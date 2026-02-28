@@ -1,0 +1,1586 @@
+import { prisma } from '../../lib/prisma.js';
+
+function toDecimal(value, fallback = 0) {
+  if (value === null || value === undefined || value === '') return fallback;
+  const n = Number(value);
+  return Number.isFinite(n) ? n : fallback;
+}
+
+function agreementNumber() {
+  const stamp = new Date().toISOString().replace(/[-:TZ.]/g, '').slice(0, 14);
+  const rand = Math.floor(Math.random() * 9000) + 1000;
+  return `RA-${stamp}-${rand}`;
+}
+
+function parseLocationConfig(raw) {
+  try {
+    if (!raw) return {};
+    if (typeof raw === 'string') return JSON.parse(raw);
+    if (typeof raw === 'object') return raw;
+  } catch {}
+  return {};
+}
+
+function authNetConfig() {
+  const env = (process.env.AUTHNET_ENV || 'sandbox').toLowerCase();
+  const api = env === 'production' ? 'https://api2.authorize.net/xml/v1/request.api' : 'https://apitest.authorize.net/xml/v1/request.api';
+  return {
+    api,
+    loginId: process.env.AUTHNET_API_LOGIN_ID || '',
+    transactionKey: process.env.AUTHNET_TRANSACTION_KEY || ''
+  };
+}
+
+async function authNetRequest(payload) {
+  const cfg = authNetConfig();
+  if (!cfg.loginId || !cfg.transactionKey) throw new Error('Authorize.Net is not configured');
+  const r = await fetch(cfg.api, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload)
+  });
+  return r.json();
+}
+
+function ageOnDate(dob, onDate) {
+  if (!dob || !onDate) return null;
+  const birth = new Date(dob);
+  const ref = new Date(onDate);
+  let age = ref.getFullYear() - birth.getFullYear();
+  const m = ref.getMonth() - birth.getMonth();
+  if (m < 0 || (m === 0 && ref.getDate() < birth.getDate())) age--;
+  return age;
+}
+
+function fmtDate(v) {
+  if (!v) return '-';
+  return new Date(v).toLocaleString();
+}
+
+function esc(s) {
+  return String(s ?? '')
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;');
+}
+
+function applyTemplate(html, vars = {}) {
+  let out = String(html || '');
+  for (const [k, v] of Object.entries(vars)) {
+    out = out.replaceAll(`{{${k}}}`, String(v ?? ''));
+  }
+  return out;
+}
+
+function parseReservationPaymentsFromNotes(notes) {
+  const txt = String(notes || '');
+  const lines = txt.split(/\r?\n/).map((x) => x.trim()).filter(Boolean);
+  const out = [];
+  for (const line of lines) {
+    // format: [PAYMENT <ISO>] GATEWAY paid 123.45 ref=XYZ
+    const m = line.match(/^\[PAYMENT\s+([^\]]+)\]\s+([^\s]+)\s+paid\s+([0-9]+(?:\.[0-9]+)?)\s+ref=(.+)$/i);
+    if (!m) continue;
+    const paidAt = new Date(m[1]);
+    const gateway = String(m[2] || 'PORTAL').toUpperCase();
+    const amount = Number(m[3] || 0);
+    const reference = String(m[4] || '').trim();
+    if (!Number.isFinite(amount) || amount <= 0) continue;
+    out.push({
+      paidAt: Number.isFinite(paidAt.getTime()) ? paidAt : new Date(),
+      amount,
+      reference,
+      notes: `Imported from reservation payment (${gateway})`
+    });
+  }
+  return out;
+}
+
+function parseReservationChargesMeta(notes) {
+  const m = String(notes || '').match(/\[RES_CHARGES_META\](\{[^\n]*\})/);
+  if (!m) return null;
+  try { return JSON.parse(m[1]); } catch { return null; }
+}
+
+function rentalDays(pickupAt, returnAt) {
+  const ms = Number(new Date(returnAt)) - Number(new Date(pickupAt));
+  if (!Number.isFinite(ms) || ms <= 0) return 1;
+  return Math.max(1, Math.ceil(ms / (24 * 60 * 60 * 1000)));
+}
+
+function parseAdditionalDriversCountFromNotes(notes) {
+  const m = String(notes || '').match(/\[RES_ADDITIONAL_DRIVERS\](\{[^\n]*\})/);
+  if (!m) return 0;
+  try {
+    const j = JSON.parse(m[1]);
+    return Array.isArray(j?.drivers) ? j.drivers.length : 0;
+  } catch {
+    return 0;
+  }
+}
+
+function parseDepositMetaFromNotes(notes) {
+  const legacy = String(notes || '').match(/\[RES_DEPOSIT_META\](\{[^\n]*\})/);
+  if (legacy) {
+    try {
+      const j = JSON.parse(legacy[1]);
+      const amount = Number(j?.depositAmountDue || 0);
+      return { requireDeposit: !!j?.requireDeposit || amount > 0, depositAmountDue: Number.isFinite(amount) ? amount : 0 };
+    } catch {}
+  }
+
+  const chargesMeta = parseReservationChargesMeta(notes);
+  const amount = Number(chargesMeta?.depositMeta?.depositAmountDue || 0);
+  return {
+    requireDeposit: !!chargesMeta?.depositMeta?.requireDeposit || amount > 0,
+    depositAmountDue: Number.isFinite(amount) ? amount : 0
+  };
+}
+
+function parseSecurityDepositMetaFromNotes(notes) {
+  const chargesMeta = parseReservationChargesMeta(notes);
+  const amount = Number(chargesMeta?.securityDepositMeta?.securityDepositAmount || 0);
+  return {
+    requireSecurityDeposit: !!chargesMeta?.securityDepositMeta?.requireSecurityDeposit || amount > 0,
+    securityDepositAmount: Number.isFinite(amount) ? amount : 0
+  };
+}
+
+function parseInspectionReportFromNotes(notes) {
+  const m = String(notes || '').match(/\[INSPECTION_REPORT\](\{[^\n]*\})/);
+  if (!m) return { checkout: null, checkin: null };
+  try {
+    const j = JSON.parse(m[1]);
+    return {
+      checkout: j?.checkout || null,
+      checkin: j?.checkin || null
+    };
+  } catch {
+    return { checkout: null, checkin: null };
+  }
+}
+
+function upsertInspectionReportInNotes(notes, report) {
+  const base = String(notes || '').replace(/\n?\[INSPECTION_REPORT\]\{[^\n]*\}/g, '').trim();
+  return `${base}${base ? '\n' : ''}[INSPECTION_REPORT]${JSON.stringify(report)}`;
+}
+
+export const rentalAgreementsService = {
+  async resolveLatestAgreementId(id, scope = null) {
+    const current = await prisma.rentalAgreement.findFirst({ where: { id, ...(scope?.tenantId ? { tenantId: scope.tenantId } : {}) }, select: { id: true, reservationId: true } });
+    if (!current) throw new Error('Rental agreement not found');
+    const latest = await prisma.rentalAgreement.findFirst({ where: { reservationId: current.reservationId, ...(scope?.tenantId ? { tenantId: scope.tenantId } : {}) }, orderBy: [{ createdAt: 'desc' }, { id: 'desc' }], select: { id: true } });
+    return latest?.id || current.id;
+  },
+
+  list(scope = null) {
+    return prisma.rentalAgreement.findMany({
+    where: scope?.tenantId ? { tenantId: scope.tenantId } : undefined,
+      orderBy: { createdAt: 'desc' },
+      include: {
+        reservation: { include: { customer: true, vehicle: true, vehicleType: true } },
+        drivers: true,
+        charges: true,
+        payments: true
+      }
+    });
+  },
+
+  async startFromReservation(reservationId, scope = null) {
+    const reservation = await prisma.reservation.findFirst({
+      where: { id: reservationId, ...(scope?.tenantId ? { tenantId: scope.tenantId } : {}) },
+      include: { customer: true, pickupLocation: true }
+    });
+
+    if (!reservation) throw new Error('Reservation not found');
+    if (reservation.status === 'CANCELLED' || reservation.status === 'NO_SHOW') {
+      throw new Error('Cannot start rental for cancelled/no-show reservation');
+    }
+
+    const existing = await prisma.rentalAgreement.findUnique({ where: { reservationId } });
+    if (existing) {
+      // Keep agreement charges synced from reservation charge metadata whenever start-rental is invoked.
+      // This guarantees reservation->agreement parity for checkout flow.
+      const meta = parseReservationChargesMeta(reservation.notes) || {};
+      if (existing.status !== 'CLOSED' && existing.status !== 'CANCELLED') {
+        const selectedServiceIds = Array.isArray(meta?.selectedServices) ? meta.selectedServices : [];
+        const selectedFeeIds = Array.isArray(meta?.selectedFees) ? meta.selectedFees : [];
+        const discounts = Array.isArray(meta?.discounts) ? meta.discounts : [];
+
+        // Always include auto fees computed on reservation side (underage/additional-driver) even if not in meta.
+        const underageFromNotes = /UNDERAGE ALERT/i.test(String(reservation.notes || ''));
+        if (reservation.underageAlert || underageFromNotes) {
+          const autoUnderage = await prisma.fee.findMany({ where: { isActive: true, isUnderageFee: true }, select: { id: true } });
+          selectedFeeIds.push(...autoUnderage.map((x) => x.id));
+        }
+        if (parseAdditionalDriversCountFromNotes(reservation.notes) > 0) {
+          const autoAddl = await prisma.fee.findMany({ where: { isActive: true, isAdditionalDriverFee: true }, select: { id: true } });
+          selectedFeeIds.push(...autoAddl.map((x) => x.id));
+        }
+
+        const uniqueSelectedFeeIds = [...new Set(selectedFeeIds)];
+
+        const days = rentalDays(reservation.pickupAt, reservation.returnAt);
+        const dailyRate = Number(reservation.dailyRate || 0);
+        const services = selectedServiceIds.length
+          ? await prisma.additionalService.findMany({ where: { id: { in: selectedServiceIds } } })
+          : [];
+        const fees = uniqueSelectedFeeIds.length
+          ? await prisma.fee.findMany({ where: { id: { in: uniqueSelectedFeeIds } } })
+          : [];
+
+        const incomingRows = Array.isArray(meta?.chargeRows) ? meta.chargeRows : null;
+        if (incomingRows && incomingRows.length) {
+          const normalizedRows = incomingRows.map((r) => ({
+            name: String(r?.name || 'Line Item'),
+            chargeType: String(r?.chargeType || 'UNIT').toUpperCase(),
+            quantity: Number(r?.quantity || 1),
+            rate: Number(r?.rate || 0),
+            total: Number(r?.total != null ? r.total : (Number(r?.quantity || 1) * Number(r?.rate || 0))),
+            taxable: !!r?.taxable,
+          }));
+          const subtotal = Number(normalizedRows.filter((r) => r.chargeType !== 'TAX').reduce((s, r) => s + Number(r.total || 0), 0).toFixed(2));
+          const taxes = Number(normalizedRows.filter((r) => r.chargeType === 'TAX').reduce((s, r) => s + Number(r.total || 0), 0).toFixed(2));
+          const total = Number(normalizedRows.reduce((s, r) => s + Number(r.total || 0), 0).toFixed(2));
+
+          await prisma.rentalAgreementCharge.deleteMany({ where: { rentalAgreementId: existing.id } });
+          await prisma.rentalAgreementCharge.createMany({
+            data: normalizedRows.map((r, idx) => ({
+              rentalAgreementId: existing.id,
+              name: r.name,
+              chargeType: r.chargeType,
+              quantity: r.quantity,
+              rate: r.rate,
+              total: r.total,
+              taxable: r.taxable,
+              selected: true,
+              sortOrder: idx
+            }))
+          });
+
+          const paid = Number(existing.paidAmount || 0);
+          await prisma.rentalAgreement.update({ where: { id: existing.id }, data: { notes: reservation.notes, subtotal, taxes, total, balance: Number((total - paid).toFixed(2)) } });
+          return this.getById(existing.id);
+        }
+
+        const chargeRows = [];
+        const base = dailyRate * days;
+        chargeRows.push({ rentalAgreementId: existing.id, name: 'Daily', chargeType: 'DAILY', quantity: days, rate: dailyRate, total: base, taxable: true, selected: true, sortOrder: 0 });
+
+        let servicesTotal = 0;
+        services.forEach((s) => {
+          const qty = Number(s.defaultQty || 1) || 1;
+          const perDay = Number(s.dailyRate || 0);
+          const rate = perDay > 0 ? perDay : Number(s.rate || 0);
+          const lineTotal = perDay > 0 ? perDay * days * qty : Number(s.rate || 0) * qty;
+          servicesTotal += lineTotal;
+          chargeRows.push({ rentalAgreementId: existing.id, name: s.name, chargeType: 'UNIT', quantity: qty, rate, total: lineTotal, taxable: !!s.taxable, selected: true, sortOrder: chargeRows.length });
+        });
+
+        let feesTotal = 0;
+        fees.forEach((f) => {
+          const amt = Number(f.amount || 0);
+          const mode = String(f.mode || 'FIXED').toUpperCase();
+          const lineTotal = mode === 'PERCENTAGE' ? ((base + servicesTotal) * (amt / 100)) : mode === 'PER_DAY' ? (amt * days) : amt;
+          feesTotal += lineTotal;
+          chargeRows.push({ rentalAgreementId: existing.id, name: f.name, chargeType: 'UNIT', quantity: 1, rate: mode === 'PERCENTAGE' ? amt : lineTotal, total: lineTotal, taxable: !!f.taxable, selected: true, sortOrder: chargeRows.length });
+        });
+
+        const depositMeta = parseDepositMetaFromNotes(reservation.notes);
+        const depositAmount = depositMeta.requireDeposit ? Number(depositMeta.depositAmountDue || 0) : 0;
+        if (depositAmount > 0) {
+          feesTotal += depositAmount;
+          chargeRows.push({ rentalAgreementId: existing.id, name: 'Deposit Due', chargeType: 'DEPOSIT', quantity: 1, rate: depositAmount, total: depositAmount, taxable: false, selected: true, sortOrder: chargeRows.length });
+        }
+
+        let securityDepositAmount = 0;
+        const secMeta = parseSecurityDepositMetaFromNotes(reservation.notes);
+        if (secMeta.requireSecurityDeposit) {
+          securityDepositAmount = Number(secMeta.securityDepositAmount || 0);
+        }
+        if (!(securityDepositAmount > 0)) {
+          try {
+            const cfg = reservation.pickupLocation?.locationConfig ? JSON.parse(reservation.pickupLocation.locationConfig) : {};
+            if (cfg?.requireSecurityDeposit) securityDepositAmount = Number(cfg?.securityDepositAmount || 0);
+          } catch {}
+        }
+        if (securityDepositAmount > 0) {
+          feesTotal += securityDepositAmount;
+          chargeRows.push({ rentalAgreementId: existing.id, name: 'Security Deposit', chargeType: 'DEPOSIT', quantity: 1, rate: securityDepositAmount, total: securityDepositAmount, taxable: false, selected: true, sortOrder: chargeRows.length });
+        }
+
+        const discountTotal = discounts.reduce((sum, d) => {
+          const mode = String(d?.mode || 'FIXED').toUpperCase();
+          const val = Number(d?.value || 0);
+          if (!Number.isFinite(val) || val <= 0) return sum;
+          if (mode === 'PERCENTAGE') return sum + ((base + servicesTotal + feesTotal) * (val / 100));
+          return sum + val;
+        }, 0);
+
+        const subtotal = Math.max(0, base + servicesTotal + feesTotal - discountTotal);
+        const taxRate = Number(meta?.taxRate ?? reservation.pickupLocation?.taxRate ?? 0);
+        const taxes = subtotal * (taxRate / 100);
+        const total = subtotal + taxes;
+
+        if (discountTotal > 0) {
+          chargeRows.push({ rentalAgreementId: existing.id, name: 'Discount', chargeType: 'UNIT', quantity: 1, rate: -discountTotal, total: -discountTotal, taxable: false, selected: true, sortOrder: chargeRows.length });
+        }
+        chargeRows.push({ rentalAgreementId: existing.id, name: `Tax (${taxRate.toFixed(2)}%)`, chargeType: 'TAX', quantity: 1, rate: taxes, total: taxes, taxable: false, selected: true, sortOrder: chargeRows.length });
+
+        await prisma.rentalAgreementCharge.deleteMany({ where: { rentalAgreementId: existing.id } });
+        await prisma.rentalAgreementCharge.createMany({ data: chargeRows });
+
+        const paid = Number(existing.paidAmount || 0);
+        await prisma.rentalAgreement.update({
+          where: { id: existing.id },
+          data: {
+            tenantId: existing.tenantId || reservation.tenantId || null,
+            notes: reservation.notes,
+            subtotal,
+            taxes,
+            total,
+            balance: Number((total - paid).toFixed(2))
+          }
+        });
+      }
+      return this.getById(existing.id);
+    }
+
+    let agreement;
+    try {
+      agreement = await prisma.rentalAgreement.create({
+        data: {
+          tenantId: reservation.tenantId || null,
+          agreementNumber: agreementNumber(),
+          reservationId,
+          vehicleId: reservation.vehicleId ?? null,
+          pickupAt: reservation.pickupAt,
+          returnAt: reservation.returnAt,
+          pickupLocationId: reservation.pickupLocationId,
+          returnLocationId: reservation.returnLocationId,
+          customerFirstName: reservation.customer.firstName,
+          customerLastName: reservation.customer.lastName,
+          customerEmail: reservation.customer.email,
+          customerPhone: reservation.customer.phone,
+          dateOfBirth: reservation.customer.dateOfBirth,
+          licenseNumber: reservation.customer.licenseNumber,
+          licenseState: reservation.customer.licenseState,
+          insuranceSource: reservation.customer.insurancePolicyNumber ? 'THEIRS' : null,
+          insurancePolicyNumber: reservation.customer.insurancePolicyNumber,
+          insuranceDocumentUrl: reservation.customer.insuranceDocumentUrl,
+          insurancePlanCode: null,
+          insurancePlanName: null,
+          insurancePlanRate: null,
+          notes: reservation.notes
+        }
+      });
+    } catch (e) {
+      if (String(e?.code || '') === 'P2002') {
+        const existingAfterRace = await prisma.rentalAgreement.findUnique({ where: { reservationId } });
+        if (existingAfterRace) return this.getById(existingAfterRace.id);
+      }
+      throw e;
+    }
+
+    await prisma.agreementDriver.create({
+      data: {
+        rentalAgreementId: agreement.id,
+        firstName: reservation.customer.firstName,
+        lastName: reservation.customer.lastName,
+        email: reservation.customer.email,
+        phone: reservation.customer.phone,
+        licenseNumber: reservation.customer.licenseNumber,
+        licenseState: reservation.customer.licenseState,
+        dateOfBirth: reservation.customer.dateOfBirth,
+        isPrimary: true
+      }
+    });
+
+    // Import any customer payments made before agreement creation
+    const prePayments = parseReservationPaymentsFromNotes(reservation.notes);
+    const prePaidTotal = prePayments.reduce((sum, p) => sum + Number(p.amount || 0), 0);
+
+    const days = rentalDays(reservation.pickupAt, reservation.returnAt);
+    const dailyRate = Number(reservation.dailyRate || 0);
+    const meta = parseReservationChargesMeta(reservation.notes) || {};
+    const selectedServiceIds = Array.isArray(meta?.selectedServices) ? meta.selectedServices : [];
+    const selectedFeeIds = Array.isArray(meta?.selectedFees) ? meta.selectedFees : [];
+    const discounts = Array.isArray(meta?.discounts) ? meta.discounts : [];
+
+    // Always include auto fees computed on reservation side (underage/additional-driver) even if not in meta.
+    const underageFromNotes = /UNDERAGE ALERT/i.test(String(reservation.notes || ''));
+    if (reservation.underageAlert || underageFromNotes) {
+      const autoUnderage = await prisma.fee.findMany({ where: { isActive: true, isUnderageFee: true }, select: { id: true } });
+      selectedFeeIds.push(...autoUnderage.map((x) => x.id));
+    }
+    if (parseAdditionalDriversCountFromNotes(reservation.notes) > 0) {
+      const autoAddl = await prisma.fee.findMany({ where: { isActive: true, isAdditionalDriverFee: true }, select: { id: true } });
+      selectedFeeIds.push(...autoAddl.map((x) => x.id));
+    }
+    const uniqueSelectedFeeIds = [...new Set(selectedFeeIds)];
+
+    const services = selectedServiceIds.length
+      ? await prisma.additionalService.findMany({ where: { id: { in: selectedServiceIds } } })
+      : [];
+    const fees = uniqueSelectedFeeIds.length
+      ? await prisma.fee.findMany({ where: { id: { in: uniqueSelectedFeeIds } } })
+      : [];
+
+    const incomingRows = Array.isArray(meta?.chargeRows) ? meta.chargeRows : null;
+    if (incomingRows && incomingRows.length) {
+      const normalizedRows = incomingRows.map((r) => ({
+        name: String(r?.name || 'Line Item'),
+        chargeType: String(r?.chargeType || 'UNIT').toUpperCase(),
+        quantity: Number(r?.quantity || 1),
+        rate: Number(r?.rate || 0),
+        total: Number(r?.total != null ? r.total : (Number(r?.quantity || 1) * Number(r?.rate || 0))),
+        taxable: !!r?.taxable,
+      }));
+      const subtotal = Number(normalizedRows.filter((r) => r.chargeType !== 'TAX').reduce((s, r) => s + Number(r.total || 0), 0).toFixed(2));
+      const taxes = Number(normalizedRows.filter((r) => r.chargeType === 'TAX').reduce((s, r) => s + Number(r.total || 0), 0).toFixed(2));
+
+      await prisma.rentalAgreementCharge.createMany({
+        data: normalizedRows.map((r, idx) => ({
+          rentalAgreementId: agreement.id,
+          name: r.name,
+          chargeType: r.chargeType,
+          quantity: r.quantity,
+          rate: r.rate,
+          total: r.total,
+          taxable: r.taxable,
+          selected: true,
+          sortOrder: idx
+        }))
+      });
+
+      if (prePayments.length) {
+        await prisma.rentalAgreementPayment.createMany({
+          data: prePayments.map((p) => ({
+            rentalAgreementId: agreement.id,
+            method: 'CARD',
+            amount: Number(p.amount),
+            reference: p.reference || null,
+            status: 'PAID',
+            paidAt: p.paidAt,
+            notes: p.notes
+          }))
+        });
+      }
+
+      const total = Number(normalizedRows.reduce((s, r) => s + Number(r.total || 0), 0).toFixed(2));
+      await prisma.rentalAgreement.update({
+        where: { id: agreement.id },
+        data: {
+          total,
+          subtotal,
+          taxes,
+          paidAmount: Number(prePaidTotal.toFixed(2)),
+          balance: Number((total - prePaidTotal).toFixed(2))
+        }
+      });
+
+      return prisma.rentalAgreement.findUnique({
+        where: { id: agreement.id },
+        include: {
+          drivers: true,
+          charges: true,
+          payments: true,
+          reservation: {
+            include: {
+              customer: true,
+              vehicle: true,
+              pickupLocation: true,
+              returnLocation: true
+            }
+          }
+        }
+      });
+    }
+
+    const chargeRows = [];
+    const base = dailyRate * days;
+    chargeRows.push({
+      rentalAgreementId: agreement.id,
+      name: 'Daily',
+      chargeType: 'DAILY',
+      quantity: days,
+      rate: dailyRate,
+      total: base,
+      taxable: true,
+      selected: true,
+      sortOrder: 0
+    });
+
+    let servicesTotal = 0;
+    services.forEach((s, idx) => {
+      const qty = Number(s.defaultQty || 1) || 1;
+      const perDay = Number(s.dailyRate || 0);
+      const rate = perDay > 0 ? perDay : Number(s.rate || 0);
+      const lineTotal = perDay > 0 ? perDay * days * qty : Number(s.rate || 0) * qty;
+      servicesTotal += lineTotal;
+      chargeRows.push({
+        rentalAgreementId: agreement.id,
+        name: s.name,
+        chargeType: 'UNIT',
+        quantity: qty,
+        rate,
+        total: lineTotal,
+        taxable: !!s.taxable,
+        selected: true,
+        sortOrder: chargeRows.length
+      });
+    });
+
+    let feesTotal = 0;
+    fees.forEach((f) => {
+      const amt = Number(f.amount || 0);
+      const mode = String(f.mode || 'FIXED').toUpperCase();
+      const lineTotal = mode === 'PERCENTAGE' ? ((base + servicesTotal) * (amt / 100)) : mode === 'PER_DAY' ? (amt * days) : amt;
+      feesTotal += lineTotal;
+      chargeRows.push({
+        rentalAgreementId: agreement.id,
+        name: f.name,
+        chargeType: 'UNIT',
+        quantity: 1,
+        rate: mode === 'PERCENTAGE' ? amt : lineTotal,
+        total: lineTotal,
+        taxable: !!f.taxable,
+        selected: true,
+        sortOrder: chargeRows.length
+      });
+    });
+
+    const depositMeta = parseDepositMetaFromNotes(reservation.notes);
+    const depositAmount = depositMeta.requireDeposit ? Number(depositMeta.depositAmountDue || 0) : 0;
+    if (depositAmount > 0) {
+      feesTotal += depositAmount;
+      chargeRows.push({
+        rentalAgreementId: agreement.id,
+        name: 'Deposit Due',
+        chargeType: 'DEPOSIT',
+        quantity: 1,
+        rate: depositAmount,
+        total: depositAmount,
+        taxable: false,
+        selected: true,
+        sortOrder: chargeRows.length
+      });
+    }
+
+    let securityDepositAmount = 0;
+    const secMeta = parseSecurityDepositMetaFromNotes(reservation.notes);
+    if (secMeta.requireSecurityDeposit) {
+      securityDepositAmount = Number(secMeta.securityDepositAmount || 0);
+    }
+    if (!(securityDepositAmount > 0)) {
+      try {
+        const cfg = reservation.pickupLocation?.locationConfig ? JSON.parse(reservation.pickupLocation.locationConfig) : {};
+        if (cfg?.requireSecurityDeposit) securityDepositAmount = Number(cfg?.securityDepositAmount || 0);
+      } catch {}
+    }
+    if (securityDepositAmount > 0) {
+      feesTotal += securityDepositAmount;
+      chargeRows.push({
+        rentalAgreementId: agreement.id,
+        name: 'Security Deposit',
+        chargeType: 'DEPOSIT',
+        quantity: 1,
+        rate: securityDepositAmount,
+        total: securityDepositAmount,
+        taxable: false,
+        selected: true,
+        sortOrder: chargeRows.length
+      });
+    }
+
+    const discountTotal = discounts.reduce((sum, d) => {
+      const mode = String(d?.mode || 'FIXED').toUpperCase();
+      const val = Number(d?.value || 0);
+      if (!Number.isFinite(val) || val <= 0) return sum;
+      if (mode === 'PERCENTAGE') return sum + ((base + servicesTotal + feesTotal) * (val / 100));
+      return sum + val;
+    }, 0);
+
+    const subtotal = Math.max(0, base + servicesTotal + feesTotal - discountTotal);
+    const taxRate = Number(meta?.taxRate ?? reservation.pickupLocation?.taxRate ?? 0);
+    const taxes = subtotal * (taxRate / 100);
+    const total = subtotal + taxes;
+
+    if (discountTotal > 0) {
+      chargeRows.push({
+        rentalAgreementId: agreement.id,
+        name: 'Discount',
+        chargeType: 'UNIT',
+        quantity: 1,
+        rate: -discountTotal,
+        total: -discountTotal,
+        taxable: false,
+        selected: true,
+        sortOrder: chargeRows.length
+      });
+    }
+
+    chargeRows.push({
+      rentalAgreementId: agreement.id,
+      name: `Tax (${taxRate.toFixed(2)}%)`,
+      chargeType: 'TAX',
+      quantity: 1,
+      rate: taxes,
+      total: taxes,
+      taxable: false,
+      selected: true,
+      sortOrder: chargeRows.length
+    });
+
+    await prisma.rentalAgreementCharge.createMany({ data: chargeRows });
+
+    if (prePayments.length) {
+      await prisma.rentalAgreementPayment.createMany({
+        data: prePayments.map((p) => ({
+          rentalAgreementId: agreement.id,
+          method: 'CARD',
+          amount: Number(p.amount),
+          reference: p.reference || null,
+          status: 'PAID',
+          paidAt: p.paidAt,
+          notes: p.notes
+        }))
+      });
+    }
+
+    await prisma.rentalAgreement.update({
+      where: { id: agreement.id },
+      data: {
+        total,
+        subtotal,
+        taxes,
+        paidAmount: Number(prePaidTotal.toFixed(2)),
+        balance: Number((total - prePaidTotal).toFixed(2))
+      }
+    });
+
+    return prisma.rentalAgreement.findUnique({
+      where: { id: agreement.id },
+      include: {
+        drivers: true,
+        charges: true,
+        payments: true,
+        reservation: {
+          include: {
+            customer: true,
+            vehicle: true,
+            vehicleType: true,
+            pickupLocation: true,
+            returnLocation: true
+          }
+        }
+      }
+    });
+  },
+
+  getById(id, scope = null) {
+    return prisma.rentalAgreement.findFirst({
+    where: { id, ...(scope?.tenantId ? { tenantId: scope.tenantId } : {}) },
+      include: {
+        reservation: {
+          include: {
+            customer: true,
+            vehicle: true,
+            vehicleType: true,
+            pickupLocation: true,
+            returnLocation: true
+          }
+        },
+        drivers: true,
+        charges: { orderBy: [{ sortOrder: 'asc' }, { createdAt: 'asc' }] },
+        payments: { orderBy: { paidAt: 'desc' } }
+      }
+    });
+  },
+
+  async agreementPrintContext(id) {
+    const latestId = await this.resolveLatestAgreementId(id);
+    const agreement = await this.getById(latestId);
+    if (!agreement) throw new Error('Rental agreement not found');
+
+    const { settingsService } = await import('../settings/settings.service.js');
+    const globalCfg = await settingsService.getRentalAgreementConfig();
+    const locCfg = parseLocationConfig(agreement?.reservation?.pickupLocation?.locationConfig);
+    const cfg = {
+      ...globalCfg,
+      companyName: locCfg.companyName || agreement?.reservation?.pickupLocation?.name || globalCfg.companyName,
+      companyAddress: locCfg.companyAddress || agreement?.reservation?.pickupLocation?.address1 || globalCfg.companyAddress,
+      companyPhone: locCfg.companyPhone || agreement?.reservation?.pickupLocation?.phone || globalCfg.companyPhone,
+      termsText: locCfg.termsText || globalCfg.termsText,
+      returnInstructionsText: locCfg.returnInstructionsText || globalCfg.returnInstructionsText
+    };
+
+    const sigLog = await prisma.auditLog.findFirst({
+      where: { reservationId: agreement.reservationId, action: 'UPDATE', reason: { contains: 'Agreement signed' } },
+      orderBy: { createdAt: 'desc' }
+    });
+
+    let signatureIp = '-';
+    try {
+      const m = sigLog?.metadata ? JSON.parse(sigLog.metadata) : null;
+      signatureIp = m?.ip || '-';
+    } catch {}
+
+    const signatureTime = agreement?.reservation?.signatureSignedAt || sigLog?.createdAt || null;
+
+    const dbPayments = Array.isArray(agreement?.payments) ? agreement.payments : [];
+    const notePayments = parseReservationPaymentsFromNotes(agreement?.reservation?.notes).map((p, idx) => ({
+      id: `note-${idx}-${Number(p.amount || 0).toFixed(2)}-${String(p.reference || '')}`,
+      paidAt: p.paidAt,
+      method: 'OTC',
+      reference: p.reference,
+      status: 'SETTLED',
+      amount: Number(p.amount || 0)
+    }));
+
+    const seen = new Set();
+    const paymentsForPrint = [...dbPayments, ...notePayments].filter((p) => {
+      const k = `${new Date(p.paidAt || p.createdAt || Date.now()).toISOString().slice(0,19)}|${Number(p.amount || 0).toFixed(2)}|${String(p.reference || '').trim()}`;
+      if (seen.has(k)) return false;
+      seen.add(k);
+      return true;
+    }).sort((a, b) => Number(new Date(b.paidAt || b.createdAt || 0)) - Number(new Date(a.paidAt || a.createdAt || 0)));
+
+    const paidAmountForPrint = Number(paymentsForPrint.reduce((s, p) => s + Number(p.amount || 0), 0).toFixed(2));
+    const amountDueForPrint = Number((Number(agreement?.total || 0) - paidAmountForPrint).toFixed(2));
+
+    return { agreement, cfg, signatureIp, signatureTime, paymentsForPrint, paidAmountForPrint, amountDueForPrint };
+  },
+
+  async renderAgreementHtml(id) {
+    const { agreement, cfg, signatureIp, signatureTime, paymentsForPrint, paidAmountForPrint, amountDueForPrint } = await this.agreementPrintContext(id);
+    const chargesRows = (agreement.charges || []).map((c) => `<tr><td>${esc(c.name)}</td><td>${Number(c.quantity || 0).toFixed(2)}</td><td>$${Number(c.rate || 0).toFixed(2)}</td><td>$${Number(c.total || 0).toFixed(2)}</td></tr>`).join('');
+    const paymentsRows = (paymentsForPrint || []).map((p) => `<tr><td>${esc(fmtDate(p.paidAt || p.createdAt))}</td><td>${esc(p.method || '-')}</td><td>${esc(p.reference || '-')}</td><td>${esc(String(p.status || '-'))}</td><td>$${Number(p.amount || 0).toFixed(2)}</td></tr>`).join('');
+
+    if (String(cfg?.agreementHtmlTemplate || '').trim()) {
+      return applyTemplate(cfg.agreementHtmlTemplate, {
+        companyName: esc(cfg.companyName || ''),
+        companyAddress: esc(cfg.companyAddress || ''),
+        companyPhone: esc(cfg.companyPhone || ''),
+        agreementNumber: esc(agreement.agreementNumber || ''),
+        reservationNumber: esc(agreement.reservation?.reservationNumber || '-'),
+        customerName: esc(`${agreement.customerFirstName || ''} ${agreement.customerLastName || ''}`.trim()),
+        pickupAt: esc(fmtDate(agreement.pickupAt)),
+        returnAt: esc(fmtDate(agreement.returnAt)),
+        taxConfig: esc((agreement.charges || []).find((c) => String(c.chargeType || '').toUpperCase() === 'TAX')?.name || '-'),
+        total: Number(agreement.total || 0).toFixed(2),
+        amountPaid: paidAmountForPrint.toFixed(2),
+        amountDue: amountDueForPrint.toFixed(2),
+        chargesRows,
+        paymentsRows: paymentsRows || '<tr><td colspan="5">No payments recorded</td></tr>',
+        termsText: esc(cfg.termsText || ''),
+        signatureSignedBy: esc(agreement.reservation?.signatureSignedBy || '-'),
+        signatureDateTime: esc(fmtDate(signatureTime)),
+        signatureIp: esc(signatureIp),
+        signatureDataUrl: agreement.reservation?.signatureDataUrl || ''
+      });
+    }
+
+    return `<!doctype html><html><head><meta charset="utf-8"/><title>Agreement ${esc(agreement.agreementNumber)}</title>
+      <style>body{font-family:Arial,sans-serif;padding:24px;color:#111} h1,h2,h3{margin:0 0 8px} .grid{display:grid;grid-template-columns:1fr 1fr;gap:8px 16px;margin:12px 0} table{width:100%;border-collapse:collapse;margin-top:10px} th,td{border:1px solid #ddd;padding:6px 8px;font-size:12px} .muted{color:#666;font-size:12px}.box{border:1px solid #ddd;padding:10px;border-radius:8px;margin-top:12px} @media print { body{padding:0} }</style></head>
+      <body>
+      <h1>${esc(cfg.companyName || '')}</h1>
+      <div class="muted">${esc(cfg.companyAddress || '')} â€¢ ${esc(cfg.companyPhone || '')}</div>
+      <h2 style="margin-top:14px">Rental Agreement ${esc(agreement.agreementNumber)}</h2>
+      <div class="grid">
+        <div><b>Customer:</b> ${esc(`${agreement.customerFirstName || ''} ${agreement.customerLastName || ''}`.trim())}</div>
+        <div><b>Reservation:</b> ${esc(agreement.reservation?.reservationNumber || '-')}</div>
+        <div><b>Pickup:</b> ${esc(fmtDate(agreement.pickupAt))}</div>
+        <div><b>Return:</b> ${esc(fmtDate(agreement.returnAt))}</div>
+        <div><b>Tax Config:</b> ${esc((agreement.charges || []).find((c) => String(c.chargeType || '').toUpperCase() === 'TAX')?.name || '-')}</div>
+        <div><b>Total:</b> $${Number(agreement.total || 0).toFixed(2)}</div>
+        <div><b>Amount Paid:</b> $${paidAmountForPrint.toFixed(2)}</div>
+        <div><b>Amount Due:</b> $${amountDueForPrint.toFixed(2)}</div>
+      </div>
+      <h3>Charges</h3>
+      <table><thead><tr><th>Description</th><th>Qty</th><th>Rate</th><th>Total</th></tr></thead><tbody>${chargesRows}</tbody></table>
+      <h3 style="margin-top:12px">Payments</h3>
+      <table><thead><tr><th>Date</th><th>Method</th><th>Reference</th><th>Status</th><th>Amount</th></tr></thead><tbody>${paymentsRows || '<tr><td colspan="5">No payments recorded</td></tr>'}</tbody></table>
+      <div class="box"><b>Terms</b><div class="muted">${esc(cfg.termsText || '')}</div></div>
+      <div class="box"><b>Signature</b><div class="muted">Signed by: ${esc(agreement.reservation?.signatureSignedBy || '-')} | Date/Time: ${esc(fmtDate(signatureTime))} | IP: ${esc(signatureIp)}</div>${agreement.reservation?.signatureDataUrl ? `<img src="${agreement.reservation.signatureDataUrl}" style="margin-top:8px;max-width:360px;max-height:120px;object-fit:contain;border:1px solid #ddd"/>` : '<div class="muted">No signature on file</div>'}</div>
+      </body></html>`;
+  },
+
+  async agreementPdfBuffer(id) {
+    const { agreement, cfg, signatureIp, signatureTime, paymentsForPrint, paidAmountForPrint, amountDueForPrint } = await this.agreementPrintContext(id);
+    const { default: PDFDocument } = await import('pdfkit');
+    const chunks = [];
+    const doc = new PDFDocument({ margin: 40, size: 'LETTER' });
+    doc.on('data', (c) => chunks.push(c));
+    const endPromise = new Promise((resolve) => doc.on('end', resolve));
+
+    doc.fontSize(16).text(String(cfg.companyName || ''), { align: 'left' });
+    doc.fontSize(10).fillColor('#444').text(`${cfg.companyAddress || ''}  ${cfg.companyPhone || ''}`);
+    doc.moveDown(0.8).fillColor('#111').fontSize(14).text(`Rental Agreement ${agreement.agreementNumber}`);
+    doc.moveDown(0.4).fontSize(10);
+    doc.text(`Customer: ${agreement.customerFirstName || ''} ${agreement.customerLastName || ''}`);
+    doc.text(`Reservation: ${agreement.reservation?.reservationNumber || '-'}`);
+    doc.text(`Pickup: ${fmtDate(agreement.pickupAt)}    Return: ${fmtDate(agreement.returnAt)}`);
+    const taxLabel = (agreement.charges || []).find((c) => String(c.chargeType || '').toUpperCase() === 'TAX')?.name || '-';
+    doc.text(`Tax Config: ${taxLabel}`);
+    doc.text(`Total: $${Number(agreement.total || 0).toFixed(2)}    Amount Paid: $${paidAmountForPrint.toFixed(2)}    Amount Due: $${amountDueForPrint.toFixed(2)}`);
+    doc.moveDown(0.8).fontSize(12).text('Charges');
+    (agreement.charges || []).forEach((c) => {
+      doc.fontSize(10).text(`• ${c.name} | Qty ${Number(c.quantity || 0).toFixed(2)} | Rate $${Number(c.rate || 0).toFixed(2)} | Total $${Number(c.total || 0).toFixed(2)}`);
+    });
+    doc.moveDown(0.6).fontSize(12).fillColor('#111').text('Payments');
+    if ((paymentsForPrint || []).length) {
+      (paymentsForPrint || []).forEach((p) => {
+        doc.fontSize(10).text(`• ${fmtDate(p.paidAt || p.createdAt)} | ${p.method || '-'} | ${p.reference || '-'} | ${p.status || '-'} | $${Number(p.amount || 0).toFixed(2)}`);
+      });
+    } else {
+      doc.fontSize(10).text('• No payments recorded');
+    }
+    doc.moveDown(0.8).fontSize(9).fillColor('#333').text(`Terms: ${cfg.termsText || ''}`);
+    doc.moveDown(0.8).fontSize(10).fillColor('#111').text(`Signature Stamp: ${agreement.reservation?.signatureSignedBy || '-'} | ${fmtDate(signatureTime)} | IP ${signatureIp}`);
+    doc.end();
+    await endPromise;
+    return Buffer.concat(chunks);
+  },
+
+  async emailAgreement(id, payload = {}, actorUserId = null) {
+    const latestId = await this.resolveLatestAgreementId(id);
+    const agreement = await this.getById(latestId);
+    if (!agreement) throw new Error('Rental agreement not found');
+
+    const to = String(payload.to || agreement.customerEmail || agreement.reservation?.customer?.email || '').trim();
+    if (!to) throw new Error('Customer email is required');
+
+    const pdf = await this.agreementPdfBuffer(latestId);
+    const { sendEmail } = await import('../../lib/mailer.js');
+    const { settingsService } = await import('../settings/settings.service.js');
+    const tpl = await settingsService.getEmailTemplates();
+
+    const paidAmount = Number((agreement.paidAmount != null ? agreement.paidAmount : (agreement.payments || []).reduce((s, p) => s + Number(p.amount || 0), 0)) || 0);
+    const amountDue = Number((Number(agreement.total || 0) - paidAmount).toFixed(2));
+    const base = (process.env.APP_BASE_URL || process.env.FRONTEND_BASE_URL || 'http://localhost:3000').replace(/\/$/, '');
+    const vars = {
+      companyName: agreement?.reservation?.pickupLocation?.name || 'Ride Fleet',
+      companyAddress: agreement?.reservation?.pickupLocation?.address1 || '',
+      companyPhone: agreement?.reservation?.pickupLocation?.phone || '',
+      agreementNumber: agreement.agreementNumber,
+      reservationNumber: agreement?.reservation?.reservationNumber || '-',
+      customerName: `${agreement.customerFirstName || ''} ${agreement.customerLastName || ''}`.trim(),
+      pickupAt: fmtDate(agreement.pickupAt),
+      returnAt: fmtDate(agreement.returnAt),
+      total: Number(agreement.total || 0).toFixed(2),
+      amountPaid: paidAmount.toFixed(2),
+      amountDue: amountDue.toFixed(2),
+      portalLink: `${base}/reservations/${agreement.reservationId}`
+    };
+
+    const subject = applyTemplate(String(payload.subject || tpl?.agreementEmailSubject || 'Your Rental Agreement {{agreementNumber}}'), vars);
+    const html = applyTemplate(String(payload.html || tpl?.agreementEmailHtml || ''), vars);
+    const text = String(payload.text || `Attached is your rental agreement ${agreement.agreementNumber}.`);
+
+    await sendEmail({
+      to,
+      subject,
+      text,
+      html,
+      attachments: [{ filename: `${agreement.agreementNumber}.pdf`, content: pdf, contentType: 'application/pdf' }]
+    });
+
+    await prisma.auditLog.create({ data: { reservationId: agreement.reservationId, actorUserId: actorUserId || null, action: 'UPDATE', reason: `Agreement emailed to ${to}` } });
+    return { ok: true, to };
+  },
+
+  updateCustomer(id, patch) {
+    return prisma.rentalAgreement.update({
+      where: { id },
+      data: {
+        customerFirstName: patch.customerFirstName,
+        customerLastName: patch.customerLastName,
+        customerEmail: patch.customerEmail,
+        customerPhone: patch.customerPhone,
+        customerAddress1: patch.customerAddress1,
+        customerAddress2: patch.customerAddress2,
+        customerCity: patch.customerCity,
+        customerState: patch.customerState,
+        customerZip: patch.customerZip,
+        customerCountry: patch.customerCountry,
+        dateOfBirth: patch.dateOfBirth ? new Date(patch.dateOfBirth) : undefined,
+        licenseNumber: patch.licenseNumber,
+        licenseState: patch.licenseState,
+        licenseExpiry: patch.licenseExpiry ? new Date(patch.licenseExpiry) : undefined,
+        insuranceSource: patch.insuranceSource,
+        insurancePolicyNumber: patch.insurancePolicyNumber,
+        insuranceDocumentUrl: patch.insuranceDocumentUrl,
+        insurancePlanCode: patch.insurancePlanCode,
+        insurancePlanName: patch.insurancePlanName,
+        insurancePlanRate: patch.insurancePlanRate,
+        notes: patch.notes
+      }
+    });
+  },
+
+  updateRentalDetails(id, patch = {}) {
+    return prisma.rentalAgreement.update({
+      where: { id },
+      data: {
+        pickupAt: patch.pickupAt ? new Date(patch.pickupAt) : undefined,
+        returnAt: patch.returnAt ? new Date(patch.returnAt) : undefined,
+        pickupLocationId: patch.pickupLocationId || undefined,
+        returnLocationId: patch.returnLocationId || undefined,
+        odometerOut: patch.odometerOut === '' ? null : (patch.odometerOut ?? undefined),
+        fuelOut: patch.fuelOut === '' ? null : (patch.fuelOut ?? undefined),
+        cleanlinessOut: patch.cleanlinessOut === '' ? null : (patch.cleanlinessOut ?? undefined),
+        odometerIn: patch.odometerIn === '' ? null : (patch.odometerIn ?? undefined),
+        fuelIn: patch.fuelIn === '' ? null : (patch.fuelIn ?? undefined),
+        cleanlinessIn: patch.cleanlinessIn === '' ? null : (patch.cleanlinessIn ?? undefined)
+      }
+    });
+  },
+
+  addDriver(id, input) {
+    return prisma.agreementDriver.create({
+      data: {
+        rentalAgreementId: id,
+        firstName: input.firstName,
+        lastName: input.lastName,
+        email: input.email ?? null,
+        phone: input.phone ?? null,
+        licenseNumber: input.licenseNumber ?? null,
+        licenseState: input.licenseState ?? null,
+        licenseExpiry: input.licenseExpiry ? new Date(input.licenseExpiry) : null,
+        dateOfBirth: input.dateOfBirth ? new Date(input.dateOfBirth) : null,
+        isPrimary: input.isPrimary ?? false
+      }
+    });
+  },
+
+  async replaceCharges(id, items = []) {
+    await prisma.rentalAgreementCharge.deleteMany({ where: { rentalAgreementId: id } });
+
+    if (items.length) {
+      await prisma.rentalAgreementCharge.createMany({
+        data: items.map((x, idx) => ({
+          rentalAgreementId: id,
+          code: x.code ?? null,
+          name: x.name,
+          chargeType: x.chargeType ?? 'UNIT',
+          quantity: toDecimal(x.quantity, 1),
+          rate: toDecimal(x.rate, 0),
+          total: toDecimal(x.total, toDecimal(x.quantity, 1) * toDecimal(x.rate, 0)),
+          taxable: !!x.taxable,
+          selected: x.selected !== false,
+          sortOrder: x.sortOrder ?? idx
+        }))
+      });
+    }
+
+    const charges = await prisma.rentalAgreementCharge.findMany({ where: { rentalAgreementId: id, selected: true } });
+
+    const subtotal = charges
+      .filter((c) => c.chargeType !== 'TAX')
+      .reduce((sum, c) => sum + Number(c.total), 0);
+    const taxes = charges
+      .filter((c) => c.chargeType === 'TAX')
+      .reduce((sum, c) => sum + Number(c.total), 0);
+    const total = subtotal + taxes;
+
+    const current = await prisma.rentalAgreement.findUnique({ where: { id }, select: { paidAmount: true } });
+    const paid = Number(current?.paidAmount || 0);
+
+    return prisma.rentalAgreement.update({
+      where: { id },
+      data: {
+        subtotal,
+        taxes,
+        fees: subtotal,
+        total,
+        balance: Number((total - paid).toFixed(2))
+      },
+      include: { charges: true }
+    });
+  },
+
+  async adjustCustomerCreditFromAgreement(id, amount, reason = null) {
+    const agreement = await prisma.rentalAgreement.findUnique({
+      where: { id },
+      include: { reservation: { select: { customerId: true, reservationNumber: true } } }
+    });
+    if (!agreement?.reservation?.customerId) throw new Error('Rental agreement not found');
+
+    const customer = await prisma.customer.findUnique({ where: { id: agreement.reservation.customerId }, select: { creditBalance: true, notes: true } });
+    if (!customer) throw new Error('Customer not found');
+
+    const delta = Number(amount || 0);
+    const nextBalance = Number((Number(customer.creditBalance || 0) + delta).toFixed(2));
+    const note = `[CREDIT ${new Date().toISOString()}] ${delta >= 0 ? '+' : ''}${delta.toFixed(2)} via agreement ${agreement.agreementNumber}${reason ? ` | ${reason}` : ''}`;
+
+    await prisma.customer.update({
+      where: { id: agreement.reservation.customerId },
+      data: {
+        creditBalance: nextBalance,
+        notes: customer.notes ? `${customer.notes}\n${note}` : note
+      }
+    });
+
+    return { customerId: agreement.reservation.customerId, creditBalance: nextBalance };
+  },
+
+  async signAgreement(id, payload = {}, actorUserId = null, actorIp = null) {
+    const signerName = String(payload.signerName || '').trim();
+    const signatureDataUrl = String(payload.signatureDataUrl || '').trim();
+    if (!signerName) throw new Error('Signer name is required');
+    if (!signatureDataUrl) throw new Error('Signature is required');
+
+    const agreement = await prisma.rentalAgreement.findUnique({ where: { id } });
+    if (!agreement) throw new Error('Rental agreement not found');
+
+    await prisma.reservation.update({
+      where: { id: agreement.reservationId },
+      data: {
+        signatureSignedBy: signerName,
+        signatureDataUrl,
+        signatureSignedAt: new Date()
+      }
+    });
+
+    await prisma.auditLog.create({
+      data: {
+        reservationId: agreement.reservationId,
+        actorUserId: actorUserId || null,
+        action: 'UPDATE',
+        reason: 'Agreement signed after changes',
+        metadata: JSON.stringify({ ip: actorIp || null, signedAt: new Date().toISOString(), signerName })
+      }
+    });
+
+    return this.getById(id);
+  },
+
+  async updateStatus(id, action, actorUserId = null) {
+    const agreement = await prisma.rentalAgreement.findUnique({ where: { id } });
+    if (!agreement) throw new Error('Rental agreement not found');
+
+    const mode = String(action || '').toUpperCase();
+    if (!['VOID', 'REACTIVATE', 'START_CHECK_IN'].includes(mode)) {
+      throw new Error('Unsupported agreement status action');
+    }
+
+    if (mode === 'VOID') {
+      const row = await prisma.rentalAgreement.update({ where: { id }, data: { status: 'CANCELLED' } });
+      await prisma.reservation.update({ where: { id: agreement.reservationId }, data: { status: 'CANCELLED' } });
+      await prisma.auditLog.create({ data: { reservationId: agreement.reservationId, actorUserId: actorUserId || null, action: 'STATUS_CHANGE', fromStatus: 'CHECKED_OUT', toStatus: 'CANCELLED', reason: 'Agreement voided' } });
+      return row;
+    }
+
+    if (mode === 'REACTIVATE') {
+      if (agreement.status !== 'CANCELLED') throw new Error('Only cancelled/voided agreements can be reactivated');
+      const row = await prisma.rentalAgreement.update({ where: { id }, data: { status: 'FINALIZED' } });
+      await prisma.reservation.update({ where: { id: agreement.reservationId }, data: { status: 'CHECKED_OUT' } });
+      await prisma.auditLog.create({ data: { reservationId: agreement.reservationId, actorUserId: actorUserId || null, action: 'STATUS_CHANGE', fromStatus: 'CANCELLED', toStatus: 'CHECKED_OUT', reason: 'Agreement reactivated' } });
+      return row;
+    }
+
+    // START_CHECK_IN
+    const row = await prisma.rentalAgreement.update({ where: { id }, data: { status: 'FINALIZED' } });
+    await prisma.reservation.update({ where: { id: agreement.reservationId }, data: { status: 'CHECKED_IN' } });
+    await prisma.auditLog.create({ data: { reservationId: agreement.reservationId, actorUserId: actorUserId || null, action: 'STATUS_CHANGE', fromStatus: 'CHECKED_OUT', toStatus: 'CHECKED_IN', reason: 'Check-in started from agreement' } });
+    return row;
+  },
+
+  async addManualPayment(id, payload = {}, actorUserId = null) {
+    const amount = Number(payload.amount || 0);
+    if (!Number.isFinite(amount) || amount <= 0) throw new Error('Manual entry amount must be greater than 0');
+
+    const entryType = String(payload.entryType || 'CHARGE').toUpperCase();
+    if (!['CHARGE', 'DEPOSIT', 'REFUND'].includes(entryType)) throw new Error('entryType must be CHARGE, DEPOSIT, or REFUND');
+
+    const receiptDataUrl = String(payload.receiptDataUrl || '').trim();
+    if (!receiptDataUrl) throw new Error('Receipt is required for manual entries');
+
+    const agreement = await prisma.rentalAgreement.findUnique({ where: { id } });
+    if (!agreement) throw new Error('Rental agreement not found');
+
+    const sign = entryType === 'REFUND' ? -1 : 1;
+    const postedAmount = Number((amount * sign).toFixed(2));
+
+    const nextPaidRaw = Number(agreement.paidAmount || 0) + postedAmount;
+    const nextPaid = Math.max(0, Number(nextPaidRaw.toFixed(2)));
+    const nextBalance = Math.max(0, Number((Number(agreement.balance || 0) - postedAmount).toFixed(2)));
+
+    await prisma.rentalAgreementPayment.create({
+      data: {
+        rentalAgreementId: id,
+        method: payload.method || 'OTHER',
+        amount: postedAmount,
+        reference: payload.reference || null,
+        status: 'PAID',
+        notes: payload.notes || `Manual ${entryType.toLowerCase()} posted by agent${payload.receiptName ? ` | receipt: ${payload.receiptName}` : ''}`
+      }
+    });
+
+    await prisma.rentalAgreement.update({ where: { id }, data: { paidAmount: nextPaid, balance: nextBalance } });
+    await prisma.auditLog.create({ data: { reservationId: agreement.reservationId, actorUserId: actorUserId || null, action: 'UPDATE', reason: `Manual ${entryType.toLowerCase()} added: ${postedAmount.toFixed(2)}` } });
+
+    return this.getById(id);
+  },
+
+  async captureCustomerCardOnFile(id, payload = {}, actorUserId = null) {
+    const customerProfileId = String(payload.authnetCustomerProfileId || '').trim();
+    const paymentProfileId = String(payload.authnetPaymentProfileId || '').trim();
+    if (!customerProfileId || !paymentProfileId) {
+      throw new Error('authnetCustomerProfileId and authnetPaymentProfileId are required');
+    }
+
+    const agreement = await prisma.rentalAgreement.findUnique({
+      where: { id },
+      include: { reservation: { include: { customer: true } } }
+    });
+    if (!agreement) throw new Error('Rental agreement not found');
+    const customer = agreement.reservation?.customer;
+    if (!customer) throw new Error('Customer not found');
+
+    await prisma.customer.update({
+      where: { id: customer.id },
+      data: {
+        authnetCustomerProfileId: customerProfileId,
+        authnetPaymentProfileId: paymentProfileId
+      }
+    });
+
+    await prisma.auditLog.create({
+      data: {
+        reservationId: agreement.reservationId,
+        actorUserId: actorUserId || null,
+        action: 'UPDATE',
+        reason: 'Captured customer card profile on file (Authorize.Net)'
+      }
+    });
+
+    return this.getById(id);
+  },
+
+  async chargeCardOnFile(id, payload = {}, actorUserId = null) {
+    const amount = Number(payload.amount || 0);
+    if (!Number.isFinite(amount) || amount <= 0) throw new Error('Charge amount must be greater than 0');
+
+    const agreement = await prisma.rentalAgreement.findUnique({
+      where: { id },
+      include: { reservation: { include: { customer: true } } }
+    });
+    if (!agreement) throw new Error('Rental agreement not found');
+
+    const customer = agreement.reservation?.customer;
+    if (!customer?.authnetCustomerProfileId || !customer?.authnetPaymentProfileId) {
+      throw new Error('Customer does not have Authorize.Net card profile on file');
+    }
+
+    const cfg = authNetConfig();
+    const authnet = await authNetRequest({
+      createTransactionRequest: {
+        merchantAuthentication: { name: cfg.loginId, transactionKey: cfg.transactionKey },
+        transactionRequest: {
+          transactionType: 'authCaptureTransaction',
+          amount: amount.toFixed(2),
+          profile: {
+            customerProfileId: customer.authnetCustomerProfileId,
+            paymentProfile: { paymentProfileId: customer.authnetPaymentProfileId }
+          },
+          order: { invoiceNumber: agreement.agreementNumber || undefined }
+        }
+      }
+    });
+
+    const tx = authnet?.transactionResponse;
+    const ok = authnet?.messages?.resultCode === 'Ok' && tx?.responseCode === '1';
+    if (!ok) {
+      const err = tx?.errors?.[0]?.errorText || authnet?.messages?.message?.[0]?.text || 'Authorize.Net charge failed';
+      throw new Error(err);
+    }
+
+    const reference = `AUTHNET:${tx.transId || 'UNKNOWN'}`;
+    return this.addManualPayment(id, { amount, method: 'CARD', reference, notes: 'Charged card on file via Authorize.Net' }, actorUserId);
+  },
+
+  async captureSecurityDeposit(id, payload = {}, actorUserId = null) {
+    const agreement = await prisma.rentalAgreement.findUnique({
+      where: { id },
+      include: { reservation: { include: { customer: true } } }
+    });
+    if (!agreement) throw new Error('Rental agreement not found');
+    if (agreement.securityDepositCaptured) throw new Error('Security deposit is already captured');
+
+    const amount = Number(payload.amount || agreement.securityDepositAmount || 0);
+    if (!Number.isFinite(amount) || amount <= 0) throw new Error('Security deposit amount must be greater than 0');
+
+    let reference = payload.reference || null;
+    const customer = agreement.reservation?.customer;
+    if (customer?.authnetCustomerProfileId && customer?.authnetPaymentProfileId && authNetConfig().loginId) {
+      const cfg = authNetConfig();
+      const authnet = await authNetRequest({
+        createTransactionRequest: {
+          merchantAuthentication: { name: cfg.loginId, transactionKey: cfg.transactionKey },
+          transactionRequest: {
+            transactionType: 'authOnlyTransaction',
+            amount: amount.toFixed(2),
+            profile: {
+              customerProfileId: customer.authnetCustomerProfileId,
+              paymentProfile: { paymentProfileId: customer.authnetPaymentProfileId }
+            },
+            order: { invoiceNumber: agreement.agreementNumber || undefined }
+          }
+        }
+      });
+      const tx = authnet?.transactionResponse;
+      const ok = authnet?.messages?.resultCode === 'Ok' && tx?.responseCode === '1';
+      if (!ok) {
+        const err = tx?.errors?.[0]?.errorText || authnet?.messages?.message?.[0]?.text || 'Authorize.Net deposit capture failed';
+        throw new Error(err);
+      }
+      reference = `AUTHNET_AUTH:${tx.transId || 'UNKNOWN'}`;
+    }
+
+    await prisma.rentalAgreement.update({
+      where: { id },
+      data: {
+        securityDepositAmount: amount,
+        securityDepositCaptured: true,
+        securityDepositCapturedAt: new Date(),
+        securityDepositReference: reference
+      }
+    });
+
+    await prisma.auditLog.create({ data: { reservationId: agreement.reservationId, actorUserId: actorUserId || null, action: 'UPDATE', reason: `Security deposit captured: ${amount.toFixed(2)}` } });
+    return this.getById(id);
+  },
+
+  async releaseSecurityDeposit(id, payload = {}, actorUserId = null) {
+    const agreement = await prisma.rentalAgreement.findUnique({ where: { id } });
+    if (!agreement) throw new Error('Rental agreement not found');
+    if (!agreement.securityDepositCaptured) throw new Error('Security deposit is not captured');
+    if (agreement.securityDepositReleasedAt) throw new Error('Security deposit already released');
+
+    await prisma.rentalAgreement.update({
+      where: { id },
+      data: {
+        securityDepositReleasedAt: new Date(),
+        securityDepositCaptured: false
+      }
+    });
+    await prisma.auditLog.create({ data: { reservationId: agreement.reservationId, actorUserId: actorUserId || null, action: 'UPDATE', reason: 'Security deposit released' } });
+    return this.getById(id);
+  },
+
+  async saveInspection(id, payload = {}, actorUserId = null, actorIp = null) {
+    const agreement = await prisma.rentalAgreement.findUnique({ where: { id } });
+    if (!agreement) throw new Error('Rental agreement not found');
+
+    const phase = String(payload.phase || '').toUpperCase();
+    if (!['CHECKOUT', 'CHECKIN'].includes(phase)) throw new Error('phase must be CHECKOUT or CHECKIN');
+
+    const current = parseInspectionReportFromNotes(agreement.notes);
+    const inspectionBlock = {
+      phase,
+      at: new Date().toISOString(),
+      ip: actorIp || null,
+      actorUserId: actorUserId || null,
+      exterior: payload.exterior || null,
+      interior: payload.interior || null,
+      tires: payload.tires || null,
+      lights: payload.lights || null,
+      windshield: payload.windshield || null,
+      fuelLevel: payload.fuelLevel || null,
+      odometer: payload.odometer || null,
+      damages: payload.damages || null,
+      notes: payload.notes || null,
+      photos: payload.photos && typeof payload.photos === 'object' ? payload.photos : {}
+    };
+
+    const nextReport = {
+      checkout: phase === 'CHECKOUT' ? inspectionBlock : (current.checkout || null),
+      checkin: phase === 'CHECKIN' ? inspectionBlock : (current.checkin || null)
+    };
+
+    const notes = upsertInspectionReportInNotes(agreement.notes, nextReport);
+    await prisma.rentalAgreement.update({ where: { id }, data: { notes } });
+
+    await prisma.auditLog.create({
+      data: {
+        reservationId: agreement.reservationId,
+        actorUserId: actorUserId || null,
+        action: 'UPDATE',
+        reason: `Inspection saved (${phase})`,
+        metadata: JSON.stringify({ phase, at: inspectionBlock.at, ip: inspectionBlock.ip })
+      }
+    });
+
+    return { report: nextReport };
+  },
+
+  async inspectionReport(id) {
+    const agreement = await prisma.rentalAgreement.findUnique({
+      where: { id },
+      include: {
+        reservation: { include: { customer: true, vehicle: true } }
+      }
+    });
+    if (!agreement) throw new Error('Rental agreement not found');
+
+    const report = parseInspectionReportFromNotes(agreement.notes);
+    return {
+      agreementId: agreement.id,
+      agreementNumber: agreement.agreementNumber,
+      reservationNumber: agreement.reservation?.reservationNumber || null,
+      customer: {
+        firstName: agreement.customerFirstName || agreement.reservation?.customer?.firstName || null,
+        lastName: agreement.customerLastName || agreement.reservation?.customer?.lastName || null,
+        email: agreement.customerEmail || agreement.reservation?.customer?.email || null,
+        phone: agreement.customerPhone || agreement.reservation?.customer?.phone || null
+      },
+      vehicle: agreement.reservation?.vehicle ? {
+        id: agreement.reservation.vehicle.id,
+        unit: agreement.reservation.vehicle.internalNumber || null,
+        plate: agreement.reservation.vehicle.plate || null,
+        vin: agreement.reservation.vehicle.vin || null,
+        make: agreement.reservation.vehicle.make || null,
+        model: agreement.reservation.vehicle.model || null,
+        year: agreement.reservation.vehicle.year || null
+      } : null,
+      checkoutMetrics: {
+        mileage: agreement.odometerOut ?? null,
+        fuelLevel: agreement.fuelOut ?? null,
+        cleanliness: agreement.cleanlinessOut ?? null
+      },
+      checkinMetrics: {
+        mileage: agreement.odometerIn ?? null,
+        fuelLevel: agreement.fuelIn ?? null,
+        cleanliness: agreement.cleanlinessIn ?? null
+      },
+      checkoutInspection: report.checkout,
+      checkinInspection: report.checkin
+    };
+  },
+
+  async closeAgreement(id, payload = {}, actorUserId = null, actorRole = 'AGENT', actorIp = null) {
+    const agreement = await prisma.rentalAgreement.findUnique({
+      where: { id },
+      include: { reservation: { include: { customer: true } } }
+    });
+    if (!agreement) throw new Error('Rental agreement not found');
+
+    if (Number(agreement.balance || 0) > 0) {
+      throw new Error('Agreement cannot be closed with outstanding balance');
+    }
+
+    const report = parseInspectionReportFromNotes(agreement.notes);
+    if (!report?.checkout?.at || !report?.checkout?.ip || !report?.checkin?.at || !report?.checkin?.ip) {
+      throw new Error('Both inspections are required before closing agreement: checkout + check-in (timestamp/IP missing)');
+    }
+
+    const signerName = String(payload.signerName || agreement.customerFirstName || '').trim();
+    const signatureDataUrl = String(payload.signatureDataUrl || '').trim();
+    if (!signerName) throw new Error('Signer name is required to close agreement');
+    if (!signatureDataUrl) throw new Error('Customer signature is required to close agreement');
+
+    const row = await prisma.rentalAgreement.update({
+      where: { id },
+      data: {
+        status: 'CLOSED',
+        locked: true,
+        closedAt: new Date(),
+        odometerIn: payload.odometerIn ?? agreement.odometerIn,
+        fuelIn: payload.fuelIn ?? agreement.fuelIn,
+        cleanlinessIn: payload.cleanlinessIn ?? agreement.cleanlinessIn
+      }
+    });
+
+    await prisma.reservation.update({
+      where: { id: agreement.reservationId },
+      data: {
+        status: 'CHECKED_IN',
+        signatureSignedBy: signerName,
+        signatureDataUrl: signatureDataUrl,
+        signatureSignedAt: new Date()
+      }
+    });
+    await prisma.auditLog.create({
+      data: {
+        reservationId: agreement.reservationId,
+        actorUserId: actorUserId || null,
+        action: 'UPDATE',
+        reason: 'Agreement signed during close',
+        metadata: JSON.stringify({ ip: actorIp || null, signedAt: new Date().toISOString(), signerName })
+      }
+    });
+    await prisma.auditLog.create({
+      data: {
+        reservationId: agreement.reservationId,
+        actorUserId: actorUserId || null,
+        action: 'STATUS_CHANGE',
+        fromStatus: 'CHECKED_OUT',
+        toStatus: 'CHECKED_IN',
+        reason: 'Agreement closed via check-in wizard'
+      }
+    });
+
+    // Best effort return receipt email
+    try {
+      const { settingsService } = await import('../settings/settings.service.js');
+      const { sendEmail } = await import('../../lib/mailer.js');
+      const tpl = await settingsService.getEmailTemplates();
+      const to = agreement.customerEmail || agreement.reservation?.customer?.email;
+      if (to) {
+        const render = (s = '') => String(s)
+          .replaceAll('{{customerName}}', `${agreement.customerFirstName || ''} ${agreement.customerLastName || ''}`.trim())
+          .replaceAll('{{reservationNumber}}', String(agreement.reservation?.reservationNumber || ''))
+          .replaceAll('{{paidAmount}}', Number(agreement.paidAmount || 0).toFixed(2))
+          .replaceAll('{{balance}}', Number(agreement.balance || 0).toFixed(2));
+        await sendEmail({
+          to,
+          subject: render(tpl.returnReceiptSubject || 'Return Receipt - Reservation {{reservationNumber}}'),
+          text: render(tpl.returnReceiptBody || 'Your agreement is now closed.'),
+          html: render(tpl.returnReceiptHtml || String(tpl.returnReceiptBody || 'Your agreement is now closed.').replaceAll('\n', '<br/>'))
+        });
+      }
+    } catch {}
+
+    return row;
+  },
+
+  async finalize(id, payload = {}) {
+    const agreement = await prisma.rentalAgreement.findUnique({
+      where: { id },
+      include: { reservation: true, pickupLocation: true }
+    });
+    if (!agreement) throw new Error('Rental agreement not found');
+
+    const odometerOut = payload.odometerOut ?? agreement.odometerOut;
+    const fuelOut = payload.fuelOut ?? agreement.fuelOut;
+    const paymentMethod = payload.paymentMethod ?? agreement.paymentMethod;
+
+    if (!agreement.customerFirstName || !agreement.customerLastName) {
+      throw new Error('Customer first and last name are required before finalizing');
+    }
+    if (!agreement.licenseNumber) {
+      throw new Error('Customer license number is required before finalizing');
+    }
+    if (odometerOut === null || odometerOut === undefined) {
+      throw new Error('Odometer out is required before finalizing');
+    }
+    if (!paymentMethod) {
+      throw new Error('Payment method is required before finalizing');
+    }
+
+    const selectedCharges = await prisma.rentalAgreementCharge.count({
+      where: { rentalAgreementId: id, selected: true }
+    });
+    if (!selectedCharges) {
+      throw new Error('At least one selected charge is required before finalizing');
+    }
+
+    const paidAmount = toDecimal(payload.paidAmount, agreement.paidAmount);
+
+    const locationConfig = parseLocationConfig(agreement.pickupLocation?.locationConfig);
+    const paymentDueAction = String(locationConfig?.paymentDueAction || 'AT_BOOKING');
+    if ((paymentDueAction === 'AT_BOOKING' || paymentDueAction === 'AT_PICKUP') && paidAmount <= 0) {
+      throw new Error('This location requires payment at booking/pickup before finalizing');
+    }
+
+    const minAge = Number(locationConfig?.chargeAgeMin || 0);
+    const maxAge = Number(locationConfig?.chargeAgeMax || 0);
+    const age = ageOnDate(agreement.dateOfBirth, agreement.pickupAt);
+    if (age !== null) {
+      if (minAge > 0 && age < minAge) throw new Error(`Driver age ${age} is below minimum age ${minAge} for this location`);
+      if (maxAge > 0 && age > maxAge) throw new Error(`Driver age ${age} exceeds maximum age ${maxAge} for this location`);
+    }
+
+    let balance = Number((Number(agreement.total) - paidAmount).toFixed(2));
+    let creditApplied = 0;
+
+    const reservationWithCustomer = await prisma.reservation.findUnique({
+      where: { id: agreement.reservationId },
+      select: { customerId: true }
+    });
+
+    if (balance > 0 && reservationWithCustomer?.customerId) {
+      const customer = await prisma.customer.findUnique({
+        where: { id: reservationWithCustomer.customerId },
+        select: { creditBalance: true, notes: true }
+      });
+      const availableCredit = Number(customer?.creditBalance || 0);
+      if (availableCredit > 0) {
+        creditApplied = Math.min(availableCredit, balance);
+        balance = Number((balance - creditApplied).toFixed(2));
+
+        const nextCredit = Number((availableCredit - creditApplied).toFixed(2));
+        const note = `[CREDIT AUTO-APPLIED ${new Date().toISOString()}] -${creditApplied.toFixed(2)} to agreement ${agreement.agreementNumber}`;
+        await prisma.customer.update({
+          where: { id: reservationWithCustomer.customerId },
+          data: {
+            creditBalance: nextCredit,
+            notes: customer?.notes ? `${customer.notes}\n${note}` : note
+          }
+        });
+      }
+    }
+
+    const updated = await prisma.rentalAgreement.update({
+      where: { id },
+      data: {
+        status: 'FINALIZED',
+        paymentMethod,
+        paymentReference: payload.paymentReference ?? agreement.paymentReference,
+        odometerOut,
+        fuelOut,
+        paidAmount,
+        balance,
+        finalizedAt: new Date()
+      }
+    });
+
+    await prisma.reservation.update({
+      where: { id: updated.reservationId },
+      data: { status: 'CHECKED_OUT' }
+    });
+
+    if (paidAmount > 0 && payload.paymentMethod) {
+      await prisma.rentalAgreementPayment.create({
+        data: {
+          rentalAgreementId: id,
+          method: payload.paymentMethod,
+          amount: paidAmount,
+          reference: payload.paymentReference ?? null,
+          status: 'PAID'
+        }
+      });
+    }
+
+    if (creditApplied > 0) {
+      await prisma.rentalAgreementPayment.create({
+        data: {
+          rentalAgreementId: id,
+          method: 'OTHER',
+          amount: creditApplied,
+          reference: 'CUSTOMER_CREDIT_AUTO_APPLIED',
+          status: 'PAID',
+          notes: 'Automatically applied from customer credit balance'
+        }
+      });
+    }
+
+    return this.getById(id);
+  },
+
+  async deleteDraft(id) {
+    const row = await prisma.rentalAgreement.findUnique({ where: { id } });
+    if (!row) throw new Error('Rental agreement not found');
+    if (row.status !== 'DRAFT') throw new Error('Only draft agreements can be deleted');
+
+    await prisma.rentalAgreementCharge.deleteMany({ where: { rentalAgreementId: id } });
+    await prisma.rentalAgreementPayment.deleteMany({ where: { rentalAgreementId: id } });
+    await prisma.rentalAgreement.delete({ where: { id } });
+    return { ok: true };
+  }
+};
+
+
+

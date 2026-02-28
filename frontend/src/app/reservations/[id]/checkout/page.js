@@ -1,0 +1,139 @@
+'use client';
+
+import { useEffect, useRef, useState } from 'react';
+import { useParams, useRouter } from 'next/navigation';
+import { AuthGate } from '../../../../components/AuthGate';
+import { AppShell } from '../../../../components/AppShell';
+import { api, API_BASE } from '../../../../lib/client';
+
+export default function Page() {
+  return <AuthGate>{({ token, me, logout }) => <Inner token={token} me={me} logout={logout} />}</AuthGate>;
+}
+
+function Inner({ token, me, logout }) {
+  const { id } = useParams();
+  const router = useRouter();
+  const [row, setRow] = useState(null);
+  const [vehicles, setVehicles] = useState([]);
+  const [msg, setMsg] = useState('');
+  const [form, setForm] = useState({ vehicleId: '', odometerOut: '', fuelOut: '1.000', cleanlinessOut: '5', signerName: '', paymentMethod: 'CASH' });
+  const sigRef = useRef(null);
+  const drawing = useRef(false);
+
+  const load = async () => {
+    const r = await api(`/api/reservations/${id}`, {}, token);
+    const av = await api(`/api/reservations/${id}/available-vehicles`, {}, token);
+    setRow(r);
+    setVehicles(av || []);
+    setForm((f) => ({ ...f, vehicleId: r?.vehicleId || '', signerName: `${r?.customer?.firstName || ''} ${r?.customer?.lastName || ''}`.trim() }));
+  };
+  useEffect(() => { if (id) load(); }, [id, token]);
+
+  const ensureAgreementId = async () => {
+    const out = await api(`/api/reservations/${id}/start-rental`, { method: 'POST', body: JSON.stringify({}) }, token);
+    return out?.id;
+  };
+
+  const p = (e, c) => {
+    const r = c.getBoundingClientRect();
+    const t = e?.touches?.[0] || e;
+    const sx = c.width / Math.max(1, r.width);
+    const sy = c.height / Math.max(1, r.height);
+    return {
+      x: (t.clientX - r.left) * sx,
+      y: (t.clientY - r.top) * sy
+    };
+  };
+  const begin = (e) => {
+    e.preventDefault?.();
+    const c = sigRef.current; if (!c) return;
+    const ctx = c.getContext('2d');
+    const pt = p(e, c);
+    ctx.beginPath();
+    ctx.moveTo(pt.x, pt.y);
+    ctx.lineWidth = 2;
+    ctx.lineCap = 'round';
+    ctx.strokeStyle = '#111827';
+    drawing.current = true;
+  };
+  const move = (e) => {
+    if (!drawing.current) return;
+    e.preventDefault?.();
+    const c = sigRef.current; if (!c) return;
+    const ctx = c.getContext('2d');
+    const pt = p(e, c);
+    ctx.lineTo(pt.x, pt.y);
+    ctx.stroke();
+  };
+  const end = (e) => { e?.preventDefault?.(); drawing.current = false; };
+  const clearSig = () => { const c = sigRef.current; if (!c) return; c.getContext('2d').clearRect(0, 0, c.width, c.height); };
+  const sig = () => { const c = sigRef.current; if (!c) return ''; const d = c.toDataURL('image/png'); const b = document.createElement('canvas'); b.width = c.width; b.height = c.height; return b.toDataURL() === d ? '' : d; };
+
+  const complete = async () => {
+    try {
+      if (!form.vehicleId) return setMsg('Select a vehicle');
+      if (!form.odometerOut) return setMsg('Odometer out is required');
+      const signer = String(form.signerName || '').trim();
+      const signatureDataUrl = sig();
+      if (!signer || !signatureDataUrl) return setMsg('Customer signature is required');
+
+      const checkoutLine = `[RES_CHECKOUT ${new Date().toISOString()}] odometerOut=${Number(form.odometerOut || 0)} fuelOut=${Number(form.fuelOut || 0)} cleanlinessOut=${Number(form.cleanlinessOut || 5)} paymentMethod=${String(form.paymentMethod || 'CASH')}`;
+      const baseNotes = String(row?.notes || '').trim();
+      const nextNotes = `${baseNotes}${baseNotes ? '\n' : ''}${checkoutLine}`;
+
+      await api(`/api/reservations/${id}`, {
+        method: 'PATCH',
+        body: JSON.stringify({
+          vehicleId: form.vehicleId,
+          status: 'CHECKED_OUT',
+          signatureDataUrl,
+          signatureSignedBy: signer,
+          signatureSignedAt: new Date().toISOString(),
+          notes: nextNotes
+        })
+      }, token);
+
+      // Ensure agreement exists, then auto-email PDF copy after successful checkout.
+      try {
+        const agreement = await api(`/api/reservations/${id}/start-rental`, { method: 'POST', body: JSON.stringify({}) }, token);
+        const agreementId = agreement?.id;
+        if (agreementId) {
+          await api(`/api/rental-agreements/${agreementId}/email-agreement`, { method: 'POST', body: JSON.stringify({}) }, token);
+        }
+      } catch {
+        // Non-blocking: checkout already completed.
+      }
+
+      router.push(`/reservations/${id}`);
+    } catch (e) { setMsg(e.message); }
+  };
+
+  return (
+    <AppShell me={me} logout={logout}>
+      <section className="glass card-lg">
+        <div className="row-between"><h2>Check-out Wizard</h2><button onClick={() => router.push(`/reservations/${id}`)}>Back</button></div>
+        <div className="label" style={{ textTransform: 'none', letterSpacing: 0, marginBottom: 8 }}>Reservation: {row?.reservationNumber || '-'}</div>
+        {msg ? <div className="label" style={{ color: '#b91c1c' }}>{msg}</div> : null}
+
+        <div className="grid2">
+          <div className="stack"><label className="label">Vehicle</label><select value={form.vehicleId} onChange={(e) => setForm({ ...form, vehicleId: e.target.value })}><option value="">Select available vehicle</option>{vehicles.map((v) => <option key={v.id} value={v.id}>{v.year || ''} {v.make || ''} {v.model || ''} • {v.plate || v.licensePlate || ''}</option>)}</select></div>
+          <div className="stack"><label className="label">Signer Name</label><input value={form.signerName} onChange={(e) => setForm({ ...form, signerName: e.target.value })} /></div>
+          <div className="stack"><label className="label">Odometer Out</label><input type="number" min="0" value={form.odometerOut} onChange={(e) => setForm({ ...form, odometerOut: e.target.value })} /></div>
+          <div className="stack"><label className="label">Fuel Out</label><select value={form.fuelOut} onChange={(e) => setForm({ ...form, fuelOut: e.target.value })}>{['0.000','0.125','0.250','0.375','0.500','0.625','0.750','0.875','1.000'].map((v, i) => <option key={v} value={v}>{i}/8</option>)}</select></div>
+          <div className="stack"><label className="label">Cleanliness Out (1-5)</label><input type="number" min="1" max="5" value={form.cleanlinessOut} onChange={(e) => setForm({ ...form, cleanlinessOut: e.target.value })} /></div>
+          <div className="stack"><label className="label">Payment Method</label><select value={form.paymentMethod} onChange={(e) => setForm({ ...form, paymentMethod: e.target.value })}>{['CASH','CARD','ZELLE','ATH_MOVIL','OTHER'].map((m)=><option key={m} value={m}>{m}</option>)}</select></div>
+        </div>
+
+        <div className="row-between" style={{ marginTop: 8 }}>
+          <label className="label">Customer Signature</label>
+          <button onClick={() => router.push(`/reservations/${id}/inspection?phase=CHECKOUT&returnTo=checkout`)}>Open Inspection Wizard</button>
+        </div>
+        <canvas ref={sigRef} width={900} height={220} style={{ width: '100%', border: '1px solid #d1d5db', borderRadius: 8, background: '#fff', touchAction: 'none', cursor: 'crosshair' }} onPointerDown={begin} onPointerMove={move} onPointerUp={end} onPointerCancel={end} onPointerLeave={end} />
+        <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 8 }}>
+          <button onClick={clearSig}>Clear Signature</button>
+          <button className="ios-action-btn" onClick={complete}>Complete Check-out</button>
+        </div>
+      </section>
+    </AppShell>
+  );
+}

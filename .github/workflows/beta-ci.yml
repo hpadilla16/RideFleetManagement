@@ -1,0 +1,64 @@
+name: beta-ci
+
+on:
+  pull_request:
+    branches: [ main, develop ]
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  frontend-build:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: npm ci
+      - run: npm run build
+
+  backend-check:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: npm ci
+      - run: npm run prisma:generate
+      - run: node --check src/main.js
+  tenant-isolation-suite:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Start stack
+        run: docker compose -f docker-compose.yml up -d --build
+      - name: Wait for backend
+        run: |
+          for i in {1..45}; do
+            if curl -fsS http://localhost:4000/health >/dev/null; then
+              echo "backend ready"
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "backend not ready"
+          docker compose -f docker-compose.yml logs backend
+          exit 1
+      - name: Seed tenants
+        run: docker exec fleet-backend sh -lc "cd /app && node scripts/tenant-seed-beta.mjs && node scripts/tenant-seed-superadmin.mjs"
+      - name: Run tenant isolation suite
+        run: docker exec fleet-backend sh -lc "cd /app && node scripts/tenant-tests/run-suite.mjs"
+      - name: Dump logs on failure
+        if: failure()
+        run: docker compose -f docker-compose.yml logs --tail=200
+      - name: Shutdown stack
+        if: always()
+        run: docker compose -f docker-compose.yml down -v
