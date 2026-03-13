@@ -1,4 +1,18 @@
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { prisma } from '../../lib/prisma.js';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+let cachedAgreementHtmlTemplate = null;
+function getModernAgreementTemplate() {
+  if (!cachedAgreementHtmlTemplate) {
+    const templatePath = path.join(__dirname, '..', '..', 'templates', 'agreement-modern.html');
+    cachedAgreementHtmlTemplate = fs.readFileSync(templatePath, 'utf8');
+  }
+  return cachedAgreementHtmlTemplate;
+}
 
 function toDecimal(value, fallback = 0) {
   if (value === null || value === undefined || value === '') return fallback;
@@ -781,29 +795,37 @@ export const rentalAgreementsService = {
       });
     }
 
-    return `<!doctype html><html><head><meta charset="utf-8"/><title>Agreement ${esc(agreement.agreementNumber)}</title>
-      <style>body{font-family:Arial,sans-serif;padding:24px;color:#111} h1,h2,h3{margin:0 0 8px} .grid{display:grid;grid-template-columns:1fr 1fr;gap:8px 16px;margin:12px 0} table{width:100%;border-collapse:collapse;margin-top:10px} th,td{border:1px solid #ddd;padding:6px 8px;font-size:12px} .muted{color:#666;font-size:12px}.box{border:1px solid #ddd;padding:10px;border-radius:8px;margin-top:12px} @media print { body{padding:0} }</style></head>
-      <body>
-      <h1>${esc(cfg.companyName || '')}</h1>
-      <div class="muted">${esc(cfg.companyAddress || '')} â€¢ ${esc(cfg.companyPhone || '')}</div>
-      <h2 style="margin-top:14px">Rental Agreement ${esc(agreement.agreementNumber)}</h2>
-      <div class="grid">
-        <div><b>Customer:</b> ${esc(`${agreement.customerFirstName || ''} ${agreement.customerLastName || ''}`.trim())}</div>
-        <div><b>Reservation:</b> ${esc(agreement.reservation?.reservationNumber || '-')}</div>
-        <div><b>Pickup:</b> ${esc(fmtDate(agreement.pickupAt))}</div>
-        <div><b>Return:</b> ${esc(fmtDate(agreement.returnAt))}</div>
-        <div><b>Tax Config:</b> ${esc((agreement.charges || []).find((c) => String(c.chargeType || '').toUpperCase() === 'TAX')?.name || '-')}</div>
-        <div><b>Total:</b> $${Number(agreement.total || 0).toFixed(2)}</div>
-        <div><b>Amount Paid:</b> $${paidAmountForPrint.toFixed(2)}</div>
-        <div><b>Amount Due:</b> $${amountDueForPrint.toFixed(2)}</div>
-      </div>
-      <h3>Charges</h3>
-      <table><thead><tr><th>Description</th><th>Qty</th><th>Rate</th><th>Total</th></tr></thead><tbody>${chargesRows}</tbody></table>
-      <h3 style="margin-top:12px">Payments</h3>
-      <table><thead><tr><th>Date</th><th>Method</th><th>Reference</th><th>Status</th><th>Amount</th></tr></thead><tbody>${paymentsRows || '<tr><td colspan="5">No payments recorded</td></tr>'}</tbody></table>
-      <div class="box"><b>Terms</b><div class="muted">${esc(cfg.termsText || '')}</div></div>
-      <div class="box"><b>Signature</b><div class="muted">Signed by: ${esc(agreement.reservation?.signatureSignedBy || '-')} | Date/Time: ${esc(fmtDate(signatureTime))} | IP: ${esc(signatureIp)}</div>${agreement.reservation?.signatureDataUrl ? `<img src="${agreement.reservation.signatureDataUrl}" style="margin-top:8px;max-width:360px;max-height:120px;object-fit:contain;border:1px solid #ddd"/>` : '<div class="muted">No signature on file</div>'}</div>
-      </body></html>`;
+    const chargesRowsHtml = chargesRows || '<tr><td colspan="4">No charges recorded</td></tr>';
+    const paymentsRowsHtml = paymentsForPrint.length ? paymentsRows : '<tr><td colspan="5">No payments recorded</td></tr>';
+    const signatureImageBlock = agreement.reservation?.signatureDataUrl
+      ? `<img src="${agreement.reservation.signatureDataUrl}" alt="Signature" />`
+      : '<div class="sig-meta">No signature on file</div>';
+
+    const templateVars = {
+      companyName: esc(cfg.companyName || ''),
+      companyAddress: esc(cfg.companyAddress || ''),
+      companyPhone: esc(cfg.companyPhone || ''),
+      agreementNumber: esc(agreement.agreementNumber || ''),
+      reservationNumber: esc(agreement.reservation?.reservationNumber || '-'),
+      customerName: esc(`${agreement.customerFirstName || ''} ${agreement.customerLastName || ''}`.trim()),
+      pickupAt: esc(fmtDate(agreement.pickupAt)),
+      returnAt: esc(fmtDate(agreement.returnAt)),
+      taxConfig: esc((agreement.charges || []).find((c) => String(c.chargeType || '').toUpperCase() === 'TAX')?.name || '-'),
+      total: Number(agreement.total || 0).toFixed(2),
+      amountPaid: paidAmountForPrint.toFixed(2),
+      amountDue: amountDueForPrint.toFixed(2),
+      chargesRows: chargesRowsHtml,
+      paymentsRows: paymentsRowsHtml,
+      termsText: esc(cfg.termsText || ''),
+      signatureSignedBy: esc(agreement.reservation?.signatureSignedBy || '-'),
+      signatureDateTime: esc(fmtDate(signatureTime)),
+      signatureIp: esc(signatureIp),
+      signatureImageBlock
+    };
+
+    const defaultTemplate = getModernAgreementTemplate();
+    return applyTemplate(defaultTemplate, templateVars);
+
   },
 
   async agreementPdfBuffer(id) {

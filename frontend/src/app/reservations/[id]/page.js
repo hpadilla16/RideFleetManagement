@@ -43,6 +43,12 @@ function extractJsonAfterMarker(notes, marker) {
   return null;
 }
 
+const parseChargeMeta = (notes) => {
+  const json = extractJsonAfterMarker(notes, '[RES_CHARGES_META]');
+  if (!json) return null;
+  try { return JSON.parse(json); } catch { return null; }
+};
+
 
 export default function ReservationDetailPage() {
 return <AuthGate>{({ token, me, logout }) => <ReservationDetailInner token={token} me={me} logout={logout} />}</AuthGate>;
@@ -325,28 +331,231 @@ function ReservationDetailInner({ token, me, logout }) {
     return Number((a - b).toFixed(2));
   }, [effectiveChargeTotal, paidTotal]);
 
+  const [depositOverrides, setDepositOverrides] = useState({
+    depositDue: '',
+    securityDeposit: ''
+  });
+
+  useEffect(() => {
+    setDepositOverrides({
+      depositDue:
+        row?.depositSummary?.lines?.find((d) => /deposit \\(due now\\)/i.test(d.name || ''))?.total?.toString() || '',
+      securityDeposit:
+        row?.depositSummary?.lines?.find((d) => /security deposit/i.test(d.name || ''))?.total?.toString() || ''
+    });
+  }, [row?.depositSummary]);
+
+  const handleEditToggle = () => {
+    if (!chargeEdit) {
+      const meta = parseChargeMeta(row?.notes);
+      if (meta) {
+        setChargeModel((prev) => ({
+          ...prev,
+          dailyRate: meta.dailyRate ?? prev.dailyRate,
+          taxRate: meta.taxRate ?? prev.taxRate,
+          serviceNames: (meta.selectedServices || []).join(', '),
+          feeNames: (meta.selectedFees || []).join(', ')
+        }));
+      }
+    }
+    setChargeEdit((v) => !v);
+  };
+
+  const removeChargeRow = (row) => {
+    const id = String(row?.id || '').toLowerCase();
+
+    if (id.startsWith('svc-')) {
+      const current = String(chargeModel.serviceNames || '')
+        .split(',')
+        .map((x) => x.trim())
+        .filter(Boolean);
+      const target = row.name.replace(/^Service:\s*/i, '').trim();
+      setChargeModel((prev) => ({
+        ...prev,
+        serviceNames: current.filter((n) => n !== target).join(', ')
+      }));
+      return;
+    }
+
+    if (id.startsWith('fee-')) {
+      const current = String(chargeModel.feeNames || '')
+        .split(',')
+        .map((x) => x.trim())
+        .filter(Boolean);
+      const target = row.name.replace(/^Fee:\s*/i, '').trim();
+      setChargeModel((prev) => ({
+        ...prev,
+        feeNames: current.filter((n) => n !== target).join(', ')
+      }));
+      return;
+    }
+
+    if (id === 'deposit-due') {
+      setDepositOverrides((prev) => ({ ...prev, depositDue: '' }));
+      return;
+    }
+
+    if (id === 'security-deposit') {
+      setDepositOverrides((prev) => ({ ...prev, securityDeposit: '' }));
+    }
+  };
+
   const saveChargeOverrides = async () => {
     try {
-      const cleanNotes = String(form.notes || '').replace(/\n?\[RES_CHARGES_META\]\{[\s\S]*\}$/m, '').trim();
-      const summaryLine = `Services: ${String(chargeModel.serviceNames || '').trim() || '-'} | Fees: ${String(chargeModel.feeNames || '').trim() || '-'}`;
-      const prevJson = extractJsonAfterMarker(row?.notes, '[RES_CHARGES_META]');
-let prevMeta = {};
-try { prevMeta = prevJson ? JSON.parse(prevJson) : {}; } catch {}
+const cleanNotes = String(form.notes || '')
+  .replace(/\n?\[RES_CHARGES_META][\s\S]*$/m, '')
+  .trim();
+const summaryLine = `Services: ${String(chargeModel.serviceNames || '').trim() || '-'} | Fees: ${String(
+  chargeModel.feeNames || ''
+).trim() || '-'}`;
+
+const serviceNames = String(chargeModel.serviceNames || '')
+.split(',')
+.map((x) => x.trim())
+.filter(Boolean);
+
+const feeNames = String(chargeModel.feeNames || '')
+.split(',')
+.map((x) => x.trim())
+.filter(Boolean);
+
+const serviceRows = serviceNames.map((name, idx) => {
+const opt = serviceOptions.find((s) => (s.name || s.code || '').trim().toLowerCase() === name.toLowerCase());
+const rate = toMoneyNum(opt?.price ?? opt?.rate ?? opt?.amount ?? 0);
+const perDay = [/PER_DAY|DAILY|DAY/i.test(String(opt?.mode || ''))] ||
+['true', '1'].includes(String(opt?.isPerDay || opt?.perDay || '').toLowerCase());
+const unit = perDay ? breakdown.days : 1;
+return {
+id: `svc-${idx}`,
+name: `Service: ${name}`,
+chargeType: 'UNIT',
+quantity: unit,
+rate,
+total: toMoneyNum(rate * unit),
+taxable: opt?.taxable !== false
+};
+});
+
+const feeRows = feeNames.map((name, idx) => {
+const opt = feeOptions.find((f) => (f.name || f.code || '').trim().toLowerCase() === name.toLowerCase());
+const rate = toMoneyNum(opt?.amount ?? opt?.price ?? opt?.rate ?? 0);
+const perDay = [/PER_DAY|DAILY|DAY/i.test(String(opt?.mode || ''))] ||
+['true', '1'].includes(String(opt?.isPerDay || opt?.perDay || '').toLowerCase());
+const unit = perDay ? breakdown.days : 1;
+return {
+id: `fee-${idx}`,
+name: `Fee: ${name}`,
+chargeType: 'UNIT',
+quantity: unit,
+rate,
+total: toMoneyNum(rate * unit),
+taxable: opt?.taxable !== false
+};
+});
+
+const baseRow = {
+id: 'daily',
+name: 'Daily',
+chargeType: 'DAILY',
+quantity: breakdown.days,
+rate: toMoneyNum(chargeModel.dailyRate || row?.dailyRate || 0),
+total: toMoneyNum((chargeModel.dailyRate || row?.dailyRate || 0) * breakdown.days),
+taxable: true
+};
+
+const coreRows = [baseRow, ...serviceRows, ...feeRows];
+
+const taxableSubTotal = coreRows.reduce(
+(sum, r) => sum + (r.taxable === false ? 0 : toMoneyNum(r.total)),
+0
+);
+
+const taxRow =
+Number(chargeModel.taxRate || 0) > 0
+? {
+id: 'tax',
+name: `Sales Tax (${Number(chargeModel.taxRate).toFixed(2)}%)`,
+chargeType: 'TAX',
+quantity: 1,
+rate: toMoneyNum(taxableSubTotal * (Number(chargeModel.taxRate) / 100)),
+total: toMoneyNum(taxableSubTotal * (Number(chargeModel.taxRate) / 100)),
+taxable: false
+}
+: null;
+
+const normalizedRows = taxRow ? [...coreRows, taxRow] : coreRows;
+
+const depositRows = [];
+if (Number(depositOverrides.depositDue || 0) > 0) {
+depositRows.push({
+id: 'deposit-due',
+name: 'Deposit (Due Now)',
+chargeType: 'DEPOSIT',
+quantity: 1,
+rate: Number(depositOverrides.depositDue),
+total: Number(depositOverrides.depositDue),
+taxable: false
+});
+}
+if (Number(depositOverrides.securityDeposit || 0) > 0) {
+depositRows.push({
+id: 'security-deposit',
+name: 'Security Deposit',
+chargeType: 'DEPOSIT',
+quantity: 1,
+rate: Number(depositOverrides.securityDeposit),
+total: Number(depositOverrides.securityDeposit),
+taxable: false
+});
+}
 
 const meta = {
 dailyRate: Number(chargeModel.dailyRate || row?.dailyRate || 0),
 taxRate: Number(chargeModel.taxRate || 0),
-selectedServices: String(chargeModel.serviceNames || '').split(',').map((x)=>x.trim()).filter(Boolean),
-selectedFees: String(chargeModel.feeNames || '').split(',').map((x)=>x.trim()).filter(Boolean),
-chargeRows: Array.isArray(prevMeta?.chargeRows) ? prevMeta.chargeRows : []
+selectedServices: String(chargeModel.serviceNames || '')
+.split(',')
+.map((x) => x.trim())
+.filter(Boolean),
+selectedFees: String(chargeModel.feeNames || '')
+.split(',')
+.map((x) => x.trim())
+.filter(Boolean),
+chargeRows: [...normalizedRows, ...depositRows]
 };
-      const notesWithMeta = `${cleanNotes}${cleanNotes ? '\n' : ''}${summaryLine}\n[RES_CHARGES_META]${JSON.stringify(meta)}`;
-      const updated = await api(`/api/reservations/${id}`, { method:'PATCH', body: JSON.stringify({ notes: notesWithMeta, dailyRate: Number(chargeModel.dailyRate || row?.dailyRate || 0) }) }, token);
-      setRow(updated);
-      setForm((f) => ({ ...f, notes: cleanNotes ? `${cleanNotes}\n${summaryLine}` : summaryLine }));
-      setChargeEdit(false);
-      setMsg('Charges updated');
-    } catch (e) { setMsg(e.message); }
+
+const depositMeta = {
+requireDeposit: Number(depositOverrides.depositDue || 0) > 0,
+depositAmountDue: Number(depositOverrides.depositDue || 0)
+};
+
+const securityMeta = {
+requireSecurityDeposit: Number(depositOverrides.securityDeposit || 0) > 0,
+securityDepositAmount: Number(depositOverrides.securityDeposit || 0)
+};
+
+const notesWithMeta = `${cleanNotes}${cleanNotes ? '\n' : ''}${summaryLine}
+[RES_CHARGES_META]${JSON.stringify(meta)}
+[RES_DEPOSIT_META]${JSON.stringify(depositMeta)}
+[SECURITY_DEPOSIT_META]${JSON.stringify(securityMeta)}`;
+
+await api(
+`/api/reservations/${id}`,
+{
+method: 'PATCH',
+body: JSON.stringify({
+notes: notesWithMeta,
+dailyRate: Number(chargeModel.dailyRate || row?.dailyRate || 0)
+})
+},
+token
+);
+
+await load();
+setChargeEdit(false);
+setMsg('Charges updated');
+  } catch (e) {
+    setMsg(e.message);
+  }
   };
 
   const selectedServiceRows = useMemo(() => {
@@ -572,58 +781,100 @@ chargeRows: Array.isArray(prevMeta?.chargeRows) ? prevMeta.chargeRows : []
             </>
           ) : (
             <>
-              <div className="row-between"><h3>Charges</h3><div style={{ display: 'flex', gap: 8 }}><button onClick={() => setChargeEdit((v) => !v)}>{chargeEdit ? 'Cancel Edit' : 'Edit'}</button>{chargeEdit ? <button onClick={saveChargeOverrides}>Save Override</button> : null}</div></div>
+              <div className="row-between"><h3>Charges</h3><div style={{ display: 'flex', gap: 8 }}><button onClick={handleEditToggle}>{chargeEdit ? 'Cancel Edit' : 'Edit'}</button>{chargeEdit ? <button onClick={saveChargeOverrides}>Save Override</button> : null}</div></div>
               {chargeEdit ? (
-                <div className="grid3" style={{ marginBottom: 10 }}>
-                  <div className="stack"><label className="label">Daily Rate</label><input value={chargeModel.dailyRate} onChange={(e) => setChargeModel({ ...chargeModel, dailyRate: e.target.value })} /></div>
-                  <div className="stack"><label className="label">Tax %</label><input value={chargeModel.taxRate} onChange={(e) => setChargeModel({ ...chargeModel, taxRate: e.target.value })} /></div>
-                  <div className="stack"><label className="label">Services</label>
-                    <div style={{ display:'flex', gap:6 }}>
-                      <select value={servicePick} onChange={(e)=>setServicePick(e.target.value)}>
-                        <option value="">Select service</option>
-                        {serviceOptions.map((s) => { const label=(s.name||s.code||s.id||'').trim(); return <option key={s.id} value={label}>{label}</option>; })}
-                      </select>
-                      <button type="button" onClick={() => { const v=String(servicePick||'').trim(); if(!v) return; const curr=String(chargeModel.serviceNames||'').split(',').map((x)=>x.trim()).filter(Boolean); if(!curr.includes(v)) setChargeModel({ ...chargeModel, serviceNames:[...curr,v].join(', ') }); setServicePick(''); }}>Add</button>
-                    </div>
-                    <div style={{ display:'flex', flexWrap:'wrap', gap:6, marginTop:6 }}>
-                      {String(chargeModel.serviceNames || '').split(',').map((x)=>x.trim()).filter(Boolean).map((n) => (
-                        <span key={n} className="label" style={{ textTransform:'none', letterSpacing:0, border:'1px solid #3a2d5f', borderRadius:12, padding:'2px 8px', display:'inline-flex', gap:6, alignItems:'center' }}>
-                          {n}
-                          <button type="button" title="Remove service" onClick={() => { const next=String(chargeModel.serviceNames||'').split(',').map((x)=>x.trim()).filter(Boolean).filter((v)=>v!==n); setChargeModel({ ...chargeModel, serviceNames: next.join(', ') }); }}>×</button>
-                        </span>
-                      ))}
-                    </div>
-                  </div>
-                  <div className="stack"><label className="label">Fees</label>
-                    <div style={{ display:'flex', gap:6 }}>
-                      <select value={feePick} onChange={(e)=>setFeePick(e.target.value)}>
-                        <option value="">Select fee</option>
-                        {feeOptions.map((f) => { const label=(f.name||f.code||f.id||'').trim(); return <option key={f.id} value={label}>{label}</option>; })}
-                      </select>
-                      <button type="button" onClick={() => { const v=String(feePick||'').trim(); if(!v) return; const curr=String(chargeModel.feeNames||'').split(',').map((x)=>x.trim()).filter(Boolean); if(!curr.includes(v)) setChargeModel({ ...chargeModel, feeNames:[...curr,v].join(', ') }); setFeePick(''); }}>Add</button>
-                    </div>
-                    <div style={{ display:'flex', flexWrap:'wrap', gap:6, marginTop:6 }}>
-                      {String(chargeModel.feeNames || '').split(',').map((x)=>x.trim()).filter(Boolean).map((n) => (
-                        <span key={n} className="label" style={{ textTransform:'none', letterSpacing:0, border:'1px solid #3a2d5f', borderRadius:12, padding:'2px 8px', display:'inline-flex', gap:6, alignItems:'center' }}>
-                          {n}
-                          <button type="button" title="Remove fee" onClick={() => { const next=String(chargeModel.feeNames||'').split(',').map((x)=>x.trim()).filter(Boolean).filter((v)=>v!==n); setChargeModel({ ...chargeModel, feeNames: next.join(', ') }); }}>×</button>
-                        </span>
-                      ))}
-                    </div>
-                  </div>
-                </div>
+                <><div className="grid3" style={{ marginBottom: 10 }}>
+                      <div className="stack"><label className="label">Daily Rate</label><input value={chargeModel.dailyRate} onChange={(e) => setChargeModel({ ...chargeModel, dailyRate: e.target.value })} /></div>
+                      <div className="stack"><label className="label">Tax %</label><input value={chargeModel.taxRate} onChange={(e) => setChargeModel({ ...chargeModel, taxRate: e.target.value })} /></div>
+                      <div className="stack"><label className="label">Services</label>
+                        <div style={{ display: 'flex', gap: 6 }}>
+                          <select value={servicePick} onChange={(e) => setServicePick(e.target.value)}>
+                            <option value="">Select service</option>
+                            {serviceOptions.map((s) => { const label = (s.name || s.code || s.id || '').trim(); return <option key={s.id} value={label}>{label}</option>; })}
+                          </select>
+                          <button type="button" onClick={() => { const v = String(servicePick || '').trim(); if (!v) return; const curr = String(chargeModel.serviceNames || '').split(',').map((x) => x.trim()).filter(Boolean); if (!curr.includes(v)) setChargeModel({ ...chargeModel, serviceNames: [...curr, v].join(', ') }); setServicePick(''); } }>Add</button>
+                        </div>
+                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 6 }}>
+                          {String(chargeModel.serviceNames || '').split(',').map((x) => x.trim()).filter(Boolean).map((n) => (
+                            <span key={n} className="label" style={{ textTransform: 'none', letterSpacing: 0, border: '1px solid #3a2d5f', borderRadius: 12, padding: '2px 8px', display: 'inline-flex', gap: 6, alignItems: 'center' }}>
+                              {n}
+                              <button type="button" title="Remove service" onClick={() => { const next = String(chargeModel.serviceNames || '').split(',').map((x) => x.trim()).filter(Boolean).filter((v) => v !== n); setChargeModel({ ...chargeModel, serviceNames: next.join(', ') }); } }>×</button>
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                      <div className="stack"><label className="label">Fees</label>
+                        <div style={{ display: 'flex', gap: 6 }}>
+                          <select value={feePick} onChange={(e) => setFeePick(e.target.value)}>
+                            <option value="">Select fee</option>
+                            {feeOptions.map((f) => { const label = (f.name || f.code || f.id || '').trim(); return <option key={f.id} value={label}>{label}</option>; })}
+                          </select>
+                          <button type="button" onClick={() => { const v = String(feePick || '').trim(); if (!v) return; const curr = String(chargeModel.feeNames || '').split(',').map((x) => x.trim()).filter(Boolean); if (!curr.includes(v)) setChargeModel({ ...chargeModel, feeNames: [...curr, v].join(', ') }); setFeePick(''); } }>Add</button>
+                        </div>
+                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 6 }}>
+                          {String(chargeModel.feeNames || '').split(',').map((x) => x.trim()).filter(Boolean).map((n) => (
+                            <span key={n} className="label" style={{ textTransform: 'none', letterSpacing: 0, border: '1px solid #3a2d5f', borderRadius: 12, padding: '2px 8px', display: 'inline-flex', gap: 6, alignItems: 'center' }}>
+                              {n}
+                              <button type="button" title="Remove fee" onClick={() => { const next = String(chargeModel.feeNames || '').split(',').map((x) => x.trim()).filter(Boolean).filter((v) => v !== n); setChargeModel({ ...chargeModel, feeNames: next.join(', ') }); } }>×</button>
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                    </div><div className="grid2">
+                        <div className="stack">
+                          <label className="label">Deposit (Due Now)</label>
+                          <input
+                            type="number"
+                            min="0"
+                            step="0.01"
+                            value={depositOverrides.depositDue}
+                            onChange={(e) => setDepositOverrides((prev) => ({
+                              ...prev,
+                              depositDue: e.target.value
+                            }))} />
+                        </div>
+                        <div className="stack">
+                          <label className="label">Security Deposit</label>
+                          <input
+                            type="number"
+                            min="0"
+                            step="0.01"
+                            value={depositOverrides.securityDeposit}
+                            onChange={(e) => setDepositOverrides((prev) => ({
+                              ...prev,
+                              securityDeposit: e.target.value
+                            }))} />
+                        </div>
+                      </div></>
               ) : null}
               <table>
                 <thead><tr><th>Charge</th><th>Unit</th><th>Rate</th><th>Total</th></tr></thead>
                 <tbody>
-                  {displayChargeRows.map((r) => (
-                    <tr key={r.id}>
-                      <td>{r.name}</td>
-                      <td>{toMoneyNum(r.unit || 1)}</td>
-                      <td>{money(r.rate)}</td>
-                      <td>{money(r.total)}</td>
-                    </tr>
-                  ))}
+                  {displayChargeRows.map((r) => {
+                    const canDelete = ['service', 'fee', 'deposit-due', 'security-deposit'].some((key) =>
+                      String(r.id || '').toLowerCase().includes(key.replace('-', ''))
+                    );
+
+                    return (
+                      <tr key={r.id}>
+                        <td style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                          {r.name}
+                          {chargeEdit && canDelete ? (
+                            <button
+                              className="link"
+                              onClick={() => removeChargeRow(r)}
+                              title="Remove row"
+                            >
+                              Delete
+                            </button>
+                          ) : null}
+                        </td>
+                        <td>{toMoneyNum(r.unit || 1)}</td>
+                        <td>{money(r.rate)}</td>
+                        <td>{money(r.total)}</td>
+                      </tr>
+                    );
+                  })}
                   <tr>
                     <td colSpan={3}><strong>Total</strong></td>
                     <td><strong>{money(displayTotal)}</strong></td>
