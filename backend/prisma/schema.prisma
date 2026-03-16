@@ -141,7 +141,7 @@ model VehicleType {
   id           String     @id @default(cuid())
   tenantId     String?
   tenant       Tenant?    @relation(fields: [tenantId], references: [id])
-  code         String     @unique
+  code         String
   name         String
   description  String?
   createdAt    DateTime   @default(now())
@@ -150,6 +150,8 @@ model VehicleType {
   vehicles     Vehicle[]
   reservations Reservation[]
   rateItems    RateItem[]
+
+  @@unique([tenantId, code])
 }
 
 model Vehicle {

@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import puppeteer from 'puppeteer';
 import { prisma } from '../../lib/prisma.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -829,40 +830,21 @@ export const rentalAgreementsService = {
   },
 
   async agreementPdfBuffer(id) {
-    const { agreement, cfg, signatureIp, signatureTime, paymentsForPrint, paidAmountForPrint, amountDueForPrint } = await this.agreementPrintContext(id);
-    const { default: PDFDocument } = await import('pdfkit');
-    const chunks = [];
-    const doc = new PDFDocument({ margin: 40, size: 'LETTER' });
-    doc.on('data', (c) => chunks.push(c));
-    const endPromise = new Promise((resolve) => doc.on('end', resolve));
-
-    doc.fontSize(16).text(String(cfg.companyName || ''), { align: 'left' });
-    doc.fontSize(10).fillColor('#444').text(`${cfg.companyAddress || ''}  ${cfg.companyPhone || ''}`);
-    doc.moveDown(0.8).fillColor('#111').fontSize(14).text(`Rental Agreement ${agreement.agreementNumber}`);
-    doc.moveDown(0.4).fontSize(10);
-    doc.text(`Customer: ${agreement.customerFirstName || ''} ${agreement.customerLastName || ''}`);
-    doc.text(`Reservation: ${agreement.reservation?.reservationNumber || '-'}`);
-    doc.text(`Pickup: ${fmtDate(agreement.pickupAt)}    Return: ${fmtDate(agreement.returnAt)}`);
-    const taxLabel = (agreement.charges || []).find((c) => String(c.chargeType || '').toUpperCase() === 'TAX')?.name || '-';
-    doc.text(`Tax Config: ${taxLabel}`);
-    doc.text(`Total: $${Number(agreement.total || 0).toFixed(2)}    Amount Paid: $${paidAmountForPrint.toFixed(2)}    Amount Due: $${amountDueForPrint.toFixed(2)}`);
-    doc.moveDown(0.8).fontSize(12).text('Charges');
-    (agreement.charges || []).forEach((c) => {
-      doc.fontSize(10).text(`• ${c.name} | Qty ${Number(c.quantity || 0).toFixed(2)} | Rate $${Number(c.rate || 0).toFixed(2)} | Total $${Number(c.total || 0).toFixed(2)}`);
-    });
-    doc.moveDown(0.6).fontSize(12).fillColor('#111').text('Payments');
-    if ((paymentsForPrint || []).length) {
-      (paymentsForPrint || []).forEach((p) => {
-        doc.fontSize(10).text(`• ${fmtDate(p.paidAt || p.createdAt)} | ${p.method || '-'} | ${p.reference || '-'} | ${p.status || '-'} | $${Number(p.amount || 0).toFixed(2)}`);
+    const html = await this.renderAgreementHtml(id);
+    const browser = await puppeteer.launch({ headless: 'new', args: ['--no-sandbox', '--disable-setuid-sandbox'] });
+    try {
+      const page = await browser.newPage();
+      await page.setContent(html, { waitUntil: 'networkidle0' });
+      const pdfBuffer = await page.pdf({
+        format: 'Letter',
+        printBackground: true,
+        margin: { top: '0.5in', bottom: '0.6in', left: '0.5in', right: '0.5in' }
       });
-    } else {
-      doc.fontSize(10).text('• No payments recorded');
+      await page.close();
+      return pdfBuffer;
+    } finally {
+      await browser.close();
     }
-    doc.moveDown(0.8).fontSize(9).fillColor('#333').text(`Terms: ${cfg.termsText || ''}`);
-    doc.moveDown(0.8).fontSize(10).fillColor('#111').text(`Signature Stamp: ${agreement.reservation?.signatureSignedBy || '-'} | ${fmtDate(signatureTime)} | IP ${signatureIp}`);
-    doc.end();
-    await endPromise;
-    return Buffer.concat(chunks);
   },
 
   async emailAgreement(id, payload = {}, actorUserId = null) {

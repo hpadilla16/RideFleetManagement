@@ -124,6 +124,7 @@ const EMPTY_SERVICE = {
   allVehicleTypes: true, vehicleTypeIds: [], displayOnline: false, defaultRencars: false, mandatory: false,
   isActive: true, locationId: ''
 };
+const EMPTY_VEHICLE_TYPE = { code: '', name: '', description: '' };
 
 export default function SettingsPage() {
   return <AuthGate>{({ token, me, logout }) => <SettingsInner token={token} me={me} logout={logout} />}</AuthGate>;
@@ -140,6 +141,8 @@ function SettingsInner({ token, me, logout }) {
   const [rates, setRates] = useState([]);
   const [rateQuery, setRateQuery] = useState('');
   const [vehicleTypes, setVehicleTypes] = useState([]);
+  const [vehicleTypeForm, setVehicleTypeForm] = useState(EMPTY_VEHICLE_TYPE);
+  const [vehicleTypeEditId, setVehicleTypeEditId] = useState(null);
   const [insurancePlans, setInsurancePlans] = useState([]);
   const [insuranceEditIdx, setInsuranceEditIdx] = useState(-1);
   const [insuranceForm, setInsuranceForm] = useState({
@@ -339,6 +342,62 @@ function SettingsInner({ token, me, logout }) {
       const text = String(e?.message || 'Unknown error');
       setMsg(`Copy failed: ${text}`);
       window.alert(`Copy failed: ${text}`);
+    }
+  };
+
+  const resetVehicleTypeForm = () => {
+    setVehicleTypeForm(EMPTY_VEHICLE_TYPE);
+    setVehicleTypeEditId(null);
+  };
+
+  const saveVehicleType = async (e) => {
+    e.preventDefault();
+    const code = String(vehicleTypeForm.code || '').trim().toUpperCase();
+    const name = String(vehicleTypeForm.name || '').trim();
+    const description = String(vehicleTypeForm.description || '').trim();
+    if (!code || !name) {
+      setMsg('Vehicle type code and name are required');
+      return;
+    }
+    const duplicate = vehicleTypes.some((vt) => vt.code?.toUpperCase() === code && vt.id !== vehicleTypeEditId);
+    if (duplicate) {
+      setMsg('Vehicle type code already exists. Use a unique code.');
+      return;
+    }
+    const payload = { code, name, description: description || null };
+    try {
+      if (vehicleTypeEditId) {
+        await api(`/api/vehicle-types/${vehicleTypeEditId}`, { method: 'PATCH', body: JSON.stringify(payload) }, token);
+        setMsg('Vehicle type updated');
+      } else {
+        await api('/api/vehicle-types', { method: 'POST', body: JSON.stringify(payload) }, token);
+        setMsg('Vehicle type added');
+      }
+      resetVehicleTypeForm();
+      await load();
+    } catch (err) {
+      setMsg(err?.message || 'Failed to save vehicle type');
+    }
+  };
+
+  const editVehicleType = (vt) => {
+    setVehicleTypeEditId(vt.id);
+    setVehicleTypeForm({
+      code: vt.code || '',
+      name: vt.name || '',
+      description: vt.description || ''
+    });
+  };
+
+  const removeVehicleType = async (vt) => {
+    if (!window.confirm(`Delete vehicle type ${vt.code || vt.name}?`)) return;
+    try {
+      await api(`/api/vehicle-types/${vt.id}`, { method: 'DELETE' }, token);
+      setMsg('Vehicle type removed');
+      if (vehicleTypeEditId === vt.id) resetVehicleTypeForm();
+      await load();
+    } catch (err) {
+      setMsg(err?.message || 'Failed to remove vehicle type');
     }
   };
 
@@ -743,6 +802,7 @@ function SettingsInner({ token, me, logout }) {
           <button onClick={() => setTab('locations')}>Locations</button>
           <button onClick={() => setTab('fees')}>Fees</button>
           <button onClick={() => setTab('rates')}>Rates</button>
+          <button onClick={() => setTab('vehicleTypes')}>Vehicle Types</button>
           <button onClick={() => setTab('insurance')}>Insurance</button>
           <button onClick={() => setTab('emails')}>Emails</button>
           <button onClick={() => setTab('services')}>Additional Services</button>
@@ -1006,6 +1066,43 @@ function SettingsInner({ token, me, logout }) {
                     </td>
                   </tr>
                 ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+
+        {tab === 'vehicleTypes' && (
+          <div className="stack">
+            <div className="row-between"><h2>Vehicle Classes</h2><button onClick={resetVehicleTypeForm}>New Class</button></div>
+            <form className="stack" onSubmit={saveVehicleType}>
+              <div className="grid3">
+                <input placeholder="Code" value={vehicleTypeForm.code} onChange={(e) => setVehicleTypeForm({ ...vehicleTypeForm, code: e.target.value.toUpperCase() })} />
+                <input placeholder="Name" value={vehicleTypeForm.name} onChange={(e) => setVehicleTypeForm({ ...vehicleTypeForm, name: e.target.value })} />
+                <input placeholder="Description" value={vehicleTypeForm.description} onChange={(e) => setVehicleTypeForm({ ...vehicleTypeForm, description: e.target.value })} />
+              </div>
+              <div style={{ display: 'flex', gap: 8 }}>
+                <button type="submit">{vehicleTypeEditId ? 'Update Class' : 'Add Class'}</button>
+                {vehicleTypeEditId ? <button type="button" onClick={resetVehicleTypeForm}>Cancel</button> : null}
+              </div>
+            </form>
+            <table>
+              <thead><tr><th>Code</th><th>Name</th><th>Description</th><th>Actions</th></tr></thead>
+              <tbody>
+                {vehicleTypes.length ? vehicleTypes.map((vt) => (
+                  <tr key={vt.id}>
+                    <td>{vt.code}</td>
+                    <td>{vt.name}</td>
+                    <td>{vt.description || '-'}</td>
+                    <td>
+                      <div style={{ display: 'flex', gap: 6 }}>
+                        <button type="button" onClick={() => editVehicleType(vt)}>Edit</button>
+                        <button type="button" onClick={() => removeVehicleType(vt)}>Delete</button>
+                      </div>
+                    </td>
+                  </tr>
+                )) : (
+                  <tr><td colSpan="4">No vehicle classes configured yet.</td></tr>
+                )}
               </tbody>
             </table>
           </div>

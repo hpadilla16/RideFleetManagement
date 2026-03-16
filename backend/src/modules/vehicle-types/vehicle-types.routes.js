@@ -28,12 +28,20 @@ vehicleTypesRouter.post('/', async (req, res, next) => {
     if (missing.length) return res.status(400).json({ error: `Missing required fields: ${missing.join(', ')}` });
     const row = await vehicleTypesService.create(req.body, scopeFor(req));
     res.status(201).json(row);
-  } catch (e) { next(e); }
+  } catch (e) {
+    if (e?.code === 'P2002') return res.status(409).json({ error: 'Vehicle type code must be unique.' });
+    next(e);
+  }
 });
 
-vehicleTypesRouter.patch('/:id', async (req, res) => {
-  try { res.json(await vehicleTypesService.update(req.params.id, req.body || {}, scopeFor(req))); }
-  catch { res.status(404).json({ error: 'Vehicle type not found' }); }
+vehicleTypesRouter.patch('/:id', async (req, res, next) => {
+  try {
+    res.json(await vehicleTypesService.update(req.params.id, req.body || {}, scopeFor(req)));
+  } catch (e) {
+    if (e?.message === 'Vehicle type not found') return res.status(404).json({ error: 'Vehicle type not found' });
+    if (e?.code === 'P2002') return res.status(409).json({ error: 'Vehicle type code must be unique.' });
+    next(e);
+  }
 });
 
 vehicleTypesRouter.delete('/:id', async (req, res) => {
