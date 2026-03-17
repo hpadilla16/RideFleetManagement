@@ -20,11 +20,11 @@ function ageOnDate(dob, onDate) {
   return age;
 }
 
-async function buildUnderageAlertNote({ customerId, pickupLocationId, pickupAt }) {
+async function buildUnderageAlertNote({ customerId, pickupLocationId, pickupAt }, scope = {}) {
   if (!customerId || !pickupLocationId || !pickupAt) return null;
   const [customer, location] = await Promise.all([
-    prisma.customer.findUnique({ where: { id: customerId }, select: { dateOfBirth: true } }),
-    prisma.location.findUnique({ where: { id: pickupLocationId }, select: { locationConfig: true } })
+    prisma.customer.findFirst({ where: { id: customerId, ...(scope?.tenantId ? { tenantId: scope.tenantId } : {}) }, select: { dateOfBirth: true } }),
+    prisma.location.findFirst({ where: { id: pickupLocationId, ...(scope?.tenantId ? { tenantId: scope.tenantId } : {}) }, select: { locationConfig: true } })
   ]);
   const cfg = parseLocationConfig(location?.locationConfig);
   const enabled = !!cfg.underageAlertEnabled;
@@ -87,8 +87,15 @@ function resolveHoursForDate(cfg, date) {
   };
 }
 
-async function validateLocationWindow({ locationId, at, label }) {
-  const location = await prisma.location.findUnique({ where: { id: locationId }, select: { name: true, locationConfig: true } });
+function scopedSettingKey(baseKey, scope = {}) {
+  return scope?.tenantId ? `tenant:${scope.tenantId}:${baseKey}` : baseKey;
+}
+
+async function validateLocationWindow({ locationId, at, label }, scope = {}) {
+  const location = await prisma.location.findFirst({
+    where: { id: locationId, ...(scope?.tenantId ? { tenantId: scope.tenantId } : {}) },
+    select: { name: true, locationConfig: true }
+  });
   if (!location) return;
 
   const cfg = parseLocationConfig(location.locationConfig);
@@ -108,7 +115,7 @@ async function validateLocationWindow({ locationId, at, label }) {
   }
 }
 
-async function ensureNoVehicleConflict({ vehicleId, pickupAt, returnAt, ignoreReservationId = null }) {
+async function ensureNoVehicleConflict({ vehicleId, pickupAt, returnAt, ignoreReservationId = null }, scope = {}) {
   if (!vehicleId) return;
 
   const start = new Date(pickupAt);
@@ -116,6 +123,7 @@ async function ensureNoVehicleConflict({ vehicleId, pickupAt, returnAt, ignoreRe
 
   const conflict = await prisma.reservation.findFirst({
     where: {
+      ...(scope?.tenantId ? { tenantId: scope.tenantId } : {}),
       vehicleId,
       id: ignoreReservationId ? { not: ignoreReservationId } : undefined,
       status: { in: ['NEW', 'CONFIRMED', 'CHECKED_OUT'] },
@@ -130,8 +138,8 @@ async function ensureNoVehicleConflict({ vehicleId, pickupAt, returnAt, ignoreRe
   }
 }
 
-async function isAutoAssignEnabled() {
-  const row = await prisma.appSetting.findUnique({ where: { key: 'reservationOptions' } });
+async function isAutoAssignEnabled(scope = {}) {
+  const row = await prisma.appSetting.findUnique({ where: { key: scopedSettingKey('reservationOptions', scope) } });
   if (!row?.value) return false;
   try {
     const parsed = JSON.parse(row.value);
@@ -141,11 +149,11 @@ async function isAutoAssignEnabled() {
   }
 }
 
-async function pickAvailableVehicle({ vehicleTypeId, pickupLocationId, pickupAt, returnAt }) {
+async function pickAvailableVehicle({ vehicleTypeId, pickupLocationId, pickupAt, returnAt }, scope = {}) {
   if (!vehicleTypeId) return null;
 
   const candidates = await prisma.vehicle.findMany({
-    where: { status: 'AVAILABLE', vehicleTypeId },
+    where: { ...(scope?.tenantId ? { tenantId: scope.tenantId } : {}), status: 'AVAILABLE', vehicleTypeId },
     select: { id: true, homeLocationId: true }
   });
   if (!candidates.length) return null;
@@ -156,6 +164,7 @@ async function pickAvailableVehicle({ vehicleTypeId, pickupLocationId, pickupAt,
 
   const conflicts = await prisma.reservation.findMany({
     where: {
+      ...(scope?.tenantId ? { tenantId: scope.tenantId } : {}),
       vehicleId: { in: ids },
       status: { in: ['NEW', 'CONFIRMED', 'CHECKED_OUT'] },
       pickupAt: { lt: end },
@@ -234,19 +243,19 @@ export const reservationsService = {
       throw new Error('reservationNumber/sourceRef already exists');
     }
 
-    await validateLocationWindow({ locationId: data.pickupLocationId, at: data.pickupAt, label: 'Pickup' });
-    await validateLocationWindow({ locationId: data.returnLocationId, at: data.returnAt, label: 'Return' });
+    await validateLocationWindow({ locationId: data.pickupLocationId, at: data.pickupAt, label: 'Pickup' }, scope);
+    await validateLocationWindow({ locationId: data.returnLocationId, at: data.returnAt, label: 'Return' }, scope);
 
     let assignedVehicleId = data.vehicleId ?? null;
     if (!assignedVehicleId) {
-      const autoAssign = await isAutoAssignEnabled();
+      const autoAssign = await isAutoAssignEnabled(scope);
       if (autoAssign) {
         assignedVehicleId = await pickAvailableVehicle({
           vehicleTypeId: data.vehicleTypeId ?? null,
           pickupLocationId: data.pickupLocationId,
           pickupAt: data.pickupAt,
           returnAt: data.returnAt
-        });
+        }, scope);
       }
     }
 
@@ -254,13 +263,13 @@ export const reservationsService = {
       vehicleId: assignedVehicleId,
       pickupAt: data.pickupAt,
       returnAt: data.returnAt
-    });
+    }, scope);
 
     const underageAlert = await buildUnderageAlertNote({
       customerId: data.customerId,
       pickupLocationId: data.pickupLocationId,
       pickupAt: data.pickupAt
-    });
+    }, scope);
 
     return prisma.reservation.create({
       data: {
@@ -306,22 +315,22 @@ export const reservationsService = {
     const nextPickupLocationId = patch.pickupLocationId !== undefined ? patch.pickupLocationId : current.pickupLocationId;
     const nextReturnLocationId = patch.returnLocationId !== undefined ? patch.returnLocationId : current.returnLocationId;
 
-    await validateLocationWindow({ locationId: nextPickupLocationId, at: nextPickupAt, label: 'Pickup' });
-    await validateLocationWindow({ locationId: nextReturnLocationId, at: nextReturnAt, label: 'Return' });
+    await validateLocationWindow({ locationId: nextPickupLocationId, at: nextPickupAt, label: 'Pickup' }, scope);
+    await validateLocationWindow({ locationId: nextReturnLocationId, at: nextReturnAt, label: 'Return' }, scope);
 
     await ensureNoVehicleConflict({
       vehicleId: nextVehicleId,
       pickupAt: nextPickupAt,
       returnAt: nextReturnAt,
       ignoreReservationId: id
-    });
+    }, scope);
 
     const nextNotesInput = patch.notes !== undefined ? patch.notes : current.notes;
     const underageAlert = await buildUnderageAlertNote({
       customerId: nextCustomerId,
       pickupLocationId: nextPickupLocationId,
       pickupAt: nextPickupAt
-    });
+    }, scope);
 
     const data = {
       ...patch,

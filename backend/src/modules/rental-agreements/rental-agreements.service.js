@@ -153,6 +153,18 @@ function parseDepositMetaFromNotes(notes) {
 }
 
 function parseSecurityDepositMetaFromNotes(notes) {
+  const tagged = String(notes || '').match(/\[SECURITY_DEPOSIT_META\](\{[^\n]*\})/);
+  if (tagged) {
+    try {
+      const j = JSON.parse(tagged[1]);
+      const amount = Number(j?.securityDepositAmount || 0);
+      return {
+        requireSecurityDeposit: !!j?.requireSecurityDeposit || amount > 0,
+        securityDepositAmount: Number.isFinite(amount) ? amount : 0
+      };
+    } catch {}
+  }
+
   const chargesMeta = parseReservationChargesMeta(notes);
   const amount = Number(chargesMeta?.securityDepositMeta?.securityDepositAmount || 0);
   return {
@@ -218,6 +230,7 @@ export const rentalAgreementsService = {
       // This guarantees reservation->agreement parity for checkout flow.
       const meta = parseReservationChargesMeta(reservation.notes) || {};
       if (existing.status !== 'CLOSED' && existing.status !== 'CANCELLED') {
+        const tenantWhere = reservation.tenantId ? { tenantId: reservation.tenantId } : {};
         const selectedServiceIds = Array.isArray(meta?.selectedServices) ? meta.selectedServices : [];
         const selectedFeeIds = Array.isArray(meta?.selectedFees) ? meta.selectedFees : [];
         const discounts = Array.isArray(meta?.discounts) ? meta.discounts : [];
@@ -225,11 +238,11 @@ export const rentalAgreementsService = {
         // Always include auto fees computed on reservation side (underage/additional-driver) even if not in meta.
         const underageFromNotes = /UNDERAGE ALERT/i.test(String(reservation.notes || ''));
         if (reservation.underageAlert || underageFromNotes) {
-          const autoUnderage = await prisma.fee.findMany({ where: { isActive: true, isUnderageFee: true }, select: { id: true } });
+          const autoUnderage = await prisma.fee.findMany({ where: { ...tenantWhere, isActive: true, isUnderageFee: true }, select: { id: true } });
           selectedFeeIds.push(...autoUnderage.map((x) => x.id));
         }
         if (parseAdditionalDriversCountFromNotes(reservation.notes) > 0) {
-          const autoAddl = await prisma.fee.findMany({ where: { isActive: true, isAdditionalDriverFee: true }, select: { id: true } });
+          const autoAddl = await prisma.fee.findMany({ where: { ...tenantWhere, isActive: true, isAdditionalDriverFee: true }, select: { id: true } });
           selectedFeeIds.push(...autoAddl.map((x) => x.id));
         }
 
@@ -238,10 +251,10 @@ export const rentalAgreementsService = {
         const days = rentalDays(reservation.pickupAt, reservation.returnAt);
         const dailyRate = Number(reservation.dailyRate || 0);
         const services = selectedServiceIds.length
-          ? await prisma.additionalService.findMany({ where: { id: { in: selectedServiceIds } } })
+          ? await prisma.additionalService.findMany({ where: { ...tenantWhere, id: { in: selectedServiceIds } } })
           : [];
         const fees = uniqueSelectedFeeIds.length
-          ? await prisma.fee.findMany({ where: { id: { in: uniqueSelectedFeeIds } } })
+          ? await prisma.fee.findMany({ where: { ...tenantWhere, id: { in: uniqueSelectedFeeIds } } })
           : [];
 
         const incomingRows = Array.isArray(meta?.chargeRows) ? meta.chargeRows : null;
@@ -418,6 +431,7 @@ export const rentalAgreementsService = {
     const days = rentalDays(reservation.pickupAt, reservation.returnAt);
     const dailyRate = Number(reservation.dailyRate || 0);
     const meta = parseReservationChargesMeta(reservation.notes) || {};
+    const tenantWhere = reservation.tenantId ? { tenantId: reservation.tenantId } : {};
     const selectedServiceIds = Array.isArray(meta?.selectedServices) ? meta.selectedServices : [];
     const selectedFeeIds = Array.isArray(meta?.selectedFees) ? meta.selectedFees : [];
     const discounts = Array.isArray(meta?.discounts) ? meta.discounts : [];
@@ -425,20 +439,20 @@ export const rentalAgreementsService = {
     // Always include auto fees computed on reservation side (underage/additional-driver) even if not in meta.
     const underageFromNotes = /UNDERAGE ALERT/i.test(String(reservation.notes || ''));
     if (reservation.underageAlert || underageFromNotes) {
-      const autoUnderage = await prisma.fee.findMany({ where: { isActive: true, isUnderageFee: true }, select: { id: true } });
+      const autoUnderage = await prisma.fee.findMany({ where: { ...tenantWhere, isActive: true, isUnderageFee: true }, select: { id: true } });
       selectedFeeIds.push(...autoUnderage.map((x) => x.id));
     }
     if (parseAdditionalDriversCountFromNotes(reservation.notes) > 0) {
-      const autoAddl = await prisma.fee.findMany({ where: { isActive: true, isAdditionalDriverFee: true }, select: { id: true } });
+      const autoAddl = await prisma.fee.findMany({ where: { ...tenantWhere, isActive: true, isAdditionalDriverFee: true }, select: { id: true } });
       selectedFeeIds.push(...autoAddl.map((x) => x.id));
     }
     const uniqueSelectedFeeIds = [...new Set(selectedFeeIds)];
 
     const services = selectedServiceIds.length
-      ? await prisma.additionalService.findMany({ where: { id: { in: selectedServiceIds } } })
+      ? await prisma.additionalService.findMany({ where: { ...tenantWhere, id: { in: selectedServiceIds } } })
       : [];
     const fees = uniqueSelectedFeeIds.length
-      ? await prisma.fee.findMany({ where: { id: { in: uniqueSelectedFeeIds } } })
+      ? await prisma.fee.findMany({ where: { ...tenantWhere, id: { in: uniqueSelectedFeeIds } } })
       : [];
 
     const incomingRows = Array.isArray(meta?.chargeRows) ? meta.chargeRows : null;
@@ -719,7 +733,8 @@ export const rentalAgreementsService = {
     if (!agreement) throw new Error('Rental agreement not found');
 
     const { settingsService } = await import('../settings/settings.service.js');
-    const globalCfg = await settingsService.getRentalAgreementConfig();
+    const agreementScope = agreement?.tenantId ? { tenantId: agreement.tenantId } : {};
+    const globalCfg = await settingsService.getRentalAgreementConfig(agreementScope);
     const locCfg = parseLocationConfig(agreement?.reservation?.pickupLocation?.locationConfig);
     const cfg = {
       ...globalCfg,

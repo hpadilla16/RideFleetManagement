@@ -3,11 +3,10 @@
 import { useEffect, useState } from 'react';
 import { AuthGate } from '../../components/AuthGate';
 import { AppShell } from '../../components/AppShell';
-import { api, TOKEN_KEY } from '../../lib/client';
+import { api, TOKEN_KEY, USER_KEY } from '../../lib/client';
 
 const EMPTY_TENANT = { name: '', slug: '', status: 'ACTIVE', plan: 'BETA' };
 const EMPTY_ADMIN = { email: '', fullName: '', password: 'TempPass123!' };
-const USER_KEY = 'fleet_user';
 
 export default function TenantsPage() {
   return <AuthGate>{({ token, me, logout }) => <Inner token={token} me={me} logout={logout} />}</AuthGate>;

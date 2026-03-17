@@ -299,7 +299,6 @@ rentalAgreementsRouter.post('/:id/payments/:paymentId/refund', async (req, res, 
 rentalAgreementsRouter.post('/:id/charge-card-on-file', async (req, res, next) => {
   try {
     await ensureEditable(req.params.id, req.user);
-    await ensureEditable(req.params.id, req.user);
     const row = await rentalAgreementsService.chargeCardOnFile(req.params.id, req.body || {}, req.user?.id || null);
     res.json(row);
   } catch (e) {
@@ -321,18 +320,6 @@ rentalAgreementsRouter.post('/:id/finalize', async (req, res, next) => {
 
 
 // PAYMENT_ACTION_COMPAT_ROUTES
-rentalAgreementsRouter.post('/:id/payments/:paymentId/void', async (req, res, next) => {
-  try {
-    await ensureEditable(req.params.id, req.user);
-    const row = await rentalAgreementsService.deletePaymentHard(req.params.id, req.params.paymentId, req.body || {}, req.user?.id || null);
-    res.json(row);
-  } catch (e) {
-    if (/not found/i.test(e.message)) return res.status(404).json({ error: e.message });
-    if (/cannot|invalid|already/i.test(e.message)) return res.status(400).json({ error: e.message });
-    next(e);
-  }
-});
-
 rentalAgreementsRouter.post('/:id/payments/:paymentId/delete', async (req, res, next) => {
   try {
     await ensureEditable(req.params.id, req.user);
@@ -341,18 +328,6 @@ rentalAgreementsRouter.post('/:id/payments/:paymentId/delete', async (req, res, 
   } catch (e) {
     if (/not found/i.test(e.message)) return res.status(404).json({ error: e.message });
     if (/cannot|invalid|already/i.test(e.message)) return res.status(400).json({ error: e.message });
-    next(e);
-  }
-});
-
-rentalAgreementsRouter.post('/:id/payments/:paymentId/refund', async (req, res, next) => {
-  try {
-    await ensureEditable(req.params.id, req.user);
-    const row = await rentalAgreementsService.refundPayment(req.params.id, req.params.paymentId, req.body || {}, req.user?.id || null);
-    res.json(row);
-  } catch (e) {
-    if (/not found/i.test(e.message)) return res.status(404).json({ error: e.message });
-    if (/cannot|invalid|already|amount/i.test(e.message)) return res.status(400).json({ error: e.message });
     next(e);
   }
 });

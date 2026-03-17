@@ -3,6 +3,7 @@
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { API_BASE, TOKEN_KEY, USER_KEY, readStoredToken } from '../lib/client';
 
 const NAV_ITEMS = [
   { href: '/dashboard', label: 'Dashboard' },
@@ -19,7 +20,6 @@ const NAV_ITEMS = [
 ];
 
 const IDLE_LOCK_MS = 2 * 60 * 1000;
-const API_BASE = process.env.NEXT_PUBLIC_API_BASE || 'http://localhost:4000';
 
 function formatDate(d) {
   return d.toLocaleDateString(undefined, { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
@@ -48,19 +48,8 @@ export function AppShell({ me, logout, children }) {
 
   const idleTimerRef = useRef(null);
 
-  const readToken = () => {
-    if (typeof window === 'undefined') return '';
-    return (
-      localStorage.getItem('token') ||
-      localStorage.getItem('authToken') ||
-      localStorage.getItem('accessToken') ||
-      localStorage.getItem('jwt') ||
-      ''
-    );
-  };
-
   const authApi = async (path, init = {}) => {
-    const token = readToken();
+    const token = readStoredToken();
     if (!token) throw new Error('Missing auth token');
     const res = await fetch(`${API_BASE}/api/auth${path}`, {
       ...init,
@@ -84,7 +73,7 @@ export function AppShell({ me, logout, children }) {
         setNow(new Date());
       }
       // fast local hint to avoid showing first-time setup on refresh
-      const hasPinHint = localStorage.getItem('ui.hasPin') === '1' || !!localStorage.getItem('ui.lockPin');
+      const hasPinHint = localStorage.getItem('ui.hasPin') === '1';
       setHasPin(hasPinHint);
       const hasBackup = !!localStorage.getItem('superadmin_backup_token');
       const role = String(me?.role || '').toUpperCase();
@@ -92,15 +81,14 @@ export function AppShell({ me, logout, children }) {
     } catch {}
     (async () => {
       try {
-        const token = readToken();
+        const token = readStoredToken();
         if (!token) return;
         const st = await authApi('/lock-pin/status');
         const has = !!st?.hasPin;
         setHasPin(has);
         try { localStorage.setItem('ui.hasPin', has ? '1' : '0'); } catch {}
       } catch {
-        // fallback to legacy local pin if backend endpoint unavailable
-        try { setHasPin(localStorage.getItem('ui.hasPin') === '1' || !!localStorage.getItem('ui.lockPin')); } catch {}
+        setHasPin(false);
       }
     })();
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -157,8 +145,8 @@ export function AppShell({ me, logout, children }) {
       const t = localStorage.getItem('superadmin_backup_token');
       const u = localStorage.getItem('superadmin_backup_user');
       if (!t || !u) return;
-      localStorage.setItem('fleet_jwt', t);
-      localStorage.setItem('fleet_user', u);
+      localStorage.setItem(TOKEN_KEY, t);
+      localStorage.setItem(USER_KEY, u);
       localStorage.removeItem('superadmin_backup_token');
       localStorage.removeItem('superadmin_backup_user');
       window.location.href = '/tenants';
@@ -170,12 +158,7 @@ export function AppShell({ me, logout, children }) {
       if (!hasPin) {
         if (!newPin || newPin.length < 4) return setLockMsg('Set a PIN with at least 4 digits');
         if (newPin !== newPin2) return setLockMsg('PIN confirmation does not match');
-        try {
-          await authApi('/lock-pin/set', { method: 'POST', body: JSON.stringify({ pin: newPin }) });
-        } catch {
-          // fallback local pin
-          localStorage.setItem('ui.lockPin', newPin);
-        }
+        await authApi('/lock-pin/set', { method: 'POST', body: JSON.stringify({ pin: newPin }) });
         try { localStorage.setItem('ui.hasPin', '1'); } catch {}
         setHasPin(true);
         setNewPin('');
@@ -188,13 +171,8 @@ export function AppShell({ me, logout, children }) {
       }
 
       let ok = false;
-      try {
-        await authApi('/lock-pin/verify', { method: 'POST', body: JSON.stringify({ pin: pinInput }) });
-        ok = true;
-      } catch {
-        const localPin = localStorage.getItem('ui.lockPin') || '';
-        ok = !!localPin && pinInput === localPin;
-      }
+      await authApi('/lock-pin/verify', { method: 'POST', body: JSON.stringify({ pin: pinInput }) });
+      ok = true;
 
       if (!ok) throw new Error('Invalid PIN');
 
@@ -217,8 +195,8 @@ export function AppShell({ me, logout, children }) {
 
   const resetMyPin = async () => {
     try {
-      try { await authApi('/lock-pin/reset', { method: 'POST' }); } catch {}
-      try { localStorage.removeItem('ui.lockPin'); localStorage.setItem('ui.hasPin', '0'); } catch {}
+      await authApi('/lock-pin/reset', { method: 'POST' });
+      try { localStorage.setItem('ui.hasPin', '0'); } catch {}
       setHasPin(false);
       setPinInput('');
       setNewPin('');
@@ -257,7 +235,7 @@ export function AppShell({ me, logout, children }) {
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
             <button className="mobile-menu-btn" onClick={() => setMobileOpen((v) => !v)}>☰</button>
             <div>
-              <div style={{ fontWeight: 700 }}>{me?.name || me?.email || 'User'}</div>
+              <div style={{ fontWeight: 700 }}>{me?.fullName || me?.name || me?.email || 'User'}</div>
               <div className="label">{me?.role || 'ADMIN'}</div>
             </div>
           </div>
@@ -291,7 +269,7 @@ export function AppShell({ me, logout, children }) {
             </div>
             <div className="screenlock-time">{formatTime(now)}</div>
             <div className="screenlock-date">{formatDate(now)}</div>
-            <div className="screenlock-user">{me?.name || me?.email || 'User'}</div>
+            <div className="screenlock-user">{me?.fullName || me?.name || me?.email || 'User'}</div>
 
             <div className="screenlock-card glass card">
               <h3 style={{ marginBottom: 8 }}>Screen Locked</h3>

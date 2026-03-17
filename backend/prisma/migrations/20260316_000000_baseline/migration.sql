@@ -1,0 +1,3 @@
+-- Baseline migration for an existing database.
+-- The schema already exists in this environment, so this migration is marked
+-- as applied without executing DDL before later additive migrations are deployed.

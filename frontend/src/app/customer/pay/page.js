@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { API_BASE } from '../../../lib/client';
 
 export default function CustomerPayPage() {
   const [token, setToken] = useState('');
@@ -13,8 +14,6 @@ export default function CustomerPayPage() {
   const [error, setError] = useState('');
   const [ok, setOk] = useState('');
   const [model, setModel] = useState(null);
-  const [confirmAmount, setConfirmAmount] = useState('');
-  const [confirmRef, setConfirmRef] = useState('MANUAL');
 
   useEffect(() => {
     const p = new URLSearchParams(window.location.search);
@@ -32,11 +31,10 @@ export default function CustomerPayPage() {
         return;
       }
       try {
-        const res = await fetch(`http://localhost:4000/api/public/payment/${encodeURIComponent(token)}`);
+        const res = await fetch(`${API_BASE}/api/public/payment/${encodeURIComponent(token)}`);
         const j = await res.json();
         if (!res.ok) throw new Error(j?.error || 'Unable to load payment page');
         setModel(j);
-        setConfirmAmount(String(j.amountDue || ''));
         setLoading(false);
       } catch (e) {
         setError(String(e.message || e));
@@ -52,7 +50,7 @@ export default function CustomerPayPage() {
       try {
         if (model.gateway === 'stripe') {
           if (!sessionId) return;
-          const res = await fetch(`http://localhost:4000/api/public/payment/${encodeURIComponent(token)}/confirm`, {
+          const res = await fetch(`${API_BASE}/api/public/payment/${encodeURIComponent(token)}/confirm`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ sessionId })
@@ -62,52 +60,23 @@ export default function CustomerPayPage() {
           setOk(`Payment recorded successfully: $${Number(j.paidAmount || 0).toFixed(2)}` + (j?.savedCardOnFile ? ' Card on file saved.' : ''));
           return;
         }
-
-        const paidAmount = Number(model.amountDue || confirmAmount || 0);
-        if (!Number.isFinite(paidAmount) || paidAmount <= 0) return;
-        const reference = returnTransId ? `AUTHNET:${returnTransId}` : (confirmRef || 'AUTHNET:MANUAL');
-        const res = await fetch(`http://localhost:4000/api/public/payment/${encodeURIComponent(token)}/confirm`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ paidAmount, reference })
-        });
-        const j = await res.json();
-        if (!res.ok) throw new Error(j?.error || 'Payment confirmation failed');
-        setOk(`Payment recorded successfully: $${Number(j.paidAmount || 0).toFixed(2)}` + (j?.savedCardOnFile ? ' Card on file saved.' : ''));
+        setOk(`Payment return detected for ${String(model.gateway || '').toUpperCase()}. Verification must be completed through a server-side gateway callback or internal reconciliation.`);
         setError('');
       } catch (e) {
         setError(String(e.message || e));
       }
     };
     autoConfirmReturn();
-  }, [token, success, sessionId, model, returnTransId, confirmAmount, confirmRef]);
+  }, [token, success, sessionId, model, returnTransId]);
 
   const startCheckout = async () => {
     try {
       setError('');
-      const res = await fetch(`http://localhost:4000/api/public/payment/${encodeURIComponent(token)}/create-session`, { method: 'POST' });
+      const res = await fetch(`${API_BASE}/api/public/payment/${encodeURIComponent(token)}/create-session`, { method: 'POST' });
       const j = await res.json();
       if (!res.ok) throw new Error(j?.error || 'Unable to start checkout');
       if (!j.checkoutUrl) throw new Error('Checkout URL missing');
       window.location.href = j.checkoutUrl;
-    } catch (e) {
-      setError(String(e.message || e));
-    }
-  };
-
-  const confirmPayment = async () => {
-    try {
-      const paidAmount = Number(confirmAmount || 0);
-      if (!Number.isFinite(paidAmount) || paidAmount <= 0) throw new Error('Enter valid paid amount');
-      const res = await fetch(`http://localhost:4000/api/public/payment/${encodeURIComponent(token)}/confirm`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ paidAmount, reference: confirmRef || 'AUTHNET:MANUAL' })
-      });
-      const j = await res.json();
-      if (!res.ok) throw new Error(j?.error || 'Payment confirmation failed');
-      setOk(`Payment recorded successfully: $${Number(j.paidAmount || 0).toFixed(2)}` + (j?.savedCardOnFile ? ' Card on file saved.' : ''));
-      setError('');
     } catch (e) {
       setError(String(e.message || e));
     }
@@ -162,10 +131,11 @@ export default function CustomerPayPage() {
           ) : (
             <div style={{ border: '1px solid #ddd', borderRadius: 8, padding: 12, display: 'grid', gap: 8 }}>
               <strong>Payment return detected.</strong>
-              <div>Please confirm payment amount/reference to finalize posting.</div>
-              <input placeholder="Paid Amount" value={confirmAmount} onChange={(e) => setConfirmAmount(e.target.value)} />
-              <input placeholder="Reference (Auth/Trans ID)" value={confirmRef} onChange={(e) => setConfirmRef(e.target.value)} />
-              <button onClick={confirmPayment}>Confirm Payment</button>
+              <div>
+                Public confirmation is disabled for {String(model.gateway || '').toUpperCase()}.
+                {returnTransId ? ` Return reference detected: ${returnTransId}.` : ''}
+              </div>
+              <div>Ask staff to verify and post the payment through the internal workflow or a server-side callback.</div>
             </div>
           )}
 

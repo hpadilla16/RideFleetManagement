@@ -1,6 +1,5 @@
 import jwt from 'jsonwebtoken';
-
-const JWT_SECRET = process.env.JWT_SECRET || 'dev-secret-change-me';
+import { getJwtSecret } from '../modules/auth/auth.config.js';
 
 export function requireAuth(req, res, next) {
   const auth = req.headers.authorization || '';
@@ -8,10 +7,13 @@ export function requireAuth(req, res, next) {
   if (scheme !== 'Bearer' || !token) return res.status(401).json({ error: 'Unauthorized' });
 
   try {
-    const payload = jwt.verify(token, JWT_SECRET);
-    req.user = payload;
+    const payload = jwt.verify(token, getJwtSecret());
+    req.user = { ...payload, id: payload?.sub || null };
     next();
-  } catch {
+  } catch (e) {
+    if (/JWT_SECRET must be configured/i.test(String(e?.message || ''))) {
+      return res.status(500).json({ error: 'Authentication is not configured' });
+    }
     res.status(401).json({ error: 'Invalid token' });
   }
 }

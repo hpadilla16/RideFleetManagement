@@ -131,6 +131,7 @@ function isUnderageReservation(reservation) {
 }
 
 async function buildReservationBreakdown(reservation) {
+  const tenantWhere = reservation?.tenantId ? { tenantId: reservation.tenantId } : {};
   const notes = String(reservation?.notes || '');
   const m = notes.match(/\[RES_CHARGES_META\](\{[\s\S]*\})/);
   const pickupAt = new Date(reservation?.pickupAt || Date.now());
@@ -144,7 +145,7 @@ async function buildReservationBreakdown(reservation) {
 
     let feesTotal = 0;
     if (isUnderageReservation(reservation)) {
-      const underageFees = await prisma.fee.findMany({ where: { isActive: true, isUnderageFee: true } });
+      const underageFees = await prisma.fee.findMany({ where: { ...tenantWhere, isActive: true, isUnderageFee: true } });
       for (const f of underageFees) {
         const amt = Number(f?.amount || 0);
         const mode = String(f?.mode || 'FIXED').toUpperCase();
@@ -175,14 +176,16 @@ async function buildReservationBreakdown(reservation) {
   const discounts = Array.isArray(meta?.discounts) ? meta.discounts : [];
 
   const underageAutoFees = isUnderageReservation(reservation)
-    ? await prisma.fee.findMany({ where: { isActive: true, isUnderageFee: true }, select: { id: true } })
+    ? await prisma.fee.findMany({ where: { ...tenantWhere, isActive: true, isUnderageFee: true }, select: { id: true } })
     : [];
-  const addlDriverAutoFees = hasAdditionalDrivers ? await prisma.fee.findMany({ where: { isActive: true, isAdditionalDriverFee: true }, select: { id: true } }) : [];
+  const addlDriverAutoFees = hasAdditionalDrivers
+    ? await prisma.fee.findMany({ where: { ...tenantWhere, isActive: true, isAdditionalDriverFee: true }, select: { id: true } })
+    : [];
   const mergedFeeIds = [...new Set([...selectedFeeIds, ...underageAutoFees.map((f) => f.id), ...addlDriverAutoFees.map((f) => f.id)])];
 
   const [services, fees] = await Promise.all([
-    selectedServiceIds.length ? prisma.additionalService.findMany({ where: { id: { in: selectedServiceIds } } }) : Promise.resolve([]),
-    mergedFeeIds.length ? prisma.fee.findMany({ where: { id: { in: mergedFeeIds } } }) : Promise.resolve([])
+    selectedServiceIds.length ? prisma.additionalService.findMany({ where: { ...tenantWhere, id: { in: selectedServiceIds } } }) : Promise.resolve([]),
+    mergedFeeIds.length ? prisma.fee.findMany({ where: { ...tenantWhere, id: { in: mergedFeeIds } } }) : Promise.resolve([])
   ]);
 
   const dailyRate = Number(meta?.dailyRate ?? reservation?.dailyRate ?? 0);
@@ -327,7 +330,8 @@ customerPortalRouter.get('/signature/:token', async (req, res, next) => {
     const reservation = await findReservationByToken('signature', token);
     if (!reservation) return res.status(404).json({ error: 'Invalid or expired signature link' });
 
-    const termsRow = await prisma.appSetting.findUnique({ where: { key: 'termsText' } });
+    const { settingsService } = await import('../settings/settings.service.js');
+    const agreementCfg = await settingsService.getRentalAgreementConfig(reservation?.tenantId ? { tenantId: reservation.tenantId } : {});
     const latestAgreement = await prisma.rentalAgreement.findFirst({
       where: { reservationId: reservation.id },
       include: { charges: { orderBy: [{ sortOrder: 'asc' }, { createdAt: 'asc' }] } },
@@ -371,7 +375,7 @@ customerPortalRouter.get('/signature/:token', async (req, res, next) => {
         returnLocation: reservation.returnLocation?.name || null
       },
       breakdown,
-      termsText: termsRow?.value || 'Standard rental terms apply.'
+      termsText: agreementCfg?.termsText || 'Standard rental terms apply.'
     });
   } catch (e) { next(e); }
 });
@@ -552,9 +556,11 @@ customerPortalRouter.post('/payment/:token/confirm', async (req, res, next) => {
       paidAmount = Number(((session.amount_total || 0) / 100).toFixed(2));
       reference = `STRIPE:${session.id}`;
     } else {
-      paidAmount = Number(req.body?.paidAmount || 0);
-      if (!Number.isFinite(paidAmount) || paidAmount <= 0) return res.status(400).json({ error: 'paidAmount must be > 0' });
-      if (!reference) reference = gateway === 'authorizenet' ? 'AUTHNET:MANUAL' : gateway === 'square' ? 'SQUARE:MANUAL' : 'MANUAL';
+      return res.status(400).json({
+        error: gateway === 'stripe'
+          ? 'Stripe sessionId is required'
+          : `Public payment confirmation is disabled for ${String(gateway || 'this gateway').toUpperCase()}. Use verified gateway callbacks or internal reconciliation.`
+      });
     }
 
     await postPayment({ reservation, paidAmount, reference, gateway });

@@ -1,0 +1,86 @@
+# Plan: Auth Register Hardening
+
+Fecha: 2026-03-16
+Proyecto: RideFleetManagement-working-clean
+Estado: Pendiente
+
+## Objetivo
+
+Corregir el riesgo de seguridad identificado en el punto 1 de la revision:
+
+- El endpoint publico `POST /api/auth/register` permite crear usuarios libremente.
+- El backend acepta `role` desde el payload y eso permite elevacion de privilegios.
+- El JWT usa un secreto por defecto (`dev-secret-change-me`) si falta configuracion.
+
+## Plan Recomendado
+
+1. Cerrar el registro publico.
+
+- Deshabilitar `POST /api/auth/register` para uso publico.
+- Recomendacion principal: dejarlo inactivo en produccion o retirarlo por completo si ya existe un flujo administrativo alterno.
+
+2. Bloquear la elevacion de privilegios por payload.
+
+- No aceptar `role` desde `req.body` en flujos publicos.
+- Si el endpoint sobrevive para un caso controlado, el rol debe fijarse en servidor, por ejemplo `AGENT`.
+
+3. Forzar configuracion segura al arrancar.
+
+- El backend no debe usar `dev-secret-change-me` como fallback.
+- La app debe fallar al iniciar si `JWT_SECRET` no esta definido.
+
+4. Definir el flujo legitimo para crear usuarios.
+
+- Flujo recomendado:
+- `SUPER_ADMIN` crea tenant.
+- `SUPER_ADMIN` crea admin del tenant.
+- Admin crea usuarios internos por flujo controlado.
+
+5. Alinear documentacion y configuracion.
+
+- Actualizar ejemplos de entorno.
+- Actualizar README para que el equipo no levante la app con defaults inseguros.
+
+6. Verificacion despues del cambio.
+
+- `POST /api/auth/register` ya no crea usuarios privilegiados libremente.
+- Un payload con `role: "SUPER_ADMIN"` es rechazado o ignorado.
+- El backend no arranca sin `JWT_SECRET`.
+- `POST /api/auth/login` sigue funcionando con usuarios existentes.
+- El flujo de tenants/admins sigue intacto.
+
+## Archivos A Cambiar Antes De Empezar
+
+### Minimos
+
+- `backend/src/modules/auth/auth.routes.js`
+- `backend/src/modules/auth/auth.service.js`
+- `backend/src/middleware/auth.js`
+
+### Probables
+
+- `backend/src/main.js`
+- `backend/.env.example`
+
+### Si se completa el flujo operativo
+
+- `backend/scripts/seed-bootstrap.mjs`
+- `README.md`
+
+## Enfoque Recomendado
+
+La ruta mas limpia y de menor riesgo es:
+
+- eliminar o deshabilitar `register` publico
+- quitar `role` del input publico
+- exigir `JWT_SECRET` obligatorio al arranque
+
+Esto corrige el riesgo principal sin abrir todavia un refactor mas grande del modulo de usuarios.
+
+## Nota Para Retomar Luego
+
+Si en una conversacion futura quieres continuar este trabajo, puedes pedirme que lea este archivo:
+
+- `doc/plan-auth-register-hardening.md`
+
+y a partir de ahi armamos implementacion, validaciones o una version mas detallada del plan.

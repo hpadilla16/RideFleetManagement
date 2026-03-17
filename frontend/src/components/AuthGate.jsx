@@ -1,9 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { api, TOKEN_KEY } from '../lib/client';
-
-const USER_KEY = 'fleet_user';
+import { api, TOKEN_KEY, USER_KEY } from '../lib/client';
 
 function parseJwt(token) {
   try {

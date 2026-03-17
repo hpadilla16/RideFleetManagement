@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
+import { API_BASE } from '../../../lib/client';
 
 export default function SignAgreementPage() {
   const [token, setToken] = useState('');
@@ -25,7 +26,7 @@ export default function SignAgreementPage() {
     const run = async () => {
       if (!token) return;
       try {
-        const res = await fetch(`http://localhost:4000/api/public/signature/${encodeURIComponent(token)}`);
+        const res = await fetch(`${API_BASE}/api/public/signature/${encodeURIComponent(token)}`);
         const j = await res.json();
         if (!res.ok) throw new Error(j?.error || 'Unable to load signature page');
         setReservation(j.reservation);
@@ -92,7 +93,7 @@ export default function SignAgreementPage() {
       const signatureDataUrl = c.toDataURL('image/png');
       if (!signatureDataUrl || signatureDataUrl.length < 2000) return setError('Please draw your signature');
 
-      const res = await fetch(`http://localhost:4000/api/public/signature/${encodeURIComponent(token)}`, {
+      const res = await fetch(`${API_BASE}/api/public/signature/${encodeURIComponent(token)}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ signerName: signerName.trim(), signatureDataUrl })

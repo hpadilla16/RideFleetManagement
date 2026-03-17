@@ -8,12 +8,16 @@ import { vehicleTypesRouter } from './modules/vehicle-types/vehicle-types.routes
 import { additionalServicesRouter } from './modules/additional-services/additional-services.routes.js';
 import { feesRouter } from './modules/fees/fees.routes.js';
 import { ratesRouter } from './modules/rates/rates.routes.js';
-import { authRouter } from './modules/auth/auth.routes.js';import { rentalAgreementsRouter } from './modules/rental-agreements/rental-agreements.routes.js';
+import { authRouter } from './modules/auth/auth.routes.js';
+import { rentalAgreementsRouter } from './modules/rental-agreements/rental-agreements.routes.js';
+import { assertAuthConfig } from './modules/auth/auth.config.js';
 import { settingsRouter } from './modules/settings/settings.routes.js';
 import { requireAuth, requireRole } from './middleware/auth.js';
 import { prisma } from './lib/prisma.js';
 import { customerPortalRouter } from './modules/customer-portal/customer-portal.routes.js';
 import { tenantsRouter } from './modules/tenants/tenants.routes.js';
+
+assertAuthConfig();
 
 const app = express();
 app.use(cors({ origin: ['http://localhost:3000', 'http://127.0.0.1:3000'] }));

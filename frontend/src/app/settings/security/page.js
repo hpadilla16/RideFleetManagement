@@ -25,10 +25,10 @@ function Inner({ token, me, logout }) {
   useEffect(() => { load(); }, [token]);
 
   const resetPin = async (u) => {
-    if (!window.confirm(`Reset screen-lock PIN for ${u.name || u.email}?`)) return;
+    if (!window.confirm(`Reset screen-lock PIN for ${u.fullName || u.name || u.email}?`)) return;
     try {
       await api(`/api/auth/users/${u.id}/reset-lock-pin`, { method: 'POST' }, token);
-      setMsg(`PIN reset for ${u.name || u.email}`);
+      setMsg(`PIN reset for ${u.fullName || u.name || u.email}`);
       await load();
     } catch (e) {
       setMsg(e.message);
@@ -46,7 +46,7 @@ function Inner({ token, me, logout }) {
           <tbody>
             {users.map((u) => (
               <tr key={u.id}>
-                <td>{u.name || '-'}</td>
+                <td>{u.fullName || u.name || '-'}</td>
                 <td>{u.email}</td>
                 <td>{u.role}</td>
                 <td>{u.hasLockPin ? 'Yes' : 'No'}</td>
