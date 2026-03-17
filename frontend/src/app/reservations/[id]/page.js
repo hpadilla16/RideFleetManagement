@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { AuthGate } from '../../../components/AuthGate';
 import { AppShell } from '../../../components/AppShell';
-import { api } from '../../../lib/client';
+import { api, API_BASE } from '../../../lib/client';
 
 function parseSelectedAddonsFromMemo(notes) {
   const txt = String(notes || '');
@@ -90,13 +90,14 @@ function ReservationDetailInner({ token, me, logout }) {
   const [customers, setCustomers] = useState([]);
   const [serviceOptions, setServiceOptions] = useState([]);
   const [feeOptions, setFeeOptions] = useState([]);
+  const [insurancePlans, setInsurancePlans] = useState([]);
   const [servicePick, setServicePick] = useState('');
   const [feePick, setFeePick] = useState('');
   const [msg, setMsg] = useState('');
   const [activePanel, setActivePanel] = useState('overview');
   const [auditLogs, setAuditLogs] = useState([]);
   const [chargeEdit, setChargeEdit] = useState(false);
-  const [chargeModel, setChargeModel] = useState({ dailyRate: '0', serviceFee: '0', taxRate: '11.5', serviceNames: '', feeNames: '' });
+  const [chargeModel, setChargeModel] = useState({ dailyRate: '0', serviceFee: '0', taxRate: '11.5', serviceNames: '', feeNames: '', insuranceCode: '' });
   const [form, setForm] = useState({ customerId: '', pickupAt: '', returnAt: '', pickupLocationId: '', returnLocationId: '', notes: '' });
 
 
@@ -106,18 +107,20 @@ function ReservationDetailInner({ token, me, logout }) {
     try { return decodeURIComponent(escape(s)); } catch { return s; }
   };
   const load = async () => {
-    const [r, l, c, svc, fee] = await Promise.all([
+    const [r, l, c, svc, fee, ip] = await Promise.all([
       api(`/api/reservations/${id}`, {}, token),
       api('/api/locations', {}, token),
       api('/api/customers', {}, token),
       api('/api/additional-services', {}, token).catch(() => []),
-      api('/api/fees', {}, token).catch(() => [])
+      api('/api/fees', {}, token).catch(() => []),
+      api('/api/settings/insurance-plans', {}, token).catch(() => [])
     ]);
     setRow(r);
     setLocations(l);
     setCustomers(c);
     setServiceOptions(Array.isArray(svc) ? svc : []);
     setFeeOptions(Array.isArray(fee) ? fee : []);
+    setInsurancePlans(Array.isArray(ip) ? ip : []);
     setForm({
       customerId: r.customerId || '',
       pickupAt: r.pickupAt ? new Date(r.pickupAt).toISOString().slice(0, 16) : '',
@@ -268,6 +271,44 @@ function ReservationDetailInner({ token, me, logout }) {
       await load();
     } catch (e) { setMsg(e.message); }
   };
+
+  const handlePrintAgreement = async () => {
+    const status = String(row?.status || '').toUpperCase();
+    if (!(status === 'CHECKED_OUT' || status === 'CHECKED_IN')) {
+      setMsg('Print Agreement is available after check-out.');
+      return;
+    }
+    const printWindow = window.open('', '_blank');
+    if (!printWindow) {
+      setMsg('Pop-up blocked. Please allow pop-ups to view the agreement.');
+      return;
+    }
+    printWindow.opener = null;
+    printWindow.document.write('<html><body style="font-family:Inter, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif;padding:32px;text-align:center;background:#0b0a12;color:#fff;">Preparing agreement...</body></html>');
+    printWindow.document.close();
+    try {
+      const agreement = await api(`/api/reservations/${id}/start-rental`, { method: 'POST', body: JSON.stringify({}) }, token);
+      const agreementId = agreement?.id || row?.rentalAgreement?.id;
+      if (!agreementId) throw new Error('No agreement available to print.');
+
+      const res = await fetch(`${API_BASE}/api/rental-agreements/${agreementId}/print`, {
+        headers: { Authorization: `Bearer ${token}` },
+        cache: 'no-store'
+      });
+      if (!res.ok) throw new Error(`Print failed (${res.status})`);
+      const html = await res.text();
+      printWindow.document.open();
+      printWindow.document.write(html);
+      printWindow.document.close();
+      printWindow.focus();
+      printWindow.print();
+    } catch (e) {
+      printWindow.document.open();
+      printWindow.document.write(`<p style="font-family: sans-serif; padding: 24px;">${e.message || 'Unable to print agreement'}</p>`);
+      printWindow.document.close();
+      setMsg(e.message || 'Unable to print agreement');
+    }
+  };
   const openLogs = async () => {
     try {
       const logs = await api(`/api/reservations/${id}/audit-logs`, {}, token);
@@ -354,7 +395,8 @@ function ReservationDetailInner({ token, me, logout }) {
           dailyRate: meta.dailyRate ?? prev.dailyRate,
           taxRate: meta.taxRate ?? prev.taxRate,
           serviceNames: (meta.selectedServices || []).join(', '),
-          feeNames: (meta.selectedFees || []).join(', ')
+          feeNames: (meta.selectedFees || []).join(', '),
+          insuranceCode: meta.selectedInsuranceCode || prev.insuranceCode || ''
         }));
       }
     }
@@ -390,6 +432,11 @@ function ReservationDetailInner({ token, me, logout }) {
       return;
     }
 
+    if (id.startsWith('ins-') || id === 'insurance') {
+      setChargeModel((prev) => ({ ...prev, insuranceCode: '' }));
+      return;
+    }
+
     if (id === 'deposit-due') {
       setDepositOverrides((prev) => ({ ...prev, depositDue: '' }));
       return;
@@ -405,9 +452,6 @@ function ReservationDetailInner({ token, me, logout }) {
 const cleanNotes = String(form.notes || '')
   .replace(/\n?\[RES_CHARGES_META][\s\S]*$/m, '')
   .trim();
-const summaryLine = `Services: ${String(chargeModel.serviceNames || '').trim() || '-'} | Fees: ${String(
-  chargeModel.feeNames || ''
-).trim() || '-'}`;
 
 const serviceNames = String(chargeModel.serviceNames || '')
 .split(',')
@@ -418,6 +462,17 @@ const feeNames = String(chargeModel.feeNames || '')
 .split(',')
 .map((x) => x.trim())
 .filter(Boolean);
+
+const insuranceCode = String(chargeModel.insuranceCode || '').trim();
+const insurancePlan = insuranceCode
+  ? (insurancePlans || []).find((p) => String(p.code || '').trim().toUpperCase() === insuranceCode.toUpperCase())
+  : null;
+const insuranceSummary = insurancePlan
+  ? insurancePlan.label || insurancePlan.name || insurancePlan.code
+  : insuranceCode || '-';
+const summaryLine = `Services: ${String(chargeModel.serviceNames || '').trim() || '-'} | Fees: ${String(
+  chargeModel.feeNames || ''
+).trim() || '-'} | Insurance: ${insuranceSummary}`;
 
 const serviceRows = serviceNames.map((name, idx) => {
 const opt = serviceOptions.find((s) => (s.name || s.code || '').trim().toLowerCase() === name.toLowerCase());
@@ -453,6 +508,33 @@ taxable: opt?.taxable !== false
 };
 });
 
+const insuranceRows = [];
+if (insurancePlan) {
+  const planLabel = insurancePlan.label || insurancePlan.name || insurancePlan.code;
+  const mode = String(insurancePlan.chargeBy || insurancePlan.mode || 'FIXED').toUpperCase();
+  const amount = toMoneyNum(insurancePlan.amount || 0);
+  let quantity = 1;
+  let rate = amount;
+  let total = amount;
+  if (mode === 'PER_DAY') {
+    quantity = Math.max(1, breakdown.days || 1);
+    total = toMoneyNum(amount * quantity);
+  } else if (mode === 'PERCENTAGE') {
+    quantity = 1;
+    total = toMoneyNum(toMoneyNum((chargeModel.dailyRate || row?.dailyRate || 0) * breakdown.days) * (amount / 100));
+    rate = total;
+  }
+  insuranceRows.push({
+    id: `ins-${insurancePlan.code}`,
+    name: `Insurance: ${planLabel}`,
+    chargeType: 'UNIT',
+    quantity,
+    rate,
+    total,
+    taxable: false
+  });
+}
+
 const baseRow = {
 id: 'daily',
 name: 'Daily',
@@ -463,7 +545,7 @@ total: toMoneyNum((chargeModel.dailyRate || row?.dailyRate || 0) * breakdown.day
 taxable: true
 };
 
-const coreRows = [baseRow, ...serviceRows, ...feeRows];
+const coreRows = [baseRow, ...serviceRows, ...feeRows, ...insuranceRows];
 
 const taxableSubTotal = coreRows.reduce(
 (sum, r) => sum + (r.taxable === false ? 0 : toMoneyNum(r.total)),
@@ -520,6 +602,7 @@ selectedFees: String(chargeModel.feeNames || '')
 .split(',')
 .map((x) => x.trim())
 .filter(Boolean),
+selectedInsuranceCode: insurancePlan ? insurancePlan.code : '',
 chargeRows: [...normalizedRows, ...depositRows]
 };
 
@@ -575,6 +658,25 @@ setMsg('Charges updated');
       return names.map((n, i) => ({ id: `fee-${i}`, name: `Fee: ${n}` }));
     } catch { return []; }
   }, [row?.notes]);
+
+  const filteredInsurancePlans = useMemo(() => {
+    const vtId = row?.vehicleTypeId;
+    const locId = row?.pickupLocationId;
+    return (insurancePlans || []).filter((plan) => {
+      if (plan?.isActive === false) return false;
+      const locIds = Array.isArray(plan?.locationIds) ? plan.locationIds : [];
+      const vtIds = Array.isArray(plan?.vehicleTypeIds) ? plan.vehicleTypeIds : [];
+      if (locIds.length && locId && !locIds.includes(locId)) return false;
+      if (vtIds.length && vtId && !vtIds.includes(vtId)) return false;
+      return true;
+    });
+  }, [insurancePlans, row?.vehicleTypeId, row?.pickupLocationId]);
+
+  const selectedInsurancePlan = useMemo(() => {
+    if (!chargeModel.insuranceCode) return null;
+    const code = String(chargeModel.insuranceCode || '').trim().toUpperCase();
+    return filteredInsurancePlans.find((p) => String(p.code || '').trim().toUpperCase() === code) || null;
+  }, [filteredInsurancePlans, chargeModel.insuranceCode]);
 
   const displayChargeRows = useMemo(() => {
     const notes = row?.notes;
@@ -724,7 +826,7 @@ setMsg('Charges updated');
                   <button className="ios-action-btn" onClick={() => router.push(`/reservations/${id}/payments?total=${Number(effectiveChargeTotal || 0)}`)}>View Payments</button>
                   <button className="ios-action-btn" onClick={() => router.push(`/reservations/${id}/payments?total=${Number(effectiveChargeTotal || 0)}&mode=otc`)}>Record OTC Payment</button>
                   <button className="ios-action-btn" onClick={() => router.push(`/reservations/${id}/additional-drivers`)}>Additional Drivers</button>
-                  <button className="ios-action-btn" onClick={async () => { if (['CHECKED_OUT','CHECKED_IN'].includes(String(row?.status || '').toUpperCase())) { try { await api(`/api/reservations/${id}/start-rental`, { method: 'POST', body: JSON.stringify({}) }, token); } catch {} window.print(); } else { setMsg('Print Agreement is available after check-out.'); } }}>Print Agreement</button>
+                  <button className="ios-action-btn" onClick={handlePrintAgreement}>Print Agreement</button>
                   <button className="ios-action-btn" onClick={() => setActivePanel('notes')}>Notes Page</button>
                   <button className="ios-action-btn" onClick={openLogs}>Log</button>
                 </div>
@@ -818,6 +920,29 @@ setMsg('Charges updated');
                               <button type="button" title="Remove fee" onClick={() => { const next = String(chargeModel.feeNames || '').split(',').map((x) => x.trim()).filter(Boolean).filter((v) => v !== n); setChargeModel({ ...chargeModel, feeNames: next.join(', ') }); } }>×</button>
                             </span>
                           ))}
+                        </div>
+                      </div>
+                      <div className="stack">
+                        <label className="label">Insurance</label>
+                        <div style={{ display: 'flex', gap: 6 }}>
+                          <select value={chargeModel.insuranceCode || ''} onChange={(e) => setChargeModel({ ...chargeModel, insuranceCode: e.target.value })}>
+                            <option value="">No insurance selected</option>
+                            {filteredInsurancePlans.map((plan) => {
+                              const label = (plan.label || plan.name || plan.code || '').trim();
+                              const mode = String(plan.chargeBy || plan.mode || 'FIXED').toUpperCase();
+                              const amount = toMoneyNum(plan.amount || 0);
+                              const descriptor = mode === 'PERCENTAGE' ? `${amount}%` : money(amount);
+                              return <option key={plan.id || plan.code} value={plan.code}>{`${label} — ${descriptor}`}</option>;
+                            })}
+                          </select>
+                          {chargeModel.insuranceCode ? (
+                            <button type="button" onClick={() => setChargeModel({ ...chargeModel, insuranceCode: '' })}>Clear</button>
+                          ) : null}
+                        </div>
+                        <div className="label" style={{ textTransform: 'none', letterSpacing: 0 }}>
+                          {selectedInsurancePlan
+                            ? (selectedInsurancePlan.description || 'Plan applied to this reservation.')
+                            : 'Optional protection plan for this reservation.'}
                         </div>
                       </div>
                     </div><div className="grid2">
