@@ -14,6 +14,7 @@ import { requireAuth, requireRole } from './middleware/auth.js';
 import { prisma } from './lib/prisma.js';
 import { customerPortalRouter } from './modules/customer-portal/customer-portal.routes.js';
 import { tenantsRouter } from './modules/tenants/tenants.routes.js';
+import { buildOpenApiSpec, swaggerHtml } from './docs/openapi.js';
 
 const app = express();
 app.use(cors({ origin: ['http://localhost:3000', 'http://127.0.0.1:3000'] }));
@@ -21,6 +22,15 @@ app.use(express.json({ limit: '12mb' }));
 
 app.get('/health', (_req, res) => {
   res.json({ ok: true, service: 'fleet-management-backend' });
+});
+
+app.get('/api/docs/openapi.json', (req, res) => {
+  const serverUrl = `${req.protocol}://${req.get('host')}`;
+  res.json(buildOpenApiSpec(serverUrl));
+});
+
+app.get(['/api/docs', '/api/docs/'], (_req, res) => {
+  res.type('html').send(swaggerHtml('/api/docs/openapi.json'));
 });
 
 app.use('/api/auth', authRouter);
