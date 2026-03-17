@@ -5,6 +5,8 @@ import { validateReservationCreate, validateReservationPatch } from './reservati
 import { prisma } from '../../lib/prisma.js';
 import { sendEmail } from '../../lib/mailer.js';
 import { rentalAgreementsService } from '../rental-agreements/rental-agreements.service.js';
+import { reservationPricingService } from './reservation-pricing.service.js';
+import { reservationAdditionalDriversService } from './reservation-additional-drivers.service.js';
 import { settingsService } from '../settings/settings.service.js';
 import { ratesService } from '../rates/rates.service.js';
 import { isSuperAdmin } from '../../middleware/auth.js';
@@ -49,7 +51,7 @@ reservationsRouter.get('/:id/agreement', async (req, res, next) => {
   try {
     const current = await reservationsService.getById(req.params.id, scopeFor(req));
     if (!current) return res.status(404).json({ error: 'Reservation not found' });
-    const agreement = await rentalAgreementsService.startFromReservation(req.params.id);
+    const agreement = await rentalAgreementsService.startFromReservation(req.params.id, scopeFor(req));
     res.json(agreement);
   } catch (e) {
     if (/not found/i.test(e.message)) return res.status(404).json({ error: e.message });
@@ -63,6 +65,92 @@ reservationsRouter.get('/:id', async (req, res, next) => {
     if (!row) return res.status(404).json({ error: 'Reservation not found' });
     res.json(row);
   } catch (e) {
+    next(e);
+  }
+});
+
+reservationsRouter.get('/:id/pricing', async (req, res, next) => {
+  try {
+    const out = await reservationPricingService.getPricing(req.params.id, scopeFor(req));
+    res.json(out);
+  } catch (e) {
+    if (/not found/i.test(String(e?.message || ''))) return res.status(404).json({ error: e.message });
+    next(e);
+  }
+});
+
+reservationsRouter.put('/:id/pricing', async (req, res, next) => {
+  try {
+    const out = await reservationPricingService.replacePricing(req.params.id, req.body || {}, scopeFor(req));
+    res.json(out);
+  } catch (e) {
+    if (/not found/i.test(String(e?.message || ''))) return res.status(404).json({ error: e.message });
+    next(e);
+  }
+});
+
+reservationsRouter.get('/:id/payments', async (req, res, next) => {
+  try {
+    const out = await reservationPricingService.listPayments(req.params.id, scopeFor(req));
+    res.json(out);
+  } catch (e) {
+    if (/not found/i.test(String(e?.message || ''))) return res.status(404).json({ error: e.message });
+    next(e);
+  }
+});
+
+reservationsRouter.post('/:id/payments', async (req, res, next) => {
+  try {
+    const out = await reservationPricingService.postPayment(req.params.id, req.body || {}, scopeFor(req), req.user?.sub || null);
+    res.status(201).json(out);
+  } catch (e) {
+    if (/not found/i.test(String(e?.message || ''))) return res.status(404).json({ error: e.message });
+    if (/amount must be > 0|invalid/i.test(String(e?.message || ''))) return res.status(400).json({ error: e.message });
+    next(e);
+  }
+});
+
+reservationsRouter.get('/:id/additional-drivers', async (req, res, next) => {
+  try {
+    const out = await reservationAdditionalDriversService.list(req.params.id, scopeFor(req));
+    res.json(out);
+  } catch (e) {
+    if (/not found/i.test(String(e?.message || ''))) return res.status(404).json({ error: e.message });
+    next(e);
+  }
+});
+
+reservationsRouter.put('/:id/additional-drivers', async (req, res, next) => {
+  try {
+    const current = await reservationsService.getById(req.params.id, scopeFor(req));
+    if (!current) return res.status(404).json({ error: 'Reservation not found' });
+
+    const out = await reservationAdditionalDriversService.replace(
+      req.params.id,
+      Array.isArray(req.body?.drivers) ? req.body.drivers : [],
+      scopeFor(req)
+    );
+
+    if (current.rentalAgreement?.id) {
+      await rentalAgreementsService.startFromReservation(req.params.id, scopeFor(req));
+    }
+
+    await prisma.auditLog.create({
+      data: {
+        tenantId: current.tenantId || req.user?.tenantId || null,
+        reservationId: req.params.id,
+        actorUserId: req.user?.sub || null,
+        action: 'UPDATE',
+        metadata: JSON.stringify({
+          additionalDriversUpdated: true,
+          count: out.length
+        })
+      }
+    });
+
+    res.json(out);
+  } catch (e) {
+    if (/not found/i.test(String(e?.message || ''))) return res.status(404).json({ error: e.message });
     next(e);
   }
 });
@@ -189,6 +277,8 @@ reservationsRouter.post('/', async (req, res, next) => {
     const depositMode = String(cfg?.depositMode || 'FIXED').toUpperCase();
     const depositValue = Number(cfg?.depositAmount || 0);
     const basis = Array.isArray(cfg?.depositPercentBasis) && cfg.depositPercentBasis.length ? cfg.depositPercentBasis : ['rate'];
+    const requireSecurityDeposit = !!cfg?.requireSecurityDeposit;
+    const securityDepositAmount = requireSecurityDeposit ? Number(cfg?.securityDepositAmount || 0) : 0;
     let depositAmountDue = 0;
     if (requireDeposit && Number.isFinite(depositValue) && depositValue > 0) {
       if (depositMode === 'PERCENTAGE') {
@@ -202,10 +292,10 @@ reservationsRouter.post('/', async (req, res, next) => {
       }
     }
 
-    const cleanNotes = String(req.body?.notes || '').replace(/\n?\[RES_DEPOSIT_META\]\{[\s\S]*\}$/m, '');
-    const notes = requireDeposit
-      ? `${cleanNotes}${cleanNotes ? '\n' : ''}[RES_DEPOSIT_META]${JSON.stringify({ requireDeposit, depositMode, depositValue, depositPercentBasis: basis, depositAmountDue })}`
-      : cleanNotes;
+    const notes = String(req.body?.notes || '')
+      .replace(/\n?\[RES_DEPOSIT_META\]\{[^\n]*\}/g, '')
+      .replace(/\n?\[SECURITY_DEPOSIT_META\]\{[^\n]*\}/g, '')
+      .trim();
 
     const row = await reservationsService.create({
       ...(req.body || {}),
@@ -215,6 +305,35 @@ reservationsRouter.post('/', async (req, res, next) => {
       dailyRate: quote.dailyRate,
       estimatedTotal: finalEstimate
     }, scopeFor(req));
+
+    await prisma.reservationPricingSnapshot.upsert({
+      where: { reservationId: row.id },
+      create: {
+        reservationId: row.id,
+        dailyRate: quote.dailyRate,
+        taxRate: pickupLoc?.taxRate ?? 0,
+        depositRequired: requireDeposit,
+        depositMode: requireDeposit ? depositMode : null,
+        depositValue: requireDeposit ? depositValue : null,
+        depositBasisJson: requireDeposit ? JSON.stringify(basis) : null,
+        depositAmountDue,
+        securityDepositRequired: requireSecurityDeposit || securityDepositAmount > 0,
+        securityDepositAmount: securityDepositAmount > 0 ? securityDepositAmount : 0,
+        source: 'RESERVATION_CREATE'
+      },
+      update: {
+        dailyRate: quote.dailyRate,
+        taxRate: pickupLoc?.taxRate ?? 0,
+        depositRequired: requireDeposit,
+        depositMode: requireDeposit ? depositMode : null,
+        depositValue: requireDeposit ? depositValue : null,
+        depositBasisJson: requireDeposit ? JSON.stringify(basis) : null,
+        depositAmountDue,
+        securityDepositRequired: requireSecurityDeposit || securityDepositAmount > 0,
+        securityDepositAmount: securityDepositAmount > 0 ? securityDepositAmount : 0,
+        source: 'RESERVATION_CREATE'
+      }
+    });
 
     await prisma.auditLog.create({
       data: {
@@ -338,7 +457,7 @@ reservationsRouter.post('/:id/start-rental', async (req, res, next) => {
   try {
     const current = await reservationsService.getById(req.params.id, scopeFor(req));
     if (!current) return res.status(404).json({ error: 'Reservation not found' });
-    const agreement = await rentalAgreementsService.startFromReservation(req.params.id);
+    const agreement = await rentalAgreementsService.startFromReservation(req.params.id, scopeFor(req));
     await prisma.auditLog.create({
       data: {
         tenantId: current.tenantId || req.user?.tenantId || null,

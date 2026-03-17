@@ -129,7 +129,7 @@ rentalAgreementsRouter.get('/:id/print', async (req, res, next) => {
 rentalAgreementsRouter.post('/:id/email-agreement', async (req, res, next) => {
   try {
     await ensureEditable(req.params.id, req.user);
-    const out = await rentalAgreementsService.emailAgreement(req.params.id, req.body || {}, req.user?.id || null);
+    const out = await rentalAgreementsService.emailAgreement(req.params.id, req.body || {}, req.user?.sub || null);
     res.json(out);
   } catch (e) {
     if (/not found/i.test(e.message)) return res.status(404).json({ error: e.message });
@@ -141,7 +141,7 @@ rentalAgreementsRouter.post('/:id/email-agreement', async (req, res, next) => {
 rentalAgreementsRouter.post('/:id/signature', async (req, res, next) => {
   try {
     await ensureEditable(req.params.id, req.user);
-    const row = await rentalAgreementsService.signAgreement(req.params.id, req.body || {}, req.user?.id || null, req.ip || null);
+    const row = await rentalAgreementsService.signAgreement(req.params.id, req.body || {}, req.user?.sub || null, req.ip || null);
     res.json(row);
   } catch (e) {
     if (/not found/i.test(e.message)) return res.status(404).json({ error: e.message });
@@ -154,7 +154,7 @@ rentalAgreementsRouter.post('/:id/status', async (req, res, next) => {
   try {
     const action = String(req.body?.action || '');
     await ensureEditable(req.params.id, req.user);
-    const row = await rentalAgreementsService.updateStatus(req.params.id, action, req.user?.id || null);
+    const row = await rentalAgreementsService.updateStatus(req.params.id, action, req.user?.sub || null);
     res.json(row);
   } catch (e) {
     if (/not found/i.test(e.message)) return res.status(404).json({ error: e.message });
@@ -166,7 +166,7 @@ rentalAgreementsRouter.post('/:id/status', async (req, res, next) => {
 rentalAgreementsRouter.post('/:id/close', async (req, res, next) => {
   try {
     await ensureEditable(req.params.id, req.user);
-    const row = await rentalAgreementsService.closeAgreement(req.params.id, req.body || {}, req.user?.id || null, req.user?.role || 'AGENT', req.ip || null);
+    const row = await rentalAgreementsService.closeAgreement(req.params.id, req.body || {}, req.user?.sub || null, req.user?.role || 'AGENT', req.ip || null);
     res.json(row);
   } catch (e) {
     if (/not found/i.test(e.message)) return res.status(404).json({ error: e.message });
@@ -178,7 +178,7 @@ rentalAgreementsRouter.post('/:id/close', async (req, res, next) => {
 rentalAgreementsRouter.post('/:id/payments/manual', async (req, res, next) => {
   try {
     await ensureEditable(req.params.id, req.user);
-    const row = await rentalAgreementsService.addManualPayment(req.params.id, req.body || {}, req.user?.id || null);
+    const row = await rentalAgreementsService.addManualPayment(req.params.id, req.body || {}, req.user?.sub || null);
     res.json(row);
   } catch (e) {
     if (/not found/i.test(e.message)) return res.status(404).json({ error: e.message });
@@ -190,7 +190,7 @@ rentalAgreementsRouter.post('/:id/payments/manual', async (req, res, next) => {
 rentalAgreementsRouter.post('/:id/customer/card-on-file', async (req, res, next) => {
   try {
     await ensureEditable(req.params.id, req.user);
-    const row = await rentalAgreementsService.captureCustomerCardOnFile(req.params.id, req.body || {}, req.user?.id || null);
+    const row = await rentalAgreementsService.captureCustomerCardOnFile(req.params.id, req.body || {}, req.user?.sub || null);
     res.json(row);
   } catch (e) {
     if (/not found/i.test(e.message)) return res.status(404).json({ error: e.message });
@@ -202,7 +202,7 @@ rentalAgreementsRouter.post('/:id/customer/card-on-file', async (req, res, next)
 rentalAgreementsRouter.post('/:id/payments/charge-card-on-file', async (req, res, next) => {
   try {
     await ensureEditable(req.params.id, req.user);
-    const row = await rentalAgreementsService.chargeCardOnFile(req.params.id, req.body || {}, req.user?.id || null);
+    const row = await rentalAgreementsService.chargeCardOnFile(req.params.id, req.body || {}, req.user?.sub || null);
     res.json(row);
   } catch (e) {
     if (/not found/i.test(e.message)) return res.status(404).json({ error: e.message });
@@ -214,7 +214,7 @@ rentalAgreementsRouter.post('/:id/payments/charge-card-on-file', async (req, res
 rentalAgreementsRouter.post('/:id/security-deposit/capture', async (req, res, next) => {
   try {
     await ensureEditable(req.params.id, req.user);
-    const row = await rentalAgreementsService.captureSecurityDeposit(req.params.id, req.body || {}, req.user?.id || null);
+    const row = await rentalAgreementsService.captureSecurityDeposit(req.params.id, req.body || {}, req.user?.sub || null);
     res.json(row);
   } catch (e) {
     if (/not found/i.test(e.message)) return res.status(404).json({ error: e.message });
@@ -226,7 +226,7 @@ rentalAgreementsRouter.post('/:id/security-deposit/capture', async (req, res, ne
 rentalAgreementsRouter.post('/:id/security-deposit/release', async (req, res, next) => {
   try {
     await ensureEditable(req.params.id, req.user);
-    const row = await rentalAgreementsService.releaseSecurityDeposit(req.params.id, req.body || {}, req.user?.id || null);
+    const row = await rentalAgreementsService.releaseSecurityDeposit(req.params.id, req.body || {}, req.user?.sub || null);
     res.json(row);
   } catch (e) {
     if (/not found/i.test(e.message)) return res.status(404).json({ error: e.message });
@@ -238,7 +238,7 @@ rentalAgreementsRouter.post('/:id/security-deposit/release', async (req, res, ne
 rentalAgreementsRouter.post('/:id/inspection', async (req, res, next) => {
   try {
     await ensureEditable(req.params.id, req.user);
-    const out = await rentalAgreementsService.saveInspection(req.params.id, req.body || {}, req.user?.id || null, req.ip || null);
+    const out = await rentalAgreementsService.saveInspection(req.params.id, req.body || {}, req.user?.sub || null, req.ip || null);
     res.json(out);
   } catch (e) {
     if (/not found/i.test(e.message)) return res.status(404).json({ error: e.message });
@@ -275,7 +275,7 @@ rentalAgreementsRouter.delete('/:id', async (req, res, next) => {
 rentalAgreementsRouter.post('/:id/payments/:paymentId/void', async (req, res, next) => {
   try {
     await ensureEditable(req.params.id, req.user);
-    const row = await rentalAgreementsService.deletePaymentHard(req.params.id, req.params.paymentId, req.body || {}, req.user?.id || null);
+    const row = await rentalAgreementsService.deletePaymentHard(req.params.id, req.params.paymentId, req.body || {}, req.user?.sub || null);
     res.json(row);
   } catch (e) {
     if (/not found/i.test(e.message)) return res.status(404).json({ error: e.message });
@@ -287,7 +287,7 @@ rentalAgreementsRouter.post('/:id/payments/:paymentId/void', async (req, res, ne
 rentalAgreementsRouter.post('/:id/payments/:paymentId/refund', async (req, res, next) => {
   try {
     await ensureEditable(req.params.id, req.user);
-    const row = await rentalAgreementsService.refundPayment(req.params.id, req.params.paymentId, req.body || {}, req.user?.id || null);
+    const row = await rentalAgreementsService.refundPayment(req.params.id, req.params.paymentId, req.body || {}, req.user?.sub || null);
     res.json(row);
   } catch (e) {
     if (/not found/i.test(e.message)) return res.status(404).json({ error: e.message });
@@ -299,7 +299,7 @@ rentalAgreementsRouter.post('/:id/payments/:paymentId/refund', async (req, res, 
 rentalAgreementsRouter.post('/:id/charge-card-on-file', async (req, res, next) => {
   try {
     await ensureEditable(req.params.id, req.user);
-    const row = await rentalAgreementsService.chargeCardOnFile(req.params.id, req.body || {}, req.user?.id || null);
+    const row = await rentalAgreementsService.chargeCardOnFile(req.params.id, req.body || {}, req.user?.sub || null);
     res.json(row);
   } catch (e) {
     if (/not found/i.test(e.message)) return res.status(404).json({ error: e.message });
@@ -323,7 +323,7 @@ rentalAgreementsRouter.post('/:id/finalize', async (req, res, next) => {
 rentalAgreementsRouter.post('/:id/payments/:paymentId/delete', async (req, res, next) => {
   try {
     await ensureEditable(req.params.id, req.user);
-    const row = await rentalAgreementsService.deletePaymentHard(req.params.id, req.params.paymentId, req.body || {}, req.user?.id || null);
+    const row = await rentalAgreementsService.deletePaymentHard(req.params.id, req.params.paymentId, req.body || {}, req.user?.sub || null);
     res.json(row);
   } catch (e) {
     if (/not found/i.test(e.message)) return res.status(404).json({ error: e.message });

@@ -1,38 +1,9 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { AuthGate } from '../../../../components/AuthGate';
 import { api } from '../../../../lib/client';
-
-function parseInspections(notes) {
-  const txt = String(notes || '');
-  const out = [];
-  const re = /\[(RES_INSPECTION_CHECKOUT|RES_INSPECTION_CHECKIN|INSPECTION_REPORT|RES_INSPECTION)\](\{[^\n]*\})/g;
-  let m;
-  while ((m = re.exec(txt)) !== null) {
-    try { out.push({ tag: m[1], data: JSON.parse(m[2]) }); } catch {}
-  }
-  let checkout = out.find((x) => x.tag === 'RES_INSPECTION_CHECKOUT')?.data || null;
-  let checkin = out.find((x) => x.tag === 'RES_INSPECTION_CHECKIN')?.data || null;
-  for (const x of out) {
-    const d = x.data || {};
-    const ph = String(d.phase || '').toUpperCase();
-    if (!checkout && (ph === 'CHECKOUT' || d.checkout || d.checkoutInspection)) checkout = d.checkout || d.checkoutInspection || d;
-    if (!checkin && (ph === 'CHECKIN' || d.checkin || d.checkIn || d.checkinInspection)) checkin = d.checkin || d.checkIn || d.checkinInspection || d;
-  }
-  if (!checkout || !checkin) {
-    const legacy = txt.match(/\[INSPECTION_REPORT\](\{[^\n]*\})/);
-    if (legacy) {
-      try {
-        const j = JSON.parse(legacy[1]);
-        if (!checkout) checkout = j.checkout || j.checkoutInspection || (String(j.phase || '').toUpperCase() === 'CHECKOUT' ? j : null);
-        if (!checkin) checkin = j.checkin || j.checkIn || j.checkinInspection || (String(j.phase || '').toUpperCase() === 'CHECKIN' ? j : null);
-      } catch {}
-    }
-  }
-  return { checkout, checkin };
-}
 
 function fmt(v) { return v ? new Date(v).toLocaleString() : '-'; }
 
@@ -80,18 +51,21 @@ export default function Page() {
 function Inner({ token }) {
   const { id } = useParams();
   const router = useRouter();
-  const [row, setRow] = useState(null);
+  const [report, setReport] = useState(null);
   const [msg, setMsg] = useState('');
   const [selected, setSelected] = useState([]);
 
   useEffect(() => {
     (async () => {
-      try { setRow(await api(`/api/reservations/${id}`, {}, token)); }
-      catch (e) { setMsg(e.message); }
+      try {
+        const agreement = await api(`/api/reservations/${id}/agreement`, {}, token);
+        const inspectionReport = await api(`/api/rental-agreements/${agreement.id}/inspection-report`, {}, token);
+        setReport(inspectionReport);
+      } catch (e) {
+        setMsg(e.message);
+      }
     })();
   }, [id, token]);
-
-  const parsed = useMemo(() => parseInspections(row?.notes), [row?.notes]);
 
   const toggleSelect = (item) => {
     setSelected((prev) => {
@@ -149,14 +123,14 @@ function Inner({ token }) {
       <div className="print-head">
         <div>
           <h2>Inspection Report</h2>
-          <div className="muted">Reservation: {row?.reservationNumber || id}</div>
+          <div className="muted">Reservation: {report?.reservationNumber || id}</div>
         </div>
       </div>
 
       {msg ? <div className="print-card" style={{ color: '#b91c1c' }}>{msg}</div> : null}
-      {!parsed.checkout && !parsed.checkin ? <div className="print-card"><div className="muted">No inspection data found.</div></div> : null}
-      <Block title="Checkout Inspection" data={parsed.checkout} selected={selected} toggleSelect={toggleSelect} openPhoto={openPhoto} />
-      <Block title="Check-in Inspection" data={parsed.checkin} selected={selected} toggleSelect={toggleSelect} openPhoto={openPhoto} />
+      {!report?.checkoutInspection && !report?.checkinInspection ? <div className="print-card"><div className="muted">No inspection data found.</div></div> : null}
+      <Block title="Checkout Inspection" data={report?.checkoutInspection} selected={selected} toggleSelect={toggleSelect} openPhoto={openPhoto} />
+      <Block title="Check-in Inspection" data={report?.checkinInspection} selected={selected} toggleSelect={toggleSelect} openPhoto={openPhoto} />
     </main>
   );
 }

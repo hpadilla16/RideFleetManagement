@@ -24,6 +24,7 @@ export const vehiclesService = {
             agreementNumber: true,
             notes: true,
             createdAt: true,
+            inspections: { select: { phase: true, capturedAt: true } },
             reservation: { select: { reservationNumber: true, customer: { select: { firstName: true, lastName: true } } } }
           }
         }
@@ -45,6 +46,7 @@ export const vehiclesService = {
             agreementNumber: true,
             notes: true,
             createdAt: true,
+            inspections: { select: { phase: true, capturedAt: true } },
             reservation: { select: { reservationNumber: true, customer: { select: { firstName: true, lastName: true } } } }
           }
         }

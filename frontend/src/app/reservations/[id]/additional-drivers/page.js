@@ -6,22 +6,6 @@ import { AuthGate } from '../../../../components/AuthGate';
 import { AppShell } from '../../../../components/AppShell';
 import { api } from '../../../../lib/client';
 
-function readDrivers(notes) {
-  const m = String(notes || '').match(/\[RES_ADDITIONAL_DRIVERS\](\{[^\n]*\})/);
-  if (!m) return [];
-  try {
-    const j = JSON.parse(m[1]);
-    return Array.isArray(j?.drivers) ? j.drivers : [];
-  } catch {
-    return [];
-  }
-}
-
-function upsertDrivers(notes, drivers) {
-  const base = String(notes || '').replace(/\n?\[RES_ADDITIONAL_DRIVERS\]\{[^\n]*\}/g, '').trim();
-  return `${base}${base ? '\n' : ''}[RES_ADDITIONAL_DRIVERS]${JSON.stringify({ drivers })}`;
-}
-
 export default function Page() {
   return <AuthGate>{({ token, me, logout }) => <Inner token={token} me={me} logout={logout} />}</AuthGate>;
 }
@@ -32,12 +16,22 @@ function Inner({ token, me, logout }) {
   const [row, setRow] = useState(null);
   const [drivers, setDrivers] = useState([]);
   const [msg, setMsg] = useState('');
-  const [draft, setDraft] = useState({ firstName: '', lastName: '', address: '', dateOfBirth: '', licenseNumber: '', licenseImageDataUrl: '' });
+  const [draft, setDraft] = useState({
+    firstName: '',
+    lastName: '',
+    address: '',
+    dateOfBirth: '',
+    licenseNumber: '',
+    licenseImageDataUrl: ''
+  });
 
   const load = async () => {
-    const r = await api(`/api/reservations/${id}`, {}, token);
-    setRow(r);
-    setDrivers(readDrivers(r?.notes));
+    const [reservation, driverRows] = await Promise.all([
+      api(`/api/reservations/${id}`, {}, token),
+      api(`/api/reservations/${id}/additional-drivers`, {}, token).catch(() => [])
+    ]);
+    setRow(reservation);
+    setDrivers(Array.isArray(driverRows) ? driverRows : []);
   };
 
   useEffect(() => { load(); }, [id, token]);
@@ -63,12 +57,18 @@ function Inner({ token, me, logout }) {
       return;
     }
     setDrivers((prev) => [...prev, { ...draft, licenseImageUploaded: true }]);
-    setDraft({ firstName: '', lastName: '', address: '', dateOfBirth: '', licenseNumber: '', licenseImageDataUrl: '' });
+    setDraft({
+      firstName: '',
+      lastName: '',
+      address: '',
+      dateOfBirth: '',
+      licenseNumber: '',
+      licenseImageDataUrl: ''
+    });
   };
 
   const save = async () => {
     try {
-      // Do not persist raw base64 images in reservation notes (can exceed backend JSON body limits).
       const compactDrivers = (drivers || []).map((d) => ({
         firstName: d.firstName,
         lastName: d.lastName,
@@ -77,13 +77,10 @@ function Inner({ token, me, logout }) {
         licenseNumber: d.licenseNumber,
         licenseImageUploaded: !!(d.licenseImageUploaded || d.licenseImageDataUrl)
       }));
-      const notes = upsertDrivers(row?.notes, compactDrivers);
-      await api(`/api/reservations/${id}`, { method: 'PATCH', body: JSON.stringify({ notes }) }, token);
-
-      // Keep existing agreement in sync with reservation changes (fees/charges recalculation).
-      try {
-        await api(`/api/reservations/${id}/start-rental`, { method: 'POST', body: JSON.stringify({}) }, token);
-      } catch {}
+      await api(`/api/reservations/${id}/additional-drivers`, {
+        method: 'PUT',
+        body: JSON.stringify({ drivers: compactDrivers })
+      }, token);
 
       setMsg('Additional drivers saved');
       router.push(`/reservations/${id}`);
@@ -117,12 +114,12 @@ function Inner({ token, me, logout }) {
           <thead><tr><th>Name</th><th>DOB</th><th>License #</th><th>License Image</th><th>Action</th></tr></thead>
           <tbody>
             {drivers.map((d, i) => (
-              <tr key={i}>
+              <tr key={d.id || i}>
                 <td>{d.firstName} {d.lastName}</td>
-                <td>{d.dateOfBirth}</td>
+                <td>{d.dateOfBirth ? String(d.dateOfBirth).slice(0, 10) : '-'}</td>
                 <td>{d.licenseNumber}</td>
                 <td>{(d.licenseImageUploaded || d.licenseImageDataUrl) ? 'Uploaded' : '-'}</td>
-                <td><button onClick={() => setDrivers((prev) => prev.filter((_, idx) => idx !== i))}>🗑️</button></td>
+                <td><button onClick={() => setDrivers((prev) => prev.filter((_, idx) => idx !== i))}>Remove</button></td>
               </tr>
             ))}
           </tbody>

@@ -6,60 +6,15 @@ import { AuthGate } from '../../../../components/AuthGate';
 import { AppShell } from '../../../../components/AppShell';
 import { api } from '../../../../lib/client';
 
-function parsePayments(notes) {
-  const txt = String(notes || '');
-  const re = /^\[PAYMENT\s+([^\]]+)\]\s+([^\s]+)\s+paid\s+([0-9]+(?:\.[0-9]+)?)\s+ref=(.+)$/gim;
-  const out = [];
-  let m;
-  while ((m = re.exec(txt)) !== null) {
-    out.push({ id: `note-${m[1]}-${m[4]}`, paidAt: m[1], method: m[2], amount: Number(m[3] || 0), reference: m[4] });
-  }
-  return out;
-}
-
-function extractJsonAfterMarker(notes, marker) {
-  const txt = String(notes || '');
-  const start = txt.indexOf(marker);
-  if (start < 0) return null;
-  const jsonStart = txt.indexOf('{', start + marker.length);
-  if (jsonStart < 0) return null;
-
-  let depth = 0;
-  let inString = false;
-  let escaped = false;
-  for (let i = jsonStart; i < txt.length; i += 1) {
-    const ch = txt[i];
-    if (inString) {
-      if (escaped) escaped = false;
-      else if (ch === '\\') escaped = true;
-      else if (ch === '"') inString = false;
-      continue;
-    }
-
-    if (ch === '"') { inString = true; continue; }
-    if (ch === '{') depth += 1;
-    if (ch === '}') {
-      depth -= 1;
-      if (depth === 0) return txt.slice(jsonStart, i + 1);
-    }
-  }
-  return null;
-}
-
-function parseChargesTotalFromMeta(notes) {
-  const json = extractJsonAfterMarker(notes, '[RES_CHARGES_META]');
-  if (!json) return 0;
-  try {
-    const meta = JSON.parse(json);
-    const rows = Array.isArray(meta?.chargeRows) ? meta.chargeRows : [];
-    return Number(rows
-      .filter((r) => {
-        const n = String(r?.name || '').toLowerCase();
-        return !n.includes('deposit') && !n.includes('security deposit');
-      })
-      .reduce((s, r) => s + Number(r?.total || 0), 0)
-      .toFixed(2));
-  } catch { return 0; }
+function normalizePaymentRows(rows = []) {
+  return (Array.isArray(rows) ? rows : []).map((p) => ({
+    id: p.id,
+    paidAt: p.paidAt,
+    method: p.method,
+    amount: Number(p.amount || 0),
+    reference: p.reference || '',
+    source: 'db'
+  }));
 }
 
 function deriveTotalFromReservationRow(row) {
@@ -93,6 +48,8 @@ function Inner({ token, me, logout }) {
   const router = useRouter();
   const searchParams = useSearchParams();
   const [row, setRow] = useState(null);
+  const [paymentRows, setPaymentRows] = useState([]);
+  const [pricing, setPricing] = useState(null);
   const [msg, setMsg] = useState('');
   const [amount, setAmount] = useState('');
   const [method, setMethod] = useState('CASH');
@@ -100,19 +57,25 @@ function Inner({ token, me, logout }) {
   const [saving, setSaving] = useState(false);
 
   const load = async () => {
-    const r = await api(`/api/reservations/${id}`, {}, token);
+    const [r, payments, pricingOut] = await Promise.all([
+      api(`/api/reservations/${id}`, {}, token),
+      api(`/api/reservations/${id}/payments`, {}, token).catch(() => []),
+      api(`/api/reservations/${id}/pricing`, {}, token).catch(() => null)
+    ]);
     setRow(r);
+    setPaymentRows(normalizePaymentRows(payments));
+    setPricing(pricingOut);
   };
 
   useEffect(() => { if (id) load(); }, [id]);
 
-  const payments = useMemo(() => parsePayments(row?.notes), [row?.notes]);
+  const payments = useMemo(() => paymentRows, [paymentRows]);
   const totalFromQuery = useMemo(() => Number(searchParams?.get('total') || 0), [searchParams]);
   const total = useMemo(() => {
-    const fromMeta = Number(parseChargesTotalFromMeta(row?.notes).toFixed(2));
+    const fromPricing = Number(pricing?.totals?.total || 0);
     const fromRow = Number(deriveTotalFromReservationRow(row).toFixed(2));
-    return Number(Math.max(totalFromQuery, fromMeta, fromRow).toFixed(2));
-  }, [row, row?.notes, totalFromQuery]);
+    return Number(Math.max(totalFromQuery, fromPricing, fromRow).toFixed(2));
+  }, [row, pricing?.totals?.total, totalFromQuery]);
   const paid = useMemo(() => Number(payments.reduce((s, p) => s + Number(p.amount || 0), 0).toFixed(2)), [payments]);
   const unpaid = useMemo(() => Math.max(0, Number((total - paid).toFixed(2))), [total, paid]);
 
@@ -122,12 +85,16 @@ function Inner({ token, me, logout }) {
       if (!(v > 0)) return setMsg('Enter a valid amount');
       if (v - unpaid > 0.009) return setMsg(`Amount exceeds unpaid balance ($${unpaid.toFixed(2)})`);
       setSaving(true);
-      const now = new Date().toISOString();
-      const line = `[PAYMENT ${now}] ${String(method || 'CASH').toUpperCase()} paid ${v.toFixed(2)} ref=${String(reference || `OTC-${Date.now()}`)}`;
-      const clean = String(row?.notes || '').trim();
-      const next = `${clean}${clean ? '\n' : ''}${line}`;
-      const updated = await api(`/api/reservations/${id}`, { method: 'PATCH', body: JSON.stringify({ notes: next }) }, token);
-      setRow(updated);
+      await api(`/api/reservations/${id}/payments`, {
+        method: 'POST',
+        body: JSON.stringify({
+          amount: v,
+          method,
+          reference: String(reference || `OTC-${Date.now()}`),
+          origin: 'OTC'
+        })
+      }, token);
+      await load();
       setAmount('');
       setReference('');
       setMsg('Payment recorded');
@@ -157,6 +124,7 @@ function Inner({ token, me, logout }) {
               <option value="CASH">Cash</option>
               <option value="CARD">Card</option>
               <option value="ZELLE">Zelle</option>
+              <option value="ATH_MOVIL">ATH Movil</option>
               <option value="BANK_TRANSFER">Bank Transfer</option>
               <option value="OTHER">Other</option>
             </select>

@@ -6,73 +6,66 @@ import { AuthGate } from '../../../components/AuthGate';
 import { AppShell } from '../../../components/AppShell';
 import { api, API_BASE } from '../../../lib/client';
 
-function parseSelectedAddonsFromMemo(notes) {
-  const txt = String(notes || '');
-  const m = txt.match(/Services:\s*([^|\n]+)\|\s*Fees:\s*([^\n|]+)/i);
-  if (!m) return { services: [], fees: [] };
-  const services = String(m[1] || '').split(',').map((x)=>x.trim()).filter(Boolean).filter((x)=>x!=='-');
-  const fees = String(m[2] || '').split(',').map((x)=>x.trim()).filter(Boolean).filter((x)=>x!=='-');
-  return { services, fees };
+function stripChargePrefix(name = '', prefix) {
+  return String(name || '').replace(prefix, '').trim();
 }
 
-function extractJsonAfterMarker(notes, marker) {
-  const txt = String(notes || '');
-  const start = txt.indexOf(marker);
-  if (start < 0) return null;
-  const jsonStart = txt.indexOf('{', start + marker.length);
-  if (jsonStart < 0) return null;
-
-  let depth = 0;
-  let inString = false;
-  let escaped = false;
-  for (let i = jsonStart; i < txt.length; i += 1) {
-    const ch = txt[i];
-    if (inString) {
-      if (escaped) escaped = false;
-      else if (ch === '\\') escaped = true;
-      else if (ch === '"') inString = false;
-      continue;
-    }
-    if (ch === '"') { inString = true; continue; }
-    if (ch === '{') depth += 1;
-    if (ch === '}') {
-      depth -= 1;
-      if (depth === 0) return txt.slice(jsonStart, i + 1);
-    }
+function pricingEditorState(pricing, reservation) {
+  const snapshot = pricing?.snapshot || null;
+  const charges = Array.isArray(pricing?.charges) ? pricing.charges : [];
+  if (snapshot || charges.length) {
+    const serviceNames = charges
+      .filter((c) => String(c?.source || '').toUpperCase() === 'SERVICE')
+      .map((c) => stripChargePrefix(c?.name, /^Service:\s*/i))
+      .filter(Boolean)
+      .join(', ');
+    const feeNames = charges
+      .filter((c) => String(c?.source || '').toUpperCase() === 'FEE')
+      .map((c) => stripChargePrefix(c?.name, /^Fee:\s*/i))
+      .filter(Boolean)
+      .join(', ');
+    return {
+      dailyRate: String(snapshot?.dailyRate ?? reservation?.dailyRate ?? '0'),
+      serviceFee: '0',
+      taxRate: String(snapshot?.taxRate ?? '11.5'),
+      serviceNames,
+      feeNames,
+      insuranceCode: snapshot?.selectedInsuranceCode || ''
+    };
   }
-  return null;
+  return {
+    dailyRate: String(reservation?.dailyRate ?? '0'),
+    serviceFee: '0',
+    taxRate: '11.5',
+    serviceNames: '',
+    feeNames: '',
+    insuranceCode: ''
+  };
 }
 
-const parseChargeMeta = (notes) => {
-  const json = extractJsonAfterMarker(notes, '[RES_CHARGES_META]');
-  if (!json) return null;
-  try { return JSON.parse(json); } catch { return null; }
-};
+function structuredDisplayChargeRows(pricingRows = []) {
+  return (Array.isArray(pricingRows) ? pricingRows : []).map((r, idx) => {
+    const source = String(r?.source || '').toUpperCase();
+    let displayId = String(r?.id || idx);
+    if (source === 'SERVICE') displayId = `service-${r?.sourceRefId || idx}`;
+    if (source === 'FEE') displayId = `fee-${r?.sourceRefId || idx}`;
+    if (source === 'DEPOSIT_DUE') displayId = 'deposit-due';
+    if (source === 'SECURITY_DEPOSIT') displayId = 'security-deposit';
+    if (source === 'INSURANCE') displayId = `insurance-${r?.sourceRefId || idx}`;
+    return {
+      id: displayId,
+      name: String(r?.name || `Charge ${idx + 1}`),
+      unit: Number(r?.quantity || 1),
+      rate: Number(r?.rate || 0),
+      total: Number(r?.total || 0),
+      taxable: !!r?.taxable
+    };
+  });
+}
 
 
 export default function ReservationDetailPage() {
 return <AuthGate>{({ token, me, logout }) => <ReservationDetailInner token={token} me={me} logout={logout} />}</AuthGate>;
-}
-
-function parseChargeRowsTotalFromNotes(notes) {
-const json = extractJsonAfterMarker(notes, '[RES_CHARGES_META]');
-if (!json) return 0;
-try {
-const j = JSON.parse(json);
-const rows = Array.isArray(j?.chargeRows) ? j.chargeRows : [];
-return Number(rows.reduce((s, r) => s + Number(r?.total || 0), 0).toFixed(2));
-} catch {
-return 0;
-}
-}
-
-function parsePaymentsTotalFromNotes(notes) {
-const txt = String(notes || '');
-const re = /^\[PAYMENT\s+[^\]]+\]\s+[^\s]+\s+paid\s+([0-9]+(?:\.[0-9]+)?)\s+ref=.*$/gim;
-let m;
-let sum = 0;
-while ((m = re.exec(txt)) !== null) sum += Number(m[1] || 0);
-return Number(sum.toFixed(2));
 }
 const toMoneyNum = (v) => {
   const n = Number(v);
@@ -86,6 +79,8 @@ function ReservationDetailInner({ token, me, logout }) {
   const router = useRouter();
 
   const [row, setRow] = useState(null);
+  const [pricing, setPricing] = useState(null);
+  const [paymentRows, setPaymentRows] = useState([]);
   const [locations, setLocations] = useState([]);
   const [customers, setCustomers] = useState([]);
   const [serviceOptions, setServiceOptions] = useState([]);
@@ -107,15 +102,19 @@ function ReservationDetailInner({ token, me, logout }) {
     try { return decodeURIComponent(escape(s)); } catch { return s; }
   };
   const load = async () => {
-    const [r, l, c, svc, fee, ip] = await Promise.all([
+    const [r, l, c, svc, fee, ip, pricingOut, paymentsOut] = await Promise.all([
       api(`/api/reservations/${id}`, {}, token),
       api('/api/locations', {}, token),
       api('/api/customers', {}, token),
       api('/api/additional-services', {}, token).catch(() => []),
       api('/api/fees', {}, token).catch(() => []),
-      api('/api/settings/insurance-plans', {}, token).catch(() => [])
+      api('/api/settings/insurance-plans', {}, token).catch(() => []),
+      api(`/api/reservations/${id}/pricing`, {}, token).catch(() => null),
+      api(`/api/reservations/${id}/payments`, {}, token).catch(() => [])
     ]);
     setRow(r);
+    setPricing(pricingOut);
+    setPaymentRows(Array.isArray(paymentsOut) ? paymentsOut : []);
     setLocations(l);
     setCustomers(c);
     setServiceOptions(Array.isArray(svc) ? svc : []);
@@ -129,8 +128,7 @@ function ReservationDetailInner({ token, me, logout }) {
       returnLocationId: r.returnLocationId || '',
       notes: r.notes || ''
     });
-    const memoSel = parseSelectedAddonsFromMemo(r.notes);
-    setChargeModel((prev) => ({ ...prev, dailyRate: String(r.dailyRate ?? '0'), serviceNames: memoSel.services.join(', '), feeNames: memoSel.fees.join(', ') }));
+    setChargeModel(pricingEditorState(pricingOut, r));
   };
 
   useEffect(() => { if (id) load(); }, [id, token]);
@@ -345,16 +343,12 @@ function ReservationDetailInner({ token, me, logout }) {
   }, [row, form.pickupAt, form.returnAt, chargeModel]);
 
   const paidTotal = useMemo(() => {
-    const dbPaid = Number((row?.payments || []).reduce((s, p) => s + Number(p?.amount || 0), 0));
-    const notePaid = Number(parsePaymentsTotalFromNotes(row?.notes));
-    const a = Number.isFinite(dbPaid) ? dbPaid : 0;
-    const b = Number.isFinite(notePaid) ? notePaid : 0;
-    return Number(Math.max(a, b).toFixed(2));
-  }, [row?.payments, row?.notes]);
+    return Number((paymentRows || []).reduce((sum, payment) => sum + Number(payment?.amount || 0), 0).toFixed(2));
+  }, [paymentRows]);
 
   const chargeTableTotal = useMemo(() => {
-    return Number(toMoneyNum(parseChargeRowsTotalFromNotes(row?.notes)).toFixed(2));
-  }, [row?.notes]);
+    return Number(toMoneyNum((pricing?.totals?.total ?? 0)).toFixed(2));
+  }, [pricing?.totals?.total]);
 
   const effectiveChargeTotal = useMemo(() => {
     const table = Number(chargeTableTotal);
@@ -379,26 +373,14 @@ function ReservationDetailInner({ token, me, logout }) {
 
   useEffect(() => {
     setDepositOverrides({
-      depositDue:
-        row?.depositSummary?.lines?.find((d) => /deposit \\(due now\\)/i.test(d.name || ''))?.total?.toString() || '',
-      securityDeposit:
-        row?.depositSummary?.lines?.find((d) => /security deposit/i.test(d.name || ''))?.total?.toString() || ''
+      depositDue: pricing?.snapshot?.depositAmountDue != null ? String(pricing.snapshot.depositAmountDue) : '',
+      securityDeposit: pricing?.snapshot?.securityDepositAmount != null ? String(pricing.snapshot.securityDepositAmount) : ''
     });
-  }, [row?.depositSummary]);
+  }, [pricing?.snapshot]);
 
   const handleEditToggle = () => {
     if (!chargeEdit) {
-      const meta = parseChargeMeta(row?.notes);
-      if (meta) {
-        setChargeModel((prev) => ({
-          ...prev,
-          dailyRate: meta.dailyRate ?? prev.dailyRate,
-          taxRate: meta.taxRate ?? prev.taxRate,
-          serviceNames: (meta.selectedServices || []).join(', '),
-          feeNames: (meta.selectedFees || []).join(', '),
-          insuranceCode: meta.selectedInsuranceCode || prev.insuranceCode || ''
-        }));
-      }
+      setChargeModel(pricingEditorState(pricing, row));
     }
     setChargeEdit((v) => !v);
   };
@@ -406,7 +388,7 @@ function ReservationDetailInner({ token, me, logout }) {
   const removeChargeRow = (row) => {
     const id = String(row?.id || '').toLowerCase();
 
-    if (id.startsWith('svc-')) {
+    if (id.startsWith('svc-') || id.startsWith('service-')) {
       const current = String(chargeModel.serviceNames || '')
         .split(',')
         .map((x) => x.trim())
@@ -432,7 +414,7 @@ function ReservationDetailInner({ token, me, logout }) {
       return;
     }
 
-    if (id.startsWith('ins-') || id === 'insurance') {
+    if (id.startsWith('ins-') || id.startsWith('insurance-') || id === 'insurance') {
       setChargeModel((prev) => ({ ...prev, insuranceCode: '' }));
       return;
     }
@@ -449,10 +431,6 @@ function ReservationDetailInner({ token, me, logout }) {
 
   const saveChargeOverrides = async () => {
     try {
-const cleanNotes = String(form.notes || '')
-  .replace(/\n?\[RES_CHARGES_META][\s\S]*$/m, '')
-  .trim();
-
 const serviceNames = String(chargeModel.serviceNames || '')
 .split(',')
 .map((x) => x.trim())
@@ -467,12 +445,6 @@ const insuranceCode = String(chargeModel.insuranceCode || '').trim();
 const insurancePlan = insuranceCode
   ? (insurancePlans || []).find((p) => String(p.code || '').trim().toUpperCase() === insuranceCode.toUpperCase())
   : null;
-const insuranceSummary = insurancePlan
-  ? insurancePlan.label || insurancePlan.name || insurancePlan.code
-  : insuranceCode || '-';
-const summaryLine = `Services: ${String(chargeModel.serviceNames || '').trim() || '-'} | Fees: ${String(
-  chargeModel.feeNames || ''
-).trim() || '-'} | Insurance: ${insuranceSummary}`;
 
 const serviceRows = serviceNames.map((name, idx) => {
 const opt = serviceOptions.find((s) => (s.name || s.code || '').trim().toLowerCase() === name.toLowerCase());
@@ -487,7 +459,9 @@ chargeType: 'UNIT',
 quantity: unit,
 rate,
 total: toMoneyNum(rate * unit),
-taxable: opt?.taxable !== false
+ taxable: opt?.taxable !== false,
+ source: 'SERVICE',
+ sourceRefId: opt?.id || null
 };
 });
 
@@ -504,7 +478,9 @@ chargeType: 'UNIT',
 quantity: unit,
 rate,
 total: toMoneyNum(rate * unit),
-taxable: opt?.taxable !== false
+ taxable: opt?.taxable !== false,
+ source: 'FEE',
+ sourceRefId: opt?.id || null
 };
 });
 
@@ -531,7 +507,9 @@ if (insurancePlan) {
     quantity,
     rate,
     total,
-    taxable: false
+    taxable: false,
+    source: 'INSURANCE',
+    sourceRefId: insurancePlan.code
   });
 }
 
@@ -542,7 +520,8 @@ chargeType: 'DAILY',
 quantity: breakdown.days,
 rate: toMoneyNum(chargeModel.dailyRate || row?.dailyRate || 0),
 total: toMoneyNum((chargeModel.dailyRate || row?.dailyRate || 0) * breakdown.days),
-taxable: true
+ taxable: true,
+ source: 'DAILY'
 };
 
 const coreRows = [baseRow, ...serviceRows, ...feeRows, ...insuranceRows];
@@ -561,7 +540,8 @@ chargeType: 'TAX',
 quantity: 1,
 rate: toMoneyNum(taxableSubTotal * (Number(chargeModel.taxRate) / 100)),
 total: toMoneyNum(taxableSubTotal * (Number(chargeModel.taxRate) / 100)),
-taxable: false
+ taxable: false,
+ source: 'TAX'
 }
 : null;
 
@@ -576,7 +556,8 @@ chargeType: 'DEPOSIT',
 quantity: 1,
 rate: Number(depositOverrides.depositDue),
 total: Number(depositOverrides.depositDue),
-taxable: false
+ taxable: false,
+ source: 'DEPOSIT_DUE'
 });
 }
 if (Number(depositOverrides.securityDeposit || 0) > 0) {
@@ -587,47 +568,29 @@ chargeType: 'DEPOSIT',
 quantity: 1,
 rate: Number(depositOverrides.securityDeposit),
 total: Number(depositOverrides.securityDeposit),
-taxable: false
+ taxable: false,
+ source: 'SECURITY_DEPOSIT'
 });
 }
 
-const meta = {
+await api(
+`/api/reservations/${id}/pricing`,
+{
+method: 'PUT',
+body: JSON.stringify({
 dailyRate: Number(chargeModel.dailyRate || row?.dailyRate || 0),
 taxRate: Number(chargeModel.taxRate || 0),
-selectedServices: String(chargeModel.serviceNames || '')
-.split(',')
-.map((x) => x.trim())
-.filter(Boolean),
-selectedFees: String(chargeModel.feeNames || '')
-.split(',')
-.map((x) => x.trim())
-.filter(Boolean),
 selectedInsuranceCode: insurancePlan ? insurancePlan.code : '',
-chargeRows: [...normalizedRows, ...depositRows]
-};
-
-const depositMeta = {
-requireDeposit: Number(depositOverrides.depositDue || 0) > 0,
-depositAmountDue: Number(depositOverrides.depositDue || 0)
-};
-
-const securityMeta = {
-requireSecurityDeposit: Number(depositOverrides.securityDeposit || 0) > 0,
-securityDepositAmount: Number(depositOverrides.securityDeposit || 0)
-};
-
-const notesWithMeta = `${cleanNotes}${cleanNotes ? '\n' : ''}${summaryLine}
-[RES_CHARGES_META]${JSON.stringify(meta)}
-[RES_DEPOSIT_META]${JSON.stringify(depositMeta)}
-[SECURITY_DEPOSIT_META]${JSON.stringify(securityMeta)}`;
-
-await api(
-`/api/reservations/${id}`,
-{
-method: 'PATCH',
-body: JSON.stringify({
-notes: notesWithMeta,
-dailyRate: Number(chargeModel.dailyRate || row?.dailyRate || 0)
+selectedInsuranceName: insurancePlan ? (insurancePlan.label || insurancePlan.name || insurancePlan.code) : null,
+depositRequired: Number(depositOverrides.depositDue || 0) > 0,
+depositMode: Number(depositOverrides.depositDue || 0) > 0 ? 'FIXED' : null,
+depositValue: Number(depositOverrides.depositDue || 0),
+depositBasis: [],
+depositAmountDue: Number(depositOverrides.depositDue || 0),
+securityDepositRequired: Number(depositOverrides.securityDeposit || 0) > 0,
+securityDepositAmount: Number(depositOverrides.securityDeposit || 0),
+source: 'UI_MANUAL',
+charges: [...normalizedRows, ...depositRows]
 })
 },
 token
@@ -642,22 +605,26 @@ setMsg('Charges updated');
   };
 
   const selectedServiceRows = useMemo(() => {
-    const json = extractJsonAfterMarker(row?.notes, '[RES_CHARGES_META]');
-    try {
-      const j = json ? JSON.parse(json) : null;
-      const names = Array.isArray(j?.selectedServices) ? j.selectedServices : [];
-      return names.map((n, i) => ({ id: `svc-${i}`, name: `Service: ${n}` }));
-    } catch { return []; }
-  }, [row?.notes]);
+    const editorRows = String(chargeModel.serviceNames || '')
+      .split(',')
+      .map((name, i) => ({ id: `svc-editor-${i}`, name: `Service: ${String(name || '').trim()}` }))
+      .filter((row) => row.name !== 'Service:');
+    if (chargeEdit) return editorRows;
+    return (pricing?.charges || [])
+      .filter((j) => String(j?.source || '').toUpperCase() === 'SERVICE')
+      .map((j, i) => ({ id: `svc-${j?.sourceRefId || i}`, name: String(j?.name || '') }));
+  }, [pricing?.charges, chargeEdit, chargeModel.serviceNames]);
 
   const selectedFeeRows = useMemo(() => {
-    const json = extractJsonAfterMarker(row?.notes, '[RES_CHARGES_META]');
-    try {
-      const j = json ? JSON.parse(json) : null;
-      const names = Array.isArray(j?.selectedFees) ? j.selectedFees : [];
-      return names.map((n, i) => ({ id: `fee-${i}`, name: `Fee: ${n}` }));
-    } catch { return []; }
-  }, [row?.notes]);
+    const editorRows = String(chargeModel.feeNames || '')
+      .split(',')
+      .map((name, i) => ({ id: `fee-editor-${i}`, name: `Fee: ${String(name || '').trim()}` }))
+      .filter((row) => row.name !== 'Fee:');
+    if (chargeEdit) return editorRows;
+    return (pricing?.charges || [])
+      .filter((j) => String(j?.source || '').toUpperCase() === 'FEE')
+      .map((j, i) => ({ id: `fee-${j?.sourceRefId || i}`, name: String(j?.name || '') }));
+  }, [pricing?.charges, chargeEdit, chargeModel.feeNames]);
 
   const filteredInsurancePlans = useMemo(() => {
     const vtId = row?.vehicleTypeId;
@@ -679,24 +646,8 @@ setMsg('Charges updated');
   }, [filteredInsurancePlans, chargeModel.insuranceCode]);
 
   const displayChargeRows = useMemo(() => {
-    const notes = row?.notes;
-    const metaJson = extractJsonAfterMarker(notes, '[RES_CHARGES_META]');
-    const depJson = extractJsonAfterMarker(notes, '[RES_DEPOSIT_META]');
-
-    let meta = null;
-    let dep = null;
-    try { meta = metaJson ? JSON.parse(metaJson) : null; } catch {}
-    try { dep = depJson ? JSON.parse(depJson) : null; } catch {}
-
-    const fromMeta = Array.isArray(meta?.chargeRows) ? meta.chargeRows : [];
-    if (fromMeta.length) {
-      return fromMeta.map((r, i) => ({
-        id: `meta-${i}`,
-        name: String(r?.name || r?.label || r?.code || `Charge ${i + 1}`),
-        unit: toMoneyNum(r?.unit || 1),
-        rate: toMoneyNum(r?.rate ?? r?.amount ?? r?.total ?? 0),
-        total: toMoneyNum(r?.total ?? r?.amount ?? r?.rate ?? 0)
-      }));
+    if (pricing?.charges?.length) {
+      return structuredDisplayChargeRows(pricing.charges);
     }
 
     const serviceRows = selectedServiceRows.map((r) => {
@@ -746,16 +697,15 @@ setMsg('Charges updated');
     const taxTotal = toMoneyNum(taxableSubTotal * (taxRatePct / 100));
     if (taxTotal > 0) rows.push({ id: 'tax', name: `Sales Tax (${taxRatePct.toFixed(2)}%)`, unit: 1, rate: taxTotal, total: taxTotal, taxable: false });
 
-    const depDue = toMoneyNum(dep?.depositAmountDue);
-    if (depDue > 0) rows.push({ id: 'deposit-due', name: 'Deposit (Due Now)', unit: 1, rate: depDue, total: depDue });
-
-    let locCfg = row?.pickupLocation?.locationConfig;
-    try { if (typeof locCfg === 'string') locCfg = JSON.parse(locCfg); } catch { locCfg = {}; }
-    const sec = toMoneyNum(locCfg?.securityDepositAmount ?? locCfg?.securityDeposit ?? 0);
-    if (sec > 0) rows.push({ id: 'security-deposit', name: 'Security Deposit', unit: 1, rate: sec, total: sec });
+    if (Number(depositOverrides.depositDue || 0) > 0) {
+      rows.push({ id: 'deposit-due', name: 'Deposit (Due Now)', unit: 1, rate: toMoneyNum(depositOverrides.depositDue), total: toMoneyNum(depositOverrides.depositDue) });
+    }
+    if (Number(depositOverrides.securityDeposit || 0) > 0) {
+      rows.push({ id: 'security-deposit', name: 'Security Deposit', unit: 1, rate: toMoneyNum(depositOverrides.securityDeposit), total: toMoneyNum(depositOverrides.securityDeposit) });
+    }
 
     return rows;
-  }, [row?.notes, row?.pickupLocation?.locationConfig, breakdown, selectedServiceRows, selectedFeeRows, serviceOptions, feeOptions, chargeModel?.taxRate]);
+  }, [pricing?.charges, breakdown, selectedServiceRows, selectedFeeRows, serviceOptions, feeOptions, chargeModel?.taxRate, depositOverrides.depositDue, depositOverrides.securityDeposit]);
 
   const displayTotal = useMemo(() => toMoneyNum(displayChargeRows.reduce((s, r) => s + toMoneyNum(r?.total), 0)), [displayChargeRows]);
 

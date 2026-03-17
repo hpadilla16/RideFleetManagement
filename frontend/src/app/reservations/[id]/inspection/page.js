@@ -24,6 +24,12 @@ function Inner({ token, me, logout }) {
 
   useEffect(() => { (async () => { try { setRow(await api(`/api/reservations/${id}`, {}, token)); } catch (e) { setMsg(e.message); } })(); }, [id, token]);
 
+  const ensureAgreementId = async () => {
+    const agreement = await api(`/api/reservations/${id}/agreement`, {}, token);
+    if (!agreement?.id) throw new Error('Could not resolve rental agreement');
+    return agreement.id;
+  };
+
   const fileToDataUrl = (file) => new Promise((resolve, reject) => {
     const r = new FileReader();
     r.onload = () => resolve(String(r.result || ''));
@@ -43,13 +49,11 @@ function Inner({ token, me, logout }) {
 
   const save = async () => {
     try {
-      const tag = phase === 'CHECKIN' ? 'RES_INSPECTION_CHECKIN' : 'RES_INSPECTION_CHECKOUT';
-      const payload = { ...f, phase, at: new Date().toISOString(), photos };
-      const current = String(row?.notes || '');
-      const clean = current.replace(new RegExp(`\\n?\\[${tag}\\]\\{[^\\n]*\\}`, 'g'), '').trim();
-      const notes = `${clean}${clean ? '\n' : ''}[${tag}]${JSON.stringify(payload)}`;
-      const updated = await api(`/api/reservations/${id}`, { method: 'PATCH', body: JSON.stringify({ notes }) }, token);
-      setRow(updated);
+      const agreementId = await ensureAgreementId();
+      await api(`/api/rental-agreements/${agreementId}/inspection`, {
+        method: 'POST',
+        body: JSON.stringify({ ...f, phase, photos })
+      }, token);
       setMsg(`Inspection saved (${phase})`);
       if (returnTo === 'checkout') router.push(`/reservations/${id}/checkout`);
       else if (returnTo === 'checkin') router.push(`/reservations/${id}/checkin`);

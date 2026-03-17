@@ -3,6 +3,7 @@ import Stripe from 'stripe';
 import { prisma } from '../../lib/prisma.js';
 import { sendEmail } from '../../lib/mailer.js';
 import { rentalAgreementsService } from '../rental-agreements/rental-agreements.service.js';
+import { reservationPricingService } from '../reservations/reservation-pricing.service.js';
 
 export const customerPortalRouter = Router();
 
@@ -78,16 +79,42 @@ async function findReservationByToken(kind, token) {
   if (kind === 'signature') {
     return prisma.reservation.findFirst({
       where: { signatureToken: token, signatureTokenExpiresAt: { gt: new Date() } },
-      include: { customer: true, pickupLocation: true, returnLocation: true, vehicle: true }
+      include: {
+        customer: true,
+        pickupLocation: true,
+        returnLocation: true,
+        vehicle: true,
+        pricingSnapshot: true,
+        charges: { where: { selected: true }, orderBy: [{ sortOrder: 'asc' }, { createdAt: 'asc' }] },
+        payments: { orderBy: { paidAt: 'desc' } },
+        additionalDrivers: { orderBy: { createdAt: 'asc' } }
+      }
     });
   }
   if (kind === 'payment') {
     return prisma.reservation.findFirst({
       where: { paymentRequestToken: token, paymentRequestTokenExpiresAt: { gt: new Date() } },
-      include: { customer: true, pickupLocation: true, returnLocation: true, vehicle: true }
+      include: {
+        customer: true,
+        pickupLocation: true,
+        returnLocation: true,
+        vehicle: true,
+        pricingSnapshot: true,
+        charges: { where: { selected: true }, orderBy: [{ sortOrder: 'asc' }, { createdAt: 'asc' }] },
+        payments: { orderBy: { paidAt: 'desc' } },
+        additionalDrivers: { orderBy: { createdAt: 'asc' } }
+      }
     });
   }
   return null;
+}
+
+function paidFromStructuredPayments(payments) {
+  const rows = Array.isArray(payments) ? payments : [];
+  return Number(rows
+    .filter((p) => String(p?.status || '').toUpperCase() !== 'VOID')
+    .reduce((sum, p) => sum + Number(p?.amount || 0), 0)
+    .toFixed(2));
 }
 
 function paidFromReservationNotes(notes) {
@@ -131,49 +158,36 @@ function isUnderageReservation(reservation) {
 }
 
 async function buildReservationBreakdown(reservation) {
-  const tenantWhere = reservation?.tenantId ? { tenantId: reservation.tenantId } : {};
-  const notes = String(reservation?.notes || '');
-  const m = notes.match(/\[RES_CHARGES_META\](\{[\s\S]*\})/);
-  const pickupAt = new Date(reservation?.pickupAt || Date.now());
-  const returnAt = new Date(reservation?.returnAt || Date.now());
-  const days = Math.max(1, Math.ceil((returnAt - pickupAt) / (1000 * 60 * 60 * 24)));
-
-  if (!m) {
-    const dailyRate = Number(reservation?.dailyRate || 0);
-    const base = Number((dailyRate * days).toFixed(2));
-    const lines = [{ name: 'Daily', qty: days, rate: dailyRate, total: base }];
-
-    let feesTotal = 0;
-    if (isUnderageReservation(reservation)) {
-      const underageFees = await prisma.fee.findMany({ where: { ...tenantWhere, isActive: true, isUnderageFee: true } });
-      for (const f of underageFees) {
-        const amt = Number(f?.amount || 0);
-        const mode = String(f?.mode || 'FIXED').toUpperCase();
-        const total = Number((mode === 'PERCENTAGE' ? (base * (amt / 100)) : amt).toFixed(2));
-        feesTotal += total;
-        lines.push({ name: f.name, qty: 1, rate: mode === 'PERCENTAGE' ? `${amt}%` : amt, total });
-      }
-    }
-
-    const subtotal = Number((base + feesTotal).toFixed(2));
-    const taxRate = Number(reservation?.pickupLocation?.taxRate || 0);
-    const tax = Number((subtotal * (taxRate / 100)).toFixed(2));
+  const structuredCharges = Array.isArray(reservation?.charges) ? reservation.charges : [];
+  if (structuredCharges.length) {
+    const lines = structuredCharges.map((c) => ({
+      name: c.name,
+      qty: Number(c.quantity || 0),
+      rate: Number(c.rate || 0),
+      total: Number(c.total || 0)
+    }));
+    const subtotal = Number(structuredCharges
+      .filter((c) => String(c?.chargeType || '').toUpperCase() !== 'TAX')
+      .reduce((sum, c) => sum + Number(c.total || 0), 0)
+      .toFixed(2));
+    const tax = Number(structuredCharges
+      .filter((c) => String(c?.chargeType || '').toUpperCase() === 'TAX')
+      .reduce((sum, c) => sum + Number(c.total || 0), 0)
+      .toFixed(2));
     const total = Number((subtotal + tax).toFixed(2));
-
     return { lines, subtotal, tax, total };
   }
 
-  let meta;
-  try { meta = JSON.parse(m[1]); } catch { meta = null; }
-  if (!meta) {
-    const est = Number(reservation?.estimatedTotal || 0);
-    return { lines: [], subtotal: est, tax: 0, total: est };
-  }
-
-  const selectedServiceIds = Array.isArray(meta?.selectedServices) ? meta.selectedServices : [];
-  const hasAdditionalDrivers = Array.isArray(readMetaBlock(reservation?.notes, "RES_ADDITIONAL_DRIVERS")?.drivers) && readMetaBlock(reservation?.notes, "RES_ADDITIONAL_DRIVERS")?.drivers?.length > 0;
-  const selectedFeeIds = Array.isArray(meta?.selectedFees) ? meta.selectedFees : [];
-  const discounts = Array.isArray(meta?.discounts) ? meta.discounts : [];
+  const tenantWhere = reservation?.tenantId ? { tenantId: reservation.tenantId } : {};
+  const pickupAt = new Date(reservation?.pickupAt || Date.now());
+  const returnAt = new Date(reservation?.returnAt || Date.now());
+  const days = Math.max(1, Math.ceil((returnAt - pickupAt) / (1000 * 60 * 60 * 24)));
+  const dailyRate = Number(reservation?.pricingSnapshot?.dailyRate ?? reservation?.dailyRate ?? 0);
+  const lines = [{ name: 'Daily', qty: days, rate: dailyRate, total: Number((dailyRate * days).toFixed(2)) }];
+  const base = Number((dailyRate * days).toFixed(2));
+  const hasAdditionalDrivers = Array.isArray(reservation?.additionalDrivers) && reservation.additionalDrivers.length > 0;
+  const selectedFeeIds = [];
+  const discounts = [];
 
   const underageAutoFees = isUnderageReservation(reservation)
     ? await prisma.fee.findMany({ where: { ...tenantWhere, isActive: true, isUnderageFee: true }, select: { id: true } })
@@ -184,16 +198,11 @@ async function buildReservationBreakdown(reservation) {
   const mergedFeeIds = [...new Set([...selectedFeeIds, ...underageAutoFees.map((f) => f.id), ...addlDriverAutoFees.map((f) => f.id)])];
 
   const [services, fees] = await Promise.all([
-    selectedServiceIds.length ? prisma.additionalService.findMany({ where: { ...tenantWhere, id: { in: selectedServiceIds } } }) : Promise.resolve([]),
+    Promise.resolve([]),
     mergedFeeIds.length ? prisma.fee.findMany({ where: { ...tenantWhere, id: { in: mergedFeeIds } } }) : Promise.resolve([])
   ]);
 
-  const dailyRate = Number(meta?.dailyRate ?? reservation?.dailyRate ?? 0);
-  const taxRate = Number(meta?.taxRate ?? 0);
-  const lines = [];
-
-  const base = Number((dailyRate * days).toFixed(2));
-  lines.push({ name: 'Daily', qty: days, rate: dailyRate, total: base });
+  const taxRate = Number(reservation?.pricingSnapshot?.taxRate ?? reservation?.pickupLocation?.taxRate ?? 0);
 
   let servicesTotal = 0;
   for (const s of services || []) {
@@ -233,24 +242,29 @@ async function buildReservationBreakdown(reservation) {
 async function amountDueForReservation(reservationId, fallbackEstimated = 0) {
   const [latestAgreement, reservation] = await Promise.all([
     prisma.rentalAgreement.findFirst({ where: { reservationId }, orderBy: { createdAt: 'desc' } }),
-    prisma.reservation.findUnique({ where: { id: reservationId }, include: { customer: { select: { dateOfBirth: true } }, pickupLocation: { select: { locationConfig: true, taxRate: true } } } })
+    prisma.reservation.findUnique({
+      where: { id: reservationId },
+      include: {
+        customer: { select: { dateOfBirth: true } },
+        pickupLocation: { select: { locationConfig: true, taxRate: true } },
+        pricingSnapshot: true,
+        charges: { where: { selected: true }, orderBy: [{ sortOrder: 'asc' }, { createdAt: 'asc' }] },
+        payments: { orderBy: { paidAt: 'desc' } }
+      }
+    })
   ]);
 
   const breakdown = reservation ? await buildReservationBreakdown(reservation) : null;
   const est = Number(breakdown?.total ?? reservation?.estimatedTotal ?? fallbackEstimated ?? 0);
-  const paid = paidFromReservationNotes(reservation?.notes);
+  const paid = paidFromStructuredPayments(reservation?.payments);
   const reservationOutstanding = Math.max(0, Number((est - paid).toFixed(2)));
 
-  const depMatch = String(reservation?.notes || '').match(/\[RES_DEPOSIT_META\](\{[\s\S]*\})/);
   let depositDueNow = null;
-  if (depMatch) {
-    try {
-      const d = JSON.parse(depMatch[1]);
-      if (d?.requireDeposit) {
-        const dep = Number(d?.depositAmountDue || 0);
-        if (Number.isFinite(dep) && dep > 0) depositDueNow = Math.max(0, Number((dep - paid).toFixed(2)));
-      }
-    } catch {}
+  if (reservation?.pricingSnapshot) {
+    const dep = Number(reservation.pricingSnapshot.depositAmountDue || 0);
+    if (reservation.pricingSnapshot.depositRequired && Number.isFinite(dep) && dep > 0) {
+      depositDueNow = Math.max(0, Number((dep - paid).toFixed(2)));
+    }
   }
 
   if (latestAgreement) {
@@ -269,32 +283,21 @@ async function amountDueForReservation(reservationId, fallbackEstimated = 0) {
 }
 
 async function postPayment({ reservation, paidAmount, reference, gateway }) {
-  const latestAgreement = await prisma.rentalAgreement.findFirst({ where: { reservationId: reservation.id }, orderBy: { createdAt: 'desc' } });
-  if (latestAgreement) {
-    const nextBalance = Math.max(0, Number((Number(latestAgreement.balance || 0) - paidAmount).toFixed(2)));
-    await prisma.rentalAgreement.update({
-      where: { id: latestAgreement.id },
-      data: { balance: nextBalance, paidAmount: Number((Number(latestAgreement.paidAmount || 0) + paidAmount).toFixed(2)) }
-    });
-    await prisma.rentalAgreementPayment.create({
-      data: {
-        rentalAgreementId: latestAgreement.id,
-        method: 'CARD',
-        amount: paidAmount,
-        reference,
-        status: 'PAID',
-        notes: `Paid via ${gateway} customer payment portal`
-      }
-    });
-  }
+  await reservationPricingService.postPayment(reservation.id, {
+    amount: paidAmount,
+    method: 'CARD',
+    reference,
+    status: 'PAID',
+    origin: 'PORTAL',
+    gateway,
+    notes: `Paid via ${gateway} customer payment portal`
+  }, {}, null);
 
-  const note = `[PAYMENT ${new Date().toISOString()}] ${gateway} paid ${paidAmount.toFixed(2)} ref=${reference}`;
   await prisma.reservation.update({
     where: { id: reservation.id },
     data: {
       paymentRequestToken: null,
-      paymentRequestTokenExpiresAt: null,
-      notes: reservation.notes ? `${reservation.notes}\n${note}` : note
+      paymentRequestTokenExpiresAt: null
     }
   });
 

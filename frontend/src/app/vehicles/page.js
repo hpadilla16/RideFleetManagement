@@ -21,10 +21,15 @@ function parseCsv(text) {
   });
 }
 
-function parseInspectionReport(notes) {
-  const m = String(notes || '').match(/\[INSPECTION_REPORT\](\{[^\n]*\})/);
-  if (!m) return null;
-  try { return JSON.parse(m[1]); } catch { return null; }
+function agreementInspectionSummary(agreement) {
+  const inspections = Array.isArray(agreement?.inspections) ? agreement.inspections : [];
+  if (!inspections.length) return null;
+  const checkout = inspections.find((x) => String(x?.phase || '').toUpperCase() === 'CHECKOUT') || null;
+  const checkin = inspections.find((x) => String(x?.phase || '').toUpperCase() === 'CHECKIN') || null;
+  return {
+    checkout: checkout ? { at: checkout.capturedAt } : null,
+    checkin: checkin ? { at: checkin.capturedAt } : null
+  };
 }
 
 function VehiclesInner({ token, me, logout }) {
@@ -315,10 +320,10 @@ function VehiclesInner({ token, me, logout }) {
             </div>
 
             <div className="glass card" style={{ padding: 10, marginTop: 8 }}>
-              <div className="row-between"><strong>Inspection History</strong><span className="badge">{(selected.rentalAgreements || []).filter((a) => !!parseInspectionReport(a.notes)).length}</span></div>
+              <div className="row-between"><strong>Inspection History</strong><span className="badge">{(selected.rentalAgreements || []).filter((a) => !!agreementInspectionSummary(a)).length}</span></div>
               <div style={{ display: 'grid', gap: 6, marginTop: 6 }}>
                 {(selected.rentalAgreements || []).map((a) => {
-                  const rep = parseInspectionReport(a.notes);
+                  const rep = agreementInspectionSummary(a);
                   if (!rep) return null;
                   return (
                     <div key={a.id} className="label" style={{ textTransform: 'none', letterSpacing: 0 }}>
@@ -326,7 +331,7 @@ function VehiclesInner({ token, me, logout }) {
                     </div>
                   );
                 })}
-                {!(selected.rentalAgreements || []).some((a) => !!parseInspectionReport(a.notes)) ? <div className="label">No inspection reports yet.</div> : null}
+                {!(selected.rentalAgreements || []).some((a) => !!agreementInspectionSummary(a)) ? <div className="label">No inspection reports yet.</div> : null}
               </div>
             </div>
           </div>

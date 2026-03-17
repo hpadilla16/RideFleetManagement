@@ -123,14 +123,14 @@ function rentalDays(pickupAt, returnAt) {
   return Math.max(1, Math.ceil(ms / (24 * 60 * 60 * 1000)));
 }
 
-function parseAdditionalDriversCountFromNotes(notes) {
+function parseAdditionalDriversFromNotes(notes) {
   const m = String(notes || '').match(/\[RES_ADDITIONAL_DRIVERS\](\{[^\n]*\})/);
-  if (!m) return 0;
+  if (!m) return [];
   try {
     const j = JSON.parse(m[1]);
-    return Array.isArray(j?.drivers) ? j.drivers.length : 0;
+    return Array.isArray(j?.drivers) ? j.drivers : [];
   } catch {
-    return 0;
+    return [];
   }
 }
 
@@ -173,23 +173,184 @@ function parseSecurityDepositMetaFromNotes(notes) {
   };
 }
 
-function parseInspectionReportFromNotes(notes) {
-  const m = String(notes || '').match(/\[INSPECTION_REPORT\](\{[^\n]*\})/);
-  if (!m) return { checkout: null, checkin: null };
-  try {
-    const j = JSON.parse(m[1]);
-    return {
-      checkout: j?.checkout || null,
-      checkin: j?.checkin || null
-    };
-  } catch {
-    return { checkout: null, checkin: null };
-  }
+function structuredReservationChargeRows(reservation) {
+  const rows = Array.isArray(reservation?.charges) ? reservation.charges : [];
+  if (!rows.length) return null;
+  return rows.map((row, idx) => ({
+    name: String(row?.name || 'Line Item'),
+    code: row?.code || null,
+    chargeType: String(row?.chargeType || 'UNIT').toUpperCase(),
+    quantity: Number(row?.quantity || 1),
+    rate: Number(row?.rate || 0),
+    total: Number(row?.total || 0),
+    taxable: !!row?.taxable,
+    selected: row?.selected !== false,
+    sortOrder: Number.isInteger(row?.sortOrder) ? row.sortOrder : idx
+  }));
 }
 
-function upsertInspectionReportInNotes(notes, report) {
-  const base = String(notes || '').replace(/\n?\[INSPECTION_REPORT\]\{[^\n]*\}/g, '').trim();
-  return `${base}${base ? '\n' : ''}[INSPECTION_REPORT]${JSON.stringify(report)}`;
+function structuredReservationTotals(rows = []) {
+  const normalized = Array.isArray(rows) ? rows : [];
+  const subtotal = Number(normalized
+    .filter((row) => String(row?.chargeType || '').toUpperCase() !== 'TAX')
+    .reduce((sum, row) => sum + Number(row?.total || 0), 0)
+    .toFixed(2));
+  const taxes = Number(normalized
+    .filter((row) => String(row?.chargeType || '').toUpperCase() === 'TAX')
+    .reduce((sum, row) => sum + Number(row?.total || 0), 0)
+    .toFixed(2));
+  const total = Number((subtotal + taxes).toFixed(2));
+  return { subtotal, taxes, total };
+}
+
+function structuredReservationPayments(reservation) {
+  const payments = Array.isArray(reservation?.payments) ? reservation.payments : [];
+  return payments.filter((payment) => String(payment?.status || 'PAID').toUpperCase() === 'PAID');
+}
+
+function reservationAdditionalDrivers(reservation) {
+  const structured = Array.isArray(reservation?.additionalDrivers) ? reservation.additionalDrivers : [];
+  if (structured.length) return structured;
+  return parseAdditionalDriversFromNotes(reservation?.notes);
+}
+
+function reservationDepositMeta(reservation) {
+  const snapshot = reservation?.pricingSnapshot;
+  if (snapshot) {
+    const amount = Number(snapshot.depositAmountDue || 0);
+    return {
+      requireDeposit: !!snapshot.depositRequired || amount > 0,
+      depositAmountDue: Number.isFinite(amount) ? amount : 0
+    };
+  }
+  return parseDepositMetaFromNotes(reservation?.notes);
+}
+
+function reservationSecurityDepositMeta(reservation) {
+  const snapshot = reservation?.pricingSnapshot;
+  if (snapshot) {
+    const amount = Number(snapshot.securityDepositAmount || 0);
+    return {
+      requireSecurityDeposit: !!snapshot.securityDepositRequired || amount > 0,
+      securityDepositAmount: Number.isFinite(amount) ? amount : 0
+    };
+  }
+  return parseSecurityDepositMetaFromNotes(reservation?.notes);
+}
+
+async function importStructuredReservationPaymentsToAgreement(rentalAgreementId, reservationPayments = []) {
+  const pending = (Array.isArray(reservationPayments) ? reservationPayments : []).filter((payment) => !payment?.rentalAgreementPaymentId);
+  if (!pending.length) {
+    const agreement = await prisma.rentalAgreement.findUnique({
+      where: { id: rentalAgreementId },
+      select: { paidAmount: true, total: true, balance: true }
+    });
+    return {
+      importedCount: 0,
+      paidAmount: Number(agreement?.paidAmount || 0),
+      balance: Number(agreement?.balance || 0)
+    };
+  }
+
+  let importedPaid = 0;
+  for (const payment of pending) {
+    const created = await prisma.rentalAgreementPayment.create({
+      data: {
+        rentalAgreementId,
+        method: payment.method || 'OTHER',
+        amount: Number(payment.amount || 0),
+        reference: payment.reference || null,
+        status: payment.status || 'PAID',
+        paidAt: payment.paidAt || new Date(),
+        notes: payment.notes || null
+      }
+    });
+
+    await prisma.reservationPayment.update({
+      where: { id: payment.id },
+      data: { rentalAgreementPaymentId: created.id }
+    });
+
+    if (String(payment.status || 'PAID').toUpperCase() === 'PAID') {
+      importedPaid += Number(payment.amount || 0);
+    }
+  }
+
+  const agreement = await prisma.rentalAgreement.findUnique({
+    where: { id: rentalAgreementId },
+    select: { total: true, paidAmount: true }
+  });
+  const paidAmount = Number((Number(agreement?.paidAmount || 0) + importedPaid).toFixed(2));
+  const balance = Number((Number(agreement?.total || 0) - paidAmount).toFixed(2));
+  await prisma.rentalAgreement.update({
+    where: { id: rentalAgreementId },
+    data: { paidAmount, balance }
+  });
+
+  return { importedCount: pending.length, paidAmount, balance };
+}
+
+async function syncAgreementAdditionalDrivers(rentalAgreementId, reservation) {
+  const additionalDrivers = reservationAdditionalDrivers(reservation);
+  await prisma.agreementDriver.deleteMany({
+    where: {
+      rentalAgreementId,
+      isPrimary: false
+    }
+  });
+
+  const rows = additionalDrivers
+    .map((driver) => ({
+      rentalAgreementId,
+      firstName: String(driver?.firstName || '').trim(),
+      lastName: String(driver?.lastName || '').trim(),
+      licenseNumber: driver?.licenseNumber ? String(driver.licenseNumber).trim() : null,
+      dateOfBirth: driver?.dateOfBirth ? new Date(driver.dateOfBirth) : null,
+      isPrimary: false
+    }))
+    .filter((driver) => driver.firstName && driver.lastName);
+
+  if (rows.length) {
+    await prisma.agreementDriver.createMany({ data: rows });
+  }
+
+  return rows.length;
+}
+
+function normalizeInspectionRow(row) {
+  if (!row) return null;
+  let photos = {};
+  try {
+    photos = row.photosJson ? JSON.parse(row.photosJson) : {};
+  } catch {
+    photos = {};
+  }
+  return {
+    phase: row.phase,
+    at: row.capturedAt,
+    ip: row.actorIp || null,
+    actorUserId: row.actorUserId || null,
+    exterior: row.exterior || null,
+    interior: row.interior || null,
+    tires: row.tires || null,
+    lights: row.lights || null,
+    windshield: row.windshield || null,
+    fuelLevel: row.fuelLevel || null,
+    odometer: row.odometer ?? null,
+    damages: row.damages || null,
+    notes: row.notes || null,
+    photos
+  };
+}
+
+function inspectionReportFromAgreement(agreement) {
+  const structured = Array.isArray(agreement?.inspections) ? agreement.inspections : [];
+  const checkout = structured.find((row) => String(row.phase || '').toUpperCase() === 'CHECKOUT') || null;
+  const checkin = structured.find((row) => String(row.phase || '').toUpperCase() === 'CHECKIN') || null;
+  return {
+    checkout: normalizeInspectionRow(checkout),
+    checkin: normalizeInspectionRow(checkin)
+  };
 }
 
 export const rentalAgreementsService = {
@@ -216,7 +377,14 @@ export const rentalAgreementsService = {
   async startFromReservation(reservationId, scope = null) {
     const reservation = await prisma.reservation.findFirst({
       where: { id: reservationId, ...(scope?.tenantId ? { tenantId: scope.tenantId } : {}) },
-      include: { customer: true, pickupLocation: true }
+      include: {
+        customer: true,
+        pickupLocation: true,
+        pricingSnapshot: true,
+        charges: { where: { selected: true }, orderBy: [{ sortOrder: 'asc' }, { createdAt: 'asc' }] },
+        payments: { orderBy: { paidAt: 'asc' } },
+        additionalDrivers: { orderBy: { createdAt: 'asc' } }
+      }
     });
 
     if (!reservation) throw new Error('Reservation not found');
@@ -228,8 +396,48 @@ export const rentalAgreementsService = {
     if (existing) {
       // Keep agreement charges synced from reservation charge metadata whenever start-rental is invoked.
       // This guarantees reservation->agreement parity for checkout flow.
+      const structuredRows = structuredReservationChargeRows(reservation);
+      const structuredPaymentsList = structuredReservationPayments(reservation);
       const meta = parseReservationChargesMeta(reservation.notes) || {};
       if (existing.status !== 'CLOSED' && existing.status !== 'CANCELLED') {
+        await syncAgreementAdditionalDrivers(existing.id, reservation);
+        let paid = Number(existing.paidAmount || 0);
+        if (structuredPaymentsList.length) {
+          const paymentSync = await importStructuredReservationPaymentsToAgreement(existing.id, structuredPaymentsList);
+          paid = Number(paymentSync.paidAmount || 0);
+        }
+
+        if (structuredRows?.length) {
+          const normalizedRows = structuredRows.map((row) => ({
+            rentalAgreementId: existing.id,
+            code: row.code,
+            name: row.name,
+            chargeType: row.chargeType,
+            quantity: row.quantity,
+            rate: row.rate,
+            total: row.total,
+            taxable: row.taxable,
+            selected: row.selected,
+            sortOrder: row.sortOrder
+          }));
+          const { subtotal, taxes, total } = structuredReservationTotals(normalizedRows);
+
+          await prisma.rentalAgreementCharge.deleteMany({ where: { rentalAgreementId: existing.id } });
+          await prisma.rentalAgreementCharge.createMany({ data: normalizedRows });
+
+          await prisma.rentalAgreement.update({
+            where: { id: existing.id },
+            data: {
+              notes: reservation.notes,
+              subtotal,
+              taxes,
+              total,
+              balance: Number((total - paid).toFixed(2))
+            }
+          });
+          return this.getById(existing.id);
+        }
+
         const tenantWhere = reservation.tenantId ? { tenantId: reservation.tenantId } : {};
         const selectedServiceIds = Array.isArray(meta?.selectedServices) ? meta.selectedServices : [];
         const selectedFeeIds = Array.isArray(meta?.selectedFees) ? meta.selectedFees : [];
@@ -241,7 +449,7 @@ export const rentalAgreementsService = {
           const autoUnderage = await prisma.fee.findMany({ where: { ...tenantWhere, isActive: true, isUnderageFee: true }, select: { id: true } });
           selectedFeeIds.push(...autoUnderage.map((x) => x.id));
         }
-        if (parseAdditionalDriversCountFromNotes(reservation.notes) > 0) {
+        if (reservationAdditionalDrivers(reservation).length > 0) {
           const autoAddl = await prisma.fee.findMany({ where: { ...tenantWhere, isActive: true, isAdditionalDriverFee: true }, select: { id: true } });
           selectedFeeIds.push(...autoAddl.map((x) => x.id));
         }
@@ -275,6 +483,7 @@ export const rentalAgreementsService = {
           await prisma.rentalAgreementCharge.createMany({
             data: normalizedRows.map((r, idx) => ({
               rentalAgreementId: existing.id,
+              code: r.code || null,
               name: r.name,
               chargeType: r.chargeType,
               quantity: r.quantity,
@@ -286,7 +495,6 @@ export const rentalAgreementsService = {
             }))
           });
 
-          const paid = Number(existing.paidAmount || 0);
           await prisma.rentalAgreement.update({ where: { id: existing.id }, data: { notes: reservation.notes, subtotal, taxes, total, balance: Number((total - paid).toFixed(2)) } });
           return this.getById(existing.id);
         }
@@ -314,7 +522,7 @@ export const rentalAgreementsService = {
           chargeRows.push({ rentalAgreementId: existing.id, name: f.name, chargeType: 'UNIT', quantity: 1, rate: mode === 'PERCENTAGE' ? amt : lineTotal, total: lineTotal, taxable: !!f.taxable, selected: true, sortOrder: chargeRows.length });
         });
 
-        const depositMeta = parseDepositMetaFromNotes(reservation.notes);
+        const depositMeta = reservationDepositMeta(reservation);
         const depositAmount = depositMeta.requireDeposit ? Number(depositMeta.depositAmountDue || 0) : 0;
         if (depositAmount > 0) {
           feesTotal += depositAmount;
@@ -322,7 +530,7 @@ export const rentalAgreementsService = {
         }
 
         let securityDepositAmount = 0;
-        const secMeta = parseSecurityDepositMetaFromNotes(reservation.notes);
+        const secMeta = reservationSecurityDepositMeta(reservation);
         if (secMeta.requireSecurityDeposit) {
           securityDepositAmount = Number(secMeta.securityDepositAmount || 0);
         }
@@ -346,7 +554,7 @@ export const rentalAgreementsService = {
         }, 0);
 
         const subtotal = Math.max(0, base + servicesTotal + feesTotal - discountTotal);
-        const taxRate = Number(meta?.taxRate ?? reservation.pickupLocation?.taxRate ?? 0);
+        const taxRate = Number(reservation?.pricingSnapshot?.taxRate ?? meta?.taxRate ?? reservation.pickupLocation?.taxRate ?? 0);
         const taxes = subtotal * (taxRate / 100);
         const total = subtotal + taxes;
 
@@ -358,7 +566,6 @@ export const rentalAgreementsService = {
         await prisma.rentalAgreementCharge.deleteMany({ where: { rentalAgreementId: existing.id } });
         await prisma.rentalAgreementCharge.createMany({ data: chargeRows });
 
-        const paid = Number(existing.paidAmount || 0);
         await prisma.rentalAgreement.update({
           where: { id: existing.id },
           data: {
@@ -424,8 +631,11 @@ export const rentalAgreementsService = {
       }
     });
 
+    await syncAgreementAdditionalDrivers(agreement.id, reservation);
+
     // Import any customer payments made before agreement creation
-    const prePayments = parseReservationPaymentsFromNotes(reservation.notes);
+    const structuredPrePayments = structuredReservationPayments(reservation);
+    const prePayments = structuredPrePayments.length ? structuredPrePayments : parseReservationPaymentsFromNotes(reservation.notes);
     const prePaidTotal = prePayments.reduce((sum, p) => sum + Number(p.amount || 0), 0);
 
     const days = rentalDays(reservation.pickupAt, reservation.returnAt);
@@ -442,7 +652,7 @@ export const rentalAgreementsService = {
       const autoUnderage = await prisma.fee.findMany({ where: { ...tenantWhere, isActive: true, isUnderageFee: true }, select: { id: true } });
       selectedFeeIds.push(...autoUnderage.map((x) => x.id));
     }
-    if (parseAdditionalDriversCountFromNotes(reservation.notes) > 0) {
+    if (reservationAdditionalDrivers(reservation).length > 0) {
       const autoAddl = await prisma.fee.findMany({ where: { ...tenantWhere, isActive: true, isAdditionalDriverFee: true }, select: { id: true } });
       selectedFeeIds.push(...autoAddl.map((x) => x.id));
     }
@@ -455,10 +665,12 @@ export const rentalAgreementsService = {
       ? await prisma.fee.findMany({ where: { ...tenantWhere, id: { in: uniqueSelectedFeeIds } } })
       : [];
 
-    const incomingRows = Array.isArray(meta?.chargeRows) ? meta.chargeRows : null;
+    const structuredRows = structuredReservationChargeRows(reservation);
+    const incomingRows = structuredRows?.length ? structuredRows : (Array.isArray(meta?.chargeRows) ? meta.chargeRows : null);
     if (incomingRows && incomingRows.length) {
       const normalizedRows = incomingRows.map((r) => ({
         name: String(r?.name || 'Line Item'),
+        code: r?.code || null,
         chargeType: String(r?.chargeType || 'UNIT').toUpperCase(),
         quantity: Number(r?.quantity || 1),
         rate: Number(r?.rate || 0),
@@ -471,6 +683,7 @@ export const rentalAgreementsService = {
       await prisma.rentalAgreementCharge.createMany({
         data: normalizedRows.map((r, idx) => ({
           rentalAgreementId: agreement.id,
+          code: r.code || null,
           name: r.name,
           chargeType: r.chargeType,
           quantity: r.quantity,
@@ -483,17 +696,21 @@ export const rentalAgreementsService = {
       });
 
       if (prePayments.length) {
-        await prisma.rentalAgreementPayment.createMany({
-          data: prePayments.map((p) => ({
-            rentalAgreementId: agreement.id,
-            method: 'CARD',
-            amount: Number(p.amount),
-            reference: p.reference || null,
-            status: 'PAID',
-            paidAt: p.paidAt,
-            notes: p.notes
-          }))
-        });
+        if (structuredPrePayments.length) {
+          await importStructuredReservationPaymentsToAgreement(agreement.id, structuredPrePayments);
+        } else {
+          await prisma.rentalAgreementPayment.createMany({
+            data: prePayments.map((p) => ({
+              rentalAgreementId: agreement.id,
+              method: 'CARD',
+              amount: Number(p.amount),
+              reference: p.reference || null,
+              status: 'PAID',
+              paidAt: p.paidAt,
+              notes: p.notes
+            }))
+          });
+        }
       }
 
       const total = Number(normalizedRows.reduce((s, r) => s + Number(r.total || 0), 0).toFixed(2));
@@ -579,7 +796,7 @@ export const rentalAgreementsService = {
       });
     });
 
-    const depositMeta = parseDepositMetaFromNotes(reservation.notes);
+    const depositMeta = reservationDepositMeta(reservation);
     const depositAmount = depositMeta.requireDeposit ? Number(depositMeta.depositAmountDue || 0) : 0;
     if (depositAmount > 0) {
       feesTotal += depositAmount;
@@ -597,7 +814,7 @@ export const rentalAgreementsService = {
     }
 
     let securityDepositAmount = 0;
-    const secMeta = parseSecurityDepositMetaFromNotes(reservation.notes);
+    const secMeta = reservationSecurityDepositMeta(reservation);
     if (secMeta.requireSecurityDeposit) {
       securityDepositAmount = Number(secMeta.securityDepositAmount || 0);
     }
@@ -631,7 +848,7 @@ export const rentalAgreementsService = {
     }, 0);
 
     const subtotal = Math.max(0, base + servicesTotal + feesTotal - discountTotal);
-    const taxRate = Number(meta?.taxRate ?? reservation.pickupLocation?.taxRate ?? 0);
+    const taxRate = Number(reservation?.pricingSnapshot?.taxRate ?? meta?.taxRate ?? reservation.pickupLocation?.taxRate ?? 0);
     const taxes = subtotal * (taxRate / 100);
     const total = subtotal + taxes;
 
@@ -664,17 +881,21 @@ export const rentalAgreementsService = {
     await prisma.rentalAgreementCharge.createMany({ data: chargeRows });
 
     if (prePayments.length) {
-      await prisma.rentalAgreementPayment.createMany({
-        data: prePayments.map((p) => ({
-          rentalAgreementId: agreement.id,
-          method: 'CARD',
-          amount: Number(p.amount),
-          reference: p.reference || null,
-          status: 'PAID',
-          paidAt: p.paidAt,
-          notes: p.notes
-        }))
-      });
+      if (structuredPrePayments.length) {
+        await importStructuredReservationPaymentsToAgreement(agreement.id, structuredPrePayments);
+      } else {
+        await prisma.rentalAgreementPayment.createMany({
+          data: prePayments.map((p) => ({
+            rentalAgreementId: agreement.id,
+            method: 'CARD',
+            amount: Number(p.amount),
+            reference: p.reference || null,
+            status: 'PAID',
+            paidAt: p.paidAt,
+            notes: p.notes
+          }))
+        });
+      }
     }
 
     await prisma.rentalAgreement.update({
@@ -722,7 +943,8 @@ export const rentalAgreementsService = {
         },
         drivers: true,
         charges: { orderBy: [{ sortOrder: 'asc' }, { createdAt: 'asc' }] },
-        payments: { orderBy: { paidAt: 'desc' } }
+        payments: { orderBy: { paidAt: 'desc' } },
+        inspections: { orderBy: { createdAt: 'asc' } }
       }
     });
   },
@@ -1290,16 +1512,18 @@ export const rentalAgreementsService = {
   },
 
   async saveInspection(id, payload = {}, actorUserId = null, actorIp = null) {
-    const agreement = await prisma.rentalAgreement.findUnique({ where: { id } });
+    const agreement = await prisma.rentalAgreement.findUnique({
+      where: { id },
+      include: { inspections: true }
+    });
     if (!agreement) throw new Error('Rental agreement not found');
 
     const phase = String(payload.phase || '').toUpperCase();
     if (!['CHECKOUT', 'CHECKIN'].includes(phase)) throw new Error('phase must be CHECKOUT or CHECKIN');
 
-    const current = parseInspectionReportFromNotes(agreement.notes);
     const inspectionBlock = {
       phase,
-      at: new Date().toISOString(),
+      at: new Date(),
       ip: actorIp || null,
       actorUserId: actorUserId || null,
       exterior: payload.exterior || null,
@@ -1313,14 +1537,46 @@ export const rentalAgreementsService = {
       notes: payload.notes || null,
       photos: payload.photos && typeof payload.photos === 'object' ? payload.photos : {}
     };
-
-    const nextReport = {
-      checkout: phase === 'CHECKOUT' ? inspectionBlock : (current.checkout || null),
-      checkin: phase === 'CHECKIN' ? inspectionBlock : (current.checkin || null)
-    };
-
-    const notes = upsertInspectionReportInNotes(agreement.notes, nextReport);
-    await prisma.rentalAgreement.update({ where: { id }, data: { notes } });
+    await prisma.rentalAgreementInspection.upsert({
+      where: {
+        rentalAgreementId_phase: {
+          rentalAgreementId: id,
+          phase
+        }
+      },
+      create: {
+        rentalAgreementId: id,
+        phase,
+        capturedAt: inspectionBlock.at,
+        actorUserId: inspectionBlock.actorUserId,
+        actorIp: inspectionBlock.ip,
+        exterior: inspectionBlock.exterior,
+        interior: inspectionBlock.interior,
+        tires: inspectionBlock.tires,
+        lights: inspectionBlock.lights,
+        windshield: inspectionBlock.windshield,
+        fuelLevel: inspectionBlock.fuelLevel ? String(inspectionBlock.fuelLevel) : null,
+        odometer: inspectionBlock.odometer === '' || inspectionBlock.odometer == null ? null : Number(inspectionBlock.odometer),
+        damages: inspectionBlock.damages,
+        notes: inspectionBlock.notes,
+        photosJson: JSON.stringify(inspectionBlock.photos || {})
+      },
+      update: {
+        capturedAt: inspectionBlock.at,
+        actorUserId: inspectionBlock.actorUserId,
+        actorIp: inspectionBlock.ip,
+        exterior: inspectionBlock.exterior,
+        interior: inspectionBlock.interior,
+        tires: inspectionBlock.tires,
+        lights: inspectionBlock.lights,
+        windshield: inspectionBlock.windshield,
+        fuelLevel: inspectionBlock.fuelLevel ? String(inspectionBlock.fuelLevel) : null,
+        odometer: inspectionBlock.odometer === '' || inspectionBlock.odometer == null ? null : Number(inspectionBlock.odometer),
+        damages: inspectionBlock.damages,
+        notes: inspectionBlock.notes,
+        photosJson: JSON.stringify(inspectionBlock.photos || {})
+      }
+    });
 
     await prisma.auditLog.create({
       data: {
@@ -1328,23 +1584,28 @@ export const rentalAgreementsService = {
         actorUserId: actorUserId || null,
         action: 'UPDATE',
         reason: `Inspection saved (${phase})`,
-        metadata: JSON.stringify({ phase, at: inspectionBlock.at, ip: inspectionBlock.ip })
+        metadata: JSON.stringify({ phase, at: inspectionBlock.at.toISOString(), ip: inspectionBlock.ip })
       }
     });
 
-    return { report: nextReport };
+    const refreshed = await prisma.rentalAgreement.findUnique({
+      where: { id },
+      include: { inspections: { orderBy: { createdAt: 'asc' } } }
+    });
+    return { report: inspectionReportFromAgreement(refreshed) };
   },
 
   async inspectionReport(id) {
     const agreement = await prisma.rentalAgreement.findUnique({
       where: { id },
       include: {
-        reservation: { include: { customer: true, vehicle: true } }
+        reservation: { include: { customer: true, vehicle: true } },
+        inspections: { orderBy: { createdAt: 'asc' } }
       }
     });
     if (!agreement) throw new Error('Rental agreement not found');
 
-    const report = parseInspectionReportFromNotes(agreement.notes);
+    const report = inspectionReportFromAgreement(agreement);
     return {
       agreementId: agreement.id,
       agreementNumber: agreement.agreementNumber,
@@ -1382,7 +1643,10 @@ export const rentalAgreementsService = {
   async closeAgreement(id, payload = {}, actorUserId = null, actorRole = 'AGENT', actorIp = null) {
     const agreement = await prisma.rentalAgreement.findUnique({
       where: { id },
-      include: { reservation: { include: { customer: true } } }
+      include: {
+        reservation: { include: { customer: true } },
+        inspections: { orderBy: { createdAt: 'asc' } }
+      }
     });
     if (!agreement) throw new Error('Rental agreement not found');
 
@@ -1390,7 +1654,7 @@ export const rentalAgreementsService = {
       throw new Error('Agreement cannot be closed with outstanding balance');
     }
 
-    const report = parseInspectionReportFromNotes(agreement.notes);
+    const report = inspectionReportFromAgreement(agreement);
     if (!report?.checkout?.at || !report?.checkout?.ip || !report?.checkin?.at || !report?.checkin?.ip) {
       throw new Error('Both inspections are required before closing agreement: checkout + check-in (timestamp/IP missing)');
     }

@@ -191,7 +191,8 @@ export const reservationsService = {
         vehicleType: true,
         vehicle: true,
         pickupLocation: true,
-        returnLocation: true
+        returnLocation: true,
+        additionalDrivers: { orderBy: { createdAt: 'asc' } }
       }
     });
     return rows.map((r) => ({ ...r, ...deriveUnderageAlertForReservation(r) }));
@@ -209,6 +210,7 @@ export const reservationsService = {
         vehicle: true,
         pickupLocation: true,
         returnLocation: true,
+        additionalDrivers: { orderBy: { createdAt: 'asc' } },
         rentalAgreement: {
           include: {
             charges: { orderBy: [{ sortOrder: 'asc' }, { createdAt: 'asc' }] },
