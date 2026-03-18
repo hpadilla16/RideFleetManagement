@@ -125,6 +125,27 @@ const EMPTY_SERVICE = {
   isActive: true, locationId: ''
 };
 const EMPTY_VEHICLE_TYPE = { code: '', name: '', description: '' };
+const EMPTY_COMMISSION_PLAN = {
+  id: '',
+  tenantId: '',
+  name: '',
+  isActive: true,
+  defaultValueType: '',
+  defaultPercentValue: '',
+  defaultFixedAmount: ''
+};
+const EMPTY_COMMISSION_RULE = {
+  id: '',
+  name: '',
+  serviceId: '',
+  chargeCode: '',
+  chargeType: '',
+  valueType: 'PERCENT',
+  percentValue: '',
+  fixedAmount: '',
+  priority: '0',
+  isActive: true
+};
 
 export default function SettingsPage() {
   return <AuthGate>{({ token, me, logout }) => <SettingsInner token={token} me={me} logout={logout} />}</AuthGate>;
@@ -166,9 +187,16 @@ function SettingsInner({ token, me, logout }) {
   const [locationEditor, setLocationEditor] = useState(null);
   const [locationEditorTab, setLocationEditorTab] = useState('main');
   const [copyLocationModal, setCopyLocationModal] = useState(null);
+  const [tenantRows, setTenantRows] = useState([]);
+  const [commissionPlans, setCommissionPlans] = useState([]);
+  const [activeCommissionTenantId, setActiveCommissionTenantId] = useState('');
+  const [activeCommissionPlanId, setActiveCommissionPlanId] = useState('');
+  const [commissionPlanForm, setCommissionPlanForm] = useState(EMPTY_COMMISSION_PLAN);
+  const [commissionRuleForm, setCommissionRuleForm] = useState(EMPTY_COMMISSION_RULE);
 
   const role = String(me?.role || '').toUpperCase().trim();
   const isAdmin = role === 'ADMIN' || role === 'SUPER_ADMIN';
+  const isSuper = role === 'SUPER_ADMIN';
 
   const load = async () => {
     const requests = [
@@ -216,7 +244,35 @@ function SettingsInner({ token, me, logout }) {
     else setMsg('');
   };
 
+  const loadCommissionConfig = async (tenantId = activeCommissionTenantId) => {
+    try {
+      const qs = new URLSearchParams();
+      if (isSuper && tenantId) qs.set('tenantId', tenantId);
+      const list = await api(`/api/commissions/plans${qs.toString() ? `?${qs.toString()}` : ''}`, {}, token);
+      const rows = Array.isArray(list) ? list : [];
+      setCommissionPlans(rows);
+      setActiveCommissionPlanId((current) => {
+        if (current && rows.some((row) => row.id === current)) return current;
+        return rows[0]?.id || '';
+      });
+    } catch (e) {
+      setMsg(e.message);
+    }
+  };
+
+  const loadTenants = async () => {
+    if (!isSuper) return;
+    try {
+      const list = await api('/api/tenants', {}, token);
+      setTenantRows(Array.isArray(list) ? list : []);
+    } catch (e) {
+      setMsg(e.message);
+    }
+  };
+
   useEffect(() => { load(); }, [token]);
+  useEffect(() => { loadCommissionConfig(activeCommissionTenantId); }, [token, activeCommissionTenantId]);
+  useEffect(() => { loadTenants(); }, [token, isSuper]);
 
   const saveAgreement = async () => {
     setCfg(await api('/api/settings/rental-agreement', { method: 'PUT', body: JSON.stringify(cfg) }, token));
@@ -767,6 +823,173 @@ function SettingsInner({ token, me, logout }) {
     await patchService(svc.id, { name, rate: Number(rate || 0) });
   };
 
+  const resetCommissionPlanForm = () => {
+    setCommissionPlanForm({
+      ...EMPTY_COMMISSION_PLAN,
+      tenantId: isSuper ? (activeCommissionTenantId || '') : (me?.tenantId || '')
+    });
+  };
+
+  const resetCommissionRuleForm = () => {
+    setCommissionRuleForm(EMPTY_COMMISSION_RULE);
+  };
+
+  const editCommissionPlan = (plan) => {
+    setActiveCommissionPlanId(plan.id);
+    setCommissionPlanForm({
+      id: plan.id,
+      tenantId: plan.tenantId || '',
+      name: plan.name || '',
+      isActive: plan.isActive !== false,
+      defaultValueType: plan.defaultValueType || '',
+      defaultPercentValue: plan.defaultPercentValue ?? '',
+      defaultFixedAmount: plan.defaultFixedAmount ?? ''
+    });
+    resetCommissionRuleForm();
+  };
+
+  const saveCommissionPlan = async (e) => {
+    e.preventDefault();
+    const tenantId = isSuper ? (commissionPlanForm.tenantId || activeCommissionTenantId || '') : (me?.tenantId || '');
+    const scopeTenantId = commissionPlanForm.id ? (activeCommissionPlan?.tenantId || tenantId) : tenantId;
+    if (!commissionPlanForm.name.trim()) {
+      setMsg('Commission plan name is required');
+      return;
+    }
+    if (isSuper && !tenantId) {
+      setMsg('Select a tenant before saving a commission plan');
+      return;
+    }
+    const payload = {
+      tenantId: tenantId || null,
+      name: commissionPlanForm.name.trim(),
+      isActive: !!commissionPlanForm.isActive,
+      defaultValueType: commissionPlanForm.defaultValueType || null,
+      defaultPercentValue: commissionPlanForm.defaultPercentValue,
+      defaultFixedAmount: commissionPlanForm.defaultFixedAmount
+    };
+    try {
+      const method = commissionPlanForm.id ? 'PATCH' : 'POST';
+      const path = commissionPlanForm.id ? `/api/commissions/plans/${commissionPlanForm.id}` : '/api/commissions/plans';
+      const qs = new URLSearchParams();
+      if (isSuper && scopeTenantId) qs.set('tenantId', scopeTenantId);
+      const saved = await api(`${path}${qs.toString() ? `?${qs.toString()}` : ''}`, { method, body: JSON.stringify(payload) }, token);
+      setMsg(commissionPlanForm.id ? 'Commission plan updated' : 'Commission plan created');
+      await loadCommissionConfig(activeCommissionTenantId);
+      setActiveCommissionPlanId(saved?.id || '');
+      resetCommissionPlanForm();
+    } catch (e2) {
+      setMsg(e2.message);
+    }
+  };
+
+  const removeCommissionPlan = async (plan) => {
+    if (!window.confirm(`Delete commission plan "${plan.name}"?`)) return;
+    try {
+      const qs = new URLSearchParams();
+      if (isSuper && plan?.tenantId) qs.set('tenantId', plan.tenantId);
+      await api(`/api/commissions/plans/${plan.id}${qs.toString() ? `?${qs.toString()}` : ''}`, { method: 'DELETE' }, token);
+      setMsg('Commission plan removed');
+      if (activeCommissionPlanId === plan.id) setActiveCommissionPlanId('');
+      resetCommissionPlanForm();
+      resetCommissionRuleForm();
+      await loadCommissionConfig(activeCommissionTenantId);
+    } catch (e) {
+      setMsg(e.message);
+    }
+  };
+
+  const editCommissionRule = (rule) => {
+    setCommissionRuleForm({
+      id: rule.id,
+      name: rule.name || '',
+      serviceId: rule.serviceId || '',
+      chargeCode: rule.chargeCode || '',
+      chargeType: rule.chargeType || '',
+      valueType: rule.valueType || 'PERCENT',
+      percentValue: rule.percentValue ?? '',
+      fixedAmount: rule.fixedAmount ?? '',
+      priority: String(rule.priority ?? 0),
+      isActive: rule.isActive !== false
+    });
+  };
+
+  const saveCommissionRule = async (e) => {
+    e.preventDefault();
+    const activePlan = commissionPlans.find((plan) => plan.id === activeCommissionPlanId);
+    const tenantId = activePlan?.tenantId || activeCommissionTenantId || '';
+    if (!activePlan) {
+      setMsg('Select a commission plan first');
+      return;
+    }
+    if (!commissionRuleForm.name.trim()) {
+      setMsg('Commission rule name is required');
+      return;
+    }
+    if (!commissionRuleForm.serviceId && !commissionRuleForm.chargeCode.trim() && !commissionRuleForm.chargeType) {
+      setMsg('Choose a service, charge code, or charge type for the rule');
+      return;
+    }
+    if (commissionRuleForm.valueType === 'PERCENT' && commissionRuleForm.percentValue === '') {
+      setMsg('Percent value is required for percentage rules');
+      return;
+    }
+    if (commissionRuleForm.valueType !== 'PERCENT' && commissionRuleForm.fixedAmount === '') {
+      setMsg('Fixed amount is required for fixed commission rules');
+      return;
+    }
+
+    const payload = {
+      name: commissionRuleForm.name.trim(),
+      serviceId: commissionRuleForm.serviceId || null,
+      chargeCode: commissionRuleForm.chargeCode.trim() || null,
+      chargeType: commissionRuleForm.chargeType || null,
+      valueType: commissionRuleForm.valueType,
+      percentValue: commissionRuleForm.percentValue,
+      fixedAmount: commissionRuleForm.fixedAmount,
+      priority: Number(commissionRuleForm.priority || 0),
+      isActive: !!commissionRuleForm.isActive
+    };
+
+    try {
+      const qs = new URLSearchParams();
+      if (isSuper && tenantId) qs.set('tenantId', tenantId);
+      if (commissionRuleForm.id) {
+        await api(`/api/commissions/rules/${commissionRuleForm.id}${qs.toString() ? `?${qs.toString()}` : ''}`, { method: 'PATCH', body: JSON.stringify(payload) }, token);
+      } else {
+        await api(`/api/commissions/plans/${activePlan.id}/rules${qs.toString() ? `?${qs.toString()}` : ''}`, { method: 'POST', body: JSON.stringify(payload) }, token);
+      }
+      setMsg(commissionRuleForm.id ? 'Commission rule updated' : 'Commission rule created');
+      resetCommissionRuleForm();
+      await loadCommissionConfig(activeCommissionTenantId);
+    } catch (e2) {
+      setMsg(e2.message);
+    }
+  };
+
+  const removeCommissionRule = async (rule) => {
+    if (!window.confirm(`Delete commission rule "${rule.name}"?`)) return;
+    const activePlan = commissionPlans.find((plan) => plan.id === activeCommissionPlanId);
+    const tenantId = activePlan?.tenantId || activeCommissionTenantId || '';
+    try {
+      const qs = new URLSearchParams();
+      if (isSuper && tenantId) qs.set('tenantId', tenantId);
+      await api(`/api/commissions/rules/${rule.id}${qs.toString() ? `?${qs.toString()}` : ''}`, { method: 'DELETE' }, token);
+      setMsg('Commission rule removed');
+      if (commissionRuleForm.id === rule.id) resetCommissionRuleForm();
+      await loadCommissionConfig(activeCommissionTenantId);
+    } catch (e) {
+      setMsg(e.message);
+    }
+  };
+
+  const activeCommissionPlan = commissionPlans.find((plan) => plan.id === activeCommissionPlanId) || null;
+  const commissionServiceTenantId = activeCommissionPlan?.tenantId || activeCommissionTenantId;
+  const commissionServices = services.filter((service) => {
+    if (!isSuper || !commissionServiceTenantId) return true;
+    return !service?.tenantId || service.tenantId === commissionServiceTenantId;
+  });
+
   const rateScopeLabel = (rate) => {
     if (rate?.location?.name) return rate.location.name;
     try {
@@ -806,6 +1029,7 @@ function SettingsInner({ token, me, logout }) {
           <button onClick={() => setTab('insurance')}>Insurance</button>
           <button onClick={() => setTab('emails')}>Emails</button>
           <button onClick={() => setTab('services')}>Additional Services</button>
+          <button onClick={() => setTab('commissions')}>Commissions</button>
         </div>
 
         {tab === 'agreement' && (
@@ -1332,6 +1556,230 @@ function SettingsInner({ token, me, logout }) {
                 ))}
               </tbody>
             </table>
+          </div>
+        )}
+
+        {tab === 'commissions' && (
+          <div className="stack">
+            <div className="row-between">
+              <div>
+                <h2>Commission Plans</h2>
+                <p className="label">Configure how service sales pay out when an agreement closes.</p>
+              </div>
+              <div style={{ display: 'flex', gap: 8 }}>
+                <button type="button" onClick={() => { resetCommissionPlanForm(); resetCommissionRuleForm(); }}>New Plan</button>
+                <button type="button" onClick={() => loadCommissionConfig(activeCommissionTenantId)}>Refresh</button>
+              </div>
+            </div>
+
+            {isSuper ? (
+              <div className="stack">
+                <label className="label">Tenant Scope</label>
+                <select value={activeCommissionTenantId} onChange={(e) => {
+                  setActiveCommissionTenantId(e.target.value);
+                  setActiveCommissionPlanId('');
+                  resetCommissionPlanForm();
+                  resetCommissionRuleForm();
+                }}>
+                  <option value="">All tenants</option>
+                  {tenantRows.map((tenant) => <option key={tenant.id} value={tenant.id}>{tenant.name} ({tenant.slug})</option>)}
+                </select>
+              </div>
+            ) : null}
+
+            <div className="grid2">
+              <form className="glass card stack" style={{ padding: 12 }} onSubmit={saveCommissionPlan}>
+                <div className="row-between">
+                  <h3>{commissionPlanForm.id ? 'Edit Plan' : 'New Plan'}</h3>
+                  {commissionPlanForm.id ? <button type="button" onClick={resetCommissionPlanForm}>Cancel</button> : null}
+                </div>
+
+                {isSuper ? (
+                  <div className="stack">
+                    <label className="label">Tenant</label>
+                    <select
+                      value={commissionPlanForm.tenantId || activeCommissionTenantId || ''}
+                      disabled={!!commissionPlanForm.id}
+                      onChange={(e) => setCommissionPlanForm((prev) => ({ ...prev, tenantId: e.target.value }))}
+                    >
+                      <option value="">Select tenant</option>
+                      {tenantRows.map((tenant) => <option key={tenant.id} value={tenant.id}>{tenant.name} ({tenant.slug})</option>)}
+                    </select>
+                    {commissionPlanForm.id ? <span className="label">Tenant scope is fixed after plan creation.</span> : null}
+                  </div>
+                ) : null}
+
+                <div className="stack">
+                  <label className="label">Plan Name</label>
+                  <input value={commissionPlanForm.name} onChange={(e) => setCommissionPlanForm((prev) => ({ ...prev, name: e.target.value }))} placeholder="Sales Team Standard" />
+                </div>
+
+                <div className="grid2">
+                  <div className="stack">
+                    <label className="label">Default Rule Type</label>
+                    <select value={commissionPlanForm.defaultValueType || ''} onChange={(e) => setCommissionPlanForm((prev) => ({ ...prev, defaultValueType: e.target.value }))}>
+                      <option value="">No default fallback</option>
+                      <option value="PERCENT">Percent of line revenue</option>
+                      <option value="FIXED_PER_UNIT">Fixed per unit sold</option>
+                      <option value="FIXED_PER_AGREEMENT">Fixed per agreement</option>
+                    </select>
+                  </div>
+                  <div className="stack">
+                    <label className="label">Status</label>
+                    <label className="label"><input type="checkbox" checked={!!commissionPlanForm.isActive} onChange={(e) => setCommissionPlanForm((prev) => ({ ...prev, isActive: e.target.checked }))} /> Active plan</label>
+                  </div>
+                </div>
+
+                <div className="grid2">
+                  <div className="stack">
+                    <label className="label">Default Percent</label>
+                    <input type="number" min="0" step="0.01" value={commissionPlanForm.defaultPercentValue} onChange={(e) => setCommissionPlanForm((prev) => ({ ...prev, defaultPercentValue: e.target.value }))} placeholder="5" />
+                  </div>
+                  <div className="stack">
+                    <label className="label">Default Fixed Amount</label>
+                    <input type="number" min="0" step="0.01" value={commissionPlanForm.defaultFixedAmount} onChange={(e) => setCommissionPlanForm((prev) => ({ ...prev, defaultFixedAmount: e.target.value }))} placeholder="3.00" />
+                  </div>
+                </div>
+
+                <button type="submit">{commissionPlanForm.id ? 'Save Plan' : 'Create Plan'}</button>
+              </form>
+
+              <div className="glass card stack" style={{ padding: 12 }}>
+                <div className="row-between">
+                  <h3>Existing Plans</h3>
+                  <span className="label">{commissionPlans.length} total</span>
+                </div>
+                <table>
+                  <thead><tr><th>Name</th><th>Tenant</th><th>Defaults</th><th>Rules</th><th>Active</th><th>Actions</th></tr></thead>
+                  <tbody>
+                    {commissionPlans.length ? commissionPlans.map((plan) => (
+                      <tr key={plan.id}>
+                        <td>
+                          <div>{plan.name}</div>
+                          <div className="label">{plan.id === activeCommissionPlanId ? 'Selected plan' : ''}</div>
+                        </td>
+                        <td>{tenantRows.find((tenant) => tenant.id === plan.tenantId)?.name || (plan.tenantId ? plan.tenantId : 'Current tenant')}</td>
+                        <td>{plan.defaultValueType || '-'}{plan.defaultValueType === 'PERCENT' && plan.defaultPercentValue != null ? ` / ${Number(plan.defaultPercentValue).toFixed(2)}%` : ''}{plan.defaultValueType && plan.defaultValueType !== 'PERCENT' && plan.defaultFixedAmount != null ? ` / $${Number(plan.defaultFixedAmount).toFixed(2)}` : ''}</td>
+                        <td>{Array.isArray(plan.rules) ? plan.rules.length : 0}</td>
+                        <td>{plan.isActive ? 'Yes' : 'No'}</td>
+                        <td style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                          <button type="button" onClick={() => editCommissionPlan(plan)}>Edit</button>
+                          <button type="button" onClick={() => setActiveCommissionPlanId(plan.id)}>Rules</button>
+                          <button type="button" onClick={() => removeCommissionPlan(plan)}>Delete</button>
+                        </td>
+                      </tr>
+                    )) : (
+                      <tr><td colSpan="6">No commission plans configured yet.</td></tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            <div className="glass card stack" style={{ padding: 12 }}>
+              <div className="row-between">
+                <div>
+                  <h3>{activeCommissionPlan ? `Rules for ${activeCommissionPlan.name}` : 'Commission Rules'}</h3>
+                  <p className="label">Use service-specific rules first, then charge code/type, then the plan fallback.</p>
+                </div>
+                {commissionRuleForm.id ? <button type="button" onClick={resetCommissionRuleForm}>Cancel Rule Edit</button> : null}
+              </div>
+
+              {!activeCommissionPlan ? <p className="label">Select a plan to configure its rules.</p> : (
+                <>
+                  <form className="stack" onSubmit={saveCommissionRule}>
+                    <div className="grid2">
+                      <div className="stack">
+                        <label className="label">Rule Name</label>
+                        <input value={commissionRuleForm.name} onChange={(e) => setCommissionRuleForm((prev) => ({ ...prev, name: e.target.value }))} placeholder="Insurance policy sold" />
+                      </div>
+                      <div className="stack">
+                        <label className="label">Priority</label>
+                        <input type="number" value={commissionRuleForm.priority} onChange={(e) => setCommissionRuleForm((prev) => ({ ...prev, priority: e.target.value }))} />
+                      </div>
+                    </div>
+
+                    <div className="grid3">
+                      <div className="stack">
+                        <label className="label">Service Match</label>
+                        <select value={commissionRuleForm.serviceId} onChange={(e) => setCommissionRuleForm((prev) => ({ ...prev, serviceId: e.target.value }))}>
+                          <option value="">No service match</option>
+                          {commissionServices.map((service) => <option key={service.id} value={service.id}>{service.code} - {service.name}</option>)}
+                        </select>
+                      </div>
+                      <div className="stack">
+                        <label className="label">Charge Code Match</label>
+                        <input value={commissionRuleForm.chargeCode} onChange={(e) => setCommissionRuleForm((prev) => ({ ...prev, chargeCode: e.target.value.toUpperCase() }))} placeholder="LDW" />
+                      </div>
+                      <div className="stack">
+                        <label className="label">Charge Type Match</label>
+                        <select value={commissionRuleForm.chargeType} onChange={(e) => setCommissionRuleForm((prev) => ({ ...prev, chargeType: e.target.value }))}>
+                          <option value="">No charge type match</option>
+                          <option value="UNIT">UNIT</option>
+                          <option value="DAILY">DAILY</option>
+                          <option value="PERCENT">PERCENT</option>
+                          <option value="DEPOSIT">DEPOSIT</option>
+                          <option value="TAX">TAX</option>
+                        </select>
+                      </div>
+                    </div>
+
+                    <div className="grid2">
+                      <div className="stack">
+                        <label className="label">Commission Type</label>
+                        <select value={commissionRuleForm.valueType} onChange={(e) => setCommissionRuleForm((prev) => ({ ...prev, valueType: e.target.value }))}>
+                          <option value="PERCENT">Percent of sale</option>
+                          <option value="FIXED_PER_UNIT">Fixed per unit</option>
+                          <option value="FIXED_PER_AGREEMENT">Fixed per agreement</option>
+                        </select>
+                      </div>
+                      <div className="stack">
+                        <label className="label">Status</label>
+                        <label className="label"><input type="checkbox" checked={!!commissionRuleForm.isActive} onChange={(e) => setCommissionRuleForm((prev) => ({ ...prev, isActive: e.target.checked }))} /> Active rule</label>
+                      </div>
+                    </div>
+
+                    <div className="grid2">
+                      <div className="stack">
+                        <label className="label">Percent Value</label>
+                        <input type="number" min="0" step="0.01" value={commissionRuleForm.percentValue} onChange={(e) => setCommissionRuleForm((prev) => ({ ...prev, percentValue: e.target.value }))} placeholder="5" />
+                      </div>
+                      <div className="stack">
+                        <label className="label">Fixed Amount</label>
+                        <input type="number" min="0" step="0.01" value={commissionRuleForm.fixedAmount} onChange={(e) => setCommissionRuleForm((prev) => ({ ...prev, fixedAmount: e.target.value }))} placeholder="3.00" />
+                      </div>
+                    </div>
+
+                    <button type="submit">{commissionRuleForm.id ? 'Save Rule' : 'Add Rule'}</button>
+                  </form>
+
+                  <table>
+                    <thead><tr><th>Name</th><th>Match</th><th>Type</th><th>Value</th><th>Priority</th><th>Active</th><th>Actions</th></tr></thead>
+                    <tbody>
+                      {(activeCommissionPlan.rules || []).length ? (activeCommissionPlan.rules || []).map((rule) => (
+                        <tr key={rule.id}>
+                          <td>{rule.name}</td>
+                          <td>
+                            {rule.service?.name || rule.chargeCode || rule.chargeType || '-'}
+                            <div className="label">{rule.service?.code ? `${rule.service.code} service` : rule.chargeCode ? 'Charge code' : rule.chargeType ? 'Charge type' : 'Fallback'}</div>
+                          </td>
+                          <td>{rule.valueType}</td>
+                          <td>{rule.valueType === 'PERCENT' ? `${Number(rule.percentValue || 0).toFixed(2)}%` : `$${Number(rule.fixedAmount || 0).toFixed(2)}`}</td>
+                          <td>{rule.priority}</td>
+                          <td>{rule.isActive ? 'Yes' : 'No'}</td>
+                          <td style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                            <button type="button" onClick={() => editCommissionRule(rule)}>Edit</button>
+                            <button type="button" onClick={() => removeCommissionRule(rule)}>Delete</button>
+                          </td>
+                        </tr>
+                      )) : (
+                        <tr><td colSpan="7">No rules configured for this plan yet.</td></tr>
+                      )}
+                    </tbody>
+                  </table>
+                </>
+              )}
+            </div>
           </div>
         )}
       </section>
