@@ -14,6 +14,11 @@ function isoInput(value) {
   return d.toISOString().slice(0, 10);
 }
 
+function monthInput(value) {
+  const d = value ? new Date(value) : new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+}
+
 function daysAgo(n) {
   const d = new Date();
   d.setDate(d.getDate() - n);
@@ -35,9 +40,12 @@ function metricCards(report) {
 }
 
 function Inner({ token, me, logout }) {
+  const canFilterEmployee = ['SUPER_ADMIN', 'ADMIN', 'OPS'].includes(String(me?.role || '').toUpperCase());
   const [filters, setFilters] = useState({ start: daysAgo(29), end: daysAgo(0), tenantId: '', locationId: '', employeeUserId: '' });
   const [report, setReport] = useState(null);
   const [servicesSold, setServicesSold] = useState(null);
+  const [commissionMonth, setCommissionMonth] = useState(monthInput(new Date()));
+  const [commissionLedger, setCommissionLedger] = useState([]);
   const [msg, setMsg] = useState('');
   const [loading, setLoading] = useState(true);
 
@@ -57,12 +65,19 @@ function Inner({ token, me, logout }) {
         ...(next.locationId ? { locationId: next.locationId } : {}),
         ...(next.employeeUserId ? { employeeUserId: next.employeeUserId } : {})
       });
-      const [overviewOut, servicesOut] = await Promise.all([
+      const ledgerQs = new URLSearchParams({
+        month: commissionMonth,
+        ...(next.tenantId ? { tenantId: next.tenantId } : {}),
+        ...(canFilterEmployee && next.employeeUserId ? { employeeUserId: next.employeeUserId } : {})
+      });
+      const [overviewOut, servicesOut, ledgerOut] = await Promise.all([
         api(`/api/reports/overview?${reportQs.toString()}`, {}, token),
-        api(`/api/reports/services-sold?${servicesQs.toString()}`, {}, token)
+        api(`/api/reports/services-sold?${servicesQs.toString()}`, {}, token),
+        api(`/api/commissions/ledger?${ledgerQs.toString()}`, {}, token)
       ]);
       setReport(overviewOut);
       setServicesSold(servicesOut);
+      setCommissionLedger(Array.isArray(ledgerOut) ? ledgerOut : []);
       setMsg('');
     } catch (e) {
       setMsg(e.message);
@@ -74,11 +89,20 @@ function Inner({ token, me, logout }) {
   useEffect(() => {
     load(filters);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [token]);
+  }, [token, commissionMonth]);
 
   const cards = useMemo(() => metricCards(report), [report]);
   const reservationSeriesMax = Math.max(1, ...(report?.reservationsByDay || []).map((row) => Number(row.count || 0)));
   const paymentSeriesMax = Math.max(1, ...(report?.paymentsByDay || []).map((row) => Number(row.amount || 0)));
+  const commissionSummary = useMemo(() => {
+    const rows = Array.isArray(commissionLedger) ? commissionLedger : [];
+    return {
+      agreements: rows.length,
+      grossRevenue: rows.reduce((sum, row) => sum + Number(row.grossRevenue || 0), 0),
+      serviceRevenue: rows.reduce((sum, row) => sum + Number(row.serviceRevenue || 0), 0),
+      commissionAmount: rows.reduce((sum, row) => sum + Number(row.commissionAmount || 0), 0)
+    };
+  }, [commissionLedger]);
 
   const exportCsv = async () => {
     try {
@@ -173,17 +197,28 @@ function Inner({ token, me, logout }) {
           </select>
         </div>
 
+        {canFilterEmployee ? (
+          <div>
+            <span className="label">Employee</span>
+            <select
+              value={filters.employeeUserId}
+              onChange={(e) => setFilters((prev) => ({ ...prev, employeeUserId: e.target.value }))}
+            >
+              <option value="">All employees</option>
+              {(servicesSold?.employees || []).map((employee) => (
+                <option key={employee.id} value={employee.id}>{employee.fullName}</option>
+              ))}
+            </select>
+          </div>
+        ) : null}
+
         <div>
-          <span className="label">Employee</span>
-          <select
-            value={filters.employeeUserId}
-            onChange={(e) => setFilters((prev) => ({ ...prev, employeeUserId: e.target.value }))}
-          >
-            <option value="">All employees</option>
-            {(servicesSold?.employees || []).map((employee) => (
-              <option key={employee.id} value={employee.id}>{employee.fullName}</option>
-            ))}
-          </select>
+          <span className="label">Commission Month</span>
+          <input
+            type="month"
+            value={commissionMonth}
+            onChange={(e) => setCommissionMonth(e.target.value)}
+          />
         </div>
 
         <button onClick={() => load(filters)} disabled={loading}>Apply Range</button>
@@ -191,7 +226,7 @@ function Inner({ token, me, logout }) {
         {loading ? <p className="label">Loading report...</p> : null}
         {!loading && report?.filters?.tenantName ? <p className="label">Tenant: {report.filters.tenantName}</p> : null}
         {!loading && report?.filters?.locationName ? <p className="label">Filtered by: {report.filters.locationName}</p> : null}
-        {!loading && servicesSold?.filters?.employeeName ? <p className="label">Employee: {servicesSold.filters.employeeName}</p> : null}
+        {!loading && canFilterEmployee && servicesSold?.filters?.employeeName ? <p className="label">Employee: {servicesSold.filters.employeeName}</p> : null}
       </section>
 
       <section className="grid2" style={{ marginTop: 12 }}>
@@ -294,7 +329,7 @@ function Inner({ token, me, logout }) {
             <p className="label">Closed agreements and commission-bearing service lines</p>
           </div>
           <div className="label">
-            Revenue {fmtMoney(servicesSold?.summary?.serviceRevenue)} · Commission {fmtMoney(servicesSold?.summary?.commissionAmount)}
+            Revenue {fmtMoney(servicesSold?.summary?.serviceRevenue)} | Commission {fmtMoney(servicesSold?.summary?.commissionAmount)}
           </div>
         </div>
 
@@ -344,6 +379,7 @@ function Inner({ token, me, logout }) {
             </table>
           </div>
 
+          {canFilterEmployee ? (
           <div>
             <h4>By Employee</h4>
             <table>
@@ -369,6 +405,94 @@ function Inner({ token, me, logout }) {
               </tbody>
             </table>
           </div>
+          ) : null}
+        </div>
+      </section>
+
+      <section className="glass card-lg stack" style={{ marginTop: 12 }}>
+        <div className="row-between">
+          <div>
+            <h3>{canFilterEmployee && servicesSold?.filters?.employeeName ? `${servicesSold.filters.employeeName} Commission` : 'My Commission'}</h3>
+            <p className="label">Month-to-month commission snapshot from closed agreements</p>
+          </div>
+          <div className="label">{commissionMonth}</div>
+        </div>
+
+        <div className="grid2">
+          <div className="glass card">
+            <div className="label">Closed Agreements</div>
+            <div style={{ fontSize: 28, fontWeight: 800, marginTop: 6 }}>{commissionSummary.agreements}</div>
+          </div>
+          <div className="glass card">
+            <div className="label">Gross Revenue</div>
+            <div style={{ fontSize: 28, fontWeight: 800, marginTop: 6 }}>{fmtMoney(commissionSummary.grossRevenue)}</div>
+          </div>
+          <div className="glass card">
+            <div className="label">Service Revenue</div>
+            <div style={{ fontSize: 28, fontWeight: 800, marginTop: 6 }}>{fmtMoney(commissionSummary.serviceRevenue)}</div>
+          </div>
+          <div className="glass card">
+            <div className="label">Commission Earned</div>
+            <div style={{ fontSize: 28, fontWeight: 800, marginTop: 6 }}>{fmtMoney(commissionSummary.commissionAmount)}</div>
+          </div>
+        </div>
+
+        <div>
+          <h4>Agreement Ledger</h4>
+          <table>
+            <thead>
+              <tr>
+                <th>Agreement</th>
+                <th>Closed</th>
+                <th>Gross</th>
+                <th>Service Revenue</th>
+                <th>Commission</th>
+                <th>Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              {(commissionLedger || []).map((row) => (
+                <tr key={row.id}>
+                  <td>{row.rentalAgreement?.agreementNumber || row.rentalAgreementId}</td>
+                  <td>{row.rentalAgreement?.closedAt ? new Date(row.rentalAgreement.closedAt).toLocaleDateString() : '-'}</td>
+                  <td>{fmtMoney(row.grossRevenue)}</td>
+                  <td>{fmtMoney(row.serviceRevenue)}</td>
+                  <td>{fmtMoney(row.commissionAmount)}</td>
+                  <td>{row.status}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+
+        <div>
+          <h4>Commission Lines</h4>
+          <table>
+            <thead>
+              <tr>
+                <th>Agreement</th>
+                <th>Line</th>
+                <th>Qty</th>
+                <th>Revenue</th>
+                <th>Rule</th>
+                <th>Commission</th>
+              </tr>
+            </thead>
+            <tbody>
+              {(commissionLedger || [])
+                .flatMap((row) => (row.lines || []).map((line) => ({ ...line, agreementNumber: row.rentalAgreement?.agreementNumber || row.rentalAgreementId || row.id })))
+                .map((line) => (
+                  <tr key={line.id}>
+                    <td>{line.agreementNumber}</td>
+                    <td>{line.service?.name || line.description}</td>
+                    <td>{Number(line.quantity || 0).toFixed(2)}</td>
+                    <td>{fmtMoney(line.lineRevenue)}</td>
+                    <td>{line.valueType}</td>
+                    <td>{fmtMoney(line.commissionAmount)}</td>
+                  </tr>
+                ))}
+            </tbody>
+          </table>
         </div>
       </section>
     </AppShell>
