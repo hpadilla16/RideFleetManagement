@@ -210,6 +210,82 @@ function structuredReservationPayments(reservation) {
   return payments.filter((payment) => String(payment?.status || 'PAID').toUpperCase() === 'PAID');
 }
 
+function monthKey(value = new Date()) {
+  const d = new Date(value);
+  const year = d.getFullYear();
+  const month = String(d.getMonth() + 1).padStart(2, '0');
+  return `${year}-${month}`;
+}
+
+function roundMoney(value) {
+  return Number(Number(value || 0).toFixed(2));
+}
+
+function commissionChargeRows(charges = []) {
+  return (Array.isArray(charges) ? charges : []).filter((row) => {
+    if (row?.selected === false) return false;
+    const total = Number(row?.total || 0);
+    if (!(total > 0)) return false;
+    const chargeType = String(row?.chargeType || '').toUpperCase();
+    return chargeType !== 'TAX' && chargeType !== 'DEPOSIT';
+  });
+}
+
+function resolveCommissionRule(charge, rules = []) {
+  const chargeCode = String(charge?.code || '').trim();
+  const chargeType = String(charge?.chargeType || '').toUpperCase();
+  const serviceId = String(charge?.source || '').toUpperCase() === 'ADDITIONAL_SERVICE' && charge?.sourceRefId
+    ? String(charge.sourceRefId)
+    : null;
+
+  const list = Array.isArray(rules) ? rules : [];
+  return list.find((rule) => {
+    if (!rule?.isActive) return false;
+    if (serviceId && rule.serviceId && String(rule.serviceId) === serviceId) return true;
+    if (chargeCode && rule.chargeCode && String(rule.chargeCode).trim() === chargeCode) return true;
+    if (chargeType && rule.chargeType && String(rule.chargeType).toUpperCase() === chargeType) return true;
+    return false;
+  }) || null;
+}
+
+function calculateCommissionLine({ charge, rule, plan, appliedFixedAgreementRules }) {
+  const quantity = Number(charge?.quantity || 1);
+  const lineRevenue = roundMoney(charge?.total || 0);
+
+  let valueType = rule?.valueType || plan?.defaultValueType || null;
+  let percentValue = rule?.percentValue != null ? Number(rule.percentValue) : (plan?.defaultPercentValue != null ? Number(plan.defaultPercentValue) : null);
+  let fixedAmount = rule?.fixedAmount != null ? Number(rule.fixedAmount) : (plan?.defaultFixedAmount != null ? Number(plan.defaultFixedAmount) : null);
+  let commissionAmount = 0;
+
+  if (valueType === 'PERCENT') {
+    commissionAmount = roundMoney(lineRevenue * (Number(percentValue || 0) / 100));
+  } else if (valueType === 'FIXED_PER_UNIT') {
+    commissionAmount = roundMoney(quantity * Number(fixedAmount || 0));
+  } else if (valueType === 'FIXED_PER_AGREEMENT') {
+    const key = rule?.id || `${valueType}:${charge?.sourceRefId || charge?.code || charge?.chargeType || charge?.name || 'line'}`;
+    if (appliedFixedAgreementRules.has(key)) {
+      commissionAmount = 0;
+    } else {
+      appliedFixedAgreementRules.add(key);
+      commissionAmount = roundMoney(fixedAmount || 0);
+    }
+  } else {
+    valueType = null;
+    percentValue = null;
+    fixedAmount = null;
+  }
+
+  return {
+    description: String(charge?.name || 'Line Item'),
+    quantity,
+    lineRevenue,
+    valueType,
+    percentValue: percentValue != null ? Number(percentValue) : null,
+    fixedAmount: fixedAmount != null ? Number(fixedAmount) : null,
+    commissionAmount
+  };
+}
+
 function reservationAdditionalDrivers(reservation) {
   const structured = Array.isArray(reservation?.additionalDrivers) ? reservation.additionalDrivers : [];
   if (structured.length) return structured;
@@ -290,6 +366,132 @@ async function importStructuredReservationPaymentsToAgreement(rentalAgreementId,
   });
 
   return { importedCount: pending.length, paidAmount, balance };
+}
+
+async function syncAgreementCommissionSnapshot(rentalAgreementId) {
+  const agreement = await prisma.rentalAgreement.findUnique({
+    where: { id: rentalAgreementId },
+    select: {
+      id: true,
+      tenantId: true,
+      status: true,
+      closedAt: true,
+      total: true,
+      salesOwnerUserId: true,
+      charges: {
+        orderBy: [{ sortOrder: 'asc' }, { createdAt: 'asc' }],
+        select: {
+          id: true,
+          code: true,
+          name: true,
+          chargeType: true,
+          quantity: true,
+          total: true,
+          selected: true,
+          source: true,
+          sourceRefId: true
+        }
+      }
+    }
+  });
+  if (!agreement) throw new Error('Rental agreement not found');
+  if (String(agreement.status || '').toUpperCase() !== 'CLOSED') return null;
+  if (!agreement.salesOwnerUserId) return null;
+
+  const plan = await prisma.commissionPlan.findFirst({
+    where: {
+      tenantId: agreement.tenantId || null,
+      isActive: true
+    },
+    include: {
+      rules: {
+        where: { isActive: true },
+        orderBy: [{ priority: 'asc' }, { createdAt: 'asc' }]
+      }
+    },
+    orderBy: { createdAt: 'asc' }
+  });
+
+  const appliedFixedAgreementRules = new Set();
+  const eligibleCharges = commissionChargeRows(agreement.charges);
+  const lines = eligibleCharges
+    .map((charge) => {
+      const rule = resolveCommissionRule(charge, plan?.rules || []);
+      const calc = calculateCommissionLine({ charge, rule, plan, appliedFixedAgreementRules });
+      return {
+        rentalAgreementChargeId: charge.id,
+        serviceId: String(charge?.source || '').toUpperCase() === 'ADDITIONAL_SERVICE' && charge?.sourceRefId
+          ? String(charge.sourceRefId)
+          : null,
+        ...calc
+      };
+    })
+    .filter((line) => line.valueType);
+
+  const grossRevenue = roundMoney(agreement.total || 0);
+  const serviceRevenue = roundMoney(
+    eligibleCharges
+      .filter((charge) => String(charge?.source || '').toUpperCase() === 'ADDITIONAL_SERVICE')
+      .reduce((sum, charge) => sum + Number(charge?.total || 0), 0)
+  );
+  const eligibleRevenue = roundMoney(lines.reduce((sum, line) => sum + Number(line.lineRevenue || 0), 0));
+  const commissionAmount = roundMoney(lines.reduce((sum, line) => sum + Number(line.commissionAmount || 0), 0));
+
+  const snapshot = await prisma.agreementCommission.upsert({
+    where: {
+      rentalAgreementId_employeeUserId: {
+        rentalAgreementId: agreement.id,
+        employeeUserId: agreement.salesOwnerUserId
+      }
+    },
+    update: {
+      tenantId: agreement.tenantId || null,
+      commissionPlanId: plan?.id || null,
+      status: 'PENDING',
+      monthKey: monthKey(agreement.closedAt || new Date()),
+      grossRevenue,
+      serviceRevenue,
+      eligibleRevenue,
+      commissionAmount,
+      calculatedAt: new Date()
+    },
+    create: {
+      tenantId: agreement.tenantId || null,
+      rentalAgreementId: agreement.id,
+      employeeUserId: agreement.salesOwnerUserId,
+      commissionPlanId: plan?.id || null,
+      status: 'PENDING',
+      monthKey: monthKey(agreement.closedAt || new Date()),
+      grossRevenue,
+      serviceRevenue,
+      eligibleRevenue,
+      commissionAmount,
+      calculatedAt: new Date()
+    }
+  });
+
+  await prisma.agreementCommissionLine.deleteMany({
+    where: { agreementCommissionId: snapshot.id }
+  });
+
+  if (lines.length) {
+    await prisma.agreementCommissionLine.createMany({
+      data: lines.map((line) => ({
+        agreementCommissionId: snapshot.id,
+        rentalAgreementChargeId: line.rentalAgreementChargeId || null,
+        serviceId: line.serviceId || null,
+        description: line.description,
+        quantity: line.quantity,
+        lineRevenue: line.lineRevenue,
+        valueType: line.valueType,
+        percentValue: line.percentValue,
+        fixedAmount: line.fixedAmount,
+        commissionAmount: line.commissionAmount
+      }))
+    });
+  }
+
+  return snapshot;
 }
 
 async function syncAgreementAdditionalDrivers(rentalAgreementId, reservation) {
@@ -1740,6 +1942,8 @@ export const rentalAgreementsService = {
         reason: 'Agreement closed via check-in wizard'
       }
     });
+
+    await syncAgreementCommissionSnapshot(id);
 
     // Best effort return receipt email
     try {
