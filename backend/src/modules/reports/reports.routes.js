@@ -17,3 +17,16 @@ reportsRouter.get('/overview', async (req, res, next) => {
     next(e);
   }
 });
+
+reportsRouter.get('/overview.csv', async (req, res, next) => {
+  try {
+    const csv = await reportsService.overviewCsv(req.query || {}, scopeFor(req));
+    const start = String(req.query?.start || '').trim() || 'range-start';
+    const end = String(req.query?.end || '').trim() || 'range-end';
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename="reports-overview-${start}-to-${end}.csv"`);
+    res.send(csv);
+  } catch (e) {
+    next(e);
+  }
+});

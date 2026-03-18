@@ -42,6 +42,21 @@ function sumMoney(rows, field) {
   );
 }
 
+function csvCell(value) {
+  const text = String(value ?? '');
+  if (/[",\n]/.test(text)) return `"${text.replaceAll('"', '""')}"`;
+  return text;
+}
+
+function csvLine(values = []) {
+  return values.map(csvCell).join(',');
+}
+
+function normalizeLocationId(query = {}) {
+  const raw = String(query?.locationId || '').trim();
+  return raw || null;
+}
+
 export const reportsService = {
   async overview(query = {}, scope = {}) {
     const now = new Date();
@@ -53,6 +68,28 @@ export const reportsService = {
     const start = startOfDay(Number.isNaN(rawStart.getTime()) ? now : rawStart);
     const end = endOfDay(Number.isNaN(rawEnd.getTime()) ? now : rawEnd);
     const whereScope = scopeWhere(scope);
+    const locationId = normalizeLocationId(query);
+    const reservationWhere = {
+      ...whereScope,
+      ...(locationId ? { pickupLocationId: locationId } : {}),
+      createdAt: { gte: start, lte: end }
+    };
+    const agreementWhere = {
+      ...whereScope,
+      ...(locationId ? { pickupLocationId: locationId } : {})
+    };
+    const vehicleWhere = {
+      ...whereScope,
+      ...(locationId ? { homeLocationId: locationId } : {})
+    };
+    const paymentWhere = {
+      reservation: {
+        ...whereScope,
+        ...(locationId ? { pickupLocationId: locationId } : {})
+      },
+      status: 'PAID',
+      paidAt: { gte: start, lte: end }
+    };
 
     const [
       reservations,
@@ -62,7 +99,7 @@ export const reportsService = {
       locations
     ] = await Promise.all([
       prisma.reservation.findMany({
-        where: { ...whereScope, createdAt: { gte: start, lte: end } },
+        where: reservationWhere,
         select: {
           id: true,
           status: true,
@@ -73,11 +110,7 @@ export const reportsService = {
         orderBy: { createdAt: 'asc' }
       }),
       prisma.reservationPayment.findMany({
-        where: {
-          reservation: whereScope,
-          status: 'PAID',
-          paidAt: { gte: start, lte: end }
-        },
+        where: paymentWhere,
         select: {
           id: true,
           amount: true,
@@ -86,7 +119,7 @@ export const reportsService = {
         orderBy: { paidAt: 'asc' }
       }),
       prisma.rentalAgreement.findMany({
-        where: { ...whereScope },
+        where: agreementWhere,
         select: {
           id: true,
           status: true,
@@ -98,7 +131,7 @@ export const reportsService = {
         }
       }),
       prisma.vehicle.findMany({
-        where: { ...whereScope },
+        where: vehicleWhere,
         select: { id: true, status: true }
       }),
       prisma.location.findMany({
@@ -140,6 +173,9 @@ export const reportsService = {
     const utilizationPct = fleetTotal > 0 ? Number(((onRent / fleetTotal) * 100).toFixed(1)) : 0;
 
     const locationNameById = new Map(locations.map((row) => [row.id, row.name]));
+    const selectedLocation = locationId
+      ? { id: locationId, name: locationNameById.get(locationId) || 'Unknown' }
+      : null;
     const reservationByLocation = Object.entries(
       reservations.reduce((acc, row) => {
         const key = row.pickupLocationId || 'unknown';
@@ -161,6 +197,11 @@ export const reportsService = {
         end: end.toISOString(),
         days: buildDaySeries(start, end).length
       },
+      filters: {
+        locationId,
+        locationName: selectedLocation?.name || null
+      },
+      locations,
       kpis: {
         reservationsCreated: reservations.length,
         checkedOut: reservationStatusCounts.CHECKED_OUT,
@@ -181,5 +222,48 @@ export const reportsService = {
       paymentsByDay: Array.from(paymentsByDayMap.entries()).map(([date, amount]) => ({ date, amount })),
       topPickupLocations: reservationByLocation
     };
+  },
+
+  async overviewCsv(query = {}, scope = {}) {
+    const report = await this.overview(query, scope);
+    const lines = [];
+
+    lines.push(csvLine(['Report', 'Reports Overview v1']));
+    lines.push(csvLine(['Start', report.range.start]));
+    lines.push(csvLine(['End', report.range.end]));
+    lines.push(csvLine(['Days', report.range.days]));
+    lines.push(csvLine(['Location', report.filters?.locationName || 'All Locations']));
+    lines.push('');
+
+    lines.push(csvLine(['KPI', 'Value']));
+    for (const [key, value] of Object.entries(report.kpis || {})) {
+      lines.push(csvLine([key, value]));
+    }
+    lines.push('');
+
+    lines.push(csvLine(['Reservation Status', 'Count']));
+    for (const row of report.reservationStatusBreakdown || []) {
+      lines.push(csvLine([row.status, row.count]));
+    }
+    lines.push('');
+
+    lines.push(csvLine(['Reservations By Day', 'Count']));
+    for (const row of report.reservationsByDay || []) {
+      lines.push(csvLine([row.date, row.count]));
+    }
+    lines.push('');
+
+    lines.push(csvLine(['Payments By Day', 'Amount']));
+    for (const row of report.paymentsByDay || []) {
+      lines.push(csvLine([row.date, row.amount]));
+    }
+    lines.push('');
+
+    lines.push(csvLine(['Top Pickup Locations', 'Reservations']));
+    for (const row of report.topPickupLocations || []) {
+      lines.push(csvLine([row.name, row.count]));
+    }
+
+    return lines.join('\n');
   }
 };

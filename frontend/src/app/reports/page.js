@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { AuthGate } from '../../components/AuthGate';
 import { AppShell } from '../../components/AppShell';
-import { api } from '../../lib/client';
+import { API_BASE, api } from '../../lib/client';
 
 function fmtMoney(value) {
   return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(Number(value || 0));
@@ -33,7 +33,7 @@ function metricCards(report) {
 }
 
 function Inner({ token, me, logout }) {
-  const [filters, setFilters] = useState({ start: daysAgo(29), end: daysAgo(0) });
+  const [filters, setFilters] = useState({ start: daysAgo(29), end: daysAgo(0), locationId: '' });
   const [report, setReport] = useState(null);
   const [msg, setMsg] = useState('');
   const [loading, setLoading] = useState(true);
@@ -41,7 +41,12 @@ function Inner({ token, me, logout }) {
   const load = async (next = filters) => {
     setLoading(true);
     try {
-      const out = await api(`/api/reports/overview?start=${encodeURIComponent(next.start)}&end=${encodeURIComponent(next.end)}`, {}, token);
+      const qs = new URLSearchParams({
+        start: next.start,
+        end: next.end,
+        ...(next.locationId ? { locationId: next.locationId } : {})
+      });
+      const out = await api(`/api/reports/overview?${qs.toString()}`, {}, token);
       setReport(out);
       setMsg('');
     } catch (e) {
@@ -60,6 +65,36 @@ function Inner({ token, me, logout }) {
   const reservationSeriesMax = Math.max(1, ...(report?.reservationsByDay || []).map((row) => Number(row.count || 0)));
   const paymentSeriesMax = Math.max(1, ...(report?.paymentsByDay || []).map((row) => Number(row.amount || 0)));
 
+  const exportCsv = async () => {
+    try {
+      setMsg('');
+      const qs = new URLSearchParams({
+        start: filters.start,
+        end: filters.end,
+        ...(filters.locationId ? { locationId: filters.locationId } : {})
+      });
+      const res = await fetch(`${API_BASE}/api/reports/overview.csv?${qs.toString()}`, {
+        headers: { Authorization: `Bearer ${token}` },
+        cache: 'no-store'
+      });
+      if (!res.ok) {
+        const text = await res.text();
+        throw new Error(text || `CSV export failed (${res.status})`);
+      }
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `reports-overview-${filters.start}-to-${filters.end}${filters.locationId ? `-${filters.locationId}` : ''}.csv`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    } catch (e) {
+      setMsg(e.message);
+    }
+  };
+
   return (
     <AppShell me={me} logout={logout}>
       <section className="glass card-lg stack">
@@ -68,7 +103,10 @@ function Inner({ token, me, logout }) {
             <h2>Reports</h2>
             <p className="label">Sprint 3 - Reports v1</p>
           </div>
-          <button onClick={() => load(filters)} disabled={loading}>Refresh</button>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button onClick={exportCsv} disabled={loading}>Export CSV</button>
+            <button onClick={() => load(filters)} disabled={loading}>Refresh</button>
+          </div>
         </div>
 
         <div className="grid2">
@@ -90,9 +128,23 @@ function Inner({ token, me, logout }) {
           </div>
         </div>
 
+        <div>
+          <span className="label">Location</span>
+          <select
+            value={filters.locationId}
+            onChange={(e) => setFilters((prev) => ({ ...prev, locationId: e.target.value }))}
+          >
+            <option value="">All locations</option>
+            {(report?.locations || []).map((location) => (
+              <option key={location.id} value={location.id}>{location.name}</option>
+            ))}
+          </select>
+        </div>
+
         <button onClick={() => load(filters)} disabled={loading}>Apply Range</button>
         {msg ? <p className="error">{msg}</p> : null}
         {loading ? <p className="label">Loading report...</p> : null}
+        {!loading && report?.filters?.locationName ? <p className="label">Filtered by: {report.filters.locationName}</p> : null}
       </section>
 
       <section className="grid2" style={{ marginTop: 12 }}>
