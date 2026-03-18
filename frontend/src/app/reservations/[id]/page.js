@@ -346,26 +346,6 @@ function ReservationDetailInner({ token, me, logout }) {
     return Number((paymentRows || []).reduce((sum, payment) => sum + Number(payment?.amount || 0), 0).toFixed(2));
   }, [paymentRows]);
 
-  const chargeTableTotal = useMemo(() => {
-    return Number(toMoneyNum((pricing?.totals?.total ?? 0)).toFixed(2));
-  }, [pricing?.totals?.total]);
-
-  const effectiveChargeTotal = useMemo(() => {
-    const table = Number(chargeTableTotal);
-    const breakdownTotal = Number(breakdown?.total);
-    const a = Number.isFinite(table) ? table : 0;
-    const b = Number.isFinite(breakdownTotal) ? breakdownTotal : 0;
-    return Number(Math.max(a, b).toFixed(2));
-  }, [chargeTableTotal, breakdown?.total]);
-
-  const unpaidBalance = useMemo(() => {
-    const total = Number(effectiveChargeTotal);
-    const paid = Number(paidTotal);
-    const a = Number.isFinite(total) ? total : 0;
-    const b = Number.isFinite(paid) ? paid : 0;
-    return Number((a - b).toFixed(2));
-  }, [effectiveChargeTotal, paidTotal]);
-
   const [depositOverrides, setDepositOverrides] = useState({
     depositDue: '',
     securityDeposit: ''
@@ -646,7 +626,7 @@ setMsg('Charges updated');
   }, [filteredInsurancePlans, chargeModel.insuranceCode]);
 
   const displayChargeRows = useMemo(() => {
-    if (pricing?.charges?.length) {
+    if (!chargeEdit && pricing?.charges?.length) {
       return structuredDisplayChargeRows(pricing.charges);
     }
 
@@ -705,9 +685,14 @@ setMsg('Charges updated');
     }
 
     return rows;
-  }, [pricing?.charges, breakdown, selectedServiceRows, selectedFeeRows, serviceOptions, feeOptions, chargeModel?.taxRate, depositOverrides.depositDue, depositOverrides.securityDeposit]);
+  }, [chargeEdit, pricing?.charges, breakdown, selectedServiceRows, selectedFeeRows, serviceOptions, feeOptions, chargeModel?.taxRate, depositOverrides.depositDue, depositOverrides.securityDeposit]);
 
   const displayTotal = useMemo(() => toMoneyNum(displayChargeRows.reduce((s, r) => s + toMoneyNum(r?.total), 0)), [displayChargeRows]);
+  const effectiveChargeTotal = displayTotal;
+  const unpaidBalance = useMemo(
+    () => Number((Math.max(0, toMoneyNum(displayTotal) - toMoneyNum(paidTotal))).toFixed(2)),
+    [displayTotal, paidTotal]
+  );
 
 
 	if (!row) {
@@ -956,7 +941,7 @@ setMsg('Charges updated');
                   </tr>
                   <tr>
                     <td colSpan={3}><strong>Unpaid Balance</strong></td>
-                    <td><strong>{money(Math.max(0, toMoneyNum(displayTotal) - toMoneyNum(paidTotal)))}</strong></td>
+                    <td><strong>{money(unpaidBalance)}</strong></td>
                   </tr>
                 </tbody>
               </table>

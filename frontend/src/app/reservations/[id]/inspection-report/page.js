@@ -58,8 +58,13 @@ function Inner({ token }) {
   useEffect(() => {
     (async () => {
       try {
-        const agreement = await api(`/api/reservations/${id}/agreement`, {}, token);
-        const inspectionReport = await api(`/api/rental-agreements/${agreement.id}/inspection-report`, {}, token);
+        const reservation = await api(`/api/reservations/${id}`, {}, token);
+        const agreementId = reservation?.rentalAgreement?.id || null;
+        if (!agreementId) {
+          setReport(null);
+          return;
+        }
+        const inspectionReport = await api(`/api/rental-agreements/${agreementId}/inspection-report`, {}, token);
         setReport(inspectionReport);
       } catch (e) {
         setMsg(e.message);

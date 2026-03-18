@@ -117,18 +117,6 @@ function paidFromStructuredPayments(payments) {
     .toFixed(2));
 }
 
-function paidFromReservationNotes(notes) {
-  const txt = String(notes || '');
-  let sum = 0;
-  const re = /^\[PAYMENT\s+[^\]]+\]\s+[^\s]+\s+paid\s+([0-9]+(?:\.[0-9]+)?)/gim;
-  let m;
-  while ((m = re.exec(txt)) !== null) {
-    const amt = Number(m[1] || 0);
-    if (Number.isFinite(amt) && amt > 0) sum += amt;
-  }
-  return Number(sum.toFixed(2));
-}
-
 function parseLocationConfig(raw) {
   try {
     if (!raw) return {};
@@ -340,6 +328,10 @@ customerPortalRouter.get('/signature/:token', async (req, res, next) => {
       include: { charges: { orderBy: [{ sortOrder: 'asc' }, { createdAt: 'asc' }] } },
       orderBy: { createdAt: 'desc' }
     });
+    const reservationBreakdown = latestAgreement ? null : await buildReservationBreakdown(reservation);
+    const reservationPaid = latestAgreement ? 0 : paidFromStructuredPayments(reservation?.payments);
+    const reservationTotal = Number(reservationBreakdown?.total || reservation.estimatedTotal || 0);
+    const reservationBalance = Math.max(0, Number((reservationTotal - reservationPaid).toFixed(2)));
 
     const breakdown = latestAgreement
       ? {
@@ -356,12 +348,17 @@ customerPortalRouter.get('/signature/:token', async (req, res, next) => {
           }))
         }
       : {
-          subtotal: Number(reservation.estimatedTotal || 0),
-          taxes: 0,
-          total: Number(reservation.estimatedTotal || 0),
-          paidAmount: 0,
-          balance: Number(reservation.estimatedTotal || 0),
-          charges: []
+          subtotal: Number(reservationBreakdown?.subtotal || reservationTotal),
+          taxes: Number(reservationBreakdown?.tax || 0),
+          total: reservationTotal,
+          paidAmount: reservationPaid,
+          balance: reservationBalance,
+          charges: (reservationBreakdown?.lines || []).map((line) => ({
+            name: line.name,
+            quantity: Number(line.qty || 0),
+            rate: line.rate,
+            total: Number(line.total || 0)
+          }))
         };
 
     res.json({

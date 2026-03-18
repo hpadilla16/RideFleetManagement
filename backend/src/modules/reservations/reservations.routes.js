@@ -671,7 +671,7 @@ reservationsRouter.post('/:id/agreement/payments/manual', async (req, res, next)
   try {
     const agreementId = await latestAgreementByReservationId(req.params.id, scopeFor(req));
     if (!agreementId) return res.status(400).json({ error: 'No rental agreement exists for this reservation yet' });
-    const row = await rentalAgreementsService.addManualPayment(agreementId, req.body || {}, req.user?.id || null);
+    const row = await rentalAgreementsService.addManualPayment(agreementId, req.body || {}, req.user?.sub || null);
     res.json(row);
   } catch (e) {
     next(e);
@@ -682,7 +682,7 @@ reservationsRouter.post('/:id/agreement/payments/charge-card-on-file', async (re
   try {
     const agreementId = await latestAgreementByReservationId(req.params.id, scopeFor(req));
     if (!agreementId) return res.status(400).json({ error: 'No rental agreement exists for this reservation yet' });
-    const row = await rentalAgreementsService.chargeCardOnFile(agreementId, req.body || {}, req.user?.id || null);
+    const row = await rentalAgreementsService.chargeCardOnFile(agreementId, req.body || {}, req.user?.sub || null);
     res.json(row);
   } catch (e) {
     next(e);
@@ -693,7 +693,7 @@ reservationsRouter.post('/:id/agreement/security-deposit/capture', async (req, r
   try {
     const agreementId = await latestAgreementByReservationId(req.params.id, scopeFor(req));
     if (!agreementId) return res.status(400).json({ error: 'No rental agreement exists for this reservation yet' });
-    const row = await rentalAgreementsService.captureSecurityDeposit(agreementId, req.body || {}, req.user?.id || null);
+    const row = await rentalAgreementsService.captureSecurityDeposit(agreementId, req.body || {}, req.user?.sub || null);
     res.json(row);
   } catch (e) {
     next(e);
@@ -704,7 +704,7 @@ reservationsRouter.post('/:id/agreement/security-deposit/release', async (req, r
   try {
     const agreementId = await latestAgreementByReservationId(req.params.id, scopeFor(req));
     if (!agreementId) return res.status(400).json({ error: 'No rental agreement exists for this reservation yet' });
-    const row = await rentalAgreementsService.releaseSecurityDeposit(agreementId, req.user?.id || null);
+    const row = await rentalAgreementsService.releaseSecurityDeposit(agreementId, req.user?.sub || null);
     res.json(row);
   } catch (e) {
     next(e);
@@ -715,7 +715,7 @@ reservationsRouter.post('/:id/agreement/customer/card-on-file', async (req, res,
   try {
     const agreementId = await latestAgreementByReservationId(req.params.id, scopeFor(req));
     if (!agreementId) return res.status(400).json({ error: 'No rental agreement exists for this reservation yet' });
-    const row = await rentalAgreementsService.captureCustomerCardOnFile(agreementId, req.body || {}, req.user?.id || null);
+    const row = await rentalAgreementsService.captureCustomerCardOnFile(agreementId, req.body || {}, req.user?.sub || null);
     res.json(row);
   } catch (e) {
     next(e);
@@ -726,7 +726,7 @@ reservationsRouter.post('/:id/agreement/credit', async (req, res, next) => {
   try {
     const amount = Number(req.body?.amount || 0);
     if (!Number.isFinite(amount) || amount <= 0) return res.status(400).json({ error: 'amount must be > 0' });
-    const out = await reservationsService.adjustCustomerCredit(req.params.id, { amount, reason: req.body?.reason || 'Manual credit from reservation detail' }, req.user?.id || null);
+    const out = await reservationsService.adjustCustomerCredit(req.params.id, { amount, reason: req.body?.reason || 'Manual credit from reservation detail' }, req.user?.sub || null);
     res.json(out);
   } catch (e) {
     next(e);

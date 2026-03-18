@@ -938,7 +938,10 @@ export const rentalAgreementsService = {
             vehicle: true,
             vehicleType: true,
             pickupLocation: true,
-            returnLocation: true
+            returnLocation: true,
+            pricingSnapshot: true,
+            payments: { orderBy: { paidAt: 'desc' } },
+            additionalDrivers: { orderBy: { createdAt: 'asc' } }
           }
         },
         drivers: true,
@@ -981,7 +984,17 @@ export const rentalAgreementsService = {
     const signatureTime = agreement?.reservation?.signatureSignedAt || sigLog?.createdAt || null;
 
     const dbPayments = Array.isArray(agreement?.payments) ? agreement.payments : [];
-    const notePayments = parseReservationPaymentsFromNotes(agreement?.reservation?.notes).map((p, idx) => ({
+    const structuredReservationPrintPayments = structuredReservationPayments(agreement?.reservation).map((payment, idx) => ({
+      id: payment.id || `reservation-${idx}`,
+      paidAt: payment.paidAt,
+      method: payment.method || 'OTHER',
+      reference: payment.reference || null,
+      status: payment.status || 'PAID',
+      amount: Number(payment.amount || 0)
+    }));
+    const legacyReservationPrintPayments = structuredReservationPrintPayments.length
+      ? []
+      : parseReservationPaymentsFromNotes(agreement?.reservation?.notes).map((p, idx) => ({
       id: `note-${idx}-${Number(p.amount || 0).toFixed(2)}-${String(p.reference || '')}`,
       paidAt: p.paidAt,
       method: 'OTC',
@@ -991,7 +1004,7 @@ export const rentalAgreementsService = {
     }));
 
     const seen = new Set();
-    const paymentsForPrint = [...dbPayments, ...notePayments].filter((p) => {
+    const paymentsForPrint = [...dbPayments, ...structuredReservationPrintPayments, ...legacyReservationPrintPayments].filter((p) => {
       const k = `${new Date(p.paidAt || p.createdAt || Date.now()).toISOString().slice(0,19)}|${Number(p.amount || 0).toFixed(2)}|${String(p.reference || '').trim()}`;
       if (seen.has(k)) return false;
       seen.add(k);

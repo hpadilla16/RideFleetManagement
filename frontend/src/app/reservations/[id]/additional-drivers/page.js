@@ -82,6 +82,7 @@ function Inner({ token, me, logout }) {
         body: JSON.stringify({ drivers: compactDrivers })
       }, token);
 
+      await load();
       setMsg('Additional drivers saved');
       router.push(`/reservations/${id}`);
     } catch (e) {
