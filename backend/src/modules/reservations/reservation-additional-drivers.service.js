@@ -65,6 +65,11 @@ export const reservationAdditionalDriversService = {
     const normalized = (Array.isArray(drivers) ? drivers : [])
       .map((driver) => normalizeDriver(driver))
       .filter((driver) => driver.firstName && driver.lastName);
+    const currentNotes = String(reservation.notes || '');
+    const cleanedNotes = currentNotes
+      .replace(/\n?\[RES_ADDITIONAL_DRIVERS\]\{[^\n]*\}/g, '')
+      .trim();
+    const shouldCleanLegacyNotes = cleanedNotes !== currentNotes.trim();
 
     await prisma.$transaction(async (tx) => {
       await tx.reservationAdditionalDriver.deleteMany({ where: { reservationId } });
@@ -76,15 +81,12 @@ export const reservationAdditionalDriversService = {
           }))
         });
       }
-
-      const cleanedNotes = String(reservation.notes || '')
-        .replace(/\n?\[RES_ADDITIONAL_DRIVERS\]\{[^\n]*\}/g, '')
-        .trim();
-
-      await tx.reservation.update({
-        where: { id: reservationId },
-        data: { notes: cleanedNotes || null }
-      });
+      if (shouldCleanLegacyNotes) {
+        await tx.reservation.update({
+          where: { id: reservationId },
+          data: { notes: cleanedNotes || null }
+        });
+      }
     });
 
     return prisma.reservationAdditionalDriver.findMany({

@@ -398,7 +398,6 @@ export const rentalAgreementsService = {
       // This guarantees reservation->agreement parity for checkout flow.
       const structuredRows = structuredReservationChargeRows(reservation);
       const structuredPaymentsList = structuredReservationPayments(reservation);
-      const meta = parseReservationChargesMeta(reservation.notes) || {};
       if (existing.status !== 'CLOSED' && existing.status !== 'CANCELLED') {
         await syncAgreementAdditionalDrivers(existing.id, reservation);
         let paid = Number(existing.paidAmount || 0);
@@ -438,6 +437,7 @@ export const rentalAgreementsService = {
           return this.getById(existing.id);
         }
 
+        const meta = parseReservationChargesMeta(reservation.notes) || {};
         const tenantWhere = reservation.tenantId ? { tenantId: reservation.tenantId } : {};
         const selectedServiceIds = Array.isArray(meta?.selectedServices) ? meta.selectedServices : [];
         const selectedFeeIds = Array.isArray(meta?.selectedFees) ? meta.selectedFees : [];
@@ -457,7 +457,7 @@ export const rentalAgreementsService = {
         const uniqueSelectedFeeIds = [...new Set(selectedFeeIds)];
 
         const days = rentalDays(reservation.pickupAt, reservation.returnAt);
-        const dailyRate = Number(reservation.dailyRate || 0);
+        const dailyRate = Number(reservation?.pricingSnapshot?.dailyRate ?? reservation.dailyRate ?? 0);
         const services = selectedServiceIds.length
           ? await prisma.additionalService.findMany({ where: { ...tenantWhere, id: { in: selectedServiceIds } } })
           : [];
@@ -639,33 +639,11 @@ export const rentalAgreementsService = {
     const prePaidTotal = prePayments.reduce((sum, p) => sum + Number(p.amount || 0), 0);
 
     const days = rentalDays(reservation.pickupAt, reservation.returnAt);
-    const dailyRate = Number(reservation.dailyRate || 0);
-    const meta = parseReservationChargesMeta(reservation.notes) || {};
+    const dailyRate = Number(reservation?.pricingSnapshot?.dailyRate ?? reservation.dailyRate ?? 0);
     const tenantWhere = reservation.tenantId ? { tenantId: reservation.tenantId } : {};
-    const selectedServiceIds = Array.isArray(meta?.selectedServices) ? meta.selectedServices : [];
-    const selectedFeeIds = Array.isArray(meta?.selectedFees) ? meta.selectedFees : [];
-    const discounts = Array.isArray(meta?.discounts) ? meta.discounts : [];
-
-    // Always include auto fees computed on reservation side (underage/additional-driver) even if not in meta.
-    const underageFromNotes = /UNDERAGE ALERT/i.test(String(reservation.notes || ''));
-    if (reservation.underageAlert || underageFromNotes) {
-      const autoUnderage = await prisma.fee.findMany({ where: { ...tenantWhere, isActive: true, isUnderageFee: true }, select: { id: true } });
-      selectedFeeIds.push(...autoUnderage.map((x) => x.id));
-    }
-    if (reservationAdditionalDrivers(reservation).length > 0) {
-      const autoAddl = await prisma.fee.findMany({ where: { ...tenantWhere, isActive: true, isAdditionalDriverFee: true }, select: { id: true } });
-      selectedFeeIds.push(...autoAddl.map((x) => x.id));
-    }
-    const uniqueSelectedFeeIds = [...new Set(selectedFeeIds)];
-
-    const services = selectedServiceIds.length
-      ? await prisma.additionalService.findMany({ where: { ...tenantWhere, id: { in: selectedServiceIds } } })
-      : [];
-    const fees = uniqueSelectedFeeIds.length
-      ? await prisma.fee.findMany({ where: { ...tenantWhere, id: { in: uniqueSelectedFeeIds } } })
-      : [];
 
     const structuredRows = structuredReservationChargeRows(reservation);
+    const meta = structuredRows?.length ? null : (parseReservationChargesMeta(reservation.notes) || {});
     const incomingRows = structuredRows?.length ? structuredRows : (Array.isArray(meta?.chargeRows) ? meta.chargeRows : null);
     if (incomingRows && incomingRows.length) {
       const normalizedRows = incomingRows.map((r) => ({
@@ -742,6 +720,29 @@ export const rentalAgreementsService = {
         }
       });
     }
+
+    const selectedServiceIds = Array.isArray(meta?.selectedServices) ? meta.selectedServices : [];
+    const selectedFeeIds = Array.isArray(meta?.selectedFees) ? meta.selectedFees : [];
+    const discounts = Array.isArray(meta?.discounts) ? meta.discounts : [];
+
+    // Always include auto fees computed on reservation side (underage/additional-driver) even if not in meta.
+    const underageFromNotes = /UNDERAGE ALERT/i.test(String(reservation.notes || ''));
+    if (reservation.underageAlert || underageFromNotes) {
+      const autoUnderage = await prisma.fee.findMany({ where: { ...tenantWhere, isActive: true, isUnderageFee: true }, select: { id: true } });
+      selectedFeeIds.push(...autoUnderage.map((x) => x.id));
+    }
+    if (reservationAdditionalDrivers(reservation).length > 0) {
+      const autoAddl = await prisma.fee.findMany({ where: { ...tenantWhere, isActive: true, isAdditionalDriverFee: true }, select: { id: true } });
+      selectedFeeIds.push(...autoAddl.map((x) => x.id));
+    }
+    const uniqueSelectedFeeIds = [...new Set(selectedFeeIds)];
+
+    const services = selectedServiceIds.length
+      ? await prisma.additionalService.findMany({ where: { ...tenantWhere, id: { in: selectedServiceIds } } })
+      : [];
+    const fees = uniqueSelectedFeeIds.length
+      ? await prisma.fee.findMany({ where: { ...tenantWhere, id: { in: uniqueSelectedFeeIds } } })
+      : [];
 
     const chargeRows = [];
     const base = dailyRate * days;
