@@ -1,16 +1,196 @@
 'use client';
 
+import { useEffect, useMemo, useState } from 'react';
 import { AuthGate } from '../../components/AuthGate';
 import { AppShell } from '../../components/AppShell';
+import { api } from '../../lib/client';
 
-export default function ReportsPlaceholderPage() {
-  return <AuthGate>{({ me, logout }) => (
+function fmtMoney(value) {
+  return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(Number(value || 0));
+}
+
+function isoInput(value) {
+  const d = value ? new Date(value) : new Date();
+  return d.toISOString().slice(0, 10);
+}
+
+function daysAgo(n) {
+  const d = new Date();
+  d.setDate(d.getDate() - n);
+  return isoInput(d);
+}
+
+function metricCards(report) {
+  const kpis = report?.kpis || {};
+  return [
+    { label: 'Reservations', value: kpis.reservationsCreated || 0 },
+    { label: 'Checked Out', value: kpis.checkedOut || 0 },
+    { label: 'Checked In', value: kpis.checkedIn || 0 },
+    { label: 'Collected', value: fmtMoney(kpis.collectedPayments) },
+    { label: 'Open Balance', value: fmtMoney(kpis.openBalance) },
+    { label: 'Utilization', value: `${Number(kpis.utilizationPct || 0).toFixed(1)}%` }
+  ];
+}
+
+function Inner({ token, me, logout }) {
+  const [filters, setFilters] = useState({ start: daysAgo(29), end: daysAgo(0) });
+  const [report, setReport] = useState(null);
+  const [msg, setMsg] = useState('');
+  const [loading, setLoading] = useState(true);
+
+  const load = async (next = filters) => {
+    setLoading(true);
+    try {
+      const out = await api(`/api/reports/overview?start=${encodeURIComponent(next.start)}&end=${encodeURIComponent(next.end)}`, {}, token);
+      setReport(out);
+      setMsg('');
+    } catch (e) {
+      setMsg(e.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    load(filters);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [token]);
+
+  const cards = useMemo(() => metricCards(report), [report]);
+  const reservationSeriesMax = Math.max(1, ...(report?.reservationsByDay || []).map((row) => Number(row.count || 0)));
+  const paymentSeriesMax = Math.max(1, ...(report?.paymentsByDay || []).map((row) => Number(row.amount || 0)));
+
+  return (
     <AppShell me={me} logout={logout}>
       <section className="glass card-lg stack">
-        <h2>Reports Module</h2>
-        <p className="label">Placeholder</p>
-        <p>This module is intentionally scaffolded as a placeholder so we can implement reporting workflows later (financials, utilization, reservations, agreements, no-shows, exports).</p>
+        <div className="row-between">
+          <div>
+            <h2>Reports</h2>
+            <p className="label">Sprint 3 - Reports v1</p>
+          </div>
+          <button onClick={() => load(filters)} disabled={loading}>Refresh</button>
+        </div>
+
+        <div className="grid2">
+          <div>
+            <span className="label">Start</span>
+            <input
+              type="date"
+              value={filters.start}
+              onChange={(e) => setFilters((prev) => ({ ...prev, start: e.target.value }))}
+            />
+          </div>
+          <div>
+            <span className="label">End</span>
+            <input
+              type="date"
+              value={filters.end}
+              onChange={(e) => setFilters((prev) => ({ ...prev, end: e.target.value }))}
+            />
+          </div>
+        </div>
+
+        <button onClick={() => load(filters)} disabled={loading}>Apply Range</button>
+        {msg ? <p className="error">{msg}</p> : null}
+        {loading ? <p className="label">Loading report...</p> : null}
+      </section>
+
+      <section className="grid2" style={{ marginTop: 12 }}>
+        {cards.map((card) => (
+          <div key={card.label} className="glass card">
+            <div className="label">{card.label}</div>
+            <div style={{ fontSize: 28, fontWeight: 800, marginTop: 6 }}>{card.value}</div>
+          </div>
+        ))}
+      </section>
+
+      <section className="grid2" style={{ marginTop: 12 }}>
+        <div className="glass card-lg">
+          <div className="row-between" style={{ marginBottom: 10 }}>
+            <h3>Reservations By Day</h3>
+            <span className="label">{report?.range?.days || 0} days</span>
+          </div>
+          <div className="stack">
+            {(report?.reservationsByDay || []).map((row) => (
+              <div key={row.date}>
+                <div className="row-between">
+                  <span>{row.date}</span>
+                  <strong>{row.count}</strong>
+                </div>
+                <div style={{ height: 10, borderRadius: 999, background: 'rgba(255,255,255,.08)', overflow: 'hidden', marginTop: 4 }}>
+                  <div style={{ width: `${(Number(row.count || 0) / reservationSeriesMax) * 100}%`, height: '100%', background: 'linear-gradient(90deg, #2a9d8f, #e9c46a)' }} />
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        <div className="glass card-lg">
+          <div className="row-between" style={{ marginBottom: 10 }}>
+            <h3>Payments By Day</h3>
+            <span className="label">Reservation payments</span>
+          </div>
+          <div className="stack">
+            {(report?.paymentsByDay || []).map((row) => (
+              <div key={row.date}>
+                <div className="row-between">
+                  <span>{row.date}</span>
+                  <strong>{fmtMoney(row.amount)}</strong>
+                </div>
+                <div style={{ height: 10, borderRadius: 999, background: 'rgba(255,255,255,.08)', overflow: 'hidden', marginTop: 4 }}>
+                  <div style={{ width: `${(Number(row.amount || 0) / paymentSeriesMax) * 100}%`, height: '100%', background: 'linear-gradient(90deg, #264653, #2a9d8f)' }} />
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      <section className="grid2" style={{ marginTop: 12 }}>
+        <div className="glass card-lg">
+          <h3>Status Breakdown</h3>
+          <table>
+            <thead>
+              <tr>
+                <th>Status</th>
+                <th>Count</th>
+              </tr>
+            </thead>
+            <tbody>
+              {(report?.reservationStatusBreakdown || []).map((row) => (
+                <tr key={row.status}>
+                  <td>{row.status}</td>
+                  <td>{row.count}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+
+        <div className="glass card-lg">
+          <h3>Top Pickup Locations</h3>
+          <table>
+            <thead>
+              <tr>
+                <th>Location</th>
+                <th>Reservations</th>
+              </tr>
+            </thead>
+            <tbody>
+              {(report?.topPickupLocations || []).map((row) => (
+                <tr key={row.locationId}>
+                  <td>{row.name}</td>
+                  <td>{row.count}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       </section>
     </AppShell>
-  )}</AuthGate>;
+  );
+}
+
+export default function ReportsPage() {
+  return <AuthGate>{({ token, me, logout }) => <Inner token={token} me={me} logout={logout} />}</AuthGate>;
 }
