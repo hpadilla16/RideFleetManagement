@@ -35,22 +35,34 @@ function metricCards(report) {
 }
 
 function Inner({ token, me, logout }) {
-  const [filters, setFilters] = useState({ start: daysAgo(29), end: daysAgo(0), tenantId: '', locationId: '' });
+  const [filters, setFilters] = useState({ start: daysAgo(29), end: daysAgo(0), tenantId: '', locationId: '', employeeUserId: '' });
   const [report, setReport] = useState(null);
+  const [servicesSold, setServicesSold] = useState(null);
   const [msg, setMsg] = useState('');
   const [loading, setLoading] = useState(true);
 
   const load = async (next = filters) => {
     setLoading(true);
     try {
-      const qs = new URLSearchParams({
+      const reportQs = new URLSearchParams({
         start: next.start,
         end: next.end,
         ...(next.tenantId ? { tenantId: next.tenantId } : {}),
         ...(next.locationId ? { locationId: next.locationId } : {})
       });
-      const out = await api(`/api/reports/overview?${qs.toString()}`, {}, token);
-      setReport(out);
+      const servicesQs = new URLSearchParams({
+        start: next.start,
+        end: next.end,
+        ...(next.tenantId ? { tenantId: next.tenantId } : {}),
+        ...(next.locationId ? { locationId: next.locationId } : {}),
+        ...(next.employeeUserId ? { employeeUserId: next.employeeUserId } : {})
+      });
+      const [overviewOut, servicesOut] = await Promise.all([
+        api(`/api/reports/overview?${reportQs.toString()}`, {}, token),
+        api(`/api/reports/services-sold?${servicesQs.toString()}`, {}, token)
+      ]);
+      setReport(overviewOut);
+      setServicesSold(servicesOut);
       setMsg('');
     } catch (e) {
       setMsg(e.message);
@@ -75,7 +87,8 @@ function Inner({ token, me, logout }) {
         start: filters.start,
         end: filters.end,
         ...(filters.tenantId ? { tenantId: filters.tenantId } : {}),
-        ...(filters.locationId ? { locationId: filters.locationId } : {})
+        ...(filters.locationId ? { locationId: filters.locationId } : {}),
+        ...(filters.employeeUserId ? { employeeUserId: filters.employeeUserId } : {})
       });
       const res = await fetch(`${API_BASE}/api/reports/overview.csv?${qs.toString()}`, {
         headers: { Authorization: `Bearer ${token}` },
@@ -160,11 +173,25 @@ function Inner({ token, me, logout }) {
           </select>
         </div>
 
+        <div>
+          <span className="label">Employee</span>
+          <select
+            value={filters.employeeUserId}
+            onChange={(e) => setFilters((prev) => ({ ...prev, employeeUserId: e.target.value }))}
+          >
+            <option value="">All employees</option>
+            {(servicesSold?.employees || []).map((employee) => (
+              <option key={employee.id} value={employee.id}>{employee.fullName}</option>
+            ))}
+          </select>
+        </div>
+
         <button onClick={() => load(filters)} disabled={loading}>Apply Range</button>
         {msg ? <p className="error">{msg}</p> : null}
         {loading ? <p className="label">Loading report...</p> : null}
         {!loading && report?.filters?.tenantName ? <p className="label">Tenant: {report.filters.tenantName}</p> : null}
         {!loading && report?.filters?.locationName ? <p className="label">Filtered by: {report.filters.locationName}</p> : null}
+        {!loading && servicesSold?.filters?.employeeName ? <p className="label">Employee: {servicesSold.filters.employeeName}</p> : null}
       </section>
 
       <section className="grid2" style={{ marginTop: 12 }}>
@@ -257,6 +284,91 @@ function Inner({ token, me, logout }) {
               ))}
             </tbody>
           </table>
+        </div>
+      </section>
+
+      <section className="glass card-lg stack" style={{ marginTop: 12 }}>
+        <div className="row-between">
+          <div>
+            <h3>Services Sold</h3>
+            <p className="label">Closed agreements and commission-bearing service lines</p>
+          </div>
+          <div className="label">
+            Revenue {fmtMoney(servicesSold?.summary?.serviceRevenue)} · Commission {fmtMoney(servicesSold?.summary?.commissionAmount)}
+          </div>
+        </div>
+
+        <div className="grid2">
+          <div className="glass card">
+            <div className="label">Service Lines</div>
+            <div style={{ fontSize: 28, fontWeight: 800, marginTop: 6 }}>{servicesSold?.summary?.servicesSoldCount || 0}</div>
+          </div>
+          <div className="glass card">
+            <div className="label">Units Sold</div>
+            <div style={{ fontSize: 28, fontWeight: 800, marginTop: 6 }}>{Number(servicesSold?.summary?.unitsSold || 0).toFixed(2)}</div>
+          </div>
+          <div className="glass card">
+            <div className="label">Agreements Closed</div>
+            <div style={{ fontSize: 28, fontWeight: 800, marginTop: 6 }}>{servicesSold?.summary?.agreementsClosed || 0}</div>
+          </div>
+          <div className="glass card">
+            <div className="label">Commission</div>
+            <div style={{ fontSize: 28, fontWeight: 800, marginTop: 6 }}>{fmtMoney(servicesSold?.summary?.commissionAmount)}</div>
+          </div>
+        </div>
+
+        <div className="grid2">
+          <div>
+            <h4>By Service</h4>
+            <table>
+              <thead>
+                <tr>
+                  <th>Service</th>
+                  <th>Units</th>
+                  <th>Revenue</th>
+                  <th>Commission</th>
+                  <th>Agreements</th>
+                </tr>
+              </thead>
+              <tbody>
+                {(servicesSold?.byService || []).map((row) => (
+                  <tr key={row.serviceId}>
+                    <td>{row.serviceName}</td>
+                    <td>{Number(row.unitsSold || 0).toFixed(2)}</td>
+                    <td>{fmtMoney(row.serviceRevenue)}</td>
+                    <td>{fmtMoney(row.commissionAmount)}</td>
+                    <td>{row.agreementsClosed}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+
+          <div>
+            <h4>By Employee</h4>
+            <table>
+              <thead>
+                <tr>
+                  <th>Employee</th>
+                  <th>Units</th>
+                  <th>Revenue</th>
+                  <th>Commission</th>
+                  <th>Agreements</th>
+                </tr>
+              </thead>
+              <tbody>
+                {(servicesSold?.byEmployee || []).map((row) => (
+                  <tr key={row.employeeUserId}>
+                    <td>{row.employeeName}</td>
+                    <td>{Number(row.unitsSold || 0).toFixed(2)}</td>
+                    <td>{fmtMoney(row.serviceRevenue)}</td>
+                    <td>{fmtMoney(row.commissionAmount)}</td>
+                    <td>{row.agreementsClosed}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         </div>
       </section>
     </AppShell>

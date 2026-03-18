@@ -62,6 +62,11 @@ function normalizeTenantId(query = {}) {
   return raw || null;
 }
 
+function normalizeEmployeeUserId(query = {}) {
+  const raw = String(query?.employeeUserId || '').trim();
+  return raw || null;
+}
+
 export const reportsService = {
   async overview(query = {}, scope = {}) {
     const now = new Date();
@@ -315,5 +320,196 @@ export const reportsService = {
     }
 
     return lines.join('\n');
+  },
+
+  async servicesSold(query = {}, scope = {}) {
+    const now = new Date();
+    const rawEnd = query?.end ? new Date(query.end) : now;
+    const rawStart = query?.start
+      ? new Date(query.start)
+      : new Date(rawEnd.getTime() - (29 * 24 * 60 * 60 * 1000));
+
+    const start = startOfDay(Number.isNaN(rawStart.getTime()) ? now : rawStart);
+    const end = endOfDay(Number.isNaN(rawEnd.getTime()) ? now : rawEnd);
+    const effectiveTenantId = scope?.tenantId || normalizeTenantId(query);
+    const whereScope = scopeWhere({ tenantId: effectiveTenantId });
+    const locationId = normalizeLocationId(query);
+    const employeeUserId = normalizeEmployeeUserId(query);
+
+    const lineWhere = {
+      agreementCommission: {
+        ...whereScope,
+        ...(employeeUserId ? { employeeUserId } : {}),
+        calculatedAt: { gte: start, lte: end },
+        rentalAgreement: {
+          ...(locationId ? { pickupLocationId: locationId } : {})
+        }
+      },
+      serviceId: { not: null }
+    };
+
+    const [lines, locations, tenants, employees] = await Promise.all([
+      prisma.agreementCommissionLine.findMany({
+        where: lineWhere,
+        include: {
+          service: { select: { id: true, name: true, code: true } },
+          agreementCommission: {
+            select: {
+              id: true,
+              tenantId: true,
+              employeeUserId: true,
+              commissionAmount: true,
+              rentalAgreement: {
+                select: {
+                  id: true,
+                  agreementNumber: true,
+                  pickupLocationId: true,
+                  closedAt: true
+                }
+              },
+              employeeUser: {
+                select: {
+                  id: true,
+                  fullName: true,
+                  email: true
+                }
+              }
+            }
+          }
+        },
+        orderBy: { createdAt: 'desc' }
+      }),
+      prisma.location.findMany({
+        where: { ...whereScope, isActive: true },
+        select: { id: true, name: true }
+      }),
+      scope?.tenantId
+        ? Promise.resolve([])
+        : prisma.tenant.findMany({
+            orderBy: { name: 'asc' },
+            select: { id: true, name: true, status: true }
+          }),
+      prisma.user.findMany({
+        where: {
+          ...whereScope,
+          isActive: true,
+          role: { in: ['ADMIN', 'OPS', 'AGENT'] }
+        },
+        orderBy: { fullName: 'asc' },
+        select: { id: true, fullName: true, email: true, role: true }
+      })
+    ]);
+
+    const locationNameById = new Map(locations.map((row) => [row.id, row.name]));
+    const tenantNameById = new Map((tenants || []).map((row) => [row.id, row.name]));
+    const employeeNameById = new Map((employees || []).map((row) => [row.id, row.fullName]));
+
+    const selectedTenant = effectiveTenantId
+      ? { id: effectiveTenantId, name: tenantNameById.get(effectiveTenantId) || 'Current Tenant' }
+      : null;
+    const selectedLocation = locationId
+      ? { id: locationId, name: locationNameById.get(locationId) || 'Unknown' }
+      : null;
+    const selectedEmployee = employeeUserId
+      ? { id: employeeUserId, name: employeeNameById.get(employeeUserId) || 'Unknown Employee' }
+      : null;
+
+    const grouped = new Map();
+    const agreementIds = new Set();
+
+    for (const line of lines) {
+      const serviceId = line.serviceId || 'unknown';
+      const current = grouped.get(serviceId) || {
+        serviceId,
+        serviceName: line.service?.name || line.description || 'Unknown Service',
+        serviceCode: line.service?.code || null,
+        unitsSold: 0,
+        serviceRevenue: 0,
+        commissionAmount: 0,
+        agreements: new Set(),
+        employees: new Set()
+      };
+      current.unitsSold += Number(line.quantity || 0);
+      current.serviceRevenue += Number(line.lineRevenue || 0);
+      current.commissionAmount += Number(line.commissionAmount || 0);
+      if (line.agreementCommission?.rentalAgreement?.id) {
+        current.agreements.add(line.agreementCommission.rentalAgreement.id);
+        agreementIds.add(line.agreementCommission.rentalAgreement.id);
+      }
+      if (line.agreementCommission?.employeeUserId) current.employees.add(line.agreementCommission.employeeUserId);
+      grouped.set(serviceId, current);
+    }
+
+    const byService = Array.from(grouped.values())
+      .map((row) => ({
+        serviceId: row.serviceId,
+        serviceName: row.serviceName,
+        serviceCode: row.serviceCode,
+        unitsSold: Number(row.unitsSold.toFixed ? row.unitsSold.toFixed(2) : row.unitsSold),
+        serviceRevenue: Number(row.serviceRevenue.toFixed(2)),
+        commissionAmount: Number(row.commissionAmount.toFixed(2)),
+        agreementsClosed: row.agreements.size,
+        employeesInvolved: row.employees.size
+      }))
+      .sort((a, b) => b.serviceRevenue - a.serviceRevenue);
+
+    const byEmployeeMap = new Map();
+    for (const line of lines) {
+      const employee = line.agreementCommission?.employeeUser;
+      const employeeId = employee?.id || line.agreementCommission?.employeeUserId || 'unknown';
+      const current = byEmployeeMap.get(employeeId) || {
+        employeeUserId: employeeId,
+        employeeName: employee?.fullName || 'Unknown Employee',
+        email: employee?.email || null,
+        unitsSold: 0,
+        serviceRevenue: 0,
+        commissionAmount: 0,
+        agreements: new Set()
+      };
+      current.unitsSold += Number(line.quantity || 0);
+      current.serviceRevenue += Number(line.lineRevenue || 0);
+      current.commissionAmount += Number(line.commissionAmount || 0);
+      if (line.agreementCommission?.rentalAgreement?.id) current.agreements.add(line.agreementCommission.rentalAgreement.id);
+      byEmployeeMap.set(employeeId, current);
+    }
+
+    const byEmployee = Array.from(byEmployeeMap.values())
+      .map((row) => ({
+        employeeUserId: row.employeeUserId,
+        employeeName: row.employeeName,
+        email: row.email,
+        unitsSold: Number(row.unitsSold.toFixed ? row.unitsSold.toFixed(2) : row.unitsSold),
+        serviceRevenue: Number(row.serviceRevenue.toFixed(2)),
+        commissionAmount: Number(row.commissionAmount.toFixed(2)),
+        agreementsClosed: row.agreements.size
+      }))
+      .sort((a, b) => b.commissionAmount - a.commissionAmount);
+
+    return {
+      range: {
+        start: start.toISOString(),
+        end: end.toISOString()
+      },
+      filters: {
+        tenantId: effectiveTenantId,
+        tenantName: selectedTenant?.name || null,
+        locationId,
+        locationName: selectedLocation?.name || null,
+        employeeUserId,
+        employeeName: selectedEmployee?.name || null
+      },
+      tenants,
+      locations,
+      employees,
+      summary: {
+        servicesSoldCount: byService.length,
+        unitsSold: Number(lines.reduce((sum, line) => sum + Number(line.quantity || 0), 0).toFixed(2)),
+        serviceRevenue: Number(lines.reduce((sum, line) => sum + Number(line.lineRevenue || 0), 0).toFixed(2)),
+        commissionAmount: Number(lines.reduce((sum, line) => sum + Number(line.commissionAmount || 0), 0).toFixed(2)),
+        agreementsClosed: agreementIds.size
+      },
+      byService,
+      byEmployee
+    };
   }
 };

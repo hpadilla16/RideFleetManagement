@@ -30,3 +30,12 @@ reportsRouter.get('/overview.csv', async (req, res, next) => {
     next(e);
   }
 });
+
+reportsRouter.get('/services-sold', async (req, res, next) => {
+  try {
+    const out = await reportsService.servicesSold(req.query || {}, scopeFor(req));
+    res.json(out);
+  } catch (e) {
+    next(e);
+  }
+});
