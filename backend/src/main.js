@@ -17,6 +17,7 @@ import { prisma } from './lib/prisma.js';
 import { customerPortalRouter } from './modules/customer-portal/customer-portal.routes.js';
 import { tenantsRouter } from './modules/tenants/tenants.routes.js';
 import { reportsRouter } from './modules/reports/reports.routes.js';
+import { commissionsRouter } from './modules/commissions/commissions.routes.js';
 import { buildOpenApiSpec, swaggerHtml } from './docs/openapi.js';
 
 assertAuthConfig();
@@ -51,6 +52,7 @@ app.use('/api/fees', requireAuth, requireRole('ADMIN', 'OPS'), feesRouter);
 app.use('/api/rates', requireAuth, requireRole('ADMIN', 'OPS'), ratesRouter);
 app.use('/api/rental-agreements', requireAuth, rentalAgreementsRouter);
 app.use('/api/reports', requireAuth, reportsRouter);
+app.use('/api/commissions', requireAuth, commissionsRouter);
 app.use('/api/settings', requireAuth, settingsRouter);
 app.use('/api/tenants', requireAuth, tenantsRouter);
 
