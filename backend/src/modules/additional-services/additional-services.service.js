@@ -31,6 +31,9 @@ export const additionalServicesService = {
         dailyRate: data.dailyRate ?? null,
         weeklyRate: data.weeklyRate ?? null,
         monthlyRate: data.monthlyRate ?? null,
+        commissionValueType: data.commissionValueType || null,
+        commissionPercentValue: data.commissionPercentValue ?? null,
+        commissionFixedAmount: data.commissionFixedAmount ?? null,
         taxable: data.taxable ?? false,
         defaultQty: data.defaultQty ?? 1,
         sortOrder: data.sortOrder ?? 0,
@@ -55,7 +58,10 @@ export const additionalServicesService = {
       where: { id },
       data: {
         ...data,
-        locationId: data.locationId === '' ? null : data.locationId
+        locationId: data.locationId === '' ? null : data.locationId,
+        commissionValueType: data.commissionValueType === '' ? null : data.commissionValueType,
+        commissionPercentValue: Object.prototype.hasOwnProperty.call(data, 'commissionPercentValue') && (data.commissionPercentValue === '' || data.commissionPercentValue === null) ? null : data.commissionPercentValue,
+        commissionFixedAmount: Object.prototype.hasOwnProperty.call(data, 'commissionFixedAmount') && (data.commissionFixedAmount === '' || data.commissionFixedAmount === null) ? null : data.commissionFixedAmount
       },
       include: { location: true }
     });

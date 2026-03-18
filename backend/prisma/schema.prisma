@@ -867,6 +867,9 @@ model AdditionalService {
   dailyRate       Decimal?  @db.Decimal(10, 2)
   weeklyRate      Decimal?  @db.Decimal(10, 2)
   monthlyRate     Decimal?  @db.Decimal(10, 2)
+  commissionValueType   CommissionValueType?
+  commissionPercentValue Decimal? @db.Decimal(5, 2)
+  commissionFixedAmount  Decimal? @db.Decimal(10, 2)
   taxable         Boolean   @default(false)
   defaultQty      Decimal   @default(1) @db.Decimal(10, 2)
   sortOrder       Int       @default(0)

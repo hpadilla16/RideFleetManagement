@@ -120,7 +120,7 @@ const EMPTY_RATE = {
 };
 const EMPTY_SERVICE = {
   code: '', name: '', description: '', chargeType: 'UNIT', unitLabel: 'Unit', calculationBy: '24_HOUR_TIME',
-  rate: '', dailyRate: '', weeklyRate: '', monthlyRate: '', taxable: false, defaultQty: '1', sortOrder: '0',
+  rate: '', dailyRate: '', weeklyRate: '', monthlyRate: '', commissionValueType: '', commissionPercentValue: '', commissionFixedAmount: '', taxable: false, defaultQty: '1', sortOrder: '0',
   allVehicleTypes: true, vehicleTypeIds: [], displayOnline: false, defaultRencars: false, mandatory: false,
   isActive: true, locationId: ''
 };
@@ -184,6 +184,7 @@ function SettingsInner({ token, me, logout }) {
   const [feeForm, setFeeForm] = useState(EMPTY_FEE);
   const [rateForm, setRateForm] = useState(EMPTY_RATE);
   const [serviceForm, setServiceForm] = useState(EMPTY_SERVICE);
+  const [serviceEditId, setServiceEditId] = useState(null);
   const [locationEditor, setLocationEditor] = useState(null);
   const [locationEditorTab, setLocationEditorTab] = useState('main');
   const [copyLocationModal, setCopyLocationModal] = useState(null);
@@ -544,24 +545,33 @@ function SettingsInner({ token, me, logout }) {
     });
   };
 
+  const resetServiceForm = () => {
+    setServiceForm(EMPTY_SERVICE);
+    setServiceEditId(null);
+  };
+
   const addService = async (e) => {
     e.preventDefault();
-    await api('/api/additional-services', {
-      method: 'POST',
-      body: JSON.stringify({
-        ...serviceForm,
-        rate: Number(serviceForm.rate || 0),
-        dailyRate: serviceForm.dailyRate === '' ? null : Number(serviceForm.dailyRate),
-        weeklyRate: serviceForm.weeklyRate === '' ? null : Number(serviceForm.weeklyRate),
-        monthlyRate: serviceForm.monthlyRate === '' ? null : Number(serviceForm.monthlyRate),
-        defaultQty: Number(serviceForm.defaultQty || 1),
-        sortOrder: Number(serviceForm.sortOrder || 0),
-        vehicleTypeIds: JSON.stringify(serviceForm.vehicleTypeIds || []),
-        locationId: serviceForm.locationId || null
-      })
+    const payload = {
+      ...serviceForm,
+      rate: Number(serviceForm.rate || 0),
+      dailyRate: serviceForm.dailyRate === '' ? null : Number(serviceForm.dailyRate),
+      weeklyRate: serviceForm.weeklyRate === '' ? null : Number(serviceForm.weeklyRate),
+      monthlyRate: serviceForm.monthlyRate === '' ? null : Number(serviceForm.monthlyRate),
+      commissionValueType: serviceForm.commissionValueType || null,
+      commissionPercentValue: serviceForm.commissionPercentValue === '' ? null : Number(serviceForm.commissionPercentValue),
+      commissionFixedAmount: serviceForm.commissionFixedAmount === '' ? null : Number(serviceForm.commissionFixedAmount),
+      defaultQty: Number(serviceForm.defaultQty || 1),
+      sortOrder: Number(serviceForm.sortOrder || 0),
+      vehicleTypeIds: JSON.stringify(serviceForm.vehicleTypeIds || []),
+      locationId: serviceForm.locationId || null
+    };
+    await api(serviceEditId ? `/api/additional-services/${serviceEditId}` : '/api/additional-services', {
+      method: serviceEditId ? 'PATCH' : 'POST',
+      body: JSON.stringify(payload)
     }, token);
-    setServiceForm(EMPTY_SERVICE);
-    setMsg('Additional service added');
+    resetServiceForm();
+    setMsg(serviceEditId ? 'Additional service updated' : 'Additional service added');
     await load();
   };
 
@@ -829,11 +839,41 @@ function SettingsInner({ token, me, logout }) {
   };
 
   const editService = async (svc) => {
-    const name = window.prompt('Service name', svc.name || '');
-    if (name === null) return;
-    const rate = window.prompt('Rate', String(svc.rate ?? '0'));
-    if (rate === null) return;
-    await patchService(svc.id, { name, rate: Number(rate || 0) });
+    setServiceEditId(svc.id);
+    setServiceForm({
+      code: svc.code || '',
+      name: svc.name || '',
+      description: svc.description || '',
+      chargeType: svc.chargeType || 'UNIT',
+      unitLabel: svc.unitLabel || 'Unit',
+      calculationBy: svc.calculationBy || '24_HOUR_TIME',
+      rate: String(svc.rate ?? ''),
+      dailyRate: String(svc.dailyRate ?? ''),
+      weeklyRate: String(svc.weeklyRate ?? ''),
+      monthlyRate: String(svc.monthlyRate ?? ''),
+      commissionValueType: svc.commissionValueType || '',
+      commissionPercentValue: String(svc.commissionPercentValue ?? ''),
+      commissionFixedAmount: String(svc.commissionFixedAmount ?? ''),
+      taxable: !!svc.taxable,
+      defaultQty: String(svc.defaultQty ?? 1),
+      sortOrder: String(svc.sortOrder ?? 0),
+      allVehicleTypes: svc.allVehicleTypes !== false,
+      vehicleTypeIds: (() => {
+        try {
+          if (Array.isArray(svc.vehicleTypeIds)) return svc.vehicleTypeIds;
+          if (typeof svc.vehicleTypeIds === 'string' && svc.vehicleTypeIds.trim()) {
+            const parsed = JSON.parse(svc.vehicleTypeIds);
+            return Array.isArray(parsed) ? parsed : [];
+          }
+        } catch {}
+        return [];
+      })(),
+      displayOnline: !!svc.displayOnline,
+      defaultRencars: !!svc.defaultRencars,
+      mandatory: !!svc.mandatory,
+      isActive: svc.isActive !== false,
+      locationId: svc.locationId || ''
+    });
   };
 
   const resetCommissionPlanForm = () => {
@@ -1537,6 +1577,30 @@ function SettingsInner({ token, me, logout }) {
                 <div className="stack"><label className="label">Monthly*</label><input value={serviceForm.monthlyRate} onChange={(e) => setServiceForm({ ...serviceForm, monthlyRate: e.target.value })} /></div>
               </div>
 
+              <div className="glass card stack" style={{ padding: 12 }}>
+                <h3>Service-Specific Commission</h3>
+                <div className="label">If you set this here, it overrides the employee's plan for this service only.</div>
+                <div className="grid2">
+                  <div className="stack">
+                    <label className="label">Commission Type</label>
+                    <select value={serviceForm.commissionValueType || ''} onChange={(e) => setServiceForm({ ...serviceForm, commissionValueType: e.target.value })}>
+                      <option value="">Use employee/tenant plan</option>
+                      <option value="PERCENT">Percent of service revenue</option>
+                      <option value="FIXED_PER_UNIT">Fixed per unit sold</option>
+                      <option value="FIXED_PER_AGREEMENT">Fixed per agreement</option>
+                    </select>
+                  </div>
+                  <div className="stack">
+                    <label className="label">Percent Value</label>
+                    <input type="number" min="0" step="0.01" value={serviceForm.commissionPercentValue} onChange={(e) => setServiceForm({ ...serviceForm, commissionPercentValue: e.target.value })} placeholder="5" />
+                  </div>
+                </div>
+                <div className="stack">
+                  <label className="label">Fixed Amount</label>
+                  <input type="number" min="0" step="0.01" value={serviceForm.commissionFixedAmount} onChange={(e) => setServiceForm({ ...serviceForm, commissionFixedAmount: e.target.value })} placeholder="3.00" />
+                </div>
+              </div>
+
               <label className="label"><input type="checkbox" checked={serviceForm.allVehicleTypes} onChange={(e) => setServiceForm({ ...serviceForm, allVehicleTypes: e.target.checked, vehicleTypeIds: e.target.checked ? [] : serviceForm.vehicleTypeIds })} /> All Vehicle Types</label>
 
               <div className="glass card vehicle-types-box" style={{ opacity: serviceForm.allVehicleTypes ? 0.6 : 1 }}>
@@ -1561,17 +1625,26 @@ function SettingsInner({ token, me, logout }) {
                 <input placeholder="Sort Order" value={serviceForm.sortOrder} onChange={(e) => setServiceForm({ ...serviceForm, sortOrder: e.target.value })} />
               </div>
 
-              <button type="submit">Add Service</button>
+              <div style={{ display: 'flex', gap: 8 }}>
+                <button type="submit">{serviceEditId ? 'Save Service' : 'Add Service'}</button>
+                {serviceEditId ? <button type="button" onClick={resetServiceForm}>Cancel</button> : null}
+              </div>
             </form>
 
             <table>
-              <thead><tr><th>Name</th><th>Type</th><th>Rate</th><th>Qty</th><th>Location</th><th>Active</th><th>Actions</th></tr></thead>
+              <thead><tr><th>Name</th><th>Type</th><th>Rate</th><th>Commission</th><th>Qty</th><th>Location</th><th>Active</th><th>Actions</th></tr></thead>
               <tbody>
                 {services.map((s) => (
                   <tr key={s.id}>
                     <td>{s.name}</td>
                     <td>{s.chargeType}</td>
                     <td>${Number(s.rate || 0).toFixed(2)}</td>
+                    <td>
+                      {s.commissionValueType === 'PERCENT' ? `${Number(s.commissionPercentValue || 0).toFixed(2)}%` :
+                        s.commissionValueType ? `$${Number(s.commissionFixedAmount || 0).toFixed(2)}` :
+                        'Plan Default'}
+                      <div className="label">{s.commissionValueType || '-'}</div>
+                    </td>
                     <td>{Number(s.defaultQty || 1).toFixed(2)}</td>
                     <td>{s.location?.name || 'All'}</td>
                     <td>{s.isActive ? 'Yes' : 'No'}</td>

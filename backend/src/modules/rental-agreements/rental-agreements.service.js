@@ -231,12 +231,27 @@ function commissionChargeRows(charges = []) {
   });
 }
 
-function resolveCommissionRule(charge, rules = []) {
+function resolveCommissionRule(charge, rules = [], servicesById = new Map()) {
   const chargeCode = String(charge?.code || '').trim();
   const chargeType = String(charge?.chargeType || '').toUpperCase();
   const serviceId = String(charge?.source || '').toUpperCase() === 'ADDITIONAL_SERVICE' && charge?.sourceRefId
     ? String(charge.sourceRefId)
     : null;
+
+  if (serviceId && servicesById.has(serviceId)) {
+    const service = servicesById.get(serviceId);
+    if (service?.commissionValueType) {
+      return {
+        id: `service:${serviceId}`,
+        name: service.name || charge?.name || 'Service Commission',
+        valueType: service.commissionValueType,
+        percentValue: service.commissionPercentValue,
+        fixedAmount: service.commissionFixedAmount,
+        isActive: true,
+        source: 'SERVICE'
+      };
+    }
+  }
 
   const list = Array.isArray(rules) ? rules : [];
   return list.find((rule) => {
@@ -412,6 +427,26 @@ async function syncAgreementCommissionSnapshot(rentalAgreementId) {
   if (String(agreement.status || '').toUpperCase() !== 'CLOSED') return null;
   if (!agreement.salesOwnerUserId) return null;
 
+  const serviceIds = Array.from(new Set(
+    (agreement.charges || [])
+      .filter((charge) => String(charge?.source || '').toUpperCase() === 'ADDITIONAL_SERVICE' && charge?.sourceRefId)
+      .map((charge) => String(charge.sourceRefId))
+      .filter(Boolean)
+  ));
+  const serviceRows = serviceIds.length
+    ? await prisma.additionalService.findMany({
+        where: { id: { in: serviceIds } },
+        select: {
+          id: true,
+          name: true,
+          commissionValueType: true,
+          commissionPercentValue: true,
+          commissionFixedAmount: true
+        }
+      })
+    : [];
+  const servicesById = new Map(serviceRows.map((row) => [row.id, row]));
+
   const employeePlan = agreement.salesOwnerUser?.commissionPlan?.isActive ? agreement.salesOwnerUser.commissionPlan : null;
   const tenantPlan = employeePlan
     ? null
@@ -434,7 +469,7 @@ async function syncAgreementCommissionSnapshot(rentalAgreementId) {
   const eligibleCharges = commissionChargeRows(agreement.charges);
   const lines = eligibleCharges
     .map((charge) => {
-      const rule = resolveCommissionRule(charge, plan?.rules || []);
+      const rule = resolveCommissionRule(charge, plan?.rules || [], servicesById);
       const calc = calculateCommissionLine({ charge, rule, plan, appliedFixedAgreementRules });
       return {
         rentalAgreementChargeId: charge.id,
