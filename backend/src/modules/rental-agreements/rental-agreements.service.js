@@ -185,7 +185,9 @@ function structuredReservationChargeRows(reservation) {
     total: Number(row?.total || 0),
     taxable: !!row?.taxable,
     selected: row?.selected !== false,
-    sortOrder: Number.isInteger(row?.sortOrder) ? row.sortOrder : idx
+    sortOrder: Number.isInteger(row?.sortOrder) ? row.sortOrder : idx,
+    source: row?.source || null,
+    sourceRefId: row?.sourceRefId || null
   }));
 }
 
@@ -510,7 +512,19 @@ export const rentalAgreementsService = {
           const rate = perDay > 0 ? perDay : Number(s.rate || 0);
           const lineTotal = perDay > 0 ? perDay * days * qty : Number(s.rate || 0) * qty;
           servicesTotal += lineTotal;
-          chargeRows.push({ rentalAgreementId: existing.id, name: s.name, chargeType: 'UNIT', quantity: qty, rate, total: lineTotal, taxable: !!s.taxable, selected: true, sortOrder: chargeRows.length });
+          chargeRows.push({
+            rentalAgreementId: existing.id,
+            name: s.name,
+            chargeType: 'UNIT',
+            quantity: qty,
+            rate,
+            total: lineTotal,
+            taxable: !!s.taxable,
+            selected: true,
+            sortOrder: chargeRows.length,
+            source: 'ADDITIONAL_SERVICE',
+            sourceRefId: s.id
+          });
         });
 
         let feesTotal = 0;
@@ -774,7 +788,9 @@ export const rentalAgreementsService = {
         total: lineTotal,
         taxable: !!s.taxable,
         selected: true,
-        sortOrder: chargeRows.length
+        sortOrder: chargeRows.length,
+        source: 'ADDITIONAL_SERVICE',
+        sourceRefId: s.id
       });
     });
 
@@ -1688,6 +1704,8 @@ export const rentalAgreementsService = {
         status: 'CLOSED',
         locked: true,
         closedAt: new Date(),
+        closedByUserId: actorUserId || agreement.closedByUserId || null,
+        salesOwnerUserId: agreement.salesOwnerUserId || actorUserId || null,
         odometerIn: payload.odometerIn ?? agreement.odometerIn,
         fuelIn: payload.fuelIn ?? agreement.fuelIn,
         cleanlinessIn: payload.cleanlinessIn ?? agreement.cleanlinessIn

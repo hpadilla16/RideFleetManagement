@@ -97,6 +97,19 @@ enum FeeMode {
   PERCENTAGE
 }
 
+enum CommissionValueType {
+  PERCENT
+  FIXED_PER_UNIT
+  FIXED_PER_AGREEMENT
+}
+
+enum CommissionStatus {
+  PENDING
+  APPROVED
+  PAID
+  VOID
+}
+
 enum RateType {
   MULTIPLE_CLASSES
   SINGLE_CLASS
@@ -122,6 +135,9 @@ model Tenant {
   rates        Rate[]
   fees         Fee[]
   services     AdditionalService[]
+  commissionPlans CommissionPlan[]
+  commissionRules CommissionRule[]
+  agreementCommissions AgreementCommission[]
 }
 
 model Location {
@@ -345,6 +361,9 @@ model User {
   updatedAt    DateTime @updatedAt
 
   auditLogs    AuditLog[]
+  salesOwnedAgreements RentalAgreement[] @relation("AgreementSalesOwner")
+  closedAgreements RentalAgreement[] @relation("AgreementClosedBy")
+  agreementCommissions AgreementCommission[] @relation("AgreementCommissionEmployee")
 }
 
 model AuditLog {
@@ -438,6 +457,10 @@ model RentalAgreement {
   notes             String?
   finalizedAt       DateTime?
   closedAt          DateTime?
+  salesOwnerUserId  String?
+  salesOwnerUser    User?                  @relation("AgreementSalesOwner", fields: [salesOwnerUserId], references: [id])
+  closedByUserId    String?
+  closedByUser      User?                  @relation("AgreementClosedBy", fields: [closedByUserId], references: [id])
   locked            Boolean               @default(false)
   createdAt         DateTime              @default(now())
   updatedAt         DateTime              @updatedAt
@@ -446,6 +469,7 @@ model RentalAgreement {
   charges           RentalAgreementCharge[]
   payments          RentalAgreementPayment[]
   inspections       RentalAgreementInspection[]
+  commissions       AgreementCommission[]
 
   @@index([status, pickupAt])
 }
@@ -485,9 +509,13 @@ model RentalAgreementCharge {
   taxable           Boolean         @default(false)
   selected          Boolean         @default(true)
   sortOrder         Int             @default(0)
+  source            String?
+  sourceRefId       String?
 
   createdAt         DateTime        @default(now())
   updatedAt         DateTime        @updatedAt
+
+  commissionLines   AgreementCommissionLine[]
 
   @@index([rentalAgreementId, selected])
 }
@@ -508,6 +536,98 @@ model RentalAgreementPayment {
   updatedAt         DateTime               @updatedAt
 
   @@index([rentalAgreementId, paidAt])
+}
+
+model CommissionPlan {
+  id                  String               @id @default(cuid())
+  tenantId            String?
+  tenant              Tenant?              @relation(fields: [tenantId], references: [id])
+  name                String
+  isActive            Boolean              @default(true)
+  defaultValueType    CommissionValueType?
+  defaultPercentValue Decimal?             @db.Decimal(5, 2)
+  defaultFixedAmount  Decimal?             @db.Decimal(10, 2)
+  createdAt           DateTime             @default(now())
+  updatedAt           DateTime             @updatedAt
+
+  rules               CommissionRule[]
+  agreementCommissions AgreementCommission[]
+
+  @@index([tenantId, isActive])
+}
+
+model CommissionRule {
+  id                String               @id @default(cuid())
+  commissionPlanId  String
+  commissionPlan    CommissionPlan       @relation(fields: [commissionPlanId], references: [id], onDelete: Cascade)
+  tenantId          String?
+  tenant            Tenant?              @relation(fields: [tenantId], references: [id])
+  name              String
+  serviceId         String?
+  service           AdditionalService?   @relation(fields: [serviceId], references: [id])
+  chargeCode        String?
+  chargeType        ChargeType?
+  valueType         CommissionValueType
+  percentValue      Decimal?             @db.Decimal(5, 2)
+  fixedAmount       Decimal?             @db.Decimal(10, 2)
+  priority          Int                  @default(0)
+  isActive          Boolean              @default(true)
+  createdAt         DateTime             @default(now())
+  updatedAt         DateTime             @updatedAt
+
+  @@index([tenantId, isActive, priority])
+  @@index([serviceId])
+}
+
+model AgreementCommission {
+  id                String               @id @default(cuid())
+  tenantId          String?
+  tenant            Tenant?              @relation(fields: [tenantId], references: [id])
+  rentalAgreementId String
+  rentalAgreement   RentalAgreement      @relation(fields: [rentalAgreementId], references: [id], onDelete: Cascade)
+  employeeUserId    String
+  employeeUser      User                 @relation("AgreementCommissionEmployee", fields: [employeeUserId], references: [id])
+  commissionPlanId  String?
+  commissionPlan    CommissionPlan?      @relation(fields: [commissionPlanId], references: [id])
+  status            CommissionStatus     @default(PENDING)
+  monthKey          String
+  grossRevenue      Decimal              @default(0) @db.Decimal(10, 2)
+  serviceRevenue    Decimal              @default(0) @db.Decimal(10, 2)
+  eligibleRevenue   Decimal              @default(0) @db.Decimal(10, 2)
+  commissionAmount  Decimal              @default(0) @db.Decimal(10, 2)
+  calculatedAt      DateTime             @default(now())
+  approvedAt        DateTime?
+  paidAt            DateTime?
+  notes             String?
+  createdAt         DateTime             @default(now())
+  updatedAt         DateTime             @updatedAt
+
+  lines             AgreementCommissionLine[]
+
+  @@index([tenantId, monthKey, status])
+  @@index([employeeUserId, monthKey])
+  @@unique([rentalAgreementId, employeeUserId])
+}
+
+model AgreementCommissionLine {
+  id                    String                @id @default(cuid())
+  agreementCommissionId String
+  agreementCommission   AgreementCommission   @relation(fields: [agreementCommissionId], references: [id], onDelete: Cascade)
+  rentalAgreementChargeId String?
+  rentalAgreementCharge RentalAgreementCharge? @relation(fields: [rentalAgreementChargeId], references: [id])
+  serviceId             String?
+  service               AdditionalService?    @relation(fields: [serviceId], references: [id])
+  description           String
+  quantity              Decimal               @default(1) @db.Decimal(10, 2)
+  lineRevenue           Decimal               @default(0) @db.Decimal(10, 2)
+  valueType             CommissionValueType
+  percentValue          Decimal?              @db.Decimal(5, 2)
+  fixedAmount           Decimal?              @db.Decimal(10, 2)
+  commissionAmount      Decimal               @default(0) @db.Decimal(10, 2)
+  createdAt             DateTime              @default(now())
+
+  @@index([agreementCommissionId])
+  @@index([serviceId])
 }
 
 model RentalAgreementInspection {
@@ -756,6 +876,9 @@ model AdditionalService {
 
   createdAt       DateTime  @default(now())
   updatedAt       DateTime  @updatedAt
+
+  commissionRules CommissionRule[]
+  commissionLines AgreementCommissionLine[]
 
   @@index([locationId, isActive])
 }

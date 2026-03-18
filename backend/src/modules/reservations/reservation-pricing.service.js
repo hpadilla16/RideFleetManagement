@@ -130,7 +130,9 @@ async function syncAgreementCharges(reservationId, scope = {}) {
     total: row.total,
     taxable: row.taxable,
     selected: row.selected,
-    sortOrder: Number.isInteger(row.sortOrder) ? row.sortOrder : idx
+    sortOrder: Number.isInteger(row.sortOrder) ? row.sortOrder : idx,
+    source: row.source || null,
+    sourceRefId: row.sourceRefId || null
   }));
   const { subtotal, taxes, total } = summarizeChargeTotals(chargeRows);
   const paidAmount = toNumber(agreement.paidAmount);
