@@ -189,6 +189,7 @@ function SettingsInner({ token, me, logout }) {
   const [copyLocationModal, setCopyLocationModal] = useState(null);
   const [tenantRows, setTenantRows] = useState([]);
   const [commissionPlans, setCommissionPlans] = useState([]);
+  const [commissionEmployees, setCommissionEmployees] = useState([]);
   const [activeCommissionTenantId, setActiveCommissionTenantId] = useState('');
   const [activeCommissionPlanId, setActiveCommissionPlanId] = useState('');
   const [commissionPlanForm, setCommissionPlanForm] = useState(EMPTY_COMMISSION_PLAN);
@@ -260,6 +261,17 @@ function SettingsInner({ token, me, logout }) {
     }
   };
 
+  const loadCommissionEmployees = async (tenantId = activeCommissionTenantId) => {
+    try {
+      const qs = new URLSearchParams();
+      if (isSuper && tenantId) qs.set('tenantId', tenantId);
+      const rows = await api(`/api/commissions/employees${qs.toString() ? `?${qs.toString()}` : ''}`, {}, token);
+      setCommissionEmployees(Array.isArray(rows) ? rows : []);
+    } catch (e) {
+      setMsg(e.message);
+    }
+  };
+
   const loadTenants = async () => {
     if (!isSuper) return;
     try {
@@ -272,6 +284,7 @@ function SettingsInner({ token, me, logout }) {
 
   useEffect(() => { load(); }, [token]);
   useEffect(() => { loadCommissionConfig(activeCommissionTenantId); }, [token, activeCommissionTenantId]);
+  useEffect(() => { loadCommissionEmployees(activeCommissionTenantId); }, [token, activeCommissionTenantId]);
   useEffect(() => { loadTenants(); }, [token, isSuper]);
 
   const saveAgreement = async () => {
@@ -978,6 +991,21 @@ function SettingsInner({ token, me, logout }) {
       setMsg('Commission rule removed');
       if (commissionRuleForm.id === rule.id) resetCommissionRuleForm();
       await loadCommissionConfig(activeCommissionTenantId);
+    } catch (e) {
+      setMsg(e.message);
+    }
+  };
+
+  const assignCommissionPlanToEmployee = async (employeeId, commissionPlanId) => {
+    try {
+      const qs = new URLSearchParams();
+      if (isSuper && activeCommissionTenantId) qs.set('tenantId', activeCommissionTenantId);
+      await api(`/api/commissions/employees/${employeeId}/plan${qs.toString() ? `?${qs.toString()}` : ''}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ commissionPlanId: commissionPlanId || null })
+      }, token);
+      setMsg('Employee commission assignment saved');
+      await loadCommissionEmployees(activeCommissionTenantId);
     } catch (e) {
       setMsg(e.message);
     }
@@ -1779,6 +1807,55 @@ function SettingsInner({ token, me, logout }) {
                   </table>
                 </>
               )}
+            </div>
+
+            <div className="glass card stack" style={{ padding: 12 }}>
+              <div className="row-between">
+                <div>
+                  <h3>Employee Plan Assignments</h3>
+                  <p className="label">Each employee can inherit the tenant default or use a specific commission plan override.</p>
+                </div>
+                <button type="button" onClick={() => loadCommissionEmployees(activeCommissionTenantId)}>Refresh Employees</button>
+              </div>
+
+              <table>
+                <thead><tr><th>Employee</th><th>Role</th><th>Email</th><th>Assigned Plan</th><th>Action</th></tr></thead>
+                <tbody>
+                  {commissionEmployees.length ? commissionEmployees.map((employee) => (
+                    <tr key={employee.id}>
+                      <td>{employee.fullName}</td>
+                      <td>{employee.role}</td>
+                      <td>{employee.email}</td>
+                      <td>
+                        <select
+                          value={employee.commissionPlanId || ''}
+                          onChange={(e) => {
+                            const nextPlanId = e.target.value;
+                            setCommissionEmployees((prev) => prev.map((row) => row.id === employee.id ? {
+                              ...row,
+                              commissionPlanId: nextPlanId || null,
+                              commissionPlan: commissionPlans.find((plan) => plan.id === nextPlanId) || null
+                            } : row));
+                          }}
+                        >
+                          <option value="">Tenant default plan</option>
+                          {commissionPlans.map((plan) => <option key={plan.id} value={plan.id}>{plan.name}</option>)}
+                        </select>
+                        <div className="label">
+                          {employee.commissionPlan?.name || 'Uses tenant default'}
+                        </div>
+                      </td>
+                      <td>
+                        <button type="button" onClick={() => assignCommissionPlanToEmployee(employee.id, employee.commissionPlanId || '')}>
+                          Save Assignment
+                        </button>
+                      </td>
+                    </tr>
+                  )) : (
+                    <tr><td colSpan="5">No active admins or employees found for this tenant.</td></tr>
+                  )}
+                </tbody>
+              </table>
             </div>
           </div>
         )}

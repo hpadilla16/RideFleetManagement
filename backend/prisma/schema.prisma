@@ -357,6 +357,8 @@ model User {
   fullName     String
   role         UserRole @default(AGENT)
   isActive     Boolean  @default(true)
+  commissionPlanId String?
+  commissionPlan   CommissionPlan? @relation("UserCommissionPlan", fields: [commissionPlanId], references: [id])
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 
@@ -364,6 +366,9 @@ model User {
   salesOwnedAgreements RentalAgreement[] @relation("AgreementSalesOwner")
   closedAgreements RentalAgreement[] @relation("AgreementClosedBy")
   agreementCommissions AgreementCommission[] @relation("AgreementCommissionEmployee")
+
+  @@index([tenantId, role, isActive])
+  @@index([commissionPlanId])
 }
 
 model AuditLog {
@@ -552,6 +557,7 @@ model CommissionPlan {
 
   rules               CommissionRule[]
   agreementCommissions AgreementCommission[]
+  assignedUsers       User[]               @relation("UserCommissionPlan")
 
   @@index([tenantId, isActive])
 }

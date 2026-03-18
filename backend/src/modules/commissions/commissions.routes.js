@@ -117,3 +117,21 @@ commissionsRouter.get('/ledger', async (req, res, next) => {
     next(e);
   }
 });
+
+commissionsRouter.get('/employees', async (req, res, next) => {
+  try {
+    res.json(await commissionsService.listEmployees(scopeFor(req)));
+  } catch (e) {
+    next(e);
+  }
+});
+
+commissionsRouter.patch('/employees/:id/plan', async (req, res) => {
+  try {
+    res.json(await commissionsService.assignEmployeePlan(req.params.id, req.body?.commissionPlanId || null, scopeFor(req)));
+  } catch (e) {
+    if (/employee not found/i.test(String(e?.message || ''))) return res.status(404).json({ error: 'Employee not found' });
+    if (/commission plan not found/i.test(String(e?.message || ''))) return res.status(404).json({ error: 'Commission plan not found' });
+    res.status(400).json({ error: e.message });
+  }
+});

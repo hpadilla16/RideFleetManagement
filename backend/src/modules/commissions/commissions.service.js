@@ -190,5 +190,82 @@ export const commissionsService = {
       },
       orderBy: [{ calculatedAt: 'desc' }, { createdAt: 'desc' }]
     });
+  },
+
+  async listEmployees(scope = {}) {
+    return prisma.user.findMany({
+      where: {
+        ...(scope?.tenantId ? { tenantId: scope.tenantId } : {}),
+        role: { in: ['ADMIN', 'OPS', 'AGENT'] },
+        isActive: true
+      },
+      select: {
+        id: true,
+        email: true,
+        fullName: true,
+        role: true,
+        tenantId: true,
+        commissionPlanId: true,
+        commissionPlan: {
+          select: { id: true, name: true, isActive: true }
+        }
+      },
+      orderBy: [{ role: 'asc' }, { fullName: 'asc' }, { email: 'asc' }]
+    });
+  },
+
+  async assignEmployeePlan(userId, commissionPlanId, scope = {}) {
+    const user = await prisma.user.findFirst({
+      where: {
+        id: userId,
+        ...(scope?.tenantId ? { tenantId: scope.tenantId } : {})
+      },
+      select: { id: true, tenantId: true }
+    });
+    if (!user) throw new Error('Employee not found');
+
+    if (!commissionPlanId) {
+      return prisma.user.update({
+        where: { id: userId },
+        data: { commissionPlanId: null },
+        select: {
+          id: true,
+          email: true,
+          fullName: true,
+          role: true,
+          tenantId: true,
+          commissionPlanId: true,
+          commissionPlan: {
+            select: { id: true, name: true, isActive: true }
+          }
+        }
+      });
+    }
+
+    const plan = await prisma.commissionPlan.findFirst({
+      where: {
+        id: commissionPlanId,
+        ...(scope?.tenantId ? { tenantId: scope.tenantId } : {})
+      },
+      select: { id: true, tenantId: true }
+    });
+    if (!plan) throw new Error('Commission plan not found');
+    if ((plan.tenantId || null) !== (user.tenantId || null)) throw new Error('Employee and commission plan must belong to the same tenant');
+
+    return prisma.user.update({
+      where: { id: userId },
+      data: { commissionPlanId: plan.id },
+      select: {
+        id: true,
+        email: true,
+        fullName: true,
+        role: true,
+        tenantId: true,
+        commissionPlanId: true,
+        commissionPlan: {
+          select: { id: true, name: true, isActive: true }
+        }
+      }
+    });
   }
 };

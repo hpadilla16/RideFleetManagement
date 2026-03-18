@@ -378,6 +378,20 @@ async function syncAgreementCommissionSnapshot(rentalAgreementId) {
       closedAt: true,
       total: true,
       salesOwnerUserId: true,
+      salesOwnerUser: {
+        select: {
+          id: true,
+          commissionPlanId: true,
+          commissionPlan: {
+            include: {
+              rules: {
+                where: { isActive: true },
+                orderBy: [{ priority: 'asc' }, { createdAt: 'asc' }]
+              }
+            }
+          }
+        }
+      },
       charges: {
         orderBy: [{ sortOrder: 'asc' }, { createdAt: 'asc' }],
         select: {
@@ -398,19 +412,23 @@ async function syncAgreementCommissionSnapshot(rentalAgreementId) {
   if (String(agreement.status || '').toUpperCase() !== 'CLOSED') return null;
   if (!agreement.salesOwnerUserId) return null;
 
-  const plan = await prisma.commissionPlan.findFirst({
-    where: {
-      tenantId: agreement.tenantId || null,
-      isActive: true
-    },
-    include: {
-      rules: {
-        where: { isActive: true },
-        orderBy: [{ priority: 'asc' }, { createdAt: 'asc' }]
-      }
-    },
-    orderBy: { createdAt: 'asc' }
-  });
+  const employeePlan = agreement.salesOwnerUser?.commissionPlan?.isActive ? agreement.salesOwnerUser.commissionPlan : null;
+  const tenantPlan = employeePlan
+    ? null
+    : await prisma.commissionPlan.findFirst({
+        where: {
+          tenantId: agreement.tenantId || null,
+          isActive: true
+        },
+        include: {
+          rules: {
+            where: { isActive: true },
+            orderBy: [{ priority: 'asc' }, { createdAt: 'asc' }]
+          }
+        },
+        orderBy: { createdAt: 'asc' }
+      });
+  const plan = employeePlan || tenantPlan;
 
   const appliedFixedAgreementRules = new Set();
   const eligibleCharges = commissionChargeRows(agreement.charges);
