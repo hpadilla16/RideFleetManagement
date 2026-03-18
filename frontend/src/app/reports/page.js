@@ -26,14 +26,16 @@ function metricCards(report) {
     { label: 'Reservations', value: kpis.reservationsCreated || 0 },
     { label: 'Checked Out', value: kpis.checkedOut || 0 },
     { label: 'Checked In', value: kpis.checkedIn || 0 },
+    { label: 'Due Today', value: kpis.agreementsDueToday || 0 },
     { label: 'Collected', value: fmtMoney(kpis.collectedPayments) },
     { label: 'Open Balance', value: fmtMoney(kpis.openBalance) },
+    { label: 'In Maintenance', value: kpis.vehiclesInMaintenance || 0 },
     { label: 'Utilization', value: `${Number(kpis.utilizationPct || 0).toFixed(1)}%` }
   ];
 }
 
 function Inner({ token, me, logout }) {
-  const [filters, setFilters] = useState({ start: daysAgo(29), end: daysAgo(0), locationId: '' });
+  const [filters, setFilters] = useState({ start: daysAgo(29), end: daysAgo(0), tenantId: '', locationId: '' });
   const [report, setReport] = useState(null);
   const [msg, setMsg] = useState('');
   const [loading, setLoading] = useState(true);
@@ -44,6 +46,7 @@ function Inner({ token, me, logout }) {
       const qs = new URLSearchParams({
         start: next.start,
         end: next.end,
+        ...(next.tenantId ? { tenantId: next.tenantId } : {}),
         ...(next.locationId ? { locationId: next.locationId } : {})
       });
       const out = await api(`/api/reports/overview?${qs.toString()}`, {}, token);
@@ -71,6 +74,7 @@ function Inner({ token, me, logout }) {
       const qs = new URLSearchParams({
         start: filters.start,
         end: filters.end,
+        ...(filters.tenantId ? { tenantId: filters.tenantId } : {}),
         ...(filters.locationId ? { locationId: filters.locationId } : {})
       });
       const res = await fetch(`${API_BASE}/api/reports/overview.csv?${qs.toString()}`, {
@@ -85,7 +89,7 @@ function Inner({ token, me, logout }) {
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = `reports-overview-${filters.start}-to-${filters.end}${filters.locationId ? `-${filters.locationId}` : ''}.csv`;
+      a.download = `reports-overview-${filters.start}-to-${filters.end}${filters.tenantId ? `-${filters.tenantId}` : ''}${filters.locationId ? `-${filters.locationId}` : ''}.csv`;
       document.body.appendChild(a);
       a.click();
       a.remove();
@@ -128,6 +132,21 @@ function Inner({ token, me, logout }) {
           </div>
         </div>
 
+        {String(me?.role || '').toUpperCase() === 'SUPER_ADMIN' ? (
+          <div>
+            <span className="label">Tenant</span>
+            <select
+              value={filters.tenantId}
+              onChange={(e) => setFilters((prev) => ({ ...prev, tenantId: e.target.value, locationId: '' }))}
+            >
+              <option value="">All tenants</option>
+              {(report?.tenants || []).map((tenant) => (
+                <option key={tenant.id} value={tenant.id}>{tenant.name}</option>
+              ))}
+            </select>
+          </div>
+        ) : null}
+
         <div>
           <span className="label">Location</span>
           <select
@@ -144,6 +163,7 @@ function Inner({ token, me, logout }) {
         <button onClick={() => load(filters)} disabled={loading}>Apply Range</button>
         {msg ? <p className="error">{msg}</p> : null}
         {loading ? <p className="label">Loading report...</p> : null}
+        {!loading && report?.filters?.tenantName ? <p className="label">Tenant: {report.filters.tenantName}</p> : null}
         {!loading && report?.filters?.locationName ? <p className="label">Filtered by: {report.filters.locationName}</p> : null}
       </section>
 

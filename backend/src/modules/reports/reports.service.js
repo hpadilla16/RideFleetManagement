@@ -57,6 +57,11 @@ function normalizeLocationId(query = {}) {
   return raw || null;
 }
 
+function normalizeTenantId(query = {}) {
+  const raw = String(query?.tenantId || '').trim();
+  return raw || null;
+}
+
 export const reportsService = {
   async overview(query = {}, scope = {}) {
     const now = new Date();
@@ -67,8 +72,11 @@ export const reportsService = {
 
     const start = startOfDay(Number.isNaN(rawStart.getTime()) ? now : rawStart);
     const end = endOfDay(Number.isNaN(rawEnd.getTime()) ? now : rawEnd);
-    const whereScope = scopeWhere(scope);
+    const effectiveTenantId = scope?.tenantId || normalizeTenantId(query);
+    const whereScope = scopeWhere({ tenantId: effectiveTenantId });
     const locationId = normalizeLocationId(query);
+    const todayStart = startOfDay(now);
+    const todayEnd = endOfDay(now);
     const reservationWhere = {
       ...whereScope,
       ...(locationId ? { pickupLocationId: locationId } : {}),
@@ -90,13 +98,29 @@ export const reportsService = {
       status: 'PAID',
       paidAt: { gte: start, lte: end }
     };
+    const dueTodayWhere = {
+      ...whereScope,
+      ...(locationId ? { pickupLocationId: locationId } : {}),
+      status: { notIn: ['CLOSED', 'CANCELLED'] },
+      returnAt: { gte: todayStart, lte: todayEnd }
+    };
+    const maintenanceWhere = {
+      status: { in: ['OPEN', 'IN_PROGRESS'] },
+      vehicle: {
+        ...whereScope,
+        ...(locationId ? { homeLocationId: locationId } : {})
+      }
+    };
 
     const [
       reservations,
       reservationPayments,
       agreements,
       vehicles,
-      locations
+      locations,
+      tenants,
+      dueTodayCount,
+      maintenanceJobs
     ] = await Promise.all([
       prisma.reservation.findMany({
         where: reservationWhere,
@@ -137,6 +161,19 @@ export const reportsService = {
       prisma.location.findMany({
         where: { ...whereScope, isActive: true },
         select: { id: true, name: true }
+      }),
+      scope?.tenantId
+        ? Promise.resolve([])
+        : prisma.tenant.findMany({
+            orderBy: { name: 'asc' },
+            select: { id: true, name: true, status: true }
+          }),
+      prisma.rentalAgreement.count({
+        where: dueTodayWhere
+      }),
+      prisma.maintenanceJob.findMany({
+        where: maintenanceWhere,
+        select: { vehicleId: true }
       })
     ]);
 
@@ -170,11 +207,18 @@ export const reportsService = {
     const openBalance = Number(activeAgreements.reduce((sum, row) => sum + Math.max(0, toNumber(row.balance)), 0).toFixed(2));
     const fleetTotal = vehicles.filter((row) => String(row.status || '').toUpperCase() !== 'OUT_OF_SERVICE').length;
     const onRent = vehicles.filter((row) => String(row.status || '').toUpperCase() === 'ON_RENT').length;
+    const vehicleMaintenanceCount = vehicles.filter((row) => String(row.status || '').toUpperCase() === 'IN_MAINTENANCE').length;
+    const jobVehicleCount = new Set((maintenanceJobs || []).map((row) => row.vehicleId).filter(Boolean)).size;
+    const vehiclesInMaintenance = Math.max(vehicleMaintenanceCount, jobVehicleCount);
     const utilizationPct = fleetTotal > 0 ? Number(((onRent / fleetTotal) * 100).toFixed(1)) : 0;
 
     const locationNameById = new Map(locations.map((row) => [row.id, row.name]));
+    const tenantNameById = new Map((tenants || []).map((row) => [row.id, row.name]));
     const selectedLocation = locationId
       ? { id: locationId, name: locationNameById.get(locationId) || 'Unknown' }
+      : null;
+    const selectedTenant = effectiveTenantId
+      ? { id: effectiveTenantId, name: tenantNameById.get(effectiveTenantId) || 'Current Tenant' }
       : null;
     const reservationByLocation = Object.entries(
       reservations.reduce((acc, row) => {
@@ -198,10 +242,13 @@ export const reportsService = {
         days: buildDaySeries(start, end).length
       },
       filters: {
+        tenantId: effectiveTenantId,
+        tenantName: selectedTenant?.name || null,
         locationId,
         locationName: selectedLocation?.name || null
       },
       locations,
+      tenants,
       kpis: {
         reservationsCreated: reservations.length,
         checkedOut: reservationStatusCounts.CHECKED_OUT,
@@ -210,11 +257,13 @@ export const reportsService = {
         noShow: reservationStatusCounts.NO_SHOW,
         activeAgreements: activeAgreements.length,
         agreementsClosed: closedInRange.length,
+        agreementsDueToday: dueTodayCount,
         projectedRevenue: sumMoney(reservations, 'estimatedTotal'),
         collectedPayments: sumMoney(reservationPayments, 'amount'),
         openBalance,
         fleetTotal,
         onRent,
+        vehiclesInMaintenance,
         utilizationPct
       },
       reservationStatusBreakdown: Object.entries(reservationStatusCounts).map(([status, count]) => ({ status, count })),
@@ -232,6 +281,7 @@ export const reportsService = {
     lines.push(csvLine(['Start', report.range.start]));
     lines.push(csvLine(['End', report.range.end]));
     lines.push(csvLine(['Days', report.range.days]));
+    lines.push(csvLine(['Tenant', report.filters?.tenantName || 'All Tenants']));
     lines.push(csvLine(['Location', report.filters?.locationName || 'All Locations']));
     lines.push('');
 

@@ -52,6 +52,7 @@ export function buildOpenApiSpec(serverUrl) {
       { name: 'Rental Agreements', description: 'Agreement lifecycle, payments, signatures, inspections' },
       { name: 'Customers', description: 'Customer management' },
       { name: 'Vehicles', description: 'Vehicle management' },
+      { name: 'Reports', description: 'Operational dashboards and exports' },
       { name: 'Settings', description: 'Tenant/location business settings' },
       { name: 'Tenants', description: 'Super-admin tenant management' }
     ],
@@ -424,6 +425,110 @@ export function buildOpenApiSpec(serverUrl) {
             rows: [
               { internalNumber: 'U-100', vin: '1HGCM82633A123456', vehicleTypeCode: 'SUV', make: 'Toyota', model: 'RAV4' }
             ]
+          }
+        },
+        ReportsOverviewResponse: {
+          type: 'object',
+          properties: {
+            range: {
+              type: 'object',
+              properties: {
+                start: { type: 'string', format: 'date-time' },
+                end: { type: 'string', format: 'date-time' },
+                days: { type: 'integer', example: 30 }
+              }
+            },
+            filters: {
+              type: 'object',
+              properties: {
+                tenantId: { type: 'string', nullable: true },
+                tenantName: { type: 'string', nullable: true },
+                locationId: { type: 'string', nullable: true },
+                locationName: { type: 'string', nullable: true }
+              }
+            },
+            locations: {
+              type: 'array',
+              items: {
+                type: 'object',
+                properties: {
+                  id: { type: 'string' },
+                  name: { type: 'string' }
+                }
+              }
+            },
+            tenants: {
+              type: 'array',
+              items: {
+                type: 'object',
+                properties: {
+                  id: { type: 'string' },
+                  name: { type: 'string' },
+                  status: { type: 'string' }
+                }
+              }
+            },
+            kpis: {
+              type: 'object',
+              properties: {
+                reservationsCreated: { type: 'integer' },
+                checkedOut: { type: 'integer' },
+                checkedIn: { type: 'integer' },
+                cancelled: { type: 'integer' },
+                noShow: { type: 'integer' },
+                activeAgreements: { type: 'integer' },
+                agreementsClosed: { type: 'integer' },
+                agreementsDueToday: { type: 'integer' },
+                projectedRevenue: { type: 'number' },
+                collectedPayments: { type: 'number' },
+                openBalance: { type: 'number' },
+                fleetTotal: { type: 'integer' },
+                onRent: { type: 'integer' },
+                vehiclesInMaintenance: { type: 'integer' },
+                utilizationPct: { type: 'number' }
+              }
+            },
+            reservationStatusBreakdown: {
+              type: 'array',
+              items: {
+                type: 'object',
+                properties: {
+                  status: { type: 'string' },
+                  count: { type: 'integer' }
+                }
+              }
+            },
+            reservationsByDay: {
+              type: 'array',
+              items: {
+                type: 'object',
+                properties: {
+                  date: { type: 'string', example: '2026-03-18' },
+                  count: { type: 'integer' }
+                }
+              }
+            },
+            paymentsByDay: {
+              type: 'array',
+              items: {
+                type: 'object',
+                properties: {
+                  date: { type: 'string', example: '2026-03-18' },
+                  amount: { type: 'number' }
+                }
+              }
+            },
+            topPickupLocations: {
+              type: 'array',
+              items: {
+                type: 'object',
+                properties: {
+                  locationId: { type: 'string' },
+                  name: { type: 'string' },
+                  count: { type: 'integer' }
+                }
+              }
+            }
           }
         }
       }
@@ -1127,6 +1232,47 @@ export function buildOpenApiSpec(serverUrl) {
           requestBody: body(true, '#/components/schemas/VehicleBulkRowsPayload'),
           responses: {
             200: ok('Bulk import result')
+          }
+        }
+      },
+      '/api/reports/overview': {
+        get: {
+          tags: ['Reports'],
+          summary: 'Get reports overview dashboard data',
+          security: bearerSecurity(),
+          parameters: [
+            { name: 'start', in: 'query', schema: { type: 'string', format: 'date' }, description: 'Range start date (YYYY-MM-DD)' },
+            { name: 'end', in: 'query', schema: { type: 'string', format: 'date' }, description: 'Range end date (YYYY-MM-DD)' },
+            { name: 'tenantId', in: 'query', schema: { type: 'string' }, description: 'Optional tenant filter for super admins' },
+            { name: 'locationId', in: 'query', schema: { type: 'string' }, description: 'Optional pickup/home location filter' }
+          ],
+          responses: {
+            200: ok('Reports overview', '#/components/schemas/ReportsOverviewResponse'),
+            401: ok('Unauthorized', '#/components/schemas/ErrorResponse')
+          }
+        }
+      },
+      '/api/reports/overview.csv': {
+        get: {
+          tags: ['Reports'],
+          summary: 'Export reports overview as CSV',
+          security: bearerSecurity(),
+          parameters: [
+            { name: 'start', in: 'query', schema: { type: 'string', format: 'date' }, description: 'Range start date (YYYY-MM-DD)' },
+            { name: 'end', in: 'query', schema: { type: 'string', format: 'date' }, description: 'Range end date (YYYY-MM-DD)' },
+            { name: 'tenantId', in: 'query', schema: { type: 'string' }, description: 'Optional tenant filter for super admins' },
+            { name: 'locationId', in: 'query', schema: { type: 'string' }, description: 'Optional pickup/home location filter' }
+          ],
+          responses: {
+            200: {
+              description: 'CSV export',
+              content: {
+                'text/csv': {
+                  schema: { type: 'string' }
+                }
+              }
+            },
+            401: ok('Unauthorized', '#/components/schemas/ErrorResponse')
           }
         }
       },
