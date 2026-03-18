@@ -27,6 +27,9 @@ services:
       NODE_ENV: production
       PORT: 4000
       DATABASE_URL: ${DATABASE_URL:-postgresql://postgres:postgres@db:5432/fleet_management}
+      PUPPETEER_EXECUTABLE_PATH: /usr/local/bin/chrome
+    ports:
+      - "4000:4000"
     depends_on:
       db:
         condition: service_healthy
@@ -40,6 +43,8 @@ services:
     build:
       context: ./frontend
       dockerfile: Dockerfile.prod
+      args:
+        NEXT_PUBLIC_API_BASE: ${NEXT_PUBLIC_API_BASE:-http://localhost:4000}
     container_name: fleet-frontend-prod
     restart: unless-stopped
     ports:
