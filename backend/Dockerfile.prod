@@ -1,11 +1,15 @@
 FROM node:22-alpine AS deps
 WORKDIR /app
+ENV PUPPETEER_SKIP_DOWNLOAD=true
+ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true
 COPY package*.json ./
 RUN npm ci --omit=dev
 
 FROM node:22-alpine AS runtime
 WORKDIR /app
 ENV NODE_ENV=production
+ENV PUPPETEER_SKIP_DOWNLOAD=true
+ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true
 RUN apk add --no-cache chromium nss freetype harfbuzz ca-certificates ttf-freefont \
   && (ln -sf /usr/bin/chromium-browser /usr/local/bin/chrome || ln -sf /usr/bin/chromium /usr/local/bin/chrome)
 ENV PUPPETEER_EXECUTABLE_PATH=/usr/local/bin/chrome
