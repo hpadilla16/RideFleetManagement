@@ -283,6 +283,7 @@ model Reservation {
   notes             String?
   customerInfoToken String?
   customerInfoTokenExpiresAt DateTime?
+  customerInfoCompletedAt DateTime?
   signatureToken    String?
   signatureTokenExpiresAt DateTime?
   paymentRequestToken String?

@@ -76,6 +76,17 @@ async function trySaveAuthNetCardOnFileFromTransaction({ reservation, reference 
 }
 
 async function findReservationByToken(kind, token) {
+  if (kind === 'customer-info') {
+    return prisma.reservation.findFirst({
+      where: { customerInfoToken: token, customerInfoTokenExpiresAt: { gt: new Date() } },
+      include: {
+        customer: true,
+        pickupLocation: true,
+        returnLocation: true,
+        vehicle: true
+      }
+    });
+  }
   if (kind === 'signature') {
     return prisma.reservation.findFirst({
       where: { signatureToken: token, signatureTokenExpiresAt: { gt: new Date() } },
@@ -107,6 +118,38 @@ async function findReservationByToken(kind, token) {
     });
   }
   return null;
+}
+
+function serializeCustomerInfoReservation(reservation) {
+  return {
+    id: reservation.id,
+    reservationNumber: reservation.reservationNumber,
+    status: reservation.status,
+    pickupAt: reservation.pickupAt,
+    returnAt: reservation.returnAt,
+    pickupLocation: reservation.pickupLocation?.name || '',
+    returnLocation: reservation.returnLocation?.name || '',
+    vehicle: [reservation.vehicle?.year, reservation.vehicle?.make, reservation.vehicle?.model].filter(Boolean).join(' ') || '',
+    customerInfoCompletedAt: reservation.customerInfoCompletedAt || null,
+    customer: {
+      firstName: reservation.customer?.firstName || '',
+      lastName: reservation.customer?.lastName || '',
+      email: reservation.customer?.email || '',
+      phone: reservation.customer?.phone || '',
+      dateOfBirth: reservation.customer?.dateOfBirth || null,
+      licenseNumber: reservation.customer?.licenseNumber || '',
+      licenseState: reservation.customer?.licenseState || '',
+      insurancePolicyNumber: reservation.customer?.insurancePolicyNumber || '',
+      insuranceDocumentUrl: reservation.customer?.insuranceDocumentUrl || '',
+      address1: reservation.customer?.address1 || '',
+      address2: reservation.customer?.address2 || '',
+      city: reservation.customer?.city || '',
+      state: reservation.customer?.state || '',
+      zip: reservation.customer?.zip || '',
+      country: reservation.customer?.country || '',
+      idPhotoUrl: reservation.customer?.idPhotoUrl || ''
+    }
+  };
 }
 
 function paidFromStructuredPayments(payments) {
@@ -378,6 +421,96 @@ customerPortalRouter.get('/signature/:token', async (req, res, next) => {
       termsText: agreementCfg?.termsText || 'Standard rental terms apply.'
     });
   } catch (e) { next(e); }
+});
+
+customerPortalRouter.get('/customer-info/:token', async (req, res, next) => {
+  try {
+    const token = String(req.params.token || '');
+    if (!token) return res.status(400).json({ error: 'token required' });
+
+    const reservation = await findReservationByToken('customer-info', token);
+    if (!reservation) return res.status(404).json({ error: 'Invalid or expired customer info token' });
+
+    res.json({
+      reservation: serializeCustomerInfoReservation(reservation),
+      expiresAt: reservation.customerInfoTokenExpiresAt
+    });
+  } catch (e) {
+    next(e);
+  }
+});
+
+customerPortalRouter.post('/customer-info/:token', async (req, res, next) => {
+  try {
+    const token = String(req.params.token || '');
+    if (!token) return res.status(400).json({ error: 'token required' });
+
+    const reservation = await findReservationByToken('customer-info', token);
+    if (!reservation) return res.status(404).json({ error: 'Invalid or expired customer info token' });
+
+    const body = req.body || {};
+    const firstName = String(body.firstName || '').trim();
+    const lastName = String(body.lastName || '').trim();
+    const email = String(body.email || '').trim().toLowerCase();
+    const phone = String(body.phone || '').trim();
+    if (!firstName || !lastName || !email || !phone) {
+      return res.status(400).json({ error: 'firstName, lastName, email, and phone are required' });
+    }
+
+    await prisma.customer.update({
+      where: { id: reservation.customerId },
+      data: {
+        firstName,
+        lastName,
+        email,
+        phone,
+        dateOfBirth: body.dateOfBirth ? new Date(body.dateOfBirth) : null,
+        licenseNumber: body.licenseNumber ? String(body.licenseNumber).trim() : null,
+        licenseState: body.licenseState ? String(body.licenseState).trim() : null,
+        insurancePolicyNumber: body.insurancePolicyNumber ? String(body.insurancePolicyNumber).trim() : null,
+        insuranceDocumentUrl: body.insuranceDocumentUrl ? String(body.insuranceDocumentUrl).trim() : null,
+        address1: body.address1 ? String(body.address1).trim() : null,
+        address2: body.address2 ? String(body.address2).trim() : null,
+        city: body.city ? String(body.city).trim() : null,
+        state: body.state ? String(body.state).trim() : null,
+        zip: body.zip ? String(body.zip).trim() : null,
+        country: body.country ? String(body.country).trim() : null,
+        idPhotoUrl: body.idPhotoUrl ? String(body.idPhotoUrl).trim() : null
+      }
+    });
+
+    const completedAt = new Date();
+    await prisma.reservation.update({
+      where: { id: reservation.id },
+      data: {
+        customerInfoCompletedAt: completedAt,
+        customerInfoToken: null,
+        customerInfoTokenExpiresAt: null
+      }
+    });
+
+    await prisma.auditLog.create({
+      data: {
+        tenantId: reservation.tenantId || null,
+        reservationId: reservation.id,
+        action: 'UPDATE',
+        metadata: JSON.stringify({
+          customerInfoCompleted: true,
+          completedAt: completedAt.toISOString(),
+          source: 'PUBLIC_PRECHECKIN',
+          ip: req.ip || null
+        })
+      }
+    });
+
+    res.json({
+      ok: true,
+      completedAt,
+      message: 'Pre-check-in completed successfully.'
+    });
+  } catch (e) {
+    next(e);
+  }
 });
 
 customerPortalRouter.post('/signature/:token', async (req, res, next) => {
