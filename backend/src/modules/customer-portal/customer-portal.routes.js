@@ -156,10 +156,32 @@ async function buildPortalSummary(reservation, kind, token) {
   const agreement = await latestAgreementForReservation(reservation.id);
   const payments = mergePayments(reservation, agreement);
   const paidAmount = paidFromStructuredPayments(payments);
+  const balanceDue = await amountDueForReservation(reservation.id, reservation.estimatedTotal);
   const lastPaymentAt = payments
     .map((payment) => payment?.paidAt || payment?.createdAt || null)
     .filter(Boolean)
     .sort((a, b) => new Date(b).getTime() - new Date(a).getTime())[0] || null;
+  const customerInfoComplete = !!reservation.customerInfoCompletedAt;
+  const signatureComplete = !!reservation.signatureSignedAt;
+  const paymentComplete = balanceDue <= 0 && paidAmount > 0;
+  const paymentPartial = paidAmount > 0 && balanceDue > 0;
+  const paymentRequested = !!reservation.paymentRequestToken;
+  const agreementActive = !!agreement;
+  const agreementClosed = !!agreement?.closedAt;
+  const paymentStatus = paymentComplete
+    ? 'completed'
+    : paymentPartial
+      ? 'active'
+      : paymentRequested
+        ? 'requested'
+        : 'pending';
+  const paymentStatusLabel = paymentComplete
+    ? 'Paid in Full'
+    : paymentPartial
+      ? 'Partial Payment'
+      : paymentRequested
+        ? 'Payment Requested'
+        : 'Payment Pending';
 
   const docs = [
     {
@@ -188,31 +210,57 @@ async function buildPortalSummary(reservation, kind, token) {
       'customerInfo',
       'Customer Information',
       reservation.customerInfoCompletedAt || reservation.customerInfoTokenExpiresAt || null,
-      reservation.customerInfoCompletedAt ? 'completed' : reservation.customerInfoToken ? 'requested' : 'pending',
-      reservation.customerInfoCompletedAt ? 'Customer information submitted.' : reservation.customerInfoToken ? 'Waiting for customer pre-check-in.' : 'Customer info request not sent.'
+      customerInfoComplete ? 'completed' : reservation.customerInfoToken ? 'requested' : 'pending',
+      customerInfoComplete ? 'Customer information submitted.' : reservation.customerInfoToken ? 'Waiting for customer pre-check-in.' : 'Customer info request not sent.'
     ),
     portalTimelineEntry(
       'signature',
       'Agreement Signature',
       reservation.signatureSignedAt || reservation.signatureTokenExpiresAt || null,
-      reservation.signatureSignedAt ? 'completed' : reservation.signatureToken ? 'requested' : 'pending',
-      reservation.signatureSignedAt ? `Signed by ${reservation.signatureSignedBy || 'customer'}.` : reservation.signatureToken ? 'Waiting for customer signature.' : 'Signature request not sent.'
+      signatureComplete ? 'completed' : reservation.signatureToken ? 'requested' : 'pending',
+      signatureComplete ? `Signed by ${reservation.signatureSignedBy || 'customer'}.` : reservation.signatureToken ? 'Waiting for customer signature.' : 'Signature request not sent.'
     ),
     portalTimelineEntry(
       'payment',
       'Payment',
       lastPaymentAt || reservation.paymentRequestTokenExpiresAt || null,
-      paidAmount > 0 ? 'completed' : reservation.paymentRequestToken ? 'requested' : 'pending',
-      paidAmount > 0 ? `Collected $${paidAmount.toFixed(2)}.` : reservation.paymentRequestToken ? 'Waiting for payment.' : 'Payment request not sent.'
+      paymentStatus,
+      paymentComplete
+        ? `Collected $${paidAmount.toFixed(2)}.`
+        : paymentPartial
+          ? `Collected $${paidAmount.toFixed(2)} so far. Remaining balance: $${balanceDue.toFixed(2)}.`
+          : reservation.paymentRequestToken
+            ? `Waiting for payment. Current balance: $${balanceDue.toFixed(2)}.`
+            : 'Payment request not sent.'
     ),
     portalTimelineEntry(
       'agreement',
       'Rental Agreement',
       agreement?.closedAt || agreement?.createdAt || null,
-      agreement?.closedAt ? 'completed' : agreement ? 'active' : 'pending',
-      agreement?.closedAt ? `Agreement ${agreement.agreementNumber} closed.` : agreement ? `Agreement ${agreement.agreementNumber} is available.` : 'Agreement not generated yet.'
+      agreementClosed ? 'completed' : agreementActive ? 'active' : 'pending',
+      agreementClosed ? `Agreement ${agreement.agreementNumber} closed.` : agreementActive ? `Agreement ${agreement.agreementNumber} is available.` : 'Agreement not generated yet.'
     )
   ];
+
+  const progressSteps = [
+    { key: 'customerInfo', label: 'Pre-check-in', done: customerInfoComplete },
+    { key: 'signature', label: 'Signature', done: signatureComplete },
+    { key: 'payment', label: 'Payment', done: paymentComplete },
+    { key: 'agreement', label: 'Agreement Ready', done: agreementActive }
+  ];
+  const completedSteps = progressSteps.filter((step) => step.done).length;
+  const currentStep = progressSteps.find((step) => !step.done) || null;
+  const nextActionLabel = !customerInfoComplete
+    ? 'Complete pre-check-in'
+    : !signatureComplete
+      ? 'Sign agreement'
+      : !paymentComplete
+        ? 'Complete payment'
+        : agreementClosed
+          ? 'Rental complete'
+          : agreementActive
+            ? 'Agreement available for pickup'
+            : 'Wait for agreement generation';
 
   return {
     kind,
@@ -228,11 +276,23 @@ async function buildPortalSummary(reservation, kind, token) {
       : null,
     payment: {
       paidAmount,
+      balanceDue: Number(balanceDue.toFixed(2)),
       lastPaymentAt,
-      count: payments.length
+      count: payments.length,
+      status: paymentStatus,
+      statusLabel: paymentStatusLabel
     },
     documents: docs,
-    timeline
+    timeline,
+    progress: {
+      totalSteps: progressSteps.length,
+      completedSteps,
+      percent: Math.round((completedSteps / progressSteps.length) * 100),
+      isComplete: completedSteps === progressSteps.length,
+      currentStep: currentStep ? currentStep.label : 'Complete',
+      nextAction: nextActionLabel,
+      steps: progressSteps
+    }
   };
 }
 

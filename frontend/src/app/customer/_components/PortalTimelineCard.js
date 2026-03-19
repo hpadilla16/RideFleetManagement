@@ -24,6 +24,30 @@ export function PortalTimelineCard({ portal }) {
   return (
     <div style={portalStyles.stack}>
       <div style={portalStyles.card}>
+        <h3 style={portalStyles.cardTitle}>Completion Status</h3>
+        <div style={portalStyles.statGrid}>
+          <div style={portalStyles.statTile}>
+            <div style={portalStyles.statLabel}>Progress</div>
+            <div style={portalStyles.statValue}>{portal.progress?.completedSteps || 0}/{portal.progress?.totalSteps || 0}</div>
+          </div>
+          <div style={portalStyles.statTile}>
+            <div style={portalStyles.statLabel}>Complete</div>
+            <div style={portalStyles.statValue}>{portal.progress?.percent || 0}%</div>
+          </div>
+        </div>
+        <div style={{ marginTop: 14, display: 'grid', gap: 10 }}>
+          <div>
+            <div style={portalStyles.statLabel}>Current Step</div>
+            <div style={{ fontWeight: 700 }}>{portal.progress?.currentStep || 'Complete'}</div>
+          </div>
+          <div>
+            <div style={portalStyles.statLabel}>Next Action</div>
+            <div style={{ color: '#55456f', lineHeight: 1.5 }}>{portal.progress?.nextAction || 'Nothing pending.'}</div>
+          </div>
+        </div>
+      </div>
+
+      <div style={portalStyles.card}>
         <h3 style={portalStyles.cardTitle}>Portal Timeline</h3>
         <div style={{ display: 'grid', gap: 12 }}>
           {(portal.timeline || []).map((item) => {
@@ -82,6 +106,14 @@ export function PortalTimelineCard({ portal }) {
           <div style={portalStyles.statTile}>
             <div style={portalStyles.statLabel}>Paid</div>
             <div style={portalStyles.statValue}>${Number(portal.payment?.paidAmount || 0).toFixed(2)}</div>
+          </div>
+          <div style={portalStyles.statTile}>
+            <div style={portalStyles.statLabel}>Balance Due</div>
+            <div style={portalStyles.statValue}>${Number(portal.payment?.balanceDue || 0).toFixed(2)}</div>
+          </div>
+          <div style={portalStyles.statTile}>
+            <div style={portalStyles.statLabel}>Payment Status</div>
+            <div style={portalStyles.statValue}>{portal.payment?.statusLabel || '-'}</div>
           </div>
         </div>
       </div>

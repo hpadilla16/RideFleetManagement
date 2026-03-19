@@ -85,6 +85,10 @@ export default function CustomerPayPage() {
     }
   };
 
+  const paymentStatusLabel = model?.portal?.payment?.statusLabel || (Number(model?.amountDue || 0) > 0 ? 'Payment Pending' : 'Paid in Full');
+  const balanceDue = Number(model?.portal?.payment?.balanceDue ?? model?.amountDue ?? 0);
+  const fullyPaid = balanceDue <= 0;
+
   const notices = (
     <div style={portalStyles.stack}>
       {loading ? <div style={{ ...portalStyles.notice, background: 'rgba(79, 70, 229, 0.08)', color: '#4338ca' }}>Loading your payment portal...</div> : null}
@@ -119,6 +123,10 @@ export default function CustomerPayPage() {
               <div style={portalStyles.statTile}>
                 <div style={portalStyles.statLabel}>Amount Due</div>
                 <div style={portalStyles.statValue}>${Number(model.amountDue || 0).toFixed(2)}</div>
+              </div>
+              <div style={portalStyles.statTile}>
+                <div style={portalStyles.statLabel}>Payment Status</div>
+                <div style={portalStyles.statValue}>{paymentStatusLabel}</div>
               </div>
               <div style={portalStyles.statTile}>
                 <div style={portalStyles.statLabel}>Gateway</div>
@@ -158,9 +166,18 @@ export default function CustomerPayPage() {
 
           <div style={portalStyles.card}>
             <h2 style={portalStyles.cardTitle}>Next Step</h2>
-            {!success ? (
+            {fullyPaid ? (
+              <div style={{ display: 'grid', gap: 10, color: '#55456f', lineHeight: 1.6 }}>
+                <div><strong>Your payment step is complete.</strong></div>
+                <div>You can stay on this portal to review the timeline, download your receipt, and continue with any remaining reservation steps.</div>
+              </div>
+            ) : !success ? (
               <div style={{ display: 'grid', gap: 12 }}>
-                <div style={{ color: '#55456f', lineHeight: 1.6 }}>When you continue, you will be redirected to the secure payment page configured for this reservation.</div>
+                <div style={{ color: '#55456f', lineHeight: 1.6 }}>
+                  {balanceDue > 0
+                    ? `When you continue, you will be redirected to the secure payment page to pay the remaining $${balanceDue.toFixed(2)}.`
+                    : 'When you continue, you will be redirected to the secure payment page configured for this reservation.'}
+                </div>
                 <div>
                   <button onClick={startCheckout} disabled={!model.gatewayReady} style={portalStyles.button}>Pay Now</button>
                 </div>
