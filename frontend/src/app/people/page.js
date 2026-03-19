@@ -84,6 +84,24 @@ function Inner({ token, me, logout }) {
     }
   };
 
+  const resetPassword = async (person) => {
+    try {
+      const pwd = window.prompt(`Temporary password for ${person.displayName || person.email}`, '');
+      if (pwd === null) return;
+      const sendInvite = window.confirm(`Send the temporary password to ${person.email || 'this user'} by email?`);
+      const out = await api(`/api/people/${person.userId}/reset-password`, {
+        method: 'POST',
+        body: JSON.stringify({
+          password: pwd || undefined,
+          sendInvite
+        })
+      }, token);
+      setMsg(`Password reset for ${out.email}. Temp password: ${out.tempPassword}${out.inviteSent ? ' · Invite sent' : ''}`);
+    } catch (e) {
+      setMsg(e.message);
+    }
+  };
+
   const visiblePeople = useMemo(() => {
     if (!isSuper || !activeTenantId) return people;
     return people.filter((row) => String(row.tenantId || '') === String(activeTenantId));
@@ -237,6 +255,7 @@ function Inner({ token, me, logout }) {
                   <th>Phone</th>
                   <th>Access</th>
                   <th>Status</th>
+                  <th>Action</th>
                 </tr>
               </thead>
               <tbody>
@@ -249,6 +268,11 @@ function Inner({ token, me, logout }) {
                     <td>{person.phone || '-'}</td>
                     <td>{person.hasLogin ? 'Login Enabled' : 'Profile Only'}</td>
                     <td>{person.status}</td>
+                    <td>
+                      {person.hasLogin && person.userId ? (
+                        <button type="button" onClick={() => resetPassword(person)}>Reset Password</button>
+                      ) : '-'}
+                    </td>
                   </tr>
                 ))}
               </tbody>

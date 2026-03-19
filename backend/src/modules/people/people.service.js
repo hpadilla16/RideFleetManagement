@@ -220,5 +220,44 @@ export const peopleService = {
       tempPassword: enableLogin ? tempPassword : null,
       inviteSent: !!(sendInvite && enableLogin && user?.email)
     };
+  },
+
+  async resetPassword(userId, payload = {}, scope = {}) {
+    const user = await prisma.user.findFirst({
+      where: {
+        id: userId,
+        ...(scope?.tenantId ? { tenantId: scope.tenantId } : {})
+      },
+      include: {
+        tenant: { select: { id: true, name: true } }
+      }
+    });
+    if (!user) throw new Error('User not found');
+
+    const tempPassword = String(payload.password || randomTempPassword());
+    const passwordHash = await bcrypt.hash(tempPassword, SALT_ROUNDS);
+    await prisma.user.update({
+      where: { id: user.id },
+      data: { passwordHash }
+    });
+
+    const sendInvite = payload?.sendInvite === false ? false : true;
+    if (sendInvite && user.email) {
+      await sendInviteEmail({
+        email: user.email,
+        fullName: user.fullName,
+        tempPassword,
+        tenantName: user.tenant?.name,
+        role: user.role
+      });
+    }
+
+    return {
+      ok: true,
+      userId: user.id,
+      email: user.email,
+      tempPassword,
+      inviteSent: !!(sendInvite && user.email)
+    };
   }
 };

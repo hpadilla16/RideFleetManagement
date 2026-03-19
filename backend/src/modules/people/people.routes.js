@@ -27,3 +27,11 @@ peopleRouter.post('/', requireRole('ADMIN', 'OPS'), async (req, res) => {
     res.status(400).json({ error: e.message });
   }
 });
+
+peopleRouter.post('/:userId/reset-password', requireRole('ADMIN', 'OPS'), async (req, res) => {
+  try {
+    res.json(await peopleService.resetPassword(req.params.userId, req.body || {}, scopeFor(req)));
+  } catch (e) {
+    res.status(400).json({ error: e.message });
+  }
+});
