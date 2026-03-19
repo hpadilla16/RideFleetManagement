@@ -194,6 +194,83 @@ Preparar diferenciadores de siguiente fase.
 ### Resultado esperado
 Queda lista la base para una segunda fase mas enterprise.
 
+## Actualizacion 2026-03-19
+
+Despues de avanzar `Reports`, `Pre-check-in`, `Portal Cliente` y el primer build de `Car Sharing`, el plan de siguientes sprints debe incorporar una estrategia de plataformas y apps.
+
+### Nuevo principio
+
+No construir apps separadas con logica duplicada.
+
+Construir:
+
+- un `booking engine` compartido
+- una `operations layer` compartida
+- varias superficies cliente encima:
+  - web booking
+  - guest app
+  - host app
+  - employee app
+
+### Booking System Requerido
+
+El sistema debe permitir reservas desde:
+
+- sitio web
+- futura app de guest
+
+Y debe cubrir:
+
+- `rental reservations`
+- `car sharing trips`
+
+### Sprints Siguientes Recomendados
+
+#### Sprint 6
+
+- cerrar `car sharing internal MVP`
+- definir contrato del `booking engine`
+- comenzar el pase fuerte de UX/responsive para desktop, tablet y phone
+
+#### Sprint 7
+
+- public booking web foundation
+- quote/search foundation para rental y car sharing
+
+#### Sprint 8
+
+- guest booking experience v1
+- timeline y continuidad entre booking, pago, firma y documentos
+
+#### Sprint 9
+
+- host app foundation
+- login host, listing management, availability, trip queue, earnings summary
+
+#### Sprint 10
+
+- employee app foundation para rental tradicional
+- reservation creation, pre-check-in review, checkout/checkin, inspections, pagos
+
+#### Sprint 11
+
+- cancellations/modifications
+- reminders/notifications
+- host trip actions
+- delivery/collection mobile ops
+
+#### Sprint 12
+
+- polish final:
+  - responsive UX pass
+  - PWA readiness
+  - analytics/conversion tracking
+  - launch readiness
+
+### Referencia Nueva
+
+- [platform-app-roadmap-2026-03-19.md](/c:/Users/silve/.openclaw/workspace/RideFleetManagement-working-clean/doc/platform-app-roadmap-2026-03-19.md)
+
 ## Dependencias Criticas
 - No arrancar telematics antes de cerrar eventos y modelos estructurados.
 - No lanzar PWA operativa antes de estabilizar auth/permisos/flujo.

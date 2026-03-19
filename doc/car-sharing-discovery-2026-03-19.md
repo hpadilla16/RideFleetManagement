@@ -202,3 +202,42 @@ For MVP, success is:
 - the guest can complete pre-check-in, signature, and payment
 - ops can execute pickup and return
 - host and platform earnings are visible and auditable
+
+## Expanded Product Direction 2026-03-19
+
+Car sharing should be planned as part of a broader platform, not as an isolated module.
+
+### Shared Booking Strategy
+
+The future system should support:
+
+- public booking web
+- guest mobile experience
+- host mobile experience
+- employee mobile operations
+
+The right architecture is:
+
+- one shared booking engine
+- one shared operations engine
+- multiple frontends on top
+
+### Surface Map
+
+- `Fleet Manager` remains the internal back office
+- `Public Booking Web` becomes the first customer-facing marketplace surface
+- `Guest App` becomes the trip and reservation self-service layer
+- `Host App` becomes the listing, availability, and earnings layer
+- `Employee App` becomes the operational mobile tool for traditional rental workflows
+
+### Near-Term Sprint Placement
+
+- `Sprint 6`: stabilize internal car sharing, booking engine contract, responsive polish
+- `Sprint 7`: public booking web foundation
+- `Sprint 8`: guest booking app shell
+- `Sprint 9`: host app foundation
+- `Sprint 10`: employee app foundation
+
+For the fuller plan, see:
+
+- [platform-app-roadmap-2026-03-19.md](/c:/Users/silve/.openclaw/workspace/RideFleetManagement-working-clean/doc/platform-app-roadmap-2026-03-19.md)
