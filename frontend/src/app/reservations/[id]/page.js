@@ -357,14 +357,24 @@ function ReservationDetailInner({ token, me, logout }) {
       { label: 'Insurance Document', done: !!customer.insuranceDocumentUrl }
     ];
     const completed = items.filter((item) => item.done).length;
-    const isComplete = !!row?.customerInfoCompletedAt;
+    const missingItems = items.filter((item) => !item.done);
+    const hasSubmitted = !!row?.customerInfoCompletedAt;
+    const isChecklistComplete = completed === items.length;
+    const isReadyForPickup = hasSubmitted && isChecklistComplete;
+    let statusLabel = 'Not Requested';
+    if (isReadyForPickup) statusLabel = 'Completed';
+    else if (hasSubmitted) statusLabel = 'Submitted - Missing Items';
+    else if (row?.customerInfoToken) statusLabel = 'Requested';
     return {
       items,
       completed,
       total: items.length,
-      isComplete,
+      missingItems,
+      hasSubmitted,
+      isChecklistComplete,
+      isReadyForPickup,
       hasActiveToken: !!row?.customerInfoToken,
-      statusLabel: isComplete ? 'Completed' : (row?.customerInfoToken ? 'Requested' : 'Not Requested')
+      statusLabel
     };
   }, [row]);
 
@@ -762,10 +772,16 @@ setMsg('Charges updated');
             </div>
             <div className="grid2" style={{ marginBottom: 10 }}>
               <div><span className="label">Portal Status</span><div>{precheckinStatus.statusLabel}</div></div>
-              <div><span className="label">Ready For Pickup</span><div>{precheckinStatus.isComplete ? 'Yes' : 'Pending customer info'}</div></div>
+              <div><span className="label">Ready For Pickup</span><div>{precheckinStatus.isReadyForPickup ? 'Yes' : (precheckinStatus.hasSubmitted ? 'Missing requirements' : 'Pending customer info')}</div></div>
               <div><span className="label">ID / License Photo</span><div>{row?.customer?.idPhotoUrl ? 'Uploaded' : 'Missing'}</div></div>
               <div><span className="label">Insurance Doc</span><div>{row?.customer?.insuranceDocumentUrl ? 'Uploaded' : 'Missing'}</div></div>
             </div>
+            {precheckinStatus.missingItems.length ? (
+              <div style={{ marginBottom: 10 }}>
+                <span className="label">Missing Items</span>
+                <div>{precheckinStatus.missingItems.map((item) => item.label).join(', ')}</div>
+              </div>
+            ) : null}
             <table>
               <thead><tr><th>Requirement</th><th>Status</th></tr></thead>
               <tbody>
