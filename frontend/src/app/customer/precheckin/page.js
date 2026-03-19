@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { API_BASE } from '../../../lib/client';
+import { PortalTimelineCard } from '../_components/PortalTimelineCard';
 
 function toDateInput(value) {
   if (!value) return '';
@@ -61,9 +62,9 @@ export default function PrecheckinPage() {
       }
       try {
         const res = await fetch(`${API_BASE}/api/public/customer-info/${encodeURIComponent(token)}`);
-        const json = await res.json();
-        if (!res.ok) throw new Error(json?.error || 'Unable to load pre-check-in');
-        setModel(json);
+      const json = await res.json();
+      if (!res.ok) throw new Error(json?.error || 'Unable to load pre-check-in');
+      setModel(json);
         setForm({
           firstName: json?.reservation?.customer?.firstName || '',
           lastName: json?.reservation?.customer?.lastName || '',
@@ -115,6 +116,7 @@ export default function PrecheckinPage() {
       setOk(json?.message || 'Pre-check-in completed.');
       setModel((prev) => ({
         ...(prev || {}),
+        portal: json?.portal || prev?.portal || null,
         reservation: {
           ...(prev?.reservation || {}),
           customerInfoCompletedAt: json?.completedAt || new Date().toISOString(),
@@ -194,6 +196,8 @@ export default function PrecheckinPage() {
               {saving ? 'Submitting...' : 'Complete Pre-Check-in'}
             </button>
           </div>
+
+          <PortalTimelineCard portal={model?.portal} />
         </div>
       ) : null}
     </main>

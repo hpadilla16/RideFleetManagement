@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { API_BASE } from '../../../lib/client';
+import { PortalTimelineCard } from '../_components/PortalTimelineCard';
 
 export default function CustomerPayPage() {
   const [token, setToken] = useState('');
@@ -57,6 +58,7 @@ export default function CustomerPayPage() {
           });
           const j = await res.json();
           if (!res.ok) throw new Error(j?.error || 'Stripe confirmation failed');
+          setModel((prev) => ({ ...(prev || {}), portal: j?.portal || prev?.portal || null }));
           setOk(`Payment recorded successfully: $${Number(j.paidAmount || 0).toFixed(2)}` + (j?.savedCardOnFile ? ' Card on file saved.' : ''));
           return;
         }
@@ -140,6 +142,8 @@ export default function CustomerPayPage() {
           )}
 
           {!model.gatewayReady ? <p style={{ color: '#92400e' }}>Gateway not configured for {String(model.gateway || '').toUpperCase()}. Set the required backend env credentials.</p> : null}
+
+          <PortalTimelineCard portal={model?.portal} />
         </div>
       ) : null}
     </main>

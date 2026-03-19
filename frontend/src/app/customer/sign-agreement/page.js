@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { API_BASE } from '../../../lib/client';
+import { PortalTimelineCard } from '../_components/PortalTimelineCard';
 
 export default function SignAgreementPage() {
   const [token, setToken] = useState('');
@@ -19,6 +20,7 @@ export default function SignAgreementPage() {
   const [reservation, setReservation] = useState(null);
   const [breakdown, setBreakdown] = useState(null);
   const [termsText, setTermsText] = useState('');
+  const [portal, setPortal] = useState(null);
   const [signerName, setSignerName] = useState('');
   const [accepted, setAccepted] = useState(false);
 
@@ -32,6 +34,7 @@ export default function SignAgreementPage() {
         setReservation(j.reservation);
         setBreakdown(j.breakdown || null);
         setTermsText(j.termsText || '');
+        setPortal(j.portal || null);
         setLoaded(true);
       } catch (e) {
         setError(String(e.message || e));
@@ -103,6 +106,7 @@ export default function SignAgreementPage() {
       const successMsg = j?.message || 'Thank you. Your signature has been captured successfully.';
       setOk(successMsg);
       setError('');
+      if (j?.portal) setPortal(j.portal);
       if (j?.emailedSignedAgreement) {
         window.alert('Signed agreement has been sent to your email.');
       }
@@ -177,6 +181,8 @@ export default function SignAgreementPage() {
             <label><input type="checkbox" checked={accepted} onChange={(e) => setAccepted(e.target.checked)} /> I accept the terms and conditions.</label>
             <button onClick={submit}>Submit Signature</button>
           </div>
+
+          <PortalTimelineCard portal={portal} />
         </div>
       )}
     </main>

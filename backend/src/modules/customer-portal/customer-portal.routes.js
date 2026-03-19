@@ -83,7 +83,8 @@ async function findReservationByToken(kind, token) {
         customer: true,
         pickupLocation: true,
         returnLocation: true,
-        vehicle: true
+        vehicle: true,
+        payments: { orderBy: { paidAt: 'desc' } }
       }
     });
   }
@@ -118,6 +119,144 @@ async function findReservationByToken(kind, token) {
     });
   }
   return null;
+}
+
+async function latestAgreementForReservation(reservationId) {
+  return prisma.rentalAgreement.findFirst({
+    where: { reservationId },
+    orderBy: { createdAt: 'desc' },
+    include: {
+      payments: { orderBy: { paidAt: 'desc' } }
+    }
+  });
+}
+
+function mergePayments(reservation, agreement) {
+  const seen = new Set();
+  const rows = [...(Array.isArray(reservation?.payments) ? reservation.payments : []), ...(Array.isArray(agreement?.payments) ? agreement.payments : [])];
+  return rows.filter((payment) => {
+    const id = String(payment?.id || '');
+    if (!id || seen.has(id)) return false;
+    seen.add(id);
+    return true;
+  });
+}
+
+function portalTimelineEntry(key, label, at, status, description) {
+  return {
+    key,
+    label,
+    at: at || null,
+    status,
+    description
+  };
+}
+
+async function buildPortalSummary(reservation, kind, token) {
+  const agreement = await latestAgreementForReservation(reservation.id);
+  const payments = mergePayments(reservation, agreement);
+  const paidAmount = paidFromStructuredPayments(payments);
+  const lastPaymentAt = payments
+    .map((payment) => payment?.paidAt || payment?.createdAt || null)
+    .filter(Boolean)
+    .sort((a, b) => new Date(b).getTime() - new Date(a).getTime())[0] || null;
+
+  const docs = [
+    {
+      key: 'agreement',
+      label: 'Signed Agreement PDF',
+      available: !!agreement?.id && !!(reservation?.signatureSignedAt || agreement?.signatureDataUrl || agreement?.locked),
+      downloadPath: `/api/public/document/${encodeURIComponent(kind)}/${encodeURIComponent(token)}/agreement`
+    },
+    {
+      key: 'receipt',
+      label: 'Payment Receipt',
+      available: payments.length > 0,
+      downloadPath: `/api/public/document/${encodeURIComponent(kind)}/${encodeURIComponent(token)}/receipt`
+    }
+  ];
+
+  const timeline = [
+    portalTimelineEntry(
+      'reservation',
+      'Reservation Created',
+      reservation.createdAt,
+      'completed',
+      `Reservation ${reservation.reservationNumber} is active.`
+    ),
+    portalTimelineEntry(
+      'customerInfo',
+      'Customer Information',
+      reservation.customerInfoCompletedAt || reservation.customerInfoTokenExpiresAt || null,
+      reservation.customerInfoCompletedAt ? 'completed' : reservation.customerInfoToken ? 'requested' : 'pending',
+      reservation.customerInfoCompletedAt ? 'Customer information submitted.' : reservation.customerInfoToken ? 'Waiting for customer pre-check-in.' : 'Customer info request not sent.'
+    ),
+    portalTimelineEntry(
+      'signature',
+      'Agreement Signature',
+      reservation.signatureSignedAt || reservation.signatureTokenExpiresAt || null,
+      reservation.signatureSignedAt ? 'completed' : reservation.signatureToken ? 'requested' : 'pending',
+      reservation.signatureSignedAt ? `Signed by ${reservation.signatureSignedBy || 'customer'}.` : reservation.signatureToken ? 'Waiting for customer signature.' : 'Signature request not sent.'
+    ),
+    portalTimelineEntry(
+      'payment',
+      'Payment',
+      lastPaymentAt || reservation.paymentRequestTokenExpiresAt || null,
+      paidAmount > 0 ? 'completed' : reservation.paymentRequestToken ? 'requested' : 'pending',
+      paidAmount > 0 ? `Collected $${paidAmount.toFixed(2)}.` : reservation.paymentRequestToken ? 'Waiting for payment.' : 'Payment request not sent.'
+    ),
+    portalTimelineEntry(
+      'agreement',
+      'Rental Agreement',
+      agreement?.closedAt || agreement?.createdAt || null,
+      agreement?.closedAt ? 'completed' : agreement ? 'active' : 'pending',
+      agreement?.closedAt ? `Agreement ${agreement.agreementNumber} closed.` : agreement ? `Agreement ${agreement.agreementNumber} is available.` : 'Agreement not generated yet.'
+    )
+  ];
+
+  return {
+    kind,
+    reservationStatus: reservation.status,
+    agreement: agreement
+      ? {
+          id: agreement.id,
+          agreementNumber: agreement.agreementNumber,
+          status: agreement.status,
+          createdAt: agreement.createdAt,
+          closedAt: agreement.closedAt || null
+        }
+      : null,
+    payment: {
+      paidAmount,
+      lastPaymentAt,
+      count: payments.length
+    },
+    documents: docs,
+    timeline
+  };
+}
+
+function paymentReceiptText({ reservation, agreement, payments }) {
+  const customerName = `${reservation?.customer?.firstName || ''} ${reservation?.customer?.lastName || ''}`.trim() || 'Customer';
+  const lines = [
+    'Ride Fleet Payment Receipt',
+    '',
+    `Reservation: ${reservation?.reservationNumber || '-'}`,
+    `Agreement: ${agreement?.agreementNumber || '-'}`,
+    `Customer: ${customerName}`,
+    `Status: ${reservation?.status || '-'}`,
+    ''
+  ];
+
+  payments.forEach((payment, idx) => {
+    lines.push(
+      `Payment ${idx + 1}: $${Number(payment?.amount || 0).toFixed(2)} | ${String(payment?.status || 'PAID').toUpperCase()} | ${payment?.reference || '-'} | ${payment?.paidAt ? new Date(payment.paidAt).toLocaleString() : '-'}`
+    );
+  });
+
+  lines.push('');
+  lines.push(`Total Paid: $${paidFromStructuredPayments(payments).toFixed(2)}`);
+  return lines.join('\n');
 }
 
 function serializeCustomerInfoReservation(reservation) {
@@ -324,14 +463,6 @@ async function postPayment({ reservation, paidAmount, reference, gateway }) {
     notes: `Paid via ${gateway} customer payment portal`
   }, {}, null);
 
-  await prisma.reservation.update({
-    where: { id: reservation.id },
-    data: {
-      paymentRequestToken: null,
-      paymentRequestTokenExpiresAt: null
-    }
-  });
-
   await prisma.auditLog.create({ data: { reservationId: reservation.id, action: 'UPDATE', metadata: JSON.stringify({ paymentPortalCompleted: true, reference, amount: paidAmount, gateway }) } });
 
   try {
@@ -418,6 +549,7 @@ customerPortalRouter.get('/signature/:token', async (req, res, next) => {
         returnLocation: reservation.returnLocation?.name || null
       },
       breakdown,
+      portal: await buildPortalSummary(reservation, 'signature', token),
       termsText: agreementCfg?.termsText || 'Standard rental terms apply.'
     });
   } catch (e) { next(e); }
@@ -433,7 +565,8 @@ customerPortalRouter.get('/customer-info/:token', async (req, res, next) => {
 
     res.json({
       reservation: serializeCustomerInfoReservation(reservation),
-      expiresAt: reservation.customerInfoTokenExpiresAt
+      expiresAt: reservation.customerInfoTokenExpiresAt,
+      portal: await buildPortalSummary(reservation, 'customer-info', token)
     });
   } catch (e) {
     next(e);
@@ -483,9 +616,7 @@ customerPortalRouter.post('/customer-info/:token', async (req, res, next) => {
     await prisma.reservation.update({
       where: { id: reservation.id },
       data: {
-        customerInfoCompletedAt: completedAt,
-        customerInfoToken: null,
-        customerInfoTokenExpiresAt: null
+        customerInfoCompletedAt: completedAt
       }
     });
 
@@ -503,10 +634,12 @@ customerPortalRouter.post('/customer-info/:token', async (req, res, next) => {
       }
     });
 
+    const refreshed = await findReservationByToken('customer-info', token);
     res.json({
       ok: true,
       completedAt,
-      message: 'Pre-check-in completed successfully.'
+      message: 'Pre-check-in completed successfully.',
+      portal: refreshed ? await buildPortalSummary(refreshed, 'customer-info', token) : null
     });
   } catch (e) {
     next(e);
@@ -531,8 +664,6 @@ customerPortalRouter.post('/signature/:token', async (req, res, next) => {
         signatureSignedAt: new Date(),
         signatureSignedBy: signerName,
         signatureDataUrl,
-        signatureToken: null,
-        signatureTokenExpiresAt: null,
         notes: reservation.notes ? `${reservation.notes}\n${note}` : note
       }
     });
@@ -557,7 +688,13 @@ customerPortalRouter.post('/signature/:token', async (req, res, next) => {
       }
     } catch {}
 
-    res.json({ ok: true, emailedSignedAgreement, message: emailedSignedAgreement ? 'Signature captured. Signed agreement has been sent to your email.' : 'Signature captured successfully.' });
+    const refreshed = await findReservationByToken('signature', token);
+    res.json({
+      ok: true,
+      emailedSignedAgreement,
+      message: emailedSignedAgreement ? 'Signature captured. Signed agreement has been sent to your email.' : 'Signature captured successfully.',
+      portal: refreshed ? await buildPortalSummary(refreshed, 'signature', token) : null
+    });
   } catch (e) { next(e); }
 });
 
@@ -582,6 +719,7 @@ customerPortalRouter.get('/payment/:token', async (req, res, next) => {
       },
       amountDue: Number(amountDue.toFixed(2)),
       breakdown,
+      portal: await buildPortalSummary(reservation, 'payment', token),
       gateway,
       gatewayReady
     });
@@ -705,6 +843,44 @@ customerPortalRouter.post('/payment/:token/confirm', async (req, res, next) => {
       }
     } catch {}
 
-    res.json({ ok: true, paidAmount, savedCardOnFile });
+    const refreshed = await findReservationByToken('payment', token);
+    res.json({ ok: true, paidAmount, savedCardOnFile, portal: refreshed ? await buildPortalSummary(refreshed, 'payment', token) : null });
   } catch (e) { next(e); }
+});
+
+customerPortalRouter.get('/document/:kind/:token/:asset', async (req, res, next) => {
+  try {
+    const kind = String(req.params.kind || '').trim();
+    const token = String(req.params.token || '').trim();
+    const asset = String(req.params.asset || '').trim().toLowerCase();
+    if (!['customer-info', 'signature', 'payment'].includes(kind)) {
+      return res.status(400).json({ error: 'Unsupported portal kind' });
+    }
+
+    const reservation = await findReservationByToken(kind, token);
+    if (!reservation) return res.status(404).json({ error: 'Invalid or expired portal link' });
+
+    const agreement = await latestAgreementForReservation(reservation.id);
+    const payments = mergePayments(reservation, agreement);
+
+    if (asset === 'agreement') {
+      if (!agreement?.id) return res.status(404).json({ error: 'Agreement not available' });
+      const pdf = await rentalAgreementsService.agreementPdfBuffer(agreement.id);
+      res.setHeader('Content-Type', 'application/pdf');
+      res.setHeader('Content-Disposition', `attachment; filename="${agreement.agreementNumber || reservation.reservationNumber || 'agreement'}.pdf"`);
+      return res.send(pdf);
+    }
+
+    if (asset === 'receipt') {
+      if (!payments.length) return res.status(404).json({ error: 'Receipt not available yet' });
+      const text = paymentReceiptText({ reservation, agreement, payments });
+      res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+      res.setHeader('Content-Disposition', `attachment; filename="${reservation.reservationNumber || 'receipt'}-receipt.txt"`);
+      return res.send(text);
+    }
+
+    return res.status(404).json({ error: 'Document not available' });
+  } catch (e) {
+    next(e);
+  }
 });
