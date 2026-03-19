@@ -94,6 +94,7 @@ function ReservationDetailInner({ token, me, logout }) {
   const [chargeEdit, setChargeEdit] = useState(false);
   const [chargeModel, setChargeModel] = useState({ dailyRate: '0', serviceFee: '0', taxRate: '11.5', serviceNames: '', feeNames: '', insuranceCode: '' });
   const [form, setForm] = useState({ customerId: '', pickupAt: '', returnAt: '', pickupLocationId: '', returnLocationId: '', notes: '' });
+  const canManagePrecheckin = ['SUPER_ADMIN', 'ADMIN', 'OPS'].includes(String(me?.role || '').toUpperCase());
 
 
   const cleanMojibake = (val) => {
@@ -316,6 +317,41 @@ function ReservationDetailInner({ token, me, logout }) {
       setMsg(e.message);
     }
   };
+  const markPrecheckinReviewed = async () => {
+    const note = window.prompt('Optional review note for staff:', row?.customerInfoReviewNote || '') || '';
+    try {
+      await api(`/api/reservations/${id}/precheckin/review`, {
+        method: 'POST',
+        body: JSON.stringify({ note })
+      }, token);
+      await load();
+      setMsg('Pre-check-in reviewed');
+    } catch (e) {
+      setMsg(e.message);
+    }
+  };
+
+  const setReadyForPickup = async (ready) => {
+    const needsOverride = ready && !precheckinStatus.isChecklistComplete;
+    const promptLabel = ready
+      ? (needsOverride ? 'Override note is required because items are still missing:' : 'Optional ready-for-pickup note:')
+      : 'Optional note for clearing ready-for-pickup:';
+    const note = window.prompt(promptLabel, ready ? (row?.readyForPickupOverrideNote || '') : '') || '';
+    if (needsOverride && !String(note).trim()) {
+      setMsg('Override note is required when marking ready with missing items');
+      return;
+    }
+    try {
+      await api(`/api/reservations/${id}/precheckin/ready`, {
+        method: 'POST',
+        body: JSON.stringify({ ready, note })
+      }, token);
+      await load();
+      setMsg(ready ? 'Reservation marked ready for pickup' : 'Ready-for-pickup cleared');
+    } catch (e) {
+      setMsg(e.message);
+    }
+  };
   const breakdown = useMemo(() => {
     const daily = toMoneyNum(chargeModel.dailyRate || row?.dailyRate || 0);
 
@@ -360,9 +396,12 @@ function ReservationDetailInner({ token, me, logout }) {
     const missingItems = items.filter((item) => !item.done);
     const hasSubmitted = !!row?.customerInfoCompletedAt;
     const isChecklistComplete = completed === items.length;
-    const isReadyForPickup = hasSubmitted && isChecklistComplete;
+    const isStaffReviewed = !!row?.customerInfoReviewedAt;
+    const isReadyForPickup = !!row?.readyForPickupAt;
     let statusLabel = 'Not Requested';
-    if (isReadyForPickup) statusLabel = 'Completed';
+    if (isReadyForPickup) statusLabel = 'Ready For Pickup';
+    else if (isStaffReviewed && isChecklistComplete) statusLabel = 'Reviewed - Awaiting Pickup';
+    else if (hasSubmitted && isChecklistComplete) statusLabel = 'Submitted - Awaiting Review';
     else if (hasSubmitted) statusLabel = 'Submitted - Missing Items';
     else if (row?.customerInfoToken) statusLabel = 'Requested';
     return {
@@ -371,6 +410,7 @@ function ReservationDetailInner({ token, me, logout }) {
       total: items.length,
       missingItems,
       hasSubmitted,
+      isStaffReviewed,
       isChecklistComplete,
       isReadyForPickup,
       hasActiveToken: !!row?.customerInfoToken,
@@ -745,6 +785,8 @@ setMsg('Charges updated');
             <div><span className="label">Type</span><div>{row.vehicleType?.name || '-'}</div></div>
             <div><span className="label">Pre-check-in</span><div>{precheckinStatus.statusLabel}</div></div>
             <div><span className="label">Pre-check-in Completed At</span><div>{row.customerInfoCompletedAt ? new Date(row.customerInfoCompletedAt).toLocaleString() : '-'}</div></div>
+            <div><span className="label">Docs Reviewed At</span><div>{row.customerInfoReviewedAt ? new Date(row.customerInfoReviewedAt).toLocaleString() : '-'}</div></div>
+            <div><span className="label">Ready For Pickup At</span><div>{row.readyForPickupAt ? new Date(row.readyForPickupAt).toLocaleString() : '-'}</div></div>
             <div><span className="label">Signature</span><div>{row.signatureSignedAt ? 'Signed' : 'Pending'}</div></div>
             <div><span className="label">Signed By</span><div>{row.signatureSignedBy || '-'}</div></div>
             <div><span className="label">Signed At</span><div>{row.signatureSignedAt ? new Date(row.signatureSignedAt).toLocaleString() : '-'}</div></div>
@@ -772,14 +814,34 @@ setMsg('Charges updated');
             </div>
             <div className="grid2" style={{ marginBottom: 10 }}>
               <div><span className="label">Portal Status</span><div>{precheckinStatus.statusLabel}</div></div>
-              <div><span className="label">Ready For Pickup</span><div>{precheckinStatus.isReadyForPickup ? 'Yes' : (precheckinStatus.hasSubmitted ? 'Missing requirements' : 'Pending customer info')}</div></div>
+              <div><span className="label">Ready For Pickup</span><div>{precheckinStatus.isReadyForPickup ? 'Yes' : (precheckinStatus.hasSubmitted ? (precheckinStatus.isChecklistComplete ? 'Awaiting staff review' : 'Missing requirements') : 'Pending customer info')}</div></div>
+              <div><span className="label">Staff Review</span><div>{precheckinStatus.isStaffReviewed ? 'Reviewed' : 'Pending review'}</div></div>
+              <div><span className="label">Reviewed By</span><div>{row?.customerInfoReviewedByUser?.fullName || row?.customerInfoReviewedByUser?.email || '-'}</div></div>
               <div><span className="label">ID / License Photo</span><div>{row?.customer?.idPhotoUrl ? 'Uploaded' : 'Missing'}</div></div>
               <div><span className="label">Insurance Doc</span><div>{row?.customer?.insuranceDocumentUrl ? 'Uploaded' : 'Missing'}</div></div>
+              <div><span className="label">Ready By</span><div>{row?.readyForPickupByUser?.fullName || row?.readyForPickupByUser?.email || '-'}</div></div>
+              <div><span className="label">Override Note</span><div>{row?.readyForPickupOverrideNote || '-'}</div></div>
             </div>
+            {row?.customerInfoReviewNote ? (
+              <div style={{ marginBottom: 10 }}>
+                <span className="label">Staff Review Note</span>
+                <div>{row.customerInfoReviewNote}</div>
+              </div>
+            ) : null}
             {precheckinStatus.missingItems.length ? (
               <div style={{ marginBottom: 10 }}>
                 <span className="label">Missing Items</span>
                 <div>{precheckinStatus.missingItems.map((item) => item.label).join(', ')}</div>
+              </div>
+            ) : null}
+            {canManagePrecheckin ? (
+              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 10 }}>
+                <button type="button" onClick={markPrecheckinReviewed}>Mark Docs Reviewed</button>
+                {!precheckinStatus.isReadyForPickup ? (
+                  <button type="button" onClick={() => setReadyForPickup(true)}>Mark Ready For Pickup</button>
+                ) : (
+                  <button type="button" onClick={() => setReadyForPickup(false)}>Clear Ready For Pickup</button>
+                )}
               </div>
             ) : null}
             <table>

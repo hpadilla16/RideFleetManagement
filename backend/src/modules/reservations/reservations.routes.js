@@ -39,6 +39,28 @@ async function latestAgreementByReservationId(reservationId, scope = {}) {
   return row?.id || null;
 }
 
+function canManagePrecheckin(req) {
+  const role = String(req.user?.role || '').toUpperCase();
+  return ['SUPER_ADMIN', 'ADMIN', 'OPS'].includes(role);
+}
+
+function buildPrecheckinChecklist(reservation) {
+  const customer = reservation?.customer || {};
+  const items = [
+    { key: 'contact', label: 'Contact Info', done: !!(customer.firstName && customer.lastName && customer.email && customer.phone) },
+    { key: 'dob', label: 'Date of Birth', done: !!customer.dateOfBirth },
+    { key: 'license', label: 'Driver License', done: !!(customer.licenseNumber && customer.licenseState) },
+    { key: 'address', label: 'Address', done: !!(customer.address1 && customer.city && customer.state && customer.zip) },
+    { key: 'idPhoto', label: 'ID / License Photo', done: !!customer.idPhotoUrl },
+    { key: 'insuranceDoc', label: 'Insurance Document', done: !!customer.insuranceDocumentUrl }
+  ];
+  return {
+    items,
+    complete: items.every((item) => item.done),
+    missingItems: items.filter((item) => !item.done).map((item) => item.label)
+  };
+}
+
 reservationsRouter.get('/', async (req, res, next) => {
   try {
     res.json(await reservationsService.list(scopeFor(req)));
@@ -662,6 +684,105 @@ reservationsRouter.post('/:id/send-detail-email', async (req, res, next) => {
     await reservationsService.update(req.params.id, { notes: current.notes ? `${current.notes}\n${note}` : note }, scopeFor(req));
 
     res.json({ ok: true, sentTo: recipients });
+  } catch (e) {
+    next(e);
+  }
+});
+
+reservationsRouter.post('/:id/precheckin/review', async (req, res, next) => {
+  try {
+    if (!canManagePrecheckin(req)) {
+      return res.status(403).json({ error: 'Admin or ops role required' });
+    }
+
+    const current = await reservationsService.getById(req.params.id, scopeFor(req));
+    if (!current) return res.status(404).json({ error: 'Reservation not found' });
+
+    const note = String(req.body?.note || '').trim() || null;
+    const reviewedAt = new Date();
+    const row = await reservationsService.update(req.params.id, {
+      customerInfoReviewedAt: reviewedAt,
+      customerInfoReviewedByUserId: req.user?.sub || null,
+      customerInfoReviewNote: note
+    }, scopeFor(req));
+
+    const checklist = buildPrecheckinChecklist(current);
+    await prisma.auditLog.create({
+      data: {
+        tenantId: row.tenantId || req.user?.tenantId || null,
+        reservationId: row.id,
+        action: 'ADMIN_OVERRIDE',
+        actorUserId: req.user?.sub || null,
+        metadata: JSON.stringify({
+          precheckinReviewed: true,
+          reviewedAt: reviewedAt.toISOString(),
+          note,
+          checklistComplete: checklist.complete,
+          missingItems: checklist.missingItems
+        })
+      }
+    });
+
+    res.json({
+      ok: true,
+      reviewedAt,
+      reservation: row
+    });
+  } catch (e) {
+    next(e);
+  }
+});
+
+reservationsRouter.post('/:id/precheckin/ready', async (req, res, next) => {
+  try {
+    if (!canManagePrecheckin(req)) {
+      return res.status(403).json({ error: 'Admin or ops role required' });
+    }
+
+    const current = await reservationsService.getById(req.params.id, scopeFor(req));
+    if (!current) return res.status(404).json({ error: 'Reservation not found' });
+
+    const ready = req.body?.ready !== false;
+    const note = String(req.body?.note || '').trim() || null;
+    const checklist = buildPrecheckinChecklist(current);
+
+    if (ready && !checklist.complete && !note) {
+      return res.status(400).json({ error: 'Override note is required when marking ready with missing items' });
+    }
+
+    const payload = ready ? {
+      readyForPickupAt: new Date(),
+      readyForPickupByUserId: req.user?.sub || null,
+      readyForPickupOverrideNote: checklist.complete ? null : note
+    } : {
+      readyForPickupAt: null,
+      readyForPickupByUserId: null,
+      readyForPickupOverrideNote: note
+    };
+
+    const row = await reservationsService.update(req.params.id, payload, scopeFor(req));
+
+    await prisma.auditLog.create({
+      data: {
+        tenantId: row.tenantId || req.user?.tenantId || null,
+        reservationId: row.id,
+        action: 'ADMIN_OVERRIDE',
+        actorUserId: req.user?.sub || null,
+        metadata: JSON.stringify({
+          readyForPickup: ready,
+          override: ready && !checklist.complete,
+          note,
+          checklistComplete: checklist.complete,
+          missingItems: checklist.missingItems
+        })
+      }
+    });
+
+    res.json({
+      ok: true,
+      readyForPickup: ready,
+      reservation: row
+    });
   } catch (e) {
     next(e);
   }

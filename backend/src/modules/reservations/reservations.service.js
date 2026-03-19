@@ -192,7 +192,9 @@ export const reservationsService = {
         vehicle: true,
         pickupLocation: true,
         returnLocation: true,
-        additionalDrivers: { orderBy: { createdAt: 'asc' } }
+        additionalDrivers: { orderBy: { createdAt: 'asc' } },
+        customerInfoReviewedByUser: { select: { id: true, fullName: true, email: true, role: true } },
+        readyForPickupByUser: { select: { id: true, fullName: true, email: true, role: true } }
       }
     });
     return rows.map((r) => ({ ...r, ...deriveUnderageAlertForReservation(r) }));
@@ -211,6 +213,8 @@ export const reservationsService = {
         pickupLocation: true,
         returnLocation: true,
         additionalDrivers: { orderBy: { createdAt: 'asc' } },
+        customerInfoReviewedByUser: { select: { id: true, fullName: true, email: true, role: true } },
+        readyForPickupByUser: { select: { id: true, fullName: true, email: true, role: true } },
         rentalAgreement: {
           include: {
             charges: { orderBy: [{ sortOrder: 'asc' }, { createdAt: 'asc' }] },

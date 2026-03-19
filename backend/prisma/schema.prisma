@@ -284,6 +284,14 @@ model Reservation {
   customerInfoToken String?
   customerInfoTokenExpiresAt DateTime?
   customerInfoCompletedAt DateTime?
+  customerInfoReviewedAt DateTime?
+  customerInfoReviewedByUserId String?
+  customerInfoReviewedByUser User? @relation("ReservationCustomerInfoReviewedBy", fields: [customerInfoReviewedByUserId], references: [id])
+  customerInfoReviewNote String?
+  readyForPickupAt DateTime?
+  readyForPickupByUserId String?
+  readyForPickupByUser User? @relation("ReservationReadyForPickupBy", fields: [readyForPickupByUserId], references: [id])
+  readyForPickupOverrideNote String?
   signatureToken    String?
   signatureTokenExpiresAt DateTime?
   paymentRequestToken String?
@@ -367,6 +375,8 @@ model User {
   salesOwnedAgreements RentalAgreement[] @relation("AgreementSalesOwner")
   closedAgreements RentalAgreement[] @relation("AgreementClosedBy")
   agreementCommissions AgreementCommission[] @relation("AgreementCommissionEmployee")
+  customerInfoReviewedReservations Reservation[] @relation("ReservationCustomerInfoReviewedBy")
+  readyForPickupReservations Reservation[] @relation("ReservationReadyForPickupBy")
 
   @@index([tenantId, role, isActive])
   @@index([commissionPlanId])
