@@ -7,9 +7,9 @@ export const carSharingRouter = Router();
 
 function scopeFor(req) {
   if (isSuperAdmin(req.user)) {
-    return req.query?.tenantId ? { tenantId: String(req.query.tenantId) } : {};
+    return req.query?.tenantId ? { tenantId: String(req.query.tenantId), allowUnassigned: true } : { allowUnassigned: true };
   }
-  return { tenantId: req.user?.tenantId || null };
+  return { tenantId: req.user?.tenantId || null, allowUnassigned: false };
 }
 
 async function ensureCarSharingEnabled(req, res, next) {

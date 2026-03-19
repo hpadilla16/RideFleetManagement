@@ -29,10 +29,14 @@ async function assertTenantCarSharingEnabled(tenantId) {
 }
 
 export const carSharingService = {
-  async listEligibleVehicles({ tenantId } = {}) {
+  async listEligibleVehicles({ tenantId, allowUnassigned } = {}) {
     return prisma.vehicle.findMany({
       where: {
-        ...(tenantId ? { tenantId } : {}),
+        ...(tenantId
+          ? allowUnassigned
+            ? { OR: [{ tenantId }, { tenantId: null }] }
+            : { tenantId }
+          : {}),
         fleetMode: { in: ['CAR_SHARING_ONLY', 'BOTH'] }
       },
       include: {
@@ -140,12 +144,21 @@ export const carSharingService = {
     if (!title) throw new Error('title is required');
 
     const vehicle = await prisma.vehicle.findFirst({
-      where: { id: vehicleId, tenantId },
-      select: { fleetMode: true }
+      where: {
+        id: vehicleId,
+        ...(scope?.allowUnassigned ? { OR: [{ tenantId }, { tenantId: null }] } : { tenantId })
+      },
+      select: { id: true, tenantId: true, fleetMode: true }
     });
     if (!vehicle) throw new Error('Vehicle not found for this tenant');
     if (!['CAR_SHARING_ONLY', 'BOTH'].includes(String(vehicle.fleetMode || 'RENTAL_ONLY'))) {
       throw new Error('Vehicle must be marked for car sharing before it can be listed');
+    }
+    if (!vehicle.tenantId && tenantId) {
+      await prisma.vehicle.update({
+        where: { id: vehicle.id },
+        data: { tenantId }
+      });
     }
 
     const baseSlug = slugify(data?.slug || title);
@@ -196,12 +209,23 @@ export const carSharingService = {
 
     if (Object.prototype.hasOwnProperty.call(patch || {}, 'vehicleId') && patch?.vehicleId) {
       const vehicle = await prisma.vehicle.findFirst({
-        where: { id: String(patch.vehicleId), tenantId: current.tenantId || undefined },
-        select: { fleetMode: true }
+        where: {
+          id: String(patch.vehicleId),
+          ...(scope?.allowUnassigned
+            ? { OR: [{ tenantId: current.tenantId || undefined }, { tenantId: null }] }
+            : { tenantId: current.tenantId || undefined })
+        },
+        select: { id: true, tenantId: true, fleetMode: true }
       });
       if (!vehicle) throw new Error('Vehicle not found for this tenant');
       if (!['CAR_SHARING_ONLY', 'BOTH'].includes(String(vehicle.fleetMode || 'RENTAL_ONLY'))) {
         throw new Error('Vehicle must be marked for car sharing before it can be listed');
+      }
+      if (!vehicle.tenantId && current.tenantId) {
+        await prisma.vehicle.update({
+          where: { id: vehicle.id },
+          data: { tenantId: current.tenantId }
+        });
       }
     }
 
