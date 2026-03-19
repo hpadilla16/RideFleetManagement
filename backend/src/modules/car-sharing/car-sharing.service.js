@@ -18,6 +18,16 @@ function listingInclude() {
   };
 }
 
+async function assertTenantCarSharingEnabled(tenantId) {
+  const tenant = await prisma.tenant.findUnique({
+    where: { id: tenantId },
+    select: { carSharingEnabled: true }
+  });
+  if (!tenant?.carSharingEnabled) {
+    throw new Error('Car sharing is not enabled for this tenant');
+  }
+}
+
 export const carSharingService = {
   async listHosts({ tenantId } = {}) {
     return prisma.hostProfile.findMany({
@@ -36,6 +46,7 @@ export const carSharingService = {
   async createHost(data, scope = {}) {
     const tenantId = scope?.tenantId || data?.tenantId || null;
     if (!tenantId) throw new Error('tenantId is required');
+    await assertTenantCarSharingEnabled(tenantId);
     const displayName = String(data?.displayName || '').trim();
     if (!displayName) throw new Error('displayName is required');
 
@@ -105,12 +116,22 @@ export const carSharingService = {
   async createListing(data, scope = {}) {
     const tenantId = scope?.tenantId || data?.tenantId || null;
     if (!tenantId) throw new Error('tenantId is required');
+    await assertTenantCarSharingEnabled(tenantId);
     const hostProfileId = String(data?.hostProfileId || '').trim();
     const vehicleId = String(data?.vehicleId || '').trim();
     const title = String(data?.title || '').trim();
     if (!hostProfileId) throw new Error('hostProfileId is required');
     if (!vehicleId) throw new Error('vehicleId is required');
     if (!title) throw new Error('title is required');
+
+    const vehicle = await prisma.vehicle.findFirst({
+      where: { id: vehicleId, tenantId },
+      select: { fleetMode: true }
+    });
+    if (!vehicle) throw new Error('Vehicle not found for this tenant');
+    if (!['CAR_SHARING_ONLY', 'BOTH'].includes(String(vehicle.fleetMode || 'RENTAL_ONLY'))) {
+      throw new Error('Vehicle must be marked for car sharing before it can be listed');
+    }
 
     const baseSlug = slugify(data?.slug || title);
     const existingCount = await prisma.hostVehicleListing.count({
@@ -149,18 +170,31 @@ export const carSharingService = {
   async updateListing(id, patch, scope = {}) {
     const current = await prisma.hostVehicleListing.findFirst({
       where: { id, ...(scope?.tenantId ? { tenantId: scope.tenantId } : {}) },
-      select: { id: true, status: true }
+      select: { id: true, status: true, tenantId: true }
     });
     if (!current) throw new Error('Listing not found');
+    await assertTenantCarSharingEnabled(current.tenantId);
 
     const nextStatus = Object.prototype.hasOwnProperty.call(patch || {}, 'status')
       ? String(patch?.status || current.status).trim().toUpperCase()
       : current.status;
 
+    if (Object.prototype.hasOwnProperty.call(patch || {}, 'vehicleId') && patch?.vehicleId) {
+      const vehicle = await prisma.vehicle.findFirst({
+        where: { id: String(patch.vehicleId), tenantId: current.tenantId || undefined },
+        select: { fleetMode: true }
+      });
+      if (!vehicle) throw new Error('Vehicle not found for this tenant');
+      if (!['CAR_SHARING_ONLY', 'BOTH'].includes(String(vehicle.fleetMode || 'RENTAL_ONLY'))) {
+        throw new Error('Vehicle must be marked for car sharing before it can be listed');
+      }
+    }
+
     return prisma.hostVehicleListing.update({
       where: { id },
       data: {
         hostProfileId: Object.prototype.hasOwnProperty.call(patch || {}, 'hostProfileId') ? String(patch?.hostProfileId || '') : undefined,
+        vehicleId: Object.prototype.hasOwnProperty.call(patch || {}, 'vehicleId') ? String(patch?.vehicleId || '') : undefined,
         locationId: Object.prototype.hasOwnProperty.call(patch || {}, 'locationId') ? (patch?.locationId || null) : undefined,
         title: Object.prototype.hasOwnProperty.call(patch || {}, 'title') ? String(patch?.title || '').trim() : undefined,
         shortDescription: Object.prototype.hasOwnProperty.call(patch || {}, 'shortDescription') ? (patch?.shortDescription ? String(patch.shortDescription).trim() : null) : undefined,

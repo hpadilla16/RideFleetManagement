@@ -65,6 +65,7 @@ export const vehiclesService = {
         color: data.color ?? null,
         mileage: data.mileage ?? 0,
         status: data.status ?? 'AVAILABLE',
+        fleetMode: data.fleetMode ?? 'RENTAL_ONLY',
         vehicleTypeId: data.vehicleTypeId,
         homeLocationId: data.homeLocationId ?? null
       }

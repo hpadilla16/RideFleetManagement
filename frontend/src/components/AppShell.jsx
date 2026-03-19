@@ -13,7 +13,7 @@ const NAV_ITEMS = [
   // agreements module hidden from nav (workflow moved to reservations),
   { href: '/planner', label: 'Planner' },
   { href: '/reports', label: 'Reports' },
-  { href: '/car-sharing', label: 'Car Sharing' },
+  { href: '/car-sharing', label: 'Car Sharing', feature: 'carSharing' },
   { href: '/settings', label: 'Settings' },
   { href: '/tenants', label: 'Tenants', superOnly: true },
   { href: '/settings/security', label: 'Security' }
@@ -45,6 +45,7 @@ export function AppShell({ me, logout, children }) {
   const [failedUnlockAttempts, setFailedUnlockAttempts] = useState(0);
   const [now, setNow] = useState(new Date());
   const [canReturnSuper, setCanReturnSuper] = useState(false);
+  const [carSharingVisible, setCarSharingVisible] = useState(() => String(me?.role || '').toUpperCase() === 'SUPER_ADMIN');
 
   const idleTimerRef = useRef(null);
 
@@ -98,6 +99,36 @@ export function AppShell({ me, logout, children }) {
     try { localStorage.setItem('ui.darkMode', darkMode ? '1' : '0'); } catch {}
     if (typeof document !== 'undefined') document.documentElement.setAttribute('data-theme', darkMode ? 'dark' : 'light');
   }, [darkMode]);
+
+  useEffect(() => {
+    const role = String(me?.role || '').toUpperCase();
+    if (role === 'SUPER_ADMIN') {
+      setCarSharingVisible(true);
+      return;
+    }
+    if (!['ADMIN', 'OPS'].includes(role)) {
+      setCarSharingVisible(false);
+      return;
+    }
+
+    (async () => {
+      try {
+        const token = readStoredToken();
+        if (!token) return;
+        const res = await fetch(`${API_BASE}/api/car-sharing/config`, {
+          headers: { Authorization: `Bearer ${token}` }
+        });
+        if (!res.ok) {
+          setCarSharingVisible(false);
+          return;
+        }
+        const json = await res.json();
+        setCarSharingVisible(!!json?.enabled);
+      } catch {
+        setCarSharingVisible(false);
+      }
+    })();
+  }, [me?.role]);
 
   useEffect(() => {
     if (!locked) return;
@@ -214,6 +245,7 @@ export function AppShell({ me, logout, children }) {
         <div className="stack">
           {NAV_ITEMS
             .filter((item) => !item.superOnly || String(me?.role || '').toUpperCase() === 'SUPER_ADMIN')
+            .filter((item) => item.feature !== 'carSharing' || carSharingVisible)
             .map((item) => (
               item.disabled ? (
                 <span key={item.href} className="nav-link" style={{ opacity: .55, cursor: 'not-allowed' }}>

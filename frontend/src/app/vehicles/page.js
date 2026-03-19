@@ -46,10 +46,10 @@ function VehiclesInner({ token, me, logout }) {
   const [msg, setMsg] = useState('');
 
   const [newVehicle, setNewVehicle] = useState({
-    internalNumber: '', plate: '', vin: '', make: '', model: '', color: '', year: '', mileage: '', vehicleTypeId: '', homeLocationId: ''
+    internalNumber: '', plate: '', vin: '', make: '', model: '', color: '', year: '', mileage: '', vehicleTypeId: '', homeLocationId: '', fleetMode: 'RENTAL_ONLY'
   });
   const [editVehicleForm, setEditVehicleForm] = useState({
-    internalNumber: '', plate: '', vin: '', make: '', model: '', color: '', year: '', mileage: '', status: 'AVAILABLE', vehicleTypeId: '', homeLocationId: ''
+    internalNumber: '', plate: '', vin: '', make: '', model: '', color: '', year: '', mileage: '', status: 'AVAILABLE', vehicleTypeId: '', homeLocationId: '', fleetMode: 'RENTAL_ONLY'
   });
 
   const [rentForm, setRentForm] = useState({
@@ -147,7 +147,7 @@ function VehiclesInner({ token, me, logout }) {
         })
       }, token);
       setShowAddVehicle(false);
-      setNewVehicle({ internalNumber: '', plate: '', vin: '', make: '', model: '', color: '', year: '', mileage: '', vehicleTypeId: '', homeLocationId: '' });
+      setNewVehicle({ internalNumber: '', plate: '', vin: '', make: '', model: '', color: '', year: '', mileage: '', vehicleTypeId: '', homeLocationId: '', fleetMode: 'RENTAL_ONLY' });
       setMsg('Vehicle added successfully');
       await load();
     } catch (e2) {
@@ -168,7 +168,8 @@ function VehiclesInner({ token, me, logout }) {
       mileage: vehicle.mileage ?? '',
       status: vehicle.status || 'AVAILABLE',
       vehicleTypeId: vehicle.vehicleTypeId || '',
-      homeLocationId: vehicle.homeLocationId || ''
+      homeLocationId: vehicle.homeLocationId || '',
+      fleetMode: vehicle.fleetMode || 'RENTAL_ONLY'
     });
     setShowEditVehicle(true);
   };
@@ -279,6 +280,7 @@ function VehiclesInner({ token, me, logout }) {
               <th>Type</th>
               <th>Current Location</th>
               <th>Status</th>
+              <th>Fleet Mode</th>
               <th>Rent</th>
             </tr>
           </thead>
@@ -294,6 +296,7 @@ function VehiclesInner({ token, me, logout }) {
                 <td>{v.vehicleType?.name || '-'}</td>
                 <td>{v.homeLocation?.name || '-'}</td>
                 <td><span className="badge">{v.status}</span></td>
+                <td><span className="badge">{v.fleetMode || 'RENTAL_ONLY'}</span></td>
                 <td>
                   <button onClick={(e) => { e.stopPropagation(); openRent(v); }} disabled={v.status !== 'AVAILABLE'}>Rent</button>
                 </td>
@@ -314,6 +317,7 @@ function VehiclesInner({ token, me, logout }) {
             <div><span className="label">Mileage</span><div>{selected.mileage ?? 0}</div></div>
             <div><span className="label">Type</span><div>{selected.vehicleType?.name || '-'}</div></div>
             <div><span className="label">Home Location</span><div>{selected.homeLocation?.name || '-'}</div></div>
+            <div><span className="label">Fleet Mode</span><div>{selected.fleetMode || 'RENTAL_ONLY'}</div></div>
             <div style={{ display: 'flex', gap: 8 }}>
               <button onClick={() => openRent(selected)} disabled={selected.status !== 'AVAILABLE'}>Rent this vehicle</button>
               <button onClick={() => openEditVehicle(selected)}>Edit vehicle</button>
@@ -369,6 +373,11 @@ function VehiclesInner({ token, me, logout }) {
                   {locations.map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}
                 </select>
               </div>
+              <select value={newVehicle.fleetMode} onChange={(e) => setNewVehicle({ ...newVehicle, fleetMode: e.target.value })}>
+                <option value="RENTAL_ONLY">RENTAL_ONLY</option>
+                <option value="CAR_SHARING_ONLY">CAR_SHARING_ONLY</option>
+                <option value="BOTH">BOTH</option>
+              </select>
               <div className="row-between"><button type="button" onClick={() => setShowAddVehicle(false)}>Cancel</button><button type="submit">Save Vehicle</button></div>
             </form>
           </div>
@@ -406,6 +415,11 @@ function VehiclesInner({ token, me, logout }) {
                   {locations.map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}
                 </select>
               </div>
+              <select value={editVehicleForm.fleetMode} onChange={(e) => setEditVehicleForm({ ...editVehicleForm, fleetMode: e.target.value })}>
+                <option value="RENTAL_ONLY">RENTAL_ONLY</option>
+                <option value="CAR_SHARING_ONLY">CAR_SHARING_ONLY</option>
+                <option value="BOTH">BOTH</option>
+              </select>
               <select value={editVehicleForm.status} onChange={(e) => setEditVehicleForm({ ...editVehicleForm, status: e.target.value })}>
                 {['AVAILABLE', 'RESERVED', 'ON_RENT', 'IN_MAINTENANCE', 'OUT_OF_SERVICE'].map((s) => <option key={s} value={s}>{s}</option>)}
               </select>

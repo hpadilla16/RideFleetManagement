@@ -134,6 +134,7 @@ function CarSharingInner({ token, me, logout }) {
   const [vehicles, setVehicles] = useState([]);
   const [locations, setLocations] = useState([]);
   const [tenants, setTenants] = useState([]);
+  const [tenantConfig, setTenantConfig] = useState(null);
   const [hostForm, setHostForm] = useState(EMPTY_HOST);
   const [listingForm, setListingForm] = useState(EMPTY_LISTING);
   const [activeTenantId, setActiveTenantId] = useState('');
@@ -158,6 +159,10 @@ function CarSharingInner({ token, me, logout }) {
     return locations.filter((row) => String(row.tenantId || '') === String(activeTenantId));
   }, [locations, activeTenantId, isSuper]);
 
+  const eligibleVehicles = useMemo(() => {
+    return filteredVehicles.filter((row) => ['CAR_SHARING_ONLY', 'BOTH'].includes(String(row.fleetMode || 'RENTAL_ONLY')));
+  }, [filteredVehicles]);
+
   const load = async () => {
     try {
       setLoading(true);
@@ -165,7 +170,8 @@ function CarSharingInner({ token, me, logout }) {
         api(`/api/car-sharing/hosts${scopedQuery}`, {}, token),
         api(`/api/car-sharing/listings${scopedQuery}`, {}, token),
         api('/api/vehicles', {}, token),
-        api('/api/locations', {}, token)
+        api('/api/locations', {}, token),
+        api(`/api/car-sharing/config${scopedQuery}`, {}, token)
       ];
       if (isSuper) reqs.push(api('/api/tenants', {}, token));
       const results = await Promise.all(reqs);
@@ -173,8 +179,9 @@ function CarSharingInner({ token, me, logout }) {
       setListings(Array.isArray(results[1]) ? results[1] : []);
       setVehicles(Array.isArray(results[2]) ? results[2] : []);
       setLocations(Array.isArray(results[3]) ? results[3] : []);
+      setTenantConfig(results[4] || null);
       if (isSuper) {
-        const rows = Array.isArray(results[4]) ? results[4] : [];
+        const rows = Array.isArray(results[5]) ? results[5] : [];
         setTenants(rows);
         if (!activeTenantId && rows[0]?.id) setActiveTenantId(rows[0].id);
       }
@@ -242,6 +249,17 @@ function CarSharingInner({ token, me, logout }) {
   };
 
   const activeHosts = hosts.filter((row) => !activeTenantId || !isSuper || String(row.tenantId || '') === String(activeTenantId));
+  const canManageCarSharing = isSuper ? !!tenantConfig?.tenantId && !!tenantConfig?.enabled : !!tenantConfig?.enabled;
+
+  const updateVehicleFleetMode = async (vehicleId, fleetMode) => {
+    try {
+      await api(`/api/vehicles/${vehicleId}`, { method: 'PATCH', body: JSON.stringify({ fleetMode }) }, token);
+      setMsg('Vehicle fleet mode updated');
+      await load();
+    } catch (e) {
+      setMsg(e.message);
+    }
+  };
 
   return (
     <AppShell me={me} logout={logout}>
@@ -268,6 +286,25 @@ function CarSharingInner({ token, me, logout }) {
         </section>
       ) : null}
 
+      <section className="glass card" style={{ marginBottom: 18 }}>
+        <div className="row-between" style={{ alignItems: 'center', gap: 12 }}>
+          <div>
+            <div className="label">Tenant Feature Status</div>
+            <div style={{ fontWeight: 700 }}>
+              {tenantConfig?.enabled ? 'Car Sharing Enabled' : 'Car Sharing Disabled'}
+            </div>
+          </div>
+          <div className="label" style={{ textTransform: 'none', letterSpacing: 0 }}>
+            {tenantConfig?.tenantName || 'Select a tenant to manage this module.'}
+          </div>
+        </div>
+        {!tenantConfig?.enabled ? (
+          <div className="label" style={{ marginTop: 10, textTransform: 'none', letterSpacing: 0, fontSize: 13 }}>
+            Enable Car Sharing for this tenant in `Tenants` before creating hosts or listings.
+          </div>
+        ) : null}
+      </section>
+
       <section className="grid2">
         <section className="glass card-lg stack">
           <div className="row-between">
@@ -288,7 +325,7 @@ function CarSharingInner({ token, me, logout }) {
               <label className="label"><input type="checkbox" checked={hostForm.payoutEnabled} onChange={(e) => setHostForm({ ...hostForm, payoutEnabled: e.target.checked })} /> Payouts Enabled</label>
             </div>
             <div className="stack"><label className="label">Notes</label><textarea rows={3} value={hostForm.notes} onChange={(e) => setHostForm({ ...hostForm, notes: e.target.value })} /></div>
-            <div><button type="submit">{hostForm.id ? 'Update Host' : 'Create Host'}</button></div>
+            <div><button type="submit" disabled={!canManageCarSharing}>{hostForm.id ? 'Update Host' : 'Create Host'}</button></div>
           </form>
 
           <div className="grid2">
@@ -315,9 +352,9 @@ function CarSharingInner({ token, me, logout }) {
                 <label className="label">Vehicle</label>
                 <select value={listingForm.vehicleId} onChange={(e) => setListingForm({ ...listingForm, vehicleId: e.target.value })}>
                   <option value="">Select vehicle</option>
-                  {filteredVehicles.map((vehicle) => (
+                  {eligibleVehicles.map((vehicle) => (
                     <option key={vehicle.id} value={vehicle.id}>
-                      {[vehicle.year, vehicle.make, vehicle.model, vehicle.plate].filter(Boolean).join(' ')}
+                      {[vehicle.year, vehicle.make, vehicle.model, vehicle.plate].filter(Boolean).join(' ')} · {vehicle.fleetMode}
                     </option>
                   ))}
                 </select>
@@ -345,8 +382,14 @@ function CarSharingInner({ token, me, logout }) {
             </div>
             <label className="label"><input type="checkbox" checked={listingForm.instantBook} onChange={(e) => setListingForm({ ...listingForm, instantBook: e.target.checked })} /> Instant Book</label>
             <div className="stack"><label className="label">Trip Rules</label><textarea rows={3} value={listingForm.tripRules} onChange={(e) => setListingForm({ ...listingForm, tripRules: e.target.value })} /></div>
-            <div><button type="submit">{listingForm.id ? 'Update Listing' : 'Create Listing'}</button></div>
+            <div><button type="submit" disabled={!canManageCarSharing}>{listingForm.id ? 'Update Listing' : 'Create Listing'}</button></div>
           </form>
+
+          {!eligibleVehicles.length ? (
+            <div className="label" style={{ textTransform: 'none', letterSpacing: 0, fontSize: 13 }}>
+              No car-sharing eligible vehicles yet. Set some vehicles to `CAR_SHARING_ONLY` or `BOTH` below.
+            </div>
+          ) : null}
 
           <div className="grid2">
             {listings.map((listing) => <ListingCard key={listing.id} listing={listing} onEdit={(row) => setListingForm({
@@ -372,6 +415,40 @@ function CarSharingInner({ token, me, logout }) {
           </div>
           {!listings.length && !loading ? <div className="label">No listings yet for this tenant.</div> : null}
         </section>
+      </section>
+
+      <section className="glass card-lg stack" style={{ marginTop: 18 }}>
+        <div className="row-between">
+          <h3 style={{ margin: 0 }}>Vehicle Fleet Access</h3>
+          <div className="label">Separate traditional rental inventory from car sharing supply.</div>
+        </div>
+        <table>
+          <thead>
+            <tr>
+              <th>Vehicle</th>
+              <th>Type</th>
+              <th>Status</th>
+              <th>Fleet Mode</th>
+            </tr>
+          </thead>
+          <tbody>
+            {filteredVehicles.map((vehicle) => (
+              <tr key={vehicle.id}>
+                <td>{[vehicle.year, vehicle.make, vehicle.model, vehicle.plate].filter(Boolean).join(' ') || vehicle.internalNumber}</td>
+                <td>{vehicle.vehicleType?.name || '-'}</td>
+                <td>{vehicle.status}</td>
+                <td>
+                  <select value={vehicle.fleetMode || 'RENTAL_ONLY'} onChange={(e) => updateVehicleFleetMode(vehicle.id, e.target.value)}>
+                    <option value="RENTAL_ONLY">RENTAL_ONLY</option>
+                    <option value="CAR_SHARING_ONLY">CAR_SHARING_ONLY</option>
+                    <option value="BOTH">BOTH</option>
+                  </select>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        {!filteredVehicles.length && !loading ? <div className="label">No vehicles found for this tenant.</div> : null}
       </section>
 
       <section className="glass card-lg stack" style={{ marginTop: 18 }}>

@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import { prisma } from '../../lib/prisma.js';
 import { isSuperAdmin } from '../../middleware/auth.js';
 import { carSharingService } from './car-sharing.service.js';
 
@@ -10,6 +11,36 @@ function scopeFor(req) {
   }
   return { tenantId: req.user?.tenantId || null };
 }
+
+async function ensureCarSharingEnabled(req, res, next) {
+  try {
+    if (isSuperAdmin(req.user)) return next();
+    const tenantId = req.user?.tenantId || null;
+    if (!tenantId) return res.status(403).json({ error: 'Car sharing is not enabled for this tenant' });
+    const tenant = await prisma.tenant.findUnique({ where: { id: tenantId }, select: { carSharingEnabled: true } });
+    if (!tenant?.carSharingEnabled) return res.status(403).json({ error: 'Car sharing is not enabled for this tenant' });
+    next();
+  } catch (e) {
+    next(e);
+  }
+}
+
+carSharingRouter.use(ensureCarSharingEnabled);
+
+carSharingRouter.get('/config', async (req, res, next) => {
+  try {
+    const tenantId = isSuperAdmin(req.user) ? (req.query?.tenantId ? String(req.query.tenantId) : null) : (req.user?.tenantId || null);
+    if (!tenantId) return res.json({ enabled: isSuperAdmin(req.user), tenantId: null });
+    const tenant = await prisma.tenant.findUnique({ where: { id: tenantId }, select: { id: true, name: true, carSharingEnabled: true } });
+    res.json({
+      enabled: !!tenant?.carSharingEnabled || isSuperAdmin(req.user),
+      tenantId: tenant?.id || tenantId,
+      tenantName: tenant?.name || null
+    });
+  } catch (e) {
+    next(e);
+  }
+});
 
 carSharingRouter.get('/hosts', async (req, res, next) => {
   try {

@@ -120,6 +120,12 @@ enum VehicleOwnershipType {
   HOST_OWNED
 }
 
+enum VehicleFleetMode {
+  RENTAL_ONLY
+  CAR_SHARING_ONLY
+  BOTH
+}
+
 enum ListingStatus {
   DRAFT
   PUBLISHED
@@ -167,6 +173,7 @@ model Tenant {
   slug      String   @unique
   status    String   @default("ACTIVE")
   plan      String   @default("BETA")
+  carSharingEnabled Boolean @default(false)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -249,6 +256,7 @@ model Vehicle {
   color          String?
   mileage        Int           @default(0)
   status         VehicleStatus @default(AVAILABLE)
+  fleetMode      VehicleFleetMode @default(RENTAL_ONLY)
 
   vehicleTypeId  String
   vehicleType    VehicleType   @relation(fields: [vehicleTypeId], references: [id])
