@@ -346,6 +346,28 @@ function ReservationDetailInner({ token, me, logout }) {
     return Number((paymentRows || []).reduce((sum, payment) => sum + Number(payment?.amount || 0), 0).toFixed(2));
   }, [paymentRows]);
 
+  const precheckinStatus = useMemo(() => {
+    const customer = row?.customer || {};
+    const items = [
+      { label: 'Contact Info', done: !!(customer.firstName && customer.lastName && customer.email && customer.phone) },
+      { label: 'Date of Birth', done: !!customer.dateOfBirth },
+      { label: 'Driver License', done: !!(customer.licenseNumber && customer.licenseState) },
+      { label: 'Address', done: !!(customer.address1 && customer.city && customer.state && customer.zip) },
+      { label: 'ID / License Photo', done: !!customer.idPhotoUrl },
+      { label: 'Insurance Document', done: !!customer.insuranceDocumentUrl }
+    ];
+    const completed = items.filter((item) => item.done).length;
+    const isComplete = !!row?.customerInfoCompletedAt;
+    return {
+      items,
+      completed,
+      total: items.length,
+      isComplete,
+      hasActiveToken: !!row?.customerInfoToken,
+      statusLabel: isComplete ? 'Completed' : (row?.customerInfoToken ? 'Requested' : 'Not Requested')
+    };
+  }, [row]);
+
   const [depositOverrides, setDepositOverrides] = useState({
     depositDue: '',
     securityDeposit: ''
@@ -711,6 +733,8 @@ setMsg('Charges updated');
           <div className="grid2">
             <div><span className="label">Status</span><div>{row.status}</div></div>
             <div><span className="label">Type</span><div>{row.vehicleType?.name || '-'}</div></div>
+            <div><span className="label">Pre-check-in</span><div>{precheckinStatus.statusLabel}</div></div>
+            <div><span className="label">Pre-check-in Completed At</span><div>{row.customerInfoCompletedAt ? new Date(row.customerInfoCompletedAt).toLocaleString() : '-'}</div></div>
             <div><span className="label">Signature</span><div>{row.signatureSignedAt ? 'Signed' : 'Pending'}</div></div>
             <div><span className="label">Signed By</span><div>{row.signatureSignedBy || '-'}</div></div>
             <div><span className="label">Signed At</span><div>{row.signatureSignedAt ? new Date(row.signatureSignedAt).toLocaleString() : '-'}</div></div>
@@ -727,6 +751,32 @@ setMsg('Charges updated');
             <div><span className="label">Return Date</span><input type="datetime-local" value={form.returnAt} onChange={(e) => setForm({ ...form, returnAt: e.target.value })} /></div>
             <div><span className="label">Pickup Location</span><select value={form.pickupLocationId} onChange={(e) => setForm({ ...form, pickupLocationId: e.target.value })}><option value="">Select</option>{locations.map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}</select></div>
             <div><span className="label">Return Location</span><select value={form.returnLocationId} onChange={(e) => setForm({ ...form, returnLocationId: e.target.value })}><option value="">Select</option>{locations.map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}</select></div>
+          </div>
+
+          <div className="glass card" style={{ marginTop: 12, padding: 10 }}>
+            <div className="row-between" style={{ marginBottom: 8 }}>
+              <div style={{ fontWeight: 700 }}>Pre-check-in Status</div>
+              <div className="label" style={{ textTransform: 'none', letterSpacing: 0 }}>
+                {precheckinStatus.completed}/{precheckinStatus.total} items complete
+              </div>
+            </div>
+            <div className="grid2" style={{ marginBottom: 10 }}>
+              <div><span className="label">Portal Status</span><div>{precheckinStatus.statusLabel}</div></div>
+              <div><span className="label">Ready For Pickup</span><div>{precheckinStatus.isComplete ? 'Yes' : 'Pending customer info'}</div></div>
+              <div><span className="label">ID / License Photo</span><div>{row?.customer?.idPhotoUrl ? 'Uploaded' : 'Missing'}</div></div>
+              <div><span className="label">Insurance Doc</span><div>{row?.customer?.insuranceDocumentUrl ? 'Uploaded' : 'Missing'}</div></div>
+            </div>
+            <table>
+              <thead><tr><th>Requirement</th><th>Status</th></tr></thead>
+              <tbody>
+                {precheckinStatus.items.map((item) => (
+                  <tr key={item.label}>
+                    <td>{item.label}</td>
+                    <td>{item.done ? 'Done' : 'Missing'}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
 
           <div className="ios-actions-wrap" style={{ marginTop: 12 }}>
