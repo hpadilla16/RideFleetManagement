@@ -18,6 +18,13 @@ function getEnvOrDotenv(key) {
   }
 }
 
+function preferredProvider() {
+  const explicit = String(getEnvOrDotenv('MAIL_PROVIDER') || '').trim().toLowerCase();
+  if (explicit) return explicit;
+  if (getEnvOrDotenv('RESEND_API_KEY')) return 'resend';
+  return 'smtp';
+}
+
 function getTransporter() {
   if (transporter) return transporter;
 
@@ -40,8 +47,72 @@ function getTransporter() {
   return transporter;
 }
 
-export async function sendEmail({ to, subject, text, html, attachments }) {
+function toBase64(content) {
+  if (!content) return '';
+  if (Buffer.isBuffer(content)) return content.toString('base64');
+  if (content instanceof Uint8Array) return Buffer.from(content).toString('base64');
+  return Buffer.from(String(content)).toString('base64');
+}
+
+async function sendViaResend({ to, subject, text, html, attachments }) {
+  const apiKey = getEnvOrDotenv('RESEND_API_KEY');
+  const from = getEnvOrDotenv('RESEND_FROM') || getEnvOrDotenv('SMTP_FROM') || getEnvOrDotenv('SMTP_USER');
+  if (!apiKey || !from) {
+    throw new Error('Resend is not configured (RESEND_API_KEY/RESEND_FROM)');
+  }
+
+  const recipientList = Array.isArray(to)
+    ? to.filter(Boolean)
+    : String(to || '')
+        .split(',')
+        .map((value) => value.trim())
+        .filter(Boolean);
+
+  const payload = {
+    from,
+    to: recipientList,
+    subject,
+    text,
+    html
+  };
+
+  if (Array.isArray(attachments) && attachments.length) {
+    payload.attachments = attachments.map((item) => ({
+      filename: item.filename,
+      content: toBase64(item.content),
+      ...(item.contentType ? { content_type: item.contentType } : {})
+    }));
+  }
+
+  const res = await fetch('https://api.resend.com/emails', {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify(payload)
+  });
+
+  if (!res.ok) {
+    let detail = '';
+    try {
+      detail = await res.text();
+    } catch {}
+    throw new Error(`Resend request failed (${res.status})${detail ? `: ${detail.slice(0, 300)}` : ''}`);
+  }
+
+  return res.json();
+}
+
+async function sendViaSmtp({ to, subject, text, html, attachments }) {
   const tx = getTransporter();
   const from = getEnvOrDotenv('SMTP_FROM') || getEnvOrDotenv('SMTP_USER');
   return tx.sendMail({ from, to, subject, text, html, attachments });
+}
+
+export async function sendEmail({ to, subject, text, html, attachments }) {
+  if (preferredProvider() === 'resend') {
+    return sendViaResend({ to, subject, text, html, attachments });
+  }
+  return sendViaSmtp({ to, subject, text, html, attachments });
 }
