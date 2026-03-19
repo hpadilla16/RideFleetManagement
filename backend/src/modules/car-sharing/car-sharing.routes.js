@@ -88,6 +88,19 @@ carSharingRouter.get('/listings', async (req, res, next) => {
   }
 });
 
+carSharingRouter.get('/trips', async (req, res, next) => {
+  try {
+    const scope = scopeFor(req);
+    res.json(await carSharingService.listTrips({
+      ...scope,
+      listingId: req.query?.listingId ? String(req.query.listingId) : undefined,
+      status: req.query?.status ? String(req.query.status).toUpperCase() : undefined
+    }));
+  } catch (e) {
+    next(e);
+  }
+});
+
 carSharingRouter.get('/listings/:id/availability', async (req, res, next) => {
   try {
     res.json(await carSharingService.listAvailabilityWindows(req.params.id, scopeFor(req)));
@@ -99,6 +112,18 @@ carSharingRouter.get('/listings/:id/availability', async (req, res, next) => {
 carSharingRouter.post('/listings', async (req, res, next) => {
   try {
     const row = await carSharingService.createListing(req.body || {}, scopeFor(req));
+    res.status(201).json(row);
+  } catch (e) {
+    res.status(400).json({ error: e.message });
+  }
+});
+
+carSharingRouter.post('/trips', async (req, res, next) => {
+  try {
+    const row = await carSharingService.createTrip({
+      ...(req.body || {}),
+      actorUserId: req.user?.sub || req.user?.id || null
+    }, scopeFor(req));
     res.status(201).json(row);
   } catch (e) {
     res.status(400).json({ error: e.message });

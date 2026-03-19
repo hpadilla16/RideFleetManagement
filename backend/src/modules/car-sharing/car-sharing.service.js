@@ -21,6 +21,75 @@ function listingInclude() {
   };
 }
 
+function tripInclude() {
+  return {
+    listing: {
+      include: {
+        vehicle: { include: { vehicleType: true } },
+        location: true
+      }
+    },
+    hostProfile: true,
+    guestCustomer: true,
+    pickupLocation: true,
+    returnLocation: true,
+    timelineEvents: { orderBy: [{ eventAt: 'desc' }], take: 10 }
+  };
+}
+
+function generateTripCode() {
+  return `TRIP-${Date.now().toString().slice(-8)}`;
+}
+
+function ceilTripDays(startAt, endAt) {
+  return Math.max(1, Math.ceil((endAt.getTime() - startAt.getTime()) / (24 * 60 * 60 * 1000)));
+}
+
+function overlapsWindow(windowStart, windowEnd, tripStart, tripEnd) {
+  return windowStart < tripEnd && windowEnd > tripStart;
+}
+
+function startOfUtcDay(dt) {
+  return new Date(Date.UTC(dt.getUTCFullYear(), dt.getUTCMonth(), dt.getUTCDate()));
+}
+
+function addUtcDays(dt, days) {
+  const copy = new Date(dt);
+  copy.setUTCDate(copy.getUTCDate() + days);
+  return copy;
+}
+
+function computeTripPricing(listing, windows, startAt, endAt) {
+  const tripDays = ceilTripDays(startAt, endAt);
+  const dayRates = [];
+  const tripStartDay = startOfUtcDay(startAt);
+  for (let idx = 0; idx < tripDays; idx += 1) {
+    const dayStart = addUtcDays(tripStartDay, idx);
+    const dayEnd = addUtcDays(dayStart, 1);
+    const overrideWindow = windows.find((window) =>
+      window.priceOverride !== null
+      && window.priceOverride !== undefined
+      && overlapsWindow(new Date(window.startAt), new Date(window.endAt), dayStart, dayEnd)
+    );
+    dayRates.push(Number(overrideWindow?.priceOverride ?? listing.baseDailyRate ?? 0));
+  }
+  const subtotal = dayRates.reduce((sum, value) => sum + value, 0);
+  const fees = Number(listing.cleaningFee ?? 0) + Number(listing.deliveryFee ?? 0);
+  const taxes = 0;
+  const total = subtotal + fees + taxes;
+  const platformFee = Number((subtotal * 0.15).toFixed(2));
+  const hostEarnings = Number((total - platformFee).toFixed(2));
+  return {
+    tripDays,
+    subtotal,
+    fees,
+    taxes,
+    total,
+    platformFee,
+    hostEarnings
+  };
+}
+
 async function assertTenantCarSharingEnabled(tenantId) {
   const tenant = await prisma.tenant.findUnique({
     where: { id: tenantId },
@@ -131,6 +200,18 @@ export const carSharingService = {
         ...(status ? { status } : {})
       },
       include: listingInclude(),
+      orderBy: [{ createdAt: 'desc' }]
+    });
+  },
+
+  async listTrips({ tenantId, listingId, status } = {}) {
+    return prisma.trip.findMany({
+      where: {
+        ...(tenantId ? { tenantId } : {}),
+        ...(listingId ? { listingId } : {}),
+        ...(status ? { status } : {})
+      },
+      include: tripInclude(),
       orderBy: [{ createdAt: 'desc' }]
     });
   },
@@ -280,6 +361,91 @@ export const carSharingService = {
       },
       include: listingInclude()
     });
+  },
+
+  async createTrip(data, scope = {}) {
+    const tenantId = scope?.tenantId || data?.tenantId || null;
+    if (!tenantId) throw new Error('tenantId is required');
+    await assertTenantCarSharingEnabled(tenantId);
+    const listingId = String(data?.listingId || '').trim();
+    if (!listingId) throw new Error('listingId is required');
+    const pickupAt = data?.scheduledPickupAt ? new Date(data.scheduledPickupAt) : null;
+    const returnAt = data?.scheduledReturnAt ? new Date(data.scheduledReturnAt) : null;
+    if (!pickupAt || !returnAt || Number.isNaN(pickupAt.getTime()) || Number.isNaN(returnAt.getTime())) {
+      throw new Error('scheduledPickupAt and scheduledReturnAt are required');
+    }
+    if (pickupAt >= returnAt) throw new Error('scheduledReturnAt must be after scheduledPickupAt');
+
+    const listing = await prisma.hostVehicleListing.findFirst({
+      where: { id: listingId, tenantId },
+      include: {
+        hostProfile: true,
+        availabilityWindows: { orderBy: [{ startAt: 'asc' }] }
+      }
+    });
+    if (!listing) throw new Error('Listing not found for this tenant');
+    if (String(listing.status || '').toUpperCase() === 'ARCHIVED') throw new Error('Archived listings cannot accept trips');
+
+    const tripDays = ceilTripDays(pickupAt, returnAt);
+    if (tripDays < Number(listing.minTripDays || 1)) {
+      throw new Error(`Trip must be at least ${listing.minTripDays} day(s)`);
+    }
+    if (listing.maxTripDays && tripDays > Number(listing.maxTripDays)) {
+      throw new Error(`Trip cannot exceed ${listing.maxTripDays} day(s)`);
+    }
+
+    const overlappingWindows = (listing.availabilityWindows || []).filter((window) =>
+      overlapsWindow(new Date(window.startAt), new Date(window.endAt), pickupAt, returnAt)
+    );
+    const blockedWindow = overlappingWindows.find((window) => !!window.isBlocked);
+    if (blockedWindow) {
+      throw new Error('This listing is blocked for the selected dates');
+    }
+    const minStayViolation = overlappingWindows.find((window) =>
+      window.minTripDaysOverride && tripDays < Number(window.minTripDaysOverride)
+    );
+    if (minStayViolation) {
+      throw new Error(`Selected dates require at least ${minStayViolation.minTripDaysOverride} day(s)`);
+    }
+
+    const quote = computeTripPricing(listing, overlappingWindows, pickupAt, returnAt);
+    const trip = await prisma.trip.create({
+      data: {
+        tenantId,
+        listingId: listing.id,
+        hostProfileId: listing.hostProfileId,
+        guestCustomerId: data?.guestCustomerId || null,
+        tripCode: generateTripCode(),
+        status: data?.status ? String(data.status).trim().toUpperCase() : 'RESERVED',
+        scheduledPickupAt: pickupAt,
+        scheduledReturnAt: returnAt,
+        pickupLocationId: data?.pickupLocationId || listing.locationId || null,
+        returnLocationId: data?.returnLocationId || listing.locationId || null,
+        quotedSubtotal: quote.subtotal,
+        quotedTaxes: quote.taxes,
+        quotedFees: quote.fees,
+        quotedTotal: quote.total,
+        hostEarnings: quote.hostEarnings,
+        platformFee: quote.platformFee,
+        notes: data?.notes ? String(data.notes).trim() : null,
+        timelineEvents: {
+          create: [{
+            eventType: 'TRIP_CREATED',
+            actorType: scope?.tenantId ? 'TENANT_USER' : 'SYSTEM',
+            actorRefId: data?.actorUserId || null,
+            notes: data?.notes ? String(data.notes).trim() : 'Trip created from car sharing console',
+            metadata: JSON.stringify({
+              listingId: listing.id,
+              guestCustomerId: data?.guestCustomerId || null,
+              tripDays: quote.tripDays,
+              quotedTotal: quote.total
+            })
+          }]
+        }
+      },
+      include: tripInclude()
+    });
+    return trip;
   },
 
   async updateListing(id, patch, scope = {}) {

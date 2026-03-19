@@ -49,6 +49,15 @@ const EMPTY_WINDOW = {
   note: ''
 };
 
+const EMPTY_TRIP = {
+  guestCustomerId: '',
+  scheduledPickupAt: '',
+  scheduledReturnAt: '',
+  pickupLocationId: '',
+  returnLocationId: '',
+  notes: ''
+};
+
 const discoveryBullets = [
   'Use Fleet Manager as the internal ops spine while hosts and guests get marketplace-specific flows.',
   'Reuse reservations, pricing, agreements, inspections, portal steps, and earnings ledgers instead of rebuilding the stack.',
@@ -149,14 +158,17 @@ function CarSharingInner({ token, me, logout }) {
   const [msg, setMsg] = useState('');
   const [hosts, setHosts] = useState([]);
   const [listings, setListings] = useState([]);
+  const [trips, setTrips] = useState([]);
   const [eligibleVehicles, setEligibleVehicles] = useState([]);
   const [vehicles, setVehicles] = useState([]);
+  const [customers, setCustomers] = useState([]);
   const [locations, setLocations] = useState([]);
   const [tenants, setTenants] = useState([]);
   const [tenantConfig, setTenantConfig] = useState(null);
   const [hostForm, setHostForm] = useState(EMPTY_HOST);
   const [listingForm, setListingForm] = useState(EMPTY_LISTING);
   const [windowForm, setWindowForm] = useState(EMPTY_WINDOW);
+  const [tripForm, setTripForm] = useState(EMPTY_TRIP);
   const [activeTenantId, setActiveTenantId] = useState('');
   const [loading, setLoading] = useState(true);
 
@@ -187,6 +199,11 @@ function CarSharingInner({ token, me, logout }) {
     return locations.filter((row) => String(row.tenantId || '') === String(activeTenantId));
   }, [locations, activeTenantId, isSuper]);
 
+  const filteredCustomers = useMemo(() => {
+    if (!activeTenantId || !isSuper) return customers;
+    return customers.filter((row) => String(row.tenantId || '') === String(activeTenantId));
+  }, [customers, activeTenantId, isSuper]);
+
   const filteredEligibleVehicles = useMemo(() => {
     if (!activeTenantId || !isSuper) return eligibleVehicles;
     return eligibleVehicles.filter((row) => {
@@ -201,8 +218,10 @@ function CarSharingInner({ token, me, logout }) {
       const reqs = [
         api(`/api/car-sharing/hosts${scopedQuery}`, {}, token),
         api(`/api/car-sharing/listings${scopedQuery}`, {}, token),
+        api(`/api/car-sharing/trips${scopedQuery}`, {}, token),
         api(`/api/car-sharing/eligible-vehicles${scopedQuery}`, {}, token),
         api('/api/vehicles', {}, token),
+        api('/api/customers', {}, token),
         api('/api/locations', {}, token),
         api(`/api/car-sharing/config${scopedQuery}`, {}, token)
       ];
@@ -210,12 +229,14 @@ function CarSharingInner({ token, me, logout }) {
       const results = await Promise.all(reqs);
       setHosts(Array.isArray(results[0]) ? results[0] : []);
       setListings(Array.isArray(results[1]) ? results[1] : []);
-      setEligibleVehicles(Array.isArray(results[2]) ? results[2] : []);
-      setVehicles(Array.isArray(results[3]) ? results[3] : []);
-      setLocations(Array.isArray(results[4]) ? results[4] : []);
-      setTenantConfig(results[5] || null);
+      setTrips(Array.isArray(results[2]) ? results[2] : []);
+      setEligibleVehicles(Array.isArray(results[3]) ? results[3] : []);
+      setVehicles(Array.isArray(results[4]) ? results[4] : []);
+      setCustomers(Array.isArray(results[5]) ? results[5] : []);
+      setLocations(Array.isArray(results[6]) ? results[6] : []);
+      setTenantConfig(results[7] || null);
       if (isSuper) {
-        const rows = Array.isArray(results[6]) ? results[6] : [];
+        const rows = Array.isArray(results[8]) ? results[8] : [];
         setTenants(rows);
         if (!activeTenantId && rows[0]?.id) setActiveTenantId(rows[0].id);
       }
@@ -235,6 +256,7 @@ function CarSharingInner({ token, me, logout }) {
   const resetListingForm = () => {
     setListingForm(EMPTY_LISTING);
     setWindowForm(EMPTY_WINDOW);
+    setTripForm(EMPTY_TRIP);
   };
 
   const saveHost = async (e) => {
@@ -288,6 +310,7 @@ function CarSharingInner({ token, me, logout }) {
   const activeHosts = hosts.filter((row) => !activeTenantId || !isSuper || String(row.tenantId || '') === String(activeTenantId));
   const canManageCarSharing = isSuper ? !!tenantConfig?.tenantId && !!tenantConfig?.enabled : !!tenantConfig?.enabled;
   const selectedListing = useMemo(() => listings.find((row) => row.id === listingForm.id) || null, [listings, listingForm.id]);
+  const selectedListingTrips = useMemo(() => trips.filter((row) => row.listingId === selectedListing?.id), [trips, selectedListing?.id]);
 
   const updateVehicleFleetMode = async (vehicleId, fleetMode) => {
     try {
@@ -335,6 +358,47 @@ function CarSharingInner({ token, me, logout }) {
       await api(`/api/car-sharing/availability/${id}`, { method: 'DELETE' }, token);
       setMsg('Availability window deleted');
       if (windowForm.id === id) setWindowForm(EMPTY_WINDOW);
+      await load();
+    } catch (e) {
+      setMsg(e.message);
+    }
+  };
+
+  useEffect(() => {
+    if (!selectedListing) return;
+    setTripForm((current) => ({
+      ...current,
+      pickupLocationId: current.pickupLocationId || selectedListing.locationId || '',
+      returnLocationId: current.returnLocationId || selectedListing.locationId || ''
+    }));
+  }, [selectedListing]);
+
+  const saveTrip = async (e) => {
+    e.preventDefault();
+    if (!selectedListing?.id) {
+      setMsg('Select an existing listing first to create a trip.');
+      return;
+    }
+    try {
+      await api('/api/car-sharing/trips', {
+        method: 'POST',
+        body: JSON.stringify({
+          tenantId: isSuper ? activeTenantId : undefined,
+          listingId: selectedListing.id,
+          guestCustomerId: tripForm.guestCustomerId || null,
+          scheduledPickupAt: tripForm.scheduledPickupAt,
+          scheduledReturnAt: tripForm.scheduledReturnAt,
+          pickupLocationId: tripForm.pickupLocationId || null,
+          returnLocationId: tripForm.returnLocationId || null,
+          notes: tripForm.notes || null
+        })
+      }, token);
+      setMsg('Trip created');
+      setTripForm({
+        ...EMPTY_TRIP,
+        pickupLocationId: selectedListing.locationId || '',
+        returnLocationId: selectedListing.locationId || ''
+      });
       await load();
     } catch (e) {
       setMsg(e.message);
@@ -568,6 +632,91 @@ function CarSharingInner({ token, me, logout }) {
             {!(selectedListing.availabilityWindows || []).length ? (
               <div className="label" style={{ textTransform: 'none', letterSpacing: 0, fontSize: 13 }}>
                 No availability windows yet for this listing.
+              </div>
+            ) : null}
+          </>
+        )}
+      </section>
+
+      <section className="glass card-lg stack" style={{ marginTop: 18 }}>
+        <div className="row-between">
+          <h3 style={{ margin: 0 }}>Trip Creation</h3>
+          <div className="label">Internal booking flow on top of listing supply.</div>
+        </div>
+        {!selectedListing ? (
+          <div className="label" style={{ textTransform: 'none', letterSpacing: 0, fontSize: 13 }}>
+            Edit a listing first to create trips from it.
+          </div>
+        ) : (
+          <>
+            <div className="label" style={{ textTransform: 'none', letterSpacing: 0, fontSize: 13 }}>
+              Creating trips for <strong>{selectedListing.title}</strong>
+            </div>
+            <form className="stack" onSubmit={saveTrip}>
+              <div className="grid2">
+                <div className="stack">
+                  <label className="label">Guest</label>
+                  <select value={tripForm.guestCustomerId} onChange={(e) => setTripForm({ ...tripForm, guestCustomerId: e.target.value })}>
+                    <option value="">Select guest</option>
+                    {filteredCustomers.map((customer) => (
+                      <option key={customer.id} value={customer.id}>
+                        {[customer.firstName, customer.lastName].filter(Boolean).join(' ') || customer.email || customer.id}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div className="stack"><label className="label">Pickup</label><input type="datetime-local" value={tripForm.scheduledPickupAt} onChange={(e) => setTripForm({ ...tripForm, scheduledPickupAt: e.target.value })} /></div>
+                <div className="stack"><label className="label">Return</label><input type="datetime-local" value={tripForm.scheduledReturnAt} onChange={(e) => setTripForm({ ...tripForm, scheduledReturnAt: e.target.value })} /></div>
+                <div className="stack">
+                  <label className="label">Pickup Location</label>
+                  <select value={tripForm.pickupLocationId} onChange={(e) => setTripForm({ ...tripForm, pickupLocationId: e.target.value })}>
+                    <option value="">No fixed pickup location</option>
+                    {filteredLocations.map((location) => <option key={location.id} value={location.id}>{location.name}</option>)}
+                  </select>
+                </div>
+                <div className="stack">
+                  <label className="label">Return Location</label>
+                  <select value={tripForm.returnLocationId} onChange={(e) => setTripForm({ ...tripForm, returnLocationId: e.target.value })}>
+                    <option value="">No fixed return location</option>
+                    {filteredLocations.map((location) => <option key={location.id} value={location.id}>{location.name}</option>)}
+                  </select>
+                </div>
+              </div>
+              <div className="stack"><label className="label">Notes</label><textarea rows={2} value={tripForm.notes} onChange={(e) => setTripForm({ ...tripForm, notes: e.target.value })} /></div>
+              <div><button type="submit">Create Trip</button></div>
+            </form>
+
+            <table>
+              <thead>
+                <tr>
+                  <th>Trip</th>
+                  <th>Guest</th>
+                  <th>Status</th>
+                  <th>Pickup</th>
+                  <th>Return</th>
+                  <th>Total</th>
+                  <th>Host Earnings</th>
+                  <th>Platform Fee</th>
+                </tr>
+              </thead>
+              <tbody>
+                {selectedListingTrips.map((trip) => (
+                  <tr key={trip.id}>
+                    <td>{trip.tripCode}</td>
+                    <td>{trip.guestCustomer ? [trip.guestCustomer.firstName, trip.guestCustomer.lastName].filter(Boolean).join(' ') : '-'}</td>
+                    <td>{trip.status}</td>
+                    <td>{new Date(trip.scheduledPickupAt).toLocaleString()}</td>
+                    <td>{new Date(trip.scheduledReturnAt).toLocaleString()}</td>
+                    <td>${Number(trip.quotedTotal || 0).toFixed(2)}</td>
+                    <td>${Number(trip.hostEarnings || 0).toFixed(2)}</td>
+                    <td>${Number(trip.platformFee || 0).toFixed(2)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            {!selectedListingTrips.length ? (
+              <div className="label" style={{ textTransform: 'none', letterSpacing: 0, fontSize: 13 }}>
+                No trips yet for this listing.
               </div>
             ) : null}
           </>
