@@ -88,6 +88,14 @@ carSharingRouter.get('/listings', async (req, res, next) => {
   }
 });
 
+carSharingRouter.get('/listings/:id/availability', async (req, res, next) => {
+  try {
+    res.json(await carSharingService.listAvailabilityWindows(req.params.id, scopeFor(req)));
+  } catch (e) {
+    res.status(404).json({ error: e.message });
+  }
+});
+
 carSharingRouter.post('/listings', async (req, res, next) => {
   try {
     const row = await carSharingService.createListing(req.body || {}, scopeFor(req));
@@ -97,9 +105,34 @@ carSharingRouter.post('/listings', async (req, res, next) => {
   }
 });
 
+carSharingRouter.post('/listings/:id/availability', async (req, res, next) => {
+  try {
+    const row = await carSharingService.createAvailabilityWindow(req.params.id, req.body || {}, scopeFor(req));
+    res.status(201).json(row);
+  } catch (e) {
+    res.status(400).json({ error: e.message });
+  }
+});
+
 carSharingRouter.patch('/listings/:id', async (req, res, next) => {
   try {
     res.json(await carSharingService.updateListing(req.params.id, req.body || {}, scopeFor(req)));
+  } catch (e) {
+    res.status(404).json({ error: e.message });
+  }
+});
+
+carSharingRouter.patch('/availability/:id', async (req, res, next) => {
+  try {
+    res.json(await carSharingService.updateAvailabilityWindow(req.params.id, req.body || {}, scopeFor(req)));
+  } catch (e) {
+    res.status(404).json({ error: e.message });
+  }
+});
+
+carSharingRouter.delete('/availability/:id', async (req, res, next) => {
+  try {
+    res.json(await carSharingService.deleteAvailabilityWindow(req.params.id, scopeFor(req)));
   } catch (e) {
     res.status(404).json({ error: e.message });
   }

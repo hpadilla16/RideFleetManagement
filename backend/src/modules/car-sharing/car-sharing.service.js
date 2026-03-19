@@ -14,7 +14,10 @@ function listingInclude() {
     hostProfile: true,
     vehicle: { include: { vehicleType: true } },
     location: true,
-    tenant: true
+    tenant: true,
+    availabilityWindows: {
+      orderBy: [{ startAt: 'asc' }]
+    }
   };
 }
 
@@ -130,6 +133,90 @@ export const carSharingService = {
       include: listingInclude(),
       orderBy: [{ createdAt: 'desc' }]
     });
+  },
+
+  async listAvailabilityWindows(listingId, scope = {}) {
+    const listing = await prisma.hostVehicleListing.findFirst({
+      where: { id: listingId, ...(scope?.tenantId ? { tenantId: scope.tenantId } : {}) },
+      select: { id: true }
+    });
+    if (!listing) throw new Error('Listing not found');
+    return prisma.listingAvailabilityWindow.findMany({
+      where: { listingId },
+      orderBy: [{ startAt: 'asc' }]
+    });
+  },
+
+  async createAvailabilityWindow(listingId, data, scope = {}) {
+    const listing = await prisma.hostVehicleListing.findFirst({
+      where: { id: listingId, ...(scope?.tenantId ? { tenantId: scope.tenantId } : {}) },
+      select: { id: true, tenantId: true }
+    });
+    if (!listing) throw new Error('Listing not found');
+    await assertTenantCarSharingEnabled(listing.tenantId);
+    const startAt = data?.startAt ? new Date(data.startAt) : null;
+    const endAt = data?.endAt ? new Date(data.endAt) : null;
+    if (!startAt || !endAt || Number.isNaN(startAt.getTime()) || Number.isNaN(endAt.getTime())) {
+      throw new Error('startAt and endAt are required');
+    }
+    if (startAt >= endAt) throw new Error('endAt must be after startAt');
+    return prisma.listingAvailabilityWindow.create({
+      data: {
+        listingId,
+        startAt,
+        endAt,
+        isBlocked: !!data?.isBlocked,
+        priceOverride: data?.priceOverride === '' || data?.priceOverride === null || data?.priceOverride === undefined ? null : data.priceOverride,
+        minTripDaysOverride: data?.minTripDaysOverride ? Number(data.minTripDaysOverride) : null,
+        note: data?.note ? String(data.note).trim() : null
+      }
+    });
+  },
+
+  async updateAvailabilityWindow(id, patch, scope = {}) {
+    const current = await prisma.listingAvailabilityWindow.findFirst({
+      where: {
+        id,
+        listing: scope?.tenantId ? { tenantId: scope.tenantId } : undefined
+      },
+      include: { listing: { select: { tenantId: true } } }
+    });
+    if (!current) throw new Error('Availability window not found');
+    await assertTenantCarSharingEnabled(current.listing?.tenantId);
+    const nextStartAt = Object.prototype.hasOwnProperty.call(patch || {}, 'startAt') ? new Date(patch.startAt) : current.startAt;
+    const nextEndAt = Object.prototype.hasOwnProperty.call(patch || {}, 'endAt') ? new Date(patch.endAt) : current.endAt;
+    if (Number.isNaN(nextStartAt.getTime()) || Number.isNaN(nextEndAt.getTime())) {
+      throw new Error('startAt and endAt must be valid dates');
+    }
+    if (nextStartAt >= nextEndAt) throw new Error('endAt must be after startAt');
+    return prisma.listingAvailabilityWindow.update({
+      where: { id },
+      data: {
+        startAt: Object.prototype.hasOwnProperty.call(patch || {}, 'startAt') ? nextStartAt : undefined,
+        endAt: Object.prototype.hasOwnProperty.call(patch || {}, 'endAt') ? nextEndAt : undefined,
+        isBlocked: Object.prototype.hasOwnProperty.call(patch || {}, 'isBlocked') ? !!patch?.isBlocked : undefined,
+        priceOverride: Object.prototype.hasOwnProperty.call(patch || {}, 'priceOverride')
+          ? (patch?.priceOverride === '' || patch?.priceOverride === null || patch?.priceOverride === undefined ? null : patch.priceOverride)
+          : undefined,
+        minTripDaysOverride: Object.prototype.hasOwnProperty.call(patch || {}, 'minTripDaysOverride')
+          ? (patch?.minTripDaysOverride ? Number(patch.minTripDaysOverride) : null)
+          : undefined,
+        note: Object.prototype.hasOwnProperty.call(patch || {}, 'note') ? (patch?.note ? String(patch.note).trim() : null) : undefined
+      }
+    });
+  },
+
+  async deleteAvailabilityWindow(id, scope = {}) {
+    const current = await prisma.listingAvailabilityWindow.findFirst({
+      where: {
+        id,
+        listing: scope?.tenantId ? { tenantId: scope.tenantId } : undefined
+      },
+      select: { id: true }
+    });
+    if (!current) throw new Error('Availability window not found');
+    await prisma.listingAvailabilityWindow.delete({ where: { id } });
+    return { ok: true };
   },
 
   async createListing(data, scope = {}) {

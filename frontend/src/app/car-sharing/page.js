@@ -39,6 +39,16 @@ const EMPTY_LISTING = {
   tripRules: ''
 };
 
+const EMPTY_WINDOW = {
+  id: '',
+  startAt: '',
+  endAt: '',
+  isBlocked: false,
+  priceOverride: '',
+  minTripDaysOverride: '',
+  note: ''
+};
+
 const discoveryBullets = [
   'Use Fleet Manager as the internal ops spine while hosts and guests get marketplace-specific flows.',
   'Reuse reservations, pricing, agreements, inspections, portal steps, and earnings ledgers instead of rebuilding the stack.',
@@ -49,6 +59,14 @@ function normalizeMoney(value) {
   if (value === '' || value === null || value === undefined) return 0;
   const num = Number(value);
   return Number.isFinite(num) ? num : 0;
+}
+
+function toLocalDateTimeInput(value) {
+  if (!value) return '';
+  const dt = new Date(value);
+  if (Number.isNaN(dt.getTime())) return '';
+  const pad = (n) => String(n).padStart(2, '0');
+  return `${dt.getFullYear()}-${pad(dt.getMonth() + 1)}-${pad(dt.getDate())}T${pad(dt.getHours())}:${pad(dt.getMinutes())}`;
 }
 
 function HostCard({ host, onEdit }) {
@@ -138,6 +156,7 @@ function CarSharingInner({ token, me, logout }) {
   const [tenantConfig, setTenantConfig] = useState(null);
   const [hostForm, setHostForm] = useState(EMPTY_HOST);
   const [listingForm, setListingForm] = useState(EMPTY_LISTING);
+  const [windowForm, setWindowForm] = useState(EMPTY_WINDOW);
   const [activeTenantId, setActiveTenantId] = useState('');
   const [loading, setLoading] = useState(true);
 
@@ -213,7 +232,10 @@ function CarSharingInner({ token, me, logout }) {
   }, [token, scopedQuery]);
 
   const resetHostForm = () => setHostForm(EMPTY_HOST);
-  const resetListingForm = () => setListingForm(EMPTY_LISTING);
+  const resetListingForm = () => {
+    setListingForm(EMPTY_LISTING);
+    setWindowForm(EMPTY_WINDOW);
+  };
 
   const saveHost = async (e) => {
     e.preventDefault();
@@ -265,6 +287,7 @@ function CarSharingInner({ token, me, logout }) {
 
   const activeHosts = hosts.filter((row) => !activeTenantId || !isSuper || String(row.tenantId || '') === String(activeTenantId));
   const canManageCarSharing = isSuper ? !!tenantConfig?.tenantId && !!tenantConfig?.enabled : !!tenantConfig?.enabled;
+  const selectedListing = useMemo(() => listings.find((row) => row.id === listingForm.id) || null, [listings, listingForm.id]);
 
   const updateVehicleFleetMode = async (vehicleId, fleetMode) => {
     try {
@@ -272,6 +295,46 @@ function CarSharingInner({ token, me, logout }) {
       if (isSuper && activeTenantId) payload.tenantId = activeTenantId;
       await api(`/api/vehicles/${vehicleId}`, { method: 'PATCH', body: JSON.stringify(payload) }, token);
       setMsg(isSuper && activeTenantId ? 'Vehicle fleet mode updated and assigned to active tenant' : 'Vehicle fleet mode updated');
+      await load();
+    } catch (e) {
+      setMsg(e.message);
+    }
+  };
+
+  const saveAvailabilityWindow = async (e) => {
+    e.preventDefault();
+    if (!selectedListing?.id) {
+      setMsg('Select an existing listing first to manage availability.');
+      return;
+    }
+    try {
+      const payload = {
+        startAt: windowForm.startAt,
+        endAt: windowForm.endAt,
+        isBlocked: !!windowForm.isBlocked,
+        priceOverride: windowForm.priceOverride === '' ? null : normalizeMoney(windowForm.priceOverride),
+        minTripDaysOverride: windowForm.minTripDaysOverride ? Number(windowForm.minTripDaysOverride) : null,
+        note: windowForm.note || null
+      };
+      if (windowForm.id) {
+        await api(`/api/car-sharing/availability/${windowForm.id}`, { method: 'PATCH', body: JSON.stringify(payload) }, token);
+        setMsg('Availability window updated');
+      } else {
+        await api(`/api/car-sharing/listings/${selectedListing.id}/availability`, { method: 'POST', body: JSON.stringify(payload) }, token);
+        setMsg('Availability window created');
+      }
+      setWindowForm(EMPTY_WINDOW);
+      await load();
+    } catch (e) {
+      setMsg(e.message);
+    }
+  };
+
+  const deleteAvailabilityWindow = async (id) => {
+    try {
+      await api(`/api/car-sharing/availability/${id}`, { method: 'DELETE' }, token);
+      setMsg('Availability window deleted');
+      if (windowForm.id === id) setWindowForm(EMPTY_WINDOW);
       await load();
     } catch (e) {
       setMsg(e.message);
@@ -409,29 +472,106 @@ function CarSharingInner({ token, me, logout }) {
           ) : null}
 
           <div className="grid2">
-            {listings.map((listing) => <ListingCard key={listing.id} listing={listing} onEdit={(row) => setListingForm({
-              id: row.id,
-              hostProfileId: row.hostProfileId || '',
-              vehicleId: row.vehicleId || '',
-              locationId: row.locationId || '',
-              title: row.title || '',
-              shortDescription: row.shortDescription || '',
-              description: row.description || '',
-              status: row.status || 'DRAFT',
-              ownershipType: row.ownershipType || 'HOST_OWNED',
-              currency: row.currency || 'USD',
-              baseDailyRate: String(row.baseDailyRate ?? ''),
-              cleaningFee: String(row.cleaningFee ?? ''),
-              deliveryFee: String(row.deliveryFee ?? ''),
-              securityDeposit: String(row.securityDeposit ?? ''),
-              instantBook: !!row.instantBook,
-              minTripDays: String(row.minTripDays ?? 1),
-              maxTripDays: row.maxTripDays ? String(row.maxTripDays) : '',
-              tripRules: row.tripRules || ''
-            })} />)}
+            {listings.map((listing) => <ListingCard key={listing.id} listing={listing} onEdit={(row) => {
+              setListingForm({
+                id: row.id,
+                hostProfileId: row.hostProfileId || '',
+                vehicleId: row.vehicleId || '',
+                locationId: row.locationId || '',
+                title: row.title || '',
+                shortDescription: row.shortDescription || '',
+                description: row.description || '',
+                status: row.status || 'DRAFT',
+                ownershipType: row.ownershipType || 'HOST_OWNED',
+                currency: row.currency || 'USD',
+                baseDailyRate: String(row.baseDailyRate ?? ''),
+                cleaningFee: String(row.cleaningFee ?? ''),
+                deliveryFee: String(row.deliveryFee ?? ''),
+                securityDeposit: String(row.securityDeposit ?? ''),
+                instantBook: !!row.instantBook,
+                minTripDays: String(row.minTripDays ?? 1),
+                maxTripDays: row.maxTripDays ? String(row.maxTripDays) : '',
+                tripRules: row.tripRules || ''
+              });
+              setWindowForm(EMPTY_WINDOW);
+            }} />)}
           </div>
           {!listings.length && !loading ? <div className="label">No listings yet for this tenant.</div> : null}
         </section>
+      </section>
+
+      <section className="glass card-lg stack" style={{ marginTop: 18 }}>
+        <div className="row-between">
+          <h3 style={{ margin: 0 }}>Availability Windows</h3>
+          {selectedListing ? <button type="button" onClick={() => setWindowForm(EMPTY_WINDOW)}>New Window</button> : null}
+        </div>
+        {!selectedListing ? (
+          <div className="label" style={{ textTransform: 'none', letterSpacing: 0, fontSize: 13 }}>
+            Edit a listing first to manage blackout dates, price overrides, and minimum stay rules.
+          </div>
+        ) : (
+          <>
+            <div className="label" style={{ textTransform: 'none', letterSpacing: 0, fontSize: 13 }}>
+              Managing windows for <strong>{selectedListing.title}</strong>
+            </div>
+            <form className="stack" onSubmit={saveAvailabilityWindow}>
+              <div className="grid2">
+                <div className="stack"><label className="label">Start</label><input type="datetime-local" value={windowForm.startAt} onChange={(e) => setWindowForm({ ...windowForm, startAt: e.target.value })} /></div>
+                <div className="stack"><label className="label">End</label><input type="datetime-local" value={windowForm.endAt} onChange={(e) => setWindowForm({ ...windowForm, endAt: e.target.value })} /></div>
+                <div className="stack"><label className="label">Price Override</label><input type="number" min="0" step="0.01" value={windowForm.priceOverride} onChange={(e) => setWindowForm({ ...windowForm, priceOverride: e.target.value })} /></div>
+                <div className="stack"><label className="label">Min Trip Days Override</label><input type="number" min="1" value={windowForm.minTripDaysOverride} onChange={(e) => setWindowForm({ ...windowForm, minTripDaysOverride: e.target.value })} /></div>
+              </div>
+              <label className="label"><input type="checkbox" checked={windowForm.isBlocked} onChange={(e) => setWindowForm({ ...windowForm, isBlocked: e.target.checked })} /> Block this window</label>
+              <div className="stack"><label className="label">Note</label><textarea rows={2} value={windowForm.note} onChange={(e) => setWindowForm({ ...windowForm, note: e.target.value })} /></div>
+              <div><button type="submit">{windowForm.id ? 'Update Window' : 'Create Window'}</button></div>
+            </form>
+
+            <table>
+              <thead>
+                <tr>
+                  <th>Start</th>
+                  <th>End</th>
+                  <th>Blocked</th>
+                  <th>Price Override</th>
+                  <th>Min Trip Days</th>
+                  <th>Note</th>
+                  <th>Action</th>
+                </tr>
+              </thead>
+              <tbody>
+                {(selectedListing.availabilityWindows || []).map((window) => (
+                  <tr key={window.id}>
+                    <td>{new Date(window.startAt).toLocaleString()}</td>
+                    <td>{new Date(window.endAt).toLocaleString()}</td>
+                    <td>{window.isBlocked ? 'Yes' : 'No'}</td>
+                    <td>{window.priceOverride !== null && window.priceOverride !== undefined ? `$${Number(window.priceOverride).toFixed(2)}` : '-'}</td>
+                    <td>{window.minTripDaysOverride || '-'}</td>
+                    <td>{window.note || '-'}</td>
+                    <td>
+                      <div className="row" style={{ gap: 8 }}>
+                        <button type="button" onClick={() => setWindowForm({
+                          id: window.id,
+                          startAt: toLocalDateTimeInput(window.startAt),
+                          endAt: toLocalDateTimeInput(window.endAt),
+                          isBlocked: !!window.isBlocked,
+                          priceOverride: window.priceOverride ?? '',
+                          minTripDaysOverride: window.minTripDaysOverride ?? '',
+                          note: window.note || ''
+                        })}>Edit</button>
+                        <button type="button" onClick={() => deleteAvailabilityWindow(window.id)}>Delete</button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            {!(selectedListing.availabilityWindows || []).length ? (
+              <div className="label" style={{ textTransform: 'none', letterSpacing: 0, fontSize: 13 }}>
+                No availability windows yet for this listing.
+              </div>
+            ) : null}
+          </>
+        )}
       </section>
 
       <section className="glass card-lg stack" style={{ marginTop: 18 }}>
