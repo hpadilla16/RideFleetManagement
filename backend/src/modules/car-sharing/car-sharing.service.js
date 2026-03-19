@@ -31,6 +31,12 @@ function tripInclude() {
     },
     hostProfile: true,
     guestCustomer: true,
+    reservation: {
+      include: {
+        pricingSnapshot: true,
+        rentalAgreement: true
+      }
+    },
     pickupLocation: true,
     returnLocation: true,
     timelineEvents: { orderBy: [{ eventAt: 'desc' }], take: 10 }
@@ -39,6 +45,10 @@ function tripInclude() {
 
 function generateTripCode() {
   return `TRIP-${Date.now().toString().slice(-8)}`;
+}
+
+function generateReservationNumber() {
+  return `CS-${Date.now().toString().slice(-8)}`;
 }
 
 function ceilTripDays(startAt, endAt) {
@@ -88,6 +98,102 @@ function computeTripPricing(listing, windows, startAt, endAt) {
     platformFee,
     hostEarnings
   };
+}
+
+async function createReservationForTrip({ tenantId, listing, guestCustomerId, pickupAt, returnAt, pickupLocationId, returnLocationId, quote, tripCode, notes }) {
+  const reservation = await prisma.reservation.create({
+    data: {
+      tenantId,
+      reservationNumber: generateReservationNumber(),
+      sourceRef: `CARSHARE:${tripCode}`,
+      status: 'CONFIRMED',
+      customerId: guestCustomerId,
+      vehicleId: listing.vehicleId,
+      vehicleTypeId: listing.vehicle?.vehicleTypeId || null,
+      pickupAt,
+      returnAt,
+      pickupLocationId,
+      returnLocationId,
+      dailyRate: Number(listing.baseDailyRate || 0),
+      estimatedTotal: quote.total,
+      paymentStatus: 'PENDING',
+      sendConfirmationEmail: false,
+      notes: notes ? `[CAR SHARING TRIP ${tripCode}] ${notes}` : `[CAR SHARING TRIP ${tripCode}]`
+    }
+  });
+
+  await prisma.reservationPricingSnapshot.create({
+    data: {
+      reservationId: reservation.id,
+      dailyRate: Number(listing.baseDailyRate || 0),
+      taxRate: 0,
+      securityDepositRequired: Number(listing.securityDeposit || 0) > 0,
+      securityDepositAmount: Number(listing.securityDeposit || 0),
+      source: 'CAR_SHARING_TRIP'
+    }
+  });
+
+  const charges = [
+    {
+      reservationId: reservation.id,
+      code: 'TRIP_DAILY',
+      name: 'Trip Daily Rate',
+      chargeType: 'DAILY',
+      quantity: quote.tripDays,
+      rate: Number((quote.subtotal / Math.max(1, quote.tripDays)).toFixed(2)),
+      total: quote.subtotal,
+      taxable: true,
+      selected: true,
+      sortOrder: 0,
+      source: 'CAR_SHARING_TRIP',
+      sourceRefId: listing.id
+    },
+    ...(Number(listing.cleaningFee || 0) > 0 ? [{
+      reservationId: reservation.id,
+      code: 'CLEANING_FEE',
+      name: 'Cleaning Fee',
+      chargeType: 'UNIT',
+      quantity: 1,
+      rate: Number(listing.cleaningFee || 0),
+      total: Number(listing.cleaningFee || 0),
+      taxable: false,
+      selected: true,
+      sortOrder: 1,
+      source: 'CAR_SHARING_TRIP',
+      sourceRefId: listing.id
+    }] : []),
+    ...(Number(listing.deliveryFee || 0) > 0 ? [{
+      reservationId: reservation.id,
+      code: 'DELIVERY_FEE',
+      name: 'Delivery Fee',
+      chargeType: 'UNIT',
+      quantity: 1,
+      rate: Number(listing.deliveryFee || 0),
+      total: Number(listing.deliveryFee || 0),
+      taxable: false,
+      selected: true,
+      sortOrder: 2,
+      source: 'CAR_SHARING_TRIP',
+      sourceRefId: listing.id
+    }] : []),
+    ...(Number(listing.securityDeposit || 0) > 0 ? [{
+      reservationId: reservation.id,
+      code: 'SECURITY_DEPOSIT',
+      name: 'Security Deposit',
+      chargeType: 'DEPOSIT',
+      quantity: 1,
+      rate: Number(listing.securityDeposit || 0),
+      total: Number(listing.securityDeposit || 0),
+      taxable: false,
+      selected: true,
+      sortOrder: 3,
+      source: 'CAR_SHARING_TRIP',
+      sourceRefId: listing.id
+    }] : [])
+  ];
+
+  await prisma.reservationCharge.createMany({ data: charges });
+  return reservation;
 }
 
 const TRIP_STATUS_TRANSITIONS = {
@@ -386,10 +492,13 @@ export const carSharingService = {
     }
     if (pickupAt >= returnAt) throw new Error('scheduledReturnAt must be after scheduledPickupAt');
 
+    if (!data?.guestCustomerId) throw new Error('guestCustomerId is required');
+
     const listing = await prisma.hostVehicleListing.findFirst({
       where: { id: listingId, tenantId },
       include: {
         hostProfile: true,
+        vehicle: { select: { vehicleTypeId: true } },
         availabilityWindows: { orderBy: [{ startAt: 'asc' }] }
       }
     });
@@ -419,18 +528,37 @@ export const carSharingService = {
     }
 
     const quote = computeTripPricing(listing, overlappingWindows, pickupAt, returnAt);
+    const pickupLocationId = data?.pickupLocationId || listing.locationId || null;
+    const returnLocationId = data?.returnLocationId || listing.locationId || null;
+    if (!pickupLocationId || !returnLocationId) {
+      throw new Error('pickupLocationId and returnLocationId are required for trip operations');
+    }
+    const tripCode = generateTripCode();
+    const reservation = await createReservationForTrip({
+      tenantId,
+      listing,
+      guestCustomerId: data.guestCustomerId,
+      pickupAt,
+      returnAt,
+      pickupLocationId,
+      returnLocationId,
+      quote,
+      tripCode,
+      notes: data?.notes ? String(data.notes).trim() : null
+    });
     const trip = await prisma.trip.create({
       data: {
         tenantId,
         listingId: listing.id,
+        reservationId: reservation.id,
         hostProfileId: listing.hostProfileId,
         guestCustomerId: data?.guestCustomerId || null,
-        tripCode: generateTripCode(),
+        tripCode,
         status: data?.status ? String(data.status).trim().toUpperCase() : 'RESERVED',
         scheduledPickupAt: pickupAt,
         scheduledReturnAt: returnAt,
-        pickupLocationId: data?.pickupLocationId || listing.locationId || null,
-        returnLocationId: data?.returnLocationId || listing.locationId || null,
+        pickupLocationId,
+        returnLocationId,
         quotedSubtotal: quote.subtotal,
         quotedTaxes: quote.taxes,
         quotedFees: quote.fees,
@@ -446,6 +574,7 @@ export const carSharingService = {
             notes: data?.notes ? String(data.notes).trim() : 'Trip created from car sharing console',
             metadata: JSON.stringify({
               listingId: listing.id,
+              reservationId: reservation.id,
               guestCustomerId: data?.guestCustomerId || null,
               tripDays: quote.tripDays,
               quotedTotal: quote.total

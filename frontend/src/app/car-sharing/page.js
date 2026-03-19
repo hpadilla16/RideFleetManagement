@@ -88,6 +88,101 @@ function tripActionsFor(status) {
   return [];
 }
 
+function tripWorkflowSummary(trip) {
+  const reservation = trip?.reservation;
+  const agreement = reservation?.rentalAgreement;
+  const reservationStatus = String(reservation?.status || '').toUpperCase();
+  const agreementStatus = String(agreement?.status || '').toUpperCase();
+  const paymentStatus = String(reservation?.paymentStatus || '').toUpperCase();
+
+  const checks = [
+    { label: 'Customer Info', done: !!reservation?.customerInfoCompletedAt },
+    { label: 'Signature', done: !!reservation?.signatureSignedAt },
+    { label: 'Ready', done: !!reservation?.readyForPickupAt },
+    { label: 'Checkout', done: reservationStatus === 'CHECKED_OUT' || reservationStatus === 'CHECKED_IN' },
+    { label: 'Check-in', done: reservationStatus === 'CHECKED_IN' || agreementStatus === 'CLOSED' }
+  ];
+
+  if (!reservation) {
+    return {
+      stageLabel: 'Reservation Pending',
+      nextAction: 'Create the operational reservation workflow',
+      paymentLabel: 'No payment workflow yet',
+      checks
+    };
+  }
+
+  if (reservationStatus === 'CANCELLED' || reservationStatus === 'NO_SHOW' || String(trip?.status || '').toUpperCase() === 'CANCELLED') {
+    return {
+      stageLabel: 'Trip Cancelled',
+      nextAction: 'Review cancellation and payout outcome',
+      paymentLabel: paymentStatus || 'PENDING',
+      checks
+    };
+  }
+
+  if (reservationStatus === 'CHECKED_IN' || agreementStatus === 'CLOSED') {
+    return {
+      stageLabel: 'Trip Closed',
+      nextAction: 'Review receipts, damages, and host payout',
+      paymentLabel: paymentStatus === 'PAID' ? 'Paid in Full' : paymentStatus,
+      checks
+    };
+  }
+
+  if (reservationStatus === 'CHECKED_OUT') {
+    return {
+      stageLabel: 'Trip In Progress',
+      nextAction: 'Run check-in, final inspection, and close-out',
+      paymentLabel: paymentStatus === 'PAID' ? 'Paid in Full' : paymentStatus,
+      checks
+    };
+  }
+
+  if (reservation?.readyForPickupAt) {
+    return {
+      stageLabel: 'Ready For Pickup',
+      nextAction: 'Run checkout and hand off the vehicle',
+      paymentLabel: paymentStatus === 'PAID' ? 'Paid in Full' : paymentStatus,
+      checks
+    };
+  }
+
+  if (reservation?.customerInfoReviewedAt) {
+    return {
+      stageLabel: 'Reviewed - Awaiting Pickup',
+      nextAction: 'Mark ready for pickup or clear outstanding ops items',
+      paymentLabel: paymentStatus,
+      checks
+    };
+  }
+
+  if (reservation?.signatureSignedAt && reservation?.customerInfoCompletedAt) {
+    return {
+      stageLabel: 'Signed - Awaiting Ops Review',
+      nextAction: 'Review docs and mark ready for pickup',
+      paymentLabel: paymentStatus,
+      checks
+    };
+  }
+
+  if (reservation?.customerInfoCompletedAt) {
+    return {
+      stageLabel: 'Customer Info Complete',
+      nextAction: 'Request signature and payment',
+      paymentLabel: paymentStatus,
+      checks
+    };
+  }
+
+  return {
+    stageLabel: 'Guest Intake Pending',
+    nextAction: 'Request customer information, signature, and payment',
+    paymentLabel: paymentStatus,
+    checks
+  };
+}
+
 function HostCard({ host, onEdit }) {
   return (
     <div className="glass card stack" style={{ padding: 14, gap: 8 }}>
@@ -390,7 +485,7 @@ function CarSharingInner({ token, me, logout }) {
       return;
     }
     try {
-      await api('/api/car-sharing/trips', {
+      const created = await api('/api/car-sharing/trips', {
         method: 'POST',
         body: JSON.stringify({
           tenantId: isSuper ? activeTenantId : undefined,
@@ -403,7 +498,9 @@ function CarSharingInner({ token, me, logout }) {
           notes: tripForm.notes || null
         })
       }, token);
-      setMsg('Trip created');
+      setMsg(created?.reservation?.reservationNumber
+        ? `Trip created and linked to reservation ${created.reservation.reservationNumber}`
+        : 'Trip created');
       setTripForm({
         ...EMPTY_TRIP,
         pickupLocationId: selectedListing.locationId || '',
@@ -713,6 +810,8 @@ function CarSharingInner({ token, me, logout }) {
               <thead>
                 <tr>
                   <th>Trip</th>
+                  <th>Reservation</th>
+                  <th>Workflow</th>
                   <th>Guest</th>
                   <th>Status</th>
                   <th>Pickup</th>
@@ -724,9 +823,48 @@ function CarSharingInner({ token, me, logout }) {
                 </tr>
               </thead>
               <tbody>
-                {selectedListingTrips.map((trip) => (
+                {selectedListingTrips.map((trip) => {
+                  const workflow = tripWorkflowSummary(trip);
+                  return (
                   <tr key={trip.id}>
                     <td>{trip.tripCode}</td>
+                    <td>
+                      {trip.reservation?.reservationNumber ? (
+                        <div className="stack" style={{ gap: 4 }}>
+                          <a href={`/reservations/${trip.reservation.id}`} style={{ fontWeight: 700 }}>
+                            {trip.reservation.reservationNumber}
+                          </a>
+                          <span className="label" style={{ textTransform: 'none', letterSpacing: 0, fontSize: 11 }}>
+                            Payment: {workflow.paymentLabel || '-'}
+                          </span>
+                        </div>
+                      ) : '-'}
+                    </td>
+                    <td>
+                      <div className="stack" style={{ gap: 4 }}>
+                        <strong>{workflow.stageLabel}</strong>
+                        <span className="label" style={{ textTransform: 'none', letterSpacing: 0, fontSize: 11 }}>
+                          {workflow.nextAction}
+                        </span>
+                        <div className="row" style={{ gap: 6, flexWrap: 'wrap' }}>
+                          {workflow.checks.map((check) => (
+                            <span
+                              key={check.label}
+                              style={{
+                                border: '1px solid rgba(124, 58, 237, 0.24)',
+                                borderRadius: 999,
+                                padding: '3px 8px',
+                                fontSize: 11,
+                                background: check.done ? 'rgba(16,185,129,0.12)' : 'rgba(148,163,184,0.12)',
+                                color: check.done ? '#047857' : '#475569'
+                              }}
+                            >
+                              {check.done ? 'Done' : 'Pending'} {check.label}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                    </td>
                     <td>{trip.guestCustomer ? [trip.guestCustomer.firstName, trip.guestCustomer.lastName].filter(Boolean).join(' ') : '-'}</td>
                     <td>{trip.status}</td>
                     <td>{new Date(trip.scheduledPickupAt).toLocaleString()}</td>
@@ -739,10 +877,26 @@ function CarSharingInner({ token, me, logout }) {
                         {tripActionsFor(trip.status).map((action) => (
                           <button key={action} type="button" onClick={() => updateTripStatus(trip.id, action)}>{action}</button>
                         ))}
+                        {trip.reservation?.id ? (
+                          <>
+                            <a href={`/reservations/${trip.reservation.id}`}>
+                              <button type="button">Open Workflow</button>
+                            </a>
+                            <a href={`/reservations/${trip.reservation.id}/checkout`}>
+                              <button type="button">Checkout</button>
+                            </a>
+                            <a href={`/reservations/${trip.reservation.id}/checkin`}>
+                              <button type="button">Check-in</button>
+                            </a>
+                            <a href={`/reservations/${trip.reservation.id}/inspection-report`}>
+                              <button type="button">Inspections</button>
+                            </a>
+                          </>
+                        ) : null}
                       </div>
                     </td>
                   </tr>
-                ))}
+                )})}
               </tbody>
             </table>
             {!selectedListingTrips.length ? (
