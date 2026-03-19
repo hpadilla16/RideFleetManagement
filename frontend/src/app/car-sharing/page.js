@@ -131,6 +131,7 @@ function CarSharingInner({ token, me, logout }) {
   const [msg, setMsg] = useState('');
   const [hosts, setHosts] = useState([]);
   const [listings, setListings] = useState([]);
+  const [eligibleVehicles, setEligibleVehicles] = useState([]);
   const [vehicles, setVehicles] = useState([]);
   const [locations, setLocations] = useState([]);
   const [tenants, setTenants] = useState([]);
@@ -159,9 +160,10 @@ function CarSharingInner({ token, me, logout }) {
     return locations.filter((row) => String(row.tenantId || '') === String(activeTenantId));
   }, [locations, activeTenantId, isSuper]);
 
-  const eligibleVehicles = useMemo(() => {
-    return filteredVehicles.filter((row) => ['CAR_SHARING_ONLY', 'BOTH'].includes(String(row.fleetMode || 'RENTAL_ONLY')));
-  }, [filteredVehicles]);
+  const filteredEligibleVehicles = useMemo(() => {
+    if (!activeTenantId || !isSuper) return eligibleVehicles;
+    return eligibleVehicles.filter((row) => String(row.tenantId || '') === String(activeTenantId));
+  }, [eligibleVehicles, activeTenantId, isSuper]);
 
   const load = async () => {
     try {
@@ -169,6 +171,7 @@ function CarSharingInner({ token, me, logout }) {
       const reqs = [
         api(`/api/car-sharing/hosts${scopedQuery}`, {}, token),
         api(`/api/car-sharing/listings${scopedQuery}`, {}, token),
+        api(`/api/car-sharing/eligible-vehicles${scopedQuery}`, {}, token),
         api('/api/vehicles', {}, token),
         api('/api/locations', {}, token),
         api(`/api/car-sharing/config${scopedQuery}`, {}, token)
@@ -177,11 +180,12 @@ function CarSharingInner({ token, me, logout }) {
       const results = await Promise.all(reqs);
       setHosts(Array.isArray(results[0]) ? results[0] : []);
       setListings(Array.isArray(results[1]) ? results[1] : []);
-      setVehicles(Array.isArray(results[2]) ? results[2] : []);
-      setLocations(Array.isArray(results[3]) ? results[3] : []);
-      setTenantConfig(results[4] || null);
+      setEligibleVehicles(Array.isArray(results[2]) ? results[2] : []);
+      setVehicles(Array.isArray(results[3]) ? results[3] : []);
+      setLocations(Array.isArray(results[4]) ? results[4] : []);
+      setTenantConfig(results[5] || null);
       if (isSuper) {
-        const rows = Array.isArray(results[5]) ? results[5] : [];
+        const rows = Array.isArray(results[6]) ? results[6] : [];
         setTenants(rows);
         if (!activeTenantId && rows[0]?.id) setActiveTenantId(rows[0].id);
       }
@@ -352,7 +356,7 @@ function CarSharingInner({ token, me, logout }) {
                 <label className="label">Vehicle</label>
                 <select value={listingForm.vehicleId} onChange={(e) => setListingForm({ ...listingForm, vehicleId: e.target.value })}>
                   <option value="">Select vehicle</option>
-                  {eligibleVehicles.map((vehicle) => (
+                  {filteredEligibleVehicles.map((vehicle) => (
                     <option key={vehicle.id} value={vehicle.id}>
                       {[vehicle.year, vehicle.make, vehicle.model, vehicle.plate].filter(Boolean).join(' ')} · {vehicle.fleetMode}
                     </option>
@@ -385,9 +389,9 @@ function CarSharingInner({ token, me, logout }) {
             <div><button type="submit" disabled={!canManageCarSharing}>{listingForm.id ? 'Update Listing' : 'Create Listing'}</button></div>
           </form>
 
-          {!eligibleVehicles.length ? (
+          {!filteredEligibleVehicles.length ? (
             <div className="label" style={{ textTransform: 'none', letterSpacing: 0, fontSize: 13 }}>
-              No car-sharing eligible vehicles yet. Set some vehicles to `CAR_SHARING_ONLY` or `BOTH` below.
+              No car-sharing eligible vehicles are available for this tenant yet. Enable the feature on the tenant and set some vehicles to `CAR_SHARING_ONLY` or `BOTH` below.
             </div>
           ) : null}
 

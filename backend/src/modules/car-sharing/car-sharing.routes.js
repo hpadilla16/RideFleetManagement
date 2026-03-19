@@ -42,6 +42,14 @@ carSharingRouter.get('/config', async (req, res, next) => {
   }
 });
 
+carSharingRouter.get('/eligible-vehicles', async (req, res, next) => {
+  try {
+    res.json(await carSharingService.listEligibleVehicles(scopeFor(req)));
+  } catch (e) {
+    next(e);
+  }
+});
+
 carSharingRouter.get('/hosts', async (req, res, next) => {
   try {
     res.json(await carSharingService.listHosts(scopeFor(req)));

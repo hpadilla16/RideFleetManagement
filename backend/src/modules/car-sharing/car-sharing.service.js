@@ -29,6 +29,21 @@ async function assertTenantCarSharingEnabled(tenantId) {
 }
 
 export const carSharingService = {
+  async listEligibleVehicles({ tenantId } = {}) {
+    return prisma.vehicle.findMany({
+      where: {
+        ...(tenantId ? { tenantId } : {}),
+        fleetMode: { in: ['CAR_SHARING_ONLY', 'BOTH'] }
+      },
+      include: {
+        vehicleType: true,
+        homeLocation: true,
+        hostListing: { select: { id: true, title: true, status: true } }
+      },
+      orderBy: [{ createdAt: 'desc' }]
+    });
+  },
+
   async listHosts({ tenantId } = {}) {
     return prisma.hostProfile.findMany({
       where: {
