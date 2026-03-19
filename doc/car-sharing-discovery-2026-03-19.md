@@ -49,6 +49,29 @@ The better first move is:
 - signs trip documents and pays
 - receives receipts and post-trip status
 
+## Recommended Actor Model
+
+Use a `hybrid` model.
+
+### Decision
+
+- `HostProfile` is the business actor
+- a host may optionally be linked to a `User` for future direct login access
+- tenant operators can still manage host listings and trips from Fleet Manager
+
+### Why This Fits Ride Fleet
+
+- it does not force hosts into internal staff roles
+- it still lets operations teams support hosts centrally
+- it keeps room for a later host portal without refactoring the whole domain
+
+### Practical Meaning
+
+- `Tenant` remains the operational container
+- `HostProfile` owns listing and payout identity
+- `User` remains the application login actor
+- `Customer` remains the guest/trip renter actor
+
 ## Recommended Data Model
 
 ### New Models
@@ -71,6 +94,27 @@ The better first move is:
 - `ReservationPayment`
 - `RentalAgreement`
 - `RentalAgreementInspection`
+
+## Schema Scaffold Chosen
+
+The initial schema scaffold should add:
+
+- `HostProfile`
+- `HostVehicleListing`
+- `ListingAvailabilityWindow`
+- `Trip`
+- `TripPayout`
+- `TripIncident`
+- `TripTimelineEvent`
+
+And extend current models with relations so car sharing can reuse the existing operational spine:
+
+- `Tenant`
+- `Location`
+- `Vehicle`
+- `Customer`
+- `Reservation`
+- `User`
 
 ## Integration Strategy
 

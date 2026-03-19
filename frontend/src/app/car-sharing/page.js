@@ -61,6 +61,25 @@ const mvpPhases = [
   }
 ];
 
+const actorModel = [
+  {
+    title: 'Tenant',
+    detail: 'Remains the operational container. Fleet Manager teams can manage listings, support trips, and control marketplace policy.'
+  },
+  {
+    title: 'HostProfile',
+    detail: 'Becomes the business identity for supply, payouts, and listing ownership, with optional future login access.'
+  },
+  {
+    title: 'User',
+    detail: 'Stays as the application login actor for internal staff and eventually for host portal access when linked to a HostProfile.'
+  },
+  {
+    title: 'Customer',
+    detail: 'Continues as the guest/renter identity for booking, pre-check-in, signature, payment, and trip documents.'
+  }
+];
+
 function DiscoveryCard({ title, children }) {
   return (
     <section className="glass card-lg stack" style={{ gap: 12 }}>
@@ -131,6 +150,17 @@ export default function CarSharingPage() {
           </section>
 
           <section className="grid2" style={{ marginTop: 18 }}>
+            <DiscoveryCard title="Recommended Actor Model">
+              <div className="stack">
+                {actorModel.map((item) => (
+                  <div key={item.title} className="glass" style={{ padding: 14, borderRadius: 18 }}>
+                    <div style={{ fontWeight: 700, marginBottom: 6 }}>{item.title}</div>
+                    <div style={{ lineHeight: 1.7 }}>{item.detail}</div>
+                  </div>
+                ))}
+              </div>
+            </DiscoveryCard>
+
             <DiscoveryCard title="Key Business Decisions">
               <div className="stack">
                 <div><strong>Inventory source:</strong> internal fleet only, host-owned vehicles, or both.</div>

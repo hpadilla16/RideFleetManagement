@@ -115,6 +115,52 @@ enum RateType {
   SINGLE_CLASS
 }
 
+enum VehicleOwnershipType {
+  FLEET_OWNED
+  HOST_OWNED
+}
+
+enum ListingStatus {
+  DRAFT
+  PUBLISHED
+  PAUSED
+  ARCHIVED
+}
+
+enum TripStatus {
+  INQUIRY
+  RESERVED
+  CONFIRMED
+  READY_FOR_PICKUP
+  IN_PROGRESS
+  COMPLETED
+  CANCELLED
+  DISPUTED
+}
+
+enum TripPayoutStatus {
+  PENDING
+  ON_HOLD
+  APPROVED
+  PAID
+  VOID
+}
+
+enum TripIncidentType {
+  DAMAGE
+  TOLL
+  CLEANING
+  LATE_RETURN
+  OTHER
+}
+
+enum TripIncidentStatus {
+  OPEN
+  UNDER_REVIEW
+  RESOLVED
+  CLOSED
+}
+
 model Tenant {
   id        String   @id @default(cuid())
   name      String
@@ -138,6 +184,10 @@ model Tenant {
   commissionPlans CommissionPlan[]
   commissionRules CommissionRule[]
   agreementCommissions AgreementCommission[]
+  hostProfiles HostProfile[]
+  carSharingListings HostVehicleListing[]
+  carSharingTrips Trip[]
+  tripPayouts TripPayout[]
 }
 
 model Location {
@@ -164,6 +214,9 @@ model Location {
   additionalServices AdditionalService[]
   locationFees       LocationFee[]
   rates              Rate[]
+  carSharingListings HostVehicleListing[]
+  carSharingPickupTrips Trip[] @relation("TripPickupLocation")
+  carSharingReturnTrips Trip[] @relation("TripReturnLocation")
 }
 
 model VehicleType {
@@ -209,6 +262,7 @@ model Vehicle {
   reservations    Reservation[]
   maintenanceJobs MaintenanceJob[]
   rentalAgreements RentalAgreement[]
+  hostListing     HostVehicleListing?
 }
 
 model Customer {
@@ -243,6 +297,7 @@ model Customer {
   updatedAt       DateTime @updatedAt
 
   reservations    Reservation[]
+  guestTrips      Trip[] @relation("TripGuestCustomer")
 
   @@index([lastName, firstName])
   @@index([phone])
@@ -310,6 +365,7 @@ model Reservation {
   charges           ReservationCharge[]
   payments          ReservationPayment[]
   additionalDrivers ReservationAdditionalDriver[]
+  carSharingTrip    Trip?
 
   @@index([status, pickupAt])
   @@index([pickupLocationId, pickupAt])
@@ -355,6 +411,61 @@ model MaintenanceJob {
   @@index([vehicleId, status])
 }
 
+model HostVehicleListing {
+  id                String              @id @default(cuid())
+  tenantId          String?
+  tenant            Tenant?             @relation(fields: [tenantId], references: [id])
+  hostProfileId     String
+  hostProfile       HostProfile         @relation(fields: [hostProfileId], references: [id])
+  vehicleId         String              @unique
+  vehicle           Vehicle             @relation(fields: [vehicleId], references: [id])
+  locationId        String?
+  location          Location?           @relation(fields: [locationId], references: [id])
+  slug              String              @unique
+  title             String
+  shortDescription  String?
+  description       String?
+  status            ListingStatus       @default(DRAFT)
+  ownershipType     VehicleOwnershipType @default(HOST_OWNED)
+  currency          String              @default("USD")
+  baseDailyRate     Decimal             @default(0) @db.Decimal(10, 2)
+  cleaningFee       Decimal             @default(0) @db.Decimal(10, 2)
+  deliveryFee       Decimal             @default(0) @db.Decimal(10, 2)
+  securityDeposit   Decimal             @default(0) @db.Decimal(10, 2)
+  instantBook       Boolean             @default(false)
+  minTripDays       Int                 @default(1)
+  maxTripDays       Int?
+  tripRules         String?
+  photosJson        String?
+  publishedAt       DateTime?
+  pausedAt          DateTime?
+  createdAt         DateTime            @default(now())
+  updatedAt         DateTime            @updatedAt
+
+  availabilityWindows ListingAvailabilityWindow[]
+  trips             Trip[]
+
+  @@index([tenantId, status])
+  @@index([hostProfileId, status])
+  @@index([locationId, status])
+}
+
+model ListingAvailabilityWindow {
+  id                 String            @id @default(cuid())
+  listingId          String
+  listing            HostVehicleListing @relation(fields: [listingId], references: [id], onDelete: Cascade)
+  startAt            DateTime
+  endAt              DateTime
+  isBlocked          Boolean           @default(false)
+  priceOverride      Decimal?          @db.Decimal(10, 2)
+  minTripDaysOverride Int?
+  note               String?
+  createdAt          DateTime          @default(now())
+  updatedAt          DateTime          @updatedAt
+
+  @@index([listingId, startAt, endAt])
+}
+
 model User {
   id           String   @id @default(cuid())
   tenantId     String?
@@ -377,9 +488,36 @@ model User {
   agreementCommissions AgreementCommission[] @relation("AgreementCommissionEmployee")
   customerInfoReviewedReservations Reservation[] @relation("ReservationCustomerInfoReviewedBy")
   readyForPickupReservations Reservation[] @relation("ReservationReadyForPickupBy")
+  hostProfile HostProfile?
 
   @@index([tenantId, role, isActive])
   @@index([commissionPlanId])
+}
+
+model HostProfile {
+  id                String    @id @default(cuid())
+  tenantId          String?
+  tenant            Tenant?   @relation(fields: [tenantId], references: [id])
+  userId            String?   @unique
+  user              User?     @relation(fields: [userId], references: [id])
+  displayName       String
+  legalName         String?
+  email             String?
+  phone             String?
+  status            String    @default("ACTIVE")
+  payoutProvider    String?
+  payoutAccountRef  String?
+  payoutEnabled     Boolean   @default(false)
+  notes             String?
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  listings          HostVehicleListing[]
+  trips             Trip[]    @relation("TripHost")
+  payouts           TripPayout[]
+
+  @@index([tenantId, status])
+  @@index([email])
 }
 
 model AuditLog {
@@ -488,6 +626,48 @@ model RentalAgreement {
   commissions       AgreementCommission[]
 
   @@index([status, pickupAt])
+}
+
+model Trip {
+  id                String           @id @default(cuid())
+  tenantId          String?
+  tenant            Tenant?          @relation(fields: [tenantId], references: [id])
+  listingId         String
+  listing           HostVehicleListing @relation(fields: [listingId], references: [id])
+  reservationId     String?          @unique
+  reservation       Reservation?     @relation(fields: [reservationId], references: [id])
+  hostProfileId     String
+  hostProfile       HostProfile      @relation("TripHost", fields: [hostProfileId], references: [id])
+  guestCustomerId   String?
+  guestCustomer     Customer?        @relation("TripGuestCustomer", fields: [guestCustomerId], references: [id])
+  tripCode          String           @unique
+  status            TripStatus       @default(RESERVED)
+  scheduledPickupAt DateTime
+  scheduledReturnAt DateTime
+  actualPickupAt    DateTime?
+  actualReturnAt    DateTime?
+  pickupLocationId  String?
+  pickupLocation    Location?        @relation("TripPickupLocation", fields: [pickupLocationId], references: [id])
+  returnLocationId  String?
+  returnLocation    Location?        @relation("TripReturnLocation", fields: [returnLocationId], references: [id])
+  quotedSubtotal    Decimal          @default(0) @db.Decimal(10, 2)
+  quotedTaxes       Decimal          @default(0) @db.Decimal(10, 2)
+  quotedFees        Decimal          @default(0) @db.Decimal(10, 2)
+  quotedTotal       Decimal          @default(0) @db.Decimal(10, 2)
+  hostEarnings      Decimal          @default(0) @db.Decimal(10, 2)
+  platformFee       Decimal          @default(0) @db.Decimal(10, 2)
+  payoutHoldUntil   DateTime?
+  notes             String?
+  createdAt         DateTime         @default(now())
+  updatedAt         DateTime         @updatedAt
+
+  payouts           TripPayout[]
+  incidents         TripIncident[]
+  timelineEvents    TripTimelineEvent[]
+
+  @@index([tenantId, status, scheduledPickupAt])
+  @@index([hostProfileId, status, scheduledPickupAt])
+  @@index([guestCustomerId, status, scheduledPickupAt])
 }
 
 model AgreementDriver {
@@ -645,6 +825,62 @@ model AgreementCommissionLine {
 
   @@index([agreementCommissionId])
   @@index([serviceId])
+}
+
+model TripPayout {
+  id                String            @id @default(cuid())
+  tenantId          String?
+  tenant            Tenant?           @relation(fields: [tenantId], references: [id])
+  tripId            String
+  trip              Trip              @relation(fields: [tripId], references: [id], onDelete: Cascade)
+  hostProfileId     String
+  hostProfile       HostProfile       @relation(fields: [hostProfileId], references: [id])
+  status            TripPayoutStatus  @default(PENDING)
+  grossTripAmount   Decimal           @default(0) @db.Decimal(10, 2)
+  hostShareAmount   Decimal           @default(0) @db.Decimal(10, 2)
+  platformFeeAmount Decimal           @default(0) @db.Decimal(10, 2)
+  adjustmentsAmount Decimal           @default(0) @db.Decimal(10, 2)
+  releasedAt        DateTime?
+  holdReason        String?
+  notes             String?
+  createdAt         DateTime          @default(now())
+  updatedAt         DateTime          @updatedAt
+
+  @@index([tripId, status])
+  @@index([hostProfileId, status, createdAt])
+}
+
+model TripIncident {
+  id                String             @id @default(cuid())
+  tripId            String
+  trip              Trip               @relation(fields: [tripId], references: [id], onDelete: Cascade)
+  type              TripIncidentType
+  status            TripIncidentStatus @default(OPEN)
+  title             String
+  description       String?
+  amountClaimed     Decimal?           @db.Decimal(10, 2)
+  amountResolved    Decimal?           @db.Decimal(10, 2)
+  evidenceJson      String?
+  resolvedAt        DateTime?
+  createdAt         DateTime           @default(now())
+  updatedAt         DateTime           @updatedAt
+
+  @@index([tripId, status])
+}
+
+model TripTimelineEvent {
+  id                String    @id @default(cuid())
+  tripId            String
+  trip              Trip      @relation(fields: [tripId], references: [id], onDelete: Cascade)
+  eventType         String
+  eventAt           DateTime  @default(now())
+  actorType         String?
+  actorRefId        String?
+  notes             String?
+  metadata          String?
+  createdAt         DateTime  @default(now())
+
+  @@index([tripId, eventAt])
 }
 
 model RentalAgreementInspection {
