@@ -10,13 +10,14 @@ const NAV_ITEMS = [
   { href: '/reservations', label: 'Reservations' },
   { href: '/vehicles', label: 'Vehicles' },
   { href: '/customers', label: 'Customers' },
+  { href: '/people', label: 'People', adminOnly: true },
   // agreements module hidden from nav (workflow moved to reservations),
   { href: '/planner', label: 'Planner' },
   { href: '/reports', label: 'Reports' },
   { href: '/car-sharing', label: 'Car Sharing', feature: 'carSharing' },
   { href: '/settings', label: 'Settings' },
   { href: '/tenants', label: 'Tenants', superOnly: true },
-  { href: '/settings/security', label: 'Security' }
+  { href: '/settings/security', label: 'Security', adminOnly: true }
 ];
 
 const IDLE_LOCK_MS = 2 * 60 * 1000;
@@ -48,6 +49,8 @@ export function AppShell({ me, logout, children }) {
   const [carSharingVisible, setCarSharingVisible] = useState(() => String(me?.role || '').toUpperCase() === 'SUPER_ADMIN');
 
   const idleTimerRef = useRef(null);
+  const role = String(me?.role || '').toUpperCase();
+  const isAdminNavRole = ['SUPER_ADMIN', 'ADMIN', 'OPS'].includes(role);
 
   const authApi = async (path, init = {}) => {
     const token = readStoredToken();
@@ -245,6 +248,7 @@ export function AppShell({ me, logout, children }) {
         <div className="stack">
           {NAV_ITEMS
             .filter((item) => !item.superOnly || String(me?.role || '').toUpperCase() === 'SUPER_ADMIN')
+            .filter((item) => !item.adminOnly || isAdminNavRole)
             .filter((item) => item.feature !== 'carSharing' || carSharingVisible)
             .map((item) => (
               item.disabled ? (
