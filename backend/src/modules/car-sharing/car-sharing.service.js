@@ -196,6 +196,81 @@ async function createReservationForTrip({ tenantId, listing, guestCustomerId, pi
   return reservation;
 }
 
+async function ensureReservationForTrip(tripId, scope = {}) {
+  const trip = await prisma.trip.findFirst({
+    where: { id: tripId, ...(scope?.tenantId ? { tenantId: scope.tenantId } : {}) },
+    include: {
+      reservation: true,
+      listing: {
+        include: {
+          vehicle: { select: { vehicleTypeId: true } }
+        }
+      }
+    }
+  });
+  if (!trip) throw new Error('Trip not found');
+  await assertTenantCarSharingEnabled(trip.tenantId);
+  if (trip.reservationId && trip.reservation) {
+    return prisma.trip.findUnique({
+      where: { id: trip.id },
+      include: tripInclude()
+    });
+  }
+  if (!trip.listing) throw new Error('Trip listing not found');
+  if (!trip.guestCustomerId) throw new Error('Trip is missing guestCustomerId');
+  if (!trip.pickupLocationId || !trip.returnLocationId) {
+    throw new Error('Trip is missing pickup or return locations');
+  }
+
+  const tripDays = ceilTripDays(new Date(trip.scheduledPickupAt), new Date(trip.scheduledReturnAt));
+  const quote = {
+    tripDays,
+    subtotal: Number(trip.quotedSubtotal || 0),
+    fees: Number(trip.quotedFees || 0),
+    taxes: Number(trip.quotedTaxes || 0),
+    total: Number(trip.quotedTotal || 0),
+    hostEarnings: Number(trip.hostEarnings || 0),
+    platformFee: Number(trip.platformFee || 0)
+  };
+
+  const reservation = await createReservationForTrip({
+    tenantId: trip.tenantId,
+    listing: trip.listing,
+    guestCustomerId: trip.guestCustomerId,
+    pickupAt: new Date(trip.scheduledPickupAt),
+    returnAt: new Date(trip.scheduledReturnAt),
+    pickupLocationId: trip.pickupLocationId,
+    returnLocationId: trip.returnLocationId,
+    quote,
+    tripCode: trip.tripCode,
+    notes: trip.notes ? `${trip.notes}\n[Workflow backfilled from existing trip]` : '[Workflow backfilled from existing trip]'
+  });
+
+  await prisma.trip.update({
+    where: { id: trip.id },
+    data: {
+      reservationId: reservation.id,
+      timelineEvents: {
+        create: [{
+          eventType: 'TRIP_WORKFLOW_LINKED',
+          actorType: scope?.actorUserId ? 'TENANT_USER' : 'SYSTEM',
+          actorRefId: scope?.actorUserId || null,
+          notes: 'Operational reservation workflow created for existing trip',
+          metadata: JSON.stringify({
+            reservationId: reservation.id,
+            reservationNumber: reservation.reservationNumber
+          })
+        }]
+      }
+    }
+  });
+
+  return prisma.trip.findUnique({
+    where: { id: trip.id },
+    include: tripInclude()
+  });
+}
+
 const TRIP_STATUS_TRANSITIONS = {
   RESERVED: ['CONFIRMED', 'CANCELLED'],
   CONFIRMED: ['READY_FOR_PICKUP', 'CANCELLED'],
@@ -622,6 +697,10 @@ export const carSharingService = {
       },
       include: tripInclude()
     });
+  },
+
+  async ensureTripWorkflow(id, scope = {}) {
+    return ensureReservationForTrip(id, scope);
   },
 
   async updateListing(id, patch, scope = {}) {

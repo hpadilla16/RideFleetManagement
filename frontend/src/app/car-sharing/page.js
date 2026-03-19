@@ -525,6 +525,21 @@ function CarSharingInner({ token, me, logout }) {
     }
   };
 
+  const provisionTripWorkflow = async (tripId) => {
+    try {
+      const trip = await api(`/api/car-sharing/trips/${tripId}/provision-workflow`, {
+        method: 'POST',
+        body: JSON.stringify({})
+      }, token);
+      setMsg(trip?.reservation?.reservationNumber
+        ? `Workflow created and linked to reservation ${trip.reservation.reservationNumber}`
+        : 'Workflow created for trip');
+      await load();
+    } catch (e) {
+      setMsg(e.message);
+    }
+  };
+
   return (
     <AppShell me={me} logout={logout}>
       <section className="glass card-lg" style={{ marginBottom: 18 }}>
@@ -892,7 +907,9 @@ function CarSharingInner({ token, me, logout }) {
                               <button type="button">Inspections</button>
                             </a>
                           </>
-                        ) : null}
+                        ) : (
+                          <button type="button" onClick={() => provisionTripWorkflow(trip.id)}>Create Workflow</button>
+                        )}
                       </div>
                     </td>
                   </tr>
