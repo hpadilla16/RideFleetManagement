@@ -155,6 +155,14 @@ function CarSharingInner({ token, me, logout }) {
     return vehicles.filter((row) => String(row.tenantId || '') === String(activeTenantId));
   }, [vehicles, activeTenantId, isSuper]);
 
+  const assignableVehicles = useMemo(() => {
+    if (!activeTenantId || !isSuper) return filteredVehicles;
+    return vehicles.filter((row) => {
+      const tenantId = String(row.tenantId || '');
+      return tenantId === String(activeTenantId) || !tenantId;
+    });
+  }, [vehicles, filteredVehicles, activeTenantId, isSuper]);
+
   const filteredLocations = useMemo(() => {
     if (!activeTenantId || !isSuper) return locations;
     return locations.filter((row) => String(row.tenantId || '') === String(activeTenantId));
@@ -257,8 +265,10 @@ function CarSharingInner({ token, me, logout }) {
 
   const updateVehicleFleetMode = async (vehicleId, fleetMode) => {
     try {
-      await api(`/api/vehicles/${vehicleId}`, { method: 'PATCH', body: JSON.stringify({ fleetMode }) }, token);
-      setMsg('Vehicle fleet mode updated');
+      const payload = { fleetMode };
+      if (isSuper && activeTenantId) payload.tenantId = activeTenantId;
+      await api(`/api/vehicles/${vehicleId}`, { method: 'PATCH', body: JSON.stringify(payload) }, token);
+      setMsg(isSuper && activeTenantId ? 'Vehicle fleet mode updated and assigned to active tenant' : 'Vehicle fleet mode updated');
       await load();
     } catch (e) {
       setMsg(e.message);
@@ -426,19 +436,26 @@ function CarSharingInner({ token, me, logout }) {
           <h3 style={{ margin: 0 }}>Vehicle Fleet Access</h3>
           <div className="label">Separate traditional rental inventory from car sharing supply.</div>
         </div>
+        {isSuper ? (
+          <div className="label" style={{ textTransform: 'none', letterSpacing: 0, fontSize: 13 }}>
+            Unassigned vehicles are shown here too. Changing fleet mode from this screen will attach them to the active tenant.
+          </div>
+        ) : null}
         <table>
           <thead>
             <tr>
               <th>Vehicle</th>
+              {isSuper ? <th>Tenant</th> : null}
               <th>Type</th>
               <th>Status</th>
               <th>Fleet Mode</th>
             </tr>
           </thead>
           <tbody>
-            {filteredVehicles.map((vehicle) => (
+            {assignableVehicles.map((vehicle) => (
               <tr key={vehicle.id}>
                 <td>{[vehicle.year, vehicle.make, vehicle.model, vehicle.plate].filter(Boolean).join(' ') || vehicle.internalNumber}</td>
+                {isSuper ? <td>{vehicle.tenantId ? (vehicle.tenant?.name || 'Assigned') : 'Unassigned'}</td> : null}
                 <td>{vehicle.vehicleType?.name || '-'}</td>
                 <td>{vehicle.status}</td>
                 <td>
@@ -452,7 +469,7 @@ function CarSharingInner({ token, me, logout }) {
             ))}
           </tbody>
         </table>
-        {!filteredVehicles.length && !loading ? <div className="label">No vehicles found for this tenant.</div> : null}
+        {!assignableVehicles.length && !loading ? <div className="label">No vehicles found for this tenant.</div> : null}
       </section>
 
       <section className="glass card-lg stack" style={{ marginTop: 18 }}>
