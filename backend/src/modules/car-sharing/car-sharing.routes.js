@@ -130,6 +130,17 @@ carSharingRouter.post('/trips', async (req, res, next) => {
   }
 });
 
+carSharingRouter.patch('/trips/:id/status', async (req, res, next) => {
+  try {
+    res.json(await carSharingService.updateTripStatus(req.params.id, {
+      ...(req.body || {}),
+      actorUserId: req.user?.sub || req.user?.id || null
+    }, scopeFor(req)));
+  } catch (e) {
+    res.status(400).json({ error: e.message });
+  }
+});
+
 carSharingRouter.post('/listings/:id/availability', async (req, res, next) => {
   try {
     const row = await carSharingService.createAvailabilityWindow(req.params.id, req.body || {}, scopeFor(req));

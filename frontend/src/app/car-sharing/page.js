@@ -78,6 +78,16 @@ function toLocalDateTimeInput(value) {
   return `${dt.getFullYear()}-${pad(dt.getMonth() + 1)}-${pad(dt.getDate())}T${pad(dt.getHours())}:${pad(dt.getMinutes())}`;
 }
 
+function tripActionsFor(status) {
+  const current = String(status || '').toUpperCase();
+  if (current === 'RESERVED') return ['CONFIRMED', 'CANCELLED'];
+  if (current === 'CONFIRMED') return ['READY_FOR_PICKUP', 'CANCELLED'];
+  if (current === 'READY_FOR_PICKUP') return ['IN_PROGRESS', 'CANCELLED'];
+  if (current === 'IN_PROGRESS') return ['COMPLETED', 'DISPUTED'];
+  if (current === 'DISPUTED') return ['COMPLETED'];
+  return [];
+}
+
 function HostCard({ host, onEdit }) {
   return (
     <div className="glass card stack" style={{ padding: 14, gap: 8 }}>
@@ -405,6 +415,19 @@ function CarSharingInner({ token, me, logout }) {
     }
   };
 
+  const updateTripStatus = async (tripId, status) => {
+    try {
+      await api(`/api/car-sharing/trips/${tripId}/status`, {
+        method: 'PATCH',
+        body: JSON.stringify({ status, note: `Trip moved to ${status}` })
+      }, token);
+      setMsg(`Trip moved to ${status}`);
+      await load();
+    } catch (e) {
+      setMsg(e.message);
+    }
+  };
+
   return (
     <AppShell me={me} logout={logout}>
       <section className="glass card-lg" style={{ marginBottom: 18 }}>
@@ -697,6 +720,7 @@ function CarSharingInner({ token, me, logout }) {
                   <th>Total</th>
                   <th>Host Earnings</th>
                   <th>Platform Fee</th>
+                  <th>Actions</th>
                 </tr>
               </thead>
               <tbody>
@@ -710,6 +734,13 @@ function CarSharingInner({ token, me, logout }) {
                     <td>${Number(trip.quotedTotal || 0).toFixed(2)}</td>
                     <td>${Number(trip.hostEarnings || 0).toFixed(2)}</td>
                     <td>${Number(trip.platformFee || 0).toFixed(2)}</td>
+                    <td>
+                      <div className="row" style={{ gap: 8, flexWrap: 'wrap' }}>
+                        {tripActionsFor(trip.status).map((action) => (
+                          <button key={action} type="button" onClick={() => updateTripStatus(trip.id, action)}>{action}</button>
+                        ))}
+                      </div>
+                    </td>
                   </tr>
                 ))}
               </tbody>

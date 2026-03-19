@@ -90,6 +90,16 @@ function computeTripPricing(listing, windows, startAt, endAt) {
   };
 }
 
+const TRIP_STATUS_TRANSITIONS = {
+  RESERVED: ['CONFIRMED', 'CANCELLED'],
+  CONFIRMED: ['READY_FOR_PICKUP', 'CANCELLED'],
+  READY_FOR_PICKUP: ['IN_PROGRESS', 'CANCELLED'],
+  IN_PROGRESS: ['COMPLETED', 'DISPUTED'],
+  COMPLETED: [],
+  CANCELLED: [],
+  DISPUTED: ['COMPLETED']
+};
+
 async function assertTenantCarSharingEnabled(tenantId) {
   const tenant = await prisma.tenant.findUnique({
     where: { id: tenantId },
@@ -446,6 +456,43 @@ export const carSharingService = {
       include: tripInclude()
     });
     return trip;
+  },
+
+  async updateTripStatus(id, patch, scope = {}) {
+    const current = await prisma.trip.findFirst({
+      where: { id, ...(scope?.tenantId ? { tenantId: scope.tenantId } : {}) },
+      include: { listing: { select: { tenantId: true } } }
+    });
+    if (!current) throw new Error('Trip not found');
+    await assertTenantCarSharingEnabled(current.tenantId);
+    const nextStatus = String(patch?.status || '').trim().toUpperCase();
+    if (!nextStatus) throw new Error('status is required');
+    const allowed = TRIP_STATUS_TRANSITIONS[String(current.status || '').toUpperCase()] || [];
+    if (!allowed.includes(nextStatus)) {
+      throw new Error(`Cannot move trip from ${current.status} to ${nextStatus}`);
+    }
+    const now = new Date();
+    return prisma.trip.update({
+      where: { id },
+      data: {
+        status: nextStatus,
+        actualPickupAt: nextStatus === 'IN_PROGRESS' ? (current.actualPickupAt || now) : undefined,
+        actualReturnAt: nextStatus === 'COMPLETED' ? (current.actualReturnAt || now) : undefined,
+        timelineEvents: {
+          create: [{
+            eventType: `TRIP_${nextStatus}`,
+            actorType: patch?.actorUserId ? 'TENANT_USER' : 'SYSTEM',
+            actorRefId: patch?.actorUserId || null,
+            notes: patch?.note ? String(patch.note).trim() : `Trip moved to ${nextStatus}`,
+            metadata: JSON.stringify({
+              previousStatus: current.status,
+              nextStatus
+            })
+          }]
+        }
+      },
+      include: tripInclude()
+    });
   },
 
   async updateListing(id, patch, scope = {}) {
