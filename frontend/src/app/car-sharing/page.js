@@ -170,7 +170,10 @@ function CarSharingInner({ token, me, logout }) {
 
   const filteredEligibleVehicles = useMemo(() => {
     if (!activeTenantId || !isSuper) return eligibleVehicles;
-    return eligibleVehicles.filter((row) => String(row.tenantId || '') === String(activeTenantId));
+    return eligibleVehicles.filter((row) => {
+      const tenantId = String(row.tenantId || '');
+      return tenantId === String(activeTenantId) || !tenantId;
+    });
   }, [eligibleVehicles, activeTenantId, isSuper]);
 
   const load = async () => {
