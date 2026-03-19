@@ -13,7 +13,7 @@ const NAV_ITEMS = [
   // agreements module hidden from nav (workflow moved to reservations),
   { href: '/planner', label: 'Planner' },
   { href: '/reports', label: 'Reports' },
-  { href: '/car-sharing', label: 'Car Sharing - Coming Soon', disabled: true },
+  { href: '/car-sharing', label: 'Car Sharing' },
   { href: '/settings', label: 'Settings' },
   { href: '/tenants', label: 'Tenants', superOnly: true },
   { href: '/settings/security', label: 'Security' }
