@@ -221,7 +221,18 @@ function ReservationDetailInner({ token, me, logout }) {
         body: JSON.stringify({ kind, extraEmails })
       }, token);
 
-      setMsg(`${actionLabel} email sent to ${out?.sentTo?.join(', ') || recipients.join(', ')}`);
+      if (out?.emailSent === false) {
+        const text = `${out?.warning || `${actionLabel} email could not be sent.`}\n\nManual link:\n${out?.link || 'Unavailable'}`;
+        try {
+          if (out?.link && navigator?.clipboard?.writeText) {
+            await navigator.clipboard.writeText(out.link);
+          }
+        } catch {}
+        window.alert(text);
+        setMsg(`${actionLabel} email could not be sent. Link generated${out?.link ? ' and copied to clipboard' : ''}.`);
+      } else {
+        setMsg(`${actionLabel} email sent to ${out?.sentTo?.join(', ') || recipients.join(', ')}`);
+      }
       await load();
     } catch (e) {
       setMsg(e.message);
@@ -559,7 +570,7 @@ if (insurancePlan) {
     quantity,
     rate,
     total,
-    taxable: false,
+    taxable: !!insurancePlan.taxable,
     source: 'INSURANCE',
     sourceRefId: insurancePlan.code
   });

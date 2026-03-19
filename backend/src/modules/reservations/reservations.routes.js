@@ -604,9 +604,6 @@ reservationsRouter.post('/:id/send-request-email', async (req, res, next) => {
       await reservationsService.update(req.params.id, { paymentRequestToken: token, paymentRequestTokenExpiresAt: expiresAt }, scopeFor(req));
     }
 
-    const note = `[${notePrefix} ${new Date().toISOString()}] emailed to ${recipients.join(', ')}`;
-    await reservationsService.update(req.params.id, { notes: current.notes ? `${current.notes}\n${note}` : note }, scopeFor(req));
-
     const actionLabel = kind === 'signature' ? 'Signature Request' : kind === 'customer-info' ? 'Customer Information Request' : 'Payment Request';
     const customerName = `${current.customer?.firstName || ''} ${current.customer?.lastName || ''}`.trim() || 'Customer';
 
@@ -623,14 +620,43 @@ reservationsRouter.post('/:id/send-request-email', async (req, res, next) => {
       .replaceAll('{{companyName}}', companyName);
 
     const htmlTpl = kind === 'signature' ? tpl.requestSignatureHtml : kind === 'customer-info' ? tpl.requestCustomerInfoHtml : tpl.requestPaymentHtml;
-    await sendEmail({
-      to: recipients.join(','),
-      subject: render(subjectTpl) || `${actionLabel} - Reservation ${current.reservationNumber}`,
-      text: render(bodyTpl),
-      html: render(htmlTpl || String(bodyTpl || '').replaceAll('\n', '<br/>'))
-    });
+    try {
+      await sendEmail({
+        to: recipients.join(','),
+        subject: render(subjectTpl) || `${actionLabel} - Reservation ${current.reservationNumber}`,
+        text: render(bodyTpl),
+        html: render(htmlTpl || String(bodyTpl || '').replaceAll('\n', '<br/>'))
+      });
+      const note = `[${notePrefix} ${new Date().toISOString()}] emailed to ${recipients.join(', ')}`;
+      await reservationsService.update(req.params.id, { notes: current.notes ? `${current.notes}\n${note}` : note }, scopeFor(req));
+      res.json({ ok: true, sentTo: recipients, link, expiresAt, emailSent: true });
+    } catch (mailError) {
+      const failNote = `[${notePrefix} ${new Date().toISOString()}] email failed for ${recipients.join(', ')} | ${String(mailError?.message || mailError)}`;
+      await reservationsService.update(req.params.id, { notes: current.notes ? `${current.notes}\n${failNote}` : failNote }, scopeFor(req));
+      await prisma.auditLog.create({
+        data: {
+          tenantId: current.tenantId || req.user?.tenantId || null,
+          reservationId: current.id,
+          action: 'UPDATE',
+          actorUserId: req.user?.sub || null,
+          metadata: JSON.stringify({
+            requestEmailFailed: true,
+            kind,
+            recipients,
+            link,
+            error: String(mailError?.message || mailError)
+          })
+        }
+      });
 
-    res.json({ ok: true, sentTo: recipients, link, expiresAt });
+      res.json({
+        ok: false,
+        warning: `Unable to send ${actionLabel.toLowerCase()} email: ${String(mailError?.message || mailError)}`,
+        link,
+        expiresAt,
+        emailSent: false
+      });
+    }
   } catch (e) {
     next(e);
   }

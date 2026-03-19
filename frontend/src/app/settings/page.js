@@ -173,6 +173,7 @@ function SettingsInner({ token, me, logout }) {
     description: '',
     chargeBy: 'FIXED',
     amount: '',
+    taxable: false,
     isActive: true,
     locationIds: [],
     vehicleTypeIds: []
@@ -229,6 +230,7 @@ function SettingsInner({ token, me, logout }) {
         description: p.description || '',
         chargeBy: p.chargeBy || p.mode || 'FIXED',
         amount: Number(p.amount || 0),
+        taxable: !!p.taxable,
         isActive: p.isActive !== false,
         locationIds: Array.isArray(p.locationIds) ? p.locationIds : [],
         vehicleTypeIds: Array.isArray(p.vehicleTypeIds) ? p.vehicleTypeIds : []
@@ -627,6 +629,7 @@ function SettingsInner({ token, me, logout }) {
       chargeBy: p.chargeBy || 'FIXED',
       mode: p.chargeBy || 'FIXED',
       amount: Number(p.amount || 0),
+      taxable: !!p.taxable,
       isActive: p.isActive !== false,
       locationIds: Array.isArray(p.locationIds) ? p.locationIds : [],
       vehicleTypeIds: Array.isArray(p.vehicleTypeIds) ? p.vehicleTypeIds : []
@@ -637,7 +640,7 @@ function SettingsInner({ token, me, logout }) {
 
   const resetInsuranceForm = () => {
     setInsuranceForm({
-      code: '', name: '', label: '', description: '', chargeBy: 'FIXED', amount: '', isActive: true, locationIds: [], vehicleTypeIds: []
+      code: '', name: '', label: '', description: '', chargeBy: 'FIXED', amount: '', taxable: false, isActive: true, locationIds: [], vehicleTypeIds: []
     });
     setInsuranceEditIdx(-1);
   };
@@ -651,6 +654,7 @@ function SettingsInner({ token, me, logout }) {
       description: insuranceForm.description || '',
       chargeBy: insuranceForm.chargeBy,
       amount: Number(insuranceForm.amount || 0),
+      taxable: !!insuranceForm.taxable,
       isActive: !!insuranceForm.isActive,
       locationIds: insuranceForm.locationIds || [],
       vehicleTypeIds: insuranceForm.vehicleTypeIds || []
@@ -674,6 +678,7 @@ function SettingsInner({ token, me, logout }) {
       description: p.description || '',
       chargeBy: p.chargeBy || p.mode || 'FIXED',
       amount: String(p.amount ?? ''),
+      taxable: !!p.taxable,
       isActive: p.isActive !== false,
       locationIds: Array.isArray(p.locationIds) ? p.locationIds : [],
       vehicleTypeIds: Array.isArray(p.vehicleTypeIds) ? p.vehicleTypeIds : []
@@ -1423,6 +1428,10 @@ function SettingsInner({ token, me, logout }) {
                 <div className="stack"><label className="label">Charge Amount</label><input value={insuranceForm.amount} onChange={(e) => setInsuranceForm({ ...insuranceForm, amount: e.target.value })} /></div>
               </div>
 
+              <label className="label">
+                <input type="checkbox" checked={!!insuranceForm.taxable} onChange={(e) => setInsuranceForm({ ...insuranceForm, taxable: e.target.checked })} /> Taxable
+              </label>
+
               <div className="stack">
                 <label className="label">Applies to Locations</label>
                 <div className="service-checks-grid">
@@ -1467,7 +1476,7 @@ function SettingsInner({ token, me, logout }) {
             </form>
 
             <table>
-              <thead><tr><th>Code</th><th>Name/Label</th><th>Charge</th><th>Locations</th><th>Vehicle Classes</th><th>Active</th><th>Actions</th></tr></thead>
+              <thead><tr><th>Code</th><th>Name/Label</th><th>Charge</th><th>Taxable</th><th>Locations</th><th>Vehicle Classes</th><th>Active</th><th>Actions</th></tr></thead>
               <tbody>
                 {insurancePlans.map((p, idx) => (
                   <tr key={`${p.code}-${idx}`}>
@@ -1478,6 +1487,7 @@ function SettingsInner({ token, me, logout }) {
                       <div className="label">{p.description || '-'}</div>
                     </td>
                     <td>{p.chargeBy || p.mode} / {Number(p.amount || 0).toFixed(2)}</td>
+                    <td>{p.taxable ? 'Yes' : 'No'}</td>
                     <td className="label">{(p.locationIds || []).length ? (p.locationIds || []).map((id) => locations.find((l) => l.id === id)?.code || id).join(', ') : 'All'}</td>
                     <td className="label">{(p.vehicleTypeIds || []).length ? (p.vehicleTypeIds || []).map((id) => vehicleTypes.find((v) => v.id === id)?.code || id).join(', ') : 'All'}</td>
                     <td>{p.isActive ? 'Yes' : 'No'}</td>

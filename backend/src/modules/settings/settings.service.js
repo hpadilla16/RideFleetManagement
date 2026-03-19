@@ -70,14 +70,22 @@ export const settingsService = {
     if (!row?.value) return [];
     try {
       const parsed = JSON.parse(row.value);
-      return Array.isArray(parsed) ? parsed : [];
+      return Array.isArray(parsed)
+        ? parsed.map((plan) => ({
+            ...plan,
+            taxable: !!plan?.taxable
+          }))
+        : [];
     } catch {
       return [];
     }
   },
 
   async updateInsurancePlans(plans = [], scope = {}) {
-    const payload = Array.isArray(plans) ? plans : [];
+    const payload = (Array.isArray(plans) ? plans : []).map((plan) => ({
+      ...plan,
+      taxable: !!plan?.taxable
+    }));
     const key = scopedKey('insurancePlans', scope);
     await prisma.appSetting.upsert({
       where: { key },
