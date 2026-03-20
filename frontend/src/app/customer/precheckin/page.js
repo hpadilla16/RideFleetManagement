@@ -136,6 +136,7 @@ export default function PrecheckinPage() {
   };
 
   const reservation = model?.reservation;
+  const nextPortalStep = model?.portal?.nextStep;
 
   const notices = (
     <div style={portalStyles.stack}>
@@ -295,6 +296,13 @@ export default function PrecheckinPage() {
                   {saving ? 'Submitting...' : 'Complete Pre-Check-in'}
                 </button>
               </div>
+              {nextPortalStep?.key && nextPortalStep.key !== 'customerInfo' && nextPortalStep.link ? (
+                <div className="inline-actions">
+                  <a href={nextPortalStep.link} target="_blank" rel="noreferrer" style={{ textDecoration: 'none' }}>
+                    <button type="button" className="button-subtle">Continue to {nextPortalStep.label}</button>
+                  </a>
+                </div>
+              ) : null}
             </div>
           </div>
         </>

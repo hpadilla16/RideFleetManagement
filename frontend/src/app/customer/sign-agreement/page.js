@@ -24,6 +24,7 @@ export default function SignAgreementPage() {
   const [portal, setPortal] = useState(null);
   const [signerName, setSignerName] = useState('');
   const [accepted, setAccepted] = useState(false);
+  const nextPortalStep = portal?.nextStep;
 
   useEffect(() => {
     const run = async () => {
@@ -221,6 +222,18 @@ export default function SignAgreementPage() {
               <div>
                 <button onClick={submit} style={portalStyles.button}>Submit Signature</button>
               </div>
+              {nextPortalStep?.key && nextPortalStep.key !== 'signature' && nextPortalStep.link ? (
+                <div style={{ display: 'grid', gap: 8 }}>
+                  <div style={{ color: '#55456f', lineHeight: 1.6 }}>
+                    Once this step is complete, continue directly to the next guest action.
+                  </div>
+                  <div className="inline-actions">
+                    <a href={nextPortalStep.link} target="_blank" rel="noreferrer" style={{ textDecoration: 'none' }}>
+                      <button type="button" className="button-subtle">Continue to {nextPortalStep.label}</button>
+                    </a>
+                  </div>
+                </div>
+              ) : null}
             </div>
           </div>
         </>

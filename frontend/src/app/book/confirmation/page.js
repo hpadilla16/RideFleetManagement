@@ -87,6 +87,8 @@ export default function PublicBookingConfirmationPage() {
   const customerInfoLive = timelineStatus(portalStatus, 'customerInfo');
   const signatureLive = timelineStatus(portalStatus, 'signature');
   const paymentLive = timelineStatus(portalStatus, 'payment');
+  const primaryActionLink = portalStatus?.nextStep?.link || customerInfoAction?.link || signatureAction?.link || paymentAction?.link || '';
+  const primaryActionLabel = portalStatus?.nextStep?.label || 'Continue guest workflow';
 
   return (
     <main style={{ minHeight: '100vh', padding: '22px clamp(16px, 3vw, 34px) 42px' }}>
@@ -215,6 +217,13 @@ export default function PublicBookingConfirmationPage() {
                     Live progress: <strong>{portalStatus.progress?.completedSteps || 0}/{portalStatus.progress?.totalSteps || 0}</strong>
                     {' '}completed. Next action: <strong>{portalStatus.progress?.nextAction || 'Continue the customer workflow.'}</strong>
                   </div>
+                </div>
+              ) : null}
+              {primaryActionLink ? (
+                <div className="inline-actions">
+                  <a href={primaryActionLink} target="_blank" rel="noreferrer">
+                    <button type="button">{primaryActionLabel}</button>
+                  </a>
                 </div>
               ) : null}
               <div className="surface-note">
