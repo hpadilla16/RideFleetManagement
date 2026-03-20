@@ -24,6 +24,19 @@ function fmtMoney(value) {
   return `$${Number(value || 0).toFixed(2)}`;
 }
 
+function buildServiceSelectionState(result, mode) {
+  if (mode !== 'RENTAL') return {};
+  return Object.fromEntries(
+    (result?.additionalServices || []).map((service) => [
+      service.serviceId,
+      {
+        selected: !!service.mandatory,
+        quantity: Math.max(1, Number(service.quantity || 1) || 1)
+      }
+    ])
+  );
+}
+
 function BookingCard({ title, subtitle, meta, quote, cta, onClick }) {
   return (
     <article className="glass card section-card">
@@ -72,6 +85,7 @@ export default function PublicBookingPage() {
     licenseState: ''
   });
   const [submitting, setSubmitting] = useState(false);
+  const [selectedServices, setSelectedServices] = useState({});
 
   const loadBootstrap = async (slug) => {
     setLoadingBootstrap(true);
@@ -104,6 +118,14 @@ export default function PublicBookingPage() {
     loadBootstrap('');
   }, []);
 
+  useEffect(() => {
+    if (!selectedResult) {
+      setSelectedServices({});
+      return;
+    }
+    setSelectedServices(buildServiceSelectionState(selectedResult, searchMode));
+  }, [selectedResult, searchMode]);
+
   const selectedTenant = bootstrap?.selectedTenant || null;
   const locations = bootstrap?.locations || [];
   const vehicleTypes = bootstrap?.vehicleTypes || [];
@@ -115,6 +137,36 @@ export default function PublicBookingPage() {
     { label: 'Vehicle Types', value: vehicleTypes.length },
     { label: 'Car Sharing', value: selectedTenant?.carSharingEnabled ? 'Enabled' : 'Not Yet' }
   ]), [bootstrap?.tenants?.length, locations.length, vehicleTypes.length, selectedTenant?.carSharingEnabled]);
+
+  const chosenAdditionalServices = useMemo(() => {
+    if (searchMode !== 'RENTAL' || !selectedResult?.additionalServices?.length) return [];
+    return selectedResult.additionalServices
+      .filter((service) => selectedServices[service.serviceId]?.selected || service.mandatory)
+      .map((service) => {
+        const quantity = Math.max(1, Number(selectedServices[service.serviceId]?.quantity ?? service.quantity ?? 1) || 1);
+        const total = service.pricingMode === 'PER_DAY'
+          ? Number(service.rate || 0) * Number(selectedResult?.quote?.days || 1) * quantity
+          : Number(service.rate || 0) * quantity;
+        return {
+          ...service,
+          quantity,
+          total
+        };
+      });
+  }, [searchMode, selectedResult, selectedServices]);
+
+  const chosenAdditionalServicesTotal = useMemo(
+    () => chosenAdditionalServices.reduce((sum, service) => sum + Number(service.total || 0), 0),
+    [chosenAdditionalServices]
+  );
+
+  const checkoutEstimatedTotal = useMemo(() => {
+    if (!selectedResult) return 0;
+    const baseTotal = searchMode === 'RENTAL'
+      ? Number(selectedResult?.quote?.estimatedTripTotal || 0)
+      : Number(selectedResult?.quote?.total || 0);
+    return baseTotal + chosenAdditionalServicesTotal;
+  }, [chosenAdditionalServicesTotal, searchMode, selectedResult]);
 
   const runSearch = async () => {
     if (!tenantSlug) {
@@ -387,16 +439,103 @@ export default function PublicBookingPage() {
                 <strong>{searchMode === 'RENTAL' ? selectedResult.vehicleType?.name : selectedResult.title}</strong>
                 <br />
                 {searchMode === 'RENTAL'
-                  ? `Pickup ${results?.pickupLocation?.name || ''} · ${fmtMoney(selectedResult.quote?.estimatedTripTotal)} estimated total`
+                  ? `Pickup ${results?.pickupLocation?.name || ''} · ${fmtMoney(checkoutEstimatedTotal)} estimated total`
                   : `${selectedResult.vehicle?.label || ''} · ${fmtMoney(selectedResult.quote?.total)} projected total`}
                 <br />
                 {searchMode === 'RENTAL'
-                  ? `Deposit due now: ${fmtMoney(selectedResult.quote?.depositAmountDue)}`
+                  ? `Deposit due now: ${fmtMoney(selectedResult.quote?.depositAmountDue)}${chosenAdditionalServicesTotal ? ` · Add-ons ${fmtMoney(chosenAdditionalServicesTotal)}` : ''}`
                   : `Host earns ${fmtMoney(selectedResult.quote?.hostEarnings)} · Platform fee ${fmtMoney(selectedResult.quote?.platformFee)}`}
               </div>
 
               <div className="section-card">
                 <div className="section-title">Guest Details</div>
+                {searchMode === 'RENTAL' && selectedResult?.additionalServices?.length ? (
+                  <div className="stack" style={{ marginBottom: 18 }}>
+                    <div>
+                      <div className="section-title" style={{ fontSize: 16 }}>Additional Services</div>
+                      <p className="ui-muted">Add optional extras before the customer creates the reservation.</p>
+                    </div>
+                    <div className="stack">
+                      {selectedResult.additionalServices.map((service) => {
+                        const serviceState = selectedServices[service.serviceId] || {
+                          selected: !!service.mandatory,
+                          quantity: Math.max(1, Number(service.quantity || 1) || 1)
+                        };
+                        const serviceTotal = service.pricingMode === 'PER_DAY'
+                          ? Number(service.rate || 0) * Number(selectedResult?.quote?.days || 1) * Number(serviceState.quantity || 1)
+                          : Number(service.rate || 0) * Number(serviceState.quantity || 1);
+                        return (
+                          <div key={service.serviceId} className="surface-note" style={{ display: 'grid', gap: 12 }}>
+                            <div className="row-between" style={{ alignItems: 'start', gap: 12 }}>
+                              <div className="stack" style={{ gap: 4 }}>
+                                <strong>{service.name}</strong>
+                                {service.description ? <span className="ui-muted">{service.description}</span> : null}
+                                <span className="eyebrow">
+                                  {service.pricingMode === 'PER_DAY'
+                                    ? `${fmtMoney(service.rate)} / ${service.unitLabel.toLowerCase()} / day`
+                                    : `${fmtMoney(service.rate)} / ${service.unitLabel.toLowerCase()}`}
+                                  {service.taxable ? ' · Taxable' : ''}
+                                  {service.mandatory ? ' · Required' : ''}
+                                </span>
+                              </div>
+                              <label style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+                                <input
+                                  type="checkbox"
+                                  checked={!!serviceState.selected || !!service.mandatory}
+                                  disabled={!!service.mandatory}
+                                  onChange={(event) => {
+                                    const checked = event.target.checked;
+                                    setSelectedServices((current) => ({
+                                      ...current,
+                                      [service.serviceId]: {
+                                        selected: checked,
+                                        quantity: Math.max(1, Number(current[service.serviceId]?.quantity ?? service.quantity ?? 1) || 1)
+                                      }
+                                    }));
+                                  }}
+                                />
+                                <span>{service.mandatory ? 'Included' : 'Add service'}</span>
+                              </label>
+                            </div>
+                            <div className="form-grid-3">
+                              <div>
+                                <div className="label">Quantity</div>
+                                <input
+                                  type="number"
+                                  min="1"
+                                  value={serviceState.quantity}
+                                  disabled={!serviceState.selected && !service.mandatory}
+                                  onChange={(event) => {
+                                    const quantity = Math.max(1, Number(event.target.value || 1) || 1);
+                                    setSelectedServices((current) => ({
+                                      ...current,
+                                      [service.serviceId]: {
+                                        selected: current[service.serviceId]?.selected ?? !!service.mandatory,
+                                        quantity
+                                      }
+                                    }));
+                                  }}
+                                />
+                              </div>
+                              <div>
+                                <div className="label">Billing</div>
+                                <input
+                                  value={service.pricingMode === 'PER_DAY' ? `Per day x ${selectedResult?.quote?.days || 1} day(s)` : 'Flat'}
+                                  disabled
+                                />
+                              </div>
+                              <div>
+                                <div className="label">Service Total</div>
+                                <input value={fmtMoney(serviceTotal)} disabled />
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                ) : null}
+
                 <div className="form-grid-2">
                   <div>
                     <div className="label">First Name</div>
@@ -450,6 +589,12 @@ export default function PublicBookingPage() {
                             returnLocationId,
                             vehicleTypeId: searchMode === 'RENTAL' ? selectedResult?.vehicleType?.id : null,
                             listingId: searchMode === 'CAR_SHARING' ? selectedResult?.id : null,
+                            additionalServices: searchMode === 'RENTAL'
+                              ? chosenAdditionalServices.map((service) => ({
+                                  serviceId: service.serviceId,
+                                  quantity: service.quantity
+                                }))
+                              : [],
                             customer: checkoutState
                           })
                         });
@@ -467,6 +612,14 @@ export default function PublicBookingPage() {
                     {submitting ? 'Creating Booking...' : `Create ${searchMode === 'RENTAL' ? 'Reservation' : 'Trip'} Request`}
                   </button>
                 </div>
+                {searchMode === 'RENTAL' ? (
+                  <div className="surface-note">
+                    Base trip total {fmtMoney(selectedResult?.quote?.estimatedTripTotal)}.
+                    {chosenAdditionalServicesTotal
+                      ? ` With add-ons: ${fmtMoney(checkoutEstimatedTotal)}.`
+                      : ' Additional services will be reflected here before checkout.'}
+                  </div>
+                ) : null}
               </div>
             </div>
           </section>

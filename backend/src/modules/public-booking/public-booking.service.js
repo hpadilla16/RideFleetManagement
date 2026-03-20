@@ -61,7 +61,20 @@ export const publicBookingService = {
           depositBasis: [],
           securityDepositRequired: !!result.deposit?.securityDepositRequired,
           securityDepositAmount: money(result.deposit?.securityDepositAmount)
-        }
+        },
+        additionalServices: (result.additionalServices || []).map((service) => ({
+          serviceId: service.serviceId,
+          code: service.code,
+          name: service.name,
+          description: service.description || '',
+          unitLabel: service.unitLabel || 'Unit',
+          pricingMode: service.pricingMode || 'FLAT',
+          quantity: Number(service.quantity || 1),
+          rate: money(service.rate),
+          total: money(service.total),
+          taxable: !!service.taxable,
+          mandatory: !!service.mandatory
+        }))
       }))
     };
   },

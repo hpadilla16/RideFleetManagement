@@ -83,6 +83,19 @@ export default function PublicBookingConfirmationPage() {
                   : `Reservation estimate ${fmtMoney(confirmation.reservation?.estimatedTotal)} · Status ${confirmation.reservation?.status || '-'}`
                 }
               </div>
+              {confirmation.bookingType === 'RENTAL' && confirmation.additionalServices?.length ? (
+                <div className="surface-note">
+                  <strong>Additional Services</strong>
+                  <div className="stack" style={{ marginTop: 10 }}>
+                    {confirmation.additionalServices.map((service) => (
+                      <div key={service.serviceId || service.name} className="row-between" style={{ gap: 12 }}>
+                        <span>{service.name} x {service.quantity}</span>
+                        <strong>{fmtMoney(service.total)}</strong>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ) : null}
               {confirmation.reservation ? (
                 <div className="surface-note">
                   Reservation workflow: <strong>{confirmation.reservation.reservationNumber}</strong>

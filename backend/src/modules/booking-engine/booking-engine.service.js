@@ -42,6 +42,43 @@ function money(value) {
   return Number(Number(value || 0).toFixed(2));
 }
 
+function parseJsonArray(value) {
+  try {
+    const parsed = typeof value === 'string' ? JSON.parse(value) : value;
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+function isServiceEligibleForVehicleType(service, vehicleTypeId) {
+  if (!vehicleTypeId) return true;
+  if (service?.allVehicleTypes) return true;
+  const ids = parseJsonArray(service?.vehicleTypeIds).map(String);
+  return ids.includes(String(vehicleTypeId));
+}
+
+function computeAdditionalServiceLine(service, days, quantityOverride) {
+  const qty = Math.max(1, Number(quantityOverride ?? service?.defaultQty ?? 1) || 1);
+  const perDay = Number(service?.dailyRate || 0);
+  const rate = perDay > 0 ? perDay : Number(service?.rate || 0);
+  const total = perDay > 0 ? perDay * days * qty : Number(service?.rate || 0) * qty;
+  return {
+    serviceId: service.id,
+    code: service.code || null,
+    name: service.name,
+    description: service.description || '',
+    chargeType: service.chargeType || 'UNIT',
+    unitLabel: service.unitLabel || 'Unit',
+    pricingMode: perDay > 0 ? 'PER_DAY' : 'FLAT',
+    quantity: qty,
+    rate: money(rate),
+    total: money(total),
+    taxable: !!service.taxable,
+    mandatory: !!service.mandatory
+  };
+}
+
 function generateReservationNumber(prefix = 'WEB') {
   return `${prefix}-${Date.now().toString().slice(-8)}${crypto.randomBytes(2).toString('hex').toUpperCase()}`;
 }
@@ -139,6 +176,25 @@ async function issueCustomerInfoRequest(reservation) {
   }
 
   return { link, expiresAt, emailSent, warning };
+}
+
+async function listPublicAdditionalServices({ tenantId, locationId, vehicleTypeId, days }) {
+  const services = await prisma.additionalService.findMany({
+    where: {
+      tenantId,
+      isActive: true,
+      displayOnline: true,
+      OR: [
+        { locationId: null },
+        ...(locationId ? [{ locationId }] : [])
+      ]
+    },
+    orderBy: [{ sortOrder: 'asc' }, { name: 'asc' }]
+  });
+
+  return services
+    .filter((service) => isServiceEligibleForVehicleType(service, vehicleTypeId))
+    .map((service) => computeAdditionalServiceLine(service, days, service.defaultQty));
 }
 
 function depositSnapshot({ location, quote, addOnsTotal = 0 }) {
@@ -339,6 +395,7 @@ export const bookingEngineService = {
     }
     if (!pickupLocationId) throw new Error('pickupLocationId is required');
 
+    const rentalDays = ceilTripDays(pickupDate, returnDate);
     const [vehicleTypes, location] = await Promise.all([
       prisma.vehicleType.findMany({
         where: { tenantId: tenant.id },
@@ -371,6 +428,12 @@ export const bookingEngineService = {
 
       if (!quote) continue;
 
+      const additionalServices = await listPublicAdditionalServices({
+        tenantId: tenant.id,
+        locationId: location.id,
+        vehicleTypeId: vehicleType.id,
+        days: rentalDays
+      });
       const taxes = money(Number(quote.baseTotal || 0) * (Number(location.taxRate || 0) / 100));
       const total = money(Number(quote.baseTotal || 0) + taxes);
       results.push({
@@ -393,7 +456,8 @@ export const bookingEngineService = {
           gracePeriodMin: Number(quote.gracePeriodMin || 0),
           source: quote.source || 'GLOBAL'
         },
-        deposit: depositSnapshot({ location, quote })
+        deposit: depositSnapshot({ location, quote }),
+        additionalServices
       });
     }
 
@@ -555,6 +619,27 @@ export const bookingEngineService = {
       const selected = (search.results || []).find((row) => row.vehicleType?.id === String(input?.vehicleTypeId || ''));
       if (!selected) throw new Error('Selected rental vehicle type is no longer available');
       if (!selected.availability?.available) throw new Error('Selected rental vehicle type is sold out for those dates');
+      const requestedServices = Array.isArray(input?.additionalServices) ? input.additionalServices : [];
+      const chosenServices = requestedServices
+        .map((row) => {
+          const serviceId = String(row?.serviceId || '').trim();
+          const match = (selected.additionalServices || []).find((service) => service.serviceId === serviceId);
+          if (!match) return null;
+          return {
+            ...match,
+            quantity: Math.max(1, Number(row?.quantity ?? match.quantity ?? 1) || 1)
+          };
+        })
+        .filter(Boolean);
+
+      const normalizedChosenServices = chosenServices.map((service) => ({
+        ...service,
+        total: service.pricingMode === 'PER_DAY'
+          ? money(Number(service.rate || 0) * Number(selected.quote?.days || 1) * Number(service.quantity || 1))
+          : money(Number(service.rate || 0) * Number(service.quantity || 1))
+      }));
+      const addOnsTotal = money(normalizedChosenServices.reduce((sum, service) => sum + Number(service.total || 0), 0));
+      const estimatedTotal = money(Number(selected.quote.total || 0) + addOnsTotal);
 
       const reservation = await reservationsService.create({
         reservationNumber: generateReservationNumber('WEB'),
@@ -567,7 +652,7 @@ export const bookingEngineService = {
         pickupLocationId: input.pickupLocationId,
         returnLocationId: input.returnLocationId || input.pickupLocationId,
         dailyRate: selected.quote.dailyRate,
-        estimatedTotal: selected.quote.total,
+        estimatedTotal,
         paymentStatus: 'PENDING',
         sendConfirmationEmail: false,
         notes: '[PUBLIC BOOKING] Created from booking web'
@@ -600,6 +685,25 @@ export const bookingEngineService = {
         }
       });
 
+      if (normalizedChosenServices.length) {
+        await prisma.reservationCharge.createMany({
+          data: normalizedChosenServices.map((service, idx) => ({
+            reservationId: reservation.id,
+            code: service.code,
+            name: service.name,
+            chargeType: service.chargeType || 'UNIT',
+            quantity: Number(service.quantity || 1),
+            rate: Number(service.rate || 0),
+            total: Number(service.total || 0),
+            taxable: !!service.taxable,
+            selected: true,
+            sortOrder: idx,
+            source: 'ADDITIONAL_SERVICE',
+            sourceRefId: service.serviceId
+          }))
+        });
+      }
+
       const nextActions = await issueCustomerInfoRequest(reservation);
       return {
         bookingType: 'RENTAL',
@@ -615,10 +719,11 @@ export const bookingEngineService = {
           id: reservation.id,
           reservationNumber: reservation.reservationNumber,
           status: reservation.status,
-          estimatedTotal: money(reservation.estimatedTotal),
+          estimatedTotal: estimatedTotal,
           pickupAt: reservation.pickupAt,
           returnAt: reservation.returnAt
         },
+        additionalServices: normalizedChosenServices,
         nextActions
       };
     }
