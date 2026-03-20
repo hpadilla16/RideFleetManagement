@@ -37,6 +37,25 @@ function buildServiceSelectionState(result, mode) {
   );
 }
 
+function buildInsuranceSelectionState(result, mode) {
+  if (mode !== 'RENTAL') {
+    return {
+      selectedPlanCode: '',
+      declinedCoverage: false,
+      usingOwnInsurance: false,
+      liabilityAccepted: false,
+      ownPolicyNumber: ''
+    };
+  }
+  return {
+    selectedPlanCode: '',
+    declinedCoverage: false,
+    usingOwnInsurance: false,
+    liabilityAccepted: false,
+    ownPolicyNumber: ''
+  };
+}
+
 function BookingCard({ title, subtitle, meta, quote, cta, onClick }) {
   return (
     <article className="glass card section-card">
@@ -86,6 +105,7 @@ export default function PublicBookingPage() {
   });
   const [submitting, setSubmitting] = useState(false);
   const [selectedServices, setSelectedServices] = useState({});
+  const [insuranceSelection, setInsuranceSelection] = useState(buildInsuranceSelectionState(null, 'RENTAL'));
 
   const loadBootstrap = async (slug) => {
     setLoadingBootstrap(true);
@@ -121,9 +141,11 @@ export default function PublicBookingPage() {
   useEffect(() => {
     if (!selectedResult) {
       setSelectedServices({});
+      setInsuranceSelection(buildInsuranceSelectionState(null, searchMode));
       return;
     }
     setSelectedServices(buildServiceSelectionState(selectedResult, searchMode));
+    setInsuranceSelection(buildInsuranceSelectionState(selectedResult, searchMode));
   }, [selectedResult, searchMode]);
 
   const selectedTenant = bootstrap?.selectedTenant || null;
@@ -160,13 +182,25 @@ export default function PublicBookingPage() {
     [chosenAdditionalServices]
   );
 
+  const selectedInsurancePlan = useMemo(() => {
+    if (searchMode !== 'RENTAL') return null;
+    const code = String(insuranceSelection.selectedPlanCode || '').trim().toUpperCase();
+    if (!code) return null;
+    return (selectedResult?.insurancePlans || []).find((plan) => String(plan.code || '').trim().toUpperCase() === code) || null;
+  }, [insuranceSelection.selectedPlanCode, searchMode, selectedResult]);
+
+  const selectedInsuranceTotal = useMemo(
+    () => Number(selectedInsurancePlan?.total || 0),
+    [selectedInsurancePlan]
+  );
+
   const checkoutEstimatedTotal = useMemo(() => {
     if (!selectedResult) return 0;
     const baseTotal = searchMode === 'RENTAL'
       ? Number(selectedResult?.quote?.estimatedTripTotal || 0)
       : Number(selectedResult?.quote?.total || 0);
-    return baseTotal + chosenAdditionalServicesTotal;
-  }, [chosenAdditionalServicesTotal, searchMode, selectedResult]);
+    return baseTotal + chosenAdditionalServicesTotal + selectedInsuranceTotal;
+  }, [chosenAdditionalServicesTotal, searchMode, selectedInsuranceTotal, selectedResult]);
 
   const runSearch = async () => {
     if (!tenantSlug) {
@@ -443,12 +477,106 @@ export default function PublicBookingPage() {
                   : `${selectedResult.vehicle?.label || ''} · ${fmtMoney(selectedResult.quote?.total)} projected total`}
                 <br />
                 {searchMode === 'RENTAL'
-                  ? `Deposit due now: ${fmtMoney(selectedResult.quote?.depositAmountDue)}${chosenAdditionalServicesTotal ? ` · Add-ons ${fmtMoney(chosenAdditionalServicesTotal)}` : ''}`
+                  ? `Deposit due now: ${fmtMoney(selectedResult.quote?.depositAmountDue)}${chosenAdditionalServicesTotal ? ` · Add-ons ${fmtMoney(chosenAdditionalServicesTotal)}` : ''}${selectedInsuranceTotal ? ` · Insurance ${fmtMoney(selectedInsuranceTotal)}` : ''}`
                   : `Host earns ${fmtMoney(selectedResult.quote?.hostEarnings)} · Platform fee ${fmtMoney(selectedResult.quote?.platformFee)}`}
               </div>
 
               <div className="section-card">
                 <div className="section-title">Guest Details</div>
+                {searchMode === 'RENTAL' ? (
+                  <div className="stack" style={{ marginBottom: 18 }}>
+                    <div>
+                      <div className="section-title" style={{ fontSize: 16 }}>Insurance</div>
+                      <p className="ui-muted">Choose one of our protection plans or certify that you will use your own insurance and accept responsibility and liability.</p>
+                    </div>
+                    {selectedResult?.insurancePlans?.length ? (
+                      <div className="stack">
+                        <div className="form-grid-2">
+                          <div>
+                            <div className="label">Our Insurance Plan</div>
+                            <select
+                              value={insuranceSelection.selectedPlanCode}
+                              onChange={(event) => {
+                                const code = event.target.value;
+                                setInsuranceSelection((current) => ({
+                                  ...current,
+                                  selectedPlanCode: code,
+                                  declinedCoverage: false,
+                                  usingOwnInsurance: false,
+                                  liabilityAccepted: false
+                                }));
+                              }}
+                            >
+                              <option value="">Select a protection plan</option>
+                              {selectedResult.insurancePlans.map((plan) => (
+                                <option key={plan.code} value={plan.code}>
+                                  {plan.name} ({plan.chargeBy === 'PER_DAY' ? `${fmtMoney(plan.amount)}/day` : plan.chargeBy === 'PERCENTAGE' ? `${plan.amount}%` : fmtMoney(plan.amount)})
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+                          <div>
+                            <div className="label">Insurance Total</div>
+                            <input value={selectedInsurancePlan ? fmtMoney(selectedInsurancePlan.total) : '$0.00'} disabled />
+                          </div>
+                        </div>
+                        {selectedInsurancePlan?.description ? (
+                          <div className="surface-note">{selectedInsurancePlan.description}</div>
+                        ) : null}
+                      </div>
+                    ) : (
+                      <div className="surface-note">
+                        No house insurance plans are currently configured for this rental. The customer must proceed using their own insurance.
+                      </div>
+                    )}
+
+                    <div className="surface-note" style={{ display: 'grid', gap: 10 }}>
+                      <strong>Decline Our Insurance</strong>
+                      <label style={{ display: 'inline-flex', gap: 8, alignItems: 'center' }}>
+                        <input
+                          type="checkbox"
+                          checked={insuranceSelection.declinedCoverage}
+                          onChange={(event) => {
+                            const checked = event.target.checked;
+                            setInsuranceSelection((current) => ({
+                              ...current,
+                              selectedPlanCode: checked ? '' : current.selectedPlanCode,
+                              declinedCoverage: checked
+                            }));
+                          }}
+                        />
+                        <span>I decline the company insurance offered for this rental.</span>
+                      </label>
+                      <label style={{ display: 'inline-flex', gap: 8, alignItems: 'center' }}>
+                        <input
+                          type="checkbox"
+                          checked={insuranceSelection.usingOwnInsurance}
+                          onChange={(event) => setInsuranceSelection((current) => ({ ...current, usingOwnInsurance: event.target.checked }))}
+                          disabled={!insuranceSelection.declinedCoverage}
+                        />
+                        <span>I confirm I will use my own insurance coverage for this rental.</span>
+                      </label>
+                      <label style={{ display: 'inline-flex', gap: 8, alignItems: 'center' }}>
+                        <input
+                          type="checkbox"
+                          checked={insuranceSelection.liabilityAccepted}
+                          onChange={(event) => setInsuranceSelection((current) => ({ ...current, liabilityAccepted: event.target.checked }))}
+                          disabled={!insuranceSelection.declinedCoverage}
+                        />
+                        <span>I accept responsibility and liability if I decline your insurance coverage.</span>
+                      </label>
+                      <div>
+                        <div className="label">Own Insurance Policy Number</div>
+                        <input
+                          value={insuranceSelection.ownPolicyNumber}
+                          onChange={(event) => setInsuranceSelection((current) => ({ ...current, ownPolicyNumber: event.target.value }))}
+                          placeholder="Optional but recommended if using your own policy"
+                          disabled={!insuranceSelection.declinedCoverage}
+                        />
+                      </div>
+                    </div>
+                  </div>
+                ) : null}
                 {searchMode === 'RENTAL' && selectedResult?.additionalServices?.length ? (
                   <div className="stack" style={{ marginBottom: 18 }}>
                     <div>
@@ -575,6 +703,12 @@ export default function PublicBookingPage() {
                     type="button"
                     disabled={submitting}
                     onClick={async () => {
+                      if (searchMode === 'RENTAL' && !selectedInsurancePlan) {
+                        if (!(insuranceSelection.declinedCoverage && insuranceSelection.usingOwnInsurance && insuranceSelection.liabilityAccepted)) {
+                          setError('Choose one of our insurance plans or certify that you are declining it, using your own insurance, and accepting responsibility and liability.');
+                          return;
+                        }
+                      }
                       setSubmitting(true);
                       setError('');
                       try {
@@ -595,6 +729,15 @@ export default function PublicBookingPage() {
                                   quantity: service.quantity
                                 }))
                               : [],
+                            insuranceSelection: searchMode === 'RENTAL'
+                              ? {
+                                  selectedPlanCode: selectedInsurancePlan?.code || '',
+                                  declinedCoverage: !!insuranceSelection.declinedCoverage,
+                                  usingOwnInsurance: !!insuranceSelection.usingOwnInsurance,
+                                  liabilityAccepted: !!insuranceSelection.liabilityAccepted,
+                                  ownPolicyNumber: insuranceSelection.ownPolicyNumber || ''
+                                }
+                              : null,
                             customer: checkoutState
                           })
                         });
@@ -615,9 +758,9 @@ export default function PublicBookingPage() {
                 {searchMode === 'RENTAL' ? (
                   <div className="surface-note">
                     Base trip total {fmtMoney(selectedResult?.quote?.estimatedTripTotal)}.
-                    {chosenAdditionalServicesTotal
-                      ? ` With add-ons: ${fmtMoney(checkoutEstimatedTotal)}.`
-                      : ' Additional services will be reflected here before checkout.'}
+                    {chosenAdditionalServicesTotal || selectedInsuranceTotal
+                      ? ` With extras and insurance: ${fmtMoney(checkoutEstimatedTotal)}.`
+                      : ' Additional services and insurance will be reflected here before checkout.'}
                   </div>
                 ) : null}
               </div>

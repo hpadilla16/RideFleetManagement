@@ -74,6 +74,17 @@ export const publicBookingService = {
           total: money(service.total),
           taxable: !!service.taxable,
           mandatory: !!service.mandatory
+        })),
+        insurancePlans: (result.insurancePlans || []).map((plan) => ({
+          code: plan.code,
+          name: plan.name,
+          description: plan.description || '',
+          chargeBy: plan.chargeBy || 'FIXED',
+          amount: money(plan.amount),
+          quantity: Number(plan.quantity || 1),
+          rate: money(plan.rate),
+          total: money(plan.total),
+          taxable: !!plan.taxable
         }))
       }))
     };

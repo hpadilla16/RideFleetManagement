@@ -197,6 +197,48 @@ async function listPublicAdditionalServices({ tenantId, locationId, vehicleTypeI
     .map((service) => computeAdditionalServiceLine(service, days, service.defaultQty));
 }
 
+function computeInsuranceLine(plan, baseAmount, days) {
+  const label = plan?.label || plan?.name || plan?.code || 'Insurance';
+  const mode = String(plan?.chargeBy || plan?.mode || 'FIXED').toUpperCase();
+  const amount = Number(plan?.amount || 0);
+  let quantity = 1;
+  let rate = amount;
+  let total = amount;
+  if (mode === 'PER_DAY') {
+    quantity = Math.max(1, Number(days || 1));
+    total = amount * quantity;
+  } else if (mode === 'PERCENTAGE') {
+    quantity = 1;
+    total = Number(baseAmount || 0) * (amount / 100);
+    rate = total;
+  }
+  return {
+    code: String(plan?.code || '').trim(),
+    name: label,
+    description: plan?.description || '',
+    chargeBy: mode,
+    amount: money(amount),
+    taxable: !!plan?.taxable,
+    quantity,
+    rate: money(rate),
+    total: money(total)
+  };
+}
+
+async function listPublicInsurancePlans({ tenantId, locationId, vehicleTypeId, baseAmount, days }) {
+  const plans = await settingsService.getInsurancePlans({ tenantId });
+  return (Array.isArray(plans) ? plans : [])
+    .filter((plan) => {
+      if (plan?.isActive === false) return false;
+      const locationIds = Array.isArray(plan?.locationIds) ? plan.locationIds.map(String) : [];
+      const vehicleTypeIds = Array.isArray(plan?.vehicleTypeIds) ? plan.vehicleTypeIds.map(String) : [];
+      if (locationIds.length && locationId && !locationIds.includes(String(locationId))) return false;
+      if (vehicleTypeIds.length && vehicleTypeId && !vehicleTypeIds.includes(String(vehicleTypeId))) return false;
+      return true;
+    })
+    .map((plan) => computeInsuranceLine(plan, baseAmount, days));
+}
+
 function depositSnapshot({ location, quote, addOnsTotal = 0 }) {
   const cfg = parseLocationConfig(location?.locationConfig);
   const requireDeposit = !!cfg?.requireDeposit;
@@ -428,12 +470,21 @@ export const bookingEngineService = {
 
       if (!quote) continue;
 
-      const additionalServices = await listPublicAdditionalServices({
-        tenantId: tenant.id,
-        locationId: location.id,
-        vehicleTypeId: vehicleType.id,
-        days: rentalDays
-      });
+      const [additionalServices, insurancePlans] = await Promise.all([
+        listPublicAdditionalServices({
+          tenantId: tenant.id,
+          locationId: location.id,
+          vehicleTypeId: vehicleType.id,
+          days: rentalDays
+        }),
+        listPublicInsurancePlans({
+          tenantId: tenant.id,
+          locationId: location.id,
+          vehicleTypeId: vehicleType.id,
+          baseAmount: Number(quote.baseTotal || 0),
+          days: rentalDays
+        })
+      ]);
       const taxes = money(Number(quote.baseTotal || 0) * (Number(location.taxRate || 0) / 100));
       const total = money(Number(quote.baseTotal || 0) + taxes);
       results.push({
@@ -457,7 +508,8 @@ export const bookingEngineService = {
           source: quote.source || 'GLOBAL'
         },
         deposit: depositSnapshot({ location, quote }),
-        additionalServices
+        additionalServices,
+        insurancePlans
       });
     }
 
@@ -619,6 +671,19 @@ export const bookingEngineService = {
       const selected = (search.results || []).find((row) => row.vehicleType?.id === String(input?.vehicleTypeId || ''));
       if (!selected) throw new Error('Selected rental vehicle type is no longer available');
       if (!selected.availability?.available) throw new Error('Selected rental vehicle type is sold out for those dates');
+      const insuranceSelection = input?.insuranceSelection || {};
+      const selectedInsuranceCode = String(insuranceSelection?.selectedPlanCode || '').trim();
+      const selectedInsurancePlan = selectedInsuranceCode
+        ? (selected.insurancePlans || []).find((plan) => String(plan.code || '').trim().toUpperCase() === selectedInsuranceCode.toUpperCase())
+        : null;
+      const declinedCoverage = !!insuranceSelection?.declinedCoverage;
+      const usingOwnInsurance = !!insuranceSelection?.usingOwnInsurance;
+      const liabilityAccepted = !!insuranceSelection?.liabilityAccepted;
+      if (!selectedInsurancePlan) {
+        if (!(declinedCoverage && usingOwnInsurance && liabilityAccepted)) {
+          throw new Error('Select one of our insurance plans or accept responsibility and confirm you will use your own insurance');
+        }
+      }
       const requestedServices = Array.isArray(input?.additionalServices) ? input.additionalServices : [];
       const chosenServices = requestedServices
         .map((row) => {
@@ -638,8 +703,16 @@ export const bookingEngineService = {
           ? money(Number(service.rate || 0) * Number(selected.quote?.days || 1) * Number(service.quantity || 1))
           : money(Number(service.rate || 0) * Number(service.quantity || 1))
       }));
+      const insuranceLine = selectedInsurancePlan
+        ? {
+            ...selectedInsurancePlan,
+            source: 'INSURANCE',
+            sourceRefId: selectedInsurancePlan.code
+          }
+        : null;
+      const insuranceTotal = money(Number(insuranceLine?.total || 0));
       const addOnsTotal = money(normalizedChosenServices.reduce((sum, service) => sum + Number(service.total || 0), 0));
-      const estimatedTotal = money(Number(selected.quote.total || 0) + addOnsTotal);
+      const estimatedTotal = money(Number(selected.quote.total || 0) + addOnsTotal + insuranceTotal);
 
       const reservation = await reservationsService.create({
         reservationNumber: generateReservationNumber('WEB'),
@@ -664,6 +737,8 @@ export const bookingEngineService = {
           reservationId: reservation.id,
           dailyRate: selected.quote.dailyRate,
           taxRate: Number(search.location?.taxRate || 0),
+          selectedInsuranceCode: insuranceLine?.code || null,
+          selectedInsuranceName: insuranceLine?.name || null,
           depositRequired: !!selected.deposit?.required,
           depositMode: selected.deposit?.mode || null,
           depositValue: selected.deposit?.value ?? null,
@@ -675,6 +750,8 @@ export const bookingEngineService = {
         update: {
           dailyRate: selected.quote.dailyRate,
           taxRate: Number(search.location?.taxRate || 0),
+          selectedInsuranceCode: insuranceLine?.code || null,
+          selectedInsuranceName: insuranceLine?.name || null,
           depositRequired: !!selected.deposit?.required,
           depositMode: selected.deposit?.mode || null,
           depositValue: selected.deposit?.value ?? null,
@@ -685,22 +762,54 @@ export const bookingEngineService = {
         }
       });
 
-      if (normalizedChosenServices.length) {
+      if (normalizedChosenServices.length || insuranceLine) {
         await prisma.reservationCharge.createMany({
-          data: normalizedChosenServices.map((service, idx) => ({
-            reservationId: reservation.id,
-            code: service.code,
-            name: service.name,
-            chargeType: service.chargeType || 'UNIT',
-            quantity: Number(service.quantity || 1),
-            rate: Number(service.rate || 0),
-            total: Number(service.total || 0),
-            taxable: !!service.taxable,
-            selected: true,
-            sortOrder: idx,
-            source: 'ADDITIONAL_SERVICE',
-            sourceRefId: service.serviceId
-          }))
+          data: [
+            ...normalizedChosenServices.map((service, idx) => ({
+              reservationId: reservation.id,
+              code: service.code,
+              name: service.name,
+              chargeType: service.chargeType || 'UNIT',
+              quantity: Number(service.quantity || 1),
+              rate: Number(service.rate || 0),
+              total: Number(service.total || 0),
+              taxable: !!service.taxable,
+              selected: true,
+              sortOrder: idx,
+              source: 'ADDITIONAL_SERVICE',
+              sourceRefId: service.serviceId
+            })),
+            ...(insuranceLine ? [{
+              reservationId: reservation.id,
+              code: insuranceLine.code,
+              name: `Insurance: ${insuranceLine.name}`,
+              chargeType: 'UNIT',
+              quantity: Number(insuranceLine.quantity || 1),
+              rate: Number(insuranceLine.rate || 0),
+              total: Number(insuranceLine.total || 0),
+              taxable: !!insuranceLine.taxable,
+              selected: true,
+              sortOrder: normalizedChosenServices.length,
+              source: 'INSURANCE',
+              sourceRefId: insuranceLine.code
+            }] : [])
+          ]
+        });
+      }
+
+      if (!insuranceLine && (declinedCoverage || usingOwnInsurance || liabilityAccepted)) {
+        const waiverNote = `[PUBLIC BOOKING INSURANCE WAIVER ${new Date().toISOString()}] Customer declined house insurance, confirmed use of their own insurance, and accepted responsibility/liability.${insuranceSelection?.ownPolicyNumber ? ` Policy: ${String(insuranceSelection.ownPolicyNumber).trim()}` : ''}`;
+        await prisma.reservation.update({
+          where: { id: reservation.id },
+          data: {
+            notes: reservation.notes ? `${reservation.notes}\n${waiverNote}` : waiverNote
+          }
+        });
+        await prisma.customer.update({
+          where: { id: customer.id },
+          data: {
+            insurancePolicyNumber: insuranceSelection?.ownPolicyNumber ? String(insuranceSelection.ownPolicyNumber).trim() : undefined
+          }
         });
       }
 
@@ -724,6 +833,17 @@ export const bookingEngineService = {
           returnAt: reservation.returnAt
         },
         additionalServices: normalizedChosenServices,
+        insuranceSelection: insuranceLine
+          ? {
+              type: 'PLAN',
+              code: insuranceLine.code,
+              name: insuranceLine.name,
+              total: insuranceLine.total
+            }
+          : {
+              type: 'OWN_POLICY',
+              ownPolicyNumber: insuranceSelection?.ownPolicyNumber ? String(insuranceSelection.ownPolicyNumber).trim() : ''
+            },
         nextActions
       };
     }

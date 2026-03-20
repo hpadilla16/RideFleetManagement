@@ -96,6 +96,16 @@ export default function PublicBookingConfirmationPage() {
                   </div>
                 </div>
               ) : null}
+              {confirmation.bookingType === 'RENTAL' && confirmation.insuranceSelection ? (
+                <div className="surface-note">
+                  <strong>Insurance Decision</strong>
+                  <div style={{ marginTop: 10 }}>
+                    {confirmation.insuranceSelection.type === 'PLAN'
+                      ? `${confirmation.insuranceSelection.name} · ${fmtMoney(confirmation.insuranceSelection.total)}`
+                      : `Customer declined company insurance, will use their own policy${confirmation.insuranceSelection.ownPolicyNumber ? ` (${confirmation.insuranceSelection.ownPolicyNumber})` : ''}, and accepted responsibility and liability.`}
+                  </div>
+                </div>
+              ) : null}
               {confirmation.reservation ? (
                 <div className="surface-note">
                   Reservation workflow: <strong>{confirmation.reservation.reservationNumber}</strong>
