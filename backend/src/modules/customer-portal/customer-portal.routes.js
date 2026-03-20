@@ -152,6 +152,21 @@ function portalTimelineEntry(key, label, at, status, description) {
   };
 }
 
+function customerPortalBaseUrl() {
+  return (process.env.CUSTOMER_PORTAL_BASE_URL || process.env.APP_BASE_URL || process.env.FRONTEND_BASE_URL || 'http://localhost:3000').replace(/\/$/, '');
+}
+
+function customerPortalPath(kind) {
+  if (kind === 'signature') return '/customer/sign-agreement';
+  if (kind === 'payment') return '/customer/pay';
+  return '/customer/precheckin';
+}
+
+function customerPortalLink(kind, token) {
+  if (!token) return null;
+  return `${customerPortalBaseUrl()}${customerPortalPath(kind)}?token=${encodeURIComponent(token)}`;
+}
+
 async function buildPortalSummary(reservation, kind, token) {
   const agreement = await latestAgreementForReservation(reservation.id);
   const payments = mergePayments(reservation, agreement);
@@ -259,8 +274,22 @@ async function buildPortalSummary(reservation, kind, token) {
         : agreementClosed
           ? 'Rental complete'
           : agreementActive
-            ? 'Agreement available for pickup'
-            : 'Wait for agreement generation';
+          ? 'Agreement available for pickup'
+          : 'Wait for agreement generation';
+  const links = {
+    customerInfo: customerPortalLink('customer-info', reservation.customerInfoToken),
+    signature: customerPortalLink('signature', reservation.signatureToken),
+    payment: customerPortalLink('payment', reservation.paymentRequestToken)
+  };
+  const nextStep = !customerInfoComplete
+    ? { key: 'customerInfo', label: 'Complete pre-check-in', link: links.customerInfo }
+    : !signatureComplete
+      ? { key: 'signature', label: 'Sign agreement', link: links.signature }
+      : !paymentComplete
+        ? { key: 'payment', label: 'Complete payment', link: links.payment }
+        : agreementActive
+          ? { key: 'agreement', label: 'Agreement ready for pickup', link: links.signature || links.customerInfo || links.payment || null }
+          : null;
 
   return {
     kind,
@@ -283,6 +312,8 @@ async function buildPortalSummary(reservation, kind, token) {
       statusLabel: paymentStatusLabel
     },
     documents: docs,
+    links,
+    nextStep,
     timeline,
     progress: {
       totalSteps: progressSteps.length,

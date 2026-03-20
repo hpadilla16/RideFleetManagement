@@ -88,6 +88,8 @@ export default function CustomerPayPage() {
   const paymentStatusLabel = model?.portal?.payment?.statusLabel || (Number(model?.amountDue || 0) > 0 ? 'Payment Pending' : 'Paid in Full');
   const balanceDue = Number(model?.portal?.payment?.balanceDue ?? model?.amountDue ?? 0);
   const fullyPaid = balanceDue <= 0;
+  const nextPortalStep = model?.portal?.nextStep;
+  const agreementDoc = (model?.portal?.documents || []).find((doc) => doc.key === 'agreement' && doc.available);
 
   const notices = (
     <div style={portalStyles.stack}>
@@ -170,6 +172,23 @@ export default function CustomerPayPage() {
               <div style={{ display: 'grid', gap: 10, color: '#55456f', lineHeight: 1.6 }}>
                 <div><strong>Your payment step is complete.</strong></div>
                 <div>You can stay on this portal to review the timeline, download your receipt, and continue with any remaining reservation steps.</div>
+                <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+                  {agreementDoc ? (
+                    <a
+                      href={`${API_BASE}${agreementDoc.downloadPath}`}
+                      target="_blank"
+                      rel="noreferrer"
+                      style={portalStyles.secondaryButton}
+                    >
+                      Download Signed Agreement
+                    </a>
+                  ) : null}
+                  {nextPortalStep?.key && nextPortalStep.key !== 'payment' && nextPortalStep.link ? (
+                    <a href={nextPortalStep.link} target="_blank" rel="noreferrer" style={portalStyles.secondaryButton}>
+                      Continue to {nextPortalStep.label}
+                    </a>
+                  ) : null}
+                </div>
               </div>
             ) : !success ? (
               <div style={{ display: 'grid', gap: 12 }}>
