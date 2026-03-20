@@ -27,7 +27,7 @@ function roleLabel(role) {
 
 async function sendInviteEmail({ email, fullName, tempPassword, tenantName, role }) {
   if (!email || !tempPassword) return;
-  const loginUrl = `${appBaseUrl()}/login`;
+  const loginUrl = `${appBaseUrl()}`;
   const displayName = fullName || email;
   const subject = `${tenantName || 'Ride Fleet'} access invitation`;
   const text = [
