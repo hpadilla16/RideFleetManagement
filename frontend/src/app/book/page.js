@@ -104,8 +104,13 @@ export default function PublicBookingPage() {
     licenseState: ''
   });
   const [submitting, setSubmitting] = useState(false);
+  const [lookingUp, setLookingUp] = useState(false);
   const [selectedServices, setSelectedServices] = useState({});
   const [insuranceSelection, setInsuranceSelection] = useState(buildInsuranceSelectionState(null, 'RENTAL'));
+  const [lookupState, setLookupState] = useState({
+    reference: '',
+    email: ''
+  });
 
   const loadBootstrap = async (slug) => {
     setLoadingBootstrap(true);
@@ -398,6 +403,65 @@ export default function PublicBookingPage() {
                 No featured public car sharing listings yet. This tenant can still search rental inventory if online rates are configured.
               </div>
             )}
+          </div>
+        </section>
+
+        <section className="glass card-lg section-card">
+          <div className="row-between">
+            <div>
+              <div className="section-title">Find Existing Booking</div>
+              <p className="ui-muted">Guests can resume a rental reservation or car sharing trip with their reference and email, even if they changed devices.</p>
+            </div>
+            <span className="status-chip neutral">Resume Flow</span>
+          </div>
+          <div className="form-grid-2">
+            <div>
+              <div className="label">Reference</div>
+              <input
+                value={lookupState.reference}
+                onChange={(event) => setLookupState((current) => ({ ...current, reference: event.target.value }))}
+                placeholder="Reservation number or trip code"
+              />
+            </div>
+            <div>
+              <div className="label">Email</div>
+              <input
+                type="email"
+                value={lookupState.email}
+                onChange={(event) => setLookupState((current) => ({ ...current, email: event.target.value }))}
+                placeholder="guest@email.com"
+              />
+            </div>
+          </div>
+          <div className="inline-actions">
+            <button
+              type="button"
+              disabled={lookingUp}
+              onClick={async () => {
+                setLookingUp(true);
+                setError('');
+                try {
+                  const payload = await api('/api/public/booking/lookup', {
+                    method: 'POST',
+                    body: JSON.stringify({
+                      tenantSlug,
+                      reference: lookupState.reference,
+                      email: lookupState.email
+                    })
+                  });
+                  if (typeof window !== 'undefined') {
+                    sessionStorage.setItem('fleet_public_booking_confirmation', JSON.stringify(payload));
+                  }
+                  router.push('/book/confirmation');
+                } catch (err) {
+                  setError(err.message);
+                } finally {
+                  setLookingUp(false);
+                }
+              }}
+            >
+              {lookingUp ? 'Finding Booking...' : 'Find My Booking'}
+            </button>
           </div>
         </section>
 

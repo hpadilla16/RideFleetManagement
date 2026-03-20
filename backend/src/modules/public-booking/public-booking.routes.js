@@ -50,3 +50,15 @@ publicBookingRouter.post('/checkout', async (req, res, next) => {
     next(error);
   }
 });
+
+publicBookingRouter.post('/lookup', async (req, res, next) => {
+  try {
+    const payload = await publicBookingService.lookupBooking(req.body || {});
+    res.json(payload);
+  } catch (error) {
+    if (/required|not found/i.test(String(error?.message || ''))) {
+      return res.status(400).json({ error: error.message });
+    }
+    next(error);
+  }
+});

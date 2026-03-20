@@ -127,5 +127,9 @@ export const publicBookingService = {
 
   async createBooking(input = {}) {
     return bookingEngineService.createPublicBooking(input);
+  },
+
+  async lookupBooking(input = {}) {
+    return bookingEngineService.lookupPublicBooking(input);
   }
 };

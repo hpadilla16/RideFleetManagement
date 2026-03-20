@@ -220,6 +220,27 @@ async function issueCustomerInfoRequest(reservation) {
   return issuePortalRequest('customer-info', reservation, { sendEmailToCustomer: true });
 }
 
+function existingPortalAction(kind, reservation) {
+  const { tokenField, expiresField } = tokenFieldMap(kind);
+  const token = reservation?.[tokenField];
+  const expiresAt = reservation?.[expiresField];
+  if (!token || !expiresAt) return null;
+  const expiresDate = new Date(expiresAt);
+  if (Number.isNaN(expiresDate.getTime()) || expiresDate.getTime() <= Date.now()) return null;
+  const base = process.env.CUSTOMER_PORTAL_BASE_URL || 'http://localhost:3000';
+  return {
+    kind,
+    link: `${base.replace(/\/$/, '')}${portalPathForKind(kind)}?token=${token}`,
+    expiresAt: expiresDate,
+    emailSent: false,
+    warning: null
+  };
+}
+
+async function ensurePortalRequest(kind, reservation) {
+  return existingPortalAction(kind, reservation) || issuePortalRequest(kind, reservation);
+}
+
 async function listPublicAdditionalServices({ tenantId, locationId, vehicleTypeId, days }) {
   const services = await prisma.additionalService.findMany({
     where: {
@@ -955,6 +976,131 @@ export const bookingEngineService = {
         reservationNumber: trip.reservation.reservationNumber,
         status: trip.reservation.status
       } : null,
+      nextActions
+    };
+  },
+
+  async lookupPublicBooking(input = {}) {
+    const reference = String(input?.reference || '').trim();
+    const email = String(input?.email || '').trim().toLowerCase();
+    const tenantSlug = String(input?.tenantSlug || '').trim();
+    if (!reference || !email) throw new Error('reference and email are required');
+
+    let tenantId = null;
+    if (tenantSlug) {
+      const tenant = await prisma.tenant.findFirst({
+        where: { slug: tenantSlug },
+        select: { id: true }
+      });
+      if (!tenant) throw new Error('Selected tenant not found');
+      tenantId = tenant.id;
+    }
+
+    const customerFilter = {
+      email: {
+        equals: email,
+        mode: 'insensitive'
+      }
+    };
+
+    let reservation = await prisma.reservation.findFirst({
+      where: {
+        ...(tenantId ? { tenantId } : {}),
+        reservationNumber: reference,
+        customer: customerFilter
+      },
+      include: {
+        customer: true
+      }
+    });
+
+    let trip = null;
+    if (!reservation) {
+      trip = await prisma.trip.findFirst({
+        where: {
+          ...(tenantId ? { tenantId } : {}),
+          tripCode: reference,
+          guestCustomer: customerFilter
+        },
+        include: {
+          guestCustomer: true,
+          reservation: true
+        }
+      });
+      reservation = trip?.reservation || null;
+    } else {
+      trip = await prisma.trip.findFirst({
+        where: { reservationId: reservation.id },
+        include: {
+          guestCustomer: true
+        }
+      });
+    }
+
+    if (!reservation && !trip) {
+      throw new Error('Booking not found for that reference and email');
+    }
+
+    const tenant = await prisma.tenant.findUnique({
+      where: { id: reservation?.tenantId || trip?.tenantId || tenantId },
+      select: { id: true, name: true, slug: true }
+    });
+
+    const customer = reservation?.customer || trip?.guestCustomer || null;
+    const nextActions = reservation
+      ? {
+          customerInfo: await ensurePortalRequest('customer-info', reservation),
+          ...(await (async () => {
+            const [signature, payment] = await Promise.all([
+              ensurePortalRequest('signature', reservation),
+              ensurePortalRequest('payment', reservation)
+            ]);
+            return {
+              signature,
+              payment,
+              primaryStep: 'customer-info'
+            };
+          })())
+        }
+      : {
+          customerInfo: { kind: 'customer-info', link: '', expiresAt: null, emailSent: false, warning: 'No linked reservation workflow found' },
+          signature: { kind: 'signature', link: '', expiresAt: null, emailSent: false, warning: 'No linked reservation workflow found' },
+          payment: { kind: 'payment', link: '', expiresAt: null, emailSent: false, warning: 'No linked reservation workflow found' },
+          primaryStep: 'customer-info'
+        };
+
+    return {
+      bookingType: trip ? 'CAR_SHARING' : 'RENTAL',
+      tenant: tenant || null,
+      customer: customer
+        ? {
+            id: customer.id,
+            firstName: customer.firstName,
+            lastName: customer.lastName,
+            email: customer.email,
+            phone: customer.phone
+          }
+        : null,
+      reservation: reservation
+        ? {
+            id: reservation.id,
+            reservationNumber: reservation.reservationNumber,
+            status: reservation.status,
+            estimatedTotal: money(reservation.estimatedTotal),
+            pickupAt: reservation.pickupAt,
+            returnAt: reservation.returnAt
+          }
+        : null,
+      trip: trip
+        ? {
+            id: trip.id,
+            tripCode: trip.tripCode,
+            status: trip.status,
+            quotedTotal: money(trip.quotedTotal),
+            hostEarnings: money(trip.hostEarnings),
+            platformFee: money(trip.platformFee)
+          }
+        : null,
       nextActions
     };
   }
