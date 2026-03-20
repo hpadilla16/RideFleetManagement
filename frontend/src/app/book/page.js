@@ -56,14 +56,55 @@ function buildInsuranceSelectionState(result, mode) {
   };
 }
 
-function BookingCard({ title, subtitle, meta, quote, cta, onClick }) {
+function BookingStageBar({ stage }) {
+  const stages = [
+    { key: 'search', label: 'Search' },
+    { key: 'select', label: 'Select' },
+    { key: 'checkout', label: 'Guest Details' },
+    { key: 'confirm', label: 'Confirmation' }
+  ];
+  const activeIndex = stages.findIndex((item) => item.key === stage);
+
   return (
-    <article className="glass card section-card">
+    <div className="metric-grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))' }}>
+      {stages.map((item, index) => {
+        const done = activeIndex > index;
+        const active = activeIndex === index;
+        const className = done ? 'status-chip good' : active ? 'status-chip' : 'status-chip neutral';
+        return (
+          <div key={item.key} className="surface-note" style={{ display: 'grid', gap: 8 }}>
+            <span className={className} style={{ width: 'fit-content' }}>
+              {done ? 'Done' : active ? 'Current' : 'Next'}
+            </span>
+            <strong>{item.label}</strong>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function BookingCard({ title, subtitle, meta, quote, cta, onClick, selected = false, hints = [] }) {
+  return (
+    <article
+      className="glass card section-card"
+      style={selected ? { borderColor: 'rgba(110,73,255,.38)', boxShadow: '0 18px 42px rgba(110,73,255,.18)' } : undefined}
+    >
       <div className="stack" style={{ gap: 8 }}>
-        <div className="eyebrow">{meta}</div>
+        <div className="row-between" style={{ gap: 12, alignItems: 'start' }}>
+          <div className="eyebrow">{meta}</div>
+          {selected ? <span className="status-chip good">Selected</span> : null}
+        </div>
         <div className="page-title">{title}</div>
         {subtitle ? <p className="ui-muted">{subtitle}</p> : null}
       </div>
+      {hints.length ? (
+        <div className="inline-actions">
+          {hints.map((hint) => (
+            <span key={hint} className="status-chip neutral">{hint}</span>
+          ))}
+        </div>
+      ) : null}
       <div className="metric-grid">
         {quote.map((item) => (
           <div key={item.label} className="metric-card">
@@ -157,6 +198,7 @@ export default function PublicBookingPage() {
   const locations = bootstrap?.locations || [];
   const vehicleTypes = bootstrap?.vehicleTypes || [];
   const featuredListings = bootstrap?.featuredCarSharingListings || [];
+  const bookingStage = selectedResult ? 'checkout' : results?.results?.length ? 'select' : 'search';
 
   const summaryCards = useMemo(() => ([
     { label: 'Tenants', value: bootstrap?.tenants?.length || 0 },
@@ -282,6 +324,17 @@ export default function PublicBookingPage() {
               )}
             </div>
           </div>
+        </section>
+
+        <section className="glass card-lg section-card">
+          <div className="row-between">
+            <div>
+              <div className="section-title">Booking Journey</div>
+              <p className="ui-muted">One public path for search, selection, guest details, and confirmation.</p>
+            </div>
+            <span className="status-chip neutral">{searchMode === 'RENTAL' ? 'Rental Flow' : 'Car Sharing Flow'}</span>
+          </div>
+          <BookingStageBar stage={bookingStage} />
         </section>
 
         <section className="split-panel">
@@ -487,6 +540,11 @@ export default function PublicBookingPage() {
                       title={result.vehicleType.name}
                       subtitle={result.sampleVehicleLabel || result.vehicleType.description || 'Public rental quote available'}
                       meta={result.soldOut ? 'Waitlist / sold out' : `${result.availabilityCount} unit(s) available`}
+                      selected={selectedResult?.vehicleType?.id === result.vehicleType.id}
+                      hints={[
+                        ...(result.additionalServices?.length ? [`${result.additionalServices.length} add-on${result.additionalServices.length === 1 ? '' : 's'} online`] : []),
+                        ...(result.insurancePlans?.length ? [`${result.insurancePlans.length} insurance option${result.insurancePlans.length === 1 ? '' : 's'}`] : [])
+                      ]}
                       quote={[
                         { label: 'Daily Rate', value: fmtMoney(result.quote.dailyRate) },
                         { label: 'Trip Total', value: fmtMoney(result.quote.estimatedTripTotal) },
@@ -503,6 +561,11 @@ export default function PublicBookingPage() {
                       title={result.title}
                       subtitle={`${result.vehicle?.label || 'Vehicle'}${result.location?.name ? ` · ${result.location.name}` : ''}`}
                       meta={result.instantBook ? 'Instant book ready' : `Hosted by ${result.host?.displayName || 'Host'}`}
+                      selected={selectedResult?.id === result.id}
+                      hints={[
+                        result.instantBook ? 'Instant book' : 'Approval flow',
+                        `${Math.max(1, Number(result.minTripDays || 1))}+ day minimum`
+                      ]}
                       quote={[
                         { label: 'Daily Rate', value: fmtMoney(result.quote.subtotal / Math.max(1, result.quote.tripDays)) },
                         { label: 'Trip Total', value: fmtMoney(result.quote.total) },
@@ -546,6 +609,13 @@ export default function PublicBookingPage() {
               </div>
 
               <div className="section-card">
+                <div className="surface-note" style={{ marginBottom: 6 }}>
+                  <strong>Checkout Snapshot</strong>
+                  <br />
+                  {searchMode === 'RENTAL'
+                    ? `Base total ${fmtMoney(selectedResult?.quote?.estimatedTripTotal)} · Estimated total ${fmtMoney(checkoutEstimatedTotal)}`
+                    : `Trip total ${fmtMoney(selectedResult?.quote?.total)} · Guest flow will continue through pre-check-in, signature, and payment.`}
+                </div>
                 <div className="section-title">Guest Details</div>
                 {searchMode === 'RENTAL' ? (
                   <div className="stack" style={{ marginBottom: 18 }}>
