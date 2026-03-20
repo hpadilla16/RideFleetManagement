@@ -110,7 +110,7 @@ export const ratesService = {
     return prisma.rate.findUnique({ where: { id: created.id }, include: { location: true, rateItems: { include: { vehicleType: true }, orderBy: { sortOrder: 'asc' } } } });
   },
 
-  async resolveForRental({ vehicleTypeId, pickupLocationId, pickupAt, returnAt }, scope = {}) {
+  async resolveForRental({ vehicleTypeId, pickupLocationId, pickupAt, returnAt }, scope = {}, options = {}) {
     if (!vehicleTypeId || !pickupAt || !returnAt) return null;
 
     const pickup = new Date(pickupAt);
@@ -131,6 +131,7 @@ export const ratesService = {
     const candidates = await prisma.rate.findMany({
       where: {
         ...(scope?.tenantId ? { tenantId: scope.tenantId } : {}),
+        ...(options?.displayOnline ? { displayOnline: true } : {}),
         isActive: true,
         active: true,
         [dayFlag]: true,
