@@ -70,6 +70,10 @@ function normalizeMoney(value) {
   return Number.isFinite(num) ? num : 0;
 }
 
+function formatMoney(value) {
+  return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(Number(value || 0));
+}
+
 function toLocalDateTimeInput(value) {
   if (!value) return '';
   const dt = new Date(value);
@@ -86,6 +90,13 @@ function tripActionsFor(status) {
   if (current === 'IN_PROGRESS') return ['COMPLETED', 'DISPUTED'];
   if (current === 'DISPUTED') return ['COMPLETED'];
   return [];
+}
+
+function tripStatusClass(status) {
+  const current = String(status || '').toUpperCase();
+  if (['COMPLETED', 'READY_FOR_PICKUP'].includes(current)) return 'status-chip good';
+  if (['CANCELLED', 'DISPUTED'].includes(current)) return 'status-chip warn';
+  return 'status-chip neutral';
 }
 
 function tripWorkflowSummary(trip) {
@@ -416,6 +427,13 @@ function CarSharingInner({ token, me, logout }) {
   const canManageCarSharing = isSuper ? !!tenantConfig?.tenantId && !!tenantConfig?.enabled : !!tenantConfig?.enabled;
   const selectedListing = useMemo(() => listings.find((row) => row.id === listingForm.id) || null, [listings, listingForm.id]);
   const selectedListingTrips = useMemo(() => trips.filter((row) => row.listingId === selectedListing?.id), [trips, selectedListing?.id]);
+  const heroMetrics = useMemo(() => ([
+    { label: 'Hosts', value: activeHosts.length },
+    { label: 'Listings', value: listings.length },
+    { label: 'Trips', value: trips.length },
+    { label: 'Eligible Vehicles', value: filteredEligibleVehicles.length },
+    { label: 'Fleet Shared', value: assignableVehicles.filter((row) => ['CAR_SHARING_ONLY', 'BOTH'].includes(String(row.fleetMode || ''))).length }
+  ]), [activeHosts.length, listings.length, trips.length, filteredEligibleVehicles.length, assignableVehicles]);
 
   const updateVehicleFleetMode = async (vehicleId, fleetMode) => {
     try {
@@ -542,18 +560,43 @@ function CarSharingInner({ token, me, logout }) {
 
   return (
     <AppShell me={me} logout={logout}>
-      <section className="glass card-lg" style={{ marginBottom: 18 }}>
-        <div className="label">Sprint 5 · Car Sharing Build</div>
-        <h2 style={{ marginTop: 8, marginBottom: 10 }}>Host And Listing Management</h2>
-        <p style={{ margin: 0, maxWidth: 920, lineHeight: 1.7 }}>
-          This is the first internal management layer for the car sharing module. It keeps Fleet Manager as the operational console while introducing hosts and public-facing listings as separate supply entities.
-        </p>
+      <section className="page-hero">
+        <div className="hero-grid">
+          <section className="glass card-lg hero-copy">
+            <div className="eyebrow">Sprint 5 · Car Sharing Build</div>
+            <h2>Host supply, listing control, and trip operations in one internal console.</h2>
+            <p>
+              Build out supply the same way a strong marketplace would: enable the feature by tenant, separate fleet
+              modes, manage hosts cleanly, attach vehicles to listings, control availability, and then run each trip
+              through the same operational workflow backbone used for standard reservations.
+            </p>
+            <div className="hero-meta">
+              <span className={tenantConfig?.enabled ? 'status-chip good' : 'status-chip warn'}>
+                {tenantConfig?.enabled ? 'Car Sharing Enabled' : 'Car Sharing Disabled'}
+              </span>
+              <span className="hero-pill">{tenantConfig?.tenantName || 'Select a tenant to manage this module.'}</span>
+              <span className="hero-pill">{selectedListing ? `Focused on ${selectedListing.title}` : 'Choose a listing to manage windows and trips'}</span>
+            </div>
+          </section>
+
+          <section className="glass card-lg section-card">
+            <div className="section-title">Current supply snapshot</div>
+            <div className="metric-grid">
+              {heroMetrics.map((metric) => (
+                <div key={metric.label} className="metric-card">
+                  <span className="label">{metric.label}</span>
+                  <strong>{metric.value}</strong>
+                </div>
+              ))}
+            </div>
+          </section>
+        </div>
       </section>
 
-      {msg ? <p className="label" style={{ margin: '0 0 12px 2px' }}>{msg}</p> : null}
+      {msg ? <div className="surface-note" style={{ marginBottom: 16 }}>{msg}</div> : null}
 
       {isSuper ? (
-        <section className="glass card" style={{ marginBottom: 18 }}>
+        <section className="glass card-lg section-card" style={{ marginBottom: 18 }}>
           <div className="stack">
             <label className="label">Tenant Scope</label>
             <select value={activeTenantId} onChange={(e) => setActiveTenantId(e.target.value)}>
@@ -565,33 +608,31 @@ function CarSharingInner({ token, me, logout }) {
         </section>
       ) : null}
 
-      <section className="glass card" style={{ marginBottom: 18 }}>
+      <section className="glass card-lg section-card" style={{ marginBottom: 18 }}>
         <div className="row-between" style={{ alignItems: 'center', gap: 12 }}>
           <div>
-            <div className="label">Tenant Feature Status</div>
-            <div style={{ fontWeight: 700 }}>
-              {tenantConfig?.enabled ? 'Car Sharing Enabled' : 'Car Sharing Disabled'}
-            </div>
+            <div className="section-title">Tenant Feature Status</div>
+            <div className="ui-muted">{tenantConfig?.tenantName || 'Select a tenant to manage this module.'}</div>
           </div>
-          <div className="label" style={{ textTransform: 'none', letterSpacing: 0 }}>
-            {tenantConfig?.tenantName || 'Select a tenant to manage this module.'}
-          </div>
+          <span className={tenantConfig?.enabled ? 'status-chip good' : 'status-chip warn'}>
+            {tenantConfig?.enabled ? 'Car Sharing Enabled' : 'Car Sharing Disabled'}
+          </span>
         </div>
         {!tenantConfig?.enabled ? (
-          <div className="label" style={{ marginTop: 10, textTransform: 'none', letterSpacing: 0, fontSize: 13 }}>
+          <div className="surface-note">
             Enable Car Sharing for this tenant in `Tenants` before creating hosts or listings.
           </div>
         ) : null}
       </section>
 
-      <section className="grid2">
-        <section className="glass card-lg stack">
+      <section className="split-panel">
+        <section className="glass card-lg section-card">
           <div className="row-between">
             <h3 style={{ margin: 0 }}>Host Profiles</h3>
-            <button type="button" onClick={resetHostForm}>New Host</button>
+            <button type="button" className="button-subtle" onClick={resetHostForm}>New Host</button>
           </div>
           <form className="stack" onSubmit={saveHost}>
-            <div className="grid2">
+            <div className="form-grid-2">
               <div className="stack"><label className="label">Display Name</label><input value={hostForm.displayName} onChange={(e) => setHostForm({ ...hostForm, displayName: e.target.value })} /></div>
               <div className="stack"><label className="label">Legal Name</label><input value={hostForm.legalName} onChange={(e) => setHostForm({ ...hostForm, legalName: e.target.value })} /></div>
               <div className="stack"><label className="label">Email</label><input value={hostForm.email} onChange={(e) => setHostForm({ ...hostForm, email: e.target.value })} /></div>
@@ -599,27 +640,27 @@ function CarSharingInner({ token, me, logout }) {
               <div className="stack"><label className="label">Status</label><select value={hostForm.status} onChange={(e) => setHostForm({ ...hostForm, status: e.target.value })}><option value="ACTIVE">ACTIVE</option><option value="PAUSED">PAUSED</option><option value="ARCHIVED">ARCHIVED</option></select></div>
               <div className="stack"><label className="label">Payout Provider</label><input value={hostForm.payoutProvider} onChange={(e) => setHostForm({ ...hostForm, payoutProvider: e.target.value })} placeholder="stripe-connect / manual" /></div>
             </div>
-            <div className="grid2">
+            <div className="form-grid-2">
               <div className="stack"><label className="label">Payout Account Ref</label><input value={hostForm.payoutAccountRef} onChange={(e) => setHostForm({ ...hostForm, payoutAccountRef: e.target.value })} /></div>
-              <label className="label"><input type="checkbox" checked={hostForm.payoutEnabled} onChange={(e) => setHostForm({ ...hostForm, payoutEnabled: e.target.checked })} /> Payouts Enabled</label>
+              <label className="label" style={{ textTransform: 'none', letterSpacing: 0 }}><input type="checkbox" checked={hostForm.payoutEnabled} onChange={(e) => setHostForm({ ...hostForm, payoutEnabled: e.target.checked })} /> Payouts Enabled</label>
             </div>
             <div className="stack"><label className="label">Notes</label><textarea rows={3} value={hostForm.notes} onChange={(e) => setHostForm({ ...hostForm, notes: e.target.value })} /></div>
-            <div><button type="submit" disabled={!canManageCarSharing}>{hostForm.id ? 'Update Host' : 'Create Host'}</button></div>
+            <div className="inline-actions"><button type="submit" disabled={!canManageCarSharing}>{hostForm.id ? 'Update Host' : 'Create Host'}</button></div>
           </form>
 
-          <div className="grid2">
+          <div className="metric-grid">
             {activeHosts.map((host) => <HostCard key={host.id} host={host} onEdit={setHostForm} />)}
           </div>
-          {!activeHosts.length && !loading ? <div className="label">No host profiles yet for this tenant.</div> : null}
+          {!activeHosts.length && !loading ? <div className="surface-note">No host profiles yet for this tenant.</div> : null}
         </section>
 
-        <section className="glass card-lg stack">
+        <section className="glass card-lg section-card">
           <div className="row-between">
             <h3 style={{ margin: 0 }}>Vehicle Listings</h3>
-            <button type="button" onClick={resetListingForm}>New Listing</button>
+            <button type="button" className="button-subtle" onClick={resetListingForm}>New Listing</button>
           </div>
           <form className="stack" onSubmit={saveListing}>
-            <div className="grid2">
+            <div className="form-grid-2">
               <div className="stack">
                 <label className="label">Host</label>
                 <select value={listingForm.hostProfileId} onChange={(e) => setListingForm({ ...listingForm, hostProfileId: e.target.value })}>
@@ -651,7 +692,7 @@ function CarSharingInner({ token, me, logout }) {
             </div>
             <div className="stack"><label className="label">Short Description</label><input value={listingForm.shortDescription} onChange={(e) => setListingForm({ ...listingForm, shortDescription: e.target.value })} /></div>
             <div className="stack"><label className="label">Description</label><textarea rows={4} value={listingForm.description} onChange={(e) => setListingForm({ ...listingForm, description: e.target.value })} /></div>
-            <div className="grid2">
+            <div className="form-grid-3">
               <div className="stack"><label className="label">Base Daily Rate</label><input type="number" min="0" step="0.01" value={listingForm.baseDailyRate} onChange={(e) => setListingForm({ ...listingForm, baseDailyRate: e.target.value })} /></div>
               <div className="stack"><label className="label">Cleaning Fee</label><input type="number" min="0" step="0.01" value={listingForm.cleaningFee} onChange={(e) => setListingForm({ ...listingForm, cleaningFee: e.target.value })} /></div>
               <div className="stack"><label className="label">Delivery Fee</label><input type="number" min="0" step="0.01" value={listingForm.deliveryFee} onChange={(e) => setListingForm({ ...listingForm, deliveryFee: e.target.value })} /></div>
@@ -659,18 +700,18 @@ function CarSharingInner({ token, me, logout }) {
               <div className="stack"><label className="label">Min Trip Days</label><input type="number" min="1" value={listingForm.minTripDays} onChange={(e) => setListingForm({ ...listingForm, minTripDays: e.target.value })} /></div>
               <div className="stack"><label className="label">Max Trip Days</label><input type="number" min="1" value={listingForm.maxTripDays} onChange={(e) => setListingForm({ ...listingForm, maxTripDays: e.target.value })} /></div>
             </div>
-            <label className="label"><input type="checkbox" checked={listingForm.instantBook} onChange={(e) => setListingForm({ ...listingForm, instantBook: e.target.checked })} /> Instant Book</label>
+            <label className="label" style={{ textTransform: 'none', letterSpacing: 0 }}><input type="checkbox" checked={listingForm.instantBook} onChange={(e) => setListingForm({ ...listingForm, instantBook: e.target.checked })} /> Instant Book</label>
             <div className="stack"><label className="label">Trip Rules</label><textarea rows={3} value={listingForm.tripRules} onChange={(e) => setListingForm({ ...listingForm, tripRules: e.target.value })} /></div>
-            <div><button type="submit" disabled={!canManageCarSharing}>{listingForm.id ? 'Update Listing' : 'Create Listing'}</button></div>
+            <div className="inline-actions"><button type="submit" disabled={!canManageCarSharing}>{listingForm.id ? 'Update Listing' : 'Create Listing'}</button></div>
           </form>
 
           {!filteredEligibleVehicles.length ? (
-            <div className="label" style={{ textTransform: 'none', letterSpacing: 0, fontSize: 13 }}>
+            <div className="surface-note">
               No car-sharing eligible vehicles are available for this tenant yet. Enable the feature on the tenant and set some vehicles to `CAR_SHARING_ONLY` or `BOTH` below.
             </div>
           ) : null}
 
-          <div className="grid2">
+          <div className="metric-grid">
             {listings.map((listing) => <ListingCard key={listing.id} listing={listing} onEdit={(row) => {
               setListingForm({
                 id: row.id,
@@ -695,36 +736,37 @@ function CarSharingInner({ token, me, logout }) {
               setWindowForm(EMPTY_WINDOW);
             }} />)}
           </div>
-          {!listings.length && !loading ? <div className="label">No listings yet for this tenant.</div> : null}
+          {!listings.length && !loading ? <div className="surface-note">No listings yet for this tenant.</div> : null}
         </section>
       </section>
 
-      <section className="glass card-lg stack" style={{ marginTop: 18 }}>
+      <section className="glass card-lg section-card" style={{ marginTop: 18 }}>
         <div className="row-between">
           <h3 style={{ margin: 0 }}>Availability Windows</h3>
-          {selectedListing ? <button type="button" onClick={() => setWindowForm(EMPTY_WINDOW)}>New Window</button> : null}
+          {selectedListing ? <button type="button" className="button-subtle" onClick={() => setWindowForm(EMPTY_WINDOW)}>New Window</button> : null}
         </div>
         {!selectedListing ? (
-          <div className="label" style={{ textTransform: 'none', letterSpacing: 0, fontSize: 13 }}>
+          <div className="surface-note">
             Edit a listing first to manage blackout dates, price overrides, and minimum stay rules.
           </div>
         ) : (
           <>
-            <div className="label" style={{ textTransform: 'none', letterSpacing: 0, fontSize: 13 }}>
+            <div className="surface-note">
               Managing windows for <strong>{selectedListing.title}</strong>
             </div>
             <form className="stack" onSubmit={saveAvailabilityWindow}>
-              <div className="grid2">
+              <div className="form-grid-2">
                 <div className="stack"><label className="label">Start</label><input type="datetime-local" value={windowForm.startAt} onChange={(e) => setWindowForm({ ...windowForm, startAt: e.target.value })} /></div>
                 <div className="stack"><label className="label">End</label><input type="datetime-local" value={windowForm.endAt} onChange={(e) => setWindowForm({ ...windowForm, endAt: e.target.value })} /></div>
                 <div className="stack"><label className="label">Price Override</label><input type="number" min="0" step="0.01" value={windowForm.priceOverride} onChange={(e) => setWindowForm({ ...windowForm, priceOverride: e.target.value })} /></div>
                 <div className="stack"><label className="label">Min Trip Days Override</label><input type="number" min="1" value={windowForm.minTripDaysOverride} onChange={(e) => setWindowForm({ ...windowForm, minTripDaysOverride: e.target.value })} /></div>
               </div>
-              <label className="label"><input type="checkbox" checked={windowForm.isBlocked} onChange={(e) => setWindowForm({ ...windowForm, isBlocked: e.target.checked })} /> Block this window</label>
+              <label className="label" style={{ textTransform: 'none', letterSpacing: 0 }}><input type="checkbox" checked={windowForm.isBlocked} onChange={(e) => setWindowForm({ ...windowForm, isBlocked: e.target.checked })} /> Block this window</label>
               <div className="stack"><label className="label">Note</label><textarea rows={2} value={windowForm.note} onChange={(e) => setWindowForm({ ...windowForm, note: e.target.value })} /></div>
-              <div><button type="submit">{windowForm.id ? 'Update Window' : 'Create Window'}</button></div>
+              <div className="inline-actions"><button type="submit">{windowForm.id ? 'Update Window' : 'Create Window'}</button></div>
             </form>
 
+            <div className="table-shell">
             <table>
               <thead>
                 <tr>
@@ -742,13 +784,13 @@ function CarSharingInner({ token, me, logout }) {
                   <tr key={window.id}>
                     <td>{new Date(window.startAt).toLocaleString()}</td>
                     <td>{new Date(window.endAt).toLocaleString()}</td>
-                    <td>{window.isBlocked ? 'Yes' : 'No'}</td>
-                    <td>{window.priceOverride !== null && window.priceOverride !== undefined ? `$${Number(window.priceOverride).toFixed(2)}` : '-'}</td>
+                    <td><span className={window.isBlocked ? 'status-chip warn' : 'status-chip good'}>{window.isBlocked ? 'Blocked' : 'Open'}</span></td>
+                    <td>{window.priceOverride !== null && window.priceOverride !== undefined ? formatMoney(window.priceOverride) : '-'}</td>
                     <td>{window.minTripDaysOverride || '-'}</td>
                     <td>{window.note || '-'}</td>
                     <td>
-                      <div className="row" style={{ gap: 8 }}>
-                        <button type="button" onClick={() => setWindowForm({
+                      <div className="inline-actions">
+                        <button type="button" className="button-subtle" onClick={() => setWindowForm({
                           id: window.id,
                           startAt: toLocalDateTimeInput(window.startAt),
                           endAt: toLocalDateTimeInput(window.endAt),
@@ -764,8 +806,9 @@ function CarSharingInner({ token, me, logout }) {
                 ))}
               </tbody>
             </table>
+            </div>
             {!(selectedListing.availabilityWindows || []).length ? (
-              <div className="label" style={{ textTransform: 'none', letterSpacing: 0, fontSize: 13 }}>
+              <div className="surface-note">
                 No availability windows yet for this listing.
               </div>
             ) : null}
@@ -773,22 +816,22 @@ function CarSharingInner({ token, me, logout }) {
         )}
       </section>
 
-      <section className="glass card-lg stack" style={{ marginTop: 18 }}>
+      <section className="glass card-lg section-card" style={{ marginTop: 18 }}>
         <div className="row-between">
           <h3 style={{ margin: 0 }}>Trip Creation</h3>
-          <div className="label">Internal booking flow on top of listing supply.</div>
+          <div className="ui-muted">Internal booking flow on top of listing supply.</div>
         </div>
         {!selectedListing ? (
-          <div className="label" style={{ textTransform: 'none', letterSpacing: 0, fontSize: 13 }}>
+          <div className="surface-note">
             Edit a listing first to create trips from it.
           </div>
         ) : (
           <>
-            <div className="label" style={{ textTransform: 'none', letterSpacing: 0, fontSize: 13 }}>
+            <div className="surface-note">
               Creating trips for <strong>{selectedListing.title}</strong>
             </div>
             <form className="stack" onSubmit={saveTrip}>
-              <div className="grid2">
+              <div className="form-grid-2">
                 <div className="stack">
                   <label className="label">Guest</label>
                   <select value={tripForm.guestCustomerId} onChange={(e) => setTripForm({ ...tripForm, guestCustomerId: e.target.value })}>
@@ -818,9 +861,10 @@ function CarSharingInner({ token, me, logout }) {
                 </div>
               </div>
               <div className="stack"><label className="label">Notes</label><textarea rows={2} value={tripForm.notes} onChange={(e) => setTripForm({ ...tripForm, notes: e.target.value })} /></div>
-              <div><button type="submit">Create Trip</button></div>
+              <div className="inline-actions"><button type="submit">Create Trip</button></div>
             </form>
 
+            <div className="table-shell">
             <table>
               <thead>
                 <tr>
@@ -861,7 +905,7 @@ function CarSharingInner({ token, me, logout }) {
                         <span className="label" style={{ textTransform: 'none', letterSpacing: 0, fontSize: 11 }}>
                           {workflow.nextAction}
                         </span>
-                        <div className="row" style={{ gap: 6, flexWrap: 'wrap' }}>
+                        <div className="inline-actions">
                           {workflow.checks.map((check) => (
                             <span
                               key={check.label}
@@ -881,16 +925,16 @@ function CarSharingInner({ token, me, logout }) {
                       </div>
                     </td>
                     <td>{trip.guestCustomer ? [trip.guestCustomer.firstName, trip.guestCustomer.lastName].filter(Boolean).join(' ') : '-'}</td>
-                    <td>{trip.status}</td>
+                    <td><span className={tripStatusClass(trip.status)}>{trip.status}</span></td>
                     <td>{new Date(trip.scheduledPickupAt).toLocaleString()}</td>
                     <td>{new Date(trip.scheduledReturnAt).toLocaleString()}</td>
-                    <td>${Number(trip.quotedTotal || 0).toFixed(2)}</td>
-                    <td>${Number(trip.hostEarnings || 0).toFixed(2)}</td>
-                    <td>${Number(trip.platformFee || 0).toFixed(2)}</td>
+                    <td>{formatMoney(trip.quotedTotal)}</td>
+                    <td>{formatMoney(trip.hostEarnings)}</td>
+                    <td>{formatMoney(trip.platformFee)}</td>
                     <td>
-                      <div className="row" style={{ gap: 8, flexWrap: 'wrap' }}>
+                      <div className="inline-actions">
                         {tripActionsFor(trip.status).map((action) => (
-                          <button key={action} type="button" onClick={() => updateTripStatus(trip.id, action)}>{action}</button>
+                          <button key={action} type="button" className="button-subtle" onClick={() => updateTripStatus(trip.id, action)}>{action}</button>
                         ))}
                         {trip.reservation?.id ? (
                           <>
@@ -898,13 +942,13 @@ function CarSharingInner({ token, me, logout }) {
                               <button type="button">Open Workflow</button>
                             </a>
                             <a href={`/reservations/${trip.reservation.id}/checkout`}>
-                              <button type="button">Checkout</button>
+                              <button type="button" className="button-subtle">Checkout</button>
                             </a>
                             <a href={`/reservations/${trip.reservation.id}/checkin`}>
-                              <button type="button">Check-in</button>
+                              <button type="button" className="button-subtle">Check-in</button>
                             </a>
                             <a href={`/reservations/${trip.reservation.id}/inspection-report`}>
-                              <button type="button">Inspections</button>
+                              <button type="button" className="button-subtle">Inspections</button>
                             </a>
                           </>
                         ) : (
@@ -916,8 +960,9 @@ function CarSharingInner({ token, me, logout }) {
                 )})}
               </tbody>
             </table>
+            </div>
             {!selectedListingTrips.length ? (
-              <div className="label" style={{ textTransform: 'none', letterSpacing: 0, fontSize: 13 }}>
+              <div className="surface-note">
                 No trips yet for this listing.
               </div>
             ) : null}
@@ -925,16 +970,17 @@ function CarSharingInner({ token, me, logout }) {
         )}
       </section>
 
-      <section className="glass card-lg stack" style={{ marginTop: 18 }}>
+      <section className="glass card-lg section-card" style={{ marginTop: 18 }}>
         <div className="row-between">
           <h3 style={{ margin: 0 }}>Vehicle Fleet Access</h3>
-          <div className="label">Separate traditional rental inventory from car sharing supply.</div>
+          <div className="ui-muted">Separate traditional rental inventory from car sharing supply.</div>
         </div>
         {isSuper ? (
-          <div className="label" style={{ textTransform: 'none', letterSpacing: 0, fontSize: 13 }}>
+          <div className="surface-note">
             Unassigned vehicles are shown here too. Changing fleet mode from this screen will attach them to the active tenant.
           </div>
         ) : null}
+        <div className="table-shell">
         <table>
           <thead>
             <tr>
@@ -951,7 +997,7 @@ function CarSharingInner({ token, me, logout }) {
                 <td>{[vehicle.year, vehicle.make, vehicle.model, vehicle.plate].filter(Boolean).join(' ') || vehicle.internalNumber}</td>
                 {isSuper ? <td>{vehicle.tenantId ? (vehicle.tenant?.name || 'Assigned') : 'Unassigned'}</td> : null}
                 <td>{vehicle.vehicleType?.name || '-'}</td>
-                <td>{vehicle.status}</td>
+                <td><span className="status-chip neutral">{vehicle.status}</span></td>
                 <td>
                   <select value={vehicle.fleetMode || 'RENTAL_ONLY'} onChange={(e) => updateVehicleFleetMode(vehicle.id, e.target.value)}>
                     <option value="RENTAL_ONLY">RENTAL_ONLY</option>
@@ -963,16 +1009,16 @@ function CarSharingInner({ token, me, logout }) {
             ))}
           </tbody>
         </table>
-        {!assignableVehicles.length && !loading ? <div className="label">No vehicles found for this tenant.</div> : null}
+        </div>
+        {!assignableVehicles.length && !loading ? <div className="surface-note">No vehicles found for this tenant.</div> : null}
       </section>
 
-      <section className="glass card-lg stack" style={{ marginTop: 18 }}>
+      <section className="glass card-lg section-card" style={{ marginTop: 18 }}>
         <h3 style={{ margin: 0 }}>Launch Direction</h3>
         <div className="stack">
           {discoveryBullets.map((point) => (
-            <div key={point} className="row" style={{ alignItems: 'flex-start', gap: 10 }}>
-              <strong>•</strong>
-              <span>{point}</span>
+            <div key={point} className="surface-note">
+              {point}
             </div>
           ))}
         </div>
