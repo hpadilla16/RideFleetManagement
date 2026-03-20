@@ -292,11 +292,14 @@ Deliverables:
 
 Goal:
 
+- deepen guest and host apps
 - launch employee app foundation
 - begin dealership loaner program foundation
 
 Deliverables:
 
+- guest app continuity upgrades
+- host trip and listing workflow upgrades
 - employee mobile shell
 - reservation lookup and creation
 - pre-check-in review
@@ -308,13 +311,15 @@ Deliverables:
 
 Goal:
 
-- deepen guest and host apps
+- deepen guest and host apps further
+- deepen employee app
 - extend dealership loaner workflow v1
 
 Deliverables:
 
 - guest app continuity and wallet-style surfaces
 - host availability and earnings depth
+- employee field workflow depth
 - dealership courtesy contract flow
 - insurance verification UX
 - quick service-lane inspection flow

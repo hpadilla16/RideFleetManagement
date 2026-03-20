@@ -1,4 +1,4 @@
-# Sprint 7-8 Plan - Employee Foundation, Guest/Host Depth, And Dealership Loaner
+# Sprint 7-8 Plan - Guest, Host, Employee Apps And Dealership Loaner
 
 Fecha base: 2026-03-20
 
@@ -8,10 +8,13 @@ The next delivery order is:
 
 1. `Sprint 7`
    - `employee app foundation`
+   - `guest app depth`
+   - `host app depth`
    - begin `dealership loaner program` foundation
 2. `Sprint 8`
-   - go deeper into `guest app`
-   - go deeper into `host app`
+   - deepen `guest app` further
+   - deepen `host app` further
+   - deepen `employee app`
    - continue `dealership loaner` with dealership-specific workflows
 
 This keeps momentum while using the shared engines already built:
@@ -33,7 +36,7 @@ We already have:
 - host app foundation
 - car sharing internal ops
 
-What is still missing on the operational side is the mobile-first surface for internal staff. That is the fastest path to real day-to-day usage by dealerships and rental teams.
+What is still missing on the operational side is the mobile-first surface for internal staff. At the same time, the guest and host surfaces need another step forward so all three app tracks move together and feel like one connected platform.
 
 At the same time, the `dealership loaner program` opportunity is too important to leave for later because it is one of the clearest commercial expansion paths beyond classic rental and car sharing.
 
@@ -156,7 +159,7 @@ Add a dealership-specific program layer on top of the current platform:
 
 ### Primary Goal
 
-Launch `employee app foundation` and start the `dealership loaner` backbone.
+Advance `employee`, `guest`, and `host` app surfaces together while starting the `dealership loaner` backbone.
 
 ### Sprint 7 Deliverables
 
@@ -168,7 +171,18 @@ Launch `employee app foundation` and start the `dealership loaner` backbone.
    - checkout / check-in shortcuts
    - payment capture entry points
 
-2. `Dealership Loaner Foundation`
+2. `Guest App Depth`
+   - stronger booking continuity
+   - clearer booking status surface
+   - documents and next-step emphasis
+   - app-like shell improvements
+
+3. `Host App Depth`
+   - stronger trip queue
+   - availability and listing management improvements
+   - clearer host metrics and actions
+
+4. `Dealership Loaner Foundation`
    - define data model for:
      - service appointment / RO reference
      - loaner program type
@@ -178,13 +192,14 @@ Launch `employee app foundation` and start the `dealership loaner` backbone.
    - create dealership loaner console placeholder
    - map existing reservation flow to service-lane usage
 
-3. `Commercial enablement base`
+5. `Commercial enablement base`
    - product presentation v1
    - feature matrix by module
    - screenshots and workflow story
 
 ### Sprint 7 Success Criteria
 
+- employee, guest, and host surfaces all move forward in the same sprint
 - an employee can complete a meaningful operational workflow from a phone
 - the loaner program model exists and is compatible with current reservations
 - we can demo a dealership-specific story, not only rental and car sharing
@@ -193,7 +208,7 @@ Launch `employee app foundation` and start the `dealership loaner` backbone.
 
 ### Primary Goal
 
-Deepen `guest app` and `host app`, while extending dealership loaner workflows.
+Deepen all three app surfaces and extend dealership loaner workflows.
 
 ### Sprint 8 Deliverables
 
@@ -209,7 +224,12 @@ Deepen `guest app` and `host app`, while extending dealership loaner workflows.
    - trip inbox improvements
    - host-side trip actions and incident entry
 
-3. `Dealership Loaner Workflow v1`
+3. `Employee App Depth`
+   - faster lookup and create flow
+   - stronger inspections and payment handling
+   - service-lane and field-friendly actions
+
+4. `Dealership Loaner Workflow v1`
    - service lane courtesy contract flow
    - courtesy vs paid conversion
    - insurance verification UX
@@ -217,7 +237,7 @@ Deepen `guest app` and `host app`, while extending dealership loaner workflows.
 
 ### Sprint 8 Success Criteria
 
-- guest and host surfaces feel like real apps, not just reused screens
+- guest, host, and employee surfaces feel like real apps, not just reused screens
 - dealership loaner flow can be demoed end-to-end in a service context
 
 ## Product Architecture Direction

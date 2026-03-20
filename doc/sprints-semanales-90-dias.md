@@ -289,12 +289,15 @@ Despues de cerrar `Sprint 6` en `main`, el orden de trabajo cambia para reflejar
 
 Objetivo:
 
+- lanzar `guest app` y `host app` a una segunda capa mas fuerte
 - lanzar `employee app foundation`
 - comenzar `dealership loaner program foundation`
 - preparar material de demo / presentacion comercial
 
 Entregables:
 
+- `guest app` con continuidad mejorada, estados y acciones mas claras
+- `host app` con mejor trip queue, disponibilidad y acciones
 - `employee app` mobile-first shell
 - reservation lookup/create para staff
 - `pre-check-in review`, `checkout`, `check-in`, `inspections`, `payments`
@@ -307,6 +310,7 @@ Entregables:
 
 Resultado esperado:
 
+- guest, host y employee avanzan juntos en el mismo sprint
 - un empleado puede completar un flujo operativo real desde telefono o tablet
 - el producto ya puede demostrarse como:
   - rental
@@ -318,14 +322,16 @@ Resultado esperado:
 
 Objetivo:
 
-- ir a profundidad con `guest app`
-- ir a profundidad con `host app`
+- ir mas a profundidad con `guest app`
+- ir mas a profundidad con `host app`
+- profundizar tambien `employee app`
 - extender `dealership loaner workflow v1`
 
 Entregables:
 
 - `guest app` con continuidad y wallet de documentos
 - `host app` con disponibilidad, earnings y trip inbox mas fuerte
+- `employee app` con acciones mas rapidas y mejor operacion movil
 - `dealership loaner` con flujo de service lane y courtesy contract
 
 Resultado esperado:
