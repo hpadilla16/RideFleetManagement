@@ -39,8 +39,40 @@ function metricCards(report) {
   ];
 }
 
+function EmptyTableState({ text }) {
+  return <div className="surface-note">{text}</div>;
+}
+
+function DataTable({ title, subtitle, columns, rows, renderRow, emptyText }) {
+  return (
+    <section className="glass card-lg section-card">
+      <div className="row-between" style={{ marginBottom: 0 }}>
+        <div>
+          <div className="section-title">{title}</div>
+          {subtitle ? <div className="ui-muted">{subtitle}</div> : null}
+        </div>
+      </div>
+      {rows.length ? (
+        <div className="table-shell">
+          <table>
+            <thead>
+              <tr>
+                {columns.map((col) => <th key={col}>{col}</th>)}
+              </tr>
+            </thead>
+            <tbody>{rows.map(renderRow)}</tbody>
+          </table>
+        </div>
+      ) : (
+        <EmptyTableState text={emptyText} />
+      )}
+    </section>
+  );
+}
+
 function Inner({ token, me, logout }) {
   const canFilterEmployee = ['SUPER_ADMIN', 'ADMIN', 'OPS'].includes(String(me?.role || '').toUpperCase());
+  const isSuper = String(me?.role || '').toUpperCase() === 'SUPER_ADMIN';
   const [filters, setFilters] = useState({ start: daysAgo(29), end: daysAgo(0), tenantId: '', locationId: '', employeeUserId: '' });
   const [report, setReport] = useState(null);
   const [servicesSold, setServicesSold] = useState(null);
@@ -94,6 +126,7 @@ function Inner({ token, me, logout }) {
   const cards = useMemo(() => metricCards(report), [report]);
   const reservationSeriesMax = Math.max(1, ...(report?.reservationsByDay || []).map((row) => Number(row.count || 0)));
   const paymentSeriesMax = Math.max(1, ...(report?.paymentsByDay || []).map((row) => Number(row.amount || 0)));
+
   const commissionSummary = useMemo(() => {
     const rows = Array.isArray(commissionLedger) ? commissionLedger : [];
     return {
@@ -103,6 +136,15 @@ function Inner({ token, me, logout }) {
       commissionAmount: rows.reduce((sum, row) => sum + Number(row.commissionAmount || 0), 0)
     };
   }, [commissionLedger]);
+
+  const scopePills = useMemo(() => {
+    const pills = [`${report?.range?.days || 0} day window`];
+    if (report?.filters?.tenantName) pills.push(`Tenant: ${report.filters.tenantName}`);
+    if (report?.filters?.locationName) pills.push(`Location: ${report.filters.locationName}`);
+    if (canFilterEmployee && servicesSold?.filters?.employeeName) pills.push(`Employee: ${servicesSold.filters.employeeName}`);
+    pills.push(`Commission month: ${commissionMonth}`);
+    return pills;
+  }, [report, servicesSold, commissionMonth, canFilterEmployee]);
 
   const exportCsv = async () => {
     try {
@@ -136,363 +178,359 @@ function Inner({ token, me, logout }) {
     }
   };
 
+  const commissionLines = (commissionLedger || [])
+    .flatMap((row) => (row.lines || []).map((line) => ({
+      ...line,
+      agreementNumber: row.rentalAgreement?.agreementNumber || row.rentalAgreementId || row.id
+    })));
+
   return (
     <AppShell me={me} logout={logout}>
-      <section className="glass card-lg stack">
-        <div className="row-between">
-          <div>
-            <h2>Reports</h2>
-            <p className="label">Sprint 3 - Reports v1</p>
-          </div>
-          <div style={{ display: 'flex', gap: 8 }}>
-            <button onClick={exportCsv} disabled={loading}>Export CSV</button>
-            <button onClick={() => load(filters)} disabled={loading}>Refresh</button>
-          </div>
+      <section className="page-hero">
+        <div className="hero-grid">
+          <section className="glass card-lg hero-copy">
+            <div className="eyebrow">Reports Workspace</div>
+            <h2>Revenue, operations, services sold, and commission performance in one view.</h2>
+            <p>
+              This page is now the command center for daily rental performance. Teams can compare operational flow,
+              revenue movement, add-on attachment, and employee commission outcomes without hopping between modules.
+            </p>
+            <div className="hero-meta">
+              {scopePills.map((pill) => <span key={pill} className="hero-pill">{pill}</span>)}
+            </div>
+          </section>
+
+          <section className="glass card-lg section-card">
+            <div className="row-between" style={{ marginBottom: 0 }}>
+              <div>
+                <div className="section-title">Report controls</div>
+                <div className="ui-muted">Adjust the scope, export a CSV, and refresh the operational snapshot.</div>
+              </div>
+              <div className="inline-actions">
+                <button onClick={exportCsv} disabled={loading}>Export CSV</button>
+                <button className="button-subtle" onClick={() => load(filters)} disabled={loading}>Refresh</button>
+              </div>
+            </div>
+
+            <div className="form-grid-3">
+              <div className="stack">
+                <label className="label">Start</label>
+                <input
+                  type="date"
+                  value={filters.start}
+                  onChange={(e) => setFilters((prev) => ({ ...prev, start: e.target.value }))}
+                />
+              </div>
+
+              <div className="stack">
+                <label className="label">End</label>
+                <input
+                  type="date"
+                  value={filters.end}
+                  onChange={(e) => setFilters((prev) => ({ ...prev, end: e.target.value }))}
+                />
+              </div>
+
+              <div className="stack">
+                <label className="label">Commission Month</label>
+                <input
+                  type="month"
+                  value={commissionMonth}
+                  onChange={(e) => setCommissionMonth(e.target.value)}
+                />
+              </div>
+
+              {isSuper ? (
+                <div className="stack">
+                  <label className="label">Tenant</label>
+                  <select
+                    value={filters.tenantId}
+                    onChange={(e) => setFilters((prev) => ({ ...prev, tenantId: e.target.value, locationId: '' }))}
+                  >
+                    <option value="">All tenants</option>
+                    {(report?.tenants || []).map((tenant) => (
+                      <option key={tenant.id} value={tenant.id}>{tenant.name}</option>
+                    ))}
+                  </select>
+                </div>
+              ) : null}
+
+              <div className="stack">
+                <label className="label">Location</label>
+                <select
+                  value={filters.locationId}
+                  onChange={(e) => setFilters((prev) => ({ ...prev, locationId: e.target.value }))}
+                >
+                  <option value="">All locations</option>
+                  {(report?.locations || []).map((location) => (
+                    <option key={location.id} value={location.id}>{location.name}</option>
+                  ))}
+                </select>
+              </div>
+
+              {canFilterEmployee ? (
+                <div className="stack">
+                  <label className="label">Employee</label>
+                  <select
+                    value={filters.employeeUserId}
+                    onChange={(e) => setFilters((prev) => ({ ...prev, employeeUserId: e.target.value }))}
+                  >
+                    <option value="">All employees</option>
+                    {(servicesSold?.employees || []).map((employee) => (
+                      <option key={employee.id} value={employee.id}>{employee.fullName}</option>
+                    ))}
+                  </select>
+                </div>
+              ) : null}
+            </div>
+
+            <div className="inline-actions">
+              <button onClick={() => load(filters)} disabled={loading}>Apply Range</button>
+              {loading ? <span className="status-chip neutral">Loading report</span> : null}
+            </div>
+          </section>
         </div>
-
-        <div className="grid2">
-          <div>
-            <span className="label">Start</span>
-            <input
-              type="date"
-              value={filters.start}
-              onChange={(e) => setFilters((prev) => ({ ...prev, start: e.target.value }))}
-            />
-          </div>
-          <div>
-            <span className="label">End</span>
-            <input
-              type="date"
-              value={filters.end}
-              onChange={(e) => setFilters((prev) => ({ ...prev, end: e.target.value }))}
-            />
-          </div>
-        </div>
-
-        {String(me?.role || '').toUpperCase() === 'SUPER_ADMIN' ? (
-          <div>
-            <span className="label">Tenant</span>
-            <select
-              value={filters.tenantId}
-              onChange={(e) => setFilters((prev) => ({ ...prev, tenantId: e.target.value, locationId: '' }))}
-            >
-              <option value="">All tenants</option>
-              {(report?.tenants || []).map((tenant) => (
-                <option key={tenant.id} value={tenant.id}>{tenant.name}</option>
-              ))}
-            </select>
-          </div>
-        ) : null}
-
-        <div>
-          <span className="label">Location</span>
-          <select
-            value={filters.locationId}
-            onChange={(e) => setFilters((prev) => ({ ...prev, locationId: e.target.value }))}
-          >
-            <option value="">All locations</option>
-            {(report?.locations || []).map((location) => (
-              <option key={location.id} value={location.id}>{location.name}</option>
-            ))}
-          </select>
-        </div>
-
-        {canFilterEmployee ? (
-          <div>
-            <span className="label">Employee</span>
-            <select
-              value={filters.employeeUserId}
-              onChange={(e) => setFilters((prev) => ({ ...prev, employeeUserId: e.target.value }))}
-            >
-              <option value="">All employees</option>
-              {(servicesSold?.employees || []).map((employee) => (
-                <option key={employee.id} value={employee.id}>{employee.fullName}</option>
-              ))}
-            </select>
-          </div>
-        ) : null}
-
-        <div>
-          <span className="label">Commission Month</span>
-          <input
-            type="month"
-            value={commissionMonth}
-            onChange={(e) => setCommissionMonth(e.target.value)}
-          />
-        </div>
-
-        <button onClick={() => load(filters)} disabled={loading}>Apply Range</button>
-        {msg ? <p className="error">{msg}</p> : null}
-        {loading ? <p className="label">Loading report...</p> : null}
-        {!loading && report?.filters?.tenantName ? <p className="label">Tenant: {report.filters.tenantName}</p> : null}
-        {!loading && report?.filters?.locationName ? <p className="label">Filtered by: {report.filters.locationName}</p> : null}
-        {!loading && canFilterEmployee && servicesSold?.filters?.employeeName ? <p className="label">Employee: {servicesSold.filters.employeeName}</p> : null}
       </section>
 
-      <section className="grid2" style={{ marginTop: 12 }}>
+      {msg ? <div className="surface-note" style={{ marginBottom: 16 }}>{msg}</div> : null}
+
+      <section className="metric-grid" style={{ marginBottom: 18 }}>
         {cards.map((card) => (
-          <div key={card.label} className="glass card">
-            <div className="label">{card.label}</div>
-            <div style={{ fontSize: 28, fontWeight: 800, marginTop: 6 }}>{card.value}</div>
+          <div key={card.label} className="metric-card">
+            <span className="label">{card.label}</span>
+            <strong>{card.value}</strong>
           </div>
         ))}
       </section>
 
-      <section className="grid2" style={{ marginTop: 12 }}>
-        <div className="glass card-lg">
-          <div className="row-between" style={{ marginBottom: 10 }}>
-            <h3>Reservations By Day</h3>
-            <span className="label">{report?.range?.days || 0} days</span>
+      <section className="split-panel" style={{ marginBottom: 18 }}>
+        <section className="glass card-lg section-card">
+          <div className="row-between" style={{ marginBottom: 0 }}>
+            <div>
+              <div className="section-title">Reservations By Day</div>
+              <div className="ui-muted">Volume trend across the selected range.</div>
+            </div>
+            <span className="hero-pill">{report?.range?.days || 0} days</span>
           </div>
+
           <div className="stack">
-            {(report?.reservationsByDay || []).map((row) => (
+            {(report?.reservationsByDay || []).length ? (report.reservationsByDay || []).map((row) => (
               <div key={row.date}>
-                <div className="row-between">
+                <div className="row-between" style={{ marginBottom: 4 }}>
                   <span>{row.date}</span>
                   <strong>{row.count}</strong>
                 </div>
-                <div style={{ height: 10, borderRadius: 999, background: 'rgba(255,255,255,.08)', overflow: 'hidden', marginTop: 4 }}>
-                  <div style={{ width: `${(Number(row.count || 0) / reservationSeriesMax) * 100}%`, height: '100%', background: 'linear-gradient(90deg, #2a9d8f, #e9c46a)' }} />
+                <div style={{ height: 10, borderRadius: 999, background: 'rgba(135,82,254,.08)', overflow: 'hidden' }}>
+                  <div
+                    style={{
+                      width: `${(Number(row.count || 0) / reservationSeriesMax) * 100}%`,
+                      height: '100%',
+                      background: 'linear-gradient(90deg, #6d3df2, #1fc7aa)'
+                    }}
+                  />
                 </div>
               </div>
-            ))}
+            )) : <EmptyTableState text="No reservation activity for the selected range." />}
           </div>
-        </div>
+        </section>
 
-        <div className="glass card-lg">
-          <div className="row-between" style={{ marginBottom: 10 }}>
-            <h3>Payments By Day</h3>
-            <span className="label">Reservation payments</span>
+        <section className="glass card-lg section-card">
+          <div className="row-between" style={{ marginBottom: 0 }}>
+            <div>
+              <div className="section-title">Payments By Day</div>
+              <div className="ui-muted">Reservation payment movement across the same range.</div>
+            </div>
+            <span className="hero-pill">Cashflow snapshot</span>
           </div>
+
           <div className="stack">
-            {(report?.paymentsByDay || []).map((row) => (
+            {(report?.paymentsByDay || []).length ? (report.paymentsByDay || []).map((row) => (
               <div key={row.date}>
-                <div className="row-between">
+                <div className="row-between" style={{ marginBottom: 4 }}>
                   <span>{row.date}</span>
                   <strong>{fmtMoney(row.amount)}</strong>
                 </div>
-                <div style={{ height: 10, borderRadius: 999, background: 'rgba(255,255,255,.08)', overflow: 'hidden', marginTop: 4 }}>
-                  <div style={{ width: `${(Number(row.amount || 0) / paymentSeriesMax) * 100}%`, height: '100%', background: 'linear-gradient(90deg, #264653, #2a9d8f)' }} />
+                <div style={{ height: 10, borderRadius: 999, background: 'rgba(31,199,170,.08)', overflow: 'hidden' }}>
+                  <div
+                    style={{
+                      width: `${(Number(row.amount || 0) / paymentSeriesMax) * 100}%`,
+                      height: '100%',
+                      background: 'linear-gradient(90deg, #1fc7aa, #6d3df2)'
+                    }}
+                  />
                 </div>
               </div>
-            ))}
+            )) : <EmptyTableState text="No payment activity for the selected range." />}
           </div>
-        </div>
+        </section>
       </section>
 
-      <section className="grid2" style={{ marginTop: 12 }}>
-        <div className="glass card-lg">
-          <h3>Status Breakdown</h3>
-          <table>
-            <thead>
-              <tr>
-                <th>Status</th>
-                <th>Count</th>
-              </tr>
-            </thead>
-            <tbody>
-              {(report?.reservationStatusBreakdown || []).map((row) => (
-                <tr key={row.status}>
-                  <td>{row.status}</td>
-                  <td>{row.count}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+      <section className="split-panel" style={{ marginBottom: 18 }}>
+        <DataTable
+          title="Status Breakdown"
+          subtitle="Reservation outcome mix across the current range."
+          columns={['Status', 'Count']}
+          rows={report?.reservationStatusBreakdown || []}
+          emptyText="No reservation status data is available for this range."
+          renderRow={(row) => (
+            <tr key={row.status}>
+              <td>{row.status}</td>
+              <td>{row.count}</td>
+            </tr>
+          )}
+        />
 
-        <div className="glass card-lg">
-          <h3>Top Pickup Locations</h3>
-          <table>
-            <thead>
-              <tr>
-                <th>Location</th>
-                <th>Reservations</th>
-              </tr>
-            </thead>
-            <tbody>
-              {(report?.topPickupLocations || []).map((row) => (
-                <tr key={row.locationId}>
-                  <td>{row.name}</td>
-                  <td>{row.count}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+        <DataTable
+          title="Top Pickup Locations"
+          subtitle="Highest-volume pickup points for the current filter."
+          columns={['Location', 'Reservations']}
+          rows={report?.topPickupLocations || []}
+          emptyText="No pickup locations are available for this range."
+          renderRow={(row) => (
+            <tr key={row.locationId}>
+              <td>{row.name}</td>
+              <td>{row.count}</td>
+            </tr>
+          )}
+        />
       </section>
 
-      <section className="glass card-lg stack" style={{ marginTop: 12 }}>
-        <div className="row-between">
+      <section className="glass card-lg section-card" style={{ marginBottom: 18 }}>
+        <div className="row-between" style={{ marginBottom: 0 }}>
           <div>
-            <h3>Services Sold</h3>
-            <p className="label">Closed agreements and commission-bearing service lines</p>
+            <div className="section-title">Services Sold</div>
+            <div className="ui-muted">Closed agreements and commission-bearing service lines.</div>
           </div>
-          <div className="label">
-            Revenue {fmtMoney(servicesSold?.summary?.serviceRevenue)} | Commission {fmtMoney(servicesSold?.summary?.commissionAmount)}
+          <div className="hero-meta">
+            <span className="hero-pill">Revenue {fmtMoney(servicesSold?.summary?.serviceRevenue)}</span>
+            <span className="hero-pill">Commission {fmtMoney(servicesSold?.summary?.commissionAmount)}</span>
           </div>
         </div>
 
-        <div className="grid2">
-          <div className="glass card">
-            <div className="label">Service Lines</div>
-            <div style={{ fontSize: 28, fontWeight: 800, marginTop: 6 }}>{servicesSold?.summary?.servicesSoldCount || 0}</div>
+        <div className="metric-grid">
+          <div className="metric-card">
+            <span className="label">Service Lines</span>
+            <strong>{servicesSold?.summary?.servicesSoldCount || 0}</strong>
           </div>
-          <div className="glass card">
-            <div className="label">Units Sold</div>
-            <div style={{ fontSize: 28, fontWeight: 800, marginTop: 6 }}>{Number(servicesSold?.summary?.unitsSold || 0).toFixed(2)}</div>
+          <div className="metric-card">
+            <span className="label">Units Sold</span>
+            <strong>{Number(servicesSold?.summary?.unitsSold || 0).toFixed(2)}</strong>
           </div>
-          <div className="glass card">
-            <div className="label">Agreements Closed</div>
-            <div style={{ fontSize: 28, fontWeight: 800, marginTop: 6 }}>{servicesSold?.summary?.agreementsClosed || 0}</div>
+          <div className="metric-card">
+            <span className="label">Agreements Closed</span>
+            <strong>{servicesSold?.summary?.agreementsClosed || 0}</strong>
           </div>
-          <div className="glass card">
-            <div className="label">Commission</div>
-            <div style={{ fontSize: 28, fontWeight: 800, marginTop: 6 }}>{fmtMoney(servicesSold?.summary?.commissionAmount)}</div>
+          <div className="metric-card">
+            <span className="label">Commission</span>
+            <strong>{fmtMoney(servicesSold?.summary?.commissionAmount)}</strong>
           </div>
         </div>
 
-        <div className="grid2">
-          <div>
-            <h4>By Service</h4>
-            <table>
-              <thead>
-                <tr>
-                  <th>Service</th>
-                  <th>Units</th>
-                  <th>Revenue</th>
-                  <th>Commission</th>
-                  <th>Agreements</th>
-                </tr>
-              </thead>
-              <tbody>
-                {(servicesSold?.byService || []).map((row) => (
-                  <tr key={row.serviceId}>
-                    <td>{row.serviceName}</td>
-                    <td>{Number(row.unitsSold || 0).toFixed(2)}</td>
-                    <td>{fmtMoney(row.serviceRevenue)}</td>
-                    <td>{fmtMoney(row.commissionAmount)}</td>
-                    <td>{row.agreementsClosed}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+        <div className="split-panel">
+          <DataTable
+            title="By Service"
+            subtitle="Which add-ons are moving and contributing revenue."
+            columns={['Service', 'Units', 'Revenue', 'Commission', 'Agreements']}
+            rows={servicesSold?.byService || []}
+            emptyText="No service lines have closed in this range."
+            renderRow={(row) => (
+              <tr key={row.serviceId}>
+                <td>{row.serviceName}</td>
+                <td>{Number(row.unitsSold || 0).toFixed(2)}</td>
+                <td>{fmtMoney(row.serviceRevenue)}</td>
+                <td>{fmtMoney(row.commissionAmount)}</td>
+                <td>{row.agreementsClosed}</td>
+              </tr>
+            )}
+          />
 
           {canFilterEmployee ? (
-          <div>
-            <h4>By Employee</h4>
-            <table>
-              <thead>
-                <tr>
-                  <th>Employee</th>
-                  <th>Units</th>
-                  <th>Revenue</th>
-                  <th>Commission</th>
-                  <th>Agreements</th>
+            <DataTable
+              title="By Employee"
+              subtitle="Who is driving service revenue and commission."
+              columns={['Employee', 'Units', 'Revenue', 'Commission', 'Agreements']}
+              rows={servicesSold?.byEmployee || []}
+              emptyText="No employee-attributed service activity yet."
+              renderRow={(row) => (
+                <tr key={row.employeeUserId}>
+                  <td>{row.employeeName}</td>
+                  <td>{Number(row.unitsSold || 0).toFixed(2)}</td>
+                  <td>{fmtMoney(row.serviceRevenue)}</td>
+                  <td>{fmtMoney(row.commissionAmount)}</td>
+                  <td>{row.agreementsClosed}</td>
                 </tr>
-              </thead>
-              <tbody>
-                {(servicesSold?.byEmployee || []).map((row) => (
-                  <tr key={row.employeeUserId}>
-                    <td>{row.employeeName}</td>
-                    <td>{Number(row.unitsSold || 0).toFixed(2)}</td>
-                    <td>{fmtMoney(row.serviceRevenue)}</td>
-                    <td>{fmtMoney(row.commissionAmount)}</td>
-                    <td>{row.agreementsClosed}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+              )}
+            />
           ) : null}
         </div>
       </section>
 
-      <section className="glass card-lg stack" style={{ marginTop: 12 }}>
-        <div className="row-between">
+      <section className="glass card-lg section-card">
+        <div className="row-between" style={{ marginBottom: 0 }}>
           <div>
-            <h3>{canFilterEmployee && servicesSold?.filters?.employeeName ? `${servicesSold.filters.employeeName} Commission` : 'My Commission'}</h3>
-            <p className="label">Month-to-month commission snapshot from closed agreements</p>
+            <div className="section-title">
+              {canFilterEmployee && servicesSold?.filters?.employeeName ? `${servicesSold.filters.employeeName} Commission` : 'My Commission'}
+            </div>
+            <div className="ui-muted">Month-to-month commission snapshot sourced from closed agreements.</div>
           </div>
-          <div className="label">{commissionMonth}</div>
+          <span className="hero-pill">{commissionMonth}</span>
         </div>
 
-        <div className="grid2">
-          <div className="glass card">
-            <div className="label">Closed Agreements</div>
-            <div style={{ fontSize: 28, fontWeight: 800, marginTop: 6 }}>{commissionSummary.agreements}</div>
+        <div className="metric-grid">
+          <div className="metric-card">
+            <span className="label">Closed Agreements</span>
+            <strong>{commissionSummary.agreements}</strong>
           </div>
-          <div className="glass card">
-            <div className="label">Gross Revenue</div>
-            <div style={{ fontSize: 28, fontWeight: 800, marginTop: 6 }}>{fmtMoney(commissionSummary.grossRevenue)}</div>
+          <div className="metric-card">
+            <span className="label">Gross Revenue</span>
+            <strong>{fmtMoney(commissionSummary.grossRevenue)}</strong>
           </div>
-          <div className="glass card">
-            <div className="label">Service Revenue</div>
-            <div style={{ fontSize: 28, fontWeight: 800, marginTop: 6 }}>{fmtMoney(commissionSummary.serviceRevenue)}</div>
+          <div className="metric-card">
+            <span className="label">Service Revenue</span>
+            <strong>{fmtMoney(commissionSummary.serviceRevenue)}</strong>
           </div>
-          <div className="glass card">
-            <div className="label">Commission Earned</div>
-            <div style={{ fontSize: 28, fontWeight: 800, marginTop: 6 }}>{fmtMoney(commissionSummary.commissionAmount)}</div>
+          <div className="metric-card">
+            <span className="label">Commission Earned</span>
+            <strong>{fmtMoney(commissionSummary.commissionAmount)}</strong>
           </div>
         </div>
 
-        <div>
-          <h4>Agreement Ledger</h4>
-          <table>
-            <thead>
-              <tr>
-                <th>Agreement</th>
-                <th>Closed</th>
-                <th>Gross</th>
-                <th>Service Revenue</th>
-                <th>Commission</th>
-                <th>Status</th>
+        <div className="split-panel">
+          <DataTable
+            title="Agreement Ledger"
+            subtitle="Closed agreements contributing to the current month."
+            columns={['Agreement', 'Closed', 'Gross', 'Service Revenue', 'Commission', 'Status']}
+            rows={commissionLedger || []}
+            emptyText="No commission ledger rows exist for the selected month."
+            renderRow={(row) => (
+              <tr key={row.id}>
+                <td>{row.rentalAgreement?.agreementNumber || row.rentalAgreementId}</td>
+                <td>{row.rentalAgreement?.closedAt ? new Date(row.rentalAgreement.closedAt).toLocaleDateString() : '-'}</td>
+                <td>{fmtMoney(row.grossRevenue)}</td>
+                <td>{fmtMoney(row.serviceRevenue)}</td>
+                <td>{fmtMoney(row.commissionAmount)}</td>
+                <td><span className="status-chip neutral">{row.status}</span></td>
               </tr>
-            </thead>
-            <tbody>
-              {(commissionLedger || []).map((row) => (
-                <tr key={row.id}>
-                  <td>{row.rentalAgreement?.agreementNumber || row.rentalAgreementId}</td>
-                  <td>{row.rentalAgreement?.closedAt ? new Date(row.rentalAgreement.closedAt).toLocaleDateString() : '-'}</td>
-                  <td>{fmtMoney(row.grossRevenue)}</td>
-                  <td>{fmtMoney(row.serviceRevenue)}</td>
-                  <td>{fmtMoney(row.commissionAmount)}</td>
-                  <td>{row.status}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+            )}
+          />
 
-        <div>
-          <h4>Commission Lines</h4>
-          <table>
-            <thead>
-              <tr>
-                <th>Agreement</th>
-                <th>Line</th>
-                <th>Qty</th>
-                <th>Revenue</th>
-                <th>Rule</th>
-                <th>Commission</th>
+          <DataTable
+            title="Commission Lines"
+            subtitle="Every line item contributing to commission calculation."
+            columns={['Agreement', 'Line', 'Qty', 'Revenue', 'Rule', 'Commission']}
+            rows={commissionLines}
+            emptyText="No commission line items are available for the selected month."
+            renderRow={(line) => (
+              <tr key={line.id}>
+                <td>{line.agreementNumber}</td>
+                <td>{line.service?.name || line.description}</td>
+                <td>{Number(line.quantity || 0).toFixed(2)}</td>
+                <td>{fmtMoney(line.lineRevenue)}</td>
+                <td>{line.valueType}</td>
+                <td>{fmtMoney(line.commissionAmount)}</td>
               </tr>
-            </thead>
-            <tbody>
-              {(commissionLedger || [])
-                .flatMap((row) => (row.lines || []).map((line) => ({ ...line, agreementNumber: row.rentalAgreement?.agreementNumber || row.rentalAgreementId || row.id })))
-                .map((line) => (
-                  <tr key={line.id}>
-                    <td>{line.agreementNumber}</td>
-                    <td>{line.service?.name || line.description}</td>
-                    <td>{Number(line.quantity || 0).toFixed(2)}</td>
-                    <td>{fmtMoney(line.lineRevenue)}</td>
-                    <td>{line.valueType}</td>
-                    <td>{fmtMoney(line.commissionAmount)}</td>
-                  </tr>
-                ))}
-            </tbody>
-          </table>
+            )}
+          />
         </div>
       </section>
     </AppShell>

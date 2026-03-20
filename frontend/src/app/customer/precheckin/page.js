@@ -2,6 +2,8 @@
 
 import { useEffect, useState } from 'react';
 import { API_BASE } from '../../../lib/client';
+import { PortalFrame, portalStyles } from '../_components/PortalFrame';
+import { PortalTimelineCard } from '../_components/PortalTimelineCard';
 
 function toDateInput(value) {
   if (!value) return '';
@@ -91,10 +93,14 @@ export default function PrecheckinPage() {
     run();
   }, [token]);
 
+  const updateField = (key, value) => {
+    setForm((prev) => ({ ...prev, [key]: value }));
+  };
+
   const uploadField = async (key, file) => {
     try {
       const dataUrl = await fileToDataUrl(file);
-      setForm((prev) => ({ ...prev, [key]: dataUrl }));
+      updateField(key, dataUrl);
     } catch (e) {
       setError(String(e.message || e));
     }
@@ -115,6 +121,7 @@ export default function PrecheckinPage() {
       setOk(json?.message || 'Pre-check-in completed.');
       setModel((prev) => ({
         ...(prev || {}),
+        portal: json?.portal || prev?.portal || null,
         reservation: {
           ...(prev?.reservation || {}),
           customerInfoCompletedAt: json?.completedAt || new Date().toISOString(),
@@ -128,74 +135,170 @@ export default function PrecheckinPage() {
     }
   };
 
-  return (
-    <main style={{ maxWidth: 920, margin: '24px auto', padding: 16 }}>
-      <h1>Customer Pre-Check-in</h1>
-      {loading ? <p>Loading...</p> : null}
-      {error ? <p style={{ color: '#b91c1c' }}>{error}</p> : null}
-      {ok ? <p style={{ color: '#065f46' }}>{ok}</p> : null}
+  const reservation = model?.reservation;
 
-      {!loading && model?.reservation ? (
-        <div style={{ display: 'grid', gap: 14 }}>
-          <div style={{ border: '1px solid #ddd', borderRadius: 8, padding: 12 }}>
-            <strong>Reservation:</strong> {model.reservation.reservationNumber}<br />
-            <strong>Status:</strong> {model.reservation.status}<br />
-            <strong>Pickup:</strong> {model.reservation.pickupAt ? new Date(model.reservation.pickupAt).toLocaleString() : '-'} ({model.reservation.pickupLocation || '-'})<br />
-            <strong>Return:</strong> {model.reservation.returnAt ? new Date(model.reservation.returnAt).toLocaleString() : '-'} ({model.reservation.returnLocation || '-'})<br />
-            <strong>Vehicle:</strong> {model.reservation.vehicle || '-'}<br />
-            <strong>Completed:</strong> {model.reservation.customerInfoCompletedAt ? new Date(model.reservation.customerInfoCompletedAt).toLocaleString() : 'Pending'}
+  const notices = (
+    <div style={portalStyles.stack}>
+      {loading ? <div style={{ ...portalStyles.notice, background: 'rgba(79, 70, 229, 0.08)', color: '#4338ca' }}>Loading your pre-check-in checklist...</div> : null}
+      {error ? <div style={{ ...portalStyles.notice, background: 'rgba(220, 38, 38, 0.12)', color: '#991b1b' }}>{error}</div> : null}
+      {ok ? <div style={{ ...portalStyles.notice, background: 'rgba(22, 163, 74, 0.12)', color: '#166534' }}>{ok}</div> : null}
+    </div>
+  );
+
+  return (
+    <PortalFrame
+      eyebrow="Ride Fleet Self-Service"
+      title="Complete Your Pre-Check-in"
+      subtitle="Share your contact details, driver information, and supporting documents before pickup so the counter team can get you on the road faster."
+      aside={<PortalTimelineCard portal={model?.portal} />}
+    >
+      {notices}
+
+      {!loading && reservation ? (
+        <>
+          <div style={portalStyles.card}>
+            <h2 style={portalStyles.cardTitle}>Reservation Summary</h2>
+            <div style={portalStyles.statGrid}>
+              <div style={portalStyles.statTile}>
+                <div style={portalStyles.statLabel}>Reservation</div>
+                <div style={portalStyles.statValue}>{reservation.reservationNumber}</div>
+              </div>
+              <div style={portalStyles.statTile}>
+                <div style={portalStyles.statLabel}>Status</div>
+                <div style={portalStyles.statValue}>{reservation.status || '-'}</div>
+              </div>
+              <div style={portalStyles.statTile}>
+                <div style={portalStyles.statLabel}>Vehicle</div>
+                <div style={portalStyles.statValue}>{reservation.vehicle || '-'}</div>
+              </div>
+              <div style={portalStyles.statTile}>
+                <div style={portalStyles.statLabel}>Pre-check-in</div>
+                <div style={portalStyles.statValue}>{reservation.customerInfoCompletedAt ? 'Submitted' : 'Pending'}</div>
+              </div>
+            </div>
+            <div style={{ marginTop: 14, color: '#55456f', lineHeight: 1.6 }}>
+              <div><strong>Pickup:</strong> {reservation.pickupAt ? new Date(reservation.pickupAt).toLocaleString() : '-'} ({reservation.pickupLocation || '-'})</div>
+              <div><strong>Return:</strong> {reservation.returnAt ? new Date(reservation.returnAt).toLocaleString() : '-'} ({reservation.returnLocation || '-'})</div>
+              <div><strong>Last completed:</strong> {reservation.customerInfoCompletedAt ? new Date(reservation.customerInfoCompletedAt).toLocaleString() : 'Not yet submitted'}</div>
+            </div>
           </div>
 
-          <div style={{ display: 'grid', gap: 12, border: '1px solid #ddd', borderRadius: 8, padding: 12 }}>
-            <h3>Contact Information</h3>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
-              <input placeholder="First Name" value={form.firstName} onChange={(e) => setForm((prev) => ({ ...prev, firstName: e.target.value }))} />
-              <input placeholder="Last Name" value={form.lastName} onChange={(e) => setForm((prev) => ({ ...prev, lastName: e.target.value }))} />
-              <input placeholder="Email" value={form.email} onChange={(e) => setForm((prev) => ({ ...prev, email: e.target.value }))} />
-              <input placeholder="Phone" value={form.phone} onChange={(e) => setForm((prev) => ({ ...prev, phone: e.target.value }))} />
-              <input type="date" value={form.dateOfBirth} onChange={(e) => setForm((prev) => ({ ...prev, dateOfBirth: e.target.value }))} />
-              <input placeholder="Insurance Policy Number" value={form.insurancePolicyNumber} onChange={(e) => setForm((prev) => ({ ...prev, insurancePolicyNumber: e.target.value }))} />
+          <div style={portalStyles.card}>
+            <h2 style={portalStyles.cardTitle}>Contact Information</h2>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 12 }}>
+              <div>
+                <label style={portalStyles.sectionTitle}>First Name</label>
+                <input style={portalStyles.input} value={form.firstName} onChange={(e) => updateField('firstName', e.target.value)} />
+              </div>
+              <div>
+                <label style={portalStyles.sectionTitle}>Last Name</label>
+                <input style={portalStyles.input} value={form.lastName} onChange={(e) => updateField('lastName', e.target.value)} />
+              </div>
+              <div>
+                <label style={portalStyles.sectionTitle}>Email</label>
+                <input style={portalStyles.input} type="email" value={form.email} onChange={(e) => updateField('email', e.target.value)} />
+              </div>
+              <div>
+                <label style={portalStyles.sectionTitle}>Phone</label>
+                <input style={portalStyles.input} value={form.phone} onChange={(e) => updateField('phone', e.target.value)} />
+              </div>
+              <div>
+                <label style={portalStyles.sectionTitle}>Date of Birth</label>
+                <input style={portalStyles.input} type="date" value={form.dateOfBirth} onChange={(e) => updateField('dateOfBirth', e.target.value)} />
+              </div>
+              <div>
+                <label style={portalStyles.sectionTitle}>Insurance Policy Number</label>
+                <input style={portalStyles.input} value={form.insurancePolicyNumber} onChange={(e) => updateField('insurancePolicyNumber', e.target.value)} />
+              </div>
             </div>
+          </div>
 
-            <h3>Driver Information</h3>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
-              <input placeholder="License Number" value={form.licenseNumber} onChange={(e) => setForm((prev) => ({ ...prev, licenseNumber: e.target.value }))} />
-              <input placeholder="License State" value={form.licenseState} onChange={(e) => setForm((prev) => ({ ...prev, licenseState: e.target.value }))} />
+          <div style={portalStyles.card}>
+            <h2 style={portalStyles.cardTitle}>Driver Information</h2>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 12 }}>
+              <div>
+                <label style={portalStyles.sectionTitle}>License Number</label>
+                <input style={portalStyles.input} value={form.licenseNumber} onChange={(e) => updateField('licenseNumber', e.target.value)} />
+              </div>
+              <div>
+                <label style={portalStyles.sectionTitle}>License State</label>
+                <input style={portalStyles.input} value={form.licenseState} onChange={(e) => updateField('licenseState', e.target.value)} />
+              </div>
             </div>
+          </div>
 
-            <h3>Address</h3>
-            <div style={{ display: 'grid', gap: 10 }}>
-              <input placeholder="Address 1" value={form.address1} onChange={(e) => setForm((prev) => ({ ...prev, address1: e.target.value }))} />
-              <input placeholder="Address 2" value={form.address2} onChange={(e) => setForm((prev) => ({ ...prev, address2: e.target.value }))} />
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr', gap: 10 }}>
-                <input placeholder="City" value={form.city} onChange={(e) => setForm((prev) => ({ ...prev, city: e.target.value }))} />
-                <input placeholder="State" value={form.state} onChange={(e) => setForm((prev) => ({ ...prev, state: e.target.value }))} />
-                <input placeholder="ZIP" value={form.zip} onChange={(e) => setForm((prev) => ({ ...prev, zip: e.target.value }))} />
-                <input placeholder="Country" value={form.country} onChange={(e) => setForm((prev) => ({ ...prev, country: e.target.value }))} />
+          <div style={portalStyles.card}>
+            <h2 style={portalStyles.cardTitle}>Home Address</h2>
+            <div style={portalStyles.stack}>
+              <div>
+                <label style={portalStyles.sectionTitle}>Address Line 1</label>
+                <input style={portalStyles.input} value={form.address1} onChange={(e) => updateField('address1', e.target.value)} />
+              </div>
+              <div>
+                <label style={portalStyles.sectionTitle}>Address Line 2</label>
+                <input style={portalStyles.input} value={form.address2} onChange={(e) => updateField('address2', e.target.value)} />
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 12 }}>
+                <div>
+                  <label style={portalStyles.sectionTitle}>City</label>
+                  <input style={portalStyles.input} value={form.city} onChange={(e) => updateField('city', e.target.value)} />
+                </div>
+                <div>
+                  <label style={portalStyles.sectionTitle}>State</label>
+                  <input style={portalStyles.input} value={form.state} onChange={(e) => updateField('state', e.target.value)} />
+                </div>
+                <div>
+                  <label style={portalStyles.sectionTitle}>ZIP</label>
+                  <input style={portalStyles.input} value={form.zip} onChange={(e) => updateField('zip', e.target.value)} />
+                </div>
+                <div>
+                  <label style={portalStyles.sectionTitle}>Country</label>
+                  <input style={portalStyles.input} value={form.country} onChange={(e) => updateField('country', e.target.value)} />
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div style={portalStyles.card}>
+            <h2 style={portalStyles.cardTitle}>Upload Documents</h2>
+            <div style={portalStyles.statGrid}>
+              <div style={portalStyles.statTile}>
+                <div style={portalStyles.statLabel}>ID / License Photo</div>
+                <div style={portalStyles.statValue}>{form.idPhotoUrl ? 'Attached' : 'Missing'}</div>
+              </div>
+              <div style={portalStyles.statTile}>
+                <div style={portalStyles.statLabel}>Insurance Document</div>
+                <div style={portalStyles.statValue}>{form.insuranceDocumentUrl ? 'Attached' : 'Missing'}</div>
               </div>
             </div>
 
-            <h3>Document Uploads</h3>
-            <div style={{ display: 'grid', gap: 10 }}>
-              <label>
-                Driver License / ID Photo
-                <input type="file" accept="image/*,.pdf" onChange={(e) => uploadField('idPhotoUrl', e.target.files?.[0])} />
-              </label>
-              {form.idPhotoUrl ? <div style={{ color: '#065f46' }}>Document attached.</div> : null}
-
-              <label>
-                Insurance Document
-                <input type="file" accept="image/*,.pdf" onChange={(e) => uploadField('insuranceDocumentUrl', e.target.files?.[0])} />
-              </label>
-              {form.insuranceDocumentUrl ? <div style={{ color: '#065f46' }}>Insurance document attached.</div> : null}
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: 14, marginTop: 14 }}>
+              <div>
+                <label style={portalStyles.sectionTitle}>Driver License / ID Photo</label>
+                <input style={portalStyles.input} type="file" accept="image/*,.pdf" onChange={(e) => uploadField('idPhotoUrl', e.target.files?.[0])} />
+              </div>
+              <div>
+                <label style={portalStyles.sectionTitle}>Insurance Document</label>
+                <input style={portalStyles.input} type="file" accept="image/*,.pdf" onChange={(e) => uploadField('insuranceDocumentUrl', e.target.files?.[0])} />
+              </div>
             </div>
-
-            <button onClick={submit} disabled={saving || !token}>
-              {saving ? 'Submitting...' : 'Complete Pre-Check-in'}
-            </button>
           </div>
-        </div>
+
+          <div style={portalStyles.card}>
+            <h2 style={portalStyles.cardTitle}>Submit for Review</h2>
+            <div style={{ display: 'grid', gap: 12 }}>
+              <div style={{ color: '#55456f', lineHeight: 1.6 }}>
+                Once you submit, our team can review your information before pickup and help shorten your time at the counter.
+              </div>
+              <div>
+                <button onClick={submit} disabled={saving || !token} style={portalStyles.button}>
+                  {saving ? 'Submitting...' : 'Complete Pre-Check-in'}
+                </button>
+              </div>
+            </div>
+          </div>
+        </>
       ) : null}
-    </main>
+    </PortalFrame>
   );
 }

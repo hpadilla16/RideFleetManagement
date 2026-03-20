@@ -5,8 +5,8 @@ import { isSuperAdmin } from '../../middleware/auth.js';
 export const vehiclesRouter = Router();
 
 function scopeFor(req) {
-  if (isSuperAdmin(req.user)) return {};
-  return { tenantId: req.user?.tenantId || null };
+  if (isSuperAdmin(req.user)) return { allowCrossTenant: true };
+  return { tenantId: req.user?.tenantId || null, allowCrossTenant: false };
 }
 
 vehiclesRouter.get('/', async (_req, res) => {

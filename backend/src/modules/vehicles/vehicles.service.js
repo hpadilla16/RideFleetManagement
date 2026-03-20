@@ -14,6 +14,7 @@ export const vehiclesService = {
       where: scope?.tenantId ? { tenantId: scope.tenantId } : undefined,
       orderBy: { createdAt: 'desc' },
       include: {
+        tenant: true,
         vehicleType: true,
         homeLocation: true,
         rentalAgreements: {
@@ -35,6 +36,7 @@ export const vehiclesService = {
     return prisma.vehicle.findFirst({
       where: { id, ...(scope?.tenantId ? { tenantId: scope.tenantId } : {}) },
       include: {
+        tenant: true,
         vehicleType: true,
         homeLocation: true,
         rentalAgreements: {
@@ -55,7 +57,7 @@ export const vehiclesService = {
   create(data, scope = {}) {
     return prisma.vehicle.create({
       data: {
-        tenantId: scope?.tenantId || data.tenantId || null,
+        tenantId: scope?.allowCrossTenant ? (data.tenantId || null) : (scope?.tenantId || data.tenantId || null),
         internalNumber: data.internalNumber,
         vin: data.vin ?? null,
         plate: data.plate ?? null,
@@ -65,6 +67,7 @@ export const vehiclesService = {
         color: data.color ?? null,
         mileage: data.mileage ?? 0,
         status: data.status ?? 'AVAILABLE',
+        fleetMode: data.fleetMode ?? 'RENTAL_ONLY',
         vehicleTypeId: data.vehicleTypeId,
         homeLocationId: data.homeLocationId ?? null
       }
@@ -75,7 +78,7 @@ export const vehiclesService = {
     const current = await prisma.vehicle.findFirst({ where: { id, ...(scope?.tenantId ? { tenantId: scope.tenantId } : {}) }, select: { id: true } });
     if (!current) throw new Error('Vehicle not found');
     const data = { ...(patch || {}) };
-    delete data.tenantId;
+    if (!scope?.allowCrossTenant) delete data.tenantId;
     return prisma.vehicle.update({ where: { id }, data });
   },
 

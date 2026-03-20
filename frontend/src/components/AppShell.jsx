@@ -10,13 +10,13 @@ const NAV_ITEMS = [
   { href: '/reservations', label: 'Reservations' },
   { href: '/vehicles', label: 'Vehicles' },
   { href: '/customers', label: 'Customers' },
-  // agreements module hidden from nav (workflow moved to reservations),
+  { href: '/people', label: 'People', adminOnly: true },
   { href: '/planner', label: 'Planner' },
   { href: '/reports', label: 'Reports' },
-  { href: '/car-sharing', label: 'Car Sharing - Coming Soon', disabled: true },
+  { href: '/car-sharing', label: 'Car Sharing', feature: 'carSharing' },
   { href: '/settings', label: 'Settings' },
   { href: '/tenants', label: 'Tenants', superOnly: true },
-  { href: '/settings/security', label: 'Security' }
+  { href: '/settings/security', label: 'Security', adminOnly: true }
 ];
 
 const IDLE_LOCK_MS = 2 * 60 * 1000;
@@ -24,6 +24,7 @@ const IDLE_LOCK_MS = 2 * 60 * 1000;
 function formatDate(d) {
   return d.toLocaleDateString(undefined, { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
 }
+
 function formatTime(d) {
   return d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
 }
@@ -45,8 +46,11 @@ export function AppShell({ me, logout, children }) {
   const [failedUnlockAttempts, setFailedUnlockAttempts] = useState(0);
   const [now, setNow] = useState(new Date());
   const [canReturnSuper, setCanReturnSuper] = useState(false);
+  const [carSharingVisible, setCarSharingVisible] = useState(() => String(me?.role || '').toUpperCase() === 'SUPER_ADMIN');
 
   const idleTimerRef = useRef(null);
+  const role = String(me?.role || '').toUpperCase();
+  const isAdminNavRole = ['SUPER_ADMIN', 'ADMIN', 'OPS'].includes(role);
 
   const authApi = async (path, init = {}) => {
     const token = readStoredToken();
@@ -72,13 +76,13 @@ export function AppShell({ me, logout, children }) {
         setLocked(true);
         setNow(new Date());
       }
-      // fast local hint to avoid showing first-time setup on refresh
       const hasPinHint = localStorage.getItem('ui.hasPin') === '1';
       setHasPin(hasPinHint);
       const hasBackup = !!localStorage.getItem('superadmin_backup_token');
-      const role = String(me?.role || '').toUpperCase();
-      setCanReturnSuper(hasBackup && role !== 'SUPER_ADMIN');
+      const currentRole = String(me?.role || '').toUpperCase();
+      setCanReturnSuper(hasBackup && currentRole !== 'SUPER_ADMIN');
     } catch {}
+
     (async () => {
       try {
         const token = readStoredToken();
@@ -98,6 +102,36 @@ export function AppShell({ me, logout, children }) {
     try { localStorage.setItem('ui.darkMode', darkMode ? '1' : '0'); } catch {}
     if (typeof document !== 'undefined') document.documentElement.setAttribute('data-theme', darkMode ? 'dark' : 'light');
   }, [darkMode]);
+
+  useEffect(() => {
+    const currentRole = String(me?.role || '').toUpperCase();
+    if (currentRole === 'SUPER_ADMIN') {
+      setCarSharingVisible(true);
+      return;
+    }
+    if (!['ADMIN', 'OPS'].includes(currentRole)) {
+      setCarSharingVisible(false);
+      return;
+    }
+
+    (async () => {
+      try {
+        const token = readStoredToken();
+        if (!token) return;
+        const res = await fetch(`${API_BASE}/api/car-sharing/config`, {
+          headers: { Authorization: `Bearer ${token}` }
+        });
+        if (!res.ok) {
+          setCarSharingVisible(false);
+          return;
+        }
+        const json = await res.json();
+        setCarSharingVisible(!!json?.enabled);
+      } catch {
+        setCarSharingVisible(false);
+      }
+    })();
+  }, [me?.role]);
 
   useEffect(() => {
     if (!locked) return;
@@ -122,11 +156,11 @@ export function AppShell({ me, logout, children }) {
       return;
     }
     const onActivity = () => armIdleLock();
-    const evs = ['mousemove', 'keydown', 'click', 'scroll', 'touchstart'];
-    evs.forEach((e) => window.addEventListener(e, onActivity, { passive: true }));
+    const events = ['mousemove', 'keydown', 'click', 'scroll', 'touchstart'];
+    events.forEach((eventName) => window.addEventListener(eventName, onActivity, { passive: true }));
     armIdleLock();
     return () => {
-      evs.forEach((e) => window.removeEventListener(e, onActivity));
+      events.forEach((eventName) => window.removeEventListener(eventName, onActivity));
       if (idleTimerRef.current) clearTimeout(idleTimerRef.current);
     };
   }, [locked, armIdleLock]);
@@ -170,12 +204,7 @@ export function AppShell({ me, logout, children }) {
         return;
       }
 
-      let ok = false;
       await authApi('/lock-pin/verify', { method: 'POST', body: JSON.stringify({ pin: pinInput }) });
-      ok = true;
-
-      if (!ok) throw new Error('Invalid PIN');
-
       setPinInput('');
       setLockMsg('');
       setFailedUnlockAttempts(0);
@@ -210,17 +239,29 @@ export function AppShell({ me, logout, children }) {
   return (
     <div className="app-shell">
       <aside className={`sidebar glass ${mobileOpen ? 'open' : ''}`}>
-        <div className="brand">Ride Fleet</div>
-        <div className="stack">
+        <div className="brand-block">
+          <div className="brand">Ride Fleet</div>
+          <div className="brand-subtitle">Rental ops, guest journeys, reporting, and car sharing in one workspace.</div>
+        </div>
+
+        <div className="nav-section-label">Workspace</div>
+        <div className="stack nav-stack">
           {NAV_ITEMS
-            .filter((item) => !item.superOnly || String(me?.role || '').toUpperCase() === 'SUPER_ADMIN')
+            .filter((item) => !item.superOnly || role === 'SUPER_ADMIN')
+            .filter((item) => !item.adminOnly || isAdminNavRole)
+            .filter((item) => item.feature !== 'carSharing' || carSharingVisible)
             .map((item) => (
               item.disabled ? (
-                <span key={item.href} className="nav-link" style={{ opacity: .55, cursor: 'not-allowed' }}>
+                <span key={item.href} className="nav-link" style={{ opacity: 0.55, cursor: 'not-allowed' }}>
                   <span className="nav-label">{item.label}</span>
                 </span>
               ) : (
-                <Link key={item.href} href={item.href} className={`nav-link ${pathname?.startsWith(item.href) ? 'active' : ''}`} onClick={() => setMobileOpen(false)}>
+                <Link
+                  key={item.href}
+                  href={item.href}
+                  className={`nav-link ${pathname?.startsWith(item.href) ? 'active' : ''}`}
+                  onClick={() => setMobileOpen(false)}
+                >
                   <span className="nav-label">{item.label}</span>
                 </Link>
               )
@@ -232,18 +273,18 @@ export function AppShell({ me, logout, children }) {
 
       <main className="content">
         <div className="topbar glass">
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <button className="mobile-menu-btn" onClick={() => setMobileOpen((v) => !v)}>☰</button>
-            <div>
-              <div style={{ fontWeight: 700 }}>{me?.fullName || me?.name || me?.email || 'User'}</div>
+          <div className="topbar-primary">
+            <button className="mobile-menu-btn" onClick={() => setMobileOpen((v) => !v)}>Menu</button>
+            <div className="topbar-identity">
+              <div className="topbar-name">{me?.fullName || me?.name || me?.email || 'User'}</div>
               <div className="label">{me?.role || 'ADMIN'}</div>
             </div>
           </div>
 
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            {canReturnSuper ? <button title="Return to Super Admin" onClick={returnToSuperAdmin}>↩ Super Admin</button> : null}
-            <button title="Toggle dark mode" onClick={() => setDarkMode((v) => !v)}>{darkMode ? '☀️' : '🌙'}</button>
-            <button title="Lock screen" onClick={lockNow}>🔒</button>
+          <div className="topbar-actions">
+            {canReturnSuper ? <button className="button-subtle" title="Return to Super Admin" onClick={returnToSuperAdmin}>Return To Super Admin</button> : null}
+            <button className="button-subtle" title="Toggle dark mode" onClick={() => setDarkMode((v) => !v)}>{darkMode ? 'Light' : 'Dark'}</button>
+            <button className="button-subtle" title="Lock screen" onClick={lockNow}>Lock</button>
             <button onClick={logout}>Logout</button>
           </div>
         </div>
@@ -274,7 +315,13 @@ export function AppShell({ me, logout, children }) {
             <div className="screenlock-card glass card">
               <h3 style={{ marginBottom: 8 }}>Screen Locked</h3>
               {hasPin ? (
-                <input type="password" placeholder="Enter PIN" value={pinInput} onChange={(e) => setPinInput(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') unlock(); }} />
+                <input
+                  type="password"
+                  placeholder="Enter PIN"
+                  value={pinInput}
+                  onChange={(e) => setPinInput(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === 'Enter') unlock(); }}
+                />
               ) : (
                 <div className="stack">
                   <div className="label" style={{ textTransform: 'none', letterSpacing: 0, fontSize: 12 }}>Set your unlock PIN (first time).</div>
@@ -285,10 +332,10 @@ export function AppShell({ me, logout, children }) {
 
               {lockMsg ? <div className="label" style={{ marginTop: 8, color: '#fca5a5' }}>{lockMsg}</div> : null}
 
-              <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
+              <div style={{ display: 'flex', gap: 8, marginTop: 10, flexWrap: 'wrap' }}>
                 <button onClick={unlock}>Unlock</button>
-                <button onClick={resetMyPin}>Reset PIN</button>
-                <button onClick={logout}>Logout</button>
+                <button className="button-subtle" onClick={resetMyPin}>Reset PIN</button>
+                <button className="button-subtle" onClick={logout}>Logout</button>
               </div>
             </div>
           </div>
