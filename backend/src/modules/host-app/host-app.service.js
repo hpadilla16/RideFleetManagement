@@ -159,7 +159,10 @@ export const hostAppService = {
     });
 
     const trips = await prisma.trip.findMany({
-      where: { hostProfileId: context.hostProfile.id },
+      where: {
+        hostProfileId: context.hostProfile.id,
+        ...(input?.tripStatus ? { status: String(input.tripStatus).toUpperCase() } : {})
+      },
       include: tripInclude(),
       orderBy: [{ createdAt: 'desc' }]
     });
@@ -188,6 +191,72 @@ export const hostAppService = {
       trips,
       metrics: hostMetrics(listings, trips)
     };
+  },
+
+  async listAvailability(user, listingId) {
+    const context = await resolveHostContext(user, null);
+    const listing = await prisma.hostVehicleListing.findFirst({
+      where: {
+        id: listingId,
+        ...(context.hostProfile ? { hostProfileId: context.hostProfile.id } : {})
+      },
+      select: { id: true, tenantId: true }
+    });
+    if (!listing) throw new Error('Listing not found for this host');
+    return carSharingService.listAvailabilityWindows(listingId, {
+      tenantId: listing.tenantId || undefined
+    });
+  },
+
+  async createAvailability(user, listingId, payload = {}) {
+    const context = await resolveHostContext(user, null);
+    const listing = await prisma.hostVehicleListing.findFirst({
+      where: {
+        id: listingId,
+        ...(context.hostProfile ? { hostProfileId: context.hostProfile.id } : {})
+      },
+      select: { id: true, tenantId: true }
+    });
+    if (!listing) throw new Error('Listing not found for this host');
+    return carSharingService.createAvailabilityWindow(listingId, payload, {
+      tenantId: listing.tenantId || undefined
+    });
+  },
+
+  async updateAvailability(user, id, payload = {}) {
+    const context = await resolveHostContext(user, null);
+    const current = await prisma.listingAvailabilityWindow.findFirst({
+      where: {
+        id,
+        ...(context.hostProfile ? { listing: { hostProfileId: context.hostProfile.id } } : {})
+      },
+      select: {
+        id: true,
+        listing: { select: { tenantId: true } }
+      }
+    });
+    if (!current) throw new Error('Availability window not found for this host');
+    return carSharingService.updateAvailabilityWindow(id, payload, {
+      tenantId: current.listing?.tenantId || undefined
+    });
+  },
+
+  async deleteAvailability(user, id) {
+    const context = await resolveHostContext(user, null);
+    const current = await prisma.listingAvailabilityWindow.findFirst({
+      where: {
+        id,
+        ...(context.hostProfile ? { listing: { hostProfileId: context.hostProfile.id } } : {})
+      },
+      select: {
+        id: true,
+        listing: { select: { tenantId: true } }
+      }
+    });
+    if (!current) throw new Error('Availability window not found for this host');
+    return carSharingService.deleteAvailabilityWindow(id, {
+      tenantId: current.listing?.tenantId || undefined
+    });
   },
 
   async updateListing(user, id, payload = {}) {

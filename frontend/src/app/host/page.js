@@ -41,6 +41,15 @@ const EMPTY_LISTING_EDIT = {
   tripRules: ''
 };
 
+const EMPTY_WINDOW_FORM = {
+  startAt: '',
+  endAt: '',
+  isBlocked: false,
+  priceOverride: '',
+  minTripDaysOverride: '',
+  note: ''
+};
+
 export default function HostAppPage() {
   return (
     <AuthGate>
@@ -54,14 +63,21 @@ function HostAppInner({ token, me, logout }) {
   const [msg, setMsg] = useState('');
   const [selectedHostProfileId, setSelectedHostProfileId] = useState('');
   const [listingEdit, setListingEdit] = useState(EMPTY_LISTING_EDIT);
+  const [tripStatusFilter, setTripStatusFilter] = useState('');
+  const [availabilityRows, setAvailabilityRows] = useState([]);
+  const [availabilityListingId, setAvailabilityListingId] = useState('');
+  const [windowForm, setWindowForm] = useState(EMPTY_WINDOW_FORM);
   const [loading, setLoading] = useState(true);
 
   const isAdminViewer = !!dashboard?.isAdminViewer;
 
   const scopedQuery = useMemo(() => {
-    if (!selectedHostProfileId) return '';
-    return `?hostProfileId=${encodeURIComponent(selectedHostProfileId)}`;
-  }, [selectedHostProfileId]);
+    const params = new URLSearchParams();
+    if (selectedHostProfileId) params.set('hostProfileId', selectedHostProfileId);
+    if (tripStatusFilter) params.set('tripStatus', tripStatusFilter);
+    const str = params.toString();
+    return str ? `?${str}` : '';
+  }, [selectedHostProfileId, tripStatusFilter]);
 
   async function load() {
     try {
@@ -119,6 +135,61 @@ function HostAppInner({ token, me, logout }) {
       }, token);
       setMsg('Listing updated');
       setListingEdit(EMPTY_LISTING_EDIT);
+      await load();
+    } catch (error) {
+      setMsg(error.message);
+    }
+  }
+
+  async function loadAvailability(listingId) {
+    if (!listingId) {
+      setAvailabilityListingId('');
+      setAvailabilityRows([]);
+      return;
+    }
+    try {
+      const rows = await api(`/api/host-app/listings/${listingId}/availability`, {}, token);
+      setAvailabilityListingId(listingId);
+      setAvailabilityRows(Array.isArray(rows) ? rows : []);
+    } catch (error) {
+      setMsg(error.message);
+      setAvailabilityListingId(listingId);
+      setAvailabilityRows([]);
+    }
+  }
+
+  async function saveAvailabilityWindow(event) {
+    event.preventDefault();
+    if (!availabilityListingId) {
+      setMsg('Choose a listing first');
+      return;
+    }
+    try {
+      await api(`/api/host-app/listings/${availabilityListingId}/availability`, {
+        method: 'POST',
+        body: JSON.stringify({
+          startAt: windowForm.startAt,
+          endAt: windowForm.endAt,
+          isBlocked: !!windowForm.isBlocked,
+          priceOverride: windowForm.priceOverride === '' ? null : Number(windowForm.priceOverride),
+          minTripDaysOverride: windowForm.minTripDaysOverride === '' ? null : Number(windowForm.minTripDaysOverride),
+          note: windowForm.note
+        })
+      }, token);
+      setWindowForm(EMPTY_WINDOW_FORM);
+      setMsg('Availability window added');
+      await loadAvailability(availabilityListingId);
+      await load();
+    } catch (error) {
+      setMsg(error.message);
+    }
+  }
+
+  async function removeAvailabilityWindow(id) {
+    try {
+      await api(`/api/host-app/availability/${id}`, { method: 'DELETE' }, token);
+      setMsg('Availability window removed');
+      await loadAvailability(availabilityListingId);
       await load();
     } catch (error) {
       setMsg(error.message);
@@ -254,6 +325,13 @@ function HostAppInner({ token, me, logout }) {
                     >
                       Edit Listing
                     </button>
+                    <button
+                      type="button"
+                      className="button-subtle"
+                      onClick={() => loadAvailability(listing.id)}
+                    >
+                      Availability
+                    </button>
                   </div>
                 </div>
               ))}
@@ -333,13 +411,115 @@ function HostAppInner({ token, me, logout }) {
         </section>
       </section>
 
+      <section className="split-panel" style={{ marginTop: 18 }}>
+        <section className="glass card-lg section-card">
+          <div className="row-between">
+            <div>
+              <div className="section-title">Availability Windows</div>
+              <p className="ui-muted">Block dates, set price overrides, or require a longer minimum stay from the host surface.</p>
+            </div>
+            <select
+              value={availabilityListingId}
+              onChange={(event) => loadAvailability(event.target.value)}
+              style={{ maxWidth: 280 }}
+            >
+              <option value="">Choose listing</option>
+              {listings.map((row) => (
+                <option key={row.id} value={row.id}>{row.title}</option>
+              ))}
+            </select>
+          </div>
+          {availabilityListingId ? (
+            availabilityRows.length ? (
+              <div className="stack">
+                {availabilityRows.map((row) => (
+                  <div key={row.id} className="surface-note" style={{ display: 'grid', gap: 8 }}>
+                    <div className="row-between" style={{ gap: 12 }}>
+                      <strong>{formatDateTime(row.startAt)} -> {formatDateTime(row.endAt)}</strong>
+                      <span className={row.isBlocked ? 'status-chip warn' : 'status-chip good'}>
+                        {row.isBlocked ? 'Blocked' : 'Open'}
+                      </span>
+                    </div>
+                    <div style={{ color: '#55456f', lineHeight: 1.5 }}>
+                      Price override: {row.priceOverride != null ? formatMoney(row.priceOverride) : 'None'} · Min days override: {row.minTripDaysOverride || '-'}
+                    </div>
+                    <div style={{ color: '#55456f', lineHeight: 1.5 }}>
+                      {row.note || 'No notes'}
+                    </div>
+                    <div className="inline-actions">
+                      <button type="button" className="button-subtle" onClick={() => removeAvailabilityWindow(row.id)}>Delete</button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="surface-note">No availability windows yet for this listing.</div>
+            )
+          ) : (
+            <div className="surface-note">Choose a listing to manage availability windows.</div>
+          )}
+        </section>
+
+        <section className="glass card-lg section-card">
+          <div className="row-between">
+            <div>
+              <div className="section-title">Add Availability Window</div>
+              <p className="ui-muted">Useful for blackout dates, seasonal pricing, and minimum-stay control.</p>
+            </div>
+            {availabilityListingId ? <span className="status-chip neutral">Listing Selected</span> : null}
+          </div>
+          <form className="stack" onSubmit={saveAvailabilityWindow}>
+            <div className="form-grid-2">
+              <div className="stack">
+                <label className="label">Start</label>
+                <input type="datetime-local" value={windowForm.startAt} onChange={(event) => setWindowForm((current) => ({ ...current, startAt: event.target.value }))} />
+              </div>
+              <div className="stack">
+                <label className="label">End</label>
+                <input type="datetime-local" value={windowForm.endAt} onChange={(event) => setWindowForm((current) => ({ ...current, endAt: event.target.value }))} />
+              </div>
+              <div className="stack">
+                <label className="label">Price Override</label>
+                <input type="number" min="0" step="0.01" value={windowForm.priceOverride} onChange={(event) => setWindowForm((current) => ({ ...current, priceOverride: event.target.value }))} />
+              </div>
+              <div className="stack">
+                <label className="label">Min Trip Days Override</label>
+                <input type="number" min="1" value={windowForm.minTripDaysOverride} onChange={(event) => setWindowForm((current) => ({ ...current, minTripDaysOverride: event.target.value }))} />
+              </div>
+            </div>
+            <label className="label" style={{ textTransform: 'none', letterSpacing: 0 }}>
+              <input type="checkbox" checked={windowForm.isBlocked} onChange={(event) => setWindowForm((current) => ({ ...current, isBlocked: event.target.checked }))} /> Block these dates
+            </label>
+            <div className="stack">
+              <label className="label">Note</label>
+              <textarea rows={3} value={windowForm.note} onChange={(event) => setWindowForm((current) => ({ ...current, note: event.target.value }))} />
+            </div>
+            <div className="inline-actions">
+              <button type="submit">Add Window</button>
+            </div>
+          </form>
+        </section>
+      </section>
+
       <section className="glass card-lg section-card" style={{ marginTop: 18 }}>
         <div className="row-between">
           <div>
             <div className="section-title">My Trips</div>
             <p className="ui-muted">Watch incoming trips and move them through the next host-facing operational status.</p>
           </div>
-          <span className="status-chip neutral">{metrics.trips} trips</span>
+          <div className="inline-actions">
+            <select value={tripStatusFilter} onChange={(event) => setTripStatusFilter(event.target.value)} style={{ maxWidth: 220 }}>
+              <option value="">All statuses</option>
+              <option value="RESERVED">RESERVED</option>
+              <option value="CONFIRMED">CONFIRMED</option>
+              <option value="READY_FOR_PICKUP">READY_FOR_PICKUP</option>
+              <option value="IN_PROGRESS">IN_PROGRESS</option>
+              <option value="COMPLETED">COMPLETED</option>
+              <option value="CANCELLED">CANCELLED</option>
+              <option value="DISPUTED">DISPUTED</option>
+            </select>
+            <span className="status-chip neutral">{metrics.trips} trips</span>
+          </div>
         </div>
         <div className="table-shell">
           <table>

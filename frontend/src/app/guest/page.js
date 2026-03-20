@@ -1,8 +1,10 @@
 'use client';
 
 import Link from 'next/link';
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { API_BASE, api } from '../../lib/client';
+
+const RECENT_LOOKUPS_KEY = 'guest.recentLookups';
 
 function fmtMoney(value) {
   return `$${Number(value || 0).toFixed(2)}`;
@@ -43,6 +45,7 @@ export default function GuestAppPage() {
   const [error, setError] = useState('');
   const [result, setResult] = useState(null);
   const [portalStatus, setPortalStatus] = useState(null);
+  const [recentLookups, setRecentLookups] = useState([]);
 
   const customerInfoAction = resolvePortalAction(result, 'customerInfo');
   const signatureAction = resolvePortalAction(result, 'signature');
@@ -61,6 +64,34 @@ export default function GuestAppPage() {
           ? { label: 'Continue to Payment', link: paymentAction.link }
           : null;
   }, [customerInfoAction?.link, paymentAction?.link, portalStatus?.nextStep?.label, portalStatus?.nextStep?.link, signatureAction?.link]);
+
+  useEffect(() => {
+    try {
+      const stored = JSON.parse(localStorage.getItem(RECENT_LOOKUPS_KEY) || '[]');
+      setRecentLookups(Array.isArray(stored) ? stored : []);
+    } catch {
+      setRecentLookups([]);
+    }
+  }, []);
+
+  function persistRecentLookup(confirmation) {
+    const entry = {
+      reference: confirmation?.trip?.tripCode || confirmation?.reservation?.reservationNumber || '',
+      email: confirmation?.customer?.email || lookupState.email,
+      customerName: `${confirmation?.customer?.firstName || ''} ${confirmation?.customer?.lastName || ''}`.trim() || 'Guest',
+      bookingType: confirmation?.bookingType || 'RENTAL',
+      updatedAt: new Date().toISOString()
+    };
+    if (!entry.reference || !entry.email) return;
+    try {
+      const next = [
+        entry,
+        ...recentLookups.filter((row) => !(row.reference === entry.reference && row.email === entry.email))
+      ].slice(0, 5);
+      localStorage.setItem(RECENT_LOOKUPS_KEY, JSON.stringify(next));
+      setRecentLookups(next);
+    } catch {}
+  }
 
   async function loadPortalStatus(confirmation) {
     const token = tokenFromLink(resolvePortalAction(confirmation, 'customerInfo')?.link);
@@ -96,6 +127,7 @@ export default function GuestAppPage() {
         })
       });
       setResult(payload);
+      persistRecentLookup(payload);
       await loadPortalStatus(payload);
     } catch (err) {
       setResult(null);
@@ -174,6 +206,46 @@ export default function GuestAppPage() {
           </div>
           {error ? <div className="surface-note" style={{ color: '#991b1b' }}>{error}</div> : null}
         </section>
+
+        {recentLookups.length ? (
+          <section className="glass card-lg section-card">
+            <div className="row-between">
+              <div>
+                <div className="section-title">Recent Guest Lookups</div>
+                <p className="ui-muted">Helpful when a guest returns later from the same device.</p>
+              </div>
+              <button
+                type="button"
+                className="button-subtle"
+                onClick={() => {
+                  try { localStorage.removeItem(RECENT_LOOKUPS_KEY); } catch {}
+                  setRecentLookups([]);
+                }}
+              >
+                Clear
+              </button>
+            </div>
+            <div className="metric-grid">
+              {recentLookups.map((row) => (
+                <div key={`${row.reference}:${row.email}`} className="glass card section-card" style={{ padding: 14 }}>
+                  <div style={{ fontWeight: 700 }}>{row.reference}</div>
+                  <div className="label" style={{ textTransform: 'none', letterSpacing: 0, fontSize: 12 }}>
+                    {row.customerName} · {row.bookingType === 'CAR_SHARING' ? 'Car Sharing' : 'Rental'}
+                  </div>
+                  <div className="ui-muted" style={{ fontSize: 13 }}>{row.email}</div>
+                  <div className="inline-actions">
+                    <button
+                      type="button"
+                      onClick={() => setLookupState({ reference: row.reference, email: row.email })}
+                    >
+                      Use Lookup
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </section>
+        ) : null}
 
         {result ? (
           <section className="split-panel">
