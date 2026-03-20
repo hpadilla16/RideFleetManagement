@@ -444,7 +444,7 @@ export default function PublicBookingPage() {
                           method: 'POST',
                           body: JSON.stringify({
                             tenantSlug,
-                            searchType,
+                            searchType: searchMode,
                             pickupAt,
                             returnAt,
                             pickupLocationId,
