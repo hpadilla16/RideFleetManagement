@@ -7,6 +7,14 @@ function fmtMoney(value) {
   return `$${Number(value || 0).toFixed(2)}`;
 }
 
+function resolvePortalAction(confirmation, key) {
+  const nextActions = confirmation?.nextActions;
+  if (!nextActions) return null;
+  if (nextActions[key]) return nextActions[key];
+  if (key === 'customerInfo' && nextActions?.link) return nextActions;
+  return null;
+}
+
 export default function PublicBookingConfirmationPage() {
   const [confirmation, setConfirmation] = useState(null);
 
@@ -22,6 +30,9 @@ export default function PublicBookingConfirmationPage() {
   const title = confirmation?.bookingType === 'CAR_SHARING'
     ? `Trip ${confirmation?.trip?.tripCode || ''} created`
     : `Reservation ${confirmation?.reservation?.reservationNumber || ''} created`;
+  const customerInfoAction = resolvePortalAction(confirmation, 'customerInfo');
+  const signatureAction = resolvePortalAction(confirmation, 'signature');
+  const paymentAction = resolvePortalAction(confirmation, 'payment');
 
   return (
     <main style={{ minHeight: '100vh', padding: '22px clamp(16px, 3vw, 34px) 42px' }}>
@@ -118,19 +129,38 @@ export default function PublicBookingConfirmationPage() {
             <div className="glass card-lg section-card">
               <div className="section-title">Customer Next Step</div>
               <div className="surface-note">
-                {confirmation.nextActions?.warning
-                  ? confirmation.nextActions.warning
-                  : confirmation.nextActions?.emailSent
+                {customerInfoAction?.warning
+                  ? customerInfoAction.warning
+                  : customerInfoAction?.emailSent
                     ? 'Customer info request email was sent successfully.'
                     : 'Manual pre-check-in link generated successfully.'}
               </div>
-              {confirmation.nextActions?.link ? (
-                <div className="inline-actions">
-                  <a href={confirmation.nextActions.link} target="_blank" rel="noreferrer">
-                    <button type="button">Open Pre-check-in Link</button>
-                  </a>
-                </div>
-              ) : null}
+              <div className="stack" style={{ gap: 10 }}>
+                {customerInfoAction?.link ? (
+                  <div className="inline-actions">
+                    <a href={customerInfoAction.link} target="_blank" rel="noreferrer">
+                      <button type="button">Open Pre-check-in</button>
+                    </a>
+                  </div>
+                ) : null}
+                {signatureAction?.link ? (
+                  <div className="inline-actions">
+                    <a href={signatureAction.link} target="_blank" rel="noreferrer">
+                      <button type="button" className="button-subtle">Open Signature Step</button>
+                    </a>
+                  </div>
+                ) : null}
+                {paymentAction?.link ? (
+                  <div className="inline-actions">
+                    <a href={paymentAction.link} target="_blank" rel="noreferrer">
+                      <button type="button" className="button-subtle">Open Payment Step</button>
+                    </a>
+                  </div>
+                ) : null}
+              </div>
+              <div className="surface-note">
+                Recommended order: Pre-check-in, then signature, then payment.
+              </div>
               <div className="inline-actions">
                 <Link href="/book">
                   <button type="button" className="button-subtle">Create Another Booking</button>

@@ -128,7 +128,29 @@ async function upsertPublicCustomer(tenantId, input = {}) {
   return prisma.customer.create({ data: payload });
 }
 
-async function issueCustomerInfoRequest(reservation) {
+function portalPathForKind(kind) {
+  if (kind === 'signature') return '/customer/sign-agreement';
+  if (kind === 'payment') return '/customer/pay';
+  return '/customer/precheckin';
+}
+
+function noteLabelForKind(kind) {
+  if (kind === 'signature') return 'REQUEST SIGNATURE';
+  if (kind === 'payment') return 'REQUEST PAYMENT';
+  return 'REQUEST CUSTOMER INFO';
+}
+
+function tokenFieldMap(kind) {
+  if (kind === 'signature') {
+    return { tokenField: 'signatureToken', expiresField: 'signatureTokenExpiresAt' };
+  }
+  if (kind === 'payment') {
+    return { tokenField: 'paymentRequestToken', expiresField: 'paymentRequestTokenExpiresAt' };
+  }
+  return { tokenField: 'customerInfoToken', expiresField: 'customerInfoTokenExpiresAt' };
+}
+
+async function issuePortalRequest(kind, reservation, { sendEmailToCustomer = false } = {}) {
   const fullReservation = await prisma.reservation.findUnique({
     where: { id: reservation.id },
     include: {
@@ -138,23 +160,24 @@ async function issueCustomerInfoRequest(reservation) {
   });
   if (!fullReservation) throw new Error('Reservation not found after booking creation');
 
+  const { tokenField, expiresField } = tokenFieldMap(kind);
   const token = crypto.randomBytes(24).toString('hex');
   const expiresAt = new Date(Date.now() + 1000 * 60 * 60 * 24 * 2);
   const base = process.env.CUSTOMER_PORTAL_BASE_URL || 'http://localhost:3000';
-  const link = `${base.replace(/\/$/, '')}/customer/precheckin?token=${token}`;
-  const note = `[PUBLIC BOOKING REQUEST CUSTOMER INFO ${new Date().toISOString()}] token issued`;
+  const link = `${base.replace(/\/$/, '')}${portalPathForKind(kind)}?token=${token}`;
+  const note = `[PUBLIC BOOKING ${noteLabelForKind(kind)} ${new Date().toISOString()}] token issued`;
   await prisma.reservation.update({
     where: { id: fullReservation.id },
     data: {
-      customerInfoToken: token,
-      customerInfoTokenExpiresAt: expiresAt,
+      [tokenField]: token,
+      [expiresField]: expiresAt,
       notes: fullReservation.notes ? `${fullReservation.notes}\n${note}` : note
     }
   });
 
   let emailSent = false;
   let warning = null;
-  if (fullReservation.customer?.email) {
+  if (sendEmailToCustomer && fullReservation.customer?.email) {
     const tpl = await settingsService.getEmailTemplates({ tenantId: fullReservation.tenantId || null });
     const render = (value = '') => String(value)
       .replaceAll('{{customerName}}', customerName(fullReservation.customer))
@@ -162,20 +185,39 @@ async function issueCustomerInfoRequest(reservation) {
       .replaceAll('{{link}}', link)
       .replaceAll('{{expiresAt}}', expiresAt.toISOString())
       .replaceAll('{{companyName}}', fullReservation.pickupLocation?.name || 'Ride Fleet');
+    const subjectTpl = kind === 'signature'
+      ? tpl.requestSignatureSubject
+      : kind === 'payment'
+        ? tpl.requestPaymentSubject
+        : tpl.requestCustomerInfoSubject;
+    const bodyTpl = kind === 'signature'
+      ? tpl.requestSignatureBody
+      : kind === 'payment'
+        ? tpl.requestPaymentBody
+        : tpl.requestCustomerInfoBody;
+    const htmlTpl = kind === 'signature'
+      ? tpl.requestSignatureHtml
+      : kind === 'payment'
+        ? tpl.requestPaymentHtml
+        : tpl.requestCustomerInfoHtml;
     try {
       await sendEmail({
         to: fullReservation.customer.email,
-        subject: render(tpl.requestCustomerInfoSubject),
-        text: render(tpl.requestCustomerInfoBody),
-        html: render(tpl.requestCustomerInfoHtml || String(tpl.requestCustomerInfoBody || '').replaceAll('\n', '<br/>'))
+        subject: render(subjectTpl),
+        text: render(bodyTpl),
+        html: render(htmlTpl || String(bodyTpl || '').replaceAll('\n', '<br/>'))
       });
       emailSent = true;
     } catch (mailError) {
-      warning = `Unable to send customer information request email: ${String(mailError?.message || mailError)}`;
+      warning = `Unable to send ${kind} request email: ${String(mailError?.message || mailError)}`;
     }
   }
 
-  return { link, expiresAt, emailSent, warning };
+  return { kind, link, expiresAt, emailSent, warning };
+}
+
+async function issueCustomerInfoRequest(reservation) {
+  return issuePortalRequest('customer-info', reservation, { sendEmailToCustomer: true });
 }
 
 async function listPublicAdditionalServices({ tenantId, locationId, vehicleTypeId, days }) {
@@ -813,7 +855,11 @@ export const bookingEngineService = {
         });
       }
 
-      const nextActions = await issueCustomerInfoRequest(reservation);
+      const customerInfoRequest = await issueCustomerInfoRequest(reservation);
+      const [signatureRequest, paymentRequest] = await Promise.all([
+        issuePortalRequest('signature', reservation),
+        issuePortalRequest('payment', reservation)
+      ]);
       return {
         bookingType: 'RENTAL',
         tenant: { id: tenant.id, name: tenant.name, slug: tenant.slug },
@@ -844,7 +890,12 @@ export const bookingEngineService = {
               type: 'OWN_POLICY',
               ownPolicyNumber: insuranceSelection?.ownPolicyNumber ? String(insuranceSelection.ownPolicyNumber).trim() : ''
             },
-        nextActions
+        nextActions: {
+          customerInfo: customerInfoRequest,
+          signature: signatureRequest,
+          payment: paymentRequest,
+          primaryStep: 'customer-info'
+        }
       };
     }
 
@@ -860,8 +911,26 @@ export const bookingEngineService = {
     }, { tenantId: tenant.id });
 
     const nextActions = trip?.reservation
-      ? await issueCustomerInfoRequest(trip.reservation)
-      : { link: '', expiresAt: null, emailSent: false, warning: 'Trip created without linked reservation workflow' };
+      ? {
+          customerInfo: await issueCustomerInfoRequest(trip.reservation),
+          ...(await (async () => {
+            const [signature, payment] = await Promise.all([
+              issuePortalRequest('signature', trip.reservation),
+              issuePortalRequest('payment', trip.reservation)
+            ]);
+            return {
+              signature,
+              payment,
+              primaryStep: 'customer-info'
+            };
+          })())
+        }
+      : {
+          customerInfo: { kind: 'customer-info', link: '', expiresAt: null, emailSent: false, warning: 'Trip created without linked reservation workflow' },
+          signature: { kind: 'signature', link: '', expiresAt: null, emailSent: false, warning: 'Trip created without linked reservation workflow' },
+          payment: { kind: 'payment', link: '', expiresAt: null, emailSent: false, warning: 'Trip created without linked reservation workflow' },
+          primaryStep: 'customer-info'
+        };
 
     return {
       bookingType: 'CAR_SHARING',
