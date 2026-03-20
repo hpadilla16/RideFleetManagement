@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
+import { useRouter } from 'next/navigation';
 import { api } from '../../lib/client';
 
 function toLocalInputValue(date) {
@@ -47,6 +48,7 @@ function BookingCard({ title, subtitle, meta, quote, cta, onClick }) {
 }
 
 export default function PublicBookingPage() {
+  const router = useRouter();
   const [bootstrap, setBootstrap] = useState(null);
   const [tenantSlug, setTenantSlug] = useState('');
   const [searchMode, setSearchMode] = useState('RENTAL');
@@ -70,7 +72,6 @@ export default function PublicBookingPage() {
     licenseState: ''
   });
   const [submitting, setSubmitting] = useState(false);
-  const [confirmation, setConfirmation] = useState(null);
 
   const loadBootstrap = async (slug) => {
     setLoadingBootstrap(true);
@@ -123,7 +124,6 @@ export default function PublicBookingPage() {
     setSearching(true);
     setError('');
     setSelectedResult(null);
-    setConfirmation(null);
     try {
       const endpoint = searchMode === 'RENTAL'
         ? '/api/public/booking/rental-search'
@@ -438,7 +438,6 @@ export default function PublicBookingPage() {
                     onClick={async () => {
                       setSubmitting(true);
                       setError('');
-                      setConfirmation(null);
                       try {
                         const payload = await api('/api/public/booking/checkout', {
                           method: 'POST',
@@ -454,7 +453,10 @@ export default function PublicBookingPage() {
                             customer: checkoutState
                           })
                         });
-                        setConfirmation(payload);
+                        if (typeof window !== 'undefined') {
+                          sessionStorage.setItem('fleet_public_booking_confirmation', JSON.stringify(payload));
+                        }
+                        router.push('/book/confirmation');
                       } catch (err) {
                         setError(err.message);
                       } finally {
@@ -467,25 +469,6 @@ export default function PublicBookingPage() {
                 </div>
               </div>
             </div>
-            {confirmation ? (
-              <div className="surface-note">
-                <strong>{confirmation.bookingType === 'RENTAL' ? `Reservation ${confirmation.reservation?.reservationNumber}` : `Trip ${confirmation.trip?.tripCode}`}</strong>
-                <br />
-                {confirmation.bookingType === 'RENTAL'
-                  ? `Rental booking created at ${fmtMoney(confirmation.reservation?.estimatedTotal)}`
-                  : `Car sharing trip created at ${fmtMoney(confirmation.trip?.quotedTotal)}`}
-                <br />
-                Next step: request customer information is already ready.
-                <br />
-                {confirmation.nextActions?.warning ? confirmation.nextActions.warning : (confirmation.nextActions?.emailSent ? 'Customer info email sent.' : 'Manual customer info link generated.')}
-                {confirmation.nextActions?.link ? (
-                  <>
-                    <br />
-                    <a href={confirmation.nextActions.link} target="_blank" rel="noreferrer"><strong>Open customer pre-check-in link</strong></a>
-                  </>
-                ) : null}
-              </div>
-            ) : null}
           </section>
         ) : null}
       </div>
