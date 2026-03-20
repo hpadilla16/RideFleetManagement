@@ -60,6 +60,17 @@ export default function PublicBookingPage() {
   const [searching, setSearching] = useState(false);
   const [error, setError] = useState('');
   const [selectedResult, setSelectedResult] = useState(null);
+  const [checkoutState, setCheckoutState] = useState({
+    firstName: '',
+    lastName: '',
+    email: '',
+    phone: '',
+    dateOfBirth: '',
+    licenseNumber: '',
+    licenseState: ''
+  });
+  const [submitting, setSubmitting] = useState(false);
+  const [confirmation, setConfirmation] = useState(null);
 
   const loadBootstrap = async (slug) => {
     setLoadingBootstrap(true);
@@ -112,6 +123,7 @@ export default function PublicBookingPage() {
     setSearching(true);
     setError('');
     setSelectedResult(null);
+    setConfirmation(null);
     try {
       const endpoint = searchMode === 'RENTAL'
         ? '/api/public/booking/rental-search'
@@ -365,20 +377,115 @@ export default function PublicBookingPage() {
           <section className="glass card-lg section-card">
             <div className="row-between">
               <div>
-                <div className="section-title">Selected Result</div>
-                <p className="ui-muted">This panel is the bridge into the future booking flow for web and app.</p>
+                <div className="section-title">Checkout Foundation</div>
+                <p className="ui-muted">Turn the selected quote into a live reservation or trip and immediately kick off customer info collection.</p>
               </div>
               <button type="button" className="button-subtle" onClick={() => setSelectedResult(null)}>Clear</button>
             </div>
-            <div className="surface-note">
-              <strong>{searchMode === 'RENTAL' ? selectedResult.vehicleType?.name : selectedResult.title}</strong>
-              <br />
-              {searchMode === 'RENTAL'
-                ? `Pickup ${results?.pickupLocation?.name || ''} · ${fmtMoney(selectedResult.quote?.estimatedTripTotal)} estimated total`
-                : `${selectedResult.vehicle?.label || ''} · ${fmtMoney(selectedResult.quote?.total)} projected total`}
-              <br />
-              Next slice will convert this selected quote into a real public booking path with guest checkout and reservation/trip creation.
+            <div className="split-panel">
+              <div className="surface-note">
+                <strong>{searchMode === 'RENTAL' ? selectedResult.vehicleType?.name : selectedResult.title}</strong>
+                <br />
+                {searchMode === 'RENTAL'
+                  ? `Pickup ${results?.pickupLocation?.name || ''} · ${fmtMoney(selectedResult.quote?.estimatedTripTotal)} estimated total`
+                  : `${selectedResult.vehicle?.label || ''} · ${fmtMoney(selectedResult.quote?.total)} projected total`}
+                <br />
+                {searchMode === 'RENTAL'
+                  ? `Deposit due now: ${fmtMoney(selectedResult.quote?.depositAmountDue)}`
+                  : `Host earns ${fmtMoney(selectedResult.quote?.hostEarnings)} · Platform fee ${fmtMoney(selectedResult.quote?.platformFee)}`}
+              </div>
+
+              <div className="section-card">
+                <div className="section-title">Guest Details</div>
+                <div className="form-grid-2">
+                  <div>
+                    <div className="label">First Name</div>
+                    <input value={checkoutState.firstName} onChange={(event) => setCheckoutState((current) => ({ ...current, firstName: event.target.value }))} />
+                  </div>
+                  <div>
+                    <div className="label">Last Name</div>
+                    <input value={checkoutState.lastName} onChange={(event) => setCheckoutState((current) => ({ ...current, lastName: event.target.value }))} />
+                  </div>
+                </div>
+                <div className="form-grid-2">
+                  <div>
+                    <div className="label">Email</div>
+                    <input type="email" value={checkoutState.email} onChange={(event) => setCheckoutState((current) => ({ ...current, email: event.target.value }))} />
+                  </div>
+                  <div>
+                    <div className="label">Phone</div>
+                    <input value={checkoutState.phone} onChange={(event) => setCheckoutState((current) => ({ ...current, phone: event.target.value }))} />
+                  </div>
+                </div>
+                <div className="form-grid-3">
+                  <div>
+                    <div className="label">Date of Birth</div>
+                    <input type="date" value={checkoutState.dateOfBirth} onChange={(event) => setCheckoutState((current) => ({ ...current, dateOfBirth: event.target.value }))} />
+                  </div>
+                  <div>
+                    <div className="label">License Number</div>
+                    <input value={checkoutState.licenseNumber} onChange={(event) => setCheckoutState((current) => ({ ...current, licenseNumber: event.target.value }))} />
+                  </div>
+                  <div>
+                    <div className="label">License State</div>
+                    <input value={checkoutState.licenseState} onChange={(event) => setCheckoutState((current) => ({ ...current, licenseState: event.target.value }))} />
+                  </div>
+                </div>
+                <div className="inline-actions">
+                  <button
+                    type="button"
+                    disabled={submitting}
+                    onClick={async () => {
+                      setSubmitting(true);
+                      setError('');
+                      setConfirmation(null);
+                      try {
+                        const payload = await api('/api/public/booking/checkout', {
+                          method: 'POST',
+                          body: JSON.stringify({
+                            tenantSlug,
+                            searchType,
+                            pickupAt,
+                            returnAt,
+                            pickupLocationId,
+                            returnLocationId,
+                            vehicleTypeId: searchMode === 'RENTAL' ? selectedResult?.vehicleType?.id : null,
+                            listingId: searchMode === 'CAR_SHARING' ? selectedResult?.id : null,
+                            customer: checkoutState
+                          })
+                        });
+                        setConfirmation(payload);
+                      } catch (err) {
+                        setError(err.message);
+                      } finally {
+                        setSubmitting(false);
+                      }
+                    }}
+                  >
+                    {submitting ? 'Creating Booking...' : `Create ${searchMode === 'RENTAL' ? 'Reservation' : 'Trip'} Request`}
+                  </button>
+                </div>
+              </div>
             </div>
+            {confirmation ? (
+              <div className="surface-note">
+                <strong>{confirmation.bookingType === 'RENTAL' ? `Reservation ${confirmation.reservation?.reservationNumber}` : `Trip ${confirmation.trip?.tripCode}`}</strong>
+                <br />
+                {confirmation.bookingType === 'RENTAL'
+                  ? `Rental booking created at ${fmtMoney(confirmation.reservation?.estimatedTotal)}`
+                  : `Car sharing trip created at ${fmtMoney(confirmation.trip?.quotedTotal)}`}
+                <br />
+                Next step: request customer information is already ready.
+                <br />
+                {confirmation.nextActions?.warning ? confirmation.nextActions.warning : (confirmation.nextActions?.emailSent ? 'Customer info email sent.' : 'Manual customer info link generated.')}
+                {confirmation.nextActions?.link ? (
+                  <>
+                    <br />
+                    <a href={confirmation.nextActions.link} target="_blank" rel="noreferrer"><strong>Open customer pre-check-in link</strong></a>
+                  </>
+                ) : null}
+              </div>
+            ) : null}
           </section>
         ) : null}
       </div>

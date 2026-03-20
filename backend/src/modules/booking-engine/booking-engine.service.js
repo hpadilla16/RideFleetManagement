@@ -1,5 +1,10 @@
+import crypto from 'node:crypto';
 import { prisma } from '../../lib/prisma.js';
 import { ratesService } from '../rates/rates.service.js';
+import { reservationsService } from '../reservations/reservations.service.js';
+import { carSharingService } from '../car-sharing/car-sharing.service.js';
+import { sendEmail } from '../../lib/mailer.js';
+import { settingsService } from '../settings/settings.service.js';
 
 function parseLocationConfig(raw) {
   try {
@@ -35,6 +40,105 @@ function ceilTripDays(startAt, endAt) {
 
 function money(value) {
   return Number(Number(value || 0).toFixed(2));
+}
+
+function generateReservationNumber(prefix = 'WEB') {
+  return `${prefix}-${Date.now().toString().slice(-8)}${crypto.randomBytes(2).toString('hex').toUpperCase()}`;
+}
+
+function customerName(customer) {
+  return `${customer?.firstName || ''} ${customer?.lastName || ''}`.trim() || 'Customer';
+}
+
+async function upsertPublicCustomer(tenantId, input = {}) {
+  const email = String(input?.email || '').trim().toLowerCase();
+  const phone = String(input?.phone || '').trim();
+  const firstName = String(input?.firstName || '').trim();
+  const lastName = String(input?.lastName || '').trim();
+  if (!firstName || !lastName || !email || !phone) {
+    throw new Error('customer firstName, lastName, email, and phone are required');
+  }
+
+  const existing = await prisma.customer.findFirst({
+    where: { tenantId, email },
+    select: { id: true }
+  });
+
+  const payload = {
+    tenantId,
+    firstName,
+    lastName,
+    email,
+    phone,
+    dateOfBirth: input?.dateOfBirth ? new Date(input.dateOfBirth) : undefined,
+    licenseNumber: input?.licenseNumber ? String(input.licenseNumber).trim() : undefined,
+    licenseState: input?.licenseState ? String(input.licenseState).trim() : undefined,
+    address1: input?.address1 ? String(input.address1).trim() : undefined,
+    address2: input?.address2 ? String(input.address2).trim() : undefined,
+    city: input?.city ? String(input.city).trim() : undefined,
+    state: input?.state ? String(input.state).trim() : undefined,
+    zip: input?.zip ? String(input.zip).trim() : undefined,
+    country: input?.country ? String(input.country).trim() : undefined
+  };
+
+  if (existing) {
+    return prisma.customer.update({
+      where: { id: existing.id },
+      data: payload
+    });
+  }
+
+  return prisma.customer.create({ data: payload });
+}
+
+async function issueCustomerInfoRequest(reservation) {
+  const fullReservation = await prisma.reservation.findUnique({
+    where: { id: reservation.id },
+    include: {
+      customer: true,
+      pickupLocation: true
+    }
+  });
+  if (!fullReservation) throw new Error('Reservation not found after booking creation');
+
+  const token = crypto.randomBytes(24).toString('hex');
+  const expiresAt = new Date(Date.now() + 1000 * 60 * 60 * 24 * 2);
+  const base = process.env.CUSTOMER_PORTAL_BASE_URL || 'http://localhost:3000';
+  const link = `${base.replace(/\/$/, '')}/customer/precheckin?token=${token}`;
+  const note = `[PUBLIC BOOKING REQUEST CUSTOMER INFO ${new Date().toISOString()}] token issued`;
+  await prisma.reservation.update({
+    where: { id: fullReservation.id },
+    data: {
+      customerInfoToken: token,
+      customerInfoTokenExpiresAt: expiresAt,
+      notes: fullReservation.notes ? `${fullReservation.notes}\n${note}` : note
+    }
+  });
+
+  let emailSent = false;
+  let warning = null;
+  if (fullReservation.customer?.email) {
+    const tpl = await settingsService.getEmailTemplates({ tenantId: fullReservation.tenantId || null });
+    const render = (value = '') => String(value)
+      .replaceAll('{{customerName}}', customerName(fullReservation.customer))
+      .replaceAll('{{reservationNumber}}', String(fullReservation.reservationNumber || ''))
+      .replaceAll('{{link}}', link)
+      .replaceAll('{{expiresAt}}', expiresAt.toISOString())
+      .replaceAll('{{companyName}}', fullReservation.pickupLocation?.name || 'Ride Fleet');
+    try {
+      await sendEmail({
+        to: fullReservation.customer.email,
+        subject: render(tpl.requestCustomerInfoSubject),
+        text: render(tpl.requestCustomerInfoBody),
+        html: render(tpl.requestCustomerInfoHtml || String(tpl.requestCustomerInfoBody || '').replaceAll('\n', '<br/>'))
+      });
+      emailSent = true;
+    } catch (mailError) {
+      warning = `Unable to send customer information request email: ${String(mailError?.message || mailError)}`;
+    }
+  }
+
+  return { link, expiresAt, emailSent, warning };
 }
 
 function depositSnapshot({ location, quote, addOnsTotal = 0 }) {
@@ -424,6 +528,140 @@ export const bookingEngineService = {
       tenant: { id: tenant.id, name: tenant.name, slug: tenant.slug },
       listing: detail,
       quote: blocked || invalidMinDays ? null : computeCarSharingQuote(listing, overlappingWindows, pickupDate, returnDate)
+    };
+  },
+
+  async createPublicBooking(input = {}) {
+    const tenant = await resolvePublicTenant({
+      tenantSlug: input?.tenantSlug,
+      tenantId: input?.tenantId
+    });
+    if (!tenant) throw new Error('tenant is required');
+
+    const searchType = String(input?.searchType || '').trim().toUpperCase();
+    if (!['RENTAL', 'CAR_SHARING'].includes(searchType)) {
+      throw new Error('searchType must be RENTAL or CAR_SHARING');
+    }
+
+    const customer = await upsertPublicCustomer(tenant.id, input?.customer || {});
+
+    if (searchType === 'RENTAL') {
+      const search = await this.searchRental({
+        tenantId: tenant.id,
+        pickupLocationId: input?.pickupLocationId,
+        pickupAt: input?.pickupAt,
+        returnAt: input?.returnAt
+      });
+      const selected = (search.results || []).find((row) => row.vehicleType?.id === String(input?.vehicleTypeId || ''));
+      if (!selected) throw new Error('Selected rental vehicle type is no longer available');
+      if (!selected.availability?.available) throw new Error('Selected rental vehicle type is sold out for those dates');
+
+      const reservation = await reservationsService.create({
+        reservationNumber: generateReservationNumber('WEB'),
+        sourceRef: `PUBLICBOOK:${crypto.randomBytes(8).toString('hex')}`,
+        status: selected.deposit?.required ? 'NEW' : 'CONFIRMED',
+        customerId: customer.id,
+        vehicleTypeId: selected.vehicleType.id,
+        pickupAt: input.pickupAt,
+        returnAt: input.returnAt,
+        pickupLocationId: input.pickupLocationId,
+        returnLocationId: input.returnLocationId || input.pickupLocationId,
+        dailyRate: selected.quote.dailyRate,
+        estimatedTotal: selected.quote.total,
+        paymentStatus: 'PENDING',
+        sendConfirmationEmail: false,
+        notes: '[PUBLIC BOOKING] Created from booking web'
+      }, { tenantId: tenant.id });
+
+      await prisma.reservationPricingSnapshot.upsert({
+        where: { reservationId: reservation.id },
+        create: {
+          reservationId: reservation.id,
+          dailyRate: selected.quote.dailyRate,
+          taxRate: Number(search.location?.taxRate || 0),
+          depositRequired: !!selected.deposit?.required,
+          depositMode: selected.deposit?.mode || null,
+          depositValue: selected.deposit?.value ?? null,
+          depositAmountDue: selected.deposit?.amountDue ?? 0,
+          securityDepositRequired: !!selected.deposit?.securityDepositRequired,
+          securityDepositAmount: selected.deposit?.securityDepositAmount ?? 0,
+          source: 'PUBLIC_BOOKING'
+        },
+        update: {
+          dailyRate: selected.quote.dailyRate,
+          taxRate: Number(search.location?.taxRate || 0),
+          depositRequired: !!selected.deposit?.required,
+          depositMode: selected.deposit?.mode || null,
+          depositValue: selected.deposit?.value ?? null,
+          depositAmountDue: selected.deposit?.amountDue ?? 0,
+          securityDepositRequired: !!selected.deposit?.securityDepositRequired,
+          securityDepositAmount: selected.deposit?.securityDepositAmount ?? 0,
+          source: 'PUBLIC_BOOKING'
+        }
+      });
+
+      const nextActions = await issueCustomerInfoRequest(reservation);
+      return {
+        bookingType: 'RENTAL',
+        tenant: { id: tenant.id, name: tenant.name, slug: tenant.slug },
+        customer: {
+          id: customer.id,
+          firstName: customer.firstName,
+          lastName: customer.lastName,
+          email: customer.email,
+          phone: customer.phone
+        },
+        reservation: {
+          id: reservation.id,
+          reservationNumber: reservation.reservationNumber,
+          status: reservation.status,
+          estimatedTotal: money(reservation.estimatedTotal),
+          pickupAt: reservation.pickupAt,
+          returnAt: reservation.returnAt
+        },
+        nextActions
+      };
+    }
+
+    const trip = await carSharingService.createTrip({
+      tenantId: tenant.id,
+      listingId: input?.listingId,
+      guestCustomerId: customer.id,
+      scheduledPickupAt: input?.pickupAt,
+      scheduledReturnAt: input?.returnAt,
+      pickupLocationId: input?.pickupLocationId || null,
+      returnLocationId: input?.returnLocationId || input?.pickupLocationId || null,
+      notes: '[PUBLIC BOOKING] Created from booking web'
+    }, { tenantId: tenant.id });
+
+    const nextActions = trip?.reservation
+      ? await issueCustomerInfoRequest(trip.reservation)
+      : { link: '', expiresAt: null, emailSent: false, warning: 'Trip created without linked reservation workflow' };
+
+    return {
+      bookingType: 'CAR_SHARING',
+      tenant: { id: tenant.id, name: tenant.name, slug: tenant.slug },
+      customer: {
+        id: customer.id,
+        firstName: customer.firstName,
+        lastName: customer.lastName,
+        email: customer.email,
+        phone: customer.phone
+      },
+      trip: {
+        id: trip.id,
+        tripCode: trip.tripCode,
+        status: trip.status,
+        quotedTotal: money(trip.quotedTotal),
+        hostEarnings: money(trip.hostEarnings),
+        platformFee: money(trip.platformFee)
+      },
+      reservation: trip?.reservation ? {
+        id: trip.reservation.id,
+        reservationNumber: trip.reservation.reservationNumber,
+        status: trip.reservation.status
+      } : null,
+      nextActions
     };
   }
 };

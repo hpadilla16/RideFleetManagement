@@ -38,3 +38,15 @@ publicBookingRouter.post('/car-sharing-search', async (req, res, next) => {
     next(error);
   }
 });
+
+publicBookingRouter.post('/checkout', async (req, res, next) => {
+  try {
+    const payload = await publicBookingService.createBooking(req.body || {});
+    res.status(201).json(payload);
+  } catch (error) {
+    if (/required|available|sold out|not found|not enabled|after/i.test(String(error?.message || ''))) {
+      return res.status(400).json({ error: error.message });
+    }
+    next(error);
+  }
+});

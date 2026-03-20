@@ -99,5 +99,9 @@ export const publicBookingService = {
         activeWindowCount: 0
       }))
     };
+  },
+
+  async createBooking(input = {}) {
+    return bookingEngineService.createPublicBooking(input);
   }
 };
