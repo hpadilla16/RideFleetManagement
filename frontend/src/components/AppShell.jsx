@@ -14,6 +14,7 @@ const NAV_ITEMS = [
   { href: '/planner', label: 'Planner' },
   { href: '/reports', label: 'Reports' },
   { href: '/car-sharing', label: 'Car Sharing', feature: 'carSharing' },
+  { href: '/host', label: 'Host App', feature: 'carSharing' },
   { href: '/settings', label: 'Settings' },
   { href: '/tenants', label: 'Tenants', superOnly: true },
   { href: '/settings/security', label: 'Security', adminOnly: true }

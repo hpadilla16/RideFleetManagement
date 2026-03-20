@@ -21,6 +21,7 @@ import { commissionsRouter } from './modules/commissions/commissions.routes.js';
 import { carSharingRouter } from './modules/car-sharing/car-sharing.routes.js';
 import { peopleRouter } from './modules/people/people.routes.js';
 import { publicBookingRouter } from './modules/public-booking/public-booking.routes.js';
+import { hostAppRouter } from './modules/host-app/host-app.routes.js';
 import { buildOpenApiSpec, swaggerHtml } from './docs/openapi.js';
 
 assertAuthConfig();
@@ -45,6 +46,7 @@ app.get(['/api/docs', '/api/docs/'], (_req, res) => {
 app.use('/api/auth', authRouter);
 app.use('/api/public', customerPortalRouter);
 app.use('/api/public/booking', publicBookingRouter);
+app.use('/api/host-app', requireAuth, hostAppRouter);
 
 app.use('/api/reservations', requireAuth, reservationsRouter);
 app.use('/api/customers', requireAuth, customersRouter);
