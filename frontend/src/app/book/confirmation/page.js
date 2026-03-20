@@ -2,9 +2,18 @@
 
 import Link from 'next/link';
 import { useEffect, useState } from 'react';
+import { API_BASE } from '../../../lib/client';
 
 function fmtMoney(value) {
   return `$${Number(value || 0).toFixed(2)}`;
+}
+
+function statusTone(status) {
+  const value = String(status || '').toLowerCase();
+  if (value === 'completed') return { color: '#12633d', background: 'rgba(43, 174, 96, 0.14)' };
+  if (value === 'active' || value === 'partial') return { color: '#10568b', background: 'rgba(48, 135, 214, 0.14)' };
+  if (value === 'requested') return { color: '#7a4f08', background: 'rgba(255, 191, 71, 0.18)' };
+  return { color: '#6f5b8f', background: 'rgba(111, 91, 143, 0.1)' };
 }
 
 function resolvePortalAction(confirmation, key) {
@@ -15,8 +24,22 @@ function resolvePortalAction(confirmation, key) {
   return null;
 }
 
+function tokenFromLink(link) {
+  if (!link) return '';
+  try {
+    return new URL(link).searchParams.get('token') || '';
+  } catch {
+    return '';
+  }
+}
+
+function timelineStatus(portal, key) {
+  return portal?.timeline?.find((item) => item.key === key) || null;
+}
+
 export default function PublicBookingConfirmationPage() {
   const [confirmation, setConfirmation] = useState(null);
+  const [portalStatus, setPortalStatus] = useState(null);
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -27,12 +50,43 @@ export default function PublicBookingConfirmationPage() {
     } catch {}
   }, []);
 
+  useEffect(() => {
+    const customerInfoLink = resolvePortalAction(confirmation, 'customerInfo')?.link;
+    const token = tokenFromLink(customerInfoLink);
+    if (!token) {
+      setPortalStatus(null);
+      return;
+    }
+
+    let ignore = false;
+    (async () => {
+      try {
+        const res = await fetch(`${API_BASE}/api/public/customer-info/${encodeURIComponent(token)}`, {
+          method: 'GET',
+          cache: 'no-store'
+        });
+        if (!res.ok) return;
+        const json = await res.json();
+        if (!ignore) setPortalStatus(json?.portal || null);
+      } catch {
+        if (!ignore) setPortalStatus(null);
+      }
+    })();
+
+    return () => {
+      ignore = true;
+    };
+  }, [confirmation]);
+
   const title = confirmation?.bookingType === 'CAR_SHARING'
     ? `Trip ${confirmation?.trip?.tripCode || ''} created`
     : `Reservation ${confirmation?.reservation?.reservationNumber || ''} created`;
   const customerInfoAction = resolvePortalAction(confirmation, 'customerInfo');
   const signatureAction = resolvePortalAction(confirmation, 'signature');
   const paymentAction = resolvePortalAction(confirmation, 'payment');
+  const customerInfoLive = timelineStatus(portalStatus, 'customerInfo');
+  const signatureLive = timelineStatus(portalStatus, 'signature');
+  const paymentLive = timelineStatus(portalStatus, 'payment');
 
   return (
     <main style={{ minHeight: '100vh', padding: '22px clamp(16px, 3vw, 34px) 42px' }}>
@@ -128,6 +182,41 @@ export default function PublicBookingConfirmationPage() {
 
             <div className="glass card-lg section-card">
               <div className="section-title">Customer Next Step</div>
+              {portalStatus ? (
+                <div className="stack" style={{ gap: 10 }}>
+                  {[customerInfoLive, signatureLive, paymentLive].filter(Boolean).map((item) => {
+                    const tone = statusTone(item.status);
+                    return (
+                      <div key={item.key} className="surface-note" style={{ display: 'grid', gap: 8 }}>
+                        <div className="row-between" style={{ gap: 12, alignItems: 'center' }}>
+                          <strong>{item.label}</strong>
+                          <span
+                            style={{
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              minHeight: 28,
+                              padding: '0 10px',
+                              borderRadius: 999,
+                              background: tone.background,
+                              color: tone.color,
+                              fontSize: 12,
+                              fontWeight: 700,
+                              textTransform: 'capitalize'
+                            }}
+                          >
+                            {item.status}
+                          </span>
+                        </div>
+                        <div style={{ color: '#55456f', lineHeight: 1.5 }}>{item.description || '-'}</div>
+                      </div>
+                    );
+                  })}
+                  <div className="surface-note">
+                    Live progress: <strong>{portalStatus.progress?.completedSteps || 0}/{portalStatus.progress?.totalSteps || 0}</strong>
+                    {' '}completed. Next action: <strong>{portalStatus.progress?.nextAction || 'Continue the customer workflow.'}</strong>
+                  </div>
+                </div>
+              ) : null}
               <div className="surface-note">
                 {customerInfoAction?.warning
                   ? customerInfoAction.warning
