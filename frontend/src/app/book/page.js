@@ -663,6 +663,11 @@ export default function PublicBookingPage() {
                     </div>
                   </div>
                 ) : null}
+                {searchMode === 'RENTAL' && !selectedResult?.additionalServices?.length ? (
+                  <div className="surface-note" style={{ marginBottom: 18 }}>
+                    No online additional services are configured for this rental yet. In `Settings > Additional Services`, make sure the service is active, matches this location/vehicle type, and has `Display Online` enabled.
+                  </div>
+                ) : null}
 
                 <div className="form-grid-2">
                   <div>

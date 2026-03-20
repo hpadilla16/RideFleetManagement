@@ -1623,6 +1623,7 @@ function SettingsInner({ token, me, logout }) {
 
               <div className="service-checks-grid">
                 <label className="label"><input type="checkbox" checked={serviceForm.mandatory} onChange={(e) => setServiceForm({ ...serviceForm, mandatory: e.target.checked })} /> Mandatory</label>
+                <label className="label"><input type="checkbox" checked={serviceForm.displayOnline} onChange={(e) => setServiceForm({ ...serviceForm, displayOnline: e.target.checked })} /> Display Online</label>
                 <label className="label"><input type="checkbox" checked={serviceForm.taxable} onChange={(e) => setServiceForm({ ...serviceForm, taxable: e.target.checked })} /> Taxable</label>
                 <label className="label"><input type="checkbox" checked={serviceForm.isActive} onChange={(e) => setServiceForm({ ...serviceForm, isActive: e.target.checked })} /> Active</label>
               </div>
@@ -1642,7 +1643,7 @@ function SettingsInner({ token, me, logout }) {
             </form>
 
             <table>
-              <thead><tr><th>Name</th><th>Type</th><th>Rate</th><th>Commission</th><th>Qty</th><th>Location</th><th>Active</th><th>Actions</th></tr></thead>
+              <thead><tr><th>Name</th><th>Type</th><th>Rate</th><th>Commission</th><th>Qty</th><th>Location</th><th>Online</th><th>Active</th><th>Actions</th></tr></thead>
               <tbody>
                 {services.map((s) => (
                   <tr key={s.id}>
@@ -1657,6 +1658,7 @@ function SettingsInner({ token, me, logout }) {
                     </td>
                     <td>{Number(s.defaultQty || 1).toFixed(2)}</td>
                     <td>{s.location?.name || 'All'}</td>
+                    <td>{s.displayOnline ? 'Yes' : 'No'}</td>
                     <td>{s.isActive ? 'Yes' : 'No'}</td>
                     <td style={{ display: 'flex', gap: 6 }}>
                       <button onClick={() => editService(s)}>Edit</button>
