@@ -54,7 +54,7 @@ export function PortalTimelineCard({ portal }) {
             const tone = statusTone(item.status);
             return (
               <div key={item.key} style={{ display: 'grid', gap: 6, paddingBottom: 12, borderBottom: '1px solid rgba(105, 85, 171, 0.12)' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, alignItems: 'center' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
                   <strong>{item.label}</strong>
                   <span style={{ ...portalStyles.secondaryButton, minHeight: 28, padding: '0 10px', border: 'none', background: tone.background, color: tone.color }}>
                     {item.status}
@@ -72,7 +72,7 @@ export function PortalTimelineCard({ portal }) {
         <h3 style={portalStyles.cardTitle}>Documents & Receipts</h3>
         <div style={{ display: 'grid', gap: 10 }}>
           {(portal.documents || []).map((doc) => (
-            <div key={doc.key} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, padding: '10px 0', borderBottom: '1px solid rgba(105, 85, 171, 0.12)' }}>
+            <div key={doc.key} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, padding: '10px 0', borderBottom: '1px solid rgba(105, 85, 171, 0.12)', flexWrap: 'wrap' }}>
               <div>
                 <div><strong>{doc.label}</strong></div>
                 <div style={{ fontSize: 12, color: '#746294' }}>{doc.available ? 'Available now' : 'Available after the step is completed'}</div>

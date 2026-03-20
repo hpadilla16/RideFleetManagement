@@ -1,5 +1,7 @@
 'use client';
 
+import { useEffect, useState } from 'react';
+
 export const portalStyles = {
   page: {
     minHeight: '100vh',
@@ -154,18 +156,42 @@ export const portalStyles = {
 };
 
 export function PortalFrame({ eyebrow = 'Ride Fleet Portal', title, subtitle, aside, children }) {
+  const [isCompact, setIsCompact] = useState(false);
+
+  useEffect(() => {
+    const update = () => setIsCompact(window.innerWidth < 980);
+    update();
+    window.addEventListener('resize', update);
+    return () => window.removeEventListener('resize', update);
+  }, []);
+
   return (
-    <main style={portalStyles.page}>
-      <div style={portalStyles.shell}>
-        <section style={portalStyles.hero}>
+    <main style={{
+      ...portalStyles.page,
+      padding: isCompact ? '18px 12px 40px' : portalStyles.page.padding
+    }}>
+      <div style={{ ...portalStyles.shell, gap: isCompact ? 14 : portalStyles.shell.gap }}>
+        <section style={{
+          ...portalStyles.hero,
+          borderRadius: isCompact ? 22 : portalStyles.hero.borderRadius,
+          padding: isCompact ? '22px 18px' : portalStyles.hero.padding
+        }}>
           <div style={portalStyles.eyebrow}>{eyebrow}</div>
-          <h1 style={portalStyles.heroTitle}>{title}</h1>
-          {subtitle ? <div style={portalStyles.heroSubtitle}>{subtitle}</div> : null}
+          <h1 style={{
+            ...portalStyles.heroTitle,
+            fontSize: isCompact ? 28 : portalStyles.heroTitle.fontSize,
+            lineHeight: isCompact ? 1.04 : portalStyles.heroTitle.lineHeight
+          }}>{title}</h1>
+          {subtitle ? <div style={{ ...portalStyles.heroSubtitle, fontSize: isCompact ? 14 : portalStyles.heroSubtitle.fontSize }}>{subtitle}</div> : null}
         </section>
 
-        <section style={portalStyles.grid}>
-          <div style={portalStyles.stack}>{children}</div>
-          <aside style={portalStyles.stack}>{aside}</aside>
+        <section style={{
+          ...portalStyles.grid,
+          gridTemplateColumns: isCompact ? 'minmax(0, 1fr)' : portalStyles.grid.gridTemplateColumns,
+          gap: isCompact ? 14 : portalStyles.grid.gap
+        }}>
+          <div style={{ ...portalStyles.stack, order: 1 }}>{children}</div>
+          <aside style={{ ...portalStyles.stack, order: isCompact ? 2 : 1 }}>{aside}</aside>
         </section>
       </div>
     </main>
