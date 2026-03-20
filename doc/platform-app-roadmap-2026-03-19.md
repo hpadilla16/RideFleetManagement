@@ -6,6 +6,7 @@ Organize Ride Fleet into one shared booking platform that can power:
 
 - public web booking for rental reservations
 - public web booking for car sharing trips
+- dealership loaner / courtesy contracts
 - guest mobile experience
 - host mobile experience
 - employee mobile operations
@@ -87,6 +88,18 @@ Operational app for non-car-sharing rental staff:
 - payments
 - delivery / collection
 
+### 6. Dealership Loaner Program
+
+Operational layer for dealership service departments:
+
+- service appointment / RO linkage
+- courtesy vs paid rental mode
+- insurance verification
+- liability acceptance
+- service-lane handoff
+- inspections
+- post-return recovery charges
+
 ## Core Platform Principle
 
 Build shared platform layers first.
@@ -97,6 +110,7 @@ Must power:
 
 - reservation quote
 - trip quote
+- courtesy / loaner contract quote or zero-rated courtesy assignment
 - availability search
 - taxes and fees
 - pricing rules
@@ -115,6 +129,7 @@ Must power:
 - timeline events
 - notifications
 - audit
+- dealership service-lane workflows
 
 ### Shared Identity And Roles
 
@@ -239,6 +254,23 @@ Phase 2:
 - mobile uploads and scan helpers
 - ops dashboard by location
 
+### Dealership Loaner Program
+
+Phase 1:
+
+- service appointment / RO reference
+- courtesy vs paid rental mode
+- liability and insurance handling
+- mobile courtesy contract
+- checkout / check-in inspection
+
+Phase 2:
+
+- service-lane queue
+- substitute vehicle assignment
+- reimbursement / recovery reporting
+- OEM or DMS integration layer
+
 ## Recommended Next Sprints
 
 ### Sprint 6
@@ -260,49 +292,8 @@ Deliverables:
 
 Goal:
 
-- build public booking web foundation
-
-Deliverables:
-
-- public listing detail page
-- rental booking search scaffold
-- quote API for rental and car sharing
-- reserve request flow
-- mobile-first responsive patterns for booking
-
-### Sprint 8
-
-Goal:
-
-- launch guest booking experience v1
-
-Deliverables:
-
-- guest portal upgraded into booking app shell
-- booking confirmation
-- trip/reservation timeline
-- payment and signature continuity across devices
-- saved session flow for guest users
-
-### Sprint 9
-
-Goal:
-
-- launch host app foundation
-
-Deliverables:
-
-- host login
-- host dashboard
-- listing management mobile layout
-- calendar / availability management
-- trip inbox / upcoming trips
-
-### Sprint 10
-
-Goal:
-
-- launch employee app foundation for traditional rental
+- launch employee app foundation
+- begin dealership loaner program foundation
 
 Deliverables:
 
@@ -311,8 +302,24 @@ Deliverables:
 - pre-check-in review
 - checkout / checkin
 - inspection and payment capture
+- loaner program data model and console scaffold
 
-### Sprint 11
+### Sprint 8
+
+Goal:
+
+- deepen guest and host apps
+- extend dealership loaner workflow v1
+
+Deliverables:
+
+- guest app continuity and wallet-style surfaces
+- host availability and earnings depth
+- dealership courtesy contract flow
+- insurance verification UX
+- quick service-lane inspection flow
+
+### Sprint 9
 
 Goal:
 
@@ -326,7 +333,7 @@ Deliverables:
 - employee delivery / collection
 - better mobile timeline and status UX
 
-### Sprint 12
+### Sprint 10
 
 Goal:
 

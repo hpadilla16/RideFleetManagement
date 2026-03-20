@@ -263,9 +263,75 @@ Y debe cubrir:
 
 - polish final:
   - responsive UX pass
-  - PWA readiness
-  - analytics/conversion tracking
-  - launch readiness
+- PWA readiness
+- analytics/conversion tracking
+- launch readiness
+
+## Actualizacion 2026-03-20
+
+Despues de cerrar `Sprint 6` en `main`, el orden de trabajo cambia para reflejar el avance real del producto y la oportunidad comercial mas fuerte siguiente.
+
+### Estado Real Cerrado
+
+`Sprint 6` ya dejo operativo:
+
+- `booking engine` compartido
+- `/book` para `rental` y `car sharing`
+- `/book/confirmation`
+- resume flow por referencia + email
+- `guest app` foundation
+- `host app` foundation
+- flujo guiado de `pre-check-in -> signature -> payment`
+
+### Nuevo Orden Recomendado
+
+#### Sprint 7
+
+Objetivo:
+
+- lanzar `employee app foundation`
+- comenzar `dealership loaner program foundation`
+- preparar material de demo / presentacion comercial
+
+Entregables:
+
+- `employee app` mobile-first shell
+- reservation lookup/create para staff
+- `pre-check-in review`, `checkout`, `check-in`, `inspections`, `payments`
+- modelo base de `dealership loaner`:
+  - `service appointment / RO`
+  - `courtesy vs paid rental`
+  - `insurance verification`
+  - `liability acceptance`
+- deck/demo outline y matriz de capacidades
+
+Resultado esperado:
+
+- un empleado puede completar un flujo operativo real desde telefono o tablet
+- el producto ya puede demostrarse como:
+  - rental
+  - car sharing
+  - dealership loaner
+  - one platform
+
+#### Sprint 8
+
+Objetivo:
+
+- ir a profundidad con `guest app`
+- ir a profundidad con `host app`
+- extender `dealership loaner workflow v1`
+
+Entregables:
+
+- `guest app` con continuidad y wallet de documentos
+- `host app` con disponibilidad, earnings y trip inbox mas fuerte
+- `dealership loaner` con flujo de service lane y courtesy contract
+
+Resultado esperado:
+
+- `guest` y `host` ya se sienten como apps reales
+- el `loaner program` se puede demoear end-to-end en contexto de dealership
 
 ### Referencia Nueva
 
