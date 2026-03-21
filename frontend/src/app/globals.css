@@ -386,6 +386,57 @@ tr:hover td { background: rgba(135,82,254,.05); }
   .button-subtle, button { width: auto; }
 }
 
+@media (max-width: 820px) {
+  .topbar {
+    gap: 10px;
+    align-items: stretch;
+  }
+  .topbar-primary {
+    align-items: center;
+    gap: 12px;
+  }
+  .topbar-identity {
+    display: grid;
+    gap: 2px;
+    flex: 1;
+    min-width: 0;
+  }
+  .topbar-name {
+    font-size: 16px;
+    line-height: 1.12;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 100%;
+  }
+  .topbar-role {
+    font-size: 10px;
+  }
+  .topbar-actions {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 8px;
+    width: 100%;
+  }
+  .topbar-action-btn {
+    width: 100%;
+    min-width: 0;
+    min-height: 44px;
+    padding: 10px 8px;
+    font-size: 13px;
+  }
+  .topbar-action-wide {
+    grid-column: span 3;
+  }
+  .mobile-menu-btn {
+    min-width: 52px;
+    width: 52px;
+    padding: 10px 0;
+    font-size: 22px;
+    line-height: 1;
+  }
+}
+
 /* iOS actions */
 .ios-actions-grid { display: grid; grid-template-columns: repeat(3, minmax(0,1fr)); gap: 10px; }
 .ios-action-card {
@@ -661,7 +712,7 @@ label input[type="checkbox"],
     align-items: stretch;
   }
   .topbar-primary {
-    align-items: flex-start;
+    align-items: center;
     gap: 12px;
   }
   .topbar-identity {
@@ -670,11 +721,11 @@ label input[type="checkbox"],
     flex: 1;
   }
   .topbar-name {
-    font-size: 17px;
-    line-height: 1.12;
-    white-space: normal;
-    overflow: visible;
-    text-overflow: initial;
+    font-size: 15px;
+    line-height: 1.1;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
   .topbar-actions {
     display: grid;
@@ -693,7 +744,8 @@ label input[type="checkbox"],
     grid-column: span 3;
   }
   .mobile-menu-btn {
-    min-width: 76px;
+    min-width: 52px;
+    width: 52px;
   }
   .brand-subtitle {
     font-size: 11px;

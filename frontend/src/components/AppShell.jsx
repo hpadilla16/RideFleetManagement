@@ -276,7 +276,14 @@ export function AppShell({ me, logout, children }) {
       <main className="content">
         <div className="topbar glass">
           <div className="topbar-primary">
-            <button className="mobile-menu-btn topbar-action-btn" onClick={() => setMobileOpen((v) => !v)}>Menu</button>
+            <button
+              className="mobile-menu-btn topbar-action-btn"
+              aria-label="Open navigation menu"
+              title="Open menu"
+              onClick={() => setMobileOpen((v) => !v)}
+            >
+              ☰
+            </button>
             <div className="topbar-identity">
               <div className="topbar-name">{me?.fullName || me?.name || me?.email || 'User'}</div>
               <div className="topbar-role">{me?.role || 'ADMIN'}</div>
