@@ -91,6 +91,15 @@ function parseLoanerPacket(raw) {
   }
 }
 
+function parseAuditMetadata(raw) {
+  try {
+    if (!raw) return {};
+    return typeof raw === 'string' ? JSON.parse(raw) : raw;
+  } catch {
+    return {};
+  }
+}
+
 function ReservationDetailInner({ token, me, logout }) {
   const { id } = useParams();
   const router = useRouter();
@@ -158,7 +167,7 @@ function ReservationDetailInner({ token, me, logout }) {
     try { return decodeURIComponent(escape(s)); } catch { return s; }
   };
   const load = async () => {
-    const [r, l, c, v, svc, fee, ip, pricingOut, paymentsOut] = await Promise.all([
+    const [r, l, c, v, svc, fee, ip, pricingOut, paymentsOut, logsOut] = await Promise.all([
       api(`/api/reservations/${id}`, {}, token),
       api('/api/locations', {}, token),
       api('/api/customers', {}, token),
@@ -167,11 +176,13 @@ function ReservationDetailInner({ token, me, logout }) {
       api('/api/fees', {}, token).catch(() => []),
       api('/api/settings/insurance-plans', {}, token).catch(() => []),
       api(`/api/reservations/${id}/pricing`, {}, token).catch(() => null),
-      api(`/api/reservations/${id}/payments`, {}, token).catch(() => [])
+      api(`/api/reservations/${id}/payments`, {}, token).catch(() => []),
+      api(`/api/reservations/${id}/audit-logs`, {}, token).catch(() => [])
     ]);
     setRow(r);
     setPricing(pricingOut);
     setPaymentRows(Array.isArray(paymentsOut) ? paymentsOut : []);
+    setAuditLogs(Array.isArray(logsOut) ? logsOut : []);
     setLocations(l);
     setCustomers(c);
     setVehicles(Array.isArray(v) ? v : []);
@@ -540,6 +551,49 @@ function ReservationDetailInner({ token, me, logout }) {
       return !['IN_MAINTENANCE', 'OUT_OF_SERVICE', 'ON_RENT'].includes(status);
     });
   }, [vehicles, row?.vehicleId]);
+  const loanerTimeline = useMemo(() => {
+    if (!isLoanerWorkflow || !row) return [];
+    const events = [];
+    const pushEvent = (at, label, detail, tone = 'neutral') => {
+      if (!at) return;
+      events.push({
+        at: new Date(at),
+        label,
+        detail,
+        tone
+      });
+    };
+
+    pushEvent(row.createdAt, 'Loaner Created', `Reservation ${row.reservationNumber} opened for service lane`, 'good');
+    pushEvent(row.loanerBillingSubmittedAt, 'Billing Submitted', `${row.loanerBillingMode || 'Loaner'} moved into ${row.loanerBillingStatus || 'DRAFT'}`, 'warn');
+    pushEvent(row.loanerBorrowerPacketCompletedAt, 'Borrower Packet Complete', row.loanerBorrowerPacketCompletedBy || 'Packet validated by staff', 'good');
+    pushEvent(row.customerInfoCompletedAt, 'Customer Info Completed', 'Guest finished pre-check-in details', 'good');
+    pushEvent(row.customerInfoReviewedAt, 'Pre-check-in Reviewed', row.customerInfoReviewNote || 'Docs reviewed by staff', 'neutral');
+    pushEvent(row.readyForPickupAt, 'Ready For Pickup', row.readyForPickupOverrideNote || 'Marked ready for service lane handoff', 'good');
+    pushEvent(row.signatureSignedAt, 'Agreement Signed', row.signatureSignedBy || 'Agreement executed', 'good');
+    pushEvent(row.loanerLastExtendedAt, 'Loaner Extended', 'Return window updated', 'warn');
+    pushEvent(row.loanerLastVehicleSwapAt, 'Vehicle Swapped', 'Replacement loaner assigned', 'warn');
+    pushEvent(row.loanerServiceCompletedAt, 'Service Completed', row.loanerCloseoutNotes || row.loanerServiceCompletedBy || 'Service marked complete', 'good');
+    pushEvent(row.loanerBillingSettledAt, 'Billing Settled', 'Billing responsibility closed out', 'good');
+
+    (Array.isArray(auditLogs) ? auditLogs : []).forEach((log) => {
+      const meta = parseAuditMetadata(log.metadata);
+      if (meta.dealershipLoanerReturnExceptionSaved && meta.flagged) {
+        pushEvent(log.createdAt, 'Return Exception Flagged', meta.notes || 'Return exception needs review', 'warn');
+      }
+      if (meta.dealershipLoanerBillingSaved && meta.loanerBillingStatus === 'DENIED') {
+        pushEvent(log.createdAt, 'Billing Denied', meta.loanerBillingAuthorizationRef || 'Billing was denied and needs follow-up', 'warn');
+      }
+      if (meta.dealershipLoanerAdvisorOpsSaved && meta.readyForPickup) {
+        pushEvent(log.createdAt, 'Advisor Marked Ready', meta.serviceAdvisorName || 'Service lane marked ready for pickup', 'good');
+      }
+    });
+
+    return events
+      .filter((event) => Number.isFinite(event.at?.getTime?.()))
+      .sort((a, b) => b.at.getTime() - a.at.getTime())
+      .slice(0, 12);
+  }, [auditLogs, isLoanerWorkflow, row]);
 
   const saveLoanerPacket = async () => {
     try {
@@ -1134,12 +1188,53 @@ setMsg('Charges updated');
                 </section>
 
                 <section className="glass card section-card">
+                  <div className="section-title">Billing Summary</div>
+                  <div className="grid2" style={{ marginBottom: 0 }}>
+                    <div><span className="label">Billing Mode</span><div>{row.loanerBillingMode || '-'}</div></div>
+                    <div><span className="label">Billing Status</span><div>{row.loanerBillingStatus || 'DRAFT'}</div></div>
+                    <div><span className="label">Estimate</span><div>{money(row.estimatedTotal || 0)}</div></div>
+                    <div><span className="label">Payment Status</span><div>{row.paymentStatus || 'PENDING'}</div></div>
+                    <div><span className="label">Agreement Total</span><div>{money(row?.rentalAgreement?.total || 0)}</div></div>
+                    <div><span className="label">Agreement Balance</span><div>{money(row?.rentalAgreement?.balance || 0)}</div></div>
+                    <div><span className="label">Billing Contact</span><div>{row.loanerBillingContactName || '-'}</div></div>
+                    <div><span className="label">Billing Email</span><div>{row.loanerBillingContactEmail || '-'}</div></div>
+                    <div><span className="label">Billing Phone</span><div>{row.loanerBillingContactPhone || '-'}</div></div>
+                    <div><span className="label">Auth Ref</span><div>{row.loanerBillingAuthorizationRef || '-'}</div></div>
+                  </div>
+                  {row.loanerBillingNotes ? (
+                    <div>
+                      <span className="label">Billing Notes</span>
+                      <div>{row.loanerBillingNotes}</div>
+                    </div>
+                  ) : null}
+                </section>
+
+                <section className="glass card section-card">
                   <div className="section-title">Return Exceptions</div>
                   <label className="label"><input type="checkbox" checked={loanerReturnForm.flagged} onChange={(e) => setLoanerReturnForm({ ...loanerReturnForm, flagged: e.target.checked })} /> Flag return exception</label>
                   <textarea rows={6} value={loanerReturnForm.loanerReturnExceptionNotes} onChange={(e) => setLoanerReturnForm({ ...loanerReturnForm, loanerReturnExceptionNotes: e.target.value })} placeholder="Fuel shortage, damage, odor, late return, missing docs, etc." />
                   <button type="button" onClick={saveLoanerReturnException}>
                     {loanerReturnForm.flagged ? 'Save Exception' : 'Clear Exception'}
                   </button>
+                </section>
+
+                <section className="glass card section-card">
+                  <div className="section-title">Service Lane Timeline</div>
+                  {loanerTimeline.length ? (
+                    <div className="stack">
+                      {loanerTimeline.map((event) => (
+                        <div key={`${event.label}-${event.at.toISOString()}`} className="surface-note" style={{ display: 'grid', gap: 6 }}>
+                          <div className="row-between" style={{ marginBottom: 0 }}>
+                            <strong>{event.label}</strong>
+                            <span className={`status-chip ${event.tone}`}>{event.at.toLocaleString()}</span>
+                          </div>
+                          <div>{event.detail}</div>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="surface-note">Timeline events will appear here as the loaner moves through service-lane operations.</div>
+                  )}
                 </section>
               </div>
             </div>
