@@ -302,6 +302,16 @@ export const reservationsService = {
           ? new Date(data.loanerLiabilityAcceptedAt)
           : (data.loanerLiabilityAccepted ? new Date() : null),
         loanerProgramNotes: data.loanerProgramNotes ?? null,
+        loanerBorrowerPacketJson: data.loanerBorrowerPacketJson ?? null,
+        loanerBorrowerPacketCompletedAt: data.loanerBorrowerPacketCompletedAt ? new Date(data.loanerBorrowerPacketCompletedAt) : null,
+        loanerBorrowerPacketCompletedBy: data.loanerBorrowerPacketCompletedBy ?? null,
+        loanerBillingContactName: data.loanerBillingContactName ?? null,
+        loanerBillingContactEmail: data.loanerBillingContactEmail ?? null,
+        loanerBillingContactPhone: data.loanerBillingContactPhone ?? null,
+        loanerBillingAuthorizationRef: data.loanerBillingAuthorizationRef ?? null,
+        loanerBillingNotes: data.loanerBillingNotes ?? null,
+        loanerReturnExceptionFlag: !!data.loanerReturnExceptionFlag,
+        loanerReturnExceptionNotes: data.loanerReturnExceptionNotes ?? null,
         customerId: data.customerId,
         vehicleId: assignedVehicleId,
         vehicleTypeId: data.vehicleTypeId ?? null,
@@ -365,6 +375,9 @@ export const reservationsService = {
       loanerLiabilityAcceptedAt: patch.loanerLiabilityAcceptedAt
         ? new Date(patch.loanerLiabilityAcceptedAt)
         : (patch.loanerLiabilityAccepted === true ? new Date() : undefined),
+      loanerBorrowerPacketCompletedAt: patch.loanerBorrowerPacketCompletedAt
+        ? new Date(patch.loanerBorrowerPacketCompletedAt)
+        : (patch.loanerBorrowerPacketCompletedAt === null ? null : undefined),
       pickupAt: patch.pickupAt ? new Date(patch.pickupAt) : undefined,
       returnAt: patch.returnAt ? new Date(patch.returnAt) : undefined
     };

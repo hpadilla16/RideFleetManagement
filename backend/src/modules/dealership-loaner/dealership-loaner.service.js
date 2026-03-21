@@ -36,6 +36,10 @@ function matchesQuery(query) {
 }
 
 function reservationCard(row) {
+  let packet = {};
+  try {
+    packet = row.loanerBorrowerPacketJson ? JSON.parse(row.loanerBorrowerPacketJson) : {};
+  } catch {}
   return {
     id: row.id,
     reservationNumber: row.reservationNumber,
@@ -51,6 +55,16 @@ function reservationCard(row) {
     loanerBillingMode: row.loanerBillingMode,
     serviceAdvisorName: row.serviceAdvisorName,
     estimatedServiceCompletionAt: row.estimatedServiceCompletionAt,
+    loanerBorrowerPacketCompletedAt: row.loanerBorrowerPacketCompletedAt,
+    loanerBorrowerPacketCompletedBy: row.loanerBorrowerPacketCompletedBy,
+    loanerBorrowerPacket: packet,
+    loanerBillingContactName: row.loanerBillingContactName,
+    loanerBillingContactEmail: row.loanerBillingContactEmail,
+    loanerBillingContactPhone: row.loanerBillingContactPhone,
+    loanerBillingAuthorizationRef: row.loanerBillingAuthorizationRef,
+    loanerBillingNotes: row.loanerBillingNotes,
+    loanerReturnExceptionFlag: !!row.loanerReturnExceptionFlag,
+    loanerReturnExceptionNotes: row.loanerReturnExceptionNotes,
     serviceVehicle: {
       year: row.serviceVehicleYear,
       make: row.serviceVehicleMake,
@@ -143,6 +157,19 @@ async function resolveCustomer(payload = {}, scope = {}) {
 
 function makeReservationNumber() {
   return `DL-${Date.now().toString().slice(-8)}`;
+}
+
+async function getLoanerReservationOrThrow(id, scope = {}) {
+  const row = await prisma.reservation.findFirst({
+    where: {
+      id,
+      workflowMode: 'DEALERSHIP_LOANER',
+      ...(scope?.tenantId ? { tenantId: scope.tenantId } : {})
+    },
+    include: includeReservation()
+  });
+  if (!row) throw new Error('Loaner reservation not found');
+  return row;
 }
 
 export const dealershipLoanerService = {
@@ -340,5 +367,112 @@ export const dealershipLoanerService = {
     }, scope);
 
     return reservationsService.getById(reservation.id, scope);
+  },
+
+  async getReservation(user, reservationId) {
+    const scope = tenantScope(user);
+    const row = await getLoanerReservationOrThrow(reservationId, scope);
+    return reservationCard(row);
+  },
+
+  async saveBorrowerPacket(user, reservationId, payload = {}) {
+    const scope = tenantScope(user);
+    const current = await getLoanerReservationOrThrow(reservationId, scope);
+    const packet = {
+      driverLicenseChecked: !!payload.driverLicenseChecked,
+      insuranceCardCollected: !!payload.insuranceCardCollected,
+      registrationConfirmed: !!payload.registrationConfirmed,
+      walkaroundCompleted: !!payload.walkaroundCompleted,
+      fuelAndMileageCaptured: !!payload.fuelAndMileageCaptured,
+      notes: String(payload.notes || '').trim() || null
+    };
+    const complete = packet.driverLicenseChecked
+      && packet.insuranceCardCollected
+      && packet.registrationConfirmed
+      && packet.walkaroundCompleted
+      && packet.fuelAndMileageCaptured;
+
+    const updated = await reservationsService.update(reservationId, {
+      loanerBorrowerPacketJson: JSON.stringify(packet),
+      loanerBorrowerPacketCompletedAt: complete ? new Date().toISOString() : null,
+      loanerBorrowerPacketCompletedBy: complete
+        ? (String(user?.fullName || '').trim() || String(user?.email || '').trim() || 'Staff')
+        : null
+    }, scope);
+
+    await prisma.auditLog.create({
+      data: {
+        tenantId: current.tenantId || user?.tenantId || null,
+        reservationId,
+        action: 'UPDATE',
+        actorUserId: user?.sub || user?.id || null,
+        metadata: JSON.stringify({
+          dealershipLoanerBorrowerPacketSaved: true,
+          complete,
+          packet
+        })
+      }
+    });
+
+    return reservationCard(updated);
+  },
+
+  async saveBilling(user, reservationId, payload = {}) {
+    const scope = tenantScope(user);
+    const current = await getLoanerReservationOrThrow(reservationId, scope);
+    const billingMode = payload.loanerBillingMode ? String(payload.loanerBillingMode).toUpperCase() : current.loanerBillingMode;
+
+    const updated = await reservationsService.update(reservationId, {
+      loanerBillingMode: billingMode,
+      loanerBillingContactName: String(payload.loanerBillingContactName || '').trim() || null,
+      loanerBillingContactEmail: String(payload.loanerBillingContactEmail || '').trim() || null,
+      loanerBillingContactPhone: String(payload.loanerBillingContactPhone || '').trim() || null,
+      loanerBillingAuthorizationRef: String(payload.loanerBillingAuthorizationRef || '').trim() || null,
+      loanerBillingNotes: String(payload.loanerBillingNotes || '').trim() || null
+    }, scope);
+
+    await prisma.auditLog.create({
+      data: {
+        tenantId: current.tenantId || user?.tenantId || null,
+        reservationId,
+        action: 'UPDATE',
+        actorUserId: user?.sub || user?.id || null,
+        metadata: JSON.stringify({
+          dealershipLoanerBillingSaved: true,
+          loanerBillingMode: updated.loanerBillingMode,
+          loanerBillingAuthorizationRef: updated.loanerBillingAuthorizationRef || null
+        })
+      }
+    });
+
+    return reservationCard(updated);
+  },
+
+  async saveReturnException(user, reservationId, payload = {}) {
+    const scope = tenantScope(user);
+    const current = await getLoanerReservationOrThrow(reservationId, scope);
+    const flagged = payload.flagged !== false;
+    const notes = String(payload.loanerReturnExceptionNotes || '').trim() || null;
+
+    const updated = await reservationsService.update(reservationId, {
+      loanerReturnExceptionFlag: flagged,
+      loanerReturnExceptionNotes: flagged ? notes : null
+    }, scope);
+
+    await prisma.auditLog.create({
+      data: {
+        tenantId: current.tenantId || user?.tenantId || null,
+        reservationId,
+        action: 'UPDATE',
+        actorUserId: user?.sub || user?.id || null,
+        metadata: JSON.stringify({
+          dealershipLoanerReturnExceptionSaved: true,
+          flagged,
+          notes
+        })
+      }
+    });
+
+    return reservationCard(updated);
   }
 };

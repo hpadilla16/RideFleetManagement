@@ -351,6 +351,16 @@ model Reservation {
   loanerLiabilityAccepted Boolean @default(false)
   loanerLiabilityAcceptedAt DateTime?
   loanerProgramNotes String?
+  loanerBorrowerPacketJson String?
+  loanerBorrowerPacketCompletedAt DateTime?
+  loanerBorrowerPacketCompletedBy String?
+  loanerBillingContactName String?
+  loanerBillingContactEmail String?
+  loanerBillingContactPhone String?
+  loanerBillingAuthorizationRef String?
+  loanerBillingNotes String?
+  loanerReturnExceptionFlag Boolean @default(false)
+  loanerReturnExceptionNotes String?
 
   customerId        String
   customer          Customer          @relation(fields: [customerId], references: [id])

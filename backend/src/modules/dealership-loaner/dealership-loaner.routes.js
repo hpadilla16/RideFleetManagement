@@ -54,6 +54,38 @@ dealershipLoanerRouter.get('/dashboard', async (req, res, next) => {
   }
 });
 
+dealershipLoanerRouter.get('/reservations/:id', async (req, res, next) => {
+  try {
+    res.json(await dealershipLoanerService.getReservation(req.user, req.params.id));
+  } catch (error) {
+    res.status(404).json({ error: error.message });
+  }
+});
+
+dealershipLoanerRouter.post('/reservations/:id/borrower-packet', async (req, res, next) => {
+  try {
+    res.json(await dealershipLoanerService.saveBorrowerPacket(req.user, req.params.id, req.body || {}));
+  } catch (error) {
+    res.status(400).json({ error: error.message });
+  }
+});
+
+dealershipLoanerRouter.post('/reservations/:id/billing', async (req, res, next) => {
+  try {
+    res.json(await dealershipLoanerService.saveBilling(req.user, req.params.id, req.body || {}));
+  } catch (error) {
+    res.status(400).json({ error: error.message });
+  }
+});
+
+dealershipLoanerRouter.post('/reservations/:id/return-exception', async (req, res, next) => {
+  try {
+    res.json(await dealershipLoanerService.saveReturnException(req.user, req.params.id, req.body || {}));
+  } catch (error) {
+    res.status(400).json({ error: error.message });
+  }
+});
+
 dealershipLoanerRouter.post('/intake', async (req, res, next) => {
   try {
     const row = await dealershipLoanerService.intake(req.user, req.body || {});
