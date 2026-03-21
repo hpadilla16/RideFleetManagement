@@ -276,18 +276,18 @@ export function AppShell({ me, logout, children }) {
       <main className="content">
         <div className="topbar glass">
           <div className="topbar-primary">
-            <button className="mobile-menu-btn" onClick={() => setMobileOpen((v) => !v)}>Menu</button>
+            <button className="mobile-menu-btn topbar-action-btn" onClick={() => setMobileOpen((v) => !v)}>Menu</button>
             <div className="topbar-identity">
               <div className="topbar-name">{me?.fullName || me?.name || me?.email || 'User'}</div>
-              <div className="label">{me?.role || 'ADMIN'}</div>
+              <div className="topbar-role">{me?.role || 'ADMIN'}</div>
             </div>
           </div>
 
           <div className="topbar-actions">
-            {canReturnSuper ? <button className="button-subtle" title="Return to Super Admin" onClick={returnToSuperAdmin}>Return To Super Admin</button> : null}
-            <button className="button-subtle" title="Toggle dark mode" onClick={() => setDarkMode((v) => !v)}>{darkMode ? 'Light' : 'Dark'}</button>
-            <button className="button-subtle" title="Lock screen" onClick={lockNow}>Lock</button>
-            <button onClick={logout}>Logout</button>
+            {canReturnSuper ? <button className="button-subtle topbar-action-btn topbar-action-wide" title="Return to Super Admin" onClick={returnToSuperAdmin}>Return</button> : null}
+            <button className="button-subtle topbar-action-btn" title="Toggle dark mode" onClick={() => setDarkMode((v) => !v)}>{darkMode ? 'Light' : 'Dark'}</button>
+            <button className="button-subtle topbar-action-btn" title="Lock screen" onClick={lockNow}>Lock</button>
+            <button className="topbar-action-btn" onClick={logout}>Logout</button>
           </div>
         </div>
 
