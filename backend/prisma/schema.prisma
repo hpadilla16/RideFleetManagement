@@ -375,6 +375,11 @@ model Reservation {
   loanerBillingSettledAt DateTime?
   serviceAdvisorNotes String?
   serviceAdvisorUpdatedAt DateTime?
+  loanerServiceCompletedAt DateTime?
+  loanerServiceCompletedBy String?
+  loanerCloseoutNotes String?
+  loanerLastExtendedAt DateTime?
+  loanerLastVehicleSwapAt DateTime?
 
   customerId        String
   customer          Customer          @relation(fields: [customerId], references: [id])

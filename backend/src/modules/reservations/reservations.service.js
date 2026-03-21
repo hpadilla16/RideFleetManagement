@@ -317,6 +317,11 @@ export const reservationsService = {
         loanerBillingSettledAt: data.loanerBillingSettledAt ? new Date(data.loanerBillingSettledAt) : null,
         serviceAdvisorNotes: data.serviceAdvisorNotes ?? null,
         serviceAdvisorUpdatedAt: data.serviceAdvisorUpdatedAt ? new Date(data.serviceAdvisorUpdatedAt) : null,
+        loanerServiceCompletedAt: data.loanerServiceCompletedAt ? new Date(data.loanerServiceCompletedAt) : null,
+        loanerServiceCompletedBy: data.loanerServiceCompletedBy ?? null,
+        loanerCloseoutNotes: data.loanerCloseoutNotes ?? null,
+        loanerLastExtendedAt: data.loanerLastExtendedAt ? new Date(data.loanerLastExtendedAt) : null,
+        loanerLastVehicleSwapAt: data.loanerLastVehicleSwapAt ? new Date(data.loanerLastVehicleSwapAt) : null,
         customerId: data.customerId,
         vehicleId: assignedVehicleId,
         vehicleTypeId: data.vehicleTypeId ?? null,
@@ -396,6 +401,15 @@ export const reservationsService = {
       serviceAdvisorUpdatedAt: patch.serviceAdvisorUpdatedAt
         ? new Date(patch.serviceAdvisorUpdatedAt)
         : (patch.serviceAdvisorUpdatedAt === null ? null : undefined),
+      loanerServiceCompletedAt: patch.loanerServiceCompletedAt
+        ? new Date(patch.loanerServiceCompletedAt)
+        : (patch.loanerServiceCompletedAt === null ? null : undefined),
+      loanerLastExtendedAt: patch.loanerLastExtendedAt
+        ? new Date(patch.loanerLastExtendedAt)
+        : (patch.loanerLastExtendedAt === null ? null : undefined),
+      loanerLastVehicleSwapAt: patch.loanerLastVehicleSwapAt
+        ? new Date(patch.loanerLastVehicleSwapAt)
+        : (patch.loanerLastVehicleSwapAt === null ? null : undefined),
       pickupAt: patch.pickupAt ? new Date(patch.pickupAt) : undefined,
       returnAt: patch.returnAt ? new Date(patch.returnAt) : undefined
     };

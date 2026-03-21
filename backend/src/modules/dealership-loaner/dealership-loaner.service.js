@@ -70,6 +70,11 @@ function reservationCard(row) {
     loanerBillingSettledAt: row.loanerBillingSettledAt,
     serviceAdvisorNotes: row.serviceAdvisorNotes,
     serviceAdvisorUpdatedAt: row.serviceAdvisorUpdatedAt,
+    loanerServiceCompletedAt: row.loanerServiceCompletedAt,
+    loanerServiceCompletedBy: row.loanerServiceCompletedBy,
+    loanerCloseoutNotes: row.loanerCloseoutNotes,
+    loanerLastExtendedAt: row.loanerLastExtendedAt,
+    loanerLastVehicleSwapAt: row.loanerLastVehicleSwapAt,
     serviceVehicle: {
       year: row.serviceVehicleYear,
       make: row.serviceVehicleMake,
@@ -556,6 +561,97 @@ export const dealershipLoanerService = {
           dealershipLoanerReturnExceptionSaved: true,
           flagged,
           notes
+        })
+      }
+    });
+
+    return reservationCard(updated);
+  },
+
+  async extendLoaner(user, reservationId, payload = {}) {
+    const scope = tenantScope(user);
+    const current = await getLoanerReservationOrThrow(reservationId, scope);
+    if (!payload.returnAt) throw new Error('New return date is required');
+
+    const updated = await reservationsService.update(reservationId, {
+      returnAt: payload.returnAt,
+      estimatedServiceCompletionAt: payload.estimatedServiceCompletionAt || payload.returnAt,
+      loanerLastExtendedAt: new Date().toISOString()
+    }, scope);
+
+    await prisma.auditLog.create({
+      data: {
+        tenantId: current.tenantId || user?.tenantId || null,
+        reservationId,
+        action: 'UPDATE',
+        actorUserId: user?.sub || user?.id || null,
+        metadata: JSON.stringify({
+          dealershipLoanerExtended: true,
+          previousReturnAt: current.returnAt,
+          nextReturnAt: updated.returnAt,
+          estimatedServiceCompletionAt: updated.estimatedServiceCompletionAt,
+          note: String(payload.note || '').trim() || null
+        })
+      }
+    });
+
+    return reservationCard(updated);
+  },
+
+  async swapVehicle(user, reservationId, payload = {}) {
+    const scope = tenantScope(user);
+    const current = await getLoanerReservationOrThrow(reservationId, scope);
+    const nextVehicleId = String(payload.vehicleId || '').trim();
+    if (!nextVehicleId) throw new Error('vehicleId is required');
+    if (nextVehicleId === String(current.vehicleId || '')) {
+      throw new Error('Select a different loaner vehicle to swap');
+    }
+
+    const updated = await reservationsService.update(reservationId, {
+      vehicleId: nextVehicleId,
+      loanerLastVehicleSwapAt: new Date().toISOString()
+    }, scope);
+
+    await prisma.auditLog.create({
+      data: {
+        tenantId: current.tenantId || user?.tenantId || null,
+        reservationId,
+        action: 'UPDATE',
+        actorUserId: user?.sub || user?.id || null,
+        metadata: JSON.stringify({
+          dealershipLoanerVehicleSwapped: true,
+          previousVehicleId: current.vehicleId || null,
+          nextVehicleId,
+          note: String(payload.note || '').trim() || null
+        })
+      }
+    });
+
+    return reservationCard(updated);
+  },
+
+  async completeService(user, reservationId, payload = {}) {
+    const scope = tenantScope(user);
+    const current = await getLoanerReservationOrThrow(reservationId, scope);
+    const completedBy = String(user?.fullName || '').trim() || String(user?.email || '').trim() || 'Staff';
+
+    const updated = await reservationsService.update(reservationId, {
+      loanerServiceCompletedAt: new Date().toISOString(),
+      loanerServiceCompletedBy: completedBy,
+      loanerCloseoutNotes: String(payload.loanerCloseoutNotes || '').trim() || null,
+      estimatedServiceCompletionAt: payload.estimatedServiceCompletionAt || current.estimatedServiceCompletionAt?.toISOString?.() || null
+    }, scope);
+
+    await prisma.auditLog.create({
+      data: {
+        tenantId: current.tenantId || user?.tenantId || null,
+        reservationId,
+        action: 'UPDATE',
+        actorUserId: user?.sub || user?.id || null,
+        metadata: JSON.stringify({
+          dealershipLoanerServiceCompleted: true,
+          completedBy,
+          closeoutNotes: updated.loanerCloseoutNotes || null
         })
       }
     });

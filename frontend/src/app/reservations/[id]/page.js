@@ -100,6 +100,7 @@ function ReservationDetailInner({ token, me, logout }) {
   const [paymentRows, setPaymentRows] = useState([]);
   const [locations, setLocations] = useState([]);
   const [customers, setCustomers] = useState([]);
+  const [vehicles, setVehicles] = useState([]);
   const [serviceOptions, setServiceOptions] = useState([]);
   const [feeOptions, setFeeOptions] = useState([]);
   const [insurancePlans, setInsurancePlans] = useState([]);
@@ -141,6 +142,13 @@ function ReservationDetailInner({ token, me, logout }) {
     flagged: false,
     loanerReturnExceptionNotes: ''
   });
+  const [loanerOpsForm, setLoanerOpsForm] = useState({
+    vehicleId: '',
+    returnAt: '',
+    estimatedServiceCompletionAt: '',
+    loanerCloseoutNotes: '',
+    note: ''
+  });
   const canManagePrecheckin = ['SUPER_ADMIN', 'ADMIN', 'OPS'].includes(String(me?.role || '').toUpperCase());
 
 
@@ -150,10 +158,11 @@ function ReservationDetailInner({ token, me, logout }) {
     try { return decodeURIComponent(escape(s)); } catch { return s; }
   };
   const load = async () => {
-    const [r, l, c, svc, fee, ip, pricingOut, paymentsOut] = await Promise.all([
+    const [r, l, c, v, svc, fee, ip, pricingOut, paymentsOut] = await Promise.all([
       api(`/api/reservations/${id}`, {}, token),
       api('/api/locations', {}, token),
       api('/api/customers', {}, token),
+      api('/api/vehicles', {}, token).catch(() => []),
       api('/api/additional-services', {}, token).catch(() => []),
       api('/api/fees', {}, token).catch(() => []),
       api('/api/settings/insurance-plans', {}, token).catch(() => []),
@@ -165,6 +174,7 @@ function ReservationDetailInner({ token, me, logout }) {
     setPaymentRows(Array.isArray(paymentsOut) ? paymentsOut : []);
     setLocations(l);
     setCustomers(c);
+    setVehicles(Array.isArray(v) ? v : []);
     setServiceOptions(Array.isArray(svc) ? svc : []);
     setFeeOptions(Array.isArray(fee) ? fee : []);
     setInsurancePlans(Array.isArray(ip) ? ip : []);
@@ -206,6 +216,13 @@ function ReservationDetailInner({ token, me, logout }) {
     setLoanerReturnForm({
       flagged: !!r.loanerReturnExceptionFlag,
       loanerReturnExceptionNotes: r.loanerReturnExceptionNotes || ''
+    });
+    setLoanerOpsForm({
+      vehicleId: r.vehicleId || '',
+      returnAt: r.returnAt ? new Date(r.returnAt).toISOString().slice(0, 16) : '',
+      estimatedServiceCompletionAt: toLocalDateTime(r.estimatedServiceCompletionAt),
+      loanerCloseoutNotes: r.loanerCloseoutNotes || '',
+      note: ''
     });
     setChargeModel(pricingEditorState(pricingOut, r));
   };
@@ -516,6 +533,13 @@ function ReservationDetailInner({ token, me, logout }) {
       loanerPacketForm.fuelAndMileageCaptured
     );
   }, [loanerPacketForm]);
+  const loanerVehicleChoices = useMemo(() => {
+    return (Array.isArray(vehicles) ? vehicles : []).filter((vehicle) => {
+      const status = String(vehicle?.status || '').toUpperCase();
+      if (vehicle?.id === row?.vehicleId) return true;
+      return !['IN_MAINTENANCE', 'OUT_OF_SERVICE', 'ON_RENT'].includes(status);
+    });
+  }, [vehicles, row?.vehicleId]);
 
   const saveLoanerPacket = async () => {
     try {
@@ -564,6 +588,55 @@ function ReservationDetailInner({ token, me, logout }) {
       }, token);
       await load();
       setMsg(loanerReturnForm.flagged ? 'Loaner return exception saved' : 'Loaner return exception cleared');
+    } catch (e) {
+      setMsg(e.message);
+    }
+  };
+
+  const extendLoaner = async () => {
+    try {
+      await api(`/api/dealership-loaner/reservations/${id}/extend`, {
+        method: 'POST',
+        body: JSON.stringify({
+          returnAt: loanerOpsForm.returnAt,
+          estimatedServiceCompletionAt: loanerOpsForm.estimatedServiceCompletionAt || loanerOpsForm.returnAt,
+          note: loanerOpsForm.note
+        })
+      }, token);
+      await load();
+      setMsg('Loaner return window updated');
+    } catch (e) {
+      setMsg(e.message);
+    }
+  };
+
+  const swapLoanerVehicle = async () => {
+    try {
+      await api(`/api/dealership-loaner/reservations/${id}/swap-vehicle`, {
+        method: 'POST',
+        body: JSON.stringify({
+          vehicleId: loanerOpsForm.vehicleId,
+          note: loanerOpsForm.note
+        })
+      }, token);
+      await load();
+      setMsg('Loaner vehicle swapped');
+    } catch (e) {
+      setMsg(e.message);
+    }
+  };
+
+  const completeLoanerService = async () => {
+    try {
+      await api(`/api/dealership-loaner/reservations/${id}/complete-service`, {
+        method: 'POST',
+        body: JSON.stringify({
+          estimatedServiceCompletionAt: loanerOpsForm.estimatedServiceCompletionAt || null,
+          loanerCloseoutNotes: loanerOpsForm.loanerCloseoutNotes
+        })
+      }, token);
+      await load();
+      setMsg('Loaner service marked complete');
     } catch (e) {
       setMsg(e.message);
     }
@@ -981,9 +1054,34 @@ setMsg('Charges updated');
                 <div><span className="label">Advisor Notes Updated</span><div>{row.serviceAdvisorUpdatedAt ? new Date(row.serviceAdvisorUpdatedAt).toLocaleString() : '-'}</div></div>
                 <div><span className="label">Return Exception</span><div>{row.loanerReturnExceptionFlag ? 'Flagged' : 'Clear'}</div></div>
                 <div><span className="label">Service Completion ETA</span><div>{row.estimatedServiceCompletionAt ? new Date(row.estimatedServiceCompletionAt).toLocaleString() : '-'}</div></div>
+                <div><span className="label">Service Completed</span><div>{row.loanerServiceCompletedAt ? new Date(row.loanerServiceCompletedAt).toLocaleString() : '-'}</div></div>
+                <div><span className="label">Completed By</span><div>{row.loanerServiceCompletedBy || '-'}</div></div>
+                <div><span className="label">Last Extended</span><div>{row.loanerLastExtendedAt ? new Date(row.loanerLastExtendedAt).toLocaleString() : '-'}</div></div>
+                <div><span className="label">Last Vehicle Swap</span><div>{row.loanerLastVehicleSwapAt ? new Date(row.loanerLastVehicleSwapAt).toLocaleString() : '-'}</div></div>
               </div>
 
               <div className="loaner-workflow-grid" style={{ marginBottom: 0 }}>
+                <section className="glass card section-card">
+                  <div className="section-title">Loaner Operations</div>
+                  <select value={loanerOpsForm.vehicleId} onChange={(e) => setLoanerOpsForm({ ...loanerOpsForm, vehicleId: e.target.value })}>
+                    <option value="">Select assigned loaner vehicle</option>
+                    {loanerVehicleChoices.map((vehicle) => (
+                      <option key={vehicle.id} value={vehicle.id}>
+                        {[vehicle.year, vehicle.make, vehicle.model, vehicle.internalNumber].filter(Boolean).join(' ')}
+                      </option>
+                    ))}
+                  </select>
+                  <input type="datetime-local" value={loanerOpsForm.returnAt} onChange={(e) => setLoanerOpsForm({ ...loanerOpsForm, returnAt: e.target.value })} />
+                  <input type="datetime-local" value={loanerOpsForm.estimatedServiceCompletionAt} onChange={(e) => setLoanerOpsForm({ ...loanerOpsForm, estimatedServiceCompletionAt: e.target.value })} />
+                  <textarea rows={2} value={loanerOpsForm.note} onChange={(e) => setLoanerOpsForm({ ...loanerOpsForm, note: e.target.value })} placeholder="Extension or swap note" />
+                  <textarea rows={3} value={loanerOpsForm.loanerCloseoutNotes} onChange={(e) => setLoanerOpsForm({ ...loanerOpsForm, loanerCloseoutNotes: e.target.value })} placeholder="Closeout notes once the service is complete" />
+                  <div className="inline-actions">
+                    <button type="button" onClick={extendLoaner}>Extend Loaner</button>
+                    <button type="button" className="button-subtle" onClick={swapLoanerVehicle}>Swap Vehicle</button>
+                    <button type="button" className="button-subtle" onClick={completeLoanerService}>Complete Service</button>
+                  </div>
+                </section>
+
                 <section className="glass card section-card">
                   <div className="section-title">Advisor Operations</div>
                   <input value={loanerAdvisorForm.serviceAdvisorName} onChange={(e) => setLoanerAdvisorForm({ ...loanerAdvisorForm, serviceAdvisorName: e.target.value })} placeholder="Service advisor name" />

@@ -94,6 +94,30 @@ dealershipLoanerRouter.post('/reservations/:id/return-exception', async (req, re
   }
 });
 
+dealershipLoanerRouter.post('/reservations/:id/extend', async (req, res, next) => {
+  try {
+    res.json(await dealershipLoanerService.extendLoaner(req.user, req.params.id, req.body || {}));
+  } catch (error) {
+    res.status(400).json({ error: error.message });
+  }
+});
+
+dealershipLoanerRouter.post('/reservations/:id/swap-vehicle', async (req, res, next) => {
+  try {
+    res.json(await dealershipLoanerService.swapVehicle(req.user, req.params.id, req.body || {}));
+  } catch (error) {
+    res.status(400).json({ error: error.message });
+  }
+});
+
+dealershipLoanerRouter.post('/reservations/:id/complete-service', async (req, res, next) => {
+  try {
+    res.json(await dealershipLoanerService.completeService(req.user, req.params.id, req.body || {}));
+  } catch (error) {
+    res.status(400).json({ error: error.message });
+  }
+});
+
 dealershipLoanerRouter.post('/intake', async (req, res, next) => {
   try {
     const row = await dealershipLoanerService.intake(req.user, req.body || {});
