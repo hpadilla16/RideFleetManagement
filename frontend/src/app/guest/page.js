@@ -10,6 +10,15 @@ function fmtMoney(value) {
   return `$${Number(value || 0).toFixed(2)}`;
 }
 
+function formatDateTime(value) {
+  if (!value) return '-';
+  try {
+    return new Date(value).toLocaleString();
+  } catch {
+    return String(value);
+  }
+}
+
 function statusTone(status) {
   const value = String(status || '').toLowerCase();
   if (value === 'completed') return { color: '#12633d', background: 'rgba(43, 174, 96, 0.14)' };
@@ -39,6 +48,13 @@ function timelineStatus(portal, key) {
   return portal?.timeline?.find((item) => item.key === key) || null;
 }
 
+async function lookupBooking({ reference, email }) {
+  return api('/api/public/booking/lookup', {
+    method: 'POST',
+    body: JSON.stringify({ reference, email })
+  });
+}
+
 export default function GuestAppPage() {
   const [lookupState, setLookupState] = useState({ reference: '', email: '' });
   const [loading, setLoading] = useState(false);
@@ -53,6 +69,8 @@ export default function GuestAppPage() {
   const customerInfoLive = timelineStatus(portalStatus, 'customerInfo');
   const signatureLive = timelineStatus(portalStatus, 'signature');
   const paymentLive = timelineStatus(portalStatus, 'payment');
+  const documents = portalStatus?.documents || [];
+  const timeline = portalStatus?.timeline || [];
 
   const primaryAction = useMemo(() => {
     if (portalStatus?.nextStep?.link) return { label: portalStatus.nextStep.label, link: portalStatus.nextStep.link };
@@ -74,10 +92,10 @@ export default function GuestAppPage() {
     }
   }, []);
 
-  function persistRecentLookup(confirmation) {
+  function persistRecentLookup(confirmation, fallbackEmail = '') {
     const entry = {
       reference: confirmation?.trip?.tripCode || confirmation?.reservation?.reservationNumber || '',
-      email: confirmation?.customer?.email || lookupState.email,
+      email: confirmation?.customer?.email || fallbackEmail,
       customerName: `${confirmation?.customer?.firstName || ''} ${confirmation?.customer?.lastName || ''}`.trim() || 'Guest',
       bookingType: confirmation?.bookingType || 'RENTAL',
       updatedAt: new Date().toISOString()
@@ -115,19 +133,13 @@ export default function GuestAppPage() {
     }
   }
 
-  async function runLookup() {
+  async function resolveLookup(reference, email) {
     setLoading(true);
     setError('');
     try {
-      const payload = await api('/api/public/booking/lookup', {
-        method: 'POST',
-        body: JSON.stringify({
-          reference: lookupState.reference,
-          email: lookupState.email
-        })
-      });
+      const payload = await lookupBooking({ reference, email });
       setResult(payload);
-      persistRecentLookup(payload);
+      persistRecentLookup(payload, email);
       await loadPortalStatus(payload);
     } catch (err) {
       setResult(null);
@@ -138,6 +150,16 @@ export default function GuestAppPage() {
     }
   }
 
+  async function runLookup() {
+    await resolveLookup(lookupState.reference, lookupState.email);
+  }
+
+  async function useRecentLookup(row) {
+    const next = { reference: row.reference, email: row.email };
+    setLookupState(next);
+    await resolveLookup(next.reference, next.email);
+  }
+
   return (
     <main style={{ minHeight: '100vh', padding: '22px clamp(16px, 3vw, 34px) 42px' }}>
       <div style={{ maxWidth: 1160, margin: '0 auto', display: 'grid', gap: 18 }}>
@@ -146,16 +168,16 @@ export default function GuestAppPage() {
             <div className="hero-copy">
               <span className="eyebrow">Guest App Foundation</span>
               <h1 className="page-title" style={{ fontSize: 'clamp(30px, 5vw, 54px)', lineHeight: 1.02 }}>
-                Manage your booking, complete your steps, and stay on track from one guest surface.
+                Manage your booking, complete your steps, and reopen your documents from one guest surface.
               </h1>
               <p>
-                Guests can find a rental reservation or car sharing trip, check live progress, and jump directly into
-                pre-check-in, signature, or payment without calling the counter.
+                Guests can find a rental reservation or car sharing trip, check live progress, download documents and receipts,
+                and jump directly into pre-check-in, signature, or payment without calling the counter.
               </p>
               <div className="hero-meta">
                 <span className="hero-pill">Guest resume flow</span>
                 <span className="hero-pill">Live step status</span>
-                <span className="hero-pill">Mobile-friendly portal</span>
+                <span className="hero-pill">Documents and receipts</span>
               </div>
             </div>
             <div className="glass card section-card">
@@ -163,7 +185,7 @@ export default function GuestAppPage() {
               <div className="stack">
                 <div className="surface-note">Look up a booking using the reservation or trip reference plus email.</div>
                 <div className="surface-note">See the next required step in real time.</div>
-                <div className="surface-note">Open pre-check-in, sign agreement, or finish payment from one place.</div>
+                <div className="surface-note">Download signed paperwork and receipts when they are ready.</div>
               </div>
             </div>
           </div>
@@ -234,12 +256,7 @@ export default function GuestAppPage() {
                   </div>
                   <div className="ui-muted" style={{ fontSize: 13 }}>{row.email}</div>
                   <div className="inline-actions">
-                    <button
-                      type="button"
-                      onClick={() => setLookupState({ reference: row.reference, email: row.email })}
-                    >
-                      Use Lookup
-                    </button>
+                    <button type="button" onClick={() => useRecentLookup(row)}>Resume Now</button>
                   </div>
                 </div>
               ))}
@@ -268,6 +285,22 @@ export default function GuestAppPage() {
                   <span className="label">Tenant</span>
                   <strong>{result.tenant?.name || '-'}</strong>
                 </div>
+                <div className="metric-card">
+                  <span className="label">Pickup</span>
+                  <strong>{formatDateTime(result.reservation?.pickupAt)}</strong>
+                </div>
+                <div className="metric-card">
+                  <span className="label">Return</span>
+                  <strong>{formatDateTime(result.reservation?.returnAt)}</strong>
+                </div>
+                <div className="metric-card">
+                  <span className="label">Workflow</span>
+                  <strong>{result.bookingType === 'CAR_SHARING' ? (result.trip?.status || '-') : (result.reservation?.status || '-')}</strong>
+                </div>
+                <div className="metric-card">
+                  <span className="label">Current Step</span>
+                  <strong>{portalStatus?.progress?.currentStep || 'Guest Flow'}</strong>
+                </div>
               </div>
               <div className="surface-note">
                 {result.bookingType === 'CAR_SHARING'
@@ -287,6 +320,26 @@ export default function GuestAppPage() {
               <div className="section-title">Live Guest Status</div>
               {portalStatus ? (
                 <div className="stack">
+                  <div className="surface-note" style={{ display: 'grid', gap: 10 }}>
+                    <div className="row-between" style={{ gap: 12 }}>
+                      <strong>Journey Progress</strong>
+                      <span className="status-chip neutral">{portalStatus.progress?.percent || 0}% complete</span>
+                    </div>
+                    <div style={{ height: 10, borderRadius: 999, background: 'rgba(146, 118, 255, 0.14)', overflow: 'hidden' }}>
+                      <div
+                        style={{
+                          width: `${portalStatus.progress?.percent || 0}%`,
+                          height: '100%',
+                          borderRadius: 999,
+                          background: 'linear-gradient(90deg, #7c3aed 0%, #38bdf8 100%)'
+                        }}
+                      />
+                    </div>
+                    <div style={{ color: '#55456f', lineHeight: 1.5 }}>
+                      Progress <strong>{portalStatus.progress?.completedSteps || 0}/{portalStatus.progress?.totalSteps || 0}</strong>.
+                      {' '}Next action: <strong>{portalStatus.progress?.nextAction || 'Continue your guest workflow.'}</strong>
+                    </div>
+                  </div>
                   {[customerInfoLive, signatureLive, paymentLive].filter(Boolean).map((item) => {
                     const tone = statusTone(item.status);
                     return (
@@ -314,10 +367,6 @@ export default function GuestAppPage() {
                       </div>
                     );
                   })}
-                  <div className="surface-note">
-                    Progress <strong>{portalStatus.progress?.completedSteps || 0}/{portalStatus.progress?.totalSteps || 0}</strong>.
-                    {' '}Next action: <strong>{portalStatus.progress?.nextAction || 'Continue your guest workflow.'}</strong>
-                  </div>
                 </div>
               ) : (
                 <div className="surface-note">Live portal status will appear here as soon as the guest flow is available.</div>
@@ -339,6 +388,92 @@ export default function GuestAppPage() {
                   </a>
                 ) : null}
               </div>
+            </div>
+          </section>
+        ) : null}
+
+        {result ? (
+          <section className="split-panel">
+            <div className="glass card-lg section-card">
+              <div className="row-between">
+                <div>
+                  <div className="section-title">Documents And Receipts</div>
+                  <p className="ui-muted">Guests can reopen signed paperwork and payment proof without calling the counter.</p>
+                </div>
+                <span className="status-chip neutral">{documents.filter((item) => item.available).length} available</span>
+              </div>
+              {documents.length ? (
+                <div className="stack">
+                  {documents.map((doc) => (
+                    <div key={doc.key} className="surface-note" style={{ display: 'grid', gap: 10 }}>
+                      <div className="row-between" style={{ gap: 12 }}>
+                        <div>
+                          <strong>{doc.label}</strong>
+                          <div className="ui-muted" style={{ fontSize: 13 }}>
+                            {doc.available ? 'Ready to download' : 'Not available yet'}
+                          </div>
+                        </div>
+                        <span className={doc.available ? 'status-chip good' : 'status-chip neutral'}>
+                          {doc.available ? 'Available' : 'Pending'}
+                        </span>
+                      </div>
+                      {doc.available ? (
+                        <div className="inline-actions">
+                          <a href={`${API_BASE}${doc.downloadPath}`} target="_blank" rel="noreferrer">
+                            <button type="button">Download</button>
+                          </a>
+                        </div>
+                      ) : null}
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="surface-note">Documents will appear here as the booking progresses.</div>
+              )}
+            </div>
+
+            <div className="glass card-lg section-card">
+              <div className="row-between">
+                <div>
+                  <div className="section-title">Booking Timeline</div>
+                  <p className="ui-muted">A guest-friendly view of what has already happened and what still remains.</p>
+                </div>
+                <span className="status-chip neutral">{timeline.length} events</span>
+              </div>
+              {timeline.length ? (
+                <div className="stack">
+                  {timeline.map((item) => {
+                    const tone = statusTone(item.status);
+                    return (
+                      <div key={item.key} className="surface-note" style={{ display: 'grid', gap: 6 }}>
+                        <div className="row-between" style={{ gap: 10 }}>
+                          <strong>{item.label}</strong>
+                          <span
+                            style={{
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              minHeight: 28,
+                              padding: '0 10px',
+                              borderRadius: 999,
+                              background: tone.background,
+                              color: tone.color,
+                              fontSize: 12,
+                              fontWeight: 700,
+                              textTransform: 'capitalize'
+                            }}
+                          >
+                            {item.status}
+                          </span>
+                        </div>
+                        <div className="ui-muted" style={{ fontSize: 13 }}>{formatDateTime(item.at)}</div>
+                        <div style={{ color: '#55456f', lineHeight: 1.5 }}>{item.description || '-'}</div>
+                      </div>
+                    );
+                  })}
+                </div>
+              ) : (
+                <div className="surface-note">Timeline entries will appear here as the booking moves forward.</div>
+              )}
             </div>
           </section>
         ) : null}
