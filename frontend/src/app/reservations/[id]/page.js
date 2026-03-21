@@ -100,6 +100,31 @@ function parseAuditMetadata(raw) {
   }
 }
 
+function formatLoanerTimelineDetail(meta = {}, fallback = '') {
+  if (meta.dealershipLoanerBorrowerPacketSaved) {
+    return meta.complete ? 'Borrower packet completed and validated by staff' : 'Borrower packet updated';
+  }
+  if (meta.dealershipLoanerBillingSaved) {
+    return `Billing ${String(meta.loanerBillingStatus || '').replaceAll('_', ' ').toLowerCase()} for ${String(meta.loanerBillingMode || '').replaceAll('_', ' ').toLowerCase() || 'loaner'}`.trim();
+  }
+  if (meta.dealershipLoanerAdvisorOpsSaved) {
+    return meta.readyForPickup ? 'Service lane marked the loaner ready for customer pickup' : 'Advisor operations updated';
+  }
+  if (meta.dealershipLoanerReturnExceptionSaved) {
+    return meta.flagged ? 'Return exception flagged for staff review' : 'Return exception cleared';
+  }
+  if (meta.dealershipLoanerExtended) {
+    return 'Return date extended to keep the customer mobile during service';
+  }
+  if (meta.dealershipLoanerVehicleSwapped) {
+    return 'Loaner vehicle swapped';
+  }
+  if (meta.dealershipLoanerServiceCompleted) {
+    return 'Service completed and loaner case ready for closeout';
+  }
+  return fallback || 'Reservation workflow updated';
+}
+
 function ReservationDetailInner({ token, me, logout }) {
   const { id } = useParams();
   const router = useRouter();
@@ -578,6 +603,27 @@ function ReservationDetailInner({ token, me, logout }) {
 
     (Array.isArray(auditLogs) ? auditLogs : []).forEach((log) => {
       const meta = parseAuditMetadata(log.metadata);
+      if (meta.dealershipLoanerBorrowerPacketSaved || meta.dealershipLoanerBillingSaved || meta.dealershipLoanerAdvisorOpsSaved || meta.dealershipLoanerReturnExceptionSaved || meta.dealershipLoanerExtended || meta.dealershipLoanerVehicleSwapped || meta.dealershipLoanerServiceCompleted) {
+        const label = meta.dealershipLoanerBorrowerPacketSaved
+          ? 'Borrower Packet Updated'
+          : meta.dealershipLoanerBillingSaved
+            ? 'Billing Updated'
+            : meta.dealershipLoanerAdvisorOpsSaved
+              ? 'Advisor Ops Updated'
+              : meta.dealershipLoanerReturnExceptionSaved
+                ? 'Return Exception Updated'
+                : meta.dealershipLoanerExtended
+                  ? 'Loaner Extended'
+                  : meta.dealershipLoanerVehicleSwapped
+                    ? 'Vehicle Swapped'
+                    : 'Service Completed';
+        const tone = meta.dealershipLoanerReturnExceptionSaved && meta.flagged
+          ? 'warn'
+          : meta.dealershipLoanerBillingSaved && meta.loanerBillingStatus === 'DENIED'
+            ? 'warn'
+            : 'neutral';
+        pushEvent(log.createdAt, label, formatLoanerTimelineDetail(meta, log.reason || ''), tone);
+      }
       if (meta.dealershipLoanerReturnExceptionSaved && meta.flagged) {
         pushEvent(log.createdAt, 'Return Exception Flagged', meta.notes || 'Return exception needs review', 'warn');
       }
@@ -594,6 +640,22 @@ function ReservationDetailInner({ token, me, logout }) {
       .sort((a, b) => b.at.getTime() - a.at.getTime())
       .slice(0, 12);
   }, [auditLogs, isLoanerWorkflow, row]);
+  const loanerBillingSummary = useMemo(() => {
+    if (!isLoanerWorkflow || !row) return null;
+    const estimate = toMoneyNum(row.estimatedTotal || 0);
+    const agreementTotal = toMoneyNum(row?.rentalAgreement?.total || 0);
+    const agreementBalance = toMoneyNum(row?.rentalAgreement?.balance || 0);
+    const dueNow = Math.max(0, agreementBalance);
+    const coveredByDealer = ['COURTESY', 'WARRANTY', 'INTERNAL'].includes(String(row.loanerBillingMode || '').toUpperCase());
+    return {
+      estimate,
+      agreementTotal,
+      agreementBalance,
+      dueNow,
+      coveredByDealer,
+      paymentStatus: row.paymentStatus || 'PENDING'
+    };
+  }, [isLoanerWorkflow, row]);
 
   const saveLoanerPacket = async () => {
     try {
@@ -1192,10 +1254,12 @@ setMsg('Charges updated');
                   <div className="grid2" style={{ marginBottom: 0 }}>
                     <div><span className="label">Billing Mode</span><div>{row.loanerBillingMode || '-'}</div></div>
                     <div><span className="label">Billing Status</span><div>{row.loanerBillingStatus || 'DRAFT'}</div></div>
-                    <div><span className="label">Estimate</span><div>{money(row.estimatedTotal || 0)}</div></div>
-                    <div><span className="label">Payment Status</span><div>{row.paymentStatus || 'PENDING'}</div></div>
-                    <div><span className="label">Agreement Total</span><div>{money(row?.rentalAgreement?.total || 0)}</div></div>
-                    <div><span className="label">Agreement Balance</span><div>{money(row?.rentalAgreement?.balance || 0)}</div></div>
+                    <div><span className="label">Estimate</span><div>{money(loanerBillingSummary?.estimate || 0)}</div></div>
+                    <div><span className="label">Payment Status</span><div>{loanerBillingSummary?.paymentStatus || 'PENDING'}</div></div>
+                    <div><span className="label">Agreement Total</span><div>{money(loanerBillingSummary?.agreementTotal || 0)}</div></div>
+                    <div><span className="label">Agreement Balance</span><div>{money(loanerBillingSummary?.agreementBalance || 0)}</div></div>
+                    <div><span className="label">Due Now</span><div>{money(loanerBillingSummary?.dueNow || 0)}</div></div>
+                    <div><span className="label">Dealer Covered</span><div>{loanerBillingSummary?.coveredByDealer ? 'Yes' : 'No'}</div></div>
                     <div><span className="label">Billing Contact</span><div>{row.loanerBillingContactName || '-'}</div></div>
                     <div><span className="label">Billing Email</span><div>{row.loanerBillingContactEmail || '-'}</div></div>
                     <div><span className="label">Billing Phone</span><div>{row.loanerBillingContactPhone || '-'}</div></div>
