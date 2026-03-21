@@ -435,7 +435,7 @@ function HostAppInner({ token, me, logout }) {
                 {availabilityRows.map((row) => (
                   <div key={row.id} className="surface-note" style={{ display: 'grid', gap: 8 }}>
                     <div className="row-between" style={{ gap: 12 }}>
-                      <strong>{formatDateTime(row.startAt)} -> {formatDateTime(row.endAt)}</strong>
+                      <strong>{formatDateTime(row.startAt)} {'->'} {formatDateTime(row.endAt)}</strong>
                       <span className={row.isBlocked ? 'status-chip warn' : 'status-chip good'}>
                         {row.isBlocked ? 'Blocked' : 'Open'}
                       </span>
