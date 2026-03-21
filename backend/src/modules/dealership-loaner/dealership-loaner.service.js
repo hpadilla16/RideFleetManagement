@@ -209,6 +209,89 @@ function buildLoanerHandoffHtml(row) {
 </html>`;
 }
 
+function buildLoanerBillingSummaryHtml(row) {
+  const customerName = [row.customer?.firstName, row.customer?.lastName].filter(Boolean).join(' ') || 'Customer';
+  const agreementTotal = Number(row.rentalAgreement?.total || 0);
+  const agreementBalance = Number(row.rentalAgreement?.balance || 0);
+  const estimate = Number(row.estimatedTotal || 0);
+  const serviceVehicle = [row.serviceVehicleYear, row.serviceVehicleMake, row.serviceVehicleModel, row.serviceVehiclePlate].filter(Boolean).join(' - ') || '-';
+  const loanerVehicle = row.vehicle ? [row.vehicle.year, row.vehicle.make, row.vehicle.model, row.vehicle.internalNumber].filter(Boolean).join(' ') : 'Unassigned';
+
+  return `<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Dealer Invoice Summary - ${escapeHtml(row.reservationNumber)}</title>
+  <style>
+    body { font-family: Arial, sans-serif; color: #1f1f1f; margin: 0; padding: 28px; }
+    h1, h2, h3 { margin: 0 0 10px; }
+    .muted { color: #666; }
+    .grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; margin: 18px 0; }
+    .card { border: 1px solid #ddd; border-radius: 12px; padding: 14px; }
+    .label { font-size: 11px; text-transform: uppercase; color: #666; letter-spacing: .06em; }
+    .value { font-size: 15px; font-weight: 700; margin-top: 4px; }
+    table { width: 100%; border-collapse: collapse; margin-top: 10px; }
+    td, th { border-bottom: 1px solid #eee; padding: 8px 0; text-align: left; }
+    .signature { margin-top: 24px; display: grid; grid-template-columns: 1fr 1fr; gap: 22px; }
+    .line { border-top: 1px solid #999; padding-top: 6px; margin-top: 40px; }
+    @media print { body { padding: 16px; } }
+  </style>
+</head>
+<body>
+  <h1>Dealer Invoice Summary</h1>
+  <div class="muted">Reservation ${escapeHtml(row.reservationNumber)} - RO ${escapeHtml(row.repairOrderNumber || '-')} - Claim ${escapeHtml(row.claimNumber || '-')}</div>
+
+  <div class="grid">
+    <div class="card">
+      <div class="label">Customer</div>
+      <div class="value">${escapeHtml(customerName)}</div>
+      <div class="muted">${escapeHtml(row.customer?.email || '-')} - ${escapeHtml(row.customer?.phone || '-')}</div>
+    </div>
+    <div class="card">
+      <div class="label">Service Advisor</div>
+      <div class="value">${escapeHtml(row.serviceAdvisorName || '-')}</div>
+      <div class="muted">${escapeHtml(row.serviceAdvisorEmail || '-')} - ${escapeHtml(row.serviceAdvisorPhone || '-')}</div>
+    </div>
+    <div class="card">
+      <div class="label">Service Vehicle</div>
+      <div class="value">${escapeHtml(serviceVehicle)}</div>
+    </div>
+    <div class="card">
+      <div class="label">Loaner Vehicle</div>
+      <div class="value">${escapeHtml(loanerVehicle)}</div>
+      <div class="muted">${escapeHtml(row.pickupLocation?.name || '-')} - ${escapeHtml(row.returnLocation?.name || '-')}</div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h3>Billing Summary</h3>
+    <table>
+      <tr><th>Billing Mode</th><td>${escapeHtml(row.loanerBillingMode || '-')}</td></tr>
+      <tr><th>Billing Status</th><td>${escapeHtml(row.loanerBillingStatus || 'DRAFT')}</td></tr>
+      <tr><th>Estimate</th><td>$${estimate.toFixed(2)}</td></tr>
+      <tr><th>Agreement Total</th><td>$${agreementTotal.toFixed(2)}</td></tr>
+      <tr><th>Agreement Balance</th><td>$${agreementBalance.toFixed(2)}</td></tr>
+      <tr><th>Payment Status</th><td>${escapeHtml(row.paymentStatus || 'PENDING')}</td></tr>
+      <tr><th>Billing Contact</th><td>${escapeHtml(row.loanerBillingContactName || '-')}</td></tr>
+      <tr><th>Billing Email</th><td>${escapeHtml(row.loanerBillingContactEmail || '-')}</td></tr>
+      <tr><th>Billing Phone</th><td>${escapeHtml(row.loanerBillingContactPhone || '-')}</td></tr>
+      <tr><th>Authorization Ref</th><td>${escapeHtml(row.loanerBillingAuthorizationRef || '-')}</td></tr>
+      <tr><th>Billing Notes</th><td>${escapeHtml(row.loanerBillingNotes || '-')}</td></tr>
+    </table>
+  </div>
+
+  <div class="signature">
+    <div>
+      <div class="line">Service Advisor / Authorization</div>
+    </div>
+    <div>
+      <div class="line">Accounting / Billing Review</div>
+    </div>
+  </div>
+</body>
+</html>`;
+}
+
 function reservationCard(row) {
   let packet = {};
   try {
@@ -284,7 +367,11 @@ function reservationCard(row) {
           balance: row.rentalAgreement.balance,
           total: row.rentalAgreement.total
         }
-      : null
+      : null,
+    overdueReturn: row.status === 'CHECKED_OUT' && row.returnAt ? new Date(row.returnAt).getTime() < Date.now() : false,
+    serviceEtaAtRisk: row.status !== 'CANCELLED' && !row.loanerServiceCompletedAt && row.estimatedServiceCompletionAt
+      ? new Date(row.estimatedServiceCompletionAt).getTime() < Date.now()
+      : false
   };
 }
 
@@ -395,7 +482,7 @@ export const dealershipLoanerService = {
     endOfToday.setDate(endOfToday.getDate() + 1);
     const loanerWhere = { ...scope, workflowMode: 'DEALERSHIP_LOANER' };
 
-    const [intakeRaw, activeRaw, returnsRaw, advisorRaw, billingRaw, searchRaw, counts] = await Promise.all([
+    const [intakeRaw, activeRaw, returnsRaw, advisorRaw, billingRaw, overdueRaw, searchRaw, counts] = await Promise.all([
       prisma.reservation.findMany({
         where: {
           ...loanerWhere,
@@ -445,6 +532,20 @@ export const dealershipLoanerService = {
         orderBy: [{ updatedAt: 'desc' }],
         take: 8
       }),
+      prisma.reservation.findMany({
+        where: {
+          ...loanerWhere,
+          status: { in: ['NEW', 'CONFIRMED', 'CHECKED_OUT'] },
+          OR: [
+            { status: 'CHECKED_OUT', returnAt: { lt: now } },
+            { status: { in: ['NEW', 'CONFIRMED'] }, estimatedServiceCompletionAt: { lt: now }, readyForPickupAt: null },
+            { loanerBillingStatus: 'DENIED' }
+          ]
+        },
+        include: includeReservation(),
+        orderBy: [{ returnAt: 'asc' }, { estimatedServiceCompletionAt: 'asc' }, { updatedAt: 'desc' }],
+        take: 12
+      }),
       query
         ? prisma.reservation.findMany({
             where: {
@@ -464,7 +565,9 @@ export const dealershipLoanerService = {
         prisma.reservation.count({ where: { ...loanerWhere, readyForPickupAt: { not: null }, status: { in: ['NEW', 'CONFIRMED'] } } }),
         prisma.reservation.count({ where: { ...loanerWhere, status: { in: ['NEW', 'CONFIRMED'] }, loanerBorrowerPacketCompletedAt: null } }),
         prisma.reservation.count({ where: { ...loanerWhere, status: { not: 'CANCELLED' }, loanerBillingMode: { in: ['CUSTOMER_PAY', 'WARRANTY', 'INSURANCE'] }, loanerBillingStatus: { not: 'SETTLED' } } }),
-        prisma.reservation.count({ where: { ...loanerWhere, loanerReturnExceptionFlag: true, status: { not: 'CANCELLED' } } })
+        prisma.reservation.count({ where: { ...loanerWhere, loanerReturnExceptionFlag: true, status: { not: 'CANCELLED' } } }),
+        prisma.reservation.count({ where: { ...loanerWhere, status: 'CHECKED_OUT', returnAt: { lt: now } } }),
+        prisma.reservation.count({ where: { ...loanerWhere, status: { in: ['NEW', 'CONFIRMED'] }, estimatedServiceCompletionAt: { lt: now }, readyForPickupAt: null } })
       ])
     ]);
 
@@ -478,14 +581,24 @@ export const dealershipLoanerService = {
         readyForDelivery: counts[4],
         packetPending: counts[5],
         billingAttention: counts[6],
-        returnExceptions: counts[7]
+        returnExceptions: counts[7],
+        overdueReturns: counts[8],
+        serviceDelays: counts[9]
       },
       queues: {
         intake: intakeRaw.map(reservationCard),
         active: activeRaw.map(reservationCard),
         returns: returnsRaw.map(reservationCard),
         advisor: advisorRaw.map(reservationCard),
-        billing: billingRaw.map(reservationCard)
+        billing: billingRaw.map(reservationCard),
+        alerts: overdueRaw.map((row) => ({
+          ...reservationCard(row),
+          alertReason: row.status === 'CHECKED_OUT' && row.returnAt && new Date(row.returnAt).getTime() < now.getTime()
+            ? 'Overdue Return'
+            : row.loanerBillingStatus === 'DENIED'
+              ? 'Billing Denied'
+              : 'Service ETA Missed'
+        }))
       },
       searchResults: searchRaw.map(reservationCard)
     };
@@ -596,6 +709,12 @@ export const dealershipLoanerService = {
     const scope = tenantScope(user);
     const row = await getLoanerReservationOrThrow(reservationId, scope);
     return buildLoanerHandoffHtml(row);
+  },
+
+  async renderBillingPrint(user, reservationId) {
+    const scope = tenantScope(user);
+    const row = await getLoanerReservationOrThrow(reservationId, scope);
+    return buildLoanerBillingSummaryHtml(row);
   },
 
   async exportBillingCsv(user, input = {}) {

@@ -85,7 +85,9 @@ function LoanerProgramInner({ token, me, logout }) {
     readyForDelivery: 0,
     packetPending: 0,
     billingAttention: 0,
-    returnExceptions: 0
+    returnExceptions: 0,
+    overdueReturns: 0,
+    serviceDelays: 0
   };
 
   async function load(query = '') {
@@ -254,6 +256,8 @@ function LoanerProgramInner({ token, me, logout }) {
               <div className="metric-card"><span className="label">Billing Attention</span><strong>{metrics.billingAttention}</strong></div>
               <div className="metric-card"><span className="label">Return Exceptions</span><strong>{metrics.returnExceptions}</strong></div>
               <div className="metric-card"><span className="label">Ready For Delivery</span><strong>{metrics.readyForDelivery}</strong></div>
+              <div className="metric-card"><span className="label">Overdue Returns</span><strong>{metrics.overdueReturns}</strong></div>
+              <div className="metric-card"><span className="label">Service Delays</span><strong>{metrics.serviceDelays}</strong></div>
             </div>
           </div>
         </div>
@@ -591,13 +595,18 @@ function LoanerProgramInner({ token, me, logout }) {
               </>
             )}
           />
-          <section className="glass card section-card">
-            <div className="section-title">Operations Notes</div>
-            <div className="surface-note">
-              Loaners now carry service-advisor notes, billing status, borrower packet completion, and return exceptions
-              on the same reservation record, so service lane, cashier, and ops stay aligned in one workflow.
-            </div>
-          </section>
+          <LoanerQueueCard
+            title="Overdue And SLA Alerts"
+            subtitle="Past-due returns, missed service ETAs, and denied billing items that need action now."
+            rows={dashboard?.queues?.alerts || []}
+            emptyText="No overdue or SLA-risk loaner alerts right now."
+            actions={(row) => (
+              <>
+                <Link href={reservationHref(row)}><button type="button">Open Workflow</button></Link>
+                <Link href={reservationHref(row, row.overdueReturn ? 'checkin' : 'checkout')}><button type="button" className="button-subtle">{row.overdueReturn ? 'Check-in' : 'Checkout'}</button></Link>
+              </>
+            )}
+          />
         </div>
       </section>
     </AppShell>
@@ -640,6 +649,7 @@ function LoanerQueueCard({ title, subtitle, rows, emptyText, actions }) {
                   {row.loanerBorrowerPacketCompletedAt ? 'Packet Complete' : 'Packet Pending'}
                 </span>
                 {row.loanerReturnExceptionFlag ? <span className="status-chip warn">Return Exception</span> : null}
+                {row.alertReason ? <span className="status-chip warn">{row.alertReason}</span> : null}
               </div>
               <div className="label" style={{ textTransform: 'none', letterSpacing: 0, fontSize: 12 }}>
                 Advisor: {row.serviceAdvisorName || '-'} · Location: {row.pickupLocation?.name || '-'}

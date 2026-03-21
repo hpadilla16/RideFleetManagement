@@ -479,6 +479,35 @@ function ReservationDetailInner({ token, me, logout }) {
       setMsg(e.message || 'Unable to print loaner handoff packet');
     }
   };
+  const handlePrintLoanerBillingSummary = async () => {
+    if (!isLoanerWorkflow) return;
+    const printWindow = window.open('', '_blank');
+    if (!printWindow) {
+      setMsg('Pop-up blocked. Please allow pop-ups to print the billing summary.');
+      return;
+    }
+    printWindow.opener = null;
+    printWindow.document.write('<html><body style="font-family:Inter, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif;padding:32px;text-align:center;background:#0b0a12;color:#fff;">Preparing billing summary...</body></html>');
+    printWindow.document.close();
+    try {
+      const res = await fetch(`${API_BASE}/api/dealership-loaner/reservations/${id}/billing-print`, {
+        headers: { Authorization: `Bearer ${token}` },
+        cache: 'no-store'
+      });
+      if (!res.ok) throw new Error(`Print failed (${res.status})`);
+      const html = await res.text();
+      printWindow.document.open();
+      printWindow.document.write(html);
+      printWindow.document.close();
+      printWindow.focus();
+      printWindow.print();
+    } catch (e) {
+      printWindow.document.open();
+      printWindow.document.write(`<p style="font-family: sans-serif; padding: 24px;">${e.message || 'Unable to print billing summary'}</p>`);
+      printWindow.document.close();
+      setMsg(e.message || 'Unable to print billing summary');
+    }
+  };
   const openLogs = async () => {
     try {
       const logs = await api(`/api/reservations/${id}/audit-logs`, {}, token);
@@ -1281,6 +1310,9 @@ setMsg('Charges updated');
 
                 <section className="glass card section-card">
                   <div className="section-title">Billing Summary</div>
+                  <div className="inline-actions" style={{ marginBottom: 10 }}>
+                    <button type="button" className="button-subtle" onClick={handlePrintLoanerBillingSummary}>Print Billing Summary</button>
+                  </div>
                   <div className="grid2" style={{ marginBottom: 0 }}>
                     <div><span className="label">Billing Mode</span><div>{row.loanerBillingMode || '-'}</div></div>
                     <div><span className="label">Billing Status</span><div>{row.loanerBillingStatus || 'DRAFT'}</div></div>
@@ -1294,6 +1326,8 @@ setMsg('Charges updated');
                     <div><span className="label">Billing Email</span><div>{row.loanerBillingContactEmail || '-'}</div></div>
                     <div><span className="label">Billing Phone</span><div>{row.loanerBillingContactPhone || '-'}</div></div>
                     <div><span className="label">Auth Ref</span><div>{row.loanerBillingAuthorizationRef || '-'}</div></div>
+                    <div><span className="label">Service Completed</span><div>{row.loanerServiceCompletedAt ? new Date(row.loanerServiceCompletedAt).toLocaleString() : 'Not yet'}</div></div>
+                    <div><span className="label">Last Billing Activity</span><div>{row.loanerBillingSettledAt ? new Date(row.loanerBillingSettledAt).toLocaleString() : (row.loanerBillingSubmittedAt ? new Date(row.loanerBillingSubmittedAt).toLocaleString() : '-')}</div></div>
                   </div>
                   {row.loanerBillingNotes ? (
                     <div>

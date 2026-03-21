@@ -85,6 +85,16 @@ dealershipLoanerRouter.get('/reservations/:id/handoff-print', async (req, res, n
   }
 });
 
+dealershipLoanerRouter.get('/reservations/:id/billing-print', async (req, res, next) => {
+  try {
+    const html = await dealershipLoanerService.renderBillingPrint(req.user, req.params.id);
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    res.send(html);
+  } catch (error) {
+    res.status(404).json({ error: error.message });
+  }
+});
+
 dealershipLoanerRouter.post('/reservations/:id/borrower-packet', async (req, res, next) => {
   try {
     res.json(await dealershipLoanerService.saveBorrowerPacket(req.user, req.params.id, req.body || {}));
