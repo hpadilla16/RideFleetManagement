@@ -35,6 +35,38 @@ function matchesQuery(query) {
   };
 }
 
+function parseDate(value) {
+  if (!value) return null;
+  const parsed = new Date(value);
+  return Number.isFinite(parsed.getTime()) ? parsed : null;
+}
+
+function buildBillingExportWhere(scope = {}, input = {}) {
+  const query = String(input?.query || '').trim();
+  const billingStatus = String(input?.billingStatus || '').trim().toUpperCase();
+  const billingMode = String(input?.billingMode || '').trim().toUpperCase();
+  const startDate = parseDate(input?.startDate);
+  const endDate = parseDate(input?.endDate);
+
+  const where = {
+    ...scope,
+    workflowMode: 'DEALERSHIP_LOANER',
+    status: { not: 'CANCELLED' },
+    ...(matchesQuery(query) || {})
+  };
+
+  if (billingStatus) where.loanerBillingStatus = billingStatus;
+  if (billingMode) where.loanerBillingMode = billingMode;
+  if (startDate || endDate) {
+    where.pickupAt = {
+      ...(startDate ? { gte: startDate } : {}),
+      ...(endDate ? { lte: endDate } : {})
+    };
+  }
+
+  return where;
+}
+
 function escapeHtml(value) {
   return String(value ?? '')
     .replaceAll('&', '&amp;')
@@ -77,7 +109,10 @@ function buildBillingCsv(rows = []) {
     'Advisor',
     'Pickup',
     'Return',
-    'Location'
+    'Location',
+    'Due Now',
+    'Dealer Covered',
+    'Alert Reason'
   ];
 
   const body = rows.map((row) => [
@@ -98,7 +133,16 @@ function buildBillingCsv(rows = []) {
     row.serviceAdvisorName || '',
     formatDateTime(row.pickupAt),
     formatDateTime(row.returnAt),
-    row.pickupLocation?.name || ''
+    row.pickupLocation?.name || '',
+    Math.max(0, Number(row.rentalAgreement?.balance || 0)),
+    ['COURTESY', 'WARRANTY', 'INTERNAL'].includes(String(row.loanerBillingMode || '').toUpperCase()) ? 'Yes' : 'No',
+    row.status === 'CHECKED_OUT' && row.returnAt && new Date(row.returnAt).getTime() < Date.now()
+      ? 'Overdue Return'
+      : row.loanerBillingStatus === 'DENIED'
+        ? 'Billing Denied'
+        : row.estimatedServiceCompletionAt && !row.loanerServiceCompletedAt && new Date(row.estimatedServiceCompletionAt).getTime() < Date.now()
+          ? 'Service ETA Missed'
+          : ''
   ].map(csvCell).join(','));
 
   return [header.map(csvCell).join(','), ...body].join('\n');
@@ -572,6 +616,12 @@ export const dealershipLoanerService = {
     ]);
 
     return {
+      badges: [
+        counts[8] > 0 ? { tone: 'warn', label: `${counts[8]} overdue returns`, detail: 'Loaners still out past the promised return time' } : null,
+        counts[9] > 0 ? { tone: 'warn', label: `${counts[9]} service delays`, detail: 'Service ETA passed and the customer still is not ready for handoff' } : null,
+        counts[7] > 0 ? { tone: 'warn', label: `${counts[7]} return exceptions`, detail: 'Loaners with damage, fuel, odor, or closeout issues' } : null,
+        counts[6] > 0 ? { tone: 'neutral', label: `${counts[6]} billing items`, detail: 'Customer-pay, warranty, or insurance loaners still not settled' } : null
+      ].filter(Boolean),
       query,
       metrics: {
         openLoaners: counts[0],
@@ -597,7 +647,12 @@ export const dealershipLoanerService = {
             ? 'Overdue Return'
             : row.loanerBillingStatus === 'DENIED'
               ? 'Billing Denied'
-              : 'Service ETA Missed'
+              : 'Service ETA Missed',
+          alertSeverity: row.status === 'CHECKED_OUT' && row.returnAt && new Date(row.returnAt).getTime() < now.getTime()
+            ? 'warn'
+            : row.loanerBillingStatus === 'DENIED'
+              ? 'warn'
+              : 'neutral'
         }))
       },
       searchResults: searchRaw.map(reservationCard)
@@ -719,14 +774,8 @@ export const dealershipLoanerService = {
 
   async exportBillingCsv(user, input = {}) {
     const scope = tenantScope(user);
-    const query = String(input?.query || '').trim();
     const rows = await prisma.reservation.findMany({
-      where: {
-        ...scope,
-        workflowMode: 'DEALERSHIP_LOANER',
-        status: { not: 'CANCELLED' },
-        ...(matchesQuery(query) || {})
-      },
+      where: buildBillingExportWhere(scope, input),
       include: includeReservation(),
       orderBy: [{ pickupAt: 'desc' }]
     });

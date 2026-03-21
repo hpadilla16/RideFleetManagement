@@ -57,7 +57,11 @@ dealershipLoanerRouter.get('/dashboard', async (req, res, next) => {
 dealershipLoanerRouter.get('/billing-export', async (req, res, next) => {
   try {
     const csv = await dealershipLoanerService.exportBillingCsv(req.user, {
-      query: req.query?.q ? String(req.query.q) : ''
+      query: req.query?.q ? String(req.query.q) : '',
+      billingStatus: req.query?.billingStatus ? String(req.query.billingStatus) : '',
+      billingMode: req.query?.billingMode ? String(req.query.billingMode) : '',
+      startDate: req.query?.startDate ? String(req.query.startDate) : '',
+      endDate: req.query?.endDate ? String(req.query.endDate) : ''
     });
     res.setHeader('Content-Type', 'text/csv; charset=utf-8');
     res.setHeader('Content-Disposition', `attachment; filename="loaner-billing-export.csv"`);

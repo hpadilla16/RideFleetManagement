@@ -73,6 +73,12 @@ function LoanerProgramInner({ token, me, logout }) {
   const [vehicleTypes, setVehicleTypes] = useState([]);
   const [vehicles, setVehicles] = useState([]);
   const [search, setSearch] = useState('');
+  const [exportFilters, setExportFilters] = useState({
+    billingStatus: '',
+    billingMode: '',
+    startDate: '',
+    endDate: ''
+  });
   const [msg, setMsg] = useState('');
   const [loading, setLoading] = useState(true);
   const [form, setForm] = useState(EMPTY_FORM);
@@ -196,7 +202,13 @@ function LoanerProgramInner({ token, me, logout }) {
 
   async function exportBillingCsv() {
     try {
-      const res = await fetch(`${API_BASE}/api/dealership-loaner/billing-export${search.trim() ? `?q=${encodeURIComponent(search.trim())}` : ''}`, {
+      const query = new URLSearchParams();
+      if (search.trim()) query.set('q', search.trim());
+      if (exportFilters.billingStatus) query.set('billingStatus', exportFilters.billingStatus);
+      if (exportFilters.billingMode) query.set('billingMode', exportFilters.billingMode);
+      if (exportFilters.startDate) query.set('startDate', exportFilters.startDate);
+      if (exportFilters.endDate) query.set('endDate', exportFilters.endDate);
+      const res = await fetch(`${API_BASE}/api/dealership-loaner/billing-export${query.toString() ? `?${query.toString()}` : ''}`, {
         headers: { Authorization: `Bearer ${token}` },
         cache: 'no-store'
       });
@@ -243,6 +255,11 @@ function LoanerProgramInner({ token, me, logout }) {
               <span className="hero-pill">Courtesy + customer-pay</span>
               <span className="hero-pill">Repair order tracking</span>
               <span className="hero-pill">Ready for service lane ops</span>
+              {(dashboard?.badges || []).map((badge) => (
+                <span key={badge.label} className={`hero-pill ${badge.tone === 'warn' ? 'hero-pill-warn' : ''}`} title={badge.detail}>
+                  {badge.label}
+                </span>
+              ))}
             </div>
           </div>
           <div className="glass card section-card">
@@ -291,6 +308,27 @@ function LoanerProgramInner({ token, me, logout }) {
             />
             <button type="button" onClick={runSearch} disabled={loading}>{loading ? 'Loading...' : 'Search'}</button>
             <button type="button" className="button-subtle" onClick={() => { setSearch(''); load(''); }}>Clear</button>
+          </div>
+          <div className="form-grid-2" style={{ marginTop: 12 }}>
+            <select value={exportFilters.billingMode} onChange={(event) => setExportFilters((current) => ({ ...current, billingMode: event.target.value }))}>
+              <option value="">All billing modes</option>
+              <option value="COURTESY">Courtesy</option>
+              <option value="CUSTOMER_PAY">Customer Pay</option>
+              <option value="WARRANTY">Warranty</option>
+              <option value="INSURANCE">Insurance</option>
+              <option value="INTERNAL">Internal</option>
+            </select>
+            <select value={exportFilters.billingStatus} onChange={(event) => setExportFilters((current) => ({ ...current, billingStatus: event.target.value }))}>
+              <option value="">All billing statuses</option>
+              <option value="DRAFT">Draft</option>
+              <option value="PENDING_APPROVAL">Pending Approval</option>
+              <option value="APPROVED">Approved</option>
+              <option value="INVOICED">Invoiced</option>
+              <option value="SETTLED">Settled</option>
+              <option value="DENIED">Denied</option>
+            </select>
+            <input type="date" value={exportFilters.startDate} onChange={(event) => setExportFilters((current) => ({ ...current, startDate: event.target.value }))} />
+            <input type="date" value={exportFilters.endDate} onChange={(event) => setExportFilters((current) => ({ ...current, endDate: event.target.value }))} />
           </div>
 
           {dashboard?.searchResults?.length ? (
@@ -608,6 +646,38 @@ function LoanerProgramInner({ token, me, logout }) {
             )}
           />
         </div>
+
+        <section className="glass card section-card" style={{ marginTop: 16 }}>
+          <div className="row-between">
+            <div>
+              <div className="section-title">Alert Escalation</div>
+              <p className="ui-muted">Fast signal for what should get cashier, advisor, or lane-manager attention first.</p>
+            </div>
+            <span className="status-chip warn">Escalation Board</span>
+          </div>
+          <div className="metric-grid">
+            <div className="metric-card">
+              <span className="label">Overdue Returns</span>
+              <strong>{metrics.overdueReturns}</strong>
+              <span className="ui-muted">Units still out after promised return time.</span>
+            </div>
+            <div className="metric-card">
+              <span className="label">Service Delays</span>
+              <strong>{metrics.serviceDelays}</strong>
+              <span className="ui-muted">ETA passed and not yet ready for pickup.</span>
+            </div>
+            <div className="metric-card">
+              <span className="label">Billing Attention</span>
+              <strong>{metrics.billingAttention}</strong>
+              <span className="ui-muted">Warranty, insurer, or customer-pay billing still unresolved.</span>
+            </div>
+            <div className="metric-card">
+              <span className="label">Return Exceptions</span>
+              <strong>{metrics.returnExceptions}</strong>
+              <span className="ui-muted">Damage, fuel, odor, or closeout issues flagged by staff.</span>
+            </div>
+          </div>
+        </section>
       </section>
     </AppShell>
   );
@@ -649,7 +719,7 @@ function LoanerQueueCard({ title, subtitle, rows, emptyText, actions }) {
                   {row.loanerBorrowerPacketCompletedAt ? 'Packet Complete' : 'Packet Pending'}
                 </span>
                 {row.loanerReturnExceptionFlag ? <span className="status-chip warn">Return Exception</span> : null}
-                {row.alertReason ? <span className="status-chip warn">{row.alertReason}</span> : null}
+                {row.alertReason ? <span className={`status-chip ${row.alertSeverity === 'warn' ? 'warn' : 'neutral'}`}>{row.alertReason}</span> : null}
               </div>
               <div className="label" style={{ textTransform: 'none', letterSpacing: 0, fontSize: 12 }}>
                 Advisor: {row.serviceAdvisorName || '-'} · Location: {row.pickupLocation?.name || '-'}
