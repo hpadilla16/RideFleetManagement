@@ -983,7 +983,7 @@ setMsg('Charges updated');
                 <div><span className="label">Service Completion ETA</span><div>{row.estimatedServiceCompletionAt ? new Date(row.estimatedServiceCompletionAt).toLocaleString() : '-'}</div></div>
               </div>
 
-              <div className="grid3" style={{ marginBottom: 0 }}>
+              <div className="loaner-workflow-grid" style={{ marginBottom: 0 }}>
                 <section className="glass card section-card">
                   <div className="section-title">Advisor Operations</div>
                   <input value={loanerAdvisorForm.serviceAdvisorName} onChange={(e) => setLoanerAdvisorForm({ ...loanerAdvisorForm, serviceAdvisorName: e.target.value })} placeholder="Service advisor name" />
