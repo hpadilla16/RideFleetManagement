@@ -71,6 +71,39 @@ dealershipLoanerRouter.get('/billing-export', async (req, res, next) => {
   }
 });
 
+dealershipLoanerRouter.get('/statement-export', async (req, res, next) => {
+  try {
+    const csv = await dealershipLoanerService.exportStatementCsv(req.user, {
+      query: req.query?.q ? String(req.query.q) : '',
+      billingStatus: req.query?.billingStatus ? String(req.query.billingStatus) : '',
+      billingMode: req.query?.billingMode ? String(req.query.billingMode) : '',
+      startDate: req.query?.startDate ? String(req.query.startDate) : '',
+      endDate: req.query?.endDate ? String(req.query.endDate) : ''
+    });
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', 'attachment; filename="loaner-dealer-statement.csv"');
+    res.send(csv);
+  } catch (error) {
+    next(error);
+  }
+});
+
+dealershipLoanerRouter.get('/statement-print', async (req, res, next) => {
+  try {
+    const html = await dealershipLoanerService.renderStatementPrint(req.user, {
+      query: req.query?.q ? String(req.query.q) : '',
+      billingStatus: req.query?.billingStatus ? String(req.query.billingStatus) : '',
+      billingMode: req.query?.billingMode ? String(req.query.billingMode) : '',
+      startDate: req.query?.startDate ? String(req.query.startDate) : '',
+      endDate: req.query?.endDate ? String(req.query.endDate) : ''
+    });
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    res.send(html);
+  } catch (error) {
+    next(error);
+  }
+});
+
 dealershipLoanerRouter.get('/reservations/:id', async (req, res, next) => {
   try {
     res.json(await dealershipLoanerService.getReservation(req.user, req.params.id));

@@ -148,6 +148,84 @@ function buildBillingCsv(rows = []) {
   return [header.map(csvCell).join(','), ...body].join('\n');
 }
 
+function summarizeStatementRows(rows = []) {
+  const totals = {
+    reservations: rows.length,
+    estimate: 0,
+    agreementTotal: 0,
+    agreementBalance: 0
+  };
+  const byMode = new Map();
+  const byStatus = new Map();
+
+  rows.forEach((row) => {
+    const estimate = Number(row.estimatedTotal || 0);
+    const agreementTotal = Number(row.rentalAgreement?.total || 0);
+    const agreementBalance = Number(row.rentalAgreement?.balance || 0);
+    totals.estimate += estimate;
+    totals.agreementTotal += agreementTotal;
+    totals.agreementBalance += agreementBalance;
+
+    const mode = String(row.loanerBillingMode || 'UNSPECIFIED');
+    const status = String(row.loanerBillingStatus || 'DRAFT');
+    byMode.set(mode, {
+      label: mode,
+      count: (byMode.get(mode)?.count || 0) + 1,
+      estimate: Number(((byMode.get(mode)?.estimate || 0) + estimate).toFixed(2)),
+      balance: Number(((byMode.get(mode)?.balance || 0) + agreementBalance).toFixed(2))
+    });
+    byStatus.set(status, {
+      label: status,
+      count: (byStatus.get(status)?.count || 0) + 1,
+      estimate: Number(((byStatus.get(status)?.estimate || 0) + estimate).toFixed(2)),
+      balance: Number(((byStatus.get(status)?.balance || 0) + agreementBalance).toFixed(2))
+    });
+  });
+
+  return {
+    totals: {
+      reservations: totals.reservations,
+      estimate: Number(totals.estimate.toFixed(2)),
+      agreementTotal: Number(totals.agreementTotal.toFixed(2)),
+      agreementBalance: Number(totals.agreementBalance.toFixed(2))
+    },
+    byMode: Array.from(byMode.values()).sort((a, b) => a.label.localeCompare(b.label)),
+    byStatus: Array.from(byStatus.values()).sort((a, b) => a.label.localeCompare(b.label))
+  };
+}
+
+function buildStatementRowsTable(rows = []) {
+  const body = rows.map((row) => `
+    <tr>
+      <td>${escapeHtml(row.reservationNumber || '-')}</td>
+      <td>${escapeHtml([row.customer?.firstName, row.customer?.lastName].filter(Boolean).join(' ') || '-')}</td>
+      <td>${escapeHtml(row.repairOrderNumber || '-')}</td>
+      <td>${escapeHtml(row.loanerBillingMode || '-')}</td>
+      <td>${escapeHtml(row.loanerBillingStatus || 'DRAFT')}</td>
+      <td>$${Number(row.estimatedTotal || 0).toFixed(2)}</td>
+      <td>$${Number(row.rentalAgreement?.total || 0).toFixed(2)}</td>
+      <td>$${Number(row.rentalAgreement?.balance || 0).toFixed(2)}</td>
+      <td>${escapeHtml(row.loanerDealerInvoiceNumber || '-')}</td>
+      <td>${escapeHtml(row.loanerPurchaseOrderNumber || '-')}</td>
+      <td>${escapeHtml(row.serviceAdvisorName || '-')}</td>
+      <td>${escapeHtml(formatDateTime(row.pickupAt))}</td>
+    </tr>
+  `).join('');
+  return `<table><thead><tr><th>Reservation</th><th>Customer</th><th>RO</th><th>Billing Mode</th><th>Billing Status</th><th>Estimate</th><th>Agreement Total</th><th>Balance</th><th>Invoice #</th><th>PO #</th><th>Advisor</th><th>Pickup</th></tr></thead><tbody>${body || '<tr><td colspan="12">No reservations matched this statement range.</td></tr>'}</tbody></table>`;
+}
+
+function buildStatementSummaryTable(rows = []) {
+  const body = rows.map((row) => `
+    <tr>
+      <td>${escapeHtml(row.label)}</td>
+      <td>${row.count}</td>
+      <td>$${Number(row.estimate || 0).toFixed(2)}</td>
+      <td>$${Number(row.balance || 0).toFixed(2)}</td>
+    </tr>
+  `).join('');
+  return `<table><thead><tr><th>Bucket</th><th>Reservations</th><th>Estimate</th><th>Balance</th></tr></thead><tbody>${body || '<tr><td colspan="4">No grouped totals available.</td></tr>'}</tbody></table>`;
+}
+
 function buildLoanerHandoffHtml(row) {
   let packet = {};
   try {
@@ -326,6 +404,35 @@ function buildLoanerPurchaseOrderHtml(row) {
       { title: 'Program Notes', content: `<div class="terms">${escapeHtml(row.loanerProgramNotes || row.loanerBillingNotes || row.loanerAccountingNotes || 'No additional purchase-order notes recorded.')}</div>` }
     ],
     signatureLabels: ['Service Advisor Approval', 'Accounting / PO Release']
+  });
+}
+
+function buildDealerStatementHtml(rows = [], input = {}) {
+  const summary = summarizeStatementRows(rows);
+  const startDate = input?.startDate ? formatDateTime(input.startDate) : 'Beginning';
+  const endDate = input?.endDate ? formatDateTime(input.endDate) : 'Now';
+  const subtitleParts = [
+    `Statement window ${startDate} to ${endDate}`,
+    input?.billingMode ? `Mode ${String(input.billingMode).toUpperCase()}` : null,
+    input?.billingStatus ? `Status ${String(input.billingStatus).toUpperCase()}` : null
+  ].filter(Boolean);
+
+  return buildLoanerPrintShell({
+    title: 'Dealer Statement / Monthly Accounting Packet',
+    pill: 'Monthly Statement',
+    subtitle: subtitleParts.join(' • '),
+    summaryTiles: [
+      { label: 'Reservations', value: String(summary.totals.reservations) },
+      { label: 'Estimate Total', value: `$${summary.totals.estimate.toFixed(2)}` },
+      { label: 'Agreement Total', value: `$${summary.totals.agreementTotal.toFixed(2)}` },
+      { label: 'Open Balance', value: `$${summary.totals.agreementBalance.toFixed(2)}`, tone: summary.totals.agreementBalance > 0 ? 'due' : 'paid' }
+    ],
+    sections: [
+      { title: 'Summary By Billing Mode', content: buildStatementSummaryTable(summary.byMode) },
+      { title: 'Summary By Billing Status', content: buildStatementSummaryTable(summary.byStatus) },
+      { title: 'Statement Detail', content: buildStatementRowsTable(rows) }
+    ],
+    signatureLabels: ['Dealer Accounting Review', 'Ride Fleet Accounting']
   });
 }
 
@@ -784,6 +891,26 @@ export const dealershipLoanerService = {
       orderBy: [{ pickupAt: 'desc' }]
     });
     return buildBillingCsv(rows);
+  },
+
+  async exportStatementCsv(user, input = {}) {
+    const scope = tenantScope(user);
+    const rows = await prisma.reservation.findMany({
+      where: buildBillingExportWhere(scope, input),
+      include: includeReservation(),
+      orderBy: [{ pickupAt: 'desc' }]
+    });
+    return buildBillingCsv(rows);
+  },
+
+  async renderStatementPrint(user, input = {}) {
+    const scope = tenantScope(user);
+    const rows = await prisma.reservation.findMany({
+      where: buildBillingExportWhere(scope, input),
+      include: includeReservation(),
+      orderBy: [{ pickupAt: 'desc' }]
+    });
+    return buildDealerStatementHtml(rows, input);
   },
 
   async saveBorrowerPacket(user, reservationId, payload = {}) {

@@ -226,6 +226,67 @@ function LoanerProgramInner({ token, me, logout }) {
     }
   }
 
+  function buildStatementQuery() {
+    const query = new URLSearchParams();
+    if (search.trim()) query.set('q', search.trim());
+    if (exportFilters.billingStatus) query.set('billingStatus', exportFilters.billingStatus);
+    if (exportFilters.billingMode) query.set('billingMode', exportFilters.billingMode);
+    if (exportFilters.startDate) query.set('startDate', exportFilters.startDate);
+    if (exportFilters.endDate) query.set('endDate', exportFilters.endDate);
+    return query;
+  }
+
+  async function exportStatementCsv() {
+    try {
+      const query = buildStatementQuery();
+      const res = await fetch(`${API_BASE}/api/dealership-loaner/statement-export${query.toString() ? `?${query.toString()}` : ''}`, {
+        headers: { Authorization: `Bearer ${token}` },
+        cache: 'no-store'
+      });
+      if (!res.ok) throw new Error(`Statement export failed (${res.status})`);
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const anchor = document.createElement('a');
+      anchor.href = url;
+      anchor.download = 'loaner-dealer-statement.csv';
+      anchor.click();
+      URL.revokeObjectURL(url);
+      setMsg('Dealer statement export downloaded');
+    } catch (error) {
+      setMsg(error.message);
+    }
+  }
+
+  async function printStatementPacket() {
+    const printWindow = window.open('', '_blank');
+    if (!printWindow) {
+      setMsg('Pop-up blocked. Please allow pop-ups to print the dealer statement.');
+      return;
+    }
+    printWindow.opener = null;
+    printWindow.document.write('<html><body style="font-family:Inter, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif;padding:32px;text-align:center;background:#0b0a12;color:#fff;">Preparing monthly accounting packet...</body></html>');
+    printWindow.document.close();
+    try {
+      const query = buildStatementQuery();
+      const res = await fetch(`${API_BASE}/api/dealership-loaner/statement-print${query.toString() ? `?${query.toString()}` : ''}`, {
+        headers: { Authorization: `Bearer ${token}` },
+        cache: 'no-store'
+      });
+      if (!res.ok) throw new Error(`Statement print failed (${res.status})`);
+      const html = await res.text();
+      printWindow.document.open();
+      printWindow.document.write(html);
+      printWindow.document.close();
+      printWindow.focus();
+      printWindow.print();
+    } catch (error) {
+      printWindow.document.open();
+      printWindow.document.write(`<p style="font-family: sans-serif; padding: 24px;">${error.message || 'Unable to print dealer statement'}</p>`);
+      printWindow.document.close();
+      setMsg(error.message);
+    }
+  }
+
   if (!config?.enabled && String(me?.role || '').toUpperCase() !== 'SUPER_ADMIN') {
     return (
       <AppShell me={me} logout={logout}>
@@ -296,6 +357,8 @@ function LoanerProgramInner({ token, me, logout }) {
             <div className="inline-actions">
               <span className="status-chip neutral">Service Lane</span>
               <button type="button" className="button-subtle" onClick={exportBillingCsv}>Export Billing CSV</button>
+              <button type="button" className="button-subtle" onClick={exportStatementCsv}>Export Statement CSV</button>
+              <button type="button" className="button-subtle" onClick={printStatementPacket}>Print Monthly Packet</button>
             </div>
           </div>
 
