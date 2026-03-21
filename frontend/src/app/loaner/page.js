@@ -4,7 +4,7 @@ import Link from 'next/link';
 import { useEffect, useMemo, useState } from 'react';
 import { AuthGate } from '../../components/AuthGate';
 import { AppShell } from '../../components/AppShell';
-import { api } from '../../lib/client';
+import { api, API_BASE } from '../../lib/client';
 
 const EMPTY_FORM = {
   customerId: '',
@@ -192,6 +192,26 @@ function LoanerProgramInner({ token, me, logout }) {
     await load(search.trim());
   }
 
+  async function exportBillingCsv() {
+    try {
+      const res = await fetch(`${API_BASE}/api/dealership-loaner/billing-export${search.trim() ? `?q=${encodeURIComponent(search.trim())}` : ''}`, {
+        headers: { Authorization: `Bearer ${token}` },
+        cache: 'no-store'
+      });
+      if (!res.ok) throw new Error(`Billing export failed (${res.status})`);
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const anchor = document.createElement('a');
+      anchor.href = url;
+      anchor.download = 'loaner-billing-export.csv';
+      anchor.click();
+      URL.revokeObjectURL(url);
+      setMsg('Loaner billing export downloaded');
+    } catch (error) {
+      setMsg(error.message);
+    }
+  }
+
   if (!config?.enabled && String(me?.role || '').toUpperCase() !== 'SUPER_ADMIN') {
     return (
       <AppShell me={me} logout={logout}>
@@ -252,7 +272,10 @@ function LoanerProgramInner({ token, me, logout }) {
               <div className="section-title">Loaner Lookup</div>
               <p className="ui-muted">Search by reservation, RO number, claim, customer, advisor, or service vehicle.</p>
             </div>
-            <span className="status-chip neutral">Service Lane</span>
+            <div className="inline-actions">
+              <span className="status-chip neutral">Service Lane</span>
+              <button type="button" className="button-subtle" onClick={exportBillingCsv}>Export Billing CSV</button>
+            </div>
           </div>
 
           <div className="inline-actions" style={{ alignItems: 'stretch' }}>
@@ -292,6 +315,7 @@ function LoanerProgramInner({ token, me, logout }) {
                       <td>
                         <div className="inline-actions">
                           <Link href={reservationHref(row)}><button type="button">Open</button></Link>
+                          <button type="button" className="button-subtle" onClick={() => window.open(reservationHref(row), '_blank')}>Open New Tab</button>
                           <Link href={reservationHref(row, 'checkout')}><button type="button" className="button-subtle">Checkout</button></Link>
                           <Link href={reservationHref(row, 'checkin')}><button type="button" className="button-subtle">Check-in</button></Link>
                         </div>

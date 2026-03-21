@@ -35,6 +35,180 @@ function matchesQuery(query) {
   };
 }
 
+function escapeHtml(value) {
+  return String(value ?? '')
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;')
+    .replaceAll("'", '&#39;');
+}
+
+function formatDateTime(value) {
+  if (!value) return '-';
+  try {
+    return new Date(value).toLocaleString();
+  } catch {
+    return String(value);
+  }
+}
+
+function csvCell(value) {
+  const text = String(value ?? '');
+  return `"${text.replaceAll('"', '""')}"`;
+}
+
+function buildBillingCsv(rows = []) {
+  const header = [
+    'Reservation',
+    'Customer',
+    'Repair Order',
+    'Claim',
+    'Billing Mode',
+    'Billing Status',
+    'Estimate',
+    'Payment Status',
+    'Agreement Total',
+    'Agreement Balance',
+    'Billing Contact',
+    'Billing Email',
+    'Billing Phone',
+    'Authorization Ref',
+    'Advisor',
+    'Pickup',
+    'Return',
+    'Location'
+  ];
+
+  const body = rows.map((row) => [
+    row.reservationNumber,
+    [row.customer?.firstName, row.customer?.lastName].filter(Boolean).join(' '),
+    row.repairOrderNumber || '',
+    row.claimNumber || '',
+    row.loanerBillingMode || '',
+    row.loanerBillingStatus || '',
+    row.estimatedTotal || 0,
+    row.paymentStatus || '',
+    row.rentalAgreement?.total || 0,
+    row.rentalAgreement?.balance || 0,
+    row.loanerBillingContactName || '',
+    row.loanerBillingContactEmail || '',
+    row.loanerBillingContactPhone || '',
+    row.loanerBillingAuthorizationRef || '',
+    row.serviceAdvisorName || '',
+    formatDateTime(row.pickupAt),
+    formatDateTime(row.returnAt),
+    row.pickupLocation?.name || ''
+  ].map(csvCell).join(','));
+
+  return [header.map(csvCell).join(','), ...body].join('\n');
+}
+
+function buildLoanerHandoffHtml(row) {
+  let packet = {};
+  try {
+    packet = row.loanerBorrowerPacketJson ? JSON.parse(row.loanerBorrowerPacketJson) : {};
+  } catch {}
+  const customerName = [row.customer?.firstName, row.customer?.lastName].filter(Boolean).join(' ') || 'Customer';
+  const serviceVehicle = [row.serviceVehicleYear, row.serviceVehicleMake, row.serviceVehicleModel, row.serviceVehiclePlate].filter(Boolean).join(' - ') || '-';
+  const loanerVehicle = row.vehicle ? [row.vehicle.year, row.vehicle.make, row.vehicle.model, row.vehicle.internalNumber].filter(Boolean).join(' ') : 'Unassigned';
+  const packetItems = [
+    ['Driver License Checked', packet.driverLicenseChecked ? 'Yes' : 'No'],
+    ['Insurance Card Collected', packet.insuranceCardCollected ? 'Yes' : 'No'],
+    ['Registration Confirmed', packet.registrationConfirmed ? 'Yes' : 'No'],
+    ['Walkaround Completed', packet.walkaroundCompleted ? 'Yes' : 'No'],
+    ['Fuel / Mileage Captured', packet.fuelAndMileageCaptured ? 'Yes' : 'No']
+  ];
+
+  return `<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Loaner Handoff Packet - ${escapeHtml(row.reservationNumber)}</title>
+  <style>
+    body { font-family: Arial, sans-serif; color: #1f1f1f; margin: 0; padding: 28px; }
+    h1, h2, h3 { margin: 0 0 10px; }
+    .muted { color: #666; }
+    .grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; margin-bottom: 18px; }
+    .card { border: 1px solid #ddd; border-radius: 12px; padding: 14px; }
+    .label { font-size: 11px; text-transform: uppercase; color: #666; letter-spacing: .06em; }
+    .value { font-size: 15px; font-weight: 700; margin-top: 4px; }
+    table { width: 100%; border-collapse: collapse; margin-top: 10px; }
+    td, th { border-bottom: 1px solid #eee; padding: 8px 0; text-align: left; }
+    .signature { margin-top: 24px; display: grid; grid-template-columns: 1fr 1fr; gap: 22px; }
+    .line { border-top: 1px solid #999; padding-top: 6px; margin-top: 40px; }
+    @media print { body { padding: 16px; } }
+  </style>
+</head>
+<body>
+  <h1>Dealership Loaner Handoff Packet</h1>
+  <div class="muted">Reservation ${escapeHtml(row.reservationNumber)} - RO ${escapeHtml(row.repairOrderNumber || '-')}</div>
+
+  <div class="grid" style="margin-top:18px;">
+    <div class="card">
+      <div class="label">Customer</div>
+      <div class="value">${escapeHtml(customerName)}</div>
+      <div class="muted">${escapeHtml(row.customer?.email || '-')} - ${escapeHtml(row.customer?.phone || '-')}</div>
+    </div>
+    <div class="card">
+      <div class="label">Service Advisor</div>
+      <div class="value">${escapeHtml(row.serviceAdvisorName || '-')}</div>
+      <div class="muted">${escapeHtml(row.serviceAdvisorEmail || '-')} - ${escapeHtml(row.serviceAdvisorPhone || '-')}</div>
+    </div>
+    <div class="card">
+      <div class="label">Service Vehicle</div>
+      <div class="value">${escapeHtml(serviceVehicle)}</div>
+      <div class="muted">Claim ${escapeHtml(row.claimNumber || '-')}</div>
+    </div>
+    <div class="card">
+      <div class="label">Loaner Vehicle</div>
+      <div class="value">${escapeHtml(loanerVehicle)}</div>
+      <div class="muted">${escapeHtml(row.pickupLocation?.name || '-')} - ${escapeHtml(row.returnLocation?.name || '-')}</div>
+    </div>
+  </div>
+
+  <div class="grid">
+    <div class="card">
+      <h3>Trip Window</h3>
+      <table>
+        <tr><th>Pickup</th><td>${escapeHtml(formatDateTime(row.pickupAt))}</td></tr>
+        <tr><th>Return</th><td>${escapeHtml(formatDateTime(row.returnAt))}</td></tr>
+        <tr><th>Billing Mode</th><td>${escapeHtml(row.loanerBillingMode || '-')}</td></tr>
+        <tr><th>Liability Accepted</th><td>${row.loanerLiabilityAccepted ? 'Yes' : 'No'}</td></tr>
+      </table>
+    </div>
+    <div class="card">
+      <h3>Borrower Packet</h3>
+      <table>
+        ${packetItems.map(([label, value]) => `<tr><th>${escapeHtml(label)}</th><td>${escapeHtml(value)}</td></tr>`).join('')}
+      </table>
+      <div style="margin-top:10px;"><strong>Notes:</strong> ${escapeHtml(packet.notes || row.loanerCloseoutNotes || row.serviceAdvisorNotes || '-')}</div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h3>Billing Summary</h3>
+    <table>
+      <tr><th>Billing Status</th><td>${escapeHtml(row.loanerBillingStatus || 'DRAFT')}</td></tr>
+      <tr><th>Estimate</th><td>$${Number(row.estimatedTotal || 0).toFixed(2)}</td></tr>
+      <tr><th>Billing Contact</th><td>${escapeHtml(row.loanerBillingContactName || '-')}</td></tr>
+      <tr><th>Auth Ref</th><td>${escapeHtml(row.loanerBillingAuthorizationRef || '-')}</td></tr>
+      <tr><th>Billing Notes</th><td>${escapeHtml(row.loanerBillingNotes || '-')}</td></tr>
+    </table>
+  </div>
+
+  <div class="signature">
+    <div>
+      <div class="line">Customer Signature / Initials</div>
+    </div>
+    <div>
+      <div class="line">Staff / Service Advisor</div>
+    </div>
+  </div>
+</body>
+</html>`;
+}
+
 function reservationCard(row) {
   let packet = {};
   try {
@@ -416,6 +590,28 @@ export const dealershipLoanerService = {
     const scope = tenantScope(user);
     const row = await getLoanerReservationOrThrow(reservationId, scope);
     return reservationCard(row);
+  },
+
+  async renderHandoffPrint(user, reservationId) {
+    const scope = tenantScope(user);
+    const row = await getLoanerReservationOrThrow(reservationId, scope);
+    return buildLoanerHandoffHtml(row);
+  },
+
+  async exportBillingCsv(user, input = {}) {
+    const scope = tenantScope(user);
+    const query = String(input?.query || '').trim();
+    const rows = await prisma.reservation.findMany({
+      where: {
+        ...scope,
+        workflowMode: 'DEALERSHIP_LOANER',
+        status: { not: 'CANCELLED' },
+        ...(matchesQuery(query) || {})
+      },
+      include: includeReservation(),
+      orderBy: [{ pickupAt: 'desc' }]
+    });
+    return buildBillingCsv(rows);
   },
 
   async saveBorrowerPacket(user, reservationId, payload = {}) {

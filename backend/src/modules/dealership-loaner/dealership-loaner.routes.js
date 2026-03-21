@@ -54,9 +54,32 @@ dealershipLoanerRouter.get('/dashboard', async (req, res, next) => {
   }
 });
 
+dealershipLoanerRouter.get('/billing-export', async (req, res, next) => {
+  try {
+    const csv = await dealershipLoanerService.exportBillingCsv(req.user, {
+      query: req.query?.q ? String(req.query.q) : ''
+    });
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename="loaner-billing-export.csv"`);
+    res.send(csv);
+  } catch (error) {
+    next(error);
+  }
+});
+
 dealershipLoanerRouter.get('/reservations/:id', async (req, res, next) => {
   try {
     res.json(await dealershipLoanerService.getReservation(req.user, req.params.id));
+  } catch (error) {
+    res.status(404).json({ error: error.message });
+  }
+});
+
+dealershipLoanerRouter.get('/reservations/:id/handoff-print', async (req, res, next) => {
+  try {
+    const html = await dealershipLoanerService.renderHandoffPrint(req.user, req.params.id);
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    res.send(html);
   } catch (error) {
     res.status(404).json({ error: error.message });
   }

@@ -450,6 +450,35 @@ function ReservationDetailInner({ token, me, logout }) {
       setMsg(e.message || 'Unable to print agreement');
     }
   };
+  const handlePrintLoanerHandoff = async () => {
+    if (!isLoanerWorkflow) return;
+    const printWindow = window.open('', '_blank');
+    if (!printWindow) {
+      setMsg('Pop-up blocked. Please allow pop-ups to print the loaner handoff packet.');
+      return;
+    }
+    printWindow.opener = null;
+    printWindow.document.write('<html><body style="font-family:Inter, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif;padding:32px;text-align:center;background:#0b0a12;color:#fff;">Preparing loaner handoff packet...</body></html>');
+    printWindow.document.close();
+    try {
+      const res = await fetch(`${API_BASE}/api/dealership-loaner/reservations/${id}/handoff-print`, {
+        headers: { Authorization: `Bearer ${token}` },
+        cache: 'no-store'
+      });
+      if (!res.ok) throw new Error(`Print failed (${res.status})`);
+      const html = await res.text();
+      printWindow.document.open();
+      printWindow.document.write(html);
+      printWindow.document.close();
+      printWindow.focus();
+      printWindow.print();
+    } catch (e) {
+      printWindow.document.open();
+      printWindow.document.write(`<p style="font-family: sans-serif; padding: 24px;">${e.message || 'Unable to print loaner handoff packet'}</p>`);
+      printWindow.document.close();
+      setMsg(e.message || 'Unable to print loaner handoff packet');
+    }
+  };
   const openLogs = async () => {
     try {
       const logs = await api(`/api/reservations/${id}/audit-logs`, {}, token);
@@ -1195,6 +1224,7 @@ setMsg('Charges updated');
                     <button type="button" onClick={extendLoaner}>Extend Loaner</button>
                     <button type="button" className="button-subtle" onClick={swapLoanerVehicle}>Swap Vehicle</button>
                     <button type="button" className="button-subtle" onClick={completeLoanerService}>Complete Service</button>
+                    <button type="button" className="button-subtle" onClick={handlePrintLoanerHandoff}>Print Handoff Packet</button>
                   </div>
                 </section>
 
