@@ -390,10 +390,12 @@ tr:hover td { background: rgba(135,82,254,.05); }
   .topbar {
     gap: 10px;
     align-items: stretch;
+    grid-template-columns: 1fr;
   }
   .topbar-primary {
     align-items: center;
     gap: 12px;
+    width: 100%;
   }
   .topbar-identity {
     display: grid;
@@ -411,6 +413,7 @@ tr:hover td { background: rgba(135,82,254,.05); }
   }
   .topbar-role {
     font-size: 10px;
+    display: none;
   }
   .topbar-actions {
     display: grid;
@@ -423,7 +426,8 @@ tr:hover td { background: rgba(135,82,254,.05); }
     min-width: 0;
     min-height: 44px;
     padding: 10px 8px;
-    font-size: 13px;
+    font-size: 12px;
+    line-height: 1.1;
   }
   .topbar-action-wide {
     grid-column: span 3;
@@ -710,18 +714,21 @@ label input[type="checkbox"],
   .topbar {
     gap: 10px;
     align-items: stretch;
+    padding: 10px;
   }
   .topbar-primary {
     align-items: center;
-    gap: 12px;
+    gap: 10px;
+    width: 100%;
   }
   .topbar-identity {
     display: grid;
     gap: 2px;
     flex: 1;
+    min-width: 0;
   }
   .topbar-name {
-    font-size: 15px;
+    font-size: 14px;
     line-height: 1.1;
     white-space: nowrap;
     overflow: hidden;
@@ -732,13 +739,14 @@ label input[type="checkbox"],
     grid-template-columns: repeat(3, minmax(0, 1fr));
     gap: 8px;
     width: 100%;
+    margin-top: 2px;
   }
   .topbar-action-btn {
     width: 100%;
     min-width: 0;
     min-height: 44px;
-    padding: 10px 10px;
-    font-size: 13px;
+    padding: 10px 6px;
+    font-size: 11px;
   }
   .topbar-action-wide {
     grid-column: span 3;
@@ -746,6 +754,7 @@ label input[type="checkbox"],
   .mobile-menu-btn {
     min-width: 52px;
     width: 52px;
+    font-size: 20px;
   }
   .brand-subtitle {
     font-size: 11px;
