@@ -65,6 +65,11 @@ function reservationCard(row) {
     loanerBillingNotes: row.loanerBillingNotes,
     loanerReturnExceptionFlag: !!row.loanerReturnExceptionFlag,
     loanerReturnExceptionNotes: row.loanerReturnExceptionNotes,
+    loanerBillingStatus: row.loanerBillingStatus || 'DRAFT',
+    loanerBillingSubmittedAt: row.loanerBillingSubmittedAt,
+    loanerBillingSettledAt: row.loanerBillingSettledAt,
+    serviceAdvisorNotes: row.serviceAdvisorNotes,
+    serviceAdvisorUpdatedAt: row.serviceAdvisorUpdatedAt,
     serviceVehicle: {
       year: row.serviceVehicleYear,
       make: row.serviceVehicleMake,
@@ -211,7 +216,7 @@ export const dealershipLoanerService = {
     endOfToday.setDate(endOfToday.getDate() + 1);
     const loanerWhere = { ...scope, workflowMode: 'DEALERSHIP_LOANER' };
 
-    const [intakeRaw, activeRaw, returnsRaw, searchRaw, counts] = await Promise.all([
+    const [intakeRaw, activeRaw, returnsRaw, advisorRaw, billingRaw, searchRaw, counts] = await Promise.all([
       prisma.reservation.findMany({
         where: {
           ...loanerWhere,
@@ -241,6 +246,26 @@ export const dealershipLoanerService = {
         orderBy: [{ returnAt: 'asc' }],
         take: 8
       }),
+      prisma.reservation.findMany({
+        where: {
+          ...loanerWhere,
+          status: { in: ['NEW', 'CONFIRMED'] }
+        },
+        include: includeReservation(),
+        orderBy: [{ estimatedServiceCompletionAt: 'asc' }, { pickupAt: 'asc' }],
+        take: 8
+      }),
+      prisma.reservation.findMany({
+        where: {
+          ...loanerWhere,
+          status: { not: 'CANCELLED' },
+          loanerBillingMode: { in: ['CUSTOMER_PAY', 'WARRANTY', 'INSURANCE'] },
+          loanerBillingStatus: { not: 'SETTLED' }
+        },
+        include: includeReservation(),
+        orderBy: [{ updatedAt: 'desc' }],
+        take: 8
+      }),
       query
         ? prisma.reservation.findMany({
             where: {
@@ -257,7 +282,10 @@ export const dealershipLoanerService = {
         prisma.reservation.count({ where: { ...loanerWhere, status: 'CHECKED_OUT' } }),
         prisma.reservation.count({ where: { ...loanerWhere, status: { in: ['NEW', 'CONFIRMED'] }, pickupAt: { gte: startOfToday, lt: endOfToday } } }),
         prisma.reservation.count({ where: { ...loanerWhere, status: { in: ['CONFIRMED', 'CHECKED_OUT'] }, returnAt: { gte: startOfToday, lt: endOfToday } } }),
-        prisma.reservation.count({ where: { ...loanerWhere, readyForPickupAt: { not: null }, status: { in: ['NEW', 'CONFIRMED'] } } })
+        prisma.reservation.count({ where: { ...loanerWhere, readyForPickupAt: { not: null }, status: { in: ['NEW', 'CONFIRMED'] } } }),
+        prisma.reservation.count({ where: { ...loanerWhere, status: { in: ['NEW', 'CONFIRMED'] }, loanerBorrowerPacketCompletedAt: null } }),
+        prisma.reservation.count({ where: { ...loanerWhere, status: { not: 'CANCELLED' }, loanerBillingMode: { in: ['CUSTOMER_PAY', 'WARRANTY', 'INSURANCE'] }, loanerBillingStatus: { not: 'SETTLED' } } }),
+        prisma.reservation.count({ where: { ...loanerWhere, loanerReturnExceptionFlag: true, status: { not: 'CANCELLED' } } })
       ])
     ]);
 
@@ -268,12 +296,17 @@ export const dealershipLoanerService = {
         activeLoaners: counts[1],
         pickupsToday: counts[2],
         dueBackToday: counts[3],
-        readyForDelivery: counts[4]
+        readyForDelivery: counts[4],
+        packetPending: counts[5],
+        billingAttention: counts[6],
+        returnExceptions: counts[7]
       },
       queues: {
         intake: intakeRaw.map(reservationCard),
         active: activeRaw.map(reservationCard),
-        returns: returnsRaw.map(reservationCard)
+        returns: returnsRaw.map(reservationCard),
+        advisor: advisorRaw.map(reservationCard),
+        billing: billingRaw.map(reservationCard)
       },
       searchResults: searchRaw.map(reservationCard)
     };
@@ -332,6 +365,7 @@ export const dealershipLoanerService = {
     if (!payload.loanerLiabilityAccepted) throw new Error('Customer liability acknowledgement is required');
 
     const billingMode = String(payload.loanerBillingMode || 'COURTESY').toUpperCase();
+    const loanerBillingStatus = ['COURTESY', 'INTERNAL'].includes(billingMode) ? 'APPROVED' : 'PENDING_APPROVAL';
     const reservation = await reservationsService.create({
       reservationNumber: String(payload.reservationNumber || '').trim() || makeReservationNumber(),
       sourceRef: String(payload.sourceRef || '').trim() || `LOANER:${String(payload.repairOrderNumber || 'NA')}:${Date.now()}`,
@@ -363,7 +397,11 @@ export const dealershipLoanerService = {
       serviceVehiclePlate: payload.serviceVehiclePlate || null,
       serviceVehicleVin: payload.serviceVehicleVin || null,
       loanerLiabilityAccepted: true,
-      loanerProgramNotes: payload.loanerProgramNotes || null
+      loanerProgramNotes: payload.loanerProgramNotes || null,
+      loanerBillingStatus,
+      loanerBillingSubmittedAt: ['WARRANTY', 'INSURANCE', 'CUSTOMER_PAY'].includes(billingMode) ? new Date().toISOString() : null,
+      serviceAdvisorNotes: String(payload.serviceAdvisorNotes || '').trim() || null,
+      serviceAdvisorUpdatedAt: payload.serviceAdvisorNotes ? new Date().toISOString() : null
     }, scope);
 
     return reservationsService.getById(reservation.id, scope);
@@ -421,6 +459,14 @@ export const dealershipLoanerService = {
     const scope = tenantScope(user);
     const current = await getLoanerReservationOrThrow(reservationId, scope);
     const billingMode = payload.loanerBillingMode ? String(payload.loanerBillingMode).toUpperCase() : current.loanerBillingMode;
+    const nextBillingStatus = payload.loanerBillingStatus
+      ? String(payload.loanerBillingStatus).toUpperCase()
+      : current.loanerBillingStatus;
+    const submittedAt = payload.loanerBillingSubmittedAt
+      ? payload.loanerBillingSubmittedAt
+      : (current.loanerBillingSubmittedAt
+        ? current.loanerBillingSubmittedAt.toISOString()
+        : (['WARRANTY', 'INSURANCE', 'CUSTOMER_PAY'].includes(billingMode) ? new Date().toISOString() : null));
 
     const updated = await reservationsService.update(reservationId, {
       loanerBillingMode: billingMode,
@@ -428,7 +474,10 @@ export const dealershipLoanerService = {
       loanerBillingContactEmail: String(payload.loanerBillingContactEmail || '').trim() || null,
       loanerBillingContactPhone: String(payload.loanerBillingContactPhone || '').trim() || null,
       loanerBillingAuthorizationRef: String(payload.loanerBillingAuthorizationRef || '').trim() || null,
-      loanerBillingNotes: String(payload.loanerBillingNotes || '').trim() || null
+      loanerBillingNotes: String(payload.loanerBillingNotes || '').trim() || null,
+      loanerBillingStatus: nextBillingStatus,
+      loanerBillingSubmittedAt: submittedAt,
+      loanerBillingSettledAt: nextBillingStatus === 'SETTLED' ? new Date().toISOString() : null
     }, scope);
 
     await prisma.auditLog.create({
@@ -440,7 +489,45 @@ export const dealershipLoanerService = {
         metadata: JSON.stringify({
           dealershipLoanerBillingSaved: true,
           loanerBillingMode: updated.loanerBillingMode,
+          loanerBillingStatus: updated.loanerBillingStatus,
           loanerBillingAuthorizationRef: updated.loanerBillingAuthorizationRef || null
+        })
+      }
+    });
+
+    return reservationCard(updated);
+  },
+
+  async saveAdvisorOps(user, reservationId, payload = {}) {
+    const scope = tenantScope(user);
+    const current = await getLoanerReservationOrThrow(reservationId, scope);
+    const markReady = payload.readyForPickup === true;
+
+    const updated = await reservationsService.update(reservationId, {
+      serviceAdvisorName: String(payload.serviceAdvisorName ?? current.serviceAdvisorName ?? '').trim() || null,
+      serviceAdvisorEmail: String(payload.serviceAdvisorEmail ?? current.serviceAdvisorEmail ?? '').trim() || null,
+      serviceAdvisorPhone: String(payload.serviceAdvisorPhone ?? current.serviceAdvisorPhone ?? '').trim() || null,
+      serviceAdvisorNotes: String(payload.serviceAdvisorNotes || '').trim() || null,
+      serviceAdvisorUpdatedAt: new Date().toISOString(),
+      estimatedServiceCompletionAt: payload.estimatedServiceCompletionAt || null,
+      readyForPickupAt: markReady ? new Date().toISOString() : null,
+      readyForPickupByUserId: markReady ? (user?.sub || user?.id || null) : null,
+      readyForPickupOverrideNote: markReady
+        ? (String(payload.readyForPickupNote || '').trim() || 'Service lane marked ready for pickup')
+        : null
+    }, scope);
+
+    await prisma.auditLog.create({
+      data: {
+        tenantId: current.tenantId || user?.tenantId || null,
+        reservationId,
+        action: 'UPDATE',
+        actorUserId: user?.sub || user?.id || null,
+        metadata: JSON.stringify({
+          dealershipLoanerAdvisorOpsSaved: true,
+          readyForPickup: markReady,
+          estimatedServiceCompletionAt: updated.estimatedServiceCompletionAt,
+          serviceAdvisorName: updated.serviceAdvisorName || null
         })
       }
     });

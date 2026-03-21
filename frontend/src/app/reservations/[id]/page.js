@@ -74,6 +74,14 @@ const toMoneyNum = (v) => {
 
 const money = (n) => `$${toMoneyNum(n).toFixed(2)}`;
 
+function toLocalDateTime(value) {
+  if (!value) return '';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '';
+  const pad = (num) => String(num).padStart(2, '0');
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
+}
+
 function parseLoanerPacket(raw) {
   try {
     if (!raw) return {};
@@ -113,11 +121,21 @@ function ReservationDetailInner({ token, me, logout }) {
   });
   const [loanerBillingForm, setLoanerBillingForm] = useState({
     loanerBillingMode: 'COURTESY',
+    loanerBillingStatus: 'DRAFT',
     loanerBillingContactName: '',
     loanerBillingContactEmail: '',
     loanerBillingContactPhone: '',
     loanerBillingAuthorizationRef: '',
     loanerBillingNotes: ''
+  });
+  const [loanerAdvisorForm, setLoanerAdvisorForm] = useState({
+    serviceAdvisorName: '',
+    serviceAdvisorEmail: '',
+    serviceAdvisorPhone: '',
+    serviceAdvisorNotes: '',
+    estimatedServiceCompletionAt: '',
+    readyForPickup: false,
+    readyForPickupNote: ''
   });
   const [loanerReturnForm, setLoanerReturnForm] = useState({
     flagged: false,
@@ -169,11 +187,21 @@ function ReservationDetailInner({ token, me, logout }) {
     });
     setLoanerBillingForm({
       loanerBillingMode: r.loanerBillingMode || 'COURTESY',
+      loanerBillingStatus: r.loanerBillingStatus || 'DRAFT',
       loanerBillingContactName: r.loanerBillingContactName || '',
       loanerBillingContactEmail: r.loanerBillingContactEmail || '',
       loanerBillingContactPhone: r.loanerBillingContactPhone || '',
       loanerBillingAuthorizationRef: r.loanerBillingAuthorizationRef || '',
       loanerBillingNotes: r.loanerBillingNotes || ''
+    });
+    setLoanerAdvisorForm({
+      serviceAdvisorName: r.serviceAdvisorName || '',
+      serviceAdvisorEmail: r.serviceAdvisorEmail || '',
+      serviceAdvisorPhone: r.serviceAdvisorPhone || '',
+      serviceAdvisorNotes: r.serviceAdvisorNotes || '',
+      estimatedServiceCompletionAt: toLocalDateTime(r.estimatedServiceCompletionAt),
+      readyForPickup: !!r.readyForPickupAt,
+      readyForPickupNote: r.readyForPickupOverrideNote || ''
     });
     setLoanerReturnForm({
       flagged: !!r.loanerReturnExceptionFlag,
@@ -510,6 +538,19 @@ function ReservationDetailInner({ token, me, logout }) {
       }, token);
       await load();
       setMsg('Loaner billing details saved');
+    } catch (e) {
+      setMsg(e.message);
+    }
+  };
+
+  const saveLoanerAdvisor = async () => {
+    try {
+      await api(`/api/dealership-loaner/reservations/${id}/advisor-ops`, {
+        method: 'POST',
+        body: JSON.stringify(loanerAdvisorForm)
+      }, token);
+      await load();
+      setMsg('Loaner advisor operations saved');
     } catch (e) {
       setMsg(e.message);
     }
@@ -934,11 +975,27 @@ setMsg('Charges updated');
                 <div><span className="label">Packet Completed By</span><div>{row.loanerBorrowerPacketCompletedBy || '-'}</div></div>
                 <div><span className="label">Billing Contact</span><div>{row.loanerBillingContactName || '-'}</div></div>
                 <div><span className="label">Billing Auth Ref</span><div>{row.loanerBillingAuthorizationRef || '-'}</div></div>
+                <div><span className="label">Billing Status</span><div>{row.loanerBillingStatus || 'DRAFT'}</div></div>
+                <div><span className="label">Billing Submitted</span><div>{row.loanerBillingSubmittedAt ? new Date(row.loanerBillingSubmittedAt).toLocaleString() : '-'}</div></div>
+                <div><span className="label">Billing Settled</span><div>{row.loanerBillingSettledAt ? new Date(row.loanerBillingSettledAt).toLocaleString() : '-'}</div></div>
+                <div><span className="label">Advisor Notes Updated</span><div>{row.serviceAdvisorUpdatedAt ? new Date(row.serviceAdvisorUpdatedAt).toLocaleString() : '-'}</div></div>
                 <div><span className="label">Return Exception</span><div>{row.loanerReturnExceptionFlag ? 'Flagged' : 'Clear'}</div></div>
                 <div><span className="label">Service Completion ETA</span><div>{row.estimatedServiceCompletionAt ? new Date(row.estimatedServiceCompletionAt).toLocaleString() : '-'}</div></div>
               </div>
 
               <div className="grid3" style={{ marginBottom: 0 }}>
+                <section className="glass card section-card">
+                  <div className="section-title">Advisor Operations</div>
+                  <input value={loanerAdvisorForm.serviceAdvisorName} onChange={(e) => setLoanerAdvisorForm({ ...loanerAdvisorForm, serviceAdvisorName: e.target.value })} placeholder="Service advisor name" />
+                  <input value={loanerAdvisorForm.serviceAdvisorEmail} onChange={(e) => setLoanerAdvisorForm({ ...loanerAdvisorForm, serviceAdvisorEmail: e.target.value })} placeholder="Service advisor email" />
+                  <input value={loanerAdvisorForm.serviceAdvisorPhone} onChange={(e) => setLoanerAdvisorForm({ ...loanerAdvisorForm, serviceAdvisorPhone: e.target.value })} placeholder="Service advisor phone" />
+                  <input type="datetime-local" value={loanerAdvisorForm.estimatedServiceCompletionAt} onChange={(e) => setLoanerAdvisorForm({ ...loanerAdvisorForm, estimatedServiceCompletionAt: e.target.value })} />
+                  <textarea rows={4} value={loanerAdvisorForm.serviceAdvisorNotes} onChange={(e) => setLoanerAdvisorForm({ ...loanerAdvisorForm, serviceAdvisorNotes: e.target.value })} placeholder="Lane notes, promised completion, customer communication, parts delays, etc." />
+                  <label className="label"><input type="checkbox" checked={loanerAdvisorForm.readyForPickup} onChange={(e) => setLoanerAdvisorForm({ ...loanerAdvisorForm, readyForPickup: e.target.checked })} /> Mark ready for pickup</label>
+                  <textarea rows={2} value={loanerAdvisorForm.readyForPickupNote} onChange={(e) => setLoanerAdvisorForm({ ...loanerAdvisorForm, readyForPickupNote: e.target.value })} placeholder="Ready note for service lane / cashier" />
+                  <button type="button" onClick={saveLoanerAdvisor}>Save Advisor Ops</button>
+                </section>
+
                 <section className="glass card section-card">
                   <div className="section-title">Borrower Packet</div>
                   <label className="label"><input type="checkbox" checked={loanerPacketForm.driverLicenseChecked} onChange={(e) => setLoanerPacketForm({ ...loanerPacketForm, driverLicenseChecked: e.target.checked })} /> Driver license checked</label>
@@ -961,6 +1018,14 @@ setMsg('Charges updated');
                     <option value="WARRANTY">Warranty</option>
                     <option value="INSURANCE">Insurance</option>
                     <option value="INTERNAL">Internal</option>
+                  </select>
+                  <select value={loanerBillingForm.loanerBillingStatus} onChange={(e) => setLoanerBillingForm({ ...loanerBillingForm, loanerBillingStatus: e.target.value })}>
+                    <option value="DRAFT">Draft</option>
+                    <option value="PENDING_APPROVAL">Pending Approval</option>
+                    <option value="APPROVED">Approved</option>
+                    <option value="INVOICED">Invoiced</option>
+                    <option value="SETTLED">Settled</option>
+                    <option value="DENIED">Denied</option>
                   </select>
                   <input value={loanerBillingForm.loanerBillingContactName} onChange={(e) => setLoanerBillingForm({ ...loanerBillingForm, loanerBillingContactName: e.target.value })} placeholder="Billing contact name" />
                   <input value={loanerBillingForm.loanerBillingContactEmail} onChange={(e) => setLoanerBillingForm({ ...loanerBillingForm, loanerBillingContactEmail: e.target.value })} placeholder="Billing contact email" />

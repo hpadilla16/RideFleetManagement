@@ -312,6 +312,11 @@ export const reservationsService = {
         loanerBillingNotes: data.loanerBillingNotes ?? null,
         loanerReturnExceptionFlag: !!data.loanerReturnExceptionFlag,
         loanerReturnExceptionNotes: data.loanerReturnExceptionNotes ?? null,
+        loanerBillingStatus: data.loanerBillingStatus ?? 'DRAFT',
+        loanerBillingSubmittedAt: data.loanerBillingSubmittedAt ? new Date(data.loanerBillingSubmittedAt) : null,
+        loanerBillingSettledAt: data.loanerBillingSettledAt ? new Date(data.loanerBillingSettledAt) : null,
+        serviceAdvisorNotes: data.serviceAdvisorNotes ?? null,
+        serviceAdvisorUpdatedAt: data.serviceAdvisorUpdatedAt ? new Date(data.serviceAdvisorUpdatedAt) : null,
         customerId: data.customerId,
         vehicleId: assignedVehicleId,
         vehicleTypeId: data.vehicleTypeId ?? null,
@@ -370,14 +375,27 @@ export const reservationsService = {
     const data = {
       ...patch,
       notes: mergeUnderageAlert(nextNotesInput, underageAlert),
-      serviceStartAt: patch.serviceStartAt ? new Date(patch.serviceStartAt) : undefined,
-      estimatedServiceCompletionAt: patch.estimatedServiceCompletionAt ? new Date(patch.estimatedServiceCompletionAt) : undefined,
+      serviceStartAt: patch.serviceStartAt
+        ? new Date(patch.serviceStartAt)
+        : (patch.serviceStartAt === null ? null : undefined),
+      estimatedServiceCompletionAt: patch.estimatedServiceCompletionAt
+        ? new Date(patch.estimatedServiceCompletionAt)
+        : (patch.estimatedServiceCompletionAt === null ? null : undefined),
       loanerLiabilityAcceptedAt: patch.loanerLiabilityAcceptedAt
         ? new Date(patch.loanerLiabilityAcceptedAt)
         : (patch.loanerLiabilityAccepted === true ? new Date() : undefined),
       loanerBorrowerPacketCompletedAt: patch.loanerBorrowerPacketCompletedAt
         ? new Date(patch.loanerBorrowerPacketCompletedAt)
         : (patch.loanerBorrowerPacketCompletedAt === null ? null : undefined),
+      loanerBillingSubmittedAt: patch.loanerBillingSubmittedAt
+        ? new Date(patch.loanerBillingSubmittedAt)
+        : (patch.loanerBillingSubmittedAt === null ? null : undefined),
+      loanerBillingSettledAt: patch.loanerBillingSettledAt
+        ? new Date(patch.loanerBillingSettledAt)
+        : (patch.loanerBillingSettledAt === null ? null : undefined),
+      serviceAdvisorUpdatedAt: patch.serviceAdvisorUpdatedAt
+        ? new Date(patch.serviceAdvisorUpdatedAt)
+        : (patch.serviceAdvisorUpdatedAt === null ? null : undefined),
       pickupAt: patch.pickupAt ? new Date(patch.pickupAt) : undefined,
       returnAt: patch.returnAt ? new Date(patch.returnAt) : undefined
     };

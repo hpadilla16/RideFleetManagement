@@ -181,6 +181,15 @@ enum LoanerBillingMode {
   INTERNAL
 }
 
+enum LoanerBillingStatus {
+  DRAFT
+  PENDING_APPROVAL
+  APPROVED
+  INVOICED
+  SETTLED
+  DENIED
+}
+
 model Tenant {
   id        String   @id @default(cuid())
   name      String
@@ -361,6 +370,11 @@ model Reservation {
   loanerBillingNotes String?
   loanerReturnExceptionFlag Boolean @default(false)
   loanerReturnExceptionNotes String?
+  loanerBillingStatus LoanerBillingStatus @default(DRAFT)
+  loanerBillingSubmittedAt DateTime?
+  loanerBillingSettledAt DateTime?
+  serviceAdvisorNotes String?
+  serviceAdvisorUpdatedAt DateTime?
 
   customerId        String
   customer          Customer          @relation(fields: [customerId], references: [id])

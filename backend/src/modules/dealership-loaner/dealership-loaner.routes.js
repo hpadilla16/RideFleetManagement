@@ -78,6 +78,14 @@ dealershipLoanerRouter.post('/reservations/:id/billing', async (req, res, next) 
   }
 });
 
+dealershipLoanerRouter.post('/reservations/:id/advisor-ops', async (req, res, next) => {
+  try {
+    res.json(await dealershipLoanerService.saveAdvisorOps(req.user, req.params.id, req.body || {}));
+  } catch (error) {
+    res.status(400).json({ error: error.message });
+  }
+});
+
 dealershipLoanerRouter.post('/reservations/:id/return-exception', async (req, res, next) => {
   try {
     res.json(await dealershipLoanerService.saveReturnException(req.user, req.params.id, req.body || {}));

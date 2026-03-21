@@ -31,7 +31,8 @@ const EMPTY_FORM = {
   serviceVehicleVin: '',
   notes: '',
   loanerProgramNotes: '',
-  loanerLiabilityAccepted: false
+  loanerLiabilityAccepted: false,
+  serviceAdvisorNotes: ''
 };
 
 function formatDateTime(value) {
@@ -81,7 +82,10 @@ function LoanerProgramInner({ token, me, logout }) {
     activeLoaners: 0,
     pickupsToday: 0,
     dueBackToday: 0,
-    readyForDelivery: 0
+    readyForDelivery: 0,
+    packetPending: 0,
+    billingAttention: 0,
+    returnExceptions: 0
   };
 
   async function load(query = '') {
@@ -226,6 +230,10 @@ function LoanerProgramInner({ token, me, logout }) {
               <div className="metric-card"><span className="label">Active Loaners</span><strong>{metrics.activeLoaners}</strong></div>
               <div className="metric-card"><span className="label">Pickups Today</span><strong>{metrics.pickupsToday}</strong></div>
               <div className="metric-card"><span className="label">Due Back Today</span><strong>{metrics.dueBackToday}</strong></div>
+              <div className="metric-card"><span className="label">Packet Pending</span><strong>{metrics.packetPending}</strong></div>
+              <div className="metric-card"><span className="label">Billing Attention</span><strong>{metrics.billingAttention}</strong></div>
+              <div className="metric-card"><span className="label">Return Exceptions</span><strong>{metrics.returnExceptions}</strong></div>
+              <div className="metric-card"><span className="label">Ready For Delivery</span><strong>{metrics.readyForDelivery}</strong></div>
             </div>
           </div>
         </div>
@@ -463,6 +471,10 @@ function LoanerProgramInner({ token, me, logout }) {
               <div className="label">Loaner Program Notes</div>
               <textarea rows={3} value={form.loanerProgramNotes} onChange={(event) => setForm((current) => ({ ...current, loanerProgramNotes: event.target.value }))} placeholder="Coverage details, insurer approval, courtesy policy, etc." />
             </div>
+            <div>
+              <div className="label">Service Advisor Notes</div>
+              <textarea rows={3} value={form.serviceAdvisorNotes} onChange={(event) => setForm((current) => ({ ...current, serviceAdvisorNotes: event.target.value }))} placeholder="Advisor follow-up, promised completion, customer expectations, or service context" />
+            </div>
             <label className="label">
               <input
                 type="checkbox"
@@ -528,11 +540,38 @@ function LoanerProgramInner({ token, me, logout }) {
               </>
             )}
           />
+          <LoanerQueueCard
+            title="Advisor Follow-Up"
+            subtitle="Reservations that still need lane guidance, borrower packet progress, or ready-for-pickup decisions."
+            rows={dashboard?.queues?.advisor || []}
+            emptyText="No advisor follow-up items right now."
+            actions={(row) => (
+              <>
+                <Link href={reservationHref(row)}><button type="button">Open Workflow</button></Link>
+                <Link href={reservationHref(row, 'checkout')}><button type="button" className="button-subtle">Checkout</button></Link>
+              </>
+            )}
+          />
+        </div>
+
+        <div className="split-panel" style={{ marginTop: 16 }}>
+          <LoanerQueueCard
+            title="Billing Review"
+            subtitle="Warranty, insurer, and customer-pay loaners that still need billing follow-up."
+            rows={dashboard?.queues?.billing || []}
+            emptyText="No loaner billing items waiting right now."
+            actions={(row) => (
+              <>
+                <Link href={reservationHref(row)}><button type="button">Open Workflow</button></Link>
+                <Link href={reservationHref(row, 'payments')}><button type="button" className="button-subtle">Payments</button></Link>
+              </>
+            )}
+          />
           <section className="glass card section-card">
-            <div className="section-title">Foundation Notes</div>
+            <div className="section-title">Operations Notes</div>
             <div className="surface-note">
-              This first slice uses the normal reservation workflow so loaners can move into the same agreement,
-              inspection, payment, and return flows already proven in the core product.
+              Loaners now carry service-advisor notes, billing status, borrower packet completion, and return exceptions
+              on the same reservation record, so service lane, cashier, and ops stay aligned in one workflow.
             </div>
           </section>
         </div>
@@ -562,9 +601,21 @@ function LoanerQueueCard({ title, subtitle, rows, emptyText, actions }) {
               <div className="metric-grid">
                 <div className="metric-card"><span className="label">RO</span><strong>{row.repairOrderNumber || '-'}</strong></div>
                 <div className="metric-card"><span className="label">Billing</span><strong>{row.loanerBillingMode || '-'}</strong></div>
+                <div className="metric-card"><span className="label">Billing Status</span><strong>{row.loanerBillingStatus || 'DRAFT'}</strong></div>
                 <div className="metric-card"><span className="label">Pickup</span><strong>{formatDateTime(row.pickupAt)}</strong></div>
                 <div className="metric-card"><span className="label">Return</span><strong>{formatDateTime(row.returnAt)}</strong></div>
                 <div className="metric-card"><span className="label">Estimate</span><strong>{formatMoney(row.estimatedTotal)}</strong></div>
+              </div>
+              {row.serviceAdvisorNotes ? (
+                <div className="label" style={{ textTransform: 'none', letterSpacing: 0, fontSize: 12 }}>
+                  Notes: {row.serviceAdvisorNotes}
+                </div>
+              ) : null}
+              <div className="inline-actions" style={{ gap: 8 }}>
+                <span className={`status-chip ${row.loanerBorrowerPacketCompletedAt ? 'good' : 'warn'}`}>
+                  {row.loanerBorrowerPacketCompletedAt ? 'Packet Complete' : 'Packet Pending'}
+                </span>
+                {row.loanerReturnExceptionFlag ? <span className="status-chip warn">Return Exception</span> : null}
               </div>
               <div className="label" style={{ textTransform: 'none', letterSpacing: 0, fontSize: 12 }}>
                 Advisor: {row.serviceAdvisorName || '-'} · Location: {row.pickupLocation?.name || '-'}
