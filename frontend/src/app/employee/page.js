@@ -179,6 +179,7 @@ function EmployeeAppInner({ token, me, logout }) {
               <span className="hero-pill">Lookup + queues</span>
               <span className="hero-pill">Quick create</span>
               <span className="hero-pill">Phone and tablet friendly</span>
+              <Link href="/loaner" className="hero-pill">Open Loaner Program</Link>
             </div>
           </div>
           <div className="glass card section-card">

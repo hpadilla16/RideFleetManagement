@@ -283,6 +283,25 @@ export const reservationsService = {
         reservationNumber: data.reservationNumber,
         sourceRef: data.sourceRef ?? null,
         status: data.status ?? 'NEW',
+        workflowMode: data.workflowMode ?? 'RENTAL',
+        loanerBillingMode: data.loanerBillingMode ?? null,
+        repairOrderNumber: data.repairOrderNumber ?? null,
+        claimNumber: data.claimNumber ?? null,
+        serviceAdvisorName: data.serviceAdvisorName ?? null,
+        serviceAdvisorEmail: data.serviceAdvisorEmail ?? null,
+        serviceAdvisorPhone: data.serviceAdvisorPhone ?? null,
+        serviceStartAt: data.serviceStartAt ? new Date(data.serviceStartAt) : null,
+        estimatedServiceCompletionAt: data.estimatedServiceCompletionAt ? new Date(data.estimatedServiceCompletionAt) : null,
+        serviceVehicleYear: data.serviceVehicleYear ?? null,
+        serviceVehicleMake: data.serviceVehicleMake ?? null,
+        serviceVehicleModel: data.serviceVehicleModel ?? null,
+        serviceVehiclePlate: data.serviceVehiclePlate ?? null,
+        serviceVehicleVin: data.serviceVehicleVin ?? null,
+        loanerLiabilityAccepted: !!data.loanerLiabilityAccepted,
+        loanerLiabilityAcceptedAt: data.loanerLiabilityAcceptedAt
+          ? new Date(data.loanerLiabilityAcceptedAt)
+          : (data.loanerLiabilityAccepted ? new Date() : null),
+        loanerProgramNotes: data.loanerProgramNotes ?? null,
         customerId: data.customerId,
         vehicleId: assignedVehicleId,
         vehicleTypeId: data.vehicleTypeId ?? null,
@@ -341,6 +360,11 @@ export const reservationsService = {
     const data = {
       ...patch,
       notes: mergeUnderageAlert(nextNotesInput, underageAlert),
+      serviceStartAt: patch.serviceStartAt ? new Date(patch.serviceStartAt) : undefined,
+      estimatedServiceCompletionAt: patch.estimatedServiceCompletionAt ? new Date(patch.estimatedServiceCompletionAt) : undefined,
+      loanerLiabilityAcceptedAt: patch.loanerLiabilityAcceptedAt
+        ? new Date(patch.loanerLiabilityAcceptedAt)
+        : (patch.loanerLiabilityAccepted === true ? new Date() : undefined),
       pickupAt: patch.pickupAt ? new Date(patch.pickupAt) : undefined,
       returnAt: patch.returnAt ? new Date(patch.returnAt) : undefined
     };

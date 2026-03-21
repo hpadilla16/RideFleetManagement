@@ -167,6 +167,20 @@ enum TripIncidentStatus {
   CLOSED
 }
 
+enum ReservationWorkflowMode {
+  RENTAL
+  CAR_SHARING
+  DEALERSHIP_LOANER
+}
+
+enum LoanerBillingMode {
+  COURTESY
+  CUSTOMER_PAY
+  WARRANTY
+  INSURANCE
+  INTERNAL
+}
+
 model Tenant {
   id        String   @id @default(cuid())
   name      String
@@ -174,6 +188,7 @@ model Tenant {
   status    String   @default("ACTIVE")
   plan      String   @default("BETA")
   carSharingEnabled Boolean @default(false)
+  dealershipLoanerEnabled Boolean @default(false)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -319,6 +334,23 @@ model Reservation {
   reservationNumber String            @unique
   sourceRef         String?           @unique
   status            ReservationStatus @default(NEW)
+  workflowMode      ReservationWorkflowMode @default(RENTAL)
+  loanerBillingMode LoanerBillingMode?
+  repairOrderNumber String?
+  claimNumber       String?
+  serviceAdvisorName String?
+  serviceAdvisorEmail String?
+  serviceAdvisorPhone String?
+  serviceStartAt    DateTime?
+  estimatedServiceCompletionAt DateTime?
+  serviceVehicleYear Int?
+  serviceVehicleMake String?
+  serviceVehicleModel String?
+  serviceVehiclePlate String?
+  serviceVehicleVin String?
+  loanerLiabilityAccepted Boolean @default(false)
+  loanerLiabilityAcceptedAt DateTime?
+  loanerProgramNotes String?
 
   customerId        String
   customer          Customer          @relation(fields: [customerId], references: [id])
@@ -376,7 +408,9 @@ model Reservation {
   carSharingTrip    Trip?
 
   @@index([status, pickupAt])
+  @@index([workflowMode, status, pickupAt])
   @@index([pickupLocationId, pickupAt])
+  @@index([repairOrderNumber])
 }
 
 model Invoice {

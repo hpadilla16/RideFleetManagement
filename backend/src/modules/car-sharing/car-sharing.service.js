@@ -107,6 +107,7 @@ async function createReservationForTrip({ tenantId, listing, guestCustomerId, pi
       reservationNumber: generateReservationNumber(),
       sourceRef: `CARSHARE:${tripCode}`,
       status: 'CONFIRMED',
+      workflowMode: 'CAR_SHARING',
       customerId: guestCustomerId,
       vehicleId: listing.vehicleId,
       vehicleTypeId: listing.vehicle?.vehicleTypeId || null,
