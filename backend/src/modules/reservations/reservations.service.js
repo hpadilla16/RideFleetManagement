@@ -320,6 +320,11 @@ export const reservationsService = {
         loanerServiceCompletedAt: data.loanerServiceCompletedAt ? new Date(data.loanerServiceCompletedAt) : null,
         loanerServiceCompletedBy: data.loanerServiceCompletedBy ?? null,
         loanerCloseoutNotes: data.loanerCloseoutNotes ?? null,
+        loanerPurchaseOrderNumber: data.loanerPurchaseOrderNumber ?? null,
+        loanerDealerInvoiceNumber: data.loanerDealerInvoiceNumber ?? null,
+        loanerAccountingNotes: data.loanerAccountingNotes ?? null,
+        loanerAccountingClosedAt: data.loanerAccountingClosedAt ? new Date(data.loanerAccountingClosedAt) : null,
+        loanerAccountingClosedBy: data.loanerAccountingClosedBy ?? null,
         loanerLastExtendedAt: data.loanerLastExtendedAt ? new Date(data.loanerLastExtendedAt) : null,
         loanerLastVehicleSwapAt: data.loanerLastVehicleSwapAt ? new Date(data.loanerLastVehicleSwapAt) : null,
         customerId: data.customerId,
@@ -404,6 +409,9 @@ export const reservationsService = {
       loanerServiceCompletedAt: patch.loanerServiceCompletedAt
         ? new Date(patch.loanerServiceCompletedAt)
         : (patch.loanerServiceCompletedAt === null ? null : undefined),
+      loanerAccountingClosedAt: patch.loanerAccountingClosedAt
+        ? new Date(patch.loanerAccountingClosedAt)
+        : (patch.loanerAccountingClosedAt === null ? null : undefined),
       loanerLastExtendedAt: patch.loanerLastExtendedAt
         ? new Date(patch.loanerLastExtendedAt)
         : (patch.loanerLastExtendedAt === null ? null : undefined),

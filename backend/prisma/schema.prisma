@@ -378,6 +378,11 @@ model Reservation {
   loanerServiceCompletedAt DateTime?
   loanerServiceCompletedBy String?
   loanerCloseoutNotes String?
+  loanerPurchaseOrderNumber String?
+  loanerDealerInvoiceNumber String?
+  loanerAccountingNotes String?
+  loanerAccountingClosedAt DateTime?
+  loanerAccountingClosedBy String?
   loanerLastExtendedAt DateTime?
   loanerLastVehicleSwapAt DateTime?
 

@@ -99,6 +99,16 @@ dealershipLoanerRouter.get('/reservations/:id/billing-print', async (req, res, n
   }
 });
 
+dealershipLoanerRouter.get('/reservations/:id/purchase-order-print', async (req, res, next) => {
+  try {
+    const html = await dealershipLoanerService.renderPurchaseOrderPrint(req.user, req.params.id);
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    res.send(html);
+  } catch (error) {
+    res.status(404).json({ error: error.message });
+  }
+});
+
 dealershipLoanerRouter.post('/reservations/:id/borrower-packet', async (req, res, next) => {
   try {
     res.json(await dealershipLoanerService.saveBorrowerPacket(req.user, req.params.id, req.body || {}));
@@ -110,6 +120,14 @@ dealershipLoanerRouter.post('/reservations/:id/borrower-packet', async (req, res
 dealershipLoanerRouter.post('/reservations/:id/billing', async (req, res, next) => {
   try {
     res.json(await dealershipLoanerService.saveBilling(req.user, req.params.id, req.body || {}));
+  } catch (error) {
+    res.status(400).json({ error: error.message });
+  }
+});
+
+dealershipLoanerRouter.post('/reservations/:id/accounting-closeout', async (req, res, next) => {
+  try {
+    res.json(await dealershipLoanerService.saveAccountingCloseout(req.user, req.params.id, req.body || {}));
   } catch (error) {
     res.status(400).json({ error: error.message });
   }
