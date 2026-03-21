@@ -33,7 +33,7 @@ function formatDateTime(value) {
 function statusClass(status) {
   const current = String(status || '').toUpperCase();
   if (['CHECKED_OUT', 'CHECKED_IN', 'READY_FOR_PICKUP'].includes(current)) return 'status-chip good';
-  if (['CANCELLED', 'NO_SHOW'].includes(current)) return 'status-chip warn';
+  if (['CANCELLED', 'NO_SHOW', 'DENIED'].includes(current)) return 'status-chip warn';
   return 'status-chip neutral';
 }
 
@@ -46,6 +46,22 @@ function vehicleLabel(row) {
     return [row.vehicle.year, row.vehicle.make, row.vehicle.model].filter(Boolean).join(' ');
   }
   return row?.vehicleType?.name || 'Unassigned vehicle';
+}
+
+function workflowLabel(row) {
+  const mode = String(row?.workflowMode || 'RENTAL').toUpperCase();
+  if (mode === 'DEALERSHIP_LOANER') return 'Dealership Loaner';
+  if (mode === 'CAR_SHARING') return 'Car Sharing';
+  return 'Rental';
+}
+
+function queueContext(row) {
+  if (String(row?.workflowMode || '').toUpperCase() !== 'DEALERSHIP_LOANER') return '';
+  return [
+    row?.repairOrderNumber ? `RO ${row.repairOrderNumber}` : '',
+    row?.serviceAdvisorName || '',
+    row?.loanerBillingStatus ? `Billing ${String(row.loanerBillingStatus).replaceAll('_', ' ')}` : ''
+  ].filter(Boolean).join(' · ');
 }
 
 function reservationHref(row, action = '') {
@@ -73,7 +89,11 @@ function EmployeeAppInner({ token, me, logout }) {
     activeRentals: 0,
     precheckinQueue: 0,
     readyForPickup: 0,
-    dueBackToday: 0
+    dueBackToday: 0,
+    loanerOpen: 0,
+    loanerReady: 0,
+    loanerBillingAttention: 0,
+    loanerOverdue: 0
   };
 
   async function load(query = '') {
@@ -172,13 +192,14 @@ function EmployeeAppInner({ token, me, logout }) {
               Run reservation operations from a faster, mobile-first employee surface.
             </h1>
             <p>
-              This first slice is built for agents, ops, and admins who need fast lookup, pre-check-in review,
-              quick reservation creation, and direct access to checkout, check-in, inspections, and payments.
+              This next slice turns the employee app into a real operations hub: fast lookup, quick reservation intake,
+              rental queues, and dealership loaner service-lane work from one place.
             </p>
             <div className="hero-meta">
               <span className="hero-pill">Lookup + queues</span>
               <span className="hero-pill">Quick create</span>
               <span className="hero-pill">Phone and tablet friendly</span>
+              <span className="hero-pill">Loaner service lane</span>
               <Link href="/loaner" className="hero-pill">Open Loaner Program</Link>
             </div>
           </div>
@@ -189,13 +210,17 @@ function EmployeeAppInner({ token, me, logout }) {
               <div className="metric-card"><span className="label">Active Rentals</span><strong>{metrics.activeRentals}</strong></div>
               <div className="metric-card"><span className="label">Ready For Pickup</span><strong>{metrics.readyForPickup}</strong></div>
               <div className="metric-card"><span className="label">Due Back Today</span><strong>{metrics.dueBackToday}</strong></div>
+              <div className="metric-card"><span className="label">Loaners Open</span><strong>{metrics.loanerOpen}</strong></div>
+              <div className="metric-card"><span className="label">Loaners Ready</span><strong>{metrics.loanerReady}</strong></div>
+              <div className="metric-card"><span className="label">Billing Attention</span><strong>{metrics.loanerBillingAttention}</strong></div>
+              <div className="metric-card"><span className="label">Loaners Overdue</span><strong>{metrics.loanerOverdue}</strong></div>
             </div>
           </div>
         </div>
       </section>
 
       {msg ? (
-        <div className="surface-note" style={{ color: /created|saved|updated/i.test(msg) ? '#166534' : '#991b1b', marginBottom: 18 }}>
+        <div className="surface-note" style={{ color: /created|saved|updated|moved/i.test(msg) ? '#166534' : '#991b1b', marginBottom: 18 }}>
           {msg}
         </div>
       ) : null}
@@ -242,6 +267,9 @@ function EmployeeAppInner({ token, me, logout }) {
                       <td>{formatDateTime(row.pickupAt)}</td>
                       <td>{formatDateTime(row.returnAt)}</td>
                       <td>
+                        <div className="label" style={{ textTransform: 'none', letterSpacing: 0, fontSize: 12, marginBottom: 6 }}>
+                          {[workflowLabel(row), queueContext(row)].filter(Boolean).join(' · ')}
+                        </div>
                         <div className="inline-actions">
                           <Link href={reservationHref(row)}><button type="button">Open</button></Link>
                           <Link href={reservationHref(row, 'checkout')}><button type="button" className="button-subtle">Checkout</button></Link>
@@ -342,7 +370,7 @@ function EmployeeAppInner({ token, me, logout }) {
             <div className="section-title">Employee Queues</div>
             <p className="ui-muted">Designed for quick triage: who needs review, who is ready to leave, and who is due back.</p>
           </div>
-          <span className="status-chip neutral">Foundation Surface</span>
+          <span className="status-chip neutral">Rental Operations</span>
         </div>
 
         <div className="split-panel" style={{ marginTop: 10 }}>
@@ -399,6 +427,70 @@ function EmployeeAppInner({ token, me, logout }) {
           />
         </div>
       </section>
+
+      <section className="glass card-lg section-card" style={{ marginTop: 18 }}>
+        <div className="row-between">
+          <div>
+            <div className="section-title">Loaner Service Lane</div>
+            <p className="ui-muted">Keep dealership loaners moving without leaving the employee surface.</p>
+          </div>
+          <Link href="/loaner"><button type="button">Open Loaner Dashboard</button></Link>
+        </div>
+
+        <div className="split-panel" style={{ marginTop: 10 }}>
+          <QueueCard
+            title="Loaners Ready For Pickup"
+            subtitle="Units that the service lane has cleared for customer handoff."
+            rows={dashboard?.queues?.loanerReady || []}
+            emptyText="No loaners are marked ready for pickup right now."
+            actions={(row) => (
+              <>
+                <Link href={reservationHref(row)}><button type="button">Open Workflow</button></Link>
+                <Link href={reservationHref(row, 'checkout')}><button type="button" className="button-subtle">Checkout</button></Link>
+              </>
+            )}
+          />
+          <QueueCard
+            title="Advisor Follow-Up"
+            subtitle="Loaners still missing packet work, waiting on advisor response, or missing ready status."
+            rows={dashboard?.queues?.loanerAdvisorFollowup || []}
+            emptyText="No service-lane follow-up items right now."
+            actions={(row) => (
+              <>
+                <Link href={reservationHref(row)}><button type="button">Open Workflow</button></Link>
+                <Link href="/loaner"><button type="button" className="button-subtle">Loaner Board</button></Link>
+              </>
+            )}
+          />
+        </div>
+
+        <div className="split-panel" style={{ marginTop: 16 }}>
+          <QueueCard
+            title="Billing Review"
+            subtitle="Customer-pay, warranty, or insurance loaners that still need billing resolution."
+            rows={dashboard?.queues?.loanerBillingReview || []}
+            emptyText="No loaner billing items currently need review."
+            actions={(row) => (
+              <>
+                <Link href={reservationHref(row)}><button type="button">Open Workflow</button></Link>
+                <Link href="/loaner"><button type="button" className="button-subtle">Billing Board</button></Link>
+              </>
+            )}
+          />
+          <QueueCard
+            title="Loaner Returns"
+            subtitle="Loaner agreements due back soon or already checked out."
+            rows={dashboard?.queues?.loanerReturns || []}
+            emptyText="No loaner returns are in the near-term queue."
+            actions={(row) => (
+              <>
+                <Link href={reservationHref(row, 'checkin')}><button type="button">Check-in</button></Link>
+                <Link href={reservationHref(row)}><button type="button" className="button-subtle">Open Workflow</button></Link>
+              </>
+            )}
+          />
+        </div>
+      </section>
     </AppShell>
   );
 }
@@ -416,7 +508,10 @@ function QueueCard({ title, subtitle, rows, emptyText, actions }) {
                 <div>
                   <div style={{ fontWeight: 700 }}>{row.reservationNumber}</div>
                   <div className="label" style={{ textTransform: 'none', letterSpacing: 0, fontSize: 12 }}>
-                    {customerName(row)} · {vehicleLabel(row)}
+                    {[customerName(row), vehicleLabel(row)].filter(Boolean).join(' · ')}
+                  </div>
+                  <div className="label" style={{ textTransform: 'none', letterSpacing: 0, fontSize: 12, marginTop: 4 }}>
+                    {[workflowLabel(row), queueContext(row)].filter(Boolean).join(' · ')}
                   </div>
                 </div>
                 <span className={statusClass(row.status)}>{row.status}</span>
@@ -426,6 +521,12 @@ function QueueCard({ title, subtitle, rows, emptyText, actions }) {
                 <div className="metric-card"><span className="label">Return</span><strong>{formatDateTime(row.returnAt)}</strong></div>
                 <div className="metric-card"><span className="label">Location</span><strong>{row.pickupLocation?.name || '-'}</strong></div>
                 <div className="metric-card"><span className="label">Estimate</span><strong>{formatMoney(row.estimatedTotal)}</strong></div>
+                {String(row?.workflowMode || '').toUpperCase() === 'DEALERSHIP_LOANER' ? (
+                  <>
+                    <div className="metric-card"><span className="label">Service ETA</span><strong>{formatDateTime(row.estimatedServiceCompletionAt)}</strong></div>
+                    <div className="metric-card"><span className="label">Billing</span><strong>{row.loanerBillingStatus || '-'}</strong></div>
+                  </>
+                ) : null}
               </div>
               <div className="inline-actions">{actions(row)}</div>
             </div>

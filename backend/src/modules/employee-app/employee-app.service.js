@@ -38,6 +38,7 @@ function reservationCard(row) {
     id: row.id,
     reservationNumber: row.reservationNumber,
     status: row.status,
+    workflowMode: row.workflowMode || 'RENTAL',
     paymentStatus: row.paymentStatus,
     pickupAt: row.pickupAt,
     returnAt: row.returnAt,
@@ -45,6 +46,14 @@ function reservationCard(row) {
     readyForPickupAt: row.readyForPickupAt,
     customerInfoCompletedAt: row.customerInfoCompletedAt,
     customerInfoReviewedAt: row.customerInfoReviewedAt,
+    estimatedServiceCompletionAt: row.estimatedServiceCompletionAt,
+    repairOrderNumber: row.repairOrderNumber || '',
+    claimNumber: row.claimNumber || '',
+    serviceAdvisorName: row.serviceAdvisorName || '',
+    loanerBillingMode: row.loanerBillingMode || '',
+    loanerBillingStatus: row.loanerBillingStatus || '',
+    loanerBorrowerPacketCompletedAt: row.loanerBorrowerPacketCompletedAt,
+    loanerReturnExceptionFlag: !!row.loanerReturnExceptionFlag,
     customer: row.customer
       ? {
           id: row.customer.id,
@@ -97,8 +106,23 @@ export const employeeAppService = {
       ...scope,
       ...(matchesQuery(query) || {})
     };
+    const loanerWhere = {
+      ...scope,
+      workflowMode: 'DEALERSHIP_LOANER'
+    };
 
-    const [precheckinQueueRaw, checkoutQueueRaw, returnQueueRaw, activeQueueRaw, searchResultsRaw, counts] = await Promise.all([
+    const [
+      precheckinQueueRaw,
+      checkoutQueueRaw,
+      returnQueueRaw,
+      activeQueueRaw,
+      loanerReadyRaw,
+      loanerAdvisorFollowupRaw,
+      loanerBillingReviewRaw,
+      loanerReturnsRaw,
+      searchResultsRaw,
+      counts
+    ] = await Promise.all([
       prisma.reservation.findMany({
         where: {
           ...scope,
@@ -141,6 +165,51 @@ export const employeeAppService = {
         orderBy: [{ returnAt: 'asc' }],
         take: 8
       }),
+      prisma.reservation.findMany({
+        where: {
+          ...loanerWhere,
+          readyForPickupAt: { not: null },
+          status: { in: ['NEW', 'CONFIRMED'] }
+        },
+        include: includeReservation(),
+        orderBy: [{ readyForPickupAt: 'desc' }, { pickupAt: 'asc' }],
+        take: 8
+      }),
+      prisma.reservation.findMany({
+        where: {
+          ...loanerWhere,
+          status: { in: ['NEW', 'CONFIRMED'] },
+          OR: [
+            { loanerBorrowerPacketCompletedAt: null },
+            { readyForPickupAt: null, estimatedServiceCompletionAt: { lt: now } },
+            { loanerBillingStatus: 'DENIED' }
+          ]
+        },
+        include: includeReservation(),
+        orderBy: [{ estimatedServiceCompletionAt: 'asc' }, { pickupAt: 'asc' }],
+        take: 8
+      }),
+      prisma.reservation.findMany({
+        where: {
+          ...loanerWhere,
+          status: { not: 'CANCELLED' },
+          loanerBillingMode: { in: ['CUSTOMER_PAY', 'WARRANTY', 'INSURANCE'] },
+          loanerBillingStatus: { not: 'SETTLED' }
+        },
+        include: includeReservation(),
+        orderBy: [{ loanerBillingSubmittedAt: 'asc' }, { pickupAt: 'asc' }],
+        take: 8
+      }),
+      prisma.reservation.findMany({
+        where: {
+          ...loanerWhere,
+          status: 'CHECKED_OUT',
+          returnAt: { lte: next72h }
+        },
+        include: includeReservation(),
+        orderBy: [{ returnAt: 'asc' }],
+        take: 8
+      }),
       query
         ? prisma.reservation.findMany({
             where: searchWhere,
@@ -175,7 +244,18 @@ export const employeeAppService = {
             status: 'CHECKED_OUT',
             returnAt: { gte: startOfToday, lt: endOfToday }
           }
-        })
+        }),
+        prisma.reservation.count({ where: { ...loanerWhere, status: { in: ['NEW', 'CONFIRMED', 'CHECKED_OUT'] } } }),
+        prisma.reservation.count({ where: { ...loanerWhere, readyForPickupAt: { not: null }, status: { in: ['NEW', 'CONFIRMED'] } } }),
+        prisma.reservation.count({
+          where: {
+            ...loanerWhere,
+            status: { not: 'CANCELLED' },
+            loanerBillingMode: { in: ['CUSTOMER_PAY', 'WARRANTY', 'INSURANCE'] },
+            loanerBillingStatus: { not: 'SETTLED' }
+          }
+        }),
+        prisma.reservation.count({ where: { ...loanerWhere, status: 'CHECKED_OUT', returnAt: { lt: now } } })
       ])
     ]);
 
@@ -186,13 +266,21 @@ export const employeeAppService = {
         activeRentals: counts[1],
         precheckinQueue: counts[2],
         readyForPickup: counts[3],
-        dueBackToday: counts[4]
+        dueBackToday: counts[4],
+        loanerOpen: counts[5],
+        loanerReady: counts[6],
+        loanerBillingAttention: counts[7],
+        loanerOverdue: counts[8]
       },
       queues: {
         precheckin: precheckinQueueRaw.map(reservationCard),
         checkout: checkoutQueueRaw.map(reservationCard),
         returns: returnQueueRaw.map(reservationCard),
-        active: activeQueueRaw.map(reservationCard)
+        active: activeQueueRaw.map(reservationCard),
+        loanerReady: loanerReadyRaw.map(reservationCard),
+        loanerAdvisorFollowup: loanerAdvisorFollowupRaw.map(reservationCard),
+        loanerBillingReview: loanerBillingReviewRaw.map(reservationCard),
+        loanerReturns: loanerReturnsRaw.map(reservationCard)
       },
       searchResults: searchResultsRaw.map(reservationCard)
     };
