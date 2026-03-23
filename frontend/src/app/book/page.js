@@ -168,6 +168,7 @@ export default function PublicBookingPage() {
   const router = useRouter();
   const [bootstrap, setBootstrap] = useState(null);
   const [tenantSlug, setTenantSlug] = useState('');
+  const [uiStep, setUiStep] = useState('search');
   const [searchMode, setSearchMode] = useState('RENTAL');
   const [pickupLocationId, setPickupLocationId] = useState('');
   const [returnLocationId, setReturnLocationId] = useState('');
@@ -242,14 +243,26 @@ export default function PublicBookingPage() {
   const locations = bootstrap?.locations || [];
   const vehicleTypes = bootstrap?.vehicleTypes || [];
   const featuredListings = bootstrap?.featuredCarSharingListings || [];
-  const bookingStage = selectedResult ? 'checkout' : results?.results?.length ? 'select' : 'search';
+  const bookingStage = uiStep === 'checkout' ? 'checkout' : uiStep === 'select' ? 'select' : 'search';
 
   const summaryCards = useMemo(() => ([
-    { label: 'Tenants', value: bootstrap?.tenants?.length || 0 },
     { label: 'Locations', value: locations.length },
     { label: 'Vehicle Types', value: vehicleTypes.length },
-    { label: 'Car Sharing', value: selectedTenant?.carSharingEnabled ? 'Enabled' : 'Not Yet' }
-  ]), [bootstrap?.tenants?.length, locations.length, vehicleTypes.length, selectedTenant?.carSharingEnabled]);
+    { label: 'Rental Booking', value: 'Available' },
+    { label: 'Car Sharing', value: selectedTenant?.carSharingEnabled ? 'Available' : 'Not Yet' }
+  ]), [locations.length, vehicleTypes.length, selectedTenant?.carSharingEnabled]);
+
+  const goToStep = (step) => {
+    setUiStep(step);
+    if (typeof window !== 'undefined') {
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    }
+  };
+
+  const clearSelection = () => {
+    setSelectedResult(null);
+    goToStep(results?.results?.length ? 'select' : 'search');
+  };
 
   const chosenAdditionalServices = useMemo(() => {
     if (!selectedResult?.additionalServices?.length) return [];
@@ -298,7 +311,7 @@ export default function PublicBookingPage() {
 
   const runSearch = async () => {
     if (!tenantSlug) {
-      setError('Select a tenant before searching.');
+      setError('Public booking is still loading. Try again in a moment.');
       return;
     }
     setSearching(true);
@@ -321,6 +334,7 @@ export default function PublicBookingPage() {
         })
       });
       setResults(payload);
+      goToStep(payload?.results?.length ? 'select' : 'search');
     } catch (err) {
       setResults(null);
       setError(err.message);
@@ -337,20 +351,19 @@ export default function PublicBookingPage() {
             <div className="hero-copy">
               <span className="eyebrow">Sprint 6 · Booking Engine Foundation</span>
               <h1 className="page-title" style={{ fontSize: 'clamp(30px, 5vw, 54px)', lineHeight: 1.02 }}>
-                Reserve fleet rentals and car sharing from one public booking surface.
+                Find the right vehicle for your dates, location, and trip.
               </h1>
               <p>
-                This is the shared quote layer we can grow into the booking website, guest app, and host app.
-                Rental inventory and car sharing supply already speak the same public language here.
+                Browse rental inventory and car sharing supply from one public booking flow built around where and when you need the vehicle.
               </p>
               <div className="hero-meta">
-                <span className="hero-pill">Public search</span>
-                <span className="hero-pill">Shared pricing contract</span>
+                <span className="hero-pill">Location-first search</span>
+                <span className="hero-pill">Guided steps</span>
                 <span className="hero-pill">Rental + Car Sharing</span>
               </div>
             </div>
             <div className="glass card section-card">
-              <div className="section-title">Current Tenant Snapshot</div>
+              <div className="section-title">Public Booking Snapshot</div>
               <div className="metric-grid">
                 {summaryCards.map((item) => (
                   <div key={item.label} className="metric-card">
@@ -359,16 +372,9 @@ export default function PublicBookingPage() {
                   </div>
                 ))}
               </div>
-              {selectedTenant ? (
-                <div className="surface-note">
-                  <strong>{selectedTenant.name}</strong>
-                  {` · ${selectedTenant.slug}`}
-                  <br />
-                  Public booking can now branch cleanly into booking web, guest app, host app, and employee app.
-                </div>
-              ) : (
-                <div className="surface-note">Loading active tenant configuration...</div>
-              )}
+              <div className="surface-note">
+                Search by location, pick the best fit, and move through each booking step without one long scroll.
+              </div>
             </div>
           </div>
         </section>
@@ -382,27 +388,58 @@ export default function PublicBookingPage() {
             <span className="status-chip neutral">{searchMode === 'RENTAL' ? 'Rental Flow' : 'Car Sharing Flow'}</span>
           </div>
           <BookingStageBar stage={bookingStage} />
+          <div className="inline-actions" style={{ marginTop: 14 }}>
+            <button type="button" className={uiStep === 'search' ? '' : 'button-subtle'} onClick={() => goToStep('search')}>1. Search</button>
+            <button
+              type="button"
+              className={uiStep === 'select' ? '' : 'button-subtle'}
+              disabled={!results?.results?.length}
+              onClick={() => goToStep('select')}
+            >
+              2. Select
+            </button>
+            <button
+              type="button"
+              className={uiStep === 'checkout' ? '' : 'button-subtle'}
+              disabled={!selectedResult}
+              onClick={() => goToStep('checkout')}
+            >
+              3. Guest Details
+            </button>
+          </div>
         </section>
 
+        {uiStep === 'search' ? (
+        <>
         <section className="split-panel">
           <div className="glass card-lg section-card">
             <div className="row-between">
               <div>
                 <div className="section-title">Booking Search</div>
-                <p className="ui-muted">Choose a tenant, set dates, and search either traditional rental inventory or car sharing supply.</p>
+                <p className="ui-muted">Choose your location, dates, and trip type to see what is available.</p>
               </div>
               <div className="inline-actions">
                 <button
                   type="button"
                   className={searchMode === 'RENTAL' ? '' : 'button-subtle'}
-                  onClick={() => setSearchMode('RENTAL')}
+                  onClick={() => {
+                    setSearchMode('RENTAL');
+                    setResults(null);
+                    setSelectedResult(null);
+                    setUiStep('search');
+                  }}
                 >
                   Rental
                 </button>
                 <button
                   type="button"
                   className={searchMode === 'CAR_SHARING' ? '' : 'button-subtle'}
-                  onClick={() => setSearchMode('CAR_SHARING')}
+                  onClick={() => {
+                    setSearchMode('CAR_SHARING');
+                    setResults(null);
+                    setSelectedResult(null);
+                    setUiStep('search');
+                  }}
                 >
                   Car Sharing
                 </button>
@@ -411,22 +448,6 @@ export default function PublicBookingPage() {
 
             <div className="form-grid-3">
               <div>
-                <div className="label">Tenant</div>
-                <select
-                  value={tenantSlug}
-                  onChange={async (event) => {
-                    const nextSlug = event.target.value;
-                    setResults(null);
-                    setSelectedResult(null);
-                    await loadBootstrap(nextSlug);
-                  }}
-                >
-                  {(bootstrap?.tenants || []).map((tenant) => (
-                    <option key={tenant.id} value={tenant.slug}>{tenant.name}</option>
-                  ))}
-                </select>
-              </div>
-              <div>
                 <div className="label">Pickup</div>
                 <input type="datetime-local" value={pickupAt} onChange={(event) => setPickupAt(event.target.value)} />
               </div>
@@ -434,9 +455,6 @@ export default function PublicBookingPage() {
                 <div className="label">Return</div>
                 <input type="datetime-local" value={returnAt} onChange={(event) => setReturnAt(event.target.value)} />
               </div>
-            </div>
-
-            <div className={searchMode === 'RENTAL' ? 'form-grid-3' : 'form-grid-2'}>
               <div>
                 <div className="label">{searchMode === 'RENTAL' ? 'Pickup Location' : 'Preferred Location'}</div>
                 <select value={pickupLocationId} onChange={(event) => setPickupLocationId(event.target.value)}>
@@ -445,6 +463,9 @@ export default function PublicBookingPage() {
                   ))}
                 </select>
               </div>
+            </div>
+
+            <div className={searchMode === 'RENTAL' ? 'form-grid-2' : 'form-grid-1'}>
               {searchMode === 'RENTAL' ? (
                 <>
                   <div>
@@ -470,7 +491,7 @@ export default function PublicBookingPage() {
 
             <div className="inline-actions">
               <button type="button" onClick={runSearch} disabled={loadingBootstrap || searching}>
-                {searching ? 'Searching...' : `Search ${searchMode === 'RENTAL' ? 'Rental Quotes' : 'Car Sharing Listings'}`}
+                {searching ? 'Searching...' : `Search ${searchMode === 'RENTAL' ? 'Rental Vehicles' : 'Car Sharing Vehicles'}`}
               </button>
             </div>
 
@@ -481,7 +502,7 @@ export default function PublicBookingPage() {
             <div className="row-between">
               <div>
                 <div className="section-title">Discovery Feed</div>
-                <p className="ui-muted">Featured public supply and readiness hints for the selected tenant.</p>
+                <p className="ui-muted">Featured availability and host trust signals for the public booking experience.</p>
               </div>
               {selectedTenant?.carSharingEnabled ? <span className="status-chip good">Car Sharing Live</span> : <span className="status-chip warn">Rental Only</span>}
             </div>
@@ -503,7 +524,7 @@ export default function PublicBookingPage() {
               </div>
             ) : (
               <div className="surface-note">
-                No featured public car sharing listings yet. This tenant can still search rental inventory if online rates are configured.
+                No featured car sharing vehicles are highlighted yet. You can still search the location and dates above.
               </div>
             )}
           </div>
@@ -513,7 +534,7 @@ export default function PublicBookingPage() {
           <div className="row-between">
             <div>
               <div className="section-title">Find Existing Booking</div>
-              <p className="ui-muted">Guests can resume a rental reservation or car sharing trip with their reference and email, even if they changed devices.</p>
+              <p className="ui-muted">Already booked? Resume your trip with your reference number and email.</p>
             </div>
             <span className="status-chip neutral">Resume Flow</span>
           </div>
@@ -567,7 +588,31 @@ export default function PublicBookingPage() {
             </button>
           </div>
         </section>
+        </>
+        ) : null}
 
+        {uiStep !== 'search' ? (
+        <>
+        <section className="glass card-lg section-card">
+          <div className="row-between">
+            <div>
+              <div className="section-title">{uiStep === 'select' ? 'Step 2 · Select Your Vehicle' : 'Step 3 · Guest Details'}</div>
+              <p className="ui-muted">
+                {searchMode === 'RENTAL'
+                  ? `${results?.pickupLocation?.name || 'Selected location'} · ${pickupAt} to ${returnAt}`
+                  : `${locations.find((location) => location.id === pickupLocationId)?.name || 'Selected location'} · ${pickupAt} to ${returnAt}`}
+              </p>
+            </div>
+            <div className="inline-actions">
+              <button type="button" className="button-subtle" onClick={() => goToStep('search')}>Back to Search</button>
+              {uiStep === 'checkout' ? (
+                <button type="button" className="button-subtle" onClick={() => goToStep('select')}>Back to Results</button>
+              ) : null}
+            </div>
+          </div>
+        </section>
+
+        {uiStep === 'select' ? (
         <section className="glass card-lg section-card">
           <div className="row-between">
             <div>
@@ -578,7 +623,7 @@ export default function PublicBookingPage() {
                   : 'Run a search to load public inventory and pricing.'}
               </p>
             </div>
-            {results?.tenant ? <span className="status-chip neutral">{results.tenant.name}</span> : null}
+            <span className="status-chip neutral">{searchMode === 'RENTAL' ? 'Rental options' : 'Car sharing options'}</span>
           </div>
 
           {results?.results?.length ? (
@@ -603,8 +648,11 @@ export default function PublicBookingPage() {
                         { label: 'Deposit Due', value: fmtMoney(result.quote.depositAmountDue) },
                         { label: 'Security Deposit', value: fmtMoney(result.quote.securityDepositAmount) }
                       ]}
-                      cta={result.soldOut ? 'Notify Me Later' : 'Start Rental Booking'}
-                      onClick={() => setSelectedResult(result)}
+                      cta={result.soldOut ? 'Notify Me Later' : 'Continue'}
+                      onClick={() => {
+                        setSelectedResult(result);
+                        goToStep('checkout');
+                      }}
                     />
                   ))
                 : results.results.map((result) => (
@@ -629,28 +677,34 @@ export default function PublicBookingPage() {
                         { label: 'Host Earnings', value: fmtMoney(result.quote.hostEarnings) },
                         { label: 'Platform Fee', value: fmtMoney(result.quote.platformFee) }
                       ]}
-                      cta={result.instantBook ? 'Continue to Guest Flow' : 'Request Booking'}
-                      onClick={() => setSelectedResult(result)}
+                      cta={result.instantBook ? 'Continue' : 'Request Booking'}
+                      onClick={() => {
+                        setSelectedResult(result);
+                        goToStep('checkout');
+                      }}
                     />
                   ))}
             </div>
           ) : (
             <div className="surface-note">
               {results
-                ? 'No options matched those dates yet. Try another date range, location, or tenant.'
+                ? 'No options matched those dates yet. Try another date range or location.'
                 : 'Search results will appear here with a shared quote contract for both rental and car sharing.'}
             </div>
           )}
         </section>
+        ) : null}
+        </>
+        ) : null}
 
-        {selectedResult ? (
+        {selectedResult && uiStep === 'checkout' ? (
           <section className="glass card-lg section-card">
             <div className="row-between">
               <div>
                 <div className="section-title">Checkout Foundation</div>
                 <p className="ui-muted">Turn the selected quote into a live reservation or trip and immediately kick off customer info collection.</p>
               </div>
-              <button type="button" className="button-subtle" onClick={() => setSelectedResult(null)}>Clear</button>
+              <button type="button" className="button-subtle" onClick={clearSelection}>Clear</button>
             </div>
             <div className="split-panel">
               <div className="surface-note">
