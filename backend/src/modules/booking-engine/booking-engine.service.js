@@ -957,8 +957,8 @@ export const bookingEngineService = {
 
     if (searchType === 'RENTAL') {
       const search = await this.searchRental({
-        tenantId: tenant.id,
         pickupLocationId: input?.pickupLocationId,
+        pickupLocationIds: input?.pickupLocationId ? [input.pickupLocationId] : [],
         pickupAt: input?.pickupAt,
         returnAt: input?.returnAt
       });
@@ -1152,10 +1152,10 @@ export const bookingEngineService = {
     }
 
     const search = await this.searchCarSharing({
-      tenantId: tenant.id,
       pickupAt: input?.pickupAt,
       returnAt: input?.returnAt,
-      locationId: input?.pickupLocationId || null
+      locationId: input?.pickupLocationId || null,
+      locationIds: input?.pickupLocationId ? [input.pickupLocationId] : []
     });
     const selected = (search.results || []).find((row) => row.listing?.id === String(input?.listingId || ''));
     if (!selected) throw new Error('Selected car sharing listing is no longer available');
