@@ -124,7 +124,7 @@ const EMPTY_SERVICE = {
   allVehicleTypes: true, vehicleTypeIds: [], displayOnline: false, defaultRencars: false, mandatory: false,
   isActive: true, locationId: ''
 };
-const EMPTY_VEHICLE_TYPE = { code: '', name: '', description: '' };
+const EMPTY_VEHICLE_TYPE = { code: '', name: '', description: '', imageUrl: '' };
 const EMPTY_COMMISSION_PLAN = {
   id: '',
   tenantId: '',
@@ -422,6 +422,13 @@ function SettingsInner({ token, me, logout }) {
     setVehicleTypeEditId(null);
   };
 
+  const uploadVehicleTypeImage = (file) => {
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => setVehicleTypeForm((current) => ({ ...current, imageUrl: String(reader.result || '') }));
+    reader.readAsDataURL(file);
+  };
+
   const saveVehicleType = async (e) => {
     e.preventDefault();
     const code = String(vehicleTypeForm.code || '').trim().toUpperCase();
@@ -436,7 +443,7 @@ function SettingsInner({ token, me, logout }) {
       setMsg('Vehicle type code already exists. Use a unique code.');
       return;
     }
-    const payload = { code, name, description: description || null };
+    const payload = { code, name, description: description || null, imageUrl: vehicleTypeForm.imageUrl || null };
     try {
       if (vehicleTypeEditId) {
         await api(`/api/vehicle-types/${vehicleTypeEditId}`, { method: 'PATCH', body: JSON.stringify(payload) }, token);
@@ -457,7 +464,8 @@ function SettingsInner({ token, me, logout }) {
     setVehicleTypeForm({
       code: vt.code || '',
       name: vt.name || '',
-      description: vt.description || ''
+      description: vt.description || '',
+      imageUrl: vt.imageUrl || ''
     });
   };
 
@@ -1377,16 +1385,33 @@ function SettingsInner({ token, me, logout }) {
                 <input placeholder="Name" value={vehicleTypeForm.name} onChange={(e) => setVehicleTypeForm({ ...vehicleTypeForm, name: e.target.value })} />
                 <input placeholder="Description" value={vehicleTypeForm.description} onChange={(e) => setVehicleTypeForm({ ...vehicleTypeForm, description: e.target.value })} />
               </div>
+              <div className="grid2">
+                <div className="stack">
+                  <label className="label">Default Booking Image</label>
+                  <input type="file" accept="image/*" onChange={(e) => uploadVehicleTypeImage(e.target.files?.[0])} />
+                  <span className="label">This image will show in booking when a host listing has no custom vehicle photos.</span>
+                </div>
+                <div className="stack">
+                  <label className="label">Preview</label>
+                  {vehicleTypeForm.imageUrl ? (
+                    <img src={vehicleTypeForm.imageUrl} alt="Vehicle type preview" style={{ width: '100%', maxWidth: 220, aspectRatio: '16 / 10', objectFit: 'cover', borderRadius: 16, border: '1px solid rgba(110,73,255,.15)' }} />
+                  ) : (
+                    <div className="surface-note">No image uploaded yet.</div>
+                  )}
+                  {vehicleTypeForm.imageUrl ? <button type="button" className="button-subtle" onClick={() => setVehicleTypeForm({ ...vehicleTypeForm, imageUrl: '' })}>Remove Image</button> : null}
+                </div>
+              </div>
               <div style={{ display: 'flex', gap: 8 }}>
                 <button type="submit">{vehicleTypeEditId ? 'Update Class' : 'Add Class'}</button>
                 {vehicleTypeEditId ? <button type="button" onClick={resetVehicleTypeForm}>Cancel</button> : null}
               </div>
             </form>
             <table>
-              <thead><tr><th>Code</th><th>Name</th><th>Description</th><th>Actions</th></tr></thead>
+              <thead><tr><th>Image</th><th>Code</th><th>Name</th><th>Description</th><th>Actions</th></tr></thead>
               <tbody>
                 {vehicleTypes.length ? vehicleTypes.map((vt) => (
                   <tr key={vt.id}>
+                    <td>{vt.imageUrl ? <img src={vt.imageUrl} alt={vt.name} style={{ width: 84, height: 54, objectFit: 'cover', borderRadius: 12, border: '1px solid rgba(110,73,255,.15)' }} /> : <span className="label">No image</span>}</td>
                     <td>{vt.code}</td>
                     <td>{vt.name}</td>
                     <td>{vt.description || '-'}</td>
@@ -1398,7 +1423,7 @@ function SettingsInner({ token, me, logout }) {
                     </td>
                   </tr>
                 )) : (
-                  <tr><td colSpan="4">No vehicle classes configured yet.</td></tr>
+                  <tr><td colSpan="5">No vehicle classes configured yet.</td></tr>
                 )}
               </tbody>
             </table>

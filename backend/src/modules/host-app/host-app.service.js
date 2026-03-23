@@ -290,7 +290,8 @@ export const hostAppService = {
       instantBook: Object.prototype.hasOwnProperty.call(payload, 'instantBook') ? payload.instantBook : undefined,
       minTripDays: Object.prototype.hasOwnProperty.call(payload, 'minTripDays') ? payload.minTripDays : undefined,
       maxTripDays: Object.prototype.hasOwnProperty.call(payload, 'maxTripDays') ? payload.maxTripDays : undefined,
-      tripRules: Object.prototype.hasOwnProperty.call(payload, 'tripRules') ? payload.tripRules : undefined
+      tripRules: Object.prototype.hasOwnProperty.call(payload, 'tripRules') ? payload.tripRules : undefined,
+      photosJson: Object.prototype.hasOwnProperty.call(payload, 'photosJson') ? payload.photosJson : undefined
     };
 
     return carSharingService.updateListing(id, allowedPatch, {

@@ -14,6 +14,17 @@ function formatDateTime(value) {
   try { return new Date(value).toLocaleString(); } catch { return String(value); }
 }
 
+function parsePhotoList(value) {
+  try {
+    const parsed = typeof value === 'string' ? JSON.parse(value) : value;
+    return Array.isArray(parsed)
+      ? parsed.map((item) => String(item || '').trim()).filter(Boolean).slice(0, 6)
+      : [];
+  } catch {
+    return [];
+  }
+}
+
 function tripActionsFor(status) {
   const current = String(status || '').toUpperCase();
   if (current === 'RESERVED') return ['CONFIRMED', 'CANCELLED'];
@@ -46,7 +57,7 @@ function hostAttention(trip) {
 const EMPTY_LISTING_EDIT = {
   id: '', shortDescription: '', description: '', status: 'DRAFT',
   baseDailyRate: '', cleaningFee: '', deliveryFee: '', securityDeposit: '',
-  instantBook: false, minTripDays: '1', maxTripDays: '', tripRules: ''
+  instantBook: false, minTripDays: '1', maxTripDays: '', tripRules: '', photoUrls: []
 };
 
 const EMPTY_WINDOW_FORM = {
@@ -168,7 +179,8 @@ function HostAppInner({ token, me, logout }) {
           instantBook: !!listingEdit.instantBook,
           minTripDays: Number(listingEdit.minTripDays || 1),
           maxTripDays: listingEdit.maxTripDays ? Number(listingEdit.maxTripDays) : null,
-          tripRules: listingEdit.tripRules
+          tripRules: listingEdit.tripRules,
+          photosJson: JSON.stringify((listingEdit.photoUrls || []).slice(0, 6))
         })
       }, token);
       setMsg('Listing updated');
@@ -269,6 +281,21 @@ function HostAppInner({ token, me, logout }) {
     } catch (error) {
       setMsg(error.message);
     }
+  }
+
+  function uploadListingPhotos(files) {
+    const incoming = Array.from(files || []).slice(0, 6);
+    if (!incoming.length) return;
+    Promise.all(incoming.map((file) => new Promise((resolve) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result || ''));
+      reader.readAsDataURL(file);
+    }))).then((images) => {
+      setListingEdit((current) => ({
+        ...current,
+        photoUrls: [...(current.photoUrls || []), ...images.filter(Boolean)].slice(0, 6)
+      }));
+    });
   }
 
   return (
@@ -379,6 +406,19 @@ function HostAppInner({ token, me, logout }) {
                     <div><div style={{ fontWeight: 700 }}>{listing.title}</div><div className="label" style={{ textTransform: 'none', letterSpacing: 0, fontSize: 12 }}>{listing.vehicle ? `${listing.vehicle.year || ''} ${listing.vehicle.make || ''} ${listing.vehicle.model || ''}`.trim() : 'No vehicle'}</div></div>
                     <span className={statusChip(listing.status)}>{listing.status}</span>
                   </div>
+                  {parsePhotoList(listing.photosJson).length ? (
+                    <img
+                      src={parsePhotoList(listing.photosJson)[0]}
+                      alt={listing.title}
+                      style={{ width: '100%', aspectRatio: '16 / 9', objectFit: 'cover', borderRadius: 16, border: '1px solid rgba(110,73,255,.15)' }}
+                    />
+                  ) : listing.vehicle?.vehicleType?.imageUrl ? (
+                    <img
+                      src={listing.vehicle.vehicleType.imageUrl}
+                      alt={listing.vehicle.vehicleType.name || listing.title}
+                      style={{ width: '100%', aspectRatio: '16 / 9', objectFit: 'cover', borderRadius: 16, border: '1px solid rgba(110,73,255,.15)' }}
+                    />
+                  ) : null}
                   <div className="metric-grid">
                     <div className="metric-card"><span className="label">Daily Rate</span><strong>{formatMoney(listing.baseDailyRate)}</strong></div>
                     <div className="metric-card"><span className="label">Instant Book</span><strong>{listing.instantBook ? 'On' : 'Off'}</strong></div>
@@ -389,7 +429,7 @@ function HostAppInner({ token, me, logout }) {
                       id: listing.id, shortDescription: listing.shortDescription || '', description: listing.description || '', status: listing.status || 'DRAFT',
                       baseDailyRate: String(listing.baseDailyRate ?? ''), cleaningFee: String(listing.cleaningFee ?? ''), deliveryFee: String(listing.deliveryFee ?? ''),
                       securityDeposit: String(listing.securityDeposit ?? ''), instantBook: !!listing.instantBook, minTripDays: String(listing.minTripDays ?? 1),
-                      maxTripDays: listing.maxTripDays ? String(listing.maxTripDays) : '', tripRules: listing.tripRules || ''
+                      maxTripDays: listing.maxTripDays ? String(listing.maxTripDays) : '', tripRules: listing.tripRules || '', photoUrls: parsePhotoList(listing.photosJson)
                     })}>Edit Listing</button>
                     <button type="button" className="button-subtle" onClick={() => loadAvailability(listing.id)}>Availability</button>
                   </div>
@@ -419,6 +459,23 @@ function HostAppInner({ token, me, logout }) {
               </div>
               <label className="label" style={{ textTransform: 'none', letterSpacing: 0 }}><input type="checkbox" checked={listingEdit.instantBook} onChange={(event) => setListingEdit((current) => ({ ...current, instantBook: event.target.checked }))} /> Instant Book</label>
               <div className="stack"><label className="label">Trip Rules</label><textarea rows={3} value={listingEdit.tripRules} onChange={(event) => setListingEdit((current) => ({ ...current, tripRules: event.target.value }))} /></div>
+              <div className="stack">
+                <label className="label">Vehicle Photos</label>
+                <input type="file" accept="image/*" multiple onChange={(event) => uploadListingPhotos(event.target.files)} />
+                <span className="label">Upload up to 6 photos. If none are uploaded, booking will fall back to the default vehicle class image.</span>
+                {listingEdit.photoUrls?.length ? (
+                  <div className="metric-grid">
+                    {listingEdit.photoUrls.map((photo, index) => (
+                      <div key={`${index}-${photo.slice(0, 18)}`} className="surface-note" style={{ display: 'grid', gap: 8 }}>
+                        <img src={photo} alt={`Vehicle photo ${index + 1}`} style={{ width: '100%', aspectRatio: '16 / 10', objectFit: 'cover', borderRadius: 14 }} />
+                        <button type="button" className="button-subtle" onClick={() => setListingEdit((current) => ({ ...current, photoUrls: current.photoUrls.filter((_, idx) => idx !== index) }))}>Remove</button>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="surface-note">No host photos yet. The customer will see the vehicle class default image instead.</div>
+                )}
+              </div>
               <div className="inline-actions"><button type="submit">Save Listing</button></div>
             </form>
           ) : <div className="surface-note">Choose a listing to edit host-facing pricing and publishing controls.</div>}

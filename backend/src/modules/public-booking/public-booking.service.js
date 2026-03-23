@@ -24,7 +24,9 @@ export const publicBookingService = {
         maxTripDays: listing.maxTripDays ? Number(listing.maxTripDays) : null,
         host: listing.host || null,
         vehicle: listing.vehicle || null,
-        location: listing.location || null
+        location: listing.location || null,
+        primaryImageUrl: listing.primaryImageUrl || '',
+        imageUrls: listing.imageUrls || []
       }))
     };
   },
@@ -43,6 +45,8 @@ export const publicBookingService = {
       results: (payload.results || []).map((result) => ({
         vehicleType: result.vehicleType,
         location: payload.location,
+        primaryImageUrl: result.vehicleType?.imageUrl || '',
+        imageUrls: result.vehicleType?.imageUrl ? [result.vehicleType.imageUrl] : [],
         availabilityCount: Number(result.availability?.availableUnits || 0),
         soldOut: !result.availability?.available,
         sampleVehicleLabel: '',
@@ -112,6 +116,8 @@ export const publicBookingService = {
         host: result.listing.host || null,
         vehicle: result.listing.vehicle || null,
         location: result.listing.location || null,
+        primaryImageUrl: result.listing.primaryImageUrl || '',
+        imageUrls: result.listing.imageUrls || [],
         quote: {
           tripDays: Number(result.quote?.tripDays || 0),
           subtotal: money(result.quote?.subtotal),

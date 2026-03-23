@@ -257,6 +257,7 @@ model VehicleType {
   code         String
   name         String
   description  String?
+  imageUrl     String?
   createdAt    DateTime   @default(now())
   updatedAt    DateTime   @updatedAt
 

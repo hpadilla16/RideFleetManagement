@@ -51,6 +51,27 @@ function parseJsonArray(value) {
   }
 }
 
+function normalizePhotoList(value, limit = 6) {
+  return parseJsonArray(value)
+    .map((item) => String(item || '').trim())
+    .filter(Boolean)
+    .slice(0, limit);
+}
+
+function bookingImageSet({ vehicleTypeImageUrl, listingPhotos }) {
+  const photos = normalizePhotoList(listingPhotos);
+  if (photos.length) {
+    return {
+      primaryImageUrl: photos[0],
+      imageUrls: photos
+    };
+  }
+  return {
+    primaryImageUrl: vehicleTypeImageUrl ? String(vehicleTypeImageUrl).trim() : '',
+    imageUrls: vehicleTypeImageUrl ? [String(vehicleTypeImageUrl).trim()] : []
+  };
+}
+
 function isServiceEligibleForVehicleType(service, vehicleTypeId) {
   if (!vehicleTypeId) return true;
   if (service?.allVehicleTypes) return true;
@@ -434,14 +455,14 @@ export const bookingEngineService = {
       }),
       prisma.vehicleType.findMany({
         where: { tenantId: tenant.id },
-        select: { id: true, code: true, name: true, description: true },
+        select: { id: true, code: true, name: true, description: true, imageUrl: true },
         orderBy: [{ name: 'asc' }]
       }),
       prisma.hostVehicleListing.findMany({
         where: { tenantId: tenant.id, status: 'PUBLISHED' },
         include: {
           hostProfile: { select: { id: true, displayName: true } },
-          vehicle: { select: { id: true, make: true, model: true, year: true, color: true, plate: true } },
+          vehicle: { select: { id: true, make: true, model: true, year: true, color: true, plate: true, vehicleType: { select: { imageUrl: true } } } },
           location: { select: { id: true, name: true, city: true, state: true } }
         },
         orderBy: [{ publishedAt: 'desc' }, { createdAt: 'desc' }],
@@ -480,7 +501,11 @@ export const bookingEngineService = {
         instantBook: !!listing.instantBook,
         host: listing.hostProfile,
         vehicle: listing.vehicle,
-        location: listing.location
+        location: listing.location,
+        ...bookingImageSet({
+          vehicleTypeImageUrl: listing.vehicle?.vehicleType?.imageUrl,
+          listingPhotos: listing.photosJson
+        })
       })),
       bookingModes: {
         rental: true,
@@ -550,13 +575,14 @@ export const bookingEngineService = {
       ]);
       const taxes = money(Number(quote.baseTotal || 0) * (Number(location.taxRate || 0) / 100));
       const total = money(Number(quote.baseTotal || 0) + taxes);
-      results.push({
-        vehicleType: {
-          id: vehicleType.id,
-          code: vehicleType.code,
-          name: vehicleType.name,
-          description: vehicleType.description
-        },
+        results.push({
+          vehicleType: {
+            id: vehicleType.id,
+            code: vehicleType.code,
+            name: vehicleType.name,
+            description: vehicleType.description,
+            imageUrl: vehicleType.imageUrl || ''
+          },
         availability: {
           availableUnits,
           available: availableUnits > 0
@@ -604,7 +630,7 @@ export const bookingEngineService = {
       },
       include: {
         hostProfile: { select: { id: true, displayName: true } },
-        vehicle: { select: { id: true, make: true, model: true, year: true, color: true, plate: true } },
+        vehicle: { select: { id: true, make: true, model: true, year: true, color: true, plate: true, vehicleType: { select: { imageUrl: true } } } },
         location: { select: { id: true, name: true, city: true, state: true } },
         availabilityWindows: { orderBy: [{ startAt: 'asc' }] }
       },
@@ -635,7 +661,11 @@ export const bookingEngineService = {
           maxTripDays: listing.maxTripDays,
           host: listing.hostProfile,
           vehicle: listing.vehicle,
-          location: listing.location
+          location: listing.location,
+          ...bookingImageSet({
+            vehicleTypeImageUrl: listing.vehicle?.vehicleType?.imageUrl,
+            listingPhotos: listing.photosJson
+          })
         },
         quote
       }];
@@ -663,7 +693,7 @@ export const bookingEngineService = {
       },
       include: {
         hostProfile: { select: { id: true, displayName: true, notes: true } },
-        vehicle: { select: { id: true, make: true, model: true, year: true, color: true, plate: true } },
+        vehicle: { select: { id: true, make: true, model: true, year: true, color: true, plate: true, vehicleType: { select: { imageUrl: true } } } },
         location: { select: { id: true, name: true, city: true, state: true } },
         availabilityWindows: { orderBy: [{ startAt: 'asc' }] }
       }
@@ -687,7 +717,11 @@ export const bookingEngineService = {
       tripRules: listing.tripRules,
       host: listing.hostProfile,
       vehicle: listing.vehicle,
-      location: listing.location
+      location: listing.location,
+      ...bookingImageSet({
+        vehicleTypeImageUrl: listing.vehicle?.vehicleType?.imageUrl,
+        listingPhotos: listing.photosJson
+      })
     };
 
     const pickupDate = toDate(pickupAt);

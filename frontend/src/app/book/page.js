@@ -24,6 +24,11 @@ function fmtMoney(value) {
   return `$${Number(value || 0).toFixed(2)}`;
 }
 
+function normalizeImageList(value) {
+  const items = Array.isArray(value) ? value : value ? [value] : [];
+  return items.map((item) => String(item || '').trim()).filter(Boolean).slice(0, 6);
+}
+
 function buildServiceSelectionState(result, mode) {
   if (mode !== 'RENTAL') return {};
   return Object.fromEntries(
@@ -84,12 +89,34 @@ function BookingStageBar({ stage }) {
   );
 }
 
-function BookingCard({ title, subtitle, meta, quote, cta, onClick, selected = false, hints = [] }) {
+function BookingCard({ title, subtitle, meta, quote, cta, onClick, selected = false, hints = [], imageUrl = '', imageUrls = [] }) {
+  const gallery = normalizeImageList(imageUrls?.length ? imageUrls : imageUrl ? [imageUrl] : []);
   return (
     <article
       className="glass card section-card"
       style={selected ? { borderColor: 'rgba(110,73,255,.38)', boxShadow: '0 18px 42px rgba(110,73,255,.18)' } : undefined}
     >
+      {gallery[0] ? (
+        <div className="stack" style={{ gap: 10 }}>
+          <img
+            src={gallery[0]}
+            alt={title}
+            style={{ width: '100%', aspectRatio: '16 / 9', objectFit: 'cover', borderRadius: 18, border: '1px solid rgba(110,73,255,.15)' }}
+          />
+          {gallery.length > 1 ? (
+            <div className="inline-actions">
+              {gallery.slice(0, 4).map((photo, index) => (
+                <img
+                  key={`${title}-${index}`}
+                  src={photo}
+                  alt={`${title} ${index + 1}`}
+                  style={{ width: 56, height: 40, objectFit: 'cover', borderRadius: 10, border: '1px solid rgba(110,73,255,.15)' }}
+                />
+              ))}
+            </div>
+          ) : null}
+        </div>
+      ) : null}
       <div className="stack" style={{ gap: 8 }}>
         <div className="row-between" style={{ gap: 12, alignItems: 'start' }}>
           <div className="eyebrow">{meta}</div>
@@ -441,7 +468,10 @@ export default function PublicBookingPage() {
             {featuredListings.length ? (
               <div className="stack">
                 {featuredListings.map((listing) => (
-                  <div key={listing.id} className="surface-note">
+                  <div key={listing.id} className="surface-note" style={{ display: 'grid', gap: 10 }}>
+                    {listing.primaryImageUrl ? (
+                      <img src={listing.primaryImageUrl} alt={listing.title} style={{ width: '100%', aspectRatio: '16 / 9', objectFit: 'cover', borderRadius: 16, border: '1px solid rgba(110,73,255,.15)' }} />
+                    ) : null}
                     <strong>{listing.title}</strong>
                     <br />
                     {listing.vehicle?.label || 'Vehicle pending'}
@@ -541,6 +571,8 @@ export default function PublicBookingPage() {
                       subtitle={result.sampleVehicleLabel || result.vehicleType.description || 'Public rental quote available'}
                       meta={result.soldOut ? 'Waitlist / sold out' : `${result.availabilityCount} unit(s) available`}
                       selected={selectedResult?.vehicleType?.id === result.vehicleType.id}
+                      imageUrl={result.primaryImageUrl}
+                      imageUrls={result.imageUrls}
                       hints={[
                         ...(result.additionalServices?.length ? [`${result.additionalServices.length} add-on${result.additionalServices.length === 1 ? '' : 's'} online`] : []),
                         ...(result.insurancePlans?.length ? [`${result.insurancePlans.length} insurance option${result.insurancePlans.length === 1 ? '' : 's'}`] : [])
@@ -562,6 +594,8 @@ export default function PublicBookingPage() {
                       subtitle={`${result.vehicle?.label || 'Vehicle'}${result.location?.name ? ` · ${result.location.name}` : ''}`}
                       meta={result.instantBook ? 'Instant book ready' : `Hosted by ${result.host?.displayName || 'Host'}`}
                       selected={selectedResult?.id === result.id}
+                      imageUrl={result.primaryImageUrl}
+                      imageUrls={result.imageUrls}
                       hints={[
                         result.instantBook ? 'Instant book' : 'Approval flow',
                         `${Math.max(1, Number(result.minTripDays || 1))}+ day minimum`
@@ -597,6 +631,27 @@ export default function PublicBookingPage() {
             </div>
             <div className="split-panel">
               <div className="surface-note">
+                {normalizeImageList(selectedResult.imageUrls?.length ? selectedResult.imageUrls : selectedResult.primaryImageUrl ? [selectedResult.primaryImageUrl] : [])[0] ? (
+                  <div className="stack" style={{ gap: 10, marginBottom: 12 }}>
+                    <img
+                      src={normalizeImageList(selectedResult.imageUrls?.length ? selectedResult.imageUrls : [selectedResult.primaryImageUrl])[0]}
+                      alt={searchMode === 'RENTAL' ? selectedResult.vehicleType?.name : selectedResult.title}
+                      style={{ width: '100%', maxWidth: 520, aspectRatio: '16 / 9', objectFit: 'cover', borderRadius: 18, border: '1px solid rgba(110,73,255,.15)' }}
+                    />
+                    {normalizeImageList(selectedResult.imageUrls?.length ? selectedResult.imageUrls : [selectedResult.primaryImageUrl]).length > 1 ? (
+                      <div className="inline-actions">
+                        {normalizeImageList(selectedResult.imageUrls).map((photo, index) => (
+                          <img
+                            key={`selected-${index}`}
+                            src={photo}
+                            alt={`Selected option ${index + 1}`}
+                            style={{ width: 72, height: 52, objectFit: 'cover', borderRadius: 12, border: '1px solid rgba(110,73,255,.15)' }}
+                          />
+                        ))}
+                      </div>
+                    ) : null}
+                  </div>
+                ) : null}
                 <strong>{searchMode === 'RENTAL' ? selectedResult.vehicleType?.name : selectedResult.title}</strong>
                 <br />
                 {searchMode === 'RENTAL'
