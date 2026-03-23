@@ -675,7 +675,7 @@ export const bookingEngineService = {
     };
   },
 
-  async searchRental({ tenantSlug, tenantId, pickupLocationId, pickupAt, returnAt }) {
+  async searchRental({ tenantSlug, tenantId, pickupLocationId, pickupLocationIds = [], pickupAt, returnAt }) {
     const pickupDate = toDate(pickupAt);
     const returnDate = toDate(returnAt);
     if (!pickupDate || !returnDate || pickupDate >= returnDate) {
@@ -683,55 +683,81 @@ export const bookingEngineService = {
     }
     if (!pickupLocationId) throw new Error('pickupLocationId is required');
 
-    const location = await resolveActiveLocation(pickupLocationId);
-    if (!location) throw new Error('Pickup location not found');
-
-    const tenant = await resolvePublicTenantContext({ tenantSlug, tenantId, pickupLocationId: location.id });
-    if (!tenant) throw new Error('tenant is required');
-
     const rentalDays = ceilTripDays(pickupDate, returnDate);
-    const vehicleTypes = await prisma.vehicleType.findMany({
-      where: { tenantId: tenant.id },
+    const directTenant = await resolvePublicTenant({ tenantSlug, tenantId });
+    const requestedLocationIds = Array.isArray(pickupLocationIds)
+      ? pickupLocationIds.map((value) => String(value)).filter(Boolean)
+      : pickupLocationId ? [String(pickupLocationId)] : [];
+    const locations = await prisma.location.findMany({
+      where: {
+        id: { in: requestedLocationIds },
+        isActive: true,
+        ...(directTenant ? { tenantId: directTenant.id } : {}),
+        tenant: { status: 'ACTIVE' }
+      },
+      select: { id: true, tenantId: true, name: true, city: true, state: true, taxRate: true, locationConfig: true },
       orderBy: [{ name: 'asc' }]
     });
+    if (!locations.length) throw new Error('Pickup location not found');
 
+    const vehicleTypesByTenant = new Map();
     const results = [];
-    for (const vehicleType of vehicleTypes) {
-      const [quote, availableUnits] = await Promise.all([
-        ratesService.resolveForRental({
-          vehicleTypeId: vehicleType.id,
-          pickupLocationId: location.id,
-          pickupAt: pickupDate.toISOString(),
-          returnAt: returnDate.toISOString()
-        }, { tenantId: tenant.id }, { displayOnline: true }),
-        rentalAvailabilityCount({
-          tenantId: tenant.id,
-          vehicleTypeId: vehicleType.id,
-          pickupAt: pickupDate,
-          returnAt: returnDate
-        })
-      ]);
+    for (const location of locations) {
+      const tenant = directTenant || await resolvePublicTenantContext({ pickupLocationId: location.id });
+      if (!tenant) continue;
+      if (!vehicleTypesByTenant.has(tenant.id)) {
+        const tenantVehicleTypes = await prisma.vehicleType.findMany({
+          where: { tenantId: tenant.id },
+          orderBy: [{ name: 'asc' }]
+        });
+        vehicleTypesByTenant.set(tenant.id, tenantVehicleTypes);
+      }
+      const vehicleTypes = vehicleTypesByTenant.get(tenant.id) || [];
 
-      if (!quote) continue;
+      for (const vehicleType of vehicleTypes) {
+        const [quote, availableUnits] = await Promise.all([
+          ratesService.resolveForRental({
+            vehicleTypeId: vehicleType.id,
+            pickupLocationId: location.id,
+            pickupAt: pickupDate.toISOString(),
+            returnAt: returnDate.toISOString()
+          }, { tenantId: tenant.id }, { displayOnline: true }),
+          rentalAvailabilityCount({
+            tenantId: tenant.id,
+            vehicleTypeId: vehicleType.id,
+            pickupAt: pickupDate,
+            returnAt: returnDate
+          })
+        ]);
 
-      const [additionalServices, insurancePlans] = await Promise.all([
-        listPublicAdditionalServices({
-          tenantId: tenant.id,
-          locationId: location.id,
-          vehicleTypeId: vehicleType.id,
-          days: rentalDays
-        }),
-        listPublicInsurancePlans({
-          tenantId: tenant.id,
-          locationId: location.id,
-          vehicleTypeId: vehicleType.id,
-          baseAmount: Number(quote.baseTotal || 0),
-          days: rentalDays
-        })
-      ]);
-      const taxes = money(Number(quote.baseTotal || 0) * (Number(location.taxRate || 0) / 100));
-      const total = money(Number(quote.baseTotal || 0) + taxes);
+        if (!quote) continue;
+
+        const [additionalServices, insurancePlans] = await Promise.all([
+          listPublicAdditionalServices({
+            tenantId: tenant.id,
+            locationId: location.id,
+            vehicleTypeId: vehicleType.id,
+            days: rentalDays
+          }),
+          listPublicInsurancePlans({
+            tenantId: tenant.id,
+            locationId: location.id,
+            vehicleTypeId: vehicleType.id,
+            baseAmount: Number(quote.baseTotal || 0),
+            days: rentalDays
+          })
+        ]);
+        const taxes = money(Number(quote.baseTotal || 0) * (Number(location.taxRate || 0) / 100));
+        const total = money(Number(quote.baseTotal || 0) + taxes);
         results.push({
+          location: {
+            id: location.id,
+            tenantId: location.tenantId,
+            name: location.name,
+            city: location.city,
+            state: location.state,
+            taxRate: location.taxRate
+          },
           vehicleType: {
             id: vehicleType.id,
             code: vehicleType.code,
@@ -752,37 +778,44 @@ export const bookingEngineService = {
           gracePeriodMin: Number(quote.gracePeriodMin || 0),
           source: quote.source || 'GLOBAL'
         },
-        deposit: depositSnapshot({ location, quote }),
-        additionalServices,
-        insurancePlans
-      });
+          deposit: depositSnapshot({ location, quote }),
+          additionalServices,
+          insurancePlans
+        });
+      }
     }
 
     return {
-      tenant: { id: tenant.id, name: tenant.name, slug: tenant.slug },
-      location,
+      tenant: directTenant ? { id: directTenant.id, name: directTenant.name, slug: directTenant.slug } : null,
+      location: locations[0] || null,
       pickupAt: pickupDate,
       returnAt: returnDate,
       results
     };
   },
 
-  async searchCarSharing({ tenantSlug, tenantId, pickupAt, returnAt, locationId }) {
+  async searchCarSharing({ tenantSlug, tenantId, pickupAt, returnAt, locationId, locationIds = [] }) {
     const pickupDate = toDate(pickupAt);
     const returnDate = toDate(returnAt);
     if (!pickupDate || !returnDate || pickupDate >= returnDate) {
       throw new Error('pickupAt and returnAt must be valid and returnAt must be after pickupAt');
     }
 
-    const tenant = await resolvePublicTenantContext({ tenantSlug, tenantId, locationId });
-    if (!tenant) throw new Error('Choose a valid location before searching car sharing');
-    if (!tenant.carSharingEnabled) throw new Error('Car sharing is not enabled for this location yet');
+    const directTenant = await resolvePublicTenant({ tenantSlug, tenantId });
+    const normalizedLocationIds = Array.isArray(locationIds)
+      ? locationIds.map((value) => String(value)).filter(Boolean)
+      : locationId ? [String(locationId)] : [];
+    if (!normalizedLocationIds.length) throw new Error('Choose a valid location before searching car sharing');
 
     const listings = await prisma.hostVehicleListing.findMany({
       where: {
-        tenantId: tenant.id,
         status: 'PUBLISHED',
-        ...(locationId ? { locationId: String(locationId) } : {})
+        locationId: { in: normalizedLocationIds },
+        tenant: {
+          status: 'ACTIVE',
+          ...(directTenant ? { id: directTenant.id } : {}),
+          carSharingEnabled: true
+        }
       },
       include: {
         hostProfile: { select: publicHostSelect() },
@@ -792,6 +825,9 @@ export const bookingEngineService = {
       },
       orderBy: [{ publishedAt: 'desc' }, { createdAt: 'desc' }]
     });
+    if (!directTenant && !listings.length) {
+      throw new Error('No car sharing vehicles are available for this location yet');
+    }
 
     const tripDays = ceilTripDays(pickupDate, returnDate);
     const results = listings.flatMap((listing) => {
@@ -829,7 +865,7 @@ export const bookingEngineService = {
     });
 
     return {
-      tenant: { id: tenant.id, name: tenant.name, slug: tenant.slug },
+      tenant: directTenant ? { id: directTenant.id, name: directTenant.name, slug: directTenant.slug } : null,
       pickupAt: pickupDate,
       returnAt: returnDate,
       results

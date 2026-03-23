@@ -36,6 +36,10 @@ function normalizeImageList(value) {
   return items.map((item) => String(item || '').trim()).filter(Boolean).slice(0, 6);
 }
 
+function publicLocationLabel(location) {
+  return [location?.name, location?.city, location?.state].filter(Boolean).join(' · ') || 'Location';
+}
+
 function buildServiceSelectionState(result, mode) {
   return Object.fromEntries(
     (result?.additionalServices || []).map((service) => [
@@ -207,12 +211,12 @@ export default function PublicBookingPage() {
       setBootstrap(payload);
       const selectedSlug = payload?.selectedTenant?.slug || '';
       setTenantSlug(selectedSlug);
-      const firstLocationId = payload?.locations?.[0]?.id || '';
+      const firstLocationId = payload?.locations?.[0] ? publicLocationLabel(payload.locations[0]) : '';
       setPickupLocationId((current) =>
-        payload?.locations?.some((item) => item.id === current) ? current : firstLocationId
+        payload?.locations?.some((item) => publicLocationLabel(item) === current) ? current : firstLocationId
       );
       setReturnLocationId((current) =>
-        payload?.locations?.some((item) => item.id === current) ? current : firstLocationId
+        payload?.locations?.some((item) => publicLocationLabel(item) === current) ? current : firstLocationId
       );
       setVehicleTypeId((current) => {
         if (current && payload?.vehicleTypes?.some((item) => item.id === current)) return current;
@@ -243,18 +247,40 @@ export default function PublicBookingPage() {
   const vehicleTypes = bootstrap?.vehicleTypes || [];
   const featuredListings = bootstrap?.featuredCarSharingListings || [];
   const bookingStage = uiStep === 'checkout' ? 'checkout' : uiStep === 'select' ? 'select' : 'search';
-  const selectedPickupLocation = useMemo(
-    () => locations.find((location) => location.id === pickupLocationId) || null,
-    [locations, pickupLocationId]
+  const publicLocationOptions = useMemo(() => {
+    const groups = new Map();
+    locations.forEach((location) => {
+      const key = publicLocationLabel(location);
+      if (!groups.has(key)) {
+        groups.set(key, {
+          id: key,
+          label: key,
+          locationIds: [],
+          tenantIds: [],
+          locations: []
+        });
+      }
+      const group = groups.get(key);
+      group.locationIds.push(location.id);
+      if (location.tenantId && !group.tenantIds.includes(location.tenantId)) {
+        group.tenantIds.push(location.tenantId);
+      }
+      group.locations.push(location);
+    });
+    return Array.from(groups.values()).sort((a, b) => a.label.localeCompare(b.label));
+  }, [locations]);
+  const selectedPickupLocationOption = useMemo(
+    () => publicLocationOptions.find((location) => location.id === pickupLocationId) || null,
+    [publicLocationOptions, pickupLocationId]
   );
   const availableReturnLocations = useMemo(() => {
-    if (!selectedPickupLocation?.tenantId) return locations;
-    return locations.filter((location) => location.tenantId === selectedPickupLocation.tenantId);
-  }, [locations, selectedPickupLocation?.tenantId]);
+    if (!selectedPickupLocationOption?.tenantIds?.length) return publicLocationOptions;
+    return publicLocationOptions.filter((location) => location.tenantIds.some((tenantId) => selectedPickupLocationOption.tenantIds.includes(tenantId)));
+  }, [publicLocationOptions, selectedPickupLocationOption?.tenantIds]);
   const availableVehicleTypes = useMemo(() => {
-    if (!selectedPickupLocation?.tenantId) return vehicleTypes;
-    return vehicleTypes.filter((vehicleType) => vehicleType.tenantId === selectedPickupLocation.tenantId);
-  }, [selectedPickupLocation?.tenantId, vehicleTypes]);
+    if (!selectedPickupLocationOption?.tenantIds?.length) return vehicleTypes;
+    return vehicleTypes.filter((vehicleType) => selectedPickupLocationOption.tenantIds.includes(vehicleType.tenantId));
+  }, [selectedPickupLocationOption?.tenantIds, vehicleTypes]);
 
   const goToStep = (step) => {
     setUiStep(step);
@@ -266,6 +292,13 @@ export default function PublicBookingPage() {
   const clearSelection = () => {
     setSelectedResult(null);
     goToStep(results?.results?.length ? 'select' : 'search');
+  };
+
+  const resolveReturnLocationForSelection = () => {
+    if (!selectedResult?.location?.tenantId) return selectedResult?.location?.id || '';
+    const chosenReturnOption = publicLocationOptions.find((location) => location.id === returnLocationId);
+    const matchingReturnLocation = chosenReturnOption?.locations?.find((location) => location.tenantId === selectedResult.location.tenantId);
+    return matchingReturnLocation?.id || selectedResult?.location?.id || '';
   };
 
   useEffect(() => {
@@ -326,8 +359,10 @@ export default function PublicBookingPage() {
   }, [chosenAdditionalServicesTotal, searchMode, selectedInsuranceTotal, selectedResult]);
 
   const runSearch = async () => {
-    if (!tenantSlug) {
-      setError('Public booking is still loading. Try again in a moment.');
+    const pickupLocationIds = publicLocationOptions.find((location) => location.id === pickupLocationId)?.locationIds || [];
+    const returnLocationIds = publicLocationOptions.find((location) => location.id === returnLocationId)?.locationIds || pickupLocationIds;
+    if (!pickupLocationIds.length) {
+      setError('Choose a location before searching.');
       return;
     }
     setSearching(true);
@@ -341,9 +376,12 @@ export default function PublicBookingPage() {
         method: 'POST',
         body: JSON.stringify({
           tenantSlug,
-          pickupLocationId,
-          returnLocationId,
-          locationId: pickupLocationId,
+          pickupLocationId: pickupLocationIds[0],
+          pickupLocationIds,
+          returnLocationId: returnLocationIds[0] || pickupLocationIds[0],
+          returnLocationIds,
+          locationId: pickupLocationIds[0],
+          locationIds: pickupLocationIds,
           vehicleTypeId: vehicleTypeId || null,
           pickupAt,
           returnAt
@@ -460,8 +498,8 @@ export default function PublicBookingPage() {
               <div>
                 <div className="label">{searchMode === 'RENTAL' ? 'Pickup Location' : 'Preferred Location'}</div>
                 <select value={pickupLocationId} onChange={(event) => setPickupLocationId(event.target.value)}>
-                  {locations.map((location) => (
-                    <option key={location.id} value={location.id}>{location.name}</option>
+                  {publicLocationOptions.map((location) => (
+                    <option key={location.id} value={location.id}>{location.label}</option>
                   ))}
                 </select>
               </div>
@@ -474,7 +512,7 @@ export default function PublicBookingPage() {
                     <div className="label">Return Location</div>
                         <select value={returnLocationId} onChange={(event) => setReturnLocationId(event.target.value)}>
                           {availableReturnLocations.map((location) => (
-                            <option key={location.id} value={location.id}>{location.name}</option>
+                            <option key={location.id} value={location.id}>{location.label}</option>
                           ))}
                         </select>
                   </div>
@@ -601,8 +639,8 @@ export default function PublicBookingPage() {
               <div className="section-title">{uiStep === 'select' ? 'Step 2 · Select Your Vehicle' : 'Step 3 · Guest Details'}</div>
               <p className="ui-muted">
                 {searchMode === 'RENTAL'
-                  ? `${results?.pickupLocation?.name || 'Selected location'} · ${pickupAt} to ${returnAt}`
-                  : `${locations.find((location) => location.id === pickupLocationId)?.name || 'Selected location'} · ${pickupAt} to ${returnAt}`}
+                  ? `${selectedPickupLocationOption?.label || 'Selected location'} · ${pickupAt} to ${returnAt}`
+                  : `${selectedPickupLocationOption?.label || 'Selected location'} · ${pickupAt} to ${returnAt}`}
               </p>
             </div>
             <div className="inline-actions">
@@ -635,7 +673,7 @@ export default function PublicBookingPage() {
                     <BookingCard
                       key={result.vehicleType.id}
                       title={result.vehicleType.name}
-                      subtitle={result.sampleVehicleLabel || result.vehicleType.description || 'Public rental quote available'}
+                      subtitle={`${result.sampleVehicleLabel || result.vehicleType.description || 'Public rental quote available'}${result.location?.name ? ` · ${publicLocationLabel(result.location)}` : ''}`}
                       meta={result.soldOut ? 'Waitlist / sold out' : `${result.availabilityCount} unit(s) available`}
                       selected={selectedResult?.vehicleType?.id === result.vehicleType.id}
                       imageUrl={result.primaryImageUrl}
@@ -734,7 +772,7 @@ export default function PublicBookingPage() {
                 <strong>{searchMode === 'RENTAL' ? selectedResult.vehicleType?.name : selectedResult.title}</strong>
                 <br />
                 {searchMode === 'RENTAL'
-                  ? `Pickup ${results?.pickupLocation?.name || ''} · ${fmtMoney(checkoutEstimatedTotal)} estimated total`
+                  ? `Pickup ${publicLocationLabel(selectedResult.location || {})} · ${fmtMoney(checkoutEstimatedTotal)} estimated total`
                   : `${selectedResult.vehicle?.label || ''} · ${fmtMoney(selectedResult.quote?.total)} projected total`}
                 <br />
                 {searchMode === 'CAR_SHARING' && selectedResult.host ? (
@@ -1006,8 +1044,8 @@ export default function PublicBookingPage() {
                             searchType: searchMode,
                             pickupAt,
                             returnAt,
-                            pickupLocationId,
-                            returnLocationId,
+                            pickupLocationId: selectedResult?.location?.id || '',
+                            returnLocationId: searchMode === 'RENTAL' ? resolveReturnLocationForSelection() : (selectedResult?.location?.id || ''),
                             vehicleTypeId: searchMode === 'RENTAL' ? selectedResult?.vehicleType?.id : null,
                             listingId: searchMode === 'CAR_SHARING' ? selectedResult?.id : null,
                             additionalServices: chosenAdditionalServices.map((service) => ({

@@ -45,7 +45,7 @@ export const publicBookingService = {
       defaultDepositMeta: null,
       results: (payload.results || []).map((result) => ({
         vehicleType: result.vehicleType,
-        location: payload.location,
+        location: result.location || payload.location,
         primaryImageUrl: result.vehicleType?.imageUrl || '',
         imageUrls: result.vehicleType?.imageUrl ? [result.vehicleType.imageUrl] : [],
         availabilityCount: Number(result.availability?.availableUnits || 0),
