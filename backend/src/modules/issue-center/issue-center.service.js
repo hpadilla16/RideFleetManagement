@@ -1,4 +1,6 @@
+import crypto from 'node:crypto';
 import { prisma } from '../../lib/prisma.js';
+import { sendEmail } from '../../lib/mailer.js';
 
 function tenantWhereFor(user) {
   const role = String(user?.role || '').toUpperCase();
@@ -25,6 +27,9 @@ function incidentInclude() {
           }
         }
       }
+    },
+    communications: {
+      orderBy: [{ createdAt: 'desc' }]
     }
   };
 }
@@ -54,6 +59,24 @@ function serializeHistoryEntry(entry) {
   };
 }
 
+function serializeCommunication(entry) {
+  return {
+    id: entry.id,
+    direction: entry.direction,
+    channel: entry.channel,
+    recipientType: entry.recipientType || '',
+    senderType: entry.senderType || '',
+    senderRefId: entry.senderRefId || '',
+    subject: entry.subject || '',
+    message: entry.message || '',
+    attachments: safeParse(entry.attachmentsJson) || [],
+    publicTokenExpiresAt: entry.publicTokenExpiresAt || null,
+    respondedAt: entry.respondedAt || null,
+    createdAt: entry.createdAt,
+    updatedAt: entry.updatedAt
+  };
+}
+
 function serializeIncident(incident, history = []) {
   return {
     id: incident.id,
@@ -68,6 +91,7 @@ function serializeIncident(incident, history = []) {
     createdAt: incident.createdAt,
     updatedAt: incident.updatedAt,
     history,
+    communications: Array.isArray(incident.communications) ? incident.communications.map(serializeCommunication) : [],
     trip: incident.trip ? {
       id: incident.trip.id,
       tripCode: incident.trip.tripCode,
@@ -109,6 +133,108 @@ function serializeIncident(incident, history = []) {
       } : null
     } : null
   };
+}
+
+function issueBaseUrl() {
+  return (process.env.CUSTOMER_PORTAL_BASE_URL || process.env.APP_BASE_URL || process.env.FRONTEND_BASE_URL || 'http://localhost:3000').replace(/\/$/, '');
+}
+
+function issueResponseLink(token) {
+  return token ? `${issueBaseUrl()}/issue-response?token=${encodeURIComponent(token)}` : '';
+}
+
+function recipientForIncident(incident, recipientType) {
+  const target = String(recipientType || '').trim().toUpperCase();
+  if (target === 'HOST') {
+    return {
+      recipientType: 'HOST',
+      name: incident?.trip?.hostProfile?.displayName || 'Host',
+      email: String(incident?.trip?.hostProfile?.email || '').trim().toLowerCase()
+    };
+  }
+  return {
+    recipientType: 'GUEST',
+    name: incident?.trip?.guestCustomer ? [incident.trip.guestCustomer.firstName, incident.trip.guestCustomer.lastName].filter(Boolean).join(' ') : 'Customer',
+    email: String(incident?.trip?.guestCustomer?.email || '').trim().toLowerCase()
+  };
+}
+
+async function createCommunication(incidentId, payload = {}) {
+  return prisma.tripIncidentCommunication.create({
+    data: {
+      incidentId,
+      direction: payload.direction || 'OUTBOUND',
+      channel: payload.channel || 'EMAIL',
+      recipientType: payload.recipientType || null,
+      senderType: payload.senderType || null,
+      senderRefId: payload.senderRefId || null,
+      subject: payload.subject || null,
+      message: payload.message || null,
+      attachmentsJson: payload.attachments && payload.attachments.length ? JSON.stringify(payload.attachments) : null,
+      publicToken: payload.publicToken || null,
+      publicTokenExpiresAt: payload.publicTokenExpiresAt || null,
+      respondedAt: payload.respondedAt || null
+    }
+  });
+}
+
+async function sendIssueEmail({ to, subject, lines = [], htmlExtra = '' }) {
+  const safeLines = lines.filter(Boolean).map((line) => String(line));
+  const text = safeLines.join('\n');
+  const html = `
+    <div style="font-family:Arial,sans-serif;font-size:14px;line-height:1.6;color:#111">
+      ${safeLines.map((line) => `<div>${line.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;')}</div>`).join('')}
+      ${htmlExtra}
+    </div>
+  `;
+  return sendEmail({ to, subject, text, html });
+}
+
+async function notifyIncidentStatusChange(incident, previousStatus, nextStatus, note = '') {
+  const recipients = [
+    recipientForIncident(incident, 'GUEST'),
+    recipientForIncident(incident, 'HOST')
+  ].filter((row) => row.email);
+
+  await Promise.all(recipients.map(async (recipient) => {
+    const subject = `Issue Update: ${incident.title}`;
+    const message = [
+      `Hello ${recipient.name || (recipient.recipientType === 'HOST' ? 'Host' : 'Customer')},`,
+      '',
+      `The issue "${incident.title}" is now ${nextStatus}.`,
+      `Previous status: ${previousStatus}`,
+      `Trip: ${incident.trip?.tripCode || '-'}`,
+      incident.trip?.reservation?.reservationNumber ? `Reservation: ${incident.trip.reservation.reservationNumber}` : '',
+      note ? `Representative note: ${note}` : '',
+      '',
+      'Customer service is actively tracking this case.'
+    ].filter(Boolean);
+
+    try {
+      await sendIssueEmail({ to: recipient.email, subject, lines: message });
+      await createCommunication(incident.id, {
+        direction: 'OUTBOUND',
+        channel: 'EMAIL',
+        recipientType: recipient.recipientType,
+        senderType: 'SYSTEM',
+        subject,
+        message: message.join('\n')
+      });
+    } catch {}
+  }));
+
+  await createTimelineEvent(
+    incident.tripId,
+    'SYSTEM',
+    null,
+    'TRIP_INCIDENT_STATUS_NOTIFIED',
+    `Issue status change emailed for ${nextStatus}`,
+    {
+      incidentId: incident.id,
+      previousStatus,
+      nextStatus
+    }
+  );
 }
 
 async function createTimelineEvent(tripId, actorType, actorRefId, eventType, notes, metadata = {}) {
@@ -218,7 +344,15 @@ async function attachHistory(incidents) {
   const timeline = await prisma.tripTimelineEvent.findMany({
     where: {
       tripId: { in: tripIds },
-      eventType: { in: ['TRIP_INCIDENT_OPENED', 'TRIP_INCIDENT_UPDATED'] }
+      eventType: {
+        in: [
+          'TRIP_INCIDENT_OPENED',
+          'TRIP_INCIDENT_UPDATED',
+          'TRIP_INCIDENT_STATUS_NOTIFIED',
+          'TRIP_INCIDENT_INFO_REQUESTED',
+          'TRIP_INCIDENT_REPLY_SUBMITTED'
+        ]
+      }
     },
     orderBy: [{ eventAt: 'desc' }]
   });
@@ -331,6 +465,10 @@ export const issueCenterService = {
       }
     );
 
+    if (current.status !== nextStatus) {
+      await notifyIncidentStatusChange(updated, current.status, nextStatus, payload?.note ? String(payload.note).trim() : '');
+    }
+
     if (['RESOLVED', 'CLOSED'].includes(nextStatus)) {
       await maybeResolveTripDispute(current.tripId);
     } else {
@@ -338,6 +476,179 @@ export const issueCenterService = {
     }
 
     return (await attachHistory([updated]))[0];
+  },
+
+  async requestMoreInfo(user, id, payload = {}) {
+    const tenantScope = tenantWhereFor(user);
+    const incident = await prisma.tripIncident.findFirst({
+      where: {
+        id,
+        trip: tenantScope
+      },
+      include: incidentInclude()
+    });
+    if (!incident) throw new Error('Incident not found');
+
+    const recipient = recipientForIncident(incident, payload?.recipientType || 'GUEST');
+    if (!recipient.email) {
+      throw new Error(`${recipient.recipientType === 'HOST' ? 'Host' : 'Guest'} email is not available for this issue`);
+    }
+
+    const note = String(payload?.note || '').trim();
+    if (!note) throw new Error('note is required');
+
+    const token = crypto.randomBytes(24).toString('hex');
+    const expiresAt = new Date(Date.now() + 1000 * 60 * 60 * 24 * 5);
+    const link = issueResponseLink(token);
+    const subject = `More information needed for issue: ${incident.title}`;
+    const message = [
+      `Hello ${recipient.name || (recipient.recipientType === 'HOST' ? 'Host' : 'Customer')},`,
+      '',
+      'Customer service needs more information to continue processing this issue.',
+      `Issue: ${incident.title}`,
+      `Trip: ${incident.trip?.tripCode || '-'}`,
+      incident.trip?.reservation?.reservationNumber ? `Reservation: ${incident.trip.reservation.reservationNumber}` : '',
+      '',
+      `Representative note: ${note}`,
+      '',
+      `Reply here: ${link}`,
+      `This link expires on ${expiresAt.toLocaleString()}.`
+    ];
+
+    await sendIssueEmail({
+      to: recipient.email,
+      subject,
+      lines: message,
+      htmlExtra: `<div style="margin-top:16px"><a href="${link}" style="display:inline-block;padding:10px 16px;border-radius:999px;background:#7c3aed;color:#fff;text-decoration:none;font-weight:700">Reply To Issue</a></div>`
+    });
+
+    await createCommunication(incident.id, {
+      direction: 'OUTBOUND',
+      channel: 'EMAIL',
+      recipientType: recipient.recipientType,
+      senderType: 'TENANT_USER',
+      senderRefId: user?.id || user?.sub || null,
+      subject,
+      message: note,
+      publicToken: token,
+      publicTokenExpiresAt: expiresAt
+    });
+
+    await createTimelineEvent(
+      incident.tripId,
+      'TENANT_USER',
+      user?.id || user?.sub || null,
+      'TRIP_INCIDENT_INFO_REQUESTED',
+      `Requested more information from ${recipient.recipientType.toLowerCase()}`,
+      {
+        incidentId: incident.id,
+        recipientType: recipient.recipientType,
+        link,
+        expiresAt: expiresAt.toISOString()
+      }
+    );
+
+    return {
+      ok: true,
+      recipientType: recipient.recipientType,
+      email: recipient.email,
+      link,
+      expiresAt
+    };
+  },
+
+  async getPublicResponsePrompt(token) {
+    const communication = await prisma.tripIncidentCommunication.findFirst({
+      where: {
+        publicToken: String(token || '').trim(),
+        publicTokenExpiresAt: { gt: new Date() }
+      },
+      include: {
+        incident: {
+          include: incidentInclude()
+        }
+      }
+    });
+    if (!communication?.incident) throw new Error('Invalid or expired response link');
+
+    const incident = communication.incident;
+    return {
+      incident: serializeIncident(incident, (await attachHistory([incident]))[0]?.history || []),
+      request: serializeCommunication(communication),
+      responseLink: issueResponseLink(communication.publicToken)
+    };
+  },
+
+  async submitPublicResponse(token, payload = {}) {
+    const communication = await prisma.tripIncidentCommunication.findFirst({
+      where: {
+        publicToken: String(token || '').trim(),
+        publicTokenExpiresAt: { gt: new Date() }
+      },
+      include: {
+        incident: {
+          include: incidentInclude()
+        }
+      }
+    });
+    if (!communication?.incident) throw new Error('Invalid or expired response link');
+
+    const note = String(payload?.message || '').trim();
+    if (!note) throw new Error('message is required');
+    const attachments = Array.isArray(payload?.attachments)
+      ? payload.attachments
+          .map((item) => ({
+            name: String(item?.name || 'document').trim(),
+            dataUrl: String(item?.dataUrl || '').trim()
+          }))
+          .filter((item) => item.dataUrl)
+          .slice(0, 6)
+      : [];
+
+    const recipientType = String(communication.recipientType || '').toUpperCase() === 'HOST' ? 'HOST' : 'GUEST';
+    const senderType = recipientType === 'HOST' ? 'HOST' : 'GUEST';
+
+    await createCommunication(communication.incidentId, {
+      direction: 'INBOUND',
+      channel: 'PORTAL',
+      recipientType,
+      senderType,
+      senderRefId: senderType === 'HOST'
+        ? communication.incident.trip?.hostProfile?.id || null
+        : communication.incident.trip?.guestCustomer?.id || null,
+      subject: `Issue reply from ${recipientType.toLowerCase()}`,
+      message: note,
+      attachments
+    });
+
+    await prisma.tripIncidentCommunication.update({
+      where: { id: communication.id },
+      data: {
+        respondedAt: new Date()
+      }
+    });
+
+    await createTimelineEvent(
+      communication.incident.tripId,
+      senderType,
+      senderType === 'HOST'
+        ? communication.incident.trip?.hostProfile?.id || null
+        : communication.incident.trip?.guestCustomer?.id || null,
+      'TRIP_INCIDENT_REPLY_SUBMITTED',
+      note,
+      {
+        incidentId: communication.incidentId,
+        recipientType,
+        attachmentCount: attachments.length
+      }
+    );
+
+    const refreshed = await prisma.tripIncident.findUnique({
+      where: { id: communication.incidentId },
+      include: incidentInclude()
+    });
+
+    return refreshed ? (await attachHistory([refreshed]))[0] : null;
   },
 
   async createGuestIncident(input = {}) {

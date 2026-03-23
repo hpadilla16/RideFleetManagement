@@ -942,7 +942,30 @@ model TripIncident {
   createdAt         DateTime           @default(now())
   updatedAt         DateTime           @updatedAt
 
+  communications    TripIncidentCommunication[]
+
   @@index([tripId, status])
+}
+
+model TripIncidentCommunication {
+  id                  String       @id @default(cuid())
+  incidentId          String
+  incident            TripIncident @relation(fields: [incidentId], references: [id], onDelete: Cascade)
+  direction           String
+  channel             String
+  recipientType       String?
+  senderType          String?
+  senderRefId         String?
+  subject             String?
+  message             String?
+  attachmentsJson     String?
+  publicToken         String?      @unique
+  publicTokenExpiresAt DateTime?
+  respondedAt         DateTime?
+  createdAt           DateTime     @default(now())
+  updatedAt           DateTime     @updatedAt
+
+  @@index([incidentId, createdAt])
 }
 
 model TripTimelineEvent {

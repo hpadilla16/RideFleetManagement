@@ -12,7 +12,9 @@ const EMPTY_EDIT = {
   description: '',
   amountResolved: '',
   note: '',
-  history: []
+  history: [],
+  communications: [],
+  requestNote: ''
 };
 
 function formatMoney(value) {
@@ -39,6 +41,9 @@ function eventLabel(entry) {
   const current = String(entry?.eventType || '').toUpperCase();
   if (current === 'TRIP_INCIDENT_OPENED') return 'Issue Opened';
   if (current === 'TRIP_INCIDENT_UPDATED') return 'Issue Updated';
+  if (current === 'TRIP_INCIDENT_STATUS_NOTIFIED') return 'Status Notification Sent';
+  if (current === 'TRIP_INCIDENT_INFO_REQUESTED') return 'More Information Requested';
+  if (current === 'TRIP_INCIDENT_REPLY_SUBMITTED') return 'Public Reply Submitted';
   return current || 'Timeline Event';
 }
 
@@ -84,6 +89,45 @@ function HistoryList({ rows }) {
   );
 }
 
+function CommunicationList({ rows }) {
+  if (!rows?.length) {
+    return <div className="surface-note">No issue communications yet.</div>;
+  }
+
+  return (
+    <div className="stack">
+      {rows.map((entry) => (
+        <div key={entry.id} className="surface-note" style={{ display: 'grid', gap: 8 }}>
+          <div className="row-between" style={{ gap: 12, alignItems: 'start' }}>
+            <div>
+              <div style={{ fontWeight: 700 }}>{entry.subject || `${entry.direction} ${entry.channel}`}</div>
+              <div className="label" style={{ textTransform: 'none', letterSpacing: 0, fontSize: 12 }}>
+                {[entry.direction, entry.channel, entry.recipientType || '-', formatDateTime(entry.createdAt)].join(' - ')}
+              </div>
+            </div>
+            {entry.respondedAt ? <span className="status-chip good">Responded</span> : entry.publicTokenExpiresAt ? <span className="status-chip warn">Awaiting Reply</span> : <span className="status-chip neutral">Logged</span>}
+          </div>
+          <div style={{ color: '#55456f', lineHeight: 1.5 }}>{entry.message || 'No message body.'}</div>
+          {entry.publicTokenExpiresAt ? (
+            <div className="label" style={{ textTransform: 'none', letterSpacing: 0, fontSize: 12 }}>
+              Link expires {formatDateTime(entry.publicTokenExpiresAt)}
+            </div>
+          ) : null}
+          {entry.attachments?.length ? (
+            <div className="stack">
+              {entry.attachments.map((file, index) => (
+                <a key={`${entry.id}-${index}`} href={file.dataUrl} target="_blank" rel="noreferrer" className="surface-note" style={{ textDecoration: 'none', color: '#4338ca' }}>
+                  Open {file.name || `Attachment ${index + 1}`}
+                </a>
+              ))}
+            </div>
+          ) : null}
+        </div>
+      ))}
+    </div>
+  );
+}
+
 export default function IssueCenterPage() {
   return <AuthGate>{({ token, me, logout }) => <IssueCenterInner token={token} me={me} logout={logout} />}</AuthGate>;
 }
@@ -109,7 +153,20 @@ function IssueCenterInner({ token, me, logout }) {
     try {
       const payload = await api(`/api/issue-center/dashboard${scopedQuery}`, {}, token);
       setDashboard(payload);
-      setMsg('');
+      if (edit.id) {
+        const refreshed = (payload?.incidents || []).find((incident) => incident.id === edit.id);
+        if (refreshed) {
+          setEdit((current) => ({
+            ...current,
+            status: refreshed.status,
+            title: refreshed.title,
+            description: refreshed.description || '',
+            amountResolved: refreshed.amountResolved ? String(refreshed.amountResolved) : '',
+            history: refreshed.history || [],
+            communications: refreshed.communications || []
+          }));
+        }
+      }
     } catch (error) {
       setDashboard(null);
       setMsg(error.message);
@@ -136,6 +193,24 @@ function IssueCenterInner({ token, me, logout }) {
       }, token);
       setMsg('Issue updated');
       setEdit(EMPTY_EDIT);
+      await load();
+    } catch (error) {
+      setMsg(error.message);
+    }
+  }
+
+  async function requestInfo(recipientType) {
+    if (!edit.id) return;
+    try {
+      const payload = await api(`/api/issue-center/incidents/${edit.id}/request-info`, {
+        method: 'POST',
+        body: JSON.stringify({
+          recipientType,
+          note: edit.requestNote
+        })
+      }, token);
+      setMsg(`Request sent to ${payload.recipientType.toLowerCase()}`);
+      setEdit((current) => ({ ...current, requestNote: '' }));
       await load();
     } catch (error) {
       setMsg(error.message);
@@ -256,7 +331,9 @@ function IssueCenterInner({ token, me, logout }) {
                         description: incident.description || '',
                         amountResolved: incident.amountResolved ? String(incident.amountResolved) : '',
                         note: '',
-                        history: incident.history || []
+                        history: incident.history || [],
+                        communications: incident.communications || [],
+                        requestNote: ''
                       })}
                     >
                       Handle Case
@@ -309,9 +386,24 @@ function IssueCenterInner({ token, me, logout }) {
               <div className="inline-actions">
                 <button type="submit">Save Case</button>
               </div>
+              <div className="glass card section-card" style={{ padding: 14 }}>
+                <div className="section-title" style={{ marginBottom: 10 }}>Request More Information</div>
+                <div className="stack">
+                  <div className="label">Representative Request Note</div>
+                  <textarea rows={4} value={edit.requestNote} onChange={(e) => setEdit((current) => ({ ...current, requestNote: e.target.value }))} placeholder="Explain what support or documents are needed to continue processing this issue." />
+                  <div className="inline-actions">
+                    <button type="button" className="button-subtle" onClick={() => requestInfo('GUEST')}>Email Guest For Info</button>
+                    <button type="button" className="button-subtle" onClick={() => requestInfo('HOST')}>Email Host For Info</button>
+                  </div>
+                </div>
+              </div>
               <div>
                 <div className="section-title" style={{ marginBottom: 10 }}>Issue History</div>
                 <HistoryList rows={edit.history || []} />
+              </div>
+              <div>
+                <div className="section-title" style={{ marginBottom: 10 }}>Communications</div>
+                <CommunicationList rows={edit.communications || []} />
               </div>
             </form>
           ) : (
