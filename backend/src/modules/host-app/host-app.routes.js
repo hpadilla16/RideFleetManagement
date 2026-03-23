@@ -101,3 +101,14 @@ hostAppRouter.post('/trips/:id/incidents', async (req, res, next) => {
     next(error);
   }
 });
+
+hostAppRouter.post('/vehicle-submissions', async (req, res, next) => {
+  try {
+    res.status(201).json(await hostAppService.createVehicleSubmission(req.user, req.body || {}));
+  } catch (error) {
+    if (/not found|required|linked/i.test(String(error?.message || ''))) {
+      return res.status(400).json({ error: error.message });
+    }
+    next(error);
+  }
+});

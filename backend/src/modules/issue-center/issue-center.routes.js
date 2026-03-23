@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import { issueCenterService } from './issue-center.service.js';
+import { hostAppService } from '../host-app/host-app.service.js';
 
 export const issueCenterRouter = Router();
 export const publicIssueCenterRouter = Router();
@@ -32,6 +33,28 @@ issueCenterRouter.post('/incidents/:id/request-info', async (req, res, next) => 
     res.json(await issueCenterService.requestMoreInfo(req.user, req.params.id, req.body || {}));
   } catch (error) {
     if (/not found|required|not available/i.test(String(error?.message || ''))) {
+      return res.status(400).json({ error: error.message });
+    }
+    next(error);
+  }
+});
+
+issueCenterRouter.post('/vehicle-submissions/:id/request-info', async (req, res, next) => {
+  try {
+    res.json(await issueCenterService.requestVehicleSubmissionInfo(req.user, req.params.id, req.body || {}));
+  } catch (error) {
+    if (/not found|required|not available/i.test(String(error?.message || ''))) {
+      return res.status(400).json({ error: error.message });
+    }
+    next(error);
+  }
+});
+
+issueCenterRouter.post('/vehicle-submissions/:id/approve', async (req, res, next) => {
+  try {
+    res.json(await hostAppService.approveVehicleSubmission(req.user, req.params.id, req.body || {}));
+  } catch (error) {
+    if (/not found|required|allowed/i.test(String(error?.message || ''))) {
       return res.status(400).json({ error: error.message });
     }
     next(error);

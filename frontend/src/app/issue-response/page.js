@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import { API_BASE, api } from '../../lib/client';
+import { api } from '../../lib/client';
 
 function formatDateTime(value) {
   if (!value) return '-';
@@ -102,7 +102,13 @@ export default function IssueResponsePage() {
           attachments: form.attachments
         })
       });
-      setModel((current) => current ? { ...current, incident: payload } : current);
+      setModel((current) => {
+        if (!current) return current;
+        if (current.caseType === 'HOST_VEHICLE_SUBMISSION') {
+          return { ...current, submission: payload };
+        }
+        return { ...current, incident: payload };
+      });
       setForm({ message: '', attachments: [] });
       setMsg('Your reply was sent to customer service successfully.');
     } catch (err) {
@@ -112,7 +118,13 @@ export default function IssueResponsePage() {
     }
   }
 
-  const communications = useMemo(() => model?.incident?.communications || [], [model]);
+  const communications = useMemo(() => {
+    if (model?.caseType === 'HOST_VEHICLE_SUBMISSION') return model?.submission?.communications || [];
+    return model?.incident?.communications || [];
+  }, [model]);
+  const isVehicleSubmission = model?.caseType === 'HOST_VEHICLE_SUBMISSION';
+  const vehicleSummary = model?.submission || null;
+  const incidentSummary = model?.incident || null;
 
   return (
     <main style={{ minHeight: '100vh', padding: '22px clamp(14px, 3vw, 34px) 44px' }}>
@@ -144,27 +156,49 @@ export default function IssueResponsePage() {
         {error ? <div className="surface-note" style={{ color: '#991b1b' }}>{error}</div> : null}
         {msg ? <div className="surface-note" style={{ color: '#166534' }}>{msg}</div> : null}
 
-        {model?.incident ? (
+        {model?.incident || model?.submission ? (
           <section className="split-panel">
             <section className="glass card-lg section-card">
               <div className="row-between">
                 <div>
-                  <div className="section-title">Issue Summary</div>
-                  <p className="ui-muted">The support request your reply will be attached to.</p>
+                  <div className="section-title">{isVehicleSubmission ? 'Vehicle Review Summary' : 'Issue Summary'}</div>
+                  <p className="ui-muted">
+                    {isVehicleSubmission
+                      ? 'The vehicle approval request your reply will be attached to.'
+                      : 'The support request your reply will be attached to.'}
+                  </p>
                 </div>
-                <StatusPill status={model.incident.status} />
+                <StatusPill status={isVehicleSubmission ? vehicleSummary?.status : incidentSummary?.status} />
               </div>
-              <div className="info-grid-tight">
-                <div className="info-tile"><span className="label">Issue</span><strong>{model.incident.title}</strong></div>
-                <div className="info-tile"><span className="label">Type</span><strong>{model.incident.type}</strong></div>
-                <div className="info-tile"><span className="label">Trip</span><strong>{model.incident.trip?.tripCode || '-'}</strong></div>
-                <div className="info-tile"><span className="label">Reservation</span><strong>{model.incident.trip?.reservation?.reservationNumber || '-'}</strong></div>
-                <div className="info-tile"><span className="label">Claimed</span><strong>{money(model.incident.amountClaimed)}</strong></div>
-                <div className="info-tile"><span className="label">Opened</span><strong>{formatDateTime(model.incident.createdAt)}</strong></div>
-              </div>
-              <div className="surface-note" style={{ color: '#55456f', lineHeight: 1.6 }}>
-                {model.incident.description || 'No extra description was provided with the issue.'}
-              </div>
+              {isVehicleSubmission ? (
+                <>
+                  <div className="info-grid-tight">
+                    <div className="info-tile"><span className="label">Vehicle</span><strong>{[vehicleSummary?.year, vehicleSummary?.make, vehicleSummary?.model].filter(Boolean).join(' ') || '-'}</strong></div>
+                    <div className="info-tile"><span className="label">Vehicle Type</span><strong>{vehicleSummary?.vehicleType?.name || '-'}</strong></div>
+                    <div className="info-tile"><span className="label">Location</span><strong>{vehicleSummary?.preferredLocation?.name || '-'}</strong></div>
+                    <div className="info-tile"><span className="label">Plate</span><strong>{vehicleSummary?.plate || '-'}</strong></div>
+                    <div className="info-tile"><span className="label">VIN</span><strong>{vehicleSummary?.vin || '-'}</strong></div>
+                    <div className="info-tile"><span className="label">Submitted</span><strong>{formatDateTime(vehicleSummary?.createdAt)}</strong></div>
+                  </div>
+                  <div className="surface-note" style={{ color: '#55456f', lineHeight: 1.6 }}>
+                    {vehicleSummary?.description || vehicleSummary?.shortDescription || 'No extra vehicle description was provided.'}
+                  </div>
+                </>
+              ) : (
+                <>
+                  <div className="info-grid-tight">
+                    <div className="info-tile"><span className="label">Issue</span><strong>{incidentSummary?.title}</strong></div>
+                    <div className="info-tile"><span className="label">Type</span><strong>{incidentSummary?.type}</strong></div>
+                    <div className="info-tile"><span className="label">Trip</span><strong>{incidentSummary?.trip?.tripCode || '-'}</strong></div>
+                    <div className="info-tile"><span className="label">Reservation</span><strong>{incidentSummary?.trip?.reservation?.reservationNumber || '-'}</strong></div>
+                    <div className="info-tile"><span className="label">Claimed</span><strong>{money(incidentSummary?.amountClaimed)}</strong></div>
+                    <div className="info-tile"><span className="label">Opened</span><strong>{formatDateTime(incidentSummary?.createdAt)}</strong></div>
+                  </div>
+                  <div className="surface-note" style={{ color: '#55456f', lineHeight: 1.6 }}>
+                    {incidentSummary?.description || 'No extra description was provided with the issue.'}
+                  </div>
+                </>
+              )}
               {model.request ? (
                 <div className="surface-note" style={{ display: 'grid', gap: 8 }}>
                   <div style={{ fontWeight: 700 }}>Representative Request</div>
@@ -172,6 +206,16 @@ export default function IssueResponsePage() {
                   <div className="label" style={{ textTransform: 'none', letterSpacing: 0, fontSize: 12 }}>
                     Sent {formatDateTime(model.request.createdAt)} - expires {formatDateTime(model.request.publicTokenExpiresAt)}
                   </div>
+                </div>
+              ) : null}
+              {isVehicleSubmission && vehicleSummary?.photos?.length ? (
+                <div className="metric-grid">
+                  {vehicleSummary.photos.slice(0, 6).map((photo, index) => (
+                    <a key={`vehicle-photo-${index}`} href={photo} target="_blank" rel="noreferrer" className="surface-note" style={{ textDecoration: 'none', display: 'grid', gap: 8 }}>
+                      <img src={photo} alt={`Vehicle ${index + 1}`} style={{ width: '100%', aspectRatio: '16 / 10', objectFit: 'cover', borderRadius: 14 }} />
+                      <span style={{ color: '#4338ca', fontWeight: 600 }}>Open Photo {index + 1}</span>
+                    </a>
+                  ))}
                 </div>
               ) : null}
             </section>

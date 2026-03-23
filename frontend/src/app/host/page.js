@@ -25,6 +25,21 @@ function parsePhotoList(value) {
   }
 }
 
+function parseAddOns(value) {
+  try {
+    const parsed = typeof value === 'string' ? JSON.parse(value) : value;
+    return Array.isArray(parsed)
+      ? parsed.map((row) => ({
+          name: String(row?.name || '').trim(),
+          price: String(row?.price ?? '').trim(),
+          description: String(row?.description || '').trim()
+        }))
+      : [];
+  } catch {
+    return [];
+  }
+}
+
 function tripActionsFor(status) {
   const current = String(status || '').toUpperCase();
   if (current === 'RESERVED') return ['CONFIRMED', 'CANCELLED'];
@@ -57,7 +72,14 @@ function hostAttention(trip) {
 const EMPTY_LISTING_EDIT = {
   id: '', shortDescription: '', description: '', status: 'DRAFT',
   baseDailyRate: '', cleaningFee: '', deliveryFee: '', securityDeposit: '',
-  instantBook: false, minTripDays: '1', maxTripDays: '', tripRules: '', photoUrls: []
+  instantBook: false, minTripDays: '1', maxTripDays: '', tripRules: '', photoUrls: [], addOns: []
+};
+
+const EMPTY_SUBMISSION_FORM = {
+  vehicleTypeId: '', preferredLocationId: '', year: '', make: '', model: '', color: '', vin: '', plate: '', mileage: '',
+  baseDailyRate: '', cleaningFee: '', deliveryFee: '', securityDeposit: '', minTripDays: '1', maxTripDays: '',
+  shortDescription: '', description: '', tripRules: '', photos: [], insuranceDocumentUrl: '', registrationDocumentUrl: '',
+  initialInspectionDocumentUrl: '', initialInspectionNotes: '', addOns: []
 };
 
 const EMPTY_WINDOW_FORM = {
@@ -110,6 +132,7 @@ function HostAppInner({ token, me, logout }) {
   const [availabilityListingId, setAvailabilityListingId] = useState('');
   const [windowForm, setWindowForm] = useState(EMPTY_WINDOW_FORM);
   const [issueForm, setIssueForm] = useState(EMPTY_ISSUE_FORM);
+  const [submissionForm, setSubmissionForm] = useState(EMPTY_SUBMISSION_FORM);
   const [loading, setLoading] = useState(true);
 
   const isAdminViewer = !!dashboard?.isAdminViewer;
@@ -142,6 +165,9 @@ function HostAppInner({ token, me, logout }) {
   const host = dashboard?.hostProfile || null;
   const listings = dashboard?.listings || [];
   const trips = dashboard?.trips || [];
+  const submissions = dashboard?.vehicleSubmissions || [];
+  const vehicleTypes = dashboard?.vehicleTypes || [];
+  const locations = dashboard?.locations || [];
 
   const hostSnapshot = useMemo(() => {
     const now = Date.now();
@@ -180,7 +206,8 @@ function HostAppInner({ token, me, logout }) {
           minTripDays: Number(listingEdit.minTripDays || 1),
           maxTripDays: listingEdit.maxTripDays ? Number(listingEdit.maxTripDays) : null,
           tripRules: listingEdit.tripRules,
-          photosJson: JSON.stringify((listingEdit.photoUrls || []).slice(0, 6))
+          photosJson: JSON.stringify((listingEdit.photoUrls || []).slice(0, 6)),
+          addOnsJson: JSON.stringify((listingEdit.addOns || []).filter((row) => row.name && row.price))
         })
       }, token);
       setMsg('Listing updated');
@@ -283,6 +310,33 @@ function HostAppInner({ token, me, logout }) {
     }
   }
 
+  async function submitVehicleSubmission(event) {
+    event.preventDefault();
+    try {
+      await api('/api/host-app/vehicle-submissions', {
+        method: 'POST',
+        body: JSON.stringify({
+          ...submissionForm,
+          year: submissionForm.year ? Number(submissionForm.year) : null,
+          mileage: submissionForm.mileage ? Number(submissionForm.mileage) : 0,
+          baseDailyRate: submissionForm.baseDailyRate ? Number(submissionForm.baseDailyRate) : 0,
+          cleaningFee: submissionForm.cleaningFee ? Number(submissionForm.cleaningFee) : 0,
+          deliveryFee: submissionForm.deliveryFee ? Number(submissionForm.deliveryFee) : 0,
+          securityDeposit: submissionForm.securityDeposit ? Number(submissionForm.securityDeposit) : 0,
+          minTripDays: submissionForm.minTripDays ? Number(submissionForm.minTripDays) : 1,
+          maxTripDays: submissionForm.maxTripDays ? Number(submissionForm.maxTripDays) : null,
+          photosJson: JSON.stringify((submissionForm.photos || []).slice(0, 6)),
+          addOnsJson: JSON.stringify((submissionForm.addOns || []).filter((row) => row.name && row.price))
+        })
+      }, token);
+      setMsg('Vehicle submitted for approval');
+      setSubmissionForm(EMPTY_SUBMISSION_FORM);
+      await load();
+    } catch (error) {
+      setMsg(error.message);
+    }
+  }
+
   function uploadListingPhotos(files) {
     const incoming = Array.from(files || []).slice(0, 6);
     if (!incoming.length) return;
@@ -296,6 +350,40 @@ function HostAppInner({ token, me, logout }) {
         photoUrls: [...(current.photoUrls || []), ...images.filter(Boolean)].slice(0, 6)
       }));
     });
+  }
+
+  function uploadSubmissionPhotos(files) {
+    const incoming = Array.from(files || []).slice(0, 6);
+    if (!incoming.length) return;
+    Promise.all(incoming.map((file) => new Promise((resolve) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result || ''));
+      reader.readAsDataURL(file);
+    }))).then((images) => {
+      setSubmissionForm((current) => ({
+        ...current,
+        photos: [...(current.photos || []), ...images.filter(Boolean)].slice(0, 6)
+      }));
+    });
+  }
+
+  function uploadSubmissionDocument(field, file) {
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => setSubmissionForm((current) => ({ ...current, [field]: String(reader.result || '') }));
+    reader.readAsDataURL(file);
+  }
+
+  function updateAddOn(target, index, key, value) {
+    target((current) => {
+      const addOns = Array.isArray(current.addOns) ? [...current.addOns] : [];
+      addOns[index] = { ...(addOns[index] || { name: '', price: '', description: '' }), [key]: value };
+      return { ...current, addOns };
+    });
+  }
+
+  function removeAddOn(target, index) {
+    target((current) => ({ ...current, addOns: (current.addOns || []).filter((_, idx) => idx !== index) }));
   }
 
   return (
@@ -325,6 +413,7 @@ function HostAppInner({ token, me, logout }) {
               <div className="metric-card"><span className="label">Needs Attention</span><strong>{hostSnapshot.watchlist.length}</strong></div>
               <div className="metric-card"><span className="label">Completed Trips</span><strong>{hostSnapshot.completedTrips.length}</strong></div>
               <div className="metric-card"><span className="label">Earned Closed</span><strong>{formatMoney(hostSnapshot.earnedCompleted)}</strong></div>
+              <div className="metric-card"><span className="label">Fleet Pending</span><strong>{dashboard?.metrics?.pendingVehicleApprovals || 0}</strong></div>
             </div>
             {host ? (
               <div className="surface-note"><strong>{host.displayName}</strong><br />{[host.tenant?.name || 'No tenant', host.status].join(' · ')}<br />{host.payoutEnabled ? 'Payouts enabled' : 'Payouts not enabled yet'}</div>
@@ -352,6 +441,121 @@ function HostAppInner({ token, me, logout }) {
           </div>
         </section>
       ) : null}
+
+      <section className="split-panel">
+        <section className="glass card-lg section-card">
+          <div className="row-between">
+            <div><div className="section-title">Add Vehicle To My Fleet</div><p className="ui-muted">Submit a host-owned vehicle, documents, inspection proof, pricing, and host-only add-ons for review.</p></div>
+            <span className="status-chip neutral">{dashboard?.metrics?.pendingVehicleApprovals || 0} pending</span>
+          </div>
+          <form className="stack" onSubmit={submitVehicleSubmission}>
+            <div className="form-grid-3">
+              <div className="stack">
+                <label className="label">Vehicle Type</label>
+                <select value={submissionForm.vehicleTypeId} onChange={(event) => setSubmissionForm((current) => ({ ...current, vehicleTypeId: event.target.value }))}>
+                  <option value="">Choose vehicle type</option>
+                  {vehicleTypes.map((row) => <option key={row.id} value={row.id}>{row.name}</option>)}
+                </select>
+              </div>
+              <div className="stack">
+                <label className="label">Preferred Location</label>
+                <select value={submissionForm.preferredLocationId} onChange={(event) => setSubmissionForm((current) => ({ ...current, preferredLocationId: event.target.value }))}>
+                  <option value="">Choose location</option>
+                  {locations.map((row) => <option key={row.id} value={row.id}>{row.name}</option>)}
+                </select>
+              </div>
+              <div className="stack"><label className="label">Year</label><input type="number" value={submissionForm.year} onChange={(event) => setSubmissionForm((current) => ({ ...current, year: event.target.value }))} /></div>
+              <div className="stack"><label className="label">Make</label><input value={submissionForm.make} onChange={(event) => setSubmissionForm((current) => ({ ...current, make: event.target.value }))} /></div>
+              <div className="stack"><label className="label">Model</label><input value={submissionForm.model} onChange={(event) => setSubmissionForm((current) => ({ ...current, model: event.target.value }))} /></div>
+              <div className="stack"><label className="label">Color</label><input value={submissionForm.color} onChange={(event) => setSubmissionForm((current) => ({ ...current, color: event.target.value }))} /></div>
+              <div className="stack"><label className="label">VIN</label><input value={submissionForm.vin} onChange={(event) => setSubmissionForm((current) => ({ ...current, vin: event.target.value }))} /></div>
+              <div className="stack"><label className="label">Plate</label><input value={submissionForm.plate} onChange={(event) => setSubmissionForm((current) => ({ ...current, plate: event.target.value }))} /></div>
+              <div className="stack"><label className="label">Mileage</label><input type="number" value={submissionForm.mileage} onChange={(event) => setSubmissionForm((current) => ({ ...current, mileage: event.target.value }))} /></div>
+            </div>
+            <div className="form-grid-3">
+              <div className="stack"><label className="label">Daily Rate</label><input type="number" min="0" step="0.01" value={submissionForm.baseDailyRate} onChange={(event) => setSubmissionForm((current) => ({ ...current, baseDailyRate: event.target.value }))} /></div>
+              <div className="stack"><label className="label">Cleaning Fee</label><input type="number" min="0" step="0.01" value={submissionForm.cleaningFee} onChange={(event) => setSubmissionForm((current) => ({ ...current, cleaningFee: event.target.value }))} /></div>
+              <div className="stack"><label className="label">Delivery Fee</label><input type="number" min="0" step="0.01" value={submissionForm.deliveryFee} onChange={(event) => setSubmissionForm((current) => ({ ...current, deliveryFee: event.target.value }))} /></div>
+              <div className="stack"><label className="label">Security Deposit</label><input type="number" min="0" step="0.01" value={submissionForm.securityDeposit} onChange={(event) => setSubmissionForm((current) => ({ ...current, securityDeposit: event.target.value }))} /></div>
+              <div className="stack"><label className="label">Min Trip Days</label><input type="number" min="1" value={submissionForm.minTripDays} onChange={(event) => setSubmissionForm((current) => ({ ...current, minTripDays: event.target.value }))} /></div>
+              <div className="stack"><label className="label">Max Trip Days</label><input type="number" min="1" value={submissionForm.maxTripDays} onChange={(event) => setSubmissionForm((current) => ({ ...current, maxTripDays: event.target.value }))} /></div>
+            </div>
+            <div className="stack"><label className="label">Short Description</label><input value={submissionForm.shortDescription} onChange={(event) => setSubmissionForm((current) => ({ ...current, shortDescription: event.target.value }))} /></div>
+            <div className="stack"><label className="label">Description</label><textarea rows={4} value={submissionForm.description} onChange={(event) => setSubmissionForm((current) => ({ ...current, description: event.target.value }))} /></div>
+            <div className="stack"><label className="label">Trip Rules</label><textarea rows={3} value={submissionForm.tripRules} onChange={(event) => setSubmissionForm((current) => ({ ...current, tripRules: event.target.value }))} /></div>
+            <div className="stack">
+              <label className="label">Vehicle Photos</label>
+              <input type="file" accept="image/*" multiple onChange={(event) => uploadSubmissionPhotos(event.target.files)} />
+              {submissionForm.photos?.length ? (
+                <div className="metric-grid">
+                  {submissionForm.photos.map((photo, index) => (
+                    <div key={`${index}-${photo.slice(0, 18)}`} className="surface-note" style={{ display: 'grid', gap: 8 }}>
+                      <img src={photo} alt={`Submitted vehicle ${index + 1}`} style={{ width: '100%', aspectRatio: '16 / 10', objectFit: 'cover', borderRadius: 14 }} />
+                      <button type="button" className="button-subtle" onClick={() => setSubmissionForm((current) => ({ ...current, photos: current.photos.filter((_, idx) => idx !== index) }))}>Remove</button>
+                    </div>
+                  ))}
+                </div>
+              ) : <div className="surface-note">Upload up to 6 photos of the vehicle.</div>}
+            </div>
+            <div className="form-grid-3">
+              <div className="stack"><label className="label">Insurance Document</label><input type="file" accept="image/*,.pdf" onChange={(event) => uploadSubmissionDocument('insuranceDocumentUrl', event.target.files?.[0])} /></div>
+              <div className="stack"><label className="label">Registration Document</label><input type="file" accept="image/*,.pdf" onChange={(event) => uploadSubmissionDocument('registrationDocumentUrl', event.target.files?.[0])} /></div>
+              <div className="stack"><label className="label">Initial Inspection</label><input type="file" accept="image/*,.pdf" onChange={(event) => uploadSubmissionDocument('initialInspectionDocumentUrl', event.target.files?.[0])} /></div>
+            </div>
+            <div className="stack"><label className="label">Initial Inspection Notes</label><textarea rows={3} value={submissionForm.initialInspectionNotes} onChange={(event) => setSubmissionForm((current) => ({ ...current, initialInspectionNotes: event.target.value }))} /></div>
+            <div className="stack">
+              <div className="row-between">
+                <label className="label">Host Vehicle Add-Ons</label>
+                <button type="button" className="button-subtle" onClick={() => setSubmissionForm((current) => ({ ...current, addOns: [...(current.addOns || []), { name: '', price: '', description: '' }] }))}>Add Service</button>
+              </div>
+              {(submissionForm.addOns || []).length ? (
+                <div className="stack">
+                  {(submissionForm.addOns || []).map((row, index) => (
+                    <div key={`submission-addon-${index}`} className="surface-note" style={{ display: 'grid', gap: 10 }}>
+                      <div className="form-grid-3">
+                        <input placeholder="Service name" value={row.name} onChange={(event) => updateAddOn(setSubmissionForm, index, 'name', event.target.value)} />
+                        <input placeholder="Price" type="number" min="0" step="0.01" value={row.price} onChange={(event) => updateAddOn(setSubmissionForm, index, 'price', event.target.value)} />
+                        <button type="button" className="button-subtle" onClick={() => removeAddOn(setSubmissionForm, index)}>Remove</button>
+                      </div>
+                      <textarea rows={2} placeholder="Description" value={row.description} onChange={(event) => updateAddOn(setSubmissionForm, index, 'description', event.target.value)} />
+                    </div>
+                  ))}
+                </div>
+              ) : <div className="surface-note">Optional host-only add-ons like cooler, car seat, or delivery extras.</div>}
+            </div>
+            <div className="inline-actions"><button type="submit">Submit Vehicle For Approval</button></div>
+          </form>
+        </section>
+
+        <section className="glass card-lg section-card">
+          <div className="row-between">
+            <div><div className="section-title">Fleet Approval Status</div><p className="ui-muted">These submissions stay pending until customer service reviews and approves the vehicle.</p></div>
+            <a href="/issues"><button type="button" className="button-subtle">Open Issue Center</button></a>
+          </div>
+          {submissions.length ? (
+            <div className="stack">
+              {submissions.map((row) => (
+                <div key={row.id} className="surface-note" style={{ display: 'grid', gap: 10 }}>
+                  <div className="row-between" style={{ gap: 12 }}>
+                    <strong>{[row.year, row.make, row.model].filter(Boolean).join(' ') || 'Vehicle Submission'}</strong>
+                    <span className={statusChip(row.status)}>{row.status}</span>
+                  </div>
+                  <div className="label" style={{ textTransform: 'none', letterSpacing: 0, fontSize: 12 }}>
+                    {[row.vehicleType?.name || '-', row.preferredLocation?.name || '-', formatDateTime(row.createdAt)].join(' - ')}
+                  </div>
+                  <div style={{ color: '#55456f', lineHeight: 1.5 }}>
+                    {[row.plate ? `Plate ${row.plate}` : '', row.vin ? `VIN ${row.vin}` : '', row.reviewNotes || 'Waiting for review.'].filter(Boolean).join(' · ')}
+                  </div>
+                  <div className="inline-actions">
+                    {row.listing?.id ? <span className="status-chip good">Active In Portal</span> : null}
+                    {(row.communications || []).some((entry) => entry.publicTokenExpiresAt && !entry.respondedAt) ? <span className="status-chip warn">Info Requested</span> : null}
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : <div className="surface-note">No vehicle submissions yet.</div>}
+        </section>
+      </section>
 
       <section className="split-panel">
         <section className="glass card-lg section-card">
@@ -429,7 +633,7 @@ function HostAppInner({ token, me, logout }) {
                       id: listing.id, shortDescription: listing.shortDescription || '', description: listing.description || '', status: listing.status || 'DRAFT',
                       baseDailyRate: String(listing.baseDailyRate ?? ''), cleaningFee: String(listing.cleaningFee ?? ''), deliveryFee: String(listing.deliveryFee ?? ''),
                       securityDeposit: String(listing.securityDeposit ?? ''), instantBook: !!listing.instantBook, minTripDays: String(listing.minTripDays ?? 1),
-                      maxTripDays: listing.maxTripDays ? String(listing.maxTripDays) : '', tripRules: listing.tripRules || '', photoUrls: parsePhotoList(listing.photosJson)
+                      maxTripDays: listing.maxTripDays ? String(listing.maxTripDays) : '', tripRules: listing.tripRules || '', photoUrls: parsePhotoList(listing.photosJson), addOns: parseAddOns(listing.addOnsJson)
                     })}>Edit Listing</button>
                     <button type="button" className="button-subtle" onClick={() => loadAvailability(listing.id)}>Availability</button>
                   </div>
@@ -459,6 +663,26 @@ function HostAppInner({ token, me, logout }) {
               </div>
               <label className="label" style={{ textTransform: 'none', letterSpacing: 0 }}><input type="checkbox" checked={listingEdit.instantBook} onChange={(event) => setListingEdit((current) => ({ ...current, instantBook: event.target.checked }))} /> Instant Book</label>
               <div className="stack"><label className="label">Trip Rules</label><textarea rows={3} value={listingEdit.tripRules} onChange={(event) => setListingEdit((current) => ({ ...current, tripRules: event.target.value }))} /></div>
+              <div className="stack">
+                <div className="row-between">
+                  <label className="label">Host Vehicle Add-Ons</label>
+                  <button type="button" className="button-subtle" onClick={() => setListingEdit((current) => ({ ...current, addOns: [...(current.addOns || []), { name: '', price: '', description: '' }] }))}>Add Service</button>
+                </div>
+                {(listingEdit.addOns || []).length ? (
+                  <div className="stack">
+                    {(listingEdit.addOns || []).map((row, index) => (
+                      <div key={`listing-addon-${index}`} className="surface-note" style={{ display: 'grid', gap: 10 }}>
+                        <div className="form-grid-3">
+                          <input placeholder="Service name" value={row.name} onChange={(event) => updateAddOn(setListingEdit, index, 'name', event.target.value)} />
+                          <input placeholder="Price" type="number" min="0" step="0.01" value={row.price} onChange={(event) => updateAddOn(setListingEdit, index, 'price', event.target.value)} />
+                          <button type="button" className="button-subtle" onClick={() => removeAddOn(setListingEdit, index)}>Remove</button>
+                        </div>
+                        <textarea rows={2} placeholder="Description" value={row.description} onChange={(event) => updateAddOn(setListingEdit, index, 'description', event.target.value)} />
+                      </div>
+                    ))}
+                  </div>
+                ) : <div className="surface-note">Optional host-specific add-ons for this vehicle only.</div>}
+              </div>
               <div className="stack">
                 <label className="label">Vehicle Photos</label>
                 <input type="file" accept="image/*" multiple onChange={(event) => uploadListingPhotos(event.target.files)} />

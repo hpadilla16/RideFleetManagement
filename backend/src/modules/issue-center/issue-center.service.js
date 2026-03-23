@@ -34,6 +34,29 @@ function incidentInclude() {
   };
 }
 
+function vehicleSubmissionInclude() {
+  return {
+    hostProfile: true,
+    vehicleType: true,
+    preferredLocation: true,
+    vehicle: {
+      include: {
+        vehicleType: true,
+        homeLocation: true
+      }
+    },
+    listing: {
+      include: {
+        vehicle: { include: { vehicleType: true } },
+        location: true
+      }
+    },
+    communications: {
+      orderBy: [{ createdAt: 'desc' }]
+    }
+  };
+}
+
 function money(value) {
   return Number(Number(value || 0).toFixed(2));
 }
@@ -135,6 +158,65 @@ function serializeIncident(incident, history = []) {
   };
 }
 
+function serializeVehicleSubmission(submission) {
+  return {
+    id: submission.id,
+    status: submission.status,
+    year: submission.year,
+    make: submission.make || '',
+    model: submission.model || '',
+    color: submission.color || '',
+    vin: submission.vin || '',
+    plate: submission.plate || '',
+    mileage: submission.mileage || 0,
+    baseDailyRate: money(submission.baseDailyRate),
+    cleaningFee: money(submission.cleaningFee),
+    deliveryFee: money(submission.deliveryFee),
+    securityDeposit: money(submission.securityDeposit),
+    minTripDays: submission.minTripDays || 1,
+    maxTripDays: submission.maxTripDays || null,
+    shortDescription: submission.shortDescription || '',
+    description: submission.description || '',
+    tripRules: submission.tripRules || '',
+    photos: safeParse(submission.photosJson) || [],
+    insuranceDocumentUrl: submission.insuranceDocumentUrl || '',
+    registrationDocumentUrl: submission.registrationDocumentUrl || '',
+    initialInspectionDocumentUrl: submission.initialInspectionDocumentUrl || '',
+    initialInspectionNotes: submission.initialInspectionNotes || '',
+    addOns: safeParse(submission.addOnsJson) || [],
+    reviewNotes: submission.reviewNotes || '',
+    approvedAt: submission.approvedAt || null,
+    createdAt: submission.createdAt,
+    updatedAt: submission.updatedAt,
+    vehicleType: submission.vehicleType ? {
+      id: submission.vehicleType.id,
+      code: submission.vehicleType.code,
+      name: submission.vehicleType.name
+    } : null,
+    preferredLocation: submission.preferredLocation ? {
+      id: submission.preferredLocation.id,
+      name: submission.preferredLocation.name
+    } : null,
+    hostProfile: submission.hostProfile ? {
+      id: submission.hostProfile.id,
+      displayName: submission.hostProfile.displayName,
+      email: submission.hostProfile.email || '',
+      phone: submission.hostProfile.phone || ''
+    } : null,
+    vehicle: submission.vehicle ? {
+      id: submission.vehicle.id,
+      internalNumber: submission.vehicle.internalNumber,
+      fleetMode: submission.vehicle.fleetMode
+    } : null,
+    listing: submission.listing ? {
+      id: submission.listing.id,
+      title: submission.listing.title,
+      status: submission.listing.status
+    } : null,
+    communications: Array.isArray(submission.communications) ? submission.communications.map(serializeCommunication) : []
+  };
+}
+
 function issueBaseUrl() {
   return (process.env.CUSTOMER_PORTAL_BASE_URL || process.env.APP_BASE_URL || process.env.FRONTEND_BASE_URL || 'http://localhost:3000').replace(/\/$/, '');
 }
@@ -188,6 +270,33 @@ async function sendIssueEmail({ to, subject, lines = [], htmlExtra = '' }) {
     </div>
   `;
   return sendEmail({ to, subject, text, html });
+}
+
+function recipientForVehicleSubmission(submission) {
+  return {
+    recipientType: 'HOST',
+    name: submission?.hostProfile?.displayName || 'Host',
+    email: String(submission?.hostProfile?.email || '').trim().toLowerCase()
+  };
+}
+
+async function createVehicleSubmissionCommunication(submissionId, payload = {}) {
+  return prisma.hostVehicleSubmissionCommunication.create({
+    data: {
+      submissionId,
+      direction: payload.direction || 'OUTBOUND',
+      channel: payload.channel || 'EMAIL',
+      recipientType: payload.recipientType || null,
+      senderType: payload.senderType || null,
+      senderRefId: payload.senderRefId || null,
+      subject: payload.subject || null,
+      message: payload.message || null,
+      attachmentsJson: payload.attachments && payload.attachments.length ? JSON.stringify(payload.attachments) : null,
+      publicToken: payload.publicToken || null,
+      publicTokenExpiresAt: payload.publicTokenExpiresAt || null,
+      respondedAt: payload.respondedAt || null
+    }
+  });
 }
 
 async function notifyIncidentStatusChange(incident, previousStatus, nextStatus, note = '') {
@@ -369,7 +478,37 @@ async function attachHistory(incidents) {
   return incidents.map((incident) => serializeIncident(incident, historyByIncidentId.get(incident.id) || []));
 }
 
+async function notifyVehicleSubmissionApproved(submission) {
+  const recipient = recipientForVehicleSubmission(submission);
+  if (!recipient.email) return;
+  const subject = `Vehicle Approved: ${[submission.year, submission.make, submission.model].filter(Boolean).join(' ') || 'Your vehicle'}`;
+  const lines = [
+    `Hello ${recipient.name},`,
+    '',
+    'Your vehicle submission was approved and is now active in your host portal.',
+    `Vehicle: ${[submission.year, submission.make, submission.model].filter(Boolean).join(' ') || '-'}`,
+    submission.listing?.title ? `Listing: ${submission.listing.title}` : '',
+    submission.vehicle?.internalNumber ? `Fleet Number: ${submission.vehicle.internalNumber}` : '',
+    '',
+    'You can now manage pricing, availability, and host-only add-ons from your host app.'
+  ].filter(Boolean);
+
+  try {
+    await sendIssueEmail({ to: recipient.email, subject, lines });
+    await createVehicleSubmissionCommunication(submission.id, {
+      direction: 'OUTBOUND',
+      channel: 'EMAIL',
+      recipientType: 'HOST',
+      senderType: 'SYSTEM',
+      subject,
+      message: lines.join('\n')
+    });
+  } catch {}
+}
+
 export const issueCenterService = {
+  notifyHostVehicleSubmissionApproved: notifyVehicleSubmissionApproved,
+
   async getDashboard(user, input = {}) {
     const tenantScope = tenantWhereFor(user);
     const search = input?.q ? String(input.q).trim() : '';
@@ -401,11 +540,41 @@ export const issueCenterService = {
       take: 100
     });
 
-    const [openCount, reviewCount, resolvedCount, closedCount] = await Promise.all([
+    const submissionWhere = {
+      tenantId: tenantScope.tenantId || undefined,
+      ...(
+        search
+          ? {
+              OR: [
+                { make: { contains: search, mode: 'insensitive' } },
+                { model: { contains: search, mode: 'insensitive' } },
+                { plate: { contains: search, mode: 'insensitive' } },
+                { vin: { contains: search, mode: 'insensitive' } },
+                { hostProfile: { displayName: { contains: search, mode: 'insensitive' } } }
+              ]
+            }
+          : {}
+      )
+    };
+
+    const vehicleSubmissions = await prisma.hostVehicleSubmission.findMany({
+      where: submissionWhere,
+      include: vehicleSubmissionInclude(),
+      orderBy: [{ createdAt: 'desc' }],
+      take: 100
+    });
+
+    const [openCount, reviewCount, resolvedCount, closedCount, submissionPendingCount] = await Promise.all([
       prisma.tripIncident.count({ where: { trip: { ...tenantScope }, status: 'OPEN' } }),
       prisma.tripIncident.count({ where: { trip: { ...tenantScope }, status: 'UNDER_REVIEW' } }),
       prisma.tripIncident.count({ where: { trip: { ...tenantScope }, status: 'RESOLVED' } }),
-      prisma.tripIncident.count({ where: { trip: { ...tenantScope }, status: 'CLOSED' } })
+      prisma.tripIncident.count({ where: { trip: { ...tenantScope }, status: 'CLOSED' } }),
+      prisma.hostVehicleSubmission.count({
+        where: {
+          tenantId: tenantScope.tenantId || undefined,
+          status: { in: ['PENDING_REVIEW', 'PENDING_INFO'] }
+        }
+      })
     ]);
 
     return {
@@ -414,9 +583,11 @@ export const issueCenterService = {
         underReview: reviewCount,
         resolved: resolvedCount,
         closed: closedCount,
-        total: openCount + reviewCount + resolvedCount + closedCount
+        total: openCount + reviewCount + resolvedCount + closedCount,
+        vehicleApprovalsPending: submissionPendingCount
       },
-      incidents: await attachHistory(incidents)
+      incidents: await attachHistory(incidents),
+      vehicleSubmissions: vehicleSubmissions.map(serializeVehicleSubmission)
     };
   },
 
@@ -557,8 +728,77 @@ export const issueCenterService = {
     };
   },
 
+  async requestVehicleSubmissionInfo(user, id, payload = {}) {
+    const tenantScope = tenantWhereFor(user);
+    const submission = await prisma.hostVehicleSubmission.findFirst({
+      where: {
+        id,
+        ...(tenantScope.tenantId ? { tenantId: tenantScope.tenantId } : {})
+      },
+      include: vehicleSubmissionInclude()
+    });
+    if (!submission) throw new Error('Vehicle submission not found');
+
+    const recipient = recipientForVehicleSubmission(submission);
+    if (!recipient.email) throw new Error('Host email is not available for this vehicle submission');
+
+    const note = String(payload?.note || '').trim();
+    if (!note) throw new Error('note is required');
+
+    const token = crypto.randomBytes(24).toString('hex');
+    const expiresAt = new Date(Date.now() + 1000 * 60 * 60 * 24 * 5);
+    const link = issueResponseLink(token);
+    const subject = `More information needed for vehicle approval`;
+    const message = [
+      `Hello ${recipient.name},`,
+      '',
+      'Customer service needs more information before approving your vehicle submission.',
+      `Vehicle: ${[submission.year, submission.make, submission.model].filter(Boolean).join(' ') || '-'}`,
+      '',
+      `Representative note: ${note}`,
+      '',
+      `Reply here: ${link}`,
+      `This link expires on ${expiresAt.toLocaleString()}.`
+    ];
+
+    await sendIssueEmail({
+      to: recipient.email,
+      subject,
+      lines: message,
+      htmlExtra: `<div style="margin-top:16px"><a href="${link}" style="display:inline-block;padding:10px 16px;border-radius:999px;background:#7c3aed;color:#fff;text-decoration:none;font-weight:700">Reply To Vehicle Review</a></div>`
+    });
+
+    await prisma.hostVehicleSubmission.update({
+      where: { id: submission.id },
+      data: {
+        status: 'PENDING_INFO',
+        reviewNotes: note
+      }
+    });
+
+    await createVehicleSubmissionCommunication(submission.id, {
+      direction: 'OUTBOUND',
+      channel: 'EMAIL',
+      recipientType: 'HOST',
+      senderType: 'TENANT_USER',
+      senderRefId: user?.id || user?.sub || null,
+      subject,
+      message: note,
+      publicToken: token,
+      publicTokenExpiresAt: expiresAt
+    });
+
+    return {
+      ok: true,
+      recipientType: 'HOST',
+      email: recipient.email,
+      link,
+      expiresAt
+    };
+  },
+
   async getPublicResponsePrompt(token) {
-    const communication = await prisma.tripIncidentCommunication.findFirst({
+    const incidentCommunication = await prisma.tripIncidentCommunication.findFirst({
       where: {
         publicToken: String(token || '').trim(),
         publicTokenExpiresAt: { gt: new Date() }
@@ -569,18 +809,39 @@ export const issueCenterService = {
         }
       }
     });
-    if (!communication?.incident) throw new Error('Invalid or expired response link');
+    if (incidentCommunication?.incident) {
+      const incident = incidentCommunication.incident;
+      return {
+        caseType: 'TRIP_INCIDENT',
+        incident: serializeIncident(incident, (await attachHistory([incident]))[0]?.history || []),
+        request: serializeCommunication(incidentCommunication),
+        responseLink: issueResponseLink(incidentCommunication.publicToken)
+      };
+    }
 
-    const incident = communication.incident;
+    const submissionCommunication = await prisma.hostVehicleSubmissionCommunication.findFirst({
+      where: {
+        publicToken: String(token || '').trim(),
+        publicTokenExpiresAt: { gt: new Date() }
+      },
+      include: {
+        submission: {
+          include: vehicleSubmissionInclude()
+        }
+      }
+    });
+    if (!submissionCommunication?.submission) throw new Error('Invalid or expired response link');
+
     return {
-      incident: serializeIncident(incident, (await attachHistory([incident]))[0]?.history || []),
-      request: serializeCommunication(communication),
-      responseLink: issueResponseLink(communication.publicToken)
+      caseType: 'HOST_VEHICLE_SUBMISSION',
+      submission: serializeVehicleSubmission(submissionCommunication.submission),
+      request: serializeCommunication(submissionCommunication),
+      responseLink: issueResponseLink(submissionCommunication.publicToken)
     };
   },
 
   async submitPublicResponse(token, payload = {}) {
-    const communication = await prisma.tripIncidentCommunication.findFirst({
+    const incidentCommunication = await prisma.tripIncidentCommunication.findFirst({
       where: {
         publicToken: String(token || '').trim(),
         publicTokenExpiresAt: { gt: new Date() }
@@ -591,7 +852,78 @@ export const issueCenterService = {
         }
       }
     });
-    if (!communication?.incident) throw new Error('Invalid or expired response link');
+    if (incidentCommunication?.incident) {
+      const communication = incidentCommunication;
+      const note = String(payload?.message || '').trim();
+      if (!note) throw new Error('message is required');
+      const attachments = Array.isArray(payload?.attachments)
+        ? payload.attachments
+            .map((item) => ({
+              name: String(item?.name || 'document').trim(),
+              dataUrl: String(item?.dataUrl || '').trim()
+            }))
+            .filter((item) => item.dataUrl)
+            .slice(0, 6)
+        : [];
+
+      const recipientType = String(communication.recipientType || '').toUpperCase() === 'HOST' ? 'HOST' : 'GUEST';
+      const senderType = recipientType === 'HOST' ? 'HOST' : 'GUEST';
+
+      await createCommunication(communication.incidentId, {
+        direction: 'INBOUND',
+        channel: 'PORTAL',
+        recipientType,
+        senderType,
+        senderRefId: senderType === 'HOST'
+          ? communication.incident.trip?.hostProfile?.id || null
+          : communication.incident.trip?.guestCustomer?.id || null,
+        subject: `Issue reply from ${recipientType.toLowerCase()}`,
+        message: note,
+        attachments
+      });
+
+      await prisma.tripIncidentCommunication.update({
+        where: { id: communication.id },
+        data: {
+          respondedAt: new Date()
+        }
+      });
+
+      await createTimelineEvent(
+        communication.incident.tripId,
+        senderType,
+        senderType === 'HOST'
+          ? communication.incident.trip?.hostProfile?.id || null
+          : communication.incident.trip?.guestCustomer?.id || null,
+        'TRIP_INCIDENT_REPLY_SUBMITTED',
+        note,
+        {
+          incidentId: communication.incidentId,
+          recipientType,
+          attachmentCount: attachments.length
+        }
+      );
+
+      const refreshed = await prisma.tripIncident.findUnique({
+        where: { id: communication.incidentId },
+        include: incidentInclude()
+      });
+
+      return refreshed ? (await attachHistory([refreshed]))[0] : null;
+    }
+
+    const submissionCommunication = await prisma.hostVehicleSubmissionCommunication.findFirst({
+      where: {
+        publicToken: String(token || '').trim(),
+        publicTokenExpiresAt: { gt: new Date() }
+      },
+      include: {
+        submission: {
+          include: vehicleSubmissionInclude()
+        }
+      }
+    });
+    if (!submissionCommunication?.submission) throw new Error('Invalid or expired response link');
 
     const note = String(payload?.message || '').trim();
     if (!note) throw new Error('message is required');
@@ -605,50 +937,35 @@ export const issueCenterService = {
           .slice(0, 6)
       : [];
 
-    const recipientType = String(communication.recipientType || '').toUpperCase() === 'HOST' ? 'HOST' : 'GUEST';
-    const senderType = recipientType === 'HOST' ? 'HOST' : 'GUEST';
-
-    await createCommunication(communication.incidentId, {
+    await createVehicleSubmissionCommunication(submissionCommunication.submissionId, {
       direction: 'INBOUND',
       channel: 'PORTAL',
-      recipientType,
-      senderType,
-      senderRefId: senderType === 'HOST'
-        ? communication.incident.trip?.hostProfile?.id || null
-        : communication.incident.trip?.guestCustomer?.id || null,
-      subject: `Issue reply from ${recipientType.toLowerCase()}`,
+      recipientType: 'HOST',
+      senderType: 'HOST',
+      senderRefId: submissionCommunication.submission.hostProfileId,
+      subject: 'Vehicle approval reply from host',
       message: note,
       attachments
     });
 
-    await prisma.tripIncidentCommunication.update({
-      where: { id: communication.id },
+    await prisma.hostVehicleSubmissionCommunication.update({
+      where: { id: submissionCommunication.id },
       data: {
         respondedAt: new Date()
       }
     });
 
-    await createTimelineEvent(
-      communication.incident.tripId,
-      senderType,
-      senderType === 'HOST'
-        ? communication.incident.trip?.hostProfile?.id || null
-        : communication.incident.trip?.guestCustomer?.id || null,
-      'TRIP_INCIDENT_REPLY_SUBMITTED',
-      note,
-      {
-        incidentId: communication.incidentId,
-        recipientType,
-        attachmentCount: attachments.length
+    await prisma.hostVehicleSubmission.update({
+      where: { id: submissionCommunication.submissionId },
+      data: {
+        status: 'PENDING_REVIEW'
       }
-    );
-
-    const refreshed = await prisma.tripIncident.findUnique({
-      where: { id: communication.incidentId },
-      include: incidentInclude()
     });
 
-    return refreshed ? (await attachHistory([refreshed]))[0] : null;
+    return serializeVehicleSubmission(await prisma.hostVehicleSubmission.findUnique({
+      where: { id: submissionCommunication.submissionId },
+      include: vehicleSubmissionInclude()
+    }));
   },
 
   async createGuestIncident(input = {}) {
