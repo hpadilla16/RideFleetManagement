@@ -399,7 +399,8 @@ export const hostAppService = {
   },
 
   async createVehicleSubmission(user, payload = {}) {
-    const context = await resolveHostContext(user, null);
+    const requestedHostProfileId = payload?.hostProfileId ? String(payload.hostProfileId).trim() : null;
+    const context = await resolveHostContext(user, requestedHostProfileId || null);
     if (!context.hostProfile) throw new Error('No host profile is linked to this login yet');
 
     const tenantId = await resolveHostTenantId(context.hostProfile);

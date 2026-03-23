@@ -385,6 +385,7 @@ function HostAppInner({ token, me, logout }) {
         method: 'POST',
         body: JSON.stringify({
           ...submissionForm,
+          hostProfileId: isAdminViewer ? (selectedHostProfileId || host?.id || '') : undefined,
           year: submissionForm.year ? Number(submissionForm.year) : null,
           mileage: submissionForm.mileage ? Number(submissionForm.mileage) : 0,
           baseDailyRate: submissionForm.baseDailyRate ? Number(submissionForm.baseDailyRate) : 0,
