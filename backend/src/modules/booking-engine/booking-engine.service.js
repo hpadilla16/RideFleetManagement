@@ -456,6 +456,55 @@ async function resolvePublicTenant({ tenantSlug, tenantId } = {}) {
   });
 }
 
+async function resolveActiveLocation(locationId) {
+  if (!locationId) return null;
+  return prisma.location.findFirst({
+    where: { id: String(locationId), isActive: true },
+    select: { id: true, tenantId: true, name: true, city: true, state: true, taxRate: true, locationConfig: true }
+  });
+}
+
+async function resolvePublicTenantContext(input = {}) {
+  const directTenant = await resolvePublicTenant({
+    tenantSlug: input?.tenantSlug,
+    tenantId: input?.tenantId
+  });
+  if (directTenant) return directTenant;
+
+  const location = await resolveActiveLocation(input?.pickupLocationId || input?.locationId || input?.returnLocationId);
+  if (location?.tenantId) {
+    return prisma.tenant.findFirst({
+      where: { id: location.tenantId, status: 'ACTIVE' }
+    });
+  }
+
+  if (input?.vehicleTypeId) {
+    const vehicleType = await prisma.vehicleType.findFirst({
+      where: { id: String(input.vehicleTypeId) },
+      select: { tenantId: true }
+    });
+    if (vehicleType?.tenantId) {
+      return prisma.tenant.findFirst({
+        where: { id: vehicleType.tenantId, status: 'ACTIVE' }
+      });
+    }
+  }
+
+  if (input?.listingId) {
+    const listing = await prisma.hostVehicleListing.findFirst({
+      where: { id: String(input.listingId) },
+      select: { tenantId: true }
+    });
+    if (listing?.tenantId) {
+      return prisma.tenant.findFirst({
+        where: { id: listing.tenantId, status: 'ACTIVE' }
+      });
+    }
+  }
+
+  return null;
+}
+
 async function rentalAvailabilityCount({ tenantId, vehicleTypeId, pickupAt, returnAt }) {
   const vehicles = await prisma.vehicle.findMany({
     where: {
@@ -489,26 +538,72 @@ export const bookingEngineService = {
     const tenant = await resolvePublicTenant({ tenantSlug, tenantId });
 
     if (!tenant) {
-      const tenants = await prisma.tenant.findMany({
-        where: { status: 'ACTIVE' },
-        select: {
-          id: true,
-          name: true,
-          slug: true,
-          carSharingEnabled: true
-        },
-        orderBy: [{ name: 'asc' }]
-      });
+      const [tenants, locations, vehicleTypes, featuredListings] = await Promise.all([
+        prisma.tenant.findMany({
+          where: { status: 'ACTIVE' },
+          select: {
+            id: true,
+            name: true,
+            slug: true,
+            carSharingEnabled: true
+          },
+          orderBy: [{ name: 'asc' }]
+        }),
+        prisma.location.findMany({
+          where: {
+            isActive: true,
+            tenant: { status: 'ACTIVE' }
+          },
+          select: { id: true, tenantId: true, name: true, city: true, state: true, taxRate: true },
+          orderBy: [{ name: 'asc' }]
+        }),
+        prisma.vehicleType.findMany({
+          where: {
+            tenant: { status: 'ACTIVE' }
+          },
+          select: { id: true, tenantId: true, code: true, name: true, description: true, imageUrl: true },
+          orderBy: [{ name: 'asc' }]
+        }),
+        prisma.hostVehicleListing.findMany({
+          where: {
+            status: 'PUBLISHED',
+            tenant: { status: 'ACTIVE' }
+          },
+          include: {
+            hostProfile: { select: publicHostSelect() },
+            vehicle: { select: { id: true, make: true, model: true, year: true, color: true, plate: true, vehicleType: { select: { imageUrl: true } } } },
+            location: { select: { id: true, name: true, city: true, state: true } }
+          },
+          orderBy: [{ publishedAt: 'desc' }, { createdAt: 'desc' }],
+          take: 8
+        })
+      ]);
 
       return {
         tenant: null,
         tenants,
-        locations: [],
-        vehicleTypes: [],
-        featuredListings: [],
+        locations,
+        vehicleTypes,
+        featuredListings: featuredListings.map((listing) => ({
+          id: listing.id,
+          slug: listing.slug,
+          title: listing.title,
+          shortDescription: listing.shortDescription,
+          baseDailyRate: money(listing.baseDailyRate),
+          cleaningFee: money(listing.cleaningFee),
+          deliveryFee: money(listing.deliveryFee),
+          instantBook: !!listing.instantBook,
+          host: publicHostSummary(listing.hostProfile),
+          vehicle: listing.vehicle,
+          location: listing.location,
+          ...bookingImageSet({
+            vehicleTypeImageUrl: listing.vehicle?.vehicleType?.imageUrl,
+            listingPhotos: listing.photosJson
+          })
+        })),
         bookingModes: {
           rental: true,
-          carSharing: false
+          carSharing: tenants.some((row) => !!row.carSharingEnabled)
         }
       };
     }
@@ -516,12 +611,12 @@ export const bookingEngineService = {
     const [locations, vehicleTypes, featuredListings, tenants] = await Promise.all([
       prisma.location.findMany({
         where: { tenantId: tenant.id, isActive: true },
-        select: { id: true, name: true, city: true, state: true, taxRate: true },
+        select: { id: true, tenantId: true, name: true, city: true, state: true, taxRate: true },
         orderBy: [{ name: 'asc' }]
       }),
       prisma.vehicleType.findMany({
         where: { tenantId: tenant.id },
-        select: { id: true, code: true, name: true, description: true, imageUrl: true },
+        select: { id: true, tenantId: true, code: true, name: true, description: true, imageUrl: true },
         orderBy: [{ name: 'asc' }]
       }),
       prisma.hostVehicleListing.findMany({
@@ -581,9 +676,6 @@ export const bookingEngineService = {
   },
 
   async searchRental({ tenantSlug, tenantId, pickupLocationId, pickupAt, returnAt }) {
-    const tenant = await resolvePublicTenant({ tenantSlug, tenantId });
-    if (!tenant) throw new Error('tenant is required');
-
     const pickupDate = toDate(pickupAt);
     const returnDate = toDate(returnAt);
     if (!pickupDate || !returnDate || pickupDate >= returnDate) {
@@ -591,19 +683,17 @@ export const bookingEngineService = {
     }
     if (!pickupLocationId) throw new Error('pickupLocationId is required');
 
-    const rentalDays = ceilTripDays(pickupDate, returnDate);
-    const [vehicleTypes, location] = await Promise.all([
-      prisma.vehicleType.findMany({
-        where: { tenantId: tenant.id },
-        orderBy: [{ name: 'asc' }]
-      }),
-      prisma.location.findFirst({
-        where: { id: String(pickupLocationId), tenantId: tenant.id, isActive: true },
-        select: { id: true, name: true, city: true, state: true, taxRate: true, locationConfig: true }
-      })
-    ]);
-
+    const location = await resolveActiveLocation(pickupLocationId);
     if (!location) throw new Error('Pickup location not found');
+
+    const tenant = await resolvePublicTenantContext({ tenantSlug, tenantId, pickupLocationId: location.id });
+    if (!tenant) throw new Error('tenant is required');
+
+    const rentalDays = ceilTripDays(pickupDate, returnDate);
+    const vehicleTypes = await prisma.vehicleType.findMany({
+      where: { tenantId: tenant.id },
+      orderBy: [{ name: 'asc' }]
+    });
 
     const results = [];
     for (const vehicleType of vehicleTypes) {
@@ -678,15 +768,15 @@ export const bookingEngineService = {
   },
 
   async searchCarSharing({ tenantSlug, tenantId, pickupAt, returnAt, locationId }) {
-    const tenant = await resolvePublicTenant({ tenantSlug, tenantId });
-    if (!tenant) throw new Error('tenant is required');
-    if (!tenant.carSharingEnabled) throw new Error('Car sharing is not enabled for this tenant');
-
     const pickupDate = toDate(pickupAt);
     const returnDate = toDate(returnAt);
     if (!pickupDate || !returnDate || pickupDate >= returnDate) {
       throw new Error('pickupAt and returnAt must be valid and returnAt must be after pickupAt');
     }
+
+    const tenant = await resolvePublicTenantContext({ tenantSlug, tenantId, locationId });
+    if (!tenant) throw new Error('Choose a valid location before searching car sharing');
+    if (!tenant.carSharingEnabled) throw new Error('Car sharing is not enabled for this location yet');
 
     const listings = await prisma.hostVehicleListing.findMany({
       where: {
@@ -812,9 +902,13 @@ export const bookingEngineService = {
   },
 
   async createPublicBooking(input = {}) {
-    const tenant = await resolvePublicTenant({
+    const tenant = await resolvePublicTenantContext({
       tenantSlug: input?.tenantSlug,
-      tenantId: input?.tenantId
+      tenantId: input?.tenantId,
+      pickupLocationId: input?.pickupLocationId,
+      returnLocationId: input?.returnLocationId,
+      vehicleTypeId: input?.vehicleTypeId,
+      listingId: input?.listingId
     });
     if (!tenant) throw new Error('tenant is required');
 

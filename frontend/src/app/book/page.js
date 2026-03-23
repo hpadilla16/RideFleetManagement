@@ -239,18 +239,22 @@ export default function PublicBookingPage() {
     setInsuranceSelection(buildInsuranceSelectionState(selectedResult, searchMode));
   }, [selectedResult, searchMode]);
 
-  const selectedTenant = bootstrap?.selectedTenant || null;
   const locations = bootstrap?.locations || [];
   const vehicleTypes = bootstrap?.vehicleTypes || [];
   const featuredListings = bootstrap?.featuredCarSharingListings || [];
   const bookingStage = uiStep === 'checkout' ? 'checkout' : uiStep === 'select' ? 'select' : 'search';
-
-  const summaryCards = useMemo(() => ([
-    { label: 'Locations', value: locations.length },
-    { label: 'Vehicle Types', value: vehicleTypes.length },
-    { label: 'Rental Booking', value: 'Available' },
-    { label: 'Car Sharing', value: selectedTenant?.carSharingEnabled ? 'Available' : 'Not Yet' }
-  ]), [locations.length, vehicleTypes.length, selectedTenant?.carSharingEnabled]);
+  const selectedPickupLocation = useMemo(
+    () => locations.find((location) => location.id === pickupLocationId) || null,
+    [locations, pickupLocationId]
+  );
+  const availableReturnLocations = useMemo(() => {
+    if (!selectedPickupLocation?.tenantId) return locations;
+    return locations.filter((location) => location.tenantId === selectedPickupLocation.tenantId);
+  }, [locations, selectedPickupLocation?.tenantId]);
+  const availableVehicleTypes = useMemo(() => {
+    if (!selectedPickupLocation?.tenantId) return vehicleTypes;
+    return vehicleTypes.filter((vehicleType) => vehicleType.tenantId === selectedPickupLocation.tenantId);
+  }, [selectedPickupLocation?.tenantId, vehicleTypes]);
 
   const goToStep = (step) => {
     setUiStep(step);
@@ -263,6 +267,18 @@ export default function PublicBookingPage() {
     setSelectedResult(null);
     goToStep(results?.results?.length ? 'select' : 'search');
   };
+
+  useEffect(() => {
+    if (!availableReturnLocations.some((location) => location.id === returnLocationId)) {
+      setReturnLocationId(availableReturnLocations[0]?.id || '');
+    }
+  }, [availableReturnLocations, returnLocationId]);
+
+  useEffect(() => {
+    if (!availableVehicleTypes.some((vehicleType) => vehicleType.id === vehicleTypeId)) {
+      setVehicleTypeId('');
+    }
+  }, [availableVehicleTypes, vehicleTypeId]);
 
   const chosenAdditionalServices = useMemo(() => {
     if (!selectedResult?.additionalServices?.length) return [];
@@ -362,20 +378,6 @@ export default function PublicBookingPage() {
                 <span className="hero-pill">Rental + Car Sharing</span>
               </div>
             </div>
-            <div className="glass card section-card">
-              <div className="section-title">Public Booking Snapshot</div>
-              <div className="metric-grid">
-                {summaryCards.map((item) => (
-                  <div key={item.label} className="metric-card">
-                    <span className="label">{item.label}</span>
-                    <strong>{item.value}</strong>
-                  </div>
-                ))}
-              </div>
-              <div className="surface-note">
-                Search by location, pick the best fit, and move through each booking step without one long scroll.
-              </div>
-            </div>
           </div>
         </section>
 
@@ -470,20 +472,20 @@ export default function PublicBookingPage() {
                 <>
                   <div>
                     <div className="label">Return Location</div>
-                    <select value={returnLocationId} onChange={(event) => setReturnLocationId(event.target.value)}>
-                      {locations.map((location) => (
-                        <option key={location.id} value={location.id}>{location.name}</option>
-                      ))}
-                    </select>
+                        <select value={returnLocationId} onChange={(event) => setReturnLocationId(event.target.value)}>
+                          {availableReturnLocations.map((location) => (
+                            <option key={location.id} value={location.id}>{location.name}</option>
+                          ))}
+                        </select>
                   </div>
                   <div>
                     <div className="label">Vehicle Type</div>
-                    <select value={vehicleTypeId} onChange={(event) => setVehicleTypeId(event.target.value)}>
-                      <option value="">All eligible classes</option>
-                      {vehicleTypes.map((vehicleType) => (
-                        <option key={vehicleType.id} value={vehicleType.id}>{vehicleType.name}</option>
-                      ))}
-                    </select>
+                        <select value={vehicleTypeId} onChange={(event) => setVehicleTypeId(event.target.value)}>
+                          <option value="">All eligible classes</option>
+                          {availableVehicleTypes.map((vehicleType) => (
+                            <option key={vehicleType.id} value={vehicleType.id}>{vehicleType.name}</option>
+                          ))}
+                        </select>
                   </div>
                 </>
               ) : null}
@@ -504,7 +506,7 @@ export default function PublicBookingPage() {
                 <div className="section-title">Discovery Feed</div>
                 <p className="ui-muted">Featured availability and host trust signals for the public booking experience.</p>
               </div>
-              {selectedTenant?.carSharingEnabled ? <span className="status-chip good">Car Sharing Live</span> : <span className="status-chip warn">Rental Only</span>}
+              <span className="status-chip neutral">Featured Vehicles</span>
             </div>
             {featuredListings.length ? (
               <div className="stack">
