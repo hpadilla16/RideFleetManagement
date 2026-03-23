@@ -116,6 +116,19 @@ export const publicBookingService = {
         host: result.listing.host || null,
         vehicle: result.listing.vehicle || null,
         location: result.listing.location || null,
+        additionalServices: (result.listing.additionalServices || []).map((service) => ({
+          serviceId: service.serviceId,
+          code: service.code,
+          name: service.name,
+          description: service.description || '',
+          unitLabel: service.unitLabel || 'Unit',
+          pricingMode: service.pricingMode || 'FLAT',
+          quantity: Number(service.quantity || 1),
+          rate: money(service.rate),
+          total: money(service.total),
+          taxable: !!service.taxable,
+          mandatory: !!service.mandatory
+        })),
         primaryImageUrl: result.listing.primaryImageUrl || '',
         imageUrls: result.listing.imageUrls || [],
         quote: {

@@ -416,7 +416,9 @@ function HostAppInner({ token, me, logout }) {
               <div className="metric-card"><span className="label">Fleet Pending</span><strong>{dashboard?.metrics?.pendingVehicleApprovals || 0}</strong></div>
             </div>
             {host ? (
-              <div className="surface-note"><strong>{host.displayName}</strong><br />{[host.tenant?.name || 'No tenant', host.status].join(' · ')}<br />{host.payoutEnabled ? 'Payouts enabled' : 'Payouts not enabled yet'}</div>
+              <div className="surface-note">
+                <strong>{host.displayName}</strong><br />{[host.tenant?.name || 'No tenant', host.status].join(' · ')}<br />{host.payoutEnabled ? 'Payouts enabled' : 'Payouts not enabled yet'}<br />{host.resolvedTenantId ? 'Tenant scope ready' : 'Tenant setup still missing'}
+              </div>
             ) : (
               <div className="surface-note">{loading ? 'Loading host profile...' : 'No host profile is linked to this login yet. Admins can still use the selector below to support hosts.'}</div>
             )}
@@ -448,6 +450,11 @@ function HostAppInner({ token, me, logout }) {
             <div><div className="section-title">Add Vehicle To My Fleet</div><p className="ui-muted">Submit a host-owned vehicle, documents, inspection proof, pricing, and host-only add-ons for review.</p></div>
             <span className="status-chip neutral">{dashboard?.metrics?.pendingVehicleApprovals || 0} pending</span>
           </div>
+          {!vehicleTypes.length ? (
+            <div className="surface-note" style={{ color: '#92400e' }}>
+              Vehicle types are not showing for this host yet. This usually means the host profile still needs tenant scope or that no vehicle classes are configured for that tenant.
+            </div>
+          ) : null}
           <form className="stack" onSubmit={submitVehicleSubmission}>
             <div className="form-grid-3">
               <div className="stack">
@@ -599,7 +606,7 @@ function HostAppInner({ token, me, logout }) {
       <section className="split-panel" style={{ marginTop: 18 }}>
         <section className="glass card-lg section-card">
           <div className="row-between">
-            <div><div className="section-title">My Listings</div><p className="ui-muted">Edit the host-facing listing details and pricing without opening the full car sharing console.</p></div>
+            <div><div className="section-title">My Fleet Vehicles</div><p className="ui-muted">Edit rates, host add-ons, photos, and listing details for active host vehicles.</p></div>
             <span className="status-chip neutral">{metrics.instantBookListings} instant book</span>
           </div>
           {listings.length ? (
@@ -625,8 +632,12 @@ function HostAppInner({ token, me, logout }) {
                   ) : null}
                   <div className="metric-grid">
                     <div className="metric-card"><span className="label">Daily Rate</span><strong>{formatMoney(listing.baseDailyRate)}</strong></div>
+                    <div className="metric-card"><span className="label">Cleaning Fee</span><strong>{formatMoney(listing.cleaningFee)}</strong></div>
                     <div className="metric-card"><span className="label">Instant Book</span><strong>{listing.instantBook ? 'On' : 'Off'}</strong></div>
                     <div className="metric-card"><span className="label">Min Stay</span><strong>{listing.minTripDays} day(s)</strong></div>
+                  </div>
+                  <div className="surface-note" style={{ color: '#55456f', lineHeight: 1.5 }}>
+                    Change daily rate, cleaning fee, delivery fee, deposit, host add-ons, and photos from the editor below.
                   </div>
                   <div className="inline-actions">
                     <button type="button" onClick={() => setListingEdit({
@@ -634,7 +645,7 @@ function HostAppInner({ token, me, logout }) {
                       baseDailyRate: String(listing.baseDailyRate ?? ''), cleaningFee: String(listing.cleaningFee ?? ''), deliveryFee: String(listing.deliveryFee ?? ''),
                       securityDeposit: String(listing.securityDeposit ?? ''), instantBook: !!listing.instantBook, minTripDays: String(listing.minTripDays ?? 1),
                       maxTripDays: listing.maxTripDays ? String(listing.maxTripDays) : '', tripRules: listing.tripRules || '', photoUrls: parsePhotoList(listing.photosJson), addOns: parseAddOns(listing.addOnsJson)
-                    })}>Edit Listing</button>
+                    })}>Edit Rates And Listing</button>
                     <button type="button" className="button-subtle" onClick={() => loadAvailability(listing.id)}>Availability</button>
                   </div>
                 </div>
@@ -645,7 +656,7 @@ function HostAppInner({ token, me, logout }) {
 
         <section className="glass card-lg section-card">
           <div className="row-between">
-            <div><div className="section-title">Listing Editor</div><p className="ui-muted">Host-safe edit surface for pricing, availability mode, and trip rules.</p></div>
+            <div><div className="section-title">Rates And Listing Editor</div><p className="ui-muted">This is where hosts can change daily rate, cleaning fee, delivery fee, deposit, host add-ons, and listing photos.</p></div>
             {listingEdit.id ? <button type="button" className="button-subtle" onClick={() => setListingEdit(EMPTY_LISTING_EDIT)}>Clear</button> : null}
           </div>
           {listingEdit.id ? (

@@ -58,6 +58,32 @@ function normalizePhotoList(value, limit = 6) {
     .slice(0, limit);
 }
 
+function normalizeHostAddOns(value) {
+  return parseJsonArray(value)
+    .map((item, index) => {
+      const name = String(item?.name || '').trim();
+      const description = String(item?.description || '').trim();
+      const rate = money(item?.price || 0);
+      if (!name || rate <= 0) return null;
+      return {
+        serviceId: String(item?.id || `${name.toLowerCase().replace(/[^a-z0-9]+/g, '-') || 'addon'}-${index + 1}`),
+        code: null,
+        name,
+        description,
+        chargeType: 'UNIT',
+        unitLabel: 'Unit',
+        pricingMode: 'FLAT',
+        quantity: 1,
+        rate,
+        total: rate,
+        taxable: false,
+        mandatory: false,
+        source: 'HOST_ADDON'
+      };
+    })
+    .filter(Boolean);
+}
+
 function bookingImageSet({ vehicleTypeImageUrl, listingPhotos }) {
   const photos = normalizePhotoList(listingPhotos);
   if (photos.length) {
@@ -662,6 +688,7 @@ export const bookingEngineService = {
           host: listing.hostProfile,
           vehicle: listing.vehicle,
           location: listing.location,
+          additionalServices: normalizeHostAddOns(listing.addOnsJson),
           ...bookingImageSet({
             vehicleTypeImageUrl: listing.vehicle?.vehicleType?.imageUrl,
             listingPhotos: listing.photosJson
@@ -954,6 +981,29 @@ export const bookingEngineService = {
       };
     }
 
+    const search = await this.searchCarSharing({
+      tenantId: tenant.id,
+      pickupAt: input?.pickupAt,
+      returnAt: input?.returnAt,
+      locationId: input?.pickupLocationId || null
+    });
+    const selected = (search.results || []).find((row) => row.listing?.id === String(input?.listingId || ''));
+    if (!selected) throw new Error('Selected car sharing listing is no longer available');
+    const requestedServices = Array.isArray(input?.additionalServices) ? input.additionalServices : [];
+    const normalizedChosenServices = requestedServices
+      .map((row) => {
+        const serviceId = String(row?.serviceId || '').trim();
+        const match = (selected.listing?.additionalServices || []).find((service) => service.serviceId === serviceId);
+        if (!match) return null;
+        const quantity = Math.max(1, Number(row?.quantity ?? match.quantity ?? 1) || 1);
+        return {
+          ...match,
+          quantity,
+          total: money(Number(match.rate || 0) * quantity)
+        };
+      })
+      .filter(Boolean);
+
     const trip = await carSharingService.createTrip({
       tenantId: tenant.id,
       listingId: input?.listingId,
@@ -964,6 +1014,25 @@ export const bookingEngineService = {
       returnLocationId: input?.returnLocationId || input?.pickupLocationId || null,
       notes: '[PUBLIC BOOKING] Created from booking web'
     }, { tenantId: tenant.id });
+
+    if (trip?.reservation && normalizedChosenServices.length) {
+      await prisma.reservationCharge.createMany({
+        data: normalizedChosenServices.map((service, idx) => ({
+          reservationId: trip.reservation.id,
+          code: service.code,
+          name: service.name,
+          chargeType: service.chargeType || 'UNIT',
+          quantity: Number(service.quantity || 1),
+          rate: Number(service.rate || 0),
+          total: Number(service.total || 0),
+          taxable: !!service.taxable,
+          selected: true,
+          sortOrder: idx,
+          source: 'HOST_ADDON',
+          sourceRefId: service.serviceId
+        }))
+      });
+    }
 
     const nextActions = trip?.reservation
       ? {
@@ -1010,6 +1079,7 @@ export const bookingEngineService = {
         reservationNumber: trip.reservation.reservationNumber,
         status: trip.reservation.status
       } : null,
+      additionalServices: normalizedChosenServices,
       nextActions
     };
   },

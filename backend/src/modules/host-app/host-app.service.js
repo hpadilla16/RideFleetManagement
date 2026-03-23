@@ -112,6 +112,26 @@ async function resolveHostContext(user, requestedHostProfileId) {
   };
 }
 
+async function resolveHostTenantId(hostProfile) {
+  const directTenantId = hostProfile?.tenantId || hostProfile?.tenant?.id || hostProfile?.user?.tenantId || null;
+  if (directTenantId) return directTenantId;
+
+  const [listing, submission] = await Promise.all([
+    prisma.hostVehicleListing.findFirst({
+      where: { hostProfileId: hostProfile?.id || '__never__' },
+      select: { tenantId: true },
+      orderBy: [{ createdAt: 'desc' }]
+    }),
+    prisma.hostVehicleSubmission.findFirst({
+      where: { hostProfileId: hostProfile?.id || '__never__' },
+      select: { tenantId: true },
+      orderBy: [{ createdAt: 'desc' }]
+    })
+  ]);
+
+  return listing?.tenantId || submission?.tenantId || null;
+}
+
 function hostMetrics(listings, trips) {
   const activeListings = listings.filter((row) => String(row.status || '').toUpperCase() === 'PUBLISHED').length;
   const instantBookListings = listings.filter((row) => !!row.instantBook).length;
@@ -187,13 +207,15 @@ export const hostAppService = {
       orderBy: [{ createdAt: 'desc' }]
     });
 
+    const hostTenantId = await resolveHostTenantId(context.hostProfile);
+
     const [vehicleTypes, locations, submissions] = await Promise.all([
       prisma.vehicleType.findMany({
-        where: { tenantId: context.hostProfile.tenantId || undefined },
+        where: hostTenantId ? { tenantId: hostTenantId } : { id: '__never__' },
         orderBy: [{ name: 'asc' }]
       }),
       prisma.location.findMany({
-        where: { tenantId: context.hostProfile.tenantId || undefined, isActive: true },
+        where: hostTenantId ? { tenantId: hostTenantId, isActive: true } : { id: '__never__' },
         orderBy: [{ name: 'asc' }]
       }),
       prisma.hostVehicleSubmission.findMany({
@@ -225,6 +247,7 @@ export const hostAppService = {
         payoutProvider: context.hostProfile.payoutProvider || '',
         payoutAccountRef: context.hostProfile.payoutAccountRef || '',
         payoutEnabled: !!context.hostProfile.payoutEnabled,
+        resolvedTenantId: hostTenantId,
         tenant: context.hostProfile.tenant
           ? {
               id: context.hostProfile.tenant.id,
@@ -379,7 +402,7 @@ export const hostAppService = {
     const context = await resolveHostContext(user, null);
     if (!context.hostProfile) throw new Error('No host profile is linked to this login yet');
 
-    const tenantId = context.hostProfile.tenantId || null;
+    const tenantId = await resolveHostTenantId(context.hostProfile);
     if (!tenantId) throw new Error('Host tenant is required');
 
     const vehicleTypeId = String(payload?.vehicleTypeId || '').trim();

@@ -30,7 +30,6 @@ function normalizeImageList(value) {
 }
 
 function buildServiceSelectionState(result, mode) {
-  if (mode !== 'RENTAL') return {};
   return Object.fromEntries(
     (result?.additionalServices || []).map((service) => [
       service.serviceId,
@@ -235,13 +234,16 @@ export default function PublicBookingPage() {
   ]), [bootstrap?.tenants?.length, locations.length, vehicleTypes.length, selectedTenant?.carSharingEnabled]);
 
   const chosenAdditionalServices = useMemo(() => {
-    if (searchMode !== 'RENTAL' || !selectedResult?.additionalServices?.length) return [];
+    if (!selectedResult?.additionalServices?.length) return [];
+    const bookingDays = searchMode === 'RENTAL'
+      ? Number(selectedResult?.quote?.days || 1)
+      : Number(selectedResult?.quote?.tripDays || 1);
     return selectedResult.additionalServices
       .filter((service) => selectedServices[service.serviceId]?.selected || service.mandatory)
       .map((service) => {
         const quantity = Math.max(1, Number(selectedServices[service.serviceId]?.quantity ?? service.quantity ?? 1) || 1);
         const total = service.pricingMode === 'PER_DAY'
-          ? Number(service.rate || 0) * Number(selectedResult?.quote?.days || 1) * quantity
+          ? Number(service.rate || 0) * bookingDays * quantity
           : Number(service.rate || 0) * quantity;
         return {
           ...service,
@@ -598,7 +600,8 @@ export default function PublicBookingPage() {
                       imageUrls={result.imageUrls}
                       hints={[
                         result.instantBook ? 'Instant book' : 'Approval flow',
-                        `${Math.max(1, Number(result.minTripDays || 1))}+ day minimum`
+                        `${Math.max(1, Number(result.minTripDays || 1))}+ day minimum`,
+                        ...(result.additionalServices?.length ? [`${result.additionalServices.length} host add-on${result.additionalServices.length === 1 ? '' : 's'}`] : [])
                       ]}
                       quote={[
                         { label: 'Daily Rate', value: fmtMoney(result.quote.subtotal / Math.max(1, result.quote.tripDays)) },
@@ -766,11 +769,11 @@ export default function PublicBookingPage() {
                     </div>
                   </div>
                 ) : null}
-                {searchMode === 'RENTAL' && selectedResult?.additionalServices?.length ? (
+                {selectedResult?.additionalServices?.length ? (
                   <div className="stack" style={{ marginBottom: 18 }}>
                     <div>
-                      <div className="section-title" style={{ fontSize: 16 }}>Additional Services</div>
-                      <p className="ui-muted">Add optional extras before the customer creates the reservation.</p>
+                      <div className="section-title" style={{ fontSize: 16 }}>{searchMode === 'RENTAL' ? 'Additional Services' : 'Vehicle Add-Ons'}</div>
+                      <p className="ui-muted">{searchMode === 'RENTAL' ? 'Add optional extras before the customer creates the reservation.' : 'Choose host-provided extras for this specific vehicle before creating the trip request.'}</p>
                     </div>
                     <div className="stack">
                       {selectedResult.additionalServices.map((service) => {
@@ -779,7 +782,7 @@ export default function PublicBookingPage() {
                           quantity: Math.max(1, Number(service.quantity || 1) || 1)
                         };
                         const serviceTotal = service.pricingMode === 'PER_DAY'
-                          ? Number(service.rate || 0) * Number(selectedResult?.quote?.days || 1) * Number(serviceState.quantity || 1)
+                          ? Number(service.rate || 0) * Number(searchMode === 'RENTAL' ? selectedResult?.quote?.days || 1 : selectedResult?.quote?.tripDays || 1) * Number(serviceState.quantity || 1)
                           : Number(service.rate || 0) * Number(serviceState.quantity || 1);
                         return (
                           <div key={service.serviceId} className="surface-note" style={{ display: 'grid', gap: 12 }}>
@@ -837,7 +840,7 @@ export default function PublicBookingPage() {
                               <div>
                                 <div className="label">Billing</div>
                                 <input
-                                  value={service.pricingMode === 'PER_DAY' ? `Per day x ${selectedResult?.quote?.days || 1} day(s)` : 'Flat'}
+                                  value={service.pricingMode === 'PER_DAY' ? `Per day x ${searchMode === 'RENTAL' ? selectedResult?.quote?.days || 1 : selectedResult?.quote?.tripDays || 1} day(s)` : 'Flat'}
                                   disabled
                                 />
                               </div>
@@ -852,9 +855,11 @@ export default function PublicBookingPage() {
                     </div>
                   </div>
                 ) : null}
-                {searchMode === 'RENTAL' && !selectedResult?.additionalServices?.length ? (
+                {!selectedResult?.additionalServices?.length ? (
                   <div className="surface-note" style={{ marginBottom: 18 }}>
-                    No online additional services are configured for this rental yet. In Settings &gt; Additional Services, make sure the service is active, matches this location/vehicle type, and has Display Online enabled.
+                    {searchMode === 'RENTAL'
+                      ? 'No online additional services are configured for this rental yet. In Settings > Additional Services, make sure the service is active, matches this location/vehicle type, and has Display Online enabled.'
+                      : 'No host add-ons are configured for this vehicle yet.'}
                   </div>
                 ) : null}
 
@@ -917,12 +922,10 @@ export default function PublicBookingPage() {
                             returnLocationId,
                             vehicleTypeId: searchMode === 'RENTAL' ? selectedResult?.vehicleType?.id : null,
                             listingId: searchMode === 'CAR_SHARING' ? selectedResult?.id : null,
-                            additionalServices: searchMode === 'RENTAL'
-                              ? chosenAdditionalServices.map((service) => ({
-                                  serviceId: service.serviceId,
-                                  quantity: service.quantity
-                                }))
-                              : [],
+                            additionalServices: chosenAdditionalServices.map((service) => ({
+                              serviceId: service.serviceId,
+                              quantity: service.quantity
+                            })),
                             insuranceSelection: searchMode === 'RENTAL'
                               ? {
                                   selectedPlanCode: selectedInsurancePlan?.code || '',
