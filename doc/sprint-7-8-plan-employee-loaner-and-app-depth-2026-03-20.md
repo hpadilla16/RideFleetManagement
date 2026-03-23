@@ -240,6 +240,34 @@ Deepen all three app surfaces and extend dealership loaner workflows.
 - guest, host, and employee surfaces feel like real apps, not just reused screens
 - dealership loaner flow can be demoed end-to-end in a service context
 
+## Update 2026-03-23
+
+`Sprint 7` delivered materially more than the original base plan:
+
+- `employee app foundation` plus mixed ops lanes
+- `guest app depth` plus downloads and continuity
+- `host app depth` plus approval workflow and ratings
+- `issue center` plus communications and info requests
+- `dealership loaner` foundation and workflow depth
+- `dealer invoice / PO / monthly packet`
+
+Because of that, `Sprint 8` should now bias harder toward:
+
+- `guest app` depth and polish
+- `host app` depth and polish
+- `employee app` compact operations polish
+- `marketplace trust` and listing quality
+
+The next competitive gap to close is not raw module count.
+
+The next competitive gap is:
+
+- mobile execution
+- listing quality
+- trust signals
+- notification timing
+- host and guest usability
+
 ## Product Architecture Direction
 
 Do not fork the platform into separate business engines.

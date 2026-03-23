@@ -259,6 +259,50 @@ Y debe cubrir:
 - host trip actions
 - delivery/collection mobile ops
 
+## Actualizacion 2026-03-23
+
+Despues del cierre practico de `Sprint 7`, la plataforma ya tiene una base mucho mas fuerte en:
+
+- booking web
+- guest app
+- host app
+- employee app
+- dealership loaner
+- issue/dispute center
+- host reviews and trust
+
+La siguiente brecha competitiva principal ya no es el backend core.
+
+La siguiente brecha principal es:
+
+- mobile execution
+- listing quality
+- trust signals
+- communication polish
+- day-to-day usability para guest y host
+
+### Ajuste recomendado para Sprint 8
+
+`Sprint 8` debe priorizar:
+
+1. `guest app` depth y polish
+2. `host app` depth y polish
+3. `employee app` compact operations polish
+4. `marketplace trust`:
+   - host ratings
+   - reviews
+   - richer listing presentation
+   - better image and add-on presentation
+5. `notifications and comms` cleanup
+
+### Resultado esperado de Sprint 8
+
+Un demo donde:
+
+- el guest reserva y gestiona el trip desde phone
+- el host administra listing, pricing, disponibilidad, issues y reputacion desde phone
+- el employee opera rental, loaner y disputes desde un hub compacto
+
 #### Sprint 12
 
 - polish final:
