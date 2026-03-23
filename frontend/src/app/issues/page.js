@@ -11,7 +11,8 @@ const EMPTY_EDIT = {
   title: '',
   description: '',
   amountResolved: '',
-  note: ''
+  note: '',
+  history: []
 };
 
 function formatMoney(value) {
@@ -32,6 +33,55 @@ function toneClass(status) {
   if (['RESOLVED', 'CLOSED'].includes(current)) return 'status-chip good';
   if (['OPEN', 'UNDER_REVIEW'].includes(current)) return 'status-chip warn';
   return 'status-chip neutral';
+}
+
+function eventLabel(entry) {
+  const current = String(entry?.eventType || '').toUpperCase();
+  if (current === 'TRIP_INCIDENT_OPENED') return 'Issue Opened';
+  if (current === 'TRIP_INCIDENT_UPDATED') return 'Issue Updated';
+  return current || 'Timeline Event';
+}
+
+function actorLabel(entry) {
+  const current = String(entry?.actorType || '').toUpperCase();
+  if (current === 'HOST') return 'Host';
+  if (current === 'GUEST') return 'Guest';
+  if (current === 'TENANT_USER') return 'Customer Service / Ops';
+  return current || 'System';
+}
+
+function HistoryList({ rows }) {
+  if (!rows?.length) {
+    return <div className="surface-note">No history yet beyond the current case snapshot.</div>;
+  }
+
+  return (
+    <div className="stack">
+      {rows.map((entry) => (
+        <div key={entry.id} className="surface-note" style={{ display: 'grid', gap: 8 }}>
+          <div className="row-between" style={{ gap: 12, alignItems: 'start' }}>
+            <div>
+              <div style={{ fontWeight: 700 }}>{eventLabel(entry)}</div>
+              <div className="label" style={{ textTransform: 'none', letterSpacing: 0, fontSize: 12 }}>
+                {[actorLabel(entry), formatDateTime(entry.eventAt)].filter(Boolean).join(' - ')}
+              </div>
+            </div>
+            {entry.metadata?.nextStatus ? <span className={toneClass(entry.metadata.nextStatus)}>{entry.metadata.nextStatus}</span> : null}
+          </div>
+          {entry.notes ? <div style={{ color: '#55456f', lineHeight: 1.5 }}>{entry.notes}</div> : null}
+          {(entry.metadata?.previousStatus || entry.metadata?.amountResolved != null) ? (
+            <div className="label" style={{ textTransform: 'none', letterSpacing: 0, fontSize: 12 }}>
+              {[
+                entry.metadata?.previousStatus ? `From ${entry.metadata.previousStatus}` : '',
+                entry.metadata?.nextStatus ? `To ${entry.metadata.nextStatus}` : '',
+                entry.metadata?.amountResolved != null ? `Resolved ${formatMoney(entry.metadata.amountResolved)}` : ''
+              ].filter(Boolean).join(' - ')}
+            </div>
+          ) : null}
+        </div>
+      ))}
+    </div>
+  );
 }
 
 export default function IssueCenterPage() {
@@ -102,16 +152,17 @@ function IssueCenterInner({ token, me, logout }) {
           <div className="hero-copy">
             <span className="eyebrow">Issue And Dispute Center</span>
             <h1 className="page-title" style={{ fontSize: 'clamp(30px, 5vw, 54px)', lineHeight: 1.02 }}>
-              Give customer service one place to review, resolve, and close trip issues.
+              Give customer service one place to review, resolve, close, and audit trip issues.
             </h1>
             <p>
-              Hosts and guests can now raise issues. This center gives ops and customer service a clean triage surface
-              for open claims, disputes, and resolution handling.
+              Hosts and guests can raise issues. This center now gives ops and customer service a triage surface
+              plus a full case history so the team can understand everything that happened before taking action.
             </p>
             <div className="hero-meta">
               <span className="hero-pill">Customer service queue</span>
               <span className="hero-pill">Open and review states</span>
               <span className="hero-pill">Trip-linked cases</span>
+              <span className="hero-pill">Issue history</span>
             </div>
           </div>
           <div className="glass card section-card">
@@ -172,7 +223,12 @@ function IssueCenterInner({ token, me, logout }) {
                     <div>
                       <div style={{ fontWeight: 700 }}>{incident.title}</div>
                       <div className="label" style={{ textTransform: 'none', letterSpacing: 0, fontSize: 12 }}>
-                        {[incident.trip?.tripCode || '-', incident.type, incident.trip?.guestCustomer ? [incident.trip.guestCustomer.firstName, incident.trip.guestCustomer.lastName].filter(Boolean).join(' ') : '', incident.trip?.hostProfile?.displayName || ''].filter(Boolean).join(' - ')}
+                        {[
+                          incident.trip?.tripCode || '-',
+                          incident.type,
+                          incident.trip?.guestCustomer ? [incident.trip.guestCustomer.firstName, incident.trip.guestCustomer.lastName].filter(Boolean).join(' ') : '',
+                          incident.trip?.hostProfile?.displayName || ''
+                        ].filter(Boolean).join(' - ')}
                       </div>
                     </div>
                     <span className={toneClass(incident.status)}>{incident.status}</span>
@@ -184,6 +240,12 @@ function IssueCenterInner({ token, me, logout }) {
                     <div className="info-tile"><span className="label">Trip</span><strong>{incident.trip?.status || '-'}</strong></div>
                   </div>
                   <div style={{ color: '#55456f', lineHeight: 1.5 }}>{incident.description || 'No description provided.'}</div>
+                  <details>
+                    <summary style={{ cursor: 'pointer', fontWeight: 600 }}>Issue History</summary>
+                    <div style={{ marginTop: 10 }}>
+                      <HistoryList rows={incident.history || []} />
+                    </div>
+                  </details>
                   <div className="inline-actions">
                     <button
                       type="button"
@@ -193,7 +255,8 @@ function IssueCenterInner({ token, me, logout }) {
                         title: incident.title,
                         description: incident.description || '',
                         amountResolved: incident.amountResolved ? String(incident.amountResolved) : '',
-                        note: ''
+                        note: '',
+                        history: incident.history || []
                       })}
                     >
                       Handle Case
@@ -245,6 +308,10 @@ function IssueCenterInner({ token, me, logout }) {
               </div>
               <div className="inline-actions">
                 <button type="submit">Save Case</button>
+              </div>
+              <div>
+                <div className="section-title" style={{ marginBottom: 10 }}>Issue History</div>
+                <HistoryList rows={edit.history || []} />
               </div>
             </form>
           ) : (

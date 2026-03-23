@@ -33,7 +33,28 @@ function money(value) {
   return Number(Number(value || 0).toFixed(2));
 }
 
-function serializeIncident(incident) {
+function safeParse(value) {
+  if (!value) return null;
+  try {
+    return JSON.parse(value);
+  } catch {
+    return null;
+  }
+}
+
+function serializeHistoryEntry(entry) {
+  return {
+    id: entry.id,
+    eventType: entry.eventType,
+    eventAt: entry.eventAt,
+    actorType: entry.actorType || '',
+    actorRefId: entry.actorRefId || '',
+    notes: entry.notes || '',
+    metadata: safeParse(entry.metadata) || {}
+  };
+}
+
+function serializeIncident(incident, history = []) {
   return {
     id: incident.id,
     type: incident.type,
@@ -46,6 +67,7 @@ function serializeIncident(incident) {
     resolvedAt: incident.resolvedAt,
     createdAt: incident.createdAt,
     updatedAt: incident.updatedAt,
+    history,
     trip: incident.trip ? {
       id: incident.trip.id,
       tripCode: incident.trip.tripCode,
@@ -171,7 +193,46 @@ async function createIncidentForTrip(trip, payload, actor = {}) {
     }
   );
 
-  return serializeIncident(incident);
+  const historyEntry = {
+    id: `open-${incident.id}`,
+    eventType: 'TRIP_INCIDENT_OPENED',
+    eventAt: incident.createdAt,
+    actorType: actor.actorType || 'SYSTEM',
+    actorRefId: actor.actorRefId || '',
+    notes: title,
+    metadata: {
+      incidentId: incident.id,
+      type,
+      source: actor.source || null,
+      amountClaimed: amountClaimed == null ? null : money(amountClaimed)
+    }
+  };
+
+  return serializeIncident(incident, [historyEntry]);
+}
+
+async function attachHistory(incidents) {
+  if (!incidents.length) return incidents.map((incident) => serializeIncident(incident, []));
+
+  const tripIds = [...new Set(incidents.map((incident) => incident.tripId).filter(Boolean))];
+  const timeline = await prisma.tripTimelineEvent.findMany({
+    where: {
+      tripId: { in: tripIds },
+      eventType: { in: ['TRIP_INCIDENT_OPENED', 'TRIP_INCIDENT_UPDATED'] }
+    },
+    orderBy: [{ eventAt: 'desc' }]
+  });
+
+  const historyByIncidentId = new Map();
+  for (const event of timeline) {
+    const metadata = safeParse(event.metadata) || {};
+    const incidentId = metadata?.incidentId;
+    if (!incidentId) continue;
+    if (!historyByIncidentId.has(incidentId)) historyByIncidentId.set(incidentId, []);
+    historyByIncidentId.get(incidentId).push(serializeHistoryEntry(event));
+  }
+
+  return incidents.map((incident) => serializeIncident(incident, historyByIncidentId.get(incident.id) || []));
 }
 
 export const issueCenterService = {
@@ -221,7 +282,7 @@ export const issueCenterService = {
         closed: closedCount,
         total: openCount + reviewCount + resolvedCount + closedCount
       },
-      incidents: incidents.map(serializeIncident)
+      incidents: await attachHistory(incidents)
     };
   },
 
@@ -276,7 +337,7 @@ export const issueCenterService = {
       await flagTripDisputed(current.tripId);
     }
 
-    return serializeIncident(updated);
+    return (await attachHistory([updated]))[0];
   },
 
   async createGuestIncident(input = {}) {
