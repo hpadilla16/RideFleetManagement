@@ -37,6 +37,15 @@ function timelineStatus(portal, key) {
   return portal?.timeline?.find((item) => item.key === key) || null;
 }
 
+function BreakdownRow({ label, value, strong = false }) {
+  return (
+    <div className="row-between" style={{ gap: 12 }}>
+      <span>{label}</span>
+      <strong style={strong ? { fontSize: 16 } : undefined}>{value}</strong>
+    </div>
+  );
+}
+
 export default function PublicBookingConfirmationPage() {
   const [confirmation, setConfirmation] = useState(null);
   const [portalStatus, setPortalStatus] = useState(null);
@@ -89,6 +98,7 @@ export default function PublicBookingConfirmationPage() {
   const paymentLive = timelineStatus(portalStatus, 'payment');
   const primaryActionLink = portalStatus?.nextStep?.link || customerInfoAction?.link || signatureAction?.link || paymentAction?.link || '';
   const primaryActionLabel = portalStatus?.nextStep?.label || 'Continue guest workflow';
+  const pricing = confirmation?.pricingBreakdown || null;
 
   return (
     <main style={{ minHeight: '100vh', padding: '22px clamp(16px, 3vw, 34px) 42px' }}>
@@ -108,15 +118,15 @@ export default function PublicBookingConfirmationPage() {
               <div className="hero-meta">
                 <span className="hero-pill">Reservation workflow linked</span>
                 <span className="hero-pill">Customer next step ready</span>
-                <span className="hero-pill">Sprint 6 booking flow</span>
+                <span className="hero-pill">Email follow-up sent</span>
               </div>
             </div>
             <div className="glass card section-card">
               <div className="section-title">What Happens Next</div>
               <div className="stack">
-                <div className="surface-note">1. Customer opens pre-check-in</div>
+                <div className="surface-note">1. Guest verifies their email and opens pre-check-in</div>
                 <div className="surface-note">2. Signature and payment requests follow</div>
-                <div className="surface-note">3. Ops can complete checkout, inspections, and return inside the normal workflow</div>
+                <div className="surface-note">3. Ops completes checkout, inspections, pickup, and return inside the normal workflow</div>
               </div>
             </div>
           </div>
@@ -136,20 +146,57 @@ export default function PublicBookingConfirmationPage() {
                   <strong>{`${confirmation.customer?.firstName || ''} ${confirmation.customer?.lastName || ''}`.trim() || 'Guest'}</strong>
                 </div>
                 <div className="metric-card">
-                  <span className="label">Tenant</span>
-                  <strong>{confirmation.tenant?.name || '-'}</strong>
+                  <span className="label">Email</span>
+                  <strong>{confirmation.customer?.email || '-'}</strong>
                 </div>
                 <div className="metric-card">
                   <span className="label">Reference</span>
                   <strong>{confirmation.trip?.tripCode || confirmation.reservation?.reservationNumber || '-'}</strong>
                 </div>
               </div>
-              <div className="surface-note">
-                {confirmation.bookingType === 'CAR_SHARING'
-                  ? `Trip total ${fmtMoney(confirmation.trip?.quotedTotal)} · Host earnings ${fmtMoney(confirmation.trip?.hostEarnings)} · Platform fee ${fmtMoney(confirmation.trip?.platformFee)}`
-                  : `Reservation estimate ${fmtMoney(confirmation.reservation?.estimatedTotal)} · Status ${confirmation.reservation?.status || '-'}`
-                }
-              </div>
+
+              {pricing ? (
+                <div className="surface-note" style={{ display: 'grid', gap: 10 }}>
+                  <strong>Price Breakdown</strong>
+                  {confirmation.bookingType === 'CAR_SHARING' ? (
+                    <>
+                      <BreakdownRow
+                        label={`Vehicle subtotal (${pricing.tripDays || 0} day${Number(pricing.tripDays || 0) === 1 ? '' : 's'})`}
+                        value={fmtMoney(pricing.tripSubtotal)}
+                      />
+                      <BreakdownRow label="Trip fees" value={fmtMoney(pricing.fees)} />
+                      <BreakdownRow label="Estimated taxes" value={fmtMoney(pricing.taxes)} />
+                      <BreakdownRow label="Base trip total" value={fmtMoney(pricing.baseTripTotal)} />
+                      <BreakdownRow label="Vehicle add-ons" value={fmtMoney(pricing.additionalServicesTotal)} />
+                      <BreakdownRow label="Estimated total" value={fmtMoney(pricing.guestTotal)} strong />
+                    </>
+                  ) : (
+                    <>
+                      <BreakdownRow
+                        label={`Base rental (${pricing.tripDays || 0} day${Number(pricing.tripDays || 0) === 1 ? '' : 's'} at ${fmtMoney(pricing.dailyRate)}/day)`}
+                        value={fmtMoney(pricing.baseSubtotal)}
+                      />
+                      <BreakdownRow label="Estimated taxes" value={fmtMoney(pricing.estimatedTaxes)} />
+                      <BreakdownRow label="Base reservation total" value={fmtMoney(pricing.baseReservationTotal)} />
+                      <BreakdownRow label="Additional services" value={fmtMoney(pricing.additionalServicesTotal)} />
+                      <BreakdownRow label="Insurance" value={fmtMoney(pricing.insuranceTotal)} />
+                      <BreakdownRow label="Estimated reservation total" value={fmtMoney(pricing.reservationEstimate)} strong />
+                      <BreakdownRow label="Due now for pre-check-in" value={fmtMoney(pricing.depositDueNow)} strong />
+                      {Number(pricing.securityDeposit || 0) > 0 ? (
+                        <BreakdownRow label="Refundable security deposit" value={fmtMoney(pricing.securityDeposit)} />
+                      ) : null}
+                    </>
+                  )}
+                </div>
+              ) : (
+                <div className="surface-note">
+                  {confirmation.bookingType === 'CAR_SHARING'
+                    ? `Trip total ${fmtMoney(confirmation.trip?.quotedTotal)} · Host earnings ${fmtMoney(confirmation.trip?.hostEarnings)} · Platform fee ${fmtMoney(confirmation.trip?.platformFee)}`
+                    : `Reservation estimate ${fmtMoney(confirmation.reservation?.estimatedTotal)} · Status ${confirmation.reservation?.status || '-'}`
+                  }
+                </div>
+              )}
+
               {confirmation.additionalServices?.length ? (
                 <div className="surface-note">
                   <strong>{confirmation.bookingType === 'RENTAL' ? 'Additional Services' : 'Vehicle Add-Ons'}</strong>
@@ -163,6 +210,7 @@ export default function PublicBookingConfirmationPage() {
                   </div>
                 </div>
               ) : null}
+
               {confirmation.bookingType === 'RENTAL' && confirmation.insuranceSelection ? (
                 <div className="surface-note">
                   <strong>Insurance Decision</strong>
@@ -173,6 +221,14 @@ export default function PublicBookingConfirmationPage() {
                   </div>
                 </div>
               ) : null}
+
+              {confirmation.bookingType === 'RENTAL' && pricing ? (
+                <div className="surface-note">
+                  The pre-check-in and payment steps may show only the amount due now, such as the booking deposit. The full reservation estimate for this trip is{' '}
+                  <strong>{fmtMoney(pricing.reservationEstimate)}</strong>.
+                </div>
+              ) : null}
+
               {confirmation.reservation ? (
                 <div className="surface-note">
                   Reservation workflow: <strong>{confirmation.reservation.reservationNumber}</strong>
@@ -219,6 +275,7 @@ export default function PublicBookingConfirmationPage() {
                   </div>
                 </div>
               ) : null}
+
               {primaryActionLink ? (
                 <div className="inline-actions">
                   <a href={primaryActionLink} target="_blank" rel="noreferrer">
@@ -226,13 +283,18 @@ export default function PublicBookingConfirmationPage() {
                   </a>
                 </div>
               ) : null}
+
+              <div className="surface-note">
+                Verify the guest email <strong>{confirmation.customer?.email || '-'}</strong>. The pre-check-in link and the remaining trip steps are sent there.
+              </div>
               <div className="surface-note">
                 {customerInfoAction?.warning
                   ? customerInfoAction.warning
                   : customerInfoAction?.emailSent
-                    ? 'Customer info request email was sent successfully.'
+                    ? 'Pre-check-in email was sent successfully. Ask the guest to check inbox and spam if needed.'
                     : 'Manual pre-check-in link generated successfully.'}
               </div>
+
               <div className="stack" style={{ gap: 10 }}>
                 {customerInfoAction?.link ? (
                   <div className="inline-actions">
@@ -256,6 +318,7 @@ export default function PublicBookingConfirmationPage() {
                   </div>
                 ) : null}
               </div>
+
               <div className="surface-note">
                 Recommended order: Pre-check-in, then signature, then payment.
               </div>

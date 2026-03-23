@@ -1130,6 +1130,19 @@ export const bookingEngineService = {
           pickupAt: reservation.pickupAt,
           returnAt: reservation.returnAt
         },
+        pricingBreakdown: {
+          tripDays: Number(selected.quote?.days || 0),
+          dailyRate: money(selected.quote?.dailyRate),
+          baseSubtotal: money(selected.quote?.subtotal),
+          estimatedTaxes: money(selected.quote?.taxes),
+          baseReservationTotal: money(selected.quote?.total),
+          additionalServicesTotal: addOnsTotal,
+          insuranceTotal,
+          reservationEstimate: estimatedTotal,
+          depositDueNow: money(selected.deposit?.amountDue),
+          securityDeposit: money(selected.deposit?.securityDepositAmount),
+          currency: 'USD'
+        },
         additionalServices: normalizedChosenServices,
         insuranceSelection: insuranceLine
           ? {
@@ -1243,6 +1256,18 @@ export const bookingEngineService = {
         quotedTotal: money(trip.quotedTotal),
         hostEarnings: money(trip.hostEarnings),
         platformFee: money(trip.platformFee)
+      },
+      pricingBreakdown: {
+        tripDays: Number(selected.quote?.tripDays || 0),
+        tripSubtotal: money(selected.quote?.subtotal),
+        fees: money(selected.quote?.fees),
+        taxes: money(selected.quote?.taxes),
+        baseTripTotal: money(selected.quote?.total),
+        additionalServicesTotal: money(normalizedChosenServices.reduce((sum, service) => sum + Number(service.total || 0), 0)),
+        guestTotal: money(Number(selected.quote?.total || 0) + normalizedChosenServices.reduce((sum, service) => sum + Number(service.total || 0), 0)),
+        hostEarnings: money(trip.hostEarnings),
+        platformFee: money(trip.platformFee),
+        currency: 'USD'
       },
       reservation: trip?.reservation ? {
         id: trip.reservation.id,
