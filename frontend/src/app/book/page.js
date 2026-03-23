@@ -801,6 +801,7 @@ export default function PublicBookingPage() {
                     : `Trip total ${fmtMoney(selectedResult?.quote?.total)} · Guest flow will continue through pre-check-in, signature, and payment.`}
                 </div>
                 <div className="section-title">Guest Details</div>
+                {error ? <div className="surface-note" style={{ marginBottom: 16, color: '#991b1b' }}>{error}</div> : null}
                 {searchMode === 'RENTAL' ? (
                   <div className="stack" style={{ marginBottom: 18 }}>
                     <div>
