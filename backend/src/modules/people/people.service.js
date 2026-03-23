@@ -81,6 +81,7 @@ function mapUserPerson(user) {
     tenantId: user.tenantId || user.hostProfile?.tenantId || null,
     personType: hasHostProfile ? 'HOST' : (String(user.role || '').toUpperCase() === 'ADMIN' ? 'ADMIN' : 'EMPLOYEE'),
     accessRole: user.role,
+    tenantName: user.tenant?.name || user.hostProfile?.tenant?.name || null,
     displayName: user.hostProfile?.displayName || user.fullName || user.email,
     fullName: user.fullName || null,
     legalName: user.hostProfile?.legalName || null,
@@ -88,7 +89,10 @@ function mapUserPerson(user) {
     phone: user.hostProfile?.phone || null,
     status: user.isActive ? 'ACTIVE' : 'INACTIVE',
     hasLogin: true,
+    payoutProvider: user.hostProfile?.payoutProvider || null,
+    payoutAccountRef: user.hostProfile?.payoutAccountRef || null,
     payoutEnabled: !!user.hostProfile?.payoutEnabled,
+    notes: user.hostProfile?.notes || null,
     createdAt: user.createdAt
   };
 }
@@ -101,6 +105,7 @@ function mapHostOnlyPerson(host) {
     tenantId: host.tenantId || null,
     personType: 'HOST',
     accessRole: null,
+    tenantName: host.tenant?.name || null,
     displayName: host.displayName,
     fullName: null,
     legalName: host.legalName || null,
@@ -108,7 +113,10 @@ function mapHostOnlyPerson(host) {
     phone: host.phone || null,
     status: host.status || 'ACTIVE',
     hasLogin: false,
+    payoutProvider: host.payoutProvider || null,
+    payoutAccountRef: host.payoutAccountRef || null,
     payoutEnabled: !!host.payoutEnabled,
+    notes: host.notes || null,
     createdAt: host.createdAt
   };
 }
@@ -121,13 +129,21 @@ export const peopleService = {
         where,
         orderBy: [{ fullName: 'asc' }, { email: 'asc' }],
         include: {
-          hostProfile: true
+          tenant: { select: { id: true, name: true } },
+          hostProfile: {
+            include: {
+              tenant: { select: { id: true, name: true } }
+            }
+          }
         }
       }),
       prisma.hostProfile.findMany({
         where: {
           ...(scope?.tenantId ? { tenantId: scope.tenantId } : {}),
           userId: null
+        },
+        include: {
+          tenant: { select: { id: true, name: true } }
         },
         orderBy: [{ displayName: 'asc' }]
       })
@@ -259,5 +275,137 @@ export const peopleService = {
       tempPassword,
       inviteSent: !!(sendInvite && user.email)
     };
+  },
+
+  async updatePerson(personId, payload = {}, scope = {}) {
+    const [kind, rawId] = String(personId || '').split(':');
+    if (!kind || !rawId) throw new Error('Invalid person id');
+
+    if (kind === 'user') {
+      const user = await prisma.user.findFirst({
+        where: {
+          id: rawId,
+          ...(scope?.tenantId ? { tenantId: scope.tenantId } : {})
+        },
+        include: {
+          hostProfile: true
+        }
+      });
+      if (!user) throw new Error('Person not found');
+
+      const email = payload.email ? normalizeEmail(payload.email) : user.email;
+      if (email !== user.email) {
+        const existing = await prisma.user.findUnique({ where: { email } });
+        if (existing && existing.id !== user.id) throw new Error('Email already registered');
+      }
+
+      const nextTenantId = scope?.tenantId || payload?.tenantId || user.tenantId || user.hostProfile?.tenantId || null;
+      const tenant = nextTenantId ? await resolveTenant(nextTenantId) : null;
+
+      const userPatch = {
+        tenantId: nextTenantId,
+        email,
+        fullName: String(payload.fullName || payload.displayName || user.fullName || '').trim() || user.fullName,
+        isActive: payload.status ? String(payload.status).toUpperCase() === 'ACTIVE' : user.isActive
+      };
+
+      if (!user.hostProfile) {
+        userPatch.role = allowedRoleForPayload(payload.personType || 'EMPLOYEE', payload.role || user.role);
+      } else if (payload.role) {
+        userPatch.role = allowedRoleForPayload('HOST', payload.role);
+      }
+
+      let hostPatch = null;
+      if (user.hostProfile) {
+        hostPatch = {
+          tenantId: nextTenantId,
+          displayName: String(payload.displayName || user.hostProfile.displayName || user.fullName || '').trim() || user.hostProfile.displayName,
+          legalName: payload.legalName !== undefined ? (String(payload.legalName || '').trim() || null) : user.hostProfile.legalName,
+          email: email || null,
+          phone: payload.phone !== undefined ? (String(payload.phone || '').trim() || null) : user.hostProfile.phone,
+          status: payload.status ? String(payload.status).toUpperCase() : user.hostProfile.status,
+          payoutProvider: payload.payoutProvider !== undefined ? (String(payload.payoutProvider || '').trim() || null) : user.hostProfile.payoutProvider,
+          payoutAccountRef: payload.payoutAccountRef !== undefined ? (String(payload.payoutAccountRef || '').trim() || null) : user.hostProfile.payoutAccountRef,
+          payoutEnabled: payload.payoutEnabled !== undefined ? !!payload.payoutEnabled : !!user.hostProfile.payoutEnabled,
+          notes: payload.notes !== undefined ? (String(payload.notes || '').trim() || null) : user.hostProfile.notes
+        };
+      }
+
+      const updated = await prisma.$transaction(async (tx) => {
+        const nextUser = await tx.user.update({
+          where: { id: user.id },
+          data: userPatch
+        });
+
+        let nextHost = null;
+        if (user.hostProfile && hostPatch) {
+          nextHost = await tx.hostProfile.update({
+            where: { id: user.hostProfile.id },
+            data: hostPatch
+          });
+        }
+
+        return tx.user.findUnique({
+          where: { id: nextUser.id },
+          include: {
+            tenant: { select: { id: true, name: true } },
+            hostProfile: {
+              include: {
+                tenant: { select: { id: true, name: true } }
+              }
+            }
+          }
+        });
+      });
+
+      return {
+        ok: true,
+        tenantName: tenant?.name || null,
+        person: mapUserPerson(updated)
+      };
+    }
+
+    if (kind === 'host') {
+      const host = await prisma.hostProfile.findFirst({
+        where: {
+          id: rawId,
+          ...(scope?.tenantId ? { tenantId: scope.tenantId } : {})
+        },
+        include: {
+          tenant: { select: { id: true, name: true } }
+        }
+      });
+      if (!host) throw new Error('Person not found');
+
+      const nextTenantId = scope?.tenantId || payload?.tenantId || host.tenantId || null;
+      const tenant = nextTenantId ? await resolveTenant(nextTenantId) : null;
+
+      const updated = await prisma.hostProfile.update({
+        where: { id: host.id },
+        data: {
+          tenantId: nextTenantId,
+          displayName: String(payload.displayName || host.displayName || '').trim() || host.displayName,
+          legalName: payload.legalName !== undefined ? (String(payload.legalName || '').trim() || null) : host.legalName,
+          email: payload.email !== undefined ? (normalizeEmail(payload.email) || null) : host.email,
+          phone: payload.phone !== undefined ? (String(payload.phone || '').trim() || null) : host.phone,
+          status: payload.status ? String(payload.status).toUpperCase() : host.status,
+          payoutProvider: payload.payoutProvider !== undefined ? (String(payload.payoutProvider || '').trim() || null) : host.payoutProvider,
+          payoutAccountRef: payload.payoutAccountRef !== undefined ? (String(payload.payoutAccountRef || '').trim() || null) : host.payoutAccountRef,
+          payoutEnabled: payload.payoutEnabled !== undefined ? !!payload.payoutEnabled : !!host.payoutEnabled,
+          notes: payload.notes !== undefined ? (String(payload.notes || '').trim() || null) : host.notes
+        },
+        include: {
+          tenant: { select: { id: true, name: true } }
+        }
+      });
+
+      return {
+        ok: true,
+        tenantName: tenant?.name || null,
+        person: mapHostOnlyPerson(updated)
+      };
+    }
+
+    throw new Error('Unsupported person type');
   }
 };
