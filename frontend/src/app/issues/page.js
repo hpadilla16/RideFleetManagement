@@ -71,6 +71,33 @@ function actorLabel(entry) {
   return current || 'System';
 }
 
+function submissionChecklist(submission) {
+  const photoCount = Array.isArray(submission?.photos) ? submission.photos.length : 0;
+  const docs = [
+    !!submission?.insuranceDocumentUrl,
+    !!submission?.registrationDocumentUrl,
+    !!submission?.initialInspectionDocumentUrl
+  ];
+  return {
+    photoCount,
+    photoReady: photoCount > 0,
+    docCount: docs.filter(Boolean).length,
+    docsReady: docs.every(Boolean),
+    addOnCount: Array.isArray(submission?.addOns) ? submission.addOns.length : 0,
+    hasInspectionNotes: !!String(submission?.initialInspectionNotes || '').trim()
+  };
+}
+
+function submissionReplyState(submission) {
+  const pending = (submission?.communications || []).find((entry) => entry.publicTokenExpiresAt && !entry.respondedAt);
+  const responded = (submission?.communications || []).find((entry) => !!entry.respondedAt);
+  return {
+    awaitingReply: !!pending,
+    pending,
+    responded
+  };
+}
+
 function HistoryList({ rows }) {
   if (!rows?.length) {
     return <div className="surface-note">No history yet beyond the current case snapshot.</div>;
@@ -303,6 +330,8 @@ function IssueCenterInner({ token, me, logout }) {
   const incidents = dashboard?.incidents || [];
   const vehicleSubmissions = dashboard?.vehicleSubmissions || [];
   const selectedSubmission = submissionEdit.id ? vehicleSubmissions.find((row) => row.id === submissionEdit.id) : null;
+  const selectedSubmissionChecklist = selectedSubmission ? submissionChecklist(selectedSubmission) : null;
+  const selectedSubmissionReply = selectedSubmission ? submissionReplyState(selectedSubmission) : null;
   const submissionPhotos = selectedSubmission?.photos || [];
   const submissionDocuments = [
     selectedSubmission?.insuranceDocumentUrl ? { name: 'Insurance Document', dataUrl: selectedSubmission.insuranceDocumentUrl } : null,
@@ -518,12 +547,8 @@ function IssueCenterInner({ token, me, logout }) {
               {vehicleSubmissions.map((submission) => (
                 <div key={submission.id} className="surface-note" style={{ display: 'grid', gap: 10 }}>
                   {(() => {
-                    const docCount = [
-                      submission.insuranceDocumentUrl,
-                      submission.registrationDocumentUrl,
-                      submission.initialInspectionDocumentUrl
-                    ].filter(Boolean).length;
-                    const awaitingReply = (submission.communications || []).some((entry) => entry.publicTokenExpiresAt && !entry.respondedAt);
+                    const checklist = submissionChecklist(submission);
+                    const replyState = submissionReplyState(submission);
                     return (
                       <>
                   <div className="row-between" style={{ gap: 12, alignItems: 'start' }}>
@@ -541,9 +566,15 @@ function IssueCenterInner({ token, me, logout }) {
                   </div>
                   <div className="info-grid-tight">
                     <div className="info-tile"><span className="label">Daily Rate</span><strong>{formatMoney(submission.baseDailyRate)}</strong></div>
-                    <div className="info-tile"><span className="label">Docs</span><strong>{docCount}</strong></div>
-                    <div className="info-tile"><span className="label">Photos</span><strong>{submission.photos?.length || 0}</strong></div>
+                    <div className="info-tile"><span className="label">Docs</span><strong>{`${checklist.docCount}/3`}</strong></div>
+                    <div className="info-tile"><span className="label">Photos</span><strong>{checklist.photoCount}</strong></div>
                     <div className="info-tile"><span className="label">Submitted</span><strong>{formatDateTime(submission.createdAt)}</strong></div>
+                  </div>
+                  <div className="inline-actions" style={{ gap: 8, flexWrap: 'wrap' }}>
+                    <span className={checklist.docsReady ? 'status-chip good' : 'status-chip warn'}>{checklist.docsReady ? 'Docs Ready' : 'Docs Missing'}</span>
+                    <span className={checklist.photoReady ? 'status-chip good' : 'status-chip warn'}>{checklist.photoReady ? 'Photos Ready' : 'No Photos'}</span>
+                    <span className={checklist.hasInspectionNotes ? 'status-chip good' : 'status-chip neutral'}>{checklist.hasInspectionNotes ? 'Inspection Notes' : 'No Inspection Notes'}</span>
+                    {checklist.addOnCount ? <span className="status-chip neutral">{`${checklist.addOnCount} Host Add-On${checklist.addOnCount > 1 ? 's' : ''}`}</span> : null}
                   </div>
                   <div style={{ color: '#55456f', lineHeight: 1.5 }}>
                     {[
@@ -552,8 +583,13 @@ function IssueCenterInner({ token, me, logout }) {
                       submission.reviewNotes || 'Awaiting review.'
                     ].filter(Boolean).join(' - ')}
                   </div>
+                  {replyState.awaitingReply ? (
+                    <div className="surface-note" style={{ padding: '10px 12px' }}>
+                      Waiting on host reply since {formatDateTime(replyState.pending?.createdAt)}.
+                    </div>
+                  ) : null}
                   <div className="inline-actions">
-                    {awaitingReply ? <span className="status-chip warn">Info Requested</span> : null}
+                    {replyState.awaitingReply ? <span className="status-chip warn">Info Requested</span> : replyState.responded ? <span className="status-chip good">Host Replied</span> : null}
                     <button
                       type="button"
                       onClick={() => setSubmissionEdit({
@@ -605,6 +641,31 @@ function IssueCenterInner({ token, me, logout }) {
                 <div className="info-tile"><span className="label">Trip Days</span><strong>{`${selectedSubmission.minTripDays || 1} - ${selectedSubmission.maxTripDays || '-'}`}</strong></div>
                 <div className="info-tile"><span className="label">Daily Rate</span><strong>{formatMoney(selectedSubmission.baseDailyRate)}</strong></div>
                 <div className="info-tile"><span className="label">Security Deposit</span><strong>{formatMoney(selectedSubmission.securityDeposit)}</strong></div>
+              </div>
+              <div className="metric-grid">
+                <div className="metric-card"><span className="label">Photos Ready</span><strong>{selectedSubmissionChecklist?.photoCount || 0}</strong></div>
+                <div className="metric-card"><span className="label">Docs Ready</span><strong>{`${selectedSubmissionChecklist?.docCount || 0}/3`}</strong></div>
+                <div className="metric-card"><span className="label">Host Add-Ons</span><strong>{selectedSubmissionChecklist?.addOnCount || 0}</strong></div>
+                <div className="metric-card"><span className="label">Reply State</span><strong>{selectedSubmissionReply?.awaitingReply ? 'Waiting' : selectedSubmissionReply?.responded ? 'Replied' : 'No Request'}</strong></div>
+              </div>
+              <div className="inline-actions" style={{ gap: 8, flexWrap: 'wrap' }}>
+                <span className={selectedSubmissionChecklist?.docsReady ? 'status-chip good' : 'status-chip warn'}>{selectedSubmissionChecklist?.docsReady ? 'Documents Ready' : 'Documents Missing'}</span>
+                <span className={selectedSubmissionChecklist?.photoReady ? 'status-chip good' : 'status-chip warn'}>{selectedSubmissionChecklist?.photoReady ? 'Photos Ready' : 'Photos Missing'}</span>
+                <span className={selectedSubmissionChecklist?.hasInspectionNotes ? 'status-chip good' : 'status-chip neutral'}>{selectedSubmissionChecklist?.hasInspectionNotes ? 'Inspection Notes Included' : 'Inspection Notes Missing'}</span>
+                {selectedSubmissionReply?.awaitingReply ? <span className="status-chip warn">Waiting On Host Reply</span> : null}
+                {!selectedSubmissionReply?.awaitingReply && selectedSubmissionReply?.responded ? <span className="status-chip good">Host Replied</span> : null}
+              </div>
+              <div className="split-panel" style={{ alignItems: 'start' }}>
+                <div className="surface-note">
+                  <strong style={{ display: 'block', marginBottom: 6 }}>Host Contact</strong>
+                  {[selectedSubmission.hostProfile?.displayName || 'Host', selectedSubmission.hostProfile?.email || 'No email', selectedSubmission.hostProfile?.phone || 'No phone'].join(' · ')}
+                </div>
+                <div className="surface-note">
+                  <strong style={{ display: 'block', marginBottom: 6 }}>Review Guidance</strong>
+                  {selectedSubmissionReply?.awaitingReply
+                    ? `More info was requested on ${formatDateTime(selectedSubmissionReply.pending?.createdAt)}. Review the new reply or attachments before approving.`
+                    : 'Verify photos, ownership docs, inspection notes, and pricing before approving the vehicle.'}
+                </div>
               </div>
               {selectedSubmission.shortDescription || selectedSubmission.description ? (
                 <div className="surface-note" style={{ color: '#55456f', lineHeight: 1.6 }}>

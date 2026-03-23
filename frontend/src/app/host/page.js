@@ -43,6 +43,24 @@ function parseAddOns(value) {
   }
 }
 
+function submissionProgress(row) {
+  const photoCount = Array.isArray(row?.photos) ? row.photos.length : parsePhotoList(row?.photosJson).length;
+  const docCount = [
+    !!row?.insuranceDocumentUrl,
+    !!row?.registrationDocumentUrl,
+    !!row?.initialInspectionDocumentUrl
+  ].filter(Boolean).length;
+  const pendingReply = (row?.communications || []).find((entry) => entry.publicTokenExpiresAt && !entry.respondedAt);
+  const responded = (row?.communications || []).find((entry) => !!entry.respondedAt);
+  return {
+    photoCount,
+    docCount,
+    pendingReply,
+    responded,
+    addOnCount: Array.isArray(row?.addOns) ? row.addOns.length : parseAddOns(row?.addOnsJson).length
+  };
+}
+
 function fileToDataUrl(file) {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -619,6 +637,10 @@ function HostAppInner({ token, me, logout }) {
             <div className="stack">
               {submissions.map((row) => (
                 <div key={row.id} className="surface-note" style={{ display: 'grid', gap: 10 }}>
+                  {(() => {
+                    const progress = submissionProgress(row);
+                    return (
+                      <>
                   <div className="row-between" style={{ gap: 12 }}>
                     <strong>{[row.year, row.make, row.model].filter(Boolean).join(' ') || 'Vehicle Submission'}</strong>
                     <span className={statusChip(row.status)}>{row.status}</span>
@@ -626,13 +648,22 @@ function HostAppInner({ token, me, logout }) {
                   <div className="label" style={{ textTransform: 'none', letterSpacing: 0, fontSize: 12 }}>
                     {[row.vehicleType?.name || '-', row.preferredLocation?.name || '-', formatDateTime(row.createdAt)].join(' - ')}
                   </div>
+                  <div className="info-grid-tight">
+                    <div className="info-tile"><span className="label">Photos</span><strong>{progress.photoCount}</strong></div>
+                    <div className="info-tile"><span className="label">Docs</span><strong>{`${progress.docCount}/3`}</strong></div>
+                    <div className="info-tile"><span className="label">Add-Ons</span><strong>{progress.addOnCount}</strong></div>
+                    <div className="info-tile"><span className="label">Last Update</span><strong>{formatDateTime(row.updatedAt)}</strong></div>
+                  </div>
                   <div style={{ color: '#55456f', lineHeight: 1.5 }}>
                     {[row.plate ? `Plate ${row.plate}` : '', row.vin ? `VIN ${row.vin}` : '', row.reviewNotes || 'Waiting for review.'].filter(Boolean).join(' · ')}
                   </div>
                   <div className="inline-actions">
                     {row.listing?.id ? <span className="status-chip good">Active In Portal</span> : null}
-                    {(row.communications || []).some((entry) => entry.publicTokenExpiresAt && !entry.respondedAt) ? <span className="status-chip warn">Info Requested</span> : null}
+                    {progress.pendingReply ? <span className="status-chip warn">Info Requested</span> : progress.responded ? <span className="status-chip good">You Replied</span> : null}
                   </div>
+                      </>
+                    );
+                  })()}
                 </div>
               ))}
             </div>
