@@ -150,9 +150,9 @@ export default function PublicBookingConfirmationPage() {
                   : `Reservation estimate ${fmtMoney(confirmation.reservation?.estimatedTotal)} · Status ${confirmation.reservation?.status || '-'}`
                 }
               </div>
-              {confirmation.bookingType === 'RENTAL' && confirmation.additionalServices?.length ? (
+              {confirmation.additionalServices?.length ? (
                 <div className="surface-note">
-                  <strong>Additional Services</strong>
+                  <strong>{confirmation.bookingType === 'RENTAL' ? 'Additional Services' : 'Vehicle Add-Ons'}</strong>
                   <div className="stack" style={{ marginTop: 10 }}>
                     {confirmation.additionalServices.map((service) => (
                       <div key={service.serviceId || service.name} className="row-between" style={{ gap: 12 }}>

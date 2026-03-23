@@ -167,6 +167,41 @@ enum TripIncidentStatus {
   CLOSED
 }
 
+enum HostReviewStatus {
+  REQUESTED
+  SUBMITTED
+}
+
+enum ReservationWorkflowMode {
+  RENTAL
+  CAR_SHARING
+  DEALERSHIP_LOANER
+}
+
+enum LoanerBillingMode {
+  COURTESY
+  CUSTOMER_PAY
+  WARRANTY
+  INSURANCE
+  INTERNAL
+}
+
+enum LoanerBillingStatus {
+  DRAFT
+  PENDING_APPROVAL
+  APPROVED
+  INVOICED
+  SETTLED
+  DENIED
+}
+
+enum HostVehicleSubmissionStatus {
+  PENDING_REVIEW
+  PENDING_INFO
+  APPROVED
+  REJECTED
+}
+
 model Tenant {
   id        String   @id @default(cuid())
   name      String
@@ -174,6 +209,7 @@ model Tenant {
   status    String   @default("ACTIVE")
   plan      String   @default("BETA")
   carSharingEnabled Boolean @default(false)
+  dealershipLoanerEnabled Boolean @default(false)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -195,6 +231,7 @@ model Tenant {
   carSharingListings HostVehicleListing[]
   carSharingTrips Trip[]
   tripPayouts TripPayout[]
+  hostVehicleSubmissions HostVehicleSubmission[]
 }
 
 model Location {
@@ -222,6 +259,7 @@ model Location {
   locationFees       LocationFee[]
   rates              Rate[]
   carSharingListings HostVehicleListing[]
+  hostVehicleSubmissionPreferred HostVehicleSubmission[]
   carSharingPickupTrips Trip[] @relation("TripPickupLocation")
   carSharingReturnTrips Trip[] @relation("TripReturnLocation")
 }
@@ -233,12 +271,14 @@ model VehicleType {
   code         String
   name         String
   description  String?
+  imageUrl     String?
   createdAt    DateTime   @default(now())
   updatedAt    DateTime   @updatedAt
 
   vehicles     Vehicle[]
   reservations Reservation[]
   rateItems    RateItem[]
+  hostVehicleSubmissions HostVehicleSubmission[]
 
   @@unique([tenantId, code])
 }
@@ -271,6 +311,7 @@ model Vehicle {
   maintenanceJobs MaintenanceJob[]
   rentalAgreements RentalAgreement[]
   hostListing     HostVehicleListing?
+  hostVehicleSubmission HostVehicleSubmission?
 }
 
 model Customer {
@@ -306,6 +347,7 @@ model Customer {
 
   reservations    Reservation[]
   guestTrips      Trip[] @relation("TripGuestCustomer")
+  hostReviews     HostReview[]
 
   @@index([lastName, firstName])
   @@index([phone])
@@ -319,6 +361,48 @@ model Reservation {
   reservationNumber String            @unique
   sourceRef         String?           @unique
   status            ReservationStatus @default(NEW)
+  workflowMode      ReservationWorkflowMode @default(RENTAL)
+  loanerBillingMode LoanerBillingMode?
+  repairOrderNumber String?
+  claimNumber       String?
+  serviceAdvisorName String?
+  serviceAdvisorEmail String?
+  serviceAdvisorPhone String?
+  serviceStartAt    DateTime?
+  estimatedServiceCompletionAt DateTime?
+  serviceVehicleYear Int?
+  serviceVehicleMake String?
+  serviceVehicleModel String?
+  serviceVehiclePlate String?
+  serviceVehicleVin String?
+  loanerLiabilityAccepted Boolean @default(false)
+  loanerLiabilityAcceptedAt DateTime?
+  loanerProgramNotes String?
+  loanerBorrowerPacketJson String?
+  loanerBorrowerPacketCompletedAt DateTime?
+  loanerBorrowerPacketCompletedBy String?
+  loanerBillingContactName String?
+  loanerBillingContactEmail String?
+  loanerBillingContactPhone String?
+  loanerBillingAuthorizationRef String?
+  loanerBillingNotes String?
+  loanerReturnExceptionFlag Boolean @default(false)
+  loanerReturnExceptionNotes String?
+  loanerBillingStatus LoanerBillingStatus @default(DRAFT)
+  loanerBillingSubmittedAt DateTime?
+  loanerBillingSettledAt DateTime?
+  serviceAdvisorNotes String?
+  serviceAdvisorUpdatedAt DateTime?
+  loanerServiceCompletedAt DateTime?
+  loanerServiceCompletedBy String?
+  loanerCloseoutNotes String?
+  loanerPurchaseOrderNumber String?
+  loanerDealerInvoiceNumber String?
+  loanerAccountingNotes String?
+  loanerAccountingClosedAt DateTime?
+  loanerAccountingClosedBy String?
+  loanerLastExtendedAt DateTime?
+  loanerLastVehicleSwapAt DateTime?
 
   customerId        String
   customer          Customer          @relation(fields: [customerId], references: [id])
@@ -374,9 +458,12 @@ model Reservation {
   payments          ReservationPayment[]
   additionalDrivers ReservationAdditionalDriver[]
   carSharingTrip    Trip?
+  hostReviews       HostReview[]
 
   @@index([status, pickupAt])
+  @@index([workflowMode, status, pickupAt])
   @@index([pickupLocationId, pickupAt])
+  @@index([repairOrderNumber])
 }
 
 model Invoice {
@@ -445,6 +532,7 @@ model HostVehicleListing {
   maxTripDays       Int?
   tripRules         String?
   photosJson        String?
+  addOnsJson        String?
   publishedAt       DateTime?
   pausedAt          DateTime?
   createdAt         DateTime            @default(now())
@@ -452,10 +540,82 @@ model HostVehicleListing {
 
   availabilityWindows ListingAvailabilityWindow[]
   trips             Trip[]
+  vehicleSubmission HostVehicleSubmission?
 
   @@index([tenantId, status])
   @@index([hostProfileId, status])
   @@index([locationId, status])
+}
+
+model HostVehicleSubmission {
+  id                       String                      @id @default(cuid())
+  tenantId                 String?
+  tenant                   Tenant?                     @relation(fields: [tenantId], references: [id])
+  hostProfileId            String
+  hostProfile              HostProfile                 @relation(fields: [hostProfileId], references: [id])
+  vehicleTypeId            String
+  vehicleType              VehicleType                 @relation(fields: [vehicleTypeId], references: [id])
+  preferredLocationId      String?
+  preferredLocation        Location?                   @relation(fields: [preferredLocationId], references: [id])
+  year                     Int?
+  make                     String?
+  model                    String?
+  color                    String?
+  vin                      String?
+  plate                    String?
+  mileage                  Int                         @default(0)
+  baseDailyRate            Decimal                     @default(0) @db.Decimal(10, 2)
+  cleaningFee              Decimal                     @default(0) @db.Decimal(10, 2)
+  deliveryFee              Decimal                     @default(0) @db.Decimal(10, 2)
+  securityDeposit          Decimal                     @default(0) @db.Decimal(10, 2)
+  minTripDays              Int                         @default(1)
+  maxTripDays              Int?
+  shortDescription         String?
+  description              String?
+  tripRules                String?
+  photosJson               String?
+  insuranceDocumentUrl     String?
+  registrationDocumentUrl  String?
+  initialInspectionDocumentUrl String?
+  initialInspectionNotes   String?
+  addOnsJson               String?
+  status                   HostVehicleSubmissionStatus @default(PENDING_REVIEW)
+  reviewNotes              String?
+  approvedAt               DateTime?
+  approvedByUserId         String?
+  approvedByUser           User?                       @relation(fields: [approvedByUserId], references: [id])
+  vehicleId                String?                     @unique
+  vehicle                  Vehicle?                    @relation(fields: [vehicleId], references: [id])
+  listingId                String?                     @unique
+  listing                  HostVehicleListing?         @relation(fields: [listingId], references: [id])
+  createdAt                DateTime                    @default(now())
+  updatedAt                DateTime                    @updatedAt
+
+  communications           HostVehicleSubmissionCommunication[]
+
+  @@index([tenantId, status, createdAt])
+  @@index([hostProfileId, status, createdAt])
+}
+
+model HostVehicleSubmissionCommunication {
+  id                   String                @id @default(cuid())
+  submissionId         String
+  submission           HostVehicleSubmission @relation(fields: [submissionId], references: [id], onDelete: Cascade)
+  direction            String
+  channel              String
+  recipientType        String?
+  senderType           String?
+  senderRefId          String?
+  subject              String?
+  message              String?
+  attachmentsJson      String?
+  publicToken          String?               @unique
+  publicTokenExpiresAt DateTime?
+  respondedAt          DateTime?
+  createdAt            DateTime              @default(now())
+  updatedAt            DateTime              @updatedAt
+
+  @@index([submissionId, createdAt])
 }
 
 model ListingAvailabilityWindow {
@@ -497,6 +657,7 @@ model User {
   customerInfoReviewedReservations Reservation[] @relation("ReservationCustomerInfoReviewedBy")
   readyForPickupReservations Reservation[] @relation("ReservationReadyForPickupBy")
   hostProfile HostProfile?
+  approvedHostVehicleSubmissions HostVehicleSubmission[]
 
   @@index([tenantId, role, isActive])
   @@index([commissionPlanId])
@@ -516,6 +677,9 @@ model HostProfile {
   payoutProvider    String?
   payoutAccountRef  String?
   payoutEnabled     Boolean   @default(false)
+  averageRating     Decimal   @default(0) @db.Decimal(4, 2)
+  reviewCount       Int       @default(0)
+  latestReviewAt    DateTime?
   notes             String?
   createdAt         DateTime  @default(now())
   updatedAt         DateTime  @updatedAt
@@ -523,6 +687,8 @@ model HostProfile {
   listings          HostVehicleListing[]
   trips             Trip[]    @relation("TripHost")
   payouts           TripPayout[]
+  vehicleSubmissions HostVehicleSubmission[]
+  reviews           HostReview[]
 
   @@index([tenantId, status])
   @@index([email])
@@ -672,6 +838,7 @@ model Trip {
   payouts           TripPayout[]
   incidents         TripIncident[]
   timelineEvents    TripTimelineEvent[]
+  hostReview        HostReview?
 
   @@index([tenantId, status, scheduledPickupAt])
   @@index([hostProfileId, status, scheduledPickupAt])
@@ -873,7 +1040,30 @@ model TripIncident {
   createdAt         DateTime           @default(now())
   updatedAt         DateTime           @updatedAt
 
+  communications    TripIncidentCommunication[]
+
   @@index([tripId, status])
+}
+
+model TripIncidentCommunication {
+  id                  String       @id @default(cuid())
+  incidentId          String
+  incident            TripIncident @relation(fields: [incidentId], references: [id], onDelete: Cascade)
+  direction           String
+  channel             String
+  recipientType       String?
+  senderType          String?
+  senderRefId         String?
+  subject             String?
+  message             String?
+  attachmentsJson     String?
+  publicToken         String?      @unique
+  publicTokenExpiresAt DateTime?
+  respondedAt         DateTime?
+  createdAt           DateTime     @default(now())
+  updatedAt           DateTime     @updatedAt
+
+  @@index([incidentId, createdAt])
 }
 
 model TripTimelineEvent {
@@ -889,6 +1079,32 @@ model TripTimelineEvent {
   createdAt         DateTime  @default(now())
 
   @@index([tripId, eventAt])
+}
+
+model HostReview {
+  id                 String           @id @default(cuid())
+  tripId             String           @unique
+  trip               Trip             @relation(fields: [tripId], references: [id], onDelete: Cascade)
+  hostProfileId      String
+  hostProfile        HostProfile      @relation(fields: [hostProfileId], references: [id], onDelete: Cascade)
+  guestCustomerId    String?
+  guestCustomer      Customer?        @relation(fields: [guestCustomerId], references: [id])
+  reservationId      String?
+  reservation        Reservation?     @relation(fields: [reservationId], references: [id])
+  status             HostReviewStatus @default(REQUESTED)
+  rating             Int?
+  comments           String?
+  reviewerName       String?
+  publicToken        String?          @unique
+  publicTokenExpiresAt DateTime?
+  requestedAt        DateTime?
+  submittedAt        DateTime?
+  createdAt          DateTime         @default(now())
+  updatedAt          DateTime         @updatedAt
+
+  @@index([hostProfileId, status, submittedAt])
+  @@index([guestCustomerId, submittedAt])
+  @@index([reservationId])
 }
 
 model RentalAgreementInspection {

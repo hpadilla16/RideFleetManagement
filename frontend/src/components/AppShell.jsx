@@ -15,6 +15,9 @@ const NAV_ITEMS = [
   { href: '/reports', label: 'Reports' },
   { href: '/car-sharing', label: 'Car Sharing', feature: 'carSharing' },
   { href: '/host', label: 'Host App', feature: 'carSharing' },
+  { href: '/employee', label: 'Employee App' },
+  { href: '/issues', label: 'Issue Center' },
+  { href: '/loaner', label: 'Loaner Program', feature: 'dealershipLoaner' },
   { href: '/settings', label: 'Settings' },
   { href: '/tenants', label: 'Tenants', superOnly: true },
   { href: '/settings/security', label: 'Security', adminOnly: true }
@@ -48,6 +51,7 @@ export function AppShell({ me, logout, children }) {
   const [now, setNow] = useState(new Date());
   const [canReturnSuper, setCanReturnSuper] = useState(false);
   const [carSharingVisible, setCarSharingVisible] = useState(() => String(me?.role || '').toUpperCase() === 'SUPER_ADMIN');
+  const [dealershipLoanerVisible, setDealershipLoanerVisible] = useState(() => String(me?.role || '').toUpperCase() === 'SUPER_ADMIN');
 
   const idleTimerRef = useRef(null);
   const role = String(me?.role || '').toUpperCase();
@@ -108,10 +112,12 @@ export function AppShell({ me, logout, children }) {
     const currentRole = String(me?.role || '').toUpperCase();
     if (currentRole === 'SUPER_ADMIN') {
       setCarSharingVisible(true);
+      setDealershipLoanerVisible(true);
       return;
     }
-    if (!['ADMIN', 'OPS'].includes(currentRole)) {
+    if (!['ADMIN', 'OPS', 'AGENT'].includes(currentRole)) {
       setCarSharingVisible(false);
+      setDealershipLoanerVisible(false);
       return;
     }
 
@@ -119,17 +125,31 @@ export function AppShell({ me, logout, children }) {
       try {
         const token = readStoredToken();
         if (!token) return;
-        const res = await fetch(`${API_BASE}/api/car-sharing/config`, {
-          headers: { Authorization: `Bearer ${token}` }
-        });
-        if (!res.ok) {
+        const [carSharingRes, loanerRes] = await Promise.all([
+          currentRole === 'AGENT'
+            ? Promise.resolve(null)
+            : fetch(`${API_BASE}/api/car-sharing/config`, {
+                headers: { Authorization: `Bearer ${token}` }
+              }),
+          fetch(`${API_BASE}/api/dealership-loaner/config`, {
+            headers: { Authorization: `Bearer ${token}` }
+          })
+        ]);
+        if (carSharingRes?.ok) {
+          const json = await carSharingRes.json();
+          setCarSharingVisible(!!json?.enabled);
+        } else {
           setCarSharingVisible(false);
-          return;
         }
-        const json = await res.json();
-        setCarSharingVisible(!!json?.enabled);
+        if (loanerRes.ok) {
+          const json = await loanerRes.json();
+          setDealershipLoanerVisible(!!json?.enabled);
+        } else {
+          setDealershipLoanerVisible(false);
+        }
       } catch {
         setCarSharingVisible(false);
+        setDealershipLoanerVisible(false);
       }
     })();
   }, [me?.role]);
@@ -251,6 +271,7 @@ export function AppShell({ me, logout, children }) {
             .filter((item) => !item.superOnly || role === 'SUPER_ADMIN')
             .filter((item) => !item.adminOnly || isAdminNavRole)
             .filter((item) => item.feature !== 'carSharing' || carSharingVisible)
+            .filter((item) => item.feature !== 'dealershipLoaner' || dealershipLoanerVisible)
             .map((item) => (
               item.disabled ? (
                 <span key={item.href} className="nav-link" style={{ opacity: 0.55, cursor: 'not-allowed' }}>
@@ -275,18 +296,25 @@ export function AppShell({ me, logout, children }) {
       <main className="content">
         <div className="topbar glass">
           <div className="topbar-primary">
-            <button className="mobile-menu-btn" onClick={() => setMobileOpen((v) => !v)}>Menu</button>
+            <button
+              className="mobile-menu-btn topbar-action-btn"
+              aria-label="Open navigation menu"
+              title="Open menu"
+              onClick={() => setMobileOpen((v) => !v)}
+            >
+              ☰
+            </button>
             <div className="topbar-identity">
               <div className="topbar-name">{me?.fullName || me?.name || me?.email || 'User'}</div>
-              <div className="label">{me?.role || 'ADMIN'}</div>
+              <div className="topbar-role">{me?.role || 'ADMIN'}</div>
             </div>
           </div>
 
           <div className="topbar-actions">
-            {canReturnSuper ? <button className="button-subtle" title="Return to Super Admin" onClick={returnToSuperAdmin}>Return To Super Admin</button> : null}
-            <button className="button-subtle" title="Toggle dark mode" onClick={() => setDarkMode((v) => !v)}>{darkMode ? 'Light' : 'Dark'}</button>
-            <button className="button-subtle" title="Lock screen" onClick={lockNow}>Lock</button>
-            <button onClick={logout}>Logout</button>
+            {canReturnSuper ? <button className="button-subtle topbar-action-btn topbar-action-wide" title="Return to Super Admin" onClick={returnToSuperAdmin}>Return</button> : null}
+            <button className="button-subtle topbar-action-btn" title="Toggle dark mode" onClick={() => setDarkMode((v) => !v)}>{darkMode ? 'Light' : 'Dark'}</button>
+            <button className="button-subtle topbar-action-btn" title="Lock screen" onClick={lockNow}>Lock</button>
+            <button className="topbar-action-btn" onClick={logout}>Logout</button>
           </div>
         </div>
 

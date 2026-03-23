@@ -1,4 +1,5 @@
 import { prisma } from '../../lib/prisma.js';
+import { hostReviewsService } from '../host-reviews/host-reviews.service.js';
 
 function parseLocationConfig(raw) {
   try {
@@ -89,6 +90,60 @@ function resolveHoursForDate(cfg, date) {
 
 function scopedSettingKey(baseKey, scope = {}) {
   return scope?.tenantId ? `tenant:${scope.tenantId}:${baseKey}` : baseKey;
+}
+
+async function completeLinkedCarSharingTripForReservation(reservationId, actorUserId = null, reason = 'Reservation checked in') {
+  if (!reservationId) return null;
+
+  const trip = await prisma.trip.findFirst({
+    where: { reservationId },
+    select: {
+      id: true,
+      status: true
+    }
+  });
+  if (!trip) return null;
+
+  const currentStatus = String(trip.status || '').toUpperCase();
+  if (currentStatus === 'COMPLETED') {
+    try {
+      await hostReviewsService.issueGuestReviewRequestForTrip(trip.id);
+    } catch (error) {
+      console.error('Unable to issue host review after reservation patch check-in', error);
+    }
+    return trip;
+  }
+
+  if (!['IN_PROGRESS', 'DISPUTED', 'READY_FOR_PICKUP', 'CONFIRMED', 'RESERVED'].includes(currentStatus)) {
+    return trip;
+  }
+
+  await prisma.trip.update({
+    where: { id: trip.id },
+    data: {
+      status: 'COMPLETED',
+      actualReturnAt: new Date(),
+      timelineEvents: {
+        create: [{
+          eventType: 'TRIP_COMPLETED',
+          actorType: actorUserId ? 'TENANT_USER' : 'SYSTEM',
+          actorRefId: actorUserId || null,
+          notes: reason,
+          metadata: JSON.stringify({
+            source: 'reservation-status-patch'
+          })
+        }]
+      }
+    }
+  });
+
+  try {
+    await hostReviewsService.issueGuestReviewRequestForTrip(trip.id);
+  } catch (error) {
+    console.error('Unable to issue host review after reservation trip sync', error);
+  }
+
+  return trip;
 }
 
 async function validateLocationWindow({ locationId, at, label }, scope = {}) {
@@ -283,6 +338,50 @@ export const reservationsService = {
         reservationNumber: data.reservationNumber,
         sourceRef: data.sourceRef ?? null,
         status: data.status ?? 'NEW',
+        workflowMode: data.workflowMode ?? 'RENTAL',
+        loanerBillingMode: data.loanerBillingMode ?? null,
+        repairOrderNumber: data.repairOrderNumber ?? null,
+        claimNumber: data.claimNumber ?? null,
+        serviceAdvisorName: data.serviceAdvisorName ?? null,
+        serviceAdvisorEmail: data.serviceAdvisorEmail ?? null,
+        serviceAdvisorPhone: data.serviceAdvisorPhone ?? null,
+        serviceStartAt: data.serviceStartAt ? new Date(data.serviceStartAt) : null,
+        estimatedServiceCompletionAt: data.estimatedServiceCompletionAt ? new Date(data.estimatedServiceCompletionAt) : null,
+        serviceVehicleYear: data.serviceVehicleYear ?? null,
+        serviceVehicleMake: data.serviceVehicleMake ?? null,
+        serviceVehicleModel: data.serviceVehicleModel ?? null,
+        serviceVehiclePlate: data.serviceVehiclePlate ?? null,
+        serviceVehicleVin: data.serviceVehicleVin ?? null,
+        loanerLiabilityAccepted: !!data.loanerLiabilityAccepted,
+        loanerLiabilityAcceptedAt: data.loanerLiabilityAcceptedAt
+          ? new Date(data.loanerLiabilityAcceptedAt)
+          : (data.loanerLiabilityAccepted ? new Date() : null),
+        loanerProgramNotes: data.loanerProgramNotes ?? null,
+        loanerBorrowerPacketJson: data.loanerBorrowerPacketJson ?? null,
+        loanerBorrowerPacketCompletedAt: data.loanerBorrowerPacketCompletedAt ? new Date(data.loanerBorrowerPacketCompletedAt) : null,
+        loanerBorrowerPacketCompletedBy: data.loanerBorrowerPacketCompletedBy ?? null,
+        loanerBillingContactName: data.loanerBillingContactName ?? null,
+        loanerBillingContactEmail: data.loanerBillingContactEmail ?? null,
+        loanerBillingContactPhone: data.loanerBillingContactPhone ?? null,
+        loanerBillingAuthorizationRef: data.loanerBillingAuthorizationRef ?? null,
+        loanerBillingNotes: data.loanerBillingNotes ?? null,
+        loanerReturnExceptionFlag: !!data.loanerReturnExceptionFlag,
+        loanerReturnExceptionNotes: data.loanerReturnExceptionNotes ?? null,
+        loanerBillingStatus: data.loanerBillingStatus ?? 'DRAFT',
+        loanerBillingSubmittedAt: data.loanerBillingSubmittedAt ? new Date(data.loanerBillingSubmittedAt) : null,
+        loanerBillingSettledAt: data.loanerBillingSettledAt ? new Date(data.loanerBillingSettledAt) : null,
+        serviceAdvisorNotes: data.serviceAdvisorNotes ?? null,
+        serviceAdvisorUpdatedAt: data.serviceAdvisorUpdatedAt ? new Date(data.serviceAdvisorUpdatedAt) : null,
+        loanerServiceCompletedAt: data.loanerServiceCompletedAt ? new Date(data.loanerServiceCompletedAt) : null,
+        loanerServiceCompletedBy: data.loanerServiceCompletedBy ?? null,
+        loanerCloseoutNotes: data.loanerCloseoutNotes ?? null,
+        loanerPurchaseOrderNumber: data.loanerPurchaseOrderNumber ?? null,
+        loanerDealerInvoiceNumber: data.loanerDealerInvoiceNumber ?? null,
+        loanerAccountingNotes: data.loanerAccountingNotes ?? null,
+        loanerAccountingClosedAt: data.loanerAccountingClosedAt ? new Date(data.loanerAccountingClosedAt) : null,
+        loanerAccountingClosedBy: data.loanerAccountingClosedBy ?? null,
+        loanerLastExtendedAt: data.loanerLastExtendedAt ? new Date(data.loanerLastExtendedAt) : null,
+        loanerLastVehicleSwapAt: data.loanerLastVehicleSwapAt ? new Date(data.loanerLastVehicleSwapAt) : null,
         customerId: data.customerId,
         vehicleId: assignedVehicleId,
         vehicleTypeId: data.vehicleTypeId ?? null,
@@ -299,7 +398,7 @@ export const reservationsService = {
     });
   },
 
-  async update(id, patch, scope = {}) {
+  async update(id, patch, scope = {}, actorUserId = null) {
     const current = await prisma.reservation.findFirst({ where: { id, ...(scope?.tenantId ? { tenantId: scope.tenantId } : {}) } });
     if (!current) throw new Error('Reservation not found');
 
@@ -341,6 +440,39 @@ export const reservationsService = {
     const data = {
       ...patch,
       notes: mergeUnderageAlert(nextNotesInput, underageAlert),
+      serviceStartAt: patch.serviceStartAt
+        ? new Date(patch.serviceStartAt)
+        : (patch.serviceStartAt === null ? null : undefined),
+      estimatedServiceCompletionAt: patch.estimatedServiceCompletionAt
+        ? new Date(patch.estimatedServiceCompletionAt)
+        : (patch.estimatedServiceCompletionAt === null ? null : undefined),
+      loanerLiabilityAcceptedAt: patch.loanerLiabilityAcceptedAt
+        ? new Date(patch.loanerLiabilityAcceptedAt)
+        : (patch.loanerLiabilityAccepted === true ? new Date() : undefined),
+      loanerBorrowerPacketCompletedAt: patch.loanerBorrowerPacketCompletedAt
+        ? new Date(patch.loanerBorrowerPacketCompletedAt)
+        : (patch.loanerBorrowerPacketCompletedAt === null ? null : undefined),
+      loanerBillingSubmittedAt: patch.loanerBillingSubmittedAt
+        ? new Date(patch.loanerBillingSubmittedAt)
+        : (patch.loanerBillingSubmittedAt === null ? null : undefined),
+      loanerBillingSettledAt: patch.loanerBillingSettledAt
+        ? new Date(patch.loanerBillingSettledAt)
+        : (patch.loanerBillingSettledAt === null ? null : undefined),
+      serviceAdvisorUpdatedAt: patch.serviceAdvisorUpdatedAt
+        ? new Date(patch.serviceAdvisorUpdatedAt)
+        : (patch.serviceAdvisorUpdatedAt === null ? null : undefined),
+      loanerServiceCompletedAt: patch.loanerServiceCompletedAt
+        ? new Date(patch.loanerServiceCompletedAt)
+        : (patch.loanerServiceCompletedAt === null ? null : undefined),
+      loanerAccountingClosedAt: patch.loanerAccountingClosedAt
+        ? new Date(patch.loanerAccountingClosedAt)
+        : (patch.loanerAccountingClosedAt === null ? null : undefined),
+      loanerLastExtendedAt: patch.loanerLastExtendedAt
+        ? new Date(patch.loanerLastExtendedAt)
+        : (patch.loanerLastExtendedAt === null ? null : undefined),
+      loanerLastVehicleSwapAt: patch.loanerLastVehicleSwapAt
+        ? new Date(patch.loanerLastVehicleSwapAt)
+        : (patch.loanerLastVehicleSwapAt === null ? null : undefined),
       pickupAt: patch.pickupAt ? new Date(patch.pickupAt) : undefined,
       returnAt: patch.returnAt ? new Date(patch.returnAt) : undefined
     };
@@ -362,10 +494,20 @@ export const reservationsService = {
     delete data.vehicleTypeId;
     delete data.vehicleId;
 
-    return prisma.reservation.update({
+    const updated = await prisma.reservation.update({
       where: { id },
       data
     });
+
+    if (String(updated.workflowMode || '').toUpperCase() === 'CAR_SHARING' && String(updated.status || '').toUpperCase() === 'CHECKED_IN') {
+      await completeLinkedCarSharingTripForReservation(
+        updated.id,
+        actorUserId,
+        'Trip auto-completed from reservation status patch'
+      );
+    }
+
+    return updated;
   },
 
   async remove(id, scope = {}) {

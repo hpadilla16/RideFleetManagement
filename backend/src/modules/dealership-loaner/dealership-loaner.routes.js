@@ -1,0 +1,216 @@
+import { Router } from 'express';
+import { prisma } from '../../lib/prisma.js';
+import { isSuperAdmin, requireRole } from '../../middleware/auth.js';
+import { dealershipLoanerService } from './dealership-loaner.service.js';
+
+export const dealershipLoanerRouter = Router();
+
+async function ensureLoanerEnabled(req, res, next) {
+  try {
+    if (isSuperAdmin(req.user)) return next();
+    const tenantId = req.user?.tenantId || null;
+    if (!tenantId) return res.status(403).json({ error: 'Dealership loaner is not enabled for this tenant' });
+    const tenant = await prisma.tenant.findUnique({
+      where: { id: tenantId },
+      select: { dealershipLoanerEnabled: true }
+    });
+    if (!tenant?.dealershipLoanerEnabled) {
+      return res.status(403).json({ error: 'Dealership loaner is not enabled for this tenant' });
+    }
+    next();
+  } catch (error) {
+    next(error);
+  }
+}
+
+dealershipLoanerRouter.use(requireRole('ADMIN', 'OPS', 'AGENT'));
+
+dealershipLoanerRouter.get('/config', async (req, res, next) => {
+  try {
+    const tenantId = isSuperAdmin(req.user) ? (req.query?.tenantId ? String(req.query.tenantId) : null) : null;
+    res.json(await dealershipLoanerService.getConfig(req.user, tenantId));
+  } catch (error) {
+    next(error);
+  }
+});
+
+dealershipLoanerRouter.use(ensureLoanerEnabled);
+
+dealershipLoanerRouter.get('/intake-options', async (req, res, next) => {
+  try {
+    res.json(await dealershipLoanerService.getIntakeOptions(req.user));
+  } catch (error) {
+    next(error);
+  }
+});
+
+dealershipLoanerRouter.get('/dashboard', async (req, res, next) => {
+  try {
+    res.json(await dealershipLoanerService.getDashboard(req.user, {
+      query: req.query?.q ? String(req.query.q) : ''
+    }));
+  } catch (error) {
+    next(error);
+  }
+});
+
+dealershipLoanerRouter.get('/billing-export', async (req, res, next) => {
+  try {
+    const csv = await dealershipLoanerService.exportBillingCsv(req.user, {
+      query: req.query?.q ? String(req.query.q) : '',
+      billingStatus: req.query?.billingStatus ? String(req.query.billingStatus) : '',
+      billingMode: req.query?.billingMode ? String(req.query.billingMode) : '',
+      startDate: req.query?.startDate ? String(req.query.startDate) : '',
+      endDate: req.query?.endDate ? String(req.query.endDate) : ''
+    });
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename="loaner-billing-export.csv"`);
+    res.send(csv);
+  } catch (error) {
+    next(error);
+  }
+});
+
+dealershipLoanerRouter.get('/statement-export', async (req, res, next) => {
+  try {
+    const csv = await dealershipLoanerService.exportStatementCsv(req.user, {
+      query: req.query?.q ? String(req.query.q) : '',
+      billingStatus: req.query?.billingStatus ? String(req.query.billingStatus) : '',
+      billingMode: req.query?.billingMode ? String(req.query.billingMode) : '',
+      startDate: req.query?.startDate ? String(req.query.startDate) : '',
+      endDate: req.query?.endDate ? String(req.query.endDate) : ''
+    });
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', 'attachment; filename="loaner-dealer-statement.csv"');
+    res.send(csv);
+  } catch (error) {
+    next(error);
+  }
+});
+
+dealershipLoanerRouter.get('/statement-print', async (req, res, next) => {
+  try {
+    const html = await dealershipLoanerService.renderStatementPrint(req.user, {
+      query: req.query?.q ? String(req.query.q) : '',
+      billingStatus: req.query?.billingStatus ? String(req.query.billingStatus) : '',
+      billingMode: req.query?.billingMode ? String(req.query.billingMode) : '',
+      startDate: req.query?.startDate ? String(req.query.startDate) : '',
+      endDate: req.query?.endDate ? String(req.query.endDate) : ''
+    });
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    res.send(html);
+  } catch (error) {
+    next(error);
+  }
+});
+
+dealershipLoanerRouter.get('/reservations/:id', async (req, res, next) => {
+  try {
+    res.json(await dealershipLoanerService.getReservation(req.user, req.params.id));
+  } catch (error) {
+    res.status(404).json({ error: error.message });
+  }
+});
+
+dealershipLoanerRouter.get('/reservations/:id/handoff-print', async (req, res, next) => {
+  try {
+    const html = await dealershipLoanerService.renderHandoffPrint(req.user, req.params.id);
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    res.send(html);
+  } catch (error) {
+    res.status(404).json({ error: error.message });
+  }
+});
+
+dealershipLoanerRouter.get('/reservations/:id/billing-print', async (req, res, next) => {
+  try {
+    const html = await dealershipLoanerService.renderBillingPrint(req.user, req.params.id);
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    res.send(html);
+  } catch (error) {
+    res.status(404).json({ error: error.message });
+  }
+});
+
+dealershipLoanerRouter.get('/reservations/:id/purchase-order-print', async (req, res, next) => {
+  try {
+    const html = await dealershipLoanerService.renderPurchaseOrderPrint(req.user, req.params.id);
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    res.send(html);
+  } catch (error) {
+    res.status(404).json({ error: error.message });
+  }
+});
+
+dealershipLoanerRouter.post('/reservations/:id/borrower-packet', async (req, res, next) => {
+  try {
+    res.json(await dealershipLoanerService.saveBorrowerPacket(req.user, req.params.id, req.body || {}));
+  } catch (error) {
+    res.status(400).json({ error: error.message });
+  }
+});
+
+dealershipLoanerRouter.post('/reservations/:id/billing', async (req, res, next) => {
+  try {
+    res.json(await dealershipLoanerService.saveBilling(req.user, req.params.id, req.body || {}));
+  } catch (error) {
+    res.status(400).json({ error: error.message });
+  }
+});
+
+dealershipLoanerRouter.post('/reservations/:id/accounting-closeout', async (req, res, next) => {
+  try {
+    res.json(await dealershipLoanerService.saveAccountingCloseout(req.user, req.params.id, req.body || {}));
+  } catch (error) {
+    res.status(400).json({ error: error.message });
+  }
+});
+
+dealershipLoanerRouter.post('/reservations/:id/advisor-ops', async (req, res, next) => {
+  try {
+    res.json(await dealershipLoanerService.saveAdvisorOps(req.user, req.params.id, req.body || {}));
+  } catch (error) {
+    res.status(400).json({ error: error.message });
+  }
+});
+
+dealershipLoanerRouter.post('/reservations/:id/return-exception', async (req, res, next) => {
+  try {
+    res.json(await dealershipLoanerService.saveReturnException(req.user, req.params.id, req.body || {}));
+  } catch (error) {
+    res.status(400).json({ error: error.message });
+  }
+});
+
+dealershipLoanerRouter.post('/reservations/:id/extend', async (req, res, next) => {
+  try {
+    res.json(await dealershipLoanerService.extendLoaner(req.user, req.params.id, req.body || {}));
+  } catch (error) {
+    res.status(400).json({ error: error.message });
+  }
+});
+
+dealershipLoanerRouter.post('/reservations/:id/swap-vehicle', async (req, res, next) => {
+  try {
+    res.json(await dealershipLoanerService.swapVehicle(req.user, req.params.id, req.body || {}));
+  } catch (error) {
+    res.status(400).json({ error: error.message });
+  }
+});
+
+dealershipLoanerRouter.post('/reservations/:id/complete-service', async (req, res, next) => {
+  try {
+    res.json(await dealershipLoanerService.completeService(req.user, req.params.id, req.body || {}));
+  } catch (error) {
+    res.status(400).json({ error: error.message });
+  }
+});
+
+dealershipLoanerRouter.post('/intake', async (req, res, next) => {
+  try {
+    const row = await dealershipLoanerService.intake(req.user, req.body || {});
+    res.status(201).json(row);
+  } catch (error) {
+    res.status(400).json({ error: error.message });
+  }
+});

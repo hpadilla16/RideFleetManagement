@@ -8,6 +8,7 @@ import { api } from '../../lib/client';
 const EMPTY_PERSON = {
   personType: 'EMPLOYEE',
   role: 'AGENT',
+  tenantId: '',
   fullName: '',
   displayName: '',
   legalName: '',
@@ -19,7 +20,8 @@ const EMPTY_PERSON = {
   payoutProvider: '',
   payoutAccountRef: '',
   payoutEnabled: false,
-  notes: ''
+  notes: '',
+  status: 'ACTIVE'
 };
 
 function metricSummary(people) {
@@ -57,6 +59,7 @@ function Inner({ token, me, logout }) {
   const [activeTenantId, setActiveTenantId] = useState('');
   const [search, setSearch] = useState('');
   const [form, setForm] = useState(EMPTY_PERSON);
+  const [editingPersonId, setEditingPersonId] = useState('');
 
   const role = String(me?.role || '').toUpperCase();
   const isSuper = role === 'SUPER_ADMIN';
@@ -91,17 +94,26 @@ function Inner({ token, me, logout }) {
     load();
   }, [token, scopedQuery, canManagePeople]);
 
+  useEffect(() => {
+    if (isSuper && activeTenantId && !editingPersonId) {
+      setForm((current) => ({ ...current, tenantId: activeTenantId }));
+    }
+  }, [isSuper, activeTenantId, editingPersonId]);
+
   const savePerson = async (e) => {
     e.preventDefault();
     try {
       const payload = {
         ...form,
-        tenantId: isSuper ? activeTenantId : undefined
+        tenantId: isSuper ? (form.tenantId || activeTenantId) : undefined
       };
-      const out = await api('/api/people', { method: 'POST', body: JSON.stringify(payload) }, token);
-      setForm({ ...EMPTY_PERSON });
+      const out = editingPersonId
+        ? await api(`/api/people/${editingPersonId}`, { method: 'PATCH', body: JSON.stringify(payload) }, token)
+        : await api('/api/people', { method: 'POST', body: JSON.stringify(payload) }, token);
+      setForm({ ...EMPTY_PERSON, tenantId: isSuper ? activeTenantId : '' });
+      setEditingPersonId('');
       setMsg(
-        out?.tempPassword
+        editingPersonId ? 'Person updated' : out?.tempPassword
           ? `Person created. Temporary password: ${out.tempPassword}${out.inviteSent ? ' · Invite sent' : ''}`
           : 'Person created'
       );
@@ -109,6 +121,34 @@ function Inner({ token, me, logout }) {
     } catch (e2) {
       setMsg(e2.message);
     }
+  };
+
+  const startEditPerson = (person) => {
+    setEditingPersonId(person.id);
+    setForm({
+      personType: person.personType || 'EMPLOYEE',
+      role: person.accessRole || (person.personType === 'ADMIN' ? 'ADMIN' : 'AGENT'),
+      tenantId: person.tenantId || activeTenantId || '',
+      fullName: person.personType === 'HOST' ? '' : (person.fullName || person.displayName || ''),
+      displayName: person.personType === 'HOST' ? (person.displayName || '') : '',
+      legalName: person.legalName || '',
+      email: person.email || '',
+      phone: person.phone || '',
+      enableLogin: !!person.hasLogin,
+      sendInvite: false,
+      password: '',
+      payoutProvider: person.payoutProvider || '',
+      payoutAccountRef: person.payoutAccountRef || '',
+      payoutEnabled: !!person.payoutEnabled,
+      notes: person.notes || '',
+      status: person.status || 'ACTIVE'
+    });
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
+  const resetForm = () => {
+    setEditingPersonId('');
+    setForm({ ...EMPTY_PERSON, tenantId: isSuper ? activeTenantId : '' });
   };
 
   const resetPassword = async (person) => {
@@ -152,7 +192,7 @@ function Inner({ token, me, logout }) {
 
   const metrics = useMemo(() => metricSummary(visiblePeople), [visiblePeople]);
   const hostMode = form.personType === 'HOST';
-  const loginRequired = form.personType !== 'HOST' || form.enableLogin;
+  const loginRequired = !editingPersonId && (form.personType !== 'HOST' || form.enableLogin);
 
   if (!canManagePeople) {
     return (
@@ -179,7 +219,7 @@ function Inner({ token, me, logout }) {
             </p>
             <div className="hero-meta">
               <span className="hero-pill">{isSuper ? 'Super admin tenant routing' : 'Tenant-scoped access'}</span>
-              <span className="hero-pill">{loginRequired ? 'Invite-ready access flow' : 'Profile-only host flow'}</span>
+              <span className="hero-pill">{editingPersonId ? 'Edit and reassign flow' : (loginRequired ? 'Invite-ready access flow' : 'Profile-only host flow')}</span>
               <span className="hero-pill">{visiblePeople.length} active people in view</span>
             </div>
           </section>
@@ -241,13 +281,24 @@ function Inner({ token, me, logout }) {
         <section className="glass card-lg section-card">
           <div className="row-between" style={{ marginBottom: 0 }}>
             <div>
-              <div className="section-title">Create Person</div>
-              <div className="ui-muted">{personTypeSummary(form.personType)}</div>
+              <div className="section-title">{editingPersonId ? 'Edit Person' : 'Create Person'}</div>
+              <div className="ui-muted">{editingPersonId ? 'Update tenant scope, profile details, and host setup.' : personTypeSummary(form.personType)}</div>
             </div>
           </div>
 
           <form className="stack" onSubmit={savePerson}>
             <div className="form-grid-2">
+              {isSuper ? (
+                <div className="stack">
+                  <label className="label">Assigned Tenant</label>
+                  <select value={form.tenantId || ''} onChange={(e) => setForm({ ...form, tenantId: e.target.value })}>
+                    {tenants.map((tenant) => (
+                      <option key={tenant.id} value={tenant.id}>{tenant.name}</option>
+                    ))}
+                  </select>
+                </div>
+              ) : null}
+
               <div className="stack">
                 <label className="label">Person Type</label>
                 <select
@@ -258,6 +309,7 @@ function Inner({ token, me, logout }) {
                     role: e.target.value === 'ADMIN' ? 'ADMIN' : 'AGENT',
                     enableLogin: e.target.value === 'HOST' ? false : true
                   })}
+                  disabled={!!editingPersonId}
                 >
                   <option value="ADMIN">ADMIN</option>
                   <option value="EMPLOYEE">EMPLOYEE</option>
@@ -313,13 +365,20 @@ function Inner({ token, me, logout }) {
                   access if you want them inside the dashboard today.
                 </div>
 
-                <label className="label" style={{ textTransform: 'none', letterSpacing: 0 }}>
-                  <input
-                    type="checkbox"
-                    checked={form.enableLogin}
-                    onChange={(e) => setForm({ ...form, enableLogin: e.target.checked })}
-                  /> Enable host login
-                </label>
+                {!editingPersonId ? (
+                  <label className="label" style={{ textTransform: 'none', letterSpacing: 0 }}>
+                    <input
+                      type="checkbox"
+                      checked={form.enableLogin}
+                      onChange={(e) => setForm({ ...form, enableLogin: e.target.checked })}
+                    /> Enable host login
+                  </label>
+                ) : (
+                  <div className="surface-note">
+                    Existing host login access stays as-is here. This edit flow is for tenant reassignment, profile
+                    updates, and payout setup.
+                  </div>
+                )}
 
                 <div className="form-grid-2">
                   <div className="stack">
@@ -347,6 +406,15 @@ function Inner({ token, me, logout }) {
                     onChange={(e) => setForm({ ...form, payoutEnabled: e.target.checked })}
                   /> Payouts enabled
                 </label>
+
+                <div className="stack">
+                  <label className="label">Host Status</label>
+                  <select value={form.status || 'ACTIVE'} onChange={(e) => setForm({ ...form, status: e.target.value })}>
+                    <option value="ACTIVE">ACTIVE</option>
+                    <option value="PAUSED">PAUSED</option>
+                    <option value="INACTIVE">INACTIVE</option>
+                  </select>
+                </div>
               </>
             ) : null}
 
@@ -379,7 +447,7 @@ function Inner({ token, me, logout }) {
               <textarea rows={3} value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} />
             </div>
 
-            {hostMode && form.enableLogin ? (
+            {hostMode && form.enableLogin && !editingPersonId ? (
               <div className="surface-note">
                 Host login uses the current platform auth stack for now. In the next slice we can tighten host-specific
                 navigation and permissions when we start shaping the host app.
@@ -387,8 +455,8 @@ function Inner({ token, me, logout }) {
             ) : null}
 
             <div className="inline-actions">
-              <button type="submit">Create Person</button>
-              <button type="button" className="button-subtle" onClick={() => setForm({ ...EMPTY_PERSON })}>Reset Form</button>
+              <button type="submit">{editingPersonId ? 'Save Changes' : 'Create Person'}</button>
+              <button type="button" className="button-subtle" onClick={resetForm}>{editingPersonId ? 'Cancel Edit' : 'Reset Form'}</button>
             </div>
           </form>
         </section>
@@ -407,6 +475,7 @@ function Inner({ token, me, logout }) {
               <thead>
                 <tr>
                   <th>Name</th>
+                  {isSuper ? <th>Tenant</th> : null}
                   <th>Type</th>
                   <th>Role</th>
                   <th>Email</th>
@@ -425,6 +494,7 @@ function Inner({ token, me, logout }) {
                         <span className="ui-muted" style={{ fontSize: 12 }}>{person.legalName || 'No legal name yet'}</span>
                       </div>
                     </td>
+                    {isSuper ? <td>{person.tenantName || '-'}</td> : null}
                     <td>{person.personType}</td>
                     <td>{person.accessRole || '-'}</td>
                     <td>{person.email || '-'}</td>
@@ -438,13 +508,12 @@ function Inner({ token, me, logout }) {
                       <span className={personStatusClass(person.status)}>{person.status}</span>
                     </td>
                     <td>
-                      {person.hasLogin && person.userId ? (
-                        <div className="inline-actions">
+                      <div className="inline-actions">
+                        <button type="button" className="button-subtle" onClick={() => startEditPerson(person)}>Edit</button>
+                        {person.hasLogin && person.userId ? (
                           <button type="button" onClick={() => resetPassword(person)}>Reset Password</button>
-                        </div>
-                      ) : (
-                        '-'
-                      )}
+                        ) : null}
+                      </div>
                     </td>
                   </tr>
                 ))}

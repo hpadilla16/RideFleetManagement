@@ -13,7 +13,8 @@ export const vehicleTypesService = {
         tenantId: scope?.tenantId || data.tenantId || null,
         code: data.code,
         name: data.name,
-        description: data.description ?? null
+        description: data.description ?? null,
+        imageUrl: data.imageUrl ?? null
       }
     });
   },

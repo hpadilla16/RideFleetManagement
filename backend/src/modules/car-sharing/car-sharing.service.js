@@ -1,4 +1,5 @@
 import { prisma } from '../../lib/prisma.js';
+import { hostReviewsService } from '../host-reviews/host-reviews.service.js';
 
 function slugify(input) {
   return String(input || '')
@@ -37,6 +38,7 @@ function tripInclude() {
         rentalAgreement: true
       }
     },
+    hostReview: true,
     pickupLocation: true,
     returnLocation: true,
     timelineEvents: { orderBy: [{ eventAt: 'desc' }], take: 10 }
@@ -107,6 +109,7 @@ async function createReservationForTrip({ tenantId, listing, guestCustomerId, pi
       reservationNumber: generateReservationNumber(),
       sourceRef: `CARSHARE:${tripCode}`,
       status: 'CONFIRMED',
+      workflowMode: 'CAR_SHARING',
       customerId: guestCustomerId,
       vehicleId: listing.vehicleId,
       vehicleTypeId: listing.vehicle?.vehicleTypeId || null,
@@ -548,6 +551,7 @@ export const carSharingService = {
         maxTripDays: data?.maxTripDays ? Number(data.maxTripDays) : null,
         tripRules: data?.tripRules ? String(data.tripRules).trim() : null,
         photosJson: data?.photosJson ? String(data.photosJson).trim() : null,
+        addOnsJson: data?.addOnsJson ? String(data.addOnsJson).trim() : null,
         publishedAt: String(data?.status || '').trim().toUpperCase() === 'PUBLISHED' ? new Date() : null
       },
       include: listingInclude()
@@ -676,7 +680,7 @@ export const carSharingService = {
       throw new Error(`Cannot move trip from ${current.status} to ${nextStatus}`);
     }
     const now = new Date();
-    return prisma.trip.update({
+    const updatedTrip = await prisma.trip.update({
       where: { id },
       data: {
         status: nextStatus,
@@ -697,6 +701,14 @@ export const carSharingService = {
       },
       include: tripInclude()
     });
+    if (nextStatus === 'COMPLETED') {
+      try {
+        await hostReviewsService.issueGuestReviewRequestForTrip(updatedTrip.id);
+      } catch (error) {
+        console.error('Unable to issue host review request', error);
+      }
+    }
+    return updatedTrip;
   },
 
   async ensureTripWorkflow(id, scope = {}) {
@@ -758,6 +770,7 @@ export const carSharingService = {
         maxTripDays: Object.prototype.hasOwnProperty.call(patch || {}, 'maxTripDays') ? (patch?.maxTripDays ? Number(patch.maxTripDays) : null) : undefined,
         tripRules: Object.prototype.hasOwnProperty.call(patch || {}, 'tripRules') ? (patch?.tripRules ? String(patch.tripRules).trim() : null) : undefined,
         photosJson: Object.prototype.hasOwnProperty.call(patch || {}, 'photosJson') ? (patch?.photosJson ? String(patch.photosJson).trim() : null) : undefined,
+        addOnsJson: Object.prototype.hasOwnProperty.call(patch || {}, 'addOnsJson') ? (patch?.addOnsJson ? String(patch.addOnsJson).trim() : null) : undefined,
         publishedAt: nextStatus === 'PUBLISHED'
           ? new Date()
           : nextStatus === 'DRAFT' || nextStatus === 'ARCHIVED'

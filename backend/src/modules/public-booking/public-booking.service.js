@@ -1,4 +1,6 @@
 import { bookingEngineService } from '../booking-engine/booking-engine.service.js';
+import { issueCenterService } from '../issue-center/issue-center.service.js';
+import { hostReviewsService } from '../host-reviews/host-reviews.service.js';
 
 function money(value) {
   return Number(Number(value || 0).toFixed(2));
@@ -23,7 +25,9 @@ export const publicBookingService = {
         maxTripDays: listing.maxTripDays ? Number(listing.maxTripDays) : null,
         host: listing.host || null,
         vehicle: listing.vehicle || null,
-        location: listing.location || null
+        location: listing.location || null,
+        primaryImageUrl: listing.primaryImageUrl || '',
+        imageUrls: listing.imageUrls || []
       }))
     };
   },
@@ -42,6 +46,8 @@ export const publicBookingService = {
       results: (payload.results || []).map((result) => ({
         vehicleType: result.vehicleType,
         location: payload.location,
+        primaryImageUrl: result.vehicleType?.imageUrl || '',
+        imageUrls: result.vehicleType?.imageUrl ? [result.vehicleType.imageUrl] : [],
         availabilityCount: Number(result.availability?.availableUnits || 0),
         soldOut: !result.availability?.available,
         sampleVehicleLabel: '',
@@ -111,6 +117,21 @@ export const publicBookingService = {
         host: result.listing.host || null,
         vehicle: result.listing.vehicle || null,
         location: result.listing.location || null,
+        additionalServices: (result.listing.additionalServices || []).map((service) => ({
+          serviceId: service.serviceId,
+          code: service.code,
+          name: service.name,
+          description: service.description || '',
+          unitLabel: service.unitLabel || 'Unit',
+          pricingMode: service.pricingMode || 'FLAT',
+          quantity: Number(service.quantity || 1),
+          rate: money(service.rate),
+          total: money(service.total),
+          taxable: !!service.taxable,
+          mandatory: !!service.mandatory
+        })),
+        primaryImageUrl: result.listing.primaryImageUrl || '',
+        imageUrls: result.listing.imageUrls || [],
         quote: {
           tripDays: Number(result.quote?.tripDays || 0),
           subtotal: money(result.quote?.subtotal),
@@ -131,5 +152,21 @@ export const publicBookingService = {
 
   async lookupBooking(input = {}) {
     return bookingEngineService.lookupPublicBooking(input);
+  },
+
+  async createIssue(input = {}) {
+    return issueCenterService.createGuestIncident(input);
+  },
+
+  async getHostProfile(id) {
+    return hostReviewsService.getPublicHostProfile(id);
+  },
+
+  async getHostReviewPrompt(token) {
+    return hostReviewsService.getPublicReviewPrompt(token);
+  },
+
+  async submitHostReview(token, input = {}) {
+    return hostReviewsService.submitPublicReview(token, input);
   }
 };

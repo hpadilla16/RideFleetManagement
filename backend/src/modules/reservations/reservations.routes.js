@@ -390,7 +390,7 @@ reservationsRouter.patch('/:id', async (req, res, next) => {
       return res.status(400).json({ error: 'Validation failed', details: validationErrors });
     }
 
-    const row = await reservationsService.update(req.params.id, req.body || {}, scopeFor(req));
+    const row = await reservationsService.update(req.params.id, req.body || {}, scopeFor(req), req.user?.sub || null);
 
     await prisma.auditLog.create({
       data: {
@@ -434,7 +434,7 @@ reservationsRouter.post('/:id/admin-transition', async (req, res, next) => {
     const row = await reservationsService.update(req.params.id, {
       status,
       notes: nextNotes
-    }, scopeFor(req));
+    }, scopeFor(req), req.user?.sub || null);
 
     await prisma.auditLog.create({
       data: {

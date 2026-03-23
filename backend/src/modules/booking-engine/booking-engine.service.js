@@ -42,6 +42,10 @@ function money(value) {
   return Number(Number(value || 0).toFixed(2));
 }
 
+function ratingNumber(value) {
+  return Number(Number(value || 0).toFixed(2));
+}
+
 function parseJsonArray(value) {
   try {
     const parsed = typeof value === 'string' ? JSON.parse(value) : value;
@@ -49,6 +53,74 @@ function parseJsonArray(value) {
   } catch {
     return [];
   }
+}
+
+function normalizePhotoList(value, limit = 6) {
+  return parseJsonArray(value)
+    .map((item) => String(item || '').trim())
+    .filter(Boolean)
+    .slice(0, limit);
+}
+
+function normalizeHostAddOns(value) {
+  return parseJsonArray(value)
+    .map((item, index) => {
+      const name = String(item?.name || '').trim();
+      const description = String(item?.description || '').trim();
+      const rate = money(item?.price || 0);
+      if (!name || rate <= 0) return null;
+      return {
+        serviceId: String(item?.id || `${name.toLowerCase().replace(/[^a-z0-9]+/g, '-') || 'addon'}-${index + 1}`),
+        code: null,
+        name,
+        description,
+        chargeType: 'UNIT',
+        unitLabel: 'Unit',
+        pricingMode: 'FLAT',
+        quantity: 1,
+        rate,
+        total: rate,
+        taxable: false,
+        mandatory: false,
+        source: 'HOST_ADDON'
+      };
+    })
+    .filter(Boolean);
+}
+
+function bookingImageSet({ vehicleTypeImageUrl, listingPhotos }) {
+  const photos = normalizePhotoList(listingPhotos);
+  if (photos.length) {
+    return {
+      primaryImageUrl: photos[0],
+      imageUrls: photos
+    };
+  }
+  return {
+    primaryImageUrl: vehicleTypeImageUrl ? String(vehicleTypeImageUrl).trim() : '',
+    imageUrls: vehicleTypeImageUrl ? [String(vehicleTypeImageUrl).trim()] : []
+  };
+}
+
+function publicHostSelect() {
+  return {
+    id: true,
+    displayName: true,
+    averageRating: true,
+    reviewCount: true,
+    createdAt: true
+  };
+}
+
+function publicHostSummary(hostProfile) {
+  if (!hostProfile) return null;
+  return {
+    id: hostProfile.id,
+    displayName: hostProfile.displayName,
+    averageRating: ratingNumber(hostProfile.averageRating),
+    reviewCount: Number(hostProfile.reviewCount || 0),
+    createdAt: hostProfile.createdAt || null
+  };
 }
 
 function isServiceEligibleForVehicleType(service, vehicleTypeId) {
@@ -239,6 +311,21 @@ function existingPortalAction(kind, reservation) {
 
 async function ensurePortalRequest(kind, reservation) {
   return existingPortalAction(kind, reservation) || issuePortalRequest(kind, reservation);
+}
+
+function existingHostReviewAction(review) {
+  if (!review?.publicToken) return null;
+  const expiresAt = review.publicTokenExpiresAt ? new Date(review.publicTokenExpiresAt) : null;
+  if (review.status !== 'SUBMITTED' && (!expiresAt || Number.isNaN(expiresAt.getTime()) || expiresAt.getTime() <= Date.now())) {
+    return null;
+  }
+  const base = process.env.CUSTOMER_PORTAL_BASE_URL || 'http://localhost:3000';
+  return {
+    kind: 'host-review',
+    link: `${base.replace(/\/$/, '')}/host-review?token=${review.publicToken}`,
+    expiresAt,
+    completed: review.status === 'SUBMITTED'
+  };
 }
 
 async function listPublicAdditionalServices({ tenantId, locationId, vehicleTypeId, days }) {
@@ -434,14 +521,14 @@ export const bookingEngineService = {
       }),
       prisma.vehicleType.findMany({
         where: { tenantId: tenant.id },
-        select: { id: true, code: true, name: true, description: true },
+        select: { id: true, code: true, name: true, description: true, imageUrl: true },
         orderBy: [{ name: 'asc' }]
       }),
       prisma.hostVehicleListing.findMany({
         where: { tenantId: tenant.id, status: 'PUBLISHED' },
         include: {
-          hostProfile: { select: { id: true, displayName: true } },
-          vehicle: { select: { id: true, make: true, model: true, year: true, color: true, plate: true } },
+          hostProfile: { select: publicHostSelect() },
+          vehicle: { select: { id: true, make: true, model: true, year: true, color: true, plate: true, vehicleType: { select: { imageUrl: true } } } },
           location: { select: { id: true, name: true, city: true, state: true } }
         },
         orderBy: [{ publishedAt: 'desc' }, { createdAt: 'desc' }],
@@ -478,9 +565,13 @@ export const bookingEngineService = {
         cleaningFee: money(listing.cleaningFee),
         deliveryFee: money(listing.deliveryFee),
         instantBook: !!listing.instantBook,
-        host: listing.hostProfile,
+        host: publicHostSummary(listing.hostProfile),
         vehicle: listing.vehicle,
-        location: listing.location
+        location: listing.location,
+        ...bookingImageSet({
+          vehicleTypeImageUrl: listing.vehicle?.vehicleType?.imageUrl,
+          listingPhotos: listing.photosJson
+        })
       })),
       bookingModes: {
         rental: true,
@@ -550,13 +641,14 @@ export const bookingEngineService = {
       ]);
       const taxes = money(Number(quote.baseTotal || 0) * (Number(location.taxRate || 0) / 100));
       const total = money(Number(quote.baseTotal || 0) + taxes);
-      results.push({
-        vehicleType: {
-          id: vehicleType.id,
-          code: vehicleType.code,
-          name: vehicleType.name,
-          description: vehicleType.description
-        },
+        results.push({
+          vehicleType: {
+            id: vehicleType.id,
+            code: vehicleType.code,
+            name: vehicleType.name,
+            description: vehicleType.description,
+            imageUrl: vehicleType.imageUrl || ''
+          },
         availability: {
           availableUnits,
           available: availableUnits > 0
@@ -603,8 +695,8 @@ export const bookingEngineService = {
         ...(locationId ? { locationId: String(locationId) } : {})
       },
       include: {
-        hostProfile: { select: { id: true, displayName: true } },
-        vehicle: { select: { id: true, make: true, model: true, year: true, color: true, plate: true } },
+        hostProfile: { select: publicHostSelect() },
+        vehicle: { select: { id: true, make: true, model: true, year: true, color: true, plate: true, vehicleType: { select: { imageUrl: true } } } },
         location: { select: { id: true, name: true, city: true, state: true } },
         availabilityWindows: { orderBy: [{ startAt: 'asc' }] }
       },
@@ -633,9 +725,14 @@ export const bookingEngineService = {
           instantBook: !!listing.instantBook,
           minTripDays: listing.minTripDays,
           maxTripDays: listing.maxTripDays,
-          host: listing.hostProfile,
+          host: publicHostSummary(listing.hostProfile),
           vehicle: listing.vehicle,
-          location: listing.location
+          location: listing.location,
+          additionalServices: normalizeHostAddOns(listing.addOnsJson),
+          ...bookingImageSet({
+            vehicleTypeImageUrl: listing.vehicle?.vehicleType?.imageUrl,
+            listingPhotos: listing.photosJson
+          })
         },
         quote
       }];
@@ -662,8 +759,8 @@ export const bookingEngineService = {
         status: 'PUBLISHED'
       },
       include: {
-        hostProfile: { select: { id: true, displayName: true, notes: true } },
-        vehicle: { select: { id: true, make: true, model: true, year: true, color: true, plate: true } },
+        hostProfile: { select: publicHostSelect() },
+        vehicle: { select: { id: true, make: true, model: true, year: true, color: true, plate: true, vehicleType: { select: { imageUrl: true } } } },
         location: { select: { id: true, name: true, city: true, state: true } },
         availabilityWindows: { orderBy: [{ startAt: 'asc' }] }
       }
@@ -685,9 +782,13 @@ export const bookingEngineService = {
       minTripDays: listing.minTripDays,
       maxTripDays: listing.maxTripDays,
       tripRules: listing.tripRules,
-      host: listing.hostProfile,
+      host: publicHostSummary(listing.hostProfile),
       vehicle: listing.vehicle,
-      location: listing.location
+      location: listing.location,
+      ...bookingImageSet({
+        vehicleTypeImageUrl: listing.vehicle?.vehicleType?.imageUrl,
+        listingPhotos: listing.photosJson
+      })
     };
 
     const pickupDate = toDate(pickupAt);
@@ -920,6 +1021,29 @@ export const bookingEngineService = {
       };
     }
 
+    const search = await this.searchCarSharing({
+      tenantId: tenant.id,
+      pickupAt: input?.pickupAt,
+      returnAt: input?.returnAt,
+      locationId: input?.pickupLocationId || null
+    });
+    const selected = (search.results || []).find((row) => row.listing?.id === String(input?.listingId || ''));
+    if (!selected) throw new Error('Selected car sharing listing is no longer available');
+    const requestedServices = Array.isArray(input?.additionalServices) ? input.additionalServices : [];
+    const normalizedChosenServices = requestedServices
+      .map((row) => {
+        const serviceId = String(row?.serviceId || '').trim();
+        const match = (selected.listing?.additionalServices || []).find((service) => service.serviceId === serviceId);
+        if (!match) return null;
+        const quantity = Math.max(1, Number(row?.quantity ?? match.quantity ?? 1) || 1);
+        return {
+          ...match,
+          quantity,
+          total: money(Number(match.rate || 0) * quantity)
+        };
+      })
+      .filter(Boolean);
+
     const trip = await carSharingService.createTrip({
       tenantId: tenant.id,
       listingId: input?.listingId,
@@ -930,6 +1054,25 @@ export const bookingEngineService = {
       returnLocationId: input?.returnLocationId || input?.pickupLocationId || null,
       notes: '[PUBLIC BOOKING] Created from booking web'
     }, { tenantId: tenant.id });
+
+    if (trip?.reservation && normalizedChosenServices.length) {
+      await prisma.reservationCharge.createMany({
+        data: normalizedChosenServices.map((service, idx) => ({
+          reservationId: trip.reservation.id,
+          code: service.code,
+          name: service.name,
+          chargeType: service.chargeType || 'UNIT',
+          quantity: Number(service.quantity || 1),
+          rate: Number(service.rate || 0),
+          total: Number(service.total || 0),
+          taxable: !!service.taxable,
+          selected: true,
+          sortOrder: idx,
+          source: 'HOST_ADDON',
+          sourceRefId: service.serviceId
+        }))
+      });
+    }
 
     const nextActions = trip?.reservation
       ? {
@@ -976,6 +1119,7 @@ export const bookingEngineService = {
         reservationNumber: trip.reservation.reservationNumber,
         status: trip.reservation.status
       } : null,
+      additionalServices: normalizedChosenServices,
       nextActions
     };
   },
@@ -1023,8 +1167,14 @@ export const bookingEngineService = {
           guestCustomer: customerFilter
         },
         include: {
+          hostProfile: { select: publicHostSelect() },
           guestCustomer: true,
-          reservation: true
+          reservation: true,
+          hostReview: true,
+          incidents: {
+            orderBy: [{ createdAt: 'desc' }],
+            take: 10
+          }
         }
       });
       reservation = trip?.reservation || null;
@@ -1032,7 +1182,13 @@ export const bookingEngineService = {
       trip = await prisma.trip.findFirst({
         where: { reservationId: reservation.id },
         include: {
-          guestCustomer: true
+          hostProfile: { select: publicHostSelect() },
+          guestCustomer: true,
+          hostReview: true,
+          incidents: {
+            orderBy: [{ createdAt: 'desc' }],
+            take: 10
+          }
         }
       });
     }
@@ -1098,7 +1254,29 @@ export const bookingEngineService = {
             status: trip.status,
             quotedTotal: money(trip.quotedTotal),
             hostEarnings: money(trip.hostEarnings),
-            platformFee: money(trip.platformFee)
+            platformFee: money(trip.platformFee),
+            host: publicHostSummary(trip.hostProfile),
+            hostReview: trip.hostReview
+              ? {
+                  id: trip.hostReview.id,
+                  status: trip.hostReview.status,
+                  rating: trip.hostReview.rating == null ? null : Number(trip.hostReview.rating),
+                  comments: trip.hostReview.comments || '',
+                  submittedAt: trip.hostReview.submittedAt || null,
+                  action: existingHostReviewAction(trip.hostReview)
+                }
+              : null,
+            incidents: (trip.incidents || []).map((incident) => ({
+              id: incident.id,
+              type: incident.type,
+              status: incident.status,
+              title: incident.title,
+              description: incident.description || '',
+              amountClaimed: money(incident.amountClaimed),
+              amountResolved: money(incident.amountResolved),
+              createdAt: incident.createdAt,
+              resolvedAt: incident.resolvedAt
+            }))
           }
         : null,
       nextActions
