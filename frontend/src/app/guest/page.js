@@ -55,6 +55,28 @@ async function lookupBooking({ reference, email }) {
   });
 }
 
+function StatusPill({ status }) {
+  const tone = statusTone(status);
+  return (
+    <span
+      style={{
+        display: 'inline-flex',
+        alignItems: 'center',
+        minHeight: 28,
+        padding: '0 10px',
+        borderRadius: 999,
+        background: tone.background,
+        color: tone.color,
+        fontSize: 12,
+        fontWeight: 700,
+        textTransform: 'capitalize'
+      }}
+    >
+      {status}
+    </span>
+  );
+}
+
 export default function GuestAppPage() {
   const [lookupState, setLookupState] = useState({ reference: '', email: '' });
   const [loading, setLoading] = useState(false);
@@ -74,13 +96,10 @@ export default function GuestAppPage() {
 
   const primaryAction = useMemo(() => {
     if (portalStatus?.nextStep?.link) return { label: portalStatus.nextStep.label, link: portalStatus.nextStep.link };
-    return customerInfoAction?.link
-      ? { label: 'Continue to Pre-check-in', link: customerInfoAction.link }
-      : signatureAction?.link
-        ? { label: 'Continue to Signature', link: signatureAction.link }
-        : paymentAction?.link
-          ? { label: 'Continue to Payment', link: paymentAction.link }
-          : null;
+    if (customerInfoAction?.link) return { label: 'Continue to Pre-check-in', link: customerInfoAction.link };
+    if (signatureAction?.link) return { label: 'Continue to Signature', link: signatureAction.link };
+    if (paymentAction?.link) return { label: 'Continue to Payment', link: paymentAction.link };
+    return null;
   }, [customerInfoAction?.link, paymentAction?.link, portalStatus?.nextStep?.label, portalStatus?.nextStep?.link, signatureAction?.link]);
 
   useEffect(() => {
@@ -102,10 +121,7 @@ export default function GuestAppPage() {
     };
     if (!entry.reference || !entry.email) return;
     try {
-      const next = [
-        entry,
-        ...recentLookups.filter((row) => !(row.reference === entry.reference && row.email === entry.email))
-      ].slice(0, 5);
+      const next = [entry, ...recentLookups.filter((row) => !(row.reference === entry.reference && row.email === entry.email))].slice(0, 5);
       localStorage.setItem(RECENT_LOOKUPS_KEY, JSON.stringify(next));
       setRecentLookups(next);
     } catch {}
@@ -247,12 +263,12 @@ export default function GuestAppPage() {
                 Clear
               </button>
             </div>
-            <div className="metric-grid">
+            <div className="app-card-grid compact">
               {recentLookups.map((row) => (
                 <div key={`${row.reference}:${row.email}`} className="glass card section-card" style={{ padding: 14 }}>
                   <div style={{ fontWeight: 700 }}>{row.reference}</div>
                   <div className="label" style={{ textTransform: 'none', letterSpacing: 0, fontSize: 12 }}>
-                    {row.customerName} · {row.bookingType === 'CAR_SHARING' ? 'Car Sharing' : 'Rental'}
+                    {row.customerName} - {row.bookingType === 'CAR_SHARING' ? 'Car Sharing' : 'Rental'}
                   </div>
                   <div className="ui-muted" style={{ fontSize: 13 }}>{row.email}</div>
                   <div className="inline-actions">
@@ -267,45 +283,38 @@ export default function GuestAppPage() {
         {result ? (
           <section className="split-panel">
             <div className="glass card-lg section-card">
-              <div className="section-title">Guest Booking Summary</div>
-              <div className="metric-grid">
-                <div className="metric-card">
-                  <span className="label">Type</span>
-                  <strong>{result.bookingType === 'CAR_SHARING' ? 'Car Sharing' : 'Rental'}</strong>
+              <div className="row-between">
+                <div>
+                  <div className="section-title">Guest Booking Summary</div>
+                  <p className="ui-muted">A clean snapshot of the booking, guest, and next action.</p>
                 </div>
-                <div className="metric-card">
-                  <span className="label">Reference</span>
-                  <strong>{result.trip?.tripCode || result.reservation?.reservationNumber || '-'}</strong>
-                </div>
-                <div className="metric-card">
-                  <span className="label">Customer</span>
-                  <strong>{`${result.customer?.firstName || ''} ${result.customer?.lastName || ''}`.trim() || 'Guest'}</strong>
-                </div>
-                <div className="metric-card">
-                  <span className="label">Tenant</span>
-                  <strong>{result.tenant?.name || '-'}</strong>
-                </div>
-                <div className="metric-card">
-                  <span className="label">Pickup</span>
-                  <strong>{formatDateTime(result.reservation?.pickupAt)}</strong>
-                </div>
-                <div className="metric-card">
-                  <span className="label">Return</span>
-                  <strong>{formatDateTime(result.reservation?.returnAt)}</strong>
-                </div>
-                <div className="metric-card">
-                  <span className="label">Workflow</span>
-                  <strong>{result.bookingType === 'CAR_SHARING' ? (result.trip?.status || '-') : (result.reservation?.status || '-')}</strong>
-                </div>
-                <div className="metric-card">
-                  <span className="label">Current Step</span>
-                  <strong>{portalStatus?.progress?.currentStep || 'Guest Flow'}</strong>
-                </div>
+                <span className="status-chip neutral">{result.bookingType === 'CAR_SHARING' ? 'Car Sharing' : 'Rental'}</span>
               </div>
-              <div className="surface-note">
-                {result.bookingType === 'CAR_SHARING'
-                  ? `Trip total ${fmtMoney(result.trip?.quotedTotal)} · Host earnings ${fmtMoney(result.trip?.hostEarnings)} · Platform fee ${fmtMoney(result.trip?.platformFee)}`
-                  : `Reservation estimate ${fmtMoney(result.reservation?.estimatedTotal)} · Status ${result.reservation?.status || '-'}`}
+              <div className="info-grid-tight">
+                <div className="info-tile"><span className="label">Reference</span><strong>{result.trip?.tripCode || result.reservation?.reservationNumber || '-'}</strong></div>
+                <div className="info-tile"><span className="label">Customer</span><strong>{`${result.customer?.firstName || ''} ${result.customer?.lastName || ''}`.trim() || 'Guest'}</strong></div>
+                <div className="info-tile"><span className="label">Tenant</span><strong>{result.tenant?.name || '-'}</strong></div>
+                <div className="info-tile"><span className="label">Current Step</span><strong>{portalStatus?.progress?.currentStep || 'Guest Flow'}</strong></div>
+                <div className="info-tile"><span className="label">Pickup</span><strong>{formatDateTime(result.reservation?.pickupAt)}</strong></div>
+                <div className="info-tile"><span className="label">Return</span><strong>{formatDateTime(result.reservation?.returnAt)}</strong></div>
+              </div>
+              <div className="app-banner">
+                <div className="section-title">Booking Snapshot</div>
+                <div className="app-banner-list">
+                  {result.bookingType === 'CAR_SHARING' ? (
+                    <>
+                      <span className="app-banner-pill">Trip total {fmtMoney(result.trip?.quotedTotal)}</span>
+                      <span className="app-banner-pill">Host earnings {fmtMoney(result.trip?.hostEarnings)}</span>
+                      <span className="app-banner-pill">Platform fee {fmtMoney(result.trip?.platformFee)}</span>
+                    </>
+                  ) : (
+                    <>
+                      <span className="app-banner-pill">Reservation estimate {fmtMoney(result.reservation?.estimatedTotal)}</span>
+                      <span className="app-banner-pill">Status {result.reservation?.status || '-'}</span>
+                      <span className="app-banner-pill">Payment {portalStatus?.paymentStatusLabel || 'Pending'}</span>
+                    </>
+                  )}
+                </div>
               </div>
               {primaryAction?.link ? (
                 <div className="inline-actions">
@@ -317,14 +326,16 @@ export default function GuestAppPage() {
             </div>
 
             <div className="glass card-lg section-card">
-              <div className="section-title">Live Guest Status</div>
+              <div className="row-between">
+                <div>
+                  <div className="section-title">Live Guest Status</div>
+                  <p className="ui-muted">Real-time visibility into progress and the next required step.</p>
+                </div>
+                <span className="status-chip neutral">{portalStatus?.progress?.percent || 0}% complete</span>
+              </div>
               {portalStatus ? (
                 <div className="stack">
                   <div className="surface-note" style={{ display: 'grid', gap: 10 }}>
-                    <div className="row-between" style={{ gap: 12 }}>
-                      <strong>Journey Progress</strong>
-                      <span className="status-chip neutral">{portalStatus.progress?.percent || 0}% complete</span>
-                    </div>
                     <div style={{ height: 10, borderRadius: 999, background: 'rgba(146, 118, 255, 0.14)', overflow: 'hidden' }}>
                       <div
                         style={{
@@ -340,33 +351,17 @@ export default function GuestAppPage() {
                       {' '}Next action: <strong>{portalStatus.progress?.nextAction || 'Continue your guest workflow.'}</strong>
                     </div>
                   </div>
-                  {[customerInfoLive, signatureLive, paymentLive].filter(Boolean).map((item) => {
-                    const tone = statusTone(item.status);
-                    return (
-                      <div key={item.key} className="surface-note" style={{ display: 'grid', gap: 8 }}>
+                  <div className="app-card-grid compact">
+                    {[customerInfoLive, signatureLive, paymentLive].filter(Boolean).map((item) => (
+                      <div key={item.key} className="doc-card">
                         <div className="row-between" style={{ gap: 10, alignItems: 'center' }}>
                           <strong>{item.label}</strong>
-                          <span
-                            style={{
-                              display: 'inline-flex',
-                              alignItems: 'center',
-                              minHeight: 28,
-                              padding: '0 10px',
-                              borderRadius: 999,
-                              background: tone.background,
-                              color: tone.color,
-                              fontSize: 12,
-                              fontWeight: 700,
-                              textTransform: 'capitalize'
-                            }}
-                          >
-                            {item.status}
-                          </span>
+                          <StatusPill status={item.status} />
                         </div>
-                        <div style={{ color: '#55456f', lineHeight: 1.5 }}>{item.description || '-'}</div>
+                        <div className="doc-meta">{item.description || '-'}</div>
                       </div>
-                    );
-                  })}
+                    ))}
+                  </div>
                 </div>
               ) : (
                 <div className="surface-note">Live portal status will appear here as soon as the guest flow is available.</div>
@@ -403,15 +398,13 @@ export default function GuestAppPage() {
                 <span className="status-chip neutral">{documents.filter((item) => item.available).length} available</span>
               </div>
               {documents.length ? (
-                <div className="stack">
+                <div className="doc-grid">
                   {documents.map((doc) => (
-                    <div key={doc.key} className="surface-note" style={{ display: 'grid', gap: 10 }}>
+                    <div key={doc.key} className="doc-card">
                       <div className="row-between" style={{ gap: 12 }}>
                         <div>
                           <strong>{doc.label}</strong>
-                          <div className="ui-muted" style={{ fontSize: 13 }}>
-                            {doc.available ? 'Ready to download' : 'Not available yet'}
-                          </div>
+                          <div className="doc-meta">{doc.available ? 'Ready to download' : 'Not available yet'}</div>
                         </div>
                         <span className={doc.available ? 'status-chip good' : 'status-chip neutral'}>
                           {doc.available ? 'Available' : 'Pending'}
@@ -441,35 +434,17 @@ export default function GuestAppPage() {
                 <span className="status-chip neutral">{timeline.length} events</span>
               </div>
               {timeline.length ? (
-                <div className="stack">
-                  {timeline.map((item) => {
-                    const tone = statusTone(item.status);
-                    return (
-                      <div key={item.key} className="surface-note" style={{ display: 'grid', gap: 6 }}>
-                        <div className="row-between" style={{ gap: 10 }}>
-                          <strong>{item.label}</strong>
-                          <span
-                            style={{
-                              display: 'inline-flex',
-                              alignItems: 'center',
-                              minHeight: 28,
-                              padding: '0 10px',
-                              borderRadius: 999,
-                              background: tone.background,
-                              color: tone.color,
-                              fontSize: 12,
-                              fontWeight: 700,
-                              textTransform: 'capitalize'
-                            }}
-                          >
-                            {item.status}
-                          </span>
-                        </div>
-                        <div className="ui-muted" style={{ fontSize: 13 }}>{formatDateTime(item.at)}</div>
-                        <div style={{ color: '#55456f', lineHeight: 1.5 }}>{item.description || '-'}</div>
+                <div className="timeline-list">
+                  {timeline.map((item) => (
+                    <div key={item.key} className="timeline-item">
+                      <div className="row-between" style={{ gap: 10 }}>
+                        <strong>{item.label}</strong>
+                        <StatusPill status={item.status} />
                       </div>
-                    );
-                  })}
+                      <div className="ui-muted" style={{ fontSize: 13 }}>{formatDateTime(item.at)}</div>
+                      <div style={{ color: '#55456f', lineHeight: 1.5 }}>{item.description || '-'}</div>
+                    </div>
+                  ))}
                 </div>
               ) : (
                 <div className="surface-note">Timeline entries will appear here as the booking moves forward.</div>
