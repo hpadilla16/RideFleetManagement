@@ -190,6 +190,7 @@ function SettingsInner({ token, me, logout }) {
   const [locationEditorTab, setLocationEditorTab] = useState('main');
   const [copyLocationModal, setCopyLocationModal] = useState(null);
   const [tenantRows, setTenantRows] = useState([]);
+  const [activeSettingsTenantId, setActiveSettingsTenantId] = useState('');
   const [commissionPlans, setCommissionPlans] = useState([]);
   const [commissionEmployees, setCommissionEmployees] = useState([]);
   const [activeCommissionTenantId, setActiveCommissionTenantId] = useState('');
@@ -201,17 +202,24 @@ function SettingsInner({ token, me, logout }) {
   const isAdmin = role === 'ADMIN' || role === 'SUPER_ADMIN';
   const isSuper = role === 'SUPER_ADMIN';
 
+  const scopedSettingsPath = (path, tenantId = activeSettingsTenantId) => {
+    if (!isSuper || !tenantId) return path;
+    const sep = path.includes('?') ? '&' : '?';
+    return `${path}${sep}tenantId=${encodeURIComponent(tenantId)}`;
+  };
+
   const load = async () => {
+    if (isSuper && !activeSettingsTenantId) return;
     const requests = [
-      ['agreement', api('/api/settings/rental-agreement', {}, token)],
-      ['locations', api('/api/locations', {}, token)],
-      ['services', api('/api/additional-services', {}, token)],
-      ['fees', api('/api/fees', {}, token)],
-      ['rates', api('/api/rates', {}, token)],
-      ['vehicleTypes', api('/api/vehicle-types', {}, token)],
-      ['insurancePlans', api('/api/settings/insurance-plans', {}, token)],
-      ['emailTemplates', api('/api/settings/email-templates', {}, token)],
-      ['reservationOptions', api('/api/settings/reservation-options', {}, token)]
+      ['agreement', api(scopedSettingsPath('/api/settings/rental-agreement'), {}, token)],
+      ['locations', api(scopedSettingsPath('/api/locations'), {}, token)],
+      ['services', api(scopedSettingsPath('/api/additional-services'), {}, token)],
+      ['fees', api(scopedSettingsPath('/api/fees'), {}, token)],
+      ['rates', api(scopedSettingsPath('/api/rates'), {}, token)],
+      ['vehicleTypes', api(scopedSettingsPath('/api/vehicle-types'), {}, token)],
+      ['insurancePlans', api(scopedSettingsPath('/api/settings/insurance-plans'), {}, token)],
+      ['emailTemplates', api(scopedSettingsPath('/api/settings/email-templates'), {}, token)],
+      ['reservationOptions', api(scopedSettingsPath('/api/settings/reservation-options'), {}, token)]
     ];
     const results = await Promise.allSettled(requests.map(([, p]) => p));
 
@@ -279,19 +287,22 @@ function SettingsInner({ token, me, logout }) {
     if (!isSuper) return;
     try {
       const list = await api('/api/tenants', {}, token);
-      setTenantRows(Array.isArray(list) ? list : []);
+      const rows = Array.isArray(list) ? list : [];
+      setTenantRows(rows);
+      if (!activeSettingsTenantId && rows[0]?.id) setActiveSettingsTenantId(rows[0].id);
+      if (!activeCommissionTenantId && rows[0]?.id) setActiveCommissionTenantId(rows[0].id);
     } catch (e) {
       setMsg(e.message);
     }
   };
 
-  useEffect(() => { load(); }, [token]);
+  useEffect(() => { load(); }, [token, isSuper, activeSettingsTenantId]);
   useEffect(() => { loadCommissionConfig(activeCommissionTenantId); }, [token, activeCommissionTenantId]);
   useEffect(() => { loadCommissionEmployees(activeCommissionTenantId); }, [token, activeCommissionTenantId]);
   useEffect(() => { loadTenants(); }, [token, isSuper]);
 
   const saveAgreement = async () => {
-    setCfg(await api('/api/settings/rental-agreement', { method: 'PUT', body: JSON.stringify(cfg) }, token));
+    setCfg(await api(scopedSettingsPath('/api/settings/rental-agreement'), { method: 'PUT', body: JSON.stringify(cfg) }, token));
     setMsg('Rental agreement settings saved');
   };
 
@@ -332,13 +343,13 @@ function SettingsInner({ token, me, logout }) {
   };
 
   const saveEmailTemplates = async () => {
-    const out = await api('/api/settings/email-templates', { method: 'PUT', body: JSON.stringify(emailTemplates) }, token);
+    const out = await api(scopedSettingsPath('/api/settings/email-templates'), { method: 'PUT', body: JSON.stringify(emailTemplates) }, token);
     setEmailTemplates({ ...DEFAULT_EMAIL_TEMPLATES, ...(out || {}) });
     setMsg('Email templates saved');
   };
 
   const saveReservationOptions = async () => {
-    const out = await api('/api/settings/reservation-options', { method: 'PUT', body: JSON.stringify(reservationOptions) }, token);
+    const out = await api(scopedSettingsPath('/api/settings/reservation-options'), { method: 'PUT', body: JSON.stringify(reservationOptions) }, token);
     setReservationOptions({ autoAssignVehicleFromType: !!out?.autoAssignVehicleFromType });
     setMsg('Reservation options saved');
   };
@@ -352,21 +363,21 @@ function SettingsInner({ token, me, logout }) {
 
   const addLocation = async (e) => {
     e.preventDefault();
-    await api('/api/locations', { method: 'POST', body: JSON.stringify(locationForm) }, token);
+    await api(scopedSettingsPath('/api/locations'), { method: 'POST', body: JSON.stringify(locationForm) }, token);
     setLocationForm(EMPTY_LOCATION);
     setMsg('Location added');
     await load();
   };
 
   const patchLocation = async (id, patch) => {
-    await api(`/api/locations/${id}`, { method: 'PATCH', body: JSON.stringify(patch) }, token);
+    await api(scopedSettingsPath(`/api/locations/${id}`), { method: 'PATCH', body: JSON.stringify(patch) }, token);
     setMsg('Location updated');
     await load();
   };
 
   const removeLocation = async (id) => {
     if (!window.confirm('Remove this location?')) return;
-    await api(`/api/locations/${id}`, { method: 'DELETE' }, token);
+    await api(scopedSettingsPath(`/api/locations/${id}`), { method: 'DELETE' }, token);
     setMsg('Location removed');
     await load();
   };
@@ -446,10 +457,10 @@ function SettingsInner({ token, me, logout }) {
     const payload = { code, name, description: description || null, imageUrl: vehicleTypeForm.imageUrl || null };
     try {
       if (vehicleTypeEditId) {
-        await api(`/api/vehicle-types/${vehicleTypeEditId}`, { method: 'PATCH', body: JSON.stringify(payload) }, token);
+        await api(scopedSettingsPath(`/api/vehicle-types/${vehicleTypeEditId}`), { method: 'PATCH', body: JSON.stringify(payload) }, token);
         setMsg('Vehicle type updated');
       } else {
-        await api('/api/vehicle-types', { method: 'POST', body: JSON.stringify(payload) }, token);
+        await api(scopedSettingsPath('/api/vehicle-types'), { method: 'POST', body: JSON.stringify(payload) }, token);
         setMsg('Vehicle type added');
       }
       resetVehicleTypeForm();
@@ -472,7 +483,7 @@ function SettingsInner({ token, me, logout }) {
   const removeVehicleType = async (vt) => {
     if (!window.confirm(`Delete vehicle type ${vt.code || vt.name}?`)) return;
     try {
-      await api(`/api/vehicle-types/${vt.id}`, { method: 'DELETE' }, token);
+      await api(scopedSettingsPath(`/api/vehicle-types/${vt.id}`), { method: 'DELETE' }, token);
       setMsg('Vehicle type removed');
       if (vehicleTypeEditId === vt.id) resetVehicleTypeForm();
       await load();
@@ -576,7 +587,7 @@ function SettingsInner({ token, me, logout }) {
       vehicleTypeIds: JSON.stringify(serviceForm.vehicleTypeIds || []),
       locationId: serviceForm.locationId || null
     };
-    await api(serviceEditId ? `/api/additional-services/${serviceEditId}` : '/api/additional-services', {
+    await api(scopedSettingsPath(serviceEditId ? `/api/additional-services/${serviceEditId}` : '/api/additional-services'), {
       method: serviceEditId ? 'PATCH' : 'POST',
       body: JSON.stringify(payload)
     }, token);
@@ -586,21 +597,21 @@ function SettingsInner({ token, me, logout }) {
   };
 
   const patchService = async (id, patch) => {
-    await api(`/api/additional-services/${id}`, { method: 'PATCH', body: JSON.stringify(patch) }, token);
+    await api(scopedSettingsPath(`/api/additional-services/${id}`), { method: 'PATCH', body: JSON.stringify(patch) }, token);
     setMsg('Additional service updated');
     await load();
   };
 
   const removeService = async (id) => {
     if (!window.confirm('Remove this service?')) return;
-    await api(`/api/additional-services/${id}`, { method: 'DELETE' }, token);
+    await api(scopedSettingsPath(`/api/additional-services/${id}`), { method: 'DELETE' }, token);
     setMsg('Service removed');
     await load();
   };
 
   const addFee = async (e) => {
     e.preventDefault();
-    await api('/api/fees', { method: 'POST', body: JSON.stringify({ ...feeForm, amount: Number(feeForm.amount || 0) }) }, token);
+    await api(scopedSettingsPath('/api/fees'), { method: 'POST', body: JSON.stringify({ ...feeForm, amount: Number(feeForm.amount || 0) }) }, token);
     setFeeForm(EMPTY_FEE);
     setMsg('Fee added');
     await load();
@@ -611,19 +622,19 @@ function SettingsInner({ token, me, logout }) {
     if (name === null) return;
     const amount = window.prompt('Amount', String(fee.amount ?? '0'));
     if (amount === null) return;
-    await api(`/api/fees/${fee.id}`, { method: 'PATCH', body: JSON.stringify({ name, amount: Number(amount || 0) }) }, token);
+    await api(scopedSettingsPath(`/api/fees/${fee.id}`), { method: 'PATCH', body: JSON.stringify({ name, amount: Number(amount || 0) }) }, token);
     setMsg('Fee updated');
     await load();
   };
 
   const toggleFee = async (fee) => {
-    await api(`/api/fees/${fee.id}`, { method: 'PATCH', body: JSON.stringify({ isActive: !fee.isActive }) }, token);
+    await api(scopedSettingsPath(`/api/fees/${fee.id}`), { method: 'PATCH', body: JSON.stringify({ isActive: !fee.isActive }) }, token);
     await load();
   };
 
   const removeFee = async (id) => {
     if (!window.confirm('Remove this fee?')) return;
-    await api(`/api/fees/${id}`, { method: 'DELETE' }, token);
+    await api(scopedSettingsPath(`/api/fees/${id}`), { method: 'DELETE' }, token);
     setMsg('Fee removed');
     await load();
   };
@@ -642,7 +653,7 @@ function SettingsInner({ token, me, logout }) {
       locationIds: Array.isArray(p.locationIds) ? p.locationIds : [],
       vehicleTypeIds: Array.isArray(p.vehicleTypeIds) ? p.vehicleTypeIds : []
     }));
-    await api('/api/settings/insurance-plans', { method: 'PUT', body: JSON.stringify({ plans: payload }) }, token);
+    await api(scopedSettingsPath('/api/settings/insurance-plans'), { method: 'PUT', body: JSON.stringify({ plans: payload }) }, token);
     setInsurancePlans(payload);
   };
 
@@ -737,10 +748,10 @@ function SettingsInner({ token, me, logout }) {
 
     try {
       if (rateForm.id) {
-        await api(`/api/rates/${rateForm.id}`, { method: 'PATCH', body: JSON.stringify(payload) }, token);
+        await api(scopedSettingsPath(`/api/rates/${rateForm.id}`), { method: 'PATCH', body: JSON.stringify(payload) }, token);
         setMsg('Rate updated');
       } else {
-        await api('/api/rates', { method: 'POST', body: JSON.stringify(payload) }, token);
+        await api(scopedSettingsPath('/api/rates'), { method: 'POST', body: JSON.stringify(payload) }, token);
         setMsg('Rate added');
       }
     } catch (err) {
@@ -818,7 +829,7 @@ function SettingsInner({ token, me, logout }) {
 
   const toggleRate = async (rate) => {
     try {
-      await api(`/api/rates/${rate.id}`, { method: 'PATCH', body: JSON.stringify({ isActive: !rate.isActive }) }, token);
+      await api(scopedSettingsPath(`/api/rates/${rate.id}`), { method: 'PATCH', body: JSON.stringify({ isActive: !rate.isActive }) }, token);
       await load();
     } catch (err) {
       const text = String(err?.message || '');
@@ -835,7 +846,7 @@ function SettingsInner({ token, me, logout }) {
   const removeRate = async (id) => {
     if (!window.confirm('Delete this rate?')) return;
     try {
-      await api(`/api/rates/${id}`, { method: 'DELETE' }, token);
+      await api(scopedSettingsPath(`/api/rates/${id}`), { method: 'DELETE' }, token);
       setMsg('Rate deleted');
       if (rateForm?.id === id) setRateForm(EMPTY_RATE);
       await load();
@@ -1101,6 +1112,23 @@ function SettingsInner({ token, me, logout }) {
       {msg ? <p className="label">{msg}</p> : null}
 
       <section className="glass card-lg stack">
+        {isSuper ? (
+          <div className="form-grid-2" style={{ marginBottom: 8 }}>
+            <div className="stack">
+              <label className="label">Settings Tenant Scope</label>
+              <select value={activeSettingsTenantId} onChange={(e) => setActiveSettingsTenantId(e.target.value)}>
+                {tenantRows.map((tenant) => (
+                  <option key={tenant.id} value={tenant.id}>{tenant.name} ({tenant.slug})</option>
+                ))}
+              </select>
+            </div>
+            <div className="surface-note">
+              Vehicle types, locations, rates, services, fees, insurance, and agreement settings now follow this tenant
+              scope so you can configure exactly what applies to each host and booking flow.
+            </div>
+          </div>
+        ) : null}
+
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
           <button onClick={() => setTab('agreement')}>Agreement</button>
           <button onClick={() => setTab('locations')}>Locations</button>
@@ -1231,7 +1259,7 @@ function SettingsInner({ token, me, logout }) {
                     <td>{f.name}</td><td>{f.mode}</td><td>{Number(f.amount || 0).toFixed(2)}</td><td>{f.isUnderageFee ? 'Yes' : 'No'}</td><td>{f.isAdditionalDriverFee ? 'Yes' : 'No'}</td><td>{f.isActive ? 'Yes' : 'No'}</td>
                     <td style={{ display: 'flex', gap: 6 }}>
                       <button onClick={() => editFee(f)}>Edit</button>
-                      <button onClick={async () => { await api(`/api/fees/${f.id}`, { method: 'PATCH', body: JSON.stringify({ isUnderageFee: !f.isUnderageFee }) }, token); setMsg('Underage fee flag updated'); await load(); }}>{f.isUnderageFee ? 'Unset Underage' : 'Set Underage'}</button>
+                      <button onClick={async () => { await api(scopedSettingsPath(`/api/fees/${f.id}`), { method: 'PATCH', body: JSON.stringify({ isUnderageFee: !f.isUnderageFee }) }, token); setMsg('Underage fee flag updated'); await load(); }}>{f.isUnderageFee ? 'Unset Underage' : 'Set Underage'}</button>
                       <button onClick={() => toggleFee(f)}>{f.isActive ? 'Disable' : 'Enable'}</button>
                       <button onClick={() => removeFee(f.id)}>Delete</button>
                     </td>

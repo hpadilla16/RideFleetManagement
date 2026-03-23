@@ -5,7 +5,7 @@ import { isSuperAdmin } from '../../middleware/auth.js';
 export const vehicleTypesRouter = Router();
 
 function scopeFor(req) {
-  if (isSuperAdmin(req.user)) return {};
+  if (isSuperAdmin(req.user)) return req.query?.tenantId ? { tenantId: String(req.query.tenantId) } : {};
   return { tenantId: req.user?.tenantId || null };
 }
 
