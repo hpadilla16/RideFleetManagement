@@ -167,6 +167,11 @@ enum TripIncidentStatus {
   CLOSED
 }
 
+enum HostReviewStatus {
+  REQUESTED
+  SUBMITTED
+}
+
 enum ReservationWorkflowMode {
   RENTAL
   CAR_SHARING
@@ -342,6 +347,7 @@ model Customer {
 
   reservations    Reservation[]
   guestTrips      Trip[] @relation("TripGuestCustomer")
+  hostReviews     HostReview[]
 
   @@index([lastName, firstName])
   @@index([phone])
@@ -452,6 +458,7 @@ model Reservation {
   payments          ReservationPayment[]
   additionalDrivers ReservationAdditionalDriver[]
   carSharingTrip    Trip?
+  hostReviews       HostReview[]
 
   @@index([status, pickupAt])
   @@index([workflowMode, status, pickupAt])
@@ -670,6 +677,9 @@ model HostProfile {
   payoutProvider    String?
   payoutAccountRef  String?
   payoutEnabled     Boolean   @default(false)
+  averageRating     Decimal   @default(0) @db.Decimal(4, 2)
+  reviewCount       Int       @default(0)
+  latestReviewAt    DateTime?
   notes             String?
   createdAt         DateTime  @default(now())
   updatedAt         DateTime  @updatedAt
@@ -678,6 +688,7 @@ model HostProfile {
   trips             Trip[]    @relation("TripHost")
   payouts           TripPayout[]
   vehicleSubmissions HostVehicleSubmission[]
+  reviews           HostReview[]
 
   @@index([tenantId, status])
   @@index([email])
@@ -827,6 +838,7 @@ model Trip {
   payouts           TripPayout[]
   incidents         TripIncident[]
   timelineEvents    TripTimelineEvent[]
+  hostReview        HostReview?
 
   @@index([tenantId, status, scheduledPickupAt])
   @@index([hostProfileId, status, scheduledPickupAt])
@@ -1067,6 +1079,32 @@ model TripTimelineEvent {
   createdAt         DateTime  @default(now())
 
   @@index([tripId, eventAt])
+}
+
+model HostReview {
+  id                 String           @id @default(cuid())
+  tripId             String           @unique
+  trip               Trip             @relation(fields: [tripId], references: [id], onDelete: Cascade)
+  hostProfileId      String
+  hostProfile        HostProfile      @relation(fields: [hostProfileId], references: [id], onDelete: Cascade)
+  guestCustomerId    String?
+  guestCustomer      Customer?        @relation(fields: [guestCustomerId], references: [id])
+  reservationId      String?
+  reservation        Reservation?     @relation(fields: [reservationId], references: [id])
+  status             HostReviewStatus @default(REQUESTED)
+  rating             Int?
+  comments           String?
+  reviewerName       String?
+  publicToken        String?          @unique
+  publicTokenExpiresAt DateTime?
+  requestedAt        DateTime?
+  submittedAt        DateTime?
+  createdAt          DateTime         @default(now())
+  updatedAt          DateTime         @updatedAt
+
+  @@index([hostProfileId, status, submittedAt])
+  @@index([guestCustomerId, submittedAt])
+  @@index([reservationId])
 }
 
 model RentalAgreementInspection {

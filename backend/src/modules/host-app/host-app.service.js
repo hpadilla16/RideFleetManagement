@@ -42,6 +42,7 @@ function tripInclude() {
       orderBy: [{ createdAt: 'desc' }],
       take: 5
     },
+    hostReview: true,
     pickupLocation: true,
     returnLocation: true,
     timelineEvents: { orderBy: [{ eventAt: 'desc' }], take: 10 }
@@ -225,6 +226,15 @@ export const hostAppService = {
       })
     ]);
 
+    const recentReviews = await prisma.hostReview.findMany({
+      where: {
+        hostProfileId: context.hostProfile.id,
+        status: 'SUBMITTED'
+      },
+      orderBy: [{ submittedAt: 'desc' }],
+      take: 6
+    });
+
     const trips = await prisma.trip.findMany({
       where: {
         hostProfileId: context.hostProfile.id,
@@ -247,6 +257,9 @@ export const hostAppService = {
         payoutProvider: context.hostProfile.payoutProvider || '',
         payoutAccountRef: context.hostProfile.payoutAccountRef || '',
         payoutEnabled: !!context.hostProfile.payoutEnabled,
+        averageRating: Number(context.hostProfile.averageRating || 0),
+        reviewCount: Number(context.hostProfile.reviewCount || 0),
+        latestReviewAt: context.hostProfile.latestReviewAt || null,
         resolvedTenantId: hostTenantId,
         tenant: context.hostProfile.tenant
           ? {
@@ -257,6 +270,13 @@ export const hostAppService = {
       },
       listings,
       trips,
+      recentReviews: recentReviews.map((review) => ({
+        id: review.id,
+        rating: review.rating == null ? null : Number(review.rating),
+        comments: review.comments || '',
+        reviewerName: review.reviewerName || '',
+        submittedAt: review.submittedAt || null
+      })),
       vehicleTypes,
       locations,
       vehicleSubmissions: submissions,

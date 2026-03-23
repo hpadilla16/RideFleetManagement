@@ -1,5 +1,6 @@
 import { bookingEngineService } from '../booking-engine/booking-engine.service.js';
 import { issueCenterService } from '../issue-center/issue-center.service.js';
+import { hostReviewsService } from '../host-reviews/host-reviews.service.js';
 
 function money(value) {
   return Number(Number(value || 0).toFixed(2));
@@ -155,5 +156,17 @@ export const publicBookingService = {
 
   async createIssue(input = {}) {
     return issueCenterService.createGuestIncident(input);
+  },
+
+  async getHostProfile(id) {
+    return hostReviewsService.getPublicHostProfile(id);
+  },
+
+  async getHostReviewPrompt(token) {
+    return hostReviewsService.getPublicReviewPrompt(token);
+  },
+
+  async submitHostReview(token, input = {}) {
+    return hostReviewsService.submitPublicReview(token, input);
   }
 };

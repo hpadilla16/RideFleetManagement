@@ -42,6 +42,10 @@ function money(value) {
   return Number(Number(value || 0).toFixed(2));
 }
 
+function ratingNumber(value) {
+  return Number(Number(value || 0).toFixed(2));
+}
+
 function parseJsonArray(value) {
   try {
     const parsed = typeof value === 'string' ? JSON.parse(value) : value;
@@ -95,6 +99,27 @@ function bookingImageSet({ vehicleTypeImageUrl, listingPhotos }) {
   return {
     primaryImageUrl: vehicleTypeImageUrl ? String(vehicleTypeImageUrl).trim() : '',
     imageUrls: vehicleTypeImageUrl ? [String(vehicleTypeImageUrl).trim()] : []
+  };
+}
+
+function publicHostSelect() {
+  return {
+    id: true,
+    displayName: true,
+    averageRating: true,
+    reviewCount: true,
+    createdAt: true
+  };
+}
+
+function publicHostSummary(hostProfile) {
+  if (!hostProfile) return null;
+  return {
+    id: hostProfile.id,
+    displayName: hostProfile.displayName,
+    averageRating: ratingNumber(hostProfile.averageRating),
+    reviewCount: Number(hostProfile.reviewCount || 0),
+    createdAt: hostProfile.createdAt || null
   };
 }
 
@@ -286,6 +311,21 @@ function existingPortalAction(kind, reservation) {
 
 async function ensurePortalRequest(kind, reservation) {
   return existingPortalAction(kind, reservation) || issuePortalRequest(kind, reservation);
+}
+
+function existingHostReviewAction(review) {
+  if (!review?.publicToken) return null;
+  const expiresAt = review.publicTokenExpiresAt ? new Date(review.publicTokenExpiresAt) : null;
+  if (review.status !== 'SUBMITTED' && (!expiresAt || Number.isNaN(expiresAt.getTime()) || expiresAt.getTime() <= Date.now())) {
+    return null;
+  }
+  const base = process.env.CUSTOMER_PORTAL_BASE_URL || 'http://localhost:3000';
+  return {
+    kind: 'host-review',
+    link: `${base.replace(/\/$/, '')}/host-review?token=${review.publicToken}`,
+    expiresAt,
+    completed: review.status === 'SUBMITTED'
+  };
 }
 
 async function listPublicAdditionalServices({ tenantId, locationId, vehicleTypeId, days }) {
@@ -487,7 +527,7 @@ export const bookingEngineService = {
       prisma.hostVehicleListing.findMany({
         where: { tenantId: tenant.id, status: 'PUBLISHED' },
         include: {
-          hostProfile: { select: { id: true, displayName: true } },
+          hostProfile: { select: publicHostSelect() },
           vehicle: { select: { id: true, make: true, model: true, year: true, color: true, plate: true, vehicleType: { select: { imageUrl: true } } } },
           location: { select: { id: true, name: true, city: true, state: true } }
         },
@@ -525,7 +565,7 @@ export const bookingEngineService = {
         cleaningFee: money(listing.cleaningFee),
         deliveryFee: money(listing.deliveryFee),
         instantBook: !!listing.instantBook,
-        host: listing.hostProfile,
+        host: publicHostSummary(listing.hostProfile),
         vehicle: listing.vehicle,
         location: listing.location,
         ...bookingImageSet({
@@ -655,7 +695,7 @@ export const bookingEngineService = {
         ...(locationId ? { locationId: String(locationId) } : {})
       },
       include: {
-        hostProfile: { select: { id: true, displayName: true } },
+        hostProfile: { select: publicHostSelect() },
         vehicle: { select: { id: true, make: true, model: true, year: true, color: true, plate: true, vehicleType: { select: { imageUrl: true } } } },
         location: { select: { id: true, name: true, city: true, state: true } },
         availabilityWindows: { orderBy: [{ startAt: 'asc' }] }
@@ -685,7 +725,7 @@ export const bookingEngineService = {
           instantBook: !!listing.instantBook,
           minTripDays: listing.minTripDays,
           maxTripDays: listing.maxTripDays,
-          host: listing.hostProfile,
+          host: publicHostSummary(listing.hostProfile),
           vehicle: listing.vehicle,
           location: listing.location,
           additionalServices: normalizeHostAddOns(listing.addOnsJson),
@@ -719,7 +759,7 @@ export const bookingEngineService = {
         status: 'PUBLISHED'
       },
       include: {
-        hostProfile: { select: { id: true, displayName: true, notes: true } },
+        hostProfile: { select: publicHostSelect() },
         vehicle: { select: { id: true, make: true, model: true, year: true, color: true, plate: true, vehicleType: { select: { imageUrl: true } } } },
         location: { select: { id: true, name: true, city: true, state: true } },
         availabilityWindows: { orderBy: [{ startAt: 'asc' }] }
@@ -742,7 +782,7 @@ export const bookingEngineService = {
       minTripDays: listing.minTripDays,
       maxTripDays: listing.maxTripDays,
       tripRules: listing.tripRules,
-      host: listing.hostProfile,
+      host: publicHostSummary(listing.hostProfile),
       vehicle: listing.vehicle,
       location: listing.location,
       ...bookingImageSet({
@@ -1127,8 +1167,10 @@ export const bookingEngineService = {
           guestCustomer: customerFilter
         },
         include: {
+          hostProfile: { select: publicHostSelect() },
           guestCustomer: true,
           reservation: true,
+          hostReview: true,
           incidents: {
             orderBy: [{ createdAt: 'desc' }],
             take: 10
@@ -1140,7 +1182,9 @@ export const bookingEngineService = {
       trip = await prisma.trip.findFirst({
         where: { reservationId: reservation.id },
         include: {
+          hostProfile: { select: publicHostSelect() },
           guestCustomer: true,
+          hostReview: true,
           incidents: {
             orderBy: [{ createdAt: 'desc' }],
             take: 10
@@ -1211,6 +1255,17 @@ export const bookingEngineService = {
             quotedTotal: money(trip.quotedTotal),
             hostEarnings: money(trip.hostEarnings),
             platformFee: money(trip.platformFee),
+            host: publicHostSummary(trip.hostProfile),
+            hostReview: trip.hostReview
+              ? {
+                  id: trip.hostReview.id,
+                  status: trip.hostReview.status,
+                  rating: trip.hostReview.rating == null ? null : Number(trip.hostReview.rating),
+                  comments: trip.hostReview.comments || '',
+                  submittedAt: trip.hostReview.submittedAt || null,
+                  action: existingHostReviewAction(trip.hostReview)
+                }
+              : null,
             incidents: (trip.incidents || []).map((incident) => ({
               id: incident.id,
               type: incident.type,

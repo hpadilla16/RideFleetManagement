@@ -1,5 +1,6 @@
 'use client';
 
+import Link from 'next/link';
 import { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { api } from '../../lib/client';
@@ -22,6 +23,12 @@ function addDays(base, days) {
 
 function fmtMoney(value) {
   return `$${Number(value || 0).toFixed(2)}`;
+}
+
+function fmtRating(value, count = 0) {
+  const rating = Number(value || 0);
+  if (!count) return 'New host';
+  return `${rating.toFixed(2)} star rating (${count})`;
 }
 
 function normalizeImageList(value) {
@@ -88,7 +95,7 @@ function BookingStageBar({ stage }) {
   );
 }
 
-function BookingCard({ title, subtitle, meta, quote, cta, onClick, selected = false, hints = [], imageUrl = '', imageUrls = [] }) {
+function BookingCard({ title, subtitle, meta, quote, cta, onClick, selected = false, hints = [], imageUrl = '', imageUrls = [], hostSummary = '', hostHref = '' }) {
   const gallery = normalizeImageList(imageUrls?.length ? imageUrls : imageUrl ? [imageUrl] : []);
   return (
     <article
@@ -123,6 +130,17 @@ function BookingCard({ title, subtitle, meta, quote, cta, onClick, selected = fa
         </div>
         <div className="page-title">{title}</div>
         {subtitle ? <p className="ui-muted">{subtitle}</p> : null}
+        {hostSummary ? (
+          <div className="label" style={{ textTransform: 'none', letterSpacing: 0, fontSize: 13 }}>
+            {hostSummary}
+            {hostHref ? (
+              <>
+                {' · '}
+                <Link href={hostHref}>View host</Link>
+              </>
+            ) : null}
+          </div>
+        ) : null}
       </div>
       {hints.length ? (
         <div className="inline-actions">
@@ -479,7 +497,7 @@ export default function PublicBookingPage() {
                     {listing.vehicle?.label || 'Vehicle pending'}
                     {listing.location?.name ? ` · ${listing.location.name}` : ''}
                     <br />
-                    Host: {listing.host?.displayName || 'Unassigned'} · From {fmtMoney(listing.baseDailyRate)}/day
+                    Host: {listing.host?.displayName || 'Unassigned'} · {fmtRating(listing.host?.averageRating, listing.host?.reviewCount)} · From {fmtMoney(listing.baseDailyRate)}/day
                   </div>
                 ))}
               </div>
@@ -598,6 +616,8 @@ export default function PublicBookingPage() {
                       selected={selectedResult?.id === result.id}
                       imageUrl={result.primaryImageUrl}
                       imageUrls={result.imageUrls}
+                      hostSummary={result.host ? `${result.host.displayName} · ${fmtRating(result.host.averageRating, result.host.reviewCount)}` : ''}
+                      hostHref={result.host?.id ? `/host-profile/${result.host.id}` : ''}
                       hints={[
                         result.instantBook ? 'Instant book' : 'Approval flow',
                         `${Math.max(1, Number(result.minTripDays || 1))}+ day minimum`,
@@ -661,6 +681,18 @@ export default function PublicBookingPage() {
                   ? `Pickup ${results?.pickupLocation?.name || ''} · ${fmtMoney(checkoutEstimatedTotal)} estimated total`
                   : `${selectedResult.vehicle?.label || ''} · ${fmtMoney(selectedResult.quote?.total)} projected total`}
                 <br />
+                {searchMode === 'CAR_SHARING' && selectedResult.host ? (
+                  <>
+                    {`Host ${selectedResult.host.displayName} · ${fmtRating(selectedResult.host.averageRating, selectedResult.host.reviewCount)}`}
+                    {selectedResult.host.id ? (
+                      <>
+                        {' · '}
+                        <Link href={`/host-profile/${selectedResult.host.id}`}>View profile</Link>
+                      </>
+                    ) : null}
+                    <br />
+                  </>
+                ) : null}
                 {searchMode === 'RENTAL'
                   ? `Deposit due now: ${fmtMoney(selectedResult.quote?.depositAmountDue)}${chosenAdditionalServicesTotal ? ` · Add-ons ${fmtMoney(chosenAdditionalServicesTotal)}` : ''}${selectedInsuranceTotal ? ` · Insurance ${fmtMoney(selectedInsuranceTotal)}` : ''}`
                   : `Host earns ${fmtMoney(selectedResult.quote?.hostEarnings)} · Platform fee ${fmtMoney(selectedResult.quote?.platformFee)}`}

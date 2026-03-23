@@ -73,3 +73,36 @@ publicBookingRouter.post('/issues', async (req, res, next) => {
     next(error);
   }
 });
+
+publicBookingRouter.get('/hosts/:id', async (req, res, next) => {
+  try {
+    res.json(await publicBookingService.getHostProfile(req.params.id));
+  } catch (error) {
+    if (/not found/i.test(String(error?.message || ''))) {
+      return res.status(404).json({ error: error.message });
+    }
+    next(error);
+  }
+});
+
+publicBookingRouter.get('/host-reviews/:token', async (req, res, next) => {
+  try {
+    res.json(await publicBookingService.getHostReviewPrompt(req.params.token));
+  } catch (error) {
+    if (/invalid|expired|required|submitted/i.test(String(error?.message || ''))) {
+      return res.status(400).json({ error: error.message });
+    }
+    next(error);
+  }
+});
+
+publicBookingRouter.post('/host-reviews/:token', async (req, res, next) => {
+  try {
+    res.json(await publicBookingService.submitHostReview(req.params.token, req.body || {}));
+  } catch (error) {
+    if (/invalid|expired|required|submitted|rating/i.test(String(error?.message || ''))) {
+      return res.status(400).json({ error: error.message });
+    }
+    next(error);
+  }
+});

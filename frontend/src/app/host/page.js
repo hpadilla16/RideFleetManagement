@@ -12,6 +12,12 @@ function formatMoney(value) {
   return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(Number(value || 0));
 }
 
+function formatRating(value, count = 0) {
+  const rating = Number(value || 0);
+  if (!count) return 'No ratings yet';
+  return `${rating.toFixed(2)} ★ (${count})`;
+}
+
 function formatDateTime(value) {
   if (!value) return '-';
   try { return new Date(value).toLocaleString(); } catch { return String(value); }
@@ -245,6 +251,7 @@ function HostAppInner({ token, me, logout }) {
 
   const metrics = dashboard?.metrics || { listings: 0, activeListings: 0, instantBookListings: 0, trips: 0, activeTrips: 0, projectedEarnings: 0 };
   const host = dashboard?.hostProfile || null;
+  const recentReviews = dashboard?.recentReviews || [];
   const listings = dashboard?.listings || [];
   const trips = dashboard?.trips || [];
   const submissions = dashboard?.vehicleSubmissions || [];
@@ -504,14 +511,26 @@ function HostAppInner({ token, me, logout }) {
               <div className="metric-card"><span className="label">Completed Trips</span><strong>{hostSnapshot.completedTrips.length}</strong></div>
               <div className="metric-card"><span className="label">Earned Closed</span><strong>{formatMoney(hostSnapshot.earnedCompleted)}</strong></div>
               <div className="metric-card"><span className="label">Fleet Pending</span><strong>{dashboard?.metrics?.pendingVehicleApprovals || 0}</strong></div>
+              <div className="metric-card"><span className="label">Host Rating</span><strong>{formatRating(host?.averageRating, host?.reviewCount)}</strong></div>
+              <div className="metric-card"><span className="label">Reviews</span><strong>{host?.reviewCount || 0}</strong></div>
             </div>
             {host ? (
               <div className="surface-note">
-                <strong>{host.displayName}</strong><br />{[host.tenant?.name || 'No tenant', host.status].join(' · ')}<br />{host.payoutEnabled ? 'Payouts enabled' : 'Payouts not enabled yet'}<br />{host.resolvedTenantId ? 'Tenant scope ready' : 'Tenant setup still missing'}
+                <strong>{host.displayName}</strong><br />{[host.tenant?.name || 'No tenant', host.status].join(' · ')}<br />{host.payoutEnabled ? 'Payouts enabled' : 'Payouts not enabled yet'}<br />{host.resolvedTenantId ? 'Tenant scope ready' : 'Tenant setup still missing'}<br />Guest rating: {formatRating(host.averageRating, host.reviewCount)}
               </div>
             ) : (
               <div className="surface-note">{loading ? 'Loading host profile...' : 'No host profile is linked to this login yet. Admins can still use the selector below to support hosts.'}</div>
             )}
+            {recentReviews.length ? (
+              <div className="stack" style={{ marginTop: 12 }}>
+                {recentReviews.slice(0, 3).map((review) => (
+                  <div key={review.id} className="surface-note">
+                    <strong>{Number(review.rating || 0).toFixed(1)} ★</strong> · {review.reviewerName || 'Guest'}<br />
+                    {review.comments || 'Guest left a rating without a comment.'}
+                  </div>
+                ))}
+              </div>
+            ) : null}
           </div>
         </div>
       </section>

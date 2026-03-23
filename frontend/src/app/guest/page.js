@@ -10,6 +10,12 @@ function fmtMoney(value) {
   return `$${Number(value || 0).toFixed(2)}`;
 }
 
+function fmtRating(value, count = 0) {
+  const rating = Number(value || 0);
+  if (!count) return 'New host';
+  return `${rating.toFixed(2)} ★ (${count})`;
+}
+
 function formatDateTime(value) {
   if (!value) return '-';
   try {
@@ -95,6 +101,7 @@ export default function GuestAppPage() {
   const paymentLive = timelineStatus(portalStatus, 'payment');
   const documents = portalStatus?.documents || [];
   const timeline = portalStatus?.timeline || [];
+  const hostReview = result?.trip?.hostReview || null;
 
   const primaryAction = useMemo(() => {
     if (portalStatus?.nextStep?.link) return { label: portalStatus.nextStep.label, link: portalStatus.nextStep.link };
@@ -327,6 +334,9 @@ export default function GuestAppPage() {
                 <div className="info-tile"><span className="label">Current Step</span><strong>{portalStatus?.progress?.currentStep || 'Guest Flow'}</strong></div>
                 <div className="info-tile"><span className="label">Pickup</span><strong>{formatDateTime(result.reservation?.pickupAt)}</strong></div>
                 <div className="info-tile"><span className="label">Return</span><strong>{formatDateTime(result.reservation?.returnAt)}</strong></div>
+                {result.bookingType === 'CAR_SHARING' && result.trip?.host ? (
+                  <div className="info-tile"><span className="label">Host</span><strong>{result.trip.host.displayName} · {fmtRating(result.trip.host.averageRating, result.trip.host.reviewCount)}</strong></div>
+                ) : null}
               </div>
               <div className="app-banner">
                 <div className="section-title">Booking Snapshot</div>
@@ -346,6 +356,19 @@ export default function GuestAppPage() {
                   )}
                 </div>
               </div>
+              {result.bookingType === 'CAR_SHARING' && result.trip?.host?.id ? (
+                <div className="inline-actions">
+                  <Link href={`/host-profile/${result.trip.host.id}`}>
+                    <button type="button" className="button-subtle">View Host Profile</button>
+                  </Link>
+                  {hostReview?.action?.link && hostReview.status !== 'SUBMITTED' ? (
+                    <a href={hostReview.action.link} target="_blank" rel="noreferrer">
+                      <button type="button" className="button-subtle">Rate Your Host</button>
+                    </a>
+                  ) : null}
+                  {hostReview?.status === 'SUBMITTED' ? <span className="status-chip good">Host rated</span> : null}
+                </div>
+              ) : null}
               {primaryAction?.link ? (
                 <div className="inline-actions">
                   <a href={primaryAction.link} target="_blank" rel="noreferrer">

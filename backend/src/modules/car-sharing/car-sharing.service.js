@@ -1,4 +1,5 @@
 import { prisma } from '../../lib/prisma.js';
+import { hostReviewsService } from '../host-reviews/host-reviews.service.js';
 
 function slugify(input) {
   return String(input || '')
@@ -37,6 +38,7 @@ function tripInclude() {
         rentalAgreement: true
       }
     },
+    hostReview: true,
     pickupLocation: true,
     returnLocation: true,
     timelineEvents: { orderBy: [{ eventAt: 'desc' }], take: 10 }
@@ -678,7 +680,7 @@ export const carSharingService = {
       throw new Error(`Cannot move trip from ${current.status} to ${nextStatus}`);
     }
     const now = new Date();
-    return prisma.trip.update({
+    const updatedTrip = await prisma.trip.update({
       where: { id },
       data: {
         status: nextStatus,
@@ -699,6 +701,14 @@ export const carSharingService = {
       },
       include: tripInclude()
     });
+    if (nextStatus === 'COMPLETED') {
+      try {
+        await hostReviewsService.issueGuestReviewRequestForTrip(updatedTrip.id);
+      } catch (error) {
+        console.error('Unable to issue host review request', error);
+      }
+    }
+    return updatedTrip;
   },
 
   async ensureTripWorkflow(id, scope = {}) {
