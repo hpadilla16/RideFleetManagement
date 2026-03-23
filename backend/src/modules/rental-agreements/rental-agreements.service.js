@@ -3,6 +3,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import puppeteer from 'puppeteer';
 import { prisma } from '../../lib/prisma.js';
+import { hostReviewsService } from '../host-reviews/host-reviews.service.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -25,6 +26,59 @@ function agreementNumber() {
   const stamp = new Date().toISOString().replace(/[-:TZ.]/g, '').slice(0, 14);
   const rand = Math.floor(Math.random() * 9000) + 1000;
   return `RA-${stamp}-${rand}`;
+}
+
+async function completeLinkedCarSharingTripForReservation(reservationId, actorUserId = null, reason = 'Reservation checked in') {
+  if (!reservationId) return null;
+  const trip = await prisma.trip.findFirst({
+    where: { reservationId },
+    select: {
+      id: true,
+      status: true
+    }
+  });
+  if (!trip) return null;
+
+  const currentStatus = String(trip.status || '').toUpperCase();
+  if (currentStatus === 'COMPLETED') {
+    try {
+      await hostReviewsService.issueGuestReviewRequestForTrip(trip.id);
+    } catch (error) {
+      console.error('Unable to issue host review after reservation check-in', error);
+    }
+    return trip;
+  }
+
+  if (!['IN_PROGRESS', 'DISPUTED', 'READY_FOR_PICKUP', 'CONFIRMED', 'RESERVED'].includes(currentStatus)) {
+    return trip;
+  }
+
+  await prisma.trip.update({
+    where: { id: trip.id },
+    data: {
+      status: 'COMPLETED',
+      actualReturnAt: new Date(),
+      timelineEvents: {
+        create: [{
+          eventType: 'TRIP_COMPLETED',
+          actorType: actorUserId ? 'TENANT_USER' : 'SYSTEM',
+          actorRefId: actorUserId || null,
+          notes: reason,
+          metadata: JSON.stringify({
+            source: 'reservation-checkin'
+          })
+        }]
+      }
+    }
+  });
+
+  try {
+    await hostReviewsService.issueGuestReviewRequestForTrip(trip.id);
+  } catch (error) {
+    console.error('Unable to issue host review after trip completion sync', error);
+  }
+
+  return trip;
 }
 
 function parseLocationConfig(raw) {
@@ -1614,6 +1668,7 @@ export const rentalAgreementsService = {
     const row = await prisma.rentalAgreement.update({ where: { id }, data: { status: 'FINALIZED' } });
     await prisma.reservation.update({ where: { id: agreement.reservationId }, data: { status: 'CHECKED_IN' } });
     await prisma.auditLog.create({ data: { reservationId: agreement.reservationId, actorUserId: actorUserId || null, action: 'STATUS_CHANGE', fromStatus: 'CHECKED_OUT', toStatus: 'CHECKED_IN', reason: 'Check-in started from agreement' } });
+    await completeLinkedCarSharingTripForReservation(agreement.reservationId, actorUserId || null, 'Trip auto-completed from agreement check-in');
     return row;
   },
 
@@ -1995,6 +2050,7 @@ export const rentalAgreementsService = {
         reason: 'Agreement closed via check-in wizard'
       }
     });
+    await completeLinkedCarSharingTripForReservation(agreement.reservationId, actorUserId || null, 'Trip auto-completed from agreement closeout');
 
     await syncAgreementCommissionSnapshot(id);
 
