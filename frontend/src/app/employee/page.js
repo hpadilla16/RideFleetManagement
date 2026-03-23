@@ -46,6 +46,13 @@ function vehicleLabel(row) {
   return row?.vehicleType?.name || 'Unassigned vehicle';
 }
 
+function incidentStatusClass(status) {
+  const current = String(status || '').toUpperCase();
+  if (['RESOLVED', 'CLOSED'].includes(current)) return 'status-chip good';
+  if (['OPEN', 'UNDER_REVIEW'].includes(current)) return 'status-chip warn';
+  return 'status-chip neutral';
+}
+
 function workflowLabel(row) {
   const mode = String(row?.workflowMode || 'RENTAL').toUpperCase();
   if (mode === 'DEALERSHIP_LOANER') return 'Dealership Loaner';
@@ -66,6 +73,10 @@ function reservationHref(row, action = '') {
   if (!row?.id) return '#';
   if (!action) return `/reservations/${row.id}`;
   return `/reservations/${row.id}/${action}`;
+}
+
+function tripGuestName(trip) {
+  return [trip?.guestCustomer?.firstName, trip?.guestCustomer?.lastName].filter(Boolean).join(' ') || trip?.guestCustomer?.email || 'Guest';
 }
 
 function QueueCard({ title, subtitle, rows, emptyText, actions }) {
@@ -112,6 +123,56 @@ function QueueCard({ title, subtitle, rows, emptyText, actions }) {
   );
 }
 
+function IssueQueueCard({ rows }) {
+  return (
+    <section className="glass card section-card">
+      <div className="row-between">
+        <div>
+          <div className="section-title">Issue Escalations</div>
+          <p className="ui-muted" style={{ marginTop: -6 }}>
+            Customer service and ops can triage disputes here before moving into the full issue center.
+          </p>
+        </div>
+        <Link href="/issues"><button type="button">Open Issue Center</button></Link>
+      </div>
+      {rows.length ? (
+        <div className="stack">
+          {rows.map((row) => (
+            <div key={row.id} className="surface-note" style={{ display: 'grid', gap: 10 }}>
+              <div className="row-between" style={{ gap: 12, alignItems: 'start' }}>
+                <div>
+                  <div style={{ fontWeight: 700 }}>{row.title}</div>
+                  <div className="label" style={{ textTransform: 'none', letterSpacing: 0, fontSize: 12 }}>
+                    {[row.trip?.tripCode || '-', row.type, tripGuestName(row.trip), row.trip?.hostProfile?.displayName || ''].filter(Boolean).join(' - ')}
+                  </div>
+                </div>
+                <span className={incidentStatusClass(row.status)}>{row.status}</span>
+              </div>
+              <div className="info-grid-tight">
+                <div className="info-tile"><span className="label">Trip</span><strong>{row.trip?.status || '-'}</strong></div>
+                <div className="info-tile"><span className="label">Claimed</span><strong>{formatMoney(row.amountClaimed)}</strong></div>
+                <div className="info-tile"><span className="label">Created</span><strong>{formatDateTime(row.createdAt)}</strong></div>
+                <div className="info-tile"><span className="label">Reservation</span><strong>{row.trip?.reservation?.reservationNumber || '-'}</strong></div>
+              </div>
+              <div style={{ color: '#55456f', lineHeight: 1.5 }}>{row.description || 'No description provided.'}</div>
+              <div className="inline-actions">
+                <Link href="/issues"><button type="button">Handle Case</button></Link>
+                {row.trip?.reservation?.id ? (
+                  <Link href={`/reservations/${row.trip.reservation.id}`}>
+                    <button type="button" className="button-subtle">Open Workflow</button>
+                  </Link>
+                ) : null}
+              </div>
+            </div>
+          ))}
+        </div>
+      ) : (
+        <div className="surface-note">No issue escalations are open right now.</div>
+      )}
+    </section>
+  );
+}
+
 export default function EmployeeAppPage() {
   return <AuthGate>{({ token, me, logout }) => <EmployeeAppInner token={token} me={me} logout={logout} />}</AuthGate>;
 }
@@ -135,7 +196,9 @@ function EmployeeAppInner({ token, me, logout }) {
     loanerOpen: 0,
     loanerReady: 0,
     loanerBillingAttention: 0,
-    loanerOverdue: 0
+    loanerOverdue: 0,
+    issueOpen: 0,
+    issueUnderReview: 0
   };
 
   async function load(query = '') {
@@ -242,6 +305,7 @@ function EmployeeAppInner({ token, me, logout }) {
               <span className="hero-pill">Quick create</span>
               <span className="hero-pill">Phone and tablet friendly</span>
               <span className="hero-pill">Loaner service lane</span>
+              <span className="hero-pill">Issue escalation queue</span>
               <Link href="/loaner" className="hero-pill">Open Loaner Program</Link>
             </div>
           </div>
@@ -256,6 +320,8 @@ function EmployeeAppInner({ token, me, logout }) {
               <div className="metric-card"><span className="label">Loaners Ready</span><strong>{metrics.loanerReady}</strong></div>
               <div className="metric-card"><span className="label">Billing Attention</span><strong>{metrics.loanerBillingAttention}</strong></div>
               <div className="metric-card"><span className="label">Loaners Overdue</span><strong>{metrics.loanerOverdue}</strong></div>
+              <div className="metric-card"><span className="label">Issues Open</span><strong>{metrics.issueOpen}</strong></div>
+              <div className="metric-card"><span className="label">Under Review</span><strong>{metrics.issueUnderReview}</strong></div>
             </div>
           </div>
         </div>
@@ -276,6 +342,8 @@ function EmployeeAppInner({ token, me, logout }) {
             <span className="app-banner-pill">Loaner ready {metrics.loanerReady}</span>
             <span className="app-banner-pill">Billing attention {metrics.loanerBillingAttention}</span>
             <span className="app-banner-pill">Returns due {metrics.dueBackToday}</span>
+            <span className="app-banner-pill">Issues open {metrics.issueOpen}</span>
+            <span className="app-banner-pill">Under review {metrics.issueUnderReview}</span>
           </div>
         </div>
 
@@ -417,6 +485,10 @@ function EmployeeAppInner({ token, me, logout }) {
             </form>
           </section>
         </section>
+      </section>
+
+      <section className="glass card-lg section-card" style={{ marginTop: 18 }}>
+        <IssueQueueCard rows={dashboard?.queues?.issueEscalations || []} />
       </section>
 
       <section className="glass card-lg section-card" style={{ marginTop: 18 }}>

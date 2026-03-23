@@ -18,6 +18,26 @@ function includeReservation() {
   };
 }
 
+function includeIncident() {
+  return {
+    trip: {
+      include: {
+        listing: {
+          include: {
+            vehicle: true,
+            location: true
+          }
+        },
+        hostProfile: true,
+        guestCustomer: true,
+        reservation: {
+          include: includeReservation()
+        }
+      }
+    }
+  };
+}
+
 function matchesQuery(query) {
   if (!query) return undefined;
   return {
@@ -91,6 +111,58 @@ function reservationCard(row) {
   };
 }
 
+function incidentCard(row) {
+  const reservation = row.trip?.reservation || null;
+  return {
+    id: row.id,
+    type: row.type,
+    status: row.status,
+    title: row.title,
+    description: row.description || '',
+    amountClaimed: row.amountClaimed,
+    amountResolved: row.amountResolved,
+    createdAt: row.createdAt,
+    updatedAt: row.updatedAt,
+    trip: row.trip
+      ? {
+          id: row.trip.id,
+          tripCode: row.trip.tripCode,
+          status: row.trip.status,
+          scheduledPickupAt: row.trip.scheduledPickupAt,
+          scheduledReturnAt: row.trip.scheduledReturnAt,
+          listing: row.trip.listing
+            ? {
+                id: row.trip.listing.id,
+                title: row.trip.listing.title,
+                vehicle: row.trip.listing.vehicle
+                  ? {
+                      year: row.trip.listing.vehicle.year,
+                      make: row.trip.listing.vehicle.make,
+                      model: row.trip.listing.vehicle.model
+                    }
+                  : null
+              }
+            : null,
+          hostProfile: row.trip.hostProfile
+            ? {
+                id: row.trip.hostProfile.id,
+                displayName: row.trip.hostProfile.displayName
+              }
+            : null,
+          guestCustomer: row.trip.guestCustomer
+            ? {
+                id: row.trip.guestCustomer.id,
+                firstName: row.trip.guestCustomer.firstName,
+                lastName: row.trip.guestCustomer.lastName,
+                email: row.trip.guestCustomer.email
+              }
+            : null,
+          reservation: reservation ? reservationCard(reservation) : null
+        }
+      : null
+  };
+}
+
 export const employeeAppService = {
   async getDashboard(user, input = {}) {
     const scope = tenantScope(user);
@@ -110,6 +182,11 @@ export const employeeAppService = {
       ...scope,
       workflowMode: 'DEALERSHIP_LOANER'
     };
+    const incidentTenantWhere = {
+      trip: {
+        ...scope
+      }
+    };
 
     const [
       precheckinQueueRaw,
@@ -120,6 +197,7 @@ export const employeeAppService = {
       loanerAdvisorFollowupRaw,
       loanerBillingReviewRaw,
       loanerReturnsRaw,
+      incidentEscalationsRaw,
       searchResultsRaw,
       counts
     ] = await Promise.all([
@@ -210,6 +288,18 @@ export const employeeAppService = {
         orderBy: [{ returnAt: 'asc' }],
         take: 8
       }),
+      prisma.tripIncident.findMany({
+        where: {
+          ...incidentTenantWhere,
+          status: { in: ['OPEN', 'UNDER_REVIEW'] }
+        },
+        include: includeIncident(),
+        orderBy: [
+          { status: 'asc' },
+          { createdAt: 'asc' }
+        ],
+        take: 8
+      }),
       query
         ? prisma.reservation.findMany({
             where: searchWhere,
@@ -255,7 +345,19 @@ export const employeeAppService = {
             loanerBillingStatus: { not: 'SETTLED' }
           }
         }),
-        prisma.reservation.count({ where: { ...loanerWhere, status: 'CHECKED_OUT', returnAt: { lt: now } } })
+        prisma.reservation.count({ where: { ...loanerWhere, status: 'CHECKED_OUT', returnAt: { lt: now } } }),
+        prisma.tripIncident.count({
+          where: {
+            ...incidentTenantWhere,
+            status: 'OPEN'
+          }
+        }),
+        prisma.tripIncident.count({
+          where: {
+            ...incidentTenantWhere,
+            status: 'UNDER_REVIEW'
+          }
+        })
       ])
     ]);
 
@@ -270,7 +372,9 @@ export const employeeAppService = {
         loanerOpen: counts[5],
         loanerReady: counts[6],
         loanerBillingAttention: counts[7],
-        loanerOverdue: counts[8]
+        loanerOverdue: counts[8],
+        issueOpen: counts[9],
+        issueUnderReview: counts[10]
       },
       queues: {
         precheckin: precheckinQueueRaw.map(reservationCard),
@@ -280,7 +384,8 @@ export const employeeAppService = {
         loanerReady: loanerReadyRaw.map(reservationCard),
         loanerAdvisorFollowup: loanerAdvisorFollowupRaw.map(reservationCard),
         loanerBillingReview: loanerBillingReviewRaw.map(reservationCard),
-        loanerReturns: loanerReturnsRaw.map(reservationCard)
+        loanerReturns: loanerReturnsRaw.map(reservationCard),
+        issueEscalations: incidentEscalationsRaw.map(incidentCard)
       },
       searchResults: searchResultsRaw.map(reservationCard)
     };
