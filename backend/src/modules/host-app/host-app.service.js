@@ -1,5 +1,6 @@
 import { prisma } from '../../lib/prisma.js';
 import { carSharingService } from '../car-sharing/car-sharing.service.js';
+import { issueCenterService } from '../issue-center/issue-center.service.js';
 
 function listingInclude() {
   return {
@@ -26,6 +27,10 @@ function tripInclude() {
         pricingSnapshot: true,
         rentalAgreement: true
       }
+    },
+    incidents: {
+      orderBy: [{ createdAt: 'desc' }],
+      take: 5
     },
     pickupLocation: true,
     returnLocation: true,
@@ -316,5 +321,9 @@ export const hostAppService = {
       tenantId: trip.tenantId || undefined,
       actorUserId: user?.id || user?.sub || null
     });
+  },
+
+  async createTripIncident(user, id, payload = {}) {
+    return issueCenterService.createIncidentForHost(user, id, payload);
   }
 };

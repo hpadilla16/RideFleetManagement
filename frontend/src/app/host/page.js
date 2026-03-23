@@ -53,6 +53,10 @@ const EMPTY_WINDOW_FORM = {
   startAt: '', endAt: '', isBlocked: false, priceOverride: '', minTripDaysOverride: '', note: ''
 };
 
+const EMPTY_ISSUE_FORM = {
+  tripId: '', type: 'OTHER', title: '', description: '', amountClaimed: ''
+};
+
 function WatchCard({ trip, onMove }) {
   const attention = hostAttention(trip);
   const nextAction = tripActionsFor(trip.status)[0];
@@ -94,6 +98,7 @@ function HostAppInner({ token, me, logout }) {
   const [availabilityRows, setAvailabilityRows] = useState([]);
   const [availabilityListingId, setAvailabilityListingId] = useState('');
   const [windowForm, setWindowForm] = useState(EMPTY_WINDOW_FORM);
+  const [issueForm, setIssueForm] = useState(EMPTY_ISSUE_FORM);
   const [loading, setLoading] = useState(true);
 
   const isAdminViewer = !!dashboard?.isAdminViewer;
@@ -236,6 +241,30 @@ function HostAppInner({ token, me, logout }) {
         body: JSON.stringify({ status, note: `Host moved trip to ${status}` })
       }, token);
       setMsg(`Trip moved to ${status}`);
+      await load();
+    } catch (error) {
+      setMsg(error.message);
+    }
+  }
+
+  async function submitIssue(event) {
+    event.preventDefault();
+    if (!issueForm.tripId) {
+      setMsg('Choose a trip first');
+      return;
+    }
+    try {
+      await api(`/api/host-app/trips/${issueForm.tripId}/incidents`, {
+        method: 'POST',
+        body: JSON.stringify({
+          type: issueForm.type,
+          title: issueForm.title,
+          description: issueForm.description,
+          amountClaimed: issueForm.amountClaimed === '' ? null : Number(issueForm.amountClaimed)
+        })
+      }, token);
+      setIssueForm(EMPTY_ISSUE_FORM);
+      setMsg('Issue submitted for customer service review');
       await load();
     } catch (error) {
       setMsg(error.message);
@@ -440,6 +469,79 @@ function HostAppInner({ token, me, logout }) {
             <div className="stack"><label className="label">Note</label><textarea rows={3} value={windowForm.note} onChange={(event) => setWindowForm((current) => ({ ...current, note: event.target.value }))} /></div>
             <div className="inline-actions"><button type="submit">Add Window</button></div>
           </form>
+        </section>
+      </section>
+
+      <section className="split-panel" style={{ marginTop: 18 }}>
+        <section className="glass card-lg section-card">
+          <div className="row-between">
+            <div><div className="section-title">Report Issue Or Dispute</div><p className="ui-muted">Hosts can raise damage, toll, cleaning, late return, or other disputes from here.</p></div>
+            <a href="/issues"><button type="button" className="button-subtle">Open Issue Center</button></a>
+          </div>
+          <form className="stack" onSubmit={submitIssue}>
+            <div className="form-grid-2">
+              <div className="stack">
+                <label className="label">Trip</label>
+                <select value={issueForm.tripId} onChange={(event) => setIssueForm((current) => ({ ...current, tripId: event.target.value }))}>
+                  <option value="">Choose trip</option>
+                  {trips.map((trip) => <option key={trip.id} value={trip.id}>{trip.tripCode} - {trip.listing?.title || 'Listing'}</option>)}
+                </select>
+              </div>
+              <div className="stack">
+                <label className="label">Type</label>
+                <select value={issueForm.type} onChange={(event) => setIssueForm((current) => ({ ...current, type: event.target.value }))}>
+                  <option value="DAMAGE">DAMAGE</option>
+                  <option value="TOLL">TOLL</option>
+                  <option value="CLEANING">CLEANING</option>
+                  <option value="LATE_RETURN">LATE_RETURN</option>
+                  <option value="OTHER">OTHER</option>
+                </select>
+              </div>
+              <div className="stack">
+                <label className="label">Title</label>
+                <input value={issueForm.title} onChange={(event) => setIssueForm((current) => ({ ...current, title: event.target.value }))} placeholder="Short issue title" />
+              </div>
+              <div className="stack">
+                <label className="label">Amount Claimed</label>
+                <input type="number" min="0" step="0.01" value={issueForm.amountClaimed} onChange={(event) => setIssueForm((current) => ({ ...current, amountClaimed: event.target.value }))} placeholder="Optional" />
+              </div>
+            </div>
+            <div className="stack">
+              <label className="label">Description</label>
+              <textarea rows={4} value={issueForm.description} onChange={(event) => setIssueForm((current) => ({ ...current, description: event.target.value }))} placeholder="Describe the issue and what happened" />
+            </div>
+            <div className="inline-actions"><button type="submit">Submit Issue</button></div>
+          </form>
+        </section>
+
+        <section className="glass card-lg section-card">
+          <div className="row-between">
+            <div><div className="section-title">Recent Issues And Disputes</div><p className="ui-muted">A quick host-facing view of open or recently raised cases.</p></div>
+            <span className="status-chip neutral">{trips.reduce((sum, trip) => sum + (trip.incidents?.length || 0), 0)} cases</span>
+          </div>
+          {trips.some((trip) => (trip.incidents?.length || 0) > 0) ? (
+            <div className="stack">
+              {trips.filter((trip) => (trip.incidents?.length || 0) > 0).slice(0, 4).map((trip) => (
+                <div key={trip.id} className="surface-note" style={{ display: 'grid', gap: 10 }}>
+                  <strong>{trip.tripCode} - {trip.listing?.title || 'Listing'}</strong>
+                  <div className="stack">
+                    {(trip.incidents || []).map((incident) => (
+                      <div key={incident.id} className="doc-card">
+                        <div className="row-between" style={{ gap: 10 }}>
+                          <strong>{incident.title}</strong>
+                          <span className={statusChip(incident.status)}>{incident.status}</span>
+                        </div>
+                        <div className="label" style={{ textTransform: 'none', letterSpacing: 0, fontSize: 12 }}>
+                          {[incident.type, incident.amountClaimed ? formatMoney(incident.amountClaimed) : 'No amount claimed'].join(' - ')}
+                        </div>
+                        <div style={{ color: '#55456f', lineHeight: 1.5 }}>{incident.description || 'No details provided.'}</div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : <div className="surface-note">No issue or dispute cases have been raised yet.</div>}
         </section>
       </section>
 

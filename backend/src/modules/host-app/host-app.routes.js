@@ -90,3 +90,14 @@ hostAppRouter.patch('/trips/:id/status', async (req, res, next) => {
     res.status(400).json({ error: error.message });
   }
 });
+
+hostAppRouter.post('/trips/:id/incidents', async (req, res, next) => {
+  try {
+    res.status(201).json(await hostAppService.createTripIncident(req.user, req.params.id, req.body || {}));
+  } catch (error) {
+    if (/not found|required/i.test(String(error?.message || ''))) {
+      return res.status(400).json({ error: error.message });
+    }
+    next(error);
+  }
+});

@@ -84,6 +84,8 @@ export default function GuestAppPage() {
   const [result, setResult] = useState(null);
   const [portalStatus, setPortalStatus] = useState(null);
   const [recentLookups, setRecentLookups] = useState([]);
+  const [issueForm, setIssueForm] = useState({ type: 'OTHER', title: '', description: '', amountClaimed: '' });
+  const [issueMsg, setIssueMsg] = useState('');
 
   const customerInfoAction = resolvePortalAction(result, 'customerInfo');
   const signatureAction = resolvePortalAction(result, 'signature');
@@ -174,6 +176,34 @@ export default function GuestAppPage() {
     const next = { reference: row.reference, email: row.email };
     setLookupState(next);
     await resolveLookup(next.reference, next.email);
+  }
+
+  async function submitIssue(event) {
+    event.preventDefault();
+    try {
+      const created = await api('/api/public/booking/issues', {
+        method: 'POST',
+        body: JSON.stringify({
+          reference: lookupState.reference,
+          email: lookupState.email,
+          type: issueForm.type,
+          title: issueForm.title,
+          description: issueForm.description,
+          amountClaimed: issueForm.amountClaimed === '' ? null : Number(issueForm.amountClaimed)
+        })
+      });
+      setIssueMsg('Issue submitted. Customer service can now review it in the Issue Center.');
+      setIssueForm({ type: 'OTHER', title: '', description: '', amountClaimed: '' });
+      setResult((current) => current ? {
+        ...current,
+        trip: {
+          ...current.trip,
+          incidents: [created, ...(current.trip?.incidents || [])]
+        }
+      } : current);
+    } catch (err) {
+      setIssueMsg(err.message);
+    }
   }
 
   return (
@@ -448,6 +478,78 @@ export default function GuestAppPage() {
                 </div>
               ) : (
                 <div className="surface-note">Timeline entries will appear here as the booking moves forward.</div>
+              )}
+            </div>
+          </section>
+        ) : null}
+
+        {result?.bookingType === 'CAR_SHARING' && result?.trip ? (
+          <section className="split-panel">
+            <div className="glass card-lg section-card">
+              <div className="row-between">
+                <div>
+                  <div className="section-title">Report An Issue Or Dispute</div>
+                  <p className="ui-muted">Guests can report damage, cleaning, toll, late return, or other trip disputes from here.</p>
+                </div>
+                <span className="status-chip warn">{(result.trip?.incidents || []).length} cases</span>
+              </div>
+              {issueMsg ? <div className="surface-note" style={{ color: /submitted/i.test(issueMsg) ? '#166534' : '#991b1b' }}>{issueMsg}</div> : null}
+              <form className="stack" onSubmit={submitIssue}>
+                <div className="form-grid-2">
+                  <div>
+                    <div className="label">Issue Type</div>
+                    <select value={issueForm.type} onChange={(e) => setIssueForm((current) => ({ ...current, type: e.target.value }))}>
+                      <option value="DAMAGE">Damage</option>
+                      <option value="TOLL">Toll</option>
+                      <option value="CLEANING">Cleaning</option>
+                      <option value="LATE_RETURN">Late Return</option>
+                      <option value="OTHER">Other</option>
+                    </select>
+                  </div>
+                  <div>
+                    <div className="label">Amount Claimed</div>
+                    <input type="number" min="0" step="0.01" value={issueForm.amountClaimed} onChange={(e) => setIssueForm((current) => ({ ...current, amountClaimed: e.target.value }))} placeholder="Optional" />
+                  </div>
+                </div>
+                <div>
+                  <div className="label">Title</div>
+                  <input value={issueForm.title} onChange={(e) => setIssueForm((current) => ({ ...current, title: e.target.value }))} placeholder="Short summary of the issue" />
+                </div>
+                <div>
+                  <div className="label">Details</div>
+                  <textarea rows={4} value={issueForm.description} onChange={(e) => setIssueForm((current) => ({ ...current, description: e.target.value }))} placeholder="Describe what happened and what support is needed" />
+                </div>
+                <div className="inline-actions">
+                  <button type="submit">Submit Issue</button>
+                </div>
+              </form>
+            </div>
+
+            <div className="glass card-lg section-card">
+              <div className="row-between">
+                <div>
+                  <div className="section-title">Existing Cases</div>
+                  <p className="ui-muted">A quick status view of issues already raised for this trip.</p>
+                </div>
+              </div>
+              {(result.trip?.incidents || []).length ? (
+                <div className="timeline-list">
+                  {result.trip.incidents.map((incident) => (
+                    <div key={incident.id} className="timeline-item">
+                      <div className="row-between" style={{ gap: 10 }}>
+                        <strong>{incident.title}</strong>
+                        <StatusPill status={incident.status} />
+                      </div>
+                      <div className="label" style={{ textTransform: 'none', letterSpacing: 0, fontSize: 12 }}>
+                        {[incident.type, incident.amountClaimed ? fmtMoney(incident.amountClaimed) : 'No amount claimed'].join(' - ')}
+                      </div>
+                      <div className="ui-muted" style={{ fontSize: 13 }}>{formatDateTime(incident.createdAt)}</div>
+                      <div style={{ color: '#55456f', lineHeight: 1.5 }}>{incident.description || 'No details provided.'}</div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="surface-note">No guest issues have been raised for this trip yet.</div>
               )}
             </div>
           </section>

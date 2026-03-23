@@ -62,3 +62,14 @@ publicBookingRouter.post('/lookup', async (req, res, next) => {
     next(error);
   }
 });
+
+publicBookingRouter.post('/issues', async (req, res, next) => {
+  try {
+    res.status(201).json(await publicBookingService.createIssue(req.body || {}));
+  } catch (error) {
+    if (/required|not found/i.test(String(error?.message || ''))) {
+      return res.status(400).json({ error: error.message });
+    }
+    next(error);
+  }
+});

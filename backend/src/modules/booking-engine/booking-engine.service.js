@@ -1024,7 +1024,11 @@ export const bookingEngineService = {
         },
         include: {
           guestCustomer: true,
-          reservation: true
+          reservation: true,
+          incidents: {
+            orderBy: [{ createdAt: 'desc' }],
+            take: 10
+          }
         }
       });
       reservation = trip?.reservation || null;
@@ -1032,7 +1036,11 @@ export const bookingEngineService = {
       trip = await prisma.trip.findFirst({
         where: { reservationId: reservation.id },
         include: {
-          guestCustomer: true
+          guestCustomer: true,
+          incidents: {
+            orderBy: [{ createdAt: 'desc' }],
+            take: 10
+          }
         }
       });
     }
@@ -1098,7 +1106,18 @@ export const bookingEngineService = {
             status: trip.status,
             quotedTotal: money(trip.quotedTotal),
             hostEarnings: money(trip.hostEarnings),
-            platformFee: money(trip.platformFee)
+            platformFee: money(trip.platformFee),
+            incidents: (trip.incidents || []).map((incident) => ({
+              id: incident.id,
+              type: incident.type,
+              status: incident.status,
+              title: incident.title,
+              description: incident.description || '',
+              amountClaimed: money(incident.amountClaimed),
+              amountResolved: money(incident.amountResolved),
+              createdAt: incident.createdAt,
+              resolvedAt: incident.resolvedAt
+            }))
           }
         : null,
       nextActions

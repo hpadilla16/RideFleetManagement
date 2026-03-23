@@ -24,6 +24,7 @@ import { publicBookingRouter } from './modules/public-booking/public-booking.rou
 import { hostAppRouter } from './modules/host-app/host-app.routes.js';
 import { employeeAppRouter } from './modules/employee-app/employee-app.routes.js';
 import { dealershipLoanerRouter } from './modules/dealership-loaner/dealership-loaner.routes.js';
+import { issueCenterRouter } from './modules/issue-center/issue-center.routes.js';
 import { buildOpenApiSpec, swaggerHtml } from './docs/openapi.js';
 
 assertAuthConfig();
@@ -51,6 +52,7 @@ app.use('/api/public/booking', publicBookingRouter);
 app.use('/api/host-app', requireAuth, hostAppRouter);
 app.use('/api/employee-app', requireAuth, employeeAppRouter);
 app.use('/api/dealership-loaner', requireAuth, dealershipLoanerRouter);
+app.use('/api/issue-center', requireAuth, issueCenterRouter);
 
 app.use('/api/reservations', requireAuth, reservationsRouter);
 app.use('/api/customers', requireAuth, customersRouter);

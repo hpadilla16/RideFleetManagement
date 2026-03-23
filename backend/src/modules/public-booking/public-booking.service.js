@@ -1,4 +1,5 @@
 import { bookingEngineService } from '../booking-engine/booking-engine.service.js';
+import { issueCenterService } from '../issue-center/issue-center.service.js';
 
 function money(value) {
   return Number(Number(value || 0).toFixed(2));
@@ -131,5 +132,9 @@ export const publicBookingService = {
 
   async lookupBooking(input = {}) {
     return bookingEngineService.lookupPublicBooking(input);
+  },
+
+  async createIssue(input = {}) {
+    return issueCenterService.createGuestIncident(input);
   }
 };

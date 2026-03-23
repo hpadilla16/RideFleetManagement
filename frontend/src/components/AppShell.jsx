@@ -16,6 +16,7 @@ const NAV_ITEMS = [
   { href: '/car-sharing', label: 'Car Sharing', feature: 'carSharing' },
   { href: '/host', label: 'Host App', feature: 'carSharing' },
   { href: '/employee', label: 'Employee App' },
+  { href: '/issues', label: 'Issue Center' },
   { href: '/loaner', label: 'Loaner Program', feature: 'dealershipLoaner' },
   { href: '/settings', label: 'Settings' },
   { href: '/tenants', label: 'Tenants', superOnly: true },
