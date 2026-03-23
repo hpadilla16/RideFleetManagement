@@ -184,8 +184,8 @@ export default function GuestAppPage() {
       const created = await api('/api/public/booking/issues', {
         method: 'POST',
         body: JSON.stringify({
-          reference: lookupState.reference,
-          email: lookupState.email,
+          reference: result?.trip?.tripCode || result?.reservation?.reservationNumber || lookupState.reference,
+          email: result?.customer?.email || lookupState.email,
           type: issueForm.type,
           title: issueForm.title,
           description: issueForm.description,

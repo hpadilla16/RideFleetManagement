@@ -285,18 +285,40 @@ export const issueCenterService = {
     if (!reference) throw new Error('reference is required');
     if (!email) throw new Error('email is required');
 
-    const trip = await prisma.trip.findFirst({
+    const customerFilter = {
+      email: {
+        equals: email,
+        mode: 'insensitive'
+      }
+    };
+
+    let trip = await prisma.trip.findFirst({
       where: {
         tripCode: reference,
-        guestCustomer: {
-          email: {
-            equals: email,
-            mode: 'insensitive'
-          }
-        }
+        guestCustomer: customerFilter
       },
       include: incidentInclude().trip.include
     });
+
+    if (!trip) {
+      const reservation = await prisma.reservation.findFirst({
+        where: {
+          reservationNumber: reference,
+          customer: customerFilter
+        },
+        select: { id: true }
+      });
+
+      if (reservation?.id) {
+        trip = await prisma.trip.findFirst({
+          where: {
+            reservationId: reservation.id
+          },
+          include: incidentInclude().trip.include
+        });
+      }
+    }
+
     if (!trip) throw new Error('Car sharing trip not found for that reference and email');
 
     return createIncidentForTrip(trip, input, {
