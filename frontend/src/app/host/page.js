@@ -23,6 +23,11 @@ function formatDateTime(value) {
   try { return new Date(value).toLocaleString(); } catch { return String(value); }
 }
 
+function formatDate(value) {
+  if (!value) return '-';
+  try { return new Date(value).toLocaleDateString(); } catch { return String(value); }
+}
+
 function parsePhotoList(value) {
   try {
     const parsed = typeof value === 'string' ? JSON.parse(value) : value;
@@ -47,6 +52,10 @@ function parseAddOns(value) {
   } catch {
     return [];
   }
+}
+
+function primaryPhoto(value) {
+  return parsePhotoList(value)[0] || '';
 }
 
 function submissionProgress(row) {
@@ -277,6 +286,24 @@ function HostAppInner({ token, me, logout }) {
     };
   }, [trips]);
 
+  const hostMobileSnapshot = useMemo(() => ({
+    publishedListings: listings.filter((row) => String(row.status || '').toUpperCase() === 'PUBLISHED').length,
+    listingsWithPhotos: listings.filter((row) => parsePhotoList(row.photosJson).length > 0).length,
+    listingsWithAddOns: listings.filter((row) => parseAddOns(row.addOnsJson).filter((item) => item.name && item.price).length > 0).length,
+    instantBookListings: listings.filter((row) => !!row.instantBook).length,
+    nextPickupAt: hostSnapshot.upcomingPickups[0]?.scheduledPickupAt || null
+  }), [hostSnapshot.upcomingPickups, listings]);
+
+  const selectedListingSnapshot = useMemo(() => {
+    if (!listingEdit.id) return null;
+    return {
+      photoCount: (listingEdit.photoUrls || []).length,
+      addOnCount: (listingEdit.addOns || []).filter((row) => row.name && row.price).length,
+      pricingReady: !!Number(listingEdit.baseDailyRate || 0),
+      publishState: listingEdit.status || 'DRAFT'
+    };
+  }, [listingEdit]);
+
   async function saveListingEdit(event) {
     event.preventDefault();
     if (!listingEdit.id) return;
@@ -497,6 +524,7 @@ function HostAppInner({ token, me, logout }) {
               <span className="hero-pill">Host dashboard</span>
               <span className="hero-pill">Earnings visibility</span>
               <span className="hero-pill">Trip watchlist</span>
+              <span className="hero-pill">Listing quality</span>
             </div>
           </div>
           <div className="glass card section-card">
@@ -521,6 +549,11 @@ function HostAppInner({ token, me, logout }) {
             ) : (
               <div className="surface-note">{loading ? 'Loading host profile...' : 'No host profile is linked to this login yet. Admins can still use the selector below to support hosts.'}</div>
             )}
+            {host?.id ? (
+              <div className="inline-actions">
+                <a href={`/host-profile/${host.id}`} target="_blank" rel="noreferrer"><button type="button" className="button-subtle">View Public Host Profile</button></a>
+              </div>
+            ) : null}
             {recentReviews.length ? (
               <div className="stack" style={{ marginTop: 12 }}>
                 {recentReviews.slice(0, 3).map((review) => (
@@ -536,6 +569,31 @@ function HostAppInner({ token, me, logout }) {
       </section>
 
       {msg ? <div className="surface-note" style={{ color: /updated|moved|added|removed/i.test(msg) ? '#166534' : '#991b1b', marginBottom: 18 }}>{msg}</div> : null}
+
+      <section className="glass card-lg section-card" style={{ marginBottom: 18 }}>
+        <div className="row-between">
+          <div><div className="section-title">Host Mobile Hub</div><p className="ui-muted">A compact read on listing quality, pricing readiness, and the next handoff moment.</p></div>
+          <span className="status-chip neutral">{hostMobileSnapshot.publishedListings} published</span>
+        </div>
+        <div className="app-card-grid compact">
+          <div className="doc-card">
+            <strong>Next Pickup</strong>
+            <div className="doc-meta">{hostMobileSnapshot.nextPickupAt ? formatDateTime(hostMobileSnapshot.nextPickupAt) : 'No pickup in the next 48 hours'}</div>
+          </div>
+          <div className="doc-card">
+            <strong>Photo Coverage</strong>
+            <div className="doc-meta">{hostMobileSnapshot.listingsWithPhotos}/{listings.length || 0} listings have custom host photos.</div>
+          </div>
+          <div className="doc-card">
+            <strong>Add-On Coverage</strong>
+            <div className="doc-meta">{hostMobileSnapshot.listingsWithAddOns}/{listings.length || 0} listings have host add-ons ready.</div>
+          </div>
+          <div className="doc-card">
+            <strong>Instant Book</strong>
+            <div className="doc-meta">{hostMobileSnapshot.instantBookListings} listing{hostMobileSnapshot.instantBookListings === 1 ? '' : 's'} currently support instant book.</div>
+          </div>
+        </div>
+      </section>
 
       {isAdminViewer ? (
         <section className="glass card-lg section-card" style={{ marginBottom: 18 }}>
@@ -761,6 +819,8 @@ function HostAppInner({ token, me, logout }) {
                     <div className="metric-card"><span className="label">Cleaning Fee</span><strong>{formatMoney(listing.cleaningFee)}</strong></div>
                     <div className="metric-card"><span className="label">Instant Book</span><strong>{listing.instantBook ? 'On' : 'Off'}</strong></div>
                     <div className="metric-card"><span className="label">Min Stay</span><strong>{listing.minTripDays} day(s)</strong></div>
+                    <div className="metric-card"><span className="label">Photos</span><strong>{parsePhotoList(listing.photosJson).length}</strong></div>
+                    <div className="metric-card"><span className="label">Add-Ons</span><strong>{parseAddOns(listing.addOnsJson).filter((row) => row.name && row.price).length}</strong></div>
                   </div>
                   <div className="surface-note" style={{ color: '#55456f', lineHeight: 1.5 }}>
                     Change daily rate, cleaning fee, delivery fee, deposit, host add-ons, and photos from the editor below.
@@ -787,6 +847,26 @@ function HostAppInner({ token, me, logout }) {
           </div>
           {listingEdit.id ? (
             <form className="stack" onSubmit={saveListingEdit}>
+              {selectedListingSnapshot ? (
+                <div className="app-card-grid compact">
+                  <div className="doc-card">
+                    <strong>Pricing Ready</strong>
+                    <div className="doc-meta">{selectedListingSnapshot.pricingReady ? 'Daily rate is set for booking.' : 'Set a daily rate before publishing.'}</div>
+                  </div>
+                  <div className="doc-card">
+                    <strong>Photos</strong>
+                    <div className="doc-meta">{selectedListingSnapshot.photoCount} host photo{selectedListingSnapshot.photoCount === 1 ? '' : 's'} uploaded.</div>
+                  </div>
+                  <div className="doc-card">
+                    <strong>Add-Ons</strong>
+                    <div className="doc-meta">{selectedListingSnapshot.addOnCount} host add-on{selectedListingSnapshot.addOnCount === 1 ? '' : 's'} available.</div>
+                  </div>
+                  <div className="doc-card">
+                    <strong>Status</strong>
+                    <div className="doc-meta">{selectedListingSnapshot.publishState}</div>
+                  </div>
+                </div>
+              ) : null}
               <div className="stack"><label className="label">Short Description</label><input value={listingEdit.shortDescription} onChange={(event) => setListingEdit((current) => ({ ...current, shortDescription: event.target.value }))} /></div>
               <div className="stack"><label className="label">Description</label><textarea rows={4} value={listingEdit.description} onChange={(event) => setListingEdit((current) => ({ ...current, description: event.target.value }))} /></div>
               <div className="form-grid-3">
