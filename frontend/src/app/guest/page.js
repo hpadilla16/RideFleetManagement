@@ -25,6 +25,24 @@ function formatDateTime(value) {
   }
 }
 
+function formatDate(value) {
+  if (!value) return '-';
+  try {
+    return new Date(value).toLocaleDateString();
+  } catch {
+    return String(value);
+  }
+}
+
+function formatTime(value) {
+  if (!value) return '-';
+  try {
+    return new Date(value).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+  } catch {
+    return String(value);
+  }
+}
+
 function statusTone(status) {
   const value = String(status || '').toLowerCase();
   if (value === 'completed') return { color: '#12633d', background: 'rgba(43, 174, 96, 0.14)' };
@@ -102,6 +120,23 @@ export default function GuestAppPage() {
   const documents = portalStatus?.documents || [];
   const timeline = portalStatus?.timeline || [];
   const hostReview = result?.trip?.hostReview || null;
+  const bookingReference = result?.trip?.tripCode || result?.reservation?.reservationNumber || '-';
+  const pickupLabel = result?.reservation?.pickupLocation?.name || result?.trip?.locationName || result?.trip?.listing?.location?.name || 'Pickup location to be confirmed';
+  const returnLabel = result?.reservation?.returnLocation?.name || result?.trip?.locationName || result?.trip?.listing?.location?.name || pickupLabel;
+  const bookingVehicleLabel = [
+    result?.trip?.listing?.vehicle?.year || result?.reservation?.vehicle?.year || result?.reservation?.vehicleType?.name || '',
+    result?.trip?.listing?.vehicle?.make || result?.reservation?.vehicle?.make || '',
+    result?.trip?.listing?.vehicle?.model || result?.reservation?.vehicle?.model || ''
+  ].filter(Boolean).join(' ') || result?.trip?.listing?.title || 'Vehicle details available after booking review';
+  const availableDocsCount = documents.filter((item) => item.available).length;
+  const openIssueCount = (result?.trip?.incidents || []).filter((item) => !['RESOLVED', 'CLOSED'].includes(String(item?.status || '').toUpperCase())).length;
+  const timelineDoneCount = timeline.filter((item) => ['completed', 'active'].includes(String(item?.status || '').toLowerCase())).length;
+  const journeyStages = [
+    { key: 'lookup', label: 'Booking found', status: result ? 'completed' : 'pending', note: bookingReference },
+    { key: 'customerInfo', label: 'Pre-check-in', status: String(customerInfoLive?.status || 'pending').toLowerCase(), note: customerInfoLive?.description || 'Confirm guest details and docs' },
+    { key: 'signature', label: 'Signature', status: String(signatureLive?.status || 'pending').toLowerCase(), note: signatureLive?.description || 'Finish agreement signing' },
+    { key: 'payment', label: 'Payment', status: String(paymentLive?.status || 'pending').toLowerCase(), note: paymentLive?.description || 'Settle trip charges' }
+  ];
 
   const primaryAction = useMemo(() => {
     if (portalStatus?.nextStep?.link) return { label: portalStatus.nextStep.label, link: portalStatus.nextStep.link };
@@ -318,6 +353,32 @@ export default function GuestAppPage() {
         ) : null}
 
         {result ? (
+          <section className="glass card-lg section-card">
+            <div className="row-between">
+              <div>
+                <div className="section-title">Guest Journey</div>
+                <p className="ui-muted">A simpler mobile-first view of where the booking stands right now.</p>
+              </div>
+              <span className="status-chip neutral">{timelineDoneCount}/{Math.max(timeline.length, 3)} checkpoints active</span>
+            </div>
+            <div className="journey-stage-grid">
+              {journeyStages.map((stage) => (
+                <div
+                  key={stage.key}
+                  className={`journey-stage ${stage.status === 'completed' ? 'is-complete' : stage.status === 'active' || stage.status === 'partial' ? 'is-active' : ''}`}
+                >
+                  <div className="row-between" style={{ gap: 10, marginBottom: 8 }}>
+                    <strong>{stage.label}</strong>
+                    <StatusPill status={stage.status === 'pending' ? 'pending' : stage.status} />
+                  </div>
+                  <div className="ui-muted" style={{ fontSize: 13, lineHeight: 1.5 }}>{stage.note}</div>
+                </div>
+              ))}
+            </div>
+          </section>
+        ) : null}
+
+        {result ? (
           <section className="split-panel">
             <div className="glass card-lg section-card">
               <div className="row-between">
@@ -334,8 +395,9 @@ export default function GuestAppPage() {
                 <div className="info-tile"><span className="label">Current Step</span><strong>{portalStatus?.progress?.currentStep || 'Guest Flow'}</strong></div>
                 <div className="info-tile"><span className="label">Pickup</span><strong>{formatDateTime(result.reservation?.pickupAt)}</strong></div>
                 <div className="info-tile"><span className="label">Return</span><strong>{formatDateTime(result.reservation?.returnAt)}</strong></div>
+                <div className="info-tile"><span className="label">Vehicle</span><strong>{bookingVehicleLabel}</strong></div>
                 {result.bookingType === 'CAR_SHARING' && result.trip?.host ? (
-                  <div className="info-tile"><span className="label">Host</span><strong>{result.trip.host.displayName} · {fmtRating(result.trip.host.averageRating, result.trip.host.reviewCount)}</strong></div>
+                  <div className="info-tile"><span className="label">Host</span><strong>{result.trip.host.displayName} - {fmtRating(result.trip.host.averageRating, result.trip.host.reviewCount)}</strong></div>
                 ) : null}
               </div>
               <div className="app-banner">
@@ -348,12 +410,14 @@ export default function GuestAppPage() {
                       <span className="app-banner-pill">Platform fee {fmtMoney(result.trip?.platformFee)}</span>
                     </>
                   ) : (
-                    <>
+                  <>
                       <span className="app-banner-pill">Reservation estimate {fmtMoney(result.reservation?.estimatedTotal)}</span>
                       <span className="app-banner-pill">Status {result.reservation?.status || '-'}</span>
                       <span className="app-banner-pill">Payment {portalStatus?.paymentStatusLabel || 'Pending'}</span>
                     </>
                   )}
+                  <span className="app-banner-pill">Docs ready {availableDocsCount}</span>
+                  <span className="app-banner-pill">Open support cases {openIssueCount}</span>
                 </div>
               </div>
               {result.bookingType === 'CAR_SHARING' && result.trip?.host?.id ? (
@@ -445,8 +509,97 @@ export default function GuestAppPage() {
             <div className="glass card-lg section-card">
               <div className="row-between">
                 <div>
-                  <div className="section-title">Documents And Receipts</div>
-                  <p className="ui-muted">Guests can reopen signed paperwork and payment proof without calling the counter.</p>
+                  <div className="section-title">Pickup And Return Guide</div>
+                  <p className="ui-muted">A guest-friendly reminder of where to go and what to prepare.</p>
+                </div>
+                <span className="status-chip neutral">{result.bookingType === 'CAR_SHARING' ? 'Trip handoff' : 'Rental handoff'}</span>
+              </div>
+              <div className="info-grid-tight">
+                <div className="info-tile"><span className="label">Pickup Location</span><strong>{pickupLabel}</strong></div>
+                <div className="info-tile"><span className="label">Pickup Date</span><strong>{formatDate(result.reservation?.pickupAt)}</strong></div>
+                <div className="info-tile"><span className="label">Pickup Time</span><strong>{formatTime(result.reservation?.pickupAt)}</strong></div>
+                <div className="info-tile"><span className="label">Return Location</span><strong>{returnLabel}</strong></div>
+                <div className="info-tile"><span className="label">Return Date</span><strong>{formatDate(result.reservation?.returnAt)}</strong></div>
+                <div className="info-tile"><span className="label">Return Time</span><strong>{formatTime(result.reservation?.returnAt)}</strong></div>
+              </div>
+              <div className="instruction-grid">
+                <div className="surface-note">
+                  <strong>Before pickup</strong>
+                  <br />
+                  Complete pre-check-in, agreement, and payment before arrival whenever possible.
+                </div>
+                <div className="surface-note">
+                  <strong>Bring with you</strong>
+                  <br />
+                  Driver license, insurance proof if requested, and the same email used on the booking.
+                </div>
+                <div className="surface-note">
+                  <strong>At return</strong>
+                  <br />
+                  Capture any final photos, follow fuel and cleanliness expectations, and keep receipts if support is needed.
+                </div>
+              </div>
+            </div>
+
+            <div className="glass card-lg section-card">
+              <div className="row-between">
+                <div>
+                  <div className="section-title">Guest Support Center</div>
+                  <p className="ui-muted">Quick access to the next step, documents, host profile, and dispute follow-up.</p>
+                </div>
+                <span className="status-chip neutral">{primaryAction?.label || 'Self-service ready'}</span>
+              </div>
+              <div className="support-action-stack">
+                {primaryAction?.link ? (
+                  <a href={primaryAction.link} target="_blank" rel="noreferrer">
+                    <button type="button" style={{ width: '100%' }}>{primaryAction.label}</button>
+                  </a>
+                ) : null}
+                <div className="inline-actions">
+                  {customerInfoAction?.link ? (
+                    <a href={customerInfoAction.link} target="_blank" rel="noreferrer">
+                      <button type="button" className="button-subtle">Open Pre-check-in</button>
+                    </a>
+                  ) : null}
+                  {signatureAction?.link ? (
+                    <a href={signatureAction.link} target="_blank" rel="noreferrer">
+                      <button type="button" className="button-subtle">Open Signature</button>
+                    </a>
+                  ) : null}
+                  {paymentAction?.link ? (
+                    <a href={paymentAction.link} target="_blank" rel="noreferrer">
+                      <button type="button" className="button-subtle">Open Payment</button>
+                    </a>
+                  ) : null}
+                </div>
+                <div className="support-callout-grid">
+                  <div className="doc-card">
+                    <strong>Guest Wallet</strong>
+                    <div className="doc-meta">{availableDocsCount} document{availableDocsCount === 1 ? '' : 's'} available right now.</div>
+                  </div>
+                  <div className="doc-card">
+                    <strong>Support Cases</strong>
+                    <div className="doc-meta">{openIssueCount} open case{openIssueCount === 1 ? '' : 's'} still in progress.</div>
+                  </div>
+                  {result.bookingType === 'CAR_SHARING' && result.trip?.host?.id ? (
+                    <div className="doc-card">
+                      <strong>Host Trust</strong>
+                      <div className="doc-meta">{fmtRating(result.trip.host.averageRating, result.trip.host.reviewCount)}</div>
+                    </div>
+                  ) : null}
+                </div>
+              </div>
+            </div>
+          </section>
+        ) : null}
+
+        {result ? (
+          <section className="split-panel">
+            <div className="glass card-lg section-card">
+              <div className="row-between">
+                <div>
+                  <div className="section-title">Guest Wallet</div>
+                  <p className="ui-muted">Documents, receipts, and supporting paperwork stay together here for easy mobile access.</p>
                 </div>
                 <span className="status-chip neutral">{documents.filter((item) => item.available).length} available</span>
               </div>
@@ -482,7 +635,7 @@ export default function GuestAppPage() {
               <div className="row-between">
                 <div>
                   <div className="section-title">Booking Timeline</div>
-                  <p className="ui-muted">A guest-friendly view of what has already happened and what still remains.</p>
+                  <p className="ui-muted">A guest-friendly view of what has already happened and what still remains in the trip.</p>
                 </div>
                 <span className="status-chip neutral">{timeline.length} events</span>
               </div>
