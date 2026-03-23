@@ -5,6 +5,9 @@ import { AuthGate } from '../../components/AuthGate';
 import { AppShell } from '../../components/AppShell';
 import { api } from '../../lib/client';
 
+const MAX_INLINE_PDF_BYTES = 350 * 1024;
+const MAX_SUBMISSION_PAYLOAD_CHARS = 850000;
+
 function formatMoney(value) {
   return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(Number(value || 0));
 }
@@ -38,6 +41,67 @@ function parseAddOns(value) {
   } catch {
     return [];
   }
+}
+
+function fileToDataUrl(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result || ''));
+    reader.onerror = () => reject(new Error(`Could not read ${file?.name || 'file'}`));
+    reader.readAsDataURL(file);
+  });
+}
+
+function loadImage(dataUrl) {
+  return new Promise((resolve, reject) => {
+    const image = new Image();
+    image.onload = () => resolve(image);
+    image.onerror = () => reject(new Error('Could not process image'));
+    image.src = dataUrl;
+  });
+}
+
+async function compressImageFile(file, { maxWidth = 1400, maxHeight = 1400, quality = 0.72 } = {}) {
+  const raw = await fileToDataUrl(file);
+  const image = await loadImage(raw);
+  let width = image.width || maxWidth;
+  let height = image.height || maxHeight;
+
+  const scale = Math.min(1, maxWidth / width, maxHeight / height);
+  width = Math.max(1, Math.round(width * scale));
+  height = Math.max(1, Math.round(height * scale));
+
+  const canvas = document.createElement('canvas');
+  canvas.width = width;
+  canvas.height = height;
+  const ctx = canvas.getContext('2d');
+  ctx.drawImage(image, 0, 0, width, height);
+  return canvas.toDataURL('image/jpeg', quality);
+}
+
+async function toCompactUploadPayload(file, options = {}) {
+  if (!file) return '';
+  if (String(file.type || '').startsWith('image/')) {
+    return compressImageFile(file, options);
+  }
+  if (String(file.type || '').includes('pdf')) {
+    if (Number(file.size || 0) > MAX_INLINE_PDF_BYTES) {
+      throw new Error(`PDF "${file.name}" is too large for inline upload. Please use an image or a PDF under ${Math.round(MAX_INLINE_PDF_BYTES / 1024)} KB.`);
+    }
+    return fileToDataUrl(file);
+  }
+  return fileToDataUrl(file);
+}
+
+function estimateSubmissionPayload(form) {
+  const pieces = [
+    ...(form.photos || []),
+    form.insuranceDocumentUrl || '',
+    form.registrationDocumentUrl || '',
+    form.initialInspectionDocumentUrl || '',
+    JSON.stringify((form.addOns || []).filter((row) => row.name && row.price))
+  ];
+  return pieces.reduce((sum, item) => sum + String(item || '').length, 0);
 }
 
 function tripActionsFor(status) {
@@ -313,6 +377,10 @@ function HostAppInner({ token, me, logout }) {
   async function submitVehicleSubmission(event) {
     event.preventDefault();
     try {
+      const estimatedPayload = estimateSubmissionPayload(submissionForm);
+      if (estimatedPayload > MAX_SUBMISSION_PAYLOAD_CHARS) {
+        throw new Error('The vehicle submission is still too large. Use smaller images, avoid large PDFs, or upload fewer/lighter photos before submitting.');
+      }
       await api('/api/host-app/vehicle-submissions', {
         method: 'POST',
         body: JSON.stringify({
@@ -340,38 +408,41 @@ function HostAppInner({ token, me, logout }) {
   function uploadListingPhotos(files) {
     const incoming = Array.from(files || []).slice(0, 6);
     if (!incoming.length) return;
-    Promise.all(incoming.map((file) => new Promise((resolve) => {
-      const reader = new FileReader();
-      reader.onload = () => resolve(String(reader.result || ''));
-      reader.readAsDataURL(file);
-    }))).then((images) => {
+    Promise.all(incoming.map((file) => toCompactUploadPayload(file, { maxWidth: 1600, maxHeight: 1200, quality: 0.74 }))).then((images) => {
       setListingEdit((current) => ({
         ...current,
         photoUrls: [...(current.photoUrls || []), ...images.filter(Boolean)].slice(0, 6)
       }));
+      setMsg('Photos optimized for faster upload');
+    }).catch((error) => {
+      setMsg(error.message);
     });
   }
 
   function uploadSubmissionPhotos(files) {
     const incoming = Array.from(files || []).slice(0, 6);
     if (!incoming.length) return;
-    Promise.all(incoming.map((file) => new Promise((resolve) => {
-      const reader = new FileReader();
-      reader.onload = () => resolve(String(reader.result || ''));
-      reader.readAsDataURL(file);
-    }))).then((images) => {
+    Promise.all(incoming.map((file) => toCompactUploadPayload(file, { maxWidth: 1400, maxHeight: 1100, quality: 0.7 }))).then((images) => {
       setSubmissionForm((current) => ({
         ...current,
         photos: [...(current.photos || []), ...images.filter(Boolean)].slice(0, 6)
       }));
+      setMsg('Vehicle photos optimized for upload');
+    }).catch((error) => {
+      setMsg(error.message);
     });
   }
 
   function uploadSubmissionDocument(field, file) {
     if (!file) return;
-    const reader = new FileReader();
-    reader.onload = () => setSubmissionForm((current) => ({ ...current, [field]: String(reader.result || '') }));
-    reader.readAsDataURL(file);
+    toCompactUploadPayload(file, { maxWidth: 1600, maxHeight: 1600, quality: 0.72 })
+      .then((payload) => {
+        setSubmissionForm((current) => ({ ...current, [field]: payload }));
+        setMsg(`${file.name} is ready for submission`);
+      })
+      .catch((error) => {
+        setMsg(error.message);
+      });
   }
 
   function updateAddOn(target, index, key, value) {
@@ -502,7 +573,11 @@ function HostAppInner({ token, me, logout }) {
                     </div>
                   ))}
                 </div>
-              ) : <div className="surface-note">Upload up to 6 photos of the vehicle.</div>}
+              ) : <div className="surface-note">Upload up to 6 photos of the vehicle. Images are optimized automatically before submit.</div>}
+            </div>
+            <div className="surface-note">
+              For the approval submit, image files work best. Large PDFs can exceed the gateway limit, so if a PDF fails
+              use a photo or a smaller PDF.
             </div>
             <div className="form-grid-3">
               <div className="stack"><label className="label">Insurance Document</label><input type="file" accept="image/*,.pdf" onChange={(event) => uploadSubmissionDocument('insuranceDocumentUrl', event.target.files?.[0])} /></div>
