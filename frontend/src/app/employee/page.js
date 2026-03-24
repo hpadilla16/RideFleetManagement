@@ -79,6 +79,10 @@ function tripGuestName(trip) {
   return [trip?.guestCustomer?.firstName, trip?.guestCustomer?.lastName].filter(Boolean).join(' ') || trip?.guestCustomer?.email || 'Guest';
 }
 
+function issueHeadline(row) {
+  return [row?.title, row?.trip?.tripCode || '', row?.trip?.reservation?.reservationNumber || ''].filter(Boolean).join(' - ');
+}
+
 function QueueCard({ title, subtitle, rows, emptyText, actions }) {
   return (
     <section className="glass card section-card">
@@ -262,6 +266,56 @@ function EmployeeAppInner({ token, me, logout }) {
     )
   ), [createForm]);
 
+  const nextUpItems = useMemo(() => {
+    const checkout = dashboard?.queues?.checkout?.[0];
+    const returns = dashboard?.queues?.returns?.[0];
+    const loanerBilling = dashboard?.queues?.loanerBillingReview?.[0];
+    const issue = dashboard?.queues?.issueEscalations?.[0];
+
+    return [
+      checkout ? {
+        key: 'checkout',
+        label: 'Next Pickup',
+        title: checkout.reservationNumber,
+        detail: `${customerName(checkout)} - ${formatDateTime(checkout.pickupAt)}`,
+        note: [workflowLabel(checkout), checkout.pickupLocation?.name || ''].filter(Boolean).join(' - '),
+        href: reservationHref(checkout, 'checkout'),
+        cta: 'Start Checkout',
+        tone: 'good'
+      } : null,
+      returns ? {
+        key: 'return',
+        label: 'Next Return',
+        title: returns.reservationNumber,
+        detail: `${customerName(returns)} - ${formatDateTime(returns.returnAt)}`,
+        note: [workflowLabel(returns), vehicleLabel(returns)].filter(Boolean).join(' - '),
+        href: reservationHref(returns, 'checkin'),
+        cta: 'Run Check-in',
+        tone: 'warn'
+      } : null,
+      loanerBilling ? {
+        key: 'loaner-billing',
+        label: 'Loaner Billing Blocker',
+        title: loanerBilling.reservationNumber,
+        detail: `${loanerBilling.loanerBillingStatus || 'Pending'} - ${customerName(loanerBilling)}`,
+        note: queueContext(loanerBilling) || 'Needs billing follow-up',
+        href: reservationHref(loanerBilling),
+        cta: 'Open Loaner Workflow',
+        tone: 'warn'
+      } : null,
+      issue ? {
+        key: 'issue',
+        label: 'Issue Escalation',
+        title: issueHeadline(issue),
+        detail: `${tripGuestName(issue.trip)} - ${formatDateTime(issue.createdAt)}`,
+        note: issue.trip?.hostProfile?.displayName || 'Customer service follow-up',
+        href: '/issues',
+        cta: 'Handle Case',
+        tone: 'warn'
+      } : null
+    ].filter(Boolean);
+  }, [dashboard]);
+
   async function runSearch() {
     await load(search.trim());
   }
@@ -421,6 +475,42 @@ function EmployeeAppInner({ token, me, logout }) {
             <Link href="/issues"><button type="button" className="button-subtle">Issue Center</button></Link>
             <Link href="/planner"><button type="button" className="button-subtle">Planner</button></Link>
           </div>
+        </section>
+
+        <section className="glass card-lg section-card">
+          <div className="row-between">
+            <div>
+              <div className="section-title">Next Up For This Shift</div>
+              <p className="ui-muted">A compact priority board for phone and tablet so the next operational move is obvious.</p>
+            </div>
+            <span className="status-chip neutral">{nextUpItems.length} live priorities</span>
+          </div>
+          {nextUpItems.length ? (
+            <div className="app-card-grid compact">
+              {nextUpItems.map((item) => (
+                <div key={item.key} className="doc-card">
+                  <div className="row-between" style={{ marginBottom: 0, alignItems: 'start' }}>
+                    <div style={{ display: 'grid', gap: 6 }}>
+                      <span className="label">{item.label}</span>
+                      <strong>{item.title}</strong>
+                    </div>
+                    <span className={item.tone === 'good' ? 'status-chip good' : 'status-chip warn'}>
+                      {item.tone === 'good' ? 'Ready' : 'Attention'}
+                    </span>
+                  </div>
+                  <div className="doc-meta">{item.detail}</div>
+                  <div className="doc-meta">{item.note}</div>
+                  <div className="inline-actions">
+                    <Link href={item.href}>
+                      <button type="button">{item.cta}</button>
+                    </Link>
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div className="surface-note">No urgent shift priorities are open right now. You can work from the full queues below.</div>
+          )}
         </section>
 
         <section className="split-panel">
