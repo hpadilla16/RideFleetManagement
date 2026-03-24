@@ -191,6 +191,22 @@ function FileLinks({ files }) {
   );
 }
 
+function ServiceLaneCard({ label, count, note, tone = 'neutral' }) {
+  const chipClass = tone === 'warn' ? 'status-chip warn' : tone === 'good' ? 'status-chip good' : 'status-chip neutral';
+  return (
+    <div className="doc-card">
+      <div className="row-between" style={{ marginBottom: 0, alignItems: 'start' }}>
+        <div style={{ display: 'grid', gap: 6 }}>
+          <span className="label">{label}</span>
+          <strong style={{ fontSize: 28, color: '#241b41' }}>{count}</strong>
+        </div>
+        <span className={chipClass}>{tone === 'warn' ? 'Needs Action' : tone === 'good' ? 'Ready' : 'Live'}</span>
+      </div>
+      <div className="doc-meta">{note}</div>
+    </div>
+  );
+}
+
 export default function IssueCenterPage() {
   return <AuthGate>{({ token, me, logout }) => <IssueCenterInner token={token} me={me} logout={logout} />}</AuthGate>;
 }
@@ -329,6 +345,13 @@ function IssueCenterInner({ token, me, logout }) {
   const metrics = dashboard?.metrics || { open: 0, underReview: 0, resolved: 0, closed: 0, total: 0 };
   const incidents = dashboard?.incidents || [];
   const vehicleSubmissions = dashboard?.vehicleSubmissions || [];
+  const awaitingIncidentReplies = incidents.filter((incident) =>
+    (incident.communications || []).some((entry) => entry.publicTokenExpiresAt && !entry.respondedAt)
+  ).length;
+  const awaitingVehicleReplies = vehicleSubmissions.filter((submission) =>
+    (submission.communications || []).some((entry) => entry.publicTokenExpiresAt && !entry.respondedAt)
+  ).length;
+  const disputedTrips = incidents.filter((incident) => String(incident?.trip?.status || '').toUpperCase() === 'DISPUTED').length;
   const selectedSubmission = submissionEdit.id ? vehicleSubmissions.find((row) => row.id === submissionEdit.id) : null;
   const selectedSubmissionChecklist = selectedSubmission ? submissionChecklist(selectedSubmission) : null;
   const selectedSubmissionReply = selectedSubmission ? submissionReplyState(selectedSubmission) : null;
@@ -374,6 +397,58 @@ function IssueCenterInner({ token, me, logout }) {
       </section>
 
       {msg ? <div className="surface-note" style={{ color: /updated|saved/i.test(msg) ? '#166534' : '#991b1b', marginBottom: 18 }}>{msg}</div> : null}
+
+      <section className="app-section-grid" style={{ marginBottom: 18 }}>
+        <div className="app-banner">
+          <div className="section-title">Customer Service Hub</div>
+          <div className="app-banner-list">
+            <span className="app-banner-pill">Open cases {metrics.open}</span>
+            <span className="app-banner-pill">Under review {metrics.underReview}</span>
+            <span className="app-banner-pill">Guest or host replies {awaitingIncidentReplies + awaitingVehicleReplies}</span>
+            <span className="app-banner-pill">Vehicle approvals {metrics.vehicleApprovalsPending || 0}</span>
+            <span className="app-banner-pill">Disputed trips {disputedTrips}</span>
+          </div>
+        </div>
+
+        <section className="glass card-lg section-card">
+          <div className="row-between">
+            <div>
+              <div className="section-title">Service Lanes</div>
+              <p className="ui-muted">Triage faster from phone or tablet: know what needs action first, then open the queue or workflow only when needed.</p>
+            </div>
+            <span className="status-chip neutral">Support Ready</span>
+          </div>
+          <div className="app-card-grid compact">
+            <ServiceLaneCard
+              label="Open Issues"
+              count={metrics.open}
+              note="Fresh host or guest cases that should be triaged and moved into review."
+              tone={metrics.open > 0 ? 'warn' : 'neutral'}
+            />
+            <ServiceLaneCard
+              label="Awaiting Public Reply"
+              count={awaitingIncidentReplies + awaitingVehicleReplies}
+              note="Cases where support already asked for more info and is waiting on guest or host response."
+              tone={(awaitingIncidentReplies + awaitingVehicleReplies) > 0 ? 'warn' : 'neutral'}
+            />
+            <ServiceLaneCard
+              label="Vehicle Approvals"
+              count={metrics.vehicleApprovalsPending || 0}
+              note="Host fleet submissions waiting on document, photo, pricing, or inspection review."
+              tone={(metrics.vehicleApprovalsPending || 0) > 0 ? 'warn' : 'neutral'}
+            />
+            <ServiceLaneCard
+              label="Resolved And Closed"
+              count={(metrics.resolved || 0) + (metrics.closed || 0)}
+              note="Completed support work that can be audited from issue history and communications."
+              tone={((metrics.resolved || 0) + (metrics.closed || 0)) > 0 ? 'good' : 'neutral'}
+            />
+          </div>
+          <div className="surface-note">
+            Best support order: grab open issues first, check waiting public replies second, clear vehicle approvals, then finish resolution notes before closeout.
+          </div>
+        </section>
+      </section>
 
       <section className="split-panel">
         <section className="glass card-lg section-card">
