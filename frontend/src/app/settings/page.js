@@ -1102,6 +1102,29 @@ function SettingsInner({ token, me, logout }) {
   const rateFormMode = rateForm?.id ? 'Editing rate' : 'New rate';
   const rateDateInvalid = !!(rateForm?.effectiveDate && rateForm?.endDate && new Date(rateForm.endDate) < new Date(rateForm.effectiveDate));
   const rateFormValid = !!rateForm?.rateCode && !rateDateInvalid;
+  const activeSettingsTenant = tenantRows.find((tenant) => tenant.id === activeSettingsTenantId) || null;
+  const activeLocationCount = locations.filter((location) => location.isActive !== false).length;
+  const activeVehicleTypeCount = vehicleTypes.length;
+  const onlineRateCount = rates.filter((rate) => rate.isActive !== false && rate.displayOnline).length;
+  const onlineServiceCount = services.filter((service) => service.isActive !== false && service.displayOnline).length;
+  const activeInsuranceCount = insurancePlans.filter((plan) => plan.isActive !== false).length;
+  const settingsReadyCount = [
+    activeLocationCount > 0,
+    activeVehicleTypeCount > 0,
+    onlineRateCount > 0,
+    activeInsuranceCount > 0
+  ].filter(Boolean).length;
+  const activeTabLabel = {
+    agreement: 'Agreement',
+    locations: 'Locations',
+    fees: 'Fees',
+    rates: 'Rates',
+    vehicleTypes: 'Vehicle Types',
+    insurance: 'Insurance',
+    emails: 'Emails',
+    services: 'Additional Services',
+    commissions: 'Commissions'
+  }[tab] || 'Settings';
 
   if (!isAdmin) {
     return <AppShell me={me} logout={logout}><section className="glass card-lg"><h2>Settings</h2><p className="error">Admin only.</p></section></AppShell>;
@@ -1128,6 +1151,57 @@ function SettingsInner({ token, me, logout }) {
             </div>
           </div>
         ) : null}
+
+        <div className="app-banner">
+          <div className="row-between" style={{ marginBottom: 0 }}>
+            <div className="stack" style={{ gap: 6 }}>
+              <span className="eyebrow">Settings Hub</span>
+              <h2 style={{ margin: 0 }}>Configuration Snapshot</h2>
+              <p className="ui-muted">
+                {isSuper
+                  ? `Managing ${activeSettingsTenant?.name || 'tenant settings'} with current focus on ${activeTabLabel}.`
+                  : `Manage agreement, pricing, supply, and online booking settings with current focus on ${activeTabLabel}.`}
+              </p>
+            </div>
+            <span className={`status-chip ${settingsReadyCount >= 4 ? 'good' : settingsReadyCount >= 2 ? 'warn' : 'neutral'}`}>
+              {settingsReadyCount}/4 booking basics ready
+            </span>
+          </div>
+          <div className="app-card-grid compact">
+            <div className="info-tile">
+              <span className="label">Tenant Scope</span>
+              <strong>{isSuper ? (activeSettingsTenant?.name || 'Select tenant') : (me?.tenant?.name || 'Current tenant')}</strong>
+            </div>
+            <div className="info-tile">
+              <span className="label">Active Locations</span>
+              <strong>{activeLocationCount}</strong>
+            </div>
+            <div className="info-tile">
+              <span className="label">Vehicle Types</span>
+              <strong>{activeVehicleTypeCount}</strong>
+            </div>
+            <div className="info-tile">
+              <span className="label">Online Rates</span>
+              <strong>{onlineRateCount}</strong>
+            </div>
+            <div className="info-tile">
+              <span className="label">Online Services</span>
+              <strong>{onlineServiceCount}</strong>
+            </div>
+            <div className="info-tile">
+              <span className="label">Insurance Plans</span>
+              <strong>{activeInsuranceCount}</strong>
+            </div>
+          </div>
+          <div className="inline-actions">
+            <button type="button" onClick={() => setTab('vehicleTypes')}>Vehicle Types</button>
+            <button type="button" onClick={() => setTab('locations')}>Locations</button>
+            <button type="button" onClick={() => setTab('rates')}>Rates</button>
+            <button type="button" onClick={() => setTab('services')}>Online Services</button>
+            <button type="button" onClick={() => setTab('insurance')}>Insurance</button>
+            <button type="button" onClick={() => setTab('agreement')}>Agreement</button>
+          </div>
+        </div>
 
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
           <button onClick={() => setTab('agreement')}>Agreement</button>
