@@ -206,6 +206,7 @@ function SettingsInner({ token, me, logout }) {
   const [emailTemplates, setEmailTemplates] = useState(DEFAULT_EMAIL_TEMPLATES);
   const [reservationOptions, setReservationOptions] = useState({ autoAssignVehicleFromType: false });
   const [paymentGatewayConfig, setPaymentGatewayConfig] = useState(DEFAULT_PAYMENT_GATEWAY_CONFIG);
+  const [paymentGatewayHealth, setPaymentGatewayHealth] = useState(null);
 
   const [locationForm, setLocationForm] = useState(EMPTY_LOCATION);
   const [feeForm, setFeeForm] = useState(EMPTY_FEE);
@@ -421,6 +422,12 @@ function SettingsInner({ token, me, logout }) {
       }
     });
     setMsg('Payment gateway settings saved');
+  };
+
+  const runPaymentGatewayHealthCheck = async () => {
+    const out = await api(scopedSettingsPath('/api/settings/payment-gateway/health-check'), { method: 'POST' }, token);
+    setPaymentGatewayHealth(out);
+    setMsg(out?.summary || 'Payment gateway check complete');
   };
 
   const uploadLogo = (file) => {
@@ -1444,7 +1451,21 @@ function SettingsInner({ token, me, logout }) {
 
             <div className="inline-actions">
               <button type="button" onClick={savePaymentGatewayConfig}>Save Payment Gateway</button>
+              <button type="button" className="button-subtle" onClick={runPaymentGatewayHealthCheck}>Run Health Check</button>
             </div>
+            {paymentGatewayHealth ? (
+              <div className="surface-note">
+                <strong>{paymentGatewayHealth.summary}</strong>
+                <div style={{ marginTop: 8 }}>
+                  Active gateway: <strong>{String(paymentGatewayHealth.gateway || '-').toUpperCase()}</strong>
+                </div>
+                {paymentGatewayHealth.checks?.[paymentGatewayHealth.gateway]?.missing?.length ? (
+                  <div style={{ marginTop: 8 }}>
+                    Missing: {paymentGatewayHealth.checks[paymentGatewayHealth.gateway].missing.join(', ')}
+                  </div>
+                ) : null}
+              </div>
+            ) : null}
           </div>
         )}
 
