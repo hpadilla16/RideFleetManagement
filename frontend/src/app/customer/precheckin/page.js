@@ -151,12 +151,29 @@ export default function PrecheckinPage() {
       eyebrow="Ride Fleet Self-Service"
       title="Complete Your Pre-Check-in"
       subtitle="Share your contact details, driver information, and supporting documents before pickup so the counter team can get you on the road faster."
-      aside={<PortalTimelineCard portal={model?.portal} />}
+      aside={<PortalTimelineCard portal={model?.portal} reservation={reservation} currentStepKey="customerInfo" currentStepLabel="Pre-check-in" />}
     >
       {notices}
 
       {!loading && reservation ? (
         <>
+          <div style={portalStyles.card}>
+            <h2 style={portalStyles.cardTitle}>Before You Submit</h2>
+            <div style={portalStyles.statGrid}>
+              <div style={portalStyles.statTile}>
+                <div style={portalStyles.statLabel}>What We Need</div>
+                <div style={{ fontSize: 16, fontWeight: 700, lineHeight: 1.35 }}>Your contact details, license, address, and support documents.</div>
+              </div>
+              <div style={portalStyles.statTile}>
+                <div style={portalStyles.statLabel}>What Happens Next</div>
+                <div style={{ fontSize: 16, fontWeight: 700, lineHeight: 1.35 }}>{nextPortalStep?.key && nextPortalStep.key !== 'customerInfo' ? nextPortalStep.label : 'Counter team review'}</div>
+              </div>
+            </div>
+            <div style={{ marginTop: 12, color: '#55456f', lineHeight: 1.6 }}>
+              After this step, keep an eye on your email. We send the next secure link there so you can finish everything before pickup.
+            </div>
+          </div>
+
           <div style={portalStyles.card}>
             <h2 style={portalStyles.cardTitle}>Reservation Summary</h2>
             <div style={portalStyles.statGrid}>
