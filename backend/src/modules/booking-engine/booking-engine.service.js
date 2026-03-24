@@ -5,6 +5,7 @@ import { reservationsService } from '../reservations/reservations.service.js';
 import { carSharingService } from '../car-sharing/car-sharing.service.js';
 import { sendEmail } from '../../lib/mailer.js';
 import { settingsService } from '../settings/settings.service.js';
+import { computeMarketplaceTripPricing } from '../car-sharing/car-sharing-pricing.js';
 
 function parseLocationConfig(raw) {
   try {
@@ -435,14 +436,28 @@ function computeCarSharingQuote(listing, windows, pickupAt, returnAt) {
     dayRates.push(Number(overrideWindow?.priceOverride ?? listing.baseDailyRate ?? 0));
   }
 
-  const subtotal = money(dayRates.reduce((sum, value) => sum + value, 0));
-  const fees = money(Number(listing.cleaningFee || 0) + Number(listing.deliveryFee || 0));
-  const taxes = 0;
-  const total = money(subtotal + fees + taxes);
-  const platformFee = money(subtotal * 0.15);
-  const hostEarnings = money(total - platformFee);
+  const pricing = computeMarketplaceTripPricing({
+    subtotal: dayRates.reduce((sum, value) => sum + value, 0),
+    cleaningFee: Number(listing.cleaningFee || 0),
+    deliveryFee: Number(listing.deliveryFee || 0),
+    taxes: 0,
+    hostProfile: listing.hostProfile
+  });
 
-  return { tripDays, subtotal, fees, taxes, total, platformFee, hostEarnings };
+  return {
+    tripDays,
+    subtotal: pricing.tripSubtotal,
+    fees: pricing.quotedFees,
+    taxes: pricing.quotedTaxes,
+    total: pricing.quotedTotal,
+    hostGrossRevenue: pricing.hostGrossRevenue,
+    hostServiceFeeRate: pricing.hostServiceFeeRate,
+    hostServiceFee: pricing.hostServiceFee,
+    guestTripFee: pricing.guestTripFee,
+    platformRevenue: pricing.platformRevenue,
+    platformFee: pricing.platformFee,
+    hostEarnings: pricing.hostEarnings
+  };
 }
 
 async function resolvePublicTenant({ tenantSlug, tenantId } = {}) {
@@ -1254,19 +1269,30 @@ export const bookingEngineService = {
         tripCode: trip.tripCode,
         status: trip.status,
         quotedTotal: money(trip.quotedTotal),
+        hostGrossRevenue: money(trip.hostGrossRevenue),
+        hostServiceFeeRate: money(trip.hostServiceFeeRate),
+        hostServiceFee: money(trip.hostServiceFee),
+        guestTripFee: money(trip.guestTripFee),
         hostEarnings: money(trip.hostEarnings),
-        platformFee: money(trip.platformFee)
+        platformFee: money(trip.platformFee),
+        platformRevenue: money(trip.platformRevenue)
       },
       pricingBreakdown: {
         tripDays: Number(selected.quote?.tripDays || 0),
         tripSubtotal: money(selected.quote?.subtotal),
+        hostChargeFees: money(Number(selected.quote?.fees || 0) - Number(selected.quote?.guestTripFee || 0)),
+        guestTripFee: money(selected.quote?.guestTripFee),
         fees: money(selected.quote?.fees),
         taxes: money(selected.quote?.taxes),
         baseTripTotal: money(selected.quote?.total),
         additionalServicesTotal: money(normalizedChosenServices.reduce((sum, service) => sum + Number(service.total || 0), 0)),
         guestTotal: money(Number(selected.quote?.total || 0) + normalizedChosenServices.reduce((sum, service) => sum + Number(service.total || 0), 0)),
+        hostGrossRevenue: money(trip.hostGrossRevenue),
+        hostServiceFeeRate: money(trip.hostServiceFeeRate),
+        hostServiceFee: money(trip.hostServiceFee),
         hostEarnings: money(trip.hostEarnings),
         platformFee: money(trip.platformFee),
+        platformRevenue: money(trip.platformRevenue),
         currency: 'USD'
       },
       reservation: trip?.reservation ? {
@@ -1423,8 +1449,13 @@ export const bookingEngineService = {
             tripCode: trip.tripCode,
             status: trip.status,
             quotedTotal: money(trip.quotedTotal),
+            hostGrossRevenue: money(trip.hostGrossRevenue),
+            hostServiceFeeRate: money(trip.hostServiceFeeRate),
+            hostServiceFee: money(trip.hostServiceFee),
+            guestTripFee: money(trip.guestTripFee),
             hostEarnings: money(trip.hostEarnings),
             platformFee: money(trip.platformFee),
+            platformRevenue: money(trip.platformRevenue),
             host: publicHostSummary(trip.hostProfile),
             hostReview: trip.hostReview
               ? {

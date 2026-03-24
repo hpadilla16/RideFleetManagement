@@ -1390,8 +1390,9 @@ function HostAppInner({ token, me, logout }) {
                 <th>Status</th>
                 <th>Pickup</th>
                 <th>Return</th>
-                <th>Total</th>
-                <th>Earnings</th>
+                <th>Guest Total</th>
+                <th>Net Earnings</th>
+                <th>Service Fee</th>
                 <th>Attention</th>
                 <th>Actions</th>
               </tr>
@@ -1409,6 +1410,7 @@ function HostAppInner({ token, me, logout }) {
                     <td>{formatDateTime(trip.scheduledReturnAt)}</td>
                     <td>{formatMoney(trip.quotedTotal)}</td>
                     <td>{formatMoney(trip.hostEarnings)}</td>
+                    <td>{formatMoney(trip.hostServiceFee)}</td>
                     <td><span className={`status-chip ${attention.tone === 'good' ? 'good' : attention.tone === 'warn' ? 'warn' : 'neutral'}`}>{attention.label}</span></td>
                     <td>
                       <div className="inline-actions">

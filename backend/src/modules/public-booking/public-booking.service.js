@@ -180,8 +180,13 @@ export const publicBookingService = {
           fees: money(result.quote?.fees),
           taxes: money(result.quote?.taxes),
           total: money(result.quote?.total),
+          hostGrossRevenue: money(result.quote?.hostGrossRevenue),
+          hostServiceFeeRate: money(result.quote?.hostServiceFeeRate),
+          hostServiceFee: money(result.quote?.hostServiceFee),
+          guestTripFee: money(result.quote?.guestTripFee),
           hostEarnings: money(result.quote?.hostEarnings),
-          platformFee: money(result.quote?.platformFee)
+          platformFee: money(result.quote?.platformFee),
+          platformRevenue: money(result.quote?.platformRevenue)
         },
         activeWindowCount: 0
       }))

@@ -1,5 +1,6 @@
 import { prisma } from '../../lib/prisma.js';
 import { hostReviewsService } from '../host-reviews/host-reviews.service.js';
+import { computeMarketplaceTripPricing } from './car-sharing-pricing.js';
 
 function slugify(input) {
   return String(input || '')
@@ -85,20 +86,26 @@ function computeTripPricing(listing, windows, startAt, endAt) {
     );
     dayRates.push(Number(overrideWindow?.priceOverride ?? listing.baseDailyRate ?? 0));
   }
-  const subtotal = dayRates.reduce((sum, value) => sum + value, 0);
-  const fees = Number(listing.cleaningFee ?? 0) + Number(listing.deliveryFee ?? 0);
-  const taxes = 0;
-  const total = subtotal + fees + taxes;
-  const platformFee = Number((subtotal * 0.15).toFixed(2));
-  const hostEarnings = Number((total - platformFee).toFixed(2));
+  const pricing = computeMarketplaceTripPricing({
+    subtotal: dayRates.reduce((sum, value) => sum + value, 0),
+    cleaningFee: Number(listing.cleaningFee ?? 0),
+    deliveryFee: Number(listing.deliveryFee ?? 0),
+    taxes: 0,
+    hostProfile: listing.hostProfile
+  });
   return {
     tripDays,
-    subtotal,
-    fees,
-    taxes,
-    total,
-    platformFee,
-    hostEarnings
+    subtotal: pricing.tripSubtotal,
+    fees: pricing.quotedFees,
+    taxes: pricing.quotedTaxes,
+    total: pricing.quotedTotal,
+    hostGrossRevenue: pricing.hostGrossRevenue,
+    hostServiceFeeRate: pricing.hostServiceFeeRate,
+    hostServiceFee: pricing.hostServiceFee,
+    guestTripFee: pricing.guestTripFee,
+    platformRevenue: pricing.platformRevenue,
+    platformFee: pricing.platformFee,
+    hostEarnings: pricing.hostEarnings
   };
 }
 
@@ -232,6 +239,11 @@ async function ensureReservationForTrip(tripId, scope = {}) {
     fees: Number(trip.quotedFees || 0),
     taxes: Number(trip.quotedTaxes || 0),
     total: Number(trip.quotedTotal || 0),
+    hostGrossRevenue: Number(trip.hostGrossRevenue || 0),
+    hostServiceFeeRate: Number(trip.hostServiceFeeRate || 0),
+    hostServiceFee: Number(trip.hostServiceFee || 0),
+    guestTripFee: Number(trip.guestTripFee || 0),
+    platformRevenue: Number(trip.platformRevenue || trip.platformFee || 0),
     hostEarnings: Number(trip.hostEarnings || 0),
     platformFee: Number(trip.platformFee || 0)
   };
@@ -642,8 +654,13 @@ export const carSharingService = {
         quotedTaxes: quote.taxes,
         quotedFees: quote.fees,
         quotedTotal: quote.total,
+        hostGrossRevenue: quote.hostGrossRevenue,
+        hostServiceFeeRate: quote.hostServiceFeeRate,
+        hostServiceFee: quote.hostServiceFee,
+        guestTripFee: quote.guestTripFee,
         hostEarnings: quote.hostEarnings,
         platformFee: quote.platformFee,
+        platformRevenue: quote.platformRevenue,
         notes: data?.notes ? String(data.notes).trim() : null,
         timelineEvents: {
           create: [{

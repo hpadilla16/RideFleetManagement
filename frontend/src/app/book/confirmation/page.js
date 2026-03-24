@@ -203,7 +203,8 @@ export default function PublicBookingConfirmationPage() {
                         label={`Vehicle subtotal (${pricing.tripDays || 0} day${Number(pricing.tripDays || 0) === 1 ? '' : 's'})`}
                         value={fmtMoney(pricing.tripSubtotal)}
                       />
-                      <BreakdownRow label="Trip fees" value={fmtMoney(pricing.fees)} />
+                      <BreakdownRow label="Host vehicle fees" value={fmtMoney(pricing.hostChargeFees)} />
+                      <BreakdownRow label="Mandatory trip fee" value={fmtMoney(pricing.guestTripFee)} />
                       <BreakdownRow label="Estimated taxes" value={fmtMoney(pricing.taxes)} />
                       <BreakdownRow label="Base trip total" value={fmtMoney(pricing.baseTripTotal)} />
                       <BreakdownRow label="Vehicle add-ons" value={fmtMoney(pricing.additionalServicesTotal)} />

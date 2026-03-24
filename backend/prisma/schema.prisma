@@ -831,8 +831,13 @@ model Trip {
   quotedTaxes       Decimal          @default(0) @db.Decimal(10, 2)
   quotedFees        Decimal          @default(0) @db.Decimal(10, 2)
   quotedTotal       Decimal          @default(0) @db.Decimal(10, 2)
+  hostGrossRevenue  Decimal          @default(0) @db.Decimal(10, 2)
+  hostServiceFeeRate Decimal         @default(0) @db.Decimal(5, 2)
+  hostServiceFee    Decimal          @default(0) @db.Decimal(10, 2)
+  guestTripFee      Decimal          @default(0) @db.Decimal(10, 2)
   hostEarnings      Decimal          @default(0) @db.Decimal(10, 2)
   platformFee       Decimal          @default(0) @db.Decimal(10, 2)
+  platformRevenue   Decimal          @default(0) @db.Decimal(10, 2)
   payoutHoldUntil   DateTime?
   notes             String?
   createdAt         DateTime         @default(now())

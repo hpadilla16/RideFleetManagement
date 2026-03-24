@@ -1038,9 +1038,10 @@ function CarSharingInner({ token, me, logout }) {
                   <th>Status</th>
                   <th>Pickup</th>
                   <th>Return</th>
-                  <th>Total</th>
-                  <th>Host Earnings</th>
-                  <th>Platform Fee</th>
+                  <th>Guest Total</th>
+                  <th>Host Net</th>
+                  <th>Host Fee</th>
+                  <th>Trip Fee</th>
                   <th>Actions</th>
                 </tr>
               </thead>
@@ -1093,7 +1094,8 @@ function CarSharingInner({ token, me, logout }) {
                     <td>{new Date(trip.scheduledReturnAt).toLocaleString()}</td>
                     <td>{formatMoney(trip.quotedTotal)}</td>
                     <td>{formatMoney(trip.hostEarnings)}</td>
-                    <td>{formatMoney(trip.platformFee)}</td>
+                    <td>{formatMoney(trip.hostServiceFee)}</td>
+                    <td>{formatMoney(trip.guestTripFee)}</td>
                     <td>
                       <div className="inline-actions">
                         {tripActionsFor(trip.status).map((action) => (

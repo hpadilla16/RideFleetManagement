@@ -811,7 +811,7 @@ export default function PublicBookingPage() {
                       quote={[
                         { label: 'Daily Rate', value: fmtMoney(result.quote.subtotal / Math.max(1, result.quote.tripDays)) },
                         { label: 'Trip Total', value: fmtMoney(result.quote.total) },
-                        { label: 'Host Rating', value: result.host ? fmtRating(result.host.averageRating, result.host.reviewCount) : 'New host' },
+                        { label: 'Trip Fee', value: fmtMoney(result.quote.guestTripFee) },
                         { label: 'Minimum Trip', value: `${Math.max(1, Number(result.minTripDays || 1))} day${Math.max(1, Number(result.minTripDays || 1)) === 1 ? '' : 's'}` }
                       ]}
                       cta={result.instantBook ? 'Continue' : 'Request Booking'}
@@ -871,7 +871,7 @@ export default function PublicBookingPage() {
                 <br />
                 {searchMode === 'RENTAL'
                   ? `Pickup ${publicLocationLabel(selectedResult.location || {})} · ${fmtMoney(checkoutEstimatedTotal)} estimated total`
-                  : `${selectedResult.vehicle?.label || ''} · ${fmtMoney(selectedResult.quote?.total)} projected total`}
+                  : `${selectedResult.vehicle?.label || ''} · ${fmtMoney(selectedResult.quote?.total)} trip total before host add-ons`}
                 <br />
                 {searchMode === 'CAR_SHARING' && selectedResult.host ? (
                   <>
@@ -887,7 +887,7 @@ export default function PublicBookingPage() {
                 ) : null}
                 {searchMode === 'RENTAL'
                   ? `Deposit due now: ${fmtMoney(selectedResult.quote?.depositAmountDue)}${chosenAdditionalServicesTotal ? ` · Add-ons ${fmtMoney(chosenAdditionalServicesTotal)}` : ''}${selectedInsuranceTotal ? ` · Insurance ${fmtMoney(selectedInsuranceTotal)}` : ''}`
-                  : `Trip total: ${fmtMoney(selectedResult.quote?.total)}${chosenAdditionalServicesTotal ? ` · Vehicle add-ons ${fmtMoney(chosenAdditionalServicesTotal)}` : ''}`}
+                  : `Trip total: ${fmtMoney(selectedResult.quote?.total)} · Mandatory trip fee ${fmtMoney(selectedResult.quote?.guestTripFee)}${chosenAdditionalServicesTotal ? ` · Vehicle add-ons ${fmtMoney(chosenAdditionalServicesTotal)}` : ''}`}
               </div>
 
               <div className="section-card">
@@ -918,16 +918,16 @@ export default function PublicBookingPage() {
                         <div className="doc-meta">{fmtMoney(checkoutEstimatedTotal)}</div>
                       </div>
                       <div className="doc-card">
-                        <strong>Host Trust</strong>
-                        <div className="doc-meta">{selectedResult?.host ? fmtRating(selectedResult.host.averageRating, selectedResult.host.reviewCount) : 'New host'}</div>
+                        <strong>Mandatory Trip Fee</strong>
+                        <div className="doc-meta">{fmtMoney(selectedResult?.quote?.guestTripFee)}</div>
                       </div>
                       <div className="doc-card">
                         <strong>Trip Length</strong>
                         <div className="doc-meta">{Math.max(1, Number(selectedResult?.quote?.tripDays || 1))} day{Math.max(1, Number(selectedResult?.quote?.tripDays || 1)) === 1 ? '' : 's'}</div>
                       </div>
                       <div className="doc-card">
-                        <strong>Vehicle Add-Ons</strong>
-                        <div className="doc-meta">{selectedResult?.additionalServices?.length || 0} option{(selectedResult?.additionalServices?.length || 0) === 1 ? '' : 's'}</div>
+                        <strong>Host Trust</strong>
+                        <div className="doc-meta">{selectedResult?.host ? fmtRating(selectedResult.host.averageRating, selectedResult.host.reviewCount) : 'New host'}</div>
                       </div>
                     </>
                   )}
@@ -937,7 +937,7 @@ export default function PublicBookingPage() {
                   <br />
                   {searchMode === 'RENTAL'
                     ? `Base total ${fmtMoney(selectedResult?.quote?.estimatedTripTotal)} · Estimated total ${fmtMoney(checkoutEstimatedTotal)}`
-                    : `Trip total ${fmtMoney(checkoutEstimatedTotal)} · Guest flow will continue through pre-check-in, signature, and payment.`}
+                    : `Base host charges ${fmtMoney(Number(selectedResult?.quote?.total || 0) - Number(selectedResult?.quote?.guestTripFee || 0))} · Mandatory trip fee ${fmtMoney(selectedResult?.quote?.guestTripFee)} · Guest total ${fmtMoney(checkoutEstimatedTotal)}.`}
                 </div>
                 <div className="section-title">Guest Details</div>
                 {error ? <div className="surface-note" style={{ marginBottom: 16, color: '#991b1b' }}>{error}</div> : null}
