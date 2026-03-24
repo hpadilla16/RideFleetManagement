@@ -242,9 +242,107 @@ function DashboardInner({ token, me, logout }) {
   const pickups = reservations.filter((r) => dayEq(new Date(r.pickupAt)) && ['NEW', 'CONFIRMED'].includes(r.status));
   const returns = reservations.filter((r) => dayEq(new Date(r.returnAt)) && ['CHECKED_OUT', 'CONFIRMED'].includes(r.status));
   const timeline = reservations.slice().sort((a, b) => new Date(b.updatedAt) - new Date(a.updatedAt)).slice(0, 10);
+  const workspaceOpsHub = useMemo(() => {
+    const nextItems = [
+      pickups[0]
+        ? {
+            id: `pickup-${pickups[0].id}`,
+            title: 'Next Pickup',
+            detail: `#${pickups[0].reservationNumber} - ${pickups[0].customer?.firstName || ''} ${pickups[0].customer?.lastName || ''}`.trim(),
+            note: `Pickup ${new Date(pickups[0].pickupAt).toLocaleString()}`,
+            action: () => startCheckout(pickups[0].id),
+            actionLabel: 'Start Check-out'
+          }
+        : null,
+      returns[0]
+        ? {
+            id: `return-${returns[0].id}`,
+            title: 'Next Return',
+            detail: `#${returns[0].reservationNumber} - ${returns[0].customer?.firstName || ''} ${returns[0].customer?.lastName || ''}`.trim(),
+            note: `Return ${new Date(returns[0].returnAt).toLocaleString()}`,
+            action: () => router.push(`/reservations/${returns[0].id}/checkin`),
+            actionLabel: 'Open Check-in'
+          }
+        : null,
+      feeAdvisoryCount > 0
+        ? {
+            id: 'fee-advisory',
+            title: 'Fee Advisory Watch',
+            detail: `${feeAdvisoryCount} booking${feeAdvisoryCount === 1 ? '' : 's'}`,
+            note: 'Additional fee advisories are still open and may need team review.',
+            action: () => router.push('/reservations'),
+            actionLabel: 'Open Reservations'
+          }
+        : null,
+      {
+        id: 'loaner',
+        title: 'Loaner Lane',
+        detail: 'Service lane, billing, and alerts',
+        note: 'Jump straight into the dealership loaner workspace when service ops need attention.',
+        action: () => router.push('/loaner'),
+        actionLabel: 'Open Loaner'
+      }
+    ].filter(Boolean);
+
+    return {
+      totalVehicles: vehicles.length,
+      available,
+      activeReservations,
+      feeAdvisoryCount,
+      nextItems
+    };
+  }, [pickups, returns, feeAdvisoryCount, vehicles.length, available, activeReservations, router]);
 
   return (
     <AppShell me={me} logout={logout}>
+      <section className="glass card-lg section-card" style={{ marginBottom: 16 }}>
+        <div className="app-banner">
+          <div className="row-between" style={{ alignItems: 'start', marginBottom: 0 }}>
+            <div>
+              <span className="eyebrow">Workspace Ops Hub</span>
+              <h2 className="page-title" style={{ marginTop: 6 }}>
+                Keep today&apos;s pickups, returns, and service-lane work in view.
+              </h2>
+              <p className="ui-muted">A mobile-first launch point before you scroll into the full dashboard cards and charts.</p>
+            </div>
+            <span className="status-chip neutral">Workspace</span>
+          </div>
+          <div className="app-card-grid compact">
+            <div className="info-tile">
+              <span className="label">Vehicles</span>
+              <strong>{workspaceOpsHub.totalVehicles}</strong>
+              <span className="ui-muted">Total units across the workspace.</span>
+            </div>
+            <div className="info-tile">
+              <span className="label">Available</span>
+              <strong>{workspaceOpsHub.available}</strong>
+              <span className="ui-muted">Units ready to move today.</span>
+            </div>
+            <div className="info-tile">
+              <span className="label">Active Reservations</span>
+              <strong>{workspaceOpsHub.activeReservations}</strong>
+              <span className="ui-muted">Bookings currently in motion.</span>
+            </div>
+            <div className="info-tile">
+              <span className="label">Fee Advisories</span>
+              <strong>{workspaceOpsHub.feeAdvisoryCount}</strong>
+              <span className="ui-muted">Bookings still carrying advisory follow-up.</span>
+            </div>
+          </div>
+          <div className="app-card-grid compact">
+            {workspaceOpsHub.nextItems.map((item) => (
+              <section key={item.id} className="glass card section-card">
+                <div className="section-title" style={{ fontSize: 15 }}>{item.title}</div>
+                <div className="ui-muted">{item.detail}</div>
+                <div className="surface-note">{item.note}</div>
+                <div className="inline-actions">
+                  <button type="button" onClick={item.action}>{item.actionLabel}</button>
+                </div>
+              </section>
+            ))}
+          </div>
+        </div>
+      </section>
       <section className="grid4">
         <div className="glass card"><div className="label">Total Vehicles</div><div className="value">{vehicles.length}</div></div>
         <div className="glass card"><div className="label">Available Vehicles</div><div className="value">{available}</div></div>
