@@ -132,6 +132,30 @@ function Inner({ token }) {
         </div>
       </div>
 
+      {report ? (
+        <div className="print-card">
+          <div className="muted" style={{ textTransform: 'uppercase', letterSpacing: '.08em', marginBottom: 8 }}>Inspection Snapshot</div>
+          <div className="photos-grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))' }}>
+            <div className="photo-card">
+              <div className="photo-cap">Reservation</div>
+              <div style={{ fontWeight: 700 }}>{report?.reservationNumber || id}</div>
+            </div>
+            <div className="photo-card">
+              <div className="photo-cap">Checkout</div>
+              <div style={{ fontWeight: 700 }}>{report?.checkoutInspection ? 'Captured' : 'Missing'}</div>
+            </div>
+            <div className="photo-card">
+              <div className="photo-cap">Check-In</div>
+              <div style={{ fontWeight: 700 }}>{report?.checkinInspection ? 'Captured' : 'Missing'}</div>
+            </div>
+            <div className="photo-card">
+              <div className="photo-cap">Selected To Compare</div>
+              <div style={{ fontWeight: 700 }}>{selected.length}/2</div>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
       {msg ? <div className="print-card" style={{ color: '#b91c1c' }}>{msg}</div> : null}
       {!report?.checkoutInspection && !report?.checkinInspection ? <div className="print-card"><div className="muted">No inspection data found.</div></div> : null}
       <Block title="Checkout Inspection" data={report?.checkoutInspection} selected={selected} toggleSelect={toggleSelect} openPhoto={openPhoto} />
