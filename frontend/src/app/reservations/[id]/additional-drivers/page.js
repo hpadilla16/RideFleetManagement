@@ -92,7 +92,40 @@ function Inner({ token, me, logout }) {
 
   return (
     <AppShell me={me} logout={logout}>
-      <section className="glass card-lg">
+      <section className="glass card-lg stack">
+        <div className="app-banner">
+          <div className="row-between" style={{ marginBottom: 0 }}>
+            <div className="stack" style={{ gap: 6 }}>
+              <span className="eyebrow">Driver Snapshot</span>
+              <h3 style={{ margin: 0 }}>{row?.reservationNumber || id}</h3>
+              <p className="ui-muted">
+                Add authorized drivers, confirm license upload coverage, and keep the customer handoff clean before saving.
+              </p>
+            </div>
+            <span className={`status-chip ${drivers.length ? 'good' : 'neutral'}`}>
+              {drivers.length} additional driver{drivers.length === 1 ? '' : 's'}
+            </span>
+          </div>
+          <div className="app-card-grid compact">
+            <div className="info-tile">
+              <span className="label">Primary Customer</span>
+              <strong>{[row?.customer?.firstName, row?.customer?.lastName].filter(Boolean).join(' ') || row?.customer?.email || '-'}</strong>
+            </div>
+            <div className="info-tile">
+              <span className="label">Drivers Added</span>
+              <strong>{drivers.length}</strong>
+            </div>
+            <div className="info-tile">
+              <span className="label">License Uploads</span>
+              <strong>{drivers.filter((driver) => driver.licenseImageUploaded || driver.licenseImageDataUrl).length}</strong>
+            </div>
+            <div className="info-tile">
+              <span className="label">Draft Ready</span>
+              <strong>{draft.firstName && draft.lastName && draft.licenseImageDataUrl ? 'Yes' : 'No'}</strong>
+            </div>
+          </div>
+        </div>
+
         <div className="row-between"><h2>Additional Drivers</h2><button onClick={() => router.push(`/reservations/${id}`)}>Back</button></div>
         <div className="label" style={{ marginBottom: 8 }}>Reservation: {row?.reservationNumber || '-'}</div>
         {msg ? <div className="label" style={{ marginBottom: 8 }}>{msg}</div> : null}
