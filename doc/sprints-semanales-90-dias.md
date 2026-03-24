@@ -386,6 +386,62 @@ Resultado esperado:
 ### Referencia Nueva
 
 - [platform-app-roadmap-2026-03-19.md](/c:/Users/silve/.openclaw/workspace/RideFleetManagement-working-clean/doc/platform-app-roadmap-2026-03-19.md)
+- [sprint-8-closeout-and-sprint-9-mobile-plan-2026-03-24.md](/c:/Users/silve/.openclaw/workspace/RideFleetManagement-working-clean/doc/sprint-8-closeout-and-sprint-9-mobile-plan-2026-03-24.md)
+
+## Actualizacion 2026-03-24
+
+Despues del trabajo acumulado en `Sprint 8`, el siguiente salto ya no debe ser mas polish web aislado.
+
+El siguiente salto correcto es:
+
+- mobile app foundation
+- internal device builds
+- internal store testing
+
+### Estado Real Al Cierre De Sprint 8
+
+Ya existen y fueron profundizados:
+
+- `public booking web`
+- `guest account`
+- `customer portal`
+- `host account`
+- `employee app`
+- `issue center`
+- `dealership loaner`
+- `marketplace trust surfaces`
+
+### Nuevo Orden Recomendado
+
+#### Sprint 9
+
+- mobile app foundation
+- guest / host / employee app shell
+- session persistence
+- internal builds on device
+- `TestFlight internal`
+- `Google Play internal testing`
+
+#### Sprint 10
+
+- app hardening
+- notifications and reminders
+- media / upload polish
+- QA on devices
+- App Store and Google Play submission readiness
+
+#### Sprint 11
+
+- public website and marketplace polish
+- stronger listing pages
+- host landing and trust marketing pages
+- dealership loaner demo and commercial surfaces
+
+#### Sprint 12
+
+- messaging / communication layer
+- trust and account hardening
+- post-store feedback iteration
 
 ## Dependencias Criticas
 - No arrancar telematics antes de cerrar eventos y modelos estructurados.

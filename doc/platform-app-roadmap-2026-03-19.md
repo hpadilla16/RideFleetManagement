@@ -328,29 +328,31 @@ Deliverables:
 
 Goal:
 
-- expand booking and ops depth
+- begin real mobile app foundation
 
 Deliverables:
 
-- cancellations / modifications
-- guest reminders and notifications
-- host trip actions
-- employee delivery / collection
-- better mobile timeline and status UX
+- app shell foundation
+- guest app on-device continuity
+- host app on-device continuity
+- employee app on-device continuity
+- internal builds
+- TestFlight internal
+- Google Play internal testing
 
 ### Sprint 10
 
 Goal:
 
-- harden the whole experience and prepare for broader launch
+- harden mobile apps and prepare for store submission
 
 Deliverables:
 
-- responsive polish pass across desktop / tablet / phone
-- PWA installability and icon setup
-- push notification plan
-- analytics / conversion tracking
-- readiness checklist for beta expansion
+- notifications and reminder strategy
+- media and upload polish
+- device QA
+- privacy and support assets
+- App Store / Play readiness checklist
 
 ## UX Direction For End Of Sprint
 
