@@ -25,6 +25,12 @@ const EMPTY_SUBMISSION_EDIT = {
   requestNote: ''
 };
 
+const ISSUE_SEARCH_KEY = 'issues.search';
+const ISSUE_STATUS_KEY = 'issues.status';
+const ISSUE_TYPE_KEY = 'issues.type';
+const ISSUE_EDIT_ID_KEY = 'issues.editId';
+const ISSUE_SUBMISSION_ID_KEY = 'issues.submissionId';
+
 function formatMoney(value) {
   return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(Number(value || 0));
 }
@@ -103,6 +109,30 @@ function incidentHeadline(incident) {
     incident?.trip?.tripCode || incident?.reservation?.reservationNumber || '',
     incident?.title || ''
   ].filter(Boolean).join(' - ') || incident?.title || 'Issue Case';
+}
+
+function incidentToEdit(incident) {
+  return {
+    id: incident.id,
+    status: incident.status,
+    title: incident.title,
+    description: incident.description || '',
+    amountResolved: incident.amountResolved ? String(incident.amountResolved) : '',
+    note: '',
+    history: incident.history || [],
+    communications: incident.communications || [],
+    requestNote: ''
+  };
+}
+
+function submissionToEdit(submission) {
+  return {
+    id: submission.id,
+    status: submission.status,
+    reviewNotes: submission.reviewNotes || '',
+    communications: submission.communications || [],
+    requestNote: ''
+  };
 }
 
 function HistoryList({ rows }) {
@@ -221,9 +251,18 @@ export default function IssueCenterPage() {
 function IssueCenterInner({ token, me, logout }) {
   const [dashboard, setDashboard] = useState(null);
   const [msg, setMsg] = useState('');
-  const [search, setSearch] = useState('');
-  const [status, setStatus] = useState('');
-  const [type, setType] = useState('');
+  const [search, setSearch] = useState(() => {
+    if (typeof window === 'undefined') return '';
+    try { return localStorage.getItem(ISSUE_SEARCH_KEY) || ''; } catch { return ''; }
+  });
+  const [status, setStatus] = useState(() => {
+    if (typeof window === 'undefined') return '';
+    try { return localStorage.getItem(ISSUE_STATUS_KEY) || ''; } catch { return ''; }
+  });
+  const [type, setType] = useState(() => {
+    if (typeof window === 'undefined') return '';
+    try { return localStorage.getItem(ISSUE_TYPE_KEY) || ''; } catch { return ''; }
+  });
   const [edit, setEdit] = useState(EMPTY_EDIT);
   const [submissionEdit, setSubmissionEdit] = useState(EMPTY_SUBMISSION_EDIT);
 
@@ -274,6 +313,36 @@ function IssueCenterInner({ token, me, logout }) {
   useEffect(() => {
     load();
   }, [scopedQuery, token]);
+  useEffect(() => {
+    try {
+      if (search) localStorage.setItem(ISSUE_SEARCH_KEY, search);
+      else localStorage.removeItem(ISSUE_SEARCH_KEY);
+    } catch {}
+  }, [search]);
+  useEffect(() => {
+    try {
+      if (status) localStorage.setItem(ISSUE_STATUS_KEY, status);
+      else localStorage.removeItem(ISSUE_STATUS_KEY);
+    } catch {}
+  }, [status]);
+  useEffect(() => {
+    try {
+      if (type) localStorage.setItem(ISSUE_TYPE_KEY, type);
+      else localStorage.removeItem(ISSUE_TYPE_KEY);
+    } catch {}
+  }, [type]);
+  useEffect(() => {
+    try {
+      if (edit.id) localStorage.setItem(ISSUE_EDIT_ID_KEY, edit.id);
+      else localStorage.removeItem(ISSUE_EDIT_ID_KEY);
+    } catch {}
+  }, [edit.id]);
+  useEffect(() => {
+    try {
+      if (submissionEdit.id) localStorage.setItem(ISSUE_SUBMISSION_ID_KEY, submissionEdit.id);
+      else localStorage.removeItem(ISSUE_SUBMISSION_ID_KEY);
+    } catch {}
+  }, [submissionEdit.id]);
 
   async function saveIncident(event) {
     event.preventDefault();
@@ -291,6 +360,7 @@ function IssueCenterInner({ token, me, logout }) {
       }, token);
       setMsg('Issue updated');
       setEdit(EMPTY_EDIT);
+      try { localStorage.removeItem(ISSUE_EDIT_ID_KEY); } catch {}
       await load();
     } catch (error) {
       setMsg(error.message);
@@ -343,6 +413,7 @@ function IssueCenterInner({ token, me, logout }) {
       }, token);
       setMsg('Vehicle approved and activated for host');
       setSubmissionEdit(EMPTY_SUBMISSION_EDIT);
+      try { localStorage.removeItem(ISSUE_SUBMISSION_ID_KEY); } catch {}
       await load();
     } catch (error) {
       setMsg(error.message);
@@ -368,6 +439,20 @@ function IssueCenterInner({ token, me, logout }) {
     selectedSubmission?.registrationDocumentUrl ? { name: 'Registration Document', dataUrl: selectedSubmission.registrationDocumentUrl } : null,
     selectedSubmission?.initialInspectionDocumentUrl ? { name: 'Initial Inspection', dataUrl: selectedSubmission.initialInspectionDocumentUrl } : null
   ].filter(Boolean);
+  useEffect(() => {
+    try {
+      const storedIncidentId = localStorage.getItem(ISSUE_EDIT_ID_KEY) || '';
+      if (storedIncidentId && !edit.id) {
+        const incident = incidents.find((row) => row.id === storedIncidentId);
+        if (incident) setEdit(incidentToEdit(incident));
+      }
+      const storedSubmissionId = localStorage.getItem(ISSUE_SUBMISSION_ID_KEY) || '';
+      if (storedSubmissionId && !submissionEdit.id) {
+        const submission = vehicleSubmissions.find((row) => row.id === storedSubmissionId);
+        if (submission) setSubmissionEdit(submissionToEdit(submission));
+      }
+    } catch {}
+  }, [edit.id, incidents, submissionEdit.id, vehicleSubmissions]);
   const nextCaseItems = useMemo(() => {
     const awaitingIncident = incidents.find((incident) =>
       (incident.communications || []).some((entry) => entry.publicTokenExpiresAt && !entry.respondedAt)
@@ -386,17 +471,7 @@ function IssueCenterInner({ token, me, logout }) {
         title: incidentHeadline(awaitingIncident),
         detail: 'Support already requested more information. Review the reply window first.',
         cta: 'Handle Case',
-        onClick: () => setEdit({
-          id: awaitingIncident.id,
-          status: awaitingIncident.status,
-          title: awaitingIncident.title,
-          description: awaitingIncident.description || '',
-          amountResolved: awaitingIncident.amountResolved ? String(awaitingIncident.amountResolved) : '',
-          note: '',
-          history: awaitingIncident.history || [],
-          communications: awaitingIncident.communications || [],
-          requestNote: ''
-        }),
+        onClick: () => setEdit(incidentToEdit(awaitingIncident)),
         tone: 'warn'
       } : null,
       disputedIncident ? {
@@ -414,17 +489,7 @@ function IssueCenterInner({ token, me, logout }) {
         title: incidentHeadline(openIncident),
         detail: 'Fresh issue that should be triaged into review or resolution.',
         cta: 'Review Case',
-        onClick: () => setEdit({
-          id: openIncident.id,
-          status: openIncident.status,
-          title: openIncident.title,
-          description: openIncident.description || '',
-          amountResolved: openIncident.amountResolved ? String(openIncident.amountResolved) : '',
-          note: '',
-          history: openIncident.history || [],
-          communications: openIncident.communications || [],
-          requestNote: ''
-        }),
+        onClick: () => setEdit(incidentToEdit(openIncident)),
         tone: 'neutral'
       } : null,
       awaitingSubmission ? {
@@ -433,13 +498,7 @@ function IssueCenterInner({ token, me, logout }) {
         title: [awaitingSubmission.year, awaitingSubmission.make, awaitingSubmission.model].filter(Boolean).join(' ') || 'Vehicle Approval',
         detail: 'Host replied to an approval request. Review docs and communications before approving.',
         cta: 'Review Vehicle',
-        onClick: () => setSubmissionEdit({
-          id: awaitingSubmission.id,
-          status: awaitingSubmission.status,
-          reviewNotes: awaitingSubmission.reviewNotes || '',
-          communications: awaitingSubmission.communications || [],
-          requestNote: ''
-        }),
+        onClick: () => setSubmissionEdit(submissionToEdit(awaitingSubmission)),
         tone: 'warn'
       } : null,
       pendingSubmission ? {
@@ -448,13 +507,7 @@ function IssueCenterInner({ token, me, logout }) {
         title: [pendingSubmission.year, pendingSubmission.make, pendingSubmission.model].filter(Boolean).join(' ') || 'Vehicle Submission',
         detail: 'A new host vehicle submission is still waiting on initial review.',
         cta: 'Review Vehicle',
-        onClick: () => setSubmissionEdit({
-          id: pendingSubmission.id,
-          status: pendingSubmission.status,
-          reviewNotes: pendingSubmission.reviewNotes || '',
-          communications: pendingSubmission.communications || [],
-          requestNote: ''
-        }),
+        onClick: () => setSubmissionEdit(submissionToEdit(pendingSubmission)),
         tone: 'neutral'
       } : null
     ].filter(Boolean).slice(0, 4);
@@ -669,17 +722,7 @@ function IssueCenterInner({ token, me, logout }) {
                   <div className="inline-actions">
                     <button
                       type="button"
-                      onClick={() => setEdit({
-                        id: incident.id,
-                        status: incident.status,
-                        title: incident.title,
-                        description: incident.description || '',
-                        amountResolved: incident.amountResolved ? String(incident.amountResolved) : '',
-                        note: '',
-                        history: incident.history || [],
-                        communications: incident.communications || [],
-                        requestNote: ''
-                      })}
+                      onClick={() => setEdit(incidentToEdit(incident))}
                     >
                       Handle Case
                     </button>
@@ -819,13 +862,7 @@ function IssueCenterInner({ token, me, logout }) {
                     {replyState.awaitingReply ? <span className="status-chip warn">Info Requested</span> : replyState.responded ? <span className="status-chip good">Host Replied</span> : null}
                     <button
                       type="button"
-                      onClick={() => setSubmissionEdit({
-                        id: submission.id,
-                        status: submission.status,
-                        reviewNotes: submission.reviewNotes || '',
-                        communications: submission.communications || [],
-                        requestNote: ''
-                      })}
+                      onClick={() => setSubmissionEdit(submissionToEdit(submission))}
                     >
                       Review Vehicle
                     </button>
