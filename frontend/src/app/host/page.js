@@ -339,6 +339,14 @@ function HostAppInner({ token, me, logout }) {
     };
   }, [listingEdit]);
 
+  const nextListingAttention = useMemo(() => {
+    return listings.find((listing) => parsePhotoList(listing.photosJson).length < 3)
+      || listings.find((listing) => !Number(listing.baseDailyRate || 0))
+      || listings.find((listing) => !listing.instantBook)
+      || listings[0]
+      || null;
+  }, [listings]);
+
   const selectedAvailabilityListing = useMemo(
     () => listings.find((row) => row.id === availabilityListingId) || null,
     [availabilityListingId, listings]
@@ -642,6 +650,51 @@ function HostAppInner({ token, me, logout }) {
             <strong>Instant Book</strong>
             <div className="doc-meta">{hostMobileSnapshot.instantBookListings} listing{hostMobileSnapshot.instantBookListings === 1 ? '' : 's'} currently support instant book.</div>
           </div>
+        </div>
+      </section>
+
+      <section className="glass card-lg section-card" style={{ marginBottom: 18 }}>
+        <div className="row-between">
+          <div>
+            <div className="section-title">Welcome back{host?.displayName ? `, ${host.displayName}` : ''}.</div>
+            <p className="ui-muted">This is your host account hub for listings, trips, approvals, and your public trust profile.</p>
+          </div>
+          <span className="status-chip neutral">{host ? formatRating(host.averageRating, host.reviewCount) : 'Host account'}</span>
+        </div>
+        <div className="app-card-grid compact">
+          <div className="doc-card">
+            <strong>Host Profile</strong>
+            <div className="doc-meta">{host?.displayName || 'Host profile not linked yet'}</div>
+          </div>
+          <div className="doc-card">
+            <strong>Public Rating</strong>
+            <div className="doc-meta">{formatRating(host?.averageRating, host?.reviewCount)}</div>
+          </div>
+          <div className="doc-card">
+            <strong>Pending Approvals</strong>
+            <div className="doc-meta">{submissions.filter((row) => String(row.status || '').toUpperCase() === 'PENDING_REVIEW').length} fleet submission{''}</div>
+          </div>
+          <div className="doc-card">
+            <strong>Attention Listing</strong>
+            <div className="doc-meta">{nextListingAttention?.title || 'No listings yet'}</div>
+          </div>
+        </div>
+        <div className="surface-note">
+          {nextListingAttention
+            ? `Next listing to improve: ${nextListingAttention.title}. ${
+                parsePhotoList(nextListingAttention.photosJson).length < 3
+                  ? 'Add more photos to build guest trust faster.'
+                  : !Number(nextListingAttention.baseDailyRate || 0)
+                    ? 'Set pricing so guests can actually book it.'
+                    : !nextListingAttention.instantBook
+                      ? 'Review approval settings and handoff readiness.'
+                      : 'Keep this listing updated for stronger conversion.'
+              }`
+            : 'Once you publish listings and trips, your account summary and next recommendation will show here.'}
+        </div>
+        <div className="inline-actions">
+          {host?.id ? <a href={`/host-profile/${host.id}`}><button type="button">Open Public Host Profile</button></a> : null}
+          <a href="#fleet-vehicles"><button type="button" className="button-subtle">Go To Fleet Vehicles</button></a>
         </div>
       </section>
 
@@ -1072,7 +1125,7 @@ function HostAppInner({ token, me, logout }) {
         </section>
       </section>
 
-      <section className="split-panel" style={{ marginTop: 18 }}>
+      <section id="fleet-vehicles" className="split-panel" style={{ marginTop: 18 }}>
         <section className="glass card-lg section-card">
           <div className="row-between">
             <div><div className="section-title">Availability Windows</div><p className="ui-muted">Block dates, set price overrides, or require a longer minimum stay from the host surface.</p></div>
