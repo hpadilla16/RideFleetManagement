@@ -73,12 +73,46 @@ function Inner({ token, me, logout }) {
   };
 
   const unpaid = useMemo(() => Number(row?.unpaidBalance || 0), [row]);
+  const reservationCount = row?.reservations?.length || 0;
+  const agreementCount = row?.agreements?.length || 0;
+  const holdState = row?.doNotRent ? 'On Hold' : 'Active';
 
   return (
     <AppShell me={me} logout={logout}>
       {msg ? <p className="label">{msg}</p> : null}
       {!row ? <section className="glass card-lg">Loading customer...</section> : (
         <section className="glass card-lg stack">
+          <div className="app-banner">
+            <div className="row-between" style={{ marginBottom: 0 }}>
+              <div className="stack" style={{ gap: 6 }}>
+                <span className="eyebrow">Customer Snapshot</span>
+                <h3 style={{ margin: 0 }}>{row.firstName} {row.lastName}</h3>
+                <p className="ui-muted">
+                  Keep account status, balances, and booking history visible while you manage hold, credit, and password actions.
+                </p>
+              </div>
+              <span className={`status-chip ${row.doNotRent ? 'warn' : 'good'}`}>{holdState}</span>
+            </div>
+            <div className="app-card-grid compact">
+              <div className="info-tile">
+                <span className="label">Unpaid Balance</span>
+                <strong>${unpaid.toFixed(2)}</strong>
+              </div>
+              <div className="info-tile">
+                <span className="label">Credit Balance</span>
+                <strong>${Number(row.creditBalance || 0).toFixed(2)}</strong>
+              </div>
+              <div className="info-tile">
+                <span className="label">Reservations</span>
+                <strong>{reservationCount}</strong>
+              </div>
+              <div className="info-tile">
+                <span className="label">Agreements</span>
+                <strong>{agreementCount}</strong>
+              </div>
+            </div>
+          </div>
+
           <div className="row-between">
             <h2>{row.firstName} {row.lastName}</h2>
             <div className="label">Account: {row.doNotRent ? 'Hold' : 'Active'}</div>

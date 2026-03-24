@@ -78,6 +78,8 @@ function Inner({ token, me, logout }) {
   }, [row, pricing?.totals?.total, totalFromQuery]);
   const paid = useMemo(() => Number(payments.reduce((s, p) => s + Number(p.amount || 0), 0).toFixed(2)), [payments]);
   const unpaid = useMemo(() => Math.max(0, Number((total - paid).toFixed(2))), [total, paid]);
+  const paymentCount = payments.length;
+  const dueNowLabel = unpaid > 0 ? 'Payment Still Needed' : 'Paid In Full';
 
   const addPayment = async () => {
     try {
@@ -107,7 +109,38 @@ function Inner({ token, me, logout }) {
 
   return (
     <AppShell me={me} logout={logout}>
-      <section className="glass card-lg">
+      <section className="glass card-lg stack">
+        <div className="app-banner">
+          <div className="row-between" style={{ marginBottom: 0 }}>
+            <div className="stack" style={{ gap: 6 }}>
+              <span className="eyebrow">Payments Snapshot</span>
+              <h3 style={{ margin: 0 }}>{row?.reservationNumber || `Reservation ${id}`}</h3>
+              <p className="ui-muted">
+                Review the full payment picture before recording over-the-counter collections or sending the guest back into the portal.
+              </p>
+            </div>
+            <span className={`status-chip ${unpaid > 0 ? 'warn' : 'good'}`}>{dueNowLabel}</span>
+          </div>
+          <div className="app-card-grid compact">
+            <div className="info-tile">
+              <span className="label">Estimated Total</span>
+              <strong>${total.toFixed(2)}</strong>
+            </div>
+            <div className="info-tile">
+              <span className="label">Collected</span>
+              <strong>${paid.toFixed(2)}</strong>
+            </div>
+            <div className="info-tile">
+              <span className="label">Unpaid Balance</span>
+              <strong>${unpaid.toFixed(2)}</strong>
+            </div>
+            <div className="info-tile">
+              <span className="label">Payments Logged</span>
+              <strong>{paymentCount}</strong>
+            </div>
+          </div>
+        </div>
+
         <div className="row-between">
           <h2>Reservation Payments</h2>
           <button onClick={() => router.push(`/reservations/${id}`)}>Back</button>
