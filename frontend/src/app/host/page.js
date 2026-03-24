@@ -8,6 +8,10 @@ import { api } from '../../lib/client';
 
 const MAX_INLINE_PDF_BYTES = 350 * 1024;
 const MAX_SUBMISSION_PAYLOAD_CHARS = 850000;
+const HOST_SELECTED_PROFILE_KEY = 'host.selectedProfile';
+const HOST_TRIP_FILTER_KEY = 'host.tripStatusFilter';
+const HOST_LISTING_EDIT_KEY = 'host.listingEditId';
+const HOST_AVAILABILITY_KEY = 'host.availabilityListingId';
 
 function formatMoney(value) {
   return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(Number(value || 0));
@@ -177,6 +181,25 @@ function guestFlowLabel(trip) {
   return 'Guest ready for handoff';
 }
 
+function listingToEdit(listing) {
+  return {
+    id: listing.id,
+    shortDescription: listing.shortDescription || '',
+    description: listing.description || '',
+    status: listing.status || 'DRAFT',
+    baseDailyRate: String(listing.baseDailyRate ?? ''),
+    cleaningFee: String(listing.cleaningFee ?? ''),
+    deliveryFee: String(listing.deliveryFee ?? ''),
+    securityDeposit: String(listing.securityDeposit ?? ''),
+    instantBook: !!listing.instantBook,
+    minTripDays: String(listing.minTripDays ?? 1),
+    maxTripDays: listing.maxTripDays ? String(listing.maxTripDays) : '',
+    tripRules: listing.tripRules || '',
+    photoUrls: parsePhotoList(listing.photosJson),
+    addOns: parseAddOns(listing.addOnsJson)
+  };
+}
+
 const EMPTY_LISTING_EDIT = {
   id: '', shortDescription: '', description: '', status: 'DRAFT',
   baseDailyRate: '', cleaningFee: '', deliveryFee: '', securityDeposit: '',
@@ -233,11 +256,20 @@ export default function HostAppPage() {
 function HostAppInner({ token, me, logout }) {
   const [dashboard, setDashboard] = useState(null);
   const [msg, setMsg] = useState('');
-  const [selectedHostProfileId, setSelectedHostProfileId] = useState('');
+  const [selectedHostProfileId, setSelectedHostProfileId] = useState(() => {
+    if (typeof window === 'undefined') return '';
+    try { return localStorage.getItem(HOST_SELECTED_PROFILE_KEY) || ''; } catch { return ''; }
+  });
   const [listingEdit, setListingEdit] = useState(EMPTY_LISTING_EDIT);
-  const [tripStatusFilter, setTripStatusFilter] = useState('');
+  const [tripStatusFilter, setTripStatusFilter] = useState(() => {
+    if (typeof window === 'undefined') return '';
+    try { return localStorage.getItem(HOST_TRIP_FILTER_KEY) || ''; } catch { return ''; }
+  });
   const [availabilityRows, setAvailabilityRows] = useState([]);
-  const [availabilityListingId, setAvailabilityListingId] = useState('');
+  const [availabilityListingId, setAvailabilityListingId] = useState(() => {
+    if (typeof window === 'undefined') return '';
+    try { return localStorage.getItem(HOST_AVAILABILITY_KEY) || ''; } catch { return ''; }
+  });
   const [windowForm, setWindowForm] = useState(EMPTY_WINDOW_FORM);
   const [issueForm, setIssueForm] = useState(EMPTY_ISSUE_FORM);
   const [submissionForm, setSubmissionForm] = useState(EMPTY_SUBMISSION_FORM);
@@ -268,6 +300,30 @@ function HostAppInner({ token, me, logout }) {
   }
 
   useEffect(() => { load(); }, [scopedQuery, token]);
+  useEffect(() => {
+    try {
+      if (selectedHostProfileId) localStorage.setItem(HOST_SELECTED_PROFILE_KEY, selectedHostProfileId);
+      else localStorage.removeItem(HOST_SELECTED_PROFILE_KEY);
+    } catch {}
+  }, [selectedHostProfileId]);
+  useEffect(() => {
+    try {
+      if (tripStatusFilter) localStorage.setItem(HOST_TRIP_FILTER_KEY, tripStatusFilter);
+      else localStorage.removeItem(HOST_TRIP_FILTER_KEY);
+    } catch {}
+  }, [tripStatusFilter]);
+  useEffect(() => {
+    try {
+      if (listingEdit.id) localStorage.setItem(HOST_LISTING_EDIT_KEY, listingEdit.id);
+      else localStorage.removeItem(HOST_LISTING_EDIT_KEY);
+    } catch {}
+  }, [listingEdit.id]);
+  useEffect(() => {
+    try {
+      if (availabilityListingId) localStorage.setItem(HOST_AVAILABILITY_KEY, availabilityListingId);
+      else localStorage.removeItem(HOST_AVAILABILITY_KEY);
+    } catch {}
+  }, [availabilityListingId]);
 
   const metrics = dashboard?.metrics || { listings: 0, activeListings: 0, instantBookListings: 0, trips: 0, activeTrips: 0, projectedEarnings: 0 };
   const host = dashboard?.hostProfile || null;
@@ -370,6 +426,22 @@ function HostAppInner({ token, me, logout }) {
     };
   }, [availabilityListingId, availabilityRows]);
 
+  useEffect(() => {
+    if (!listings.length) return;
+    try {
+      const storedListingId = localStorage.getItem(HOST_LISTING_EDIT_KEY) || '';
+      if (storedListingId && !listingEdit.id) {
+        const listing = listings.find((row) => row.id === storedListingId);
+        if (listing) setListingEdit(listingToEdit(listing));
+      }
+      const storedAvailabilityId = localStorage.getItem(HOST_AVAILABILITY_KEY) || '';
+      if (storedAvailabilityId && !availabilityListingId) {
+        const listing = listings.find((row) => row.id === storedAvailabilityId);
+        if (listing) loadAvailability(storedAvailabilityId);
+      }
+    } catch {}
+  }, [availabilityListingId, listingEdit.id, listings]);
+
   async function saveListingEdit(event) {
     event.preventDefault();
     if (!listingEdit.id) return;
@@ -394,6 +466,7 @@ function HostAppInner({ token, me, logout }) {
       }, token);
       setMsg('Listing updated');
       setListingEdit(EMPTY_LISTING_EDIT);
+      try { localStorage.removeItem(HOST_LISTING_EDIT_KEY); } catch {}
       await load();
     } catch (error) {
       setMsg(error.message);
@@ -404,6 +477,7 @@ function HostAppInner({ token, me, logout }) {
     if (!listingId) {
       setAvailabilityListingId('');
       setAvailabilityRows([]);
+      try { localStorage.removeItem(HOST_AVAILABILITY_KEY); } catch {}
       return;
     }
     try {
@@ -1035,12 +1109,7 @@ function HostAppInner({ token, me, logout }) {
                     Change daily rate, cleaning fee, delivery fee, deposit, host add-ons, and photos from the editor below.
                   </div>
                   <div className="inline-actions">
-                    <button type="button" onClick={() => setListingEdit({
-                      id: listing.id, shortDescription: listing.shortDescription || '', description: listing.description || '', status: listing.status || 'DRAFT',
-                      baseDailyRate: String(listing.baseDailyRate ?? ''), cleaningFee: String(listing.cleaningFee ?? ''), deliveryFee: String(listing.deliveryFee ?? ''),
-                      securityDeposit: String(listing.securityDeposit ?? ''), instantBook: !!listing.instantBook, minTripDays: String(listing.minTripDays ?? 1),
-                      maxTripDays: listing.maxTripDays ? String(listing.maxTripDays) : '', tripRules: listing.tripRules || '', photoUrls: parsePhotoList(listing.photosJson), addOns: parseAddOns(listing.addOnsJson)
-                    })}>Edit Rates And Listing</button>
+                    <button type="button" onClick={() => setListingEdit(listingToEdit(listing))}>Edit Rates And Listing</button>
                     <button type="button" className="button-subtle" onClick={() => loadAvailability(listing.id)}>Availability</button>
                   </div>
                 </div>
