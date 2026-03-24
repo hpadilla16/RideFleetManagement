@@ -25,6 +25,7 @@ export default function SignAgreementPage() {
   const [signerName, setSignerName] = useState('');
   const [accepted, setAccepted] = useState(false);
   const nextPortalStep = portal?.nextStep;
+  const signatureReady = !!signerName.trim() && accepted;
 
   useEffect(() => {
     const run = async () => {
@@ -135,6 +136,28 @@ export default function SignAgreementPage() {
 
       {loaded ? (
         <>
+          <div style={portalStyles.card}>
+            <h2 style={portalStyles.cardTitle}>Signature Snapshot</h2>
+            <div style={portalStyles.statGrid}>
+              <div style={portalStyles.statTile}>
+                <div style={portalStyles.statLabel}>Signer Name</div>
+                <div style={portalStyles.statValue}>{signerName.trim() ? 'Ready' : 'Missing'}</div>
+              </div>
+              <div style={portalStyles.statTile}>
+                <div style={portalStyles.statLabel}>Terms Accepted</div>
+                <div style={portalStyles.statValue}>{accepted ? 'Yes' : 'No'}</div>
+              </div>
+              <div style={portalStyles.statTile}>
+                <div style={portalStyles.statLabel}>Balance After Signing</div>
+                <div style={portalStyles.statValue}>${Number(breakdown?.balance || 0).toFixed(2)}</div>
+              </div>
+              <div style={portalStyles.statTile}>
+                <div style={portalStyles.statLabel}>Ready To Submit</div>
+                <div style={portalStyles.statValue}>{signatureReady ? 'Yes' : 'Not yet'}</div>
+              </div>
+            </div>
+          </div>
+
           <div style={portalStyles.card}>
             <h2 style={portalStyles.cardTitle}>What You Are Signing</h2>
             <div style={portalStyles.statGrid}>
