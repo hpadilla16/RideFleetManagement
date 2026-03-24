@@ -135,7 +135,8 @@ export default function GuestAppPage() {
     result?.trip?.listing?.vehicle?.model || result?.reservation?.vehicle?.model || ''
   ].filter(Boolean).join(' ') || result?.trip?.listing?.title || 'Vehicle details available after booking review';
   const availableDocsCount = documents.filter((item) => item.available).length;
-  const openIssueCount = (result?.trip?.incidents || []).filter((item) => !['RESOLVED', 'CLOSED'].includes(String(item?.status || '').toUpperCase())).length;
+  const issueCases = result?.issues || result?.trip?.incidents || result?.reservation?.incidents || [];
+  const openIssueCount = issueCases.filter((item) => !['RESOLVED', 'CLOSED'].includes(String(item?.status || '').toUpperCase())).length;
   const timelineDoneCount = timeline.filter((item) => ['completed', 'active'].includes(String(item?.status || '').toLowerCase())).length;
   const bookingModeLabel = result?.bookingType === 'CAR_SHARING' ? 'Car Sharing' : 'Rental';
   const hostTrustLabel = result?.bookingType === 'CAR_SHARING' && result?.trip?.host
@@ -248,10 +249,15 @@ export default function GuestAppPage() {
       setIssueForm({ type: 'OTHER', title: '', description: '', amountClaimed: '' });
       setResult((current) => current ? {
         ...current,
-        trip: {
+        issues: [created, ...((current.issues || current.trip?.incidents || current.reservation?.incidents || []).filter((item) => item.id !== created.id))],
+        trip: current.trip ? {
           ...current.trip,
-          incidents: [created, ...(current.trip?.incidents || [])]
-        }
+          incidents: [created, ...(current.trip?.incidents || []).filter((item) => item.id !== created.id)]
+        } : current.trip,
+        reservation: current.reservation ? {
+          ...current.reservation,
+          incidents: [created, ...(current.reservation?.incidents || []).filter((item) => item.id !== created.id)]
+        } : current.reservation
       } : current);
     } catch (err) {
       setIssueMsg(err.message);
@@ -700,15 +706,15 @@ export default function GuestAppPage() {
           </section>
         ) : null}
 
-        {result?.bookingType === 'CAR_SHARING' && result?.trip ? (
+        {result ? (
           <section className="split-panel">
             <div className="glass card-lg section-card">
               <div className="row-between">
                 <div>
                   <div className="section-title">Report An Issue Or Dispute</div>
-                  <p className="ui-muted">Guests can report damage, cleaning, toll, late return, or other trip disputes from here.</p>
+                  <p className="ui-muted">Guests can report problems for this booking, whether it is a rental reservation or a car sharing trip.</p>
                 </div>
-                <span className="status-chip warn">{(result.trip?.incidents || []).length} cases</span>
+                <span className="status-chip warn">{issueCases.length} cases</span>
               </div>
               {issueMsg ? <div className="surface-note" style={{ color: /submitted/i.test(issueMsg) ? '#166534' : '#991b1b' }}>{issueMsg}</div> : null}
               <form className="stack" onSubmit={submitIssue}>
@@ -746,12 +752,12 @@ export default function GuestAppPage() {
               <div className="row-between">
                 <div>
                   <div className="section-title">Existing Cases</div>
-                  <p className="ui-muted">A quick status view of issues already raised for this trip.</p>
+                  <p className="ui-muted">A quick status view of issues already raised for this booking.</p>
                 </div>
               </div>
-              {(result.trip?.incidents || []).length ? (
+              {issueCases.length ? (
                 <div className="timeline-list">
-                  {result.trip.incidents.map((incident) => (
+                  {issueCases.map((incident) => (
                     <div key={incident.id} className="timeline-item">
                       <div className="row-between" style={{ gap: 10 }}>
                         <strong>{incident.title}</strong>
@@ -766,7 +772,7 @@ export default function GuestAppPage() {
                   ))}
                 </div>
               ) : (
-                <div className="surface-note">No guest issues have been raised for this trip yet.</div>
+                <div className="surface-note">No guest issues have been raised for this booking yet.</div>
               )}
             </div>
           </section>

@@ -490,14 +490,26 @@ function IssueCenterInner({ token, me, logout }) {
             <div className="stack">
               {incidents.map((incident) => (
                 <div key={incident.id} className="surface-note" style={{ display: 'grid', gap: 10 }}>
+                  {(() => {
+                    const reservation = incident.reservation || incident.trip?.reservation || null;
+                    const guestName = incident.trip?.guestCustomer
+                      ? [incident.trip.guestCustomer.firstName, incident.trip.guestCustomer.lastName].filter(Boolean).join(' ')
+                      : incident.guestCustomer
+                        ? [incident.guestCustomer.firstName, incident.guestCustomer.lastName].filter(Boolean).join(' ')
+                        : '';
+                    const subjectRef = incident.trip?.tripCode || reservation?.reservationNumber || '-';
+                    const workflowLabel = incident.subjectType === 'RESERVATION' ? 'Reservation Issue' : 'Trip Issue';
+                    return (
+                      <>
                   <div className="row-between" style={{ gap: 12, alignItems: 'start' }}>
                     <div>
                       <div style={{ fontWeight: 700 }}>{incident.title}</div>
                       <div className="label" style={{ textTransform: 'none', letterSpacing: 0, fontSize: 12 }}>
                         {[
-                          incident.trip?.tripCode || '-',
+                          subjectRef,
+                          workflowLabel,
                           incident.type,
-                          incident.trip?.guestCustomer ? [incident.trip.guestCustomer.firstName, incident.trip.guestCustomer.lastName].filter(Boolean).join(' ') : '',
+                          guestName,
                           incident.trip?.hostProfile?.displayName || ''
                         ].filter(Boolean).join(' - ')}
                       </div>
@@ -508,7 +520,7 @@ function IssueCenterInner({ token, me, logout }) {
                     <div className="info-tile"><span className="label">Claimed</span><strong>{formatMoney(incident.amountClaimed)}</strong></div>
                     <div className="info-tile"><span className="label">Resolved</span><strong>{formatMoney(incident.amountResolved)}</strong></div>
                     <div className="info-tile"><span className="label">Created</span><strong>{formatDateTime(incident.createdAt)}</strong></div>
-                    <div className="info-tile"><span className="label">Trip</span><strong>{incident.trip?.status || '-'}</strong></div>
+                    <div className="info-tile"><span className="label">{incident.subjectType === 'RESERVATION' ? 'Reservation' : 'Trip'}</span><strong>{incident.subjectType === 'RESERVATION' ? (reservation?.status || '-') : (incident.trip?.status || '-')}</strong></div>
                   </div>
                   <div style={{ color: '#55456f', lineHeight: 1.5 }}>{incident.description || 'No description provided.'}</div>
                   <details>
@@ -534,8 +546,11 @@ function IssueCenterInner({ token, me, logout }) {
                     >
                       Handle Case
                     </button>
-                    {incident.trip?.reservation?.id ? <a href={`/reservations/${incident.trip.reservation.id}`}><button type="button" className="button-subtle">Open Workflow</button></a> : null}
+                    {reservation?.id ? <a href={`/reservations/${reservation.id}`}><button type="button" className="button-subtle">Open Workflow</button></a> : null}
                   </div>
+                      </>
+                    );
+                  })()}
                 </div>
               ))}
             </div>

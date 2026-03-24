@@ -458,6 +458,7 @@ model Reservation {
   payments          ReservationPayment[]
   additionalDrivers ReservationAdditionalDriver[]
   carSharingTrip    Trip?
+  incidents         TripIncident[]
   hostReviews       HostReview[]
 
   @@index([status, pickupAt])
@@ -1027,8 +1028,10 @@ model TripPayout {
 
 model TripIncident {
   id                String             @id @default(cuid())
-  tripId            String
-  trip              Trip               @relation(fields: [tripId], references: [id], onDelete: Cascade)
+  tripId            String?
+  trip              Trip?              @relation(fields: [tripId], references: [id], onDelete: Cascade)
+  reservationId     String?
+  reservation       Reservation?       @relation(fields: [reservationId], references: [id], onDelete: Cascade)
   type              TripIncidentType
   status            TripIncidentStatus @default(OPEN)
   title             String
@@ -1043,6 +1046,7 @@ model TripIncident {
   communications    TripIncidentCommunication[]
 
   @@index([tripId, status])
+  @@index([reservationId, status])
 }
 
 model TripIncidentCommunication {

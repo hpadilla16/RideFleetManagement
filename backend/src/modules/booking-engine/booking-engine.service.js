@@ -1309,7 +1309,11 @@ export const bookingEngineService = {
         customer: customerFilter
       },
       include: {
-        customer: true
+        customer: true,
+        incidents: {
+          orderBy: [{ createdAt: 'desc' }],
+          take: 10
+        }
       }
     });
 
@@ -1399,7 +1403,18 @@ export const bookingEngineService = {
             status: reservation.status,
             estimatedTotal: money(reservation.estimatedTotal),
             pickupAt: reservation.pickupAt,
-            returnAt: reservation.returnAt
+            returnAt: reservation.returnAt,
+            incidents: (reservation.incidents || []).map((incident) => ({
+              id: incident.id,
+              type: incident.type,
+              status: incident.status,
+              title: incident.title,
+              description: incident.description || '',
+              amountClaimed: money(incident.amountClaimed),
+              amountResolved: money(incident.amountResolved),
+              createdAt: incident.createdAt,
+              resolvedAt: incident.resolvedAt
+            }))
           }
         : null,
       trip: trip
@@ -1434,6 +1449,29 @@ export const bookingEngineService = {
             }))
           }
         : null,
+      issues: trip
+        ? (trip.incidents || []).map((incident) => ({
+            id: incident.id,
+            type: incident.type,
+            status: incident.status,
+            title: incident.title,
+            description: incident.description || '',
+            amountClaimed: money(incident.amountClaimed),
+            amountResolved: money(incident.amountResolved),
+            createdAt: incident.createdAt,
+            resolvedAt: incident.resolvedAt
+          }))
+        : (reservation?.incidents || []).map((incident) => ({
+            id: incident.id,
+            type: incident.type,
+            status: incident.status,
+            title: incident.title,
+            description: incident.description || '',
+            amountClaimed: money(incident.amountClaimed),
+            amountResolved: money(incident.amountResolved),
+            createdAt: incident.createdAt,
+            resolvedAt: incident.resolvedAt
+          })),
       nextActions
     };
   }
