@@ -1,9 +1,51 @@
 import { bookingEngineService } from '../booking-engine/booking-engine.service.js';
 import { issueCenterService } from '../issue-center/issue-center.service.js';
 import { hostReviewsService } from '../host-reviews/host-reviews.service.js';
+import { prisma } from '../../lib/prisma.js';
+import { sendEmail } from '../../lib/mailer.js';
+import crypto from 'node:crypto';
 
 function money(value) {
   return Number(Number(value || 0).toFixed(2));
+}
+
+function baseUrl() {
+  return (process.env.CUSTOMER_PORTAL_BASE_URL || process.env.APP_BASE_URL || process.env.FRONTEND_BASE_URL || 'http://localhost:3000').replace(/\/$/, '');
+}
+
+function guestLink(token) {
+  return `${baseUrl()}/guest?token=${encodeURIComponent(token)}`;
+}
+
+function bookingSummaryFromReservation(reservation) {
+  return {
+    type: reservation.workflowMode === 'CAR_SHARING' ? 'CAR_SHARING' : 'RENTAL',
+    reference: reservation.workflowMode === 'CAR_SHARING'
+      ? (reservation.carSharingTrip?.tripCode || reservation.reservationNumber)
+      : reservation.reservationNumber,
+    reservationNumber: reservation.reservationNumber,
+    tripCode: reservation.carSharingTrip?.tripCode || '',
+    status: reservation.workflowMode === 'CAR_SHARING'
+      ? (reservation.carSharingTrip?.status || reservation.status)
+      : reservation.status,
+    pickupAt: reservation.pickupAt,
+    returnAt: reservation.returnAt,
+    pickupLocationName: reservation.pickupLocation?.name || '',
+    vehicleLabel: [
+      reservation.carSharingTrip?.listing?.vehicle?.year || reservation.vehicle?.year || '',
+      reservation.carSharingTrip?.listing?.vehicle?.make || reservation.vehicle?.make || '',
+      reservation.carSharingTrip?.listing?.vehicle?.model || reservation.vehicle?.model || ''
+    ].filter(Boolean).join(' ') || reservation.vehicleType?.name || reservation.carSharingTrip?.listing?.title || 'Vehicle',
+    estimatedTotal: money(reservation.estimatedTotal || reservation.carSharingTrip?.quotedTotal),
+    host: reservation.carSharingTrip?.hostProfile
+      ? {
+          id: reservation.carSharingTrip.hostProfile.id,
+          displayName: reservation.carSharingTrip.hostProfile.displayName,
+          averageRating: Number(reservation.carSharingTrip.hostProfile.averageRating || 0),
+          reviewCount: Number(reservation.carSharingTrip.hostProfile.reviewCount || 0)
+        }
+      : null
+  };
 }
 
 export const publicBookingService = {
@@ -152,6 +194,130 @@ export const publicBookingService = {
 
   async lookupBooking(input = {}) {
     return bookingEngineService.lookupPublicBooking(input);
+  },
+
+  async requestGuestSignIn(input = {}) {
+    const email = String(input?.email || '').trim().toLowerCase();
+    if (!email) throw new Error('email is required');
+
+    const matchingCustomers = await prisma.customer.findMany({
+      where: {
+        email: {
+          equals: email,
+          mode: 'insensitive'
+        }
+      },
+      select: {
+        id: true,
+        firstName: true,
+        email: true,
+        reservations: { take: 1, select: { id: true } },
+        guestTrips: { take: 1, select: { id: true } }
+      }
+    });
+
+    const eligibleCustomers = matchingCustomers.filter((row) => row.reservations.length || row.guestTrips.length);
+    if (!eligibleCustomers.length) throw new Error('No guest bookings were found for that email');
+
+    const token = crypto.randomBytes(24).toString('hex');
+    const expiresAt = new Date(Date.now() + 1000 * 60 * 60 * 24 * 7);
+    await prisma.customer.updateMany({
+      where: {
+        email: {
+          equals: email,
+          mode: 'insensitive'
+        }
+      },
+      data: {
+        guestAccessToken: token,
+        guestAccessExpiresAt: expiresAt
+      }
+    });
+
+    const customerName = eligibleCustomers[0]?.firstName || 'Guest';
+    const link = guestLink(token);
+    await sendEmail({
+      to: email,
+      subject: 'Open your guest account',
+      text: [
+        `Hello ${customerName},`,
+        '',
+        'Use this secure link to open your guest account and see all of your bookings.',
+        link,
+        '',
+        `This link expires on ${expiresAt.toLocaleString()}.`
+      ].join('\n'),
+      html: `
+        <div style="font-family:Arial,sans-serif;font-size:14px;line-height:1.6;color:#111">
+          <div>Hello ${customerName},</div>
+          <div style="margin-top:12px">Use this secure link to open your guest account and see all of your bookings.</div>
+          <div style="margin-top:18px"><a href="${link}" style="display:inline-block;padding:10px 16px;border-radius:999px;background:#7c3aed;color:#fff;text-decoration:none;font-weight:700">Open Guest Account</a></div>
+          <div style="margin-top:12px">${link}</div>
+          <div style="margin-top:12px">This link expires on ${expiresAt.toLocaleString()}.</div>
+        </div>
+      `
+    });
+
+    return {
+      ok: true,
+      email,
+      expiresAt
+    };
+  },
+
+  async getGuestSession(token) {
+    const cleanToken = String(token || '').trim();
+    if (!cleanToken) throw new Error('token is required');
+
+    const customers = await prisma.customer.findMany({
+      where: {
+        guestAccessToken: cleanToken,
+        guestAccessExpiresAt: { gt: new Date() }
+      },
+      include: {
+        reservations: {
+          include: {
+            pickupLocation: true,
+            returnLocation: true,
+            vehicle: true,
+            vehicleType: true,
+            carSharingTrip: {
+              include: {
+                hostProfile: true,
+                listing: {
+                  include: {
+                    vehicle: true
+                  }
+                }
+              }
+            }
+          },
+          orderBy: [{ pickupAt: 'desc' }]
+        }
+      }
+    });
+
+    if (!customers.length) throw new Error('Invalid or expired guest sign-in link');
+
+    const primary = customers[0];
+    const deduped = new Map();
+    for (const customer of customers) {
+      for (const reservation of customer.reservations || []) {
+        deduped.set(reservation.id, bookingSummaryFromReservation(reservation));
+      }
+    }
+
+    const bookings = [...deduped.values()].sort((a, b) => new Date(b.pickupAt).getTime() - new Date(a.pickupAt).getTime());
+
+    return {
+      customer: {
+        id: primary.id,
+        firstName: primary.firstName,
+        lastName: primary.lastName,
+        email: primary.email
+      },
+      bookings
+    };
   },
 
   async createIssue(input = {}) {

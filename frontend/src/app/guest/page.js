@@ -5,6 +5,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { API_BASE, api } from '../../lib/client';
 
 const RECENT_LOOKUPS_KEY = 'guest.recentLookups';
+const GUEST_SESSION_TOKEN_KEY = 'guest.session.token';
 
 function fmtMoney(value) {
   return `$${Number(value || 0).toFixed(2)}`;
@@ -109,6 +110,10 @@ function StatusPill({ status }) {
 
 export default function GuestAppPage() {
   const [lookupState, setLookupState] = useState({ reference: '', email: '' });
+  const [signInEmail, setSignInEmail] = useState('');
+  const [signInLoading, setSignInLoading] = useState(false);
+  const [signInMsg, setSignInMsg] = useState('');
+  const [guestSession, setGuestSession] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [result, setResult] = useState(null);
@@ -164,6 +169,36 @@ export default function GuestAppPage() {
     } catch {
       setRecentLookups([]);
     }
+  }, []);
+
+  useEffect(() => {
+    const token = typeof window !== 'undefined'
+      ? new URLSearchParams(window.location.search).get('token') || localStorage.getItem(GUEST_SESSION_TOKEN_KEY) || ''
+      : '';
+    if (!token) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const session = await api(`/api/public/booking/guest-signin/${encodeURIComponent(token)}`);
+        if (cancelled) return;
+        setGuestSession(session);
+        setSignInEmail(session?.customer?.email || '');
+        setLookupState((current) => ({ ...current, email: session?.customer?.email || current.email }));
+        localStorage.setItem(GUEST_SESSION_TOKEN_KEY, token);
+        if (typeof window !== 'undefined') {
+          const url = new URL(window.location.href);
+          url.searchParams.delete('token');
+          window.history.replaceState({}, '', url.toString());
+        }
+      } catch {
+        if (cancelled) return;
+        setGuestSession(null);
+        try { localStorage.removeItem(GUEST_SESSION_TOKEN_KEY); } catch {}
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   function persistRecentLookup(confirmation, fallbackEmail = '') {
@@ -229,6 +264,23 @@ export default function GuestAppPage() {
     const next = { reference: row.reference, email: row.email };
     setLookupState(next);
     await resolveLookup(next.reference, next.email);
+  }
+
+  async function requestGuestSignIn(event) {
+    event.preventDefault();
+    setSignInLoading(true);
+    setSignInMsg('');
+    try {
+      const response = await api('/api/public/booking/guest-signin/request', {
+        method: 'POST',
+        body: JSON.stringify({ email: signInEmail })
+      });
+      setSignInMsg(`We sent a sign-in link to ${response.email}. Open that email to load your guest account.`);
+    } catch (err) {
+      setSignInMsg(err.message);
+    } finally {
+      setSignInLoading(false);
+    }
   }
 
   async function submitIssue(event) {
@@ -331,6 +383,44 @@ export default function GuestAppPage() {
             </Link>
           </div>
           {error ? <div className="surface-note" style={{ color: '#991b1b' }}>{error}</div> : null}
+        </section>
+
+        <section className="glass card-lg section-card">
+          <div className="row-between">
+            <div>
+              <div className="section-title">Guest Sign-In</div>
+              <p className="ui-muted">Guests can use a secure email link to keep all of their bookings together in one saved profile.</p>
+            </div>
+            <span className="status-chip neutral">{guestSession?.bookings?.length || 0} bookings</span>
+          </div>
+          <form className="inline-actions" onSubmit={requestGuestSignIn}>
+            <input
+              type="email"
+              value={signInEmail}
+              onChange={(event) => setSignInEmail(event.target.value)}
+              placeholder="guest@email.com"
+              style={{ flex: '1 1 260px' }}
+            />
+            <button type="submit" disabled={signInLoading}>{signInLoading ? 'Sending Link...' : 'Email Guest Sign-In Link'}</button>
+          </form>
+          {signInMsg ? <div className="surface-note" style={{ color: /sent|load your guest account/i.test(signInMsg) ? '#166534' : '#991b1b' }}>{signInMsg}</div> : null}
+          {guestSession ? (
+            <div className="app-card-grid compact">
+              {guestSession.bookings?.map((booking) => (
+                <div key={`${booking.type}:${booking.reference}`} className="doc-card">
+                  <strong>{booking.reference}</strong>
+                  <div className="doc-meta">{booking.type === 'CAR_SHARING' ? 'Car Sharing' : 'Rental'} · {booking.vehicleLabel}</div>
+                  <div className="doc-meta">{booking.pickupLocationName || 'Location to be confirmed'}</div>
+                  <div className="doc-meta">{formatDateTime(booking.pickupAt)}</div>
+                  <div className="inline-actions">
+                    <button type="button" className="button-subtle" onClick={() => resolveLookup(booking.reference, guestSession.customer?.email || signInEmail)}>
+                      Open Booking
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : null}
         </section>
 
         {recentLookups.length ? (
@@ -603,6 +693,9 @@ export default function GuestAppPage() {
                   </a>
                 ) : null}
                 <div className="inline-actions">
+                  <a href="#guest-issues">
+                    <button type="button" className="button-subtle">Report Issue</button>
+                  </a>
                   {customerInfoAction?.link ? (
                     <a href={customerInfoAction.link} target="_blank" rel="noreferrer">
                       <button type="button" className="button-subtle">Open Pre-check-in</button>
@@ -641,7 +734,7 @@ export default function GuestAppPage() {
         ) : null}
 
         {result ? (
-          <section className="split-panel">
+          <section id="guest-issues" className="split-panel">
             <div className="glass card-lg section-card">
               <div className="row-between">
                 <div>

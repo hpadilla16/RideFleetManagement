@@ -339,6 +339,8 @@ model Customer {
   creditBalance   Decimal  @default(0) @db.Decimal(10, 2)
   portalResetToken String?
   portalResetExpiresAt DateTime?
+  guestAccessToken String?
+  guestAccessExpiresAt DateTime?
   doNotRent       Boolean  @default(false)
   doNotRentReason String?
   notes           String?

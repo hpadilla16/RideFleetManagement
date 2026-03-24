@@ -63,6 +63,28 @@ publicBookingRouter.post('/lookup', async (req, res, next) => {
   }
 });
 
+publicBookingRouter.post('/guest-signin/request', async (req, res, next) => {
+  try {
+    res.json(await publicBookingService.requestGuestSignIn(req.body || {}));
+  } catch (error) {
+    if (/required|not found/i.test(String(error?.message || ''))) {
+      return res.status(400).json({ error: error.message });
+    }
+    next(error);
+  }
+});
+
+publicBookingRouter.get('/guest-signin/:token', async (req, res, next) => {
+  try {
+    res.json(await publicBookingService.getGuestSession(req.params.token));
+  } catch (error) {
+    if (/invalid|expired|required|not found/i.test(String(error?.message || ''))) {
+      return res.status(400).json({ error: error.message });
+    }
+    next(error);
+  }
+});
+
 publicBookingRouter.post('/issues', async (req, res, next) => {
   try {
     res.status(201).json(await publicBookingService.createIssue(req.body || {}));
