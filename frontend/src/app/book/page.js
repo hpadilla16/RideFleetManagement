@@ -357,6 +357,12 @@ export default function PublicBookingPage() {
       : Number(selectedResult?.quote?.total || 0);
     return baseTotal + chosenAdditionalServicesTotal + selectedInsuranceTotal;
   }, [chosenAdditionalServicesTotal, searchMode, selectedInsuranceTotal, selectedResult]);
+  const tripLengthDays = useMemo(() => {
+    const pickup = new Date(pickupAt);
+    const ret = new Date(returnAt);
+    if (Number.isNaN(pickup.getTime()) || Number.isNaN(ret.getTime())) return 0;
+    return Math.max(1, Math.ceil((ret - pickup) / (1000 * 60 * 60 * 24)));
+  }, [pickupAt, returnAt]);
 
   const runSearch = async () => {
     const pickupLocationIds = publicLocationOptions.find((location) => location.id === pickupLocationId)?.locationIds || [];
@@ -659,6 +665,24 @@ export default function PublicBookingPage() {
                 {searchMode === 'RENTAL' ? (selectedResult.vehicleType?.name || 'Selected rental') : (selectedResult.title || 'Selected vehicle')}
               </span>
             ) : null}
+          </div>
+          <div className="app-card-grid compact">
+            <div className="info-tile">
+              <span className="label">Pickup</span>
+              <strong>{selectedPickupLocationOption?.label || 'Selected location'}</strong>
+            </div>
+            <div className="info-tile">
+              <span className="label">Trip Length</span>
+              <strong>{tripLengthDays} day{tripLengthDays === 1 ? '' : 's'}</strong>
+            </div>
+            <div className="info-tile">
+              <span className="label">Selected Package</span>
+              <strong>{selectedResult ? (searchMode === 'RENTAL' ? (selectedResult.vehicleType?.name || 'Rental option') : (selectedResult.title || 'Vehicle')) : 'Choose vehicle'}</strong>
+            </div>
+            <div className="info-tile">
+              <span className="label">Estimated Total</span>
+              <strong>{selectedResult ? fmtMoney(checkoutEstimatedTotal) : '$0.00'}</strong>
+            </div>
           </div>
         </section>
 
