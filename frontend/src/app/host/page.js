@@ -300,9 +300,28 @@ function HostAppInner({ token, me, logout }) {
       photoCount: (listingEdit.photoUrls || []).length,
       addOnCount: (listingEdit.addOns || []).filter((row) => row.name && row.price).length,
       pricingReady: !!Number(listingEdit.baseDailyRate || 0),
-      publishState: listingEdit.status || 'DRAFT'
+      publishState: listingEdit.status || 'DRAFT',
+      deliveryFee: Number(listingEdit.deliveryFee || 0),
+      cleaningFee: Number(listingEdit.cleaningFee || 0),
+      securityDeposit: Number(listingEdit.securityDeposit || 0),
+      instantBook: !!listingEdit.instantBook
     };
   }, [listingEdit]);
+
+  const selectedAvailabilityListing = useMemo(
+    () => listings.find((row) => row.id === availabilityListingId) || null,
+    [availabilityListingId, listings]
+  );
+
+  const availabilitySnapshot = useMemo(() => {
+    if (!availabilityListingId) return null;
+    return {
+      totalWindows: availabilityRows.length,
+      blockedWindows: availabilityRows.filter((row) => !!row.isBlocked).length,
+      priceOverrides: availabilityRows.filter((row) => row.priceOverride != null).length,
+      minStayOverrides: availabilityRows.filter((row) => row.minTripDaysOverride != null).length
+    };
+  }, [availabilityListingId, availabilityRows]);
 
   async function saveListingEdit(event) {
     event.preventDefault();
@@ -865,6 +884,23 @@ function HostAppInner({ token, me, logout }) {
                     <strong>Status</strong>
                     <div className="doc-meta">{selectedListingSnapshot.publishState}</div>
                   </div>
+                  <div className="doc-card">
+                    <strong>Fee Stack</strong>
+                    <div className="doc-meta">
+                      Cleaning {formatMoney(selectedListingSnapshot.cleaningFee)} · Delivery {formatMoney(selectedListingSnapshot.deliveryFee)}
+                    </div>
+                  </div>
+                  <div className="doc-card">
+                    <strong>Booking Controls</strong>
+                    <div className="doc-meta">
+                      {selectedListingSnapshot.instantBook ? 'Instant book is on.' : 'Approval flow is active.'} Deposit set to {formatMoney(selectedListingSnapshot.securityDeposit)}.
+                    </div>
+                  </div>
+                </div>
+              ) : null}
+              {selectedListingSnapshot ? (
+                <div className="surface-note">
+                  Hosts should confirm four things before publishing: daily rate, photo coverage, add-ons if applicable, and whether the listing should be instant book or approval based.
                 </div>
               ) : null}
               <div className="stack"><label className="label">Short Description</label><input value={listingEdit.shortDescription} onChange={(event) => setListingEdit((current) => ({ ...current, shortDescription: event.target.value }))} /></div>
@@ -932,6 +968,26 @@ function HostAppInner({ token, me, logout }) {
               {listings.map((row) => <option key={row.id} value={row.id}>{row.title}</option>)}
             </select>
           </div>
+          {selectedAvailabilityListing && availabilitySnapshot ? (
+            <div className="app-card-grid compact">
+              <div className="doc-card">
+                <strong>Listing</strong>
+                <div className="doc-meta">{selectedAvailabilityListing.title}</div>
+              </div>
+              <div className="doc-card">
+                <strong>Windows</strong>
+                <div className="doc-meta">{availabilitySnapshot.totalWindows} total window{availabilitySnapshot.totalWindows === 1 ? '' : 's'} configured.</div>
+              </div>
+              <div className="doc-card">
+                <strong>Blackouts</strong>
+                <div className="doc-meta">{availabilitySnapshot.blockedWindows} blocked date range{availabilitySnapshot.blockedWindows === 1 ? '' : 's'}.</div>
+              </div>
+              <div className="doc-card">
+                <strong>Overrides</strong>
+                <div className="doc-meta">{availabilitySnapshot.priceOverrides} price and {availabilitySnapshot.minStayOverrides} minimum-stay override{availabilitySnapshot.minStayOverrides === 1 ? '' : 's'} live.</div>
+              </div>
+            </div>
+          ) : null}
           {availabilityListingId ? (
             availabilityRows.length ? (
               <div className="stack">
@@ -956,6 +1012,11 @@ function HostAppInner({ token, me, logout }) {
             <div><div className="section-title">Add Availability Window</div><p className="ui-muted">Useful for blackout dates, seasonal pricing, and minimum-stay control.</p></div>
             {availabilityListingId ? <span className="status-chip neutral">Listing Selected</span> : null}
           </div>
+          {selectedAvailabilityListing ? (
+            <div className="surface-note">
+              You are editing availability for <strong>{selectedAvailabilityListing.title}</strong>. Use blocked windows for blackout dates, or leave dates open and add pricing/minimum-stay overrides for peak periods.
+            </div>
+          ) : null}
           <form className="stack" onSubmit={saveAvailabilityWindow}>
             <div className="form-grid-2">
               <div className="stack"><label className="label">Start</label><input type="datetime-local" value={windowForm.startAt} onChange={(event) => setWindowForm((current) => ({ ...current, startAt: event.target.value }))} /></div>
