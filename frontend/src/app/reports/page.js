@@ -146,6 +146,54 @@ function Inner({ token, me, logout }) {
     return pills;
   }, [report, servicesSold, commissionMonth, canFilterEmployee]);
 
+  const reportsLeadershipHub = useMemo(() => {
+    const kpis = report?.kpis || {};
+    const topLocation = (report?.topPickupLocations || [])[0] || null;
+    const topService = (servicesSold?.topServices || [])[0] || null;
+    const nextItems = [
+      Number(kpis.openBalance || 0) > 0
+        ? {
+            id: 'open-balance',
+            title: 'Open Balance Watch',
+            detail: fmtMoney(kpis.openBalance),
+            note: 'Outstanding balance still open across the current report scope.'
+          }
+        : null,
+      topLocation
+        ? {
+            id: 'top-location',
+            title: 'Top Pickup Location',
+            detail: topLocation.name || 'Location',
+            note: `${topLocation.count || 0} reservations in the current range.`
+          }
+        : null,
+      topService
+        ? {
+            id: 'top-service',
+            title: 'Top Add-On',
+            detail: topService.serviceName || topService.name || 'Service',
+            note: `${fmtMoney(topService.serviceRevenue)} in service revenue.`
+          }
+        : null,
+      {
+        id: 'utilization',
+        title: 'Utilization Snapshot',
+        detail: `${Number(kpis.utilizationPct || 0).toFixed(1)}%`,
+        note: Number(kpis.utilizationPct || 0) >= 70
+          ? 'Fleet utilization is healthy in the current window.'
+          : 'There may be room to improve fleet usage in this range.'
+      }
+    ].filter(Boolean);
+
+    return {
+      reservationsCreated: kpis.reservationsCreated || 0,
+      collectedPayments: fmtMoney(kpis.collectedPayments),
+      openBalance: fmtMoney(kpis.openBalance),
+      utilization: `${Number(kpis.utilizationPct || 0).toFixed(1)}%`,
+      nextItems
+    };
+  }, [report, servicesSold]);
+
   const exportCsv = async () => {
     try {
       setMsg('');
@@ -293,6 +341,52 @@ function Inner({ token, me, logout }) {
       </section>
 
       {msg ? <div className="surface-note" style={{ marginBottom: 16 }}>{msg}</div> : null}
+
+      <section className="glass card-lg section-card" style={{ marginBottom: 18 }}>
+        <div className="app-banner">
+          <div className="row-between" style={{ alignItems: 'start', marginBottom: 0 }}>
+            <div>
+              <span className="eyebrow">Reports Leadership Hub</span>
+              <h2 className="page-title" style={{ marginTop: 6 }}>
+                Read the business fast before diving into the full report.
+              </h2>
+              <p className="ui-muted">A compact mobile-first summary for revenue, open balance, utilization, and what deserves attention next.</p>
+            </div>
+            <span className="status-chip neutral">Leadership View</span>
+          </div>
+          <div className="app-card-grid compact">
+            <div className="info-tile">
+              <span className="label">Reservations</span>
+              <strong>{reportsLeadershipHub.reservationsCreated}</strong>
+              <span className="ui-muted">Reservations created inside the current reporting window.</span>
+            </div>
+            <div className="info-tile">
+              <span className="label">Collected</span>
+              <strong>{reportsLeadershipHub.collectedPayments}</strong>
+              <span className="ui-muted">Payments collected in the selected range.</span>
+            </div>
+            <div className="info-tile">
+              <span className="label">Open Balance</span>
+              <strong>{reportsLeadershipHub.openBalance}</strong>
+              <span className="ui-muted">Outstanding balance still open across this scope.</span>
+            </div>
+            <div className="info-tile">
+              <span className="label">Utilization</span>
+              <strong>{reportsLeadershipHub.utilization}</strong>
+              <span className="ui-muted">Fleet utilization snapshot for the active range.</span>
+            </div>
+          </div>
+          <div className="app-card-grid compact">
+            {reportsLeadershipHub.nextItems.map((item) => (
+              <section key={item.id} className="glass card section-card">
+                <div className="section-title" style={{ fontSize: 15 }}>{item.title}</div>
+                <div className="ui-muted">{item.detail}</div>
+                <div className="surface-note">{item.note}</div>
+              </section>
+            ))}
+          </div>
+        </div>
+      </section>
 
       <section className="metric-grid" style={{ marginBottom: 18 }}>
         {cards.map((card) => (
