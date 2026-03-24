@@ -448,6 +448,14 @@ export default function GuestAppPage() {
           {signInMsg ? <div className="surface-note" style={{ color: /sent|load your guest account/i.test(signInMsg) ? '#166534' : '#991b1b' }}>{signInMsg}</div> : null}
           {guestSession ? (
             <div className="stack">
+              <div className="app-banner">
+                <div className="section-title">
+                  Welcome back{guestSession.customer?.firstName ? `, ${guestSession.customer.firstName}` : ''}.
+                </div>
+                <div className="ui-muted" style={{ lineHeight: 1.6 }}>
+                  You are signed in to your guest account{guestSession.customer?.email ? ` with ${guestSession.customer.email}` : ''}. Your bookings, documents, and support activity stay together here.
+                </div>
+              </div>
               <div className="app-card-grid compact">
                 <div className="doc-card">
                   <strong>My Bookings</strong>
