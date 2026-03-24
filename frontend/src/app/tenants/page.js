@@ -22,6 +22,12 @@ function Inner({ token, me, logout }) {
 
   const role = String(me?.role || '').toUpperCase().trim();
   const isSuper = role === 'SUPER_ADMIN';
+  const activeTenant = rows.find((row) => row.id === activeTenantId) || null;
+  const activeTenants = rows.filter((row) => row.status === 'ACTIVE').length;
+  const suspendedTenants = rows.filter((row) => row.status === 'SUSPENDED').length;
+  const carSharingTenants = rows.filter((row) => row.carSharingEnabled).length;
+  const loanerTenants = rows.filter((row) => row.dealershipLoanerEnabled).length;
+  const enterpriseTenants = rows.filter((row) => row.plan === 'ENTERPRISE').length;
 
   const load = async () => {
     try {
@@ -107,7 +113,6 @@ function Inner({ token, me, logout }) {
     try {
       if (!activeTenantId) return setMsg('Select a tenant first');
       const out = await api(`/api/tenants/${activeTenantId}/impersonate`, { method: 'POST', body: JSON.stringify({ userId }) }, token);
-      // Keep a one-click return path to super-admin context.
       if (role === 'SUPER_ADMIN') {
         localStorage.setItem('superadmin_backup_token', token);
         localStorage.setItem('superadmin_backup_user', JSON.stringify(me || {}));
@@ -127,10 +132,56 @@ function Inner({ token, me, logout }) {
   return (
     <AppShell me={me} logout={logout}>
       <section className="glass card-lg stack">
-        <div className="row-between"><h2 className="page-title">Super Admin → Tenants</h2></div>
+        <div className="row-between"><h2 className="page-title">Super Admin - Tenants</h2></div>
         {msg ? <div className="label">{msg}</div> : null}
 
-        <div className="glass card" style={{ padding: 12 }}>
+        <div className="app-banner">
+          <div className="row-between" style={{ marginBottom: 0 }}>
+            <div className="stack" style={{ gap: 6 }}>
+              <span className="eyebrow">Tenant Hub</span>
+              <h2 style={{ margin: 0 }}>Workspace Portfolio</h2>
+              <p className="ui-muted">
+                Review tenant health, enabled products, and the active support scope before creating admins or changing feature flags.
+              </p>
+            </div>
+            <span className={`status-chip ${activeTenant?.status === 'ACTIVE' ? 'good' : activeTenant ? 'warn' : 'neutral'}`}>
+              {activeTenant ? `${activeTenant.name} focused` : 'Choose tenant'}
+            </span>
+          </div>
+          <div className="app-card-grid compact">
+            <div className="info-tile">
+              <span className="label">Active Tenants</span>
+              <strong>{activeTenants}</strong>
+            </div>
+            <div className="info-tile">
+              <span className="label">Suspended</span>
+              <strong>{suspendedTenants}</strong>
+            </div>
+            <div className="info-tile">
+              <span className="label">Car Sharing</span>
+              <strong>{carSharingTenants}</strong>
+            </div>
+            <div className="info-tile">
+              <span className="label">Loaner Enabled</span>
+              <strong>{loanerTenants}</strong>
+            </div>
+            <div className="info-tile">
+              <span className="label">Enterprise Plan</span>
+              <strong>{enterpriseTenants}</strong>
+            </div>
+            <div className="info-tile">
+              <span className="label">Focused Tenant</span>
+              <strong>{activeTenant?.slug || 'Select one'}</strong>
+            </div>
+          </div>
+          <div className="inline-actions">
+            <button type="button" onClick={() => document.getElementById('tenant-create-card')?.scrollIntoView({ behavior: 'smooth', block: 'start' })}>Create Tenant</button>
+            <button type="button" onClick={() => document.getElementById('tenant-edit-card')?.scrollIntoView({ behavior: 'smooth', block: 'start' })}>Edit Tenants</button>
+            <button type="button" onClick={() => document.getElementById('tenant-admin-card')?.scrollIntoView({ behavior: 'smooth', block: 'start' })}>Tenant Admins</button>
+          </div>
+        </div>
+
+        <div id="tenant-create-card" className="glass card" style={{ padding: 12 }}>
           <h3 className="section-title">Create Tenant</h3>
           <div className="grid-2">
             <input placeholder="Name" value={tenantForm.name} onChange={(e) => setTenantForm((f) => ({ ...f, name: e.target.value }))} />
@@ -150,7 +201,7 @@ function Inner({ token, me, logout }) {
           <button style={{ marginTop: 8 }} onClick={createTenant}>Create Tenant</button>
         </div>
 
-        <div className="glass card" style={{ padding: 12 }}>
+        <div id="tenant-edit-card" className="glass card" style={{ padding: 12 }}>
           <h3 className="section-title">Edit / Suspend Tenants</h3>
           <table>
             <thead><tr><th>Name</th><th>Slug</th><th>Status</th><th>Plan</th><th>Car Sharing</th><th>Loaner</th><th>Counts</th><th>Actions</th></tr></thead>
@@ -190,7 +241,7 @@ function Inner({ token, me, logout }) {
           </table>
         </div>
 
-        <div className="glass card" style={{ padding: 12 }}>
+        <div id="tenant-admin-card" className="glass card" style={{ padding: 12 }}>
           <h3 className="section-title">Create Tenant Admin</h3>
           <div className="grid-2">
             <select value={activeTenantId} onChange={(e) => setActiveTenantId(e.target.value)}>
@@ -211,7 +262,7 @@ function Inner({ token, me, logout }) {
             <ul>
               {(admins || []).map((a) => (
                 <li key={a.id} style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-                  <span>{a.fullName} — {a.email} ({a.role})</span>
+                  <span>{a.fullName} - {a.email} ({a.role})</span>
                   <button type="button" onClick={() => resetAdminPassword(a.id)}>Reset Password</button>
                   <button type="button" onClick={() => impersonateTenant(a.id)}>Impersonate</button>
                 </li>

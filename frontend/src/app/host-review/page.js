@@ -72,6 +72,7 @@ export default function HostReviewPage() {
   const alreadySubmitted = payload?.review?.status === 'SUBMITTED';
   const host = payload?.host || null;
   const trip = payload?.trip || null;
+  const hostTrustState = Number(host?.averageRating || 0) >= 4.5 ? 'Strong trust signal' : Number(host?.reviewCount || 0) ? 'Growing review history' : 'First reviews coming in';
 
   const summary = useMemo(() => {
     if (!host) return null;
@@ -134,6 +135,39 @@ export default function HostReviewPage() {
             <div className="surface-note">Loading host review...</div>
           </section>
         ) : payload ? (
+          <>
+          <section className="app-banner">
+            <div className="row-between" style={{ marginBottom: 0 }}>
+              <div className="stack" style={{ gap: 6 }}>
+                <span className="eyebrow">Review Snapshot</span>
+                <h3 style={{ margin: 0 }}>{alreadySubmitted ? 'Thanks for rating this host' : 'Your feedback helps the marketplace'}</h3>
+                <p className="ui-muted">
+                  Show future guests what the host experience felt like while giving the host a clear trust signal on future bookings.
+                </p>
+              </div>
+              <span className={`status-chip ${alreadySubmitted ? 'good' : 'neutral'}`}>
+                {alreadySubmitted ? 'Review submitted' : 'Review pending'}
+              </span>
+            </div>
+            <div className="app-card-grid compact">
+              <div className="info-tile">
+                <span className="label">Host</span>
+                <strong>{host?.displayName || '-'}</strong>
+              </div>
+              <div className="info-tile">
+                <span className="label">Current Rating</span>
+                <strong>{Number(host?.averageRating || 0).toFixed(2)}</strong>
+              </div>
+              <div className="info-tile">
+                <span className="label">Review Count</span>
+                <strong>{host?.reviewCount || 0}</strong>
+              </div>
+              <div className="info-tile">
+                <span className="label">Trust Signal</span>
+                <strong>{hostTrustState}</strong>
+              </div>
+            </div>
+          </section>
           <section className="split-panel">
             <section className="glass card-lg section-card">
               <div className="row-between">
@@ -208,6 +242,7 @@ export default function HostReviewPage() {
               )}
             </section>
           </section>
+          </>
         ) : null}
       </div>
     </main>

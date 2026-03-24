@@ -34,6 +34,7 @@ function Inner({ token, me, logout }) {
 
     return { fuelMismatch, cleanMismatch };
   }, [row?.rentalAgreement?.fuelOut, row?.rentalAgreement?.cleanlinessOut, form.fuelIn, form.cleanlinessIn]);
+  const balanceSnapshot = Number(row?.rentalAgreement?.balance ?? row?.balance ?? row?.amountDue ?? 0);
 
   const ensureAgreementId = async () => {
     const out = await api(`/api/reservations/${id}/start-rental`, { method: 'POST', body: JSON.stringify({}) }, token);
@@ -68,7 +69,40 @@ function Inner({ token, me, logout }) {
 
   return (
     <AppShell me={me} logout={logout}>
-      <section className="glass card-lg">
+      <section className="glass card-lg stack">
+        <div className="app-banner">
+          <div className="row-between" style={{ marginBottom: 0 }}>
+            <div className="stack" style={{ gap: 6 }}>
+              <span className="eyebrow">Check-In Snapshot</span>
+              <h3 style={{ margin: 0 }}>{row?.reservationNumber || `Reservation ${id}`}</h3>
+              <p className="ui-muted">
+                Review return condition, fee risk, and balance clarity before completing the close-out and returning the unit to fleet.
+              </p>
+            </div>
+            <span className={`status-chip ${(checkinAdvisory.fuelMismatch || checkinAdvisory.cleanMismatch) ? 'warn' : 'good'}`}>
+              {(checkinAdvisory.fuelMismatch || checkinAdvisory.cleanMismatch) ? 'Fee advisory open' : 'No fee advisory'}
+            </span>
+          </div>
+          <div className="app-card-grid compact">
+            <div className="info-tile">
+              <span className="label">Customer</span>
+              <strong>{[row?.customer?.firstName, row?.customer?.lastName].filter(Boolean).join(' ') || row?.customer?.email || '-'}</strong>
+            </div>
+            <div className="info-tile">
+              <span className="label">Vehicle</span>
+              <strong>{[row?.vehicle?.year, row?.vehicle?.make, row?.vehicle?.model].filter(Boolean).join(' ') || row?.vehicle?.plate || '-'}</strong>
+            </div>
+            <div className="info-tile">
+              <span className="label">Return</span>
+              <strong>{row?.returnAt ? new Date(row.returnAt).toLocaleString() : '-'}</strong>
+            </div>
+            <div className="info-tile">
+              <span className="label">Balance Snapshot</span>
+              <strong>${balanceSnapshot.toFixed(2)}</strong>
+            </div>
+          </div>
+        </div>
+
         <div className="row-between"><h2>Check-in Wizard</h2><button onClick={() => router.push(`/reservations/${id}`)}>Back</button></div>
         <div className="label" style={{ textTransform: 'none', letterSpacing: 0, marginBottom: 8 }}>Reservation: {row?.reservationNumber || '-'}</div>
         {msg ? <div className="label" style={{ color: '#b91c1c' }}>{msg}</div> : null}

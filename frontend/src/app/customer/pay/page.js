@@ -90,6 +90,8 @@ export default function CustomerPayPage() {
   const fullyPaid = balanceDue <= 0;
   const nextPortalStep = model?.portal?.nextStep;
   const agreementDoc = (model?.portal?.documents || []).find((doc) => doc.key === 'agreement' && doc.available);
+  const paidAmount = Number(model?.breakdown?.paidAmount || 0);
+  const gatewayLabel = String(model?.gateway || '').toUpperCase() || '-';
 
   const notices = (
     <div style={portalStyles.stack}>
@@ -105,12 +107,51 @@ export default function CustomerPayPage() {
       eyebrow="Ride Fleet Self-Service"
       title="Complete Your Payment"
       subtitle="Review your balance, understand exactly what is due, and finish payment without calling the counter."
-      aside={<PortalTimelineCard portal={model?.portal} />}
+      aside={<PortalTimelineCard portal={model?.portal} reservation={model?.reservation} breakdown={model?.breakdown} currentStepKey="payment" currentStepLabel="Payment" />}
     >
       {notices}
 
       {!loading && model ? (
         <>
+          <div style={portalStyles.card}>
+            <h2 style={portalStyles.cardTitle}>Payment Progress Snapshot</h2>
+            <div style={portalStyles.statGrid}>
+              <div style={portalStyles.statTile}>
+                <div style={portalStyles.statLabel}>Status</div>
+                <div style={portalStyles.statValue}>{paymentStatusLabel}</div>
+              </div>
+              <div style={portalStyles.statTile}>
+                <div style={portalStyles.statLabel}>Paid So Far</div>
+                <div style={portalStyles.statValue}>${paidAmount.toFixed(2)}</div>
+              </div>
+              <div style={portalStyles.statTile}>
+                <div style={portalStyles.statLabel}>Balance Due</div>
+                <div style={portalStyles.statValue}>${balanceDue.toFixed(2)}</div>
+              </div>
+              <div style={portalStyles.statTile}>
+                <div style={portalStyles.statLabel}>Gateway Ready</div>
+                <div style={portalStyles.statValue}>{model.gatewayReady ? gatewayLabel : 'Needs setup'}</div>
+              </div>
+            </div>
+          </div>
+
+          <div style={portalStyles.card}>
+            <h2 style={portalStyles.cardTitle}>What You Are Paying Today</h2>
+            <div style={portalStyles.statGrid}>
+              <div style={portalStyles.statTile}>
+                <div style={portalStyles.statLabel}>Due Now</div>
+                <div style={portalStyles.statValue}>${balanceDue.toFixed(2)}</div>
+              </div>
+              <div style={portalStyles.statTile}>
+                <div style={portalStyles.statLabel}>Trip Total</div>
+                <div style={portalStyles.statValue}>${Number(model.breakdown?.total || 0).toFixed(2)}</div>
+              </div>
+            </div>
+            <div style={{ marginTop: 12, color: '#55456f', lineHeight: 1.6 }}>
+              The amount due right now may only be part of the full reservation cost. The full estimate stays visible below so there is no confusion before you pay.
+            </div>
+          </div>
+
           <div style={portalStyles.card}>
             <h2 style={portalStyles.cardTitle}>Reservation Summary</h2>
             <div style={portalStyles.statGrid}>
@@ -140,29 +181,33 @@ export default function CustomerPayPage() {
           {model.breakdown ? (
             <div style={portalStyles.card}>
               <h2 style={portalStyles.cardTitle}>Payment Breakdown</h2>
-              <table style={portalStyles.table}>
-                <thead>
-                  <tr>
-                    <th style={{ ...portalStyles.tableCell, textAlign: 'left' }}>Charge</th>
-                    <th style={{ ...portalStyles.tableCell, textAlign: 'right' }}>Qty</th>
-                    <th style={{ ...portalStyles.tableCell, textAlign: 'right' }}>Rate</th>
-                    <th style={{ ...portalStyles.tableCell, textAlign: 'right' }}>Total</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {(model.breakdown.lines || []).map((l, i) => (
-                    <tr key={i}>
-                      <td style={{ ...portalStyles.tableCell, textAlign: 'left' }}>{l.name}</td>
-                      <td style={{ ...portalStyles.tableCell, textAlign: 'right' }}>{l.qty ?? '-'}</td>
-                      <td style={{ ...portalStyles.tableCell, textAlign: 'right' }}>{typeof l.rate === 'number' ? `$${Number(l.rate).toFixed(2)}` : String(l.rate ?? '-')}</td>
-                      <td style={{ ...portalStyles.tableCell, textAlign: 'right' }}>{Number(l.total || 0) < 0 ? `-$${Math.abs(Number(l.total || 0)).toFixed(2)}` : `$${Number(l.total || 0).toFixed(2)}`}</td>
-                    </tr>
-                  ))}
-                  <tr><td style={portalStyles.tableCell} colSpan={3}><strong>Subtotal</strong></td><td style={{ ...portalStyles.tableCell, textAlign: 'right' }}><strong>${Number(model.breakdown.subtotal || 0).toFixed(2)}</strong></td></tr>
-                  <tr><td style={portalStyles.tableCell} colSpan={3}>Tax</td><td style={{ ...portalStyles.tableCell, textAlign: 'right' }}>${Number(model.breakdown.tax || 0).toFixed(2)}</td></tr>
-                  <tr><td style={portalStyles.tableCell} colSpan={3}><strong>Total</strong></td><td style={{ ...portalStyles.tableCell, textAlign: 'right' }}><strong>${Number(model.breakdown.total || 0).toFixed(2)}</strong></td></tr>
-                </tbody>
-              </table>
+              <div style={{ display: 'grid', gap: 10 }}>
+                {(model.breakdown.lines || []).map((l, i) => (
+                  <div key={i} style={{ ...portalStyles.statTile, display: 'grid', gap: 6 }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap' }}>
+                      <strong>{l.name}</strong>
+                      <strong>{Number(l.total || 0) < 0 ? `-$${Math.abs(Number(l.total || 0)).toFixed(2)}` : `$${Number(l.total || 0).toFixed(2)}`}</strong>
+                    </div>
+                    <div style={{ fontSize: 13, color: '#746294' }}>
+                      Qty {l.qty ?? '-'} at {typeof l.rate === 'number' ? `$${Number(l.rate).toFixed(2)}` : String(l.rate ?? '-')}
+                    </div>
+                  </div>
+                ))}
+                <div style={portalStyles.statGrid}>
+                  <div style={portalStyles.statTile}>
+                    <div style={portalStyles.statLabel}>Subtotal</div>
+                    <div style={portalStyles.statValue}>${Number(model.breakdown.subtotal || 0).toFixed(2)}</div>
+                  </div>
+                  <div style={portalStyles.statTile}>
+                    <div style={portalStyles.statLabel}>Tax</div>
+                    <div style={portalStyles.statValue}>${Number(model.breakdown.tax || 0).toFixed(2)}</div>
+                  </div>
+                  <div style={portalStyles.statTile}>
+                    <div style={portalStyles.statLabel}>Total</div>
+                    <div style={portalStyles.statValue}>${Number(model.breakdown.total || 0).toFixed(2)}</div>
+                  </div>
+                </div>
+              </div>
             </div>
           ) : null}
 

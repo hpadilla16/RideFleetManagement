@@ -25,6 +25,7 @@ export default function SignAgreementPage() {
   const [signerName, setSignerName] = useState('');
   const [accepted, setAccepted] = useState(false);
   const nextPortalStep = portal?.nextStep;
+  const signatureReady = !!signerName.trim() && accepted;
 
   useEffect(() => {
     const run = async () => {
@@ -129,12 +130,51 @@ export default function SignAgreementPage() {
       eyebrow="Ride Fleet Self-Service"
       title="Review and Sign Your Agreement"
       subtitle="Review your reservation details, verify the full cost breakdown, and sign the agreement digitally in one secure step."
-      aside={<PortalTimelineCard portal={portal} />}
+      aside={<PortalTimelineCard portal={portal} reservation={reservation} breakdown={breakdown} currentStepKey="signature" currentStepLabel="Signature" />}
     >
       {notices}
 
       {loaded ? (
         <>
+          <div style={portalStyles.card}>
+            <h2 style={portalStyles.cardTitle}>Signature Snapshot</h2>
+            <div style={portalStyles.statGrid}>
+              <div style={portalStyles.statTile}>
+                <div style={portalStyles.statLabel}>Signer Name</div>
+                <div style={portalStyles.statValue}>{signerName.trim() ? 'Ready' : 'Missing'}</div>
+              </div>
+              <div style={portalStyles.statTile}>
+                <div style={portalStyles.statLabel}>Terms Accepted</div>
+                <div style={portalStyles.statValue}>{accepted ? 'Yes' : 'No'}</div>
+              </div>
+              <div style={portalStyles.statTile}>
+                <div style={portalStyles.statLabel}>Balance After Signing</div>
+                <div style={portalStyles.statValue}>${Number(breakdown?.balance || 0).toFixed(2)}</div>
+              </div>
+              <div style={portalStyles.statTile}>
+                <div style={portalStyles.statLabel}>Ready To Submit</div>
+                <div style={portalStyles.statValue}>{signatureReady ? 'Yes' : 'Not yet'}</div>
+              </div>
+            </div>
+          </div>
+
+          <div style={portalStyles.card}>
+            <h2 style={portalStyles.cardTitle}>What You Are Signing</h2>
+            <div style={portalStyles.statGrid}>
+              <div style={portalStyles.statTile}>
+                <div style={portalStyles.statLabel}>Trip Estimate</div>
+                <div style={portalStyles.statValue}>${Number(breakdown?.total || 0).toFixed(2)}</div>
+              </div>
+              <div style={portalStyles.statTile}>
+                <div style={portalStyles.statLabel}>Due Right Now</div>
+                <div style={portalStyles.statValue}>${Number(portal?.payment?.balanceDue || 0).toFixed(2)}</div>
+              </div>
+            </div>
+            <div style={{ marginTop: 12, color: '#55456f', lineHeight: 1.6 }}>
+              This page shows the full reservation estimate and rental terms. If there is still a balance after signing, the secure payment step comes next.
+            </div>
+          </div>
+
           <div style={portalStyles.card}>
             <h2 style={portalStyles.cardTitle}>Reservation Summary</h2>
             <div style={portalStyles.statGrid}>
@@ -163,22 +203,37 @@ export default function SignAgreementPage() {
 
           <div style={portalStyles.card}>
             <h2 style={portalStyles.cardTitle}>Cost Breakdown</h2>
-            <table style={portalStyles.table}>
-              <tbody>
-                {(breakdown?.charges || []).map((c, idx) => (
-                  <tr key={idx}>
-                    <td style={{ ...portalStyles.tableCell, textAlign: 'left' }}>{c.name}</td>
-                    <td style={{ ...portalStyles.tableCell, textAlign: 'right' }}>{Number(c.quantity || 0).toFixed(2)}</td>
-                    <td style={{ ...portalStyles.tableCell, textAlign: 'right' }}>${Number(c.rate || 0).toFixed(2)}</td>
-                    <td style={{ ...portalStyles.tableCell, textAlign: 'right' }}>${Number(c.total || 0).toFixed(2)}</td>
-                  </tr>
-                ))}
-                <tr><td style={portalStyles.tableCell} colSpan={3}><strong>Subtotal</strong></td><td style={{ ...portalStyles.tableCell, textAlign: 'right' }}><strong>${Number(breakdown?.subtotal || 0).toFixed(2)}</strong></td></tr>
-                <tr><td style={portalStyles.tableCell} colSpan={3}>Taxes</td><td style={{ ...portalStyles.tableCell, textAlign: 'right' }}>${Number(breakdown?.taxes || 0).toFixed(2)}</td></tr>
-                <tr><td style={portalStyles.tableCell} colSpan={3}>Paid</td><td style={{ ...portalStyles.tableCell, textAlign: 'right' }}>${Number(breakdown?.paidAmount || 0).toFixed(2)}</td></tr>
-                <tr><td style={portalStyles.tableCell} colSpan={3}><strong>Balance</strong></td><td style={{ ...portalStyles.tableCell, textAlign: 'right' }}><strong>${Number(breakdown?.balance || 0).toFixed(2)}</strong></td></tr>
-              </tbody>
-            </table>
+            <div style={{ display: 'grid', gap: 10 }}>
+              {(breakdown?.charges || []).map((c, idx) => (
+                <div key={idx} style={{ ...portalStyles.statTile, display: 'grid', gap: 6 }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap' }}>
+                    <strong>{c.name}</strong>
+                    <strong>${Number(c.total || 0).toFixed(2)}</strong>
+                  </div>
+                  <div style={{ fontSize: 13, color: '#746294' }}>
+                    Qty {Number(c.quantity || 0).toFixed(2)} at ${Number(c.rate || 0).toFixed(2)}
+                  </div>
+                </div>
+              ))}
+              <div style={portalStyles.statGrid}>
+                <div style={portalStyles.statTile}>
+                  <div style={portalStyles.statLabel}>Subtotal</div>
+                  <div style={portalStyles.statValue}>${Number(breakdown?.subtotal || 0).toFixed(2)}</div>
+                </div>
+                <div style={portalStyles.statTile}>
+                  <div style={portalStyles.statLabel}>Taxes</div>
+                  <div style={portalStyles.statValue}>${Number(breakdown?.taxes || 0).toFixed(2)}</div>
+                </div>
+                <div style={portalStyles.statTile}>
+                  <div style={portalStyles.statLabel}>Paid</div>
+                  <div style={portalStyles.statValue}>${Number(breakdown?.paidAmount || 0).toFixed(2)}</div>
+                </div>
+                <div style={portalStyles.statTile}>
+                  <div style={portalStyles.statLabel}>Balance</div>
+                  <div style={portalStyles.statValue}>${Number(breakdown?.balance || 0).toFixed(2)}</div>
+                </div>
+              </div>
+            </div>
           </div>
 
           <div style={portalStyles.card}>

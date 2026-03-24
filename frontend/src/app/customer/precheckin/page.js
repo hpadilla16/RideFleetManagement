@@ -137,6 +137,21 @@ export default function PrecheckinPage() {
 
   const reservation = model?.reservation;
   const nextPortalStep = model?.portal?.nextStep;
+  const profileFieldsComplete = [
+    form.firstName,
+    form.lastName,
+    form.email,
+    form.phone,
+    form.dateOfBirth,
+    form.licenseNumber,
+    form.licenseState,
+    form.address1,
+    form.city,
+    form.state,
+    form.zip,
+    form.country
+  ].filter(Boolean).length;
+  const uploadedDocs = [form.idPhotoUrl, form.insuranceDocumentUrl].filter(Boolean).length;
 
   const notices = (
     <div style={portalStyles.stack}>
@@ -151,12 +166,51 @@ export default function PrecheckinPage() {
       eyebrow="Ride Fleet Self-Service"
       title="Complete Your Pre-Check-in"
       subtitle="Share your contact details, driver information, and supporting documents before pickup so the counter team can get you on the road faster."
-      aside={<PortalTimelineCard portal={model?.portal} />}
+      aside={<PortalTimelineCard portal={model?.portal} reservation={reservation} currentStepKey="customerInfo" currentStepLabel="Pre-check-in" />}
     >
       {notices}
 
       {!loading && reservation ? (
         <>
+          <div style={portalStyles.card}>
+            <h2 style={portalStyles.cardTitle}>Pre-Check-in Snapshot</h2>
+            <div style={portalStyles.statGrid}>
+              <div style={portalStyles.statTile}>
+                <div style={portalStyles.statLabel}>Profile Fields</div>
+                <div style={portalStyles.statValue}>{profileFieldsComplete}/12</div>
+              </div>
+              <div style={portalStyles.statTile}>
+                <div style={portalStyles.statLabel}>Documents</div>
+                <div style={portalStyles.statValue}>{uploadedDocs}/2</div>
+              </div>
+              <div style={portalStyles.statTile}>
+                <div style={portalStyles.statLabel}>Current Status</div>
+                <div style={portalStyles.statValue}>{reservation.customerInfoCompletedAt ? 'Submitted' : 'In Progress'}</div>
+              </div>
+              <div style={portalStyles.statTile}>
+                <div style={portalStyles.statLabel}>Next Step</div>
+                <div style={portalStyles.statValue}>{nextPortalStep?.key && nextPortalStep.key !== 'customerInfo' ? nextPortalStep.label : 'Counter team review'}</div>
+              </div>
+            </div>
+          </div>
+
+          <div style={portalStyles.card}>
+            <h2 style={portalStyles.cardTitle}>Before You Submit</h2>
+            <div style={portalStyles.statGrid}>
+              <div style={portalStyles.statTile}>
+                <div style={portalStyles.statLabel}>What We Need</div>
+                <div style={{ fontSize: 16, fontWeight: 700, lineHeight: 1.35 }}>Your contact details, license, address, and support documents.</div>
+              </div>
+              <div style={portalStyles.statTile}>
+                <div style={portalStyles.statLabel}>What Happens Next</div>
+                <div style={{ fontSize: 16, fontWeight: 700, lineHeight: 1.35 }}>{nextPortalStep?.key && nextPortalStep.key !== 'customerInfo' ? nextPortalStep.label : 'Counter team review'}</div>
+              </div>
+            </div>
+            <div style={{ marginTop: 12, color: '#55456f', lineHeight: 1.6 }}>
+              After this step, keep an eye on your email. We send the next secure link there so you can finish everything before pickup.
+            </div>
+          </div>
+
           <div style={portalStyles.card}>
             <h2 style={portalStyles.cardTitle}>Reservation Summary</h2>
             <div style={portalStyles.statGrid}>

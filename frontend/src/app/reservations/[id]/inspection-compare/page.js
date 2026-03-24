@@ -196,10 +196,30 @@ export default function ComparePage() {
       {!payload ? (
         <div>Missing compare payload.</div>
       ) : (
-        <div className="grid">
-          <Pane title={payload?.a?.label || 'Photo A'} src={payload?.a?.src} />
-          <Pane title={payload?.b?.label || 'Photo B'} src={payload?.b?.src} />
-        </div>
+        <>
+          <section className="pane" style={{ marginBottom: 10 }}>
+            <div className="pane-head">
+              <h3>Compare Snapshot</h3>
+              <div className="controls">
+                <span className="status-chip neutral" style={{ textTransform: 'none' }}>Reservation {id}</span>
+              </div>
+            </div>
+            <div className="grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))' }}>
+              <div className="photo-card">
+                <div className="photo-cap">Photo A</div>
+                <div style={{ fontWeight: 700 }}>{payload?.a?.label || 'Photo A'}</div>
+              </div>
+              <div className="photo-card">
+                <div className="photo-cap">Photo B</div>
+                <div style={{ fontWeight: 700 }}>{payload?.b?.label || 'Photo B'}</div>
+              </div>
+            </div>
+          </section>
+          <div className="grid">
+            <Pane title={payload?.a?.label || 'Photo A'} src={payload?.a?.src} />
+            <Pane title={payload?.b?.label || 'Photo B'} src={payload?.b?.src} />
+          </div>
+        </>
       )}
     </main>
   );

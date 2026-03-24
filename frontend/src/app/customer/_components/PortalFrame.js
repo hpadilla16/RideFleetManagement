@@ -190,8 +190,8 @@ export function PortalFrame({ eyebrow = 'Ride Fleet Portal', title, subtitle, as
           gridTemplateColumns: isCompact ? 'minmax(0, 1fr)' : portalStyles.grid.gridTemplateColumns,
           gap: isCompact ? 14 : portalStyles.grid.gap
         }}>
-          <div style={{ ...portalStyles.stack, order: 1 }}>{children}</div>
-          <aside style={{ ...portalStyles.stack, order: isCompact ? 2 : 1 }}>{aside}</aside>
+          <aside style={{ ...portalStyles.stack, order: isCompact ? 1 : 2 }}>{aside}</aside>
+          <div style={{ ...portalStyles.stack, order: isCompact ? 2 : 1 }}>{children}</div>
         </section>
       </div>
     </main>

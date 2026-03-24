@@ -98,6 +98,13 @@ function submissionReplyState(submission) {
   };
 }
 
+function incidentHeadline(incident) {
+  return [
+    incident?.trip?.tripCode || incident?.reservation?.reservationNumber || '',
+    incident?.title || ''
+  ].filter(Boolean).join(' - ') || incident?.title || 'Issue Case';
+}
+
 function HistoryList({ rows }) {
   if (!rows?.length) {
     return <div className="surface-note">No history yet beyond the current case snapshot.</div>;
@@ -187,6 +194,22 @@ function FileLinks({ files }) {
           Open {file.name || `Attachment ${index + 1}`}
         </a>
       ))}
+    </div>
+  );
+}
+
+function ServiceLaneCard({ label, count, note, tone = 'neutral' }) {
+  const chipClass = tone === 'warn' ? 'status-chip warn' : tone === 'good' ? 'status-chip good' : 'status-chip neutral';
+  return (
+    <div className="doc-card">
+      <div className="row-between" style={{ marginBottom: 0, alignItems: 'start' }}>
+        <div style={{ display: 'grid', gap: 6 }}>
+          <span className="label">{label}</span>
+          <strong style={{ fontSize: 28, color: '#241b41' }}>{count}</strong>
+        </div>
+        <span className={chipClass}>{tone === 'warn' ? 'Needs Action' : tone === 'good' ? 'Ready' : 'Live'}</span>
+      </div>
+      <div className="doc-meta">{note}</div>
     </div>
   );
 }
@@ -329,6 +352,13 @@ function IssueCenterInner({ token, me, logout }) {
   const metrics = dashboard?.metrics || { open: 0, underReview: 0, resolved: 0, closed: 0, total: 0 };
   const incidents = dashboard?.incidents || [];
   const vehicleSubmissions = dashboard?.vehicleSubmissions || [];
+  const awaitingIncidentReplies = incidents.filter((incident) =>
+    (incident.communications || []).some((entry) => entry.publicTokenExpiresAt && !entry.respondedAt)
+  ).length;
+  const awaitingVehicleReplies = vehicleSubmissions.filter((submission) =>
+    (submission.communications || []).some((entry) => entry.publicTokenExpiresAt && !entry.respondedAt)
+  ).length;
+  const disputedTrips = incidents.filter((incident) => String(incident?.trip?.status || '').toUpperCase() === 'DISPUTED').length;
   const selectedSubmission = submissionEdit.id ? vehicleSubmissions.find((row) => row.id === submissionEdit.id) : null;
   const selectedSubmissionChecklist = selectedSubmission ? submissionChecklist(selectedSubmission) : null;
   const selectedSubmissionReply = selectedSubmission ? submissionReplyState(selectedSubmission) : null;
@@ -338,6 +368,97 @@ function IssueCenterInner({ token, me, logout }) {
     selectedSubmission?.registrationDocumentUrl ? { name: 'Registration Document', dataUrl: selectedSubmission.registrationDocumentUrl } : null,
     selectedSubmission?.initialInspectionDocumentUrl ? { name: 'Initial Inspection', dataUrl: selectedSubmission.initialInspectionDocumentUrl } : null
   ].filter(Boolean);
+  const nextCaseItems = useMemo(() => {
+    const awaitingIncident = incidents.find((incident) =>
+      (incident.communications || []).some((entry) => entry.publicTokenExpiresAt && !entry.respondedAt)
+    );
+    const disputedIncident = incidents.find((incident) => String(incident?.trip?.status || '').toUpperCase() === 'DISPUTED');
+    const openIncident = incidents.find((incident) => String(incident.status || '').toUpperCase() === 'OPEN');
+    const awaitingSubmission = vehicleSubmissions.find((submission) =>
+      (submission.communications || []).some((entry) => entry.publicTokenExpiresAt && !entry.respondedAt)
+    );
+    const pendingSubmission = vehicleSubmissions.find((submission) => String(submission.status || '').toUpperCase() === 'PENDING_REVIEW');
+
+    return [
+      awaitingIncident ? {
+        key: `incident-reply-${awaitingIncident.id}`,
+        label: 'Awaiting Guest / Host Reply',
+        title: incidentHeadline(awaitingIncident),
+        detail: 'Support already requested more information. Review the reply window first.',
+        cta: 'Handle Case',
+        onClick: () => setEdit({
+          id: awaitingIncident.id,
+          status: awaitingIncident.status,
+          title: awaitingIncident.title,
+          description: awaitingIncident.description || '',
+          amountResolved: awaitingIncident.amountResolved ? String(awaitingIncident.amountResolved) : '',
+          note: '',
+          history: awaitingIncident.history || [],
+          communications: awaitingIncident.communications || [],
+          requestNote: ''
+        }),
+        tone: 'warn'
+      } : null,
+      disputedIncident ? {
+        key: `incident-dispute-${disputedIncident.id}`,
+        label: 'Disputed Trip',
+        title: incidentHeadline(disputedIncident),
+        detail: 'Trip is still marked disputed and should be actively worked.',
+        cta: 'Open Workflow',
+        href: disputedIncident.trip?.reservation?.id ? `/reservations/${disputedIncident.trip.reservation.id}` : '/issues',
+        tone: 'warn'
+      } : null,
+      openIncident ? {
+        key: `incident-open-${openIncident.id}`,
+        label: 'Newest Open Case',
+        title: incidentHeadline(openIncident),
+        detail: 'Fresh issue that should be triaged into review or resolution.',
+        cta: 'Review Case',
+        onClick: () => setEdit({
+          id: openIncident.id,
+          status: openIncident.status,
+          title: openIncident.title,
+          description: openIncident.description || '',
+          amountResolved: openIncident.amountResolved ? String(openIncident.amountResolved) : '',
+          note: '',
+          history: openIncident.history || [],
+          communications: openIncident.communications || [],
+          requestNote: ''
+        }),
+        tone: 'neutral'
+      } : null,
+      awaitingSubmission ? {
+        key: `submission-reply-${awaitingSubmission.id}`,
+        label: 'Host Approval Reply',
+        title: [awaitingSubmission.year, awaitingSubmission.make, awaitingSubmission.model].filter(Boolean).join(' ') || 'Vehicle Approval',
+        detail: 'Host replied to an approval request. Review docs and communications before approving.',
+        cta: 'Review Vehicle',
+        onClick: () => setSubmissionEdit({
+          id: awaitingSubmission.id,
+          status: awaitingSubmission.status,
+          reviewNotes: awaitingSubmission.reviewNotes || '',
+          communications: awaitingSubmission.communications || [],
+          requestNote: ''
+        }),
+        tone: 'warn'
+      } : null,
+      pendingSubmission ? {
+        key: `submission-pending-${pendingSubmission.id}`,
+        label: 'Pending Vehicle Approval',
+        title: [pendingSubmission.year, pendingSubmission.make, pendingSubmission.model].filter(Boolean).join(' ') || 'Vehicle Submission',
+        detail: 'A new host vehicle submission is still waiting on initial review.',
+        cta: 'Review Vehicle',
+        onClick: () => setSubmissionEdit({
+          id: pendingSubmission.id,
+          status: pendingSubmission.status,
+          reviewNotes: pendingSubmission.reviewNotes || '',
+          communications: pendingSubmission.communications || [],
+          requestNote: ''
+        }),
+        tone: 'neutral'
+      } : null
+    ].filter(Boolean).slice(0, 4);
+  }, [incidents, vehicleSubmissions]);
 
   return (
     <AppShell me={me} logout={logout}>
@@ -374,6 +495,97 @@ function IssueCenterInner({ token, me, logout }) {
       </section>
 
       {msg ? <div className="surface-note" style={{ color: /updated|saved/i.test(msg) ? '#166534' : '#991b1b', marginBottom: 18 }}>{msg}</div> : null}
+
+      <section className="app-section-grid" style={{ marginBottom: 18 }}>
+        <div className="app-banner">
+          <div className="section-title">Customer Service Hub</div>
+          <div className="app-banner-list">
+            <span className="app-banner-pill">Open cases {metrics.open}</span>
+            <span className="app-banner-pill">Under review {metrics.underReview}</span>
+            <span className="app-banner-pill">Guest or host replies {awaitingIncidentReplies + awaitingVehicleReplies}</span>
+            <span className="app-banner-pill">Vehicle approvals {metrics.vehicleApprovalsPending || 0}</span>
+            <span className="app-banner-pill">Disputed trips {disputedTrips}</span>
+          </div>
+        </div>
+
+        <section className="glass card-lg section-card">
+          <div className="row-between">
+            <div>
+              <div className="section-title">Service Lanes</div>
+              <p className="ui-muted">Triage faster from phone or tablet: know what needs action first, then open the queue or workflow only when needed.</p>
+            </div>
+            <span className="status-chip neutral">Support Ready</span>
+          </div>
+          <div className="app-card-grid compact">
+            <ServiceLaneCard
+              label="Open Issues"
+              count={metrics.open}
+              note="Fresh host or guest cases that should be triaged and moved into review."
+              tone={metrics.open > 0 ? 'warn' : 'neutral'}
+            />
+            <ServiceLaneCard
+              label="Awaiting Public Reply"
+              count={awaitingIncidentReplies + awaitingVehicleReplies}
+              note="Cases where support already asked for more info and is waiting on guest or host response."
+              tone={(awaitingIncidentReplies + awaitingVehicleReplies) > 0 ? 'warn' : 'neutral'}
+            />
+            <ServiceLaneCard
+              label="Vehicle Approvals"
+              count={metrics.vehicleApprovalsPending || 0}
+              note="Host fleet submissions waiting on document, photo, pricing, or inspection review."
+              tone={(metrics.vehicleApprovalsPending || 0) > 0 ? 'warn' : 'neutral'}
+            />
+            <ServiceLaneCard
+              label="Resolved And Closed"
+              count={(metrics.resolved || 0) + (metrics.closed || 0)}
+              note="Completed support work that can be audited from issue history and communications."
+              tone={((metrics.resolved || 0) + (metrics.closed || 0)) > 0 ? 'good' : 'neutral'}
+            />
+          </div>
+          <div className="surface-note">
+            Best support order: grab open issues first, check waiting public replies second, clear vehicle approvals, then finish resolution notes before closeout.
+          </div>
+        </section>
+
+        <section className="glass card-lg section-card">
+          <div className="row-between">
+            <div>
+              <div className="section-title">Next Cases To Handle</div>
+              <p className="ui-muted">A compact priority board for phone and tablet so the next support move is obvious.</p>
+            </div>
+            <span className="status-chip neutral">{nextCaseItems.length} live priorities</span>
+          </div>
+          {nextCaseItems.length ? (
+            <div className="app-card-grid compact">
+              {nextCaseItems.map((item) => (
+                <div key={item.key} className="doc-card">
+                  <div className="row-between" style={{ marginBottom: 0, alignItems: 'start' }}>
+                    <div style={{ display: 'grid', gap: 6 }}>
+                      <span className="label">{item.label}</span>
+                      <strong>{item.title}</strong>
+                    </div>
+                    <span className={item.tone === 'warn' ? 'status-chip warn' : 'status-chip neutral'}>
+                      {item.tone === 'warn' ? 'Attention' : 'Queue'}
+                    </span>
+                  </div>
+                  <div className="doc-meta">{item.detail}</div>
+                  <div className="inline-actions">
+                    {item.href ? (
+                      <a href={item.href}>
+                        <button type="button">{item.cta}</button>
+                      </a>
+                    ) : (
+                      <button type="button" onClick={item.onClick}>{item.cta}</button>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div className="surface-note">No urgent support priorities are open right now. You can work from the queues below.</div>
+          )}
+        </section>
+      </section>
 
       <section className="split-panel">
         <section className="glass card-lg section-card">
@@ -415,14 +627,26 @@ function IssueCenterInner({ token, me, logout }) {
             <div className="stack">
               {incidents.map((incident) => (
                 <div key={incident.id} className="surface-note" style={{ display: 'grid', gap: 10 }}>
+                  {(() => {
+                    const reservation = incident.reservation || incident.trip?.reservation || null;
+                    const guestName = incident.trip?.guestCustomer
+                      ? [incident.trip.guestCustomer.firstName, incident.trip.guestCustomer.lastName].filter(Boolean).join(' ')
+                      : incident.guestCustomer
+                        ? [incident.guestCustomer.firstName, incident.guestCustomer.lastName].filter(Boolean).join(' ')
+                        : '';
+                    const subjectRef = incident.trip?.tripCode || reservation?.reservationNumber || '-';
+                    const workflowLabel = incident.subjectType === 'RESERVATION' ? 'Reservation Issue' : 'Trip Issue';
+                    return (
+                      <>
                   <div className="row-between" style={{ gap: 12, alignItems: 'start' }}>
                     <div>
                       <div style={{ fontWeight: 700 }}>{incident.title}</div>
                       <div className="label" style={{ textTransform: 'none', letterSpacing: 0, fontSize: 12 }}>
                         {[
-                          incident.trip?.tripCode || '-',
+                          subjectRef,
+                          workflowLabel,
                           incident.type,
-                          incident.trip?.guestCustomer ? [incident.trip.guestCustomer.firstName, incident.trip.guestCustomer.lastName].filter(Boolean).join(' ') : '',
+                          guestName,
                           incident.trip?.hostProfile?.displayName || ''
                         ].filter(Boolean).join(' - ')}
                       </div>
@@ -433,7 +657,7 @@ function IssueCenterInner({ token, me, logout }) {
                     <div className="info-tile"><span className="label">Claimed</span><strong>{formatMoney(incident.amountClaimed)}</strong></div>
                     <div className="info-tile"><span className="label">Resolved</span><strong>{formatMoney(incident.amountResolved)}</strong></div>
                     <div className="info-tile"><span className="label">Created</span><strong>{formatDateTime(incident.createdAt)}</strong></div>
-                    <div className="info-tile"><span className="label">Trip</span><strong>{incident.trip?.status || '-'}</strong></div>
+                    <div className="info-tile"><span className="label">{incident.subjectType === 'RESERVATION' ? 'Reservation' : 'Trip'}</span><strong>{incident.subjectType === 'RESERVATION' ? (reservation?.status || '-') : (incident.trip?.status || '-')}</strong></div>
                   </div>
                   <div style={{ color: '#55456f', lineHeight: 1.5 }}>{incident.description || 'No description provided.'}</div>
                   <details>
@@ -459,8 +683,11 @@ function IssueCenterInner({ token, me, logout }) {
                     >
                       Handle Case
                     </button>
-                    {incident.trip?.reservation?.id ? <a href={`/reservations/${incident.trip.reservation.id}`}><button type="button" className="button-subtle">Open Workflow</button></a> : null}
+                    {reservation?.id ? <a href={`/reservations/${reservation.id}`}><button type="button" className="button-subtle">Open Workflow</button></a> : null}
                   </div>
+                      </>
+                    );
+                  })()}
                 </div>
               ))}
             </div>

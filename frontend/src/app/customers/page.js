@@ -38,6 +38,7 @@ function CustomersInner({ token, me, logout }) {
   const [query, setQuery] = useState('');
   const [showOnlyHold, setShowOnlyHold] = useState(false);
   const [msg, setMsg] = useState('');
+  const [supportFocus, setSupportFocus] = useState('ALL');
 
   const [wizardOpen, setWizardOpen] = useState(false);
   const [step, setStep] = useState(0);
@@ -56,6 +57,80 @@ function CustomersInner({ token, me, logout }) {
       return true;
     });
   }, [rows, query, showOnlyHold]);
+
+  const customerSupportHub = useMemo(() => {
+    const holds = rows.filter((r) => r.doNotRent);
+    const docsMissing = rows.filter((r) => !r.idPhotoUrl || !r.insuranceDocumentUrl);
+    const withEmail = rows.filter((r) => !!r.email);
+    const recentNeedAttention = [
+      holds[0]
+        ? {
+            id: `hold-${holds[0].id}`,
+            title: 'Hold Review',
+            detail: `${holds[0].firstName || ''} ${holds[0].lastName || ''}`.trim(),
+            note: holds[0].doNotRentReason || 'Customer is currently on hold and may need support review.',
+            href: `/customers/${holds[0].id}`,
+            actionLabel: 'Open Profile'
+          }
+        : null,
+      docsMissing[0]
+        ? {
+            id: `docs-${docsMissing[0].id}`,
+            title: 'Missing Documents',
+            detail: `${docsMissing[0].firstName || ''} ${docsMissing[0].lastName || ''}`.trim(),
+            note: `${docsMissing[0].idPhotoUrl ? 'ID ready' : 'ID missing'} - ${docsMissing[0].insuranceDocumentUrl ? 'Insurance ready' : 'Insurance missing'}`,
+            href: `/customers/${docsMissing[0].id}`,
+            actionLabel: 'Review Docs'
+          }
+        : null,
+      withEmail[0]
+        ? {
+            id: `email-${withEmail[0].id}`,
+            title: 'Email-Ready Customer',
+            detail: `${withEmail[0].firstName || ''} ${withEmail[0].lastName || ''}`.trim(),
+            note: withEmail[0].email,
+            href: `/customers/${withEmail[0].id}`,
+            actionLabel: 'Open Profile'
+          }
+        : null
+    ].filter(Boolean);
+
+    return {
+      total: rows.length,
+      holds: holds.length,
+      docsMissing: docsMissing.length,
+      withEmail: withEmail.length,
+      recentNeedAttention
+    };
+  }, [rows]);
+
+  const supportFocusOptions = useMemo(() => ([
+    { id: 'ALL', label: 'All Queues', count: customerSupportHub.recentNeedAttention.length },
+    { id: 'HOLDS', label: 'Holds', count: customerSupportHub.recentNeedAttention.filter((item) => item.id.startsWith('hold-')).length },
+    { id: 'DOCS', label: 'Docs', count: customerSupportHub.recentNeedAttention.filter((item) => item.id.startsWith('docs-')).length },
+    { id: 'EMAIL', label: 'Email', count: customerSupportHub.recentNeedAttention.filter((item) => item.id.startsWith('email-')).length }
+  ]), [customerSupportHub]);
+
+  const supportFocusSummary = useMemo(() => {
+    switch (supportFocus) {
+      case 'HOLDS':
+        return 'Focus the shift on hold reviews first so blocked customers get a fast decision.';
+      case 'DOCS':
+        return 'Keep missing document work visible to close out ID and insurance gaps faster from phone.';
+      case 'EMAIL':
+        return 'Show customers ready for email actions like resets and support follow-up without scanning the full table.';
+      default:
+        return 'A compact mobile-first board before you drop into the full customer table.';
+    }
+  }, [supportFocus]);
+
+  const visibleSupportItems = useMemo(() => {
+    if (supportFocus === 'ALL') return customerSupportHub.recentNeedAttention;
+    if (supportFocus === 'HOLDS') return customerSupportHub.recentNeedAttention.filter((item) => item.id.startsWith('hold-'));
+    if (supportFocus === 'DOCS') return customerSupportHub.recentNeedAttention.filter((item) => item.id.startsWith('docs-'));
+    if (supportFocus === 'EMAIL') return customerSupportHub.recentNeedAttention.filter((item) => item.id.startsWith('email-'));
+    return customerSupportHub.recentNeedAttention;
+  }, [customerSupportHub, supportFocus]);
 
   const openCreate = () => {
     setForm(EMPTY);
@@ -173,6 +248,71 @@ function CustomersInner({ token, me, logout }) {
 
   return (
     <AppShell me={me} logout={logout}>
+      <section className="glass card-lg section-card" style={{ marginBottom: 16 }}>
+        <div className="app-banner">
+          <div className="row-between" style={{ alignItems: 'start', marginBottom: 0 }}>
+            <div>
+              <span className="eyebrow">Customer Support Hub</span>
+              <h2 className="page-title" style={{ marginTop: 6 }}>
+                Keep customer readiness and holds in view.
+              </h2>
+              <p className="ui-muted">{supportFocusSummary}</p>
+            </div>
+            <span className="status-chip neutral">Customer Ops</span>
+          </div>
+          <div className="app-card-grid compact">
+            <div className="info-tile">
+              <span className="label">Customers</span>
+              <strong>{customerSupportHub.total}</strong>
+              <span className="ui-muted">Profiles currently available in the tenant workspace.</span>
+            </div>
+            <div className="info-tile">
+              <span className="label">On Hold</span>
+              <strong>{customerSupportHub.holds}</strong>
+              <span className="ui-muted">Customers currently blocked from renting.</span>
+            </div>
+            <div className="info-tile">
+              <span className="label">Docs Missing</span>
+              <strong>{customerSupportHub.docsMissing}</strong>
+              <span className="ui-muted">Customers missing ID or insurance documentation.</span>
+            </div>
+            <div className="info-tile">
+              <span className="label">Email Ready</span>
+              <strong>{customerSupportHub.withEmail}</strong>
+              <span className="ui-muted">Customers who can receive support emails and password resets.</span>
+            </div>
+          </div>
+          <div className="app-banner-list">
+            {supportFocusOptions.map((option) => (
+              <button
+                key={option.id}
+                type="button"
+                className={supportFocus === option.id ? '' : 'button-subtle'}
+                onClick={() => setSupportFocus(option.id)}
+                style={{ minHeight: 36, paddingInline: 14 }}
+              >
+                {option.label} · {option.count}
+              </button>
+            ))}
+          </div>
+          {visibleSupportItems.length ? (
+            <div className="app-card-grid compact">
+              {visibleSupportItems.map((item) => (
+                <section key={item.id} className="glass card section-card">
+                  <div className="section-title" style={{ fontSize: 15 }}>{item.title}</div>
+                  <div className="ui-muted">{item.detail}</div>
+                  <div className="surface-note">{item.note}</div>
+                  <div className="inline-actions">
+                    <Link href={item.href}><button type="button">{item.actionLabel}</button></Link>
+                  </div>
+                </section>
+              ))}
+            </div>
+          ) : customerSupportHub.recentNeedAttention.length ? (
+            <div className="surface-note">No customer cases match this focus right now. Switch filters to review another lane.</div>
+          ) : null}
+        </div>
+      </section>
       <section className="glass card-lg stack">
         <div className="row-between">
           <h2>Customers</h2>

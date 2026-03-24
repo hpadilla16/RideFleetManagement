@@ -357,6 +357,7 @@ function serializeCustomerInfoReservation(reservation) {
     status: reservation.status,
     pickupAt: reservation.pickupAt,
     returnAt: reservation.returnAt,
+    estimatedTotal: reservation.estimatedTotal,
     pickupLocation: reservation.pickupLocation?.name || '',
     returnLocation: reservation.returnLocation?.name || '',
     vehicle: [reservation.vehicle?.year, reservation.vehicle?.make, reservation.vehicle?.model].filter(Boolean).join(' ') || '',
@@ -805,8 +806,14 @@ customerPortalRouter.get('/payment/:token', async (req, res, next) => {
       reservation: {
         id: reservation.id,
         reservationNumber: reservation.reservationNumber,
+        pickupAt: reservation.pickupAt,
+        returnAt: reservation.returnAt,
+        estimatedTotal: reservation.estimatedTotal,
         customerName: `${reservation.customer?.firstName || ''} ${reservation.customer?.lastName || ''}`.trim(),
-        customerEmail: reservation.customer?.email || null
+        customerEmail: reservation.customer?.email || null,
+        vehicle: reservation.vehicle ? `${reservation.vehicle.year || ''} ${reservation.vehicle.make || ''} ${reservation.vehicle.model || ''}`.trim() : null,
+        pickupLocation: reservation.pickupLocation?.name || null,
+        returnLocation: reservation.returnLocation?.name || null
       },
       amountDue: Number(amountDue.toFixed(2)),
       breakdown,

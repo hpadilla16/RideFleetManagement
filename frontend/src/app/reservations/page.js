@@ -255,8 +255,131 @@ function ReservationsInner({ token, me, logout }) {
     return !q || r.reservationNumber.toLowerCase().includes(q) || `${r.customer?.firstName || ''} ${r.customer?.lastName || ''}`.toLowerCase().includes(q);
   });
 
+  const reservationShiftSummary = useMemo(() => {
+    const now = new Date();
+    const sameDay = (value) => {
+      if (!value) return false;
+      const date = new Date(value);
+      return (
+        date.getFullYear() === now.getFullYear() &&
+        date.getMonth() === now.getMonth() &&
+        date.getDate() === now.getDate()
+      );
+    };
+
+    const upcomingPickups = reservations
+      .filter((r) => ['CONFIRMED', 'PENDING'].includes(String(r?.status || '').toUpperCase()))
+      .sort((a, b) => new Date(a.pickupAt) - new Date(b.pickupAt));
+    const returnsDue = reservations
+      .filter((r) => String(r?.status || '').toUpperCase() === 'CHECKED_OUT')
+      .sort((a, b) => new Date(a.returnAt) - new Date(b.returnAt));
+    const feeAdvisories = reservations.filter((r) => hasFeeAdvisory(r.notes));
+    const noShows = reservations.filter((r) => String(r?.status || '').toUpperCase() === 'NO_SHOW');
+
+    const nextItems = [
+      upcomingPickups[0]
+        ? {
+            id: `pickup-${upcomingPickups[0].id}`,
+            title: 'Next Pickup',
+            detail: `${upcomingPickups[0].reservationNumber} - ${upcomingPickups[0].customer?.firstName || ''} ${upcomingPickups[0].customer?.lastName || ''}`.trim(),
+            note: `Pickup ${new Date(upcomingPickups[0].pickupAt).toLocaleString()}`,
+            href: `/reservations/${upcomingPickups[0].id}/checkout`,
+            actionLabel: 'Start Check-out'
+          }
+        : null,
+      returnsDue[0]
+        ? {
+            id: `return-${returnsDue[0].id}`,
+            title: 'Next Return',
+            detail: `${returnsDue[0].reservationNumber} - ${returnsDue[0].customer?.firstName || ''} ${returnsDue[0].customer?.lastName || ''}`.trim(),
+            note: `Return ${new Date(returnsDue[0].returnAt).toLocaleString()}`,
+            href: `/reservations/${returnsDue[0].id}/checkin`,
+            actionLabel: 'Start Check-in'
+          }
+        : null,
+      feeAdvisories[0]
+        ? {
+            id: `fee-${feeAdvisories[0].id}`,
+            title: 'Fee Advisory',
+            detail: `${feeAdvisories[0].reservationNumber} - ${feeAdvisories[0].customer?.firstName || ''} ${feeAdvisories[0].customer?.lastName || ''}`.trim(),
+            note: 'Additional fee advisory still open on this booking.',
+            href: `/reservations/${feeAdvisories[0].id}`,
+            actionLabel: 'Open Workflow'
+          }
+        : null,
+      noShows[0]
+        ? {
+            id: `noshow-${noShows[0].id}`,
+            title: 'No-Show Follow-Up',
+            detail: `${noShows[0].reservationNumber} - ${noShows[0].customer?.firstName || ''} ${noShows[0].customer?.lastName || ''}`.trim(),
+            note: 'This booking was marked no-show and may need follow-up.',
+            href: `/reservations/${noShows[0].id}`,
+            actionLabel: 'Review'
+          }
+        : null
+    ].filter(Boolean);
+
+    return {
+      pickupsToday: reservations.filter((r) => sameDay(r.pickupAt)).length,
+      returnsToday: reservations.filter((r) => sameDay(r.returnAt)).length,
+      checkedOut: reservations.filter((r) => String(r?.status || '').toUpperCase() === 'CHECKED_OUT').length,
+      feeAdvisories: feeAdvisories.length,
+      nextItems
+    };
+  }, [reservations]);
+
   return (
     <AppShell me={me} logout={logout}>
+      <section className="glass card-lg section-card" style={{ marginBottom: 16 }}>
+        <div className="app-banner">
+          <div className="row-between" style={{ alignItems: 'start', marginBottom: 0 }}>
+            <div>
+              <span className="eyebrow">Reservation Shift Board</span>
+              <h2 className="page-title" style={{ marginTop: 6 }}>
+                Keep pickups, returns, and booking follow-up in view.
+              </h2>
+              <p className="ui-muted">A compact operations board for counter staff before diving into the full reservation table.</p>
+            </div>
+            <span className="status-chip neutral">Mobile Ops</span>
+          </div>
+          <div className="app-card-grid compact">
+            <div className="info-tile">
+              <span className="label">Pickups Today</span>
+              <strong>{reservationShiftSummary.pickupsToday}</strong>
+              <span className="ui-muted">Reservations scheduled to go out today.</span>
+            </div>
+            <div className="info-tile">
+              <span className="label">Returns Today</span>
+              <strong>{reservationShiftSummary.returnsToday}</strong>
+              <span className="ui-muted">Bookings due back today across the board.</span>
+            </div>
+            <div className="info-tile">
+              <span className="label">Checked Out</span>
+              <strong>{reservationShiftSummary.checkedOut}</strong>
+              <span className="ui-muted">Reservations currently out and active.</span>
+            </div>
+            <div className="info-tile">
+              <span className="label">Fee Advisories</span>
+              <strong>{reservationShiftSummary.feeAdvisories}</strong>
+              <span className="ui-muted">Bookings that still have advisory follow-up attached.</span>
+            </div>
+          </div>
+          {reservationShiftSummary.nextItems.length ? (
+            <div className="app-card-grid compact">
+              {reservationShiftSummary.nextItems.map((item) => (
+                <section key={item.id} className="glass card section-card">
+                  <div className="section-title" style={{ fontSize: 15 }}>{item.title}</div>
+                  <div className="ui-muted">{item.detail}</div>
+                  <div className="surface-note">{item.note}</div>
+                  <div className="inline-actions">
+                    <Link href={item.href}><button type="button">{item.actionLabel}</button></Link>
+                  </div>
+                </section>
+              ))}
+            </div>
+          ) : null}
+        </div>
+      </section>
       <section className="glass card-lg">
         <div className="row-between"><h2>Reservations</h2><div style={{ display: 'flex', gap: 8 }}><input placeholder="Search reservation/customer" value={query} onChange={(e) => setQuery(e.target.value)} /><button onClick={() => { setCreateOpen(true); setSelectedServiceIds([]); setSelectedFeeIds([]); setSelectedInsuranceCode(''); setRateError(''); setAddingCustomer(false); setNewCustomer({ firstName: '', lastName: '', phone: '', email: '' }); }}>New Reservation</button></div></div>
         {msg ? <p className="label">{msg}</p> : null}

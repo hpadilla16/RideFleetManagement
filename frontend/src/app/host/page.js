@@ -23,6 +23,11 @@ function formatDateTime(value) {
   try { return new Date(value).toLocaleString(); } catch { return String(value); }
 }
 
+function formatDate(value) {
+  if (!value) return '-';
+  try { return new Date(value).toLocaleDateString(); } catch { return String(value); }
+}
+
 function parsePhotoList(value) {
   try {
     const parsed = typeof value === 'string' ? JSON.parse(value) : value;
@@ -47,6 +52,10 @@ function parseAddOns(value) {
   } catch {
     return [];
   }
+}
+
+function primaryPhoto(value) {
+  return parsePhotoList(value)[0] || '';
 }
 
 function submissionProgress(row) {
@@ -155,6 +164,16 @@ function hostAttention(trip) {
   if (Number(reservation?.rentalAgreement?.balance || 0) > 0) return { label: 'Payment Balance Pending', tone: 'warn' };
   if (!reservation.readyForPickupAt && ['CONFIRMED', 'READY_FOR_PICKUP'].includes(current)) return { label: 'Awaiting Pickup Readiness', tone: 'neutral' };
   return { label: 'Healthy', tone: 'good' };
+}
+
+function guestFlowLabel(trip) {
+  const reservation = trip?.reservation || null;
+  if (!reservation) return 'Workflow missing';
+  if (!reservation.customerInfoCompletedAt) return 'Guest pre-check-in pending';
+  if (!reservation.signatureSignedAt) return 'Guest signature pending';
+  if (Number(reservation?.rentalAgreement?.balance || 0) > 0) return 'Guest payment pending';
+  if (!reservation.readyForPickupAt) return 'Awaiting pickup readiness';
+  return 'Guest ready for handoff';
 }
 
 const EMPTY_LISTING_EDIT = {
@@ -276,6 +295,72 @@ function HostAppInner({ token, me, logout }) {
       atRisk: Number(disputed.reduce((sum, trip) => sum + Number(trip.hostEarnings || 0), 0).toFixed(2))
     };
   }, [trips]);
+
+  const hostMobileSnapshot = useMemo(() => ({
+    publishedListings: listings.filter((row) => String(row.status || '').toUpperCase() === 'PUBLISHED').length,
+    listingsWithPhotos: listings.filter((row) => parsePhotoList(row.photosJson).length > 0).length,
+    listingsWithAddOns: listings.filter((row) => parseAddOns(row.addOnsJson).filter((item) => item.name && item.price).length > 0).length,
+    instantBookListings: listings.filter((row) => !!row.instantBook).length,
+    nextPickupAt: hostSnapshot.upcomingPickups[0]?.scheduledPickupAt || null
+  }), [hostSnapshot.upcomingPickups, listings]);
+
+  const hostTripOpsSnapshot = useMemo(() => {
+    const nextHandoffTrip = hostSnapshot.upcomingPickups[0] || hostSnapshot.watchlist[0] || null;
+    const guestActionTrips = trips.filter((trip) => {
+      const reservation = trip?.reservation || null;
+      return !!reservation && (
+        !reservation.customerInfoCompletedAt ||
+        !reservation.signatureSignedAt ||
+        Number(reservation?.rentalAgreement?.balance || 0) > 0
+      );
+    });
+    const readyForHandoff = trips.filter((trip) => {
+      const reservation = trip?.reservation || null;
+      return !!reservation?.readyForPickupAt && ['CONFIRMED', 'READY_FOR_PICKUP'].includes(String(trip?.status || '').toUpperCase());
+    });
+    return {
+      nextHandoffTrip,
+      guestActionTrips,
+      readyForHandoff
+    };
+  }, [hostSnapshot.upcomingPickups, hostSnapshot.watchlist, trips]);
+
+  const selectedListingSnapshot = useMemo(() => {
+    if (!listingEdit.id) return null;
+    return {
+      photoCount: (listingEdit.photoUrls || []).length,
+      addOnCount: (listingEdit.addOns || []).filter((row) => row.name && row.price).length,
+      pricingReady: !!Number(listingEdit.baseDailyRate || 0),
+      publishState: listingEdit.status || 'DRAFT',
+      deliveryFee: Number(listingEdit.deliveryFee || 0),
+      cleaningFee: Number(listingEdit.cleaningFee || 0),
+      securityDeposit: Number(listingEdit.securityDeposit || 0),
+      instantBook: !!listingEdit.instantBook
+    };
+  }, [listingEdit]);
+
+  const nextListingAttention = useMemo(() => {
+    return listings.find((listing) => parsePhotoList(listing.photosJson).length < 3)
+      || listings.find((listing) => !Number(listing.baseDailyRate || 0))
+      || listings.find((listing) => !listing.instantBook)
+      || listings[0]
+      || null;
+  }, [listings]);
+
+  const selectedAvailabilityListing = useMemo(
+    () => listings.find((row) => row.id === availabilityListingId) || null,
+    [availabilityListingId, listings]
+  );
+
+  const availabilitySnapshot = useMemo(() => {
+    if (!availabilityListingId) return null;
+    return {
+      totalWindows: availabilityRows.length,
+      blockedWindows: availabilityRows.filter((row) => !!row.isBlocked).length,
+      priceOverrides: availabilityRows.filter((row) => row.priceOverride != null).length,
+      minStayOverrides: availabilityRows.filter((row) => row.minTripDaysOverride != null).length
+    };
+  }, [availabilityListingId, availabilityRows]);
 
   async function saveListingEdit(event) {
     event.preventDefault();
@@ -497,6 +582,7 @@ function HostAppInner({ token, me, logout }) {
               <span className="hero-pill">Host dashboard</span>
               <span className="hero-pill">Earnings visibility</span>
               <span className="hero-pill">Trip watchlist</span>
+              <span className="hero-pill">Listing quality</span>
             </div>
           </div>
           <div className="glass card section-card">
@@ -521,6 +607,11 @@ function HostAppInner({ token, me, logout }) {
             ) : (
               <div className="surface-note">{loading ? 'Loading host profile...' : 'No host profile is linked to this login yet. Admins can still use the selector below to support hosts.'}</div>
             )}
+            {host?.id ? (
+              <div className="inline-actions">
+                <a href={`/host-profile/${host.id}`} target="_blank" rel="noreferrer"><button type="button" className="button-subtle">View Public Host Profile</button></a>
+              </div>
+            ) : null}
             {recentReviews.length ? (
               <div className="stack" style={{ marginTop: 12 }}>
                 {recentReviews.slice(0, 3).map((review) => (
@@ -536,6 +627,158 @@ function HostAppInner({ token, me, logout }) {
       </section>
 
       {msg ? <div className="surface-note" style={{ color: /updated|moved|added|removed/i.test(msg) ? '#166534' : '#991b1b', marginBottom: 18 }}>{msg}</div> : null}
+
+      <section className="glass card-lg section-card" style={{ marginBottom: 18 }}>
+        <div className="row-between">
+          <div><div className="section-title">Host Mobile Hub</div><p className="ui-muted">A compact read on listing quality, pricing readiness, and the next handoff moment.</p></div>
+          <span className="status-chip neutral">{hostMobileSnapshot.publishedListings} published</span>
+        </div>
+        <div className="app-card-grid compact">
+          <div className="doc-card">
+            <strong>Next Pickup</strong>
+            <div className="doc-meta">{hostMobileSnapshot.nextPickupAt ? formatDateTime(hostMobileSnapshot.nextPickupAt) : 'No pickup in the next 48 hours'}</div>
+          </div>
+          <div className="doc-card">
+            <strong>Photo Coverage</strong>
+            <div className="doc-meta">{hostMobileSnapshot.listingsWithPhotos}/{listings.length || 0} listings have custom host photos.</div>
+          </div>
+          <div className="doc-card">
+            <strong>Add-On Coverage</strong>
+            <div className="doc-meta">{hostMobileSnapshot.listingsWithAddOns}/{listings.length || 0} listings have host add-ons ready.</div>
+          </div>
+          <div className="doc-card">
+            <strong>Instant Book</strong>
+            <div className="doc-meta">{hostMobileSnapshot.instantBookListings} listing{hostMobileSnapshot.instantBookListings === 1 ? '' : 's'} currently support instant book.</div>
+          </div>
+        </div>
+      </section>
+
+      <section className="glass card-lg section-card" style={{ marginBottom: 18 }}>
+        <div className="row-between">
+          <div>
+            <div className="section-title">Welcome back{host?.displayName ? `, ${host.displayName}` : ''}.</div>
+            <p className="ui-muted">This is your host account hub for listings, trips, approvals, and your public trust profile.</p>
+          </div>
+          <span className="status-chip neutral">{host ? formatRating(host.averageRating, host.reviewCount) : 'Host account'}</span>
+        </div>
+        <div className="app-card-grid compact">
+          <div className="doc-card">
+            <strong>Host Profile</strong>
+            <div className="doc-meta">{host?.displayName || 'Host profile not linked yet'}</div>
+          </div>
+          <div className="doc-card">
+            <strong>Public Rating</strong>
+            <div className="doc-meta">{formatRating(host?.averageRating, host?.reviewCount)}</div>
+          </div>
+          <div className="doc-card">
+            <strong>Pending Approvals</strong>
+            <div className="doc-meta">{submissions.filter((row) => String(row.status || '').toUpperCase() === 'PENDING_REVIEW').length} fleet submission{''}</div>
+          </div>
+          <div className="doc-card">
+            <strong>Attention Listing</strong>
+            <div className="doc-meta">{nextListingAttention?.title || 'No listings yet'}</div>
+          </div>
+        </div>
+        <div className="surface-note">
+          {nextListingAttention
+            ? `Next listing to improve: ${nextListingAttention.title}. ${
+                parsePhotoList(nextListingAttention.photosJson).length < 3
+                  ? 'Add more photos to build guest trust faster.'
+                  : !Number(nextListingAttention.baseDailyRate || 0)
+                    ? 'Set pricing so guests can actually book it.'
+                    : !nextListingAttention.instantBook
+                      ? 'Review approval settings and handoff readiness.'
+                      : 'Keep this listing updated for stronger conversion.'
+              }`
+            : 'Once you publish listings and trips, your account summary and next recommendation will show here.'}
+        </div>
+        <div className="inline-actions">
+          {host?.id ? <a href={`/host-profile/${host.id}`}><button type="button">Open Public Host Profile</button></a> : null}
+          <a href="#fleet-vehicles"><button type="button" className="button-subtle">Go To Fleet Vehicles</button></a>
+        </div>
+      </section>
+
+      <section className="split-panel" style={{ marginBottom: 18 }}>
+        <section className="glass card-lg section-card">
+          <div className="row-between">
+            <div><div className="section-title">Next Handoff</div><p className="ui-muted">The next trip that likely needs host attention right now.</p></div>
+            <span className="status-chip neutral">{hostTripOpsSnapshot.nextHandoffTrip ? 'Live' : 'Clear'}</span>
+          </div>
+          {hostTripOpsSnapshot.nextHandoffTrip ? (
+            <div className="stack">
+              <div className="surface-note" style={{ display: 'grid', gap: 10 }}>
+                <div className="row-between" style={{ gap: 12, alignItems: 'start' }}>
+                  <div>
+                    <div style={{ fontWeight: 700 }}>{hostTripOpsSnapshot.nextHandoffTrip.tripCode}</div>
+                    <div className="label" style={{ textTransform: 'none', letterSpacing: 0, fontSize: 12 }}>
+                      {[
+                        hostTripOpsSnapshot.nextHandoffTrip.listing?.title || 'Listing',
+                        hostTripOpsSnapshot.nextHandoffTrip.guestCustomer
+                          ? [hostTripOpsSnapshot.nextHandoffTrip.guestCustomer.firstName, hostTripOpsSnapshot.nextHandoffTrip.guestCustomer.lastName].filter(Boolean).join(' ')
+                          : 'Guest'
+                      ].join(' · ')}
+                    </div>
+                  </div>
+                  <span className={statusChip(hostTripOpsSnapshot.nextHandoffTrip.status)}>{hostTripOpsSnapshot.nextHandoffTrip.status}</span>
+                </div>
+                <div className="app-card-grid compact">
+                  <div className="doc-card">
+                    <strong>Pickup</strong>
+                    <div className="doc-meta">{formatDateTime(hostTripOpsSnapshot.nextHandoffTrip.scheduledPickupAt)}</div>
+                  </div>
+                  <div className="doc-card">
+                    <strong>Guest Flow</strong>
+                    <div className="doc-meta">{guestFlowLabel(hostTripOpsSnapshot.nextHandoffTrip)}</div>
+                  </div>
+                  <div className="doc-card">
+                    <strong>Host Earnings</strong>
+                    <div className="doc-meta">{formatMoney(hostTripOpsSnapshot.nextHandoffTrip.hostEarnings)}</div>
+                  </div>
+                  <div className="doc-card">
+                    <strong>Support Cases</strong>
+                    <div className="doc-meta">{hostTripOpsSnapshot.nextHandoffTrip.incidents?.length || 0} case{(hostTripOpsSnapshot.nextHandoffTrip.incidents?.length || 0) === 1 ? '' : 's'} on this trip.</div>
+                  </div>
+                </div>
+                <div className="inline-actions">
+                  {hostTripOpsSnapshot.nextHandoffTrip.reservation?.id ? <a href={`/reservations/${hostTripOpsSnapshot.nextHandoffTrip.reservation.id}`}><button type="button">Open Workflow</button></a> : null}
+                  {tripActionsFor(hostTripOpsSnapshot.nextHandoffTrip.status)[0] ? (
+                    <button type="button" className="button-subtle" onClick={() => moveTrip(hostTripOpsSnapshot.nextHandoffTrip.id, tripActionsFor(hostTripOpsSnapshot.nextHandoffTrip.status)[0])}>
+                      {tripActionsFor(hostTripOpsSnapshot.nextHandoffTrip.status)[0]}
+                    </button>
+                  ) : null}
+                </div>
+              </div>
+            </div>
+          ) : <div className="surface-note">No handoff needs immediate host action right now.</div>}
+        </section>
+
+        <section className="glass card-lg section-card">
+          <div className="row-between">
+            <div><div className="section-title">Guest Readiness Lane</div><p className="ui-muted">Trips where the guest still owes a step before handoff feels clean.</p></div>
+            <span className="status-chip neutral">{hostTripOpsSnapshot.guestActionTrips.length} waiting</span>
+          </div>
+          {hostTripOpsSnapshot.guestActionTrips.length ? (
+            <div className="stack">
+              {hostTripOpsSnapshot.guestActionTrips.slice(0, 4).map((trip) => (
+                <div key={trip.id} className="surface-note" style={{ display: 'grid', gap: 8 }}>
+                  <div className="row-between" style={{ gap: 12 }}>
+                    <strong>{trip.tripCode}</strong>
+                    <span className={statusChip(trip.status)}>{trip.status}</span>
+                  </div>
+                  <div style={{ color: '#55456f', lineHeight: 1.5 }}>
+                    {[trip.listing?.title || 'Listing', guestFlowLabel(trip)].join(' · ')}
+                  </div>
+                  <div className="inline-actions">
+                    {trip.reservation?.id ? <a href={`/reservations/${trip.reservation.id}`}><button type="button" className="button-subtle">Open Workflow</button></a> : null}
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div className="surface-note">Guests are looking clean right now. No pre-check-in, signature, or payment blockers detected.</div>
+          )}
+        </section>
+      </section>
 
       {isAdminViewer ? (
         <section className="glass card-lg section-card" style={{ marginBottom: 18 }}>
@@ -761,6 +1004,8 @@ function HostAppInner({ token, me, logout }) {
                     <div className="metric-card"><span className="label">Cleaning Fee</span><strong>{formatMoney(listing.cleaningFee)}</strong></div>
                     <div className="metric-card"><span className="label">Instant Book</span><strong>{listing.instantBook ? 'On' : 'Off'}</strong></div>
                     <div className="metric-card"><span className="label">Min Stay</span><strong>{listing.minTripDays} day(s)</strong></div>
+                    <div className="metric-card"><span className="label">Photos</span><strong>{parsePhotoList(listing.photosJson).length}</strong></div>
+                    <div className="metric-card"><span className="label">Add-Ons</span><strong>{parseAddOns(listing.addOnsJson).filter((row) => row.name && row.price).length}</strong></div>
                   </div>
                   <div className="surface-note" style={{ color: '#55456f', lineHeight: 1.5 }}>
                     Change daily rate, cleaning fee, delivery fee, deposit, host add-ons, and photos from the editor below.
@@ -787,6 +1032,43 @@ function HostAppInner({ token, me, logout }) {
           </div>
           {listingEdit.id ? (
             <form className="stack" onSubmit={saveListingEdit}>
+              {selectedListingSnapshot ? (
+                <div className="app-card-grid compact">
+                  <div className="doc-card">
+                    <strong>Pricing Ready</strong>
+                    <div className="doc-meta">{selectedListingSnapshot.pricingReady ? 'Daily rate is set for booking.' : 'Set a daily rate before publishing.'}</div>
+                  </div>
+                  <div className="doc-card">
+                    <strong>Photos</strong>
+                    <div className="doc-meta">{selectedListingSnapshot.photoCount} host photo{selectedListingSnapshot.photoCount === 1 ? '' : 's'} uploaded.</div>
+                  </div>
+                  <div className="doc-card">
+                    <strong>Add-Ons</strong>
+                    <div className="doc-meta">{selectedListingSnapshot.addOnCount} host add-on{selectedListingSnapshot.addOnCount === 1 ? '' : 's'} available.</div>
+                  </div>
+                  <div className="doc-card">
+                    <strong>Status</strong>
+                    <div className="doc-meta">{selectedListingSnapshot.publishState}</div>
+                  </div>
+                  <div className="doc-card">
+                    <strong>Fee Stack</strong>
+                    <div className="doc-meta">
+                      Cleaning {formatMoney(selectedListingSnapshot.cleaningFee)} · Delivery {formatMoney(selectedListingSnapshot.deliveryFee)}
+                    </div>
+                  </div>
+                  <div className="doc-card">
+                    <strong>Booking Controls</strong>
+                    <div className="doc-meta">
+                      {selectedListingSnapshot.instantBook ? 'Instant book is on.' : 'Approval flow is active.'} Deposit set to {formatMoney(selectedListingSnapshot.securityDeposit)}.
+                    </div>
+                  </div>
+                </div>
+              ) : null}
+              {selectedListingSnapshot ? (
+                <div className="surface-note">
+                  Hosts should confirm four things before publishing: daily rate, photo coverage, add-ons if applicable, and whether the listing should be instant book or approval based.
+                </div>
+              ) : null}
               <div className="stack"><label className="label">Short Description</label><input value={listingEdit.shortDescription} onChange={(event) => setListingEdit((current) => ({ ...current, shortDescription: event.target.value }))} /></div>
               <div className="stack"><label className="label">Description</label><textarea rows={4} value={listingEdit.description} onChange={(event) => setListingEdit((current) => ({ ...current, description: event.target.value }))} /></div>
               <div className="form-grid-3">
@@ -843,7 +1125,7 @@ function HostAppInner({ token, me, logout }) {
         </section>
       </section>
 
-      <section className="split-panel" style={{ marginTop: 18 }}>
+      <section id="fleet-vehicles" className="split-panel" style={{ marginTop: 18 }}>
         <section className="glass card-lg section-card">
           <div className="row-between">
             <div><div className="section-title">Availability Windows</div><p className="ui-muted">Block dates, set price overrides, or require a longer minimum stay from the host surface.</p></div>
@@ -852,6 +1134,26 @@ function HostAppInner({ token, me, logout }) {
               {listings.map((row) => <option key={row.id} value={row.id}>{row.title}</option>)}
             </select>
           </div>
+          {selectedAvailabilityListing && availabilitySnapshot ? (
+            <div className="app-card-grid compact">
+              <div className="doc-card">
+                <strong>Listing</strong>
+                <div className="doc-meta">{selectedAvailabilityListing.title}</div>
+              </div>
+              <div className="doc-card">
+                <strong>Windows</strong>
+                <div className="doc-meta">{availabilitySnapshot.totalWindows} total window{availabilitySnapshot.totalWindows === 1 ? '' : 's'} configured.</div>
+              </div>
+              <div className="doc-card">
+                <strong>Blackouts</strong>
+                <div className="doc-meta">{availabilitySnapshot.blockedWindows} blocked date range{availabilitySnapshot.blockedWindows === 1 ? '' : 's'}.</div>
+              </div>
+              <div className="doc-card">
+                <strong>Overrides</strong>
+                <div className="doc-meta">{availabilitySnapshot.priceOverrides} price and {availabilitySnapshot.minStayOverrides} minimum-stay override{availabilitySnapshot.minStayOverrides === 1 ? '' : 's'} live.</div>
+              </div>
+            </div>
+          ) : null}
           {availabilityListingId ? (
             availabilityRows.length ? (
               <div className="stack">
@@ -876,6 +1178,11 @@ function HostAppInner({ token, me, logout }) {
             <div><div className="section-title">Add Availability Window</div><p className="ui-muted">Useful for blackout dates, seasonal pricing, and minimum-stay control.</p></div>
             {availabilityListingId ? <span className="status-chip neutral">Listing Selected</span> : null}
           </div>
+          {selectedAvailabilityListing ? (
+            <div className="surface-note">
+              You are editing availability for <strong>{selectedAvailabilityListing.title}</strong>. Use blocked windows for blackout dates, or leave dates open and add pricing/minimum-stay overrides for peak periods.
+            </div>
+          ) : null}
           <form className="stack" onSubmit={saveAvailabilityWindow}>
             <div className="form-grid-2">
               <div className="stack"><label className="label">Start</label><input type="datetime-local" value={windowForm.startAt} onChange={(event) => setWindowForm((current) => ({ ...current, startAt: event.target.value }))} /></div>

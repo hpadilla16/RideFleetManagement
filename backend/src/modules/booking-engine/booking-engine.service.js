@@ -456,6 +456,55 @@ async function resolvePublicTenant({ tenantSlug, tenantId } = {}) {
   });
 }
 
+async function resolveActiveLocation(locationId) {
+  if (!locationId) return null;
+  return prisma.location.findFirst({
+    where: { id: String(locationId), isActive: true },
+    select: { id: true, tenantId: true, name: true, city: true, state: true, taxRate: true, locationConfig: true }
+  });
+}
+
+async function resolvePublicTenantContext(input = {}) {
+  const directTenant = await resolvePublicTenant({
+    tenantSlug: input?.tenantSlug,
+    tenantId: input?.tenantId
+  });
+  if (directTenant) return directTenant;
+
+  const location = await resolveActiveLocation(input?.pickupLocationId || input?.locationId || input?.returnLocationId);
+  if (location?.tenantId) {
+    return prisma.tenant.findFirst({
+      where: { id: location.tenantId, status: 'ACTIVE' }
+    });
+  }
+
+  if (input?.vehicleTypeId) {
+    const vehicleType = await prisma.vehicleType.findFirst({
+      where: { id: String(input.vehicleTypeId) },
+      select: { tenantId: true }
+    });
+    if (vehicleType?.tenantId) {
+      return prisma.tenant.findFirst({
+        where: { id: vehicleType.tenantId, status: 'ACTIVE' }
+      });
+    }
+  }
+
+  if (input?.listingId) {
+    const listing = await prisma.hostVehicleListing.findFirst({
+      where: { id: String(input.listingId) },
+      select: { tenantId: true }
+    });
+    if (listing?.tenantId) {
+      return prisma.tenant.findFirst({
+        where: { id: listing.tenantId, status: 'ACTIVE' }
+      });
+    }
+  }
+
+  return null;
+}
+
 async function rentalAvailabilityCount({ tenantId, vehicleTypeId, pickupAt, returnAt }) {
   const vehicles = await prisma.vehicle.findMany({
     where: {
@@ -489,26 +538,72 @@ export const bookingEngineService = {
     const tenant = await resolvePublicTenant({ tenantSlug, tenantId });
 
     if (!tenant) {
-      const tenants = await prisma.tenant.findMany({
-        where: { status: 'ACTIVE' },
-        select: {
-          id: true,
-          name: true,
-          slug: true,
-          carSharingEnabled: true
-        },
-        orderBy: [{ name: 'asc' }]
-      });
+      const [tenants, locations, vehicleTypes, featuredListings] = await Promise.all([
+        prisma.tenant.findMany({
+          where: { status: 'ACTIVE' },
+          select: {
+            id: true,
+            name: true,
+            slug: true,
+            carSharingEnabled: true
+          },
+          orderBy: [{ name: 'asc' }]
+        }),
+        prisma.location.findMany({
+          where: {
+            isActive: true,
+            tenant: { status: 'ACTIVE' }
+          },
+          select: { id: true, tenantId: true, name: true, city: true, state: true, taxRate: true },
+          orderBy: [{ name: 'asc' }]
+        }),
+        prisma.vehicleType.findMany({
+          where: {
+            tenant: { status: 'ACTIVE' }
+          },
+          select: { id: true, tenantId: true, code: true, name: true, description: true, imageUrl: true },
+          orderBy: [{ name: 'asc' }]
+        }),
+        prisma.hostVehicleListing.findMany({
+          where: {
+            status: 'PUBLISHED',
+            tenant: { status: 'ACTIVE' }
+          },
+          include: {
+            hostProfile: { select: publicHostSelect() },
+            vehicle: { select: { id: true, make: true, model: true, year: true, color: true, plate: true, vehicleType: { select: { imageUrl: true } } } },
+            location: { select: { id: true, name: true, city: true, state: true } }
+          },
+          orderBy: [{ publishedAt: 'desc' }, { createdAt: 'desc' }],
+          take: 8
+        })
+      ]);
 
       return {
         tenant: null,
         tenants,
-        locations: [],
-        vehicleTypes: [],
-        featuredListings: [],
+        locations,
+        vehicleTypes,
+        featuredListings: featuredListings.map((listing) => ({
+          id: listing.id,
+          slug: listing.slug,
+          title: listing.title,
+          shortDescription: listing.shortDescription,
+          baseDailyRate: money(listing.baseDailyRate),
+          cleaningFee: money(listing.cleaningFee),
+          deliveryFee: money(listing.deliveryFee),
+          instantBook: !!listing.instantBook,
+          host: publicHostSummary(listing.hostProfile),
+          vehicle: listing.vehicle,
+          location: listing.location,
+          ...bookingImageSet({
+            vehicleTypeImageUrl: listing.vehicle?.vehicleType?.imageUrl,
+            listingPhotos: listing.photosJson
+          })
+        })),
         bookingModes: {
           rental: true,
-          carSharing: false
+          carSharing: tenants.some((row) => !!row.carSharingEnabled)
         }
       };
     }
@@ -516,12 +611,12 @@ export const bookingEngineService = {
     const [locations, vehicleTypes, featuredListings, tenants] = await Promise.all([
       prisma.location.findMany({
         where: { tenantId: tenant.id, isActive: true },
-        select: { id: true, name: true, city: true, state: true, taxRate: true },
+        select: { id: true, tenantId: true, name: true, city: true, state: true, taxRate: true },
         orderBy: [{ name: 'asc' }]
       }),
       prisma.vehicleType.findMany({
         where: { tenantId: tenant.id },
-        select: { id: true, code: true, name: true, description: true, imageUrl: true },
+        select: { id: true, tenantId: true, code: true, name: true, description: true, imageUrl: true },
         orderBy: [{ name: 'asc' }]
       }),
       prisma.hostVehicleListing.findMany({
@@ -580,10 +675,7 @@ export const bookingEngineService = {
     };
   },
 
-  async searchRental({ tenantSlug, tenantId, pickupLocationId, pickupAt, returnAt }) {
-    const tenant = await resolvePublicTenant({ tenantSlug, tenantId });
-    if (!tenant) throw new Error('tenant is required');
-
+  async searchRental({ tenantSlug, tenantId, pickupLocationId, pickupLocationIds = [], pickupAt, returnAt }) {
     const pickupDate = toDate(pickupAt);
     const returnDate = toDate(returnAt);
     if (!pickupDate || !returnDate || pickupDate >= returnDate) {
@@ -592,56 +684,80 @@ export const bookingEngineService = {
     if (!pickupLocationId) throw new Error('pickupLocationId is required');
 
     const rentalDays = ceilTripDays(pickupDate, returnDate);
-    const [vehicleTypes, location] = await Promise.all([
-      prisma.vehicleType.findMany({
-        where: { tenantId: tenant.id },
-        orderBy: [{ name: 'asc' }]
-      }),
-      prisma.location.findFirst({
-        where: { id: String(pickupLocationId), tenantId: tenant.id, isActive: true },
-        select: { id: true, name: true, city: true, state: true, taxRate: true, locationConfig: true }
-      })
-    ]);
+    const directTenant = await resolvePublicTenant({ tenantSlug, tenantId });
+    const requestedLocationIds = Array.isArray(pickupLocationIds)
+      ? pickupLocationIds.map((value) => String(value)).filter(Boolean)
+      : pickupLocationId ? [String(pickupLocationId)] : [];
+    const locations = await prisma.location.findMany({
+      where: {
+        id: { in: requestedLocationIds },
+        isActive: true,
+        ...(directTenant ? { tenantId: directTenant.id } : {}),
+        tenant: { status: 'ACTIVE' }
+      },
+      select: { id: true, tenantId: true, name: true, city: true, state: true, taxRate: true, locationConfig: true },
+      orderBy: [{ name: 'asc' }]
+    });
+    if (!locations.length) throw new Error('Pickup location not found');
 
-    if (!location) throw new Error('Pickup location not found');
-
+    const vehicleTypesByTenant = new Map();
     const results = [];
-    for (const vehicleType of vehicleTypes) {
-      const [quote, availableUnits] = await Promise.all([
-        ratesService.resolveForRental({
-          vehicleTypeId: vehicleType.id,
-          pickupLocationId: location.id,
-          pickupAt: pickupDate.toISOString(),
-          returnAt: returnDate.toISOString()
-        }, { tenantId: tenant.id }, { displayOnline: true }),
-        rentalAvailabilityCount({
-          tenantId: tenant.id,
-          vehicleTypeId: vehicleType.id,
-          pickupAt: pickupDate,
-          returnAt: returnDate
-        })
-      ]);
+    for (const location of locations) {
+      const tenant = directTenant || await resolvePublicTenantContext({ pickupLocationId: location.id });
+      if (!tenant) continue;
+      if (!vehicleTypesByTenant.has(tenant.id)) {
+        const tenantVehicleTypes = await prisma.vehicleType.findMany({
+          where: { tenantId: tenant.id },
+          orderBy: [{ name: 'asc' }]
+        });
+        vehicleTypesByTenant.set(tenant.id, tenantVehicleTypes);
+      }
+      const vehicleTypes = vehicleTypesByTenant.get(tenant.id) || [];
 
-      if (!quote) continue;
+      for (const vehicleType of vehicleTypes) {
+        const [quote, availableUnits] = await Promise.all([
+          ratesService.resolveForRental({
+            vehicleTypeId: vehicleType.id,
+            pickupLocationId: location.id,
+            pickupAt: pickupDate.toISOString(),
+            returnAt: returnDate.toISOString()
+          }, { tenantId: tenant.id }, { displayOnline: true }),
+          rentalAvailabilityCount({
+            tenantId: tenant.id,
+            vehicleTypeId: vehicleType.id,
+            pickupAt: pickupDate,
+            returnAt: returnDate
+          })
+        ]);
 
-      const [additionalServices, insurancePlans] = await Promise.all([
-        listPublicAdditionalServices({
-          tenantId: tenant.id,
-          locationId: location.id,
-          vehicleTypeId: vehicleType.id,
-          days: rentalDays
-        }),
-        listPublicInsurancePlans({
-          tenantId: tenant.id,
-          locationId: location.id,
-          vehicleTypeId: vehicleType.id,
-          baseAmount: Number(quote.baseTotal || 0),
-          days: rentalDays
-        })
-      ]);
-      const taxes = money(Number(quote.baseTotal || 0) * (Number(location.taxRate || 0) / 100));
-      const total = money(Number(quote.baseTotal || 0) + taxes);
+        if (!quote) continue;
+
+        const [additionalServices, insurancePlans] = await Promise.all([
+          listPublicAdditionalServices({
+            tenantId: tenant.id,
+            locationId: location.id,
+            vehicleTypeId: vehicleType.id,
+            days: rentalDays
+          }),
+          listPublicInsurancePlans({
+            tenantId: tenant.id,
+            locationId: location.id,
+            vehicleTypeId: vehicleType.id,
+            baseAmount: Number(quote.baseTotal || 0),
+            days: rentalDays
+          })
+        ]);
+        const taxes = money(Number(quote.baseTotal || 0) * (Number(location.taxRate || 0) / 100));
+        const total = money(Number(quote.baseTotal || 0) + taxes);
         results.push({
+          location: {
+            id: location.id,
+            tenantId: location.tenantId,
+            name: location.name,
+            city: location.city,
+            state: location.state,
+            taxRate: location.taxRate
+          },
           vehicleType: {
             id: vehicleType.id,
             code: vehicleType.code,
@@ -662,37 +778,44 @@ export const bookingEngineService = {
           gracePeriodMin: Number(quote.gracePeriodMin || 0),
           source: quote.source || 'GLOBAL'
         },
-        deposit: depositSnapshot({ location, quote }),
-        additionalServices,
-        insurancePlans
-      });
+          deposit: depositSnapshot({ location, quote }),
+          additionalServices,
+          insurancePlans
+        });
+      }
     }
 
     return {
-      tenant: { id: tenant.id, name: tenant.name, slug: tenant.slug },
-      location,
+      tenant: directTenant ? { id: directTenant.id, name: directTenant.name, slug: directTenant.slug } : null,
+      location: locations[0] || null,
       pickupAt: pickupDate,
       returnAt: returnDate,
       results
     };
   },
 
-  async searchCarSharing({ tenantSlug, tenantId, pickupAt, returnAt, locationId }) {
-    const tenant = await resolvePublicTenant({ tenantSlug, tenantId });
-    if (!tenant) throw new Error('tenant is required');
-    if (!tenant.carSharingEnabled) throw new Error('Car sharing is not enabled for this tenant');
-
+  async searchCarSharing({ tenantSlug, tenantId, pickupAt, returnAt, locationId, locationIds = [] }) {
     const pickupDate = toDate(pickupAt);
     const returnDate = toDate(returnAt);
     if (!pickupDate || !returnDate || pickupDate >= returnDate) {
       throw new Error('pickupAt and returnAt must be valid and returnAt must be after pickupAt');
     }
 
+    const directTenant = await resolvePublicTenant({ tenantSlug, tenantId });
+    const normalizedLocationIds = Array.isArray(locationIds)
+      ? locationIds.map((value) => String(value)).filter(Boolean)
+      : locationId ? [String(locationId)] : [];
+    if (!normalizedLocationIds.length) throw new Error('Choose a valid location before searching car sharing');
+
     const listings = await prisma.hostVehicleListing.findMany({
       where: {
-        tenantId: tenant.id,
         status: 'PUBLISHED',
-        ...(locationId ? { locationId: String(locationId) } : {})
+        locationId: { in: normalizedLocationIds },
+        tenant: {
+          status: 'ACTIVE',
+          ...(directTenant ? { id: directTenant.id } : {}),
+          carSharingEnabled: true
+        }
       },
       include: {
         hostProfile: { select: publicHostSelect() },
@@ -702,6 +825,9 @@ export const bookingEngineService = {
       },
       orderBy: [{ publishedAt: 'desc' }, { createdAt: 'desc' }]
     });
+    if (!directTenant && !listings.length) {
+      throw new Error('No car sharing vehicles are available for this location yet');
+    }
 
     const tripDays = ceilTripDays(pickupDate, returnDate);
     const results = listings.flatMap((listing) => {
@@ -739,7 +865,7 @@ export const bookingEngineService = {
     });
 
     return {
-      tenant: { id: tenant.id, name: tenant.name, slug: tenant.slug },
+      tenant: directTenant ? { id: directTenant.id, name: directTenant.name, slug: directTenant.slug } : null,
       pickupAt: pickupDate,
       returnAt: returnDate,
       results
@@ -812,9 +938,13 @@ export const bookingEngineService = {
   },
 
   async createPublicBooking(input = {}) {
-    const tenant = await resolvePublicTenant({
+    const tenant = await resolvePublicTenantContext({
       tenantSlug: input?.tenantSlug,
-      tenantId: input?.tenantId
+      tenantId: input?.tenantId,
+      pickupLocationId: input?.pickupLocationId,
+      returnLocationId: input?.returnLocationId,
+      vehicleTypeId: input?.vehicleTypeId,
+      listingId: input?.listingId
     });
     if (!tenant) throw new Error('tenant is required');
 
@@ -827,8 +957,8 @@ export const bookingEngineService = {
 
     if (searchType === 'RENTAL') {
       const search = await this.searchRental({
-        tenantId: tenant.id,
         pickupLocationId: input?.pickupLocationId,
+        pickupLocationIds: input?.pickupLocationId ? [input.pickupLocationId] : [],
         pickupAt: input?.pickupAt,
         returnAt: input?.returnAt
       });
@@ -1000,6 +1130,19 @@ export const bookingEngineService = {
           pickupAt: reservation.pickupAt,
           returnAt: reservation.returnAt
         },
+        pricingBreakdown: {
+          tripDays: Number(selected.quote?.days || 0),
+          dailyRate: money(selected.quote?.dailyRate),
+          baseSubtotal: money(selected.quote?.subtotal),
+          estimatedTaxes: money(selected.quote?.taxes),
+          baseReservationTotal: money(selected.quote?.total),
+          additionalServicesTotal: addOnsTotal,
+          insuranceTotal,
+          reservationEstimate: estimatedTotal,
+          depositDueNow: money(selected.deposit?.amountDue),
+          securityDeposit: money(selected.deposit?.securityDepositAmount),
+          currency: 'USD'
+        },
         additionalServices: normalizedChosenServices,
         insuranceSelection: insuranceLine
           ? {
@@ -1022,10 +1165,10 @@ export const bookingEngineService = {
     }
 
     const search = await this.searchCarSharing({
-      tenantId: tenant.id,
       pickupAt: input?.pickupAt,
       returnAt: input?.returnAt,
-      locationId: input?.pickupLocationId || null
+      locationId: input?.pickupLocationId || null,
+      locationIds: input?.pickupLocationId ? [input.pickupLocationId] : []
     });
     const selected = (search.results || []).find((row) => row.listing?.id === String(input?.listingId || ''));
     if (!selected) throw new Error('Selected car sharing listing is no longer available');
@@ -1114,6 +1257,18 @@ export const bookingEngineService = {
         hostEarnings: money(trip.hostEarnings),
         platformFee: money(trip.platformFee)
       },
+      pricingBreakdown: {
+        tripDays: Number(selected.quote?.tripDays || 0),
+        tripSubtotal: money(selected.quote?.subtotal),
+        fees: money(selected.quote?.fees),
+        taxes: money(selected.quote?.taxes),
+        baseTripTotal: money(selected.quote?.total),
+        additionalServicesTotal: money(normalizedChosenServices.reduce((sum, service) => sum + Number(service.total || 0), 0)),
+        guestTotal: money(Number(selected.quote?.total || 0) + normalizedChosenServices.reduce((sum, service) => sum + Number(service.total || 0), 0)),
+        hostEarnings: money(trip.hostEarnings),
+        platformFee: money(trip.platformFee),
+        currency: 'USD'
+      },
       reservation: trip?.reservation ? {
         id: trip.reservation.id,
         reservationNumber: trip.reservation.reservationNumber,
@@ -1154,7 +1309,11 @@ export const bookingEngineService = {
         customer: customerFilter
       },
       include: {
-        customer: true
+        customer: true,
+        incidents: {
+          orderBy: [{ createdAt: 'desc' }],
+          take: 10
+        }
       }
     });
 
@@ -1244,7 +1403,18 @@ export const bookingEngineService = {
             status: reservation.status,
             estimatedTotal: money(reservation.estimatedTotal),
             pickupAt: reservation.pickupAt,
-            returnAt: reservation.returnAt
+            returnAt: reservation.returnAt,
+            incidents: (reservation.incidents || []).map((incident) => ({
+              id: incident.id,
+              type: incident.type,
+              status: incident.status,
+              title: incident.title,
+              description: incident.description || '',
+              amountClaimed: money(incident.amountClaimed),
+              amountResolved: money(incident.amountResolved),
+              createdAt: incident.createdAt,
+              resolvedAt: incident.resolvedAt
+            }))
           }
         : null,
       trip: trip
@@ -1279,6 +1449,29 @@ export const bookingEngineService = {
             }))
           }
         : null,
+      issues: trip
+        ? (trip.incidents || []).map((incident) => ({
+            id: incident.id,
+            type: incident.type,
+            status: incident.status,
+            title: incident.title,
+            description: incident.description || '',
+            amountClaimed: money(incident.amountClaimed),
+            amountResolved: money(incident.amountResolved),
+            createdAt: incident.createdAt,
+            resolvedAt: incident.resolvedAt
+          }))
+        : (reservation?.incidents || []).map((incident) => ({
+            id: incident.id,
+            type: incident.type,
+            status: incident.status,
+            title: incident.title,
+            description: incident.description || '',
+            amountClaimed: money(incident.amountClaimed),
+            amountResolved: money(incident.amountResolved),
+            createdAt: incident.createdAt,
+            resolvedAt: incident.resolvedAt
+          })),
       nextActions
     };
   }

@@ -36,6 +36,10 @@ function normalizeImageList(value) {
   return items.map((item) => String(item || '').trim()).filter(Boolean).slice(0, 6);
 }
 
+function publicLocationLabel(location) {
+  return [location?.name, location?.city, location?.state].filter(Boolean).join(' · ') || 'Location';
+}
+
 function buildServiceSelectionState(result, mode) {
   return Object.fromEntries(
     (result?.additionalServices || []).map((service) => [
@@ -168,6 +172,7 @@ export default function PublicBookingPage() {
   const router = useRouter();
   const [bootstrap, setBootstrap] = useState(null);
   const [tenantSlug, setTenantSlug] = useState('');
+  const [uiStep, setUiStep] = useState('search');
   const [searchMode, setSearchMode] = useState('RENTAL');
   const [pickupLocationId, setPickupLocationId] = useState('');
   const [returnLocationId, setReturnLocationId] = useState('');
@@ -206,12 +211,12 @@ export default function PublicBookingPage() {
       setBootstrap(payload);
       const selectedSlug = payload?.selectedTenant?.slug || '';
       setTenantSlug(selectedSlug);
-      const firstLocationId = payload?.locations?.[0]?.id || '';
+      const firstLocationId = payload?.locations?.[0] ? publicLocationLabel(payload.locations[0]) : '';
       setPickupLocationId((current) =>
-        payload?.locations?.some((item) => item.id === current) ? current : firstLocationId
+        payload?.locations?.some((item) => publicLocationLabel(item) === current) ? current : firstLocationId
       );
       setReturnLocationId((current) =>
-        payload?.locations?.some((item) => item.id === current) ? current : firstLocationId
+        payload?.locations?.some((item) => publicLocationLabel(item) === current) ? current : firstLocationId
       );
       setVehicleTypeId((current) => {
         if (current && payload?.vehicleTypes?.some((item) => item.id === current)) return current;
@@ -238,18 +243,75 @@ export default function PublicBookingPage() {
     setInsuranceSelection(buildInsuranceSelectionState(selectedResult, searchMode));
   }, [selectedResult, searchMode]);
 
-  const selectedTenant = bootstrap?.selectedTenant || null;
   const locations = bootstrap?.locations || [];
   const vehicleTypes = bootstrap?.vehicleTypes || [];
   const featuredListings = bootstrap?.featuredCarSharingListings || [];
-  const bookingStage = selectedResult ? 'checkout' : results?.results?.length ? 'select' : 'search';
+  const bookingStage = uiStep === 'checkout' ? 'checkout' : uiStep === 'select' ? 'select' : 'search';
+  const publicLocationOptions = useMemo(() => {
+    const groups = new Map();
+    locations.forEach((location) => {
+      const key = publicLocationLabel(location);
+      if (!groups.has(key)) {
+        groups.set(key, {
+          id: key,
+          label: key,
+          locationIds: [],
+          tenantIds: [],
+          locations: []
+        });
+      }
+      const group = groups.get(key);
+      group.locationIds.push(location.id);
+      if (location.tenantId && !group.tenantIds.includes(location.tenantId)) {
+        group.tenantIds.push(location.tenantId);
+      }
+      group.locations.push(location);
+    });
+    return Array.from(groups.values()).sort((a, b) => a.label.localeCompare(b.label));
+  }, [locations]);
+  const selectedPickupLocationOption = useMemo(
+    () => publicLocationOptions.find((location) => location.id === pickupLocationId) || null,
+    [publicLocationOptions, pickupLocationId]
+  );
+  const availableReturnLocations = useMemo(() => {
+    if (!selectedPickupLocationOption?.tenantIds?.length) return publicLocationOptions;
+    return publicLocationOptions.filter((location) => location.tenantIds.some((tenantId) => selectedPickupLocationOption.tenantIds.includes(tenantId)));
+  }, [publicLocationOptions, selectedPickupLocationOption?.tenantIds]);
+  const availableVehicleTypes = useMemo(() => {
+    if (!selectedPickupLocationOption?.tenantIds?.length) return vehicleTypes;
+    return vehicleTypes.filter((vehicleType) => selectedPickupLocationOption.tenantIds.includes(vehicleType.tenantId));
+  }, [selectedPickupLocationOption?.tenantIds, vehicleTypes]);
 
-  const summaryCards = useMemo(() => ([
-    { label: 'Tenants', value: bootstrap?.tenants?.length || 0 },
-    { label: 'Locations', value: locations.length },
-    { label: 'Vehicle Types', value: vehicleTypes.length },
-    { label: 'Car Sharing', value: selectedTenant?.carSharingEnabled ? 'Enabled' : 'Not Yet' }
-  ]), [bootstrap?.tenants?.length, locations.length, vehicleTypes.length, selectedTenant?.carSharingEnabled]);
+  const goToStep = (step) => {
+    setUiStep(step);
+    if (typeof window !== 'undefined') {
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    }
+  };
+
+  const clearSelection = () => {
+    setSelectedResult(null);
+    goToStep(results?.results?.length ? 'select' : 'search');
+  };
+
+  const resolveReturnLocationForSelection = () => {
+    if (!selectedResult?.location?.tenantId) return selectedResult?.location?.id || '';
+    const chosenReturnOption = publicLocationOptions.find((location) => location.id === returnLocationId);
+    const matchingReturnLocation = chosenReturnOption?.locations?.find((location) => location.tenantId === selectedResult.location.tenantId);
+    return matchingReturnLocation?.id || selectedResult?.location?.id || '';
+  };
+
+  useEffect(() => {
+    if (!availableReturnLocations.some((location) => location.id === returnLocationId)) {
+      setReturnLocationId(availableReturnLocations[0]?.id || '');
+    }
+  }, [availableReturnLocations, returnLocationId]);
+
+  useEffect(() => {
+    if (!availableVehicleTypes.some((vehicleType) => vehicleType.id === vehicleTypeId)) {
+      setVehicleTypeId('');
+    }
+  }, [availableVehicleTypes, vehicleTypeId]);
 
   const chosenAdditionalServices = useMemo(() => {
     if (!selectedResult?.additionalServices?.length) return [];
@@ -295,10 +357,18 @@ export default function PublicBookingPage() {
       : Number(selectedResult?.quote?.total || 0);
     return baseTotal + chosenAdditionalServicesTotal + selectedInsuranceTotal;
   }, [chosenAdditionalServicesTotal, searchMode, selectedInsuranceTotal, selectedResult]);
+  const tripLengthDays = useMemo(() => {
+    const pickup = new Date(pickupAt);
+    const ret = new Date(returnAt);
+    if (Number.isNaN(pickup.getTime()) || Number.isNaN(ret.getTime())) return 0;
+    return Math.max(1, Math.ceil((ret - pickup) / (1000 * 60 * 60 * 24)));
+  }, [pickupAt, returnAt]);
 
   const runSearch = async () => {
-    if (!tenantSlug) {
-      setError('Select a tenant before searching.');
+    const pickupLocationIds = publicLocationOptions.find((location) => location.id === pickupLocationId)?.locationIds || [];
+    const returnLocationIds = publicLocationOptions.find((location) => location.id === returnLocationId)?.locationIds || pickupLocationIds;
+    if (!pickupLocationIds.length) {
+      setError('Choose a location before searching.');
       return;
     }
     setSearching(true);
@@ -312,15 +382,19 @@ export default function PublicBookingPage() {
         method: 'POST',
         body: JSON.stringify({
           tenantSlug,
-          pickupLocationId,
-          returnLocationId,
-          locationId: pickupLocationId,
+          pickupLocationId: pickupLocationIds[0],
+          pickupLocationIds,
+          returnLocationId: returnLocationIds[0] || pickupLocationIds[0],
+          returnLocationIds,
+          locationId: pickupLocationIds[0],
+          locationIds: pickupLocationIds,
           vehicleTypeId: vehicleTypeId || null,
           pickupAt,
           returnAt
         })
       });
       setResults(payload);
+      goToStep(payload?.results?.length ? 'select' : 'search');
     } catch (err) {
       setResults(null);
       setError(err.message);
@@ -337,38 +411,16 @@ export default function PublicBookingPage() {
             <div className="hero-copy">
               <span className="eyebrow">Sprint 6 · Booking Engine Foundation</span>
               <h1 className="page-title" style={{ fontSize: 'clamp(30px, 5vw, 54px)', lineHeight: 1.02 }}>
-                Reserve fleet rentals and car sharing from one public booking surface.
+                Find the right vehicle for your dates, location, and trip.
               </h1>
               <p>
-                This is the shared quote layer we can grow into the booking website, guest app, and host app.
-                Rental inventory and car sharing supply already speak the same public language here.
+                Browse rental inventory and car sharing supply from one public booking flow built around where and when you need the vehicle.
               </p>
               <div className="hero-meta">
-                <span className="hero-pill">Public search</span>
-                <span className="hero-pill">Shared pricing contract</span>
+                <span className="hero-pill">Location-first search</span>
+                <span className="hero-pill">Guided steps</span>
                 <span className="hero-pill">Rental + Car Sharing</span>
               </div>
-            </div>
-            <div className="glass card section-card">
-              <div className="section-title">Current Tenant Snapshot</div>
-              <div className="metric-grid">
-                {summaryCards.map((item) => (
-                  <div key={item.label} className="metric-card">
-                    <span className="label">{item.label}</span>
-                    <strong>{item.value}</strong>
-                  </div>
-                ))}
-              </div>
-              {selectedTenant ? (
-                <div className="surface-note">
-                  <strong>{selectedTenant.name}</strong>
-                  {` · ${selectedTenant.slug}`}
-                  <br />
-                  Public booking can now branch cleanly into booking web, guest app, host app, and employee app.
-                </div>
-              ) : (
-                <div className="surface-note">Loading active tenant configuration...</div>
-              )}
             </div>
           </div>
         </section>
@@ -382,27 +434,58 @@ export default function PublicBookingPage() {
             <span className="status-chip neutral">{searchMode === 'RENTAL' ? 'Rental Flow' : 'Car Sharing Flow'}</span>
           </div>
           <BookingStageBar stage={bookingStage} />
+          <div className="inline-actions" style={{ marginTop: 14 }}>
+            <button type="button" className={uiStep === 'search' ? '' : 'button-subtle'} onClick={() => goToStep('search')}>1. Search</button>
+            <button
+              type="button"
+              className={uiStep === 'select' ? '' : 'button-subtle'}
+              disabled={!results?.results?.length}
+              onClick={() => goToStep('select')}
+            >
+              2. Select
+            </button>
+            <button
+              type="button"
+              className={uiStep === 'checkout' ? '' : 'button-subtle'}
+              disabled={!selectedResult}
+              onClick={() => goToStep('checkout')}
+            >
+              3. Guest Details
+            </button>
+          </div>
         </section>
 
+        {uiStep === 'search' ? (
+        <>
         <section className="split-panel">
           <div className="glass card-lg section-card">
             <div className="row-between">
               <div>
                 <div className="section-title">Booking Search</div>
-                <p className="ui-muted">Choose a tenant, set dates, and search either traditional rental inventory or car sharing supply.</p>
+                <p className="ui-muted">Choose your location, dates, and trip type to see what is available.</p>
               </div>
               <div className="inline-actions">
                 <button
                   type="button"
                   className={searchMode === 'RENTAL' ? '' : 'button-subtle'}
-                  onClick={() => setSearchMode('RENTAL')}
+                  onClick={() => {
+                    setSearchMode('RENTAL');
+                    setResults(null);
+                    setSelectedResult(null);
+                    setUiStep('search');
+                  }}
                 >
                   Rental
                 </button>
                 <button
                   type="button"
                   className={searchMode === 'CAR_SHARING' ? '' : 'button-subtle'}
-                  onClick={() => setSearchMode('CAR_SHARING')}
+                  onClick={() => {
+                    setSearchMode('CAR_SHARING');
+                    setResults(null);
+                    setSelectedResult(null);
+                    setUiStep('search');
+                  }}
                 >
                   Car Sharing
                 </button>
@@ -411,22 +494,6 @@ export default function PublicBookingPage() {
 
             <div className="form-grid-3">
               <div>
-                <div className="label">Tenant</div>
-                <select
-                  value={tenantSlug}
-                  onChange={async (event) => {
-                    const nextSlug = event.target.value;
-                    setResults(null);
-                    setSelectedResult(null);
-                    await loadBootstrap(nextSlug);
-                  }}
-                >
-                  {(bootstrap?.tenants || []).map((tenant) => (
-                    <option key={tenant.id} value={tenant.slug}>{tenant.name}</option>
-                  ))}
-                </select>
-              </div>
-              <div>
                 <div className="label">Pickup</div>
                 <input type="datetime-local" value={pickupAt} onChange={(event) => setPickupAt(event.target.value)} />
               </div>
@@ -434,35 +501,35 @@ export default function PublicBookingPage() {
                 <div className="label">Return</div>
                 <input type="datetime-local" value={returnAt} onChange={(event) => setReturnAt(event.target.value)} />
               </div>
-            </div>
-
-            <div className={searchMode === 'RENTAL' ? 'form-grid-3' : 'form-grid-2'}>
               <div>
                 <div className="label">{searchMode === 'RENTAL' ? 'Pickup Location' : 'Preferred Location'}</div>
                 <select value={pickupLocationId} onChange={(event) => setPickupLocationId(event.target.value)}>
-                  {locations.map((location) => (
-                    <option key={location.id} value={location.id}>{location.name}</option>
+                  {publicLocationOptions.map((location) => (
+                    <option key={location.id} value={location.id}>{location.label}</option>
                   ))}
                 </select>
               </div>
+            </div>
+
+            <div className={searchMode === 'RENTAL' ? 'form-grid-2' : 'form-grid-1'}>
               {searchMode === 'RENTAL' ? (
                 <>
                   <div>
                     <div className="label">Return Location</div>
-                    <select value={returnLocationId} onChange={(event) => setReturnLocationId(event.target.value)}>
-                      {locations.map((location) => (
-                        <option key={location.id} value={location.id}>{location.name}</option>
-                      ))}
-                    </select>
+                        <select value={returnLocationId} onChange={(event) => setReturnLocationId(event.target.value)}>
+                          {availableReturnLocations.map((location) => (
+                            <option key={location.id} value={location.id}>{location.label}</option>
+                          ))}
+                        </select>
                   </div>
                   <div>
                     <div className="label">Vehicle Type</div>
-                    <select value={vehicleTypeId} onChange={(event) => setVehicleTypeId(event.target.value)}>
-                      <option value="">All eligible classes</option>
-                      {vehicleTypes.map((vehicleType) => (
-                        <option key={vehicleType.id} value={vehicleType.id}>{vehicleType.name}</option>
-                      ))}
-                    </select>
+                        <select value={vehicleTypeId} onChange={(event) => setVehicleTypeId(event.target.value)}>
+                          <option value="">All eligible classes</option>
+                          {availableVehicleTypes.map((vehicleType) => (
+                            <option key={vehicleType.id} value={vehicleType.id}>{vehicleType.name}</option>
+                          ))}
+                        </select>
                   </div>
                 </>
               ) : null}
@@ -470,7 +537,7 @@ export default function PublicBookingPage() {
 
             <div className="inline-actions">
               <button type="button" onClick={runSearch} disabled={loadingBootstrap || searching}>
-                {searching ? 'Searching...' : `Search ${searchMode === 'RENTAL' ? 'Rental Quotes' : 'Car Sharing Listings'}`}
+                {searching ? 'Searching...' : `Search ${searchMode === 'RENTAL' ? 'Rental Vehicles' : 'Car Sharing Vehicles'}`}
               </button>
             </div>
 
@@ -481,9 +548,9 @@ export default function PublicBookingPage() {
             <div className="row-between">
               <div>
                 <div className="section-title">Discovery Feed</div>
-                <p className="ui-muted">Featured public supply and readiness hints for the selected tenant.</p>
+                <p className="ui-muted">Featured availability and host trust signals for the public booking experience.</p>
               </div>
-              {selectedTenant?.carSharingEnabled ? <span className="status-chip good">Car Sharing Live</span> : <span className="status-chip warn">Rental Only</span>}
+              <span className="status-chip neutral">Featured Vehicles</span>
             </div>
             {featuredListings.length ? (
               <div className="stack">
@@ -503,7 +570,7 @@ export default function PublicBookingPage() {
               </div>
             ) : (
               <div className="surface-note">
-                No featured public car sharing listings yet. This tenant can still search rental inventory if online rates are configured.
+                No featured car sharing vehicles are highlighted yet. You can still search the location and dates above.
               </div>
             )}
           </div>
@@ -513,7 +580,7 @@ export default function PublicBookingPage() {
           <div className="row-between">
             <div>
               <div className="section-title">Find Existing Booking</div>
-              <p className="ui-muted">Guests can resume a rental reservation or car sharing trip with their reference and email, even if they changed devices.</p>
+              <p className="ui-muted">Already booked? Resume your trip with your reference number and email.</p>
             </div>
             <span className="status-chip neutral">Resume Flow</span>
           </div>
@@ -567,7 +634,59 @@ export default function PublicBookingPage() {
             </button>
           </div>
         </section>
+        </>
+        ) : null}
 
+        {uiStep !== 'search' ? (
+        <>
+        <section className="glass card-lg section-card">
+          <div className="row-between">
+            <div>
+              <div className="section-title">{uiStep === 'select' ? 'Step 2 · Select Your Vehicle' : 'Step 3 · Guest Details'}</div>
+              <p className="ui-muted">
+                {searchMode === 'RENTAL'
+                  ? `${selectedPickupLocationOption?.label || 'Selected location'} · ${pickupAt} to ${returnAt}`
+                  : `${selectedPickupLocationOption?.label || 'Selected location'} · ${pickupAt} to ${returnAt}`}
+              </p>
+            </div>
+            <div className="inline-actions">
+              <button type="button" className="button-subtle" onClick={() => goToStep('search')}>Back to Search</button>
+              {uiStep === 'checkout' ? (
+                <button type="button" className="button-subtle" onClick={() => goToStep('select')}>Back to Results</button>
+              ) : null}
+            </div>
+          </div>
+          <div className="app-banner-list">
+            <span className="app-banner-pill">{selectedPickupLocationOption?.label || 'Selected location'}</span>
+            <span className="app-banner-pill">{pickupAt}</span>
+            <span className="app-banner-pill">{returnAt}</span>
+            {selectedResult ? (
+              <span className="app-banner-pill">
+                {searchMode === 'RENTAL' ? (selectedResult.vehicleType?.name || 'Selected rental') : (selectedResult.title || 'Selected vehicle')}
+              </span>
+            ) : null}
+          </div>
+          <div className="app-card-grid compact">
+            <div className="info-tile">
+              <span className="label">Pickup</span>
+              <strong>{selectedPickupLocationOption?.label || 'Selected location'}</strong>
+            </div>
+            <div className="info-tile">
+              <span className="label">Trip Length</span>
+              <strong>{tripLengthDays} day{tripLengthDays === 1 ? '' : 's'}</strong>
+            </div>
+            <div className="info-tile">
+              <span className="label">Selected Package</span>
+              <strong>{selectedResult ? (searchMode === 'RENTAL' ? (selectedResult.vehicleType?.name || 'Rental option') : (selectedResult.title || 'Vehicle')) : 'Choose vehicle'}</strong>
+            </div>
+            <div className="info-tile">
+              <span className="label">Estimated Total</span>
+              <strong>{selectedResult ? fmtMoney(checkoutEstimatedTotal) : '$0.00'}</strong>
+            </div>
+          </div>
+        </section>
+
+        {uiStep === 'select' ? (
         <section className="glass card-lg section-card">
           <div className="row-between">
             <div>
@@ -578,17 +697,27 @@ export default function PublicBookingPage() {
                   : 'Run a search to load public inventory and pricing.'}
               </p>
             </div>
-            {results?.tenant ? <span className="status-chip neutral">{results.tenant.name}</span> : null}
+            <span className="status-chip neutral">{searchMode === 'RENTAL' ? 'Rental options' : 'Car sharing options'}</span>
           </div>
 
           {results?.results?.length ? (
+            <>
+            {selectedResult ? (
+              <div className="surface-note" style={{ marginBottom: 14 }}>
+                <strong>Selected Package</strong>
+                <br />
+                {searchMode === 'RENTAL'
+                  ? `${selectedResult.vehicleType?.name || 'Rental option'} · Estimated total ${fmtMoney(selectedResult.quote?.estimatedTripTotal)}`
+                  : `${selectedResult.title || 'Vehicle'} · Estimated total ${fmtMoney(checkoutEstimatedTotal)}`}
+              </div>
+            ) : null}
             <div className="grid2" style={{ marginBottom: 0 }}>
               {searchMode === 'RENTAL'
                 ? results.results.map((result) => (
                     <BookingCard
                       key={result.vehicleType.id}
                       title={result.vehicleType.name}
-                      subtitle={result.sampleVehicleLabel || result.vehicleType.description || 'Public rental quote available'}
+                      subtitle={`${result.sampleVehicleLabel || result.vehicleType.description || 'Public rental quote available'}${result.location?.name ? ` · ${publicLocationLabel(result.location)}` : ''}`}
                       meta={result.soldOut ? 'Waitlist / sold out' : `${result.availabilityCount} unit(s) available`}
                       selected={selectedResult?.vehicleType?.id === result.vehicleType.id}
                       imageUrl={result.primaryImageUrl}
@@ -603,8 +732,11 @@ export default function PublicBookingPage() {
                         { label: 'Deposit Due', value: fmtMoney(result.quote.depositAmountDue) },
                         { label: 'Security Deposit', value: fmtMoney(result.quote.securityDepositAmount) }
                       ]}
-                      cta={result.soldOut ? 'Notify Me Later' : 'Start Rental Booking'}
-                      onClick={() => setSelectedResult(result)}
+                      cta={result.soldOut ? 'Notify Me Later' : 'Continue'}
+                      onClick={() => {
+                        setSelectedResult(result);
+                        goToStep('checkout');
+                      }}
                     />
                   ))
                 : results.results.map((result) => (
@@ -621,36 +753,44 @@ export default function PublicBookingPage() {
                       hints={[
                         result.instantBook ? 'Instant book' : 'Approval flow',
                         `${Math.max(1, Number(result.minTripDays || 1))}+ day minimum`,
+                        ...(normalizeImageList(result.imageUrls || []).length ? [`${normalizeImageList(result.imageUrls || []).length} photo${normalizeImageList(result.imageUrls || []).length === 1 ? '' : 's'}`] : []),
                         ...(result.additionalServices?.length ? [`${result.additionalServices.length} host add-on${result.additionalServices.length === 1 ? '' : 's'}`] : [])
                       ]}
                       quote={[
                         { label: 'Daily Rate', value: fmtMoney(result.quote.subtotal / Math.max(1, result.quote.tripDays)) },
                         { label: 'Trip Total', value: fmtMoney(result.quote.total) },
-                        { label: 'Host Earnings', value: fmtMoney(result.quote.hostEarnings) },
-                        { label: 'Platform Fee', value: fmtMoney(result.quote.platformFee) }
+                        { label: 'Host Rating', value: result.host ? fmtRating(result.host.averageRating, result.host.reviewCount) : 'New host' },
+                        { label: 'Minimum Trip', value: `${Math.max(1, Number(result.minTripDays || 1))} day${Math.max(1, Number(result.minTripDays || 1)) === 1 ? '' : 's'}` }
                       ]}
-                      cta={result.instantBook ? 'Continue to Guest Flow' : 'Request Booking'}
-                      onClick={() => setSelectedResult(result)}
+                      cta={result.instantBook ? 'Continue' : 'Request Booking'}
+                      onClick={() => {
+                        setSelectedResult(result);
+                        goToStep('checkout');
+                      }}
                     />
                   ))}
             </div>
+            </>
           ) : (
             <div className="surface-note">
               {results
-                ? 'No options matched those dates yet. Try another date range, location, or tenant.'
+                ? 'No options matched those dates yet. Try another date range or location.'
                 : 'Search results will appear here with a shared quote contract for both rental and car sharing.'}
             </div>
           )}
         </section>
+        ) : null}
+        </>
+        ) : null}
 
-        {selectedResult ? (
+        {selectedResult && uiStep === 'checkout' ? (
           <section className="glass card-lg section-card">
             <div className="row-between">
               <div>
-                <div className="section-title">Checkout Foundation</div>
-                <p className="ui-muted">Turn the selected quote into a live reservation or trip and immediately kick off customer info collection.</p>
+                <div className="section-title">Selected Package</div>
+                <p className="ui-muted">Review the vehicle, pricing, and next guest steps before creating the booking.</p>
               </div>
-              <button type="button" className="button-subtle" onClick={() => setSelectedResult(null)}>Clear</button>
+              <button type="button" className="button-subtle" onClick={clearSelection}>Clear</button>
             </div>
             <div className="split-panel">
               <div className="surface-note">
@@ -678,7 +818,7 @@ export default function PublicBookingPage() {
                 <strong>{searchMode === 'RENTAL' ? selectedResult.vehicleType?.name : selectedResult.title}</strong>
                 <br />
                 {searchMode === 'RENTAL'
-                  ? `Pickup ${results?.pickupLocation?.name || ''} · ${fmtMoney(checkoutEstimatedTotal)} estimated total`
+                  ? `Pickup ${publicLocationLabel(selectedResult.location || {})} · ${fmtMoney(checkoutEstimatedTotal)} estimated total`
                   : `${selectedResult.vehicle?.label || ''} · ${fmtMoney(selectedResult.quote?.total)} projected total`}
                 <br />
                 {searchMode === 'CAR_SHARING' && selectedResult.host ? (
@@ -695,18 +835,60 @@ export default function PublicBookingPage() {
                 ) : null}
                 {searchMode === 'RENTAL'
                   ? `Deposit due now: ${fmtMoney(selectedResult.quote?.depositAmountDue)}${chosenAdditionalServicesTotal ? ` · Add-ons ${fmtMoney(chosenAdditionalServicesTotal)}` : ''}${selectedInsuranceTotal ? ` · Insurance ${fmtMoney(selectedInsuranceTotal)}` : ''}`
-                  : `Host earns ${fmtMoney(selectedResult.quote?.hostEarnings)} · Platform fee ${fmtMoney(selectedResult.quote?.platformFee)}`}
+                  : `Trip total: ${fmtMoney(selectedResult.quote?.total)}${chosenAdditionalServicesTotal ? ` · Vehicle add-ons ${fmtMoney(chosenAdditionalServicesTotal)}` : ''}`}
               </div>
 
               <div className="section-card">
+                <div className="app-card-grid compact" style={{ marginBottom: 12 }}>
+                  {searchMode === 'RENTAL' ? (
+                    <>
+                      <div className="doc-card">
+                        <strong>Estimated Total</strong>
+                        <div className="doc-meta">{fmtMoney(checkoutEstimatedTotal)}</div>
+                      </div>
+                      <div className="doc-card">
+                        <strong>Due At Pre-Check-In</strong>
+                        <div className="doc-meta">{fmtMoney(selectedResult?.quote?.depositAmountDue)}</div>
+                      </div>
+                      <div className="doc-card">
+                        <strong>Security Deposit</strong>
+                        <div className="doc-meta">{fmtMoney(selectedResult?.quote?.securityDepositAmount)}</div>
+                      </div>
+                      <div className="doc-card">
+                        <strong>Included Extras</strong>
+                        <div className="doc-meta">{selectedResult?.additionalServices?.length || 0} service option{(selectedResult?.additionalServices?.length || 0) === 1 ? '' : 's'}</div>
+                      </div>
+                    </>
+                  ) : (
+                    <>
+                      <div className="doc-card">
+                        <strong>Trip Total</strong>
+                        <div className="doc-meta">{fmtMoney(checkoutEstimatedTotal)}</div>
+                      </div>
+                      <div className="doc-card">
+                        <strong>Host Trust</strong>
+                        <div className="doc-meta">{selectedResult?.host ? fmtRating(selectedResult.host.averageRating, selectedResult.host.reviewCount) : 'New host'}</div>
+                      </div>
+                      <div className="doc-card">
+                        <strong>Trip Length</strong>
+                        <div className="doc-meta">{Math.max(1, Number(selectedResult?.quote?.tripDays || 1))} day{Math.max(1, Number(selectedResult?.quote?.tripDays || 1)) === 1 ? '' : 's'}</div>
+                      </div>
+                      <div className="doc-card">
+                        <strong>Vehicle Add-Ons</strong>
+                        <div className="doc-meta">{selectedResult?.additionalServices?.length || 0} option{(selectedResult?.additionalServices?.length || 0) === 1 ? '' : 's'}</div>
+                      </div>
+                    </>
+                  )}
+                </div>
                 <div className="surface-note" style={{ marginBottom: 6 }}>
                   <strong>Checkout Snapshot</strong>
                   <br />
                   {searchMode === 'RENTAL'
                     ? `Base total ${fmtMoney(selectedResult?.quote?.estimatedTripTotal)} · Estimated total ${fmtMoney(checkoutEstimatedTotal)}`
-                    : `Trip total ${fmtMoney(selectedResult?.quote?.total)} · Guest flow will continue through pre-check-in, signature, and payment.`}
+                    : `Trip total ${fmtMoney(checkoutEstimatedTotal)} · Guest flow will continue through pre-check-in, signature, and payment.`}
                 </div>
                 <div className="section-title">Guest Details</div>
+                {error ? <div className="surface-note" style={{ marginBottom: 16, color: '#991b1b' }}>{error}</div> : null}
                 {searchMode === 'RENTAL' ? (
                   <div className="stack" style={{ marginBottom: 18 }}>
                     <div>
@@ -950,8 +1132,8 @@ export default function PublicBookingPage() {
                             searchType: searchMode,
                             pickupAt,
                             returnAt,
-                            pickupLocationId,
-                            returnLocationId,
+                            pickupLocationId: selectedResult?.location?.id || '',
+                            returnLocationId: searchMode === 'RENTAL' ? resolveReturnLocationForSelection() : (selectedResult?.location?.id || ''),
                             vehicleTypeId: searchMode === 'RENTAL' ? selectedResult?.vehicleType?.id : null,
                             listingId: searchMode === 'CAR_SHARING' ? selectedResult?.id : null,
                             additionalServices: chosenAdditionalServices.map((service) => ({

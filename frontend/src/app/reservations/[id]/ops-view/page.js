@@ -46,6 +46,39 @@ function Inner({ token, me, logout }) {
   return (
     <AppShell me={me} logout={logout}>
       <section className="glass card-lg stack">
+        <div className="app-banner">
+          <div className="row-between" style={{ marginBottom: 0 }}>
+            <div className="stack" style={{ gap: 6 }}>
+              <span className="eyebrow">Ops Snapshot</span>
+              <h3 style={{ margin: 0 }}>{row?.reservationNumber || id}</h3>
+              <p className="ui-muted">
+                Review check-out and check-in values side by side before drilling back into inspections, payments, or fee follow-up.
+              </p>
+            </div>
+            <span className={`status-chip ${checkout || checkin ? 'good' : 'neutral'}`}>
+              {checkout || checkin ? 'Ops data found' : 'No ops data yet'}
+            </span>
+          </div>
+          <div className="app-card-grid compact">
+            <div className="info-tile">
+              <span className="label">Checkout</span>
+              <strong>{checkout ? 'Captured' : 'Missing'}</strong>
+            </div>
+            <div className="info-tile">
+              <span className="label">Check-In</span>
+              <strong>{checkin ? 'Captured' : 'Missing'}</strong>
+            </div>
+            <div className="info-tile">
+              <span className="label">Vehicle</span>
+              <strong>{[row?.vehicle?.year, row?.vehicle?.make, row?.vehicle?.model].filter(Boolean).join(' ') || row?.vehicle?.plate || '-'}</strong>
+            </div>
+            <div className="info-tile">
+              <span className="label">Customer</span>
+              <strong>{[row?.customer?.firstName, row?.customer?.lastName].filter(Boolean).join(' ') || row?.customer?.email || '-'}</strong>
+            </div>
+          </div>
+        </div>
+
         <div className="row-between">
           <h2 className="page-title">Check-out / Check-in View</h2>
           <button onClick={() => router.push(`/reservations/${id}`)}>Back</button>

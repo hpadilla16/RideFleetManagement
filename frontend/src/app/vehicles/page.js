@@ -88,6 +88,55 @@ function VehiclesInner({ token, me, logout }) {
     );
   }, [vehicles, query]);
 
+  const fleetOpsHub = useMemo(() => {
+    const available = vehicles.filter((v) => String(v?.status || '').toUpperCase() === 'AVAILABLE');
+    const onRent = vehicles.filter((v) => String(v?.status || '').toUpperCase() === 'ON_RENT');
+    const serviceRisk = vehicles.filter((v) => ['IN_MAINTENANCE', 'OUT_OF_SERVICE'].includes(String(v?.status || '').toUpperCase()));
+    const carSharing = vehicles.filter((v) => ['CAR_SHARING_ONLY', 'BOTH'].includes(String(v?.fleetMode || '').toUpperCase()));
+
+    const nextItems = [
+      available[0]
+        ? {
+            id: `available-${available[0].id}`,
+            title: 'Next Rentable Unit',
+            detail: `${available[0].internalNumber} - ${available[0].make || ''} ${available[0].model || ''}`.trim(),
+            note: `${available[0].homeLocation?.name || 'Home location pending'} - ready to go out now.`,
+            action: () => openRent(available[0]),
+            actionLabel: 'Rent Vehicle'
+          }
+        : null,
+      serviceRisk[0]
+        ? {
+            id: `service-${serviceRisk[0].id}`,
+            title: 'Service Risk Unit',
+            detail: `${serviceRisk[0].internalNumber} - ${serviceRisk[0].make || ''} ${serviceRisk[0].model || ''}`.trim(),
+            note: `${serviceRisk[0].status} - review this unit before assigning it again.`,
+            action: () => openEditVehicle(serviceRisk[0]),
+            actionLabel: 'Review Vehicle'
+          }
+        : null,
+      onRent[0]
+        ? {
+            id: `onrent-${onRent[0].id}`,
+            title: 'On-Rent Unit',
+            detail: `${onRent[0].internalNumber} - ${onRent[0].make || ''} ${onRent[0].model || ''}`.trim(),
+            note: 'This vehicle is currently out and may need return follow-up.',
+            action: () => setSelected(onRent[0]),
+            actionLabel: 'Open Unit'
+          }
+        : null
+    ].filter(Boolean);
+
+    return {
+      total: vehicles.length,
+      available: available.length,
+      onRent: onRent.length,
+      serviceRisk: serviceRisk.length,
+      carSharing: carSharing.length,
+      nextItems
+    };
+  }, [vehicles]);
+
   const openRent = (vehicle) => {
     const now = new Date();
     const ret = new Date(now); ret.setDate(now.getDate() + 1);
@@ -258,6 +307,61 @@ function VehiclesInner({ token, me, logout }) {
 
   return (
     <AppShell me={me} logout={logout}>
+      <section className="glass card-lg section-card" style={{ marginBottom: 16 }}>
+        <div className="app-banner">
+          <div className="row-between" style={{ alignItems: 'start', marginBottom: 0 }}>
+            <div>
+              <span className="eyebrow">Fleet Ops Hub</span>
+              <h2 className="page-title" style={{ marginTop: 6 }}>
+                Keep fleet availability and service risk in view.
+              </h2>
+              <p className="ui-muted">A quick mobile-first board before dropping into the full vehicle inventory table.</p>
+            </div>
+            <span className="status-chip neutral">Fleet Ops</span>
+          </div>
+          <div className="app-card-grid compact">
+            <div className="info-tile">
+              <span className="label">Total Units</span>
+              <strong>{fleetOpsHub.total}</strong>
+              <span className="ui-muted">Vehicles currently registered in this workspace.</span>
+            </div>
+            <div className="info-tile">
+              <span className="label">Available</span>
+              <strong>{fleetOpsHub.available}</strong>
+              <span className="ui-muted">Units ready to rent or assign right now.</span>
+            </div>
+            <div className="info-tile">
+              <span className="label">On Rent</span>
+              <strong>{fleetOpsHub.onRent}</strong>
+              <span className="ui-muted">Vehicles currently out with customers.</span>
+            </div>
+            <div className="info-tile">
+              <span className="label">Service Risk</span>
+              <strong>{fleetOpsHub.serviceRisk}</strong>
+              <span className="ui-muted">Units in maintenance or out of service.</span>
+            </div>
+          </div>
+          <div className="app-banner-list">
+            <span className="app-banner-pill">Car Sharing Supply {fleetOpsHub.carSharing}</span>
+            <button type="button" className="button-subtle" onClick={() => setShowAddVehicle(true)}>Add Vehicle</button>
+            <button type="button" className="button-subtle" onClick={() => setShowUpload(true)}>Upload Inventory</button>
+          </div>
+          {fleetOpsHub.nextItems.length ? (
+            <div className="app-card-grid compact">
+              {fleetOpsHub.nextItems.map((item) => (
+                <section key={item.id} className="glass card section-card">
+                  <div className="section-title" style={{ fontSize: 15 }}>{item.title}</div>
+                  <div className="ui-muted">{item.detail}</div>
+                  <div className="surface-note">{item.note}</div>
+                  <div className="inline-actions">
+                    <button type="button" onClick={item.action}>{item.actionLabel}</button>
+                  </div>
+                </section>
+              ))}
+            </div>
+          ) : null}
+        </div>
+      </section>
       <section className="glass card-lg">
         <div className="row-between">
           <h2>Vehicle Inventory</h2>

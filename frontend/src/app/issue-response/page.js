@@ -125,6 +125,7 @@ export default function IssueResponsePage() {
   const isVehicleSubmission = model?.caseType === 'HOST_VEHICLE_SUBMISSION';
   const vehicleSummary = model?.submission || null;
   const incidentSummary = model?.incident || null;
+  const openAttachmentCount = (vehicleSummary?.photos?.length || 0) + (form.attachments?.length || 0);
 
   return (
     <main style={{ minHeight: '100vh', padding: '22px clamp(14px, 3vw, 34px) 44px' }}>
@@ -155,6 +156,41 @@ export default function IssueResponsePage() {
         {loading ? <div className="surface-note">Loading your issue response request...</div> : null}
         {error ? <div className="surface-note" style={{ color: '#991b1b' }}>{error}</div> : null}
         {msg ? <div className="surface-note" style={{ color: '#166534' }}>{msg}</div> : null}
+
+        {model?.incident || model?.submission ? (
+          <section className="app-banner">
+            <div className="row-between" style={{ marginBottom: 0 }}>
+              <div className="stack" style={{ gap: 6 }}>
+                <span className="eyebrow">Reply Snapshot</span>
+                <h3 style={{ margin: 0 }}>{isVehicleSubmission ? 'Vehicle Approval Follow-Up' : 'Issue Support Follow-Up'}</h3>
+                <p className="ui-muted">
+                  Keep the case summary, representative request, and your response progress in view while you upload documents.
+                </p>
+              </div>
+              <span className={`status-chip ${communications.length ? 'good' : 'neutral'}`}>
+                {communications.length} thread item{communications.length === 1 ? '' : 's'}
+              </span>
+            </div>
+            <div className="app-card-grid compact">
+              <div className="info-tile">
+                <span className="label">Case Type</span>
+                <strong>{isVehicleSubmission ? 'Vehicle Approval' : (incidentSummary?.type || 'Issue')}</strong>
+              </div>
+              <div className="info-tile">
+                <span className="label">Current Status</span>
+                <strong>{isVehicleSubmission ? (vehicleSummary?.status || '-') : (incidentSummary?.status || '-')}</strong>
+              </div>
+              <div className="info-tile">
+                <span className="label">Representative Request</span>
+                <strong>{model.request ? 'Waiting on you' : 'No extra request'}</strong>
+              </div>
+              <div className="info-tile">
+                <span className="label">Files In Play</span>
+                <strong>{openAttachmentCount}</strong>
+              </div>
+            </div>
+          </section>
+        ) : null}
 
         {model?.incident || model?.submission ? (
           <section className="split-panel">

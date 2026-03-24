@@ -9,6 +9,17 @@ function tenantWhereFor(user) {
   return { tenantId: '__never__' };
 }
 
+function incidentTenantWhere(user) {
+  const tenantScope = tenantWhereFor(user);
+  if (!tenantScope.tenantId) return {};
+  return {
+    OR: [
+      { trip: { tenantId: tenantScope.tenantId } },
+      { reservation: { tenantId: tenantScope.tenantId } }
+    ]
+  };
+}
+
 function incidentInclude() {
   return {
     trip: {
@@ -26,6 +37,14 @@ function incidentInclude() {
             rentalAgreement: true
           }
         }
+      }
+    },
+    reservation: {
+      include: {
+        customer: true,
+        pickupLocation: true,
+        returnLocation: true,
+        rentalAgreement: true
       }
     },
     communications: {
@@ -101,6 +120,8 @@ function serializeCommunication(entry) {
 }
 
 function serializeIncident(incident, history = []) {
+  const reservation = incident.reservation || incident.trip?.reservation || null;
+  const guestCustomer = incident.trip?.guestCustomer || reservation?.customer || null;
   return {
     id: incident.id,
     type: incident.type,
@@ -115,6 +136,7 @@ function serializeIncident(incident, history = []) {
     updatedAt: incident.updatedAt,
     history,
     communications: Array.isArray(incident.communications) ? incident.communications.map(serializeCommunication) : [],
+    subjectType: incident.tripId ? 'TRIP' : 'RESERVATION',
     trip: incident.trip ? {
       id: incident.trip.id,
       tripCode: incident.trip.tripCode,
@@ -147,13 +169,35 @@ function serializeIncident(incident, history = []) {
           name: incident.trip.listing.location.name
         } : null
       } : null,
-      reservation: incident.trip.reservation ? {
-        id: incident.trip.reservation.id,
-        reservationNumber: incident.trip.reservation.reservationNumber,
-        status: incident.trip.reservation.status,
-        readyForPickupAt: incident.trip.reservation.readyForPickupAt,
-        balance: money(incident.trip.reservation.rentalAgreement?.balance)
+      reservation: reservation ? {
+        id: reservation.id,
+        reservationNumber: reservation.reservationNumber,
+        status: reservation.status,
+        readyForPickupAt: reservation.readyForPickupAt,
+        balance: money(reservation.rentalAgreement?.balance)
       } : null
+    } : null,
+    reservation: reservation ? {
+      id: reservation.id,
+      reservationNumber: reservation.reservationNumber,
+      status: reservation.status,
+      pickupAt: reservation.pickupAt,
+      returnAt: reservation.returnAt,
+      pickupLocation: reservation.pickupLocation ? {
+        id: reservation.pickupLocation.id,
+        name: reservation.pickupLocation.name
+      } : null,
+      returnLocation: reservation.returnLocation ? {
+        id: reservation.returnLocation.id,
+        name: reservation.returnLocation.name
+      } : null,
+      balance: money(reservation.rentalAgreement?.balance)
+    } : null,
+    guestCustomer: guestCustomer ? {
+      id: guestCustomer.id,
+      firstName: guestCustomer.firstName,
+      lastName: guestCustomer.lastName,
+      email: guestCustomer.email
     } : null
   };
 }
@@ -236,8 +280,12 @@ function recipientForIncident(incident, recipientType) {
   }
   return {
     recipientType: 'GUEST',
-    name: incident?.trip?.guestCustomer ? [incident.trip.guestCustomer.firstName, incident.trip.guestCustomer.lastName].filter(Boolean).join(' ') : 'Customer',
-    email: String(incident?.trip?.guestCustomer?.email || '').trim().toLowerCase()
+    name: incident?.trip?.guestCustomer
+      ? [incident.trip.guestCustomer.firstName, incident.trip.guestCustomer.lastName].filter(Boolean).join(' ')
+      : incident?.reservation?.customer
+        ? [incident.reservation.customer.firstName, incident.reservation.customer.lastName].filter(Boolean).join(' ')
+        : 'Customer',
+    email: String(incident?.trip?.guestCustomer?.email || incident?.reservation?.customer?.email || '').trim().toLowerCase()
   };
 }
 
@@ -312,8 +360,10 @@ async function notifyIncidentStatusChange(incident, previousStatus, nextStatus, 
       '',
       `The issue "${incident.title}" is now ${nextStatus}.`,
       `Previous status: ${previousStatus}`,
-      `Trip: ${incident.trip?.tripCode || '-'}`,
-      incident.trip?.reservation?.reservationNumber ? `Reservation: ${incident.trip.reservation.reservationNumber}` : '',
+      incident.trip?.tripCode ? `Trip: ${incident.trip.tripCode}` : '',
+      (incident.reservation?.reservationNumber || incident.trip?.reservation?.reservationNumber)
+        ? `Reservation: ${incident.reservation?.reservationNumber || incident.trip?.reservation?.reservationNumber}`
+        : '',
       note ? `Representative note: ${note}` : '',
       '',
       'Customer service is actively tracking this case.'
@@ -332,18 +382,10 @@ async function notifyIncidentStatusChange(incident, previousStatus, nextStatus, 
     } catch {}
   }));
 
-  await createTimelineEvent(
-    incident.tripId,
-    'SYSTEM',
-    null,
-    'TRIP_INCIDENT_STATUS_NOTIFIED',
-    `Issue status change emailed for ${nextStatus}`,
-    {
-      incidentId: incident.id,
-      previousStatus,
-      nextStatus
-    }
-  );
+  await createIncidentEvent(incident, 'SYSTEM', null, 'TRIP_INCIDENT_STATUS_NOTIFIED', `Issue status change emailed for ${nextStatus}`, {
+    previousStatus,
+    nextStatus
+  });
 }
 
 async function createTimelineEvent(tripId, actorType, actorRefId, eventType, notes, metadata = {}) {
@@ -357,6 +399,44 @@ async function createTimelineEvent(tripId, actorType, actorRefId, eventType, not
       metadata: Object.keys(metadata || {}).length ? JSON.stringify(metadata) : null
     }
   });
+}
+
+async function createReservationIncidentAuditEvent(reservationId, actorType, actorRefId, eventType, notes, metadata = {}) {
+  if (!reservationId) return;
+  const reservation = await prisma.reservation.findUnique({
+    where: { id: reservationId },
+    select: { tenantId: true }
+  });
+  await prisma.auditLog.create({
+    data: {
+      tenantId: reservation?.tenantId || null,
+      reservationId,
+      action: 'UPDATE',
+      actorUserId: actorType === 'TENANT_USER' ? (actorRefId || null) : null,
+      reason: notes || null,
+      metadata: JSON.stringify({
+        issueHistoryEvent: {
+          eventType,
+          actorType,
+          actorRefId: actorRefId || '',
+          notes: notes || '',
+          ...metadata
+        }
+      })
+    }
+  });
+}
+
+async function createIncidentEvent(incident, actorType, actorRefId, eventType, notes, metadata = {}) {
+  const baseMetadata = {
+    incidentId: incident.id,
+    ...metadata
+  };
+  if (incident.tripId) {
+    await createTimelineEvent(incident.tripId, actorType, actorRefId, eventType, notes, baseMetadata);
+    return;
+  }
+  await createReservationIncidentAuditEvent(incident.reservationId, actorType, actorRefId, eventType, notes, baseMetadata);
 }
 
 async function flagTripDisputed(tripId) {
@@ -414,19 +494,57 @@ async function createIncidentForTrip(trip, payload, actor = {}) {
   });
 
   await flagTripDisputed(trip.id);
-  await createTimelineEvent(
-    trip.id,
-    actor.actorType || 'SYSTEM',
-    actor.actorRefId || null,
-    'TRIP_INCIDENT_OPENED',
-    title,
-    {
+  await createIncidentEvent(incident, actor.actorType || 'SYSTEM', actor.actorRefId || null, 'TRIP_INCIDENT_OPENED', title, {
+    type,
+    source: actor.source || null,
+    amountClaimed
+  });
+
+  const historyEntry = {
+    id: `open-${incident.id}`,
+    eventType: 'TRIP_INCIDENT_OPENED',
+    eventAt: incident.createdAt,
+    actorType: actor.actorType || 'SYSTEM',
+    actorRefId: actor.actorRefId || '',
+    notes: title,
+    metadata: {
       incidentId: incident.id,
       type,
       source: actor.source || null,
-      amountClaimed
+      amountClaimed: amountClaimed == null ? null : money(amountClaimed)
     }
-  );
+  };
+
+  return serializeIncident(incident, [historyEntry]);
+}
+
+async function createIncidentForReservation(reservation, payload, actor = {}) {
+  const type = String(payload?.type || '').trim().toUpperCase();
+  const title = String(payload?.title || '').trim();
+  if (!type) throw new Error('type is required');
+  if (!title) throw new Error('title is required');
+  const description = payload?.description ? String(payload.description).trim() : null;
+  const amountClaimed = payload?.amountClaimed === '' || payload?.amountClaimed == null
+    ? null
+    : Number(payload.amountClaimed);
+
+  const incident = await prisma.tripIncident.create({
+    data: {
+      reservationId: reservation.id,
+      type,
+      status: 'OPEN',
+      title,
+      description,
+      amountClaimed: amountClaimed == null ? null : amountClaimed
+    },
+    include: incidentInclude()
+  });
+
+  await createIncidentEvent(incident, actor.actorType || 'SYSTEM', actor.actorRefId || null, 'TRIP_INCIDENT_OPENED', title, {
+    type,
+    source: actor.source || null,
+    amountClaimed
+  });
 
   const historyEntry = {
     id: `open-${incident.id}`,
@@ -450,6 +568,7 @@ async function attachHistory(incidents) {
   if (!incidents.length) return incidents.map((incident) => serializeIncident(incident, []));
 
   const tripIds = [...new Set(incidents.map((incident) => incident.tripId).filter(Boolean))];
+  const reservationIds = [...new Set(incidents.map((incident) => incident.reservationId || incident.trip?.reservation?.id).filter(Boolean))];
   const timeline = await prisma.tripTimelineEvent.findMany({
     where: {
       tripId: { in: tripIds },
@@ -465,6 +584,14 @@ async function attachHistory(incidents) {
     },
     orderBy: [{ eventAt: 'desc' }]
   });
+  const auditLogs = reservationIds.length
+    ? await prisma.auditLog.findMany({
+        where: {
+          reservationId: { in: reservationIds }
+        },
+        orderBy: [{ createdAt: 'desc' }]
+      })
+    : [];
 
   const historyByIncidentId = new Map();
   for (const event of timeline) {
@@ -473,6 +600,22 @@ async function attachHistory(incidents) {
     if (!incidentId) continue;
     if (!historyByIncidentId.has(incidentId)) historyByIncidentId.set(incidentId, []);
     historyByIncidentId.get(incidentId).push(serializeHistoryEntry(event));
+  }
+  for (const audit of auditLogs) {
+    const metadata = safeParse(audit.metadata) || {};
+    const issueHistory = metadata?.issueHistoryEvent;
+    const incidentId = issueHistory?.incidentId;
+    if (!incidentId) continue;
+    if (!historyByIncidentId.has(incidentId)) historyByIncidentId.set(incidentId, []);
+    historyByIncidentId.get(incidentId).push({
+      id: audit.id,
+      eventType: issueHistory.eventType || 'TRIP_INCIDENT_UPDATED',
+      eventAt: audit.createdAt,
+      actorType: issueHistory.actorType || '',
+      actorRefId: issueHistory.actorRefId || '',
+      notes: issueHistory.notes || audit.reason || '',
+      metadata: issueHistory
+    });
   }
 
   return incidents.map((incident) => serializeIncident(incident, historyByIncidentId.get(incident.id) || []));
@@ -511,6 +654,7 @@ export const issueCenterService = {
 
   async getDashboard(user, input = {}) {
     const tenantScope = tenantWhereFor(user);
+    const incidentScope = incidentTenantWhere(user);
     const search = input?.q ? String(input.q).trim() : '';
     const searchFilter = search ? {
       OR: [
@@ -518,16 +662,17 @@ export const issueCenterService = {
         { description: { contains: search, mode: 'insensitive' } },
         { trip: { tripCode: { contains: search, mode: 'insensitive' } } },
         { trip: { reservation: { reservationNumber: { contains: search, mode: 'insensitive' } } } },
+        { reservation: { reservationNumber: { contains: search, mode: 'insensitive' } } },
         { trip: { guestCustomer: { firstName: { contains: search, mode: 'insensitive' } } } },
         { trip: { guestCustomer: { lastName: { contains: search, mode: 'insensitive' } } } },
+        { reservation: { customer: { firstName: { contains: search, mode: 'insensitive' } } } },
+        { reservation: { customer: { lastName: { contains: search, mode: 'insensitive' } } } },
         { trip: { hostProfile: { displayName: { contains: search, mode: 'insensitive' } } } }
       ]
     } : {};
 
     const where = {
-      trip: {
-        ...tenantScope
-      },
+      ...incidentScope,
       ...(input?.status ? { status: String(input.status).toUpperCase() } : {}),
       ...(input?.type ? { type: String(input.type).toUpperCase() } : {}),
       ...searchFilter
@@ -565,10 +710,10 @@ export const issueCenterService = {
     });
 
     const [openCount, reviewCount, resolvedCount, closedCount, submissionPendingCount] = await Promise.all([
-      prisma.tripIncident.count({ where: { trip: { ...tenantScope }, status: 'OPEN' } }),
-      prisma.tripIncident.count({ where: { trip: { ...tenantScope }, status: 'UNDER_REVIEW' } }),
-      prisma.tripIncident.count({ where: { trip: { ...tenantScope }, status: 'RESOLVED' } }),
-      prisma.tripIncident.count({ where: { trip: { ...tenantScope }, status: 'CLOSED' } }),
+      prisma.tripIncident.count({ where: { ...incidentScope, status: 'OPEN' } }),
+      prisma.tripIncident.count({ where: { ...incidentScope, status: 'UNDER_REVIEW' } }),
+      prisma.tripIncident.count({ where: { ...incidentScope, status: 'RESOLVED' } }),
+      prisma.tripIncident.count({ where: { ...incidentScope, status: 'CLOSED' } }),
       prisma.hostVehicleSubmission.count({
         where: {
           tenantId: tenantScope.tenantId || undefined,
@@ -592,11 +737,10 @@ export const issueCenterService = {
   },
 
   async updateIncident(user, id, payload = {}) {
-    const tenantScope = tenantWhereFor(user);
     const current = await prisma.tripIncident.findFirst({
       where: {
         id,
-        trip: tenantScope
+        ...incidentTenantWhere(user)
       },
       include: incidentInclude()
     });
@@ -622,14 +766,13 @@ export const issueCenterService = {
       include: incidentInclude()
     });
 
-    await createTimelineEvent(
-      current.tripId,
+    await createIncidentEvent(
+      updated,
       'TENANT_USER',
       user?.id || user?.sub || null,
       'TRIP_INCIDENT_UPDATED',
       payload?.note ? String(payload.note).trim() : `Incident moved to ${nextStatus}`,
       {
-        incidentId: updated.id,
         previousStatus: current.status,
         nextStatus,
         amountResolved: updated.amountResolved == null ? null : money(updated.amountResolved)
@@ -640,9 +783,9 @@ export const issueCenterService = {
       await notifyIncidentStatusChange(updated, current.status, nextStatus, payload?.note ? String(payload.note).trim() : '');
     }
 
-    if (['RESOLVED', 'CLOSED'].includes(nextStatus)) {
+    if (current.tripId && ['RESOLVED', 'CLOSED'].includes(nextStatus)) {
       await maybeResolveTripDispute(current.tripId);
-    } else {
+    } else if (current.tripId) {
       await flagTripDisputed(current.tripId);
     }
 
@@ -650,11 +793,10 @@ export const issueCenterService = {
   },
 
   async requestMoreInfo(user, id, payload = {}) {
-    const tenantScope = tenantWhereFor(user);
     const incident = await prisma.tripIncident.findFirst({
       where: {
         id,
-        trip: tenantScope
+        ...incidentTenantWhere(user)
       },
       include: incidentInclude()
     });
@@ -677,8 +819,10 @@ export const issueCenterService = {
       '',
       'Customer service needs more information to continue processing this issue.',
       `Issue: ${incident.title}`,
-      `Trip: ${incident.trip?.tripCode || '-'}`,
-      incident.trip?.reservation?.reservationNumber ? `Reservation: ${incident.trip.reservation.reservationNumber}` : '',
+      incident.trip?.tripCode ? `Trip: ${incident.trip.tripCode}` : '',
+      (incident.reservation?.reservationNumber || incident.trip?.reservation?.reservationNumber)
+        ? `Reservation: ${incident.reservation?.reservationNumber || incident.trip?.reservation?.reservationNumber}`
+        : '',
       '',
       `Representative note: ${note}`,
       '',
@@ -705,14 +849,13 @@ export const issueCenterService = {
       publicTokenExpiresAt: expiresAt
     });
 
-    await createTimelineEvent(
-      incident.tripId,
+    await createIncidentEvent(
+      incident,
       'TENANT_USER',
       user?.id || user?.sub || null,
       'TRIP_INCIDENT_INFO_REQUESTED',
       `Requested more information from ${recipient.recipientType.toLowerCase()}`,
       {
-        incidentId: incident.id,
         recipientType: recipient.recipientType,
         link,
         expiresAt: expiresAt.toISOString()
@@ -876,7 +1019,7 @@ export const issueCenterService = {
         senderType,
         senderRefId: senderType === 'HOST'
           ? communication.incident.trip?.hostProfile?.id || null
-          : communication.incident.trip?.guestCustomer?.id || null,
+          : communication.incident.trip?.guestCustomer?.id || communication.incident.reservation?.customer?.id || null,
         subject: `Issue reply from ${recipientType.toLowerCase()}`,
         message: note,
         attachments
@@ -889,16 +1032,15 @@ export const issueCenterService = {
         }
       });
 
-      await createTimelineEvent(
-        communication.incident.tripId,
+      await createIncidentEvent(
+        communication.incident,
         senderType,
         senderType === 'HOST'
           ? communication.incident.trip?.hostProfile?.id || null
-          : communication.incident.trip?.guestCustomer?.id || null,
+          : communication.incident.trip?.guestCustomer?.id || communication.incident.reservation?.customer?.id || null,
         'TRIP_INCIDENT_REPLY_SUBMITTED',
         note,
         {
-          incidentId: communication.incidentId,
           recipientType,
           attachmentCount: attachments.length
         }
@@ -995,7 +1137,7 @@ export const issueCenterService = {
           reservationNumber: reference,
           customer: customerFilter
         },
-        select: { id: true }
+        include: incidentInclude().reservation.include
       });
 
       if (reservation?.id) {
@@ -1005,10 +1147,18 @@ export const issueCenterService = {
           },
           include: incidentInclude().trip.include
         });
+
+        if (!trip) {
+          return createIncidentForReservation(reservation, input, {
+            actorType: 'GUEST',
+            actorRefId: reservation.customerId,
+            source: 'guest-app'
+          });
+        }
       }
     }
 
-    if (!trip) throw new Error('Car sharing trip not found for that reference and email');
+    if (!trip) throw new Error('Booking not found for that reference and email');
 
     return createIncidentForTrip(trip, input, {
       actorType: 'GUEST',

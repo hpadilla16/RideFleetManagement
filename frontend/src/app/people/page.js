@@ -193,6 +193,63 @@ function Inner({ token, me, logout }) {
   const metrics = useMemo(() => metricSummary(visiblePeople), [visiblePeople]);
   const hostMode = form.personType === 'HOST';
   const loginRequired = !editingPersonId && (form.personType !== 'HOST' || form.enableLogin);
+  const peopleOpsHub = useMemo(() => {
+    const admins = visiblePeople.filter((row) => row.personType === 'ADMIN');
+    const hosts = visiblePeople.filter((row) => row.personType === 'HOST');
+    const profileOnly = visiblePeople.filter((row) => !row.hasLogin);
+    const paused = visiblePeople.filter((row) => String(row.status || '').toUpperCase() === 'PAUSED');
+
+    const nextItems = [
+      hosts[0]
+        ? {
+            id: `host-${hosts[0].id}`,
+            title: 'Host Setup Review',
+            detail: hosts[0].displayName || hosts[0].legalName || hosts[0].email || 'Host profile',
+            note: hosts[0].hasLogin ? 'Host login is enabled and ready for host app access.' : 'Profile-only host. Review if login should be enabled next.',
+            action: () => startEditPerson(hosts[0]),
+            actionLabel: 'Edit Host'
+          }
+        : null,
+      profileOnly[0]
+        ? {
+            id: `profile-${profileOnly[0].id}`,
+            title: 'Profile-Only User',
+            detail: profileOnly[0].displayName || profileOnly[0].fullName || profileOnly[0].email || 'Profile',
+            note: 'This person does not have login access yet.',
+            action: () => startEditPerson(profileOnly[0]),
+            actionLabel: 'Review Access'
+          }
+        : null,
+      paused[0]
+        ? {
+            id: `paused-${paused[0].id}`,
+            title: 'Paused Person',
+            detail: paused[0].displayName || paused[0].fullName || paused[0].email || 'Paused profile',
+            note: 'Profile is paused and may need reactivation or tenant review.',
+            action: () => startEditPerson(paused[0]),
+            actionLabel: 'Open Profile'
+          }
+        : null,
+      admins[0]
+        ? {
+            id: `admin-${admins[0].id}`,
+            title: 'Admin Coverage',
+            detail: admins[0].displayName || admins[0].fullName || admins[0].email || 'Admin profile',
+            note: 'Use this to verify tenant leadership and access routing.',
+            action: () => startEditPerson(admins[0]),
+            actionLabel: 'Review Admin'
+          }
+        : null
+    ].filter(Boolean);
+
+    return {
+      admins: admins.length,
+      hosts: hosts.length,
+      profileOnly: profileOnly.length,
+      paused: paused.length,
+      nextItems
+    };
+  }, [visiblePeople]);
 
   if (!canManagePeople) {
     return (
@@ -239,6 +296,57 @@ function Inner({ token, me, logout }) {
       </section>
 
       {msg ? <div className="surface-note" style={{ marginBottom: 16 }}>{msg}</div> : null}
+
+      <section className="glass card-lg section-card" style={{ marginBottom: 18 }}>
+        <div className="app-banner">
+          <div className="row-between" style={{ alignItems: 'start', marginBottom: 0 }}>
+            <div>
+              <span className="eyebrow">People Ops Hub</span>
+              <h2 className="page-title" style={{ marginTop: 6 }}>
+                Keep tenant access coverage and host readiness in view.
+              </h2>
+              <p className="ui-muted">A compact mobile-first board before diving into filters, forms, and the full directory.</p>
+            </div>
+            <span className="status-chip neutral">Identity Ops</span>
+          </div>
+          <div className="app-card-grid compact">
+            <div className="info-tile">
+              <span className="label">Admins</span>
+              <strong>{peopleOpsHub.admins}</strong>
+              <span className="ui-muted">Tenant leadership and high-access users in the current scope.</span>
+            </div>
+            <div className="info-tile">
+              <span className="label">Hosts</span>
+              <strong>{peopleOpsHub.hosts}</strong>
+              <span className="ui-muted">Profiles tied to supply-side host operations.</span>
+            </div>
+            <div className="info-tile">
+              <span className="label">Profile Only</span>
+              <strong>{peopleOpsHub.profileOnly}</strong>
+              <span className="ui-muted">People without login access yet.</span>
+            </div>
+            <div className="info-tile">
+              <span className="label">Paused</span>
+              <strong>{peopleOpsHub.paused}</strong>
+              <span className="ui-muted">Profiles currently paused and needing follow-up.</span>
+            </div>
+          </div>
+          {peopleOpsHub.nextItems.length ? (
+            <div className="app-card-grid compact">
+              {peopleOpsHub.nextItems.map((item) => (
+                <section key={item.id} className="glass card section-card">
+                  <div className="section-title" style={{ fontSize: 15 }}>{item.title}</div>
+                  <div className="ui-muted">{item.detail}</div>
+                  <div className="surface-note">{item.note}</div>
+                  <div className="inline-actions">
+                    <button type="button" onClick={item.action}>{item.actionLabel}</button>
+                  </div>
+                </section>
+              ))}
+            </div>
+          ) : null}
+        </div>
+      </section>
 
       <section className="glass card-lg stack" style={{ marginBottom: 18 }}>
         <div className="row-between" style={{ marginBottom: 0 }}>

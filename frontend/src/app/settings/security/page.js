@@ -12,6 +12,13 @@ export default function SecuritySettingsPage() {
 function Inner({ token, me, logout }) {
   const [users, setUsers] = useState([]);
   const [msg, setMsg] = useState('');
+  const usersWithPin = users.filter((user) => user.hasLockPin).length;
+  const usersWithoutPin = users.length - usersWithPin;
+  const recentlyUpdatedPins = users.filter((user) => {
+    if (!user.lockPinUpdatedAt) return false;
+    const updated = new Date(user.lockPinUpdatedAt).getTime();
+    return Number.isFinite(updated) && Date.now() - updated <= 1000 * 60 * 60 * 24 * 7;
+  }).length;
 
   const load = async () => {
     try {
@@ -37,8 +44,38 @@ function Inner({ token, me, logout }) {
 
   return (
     <AppShell me={me} logout={logout}>
-      <section className="glass card-lg">
+      <section className="glass card-lg stack">
         <div className="row-between"><h2>Security Settings</h2><span className="badge">Admin</span></div>
+        <div className="app-banner">
+          <div className="row-between" style={{ marginBottom: 0 }}>
+            <div className="stack" style={{ gap: 6 }}>
+              <span className="eyebrow">Security Hub</span>
+              <h3 style={{ margin: 0 }}>Screen Lock Coverage</h3>
+              <p className="ui-muted">Review who still needs a lock PIN and reset access quickly from one mobile-friendly board.</p>
+            </div>
+            <span className={`status-chip ${usersWithoutPin === 0 ? 'good' : 'warn'}`}>
+              {usersWithoutPin === 0 ? 'All users covered' : `${usersWithoutPin} missing PIN`}
+            </span>
+          </div>
+          <div className="app-card-grid compact">
+            <div className="info-tile">
+              <span className="label">Users</span>
+              <strong>{users.length}</strong>
+            </div>
+            <div className="info-tile">
+              <span className="label">With PIN</span>
+              <strong>{usersWithPin}</strong>
+            </div>
+            <div className="info-tile">
+              <span className="label">Missing PIN</span>
+              <strong>{usersWithoutPin}</strong>
+            </div>
+            <div className="info-tile">
+              <span className="label">Updated 7 Days</span>
+              <strong>{recentlyUpdatedPins}</strong>
+            </div>
+          </div>
+        </div>
         <div className="label" style={{ marginBottom: 10 }}>Reset screen-lock PIN for any user</div>
         {msg ? <div className="label" style={{ marginBottom: 8 }}>{msg}</div> : null}
         <table>

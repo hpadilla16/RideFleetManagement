@@ -287,6 +287,7 @@ function CarSharingInner({ token, me, logout }) {
   const [tripForm, setTripForm] = useState(EMPTY_TRIP);
   const [activeTenantId, setActiveTenantId] = useState('');
   const [loading, setLoading] = useState(true);
+  const [opsFocus, setOpsFocus] = useState('ALL');
 
   const isSuper = String(me?.role || '').toUpperCase() === 'SUPER_ADMIN';
 
@@ -434,6 +435,93 @@ function CarSharingInner({ token, me, logout }) {
     { label: 'Eligible Vehicles', value: filteredEligibleVehicles.length },
     { label: 'Fleet Shared', value: assignableVehicles.filter((row) => ['CAR_SHARING_ONLY', 'BOTH'].includes(String(row.fleetMode || ''))).length }
   ]), [activeHosts.length, listings.length, trips.length, filteredEligibleVehicles.length, assignableVehicles]);
+  const publishedListings = listings.filter((row) => String(row.status || '').toUpperCase() === 'PUBLISHED').length;
+  const instantBookListings = listings.filter((row) => row.instantBook).length;
+  const tripAttentionCount = trips.filter((row) => {
+    const current = String(row.status || '').toUpperCase();
+    return current === 'DISPUTED' || current === 'READY_FOR_PICKUP' || current === 'RESERVED';
+  }).length;
+  const controlCenterItems = useMemo(() => {
+    const attentionTrip = trips.find((row) => {
+      const current = String(row.status || '').toUpperCase();
+      return current === 'DISPUTED' || current === 'READY_FOR_PICKUP' || current === 'RESERVED';
+    }) || null;
+    const instantBookListing = listings.find((row) => row.instantBook) || null;
+    const draftListing = listings.find((row) => String(row.status || '').toUpperCase() !== 'PUBLISHED') || null;
+    const publishedListing = listings.find((row) => String(row.status || '').toUpperCase() === 'PUBLISHED') || null;
+
+    return [
+      publishedListing
+        ? {
+            id: `listing-${publishedListing.id}`,
+            focus: 'LISTINGS',
+            title: 'Published Listing',
+            detail: publishedListing.title,
+            note: `${publishedListing.vehicle ? `${publishedListing.vehicle.year || ''} ${publishedListing.vehicle.make || ''} ${publishedListing.vehicle.model || ''}`.trim() : 'Vehicle pending'} · ${formatMoney(publishedListing.baseDailyRate)}/day`,
+            actionLabel: 'Go To Listings',
+            targetId: 'car-sharing-listings'
+          }
+        : null,
+      instantBookListing
+        ? {
+            id: `instant-${instantBookListing.id}`,
+            focus: 'INSTANT',
+            title: 'Instant Book Live',
+            detail: instantBookListing.title,
+            note: `Host ${instantBookListing.hostProfile?.displayName || '-'} · Trips ${instantBookListing.trips?.length || 0}`,
+            actionLabel: 'Review Listing',
+            targetId: 'car-sharing-listings'
+          }
+        : null,
+      attentionTrip
+        ? {
+            id: `trip-${attentionTrip.id}`,
+            focus: 'TRIPS',
+            title: 'Trip Attention',
+            detail: `${attentionTrip.tripCode} · ${attentionTrip.guestCustomer ? [attentionTrip.guestCustomer.firstName, attentionTrip.guestCustomer.lastName].filter(Boolean).join(' ') : 'Guest pending'}`,
+            note: `${String(attentionTrip.status || '').replaceAll('_', ' ')} · ${new Date(attentionTrip.scheduledPickupAt).toLocaleString()}`,
+            actionLabel: 'Open Trips',
+            targetId: 'car-sharing-trips'
+          }
+        : null,
+      draftListing
+        ? {
+            id: `draft-${draftListing.id}`,
+            focus: 'ATTENTION',
+            title: 'Listing Needs Attention',
+            detail: draftListing.title,
+            note: `Status ${draftListing.status} · Complete pricing, availability, and publish readiness.`,
+            actionLabel: 'Open Listings',
+            targetId: 'car-sharing-listings'
+          }
+        : null
+    ].filter(Boolean);
+  }, [listings, trips]);
+  const opsFocusOptions = useMemo(() => ([
+    { id: 'ALL', label: 'All Queues', count: controlCenterItems.length },
+    { id: 'LISTINGS', label: 'Listings', count: controlCenterItems.filter((item) => item.focus === 'LISTINGS').length },
+    { id: 'INSTANT', label: 'Instant Book', count: controlCenterItems.filter((item) => item.focus === 'INSTANT').length },
+    { id: 'TRIPS', label: 'Trips', count: controlCenterItems.filter((item) => item.focus === 'TRIPS').length },
+    { id: 'ATTENTION', label: 'Attention', count: controlCenterItems.filter((item) => item.focus === 'ATTENTION').length }
+  ]), [controlCenterItems]);
+  const opsFocusSummary = useMemo(() => {
+    switch (opsFocus) {
+      case 'LISTINGS':
+        return 'Focus the team on published supply and the listings that should stay guest-ready first.';
+      case 'INSTANT':
+        return 'Keep instant-book inventory visible so hosts and ops can watch quality and conversion from phone.';
+      case 'TRIPS':
+        return 'Show only trip-readiness work so support can jump into pickup and dispute actions faster.';
+      case 'ATTENTION':
+        return 'Highlight the listings that still need setup or publishing cleanup before they can sell well.';
+      default:
+        return 'Keep host supply, listing quality, and trip readiness in view before jumping into the full workspace below.';
+    }
+  }, [opsFocus]);
+  const visibleControlCenterItems = useMemo(() => {
+    if (opsFocus === 'ALL') return controlCenterItems;
+    return controlCenterItems.filter((item) => item.focus === opsFocus);
+  }, [controlCenterItems, opsFocus]);
 
   const updateVehicleFleetMode = async (vehicleId, fleetMode) => {
     try {
@@ -609,6 +697,81 @@ function CarSharingInner({ token, me, logout }) {
       ) : null}
 
       <section className="glass card-lg section-card" style={{ marginBottom: 18 }}>
+        <div className="app-banner">
+          <div className="row-between" style={{ marginBottom: 0 }}>
+            <div className="stack" style={{ gap: 6 }}>
+              <span className="eyebrow">Marketplace Ops</span>
+              <h3 style={{ margin: 0 }}>Car Sharing Control Center</h3>
+              <p className="ui-muted">
+                {opsFocusSummary}
+              </p>
+            </div>
+            <span className={`status-chip ${canManageCarSharing ? 'good' : 'warn'}`}>
+              {canManageCarSharing ? 'Ready to manage' : 'Feature gated'}
+            </span>
+          </div>
+          <div className="app-card-grid compact">
+            <div className="info-tile">
+              <span className="label">Published</span>
+              <strong>{publishedListings}</strong>
+            </div>
+            <div className="info-tile">
+              <span className="label">Instant Book</span>
+              <strong>{instantBookListings}</strong>
+            </div>
+            <div className="info-tile">
+              <span className="label">Trip Attention</span>
+              <strong>{tripAttentionCount}</strong>
+            </div>
+            <div className="info-tile">
+              <span className="label">Focused Listing</span>
+              <strong>{selectedListing?.title || 'Choose one'}</strong>
+            </div>
+          </div>
+          <div className="app-banner-list">
+            {opsFocusOptions.map((option) => (
+              <button
+                key={option.id}
+                type="button"
+                className={opsFocus === option.id ? '' : 'button-subtle'}
+                onClick={() => setOpsFocus(option.id)}
+                style={{ minHeight: 36, paddingInline: 14 }}
+              >
+                {option.label} · {option.count}
+              </button>
+            ))}
+          </div>
+          {visibleControlCenterItems.length ? (
+            <div className="app-card-grid compact">
+              {visibleControlCenterItems.map((item) => (
+                <section key={item.id} className="glass card section-card">
+                  <div className="section-title" style={{ fontSize: 15 }}>{item.title}</div>
+                  <div className="ui-muted">{item.detail}</div>
+                  <div className="surface-note">{item.note}</div>
+                  <div className="inline-actions">
+                    <button
+                      type="button"
+                      onClick={() => document.getElementById(item.targetId)?.scrollIntoView({ behavior: 'smooth', block: 'start' })}
+                    >
+                      {item.actionLabel}
+                    </button>
+                  </div>
+                </section>
+              ))}
+            </div>
+          ) : controlCenterItems.length ? (
+            <div className="surface-note">No car sharing items match this focus right now. Switch filters to review another lane.</div>
+          ) : null}
+          <div className="inline-actions">
+            <button type="button" onClick={() => document.getElementById('car-sharing-hosts')?.scrollIntoView({ behavior: 'smooth', block: 'start' })}>Hosts</button>
+            <button type="button" onClick={() => document.getElementById('car-sharing-listings')?.scrollIntoView({ behavior: 'smooth', block: 'start' })}>Listings</button>
+            <button type="button" onClick={() => document.getElementById('car-sharing-windows')?.scrollIntoView({ behavior: 'smooth', block: 'start' })}>Availability</button>
+            <button type="button" onClick={() => document.getElementById('car-sharing-trips')?.scrollIntoView({ behavior: 'smooth', block: 'start' })}>Trips</button>
+          </div>
+        </div>
+      </section>
+
+      <section className="glass card-lg section-card" style={{ marginBottom: 18 }}>
         <div className="row-between" style={{ alignItems: 'center', gap: 12 }}>
           <div>
             <div className="section-title">Tenant Feature Status</div>
@@ -626,7 +789,7 @@ function CarSharingInner({ token, me, logout }) {
       </section>
 
       <section className="split-panel">
-        <section className="glass card-lg section-card">
+        <section id="car-sharing-hosts" className="glass card-lg section-card">
           <div className="row-between">
             <h3 style={{ margin: 0 }}>Host Profiles</h3>
             <button type="button" className="button-subtle" onClick={resetHostForm}>New Host</button>
@@ -654,7 +817,7 @@ function CarSharingInner({ token, me, logout }) {
           {!activeHosts.length && !loading ? <div className="surface-note">No host profiles yet for this tenant.</div> : null}
         </section>
 
-        <section className="glass card-lg section-card">
+        <section id="car-sharing-listings" className="glass card-lg section-card">
           <div className="row-between">
             <h3 style={{ margin: 0 }}>Vehicle Listings</h3>
             <button type="button" className="button-subtle" onClick={resetListingForm}>New Listing</button>
@@ -740,7 +903,7 @@ function CarSharingInner({ token, me, logout }) {
         </section>
       </section>
 
-      <section className="glass card-lg section-card" style={{ marginTop: 18 }}>
+      <section id="car-sharing-windows" className="glass card-lg section-card" style={{ marginTop: 18 }}>
         <div className="row-between">
           <h3 style={{ margin: 0 }}>Availability Windows</h3>
           {selectedListing ? <button type="button" className="button-subtle" onClick={() => setWindowForm(EMPTY_WINDOW)}>New Window</button> : null}
@@ -816,7 +979,7 @@ function CarSharingInner({ token, me, logout }) {
         )}
       </section>
 
-      <section className="glass card-lg section-card" style={{ marginTop: 18 }}>
+      <section id="car-sharing-trips" className="glass card-lg section-card" style={{ marginTop: 18 }}>
         <div className="row-between">
           <h3 style={{ margin: 0 }}>Trip Creation</h3>
           <div className="ui-muted">Internal booking flow on top of listing supply.</div>

@@ -19,6 +19,7 @@ function Inner({ token, me, logout }) {
   const [form, setForm] = useState({ vehicleId: '', odometerOut: '', fuelOut: '1.000', cleanlinessOut: '5', signerName: '', paymentMethod: 'CASH' });
   const sigRef = useRef(null);
   const drawing = useRef(false);
+  const selectedVehicle = vehicles.find((vehicle) => String(vehicle.id) === String(form.vehicleId)) || null;
 
   const load = async () => {
     const r = await api(`/api/reservations/${id}`, {}, token);
@@ -110,7 +111,40 @@ function Inner({ token, me, logout }) {
 
   return (
     <AppShell me={me} logout={logout}>
-      <section className="glass card-lg">
+      <section className="glass card-lg stack">
+        <div className="app-banner">
+          <div className="row-between" style={{ marginBottom: 0 }}>
+            <div className="stack" style={{ gap: 6 }}>
+              <span className="eyebrow">Checkout Snapshot</span>
+              <h3 style={{ margin: 0 }}>{row?.reservationNumber || `Reservation ${id}`}</h3>
+              <p className="ui-muted">
+                Confirm the assigned vehicle, signer, and checkout readiness before capturing the signature and closing the handoff.
+              </p>
+            </div>
+            <span className={`status-chip ${form.vehicleId && form.signerName ? 'good' : 'warn'}`}>
+              {form.vehicleId && form.signerName ? 'Ready to sign' : 'Needs setup'}
+            </span>
+          </div>
+          <div className="app-card-grid compact">
+            <div className="info-tile">
+              <span className="label">Customer</span>
+              <strong>{[row?.customer?.firstName, row?.customer?.lastName].filter(Boolean).join(' ') || row?.customer?.email || '-'}</strong>
+            </div>
+            <div className="info-tile">
+              <span className="label">Vehicle</span>
+              <strong>{selectedVehicle ? [selectedVehicle.year, selectedVehicle.make, selectedVehicle.model].filter(Boolean).join(' ') : 'Select vehicle'}</strong>
+            </div>
+            <div className="info-tile">
+              <span className="label">Pickup</span>
+              <strong>{row?.pickupAt ? new Date(row.pickupAt).toLocaleString() : '-'}</strong>
+            </div>
+            <div className="info-tile">
+              <span className="label">Payment Method</span>
+              <strong>{form.paymentMethod || '-'}</strong>
+            </div>
+          </div>
+        </div>
+
         <div className="row-between"><h2>Check-out Wizard</h2><button onClick={() => router.push(`/reservations/${id}`)}>Back</button></div>
         <div className="label" style={{ textTransform: 'none', letterSpacing: 0, marginBottom: 8 }}>Reservation: {row?.reservationNumber || '-'}</div>
         {msg ? <div className="label" style={{ color: '#b91c1c' }}>{msg}</div> : null}

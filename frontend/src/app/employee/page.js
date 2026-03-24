@@ -79,6 +79,10 @@ function tripGuestName(trip) {
   return [trip?.guestCustomer?.firstName, trip?.guestCustomer?.lastName].filter(Boolean).join(' ') || trip?.guestCustomer?.email || 'Guest';
 }
 
+function issueHeadline(row) {
+  return [row?.title, row?.trip?.tripCode || '', row?.trip?.reservation?.reservationNumber || ''].filter(Boolean).join(' - ');
+}
+
 function QueueCard({ title, subtitle, rows, emptyText, actions }) {
   return (
     <section className="glass card section-card">
@@ -173,6 +177,29 @@ function IssueQueueCard({ rows }) {
   );
 }
 
+function OpsLaneCard({ title, count, note, href, cta, tone = 'neutral' }) {
+  const chipClass = tone === 'warn' ? 'status-chip warn' : tone === 'good' ? 'status-chip good' : 'status-chip neutral';
+  return (
+    <div className="doc-card">
+      <div className="row-between" style={{ marginBottom: 0, alignItems: 'start' }}>
+        <div style={{ display: 'grid', gap: 6 }}>
+          <span className="label">{title}</span>
+          <strong style={{ fontSize: 28, color: '#241b41' }}>{count}</strong>
+        </div>
+        <span className={chipClass}>{tone === 'warn' ? 'Attention' : tone === 'good' ? 'Ready' : 'Live'}</span>
+      </div>
+      <div className="doc-meta">{note}</div>
+      {href ? (
+        <div className="inline-actions">
+          <Link href={href}>
+            <button type="button" className="button-subtle">{cta || 'Open'}</button>
+          </Link>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 export default function EmployeeAppPage() {
   return <AuthGate>{({ token, me, logout }) => <EmployeeAppInner token={token} me={me} logout={logout} />}</AuthGate>;
 }
@@ -238,6 +265,56 @@ function EmployeeAppInner({ token, me, logout }) {
       createForm.returnLocationId
     )
   ), [createForm]);
+
+  const nextUpItems = useMemo(() => {
+    const checkout = dashboard?.queues?.checkout?.[0];
+    const returns = dashboard?.queues?.returns?.[0];
+    const loanerBilling = dashboard?.queues?.loanerBillingReview?.[0];
+    const issue = dashboard?.queues?.issueEscalations?.[0];
+
+    return [
+      checkout ? {
+        key: 'checkout',
+        label: 'Next Pickup',
+        title: checkout.reservationNumber,
+        detail: `${customerName(checkout)} - ${formatDateTime(checkout.pickupAt)}`,
+        note: [workflowLabel(checkout), checkout.pickupLocation?.name || ''].filter(Boolean).join(' - '),
+        href: reservationHref(checkout, 'checkout'),
+        cta: 'Start Checkout',
+        tone: 'good'
+      } : null,
+      returns ? {
+        key: 'return',
+        label: 'Next Return',
+        title: returns.reservationNumber,
+        detail: `${customerName(returns)} - ${formatDateTime(returns.returnAt)}`,
+        note: [workflowLabel(returns), vehicleLabel(returns)].filter(Boolean).join(' - '),
+        href: reservationHref(returns, 'checkin'),
+        cta: 'Run Check-in',
+        tone: 'warn'
+      } : null,
+      loanerBilling ? {
+        key: 'loaner-billing',
+        label: 'Loaner Billing Blocker',
+        title: loanerBilling.reservationNumber,
+        detail: `${loanerBilling.loanerBillingStatus || 'Pending'} - ${customerName(loanerBilling)}`,
+        note: queueContext(loanerBilling) || 'Needs billing follow-up',
+        href: reservationHref(loanerBilling),
+        cta: 'Open Loaner Workflow',
+        tone: 'warn'
+      } : null,
+      issue ? {
+        key: 'issue',
+        label: 'Issue Escalation',
+        title: issueHeadline(issue),
+        detail: `${tripGuestName(issue.trip)} - ${formatDateTime(issue.createdAt)}`,
+        note: issue.trip?.hostProfile?.displayName || 'Customer service follow-up',
+        href: '/issues',
+        cta: 'Handle Case',
+        tone: 'warn'
+      } : null
+    ].filter(Boolean);
+  }, [dashboard]);
 
   async function runSearch() {
     await load(search.trim());
@@ -347,6 +424,95 @@ function EmployeeAppInner({ token, me, logout }) {
           </div>
         </div>
 
+        <section className="glass card-lg section-card">
+          <div className="row-between">
+            <div>
+              <div className="section-title">Employee Mobile Hub</div>
+              <p className="ui-muted">Use this top layer like a phone-ready operations dashboard: what is due now, what needs review, and where to jump next.</p>
+            </div>
+            <span className="status-chip neutral">Shift Ready</span>
+          </div>
+          <div className="app-card-grid compact">
+            <OpsLaneCard
+              title="Ready Pickups"
+              count={metrics.readyForPickup}
+              note="Guests who are close to pickup and should move into checkout quickly."
+              href="/reservations"
+              cta="Open Pickup Queue"
+              tone={metrics.readyForPickup > 0 ? 'good' : 'neutral'}
+            />
+            <OpsLaneCard
+              title="Returns Due"
+              count={metrics.dueBackToday}
+              note="Vehicles coming back today that may need check-in, fuel, mileage, and damage review."
+              href="/reservations"
+              cta="Open Return Queue"
+              tone={metrics.dueBackToday > 0 ? 'warn' : 'neutral'}
+            />
+            <OpsLaneCard
+              title="Loaner Billing"
+              count={metrics.loanerBillingAttention}
+              note="Loaners waiting on advisor, dealer, insurer, or customer-pay billing decisions."
+              href="/loaner"
+              cta="Open Loaner Billing"
+              tone={metrics.loanerBillingAttention > 0 ? 'warn' : 'neutral'}
+            />
+            <OpsLaneCard
+              title="Issue Escalations"
+              count={metrics.issueOpen + metrics.issueUnderReview}
+              note="Disputes and support cases that customer service or ops should review right away."
+              href="/issues"
+              cta="Open Issue Center"
+              tone={(metrics.issueOpen + metrics.issueUnderReview) > 0 ? 'warn' : 'neutral'}
+            />
+          </div>
+          <div className="surface-note">
+            Best mobile order for most shifts: search the reservation, launch checkout or check-in, handle loaner follow-up, then clear issue escalations before close.
+          </div>
+          <div className="inline-actions">
+            <Link href="/reservations"><button type="button">Reservations Board</button></Link>
+            <Link href="/loaner"><button type="button" className="button-subtle">Loaner Dashboard</button></Link>
+            <Link href="/issues"><button type="button" className="button-subtle">Issue Center</button></Link>
+            <Link href="/planner"><button type="button" className="button-subtle">Planner</button></Link>
+          </div>
+        </section>
+
+        <section className="glass card-lg section-card">
+          <div className="row-between">
+            <div>
+              <div className="section-title">Next Up For This Shift</div>
+              <p className="ui-muted">A compact priority board for phone and tablet so the next operational move is obvious.</p>
+            </div>
+            <span className="status-chip neutral">{nextUpItems.length} live priorities</span>
+          </div>
+          {nextUpItems.length ? (
+            <div className="app-card-grid compact">
+              {nextUpItems.map((item) => (
+                <div key={item.key} className="doc-card">
+                  <div className="row-between" style={{ marginBottom: 0, alignItems: 'start' }}>
+                    <div style={{ display: 'grid', gap: 6 }}>
+                      <span className="label">{item.label}</span>
+                      <strong>{item.title}</strong>
+                    </div>
+                    <span className={item.tone === 'good' ? 'status-chip good' : 'status-chip warn'}>
+                      {item.tone === 'good' ? 'Ready' : 'Attention'}
+                    </span>
+                  </div>
+                  <div className="doc-meta">{item.detail}</div>
+                  <div className="doc-meta">{item.note}</div>
+                  <div className="inline-actions">
+                    <Link href={item.href}>
+                      <button type="button">{item.cta}</button>
+                    </Link>
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div className="surface-note">No urgent shift priorities are open right now. You can work from the full queues below.</div>
+          )}
+        </section>
+
         <section className="split-panel">
           <section className="glass card-lg section-card">
             <div className="row-between">
@@ -368,40 +534,45 @@ function EmployeeAppInner({ token, me, logout }) {
             </div>
 
             {dashboard?.searchResults?.length ? (
-              <div className="table-shell" style={{ marginTop: 14 }}>
-                <table>
-                  <thead>
-                    <tr>
-                      <th>Reservation</th>
-                      <th>Customer</th>
-                      <th>Status</th>
-                      <th>Pickup</th>
-                      <th>Return</th>
-                      <th>Actions</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {dashboard.searchResults.map((row) => (
-                      <tr key={row.id}>
-                        <td>{row.reservationNumber}</td>
-                        <td>{customerName(row)}</td>
-                        <td><span className={statusClass(row.status)}>{row.status}</span></td>
-                        <td>{formatDateTime(row.pickupAt)}</td>
-                        <td>{formatDateTime(row.returnAt)}</td>
-                        <td>
-                          <div className="label" style={{ textTransform: 'none', letterSpacing: 0, fontSize: 12, marginBottom: 6 }}>
-                            {[workflowLabel(row), queueContext(row)].filter(Boolean).join(' - ')}
-                          </div>
-                          <div className="inline-actions">
-                            <Link href={reservationHref(row)}><button type="button">Open</button></Link>
-                            <Link href={reservationHref(row, 'checkout')}><button type="button" className="button-subtle">Checkout</button></Link>
-                            <Link href={reservationHref(row, 'checkin')}><button type="button" className="button-subtle">Check-in</button></Link>
-                          </div>
-                        </td>
+              <div className="stack" style={{ marginTop: 14 }}>
+                <div className="surface-note">
+                  Found <strong>{dashboard.searchResults.length}</strong> matching reservation{dashboard.searchResults.length === 1 ? '' : 's'}.
+                </div>
+                <div className="table-shell">
+                  <table>
+                    <thead>
+                      <tr>
+                        <th>Reservation</th>
+                        <th>Customer</th>
+                        <th>Status</th>
+                        <th>Pickup</th>
+                        <th>Return</th>
+                        <th>Actions</th>
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
+                    </thead>
+                    <tbody>
+                      {dashboard.searchResults.map((row) => (
+                        <tr key={row.id}>
+                          <td>{row.reservationNumber}</td>
+                          <td>{customerName(row)}</td>
+                          <td><span className={statusClass(row.status)}>{row.status}</span></td>
+                          <td>{formatDateTime(row.pickupAt)}</td>
+                          <td>{formatDateTime(row.returnAt)}</td>
+                          <td>
+                            <div className="label" style={{ textTransform: 'none', letterSpacing: 0, fontSize: 12, marginBottom: 6 }}>
+                              {[workflowLabel(row), queueContext(row)].filter(Boolean).join(' - ')}
+                            </div>
+                            <div className="inline-actions">
+                              <Link href={reservationHref(row)}><button type="button">Open</button></Link>
+                              <Link href={reservationHref(row, 'checkout')}><button type="button" className="button-subtle">Checkout</button></Link>
+                              <Link href={reservationHref(row, 'checkin')}><button type="button" className="button-subtle">Check-in</button></Link>
+                            </div>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
               </div>
             ) : (
               <div className="surface-note" style={{ marginTop: 14 }}>
@@ -481,6 +652,9 @@ function EmployeeAppInner({ token, me, logout }) {
               <div className="inline-actions">
                 <button type="submit">Create Reservation</button>
                 <button type="button" className="button-subtle" onClick={() => setCreateForm(EMPTY_FORM)}>Reset</button>
+              </div>
+              <div className="surface-note">
+                Counter tip: for the fastest intake on phone, start with `24h` or `72h`, pick the customer, then adjust pickup and return after the reservation is created.
               </div>
             </form>
           </section>
