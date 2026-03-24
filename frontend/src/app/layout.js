@@ -1,8 +1,30 @@
 import './globals.css';
 
 export const metadata = {
-  title: 'Fleet Management Dashboard',
-  description: 'Operations dashboard for fleet and reservations'
+  title: 'Ride Fleet',
+  description: 'Mobile-first rental, host, guest, employee, and loaner operations platform.',
+  manifest: '/manifest.webmanifest',
+  appleWebApp: {
+    capable: true,
+    statusBarStyle: 'default',
+    title: 'Ride Fleet'
+  },
+  icons: {
+    icon: [
+      { url: '/ride-logo.png', sizes: '192x192', type: 'image/png' },
+      { url: '/ride-logo.png', sizes: '512x512', type: 'image/png' }
+    ],
+    apple: [
+      { url: '/ride-logo.png', sizes: '180x180', type: 'image/png' }
+    ]
+  }
+};
+
+export const viewport = {
+  width: 'device-width',
+  initialScale: 1,
+  viewportFit: 'cover',
+  themeColor: '#6e49ff'
 };
 
 const themeBootScript = `
