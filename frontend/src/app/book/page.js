@@ -709,13 +709,14 @@ export default function PublicBookingPage() {
                       hints={[
                         result.instantBook ? 'Instant book' : 'Approval flow',
                         `${Math.max(1, Number(result.minTripDays || 1))}+ day minimum`,
+                        ...(normalizeImageList(result.imageUrls || []).length ? [`${normalizeImageList(result.imageUrls || []).length} photo${normalizeImageList(result.imageUrls || []).length === 1 ? '' : 's'}`] : []),
                         ...(result.additionalServices?.length ? [`${result.additionalServices.length} host add-on${result.additionalServices.length === 1 ? '' : 's'}`] : [])
                       ]}
                       quote={[
                         { label: 'Daily Rate', value: fmtMoney(result.quote.subtotal / Math.max(1, result.quote.tripDays)) },
                         { label: 'Trip Total', value: fmtMoney(result.quote.total) },
-                        { label: 'Host Earnings', value: fmtMoney(result.quote.hostEarnings) },
-                        { label: 'Platform Fee', value: fmtMoney(result.quote.platformFee) }
+                        { label: 'Host Rating', value: result.host ? fmtRating(result.host.averageRating, result.host.reviewCount) : 'New host' },
+                        { label: 'Minimum Trip', value: `${Math.max(1, Number(result.minTripDays || 1))} day${Math.max(1, Number(result.minTripDays || 1)) === 1 ? '' : 's'}` }
                       ]}
                       cta={result.instantBook ? 'Continue' : 'Request Booking'}
                       onClick={() => {

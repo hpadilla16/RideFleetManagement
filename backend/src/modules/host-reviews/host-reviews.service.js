@@ -18,6 +18,15 @@ function ratingNumber(value) {
   return Number(Number(value || 0).toFixed(2));
 }
 
+function parsePhotoList(value) {
+  try {
+    const parsed = typeof value === 'string' ? JSON.parse(value) : value;
+    return Array.isArray(parsed) ? parsed.map((item) => String(item || '').trim()).filter(Boolean).slice(0, 6) : [];
+  } catch {
+    return [];
+  }
+}
+
 function serializeHostCard(hostProfile, extra = {}) {
   if (!hostProfile) return null;
   return {
@@ -272,6 +281,8 @@ export const hostReviewsService = {
         id: listing.id,
         title: listing.title,
         baseDailyRate: money(listing.baseDailyRate),
+        primaryImageUrl: parsePhotoList(listing.photosJson)[0] || '',
+        imageUrls: parsePhotoList(listing.photosJson),
         vehicle: listing.vehicle
           ? {
               year: listing.vehicle.year,
