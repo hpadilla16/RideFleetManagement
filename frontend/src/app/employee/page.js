@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { useEffect, useMemo, useState } from 'react';
 import { AuthGate } from '../../components/AuthGate';
 import { AppShell } from '../../components/AppShell';
+import { MobileAppShell } from '../../components/MobileAppShell';
 import { api } from '../../lib/client';
 
 const EMPTY_FORM = {
@@ -316,6 +317,13 @@ function EmployeeAppInner({ token, me, logout }) {
     ].filter(Boolean);
   }, [dashboard]);
 
+  const employeeShellStats = useMemo(() => ([
+    { label: 'Shift Ready', value: `${metrics.readyForPickup} pickups` },
+    { label: 'Returns Due', value: `${metrics.dueBackToday} returns` },
+    { label: 'Loaner Billing', value: `${metrics.loanerBillingAttention} blockers` },
+    { label: 'Issue Escalations', value: `${metrics.issueOpen + metrics.issueUnderReview} live` }
+  ]), [metrics.dueBackToday, metrics.issueOpen, metrics.issueUnderReview, metrics.loanerBillingAttention, metrics.readyForPickup]);
+
   async function runSearch() {
     await load(search.trim());
   }
@@ -410,6 +418,21 @@ function EmployeeAppInner({ token, me, logout }) {
         </div>
       ) : null}
 
+      <MobileAppShell
+        eyebrow="Sprint 9 · Mobile App Shell"
+        title="Employee app shell"
+        description="A shared mobile-first foundation for shift priorities, lookup, quick creation, and operational queues."
+        statusLabel="Shift Ready"
+        stats={employeeShellStats}
+        tabs={[
+          { href: '#employee-hub', label: 'Hub', active: true },
+          { href: '#employee-shift', label: 'Shift', active: nextUpItems.length > 0 },
+          { href: '#employee-search', label: 'Lookup', active: !!search || !!dashboard?.searchResults?.length },
+          { href: '#employee-create', label: 'Quick Create', active: quickCreateReady },
+          { href: '#employee-queues', label: 'Queues', active: true }
+        ]}
+      />
+
       <section className="app-section-grid">
         <div className="app-banner">
           <div className="section-title">Operations Lanes</div>
@@ -424,7 +447,7 @@ function EmployeeAppInner({ token, me, logout }) {
           </div>
         </div>
 
-        <section className="glass card-lg section-card">
+        <section id="employee-hub" className="glass card-lg section-card">
           <div className="row-between">
             <div>
               <div className="section-title">Employee Mobile Hub</div>
@@ -477,7 +500,7 @@ function EmployeeAppInner({ token, me, logout }) {
           </div>
         </section>
 
-        <section className="glass card-lg section-card">
+        <section id="employee-shift" className="glass card-lg section-card">
           <div className="row-between">
             <div>
               <div className="section-title">Next Up For This Shift</div>
@@ -514,7 +537,7 @@ function EmployeeAppInner({ token, me, logout }) {
         </section>
 
         <section className="split-panel">
-          <section className="glass card-lg section-card">
+          <section id="employee-search" className="glass card-lg section-card">
             <div className="row-between">
               <div>
                 <div className="section-title">Lookup And Resume</div>
@@ -581,7 +604,7 @@ function EmployeeAppInner({ token, me, logout }) {
             )}
           </section>
 
-          <section className="glass card-lg section-card">
+          <section id="employee-create" className="glass card-lg section-card">
             <div className="row-between">
               <div>
                 <div className="section-title">Quick Create Reservation</div>
@@ -661,7 +684,7 @@ function EmployeeAppInner({ token, me, logout }) {
         </section>
       </section>
 
-      <section className="glass card-lg section-card" style={{ marginTop: 18 }}>
+      <section id="employee-queues" className="glass card-lg section-card" style={{ marginTop: 18 }}>
         <IssueQueueCard rows={dashboard?.queues?.issueEscalations || []} />
       </section>
 

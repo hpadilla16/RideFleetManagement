@@ -3,6 +3,7 @@
 import Link from 'next/link';
 import { useEffect, useMemo, useState } from 'react';
 import { API_BASE, api } from '../../lib/client';
+import { MobileAppShell } from '../../components/MobileAppShell';
 
 const RECENT_LOOKUPS_KEY = 'guest.recentLookups';
 const GUEST_SESSION_TOKEN_KEY = 'guest.session.token';
@@ -204,6 +205,13 @@ export default function GuestAppPage() {
     return bookings.filter((booking) => bookingPriority(booking).bucket === bookingFilter);
   }, [bookingFilter, guestSession?.bookings]);
 
+  const guestShellStats = useMemo(() => ([
+    { label: 'Account', value: guestSession ? `${guestSessionSummary.total} booking${guestSessionSummary.total === 1 ? '' : 's'}` : 'Guest access' },
+    { label: 'Next Step', value: primaryAction?.label || portalStatus?.progress?.nextAction || 'Find your booking' },
+    { label: 'Docs Ready', value: `${availableDocsCount} ready` },
+    { label: 'Support', value: `${openIssueCount} open case${openIssueCount === 1 ? '' : 's'}` }
+  ]), [availableDocsCount, guestSession, guestSessionSummary.total, openIssueCount, portalStatus?.progress?.nextAction, primaryAction?.label]);
+
   useEffect(() => {
     try {
       const stored = JSON.parse(localStorage.getItem(RECENT_LOOKUPS_KEY) || '[]');
@@ -389,7 +397,22 @@ export default function GuestAppPage() {
           </div>
         </section>
 
-        <section className="glass card-lg section-card">
+        <MobileAppShell
+          eyebrow="Sprint 9 · Mobile App Shell"
+          title="Guest account shell"
+          description="A shared mobile-first foundation for account access, journey progress, wallet items, and support actions."
+          statusLabel={guestSession ? 'Signed In' : 'Guest Access'}
+          stats={guestShellStats}
+          tabs={[
+            { href: '#guest-find', label: 'Find Booking', active: !guestSession && !result },
+            { href: '#guest-account', label: 'My Account', active: !!guestSession },
+            { href: '#guest-journey', label: 'Journey', active: !!result },
+            { href: '#guest-wallet', label: 'Wallet', active: availableDocsCount > 0 },
+            { href: '#guest-support', label: 'Support', active: openIssueCount > 0 }
+          ]}
+        />
+
+        <section id="guest-find" className="glass card-lg section-card">
           <div className="row-between">
             <div>
               <div className="section-title">Find Your Booking</div>
@@ -427,7 +450,7 @@ export default function GuestAppPage() {
           {error ? <div className="surface-note" style={{ color: '#991b1b' }}>{error}</div> : null}
         </section>
 
-        <section className="glass card-lg section-card">
+        <section id="guest-account" className="glass card-lg section-card">
           <div className="row-between">
             <div>
               <div className="section-title">Guest Sign-In</div>
@@ -526,7 +549,7 @@ export default function GuestAppPage() {
         </section>
 
         {recentLookups.length ? (
-          <section className="glass card-lg section-card">
+          <section id="guest-journey" className="glass card-lg section-card">
             <div className="row-between">
               <div>
                 <div className="section-title">Recent Guest Lookups</div>
@@ -618,7 +641,7 @@ export default function GuestAppPage() {
 
         {result ? (
           <section className="split-panel">
-            <div className="glass card-lg section-card">
+            <div id="guest-support" className="glass card-lg section-card">
               <div className="row-between">
                 <div>
                   <div className="section-title">Guest Booking Summary</div>
@@ -681,7 +704,7 @@ export default function GuestAppPage() {
               ) : null}
             </div>
 
-            <div className="glass card-lg section-card">
+            <div id="guest-wallet" className="glass card-lg section-card">
               <div className="row-between">
                 <div>
                   <div className="section-title">Live Guest Status</div>

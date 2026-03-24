@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { AuthGate } from '../../components/AuthGate';
 import { AppShell } from '../../components/AppShell';
+import { MobileAppShell } from '../../components/MobileAppShell';
 import { api } from '../../lib/client';
 
 const MAX_INLINE_PDF_BYTES = 350 * 1024;
@@ -325,6 +326,13 @@ function HostAppInner({ token, me, logout }) {
     };
   }, [hostSnapshot.upcomingPickups, hostSnapshot.watchlist, trips]);
 
+  const hostShellStats = useMemo(() => ([
+    { label: 'Listings', value: `${metrics.activeListings}/${metrics.listings || 0} active` },
+    { label: 'Next Handoff', value: hostTripOpsSnapshot.nextHandoffTrip?.tripCode || 'Clear' },
+    { label: 'Guest Readiness', value: `${hostTripOpsSnapshot.guestActionTrips.length} waiting` },
+    { label: 'Approvals', value: `${submissions.filter((row) => String(row.status || '').toUpperCase() === 'PENDING_REVIEW').length} pending` }
+  ]), [hostTripOpsSnapshot.guestActionTrips.length, hostTripOpsSnapshot.nextHandoffTrip?.tripCode, metrics.activeListings, metrics.listings, submissions]);
+
   const selectedListingSnapshot = useMemo(() => {
     if (!listingEdit.id) return null;
     return {
@@ -628,6 +636,21 @@ function HostAppInner({ token, me, logout }) {
 
       {msg ? <div className="surface-note" style={{ color: /updated|moved|added|removed/i.test(msg) ? '#166534' : '#991b1b', marginBottom: 18 }}>{msg}</div> : null}
 
+      <MobileAppShell
+        eyebrow="Sprint 9 · Mobile App Shell"
+        title="Host account shell"
+        description="A shared mobile-first foundation for host account, handoff readiness, fleet setup, and approval follow-up."
+        statusLabel={host ? 'Host Account' : 'Support Mode'}
+        stats={hostShellStats}
+        tabs={[
+          { href: '#host-account', label: 'Account', active: !!host },
+          { href: '#host-handoff', label: 'Handoff', active: !!hostTripOpsSnapshot.nextHandoffTrip },
+          { href: '#host-fleet', label: 'Fleet', active: listings.length > 0 },
+          { href: '#host-approvals', label: 'Approvals', active: submissions.some((row) => String(row.status || '').toUpperCase() === 'PENDING_REVIEW') },
+          { href: '#host-actions', label: 'Actions', active: hostSnapshot.watchlist.length > 0 }
+        ]}
+      />
+
       <section className="glass card-lg section-card" style={{ marginBottom: 18 }}>
         <div className="row-between">
           <div><div className="section-title">Host Mobile Hub</div><p className="ui-muted">A compact read on listing quality, pricing readiness, and the next handoff moment.</p></div>
@@ -653,7 +676,7 @@ function HostAppInner({ token, me, logout }) {
         </div>
       </section>
 
-      <section className="glass card-lg section-card" style={{ marginBottom: 18 }}>
+      <section id="host-account" className="glass card-lg section-card" style={{ marginBottom: 18 }}>
         <div className="row-between">
           <div>
             <div className="section-title">Welcome back{host?.displayName ? `, ${host.displayName}` : ''}.</div>
@@ -694,12 +717,12 @@ function HostAppInner({ token, me, logout }) {
         </div>
         <div className="inline-actions">
           {host?.id ? <a href={`/host-profile/${host.id}`}><button type="button">Open Public Host Profile</button></a> : null}
-          <a href="#fleet-vehicles"><button type="button" className="button-subtle">Go To Fleet Vehicles</button></a>
+          <a href="#host-fleet"><button type="button" className="button-subtle">Go To Fleet Vehicles</button></a>
         </div>
       </section>
 
       <section className="split-panel" style={{ marginBottom: 18 }}>
-        <section className="glass card-lg section-card">
+        <section id="host-handoff" className="glass card-lg section-card">
           <div className="row-between">
             <div><div className="section-title">Next Handoff</div><p className="ui-muted">The next trip that likely needs host attention right now.</p></div>
             <span className="status-chip neutral">{hostTripOpsSnapshot.nextHandoffTrip ? 'Live' : 'Clear'}</span>
@@ -752,7 +775,7 @@ function HostAppInner({ token, me, logout }) {
           ) : <div className="surface-note">No handoff needs immediate host action right now.</div>}
         </section>
 
-        <section className="glass card-lg section-card">
+        <section id="host-approvals" className="glass card-lg section-card">
           <div className="row-between">
             <div><div className="section-title">Guest Readiness Lane</div><p className="ui-muted">Trips where the guest still owes a step before handoff feels clean.</p></div>
             <span className="status-chip neutral">{hostTripOpsSnapshot.guestActionTrips.length} waiting</span>
@@ -797,7 +820,7 @@ function HostAppInner({ token, me, logout }) {
       ) : null}
 
       <section className="split-panel">
-        <section className="glass card-lg section-card">
+        <section id="host-actions" className="glass card-lg section-card">
           <div className="row-between">
             <div><div className="section-title">Add Vehicle To My Fleet</div><p className="ui-muted">Submit a host-owned vehicle, documents, inspection proof, pricing, and host-only add-ons for review.</p></div>
             <span className="status-chip neutral">{dashboard?.metrics?.pendingVehicleApprovals || 0} pending</span>
@@ -1125,7 +1148,7 @@ function HostAppInner({ token, me, logout }) {
         </section>
       </section>
 
-      <section id="fleet-vehicles" className="split-panel" style={{ marginTop: 18 }}>
+      <section id="host-fleet" className="split-panel" style={{ marginTop: 18 }}>
         <section className="glass card-lg section-card">
           <div className="row-between">
             <div><div className="section-title">Availability Windows</div><p className="ui-muted">Block dates, set price overrides, or require a longer minimum stay from the host surface.</p></div>

@@ -206,6 +206,34 @@ a { color: inherit; text-decoration: none; }
 .instruction-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
 .support-action-stack { display: grid; gap: 12px; }
 .support-callout-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; }
+.mobile-app-shell { margin-bottom: 18px; }
+.mobile-app-shell-nav {
+  display: flex;
+  gap: 10px;
+  overflow-x: auto;
+  padding-bottom: 4px;
+  scrollbar-width: thin;
+}
+.mobile-app-shell-link {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 38px;
+  padding: 0 14px;
+  border-radius: 999px;
+  border: 1px solid rgba(135,82,254,.15);
+  background: rgba(255,255,255,.72);
+  color: #55456f;
+  font-size: 12px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+.mobile-app-shell-link.active {
+  background: linear-gradient(180deg, #9f79ff, var(--brand-purple));
+  border-color: #7f4ff0;
+  color: #fff;
+  box-shadow: 0 8px 18px rgba(135,82,254,.18);
+}
 
 /* global rhythm helpers */
 .page-title { font-size: clamp(18px, 2vw, 24px); font-weight: 800; letter-spacing: .01em; }
