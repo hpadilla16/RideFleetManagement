@@ -7,6 +7,7 @@ import { MobileAppShell } from '../../components/MobileAppShell';
 
 const RECENT_LOOKUPS_KEY = 'guest.recentLookups';
 const GUEST_SESSION_TOKEN_KEY = 'guest.session.token';
+const GUEST_LAST_BOOKING_KEY = 'guest.lastBooking';
 
 function fmtMoney(value) {
   return `$${Number(value || 0).toFixed(2)}`;
@@ -251,6 +252,22 @@ export default function GuestAppPage() {
     };
   }, []);
 
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    try {
+      const stored = JSON.parse(localStorage.getItem(GUEST_LAST_BOOKING_KEY) || 'null');
+      if (!stored?.reference || !stored?.email) return;
+      setLookupState((current) => ({
+        reference: current.reference || stored.reference,
+        email: current.email || stored.email
+      }));
+      if (!result) {
+        resolveLookup(stored.reference, stored.email);
+      }
+    } catch {}
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   function persistRecentLookup(confirmation, fallbackEmail = '') {
     const entry = {
       reference: confirmation?.trip?.tripCode || confirmation?.reservation?.reservationNumber || '',
@@ -263,6 +280,7 @@ export default function GuestAppPage() {
     try {
       const next = [entry, ...recentLookups.filter((row) => !(row.reference === entry.reference && row.email === entry.email))].slice(0, 5);
       localStorage.setItem(RECENT_LOOKUPS_KEY, JSON.stringify(next));
+      localStorage.setItem(GUEST_LAST_BOOKING_KEY, JSON.stringify({ reference: entry.reference, email: entry.email }));
       setRecentLookups(next);
     } catch {}
   }
