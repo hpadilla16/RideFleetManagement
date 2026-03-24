@@ -98,6 +98,13 @@ function submissionReplyState(submission) {
   };
 }
 
+function incidentHeadline(incident) {
+  return [
+    incident?.trip?.tripCode || incident?.reservation?.reservationNumber || '',
+    incident?.title || ''
+  ].filter(Boolean).join(' - ') || incident?.title || 'Issue Case';
+}
+
 function HistoryList({ rows }) {
   if (!rows?.length) {
     return <div className="surface-note">No history yet beyond the current case snapshot.</div>;
@@ -361,6 +368,97 @@ function IssueCenterInner({ token, me, logout }) {
     selectedSubmission?.registrationDocumentUrl ? { name: 'Registration Document', dataUrl: selectedSubmission.registrationDocumentUrl } : null,
     selectedSubmission?.initialInspectionDocumentUrl ? { name: 'Initial Inspection', dataUrl: selectedSubmission.initialInspectionDocumentUrl } : null
   ].filter(Boolean);
+  const nextCaseItems = useMemo(() => {
+    const awaitingIncident = incidents.find((incident) =>
+      (incident.communications || []).some((entry) => entry.publicTokenExpiresAt && !entry.respondedAt)
+    );
+    const disputedIncident = incidents.find((incident) => String(incident?.trip?.status || '').toUpperCase() === 'DISPUTED');
+    const openIncident = incidents.find((incident) => String(incident.status || '').toUpperCase() === 'OPEN');
+    const awaitingSubmission = vehicleSubmissions.find((submission) =>
+      (submission.communications || []).some((entry) => entry.publicTokenExpiresAt && !entry.respondedAt)
+    );
+    const pendingSubmission = vehicleSubmissions.find((submission) => String(submission.status || '').toUpperCase() === 'PENDING_REVIEW');
+
+    return [
+      awaitingIncident ? {
+        key: `incident-reply-${awaitingIncident.id}`,
+        label: 'Awaiting Guest / Host Reply',
+        title: incidentHeadline(awaitingIncident),
+        detail: 'Support already requested more information. Review the reply window first.',
+        cta: 'Handle Case',
+        onClick: () => setEdit({
+          id: awaitingIncident.id,
+          status: awaitingIncident.status,
+          title: awaitingIncident.title,
+          description: awaitingIncident.description || '',
+          amountResolved: awaitingIncident.amountResolved ? String(awaitingIncident.amountResolved) : '',
+          note: '',
+          history: awaitingIncident.history || [],
+          communications: awaitingIncident.communications || [],
+          requestNote: ''
+        }),
+        tone: 'warn'
+      } : null,
+      disputedIncident ? {
+        key: `incident-dispute-${disputedIncident.id}`,
+        label: 'Disputed Trip',
+        title: incidentHeadline(disputedIncident),
+        detail: 'Trip is still marked disputed and should be actively worked.',
+        cta: 'Open Workflow',
+        href: disputedIncident.trip?.reservation?.id ? `/reservations/${disputedIncident.trip.reservation.id}` : '/issues',
+        tone: 'warn'
+      } : null,
+      openIncident ? {
+        key: `incident-open-${openIncident.id}`,
+        label: 'Newest Open Case',
+        title: incidentHeadline(openIncident),
+        detail: 'Fresh issue that should be triaged into review or resolution.',
+        cta: 'Review Case',
+        onClick: () => setEdit({
+          id: openIncident.id,
+          status: openIncident.status,
+          title: openIncident.title,
+          description: openIncident.description || '',
+          amountResolved: openIncident.amountResolved ? String(openIncident.amountResolved) : '',
+          note: '',
+          history: openIncident.history || [],
+          communications: openIncident.communications || [],
+          requestNote: ''
+        }),
+        tone: 'neutral'
+      } : null,
+      awaitingSubmission ? {
+        key: `submission-reply-${awaitingSubmission.id}`,
+        label: 'Host Approval Reply',
+        title: [awaitingSubmission.year, awaitingSubmission.make, awaitingSubmission.model].filter(Boolean).join(' ') || 'Vehicle Approval',
+        detail: 'Host replied to an approval request. Review docs and communications before approving.',
+        cta: 'Review Vehicle',
+        onClick: () => setSubmissionEdit({
+          id: awaitingSubmission.id,
+          status: awaitingSubmission.status,
+          reviewNotes: awaitingSubmission.reviewNotes || '',
+          communications: awaitingSubmission.communications || [],
+          requestNote: ''
+        }),
+        tone: 'warn'
+      } : null,
+      pendingSubmission ? {
+        key: `submission-pending-${pendingSubmission.id}`,
+        label: 'Pending Vehicle Approval',
+        title: [pendingSubmission.year, pendingSubmission.make, pendingSubmission.model].filter(Boolean).join(' ') || 'Vehicle Submission',
+        detail: 'A new host vehicle submission is still waiting on initial review.',
+        cta: 'Review Vehicle',
+        onClick: () => setSubmissionEdit({
+          id: pendingSubmission.id,
+          status: pendingSubmission.status,
+          reviewNotes: pendingSubmission.reviewNotes || '',
+          communications: pendingSubmission.communications || [],
+          requestNote: ''
+        }),
+        tone: 'neutral'
+      } : null
+    ].filter(Boolean).slice(0, 4);
+  }, [incidents, vehicleSubmissions]);
 
   return (
     <AppShell me={me} logout={logout}>
@@ -447,6 +545,45 @@ function IssueCenterInner({ token, me, logout }) {
           <div className="surface-note">
             Best support order: grab open issues first, check waiting public replies second, clear vehicle approvals, then finish resolution notes before closeout.
           </div>
+        </section>
+
+        <section className="glass card-lg section-card">
+          <div className="row-between">
+            <div>
+              <div className="section-title">Next Cases To Handle</div>
+              <p className="ui-muted">A compact priority board for phone and tablet so the next support move is obvious.</p>
+            </div>
+            <span className="status-chip neutral">{nextCaseItems.length} live priorities</span>
+          </div>
+          {nextCaseItems.length ? (
+            <div className="app-card-grid compact">
+              {nextCaseItems.map((item) => (
+                <div key={item.key} className="doc-card">
+                  <div className="row-between" style={{ marginBottom: 0, alignItems: 'start' }}>
+                    <div style={{ display: 'grid', gap: 6 }}>
+                      <span className="label">{item.label}</span>
+                      <strong>{item.title}</strong>
+                    </div>
+                    <span className={item.tone === 'warn' ? 'status-chip warn' : 'status-chip neutral'}>
+                      {item.tone === 'warn' ? 'Attention' : 'Queue'}
+                    </span>
+                  </div>
+                  <div className="doc-meta">{item.detail}</div>
+                  <div className="inline-actions">
+                    {item.href ? (
+                      <a href={item.href}>
+                        <button type="button">{item.cta}</button>
+                      </a>
+                    ) : (
+                      <button type="button" onClick={item.onClick}>{item.cta}</button>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div className="surface-note">No urgent support priorities are open right now. You can work from the queues below.</div>
+          )}
         </section>
       </section>
 
