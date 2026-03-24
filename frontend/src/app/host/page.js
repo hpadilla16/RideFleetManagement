@@ -166,6 +166,16 @@ function hostAttention(trip) {
   return { label: 'Healthy', tone: 'good' };
 }
 
+function guestFlowLabel(trip) {
+  const reservation = trip?.reservation || null;
+  if (!reservation) return 'Workflow missing';
+  if (!reservation.customerInfoCompletedAt) return 'Guest pre-check-in pending';
+  if (!reservation.signatureSignedAt) return 'Guest signature pending';
+  if (Number(reservation?.rentalAgreement?.balance || 0) > 0) return 'Guest payment pending';
+  if (!reservation.readyForPickupAt) return 'Awaiting pickup readiness';
+  return 'Guest ready for handoff';
+}
+
 const EMPTY_LISTING_EDIT = {
   id: '', shortDescription: '', description: '', status: 'DRAFT',
   baseDailyRate: '', cleaningFee: '', deliveryFee: '', securityDeposit: '',
@@ -293,6 +303,27 @@ function HostAppInner({ token, me, logout }) {
     instantBookListings: listings.filter((row) => !!row.instantBook).length,
     nextPickupAt: hostSnapshot.upcomingPickups[0]?.scheduledPickupAt || null
   }), [hostSnapshot.upcomingPickups, listings]);
+
+  const hostTripOpsSnapshot = useMemo(() => {
+    const nextHandoffTrip = hostSnapshot.upcomingPickups[0] || hostSnapshot.watchlist[0] || null;
+    const guestActionTrips = trips.filter((trip) => {
+      const reservation = trip?.reservation || null;
+      return !!reservation && (
+        !reservation.customerInfoCompletedAt ||
+        !reservation.signatureSignedAt ||
+        Number(reservation?.rentalAgreement?.balance || 0) > 0
+      );
+    });
+    const readyForHandoff = trips.filter((trip) => {
+      const reservation = trip?.reservation || null;
+      return !!reservation?.readyForPickupAt && ['CONFIRMED', 'READY_FOR_PICKUP'].includes(String(trip?.status || '').toUpperCase());
+    });
+    return {
+      nextHandoffTrip,
+      guestActionTrips,
+      readyForHandoff
+    };
+  }, [hostSnapshot.upcomingPickups, hostSnapshot.watchlist, trips]);
 
   const selectedListingSnapshot = useMemo(() => {
     if (!listingEdit.id) return null;
@@ -612,6 +643,88 @@ function HostAppInner({ token, me, logout }) {
             <div className="doc-meta">{hostMobileSnapshot.instantBookListings} listing{hostMobileSnapshot.instantBookListings === 1 ? '' : 's'} currently support instant book.</div>
           </div>
         </div>
+      </section>
+
+      <section className="split-panel" style={{ marginBottom: 18 }}>
+        <section className="glass card-lg section-card">
+          <div className="row-between">
+            <div><div className="section-title">Next Handoff</div><p className="ui-muted">The next trip that likely needs host attention right now.</p></div>
+            <span className="status-chip neutral">{hostTripOpsSnapshot.nextHandoffTrip ? 'Live' : 'Clear'}</span>
+          </div>
+          {hostTripOpsSnapshot.nextHandoffTrip ? (
+            <div className="stack">
+              <div className="surface-note" style={{ display: 'grid', gap: 10 }}>
+                <div className="row-between" style={{ gap: 12, alignItems: 'start' }}>
+                  <div>
+                    <div style={{ fontWeight: 700 }}>{hostTripOpsSnapshot.nextHandoffTrip.tripCode}</div>
+                    <div className="label" style={{ textTransform: 'none', letterSpacing: 0, fontSize: 12 }}>
+                      {[
+                        hostTripOpsSnapshot.nextHandoffTrip.listing?.title || 'Listing',
+                        hostTripOpsSnapshot.nextHandoffTrip.guestCustomer
+                          ? [hostTripOpsSnapshot.nextHandoffTrip.guestCustomer.firstName, hostTripOpsSnapshot.nextHandoffTrip.guestCustomer.lastName].filter(Boolean).join(' ')
+                          : 'Guest'
+                      ].join(' · ')}
+                    </div>
+                  </div>
+                  <span className={statusChip(hostTripOpsSnapshot.nextHandoffTrip.status)}>{hostTripOpsSnapshot.nextHandoffTrip.status}</span>
+                </div>
+                <div className="app-card-grid compact">
+                  <div className="doc-card">
+                    <strong>Pickup</strong>
+                    <div className="doc-meta">{formatDateTime(hostTripOpsSnapshot.nextHandoffTrip.scheduledPickupAt)}</div>
+                  </div>
+                  <div className="doc-card">
+                    <strong>Guest Flow</strong>
+                    <div className="doc-meta">{guestFlowLabel(hostTripOpsSnapshot.nextHandoffTrip)}</div>
+                  </div>
+                  <div className="doc-card">
+                    <strong>Host Earnings</strong>
+                    <div className="doc-meta">{formatMoney(hostTripOpsSnapshot.nextHandoffTrip.hostEarnings)}</div>
+                  </div>
+                  <div className="doc-card">
+                    <strong>Support Cases</strong>
+                    <div className="doc-meta">{hostTripOpsSnapshot.nextHandoffTrip.incidents?.length || 0} case{(hostTripOpsSnapshot.nextHandoffTrip.incidents?.length || 0) === 1 ? '' : 's'} on this trip.</div>
+                  </div>
+                </div>
+                <div className="inline-actions">
+                  {hostTripOpsSnapshot.nextHandoffTrip.reservation?.id ? <a href={`/reservations/${hostTripOpsSnapshot.nextHandoffTrip.reservation.id}`}><button type="button">Open Workflow</button></a> : null}
+                  {tripActionsFor(hostTripOpsSnapshot.nextHandoffTrip.status)[0] ? (
+                    <button type="button" className="button-subtle" onClick={() => moveTrip(hostTripOpsSnapshot.nextHandoffTrip.id, tripActionsFor(hostTripOpsSnapshot.nextHandoffTrip.status)[0])}>
+                      {tripActionsFor(hostTripOpsSnapshot.nextHandoffTrip.status)[0]}
+                    </button>
+                  ) : null}
+                </div>
+              </div>
+            </div>
+          ) : <div className="surface-note">No handoff needs immediate host action right now.</div>}
+        </section>
+
+        <section className="glass card-lg section-card">
+          <div className="row-between">
+            <div><div className="section-title">Guest Readiness Lane</div><p className="ui-muted">Trips where the guest still owes a step before handoff feels clean.</p></div>
+            <span className="status-chip neutral">{hostTripOpsSnapshot.guestActionTrips.length} waiting</span>
+          </div>
+          {hostTripOpsSnapshot.guestActionTrips.length ? (
+            <div className="stack">
+              {hostTripOpsSnapshot.guestActionTrips.slice(0, 4).map((trip) => (
+                <div key={trip.id} className="surface-note" style={{ display: 'grid', gap: 8 }}>
+                  <div className="row-between" style={{ gap: 12 }}>
+                    <strong>{trip.tripCode}</strong>
+                    <span className={statusChip(trip.status)}>{trip.status}</span>
+                  </div>
+                  <div style={{ color: '#55456f', lineHeight: 1.5 }}>
+                    {[trip.listing?.title || 'Listing', guestFlowLabel(trip)].join(' · ')}
+                  </div>
+                  <div className="inline-actions">
+                    {trip.reservation?.id ? <a href={`/reservations/${trip.reservation.id}`}><button type="button" className="button-subtle">Open Workflow</button></a> : null}
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div className="surface-note">Guests are looking clean right now. No pre-check-in, signature, or payment blockers detected.</div>
+          )}
+        </section>
       </section>
 
       {isAdminViewer ? (
