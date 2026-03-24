@@ -5,6 +5,8 @@ import { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { api } from '../../lib/client';
 
+const PUBLIC_BOOKING_DRAFT_KEY = 'fleet_public_booking_draft';
+
 function toLocalInputValue(date) {
   const value = new Date(date);
   const year = value.getFullYear();
@@ -69,6 +71,19 @@ function buildInsuranceSelectionState(result, mode) {
     liabilityAccepted: false,
     ownPolicyNumber: ''
   };
+}
+
+function restorePublicBookingDraft() {
+  if (typeof window === 'undefined') return null;
+  try {
+    const raw = sessionStorage.getItem(PUBLIC_BOOKING_DRAFT_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== 'object') return null;
+    return parsed;
+  } catch {
+    return null;
+  }
 }
 
 function BookingStageBar({ stage }) {
@@ -170,21 +185,22 @@ function BookingCard({ title, subtitle, meta, quote, cta, onClick, selected = fa
 
 export default function PublicBookingPage() {
   const router = useRouter();
+  const initialDraft = restorePublicBookingDraft();
   const [bootstrap, setBootstrap] = useState(null);
-  const [tenantSlug, setTenantSlug] = useState('');
-  const [uiStep, setUiStep] = useState('search');
-  const [searchMode, setSearchMode] = useState('RENTAL');
-  const [pickupLocationId, setPickupLocationId] = useState('');
-  const [returnLocationId, setReturnLocationId] = useState('');
-  const [vehicleTypeId, setVehicleTypeId] = useState('');
-  const [pickupAt, setPickupAt] = useState(toLocalInputValue(addDays(new Date(), 1)));
-  const [returnAt, setReturnAt] = useState(toLocalInputValue(addDays(new Date(), 4)));
-  const [results, setResults] = useState(null);
+  const [tenantSlug, setTenantSlug] = useState(initialDraft?.tenantSlug || '');
+  const [uiStep, setUiStep] = useState(initialDraft?.uiStep || 'search');
+  const [searchMode, setSearchMode] = useState(initialDraft?.searchMode || 'RENTAL');
+  const [pickupLocationId, setPickupLocationId] = useState(initialDraft?.pickupLocationId || '');
+  const [returnLocationId, setReturnLocationId] = useState(initialDraft?.returnLocationId || '');
+  const [vehicleTypeId, setVehicleTypeId] = useState(initialDraft?.vehicleTypeId || '');
+  const [pickupAt, setPickupAt] = useState(initialDraft?.pickupAt || toLocalInputValue(addDays(new Date(), 1)));
+  const [returnAt, setReturnAt] = useState(initialDraft?.returnAt || toLocalInputValue(addDays(new Date(), 4)));
+  const [results, setResults] = useState(initialDraft?.results || null);
   const [loadingBootstrap, setLoadingBootstrap] = useState(true);
   const [searching, setSearching] = useState(false);
   const [error, setError] = useState('');
-  const [selectedResult, setSelectedResult] = useState(null);
-  const [checkoutState, setCheckoutState] = useState({
+  const [selectedResult, setSelectedResult] = useState(initialDraft?.selectedResult || null);
+  const [checkoutState, setCheckoutState] = useState(initialDraft?.checkoutState || {
     firstName: '',
     lastName: '',
     email: '',
@@ -195,9 +211,9 @@ export default function PublicBookingPage() {
   });
   const [submitting, setSubmitting] = useState(false);
   const [lookingUp, setLookingUp] = useState(false);
-  const [selectedServices, setSelectedServices] = useState({});
-  const [insuranceSelection, setInsuranceSelection] = useState(buildInsuranceSelectionState(null, 'RENTAL'));
-  const [lookupState, setLookupState] = useState({
+  const [selectedServices, setSelectedServices] = useState(initialDraft?.selectedServices || {});
+  const [insuranceSelection, setInsuranceSelection] = useState(initialDraft?.insuranceSelection || buildInsuranceSelectionState(null, 'RENTAL'));
+  const [lookupState, setLookupState] = useState(initialDraft?.lookupState || {
     reference: '',
     email: ''
   });
@@ -232,6 +248,42 @@ export default function PublicBookingPage() {
   useEffect(() => {
     loadBootstrap('');
   }, []);
+
+  useEffect(() => {
+    try {
+      sessionStorage.setItem(PUBLIC_BOOKING_DRAFT_KEY, JSON.stringify({
+        tenantSlug,
+        uiStep,
+        searchMode,
+        pickupLocationId,
+        returnLocationId,
+        vehicleTypeId,
+        pickupAt,
+        returnAt,
+        results,
+        selectedResult,
+        checkoutState,
+        selectedServices,
+        insuranceSelection,
+        lookupState
+      }));
+    } catch {}
+  }, [
+    checkoutState,
+    insuranceSelection,
+    lookupState,
+    pickupAt,
+    pickupLocationId,
+    results,
+    returnAt,
+    returnLocationId,
+    searchMode,
+    selectedResult,
+    selectedServices,
+    tenantSlug,
+    uiStep,
+    vehicleTypeId
+  ]);
 
   useEffect(() => {
     if (!selectedResult) {
@@ -1153,6 +1205,7 @@ export default function PublicBookingPage() {
                           })
                         });
                         if (typeof window !== 'undefined') {
+                          sessionStorage.removeItem(PUBLIC_BOOKING_DRAFT_KEY);
                           sessionStorage.setItem('fleet_public_booking_confirmation', JSON.stringify(payload));
                         }
                         router.push('/book/confirmation');

@@ -5,6 +5,8 @@ import { API_BASE } from '../../../lib/client';
 import { PortalFrame, portalStyles } from '../_components/PortalFrame';
 import { PortalTimelineCard } from '../_components/PortalTimelineCard';
 
+const PRECHECKIN_DRAFT_PREFIX = 'customer.precheckin.';
+
 function toDateInput(value) {
   if (!value) return '';
   const d = new Date(value);
@@ -41,6 +43,26 @@ const EMPTY_FORM = {
   idPhotoUrl: ''
 };
 
+function precheckinDraftKey(token) {
+  return `${PRECHECKIN_DRAFT_PREFIX}${token}`;
+}
+
+function restorePrecheckinDraft(token) {
+  if (!token || typeof window === 'undefined') return null;
+  try {
+    const raw = localStorage.getItem(precheckinDraftKey(token));
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== 'object') return null;
+    return {
+      ...EMPTY_FORM,
+      ...parsed
+    };
+  } catch {
+    return null;
+  }
+}
+
 export default function PrecheckinPage() {
   const [token, setToken] = useState('');
   const [loading, setLoading] = useState(true);
@@ -66,7 +88,7 @@ export default function PrecheckinPage() {
         const json = await res.json();
         if (!res.ok) throw new Error(json?.error || 'Unable to load pre-check-in');
         setModel(json);
-        setForm({
+        const serverForm = {
           firstName: json?.reservation?.customer?.firstName || '',
           lastName: json?.reservation?.customer?.lastName || '',
           email: json?.reservation?.customer?.email || '',
@@ -83,7 +105,9 @@ export default function PrecheckinPage() {
           zip: json?.reservation?.customer?.zip || '',
           country: json?.reservation?.customer?.country || '',
           idPhotoUrl: json?.reservation?.customer?.idPhotoUrl || ''
-        });
+        };
+        const draft = restorePrecheckinDraft(token);
+        setForm(draft ? { ...serverForm, ...draft } : serverForm);
       } catch (e) {
         setError(String(e.message || e));
       } finally {
@@ -96,6 +120,15 @@ export default function PrecheckinPage() {
   const updateField = (key, value) => {
     setForm((prev) => ({ ...prev, [key]: value }));
   };
+
+  useEffect(() => {
+    if (!token) return;
+    try {
+      const hasDraft = Object.values(form).some((value) => !!value);
+      if (hasDraft) localStorage.setItem(precheckinDraftKey(token), JSON.stringify(form));
+      else localStorage.removeItem(precheckinDraftKey(token));
+    } catch {}
+  }, [form, token]);
 
   const uploadField = async (key, file) => {
     try {
@@ -119,6 +152,7 @@ export default function PrecheckinPage() {
       const json = await res.json();
       if (!res.ok) throw new Error(json?.error || 'Unable to submit pre-check-in');
       setOk(json?.message || 'Pre-check-in completed.');
+      try { localStorage.removeItem(precheckinDraftKey(token)); } catch {}
       setModel((prev) => ({
         ...(prev || {}),
         portal: json?.portal || prev?.portal || null,
