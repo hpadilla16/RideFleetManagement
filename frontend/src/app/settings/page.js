@@ -35,6 +35,31 @@ const DEFAULT_EMAIL_TEMPLATES = {
   agreementEmailHtml: '<div>Hello {{customerName}},<br/><br/>Attached is your rental agreement <b>{{agreementNumber}}</b>.<br/><br/>Thanks,<br/>{{companyName}}</div>'
 };
 
+const DEFAULT_PAYMENT_GATEWAY_CONFIG = {
+  gateway: 'authorizenet',
+  label: 'Primary payment gateway',
+  authorizenet: {
+    enabled: true,
+    environment: 'sandbox',
+    loginId: '',
+    transactionKey: '',
+    clientKey: ''
+  },
+  stripe: {
+    enabled: false,
+    secretKey: '',
+    publishableKey: '',
+    webhookSecret: ''
+  },
+  square: {
+    enabled: false,
+    environment: 'production',
+    accessToken: '',
+    applicationId: '',
+    locationId: ''
+  }
+};
+
 const EMPTY_LOCATION = { code: '', name: '', address: '', city: '', state: '', country: 'Puerto Rico', taxRate: '11.5', isActive: true };
 const LOCATION_CONFIG_DEFAULT = {
   gracePeriodMin: 60,
@@ -180,6 +205,7 @@ function SettingsInner({ token, me, logout }) {
   });
   const [emailTemplates, setEmailTemplates] = useState(DEFAULT_EMAIL_TEMPLATES);
   const [reservationOptions, setReservationOptions] = useState({ autoAssignVehicleFromType: false });
+  const [paymentGatewayConfig, setPaymentGatewayConfig] = useState(DEFAULT_PAYMENT_GATEWAY_CONFIG);
 
   const [locationForm, setLocationForm] = useState(EMPTY_LOCATION);
   const [feeForm, setFeeForm] = useState(EMPTY_FEE);
@@ -219,11 +245,12 @@ function SettingsInner({ token, me, logout }) {
       ['vehicleTypes', api(scopedSettingsPath('/api/vehicle-types'), {}, token)],
       ['insurancePlans', api(scopedSettingsPath('/api/settings/insurance-plans'), {}, token)],
       ['emailTemplates', api(scopedSettingsPath('/api/settings/email-templates'), {}, token)],
-      ['reservationOptions', api(scopedSettingsPath('/api/settings/reservation-options'), {}, token)]
+      ['reservationOptions', api(scopedSettingsPath('/api/settings/reservation-options'), {}, token)],
+      ['paymentGateway', api(scopedSettingsPath('/api/settings/payment-gateway'), {}, token)]
     ];
     const results = await Promise.allSettled(requests.map(([, p]) => p));
 
-    const [c, l, s, f, r, vt, ip, et, ro] = results;
+    const [c, l, s, f, r, vt, ip, et, ro, pg] = results;
     if (c.status === 'fulfilled') setCfg(c.value);
     if (l.status === 'fulfilled') setLocations(l.value);
     if (s.status === 'fulfilled') setServices(s.value);
@@ -247,6 +274,24 @@ function SettingsInner({ token, me, logout }) {
     }
     if (et.status === 'fulfilled') setEmailTemplates({ ...DEFAULT_EMAIL_TEMPLATES, ...(et.value || {}) });
     if (ro.status === 'fulfilled') setReservationOptions({ autoAssignVehicleFromType: !!ro.value?.autoAssignVehicleFromType });
+    if (pg.status === 'fulfilled') {
+      setPaymentGatewayConfig({
+        ...DEFAULT_PAYMENT_GATEWAY_CONFIG,
+        ...(pg.value || {}),
+        authorizenet: {
+          ...DEFAULT_PAYMENT_GATEWAY_CONFIG.authorizenet,
+          ...(pg.value?.authorizenet || {})
+        },
+        stripe: {
+          ...DEFAULT_PAYMENT_GATEWAY_CONFIG.stripe,
+          ...(pg.value?.stripe || {})
+        },
+        square: {
+          ...DEFAULT_PAYMENT_GATEWAY_CONFIG.square,
+          ...(pg.value?.square || {})
+        }
+      });
+    }
 
     const failedKeys = results
       .map((x, i) => ({ x, key: requests[i][0] }))
@@ -352,6 +397,30 @@ function SettingsInner({ token, me, logout }) {
     const out = await api(scopedSettingsPath('/api/settings/reservation-options'), { method: 'PUT', body: JSON.stringify(reservationOptions) }, token);
     setReservationOptions({ autoAssignVehicleFromType: !!out?.autoAssignVehicleFromType });
     setMsg('Reservation options saved');
+  };
+
+  const savePaymentGatewayConfig = async () => {
+    const out = await api(scopedSettingsPath('/api/settings/payment-gateway'), {
+      method: 'PUT',
+      body: JSON.stringify(paymentGatewayConfig)
+    }, token);
+    setPaymentGatewayConfig({
+      ...DEFAULT_PAYMENT_GATEWAY_CONFIG,
+      ...(out || {}),
+      authorizenet: {
+        ...DEFAULT_PAYMENT_GATEWAY_CONFIG.authorizenet,
+        ...(out?.authorizenet || {})
+      },
+      stripe: {
+        ...DEFAULT_PAYMENT_GATEWAY_CONFIG.stripe,
+        ...(out?.stripe || {})
+      },
+      square: {
+        ...DEFAULT_PAYMENT_GATEWAY_CONFIG.square,
+        ...(out?.square || {})
+      }
+    });
+    setMsg('Payment gateway settings saved');
   };
 
   const uploadLogo = (file) => {
@@ -1108,6 +1177,11 @@ function SettingsInner({ token, me, logout }) {
   const onlineRateCount = rates.filter((rate) => rate.isActive !== false && rate.displayOnline).length;
   const onlineServiceCount = services.filter((service) => service.isActive !== false && service.displayOnline).length;
   const activeInsuranceCount = insurancePlans.filter((plan) => plan.isActive !== false).length;
+  const paymentGatewayLabel = {
+    authorizenet: 'Authorize.Net',
+    stripe: 'Stripe',
+    square: 'Square'
+  }[String(paymentGatewayConfig?.gateway || '').toLowerCase()] || 'Not set';
   const settingsReadyCount = [
     activeLocationCount > 0,
     activeVehicleTypeCount > 0,
@@ -1121,6 +1195,7 @@ function SettingsInner({ token, me, logout }) {
     rates: 'Rates',
     vehicleTypes: 'Vehicle Types',
     insurance: 'Insurance',
+    payments: 'Payments',
     emails: 'Emails',
     services: 'Additional Services',
     commissions: 'Commissions'
@@ -1192,6 +1267,10 @@ function SettingsInner({ token, me, logout }) {
               <span className="label">Insurance Plans</span>
               <strong>{activeInsuranceCount}</strong>
             </div>
+            <div className="info-tile">
+              <span className="label">Payment Gateway</span>
+              <strong>{paymentGatewayLabel}</strong>
+            </div>
           </div>
           <div className="inline-actions">
             <button type="button" onClick={() => setTab('vehicleTypes')}>Vehicle Types</button>
@@ -1199,6 +1278,7 @@ function SettingsInner({ token, me, logout }) {
             <button type="button" onClick={() => setTab('rates')}>Rates</button>
             <button type="button" onClick={() => setTab('services')}>Online Services</button>
             <button type="button" onClick={() => setTab('insurance')}>Insurance</button>
+            <button type="button" onClick={() => setTab('payments')}>Payments</button>
             <button type="button" onClick={() => setTab('agreement')}>Agreement</button>
           </div>
         </div>
@@ -1210,6 +1290,7 @@ function SettingsInner({ token, me, logout }) {
           <button onClick={() => setTab('rates')}>Rates</button>
           <button onClick={() => setTab('vehicleTypes')}>Vehicle Types</button>
           <button onClick={() => setTab('insurance')}>Insurance</button>
+          <button onClick={() => setTab('payments')}>Payments</button>
           <button onClick={() => setTab('emails')}>Emails</button>
           <button onClick={() => setTab('services')}>Additional Services</button>
           <button onClick={() => setTab('commissions')}>Commissions</button>
@@ -1255,6 +1336,114 @@ function SettingsInner({ token, me, logout }) {
               <div style={{ marginTop: 10 }}>
                 <button onClick={saveReservationOptions}>Save Reservation Options</button>
               </div>
+            </div>
+          </div>
+        )}
+
+        {tab === 'payments' && (
+          <div className="stack">
+            <h2>Tenant Payment Gateway</h2>
+            <div className="surface-note">
+              Configure the online payment gateway for this tenant. Super admins can switch tenant scope above and keep separate merchant credentials for each tenant.
+            </div>
+            <div className="form-grid-2">
+              <div className="stack">
+                <label className="label">Primary Gateway</label>
+                <select value={paymentGatewayConfig.gateway} onChange={(e) => setPaymentGatewayConfig({ ...paymentGatewayConfig, gateway: e.target.value })}>
+                  <option value="authorizenet">Authorize.Net</option>
+                  <option value="stripe">Stripe</option>
+                  <option value="square">Square</option>
+                </select>
+              </div>
+              <div className="stack">
+                <label className="label">Gateway Label</label>
+                <input value={paymentGatewayConfig.label || ''} onChange={(e) => setPaymentGatewayConfig({ ...paymentGatewayConfig, label: e.target.value })} placeholder="Primary payment gateway" />
+              </div>
+            </div>
+
+            <section className="glass card section-card">
+              <div className="row-between">
+                <h3 style={{ margin: 0 }}>Authorize.Net</h3>
+                <label className="label"><input type="checkbox" checked={!!paymentGatewayConfig.authorizenet?.enabled} onChange={(e) => setPaymentGatewayConfig({ ...paymentGatewayConfig, authorizenet: { ...paymentGatewayConfig.authorizenet, enabled: e.target.checked } })} /> Enabled</label>
+              </div>
+              <div className="form-grid-2">
+                <div className="stack">
+                  <label className="label">Environment</label>
+                  <select value={paymentGatewayConfig.authorizenet?.environment || 'sandbox'} onChange={(e) => setPaymentGatewayConfig({ ...paymentGatewayConfig, authorizenet: { ...paymentGatewayConfig.authorizenet, environment: e.target.value } })}>
+                    <option value="sandbox">Sandbox</option>
+                    <option value="production">Production</option>
+                  </select>
+                </div>
+                <div className="stack">
+                  <label className="label">API Login ID</label>
+                  <input value={paymentGatewayConfig.authorizenet?.loginId || ''} onChange={(e) => setPaymentGatewayConfig({ ...paymentGatewayConfig, authorizenet: { ...paymentGatewayConfig.authorizenet, loginId: e.target.value } })} />
+                </div>
+              </div>
+              <div className="form-grid-2">
+                <div className="stack">
+                  <label className="label">Transaction Key</label>
+                  <input value={paymentGatewayConfig.authorizenet?.transactionKey || ''} onChange={(e) => setPaymentGatewayConfig({ ...paymentGatewayConfig, authorizenet: { ...paymentGatewayConfig.authorizenet, transactionKey: e.target.value } })} />
+                </div>
+                <div className="stack">
+                  <label className="label">Client Key</label>
+                  <input value={paymentGatewayConfig.authorizenet?.clientKey || ''} onChange={(e) => setPaymentGatewayConfig({ ...paymentGatewayConfig, authorizenet: { ...paymentGatewayConfig.authorizenet, clientKey: e.target.value } })} />
+                </div>
+              </div>
+            </section>
+
+            <section className="glass card section-card">
+              <div className="row-between">
+                <h3 style={{ margin: 0 }}>Stripe</h3>
+                <label className="label"><input type="checkbox" checked={!!paymentGatewayConfig.stripe?.enabled} onChange={(e) => setPaymentGatewayConfig({ ...paymentGatewayConfig, stripe: { ...paymentGatewayConfig.stripe, enabled: e.target.checked } })} /> Enabled</label>
+              </div>
+              <div className="form-grid-2">
+                <div className="stack">
+                  <label className="label">Secret Key</label>
+                  <input value={paymentGatewayConfig.stripe?.secretKey || ''} onChange={(e) => setPaymentGatewayConfig({ ...paymentGatewayConfig, stripe: { ...paymentGatewayConfig.stripe, secretKey: e.target.value } })} />
+                </div>
+                <div className="stack">
+                  <label className="label">Publishable Key</label>
+                  <input value={paymentGatewayConfig.stripe?.publishableKey || ''} onChange={(e) => setPaymentGatewayConfig({ ...paymentGatewayConfig, stripe: { ...paymentGatewayConfig.stripe, publishableKey: e.target.value } })} />
+                </div>
+              </div>
+              <div className="stack">
+                <label className="label">Webhook Secret</label>
+                <input value={paymentGatewayConfig.stripe?.webhookSecret || ''} onChange={(e) => setPaymentGatewayConfig({ ...paymentGatewayConfig, stripe: { ...paymentGatewayConfig.stripe, webhookSecret: e.target.value } })} />
+              </div>
+            </section>
+
+            <section className="glass card section-card">
+              <div className="row-between">
+                <h3 style={{ margin: 0 }}>Square</h3>
+                <label className="label"><input type="checkbox" checked={!!paymentGatewayConfig.square?.enabled} onChange={(e) => setPaymentGatewayConfig({ ...paymentGatewayConfig, square: { ...paymentGatewayConfig.square, enabled: e.target.checked } })} /> Enabled</label>
+              </div>
+              <div className="form-grid-2">
+                <div className="stack">
+                  <label className="label">Environment</label>
+                  <select value={paymentGatewayConfig.square?.environment || 'production'} onChange={(e) => setPaymentGatewayConfig({ ...paymentGatewayConfig, square: { ...paymentGatewayConfig.square, environment: e.target.value } })}>
+                    <option value="production">Production</option>
+                    <option value="sandbox">Sandbox</option>
+                  </select>
+                </div>
+                <div className="stack">
+                  <label className="label">Application ID</label>
+                  <input value={paymentGatewayConfig.square?.applicationId || ''} onChange={(e) => setPaymentGatewayConfig({ ...paymentGatewayConfig, square: { ...paymentGatewayConfig.square, applicationId: e.target.value } })} />
+                </div>
+              </div>
+              <div className="form-grid-2">
+                <div className="stack">
+                  <label className="label">Access Token</label>
+                  <input value={paymentGatewayConfig.square?.accessToken || ''} onChange={(e) => setPaymentGatewayConfig({ ...paymentGatewayConfig, square: { ...paymentGatewayConfig.square, accessToken: e.target.value } })} />
+                </div>
+                <div className="stack">
+                  <label className="label">Location ID</label>
+                  <input value={paymentGatewayConfig.square?.locationId || ''} onChange={(e) => setPaymentGatewayConfig({ ...paymentGatewayConfig, square: { ...paymentGatewayConfig.square, locationId: e.target.value } })} />
+                </div>
+              </div>
+            </section>
+
+            <div className="inline-actions">
+              <button type="button" onClick={savePaymentGatewayConfig}>Save Payment Gateway</button>
             </div>
           </div>
         )}

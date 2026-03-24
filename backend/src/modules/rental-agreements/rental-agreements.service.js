@@ -4,6 +4,7 @@ import { fileURLToPath } from 'node:url';
 import puppeteer from 'puppeteer';
 import { prisma } from '../../lib/prisma.js';
 import { hostReviewsService } from '../host-reviews/host-reviews.service.js';
+import { settingsService } from '../settings/settings.service.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -90,18 +91,19 @@ function parseLocationConfig(raw) {
   return {};
 }
 
-function authNetConfig() {
-  const env = (process.env.AUTHNET_ENV || 'sandbox').toLowerCase();
+async function authNetConfig(scope = {}) {
+  const paymentConfig = await settingsService.getPaymentGatewayConfig(scope);
+  const env = String(paymentConfig?.authorizenet?.environment || process.env.AUTHNET_ENV || 'sandbox').toLowerCase();
   const api = env === 'production' ? 'https://api2.authorize.net/xml/v1/request.api' : 'https://apitest.authorize.net/xml/v1/request.api';
   return {
     api,
-    loginId: process.env.AUTHNET_API_LOGIN_ID || '',
-    transactionKey: process.env.AUTHNET_TRANSACTION_KEY || ''
+    loginId: String(paymentConfig?.authorizenet?.loginId || process.env.AUTHNET_API_LOGIN_ID || '').trim(),
+    transactionKey: String(paymentConfig?.authorizenet?.transactionKey || process.env.AUTHNET_TRANSACTION_KEY || '').trim()
   };
 }
 
-async function authNetRequest(payload) {
-  const cfg = authNetConfig();
+async function authNetRequest(payload, scope = {}) {
+  const cfg = await authNetConfig(scope);
   if (!cfg.loginId || !cfg.transactionKey) throw new Error('Authorize.Net is not configured');
   const r = await fetch(cfg.api, {
     method: 'POST',
@@ -1759,7 +1761,8 @@ export const rentalAgreementsService = {
       throw new Error('Customer does not have Authorize.Net card profile on file');
     }
 
-    const cfg = authNetConfig();
+    const tenantScope = agreement?.tenantId ? { tenantId: agreement.tenantId } : {};
+    const cfg = await authNetConfig(tenantScope);
     const authnet = await authNetRequest({
       createTransactionRequest: {
         merchantAuthentication: { name: cfg.loginId, transactionKey: cfg.transactionKey },
@@ -1773,7 +1776,7 @@ export const rentalAgreementsService = {
           order: { invoiceNumber: agreement.agreementNumber || undefined }
         }
       }
-    });
+    }, tenantScope);
 
     const tx = authnet?.transactionResponse;
     const ok = authnet?.messages?.resultCode === 'Ok' && tx?.responseCode === '1';
@@ -1799,8 +1802,10 @@ export const rentalAgreementsService = {
 
     let reference = payload.reference || null;
     const customer = agreement.reservation?.customer;
-    if (customer?.authnetCustomerProfileId && customer?.authnetPaymentProfileId && authNetConfig().loginId) {
-      const cfg = authNetConfig();
+    const tenantScope = agreement?.tenantId ? { tenantId: agreement.tenantId } : {};
+    const authNetCfg = await authNetConfig(tenantScope);
+    if (customer?.authnetCustomerProfileId && customer?.authnetPaymentProfileId && authNetCfg.loginId) {
+      const cfg = authNetCfg;
       const authnet = await authNetRequest({
         createTransactionRequest: {
           merchantAuthentication: { name: cfg.loginId, transactionKey: cfg.transactionKey },
@@ -1814,7 +1819,7 @@ export const rentalAgreementsService = {
             order: { invoiceNumber: agreement.agreementNumber || undefined }
           }
         }
-      });
+      }, tenantScope);
       const tx = authnet?.transactionResponse;
       const ok = authnet?.messages?.resultCode === 'Ok' && tx?.responseCode === '1';
       if (!ok) {

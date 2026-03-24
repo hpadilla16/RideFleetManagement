@@ -4,41 +4,52 @@ import { prisma } from '../../lib/prisma.js';
 import { sendEmail } from '../../lib/mailer.js';
 import { rentalAgreementsService } from '../rental-agreements/rental-agreements.service.js';
 import { reservationPricingService } from '../reservations/reservation-pricing.service.js';
+import { settingsService } from '../settings/settings.service.js';
 
 export const customerPortalRouter = Router();
-
-const PAYMENT_GATEWAY = (process.env.PAYMENT_GATEWAY || 'authorizenet').toLowerCase(); // authorizenet|stripe|square
-
-const AUTHNET_ENV = (process.env.AUTHNET_ENV || 'sandbox').toLowerCase();
-const AUTHNET_API = AUTHNET_ENV === 'production' ? 'https://api2.authorize.net/xml/v1/request.api' : 'https://apitest.authorize.net/xml/v1/request.api';
-
-const stripe = process.env.STRIPE_SECRET_KEY ? new Stripe(process.env.STRIPE_SECRET_KEY) : null;
 
 function portalBase() {
   return process.env.CUSTOMER_PORTAL_BASE_URL || 'http://localhost:3000';
 }
 
-function authNetEnabled() {
-  return !!(process.env.AUTHNET_API_LOGIN_ID && process.env.AUTHNET_TRANSACTION_KEY);
-}
-function stripeEnabled() {
-  return !!stripe;
-}
-function squareEnabled() {
-  return !!(process.env.SQUARE_ACCESS_TOKEN && process.env.SQUARE_LOCATION_ID);
+async function paymentGatewayConfigForTenant(tenantId = null) {
+  const cfg = await settingsService.getPaymentGatewayConfig(tenantId ? { tenantId } : {});
+  return cfg || {};
 }
 
-function currentGateway() {
-  return ['authorizenet', 'stripe', 'square'].includes(PAYMENT_GATEWAY) ? PAYMENT_GATEWAY : 'authorizenet';
+function authNetApiForConfig(config = {}) {
+  const env = String(config?.authorizenet?.environment || 'sandbox').toLowerCase();
+  return env === 'production' ? 'https://api2.authorize.net/xml/v1/request.api' : 'https://apitest.authorize.net/xml/v1/request.api';
 }
 
-async function authNetRequest(payload) {
-  const r = await fetch(AUTHNET_API, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+function authNetHostedBaseForConfig(config = {}) {
+  const env = String(config?.authorizenet?.environment || 'sandbox').toLowerCase();
+  return env === 'production' ? 'https://accept.authorize.net/payment/payment' : 'https://test.authorize.net/payment/payment';
+}
+
+function authNetEnabled(config = {}) {
+  return !!(config?.authorizenet?.enabled !== false && config?.authorizenet?.loginId && config?.authorizenet?.transactionKey);
+}
+function stripeEnabled(config = {}) {
+  return !!(config?.stripe?.enabled && config?.stripe?.secretKey);
+}
+function squareEnabled(config = {}) {
+  return !!(config?.square?.enabled && config?.square?.accessToken && config?.square?.locationId);
+}
+
+function currentGateway(config = {}) {
+  const gateway = String(config?.gateway || 'authorizenet').toLowerCase();
+  return ['authorizenet', 'stripe', 'square'].includes(gateway) ? gateway : 'authorizenet';
+}
+
+async function authNetRequest(payload, config = {}) {
+  const r = await fetch(authNetApiForConfig(config), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
   return r.json();
 }
 
 async function trySaveAuthNetCardOnFileFromTransaction({ reservation, reference }) {
-  if (!authNetEnabled()) return false;
+  const config = await paymentGatewayConfigForTenant(reservation?.tenantId || null);
+  if (!authNetEnabled(config)) return false;
   const rawRef = String(reference || '').trim();
   const transId = rawRef.startsWith('AUTHNET:') ? rawRef.slice('AUTHNET:'.length).trim() : rawRef;
   if (!transId) return false;
@@ -46,14 +57,14 @@ async function trySaveAuthNetCardOnFileFromTransaction({ reservation, reference 
   const reqPayload = {
     createCustomerProfileFromTransactionRequest: {
       merchantAuthentication: {
-        name: process.env.AUTHNET_API_LOGIN_ID,
-        transactionKey: process.env.AUTHNET_TRANSACTION_KEY
+        name: config.authorizenet.loginId,
+        transactionKey: config.authorizenet.transactionKey
       },
       transId
     }
   };
 
-  const out = await authNetRequest(reqPayload);
+  const out = await authNetRequest(reqPayload, config);
   const resp = out?.createCustomerProfileResponse || out?.createCustomerProfileFromTransactionResponse || out;
   const ok = resp?.messages?.resultCode === 'Ok';
   if (!ok) return false;
@@ -799,8 +810,13 @@ customerPortalRouter.get('/payment/:token', async (req, res, next) => {
 
     const amountDue = await amountDueForReservation(reservation.id, reservation.estimatedTotal);
     const breakdown = await buildReservationBreakdown(reservation);
-    const gateway = currentGateway();
-    const gatewayReady = gateway === 'authorizenet' ? authNetEnabled() : gateway === 'stripe' ? stripeEnabled() : squareEnabled();
+    const gatewayConfig = await paymentGatewayConfigForTenant(reservation.tenantId || null);
+    const gateway = currentGateway(gatewayConfig);
+    const gatewayReady = gateway === 'authorizenet'
+      ? authNetEnabled(gatewayConfig)
+      : gateway === 'stripe'
+        ? stripeEnabled(gatewayConfig)
+        : squareEnabled(gatewayConfig);
 
     res.json({
       reservation: {
@@ -826,14 +842,16 @@ customerPortalRouter.get('/payment/:token', async (req, res, next) => {
 
 customerPortalRouter.post('/payment/:token/create-session', async (req, res, next) => {
   try {
-    const gateway = currentGateway();
     const token = String(req.params.token || '');
     const reservation = await findReservationByToken('payment', token);
     if (!reservation) return res.status(404).json({ error: 'Invalid or expired payment link' });
     const amountDue = await amountDueForReservation(reservation.id, reservation.estimatedTotal);
+    const gatewayConfig = await paymentGatewayConfigForTenant(reservation.tenantId || null);
+    const gateway = currentGateway(gatewayConfig);
 
     if (gateway === 'stripe') {
-      if (!stripeEnabled()) return res.status(400).json({ error: 'Stripe is not configured (STRIPE_SECRET_KEY)' });
+      if (!stripeEnabled(gatewayConfig)) return res.status(400).json({ error: 'Stripe is not configured for this tenant' });
+      const stripe = new Stripe(gatewayConfig.stripe.secretKey);
       const base = portalBase().replace(/\/$/, '');
       const session = await stripe.checkout.sessions.create({
         mode: 'payment',
@@ -847,12 +865,15 @@ customerPortalRouter.post('/payment/:token/create-session', async (req, res, nex
     }
 
     if (gateway === 'square') {
-      if (!squareEnabled()) return res.status(400).json({ error: 'Square is not configured (SQUARE_ACCESS_TOKEN / SQUARE_LOCATION_ID)' });
-      const resp = await fetch('https://connect.squareup.com/v2/online-checkout/payment-links', {
+      if (!squareEnabled(gatewayConfig)) return res.status(400).json({ error: 'Square is not configured for this tenant' });
+      const squareApiBase = String(gatewayConfig.square?.environment || 'production').toLowerCase() === 'sandbox'
+        ? 'https://connect.squareupsandbox.com'
+        : 'https://connect.squareup.com';
+      const resp = await fetch(`${squareApiBase}/v2/online-checkout/payment-links`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${process.env.SQUARE_ACCESS_TOKEN}`,
+          'Authorization': `Bearer ${gatewayConfig.square.accessToken}`,
           'Square-Version': '2024-12-18'
         },
         body: JSON.stringify({
@@ -860,7 +881,7 @@ customerPortalRouter.post('/payment/:token/create-session', async (req, res, nex
           quick_pay: {
             name: `Reservation ${reservation.reservationNumber} Payment`,
             price_money: { amount: Math.round(Number(amountDue || 0) * 100), currency: 'USD' },
-            location_id: process.env.SQUARE_LOCATION_ID
+            location_id: gatewayConfig.square.locationId
           },
           checkout_options: {
             redirect_url: `${portalBase().replace(/\/$/, '')}/customer/pay?token=${encodeURIComponent(token)}&success=1`
@@ -874,14 +895,14 @@ customerPortalRouter.post('/payment/:token/create-session', async (req, res, nex
     }
 
     // Authorize.Net
-    if (!authNetEnabled()) return res.status(400).json({ error: 'Authorize.Net is not configured (AUTHNET_API_LOGIN_ID / AUTHNET_TRANSACTION_KEY)' });
+    if (!authNetEnabled(gatewayConfig)) return res.status(400).json({ error: 'Authorize.Net is not configured for this tenant' });
     const amount = Number(Math.max(0.5, Number(amountDue || 0))).toFixed(2);
     const returnUrl = `${portalBase().replace(/\/$/, '')}/customer/pay?token=${encodeURIComponent(token)}&success=1`;
     const cancelUrl = `${portalBase().replace(/\/$/, '')}/customer/pay?token=${encodeURIComponent(token)}&canceled=1`;
 
     const requestPayload = {
       getHostedPaymentPageRequest: {
-        merchantAuthentication: { name: process.env.AUTHNET_API_LOGIN_ID, transactionKey: process.env.AUTHNET_TRANSACTION_KEY },
+        merchantAuthentication: { name: gatewayConfig.authorizenet.loginId, transactionKey: gatewayConfig.authorizenet.transactionKey },
         transactionRequest: {
           transactionType: 'authCaptureTransaction',
           amount,
@@ -896,30 +917,32 @@ customerPortalRouter.post('/payment/:token/create-session', async (req, res, nex
       }
     };
 
-    const authnet = await authNetRequest(requestPayload);
+    const authnet = await authNetRequest(requestPayload, gatewayConfig);
     const response = authnet?.getHostedPaymentPageResponse;
     const hostedToken = response?.token;
     if (response?.messages?.resultCode !== 'Ok' || !hostedToken) {
       return res.status(400).json({ error: response?.messages?.message?.[0]?.text || 'Authorize.Net token creation failed' });
     }
 
-    const hostedBase = AUTHNET_ENV === 'production' ? 'https://accept.authorize.net/payment/payment' : 'https://test.authorize.net/payment/payment';
+    const hostedBase = authNetHostedBaseForConfig(gatewayConfig);
     res.json({ checkoutUrl: `${hostedBase}?token=${encodeURIComponent(hostedToken)}`, gateway });
   } catch (e) { next(e); }
 });
 
 customerPortalRouter.post('/payment/:token/confirm', async (req, res, next) => {
   try {
-    const gateway = currentGateway();
     const token = String(req.params.token || '');
     const reservation = await findReservationByToken('payment', token);
     if (!reservation) return res.status(404).json({ error: 'Invalid or expired payment link' });
+    const gatewayConfig = await paymentGatewayConfigForTenant(reservation.tenantId || null);
+    const gateway = currentGateway(gatewayConfig);
 
     let paidAmount = 0;
     let reference = String(req.body?.reference || '').trim();
 
     if (gateway === 'stripe' && req.body?.sessionId) {
-      if (!stripeEnabled()) return res.status(400).json({ error: 'Stripe not configured' });
+      if (!stripeEnabled(gatewayConfig)) return res.status(400).json({ error: 'Stripe not configured for this tenant' });
+      const stripe = new Stripe(gatewayConfig.stripe.secretKey);
       const session = await stripe.checkout.sessions.retrieve(String(req.body.sessionId));
       if (!session || session.payment_status !== 'paid') return res.status(400).json({ error: 'Stripe payment not completed' });
       paidAmount = Number(((session.amount_total || 0) / 100).toFixed(2));

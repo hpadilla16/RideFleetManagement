@@ -38,6 +38,33 @@ const DEFAULT_RESERVATION_OPTIONS = {
   autoAssignVehicleFromType: false
 };
 
+function defaultPaymentGatewayConfig() {
+  return {
+    gateway: String(process.env.PAYMENT_GATEWAY || 'authorizenet').toLowerCase(),
+    label: 'Default Payment Gateway',
+    authorizenet: {
+      enabled: !!(process.env.AUTHNET_API_LOGIN_ID && process.env.AUTHNET_TRANSACTION_KEY),
+      environment: String(process.env.AUTHNET_ENV || 'sandbox').toLowerCase(),
+      loginId: String(process.env.AUTHNET_API_LOGIN_ID || ''),
+      transactionKey: String(process.env.AUTHNET_TRANSACTION_KEY || ''),
+      clientKey: String(process.env.AUTHNET_CLIENT_KEY || '')
+    },
+    stripe: {
+      enabled: !!process.env.STRIPE_SECRET_KEY,
+      secretKey: String(process.env.STRIPE_SECRET_KEY || ''),
+      publishableKey: String(process.env.STRIPE_PUBLISHABLE_KEY || ''),
+      webhookSecret: String(process.env.STRIPE_WEBHOOK_SECRET || '')
+    },
+    square: {
+      enabled: !!(process.env.SQUARE_ACCESS_TOKEN && process.env.SQUARE_LOCATION_ID),
+      environment: String(process.env.SQUARE_ENV || 'production').toLowerCase(),
+      accessToken: String(process.env.SQUARE_ACCESS_TOKEN || ''),
+      applicationId: String(process.env.SQUARE_APPLICATION_ID || ''),
+      locationId: String(process.env.SQUARE_LOCATION_ID || '')
+    }
+  };
+}
+
 function scopedKey(baseKey, scope = {}) {
   return scope?.tenantId ? `tenant:${scope.tenantId}:${baseKey}` : baseKey;
 }
@@ -113,6 +140,76 @@ export const settingsService = {
       autoAssignVehicleFromType: !!payload?.autoAssignVehicleFromType
     };
     const key = scopedKey('reservationOptions', scope);
+    await prisma.appSetting.upsert({
+      where: { key },
+      create: { key, value: JSON.stringify(next) },
+      update: { value: JSON.stringify(next) }
+    });
+    return next;
+  },
+
+  async getPaymentGatewayConfig(scope = {}) {
+    const defaults = defaultPaymentGatewayConfig();
+    const row = await prisma.appSetting.findUnique({ where: { key: scopedKey('paymentGatewayConfig', scope) } });
+    if (!row?.value) return defaults;
+    try {
+      const parsed = JSON.parse(row.value);
+      return {
+        ...defaults,
+        ...(parsed || {}),
+        authorizenet: {
+          ...defaults.authorizenet,
+          ...(parsed?.authorizenet || {})
+        },
+        stripe: {
+          ...defaults.stripe,
+          ...(parsed?.stripe || {})
+        },
+        square: {
+          ...defaults.square,
+          ...(parsed?.square || {})
+        }
+      };
+    } catch {
+      return defaults;
+    }
+  },
+
+  async updatePaymentGatewayConfig(payload = {}, scope = {}) {
+    const defaults = defaultPaymentGatewayConfig();
+    const next = {
+      ...defaults,
+      ...(payload || {}),
+      gateway: String(payload?.gateway || defaults.gateway).trim().toLowerCase(),
+      label: String(payload?.label || defaults.label).trim(),
+      authorizenet: {
+        ...defaults.authorizenet,
+        ...(payload?.authorizenet || {}),
+        enabled: payload?.authorizenet?.enabled !== false,
+        environment: String(payload?.authorizenet?.environment || defaults.authorizenet.environment).trim().toLowerCase(),
+        loginId: String(payload?.authorizenet?.loginId || '').trim(),
+        transactionKey: String(payload?.authorizenet?.transactionKey || '').trim(),
+        clientKey: String(payload?.authorizenet?.clientKey || '').trim()
+      },
+      stripe: {
+        ...defaults.stripe,
+        ...(payload?.stripe || {}),
+        enabled: !!payload?.stripe?.enabled,
+        secretKey: String(payload?.stripe?.secretKey || '').trim(),
+        publishableKey: String(payload?.stripe?.publishableKey || '').trim(),
+        webhookSecret: String(payload?.stripe?.webhookSecret || '').trim()
+      },
+      square: {
+        ...defaults.square,
+        ...(payload?.square || {}),
+        enabled: !!payload?.square?.enabled,
+        environment: String(payload?.square?.environment || defaults.square.environment).trim().toLowerCase(),
+        accessToken: String(payload?.square?.accessToken || '').trim(),
+        applicationId: String(payload?.square?.applicationId || '').trim(),
+        locationId: String(payload?.square?.locationId || '').trim()
+      }
+    };
+    const key = scopedKey('paymentGatewayConfig', scope);
     await prisma.appSetting.upsert({
       where: { key },
       create: { key, value: JSON.stringify(next) },

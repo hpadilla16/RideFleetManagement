@@ -63,6 +63,24 @@ settingsRouter.put('/reservation-options', requireRole('ADMIN'), async (req, res
   }
 });
 
+settingsRouter.get('/payment-gateway', async (_req, res, next) => {
+  try {
+    const cfg = await settingsService.getPaymentGatewayConfig(scopeFor(_req));
+    res.json(cfg);
+  } catch (e) {
+    next(e);
+  }
+});
+
+settingsRouter.put('/payment-gateway', requireRole('ADMIN'), async (req, res, next) => {
+  try {
+    const cfg = await settingsService.updatePaymentGatewayConfig(req.body || {}, scopeFor(req));
+    res.json(cfg);
+  } catch (e) {
+    next(e);
+  }
+});
+
 settingsRouter.get('/rental-agreement', async (_req, res, next) => {
   try {
     const cfg = await settingsService.getRentalAgreementConfig(scopeFor(_req));
