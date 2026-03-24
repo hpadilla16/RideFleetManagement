@@ -650,6 +650,16 @@ export default function PublicBookingPage() {
               ) : null}
             </div>
           </div>
+          <div className="app-banner-list">
+            <span className="app-banner-pill">{selectedPickupLocationOption?.label || 'Selected location'}</span>
+            <span className="app-banner-pill">{pickupAt}</span>
+            <span className="app-banner-pill">{returnAt}</span>
+            {selectedResult ? (
+              <span className="app-banner-pill">
+                {searchMode === 'RENTAL' ? (selectedResult.vehicleType?.name || 'Selected rental') : (selectedResult.title || 'Selected vehicle')}
+              </span>
+            ) : null}
+          </div>
         </section>
 
         {uiStep === 'select' ? (
@@ -667,6 +677,16 @@ export default function PublicBookingPage() {
           </div>
 
           {results?.results?.length ? (
+            <>
+            {selectedResult ? (
+              <div className="surface-note" style={{ marginBottom: 14 }}>
+                <strong>Selected Package</strong>
+                <br />
+                {searchMode === 'RENTAL'
+                  ? `${selectedResult.vehicleType?.name || 'Rental option'} · Estimated total ${fmtMoney(selectedResult.quote?.estimatedTripTotal)}`
+                  : `${selectedResult.title || 'Vehicle'} · Estimated total ${fmtMoney(checkoutEstimatedTotal)}`}
+              </div>
+            ) : null}
             <div className="grid2" style={{ marginBottom: 0 }}>
               {searchMode === 'RENTAL'
                 ? results.results.map((result) => (
@@ -726,6 +746,7 @@ export default function PublicBookingPage() {
                     />
                   ))}
             </div>
+            </>
           ) : (
             <div className="surface-note">
               {results
@@ -742,8 +763,8 @@ export default function PublicBookingPage() {
           <section className="glass card-lg section-card">
             <div className="row-between">
               <div>
-                <div className="section-title">Checkout Foundation</div>
-                <p className="ui-muted">Turn the selected quote into a live reservation or trip and immediately kick off customer info collection.</p>
+                <div className="section-title">Selected Package</div>
+                <p className="ui-muted">Review the vehicle, pricing, and next guest steps before creating the booking.</p>
               </div>
               <button type="button" className="button-subtle" onClick={clearSelection}>Clear</button>
             </div>
@@ -790,16 +811,57 @@ export default function PublicBookingPage() {
                 ) : null}
                 {searchMode === 'RENTAL'
                   ? `Deposit due now: ${fmtMoney(selectedResult.quote?.depositAmountDue)}${chosenAdditionalServicesTotal ? ` · Add-ons ${fmtMoney(chosenAdditionalServicesTotal)}` : ''}${selectedInsuranceTotal ? ` · Insurance ${fmtMoney(selectedInsuranceTotal)}` : ''}`
-                  : `Host earns ${fmtMoney(selectedResult.quote?.hostEarnings)} · Platform fee ${fmtMoney(selectedResult.quote?.platformFee)}`}
+                  : `Trip total: ${fmtMoney(selectedResult.quote?.total)}${chosenAdditionalServicesTotal ? ` · Vehicle add-ons ${fmtMoney(chosenAdditionalServicesTotal)}` : ''}`}
               </div>
 
               <div className="section-card">
+                <div className="app-card-grid compact" style={{ marginBottom: 12 }}>
+                  {searchMode === 'RENTAL' ? (
+                    <>
+                      <div className="doc-card">
+                        <strong>Estimated Total</strong>
+                        <div className="doc-meta">{fmtMoney(checkoutEstimatedTotal)}</div>
+                      </div>
+                      <div className="doc-card">
+                        <strong>Due At Pre-Check-In</strong>
+                        <div className="doc-meta">{fmtMoney(selectedResult?.quote?.depositAmountDue)}</div>
+                      </div>
+                      <div className="doc-card">
+                        <strong>Security Deposit</strong>
+                        <div className="doc-meta">{fmtMoney(selectedResult?.quote?.securityDepositAmount)}</div>
+                      </div>
+                      <div className="doc-card">
+                        <strong>Included Extras</strong>
+                        <div className="doc-meta">{selectedResult?.additionalServices?.length || 0} service option{(selectedResult?.additionalServices?.length || 0) === 1 ? '' : 's'}</div>
+                      </div>
+                    </>
+                  ) : (
+                    <>
+                      <div className="doc-card">
+                        <strong>Trip Total</strong>
+                        <div className="doc-meta">{fmtMoney(checkoutEstimatedTotal)}</div>
+                      </div>
+                      <div className="doc-card">
+                        <strong>Host Trust</strong>
+                        <div className="doc-meta">{selectedResult?.host ? fmtRating(selectedResult.host.averageRating, selectedResult.host.reviewCount) : 'New host'}</div>
+                      </div>
+                      <div className="doc-card">
+                        <strong>Trip Length</strong>
+                        <div className="doc-meta">{Math.max(1, Number(selectedResult?.quote?.tripDays || 1))} day{Math.max(1, Number(selectedResult?.quote?.tripDays || 1)) === 1 ? '' : 's'}</div>
+                      </div>
+                      <div className="doc-card">
+                        <strong>Vehicle Add-Ons</strong>
+                        <div className="doc-meta">{selectedResult?.additionalServices?.length || 0} option{(selectedResult?.additionalServices?.length || 0) === 1 ? '' : 's'}</div>
+                      </div>
+                    </>
+                  )}
+                </div>
                 <div className="surface-note" style={{ marginBottom: 6 }}>
                   <strong>Checkout Snapshot</strong>
                   <br />
                   {searchMode === 'RENTAL'
                     ? `Base total ${fmtMoney(selectedResult?.quote?.estimatedTripTotal)} · Estimated total ${fmtMoney(checkoutEstimatedTotal)}`
-                    : `Trip total ${fmtMoney(selectedResult?.quote?.total)} · Guest flow will continue through pre-check-in, signature, and payment.`}
+                    : `Trip total ${fmtMoney(checkoutEstimatedTotal)} · Guest flow will continue through pre-check-in, signature, and payment.`}
                 </div>
                 <div className="section-title">Guest Details</div>
                 {error ? <div className="surface-note" style={{ marginBottom: 16, color: '#991b1b' }}>{error}</div> : null}
