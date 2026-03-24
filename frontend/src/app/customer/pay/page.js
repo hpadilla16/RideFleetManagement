@@ -5,6 +5,30 @@ import { API_BASE } from '../../../lib/client';
 import { PortalFrame, portalStyles } from '../_components/PortalFrame';
 import { PortalTimelineCard } from '../_components/PortalTimelineCard';
 
+const PAYMENT_PORTAL_STATE_PREFIX = 'customer.payment.';
+
+function paymentPortalStateKey(token) {
+  return `${PAYMENT_PORTAL_STATE_PREFIX}${token}`;
+}
+
+function restorePaymentPortalState(token) {
+  if (!token || typeof window === 'undefined') return null;
+  try {
+    const raw = sessionStorage.getItem(paymentPortalStateKey(token));
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== 'object') return null;
+    return {
+      success: typeof parsed.success === 'string' ? parsed.success : '',
+      canceled: typeof parsed.canceled === 'string' ? parsed.canceled : '',
+      sessionId: typeof parsed.sessionId === 'string' ? parsed.sessionId : '',
+      returnTransId: typeof parsed.returnTransId === 'string' ? parsed.returnTransId : ''
+    };
+  } catch {
+    return null;
+  }
+}
+
 export default function CustomerPayPage() {
   const [token, setToken] = useState('');
   const [success, setSuccess] = useState('');
@@ -19,12 +43,30 @@ export default function CustomerPayPage() {
 
   useEffect(() => {
     const p = new URLSearchParams(window.location.search);
-    setToken(p.get('token') || '');
-    setSuccess(p.get('success') || '');
-    setCanceled(p.get('canceled') || '');
-    setSessionId(p.get('session_id') || '');
-    setReturnTransId(p.get('transId') || p.get('x_trans_id') || p.get('transaction_id') || '');
+    const nextToken = p.get('token') || '';
+    const stored = restorePaymentPortalState(nextToken);
+    setToken(nextToken);
+    setSuccess(p.get('success') || stored?.success || '');
+    setCanceled(p.get('canceled') || stored?.canceled || '');
+    setSessionId(p.get('session_id') || stored?.sessionId || '');
+    setReturnTransId(p.get('transId') || p.get('x_trans_id') || p.get('transaction_id') || stored?.returnTransId || '');
   }, []);
+
+  useEffect(() => {
+    if (!token) return;
+    try {
+      if (success || canceled || sessionId || returnTransId) {
+        sessionStorage.setItem(paymentPortalStateKey(token), JSON.stringify({
+          success,
+          canceled,
+          sessionId,
+          returnTransId
+        }));
+      } else {
+        sessionStorage.removeItem(paymentPortalStateKey(token));
+      }
+    } catch {}
+  }, [canceled, returnTransId, sessionId, success, token]);
 
   useEffect(() => {
     const run = async () => {
@@ -92,6 +134,11 @@ export default function CustomerPayPage() {
   const agreementDoc = (model?.portal?.documents || []).find((doc) => doc.key === 'agreement' && doc.available);
   const paidAmount = Number(model?.breakdown?.paidAmount || 0);
   const gatewayLabel = String(model?.gateway || '').toUpperCase() || '-';
+
+  useEffect(() => {
+    if (!token || !fullyPaid) return;
+    try { sessionStorage.removeItem(paymentPortalStateKey(token)); } catch {}
+  }, [fullyPaid, token]);
 
   const notices = (
     <div style={portalStyles.stack}>

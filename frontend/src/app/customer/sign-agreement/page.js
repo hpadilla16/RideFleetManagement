@@ -5,6 +5,28 @@ import { API_BASE } from '../../../lib/client';
 import { PortalFrame, portalStyles } from '../_components/PortalFrame';
 import { PortalTimelineCard } from '../_components/PortalTimelineCard';
 
+const SIGNATURE_DRAFT_PREFIX = 'customer.signature.';
+
+function signatureDraftKey(token) {
+  return `${SIGNATURE_DRAFT_PREFIX}${token}`;
+}
+
+function restoreSignatureDraft(token) {
+  if (!token || typeof window === 'undefined') return null;
+  try {
+    const raw = localStorage.getItem(signatureDraftKey(token));
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== 'object') return null;
+    return {
+      signerName: typeof parsed.signerName === 'string' ? parsed.signerName : '',
+      accepted: !!parsed.accepted
+    };
+  } catch {
+    return null;
+  }
+}
+
 export default function SignAgreementPage() {
   const [token, setToken] = useState('');
   const canvasRef = useRef(null);
@@ -38,6 +60,11 @@ export default function SignAgreementPage() {
         setBreakdown(j.breakdown || null);
         setTermsText(j.termsText || '');
         setPortal(j.portal || null);
+        const draft = restoreSignatureDraft(token);
+        if (draft) {
+          setSignerName(draft.signerName || '');
+          setAccepted(!!draft.accepted);
+        }
         setLoaded(true);
       } catch (e) {
         setError(String(e.message || e));
@@ -45,6 +72,20 @@ export default function SignAgreementPage() {
     };
     run();
   }, [token]);
+
+  useEffect(() => {
+    if (!token) return;
+    try {
+      if (signerName.trim() || accepted) {
+        localStorage.setItem(signatureDraftKey(token), JSON.stringify({
+          signerName,
+          accepted
+        }));
+      } else {
+        localStorage.removeItem(signatureDraftKey(token));
+      }
+    } catch {}
+  }, [accepted, signerName, token]);
 
   const pos = (e) => {
     const c = canvasRef.current;
@@ -108,6 +149,7 @@ export default function SignAgreementPage() {
       if (!res.ok) throw new Error(j?.error || 'Unable to submit signature');
       setOk(j?.message || 'Thank you. Your signature has been captured successfully.');
       setError('');
+      try { localStorage.removeItem(signatureDraftKey(token)); } catch {}
       if (j?.portal) setPortal(j.portal);
       if (j?.emailedSignedAgreement) {
         window.alert('Signed agreement has been sent to your email.');
