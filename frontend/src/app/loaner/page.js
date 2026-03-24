@@ -88,6 +88,7 @@ function LoanerProgramInner({ token, me, logout }) {
     startDate: '',
     endDate: ''
   });
+  const [queueFocus, setQueueFocus] = useState('ALL');
   const [msg, setMsg] = useState('');
   const [loading, setLoading] = useState(true);
   const [form, setForm] = useState(EMPTY_FORM);
@@ -241,6 +242,92 @@ function LoanerProgramInner({ token, me, logout }) {
       readyToday: metrics.readyForDelivery + metrics.pickupsToday
     };
   }, [metrics, serviceLanePriorityItems]);
+
+  const queueSections = useMemo(() => ([
+    {
+      key: 'INTAKE',
+      title: 'Intake And Delivery',
+      subtitle: 'Customers about to take a loaner or still waiting on delivery steps.',
+      rows: dashboard?.queues?.intake || [],
+      emptyText: 'No loaner pickups in the active intake queue.',
+      actions: (row) => (
+        <>
+          <Link href={reservationHref(row)}><button type="button">Open Workflow</button></Link>
+          <Link href={reservationHref(row, 'checkout')}><button type="button" className="button-subtle">Checkout</button></Link>
+        </>
+      )
+    },
+    {
+      key: 'ACTIVE',
+      title: 'Active Loaners',
+      subtitle: 'Vehicles currently out in service-loaner status.',
+      rows: dashboard?.queues?.active || [],
+      emptyText: 'No active loaners right now.',
+      actions: (row) => (
+        <>
+          <Link href={reservationHref(row)}><button type="button">Open</button></Link>
+          <Link href={reservationHref(row, 'payments')}><button type="button" className="button-subtle">Payments</button></Link>
+        </>
+      )
+    },
+    {
+      key: 'RETURNS',
+      title: 'Returns',
+      subtitle: 'Loaners coming back from service customers.',
+      rows: dashboard?.queues?.returns || [],
+      emptyText: 'No loaner returns in queue right now.',
+      actions: (row) => (
+        <>
+          <Link href={reservationHref(row, 'checkin')}><button type="button">Check-in</button></Link>
+          <Link href={reservationHref(row, 'inspection')}><button type="button" className="button-subtle">Inspect</button></Link>
+        </>
+      )
+    },
+    {
+      key: 'ADVISOR',
+      title: 'Advisor Follow-Up',
+      subtitle: 'Reservations that still need lane guidance, borrower packet progress, or ready-for-pickup decisions.',
+      rows: dashboard?.queues?.advisor || [],
+      emptyText: 'No advisor follow-up items right now.',
+      actions: (row) => (
+        <>
+          <Link href={reservationHref(row)}><button type="button">Open Workflow</button></Link>
+          <Link href={reservationHref(row, 'checkout')}><button type="button" className="button-subtle">Checkout</button></Link>
+        </>
+      )
+    },
+    {
+      key: 'BILLING',
+      title: 'Billing Review',
+      subtitle: 'Warranty, insurer, and customer-pay loaners that still need billing follow-up.',
+      rows: dashboard?.queues?.billing || [],
+      emptyText: 'No loaner billing items waiting right now.',
+      actions: (row) => (
+        <>
+          <Link href={reservationHref(row)}><button type="button">Open Workflow</button></Link>
+          <Link href={reservationHref(row, 'payments')}><button type="button" className="button-subtle">Payments</button></Link>
+        </>
+      )
+    },
+    {
+      key: 'ALERTS',
+      title: 'Overdue And SLA Alerts',
+      subtitle: 'Past-due returns, missed service ETAs, and denied billing items that need action now.',
+      rows: dashboard?.queues?.alerts || [],
+      emptyText: 'No overdue or SLA-risk loaner alerts right now.',
+      actions: (row) => (
+        <>
+          <Link href={reservationHref(row)}><button type="button">Open Workflow</button></Link>
+          <Link href={reservationHref(row, row.overdueReturn ? 'checkin' : 'checkout')}><button type="button" className="button-subtle">{row.overdueReturn ? 'Check-in' : 'Checkout'}</button></Link>
+        </>
+      )
+    }
+  ]), [dashboard]);
+
+  const visibleQueueSections = useMemo(() => {
+    if (queueFocus === 'ALL') return queueSections;
+    return queueSections.filter((section) => section.key === queueFocus);
+  }, [queueFocus, queueSections]);
 
   async function createLoaner(event) {
     event.preventDefault();
@@ -787,86 +874,70 @@ function LoanerProgramInner({ token, me, logout }) {
           <span className="status-chip neutral">Foundation Surface</span>
         </div>
 
-        <div className="split-panel" style={{ marginTop: 10 }}>
-          <LoanerQueueCard
-            title="Intake And Delivery"
-            subtitle="Customers about to take a loaner or still waiting on delivery steps."
-            rows={dashboard?.queues?.intake || []}
-            emptyText="No loaner pickups in the active intake queue."
-            actions={(row) => (
-              <>
-                <Link href={reservationHref(row)}><button type="button">Open Workflow</button></Link>
-                <Link href={reservationHref(row, 'checkout')}><button type="button" className="button-subtle">Checkout</button></Link>
-              </>
-            )}
-          />
-          <LoanerQueueCard
-            title="Active Loaners"
-            subtitle="Vehicles currently out in service-loaner status."
-            rows={dashboard?.queues?.active || []}
-            emptyText="No active loaners right now."
-            actions={(row) => (
-              <>
-                <Link href={reservationHref(row)}><button type="button">Open</button></Link>
-                <Link href={reservationHref(row, 'payments')}><button type="button" className="button-subtle">Payments</button></Link>
-              </>
-            )}
-          />
+        <div className="app-banner-list">
+          <button type="button" className={queueFocus === 'ALL' ? '' : 'button-subtle'} onClick={() => setQueueFocus('ALL')}>All Queues</button>
+          <button type="button" className={queueFocus === 'INTAKE' ? '' : 'button-subtle'} onClick={() => setQueueFocus('INTAKE')}>Intake</button>
+          <button type="button" className={queueFocus === 'RETURNS' ? '' : 'button-subtle'} onClick={() => setQueueFocus('RETURNS')}>Returns</button>
+          <button type="button" className={queueFocus === 'ADVISOR' ? '' : 'button-subtle'} onClick={() => setQueueFocus('ADVISOR')}>Advisor</button>
+          <button type="button" className={queueFocus === 'BILLING' ? '' : 'button-subtle'} onClick={() => setQueueFocus('BILLING')}>Billing</button>
+          <button type="button" className={queueFocus === 'ALERTS' ? '' : 'button-subtle'} onClick={() => setQueueFocus('ALERTS')}>Alerts</button>
         </div>
 
-        <div className="split-panel" style={{ marginTop: 16 }}>
-          <LoanerQueueCard
-            title="Returns"
-            subtitle="Loaners coming back from service customers."
-            rows={dashboard?.queues?.returns || []}
-            emptyText="No loaner returns in queue right now."
-            actions={(row) => (
-              <>
-                <Link href={reservationHref(row, 'checkin')}><button type="button">Check-in</button></Link>
-                <Link href={reservationHref(row, 'inspection')}><button type="button" className="button-subtle">Inspect</button></Link>
-              </>
-            )}
-          />
-          <LoanerQueueCard
-            title="Advisor Follow-Up"
-            subtitle="Reservations that still need lane guidance, borrower packet progress, or ready-for-pickup decisions."
-            rows={dashboard?.queues?.advisor || []}
-            emptyText="No advisor follow-up items right now."
-            actions={(row) => (
-              <>
-                <Link href={reservationHref(row)}><button type="button">Open Workflow</button></Link>
-                <Link href={reservationHref(row, 'checkout')}><button type="button" className="button-subtle">Checkout</button></Link>
-              </>
-            )}
-          />
-        </div>
+        {queueFocus === 'ALL' ? (
+          <>
+            <div className="split-panel" style={{ marginTop: 10 }}>
+              {visibleQueueSections.slice(0, 2).map((section) => (
+                <LoanerQueueCard
+                  key={section.key}
+                  title={section.title}
+                  subtitle={section.subtitle}
+                  rows={section.rows}
+                  emptyText={section.emptyText}
+                  actions={section.actions}
+                />
+              ))}
+            </div>
 
-        <div className="split-panel" style={{ marginTop: 16 }}>
-          <LoanerQueueCard
-            title="Billing Review"
-            subtitle="Warranty, insurer, and customer-pay loaners that still need billing follow-up."
-            rows={dashboard?.queues?.billing || []}
-            emptyText="No loaner billing items waiting right now."
-            actions={(row) => (
-              <>
-                <Link href={reservationHref(row)}><button type="button">Open Workflow</button></Link>
-                <Link href={reservationHref(row, 'payments')}><button type="button" className="button-subtle">Payments</button></Link>
-              </>
-            )}
-          />
-          <LoanerQueueCard
-            title="Overdue And SLA Alerts"
-            subtitle="Past-due returns, missed service ETAs, and denied billing items that need action now."
-            rows={dashboard?.queues?.alerts || []}
-            emptyText="No overdue or SLA-risk loaner alerts right now."
-            actions={(row) => (
-              <>
-                <Link href={reservationHref(row)}><button type="button">Open Workflow</button></Link>
-                <Link href={reservationHref(row, row.overdueReturn ? 'checkin' : 'checkout')}><button type="button" className="button-subtle">{row.overdueReturn ? 'Check-in' : 'Checkout'}</button></Link>
-              </>
-            )}
-          />
-        </div>
+            <div className="split-panel" style={{ marginTop: 16 }}>
+              {visibleQueueSections.slice(2, 4).map((section) => (
+                <LoanerQueueCard
+                  key={section.key}
+                  title={section.title}
+                  subtitle={section.subtitle}
+                  rows={section.rows}
+                  emptyText={section.emptyText}
+                  actions={section.actions}
+                />
+              ))}
+            </div>
+
+            <div className="split-panel" style={{ marginTop: 16 }}>
+              {visibleQueueSections.slice(4, 6).map((section) => (
+                <LoanerQueueCard
+                  key={section.key}
+                  title={section.title}
+                  subtitle={section.subtitle}
+                  rows={section.rows}
+                  emptyText={section.emptyText}
+                  actions={section.actions}
+                />
+              ))}
+            </div>
+          </>
+        ) : (
+          <div style={{ marginTop: 16 }}>
+            {visibleQueueSections.map((section) => (
+              <LoanerQueueCard
+                key={section.key}
+                title={section.title}
+                subtitle={section.subtitle}
+                rows={section.rows}
+                emptyText={section.emptyText}
+                actions={section.actions}
+              />
+            ))}
+          </div>
+        )}
 
         <section className="glass card section-card" style={{ marginTop: 16 }}>
           <div className="row-between">
