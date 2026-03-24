@@ -434,6 +434,12 @@ function CarSharingInner({ token, me, logout }) {
     { label: 'Eligible Vehicles', value: filteredEligibleVehicles.length },
     { label: 'Fleet Shared', value: assignableVehicles.filter((row) => ['CAR_SHARING_ONLY', 'BOTH'].includes(String(row.fleetMode || ''))).length }
   ]), [activeHosts.length, listings.length, trips.length, filteredEligibleVehicles.length, assignableVehicles]);
+  const publishedListings = listings.filter((row) => String(row.status || '').toUpperCase() === 'PUBLISHED').length;
+  const instantBookListings = listings.filter((row) => row.instantBook).length;
+  const tripAttentionCount = trips.filter((row) => {
+    const current = String(row.status || '').toUpperCase();
+    return current === 'DISPUTED' || current === 'READY_FOR_PICKUP' || current === 'RESERVED';
+  }).length;
 
   const updateVehicleFleetMode = async (vehicleId, fleetMode) => {
     try {
@@ -609,6 +615,47 @@ function CarSharingInner({ token, me, logout }) {
       ) : null}
 
       <section className="glass card-lg section-card" style={{ marginBottom: 18 }}>
+        <div className="app-banner">
+          <div className="row-between" style={{ marginBottom: 0 }}>
+            <div className="stack" style={{ gap: 6 }}>
+              <span className="eyebrow">Marketplace Ops</span>
+              <h3 style={{ margin: 0 }}>Car Sharing Control Center</h3>
+              <p className="ui-muted">
+                Keep host supply, listing quality, and trip readiness in view before jumping into the full workspace below.
+              </p>
+            </div>
+            <span className={`status-chip ${canManageCarSharing ? 'good' : 'warn'}`}>
+              {canManageCarSharing ? 'Ready to manage' : 'Feature gated'}
+            </span>
+          </div>
+          <div className="app-card-grid compact">
+            <div className="info-tile">
+              <span className="label">Published</span>
+              <strong>{publishedListings}</strong>
+            </div>
+            <div className="info-tile">
+              <span className="label">Instant Book</span>
+              <strong>{instantBookListings}</strong>
+            </div>
+            <div className="info-tile">
+              <span className="label">Trip Attention</span>
+              <strong>{tripAttentionCount}</strong>
+            </div>
+            <div className="info-tile">
+              <span className="label">Focused Listing</span>
+              <strong>{selectedListing?.title || 'Choose one'}</strong>
+            </div>
+          </div>
+          <div className="inline-actions">
+            <button type="button" onClick={() => document.getElementById('car-sharing-hosts')?.scrollIntoView({ behavior: 'smooth', block: 'start' })}>Hosts</button>
+            <button type="button" onClick={() => document.getElementById('car-sharing-listings')?.scrollIntoView({ behavior: 'smooth', block: 'start' })}>Listings</button>
+            <button type="button" onClick={() => document.getElementById('car-sharing-windows')?.scrollIntoView({ behavior: 'smooth', block: 'start' })}>Availability</button>
+            <button type="button" onClick={() => document.getElementById('car-sharing-trips')?.scrollIntoView({ behavior: 'smooth', block: 'start' })}>Trips</button>
+          </div>
+        </div>
+      </section>
+
+      <section className="glass card-lg section-card" style={{ marginBottom: 18 }}>
         <div className="row-between" style={{ alignItems: 'center', gap: 12 }}>
           <div>
             <div className="section-title">Tenant Feature Status</div>
@@ -626,7 +673,7 @@ function CarSharingInner({ token, me, logout }) {
       </section>
 
       <section className="split-panel">
-        <section className="glass card-lg section-card">
+        <section id="car-sharing-hosts" className="glass card-lg section-card">
           <div className="row-between">
             <h3 style={{ margin: 0 }}>Host Profiles</h3>
             <button type="button" className="button-subtle" onClick={resetHostForm}>New Host</button>
@@ -654,7 +701,7 @@ function CarSharingInner({ token, me, logout }) {
           {!activeHosts.length && !loading ? <div className="surface-note">No host profiles yet for this tenant.</div> : null}
         </section>
 
-        <section className="glass card-lg section-card">
+        <section id="car-sharing-listings" className="glass card-lg section-card">
           <div className="row-between">
             <h3 style={{ margin: 0 }}>Vehicle Listings</h3>
             <button type="button" className="button-subtle" onClick={resetListingForm}>New Listing</button>
@@ -740,7 +787,7 @@ function CarSharingInner({ token, me, logout }) {
         </section>
       </section>
 
-      <section className="glass card-lg section-card" style={{ marginTop: 18 }}>
+      <section id="car-sharing-windows" className="glass card-lg section-card" style={{ marginTop: 18 }}>
         <div className="row-between">
           <h3 style={{ margin: 0 }}>Availability Windows</h3>
           {selectedListing ? <button type="button" className="button-subtle" onClick={() => setWindowForm(EMPTY_WINDOW)}>New Window</button> : null}
@@ -816,7 +863,7 @@ function CarSharingInner({ token, me, logout }) {
         )}
       </section>
 
-      <section className="glass card-lg section-card" style={{ marginTop: 18 }}>
+      <section id="car-sharing-trips" className="glass card-lg section-card" style={{ marginTop: 18 }}>
         <div className="row-between">
           <h3 style={{ margin: 0 }}>Trip Creation</h3>
           <div className="ui-muted">Internal booking flow on top of listing supply.</div>
