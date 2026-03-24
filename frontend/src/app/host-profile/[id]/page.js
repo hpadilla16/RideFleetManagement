@@ -59,6 +59,14 @@ export default function HostProfilePage() {
   }, [params?.id]);
 
   const host = payload?.host || null;
+  const listingPhotoCount = (payload?.listings || []).reduce((sum, listing) => sum + normalizeImageList(listing.imageUrls?.length ? listing.imageUrls : listing.primaryImageUrl ? [listing.primaryImageUrl] : []).length, 0);
+  const hostTrustLabel = Number(host?.averageRating || 0) >= 4.5
+    ? 'Top-rated host'
+    : Number(host?.reviewCount || 0) >= 3
+      ? 'Established host'
+      : Number(host?.reviewCount || 0) >= 1
+        ? 'Building trust'
+        : 'New public host';
 
   return (
     <main style={{ minHeight: '100vh', padding: '24px clamp(16px, 3vw, 34px) 42px' }}>
@@ -101,6 +109,39 @@ export default function HostProfilePage() {
 
         {payload ? (
           <section className="app-section-grid">
+            <section className="app-banner">
+              <div className="row-between" style={{ marginBottom: 0 }}>
+                <div className="stack" style={{ gap: 6 }}>
+                  <span className="eyebrow">Guest Trust Snapshot</span>
+                  <h2 style={{ margin: 0 }}>{hostTrustLabel}</h2>
+                  <p className="ui-muted">
+                    This is the quick read a guest gets before deciding whether to keep browsing this host's public vehicles.
+                  </p>
+                </div>
+                <span className={`status-chip ${Number(host?.reviewCount || 0) ? 'good' : 'neutral'}`}>
+                  {Number(host?.reviewCount || 0)} review{Number(host?.reviewCount || 0) === 1 ? '' : 's'}
+                </span>
+              </div>
+              <div className="app-card-grid compact">
+                <div className="info-tile">
+                  <span className="label">Average Rating</span>
+                  <strong>{Number(host?.averageRating || 0).toFixed(2)}</strong>
+                </div>
+                <div className="info-tile">
+                  <span className="label">Completed Trips</span>
+                  <strong>{host?.completedTrips || 0}</strong>
+                </div>
+                <div className="info-tile">
+                  <span className="label">Active Listings</span>
+                  <strong>{host?.activeListings || 0}</strong>
+                </div>
+                <div className="info-tile">
+                  <span className="label">Listing Photos</span>
+                  <strong>{listingPhotoCount}</strong>
+                </div>
+              </div>
+            </section>
+
             <section className="glass card-lg section-card">
               <div className="row-between">
                 <div>
