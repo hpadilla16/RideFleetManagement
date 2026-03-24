@@ -35,6 +35,72 @@ const EMPTY_FORM = {
   serviceAdvisorNotes: ''
 };
 
+const LOANER_SEARCH_KEY = 'loaner.search';
+const LOANER_QUEUE_FOCUS_KEY = 'loaner.queueFocus';
+const LOANER_EXPORT_FILTERS_KEY = 'loaner.exportFilters';
+const LOANER_INTAKE_FORM_KEY = 'loaner.intakeForm';
+
+function restoreLoanerExportFilters() {
+  if (typeof window === 'undefined') {
+    return {
+      billingStatus: '',
+      billingMode: '',
+      startDate: '',
+      endDate: ''
+    };
+  }
+  try {
+    const raw = localStorage.getItem(LOANER_EXPORT_FILTERS_KEY);
+    if (!raw) {
+      return {
+        billingStatus: '',
+        billingMode: '',
+        startDate: '',
+        endDate: ''
+      };
+    }
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== 'object') {
+      return {
+        billingStatus: '',
+        billingMode: '',
+        startDate: '',
+        endDate: ''
+      };
+    }
+    return {
+      billingStatus: typeof parsed.billingStatus === 'string' ? parsed.billingStatus : '',
+      billingMode: typeof parsed.billingMode === 'string' ? parsed.billingMode : '',
+      startDate: typeof parsed.startDate === 'string' ? parsed.startDate : '',
+      endDate: typeof parsed.endDate === 'string' ? parsed.endDate : ''
+    };
+  } catch {
+    return {
+      billingStatus: '',
+      billingMode: '',
+      startDate: '',
+      endDate: ''
+    };
+  }
+}
+
+function restoreLoanerForm() {
+  if (typeof window === 'undefined') return EMPTY_FORM;
+  try {
+    const raw = localStorage.getItem(LOANER_INTAKE_FORM_KEY);
+    if (!raw) return EMPTY_FORM;
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== 'object') return EMPTY_FORM;
+    return {
+      ...EMPTY_FORM,
+      ...parsed,
+      loanerLiabilityAccepted: !!parsed.loanerLiabilityAccepted
+    };
+  } catch {
+    return EMPTY_FORM;
+  }
+}
+
 function formatDateTime(value) {
   if (!value) return '-';
   try {
@@ -81,17 +147,18 @@ function LoanerProgramInner({ token, me, logout }) {
   const [locations, setLocations] = useState([]);
   const [vehicleTypes, setVehicleTypes] = useState([]);
   const [vehicles, setVehicles] = useState([]);
-  const [search, setSearch] = useState('');
-  const [exportFilters, setExportFilters] = useState({
-    billingStatus: '',
-    billingMode: '',
-    startDate: '',
-    endDate: ''
+  const [search, setSearch] = useState(() => {
+    if (typeof window === 'undefined') return '';
+    try { return localStorage.getItem(LOANER_SEARCH_KEY) || ''; } catch { return ''; }
   });
-  const [queueFocus, setQueueFocus] = useState('ALL');
+  const [exportFilters, setExportFilters] = useState(() => restoreLoanerExportFilters());
+  const [queueFocus, setQueueFocus] = useState(() => {
+    if (typeof window === 'undefined') return 'ALL';
+    try { return localStorage.getItem(LOANER_QUEUE_FOCUS_KEY) || 'ALL'; } catch { return 'ALL'; }
+  });
   const [msg, setMsg] = useState('');
   const [loading, setLoading] = useState(true);
-  const [form, setForm] = useState(EMPTY_FORM);
+  const [form, setForm] = useState(() => restoreLoanerForm());
 
   const metrics = dashboard?.metrics || {
     openLoaners: 0,
@@ -142,8 +209,38 @@ function LoanerProgramInner({ token, me, logout }) {
   }
 
   useEffect(() => {
-    load();
+    load(search.trim());
   }, [token]);
+  useEffect(() => {
+    try {
+      if (search) localStorage.setItem(LOANER_SEARCH_KEY, search);
+      else localStorage.removeItem(LOANER_SEARCH_KEY);
+    } catch {}
+  }, [search]);
+  useEffect(() => {
+    try {
+      if (queueFocus && queueFocus !== 'ALL') localStorage.setItem(LOANER_QUEUE_FOCUS_KEY, queueFocus);
+      else localStorage.removeItem(LOANER_QUEUE_FOCUS_KEY);
+    } catch {}
+  }, [queueFocus]);
+  useEffect(() => {
+    try {
+      const hasFilters = Object.values(exportFilters).some((value) => value);
+      if (hasFilters) localStorage.setItem(LOANER_EXPORT_FILTERS_KEY, JSON.stringify(exportFilters));
+      else localStorage.removeItem(LOANER_EXPORT_FILTERS_KEY);
+    } catch {}
+  }, [exportFilters]);
+  useEffect(() => {
+    try {
+      const hasDraft = Object.entries(form).some(([key, value]) => {
+        if (key === 'loanerBillingMode') return value && value !== EMPTY_FORM.loanerBillingMode;
+        if (key === 'loanerLiabilityAccepted') return !!value;
+        return !!value;
+      });
+      if (hasDraft) localStorage.setItem(LOANER_INTAKE_FORM_KEY, JSON.stringify(form));
+      else localStorage.removeItem(LOANER_INTAKE_FORM_KEY);
+    } catch {}
+  }, [form]);
 
   const selectedCustomer = useMemo(() => {
     if (!form.customerId) return null;
@@ -345,6 +442,7 @@ function LoanerProgramInner({ token, me, logout }) {
       }, token);
       setMsg(`Loaner reservation ${payload?.reservationNumber || ''} created`);
       setForm(EMPTY_FORM);
+      try { localStorage.removeItem(LOANER_INTAKE_FORM_KEY); } catch {}
       setSearch(payload?.reservationNumber || '');
       await load(payload?.reservationNumber || '');
     } catch (error) {
