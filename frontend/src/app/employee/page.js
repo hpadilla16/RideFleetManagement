@@ -18,6 +18,9 @@ const EMPTY_FORM = {
   notes: ''
 };
 
+const EMPLOYEE_SEARCH_KEY = 'employee.search';
+const EMPLOYEE_CREATE_FORM_KEY = 'employee.createForm';
+
 function formatMoney(value) {
   return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(Number(value || 0));
 }
@@ -40,6 +43,29 @@ function statusClass(status) {
 
 function customerName(row) {
   return [row?.customer?.firstName, row?.customer?.lastName].filter(Boolean).join(' ') || row?.customer?.email || 'Guest';
+}
+
+function restoreCreateForm() {
+  if (typeof window === 'undefined') return EMPTY_FORM;
+  try {
+    const raw = localStorage.getItem(EMPLOYEE_CREATE_FORM_KEY);
+    if (!raw) return EMPTY_FORM;
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== 'object') return EMPTY_FORM;
+    return {
+      ...EMPTY_FORM,
+      reservationNumber: typeof parsed.reservationNumber === 'string' ? parsed.reservationNumber : '',
+      customerId: typeof parsed.customerId === 'string' ? parsed.customerId : '',
+      vehicleTypeId: typeof parsed.vehicleTypeId === 'string' ? parsed.vehicleTypeId : '',
+      pickupAt: typeof parsed.pickupAt === 'string' ? parsed.pickupAt : '',
+      returnAt: typeof parsed.returnAt === 'string' ? parsed.returnAt : '',
+      pickupLocationId: typeof parsed.pickupLocationId === 'string' ? parsed.pickupLocationId : '',
+      returnLocationId: typeof parsed.returnLocationId === 'string' ? parsed.returnLocationId : '',
+      notes: typeof parsed.notes === 'string' ? parsed.notes : ''
+    };
+  } catch {
+    return EMPTY_FORM;
+  }
 }
 
 function vehicleLabel(row) {
@@ -210,10 +236,13 @@ function EmployeeAppInner({ token, me, logout }) {
   const [customers, setCustomers] = useState([]);
   const [locations, setLocations] = useState([]);
   const [vehicleTypes, setVehicleTypes] = useState([]);
-  const [search, setSearch] = useState('');
+  const [search, setSearch] = useState(() => {
+    if (typeof window === 'undefined') return '';
+    try { return localStorage.getItem(EMPLOYEE_SEARCH_KEY) || ''; } catch { return ''; }
+  });
   const [loading, setLoading] = useState(true);
   const [msg, setMsg] = useState('');
-  const [createForm, setCreateForm] = useState(EMPTY_FORM);
+  const [createForm, setCreateForm] = useState(() => restoreCreateForm());
 
   const metrics = dashboard?.metrics || {
     openReservations: 0,
@@ -252,8 +281,21 @@ function EmployeeAppInner({ token, me, logout }) {
   }
 
   useEffect(() => {
-    load();
+    load(search.trim());
   }, [token]);
+  useEffect(() => {
+    try {
+      if (search) localStorage.setItem(EMPLOYEE_SEARCH_KEY, search);
+      else localStorage.removeItem(EMPLOYEE_SEARCH_KEY);
+    } catch {}
+  }, [search]);
+  useEffect(() => {
+    try {
+      const hasDraft = Object.values(createForm).some((value) => value);
+      if (hasDraft) localStorage.setItem(EMPLOYEE_CREATE_FORM_KEY, JSON.stringify(createForm));
+      else localStorage.removeItem(EMPLOYEE_CREATE_FORM_KEY);
+    } catch {}
+  }, [createForm]);
 
   const quickCreateReady = useMemo(() => (
     !!(
@@ -365,6 +407,7 @@ function EmployeeAppInner({ token, me, logout }) {
       }, token);
       setMsg(`Reservation ${payload?.reservationNumber || ''} created`);
       setCreateForm(EMPTY_FORM);
+      try { localStorage.removeItem(EMPLOYEE_CREATE_FORM_KEY); } catch {}
       setSearch(payload?.reservationNumber || '');
       await load(payload?.reservationNumber || '');
     } catch (error) {
