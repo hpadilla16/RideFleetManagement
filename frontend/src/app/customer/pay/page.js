@@ -90,6 +90,8 @@ export default function CustomerPayPage() {
   const fullyPaid = balanceDue <= 0;
   const nextPortalStep = model?.portal?.nextStep;
   const agreementDoc = (model?.portal?.documents || []).find((doc) => doc.key === 'agreement' && doc.available);
+  const paidAmount = Number(model?.breakdown?.paidAmount || 0);
+  const gatewayLabel = String(model?.gateway || '').toUpperCase() || '-';
 
   const notices = (
     <div style={portalStyles.stack}>
@@ -111,6 +113,28 @@ export default function CustomerPayPage() {
 
       {!loading && model ? (
         <>
+          <div style={portalStyles.card}>
+            <h2 style={portalStyles.cardTitle}>Payment Progress Snapshot</h2>
+            <div style={portalStyles.statGrid}>
+              <div style={portalStyles.statTile}>
+                <div style={portalStyles.statLabel}>Status</div>
+                <div style={portalStyles.statValue}>{paymentStatusLabel}</div>
+              </div>
+              <div style={portalStyles.statTile}>
+                <div style={portalStyles.statLabel}>Paid So Far</div>
+                <div style={portalStyles.statValue}>${paidAmount.toFixed(2)}</div>
+              </div>
+              <div style={portalStyles.statTile}>
+                <div style={portalStyles.statLabel}>Balance Due</div>
+                <div style={portalStyles.statValue}>${balanceDue.toFixed(2)}</div>
+              </div>
+              <div style={portalStyles.statTile}>
+                <div style={portalStyles.statLabel}>Gateway Ready</div>
+                <div style={portalStyles.statValue}>{model.gatewayReady ? gatewayLabel : 'Needs setup'}</div>
+              </div>
+            </div>
+          </div>
+
           <div style={portalStyles.card}>
             <h2 style={portalStyles.cardTitle}>What You Are Paying Today</h2>
             <div style={portalStyles.statGrid}>
