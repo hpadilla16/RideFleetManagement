@@ -423,6 +423,7 @@ function EmployeeAppInner({ token, me, logout }) {
         title="Employee app shell"
         description="A shared mobile-first foundation for shift priorities, lookup, quick creation, and operational queues."
         statusLabel="Shift Ready"
+        storageKey="employee-app"
         stats={employeeShellStats}
         tabs={[
           { href: '#employee-hub', label: 'Hub', active: true },

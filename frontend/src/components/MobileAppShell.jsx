@@ -1,11 +1,42 @@
 'use client';
 
+import { useEffect, useMemo, useState } from 'react';
+
 function renderValue(value) {
   if (value === null || value === undefined || value === '') return '-';
   return value;
 }
 
-export function MobileAppShell({ eyebrow, title, description, statusLabel, stats = [], tabs = [] }) {
+export function MobileAppShell({ eyebrow, title, description, statusLabel, stats = [], tabs = [], storageKey = '' }) {
+  const [currentHash, setCurrentHash] = useState('');
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return undefined;
+    const syncHash = () => setCurrentHash(window.location.hash || '');
+    syncHash();
+    window.addEventListener('hashchange', syncHash);
+    return () => window.removeEventListener('hashchange', syncHash);
+  }, []);
+
+  const storedHref = useMemo(() => {
+    if (!storageKey || typeof window === 'undefined') return '';
+    try {
+      return localStorage.getItem(`mobile-shell:${storageKey}`) || '';
+    } catch {
+      return '';
+    }
+  }, [storageKey, currentHash]);
+
+  const resolvedActiveHref = currentHash || storedHref || tabs.find((tab) => tab.active)?.href || tabs[0]?.href || '';
+  const resumeTab = tabs.find((tab) => tab.href === storedHref);
+
+  const persistTab = (href) => {
+    if (!storageKey) return;
+    try {
+      localStorage.setItem(`mobile-shell:${storageKey}`, href);
+    } catch {}
+  };
+
   return (
     <section className="glass card-lg section-card mobile-app-shell">
       <div className="app-banner">
@@ -29,13 +60,25 @@ export function MobileAppShell({ eyebrow, title, description, statusLabel, stats
           </div>
         ) : null}
 
+        {resumeTab && !currentHash ? (
+          <div className="surface-note">
+            Resume where you left off in <strong>{resumeTab.label}</strong>.
+            <div className="inline-actions" style={{ marginTop: 10 }}>
+              <a href={resumeTab.href} onClick={() => persistTab(resumeTab.href)}>
+                <button type="button" className="button-subtle">Resume Section</button>
+              </a>
+            </div>
+          </div>
+        ) : null}
+
         {tabs.length ? (
           <div className="mobile-app-shell-nav">
             {tabs.map((tab) => (
               <a
                 key={`${tab.href}:${tab.label}`}
                 href={tab.href}
-                className={`mobile-app-shell-link ${tab.active ? 'active' : ''}`}
+                className={`mobile-app-shell-link ${resolvedActiveHref === tab.href ? 'active' : ''}`}
+                onClick={() => persistTab(tab.href)}
               >
                 {tab.label}
               </a>

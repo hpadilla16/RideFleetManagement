@@ -402,6 +402,7 @@ export default function GuestAppPage() {
           title="Guest account shell"
           description="A shared mobile-first foundation for account access, journey progress, wallet items, and support actions."
           statusLabel={guestSession ? 'Signed In' : 'Guest Access'}
+          storageKey="guest-account"
           stats={guestShellStats}
           tabs={[
             { href: '#guest-find', label: 'Find Booking', active: !guestSession && !result },

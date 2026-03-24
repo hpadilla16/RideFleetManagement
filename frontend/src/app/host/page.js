@@ -641,6 +641,7 @@ function HostAppInner({ token, me, logout }) {
         title="Host account shell"
         description="A shared mobile-first foundation for host account, handoff readiness, fleet setup, and approval follow-up."
         statusLabel={host ? 'Host Account' : 'Support Mode'}
+        storageKey="host-account"
         stats={hostShellStats}
         tabs={[
           { href: '#host-account', label: 'Account', active: !!host },
