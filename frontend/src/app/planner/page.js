@@ -60,6 +60,7 @@ function PlannerInner({ token, me, logout }) {
   const [dragItem, setDragItem] = useState(null);
   const [draggingId, setDraggingId] = useState('');
   const [selectedReservation, setSelectedReservation] = useState(null);
+  const [plannerFocus, setPlannerFocus] = useState('ALL');
 
   const dayCount = view === 'DAY' ? 1 : view === 'WEEK' ? 7 : 30;
   const rangeStart = useMemo(() => startOfDay(cursor), [cursor]);
@@ -235,6 +236,7 @@ function PlannerInner({ token, me, logout }) {
       upcoming[0]
         ? {
             id: `pickup-${upcoming[0].id}`,
+            focus: 'PICKUPS',
             title: 'Next Pickup',
             detail: `${upcoming[0].reservationNumber} - ${upcoming[0].customer?.firstName || ''} ${upcoming[0].customer?.lastName || ''}`.trim(),
             note: `Pickup ${new Date(upcoming[0].pickupAt).toLocaleString()}`,
@@ -245,6 +247,7 @@ function PlannerInner({ token, me, logout }) {
       returns[0]
         ? {
             id: `return-${returns[0].id}`,
+            focus: 'RETURNS',
             title: 'Next Return',
             detail: `${returns[0].reservationNumber} - ${returns[0].customer?.firstName || ''} ${returns[0].customer?.lastName || ''}`.trim(),
             note: `Return ${new Date(returns[0].returnAt).toLocaleString()}`,
@@ -255,6 +258,7 @@ function PlannerInner({ token, me, logout }) {
       unassigned[0]
         ? {
             id: `unassigned-${unassigned[0].id}`,
+            focus: 'UNASSIGNED',
             title: 'Unassigned Unit',
             detail: `${unassigned[0].reservationNumber} - ${unassigned[0].customer?.firstName || ''} ${unassigned[0].customer?.lastName || ''}`.trim(),
             note: 'This booking still needs a vehicle assignment in the planner.',
@@ -265,6 +269,7 @@ function PlannerInner({ token, me, logout }) {
       movable
         ? {
             id: `move-${movable.id}`,
+            focus: 'MOVABLE',
             title: 'Next Movable Booking',
             detail: `${movable.reservationNumber} - ${movable.customer?.firstName || ''} ${movable.customer?.lastName || ''}`.trim(),
             note: movable.vehicleId ? 'Booking can be dragged on the planner if the lane needs to rebalance inventory.' : 'Best candidate to place onto a vehicle track.',
@@ -283,6 +288,34 @@ function PlannerInner({ token, me, logout }) {
     };
   }, [reservations, lockedReservationIds]);
 
+  const plannerFocusOptions = useMemo(() => ([
+    { id: 'ALL', label: 'All Queues', count: plannerOpsBoard.nextItems.length },
+    { id: 'PICKUPS', label: 'Pickups', count: plannerOpsBoard.nextItems.filter((item) => item.focus === 'PICKUPS').length },
+    { id: 'RETURNS', label: 'Returns', count: plannerOpsBoard.nextItems.filter((item) => item.focus === 'RETURNS').length },
+    { id: 'UNASSIGNED', label: 'Unassigned', count: plannerOpsBoard.nextItems.filter((item) => item.focus === 'UNASSIGNED').length },
+    { id: 'MOVABLE', label: 'Movable', count: plannerOpsBoard.nextItems.filter((item) => item.focus === 'MOVABLE').length }
+  ]), [plannerOpsBoard]);
+
+  const plannerFocusSummary = useMemo(() => {
+    switch (plannerFocus) {
+      case 'PICKUPS':
+        return 'Focus the lane on departures that still need keys, documents, or unit readiness before release.';
+      case 'RETURNS':
+        return 'Keep only return work visible so the shift can receive vehicles faster from phone or tablet.';
+      case 'UNASSIGNED':
+        return 'Show only bookings still waiting on a vehicle assignment before they hit the counter.';
+      case 'MOVABLE':
+        return 'Highlight the best booking to drag next when rebalancing inventory across the timeline.';
+      default:
+        return 'Quick counters and next bookings to touch before dragging units around the planner grid.';
+    }
+  }, [plannerFocus]);
+
+  const plannerFocusItems = useMemo(() => {
+    if (plannerFocus === 'ALL') return plannerOpsBoard.nextItems;
+    return plannerOpsBoard.nextItems.filter((item) => item.focus === plannerFocus);
+  }, [plannerFocus, plannerOpsBoard]);
+
   return (
     <AppShell me={me} logout={logout}>
       <section className="glass card-lg section-card" style={{ marginBottom: 16 }}>
@@ -293,7 +326,7 @@ function PlannerInner({ token, me, logout }) {
               <h2 className="page-title" style={{ marginTop: 6 }}>
                 Keep the yard balanced before you drop into the timeline.
               </h2>
-              <p className="ui-muted">Quick counters and next bookings to touch before dragging units around the planner grid.</p>
+              <p className="ui-muted">{plannerFocusSummary}</p>
             </div>
             <span className="status-chip neutral">Planner Hub</span>
           </div>
@@ -319,9 +352,24 @@ function PlannerInner({ token, me, logout }) {
               <span className="ui-muted">Reservations still waiting for a vehicle track.</span>
             </div>
           </div>
-          {plannerOpsBoard.nextItems.length ? (
+          {plannerFocusOptions.length ? (
+            <div className="app-banner-list">
+              {plannerFocusOptions.map((option) => (
+                <button
+                  key={option.id}
+                  type="button"
+                  className={plannerFocus === option.id ? '' : 'button-subtle'}
+                  onClick={() => setPlannerFocus(option.id)}
+                  style={{ minHeight: 36, paddingInline: 14 }}
+                >
+                  {option.label} · {option.count}
+                </button>
+              ))}
+            </div>
+          ) : null}
+          {plannerFocusItems.length ? (
             <div className="app-card-grid compact">
-              {plannerOpsBoard.nextItems.map((item) => (
+              {plannerFocusItems.map((item) => (
                 <section key={item.id} className="glass card section-card">
                   <div className="section-title" style={{ fontSize: 15 }}>{item.title}</div>
                   <div className="ui-muted">{item.detail}</div>
@@ -332,6 +380,8 @@ function PlannerInner({ token, me, logout }) {
                 </section>
               ))}
             </div>
+          ) : plannerOpsBoard.nextItems.length ? (
+            <div className="surface-note">No bookings match this planner focus right now. Switch filters to review another lane.</div>
           ) : null}
         </div>
       </section>
