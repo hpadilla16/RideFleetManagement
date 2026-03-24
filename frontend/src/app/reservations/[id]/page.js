@@ -1221,6 +1221,44 @@ setMsg('Charges updated');
     () => Number((Math.max(0, toMoneyNum(displayTotal) - toMoneyNum(paidTotal))).toFixed(2)),
     [displayTotal, paidTotal]
   );
+  const reservationOpsSnapshot = useMemo(() => {
+    const status = String(row?.status || '').toUpperCase();
+    let nextAction = 'Review reservation workflow';
+    let nextActionDetail = 'Open the workflow and continue from the current booking state.';
+
+    if (!precheckinStatus.hasActiveToken && !precheckinStatus.hasSubmitted) {
+      nextAction = 'Request customer information';
+      nextActionDetail = 'Kick off pre-check-in so the guest can upload license, insurance, and profile details.';
+    } else if (precheckinStatus.hasSubmitted && !precheckinStatus.isStaffReviewed) {
+      nextAction = 'Review pre-check-in';
+      nextActionDetail = 'Customer details are in. Staff should review the documents and checklist.';
+    } else if (precheckinStatus.isStaffReviewed && !precheckinStatus.isReadyForPickup) {
+      nextAction = 'Mark ready for pickup';
+      nextActionDetail = 'Pre-check-in looks good. The booking is waiting for the final ready-for-pickup step.';
+    } else if (!row?.signatureSignedAt) {
+      nextAction = 'Collect signature';
+      nextActionDetail = 'Agreement still needs to be signed before the booking can be handed off cleanly.';
+    } else if (unpaidBalance > 0) {
+      nextAction = 'Resolve payment due';
+      nextActionDetail = `There is still ${money(unpaidBalance)} left to collect on this booking.`;
+    } else if (status === 'CONFIRMED') {
+      nextAction = 'Start check-out';
+      nextActionDetail = 'Booking is ready to move into vehicle handoff and agreement execution.';
+    } else if (status === 'CHECKED_OUT') {
+      nextAction = 'Prepare check-in';
+      nextActionDetail = 'The vehicle is out. Keep an eye on return timing, inspection, and balance closeout.';
+    } else if (status === 'CHECKED_IN') {
+      nextAction = 'Booking complete';
+      nextActionDetail = 'Closeout is done. Use the notes, logs, and charges if anything still needs review.';
+    }
+
+    return {
+      customerName: [row?.customer?.firstName, row?.customer?.lastName].filter(Boolean).join(' ') || row?.customer?.email || 'Guest pending',
+      vehicleLabel: row?.vehicle ? `${row.vehicle.year || ''} ${row.vehicle.make || ''} ${row.vehicle.model || ''}`.trim() : 'No vehicle assigned',
+      nextAction,
+      nextActionDetail
+    };
+  }, [precheckinStatus, row, unpaidBalance]);
 
 
 	if (!row) {
@@ -1233,6 +1271,48 @@ setMsg('Charges updated');
   return (
     <AppShell me={me} logout={logout}>
       {msg ? <p className="label">{msg}</p> : null}
+      <section className="glass card-lg section-card" style={{ marginBottom: 16 }}>
+        <div className="app-banner">
+          <div className="row-between" style={{ alignItems: 'start', marginBottom: 0 }}>
+            <div>
+              <span className="eyebrow">Reservation Ops Snapshot</span>
+              <h2 className="page-title" style={{ marginTop: 6 }}>
+                {reservationOpsSnapshot.nextAction}
+              </h2>
+              <p className="ui-muted">{reservationOpsSnapshot.nextActionDetail}</p>
+            </div>
+            <span className={`status-chip ${unpaidBalance > 0 ? 'warn' : 'neutral'}`}>{row.status}</span>
+          </div>
+          <div className="app-card-grid compact">
+            <div className="info-tile">
+              <span className="label">Reservation</span>
+              <strong>{row.reservationNumber}</strong>
+              <span className="ui-muted">{String(row.workflowMode || 'RENTAL').replaceAll('_', ' ')}</span>
+            </div>
+            <div className="info-tile">
+              <span className="label">Customer</span>
+              <strong>{reservationOpsSnapshot.customerName}</strong>
+              <span className="ui-muted">{row?.customer?.email || row?.customer?.phone || 'Customer contact pending'}</span>
+            </div>
+            <div className="info-tile">
+              <span className="label">Vehicle</span>
+              <strong>{reservationOpsSnapshot.vehicleLabel}</strong>
+              <span className="ui-muted">{row?.pickupLocation?.name || 'Pickup location pending'}</span>
+            </div>
+            <div className="info-tile">
+              <span className="label">Payment Snapshot</span>
+              <strong>{money(unpaidBalance)}</strong>
+              <span className="ui-muted">{unpaidBalance > 0 ? 'Remaining balance' : 'Balance cleared'}</span>
+            </div>
+          </div>
+          <div className="app-banner-list">
+            <button type="button" className="button-subtle" onClick={() => router.push(`/reservations/${id}/checkout`)}>Start Check-out</button>
+            <button type="button" className="button-subtle" onClick={() => router.push(`/reservations/${id}/checkin`)}>Start Check-in</button>
+            <button type="button" className="button-subtle" onClick={() => router.push(`/reservations/${id}/payments?total=${Number(effectiveChargeTotal || 0)}`)}>Payments</button>
+            <button type="button" className="button-subtle" onClick={() => router.push(`/reservations/${id}/inspection`)}>Inspection</button>
+          </div>
+        </div>
+      </section>
       <section className="grid2">
         <div className="glass card-lg">
           <div className="row-between"><h2>Reservation # {row.reservationNumber}</h2><button onClick={save}>Save</button></div>
