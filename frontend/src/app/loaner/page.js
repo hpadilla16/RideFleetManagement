@@ -61,6 +61,15 @@ function reservationHref(row, action = '') {
   return action ? `/reservations/${row.id}/${action}` : `/reservations/${row.id}`;
 }
 
+function loanerBoardNote(row) {
+  if (!row) return '';
+  if (row.alertReason) return row.alertReason;
+  if (row.loanerReturnExceptionFlag) return 'Return exception flagged';
+  if (!row.loanerBorrowerPacketCompletedAt) return 'Borrower packet still pending';
+  if (String(row.loanerBillingStatus || 'DRAFT').toUpperCase() !== 'SETTLED') return `${row.loanerBillingStatus || 'Draft'} billing status`;
+  return 'Service lane follow-up needed';
+}
+
 export default function LoanerProgramPage() {
   return <AuthGate>{({ token, me, logout }) => <LoanerProgramInner token={token} me={me} logout={logout} />}</AuthGate>;
 }
@@ -160,6 +169,68 @@ function LoanerProgramInner({ token, me, logout }) {
       return true;
     });
   }, [vehicles]);
+
+  const serviceLanePriorityItems = useMemo(() => {
+    const items = [];
+    const queues = dashboard?.queues || {};
+    const addItem = (row, config) => {
+      if (!row?.id) return;
+      items.push({
+        id: `${config.key}-${row.id}`,
+        title: config.title,
+        detail: `${row.reservationNumber} - ${customerName(row)}`,
+        note: config.note?.(row) || loanerBoardNote(row),
+        tone: config.tone,
+        href: reservationHref(row, config.action || ''),
+        actionLabel: config.actionLabel,
+        secondaryHref: reservationHref(row),
+        secondaryLabel: 'Open Workflow'
+      });
+    };
+
+    addItem(queues.intake?.[0], {
+      key: 'delivery',
+      title: 'Next Delivery',
+      tone: 'good',
+      action: 'checkout',
+      actionLabel: 'Checkout',
+      note: (row) => `Pickup ${formatDateTime(row.pickupAt)} - ${row.pickupLocation?.name || 'Location pending'}`
+    });
+    addItem(queues.returns?.[0], {
+      key: 'return',
+      title: 'Next Return',
+      tone: 'warn',
+      action: 'checkin',
+      actionLabel: 'Check-in',
+      note: (row) => `Return ${formatDateTime(row.returnAt)} - ${row.pickupLocation?.name || 'Location pending'}`
+    });
+    addItem(queues.billing?.[0], {
+      key: 'billing',
+      title: 'Billing Blocker',
+      tone: 'warn',
+      action: 'payments',
+      actionLabel: 'Review Billing',
+      note: (row) => `${row.loanerBillingMode || 'Billing'} - ${row.loanerBillingStatus || 'Draft'}`
+    });
+    addItem(queues.alerts?.[0], {
+      key: 'alert',
+      title: 'SLA Alert',
+      tone: 'warn',
+      action: 'checkout',
+      actionLabel: 'Handle Alert',
+      note: (row) => row.alertReason || loanerBoardNote(row)
+    });
+    addItem(queues.advisor?.[0], {
+      key: 'advisor',
+      title: 'Advisor Follow-Up',
+      tone: 'neutral',
+      action: '',
+      actionLabel: 'Open Case',
+      note: (row) => row.serviceAdvisorName ? `Advisor ${row.serviceAdvisorName}` : loanerBoardNote(row)
+    });
+
+    return items.slice(0, 4);
+  }, [dashboard]);
 
   async function createLoaner(event) {
     event.preventDefault();
@@ -346,6 +417,38 @@ function LoanerProgramInner({ token, me, logout }) {
           {msg}
         </div>
       ) : null}
+
+      <section className="glass card-lg section-card" style={{ marginBottom: 18 }}>
+        <div className="row-between">
+          <div>
+            <div className="section-title">Service Lane Priority Board</div>
+            <p className="ui-muted">The first delivery, return, billing blocker, and SLA risk the lane should touch next.</p>
+          </div>
+          <span className="status-chip neutral">Mobile Ops</span>
+        </div>
+        {serviceLanePriorityItems.length ? (
+          <div className="app-card-grid compact">
+            {serviceLanePriorityItems.map((item) => (
+              <section key={item.id} className="glass card section-card">
+                <div className="row-between" style={{ alignItems: 'start', marginBottom: 6 }}>
+                  <div>
+                    <div className="section-title" style={{ fontSize: 15 }}>{item.title}</div>
+                    <div className="ui-muted" style={{ marginTop: 4 }}>{item.detail}</div>
+                  </div>
+                  <span className={`status-chip ${item.tone}`}>{item.title}</span>
+                </div>
+                <div className="surface-note">{item.note}</div>
+                <div className="inline-actions">
+                  <Link href={item.href}><button type="button">{item.actionLabel}</button></Link>
+                  <Link href={item.secondaryHref}><button type="button" className="button-subtle">{item.secondaryLabel}</button></Link>
+                </div>
+              </section>
+            ))}
+          </div>
+        ) : (
+          <div className="surface-note">No immediate loaner priorities right now. The service lane looks clear.</div>
+        )}
+      </section>
 
       <section className="split-panel">
         <section className="glass card-lg section-card">
