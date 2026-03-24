@@ -21,6 +21,11 @@ function Inner({ token, me, logout }) {
   const [msg, setMsg] = useState('');
   const [f, setF] = useState({ exterior: 'GOOD', interior: 'GOOD', tires: 'GOOD', lights: 'GOOD', windshield: 'GOOD', notes: '' });
   const [photos, setPhotos] = useState({ front: '', rear: '', left: '', right: '', frontSeat: '', rearSeat: '', dashboard: '', trunk: '' });
+  const photoCount = Object.values(photos).filter(Boolean).length;
+  const conditionAttentionCount = Object.values(f).filter((value, index) => {
+    if (index === Object.keys(f).length - 1) return false;
+    return String(value) !== 'GOOD';
+  }).length;
 
   useEffect(() => { (async () => { try { setRow(await api(`/api/reservations/${id}`, {}, token)); } catch (e) { setMsg(e.message); } })(); }, [id, token]);
 
@@ -63,7 +68,40 @@ function Inner({ token, me, logout }) {
 
   return (
     <AppShell me={me} logout={logout}>
-      <section className="glass card-lg">
+      <section className="glass card-lg stack">
+        <div className="app-banner">
+          <div className="row-between" style={{ marginBottom: 0 }}>
+            <div className="stack" style={{ gap: 6 }}>
+              <span className="eyebrow">Inspection Snapshot</span>
+              <h3 style={{ margin: 0 }}>{row?.reservationNumber || `Reservation ${id}`}</h3>
+              <p className="ui-muted">
+                Capture condition, photo coverage, and notes clearly before handing the unit out or closing it back into fleet.
+              </p>
+            </div>
+            <span className={`status-chip ${photoCount >= 8 ? 'good' : 'warn'}`}>
+              {photoCount >= 8 ? 'Photo set complete' : `${photoCount}/8 photos`}
+            </span>
+          </div>
+          <div className="app-card-grid compact">
+            <div className="info-tile">
+              <span className="label">Phase</span>
+              <strong>{phase}</strong>
+            </div>
+            <div className="info-tile">
+              <span className="label">Customer</span>
+              <strong>{[row?.customer?.firstName, row?.customer?.lastName].filter(Boolean).join(' ') || row?.customer?.email || '-'}</strong>
+            </div>
+            <div className="info-tile">
+              <span className="label">Vehicle</span>
+              <strong>{[row?.vehicle?.year, row?.vehicle?.make, row?.vehicle?.model].filter(Boolean).join(' ') || row?.vehicle?.plate || '-'}</strong>
+            </div>
+            <div className="info-tile">
+              <span className="label">Condition Flags</span>
+              <strong>{conditionAttentionCount}</strong>
+            </div>
+          </div>
+        </div>
+
         <div className="row-between"><h2>Reservation Inspection ({phase})</h2><button onClick={() => router.push(`/reservations/${id}`)}>Back</button></div>
         {msg ? <div className="label">{msg}</div> : null}
         <div className="grid3">
