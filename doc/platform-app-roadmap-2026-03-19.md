@@ -171,6 +171,29 @@ Why:
 - easier QA
 - better fit for the current team and codebase
 
+## Mobile Wrapper Strategy For Sprint 9
+
+The recommended path for `Sprint 9` is:
+
+- keep the existing `Next.js` app as the main UI client
+- continue strengthening mobile-first continuity in the shared frontend
+- package it with a light native wrapper for internal device testing
+
+Recommended first wrapper strategy:
+
+- `Capacitor`-style native shell over the hosted app
+
+Why this is the right move now:
+
+- guest, host, employee, issues, loaner, booking, and customer portal already exist
+- the product can reach installable testing faster without rebuilding every surface
+- backend and workflows stay shared
+- the team can get to `TestFlight internal` and `Google Play internal testing` much faster
+
+Not recommended as the first `Sprint 9` move:
+
+- full React Native rewrite before internal device validation
+
 ## Booking System Requirement
 
 We need a real booking system that customers can use from:

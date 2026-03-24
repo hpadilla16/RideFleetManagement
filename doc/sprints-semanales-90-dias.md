@@ -136,32 +136,32 @@ Se cubre un hueco donde TSD y Rent Centric suelen verse mas maduros.
 
 ## Sprint 9
 ### Objetivo
-Crear la base de integraciones externas.
+Iniciar la base real de mobile app e internal store testing.
 
 ### Entregables
-- Event bus o capa de domain events.
-- Webhooks firmados v1.
-- Registro de intentos y estado de entrega.
-- Payloads estables para:
-  - reservation created/updated
-  - agreement finalized/closed
-  - payment posted/refunded
+- app shell movil compartido
+- continuidad de sesion y contexto por surface
+- manifest / installability base
+- internal wrapper path definido
+- `TestFlight internal`
+- `Google Play internal testing`
 
 ### Resultado esperado
-El producto deja de estar cerrado sobre si mismo y se vuelve integrable.
+La plataforma deja de ser solo mobile web pulido y pasa a una base real para app instalada y pruebas internas en stores.
 
 ## Sprint 10
 ### Objetivo
-Entregar primeras integraciones de negocio.
+Endurecer la app y preparar public store readiness.
 
 ### Entregables
-- Export contable o adaptador inicial.
-- Integracion de automation/email/CRM.
-- Contrato tecnico para insurance verification provider.
-- Configuracion por tenant para integraciones.
+- notifications and reminders
+- media / upload polish
+- device QA
+- privacy and support assets
+- App Store / Google Play readiness checklist
 
 ### Resultado esperado
-Se empieza a competir mejor con HQ, TSD y Rent Centric en ecosistema.
+Queda lista la base para submission publica mas segura en el siguiente paso.
 
 ## Sprint 11
 ### Objetivo
