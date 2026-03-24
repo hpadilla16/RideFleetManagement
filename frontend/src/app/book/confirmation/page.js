@@ -99,6 +99,12 @@ export default function PublicBookingConfirmationPage() {
   const primaryActionLink = portalStatus?.nextStep?.link || customerInfoAction?.link || signatureAction?.link || paymentAction?.link || '';
   const primaryActionLabel = portalStatus?.nextStep?.label || 'Continue guest workflow';
   const pricing = confirmation?.pricingBreakdown || null;
+  const estimatedTotal = confirmation?.bookingType === 'CAR_SHARING'
+    ? Number(pricing?.guestTotal ?? confirmation?.trip?.quotedTotal ?? 0)
+    : Number(pricing?.reservationEstimate ?? confirmation?.reservation?.estimatedTotal ?? 0);
+  const dueNow = confirmation?.bookingType === 'CAR_SHARING'
+    ? Math.max(0, Number(portalStatus?.payment?.balanceDue ?? 0))
+    : Number(pricing?.depositDueNow ?? portalStatus?.payment?.balanceDue ?? 0);
 
   return (
     <main style={{ minHeight: '100vh', padding: '22px clamp(16px, 3vw, 34px) 42px' }}>
@@ -133,6 +139,39 @@ export default function PublicBookingConfirmationPage() {
         </section>
 
         {confirmation ? (
+          <>
+          <section className="app-banner">
+            <div className="row-between" style={{ marginBottom: 0 }}>
+              <div className="stack" style={{ gap: 6 }}>
+                <span className="eyebrow">Confirmation Snapshot</span>
+                <h2 style={{ margin: 0 }}>{confirmation.bookingType === 'CAR_SHARING' ? 'Guest trip ready to continue' : 'Guest reservation ready to continue'}</h2>
+                <p className="ui-muted">
+                  The guest should verify their email, open the secure next-step link, and continue through pre-check-in, signature, and payment.
+                </p>
+              </div>
+              <span className={`status-chip ${primaryActionLink ? 'good' : 'neutral'}`}>
+                {primaryActionLink ? 'Next step ready' : 'Awaiting next step'}
+              </span>
+            </div>
+            <div className="app-card-grid compact">
+              <div className="info-tile">
+                <span className="label">Booking Type</span>
+                <strong>{confirmation.bookingType === 'CAR_SHARING' ? 'Car Sharing' : 'Rental'}</strong>
+              </div>
+              <div className="info-tile">
+                <span className="label">Estimated Total</span>
+                <strong>{fmtMoney(estimatedTotal)}</strong>
+              </div>
+              <div className="info-tile">
+                <span className="label">Due Now</span>
+                <strong>{fmtMoney(dueNow)}</strong>
+              </div>
+              <div className="info-tile">
+                <span className="label">Guest Email</span>
+                <strong>{confirmation.customer?.email || '-'}</strong>
+              </div>
+            </div>
+          </section>
           <section className="split-panel">
             <div className="glass card-lg section-card">
               <div className="section-title">Booking Summary</div>
@@ -329,6 +368,7 @@ export default function PublicBookingConfirmationPage() {
               </div>
             </div>
           </section>
+          </>
         ) : (
           <section className="glass card-lg section-card">
             <div className="surface-note">
