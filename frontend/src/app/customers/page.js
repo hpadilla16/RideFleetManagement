@@ -57,6 +57,52 @@ function CustomersInner({ token, me, logout }) {
     });
   }, [rows, query, showOnlyHold]);
 
+  const customerSupportHub = useMemo(() => {
+    const holds = rows.filter((r) => r.doNotRent);
+    const docsMissing = rows.filter((r) => !r.idPhotoUrl || !r.insuranceDocumentUrl);
+    const withEmail = rows.filter((r) => !!r.email);
+    const recentNeedAttention = [
+      holds[0]
+        ? {
+            id: `hold-${holds[0].id}`,
+            title: 'Hold Review',
+            detail: `${holds[0].firstName || ''} ${holds[0].lastName || ''}`.trim(),
+            note: holds[0].doNotRentReason || 'Customer is currently on hold and may need support review.',
+            href: `/customers/${holds[0].id}`,
+            actionLabel: 'Open Profile'
+          }
+        : null,
+      docsMissing[0]
+        ? {
+            id: `docs-${docsMissing[0].id}`,
+            title: 'Missing Documents',
+            detail: `${docsMissing[0].firstName || ''} ${docsMissing[0].lastName || ''}`.trim(),
+            note: `${docsMissing[0].idPhotoUrl ? 'ID ready' : 'ID missing'} - ${docsMissing[0].insuranceDocumentUrl ? 'Insurance ready' : 'Insurance missing'}`,
+            href: `/customers/${docsMissing[0].id}`,
+            actionLabel: 'Review Docs'
+          }
+        : null,
+      withEmail[0]
+        ? {
+            id: `email-${withEmail[0].id}`,
+            title: 'Email-Ready Customer',
+            detail: `${withEmail[0].firstName || ''} ${withEmail[0].lastName || ''}`.trim(),
+            note: withEmail[0].email,
+            href: `/customers/${withEmail[0].id}`,
+            actionLabel: 'Open Profile'
+          }
+        : null
+    ].filter(Boolean);
+
+    return {
+      total: rows.length,
+      holds: holds.length,
+      docsMissing: docsMissing.length,
+      withEmail: withEmail.length,
+      recentNeedAttention
+    };
+  }, [rows]);
+
   const openCreate = () => {
     setForm(EMPTY);
     setStep(0);
@@ -173,6 +219,56 @@ function CustomersInner({ token, me, logout }) {
 
   return (
     <AppShell me={me} logout={logout}>
+      <section className="glass card-lg section-card" style={{ marginBottom: 16 }}>
+        <div className="app-banner">
+          <div className="row-between" style={{ alignItems: 'start', marginBottom: 0 }}>
+            <div>
+              <span className="eyebrow">Customer Support Hub</span>
+              <h2 className="page-title" style={{ marginTop: 6 }}>
+                Keep customer readiness and holds in view.
+              </h2>
+              <p className="ui-muted">A compact mobile-first board before you drop into the full customer table.</p>
+            </div>
+            <span className="status-chip neutral">Customer Ops</span>
+          </div>
+          <div className="app-card-grid compact">
+            <div className="info-tile">
+              <span className="label">Customers</span>
+              <strong>{customerSupportHub.total}</strong>
+              <span className="ui-muted">Profiles currently available in the tenant workspace.</span>
+            </div>
+            <div className="info-tile">
+              <span className="label">On Hold</span>
+              <strong>{customerSupportHub.holds}</strong>
+              <span className="ui-muted">Customers currently blocked from renting.</span>
+            </div>
+            <div className="info-tile">
+              <span className="label">Docs Missing</span>
+              <strong>{customerSupportHub.docsMissing}</strong>
+              <span className="ui-muted">Customers missing ID or insurance documentation.</span>
+            </div>
+            <div className="info-tile">
+              <span className="label">Email Ready</span>
+              <strong>{customerSupportHub.withEmail}</strong>
+              <span className="ui-muted">Customers who can receive support emails and password resets.</span>
+            </div>
+          </div>
+          {customerSupportHub.recentNeedAttention.length ? (
+            <div className="app-card-grid compact">
+              {customerSupportHub.recentNeedAttention.map((item) => (
+                <section key={item.id} className="glass card section-card">
+                  <div className="section-title" style={{ fontSize: 15 }}>{item.title}</div>
+                  <div className="ui-muted">{item.detail}</div>
+                  <div className="surface-note">{item.note}</div>
+                  <div className="inline-actions">
+                    <Link href={item.href}><button type="button">{item.actionLabel}</button></Link>
+                  </div>
+                </section>
+              ))}
+            </div>
+          ) : null}
+        </div>
+      </section>
       <section className="glass card-lg stack">
         <div className="row-between">
           <h2>Customers</h2>
