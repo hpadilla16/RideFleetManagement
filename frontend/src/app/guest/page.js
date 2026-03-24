@@ -79,6 +79,29 @@ function timelineStatus(portal, key) {
   return portal?.timeline?.find((item) => item.key === key) || null;
 }
 
+function bookingPriority(booking) {
+  const status = String(booking?.status || '').toUpperCase();
+  const pickupAt = booking?.pickupAt ? new Date(booking.pickupAt) : null;
+  const returnAt = booking?.returnAt ? new Date(booking.returnAt) : null;
+  const now = Date.now();
+  const pickupMs = pickupAt && !Number.isNaN(pickupAt.getTime()) ? pickupAt.getTime() : null;
+  const returnMs = returnAt && !Number.isNaN(returnAt.getTime()) ? returnAt.getTime() : null;
+
+  if (['DISPUTED', 'LATE', 'CANCELED'].includes(status)) {
+    return { bucket: 'SUPPORT', label: 'Support needed' };
+  }
+  if (returnMs && returnMs < now && !['COMPLETED', 'CHECKED_IN'].includes(status)) {
+    return { bucket: 'SUPPORT', label: 'Return follow-up' };
+  }
+  if (pickupMs && pickupMs > now && pickupMs - now <= 1000 * 60 * 60 * 72) {
+    return { bucket: 'UPCOMING', label: 'Pickup soon' };
+  }
+  if (['CONFIRMED', 'CHECKED_OUT', 'ACTIVE', 'PENDING'].includes(status)) {
+    return { bucket: 'ACTION', label: 'Guest action likely' };
+  }
+  return { bucket: 'ALL', label: 'On your account' };
+}
+
 async function lookupBooking({ reference, email }) {
   return api('/api/public/booking/lookup', {
     method: 'POST',
@@ -114,6 +137,7 @@ export default function GuestAppPage() {
   const [signInLoading, setSignInLoading] = useState(false);
   const [signInMsg, setSignInMsg] = useState('');
   const [guestSession, setGuestSession] = useState(null);
+  const [bookingFilter, setBookingFilter] = useState('ALL');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [result, setResult] = useState(null);
@@ -161,6 +185,24 @@ export default function GuestAppPage() {
     if (paymentAction?.link) return { label: 'Continue to Payment', link: paymentAction.link };
     return null;
   }, [customerInfoAction?.link, paymentAction?.link, portalStatus?.nextStep?.label, portalStatus?.nextStep?.link, signatureAction?.link]);
+
+  const guestSessionSummary = useMemo(() => {
+    const bookings = guestSession?.bookings || [];
+    return bookings.reduce((acc, booking) => {
+      const priority = bookingPriority(booking);
+      acc.total += 1;
+      if (priority.bucket === 'UPCOMING') acc.upcoming += 1;
+      if (priority.bucket === 'ACTION') acc.action += 1;
+      if (priority.bucket === 'SUPPORT') acc.support += 1;
+      return acc;
+    }, { total: 0, upcoming: 0, action: 0, support: 0 });
+  }, [guestSession?.bookings]);
+
+  const filteredSessionBookings = useMemo(() => {
+    const bookings = guestSession?.bookings || [];
+    if (bookingFilter === 'ALL') return bookings;
+    return bookings.filter((booking) => bookingPriority(booking).bucket === bookingFilter);
+  }, [bookingFilter, guestSession?.bookings]);
 
   useEffect(() => {
     try {
@@ -405,13 +447,61 @@ export default function GuestAppPage() {
           </form>
           {signInMsg ? <div className="surface-note" style={{ color: /sent|load your guest account/i.test(signInMsg) ? '#166534' : '#991b1b' }}>{signInMsg}</div> : null}
           {guestSession ? (
-            <div className="app-card-grid compact">
-              {guestSession.bookings?.map((booking) => (
+            <div className="stack">
+              <div className="app-card-grid compact">
+                <div className="doc-card">
+                  <strong>My Bookings</strong>
+                  <div className="doc-meta">{guestSessionSummary.total} saved booking{guestSessionSummary.total === 1 ? '' : 's'} on this guest profile.</div>
+                </div>
+                <div className="doc-card">
+                  <strong>Upcoming</strong>
+                  <div className="doc-meta">{guestSessionSummary.upcoming} booking{guestSessionSummary.upcoming === 1 ? '' : 's'} with pickup coming up soon.</div>
+                </div>
+                <div className="doc-card">
+                  <strong>Action Needed</strong>
+                  <div className="doc-meta">{guestSessionSummary.action} booking{guestSessionSummary.action === 1 ? '' : 's'} likely still need guest steps.</div>
+                </div>
+                <div className="doc-card">
+                  <strong>Support Needed</strong>
+                  <div className="doc-meta">{guestSessionSummary.support} booking{guestSessionSummary.support === 1 ? '' : 's'} may need follow-up or support.</div>
+                </div>
+              </div>
+
+              <div className="inline-actions">
+                {[
+                  ['ALL', `All (${guestSessionSummary.total})`],
+                  ['UPCOMING', `Upcoming (${guestSessionSummary.upcoming})`],
+                  ['ACTION', `Action Needed (${guestSessionSummary.action})`],
+                  ['SUPPORT', `Support Needed (${guestSessionSummary.support})`]
+                ].map(([key, label]) => (
+                  <button
+                    key={key}
+                    type="button"
+                    className={bookingFilter === key ? '' : 'button-subtle'}
+                    onClick={() => setBookingFilter(key)}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+
+              {filteredSessionBookings.length ? (
+                <div className="app-card-grid compact">
+                  {filteredSessionBookings.map((booking) => (
                 <div key={`${booking.type}:${booking.reference}`} className="doc-card">
-                  <strong>{booking.reference}</strong>
+                  <div className="row-between" style={{ gap: 10 }}>
+                    <strong>{booking.reference}</strong>
+                    <span className={bookingPriority(booking).bucket === 'SUPPORT' ? 'status-chip warn' : bookingPriority(booking).bucket === 'UPCOMING' ? 'status-chip good' : 'status-chip neutral'}>
+                      {bookingPriority(booking).label}
+                    </span>
+                  </div>
                   <div className="doc-meta">{booking.type === 'CAR_SHARING' ? 'Car Sharing' : 'Rental'} · {booking.vehicleLabel}</div>
                   <div className="doc-meta">{booking.pickupLocationName || 'Location to be confirmed'}</div>
-                  <div className="doc-meta">{formatDateTime(booking.pickupAt)}</div>
+                  <div className="doc-meta">Pickup {formatDateTime(booking.pickupAt)}</div>
+                  <div className="doc-meta">Status {booking.status || '-'}</div>
+                  {booking.type === 'CAR_SHARING' && booking.host ? (
+                    <div className="doc-meta">Host {booking.host.displayName} - {fmtTrustLabel(booking.host.averageRating, booking.host.reviewCount)}</div>
+                  ) : null}
                   <div className="inline-actions">
                     <button type="button" className="button-subtle" onClick={() => resolveLookup(booking.reference, guestSession.customer?.email || signInEmail)}>
                       Open Booking
@@ -419,6 +509,10 @@ export default function GuestAppPage() {
                   </div>
                 </div>
               ))}
+                </div>
+              ) : (
+                <div className="surface-note">No saved bookings match that filter right now.</div>
+              )}
             </div>
           ) : null}
         </section>
