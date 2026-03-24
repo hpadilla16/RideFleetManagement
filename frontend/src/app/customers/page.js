@@ -38,6 +38,7 @@ function CustomersInner({ token, me, logout }) {
   const [query, setQuery] = useState('');
   const [showOnlyHold, setShowOnlyHold] = useState(false);
   const [msg, setMsg] = useState('');
+  const [supportFocus, setSupportFocus] = useState('ALL');
 
   const [wizardOpen, setWizardOpen] = useState(false);
   const [step, setStep] = useState(0);
@@ -102,6 +103,34 @@ function CustomersInner({ token, me, logout }) {
       recentNeedAttention
     };
   }, [rows]);
+
+  const supportFocusOptions = useMemo(() => ([
+    { id: 'ALL', label: 'All Queues', count: customerSupportHub.recentNeedAttention.length },
+    { id: 'HOLDS', label: 'Holds', count: customerSupportHub.recentNeedAttention.filter((item) => item.id.startsWith('hold-')).length },
+    { id: 'DOCS', label: 'Docs', count: customerSupportHub.recentNeedAttention.filter((item) => item.id.startsWith('docs-')).length },
+    { id: 'EMAIL', label: 'Email', count: customerSupportHub.recentNeedAttention.filter((item) => item.id.startsWith('email-')).length }
+  ]), [customerSupportHub]);
+
+  const supportFocusSummary = useMemo(() => {
+    switch (supportFocus) {
+      case 'HOLDS':
+        return 'Focus the shift on hold reviews first so blocked customers get a fast decision.';
+      case 'DOCS':
+        return 'Keep missing document work visible to close out ID and insurance gaps faster from phone.';
+      case 'EMAIL':
+        return 'Show customers ready for email actions like resets and support follow-up without scanning the full table.';
+      default:
+        return 'A compact mobile-first board before you drop into the full customer table.';
+    }
+  }, [supportFocus]);
+
+  const visibleSupportItems = useMemo(() => {
+    if (supportFocus === 'ALL') return customerSupportHub.recentNeedAttention;
+    if (supportFocus === 'HOLDS') return customerSupportHub.recentNeedAttention.filter((item) => item.id.startsWith('hold-'));
+    if (supportFocus === 'DOCS') return customerSupportHub.recentNeedAttention.filter((item) => item.id.startsWith('docs-'));
+    if (supportFocus === 'EMAIL') return customerSupportHub.recentNeedAttention.filter((item) => item.id.startsWith('email-'));
+    return customerSupportHub.recentNeedAttention;
+  }, [customerSupportHub, supportFocus]);
 
   const openCreate = () => {
     setForm(EMPTY);
@@ -227,7 +256,7 @@ function CustomersInner({ token, me, logout }) {
               <h2 className="page-title" style={{ marginTop: 6 }}>
                 Keep customer readiness and holds in view.
               </h2>
-              <p className="ui-muted">A compact mobile-first board before you drop into the full customer table.</p>
+              <p className="ui-muted">{supportFocusSummary}</p>
             </div>
             <span className="status-chip neutral">Customer Ops</span>
           </div>
@@ -253,9 +282,22 @@ function CustomersInner({ token, me, logout }) {
               <span className="ui-muted">Customers who can receive support emails and password resets.</span>
             </div>
           </div>
-          {customerSupportHub.recentNeedAttention.length ? (
+          <div className="app-banner-list">
+            {supportFocusOptions.map((option) => (
+              <button
+                key={option.id}
+                type="button"
+                className={supportFocus === option.id ? '' : 'button-subtle'}
+                onClick={() => setSupportFocus(option.id)}
+                style={{ minHeight: 36, paddingInline: 14 }}
+              >
+                {option.label} · {option.count}
+              </button>
+            ))}
+          </div>
+          {visibleSupportItems.length ? (
             <div className="app-card-grid compact">
-              {customerSupportHub.recentNeedAttention.map((item) => (
+              {visibleSupportItems.map((item) => (
                 <section key={item.id} className="glass card section-card">
                   <div className="section-title" style={{ fontSize: 15 }}>{item.title}</div>
                   <div className="ui-muted">{item.detail}</div>
@@ -266,6 +308,8 @@ function CustomersInner({ token, me, logout }) {
                 </section>
               ))}
             </div>
+          ) : customerSupportHub.recentNeedAttention.length ? (
+            <div className="surface-note">No customer cases match this focus right now. Switch filters to review another lane.</div>
           ) : null}
         </div>
       </section>
