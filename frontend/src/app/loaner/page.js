@@ -232,6 +232,16 @@ function LoanerProgramInner({ token, me, logout }) {
     return items.slice(0, 4);
   }, [dashboard]);
 
+  const shiftSnapshot = useMemo(() => {
+    const firstPriority = serviceLanePriorityItems[0] || null;
+    return {
+      firstPriority,
+      openWork: metrics.openLoaners + metrics.packetPending + metrics.billingAttention,
+      laneRisk: metrics.overdueReturns + metrics.serviceDelays + metrics.returnExceptions,
+      readyToday: metrics.readyForDelivery + metrics.pickupsToday
+    };
+  }, [metrics, serviceLanePriorityItems]);
+
   async function createLoaner(event) {
     event.preventDefault();
     if (!loanerReady) {
@@ -419,6 +429,51 @@ function LoanerProgramInner({ token, me, logout }) {
       ) : null}
 
       <section className="glass card-lg section-card" style={{ marginBottom: 18 }}>
+        <div className="app-banner">
+          <div className="row-between" style={{ alignItems: 'start', marginBottom: 0 }}>
+            <div>
+              <span className="eyebrow">Loaner Shift</span>
+              <h2 className="page-title" style={{ marginTop: 6 }}>
+                Welcome back{me?.firstName ? `, ${me.firstName}` : ''}. The lane is ready.
+              </h2>
+              <p className="ui-muted">
+                Jump into intake, returns, billing, and statement work without hunting through the full queue.
+              </p>
+            </div>
+            <span className="status-chip neutral">Service Lane Hub</span>
+          </div>
+          <div className="app-card-grid compact">
+            <div className="info-tile">
+              <span className="label">Open Work</span>
+              <strong>{shiftSnapshot.openWork}</strong>
+              <span className="ui-muted">Open loaners, packets, and billing follow-up still in motion.</span>
+            </div>
+            <div className="info-tile">
+              <span className="label">Ready Today</span>
+              <strong>{shiftSnapshot.readyToday}</strong>
+              <span className="ui-muted">Loaners ready for delivery or scheduled for pickup today.</span>
+            </div>
+            <div className="info-tile">
+              <span className="label">Lane Risk</span>
+              <strong>{shiftSnapshot.laneRisk}</strong>
+              <span className="ui-muted">Overdues, service delays, and return exceptions needing attention.</span>
+            </div>
+            <div className="info-tile">
+              <span className="label">Top Priority</span>
+              <strong>{shiftSnapshot.firstPriority?.title || 'All Clear'}</strong>
+              <span className="ui-muted">{shiftSnapshot.firstPriority?.detail || 'No urgent loaner task is ahead of the lane right now.'}</span>
+            </div>
+          </div>
+          <div className="app-banner-list">
+            <a href="#loaner-intake" className="app-banner-pill">Open Intake</a>
+            <a href="#loaner-lookup" className="app-banner-pill">Loaner Lookup</a>
+            <a href="#loaner-queues" className="app-banner-pill">Jump To Queues</a>
+            <button type="button" className="button-subtle" onClick={printStatementPacket}>Print Monthly Packet</button>
+          </div>
+        </div>
+      </section>
+
+      <section className="glass card-lg section-card" style={{ marginBottom: 18 }}>
         <div className="row-between">
           <div>
             <div className="section-title">Service Lane Priority Board</div>
@@ -451,7 +506,7 @@ function LoanerProgramInner({ token, me, logout }) {
       </section>
 
       <section className="split-panel">
-        <section className="glass card-lg section-card">
+        <section id="loaner-lookup" className="glass card-lg section-card">
           <div className="row-between">
             <div>
               <div className="section-title">Loaner Lookup</div>
@@ -540,7 +595,7 @@ function LoanerProgramInner({ token, me, logout }) {
           )}
         </section>
 
-        <section className="glass card-lg section-card">
+        <section id="loaner-intake" className="glass card-lg section-card">
           <div className="row-between">
             <div>
               <div className="section-title">Quick Intake</div>
@@ -723,7 +778,7 @@ function LoanerProgramInner({ token, me, logout }) {
         </section>
       </section>
 
-      <section className="glass card-lg section-card" style={{ marginTop: 18 }}>
+      <section id="loaner-queues" className="glass card-lg section-card" style={{ marginTop: 18 }}>
         <div className="row-between">
           <div>
             <div className="section-title">Loaner Queues</div>
