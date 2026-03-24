@@ -16,6 +16,12 @@ function fmtRating(value, count = 0) {
   return `${rating.toFixed(2)} ★ (${count})`;
 }
 
+function fmtTrustLabel(value, count = 0) {
+  const rating = Number(value || 0);
+  if (!count) return 'New host';
+  return `${rating.toFixed(2)} / 5 (${count} review${count === 1 ? '' : 's'})`;
+}
+
 function formatDateTime(value) {
   if (!value) return '-';
   try {
@@ -131,6 +137,10 @@ export default function GuestAppPage() {
   const availableDocsCount = documents.filter((item) => item.available).length;
   const openIssueCount = (result?.trip?.incidents || []).filter((item) => !['RESOLVED', 'CLOSED'].includes(String(item?.status || '').toUpperCase())).length;
   const timelineDoneCount = timeline.filter((item) => ['completed', 'active'].includes(String(item?.status || '').toLowerCase())).length;
+  const bookingModeLabel = result?.bookingType === 'CAR_SHARING' ? 'Car Sharing' : 'Rental';
+  const hostTrustLabel = result?.bookingType === 'CAR_SHARING' && result?.trip?.host
+    ? fmtTrustLabel(result.trip.host.averageRating, result.trip.host.reviewCount)
+    : 'Counter support available';
   const journeyStages = [
     { key: 'lookup', label: 'Booking found', status: result ? 'completed' : 'pending', note: bookingReference },
     { key: 'customerInfo', label: 'Pre-check-in', status: String(customerInfoLive?.status || 'pending').toLowerCase(), note: customerInfoLive?.description || 'Confirm guest details and docs' },
@@ -379,6 +389,36 @@ export default function GuestAppPage() {
         ) : null}
 
         {result ? (
+          <section className="glass card-lg section-card">
+            <div className="row-between">
+              <div>
+                <div className="section-title">Guest Mobile Hub</div>
+                <p className="ui-muted">Everything the guest needs right now without digging through the full workflow.</p>
+              </div>
+              <span className="status-chip neutral">{bookingModeLabel}</span>
+            </div>
+            <div className="app-card-grid compact">
+              <div className="doc-card">
+                <strong>Next Action</strong>
+                <div className="doc-meta">{primaryAction?.label || portalStatus?.progress?.nextAction || 'Booking details are ready.'}</div>
+              </div>
+              <div className="doc-card">
+                <strong>Documents Ready</strong>
+                <div className="doc-meta">{availableDocsCount} available in the guest wallet.</div>
+              </div>
+              <div className="doc-card">
+                <strong>Support Cases</strong>
+                <div className="doc-meta">{openIssueCount} case{openIssueCount === 1 ? '' : 's'} currently open.</div>
+              </div>
+              <div className="doc-card">
+                <strong>{result.bookingType === 'CAR_SHARING' ? 'Host Trust' : 'Booking Support'}</strong>
+                <div className="doc-meta">{hostTrustLabel}</div>
+              </div>
+            </div>
+          </section>
+        ) : null}
+
+        {result ? (
           <section className="split-panel">
             <div className="glass card-lg section-card">
               <div className="row-between">
@@ -386,18 +426,19 @@ export default function GuestAppPage() {
                   <div className="section-title">Guest Booking Summary</div>
                   <p className="ui-muted">A clean snapshot of the booking, guest, and next action.</p>
                 </div>
-                <span className="status-chip neutral">{result.bookingType === 'CAR_SHARING' ? 'Car Sharing' : 'Rental'}</span>
+                <span className="status-chip neutral">{bookingModeLabel}</span>
               </div>
               <div className="info-grid-tight">
                 <div className="info-tile"><span className="label">Reference</span><strong>{result.trip?.tripCode || result.reservation?.reservationNumber || '-'}</strong></div>
                 <div className="info-tile"><span className="label">Customer</span><strong>{`${result.customer?.firstName || ''} ${result.customer?.lastName || ''}`.trim() || 'Guest'}</strong></div>
-                <div className="info-tile"><span className="label">Tenant</span><strong>{result.tenant?.name || '-'}</strong></div>
+                <div className="info-tile"><span className="label">Pickup Location</span><strong>{pickupLabel}</strong></div>
+                <div className="info-tile"><span className="label">Return Location</span><strong>{returnLabel}</strong></div>
                 <div className="info-tile"><span className="label">Current Step</span><strong>{portalStatus?.progress?.currentStep || 'Guest Flow'}</strong></div>
                 <div className="info-tile"><span className="label">Pickup</span><strong>{formatDateTime(result.reservation?.pickupAt)}</strong></div>
                 <div className="info-tile"><span className="label">Return</span><strong>{formatDateTime(result.reservation?.returnAt)}</strong></div>
                 <div className="info-tile"><span className="label">Vehicle</span><strong>{bookingVehicleLabel}</strong></div>
                 {result.bookingType === 'CAR_SHARING' && result.trip?.host ? (
-                  <div className="info-tile"><span className="label">Host</span><strong>{result.trip.host.displayName} - {fmtRating(result.trip.host.averageRating, result.trip.host.reviewCount)}</strong></div>
+                  <div className="info-tile"><span className="label">Host</span><strong>{result.trip.host.displayName} - {fmtTrustLabel(result.trip.host.averageRating, result.trip.host.reviewCount)}</strong></div>
                 ) : null}
               </div>
               <div className="app-banner">
@@ -406,8 +447,8 @@ export default function GuestAppPage() {
                   {result.bookingType === 'CAR_SHARING' ? (
                     <>
                       <span className="app-banner-pill">Trip total {fmtMoney(result.trip?.quotedTotal)}</span>
-                      <span className="app-banner-pill">Host earnings {fmtMoney(result.trip?.hostEarnings)}</span>
-                      <span className="app-banner-pill">Platform fee {fmtMoney(result.trip?.platformFee)}</span>
+                      <span className="app-banner-pill">Host rating {fmtTrustLabel(result.trip?.host?.averageRating, result.trip?.host?.reviewCount)}</span>
+                      <span className="app-banner-pill">Pickup {pickupLabel}</span>
                     </>
                   ) : (
                   <>
@@ -584,7 +625,7 @@ export default function GuestAppPage() {
                   {result.bookingType === 'CAR_SHARING' && result.trip?.host?.id ? (
                     <div className="doc-card">
                       <strong>Host Trust</strong>
-                      <div className="doc-meta">{fmtRating(result.trip.host.averageRating, result.trip.host.reviewCount)}</div>
+                      <div className="doc-meta">{fmtTrustLabel(result.trip.host.averageRating, result.trip.host.reviewCount)}</div>
                     </div>
                   ) : null}
                 </div>
