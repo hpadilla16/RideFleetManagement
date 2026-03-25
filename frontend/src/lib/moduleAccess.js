@@ -43,3 +43,33 @@ export function pathnameToModule(pathname = '') {
   if (path.startsWith('/tenants')) return 'tenants';
   return null;
 }
+
+export function preferredAppRoute(me) {
+  const role = String(me?.role || '').toUpperCase();
+  const moduleAccess = me?.moduleAccess || {};
+  const enabled = (key) => role === 'SUPER_ADMIN' || moduleAccess?.[key] !== false;
+
+  if (role === 'SUPER_ADMIN') return '/dashboard';
+  if (me?.hostProfileId && enabled('hostApp')) return '/host';
+  if (enabled('employeeApp')) return '/employee';
+  if (enabled('dashboard')) return '/dashboard';
+
+  const orderedRoutes = [
+    ['reservations', '/reservations'],
+    ['customers', '/customers'],
+    ['vehicles', '/vehicles'],
+    ['planner', '/planner'],
+    ['reports', '/reports'],
+    ['carSharing', '/car-sharing'],
+    ['hostApp', '/host'],
+    ['issueCenter', '/issues'],
+    ['loaner', '/loaner'],
+    ['people', '/people'],
+    ['settings', '/settings'],
+    ['security', '/settings/security'],
+    ['tenants', '/tenants']
+  ];
+
+  const fallback = orderedRoutes.find(([key]) => enabled(key));
+  return fallback?.[1] || '/dashboard';
+}

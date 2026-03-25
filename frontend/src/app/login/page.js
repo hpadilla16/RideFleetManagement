@@ -3,21 +3,22 @@
 import { useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { AuthGate } from '../../components/AuthGate';
+import { preferredAppRoute } from '../../lib/moduleAccess';
 
 export default function LoginPage() {
   return (
     <AuthGate>
-      {() => <LoginRedirect />}
+      {({ me }) => <LoginRedirect me={me} />}
     </AuthGate>
   );
 }
 
-function LoginRedirect() {
+function LoginRedirect({ me }) {
   const router = useRouter();
 
   useEffect(() => {
-    router.replace('/dashboard');
-  }, [router]);
+    router.replace(preferredAppRoute(me));
+  }, [me, router]);
 
   return null;
 }
