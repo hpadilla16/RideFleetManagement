@@ -416,7 +416,7 @@ export default function GuestAppPage() {
         </section>
 
         <MobileAppShell
-          eyebrow="Sprint 9 · Mobile App Shell"
+          eyebrow="Ride Fleet Guest App"
           title="Guest account shell"
           description="A shared mobile-first foundation for account access, journey progress, wallet items, and support actions."
           statusLabel={guestSession ? 'Signed In' : 'Guest Access'}

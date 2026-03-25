@@ -651,7 +651,7 @@ function CarSharingInner({ token, me, logout }) {
       <section className="page-hero">
         <div className="hero-grid">
           <section className="glass card-lg hero-copy">
-            <div className="eyebrow">Sprint 5 · Car Sharing Build</div>
+            <div className="eyebrow">Ride Fleet Car Sharing</div>
             <h2>Host supply, listing control, and trip operations in one internal console.</h2>
             <p>
               Build out supply the same way a strong marketplace would: enable the feature by tenant, separate fleet

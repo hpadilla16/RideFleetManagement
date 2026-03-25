@@ -462,7 +462,7 @@ function EmployeeAppInner({ token, me, logout }) {
       ) : null}
 
       <MobileAppShell
-        eyebrow="Sprint 9 · Mobile App Shell"
+        eyebrow="Ride Fleet Employee App"
         title="Employee app shell"
         description="A shared mobile-first foundation for shift priorities, lookup, quick creation, and operational queues."
         statusLabel="Shift Ready"

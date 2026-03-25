@@ -711,7 +711,7 @@ function HostAppInner({ token, me, logout }) {
       {msg ? <div className="surface-note" style={{ color: /updated|moved|added|removed/i.test(msg) ? '#166534' : '#991b1b', marginBottom: 18 }}>{msg}</div> : null}
 
       <MobileAppShell
-        eyebrow="Sprint 9 · Mobile App Shell"
+        eyebrow="Ride Fleet Host App"
         title="Host account shell"
         description="A shared mobile-first foundation for host account, handoff readiness, fleet setup, and approval follow-up."
         statusLabel={host ? 'Host Account' : 'Support Mode'}

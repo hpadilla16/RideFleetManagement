@@ -461,7 +461,7 @@ export default function PublicBookingPage() {
         <section className="glass card-lg page-hero">
           <div className="hero-grid">
             <div className="hero-copy">
-              <span className="eyebrow">Sprint 6 · Booking Engine Foundation</span>
+              <span className="eyebrow">Ride Fleet Marketplace</span>
               <h1 className="page-title" style={{ fontSize: 'clamp(30px, 5vw, 54px)', lineHeight: 1.02 }}>
                 Find the right vehicle for your dates, location, and trip.
               </h1>
