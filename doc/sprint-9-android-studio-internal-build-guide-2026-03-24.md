@@ -11,7 +11,7 @@ Get the first internal Android build running from the new `Capacitor` wrapper.
 - native Android project already exists in `frontend/android`
 - app label is set to `Ride Fleet Beta`
 - runtime points to:
-  - `https://beta.ridefleetmanager.com`
+  - `https://ridefleetmanager.com`
 
 ## Before Opening Android Studio
 

@@ -1,4 +1,4 @@
-const appUrl = process.env.RIDEFLEET_MOBILE_APP_URL || 'https://beta.ridefleetmanager.com';
+const appUrl = process.env.RIDEFLEET_MOBILE_APP_URL || 'https://ridefleetmanager.com';
 const cleartext = appUrl.startsWith('http://');
 
 /** @type {import('@capacitor/cli').CapacitorConfig} */

@@ -10,7 +10,7 @@ Run the first serious device QA pass against the new mobile wrapper and the host
 
 - Android wrapper label: `Ride Fleet Beta`
 - hosted runtime:
-  - `https://beta.ridefleetmanager.com`
+  - `https://ridefleetmanager.com`
 
 ## Android Prep
 
@@ -33,7 +33,7 @@ npm run mobile:open:android
 
 ### Link Handling
 
-- open a `beta.ridefleetmanager.com` link on Android
+- open a `ridefleetmanager.com` link on Android
 - confirm the wrapper can open it
 - test at least:
   - guest sign-in magic link

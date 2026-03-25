@@ -11,7 +11,7 @@ forking the frontend.
 
 - `Capacitor` is installed in `frontend`
 - the wrapper loads the hosted runtime by default:
-  - `https://beta.ridefleetmanager.com`
+  - `https://ridefleetmanager.com`
 - `mobile-shell` exists only as the minimal packaged shell required by the
   native projects
 
@@ -53,7 +53,7 @@ npm run mobile:open:ios
 To point the wrapper to a different hosted environment:
 
 ```bash
-set RIDEFLEET_MOBILE_APP_URL=https://app.ridefleetmanager.com
+set RIDEFLEET_MOBILE_APP_URL=https://ridefleetmanager.com
 ```
 
 Then run:
