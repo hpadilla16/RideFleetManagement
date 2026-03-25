@@ -19,6 +19,22 @@ forking the frontend.
 
 - `frontend/capacitor.config.js`
 - `frontend/mobile-shell/index.html`
+- `scripts/generate_mobile_brand_assets.py`
+
+## Branding Assets
+
+Mobile icon and splash assets can be regenerated from the current Ride Fleet logo with:
+
+```bash
+python scripts/generate_mobile_brand_assets.py
+```
+
+This updates:
+
+- Android launcher icons
+- Android splash assets
+- iOS app icon
+- iOS splash assets
 
 ## Frontend Commands
 
