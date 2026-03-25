@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import Link from 'next/link';
 import { api, TOKEN_KEY, USER_KEY } from '../lib/client';
 
 function parseJwt(token) {
@@ -166,6 +167,11 @@ export function AuthGate({ children }) {
               <button type="submit">Login</button>
             </form>
           ) : null}
+
+          <div className="auth-legal-row">
+            <span className="ui-muted">By using Ride Fleet, you agree to the current platform policies.</span>
+            <Link href="/privacy" className="legal-link-inline">Privacy Policy</Link>
+          </div>
         </div>
       </main>
     );
