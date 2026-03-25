@@ -1,5 +1,12 @@
 apply plugin: 'com.android.application'
 
+def rideFleetVersionCode = (project.findProperty('RIDEFLEET_VERSION_CODE')
+    ?: System.getenv('RIDEFLEET_VERSION_CODE')
+    ?: '2').toInteger()
+def rideFleetVersionName = project.findProperty('RIDEFLEET_VERSION_NAME')
+    ?: System.getenv('RIDEFLEET_VERSION_NAME')
+    ?: '1.0.0-beta.1'
+
 android {
     namespace = "com.ridefleet.mobile"
     compileSdk = rootProject.ext.compileSdkVersion
@@ -7,8 +14,8 @@ android {
         applicationId "com.ridefleet.mobile"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 1
-        versionName "1.0"
+        versionCode rideFleetVersionCode
+        versionName rideFleetVersionName
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         aaptOptions {
              // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.
