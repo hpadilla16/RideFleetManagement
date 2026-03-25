@@ -6,12 +6,12 @@ export const peopleRouter = Router();
 
 function scopeFor(req) {
   if (isSuperAdmin(req.user)) {
-    return req.query?.tenantId ? { tenantId: String(req.query.tenantId) } : {};
+    return req.query?.tenantId ? { tenantId: String(req.query.tenantId), actorUserId: req.user?.id || null, actorRole: req.user?.role || null } : { actorUserId: req.user?.id || null, actorRole: req.user?.role || null };
   }
-  return { tenantId: req.user?.tenantId || null };
+  return { tenantId: req.user?.tenantId || null, actorUserId: req.user?.id || null, actorRole: req.user?.role || null };
 }
 
-peopleRouter.get('/', requireRole('ADMIN', 'OPS'), async (req, res, next) => {
+peopleRouter.get('/', requireRole('ADMIN'), async (req, res, next) => {
   try {
     res.json(await peopleService.listPeople(scopeFor(req)));
   } catch (e) {
@@ -19,7 +19,7 @@ peopleRouter.get('/', requireRole('ADMIN', 'OPS'), async (req, res, next) => {
   }
 });
 
-peopleRouter.post('/', requireRole('ADMIN', 'OPS'), async (req, res) => {
+peopleRouter.post('/', requireRole('ADMIN'), async (req, res) => {
   try {
     const row = await peopleService.createPerson(req.body || {}, scopeFor(req));
     res.status(201).json(row);
@@ -28,7 +28,7 @@ peopleRouter.post('/', requireRole('ADMIN', 'OPS'), async (req, res) => {
   }
 });
 
-peopleRouter.patch('/:personId', requireRole('ADMIN', 'OPS'), async (req, res) => {
+peopleRouter.patch('/:personId', requireRole('ADMIN'), async (req, res) => {
   try {
     res.json(await peopleService.updatePerson(req.params.personId, req.body || {}, scopeFor(req)));
   } catch (e) {
@@ -36,7 +36,7 @@ peopleRouter.patch('/:personId', requireRole('ADMIN', 'OPS'), async (req, res) =
   }
 });
 
-peopleRouter.post('/:userId/reset-password', requireRole('ADMIN', 'OPS'), async (req, res) => {
+peopleRouter.post('/:userId/reset-password', requireRole('ADMIN'), async (req, res) => {
   try {
     res.json(await peopleService.resetPassword(req.params.userId, req.body || {}, scopeFor(req)));
   } catch (e) {

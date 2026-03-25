@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { AuthGate } from '../../components/AuthGate';
 import { AppShell } from '../../components/AppShell';
 import { api } from '../../lib/client';
+import { MODULE_DEFINITIONS } from '../../lib/moduleAccess';
 
 const DEFAULTS = {
   companyName: 'Ride Fleet',
@@ -207,6 +208,7 @@ function SettingsInner({ token, me, logout }) {
   const [reservationOptions, setReservationOptions] = useState({ autoAssignVehicleFromType: false });
   const [paymentGatewayConfig, setPaymentGatewayConfig] = useState(DEFAULT_PAYMENT_GATEWAY_CONFIG);
   const [paymentGatewayHealth, setPaymentGatewayHealth] = useState(null);
+  const [tenantModuleAccess, setTenantModuleAccess] = useState({});
 
   const [locationForm, setLocationForm] = useState(EMPTY_LOCATION);
   const [feeForm, setFeeForm] = useState(EMPTY_FEE);
@@ -247,11 +249,12 @@ function SettingsInner({ token, me, logout }) {
       ['insurancePlans', api(scopedSettingsPath('/api/settings/insurance-plans'), {}, token)],
       ['emailTemplates', api(scopedSettingsPath('/api/settings/email-templates'), {}, token)],
       ['reservationOptions', api(scopedSettingsPath('/api/settings/reservation-options'), {}, token)],
-      ['paymentGateway', api(scopedSettingsPath('/api/settings/payment-gateway'), {}, token)]
+      ['paymentGateway', api(scopedSettingsPath('/api/settings/payment-gateway'), {}, token)],
+      ['tenantModules', api(scopedSettingsPath('/api/settings/tenant-modules'), {}, token)]
     ];
     const results = await Promise.allSettled(requests.map(([, p]) => p));
 
-    const [c, l, s, f, r, vt, ip, et, ro, pg] = results;
+    const [c, l, s, f, r, vt, ip, et, ro, pg, tm] = results;
     if (c.status === 'fulfilled') setCfg(c.value);
     if (l.status === 'fulfilled') setLocations(l.value);
     if (s.status === 'fulfilled') setServices(s.value);
@@ -293,6 +296,7 @@ function SettingsInner({ token, me, logout }) {
         }
       });
     }
+    if (tm.status === 'fulfilled') setTenantModuleAccess(tm.value?.config || {});
 
     const failedKeys = results
       .map((x, i) => ({ x, key: requests[i][0] }))
@@ -1205,7 +1209,8 @@ function SettingsInner({ token, me, logout }) {
     payments: 'Payments',
     emails: 'Emails',
     services: 'Additional Services',
-    commissions: 'Commissions'
+    commissions: 'Commissions',
+    access: 'Access Control'
   }[tab] || 'Settings';
 
   if (!isAdmin) {
@@ -1286,6 +1291,7 @@ function SettingsInner({ token, me, logout }) {
             <button type="button" onClick={() => setTab('services')}>Online Services</button>
             <button type="button" onClick={() => setTab('insurance')}>Insurance</button>
             <button type="button" onClick={() => setTab('payments')}>Payments</button>
+            <button type="button" onClick={() => setTab('access')}>Access Control</button>
             <button type="button" onClick={() => setTab('agreement')}>Agreement</button>
           </div>
         </div>
@@ -1298,6 +1304,7 @@ function SettingsInner({ token, me, logout }) {
           <button onClick={() => setTab('vehicleTypes')}>Vehicle Types</button>
           <button onClick={() => setTab('insurance')}>Insurance</button>
           <button onClick={() => setTab('payments')}>Payments</button>
+          <button onClick={() => setTab('access')}>Access Control</button>
           <button onClick={() => setTab('emails')}>Emails</button>
           <button onClick={() => setTab('services')}>Additional Services</button>
           <button onClick={() => setTab('commissions')}>Commissions</button>
@@ -1466,6 +1473,41 @@ function SettingsInner({ token, me, logout }) {
                 ) : null}
               </div>
             ) : null}
+          </div>
+        )}
+
+        {tab === 'access' && (
+          <div className="stack">
+            <h2>Tenant Module Access</h2>
+            <div className="surface-note">
+              Control which workspace modules are enabled for this tenant. User-level permissions can only narrow access further. Car Sharing and Loaner still depend on their tenant feature flags too.
+            </div>
+            <div className="service-checks-grid">
+              {MODULE_DEFINITIONS.filter((item) => item.key !== 'tenants').map((item) => (
+                <label key={item.key} className="label" style={{ textTransform: 'none', letterSpacing: 0 }}>
+                  <input
+                    type="checkbox"
+                    checked={tenantModuleAccess[item.key] !== false}
+                    onChange={(e) => setTenantModuleAccess((current) => ({ ...current, [item.key]: e.target.checked }))}
+                  /> {item.label}
+                </label>
+              ))}
+            </div>
+            <div className="inline-actions">
+              <button
+                type="button"
+                onClick={async () => {
+                  const out = await api(scopedSettingsPath('/api/settings/tenant-modules'), {
+                    method: 'PUT',
+                    body: JSON.stringify(tenantModuleAccess)
+                  }, token);
+                  setTenantModuleAccess(out?.config || {});
+                  setMsg('Tenant module access saved');
+                }}
+              >
+                Save Tenant Module Access
+              </button>
+            </div>
           </div>
         )}
 

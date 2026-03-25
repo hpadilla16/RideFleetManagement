@@ -641,6 +641,8 @@ model User {
   id           String   @id @default(cuid())
   tenantId     String?
   tenant       Tenant?  @relation(fields: [tenantId], references: [id])
+  createdByUserId String?
+  createdByUser   User?   @relation("UserCreatedBy", fields: [createdByUserId], references: [id])
   email        String   @unique
   passwordHash String
   lockPinHash  String?
@@ -660,10 +662,13 @@ model User {
   customerInfoReviewedReservations Reservation[] @relation("ReservationCustomerInfoReviewedBy")
   readyForPickupReservations Reservation[] @relation("ReservationReadyForPickupBy")
   hostProfile HostProfile?
+  createdUsers User[] @relation("UserCreatedBy")
+  createdHostProfiles HostProfile[] @relation("HostProfileCreatedBy")
   approvedHostVehicleSubmissions HostVehicleSubmission[]
 
   @@index([tenantId, role, isActive])
   @@index([commissionPlanId])
+  @@index([createdByUserId])
 }
 
 model HostProfile {
@@ -672,6 +677,8 @@ model HostProfile {
   tenant            Tenant?   @relation(fields: [tenantId], references: [id])
   userId            String?   @unique
   user              User?     @relation(fields: [userId], references: [id])
+  createdByUserId   String?
+  createdByUser     User?     @relation("HostProfileCreatedBy", fields: [createdByUserId], references: [id])
   displayName       String
   legalName         String?
   email             String?
@@ -695,6 +702,7 @@ model HostProfile {
 
   @@index([tenantId, status])
   @@index([email])
+  @@index([createdByUserId])
 }
 
 model AuditLog {

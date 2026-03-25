@@ -34,6 +34,17 @@ export function AuthGate({ children }) {
         localStorage.setItem(USER_KEY, JSON.stringify(fallback));
       }
     }
+
+    if (t) {
+      api('/api/auth/me')
+        .then((out) => {
+          if (out?.user) {
+            localStorage.setItem(USER_KEY, JSON.stringify(out.user));
+            setMe(out.user);
+          }
+        })
+        .catch(() => {});
+    }
   }, []);
 
   const login = async (e) => {

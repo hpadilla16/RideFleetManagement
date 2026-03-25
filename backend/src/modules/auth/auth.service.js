@@ -2,6 +2,7 @@ import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import { prisma } from '../../lib/prisma.js';
 import { getJwtExpiresIn, getJwtSecret } from './auth.config.js';
+import { getEffectiveModuleAccessForUser } from '../../lib/module-access.js';
 
 const LOCK_PIN_SALT_ROUNDS = 10;
 
@@ -13,9 +14,44 @@ function signToken(user) {
   );
 }
 
+async function buildSessionUser(user) {
+  if (!user) return null;
+  const moduleAccess = await getEffectiveModuleAccessForUser(user);
+  return {
+    id: user.id,
+    email: user.email,
+    fullName: user.fullName,
+    role: user.role,
+    tenantId: user.tenantId || null,
+    createdByUserId: user.createdByUserId || null,
+    hostProfileId: user.hostProfileId || user.hostProfile?.id || null,
+    moduleAccess: moduleAccess.effective,
+    tenantModuleAccess: moduleAccess.tenantConfig,
+    userModuleAccess: moduleAccess.userConfig
+  };
+}
+
 export const authService = {
   issueTokenForUser(user) {
     return signToken(user);
+  },
+
+  async getSessionUser(userId) {
+    const user = await prisma.user.findUnique({
+      where: { id: userId },
+      select: {
+        id: true,
+        email: true,
+        fullName: true,
+        role: true,
+        tenantId: true,
+        createdByUserId: true,
+        isActive: true,
+        hostProfile: { select: { id: true } }
+      }
+    });
+    if (!user || !user.isActive) return null;
+    return buildSessionUser(user);
   },
 
   async register({ email, password, fullName, tenantId }) {
@@ -35,25 +71,22 @@ export const authService = {
     });
 
     const token = signToken(user);
-    return {
-      token,
-      user: { id: user.id, email: user.email, fullName: user.fullName, role: user.role, tenantId: user.tenantId || null }
-    };
+    return { token, user: await buildSessionUser(user) };
   },
 
   async login({ email, password }) {
     const normalizedEmail = String(email || '').trim().toLowerCase();
-    const user = await prisma.user.findUnique({ where: { email: normalizedEmail } });
+    const user = await prisma.user.findUnique({
+      where: { email: normalizedEmail },
+      include: { hostProfile: { select: { id: true } } }
+    });
     if (!user || !user.isActive) throw new Error('Invalid credentials');
 
     const ok = await bcrypt.compare(password, user.passwordHash);
     if (!ok) throw new Error('Invalid credentials');
 
     const token = signToken(user);
-    return {
-      token,
-      user: { id: user.id, email: user.email, fullName: user.fullName, role: user.role, tenantId: user.tenantId || null }
-    };
+    return { token, user: await buildSessionUser(user) };
   },
 
   async listUsers(scope = {}) {
@@ -67,6 +100,7 @@ export const authService = {
         role: true,
         isActive: true,
         tenantId: true,
+        createdByUserId: true,
         lockPinHash: true,
         lockPinUpdatedAt: true
       }
@@ -80,6 +114,7 @@ export const authService = {
       role: row.role,
       isActive: row.isActive,
       tenantId: row.tenantId || null,
+      createdByUserId: row.createdByUserId || null,
       hasLockPin: !!row.lockPinHash,
       lockPinUpdatedAt: row.lockPinUpdatedAt || null
     }));

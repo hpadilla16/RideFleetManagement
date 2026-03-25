@@ -1,5 +1,14 @@
 ﻿import { prisma } from '../../lib/prisma.js';
 
+import {
+  MODULE_KEYS,
+  MODULE_LABELS,
+  getTenantModuleConfig,
+  updateTenantModuleConfig,
+  getEditableModuleAccessForUser,
+  updateStoredUserModuleConfig
+} from '../../lib/module-access.js';
+
 const DEFAULTS = {
   companyName: 'Ride Fleet',
   companyAddress: 'San Juan, Puerto Rico',
@@ -70,6 +79,53 @@ function scopedKey(baseKey, scope = {}) {
 }
 
 export const settingsService = {
+  async getTenantModuleAccess(scope = {}) {
+    return {
+      modules: MODULE_KEYS.map((key) => ({ key, label: MODULE_LABELS[key] || key })),
+      config: await getTenantModuleConfig(scope?.tenantId || null)
+    };
+  },
+
+  async updateTenantModuleAccess(payload = {}, scope = {}) {
+    if (!scope?.tenantId) throw new Error('tenantId is required');
+    return {
+      modules: MODULE_KEYS.map((key) => ({ key, label: MODULE_LABELS[key] || key })),
+      config: await updateTenantModuleConfig(scope.tenantId, payload || {})
+    };
+  },
+
+  async getUserModuleAccess(userId) {
+    const user = await prisma.user.findUnique({
+      where: { id: userId },
+      select: {
+        id: true,
+        role: true,
+        tenantId: true,
+        hostProfile: { select: { id: true } }
+      }
+    });
+    if (!user) throw new Error('User not found');
+    const access = await getEditableModuleAccessForUser({
+      id: user.id,
+      role: user.role,
+      tenantId: user.tenantId || null,
+      hostProfileId: user.hostProfile?.id || null
+    });
+    return {
+      modules: MODULE_KEYS.map((key) => ({ key, label: MODULE_LABELS[key] || key })),
+      config: access.config,
+      tenantConfig: access.tenantConfig,
+      storedConfig: access.storedConfig
+    };
+  },
+
+  async updateUserModuleAccess(userId, payload = {}) {
+    return {
+      modules: MODULE_KEYS.map((key) => ({ key, label: MODULE_LABELS[key] || key })),
+      config: await updateStoredUserModuleConfig(userId, payload || {})
+    };
+  },
+
   async getEmailTemplates(scope = {}) {
     const row = await prisma.appSetting.findUnique({ where: { key: scopedKey('emailTemplates', scope) } });
     if (!row?.value) return { ...DEFAULT_EMAIL_TEMPLATES };
@@ -242,4 +298,3 @@ export const settingsService = {
     return this.getRentalAgreementConfig(scope);
   }
 };
-

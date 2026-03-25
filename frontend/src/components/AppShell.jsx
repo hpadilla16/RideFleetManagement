@@ -4,23 +4,24 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { API_BASE, TOKEN_KEY, USER_KEY, readStoredToken } from '../lib/client';
+import { isModuleEnabled, pathnameToModule } from '../lib/moduleAccess';
 
 const NAV_ITEMS = [
-  { href: '/dashboard', label: 'Dashboard' },
-  { href: '/reservations', label: 'Reservations' },
-  { href: '/vehicles', label: 'Vehicles' },
-  { href: '/customers', label: 'Customers' },
-  { href: '/people', label: 'People', adminOnly: true },
-  { href: '/planner', label: 'Planner' },
-  { href: '/reports', label: 'Reports' },
-  { href: '/car-sharing', label: 'Car Sharing', feature: 'carSharing' },
-  { href: '/host', label: 'Host App', feature: 'carSharing' },
-  { href: '/employee', label: 'Employee App' },
-  { href: '/issues', label: 'Issue Center' },
-  { href: '/loaner', label: 'Loaner Program', feature: 'dealershipLoaner' },
-  { href: '/settings', label: 'Settings' },
-  { href: '/tenants', label: 'Tenants', superOnly: true },
-  { href: '/settings/security', label: 'Security', adminOnly: true }
+  { href: '/dashboard', label: 'Dashboard', moduleKey: 'dashboard' },
+  { href: '/reservations', label: 'Reservations', moduleKey: 'reservations' },
+  { href: '/vehicles', label: 'Vehicles', moduleKey: 'vehicles' },
+  { href: '/customers', label: 'Customers', moduleKey: 'customers' },
+  { href: '/people', label: 'People', adminOnly: true, moduleKey: 'people' },
+  { href: '/planner', label: 'Planner', moduleKey: 'planner' },
+  { href: '/reports', label: 'Reports', moduleKey: 'reports' },
+  { href: '/car-sharing', label: 'Car Sharing', feature: 'carSharing', moduleKey: 'carSharing' },
+  { href: '/host', label: 'Host App', feature: 'carSharing', moduleKey: 'hostApp' },
+  { href: '/employee', label: 'Employee App', moduleKey: 'employeeApp' },
+  { href: '/issues', label: 'Issue Center', moduleKey: 'issueCenter' },
+  { href: '/loaner', label: 'Loaner Program', feature: 'dealershipLoaner', moduleKey: 'loaner' },
+  { href: '/settings', label: 'Settings', moduleKey: 'settings' },
+  { href: '/tenants', label: 'Tenants', superOnly: true, moduleKey: 'tenants' },
+  { href: '/settings/security', label: 'Security', adminOnly: true, moduleKey: 'security' }
 ];
 
 const IDLE_LOCK_MS = 2 * 60 * 1000;
@@ -56,6 +57,8 @@ export function AppShell({ me, logout, children }) {
   const idleTimerRef = useRef(null);
   const role = String(me?.role || '').toUpperCase();
   const isAdminNavRole = ['SUPER_ADMIN', 'ADMIN', 'OPS'].includes(role);
+  const activeModule = pathnameToModule(pathname);
+  const blockedModule = activeModule && !isModuleEnabled(me, activeModule) ? activeModule : null;
 
   const authApi = async (path, init = {}) => {
     const token = readStoredToken();
@@ -272,6 +275,7 @@ export function AppShell({ me, logout, children }) {
             .filter((item) => !item.adminOnly || isAdminNavRole)
             .filter((item) => item.feature !== 'carSharing' || carSharingVisible)
             .filter((item) => item.feature !== 'dealershipLoaner' || dealershipLoanerVisible)
+            .filter((item) => isModuleEnabled(me, item.moduleKey))
             .map((item) => (
               item.disabled ? (
                 <span key={item.href} className="nav-link" style={{ opacity: 0.55, cursor: 'not-allowed' }}>
@@ -318,7 +322,15 @@ export function AppShell({ me, logout, children }) {
           </div>
         </div>
 
-        {children}
+        {blockedModule ? (
+          <section className="glass card-lg stack">
+            <div className="eyebrow">Access Controlled</div>
+            <h2>Module not enabled for this user</h2>
+            <p className="ui-muted">
+              This account does not currently have access to this workspace module. A super admin or tenant admin can enable it from tenant module access or user module permissions.
+            </p>
+          </section>
+        ) : children}
       </main>
 
       {locked ? (

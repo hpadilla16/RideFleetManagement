@@ -38,6 +38,14 @@ authRouter.post('/login', async (req, res) => {
   }
 });
 
+authRouter.get('/me', requireAuth, async (req, res, next) => {
+  try {
+    res.json({ user: req.user });
+  } catch (e) {
+    next(e);
+  }
+});
+
 authRouter.get('/users', requireAuth, requireRole('ADMIN'), async (req, res, next) => {
   try {
     res.json(await authService.listUsers(scopeFor(req)));

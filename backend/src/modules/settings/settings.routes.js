@@ -2,12 +2,66 @@
 import { settingsService } from './settings.service.js';
 import { requireRole, isSuperAdmin } from '../../middleware/auth.js';
 
+import { prisma } from '../../lib/prisma.js';
+
 export const settingsRouter = Router();
 
 function scopeFor(req) {
   if (isSuperAdmin(req.user)) return req.query?.tenantId ? { tenantId: String(req.query.tenantId) } : {};
   return { tenantId: req.user?.tenantId || null };
 }
+
+async function enforceUserModuleScope(req, res, next) {
+  try {
+    const target = await prisma.user.findUnique({
+      where: { id: req.params.userId },
+      select: { id: true, tenantId: true, createdByUserId: true }
+    });
+    if (!target) return res.status(404).json({ error: 'User not found' });
+    if (!isSuperAdmin(req.user)) {
+      if (!req.user?.tenantId || req.user.tenantId !== target.tenantId) return res.status(403).json({ error: 'Forbidden' });
+      if (String(req.user?.role || '').toUpperCase() === 'ADMIN' && target.id !== req.user.id && target.createdByUserId !== req.user.id) {
+        return res.status(403).json({ error: 'Tenant admins can only manage users they created' });
+      }
+    }
+    req.targetUser = target;
+    next();
+  } catch (e) {
+    next(e);
+  }
+}
+
+settingsRouter.get('/tenant-modules', requireRole('ADMIN'), async (req, res, next) => {
+  try {
+    res.json(await settingsService.getTenantModuleAccess(scopeFor(req)));
+  } catch (e) {
+    next(e);
+  }
+});
+
+settingsRouter.put('/tenant-modules', requireRole('ADMIN'), async (req, res, next) => {
+  try {
+    res.json(await settingsService.updateTenantModuleAccess(req.body || {}, scopeFor(req)));
+  } catch (e) {
+    next(e);
+  }
+});
+
+settingsRouter.get('/users/:userId/module-access', requireRole('ADMIN'), enforceUserModuleScope, async (req, res, next) => {
+  try {
+    res.json(await settingsService.getUserModuleAccess(req.targetUser.id));
+  } catch (e) {
+    next(e);
+  }
+});
+
+settingsRouter.put('/users/:userId/module-access', requireRole('ADMIN'), enforceUserModuleScope, async (req, res, next) => {
+  try {
+    res.json(await settingsService.updateUserModuleAccess(req.targetUser.id, req.body || {}));
+  } catch (e) {
+    next(e);
+  }
+});
 
 settingsRouter.get('/email-templates', async (_req, res, next) => {
   try {
@@ -63,7 +117,7 @@ settingsRouter.put('/reservation-options', requireRole('ADMIN'), async (req, res
   }
 });
 
-settingsRouter.get('/payment-gateway', async (_req, res, next) => {
+settingsRouter.get('/payment-gateway', requireRole('ADMIN'), async (_req, res, next) => {
   try {
     const cfg = await settingsService.getPaymentGatewayConfig(scopeFor(_req));
     res.json(cfg);
@@ -81,7 +135,7 @@ settingsRouter.put('/payment-gateway', requireRole('ADMIN'), async (req, res, ne
   }
 });
 
-settingsRouter.post('/payment-gateway/health-check', async (req, res, next) => {
+settingsRouter.post('/payment-gateway/health-check', requireRole('ADMIN'), async (req, res, next) => {
   try {
     const cfg = await settingsService.getPaymentGatewayConfig(scopeFor(req));
     const gateway = String(cfg?.gateway || 'authorizenet').toLowerCase();

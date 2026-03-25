@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { AuthGate } from '../../components/AuthGate';
 import { AppShell } from '../../components/AppShell';
 import { api } from '../../lib/client';
+import { MODULE_DEFINITIONS } from '../../lib/moduleAccess';
 
 const EMPTY_PERSON = {
   personType: 'EMPLOYEE',
@@ -23,6 +24,89 @@ const EMPTY_PERSON = {
   notes: '',
   status: 'ACTIVE'
 };
+
+function buildDefaultUserModuleAccess(personType = 'EMPLOYEE', role = 'AGENT') {
+  const type = String(personType || 'EMPLOYEE').toUpperCase();
+  const currentRole = String(role || 'AGENT').toUpperCase();
+
+  if (type === 'HOST') {
+    return {
+      dashboard: true,
+      reservations: false,
+      vehicles: false,
+      customers: false,
+      people: false,
+      planner: false,
+      reports: false,
+      carSharing: false,
+      hostApp: true,
+      employeeApp: false,
+      issueCenter: false,
+      loaner: false,
+      settings: false,
+      security: false,
+      tenants: false
+    };
+  }
+
+  if (currentRole === 'ADMIN') {
+    return {
+      dashboard: true,
+      reservations: true,
+      vehicles: true,
+      customers: true,
+      people: true,
+      planner: true,
+      reports: true,
+      carSharing: true,
+      hostApp: true,
+      employeeApp: true,
+      issueCenter: true,
+      loaner: true,
+      settings: true,
+      security: true,
+      tenants: false
+    };
+  }
+
+  if (currentRole === 'OPS') {
+    return {
+      dashboard: true,
+      reservations: true,
+      vehicles: true,
+      customers: true,
+      people: false,
+      planner: true,
+      reports: true,
+      carSharing: true,
+      hostApp: true,
+      employeeApp: true,
+      issueCenter: true,
+      loaner: true,
+      settings: false,
+      security: false,
+      tenants: false
+    };
+  }
+
+  return {
+    dashboard: true,
+    reservations: true,
+    vehicles: true,
+    customers: true,
+    people: false,
+    planner: true,
+    reports: false,
+    carSharing: false,
+    hostApp: false,
+    employeeApp: true,
+    issueCenter: true,
+    loaner: true,
+    settings: false,
+    security: false,
+    tenants: false
+  };
+}
 
 function metricSummary(people) {
   return [
@@ -60,10 +144,14 @@ function Inner({ token, me, logout }) {
   const [search, setSearch] = useState('');
   const [form, setForm] = useState(EMPTY_PERSON);
   const [editingPersonId, setEditingPersonId] = useState('');
+  const [userModuleAccess, setUserModuleAccess] = useState(() =>
+    buildDefaultUserModuleAccess(EMPTY_PERSON.personType, EMPTY_PERSON.role)
+  );
 
   const role = String(me?.role || '').toUpperCase();
   const isSuper = role === 'SUPER_ADMIN';
-  const canManagePeople = ['SUPER_ADMIN', 'ADMIN', 'OPS'].includes(role);
+  const canManagePeople = ['SUPER_ADMIN', 'ADMIN'].includes(role);
+  const canManageModuleAccess = ['SUPER_ADMIN', 'ADMIN'].includes(role);
 
   const scopedQuery = useMemo(() => {
     const qs = new URLSearchParams();
@@ -110,8 +198,15 @@ function Inner({ token, me, logout }) {
       const out = editingPersonId
         ? await api(`/api/people/${editingPersonId}`, { method: 'PATCH', body: JSON.stringify(payload) }, token)
         : await api('/api/people', { method: 'POST', body: JSON.stringify(payload) }, token);
+      if (canManageModuleAccess && out?.person?.userId && (payload.enableLogin !== false || out?.person?.hasLogin)) {
+        await api(`/api/settings/users/${out.person.userId}/module-access`, {
+          method: 'PUT',
+          body: JSON.stringify(userModuleAccess)
+        }, token);
+      }
       setForm({ ...EMPTY_PERSON, tenantId: isSuper ? activeTenantId : '' });
       setEditingPersonId('');
+      setUserModuleAccess(buildDefaultUserModuleAccess(EMPTY_PERSON.personType, EMPTY_PERSON.role));
       setMsg(
         editingPersonId ? 'Person updated' : out?.tempPassword
           ? `Person created. Temporary password: ${out.tempPassword}${out.inviteSent ? ' · Invite sent' : ''}`
@@ -143,12 +238,20 @@ function Inner({ token, me, logout }) {
       notes: person.notes || '',
       status: person.status || 'ACTIVE'
     });
+    if (canManageModuleAccess && person.userId && person.hasLogin) {
+      api(`/api/settings/users/${person.userId}/module-access`, {}, token)
+        .then((out) => setUserModuleAccess(out?.config || {}))
+        .catch(() => setUserModuleAccess(buildDefaultUserModuleAccess(person.personType, person.accessRole)));
+    } else {
+      setUserModuleAccess(buildDefaultUserModuleAccess(person.personType, person.accessRole));
+    }
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
   const resetForm = () => {
     setEditingPersonId('');
     setForm({ ...EMPTY_PERSON, tenantId: isSuper ? activeTenantId : '' });
+    setUserModuleAccess(buildDefaultUserModuleAccess(EMPTY_PERSON.personType, EMPTY_PERSON.role));
   };
 
   const resetPassword = async (person) => {
@@ -190,9 +293,16 @@ function Inner({ token, me, logout }) {
     );
   }, [people, isSuper, activeTenantId, search]);
 
+  const canEditPersonRecord = (person) => {
+    if (isSuper) return true;
+    if (role !== 'ADMIN') return true;
+    return person.userId === me?.id || person.createdByUserId === me?.id;
+  };
+
   const metrics = useMemo(() => metricSummary(visiblePeople), [visiblePeople]);
   const hostMode = form.personType === 'HOST';
   const loginRequired = !editingPersonId && (form.personType !== 'HOST' || form.enableLogin);
+  const editingPerson = useMemo(() => visiblePeople.find((row) => row.id === editingPersonId) || null, [visiblePeople, editingPersonId]);
   const peopleOpsHub = useMemo(() => {
     const admins = visiblePeople.filter((row) => row.personType === 'ADMIN');
     const hosts = visiblePeople.filter((row) => row.personType === 'HOST');
@@ -411,12 +521,17 @@ function Inner({ token, me, logout }) {
                 <label className="label">Person Type</label>
                 <select
                   value={form.personType}
-                  onChange={(e) => setForm({
-                    ...form,
-                    personType: e.target.value,
-                    role: e.target.value === 'ADMIN' ? 'ADMIN' : 'AGENT',
-                    enableLogin: e.target.value === 'HOST' ? false : true
-                  })}
+                  onChange={(e) => {
+                    const nextPersonType = e.target.value;
+                    const nextRole = nextPersonType === 'ADMIN' ? 'ADMIN' : 'AGENT';
+                    setForm({
+                      ...form,
+                      personType: nextPersonType,
+                      role: nextRole,
+                      enableLogin: nextPersonType === 'HOST' ? false : true
+                    });
+                    if (!editingPersonId) setUserModuleAccess(buildDefaultUserModuleAccess(nextPersonType, nextRole));
+                  }}
                   disabled={!!editingPersonId}
                 >
                   <option value="ADMIN">ADMIN</option>
@@ -429,7 +544,11 @@ function Inner({ token, me, logout }) {
                 <label className="label">Access Role</label>
                 <select
                   value={form.role}
-                  onChange={(e) => setForm({ ...form, role: e.target.value })}
+                  onChange={(e) => {
+                    const nextRole = e.target.value;
+                    setForm({ ...form, role: nextRole });
+                    if (!editingPersonId) setUserModuleAccess(buildDefaultUserModuleAccess(form.personType, nextRole));
+                  }}
                   disabled={form.personType === 'ADMIN'}
                 >
                   <option value="ADMIN">ADMIN</option>
@@ -550,6 +669,26 @@ function Inner({ token, me, logout }) {
               </div>
             ) : null}
 
+            {canManageModuleAccess && (editingPersonId ? !!editingPerson?.userId : loginRequired) ? (
+              <div className="stack">
+                <div className="section-title">User Module Access</div>
+                <div className="surface-note">
+                  Module access controls what this user can see. Tenant module settings still apply on top of these selections.
+                </div>
+                <div className="service-checks-grid">
+                  {MODULE_DEFINITIONS.filter((item) => item.key !== 'tenants').map((item) => (
+                    <label key={item.key} className="label" style={{ textTransform: 'none', letterSpacing: 0 }}>
+                      <input
+                        type="checkbox"
+                        checked={userModuleAccess[item.key] !== false}
+                        onChange={(e) => setUserModuleAccess((current) => ({ ...current, [item.key]: e.target.checked }))}
+                      /> {item.label}
+                    </label>
+                  ))}
+                </div>
+              </div>
+            ) : null}
+
             <div className="stack">
               <label className="label">Notes</label>
               <textarea rows={3} value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} />
@@ -589,6 +728,7 @@ function Inner({ token, me, logout }) {
                   <th>Email</th>
                   <th>Phone</th>
                   <th>Access</th>
+                  <th>Created By</th>
                   <th>Status</th>
                   <th>Action</th>
                 </tr>
@@ -612,13 +752,18 @@ function Inner({ token, me, logout }) {
                         {person.hasLogin ? 'Login Enabled' : 'Profile Only'}
                       </span>
                     </td>
+                    <td>{person.createdByName || '-'}</td>
                     <td>
                       <span className={personStatusClass(person.status)}>{person.status}</span>
                     </td>
                     <td>
                       <div className="inline-actions">
-                        <button type="button" className="button-subtle" onClick={() => startEditPerson(person)}>Edit</button>
-                        {person.hasLogin && person.userId ? (
+                        {canEditPersonRecord(person) ? (
+                          <button type="button" className="button-subtle" onClick={() => startEditPerson(person)}>Edit</button>
+                        ) : (
+                          <span className="ui-muted" style={{ fontSize: 12 }}>Created by another admin</span>
+                        )}
+                        {person.hasLogin && person.userId && canEditPersonRecord(person) ? (
                           <button type="button" onClick={() => resetPassword(person)}>Reset Password</button>
                         ) : null}
                       </div>

@@ -81,6 +81,8 @@ function mapUserPerson(user) {
     tenantId: user.tenantId || user.hostProfile?.tenantId || null,
     personType: hasHostProfile ? 'HOST' : (String(user.role || '').toUpperCase() === 'ADMIN' ? 'ADMIN' : 'EMPLOYEE'),
     accessRole: user.role,
+    createdByUserId: user.createdByUserId || user.hostProfile?.createdByUserId || null,
+    createdByName: user.createdByUser?.fullName || user.hostProfile?.createdByUser?.fullName || null,
     tenantName: user.tenant?.name || user.hostProfile?.tenant?.name || null,
     displayName: user.hostProfile?.displayName || user.fullName || user.email,
     fullName: user.fullName || null,
@@ -105,6 +107,8 @@ function mapHostOnlyPerson(host) {
     tenantId: host.tenantId || null,
     personType: 'HOST',
     accessRole: null,
+    createdByUserId: host.createdByUserId || null,
+    createdByName: host.createdByUser?.fullName || null,
     tenantName: host.tenant?.name || null,
     displayName: host.displayName,
     fullName: null,
@@ -121,6 +125,16 @@ function mapHostOnlyPerson(host) {
   };
 }
 
+function canTenantAdminManageRecord(scope = {}, target = {}) {
+  const actorRole = String(scope?.actorRole || '').toUpperCase();
+  if (actorRole === 'SUPER_ADMIN') return true;
+  if (actorRole !== 'ADMIN') return true;
+  const actorUserId = scope?.actorUserId || null;
+  if (!actorUserId) return false;
+  if (target?.id && target.id === actorUserId) return true;
+  return target?.createdByUserId === actorUserId;
+}
+
 export const peopleService = {
   async listPeople(scope = {}) {
     const where = scope?.tenantId ? { tenantId: scope.tenantId } : undefined;
@@ -130,9 +144,11 @@ export const peopleService = {
         orderBy: [{ fullName: 'asc' }, { email: 'asc' }],
         include: {
           tenant: { select: { id: true, name: true } },
+          createdByUser: { select: { id: true, fullName: true } },
           hostProfile: {
             include: {
-              tenant: { select: { id: true, name: true } }
+              tenant: { select: { id: true, name: true } },
+              createdByUser: { select: { id: true, fullName: true } }
             }
           }
         }
@@ -143,7 +159,8 @@ export const peopleService = {
           userId: null
         },
         include: {
-          tenant: { select: { id: true, name: true } }
+          tenant: { select: { id: true, name: true } },
+          createdByUser: { select: { id: true, fullName: true } }
         },
         orderBy: [{ displayName: 'asc' }]
       })
@@ -192,6 +209,7 @@ export const peopleService = {
       user = await prisma.user.create({
         data: {
           tenantId,
+          createdByUserId: scope?.actorUserId || null,
           email,
           fullName,
           role: allowedRoleForPayload(personType, payload.role),
@@ -207,6 +225,7 @@ export const peopleService = {
         data: {
           tenantId,
           userId: user?.id || null,
+          createdByUserId: scope?.actorUserId || null,
           displayName: String(payload.displayName || fullName).trim(),
           legalName,
           email: email || null,
@@ -249,6 +268,9 @@ export const peopleService = {
       }
     });
     if (!user) throw new Error('User not found');
+    if (!canTenantAdminManageRecord(scope, { id: user.id, createdByUserId: user.createdByUserId })) {
+      throw new Error('Tenant admins can only manage users they created');
+    }
 
     const tempPassword = String(payload.password || randomTempPassword());
     const passwordHash = await bcrypt.hash(tempPassword, SALT_ROUNDS);
@@ -288,10 +310,14 @@ export const peopleService = {
           ...(scope?.tenantId ? { tenantId: scope.tenantId } : {})
         },
         include: {
+          createdByUser: { select: { id: true, fullName: true } },
           hostProfile: true
         }
       });
       if (!user) throw new Error('Person not found');
+      if (!canTenantAdminManageRecord(scope, { id: user.id, createdByUserId: user.createdByUserId })) {
+        throw new Error('Tenant admins can only manage users they created');
+      }
 
       const email = payload.email ? normalizeEmail(payload.email) : user.email;
       if (email !== user.email) {
@@ -349,9 +375,11 @@ export const peopleService = {
           where: { id: nextUser.id },
           include: {
             tenant: { select: { id: true, name: true } },
+            createdByUser: { select: { id: true, fullName: true } },
             hostProfile: {
               include: {
-                tenant: { select: { id: true, name: true } }
+                tenant: { select: { id: true, name: true } },
+                createdByUser: { select: { id: true, fullName: true } }
               }
             }
           }
@@ -372,10 +400,14 @@ export const peopleService = {
           ...(scope?.tenantId ? { tenantId: scope.tenantId } : {})
         },
         include: {
-          tenant: { select: { id: true, name: true } }
+          tenant: { select: { id: true, name: true } },
+          createdByUser: { select: { id: true, fullName: true } }
         }
       });
       if (!host) throw new Error('Person not found');
+      if (!canTenantAdminManageRecord(scope, { id: host.userId || null, createdByUserId: host.createdByUserId })) {
+        throw new Error('Tenant admins can only manage users they created');
+      }
 
       const nextTenantId = scope?.tenantId || payload?.tenantId || host.tenantId || null;
       const tenant = nextTenantId ? await resolveTenant(nextTenantId) : null;
@@ -395,7 +427,8 @@ export const peopleService = {
           notes: payload.notes !== undefined ? (String(payload.notes || '').trim() || null) : host.notes
         },
         include: {
-          tenant: { select: { id: true, name: true } }
+          tenant: { select: { id: true, name: true } },
+          createdByUser: { select: { id: true, fullName: true } }
         }
       });
 
