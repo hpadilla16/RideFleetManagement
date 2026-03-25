@@ -61,6 +61,8 @@ export const vehiclesService = {
         internalNumber: data.internalNumber,
         vin: data.vin ?? null,
         plate: data.plate ?? null,
+        tollTagNumber: data.tollTagNumber ?? null,
+        tollStickerNumber: data.tollStickerNumber ?? null,
         make: data.make ?? null,
         model: data.model ?? null,
         year: data.year ?? null,
@@ -109,6 +111,8 @@ export const vehiclesService = {
       const color = norm(r.color);
       const vin = norm(r.vin);
       const plate = norm(r.plate);
+      const tollTagNumber = norm(r.tollTagNumber);
+      const tollStickerNumber = norm(r.tollStickerNumber);
       const vehicleTypeId = norm(r.vehicleTypeId);
 
       const errors = [];
@@ -132,6 +136,8 @@ export const vehiclesService = {
         color,
         vin,
         plate,
+        tollTagNumber,
+        tollStickerNumber,
         vehicleTypeId,
         valid: !errors.length && !dupReasons.length,
         errors,
@@ -163,6 +169,8 @@ export const vehiclesService = {
           internalNumber: r.internalNumber,
           vin: r.vin || null,
           plate: r.plate || null,
+          tollTagNumber: r.tollTagNumber || null,
+          tollStickerNumber: r.tollStickerNumber || null,
           make: r.make || null,
           model: r.model || null,
           color: r.color || null,

@@ -11,6 +11,7 @@ export const MODULE_DEFINITIONS = [
   { key: 'employeeApp', label: 'Employee App' },
   { key: 'issueCenter', label: 'Issue Center' },
   { key: 'loaner', label: 'Loaner Program' },
+  { key: 'tolls', label: 'Tolls' },
   { key: 'settings', label: 'Settings' },
   { key: 'security', label: 'Security' },
   { key: 'tenants', label: 'Tenants' }
@@ -38,6 +39,7 @@ export function pathnameToModule(pathname = '') {
   if (path.startsWith('/employee')) return 'employeeApp';
   if (path.startsWith('/issues') || path.startsWith('/issue-response')) return 'issueCenter';
   if (path.startsWith('/loaner')) return 'loaner';
+  if (path.startsWith('/tolls')) return 'tolls';
   if (path.startsWith('/settings/security')) return 'security';
   if (path.startsWith('/settings')) return 'settings';
   if (path.startsWith('/tenants')) return 'tenants';
@@ -64,6 +66,7 @@ export function preferredAppRoute(me) {
     ['hostApp', '/host'],
     ['issueCenter', '/issues'],
     ['loaner', '/loaner'],
+    ['tolls', '/tolls'],
     ['people', '/people'],
     ['settings', '/settings'],
     ['security', '/settings/security'],

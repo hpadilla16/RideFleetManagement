@@ -13,6 +13,7 @@ export const MODULE_KEYS = [
   'employeeApp',
   'issueCenter',
   'loaner',
+  'tolls',
   'settings',
   'security',
   'tenants'
@@ -31,6 +32,7 @@ export const MODULE_LABELS = {
   employeeApp: 'Employee App',
   issueCenter: 'Issue Center',
   loaner: 'Loaner Program',
+  tolls: 'Tolls',
   settings: 'Settings',
   security: 'Security',
   tenants: 'Tenants'
@@ -50,6 +52,7 @@ function hostRoleModuleMap() {
     employeeApp: false,
     issueCenter: false,
     loaner: false,
+    tolls: false,
     settings: false,
     security: false,
     tenants: false
@@ -100,6 +103,7 @@ export function roleAllowedModuleMap(roleOrUser) {
       employeeApp: true,
       issueCenter: true,
       loaner: true,
+      tolls: true,
       settings: true,
       security: true,
       tenants: false
@@ -121,6 +125,7 @@ export function roleAllowedModuleMap(roleOrUser) {
       employeeApp: true,
       issueCenter: true,
       loaner: true,
+      tolls: true,
       settings: false,
       security: false,
       tenants: false
@@ -141,6 +146,7 @@ export function roleAllowedModuleMap(roleOrUser) {
     employeeApp: true,
     issueCenter: true,
     loaner: true,
+    tolls: false,
     settings: false,
     security: false,
     tenants: false
@@ -161,6 +167,7 @@ export function defaultTenantModuleConfig(tenant = null) {
     employeeApp: true,
     issueCenter: true,
     loaner: !!tenant?.dealershipLoanerEnabled,
+    tolls: !!tenant?.tollsEnabled,
     settings: true,
     security: true,
     tenants: false
@@ -176,6 +183,7 @@ function normalizeTenantModuleConfig(raw = {}, tenant = null) {
     carSharing: !!parsed.carSharing && !!tenant?.carSharingEnabled,
     hostApp: !!parsed.hostApp && !!parsed.carSharing && !!tenant?.carSharingEnabled,
     loaner: !!parsed.loaner && !!tenant?.dealershipLoanerEnabled,
+    tolls: !!parsed.tolls && !!tenant?.tollsEnabled,
     tenants: false
   };
   return next;
@@ -191,11 +199,11 @@ function normalizeUserModuleConfig(raw = {}) {
 
 export async function getTenantModuleConfig(tenantId) {
   if (!tenantId) {
-    return normalizeTenantModuleConfig(normalizeBooleanMap(), { carSharingEnabled: true, dealershipLoanerEnabled: true });
+    return normalizeTenantModuleConfig(normalizeBooleanMap(), { carSharingEnabled: true, dealershipLoanerEnabled: true, tollsEnabled: true });
   }
   const tenant = await prisma.tenant.findUnique({
     where: { id: tenantId },
-    select: { id: true, carSharingEnabled: true, dealershipLoanerEnabled: true }
+    select: { id: true, carSharingEnabled: true, dealershipLoanerEnabled: true, tollsEnabled: true }
   });
   if (!tenant) return defaultTenantModuleConfig(null);
   const row = await prisma.appSetting.findUnique({ where: { key: scopedSettingKey('moduleAccess', { tenantId }) } });
@@ -212,7 +220,7 @@ export async function updateTenantModuleConfig(tenantId, payload = {}) {
   if (!tenantId) throw new Error('tenantId is required');
   const tenant = await prisma.tenant.findUnique({
     where: { id: tenantId },
-    select: { id: true, carSharingEnabled: true, dealershipLoanerEnabled: true }
+    select: { id: true, carSharingEnabled: true, dealershipLoanerEnabled: true, tollsEnabled: true }
   });
   if (!tenant) throw new Error('Tenant not found');
   const next = normalizeTenantModuleConfig(payload, tenant);

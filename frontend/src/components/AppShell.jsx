@@ -19,6 +19,7 @@ const NAV_ITEMS = [
   { href: '/employee', label: 'Employee App', moduleKey: 'employeeApp' },
   { href: '/issues', label: 'Issue Center', moduleKey: 'issueCenter' },
   { href: '/loaner', label: 'Loaner Program', feature: 'dealershipLoaner', moduleKey: 'loaner' },
+  { href: '/tolls', label: 'Tolls', moduleKey: 'tolls' },
   { href: '/settings', label: 'Settings', moduleKey: 'settings' },
   { href: '/tenants', label: 'Tenants', superOnly: true, moduleKey: 'tenants' },
   { href: '/settings/security', label: 'Security', adminOnly: true, moduleKey: 'security' }

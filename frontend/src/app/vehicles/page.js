@@ -46,10 +46,10 @@ function VehiclesInner({ token, me, logout }) {
   const [msg, setMsg] = useState('');
 
   const [newVehicle, setNewVehicle] = useState({
-    internalNumber: '', plate: '', vin: '', make: '', model: '', color: '', year: '', mileage: '', vehicleTypeId: '', homeLocationId: '', fleetMode: 'RENTAL_ONLY'
+    internalNumber: '', plate: '', tollTagNumber: '', tollStickerNumber: '', vin: '', make: '', model: '', color: '', year: '', mileage: '', vehicleTypeId: '', homeLocationId: '', fleetMode: 'RENTAL_ONLY'
   });
   const [editVehicleForm, setEditVehicleForm] = useState({
-    internalNumber: '', plate: '', vin: '', make: '', model: '', color: '', year: '', mileage: '', status: 'AVAILABLE', vehicleTypeId: '', homeLocationId: '', fleetMode: 'RENTAL_ONLY'
+    internalNumber: '', plate: '', tollTagNumber: '', tollStickerNumber: '', vin: '', make: '', model: '', color: '', year: '', mileage: '', status: 'AVAILABLE', vehicleTypeId: '', homeLocationId: '', fleetMode: 'RENTAL_ONLY'
   });
 
   const [rentForm, setRentForm] = useState({
@@ -83,6 +83,8 @@ function VehiclesInner({ token, me, logout }) {
     return vehicles.filter((v) =>
       (v.internalNumber || '').toLowerCase().includes(q) ||
       (v.plate || '').toLowerCase().includes(q) ||
+      (v.tollTagNumber || '').toLowerCase().includes(q) ||
+      (v.tollStickerNumber || '').toLowerCase().includes(q) ||
       (v.vin || '').toLowerCase().includes(q) ||
       `${v.make || ''} ${v.model || ''}`.toLowerCase().includes(q)
     );
@@ -196,7 +198,7 @@ function VehiclesInner({ token, me, logout }) {
         })
       }, token);
       setShowAddVehicle(false);
-      setNewVehicle({ internalNumber: '', plate: '', vin: '', make: '', model: '', color: '', year: '', mileage: '', vehicleTypeId: '', homeLocationId: '', fleetMode: 'RENTAL_ONLY' });
+      setNewVehicle({ internalNumber: '', plate: '', tollTagNumber: '', tollStickerNumber: '', vin: '', make: '', model: '', color: '', year: '', mileage: '', vehicleTypeId: '', homeLocationId: '', fleetMode: 'RENTAL_ONLY' });
       setMsg('Vehicle added successfully');
       await load();
     } catch (e2) {
@@ -209,6 +211,8 @@ function VehiclesInner({ token, me, logout }) {
     setEditVehicleForm({
       internalNumber: vehicle.internalNumber || '',
       plate: vehicle.plate || '',
+      tollTagNumber: vehicle.tollTagNumber || '',
+      tollStickerNumber: vehicle.tollStickerNumber || '',
       vin: vehicle.vin || '',
       make: vehicle.make || '',
       model: vehicle.model || '',
@@ -246,7 +250,7 @@ function VehiclesInner({ token, me, logout }) {
 
   const downloadTemplate = () => {
     const sampleType = vehicleTypes[0]?.id || 'PUT_VEHICLE_TYPE_ID_HERE';
-    const csv = `internalNumber,plate,vin,make,model,color,vehicleTypeId\nUNIT-001,ABC123,1HGBH41JXMN109186,Honda,Civic,Silver,${sampleType}`;
+    const csv = `internalNumber,plate,tollTagNumber,tollStickerNumber,vin,make,model,color,vehicleTypeId\nUNIT-001,ABC123,TAG-1001,SELLO-1001,1HGBH41JXMN109186,Honda,Civic,Silver,${sampleType}`;
     const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -366,7 +370,7 @@ function VehiclesInner({ token, me, logout }) {
         <div className="row-between">
           <h2>Vehicle Inventory</h2>
           <div style={{ display: 'flex', gap: 8, width: 'min(720px,100%)' }}>
-            <input placeholder="Search unit, plate, make/model, VIN" value={query} onChange={(e) => setQuery(e.target.value)} />
+            <input placeholder="Search unit, plate, toll tag, sticker, make/model, VIN" value={query} onChange={(e) => setQuery(e.target.value)} />
             <button onClick={() => setShowAddVehicle(true)}>Add Vehicle</button>
             <button onClick={() => setShowUpload(true)}>Upload Inventory</button>
           </div>
@@ -377,6 +381,8 @@ function VehiclesInner({ token, me, logout }) {
             <tr>
               <th>Unit ID</th>
               <th>License</th>
+              <th>Toll Tag</th>
+              <th>Toll Sticker</th>
               <th>Make</th>
               <th>Model</th>
               <th>Color</th>
@@ -393,6 +399,8 @@ function VehiclesInner({ token, me, logout }) {
               <tr key={v.id} onClick={() => setSelected(v)} style={{ cursor: 'pointer' }}>
                 <td>{v.internalNumber}</td>
                 <td>{v.plate || '-'}</td>
+                <td>{v.tollTagNumber || '-'}</td>
+                <td>{v.tollStickerNumber || '-'}</td>
                 <td>{v.make || '-'}</td>
                 <td>{v.model || '-'}</td>
                 <td>{v.color || '-'}</td>
@@ -416,6 +424,8 @@ function VehiclesInner({ token, me, logout }) {
           <div className="stack">
             <div><span className="label">VIN</span><div>{selected.vin || '-'}</div></div>
             <div><span className="label">Plate</span><div>{selected.plate || '-'}</div></div>
+            <div><span className="label">Toll Tag</span><div>{selected.tollTagNumber || '-'}</div></div>
+            <div><span className="label">Toll Sticker</span><div>{selected.tollStickerNumber || '-'}</div></div>
             <div><span className="label">Vehicle</span><div>{selected.year || ''} {selected.make || ''} {selected.model || ''}</div></div>
             <div><span className="label">Color</span><div>{selected.color || '-'}</div></div>
             <div><span className="label">Mileage</span><div>{selected.mileage ?? 0}</div></div>
@@ -454,6 +464,10 @@ function VehiclesInner({ token, me, logout }) {
               <div className="grid2">
                 <input required placeholder="Unit ID" value={newVehicle.internalNumber} onChange={(e) => setNewVehicle({ ...newVehicle, internalNumber: e.target.value })} />
                 <input placeholder="License Plate" value={newVehicle.plate} onChange={(e) => setNewVehicle({ ...newVehicle, plate: e.target.value })} />
+              </div>
+              <div className="grid2">
+                <input placeholder="Toll Tag Number" value={newVehicle.tollTagNumber || ''} onChange={(e) => setNewVehicle({ ...newVehicle, tollTagNumber: e.target.value })} />
+                <input placeholder="Toll Sticker Number" value={newVehicle.tollStickerNumber || ''} onChange={(e) => setNewVehicle({ ...newVehicle, tollStickerNumber: e.target.value })} />
               </div>
               <div className="grid2">
                 <input placeholder="VIN" value={newVehicle.vin} onChange={(e) => setNewVehicle({ ...newVehicle, vin: e.target.value })} />
@@ -496,6 +510,10 @@ function VehiclesInner({ token, me, logout }) {
               <div className="grid2">
                 <input required placeholder="Unit ID" value={editVehicleForm.internalNumber} onChange={(e) => setEditVehicleForm({ ...editVehicleForm, internalNumber: e.target.value })} />
                 <input placeholder="License Plate" value={editVehicleForm.plate} onChange={(e) => setEditVehicleForm({ ...editVehicleForm, plate: e.target.value })} />
+              </div>
+              <div className="grid2">
+                <input placeholder="Toll Tag Number" value={editVehicleForm.tollTagNumber || ''} onChange={(e) => setEditVehicleForm({ ...editVehicleForm, tollTagNumber: e.target.value })} />
+                <input placeholder="Toll Sticker Number" value={editVehicleForm.tollStickerNumber || ''} onChange={(e) => setEditVehicleForm({ ...editVehicleForm, tollStickerNumber: e.target.value })} />
               </div>
               <div className="grid2">
                 <input placeholder="VIN" value={editVehicleForm.vin} onChange={(e) => setEditVehicleForm({ ...editVehicleForm, vin: e.target.value })} />
@@ -544,7 +562,7 @@ function VehiclesInner({ token, me, logout }) {
                 <ul>
                   <li>Use CSV format.</li>
                   <li>Required columns: <code>internalNumber</code>, <code>vehicleTypeId</code>.</li>
-                  <li>Recommended columns: plate, vin, make, model, color.</li>
+                  <li>Recommended columns: plate, tollTagNumber, tollStickerNumber, vin, make, model, color.</li>
                   <li>Rows matching existing internalNumber/VIN/plate are rejected (not uploaded).</li>
                 </ul>
                 <div style={{ display: 'flex', gap: 8 }}>

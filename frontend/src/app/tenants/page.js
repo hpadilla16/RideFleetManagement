@@ -5,7 +5,7 @@ import { AuthGate } from '../../components/AuthGate';
 import { AppShell } from '../../components/AppShell';
 import { api, TOKEN_KEY, USER_KEY } from '../../lib/client';
 
-const EMPTY_TENANT = { name: '', slug: '', status: 'ACTIVE', plan: 'BETA', carSharingEnabled: false, dealershipLoanerEnabled: false };
+const EMPTY_TENANT = { name: '', slug: '', status: 'ACTIVE', plan: 'BETA', carSharingEnabled: false, dealershipLoanerEnabled: false, tollsEnabled: false };
 const EMPTY_ADMIN = { email: '', fullName: '', password: 'TempPass123!' };
 
 export default function TenantsPage() {
@@ -27,6 +27,7 @@ function Inner({ token, me, logout }) {
   const suspendedTenants = rows.filter((row) => row.status === 'SUSPENDED').length;
   const carSharingTenants = rows.filter((row) => row.carSharingEnabled).length;
   const loanerTenants = rows.filter((row) => row.dealershipLoanerEnabled).length;
+  const tollTenants = rows.filter((row) => row.tollsEnabled).length;
   const enterpriseTenants = rows.filter((row) => row.plan === 'ENTERPRISE').length;
 
   const load = async () => {
@@ -75,7 +76,8 @@ function Inner({ token, me, logout }) {
           status: row.status,
           plan: row.plan,
           carSharingEnabled: !!row.carSharingEnabled,
-          dealershipLoanerEnabled: !!row.dealershipLoanerEnabled
+          dealershipLoanerEnabled: !!row.dealershipLoanerEnabled,
+          tollsEnabled: !!row.tollsEnabled
         })
       }, token);
       setMsg('Tenant updated');
@@ -166,6 +168,10 @@ function Inner({ token, me, logout }) {
               <strong>{loanerTenants}</strong>
             </div>
             <div className="info-tile">
+              <span className="label">Tolls Enabled</span>
+              <strong>{tollTenants}</strong>
+            </div>
+            <div className="info-tile">
               <span className="label">Enterprise Plan</span>
               <strong>{enterpriseTenants}</strong>
             </div>
@@ -197,6 +203,7 @@ function Inner({ token, me, logout }) {
             </select>
             <label className="label"><input type="checkbox" checked={tenantForm.carSharingEnabled} onChange={(e) => setTenantForm((f) => ({ ...f, carSharingEnabled: e.target.checked }))} /> Car Sharing Enabled</label>
             <label className="label"><input type="checkbox" checked={tenantForm.dealershipLoanerEnabled} onChange={(e) => setTenantForm((f) => ({ ...f, dealershipLoanerEnabled: e.target.checked }))} /> Dealership Loaner Enabled</label>
+            <label className="label"><input type="checkbox" checked={tenantForm.tollsEnabled} onChange={(e) => setTenantForm((f) => ({ ...f, tollsEnabled: e.target.checked }))} /> Tolls Enabled</label>
           </div>
           <button style={{ marginTop: 8 }} onClick={createTenant}>Create Tenant</button>
         </div>
@@ -204,7 +211,7 @@ function Inner({ token, me, logout }) {
         <div id="tenant-edit-card" className="glass card" style={{ padding: 12 }}>
           <h3 className="section-title">Edit / Suspend Tenants</h3>
           <table>
-            <thead><tr><th>Name</th><th>Slug</th><th>Status</th><th>Plan</th><th>Car Sharing</th><th>Loaner</th><th>Counts</th><th>Actions</th></tr></thead>
+            <thead><tr><th>Name</th><th>Slug</th><th>Status</th><th>Plan</th><th>Car Sharing</th><th>Loaner</th><th>Tolls</th><th>Counts</th><th>Actions</th></tr></thead>
             <tbody>
               {(rows || []).map((r) => (
                 <tr key={r.id}>
@@ -231,6 +238,11 @@ function Inner({ token, me, logout }) {
                   <td>
                     <label className="label">
                       <input type="checkbox" checked={!!r.dealershipLoanerEnabled} onChange={(e) => setRows((prev) => prev.map((x) => x.id === r.id ? { ...x, dealershipLoanerEnabled: e.target.checked } : x))} /> Enabled
+                    </label>
+                  </td>
+                  <td>
+                    <label className="label">
+                      <input type="checkbox" checked={!!r.tollsEnabled} onChange={(e) => setRows((prev) => prev.map((x) => x.id === r.id ? { ...x, tollsEnabled: e.target.checked } : x))} /> Enabled
                     </label>
                   </td>
                   <td className="label">U:{r?._count?.users || 0} L:{r?._count?.locations || 0} C:{r?._count?.customers || 0} V:{r?._count?.vehicles || 0} R:{r?._count?.reservations || 0}</td>

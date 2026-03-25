@@ -195,6 +195,34 @@ enum LoanerBillingStatus {
   DENIED
 }
 
+enum TollProvider {
+  AUTOEXPRESO
+}
+
+enum TollTransactionStatus {
+  IMPORTED
+  MATCHED
+  NEEDS_REVIEW
+  BILLED
+  DISPUTED
+  VOID
+}
+
+enum TollMatchStatus {
+  SUGGESTED
+  CONFIRMED
+  REJECTED
+  AUTO_CONFIRMED
+}
+
+enum TollBillingStatus {
+  PENDING
+  POSTED_TO_RESERVATION
+  POSTED_TO_AGREEMENT
+  WAIVED
+  DISPUTED
+}
+
 enum HostVehicleSubmissionStatus {
   PENDING_REVIEW
   PENDING_INFO
@@ -210,6 +238,7 @@ model Tenant {
   plan      String   @default("BETA")
   carSharingEnabled Boolean @default(false)
   dealershipLoanerEnabled Boolean @default(false)
+  tollsEnabled Boolean @default(false)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -232,6 +261,10 @@ model Tenant {
   carSharingTrips Trip[]
   tripPayouts TripPayout[]
   hostVehicleSubmissions HostVehicleSubmission[]
+  tollProviderAccounts TollProviderAccount[]
+  tollTransactions TollTransaction[]
+  tollAssignments TollAssignment[]
+  tollImportRuns TollImportRun[]
 }
 
 model Location {
@@ -290,6 +323,8 @@ model Vehicle {
   internalNumber String        @unique
   vin            String?       @unique
   plate          String?       @unique
+  tollTagNumber  String?
+  tollStickerNumber String?
   make           String?
   model          String?
   year           Int?
@@ -312,6 +347,8 @@ model Vehicle {
   rentalAgreements RentalAgreement[]
   hostListing     HostVehicleListing?
   hostVehicleSubmission HostVehicleSubmission?
+  tollTransactions TollTransaction[]
+  tollAssignments TollAssignment[]
 }
 
 model Customer {
@@ -462,6 +499,8 @@ model Reservation {
   carSharingTrip    Trip?
   incidents         TripIncident[]
   hostReviews       HostReview[]
+  tollTransactions  TollTransaction[]
+  tollAssignments   TollAssignment[]
 
   @@index([status, pickupAt])
   @@index([workflowMode, status, pickupAt])
@@ -659,6 +698,7 @@ model User {
   salesOwnedAgreements RentalAgreement[] @relation("AgreementSalesOwner")
   closedAgreements RentalAgreement[] @relation("AgreementClosedBy")
   agreementCommissions AgreementCommission[] @relation("AgreementCommissionEmployee")
+  matchedTollAssignments TollAssignment[] @relation("TollAssignmentMatchedByUser")
   customerInfoReviewedReservations Reservation[] @relation("ReservationCustomerInfoReviewedBy")
   readyForPickupReservations Reservation[] @relation("ReservationReadyForPickupBy")
   hostProfile HostProfile?
@@ -1387,5 +1427,116 @@ model AppSetting {
   value     String
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+}
+
+model TollProviderAccount {
+  id                String       @id @default(cuid())
+  tenantId          String
+  tenant            Tenant       @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  provider          TollProvider
+  isActive          Boolean      @default(true)
+  username          String?
+  passwordEncrypted String?
+  accountNumber     String?
+  settingsJson      String?
+  lastSyncAt        DateTime?
+  lastSyncStatus    String?
+  lastSyncMessage   String?
+  createdAt         DateTime     @default(now())
+  updatedAt         DateTime     @updatedAt
+
+  importRuns        TollImportRun[]
+  transactions      TollTransaction[]
+
+  @@index([tenantId, provider, isActive])
+}
+
+model TollImportRun {
+  id                String              @id @default(cuid())
+  tenantId          String
+  tenant            Tenant              @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  providerAccountId String
+  providerAccount   TollProviderAccount @relation(fields: [providerAccountId], references: [id], onDelete: Cascade)
+  startedAt         DateTime            @default(now())
+  completedAt       DateTime?
+  sourceType        String
+  status            String
+  importedCount     Int                 @default(0)
+  matchedCount      Int                 @default(0)
+  reviewCount       Int                 @default(0)
+  errorMessage      String?
+  metadataJson      String?
+  createdAt         DateTime            @default(now())
+  updatedAt         DateTime            @updatedAt
+
+  transactions      TollTransaction[]
+
+  @@index([tenantId, startedAt])
+}
+
+model TollTransaction {
+  id                 String                @id @default(cuid())
+  tenantId           String
+  tenant             Tenant                @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  providerAccountId  String?
+  providerAccount    TollProviderAccount?  @relation(fields: [providerAccountId], references: [id])
+  importRunId        String?
+  importRun          TollImportRun?        @relation(fields: [importRunId], references: [id])
+  externalId         String?
+  transactionAt      DateTime
+  transactionDate    DateTime?
+  transactionTimeRaw String?
+  amount             Decimal               @db.Decimal(10, 2)
+  location           String?
+  lane               String?
+  direction          String?
+  plateRaw           String?
+  plateNormalized    String?
+  tagRaw             String?
+  tagNormalized      String?
+  selloRaw           String?
+  selloNormalized    String?
+  vehicleId          String?
+  vehicle            Vehicle?              @relation(fields: [vehicleId], references: [id])
+  reservationId      String?
+  reservation        Reservation?          @relation(fields: [reservationId], references: [id])
+  status             TollTransactionStatus @default(IMPORTED)
+  matchConfidence    Decimal?              @db.Decimal(5, 2)
+  needsReview        Boolean               @default(false)
+  billingStatus      TollBillingStatus     @default(PENDING)
+  sourcePayloadJson  String?
+  reviewNotes        String?
+  createdAt          DateTime              @default(now())
+  updatedAt          DateTime              @updatedAt
+
+  assignments        TollAssignment[]
+
+  @@index([tenantId, transactionAt])
+  @@index([tenantId, status, transactionAt])
+  @@index([tenantId, plateNormalized, transactionAt])
+  @@index([tenantId, tagNormalized, transactionAt])
+  @@index([tenantId, selloNormalized, transactionAt])
+}
+
+model TollAssignment {
+  id                String          @id @default(cuid())
+  tenantId          String
+  tenant            Tenant          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  tollTransactionId String
+  tollTransaction   TollTransaction @relation(fields: [tollTransactionId], references: [id], onDelete: Cascade)
+  reservationId     String
+  reservation       Reservation     @relation(fields: [reservationId], references: [id], onDelete: Cascade)
+  vehicleId         String?
+  vehicle           Vehicle?        @relation(fields: [vehicleId], references: [id])
+  status            TollMatchStatus
+  confidence        Decimal?        @db.Decimal(5, 2)
+  matchedByUserId   String?
+  matchedByUser     User?           @relation("TollAssignmentMatchedByUser", fields: [matchedByUserId], references: [id])
+  matchReason       String?
+  createdAt         DateTime        @default(now())
+  updatedAt         DateTime        @updatedAt
+
+  @@index([tenantId, reservationId, status])
+  @@index([tollTransactionId, status])
 }
 

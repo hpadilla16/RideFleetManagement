@@ -272,20 +272,27 @@ tollImportRuns TollImportRun[]
 
 ### Vehicle
 
-No hace falta cambiar la identidad base. Ya tenemos:
+Aqui si conviene tocar el schema base desde el principio. Ya tenemos:
 
 - `tenantId`
 - `plate`
 
-Opcionalmente luego se puede agregar:
+Y debemos agregar de forma explicita:
 
 ```prisma
 tollTagNumber String?
 tollStickerNumber String?
 ```
 
-pero inicialmente se puede soportar esto con `vehicle metadata` o una tabla de
-aliases para no tocar demasiado el core.
+No recomiendo esconder esto en `vehicle metadata`, porque tag y sello son parte
+del matching principal del modulo.
+
+Beneficios:
+
+- capturarlo desde `Vehicles`
+- usarlo en import/manual review
+- subir la confianza del scoring
+- auditar peajes por unidad real del tenant
 
 ### Reservation
 

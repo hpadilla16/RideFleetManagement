@@ -34,7 +34,8 @@ export const tenantsService = {
         status: String(data.status || 'ACTIVE').toUpperCase(),
         plan: String(data.plan || 'BETA').toUpperCase(),
         carSharingEnabled: !!data.carSharingEnabled,
-        dealershipLoanerEnabled: !!data.dealershipLoanerEnabled
+        dealershipLoanerEnabled: !!data.dealershipLoanerEnabled,
+        tollsEnabled: !!data.tollsEnabled
       }
     });
   },
@@ -47,6 +48,7 @@ export const tenantsService = {
     if (patch.plan !== undefined) data.plan = String(patch.plan || '').toUpperCase();
     if (patch.carSharingEnabled !== undefined) data.carSharingEnabled = !!patch.carSharingEnabled;
     if (patch.dealershipLoanerEnabled !== undefined) data.dealershipLoanerEnabled = !!patch.dealershipLoanerEnabled;
+    if (patch.tollsEnabled !== undefined) data.tollsEnabled = !!patch.tollsEnabled;
 
     return prisma.tenant.update({ where: { id }, data });
   },
