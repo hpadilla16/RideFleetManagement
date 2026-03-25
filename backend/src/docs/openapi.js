@@ -274,7 +274,7 @@ export function buildOpenApiSpec(serverUrl) {
           type: 'object',
           properties: {
             ok: { type: 'boolean', example: true },
-            link: { type: 'string', example: 'https://beta.ridefleetmanager.com/customer/pay?token=abc123' },
+            link: { type: 'string', example: 'https://ridefleetmanager.com/customer/pay?token=abc123' },
             expiresAt: { type: 'string', format: 'date-time' }
           }
         },
