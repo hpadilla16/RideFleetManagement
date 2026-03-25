@@ -74,6 +74,17 @@ publicBookingRouter.post('/guest-signin/request', async (req, res, next) => {
   }
 });
 
+publicBookingRouter.post('/guest-signup', async (req, res, next) => {
+  try {
+    res.status(201).json(await publicBookingService.createGuestAccount(req.body || {}));
+  } catch (error) {
+    if (/required|not found/i.test(String(error?.message || ''))) {
+      return res.status(400).json({ error: error.message });
+    }
+    next(error);
+  }
+});
+
 publicBookingRouter.get('/guest-signin/:token', async (req, res, next) => {
   try {
     res.json(await publicBookingService.getGuestSession(req.params.token));

@@ -17,6 +17,62 @@ function guestLink(token) {
   return `${baseUrl()}/guest?token=${encodeURIComponent(token)}`;
 }
 
+function normalizeEmail(value) {
+  return String(value || '').trim().toLowerCase();
+}
+
+async function issueGuestAccess({ customers = [], email, customerName, subject = 'Open your guest account', intro = 'Use this secure link to open your guest account and see all of your bookings.' }) {
+  const normalizedEmail = normalizeEmail(email);
+  if (!normalizedEmail) throw new Error('email is required');
+  if (!customers.length) throw new Error('No guest account found for that email');
+
+  const token = crypto.randomBytes(24).toString('hex');
+  const expiresAt = new Date(Date.now() + 1000 * 60 * 60 * 24 * 7);
+  await prisma.customer.updateMany({
+    where: {
+      email: {
+        equals: normalizedEmail,
+        mode: 'insensitive'
+      }
+    },
+    data: {
+      guestAccessToken: token,
+      guestAccessExpiresAt: expiresAt
+    }
+  });
+
+  const displayName = customerName || customers[0]?.firstName || 'Guest';
+  const link = guestLink(token);
+  await sendEmail({
+    to: normalizedEmail,
+    subject,
+    text: [
+      `Hello ${displayName},`,
+      '',
+      intro,
+      link,
+      '',
+      `This link expires on ${expiresAt.toLocaleString()}.`
+    ].join('\n'),
+    html: `
+      <div style="font-family:Arial,sans-serif;font-size:14px;line-height:1.6;color:#111">
+        <div>Hello ${displayName},</div>
+        <div style="margin-top:12px">${intro}</div>
+        <div style="margin-top:18px"><a href="${link}" style="display:inline-block;padding:10px 16px;border-radius:999px;background:#7c3aed;color:#fff;text-decoration:none;font-weight:700">Open Guest Account</a></div>
+        <div style="margin-top:12px">${link}</div>
+        <div style="margin-top:12px">This link expires on ${expiresAt.toLocaleString()}.</div>
+      </div>
+    `
+  });
+
+  return {
+    ok: true,
+    email: normalizedEmail,
+    expiresAt,
+    linkSent: true
+  };
+}
+
 function bookingSummaryFromReservation(reservation) {
   return {
     type: reservation.workflowMode === 'CAR_SHARING' ? 'CAR_SHARING' : 'RENTAL',
@@ -202,7 +258,7 @@ export const publicBookingService = {
   },
 
   async requestGuestSignIn(input = {}) {
-    const email = String(input?.email || '').trim().toLowerCase();
+    const email = normalizeEmail(input?.email);
     if (!email) throw new Error('email is required');
 
     const matchingCustomers = await prisma.customer.findMany({
@@ -221,53 +277,66 @@ export const publicBookingService = {
       }
     });
 
-    const eligibleCustomers = matchingCustomers.filter((row) => row.reservations.length || row.guestTrips.length);
-    if (!eligibleCustomers.length) throw new Error('No guest bookings were found for that email');
+    if (!matchingCustomers.length) throw new Error('No guest account found for that email');
 
-    const token = crypto.randomBytes(24).toString('hex');
-    const expiresAt = new Date(Date.now() + 1000 * 60 * 60 * 24 * 7);
-    await prisma.customer.updateMany({
+    return issueGuestAccess({
+      customers: matchingCustomers,
+      email,
+      customerName: matchingCustomers[0]?.firstName || 'Guest'
+    });
+  },
+
+  async createGuestAccount(input = {}) {
+    const email = normalizeEmail(input?.email);
+    const firstName = String(input?.firstName || '').trim();
+    const lastName = String(input?.lastName || '').trim();
+    const phone = String(input?.phone || '').trim();
+
+    if (!firstName) throw new Error('firstName is required');
+    if (!lastName) throw new Error('lastName is required');
+    if (!email) throw new Error('email is required');
+    if (!phone) throw new Error('phone is required');
+
+    const matchingCustomers = await prisma.customer.findMany({
       where: {
         email: {
           equals: email,
           mode: 'insensitive'
         }
       },
-      data: {
-        guestAccessToken: token,
-        guestAccessExpiresAt: expiresAt
+      select: {
+        id: true,
+        firstName: true,
+        email: true
       }
     });
 
-    const customerName = eligibleCustomers[0]?.firstName || 'Guest';
-    const link = guestLink(token);
-    await sendEmail({
-      to: email,
-      subject: 'Open your guest account',
-      text: [
-        `Hello ${customerName},`,
-        '',
-        'Use this secure link to open your guest account and see all of your bookings.',
-        link,
-        '',
-        `This link expires on ${expiresAt.toLocaleString()}.`
-      ].join('\n'),
-      html: `
-        <div style="font-family:Arial,sans-serif;font-size:14px;line-height:1.6;color:#111">
-          <div>Hello ${customerName},</div>
-          <div style="margin-top:12px">Use this secure link to open your guest account and see all of your bookings.</div>
-          <div style="margin-top:18px"><a href="${link}" style="display:inline-block;padding:10px 16px;border-radius:999px;background:#7c3aed;color:#fff;text-decoration:none;font-weight:700">Open Guest Account</a></div>
-          <div style="margin-top:12px">${link}</div>
-          <div style="margin-top:12px">This link expires on ${expiresAt.toLocaleString()}.</div>
-        </div>
-      `
-    });
+    let customers = matchingCustomers;
+    if (!customers.length) {
+      const created = await prisma.customer.create({
+        data: {
+          tenantId: null,
+          firstName,
+          lastName,
+          email,
+          phone
+        },
+        select: {
+          id: true,
+          firstName: true,
+          email: true
+        }
+      });
+      customers = [created];
+    }
 
-    return {
-      ok: true,
+    return issueGuestAccess({
+      customers,
       email,
-      expiresAt
-    };
+      customerName: firstName || customers[0]?.firstName || 'Guest',
+      subject: 'Welcome to Ride Fleet guest access',
+      intro: 'Your guest account is ready. Use this secure link to sign in, view your reservations, and make future bookings from the same guest account.'
+    });
   },
 
   async getGuestSession(token) {

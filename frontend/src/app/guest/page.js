@@ -516,6 +516,16 @@ export default function GuestAppPage() {
                   <div className="doc-meta">{guestSessionSummary.support} booking{guestSessionSummary.support === 1 ? '' : 's'} may need follow-up or support.</div>
                 </div>
               </div>
+              {!guestSessionSummary.total ? (
+                <div className="surface-note">
+                  This guest account is ready, but there are no bookings yet. Browse the marketplace and make a reservation from this same guest experience.
+                  <div className="inline-actions" style={{ marginTop: 10 }}>
+                    <a href="/book">
+                      <button type="button">Browse Marketplace</button>
+                    </a>
+                  </div>
+                </div>
+              ) : null}
 
               <div className="inline-actions">
                 {[
