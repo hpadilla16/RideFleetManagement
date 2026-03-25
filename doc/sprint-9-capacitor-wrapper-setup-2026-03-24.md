@@ -62,6 +62,30 @@ Then run:
 npm run mobile:sync
 ```
 
+## App Links / Universal Links
+
+The frontend now serves:
+
+- `/.well-known/assetlinks.json`
+- `/.well-known/apple-app-site-association`
+
+Use these environment variables before deploy if you want domain verification to
+open the installed app directly from guest magic links, host review links, and
+issue-response links:
+
+```bash
+RIDEFLEET_ANDROID_APP_ID=com.ridefleet.mobile
+RIDEFLEET_ANDROID_SHA256_CERT_FINGERPRINTS=AA:BB:CC:...
+RIDEFLEET_APPLE_TEAM_ID=YOURTEAMID
+RIDEFLEET_IOS_BUNDLE_ID=com.ridefleet.mobile
+```
+
+Notes:
+
+- Android App Links need the release certificate SHA256 fingerprint
+- iOS Universal Links need the Apple Team ID plus bundle ID
+- Android manifest now uses `android:autoVerify="true"` for the hosted domains
+
 ## Internal Build Path
 
 ### Android
