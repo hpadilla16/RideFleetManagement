@@ -207,6 +207,18 @@ a { color: inherit; text-decoration: none; }
 .support-action-stack { display: grid; gap: 12px; }
 .support-callout-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; }
 .mobile-app-shell { margin-bottom: 18px; }
+.mobile-app-shell-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+.mobile-install-btn {
+  min-height: 32px;
+  padding: 6px 12px;
+  font-size: 12px;
+  box-shadow: none;
+}
 .mobile-app-shell-nav {
   display: flex;
   gap: 10px;
@@ -502,6 +514,9 @@ tr:hover td { background: rgba(135,82,254,.05); }
   .info-grid-tight,
   .journey-stage-grid,
   .support-callout-grid { grid-template-columns: 1fr; }
+  .mobile-app-shell-meta {
+    align-items: stretch;
+  }
   .sales-chart { height: 180px; }
   .chart-months { grid-template-columns: repeat(6, 1fr); }
   .detail-drawer {
