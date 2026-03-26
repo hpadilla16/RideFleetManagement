@@ -2,6 +2,8 @@ import { prisma } from '../../lib/prisma.js';
 
 const DEFAULT_PRE_PICKUP_GRACE_MINUTES = 120;
 const DEFAULT_POST_RETURN_GRACE_MINUTES = 180;
+const AUTOEXPRESO_LOGIN_URL = 'https://www.autoexpreso.com/login?v=0.0.1';
+const AUTOEXPRESO_TRANSACTIONS_URL = 'https://www.autoexpreso.com/dashboard/transaction?v=0.0.1';
 
 function tenantWhereForScope(scope = {}) {
   return scope?.tenantId ? { tenantId: scope.tenantId } : {};
@@ -97,6 +99,17 @@ function serializeImportRun(row) {
     errorMessage: row.errorMessage || '',
     metadata: safeJsonParse(row.metadataJson, {})
   };
+}
+
+function parseAutoExpresoDateTime(raw) {
+  const text = String(raw || '').trim();
+  if (!text) throw new Error('AutoExpreso transaction date/time missing');
+  const match = text.match(/(\d{1,2})\/(\d{1,2})\/(\d{4})\s+(.+)/);
+  if (!match) throw new Error(`Unsupported AutoExpreso date/time: ${text}`);
+  const [, day, month, year, timePart] = match;
+  const parsed = new Date(`${month}/${day}/${year} ${timePart}`);
+  if (Number.isNaN(parsed.getTime())) throw new Error(`Unsupported AutoExpreso date/time: ${text}`);
+  return parsed;
 }
 
 function serializeTransaction(row) {
@@ -663,7 +676,168 @@ export const tollsService = {
     };
   },
 
-  async createManualTransactions(rows = [], scope = {}, actorUserId = null) {
+  async runLiveSync(scope = {}, actorUserId = null) {
+    await ensureTenantAllowsTolls(scope);
+    if (!scope?.tenantId) throw new Error('tenantId is required for toll provider setup');
+    const row = await prisma.tollProviderAccount.findFirst({
+      where: {
+        tenantId: scope.tenantId,
+        provider: 'AUTOEXPRESO'
+      },
+      orderBy: [{ isActive: 'desc' }, { updatedAt: 'desc' }]
+    });
+    if (!row) throw new Error('AutoExpreso provider account is not configured');
+
+    const health = await this.runProviderHealthCheck(scope);
+    if (!health.ready) throw new Error(`Provider not ready: ${(health.missing || []).join(', ')}`);
+
+    let playwright;
+    try {
+      playwright = await import('playwright');
+    } catch {
+      throw new Error('Playwright is not installed on backend for live AutoExpreso sync');
+    }
+
+    const settings = safeJsonParse(row.settingsJson, {});
+    const loginUrl = String(settings.loginUrl || AUTOEXPRESO_LOGIN_URL).trim() || AUTOEXPRESO_LOGIN_URL;
+    const transactionUrl = String(settings.transactionUrl || AUTOEXPRESO_TRANSACTIONS_URL).trim() || AUTOEXPRESO_TRANSACTIONS_URL;
+    const maxPages = Number(settings.maxPages || 25) > 0 ? Number(settings.maxPages || 25) : 25;
+    const username = String(row.username || '').trim();
+    const password = decodeSecret(row.passwordEncrypted);
+
+    const browser = await playwright.chromium.launch({ headless: true });
+    const context = await browser.newContext();
+    const page = await context.newPage();
+
+    try {
+      await page.goto(loginUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
+      const userInput = page.locator("input[placeholder*='Usuario'], input[placeholder*='Correo'], input[type='email'], input[type='text']").first();
+      const passwordInput = page.locator("input[formcontrolname='password'], input[type='password']").first();
+      await userInput.fill(username);
+      await passwordInput.fill(password);
+
+      const submit = page.locator("button:has-text('Iniciar'), button:has-text('Iniciar sesión'), button[type='submit']").first();
+      await Promise.all([
+        page.waitForLoadState('networkidle').catch(() => null),
+        submit.click()
+      ]);
+
+      await page.goto(transactionUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
+      await page.waitForSelector('div.az-media-list-activity', { timeout: 20000 });
+
+      const rows = [];
+      let pageNumber = 0;
+      while (pageNumber < maxPages) {
+        const tollEntries = page.locator('div.az-media-list-activity');
+        const count = await tollEntries.count();
+        for (let i = 0; i < count; i += 1) {
+          const toll = tollEntries.nth(i);
+          try {
+            const plateRaw = (await toll.locator("span strong:has-text('Tablilla:') + ngb-highlight").first().innerText()).trim();
+            const amountRaw = (await toll.locator('h6 strong ngb-highlight').first().innerText()).trim();
+            const highlights = toll.locator('span.media-right').locator('ngb-highlight');
+            const location = ((await highlights.nth(0).innerText()) || '').trim();
+            const datetimeFull = ((await highlights.nth(1).innerText()) || '').trim();
+            const transactionAt = parseAutoExpresoDateTime(datetimeFull);
+            const amount = Number(String(amountRaw).replace(/[^0-9.-]/g, ''));
+            rows.push({
+              transactionAt: transactionAt.toISOString(),
+              amount,
+              location,
+              lane: '',
+              direction: '',
+              plate: plateRaw,
+              tag: '',
+              sello: '',
+              transactionTimeRaw: datetimeFull.split(/\s+/).slice(1).join(' '),
+              externalId: normalizeToken(`${plateRaw}|${transactionAt.toISOString()}|${amount}|${location}`)
+            });
+          } catch {
+            // Skip malformed rows but continue sync.
+          }
+        }
+
+        const nextButton = page.locator("li.page-item >> a[aria-label='Next']").first();
+        if (await nextButton.count() === 0) break;
+        const parentClass = String(await nextButton.locator('xpath=..').getAttribute('class') || '');
+        if (parentClass.toLowerCase().includes('disabled')) break;
+        await nextButton.click();
+        await page.waitForTimeout(1500);
+        pageNumber += 1;
+      }
+
+      await browser.close();
+
+      if (!rows.length) {
+        const startedAt = new Date();
+        const run = await prisma.tollImportRun.create({
+          data: {
+            tenantId: scope.tenantId,
+            providerAccountId: row.id,
+            sourceType: 'AUTOEXPRESO_SYNC',
+            status: 'COMPLETED',
+            importedCount: 0,
+            matchedCount: 0,
+            reviewCount: 0,
+            startedAt,
+            completedAt: startedAt,
+            metadataJson: JSON.stringify({
+              liveSync: true,
+              actorUserId: actorUserId || null,
+              note: 'AutoExpreso sync completed with no new rows'
+            })
+          }
+        });
+
+        await prisma.tollProviderAccount.update({
+          where: { id: row.id },
+          data: {
+            lastSyncAt: startedAt,
+            lastSyncStatus: 'SYNC_OK',
+            lastSyncMessage: 'AutoExpreso sync completed with no new rows'
+          }
+        });
+
+        return {
+          ok: true,
+          createdCount: 0,
+          importRun: serializeImportRun(run)
+        };
+      }
+
+      const created = await this.createManualTransactions(rows, scope, actorUserId, {
+        sourceType: 'AUTOEXPRESO_SYNC',
+        providerAccountId: row.id
+      });
+
+      await prisma.tollProviderAccount.update({
+        where: { id: row.id },
+        data: {
+          lastSyncAt: new Date(),
+          lastSyncStatus: 'SYNC_OK',
+          lastSyncMessage: `Imported ${Array.isArray(created?.created) ? created.created.length : 0} toll rows from AutoExpreso`
+        }
+      });
+
+      return {
+        ok: true,
+        createdCount: Array.isArray(created?.created) ? created.created.length : 0
+      };
+    } catch (error) {
+      await browser.close().catch(() => null);
+      await prisma.tollProviderAccount.update({
+        where: { id: row.id },
+        data: {
+          lastSyncAt: new Date(),
+          lastSyncStatus: 'SYNC_FAILED',
+          lastSyncMessage: String(error?.message || 'AutoExpreso sync failed')
+        }
+      });
+      throw error;
+    }
+  },
+
+  async createManualTransactions(rows = [], scope = {}, actorUserId = null, options = {}) {
     await ensureTenantAllowsTolls(scope);
     if (!scope?.tenantId) throw new Error('tenantId is required for manual toll imports');
     const inputRows = (Array.isArray(rows) ? rows : []).filter(Boolean);
@@ -690,8 +864,8 @@ export const tollsService = {
     const importRun = await prisma.tollImportRun.create({
       data: {
         tenantId: scope.tenantId,
-        providerAccountId: effectiveProviderAccount.id,
-        sourceType: inputRows.length > 1 ? 'CSV_PASTE' : 'MANUAL_ENTRY',
+        providerAccountId: options.providerAccountId || effectiveProviderAccount.id,
+        sourceType: options.sourceType || (inputRows.length > 1 ? 'CSV_PASTE' : 'MANUAL_ENTRY'),
         status: 'RUNNING'
       }
     });
@@ -723,12 +897,25 @@ export const tollsService = {
         sourcePayloadJson: JSON.stringify(raw || {})
       };
 
+      if (draft.externalId) {
+        const existing = await prisma.tollTransaction.findFirst({
+          where: {
+            tenantId: scope.tenantId,
+            externalId: draft.externalId
+          },
+          select: { id: true }
+        });
+        if (existing) {
+          continue;
+        }
+      }
+
       const suggestion = await buildMatchSuggestion(draft, scope);
       const row = await prisma.$transaction(async (tx) => {
         const createdTransaction = await tx.tollTransaction.create({
           data: {
             tenantId: scope.tenantId,
-            providerAccountId: effectiveProviderAccount.id,
+            providerAccountId: options.providerAccountId || effectiveProviderAccount.id,
             importRunId: importRun.id,
             externalId: draft.externalId,
             transactionAt: draft.transactionAt,

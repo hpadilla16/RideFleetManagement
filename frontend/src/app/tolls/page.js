@@ -309,6 +309,22 @@ function TollsInner({ token, me, logout }) {
     }
   };
 
+  const runLiveSync = async () => {
+    try {
+      setBusyId('provider-live-sync');
+      const out = await api(scopedTollsPath('/api/tolls/provider-account/live-sync'), {
+        method: 'POST',
+        body: JSON.stringify({})
+      }, token);
+      setMsg(`AutoExpreso sync completed with ${Number(out?.createdCount || 0)} imported rows`);
+      await load();
+    } catch (error) {
+      setMsg(error.message);
+    } finally {
+      setBusyId('');
+    }
+  };
+
   return (
     <AppShell me={me} logout={logout}>
       <section className="glass card-lg stack">
@@ -387,6 +403,9 @@ function TollsInner({ token, me, logout }) {
             </button>
             <button type="button" className="button-subtle" disabled={busyId === 'provider-sync' || (isSuper && !activeTenantId)} onClick={runMockSync}>
               {busyId === 'provider-sync' ? 'Running...' : 'Run Mock Sync'}
+            </button>
+            <button type="button" className="button-subtle" disabled={busyId === 'provider-live-sync' || (isSuper && !activeTenantId)} onClick={runLiveSync}>
+              {busyId === 'provider-live-sync' ? 'Syncing...' : 'Run AutoExpreso Sync'}
             </button>
           </div>
           {dashboard?.providerAccount?.lastSyncStatus || dashboard?.providerAccount?.lastSyncMessage ? (

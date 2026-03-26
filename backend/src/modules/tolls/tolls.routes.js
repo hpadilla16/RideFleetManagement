@@ -87,6 +87,17 @@ tollsRouter.post('/provider-account/mock-sync', requireRole('ADMIN', 'OPS'), asy
   }
 });
 
+tollsRouter.post('/provider-account/live-sync', requireRole('ADMIN', 'OPS'), async (req, res, next) => {
+  try {
+    res.json(await tollsService.runLiveSync(scopeFor(req), req.user?.id || req.user?.sub || null));
+  } catch (error) {
+    if (/required|enabled|configured|ready|playwright|sync/i.test(String(error?.message || ''))) {
+      return res.status(400).json({ error: error.message });
+    }
+    next(error);
+  }
+});
+
 tollsRouter.post('/transactions/manual-import', requireRole('ADMIN', 'OPS'), async (req, res, next) => {
   try {
     const rows = Array.isArray(req.body?.rows) ? req.body.rows : [];
