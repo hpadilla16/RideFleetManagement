@@ -10,6 +10,7 @@ const anchors = [
   { id: 'support', label: 'Support & Issues' },
   { id: 'loaner', label: 'Loaner Program' },
   { id: 'car-sharing', label: 'Car Sharing' },
+  { id: 'website', label: 'Website & WordPress' },
   { id: 'admin', label: 'Admin & Settings' }
 ];
 
@@ -104,6 +105,10 @@ const faq = [
   {
     question: 'Where do tolls show up now?',
     answer: 'Use Tolls for AutoExpreso sync, review, dispute handling, and posting to reservation billing. Reservation detail pages also show the toll panel once charges are linked.'
+  },
+  {
+    question: 'How do we place booking on the existing WordPress website?',
+    answer: 'Use the Ride Fleet WordPress shortcodes. The booking shortcode embeds the public booking flow. The vehicle classes shortcode shows class cards with daily pricing and a Rent Now CTA.'
   },
   {
     question: 'How do I know if a module is unavailable because of permissions?',
@@ -222,6 +227,56 @@ export default function KnowledgeBasePage() {
                     <Link href="/tolls"><button type="button">Open Tolls</button></Link>
                   </div>
                 </article>
+              </div>
+            </section>
+
+            <section id="website" className="glass card-lg section-card">
+              <div className="row-between">
+                <div>
+                  <div className="section-title">Website & WordPress Shortcodes</div>
+                  <p className="ui-muted">
+                    These are meant for the existing WordPress website. They do not replace the website. They let the team embed Ride Fleet booking and pricing surfaces inside pages that already exist.
+                  </p>
+                </div>
+                <span className="status-chip neutral">Website Ops</span>
+              </div>
+
+              <div className="knowledge-grid">
+                <article className="surface-note stack">
+                  <strong>Booking Embed Shortcode</strong>
+                  <p className="ui-muted">
+                    Use this when the page should show the full public booking module inside WordPress so the customer can search availability and complete the reservation flow.
+                  </p>
+                  <pre style={{ margin: 0, whiteSpace: 'pre-wrap' }}><code>[ridefleet_booking tenant_slug="gokarrental" search_mode="RENTAL" height="1900"]</code></pre>
+                  <ul className="knowledge-list">
+                    <li>Use this on an existing Reserve page.</li>
+                    <li>`tenant_slug` is optional if the site represents the whole marketplace.</li>
+                    <li>`search_mode` can be `RENTAL` or `CAR_SHARING`.</li>
+                  </ul>
+                </article>
+
+                <article className="surface-note stack">
+                  <strong>Vehicle Classes Shortcode</strong>
+                  <p className="ui-muted">
+                    Use this when the page should show available vehicle classes, daily starting price, and a `Rent Now` call to action that opens the booking flow prefilled.
+                  </p>
+                  <pre style={{ margin: 0, whiteSpace: 'pre-wrap' }}><code>[ridefleet_vehicle_classes tenant_slug="gokarrental" limit="6" cta_label="Rent Now"]</code></pre>
+                  <ul className="knowledge-list">
+                    <li>Good for homepage sections, inventory teasers, or category landing pages.</li>
+                    <li>It reads pricing from Ride Fleet, not from WordPress.</li>
+                    <li>The button sends the customer into the booking process with the class already selected.</li>
+                  </ul>
+                </article>
+              </div>
+
+              <div className="surface-note" style={{ display: 'grid', gap: 10 }}>
+                <strong>How the team should use this</strong>
+                <ul className="knowledge-list">
+                  <li>Do not rebuild booking logic in WordPress. WordPress should only host the content and the shortcode placement.</li>
+                  <li>Use the tenant slug from <Link href="/tenants">Tenants</Link> when the website belongs to one specific operation.</li>
+                  <li>If the page is for the broader marketplace, the shortcode can be used without `tenant_slug`.</li>
+                  <li>If pricing or availability looks off, verify Rates, Vehicle Types, Locations, and online display settings inside Ride Fleet instead of editing WordPress.</li>
+                </ul>
               </div>
             </section>
 
