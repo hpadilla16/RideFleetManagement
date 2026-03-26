@@ -579,6 +579,90 @@ export const tollsService = {
     return serializeProviderAccount(row);
   },
 
+  async runProviderHealthCheck(scope = {}) {
+    await ensureTenantAllowsTolls(scope);
+    if (!scope?.tenantId) throw new Error('tenantId is required for toll provider setup');
+    const row = await prisma.tollProviderAccount.findFirst({
+      where: {
+        tenantId: scope.tenantId,
+        provider: 'AUTOEXPRESO'
+      },
+      orderBy: [{ isActive: 'desc' }, { updatedAt: 'desc' }]
+    });
+    if (!row) throw new Error('AutoExpreso provider account is not configured');
+
+    const missing = [];
+    if (!String(row.username || '').trim()) missing.push('username');
+    if (!decodeSecret(row.passwordEncrypted)) missing.push('password');
+    if (!String(row.accountNumber || '').trim()) missing.push('accountNumber');
+    const ready = missing.length === 0 && !!row.isActive;
+
+    const updated = await prisma.tollProviderAccount.update({
+      where: { id: row.id },
+      data: {
+        lastSyncAt: new Date(),
+        lastSyncStatus: ready ? 'READY' : 'MISSING_CONFIG',
+        lastSyncMessage: ready ? 'Provider account looks ready for AutoExpreso sync' : `Missing: ${missing.join(', ')}${row.isActive ? '' : ' | account inactive'}`
+      }
+    });
+
+    return {
+      ready,
+      missing,
+      providerAccount: serializeProviderAccount(updated)
+    };
+  },
+
+  async runMockSync(scope = {}, actorUserId = null) {
+    await ensureTenantAllowsTolls(scope);
+    if (!scope?.tenantId) throw new Error('tenantId is required for toll provider setup');
+    const row = await prisma.tollProviderAccount.findFirst({
+      where: {
+        tenantId: scope.tenantId,
+        provider: 'AUTOEXPRESO'
+      },
+      orderBy: [{ isActive: 'desc' }, { updatedAt: 'desc' }]
+    });
+    if (!row) throw new Error('AutoExpreso provider account is not configured');
+
+    const health = await this.runProviderHealthCheck(scope);
+    if (!health.ready) throw new Error(`Provider not ready: ${(health.missing || []).join(', ')}`);
+
+    const startedAt = new Date();
+    const run = await prisma.tollImportRun.create({
+      data: {
+        tenantId: scope.tenantId,
+        providerAccountId: row.id,
+        sourceType: 'AUTOEXPRESO_MOCK_SYNC',
+        status: 'COMPLETED',
+        importedCount: 0,
+        matchedCount: 0,
+        reviewCount: 0,
+        startedAt,
+        completedAt: startedAt,
+        metadataJson: JSON.stringify({
+          mock: true,
+          actorUserId: actorUserId || null,
+          note: 'Mock sync completed without scraping'
+        })
+      }
+    });
+
+    await prisma.tollProviderAccount.update({
+      where: { id: row.id },
+      data: {
+        lastSyncAt: startedAt,
+        lastSyncStatus: 'MOCK_SYNC_OK',
+        lastSyncMessage: 'Mock sync completed. Ready for real scraper integration.'
+      }
+    });
+
+    return {
+      ok: true,
+      importRun: serializeImportRun(run)
+    };
+  },
+
   async createManualTransactions(rows = [], scope = {}, actorUserId = null) {
     await ensureTenantAllowsTolls(scope);
     if (!scope?.tenantId) throw new Error('tenantId is required for manual toll imports');

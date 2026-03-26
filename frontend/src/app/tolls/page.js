@@ -277,6 +277,38 @@ function TollsInner({ token, me, logout }) {
     }
   };
 
+  const runProviderHealthCheck = async () => {
+    try {
+      setBusyId('provider-health');
+      const out = await api(scopedTollsPath('/api/tolls/provider-account/health-check'), {
+        method: 'POST',
+        body: JSON.stringify({})
+      }, token);
+      setMsg(out?.ready ? 'Provider health check passed' : `Provider is missing: ${(out?.missing || []).join(', ')}`);
+      await load();
+    } catch (error) {
+      setMsg(error.message);
+    } finally {
+      setBusyId('');
+    }
+  };
+
+  const runMockSync = async () => {
+    try {
+      setBusyId('provider-sync');
+      await api(scopedTollsPath('/api/tolls/provider-account/mock-sync'), {
+        method: 'POST',
+        body: JSON.stringify({})
+      }, token);
+      setMsg('Mock sync completed and import history updated');
+      await load();
+    } catch (error) {
+      setMsg(error.message);
+    } finally {
+      setBusyId('');
+    }
+  };
+
   return (
     <AppShell me={me} logout={logout}>
       <section className="glass card-lg stack">
@@ -349,6 +381,12 @@ function TollsInner({ token, me, logout }) {
             <label className="label"><input type="checkbox" checked={providerForm.isActive} onChange={(e) => setProviderForm((prev) => ({ ...prev, isActive: e.target.checked }))} /> Active provider account</label>
             <button type="button" disabled={busyId === 'provider-save' || (isSuper && !activeTenantId)} onClick={saveProviderAccount}>
               {busyId === 'provider-save' ? 'Saving...' : 'Save Provider Setup'}
+            </button>
+            <button type="button" className="button-subtle" disabled={busyId === 'provider-health' || (isSuper && !activeTenantId)} onClick={runProviderHealthCheck}>
+              {busyId === 'provider-health' ? 'Checking...' : 'Run Health Check'}
+            </button>
+            <button type="button" className="button-subtle" disabled={busyId === 'provider-sync' || (isSuper && !activeTenantId)} onClick={runMockSync}>
+              {busyId === 'provider-sync' ? 'Running...' : 'Run Mock Sync'}
             </button>
           </div>
           {dashboard?.providerAccount?.lastSyncStatus || dashboard?.providerAccount?.lastSyncMessage ? (
