@@ -7,9 +7,11 @@ import { AppShell } from '../../components/AppShell';
 const anchors = [
   { id: 'start-here', label: 'Start Here' },
   { id: 'front-desk', label: 'Front Desk' },
+  { id: 'reservations', label: 'Reservations SOP' },
   { id: 'support', label: 'Support & Issues' },
   { id: 'loaner', label: 'Loaner Program' },
   { id: 'car-sharing', label: 'Car Sharing' },
+  { id: 'tolls', label: 'Tolls' },
   { id: 'website', label: 'Website & WordPress' },
   { id: 'admin', label: 'Admin & Settings' }
 ];
@@ -93,6 +95,163 @@ const roleGuides = [
   }
 ];
 
+const reservationPlaybooks = [
+  {
+    title: 'Create or Find a Reservation',
+    route: '/reservations',
+    whenToUse: 'Use this when a customer is calling, standing at the counter, or when staff needs to verify an existing booking before any checkout work starts.',
+    steps: [
+      'Search by reservation number, customer name, phone, or email first.',
+      'If the reservation does not exist, create it from Reservations or Employee App.',
+      'Confirm pickup date, return date, vehicle type, pickup location, and customer information before moving forward.',
+      'If the customer belongs to a dealership loaner flow, verify repair-order and advisor context too.'
+    ],
+    commonMistakes: [
+      'Starting checkout before confirming customer identity and reservation details.',
+      'Editing operational details without checking if there is already an Issue Center case tied to the reservation.',
+      'Skipping location and vehicle assignment verification before handing off the vehicle.'
+    ]
+  },
+  {
+    title: 'Checkout, Inspection, and Payment',
+    route: '/reservations',
+    whenToUse: 'Use this once the customer is confirmed and the team is ready to release the vehicle.',
+    steps: [
+      'Open the reservation workflow and review the Reservation Ops Snapshot.',
+      'Go through checkout, inspection, and payment in sequence.',
+      'Confirm additional drivers, documents, and agreement status before vehicle release.',
+      'If charges are still pending, keep the reservation in the workflow until the financial side is clean.'
+    ],
+    commonMistakes: [
+      'Skipping the inspection photo flow.',
+      'Collecting payment without reviewing due now versus estimated total.',
+      'Leaving additional drivers or tolls unresolved before closeout.'
+    ]
+  },
+  {
+    title: 'Check-In and Closeout',
+    route: '/reservations',
+    whenToUse: 'Use this when the vehicle is returning and the team needs to capture condition, fees, and final charges.',
+    steps: [
+      'Open the reservation and use Check-In Snapshot to confirm the right unit and customer.',
+      'Complete inspection compare and review any damage or fee advisories.',
+      'Review tolls, balances, and open issues before final closeout.',
+      'If something is disputed, escalate it into Issue Center instead of forcing closeout blindly.'
+    ],
+    commonMistakes: [
+      'Closing the reservation before posted tolls or fees are reviewed.',
+      'Ignoring check-in inspection compare when damage is being discussed.',
+      'Failing to open an issue when the customer disputes a charge.'
+    ]
+  }
+];
+
+const issuePlaybooks = [
+  {
+    title: 'When to Use Issue Center',
+    bullets: [
+      'Use Issue Center when the case is no longer a normal reservation step and needs structured review.',
+      'Examples: customer disputes, host vehicle approval replies, toll disputes, document follow-up, unresolved payment disagreements.',
+      'The goal is to move communication out of random text/email and into a traceable workflow.'
+    ]
+  },
+  {
+    title: 'How to Work a Case',
+    bullets: [
+      'Open the case and review title, type, reservation or trip context, amount claimed, and history first.',
+      'If more evidence is needed, request more information instead of changing status too early.',
+      'If the case belongs to a reservation or toll, jump back into that workflow for context, then return to the case.',
+      'Close or resolve only after the financial and operational impact is understood.'
+    ]
+  },
+  {
+    title: 'Toll Disputes',
+    bullets: [
+      'A disputed toll can now create or reuse an Issue Center case automatically.',
+      'Use Open Issue Case from Tolls when staff needs support workflow around a specific toll transaction.',
+      'As the issue changes status, the toll row now reflects that status back in the Tolls module.'
+    ]
+  }
+];
+
+const tollPlaybooks = [
+  {
+    title: 'What Tolls Does',
+    bullets: [
+      'Syncs AutoExpreso activity for Puerto Rico accounts.',
+      'Matches transactions against the tenant fleet using plate, toll tag, toll sticker, and assigned reservation time window.',
+      'Keeps a review queue for anything that still needs manual confirmation.'
+    ]
+  },
+  {
+    title: 'Daily Toll Workflow',
+    bullets: [
+      'Make sure the tenant has Tolls enabled and the AutoExpreso provider account is configured.',
+      'Review Automatic AutoExpreso Sync status, last run, next run, and sweep stats.',
+      'Confirm or reset suggested matches in the review queue.',
+      'Post valid tolls to the reservation once the match is correct.',
+      'If the toll is disputed, mark it disputed and move it into Issue Center.'
+    ]
+  },
+  {
+    title: 'Common Toll Troubleshooting',
+    bullets: [
+      'If a toll does not match, verify the vehicle plate, toll tag number, and toll sticker on the vehicle record first.',
+      'If a tenant shows no tolls, verify that the tenant has Tolls enabled and the provider account is active.',
+      'If sync fails, check health check and last sync status before assuming the data is missing.'
+    ]
+  }
+];
+
+const adminPlaybooks = [
+  {
+    title: 'Settings',
+    route: '/settings',
+    bullets: [
+      'Use Settings to manage agreement text, locations, rates, fees, additional services, insurance plans, email templates, payment gateways, and tenant modules.',
+      'Super admins should verify Settings Tenant Scope before making changes.',
+      'If the website booking or shortcode pricing looks wrong, Rates, Vehicle Types, and Additional Services are the first places to review.'
+    ]
+  },
+  {
+    title: 'Tenants',
+    route: '/tenants',
+    bullets: [
+      'Use Tenants to create tenants, manage slug, status, plan, and tenant-level module flags.',
+      'Modules like Car Sharing, Loaner, and Tolls should be confirmed here before troubleshooting deeper.',
+      'The tenant slug used for website shortcodes should come from this screen.'
+    ]
+  },
+  {
+    title: 'People & Access',
+    route: '/people',
+    bullets: [
+      'Use People to manage logins, profile-only users, and module access at the user level.',
+      'Tenant admins should only control the users they created.',
+      'If a user says a module is missing, verify user-level module access here after checking tenant-level access.'
+    ]
+  }
+];
+
+const quickTroubleshooting = [
+  {
+    title: 'Pricing or availability looks wrong on website',
+    answer: 'Check Settings > Rates, Vehicle Types, Additional Services, online display flags, and tenant slug used in the shortcode before touching WordPress content.'
+  },
+  {
+    title: 'User cannot see a module',
+    answer: 'Check tenant module enablement first, then user-level module access in People. If both are on, verify the user is logged into the correct tenant context.'
+  },
+  {
+    title: 'A toll is not matching automatically',
+    answer: 'Verify the assigned vehicle on the reservation, then check the vehicle plate, toll tag number, toll sticker number, and the reservation time window.'
+  },
+  {
+    title: 'A customer is disputing charges at return',
+    answer: 'Do not force closeout blindly. Review check-in inspection, payments, tolls, and if needed open or continue the case in Issue Center.'
+  }
+];
+
 const faq = [
   {
     question: 'Where do I start if a customer is standing at the counter?',
@@ -173,6 +332,39 @@ export default function KnowledgeBasePage() {
               </div>
             </section>
 
+            <section id="reservations" className="glass card-lg section-card">
+              <div className="row-between">
+                <div>
+                  <div className="section-title">Reservations SOP</div>
+                  <p className="ui-muted">This is the core operating manual for front desk, counter, and closeout work.</p>
+                </div>
+                <Link href="/reservations"><button type="button">Open Reservations</button></Link>
+              </div>
+              <div className="knowledge-grid">
+                {reservationPlaybooks.map((item) => (
+                  <article key={item.title} className="surface-note stack">
+                    <div className="row-between">
+                      <strong>{item.title}</strong>
+                      <Link href={item.route}><button type="button" className="button-subtle">Open</button></Link>
+                    </div>
+                    <p className="ui-muted">{item.whenToUse}</p>
+                    <div className="label" style={{ textTransform: 'none', letterSpacing: 0, fontSize: 13 }}>Recommended steps</div>
+                    <ul className="knowledge-list">
+                      {item.steps.map((step) => (
+                        <li key={step}>{step}</li>
+                      ))}
+                    </ul>
+                    <div className="label" style={{ textTransform: 'none', letterSpacing: 0, fontSize: 13 }}>Common mistakes</div>
+                    <ul className="knowledge-list">
+                      {item.commonMistakes.map((mistake) => (
+                        <li key={mistake}>{mistake}</li>
+                      ))}
+                    </ul>
+                  </article>
+                ))}
+              </div>
+            </section>
+
             <section id="support" className="glass card-lg section-card">
               <div className="row-between">
                 <div>
@@ -186,6 +378,18 @@ export default function KnowledgeBasePage() {
                 <li>If the issue belongs to a reservation, open the reservation workflow from the case so you can see payments, inspections, and notes in context.</li>
                 <li>If a toll is disputed in <Link href="/tolls">Tolls</Link>, the system can now open or reuse the related Issue Center case automatically.</li>
               </ul>
+              <div className="knowledge-grid">
+                {issuePlaybooks.map((item) => (
+                  <article key={item.title} className="surface-note stack">
+                    <strong>{item.title}</strong>
+                    <ul className="knowledge-list">
+                      {item.bullets.map((bullet) => (
+                        <li key={bullet}>{bullet}</li>
+                      ))}
+                    </ul>
+                  </article>
+                ))}
+              </div>
             </section>
 
             <section id="loaner" className="glass card-lg section-card">
@@ -201,6 +405,15 @@ export default function KnowledgeBasePage() {
                 <li>Use Loaner Shift and Service Lane boards to identify the next work to handle on mobile.</li>
                 <li>If a loaner reservation needs a regular reservation workflow step, open the linked reservation and continue from there.</li>
               </ul>
+              <div className="surface-note" style={{ display: 'grid', gap: 10 }}>
+                <strong>Best practice order for loaner teams</strong>
+                <ul className="knowledge-list">
+                  <li>Start with queue focus for the lane you are actively handling.</li>
+                  <li>Review borrower packet progress before handoff.</li>
+                  <li>Track advisor and billing context before closing anything out.</li>
+                  <li>Use Reservation workflow if the loaner needs inspection, payment, or toll context.</li>
+                </ul>
+              </div>
             </section>
 
             <section id="car-sharing" className="glass card-lg section-card">
@@ -227,6 +440,28 @@ export default function KnowledgeBasePage() {
                     <Link href="/tolls"><button type="button">Open Tolls</button></Link>
                   </div>
                 </article>
+              </div>
+            </section>
+
+            <section id="tolls" className="glass card-lg section-card">
+              <div className="row-between">
+                <div>
+                  <div className="section-title">Tolls</div>
+                  <p className="ui-muted">Puerto Rico AutoExpreso sync, reconciliation, and dispute handling now live in one workflow.</p>
+                </div>
+                <Link href="/tolls"><button type="button">Open Tolls</button></Link>
+              </div>
+              <div className="knowledge-grid">
+                {tollPlaybooks.map((item) => (
+                  <article key={item.title} className="surface-note stack">
+                    <strong>{item.title}</strong>
+                    <ul className="knowledge-list">
+                      {item.bullets.map((bullet) => (
+                        <li key={bullet}>{bullet}</li>
+                      ))}
+                    </ul>
+                  </article>
+                ))}
               </div>
             </section>
 
@@ -294,6 +529,21 @@ export default function KnowledgeBasePage() {
                   </article>
                 ))}
               </div>
+              <div className="knowledge-grid">
+                {adminPlaybooks.map((item) => (
+                  <article key={item.title} className="surface-note stack">
+                    <div className="row-between">
+                      <strong>{item.title}</strong>
+                      <Link href={item.route}><button type="button" className="button-subtle">Open</button></Link>
+                    </div>
+                    <ul className="knowledge-list">
+                      {item.bullets.map((bullet) => (
+                        <li key={bullet}>{bullet}</li>
+                      ))}
+                    </ul>
+                  </article>
+                ))}
+              </div>
               <div className="inline-actions">
                 <Link href="/settings"><button type="button">Open Settings</button></Link>
                 <Link href="/tenants"><button type="button" className="button-subtle">Open Tenants</button></Link>
@@ -307,6 +557,18 @@ export default function KnowledgeBasePage() {
                 {faq.map((item) => (
                   <article key={item.question} className="surface-note stack">
                     <strong>{item.question}</strong>
+                    <div className="ui-muted">{item.answer}</div>
+                  </article>
+                ))}
+              </div>
+            </section>
+
+            <section className="glass card-lg section-card">
+              <div className="section-title">Quick Troubleshooting</div>
+              <div className="knowledge-grid">
+                {quickTroubleshooting.map((item) => (
+                  <article key={item.title} className="surface-note stack">
+                    <strong>{item.title}</strong>
                     <div className="ui-muted">{item.answer}</div>
                   </article>
                 ))}
