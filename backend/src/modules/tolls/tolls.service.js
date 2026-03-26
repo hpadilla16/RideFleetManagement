@@ -617,6 +617,24 @@ function getAutoSyncIntervalMinutes() {
   return Number.isFinite(raw) && raw > 0 ? raw : DEFAULT_AUTO_SYNC_INTERVAL_MINUTES;
 }
 
+function getAutoSyncStatus(providerAccount) {
+  const enabled = String(process.env.TOLLS_AUTO_SYNC_ENABLED || 'true').toLowerCase() !== 'false';
+  const intervalMinutes = getAutoSyncIntervalMinutes();
+  const startupDelaySeconds = Number(process.env.TOLLS_AUTO_SYNC_STARTUP_DELAY_SECONDS || 45);
+  const lastAutomaticRunAt = providerAccount?.lastSyncAt || null;
+  const nextRunAt = enabled
+    ? new Date((lastAutomaticRunAt ? new Date(lastAutomaticRunAt).getTime() : Date.now() + (Number.isFinite(startupDelaySeconds) ? startupDelaySeconds : 45) * 1000) + intervalMinutes * 60 * 1000)
+    : null;
+
+  return {
+    enabled,
+    intervalMinutes,
+    startupDelaySeconds: Number.isFinite(startupDelaySeconds) ? startupDelaySeconds : 45,
+    lastAutomaticRunAt,
+    nextRunAt
+  };
+}
+
 function reviewActionLabel(action) {
   switch (String(action || '').toUpperCase()) {
     case 'RESET_MATCH':
@@ -728,6 +746,7 @@ export const tollsService = {
         disputed: disputedCount
       },
       providerAccount: serializeProviderAccount(providerAccount),
+      autoSync: getAutoSyncStatus(providerAccount),
       importRuns: (importRuns || []).map(serializeImportRun),
       transactions: transactions.map(serializeTransaction)
     };

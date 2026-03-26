@@ -24,6 +24,12 @@ function money(value) {
   return `$${Number(Number(value || 0).toFixed(2)).toFixed(2)}`;
 }
 
+function dateTimeLabel(value) {
+  if (!value) return 'Not scheduled yet';
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? String(value) : date.toLocaleString();
+}
+
 function normalizeHeader(value) {
   return String(value || '').trim().toLowerCase().replace(/[^a-z0-9]+/g, '');
 }
@@ -376,6 +382,32 @@ function TollsInner({ token, me, logout }) {
         </div>
 
         {msg ? <div className="label">{msg}</div> : null}
+
+        <div className="glass card section-card">
+          <div className="row-between">
+            <div className="section-title">Automatic AutoExpreso Sync</div>
+            <span className={`status-chip ${dashboard?.autoSync?.enabled ? 'good' : 'neutral'}`}>
+              {dashboard?.autoSync?.enabled ? 'Auto Sync Enabled' : 'Auto Sync Disabled'}
+            </span>
+          </div>
+          <div className="app-card-grid compact">
+            <div className="info-tile">
+              <span className="label">Interval</span>
+              <strong>{Number(dashboard?.autoSync?.intervalMinutes || 0) || 0} min</strong>
+            </div>
+            <div className="info-tile">
+              <span className="label">Last Automatic Run</span>
+              <strong style={{ fontSize: '0.95rem' }}>{dateTimeLabel(dashboard?.autoSync?.lastAutomaticRunAt)}</strong>
+            </div>
+            <div className="info-tile">
+              <span className="label">Next Scheduled Run</span>
+              <strong style={{ fontSize: '0.95rem' }}>{dateTimeLabel(dashboard?.autoSync?.nextRunAt)}</strong>
+            </div>
+          </div>
+          <div className="surface-note" style={{ marginTop: 10 }}>
+            The backend now runs AutoExpreso sync sweeps automatically for active tenants with tolls enabled, then re-checks pending tolls against the assigned vehicle and reservation window.
+          </div>
+        </div>
 
         <div className="glass card section-card">
           <div className="row-between">
