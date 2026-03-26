@@ -16,6 +16,8 @@ const EMPTY_IMPORT_FORM = {
   sello: ''
 };
 
+const ISSUE_EDIT_ID_KEY = 'issues.editId';
+
 export default function TollsPage() {
   return <AuthGate>{({ token, me, logout }) => <TollsInner token={token} me={me} logout={logout} />}</AuthGate>;
 }
@@ -266,6 +268,14 @@ function TollsInner({ token, me, logout }) {
     } finally {
       setBusyId('');
     }
+  };
+
+  const openIssueCase = (incidentId) => {
+    if (!incidentId) return;
+    try {
+      localStorage.setItem(ISSUE_EDIT_ID_KEY, incidentId);
+    } catch {}
+    window.location.href = '/issues';
   };
 
   const saveProviderAccount = async () => {
@@ -626,6 +636,11 @@ function TollsInner({ token, me, logout }) {
                       {row.billingStatus !== 'DISPUTED' ? (
                         <button type="button" className="button-subtle" onClick={() => runReviewAction(row, 'MARK_DISPUTED')} disabled={busyId === `MARK_DISPUTED-${row.id}`}>
                           {busyId === `MARK_DISPUTED-${row.id}` ? 'Saving...' : 'Mark Disputed'}
+                        </button>
+                      ) : null}
+                      {row.issueIncident?.id ? (
+                        <button type="button" className="button-subtle" onClick={() => openIssueCase(row.issueIncident.id)}>
+                          Open Issue Case
                         </button>
                       ) : null}
                       {row.billingStatus !== 'WAIVED' ? (

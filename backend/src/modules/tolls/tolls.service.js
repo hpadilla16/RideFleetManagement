@@ -290,6 +290,17 @@ function parseAutoExpresoDateTime(raw) {
   return parsed;
 }
 
+function serializeIssueIncidentSummary(incident) {
+  if (!incident) return null;
+  return {
+    id: incident.id,
+    status: incident.status || '',
+    title: incident.title || '',
+    createdAt: incident.createdAt || null,
+    reservationId: incident.reservationId || incident.trip?.reservationId || null
+  };
+}
+
 function serializeTransaction(row) {
   const latestAssignment = Array.isArray(row.assignments) && row.assignments.length ? row.assignments[0] : null;
   return {
@@ -348,8 +359,47 @@ function serializeTransaction(row) {
         pickupAt: latestAssignment.reservation.pickupAt,
         returnAt: latestAssignment.reservation.returnAt
       } : null
-    } : null
+    } : null,
+    issueIncident: serializeIssueIncidentSummary(row.issueIncident)
   };
+}
+
+async function attachIssueIncidents(rows = [], scope = {}) {
+  const transactions = Array.isArray(rows) ? rows : [];
+  const tollTransactionIds = transactions.map((row) => row.id).filter(Boolean);
+  if (!tollTransactionIds.length) return transactions;
+
+  const incidents = await prisma.tripIncident.findMany({
+    where: {
+      ...tenantWhereForScope(scope),
+      type: 'TOLL',
+      OR: tollTransactionIds.map((id) => ({
+        evidenceJson: { contains: id }
+      }))
+    },
+    select: {
+      id: true,
+      status: true,
+      title: true,
+      createdAt: true,
+      reservationId: true,
+      evidenceJson: true
+    },
+    orderBy: [{ createdAt: 'desc' }]
+  });
+
+  const incidentByTollId = new Map();
+  for (const incident of incidents) {
+    const source = safeJsonParse(incident.evidenceJson, null);
+    const tollTransactionId = source?.tollTransactionId ? String(source.tollTransactionId) : '';
+    if (!tollTransactionId || incidentByTollId.has(tollTransactionId)) continue;
+    incidentByTollId.set(tollTransactionId, incident);
+  }
+
+  return transactions.map((row) => ({
+    ...row,
+    issueIncident: incidentByTollId.get(row.id) || null
+  }));
 }
 
 async function ensureTenantAllowsTolls(scope = {}) {
@@ -790,6 +840,7 @@ export const tollsService = {
     ]);
 
     const latestAutoSyncRun = (importRuns || []).find((run) => String(run.sourceType || '').toUpperCase() === 'AUTOEXPRESO_SYNC') || null;
+    const transactionsWithIssues = await attachIssueIncidents(transactions, scope);
 
     return {
       tollsEnabled: true,
@@ -803,7 +854,7 @@ export const tollsService = {
       providerAccount: serializeProviderAccount(providerAccount),
       autoSync: getAutoSyncStatus(providerAccount, latestAutoSyncRun, reviewCount),
       importRuns: (importRuns || []).map(serializeImportRun),
-      transactions: transactions.map(serializeTransaction)
+      transactions: transactionsWithIssues.map(serializeTransaction)
     };
   },
 
@@ -1721,9 +1772,10 @@ export const tollsService = {
       },
       orderBy: [{ transactionAt: 'desc' }]
     });
+    const rowsWithIssues = await attachIssueIncidents(rows, scope);
 
-    const totalAmount = Number(rows.reduce((sum, row) => sum + toMoney(row.amount), 0).toFixed(2));
-    const postedAmount = Number(rows
+    const totalAmount = Number(rowsWithIssues.reduce((sum, row) => sum + toMoney(row.amount), 0).toFixed(2));
+    const postedAmount = Number(rowsWithIssues
       .filter((row) => ['POSTED_TO_RESERVATION', 'POSTED_TO_AGREEMENT'].includes(String(row.billingStatus || '').toUpperCase()))
       .reduce((sum, row) => sum + toMoney(row.amount), 0)
       .toFixed(2));
@@ -1734,9 +1786,9 @@ export const tollsService = {
       totals: {
         totalAmount,
         postedAmount,
-        reviewCount: rows.filter((row) => row.needsReview).length
+        reviewCount: rowsWithIssues.filter((row) => row.needsReview).length
       },
-      transactions: rows.map(serializeTransaction)
+      transactions: rowsWithIssues.map(serializeTransaction)
     };
   }
 };
