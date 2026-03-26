@@ -4,6 +4,9 @@ const DEFAULT_PRE_PICKUP_GRACE_MINUTES = 120;
 const DEFAULT_POST_RETURN_GRACE_MINUTES = 180;
 const AUTOEXPRESO_LOGIN_URL = 'https://www.autoexpreso.com/login?v=0.0.1';
 const AUTOEXPRESO_TRANSACTIONS_URL = 'https://www.autoexpreso.com/dashboard/transaction?v=0.0.1';
+const AUTOEXPRESO_USERNAME_SELECTOR = "input[placeholder='Usuario o Correo Electronico'], input[placeholder='Usuario o Correo Electrónico'], input[placeholder*='Usuario'], input[placeholder*='Correo'], input[type='email'], input[type='text']";
+const AUTOEXPRESO_PASSWORD_SELECTOR = "input[formcontrolname='password'], input[type='password']";
+const AUTOEXPRESO_ACTIVITY_SELECTOR = 'div.az-media-list-activity';
 
 function tenantWhereForScope(scope = {}) {
   return scope?.tenantId ? { tenantId: scope.tenantId } : {};
@@ -16,6 +19,98 @@ function toMoney(value, fallback = 0) {
 
 function normalizeToken(value) {
   return String(value || '').toUpperCase().replace(/[^A-Z0-9]/g, '').trim();
+}
+
+function normalizeComparableText(value) {
+  return String(value || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .toLowerCase();
+}
+
+async function clickAutoExpresoLoginButton(page) {
+  const clicked = await page.evaluate(() => {
+    const normalize = (value = '') => String(value)
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .replace(/\s+/g, ' ')
+      .trim()
+      .toLowerCase();
+    const candidates = Array.from(document.querySelectorAll("button, input[type='submit'], input[type='button']"));
+    const target = candidates.find((element) => {
+      const text = normalize(element.textContent || element.value || '');
+      return text.includes('iniciar sesion') || text.includes('login') || text.includes('entrar');
+    });
+    if (!target) return false;
+    target.click();
+    return true;
+  });
+
+  if (!clicked) {
+    await page.click("button[type='submit'], input[type='submit'], button");
+  }
+}
+
+async function captureAutoExpresoPageState(page) {
+  const url = page.url();
+  const title = await page.title().catch(() => '');
+  const hint = await page.evaluate(() => {
+    const text = String(document.body?.innerText || '')
+      .replace(/\s+/g, ' ')
+      .trim()
+      .slice(0, 280);
+    return text;
+  }).catch(() => '');
+
+  return {
+    url,
+    title: String(title || '').trim(),
+    hint: String(hint || '').trim()
+  };
+}
+
+async function waitForAutoExpresoTransactionState(page, timeoutMs = 30000) {
+  const startedAt = Date.now();
+
+  while (Date.now() - startedAt < timeoutMs) {
+    if (await page.$(AUTOEXPRESO_ACTIVITY_SELECTOR)) return 'transactions';
+
+    const state = await page.evaluate(({ usernameSelector, passwordSelector }) => {
+      const normalize = (value = '') => String(value)
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .replace(/\s+/g, ' ')
+        .trim()
+        .toLowerCase();
+      const bodyText = normalize(document.body?.innerText || '');
+      const hasUsername = !!document.querySelector(usernameSelector);
+      const hasPassword = !!document.querySelector(passwordSelector);
+
+      if ((hasUsername && hasPassword) || window.location.pathname.includes('/login')) {
+        return 'login';
+      }
+      if (bodyText.includes('captcha') || bodyText.includes('robot')) {
+        return 'captcha';
+      }
+      if (bodyText.includes('credenciales') || bodyText.includes('incorrect') || bodyText.includes('intente nuevamente')) {
+        return 'auth-error';
+      }
+      if (bodyText.includes('dashboard') || bodyText.includes('transacciones')) {
+        return 'dashboard-loading';
+      }
+      return '';
+    }, {
+      usernameSelector: AUTOEXPRESO_USERNAME_SELECTOR,
+      passwordSelector: AUTOEXPRESO_PASSWORD_SELECTOR
+    }).catch(() => '');
+
+    if (state) return state;
+    await new Promise((resolve) => setTimeout(resolve, 1000));
+  }
+
+  return 'timeout';
 }
 
 function normalizeNullableToken(value) {
@@ -708,23 +803,30 @@ export const tollsService = {
     const page = await browser.newPage();
 
     try {
-      await page.goto(loginUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
-      await page.waitForSelector("input[placeholder*='Usuario'], input[placeholder*='Correo'], input[type='email'], input[type='text']", { timeout: 20000 });
-      await page.type("input[placeholder*='Usuario'], input[placeholder*='Correo'], input[type='email'], input[type='text']", username);
-      await page.type("input[formcontrolname='password'], input[type='password']", password);
+      await page.goto(loginUrl, { waitUntil: 'networkidle2', timeout: 45000 });
+      await page.waitForSelector(AUTOEXPRESO_USERNAME_SELECTOR, { timeout: 30000 });
+      await page.waitForSelector(AUTOEXPRESO_PASSWORD_SELECTOR, { timeout: 30000 });
+      await page.click(AUTOEXPRESO_USERNAME_SELECTOR, { clickCount: 3 }).catch(() => null);
+      await page.type(AUTOEXPRESO_USERNAME_SELECTOR, username);
+      await page.click(AUTOEXPRESO_PASSWORD_SELECTOR, { clickCount: 3 }).catch(() => null);
+      await page.type(AUTOEXPRESO_PASSWORD_SELECTOR, password);
 
       await Promise.all([
-        page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 30000 }).catch(() => null),
-        page.click("button, input[type='submit']")
+        page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 45000 }).catch(() => null),
+        clickAutoExpresoLoginButton(page)
       ]);
 
-      await page.goto(transactionUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
-      await page.waitForSelector('div.az-media-list-activity', { timeout: 20000 });
+      await page.goto(transactionUrl, { waitUntil: 'networkidle2', timeout: 45000 });
+      const transactionState = await waitForAutoExpresoTransactionState(page, 30000);
+      if (transactionState !== 'transactions') {
+        const pageState = await captureAutoExpresoPageState(page);
+        throw new Error(`AutoExpreso sync could not open transactions (${transactionState}). URL: ${pageState.url || 'unknown'} | Title: ${pageState.title || 'unknown'}${pageState.hint ? ` | Hint: ${pageState.hint}` : ''}`);
+      }
 
       const rows = [];
       let pageNumber = 0;
       while (pageNumber < maxPages) {
-        const pageRows = await page.$$eval('div.az-media-list-activity', (nodes) => nodes.map((node) => {
+        const pageRows = await page.$$eval(AUTOEXPRESO_ACTIVITY_SELECTOR, (nodes) => nodes.map((node) => {
           const plateStrong = Array.from(node.querySelectorAll('span strong')).find((item) => String(item.textContent || '').includes('Tablilla'));
           const plateRaw = plateStrong?.nextElementSibling ? String(plateStrong.nextElementSibling.textContent || '').trim() : '';
           const amountRaw = String(node.querySelector('h6 strong ngb-highlight')?.textContent || '').trim();
