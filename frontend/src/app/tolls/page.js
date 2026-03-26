@@ -73,7 +73,6 @@ function TollsInner({ token, me, logout }) {
   const [providerForm, setProviderForm] = useState({
     username: '',
     password: '',
-    accountNumber: '',
     loginUrl: '',
     notes: '',
     isActive: true
@@ -123,7 +122,6 @@ function TollsInner({ token, me, logout }) {
       setProviderForm((current) => ({
         username: provider?.username || '',
         password: '',
-        accountNumber: provider?.accountNumber || '',
         loginUrl: provider?.settings?.loginUrl || '',
         notes: provider?.settings?.notes || '',
         isActive: provider?.isActive !== false
@@ -386,10 +384,12 @@ function TollsInner({ token, me, logout }) {
               {dashboard?.providerAccount?.isActive ? 'Provider Ready' : 'Not configured'}
             </span>
           </div>
+          <div className="surface-note" style={{ marginBottom: 10 }}>
+            Puerto Rico uses AutoExpreso as the toll provider. Configure the login credentials for this tenant and then run health check or sync.
+          </div>
           <div className="grid2">
             <input placeholder="AutoExpreso username" value={providerForm.username} onChange={(e) => setProviderForm((prev) => ({ ...prev, username: e.target.value }))} />
             <input placeholder={dashboard?.providerAccount?.hasPassword ? 'Leave blank to keep current password' : 'AutoExpreso password'} type="password" value={providerForm.password} onChange={(e) => setProviderForm((prev) => ({ ...prev, password: e.target.value }))} />
-            <input placeholder="Account number" value={providerForm.accountNumber} onChange={(e) => setProviderForm((prev) => ({ ...prev, accountNumber: e.target.value }))} />
             <input placeholder="Login URL (optional)" value={providerForm.loginUrl} onChange={(e) => setProviderForm((prev) => ({ ...prev, loginUrl: e.target.value }))} />
           </div>
           <textarea rows={3} placeholder="Provider notes or login behavior notes" value={providerForm.notes} onChange={(e) => setProviderForm((prev) => ({ ...prev, notes: e.target.value }))} />

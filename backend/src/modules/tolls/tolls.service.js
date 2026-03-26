@@ -77,7 +77,6 @@ function serializeProviderAccount(row) {
     provider: row.provider,
     isActive: !!row.isActive,
     username: row.username || '',
-    accountNumber: row.accountNumber || '',
     settings: safeJsonParse(row.settingsJson, {}),
     lastSyncAt: row.lastSyncAt,
     lastSyncStatus: row.lastSyncStatus || '',
@@ -549,7 +548,6 @@ export const tollsService = {
 
     const username = String(payload.username || '').trim();
     const password = String(payload.password || '').trim();
-    const accountNumber = String(payload.accountNumber || '').trim();
     const isActive = payload.isActive !== false;
     const settings = {
       loginUrl: String(payload.loginUrl || '').trim(),
@@ -570,7 +568,6 @@ export const tollsService = {
           data: {
             username: username || null,
             passwordEncrypted: password ? encodeSecret(password) : existing.passwordEncrypted,
-            accountNumber: accountNumber || null,
             isActive,
             settingsJson: JSON.stringify(settings),
             lastSyncStatus: existing.lastSyncStatus || 'READY'
@@ -582,7 +579,6 @@ export const tollsService = {
             provider: 'AUTOEXPRESO',
             username: username || null,
             passwordEncrypted: password ? encodeSecret(password) : null,
-            accountNumber: accountNumber || null,
             isActive,
             settingsJson: JSON.stringify(settings),
             lastSyncStatus: 'READY'
@@ -607,7 +603,6 @@ export const tollsService = {
     const missing = [];
     if (!String(row.username || '').trim()) missing.push('username');
     if (!decodeSecret(row.passwordEncrypted)) missing.push('password');
-    if (!String(row.accountNumber || '').trim()) missing.push('accountNumber');
     const ready = missing.length === 0 && !!row.isActive;
 
     const updated = await prisma.tollProviderAccount.update({
