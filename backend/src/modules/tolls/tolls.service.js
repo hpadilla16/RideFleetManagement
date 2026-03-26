@@ -2,11 +2,13 @@ import { prisma } from '../../lib/prisma.js';
 
 const DEFAULT_PRE_PICKUP_GRACE_MINUTES = 120;
 const DEFAULT_POST_RETURN_GRACE_MINUTES = 180;
+const DEFAULT_AUTO_SYNC_INTERVAL_MINUTES = 15;
 const AUTOEXPRESO_LOGIN_URL = 'https://www.autoexpreso.com/login?v=0.0.1';
 const AUTOEXPRESO_BALANCE_URL = 'https://www.autoexpreso.com/dashboard/balance';
 const AUTOEXPRESO_USERNAME_SELECTOR = "input[placeholder='Usuario o Correo Electronico'], input[placeholder='Usuario o Correo Electrónico'], input[placeholder*='Usuario'], input[placeholder*='Correo'], input[type='email'], input[type='text']";
 const AUTOEXPRESO_PASSWORD_SELECTOR = "input[formcontrolname='password'], input[type='password']";
 const AUTOEXPRESO_ACTIVITY_SELECTOR = 'div.az-media-list-activity';
+const tollSyncLocks = new Set();
 
 function tenantWhereForScope(scope = {}) {
   return scope?.tenantId ? { tenantId: scope.tenantId } : {};
@@ -435,6 +437,7 @@ function scoreCandidate({ transaction, vehicle, reservation, siblingCandidates =
 
   let score = 0;
   const reasons = [];
+  let withinTripWindow = false;
 
   if (vehicle?.id && reservation?.vehicleId && vehicle.id === reservation.vehicleId) {
     score += 60;
@@ -456,6 +459,7 @@ function scoreCandidate({ transaction, vehicle, reservation, siblingCandidates =
   const prePickupAt = new Date(reservation.pickupAt.getTime() - DEFAULT_PRE_PICKUP_GRACE_MINUTES * 60 * 1000);
   const postReturnAt = new Date(reservation.returnAt.getTime() + DEFAULT_POST_RETURN_GRACE_MINUTES * 60 * 1000);
   if (when >= reservation.pickupAt && when <= reservation.returnAt) {
+    withinTripWindow = true;
     score += 25;
     reasons.push('withinTripWindow');
   } else if (when >= prePickupAt && when <= postReturnAt) {
@@ -463,8 +467,13 @@ function scoreCandidate({ transaction, vehicle, reservation, siblingCandidates =
     reasons.push('withinGraceWindow');
   }
 
+  if (withinTripWindow && vehicle?.id && reservation?.vehicleId && vehicle.id === reservation.vehicleId) {
+    score += 20;
+    reasons.push('assignedVehicleTripWindow');
+  }
+
   if (siblingCandidates > 1) {
-    score -= 30;
+    score -= withinTripWindow ? 10 : 30;
     reasons.push('multipleCandidates');
   }
 
@@ -548,6 +557,20 @@ async function createAssignmentRecord(tx, transaction, suggestion, matchedByUser
   });
 }
 
+async function replaceSuggestedAssignments(tx, transaction, suggestion, matchedByUserId = null) {
+  await tx.tollAssignment.updateMany({
+    where: {
+      tollTransactionId: transaction.id,
+      status: { in: ['SUGGESTED', 'AUTO_CONFIRMED', 'CONFIRMED'] }
+    },
+    data: { status: 'REJECTED' }
+  });
+
+  if (suggestion?.reservation?.id) {
+    await createAssignmentRecord(tx, transaction, suggestion, matchedByUserId);
+  }
+}
+
 async function getTransactionOrThrow(id, scope = {}) {
   const row = await prisma.tollTransaction.findFirst({
     where: {
@@ -587,6 +610,11 @@ async function refreshReservationEstimatedTotal(reservationId) {
     data: { estimatedTotal }
   });
   return estimatedTotal;
+}
+
+function getAutoSyncIntervalMinutes() {
+  const raw = Number(process.env.TOLLS_AUTO_SYNC_INTERVAL_MINUTES || DEFAULT_AUTO_SYNC_INTERVAL_MINUTES);
+  return Number.isFinite(raw) && raw > 0 ? raw : DEFAULT_AUTO_SYNC_INTERVAL_MINUTES;
 }
 
 function reviewActionLabel(action) {
@@ -850,6 +878,12 @@ export const tollsService = {
   async runLiveSync(scope = {}, actorUserId = null) {
     await ensureTenantAllowsTolls(scope);
     if (!scope?.tenantId) throw new Error('tenantId is required for toll provider setup');
+    const syncLockKey = String(scope.tenantId);
+    if (tollSyncLocks.has(syncLockKey)) {
+      throw new Error('AutoExpreso sync already running for this tenant');
+    }
+
+    tollSyncLocks.add(syncLockKey);
     const row = await prisma.tollProviderAccount.findFirst({
       where: {
         tenantId: scope.tenantId,
@@ -1012,7 +1046,127 @@ export const tollsService = {
         }
       });
       throw error;
+    } finally {
+      tollSyncLocks.delete(syncLockKey);
     }
+  },
+
+  async autoMatchPendingTransactions(scope = {}, actorUserId = null, options = {}) {
+    await ensureTenantAllowsTolls(scope);
+    if (!scope?.tenantId) throw new Error('tenantId is required for toll auto-match');
+
+    const limit = Number(options.limit || 200) > 0 ? Number(options.limit || 200) : 200;
+    const rows = await prisma.tollTransaction.findMany({
+      where: {
+        ...tenantWhereForScope(scope),
+        needsReview: true,
+        billingStatus: 'PENDING'
+      },
+      include: {
+        assignments: true
+      },
+      orderBy: [{ transactionAt: 'desc' }],
+      take: limit
+    });
+
+    let autoConfirmed = 0;
+    let suggested = 0;
+    let reviewed = 0;
+
+    for (const transaction of rows) {
+      const suggestion = await buildMatchSuggestion(transaction, scope);
+      await prisma.$transaction(async (tx) => {
+        await replaceSuggestedAssignments(tx, transaction, suggestion, actorUserId);
+
+        await tx.tollTransaction.update({
+          where: { id: transaction.id },
+          data: {
+            vehicleId: suggestion.vehicle?.id || null,
+            reservationId: suggestion.reservation?.id || null,
+            status: suggestion.matchStatus === 'AUTO_CONFIRMED' ? 'MATCHED' : 'NEEDS_REVIEW',
+            needsReview: suggestion.needsReview !== false,
+            matchConfidence: suggestion.score || null,
+            reviewNotes: suggestion.matchReason || null
+          }
+        });
+      });
+
+      reviewed += 1;
+      if (suggestion.matchStatus === 'AUTO_CONFIRMED') {
+        autoConfirmed += 1;
+      } else if (suggestion.reservation?.id) {
+        suggested += 1;
+      }
+    }
+
+    return {
+      reviewed,
+      autoConfirmed,
+      suggested
+    };
+  },
+
+  async runAutomaticSyncSweep() {
+    const providerAccounts = await prisma.tollProviderAccount.findMany({
+      where: {
+        provider: 'AUTOEXPRESO',
+        isActive: true,
+        tenant: {
+          tollsEnabled: true
+        }
+      },
+      select: {
+        id: true,
+        tenantId: true,
+        username: true,
+        passwordEncrypted: true,
+        settingsJson: true,
+        lastSyncAt: true
+      },
+      orderBy: [{ updatedAt: 'asc' }]
+    });
+
+    const intervalMinutes = getAutoSyncIntervalMinutes();
+    const now = Date.now();
+    const results = [];
+
+    for (const providerAccount of providerAccounts) {
+      const tenantId = providerAccount.tenantId;
+      const password = decodeSecret(providerAccount.passwordEncrypted);
+      if (!tenantId || !String(providerAccount.username || '').trim() || !password) {
+        results.push({ tenantId, ok: false, skipped: true, reason: 'provider-not-ready' });
+        continue;
+      }
+
+      const lastSyncAt = providerAccount.lastSyncAt ? new Date(providerAccount.lastSyncAt).getTime() : 0;
+      if (lastSyncAt && now - lastSyncAt < intervalMinutes * 60 * 1000) {
+        results.push({ tenantId, ok: true, skipped: true, reason: 'within-sync-interval' });
+        continue;
+      }
+
+      try {
+        const liveSync = await this.runLiveSync({ tenantId }, null);
+        const autoMatch = await this.autoMatchPendingTransactions({ tenantId }, null);
+        results.push({
+          tenantId,
+          ok: true,
+          createdCount: Number(liveSync?.createdCount || 0),
+          autoMatched: autoMatch.autoConfirmed,
+          suggested: autoMatch.suggested
+        });
+      } catch (error) {
+        results.push({
+          tenantId,
+          ok: false,
+          error: String(error?.message || 'Auto toll sync failed')
+        });
+      }
+    }
+
+    return {
+      processedTenants: results.length,
+      results
+    };
   },
 
   async createManualTransactions(rows = [], scope = {}, actorUserId = null, options = {}) {

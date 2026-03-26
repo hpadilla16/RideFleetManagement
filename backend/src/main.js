@@ -26,6 +26,7 @@ import { employeeAppRouter } from './modules/employee-app/employee-app.routes.js
 import { dealershipLoanerRouter } from './modules/dealership-loaner/dealership-loaner.routes.js';
 import { issueCenterRouter, publicIssueCenterRouter } from './modules/issue-center/issue-center.routes.js';
 import { tollsRouter } from './modules/tolls/tolls.routes.js';
+import { startTollAutoSyncScheduler, stopTollAutoSyncScheduler } from './modules/tolls/tolls.scheduler.js';
 import { buildOpenApiSpec, swaggerHtml } from './docs/openapi.js';
 
 assertAuthConfig();
@@ -81,9 +82,17 @@ app.use((err, _req, res, _next) => {
 const port = process.env.PORT || 4000;
 app.listen(port, () => {
   console.log(`Fleet backend listening on http://localhost:${port}`);
+  startTollAutoSyncScheduler();
 });
 
 process.on('SIGINT', async () => {
+  stopTollAutoSyncScheduler();
+  await prisma.$disconnect();
+  process.exit(0);
+});
+
+process.on('SIGTERM', async () => {
+  stopTollAutoSyncScheduler();
   await prisma.$disconnect();
   process.exit(0);
 });
