@@ -3,7 +3,7 @@ import { prisma } from '../../lib/prisma.js';
 const DEFAULT_PRE_PICKUP_GRACE_MINUTES = 120;
 const DEFAULT_POST_RETURN_GRACE_MINUTES = 180;
 const AUTOEXPRESO_LOGIN_URL = 'https://www.autoexpreso.com/login?v=0.0.1';
-const AUTOEXPRESO_TRANSACTIONS_URL = 'https://www.autoexpreso.com/dashboard/transaction?v=0.0.1';
+const AUTOEXPRESO_BALANCE_URL = 'https://www.autoexpreso.com/dashboard/balance';
 const AUTOEXPRESO_USERNAME_SELECTOR = "input[placeholder='Usuario o Correo Electronico'], input[placeholder='Usuario o Correo Electrónico'], input[placeholder*='Usuario'], input[placeholder*='Correo'], input[type='email'], input[type='text']";
 const AUTOEXPRESO_PASSWORD_SELECTOR = "input[formcontrolname='password'], input[type='password']";
 const AUTOEXPRESO_ACTIVITY_SELECTOR = 'div.az-media-list-activity';
@@ -87,9 +87,13 @@ async function waitForAutoExpresoTransactionState(page, timeoutMs = 30000) {
       const bodyText = normalize(document.body?.innerText || '');
       const hasUsername = !!document.querySelector(usernameSelector);
       const hasPassword = !!document.querySelector(passwordSelector);
+      const pathname = window.location.pathname || '';
 
-      if ((hasUsername && hasPassword) || window.location.pathname.includes('/login')) {
+      if ((hasUsername && hasPassword) || pathname.includes('/login')) {
         return 'login';
+      }
+      if (pathname.includes('/dashboard/balance') || bodyText.includes('ultimas transacciones') || bodyText.includes('últimas transacciones') || bodyText.includes('transacciones pendientes')) {
+        return 'transactions';
       }
       if (bodyText.includes('estado de cuenta') || bodyText.includes('seleccione el mes y ano deseado') || bodyText.includes('seleccione el mes y año deseado')) {
         return 'account-statements';
@@ -114,6 +118,80 @@ async function waitForAutoExpresoTransactionState(page, timeoutMs = 30000) {
   }
 
   return 'timeout';
+}
+
+async function scrapeAutoExpresoBalanceRows(page) {
+  return page.evaluate(() => {
+    const normalize = (value = '') => String(value).replace(/\s+/g, ' ').trim();
+    const amountFromText = (value = '') => {
+      const match = String(value).match(/\$\s*-?\d[\d,]*\.?\d*/);
+      if (!match) return null;
+      const parsed = Number(match[0].replace(/[^0-9.-]/g, ''));
+      return Number.isFinite(parsed) ? Math.abs(parsed) : null;
+    };
+
+    const seen = new Set();
+    const blocks = Array.from(document.querySelectorAll('div, li, article, section'));
+    const candidates = [];
+
+    for (const node of blocks) {
+      const text = normalize(node.innerText || '');
+      if (!text) continue;
+      if (!/tablilla:/i.test(text)) continue;
+      if (!/peaje:/i.test(text)) continue;
+      if (!/\d{2}\/\d{2}\/\d{4}\s+\d{2}:\d{2}:\d{2}\s*[AP]M/i.test(text)) continue;
+      if (seen.has(text)) continue;
+      seen.add(text);
+
+      const lines = text.split('\n').map((line) => normalize(line)).filter(Boolean);
+      const plateMatch = text.match(/Tablilla:\s*([A-Z0-9-]+)/i);
+      const selloMatch = text.match(/Sello:\s*([A-Z0-9-]+)/i);
+      const peajeLine = lines.find((line) => /^Peaje:/i.test(line)) || '';
+      const dateLine = lines.find((line) => /\d{2}\/\d{2}\/\d{4}\s+\d{2}:\d{2}:\d{2}\s*[AP]M/i.test(line)) || '';
+      const amountLine = lines.find((line) => /\$\s*-?\d[\d,]*\.?\d*/.test(line)) || text;
+
+      candidates.push({
+        plateRaw: plateMatch ? normalize(plateMatch[1]) : '',
+        selloRaw: selloMatch ? normalize(selloMatch[1]) : '',
+        amountRaw: amountLine,
+        location: peajeLine.replace(/^Peaje:\s*/i, '').trim(),
+        datetimeFull: dateLine,
+        rawText: text
+      });
+    }
+
+    return candidates
+      .map((row) => ({
+        ...row,
+        amount: amountFromText(row.amountRaw)
+      }))
+      .filter((row) => row.plateRaw && row.datetimeFull && row.amount !== null);
+  });
+}
+
+async function clickAutoExpresoNextPage(page) {
+  return page.evaluate(() => {
+    const normalize = (value = '') => String(value)
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .replace(/\s+/g, ' ')
+      .trim()
+      .toLowerCase();
+
+    const candidates = Array.from(document.querySelectorAll('a, button'));
+    const next = candidates.find((element) => {
+      const text = normalize(element.textContent || element.value || '');
+      const aria = normalize(element.getAttribute('aria-label') || '');
+      const parentClass = normalize(element.parentElement?.className || '');
+      const disabled = element.hasAttribute('disabled') || parentClass.includes('disabled');
+      if (disabled) return false;
+      return aria.includes('next') || text === '»' || text === '›' || text === 'siguiente';
+    });
+
+    if (!next) return false;
+    next.click();
+    return true;
+  });
 }
 
 function normalizeNullableToken(value) {
@@ -793,7 +871,7 @@ export const tollsService = {
 
     const settings = safeJsonParse(row.settingsJson, {});
     const loginUrl = String(settings.loginUrl || AUTOEXPRESO_LOGIN_URL).trim() || AUTOEXPRESO_LOGIN_URL;
-    const transactionUrl = String(settings.transactionUrl || AUTOEXPRESO_TRANSACTIONS_URL).trim() || AUTOEXPRESO_TRANSACTIONS_URL;
+    const transactionUrl = String(settings.transactionUrl || AUTOEXPRESO_BALANCE_URL).trim() || AUTOEXPRESO_BALANCE_URL;
     const maxPages = Number(settings.maxPages || 25) > 0 ? Number(settings.maxPages || 25) : 25;
     const username = String(row.username || '').trim();
     const password = decodeSecret(row.passwordEncrypted);
@@ -830,24 +908,17 @@ export const tollsService = {
       }
 
       const rows = [];
+      const seenExternalIds = new Set();
       let pageNumber = 0;
       while (pageNumber < maxPages) {
-        const pageRows = await page.$$eval(AUTOEXPRESO_ACTIVITY_SELECTOR, (nodes) => nodes.map((node) => {
-          const plateStrong = Array.from(node.querySelectorAll('span strong')).find((item) => String(item.textContent || '').includes('Tablilla'));
-          const plateRaw = plateStrong?.nextElementSibling ? String(plateStrong.nextElementSibling.textContent || '').trim() : '';
-          const amountRaw = String(node.querySelector('h6 strong ngb-highlight')?.textContent || '').trim();
-          const rightHighlights = Array.from(node.querySelectorAll('span.media-right ngb-highlight')).map((item) => String(item.textContent || '').trim());
-          return {
-            plateRaw,
-            amountRaw,
-            location: rightHighlights[0] || '',
-            datetimeFull: rightHighlights[1] || ''
-          };
-        }));
+        const pageRows = await scrapeAutoExpresoBalanceRows(page);
         for (const raw of pageRows) {
           try {
             const transactionAt = parseAutoExpresoDateTime(raw.datetimeFull);
-            const amount = Number(String(raw.amountRaw).replace(/[^0-9.-]/g, ''));
+            const amount = Number(raw.amount);
+            const externalId = normalizeToken(`${raw.plateRaw}|${raw.selloRaw}|${transactionAt.toISOString()}|${amount}|${raw.location}`);
+            if (!externalId || seenExternalIds.has(externalId)) continue;
+            seenExternalIds.add(externalId);
             rows.push({
               transactionAt: transactionAt.toISOString(),
               amount,
@@ -856,21 +927,20 @@ export const tollsService = {
               direction: '',
               plate: String(raw.plateRaw || '').trim(),
               tag: '',
-              sello: '',
+              sello: String(raw.selloRaw || '').trim(),
               transactionTimeRaw: String(raw.datetimeFull || '').split(/\s+/).slice(1).join(' '),
-              externalId: normalizeToken(`${raw.plateRaw}|${transactionAt.toISOString()}|${amount}|${raw.location}`)
+              externalId
             });
           } catch {
             // Skip malformed rows but continue sync.
           }
         }
 
-        const nextHandle = await page.$("li.page-item a[aria-label='Next']");
-        if (!nextHandle) break;
-        const parentClass = await page.$eval("li.page-item a[aria-label='Next']", (node) => String(node.parentElement?.className || ''));
-        if (parentClass.toLowerCase().includes('disabled')) break;
-        await nextHandle.click();
-        await new Promise((resolve) => setTimeout(resolve, 1500));
+        const beforeSnapshot = await page.evaluate(() => String(document.body?.innerText || '').slice(0, 2000)).catch(() => '');
+        const moved = await clickAutoExpresoNextPage(page);
+        if (!moved) break;
+        await page.waitForFunction((previous) => String(document.body?.innerText || '').slice(0, 2000) !== previous, { timeout: 15000 }, beforeSnapshot).catch(() => null);
+        await new Promise((resolve) => setTimeout(resolve, 1000));
         pageNumber += 1;
       }
 
