@@ -691,11 +691,11 @@ export const tollsService = {
     const health = await this.runProviderHealthCheck(scope);
     if (!health.ready) throw new Error(`Provider not ready: ${(health.missing || []).join(', ')}`);
 
-    let playwright;
+    let puppeteer;
     try {
-      playwright = await import('playwright');
+      puppeteer = await import('puppeteer');
     } catch {
-      throw new Error('Playwright is not installed on backend for live AutoExpreso sync');
+      throw new Error('Puppeteer is not installed on backend for live AutoExpreso sync');
     }
 
     const settings = safeJsonParse(row.settingsJson, {});
@@ -705,21 +705,22 @@ export const tollsService = {
     const username = String(row.username || '').trim();
     const password = decodeSecret(row.passwordEncrypted);
 
-    const browser = await playwright.chromium.launch({ headless: true });
-    const context = await browser.newContext();
-    const page = await context.newPage();
+    const browser = await puppeteer.default.launch({
+      headless: true,
+      executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || undefined,
+      args: ['--no-sandbox', '--disable-setuid-sandbox']
+    });
+    const page = await browser.newPage();
 
     try {
       await page.goto(loginUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
-      const userInput = page.locator("input[placeholder*='Usuario'], input[placeholder*='Correo'], input[type='email'], input[type='text']").first();
-      const passwordInput = page.locator("input[formcontrolname='password'], input[type='password']").first();
-      await userInput.fill(username);
-      await passwordInput.fill(password);
+      await page.waitForSelector("input[placeholder*='Usuario'], input[placeholder*='Correo'], input[type='email'], input[type='text']", { timeout: 20000 });
+      await page.type("input[placeholder*='Usuario'], input[placeholder*='Correo'], input[type='email'], input[type='text']", username);
+      await page.type("input[formcontrolname='password'], input[type='password']", password);
 
-      const submit = page.locator("button:has-text('Iniciar'), button:has-text('Iniciar sesión'), button[type='submit']").first();
       await Promise.all([
-        page.waitForLoadState('networkidle').catch(() => null),
-        submit.click()
+        page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 30000 }).catch(() => null),
+        page.click("button, input[type='submit']")
       ]);
 
       await page.goto(transactionUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
@@ -728,41 +729,45 @@ export const tollsService = {
       const rows = [];
       let pageNumber = 0;
       while (pageNumber < maxPages) {
-        const tollEntries = page.locator('div.az-media-list-activity');
-        const count = await tollEntries.count();
-        for (let i = 0; i < count; i += 1) {
-          const toll = tollEntries.nth(i);
+        const pageRows = await page.$$eval('div.az-media-list-activity', (nodes) => nodes.map((node) => {
+          const plateStrong = Array.from(node.querySelectorAll('span strong')).find((item) => String(item.textContent || '').includes('Tablilla'));
+          const plateRaw = plateStrong?.nextElementSibling ? String(plateStrong.nextElementSibling.textContent || '').trim() : '';
+          const amountRaw = String(node.querySelector('h6 strong ngb-highlight')?.textContent || '').trim();
+          const rightHighlights = Array.from(node.querySelectorAll('span.media-right ngb-highlight')).map((item) => String(item.textContent || '').trim());
+          return {
+            plateRaw,
+            amountRaw,
+            location: rightHighlights[0] || '',
+            datetimeFull: rightHighlights[1] || ''
+          };
+        }));
+        for (const raw of pageRows) {
           try {
-            const plateRaw = (await toll.locator("span strong:has-text('Tablilla:') + ngb-highlight").first().innerText()).trim();
-            const amountRaw = (await toll.locator('h6 strong ngb-highlight').first().innerText()).trim();
-            const highlights = toll.locator('span.media-right').locator('ngb-highlight');
-            const location = ((await highlights.nth(0).innerText()) || '').trim();
-            const datetimeFull = ((await highlights.nth(1).innerText()) || '').trim();
-            const transactionAt = parseAutoExpresoDateTime(datetimeFull);
-            const amount = Number(String(amountRaw).replace(/[^0-9.-]/g, ''));
+            const transactionAt = parseAutoExpresoDateTime(raw.datetimeFull);
+            const amount = Number(String(raw.amountRaw).replace(/[^0-9.-]/g, ''));
             rows.push({
               transactionAt: transactionAt.toISOString(),
               amount,
-              location,
+              location: String(raw.location || '').trim(),
               lane: '',
               direction: '',
-              plate: plateRaw,
+              plate: String(raw.plateRaw || '').trim(),
               tag: '',
               sello: '',
-              transactionTimeRaw: datetimeFull.split(/\s+/).slice(1).join(' '),
-              externalId: normalizeToken(`${plateRaw}|${transactionAt.toISOString()}|${amount}|${location}`)
+              transactionTimeRaw: String(raw.datetimeFull || '').split(/\s+/).slice(1).join(' '),
+              externalId: normalizeToken(`${raw.plateRaw}|${transactionAt.toISOString()}|${amount}|${raw.location}`)
             });
           } catch {
             // Skip malformed rows but continue sync.
           }
         }
 
-        const nextButton = page.locator("li.page-item >> a[aria-label='Next']").first();
-        if (await nextButton.count() === 0) break;
-        const parentClass = String(await nextButton.locator('xpath=..').getAttribute('class') || '');
+        const nextHandle = await page.$("li.page-item a[aria-label='Next']");
+        if (!nextHandle) break;
+        const parentClass = await page.$eval("li.page-item a[aria-label='Next']", (node) => String(node.parentElement?.className || ''));
         if (parentClass.toLowerCase().includes('disabled')) break;
-        await nextButton.click();
-        await page.waitForTimeout(1500);
+        await nextHandle.click();
+        await new Promise((resolve) => setTimeout(resolve, 1500));
         pageNumber += 1;
       }
 
