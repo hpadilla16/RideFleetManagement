@@ -25,8 +25,12 @@ function money(value) {
 }
 
 function TollsInner({ token, me, logout }) {
+  const role = String(me?.role || '').toUpperCase();
+  const isSuper = role === 'SUPER_ADMIN';
   const [msg, setMsg] = useState('');
   const [dashboard, setDashboard] = useState(null);
+  const [tenantRows, setTenantRows] = useState([]);
+  const [activeTenantId, setActiveTenantId] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
   const [reviewOnly, setReviewOnly] = useState(true);
   const [query, setQuery] = useState('');
@@ -37,13 +41,35 @@ function TollsInner({ token, me, logout }) {
   const [reservationDrafts, setReservationDrafts] = useState({});
   const [busyId, setBusyId] = useState('');
 
+  const scopedTollsPath = (path) => {
+    if (!isSuper || !activeTenantId) return path;
+    const sep = path.includes('?') ? '&' : '?';
+    return `${path}${sep}tenantId=${encodeURIComponent(activeTenantId)}`;
+  };
+
+  const loadTenants = async () => {
+    if (!isSuper) return;
+    try {
+      const rows = await api('/api/tenants', {}, token);
+      const list = Array.isArray(rows) ? rows : [];
+      setTenantRows(list);
+      if (!activeTenantId && list[0]?.id) setActiveTenantId(list[0].id);
+    } catch (error) {
+      setMsg(error.message);
+    }
+  };
+
   const load = async () => {
     try {
+      if (isSuper && !activeTenantId) {
+        setDashboard(null);
+        return;
+      }
       const params = new URLSearchParams();
       if (query.trim()) params.set('q', query.trim());
       if (statusFilter) params.set('status', statusFilter);
       if (reviewOnly) params.set('needsReview', 'true');
-      const out = await api(`/api/tolls/dashboard${params.toString() ? `?${params.toString()}` : ''}`, {}, token);
+      const out = await api(scopedTollsPath(`/api/tolls/dashboard${params.toString() ? `?${params.toString()}` : ''}`), {}, token);
       setDashboard(out);
       setMsg('');
     } catch (error) {
@@ -52,8 +78,12 @@ function TollsInner({ token, me, logout }) {
   };
 
   useEffect(() => {
+    loadTenants();
+  }, [token, isSuper]);
+
+  useEffect(() => {
     load();
-  }, [token, statusFilter, reviewOnly]);
+  }, [token, statusFilter, reviewOnly, activeTenantId, isSuper]);
 
   const transactions = useMemo(() => Array.isArray(dashboard?.transactions) ? dashboard.transactions : [], [dashboard]);
 
@@ -61,7 +91,7 @@ function TollsInner({ token, me, logout }) {
     event.preventDefault();
     try {
       setBusyId('manual-import');
-      await api('/api/tolls/transactions/manual-import', {
+      await api(scopedTollsPath('/api/tolls/transactions/manual-import'), {
         method: 'POST',
         body: JSON.stringify({
           rows: [{
@@ -98,7 +128,7 @@ function TollsInner({ token, me, logout }) {
     }
     try {
       setBusyId(`confirm-${row.id}`);
-      await api(`/api/tolls/transactions/${row.id}/confirm-match`, {
+      await api(scopedTollsPath(`/api/tolls/transactions/${row.id}/confirm-match`), {
         method: 'POST',
         body: JSON.stringify({
           reservationId: reservationId || undefined,
@@ -117,7 +147,7 @@ function TollsInner({ token, me, logout }) {
   const postToReservation = async (row) => {
     try {
       setBusyId(`post-${row.id}`);
-      await api(`/api/tolls/transactions/${row.id}/post-to-reservation`, {
+      await api(scopedTollsPath(`/api/tolls/transactions/${row.id}/post-to-reservation`), {
         method: 'POST',
         body: JSON.stringify({})
       }, token);
@@ -145,6 +175,23 @@ function TollsInner({ token, me, logout }) {
             <span className="status-chip neutral">Review Queue</span>
           </div>
 
+          {isSuper ? (
+            <div className="inline-actions" style={{ marginTop: 12 }}>
+              <label className="label" style={{ minWidth: 160 }}>Toll Tenant Scope</label>
+              <select value={activeTenantId} onChange={(e) => setActiveTenantId(e.target.value)}>
+                <option value="">Select tenant</option>
+                {tenantRows.map((tenant) => (
+                  <option key={tenant.id} value={tenant.id}>{tenant.name}</option>
+                ))}
+              </select>
+              <span className="ui-muted">
+                {activeTenantId
+                  ? `${tenantRows.find((tenant) => tenant.id === activeTenantId)?.name || 'Tenant selected'} active`
+                  : 'Choose a tenant before importing or reviewing tolls'}
+              </span>
+            </div>
+          ) : null}
+
           <div className="app-card-grid compact">
             <div className="info-tile">
               <span className="label">Imported Today</span>
@@ -169,6 +216,11 @@ function TollsInner({ token, me, logout }) {
 
         <div className="glass card section-card">
           <div className="section-title">Manual Toll Import</div>
+          {isSuper && !activeTenantId ? (
+            <div className="surface-note" style={{ marginBottom: 10 }}>
+              Choose the tenant above first so the toll import uses that tenant's fleet, toll tags, toll stickers, and reservation windows.
+            </div>
+          ) : null}
           <form className="stack" onSubmit={saveManualImport}>
             <div className="grid2">
               <input type="datetime-local" required value={importForm.transactionAt} onChange={(e) => setImportForm((prev) => ({ ...prev, transactionAt: e.target.value }))} />
@@ -184,7 +236,7 @@ function TollsInner({ token, me, logout }) {
               <input placeholder="Toll Sticker Number" value={importForm.sello} onChange={(e) => setImportForm((prev) => ({ ...prev, sello: e.target.value }))} />
             </div>
             <div className="inline-actions">
-              <button type="submit" disabled={busyId === 'manual-import'}>{busyId === 'manual-import' ? 'Importing...' : 'Import Toll'}</button>
+              <button type="submit" disabled={busyId === 'manual-import' || (isSuper && !activeTenantId)}>{busyId === 'manual-import' ? 'Importing...' : 'Import Toll'}</button>
             </div>
           </form>
         </div>
