@@ -404,6 +404,26 @@ function TollsInner({ token, me, logout }) {
               <strong style={{ fontSize: '0.95rem' }}>{dateTimeLabel(dashboard?.autoSync?.nextRunAt)}</strong>
             </div>
           </div>
+          {dashboard?.autoSync?.lastSweep ? (
+            <div className="app-card-grid compact" style={{ marginTop: 10 }}>
+              <div className="info-tile">
+                <span className="label">Last Sweep Imported</span>
+                <strong>{Number(dashboard.autoSync.lastSweep.importedCount || 0)}</strong>
+              </div>
+              <div className="info-tile">
+                <span className="label">Last Sweep Auto-Matched</span>
+                <strong>{Number(dashboard.autoSync.lastSweep.autoMatchedCount || 0)}</strong>
+              </div>
+              <div className="info-tile">
+                <span className="label">Last Sweep Suggested</span>
+                <strong>{Number(dashboard.autoSync.lastSweep.suggestedCount || 0)}</strong>
+              </div>
+              <div className="info-tile">
+                <span className="label">Pending Review Now</span>
+                <strong>{Number(dashboard.autoSync.lastSweep.pendingReviewCount || 0)}</strong>
+              </div>
+            </div>
+          ) : null}
           <div className="surface-note" style={{ marginTop: 10 }}>
             The backend now runs AutoExpreso sync sweeps automatically for active tenants with tolls enabled, then re-checks pending tolls against the assigned vehicle and reservation window.
           </div>

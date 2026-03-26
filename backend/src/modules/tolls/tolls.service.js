@@ -617,11 +617,12 @@ function getAutoSyncIntervalMinutes() {
   return Number.isFinite(raw) && raw > 0 ? raw : DEFAULT_AUTO_SYNC_INTERVAL_MINUTES;
 }
 
-function getAutoSyncStatus(providerAccount) {
+function getAutoSyncStatus(providerAccount, latestAutoSyncRun = null, pendingReviewCount = 0) {
   const enabled = String(process.env.TOLLS_AUTO_SYNC_ENABLED || 'true').toLowerCase() !== 'false';
   const intervalMinutes = getAutoSyncIntervalMinutes();
   const startupDelaySeconds = Number(process.env.TOLLS_AUTO_SYNC_STARTUP_DELAY_SECONDS || 45);
   const lastAutomaticRunAt = providerAccount?.lastSyncAt || null;
+  const lastSweepMeta = safeJsonParse(latestAutoSyncRun?.metadataJson, {});
   const nextRunAt = enabled
     ? new Date((lastAutomaticRunAt ? new Date(lastAutomaticRunAt).getTime() : Date.now() + (Number.isFinite(startupDelaySeconds) ? startupDelaySeconds : 45) * 1000) + intervalMinutes * 60 * 1000)
     : null;
@@ -631,7 +632,16 @@ function getAutoSyncStatus(providerAccount) {
     intervalMinutes,
     startupDelaySeconds: Number.isFinite(startupDelaySeconds) ? startupDelaySeconds : 45,
     lastAutomaticRunAt,
-    nextRunAt
+    nextRunAt,
+    lastSweep: latestAutoSyncRun ? {
+      importRunId: latestAutoSyncRun.id,
+      startedAt: latestAutoSyncRun.startedAt,
+      completedAt: latestAutoSyncRun.completedAt,
+      importedCount: Number(lastSweepMeta?.autoSync?.importedCount ?? latestAutoSyncRun.importedCount ?? 0),
+      autoMatchedCount: Number(lastSweepMeta?.autoSync?.autoMatchedCount ?? 0),
+      suggestedCount: Number(lastSweepMeta?.autoSync?.suggestedCount ?? 0),
+      pendingReviewCount: Number(lastSweepMeta?.autoSync?.pendingReviewCount ?? pendingReviewCount ?? 0)
+    } : null
   };
 }
 
@@ -737,6 +747,8 @@ export const tollsService = {
       }) : []
     ]);
 
+    const latestAutoSyncRun = (importRuns || []).find((run) => String(run.sourceType || '').toUpperCase() === 'AUTOEXPRESO_SYNC') || null;
+
     return {
       metrics: {
         importedToday,
@@ -746,7 +758,7 @@ export const tollsService = {
         disputed: disputedCount
       },
       providerAccount: serializeProviderAccount(providerAccount),
-      autoSync: getAutoSyncStatus(providerAccount),
+      autoSync: getAutoSyncStatus(providerAccount, latestAutoSyncRun, reviewCount),
       importRuns: (importRuns || []).map(serializeImportRun),
       transactions: transactions.map(serializeTransaction)
     };
@@ -1052,7 +1064,8 @@ export const tollsService = {
 
       return {
         ok: true,
-        createdCount: Array.isArray(created?.created) ? created.created.length : 0
+        createdCount: Array.isArray(created?.created) ? created.created.length : 0,
+        importRun: created?.importRun || null
       };
     } catch (error) {
       await browser.close().catch(() => null);
@@ -1118,10 +1131,19 @@ export const tollsService = {
       }
     }
 
+    const pendingReviewCount = await prisma.tollTransaction.count({
+      where: {
+        ...tenantWhereForScope(scope),
+        needsReview: true,
+        billingStatus: 'PENDING'
+      }
+    });
+
     return {
       reviewed,
       autoConfirmed,
-      suggested
+      suggested,
+      pendingReviewCount
     };
   },
 
@@ -1166,12 +1188,57 @@ export const tollsService = {
       try {
         const liveSync = await this.runLiveSync({ tenantId }, null);
         const autoMatch = await this.autoMatchPendingTransactions({ tenantId }, null);
+        const importedCount = Number(liveSync?.createdCount || 0);
+        const autoMatchedCount = Number(autoMatch?.autoConfirmed || 0);
+        const suggestedCount = Number(autoMatch?.suggested || 0);
+        const pendingReviewCount = Number(autoMatch?.pendingReviewCount || 0);
+
+        if (liveSync?.importRun?.id) {
+          const currentRun = await prisma.tollImportRun.findUnique({
+            where: { id: liveSync.importRun.id },
+            select: { id: true, metadataJson: true }
+          });
+          if (currentRun) {
+            const existingMeta = safeJsonParse(currentRun.metadataJson, {});
+            await prisma.tollImportRun.update({
+              where: { id: currentRun.id },
+              data: {
+                metadataJson: JSON.stringify({
+                  ...existingMeta,
+                  autoSync: {
+                    importedCount,
+                    autoMatchedCount,
+                    suggestedCount,
+                    pendingReviewCount
+                  }
+                })
+              }
+            });
+          }
+        }
+
+        const providerAccount = await prisma.tollProviderAccount.findFirst({
+          where: { tenantId, provider: 'AUTOEXPRESO' },
+          orderBy: [{ isActive: 'desc' }, { updatedAt: 'desc' }]
+        });
+        if (providerAccount) {
+          await prisma.tollProviderAccount.update({
+            where: { id: providerAccount.id },
+            data: {
+              lastSyncAt: new Date(),
+              lastSyncStatus: 'SYNC_OK',
+              lastSyncMessage: `Imported ${importedCount} | Auto-matched ${autoMatchedCount} | Suggested ${suggestedCount} | Pending review ${pendingReviewCount}`
+            }
+          });
+        }
+
         results.push({
           tenantId,
           ok: true,
-          createdCount: Number(liveSync?.createdCount || 0),
-          autoMatched: autoMatch.autoConfirmed,
-          suggested: autoMatch.suggested
+          createdCount: importedCount,
+          autoMatched: autoMatchedCount,
+          suggested: suggestedCount,
+          pendingReviewCount
         });
       } catch (error) {
         results.push({
