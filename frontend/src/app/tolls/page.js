@@ -615,6 +615,11 @@ function TollsInner({ token, me, logout }) {
                       {row.needsReview ? 'Needs review' : row.statusLabel}
                     </span>
                     <div className="label" style={{ textTransform: 'none', letterSpacing: 0 }}>{row.billingStatus}</div>
+                    {row.issueIncident?.id ? (
+                      <div className="label" style={{ textTransform: 'none', letterSpacing: 0 }}>
+                        Issue {row.issueIncident.id} - {row.issueIncident.status || 'OPEN'}
+                      </div>
+                    ) : null}
                   </td>
                   <td>
                     <div className="stack" style={{ gap: 6 }}>

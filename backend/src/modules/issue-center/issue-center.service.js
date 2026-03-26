@@ -572,6 +572,47 @@ async function createIncidentForReservation(reservation, payload, actor = {}) {
   return serializeIncident(incident, [historyEntry]);
 }
 
+async function syncTollDisputeStatusForIncident(incident) {
+  if (String(incident?.type || '').toUpperCase() !== 'TOLL') return;
+  const evidence = safeParse(incident?.evidenceJson) || {};
+  const tollTransactionId = evidence?.tollTransactionId ? String(evidence.tollTransactionId) : '';
+  if (!tollTransactionId) return;
+
+  const current = await prisma.tollTransaction.findUnique({
+    where: { id: tollTransactionId },
+    select: {
+      id: true,
+      reservationId: true,
+      reviewNotes: true
+    }
+  });
+  if (!current) return;
+
+  const nextStatus = String(incident.status || '').toUpperCase();
+  const resolved = ['RESOLVED', 'CLOSED'].includes(nextStatus);
+  const nextReviewNote = [
+    String(current.reviewNotes || '').trim(),
+    `Issue Center ${incident.id} -> ${nextStatus}`
+  ].filter(Boolean).join('\n');
+
+  await prisma.tollTransaction.update({
+    where: { id: tollTransactionId },
+    data: resolved
+      ? {
+          status: current.reservationId ? 'MATCHED' : 'NEEDS_REVIEW',
+          billingStatus: current.reservationId ? 'PENDING' : 'DISPUTED',
+          needsReview: !current.reservationId,
+          reviewNotes: nextReviewNote
+        }
+      : {
+          status: 'DISPUTED',
+          billingStatus: 'DISPUTED',
+          needsReview: true,
+          reviewNotes: nextReviewNote
+        }
+  });
+}
+
 async function attachHistory(incidents) {
   if (!incidents.length) return incidents.map((incident) => serializeIncident(incident, []));
 
@@ -796,6 +837,8 @@ export const issueCenterService = {
     } else if (current.tripId) {
       await flagTripDisputed(current.tripId);
     }
+
+    await syncTollDisputeStatusForIncident(updated);
 
     return (await attachHistory([updated]))[0];
   },
