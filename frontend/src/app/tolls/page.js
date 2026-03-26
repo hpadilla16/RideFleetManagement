@@ -648,6 +648,11 @@ function TollsInner({ token, me, logout }) {
                           Open Issue Case
                         </button>
                       ) : null}
+                      {row.reservation?.id ? (
+                        <a href={`/reservations/${row.reservation.id}`}>
+                          <button type="button" className="button-subtle">Open Reservation Workflow</button>
+                        </a>
+                      ) : null}
                       {row.billingStatus !== 'WAIVED' ? (
                         <button type="button" className="button-subtle" onClick={() => runReviewAction(row, 'MARK_NOT_BILLABLE')} disabled={busyId === `MARK_NOT_BILLABLE-${row.id}`}>
                           {busyId === `MARK_NOT_BILLABLE-${row.id}` ? 'Saving...' : 'Mark Not Billable'}

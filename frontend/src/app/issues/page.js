@@ -703,6 +703,11 @@ function IssueCenterInner({ token, me, logout }) {
                           incident.trip?.hostProfile?.displayName || ''
                         ].filter(Boolean).join(' - ')}
                       </div>
+                      {String(incident.type || '').toUpperCase() === 'TOLL' ? (
+                        <div style={{ marginTop: 6 }}>
+                          <span className="status-chip warn">Toll Dispute</span>
+                        </div>
+                      ) : null}
                     </div>
                     <span className={toneClass(incident.status)}>{incident.status}</span>
                   </div>
