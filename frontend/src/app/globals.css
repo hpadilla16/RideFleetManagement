@@ -1032,6 +1032,71 @@ label input[type="checkbox"],
   text-align: center;
 }
 
+.public-booking-shell {
+  min-height: 100vh;
+  padding: 22px clamp(16px, 3vw, 34px) 42px;
+}
+
+.public-booking-shell-embed {
+  min-height: auto;
+  padding: 12px;
+}
+
+.public-booking-layout {
+  max-width: 1380px;
+  margin: 0 auto;
+  display: grid;
+  gap: 18px;
+}
+
+.public-booking-layout-embed {
+  max-width: none;
+  gap: 14px;
+}
+
+.knowledge-hero {
+  display: grid;
+  gap: 12px;
+}
+
+.knowledge-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+  gap: 16px;
+}
+
+.knowledge-anchor-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 10px;
+}
+
+.knowledge-anchor {
+  display: block;
+  padding: 14px 16px;
+  border-radius: 16px;
+  text-decoration: none;
+  color: inherit;
+  background: rgba(255, 255, 255, 0.72);
+  border: 1px solid rgba(124, 58, 237, 0.12);
+}
+
+.knowledge-anchor:hover {
+  border-color: rgba(124, 58, 237, 0.28);
+  box-shadow: 0 14px 32px rgba(124, 58, 237, 0.08);
+}
+
+.knowledge-list {
+  display: grid;
+  gap: 10px;
+  padding-left: 18px;
+}
+
+.knowledge-list li {
+  color: #55456f;
+  line-height: 1.55;
+}
+
 /* Dark mode */
 :root[data-theme='dark'] {
   --bg-soft: #0f1117;

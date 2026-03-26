@@ -15,6 +15,25 @@ publicBookingRouter.get('/bootstrap', async (req, res, next) => {
   }
 });
 
+publicBookingRouter.get('/vehicle-classes', async (req, res, next) => {
+  try {
+    const payload = await publicBookingService.getVehicleClasses({
+      tenantId: req.query?.tenantId ? String(req.query.tenantId) : undefined,
+      tenantSlug: req.query?.tenantSlug ? String(req.query.tenantSlug) : undefined,
+      pickupLocationId: req.query?.pickupLocationId ? String(req.query.pickupLocationId) : undefined,
+      pickupAt: req.query?.pickupAt ? String(req.query.pickupAt) : undefined,
+      returnAt: req.query?.returnAt ? String(req.query.returnAt) : undefined,
+      limit: req.query?.limit ? Number(req.query.limit) : undefined
+    });
+    res.json(payload);
+  } catch (error) {
+    if (/required|not found|not enabled|after/i.test(String(error?.message || ''))) {
+      return res.status(400).json({ error: error.message });
+    }
+    next(error);
+  }
+});
+
 publicBookingRouter.post('/rental-search', async (req, res, next) => {
   try {
     const payload = await publicBookingService.searchRentalQuotes(req.body || {});

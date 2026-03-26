@@ -17,6 +17,30 @@ function guestLink(token) {
   return `${baseUrl()}/guest?token=${encodeURIComponent(token)}`;
 }
 
+function publicBookLink(params = {}) {
+  const url = new URL(`${baseUrl()}/book`);
+  Object.entries(params).forEach(([key, value]) => {
+    if (value === null || value === undefined || value === '') return;
+    url.searchParams.set(key, String(value));
+  });
+  return url.toString();
+}
+
+function coerceDate(value, fallback) {
+  const parsed = value ? new Date(value) : null;
+  if (parsed && !Number.isNaN(parsed.getTime())) return parsed;
+  return new Date(fallback);
+}
+
+function defaultVehicleClassWindow() {
+  const pickupAt = new Date();
+  pickupAt.setDate(pickupAt.getDate() + 1);
+  pickupAt.setHours(10, 0, 0, 0);
+  const returnAt = new Date(pickupAt);
+  returnAt.setDate(returnAt.getDate() + 3);
+  return { pickupAt, returnAt };
+}
+
 function normalizeEmail(value) {
   return String(value || '').trim().toLowerCase();
 }
@@ -127,6 +151,147 @@ export const publicBookingService = {
         primaryImageUrl: listing.primaryImageUrl || '',
         imageUrls: listing.imageUrls || []
       }))
+    };
+  },
+
+  async getVehicleClasses(input = {}) {
+    const windowDefaults = defaultVehicleClassWindow();
+    const pickupAt = coerceDate(input?.pickupAt, windowDefaults.pickupAt);
+    const returnAt = coerceDate(input?.returnAt, windowDefaults.returnAt);
+    const bootstrap = await bookingEngineService.getBootstrap({
+      tenantSlug: input?.tenantSlug,
+      tenantId: input?.tenantId
+    });
+
+    const allLocations = Array.isArray(bootstrap?.locations) ? bootstrap.locations : [];
+    const scopedLocations = input?.pickupLocationId
+      ? allLocations.filter((location) => String(location.id) === String(input.pickupLocationId))
+      : allLocations;
+    const candidateLocations = scopedLocations.length ? scopedLocations : allLocations;
+    const primaryLocationId = candidateLocations[0]?.id || '';
+
+    if (!primaryLocationId) {
+      return {
+        tenant: bootstrap?.tenant || null,
+        pickupAt,
+        returnAt,
+        locationScope: [],
+        classes: []
+      };
+    }
+
+    const search = await bookingEngineService.searchRental({
+      tenantSlug: input?.tenantSlug,
+      tenantId: input?.tenantId,
+      pickupLocationId: primaryLocationId,
+      pickupLocationIds: candidateLocations.map((location) => location.id),
+      pickupAt: pickupAt.toISOString(),
+      returnAt: returnAt.toISOString()
+    });
+
+    const grouped = new Map();
+    for (const result of search?.results || []) {
+      const vehicleType = result?.vehicleType;
+      if (!vehicleType?.id) continue;
+      const key = String(vehicleType.id);
+      const availabilityCount = Math.max(0, Number(result?.availability?.availableUnits || 0));
+      const dailyRate = money(result?.quote?.dailyRate);
+      const location = result?.location || null;
+      const locationLabel = [location?.name, location?.city, location?.state].filter(Boolean).join(', ');
+
+      if (!grouped.has(key)) {
+        grouped.set(key, {
+          vehicleType: {
+            id: vehicleType.id,
+            code: vehicleType.code || '',
+            name: vehicleType.name || 'Vehicle Class',
+            description: vehicleType.description || '',
+            imageUrl: vehicleType.imageUrl || ''
+          },
+          advertisedDailyRate: dailyRate,
+          availableUnits: availabilityCount,
+          available: availabilityCount > 0,
+          featuredLocation: location
+            ? {
+                id: location.id,
+                name: location.name || '',
+                city: location.city || '',
+                state: location.state || '',
+                label: locationLabel
+              }
+            : null,
+          locations: location ? [{
+            id: location.id,
+            name: location.name || '',
+            city: location.city || '',
+            state: location.state || '',
+            label: locationLabel
+          }] : []
+        });
+        continue;
+      }
+
+      const current = grouped.get(key);
+      current.availableUnits += availabilityCount;
+      current.available = current.availableUnits > 0;
+      if (dailyRate > 0 && (!current.advertisedDailyRate || dailyRate < current.advertisedDailyRate)) {
+        current.advertisedDailyRate = dailyRate;
+        current.featuredLocation = location
+          ? {
+              id: location.id,
+              name: location.name || '',
+              city: location.city || '',
+              state: location.state || '',
+              label: locationLabel
+            }
+          : current.featuredLocation;
+      }
+      if (location && !current.locations.some((row) => row.id === location.id)) {
+        current.locations.push({
+          id: location.id,
+          name: location.name || '',
+          city: location.city || '',
+          state: location.state || '',
+          label: locationLabel
+        });
+      }
+    }
+
+    const limit = Math.max(1, Math.min(24, Number(input?.limit || 12) || 12));
+    const classes = [...grouped.values()]
+      .sort((left, right) => {
+        if (Number(right.availableUnits || 0) !== Number(left.availableUnits || 0)) {
+          return Number(right.availableUnits || 0) - Number(left.availableUnits || 0);
+        }
+        return Number(left.advertisedDailyRate || 0) - Number(right.advertisedDailyRate || 0);
+      })
+      .slice(0, limit)
+      .map((entry) => ({
+        ...entry,
+        rentNowUrl: publicBookLink({
+          tenantSlug: bootstrap?.tenant?.slug || input?.tenantSlug || '',
+          searchMode: 'RENTAL',
+          vehicleTypeId: entry.vehicleType.id,
+          pickupAt: pickupAt.toISOString(),
+          returnAt: returnAt.toISOString(),
+          pickupLocationId: entry.featuredLocation?.id || primaryLocationId,
+          returnLocationId: entry.featuredLocation?.id || primaryLocationId
+        })
+      }));
+
+    return {
+      tenant: bootstrap?.tenant || null,
+      pickupAt,
+      returnAt,
+      locationScope: candidateLocations.map((location) => ({
+        id: location.id,
+        tenantId: location.tenantId || null,
+        name: location.name || '',
+        city: location.city || '',
+        state: location.state || '',
+        label: [location.name, location.city, location.state].filter(Boolean).join(', ')
+      })),
+      classes
     };
   },
 

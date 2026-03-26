@@ -1,8 +1,8 @@
 'use client';
 
 import Link from 'next/link';
-import { useEffect, useMemo, useState } from 'react';
-import { useRouter } from 'next/navigation';
+import { Suspense, useEffect, useMemo, useState } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { api } from '../../lib/client';
 
 const PUBLIC_BOOKING_DRAFT_KEY = 'fleet_public_booking_draft';
@@ -40,6 +40,12 @@ function normalizeImageList(value) {
 
 function publicLocationLabel(location) {
   return [location?.name, location?.city, location?.state].filter(Boolean).join(' · ') || 'Location';
+}
+
+function locationLabelFromId(locations, id) {
+  if (!id) return '';
+  const match = (Array.isArray(locations) ? locations : []).find((location) => String(location.id) === String(id));
+  return match ? publicLocationLabel(match) : '';
 }
 
 function buildServiceSelectionState(result, mode) {
@@ -183,23 +189,34 @@ function BookingCard({ title, subtitle, meta, quote, cta, onClick, selected = fa
   );
 }
 
-export default function PublicBookingPage() {
+function PublicBookingPageInner() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const initialDraft = restorePublicBookingDraft();
+  const embedMode = searchParams.get('embed') === '1';
+  const queryTenantSlug = String(searchParams.get('tenantSlug') || '').trim();
+  const querySearchMode = String(searchParams.get('searchMode') || '').trim().toUpperCase() === 'CAR_SHARING' ? 'CAR_SHARING' : '';
+  const queryPickupAt = String(searchParams.get('pickupAt') || '').trim();
+  const queryReturnAt = String(searchParams.get('returnAt') || '').trim();
+  const queryVehicleTypeId = String(searchParams.get('vehicleTypeId') || '').trim();
+  const queryPickupLocationId = String(searchParams.get('pickupLocationId') || '').trim();
+  const queryReturnLocationId = String(searchParams.get('returnLocationId') || '').trim();
   const [bootstrap, setBootstrap] = useState(null);
-  const [tenantSlug, setTenantSlug] = useState(initialDraft?.tenantSlug || '');
+  const [tenantSlug, setTenantSlug] = useState(queryTenantSlug || initialDraft?.tenantSlug || '');
   const [uiStep, setUiStep] = useState(initialDraft?.uiStep || 'search');
-  const [searchMode, setSearchMode] = useState(initialDraft?.searchMode || 'RENTAL');
+  const [searchMode, setSearchMode] = useState(querySearchMode || initialDraft?.searchMode || 'RENTAL');
   const [pickupLocationId, setPickupLocationId] = useState(initialDraft?.pickupLocationId || '');
   const [returnLocationId, setReturnLocationId] = useState(initialDraft?.returnLocationId || '');
-  const [vehicleTypeId, setVehicleTypeId] = useState(initialDraft?.vehicleTypeId || '');
-  const [pickupAt, setPickupAt] = useState(initialDraft?.pickupAt || toLocalInputValue(addDays(new Date(), 1)));
-  const [returnAt, setReturnAt] = useState(initialDraft?.returnAt || toLocalInputValue(addDays(new Date(), 4)));
+  const [vehicleTypeId, setVehicleTypeId] = useState(queryVehicleTypeId || initialDraft?.vehicleTypeId || '');
+  const [pickupAt, setPickupAt] = useState(queryPickupAt || initialDraft?.pickupAt || toLocalInputValue(addDays(new Date(), 1)));
+  const [returnAt, setReturnAt] = useState(queryReturnAt || initialDraft?.returnAt || toLocalInputValue(addDays(new Date(), 4)));
   const [results, setResults] = useState(initialDraft?.results || null);
   const [loadingBootstrap, setLoadingBootstrap] = useState(true);
   const [searching, setSearching] = useState(false);
   const [error, setError] = useState('');
   const [selectedResult, setSelectedResult] = useState(initialDraft?.selectedResult || null);
+  const [autoSearchDone, setAutoSearchDone] = useState(false);
+  const [autoSelectionDone, setAutoSelectionDone] = useState(false);
   const [checkoutState, setCheckoutState] = useState(initialDraft?.checkoutState || {
     firstName: '',
     lastName: '',
@@ -228,14 +245,17 @@ export default function PublicBookingPage() {
       const selectedSlug = payload?.selectedTenant?.slug || '';
       setTenantSlug(selectedSlug);
       const firstLocationId = payload?.locations?.[0] ? publicLocationLabel(payload.locations[0]) : '';
+      const preferredPickupLocation = locationLabelFromId(payload?.locations, queryPickupLocationId) || firstLocationId;
+      const preferredReturnLocation = locationLabelFromId(payload?.locations, queryReturnLocationId) || preferredPickupLocation || firstLocationId;
       setPickupLocationId((current) =>
-        payload?.locations?.some((item) => publicLocationLabel(item) === current) ? current : firstLocationId
+        payload?.locations?.some((item) => publicLocationLabel(item) === current) ? current : preferredPickupLocation
       );
       setReturnLocationId((current) =>
-        payload?.locations?.some((item) => publicLocationLabel(item) === current) ? current : firstLocationId
+        payload?.locations?.some((item) => publicLocationLabel(item) === current) ? current : preferredReturnLocation
       );
       setVehicleTypeId((current) => {
         if (current && payload?.vehicleTypes?.some((item) => item.id === current)) return current;
+        if (queryVehicleTypeId && payload?.vehicleTypes?.some((item) => item.id === queryVehicleTypeId)) return queryVehicleTypeId;
         return '';
       });
     } catch (err) {
@@ -246,7 +266,8 @@ export default function PublicBookingPage() {
   };
 
   useEffect(() => {
-    loadBootstrap('');
+    loadBootstrap(queryTenantSlug || initialDraft?.tenantSlug || '');
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
@@ -294,6 +315,26 @@ export default function PublicBookingPage() {
     setSelectedServices(buildServiceSelectionState(selectedResult, searchMode));
     setInsuranceSelection(buildInsuranceSelectionState(selectedResult, searchMode));
   }, [selectedResult, searchMode]);
+
+  useEffect(() => {
+    if (autoSearchDone || loadingBootstrap || !bootstrap) return;
+    const shouldAutoSearch = !!queryVehicleTypeId || (!!queryPickupLocationId && !!queryPickupAt && !!queryReturnAt);
+    if (!shouldAutoSearch) return;
+    if (!pickupLocationId) return;
+    setAutoSearchDone(true);
+    runSearch();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoSearchDone, bootstrap, loadingBootstrap, pickupLocationId]);
+
+  useEffect(() => {
+    if (autoSelectionDone || !queryVehicleTypeId || !results?.results?.length) return;
+    const match = results.results.find((row) => String(row?.vehicleType?.id || '') === String(queryVehicleTypeId));
+    setAutoSelectionDone(true);
+    if (!match) return;
+    setSelectedResult(match);
+    goToStep('checkout');
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoSelectionDone, queryVehicleTypeId, results]);
 
   const locations = bootstrap?.locations || [];
   const vehicleTypes = bootstrap?.vehicleTypes || [];
@@ -456,26 +497,39 @@ export default function PublicBookingPage() {
   };
 
   return (
-    <main style={{ minHeight: '100vh', padding: '22px clamp(16px, 3vw, 34px) 42px' }}>
-      <div style={{ maxWidth: 1380, margin: '0 auto', display: 'grid', gap: 18 }}>
-        <section className="glass card-lg page-hero">
-          <div className="hero-grid">
-            <div className="hero-copy">
-              <span className="eyebrow">Ride Fleet Marketplace</span>
-              <h1 className="page-title" style={{ fontSize: 'clamp(30px, 5vw, 54px)', lineHeight: 1.02 }}>
-                Find the right vehicle for your dates, location, and trip.
-              </h1>
-              <p>
-                Browse rental inventory and car sharing supply from one public booking flow built around where and when you need the vehicle.
-              </p>
-              <div className="hero-meta">
-                <span className="hero-pill">Location-first search</span>
-                <span className="hero-pill">Guided steps</span>
-                <span className="hero-pill">Rental + Car Sharing</span>
+    <main className={embedMode ? 'public-booking-shell public-booking-shell-embed' : 'public-booking-shell'}>
+      <div className={embedMode ? 'public-booking-layout public-booking-layout-embed' : 'public-booking-layout'}>
+        {embedMode ? (
+          <section className="glass card-lg section-card">
+            <div className="row-between">
+              <div>
+                <span className="eyebrow">Ride Fleet Booking</span>
+                <div className="section-title">Reserve a vehicle without leaving your website.</div>
+                <p className="ui-muted">Search availability, choose a vehicle class, and complete the booking flow here.</p>
+              </div>
+              <span className="status-chip neutral">{searchMode === 'RENTAL' ? 'Rental Flow' : 'Car Sharing Flow'}</span>
+            </div>
+          </section>
+        ) : (
+          <section className="glass card-lg page-hero">
+            <div className="hero-grid">
+              <div className="hero-copy">
+                <span className="eyebrow">Ride Fleet Marketplace</span>
+                <h1 className="page-title" style={{ fontSize: 'clamp(30px, 5vw, 54px)', lineHeight: 1.02 }}>
+                  Find the right vehicle for your dates, location, and trip.
+                </h1>
+                <p>
+                  Browse rental inventory and car sharing supply from one public booking flow built around where and when you need the vehicle.
+                </p>
+                <div className="hero-meta">
+                  <span className="hero-pill">Location-first search</span>
+                  <span className="hero-pill">Guided steps</span>
+                  <span className="hero-pill">Rental + Car Sharing</span>
+                </div>
               </div>
             </div>
-          </div>
-        </section>
+          </section>
+        )}
 
         <section className="glass card-lg section-card">
           <div className="row-between">
@@ -1233,5 +1287,24 @@ export default function PublicBookingPage() {
         ) : null}
       </div>
     </main>
+  );
+}
+
+export default function PublicBookingPage() {
+  return (
+    <Suspense
+      fallback={(
+        <main className="public-booking-shell">
+          <div className="public-booking-layout">
+            <section className="glass card-lg section-card">
+              <div className="section-title">Loading booking experience...</div>
+              <p className="ui-muted">Preparing the public booking flow.</p>
+            </section>
+          </div>
+        </main>
+      )}
+    >
+      <PublicBookingPageInner />
+    </Suspense>
   );
 }

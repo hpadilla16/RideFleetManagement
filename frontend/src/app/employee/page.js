@@ -541,6 +541,7 @@ function EmployeeAppInner({ token, me, logout }) {
             <Link href="/loaner"><button type="button" className="button-subtle">Loaner Dashboard</button></Link>
             <Link href="/issues"><button type="button" className="button-subtle">Issue Center</button></Link>
             <Link href="/planner"><button type="button" className="button-subtle">Planner</button></Link>
+            <Link href="/knowledge-base"><button type="button" className="button-subtle">Knowledge Base</button></Link>
           </div>
         </section>
 
