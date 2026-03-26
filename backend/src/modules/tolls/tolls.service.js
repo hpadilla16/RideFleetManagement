@@ -357,6 +357,19 @@ async function refreshReservationEstimatedTotal(reservationId) {
   return estimatedTotal;
 }
 
+function reviewActionLabel(action) {
+  switch (String(action || '').toUpperCase()) {
+    case 'RESET_MATCH':
+      return 'match reset';
+    case 'MARK_DISPUTED':
+      return 'marked disputed';
+    case 'MARK_NOT_BILLABLE':
+      return 'marked not billable';
+    default:
+      return 'review updated';
+  }
+}
+
 export const tollsService = {
   async getDashboard(scope = {}, filters = {}) {
     await ensureTenantAllowsTolls(scope);
@@ -668,6 +681,84 @@ export const tollsService = {
 
     await refreshReservationEstimatedTotal(transaction.reservationId);
     return serializeTransaction(await getTransactionOrThrow(transaction.id, scope));
+  },
+
+  async applyReviewAction(id, payload = {}, scope = {}, actorUserId = null) {
+    await ensureTenantAllowsTolls(scope);
+    const transaction = await getTransactionOrThrow(id, scope);
+    const action = String(payload.action || '').toUpperCase();
+    const note = String(payload.note || '').trim();
+    if (!['RESET_MATCH', 'MARK_DISPUTED', 'MARK_NOT_BILLABLE'].includes(action)) {
+      throw new Error('Unsupported toll review action');
+    }
+
+    await prisma.$transaction(async (tx) => {
+      if (action === 'RESET_MATCH') {
+        await tx.tollAssignment.updateMany({
+          where: {
+            tollTransactionId: transaction.id,
+            status: { in: ['SUGGESTED', 'AUTO_CONFIRMED', 'CONFIRMED'] }
+          },
+          data: { status: 'REJECTED' }
+        });
+
+        await tx.tollTransaction.update({
+          where: { id: transaction.id },
+          data: {
+            reservationId: null,
+            status: 'NEEDS_REVIEW',
+            needsReview: true,
+            matchConfidence: null,
+            billingStatus: transaction.billingStatus === 'DISPUTED' ? 'DISPUTED' : 'PENDING',
+            reviewNotes: mergeChargeNotes(transaction.reviewNotes, note || 'Match reset for manual review')
+          }
+        });
+      }
+
+      if (action === 'MARK_DISPUTED') {
+        await tx.tollTransaction.update({
+          where: { id: transaction.id },
+          data: {
+            status: 'DISPUTED',
+            billingStatus: 'DISPUTED',
+            needsReview: true,
+            reviewNotes: mergeChargeNotes(transaction.reviewNotes, note || 'Marked disputed')
+          }
+        });
+      }
+
+      if (action === 'MARK_NOT_BILLABLE') {
+        await tx.tollTransaction.update({
+          where: { id: transaction.id },
+          data: {
+            status: 'VOID',
+            billingStatus: 'WAIVED',
+            needsReview: false,
+            reviewNotes: mergeChargeNotes(transaction.reviewNotes, note || 'Marked not billable')
+          }
+        });
+      }
+
+      await tx.auditLog.create({
+        data: {
+          tenantId: transaction.tenantId,
+          reservationId: transaction.reservationId || null,
+          actorUserId: actorUserId || null,
+          action: 'UPDATE',
+          metadata: JSON.stringify({
+            tollReviewAction: action,
+            tollTransactionId: transaction.id,
+            note: note || null
+          })
+        }
+      });
+    });
+
+    return {
+      action,
+      actionLabel: reviewActionLabel(action),
+      transaction: serializeTransaction(await getTransactionOrThrow(transaction.id, scope))
+    };
   },
 
   async listReservationTolls(reservationId, scope = {}) {

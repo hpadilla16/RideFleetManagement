@@ -24,6 +24,45 @@ function money(value) {
   return `$${Number(Number(value || 0).toFixed(2)).toFixed(2)}`;
 }
 
+function normalizeHeader(value) {
+  return String(value || '').trim().toLowerCase().replace(/[^a-z0-9]+/g, '');
+}
+
+function parseBulkImportRows(text) {
+  const rawLines = String(text || '').split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+  if (!rawLines.length) return [];
+
+  const delimiter = rawLines[0].includes('\t') ? '\t' : ',';
+  const splitLine = (line) => line.split(delimiter).map((part) => part.trim());
+  const header = splitLine(rawLines[0]).map(normalizeHeader);
+  const hasHeader = header.some((cell) => ['transactionat', 'datetime', 'date', 'timestamp', 'amount', 'plate', 'tag', 'sello', 'sticker'].includes(cell));
+  const rows = (hasHeader ? rawLines.slice(1) : rawLines).map((line) => splitLine(line)).filter((parts) => parts.some(Boolean));
+  const columnIndex = (aliases, fallback) => {
+    const idx = header.findIndex((cell) => aliases.includes(cell));
+    return idx >= 0 ? idx : fallback;
+  };
+
+  const dateIdx = columnIndex(['transactionat', 'datetime', 'date', 'timestamp'], 0);
+  const amountIdx = columnIndex(['amount', 'tollamount', 'charge'], 1);
+  const locationIdx = columnIndex(['location', 'plaza'], 2);
+  const laneIdx = columnIndex(['lane', 'directionlane'], 3);
+  const directionIdx = columnIndex(['direction'], 4);
+  const plateIdx = columnIndex(['plate', 'licenseplate', 'tablilla'], 5);
+  const tagIdx = columnIndex(['tag', 'tolltag', 'tagnumber'], 6);
+  const selloIdx = columnIndex(['sello', 'sticker', 'tollsticker', 'stickernumber'], 7);
+
+  return rows.map((parts) => ({
+    transactionAt: parts[dateIdx] || '',
+    amount: Number(parts[amountIdx] || 0),
+    location: parts[locationIdx] || '',
+    lane: parts[laneIdx] || '',
+    direction: parts[directionIdx] || '',
+    plate: parts[plateIdx] || '',
+    tag: parts[tagIdx] || '',
+    sello: parts[selloIdx] || ''
+  })).filter((row) => row.transactionAt && Number.isFinite(row.amount) && row.amount > 0);
+}
+
 function TollsInner({ token, me, logout }) {
   const role = String(me?.role || '').toUpperCase();
   const isSuper = role === 'SUPER_ADMIN';
@@ -34,6 +73,7 @@ function TollsInner({ token, me, logout }) {
   const [statusFilter, setStatusFilter] = useState('');
   const [reviewOnly, setReviewOnly] = useState(true);
   const [query, setQuery] = useState('');
+  const [bulkImportText, setBulkImportText] = useState('');
   const [importForm, setImportForm] = useState(() => ({
     ...EMPTY_IMPORT_FORM,
     transactionAt: new Date().toISOString().slice(0, 16)
@@ -119,6 +159,28 @@ function TollsInner({ token, me, logout }) {
     }
   };
 
+  const saveBulkImport = async () => {
+    const rows = parseBulkImportRows(bulkImportText);
+    if (!rows.length) {
+      setMsg('Paste CSV rows with transactionAt, amount, location, lane, direction, plate, tag, sello');
+      return;
+    }
+    try {
+      setBusyId('bulk-import');
+      await api(scopedTollsPath('/api/tolls/transactions/manual-import'), {
+        method: 'POST',
+        body: JSON.stringify({ rows })
+      }, token);
+      setBulkImportText('');
+      setMsg(`${rows.length} toll transactions imported`);
+      await load();
+    } catch (error) {
+      setMsg(error.message);
+    } finally {
+      setBusyId('');
+    }
+  };
+
   const confirmMatch = async (row) => {
     const reservationId = row?.latestAssignment?.reservation?.id || '';
     const reservationNumber = reservationDrafts[row.id] || '';
@@ -152,6 +214,28 @@ function TollsInner({ token, me, logout }) {
         body: JSON.stringify({})
       }, token);
       setMsg('Toll posted to reservation charges');
+      await load();
+    } catch (error) {
+      setMsg(error.message);
+    } finally {
+      setBusyId('');
+    }
+  };
+
+  const runReviewAction = async (row, action) => {
+    const notePrompt = action === 'MARK_DISPUTED'
+      ? 'Optional dispute note'
+      : action === 'MARK_NOT_BILLABLE'
+        ? 'Optional waiver note'
+        : 'Optional reset note';
+    const note = window.prompt(notePrompt, '') || '';
+    try {
+      setBusyId(`${action}-${row.id}`);
+      const out = await api(scopedTollsPath(`/api/tolls/transactions/${row.id}/review-action`), {
+        method: 'POST',
+        body: JSON.stringify({ action, note })
+      }, token);
+      setMsg(`Toll ${out?.actionLabel || 'updated'}`);
       await load();
     } catch (error) {
       setMsg(error.message);
@@ -242,6 +326,26 @@ function TollsInner({ token, me, logout }) {
         </div>
 
         <div className="glass card section-card">
+          <div className="section-title">Bulk CSV Import</div>
+          <div className="surface-note" style={{ marginBottom: 10 }}>
+            Paste CSV or tab-separated rows in this order:
+            <br />
+            <code>transactionAt, amount, location, lane, direction, plate, tag, sello</code>
+          </div>
+          <textarea
+            rows={7}
+            placeholder={'transactionAt,amount,location,lane,direction,plate,tag,sello\n2026-03-26T00:41,5.00,Plaza Norte,Lane 1,North,BBTB1,0202,0202'}
+            value={bulkImportText}
+            onChange={(e) => setBulkImportText(e.target.value)}
+          />
+          <div className="inline-actions" style={{ marginTop: 10 }}>
+            <button type="button" disabled={busyId === 'bulk-import' || (isSuper && !activeTenantId)} onClick={saveBulkImport}>
+              {busyId === 'bulk-import' ? 'Importing...' : 'Import CSV Rows'}
+            </button>
+          </div>
+        </div>
+
+        <div className="glass card section-card">
           <div className="row-between">
             <div className="section-title">Review Queue</div>
             <div className="inline-actions">
@@ -252,6 +356,8 @@ function TollsInner({ token, me, logout }) {
                 <option value="MATCHED">Matched</option>
                 <option value="NEEDS_REVIEW">Needs Review</option>
                 <option value="BILLED">Billed</option>
+                <option value="DISPUTED">Disputed</option>
+                <option value="VOID">Void / Not Billable</option>
               </select>
               <label className="label"><input type="checkbox" checked={reviewOnly} onChange={(e) => setReviewOnly(e.target.checked)} /> Review only</label>
               <button type="button" onClick={load}>Refresh</button>
@@ -329,6 +435,21 @@ function TollsInner({ token, me, logout }) {
                       {row.reservation?.id && row.billingStatus === 'PENDING' ? (
                         <button type="button" onClick={() => postToReservation(row)} disabled={busyId === `post-${row.id}`}>
                           {busyId === `post-${row.id}` ? 'Posting...' : 'Post To Reservation'}
+                        </button>
+                      ) : null}
+                      {(row.latestAssignment?.reservation || row.reservation?.id) ? (
+                        <button type="button" className="button-subtle" onClick={() => runReviewAction(row, 'RESET_MATCH')} disabled={busyId === `RESET_MATCH-${row.id}`}>
+                          {busyId === `RESET_MATCH-${row.id}` ? 'Resetting...' : 'Reset Match'}
+                        </button>
+                      ) : null}
+                      {row.billingStatus !== 'DISPUTED' ? (
+                        <button type="button" className="button-subtle" onClick={() => runReviewAction(row, 'MARK_DISPUTED')} disabled={busyId === `MARK_DISPUTED-${row.id}`}>
+                          {busyId === `MARK_DISPUTED-${row.id}` ? 'Saving...' : 'Mark Disputed'}
+                        </button>
+                      ) : null}
+                      {row.billingStatus !== 'WAIVED' ? (
+                        <button type="button" className="button-subtle" onClick={() => runReviewAction(row, 'MARK_NOT_BILLABLE')} disabled={busyId === `MARK_NOT_BILLABLE-${row.id}`}>
+                          {busyId === `MARK_NOT_BILLABLE-${row.id}` ? 'Saving...' : 'Mark Not Billable'}
                         </button>
                       ) : null}
                     </div>

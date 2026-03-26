@@ -78,6 +78,17 @@ tollsRouter.post('/transactions/:id/post-to-reservation', requireRole('ADMIN', '
   }
 });
 
+tollsRouter.post('/transactions/:id/review-action', requireRole('ADMIN', 'OPS'), async (req, res, next) => {
+  try {
+    res.json(await tollsService.applyReviewAction(req.params.id, req.body || {}, scopeFor(req), req.user?.id || req.user?.sub || null));
+  } catch (error) {
+    if (/not found|required|enabled|unsupported/i.test(String(error?.message || ''))) {
+      return res.status(400).json({ error: error.message });
+    }
+    next(error);
+  }
+});
+
 tollsRouter.get('/reservations/:reservationId', async (req, res, next) => {
   try {
     res.json(await tollsService.listReservationTolls(req.params.reservationId, scopeFor(req)));
