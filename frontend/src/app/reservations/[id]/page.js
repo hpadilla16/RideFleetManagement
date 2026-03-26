@@ -138,6 +138,7 @@ function ReservationDetailInner({ token, me, logout }) {
   const [serviceOptions, setServiceOptions] = useState([]);
   const [feeOptions, setFeeOptions] = useState([]);
   const [insurancePlans, setInsurancePlans] = useState([]);
+  const [tollSummary, setTollSummary] = useState(null);
   const [servicePick, setServicePick] = useState('');
   const [feePick, setFeePick] = useState('');
   const [msg, setMsg] = useState('');
@@ -198,7 +199,7 @@ function ReservationDetailInner({ token, me, logout }) {
     try { return decodeURIComponent(escape(s)); } catch { return s; }
   };
   const load = async () => {
-    const [r, l, c, v, svc, fee, ip, pricingOut, paymentsOut, logsOut] = await Promise.all([
+    const [r, l, c, v, svc, fee, ip, pricingOut, paymentsOut, logsOut, tollsOut] = await Promise.all([
       api(`/api/reservations/${id}`, {}, token),
       api('/api/locations', {}, token),
       api('/api/customers', {}, token),
@@ -208,7 +209,8 @@ function ReservationDetailInner({ token, me, logout }) {
       api('/api/settings/insurance-plans', {}, token).catch(() => []),
       api(`/api/reservations/${id}/pricing`, {}, token).catch(() => null),
       api(`/api/reservations/${id}/payments`, {}, token).catch(() => []),
-      api(`/api/reservations/${id}/audit-logs`, {}, token).catch(() => [])
+      api(`/api/reservations/${id}/audit-logs`, {}, token).catch(() => []),
+      api(`/api/tolls/reservations/${id}`, {}, token).catch(() => null)
     ]);
     setRow(r);
     setPricing(pricingOut);
@@ -220,6 +222,7 @@ function ReservationDetailInner({ token, me, logout }) {
     setServiceOptions(Array.isArray(svc) ? svc : []);
     setFeeOptions(Array.isArray(fee) ? fee : []);
     setInsurancePlans(Array.isArray(ip) ? ip : []);
+    setTollSummary(tollsOut);
     setForm({
       customerId: r.customerId || '',
       pickupAt: r.pickupAt ? new Date(r.pickupAt).toISOString().slice(0, 16) : '',
@@ -301,6 +304,19 @@ function ReservationDetailInner({ token, me, logout }) {
       await load();
       setMsg(`Reservation set to ${status}`);
     } catch (e) { setMsg(e.message); }
+  };
+
+  const postReservationToll = async (transactionId) => {
+    try {
+      await api(`/api/tolls/transactions/${transactionId}/post-to-reservation`, {
+        method: 'POST',
+        body: JSON.stringify({})
+      }, token);
+      setMsg('Toll posted to reservation charges');
+      await load();
+    } catch (e) {
+      setMsg(e.message);
+    }
   };
 
   const startCheckout = () => router.push(`/agreements?start=${id}`);
@@ -1633,6 +1649,49 @@ setMsg('Charges updated');
               <button className="ios-action-btn" onClick={() => router.push(`/reservations/${id}/inspection-report`)}>Print Inspection Report</button>
               <button className="ios-action-btn" onClick={() => router.push(`/reservations/${id}/ops-view`)}>Vehicle Ops View</button>
             </div>
+          </div>
+
+          <div className="glass card" style={{ marginTop: 12, padding: 10 }}>
+            <div className="row-between" style={{ marginBottom: 8 }}>
+              <div style={{ fontWeight: 700 }}>Toll Review</div>
+              <div className="label" style={{ textTransform: 'none', letterSpacing: 0 }}>
+                {tollSummary?.totals?.reviewCount ? `${tollSummary.totals.reviewCount} need review` : 'Reservation-linked tolls'}
+              </div>
+            </div>
+            <div className="grid2" style={{ marginBottom: 10 }}>
+              <div><span className="label">Total Tolls</span><div>{money(tollSummary?.totals?.totalAmount || 0)}</div></div>
+              <div><span className="label">Posted To Charges</span><div>{money(tollSummary?.totals?.postedAmount || 0)}</div></div>
+            </div>
+            {Array.isArray(tollSummary?.transactions) && tollSummary.transactions.length ? (
+              <div className="stack" style={{ gap: 8 }}>
+                {tollSummary.transactions.map((toll) => (
+                  <div key={toll.id} className="surface-note" style={{ display: 'grid', gap: 8 }}>
+                    <div className="row-between" style={{ marginBottom: 0 }}>
+                      <strong>{money(toll.amount)} {toll.location ? `- ${toll.location}` : ''}</strong>
+                      <span className={`status-chip ${toll.needsReview ? 'warn' : toll.billingStatus === 'POSTED_TO_RESERVATION' ? 'good' : 'neutral'}`}>
+                        {toll.needsReview ? 'Needs review' : toll.billingStatus.replaceAll('_', ' ').toLowerCase()}
+                      </span>
+                    </div>
+                    <div className="label" style={{ textTransform: 'none', letterSpacing: 0 }}>
+                      {new Date(toll.transactionAt).toLocaleString()} · Plate {toll.plateRaw || '-'} · Tag {toll.tagRaw || '-'} · Sello {toll.selloRaw || '-'}
+                    </div>
+                    <div className="label" style={{ textTransform: 'none', letterSpacing: 0 }}>
+                      Match: {toll.latestAssignment?.matchReason || toll.reviewNotes || 'reservation-linked'} · Score {toll.latestAssignment?.confidence ?? toll.matchConfidence ?? 0}
+                    </div>
+                    {toll.billingStatus === 'PENDING' ? (
+                      <div className="inline-actions">
+                        <button type="button" className="button-subtle" onClick={() => postReservationToll(toll.id)}>Post Toll To Charges</button>
+                        <button type="button" className="button-subtle" onClick={() => router.push('/tolls')}>Open Toll Queue</button>
+                      </div>
+                    ) : null}
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="surface-note">
+                No tolls are linked to this reservation yet. Once imported into the tenant toll queue, matching uses the assigned vehicle, toll tag, toll sticker, and pickup/return timestamps.
+              </div>
+            )}
           </div>
 
           <div style={{ marginTop: 12 }}>

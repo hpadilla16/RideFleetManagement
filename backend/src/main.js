@@ -25,6 +25,7 @@ import { hostAppRouter } from './modules/host-app/host-app.routes.js';
 import { employeeAppRouter } from './modules/employee-app/employee-app.routes.js';
 import { dealershipLoanerRouter } from './modules/dealership-loaner/dealership-loaner.routes.js';
 import { issueCenterRouter, publicIssueCenterRouter } from './modules/issue-center/issue-center.routes.js';
+import { tollsRouter } from './modules/tolls/tolls.routes.js';
 import { buildOpenApiSpec, swaggerHtml } from './docs/openapi.js';
 
 assertAuthConfig();
@@ -54,6 +55,7 @@ app.use('/api/host-app', requireAuth, requireModuleAccess('hostApp'), hostAppRou
 app.use('/api/employee-app', requireAuth, requireModuleAccess('employeeApp'), employeeAppRouter);
 app.use('/api/dealership-loaner', requireAuth, requireModuleAccess('loaner'), dealershipLoanerRouter);
 app.use('/api/issue-center', requireAuth, requireModuleAccess('issueCenter'), issueCenterRouter);
+app.use('/api/tolls', requireAuth, requireModuleAccess('tolls'), tollsRouter);
 
 app.use('/api/reservations', requireAuth, requireModuleAccess('reservations'), reservationsRouter);
 app.use('/api/customers', requireAuth, requireModuleAccess('customers'), customersRouter);
