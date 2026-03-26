@@ -91,6 +91,9 @@ async function waitForAutoExpresoTransactionState(page, timeoutMs = 30000) {
       if ((hasUsername && hasPassword) || window.location.pathname.includes('/login')) {
         return 'login';
       }
+      if (bodyText.includes('estado de cuenta') || bodyText.includes('seleccione el mes y ano deseado') || bodyText.includes('seleccione el mes y año deseado')) {
+        return 'account-statements';
+      }
       if (bodyText.includes('captcha') || bodyText.includes('robot')) {
         return 'captcha';
       }
@@ -820,7 +823,10 @@ export const tollsService = {
       const transactionState = await waitForAutoExpresoTransactionState(page, 30000);
       if (transactionState !== 'transactions') {
         const pageState = await captureAutoExpresoPageState(page);
-        throw new Error(`AutoExpreso sync could not open transactions (${transactionState}). URL: ${pageState.url || 'unknown'} | Title: ${pageState.title || 'unknown'}${pageState.hint ? ` | Hint: ${pageState.hint}` : ''}`);
+        const accountStatementHint = transactionState === 'account-statements'
+          ? ' | This AutoExpreso account is landing on monthly account statements instead of the legacy live transaction feed. Use manual/CSV import for now or add monthly statement ingestion for this tenant.'
+          : '';
+        throw new Error(`AutoExpreso sync could not open transactions (${transactionState}). URL: ${pageState.url || 'unknown'} | Title: ${pageState.title || 'unknown'}${pageState.hint ? ` | Hint: ${pageState.hint}` : ''}${accountStatementHint}`);
       }
 
       const rows = [];
