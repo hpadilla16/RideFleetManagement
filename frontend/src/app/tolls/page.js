@@ -256,7 +256,10 @@ function TollsInner({ token, me, logout }) {
         method: 'POST',
         body: JSON.stringify({ action, note })
       }, token);
-      setMsg(`Toll ${out?.actionLabel || 'updated'}`);
+      const issueMessage = action === 'MARK_DISPUTED' && out?.issueIncident?.id
+        ? ` | Issue Center case ${out.issueIncident.id} ${out?.issueIncident?.title ? `(${out.issueIncident.title})` : ''}`
+        : '';
+      setMsg(`Toll ${out?.actionLabel || 'updated'}${issueMessage}`);
       await load();
     } catch (error) {
       setMsg(error.message);

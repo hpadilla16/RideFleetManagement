@@ -477,6 +477,9 @@ async function createIncidentForTrip(trip, payload, actor = {}) {
   if (!type) throw new Error('type is required');
   if (!title) throw new Error('title is required');
   const description = payload?.description ? String(payload.description).trim() : null;
+  const evidenceJson = payload?.evidenceJson
+    ? (typeof payload.evidenceJson === 'string' ? payload.evidenceJson : JSON.stringify(payload.evidenceJson))
+    : null;
   const amountClaimed = payload?.amountClaimed === '' || payload?.amountClaimed == null
     ? null
     : Number(payload.amountClaimed);
@@ -484,14 +487,15 @@ async function createIncidentForTrip(trip, payload, actor = {}) {
   const incident = await prisma.tripIncident.create({
     data: {
       tripId: trip.id,
-      type,
-      status: 'OPEN',
-      title,
-      description,
-      amountClaimed: amountClaimed == null ? null : amountClaimed
-    },
-    include: incidentInclude()
-  });
+        type,
+        status: 'OPEN',
+        title,
+        description,
+        evidenceJson,
+        amountClaimed: amountClaimed == null ? null : amountClaimed
+      },
+      include: incidentInclude()
+    });
 
   await flagTripDisputed(trip.id);
   await createIncidentEvent(incident, actor.actorType || 'SYSTEM', actor.actorRefId || null, 'TRIP_INCIDENT_OPENED', title, {
@@ -524,6 +528,9 @@ async function createIncidentForReservation(reservation, payload, actor = {}) {
   if (!type) throw new Error('type is required');
   if (!title) throw new Error('title is required');
   const description = payload?.description ? String(payload.description).trim() : null;
+  const evidenceJson = payload?.evidenceJson
+    ? (typeof payload.evidenceJson === 'string' ? payload.evidenceJson : JSON.stringify(payload.evidenceJson))
+    : null;
   const amountClaimed = payload?.amountClaimed === '' || payload?.amountClaimed == null
     ? null
     : Number(payload.amountClaimed);
@@ -531,14 +538,15 @@ async function createIncidentForReservation(reservation, payload, actor = {}) {
   const incident = await prisma.tripIncident.create({
     data: {
       reservationId: reservation.id,
-      type,
-      status: 'OPEN',
-      title,
-      description,
-      amountClaimed: amountClaimed == null ? null : amountClaimed
-    },
-    include: incidentInclude()
-  });
+        type,
+        status: 'OPEN',
+        title,
+        description,
+        evidenceJson,
+        amountClaimed: amountClaimed == null ? null : amountClaimed
+      },
+      include: incidentInclude()
+    });
 
   await createIncidentEvent(incident, actor.actorType || 'SYSTEM', actor.actorRefId || null, 'TRIP_INCIDENT_OPENED', title, {
     type,
@@ -1184,5 +1192,61 @@ export const issueCenterService = {
       actorRefId: user?.id || user?.sub || null,
       source: 'host-app'
     });
+  },
+
+  async createTollDisputeIncident(user, input = {}) {
+    const reservationId = input?.reservationId ? String(input.reservationId) : '';
+    const tollTransactionId = input?.tollTransactionId ? String(input.tollTransactionId) : '';
+    if (!reservationId) throw new Error('reservationId is required');
+    if (!tollTransactionId) throw new Error('tollTransactionId is required');
+
+    const reservation = await prisma.reservation.findFirst({
+      where: {
+        id: reservationId,
+        ...tenantWhereFor(user)
+      },
+      include: incidentInclude().reservation.include
+    });
+    if (!reservation) throw new Error('Reservation not found for toll dispute');
+
+    const existing = await prisma.tripIncident.findFirst({
+      where: {
+        reservationId,
+        type: 'TOLL',
+        evidenceJson: {
+          contains: tollTransactionId
+        }
+      },
+      include: incidentInclude()
+    });
+    if (existing) {
+      return {
+        created: false,
+        incident: (await attachHistory([existing]))[0]
+      };
+    }
+
+    const incident = await createIncidentForReservation(reservation, {
+      type: 'TOLL',
+      title: String(input.title || 'Toll dispute').trim(),
+      description: String(input.description || '').trim() || null,
+      amountClaimed: input.amountClaimed == null ? null : Number(input.amountClaimed),
+      evidenceJson: {
+        source: 'tolls-module',
+        tollTransactionId,
+        tollAmount: input.amountClaimed == null ? null : money(input.amountClaimed),
+        tollLocation: input.location || '',
+        tollTransactionAt: input.transactionAt || null
+      }
+    }, {
+      actorType: 'TENANT_USER',
+      actorRefId: user?.id || user?.sub || null,
+      source: 'tolls-module'
+    });
+
+    return {
+      created: true,
+      incident
+    };
   }
 };

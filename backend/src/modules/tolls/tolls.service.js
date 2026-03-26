@@ -1,4 +1,5 @@
 import { prisma } from '../../lib/prisma.js';
+import { issueCenterService } from '../issue-center/issue-center.service.js';
 
 const DEFAULT_PRE_PICKUP_GRACE_MINUTES = 120;
 const DEFAULT_POST_RETURN_GRACE_MINUTES = 180;
@@ -1645,9 +1646,43 @@ export const tollsService = {
       });
     });
 
+    let issueIncident = null;
+    if (action === 'MARK_DISPUTED' && transaction.reservationId) {
+      const issueResult = await issueCenterService.createTollDisputeIncident({
+        id: actorUserId || null,
+        sub: actorUserId || null,
+        tenantId: transaction.tenantId || scope?.tenantId || null
+      }, {
+        reservationId: transaction.reservationId,
+        tollTransactionId: transaction.id,
+        title: `Toll dispute - ${transaction.location || transaction.plateRaw || transaction.id}`,
+        description: [
+          note || '',
+          transaction.location ? `Location: ${transaction.location}` : '',
+          transaction.plateRaw ? `Plate: ${transaction.plateRaw}` : '',
+          transaction.selloRaw ? `Sticker: ${transaction.selloRaw}` : '',
+          transaction.transactionAt ? `Transaction at: ${new Date(transaction.transactionAt).toISOString()}` : ''
+        ].filter(Boolean).join('\n'),
+        amountClaimed: toMoney(transaction.amount),
+        location: transaction.location || '',
+        transactionAt: transaction.transactionAt || null
+      });
+      issueIncident = issueResult?.incident || null;
+
+      if (issueIncident?.id) {
+        await prisma.tollTransaction.update({
+          where: { id: transaction.id },
+          data: {
+            reviewNotes: mergeChargeNotes(transaction.reviewNotes, `Issue Center case ${issueIncident.id} ${issueResult?.created ? 'opened' : 'linked'} for toll dispute`)
+          }
+        });
+      }
+    }
+
     return {
       action,
       actionLabel: reviewActionLabel(action),
+      issueIncident,
       transaction: serializeTransaction(await getTransactionOrThrow(transaction.id, scope))
     };
   },
