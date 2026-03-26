@@ -383,6 +383,15 @@ function TollsInner({ token, me, logout }) {
 
         {msg ? <div className="label">{msg}</div> : null}
 
+        {dashboard && dashboard.tollsEnabled === false ? (
+          <div className="glass card section-card">
+            <div className="section-title">Tolls Module Disabled</div>
+            <div className="surface-note">
+              Enable <strong>Tolls</strong> for this tenant in the tenant/module controls before using AutoExpreso sync, imports, or review queue.
+            </div>
+          </div>
+        ) : null}
+
         <div className="glass card section-card">
           <div className="row-between">
             <div className="section-title">Automatic AutoExpreso Sync</div>

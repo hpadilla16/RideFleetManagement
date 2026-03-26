@@ -360,6 +360,22 @@ async function ensureTenantAllowsTolls(scope = {}) {
   if (!tenant?.tollsEnabled) throw new Error('Tolls is not enabled for this tenant');
 }
 
+async function getTenantTollsState(scope = {}) {
+  if (!scope?.tenantId) {
+    return { tenantId: null, tollsEnabled: false };
+  }
+
+  const tenant = await prisma.tenant.findUnique({
+    where: { id: scope.tenantId },
+    select: { id: true, tollsEnabled: true }
+  });
+
+  return {
+    tenantId: tenant?.id || scope.tenantId,
+    tollsEnabled: !!tenant?.tollsEnabled
+  };
+}
+
 async function listTenantVehiclesForMatch(scope = {}, transaction = null) {
   const where = tenantWhereForScope(scope);
   if (transaction) {
@@ -660,6 +676,31 @@ function reviewActionLabel(action) {
 
 export const tollsService = {
   async getDashboard(scope = {}, filters = {}) {
+    const tollState = await getTenantTollsState(scope);
+    if (scope?.tenantId && !tollState.tollsEnabled) {
+      return {
+        tollsEnabled: false,
+        metrics: {
+          importedToday: 0,
+          matched: 0,
+          needsReview: 0,
+          postedToBilling: 0,
+          disputed: 0
+        },
+        providerAccount: null,
+        autoSync: {
+          enabled: false,
+          intervalMinutes: 0,
+          startupDelaySeconds: 0,
+          lastAutomaticRunAt: null,
+          nextRunAt: null,
+          lastSweep: null
+        },
+        importRuns: [],
+        transactions: []
+      };
+    }
+
     await ensureTenantAllowsTolls(scope);
     const search = String(filters.q || '').trim();
     const searchFilter = search ? {
@@ -750,6 +791,7 @@ export const tollsService = {
     const latestAutoSyncRun = (importRuns || []).find((run) => String(run.sourceType || '').toUpperCase() === 'AUTOEXPRESO_SYNC') || null;
 
     return {
+      tollsEnabled: true,
       metrics: {
         importedToday,
         matched: matchedCount,
