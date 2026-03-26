@@ -70,6 +70,14 @@ function TollsInner({ token, me, logout }) {
   const [dashboard, setDashboard] = useState(null);
   const [tenantRows, setTenantRows] = useState([]);
   const [activeTenantId, setActiveTenantId] = useState('');
+  const [providerForm, setProviderForm] = useState({
+    username: '',
+    password: '',
+    accountNumber: '',
+    loginUrl: '',
+    notes: '',
+    isActive: true
+  });
   const [statusFilter, setStatusFilter] = useState('');
   const [reviewOnly, setReviewOnly] = useState(true);
   const [query, setQuery] = useState('');
@@ -111,6 +119,15 @@ function TollsInner({ token, me, logout }) {
       if (reviewOnly) params.set('needsReview', 'true');
       const out = await api(scopedTollsPath(`/api/tolls/dashboard${params.toString() ? `?${params.toString()}` : ''}`), {}, token);
       setDashboard(out);
+      const provider = out?.providerAccount || null;
+      setProviderForm((current) => ({
+        username: provider?.username || '',
+        password: '',
+        accountNumber: provider?.accountNumber || '',
+        loginUrl: provider?.settings?.loginUrl || '',
+        notes: provider?.settings?.notes || '',
+        isActive: provider?.isActive !== false
+      }));
       setMsg('');
     } catch (error) {
       setMsg(error.message);
@@ -244,6 +261,22 @@ function TollsInner({ token, me, logout }) {
     }
   };
 
+  const saveProviderAccount = async () => {
+    try {
+      setBusyId('provider-save');
+      await api(scopedTollsPath('/api/tolls/provider-account'), {
+        method: 'PUT',
+        body: JSON.stringify(providerForm)
+      }, token);
+      setMsg('AutoExpreso provider setup saved');
+      await load();
+    } catch (error) {
+      setMsg(error.message);
+    } finally {
+      setBusyId('');
+    }
+  };
+
   return (
     <AppShell me={me} logout={logout}>
       <section className="glass card-lg stack">
@@ -297,6 +330,33 @@ function TollsInner({ token, me, logout }) {
         </div>
 
         {msg ? <div className="label">{msg}</div> : null}
+
+        <div className="glass card section-card">
+          <div className="row-between">
+            <div className="section-title">AutoExpreso Provider Setup</div>
+            <span className={`status-chip ${dashboard?.providerAccount?.isActive ? 'good' : 'neutral'}`}>
+              {dashboard?.providerAccount?.isActive ? 'Provider Ready' : 'Not configured'}
+            </span>
+          </div>
+          <div className="grid2">
+            <input placeholder="AutoExpreso username" value={providerForm.username} onChange={(e) => setProviderForm((prev) => ({ ...prev, username: e.target.value }))} />
+            <input placeholder={dashboard?.providerAccount?.hasPassword ? 'Leave blank to keep current password' : 'AutoExpreso password'} type="password" value={providerForm.password} onChange={(e) => setProviderForm((prev) => ({ ...prev, password: e.target.value }))} />
+            <input placeholder="Account number" value={providerForm.accountNumber} onChange={(e) => setProviderForm((prev) => ({ ...prev, accountNumber: e.target.value }))} />
+            <input placeholder="Login URL (optional)" value={providerForm.loginUrl} onChange={(e) => setProviderForm((prev) => ({ ...prev, loginUrl: e.target.value }))} />
+          </div>
+          <textarea rows={3} placeholder="Provider notes or login behavior notes" value={providerForm.notes} onChange={(e) => setProviderForm((prev) => ({ ...prev, notes: e.target.value }))} />
+          <div className="inline-actions" style={{ marginTop: 10 }}>
+            <label className="label"><input type="checkbox" checked={providerForm.isActive} onChange={(e) => setProviderForm((prev) => ({ ...prev, isActive: e.target.checked }))} /> Active provider account</label>
+            <button type="button" disabled={busyId === 'provider-save' || (isSuper && !activeTenantId)} onClick={saveProviderAccount}>
+              {busyId === 'provider-save' ? 'Saving...' : 'Save Provider Setup'}
+            </button>
+          </div>
+          {dashboard?.providerAccount?.lastSyncStatus || dashboard?.providerAccount?.lastSyncMessage ? (
+            <div className="surface-note" style={{ marginTop: 10 }}>
+              Last sync status: {dashboard?.providerAccount?.lastSyncStatus || 'N/A'}{dashboard?.providerAccount?.lastSyncMessage ? ` | ${dashboard.providerAccount.lastSyncMessage}` : ''}
+            </div>
+          ) : null}
+        </div>
 
         <div className="glass card section-card">
           <div className="section-title">Manual Toll Import</div>
@@ -463,6 +523,38 @@ function TollsInner({ token, me, logout }) {
               ) : null}
             </tbody>
           </table>
+        </div>
+
+        <div className="glass card section-card">
+          <div className="section-title">Recent Import Runs</div>
+          {Array.isArray(dashboard?.importRuns) && dashboard.importRuns.length ? (
+            <table>
+              <thead>
+                <tr>
+                  <th>Started</th>
+                  <th>Source</th>
+                  <th>Status</th>
+                  <th>Imported</th>
+                  <th>Matched</th>
+                  <th>Review</th>
+                </tr>
+              </thead>
+              <tbody>
+                {dashboard.importRuns.map((run) => (
+                  <tr key={run.id}>
+                    <td>{new Date(run.startedAt).toLocaleString()}</td>
+                    <td>{run.sourceType || '-'}</td>
+                    <td>{run.status || '-'}</td>
+                    <td>{run.importedCount}</td>
+                    <td>{run.matchedCount}</td>
+                    <td>{run.reviewCount}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          ) : (
+            <div className="surface-note">Import run history will appear here once provider sync or bulk imports start logging runs.</div>
+          )}
         </div>
       </section>
     </AppShell>

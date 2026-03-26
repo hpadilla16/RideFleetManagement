@@ -43,6 +43,28 @@ tollsRouter.get('/dashboard', async (req, res, next) => {
   }
 });
 
+tollsRouter.get('/provider-account', requireRole('ADMIN', 'OPS'), async (req, res, next) => {
+  try {
+    res.json(await tollsService.getProviderAccount(scopeFor(req)));
+  } catch (error) {
+    if (/required|enabled/i.test(String(error?.message || ''))) {
+      return res.status(400).json({ error: error.message });
+    }
+    next(error);
+  }
+});
+
+tollsRouter.put('/provider-account', requireRole('ADMIN', 'OPS'), async (req, res, next) => {
+  try {
+    res.json(await tollsService.saveProviderAccount(req.body || {}, scopeFor(req)));
+  } catch (error) {
+    if (/required|enabled/i.test(String(error?.message || ''))) {
+      return res.status(400).json({ error: error.message });
+    }
+    next(error);
+  }
+});
+
 tollsRouter.post('/transactions/manual-import', requireRole('ADMIN', 'OPS'), async (req, res, next) => {
   try {
     const rows = Array.isArray(req.body?.rows) ? req.body.rows : [];

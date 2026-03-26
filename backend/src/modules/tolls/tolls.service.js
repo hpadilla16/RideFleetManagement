@@ -55,6 +55,50 @@ function transactionStatusLabel(status) {
   return String(status || '').replaceAll('_', ' ').toLowerCase();
 }
 
+function encodeSecret(value) {
+  return value ? Buffer.from(String(value), 'utf8').toString('base64') : null;
+}
+
+function decodeSecret(value) {
+  if (!value) return '';
+  try {
+    return Buffer.from(String(value), 'base64').toString('utf8');
+  } catch {
+    return '';
+  }
+}
+
+function serializeProviderAccount(row) {
+  if (!row) return null;
+  return {
+    id: row.id,
+    provider: row.provider,
+    isActive: !!row.isActive,
+    username: row.username || '',
+    accountNumber: row.accountNumber || '',
+    settings: safeJsonParse(row.settingsJson, {}),
+    lastSyncAt: row.lastSyncAt,
+    lastSyncStatus: row.lastSyncStatus || '',
+    lastSyncMessage: row.lastSyncMessage || '',
+    hasPassword: !!row.passwordEncrypted
+  };
+}
+
+function serializeImportRun(row) {
+  return {
+    id: row.id,
+    startedAt: row.startedAt,
+    completedAt: row.completedAt,
+    sourceType: row.sourceType || '',
+    status: row.status || '',
+    importedCount: Number(row.importedCount || 0),
+    matchedCount: Number(row.matchedCount || 0),
+    reviewCount: Number(row.reviewCount || 0),
+    errorMessage: row.errorMessage || '',
+    metadata: safeJsonParse(row.metadataJson, {})
+  };
+}
+
 function serializeTransaction(row) {
   const latestAssignment = Array.isArray(row.assignments) && row.assignments.length ? row.assignments[0] : null;
   return {
@@ -393,7 +437,7 @@ export const tollsService = {
       ...searchFilter
     };
 
-    const [transactions, importedToday, matchedCount, reviewCount, billedCount, disputedCount] = await Promise.all([
+    const [transactions, importedToday, matchedCount, reviewCount, billedCount, disputedCount, providerAccount, importRuns] = await Promise.all([
       prisma.tollTransaction.findMany({
         where,
         include: {
@@ -442,7 +486,21 @@ export const tollsService = {
           ...tenantWhereForScope(scope),
           billingStatus: 'DISPUTED'
         }
-      })
+      }),
+      scope?.tenantId ? prisma.tollProviderAccount.findFirst({
+        where: {
+          tenantId: scope.tenantId,
+          provider: 'AUTOEXPRESO'
+        },
+        orderBy: [{ isActive: 'desc' }, { updatedAt: 'desc' }]
+      }) : null,
+      scope?.tenantId ? prisma.tollImportRun.findMany({
+        where: {
+          tenantId: scope.tenantId
+        },
+        orderBy: [{ startedAt: 'desc' }],
+        take: 10
+      }) : []
     ]);
 
     return {
@@ -453,8 +511,72 @@ export const tollsService = {
         postedToBilling: billedCount,
         disputed: disputedCount
       },
+      providerAccount: serializeProviderAccount(providerAccount),
+      importRuns: (importRuns || []).map(serializeImportRun),
       transactions: transactions.map(serializeTransaction)
     };
+  },
+
+  async getProviderAccount(scope = {}) {
+    await ensureTenantAllowsTolls(scope);
+    if (!scope?.tenantId) throw new Error('tenantId is required for toll provider setup');
+    const row = await prisma.tollProviderAccount.findFirst({
+      where: {
+        tenantId: scope.tenantId,
+        provider: 'AUTOEXPRESO'
+      },
+      orderBy: [{ isActive: 'desc' }, { updatedAt: 'desc' }]
+    });
+    return serializeProviderAccount(row);
+  },
+
+  async saveProviderAccount(payload = {}, scope = {}) {
+    await ensureTenantAllowsTolls(scope);
+    if (!scope?.tenantId) throw new Error('tenantId is required for toll provider setup');
+
+    const username = String(payload.username || '').trim();
+    const password = String(payload.password || '').trim();
+    const accountNumber = String(payload.accountNumber || '').trim();
+    const isActive = payload.isActive !== false;
+    const settings = {
+      loginUrl: String(payload.loginUrl || '').trim(),
+      notes: String(payload.notes || '').trim()
+    };
+
+    const existing = await prisma.tollProviderAccount.findFirst({
+      where: {
+        tenantId: scope.tenantId,
+        provider: 'AUTOEXPRESO'
+      },
+      orderBy: [{ isActive: 'desc' }, { updatedAt: 'desc' }]
+    });
+
+    const row = existing
+      ? await prisma.tollProviderAccount.update({
+          where: { id: existing.id },
+          data: {
+            username: username || null,
+            passwordEncrypted: password ? encodeSecret(password) : existing.passwordEncrypted,
+            accountNumber: accountNumber || null,
+            isActive,
+            settingsJson: JSON.stringify(settings),
+            lastSyncStatus: existing.lastSyncStatus || 'READY'
+          }
+        })
+      : await prisma.tollProviderAccount.create({
+          data: {
+            tenantId: scope.tenantId,
+            provider: 'AUTOEXPRESO',
+            username: username || null,
+            passwordEncrypted: password ? encodeSecret(password) : null,
+            accountNumber: accountNumber || null,
+            isActive,
+            settingsJson: JSON.stringify(settings),
+            lastSyncStatus: 'READY'
+          }
+        });
+
+    return serializeProviderAccount(row);
   },
 
   async createManualTransactions(rows = [], scope = {}, actorUserId = null) {
@@ -462,6 +584,33 @@ export const tollsService = {
     if (!scope?.tenantId) throw new Error('tenantId is required for manual toll imports');
     const inputRows = (Array.isArray(rows) ? rows : []).filter(Boolean);
     if (!inputRows.length) throw new Error('rows are required');
+
+    const providerAccount = await prisma.tollProviderAccount.findFirst({
+      where: {
+        tenantId: scope.tenantId,
+        provider: 'AUTOEXPRESO'
+      },
+      orderBy: [{ isActive: 'desc' }, { updatedAt: 'desc' }]
+    });
+
+    const effectiveProviderAccount = providerAccount || await prisma.tollProviderAccount.create({
+      data: {
+        tenantId: scope.tenantId,
+        provider: 'AUTOEXPRESO',
+        isActive: false,
+        lastSyncStatus: 'PENDING_SETUP',
+        lastSyncMessage: 'Created automatically from manual toll import'
+      }
+    });
+
+    const importRun = await prisma.tollImportRun.create({
+      data: {
+        tenantId: scope.tenantId,
+        providerAccountId: effectiveProviderAccount.id,
+        sourceType: inputRows.length > 1 ? 'CSV_PASTE' : 'MANUAL_ENTRY',
+        status: 'RUNNING'
+      }
+    });
 
     const created = [];
     for (const raw of inputRows) {
@@ -495,8 +644,8 @@ export const tollsService = {
         const createdTransaction = await tx.tollTransaction.create({
           data: {
             tenantId: scope.tenantId,
-            providerAccountId: null,
-            importRunId: null,
+            providerAccountId: effectiveProviderAccount.id,
+            importRunId: importRun.id,
             externalId: draft.externalId,
             transactionAt: draft.transactionAt,
             transactionDate: draft.transactionDate,
@@ -531,6 +680,17 @@ export const tollsService = {
 
       created.push(await getTransactionOrThrow(row.id, scope));
     }
+
+    await prisma.tollImportRun.update({
+      where: { id: importRun.id },
+      data: {
+        completedAt: new Date(),
+        status: 'COMPLETED',
+        importedCount: created.length,
+        matchedCount: created.filter((row) => String(row.status || '').toUpperCase() === 'MATCHED').length,
+        reviewCount: created.filter((row) => !!row.needsReview).length
+      }
+    });
 
     return {
       created: created.map(serializeTransaction)
