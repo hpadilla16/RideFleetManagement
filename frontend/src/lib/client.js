@@ -7,15 +7,21 @@ function resolveApiBase() {
   if (typeof window !== 'undefined') {
     const origin = normalizeBaseUrl(window.location.origin);
     if (!configured) return origin;
-    const configuredHost = (() => {
+    const configuredUrl = (() => {
       try {
-        return new URL(configured).hostname;
+        return new URL(configured);
       } catch {
-        return '';
+        return null;
       }
     })();
+    const configuredHost = String(configuredUrl?.hostname || '').toLowerCase();
     const currentHost = String(window.location.hostname || '').trim().toLowerCase();
-    if (configuredHost && ['localhost', '127.0.0.1'].includes(configuredHost.toLowerCase()) && !['localhost', '127.0.0.1'].includes(currentHost)) {
+    const currentIsLocal = ['localhost', '127.0.0.1'].includes(currentHost);
+    const configuredIsLocal = ['localhost', '127.0.0.1'].includes(configuredHost);
+    if (configuredHost && configuredIsLocal && !currentIsLocal) {
+      return origin;
+    }
+    if (configuredHost && !currentIsLocal && configuredHost !== currentHost) {
       return origin;
     }
     return configured;
