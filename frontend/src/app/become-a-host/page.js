@@ -79,9 +79,12 @@ const EMPTY_FORM = {
   vin: '',
   plate: '',
   mileage: '',
+  fulfillmentMode: 'PICKUP_ONLY',
   baseDailyRate: '',
   cleaningFee: '',
   deliveryFee: '',
+  deliveryRadiusMiles: '',
+  deliveryNotes: '',
   securityDeposit: '',
   minTripDays: '1',
   maxTripDays: '',
@@ -348,12 +351,28 @@ function BecomeAHostPageInner() {
                   <input type="number" step="0.01" value={form.baseDailyRate} onChange={(e) => setForm((current) => ({ ...current, baseDailyRate: e.target.value }))} />
                 </label>
                 <label>
+                  <span className="label">Fulfillment Mode</span>
+                  <select value={form.fulfillmentMode} onChange={(e) => setForm((current) => ({ ...current, fulfillmentMode: e.target.value }))}>
+                    <option value="PICKUP_ONLY">Pickup Only</option>
+                    <option value="DELIVERY_ONLY">Delivery Only</option>
+                    <option value="PICKUP_OR_DELIVERY">Pickup Or Delivery</option>
+                  </select>
+                </label>
+                <label>
                   <span className="label">Min Trip Days</span>
                   <input type="number" value={form.minTripDays} onChange={(e) => setForm((current) => ({ ...current, minTripDays: e.target.value }))} />
                 </label>
                 <label>
                   <span className="label">Max Trip Days</span>
                   <input type="number" value={form.maxTripDays} onChange={(e) => setForm((current) => ({ ...current, maxTripDays: e.target.value }))} />
+                </label>
+                <label>
+                  <span className="label">Delivery Radius Miles</span>
+                  <input type="number" value={form.deliveryRadiusMiles} onChange={(e) => setForm((current) => ({ ...current, deliveryRadiusMiles: e.target.value }))} />
+                </label>
+                <label>
+                  <span className="label">Delivery Notes</span>
+                  <input value={form.deliveryNotes} onChange={(e) => setForm((current) => ({ ...current, deliveryNotes: e.target.value }))} placeholder="Airport, hotel, or neighborhood guidance" />
                 </label>
               </div>
 

@@ -25,6 +25,13 @@ function pickupSpotHint(pickupSpot) {
   return [pickupSpot?.address1, pickupSpot?.city, pickupSpot?.state, pickupSpot?.postalCode].filter(Boolean).join(' · ');
 }
 
+function fulfillmentModeLabel(mode) {
+  const value = String(mode || 'PICKUP_ONLY').toUpperCase();
+  if (value === 'DELIVERY_ONLY') return 'Delivery only';
+  if (value === 'PICKUP_OR_DELIVERY') return 'Pickup or delivery';
+  return 'Pickup only';
+}
+
 function statusTone(status) {
   const value = String(status || '').toLowerCase();
   if (value === 'completed') return { color: '#12633d', background: 'rgba(43, 174, 96, 0.14)' };
@@ -217,8 +224,15 @@ export default function PublicBookingConfirmationPage() {
                   <div>
                     Pickup spot: {publicPickupSpotLabel(confirmation.trip?.pickupSpot, confirmation.trip?.location)}
                   </div>
+                  <div>
+                    Fulfillment: {fulfillmentModeLabel(confirmation.trip?.fulfillmentMode)}
+                    {confirmation.trip?.deliveryRadiusMiles ? ` · ${confirmation.trip.deliveryRadiusMiles} mi radius` : ''}
+                  </div>
                   {pickupSpotHint(confirmation.trip?.pickupSpot) ? (
                     <div>{pickupSpotHint(confirmation.trip?.pickupSpot)}</div>
+                  ) : null}
+                  {confirmation.trip?.deliveryNotes ? (
+                    <div>{confirmation.trip.deliveryNotes}</div>
                   ) : null}
                   {confirmation.trip?.vehicleLabel ? (
                     <div>Vehicle: <strong>{confirmation.trip.vehicleLabel}</strong></div>

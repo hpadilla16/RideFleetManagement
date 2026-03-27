@@ -55,6 +55,21 @@ function pickupSpotHint(pickupSpot) {
   return [pickupSpot?.address1, pickupSpot?.city, pickupSpot?.state, pickupSpot?.postalCode].filter(Boolean).join(' · ');
 }
 
+function fulfillmentModeLabel(mode) {
+  const value = String(mode || 'PICKUP_ONLY').toUpperCase();
+  if (value === 'DELIVERY_ONLY') return 'Delivery only';
+  if (value === 'PICKUP_OR_DELIVERY') return 'Pickup or delivery';
+  return 'Pickup only';
+}
+
+function fulfillmentHint(result) {
+  if (!result) return '';
+  const bits = [fulfillmentModeLabel(result.fulfillmentMode)];
+  if (result.deliveryRadiusMiles) bits.push(`${result.deliveryRadiusMiles} mi radius`);
+  if (Number(result.deliveryFee || 0) > 0) bits.push(`Delivery fee ${fmtMoney(result.deliveryFee)}`);
+  return bits.join(' Â· ');
+}
+
 function locationLabelFromId(locations, id) {
   if (!id) return '';
   const match = (Array.isArray(locations) ? locations : []).find((location) => String(location.id) === String(id));
@@ -880,8 +895,10 @@ function PublicBookingPageInner() {
                       hints={[
                         result.instantBook ? 'Instant book' : 'Approval flow',
                         `${Math.max(1, Number(result.minTripDays || 1))}+ day minimum`,
+                        fulfillmentHint(result),
                         ...(result.pickupSpot?.label ? [`Pickup spot: ${result.pickupSpot.label}`] : []),
                         ...(pickupSpotHint(result.pickupSpot) ? [pickupSpotHint(result.pickupSpot)] : []),
+                        ...(result.deliveryNotes ? [result.deliveryNotes] : []),
                         ...(normalizeImageList(result.imageUrls || []).length ? [`${normalizeImageList(result.imageUrls || []).length} photo${normalizeImageList(result.imageUrls || []).length === 1 ? '' : 's'}`] : []),
                         ...(result.additionalServices?.length ? [`${result.additionalServices.length} host add-on${result.additionalServices.length === 1 ? '' : 's'}`] : [])
                       ]}

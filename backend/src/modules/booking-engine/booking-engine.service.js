@@ -871,6 +871,9 @@ export const bookingEngineService = {
           instantBook: !!listing.instantBook,
           minTripDays: listing.minTripDays,
           maxTripDays: listing.maxTripDays,
+          fulfillmentMode: listing.fulfillmentMode,
+          deliveryRadiusMiles: listing.deliveryRadiusMiles,
+          deliveryNotes: listing.deliveryNotes,
           host: publicHostSummary(listing.hostProfile),
           vehicle: listing.vehicle,
           location: listing.location,
@@ -929,6 +932,9 @@ export const bookingEngineService = {
       instantBook: !!listing.instantBook,
       minTripDays: listing.minTripDays,
       maxTripDays: listing.maxTripDays,
+      fulfillmentMode: listing.fulfillmentMode,
+      deliveryRadiusMiles: listing.deliveryRadiusMiles,
+      deliveryNotes: listing.deliveryNotes,
       tripRules: listing.tripRules,
       host: publicHostSummary(listing.hostProfile),
       vehicle: listing.vehicle,
@@ -1286,7 +1292,10 @@ export const bookingEngineService = {
         platformRevenue: money(trip.platformRevenue),
         location: selected.listing?.location || null,
         pickupSpot: selected.listing?.pickupSpot || null,
-        vehicleLabel: selected.listing?.vehicle?.label || ''
+        vehicleLabel: selected.listing?.vehicle?.label || '',
+        fulfillmentMode: selected.listing?.fulfillmentMode || 'PICKUP_ONLY',
+        deliveryRadiusMiles: selected.listing?.deliveryRadiusMiles || null,
+        deliveryNotes: selected.listing?.deliveryNotes || null
       },
       pricingBreakdown: {
         tripDays: Number(selected.quote?.tripDays || 0),

@@ -181,15 +181,25 @@ function guestFlowLabel(trip) {
   return 'Guest ready for handoff';
 }
 
+function fulfillmentModeLabel(mode) {
+  const value = String(mode || 'PICKUP_ONLY').toUpperCase();
+  if (value === 'DELIVERY_ONLY') return 'Delivery only';
+  if (value === 'PICKUP_OR_DELIVERY') return 'Pickup or delivery';
+  return 'Pickup only';
+}
+
 function listingToEdit(listing) {
   return {
     id: listing.id,
     shortDescription: listing.shortDescription || '',
     description: listing.description || '',
     status: listing.status || 'DRAFT',
+    fulfillmentMode: listing.fulfillmentMode || 'PICKUP_ONLY',
     baseDailyRate: String(listing.baseDailyRate ?? ''),
     cleaningFee: String(listing.cleaningFee ?? ''),
     deliveryFee: String(listing.deliveryFee ?? ''),
+    deliveryRadiusMiles: listing.deliveryRadiusMiles ? String(listing.deliveryRadiusMiles) : '',
+    deliveryNotes: listing.deliveryNotes || '',
     securityDeposit: String(listing.securityDeposit ?? ''),
     instantBook: !!listing.instantBook,
     minTripDays: String(listing.minTripDays ?? 1),
@@ -202,13 +212,13 @@ function listingToEdit(listing) {
 
 const EMPTY_LISTING_EDIT = {
   id: '', shortDescription: '', description: '', status: 'DRAFT',
-  baseDailyRate: '', cleaningFee: '', deliveryFee: '', securityDeposit: '',
+  fulfillmentMode: 'PICKUP_ONLY', baseDailyRate: '', cleaningFee: '', deliveryFee: '', deliveryRadiusMiles: '', deliveryNotes: '', securityDeposit: '',
   instantBook: false, minTripDays: '1', maxTripDays: '', tripRules: '', photoUrls: [], addOns: []
 };
 
 const EMPTY_SUBMISSION_FORM = {
   vehicleTypeId: '', preferredLocationId: '', preferredPickupSpotId: '', year: '', make: '', model: '', color: '', vin: '', plate: '', mileage: '',
-  baseDailyRate: '', cleaningFee: '', deliveryFee: '', securityDeposit: '', minTripDays: '1', maxTripDays: '',
+  fulfillmentMode: 'PICKUP_ONLY', baseDailyRate: '', cleaningFee: '', deliveryFee: '', deliveryRadiusMiles: '', deliveryNotes: '', securityDeposit: '', minTripDays: '1', maxTripDays: '',
   shortDescription: '', description: '', tripRules: '', photos: [], insuranceDocumentUrl: '', registrationDocumentUrl: '',
   initialInspectionDocumentUrl: '', initialInspectionNotes: '', addOns: []
 };
@@ -411,7 +421,9 @@ function HostAppInner({ token, me, logout }) {
       addOnCount: (listingEdit.addOns || []).filter((row) => row.name && row.price).length,
       pricingReady: !!Number(listingEdit.baseDailyRate || 0),
       publishState: listingEdit.status || 'DRAFT',
+      fulfillmentMode: listingEdit.fulfillmentMode || 'PICKUP_ONLY',
       deliveryFee: Number(listingEdit.deliveryFee || 0),
+      deliveryRadiusMiles: Number(listingEdit.deliveryRadiusMiles || 0),
       cleaningFee: Number(listingEdit.cleaningFee || 0),
       securityDeposit: Number(listingEdit.securityDeposit || 0),
       instantBook: !!listingEdit.instantBook
@@ -467,9 +479,12 @@ function HostAppInner({ token, me, logout }) {
           shortDescription: listingEdit.shortDescription,
           description: listingEdit.description,
           status: listingEdit.status,
+          fulfillmentMode: listingEdit.fulfillmentMode,
           baseDailyRate: Number(listingEdit.baseDailyRate || 0),
           cleaningFee: Number(listingEdit.cleaningFee || 0),
           deliveryFee: Number(listingEdit.deliveryFee || 0),
+          deliveryRadiusMiles: listingEdit.deliveryRadiusMiles ? Number(listingEdit.deliveryRadiusMiles) : null,
+          deliveryNotes: listingEdit.deliveryNotes,
           securityDeposit: Number(listingEdit.securityDeposit || 0),
           instantBook: !!listingEdit.instantBook,
           minTripDays: Number(listingEdit.minTripDays || 1),
@@ -595,9 +610,12 @@ function HostAppInner({ token, me, logout }) {
           hostProfileId: isAdminViewer ? (selectedHostProfileId || host?.id || '') : undefined,
           year: submissionForm.year ? Number(submissionForm.year) : null,
           mileage: submissionForm.mileage ? Number(submissionForm.mileage) : 0,
+          fulfillmentMode: submissionForm.fulfillmentMode,
           baseDailyRate: submissionForm.baseDailyRate ? Number(submissionForm.baseDailyRate) : 0,
           cleaningFee: submissionForm.cleaningFee ? Number(submissionForm.cleaningFee) : 0,
           deliveryFee: submissionForm.deliveryFee ? Number(submissionForm.deliveryFee) : 0,
+          deliveryRadiusMiles: submissionForm.deliveryRadiusMiles ? Number(submissionForm.deliveryRadiusMiles) : null,
+          deliveryNotes: submissionForm.deliveryNotes,
           securityDeposit: submissionForm.securityDeposit ? Number(submissionForm.securityDeposit) : 0,
           minTripDays: submissionForm.minTripDays ? Number(submissionForm.minTripDays) : 1,
           maxTripDays: submissionForm.maxTripDays ? Number(submissionForm.maxTripDays) : null,
@@ -1032,6 +1050,18 @@ function HostAppInner({ token, me, logout }) {
               <div className="stack"><label className="label">Min Trip Days</label><input type="number" min="1" value={submissionForm.minTripDays} onChange={(event) => setSubmissionForm((current) => ({ ...current, minTripDays: event.target.value }))} /></div>
               <div className="stack"><label className="label">Max Trip Days</label><input type="number" min="1" value={submissionForm.maxTripDays} onChange={(event) => setSubmissionForm((current) => ({ ...current, maxTripDays: event.target.value }))} /></div>
             </div>
+            <div className="form-grid-3">
+              <div className="stack">
+                <label className="label">Fulfillment Mode</label>
+                <select value={submissionForm.fulfillmentMode} onChange={(event) => setSubmissionForm((current) => ({ ...current, fulfillmentMode: event.target.value }))}>
+                  <option value="PICKUP_ONLY">Pickup Only</option>
+                  <option value="DELIVERY_ONLY">Delivery Only</option>
+                  <option value="PICKUP_OR_DELIVERY">Pickup Or Delivery</option>
+                </select>
+              </div>
+              <div className="stack"><label className="label">Delivery Radius Miles</label><input type="number" min="0" value={submissionForm.deliveryRadiusMiles} onChange={(event) => setSubmissionForm((current) => ({ ...current, deliveryRadiusMiles: event.target.value }))} /></div>
+              <div className="stack"><label className="label">Delivery Notes</label><input value={submissionForm.deliveryNotes} onChange={(event) => setSubmissionForm((current) => ({ ...current, deliveryNotes: event.target.value }))} placeholder="Airport, hotel, or service area guidance" /></div>
+            </div>
             <div className="stack"><label className="label">Short Description</label><input value={submissionForm.shortDescription} onChange={(event) => setSubmissionForm((current) => ({ ...current, shortDescription: event.target.value }))} /></div>
             <div className="stack"><label className="label">Description</label><textarea rows={4} value={submissionForm.description} onChange={(event) => setSubmissionForm((current) => ({ ...current, description: event.target.value }))} /></div>
             <div className="stack"><label className="label">Trip Rules</label><textarea rows={3} value={submissionForm.tripRules} onChange={(event) => setSubmissionForm((current) => ({ ...current, tripRules: event.target.value }))} /></div>
@@ -1110,7 +1140,7 @@ function HostAppInner({ token, me, logout }) {
                     <div className="info-tile"><span className="label">Last Update</span><strong>{formatDateTime(row.updatedAt)}</strong></div>
                   </div>
                   <div style={{ color: '#55456f', lineHeight: 1.5 }}>
-                    {[row.plate ? `Plate ${row.plate}` : '', row.vin ? `VIN ${row.vin}` : '', row.reviewNotes || 'Waiting for review.'].filter(Boolean).join(' · ')}
+                    {[fulfillmentModeLabel(row.fulfillmentMode), row.deliveryRadiusMiles ? `Delivery radius ${row.deliveryRadiusMiles} mi` : '', row.plate ? `Plate ${row.plate}` : '', row.vin ? `VIN ${row.vin}` : '', row.reviewNotes || 'Waiting for review.'].filter(Boolean).join(' · ')}
                   </div>
                   <div className="inline-actions">
                     {row.listing?.id ? <span className="status-chip good">Active In Portal</span> : null}
@@ -1201,7 +1231,7 @@ function HostAppInner({ token, me, logout }) {
                     <div className="metric-card"><span className="label">Add-Ons</span><strong>{parseAddOns(listing.addOnsJson).filter((row) => row.name && row.price).length}</strong></div>
                   </div>
                   <div className="surface-note" style={{ color: '#55456f', lineHeight: 1.5 }}>
-                    Change daily rate, cleaning fee, delivery fee, deposit, host add-ons, and photos from the editor below.
+                    {[fulfillmentModeLabel(listing.fulfillmentMode), listing.deliveryRadiusMiles ? `Delivery radius ${listing.deliveryRadiusMiles} mi` : '', 'Change daily rate, cleaning fee, delivery fee, deposit, host add-ons, and photos from the editor below.'].filter(Boolean).join(' · ')}
                   </div>
                   <div className="inline-actions">
                     <button type="button" onClick={() => setListingEdit(listingToEdit(listing))}>Edit Rates And Listing</button>
@@ -1239,6 +1269,12 @@ function HostAppInner({ token, me, logout }) {
                     <div className="doc-meta">{selectedListingSnapshot.publishState}</div>
                   </div>
                   <div className="doc-card">
+                    <strong>Fulfillment</strong>
+                    <div className="doc-meta">
+                      {`${fulfillmentModeLabel(selectedListingSnapshot.fulfillmentMode)}${selectedListingSnapshot.deliveryRadiusMiles ? ` · ${selectedListingSnapshot.deliveryRadiusMiles} mi radius` : ''}`}
+                    </div>
+                  </div>
+                  <div className="doc-card">
                     <strong>Fee Stack</strong>
                     <div className="doc-meta">
                       Cleaning {formatMoney(selectedListingSnapshot.cleaningFee)} · Delivery {formatMoney(selectedListingSnapshot.deliveryFee)}
@@ -1261,14 +1297,17 @@ function HostAppInner({ token, me, logout }) {
               <div className="stack"><label className="label">Description</label><textarea rows={4} value={listingEdit.description} onChange={(event) => setListingEdit((current) => ({ ...current, description: event.target.value }))} /></div>
               <div className="form-grid-3">
                 <div className="stack"><label className="label">Status</label><select value={listingEdit.status} onChange={(event) => setListingEdit((current) => ({ ...current, status: event.target.value }))}><option value="DRAFT">DRAFT</option><option value="PUBLISHED">PUBLISHED</option><option value="PAUSED">PAUSED</option><option value="ARCHIVED">ARCHIVED</option></select></div>
+                <div className="stack"><label className="label">Fulfillment Mode</label><select value={listingEdit.fulfillmentMode} onChange={(event) => setListingEdit((current) => ({ ...current, fulfillmentMode: event.target.value }))}><option value="PICKUP_ONLY">Pickup Only</option><option value="DELIVERY_ONLY">Delivery Only</option><option value="PICKUP_OR_DELIVERY">Pickup Or Delivery</option></select></div>
                 <div className="stack"><label className="label">Daily Rate</label><input type="number" min="0" step="0.01" value={listingEdit.baseDailyRate} onChange={(event) => setListingEdit((current) => ({ ...current, baseDailyRate: event.target.value }))} /></div>
                 <div className="stack"><label className="label">Security Deposit</label><input type="number" min="0" step="0.01" value={listingEdit.securityDeposit} onChange={(event) => setListingEdit((current) => ({ ...current, securityDeposit: event.target.value }))} /></div>
                 <div className="stack"><label className="label">Cleaning Fee</label><input type="number" min="0" step="0.01" value={listingEdit.cleaningFee} onChange={(event) => setListingEdit((current) => ({ ...current, cleaningFee: event.target.value }))} /></div>
                 <div className="stack"><label className="label">Delivery Fee</label><input type="number" min="0" step="0.01" value={listingEdit.deliveryFee} onChange={(event) => setListingEdit((current) => ({ ...current, deliveryFee: event.target.value }))} /></div>
+                <div className="stack"><label className="label">Delivery Radius Miles</label><input type="number" min="0" value={listingEdit.deliveryRadiusMiles} onChange={(event) => setListingEdit((current) => ({ ...current, deliveryRadiusMiles: event.target.value }))} /></div>
                 <div className="stack"><label className="label">Min Trip Days</label><input type="number" min="1" value={listingEdit.minTripDays} onChange={(event) => setListingEdit((current) => ({ ...current, minTripDays: event.target.value }))} /></div>
                 <div className="stack"><label className="label">Max Trip Days</label><input type="number" min="1" value={listingEdit.maxTripDays} onChange={(event) => setListingEdit((current) => ({ ...current, maxTripDays: event.target.value }))} /></div>
               </div>
               <label className="label" style={{ textTransform: 'none', letterSpacing: 0 }}><input type="checkbox" checked={listingEdit.instantBook} onChange={(event) => setListingEdit((current) => ({ ...current, instantBook: event.target.checked }))} /> Instant Book</label>
+              <div className="stack"><label className="label">Delivery Notes</label><textarea rows={2} value={listingEdit.deliveryNotes} onChange={(event) => setListingEdit((current) => ({ ...current, deliveryNotes: event.target.value }))} placeholder="Explain the service area, airport delivery guidance, or any handoff rules." /></div>
               <div className="stack"><label className="label">Trip Rules</label><textarea rows={3} value={listingEdit.tripRules} onChange={(event) => setListingEdit((current) => ({ ...current, tripRules: event.target.value }))} /></div>
               <div className="stack">
                 <div className="row-between">
