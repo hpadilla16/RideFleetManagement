@@ -8,6 +8,7 @@ const anchors = [
   { id: 'start-here', label: 'Start Here' },
   { id: 'front-desk', label: 'Front Desk' },
   { id: 'reservations', label: 'Reservations SOP' },
+  { id: 'reservation-migration', label: 'Reservation Migration' },
   { id: 'support', label: 'Support & Issues' },
   { id: 'loaner', label: 'Loaner Program' },
   { id: 'car-sharing', label: 'Car Sharing' },
@@ -142,6 +143,44 @@ const reservationPlaybooks = [
       'Closing the reservation before posted tolls or fees are reviewed.',
       'Ignoring check-in inspection compare when damage is being discussed.',
       'Failing to open an issue when the customer disputes a charge.'
+    ]
+  }
+];
+
+const reservationMigrationGuides = [
+  {
+    title: 'When to Use Reservation Migration Upload',
+    bullets: [
+      'Use this when a new client is moving active or upcoming reservations from another platform into Ride Fleet.',
+      'This is not the normal booking flow. It is a controlled migration tool inside Reservations.',
+      'Open Reservations and use Upload Migration before staff starts recreating bookings by hand.'
+    ]
+  },
+  {
+    title: 'Standard Rental Migration Template',
+    bullets: [
+      'Use the standard template for normal rental bookings.',
+      'Required columns are reservationNumber, pickupAt, returnAt, pickupLocationCode, and returnLocationCode.',
+      'Recommended columns are sourceRef, vehicleTypeCode, vehicleInternalNumber, dailyRate, estimatedTotal, and notes.',
+      'The importer can resolve an existing customer by customerId, customerEmail, or customerPhone. If needed, it can also create the customer from first name, last name, and phone.'
+    ]
+  },
+  {
+    title: 'Dealership Loaner Migration Template',
+    bullets: [
+      'Use the loaner template when the client is moving service-lane reservations into Ride Fleet.',
+      'Set workflowMode to DEALERSHIP_LOANER.',
+      'Include loanerBillingMode, repairOrderNumber, claimNumber, serviceAdvisorName, serviceAdvisorEmail, serviceAdvisorPhone, serviceStartAt, estimatedServiceCompletionAt, and the service vehicle details when available.',
+      'This makes the imported reservation much more usable inside Loaner Program on day one.'
+    ]
+  },
+  {
+    title: 'Validation Rules the Team Should Expect',
+    bullets: [
+      'Duplicate reservation numbers or source refs are skipped.',
+      'The importer validates pickup and return dates, location resolution, customer resolution, and vehicle or vehicle type resolution.',
+      'If a vehicle is assigned in the file, the importer checks for conflicts with other active reservations.',
+      'Super admins importing across tenants should include tenantSlug in each row.'
     ]
   }
 ];
@@ -362,6 +401,38 @@ export default function KnowledgeBasePage() {
                     </ul>
                   </article>
                 ))}
+              </div>
+            </section>
+
+            <section id="reservation-migration" className="glass card-lg section-card">
+              <div className="row-between">
+                <div>
+                  <div className="section-title">Reservation Migration</div>
+                  <p className="ui-muted">Use this when onboarding a client that needs existing reservations brought into Ride Fleet quickly and cleanly.</p>
+                </div>
+                <Link href="/reservations"><button type="button">Open Reservations</button></Link>
+              </div>
+              <div className="knowledge-grid">
+                {reservationMigrationGuides.map((item) => (
+                  <article key={item.title} className="surface-note stack">
+                    <strong>{item.title}</strong>
+                    <ul className="knowledge-list">
+                      {item.bullets.map((bullet) => (
+                        <li key={bullet}>{bullet}</li>
+                      ))}
+                    </ul>
+                  </article>
+                ))}
+              </div>
+              <div className="surface-note" style={{ display: 'grid', gap: 10 }}>
+                <strong>How the team should run a migration</strong>
+                <ol className="knowledge-list">
+                  <li>Download the right template from Reservations: standard rental or dealership loaner.</li>
+                  <li>Clean the exported data from the old platform before uploading it.</li>
+                  <li>Run Validate first and resolve invalid rows before importing.</li>
+                  <li>If customers do not already exist in Ride Fleet, make sure first name, last name, and phone are present so the importer can create them.</li>
+                  <li>After upload, spot-check Reservations, Loaner Program, and Customers before telling staff the migration is complete.</li>
+                </ol>
               </div>
             </section>
 

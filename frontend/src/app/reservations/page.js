@@ -284,6 +284,22 @@ function ReservationsInner({ token, me, logout }) {
     URL.revokeObjectURL(url);
   };
 
+  const downloadLoanerImportTemplate = () => {
+    const sampleTenantSlug = me?.tenantId ? '' : 'tenantSlug,';
+    const sampleTenantValue = me?.tenantId ? '' : 'demo,';
+    const samplePickupCode = locations[0]?.code || 'SERVICE';
+    const sampleReturnCode = locations[1]?.code || samplePickupCode;
+    const sampleVehicleTypeCode = vehicleTypes[0]?.code || 'LOANER';
+    const csv = `${sampleTenantSlug}reservationNumber,sourceRef,workflowMode,status,paymentStatus,customerFirstName,customerLastName,customerEmail,customerPhone,vehicleTypeCode,vehicleInternalNumber,pickupAt,returnAt,pickupLocationCode,returnLocationCode,dailyRate,estimatedTotal,loanerBillingMode,repairOrderNumber,claimNumber,serviceAdvisorName,serviceAdvisorEmail,serviceAdvisorPhone,serviceStartAt,estimatedServiceCompletionAt,serviceVehicleYear,serviceVehicleMake,serviceVehicleModel,serviceVehiclePlate,serviceVehicleVin,loanerProgramNotes,notes\n${sampleTenantValue}LN-2001,BLUEBIRD-2001,DEALERSHIP_LOANER,CONFIRMED,PENDING,Maria,Rivera,maria@example.com,7875550111,${sampleVehicleTypeCode},,2026-03-30T09:00,2026-04-03T17:00,${samplePickupCode},${sampleReturnCode},0,0,WARRANTY,RO-22091,CLM-99123,Carlos Vega,cvega@dealer.com,7875550199,2026-03-30T08:30,2026-04-03T16:30,2023,Toyota,RAV4,JVX123,2T3R1RFV0PW123456,Imported dealership loaner reservation,Imported from prior loaner platform`;
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'loaner_reservation_migration_template.csv';
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
   const onSelectImportFile = async (file) => {
     if (!file) return;
     const text = await file.text();
@@ -615,11 +631,13 @@ function ReservationsInner({ token, me, logout }) {
                   <li>Required columns: <code>reservationNumber</code>, <code>pickupAt</code>, <code>returnAt</code>, <code>pickupLocationCode</code>, <code>returnLocationCode</code>.</li>
                   <li>Identify the customer with <code>customerId</code>, <code>customerEmail</code>, <code>customerPhone</code>, or provide <code>customerFirstName</code>, <code>customerLastName</code>, and <code>customerPhone</code> so Ride Fleet can create the customer.</li>
                   <li>Recommended columns: <code>sourceRef</code>, <code>vehicleTypeCode</code>, <code>vehicleInternalNumber</code>, <code>dailyRate</code>, <code>estimatedTotal</code>, <code>notes</code>.</li>
+                  <li>For dealership migrations, use the loaner template and include <code>workflowMode=DEALERSHIP_LOANER</code>, plus advisor and RO/claim fields.</li>
                   {!me?.tenantId ? <li>For super admin imports, include <code>tenantSlug</code> in every row.</li> : null}
                   <li>Duplicate reservation numbers or source refs are skipped.</li>
                 </ul>
                 <div style={{ display: 'flex', gap: 8 }}>
                   <button type="button" onClick={downloadImportTemplate}>Download Template</button>
+                  <button type="button" className="button-subtle" onClick={downloadLoanerImportTemplate}>Download Loaner Template</button>
                   <button type="button" onClick={() => setImportStep(2)}>Next</button>
                 </div>
               </div>
