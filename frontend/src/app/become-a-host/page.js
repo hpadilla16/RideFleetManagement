@@ -100,6 +100,10 @@ const EMPTY_FORM = {
   initialInspectionNotes: ''
 };
 
+function deliveryEnabled(mode) {
+  return String(mode || 'PICKUP_ONLY').toUpperCase() !== 'PICKUP_ONLY';
+}
+
 function BecomeAHostPageInner() {
   const searchParams = useSearchParams();
   const initialTenantSlug = String(searchParams.get('tenantSlug') || '').trim().toLowerCase();
@@ -353,16 +357,12 @@ function BecomeAHostPageInner() {
                   <input type="number" step="0.01" value={form.baseDailyRate} onChange={(e) => setForm((current) => ({ ...current, baseDailyRate: e.target.value }))} />
                 </label>
                 <label>
-                  <span className="label">Fulfillment Mode</span>
+                  <span className="label">Trip Handoff</span>
                   <select value={form.fulfillmentMode} onChange={(e) => setForm((current) => ({ ...current, fulfillmentMode: e.target.value }))}>
                     <option value="PICKUP_ONLY">Pickup Only</option>
+                    <option value="PICKUP_OR_DELIVERY">Offer Pickup And Delivery</option>
                     <option value="DELIVERY_ONLY">Delivery Only</option>
-                    <option value="PICKUP_OR_DELIVERY">Pickup Or Delivery</option>
                   </select>
-                </label>
-                <label>
-                  <span className="label">Pickup Fee</span>
-                  <input type="number" step="0.01" value={form.pickupFee} onChange={(e) => setForm((current) => ({ ...current, pickupFee: e.target.value }))} />
                 </label>
                 <label>
                   <span className="label">Min Trip Days</span>
@@ -372,19 +372,40 @@ function BecomeAHostPageInner() {
                   <span className="label">Max Trip Days</span>
                   <input type="number" value={form.maxTripDays} onChange={(e) => setForm((current) => ({ ...current, maxTripDays: e.target.value }))} />
                 </label>
-                <label>
-                  <span className="label">Delivery Radius Miles</span>
-                  <input type="number" value={form.deliveryRadiusMiles} onChange={(e) => setForm((current) => ({ ...current, deliveryRadiusMiles: e.target.value }))} />
-                </label>
-                <label>
-                  <span className="label">Delivery Notes</span>
-                  <input value={form.deliveryNotes} onChange={(e) => setForm((current) => ({ ...current, deliveryNotes: e.target.value }))} placeholder="Airport, hotel, or neighborhood guidance" />
-                </label>
               </div>
-              <label>
-                <span className="label">Allowed Delivery Areas</span>
-                <textarea rows={3} value={form.deliveryAreasText} onChange={(e) => setForm((current) => ({ ...current, deliveryAreasText: e.target.value }))} placeholder={'One area per line, for example:\nSan Juan\nIsla Verde\nCondado'} />
-              </label>
+              {deliveryEnabled(form.fulfillmentMode) ? (
+                <>
+                  <div className="form-grid-2">
+                    <label>
+                      <span className="label">Delivery Fee</span>
+                      <input type="number" step="0.01" value={form.deliveryFee} onChange={(e) => setForm((current) => ({ ...current, deliveryFee: e.target.value }))} />
+                    </label>
+                    <label>
+                      <span className="label">Delivery Radius Miles</span>
+                      <input type="number" value={form.deliveryRadiusMiles} onChange={(e) => setForm((current) => ({ ...current, deliveryRadiusMiles: e.target.value }))} />
+                    </label>
+                  </div>
+                  <label>
+                    <span className="label">Allowed Delivery Areas</span>
+                    <textarea rows={3} value={form.deliveryAreasText} onChange={(e) => setForm((current) => ({ ...current, deliveryAreasText: e.target.value }))} placeholder={'One area per line, for example:\nSan Juan\nIsla Verde\nCondado'} />
+                  </label>
+                  <details className="surface-note">
+                    <summary>Advanced delivery options</summary>
+                    <div className="form-grid-2" style={{ marginTop: 12 }}>
+                      <label>
+                        <span className="label">Pickup Fee</span>
+                        <input type="number" step="0.01" value={form.pickupFee} onChange={(e) => setForm((current) => ({ ...current, pickupFee: e.target.value }))} />
+                      </label>
+                      <label>
+                        <span className="label">Delivery Notes</span>
+                        <input value={form.deliveryNotes} onChange={(e) => setForm((current) => ({ ...current, deliveryNotes: e.target.value }))} placeholder="Airport, hotel, or neighborhood guidance" />
+                      </label>
+                    </div>
+                  </details>
+                </>
+              ) : (
+                <div className="surface-note">Guests will pick up the vehicle at the configured pickup spot. Delivery details stay hidden until delivery is enabled.</div>
+              )}
 
               <div className="surface-note">
                 Optional: create a host pickup spot now. This is the guest-facing handoff point for your listing and stays separate from the tenant's operational branch locations.

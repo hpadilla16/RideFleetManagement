@@ -203,6 +203,10 @@ function fulfillmentModeLabel(mode) {
   return 'Pickup only';
 }
 
+function deliveryEnabled(mode) {
+  return String(mode || 'PICKUP_ONLY').toUpperCase() !== 'PICKUP_ONLY';
+}
+
 function listingToEdit(listing) {
   return {
     id: listing.id,
@@ -1064,28 +1068,42 @@ function HostAppInner({ token, me, logout }) {
               <div className="stack"><label className="label">Plate</label><input value={submissionForm.plate} onChange={(event) => setSubmissionForm((current) => ({ ...current, plate: event.target.value }))} /></div>
               <div className="stack"><label className="label">Mileage</label><input type="number" value={submissionForm.mileage} onChange={(event) => setSubmissionForm((current) => ({ ...current, mileage: event.target.value }))} /></div>
             </div>
+            <div className="surface-note">
+              Keep this simple for the host: start with pickup only, or turn on delivery if the host wants handoff outside the pickup spot.
+            </div>
             <div className="form-grid-3">
+              <div className="stack">
+                <label className="label">Trip Handoff</label>
+                <select value={submissionForm.fulfillmentMode} onChange={(event) => setSubmissionForm((current) => ({ ...current, fulfillmentMode: event.target.value }))}>
+                  <option value="PICKUP_ONLY">Pickup Only</option>
+                  <option value="PICKUP_OR_DELIVERY">Offer Pickup And Delivery</option>
+                  <option value="DELIVERY_ONLY">Delivery Only</option>
+                </select>
+              </div>
               <div className="stack"><label className="label">Daily Rate</label><input type="number" min="0" step="0.01" value={submissionForm.baseDailyRate} onChange={(event) => setSubmissionForm((current) => ({ ...current, baseDailyRate: event.target.value }))} /></div>
               <div className="stack"><label className="label">Cleaning Fee</label><input type="number" min="0" step="0.01" value={submissionForm.cleaningFee} onChange={(event) => setSubmissionForm((current) => ({ ...current, cleaningFee: event.target.value }))} /></div>
-              <div className="stack"><label className="label">Pickup Fee</label><input type="number" min="0" step="0.01" value={submissionForm.pickupFee} onChange={(event) => setSubmissionForm((current) => ({ ...current, pickupFee: event.target.value }))} /></div>
-              <div className="stack"><label className="label">Delivery Fee</label><input type="number" min="0" step="0.01" value={submissionForm.deliveryFee} onChange={(event) => setSubmissionForm((current) => ({ ...current, deliveryFee: event.target.value }))} /></div>
               <div className="stack"><label className="label">Security Deposit</label><input type="number" min="0" step="0.01" value={submissionForm.securityDeposit} onChange={(event) => setSubmissionForm((current) => ({ ...current, securityDeposit: event.target.value }))} /></div>
               <div className="stack"><label className="label">Min Trip Days</label><input type="number" min="1" value={submissionForm.minTripDays} onChange={(event) => setSubmissionForm((current) => ({ ...current, minTripDays: event.target.value }))} /></div>
               <div className="stack"><label className="label">Max Trip Days</label><input type="number" min="1" value={submissionForm.maxTripDays} onChange={(event) => setSubmissionForm((current) => ({ ...current, maxTripDays: event.target.value }))} /></div>
             </div>
-            <div className="form-grid-3">
-              <div className="stack">
-                <label className="label">Fulfillment Mode</label>
-                <select value={submissionForm.fulfillmentMode} onChange={(event) => setSubmissionForm((current) => ({ ...current, fulfillmentMode: event.target.value }))}>
-                  <option value="PICKUP_ONLY">Pickup Only</option>
-                  <option value="DELIVERY_ONLY">Delivery Only</option>
-                  <option value="PICKUP_OR_DELIVERY">Pickup Or Delivery</option>
-                </select>
-              </div>
-              <div className="stack"><label className="label">Delivery Radius Miles</label><input type="number" min="0" value={submissionForm.deliveryRadiusMiles} onChange={(event) => setSubmissionForm((current) => ({ ...current, deliveryRadiusMiles: event.target.value }))} /></div>
-              <div className="stack"><label className="label">Delivery Notes</label><input value={submissionForm.deliveryNotes} onChange={(event) => setSubmissionForm((current) => ({ ...current, deliveryNotes: event.target.value }))} placeholder="Airport, hotel, or service area guidance" /></div>
-            </div>
-            <div className="stack"><label className="label">Allowed Delivery Areas</label><textarea rows={3} value={submissionForm.deliveryAreasText} onChange={(event) => setSubmissionForm((current) => ({ ...current, deliveryAreasText: event.target.value }))} placeholder={'One area per line, for example:\nSan Juan\nIsla Verde\nCondado'} /></div>
+            {deliveryEnabled(submissionForm.fulfillmentMode) ? (
+              <>
+                <div className="form-grid-3">
+                  <div className="stack"><label className="label">Delivery Fee</label><input type="number" min="0" step="0.01" value={submissionForm.deliveryFee} onChange={(event) => setSubmissionForm((current) => ({ ...current, deliveryFee: event.target.value }))} /></div>
+                  <div className="stack"><label className="label">Delivery Radius Miles</label><input type="number" min="0" value={submissionForm.deliveryRadiusMiles} onChange={(event) => setSubmissionForm((current) => ({ ...current, deliveryRadiusMiles: event.target.value }))} /></div>
+                  <div className="stack"><label className="label">Allowed Delivery Areas</label><textarea rows={3} value={submissionForm.deliveryAreasText} onChange={(event) => setSubmissionForm((current) => ({ ...current, deliveryAreasText: event.target.value }))} placeholder={'One area per line, for example:\nSan Juan\nIsla Verde\nCondado'} /></div>
+                </div>
+                <details className="surface-note">
+                  <summary>Advanced delivery options</summary>
+                  <div className="form-grid-2" style={{ marginTop: 12 }}>
+                    <div className="stack"><label className="label">Pickup Fee</label><input type="number" min="0" step="0.01" value={submissionForm.pickupFee} onChange={(event) => setSubmissionForm((current) => ({ ...current, pickupFee: event.target.value }))} /></div>
+                    <div className="stack"><label className="label">Delivery Notes</label><input value={submissionForm.deliveryNotes} onChange={(event) => setSubmissionForm((current) => ({ ...current, deliveryNotes: event.target.value }))} placeholder="Airport, hotel, or service area guidance" /></div>
+                  </div>
+                </details>
+              </>
+            ) : (
+              <div className="surface-note">Guests will pick up the vehicle at the host pickup spot. Delivery fields stay hidden until the host enables delivery.</div>
+            )}
             <div className="stack"><label className="label">Short Description</label><input value={submissionForm.shortDescription} onChange={(event) => setSubmissionForm((current) => ({ ...current, shortDescription: event.target.value }))} /></div>
             <div className="stack"><label className="label">Description</label><textarea rows={4} value={submissionForm.description} onChange={(event) => setSubmissionForm((current) => ({ ...current, description: event.target.value }))} /></div>
             <div className="stack"><label className="label">Trip Rules</label><textarea rows={3} value={submissionForm.tripRules} onChange={(event) => setSubmissionForm((current) => ({ ...current, tripRules: event.target.value }))} /></div>
@@ -1319,21 +1337,37 @@ function HostAppInner({ token, me, logout }) {
               ) : null}
               <div className="stack"><label className="label">Short Description</label><input value={listingEdit.shortDescription} onChange={(event) => setListingEdit((current) => ({ ...current, shortDescription: event.target.value }))} /></div>
               <div className="stack"><label className="label">Description</label><textarea rows={4} value={listingEdit.description} onChange={(event) => setListingEdit((current) => ({ ...current, description: event.target.value }))} /></div>
+              <div className="surface-note">
+                Keep host pricing simple. Use pickup only by default, and only open delivery fields when the listing really offers delivery.
+              </div>
               <div className="form-grid-3">
                 <div className="stack"><label className="label">Status</label><select value={listingEdit.status} onChange={(event) => setListingEdit((current) => ({ ...current, status: event.target.value }))}><option value="DRAFT">DRAFT</option><option value="PUBLISHED">PUBLISHED</option><option value="PAUSED">PAUSED</option><option value="ARCHIVED">ARCHIVED</option></select></div>
-                <div className="stack"><label className="label">Fulfillment Mode</label><select value={listingEdit.fulfillmentMode} onChange={(event) => setListingEdit((current) => ({ ...current, fulfillmentMode: event.target.value }))}><option value="PICKUP_ONLY">Pickup Only</option><option value="DELIVERY_ONLY">Delivery Only</option><option value="PICKUP_OR_DELIVERY">Pickup Or Delivery</option></select></div>
+                <div className="stack"><label className="label">Trip Handoff</label><select value={listingEdit.fulfillmentMode} onChange={(event) => setListingEdit((current) => ({ ...current, fulfillmentMode: event.target.value }))}><option value="PICKUP_ONLY">Pickup Only</option><option value="PICKUP_OR_DELIVERY">Offer Pickup And Delivery</option><option value="DELIVERY_ONLY">Delivery Only</option></select></div>
                 <div className="stack"><label className="label">Daily Rate</label><input type="number" min="0" step="0.01" value={listingEdit.baseDailyRate} onChange={(event) => setListingEdit((current) => ({ ...current, baseDailyRate: event.target.value }))} /></div>
                 <div className="stack"><label className="label">Security Deposit</label><input type="number" min="0" step="0.01" value={listingEdit.securityDeposit} onChange={(event) => setListingEdit((current) => ({ ...current, securityDeposit: event.target.value }))} /></div>
                 <div className="stack"><label className="label">Cleaning Fee</label><input type="number" min="0" step="0.01" value={listingEdit.cleaningFee} onChange={(event) => setListingEdit((current) => ({ ...current, cleaningFee: event.target.value }))} /></div>
-                <div className="stack"><label className="label">Pickup Fee</label><input type="number" min="0" step="0.01" value={listingEdit.pickupFee} onChange={(event) => setListingEdit((current) => ({ ...current, pickupFee: event.target.value }))} /></div>
-                <div className="stack"><label className="label">Delivery Fee</label><input type="number" min="0" step="0.01" value={listingEdit.deliveryFee} onChange={(event) => setListingEdit((current) => ({ ...current, deliveryFee: event.target.value }))} /></div>
-                <div className="stack"><label className="label">Delivery Radius Miles</label><input type="number" min="0" value={listingEdit.deliveryRadiusMiles} onChange={(event) => setListingEdit((current) => ({ ...current, deliveryRadiusMiles: event.target.value }))} /></div>
                 <div className="stack"><label className="label">Min Trip Days</label><input type="number" min="1" value={listingEdit.minTripDays} onChange={(event) => setListingEdit((current) => ({ ...current, minTripDays: event.target.value }))} /></div>
                 <div className="stack"><label className="label">Max Trip Days</label><input type="number" min="1" value={listingEdit.maxTripDays} onChange={(event) => setListingEdit((current) => ({ ...current, maxTripDays: event.target.value }))} /></div>
               </div>
               <label className="label" style={{ textTransform: 'none', letterSpacing: 0 }}><input type="checkbox" checked={listingEdit.instantBook} onChange={(event) => setListingEdit((current) => ({ ...current, instantBook: event.target.checked }))} /> Instant Book</label>
-              <div className="stack"><label className="label">Allowed Delivery Areas</label><textarea rows={3} value={listingEdit.deliveryAreasText} onChange={(event) => setListingEdit((current) => ({ ...current, deliveryAreasText: event.target.value }))} placeholder={'One area per line, for example:\nSan Juan\nIsla Verde\nCondado'} /></div>
-              <div className="stack"><label className="label">Delivery Notes</label><textarea rows={2} value={listingEdit.deliveryNotes} onChange={(event) => setListingEdit((current) => ({ ...current, deliveryNotes: event.target.value }))} placeholder="Explain the service area, airport delivery guidance, or any handoff rules." /></div>
+              {deliveryEnabled(listingEdit.fulfillmentMode) ? (
+                <>
+                  <div className="form-grid-3">
+                    <div className="stack"><label className="label">Delivery Fee</label><input type="number" min="0" step="0.01" value={listingEdit.deliveryFee} onChange={(event) => setListingEdit((current) => ({ ...current, deliveryFee: event.target.value }))} /></div>
+                    <div className="stack"><label className="label">Delivery Radius Miles</label><input type="number" min="0" value={listingEdit.deliveryRadiusMiles} onChange={(event) => setListingEdit((current) => ({ ...current, deliveryRadiusMiles: event.target.value }))} /></div>
+                    <div className="stack"><label className="label">Allowed Delivery Areas</label><textarea rows={3} value={listingEdit.deliveryAreasText} onChange={(event) => setListingEdit((current) => ({ ...current, deliveryAreasText: event.target.value }))} placeholder={'One area per line, for example:\nSan Juan\nIsla Verde\nCondado'} /></div>
+                  </div>
+                  <details className="surface-note">
+                    <summary>Advanced delivery options</summary>
+                    <div className="form-grid-2" style={{ marginTop: 12 }}>
+                      <div className="stack"><label className="label">Pickup Fee</label><input type="number" min="0" step="0.01" value={listingEdit.pickupFee} onChange={(event) => setListingEdit((current) => ({ ...current, pickupFee: event.target.value }))} /></div>
+                      <div className="stack"><label className="label">Delivery Notes</label><textarea rows={2} value={listingEdit.deliveryNotes} onChange={(event) => setListingEdit((current) => ({ ...current, deliveryNotes: event.target.value }))} placeholder="Explain the service area, airport delivery guidance, or any handoff rules." /></div>
+                    </div>
+                  </details>
+                </>
+              ) : (
+                <div className="surface-note">Guests will pick up the vehicle at the configured pickup spot. Delivery fields stay hidden until delivery is enabled.</div>
+              )}
               <div className="stack"><label className="label">Trip Rules</label><textarea rows={3} value={listingEdit.tripRules} onChange={(event) => setListingEdit((current) => ({ ...current, tripRules: event.target.value }))} /></div>
               <div className="stack">
                 <div className="row-between">
