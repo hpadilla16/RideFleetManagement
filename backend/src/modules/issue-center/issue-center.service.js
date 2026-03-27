@@ -572,6 +572,44 @@ async function createIncidentForReservation(reservation, payload, actor = {}) {
   return serializeIncident(incident, [historyEntry]);
 }
 
+async function findTripForInternalIncident(user, payload = {}) {
+  const id = payload?.tripId ? String(payload.tripId).trim() : '';
+  const reference = payload?.reference ? String(payload.reference).trim() : '';
+  if (!id && !reference) throw new Error('tripId or reference is required');
+
+  const tenantScope = tenantWhereFor(user);
+  const where = {
+    ...(tenantScope.tenantId ? { tenantId: tenantScope.tenantId } : {}),
+    ...(id ? { id } : { tripCode: reference })
+  };
+
+  const trip = await prisma.trip.findFirst({
+    where,
+    include: incidentInclude().trip.include
+  });
+  if (!trip) throw new Error('Trip not found');
+  return trip;
+}
+
+async function findReservationForInternalIncident(user, payload = {}) {
+  const id = payload?.reservationId ? String(payload.reservationId).trim() : '';
+  const reference = payload?.reference ? String(payload.reference).trim() : '';
+  if (!id && !reference) throw new Error('reservationId or reference is required');
+
+  const tenantScope = tenantWhereFor(user);
+  const where = {
+    ...(tenantScope.tenantId ? { tenantId: tenantScope.tenantId } : {}),
+    ...(id ? { id } : { reservationNumber: reference })
+  };
+
+  const reservation = await prisma.reservation.findFirst({
+    where,
+    include: incidentInclude().reservation.include
+  });
+  if (!reservation) throw new Error('Reservation not found');
+  return reservation;
+}
+
 async function syncTollDisputeStatusForIncident(incident) {
   if (String(incident?.type || '').toUpperCase() !== 'TOLL') return;
   const evidence = safeParse(incident?.evidenceJson) || {};
@@ -700,6 +738,29 @@ async function notifyVehicleSubmissionApproved(submission) {
 
 export const issueCenterService = {
   notifyHostVehicleSubmissionApproved: notifyVehicleSubmissionApproved,
+
+  async createInternalIncident(user, payload = {}) {
+    const subjectType = String(payload?.subjectType || 'TRIP').trim().toUpperCase();
+    if (!['TRIP', 'RESERVATION'].includes(subjectType)) throw new Error('subjectType must be TRIP or RESERVATION');
+
+    if (payload?.amountClaimed !== '' && payload?.amountClaimed != null && !Number.isFinite(Number(payload.amountClaimed))) {
+      throw new Error('amountClaimed must be a valid number');
+    }
+
+    const actor = {
+      actorType: 'TENANT_USER',
+      actorRefId: user?.id || user?.sub || null,
+      source: 'issue-center'
+    };
+
+    if (subjectType === 'RESERVATION') {
+      const reservation = await findReservationForInternalIncident(user, payload);
+      return createIncidentForReservation(reservation, payload, actor);
+    }
+
+    const trip = await findTripForInternalIncident(user, payload);
+    return createIncidentForTrip(trip, payload, actor);
+  },
 
   async getDashboard(user, input = {}) {
     const tenantScope = tenantWhereFor(user);

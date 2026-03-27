@@ -17,6 +17,15 @@ const EMPTY_EDIT = {
   requestNote: ''
 };
 
+const EMPTY_CREATE = {
+  subjectType: 'TRIP',
+  reference: '',
+  type: 'OTHER',
+  title: '',
+  description: '',
+  amountClaimed: ''
+};
+
 const EMPTY_SUBMISSION_EDIT = {
   id: '',
   status: 'PENDING_REVIEW',
@@ -251,6 +260,7 @@ export default function IssueCenterPage() {
 function IssueCenterInner({ token, me, logout }) {
   const [dashboard, setDashboard] = useState(null);
   const [msg, setMsg] = useState('');
+  const [createForm, setCreateForm] = useState(EMPTY_CREATE);
   const [search, setSearch] = useState(() => {
     if (typeof window === 'undefined') return '';
     try { return localStorage.getItem(ISSUE_SEARCH_KEY) || ''; } catch { return ''; }
@@ -361,6 +371,29 @@ function IssueCenterInner({ token, me, logout }) {
       setMsg('Issue updated');
       setEdit(EMPTY_EDIT);
       try { localStorage.removeItem(ISSUE_EDIT_ID_KEY); } catch {}
+      await load();
+    } catch (error) {
+      setMsg(error.message);
+    }
+  }
+
+  async function createIncident(event) {
+    event.preventDefault();
+    try {
+      const payload = await api('/api/issue-center/incidents', {
+        method: 'POST',
+        body: JSON.stringify({
+          subjectType: createForm.subjectType,
+          reference: createForm.reference,
+          type: createForm.type,
+          title: createForm.title,
+          description: createForm.description,
+          amountClaimed: createForm.amountClaimed === '' ? null : Number(createForm.amountClaimed)
+        })
+      }, token);
+      setMsg('Issue created');
+      setCreateForm(EMPTY_CREATE);
+      setEdit(incidentToEdit(payload));
       await load();
     } catch (error) {
       setMsg(error.message);
@@ -747,11 +780,64 @@ function IssueCenterInner({ token, me, logout }) {
         <section className="glass card-lg section-card">
           <div className="row-between">
             <div>
-              <div className="section-title">Case Handling</div>
-              <p className="ui-muted">Move a case through review and resolution while keeping the trip workflow in sync.</p>
+              <div className="section-title">Create / Handle Case</div>
+              <p className="ui-muted">Open a new issue from a trip code or reservation number, then move it through review and resolution.</p>
             </div>
             {edit.id ? <button type="button" className="button-subtle" onClick={() => setEdit(EMPTY_EDIT)}>Clear</button> : null}
           </div>
+          <form className="stack" onSubmit={createIncident} style={{ marginBottom: 18 }}>
+            <div className="form-grid-2">
+              <div className="stack">
+                <div className="label">Issue Subject</div>
+                <select value={createForm.subjectType} onChange={(e) => setCreateForm((current) => ({ ...current, subjectType: e.target.value }))}>
+                  <option value="TRIP">Trip</option>
+                  <option value="RESERVATION">Reservation</option>
+                </select>
+              </div>
+              <div className="stack">
+                <div className="label">{createForm.subjectType === 'TRIP' ? 'Trip Code' : 'Reservation Number'}</div>
+                <input
+                  value={createForm.reference}
+                  onChange={(e) => setCreateForm((current) => ({ ...current, reference: e.target.value }))}
+                  placeholder={createForm.subjectType === 'TRIP' ? 'Trip code' : 'Reservation number'}
+                />
+              </div>
+            </div>
+            <div className="form-grid-2">
+              <div className="stack">
+                <div className="label">Issue Type</div>
+                <select value={createForm.type} onChange={(e) => setCreateForm((current) => ({ ...current, type: e.target.value }))}>
+                  <option value="DAMAGE">DAMAGE</option>
+                  <option value="TOLL">TOLL</option>
+                  <option value="CLEANING">CLEANING</option>
+                  <option value="LATE_RETURN">LATE_RETURN</option>
+                  <option value="OTHER">OTHER</option>
+                </select>
+              </div>
+              <div className="stack">
+                <div className="label">Amount Claimed</div>
+                <input
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  value={createForm.amountClaimed}
+                  onChange={(e) => setCreateForm((current) => ({ ...current, amountClaimed: e.target.value }))}
+                  placeholder="Optional"
+                />
+              </div>
+            </div>
+            <div className="stack">
+              <div className="label">Title</div>
+              <input value={createForm.title} onChange={(e) => setCreateForm((current) => ({ ...current, title: e.target.value }))} placeholder="Short case title" />
+            </div>
+            <div className="stack">
+              <div className="label">Description</div>
+              <textarea rows={4} value={createForm.description} onChange={(e) => setCreateForm((current) => ({ ...current, description: e.target.value }))} placeholder="What happened and what support review is needed?" />
+            </div>
+            <div className="inline-actions">
+              <button type="submit">Create Ticket</button>
+            </div>
+          </form>
           {edit.id ? (
             <form className="stack" onSubmit={saveIncident}>
               <div className="stack">

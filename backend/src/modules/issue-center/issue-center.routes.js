@@ -17,6 +17,17 @@ issueCenterRouter.get('/dashboard', async (req, res, next) => {
   }
 });
 
+issueCenterRouter.post('/incidents', async (req, res, next) => {
+  try {
+    res.status(201).json(await issueCenterService.createInternalIncident(req.user, req.body || {}));
+  } catch (error) {
+    if (/not found|required|must be|valid number/i.test(String(error?.message || ''))) {
+      return res.status(400).json({ error: error.message });
+    }
+    next(error);
+  }
+});
+
 issueCenterRouter.patch('/incidents/:id', async (req, res, next) => {
   try {
     res.json(await issueCenterService.updateIncident(req.user, req.params.id, req.body || {}));
