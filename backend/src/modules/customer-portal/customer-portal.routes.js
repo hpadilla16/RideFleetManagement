@@ -689,8 +689,25 @@ customerPortalRouter.post('/customer-info/:token', async (req, res, next) => {
     const lastName = String(body.lastName || '').trim();
     const email = String(body.email || '').trim().toLowerCase();
     const phone = String(body.phone || '').trim();
-    if (!firstName || !lastName || !email || !phone) {
-      return res.status(400).json({ error: 'firstName, lastName, email, and phone are required' });
+    const requiredChecks = [
+      ['firstName', firstName, 'First Name'],
+      ['lastName', lastName, 'Last Name'],
+      ['email', email, 'Email'],
+      ['phone', phone, 'Phone'],
+      ['dateOfBirth', String(body.dateOfBirth || '').trim(), 'Date of Birth'],
+      ['licenseNumber', String(body.licenseNumber || '').trim(), 'Driver License Number'],
+      ['licenseState', String(body.licenseState || '').trim(), 'Driver License State'],
+      ['address1', String(body.address1 || '').trim(), 'Address Line 1'],
+      ['city', String(body.city || '').trim(), 'City'],
+      ['state', String(body.state || '').trim(), 'State'],
+      ['zip', String(body.zip || '').trim(), 'ZIP'],
+      ['country', String(body.country || '').trim(), 'Country'],
+      ['idPhotoUrl', String(body.idPhotoUrl || '').trim(), 'ID / License Photo'],
+      ['insuranceDocumentUrl', String(body.insuranceDocumentUrl || '').trim(), 'Insurance Document']
+    ];
+    const missing = requiredChecks.filter(([, value]) => !value).map(([, , label]) => label);
+    if (missing.length) {
+      return res.status(400).json({ error: `Complete the required pre-check-in items first: ${missing.join(', ')}` });
     }
 
     await prisma.customer.update({

@@ -43,6 +43,23 @@ const EMPTY_FORM = {
   idPhotoUrl: ''
 };
 
+const PRECHECKIN_REQUIRED_FIELDS = [
+  ['firstName', 'First Name'],
+  ['lastName', 'Last Name'],
+  ['email', 'Email'],
+  ['phone', 'Phone'],
+  ['dateOfBirth', 'Date of Birth'],
+  ['licenseNumber', 'Driver License Number'],
+  ['licenseState', 'Driver License State'],
+  ['address1', 'Address Line 1'],
+  ['city', 'City'],
+  ['state', 'State'],
+  ['zip', 'ZIP'],
+  ['country', 'Country'],
+  ['idPhotoUrl', 'ID / License Photo'],
+  ['insuranceDocumentUrl', 'Insurance Document']
+];
+
 function precheckinDraftKey(token) {
   return `${PRECHECKIN_DRAFT_PREFIX}${token}`;
 }
@@ -144,6 +161,9 @@ export default function PrecheckinPage() {
       setSaving(true);
       setError('');
       setOk('');
+      if (missingRequiredFields.length) {
+        throw new Error(`Complete the required pre-check-in items first: ${missingRequiredFields.join(', ')}`);
+      }
       const res = await fetch(`${API_BASE}/api/public/customer-info/${encodeURIComponent(token)}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -186,6 +206,9 @@ export default function PrecheckinPage() {
     form.country
   ].filter(Boolean).length;
   const uploadedDocs = [form.idPhotoUrl, form.insuranceDocumentUrl].filter(Boolean).length;
+  const missingRequiredFields = PRECHECKIN_REQUIRED_FIELDS
+    .filter(([key]) => !String(form?.[key] || '').trim())
+    .map(([, label]) => label);
 
   const notices = (
     <div style={portalStyles.stack}>
@@ -218,6 +241,10 @@ export default function PrecheckinPage() {
                 <div style={portalStyles.statValue}>{uploadedDocs}/2</div>
               </div>
               <div style={portalStyles.statTile}>
+                <div style={portalStyles.statLabel}>Missing Required Items</div>
+                <div style={portalStyles.statValue}>{missingRequiredFields.length}</div>
+              </div>
+              <div style={portalStyles.statTile}>
                 <div style={portalStyles.statLabel}>Current Status</div>
                 <div style={portalStyles.statValue}>{reservation.customerInfoCompletedAt ? 'Submitted' : 'In Progress'}</div>
               </div>
@@ -243,6 +270,11 @@ export default function PrecheckinPage() {
             <div style={{ marginTop: 12, color: '#55456f', lineHeight: 1.6 }}>
               After this step, keep an eye on your email. We send the next secure link there so you can finish everything before pickup.
             </div>
+            {missingRequiredFields.length ? (
+              <div style={{ ...portalStyles.notice, marginTop: 12, background: 'rgba(245, 158, 11, 0.15)', color: '#92400e' }}>
+                Missing before submit: {missingRequiredFields.join(', ')}
+              </div>
+            ) : null}
           </div>
 
           <div style={portalStyles.card}>
@@ -380,7 +412,7 @@ export default function PrecheckinPage() {
                 Once you submit, our team can review your information before pickup and help shorten your time at the counter.
               </div>
               <div>
-                <button onClick={submit} disabled={saving || !token} style={portalStyles.button}>
+                <button onClick={submit} disabled={saving || !token || missingRequiredFields.length > 0} style={portalStyles.button}>
                   {saving ? 'Submitting...' : 'Complete Pre-Check-in'}
                 </button>
               </div>
