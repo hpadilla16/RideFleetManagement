@@ -282,6 +282,20 @@ rentalAgreementsRouter.post('/:id/commission-owner', async (req, res, next) => {
   }
 });
 
+rentalAgreementsRouter.get('/:id/commission-owner', async (req, res, next) => {
+  try {
+    if (!isAdminRole(req.user)) {
+      return res.status(403).json({ error: 'Admin role required for commission reassignment' });
+    }
+    const out = await rentalAgreementsService.commissionOwnerContext(req.params.id, req.user);
+    res.json(out);
+  } catch (e) {
+    if (/not found/i.test(String(e?.message || ''))) return res.status(404).json({ error: e.message });
+    if (/admin role required/i.test(String(e?.message || ''))) return res.status(403).json({ error: e.message });
+    next(e);
+  }
+});
+
 rentalAgreementsRouter.get('/:id/inspection-report', async (req, res, next) => {
   try {
     await ensureEditable(req.params.id, req.user);

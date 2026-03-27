@@ -132,6 +132,8 @@ function ReservationDetailInner({ token, me, logout }) {
   const [row, setRow] = useState(null);
   const [pricing, setPricing] = useState(null);
   const [paymentRows, setPaymentRows] = useState([]);
+  const [commissionOwnerContext, setCommissionOwnerContext] = useState(null);
+  const [commissionOwnerPick, setCommissionOwnerPick] = useState('');
   const [locations, setLocations] = useState([]);
   const [customers, setCustomers] = useState([]);
   const [vehicles, setVehicles] = useState([]);
@@ -192,6 +194,7 @@ function ReservationDetailInner({ token, me, logout }) {
   });
   const canManagePrecheckin = ['SUPER_ADMIN', 'ADMIN', 'OPS'].includes(String(me?.role || '').toUpperCase());
   const canManagePricingOverrides = ['SUPER_ADMIN', 'ADMIN'].includes(String(me?.role || '').toUpperCase());
+  const canManageCommissionOwner = ['SUPER_ADMIN', 'ADMIN'].includes(String(me?.role || '').toUpperCase());
 
 
   const cleanMojibake = (val) => {
@@ -277,6 +280,19 @@ function ReservationDetailInner({ token, me, logout }) {
       note: ''
     });
     setChargeModel(pricingEditorState(pricingOut, r));
+    if (canManageCommissionOwner && r?.rentalAgreement?.id) {
+      try {
+        const commissionCtx = await api(`/api/rental-agreements/${r.rentalAgreement.id}/commission-owner`, {}, token);
+        setCommissionOwnerContext(commissionCtx || null);
+        setCommissionOwnerPick(String(commissionCtx?.currentOwnerUserId || commissionCtx?.checkoutActorUserId || ''));
+      } catch {
+        setCommissionOwnerContext(null);
+        setCommissionOwnerPick('');
+      }
+    } else {
+      setCommissionOwnerContext(null);
+      setCommissionOwnerPick('');
+    }
   };
 
   useEffect(() => { if (id) load(); }, [id, token]);
@@ -1134,6 +1150,25 @@ token
     }
     };
 
+  const saveCommissionOwnerOverride = async () => {
+    if (!canManageCommissionOwner || !row?.rentalAgreement?.id) return;
+    try {
+      const employeeUserId = String(commissionOwnerPick || '').trim();
+      if (!employeeUserId) return setMsg('Select an employee first');
+      await api(`/api/rental-agreements/${row.rentalAgreement.id}/commission-owner`, {
+        method: 'POST',
+        body: JSON.stringify({ employeeUserId })
+      }, token);
+      const refreshed = await api(`/api/rental-agreements/${row.rentalAgreement.id}/commission-owner`, {}, token);
+      setCommissionOwnerContext(refreshed || null);
+      setCommissionOwnerPick(String(refreshed?.currentOwnerUserId || refreshed?.checkoutActorUserId || employeeUserId));
+      setMsg('Commission owner updated');
+      await load();
+    } catch (e) {
+      setMsg(e.message);
+    }
+  };
+
   const selectedServiceRows = useMemo(() => {
     const editorRows = String(chargeModel.serviceNames || '')
       .split(',')
@@ -1861,6 +1896,53 @@ token
                   </tr>
                 </tbody>
               </table>
+              {canManageCommissionOwner && row?.rentalAgreement?.id ? (
+                <div className="card" style={{ marginTop: 14 }}>
+                  <div className="row-between" style={{ marginBottom: 8 }}>
+                    <h3 style={{ margin: 0 }}>Commission Owner</h3>
+                    <span className="label">Admin only</span>
+                  </div>
+                  <div className="grid3">
+                    <div>
+                      <div className="label">Current Owner</div>
+                      <div>{commissionOwnerContext?.currentOwner?.fullName || '-'}</div>
+                    </div>
+                    <div>
+                      <div className="label">Checkout User</div>
+                      <div>
+                        {commissionOwnerContext?.employees?.find((employee) => employee.id === commissionOwnerContext?.checkoutActorUserId)?.fullName
+                          || commissionOwnerContext?.checkoutActorUserId
+                          || '-'}
+                      </div>
+                    </div>
+                    <div>
+                      <div className="label">Rule</div>
+                      <div>Commission follows checkout user unless admin overrides it.</div>
+                    </div>
+                  </div>
+                  <div className="grid2" style={{ marginTop: 10, alignItems: 'end' }}>
+                    <div className="stack">
+                      <label className="label">Assign Commission To</label>
+                      <select value={commissionOwnerPick} onChange={(e) => setCommissionOwnerPick(e.target.value)}>
+                        <option value="">Select employee</option>
+                        {(commissionOwnerContext?.employees || []).map((employee) => (
+                          <option key={employee.id} value={employee.id}>
+                            {employee.fullName} ({employee.role})
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                    <div style={{ display: 'flex', gap: 8 }}>
+                      <button type="button" onClick={() => setCommissionOwnerPick(String(commissionOwnerContext?.checkoutActorUserId || ''))}>
+                        Reset To Checkout User
+                      </button>
+                      <button type="button" onClick={saveCommissionOwnerOverride}>
+                        Save Commission Owner
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              ) : null}
             </>
           )}
         </div>

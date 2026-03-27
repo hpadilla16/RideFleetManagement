@@ -2202,6 +2202,57 @@ export const rentalAgreementsService = {
     return updated;
   },
 
+  async commissionOwnerContext(id, scope = null) {
+    const agreement = await prisma.rentalAgreement.findFirst({
+      where: {
+        id,
+        ...(scope?.tenantId ? { tenantId: scope.tenantId } : {})
+      },
+      include: {
+        salesOwnerUser: {
+          select: {
+            id: true,
+            fullName: true,
+            role: true,
+            isActive: true
+          }
+        },
+        inspections: {
+          where: { phase: 'CHECKOUT' },
+          orderBy: [{ capturedAt: 'desc' }, { updatedAt: 'desc' }],
+          select: {
+            actorUserId: true
+          }
+        }
+      }
+    });
+    if (!agreement) throw new Error('Rental agreement not found');
+
+    const employees = await prisma.user.findMany({
+      where: {
+        ...(agreement.tenantId ? { tenantId: agreement.tenantId } : {}),
+        isActive: true
+      },
+      orderBy: [{ fullName: 'asc' }, { createdAt: 'asc' }],
+      select: {
+        id: true,
+        fullName: true,
+        email: true,
+        role: true,
+        isActive: true
+      }
+    });
+
+    return {
+      agreementId: agreement.id,
+      tenantId: agreement.tenantId || null,
+      currentOwnerUserId: agreement.salesOwnerUserId || null,
+      currentOwner: agreement.salesOwnerUser || null,
+      checkoutActorUserId: agreement.inspections?.[0]?.actorUserId || null,
+      employees
+    };
+  },
+
   async finalize(id, payload = {}) {
     const agreement = await prisma.rentalAgreement.findUnique({
       where: { id },
