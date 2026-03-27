@@ -42,6 +42,19 @@ function publicLocationLabel(location) {
   return [location?.name, location?.city, location?.state].filter(Boolean).join(' · ') || 'Location';
 }
 
+function publicPickupSpotLabel(pickupSpot, fallbackLocation = null) {
+  if (pickupSpot?.label) {
+    const address = [pickupSpot?.city, pickupSpot?.state].filter(Boolean).join(', ');
+    const anchor = pickupSpot?.anchorLocation?.name ? ` · Ops hub ${pickupSpot.anchorLocation.name}` : '';
+    return `${pickupSpot.label}${address ? ` · ${address}` : ''}${anchor}`;
+  }
+  return fallbackLocation ? publicLocationLabel(fallbackLocation) : 'Location';
+}
+
+function pickupSpotHint(pickupSpot) {
+  return [pickupSpot?.address1, pickupSpot?.city, pickupSpot?.state, pickupSpot?.postalCode].filter(Boolean).join(' · ');
+}
+
 function locationLabelFromId(locations, id) {
   if (!id) return '';
   const match = (Array.isArray(locations) ? locations : []).find((location) => String(location.id) === String(id));
@@ -668,6 +681,14 @@ function PublicBookingPageInner() {
                     <strong>{listing.title}</strong>
                     <br />
                     {listing.vehicle?.label || 'Vehicle pending'}
+                    <br />
+                    Pickup spot: {publicPickupSpotLabel(listing.pickupSpot, listing.location)}
+                    {pickupSpotHint(listing.pickupSpot) ? (
+                      <>
+                        <br />
+                        {pickupSpotHint(listing.pickupSpot)}
+                      </>
+                    ) : null}
                     {listing.location?.name ? ` · ${listing.location.name}` : ''}
                     <br />
                     Host: {listing.host?.displayName || 'Unassigned'} · {fmtRating(listing.host?.averageRating, listing.host?.reviewCount)} · From {fmtMoney(listing.baseDailyRate)}/day
@@ -859,6 +880,8 @@ function PublicBookingPageInner() {
                       hints={[
                         result.instantBook ? 'Instant book' : 'Approval flow',
                         `${Math.max(1, Number(result.minTripDays || 1))}+ day minimum`,
+                        ...(result.pickupSpot?.label ? [`Pickup spot: ${result.pickupSpot.label}`] : []),
+                        ...(pickupSpotHint(result.pickupSpot) ? [pickupSpotHint(result.pickupSpot)] : []),
                         ...(normalizeImageList(result.imageUrls || []).length ? [`${normalizeImageList(result.imageUrls || []).length} photo${normalizeImageList(result.imageUrls || []).length === 1 ? '' : 's'}`] : []),
                         ...(result.additionalServices?.length ? [`${result.additionalServices.length} host add-on${result.additionalServices.length === 1 ? '' : 's'}`] : [])
                       ]}
@@ -936,6 +959,13 @@ function PublicBookingPageInner() {
                         <Link href={`/host-profile/${selectedResult.host.id}`}>View profile</Link>
                       </>
                     ) : null}
+                    <br />
+                  </>
+                ) : null}
+                {searchMode === 'CAR_SHARING' ? (
+                  <>
+                    {`Pickup ${publicPickupSpotLabel(selectedResult.pickupSpot, selectedResult.location)}`}
+                    {pickupSpotHint(selectedResult.pickupSpot) ? ` · ${pickupSpotHint(selectedResult.pickupSpot)}` : ''}
                     <br />
                   </>
                 ) : null}
