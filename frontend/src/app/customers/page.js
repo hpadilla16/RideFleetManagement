@@ -1,5 +1,17 @@
 'use client';
 
+function parseCsv(text) {
+  const lines = String(text || '').split(/\r?\n/).filter(Boolean);
+  if (!lines.length) return [];
+  const headers = lines[0].split(',').map((h) => h.trim());
+  return lines.slice(1).map((line) => {
+    const cols = line.split(',').map((c) => c.trim());
+    const row = {};
+    headers.forEach((h, i) => { row[h] = cols[i] ?? ''; });
+    return row;
+  });
+}
+
 import Link from 'next/link';
 import { useEffect, useMemo, useState } from 'react';
 import { AuthGate } from '../../components/AuthGate';
@@ -43,6 +55,12 @@ function CustomersInner({ token, me, logout }) {
   const [wizardOpen, setWizardOpen] = useState(false);
   const [step, setStep] = useState(0);
   const [form, setForm] = useState(EMPTY);
+  const [showImport, setShowImport] = useState(false);
+  const [importStep, setImportStep] = useState(1);
+  const [importRows, setImportRows] = useState([]);
+  const [importReport, setImportReport] = useState(null);
+  const [validatingImport, setValidatingImport] = useState(false);
+  const [importingRows, setImportingRows] = useState(false);
 
   const load = async () => setRows(await api('/api/customers', {}, token));
   useEffect(() => { load(); }, [token]);
@@ -246,6 +264,67 @@ function CustomersInner({ token, me, logout }) {
     await load();
   };
 
+  const downloadImportTemplate = () => {
+    const sampleTenantSlug = me?.tenantId ? '' : 'tenantSlug,';
+    const sampleTenantValue = me?.tenantId ? '' : 'demo,';
+    const csv = `${sampleTenantSlug}firstName,lastName,email,phone,dateOfBirth,address1,city,state,zip,country,licenseNumber,licenseState,insurancePolicyNumber,creditBalance,doNotRent,doNotRentReason,notes\n${sampleTenantValue}Jose,Diaz,jose@example.com,7875550101,1990-05-10,123 Main St,San Juan,PR,00901,Puerto Rico,D1234567,PR,POL-1001,0,false,,Imported from legacy CRM`;
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'customer_migration_template.csv';
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const onSelectImportFile = async (file) => {
+    if (!file) return;
+    const text = await file.text();
+    setImportRows(parseCsv(text));
+  };
+
+  const validateImport = async () => {
+    setValidatingImport(true);
+    setImportReport(null);
+    try {
+      const report = await api('/api/customers/bulk/validate', {
+        method: 'POST',
+        body: JSON.stringify({ rows: importRows })
+      }, token);
+      setImportReport(report);
+    } catch (e) {
+      setMsg(e.message);
+    } finally {
+      setValidatingImport(false);
+    }
+  };
+
+  const proceedImport = async () => {
+    setImportingRows(true);
+    try {
+      const out = await api('/api/customers/bulk/import', {
+        method: 'POST',
+        body: JSON.stringify({ rows: importRows })
+      }, token);
+      setMsg(`Customer upload successful. Created ${out.created}, skipped ${out.skipped}.`);
+      setShowImport(false);
+      setImportStep(1);
+      setImportRows([]);
+      setImportReport(null);
+      await load();
+    } catch (e) {
+      setMsg(e.message);
+    } finally {
+      setImportingRows(false);
+    }
+  };
+
+  const resetImportWizard = () => {
+    setImportStep(1);
+    setImportRows([]);
+    setImportReport(null);
+  };
+
   return (
     <AppShell me={me} logout={logout}>
       <section className="glass card-lg section-card" style={{ marginBottom: 16 }}>
@@ -319,6 +398,7 @@ function CustomersInner({ token, me, logout }) {
           <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
             <button className="badge" onClick={() => setShowOnlyHold((v) => !v)}>{showOnlyHold ? 'Showing: Hold Only' : 'Filter: Hold'}</button>
             <input placeholder="Search name/phone/email" value={query} onChange={(e) => setQuery(e.target.value)} />
+            <button onClick={() => setShowImport(true)}>Upload Customers</button>
             <button onClick={openCreate}>Add New Customer</button>
           </div>
         </div>
@@ -422,6 +502,61 @@ function CustomersInner({ token, me, logout }) {
               <button onClick={prev} disabled={step === 0}>Back</button>
               {step < STEPS.length - 1 ? <button onClick={next}>Next</button> : <button onClick={save}>{form.id ? 'Update Customer' : 'Create Customer'}</button>}
             </div>
+          </div>
+        </div>
+      )}
+
+      {showImport && (
+        <div className="modal-backdrop" onClick={() => { setShowImport(false); resetImportWizard(); }}>
+          <div className="rent-modal glass" style={{ width: 'min(820px, 95vw)' }} onClick={(e) => e.stopPropagation()}>
+            <h3>Upload Customer Migration</h3>
+
+            {importStep === 1 && (
+              <div className="stack">
+                <p className="label">Step 1: Review instructions</p>
+                <ul>
+                  <li>Use CSV format exported from the legacy CRM or rental platform.</li>
+                  <li>Required columns: <code>firstName</code>, <code>lastName</code>, and <code>phone</code>.</li>
+                  <li>Recommended columns: <code>email</code>, <code>dateOfBirth</code>, address fields, <code>licenseNumber</code>, <code>licenseState</code>, and <code>insurancePolicyNumber</code>.</li>
+                  <li>Rows matching an existing email, phone, or license number are skipped.</li>
+                  {!me?.tenantId ? <li>For super admin imports, include <code>tenantSlug</code> in every row.</li> : null}
+                </ul>
+                <div style={{ display: 'flex', gap: 8 }}>
+                  <button type="button" onClick={downloadImportTemplate}>Download Template</button>
+                  <button type="button" onClick={() => setImportStep(2)}>Next</button>
+                </div>
+              </div>
+            )}
+
+            {importStep === 2 && (
+              <div className="stack">
+                <p className="label">Step 2: Upload file and validate</p>
+                <input type="file" accept=".csv,text/csv" onChange={(e) => onSelectImportFile(e.target.files?.[0])} />
+                <p className="label">Rows loaded: {importRows.length}</p>
+                <div style={{ display: 'flex', gap: 8 }}>
+                  <button type="button" onClick={resetImportWizard}>Try again</button>
+                  <button type="button" onClick={validateImport} disabled={!importRows.length || validatingImport}>{validatingImport ? 'Validating…' : 'Validate'}</button>
+                </div>
+              </div>
+            )}
+
+            {importReport && (
+              <div className="stack" style={{ marginTop: 12 }}>
+                <p><strong>Validation report</strong></p>
+                <p className="label">Found: {importReport.found} · Valid: {importReport.valid} · Duplicates: {importReport.duplicates} · Invalid: {importReport.invalid}</p>
+                <div style={{ maxHeight: 180, overflow: 'auto', border: '1px solid #eee8ff', borderRadius: 8, padding: 8 }}>
+                  {importReport.rows.slice(0, 60).map((row) => (
+                    <div key={row.row} className="label" style={{ marginBottom: 6 }}>
+                      Row {row.row}: {row.valid ? 'valid' : [...row.errors, ...row.duplicateReasons].join(', ')}
+                    </div>
+                  ))}
+                </div>
+                <div style={{ display: 'flex', gap: 8 }}>
+                  <button type="button" onClick={resetImportWizard}>Try again</button>
+                  <button type="button" onClick={proceedImport} disabled={importReport.valid === 0 || importingRows}>{importingRows ? 'Uploading…' : 'Proceed with Upload'}</button>
+                </div>
+              </div>
+            )}
           </div>
         </div>
       )}

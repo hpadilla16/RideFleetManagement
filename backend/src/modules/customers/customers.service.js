@@ -1,6 +1,27 @@
 import crypto from 'node:crypto';
 import { prisma } from '../../lib/prisma.js';
 
+function norm(v) {
+  return String(v ?? '').trim();
+}
+
+function normLower(v) {
+  return norm(v).toLowerCase();
+}
+
+function parseDateInput(value) {
+  if (!value) return null;
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return null;
+  return parsed;
+}
+
+function parseNumberInput(value) {
+  if (value === null || value === undefined || value === '') return null;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
 function parseLocationConfig(raw) {
   try {
     if (!raw) return {};
@@ -71,6 +92,138 @@ async function applyCreditToUnpaidAgreements(customerId, scope = {}) {
   }
 }
 
+async function resolveImportTenant(row, scope = {}, cache) {
+  if (scope?.tenantId) {
+    if (!cache.tenantById.has(scope.tenantId)) {
+      const tenant = await prisma.tenant.findUnique({
+        where: { id: scope.tenantId },
+        select: { id: true, slug: true, name: true }
+      });
+      cache.tenantById.set(scope.tenantId, tenant || null);
+    }
+    return cache.tenantById.get(scope.tenantId);
+  }
+
+  const tenantId = norm(row.tenantId);
+  const tenantSlug = norm(row.tenantSlug);
+  const tenantName = norm(row.tenantName);
+
+  if (tenantId) {
+    if (!cache.tenantById.has(tenantId)) {
+      const tenant = await prisma.tenant.findUnique({
+        where: { id: tenantId },
+        select: { id: true, slug: true, name: true }
+      });
+      cache.tenantById.set(tenantId, tenant || null);
+    }
+    return cache.tenantById.get(tenantId);
+  }
+
+  if (tenantSlug) {
+    const key = tenantSlug.toLowerCase();
+    if (!cache.tenantBySlug.has(key)) {
+      const tenant = await prisma.tenant.findUnique({
+        where: { slug: tenantSlug },
+        select: { id: true, slug: true, name: true }
+      });
+      cache.tenantBySlug.set(key, tenant || null);
+    }
+    return cache.tenantBySlug.get(key);
+  }
+
+  if (tenantName) {
+    const key = tenantName.toLowerCase();
+    if (!cache.tenantByName.has(key)) {
+      const tenant = await prisma.tenant.findFirst({
+        where: { name: tenantName },
+        select: { id: true, slug: true, name: true }
+      });
+      cache.tenantByName.set(key, tenant || null);
+    }
+    return cache.tenantByName.get(key);
+  }
+
+  return null;
+}
+
+async function buildCustomerImportRow(row, index, scope = {}, cache = {}) {
+  const tenant = await resolveImportTenant(row || {}, scope, cache);
+  const tenantId = tenant?.id || scope?.tenantId || null;
+
+  const firstName = norm(row.firstName);
+  const lastName = norm(row.lastName);
+  const email = norm(row.email) || null;
+  const phone = norm(row.phone);
+  const licenseNumber = norm(row.licenseNumber) || null;
+  const licenseState = norm(row.licenseState) || null;
+  const dateOfBirth = row.dateOfBirth ? parseDateInput(row.dateOfBirth) : null;
+  const creditBalance = parseNumberInput(row.creditBalance);
+
+  const errors = [];
+  const duplicateReasons = [];
+
+  if (!tenantId) errors.push('tenantId/tenantSlug required');
+  if (!firstName) errors.push('firstName required');
+  if (!lastName) errors.push('lastName required');
+  if (!phone) errors.push('phone required');
+  if (row.dateOfBirth && !dateOfBirth) errors.push('dateOfBirth invalid');
+  if (row.creditBalance && creditBalance == null) errors.push('creditBalance invalid');
+
+  const existing = tenantId
+    ? await prisma.customer.findFirst({
+        where: {
+          tenantId,
+          OR: [
+            ...(email ? [{ email }] : []),
+            ...(phone ? [{ phone }] : []),
+            ...(licenseNumber ? [{ licenseNumber }] : [])
+          ]
+        },
+        select: { id: true, email: true, phone: true, licenseNumber: true }
+      })
+    : null;
+
+  if (existing?.email && email && normLower(existing.email) === normLower(email)) duplicateReasons.push('email exists');
+  if (existing?.phone && phone && normLower(existing.phone) === normLower(phone)) duplicateReasons.push('phone exists');
+  if (existing?.licenseNumber && licenseNumber && normLower(existing.licenseNumber) === normLower(licenseNumber)) duplicateReasons.push('licenseNumber exists');
+
+  return {
+    row: index + 1,
+    valid: errors.length === 0 && duplicateReasons.length === 0,
+    errors,
+    duplicateReasons,
+    tenantId,
+    tenantLabel: tenant?.name || tenant?.slug || tenantId || '',
+    firstName,
+    lastName,
+    email,
+    phone,
+    normalized: {
+      tenantId,
+      firstName,
+      lastName,
+      email,
+      phone,
+      dateOfBirth,
+      address1: norm(row.address1) || null,
+      address2: norm(row.address2) || null,
+      city: norm(row.city) || null,
+      state: norm(row.state) || null,
+      zip: norm(row.zip) || null,
+      country: norm(row.country) || null,
+      licenseNumber,
+      licenseState,
+      insurancePolicyNumber: norm(row.insurancePolicyNumber) || null,
+      insuranceDocumentUrl: norm(row.insuranceDocumentUrl) || null,
+      idPhotoUrl: norm(row.idPhotoUrl) || null,
+      creditBalance: creditBalance ?? 0,
+      doNotRent: ['1', 'true', 'yes', 'y'].includes(normLower(row.doNotRent)),
+      doNotRentReason: norm(row.doNotRentReason) || null,
+      notes: norm(row.notes) || null
+    }
+  };
+}
+
 export const customersService = {
   list(scope = {}) {
     return prisma.customer.findMany({ where: scope?.tenantId ? { tenantId: scope.tenantId } : undefined, orderBy: { createdAt: 'desc' } });
@@ -133,6 +286,78 @@ export const customersService = {
         notes: data.notes ?? null
       }
     });
+  },
+
+  async validateBulk(rows = [], scope = {}) {
+    const cache = {
+      tenantById: new Map(),
+      tenantBySlug: new Map(),
+      tenantByName: new Map()
+    };
+
+    let validCount = 0;
+    let duplicateCount = 0;
+    let invalidCount = 0;
+    const report = [];
+
+    for (let idx = 0; idx < rows.length; idx += 1) {
+      const built = await buildCustomerImportRow(rows[idx], idx, scope, cache);
+      if (built.errors.length) invalidCount += 1;
+      else if (built.duplicateReasons.length) duplicateCount += 1;
+      else validCount += 1;
+      report.push(built);
+    }
+
+    return {
+      found: rows.length,
+      valid: validCount,
+      duplicates: duplicateCount,
+      invalid: invalidCount,
+      rows: report
+    };
+  },
+
+  async importBulk(rows = [], scope = {}) {
+    const validation = await this.validateBulk(rows, scope);
+    const validRows = validation.rows.filter((row) => row.valid);
+
+    if (!validRows.length) {
+      return { created: 0, skipped: validation.found, validation };
+    }
+
+    for (const row of validRows) {
+      await prisma.customer.create({
+        data: {
+          tenantId: row.normalized.tenantId,
+          firstName: row.normalized.firstName,
+          lastName: row.normalized.lastName,
+          email: row.normalized.email,
+          phone: row.normalized.phone,
+          dateOfBirth: row.normalized.dateOfBirth,
+          address1: row.normalized.address1,
+          address2: row.normalized.address2,
+          city: row.normalized.city,
+          state: row.normalized.state,
+          zip: row.normalized.zip,
+          country: row.normalized.country,
+          licenseNumber: row.normalized.licenseNumber,
+          licenseState: row.normalized.licenseState,
+          insurancePolicyNumber: row.normalized.insurancePolicyNumber,
+          insuranceDocumentUrl: row.normalized.insuranceDocumentUrl,
+          idPhotoUrl: row.normalized.idPhotoUrl,
+          creditBalance: row.normalized.creditBalance,
+          doNotRent: row.normalized.doNotRent,
+          doNotRentReason: row.normalized.doNotRentReason,
+          notes: row.normalized.notes
+        }
+      });
+    }
+
+    return {
+      created: validRows.length,
+      skipped: validation.found - validRows.length,
+      validation
+    };
   },
 
   async update(id, patch, scope = {}) {

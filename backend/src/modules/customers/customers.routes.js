@@ -5,12 +5,24 @@ import { isSuperAdmin } from '../../middleware/auth.js';
 export const customersRouter = Router();
 
 function scopeFor(req) {
-  if (isSuperAdmin(req.user)) return {};
-  return { tenantId: req.user?.tenantId || null };
+  if (isSuperAdmin(req.user)) return { allowCrossTenant: true };
+  return { tenantId: req.user?.tenantId || null, allowCrossTenant: false };
 }
 
 customersRouter.get('/', async (_req, res) => {
   res.json(await customersService.list(scopeFor(_req)));
+});
+
+customersRouter.post('/bulk/validate', async (req, res) => {
+  const rows = Array.isArray(req.body?.rows) ? req.body.rows : [];
+  const report = await customersService.validateBulk(rows, scopeFor(req));
+  res.json(report);
+});
+
+customersRouter.post('/bulk/import', async (req, res) => {
+  const rows = Array.isArray(req.body?.rows) ? req.body.rows : [];
+  const out = await customersService.importBulk(rows, scopeFor(req));
+  res.json(out);
 });
 
 customersRouter.get('/:id', async (req, res) => {

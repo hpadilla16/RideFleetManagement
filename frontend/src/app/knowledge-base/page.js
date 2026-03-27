@@ -153,7 +153,8 @@ const reservationMigrationGuides = [
     bullets: [
       'Use this when a new client is moving active or upcoming reservations from another platform into Ride Fleet.',
       'This is not the normal booking flow. It is a controlled migration tool inside Reservations.',
-      'Open Reservations and use Upload Migration before staff starts recreating bookings by hand.'
+      'Open Reservations and use Upload Migration before staff starts recreating bookings by hand.',
+      'If the customer file is not already inside Ride Fleet, upload Customers first so the reservation migration resolves cleaner.'
     ]
   },
   {
@@ -180,7 +181,8 @@ const reservationMigrationGuides = [
       'Duplicate reservation numbers or source refs are skipped.',
       'The importer validates pickup and return dates, location resolution, customer resolution, and vehicle or vehicle type resolution.',
       'If a vehicle is assigned in the file, the importer checks for conflicts with other active reservations.',
-      'Super admins importing across tenants should include tenantSlug in each row.'
+      'Super admins importing across tenants should include tenantSlug in each row.',
+      'For best results, import Customers before importing Reservations.'
     ]
   }
 ];
