@@ -4,6 +4,26 @@ import { authService } from '../auth/auth.service.js';
 
 const SALT_ROUNDS = 10;
 
+function normalizePrismaTarget(error) {
+  const raw = error?.meta?.target;
+  if (Array.isArray(raw)) return raw.map((value) => String(value || '').toLowerCase());
+  if (typeof raw === 'string') return [raw.toLowerCase()];
+  return [];
+}
+
+function mapTenantWriteError(error, fallback = 'Unable to save tenant changes') {
+  if (error?.code === 'P2002') {
+    const target = normalizePrismaTarget(error);
+    if (target.includes('email')) {
+      throw new Error('A user with that email already exists. Use a different admin email or reset the existing user password.');
+    }
+    if (target.includes('slug')) {
+      throw new Error('That tenant slug is already in use. Choose a different slug.');
+    }
+  }
+  throw new Error(error?.message || fallback);
+}
+
 export const tenantsService = {
   list() {
     return prisma.tenant.findMany({
@@ -26,18 +46,21 @@ export const tenantsService = {
     const name = String(data.name || '').trim();
     const slug = String(data.slug || '').trim().toLowerCase();
     if (!name || !slug) throw new Error('name and slug are required');
-
-    return prisma.tenant.create({
-      data: {
-        name,
-        slug,
-        status: String(data.status || 'ACTIVE').toUpperCase(),
-        plan: String(data.plan || 'BETA').toUpperCase(),
-        carSharingEnabled: !!data.carSharingEnabled,
-        dealershipLoanerEnabled: !!data.dealershipLoanerEnabled,
-        tollsEnabled: !!data.tollsEnabled
-      }
-    });
+    try {
+      return await prisma.tenant.create({
+        data: {
+          name,
+          slug,
+          status: String(data.status || 'ACTIVE').toUpperCase(),
+          plan: String(data.plan || 'BETA').toUpperCase(),
+          carSharingEnabled: !!data.carSharingEnabled,
+          dealershipLoanerEnabled: !!data.dealershipLoanerEnabled,
+          tollsEnabled: !!data.tollsEnabled
+        }
+      });
+    } catch (error) {
+      mapTenantWriteError(error, 'Unable to create tenant');
+    }
   },
 
   async updateTenant(id, patch = {}) {
@@ -50,7 +73,11 @@ export const tenantsService = {
     if (patch.dealershipLoanerEnabled !== undefined) data.dealershipLoanerEnabled = !!patch.dealershipLoanerEnabled;
     if (patch.tollsEnabled !== undefined) data.tollsEnabled = !!patch.tollsEnabled;
 
-    return prisma.tenant.update({ where: { id }, data });
+    try {
+      return await prisma.tenant.update({ where: { id }, data });
+    } catch (error) {
+      mapTenantWriteError(error, 'Unable to update tenant');
+    }
   },
 
   async createTenantAdmin(tenantId, payload = {}) {
@@ -60,16 +87,21 @@ export const tenantsService = {
     if (!email || !fullName) throw new Error('email and fullName are required');
 
     const passwordHash = await bcrypt.hash(password, SALT_ROUNDS);
-    const user = await prisma.user.create({
-      data: {
-        email,
-        fullName,
-        role: 'ADMIN',
-        passwordHash,
-        tenant: { connect: { id: tenantId } }
-      },
-      select: { id: true, email: true, fullName: true, role: true, tenantId: true }
-    });
+    let user;
+    try {
+      user = await prisma.user.create({
+        data: {
+          email,
+          fullName,
+          role: 'ADMIN',
+          passwordHash,
+          tenant: { connect: { id: tenantId } }
+        },
+        select: { id: true, email: true, fullName: true, role: true, tenantId: true }
+      });
+    } catch (error) {
+      mapTenantWriteError(error, 'Unable to create tenant admin');
+    }
 
     return { ...user, tempPassword: password };
   },
