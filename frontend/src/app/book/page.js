@@ -39,20 +39,20 @@ function normalizeImageList(value) {
 }
 
 function publicLocationLabel(location) {
-  return [location?.name, location?.city, location?.state].filter(Boolean).join(' Â· ') || 'Location';
+  return [location?.name, location?.city, location?.state].filter(Boolean).join(' | ') || 'Location';
 }
 
 function publicPickupSpotLabel(pickupSpot, fallbackLocation = null) {
   if (pickupSpot?.label) {
     const address = [pickupSpot?.city, pickupSpot?.state].filter(Boolean).join(', ');
-    const anchor = pickupSpot?.anchorLocation?.name ? ` Â· Ops hub ${pickupSpot.anchorLocation.name}` : '';
-    return `${pickupSpot.label}${address ? ` Â· ${address}` : ''}${anchor}`;
+    const anchor = pickupSpot?.anchorLocation?.name ? ` | Ops hub ${pickupSpot.anchorLocation.name}` : '';
+    return `${pickupSpot.label}${address ? ` | ${address}` : ''}${anchor}`;
   }
   return fallbackLocation ? publicLocationLabel(fallbackLocation) : 'Location';
 }
 
 function pickupSpotHint(pickupSpot) {
-  return [pickupSpot?.address1, pickupSpot?.city, pickupSpot?.state, pickupSpot?.postalCode].filter(Boolean).join(' Â· ');
+  return [pickupSpot?.address1, pickupSpot?.city, pickupSpot?.state, pickupSpot?.postalCode].filter(Boolean).join(' | ');
 }
 
 function fulfillmentModeLabel(mode) {
@@ -69,7 +69,7 @@ function fulfillmentHint(result) {
   if (Array.isArray(result.deliveryAreas) && result.deliveryAreas.length) bits.push(`${result.deliveryAreas.length} delivery areas`);
   if (Number(result.pickupFee || 0) > 0) bits.push(`Pickup fee ${fmtMoney(result.pickupFee)}`);
   if (Number(result.deliveryFee || 0) > 0) bits.push(`Delivery fee ${fmtMoney(result.deliveryFee)}`);
-  return bits.join(' Ã‚Â· ');
+  return bits.join(' | ');
 }
 
 function defaultFulfillmentChoice(result) {
@@ -195,7 +195,7 @@ function BookingCard({ title, subtitle, meta, quote, cta, onClick, selected = fa
             {hostSummary}
             {hostHref ? (
               <>
-                {' Â· '}
+                {' | '}
                 <Link href={hostHref}>View host</Link>
               </>
             ) : null}
@@ -766,9 +766,9 @@ function PublicBookingPageInner() {
                         {pickupSpotHint(listing.pickupSpot)}
                       </>
                     ) : null}
-                    {listing.location?.name ? ` Â· ${listing.location.name}` : ''}
+                    {listing.location?.name ? ` | ${listing.location.name}` : ''}
                     <br />
-                    Host: {listing.host?.displayName || 'Unassigned'} Â· {fmtRating(listing.host?.averageRating, listing.host?.reviewCount)} Â· From {fmtMoney(listing.baseDailyRate)}/day
+                    Host: {listing.host?.displayName || 'Unassigned'} | {fmtRating(listing.host?.averageRating, listing.host?.reviewCount)} | From {fmtMoney(listing.baseDailyRate)}/day
                   </div>
                 ))}
               </div>
@@ -846,11 +846,11 @@ function PublicBookingPageInner() {
         <section className="glass card-lg section-card">
           <div className="row-between">
             <div>
-              <div className="section-title">{uiStep === 'select' ? 'Step 2 Â· Select Your Vehicle' : 'Step 3 Â· Guest Details'}</div>
+              <div className="section-title">{uiStep === 'select' ? 'Step 2 | Select Your Vehicle' : 'Step 3 | Guest Details'}</div>
               <p className="ui-muted">
                 {searchMode === 'RENTAL'
-                  ? `${selectedPickupLocationOption?.label || 'Selected location'} Â· ${pickupAt} to ${returnAt}`
-                  : `${selectedPickupLocationOption?.label || 'Selected location'} Â· ${pickupAt} to ${returnAt}`}
+                  ? `${selectedPickupLocationOption?.label || 'Selected location'} | ${pickupAt} to ${returnAt}`
+                  : `${selectedPickupLocationOption?.label || 'Selected location'} | ${pickupAt} to ${returnAt}`}
               </p>
             </div>
             <div className="inline-actions">
@@ -911,8 +911,8 @@ function PublicBookingPageInner() {
                 <strong>Selected Package</strong>
                 <br />
                 {searchMode === 'RENTAL'
-                  ? `${selectedResult.vehicleType?.name || 'Rental option'} Â· Estimated total ${fmtMoney(selectedResult.quote?.estimatedTripTotal)}`
-                  : `${selectedResult.title || 'Vehicle'} Â· Estimated total ${fmtMoney(checkoutEstimatedTotal)}`}
+                  ? `${selectedResult.vehicleType?.name || 'Rental option'} | Estimated total ${fmtMoney(selectedResult.quote?.estimatedTripTotal)}`
+                  : `${selectedResult.title || 'Vehicle'} | Estimated total ${fmtMoney(checkoutEstimatedTotal)}`}
               </div>
             ) : null}
             <div className="grid2" style={{ marginBottom: 0 }}>
@@ -921,7 +921,7 @@ function PublicBookingPageInner() {
                     <BookingCard
                       key={result.vehicleType.id}
                       title={result.vehicleType.name}
-                      subtitle={`${result.sampleVehicleLabel || result.vehicleType.description || 'Public rental quote available'}${result.location?.name ? ` Â· ${publicLocationLabel(result.location)}` : ''}`}
+                      subtitle={`${result.sampleVehicleLabel || result.vehicleType.description || 'Public rental quote available'}${result.location?.name ? ` | ${publicLocationLabel(result.location)}` : ''}`}
                       meta={result.soldOut ? 'Waitlist / sold out' : `${result.availabilityCount} unit(s) available`}
                       selected={selectedResult?.vehicleType?.id === result.vehicleType.id}
                       imageUrl={result.primaryImageUrl}
@@ -947,12 +947,12 @@ function PublicBookingPageInner() {
                     <BookingCard
                       key={result.id}
                       title={result.title}
-                      subtitle={`${result.vehicle?.label || 'Vehicle'}${result.location?.name ? ` Â· ${result.location.name}` : ''}`}
+                      subtitle={`${result.vehicle?.label || 'Vehicle'}${result.location?.name ? ` | ${result.location.name}` : ''}`}
                       meta={result.instantBook ? 'Instant book ready' : `Hosted by ${result.host?.displayName || 'Host'}`}
                       selected={selectedResult?.id === result.id}
                       imageUrl={result.primaryImageUrl}
                       imageUrls={result.imageUrls}
-                      hostSummary={result.host ? `${result.host.displayName} Â· ${fmtRating(result.host.averageRating, result.host.reviewCount)}` : ''}
+                      hostSummary={result.host ? `${result.host.displayName} | ${fmtRating(result.host.averageRating, result.host.reviewCount)}` : ''}
                       hostHref={result.host?.id ? `/host-profile/${result.host.id}` : ''}
                       hints={[
                         result.instantBook ? 'Instant book' : 'Approval flow',
@@ -1026,15 +1026,15 @@ function PublicBookingPageInner() {
                 <strong>{searchMode === 'RENTAL' ? selectedResult.vehicleType?.name : selectedResult.title}</strong>
                 <br />
                 {searchMode === 'RENTAL'
-                  ? `Pickup ${publicLocationLabel(selectedResult.location || {})} Â· ${fmtMoney(checkoutEstimatedTotal)} estimated total`
-                  : `${selectedResult.vehicle?.label || ''} Â· ${fmtMoney(selectedResult.quote?.total)} trip total before host add-ons`}
+                  ? `Pickup ${publicLocationLabel(selectedResult.location || {})} | ${fmtMoney(checkoutEstimatedTotal)} estimated total`
+                  : `${selectedResult.vehicle?.label || ''} | ${fmtMoney(selectedResult.quote?.total)} trip total before host add-ons`}
                 <br />
                 {searchMode === 'CAR_SHARING' && selectedResult.host ? (
                   <>
-                    {`Host ${selectedResult.host.displayName} Â· ${fmtRating(selectedResult.host.averageRating, selectedResult.host.reviewCount)}`}
+                    {`Host ${selectedResult.host.displayName} | ${fmtRating(selectedResult.host.averageRating, selectedResult.host.reviewCount)}`}
                     {selectedResult.host.id ? (
                       <>
-                        {' Â· '}
+                        {' | '}
                         <Link href={`/host-profile/${selectedResult.host.id}`}>View profile</Link>
                       </>
                     ) : null}
@@ -1044,13 +1044,13 @@ function PublicBookingPageInner() {
                 {searchMode === 'CAR_SHARING' ? (
                   <>
                     {`Pickup ${publicPickupSpotLabel(selectedResult.pickupSpot, selectedResult.location)}`}
-                    {pickupSpotHint(selectedResult.pickupSpot) ? ` Â· ${pickupSpotHint(selectedResult.pickupSpot)}` : ''}
+                    {pickupSpotHint(selectedResult.pickupSpot) ? ` | ${pickupSpotHint(selectedResult.pickupSpot)}` : ''}
                     <br />
                   </>
                 ) : null}
                 {searchMode === 'RENTAL'
-                  ? `Deposit due now: ${fmtMoney(selectedResult.quote?.depositAmountDue)}${chosenAdditionalServicesTotal ? ` Â· Add-ons ${fmtMoney(chosenAdditionalServicesTotal)}` : ''}${selectedInsuranceTotal ? ` Â· Insurance ${fmtMoney(selectedInsuranceTotal)}` : ''}`
-                  : `Trip total: ${fmtMoney(checkoutEstimatedTotal)} Â· Mandatory trip fee ${fmtMoney(selectedCarSharingGuestTripFee)}${chosenAdditionalServicesTotal ? ` Â· Vehicle add-ons ${fmtMoney(chosenAdditionalServicesTotal)}` : ''}`}
+                  ? `Deposit due now: ${fmtMoney(selectedResult.quote?.depositAmountDue)}${chosenAdditionalServicesTotal ? ` | Add-ons ${fmtMoney(chosenAdditionalServicesTotal)}` : ''}${selectedInsuranceTotal ? ` | Insurance ${fmtMoney(selectedInsuranceTotal)}` : ''}`
+                  : `Trip total: ${fmtMoney(checkoutEstimatedTotal)} | Mandatory trip fee ${fmtMoney(selectedCarSharingGuestTripFee)}${chosenAdditionalServicesTotal ? ` | Vehicle add-ons ${fmtMoney(chosenAdditionalServicesTotal)}` : ''}`}
               </div>
 
               <div className="section-card">
@@ -1099,8 +1099,8 @@ function PublicBookingPageInner() {
                   <strong>Checkout Snapshot</strong>
                   <br />
                   {searchMode === 'RENTAL'
-                    ? `Base total ${fmtMoney(selectedResult?.quote?.estimatedTripTotal)} Â· Estimated total ${fmtMoney(checkoutEstimatedTotal)}`
-                    : `Base host charges ${fmtMoney(selectedCarSharingHostChargeFees)} Â· Mandatory trip fee ${fmtMoney(selectedCarSharingGuestTripFee)} Â· Guest total ${fmtMoney(checkoutEstimatedTotal)}.`}
+                    ? `Base total ${fmtMoney(selectedResult?.quote?.estimatedTripTotal)} | Estimated total ${fmtMoney(checkoutEstimatedTotal)}`
+                    : `Base host charges ${fmtMoney(selectedCarSharingHostChargeFees)} | Mandatory trip fee ${fmtMoney(selectedCarSharingGuestTripFee)} | Guest total ${fmtMoney(checkoutEstimatedTotal)}.`}
                 </div>
                 {searchMode === 'CAR_SHARING' ? (
                   <div className="surface-note" style={{ marginBottom: 12, display: 'grid', gap: 10 }}>
@@ -1113,17 +1113,17 @@ function PublicBookingPageInner() {
                     {String(selectedResult.fulfillmentMode || 'PICKUP_ONLY').toUpperCase() === 'PICKUP_OR_DELIVERY' ? (
                       <div className="inline-actions">
                         <button type="button" className={selectedFulfillmentChoice === 'PICKUP' ? '' : 'button-subtle'} onClick={() => setSelectedFulfillmentChoice('PICKUP')}>
-                          Pickup {Number(selectedResult.pickupFee || 0) > 0 ? `Â· ${fmtMoney(selectedResult.pickupFee)}` : 'Â· Included'}
+                          Pickup {Number(selectedResult.pickupFee || 0) > 0 ? `| ${fmtMoney(selectedResult.pickupFee)}` : '| Included'}
                         </button>
                         <button type="button" className={selectedFulfillmentChoice === 'DELIVERY' ? '' : 'button-subtle'} onClick={() => setSelectedFulfillmentChoice('DELIVERY')}>
-                          Delivery {Number(selectedResult.deliveryFee || 0) > 0 ? `Â· ${fmtMoney(selectedResult.deliveryFee)}` : 'Â· Included'}
+                          Delivery {Number(selectedResult.deliveryFee || 0) > 0 ? `| ${fmtMoney(selectedResult.deliveryFee)}` : '| Included'}
                         </button>
                       </div>
                     ) : (
                       <div>
                         {String(selectedResult.fulfillmentMode || 'PICKUP_ONLY').toUpperCase() === 'DELIVERY_ONLY'
-                          ? `Delivery is required for this listing${Number(selectedResult.deliveryFee || 0) > 0 ? ` Â· ${fmtMoney(selectedResult.deliveryFee)}` : ''}.`
-                          : `Pickup is required for this listing${Number(selectedResult.pickupFee || 0) > 0 ? ` Â· ${fmtMoney(selectedResult.pickupFee)}` : ''}.`}
+                          ? `Delivery is required for this listing${Number(selectedResult.deliveryFee || 0) > 0 ? ` | ${fmtMoney(selectedResult.deliveryFee)}` : ''}.`
+                          : `Pickup is required for this listing${Number(selectedResult.pickupFee || 0) > 0 ? ` | ${fmtMoney(selectedResult.pickupFee)}` : ''}.`}
                       </div>
                     )}
                     {selectedFulfillmentChoice === 'DELIVERY' && Array.isArray(selectedResult.deliveryAreas) && selectedResult.deliveryAreas.length ? (
@@ -1257,8 +1257,8 @@ function PublicBookingPageInner() {
                                   {service.pricingMode === 'PER_DAY'
                                     ? `${fmtMoney(service.rate)} / ${service.unitLabel.toLowerCase()} / day`
                                     : `${fmtMoney(service.rate)} / ${service.unitLabel.toLowerCase()}`}
-                                  {service.taxable ? ' Â· Taxable' : ''}
-                                  {service.mandatory ? ' Â· Required' : ''}
+                                  {service.taxable ? ' | Taxable' : ''}
+                                  {service.mandatory ? ' | Required' : ''}
                                 </span>
                               </div>
                               <label style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
