@@ -141,6 +141,7 @@ export function AuthGate({ children }) {
               <div className="inline-actions" style={{ justifyContent: 'center' }}>
                 <button type="button" className="button-subtle" onClick={() => { window.location.href = '/guest'; }}>Open Guest Portal</button>
                 <button type="button" className="button-subtle" onClick={() => { window.location.href = '/book'; }}>Browse Marketplace</button>
+                <button type="button" className="button-subtle" onClick={() => { window.location.href = '/become-a-host'; }}>Become a Host</button>
               </div>
             </form>
           ) : null}
@@ -156,6 +157,7 @@ export function AuthGate({ children }) {
               <button type="submit" disabled={guestLoading}>{guestLoading ? 'Creating...' : 'Create Guest Account'}</button>
               <div className="inline-actions" style={{ justifyContent: 'center' }}>
                 <button type="button" className="button-subtle" onClick={() => { window.location.href = '/book'; }}>Browse Marketplace</button>
+                <button type="button" className="button-subtle" onClick={() => { window.location.href = '/become-a-host'; }}>Become a Host</button>
               </div>
             </form>
           ) : null}
@@ -165,6 +167,9 @@ export function AuthGate({ children }) {
               <input placeholder="Email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} required />
               <input placeholder="Password" type="password" value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} required />
               <button type="submit">Login</button>
+              <div className="inline-actions" style={{ justifyContent: 'center' }}>
+                <button type="button" className="button-subtle" onClick={() => { window.location.href = '/become-a-host'; }}>Become a Host</button>
+              </div>
             </form>
           ) : null}
 

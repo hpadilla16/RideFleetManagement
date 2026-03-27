@@ -104,6 +104,17 @@ publicBookingRouter.post('/guest-signup', async (req, res, next) => {
   }
 });
 
+publicBookingRouter.post('/host-signup', async (req, res, next) => {
+  try {
+    res.status(201).json(await publicBookingService.createHostSignup(req.body || {}));
+  } catch (error) {
+    if (/required|not found|enabled|registered|exists|password|vehicle type|photo|insurance|registration|inspection|location/i.test(String(error?.message || ''))) {
+      return res.status(400).json({ error: error.message });
+    }
+    next(error);
+  }
+});
+
 publicBookingRouter.get('/guest-signin/:token', async (req, res, next) => {
   try {
     res.json(await publicBookingService.getGuestSession(req.params.token));

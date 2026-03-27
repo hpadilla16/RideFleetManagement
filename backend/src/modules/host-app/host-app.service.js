@@ -165,6 +165,74 @@ function parseJsonList(value) {
   }
 }
 
+export async function createHostVehicleSubmissionForProfile({ hostProfileId, tenantId, payload = {} }) {
+  const scopedTenantId = String(tenantId || '').trim();
+  const scopedHostProfileId = String(hostProfileId || '').trim();
+  if (!scopedTenantId) throw new Error('Host tenant is required');
+  if (!scopedHostProfileId) throw new Error('hostProfileId is required');
+
+  const vehicleTypeId = String(payload?.vehicleTypeId || '').trim();
+  const preferredLocationId = payload?.preferredLocationId ? String(payload.preferredLocationId).trim() : null;
+  if (!vehicleTypeId) throw new Error('vehicleTypeId is required');
+
+  const vehicleType = await prisma.vehicleType.findFirst({
+    where: { id: vehicleTypeId, tenantId: scopedTenantId }
+  });
+  if (!vehicleType) throw new Error('Vehicle type not found');
+
+  const location = preferredLocationId
+    ? await prisma.location.findFirst({
+        where: { id: preferredLocationId, tenantId: scopedTenantId, isActive: true }
+      })
+    : null;
+  if (preferredLocationId && !location) throw new Error('Preferred location not found');
+
+  const photosJson = payload?.photosJson ? String(payload.photosJson).trim() : null;
+  const addOnsJson = payload?.addOnsJson ? String(payload.addOnsJson).trim() : null;
+  const photos = parseJsonList(photosJson).map((row) => String(row || '').trim()).filter(Boolean).slice(0, 6);
+
+  if (!payload?.year || !payload?.make || !payload?.model) {
+    throw new Error('year, make, and model are required');
+  }
+  if (!photos.length) throw new Error('At least one vehicle photo is required');
+  if (!payload?.insuranceDocumentUrl) throw new Error('Insurance document is required');
+  if (!payload?.registrationDocumentUrl) throw new Error('Registration document is required');
+  if (!payload?.initialInspectionDocumentUrl) throw new Error('Initial inspection document is required');
+
+  return prisma.hostVehicleSubmission.create({
+    data: {
+      tenantId: scopedTenantId,
+      hostProfileId: scopedHostProfileId,
+      vehicleTypeId,
+      preferredLocationId,
+      year: payload?.year ? Number(payload.year) : null,
+      make: payload?.make ? String(payload.make).trim() : null,
+      model: payload?.model ? String(payload.model).trim() : null,
+      color: payload?.color ? String(payload.color).trim() : null,
+      vin: payload?.vin ? String(payload.vin).trim() : null,
+      plate: payload?.plate ? String(payload.plate).trim() : null,
+      mileage: payload?.mileage ? Number(payload.mileage) : 0,
+      baseDailyRate: payload?.baseDailyRate ? Number(payload.baseDailyRate) : 0,
+      cleaningFee: payload?.cleaningFee ? Number(payload.cleaningFee) : 0,
+      deliveryFee: payload?.deliveryFee ? Number(payload.deliveryFee) : 0,
+      securityDeposit: payload?.securityDeposit ? Number(payload.securityDeposit) : 0,
+      minTripDays: payload?.minTripDays ? Number(payload.minTripDays) : 1,
+      maxTripDays: payload?.maxTripDays ? Number(payload.maxTripDays) : null,
+      shortDescription: payload?.shortDescription ? String(payload.shortDescription).trim() : null,
+      description: payload?.description ? String(payload.description).trim() : null,
+      tripRules: payload?.tripRules ? String(payload.tripRules).trim() : null,
+      photosJson: JSON.stringify(photos),
+      insuranceDocumentUrl: payload?.insuranceDocumentUrl ? String(payload.insuranceDocumentUrl).trim() : null,
+      registrationDocumentUrl: payload?.registrationDocumentUrl ? String(payload.registrationDocumentUrl).trim() : null,
+      initialInspectionDocumentUrl: payload?.initialInspectionDocumentUrl ? String(payload.initialInspectionDocumentUrl).trim() : null,
+      initialInspectionNotes: payload?.initialInspectionNotes ? String(payload.initialInspectionNotes).trim() : null,
+      addOnsJson,
+      status: 'PENDING_REVIEW'
+    },
+    include: submissionInclude()
+  });
+}
+
 export const hostAppService = {
   async getAccess(user) {
     try {
@@ -426,63 +494,10 @@ export const hostAppService = {
     const tenantId = await resolveHostTenantId(context.hostProfile);
     if (!tenantId) throw new Error('Host tenant is required');
 
-    const vehicleTypeId = String(payload?.vehicleTypeId || '').trim();
-    const preferredLocationId = payload?.preferredLocationId ? String(payload.preferredLocationId).trim() : null;
-    if (!vehicleTypeId) throw new Error('vehicleTypeId is required');
-
-    const vehicleType = await prisma.vehicleType.findFirst({
-      where: { id: vehicleTypeId, tenantId }
-    });
-    if (!vehicleType) throw new Error('Vehicle type not found');
-
-    const location = preferredLocationId
-      ? await prisma.location.findFirst({ where: { id: preferredLocationId, tenantId, isActive: true } })
-      : null;
-    if (preferredLocationId && !location) throw new Error('Preferred location not found');
-
-    const photosJson = payload?.photosJson ? String(payload.photosJson).trim() : null;
-    const addOnsJson = payload?.addOnsJson ? String(payload.addOnsJson).trim() : null;
-    const photos = parseJsonList(photosJson).map((row) => String(row || '').trim()).filter(Boolean).slice(0, 6);
-
-    if (!payload?.year || !payload?.make || !payload?.model) {
-      throw new Error('year, make, and model are required');
-    }
-    if (!photos.length) throw new Error('At least one vehicle photo is required');
-    if (!payload?.insuranceDocumentUrl) throw new Error('Insurance document is required');
-    if (!payload?.registrationDocumentUrl) throw new Error('Registration document is required');
-    if (!payload?.initialInspectionDocumentUrl) throw new Error('Initial inspection document is required');
-
-    return prisma.hostVehicleSubmission.create({
-      data: {
-        tenantId,
-        hostProfileId: context.hostProfile.id,
-        vehicleTypeId,
-        preferredLocationId,
-        year: payload?.year ? Number(payload.year) : null,
-        make: payload?.make ? String(payload.make).trim() : null,
-        model: payload?.model ? String(payload.model).trim() : null,
-        color: payload?.color ? String(payload.color).trim() : null,
-        vin: payload?.vin ? String(payload.vin).trim() : null,
-        plate: payload?.plate ? String(payload.plate).trim() : null,
-        mileage: payload?.mileage ? Number(payload.mileage) : 0,
-        baseDailyRate: payload?.baseDailyRate ? Number(payload.baseDailyRate) : 0,
-        cleaningFee: payload?.cleaningFee ? Number(payload.cleaningFee) : 0,
-        deliveryFee: payload?.deliveryFee ? Number(payload.deliveryFee) : 0,
-        securityDeposit: payload?.securityDeposit ? Number(payload.securityDeposit) : 0,
-        minTripDays: payload?.minTripDays ? Number(payload.minTripDays) : 1,
-        maxTripDays: payload?.maxTripDays ? Number(payload.maxTripDays) : null,
-        shortDescription: payload?.shortDescription ? String(payload.shortDescription).trim() : null,
-        description: payload?.description ? String(payload.description).trim() : null,
-        tripRules: payload?.tripRules ? String(payload.tripRules).trim() : null,
-        photosJson: JSON.stringify(photos),
-        insuranceDocumentUrl: payload?.insuranceDocumentUrl ? String(payload.insuranceDocumentUrl).trim() : null,
-        registrationDocumentUrl: payload?.registrationDocumentUrl ? String(payload.registrationDocumentUrl).trim() : null,
-        initialInspectionDocumentUrl: payload?.initialInspectionDocumentUrl ? String(payload.initialInspectionDocumentUrl).trim() : null,
-        initialInspectionNotes: payload?.initialInspectionNotes ? String(payload.initialInspectionNotes).trim() : null,
-        addOnsJson,
-        status: 'PENDING_REVIEW'
-      },
-      include: submissionInclude()
+    return createHostVehicleSubmissionForProfile({
+      hostProfileId: context.hostProfile.id,
+      tenantId,
+      payload
     });
   },
 

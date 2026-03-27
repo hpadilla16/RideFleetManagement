@@ -1,6 +1,8 @@
 import { bookingEngineService } from '../booking-engine/booking-engine.service.js';
 import { issueCenterService } from '../issue-center/issue-center.service.js';
 import { hostReviewsService } from '../host-reviews/host-reviews.service.js';
+import { authService } from '../auth/auth.service.js';
+import { createHostVehicleSubmissionForProfile } from '../host-app/host-app.service.js';
 import { prisma } from '../../lib/prisma.js';
 import { sendEmail } from '../../lib/mailer.js';
 import crypto from 'node:crypto';
@@ -43,6 +45,30 @@ function defaultVehicleClassWindow() {
 
 function normalizeEmail(value) {
   return String(value || '').trim().toLowerCase();
+}
+
+async function resolvePublicCarSharingTenant({ tenantSlug, tenantId }) {
+  const scopedTenantId = tenantId ? String(tenantId).trim() : '';
+  const scopedTenantSlug = tenantSlug ? String(tenantSlug).trim().toLowerCase() : '';
+  if (!scopedTenantId && !scopedTenantSlug) throw new Error('tenantSlug or tenantId is required');
+
+  const tenant = await prisma.tenant.findFirst({
+    where: {
+      status: 'ACTIVE',
+      ...(scopedTenantId ? { id: scopedTenantId } : {}),
+      ...(scopedTenantSlug ? { slug: scopedTenantSlug } : {})
+    },
+    select: {
+      id: true,
+      name: true,
+      slug: true,
+      carSharingEnabled: true
+    }
+  });
+
+  if (!tenant) throw new Error('Tenant not found');
+  if (!tenant.carSharingEnabled) throw new Error('Car sharing is not enabled for this tenant');
+  return tenant;
 }
 
 async function issueGuestAccess({ customers = [], email, customerName, subject = 'Open your guest account', intro = 'Use this secure link to open your guest account and see all of your bookings.' }) {
@@ -502,6 +528,94 @@ export const publicBookingService = {
       subject: 'Welcome to Ride Fleet guest access',
       intro: 'Your guest account is ready. Use this secure link to sign in, view your reservations, and make future bookings from the same guest account.'
     });
+  },
+
+  async createHostSignup(input = {}) {
+    const tenant = await resolvePublicCarSharingTenant({
+      tenantSlug: input?.tenantSlug,
+      tenantId: input?.tenantId
+    });
+
+    const fullName = String(input?.fullName || '').trim();
+    const displayName = String(input?.displayName || '').trim() || fullName;
+    const legalName = String(input?.legalName || '').trim();
+    const email = normalizeEmail(input?.email);
+    const phone = String(input?.phone || '').trim();
+    const password = String(input?.password || '');
+
+    if (!fullName) throw new Error('fullName is required');
+    if (!displayName) throw new Error('displayName is required');
+    if (!email) throw new Error('email is required');
+    if (!phone) throw new Error('phone is required');
+    if (password.length < 8) throw new Error('password must be at least 8 characters');
+
+    const existingHost = await prisma.hostProfile.findFirst({
+      where: {
+        tenantId: tenant.id,
+        OR: [
+          { email: { equals: email, mode: 'insensitive' } },
+          { user: { email: { equals: email, mode: 'insensitive' } } }
+        ]
+      },
+      select: { id: true }
+    });
+    if (existingHost) throw new Error('A host account already exists for that email in this tenant');
+
+    const registration = await authService.register({
+      email,
+      password,
+      fullName,
+      tenantId: tenant.id
+    });
+
+    const userId = registration?.user?.id;
+    if (!userId) throw new Error('Could not create host login');
+
+    try {
+      const hostProfile = await prisma.hostProfile.create({
+        data: {
+          tenantId: tenant.id,
+          userId,
+          displayName,
+          legalName: legalName || null,
+          email,
+          phone,
+          status: 'ACTIVE',
+          notes: 'Created through public host signup'
+        }
+      });
+
+      const submission = await createHostVehicleSubmissionForProfile({
+        hostProfileId: hostProfile.id,
+        tenantId: tenant.id,
+        payload: input
+      });
+
+      const sessionUser = await authService.getSessionUser(userId);
+      return {
+        ok: true,
+        token: registration.token,
+        user: sessionUser || registration.user,
+        tenant,
+        hostProfile: {
+          id: hostProfile.id,
+          displayName: hostProfile.displayName,
+          email: hostProfile.email || '',
+          phone: hostProfile.phone || ''
+        },
+        submission: {
+          id: submission.id,
+          status: submission.status,
+          vehicleType: submission.vehicleType,
+          preferredLocation: submission.preferredLocation,
+          createdAt: submission.createdAt
+        },
+        message: 'Host account created. Your vehicle submission is pending review.'
+      };
+    } catch (error) {
+      await prisma.user.delete({ where: { id: userId } }).catch(() => null);
+      throw error;
+    }
   },
 
   async getGuestSession(token) {
