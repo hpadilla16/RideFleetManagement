@@ -112,6 +112,51 @@ function enableDeliveryMode(mode) {
   return String(mode || '').toUpperCase() === 'DELIVERY_ONLY' ? 'DELIVERY_ONLY' : 'PICKUP_OR_DELIVERY';
 }
 
+const COMMON_DELIVERY_AREA_SUGGESTIONS = [
+  'San Juan',
+  'Isla Verde',
+  'Condado',
+  'Miramar',
+  'Old San Juan',
+  'Carolina',
+  'Guaynabo',
+  'Bayamon',
+  'Dorado',
+  'Caguas'
+];
+
+function parseDeliveryAreas(value) {
+  return String(value || '')
+    .split(/\r?\n|,/)
+    .map((row) => row.trim())
+    .filter(Boolean)
+    .slice(0, 12);
+}
+
+function buildDeliveryAreaSuggestions(...values) {
+  const seen = new Set();
+  const suggestions = [];
+  values
+    .flatMap((value) => String(value || '').split(/\r?\n|,/))
+    .map((value) => value.trim())
+    .filter(Boolean)
+    .concat(COMMON_DELIVERY_AREA_SUGGESTIONS)
+    .forEach((value) => {
+      const key = value.toLowerCase();
+      if (seen.has(key)) return;
+      seen.add(key);
+      suggestions.push(value);
+    });
+  return suggestions.slice(0, 10);
+}
+
+function appendDeliveryArea(text, area) {
+  const next = parseDeliveryAreas(text);
+  const key = String(area || '').trim().toLowerCase();
+  if (!key || next.some((value) => value.toLowerCase() === key)) return text;
+  return [...next, area.trim()].join('\n');
+}
+
 function BecomeAHostPageInner() {
   const searchParams = useSearchParams();
   const initialTenantSlug = String(searchParams.get('tenantSlug') || '').trim().toLowerCase();
@@ -158,8 +203,12 @@ function BecomeAHostPageInner() {
     () => (bootstrap?.tenants || []).filter((row) => !!row.carSharingEnabled),
     [bootstrap]
   );
-
   const selectedTenant = bootstrap?.tenant || availableTenants.find((row) => row.slug === selectedTenantSlug) || null;
+  const deliveryAreaSuggestions = buildDeliveryAreaSuggestions(
+    form.pickupSpotCity,
+    selectedTenant?.city,
+    bootstrap?.locations?.find((row) => row.id === form.preferredLocationId)?.city
+  );
 
   const handleUpload = async (field, files, multiple = false) => {
     try {
@@ -407,10 +456,22 @@ function BecomeAHostPageInner() {
                       <input type="number" value={form.deliveryRadiusMiles} onChange={(e) => setForm((current) => ({ ...current, deliveryRadiusMiles: e.target.value }))} />
                     </label>
                   </div>
-                  <label>
-                    <span className="label">Allowed Delivery Areas</span>
-                    <textarea rows={3} value={form.deliveryAreasText} onChange={(e) => setForm((current) => ({ ...current, deliveryAreasText: e.target.value }))} placeholder={'One area per line, for example:\nSan Juan\nIsla Verde\nCondado'} />
-                  </label>
+                    <label>
+                      <span className="label">Allowed Delivery Areas</span>
+                      <textarea rows={3} value={form.deliveryAreasText} onChange={(e) => setForm((current) => ({ ...current, deliveryAreasText: e.target.value }))} placeholder={'One area per line, for example:\nSan Juan\nIsla Verde\nCondado'} />
+                      <div className="inline-actions" style={{ marginTop: 8, flexWrap: 'wrap' }}>
+                        {deliveryAreaSuggestions.map((area) => (
+                          <button
+                            key={area}
+                            type="button"
+                            className="button-subtle"
+                            onClick={() => setForm((current) => ({ ...current, deliveryAreasText: appendDeliveryArea(current.deliveryAreasText, area) }))}
+                          >
+                            {area}
+                          </button>
+                        ))}
+                      </div>
+                    </label>
                   <details className="surface-note">
                     <summary>Advanced delivery options</summary>
                     <div className="form-grid-2" style={{ marginTop: 12 }}>

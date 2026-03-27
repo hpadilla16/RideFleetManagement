@@ -215,6 +215,43 @@ function enableDeliveryMode(mode) {
   return String(mode || '').toUpperCase() === 'DELIVERY_ONLY' ? 'DELIVERY_ONLY' : 'PICKUP_OR_DELIVERY';
 }
 
+const COMMON_DELIVERY_AREA_SUGGESTIONS = [
+  'San Juan',
+  'Isla Verde',
+  'Condado',
+  'Miramar',
+  'Old San Juan',
+  'Carolina',
+  'Guaynabo',
+  'Bayamon',
+  'Dorado',
+  'Caguas'
+];
+
+function buildDeliveryAreaSuggestions(...values) {
+  const seen = new Set();
+  const suggestions = [];
+  values
+    .flatMap((value) => String(value || '').split(/\r?\n|,/))
+    .map((value) => value.trim())
+    .filter(Boolean)
+    .concat(COMMON_DELIVERY_AREA_SUGGESTIONS)
+    .forEach((value) => {
+      const key = value.toLowerCase();
+      if (seen.has(key)) return;
+      seen.add(key);
+      suggestions.push(value);
+    });
+  return suggestions.slice(0, 10);
+}
+
+function appendDeliveryArea(text, area) {
+  const next = parseDeliveryAreas(text);
+  const key = String(area || '').trim().toLowerCase();
+  if (!key || next.some((value) => value.toLowerCase() === key)) return text;
+  return [...next, area.trim()].join('\n');
+}
+
 function listingToEdit(listing) {
   return {
     id: listing.id,
@@ -387,6 +424,16 @@ function HostAppInner({ token, me, logout }) {
   const vehicleTypes = dashboard?.vehicleTypes || [];
   const locations = dashboard?.locations || [];
   const pickupSpots = dashboard?.pickupSpots || [];
+  const selectedSubmissionPickupSpot = pickupSpots.find((row) => row.id === submissionForm.preferredPickupSpotId) || null;
+  const submissionDeliveryAreaSuggestions = buildDeliveryAreaSuggestions(
+    selectedSubmissionPickupSpot?.city,
+    selectedSubmissionPickupSpot?.anchorLocation?.city
+  );
+  const listingDeliveryAreaSuggestions = buildDeliveryAreaSuggestions(
+    pickupSpots.find((row) => row.isDefault)?.city,
+    pickupSpots[0]?.city,
+    pickupSpots.find((row) => row.anchorLocation?.city)?.anchorLocation?.city
+  );
 
   const hostSnapshot = useMemo(() => {
     const now = Date.now();
@@ -1110,11 +1157,26 @@ function HostAppInner({ token, me, logout }) {
                     </select>
                   </div>
                 </div>
-                <div className="form-grid-3">
-                  <div className="stack"><label className="label">Delivery Fee</label><input type="number" min="0" step="0.01" value={submissionForm.deliveryFee} onChange={(event) => setSubmissionForm((current) => ({ ...current, deliveryFee: event.target.value }))} /></div>
-                  <div className="stack"><label className="label">Delivery Radius Miles</label><input type="number" min="0" value={submissionForm.deliveryRadiusMiles} onChange={(event) => setSubmissionForm((current) => ({ ...current, deliveryRadiusMiles: event.target.value }))} /></div>
-                  <div className="stack"><label className="label">Allowed Delivery Areas</label><textarea rows={3} value={submissionForm.deliveryAreasText} onChange={(event) => setSubmissionForm((current) => ({ ...current, deliveryAreasText: event.target.value }))} placeholder={'One area per line, for example:\nSan Juan\nIsla Verde\nCondado'} /></div>
-                </div>
+                  <div className="form-grid-3">
+                    <div className="stack"><label className="label">Delivery Fee</label><input type="number" min="0" step="0.01" value={submissionForm.deliveryFee} onChange={(event) => setSubmissionForm((current) => ({ ...current, deliveryFee: event.target.value }))} /></div>
+                    <div className="stack"><label className="label">Delivery Radius Miles</label><input type="number" min="0" value={submissionForm.deliveryRadiusMiles} onChange={(event) => setSubmissionForm((current) => ({ ...current, deliveryRadiusMiles: event.target.value }))} /></div>
+                    <div className="stack">
+                      <label className="label">Allowed Delivery Areas</label>
+                      <textarea rows={3} value={submissionForm.deliveryAreasText} onChange={(event) => setSubmissionForm((current) => ({ ...current, deliveryAreasText: event.target.value }))} placeholder={'One area per line, for example:\nSan Juan\nIsla Verde\nCondado'} />
+                      <div className="inline-actions" style={{ marginTop: 8, flexWrap: 'wrap' }}>
+                        {submissionDeliveryAreaSuggestions.map((area) => (
+                          <button
+                            key={area}
+                            type="button"
+                            className="button-subtle"
+                            onClick={() => setSubmissionForm((current) => ({ ...current, deliveryAreasText: appendDeliveryArea(current.deliveryAreasText, area) }))}
+                          >
+                            {area}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
                 <details className="surface-note">
                   <summary>Advanced delivery options</summary>
                   <div className="form-grid-2" style={{ marginTop: 12 }}>
@@ -1395,11 +1457,26 @@ function HostAppInner({ token, me, logout }) {
                       </select>
                     </div>
                   </div>
-                  <div className="form-grid-3">
-                    <div className="stack"><label className="label">Delivery Fee</label><input type="number" min="0" step="0.01" value={listingEdit.deliveryFee} onChange={(event) => setListingEdit((current) => ({ ...current, deliveryFee: event.target.value }))} /></div>
-                    <div className="stack"><label className="label">Delivery Radius Miles</label><input type="number" min="0" value={listingEdit.deliveryRadiusMiles} onChange={(event) => setListingEdit((current) => ({ ...current, deliveryRadiusMiles: event.target.value }))} /></div>
-                    <div className="stack"><label className="label">Allowed Delivery Areas</label><textarea rows={3} value={listingEdit.deliveryAreasText} onChange={(event) => setListingEdit((current) => ({ ...current, deliveryAreasText: event.target.value }))} placeholder={'One area per line, for example:\nSan Juan\nIsla Verde\nCondado'} /></div>
-                  </div>
+                    <div className="form-grid-3">
+                      <div className="stack"><label className="label">Delivery Fee</label><input type="number" min="0" step="0.01" value={listingEdit.deliveryFee} onChange={(event) => setListingEdit((current) => ({ ...current, deliveryFee: event.target.value }))} /></div>
+                      <div className="stack"><label className="label">Delivery Radius Miles</label><input type="number" min="0" value={listingEdit.deliveryRadiusMiles} onChange={(event) => setListingEdit((current) => ({ ...current, deliveryRadiusMiles: event.target.value }))} /></div>
+                      <div className="stack">
+                        <label className="label">Allowed Delivery Areas</label>
+                        <textarea rows={3} value={listingEdit.deliveryAreasText} onChange={(event) => setListingEdit((current) => ({ ...current, deliveryAreasText: event.target.value }))} placeholder={'One area per line, for example:\nSan Juan\nIsla Verde\nCondado'} />
+                        <div className="inline-actions" style={{ marginTop: 8, flexWrap: 'wrap' }}>
+                          {listingDeliveryAreaSuggestions.map((area) => (
+                            <button
+                              key={area}
+                              type="button"
+                              className="button-subtle"
+                              onClick={() => setListingEdit((current) => ({ ...current, deliveryAreasText: appendDeliveryArea(current.deliveryAreasText, area) }))}
+                            >
+                              {area}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
                   <details className="surface-note">
                     <summary>Advanced delivery options</summary>
                     <div className="form-grid-2" style={{ marginTop: 12 }}>
