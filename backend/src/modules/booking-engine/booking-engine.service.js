@@ -1283,7 +1283,10 @@ export const bookingEngineService = {
         guestTripFee: money(trip.guestTripFee),
         hostEarnings: money(trip.hostEarnings),
         platformFee: money(trip.platformFee),
-        platformRevenue: money(trip.platformRevenue)
+        platformRevenue: money(trip.platformRevenue),
+        location: selected.listing?.location || null,
+        pickupSpot: selected.listing?.pickupSpot || null,
+        vehicleLabel: selected.listing?.vehicle?.label || ''
       },
       pricingBreakdown: {
         tripDays: Number(selected.quote?.tripDays || 0),

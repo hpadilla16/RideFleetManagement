@@ -8,6 +8,23 @@ function fmtMoney(value) {
   return `$${Number(value || 0).toFixed(2)}`;
 }
 
+function publicLocationLabel(location) {
+  return [location?.name, location?.city, location?.state].filter(Boolean).join(' · ') || 'Location';
+}
+
+function publicPickupSpotLabel(pickupSpot, fallbackLocation = null) {
+  if (pickupSpot?.label) {
+    const address = [pickupSpot?.city, pickupSpot?.state].filter(Boolean).join(', ');
+    const anchor = pickupSpot?.anchorLocation?.name ? ` · Ops hub ${pickupSpot.anchorLocation.name}` : '';
+    return `${pickupSpot.label}${address ? ` · ${address}` : ''}${anchor}`;
+  }
+  return fallbackLocation ? publicLocationLabel(fallbackLocation) : 'Location';
+}
+
+function pickupSpotHint(pickupSpot) {
+  return [pickupSpot?.address1, pickupSpot?.city, pickupSpot?.state, pickupSpot?.postalCode].filter(Boolean).join(' · ');
+}
+
 function statusTone(status) {
   const value = String(status || '').toLowerCase();
   if (value === 'completed') return { color: '#12633d', background: 'rgba(43, 174, 96, 0.14)' };
@@ -193,6 +210,21 @@ export default function PublicBookingConfirmationPage() {
                   <strong>{confirmation.trip?.tripCode || confirmation.reservation?.reservationNumber || '-'}</strong>
                 </div>
               </div>
+
+              {confirmation.bookingType === 'CAR_SHARING' ? (
+                <div className="surface-note" style={{ display: 'grid', gap: 8 }}>
+                  <strong>Pickup Plan</strong>
+                  <div>
+                    Pickup spot: {publicPickupSpotLabel(confirmation.trip?.pickupSpot, confirmation.trip?.location)}
+                  </div>
+                  {pickupSpotHint(confirmation.trip?.pickupSpot) ? (
+                    <div>{pickupSpotHint(confirmation.trip?.pickupSpot)}</div>
+                  ) : null}
+                  {confirmation.trip?.vehicleLabel ? (
+                    <div>Vehicle: <strong>{confirmation.trip.vehicleLabel}</strong></div>
+                  ) : null}
+                </div>
+              ) : null}
 
               {pricing ? (
                 <div className="surface-note" style={{ display: 'grid', gap: 10 }}>
