@@ -37,8 +37,19 @@ function Inner({ token, me, logout }) {
   const balanceSnapshot = Number(row?.rentalAgreement?.balance ?? row?.balance ?? row?.amountDue ?? 0);
 
   const ensureAgreementId = async () => {
-    const out = await api(`/api/reservations/${id}/start-rental`, { method: 'POST', body: JSON.stringify({}) }, token);
+    const out = await api(`/api/reservations/${id}/agreement`, {}, token);
     return out?.id;
+  };
+
+  const ensureCheckinInspectionComplete = async (agreementId) => {
+    const report = await api(`/api/rental-agreements/${agreementId}/inspection-report`, {}, token);
+    if (!report?.checkoutInspection?.at) {
+      throw new Error('Checkout inspection is required before completing check-in');
+    }
+    if (!report?.checkinInspection?.at) {
+      throw new Error('Check-in inspection is required before completing check-in');
+    }
+    return report;
   };
 
   const complete = async () => {
@@ -56,10 +67,25 @@ function Inner({ token, me, logout }) {
       const checkinLine = `[RES_CHECKIN ${new Date().toISOString()}] odometerIn=${Number(form.odometerIn || 0)} fuelIn=${Number(form.fuelIn || 0)} cleanlinessIn=${Number(form.cleanlinessIn || 5)} notes=${String(form.notes || '').replace(/\s+/g, ' ').trim()}`;
       nextNotes = `${nextNotes}${nextNotes.trim() ? '\n' : ''}${checkinLine}`;
 
+      const agreementId = await ensureAgreementId();
+      if (!agreementId) throw new Error('No rental agreement available for check-in');
+
+      await ensureCheckinInspectionComplete(agreementId);
+
+      await api(`/api/rental-agreements/${agreementId}/close`, {
+        method: 'POST',
+        body: JSON.stringify({
+          odometerIn: Number(form.odometerIn || 0),
+          fuelIn: Number(form.fuelIn || 0),
+          cleanlinessIn: Number(form.cleanlinessIn || 5),
+          signerName: String(row?.signatureSignedBy || `${row?.customer?.firstName || ''} ${row?.customer?.lastName || ''}`).trim(),
+          signatureDataUrl: String(row?.signatureDataUrl || '')
+        })
+      }, token);
+
       await api(`/api/reservations/${id}`, {
         method: 'PATCH',
         body: JSON.stringify({
-          status: 'CHECKED_IN',
           notes: nextNotes
         })
       }, token);

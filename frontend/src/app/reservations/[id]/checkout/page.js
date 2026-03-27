@@ -35,6 +35,14 @@ function Inner({ token, me, logout }) {
     return out?.id;
   };
 
+  const ensureCheckoutInspectionComplete = async (agreementId) => {
+    const report = await api(`/api/rental-agreements/${agreementId}/inspection-report`, {}, token);
+    if (!report?.checkoutInspection?.at) {
+      throw new Error('Checkout inspection is required before completing check-out');
+    }
+    return report;
+  };
+
   const p = (e, c) => {
     const r = c.getBoundingClientRect();
     const t = e?.touches?.[0] || e;
@@ -86,21 +94,46 @@ function Inner({ token, me, logout }) {
         method: 'PATCH',
         body: JSON.stringify({
           vehicleId: form.vehicleId,
-          status: 'CHECKED_OUT',
-          signatureDataUrl,
-          signatureSignedBy: signer,
-          signatureSignedAt: new Date().toISOString(),
           notes: nextNotes
         })
       }, token);
 
-      // Ensure agreement exists, then auto-email PDF copy after successful checkout.
+      const agreementId = await ensureAgreementId();
+      if (!agreementId) throw new Error('No rental agreement available for checkout');
+
+      await api(`/api/rental-agreements/${agreementId}/rental`, {
+        method: 'PUT',
+        body: JSON.stringify({
+          vehicleId: form.vehicleId,
+          odometerOut: Number(form.odometerOut || 0),
+          fuelOut: Number(form.fuelOut || 0),
+          cleanlinessOut: Number(form.cleanlinessOut || 5)
+        })
+      }, token);
+
+      await ensureCheckoutInspectionComplete(agreementId);
+
+      await api(`/api/rental-agreements/${agreementId}/signature`, {
+        method: 'POST',
+        body: JSON.stringify({
+          signerName: signer,
+          signatureDataUrl
+        })
+      }, token);
+
+      await api(`/api/rental-agreements/${agreementId}/finalize`, {
+        method: 'POST',
+        body: JSON.stringify({
+          odometerOut: Number(form.odometerOut || 0),
+          fuelOut: Number(form.fuelOut || 0),
+          cleanlinessOut: Number(form.cleanlinessOut || 5),
+          paymentMethod: String(form.paymentMethod || 'CASH')
+        })
+      }, token);
+
+      // Auto-email PDF copy after successful checkout.
       try {
-        const agreement = await api(`/api/reservations/${id}/start-rental`, { method: 'POST', body: JSON.stringify({}) }, token);
-        const agreementId = agreement?.id;
-        if (agreementId) {
-          await api(`/api/rental-agreements/${agreementId}/email-agreement`, { method: 'POST', body: JSON.stringify({}) }, token);
-        }
+        await api(`/api/rental-agreements/${agreementId}/email-agreement`, { method: 'POST', body: JSON.stringify({}) }, token);
       } catch {
         // Non-blocking: checkout already completed.
       }

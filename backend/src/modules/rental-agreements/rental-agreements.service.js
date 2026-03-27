@@ -1535,6 +1535,7 @@ export const rentalAgreementsService = {
     return prisma.rentalAgreement.update({
       where: { id },
       data: {
+        vehicleId: patch.vehicleId === '' ? null : (patch.vehicleId ?? undefined),
         pickupAt: patch.pickupAt ? new Date(patch.pickupAt) : undefined,
         returnAt: patch.returnAt ? new Date(patch.returnAt) : undefined,
         pickupLocationId: patch.pickupLocationId || undefined,
@@ -2060,7 +2061,11 @@ export const rentalAgreementsService = {
     }
 
     const signerName = String(payload.signerName || agreement.customerFirstName || '').trim();
-    const signatureDataUrl = String(payload.signatureDataUrl || '').trim();
+    const signatureDataUrl = String(
+      payload.signatureDataUrl
+      || agreement?.reservation?.signatureDataUrl
+      || ''
+    ).trim();
     if (!signerName) throw new Error('Signer name is required to close agreement');
     if (!signatureDataUrl) throw new Error('Customer signature is required to close agreement');
 
