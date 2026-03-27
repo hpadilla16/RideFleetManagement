@@ -191,6 +191,7 @@ function ReservationDetailInner({ token, me, logout }) {
     note: ''
   });
   const canManagePrecheckin = ['SUPER_ADMIN', 'ADMIN', 'OPS'].includes(String(me?.role || '').toUpperCase());
+  const canManagePricingOverrides = ['SUPER_ADMIN', 'ADMIN'].includes(String(me?.role || '').toUpperCase());
 
 
   const cleanMojibake = (val) => {
@@ -903,6 +904,7 @@ function ReservationDetailInner({ token, me, logout }) {
   }, [pricing?.snapshot]);
 
   const handleEditToggle = () => {
+    if (!canManagePricingOverrides) return;
     if (!chargeEdit) {
       setChargeModel(pricingEditorState(pricing, row));
     }
@@ -955,6 +957,10 @@ function ReservationDetailInner({ token, me, logout }) {
 
   const saveChargeOverrides = async () => {
     try {
+if (!canManagePricingOverrides) {
+  setMsg('Admin approval required for pricing overrides');
+  return;
+}
 const serviceNames = String(chargeModel.serviceNames || '')
 .split(',')
 .map((x) => x.trim())
@@ -1120,13 +1126,13 @@ charges: [...normalizedRows, ...depositRows]
 token
 );
 
-await load();
-setChargeEdit(false);
-setMsg('Charges updated');
-  } catch (e) {
-    setMsg(e.message);
-  }
-  };
+  await load();
+  setChargeEdit(false);
+  setMsg('Charges updated');
+    } catch (e) {
+      setMsg(e.message);
+    }
+    };
 
   const selectedServiceRows = useMemo(() => {
     const editorRows = String(chargeModel.serviceNames || '')
@@ -1728,7 +1734,7 @@ setMsg('Charges updated');
             </>
           ) : (
             <>
-              <div className="row-between"><h3>Charges</h3><div style={{ display: 'flex', gap: 8 }}><button onClick={handleEditToggle}>{chargeEdit ? 'Cancel Edit' : 'Edit'}</button>{chargeEdit ? <button onClick={saveChargeOverrides}>Save Override</button> : null}</div></div>
+              <div className="row-between"><h3>Charges</h3><div style={{ display: 'flex', gap: 8 }}>{canManagePricingOverrides ? <button onClick={handleEditToggle}>{chargeEdit ? 'Cancel Edit' : 'Edit'}</button> : <span className="label">Admin approval required for rate and fee overrides.</span>}{chargeEdit && canManagePricingOverrides ? <button onClick={saveChargeOverrides}>Save Override</button> : null}</div></div>
               {chargeEdit ? (
                 <><div className="grid3" style={{ marginBottom: 10 }}>
                       <div className="stack"><label className="label">Daily Rate</label><input value={chargeModel.dailyRate} onChange={(e) => setChargeModel({ ...chargeModel, dailyRate: e.target.value })} /></div>

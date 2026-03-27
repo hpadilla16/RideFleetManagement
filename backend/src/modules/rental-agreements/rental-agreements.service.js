@@ -449,18 +449,11 @@ async function syncAgreementCommissionSnapshot(rentalAgreementId) {
       closedAt: true,
       total: true,
       salesOwnerUserId: true,
-      salesOwnerUser: {
+      inspections: {
+        where: { phase: 'CHECKOUT' },
+        orderBy: [{ capturedAt: 'desc' }, { updatedAt: 'desc' }],
         select: {
-          id: true,
-          commissionPlanId: true,
-          commissionPlan: {
-            include: {
-              rules: {
-                where: { isActive: true },
-                orderBy: [{ priority: 'asc' }, { createdAt: 'asc' }]
-              }
-            }
-          }
+          actorUserId: true
         }
       },
       charges: {
@@ -481,7 +474,33 @@ async function syncAgreementCommissionSnapshot(rentalAgreementId) {
   });
   if (!agreement) throw new Error('Rental agreement not found');
   if (String(agreement.status || '').toUpperCase() !== 'CLOSED') return null;
-  if (!agreement.salesOwnerUserId) return null;
+
+  const commissionEmployeeUserId = String(
+    agreement?.inspections?.find((row) => row?.actorUserId)?.actorUserId
+    || agreement.salesOwnerUserId
+    || ''
+  ).trim();
+  if (!commissionEmployeeUserId) return null;
+
+  const commissionEmployee = await prisma.user.findFirst({
+    where: {
+      id: commissionEmployeeUserId,
+      ...(agreement.tenantId ? { tenantId: agreement.tenantId } : {})
+    },
+    select: {
+      id: true,
+      commissionPlanId: true,
+      commissionPlan: {
+        include: {
+          rules: {
+            where: { isActive: true },
+            orderBy: [{ priority: 'asc' }, { createdAt: 'asc' }]
+          }
+        }
+      }
+    }
+  });
+  if (!commissionEmployee) return null;
 
   const serviceIds = Array.from(new Set(
     (agreement.charges || [])
@@ -503,7 +522,7 @@ async function syncAgreementCommissionSnapshot(rentalAgreementId) {
     : [];
   const servicesById = new Map(serviceRows.map((row) => [row.id, row]));
 
-  const employeePlan = agreement.salesOwnerUser?.commissionPlan?.isActive ? agreement.salesOwnerUser.commissionPlan : null;
+  const employeePlan = commissionEmployee?.commissionPlan?.isActive ? commissionEmployee.commissionPlan : null;
   const tenantPlan = employeePlan
     ? null
     : await prisma.commissionPlan.findFirst({
@@ -546,11 +565,18 @@ async function syncAgreementCommissionSnapshot(rentalAgreementId) {
   const eligibleRevenue = roundMoney(lines.reduce((sum, line) => sum + Number(line.lineRevenue || 0), 0));
   const commissionAmount = roundMoney(lines.reduce((sum, line) => sum + Number(line.commissionAmount || 0), 0));
 
+  await prisma.agreementCommission.deleteMany({
+    where: {
+      rentalAgreementId: agreement.id,
+      employeeUserId: { not: commissionEmployeeUserId }
+    }
+  });
+
   const snapshot = await prisma.agreementCommission.upsert({
     where: {
       rentalAgreementId_employeeUserId: {
         rentalAgreementId: agreement.id,
-        employeeUserId: agreement.salesOwnerUserId
+        employeeUserId: commissionEmployeeUserId
       }
     },
     update: {
@@ -567,7 +593,7 @@ async function syncAgreementCommissionSnapshot(rentalAgreementId) {
     create: {
       tenantId: agreement.tenantId || null,
       rentalAgreementId: agreement.id,
-      employeeUserId: agreement.salesOwnerUserId,
+      employeeUserId: commissionEmployeeUserId,
       commissionPlanId: plan?.id || null,
       status: 'PENDING',
       monthKey: monthKey(agreement.closedAt || new Date()),
@@ -1860,7 +1886,7 @@ export const rentalAgreementsService = {
     return this.getById(id);
   },
 
-  async saveInspection(id, payload = {}, actorUserId = null, actorIp = null) {
+  async saveInspection(id, payload = {}, actorUserId = null, actorIp = null, actorRole = 'AGENT') {
     const agreement = await prisma.rentalAgreement.findUnique({
       where: { id },
       include: { inspections: true }
@@ -1869,6 +1895,19 @@ export const rentalAgreementsService = {
 
     const phase = String(payload.phase || '').toUpperCase();
     if (!['CHECKOUT', 'CHECKIN'].includes(phase)) throw new Error('phase must be CHECKOUT or CHECKIN');
+    const isAdminActor = ['SUPER_ADMIN', 'ADMIN'].includes(String(actorRole || '').toUpperCase());
+    const existingInspection = Array.isArray(agreement.inspections)
+      ? agreement.inspections.find((row) => String(row?.phase || '').toUpperCase() === phase)
+      : null;
+    if (
+      phase === 'CHECKOUT'
+      && existingInspection?.actorUserId
+      && actorUserId
+      && String(existingInspection.actorUserId) !== String(actorUserId)
+      && !isAdminActor
+    ) {
+      throw new Error('Only admin can reassign checkout commission ownership after checkout has been captured');
+    }
 
     const inspectionBlock = {
       phase,
@@ -1926,6 +1965,18 @@ export const rentalAgreementsService = {
         photosJson: JSON.stringify(inspectionBlock.photos || {})
       }
     });
+
+    if (phase === 'CHECKOUT' && inspectionBlock.actorUserId) {
+      await prisma.rentalAgreement.update({
+        where: { id },
+        data: {
+          salesOwnerUserId: inspectionBlock.actorUserId
+        }
+      });
+      if (String(agreement.status || '').toUpperCase() === 'CLOSED') {
+        await syncAgreementCommissionSnapshot(id);
+      }
+    }
 
     await prisma.auditLog.create({
       data: {
@@ -2020,7 +2071,7 @@ export const rentalAgreementsService = {
         locked: true,
         closedAt: new Date(),
         closedByUserId: actorUserId || agreement.closedByUserId || null,
-        salesOwnerUserId: agreement.salesOwnerUserId || actorUserId || null,
+        salesOwnerUserId: report?.checkout?.actorUserId || agreement.salesOwnerUserId || actorUserId || null,
         odometerIn: payload.odometerIn ?? agreement.odometerIn,
         fuelIn: payload.fuelIn ?? agreement.fuelIn,
         cleanlinessIn: payload.cleanlinessIn ?? agreement.cleanlinessIn
@@ -2081,6 +2132,74 @@ export const rentalAgreementsService = {
     } catch {}
 
     return row;
+  },
+
+  async overrideCommissionOwner(id, employeeUserId, actorUserId = null, actorRole = 'ADMIN', scope = null) {
+    const isAdminActor = ['SUPER_ADMIN', 'ADMIN'].includes(String(actorRole || '').toUpperCase());
+    if (!isAdminActor) throw new Error('Admin role required for commission reassignment');
+
+    const agreement = await prisma.rentalAgreement.findFirst({
+      where: {
+        id,
+        ...(scope?.tenantId ? { tenantId: scope.tenantId } : {})
+      },
+      include: {
+        inspections: { orderBy: { createdAt: 'asc' } }
+      }
+    });
+    if (!agreement) throw new Error('Rental agreement not found');
+
+    const employee = await prisma.user.findFirst({
+      where: {
+        id: employeeUserId,
+        ...(agreement.tenantId ? { tenantId: agreement.tenantId } : {})
+      },
+      select: { id: true, fullName: true }
+    });
+    if (!employee) throw new Error('Selected commission employee must belong to the same tenant');
+
+    const checkoutInspection = (agreement.inspections || []).find((row) => String(row?.phase || '').toUpperCase() === 'CHECKOUT');
+
+    if (checkoutInspection) {
+      await prisma.rentalAgreementInspection.update({
+        where: {
+          rentalAgreementId_phase: {
+            rentalAgreementId: agreement.id,
+            phase: 'CHECKOUT'
+          }
+        },
+        data: {
+          actorUserId: employee.id
+        }
+      });
+    }
+
+    const updated = await prisma.rentalAgreement.update({
+      where: { id: agreement.id },
+      data: {
+        salesOwnerUserId: employee.id
+      }
+    });
+
+    await prisma.auditLog.create({
+      data: {
+        reservationId: agreement.reservationId,
+        actorUserId: actorUserId || null,
+        action: 'UPDATE',
+        reason: `Commission owner reassigned to ${employee.fullName || employee.id}`,
+        metadata: JSON.stringify({
+          commissionOwnerOverride: true,
+          employeeUserId: employee.id,
+          appliedToCheckoutInspection: !!checkoutInspection
+        })
+      }
+    });
+
+    if (String(agreement.status || '').toUpperCase() === 'CLOSED') {
+      await syncAgreementCommissionSnapshot(agreement.id);
+    }
+
+    return updated;
   },
 
   async finalize(id, payload = {}) {

@@ -3,6 +3,11 @@ import { rentalAgreementsService } from './rental-agreements.service.js';
 
 export const rentalAgreementsRouter = Router();
 
+function isAdminRole(user) {
+  const role = String(user?.role || '').toUpperCase();
+  return ['SUPER_ADMIN', 'ADMIN'].includes(role);
+}
+
 async function ensureEditable(id, user) {
   const row = await rentalAgreementsService.getById(id, user);
   if (!row) {
@@ -238,11 +243,41 @@ rentalAgreementsRouter.post('/:id/security-deposit/release', async (req, res, ne
 rentalAgreementsRouter.post('/:id/inspection', async (req, res, next) => {
   try {
     await ensureEditable(req.params.id, req.user);
-    const out = await rentalAgreementsService.saveInspection(req.params.id, req.body || {}, req.user?.sub || null, req.ip || null);
+    const out = await rentalAgreementsService.saveInspection(
+      req.params.id,
+      req.body || {},
+      req.user?.sub || null,
+      req.ip || null,
+      req.user?.role || 'AGENT'
+    );
     res.json(out);
   } catch (e) {
     if (/not found/i.test(e.message)) return res.status(404).json({ error: e.message });
     if (/phase/i.test(e.message)) return res.status(400).json({ error: e.message });
+    if (/only admin can reassign|admin role required/i.test(String(e?.message || ''))) return res.status(403).json({ error: e.message });
+    next(e);
+  }
+});
+
+rentalAgreementsRouter.post('/:id/commission-owner', async (req, res, next) => {
+  try {
+    if (!isAdminRole(req.user)) {
+      return res.status(403).json({ error: 'Admin role required for commission reassignment' });
+    }
+    const employeeUserId = String(req.body?.employeeUserId || '').trim();
+    if (!employeeUserId) return res.status(400).json({ error: 'employeeUserId is required' });
+    const row = await rentalAgreementsService.overrideCommissionOwner(
+      req.params.id,
+      employeeUserId,
+      req.user?.sub || null,
+      req.user?.role || 'ADMIN',
+      req.user
+    );
+    res.json(row);
+  } catch (e) {
+    if (/not found/i.test(String(e?.message || ''))) return res.status(404).json({ error: e.message });
+    if (/same tenant|employeeuserid is required/i.test(String(e?.message || ''))) return res.status(400).json({ error: e.message });
+    if (/admin role required/i.test(String(e?.message || ''))) return res.status(403).json({ error: e.message });
     next(e);
   }
 });
