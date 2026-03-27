@@ -228,11 +228,17 @@ export default function PublicBookingConfirmationPage() {
                     Fulfillment: {fulfillmentModeLabel(confirmation.trip?.fulfillmentMode)}
                     {confirmation.trip?.deliveryRadiusMiles ? ` · ${confirmation.trip.deliveryRadiusMiles} mi radius` : ''}
                   </div>
+                  {Array.isArray(confirmation.trip?.deliveryAreas) && confirmation.trip.deliveryAreas.length ? (
+                    <div>Allowed delivery areas: {confirmation.trip.deliveryAreas.join(' | ')}</div>
+                  ) : null}
                   {confirmation.trip?.selectedFulfillmentChoice ? (
                     <div>
                       Selected option: {String(confirmation.trip.selectedFulfillmentChoice).toLowerCase() === 'delivery' ? 'Delivery' : 'Pickup'}
                       {Number(confirmation.trip?.selectedFulfillmentFee || 0) > 0 ? ` · ${fmtMoney(confirmation.trip.selectedFulfillmentFee)}` : ''}
                     </div>
+                  ) : null}
+                  {confirmation.trip?.deliveryAreaChoice ? (
+                    <div>Selected delivery area: <strong>{confirmation.trip.deliveryAreaChoice}</strong></div>
                   ) : null}
                   {pickupSpotHint(confirmation.trip?.pickupSpot) ? (
                     <div>{pickupSpotHint(confirmation.trip?.pickupSpot)}</div>

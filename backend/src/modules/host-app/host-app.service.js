@@ -175,6 +175,21 @@ function parseJsonList(value) {
   }
 }
 
+function parseTextList(value) {
+  if (Array.isArray(value)) {
+    return value
+      .map((row) => String(row || '').trim())
+      .filter(Boolean)
+      .slice(0, 12);
+  }
+  if (!value) return [];
+  return String(value)
+    .split(/\r?\n|,/)
+    .map((row) => row.trim())
+    .filter(Boolean)
+    .slice(0, 12);
+}
+
 export async function createHostVehicleSubmissionForProfile({ hostProfileId, tenantId, payload = {} }) {
   const scopedTenantId = String(tenantId || '').trim();
   const scopedHostProfileId = String(hostProfileId || '').trim();
@@ -212,6 +227,7 @@ export async function createHostVehicleSubmissionForProfile({ hostProfileId, ten
 
   const photosJson = payload?.photosJson ? String(payload.photosJson).trim() : null;
   const addOnsJson = payload?.addOnsJson ? String(payload.addOnsJson).trim() : null;
+  const deliveryAreas = parseTextList(payload?.deliveryAreas || payload?.deliveryAreasJson || payload?.deliveryAreasText);
   const photos = parseJsonList(photosJson).map((row) => String(row || '').trim()).filter(Boolean).slice(0, 6);
 
   if (!payload?.year || !payload?.make || !payload?.model) {
@@ -242,6 +258,7 @@ export async function createHostVehicleSubmissionForProfile({ hostProfileId, ten
       pickupFee: payload?.pickupFee ? Number(payload.pickupFee) : 0,
       deliveryFee: payload?.deliveryFee ? Number(payload.deliveryFee) : 0,
       deliveryRadiusMiles: payload?.deliveryRadiusMiles ? Number(payload.deliveryRadiusMiles) : null,
+      deliveryAreasJson: deliveryAreas.length ? JSON.stringify(deliveryAreas) : null,
       deliveryNotes: payload?.deliveryNotes ? String(payload.deliveryNotes).trim() : null,
       securityDeposit: payload?.securityDeposit ? Number(payload.securityDeposit) : 0,
       minTripDays: payload?.minTripDays ? Number(payload.minTripDays) : 1,
@@ -484,6 +501,8 @@ export const hostAppService = {
       deliveryFee: Object.prototype.hasOwnProperty.call(payload, 'deliveryFee') ? payload.deliveryFee : undefined,
       fulfillmentMode: Object.prototype.hasOwnProperty.call(payload, 'fulfillmentMode') ? payload.fulfillmentMode : undefined,
       deliveryRadiusMiles: Object.prototype.hasOwnProperty.call(payload, 'deliveryRadiusMiles') ? payload.deliveryRadiusMiles : undefined,
+      deliveryAreas: Object.prototype.hasOwnProperty.call(payload, 'deliveryAreas') ? payload.deliveryAreas : undefined,
+      deliveryAreasJson: Object.prototype.hasOwnProperty.call(payload, 'deliveryAreasJson') ? payload.deliveryAreasJson : undefined,
       deliveryNotes: Object.prototype.hasOwnProperty.call(payload, 'deliveryNotes') ? payload.deliveryNotes : undefined,
       securityDeposit: Object.prototype.hasOwnProperty.call(payload, 'securityDeposit') ? payload.securityDeposit : undefined,
       instantBook: Object.prototype.hasOwnProperty.call(payload, 'instantBook') ? payload.instantBook : undefined,
@@ -701,6 +720,7 @@ export const hostAppService = {
       deliveryFee: Number(submission.deliveryFee || 0),
       fulfillmentMode: submission.fulfillmentMode || 'PICKUP_ONLY',
       deliveryRadiusMiles: submission.deliveryRadiusMiles || null,
+      deliveryAreasJson: submission.deliveryAreasJson || null,
       deliveryNotes: submission.deliveryNotes || null,
       securityDeposit: Number(submission.securityDeposit || 0),
       instantBook: false,

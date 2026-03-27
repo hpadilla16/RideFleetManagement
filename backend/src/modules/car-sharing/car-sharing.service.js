@@ -90,6 +90,29 @@ function resolveFulfillmentChoice(listing, requestedChoice) {
   return 'PICKUP';
 }
 
+function parseTextList(value) {
+  if (Array.isArray(value)) {
+    return value
+      .map((row) => String(row || '').trim())
+      .filter(Boolean)
+      .slice(0, 12);
+  }
+  if (!value) return [];
+  try {
+    const parsed = typeof value === 'string' ? JSON.parse(value) : value;
+    if (Array.isArray(parsed)) {
+      return parsed.map((row) => String(row || '').trim()).filter(Boolean).slice(0, 12);
+    }
+  } catch {
+    // Fall back to newline/comma parsing below.
+  }
+  return String(value)
+    .split(/\r?\n|,/)
+    .map((row) => row.trim())
+    .filter(Boolean)
+    .slice(0, 12);
+}
+
 function computeTripPricing(listing, windows, startAt, endAt, requestedChoice = null) {
   const tripDays = ceilTripDays(startAt, endAt);
   const dayRates = [];
@@ -608,6 +631,9 @@ export const carSharingService = {
         pickupFee: data?.pickupFee ?? 0,
         deliveryFee: data?.deliveryFee ?? 0,
         deliveryRadiusMiles: data?.deliveryRadiusMiles ? Number(data.deliveryRadiusMiles) : null,
+        deliveryAreasJson: parseTextList(data?.deliveryAreas || data?.deliveryAreasJson || data?.deliveryAreasText).length
+          ? JSON.stringify(parseTextList(data?.deliveryAreas || data?.deliveryAreasJson || data?.deliveryAreasText))
+          : null,
         deliveryNotes: data?.deliveryNotes ? String(data.deliveryNotes).trim() : null,
         securityDeposit: data?.securityDeposit ?? 0,
         instantBook: !!data?.instantBook,
@@ -671,6 +697,7 @@ export const carSharingService = {
     }
 
     const quote = computeTripPricing(listing, overlappingWindows, pickupAt, returnAt, data?.fulfillmentChoice || null);
+    const deliveryAreaChoice = data?.deliveryAreaChoice ? String(data.deliveryAreaChoice).trim() : null;
     const pickupLocationId = data?.pickupLocationId || listing.locationId || null;
     const returnLocationId = data?.returnLocationId || listing.locationId || null;
     if (!pickupLocationId || !returnLocationId) {
@@ -713,7 +740,7 @@ export const carSharingService = {
         hostEarnings: quote.hostEarnings,
         platformFee: quote.platformFee,
         platformRevenue: quote.platformRevenue,
-        notes: [data?.notes ? String(data.notes).trim() : '', `Fulfillment: ${quote.fulfillmentChoice}`].filter(Boolean).join(' · '),
+        notes: [data?.notes ? String(data.notes).trim() : '', `Fulfillment: ${quote.fulfillmentChoice}`, deliveryAreaChoice ? `Delivery area: ${deliveryAreaChoice}` : ''].filter(Boolean).join(' · '),
         timelineEvents: {
           create: [{
             eventType: 'TRIP_CREATED',
@@ -727,6 +754,7 @@ export const carSharingService = {
               tripDays: quote.tripDays,
               quotedTotal: quote.total,
               fulfillmentChoice: quote.fulfillmentChoice,
+              deliveryAreaChoice,
               selectedFulfillmentFee: quote.selectedFulfillmentFee
             })
           }]
@@ -839,6 +867,18 @@ export const carSharingService = {
         pickupFee: Object.prototype.hasOwnProperty.call(patch || {}, 'pickupFee') ? patch?.pickupFee ?? 0 : undefined,
         deliveryFee: Object.prototype.hasOwnProperty.call(patch || {}, 'deliveryFee') ? patch?.deliveryFee ?? 0 : undefined,
         deliveryRadiusMiles: Object.prototype.hasOwnProperty.call(patch || {}, 'deliveryRadiusMiles') ? (patch?.deliveryRadiusMiles ? Number(patch.deliveryRadiusMiles) : null) : undefined,
+        deliveryAreasJson: Object.prototype.hasOwnProperty.call(patch || {}, 'deliveryAreas') || Object.prototype.hasOwnProperty.call(patch || {}, 'deliveryAreasJson')
+          ? (() => {
+              const areas = parseTextList(
+                Object.prototype.hasOwnProperty.call(patch || {}, 'deliveryAreas')
+                  ? patch?.deliveryAreas
+                  : Object.prototype.hasOwnProperty.call(patch || {}, 'deliveryAreasText')
+                    ? patch?.deliveryAreasText
+                    : patch?.deliveryAreasJson
+              );
+              return areas.length ? JSON.stringify(areas) : null;
+            })()
+          : undefined,
         deliveryNotes: Object.prototype.hasOwnProperty.call(patch || {}, 'deliveryNotes') ? (patch?.deliveryNotes ? String(patch.deliveryNotes).trim() : null) : undefined,
         securityDeposit: Object.prototype.hasOwnProperty.call(patch || {}, 'securityDeposit') ? patch?.securityDeposit ?? 0 : undefined,
         instantBook: Object.prototype.hasOwnProperty.call(patch || {}, 'instantBook') ? !!patch?.instantBook : undefined,
@@ -862,3 +902,4 @@ export const carSharingService = {
     });
   }
 };
+

@@ -89,6 +89,13 @@ function normalizeHostAddOns(value) {
     .filter(Boolean);
 }
 
+function normalizeDeliveryAreas(value) {
+  return parseJsonArray(value)
+    .map((item) => String(item || '').trim())
+    .filter(Boolean)
+    .slice(0, 12);
+}
+
 function bookingImageSet({ vehicleTypeImageUrl, listingPhotos }) {
   const photos = normalizePhotoList(listingPhotos);
   if (photos.length) {
@@ -641,6 +648,7 @@ export const bookingEngineService = {
           deliveryFee: money(listing.deliveryFee),
           fulfillmentMode: listing.fulfillmentMode,
           deliveryRadiusMiles: listing.deliveryRadiusMiles,
+          deliveryAreas: normalizeDeliveryAreas(listing.deliveryAreasJson),
           deliveryNotes: listing.deliveryNotes,
           instantBook: !!listing.instantBook,
           host: publicHostSummary(listing.hostProfile),
@@ -714,6 +722,7 @@ export const bookingEngineService = {
         deliveryFee: money(listing.deliveryFee),
         fulfillmentMode: listing.fulfillmentMode,
         deliveryRadiusMiles: listing.deliveryRadiusMiles,
+        deliveryAreas: normalizeDeliveryAreas(listing.deliveryAreasJson),
         deliveryNotes: listing.deliveryNotes,
         instantBook: !!listing.instantBook,
         host: publicHostSummary(listing.hostProfile),
@@ -911,6 +920,7 @@ export const bookingEngineService = {
           maxTripDays: listing.maxTripDays,
           fulfillmentMode: listing.fulfillmentMode,
           deliveryRadiusMiles: listing.deliveryRadiusMiles,
+          deliveryAreas: normalizeDeliveryAreas(listing.deliveryAreasJson),
           deliveryNotes: listing.deliveryNotes,
           host: publicHostSummary(listing.hostProfile),
           vehicle: listing.vehicle,
@@ -972,6 +982,7 @@ export const bookingEngineService = {
       maxTripDays: listing.maxTripDays,
       fulfillmentMode: listing.fulfillmentMode,
       deliveryRadiusMiles: listing.deliveryRadiusMiles,
+      deliveryAreas: normalizeDeliveryAreas(listing.deliveryAreasJson),
       deliveryNotes: listing.deliveryNotes,
       tripRules: listing.tripRules,
       host: publicHostSummary(listing.hostProfile),
@@ -1256,6 +1267,11 @@ export const bookingEngineService = {
     const fulfillmentChoice = String(input?.fulfillmentChoice || selected.quote?.fulfillmentChoice || selected.quote?.defaultFulfillmentChoice || 'PICKUP').trim().toUpperCase() === 'DELIVERY'
       ? 'DELIVERY'
       : 'PICKUP';
+    const allowedDeliveryAreas = normalizeDeliveryAreas(selected.listing?.deliveryAreasJson || selected.listing?.deliveryAreas || []);
+    const deliveryAreaChoice = String(input?.deliveryAreaChoice || '').trim();
+    if (fulfillmentChoice === 'DELIVERY' && allowedDeliveryAreas.length && !allowedDeliveryAreas.includes(deliveryAreaChoice)) {
+      throw new Error('Choose a valid delivery area for this listing');
+    }
 
     const trip = await carSharingService.createTrip({
       tenantId: tenant.id,
@@ -1266,7 +1282,8 @@ export const bookingEngineService = {
       pickupLocationId: input?.pickupLocationId || null,
       returnLocationId: input?.returnLocationId || input?.pickupLocationId || null,
       fulfillmentChoice,
-      notes: '[PUBLIC BOOKING] Created from booking web'
+      deliveryAreaChoice,
+      notes: ['[PUBLIC BOOKING] Created from booking web', deliveryAreaChoice ? `Delivery area: ${deliveryAreaChoice}` : ''].filter(Boolean).join(' · ')
     }, { tenantId: tenant.id });
 
     if (trip?.reservation && normalizedChosenServices.length) {
@@ -1338,6 +1355,8 @@ export const bookingEngineService = {
         selectedFulfillmentChoice: fulfillmentChoice,
         fulfillmentMode: selected.listing?.fulfillmentMode || 'PICKUP_ONLY',
         deliveryRadiusMiles: selected.listing?.deliveryRadiusMiles || null,
+        deliveryAreas: normalizeDeliveryAreas(selected.listing?.deliveryAreasJson || selected.listing?.deliveryAreas || []),
+        deliveryAreaChoice: deliveryAreaChoice || null,
         deliveryNotes: selected.listing?.deliveryNotes || null,
         pickupFee: money(selected.listing?.pickupFee || 0),
         deliveryFee: money(selected.listing?.deliveryFee || 0),
@@ -1349,6 +1368,7 @@ export const bookingEngineService = {
         hostChargeFees: money(Number(trip.quotedFees || 0) - Number(trip.guestTripFee || 0)),
         pickupFee: money(selected.listing?.pickupFee || 0),
         deliveryFee: money(selected.listing?.deliveryFee || 0),
+        deliveryAreaChoice: deliveryAreaChoice || null,
         selectedFulfillmentFee: money(fulfillmentChoice === 'DELIVERY' ? selected.listing?.deliveryFee || 0 : selected.listing?.pickupFee || 0),
         guestTripFee: money(trip.guestTripFee),
         fees: money(trip.quotedFees),

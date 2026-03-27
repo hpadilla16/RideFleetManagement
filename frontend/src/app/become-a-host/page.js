@@ -85,6 +85,7 @@ const EMPTY_FORM = {
   pickupFee: '',
   deliveryFee: '',
   deliveryRadiusMiles: '',
+  deliveryAreasText: '',
   deliveryNotes: '',
   securityDeposit: '',
   minTripDays: '1',
@@ -380,6 +381,10 @@ function BecomeAHostPageInner() {
                   <input value={form.deliveryNotes} onChange={(e) => setForm((current) => ({ ...current, deliveryNotes: e.target.value }))} placeholder="Airport, hotel, or neighborhood guidance" />
                 </label>
               </div>
+              <label>
+                <span className="label">Allowed Delivery Areas</span>
+                <textarea rows={3} value={form.deliveryAreasText} onChange={(e) => setForm((current) => ({ ...current, deliveryAreasText: e.target.value }))} placeholder={'One area per line, for example:\nSan Juan\nIsla Verde\nCondado'} />
+              </label>
 
               <div className="surface-note">
                 Optional: create a host pickup spot now. This is the guest-facing handoff point for your listing and stays separate from the tenant's operational branch locations.

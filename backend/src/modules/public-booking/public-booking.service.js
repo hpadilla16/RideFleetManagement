@@ -47,6 +47,22 @@ function normalizeEmail(value) {
   return String(value || '').trim().toLowerCase();
 }
 
+function parseJsonArray(value) {
+  try {
+    const parsed = typeof value === 'string' ? JSON.parse(value) : value;
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+function normalizeDeliveryAreas(value) {
+  return parseJsonArray(value)
+    .map((row) => String(row || '').trim())
+    .filter(Boolean)
+    .slice(0, 12);
+}
+
 async function resolvePublicCarSharingTenant({ tenantSlug, tenantId }) {
   const scopedTenantId = tenantId ? String(tenantId).trim() : '';
   const scopedTenantSlug = tenantSlug ? String(tenantSlug).trim().toLowerCase() : '';
@@ -212,6 +228,7 @@ export const publicBookingService = {
         maxTripDays: listing.maxTripDays ? Number(listing.maxTripDays) : null,
         fulfillmentMode: listing.fulfillmentMode || 'PICKUP_ONLY',
         deliveryRadiusMiles: listing.deliveryRadiusMiles ? Number(listing.deliveryRadiusMiles) : null,
+        deliveryAreas: normalizeDeliveryAreas(listing.deliveryAreas || listing.deliveryAreasJson),
         pickupFee: money(listing.pickupFee),
         deliveryFee: money(listing.deliveryFee),
         deliveryNotes: listing.deliveryNotes || '',
@@ -450,6 +467,7 @@ export const publicBookingService = {
         maxTripDays: result.listing.maxTripDays ? Number(result.listing.maxTripDays) : null,
         fulfillmentMode: result.listing.fulfillmentMode || 'PICKUP_ONLY',
         deliveryRadiusMiles: result.listing.deliveryRadiusMiles ? Number(result.listing.deliveryRadiusMiles) : null,
+        deliveryAreas: normalizeDeliveryAreas(result.listing.deliveryAreas || result.listing.deliveryAreasJson),
         pickupFee: money(result.listing.pickupFee),
         deliveryFee: money(result.listing.deliveryFee),
         deliveryNotes: result.listing.deliveryNotes || '',
