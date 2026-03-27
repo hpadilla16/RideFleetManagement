@@ -112,3 +112,25 @@ hostAppRouter.post('/vehicle-submissions', async (req, res, next) => {
     next(error);
   }
 });
+
+hostAppRouter.post('/pickup-spots', async (req, res, next) => {
+  try {
+    res.status(201).json(await hostAppService.createPickupSpot(req.user, req.body || {}));
+  } catch (error) {
+    if (/not found|required|linked|pickup spot|anchor/i.test(String(error?.message || ''))) {
+      return res.status(400).json({ error: error.message });
+    }
+    next(error);
+  }
+});
+
+hostAppRouter.patch('/pickup-spots/:id', async (req, res, next) => {
+  try {
+    res.json(await hostAppService.updatePickupSpot(req.user, req.params.id, req.body || {}));
+  } catch (error) {
+    if (/not found|required|linked|pickup spot|anchor/i.test(String(error?.message || ''))) {
+      return res.status(400).json({ error: error.message });
+    }
+    next(error);
+  }
+});

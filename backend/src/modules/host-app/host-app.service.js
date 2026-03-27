@@ -6,6 +6,11 @@ function listingInclude() {
   return {
     vehicle: { include: { vehicleType: true } },
     location: true,
+    pickupSpot: {
+      include: {
+        anchorLocation: true
+      }
+    },
     tenant: true,
     availabilityWindows: {
       orderBy: [{ startAt: 'asc' }]
@@ -17,6 +22,11 @@ function submissionInclude() {
   return {
     vehicleType: true,
     preferredLocation: true,
+    preferredPickupSpot: {
+      include: {
+        anchorLocation: true
+      }
+    },
     vehicle: { include: { vehicleType: true, homeLocation: true } },
     listing: { include: listingInclude() },
     communications: { orderBy: [{ createdAt: 'desc' }] }
@@ -173,6 +183,7 @@ export async function createHostVehicleSubmissionForProfile({ hostProfileId, ten
 
   const vehicleTypeId = String(payload?.vehicleTypeId || '').trim();
   const preferredLocationId = payload?.preferredLocationId ? String(payload.preferredLocationId).trim() : null;
+  const preferredPickupSpotId = payload?.preferredPickupSpotId ? String(payload.preferredPickupSpotId).trim() : null;
   if (!vehicleTypeId) throw new Error('vehicleTypeId is required');
 
   const vehicleType = await prisma.vehicleType.findFirst({
@@ -186,6 +197,18 @@ export async function createHostVehicleSubmissionForProfile({ hostProfileId, ten
       })
     : null;
   if (preferredLocationId && !location) throw new Error('Preferred location not found');
+
+  const pickupSpot = preferredPickupSpotId
+    ? await prisma.hostPickupSpot.findFirst({
+        where: {
+          id: preferredPickupSpotId,
+          tenantId: scopedTenantId,
+          hostProfileId: scopedHostProfileId,
+          isActive: true
+        }
+      })
+    : null;
+  if (preferredPickupSpotId && !pickupSpot) throw new Error('Preferred host pickup spot not found');
 
   const photosJson = payload?.photosJson ? String(payload.photosJson).trim() : null;
   const addOnsJson = payload?.addOnsJson ? String(payload.addOnsJson).trim() : null;
@@ -205,6 +228,7 @@ export async function createHostVehicleSubmissionForProfile({ hostProfileId, ten
       hostProfileId: scopedHostProfileId,
       vehicleTypeId,
       preferredLocationId,
+      preferredPickupSpotId,
       year: payload?.year ? Number(payload.year) : null,
       make: payload?.make ? String(payload.make).trim() : null,
       model: payload?.model ? String(payload.model).trim() : null,
@@ -278,7 +302,7 @@ export const hostAppService = {
 
     const hostTenantId = await resolveHostTenantId(context.hostProfile);
 
-    const [vehicleTypes, locations, submissions] = await Promise.all([
+    const [vehicleTypes, locations, submissions, pickupSpots] = await Promise.all([
       prisma.vehicleType.findMany({
         where: hostTenantId ? { tenantId: hostTenantId } : { id: '__never__' },
         orderBy: [{ name: 'asc' }]
@@ -291,6 +315,15 @@ export const hostAppService = {
         where: { hostProfileId: context.hostProfile.id },
         include: submissionInclude(),
         orderBy: [{ createdAt: 'desc' }]
+      }),
+      prisma.hostPickupSpot.findMany({
+        where: hostTenantId
+          ? { tenantId: hostTenantId, hostProfileId: context.hostProfile.id }
+          : { id: '__never__' },
+        include: {
+          anchorLocation: true
+        },
+        orderBy: [{ isDefault: 'desc' }, { createdAt: 'desc' }]
       })
     ]);
 
@@ -347,6 +380,7 @@ export const hostAppService = {
       })),
       vehicleTypes,
       locations,
+      pickupSpots,
       vehicleSubmissions: submissions,
       metrics: {
         ...hostMetrics(listings, trips),
@@ -501,6 +535,115 @@ export const hostAppService = {
     });
   },
 
+  async createPickupSpot(user, payload = {}) {
+    const requestedHostProfileId = payload?.hostProfileId ? String(payload.hostProfileId).trim() : null;
+    const context = await resolveHostContext(user, requestedHostProfileId || null);
+    if (!context.hostProfile) throw new Error('No host profile is linked to this login yet');
+
+    const tenantId = await resolveHostTenantId(context.hostProfile);
+    if (!tenantId) throw new Error('Host tenant is required');
+
+    const label = String(payload?.label || '').trim();
+    if (!label) throw new Error('label is required');
+
+    const anchorLocationId = payload?.anchorLocationId ? String(payload.anchorLocationId).trim() : null;
+    if (anchorLocationId) {
+      const anchorLocation = await prisma.location.findFirst({
+        where: { id: anchorLocationId, tenantId, isActive: true }
+      });
+      if (!anchorLocation) throw new Error('Anchor location not found');
+    }
+
+    if (payload?.isDefault) {
+      await prisma.hostPickupSpot.updateMany({
+        where: { tenantId, hostProfileId: context.hostProfile.id },
+        data: { isDefault: false }
+      });
+    }
+
+    return prisma.hostPickupSpot.create({
+      data: {
+        tenantId,
+        hostProfileId: context.hostProfile.id,
+        anchorLocationId,
+        label,
+        address1: payload?.address1 ? String(payload.address1).trim() : null,
+        address2: payload?.address2 ? String(payload.address2).trim() : null,
+        city: payload?.city ? String(payload.city).trim() : null,
+        state: payload?.state ? String(payload.state).trim() : null,
+        postalCode: payload?.postalCode ? String(payload.postalCode).trim() : null,
+        country: payload?.country ? String(payload.country).trim() : null,
+        latitude: payload?.latitude ? Number(payload.latitude) : null,
+        longitude: payload?.longitude ? Number(payload.longitude) : null,
+        instructions: payload?.instructions ? String(payload.instructions).trim() : null,
+        isDefault: !!payload?.isDefault,
+        isActive: payload?.isActive !== false,
+        approvalStatus: payload?.approvalStatus ? String(payload.approvalStatus).trim().toUpperCase() : 'PENDING'
+      },
+      include: {
+        anchorLocation: true
+      }
+    });
+  },
+
+  async updatePickupSpot(user, id, payload = {}) {
+    const requestedHostProfileId = payload?.hostProfileId ? String(payload.hostProfileId).trim() : null;
+    const context = await resolveHostContext(user, requestedHostProfileId || null);
+    if (!context.hostProfile) throw new Error('No host profile is linked to this login yet');
+
+    const tenantId = await resolveHostTenantId(context.hostProfile);
+    if (!tenantId) throw new Error('Host tenant is required');
+
+    const current = await prisma.hostPickupSpot.findFirst({
+      where: {
+        id,
+        tenantId,
+        hostProfileId: context.hostProfile.id
+      }
+    });
+    if (!current) throw new Error('Host pickup spot not found');
+
+    const anchorLocationId = Object.prototype.hasOwnProperty.call(payload || {}, 'anchorLocationId')
+      ? (payload?.anchorLocationId ? String(payload.anchorLocationId).trim() : null)
+      : undefined;
+    if (anchorLocationId) {
+      const anchorLocation = await prisma.location.findFirst({
+        where: { id: anchorLocationId, tenantId, isActive: true }
+      });
+      if (!anchorLocation) throw new Error('Anchor location not found');
+    }
+
+    if (payload?.isDefault) {
+      await prisma.hostPickupSpot.updateMany({
+        where: { tenantId, hostProfileId: context.hostProfile.id },
+        data: { isDefault: false }
+      });
+    }
+
+    return prisma.hostPickupSpot.update({
+      where: { id: current.id },
+      data: {
+        label: Object.prototype.hasOwnProperty.call(payload || {}, 'label') ? String(payload?.label || '').trim() : undefined,
+        anchorLocationId,
+        address1: Object.prototype.hasOwnProperty.call(payload || {}, 'address1') ? (payload?.address1 ? String(payload.address1).trim() : null) : undefined,
+        address2: Object.prototype.hasOwnProperty.call(payload || {}, 'address2') ? (payload?.address2 ? String(payload.address2).trim() : null) : undefined,
+        city: Object.prototype.hasOwnProperty.call(payload || {}, 'city') ? (payload?.city ? String(payload.city).trim() : null) : undefined,
+        state: Object.prototype.hasOwnProperty.call(payload || {}, 'state') ? (payload?.state ? String(payload.state).trim() : null) : undefined,
+        postalCode: Object.prototype.hasOwnProperty.call(payload || {}, 'postalCode') ? (payload?.postalCode ? String(payload.postalCode).trim() : null) : undefined,
+        country: Object.prototype.hasOwnProperty.call(payload || {}, 'country') ? (payload?.country ? String(payload.country).trim() : null) : undefined,
+        latitude: Object.prototype.hasOwnProperty.call(payload || {}, 'latitude') ? (payload?.latitude ? Number(payload.latitude) : null) : undefined,
+        longitude: Object.prototype.hasOwnProperty.call(payload || {}, 'longitude') ? (payload?.longitude ? Number(payload.longitude) : null) : undefined,
+        instructions: Object.prototype.hasOwnProperty.call(payload || {}, 'instructions') ? (payload?.instructions ? String(payload.instructions).trim() : null) : undefined,
+        isDefault: Object.prototype.hasOwnProperty.call(payload || {}, 'isDefault') ? !!payload?.isDefault : undefined,
+        isActive: Object.prototype.hasOwnProperty.call(payload || {}, 'isActive') ? !!payload?.isActive : undefined,
+        approvalStatus: Object.prototype.hasOwnProperty.call(payload || {}, 'approvalStatus') ? String(payload?.approvalStatus || 'PENDING').trim().toUpperCase() : undefined
+      },
+      include: {
+        anchorLocation: true
+      }
+    });
+  },
+
   async approveVehicleSubmission(user, id, payload = {}) {
     const role = String(user?.role || '').toUpperCase();
     if (!['SUPER_ADMIN', 'ADMIN', 'OPS'].includes(role)) throw new Error('Not allowed');
@@ -512,6 +655,7 @@ export const hostAppService = {
     });
     if (!submission) throw new Error('Vehicle submission not found');
     if (submission.vehicleId && submission.listingId) return submission;
+    const anchorLocationId = submission.preferredLocationId || submission.preferredPickupSpot?.anchorLocationId || null;
 
     const internalNumber = generateHostVehicleNumber();
     const vehicle = await prisma.vehicle.create({
@@ -528,7 +672,7 @@ export const hostAppService = {
         status: 'AVAILABLE',
         fleetMode: 'CAR_SHARING_ONLY',
         vehicleTypeId: submission.vehicleTypeId,
-        homeLocationId: submission.preferredLocationId || null
+        homeLocationId: anchorLocationId
       }
     });
 
@@ -536,7 +680,8 @@ export const hostAppService = {
       tenantId: submission.tenantId,
       hostProfileId: submission.hostProfileId,
       vehicleId: vehicle.id,
-      locationId: submission.preferredLocationId || null,
+      locationId: anchorLocationId,
+      pickupSpotId: submission.preferredPickupSpotId || null,
       title: `${submission.year || ''} ${submission.make || ''} ${submission.model || ''}`.trim() || `${submission.hostProfile.displayName}'s Vehicle`,
       shortDescription: submission.shortDescription || null,
       description: submission.description || null,

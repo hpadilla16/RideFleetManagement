@@ -207,10 +207,23 @@ const EMPTY_LISTING_EDIT = {
 };
 
 const EMPTY_SUBMISSION_FORM = {
-  vehicleTypeId: '', preferredLocationId: '', year: '', make: '', model: '', color: '', vin: '', plate: '', mileage: '',
+  vehicleTypeId: '', preferredLocationId: '', preferredPickupSpotId: '', year: '', make: '', model: '', color: '', vin: '', plate: '', mileage: '',
   baseDailyRate: '', cleaningFee: '', deliveryFee: '', securityDeposit: '', minTripDays: '1', maxTripDays: '',
   shortDescription: '', description: '', tripRules: '', photos: [], insuranceDocumentUrl: '', registrationDocumentUrl: '',
   initialInspectionDocumentUrl: '', initialInspectionNotes: '', addOns: []
+};
+
+const EMPTY_PICKUP_SPOT_FORM = {
+  label: '',
+  anchorLocationId: '',
+  address1: '',
+  address2: '',
+  city: '',
+  state: '',
+  postalCode: '',
+  country: 'Puerto Rico',
+  instructions: '',
+  isDefault: true
 };
 
 const EMPTY_WINDOW_FORM = {
@@ -273,6 +286,7 @@ function HostAppInner({ token, me, logout }) {
   const [windowForm, setWindowForm] = useState(EMPTY_WINDOW_FORM);
   const [issueForm, setIssueForm] = useState(EMPTY_ISSUE_FORM);
   const [submissionForm, setSubmissionForm] = useState(EMPTY_SUBMISSION_FORM);
+  const [pickupSpotForm, setPickupSpotForm] = useState(EMPTY_PICKUP_SPOT_FORM);
   const [loading, setLoading] = useState(true);
 
   const isAdminViewer = !!dashboard?.isAdminViewer;
@@ -333,6 +347,7 @@ function HostAppInner({ token, me, logout }) {
   const submissions = dashboard?.vehicleSubmissions || [];
   const vehicleTypes = dashboard?.vehicleTypes || [];
   const locations = dashboard?.locations || [];
+  const pickupSpots = dashboard?.pickupSpots || [];
 
   const hostSnapshot = useMemo(() => {
     const now = Date.now();
@@ -592,6 +607,24 @@ function HostAppInner({ token, me, logout }) {
       }, token);
       setMsg('Vehicle submitted for approval');
       setSubmissionForm(EMPTY_SUBMISSION_FORM);
+      await load();
+    } catch (error) {
+      setMsg(error.message);
+    }
+  }
+
+  async function savePickupSpot(event) {
+    event.preventDefault();
+    try {
+      await api('/api/host-app/pickup-spots', {
+        method: 'POST',
+        body: JSON.stringify({
+          ...pickupSpotForm,
+          hostProfileId: isAdminViewer ? (selectedHostProfileId || host?.id || '') : undefined
+        })
+      }, token);
+      setPickupSpotForm(EMPTY_PICKUP_SPOT_FORM);
+      setMsg('Pickup spot saved');
       await load();
     } catch (error) {
       setMsg(error.message);
@@ -895,7 +928,7 @@ function HostAppInner({ token, me, logout }) {
       ) : null}
 
       <section className="split-panel">
-        <section id="host-actions" className="glass card-lg section-card">
+      <section id="host-actions" className="glass card-lg section-card">
           <div className="row-between">
             <div><div className="section-title">Add Vehicle To My Fleet</div><p className="ui-muted">Submit a host-owned vehicle, documents, inspection proof, pricing, and host-only add-ons for review.</p></div>
             <span className="status-chip neutral">{dashboard?.metrics?.pendingVehicleApprovals || 0} pending</span>
@@ -905,6 +938,61 @@ function HostAppInner({ token, me, logout }) {
               Vehicle types are not showing for this host yet. This usually means the host profile still needs tenant scope or that no vehicle classes are configured for that tenant.
             </div>
           ) : null}
+          <section className="surface-note" style={{ display: 'grid', gap: 14 }}>
+            <div className="row-between">
+              <div>
+                <div className="section-title" style={{ fontSize: 18 }}>Host Pickup Spots</div>
+                <p className="ui-muted">Create guest-facing pickup points without changing the tenant's branch locations. Each spot can still anchor back to an approved operational hub.</p>
+              </div>
+              <span className="status-chip neutral">{pickupSpots.length} spots</span>
+            </div>
+            <form className="stack" onSubmit={savePickupSpot}>
+              <div className="form-grid-3">
+                <div className="stack"><label className="label">Spot Label</label><input value={pickupSpotForm.label} onChange={(event) => setPickupSpotForm((current) => ({ ...current, label: event.target.value }))} placeholder="Condado Guest Pickup" /></div>
+                <div className="stack">
+                  <label className="label">Anchor Branch</label>
+                  <select value={pickupSpotForm.anchorLocationId} onChange={(event) => setPickupSpotForm((current) => ({ ...current, anchorLocationId: event.target.value }))}>
+                    <option value="">Choose branch</option>
+                    {locations.map((row) => <option key={row.id} value={row.id}>{row.name}</option>)}
+                  </select>
+                </div>
+                <div className="stack"><label className="label">Address Line 1</label><input value={pickupSpotForm.address1} onChange={(event) => setPickupSpotForm((current) => ({ ...current, address1: event.target.value }))} /></div>
+                <div className="stack"><label className="label">Address Line 2</label><input value={pickupSpotForm.address2} onChange={(event) => setPickupSpotForm((current) => ({ ...current, address2: event.target.value }))} /></div>
+                <div className="stack"><label className="label">City</label><input value={pickupSpotForm.city} onChange={(event) => setPickupSpotForm((current) => ({ ...current, city: event.target.value }))} /></div>
+                <div className="stack"><label className="label">State</label><input value={pickupSpotForm.state} onChange={(event) => setPickupSpotForm((current) => ({ ...current, state: event.target.value }))} /></div>
+                <div className="stack"><label className="label">Postal Code</label><input value={pickupSpotForm.postalCode} onChange={(event) => setPickupSpotForm((current) => ({ ...current, postalCode: event.target.value }))} /></div>
+                <div className="stack"><label className="label">Country</label><input value={pickupSpotForm.country} onChange={(event) => setPickupSpotForm((current) => ({ ...current, country: event.target.value }))} /></div>
+              </div>
+              <div className="stack"><label className="label">Instructions</label><textarea rows={2} value={pickupSpotForm.instructions} onChange={(event) => setPickupSpotForm((current) => ({ ...current, instructions: event.target.value }))} /></div>
+              <label style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+                <input type="checkbox" checked={pickupSpotForm.isDefault} onChange={(event) => setPickupSpotForm((current) => ({ ...current, isDefault: event.target.checked }))} />
+                <span className="label" style={{ margin: 0 }}>Make this the default host pickup spot</span>
+              </label>
+              <div className="inline-actions"><button type="submit">Save Pickup Spot</button></div>
+            </form>
+            {pickupSpots.length ? (
+              <div className="stack">
+                {pickupSpots.map((spot) => (
+                  <div key={spot.id} className="surface-note" style={{ display: 'grid', gap: 8 }}>
+                    <div className="row-between" style={{ gap: 12 }}>
+                      <strong>{spot.label}</strong>
+                      <span className={statusChip(spot.approvalStatus || (spot.isActive ? 'ACTIVE' : 'ARCHIVED'))}>
+                        {spot.approvalStatus || (spot.isActive ? 'ACTIVE' : 'INACTIVE')}
+                      </span>
+                    </div>
+                    <div className="label" style={{ textTransform: 'none', letterSpacing: 0, fontSize: 12 }}>
+                      {[spot.address1, spot.city, spot.state, spot.postalCode].filter(Boolean).join(' · ') || 'No detailed address yet'}
+                    </div>
+                    <div style={{ color: '#55456f', lineHeight: 1.5 }}>
+                      {[spot.anchorLocation?.name ? `Ops hub ${spot.anchorLocation.name}` : '', spot.instructions || '', spot.isDefault ? 'Default pickup spot' : ''].filter(Boolean).join(' · ')}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="surface-note">No host pickup spots yet. Create one so guests can see a true handoff point without changing the tenant branch list.</div>
+            )}
+          </section>
           <form className="stack" onSubmit={submitVehicleSubmission}>
             <div className="form-grid-3">
               <div className="stack">
@@ -919,6 +1007,13 @@ function HostAppInner({ token, me, logout }) {
                 <select value={submissionForm.preferredLocationId} onChange={(event) => setSubmissionForm((current) => ({ ...current, preferredLocationId: event.target.value }))}>
                   <option value="">Choose location</option>
                   {locations.map((row) => <option key={row.id} value={row.id}>{row.name}</option>)}
+                </select>
+              </div>
+              <div className="stack">
+                <label className="label">Host Pickup Spot</label>
+                <select value={submissionForm.preferredPickupSpotId} onChange={(event) => setSubmissionForm((current) => ({ ...current, preferredPickupSpotId: event.target.value }))}>
+                  <option value="">Choose host pickup spot</option>
+                  {pickupSpots.map((row) => <option key={row.id} value={row.id}>{row.label}</option>)}
                 </select>
               </div>
               <div className="stack"><label className="label">Year</label><input type="number" value={submissionForm.year} onChange={(event) => setSubmissionForm((current) => ({ ...current, year: event.target.value }))} /></div>
@@ -1006,7 +1101,7 @@ function HostAppInner({ token, me, logout }) {
                     <span className={statusChip(row.status)}>{row.status}</span>
                   </div>
                   <div className="label" style={{ textTransform: 'none', letterSpacing: 0, fontSize: 12 }}>
-                    {[row.vehicleType?.name || '-', row.preferredLocation?.name || '-', formatDateTime(row.createdAt)].join(' - ')}
+                    {[row.vehicleType?.name || '-', row.preferredPickupSpot?.label || row.preferredLocation?.name || '-', formatDateTime(row.createdAt)].join(' - ')}
                   </div>
                   <div className="info-grid-tight">
                     <div className="info-tile"><span className="label">Photos</span><strong>{progress.photoCount}</strong></div>

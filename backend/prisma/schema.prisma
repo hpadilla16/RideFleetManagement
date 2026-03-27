@@ -257,6 +257,7 @@ model Tenant {
   commissionRules CommissionRule[]
   agreementCommissions AgreementCommission[]
   hostProfiles HostProfile[]
+  hostPickupSpots HostPickupSpot[]
   carSharingListings HostVehicleListing[]
   carSharingTrips Trip[]
   tripPayouts TripPayout[]
@@ -293,6 +294,7 @@ model Location {
   rates              Rate[]
   carSharingListings HostVehicleListing[]
   hostVehicleSubmissionPreferred HostVehicleSubmission[]
+  hostPickupSpotsAnchor HostPickupSpot[] @relation("HostPickupSpotAnchorLocation")
   carSharingPickupTrips Trip[] @relation("TripPickupLocation")
   carSharingReturnTrips Trip[] @relation("TripReturnLocation")
 }
@@ -558,6 +560,8 @@ model HostVehicleListing {
   vehicle           Vehicle             @relation(fields: [vehicleId], references: [id])
   locationId        String?
   location          Location?           @relation(fields: [locationId], references: [id])
+  pickupSpotId      String?
+  pickupSpot        HostPickupSpot?     @relation(fields: [pickupSpotId], references: [id])
   slug              String              @unique
   title             String
   shortDescription  String?
@@ -587,6 +591,7 @@ model HostVehicleListing {
   @@index([tenantId, status])
   @@index([hostProfileId, status])
   @@index([locationId, status])
+  @@index([pickupSpotId, status])
 }
 
 model HostVehicleSubmission {
@@ -599,6 +604,8 @@ model HostVehicleSubmission {
   vehicleType              VehicleType                 @relation(fields: [vehicleTypeId], references: [id])
   preferredLocationId      String?
   preferredLocation        Location?                   @relation(fields: [preferredLocationId], references: [id])
+  preferredPickupSpotId    String?
+  preferredPickupSpot      HostPickupSpot?             @relation(fields: [preferredPickupSpotId], references: [id])
   year                     Int?
   make                     String?
   model                    String?
@@ -637,6 +644,7 @@ model HostVehicleSubmission {
 
   @@index([tenantId, status, createdAt])
   @@index([hostProfileId, status, createdAt])
+  @@index([preferredPickupSpotId])
 }
 
 model HostVehicleSubmissionCommunication {
@@ -735,6 +743,7 @@ model HostProfile {
   updatedAt         DateTime  @updatedAt
 
   listings          HostVehicleListing[]
+  pickupSpots       HostPickupSpot[]
   trips             Trip[]    @relation("TripHost")
   payouts           TripPayout[]
   vehicleSubmissions HostVehicleSubmission[]
@@ -743,6 +752,38 @@ model HostProfile {
   @@index([tenantId, status])
   @@index([email])
   @@index([createdByUserId])
+}
+
+model HostPickupSpot {
+  id                String    @id @default(cuid())
+  tenantId          String?
+  tenant            Tenant?   @relation(fields: [tenantId], references: [id])
+  hostProfileId     String
+  hostProfile       HostProfile @relation(fields: [hostProfileId], references: [id], onDelete: Cascade)
+  anchorLocationId  String?
+  anchorLocation    Location? @relation("HostPickupSpotAnchorLocation", fields: [anchorLocationId], references: [id])
+  label             String
+  address1          String?
+  address2          String?
+  city              String?
+  state             String?
+  postalCode        String?
+  country           String?
+  latitude          Decimal?  @db.Decimal(10, 7)
+  longitude         Decimal?  @db.Decimal(10, 7)
+  instructions      String?
+  isDefault         Boolean   @default(false)
+  isActive          Boolean   @default(true)
+  approvalStatus    String    @default("PENDING")
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  preferredBySubmissions HostVehicleSubmission[]
+  listings          HostVehicleListing[]
+
+  @@index([tenantId, hostProfileId, isActive])
+  @@index([hostProfileId, approvalStatus])
+  @@index([anchorLocationId])
 }
 
 model AuditLog {

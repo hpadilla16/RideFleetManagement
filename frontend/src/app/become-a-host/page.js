@@ -64,6 +64,14 @@ const EMPTY_FORM = {
   password: '',
   vehicleTypeId: '',
   preferredLocationId: '',
+  pickupSpotLabel: '',
+  pickupSpotAddress1: '',
+  pickupSpotAddress2: '',
+  pickupSpotCity: '',
+  pickupSpotState: '',
+  pickupSpotPostalCode: '',
+  pickupSpotCountry: 'Puerto Rico',
+  pickupSpotInstructions: '',
   year: '',
   make: '',
   model: '',
@@ -213,7 +221,7 @@ function BecomeAHostPageInner() {
             <div className="surface-note">2. Create your host account and vehicle submission.</div>
             <div className="surface-note">3. Upload photos, insurance, registration, and inspection proof.</div>
             <div className="surface-note">4. After approval, your login opens the Host App with your listing workflow.</div>
-            <div className="surface-note">For now, hosts choose a tenant-approved pickup location. Dedicated host pickup spots can be added in the next slice without changing tenant branch locations.</div>
+            <div className="surface-note">You can also enter your own pickup spot. Ride Fleet keeps that separate from tenant branch locations while still anchoring ops to an approved hub.</div>
           </div>
         </aside>
 
@@ -304,6 +312,9 @@ function BecomeAHostPageInner() {
                     ))}
                   </select>
                 </label>
+                <div className="surface-note" style={{ alignSelf: 'end' }}>
+                  Choose a tenant hub if you want ops tied to an existing branch. If not, enter your own pickup spot below and we will anchor it for review.
+                </div>
                 <label>
                   <span className="label">Year</span>
                   <input type="number" value={form.year} onChange={(e) => setForm((current) => ({ ...current, year: e.target.value }))} required />
@@ -343,6 +354,45 @@ function BecomeAHostPageInner() {
                 <label>
                   <span className="label">Max Trip Days</span>
                   <input type="number" value={form.maxTripDays} onChange={(e) => setForm((current) => ({ ...current, maxTripDays: e.target.value }))} />
+                </label>
+              </div>
+
+              <div className="surface-note">
+                Optional: create a host pickup spot now. This is the guest-facing handoff point for your listing and stays separate from the tenant's operational branch locations.
+              </div>
+
+              <div className="form-grid-2">
+                <label>
+                  <span className="label">Pickup Spot Label</span>
+                  <input value={form.pickupSpotLabel} onChange={(e) => setForm((current) => ({ ...current, pickupSpotLabel: e.target.value }))} placeholder="Example: Condado Guest Pickup" />
+                </label>
+                <label>
+                  <span className="label">Address Line 1</span>
+                  <input value={form.pickupSpotAddress1} onChange={(e) => setForm((current) => ({ ...current, pickupSpotAddress1: e.target.value }))} placeholder="Street address or meeting point" />
+                </label>
+                <label>
+                  <span className="label">Address Line 2</span>
+                  <input value={form.pickupSpotAddress2} onChange={(e) => setForm((current) => ({ ...current, pickupSpotAddress2: e.target.value }))} />
+                </label>
+                <label>
+                  <span className="label">City</span>
+                  <input value={form.pickupSpotCity} onChange={(e) => setForm((current) => ({ ...current, pickupSpotCity: e.target.value }))} />
+                </label>
+                <label>
+                  <span className="label">State</span>
+                  <input value={form.pickupSpotState} onChange={(e) => setForm((current) => ({ ...current, pickupSpotState: e.target.value }))} />
+                </label>
+                <label>
+                  <span className="label">Postal Code</span>
+                  <input value={form.pickupSpotPostalCode} onChange={(e) => setForm((current) => ({ ...current, pickupSpotPostalCode: e.target.value }))} />
+                </label>
+                <label>
+                  <span className="label">Country</span>
+                  <input value={form.pickupSpotCountry} onChange={(e) => setForm((current) => ({ ...current, pickupSpotCountry: e.target.value }))} />
+                </label>
+                <label>
+                  <span className="label">Pickup Instructions</span>
+                  <input value={form.pickupSpotInstructions} onChange={(e) => setForm((current) => ({ ...current, pickupSpotInstructions: e.target.value }))} placeholder="Gate code, landmark, where to meet" />
                 </label>
               </div>
 

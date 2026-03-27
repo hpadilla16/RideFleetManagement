@@ -16,6 +16,11 @@ function listingInclude() {
     hostProfile: true,
     vehicle: { include: { vehicleType: true } },
     location: true,
+    pickupSpot: {
+      include: {
+        anchorLocation: true
+      }
+    },
     tenant: true,
     availabilityWindows: {
       orderBy: [{ startAt: 'asc' }]
@@ -28,7 +33,12 @@ function tripInclude() {
     listing: {
       include: {
         vehicle: { include: { vehicleType: true } },
-        location: true
+        location: true,
+        pickupSpot: {
+          include: {
+            anchorLocation: true
+          }
+        }
       }
     },
     hostProfile: true,
@@ -547,6 +557,7 @@ export const carSharingService = {
         hostProfileId,
         vehicleId,
         locationId: data?.locationId || null,
+        pickupSpotId: data?.pickupSpotId || null,
         slug,
         title,
         shortDescription: data?.shortDescription ? String(data.shortDescription).trim() : null,
@@ -772,6 +783,7 @@ export const carSharingService = {
         hostProfileId: Object.prototype.hasOwnProperty.call(patch || {}, 'hostProfileId') ? String(patch?.hostProfileId || '') : undefined,
         vehicleId: Object.prototype.hasOwnProperty.call(patch || {}, 'vehicleId') ? String(patch?.vehicleId || '') : undefined,
         locationId: Object.prototype.hasOwnProperty.call(patch || {}, 'locationId') ? (patch?.locationId || null) : undefined,
+        pickupSpotId: Object.prototype.hasOwnProperty.call(patch || {}, 'pickupSpotId') ? (patch?.pickupSpotId || null) : undefined,
         title: Object.prototype.hasOwnProperty.call(patch || {}, 'title') ? String(patch?.title || '').trim() : undefined,
         shortDescription: Object.prototype.hasOwnProperty.call(patch || {}, 'shortDescription') ? (patch?.shortDescription ? String(patch.shortDescription).trim() : null) : undefined,
         description: Object.prototype.hasOwnProperty.call(patch || {}, 'description') ? (patch?.description ? String(patch.description).trim() : null) : undefined,

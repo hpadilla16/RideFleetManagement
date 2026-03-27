@@ -587,7 +587,8 @@ export const bookingEngineService = {
           include: {
             hostProfile: { select: publicHostSelect() },
             vehicle: { select: { id: true, make: true, model: true, year: true, color: true, plate: true, vehicleType: { select: { imageUrl: true } } } },
-            location: { select: { id: true, name: true, city: true, state: true } }
+            location: { select: { id: true, name: true, city: true, state: true } },
+            pickupSpot: { include: { anchorLocation: { select: { id: true, name: true, city: true, state: true } } } }
           },
           orderBy: [{ publishedAt: 'desc' }, { createdAt: 'desc' }],
           take: 8
@@ -611,6 +612,7 @@ export const bookingEngineService = {
           host: publicHostSummary(listing.hostProfile),
           vehicle: listing.vehicle,
           location: listing.location,
+          pickupSpot: listing.pickupSpot,
           ...bookingImageSet({
             vehicleTypeImageUrl: listing.vehicle?.vehicleType?.imageUrl,
             listingPhotos: listing.photosJson
@@ -639,7 +641,8 @@ export const bookingEngineService = {
         include: {
           hostProfile: { select: publicHostSelect() },
           vehicle: { select: { id: true, make: true, model: true, year: true, color: true, plate: true, vehicleType: { select: { imageUrl: true } } } },
-          location: { select: { id: true, name: true, city: true, state: true } }
+          location: { select: { id: true, name: true, city: true, state: true } },
+          pickupSpot: { include: { anchorLocation: { select: { id: true, name: true, city: true, state: true } } } }
         },
         orderBy: [{ publishedAt: 'desc' }, { createdAt: 'desc' }],
         take: 8
@@ -678,6 +681,7 @@ export const bookingEngineService = {
         host: publicHostSummary(listing.hostProfile),
         vehicle: listing.vehicle,
         location: listing.location,
+        pickupSpot: listing.pickupSpot,
         ...bookingImageSet({
           vehicleTypeImageUrl: listing.vehicle?.vehicleType?.imageUrl,
           listingPhotos: listing.photosJson
@@ -836,6 +840,7 @@ export const bookingEngineService = {
         hostProfile: { select: publicHostSelect() },
         vehicle: { select: { id: true, make: true, model: true, year: true, color: true, plate: true, vehicleType: { select: { imageUrl: true } } } },
         location: { select: { id: true, name: true, city: true, state: true } },
+        pickupSpot: { include: { anchorLocation: { select: { id: true, name: true, city: true, state: true } } } },
         availabilityWindows: { orderBy: [{ startAt: 'asc' }] }
       },
       orderBy: [{ publishedAt: 'desc' }, { createdAt: 'desc' }]
@@ -869,6 +874,7 @@ export const bookingEngineService = {
           host: publicHostSummary(listing.hostProfile),
           vehicle: listing.vehicle,
           location: listing.location,
+          pickupSpot: listing.pickupSpot,
           additionalServices: normalizeHostAddOns(listing.addOnsJson),
           ...bookingImageSet({
             vehicleTypeImageUrl: listing.vehicle?.vehicleType?.imageUrl,
@@ -903,6 +909,7 @@ export const bookingEngineService = {
         hostProfile: { select: publicHostSelect() },
         vehicle: { select: { id: true, make: true, model: true, year: true, color: true, plate: true, vehicleType: { select: { imageUrl: true } } } },
         location: { select: { id: true, name: true, city: true, state: true } },
+        pickupSpot: { include: { anchorLocation: { select: { id: true, name: true, city: true, state: true } } } },
         availabilityWindows: { orderBy: [{ startAt: 'asc' }] }
       }
     });
@@ -926,6 +933,7 @@ export const bookingEngineService = {
       host: publicHostSummary(listing.hostProfile),
       vehicle: listing.vehicle,
       location: listing.location,
+      pickupSpot: listing.pickupSpot,
       ...bookingImageSet({
         vehicleTypeImageUrl: listing.vehicle?.vehicleType?.imageUrl,
         listingPhotos: listing.photosJson

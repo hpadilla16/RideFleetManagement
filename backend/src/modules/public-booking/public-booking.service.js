@@ -71,6 +71,45 @@ async function resolvePublicCarSharingTenant({ tenantSlug, tenantId }) {
   return tenant;
 }
 
+async function createInlinePickupSpot({ tenantId, hostProfileId, input = {} }) {
+  const label = String(input?.pickupSpotLabel || '').trim();
+  if (!label) return null;
+
+  const anchorLocationId = input?.pickupSpotAnchorLocationId
+    ? String(input.pickupSpotAnchorLocationId).trim()
+    : (input?.preferredLocationId ? String(input.preferredLocationId).trim() : null);
+
+  if (anchorLocationId) {
+    const anchorLocation = await prisma.location.findFirst({
+      where: { id: anchorLocationId, tenantId, isActive: true },
+      select: { id: true }
+    });
+    if (!anchorLocation) throw new Error('Pickup spot anchor location not found');
+  }
+
+  return prisma.hostPickupSpot.create({
+    data: {
+      tenantId,
+      hostProfileId,
+      anchorLocationId,
+      label,
+      address1: input?.pickupSpotAddress1 ? String(input.pickupSpotAddress1).trim() : null,
+      address2: input?.pickupSpotAddress2 ? String(input.pickupSpotAddress2).trim() : null,
+      city: input?.pickupSpotCity ? String(input.pickupSpotCity).trim() : null,
+      state: input?.pickupSpotState ? String(input.pickupSpotState).trim() : null,
+      postalCode: input?.pickupSpotPostalCode ? String(input.pickupSpotPostalCode).trim() : null,
+      country: input?.pickupSpotCountry ? String(input.pickupSpotCountry).trim() : null,
+      instructions: input?.pickupSpotInstructions ? String(input.pickupSpotInstructions).trim() : null,
+      isDefault: true,
+      isActive: true,
+      approvalStatus: 'PENDING'
+    },
+    include: {
+      anchorLocation: true
+    }
+  });
+}
+
 async function issueGuestAccess({ customers = [], email, customerName, subject = 'Open your guest account', intro = 'Use this secure link to open your guest account and see all of your bookings.' }) {
   const normalizedEmail = normalizeEmail(email);
   if (!normalizedEmail) throw new Error('email is required');
@@ -174,6 +213,7 @@ export const publicBookingService = {
         host: listing.host || null,
         vehicle: listing.vehicle || null,
         location: listing.location || null,
+        pickupSpot: listing.pickupSpot || null,
         primaryImageUrl: listing.primaryImageUrl || '',
         imageUrls: listing.imageUrls || []
       }))
@@ -406,6 +446,7 @@ export const publicBookingService = {
         host: result.listing.host || null,
         vehicle: result.listing.vehicle || null,
         location: result.listing.location || null,
+        pickupSpot: result.listing.pickupSpot || null,
         additionalServices: (result.listing.additionalServices || []).map((service) => ({
           serviceId: service.serviceId,
           code: service.code,
@@ -571,8 +612,10 @@ export const publicBookingService = {
     const userId = registration?.user?.id;
     if (!userId) throw new Error('Could not create host login');
 
+    let hostProfile = null;
+    let pickupSpot = null;
     try {
-      const hostProfile = await prisma.hostProfile.create({
+      hostProfile = await prisma.hostProfile.create({
         data: {
           tenantId: tenant.id,
           userId,
@@ -585,10 +628,20 @@ export const publicBookingService = {
         }
       });
 
+      pickupSpot = await createInlinePickupSpot({
+        tenantId: tenant.id,
+        hostProfileId: hostProfile.id,
+        input
+      });
+
       const submission = await createHostVehicleSubmissionForProfile({
         hostProfileId: hostProfile.id,
         tenantId: tenant.id,
-        payload: input
+        payload: {
+          ...input,
+          preferredPickupSpotId: input?.preferredPickupSpotId || pickupSpot?.id || null,
+          preferredLocationId: input?.preferredLocationId || pickupSpot?.anchorLocationId || null
+        }
       });
 
       const sessionUser = await authService.getSessionUser(userId);
@@ -608,11 +661,18 @@ export const publicBookingService = {
           status: submission.status,
           vehicleType: submission.vehicleType,
           preferredLocation: submission.preferredLocation,
+          preferredPickupSpot: submission.preferredPickupSpot,
           createdAt: submission.createdAt
         },
         message: 'Host account created. Your vehicle submission is pending review.'
       };
     } catch (error) {
+      if (pickupSpot?.id) {
+        await prisma.hostPickupSpot.delete({ where: { id: pickupSpot.id } }).catch(() => null);
+      }
+      if (hostProfile?.id) {
+        await prisma.hostProfile.delete({ where: { id: hostProfile.id } }).catch(() => null);
+      }
       await prisma.user.delete({ where: { id: userId } }).catch(() => null);
       throw error;
     }
