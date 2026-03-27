@@ -197,6 +197,7 @@ function listingToEdit(listing) {
     fulfillmentMode: listing.fulfillmentMode || 'PICKUP_ONLY',
     baseDailyRate: String(listing.baseDailyRate ?? ''),
     cleaningFee: String(listing.cleaningFee ?? ''),
+    pickupFee: String(listing.pickupFee ?? ''),
     deliveryFee: String(listing.deliveryFee ?? ''),
     deliveryRadiusMiles: listing.deliveryRadiusMiles ? String(listing.deliveryRadiusMiles) : '',
     deliveryNotes: listing.deliveryNotes || '',
@@ -212,13 +213,13 @@ function listingToEdit(listing) {
 
 const EMPTY_LISTING_EDIT = {
   id: '', shortDescription: '', description: '', status: 'DRAFT',
-  fulfillmentMode: 'PICKUP_ONLY', baseDailyRate: '', cleaningFee: '', deliveryFee: '', deliveryRadiusMiles: '', deliveryNotes: '', securityDeposit: '',
+  fulfillmentMode: 'PICKUP_ONLY', baseDailyRate: '', cleaningFee: '', pickupFee: '', deliveryFee: '', deliveryRadiusMiles: '', deliveryNotes: '', securityDeposit: '',
   instantBook: false, minTripDays: '1', maxTripDays: '', tripRules: '', photoUrls: [], addOns: []
 };
 
 const EMPTY_SUBMISSION_FORM = {
   vehicleTypeId: '', preferredLocationId: '', preferredPickupSpotId: '', year: '', make: '', model: '', color: '', vin: '', plate: '', mileage: '',
-  fulfillmentMode: 'PICKUP_ONLY', baseDailyRate: '', cleaningFee: '', deliveryFee: '', deliveryRadiusMiles: '', deliveryNotes: '', securityDeposit: '', minTripDays: '1', maxTripDays: '',
+  fulfillmentMode: 'PICKUP_ONLY', baseDailyRate: '', cleaningFee: '', pickupFee: '', deliveryFee: '', deliveryRadiusMiles: '', deliveryNotes: '', securityDeposit: '', minTripDays: '1', maxTripDays: '',
   shortDescription: '', description: '', tripRules: '', photos: [], insuranceDocumentUrl: '', registrationDocumentUrl: '',
   initialInspectionDocumentUrl: '', initialInspectionNotes: '', addOns: []
 };
@@ -423,6 +424,7 @@ function HostAppInner({ token, me, logout }) {
       publishState: listingEdit.status || 'DRAFT',
       fulfillmentMode: listingEdit.fulfillmentMode || 'PICKUP_ONLY',
       deliveryFee: Number(listingEdit.deliveryFee || 0),
+      pickupFee: Number(listingEdit.pickupFee || 0),
       deliveryRadiusMiles: Number(listingEdit.deliveryRadiusMiles || 0),
       cleaningFee: Number(listingEdit.cleaningFee || 0),
       securityDeposit: Number(listingEdit.securityDeposit || 0),
@@ -482,6 +484,7 @@ function HostAppInner({ token, me, logout }) {
           fulfillmentMode: listingEdit.fulfillmentMode,
           baseDailyRate: Number(listingEdit.baseDailyRate || 0),
           cleaningFee: Number(listingEdit.cleaningFee || 0),
+          pickupFee: Number(listingEdit.pickupFee || 0),
           deliveryFee: Number(listingEdit.deliveryFee || 0),
           deliveryRadiusMiles: listingEdit.deliveryRadiusMiles ? Number(listingEdit.deliveryRadiusMiles) : null,
           deliveryNotes: listingEdit.deliveryNotes,
@@ -613,6 +616,7 @@ function HostAppInner({ token, me, logout }) {
           fulfillmentMode: submissionForm.fulfillmentMode,
           baseDailyRate: submissionForm.baseDailyRate ? Number(submissionForm.baseDailyRate) : 0,
           cleaningFee: submissionForm.cleaningFee ? Number(submissionForm.cleaningFee) : 0,
+          pickupFee: submissionForm.pickupFee ? Number(submissionForm.pickupFee) : 0,
           deliveryFee: submissionForm.deliveryFee ? Number(submissionForm.deliveryFee) : 0,
           deliveryRadiusMiles: submissionForm.deliveryRadiusMiles ? Number(submissionForm.deliveryRadiusMiles) : null,
           deliveryNotes: submissionForm.deliveryNotes,
@@ -1045,6 +1049,7 @@ function HostAppInner({ token, me, logout }) {
             <div className="form-grid-3">
               <div className="stack"><label className="label">Daily Rate</label><input type="number" min="0" step="0.01" value={submissionForm.baseDailyRate} onChange={(event) => setSubmissionForm((current) => ({ ...current, baseDailyRate: event.target.value }))} /></div>
               <div className="stack"><label className="label">Cleaning Fee</label><input type="number" min="0" step="0.01" value={submissionForm.cleaningFee} onChange={(event) => setSubmissionForm((current) => ({ ...current, cleaningFee: event.target.value }))} /></div>
+              <div className="stack"><label className="label">Pickup Fee</label><input type="number" min="0" step="0.01" value={submissionForm.pickupFee} onChange={(event) => setSubmissionForm((current) => ({ ...current, pickupFee: event.target.value }))} /></div>
               <div className="stack"><label className="label">Delivery Fee</label><input type="number" min="0" step="0.01" value={submissionForm.deliveryFee} onChange={(event) => setSubmissionForm((current) => ({ ...current, deliveryFee: event.target.value }))} /></div>
               <div className="stack"><label className="label">Security Deposit</label><input type="number" min="0" step="0.01" value={submissionForm.securityDeposit} onChange={(event) => setSubmissionForm((current) => ({ ...current, securityDeposit: event.target.value }))} /></div>
               <div className="stack"><label className="label">Min Trip Days</label><input type="number" min="1" value={submissionForm.minTripDays} onChange={(event) => setSubmissionForm((current) => ({ ...current, minTripDays: event.target.value }))} /></div>
@@ -1277,7 +1282,7 @@ function HostAppInner({ token, me, logout }) {
                   <div className="doc-card">
                     <strong>Fee Stack</strong>
                     <div className="doc-meta">
-                      Cleaning {formatMoney(selectedListingSnapshot.cleaningFee)} · Delivery {formatMoney(selectedListingSnapshot.deliveryFee)}
+                      Cleaning {formatMoney(selectedListingSnapshot.cleaningFee)} · Pickup {formatMoney(selectedListingSnapshot.pickupFee)} · Delivery {formatMoney(selectedListingSnapshot.deliveryFee)}
                     </div>
                   </div>
                   <div className="doc-card">
@@ -1301,6 +1306,7 @@ function HostAppInner({ token, me, logout }) {
                 <div className="stack"><label className="label">Daily Rate</label><input type="number" min="0" step="0.01" value={listingEdit.baseDailyRate} onChange={(event) => setListingEdit((current) => ({ ...current, baseDailyRate: event.target.value }))} /></div>
                 <div className="stack"><label className="label">Security Deposit</label><input type="number" min="0" step="0.01" value={listingEdit.securityDeposit} onChange={(event) => setListingEdit((current) => ({ ...current, securityDeposit: event.target.value }))} /></div>
                 <div className="stack"><label className="label">Cleaning Fee</label><input type="number" min="0" step="0.01" value={listingEdit.cleaningFee} onChange={(event) => setListingEdit((current) => ({ ...current, cleaningFee: event.target.value }))} /></div>
+                <div className="stack"><label className="label">Pickup Fee</label><input type="number" min="0" step="0.01" value={listingEdit.pickupFee} onChange={(event) => setListingEdit((current) => ({ ...current, pickupFee: event.target.value }))} /></div>
                 <div className="stack"><label className="label">Delivery Fee</label><input type="number" min="0" step="0.01" value={listingEdit.deliveryFee} onChange={(event) => setListingEdit((current) => ({ ...current, deliveryFee: event.target.value }))} /></div>
                 <div className="stack"><label className="label">Delivery Radius Miles</label><input type="number" min="0" value={listingEdit.deliveryRadiusMiles} onChange={(event) => setListingEdit((current) => ({ ...current, deliveryRadiusMiles: event.target.value }))} /></div>
                 <div className="stack"><label className="label">Min Trip Days</label><input type="number" min="1" value={listingEdit.minTripDays} onChange={(event) => setListingEdit((current) => ({ ...current, minTripDays: event.target.value }))} /></div>

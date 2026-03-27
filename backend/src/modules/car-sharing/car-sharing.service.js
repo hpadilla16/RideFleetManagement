@@ -82,7 +82,15 @@ function addUtcDays(dt, days) {
   return copy;
 }
 
-function computeTripPricing(listing, windows, startAt, endAt) {
+function resolveFulfillmentChoice(listing, requestedChoice) {
+  const mode = String(listing?.fulfillmentMode || 'PICKUP_ONLY').toUpperCase();
+  const desired = String(requestedChoice || '').trim().toUpperCase();
+  if (mode === 'DELIVERY_ONLY') return 'DELIVERY';
+  if (mode === 'PICKUP_OR_DELIVERY') return desired === 'DELIVERY' ? 'DELIVERY' : 'PICKUP';
+  return 'PICKUP';
+}
+
+function computeTripPricing(listing, windows, startAt, endAt, requestedChoice = null) {
   const tripDays = ceilTripDays(startAt, endAt);
   const dayRates = [];
   const tripStartDay = startOfUtcDay(startAt);
@@ -96,16 +104,45 @@ function computeTripPricing(listing, windows, startAt, endAt) {
     );
     dayRates.push(Number(overrideWindow?.priceOverride ?? listing.baseDailyRate ?? 0));
   }
-  const pricing = computeMarketplaceTripPricing({
-    subtotal: dayRates.reduce((sum, value) => sum + value, 0),
-    cleaningFee: Number(listing.cleaningFee ?? 0),
-    deliveryFee: Number(listing.deliveryFee ?? 0),
-    taxes: 0,
-    hostProfile: listing.hostProfile
-  });
+  const subtotal = dayRates.reduce((sum, value) => sum + value, 0);
+  const fulfillmentMode = String(listing.fulfillmentMode || 'PICKUP_ONLY').toUpperCase();
+  const selectedChoice = resolveFulfillmentChoice(listing, requestedChoice);
+  const pickupPricing = fulfillmentMode === 'DELIVERY_ONLY'
+    ? null
+    : computeMarketplaceTripPricing({
+        subtotal,
+        cleaningFee: Number(listing.cleaningFee ?? 0),
+        pickupFee: Number(listing.pickupFee ?? 0),
+        deliveryFee: Number(listing.deliveryFee ?? 0),
+        fulfillmentChoice: 'PICKUP',
+        taxes: 0,
+        hostProfile: listing.hostProfile
+      });
+  const deliveryPricing = fulfillmentMode === 'PICKUP_ONLY'
+    ? null
+    : computeMarketplaceTripPricing({
+        subtotal,
+        cleaningFee: Number(listing.cleaningFee ?? 0),
+        pickupFee: Number(listing.pickupFee ?? 0),
+        deliveryFee: Number(listing.deliveryFee ?? 0),
+        fulfillmentChoice: 'DELIVERY',
+        taxes: 0,
+        hostProfile: listing.hostProfile
+      });
+  const pricing = (selectedChoice === 'DELIVERY' ? deliveryPricing : pickupPricing) || pickupPricing || deliveryPricing;
   return {
     tripDays,
     subtotal: pricing.tripSubtotal,
+    pickupFee: money(listing.pickupFee ?? 0),
+    deliveryFee: money(listing.deliveryFee ?? 0),
+    pickupTotal: money(pickupPricing?.quotedTotal || 0),
+    deliveryTotal: money(deliveryPricing?.quotedTotal || 0),
+    pickupGuestTripFee: money(pickupPricing?.guestTripFee || 0),
+    deliveryGuestTripFee: money(deliveryPricing?.guestTripFee || 0),
+    pickupHostChargeFees: money(pickupPricing?.hostChargeFees || 0),
+    deliveryHostChargeFees: money(deliveryPricing?.hostChargeFees || 0),
+    fulfillmentChoice: pricing.fulfillmentChoice,
+    selectedFulfillmentFee: pricing.selectedFulfillmentFee,
     fees: pricing.quotedFees,
     taxes: pricing.quotedTaxes,
     total: pricing.quotedTotal,
@@ -182,14 +219,14 @@ async function createReservationForTrip({ tenantId, listing, guestCustomerId, pi
       source: 'CAR_SHARING_TRIP',
       sourceRefId: listing.id
     }] : []),
-    ...(Number(listing.deliveryFee || 0) > 0 ? [{
+    ...(Number(quote.selectedFulfillmentFee || 0) > 0 ? [{
       reservationId: reservation.id,
-      code: 'DELIVERY_FEE',
-      name: 'Delivery Fee',
+      code: quote.fulfillmentChoice === 'DELIVERY' ? 'DELIVERY_FEE' : 'PICKUP_FEE',
+      name: quote.fulfillmentChoice === 'DELIVERY' ? 'Delivery Fee' : 'Pickup Fee',
       chargeType: 'UNIT',
       quantity: 1,
-      rate: Number(listing.deliveryFee || 0),
-      total: Number(listing.deliveryFee || 0),
+      rate: Number(quote.selectedFulfillmentFee || 0),
+      total: Number(quote.selectedFulfillmentFee || 0),
       taxable: false,
       selected: true,
       sortOrder: 2,
@@ -568,6 +605,7 @@ export const carSharingService = {
         fulfillmentMode: data?.fulfillmentMode ? String(data.fulfillmentMode).trim().toUpperCase() : 'PICKUP_ONLY',
         baseDailyRate: data?.baseDailyRate ?? 0,
         cleaningFee: data?.cleaningFee ?? 0,
+        pickupFee: data?.pickupFee ?? 0,
         deliveryFee: data?.deliveryFee ?? 0,
         deliveryRadiusMiles: data?.deliveryRadiusMiles ? Number(data.deliveryRadiusMiles) : null,
         deliveryNotes: data?.deliveryNotes ? String(data.deliveryNotes).trim() : null,
@@ -632,7 +670,7 @@ export const carSharingService = {
       throw new Error(`Selected dates require at least ${minStayViolation.minTripDaysOverride} day(s)`);
     }
 
-    const quote = computeTripPricing(listing, overlappingWindows, pickupAt, returnAt);
+    const quote = computeTripPricing(listing, overlappingWindows, pickupAt, returnAt, data?.fulfillmentChoice || null);
     const pickupLocationId = data?.pickupLocationId || listing.locationId || null;
     const returnLocationId = data?.returnLocationId || listing.locationId || null;
     if (!pickupLocationId || !returnLocationId) {
@@ -675,7 +713,7 @@ export const carSharingService = {
         hostEarnings: quote.hostEarnings,
         platformFee: quote.platformFee,
         platformRevenue: quote.platformRevenue,
-        notes: data?.notes ? String(data.notes).trim() : null,
+        notes: [data?.notes ? String(data.notes).trim() : '', `Fulfillment: ${quote.fulfillmentChoice}`].filter(Boolean).join(' · '),
         timelineEvents: {
           create: [{
             eventType: 'TRIP_CREATED',
@@ -687,7 +725,9 @@ export const carSharingService = {
               reservationId: reservation.id,
               guestCustomerId: data?.guestCustomerId || null,
               tripDays: quote.tripDays,
-              quotedTotal: quote.total
+              quotedTotal: quote.total,
+              fulfillmentChoice: quote.fulfillmentChoice,
+              selectedFulfillmentFee: quote.selectedFulfillmentFee
             })
           }]
         }
@@ -796,6 +836,7 @@ export const carSharingService = {
         fulfillmentMode: Object.prototype.hasOwnProperty.call(patch || {}, 'fulfillmentMode') ? String(patch?.fulfillmentMode || 'PICKUP_ONLY').trim().toUpperCase() : undefined,
         baseDailyRate: Object.prototype.hasOwnProperty.call(patch || {}, 'baseDailyRate') ? patch?.baseDailyRate ?? 0 : undefined,
         cleaningFee: Object.prototype.hasOwnProperty.call(patch || {}, 'cleaningFee') ? patch?.cleaningFee ?? 0 : undefined,
+        pickupFee: Object.prototype.hasOwnProperty.call(patch || {}, 'pickupFee') ? patch?.pickupFee ?? 0 : undefined,
         deliveryFee: Object.prototype.hasOwnProperty.call(patch || {}, 'deliveryFee') ? patch?.deliveryFee ?? 0 : undefined,
         deliveryRadiusMiles: Object.prototype.hasOwnProperty.call(patch || {}, 'deliveryRadiusMiles') ? (patch?.deliveryRadiusMiles ? Number(patch.deliveryRadiusMiles) : null) : undefined,
         deliveryNotes: Object.prototype.hasOwnProperty.call(patch || {}, 'deliveryNotes') ? (patch?.deliveryNotes ? String(patch.deliveryNotes).trim() : null) : undefined,

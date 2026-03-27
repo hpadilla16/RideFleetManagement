@@ -578,6 +578,7 @@ model HostVehicleListing {
   fulfillmentMode   ListingFulfillmentMode @default(PICKUP_ONLY)
   baseDailyRate     Decimal             @default(0) @db.Decimal(10, 2)
   cleaningFee       Decimal             @default(0) @db.Decimal(10, 2)
+  pickupFee         Decimal             @default(0) @db.Decimal(10, 2)
   deliveryFee       Decimal             @default(0) @db.Decimal(10, 2)
   deliveryRadiusMiles Int?
   deliveryNotes     String?
@@ -625,6 +626,7 @@ model HostVehicleSubmission {
   fulfillmentMode          ListingFulfillmentMode     @default(PICKUP_ONLY)
   baseDailyRate            Decimal                     @default(0) @db.Decimal(10, 2)
   cleaningFee              Decimal                     @default(0) @db.Decimal(10, 2)
+  pickupFee                Decimal                     @default(0) @db.Decimal(10, 2)
   deliveryFee              Decimal                     @default(0) @db.Decimal(10, 2)
   deliveryRadiusMiles      Int?
   deliveryNotes            String?

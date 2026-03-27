@@ -66,8 +66,14 @@ function fulfillmentHint(result) {
   if (!result) return '';
   const bits = [fulfillmentModeLabel(result.fulfillmentMode)];
   if (result.deliveryRadiusMiles) bits.push(`${result.deliveryRadiusMiles} mi radius`);
+  if (Number(result.pickupFee || 0) > 0) bits.push(`Pickup fee ${fmtMoney(result.pickupFee)}`);
   if (Number(result.deliveryFee || 0) > 0) bits.push(`Delivery fee ${fmtMoney(result.deliveryFee)}`);
   return bits.join(' Â· ');
+}
+
+function defaultFulfillmentChoice(result) {
+  const mode = String(result?.fulfillmentMode || 'PICKUP_ONLY').toUpperCase();
+  return mode === 'DELIVERY_ONLY' ? 'DELIVERY' : 'PICKUP';
 }
 
 function locationLabelFromId(locations, id) {
@@ -243,6 +249,7 @@ function PublicBookingPageInner() {
   const [searching, setSearching] = useState(false);
   const [error, setError] = useState('');
   const [selectedResult, setSelectedResult] = useState(initialDraft?.selectedResult || null);
+  const [selectedFulfillmentChoice, setSelectedFulfillmentChoice] = useState(initialDraft?.selectedFulfillmentChoice || 'PICKUP');
   const [autoSearchDone, setAutoSearchDone] = useState(false);
   const [autoSelectionDone, setAutoSelectionDone] = useState(false);
   const [checkoutState, setCheckoutState] = useState(initialDraft?.checkoutState || {
@@ -311,6 +318,7 @@ function PublicBookingPageInner() {
         returnAt,
         results,
         selectedResult,
+        selectedFulfillmentChoice,
         checkoutState,
         selectedServices,
         insuranceSelection,
@@ -328,6 +336,7 @@ function PublicBookingPageInner() {
     returnLocationId,
     searchMode,
     selectedResult,
+    selectedFulfillmentChoice,
     selectedServices,
     tenantSlug,
     uiStep,
@@ -338,10 +347,14 @@ function PublicBookingPageInner() {
     if (!selectedResult) {
       setSelectedServices({});
       setInsuranceSelection(buildInsuranceSelectionState(null, searchMode));
+      setSelectedFulfillmentChoice('PICKUP');
       return;
     }
     setSelectedServices(buildServiceSelectionState(selectedResult, searchMode));
     setInsuranceSelection(buildInsuranceSelectionState(selectedResult, searchMode));
+    if (searchMode === 'CAR_SHARING') {
+      setSelectedFulfillmentChoice(defaultFulfillmentChoice(selectedResult));
+    }
   }, [selectedResult, searchMode]);
 
   useEffect(() => {
@@ -475,9 +488,31 @@ function PublicBookingPageInner() {
     if (!selectedResult) return 0;
     const baseTotal = searchMode === 'RENTAL'
       ? Number(selectedResult?.quote?.estimatedTripTotal || 0)
-      : Number(selectedResult?.quote?.total || 0);
+      : Number(
+          selectedFulfillmentChoice === 'DELIVERY'
+            ? (selectedResult?.quote?.deliveryTotal || selectedResult?.quote?.total || 0)
+            : (selectedResult?.quote?.pickupTotal || selectedResult?.quote?.total || 0)
+        );
     return baseTotal + chosenAdditionalServicesTotal + selectedInsuranceTotal;
-  }, [chosenAdditionalServicesTotal, searchMode, selectedInsuranceTotal, selectedResult]);
+  }, [chosenAdditionalServicesTotal, searchMode, selectedFulfillmentChoice, selectedInsuranceTotal, selectedResult]);
+
+  const selectedCarSharingGuestTripFee = useMemo(() => {
+    if (searchMode !== 'CAR_SHARING' || !selectedResult) return 0;
+    return Number(
+      selectedFulfillmentChoice === 'DELIVERY'
+        ? (selectedResult?.quote?.deliveryGuestTripFee || selectedResult?.quote?.guestTripFee || 0)
+        : (selectedResult?.quote?.pickupGuestTripFee || selectedResult?.quote?.guestTripFee || 0)
+    );
+  }, [searchMode, selectedFulfillmentChoice, selectedResult]);
+
+  const selectedCarSharingHostChargeFees = useMemo(() => {
+    if (searchMode !== 'CAR_SHARING' || !selectedResult) return 0;
+    return Number(
+      selectedFulfillmentChoice === 'DELIVERY'
+        ? (selectedResult?.quote?.deliveryHostChargeFees || (Number(selectedResult?.quote?.fees || 0) - Number(selectedResult?.quote?.guestTripFee || 0)))
+        : (selectedResult?.quote?.pickupHostChargeFees || (Number(selectedResult?.quote?.fees || 0) - Number(selectedResult?.quote?.guestTripFee || 0)))
+    );
+  }, [searchMode, selectedFulfillmentChoice, selectedResult]);
   const tripLengthDays = useMemo(() => {
     const pickup = new Date(pickupAt);
     const ret = new Date(returnAt);
@@ -696,6 +731,10 @@ function PublicBookingPageInner() {
                     <strong>{listing.title}</strong>
                     <br />
                     {listing.vehicle?.label || 'Vehicle pending'}
+                    <br />
+                    {`Fulfillment ${fulfillmentModeLabel(listing.fulfillmentMode)}`}
+                    {listing.deliveryRadiusMiles ? ` | ${listing.deliveryRadiusMiles} mi radius` : ''}
+                    {listing.deliveryNotes ? ` | ${listing.deliveryNotes}` : ''}
                     <br />
                     Pickup spot: {publicPickupSpotLabel(listing.pickupSpot, listing.location)}
                     {pickupSpotHint(listing.pickupSpot) ? (
@@ -988,7 +1027,7 @@ function PublicBookingPageInner() {
                 ) : null}
                 {searchMode === 'RENTAL'
                   ? `Deposit due now: ${fmtMoney(selectedResult.quote?.depositAmountDue)}${chosenAdditionalServicesTotal ? ` · Add-ons ${fmtMoney(chosenAdditionalServicesTotal)}` : ''}${selectedInsuranceTotal ? ` · Insurance ${fmtMoney(selectedInsuranceTotal)}` : ''}`
-                  : `Trip total: ${fmtMoney(selectedResult.quote?.total)} · Mandatory trip fee ${fmtMoney(selectedResult.quote?.guestTripFee)}${chosenAdditionalServicesTotal ? ` · Vehicle add-ons ${fmtMoney(chosenAdditionalServicesTotal)}` : ''}`}
+                  : `Trip total: ${fmtMoney(checkoutEstimatedTotal)} · Mandatory trip fee ${fmtMoney(selectedCarSharingGuestTripFee)}${chosenAdditionalServicesTotal ? ` · Vehicle add-ons ${fmtMoney(chosenAdditionalServicesTotal)}` : ''}`}
               </div>
 
               <div className="section-card">
@@ -1020,7 +1059,7 @@ function PublicBookingPageInner() {
                       </div>
                       <div className="doc-card">
                         <strong>Mandatory Trip Fee</strong>
-                        <div className="doc-meta">{fmtMoney(selectedResult?.quote?.guestTripFee)}</div>
+                        <div className="doc-meta">{fmtMoney(selectedCarSharingGuestTripFee)}</div>
                       </div>
                       <div className="doc-card">
                         <strong>Trip Length</strong>
@@ -1038,8 +1077,31 @@ function PublicBookingPageInner() {
                   <br />
                   {searchMode === 'RENTAL'
                     ? `Base total ${fmtMoney(selectedResult?.quote?.estimatedTripTotal)} · Estimated total ${fmtMoney(checkoutEstimatedTotal)}`
-                    : `Base host charges ${fmtMoney(Number(selectedResult?.quote?.total || 0) - Number(selectedResult?.quote?.guestTripFee || 0))} · Mandatory trip fee ${fmtMoney(selectedResult?.quote?.guestTripFee)} · Guest total ${fmtMoney(checkoutEstimatedTotal)}.`}
+                    : `Base host charges ${fmtMoney(selectedCarSharingHostChargeFees)} · Mandatory trip fee ${fmtMoney(selectedCarSharingGuestTripFee)} · Guest total ${fmtMoney(checkoutEstimatedTotal)}.`}
                 </div>
+                {searchMode === 'CAR_SHARING' ? (
+                  <div className="surface-note" style={{ marginBottom: 12, display: 'grid', gap: 10 }}>
+                    <strong>Pickup Or Delivery</strong>
+                    <div>{fulfillmentHint(selectedResult)}</div>
+                    {listing.deliveryNotes ? <div>{listing.deliveryNotes}</div> : null}
+                    {String(selectedResult.fulfillmentMode || 'PICKUP_ONLY').toUpperCase() === 'PICKUP_OR_DELIVERY' ? (
+                      <div className="inline-actions">
+                        <button type="button" className={selectedFulfillmentChoice === 'PICKUP' ? '' : 'button-subtle'} onClick={() => setSelectedFulfillmentChoice('PICKUP')}>
+                          Pickup {Number(selectedResult.pickupFee || 0) > 0 ? `· ${fmtMoney(selectedResult.pickupFee)}` : '· Included'}
+                        </button>
+                        <button type="button" className={selectedFulfillmentChoice === 'DELIVERY' ? '' : 'button-subtle'} onClick={() => setSelectedFulfillmentChoice('DELIVERY')}>
+                          Delivery {Number(selectedResult.deliveryFee || 0) > 0 ? `· ${fmtMoney(selectedResult.deliveryFee)}` : '· Included'}
+                        </button>
+                      </div>
+                    ) : (
+                      <div>
+                        {String(selectedResult.fulfillmentMode || 'PICKUP_ONLY').toUpperCase() === 'DELIVERY_ONLY'
+                          ? `Delivery is required for this listing${Number(selectedResult.deliveryFee || 0) > 0 ? ` · ${fmtMoney(selectedResult.deliveryFee)}` : ''}.`
+                          : `Pickup is required for this listing${Number(selectedResult.pickupFee || 0) > 0 ? ` · ${fmtMoney(selectedResult.pickupFee)}` : ''}.`}
+                      </div>
+                    )}
+                  </div>
+                ) : null}
                 <div className="section-title">Guest Details</div>
                 {error ? <div className="surface-note" style={{ marginBottom: 16, color: '#991b1b' }}>{error}</div> : null}
                 {searchMode === 'RENTAL' ? (
@@ -1289,6 +1351,7 @@ function PublicBookingPageInner() {
                             returnLocationId: searchMode === 'RENTAL' ? resolveReturnLocationForSelection() : (selectedResult?.location?.id || ''),
                             vehicleTypeId: searchMode === 'RENTAL' ? selectedResult?.vehicleType?.id : null,
                             listingId: searchMode === 'CAR_SHARING' ? selectedResult?.id : null,
+                            fulfillmentChoice: searchMode === 'CAR_SHARING' ? selectedFulfillmentChoice : null,
                             additionalServices: chosenAdditionalServices.map((service) => ({
                               serviceId: service.serviceId,
                               quantity: service.quantity
@@ -1317,7 +1380,7 @@ function PublicBookingPageInner() {
                       }
                     }}
                   >
-                    {submitting ? 'Creating Booking...' : `Create ${searchMode === 'RENTAL' ? 'Reservation' : 'Trip'} Request`}
+                {submitting ? 'Creating Booking...' : `Create ${searchMode === 'RENTAL' ? 'Reservation' : 'Trip'} Request`}
                   </button>
                 </div>
                 {searchMode === 'RENTAL' ? (
@@ -1355,3 +1418,5 @@ export default function PublicBookingPage() {
     </Suspense>
   );
 }
+
+

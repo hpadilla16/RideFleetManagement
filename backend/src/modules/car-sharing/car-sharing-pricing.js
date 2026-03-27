@@ -19,12 +19,16 @@ function resolveGuestTripFee(hostGrossRevenue) {
 export function computeMarketplaceTripPricing({
   subtotal = 0,
   cleaningFee = 0,
+  pickupFee = 0,
   deliveryFee = 0,
+  fulfillmentChoice = 'PICKUP',
   taxes = 0,
   hostProfile = null
 } = {}) {
   const tripSubtotal = money(subtotal);
-  const hostChargeFees = money(Number(cleaningFee || 0) + Number(deliveryFee || 0));
+  const normalizedChoice = String(fulfillmentChoice || 'PICKUP').trim().toUpperCase() === 'DELIVERY' ? 'DELIVERY' : 'PICKUP';
+  const selectedFulfillmentFee = money(normalizedChoice === 'DELIVERY' ? Number(deliveryFee || 0) : Number(pickupFee || 0));
+  const hostChargeFees = money(Number(cleaningFee || 0) + selectedFulfillmentFee);
   const hostGrossRevenue = money(tripSubtotal + hostChargeFees);
   const hostServiceFeeRate = resolveHostServiceFeeRate(hostProfile);
   const hostServiceFeeRatePct = money(hostServiceFeeRate * 100);
@@ -38,6 +42,8 @@ export function computeMarketplaceTripPricing({
 
   return {
     tripSubtotal,
+    fulfillmentChoice: normalizedChoice,
+    selectedFulfillmentFee,
     hostChargeFees,
     guestTripFee,
     quotedTaxes,

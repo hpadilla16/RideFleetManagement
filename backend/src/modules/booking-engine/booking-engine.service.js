@@ -436,17 +436,47 @@ function computeCarSharingQuote(listing, windows, pickupAt, returnAt) {
     dayRates.push(Number(overrideWindow?.priceOverride ?? listing.baseDailyRate ?? 0));
   }
 
-  const pricing = computeMarketplaceTripPricing({
-    subtotal: dayRates.reduce((sum, value) => sum + value, 0),
-    cleaningFee: Number(listing.cleaningFee || 0),
-    deliveryFee: Number(listing.deliveryFee || 0),
-    taxes: 0,
-    hostProfile: listing.hostProfile
-  });
+  const subtotal = dayRates.reduce((sum, value) => sum + value, 0);
+  const fulfillmentMode = String(listing.fulfillmentMode || 'PICKUP_ONLY').toUpperCase();
+  const defaultChoice = fulfillmentMode === 'DELIVERY_ONLY' ? 'DELIVERY' : 'PICKUP';
+  const pickupPricing = fulfillmentMode === 'DELIVERY_ONLY'
+    ? null
+    : computeMarketplaceTripPricing({
+        subtotal,
+        cleaningFee: Number(listing.cleaningFee || 0),
+        pickupFee: Number(listing.pickupFee || 0),
+        deliveryFee: Number(listing.deliveryFee || 0),
+        fulfillmentChoice: 'PICKUP',
+        taxes: 0,
+        hostProfile: listing.hostProfile
+      });
+  const deliveryPricing = fulfillmentMode === 'PICKUP_ONLY'
+    ? null
+    : computeMarketplaceTripPricing({
+        subtotal,
+        cleaningFee: Number(listing.cleaningFee || 0),
+        pickupFee: Number(listing.pickupFee || 0),
+        deliveryFee: Number(listing.deliveryFee || 0),
+        fulfillmentChoice: 'DELIVERY',
+        taxes: 0,
+        hostProfile: listing.hostProfile
+      });
+  const pricing = (defaultChoice === 'DELIVERY' ? deliveryPricing : pickupPricing) || pickupPricing || deliveryPricing;
 
   return {
     tripDays,
     subtotal: pricing.tripSubtotal,
+    pickupFee: money(listing.pickupFee || 0),
+    deliveryFee: money(listing.deliveryFee || 0),
+    pickupTotal: money(pickupPricing?.quotedTotal || 0),
+    deliveryTotal: money(deliveryPricing?.quotedTotal || 0),
+    pickupGuestTripFee: money(pickupPricing?.guestTripFee || 0),
+    deliveryGuestTripFee: money(deliveryPricing?.guestTripFee || 0),
+    pickupHostChargeFees: money(pickupPricing?.hostChargeFees || 0),
+    deliveryHostChargeFees: money(deliveryPricing?.hostChargeFees || 0),
+    defaultFulfillmentChoice: defaultChoice,
+    fulfillmentChoice: pricing.fulfillmentChoice,
+    selectedFulfillmentFee: pricing.selectedFulfillmentFee,
     fees: pricing.quotedFees,
     taxes: pricing.quotedTaxes,
     total: pricing.quotedTotal,
@@ -607,7 +637,11 @@ export const bookingEngineService = {
           shortDescription: listing.shortDescription,
           baseDailyRate: money(listing.baseDailyRate),
           cleaningFee: money(listing.cleaningFee),
+          pickupFee: money(listing.pickupFee),
           deliveryFee: money(listing.deliveryFee),
+          fulfillmentMode: listing.fulfillmentMode,
+          deliveryRadiusMiles: listing.deliveryRadiusMiles,
+          deliveryNotes: listing.deliveryNotes,
           instantBook: !!listing.instantBook,
           host: publicHostSummary(listing.hostProfile),
           vehicle: listing.vehicle,
@@ -676,7 +710,11 @@ export const bookingEngineService = {
         shortDescription: listing.shortDescription,
         baseDailyRate: money(listing.baseDailyRate),
         cleaningFee: money(listing.cleaningFee),
+        pickupFee: money(listing.pickupFee),
         deliveryFee: money(listing.deliveryFee),
+        fulfillmentMode: listing.fulfillmentMode,
+        deliveryRadiusMiles: listing.deliveryRadiusMiles,
+        deliveryNotes: listing.deliveryNotes,
         instantBook: !!listing.instantBook,
         host: publicHostSummary(listing.hostProfile),
         vehicle: listing.vehicle,
@@ -1215,6 +1253,9 @@ export const bookingEngineService = {
         };
       })
       .filter(Boolean);
+    const fulfillmentChoice = String(input?.fulfillmentChoice || selected.quote?.fulfillmentChoice || selected.quote?.defaultFulfillmentChoice || 'PICKUP').trim().toUpperCase() === 'DELIVERY'
+      ? 'DELIVERY'
+      : 'PICKUP';
 
     const trip = await carSharingService.createTrip({
       tenantId: tenant.id,
@@ -1224,6 +1265,7 @@ export const bookingEngineService = {
       scheduledReturnAt: input?.returnAt,
       pickupLocationId: input?.pickupLocationId || null,
       returnLocationId: input?.returnLocationId || input?.pickupLocationId || null,
+      fulfillmentChoice,
       notes: '[PUBLIC BOOKING] Created from booking web'
     }, { tenantId: tenant.id });
 
@@ -1293,20 +1335,27 @@ export const bookingEngineService = {
         location: selected.listing?.location || null,
         pickupSpot: selected.listing?.pickupSpot || null,
         vehicleLabel: selected.listing?.vehicle?.label || '',
+        selectedFulfillmentChoice: fulfillmentChoice,
         fulfillmentMode: selected.listing?.fulfillmentMode || 'PICKUP_ONLY',
         deliveryRadiusMiles: selected.listing?.deliveryRadiusMiles || null,
-        deliveryNotes: selected.listing?.deliveryNotes || null
+        deliveryNotes: selected.listing?.deliveryNotes || null,
+        pickupFee: money(selected.listing?.pickupFee || 0),
+        deliveryFee: money(selected.listing?.deliveryFee || 0),
+        selectedFulfillmentFee: money(fulfillmentChoice === 'DELIVERY' ? selected.listing?.deliveryFee || 0 : selected.listing?.pickupFee || 0)
       },
       pricingBreakdown: {
         tripDays: Number(selected.quote?.tripDays || 0),
         tripSubtotal: money(selected.quote?.subtotal),
-        hostChargeFees: money(Number(selected.quote?.fees || 0) - Number(selected.quote?.guestTripFee || 0)),
-        guestTripFee: money(selected.quote?.guestTripFee),
-        fees: money(selected.quote?.fees),
-        taxes: money(selected.quote?.taxes),
-        baseTripTotal: money(selected.quote?.total),
+        hostChargeFees: money(Number(trip.quotedFees || 0) - Number(trip.guestTripFee || 0)),
+        pickupFee: money(selected.listing?.pickupFee || 0),
+        deliveryFee: money(selected.listing?.deliveryFee || 0),
+        selectedFulfillmentFee: money(fulfillmentChoice === 'DELIVERY' ? selected.listing?.deliveryFee || 0 : selected.listing?.pickupFee || 0),
+        guestTripFee: money(trip.guestTripFee),
+        fees: money(trip.quotedFees),
+        taxes: money(trip.quotedTaxes),
+        baseTripTotal: money(trip.quotedTotal),
         additionalServicesTotal: money(normalizedChosenServices.reduce((sum, service) => sum + Number(service.total || 0), 0)),
-        guestTotal: money(Number(selected.quote?.total || 0) + normalizedChosenServices.reduce((sum, service) => sum + Number(service.total || 0), 0)),
+        guestTotal: money(Number(trip.quotedTotal || 0) + normalizedChosenServices.reduce((sum, service) => sum + Number(service.total || 0), 0)),
         hostGrossRevenue: money(trip.hostGrossRevenue),
         hostServiceFeeRate: money(trip.hostServiceFeeRate),
         hostServiceFee: money(trip.hostServiceFee),

@@ -82,6 +82,7 @@ const EMPTY_FORM = {
   fulfillmentMode: 'PICKUP_ONLY',
   baseDailyRate: '',
   cleaningFee: '',
+  pickupFee: '',
   deliveryFee: '',
   deliveryRadiusMiles: '',
   deliveryNotes: '',
@@ -357,6 +358,10 @@ function BecomeAHostPageInner() {
                     <option value="DELIVERY_ONLY">Delivery Only</option>
                     <option value="PICKUP_OR_DELIVERY">Pickup Or Delivery</option>
                   </select>
+                </label>
+                <label>
+                  <span className="label">Pickup Fee</span>
+                  <input type="number" step="0.01" value={form.pickupFee} onChange={(e) => setForm((current) => ({ ...current, pickupFee: e.target.value }))} />
                 </label>
                 <label>
                   <span className="label">Min Trip Days</span>
