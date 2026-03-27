@@ -32,6 +32,9 @@ const DEFAULT_EMAIL_TEMPLATES = {
   returnReceiptSubject: 'Return Receipt - Reservation {{reservationNumber}}',
   returnReceiptBody: 'Hello {{customerName}},\n\nYour rental agreement has been closed.\nReservation: {{reservationNumber}}\nTotal Paid: {{paidAmount}}\nBalance: {{balance}}\n\nThank you for choosing us.',
   returnReceiptHtml: '<div>Hello {{customerName}},<br/><br/>Your rental agreement has been closed.<br/>Reservation: <b>{{reservationNumber}}</b><br/>Total Paid: <b>${{paidAmount}}</b><br/>Balance: <b>${{balance}}</b><br/><br/>Thank you for choosing {{companyName}}.</div>',
+  rentalReviewRequestSubject: 'How Was Your Rental Experience? - Reservation {{reservationNumber}}',
+  rentalReviewRequestBody: 'Hello {{customerName}},\n\nThank you for renting with {{companyName}}. Your reservation {{reservationNumber}} has been checked in successfully.\n\nWe would love to hear about your experience. Please reply to this email or leave your review using your preferred review channel.\n\nThank you again,\n{{companyName}}',
+  rentalReviewRequestHtml: '<div>Hello {{customerName}},<br/><br/>Thank you for renting with {{companyName}}. Your reservation <b>{{reservationNumber}}</b> has been checked in successfully.<br/><br/>We would love to hear about your experience. Please reply to this email or leave your review using your preferred review channel.<br/><br/>Thank you again,<br/>{{companyName}}</div>',
   agreementEmailSubject: 'Your Rental Agreement {{agreementNumber}}',
   agreementEmailHtml: '<div>Hello {{customerName}},<br/><br/>Attached is your rental agreement <b>{{agreementNumber}}</b>.<br/><br/>Thanks,<br/>{{companyName}}</div>'
 };
@@ -1885,7 +1888,7 @@ function SettingsInner({ token, me, logout }) {
         {tab === 'emails' && (
           <div className="stack">
             <h2>Email Templates</h2>
-            <div className="label">Available placeholders: {'{{customerName}}'}, {'{{reservationNumber}}'}, {'{{link}}'}, {'{{expiresAt}}'}, {'{{agreementNumber}}'}, {'{{pickupAt}}'}, {'{{returnAt}}'}, {'{{total}}'}, {'{{amountPaid}}'}, {'{{amountDue}}'}, {'{{portalLink}}'}, {'{{companyName}}'}, {'{{companyAddress}}'}, {'{{companyPhone}}'}</div>
+            <div className="label">Available placeholders: {'{{customerName}}'}, {'{{reservationNumber}}'}, {'{{link}}'}, {'{{expiresAt}}'}, {'{{agreementNumber}}'}, {'{{pickupAt}}'}, {'{{returnAt}}'}, {'{{total}}'}, {'{{amountPaid}}'}, {'{{amountDue}}'}, {'{{portalLink}}'}, {'{{companyName}}'}, {'{{companyAddress}}'}, {'{{companyPhone}}'}, {'{{pickupLocation}}'}, {'{{returnLocation}}'}, {'{{workflowMode}}'}</div>
 
             <div className="glass card stack" style={{ padding: 12 }}>
               <h3>Request Signature</h3>
@@ -1920,6 +1923,16 @@ function SettingsInner({ token, me, logout }) {
               <input placeholder="Subject" value={emailTemplates.returnReceiptSubject || ''} onChange={(e) => setEmailTemplates({ ...emailTemplates, returnReceiptSubject: e.target.value })} />
               <textarea rows={5} placeholder="Body (text)" value={emailTemplates.returnReceiptBody || ''} onChange={(e) => setEmailTemplates({ ...emailTemplates, returnReceiptBody: e.target.value })} />
               <textarea rows={6} placeholder="Body (HTML)" value={emailTemplates.returnReceiptHtml || ''} onChange={(e) => setEmailTemplates({ ...emailTemplates, returnReceiptHtml: e.target.value })} />
+            </div>
+
+            <div className="glass card stack" style={{ padding: 12 }}>
+              <h3>Rental / Loaner Review Request</h3>
+              <div className="surface-note">
+                This message goes out after a normal rental or dealership loaner reservation is checked in. It does not affect car sharing host reviews.
+              </div>
+              <input placeholder="Subject" value={emailTemplates.rentalReviewRequestSubject || ''} onChange={(e) => setEmailTemplates({ ...emailTemplates, rentalReviewRequestSubject: e.target.value })} />
+              <textarea rows={5} placeholder="Body (text)" value={emailTemplates.rentalReviewRequestBody || ''} onChange={(e) => setEmailTemplates({ ...emailTemplates, rentalReviewRequestBody: e.target.value })} />
+              <textarea rows={6} placeholder="Body (HTML)" value={emailTemplates.rentalReviewRequestHtml || ''} onChange={(e) => setEmailTemplates({ ...emailTemplates, rentalReviewRequestHtml: e.target.value })} />
             </div>
 
             <div className="glass card stack" style={{ padding: 12 }}>

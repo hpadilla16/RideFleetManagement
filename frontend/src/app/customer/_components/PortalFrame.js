@@ -26,20 +26,24 @@ export const portalStyles = {
     fontSize: 12,
     letterSpacing: '0.18em',
     textTransform: 'uppercase',
+    color: 'rgba(255,255,255,0.78)',
     opacity: 0.72,
     marginBottom: 8
   },
   heroTitle: {
     margin: 0,
     fontSize: 34,
-    lineHeight: 1.05
+    lineHeight: 1.05,
+    color: '#fff',
+    textShadow: '0 2px 18px rgba(19, 10, 45, 0.18)'
   },
   heroSubtitle: {
     marginTop: 10,
     maxWidth: 760,
     fontSize: 15,
     lineHeight: 1.6,
-    opacity: 0.92
+    opacity: 0.92,
+    color: 'rgba(255,255,255,0.96)'
   },
   grid: {
     display: 'grid',
@@ -61,11 +65,13 @@ export const portalStyles = {
   },
   cardTitle: {
     margin: '0 0 12px',
-    fontSize: 20
+    fontSize: 20,
+    color: '#241b41'
   },
   sectionTitle: {
     margin: '4px 0 8px',
-    fontSize: 16
+    fontSize: 16,
+    color: '#2c1f52'
   },
   statGrid: {
     display: 'grid',

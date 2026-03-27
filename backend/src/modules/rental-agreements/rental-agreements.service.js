@@ -2115,16 +2115,25 @@ export const rentalAgreementsService = {
 
     await syncAgreementCommissionSnapshot(id);
 
-    // Best effort return receipt email
+    // Best effort return receipt and post-return review email
     try {
       const { settingsService } = await import('../settings/settings.service.js');
       const { sendEmail } = await import('../../lib/mailer.js');
-      const tpl = await settingsService.getEmailTemplates();
+      const tpl = await settingsService.getEmailTemplates({ tenantId: agreement.tenantId || null });
+      const rentalCfg = await settingsService.getRentalAgreementConfig({ tenantId: agreement.tenantId || null });
       const to = agreement.customerEmail || agreement.reservation?.customer?.email;
       if (to) {
         const render = (s = '') => String(s)
           .replaceAll('{{customerName}}', `${agreement.customerFirstName || ''} ${agreement.customerLastName || ''}`.trim())
           .replaceAll('{{reservationNumber}}', String(agreement.reservation?.reservationNumber || ''))
+          .replaceAll('{{pickupAt}}', String(agreement.pickupAt ? fmtDate(agreement.pickupAt) : ''))
+          .replaceAll('{{returnAt}}', String(agreement.returnAt ? fmtDate(agreement.returnAt) : ''))
+          .replaceAll('{{pickupLocation}}', String(agreement.reservation?.pickupLocation?.name || ''))
+          .replaceAll('{{returnLocation}}', String(agreement.reservation?.returnLocation?.name || ''))
+          .replaceAll('{{workflowMode}}', String(agreement.reservation?.workflowMode || ''))
+          .replaceAll('{{companyName}}', String(rentalCfg?.companyName || 'Ride Fleet'))
+          .replaceAll('{{companyAddress}}', String(rentalCfg?.companyAddress || ''))
+          .replaceAll('{{companyPhone}}', String(rentalCfg?.companyPhone || ''))
           .replaceAll('{{paidAmount}}', Number(agreement.paidAmount || 0).toFixed(2))
           .replaceAll('{{balance}}', Number(agreement.balance || 0).toFixed(2));
         await sendEmail({
@@ -2133,6 +2142,20 @@ export const rentalAgreementsService = {
           text: render(tpl.returnReceiptBody || 'Your agreement is now closed.'),
           html: render(tpl.returnReceiptHtml || String(tpl.returnReceiptBody || 'Your agreement is now closed.').replaceAll('\n', '<br/>'))
         });
+
+        if (String(agreement.reservation?.workflowMode || '').toUpperCase() !== 'CAR_SHARING') {
+          const reviewSubject = render(tpl.rentalReviewRequestSubject || 'How Was Your Rental Experience? - Reservation {{reservationNumber}}');
+          const reviewText = render(tpl.rentalReviewRequestBody || 'Thank you for renting with us.');
+          const reviewHtml = render(tpl.rentalReviewRequestHtml || reviewText.replaceAll('\n', '<br/>'));
+          if (String(reviewSubject || '').trim() || String(reviewText || '').trim() || String(reviewHtml || '').trim()) {
+            await sendEmail({
+              to,
+              subject: reviewSubject,
+              text: reviewText,
+              html: reviewHtml
+            });
+          }
+        }
       }
     } catch {}
 
