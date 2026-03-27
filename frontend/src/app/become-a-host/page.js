@@ -104,6 +104,14 @@ function deliveryEnabled(mode) {
   return String(mode || 'PICKUP_ONLY').toUpperCase() !== 'PICKUP_ONLY';
 }
 
+function deliveryToggleValue(mode) {
+  return deliveryEnabled(mode) ? 'YES' : 'NO';
+}
+
+function enableDeliveryMode(mode) {
+  return String(mode || '').toUpperCase() === 'DELIVERY_ONLY' ? 'DELIVERY_ONLY' : 'PICKUP_OR_DELIVERY';
+}
+
 function BecomeAHostPageInner() {
   const searchParams = useSearchParams();
   const initialTenantSlug = String(searchParams.get('tenantSlug') || '').trim().toLowerCase();
@@ -357,11 +365,16 @@ function BecomeAHostPageInner() {
                   <input type="number" step="0.01" value={form.baseDailyRate} onChange={(e) => setForm((current) => ({ ...current, baseDailyRate: e.target.value }))} />
                 </label>
                 <label>
-                  <span className="label">Trip Handoff</span>
-                  <select value={form.fulfillmentMode} onChange={(e) => setForm((current) => ({ ...current, fulfillmentMode: e.target.value }))}>
-                    <option value="PICKUP_ONLY">Pickup Only</option>
-                    <option value="PICKUP_OR_DELIVERY">Offer Pickup And Delivery</option>
-                    <option value="DELIVERY_ONLY">Delivery Only</option>
+                  <span className="label">Offer Delivery</span>
+                  <select
+                    value={deliveryToggleValue(form.fulfillmentMode)}
+                    onChange={(e) => setForm((current) => ({
+                      ...current,
+                      fulfillmentMode: e.target.value === 'YES' ? enableDeliveryMode(current.fulfillmentMode) : 'PICKUP_ONLY'
+                    }))}
+                  >
+                    <option value="NO">No, pickup only</option>
+                    <option value="YES">Yes, offer delivery</option>
                   </select>
                 </label>
                 <label>
@@ -375,6 +388,15 @@ function BecomeAHostPageInner() {
               </div>
               {deliveryEnabled(form.fulfillmentMode) ? (
                 <>
+                  <div className="form-grid-2">
+                    <label>
+                      <span className="label">Delivery Style</span>
+                      <select value={form.fulfillmentMode} onChange={(e) => setForm((current) => ({ ...current, fulfillmentMode: e.target.value }))}>
+                        <option value="PICKUP_OR_DELIVERY">Offer pickup and delivery</option>
+                        <option value="DELIVERY_ONLY">Delivery only</option>
+                      </select>
+                    </label>
+                  </div>
                   <div className="form-grid-2">
                     <label>
                       <span className="label">Delivery Fee</span>

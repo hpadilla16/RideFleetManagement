@@ -207,6 +207,14 @@ function deliveryEnabled(mode) {
   return String(mode || 'PICKUP_ONLY').toUpperCase() !== 'PICKUP_ONLY';
 }
 
+function deliveryToggleValue(mode) {
+  return deliveryEnabled(mode) ? 'YES' : 'NO';
+}
+
+function enableDeliveryMode(mode) {
+  return String(mode || '').toUpperCase() === 'DELIVERY_ONLY' ? 'DELIVERY_ONLY' : 'PICKUP_OR_DELIVERY';
+}
+
 function listingToEdit(listing) {
   return {
     id: listing.id,
@@ -1073,11 +1081,16 @@ function HostAppInner({ token, me, logout }) {
             </div>
             <div className="form-grid-3">
               <div className="stack">
-                <label className="label">Trip Handoff</label>
-                <select value={submissionForm.fulfillmentMode} onChange={(event) => setSubmissionForm((current) => ({ ...current, fulfillmentMode: event.target.value }))}>
-                  <option value="PICKUP_ONLY">Pickup Only</option>
-                  <option value="PICKUP_OR_DELIVERY">Offer Pickup And Delivery</option>
-                  <option value="DELIVERY_ONLY">Delivery Only</option>
+                <label className="label">Offer Delivery</label>
+                <select
+                  value={deliveryToggleValue(submissionForm.fulfillmentMode)}
+                  onChange={(event) => setSubmissionForm((current) => ({
+                    ...current,
+                    fulfillmentMode: event.target.value === 'YES' ? enableDeliveryMode(current.fulfillmentMode) : 'PICKUP_ONLY'
+                  }))}
+                >
+                  <option value="NO">No, pickup only</option>
+                  <option value="YES">Yes, offer delivery</option>
                 </select>
               </div>
               <div className="stack"><label className="label">Daily Rate</label><input type="number" min="0" step="0.01" value={submissionForm.baseDailyRate} onChange={(event) => setSubmissionForm((current) => ({ ...current, baseDailyRate: event.target.value }))} /></div>
@@ -1088,6 +1101,15 @@ function HostAppInner({ token, me, logout }) {
             </div>
             {deliveryEnabled(submissionForm.fulfillmentMode) ? (
               <>
+                <div className="form-grid-2">
+                  <div className="stack">
+                    <label className="label">Delivery Style</label>
+                    <select value={submissionForm.fulfillmentMode} onChange={(event) => setSubmissionForm((current) => ({ ...current, fulfillmentMode: event.target.value }))}>
+                      <option value="PICKUP_OR_DELIVERY">Offer pickup and delivery</option>
+                      <option value="DELIVERY_ONLY">Delivery only</option>
+                    </select>
+                  </div>
+                </div>
                 <div className="form-grid-3">
                   <div className="stack"><label className="label">Delivery Fee</label><input type="number" min="0" step="0.01" value={submissionForm.deliveryFee} onChange={(event) => setSubmissionForm((current) => ({ ...current, deliveryFee: event.target.value }))} /></div>
                   <div className="stack"><label className="label">Delivery Radius Miles</label><input type="number" min="0" value={submissionForm.deliveryRadiusMiles} onChange={(event) => setSubmissionForm((current) => ({ ...current, deliveryRadiusMiles: event.target.value }))} /></div>
@@ -1342,7 +1364,19 @@ function HostAppInner({ token, me, logout }) {
               </div>
               <div className="form-grid-3">
                 <div className="stack"><label className="label">Status</label><select value={listingEdit.status} onChange={(event) => setListingEdit((current) => ({ ...current, status: event.target.value }))}><option value="DRAFT">DRAFT</option><option value="PUBLISHED">PUBLISHED</option><option value="PAUSED">PAUSED</option><option value="ARCHIVED">ARCHIVED</option></select></div>
-                <div className="stack"><label className="label">Trip Handoff</label><select value={listingEdit.fulfillmentMode} onChange={(event) => setListingEdit((current) => ({ ...current, fulfillmentMode: event.target.value }))}><option value="PICKUP_ONLY">Pickup Only</option><option value="PICKUP_OR_DELIVERY">Offer Pickup And Delivery</option><option value="DELIVERY_ONLY">Delivery Only</option></select></div>
+                <div className="stack">
+                  <label className="label">Offer Delivery</label>
+                  <select
+                    value={deliveryToggleValue(listingEdit.fulfillmentMode)}
+                    onChange={(event) => setListingEdit((current) => ({
+                      ...current,
+                      fulfillmentMode: event.target.value === 'YES' ? enableDeliveryMode(current.fulfillmentMode) : 'PICKUP_ONLY'
+                    }))}
+                  >
+                    <option value="NO">No, pickup only</option>
+                    <option value="YES">Yes, offer delivery</option>
+                  </select>
+                </div>
                 <div className="stack"><label className="label">Daily Rate</label><input type="number" min="0" step="0.01" value={listingEdit.baseDailyRate} onChange={(event) => setListingEdit((current) => ({ ...current, baseDailyRate: event.target.value }))} /></div>
                 <div className="stack"><label className="label">Security Deposit</label><input type="number" min="0" step="0.01" value={listingEdit.securityDeposit} onChange={(event) => setListingEdit((current) => ({ ...current, securityDeposit: event.target.value }))} /></div>
                 <div className="stack"><label className="label">Cleaning Fee</label><input type="number" min="0" step="0.01" value={listingEdit.cleaningFee} onChange={(event) => setListingEdit((current) => ({ ...current, cleaningFee: event.target.value }))} /></div>
@@ -1352,6 +1386,15 @@ function HostAppInner({ token, me, logout }) {
               <label className="label" style={{ textTransform: 'none', letterSpacing: 0 }}><input type="checkbox" checked={listingEdit.instantBook} onChange={(event) => setListingEdit((current) => ({ ...current, instantBook: event.target.checked }))} /> Instant Book</label>
               {deliveryEnabled(listingEdit.fulfillmentMode) ? (
                 <>
+                  <div className="form-grid-2">
+                    <div className="stack">
+                      <label className="label">Delivery Style</label>
+                      <select value={listingEdit.fulfillmentMode} onChange={(event) => setListingEdit((current) => ({ ...current, fulfillmentMode: event.target.value }))}>
+                        <option value="PICKUP_OR_DELIVERY">Offer pickup and delivery</option>
+                        <option value="DELIVERY_ONLY">Delivery only</option>
+                      </select>
+                    </div>
+                  </div>
                   <div className="form-grid-3">
                     <div className="stack"><label className="label">Delivery Fee</label><input type="number" min="0" step="0.01" value={listingEdit.deliveryFee} onChange={(event) => setListingEdit((current) => ({ ...current, deliveryFee: event.target.value }))} /></div>
                     <div className="stack"><label className="label">Delivery Radius Miles</label><input type="number" min="0" value={listingEdit.deliveryRadiusMiles} onChange={(event) => setListingEdit((current) => ({ ...current, deliveryRadiusMiles: event.target.value }))} /></div>
