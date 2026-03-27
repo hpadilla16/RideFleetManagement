@@ -1,4 +1,29 @@
-export const API_BASE = process.env.NEXT_PUBLIC_API_BASE || 'http://localhost:4000';
+function normalizeBaseUrl(value) {
+  return String(value || '').trim().replace(/\/$/, '');
+}
+
+function resolveApiBase() {
+  const configured = normalizeBaseUrl(process.env.NEXT_PUBLIC_API_BASE);
+  if (typeof window !== 'undefined') {
+    const origin = normalizeBaseUrl(window.location.origin);
+    if (!configured) return origin;
+    const configuredHost = (() => {
+      try {
+        return new URL(configured).hostname;
+      } catch {
+        return '';
+      }
+    })();
+    const currentHost = String(window.location.hostname || '').trim().toLowerCase();
+    if (configuredHost && ['localhost', '127.0.0.1'].includes(configuredHost.toLowerCase()) && !['localhost', '127.0.0.1'].includes(currentHost)) {
+      return origin;
+    }
+    return configured;
+  }
+  return configured || 'http://localhost:4000';
+}
+
+export const API_BASE = resolveApiBase();
 export const TOKEN_KEY = 'fleet_jwt';
 export const USER_KEY = 'fleet_user';
 
