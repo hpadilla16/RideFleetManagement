@@ -1,5 +1,17 @@
 'use client';
 
+function parseCsv(text) {
+  const lines = String(text || '').split(/\r?\n/).filter(Boolean);
+  if (!lines.length) return [];
+  const headers = lines[0].split(',').map((h) => h.trim());
+  return lines.slice(1).map((line) => {
+    const cols = line.split(',').map((c) => c.trim());
+    const row = {};
+    headers.forEach((h, i) => { row[h] = cols[i] ?? ''; });
+    return row;
+  });
+}
+
 function extractMandatoryFeeIdsFromLocationConfig(rawCfg) {
   let cfg = rawCfg;
   try { if (typeof cfg === 'string') cfg = JSON.parse(cfg || '{}'); } catch { cfg = {}; }
@@ -46,6 +58,12 @@ function ReservationsInner({ token, me, logout }) {
   const [query, setQuery] = useState('');
   const [msg, setMsg] = useState('');
   const [createOpen, setCreateOpen] = useState(false);
+  const [showImport, setShowImport] = useState(false);
+  const [importStep, setImportStep] = useState(1);
+  const [importRows, setImportRows] = useState([]);
+  const [importReport, setImportReport] = useState(null);
+  const [validatingImport, setValidatingImport] = useState(false);
+  const [importingRows, setImportingRows] = useState(false);
   const [rateError, setRateError] = useState('');
   const [addingCustomer, setAddingCustomer] = useState(false);
   const [newCustomer, setNewCustomer] = useState({ firstName: '', lastName: '', phone: '', email: '' });
@@ -250,6 +268,70 @@ function ReservationsInner({ token, me, logout }) {
     }
   };
 
+  const downloadImportTemplate = () => {
+    const sampleTenantSlug = me?.tenantId ? '' : 'tenantSlug,';
+    const sampleTenantValue = me?.tenantId ? '' : 'demo,';
+    const samplePickupCode = locations[0]?.code || 'SJU';
+    const sampleReturnCode = locations[1]?.code || samplePickupCode;
+    const sampleVehicleTypeCode = vehicleTypes[0]?.code || 'ECON';
+    const csv = `${sampleTenantSlug}reservationNumber,sourceRef,workflowMode,status,paymentStatus,customerFirstName,customerLastName,customerEmail,customerPhone,vehicleTypeCode,vehicleInternalNumber,pickupAt,returnAt,pickupLocationCode,returnLocationCode,dailyRate,estimatedTotal,notes\n${sampleTenantValue}MIG-1001,LEGACY-1001,RENTAL,CONFIRMED,PENDING,Jose,Diaz,jose@example.com,7875550101,${sampleVehicleTypeCode},,2026-03-30T10:00,2026-04-02T10:00,${samplePickupCode},${sampleReturnCode},49.99,149.97,Imported from legacy platform`;
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'reservation_migration_template.csv';
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const onSelectImportFile = async (file) => {
+    if (!file) return;
+    const text = await file.text();
+    setImportRows(parseCsv(text));
+  };
+
+  const validateImport = async () => {
+    setValidatingImport(true);
+    setImportReport(null);
+    try {
+      const report = await api('/api/reservations/bulk/validate', {
+        method: 'POST',
+        body: JSON.stringify({ rows: importRows })
+      }, token);
+      setImportReport(report);
+    } catch (e) {
+      setMsg(e.message);
+    } finally {
+      setValidatingImport(false);
+    }
+  };
+
+  const proceedImport = async () => {
+    setImportingRows(true);
+    try {
+      const out = await api('/api/reservations/bulk/import', {
+        method: 'POST',
+        body: JSON.stringify({ rows: importRows })
+      }, token);
+      setMsg(`Migration upload successful. Created ${out.created}, skipped ${out.skipped}.`);
+      setShowImport(false);
+      setImportStep(1);
+      setImportRows([]);
+      setImportReport(null);
+      await load();
+    } catch (e) {
+      setMsg(e.message);
+    } finally {
+      setImportingRows(false);
+    }
+  };
+
+  const resetImportWizard = () => {
+    setImportStep(1);
+    setImportRows([]);
+    setImportReport(null);
+  };
+
   const rows = reservations.filter((r) => {
     const q = query.toLowerCase();
     return !q || r.reservationNumber.toLowerCase().includes(q) || `${r.customer?.firstName || ''} ${r.customer?.lastName || ''}`.toLowerCase().includes(q);
@@ -381,7 +463,7 @@ function ReservationsInner({ token, me, logout }) {
         </div>
       </section>
       <section className="glass card-lg">
-        <div className="row-between"><h2>Reservations</h2><div style={{ display: 'flex', gap: 8 }}><input placeholder="Search reservation/customer" value={query} onChange={(e) => setQuery(e.target.value)} /><button onClick={() => { setCreateOpen(true); setSelectedServiceIds([]); setSelectedFeeIds([]); setSelectedInsuranceCode(''); setRateError(''); setAddingCustomer(false); setNewCustomer({ firstName: '', lastName: '', phone: '', email: '' }); }}>New Reservation</button></div></div>
+        <div className="row-between"><h2>Reservations</h2><div style={{ display: 'flex', gap: 8 }}><input placeholder="Search reservation/customer" value={query} onChange={(e) => setQuery(e.target.value)} /><button onClick={() => setShowImport(true)}>Upload Migration</button><button onClick={() => { setCreateOpen(true); setSelectedServiceIds([]); setSelectedFeeIds([]); setSelectedInsuranceCode(''); setRateError(''); setAddingCustomer(false); setNewCustomer({ firstName: '', lastName: '', phone: '', email: '' }); }}>New Reservation</button></div></div>
         {msg ? <p className="label">{msg}</p> : null}
         <table>
           <thead><tr><th>#</th><th>Status</th><th>Customer</th><th>Pickup</th><th>Return</th><th>Actions</th></tr></thead>
@@ -516,6 +598,62 @@ function ReservationsInner({ token, me, logout }) {
                 <button onClick={createReservation}>Create Reservation</button>
               </div>
             </div>
+          </div>
+        </div>
+      )}
+
+      {showImport && (
+        <div className="modal-backdrop" onClick={() => { setShowImport(false); resetImportWizard(); }}>
+          <div className="rent-modal glass" style={{ width: 'min(820px, 95vw)' }} onClick={(e) => e.stopPropagation()}>
+            <h3>Upload Reservation Migration</h3>
+
+            {importStep === 1 && (
+              <div className="stack">
+                <p className="label">Step 1: Review instructions</p>
+                <ul>
+                  <li>Use CSV format exported from the legacy platform.</li>
+                  <li>Required columns: <code>reservationNumber</code>, <code>pickupAt</code>, <code>returnAt</code>, <code>pickupLocationCode</code>, <code>returnLocationCode</code>.</li>
+                  <li>Identify the customer with <code>customerId</code>, <code>customerEmail</code>, <code>customerPhone</code>, or provide <code>customerFirstName</code>, <code>customerLastName</code>, and <code>customerPhone</code> so Ride Fleet can create the customer.</li>
+                  <li>Recommended columns: <code>sourceRef</code>, <code>vehicleTypeCode</code>, <code>vehicleInternalNumber</code>, <code>dailyRate</code>, <code>estimatedTotal</code>, <code>notes</code>.</li>
+                  {!me?.tenantId ? <li>For super admin imports, include <code>tenantSlug</code> in every row.</li> : null}
+                  <li>Duplicate reservation numbers or source refs are skipped.</li>
+                </ul>
+                <div style={{ display: 'flex', gap: 8 }}>
+                  <button type="button" onClick={downloadImportTemplate}>Download Template</button>
+                  <button type="button" onClick={() => setImportStep(2)}>Next</button>
+                </div>
+              </div>
+            )}
+
+            {importStep === 2 && (
+              <div className="stack">
+                <p className="label">Step 2: Upload file and validate</p>
+                <input type="file" accept=".csv,text/csv" onChange={(e) => onSelectImportFile(e.target.files?.[0])} />
+                <p className="label">Rows loaded: {importRows.length}</p>
+                <div style={{ display: 'flex', gap: 8 }}>
+                  <button type="button" onClick={resetImportWizard}>Try again</button>
+                  <button type="button" onClick={validateImport} disabled={!importRows.length || validatingImport}>{validatingImport ? 'Validating…' : 'Validate'}</button>
+                </div>
+              </div>
+            )}
+
+            {importReport && (
+              <div className="stack" style={{ marginTop: 12 }}>
+                <p><strong>Validation report</strong></p>
+                <p className="label">Found: {importReport.found} · Valid: {importReport.valid} · Invalid: {importReport.invalid}</p>
+                <div style={{ maxHeight: 180, overflow: 'auto', border: '1px solid #eee8ff', borderRadius: 8, padding: 8 }}>
+                  {importReport.rows.slice(0, 60).map((row) => (
+                    <div key={row.row} className="label" style={{ marginBottom: 6 }}>
+                      Row {row.row}: {row.valid ? `valid${row.customerAction === 'create' ? ' · creates customer' : ''}` : row.errors.join(', ')}
+                    </div>
+                  ))}
+                </div>
+                <div style={{ display: 'flex', gap: 8 }}>
+                  <button type="button" onClick={resetImportWizard}>Try again</button>
+                  <button type="button" onClick={proceedImport} disabled={importReport.valid === 0 || importingRows}>{importingRows ? 'Uploading…' : 'Proceed with Upload'}</button>
+                </div>
+              </div>
+            )}
           </div>
         </div>
       )}

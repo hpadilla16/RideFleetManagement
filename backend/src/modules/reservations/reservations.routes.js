@@ -14,8 +14,8 @@ import { isSuperAdmin } from '../../middleware/auth.js';
 export const reservationsRouter = Router();
 
 function scopeFor(req) {
-  if (isSuperAdmin(req.user)) return {};
-  return { tenantId: req.user?.tenantId || null };
+  if (isSuperAdmin(req.user)) return { allowCrossTenant: true };
+  return { tenantId: req.user?.tenantId || null, allowCrossTenant: false };
 }
 
 function parseLocationConfig(raw) {
@@ -65,6 +65,29 @@ reservationsRouter.get('/', async (req, res, next) => {
   try {
     res.json(await reservationsService.list(scopeFor(req)));
   } catch (e) {
+    next(e);
+  }
+});
+
+reservationsRouter.post('/bulk/validate', async (req, res, next) => {
+  try {
+    const rows = Array.isArray(req.body?.rows) ? req.body.rows : [];
+    const report = await reservationsService.validateBulk(rows, scopeFor(req));
+    res.json(report);
+  } catch (e) {
+    next(e);
+  }
+});
+
+reservationsRouter.post('/bulk/import', async (req, res, next) => {
+  try {
+    const rows = Array.isArray(req.body?.rows) ? req.body.rows : [];
+    const out = await reservationsService.importBulk(rows, scopeFor(req), req.user?.sub || null);
+    res.json(out);
+  } catch (e) {
+    if (/already exists|vehicle conflict/i.test(String(e?.message || ''))) {
+      return res.status(409).json({ error: e.message });
+    }
     next(e);
   }
 });

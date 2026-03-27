@@ -92,6 +92,355 @@ function scopedSettingKey(baseKey, scope = {}) {
   return scope?.tenantId ? `tenant:${scope.tenantId}:${baseKey}` : baseKey;
 }
 
+function norm(v) {
+  return String(v ?? '').trim();
+}
+
+function normLower(v) {
+  return norm(v).toLowerCase();
+}
+
+function parseDateInput(value) {
+  if (!value) return null;
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return null;
+  return parsed;
+}
+
+function parseNumberInput(value) {
+  if (value === null || value === undefined || value === '') return null;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+const reservationStatuses = new Set(['NEW', 'CONFIRMED', 'CHECKED_OUT', 'CHECKED_IN', 'CANCELLED', 'NO_SHOW']);
+const paymentStatuses = new Set(['PENDING', 'PARTIAL', 'PAID', 'REFUNDED', 'VOID']);
+const workflowModes = new Set(['RENTAL', 'CAR_SHARING', 'DEALERSHIP_LOANER']);
+const loanerBillingModes = new Set(['COURTESY', 'CUSTOMER_PAY', 'WARRANTY', 'INSURANCE', 'INTERNAL']);
+
+async function resolveImportTenant(row, scope = {}, cache) {
+  if (scope?.tenantId) {
+    if (!cache.tenantById.has(scope.tenantId)) {
+      const tenant = await prisma.tenant.findUnique({
+        where: { id: scope.tenantId },
+        select: { id: true, slug: true, name: true }
+      });
+      cache.tenantById.set(scope.tenantId, tenant || null);
+    }
+    return cache.tenantById.get(scope.tenantId);
+  }
+
+  const tenantId = norm(row.tenantId);
+  const tenantSlug = norm(row.tenantSlug);
+  const tenantName = norm(row.tenantName);
+
+  if (tenantId) {
+    if (!cache.tenantById.has(tenantId)) {
+      const tenant = await prisma.tenant.findUnique({
+        where: { id: tenantId },
+        select: { id: true, slug: true, name: true }
+      });
+      cache.tenantById.set(tenantId, tenant || null);
+    }
+    return cache.tenantById.get(tenantId);
+  }
+
+  if (tenantSlug) {
+    const key = tenantSlug.toLowerCase();
+    if (!cache.tenantBySlug.has(key)) {
+      const tenant = await prisma.tenant.findUnique({
+        where: { slug: tenantSlug },
+        select: { id: true, slug: true, name: true }
+      });
+      cache.tenantBySlug.set(key, tenant || null);
+    }
+    return cache.tenantBySlug.get(key);
+  }
+
+  if (tenantName) {
+    const key = tenantName.toLowerCase();
+    if (!cache.tenantByName.has(key)) {
+      const tenant = await prisma.tenant.findFirst({
+        where: { name: tenantName },
+        select: { id: true, slug: true, name: true }
+      });
+      cache.tenantByName.set(key, tenant || null);
+    }
+    return cache.tenantByName.get(key);
+  }
+
+  return null;
+}
+
+async function resolveImportLocation(tenantId, rawValue, cache) {
+  const value = norm(rawValue);
+  if (!value) return null;
+  const cacheKey = `${tenantId || 'global'}:${value.toLowerCase()}`;
+  if (!cache.location.has(cacheKey)) {
+    const location = await prisma.location.findFirst({
+      where: {
+        ...(tenantId ? { tenantId } : {}),
+        OR: [
+          { id: value },
+          { code: value },
+          { name: value }
+        ]
+      },
+      select: { id: true, name: true, code: true, tenantId: true }
+    });
+    cache.location.set(cacheKey, location || null);
+  }
+  return cache.location.get(cacheKey);
+}
+
+async function resolveImportVehicleType(tenantId, row, cache) {
+  const directId = norm(row.vehicleTypeId);
+  const code = norm(row.vehicleTypeCode);
+  const name = norm(row.vehicleTypeName);
+  const value = directId || code || name;
+  if (!value) return null;
+  const cacheKey = `${tenantId || 'global'}:${value.toLowerCase()}`;
+  if (!cache.vehicleType.has(cacheKey)) {
+    const vehicleType = await prisma.vehicleType.findFirst({
+      where: {
+        ...(tenantId ? { tenantId } : {}),
+        OR: [
+          { id: directId || '__none__' },
+          ...(code ? [{ code }] : []),
+          ...(name ? [{ name }] : [])
+        ]
+      },
+      select: { id: true, name: true, code: true }
+    });
+    cache.vehicleType.set(cacheKey, vehicleType || null);
+  }
+  return cache.vehicleType.get(cacheKey);
+}
+
+async function resolveImportVehicle(tenantId, row, cache) {
+  const directId = norm(row.vehicleId);
+  const internalNumber = norm(row.vehicleInternalNumber);
+  const plate = norm(row.vehiclePlate);
+  const value = directId || internalNumber || plate;
+  if (!value) return null;
+  const cacheKey = `${tenantId || 'global'}:${value.toLowerCase()}`;
+  if (!cache.vehicle.has(cacheKey)) {
+    const vehicle = await prisma.vehicle.findFirst({
+      where: {
+        ...(tenantId ? { tenantId } : {}),
+        OR: [
+          { id: directId || '__none__' },
+          ...(internalNumber ? [{ internalNumber }] : []),
+          ...(plate ? [{ plate }] : [])
+        ]
+      },
+      select: { id: true, internalNumber: true, plate: true, vehicleTypeId: true }
+    });
+    cache.vehicle.set(cacheKey, vehicle || null);
+  }
+  return cache.vehicle.get(cacheKey);
+}
+
+async function resolveImportCustomer(tenantId, row, cache) {
+  const directId = norm(row.customerId);
+  const email = norm(row.customerEmail);
+  const phone = norm(row.customerPhone);
+  const firstName = norm(row.customerFirstName);
+  const lastName = norm(row.customerLastName);
+
+  if (directId) {
+    const key = `id:${directId}`;
+    if (!cache.customer.has(key)) {
+      const customer = await prisma.customer.findFirst({
+        where: { id: directId, ...(tenantId ? { tenantId } : {}) },
+        select: { id: true, firstName: true, lastName: true, email: true, phone: true }
+      });
+      cache.customer.set(key, customer || null);
+    }
+    return { customer: cache.customer.get(key), action: cache.customer.get(key) ? 'existing' : null };
+  }
+
+  if (email) {
+    const key = `email:${tenantId || 'global'}:${email.toLowerCase()}`;
+    if (!cache.customer.has(key)) {
+      const customer = await prisma.customer.findFirst({
+        where: { ...(tenantId ? { tenantId } : {}), email },
+        select: { id: true, firstName: true, lastName: true, email: true, phone: true }
+      });
+      cache.customer.set(key, customer || null);
+    }
+    if (cache.customer.get(key)) return { customer: cache.customer.get(key), action: 'existing' };
+  }
+
+  if (phone) {
+    const key = `phone:${tenantId || 'global'}:${phone.toLowerCase()}`;
+    if (!cache.customer.has(key)) {
+      const customer = await prisma.customer.findFirst({
+        where: { ...(tenantId ? { tenantId } : {}), phone },
+        select: { id: true, firstName: true, lastName: true, email: true, phone: true }
+      });
+      cache.customer.set(key, customer || null);
+    }
+    if (cache.customer.get(key)) return { customer: cache.customer.get(key), action: 'existing' };
+  }
+
+  if (firstName && lastName && phone) {
+    return { customer: null, action: 'create' };
+  }
+
+  return { customer: null, action: null };
+}
+
+function normalizeImportRow(row) {
+  const reservationNumber = norm(row.reservationNumber);
+  const sourceRef = norm(row.sourceRef) || null;
+  const pickupAt = parseDateInput(row.pickupAt);
+  const returnAt = parseDateInput(row.returnAt);
+  const status = norm(row.status || 'CONFIRMED').toUpperCase();
+  const paymentStatus = norm(row.paymentStatus || 'PENDING').toUpperCase();
+  const workflowMode = norm(row.workflowMode || 'RENTAL').toUpperCase();
+  const loanerBillingMode = norm(row.loanerBillingMode).toUpperCase() || null;
+  const dailyRate = parseNumberInput(row.dailyRate);
+  const estimatedTotal = parseNumberInput(row.estimatedTotal);
+
+  return {
+    reservationNumber,
+    sourceRef,
+    pickupAt,
+    returnAt,
+    status,
+    paymentStatus,
+    workflowMode,
+    loanerBillingMode,
+    notes: norm(row.notes) || null,
+    dailyRate,
+    estimatedTotal,
+    repairOrderNumber: norm(row.repairOrderNumber) || null,
+    claimNumber: norm(row.claimNumber) || null,
+    serviceAdvisorName: norm(row.serviceAdvisorName) || null,
+    serviceAdvisorEmail: norm(row.serviceAdvisorEmail) || null,
+    serviceAdvisorPhone: norm(row.serviceAdvisorPhone) || null,
+    serviceStartAt: parseDateInput(row.serviceStartAt),
+    estimatedServiceCompletionAt: parseDateInput(row.estimatedServiceCompletionAt),
+    serviceVehicleYear: parseNumberInput(row.serviceVehicleYear),
+    serviceVehicleMake: norm(row.serviceVehicleMake) || null,
+    serviceVehicleModel: norm(row.serviceVehicleModel) || null,
+    serviceVehiclePlate: norm(row.serviceVehiclePlate) || null,
+    serviceVehicleVin: norm(row.serviceVehicleVin) || null,
+    loanerProgramNotes: norm(row.loanerProgramNotes) || null
+  };
+}
+
+async function buildReservationImportRow(row, index, scope = {}, cache = {}) {
+  const normalized = normalizeImportRow(row || {});
+  const tenant = await resolveImportTenant(row || {}, scope, cache);
+  const tenantId = tenant?.id || scope?.tenantId || null;
+  const pickupLocation = await resolveImportLocation(tenantId, row?.pickupLocationId || row?.pickupLocationCode || row?.pickupLocationName, cache);
+  const returnLocation = await resolveImportLocation(tenantId, row?.returnLocationId || row?.returnLocationCode || row?.returnLocationName, cache);
+  const vehicleType = await resolveImportVehicleType(tenantId, row || {}, cache);
+  const vehicle = await resolveImportVehicle(tenantId, row || {}, cache);
+  const customerResolution = await resolveImportCustomer(tenantId, row || {}, cache);
+
+  const errors = [];
+  const warnings = [];
+
+  if (!tenantId) errors.push('tenantId/tenantSlug required');
+  if (!normalized.reservationNumber) errors.push('reservationNumber required');
+  if (!normalized.pickupAt) errors.push('pickupAt invalid');
+  if (!normalized.returnAt) errors.push('returnAt invalid');
+  if (normalized.pickupAt && normalized.returnAt && normalized.pickupAt >= normalized.returnAt) errors.push('returnAt must be after pickupAt');
+  if (!pickupLocation) errors.push('pickup location not found');
+  if (!returnLocation) errors.push('return location not found');
+  if (!vehicleType && !vehicle) errors.push('vehicleType or assigned vehicle is required');
+  if (!customerResolution.customer && customerResolution.action !== 'create') {
+    errors.push('customer not found; provide customerId/email/phone or customerFirstName/customerLastName/customerPhone');
+  }
+  if (normalized.status && !reservationStatuses.has(normalized.status)) errors.push(`status invalid (${normalized.status})`);
+  if (normalized.paymentStatus && !paymentStatuses.has(normalized.paymentStatus)) errors.push(`paymentStatus invalid (${normalized.paymentStatus})`);
+  if (normalized.workflowMode && !workflowModes.has(normalized.workflowMode)) errors.push(`workflowMode invalid (${normalized.workflowMode})`);
+  if (normalized.loanerBillingMode && !loanerBillingModes.has(normalized.loanerBillingMode)) errors.push(`loanerBillingMode invalid (${normalized.loanerBillingMode})`);
+  if (normalized.workflowMode !== 'DEALERSHIP_LOANER' && normalized.loanerBillingMode) warnings.push('loanerBillingMode provided on non-loaner workflow');
+
+  const duplicate = normalized.reservationNumber
+    ? await prisma.reservation.findFirst({
+        where: {
+          ...(tenantId ? { tenantId } : {}),
+          OR: [
+            { reservationNumber: normalized.reservationNumber },
+            ...(normalized.sourceRef ? [{ sourceRef: normalized.sourceRef }] : [])
+          ]
+        },
+        select: { id: true, reservationNumber: true }
+      })
+    : null;
+  if (duplicate) errors.push(`reservationNumber/sourceRef already exists (${duplicate.reservationNumber})`);
+
+  let vehicleConflict = null;
+  if (!errors.length && vehicle?.id && normalized.pickupAt && normalized.returnAt) {
+    try {
+      await ensureNoVehicleConflict({
+        vehicleId: vehicle.id,
+        pickupAt: normalized.pickupAt,
+        returnAt: normalized.returnAt
+      }, { tenantId });
+    } catch (error) {
+      vehicleConflict = String(error?.message || 'Vehicle conflict');
+      errors.push(vehicleConflict);
+    }
+  }
+
+  return {
+    row: index + 1,
+    valid: errors.length === 0,
+    errors,
+    warnings,
+    duplicateReasons: [],
+    tenantId,
+    tenantLabel: tenant?.name || tenant?.slug || tenantId || '',
+    reservationNumber: normalized.reservationNumber,
+    workflowMode: normalized.workflowMode,
+    status: normalized.status,
+    paymentStatus: normalized.paymentStatus,
+    customerAction: customerResolution.action,
+    resolvedCustomerId: customerResolution.customer?.id || null,
+    resolvedCustomerLabel: customerResolution.customer ? `${customerResolution.customer.firstName} ${customerResolution.customer.lastName}`.trim() : null,
+    resolvedVehicleTypeId: vehicleType?.id || vehicle?.vehicleTypeId || null,
+    resolvedVehicleTypeLabel: vehicleType?.name || null,
+    resolvedVehicleId: vehicle?.id || null,
+    resolvedVehicleLabel: vehicle ? `${vehicle.internalNumber}${vehicle.plate ? ` / ${vehicle.plate}` : ''}` : null,
+    resolvedPickupLocationId: pickupLocation?.id || null,
+    resolvedReturnLocationId: returnLocation?.id || null,
+    normalized: {
+      ...normalized,
+      tenantId,
+      customerId: customerResolution.customer?.id || null,
+      vehicleTypeId: vehicleType?.id || vehicle?.vehicleTypeId || null,
+      vehicleId: vehicle?.id || null,
+      pickupLocationId: pickupLocation?.id || null,
+      returnLocationId: returnLocation?.id || null,
+      customerFirstName: norm(row?.customerFirstName) || null,
+      customerLastName: norm(row?.customerLastName) || null,
+      customerEmail: norm(row?.customerEmail) || null,
+      customerPhone: norm(row?.customerPhone) || null
+    }
+  };
+}
+
+async function createImportedCustomer(prepared, row) {
+  if (prepared.customerId) return prepared.customerId;
+  const customer = await prisma.customer.create({
+    data: {
+      tenantId: prepared.tenantId,
+      firstName: prepared.customerFirstName,
+      lastName: prepared.customerLastName,
+      email: prepared.customerEmail || null,
+      phone: prepared.customerPhone
+    },
+    select: { id: true }
+  });
+  return customer.id;
+}
+
 async function completeLinkedCarSharingTripForReservation(reservationId, actorUserId = null, reason = 'Reservation checked in') {
   if (!reservationId) return null;
 
@@ -514,5 +863,122 @@ export const reservationsService = {
     const row = await prisma.reservation.findFirst({ where: { id, ...(scope?.tenantId ? { tenantId: scope.tenantId } : {}) } });
     if (!row) throw new Error('Reservation not found');
     return prisma.reservation.delete({ where: { id } });
+  },
+
+  async validateBulk(rows = [], scope = {}) {
+    const cache = {
+      tenantById: new Map(),
+      tenantBySlug: new Map(),
+      tenantByName: new Map(),
+      location: new Map(),
+      vehicleType: new Map(),
+      vehicle: new Map(),
+      customer: new Map()
+    };
+
+    let validCount = 0;
+    let invalidCount = 0;
+    const report = [];
+
+    for (let idx = 0; idx < rows.length; idx += 1) {
+      const built = await buildReservationImportRow(rows[idx], idx, scope, cache);
+      if (built.valid) validCount += 1;
+      else invalidCount += 1;
+      report.push(built);
+    }
+
+    return {
+      found: rows.length,
+      valid: validCount,
+      duplicates: 0,
+      invalid: invalidCount,
+      rows: report
+    };
+  },
+
+  async importBulk(rows = [], scope = {}, actorUserId = null) {
+    const validation = await this.validateBulk(rows, scope);
+    const validRows = validation.rows.filter((row) => row.valid);
+
+    if (!validRows.length) {
+      return { created: 0, skipped: validation.found, validation };
+    }
+
+    let created = 0;
+    for (const row of validRows) {
+      const prepared = row.normalized;
+      const customerId = await createImportedCustomer(prepared, row);
+      const reservation = await prisma.reservation.create({
+        data: {
+          tenantId: prepared.tenantId,
+          reservationNumber: prepared.reservationNumber,
+          sourceRef: prepared.sourceRef || null,
+          status: prepared.status || 'CONFIRMED',
+          workflowMode: prepared.workflowMode || 'RENTAL',
+          loanerBillingMode: prepared.loanerBillingMode || null,
+          repairOrderNumber: prepared.repairOrderNumber || null,
+          claimNumber: prepared.claimNumber || null,
+          serviceAdvisorName: prepared.serviceAdvisorName || null,
+          serviceAdvisorEmail: prepared.serviceAdvisorEmail || null,
+          serviceAdvisorPhone: prepared.serviceAdvisorPhone || null,
+          serviceStartAt: prepared.serviceStartAt || null,
+          estimatedServiceCompletionAt: prepared.estimatedServiceCompletionAt || null,
+          serviceVehicleYear: prepared.serviceVehicleYear || null,
+          serviceVehicleMake: prepared.serviceVehicleMake || null,
+          serviceVehicleModel: prepared.serviceVehicleModel || null,
+          serviceVehiclePlate: prepared.serviceVehiclePlate || null,
+          serviceVehicleVin: prepared.serviceVehicleVin || null,
+          loanerProgramNotes: prepared.loanerProgramNotes || null,
+          customerId,
+          vehicleId: prepared.vehicleId || null,
+          vehicleTypeId: prepared.vehicleTypeId || null,
+          pickupAt: prepared.pickupAt,
+          returnAt: prepared.returnAt,
+          pickupLocationId: prepared.pickupLocationId,
+          returnLocationId: prepared.returnLocationId,
+          dailyRate: prepared.dailyRate,
+          estimatedTotal: prepared.estimatedTotal,
+          paymentStatus: prepared.paymentStatus || 'PENDING',
+          sendConfirmationEmail: false,
+          notes: prepared.notes ? `${prepared.notes}\n[IMPORT_MIGRATION] Uploaded from reservation migration tool` : '[IMPORT_MIGRATION] Uploaded from reservation migration tool'
+        }
+      });
+
+      await prisma.reservationPricingSnapshot.upsert({
+        where: { reservationId: reservation.id },
+        create: {
+          reservationId: reservation.id,
+          dailyRate: prepared.dailyRate,
+          source: 'RESERVATION_IMPORT'
+        },
+        update: {
+          dailyRate: prepared.dailyRate,
+          source: 'RESERVATION_IMPORT'
+        }
+      });
+
+      await prisma.auditLog.create({
+        data: {
+          tenantId: reservation.tenantId,
+          reservationId: reservation.id,
+          action: 'CREATE',
+          actorUserId,
+          toStatus: reservation.status,
+          metadata: JSON.stringify({
+            reservationNumber: reservation.reservationNumber,
+            importMigration: true,
+            sourceRef: reservation.sourceRef || null
+          })
+        }
+      });
+
+      created += 1;
+    }
+
+    return {
+      created,
+      skipped: validation.found - created,
+      validation
+    };
   }
 };
