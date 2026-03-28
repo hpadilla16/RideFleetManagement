@@ -38,6 +38,35 @@ ratesRouter.post('/', async (req, res, next) => {
   } catch (e) { next(e); }
 });
 
+ratesRouter.post('/:id/daily-prices/validate', async (req, res, next) => {
+  try {
+    const rows = Array.isArray(req.body?.rows) ? req.body.rows : [];
+    res.json(await ratesService.validateDailyPrices(req.params.id, rows, scopeFor(req)));
+  } catch (e) {
+    if (/rate not found/i.test(String(e?.message || ''))) return res.status(404).json({ error: e.message });
+    next(e);
+  }
+});
+
+ratesRouter.post('/:id/daily-prices/import', async (req, res, next) => {
+  try {
+    const rows = Array.isArray(req.body?.rows) ? req.body.rows : [];
+    res.json(await ratesService.importDailyPrices(req.params.id, rows, scopeFor(req)));
+  } catch (e) {
+    if (/rate not found/i.test(String(e?.message || ''))) return res.status(404).json({ error: e.message });
+    next(e);
+  }
+});
+
+ratesRouter.delete('/:id/daily-prices/:dailyPriceId', async (req, res, next) => {
+  try {
+    res.json(await ratesService.removeDailyPrice(req.params.id, req.params.dailyPriceId, scopeFor(req)));
+  } catch (e) {
+    if (/rate not found|daily price not found/i.test(String(e?.message || ''))) return res.status(404).json({ error: e.message });
+    next(e);
+  }
+});
+
 ratesRouter.patch('/:id', async (req, res, next) => {
   try {
     const out = await ratesService.update(req.params.id, req.body || {}, scopeFor(req));

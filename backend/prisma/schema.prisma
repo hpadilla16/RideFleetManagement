@@ -319,6 +319,7 @@ model VehicleType {
   vehicles     Vehicle[]
   reservations Reservation[]
   rateItems    RateItem[]
+  rateDailyPrices RateDailyPrice[]
   hostVehicleSubmissions HostVehicleSubmission[]
 
   @@unique([tenantId, code])
@@ -1383,6 +1384,7 @@ model Rate {
   updatedAt         DateTime  @updatedAt
 
   rateItems         RateItem[]
+  dailyPrices       RateDailyPrice[]
 
   @@index([locationId, isActive])
 }
@@ -1406,6 +1408,22 @@ model RateItem {
   sortOrder       Int       @default(0)
 
   @@unique([rateId, vehicleTypeId])
+}
+
+model RateDailyPrice {
+  id            String      @id @default(cuid())
+  rateId         String
+  rate           Rate        @relation(fields: [rateId], references: [id], onDelete: Cascade)
+  vehicleTypeId  String
+  vehicleType    VehicleType @relation(fields: [vehicleTypeId], references: [id])
+  date           DateTime
+  daily          Decimal     @default(0) @db.Decimal(10, 2)
+  createdAt      DateTime    @default(now())
+  updatedAt      DateTime    @updatedAt
+
+  @@unique([rateId, vehicleTypeId, date])
+  @@index([rateId, date])
+  @@index([vehicleTypeId, date])
 }
 
 model Fee {

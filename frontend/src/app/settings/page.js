@@ -145,7 +145,8 @@ const EMPTY_RATE = {
   effectiveDate: '',
   endDate: '',
   isActive: true,
-  rateItems: []
+  rateItems: [],
+  dailyPrices: []
 };
 const EMPTY_SERVICE = {
   code: '', name: '', description: '', chargeType: 'UNIT', unitLabel: 'Unit', calculationBy: '24_HOUR_TIME',
@@ -175,6 +176,26 @@ const EMPTY_COMMISSION_RULE = {
   priority: '0',
   isActive: true
 };
+
+function parseDelimitedRows(text) {
+  const lines = String(text || '')
+    .replace(/^\uFEFF/, '')
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+  if (!lines.length) return [];
+
+  const delimiter = lines[0].includes('\t') ? '\t' : ',';
+  const headers = lines[0].split(delimiter).map((item) => item.trim());
+
+  return lines.slice(1).map((line) => {
+    const values = line.split(delimiter).map((item) => item.trim());
+    return headers.reduce((acc, header, idx) => {
+      acc[header] = values[idx] ?? '';
+      return acc;
+    }, {});
+  });
+}
 
 export default function SettingsPage() {
   return <AuthGate>{({ token, me, logout }) => <SettingsInner token={token} me={me} logout={logout} />}</AuthGate>;
@@ -216,6 +237,9 @@ function SettingsInner({ token, me, logout }) {
   const [locationForm, setLocationForm] = useState(EMPTY_LOCATION);
   const [feeForm, setFeeForm] = useState(EMPTY_FEE);
   const [rateForm, setRateForm] = useState(EMPTY_RATE);
+  const [rateDailyUploadRows, setRateDailyUploadRows] = useState([]);
+  const [rateDailyUploadName, setRateDailyUploadName] = useState('');
+  const [rateDailyUploadReport, setRateDailyUploadReport] = useState(null);
   const [serviceForm, setServiceForm] = useState(EMPTY_SERVICE);
   const [serviceEditId, setServiceEditId] = useState(null);
   const [locationEditor, setLocationEditor] = useState(null);
@@ -800,6 +824,81 @@ function SettingsInner({ token, me, logout }) {
     setMsg('Insurance plan removed');
   };
 
+  const resetRateDailyUpload = () => {
+    setRateDailyUploadRows([]);
+    setRateDailyUploadName('');
+    setRateDailyUploadReport(null);
+  };
+
+  const buildRateEditorState = (rate) => ({
+    id: rate.id,
+    rateCode: rate.rateCode || '',
+    name: rate.name || '',
+    locationId: rate.locationId || '',
+    locationIds: (() => {
+      try {
+        if (Array.isArray(rate.locationIds)) return rate.locationIds;
+        if (typeof rate.locationIds === 'string' && rate.locationIds.trim()) {
+          const parsed = JSON.parse(rate.locationIds);
+          return Array.isArray(parsed) ? parsed : [];
+        }
+      } catch {}
+      return [];
+    })(),
+    rateType: rate.rateType || 'MULTIPLE_CLASSES',
+    calculationBy: rate.calculationBy || '24_HOUR_TIME',
+    averageBy: rate.averageBy || 'DATE_RANGE',
+    daily: String(rate.daily ?? ''),
+    fuelChargePerGallon: rate.fuelChargePerGallon ?? '',
+    minChargeDays: rate.minChargeDays ?? '',
+    extraMileCharge: rate.extraMileCharge ?? '',
+    graceMinutes: rate.graceMinutes ?? '',
+    useHourlyRates: !!rate.useHourlyRates,
+    active: !!rate.active,
+    displayOnline: !!rate.displayOnline,
+    sameSpecialRates: !!rate.sameSpecialRates,
+    monday: rate.monday ?? true,
+    tuesday: rate.tuesday ?? true,
+    wednesday: rate.wednesday ?? true,
+    thursday: rate.thursday ?? true,
+    friday: rate.friday ?? true,
+    saturday: rate.saturday ?? true,
+    sunday: rate.sunday ?? true,
+    effectiveDate: rate.effectiveDate ? new Date(rate.effectiveDate).toISOString().slice(0, 10) : '',
+    endDate: rate.endDate ? new Date(rate.endDate).toISOString().slice(0, 10) : '',
+    isActive: rate.isActive ?? true,
+    dailyPrices: Array.isArray(rate.dailyPrices) ? rate.dailyPrices.map((row) => ({
+      id: row.id,
+      date: row.date ? new Date(row.date).toISOString().slice(0, 10) : '',
+      daily: String(row.daily ?? ''),
+      vehicleTypeId: row.vehicleTypeId || '',
+      vehicleTypeCode: row.vehicleType?.code || '',
+      vehicleTypeName: row.vehicleType?.name || ''
+    })) : [],
+    rateItems: vehicleTypes.map((vt, idx) => {
+      const found = (rate.rateItems || []).find((x) => x.vehicleTypeId === vt.id);
+      return {
+        vehicleTypeId: vt.id,
+        sortOrder: idx,
+        hourly: String(found?.hourly ?? ''),
+        daily: String(found?.daily ?? ''),
+        extraDaily: String(found?.extraDaily ?? ''),
+        weekly: String(found?.weekly ?? ''),
+        monthly: String(found?.monthly ?? ''),
+        minHourly: String(found?.minHourly ?? 0),
+        minDaily: String(found?.minDaily ?? 0),
+        minWeekly: String(found?.minWeekly ?? 0),
+        minMonthly: String(found?.minMonthly ?? 0),
+        extraMileCharge: String(found?.extraMileCharge ?? '')
+      };
+    })
+  });
+
+  const applyRateToEditor = (rate) => {
+    setRateForm(buildRateEditorState(rate));
+    resetRateDailyUpload();
+  };
+
   const addRate = async (e) => {
     e.preventDefault();
     const payload = {
@@ -849,65 +948,12 @@ function SettingsInner({ token, me, logout }) {
     }
 
     setRateForm(EMPTY_RATE);
+    resetRateDailyUpload();
     await load();
   };
 
   const editRate = async (rate) => {
-    setRateForm({
-      id: rate.id,
-      rateCode: rate.rateCode || '',
-      name: rate.name || '',
-      locationId: rate.locationId || '',
-      locationIds: (() => {
-        try {
-          if (Array.isArray(rate.locationIds)) return rate.locationIds;
-          if (typeof rate.locationIds === 'string' && rate.locationIds.trim()) {
-            const parsed = JSON.parse(rate.locationIds);
-            return Array.isArray(parsed) ? parsed : [];
-          }
-        } catch {}
-        return [];
-      })(),
-      rateType: rate.rateType || 'MULTIPLE_CLASSES',
-      calculationBy: rate.calculationBy || '24_HOUR_TIME',
-      averageBy: rate.averageBy || 'DATE_RANGE',
-      daily: String(rate.daily ?? ''),
-      fuelChargePerGallon: rate.fuelChargePerGallon ?? '',
-      minChargeDays: rate.minChargeDays ?? '',
-      extraMileCharge: rate.extraMileCharge ?? '',
-      graceMinutes: rate.graceMinutes ?? '',
-      useHourlyRates: !!rate.useHourlyRates,
-      active: !!rate.active,
-      displayOnline: !!rate.displayOnline,
-      sameSpecialRates: !!rate.sameSpecialRates,
-      monday: rate.monday ?? true,
-      tuesday: rate.tuesday ?? true,
-      wednesday: rate.wednesday ?? true,
-      thursday: rate.thursday ?? true,
-      friday: rate.friday ?? true,
-      saturday: rate.saturday ?? true,
-      sunday: rate.sunday ?? true,
-      effectiveDate: rate.effectiveDate ? new Date(rate.effectiveDate).toISOString().slice(0, 10) : '',
-      endDate: rate.endDate ? new Date(rate.endDate).toISOString().slice(0, 10) : '',
-      isActive: rate.isActive ?? true,
-      rateItems: vehicleTypes.map((vt, idx) => {
-        const found = (rate.rateItems || []).find((x) => x.vehicleTypeId === vt.id);
-        return {
-          vehicleTypeId: vt.id,
-          sortOrder: idx,
-          hourly: String(found?.hourly ?? ''),
-          daily: String(found?.daily ?? ''),
-          extraDaily: String(found?.extraDaily ?? ''),
-          weekly: String(found?.weekly ?? ''),
-          monthly: String(found?.monthly ?? ''),
-          minHourly: String(found?.minHourly ?? 0),
-          minDaily: String(found?.minDaily ?? 0),
-          minWeekly: String(found?.minWeekly ?? 0),
-          minMonthly: String(found?.minMonthly ?? 0),
-          extraMileCharge: String(found?.extraMileCharge ?? '')
-        };
-      })
-    });
+    applyRateToEditor(rate);
   };
 
   const toggleRate = async (rate) => {
@@ -942,6 +988,97 @@ function SettingsInner({ token, me, logout }) {
         return;
       }
       setMsg(text || 'Unable to delete rate');
+    }
+  };
+
+  const downloadRateDailyPricingTemplate = () => {
+    const sampleTypes = vehicleTypes.slice(0, Math.max(1, Math.min(vehicleTypes.length, 3)));
+    const sampleRows = sampleTypes.length
+      ? sampleTypes.map((vt, idx) => `2026-03-0${idx + 1},${vt.code},${(idx + 5).toFixed(2)}`).join('\n')
+      : '2026-03-01,ECON,49.99';
+    const csv = `date,vehicleTypeCode,dailyRate\n${sampleRows}\n`;
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const url = window.URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    const safeCode = String(rateForm?.rateCode || 'rate').replace(/[^a-z0-9_-]+/gi, '-').toLowerCase();
+    link.href = url;
+    link.download = `${safeCode || 'rate'}-daily-pricing-template.csv`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    window.URL.revokeObjectURL(url);
+  };
+
+  const loadRateDailyPricingFile = async (file) => {
+    if (!file) return;
+    const text = await file.text();
+    const rows = parseDelimitedRows(text);
+    setRateDailyUploadRows(rows);
+    setRateDailyUploadName(file.name || 'pricing-upload.csv');
+    setRateDailyUploadReport(null);
+    setMsg(rows.length ? `Loaded ${rows.length} dynamic pricing row(s) from ${file.name}` : 'No pricing rows found in that file');
+  };
+
+  const validateRateDailyPricing = async () => {
+    if (!rateForm?.id) {
+      setMsg('Save the rate first, then upload dynamic daily prices.');
+      return;
+    }
+    if (!rateDailyUploadRows.length) {
+      setMsg('Upload the pricing template first.');
+      return;
+    }
+    try {
+      const out = await api(scopedSettingsPath(`/api/rates/${rateForm.id}/daily-prices/validate`), {
+        method: 'POST',
+        body: JSON.stringify({ rows: rateDailyUploadRows })
+      }, token);
+      setRateDailyUploadReport(out);
+      setMsg(`Validated ${out.validCount || 0} dynamic daily pricing row(s)`);
+    } catch (err) {
+      setMsg(String(err?.message || 'Unable to validate dynamic pricing file'));
+    }
+  };
+
+  const importRateDailyPricing = async () => {
+    if (!rateForm?.id) {
+      setMsg('Save the rate first, then upload dynamic daily prices.');
+      return;
+    }
+    if (!rateDailyUploadRows.length) {
+      setMsg('Upload the pricing template first.');
+      return;
+    }
+    try {
+      const out = await api(scopedSettingsPath(`/api/rates/${rateForm.id}/daily-prices/import`), {
+        method: 'POST',
+        body: JSON.stringify({ rows: rateDailyUploadRows })
+      }, token);
+      if (out?.rate) applyRateToEditor(out.rate);
+      await load();
+      setRateDailyUploadReport(out ? {
+        validCount: out.imported || 0,
+        errorCount: Array.isArray(out.errors) ? out.errors.length : 0,
+        rows: out.rate?.dailyPrices || [],
+        errors: out.errors || []
+      } : null);
+      setMsg(`Imported ${out?.imported || 0} dynamic daily pricing row(s)`);
+    } catch (err) {
+      setMsg(String(err?.message || 'Unable to import dynamic daily pricing'));
+    }
+  };
+
+  const removeRateDailyPrice = async (dailyPriceId) => {
+    if (!rateForm?.id || !dailyPriceId) return;
+    try {
+      const out = await api(scopedSettingsPath(`/api/rates/${rateForm.id}/daily-prices/${dailyPriceId}`), {
+        method: 'DELETE'
+      }, token);
+      if (out) applyRateToEditor(out);
+      await load();
+      setMsg('Dynamic daily price removed');
+    } catch (err) {
+      setMsg(String(err?.message || 'Unable to remove dynamic daily price'));
     }
   };
 
@@ -1185,6 +1322,8 @@ function SettingsInner({ token, me, logout }) {
   const rateFormMode = rateForm?.id ? 'Editing rate' : 'New rate';
   const rateDateInvalid = !!(rateForm?.effectiveDate && rateForm?.endDate && new Date(rateForm.endDate) < new Date(rateForm.effectiveDate));
   const rateFormValid = !!rateForm?.rateCode && !rateDateInvalid;
+  const rateDailyPrices = Array.isArray(rateForm?.dailyPrices) ? rateForm.dailyPrices : [];
+  const rateDailyPricePreview = rateDailyPrices.slice(0, 24);
   const activeSettingsTenant = tenantRows.find((tenant) => tenant.id === activeSettingsTenantId) || null;
   const activeLocationCount = locations.filter((location) => location.isActive !== false).length;
   const activeVehicleTypeCount = vehicleTypes.length;
@@ -1601,7 +1740,7 @@ function SettingsInner({ token, me, logout }) {
 
         {tab === 'rates' && (
           <div className="stack">
-            <div className="row-between"><h2>Master Rates</h2><button onClick={() => setRateForm({ ...EMPTY_RATE, rateItems: vehicleTypes.map((vt, idx) => ({ vehicleTypeId: vt.id, sortOrder: idx, hourly: '', daily: '', extraDaily: '', weekly: '', monthly: '', minHourly: '0', minDaily: '0', minWeekly: '0', minMonthly: '0', extraMileCharge: '' })) })}>New Rate</button></div>
+            <div className="row-between"><h2>Master Rates</h2><button onClick={() => { setRateForm({ ...EMPTY_RATE, rateItems: vehicleTypes.map((vt, idx) => ({ vehicleTypeId: vt.id, sortOrder: idx, hourly: '', daily: '', extraDaily: '', weekly: '', monthly: '', minHourly: '0', minDaily: '0', minWeekly: '0', minMonthly: '0', extraMileCharge: '' })) }); resetRateDailyUpload(); }}>New Rate</button></div>
             <div className="label" style={{ marginTop: -4 }}>{rateFormMode}</div>
             <div className="grid2">
               <input placeholder="Rate code" value={rateQuery} onChange={(e) => setRateQuery(e.target.value)} />
@@ -1703,6 +1842,86 @@ function SettingsInner({ token, me, logout }) {
                     })}
                   </tbody>
                 </table>
+              </div>
+
+              <div className="glass card" style={{ padding: 14 }}>
+                <div className="row-between" style={{ alignItems: 'flex-start', gap: 12 }}>
+                  <div className="stack" style={{ gap: 4 }}>
+                    <label className="label">Dynamic Daily Pricing</label>
+                    <div className="surface-note" style={{ margin: 0 }}>
+                      Upload an Excel-friendly CSV template to set a different daily rate by date for each vehicle class, like March 1 = $5 and March 2 = $6.
+                    </div>
+                  </div>
+                  <span className="badge">{rateDailyPrices.length} daily overrides</span>
+                </div>
+
+                {!rateForm.id ? (
+                  <div className="surface-note" style={{ marginTop: 12 }}>
+                    Save the rate first, then upload your date-based daily prices.
+                  </div>
+                ) : (
+                  <div className="stack" style={{ marginTop: 12 }}>
+                    <div className="inline-actions">
+                      <button type="button" onClick={downloadRateDailyPricingTemplate}>Download Template</button>
+                      <label className="button-subtle" style={{ display: 'inline-flex', alignItems: 'center', cursor: 'pointer' }}>
+                        Upload CSV
+                        <input
+                          type="file"
+                          accept=".csv,.txt,text/csv"
+                          style={{ display: 'none' }}
+                          onChange={(e) => loadRateDailyPricingFile(e.target.files?.[0])}
+                        />
+                      </label>
+                      <button type="button" className="button-subtle" onClick={validateRateDailyPricing} disabled={!rateDailyUploadRows.length}>Validate Upload</button>
+                      <button type="button" onClick={importRateDailyPricing} disabled={!rateDailyUploadRows.length}>Import Daily Pricing</button>
+                    </div>
+
+                    {rateDailyUploadName ? (
+                      <div className="surface-note">
+                        Loaded file: <strong>{rateDailyUploadName}</strong> with <strong>{rateDailyUploadRows.length}</strong> row(s).
+                      </div>
+                    ) : null}
+
+                    {rateDailyUploadReport ? (
+                      <div className="surface-note">
+                        <strong>Validation summary:</strong> {rateDailyUploadReport.validCount || 0} valid row(s), {rateDailyUploadReport.errorCount || 0} issue(s).
+                        {Array.isArray(rateDailyUploadReport.errors) && rateDailyUploadReport.errors.length ? (
+                          <div style={{ marginTop: 8 }}>
+                            {rateDailyUploadReport.errors.slice(0, 8).map((error, idx) => (
+                              <div key={`${error.line || idx}-${error.field || idx}`}>
+                                Line {error.line || '-'} | {error.field || 'row'} | {error.message}
+                              </div>
+                            ))}
+                          </div>
+                        ) : null}
+                      </div>
+                    ) : null}
+
+                    {rateDailyPrices.length ? (
+                      <div className="stack">
+                        <label className="label">Current Daily Overrides</label>
+                        <table>
+                          <thead><tr><th>Date</th><th>Vehicle Type</th><th>Daily Rate</th><th>Actions</th></tr></thead>
+                          <tbody>
+                            {rateDailyPricePreview.map((row) => (
+                              <tr key={row.id || `${row.date}-${row.vehicleTypeId}`}>
+                                <td>{row.date || '-'}</td>
+                                <td>{row.vehicleTypeCode ? `${row.vehicleTypeCode} - ${row.vehicleTypeName || ''}` : row.vehicleTypeName || row.vehicleTypeId}</td>
+                                <td>${Number(row.daily || 0).toFixed(2)}</td>
+                                <td>{row.id ? <button type="button" className="button-subtle" onClick={() => removeRateDailyPrice(row.id)}>Remove</button> : '-'}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                        {rateDailyPrices.length > rateDailyPricePreview.length ? (
+                          <span className="label">Showing first {rateDailyPricePreview.length} of {rateDailyPrices.length} daily overrides.</span>
+                        ) : null}
+                      </div>
+                    ) : (
+                      <div className="surface-note">No daily overrides uploaded yet. Base daily rates above will still apply.</div>
+                    )}
+                  </div>
+                )}
               </div>
 
               <button type="submit" disabled={!rateFormValid}>{rateForm.id ? 'Update Rate' : 'Save Rate'}</button>
