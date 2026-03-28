@@ -18,6 +18,7 @@ export const feesService = {
         amount: data.amount ?? 0,
         taxable: data.taxable ?? false,
         isActive: data.isActive ?? true,
+        mandatory: data.mandatory ?? false,
         isUnderageFee: data.isUnderageFee ?? false,
         isAdditionalDriverFee: data.isAdditionalDriverFee ?? false
       }

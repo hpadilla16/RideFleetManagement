@@ -468,7 +468,23 @@ async function buildReservationBreakdown(reservation) {
   const addlDriverAutoFees = hasAdditionalDrivers
     ? await prisma.fee.findMany({ where: { ...tenantWhere, isActive: true, isAdditionalDriverFee: true }, select: { id: true } })
     : [];
-  const mergedFeeIds = [...new Set([...selectedFeeIds, ...underageAutoFees.map((f) => f.id), ...addlDriverAutoFees.map((f) => f.id)])];
+  const mandatoryLocation = reservation?.pickupLocationId
+    ? await prisma.location.findFirst({
+        where: { id: reservation.pickupLocationId, ...tenantWhere },
+        include: {
+          locationFees: {
+            include: {
+              fee: { select: { id: true, isActive: true, mandatory: true } }
+            }
+          }
+        }
+      })
+    : null;
+  const mandatoryLocationFeeIds = (mandatoryLocation?.locationFees || [])
+    .map((row) => row.fee)
+    .filter((fee) => fee?.id && fee?.isActive && fee?.mandatory)
+    .map((fee) => fee.id);
+  const mergedFeeIds = [...new Set([...selectedFeeIds, ...underageAutoFees.map((f) => f.id), ...addlDriverAutoFees.map((f) => f.id), ...mandatoryLocationFeeIds])];
 
   const [services, fees] = await Promise.all([
     Promise.resolve([]),

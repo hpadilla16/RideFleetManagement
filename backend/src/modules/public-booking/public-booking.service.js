@@ -408,6 +408,7 @@ export const publicBookingService = {
           days: Number(result.quote?.days || 0),
           dailyRate: money(result.quote?.dailyRate),
           baseTotal: money(result.quote?.subtotal),
+          mandatoryFees: money(result.quote?.fees),
           estimatedTaxes: money(result.quote?.taxes),
           estimatedTripTotal: money(result.quote?.total),
           gracePeriodMin: Number(result.quote?.gracePeriodMin || 0),
@@ -431,6 +432,17 @@ export const publicBookingService = {
           total: money(service.total),
           taxable: !!service.taxable,
           mandatory: !!service.mandatory
+        })),
+        mandatoryFees: (result.mandatoryFees || []).map((fee) => ({
+          feeId: fee.feeId,
+          code: fee.code,
+          name: fee.name,
+          description: fee.description || '',
+          mode: fee.mode || 'FIXED',
+          amount: money(fee.amount),
+          total: money(fee.total),
+          taxable: !!fee.taxable,
+          mandatory: true
         })),
         insurancePlans: (result.insurancePlans || []).map((plan) => ({
           code: plan.code,

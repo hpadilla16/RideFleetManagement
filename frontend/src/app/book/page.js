@@ -493,6 +493,14 @@ function PublicBookingPageInner() {
     () => chosenAdditionalServices.reduce((sum, service) => sum + Number(service.total || 0), 0),
     [chosenAdditionalServices]
   );
+  const mandatoryBookingFees = useMemo(
+    () => Array.isArray(selectedResult?.mandatoryFees) ? selectedResult.mandatoryFees : [],
+    [selectedResult]
+  );
+  const mandatoryBookingFeesTotal = useMemo(
+    () => mandatoryBookingFees.reduce((sum, fee) => sum + Number(fee.total || 0), 0),
+    [mandatoryBookingFees]
+  );
 
   const selectedInsurancePlan = useMemo(() => {
     if (searchMode !== 'RENTAL') return null;
@@ -1099,7 +1107,7 @@ function PublicBookingPageInner() {
                   <strong>Checkout Snapshot</strong>
                   <br />
                   {searchMode === 'RENTAL'
-                    ? `Base total ${fmtMoney(selectedResult?.quote?.estimatedTripTotal)} | Estimated total ${fmtMoney(checkoutEstimatedTotal)}`
+                    ? `Base total ${fmtMoney(selectedResult?.quote?.estimatedTripTotal)}${mandatoryBookingFeesTotal ? ` | Required fees ${fmtMoney(mandatoryBookingFeesTotal)}` : ''} | Estimated total ${fmtMoney(checkoutEstimatedTotal)}`
                     : `Base host charges ${fmtMoney(selectedCarSharingHostChargeFees)} | Mandatory trip fee ${fmtMoney(selectedCarSharingGuestTripFee)} | Guest total ${fmtMoney(checkoutEstimatedTotal)}.`}
                 </div>
                 {searchMode === 'CAR_SHARING' ? (
@@ -1229,6 +1237,51 @@ function PublicBookingPageInner() {
                           disabled={!insuranceSelection.declinedCoverage}
                         />
                       </div>
+                    </div>
+                  </div>
+                ) : null}
+                {searchMode === 'RENTAL' && mandatoryBookingFees.length ? (
+                  <div className="stack" style={{ marginBottom: 18 }}>
+                    <div>
+                      <div className="section-title" style={{ fontSize: 16 }}>Required Fees</div>
+                      <p className="ui-muted">These fees are mandatory for this pickup location and are automatically included in the reservation total.</p>
+                    </div>
+                    <div className="stack">
+                      {mandatoryBookingFees.map((fee) => (
+                        <div key={fee.feeId || fee.code || fee.name} className="surface-note" style={{ display: 'grid', gap: 10 }}>
+                          <div className="row-between" style={{ alignItems: 'start', gap: 12 }}>
+                            <div className="stack" style={{ gap: 4 }}>
+                              <strong>{fee.name}</strong>
+                              {fee.description ? <span className="ui-muted">{fee.description}</span> : null}
+                              <span className="eyebrow">
+                                Required fee
+                                {fee.taxable ? ' | Taxable' : ''}
+                                {fee.mode ? ` | ${String(fee.mode).replaceAll('_', ' ')}` : ''}
+                              </span>
+                            </div>
+                            <span className="status-chip neutral">Included</span>
+                          </div>
+                          <div className="form-grid-2">
+                            <div>
+                              <div className="label">Fee Total</div>
+                              <input value={fmtMoney(fee.total)} disabled />
+                            </div>
+                            <div>
+                              <div className="label">Billing Rule</div>
+                              <input
+                                value={
+                                  String(fee.mode || 'FIXED').toUpperCase() === 'PER_DAY'
+                                    ? `Per day for ${selectedResult?.quote?.days || 1} day(s)`
+                                    : String(fee.mode || 'FIXED').toUpperCase() === 'PERCENTAGE'
+                                      ? `${Number(fee.amount || 0).toFixed(2)}% of base rate`
+                                      : 'Flat amount'
+                                }
+                                disabled
+                              />
+                            </div>
+                          </div>
+                        </div>
+                      ))}
                     </div>
                   </div>
                 ) : null}
@@ -1426,6 +1479,7 @@ function PublicBookingPageInner() {
                 {searchMode === 'RENTAL' ? (
                   <div className="surface-note">
                     Base trip total {fmtMoney(selectedResult?.quote?.estimatedTripTotal)}.
+                    {mandatoryBookingFeesTotal ? ` Required fees included: ${fmtMoney(mandatoryBookingFeesTotal)}.` : ''}
                     {chosenAdditionalServicesTotal || selectedInsuranceTotal
                       ? ` With extras and insurance: ${fmtMoney(checkoutEstimatedTotal)}.`
                       : ' Additional services and insurance will be reflected here before checkout.'}

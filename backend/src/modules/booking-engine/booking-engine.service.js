@@ -159,6 +159,45 @@ function computeAdditionalServiceLine(service, days, quantityOverride) {
   };
 }
 
+function computePublicFeeLine(fee, baseAmount, days) {
+  const amount = Number(fee?.amount || 0);
+  const mode = String(fee?.mode || 'FIXED').toUpperCase();
+  const total = mode === 'PERCENTAGE'
+    ? Number((Number(baseAmount || 0) * (amount / 100)).toFixed(2))
+    : mode === 'PER_DAY'
+      ? Number((amount * Math.max(1, Number(days || 1))).toFixed(2))
+      : Number(amount.toFixed(2));
+  return {
+    feeId: fee.id,
+    code: fee.code || null,
+    name: fee.name,
+    description: fee.description || '',
+    mode,
+    amount: money(amount),
+    total: money(total),
+    taxable: !!fee.taxable,
+    mandatory: !!fee.mandatory
+  };
+}
+
+async function listMandatoryFeesForLocation({ tenantId, locationId, baseAmount, days }) {
+  if (!tenantId || !locationId) return [];
+  const location = await prisma.location.findFirst({
+    where: { id: String(locationId), tenantId: String(tenantId) },
+    include: {
+      locationFees: {
+        include: {
+          fee: true
+        }
+      }
+    }
+  });
+  return (location?.locationFees || [])
+    .map((row) => row.fee)
+    .filter((fee) => fee?.isActive && fee?.mandatory)
+    .map((fee) => computePublicFeeLine(fee, baseAmount, days));
+}
+
 function generateReservationNumber(prefix = 'WEB') {
   return `${prefix}-${Date.now().toString().slice(-8)}${crypto.randomBytes(2).toString('hex').toUpperCase()}`;
 }
@@ -798,7 +837,7 @@ export const bookingEngineService = {
 
         if (!quote) continue;
 
-        const [additionalServices, insurancePlans] = await Promise.all([
+        const [additionalServices, insurancePlans, mandatoryFees] = await Promise.all([
           listPublicAdditionalServices({
             tenantId: tenant.id,
             locationId: location.id,
@@ -811,10 +850,17 @@ export const bookingEngineService = {
             vehicleTypeId: vehicleType.id,
             baseAmount: Number(quote.baseTotal || 0),
             days: rentalDays
+          }),
+          listMandatoryFeesForLocation({
+            tenantId: tenant.id,
+            locationId: location.id,
+            baseAmount: Number(quote.baseTotal || 0),
+            days: rentalDays
           })
         ]);
         const taxes = money(Number(quote.baseTotal || 0) * (Number(location.taxRate || 0) / 100));
-        const total = money(Number(quote.baseTotal || 0) + taxes);
+        const mandatoryFeesTotal = money((mandatoryFees || []).reduce((sum, fee) => sum + Number(fee.total || 0), 0));
+        const total = money(Number(quote.baseTotal || 0) + taxes + mandatoryFeesTotal);
         results.push({
           location: {
             id: location.id,
@@ -839,6 +885,7 @@ export const bookingEngineService = {
           days: Number(quote.days || 0),
           dailyRate: money(quote.dailyRate),
           subtotal: money(quote.baseTotal),
+          fees: mandatoryFeesTotal,
           taxes,
           total,
           gracePeriodMin: Number(quote.gracePeriodMin || 0),
@@ -846,6 +893,7 @@ export const bookingEngineService = {
         },
           deposit: depositSnapshot({ location, quote }),
           additionalServices,
+          mandatoryFees,
           insurancePlans
         });
       }
@@ -1082,6 +1130,8 @@ export const bookingEngineService = {
             sourceRefId: selectedInsurancePlan.code
           }
         : null;
+      const mandatoryFees = Array.isArray(selected.mandatoryFees) ? selected.mandatoryFees : [];
+      const mandatoryFeesTotal = money(mandatoryFees.reduce((sum, fee) => sum + Number(fee.total || 0), 0));
       const insuranceTotal = money(Number(insuranceLine?.total || 0));
       const addOnsTotal = money(normalizedChosenServices.reduce((sum, service) => sum + Number(service.total || 0), 0));
       const estimatedTotal = money(Number(selected.quote.total || 0) + addOnsTotal + insuranceTotal);
@@ -1134,9 +1184,23 @@ export const bookingEngineService = {
         }
       });
 
-      if (normalizedChosenServices.length || insuranceLine) {
+      if (normalizedChosenServices.length || insuranceLine || mandatoryFees.length) {
         await prisma.reservationCharge.createMany({
           data: [
+            ...mandatoryFees.map((fee, idx) => ({
+              reservationId: reservation.id,
+              code: fee.code,
+              name: fee.name,
+              chargeType: 'UNIT',
+              quantity: 1,
+              rate: Number(fee.mode === 'PERCENTAGE' ? fee.amount : fee.total || 0),
+              total: Number(fee.total || 0),
+              taxable: !!fee.taxable,
+              selected: true,
+              sortOrder: idx,
+              source: 'MANDATORY_FEE',
+              sourceRefId: fee.feeId
+            })),
             ...normalizedChosenServices.map((service, idx) => ({
               reservationId: reservation.id,
               code: service.code,
@@ -1147,7 +1211,7 @@ export const bookingEngineService = {
               total: Number(service.total || 0),
               taxable: !!service.taxable,
               selected: true,
-              sortOrder: idx,
+              sortOrder: idx + mandatoryFees.length,
               source: 'ADDITIONAL_SERVICE',
               sourceRefId: service.serviceId
             })),
@@ -1161,7 +1225,7 @@ export const bookingEngineService = {
               total: Number(insuranceLine.total || 0),
               taxable: !!insuranceLine.taxable,
               selected: true,
-              sortOrder: normalizedChosenServices.length,
+              sortOrder: normalizedChosenServices.length + mandatoryFees.length,
               source: 'INSURANCE',
               sourceRefId: insuranceLine.code
             }] : [])
@@ -1212,6 +1276,7 @@ export const bookingEngineService = {
           tripDays: Number(selected.quote?.days || 0),
           dailyRate: money(selected.quote?.dailyRate),
           baseSubtotal: money(selected.quote?.subtotal),
+          mandatoryFeesTotal,
           estimatedTaxes: money(selected.quote?.taxes),
           baseReservationTotal: money(selected.quote?.total),
           additionalServicesTotal: addOnsTotal,
@@ -1221,6 +1286,7 @@ export const bookingEngineService = {
           securityDeposit: money(selected.deposit?.securityDepositAmount),
           currency: 'USD'
         },
+        mandatoryFees,
         additionalServices: normalizedChosenServices,
         insuranceSelection: insuranceLine
           ? {

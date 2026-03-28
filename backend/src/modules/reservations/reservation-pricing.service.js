@@ -28,6 +28,21 @@ function scopedReservationWhere(id, scope = {}) {
   return { id, ...(scope?.tenantId ? { tenantId: scope.tenantId } : {}) };
 }
 
+function rentalDays(pickupAt, returnAt) {
+  const start = new Date(pickupAt || Date.now());
+  const end = new Date(returnAt || Date.now());
+  const diff = end.getTime() - start.getTime();
+  return Math.max(1, Math.ceil(diff / (1000 * 60 * 60 * 24)) || 1);
+}
+
+function computeFeeTotal(fee, { baseAmount = 0, days = 1 } = {}) {
+  const amount = toNumber(fee?.amount);
+  const mode = String(fee?.mode || 'FIXED').trim().toUpperCase();
+  if (mode === 'PER_DAY') return Number((amount * days).toFixed(2));
+  if (mode === 'PERCENTAGE') return Number((baseAmount * (amount / 100)).toFixed(2));
+  return Number(amount.toFixed(2));
+}
+
 async function getReservationOrThrow(reservationId, scope = {}) {
   const row = await prisma.reservation.findFirst({
     where: scopedReservationWhere(reservationId, scope),
@@ -179,8 +194,104 @@ async function maybeCreateAgreementPayment({ reservation, payment }) {
   return created;
 }
 
+async function syncMandatoryLocationFees(reservationId, scope = {}) {
+  const reservation = await prisma.reservation.findFirst({
+    where: scopedReservationWhere(reservationId, scope),
+    include: {
+      pickupLocation: {
+        include: {
+          locationFees: {
+            include: {
+              fee: true
+            }
+          }
+        }
+      },
+      pricingSnapshot: true,
+      charges: { orderBy: [{ sortOrder: 'asc' }, { createdAt: 'asc' }] }
+    }
+  });
+  if (!reservation) throw new Error('Reservation not found');
+
+  const mandatoryFees = (reservation.pickupLocation?.locationFees || [])
+    .map((row) => row.fee)
+    .filter((fee) => fee?.isActive && fee?.mandatory);
+
+  const existingCharges = Array.isArray(reservation.charges) ? reservation.charges : [];
+  const existingMandatoryCharges = existingCharges.filter((row) => String(row.source || '').toUpperCase() === 'MANDATORY_FEE');
+  const chargeByFeeId = new Map(existingMandatoryCharges.map((row) => [String(row.sourceRefId || ''), row]));
+  const activeFeeIds = new Set(mandatoryFees.map((fee) => String(fee.id)));
+  const baseAmount = Number((toNumber(reservation.pricingSnapshot?.dailyRate, toNumber(reservation.dailyRate)) * rentalDays(reservation.pickupAt, reservation.returnAt)).toFixed(2));
+  const days = rentalDays(reservation.pickupAt, reservation.returnAt);
+  let nextSortOrder = existingCharges.reduce((max, row) => {
+    const sortOrder = Number.isInteger(row?.sortOrder) ? row.sortOrder : Number(row?.sortOrder || 0);
+    return Math.max(max, sortOrder);
+  }, -1) + 1;
+
+  await prisma.$transaction(async (tx) => {
+    for (const fee of mandatoryFees) {
+      const existing = chargeByFeeId.get(String(fee.id));
+      const total = computeFeeTotal(fee, { baseAmount, days });
+      const rate = String(fee.mode || 'FIXED').trim().toUpperCase() === 'PERCENTAGE'
+        ? toNumber(fee.amount)
+        : total;
+      const data = {
+        code: fee.code || null,
+        name: fee.name,
+        chargeType: 'UNIT',
+        quantity: 1,
+        rate,
+        total,
+        taxable: !!fee.taxable,
+        selected: true,
+        notes: 'Auto-applied mandatory location fee'
+      };
+
+      if (existing?.id) {
+        await tx.reservationCharge.update({
+          where: { id: existing.id },
+          data
+        });
+      } else {
+        await tx.reservationCharge.create({
+          data: {
+            reservationId,
+            ...data,
+            sortOrder: nextSortOrder++,
+            source: 'MANDATORY_FEE',
+            sourceRefId: fee.id
+          }
+        });
+      }
+    }
+
+    const staleIds = existingMandatoryCharges
+      .filter((row) => !activeFeeIds.has(String(row.sourceRefId || '')))
+      .map((row) => row.id);
+    if (staleIds.length) {
+      await tx.reservationCharge.deleteMany({
+        where: {
+          reservationId,
+          id: { in: staleIds }
+        }
+      });
+    }
+
+    const refreshedCharges = await tx.reservationCharge.findMany({
+      where: { reservationId, selected: true }
+    });
+    await tx.reservation.update({
+      where: { id: reservationId },
+      data: { estimatedTotal: summarizeChargeTotals(refreshedCharges).total }
+    });
+  });
+
+  return mandatoryFees.length;
+}
+
 export const reservationPricingService = {
   async getPricing(reservationId, scope = {}) {
+    await syncMandatoryLocationFees(reservationId, scope);
     await tollsService.syncReservationCharges(reservationId, scope);
     await syncAgreementCharges(reservationId, scope);
     const row = await getReservationOrThrow(reservationId, scope);
@@ -223,6 +334,7 @@ export const reservationPricingService = {
       });
     });
 
+    await syncMandatoryLocationFees(reservationId, scope);
     await tollsService.syncReservationCharges(reservationId, scope);
     await syncAgreementCharges(reservationId, scope);
     return this.getPricing(reservationId, scope);

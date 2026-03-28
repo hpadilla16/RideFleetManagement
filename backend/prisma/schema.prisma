@@ -1440,6 +1440,7 @@ model Fee {
   amount      Decimal  @default(0) @db.Decimal(10, 2)
   taxable       Boolean  @default(false)
   isActive      Boolean  @default(true)
+  mandatory     Boolean  @default(false)
   isUnderageFee       Boolean  @default(false)
   isAdditionalDriverFee Boolean  @default(false)
   createdAt     DateTime @default(now())

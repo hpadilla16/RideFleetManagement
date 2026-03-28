@@ -179,6 +179,29 @@ function rentalDays(pickupAt, returnAt) {
   return Math.max(1, Math.ceil(ms / (24 * 60 * 60 * 1000)));
 }
 
+async function listMandatoryLocationFeeIds(reservation, tenantWhere = {}) {
+  if (!reservation?.pickupLocationId) return [];
+  const location = await prisma.location.findFirst({
+    where: {
+      id: reservation.pickupLocationId,
+      ...tenantWhere
+    },
+    include: {
+      locationFees: {
+        include: {
+          fee: {
+            select: { id: true, isActive: true, mandatory: true }
+          }
+        }
+      }
+    }
+  });
+  return (location?.locationFees || [])
+    .map((row) => row.fee)
+    .filter((fee) => fee?.id && fee?.isActive && fee?.mandatory)
+    .map((fee) => fee.id);
+}
+
 function parseAdditionalDriversFromNotes(notes) {
   const m = String(notes || '').match(/\[RES_ADDITIONAL_DRIVERS\](\{[^\n]*\})/);
   if (!m) return [];
@@ -792,6 +815,7 @@ export const rentalAgreementsService = {
           const autoAddl = await prisma.fee.findMany({ where: { ...tenantWhere, isActive: true, isAdditionalDriverFee: true }, select: { id: true } });
           selectedFeeIds.push(...autoAddl.map((x) => x.id));
         }
+        selectedFeeIds.push(...await listMandatoryLocationFeeIds(reservation, tenantWhere));
 
         const uniqueSelectedFeeIds = [...new Set(selectedFeeIds)];
 
@@ -1086,6 +1110,7 @@ export const rentalAgreementsService = {
       const autoAddl = await prisma.fee.findMany({ where: { ...tenantWhere, isActive: true, isAdditionalDriverFee: true }, select: { id: true } });
       selectedFeeIds.push(...autoAddl.map((x) => x.id));
     }
+    selectedFeeIds.push(...await listMandatoryLocationFeeIds(reservation, tenantWhere));
     const uniqueSelectedFeeIds = [...new Set(selectedFeeIds)];
 
     const services = selectedServiceIds.length
