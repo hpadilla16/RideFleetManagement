@@ -329,7 +329,7 @@ model Vehicle {
   id             String        @id @default(cuid())
   tenantId       String?
   tenant         Tenant?       @relation(fields: [tenantId], references: [id])
-  internalNumber String        @unique
+  internalNumber String
   vin            String?       @unique
   plate          String?       @unique
   tollTagNumber  String?
@@ -358,6 +358,8 @@ model Vehicle {
   hostVehicleSubmission HostVehicleSubmission?
   tollTransactions TollTransaction[]
   tollAssignments TollAssignment[]
+
+  @@unique([tenantId, internalNumber])
 }
 
 model Customer {
