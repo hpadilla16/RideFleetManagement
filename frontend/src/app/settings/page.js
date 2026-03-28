@@ -1849,7 +1849,7 @@ function SettingsInner({ token, me, logout }) {
                   <div className="stack" style={{ gap: 4 }}>
                     <label className="label">Dynamic Daily Pricing</label>
                     <div className="surface-note" style={{ margin: 0 }}>
-                      Upload an Excel-friendly CSV template to set a different daily rate by date for each vehicle class, like March 1 = $5 and March 2 = $6.
+                      Upload an Excel-friendly CSV template to set a different daily rate by date for each vehicle class, like March 1 = $5 and March 2 = $6. Dates can be YYYY-MM-DD or MM/DD/YYYY.
                     </div>
                   </div>
                   <span className="badge">{rateDailyPrices.length} daily overrides</span>

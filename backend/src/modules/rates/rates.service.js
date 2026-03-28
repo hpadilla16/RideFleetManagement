@@ -58,6 +58,31 @@ function dayKey(value) {
   return startOfUtcDay(value).toISOString().slice(0, 10);
 }
 
+function parseDynamicPriceDate(value) {
+  const raw = String(value || '').trim();
+  if (!raw) return null;
+
+  if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) {
+    const parsed = new Date(`${raw}T00:00:00.000Z`);
+    return Number.isNaN(parsed.getTime()) ? null : parsed;
+  }
+
+  const usMatch = raw.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+  if (usMatch) {
+    const [, monthRaw, dayRaw, yearRaw] = usMatch;
+    const month = Number(monthRaw);
+    const day = Number(dayRaw);
+    const year = Number(yearRaw);
+    if (month >= 1 && month <= 12 && day >= 1 && day <= 31) {
+      const parsed = new Date(Date.UTC(year, month - 1, day));
+      if (!Number.isNaN(parsed.getTime())) return parsed;
+    }
+  }
+
+  const fallback = new Date(raw);
+  return Number.isNaN(fallback.getTime()) ? null : startOfUtcDay(fallback);
+}
+
 function buildChargeDates(pickupAt, days) {
   const start = startOfUtcDay(pickupAt);
   return Array.from({ length: Number(days || 0) }, (_, idx) => new Date(start.getTime() + idx * 86400000));
@@ -128,9 +153,9 @@ async function normalizeDailyPriceRows(rateId, rows = [], scope = {}) {
       return;
     }
 
-    const parsedDate = new Date(`${dateRaw}T00:00:00.000Z`);
-    if (Number.isNaN(parsedDate.getTime())) {
-      errors.push({ line, field: 'date', message: `Invalid date ${dateRaw}. Use YYYY-MM-DD.` });
+    const parsedDate = parseDynamicPriceDate(dateRaw);
+    if (!parsedDate) {
+      errors.push({ line, field: 'date', message: `Invalid date ${dateRaw}. Use YYYY-MM-DD or MM/DD/YYYY.` });
       return;
     }
 
