@@ -35,7 +35,10 @@ ratesRouter.post('/', async (req, res, next) => {
   try {
     if (!req.body?.rateCode) return res.status(400).json({ error: 'Missing required field: rateCode' });
     res.status(201).json(await ratesService.create(req.body || {}, scopeFor(req)));
-  } catch (e) { next(e); }
+  } catch (e) {
+    if (e?.code === 'P2002') return res.status(409).json({ error: 'A rate with that code already exists for this tenant' });
+    next(e);
+  }
 });
 
 ratesRouter.post('/:id/daily-prices/validate', async (req, res, next) => {
@@ -74,6 +77,7 @@ ratesRouter.patch('/:id', async (req, res, next) => {
     res.json(out);
   } catch (e) {
     if (e?.code === 'P2025') return res.status(404).json({ error: 'Rate not found' });
+    if (e?.code === 'P2002') return res.status(409).json({ error: 'A rate with that code already exists for this tenant' });
     next(e);
   }
 });

@@ -1349,7 +1349,7 @@ model Rate {
   id                String    @id @default(cuid())
   tenantId          String?
   tenant            Tenant?   @relation(fields: [tenantId], references: [id])
-  rateCode          String    @unique
+  rateCode          String
   name              String?
   locationId        String?
   location          Location? @relation(fields: [locationId], references: [id])
@@ -1387,6 +1387,7 @@ model Rate {
   dailyPrices       RateDailyPrice[]
 
   @@index([locationId, isActive])
+  @@unique([tenantId, rateCode])
 }
 
 model RateItem {
