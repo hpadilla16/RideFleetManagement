@@ -223,6 +223,9 @@ function SettingsInner({ token, me, logout }) {
     description: '',
     chargeBy: 'FIXED',
     amount: '',
+    commissionValueType: '',
+    commissionPercentValue: '',
+    commissionFixedAmount: '',
     taxable: false,
     isActive: true,
     locationIds: [],
@@ -296,6 +299,9 @@ function SettingsInner({ token, me, logout }) {
         description: p.description || '',
         chargeBy: p.chargeBy || p.mode || 'FIXED',
         amount: Number(p.amount || 0),
+        commissionValueType: p.commissionValueType || '',
+        commissionPercentValue: p.commissionPercentValue ?? '',
+        commissionFixedAmount: p.commissionFixedAmount ?? '',
         taxable: !!p.taxable,
         isActive: p.isActive !== false,
         locationIds: Array.isArray(p.locationIds) ? p.locationIds : [],
@@ -762,6 +768,9 @@ function SettingsInner({ token, me, logout }) {
       chargeBy: p.chargeBy || 'FIXED',
       mode: p.chargeBy || 'FIXED',
       amount: Number(p.amount || 0),
+      commissionValueType: p.commissionValueType || null,
+      commissionPercentValue: p.commissionValueType === 'PERCENT' ? Number(p.commissionPercentValue || 0) : null,
+      commissionFixedAmount: p.commissionValueType && p.commissionValueType !== 'PERCENT' ? Number(p.commissionFixedAmount || 0) : null,
       taxable: !!p.taxable,
       isActive: p.isActive !== false,
       locationIds: Array.isArray(p.locationIds) ? p.locationIds : [],
@@ -773,7 +782,7 @@ function SettingsInner({ token, me, logout }) {
 
   const resetInsuranceForm = () => {
     setInsuranceForm({
-      code: '', name: '', label: '', description: '', chargeBy: 'FIXED', amount: '', taxable: false, isActive: true, locationIds: [], vehicleTypeIds: []
+      code: '', name: '', label: '', description: '', chargeBy: 'FIXED', amount: '', commissionValueType: '', commissionPercentValue: '', commissionFixedAmount: '', taxable: false, isActive: true, locationIds: [], vehicleTypeIds: []
     });
     setInsuranceEditIdx(-1);
   };
@@ -787,6 +796,9 @@ function SettingsInner({ token, me, logout }) {
       description: insuranceForm.description || '',
       chargeBy: insuranceForm.chargeBy,
       amount: Number(insuranceForm.amount || 0),
+      commissionValueType: insuranceForm.commissionValueType || '',
+      commissionPercentValue: insuranceForm.commissionValueType === 'PERCENT' ? Number(insuranceForm.commissionPercentValue || 0) : '',
+      commissionFixedAmount: insuranceForm.commissionValueType && insuranceForm.commissionValueType !== 'PERCENT' ? Number(insuranceForm.commissionFixedAmount || 0) : '',
       taxable: !!insuranceForm.taxable,
       isActive: !!insuranceForm.isActive,
       locationIds: insuranceForm.locationIds || [],
@@ -811,6 +823,9 @@ function SettingsInner({ token, me, logout }) {
       description: p.description || '',
       chargeBy: p.chargeBy || p.mode || 'FIXED',
       amount: String(p.amount ?? ''),
+      commissionValueType: p.commissionValueType || '',
+      commissionPercentValue: p.commissionPercentValue ?? '',
+      commissionFixedAmount: p.commissionFixedAmount ?? '',
       taxable: !!p.taxable,
       isActive: p.isActive !== false,
       locationIds: Array.isArray(p.locationIds) ? p.locationIds : [],
@@ -2079,6 +2094,29 @@ function SettingsInner({ token, me, logout }) {
                 </div>
               </div>
 
+              <div className="grid2">
+                <div className="stack">
+                  <label className="label">Insurance Commission</label>
+                  <select value={insuranceForm.commissionValueType || ''} onChange={(e) => setInsuranceForm({ ...insuranceForm, commissionValueType: e.target.value })}>
+                    <option value="">No direct commission</option>
+                    <option value="PERCENT">Percent of insurance premium</option>
+                    <option value="FIXED_PER_UNIT">Fixed per policy sold</option>
+                    <option value="FIXED_PER_AGREEMENT">Fixed per agreement</option>
+                  </select>
+                </div>
+                {insuranceForm.commissionValueType === 'PERCENT' ? (
+                  <div className="stack">
+                    <label className="label">Commission Percent</label>
+                    <input type="number" min="0" step="0.01" value={insuranceForm.commissionPercentValue} onChange={(e) => setInsuranceForm({ ...insuranceForm, commissionPercentValue: e.target.value })} placeholder="5" />
+                  </div>
+                ) : insuranceForm.commissionValueType ? (
+                  <div className="stack">
+                    <label className="label">Commission Fixed Amount</label>
+                    <input type="number" min="0" step="0.01" value={insuranceForm.commissionFixedAmount} onChange={(e) => setInsuranceForm({ ...insuranceForm, commissionFixedAmount: e.target.value })} placeholder="3.00" />
+                  </div>
+                ) : <div />}
+              </div>
+
               <label className="label"><input type="checkbox" checked={!!insuranceForm.isActive} onChange={(e) => setInsuranceForm({ ...insuranceForm, isActive: e.target.checked })} /> Active</label>
               <div style={{ display: 'flex', gap: 8 }}>
                 <button type="submit">{insuranceEditIdx >= 0 ? 'Update Insurance Plan' : 'Add Insurance Plan'}</button>
@@ -2087,7 +2125,7 @@ function SettingsInner({ token, me, logout }) {
             </form>
 
             <table>
-              <thead><tr><th>Code</th><th>Name/Label</th><th>Charge</th><th>Taxable</th><th>Locations</th><th>Vehicle Classes</th><th>Active</th><th>Actions</th></tr></thead>
+              <thead><tr><th>Code</th><th>Name/Label</th><th>Charge</th><th>Commission</th><th>Taxable</th><th>Locations</th><th>Vehicle Classes</th><th>Active</th><th>Actions</th></tr></thead>
               <tbody>
                 {insurancePlans.map((p, idx) => (
                   <tr key={`${p.code}-${idx}`}>
@@ -2098,6 +2136,12 @@ function SettingsInner({ token, me, logout }) {
                       <div className="label">{p.description || '-'}</div>
                     </td>
                     <td>{p.chargeBy || p.mode} / {Number(p.amount || 0).toFixed(2)}</td>
+                    <td>
+                      {p.commissionValueType === 'PERCENT' ? `${Number(p.commissionPercentValue || 0).toFixed(2)}%` :
+                        p.commissionValueType ? `$${Number(p.commissionFixedAmount || 0).toFixed(2)}` :
+                        '-'}
+                      <div className="label">{p.commissionValueType || '-'}</div>
+                    </td>
                     <td>{p.taxable ? 'Yes' : 'No'}</td>
                     <td className="label">{(p.locationIds || []).length ? (p.locationIds || []).map((id) => locations.find((l) => l.id === id)?.code || id).join(', ') : 'All'}</td>
                     <td className="label">{(p.vehicleTypeIds || []).length ? (p.vehicleTypeIds || []).map((id) => vehicleTypes.find((v) => v.id === id)?.code || id).join(', ') : 'All'}</td>

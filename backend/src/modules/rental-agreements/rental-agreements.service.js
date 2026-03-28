@@ -310,11 +310,14 @@ function commissionChargeRows(charges = []) {
   });
 }
 
-function resolveCommissionRule(charge, rules = [], servicesById = new Map()) {
+function resolveCommissionRule(charge, rules = [], servicesById = new Map(), insurancePlansByCode = new Map()) {
   const chargeCode = String(charge?.code || '').trim();
   const chargeType = String(charge?.chargeType || '').toUpperCase();
   const serviceId = String(charge?.source || '').toUpperCase() === 'ADDITIONAL_SERVICE' && charge?.sourceRefId
     ? String(charge.sourceRefId)
+    : null;
+  const insuranceCode = String(charge?.source || '').toUpperCase() === 'INSURANCE' && charge?.sourceRefId
+    ? String(charge.sourceRefId).trim().toUpperCase()
     : null;
 
   if (serviceId && servicesById.has(serviceId)) {
@@ -328,6 +331,21 @@ function resolveCommissionRule(charge, rules = [], servicesById = new Map()) {
         fixedAmount: service.commissionFixedAmount,
         isActive: true,
         source: 'SERVICE'
+      };
+    }
+  }
+
+  if (insuranceCode && insurancePlansByCode.has(insuranceCode)) {
+    const plan = insurancePlansByCode.get(insuranceCode);
+    if (plan?.commissionValueType) {
+      return {
+        id: `insurance:${insuranceCode}`,
+        name: plan.name || plan.label || charge?.name || 'Insurance Commission',
+        valueType: plan.commissionValueType,
+        percentValue: plan.commissionPercentValue,
+        fixedAmount: plan.commissionFixedAmount,
+        isActive: true,
+        source: 'INSURANCE'
       };
     }
   }
@@ -544,6 +562,12 @@ async function syncAgreementCommissionSnapshot(rentalAgreementId) {
       })
     : [];
   const servicesById = new Map(serviceRows.map((row) => [row.id, row]));
+  const insurancePlans = await settingsService.getInsurancePlans({ tenantId: agreement.tenantId || null });
+  const insurancePlansByCode = new Map(
+    (Array.isArray(insurancePlans) ? insurancePlans : [])
+      .filter((plan) => plan?.code)
+      .map((plan) => [String(plan.code).trim().toUpperCase(), plan])
+  );
 
   const employeePlan = commissionEmployee?.commissionPlan?.isActive ? commissionEmployee.commissionPlan : null;
   const tenantPlan = employeePlan
@@ -567,7 +591,7 @@ async function syncAgreementCommissionSnapshot(rentalAgreementId) {
   const eligibleCharges = commissionChargeRows(agreement.charges);
   const lines = eligibleCharges
     .map((charge) => {
-      const rule = resolveCommissionRule(charge, plan?.rules || [], servicesById);
+      const rule = resolveCommissionRule(charge, plan?.rules || [], servicesById, insurancePlansByCode);
       const calc = calculateCommissionLine({ charge, rule, plan, appliedFixedAgreementRules });
       return {
         rentalAgreementChargeId: charge.id,

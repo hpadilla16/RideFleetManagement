@@ -159,7 +159,10 @@ export const settingsService = {
       return Array.isArray(parsed)
         ? parsed.map((plan) => ({
             ...plan,
-            taxable: !!plan?.taxable
+            taxable: !!plan?.taxable,
+            commissionValueType: plan?.commissionValueType || null,
+            commissionPercentValue: plan?.commissionPercentValue ?? null,
+            commissionFixedAmount: plan?.commissionFixedAmount ?? null
           }))
         : [];
     } catch {
@@ -170,7 +173,10 @@ export const settingsService = {
   async updateInsurancePlans(plans = [], scope = {}) {
     const payload = (Array.isArray(plans) ? plans : []).map((plan) => ({
       ...plan,
-      taxable: !!plan?.taxable
+      taxable: !!plan?.taxable,
+      commissionValueType: plan?.commissionValueType || null,
+      commissionPercentValue: plan?.commissionPercentValue === '' || plan?.commissionPercentValue == null ? null : Number(plan.commissionPercentValue),
+      commissionFixedAmount: plan?.commissionFixedAmount === '' || plan?.commissionFixedAmount == null ? null : Number(plan.commissionFixedAmount)
     }));
     const key = scopedKey('insurancePlans', scope);
     await prisma.appSetting.upsert({
