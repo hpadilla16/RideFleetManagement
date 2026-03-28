@@ -19,12 +19,25 @@ feesRouter.post('/', async (req, res, next) => {
     const missing = required.filter((k) => !req.body?.[k]);
     if (missing.length) return res.status(400).json({ error: `Missing required fields: ${missing.join(', ')}` });
     res.status(201).json(await feesService.create(req.body || {}, scopeFor(req)));
-  } catch (e) { next(e); }
+  } catch (e) {
+    if (e?.code === 'P2002') {
+      return res.status(409).json({ error: 'A fee with that code already exists for this tenant' });
+    }
+    next(e);
+  }
 });
 
-feesRouter.patch('/:id', async (req, res) => {
+feesRouter.patch('/:id', async (req, res, next) => {
   try { res.json(await feesService.update(req.params.id, req.body || {}, scopeFor(req))); }
-  catch { res.status(404).json({ error: 'Fee not found' }); }
+  catch (e) {
+    if (e?.code === 'P2002') {
+      return res.status(409).json({ error: 'A fee with that code already exists for this tenant' });
+    }
+    if (String(e?.message || '').includes('Fee not found')) {
+      return res.status(404).json({ error: 'Fee not found' });
+    }
+    next(e);
+  }
 });
 
 feesRouter.delete('/:id', async (req, res) => {

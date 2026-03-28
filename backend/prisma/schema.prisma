@@ -1433,7 +1433,7 @@ model Fee {
   id          String   @id @default(cuid())
   tenantId    String?
   tenant      Tenant?  @relation(fields: [tenantId], references: [id])
-  code        String?  @unique
+  code        String?
   name        String
   description String?
   mode        FeeMode
@@ -1448,6 +1448,7 @@ model Fee {
   locationFees LocationFee[]
 
   @@index([isActive, name])
+  @@unique([tenantId, code])
 }
 
 model LocationFee {
