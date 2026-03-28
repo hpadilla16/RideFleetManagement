@@ -1,5 +1,12 @@
 import { prisma } from '../../lib/prisma.js';
 
+const RATE_INCLUDE = {
+  location: true,
+  rateItems: {
+    orderBy: { sortOrder: 'asc' }
+  }
+};
+
 function dayFlagFromDate(dt) {
   const d = new Date(dt).getDay(); // 0 Sun ... 6 Sat
   return ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'][d];
@@ -44,7 +51,7 @@ export const ratesService = {
             }
           : {})
       },
-      include: { location: true, rateItems: { include: { vehicleType: true }, orderBy: { sortOrder: 'asc' } } },
+      include: RATE_INCLUDE,
       orderBy: [{ createdAt: 'desc' }]
     });
   },
@@ -107,7 +114,7 @@ export const ratesService = {
       });
     }
 
-    return prisma.rate.findUnique({ where: { id: created.id }, include: { location: true, rateItems: { include: { vehicleType: true }, orderBy: { sortOrder: 'asc' } } } });
+    return prisma.rate.findUnique({ where: { id: created.id }, include: RATE_INCLUDE });
   },
 
   async resolveForRental({ vehicleTypeId, pickupLocationId, pickupAt, returnAt }, scope = {}, options = {}) {
@@ -273,7 +280,7 @@ export const ratesService = {
       }
     }
 
-    return prisma.rate.findUnique({ where: { id }, include: { location: true, rateItems: { include: { vehicleType: true }, orderBy: { sortOrder: 'asc' } } } });
+    return prisma.rate.findUnique({ where: { id }, include: RATE_INCLUDE });
   },
 
   async remove(id, scope = {}) {
