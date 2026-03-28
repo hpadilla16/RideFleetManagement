@@ -33,10 +33,14 @@ function agreementInspectionSummary(agreement) {
 }
 
 function VehiclesInner({ token, me, logout }) {
+  const role = String(me?.role || '').toUpperCase().trim();
+  const isSuper = role === 'SUPER_ADMIN';
   const [vehicles, setVehicles] = useState([]);
   const [customers, setCustomers] = useState([]);
   const [locations, setLocations] = useState([]);
   const [vehicleTypes, setVehicleTypes] = useState([]);
+  const [tenantRows, setTenantRows] = useState([]);
+  const [activeTenantId, setActiveTenantId] = useState('');
   const [query, setQuery] = useState('');
   const [selected, setSelected] = useState(null);
   const [showRent, setShowRent] = useState(false);
@@ -62,12 +66,25 @@ function VehiclesInner({ token, me, logout }) {
   const [validating, setValidating] = useState(false);
   const [uploading, setUploading] = useState(false);
 
+  const scopedPath = (path) => {
+    if (!isSuper || !activeTenantId) return path;
+    const joiner = path.includes('?') ? '&' : '?';
+    return `${path}${joiner}tenantId=${encodeURIComponent(activeTenantId)}`;
+  };
+
   const load = async () => {
+    if (isSuper && !activeTenantId) {
+      setVehicles([]);
+      setCustomers([]);
+      setLocations([]);
+      setVehicleTypes([]);
+      return;
+    }
     const [v, c, l, vt] = await Promise.all([
-      api('/api/vehicles', {}, token),
-      api('/api/customers', {}, token),
-      api('/api/locations', {}, token),
-      api('/api/vehicle-types', {}, token)
+      api(scopedPath('/api/vehicles'), {}, token),
+      api(scopedPath('/api/customers'), {}, token),
+      api(scopedPath('/api/locations'), {}, token),
+      api(scopedPath('/api/vehicle-types'), {}, token)
     ]);
     setVehicles(v);
     setCustomers(c);
@@ -75,7 +92,19 @@ function VehiclesInner({ token, me, logout }) {
     setVehicleTypes(vt);
   };
 
-  useEffect(() => { load(); }, [token]);
+  useEffect(() => {
+    if (!isSuper) return;
+    api('/api/tenants', {}, token)
+      .then((rows) => {
+        setTenantRows(rows || []);
+        if (!activeTenantId && rows?.length) {
+          setActiveTenantId(rows[0].id);
+        }
+      })
+      .catch((err) => setMsg(err.message));
+  }, [token, isSuper]);
+
+  useEffect(() => { load(); }, [token, activeTenantId, isSuper]);
 
   const rows = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -186,11 +215,16 @@ function VehiclesInner({ token, me, logout }) {
 
   const addVehicle = async (e) => {
     e.preventDefault();
+    if (isSuper && !activeTenantId) {
+      setMsg('Select a tenant before adding vehicles.');
+      return;
+    }
     try {
-      await api('/api/vehicles', {
+      await api(scopedPath('/api/vehicles'), {
         method: 'POST',
         body: JSON.stringify({
           ...newVehicle,
+          tenantId: isSuper ? (activeTenantId || null) : undefined,
           year: newVehicle.year ? Number(newVehicle.year) : null,
           mileage: newVehicle.mileage ? Number(newVehicle.mileage) : 0,
           homeLocationId: newVehicle.homeLocationId || null,
@@ -231,7 +265,7 @@ function VehiclesInner({ token, me, logout }) {
     e.preventDefault();
     if (!selected) return;
     try {
-      await api(`/api/vehicles/${selected.id}`, {
+      await api(scopedPath(`/api/vehicles/${selected.id}`), {
         method: 'PATCH',
         body: JSON.stringify({
           ...editVehicleForm,
@@ -271,7 +305,7 @@ function VehiclesInner({ token, me, logout }) {
     setValidating(true);
     setValidationReport(null);
     try {
-      const report = await api('/api/vehicles/bulk/validate', {
+      const report = await api(scopedPath('/api/vehicles/bulk/validate'), {
         method: 'POST',
         body: JSON.stringify({ rows: uploadRows })
       }, token);
@@ -285,8 +319,13 @@ function VehiclesInner({ token, me, logout }) {
 
   const proceedUpload = async () => {
     setUploading(true);
+    if (isSuper && !activeTenantId) {
+      setMsg('Select a tenant before uploading inventory.');
+      setUploading(false);
+      return;
+    }
     try {
-      const out = await api('/api/vehicles/bulk/import', {
+      const out = await api(scopedPath('/api/vehicles/bulk/import'), {
         method: 'POST',
         body: JSON.stringify({ rows: uploadRows })
       }, token);
@@ -323,6 +362,17 @@ function VehiclesInner({ token, me, logout }) {
             </div>
             <span className="status-chip neutral">Fleet Ops</span>
           </div>
+          {isSuper ? (
+            <div className="stack" style={{ maxWidth: 420, marginTop: 12 }}>
+              <label className="label">Inventory Tenant Scope</label>
+              <select value={activeTenantId} onChange={(e) => setActiveTenantId(e.target.value)}>
+                <option value="">Select a tenant</option>
+                {tenantRows.map((tenant) => (
+                  <option key={tenant.id} value={tenant.id}>{tenant.name} ({tenant.slug})</option>
+                ))}
+              </select>
+            </div>
+          ) : null}
           <div className="app-card-grid compact">
             <div className="info-tile">
               <span className="label">Total Units</span>
@@ -347,8 +397,8 @@ function VehiclesInner({ token, me, logout }) {
           </div>
           <div className="app-banner-list">
             <span className="app-banner-pill">Car Sharing Supply {fleetOpsHub.carSharing}</span>
-            <button type="button" className="button-subtle" onClick={() => setShowAddVehicle(true)}>Add Vehicle</button>
-            <button type="button" className="button-subtle" onClick={() => setShowUpload(true)}>Upload Inventory</button>
+            <button type="button" className="button-subtle" onClick={() => setShowAddVehicle(true)} disabled={isSuper && !activeTenantId}>Add Vehicle</button>
+            <button type="button" className="button-subtle" onClick={() => setShowUpload(true)} disabled={isSuper && !activeTenantId}>Upload Inventory</button>
           </div>
           {fleetOpsHub.nextItems.length ? (
             <div className="app-card-grid compact">
@@ -371,8 +421,8 @@ function VehiclesInner({ token, me, logout }) {
           <h2>Vehicle Inventory</h2>
           <div style={{ display: 'flex', gap: 8, width: 'min(720px,100%)' }}>
             <input placeholder="Search unit, plate, toll tag, sticker, make/model, VIN" value={query} onChange={(e) => setQuery(e.target.value)} />
-            <button onClick={() => setShowAddVehicle(true)}>Add Vehicle</button>
-            <button onClick={() => setShowUpload(true)}>Upload Inventory</button>
+            <button onClick={() => setShowAddVehicle(true)} disabled={isSuper && !activeTenantId}>Add Vehicle</button>
+            <button onClick={() => setShowUpload(true)} disabled={isSuper && !activeTenantId}>Upload Inventory</button>
           </div>
         </div>
         {msg ? <p className="label">{msg}</p> : null}
