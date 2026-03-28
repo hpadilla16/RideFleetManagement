@@ -8,10 +8,24 @@ function keyset(rows, key) {
   return new Set(rows.map((r) => norm(r[key]).toLowerCase()).filter(Boolean));
 }
 
+function byTenantWhere(scope = {}) {
+  return scope?.tenantId ? { tenantId: scope.tenantId } : undefined;
+}
+
+function uniqueBy(items = [], getKey) {
+  const seen = new Set();
+  return items.filter((item) => {
+    const key = getKey(item);
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
 export const vehiclesService = {
   list(scope = {}) {
     return prisma.vehicle.findMany({
-      where: scope?.tenantId ? { tenantId: scope.tenantId } : undefined,
+      where: byTenantWhere(scope),
       orderBy: { createdAt: 'desc' },
       include: {
         tenant: true,
@@ -34,7 +48,7 @@ export const vehiclesService = {
 
   getById(id, scope = {}) {
     return prisma.vehicle.findFirst({
-      where: { id, ...(scope?.tenantId ? { tenantId: scope.tenantId } : {}) },
+      where: { id, ...(byTenantWhere(scope) || {}) },
       include: {
         tenant: true,
         vehicleType: true,
@@ -77,7 +91,7 @@ export const vehiclesService = {
   },
 
   async update(id, patch, scope = {}) {
-    const current = await prisma.vehicle.findFirst({ where: { id, ...(scope?.tenantId ? { tenantId: scope.tenantId } : {}) }, select: { id: true } });
+    const current = await prisma.vehicle.findFirst({ where: { id, ...(byTenantWhere(scope) || {}) }, select: { id: true } });
     if (!current) throw new Error('Vehicle not found');
     const data = { ...(patch || {}) };
     if (!scope?.allowCrossTenant) delete data.tenantId;
@@ -85,20 +99,33 @@ export const vehiclesService = {
   },
 
   async remove(id, scope = {}) {
-    const current = await prisma.vehicle.findFirst({ where: { id, ...(scope?.tenantId ? { tenantId: scope.tenantId } : {}) }, select: { id: true } });
+    const current = await prisma.vehicle.findFirst({ where: { id, ...(byTenantWhere(scope) || {}) }, select: { id: true } });
     if (!current) throw new Error('Vehicle not found');
     return prisma.vehicle.delete({ where: { id } });
   },
 
   async validateBulk(rows = [], scope = {}) {
     const existing = await prisma.vehicle.findMany({
-      where: scope?.tenantId ? { tenantId: scope.tenantId } : undefined,
+      where: byTenantWhere(scope),
       select: { internalNumber: true, vin: true, plate: true }
+    });
+    const vehicleTypes = await prisma.vehicleType.findMany({
+      where: byTenantWhere(scope),
+      select: { id: true, code: true, name: true, tenantId: true }
     });
 
     const existingInternal = keyset(existing, 'internalNumber');
     const existingVin = keyset(existing, 'vin');
     const existingPlate = keyset(existing, 'plate');
+    const vehicleTypeById = new Map(vehicleTypes.map((row) => [String(row.id), row]));
+    const vehicleTypesByCode = new Map();
+    const vehicleTypesByName = new Map();
+    vehicleTypes.forEach((row) => {
+      const codeKey = norm(row.code).toUpperCase();
+      const nameKey = norm(row.name).toLowerCase();
+      if (codeKey) vehicleTypesByCode.set(codeKey, [...(vehicleTypesByCode.get(codeKey) || []), row]);
+      if (nameKey) vehicleTypesByName.set(nameKey, [...(vehicleTypesByName.get(nameKey) || []), row]);
+    });
 
     let validCount = 0;
     let duplicateCount = 0;
@@ -114,10 +141,29 @@ export const vehiclesService = {
       const tollTagNumber = norm(r.tollTagNumber);
       const tollStickerNumber = norm(r.tollStickerNumber);
       const vehicleTypeId = norm(r.vehicleTypeId);
+      const vehicleTypeCode = norm(r.vehicleTypeCode);
+      const vehicleTypeName = norm(r.vehicleTypeName || r.vehicleType);
 
       const errors = [];
       if (!internalNumber) errors.push('internalNumber required');
-      if (!vehicleTypeId) errors.push('vehicleTypeId required');
+
+      let resolvedVehicleType = null;
+      if (vehicleTypeId) {
+        resolvedVehicleType = vehicleTypeById.get(vehicleTypeId) || null;
+        if (!resolvedVehicleType) errors.push('vehicleTypeId not found');
+      } else if (vehicleTypeCode) {
+        const matches = uniqueBy(vehicleTypesByCode.get(vehicleTypeCode.toUpperCase()) || [], (row) => row.id);
+        if (matches.length === 1) resolvedVehicleType = matches[0];
+        else if (matches.length > 1) errors.push(`vehicleTypeCode ${vehicleTypeCode} is ambiguous`);
+        else errors.push(`vehicleTypeCode ${vehicleTypeCode} not found`);
+      } else if (vehicleTypeName) {
+        const matches = uniqueBy(vehicleTypesByName.get(vehicleTypeName.toLowerCase()) || [], (row) => row.id);
+        if (matches.length === 1) resolvedVehicleType = matches[0];
+        else if (matches.length > 1) errors.push(`vehicleType ${vehicleTypeName} is ambiguous`);
+        else errors.push(`vehicleType ${vehicleTypeName} not found`);
+      } else {
+        errors.push('vehicleTypeCode or vehicleType required');
+      }
 
       const dupReasons = [];
       if (existingInternal.has(internalNumber.toLowerCase())) dupReasons.push('internalNumber exists');
@@ -138,7 +184,9 @@ export const vehiclesService = {
         plate,
         tollTagNumber,
         tollStickerNumber,
-        vehicleTypeId,
+        vehicleTypeId: resolvedVehicleType?.id || vehicleTypeId,
+        vehicleTypeCode: resolvedVehicleType?.code || vehicleTypeCode,
+        vehicleTypeName: resolvedVehicleType?.name || vehicleTypeName,
         valid: !errors.length && !dupReasons.length,
         errors,
         duplicateReasons: dupReasons

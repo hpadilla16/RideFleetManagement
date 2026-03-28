@@ -249,8 +249,8 @@ function VehiclesInner({ token, me, logout }) {
   };
 
   const downloadTemplate = () => {
-    const sampleType = vehicleTypes[0]?.id || 'PUT_VEHICLE_TYPE_ID_HERE';
-    const csv = `internalNumber,plate,tollTagNumber,tollStickerNumber,vin,make,model,color,vehicleTypeId\nUNIT-001,ABC123,TAG-1001,SELLO-1001,1HGBH41JXMN109186,Honda,Civic,Silver,${sampleType}`;
+    const sampleType = vehicleTypes[0]?.code || 'ECON';
+    const csv = `internalNumber,plate,tollTagNumber,tollStickerNumber,vin,make,model,color,vehicleTypeCode\nUNIT-001,ABC123,TAG-1001,SELLO-1001,1HGBH41JXMN109186,Honda,Civic,Silver,${sampleType}`;
     const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -561,8 +561,9 @@ function VehiclesInner({ token, me, logout }) {
                 <p className="label">Step 1: Review instructions</p>
                 <ul>
                   <li>Use CSV format.</li>
-                  <li>Required columns: <code>internalNumber</code>, <code>vehicleTypeId</code>.</li>
+                  <li>Required columns: <code>internalNumber</code>, <code>vehicleTypeCode</code> or <code>vehicleType</code>.</li>
                   <li>Recommended columns: plate, tollTagNumber, tollStickerNumber, vin, make, model, color.</li>
+                  <li>Use the vehicle class code from this tenant, like <code>ECON</code>, <code>SUV</code>, or <code>CCAR</code>.</li>
                   <li>Rows matching existing internalNumber/VIN/plate are rejected (not uploaded).</li>
                 </ul>
                 <div style={{ display: 'flex', gap: 8 }}>
