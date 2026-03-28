@@ -136,6 +136,7 @@ export const vehiclesService = {
       const make = norm(r.make);
       const model = norm(r.model);
       const color = norm(r.color);
+      const yearRaw = norm(r.year);
       const vin = norm(r.vin);
       const plate = norm(r.plate);
       const tollTagNumber = norm(r.tollTagNumber);
@@ -146,6 +147,11 @@ export const vehiclesService = {
 
       const errors = [];
       if (!internalNumber) errors.push('internalNumber required');
+
+      const year = yearRaw === '' ? null : Number(yearRaw);
+      if (yearRaw !== '' && (!Number.isInteger(year) || year < 1900 || year > 2100)) {
+        errors.push(`year ${yearRaw} is invalid`);
+      }
 
       let resolvedVehicleType = null;
       if (vehicleTypeId) {
@@ -180,6 +186,7 @@ export const vehiclesService = {
         make,
         model,
         color,
+        year,
         vin,
         plate,
         tollTagNumber,
@@ -222,6 +229,7 @@ export const vehiclesService = {
           make: r.make || null,
           model: r.model || null,
           color: r.color || null,
+          year: Number.isInteger(r.year) ? r.year : null,
           mileage: 0,
           status: 'AVAILABLE',
           vehicleTypeId: r.vehicleTypeId
