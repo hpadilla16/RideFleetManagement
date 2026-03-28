@@ -1486,6 +1486,7 @@ model AdditionalService {
   displayOnline   Boolean   @default(false)
   defaultRencars  Boolean   @default(false)
   mandatory       Boolean   @default(false)
+  coversTolls     Boolean   @default(false)
   isActive        Boolean   @default(true)
 
   locationId      String?

@@ -793,6 +793,22 @@ async function syncReservationTollCharges(reservationId, scope = {}, options = {
 
   const effectiveScope = { tenantId };
   const policy = resolveReservationTollPolicy(reservation);
+  const selectedServiceIds = Array.from(new Set(
+    (reservation.charges || [])
+      .filter((row) => row.selected && String(row.source || '').toUpperCase() === 'ADDITIONAL_SERVICE' && row.sourceRefId)
+      .map((row) => String(row.sourceRefId))
+  ));
+  const prepaidTollServiceCount = selectedServiceIds.length
+    ? await prisma.additionalService.count({
+        where: {
+          tenantId,
+          id: { in: selectedServiceIds },
+          coversTolls: true,
+          isActive: true
+        }
+      })
+    : 0;
+  const coveredByTollPackage = prepaidTollServiceCount > 0;
   const transactions = await prisma.tollTransaction.findMany({
     where: {
       reservationId,
@@ -819,37 +835,6 @@ async function syncReservationTollCharges(reservationId, scope = {}, options = {
 
   await prisma.$transaction(async (tx) => {
     for (const transaction of transactions) {
-      const sourceRefId = String(transaction.id);
-      const existing = existingTollChargeByRef.get(sourceRefId);
-      const chargeData = {
-        code: 'TOLL',
-        name: buildTollChargeName(transaction),
-        chargeType: 'UNIT',
-        quantity: 1,
-        rate: toMoney(transaction.amount),
-        total: toMoney(transaction.amount),
-        taxable: policy.enabled ? !!policy.taxable : false,
-        selected: true,
-        notes: mergeChargeNotes(existing?.notes, note || null)
-      };
-
-      if (existing?.id) {
-        await tx.reservationCharge.update({
-          where: { id: existing.id },
-          data: chargeData
-        });
-      } else {
-        await tx.reservationCharge.create({
-          data: {
-            reservationId,
-            ...chargeData,
-            sortOrder: nextSortOrder++,
-            source: 'TOLL_MODULE',
-            sourceRefId
-          }
-        });
-      }
-
       await tx.tollTransaction.update({
         where: { id: transaction.id },
         data: {
@@ -859,14 +844,51 @@ async function syncReservationTollCharges(reservationId, scope = {}, options = {
           status: 'BILLED',
           reviewNotes: mergeChargeNotes(
             transaction.reviewNotes,
-            note ? `Posted to reservation: ${note}` : 'Posted to reservation automatically'
+            coveredByTollPackage
+              ? 'Covered by prepaid toll package'
+              : (note ? `Posted to reservation: ${note}` : 'Posted to reservation automatically')
           )
         }
       });
     }
 
+    if (!coveredByTollPackage) {
+      for (const transaction of transactions) {
+        const sourceRefId = String(transaction.id);
+        const existing = existingTollChargeByRef.get(sourceRefId);
+        const chargeData = {
+          code: 'TOLL',
+          name: buildTollChargeName(transaction),
+          chargeType: 'UNIT',
+          quantity: 1,
+          rate: toMoney(transaction.amount),
+          total: toMoney(transaction.amount),
+          taxable: policy.enabled ? !!policy.taxable : false,
+          selected: true,
+          notes: mergeChargeNotes(existing?.notes, note || null)
+        };
+
+        if (existing?.id) {
+          await tx.reservationCharge.update({
+            where: { id: existing.id },
+            data: chargeData
+          });
+        } else {
+          await tx.reservationCharge.create({
+            data: {
+              reservationId,
+              ...chargeData,
+              sortOrder: nextSortOrder++,
+              source: 'TOLL_MODULE',
+              sourceRefId
+            }
+          });
+        }
+      }
+    }
+
     const staleTollChargeIds = existingTollCharges
-      .filter((row) => !activeTransactionIds.has(String(row.sourceRefId || '')))
+      .filter((row) => coveredByTollPackage || !activeTransactionIds.has(String(row.sourceRefId || '')))
       .map((row) => row.id);
     if (staleTollChargeIds.length) {
       await tx.reservationCharge.deleteMany({
@@ -877,7 +899,7 @@ async function syncReservationTollCharges(reservationId, scope = {}, options = {
       });
     }
 
-    const policyCharge = buildTollPolicyChargeShape(policy, transactions);
+    const policyCharge = coveredByTollPackage ? null : buildTollPolicyChargeShape(policy, transactions);
     const existingPolicyCharge = existingPolicyCharges.find((row) => String(row.sourceRefId || '') === policySourceRefId) || existingPolicyCharges[0] || null;
 
     if (policyCharge) {
@@ -925,7 +947,8 @@ async function syncReservationTollCharges(reservationId, scope = {}, options = {
     reservationId,
     tollsEnabled: true,
     syncedChargeCount: transactions.length,
-    policyFeeApplied: !!buildTollPolicyChargeShape(policy, transactions),
+    policyFeeApplied: !coveredByTollPackage && !!buildTollPolicyChargeShape(policy, transactions),
+    coveredByTollPackage,
     policy
   };
 }

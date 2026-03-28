@@ -42,6 +42,7 @@ export const additionalServicesService = {
         displayOnline: data.displayOnline ?? false,
         defaultRencars: data.defaultRencars ?? false,
         mandatory: data.mandatory ?? false,
+        coversTolls: data.coversTolls ?? false,
         isActive: data.isActive ?? true,
         locationId: data.locationId || null
       },
