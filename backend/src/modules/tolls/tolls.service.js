@@ -679,6 +679,257 @@ async function refreshReservationEstimatedTotal(reservationId) {
   return estimatedTotal;
 }
 
+function parseLocationConfig(raw) {
+  try {
+    if (!raw) return {};
+    if (typeof raw === 'string') return JSON.parse(raw);
+    if (typeof raw === 'object') return raw;
+  } catch {}
+  return {};
+}
+
+function normalizeTollPolicy(config = {}) {
+  const mode = String(config?.tollAdditionalFeeMode || 'FIXED').trim().toUpperCase();
+  return {
+    enabled: !!config?.tollPolicyEnabled,
+    taxable: !!config?.tollTaxable,
+    additionalFeeEnabled: !!config?.tollAdditionalFeeEnabled,
+    additionalFeeMode: ['FIXED', 'PERCENTAGE', 'PER_TOLL'].includes(mode) ? mode : 'FIXED',
+    additionalFeeAmount: toMoney(config?.tollAdditionalFeeAmount)
+  };
+}
+
+function resolveReservationTollPolicy(reservation) {
+  const pickup = normalizeTollPolicy(parseLocationConfig(reservation?.pickupLocation?.locationConfig));
+  const pickupMeta = {
+    ...pickup,
+    locationId: reservation?.pickupLocation?.id || null,
+    locationName: reservation?.pickupLocation?.name || ''
+  };
+  if (pickupMeta.enabled) return pickupMeta;
+
+  const dropoff = normalizeTollPolicy(parseLocationConfig(reservation?.returnLocation?.locationConfig));
+  return {
+    ...dropoff,
+    locationId: reservation?.returnLocation?.id || pickupMeta.locationId || null,
+    locationName: reservation?.returnLocation?.name || pickupMeta.locationName || ''
+  };
+}
+
+function buildTollChargeName(transaction) {
+  return `Toll Charge${transaction?.location ? ` - ${transaction.location}` : ''}`;
+}
+
+function buildTollPolicyChargeName(policy) {
+  const suffix = policy?.locationName ? ` - ${policy.locationName}` : '';
+  return `Toll Policy Fee${suffix}`;
+}
+
+function buildTollPolicyChargeShape(policy, transactions = []) {
+  const rows = Array.isArray(transactions) ? transactions : [];
+  if (!policy?.enabled || !policy.additionalFeeEnabled || !(policy.additionalFeeAmount > 0) || !rows.length) return null;
+
+  const tollCount = rows.length;
+  const tollSubtotal = Number(rows.reduce((sum, row) => sum + toMoney(row.amount), 0).toFixed(2));
+
+  let quantity = 1;
+  let rate = policy.additionalFeeAmount;
+  let total = policy.additionalFeeAmount;
+
+  if (policy.additionalFeeMode === 'PERCENTAGE') {
+    total = Number((tollSubtotal * (policy.additionalFeeAmount / 100)).toFixed(2));
+    rate = total;
+  } else if (policy.additionalFeeMode === 'PER_TOLL') {
+    quantity = tollCount;
+    total = Number((policy.additionalFeeAmount * tollCount).toFixed(2));
+    rate = policy.additionalFeeAmount;
+  }
+
+  if (!(total > 0)) return null;
+
+  return {
+    code: 'TOLL_POLICY',
+    name: buildTollPolicyChargeName(policy),
+    chargeType: 'UNIT',
+    quantity,
+    rate,
+    total,
+    taxable: !!policy.taxable,
+    selected: true,
+    notes: `Auto-applied from toll policy (${policy.additionalFeeMode.toLowerCase()})`
+  };
+}
+
+async function getReservationForTollChargeSync(reservationId, scope = {}) {
+  return prisma.reservation.findFirst({
+    where: {
+      id: reservationId,
+      ...tenantWhereForScope(scope)
+    },
+    include: {
+      tenant: { select: { id: true, tollsEnabled: true } },
+      pickupLocation: { select: { id: true, name: true, locationConfig: true } },
+      returnLocation: { select: { id: true, name: true, locationConfig: true } },
+      charges: { orderBy: [{ sortOrder: 'asc' }, { createdAt: 'asc' }] }
+    }
+  });
+}
+
+async function syncReservationTollCharges(reservationId, scope = {}, options = {}) {
+  if (!reservationId) return null;
+
+  const reservation = await getReservationForTollChargeSync(reservationId, scope);
+  if (!reservation) throw new Error('Reservation not found for toll charge sync');
+
+  const tenantId = reservation.tenantId || scope?.tenantId || null;
+  if (!reservation?.tenant?.tollsEnabled || !tenantId) {
+    return {
+      reservationId,
+      tollsEnabled: false,
+      syncedChargeCount: 0,
+      policyFeeApplied: false
+    };
+  }
+
+  const effectiveScope = { tenantId };
+  const policy = resolveReservationTollPolicy(reservation);
+  const transactions = await prisma.tollTransaction.findMany({
+    where: {
+      reservationId,
+      ...tenantWhereForScope(effectiveScope),
+      status: { in: ['MATCHED', 'BILLED'] },
+      billingStatus: { in: ['PENDING', 'POSTED_TO_RESERVATION', 'POSTED_TO_AGREEMENT'] }
+    },
+    orderBy: [{ transactionAt: 'asc' }, { createdAt: 'asc' }]
+  });
+
+  const existingCharges = Array.isArray(reservation.charges) ? reservation.charges : [];
+  const existingTollCharges = existingCharges.filter((row) => row.source === 'TOLL_MODULE');
+  const existingPolicyCharges = existingCharges.filter((row) => row.source === 'TOLL_POLICY');
+  const existingTollChargeByRef = new Map(existingTollCharges.map((row) => [String(row.sourceRefId || ''), row]));
+  const policySourceRefId = `reservation:${reservationId}`;
+  const currentMaxSort = existingCharges.reduce((max, row) => {
+    const sortOrder = Number.isInteger(row?.sortOrder) ? row.sortOrder : Number(row?.sortOrder || 0);
+    return Math.max(max, sortOrder);
+  }, -1);
+
+  let nextSortOrder = currentMaxSort + 1;
+  const activeTransactionIds = new Set(transactions.map((row) => String(row.id)));
+  const note = String(options?.note || '').trim();
+
+  await prisma.$transaction(async (tx) => {
+    for (const transaction of transactions) {
+      const sourceRefId = String(transaction.id);
+      const existing = existingTollChargeByRef.get(sourceRefId);
+      const chargeData = {
+        code: 'TOLL',
+        name: buildTollChargeName(transaction),
+        chargeType: 'UNIT',
+        quantity: 1,
+        rate: toMoney(transaction.amount),
+        total: toMoney(transaction.amount),
+        taxable: policy.enabled ? !!policy.taxable : false,
+        selected: true,
+        notes: mergeChargeNotes(existing?.notes, note || null)
+      };
+
+      if (existing?.id) {
+        await tx.reservationCharge.update({
+          where: { id: existing.id },
+          data: chargeData
+        });
+      } else {
+        await tx.reservationCharge.create({
+          data: {
+            reservationId,
+            ...chargeData,
+            sortOrder: nextSortOrder++,
+            source: 'TOLL_MODULE',
+            sourceRefId
+          }
+        });
+      }
+
+      await tx.tollTransaction.update({
+        where: { id: transaction.id },
+        data: {
+          billingStatus: String(transaction.billingStatus || '').toUpperCase() === 'POSTED_TO_AGREEMENT'
+            ? 'POSTED_TO_AGREEMENT'
+            : 'POSTED_TO_RESERVATION',
+          status: 'BILLED',
+          reviewNotes: mergeChargeNotes(
+            transaction.reviewNotes,
+            note ? `Posted to reservation: ${note}` : 'Posted to reservation automatically'
+          )
+        }
+      });
+    }
+
+    const staleTollChargeIds = existingTollCharges
+      .filter((row) => !activeTransactionIds.has(String(row.sourceRefId || '')))
+      .map((row) => row.id);
+    if (staleTollChargeIds.length) {
+      await tx.reservationCharge.deleteMany({
+        where: {
+          reservationId,
+          id: { in: staleTollChargeIds }
+        }
+      });
+    }
+
+    const policyCharge = buildTollPolicyChargeShape(policy, transactions);
+    const existingPolicyCharge = existingPolicyCharges.find((row) => String(row.sourceRefId || '') === policySourceRefId) || existingPolicyCharges[0] || null;
+
+    if (policyCharge) {
+      const policyChargeData = {
+        ...policyCharge,
+        source: 'TOLL_POLICY',
+        sourceRefId: policySourceRefId,
+        notes: mergeChargeNotes(existingPolicyCharge?.notes, policyCharge.notes)
+      };
+
+      if (existingPolicyCharge?.id) {
+        await tx.reservationCharge.update({
+          where: { id: existingPolicyCharge.id },
+          data: policyChargeData
+        });
+      } else {
+        await tx.reservationCharge.create({
+          data: {
+            reservationId,
+            ...policyChargeData,
+            sortOrder: nextSortOrder++,
+            source: 'TOLL_POLICY',
+            sourceRefId: policySourceRefId
+          }
+        });
+      }
+    }
+
+    const stalePolicyChargeIds = existingPolicyCharges
+      .filter((row) => !policyCharge || row.id !== existingPolicyCharge?.id)
+      .map((row) => row.id);
+    if (stalePolicyChargeIds.length) {
+      await tx.reservationCharge.deleteMany({
+        where: {
+          reservationId,
+          id: { in: stalePolicyChargeIds }
+        }
+      });
+    }
+  });
+
+  await refreshReservationEstimatedTotal(reservationId);
+
+  return {
+    reservationId,
+    tollsEnabled: true,
+    syncedChargeCount: transactions.length,
+    policyFeeApplied: !!buildTollPolicyChargeShape(policy, transactions),
+    policy
+  };
+}
+
 function getAutoSyncIntervalMinutes() {
   const raw = Number(process.env.TOLLS_AUTO_SYNC_INTERVAL_MINUTES || DEFAULT_AUTO_SYNC_INTERVAL_MINUTES);
   return Number.isFinite(raw) && raw > 0 ? raw : DEFAULT_AUTO_SYNC_INTERVAL_MINUTES;
@@ -1198,6 +1449,7 @@ export const tollsService = {
     let autoConfirmed = 0;
     let suggested = 0;
     let reviewed = 0;
+    const reservationIdsToSync = new Set();
 
     for (const transaction of rows) {
       const suggestion = await buildMatchSuggestion(transaction, scope);
@@ -1220,9 +1472,14 @@ export const tollsService = {
       reviewed += 1;
       if (suggestion.matchStatus === 'AUTO_CONFIRMED') {
         autoConfirmed += 1;
+        if (suggestion.reservation?.id) reservationIdsToSync.add(String(suggestion.reservation.id));
       } else if (suggestion.reservation?.id) {
         suggested += 1;
       }
+    }
+
+    for (const reservationId of reservationIdsToSync) {
+      await syncReservationTollCharges(reservationId, scope);
     }
 
     const pendingReviewCount = await prisma.tollTransaction.count({
@@ -1383,6 +1640,7 @@ export const tollsService = {
     });
 
     const created = [];
+    const reservationIdsToSync = new Set();
     for (const raw of inputRows) {
       const transactionAt = normalizeDateTime(raw.transactionAt);
       const plateRaw = String(raw.plate || raw.plateRaw || '').trim();
@@ -1461,7 +1719,15 @@ export const tollsService = {
         return createdTransaction;
       });
 
-      created.push(await getTransactionOrThrow(row.id, scope));
+      const hydrated = await getTransactionOrThrow(row.id, scope);
+      created.push(hydrated);
+      if (hydrated?.reservationId && String(hydrated.status || '').toUpperCase() === 'MATCHED') {
+        reservationIdsToSync.add(String(hydrated.reservationId));
+      }
+    }
+
+    for (const reservationId of reservationIdsToSync) {
+      await syncReservationTollCharges(reservationId, scope);
     }
 
     await prisma.tollImportRun.update({
@@ -1535,6 +1801,8 @@ export const tollsService = {
       await createAssignmentRecord(tx, transaction, suggestion, actorUserId);
     });
 
+    await syncReservationTollCharges(reservation.id, scope);
+
     return serializeTransaction(await getTransactionOrThrow(transaction.id, scope));
   },
 
@@ -1542,87 +1810,23 @@ export const tollsService = {
     await ensureTenantAllowsTolls(scope);
     const transaction = await getTransactionOrThrow(id, scope);
     if (!transaction.reservationId) throw new Error('Reservation match is required before posting a toll');
-    if (['POSTED_TO_RESERVATION', 'POSTED_TO_AGREEMENT'].includes(String(transaction.billingStatus || '').toUpperCase())) {
-      return serializeTransaction(transaction);
-    }
-
     const note = String(payload.note || '').trim();
-    const chargeName = `Toll Charge${transaction.location ? ` - ${transaction.location}` : ''}`;
-    const sourceRefId = transaction.id;
+    await syncReservationTollCharges(transaction.reservationId, scope, { note, actorUserId });
 
-    await prisma.$transaction(async (tx) => {
-      const existing = await tx.reservationCharge.findFirst({
-        where: {
-          reservationId: transaction.reservationId,
-          source: 'TOLL_MODULE',
-          sourceRefId
-        }
-      });
-
-      if (existing) {
-        await tx.reservationCharge.update({
-          where: { id: existing.id },
-          data: {
-            name: chargeName,
-            quantity: 1,
-            rate: transaction.amount,
-            total: transaction.amount,
-            chargeType: 'UNIT',
-            taxable: false,
-            selected: true,
-            notes: mergeChargeNotes(existing.notes, note)
-          }
-        });
-      } else {
-        const currentMaxSort = await tx.reservationCharge.aggregate({
-          where: { reservationId: transaction.reservationId },
-          _max: { sortOrder: true }
-        });
-
-        await tx.reservationCharge.create({
-          data: {
-            reservationId: transaction.reservationId,
-            code: 'TOLL',
-            name: chargeName,
-            chargeType: 'UNIT',
-            quantity: 1,
-            rate: transaction.amount,
-            total: transaction.amount,
-            taxable: false,
-            selected: true,
-            sortOrder: Number(currentMaxSort._max.sortOrder || 0) + 1,
-            source: 'TOLL_MODULE',
-            sourceRefId,
-            notes: note || null
-          }
-        });
+    await prisma.auditLog.create({
+      data: {
+        tenantId: transaction.tenantId,
+        reservationId: transaction.reservationId,
+        actorUserId: actorUserId || null,
+        action: 'UPDATE',
+        metadata: JSON.stringify({
+          tollPostedToReservation: true,
+          tollTransactionId: transaction.id,
+          amount: toMoney(transaction.amount)
+        })
       }
-
-      await tx.tollTransaction.update({
-        where: { id: transaction.id },
-        data: {
-          billingStatus: 'POSTED_TO_RESERVATION',
-          status: 'BILLED',
-          reviewNotes: mergeChargeNotes(transaction.reviewNotes, note ? `Posted to reservation: ${note}` : 'Posted to reservation')
-        }
-      });
-
-      await tx.auditLog.create({
-        data: {
-          tenantId: transaction.tenantId,
-          reservationId: transaction.reservationId,
-          actorUserId: actorUserId || null,
-          action: 'UPDATE',
-          metadata: JSON.stringify({
-            tollPostedToReservation: true,
-            tollTransactionId: transaction.id,
-            amount: toMoney(transaction.amount)
-          })
-        }
-      });
     });
 
-    await refreshReservationEstimatedTotal(transaction.reservationId);
     return serializeTransaction(await getTransactionOrThrow(transaction.id, scope));
   },
 
@@ -1730,12 +1934,20 @@ export const tollsService = {
       }
     }
 
+    if (transaction.reservationId) {
+      await syncReservationTollCharges(transaction.reservationId, scope);
+    }
+
     return {
       action,
       actionLabel: reviewActionLabel(action),
       issueIncident,
       transaction: serializeTransaction(await getTransactionOrThrow(transaction.id, scope))
     };
+  },
+
+  async syncReservationCharges(reservationId, scope = {}, options = {}) {
+    return syncReservationTollCharges(reservationId, scope, options);
   },
 
   async listReservationTolls(reservationId, scope = {}) {

@@ -1,4 +1,5 @@
 import { prisma } from '../../lib/prisma.js';
+import { tollsService } from '../tolls/tolls.service.js';
 
 function toNumber(value, fallback = 0) {
   const n = Number(value);
@@ -180,6 +181,8 @@ async function maybeCreateAgreementPayment({ reservation, payment }) {
 
 export const reservationPricingService = {
   async getPricing(reservationId, scope = {}) {
+    await tollsService.syncReservationCharges(reservationId, scope);
+    await syncAgreementCharges(reservationId, scope);
     const row = await getReservationOrThrow(reservationId, scope);
     const charges = Array.isArray(row.charges) ? row.charges : [];
     const snapshot = row.pricingSnapshot || null;
@@ -220,6 +223,7 @@ export const reservationPricingService = {
       });
     });
 
+    await tollsService.syncReservationCharges(reservationId, scope);
     await syncAgreementCharges(reservationId, scope);
     return this.getPricing(reservationId, scope);
   },
