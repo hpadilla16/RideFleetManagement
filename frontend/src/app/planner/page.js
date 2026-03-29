@@ -104,6 +104,7 @@ function PlannerInner({ token, me, logout }) {
   const [filterVehicleTypeId, setFilterVehicleTypeId] = useState('');
   const [filterLocationId, setFilterLocationId] = useState('');
   const [dragItem, setDragItem] = useState(null);
+  const [dragMeta, setDragMeta] = useState(null);
   const [draggingId, setDraggingId] = useState('');
   const [selectedReservation, setSelectedReservation] = useState(null);
   const [selectedBlock, setSelectedBlock] = useState(null);
@@ -265,7 +266,7 @@ function PlannerInner({ token, me, logout }) {
     return map;
   }, [tracks, reservations, vehicles, rangeStart, rangeEnd, dayCount]);
 
-  const onDropReservation = async (trackVehicleId, dayIndexRaw) => {
+  const onDropReservation = async (trackVehicleId, dayIndexRaw, dropMetrics = null) => {
     if (!dragItem) return;
     const r = dragItem;
     if (lockedReservationIds.has(r.id)) return;
@@ -278,9 +279,16 @@ function PlannerInner({ token, me, logout }) {
       const oldReturn = new Date(r.returnAt);
       const duration = oldReturn.getTime() - oldPickup.getTime();
 
-      const newStartDay = addDays(rangeStart, dayIndex);
+      let startDayIndex = dayIndex;
+      if (dropMetrics && Number.isFinite(dropMetrics.pointerOffsetWithinCellPx) && Number.isFinite(dragMeta?.grabOffsetPx)) {
+        const rawLeftPx = dayIndex * DAY_WIDTH + dropMetrics.pointerOffsetWithinCellPx - dragMeta.grabOffsetPx;
+        const preciseStart = Math.max(0, rawLeftPx) / DAY_WIDTH;
+        startDayIndex = Math.max(0, Math.floor(preciseStart));
+      }
+
+      const newStartDay = addDays(rangeStart, startDayIndex);
       const newPickup = new Date(newStartDay);
-      newPickup.setHours(oldPickup.getHours(), oldPickup.getMinutes(), 0, 0);
+      newPickup.setHours(oldPickup.getHours(), oldPickup.getMinutes(), oldPickup.getSeconds(), oldPickup.getMilliseconds());
       const newReturn = new Date(newPickup.getTime() + duration);
 
       const targetVehicle = trackVehicleId === '__unassigned__'
@@ -295,6 +303,7 @@ function PlannerInner({ token, me, logout }) {
       if (!ok) {
         setMsg('Move cancelled');
         setDragItem(null);
+        setDragMeta(null);
         setDraggingId('');
         return;
       }
@@ -309,11 +318,13 @@ function PlannerInner({ token, me, logout }) {
       }, token);
       setMsg(`Reservation ${r.reservationNumber} moved`);
       setDragItem(null);
+      setDragMeta(null);
       setDraggingId('');
       await load();
     } catch (e) {
       setMsg(e.message);
       setDragItem(null);
+      setDragMeta(null);
       setDraggingId('');
     }
   };
@@ -329,7 +340,10 @@ function PlannerInner({ token, me, logout }) {
       setDraggingId('');
       return;
     }
-    onDropReservation(cell.getAttribute('data-track-id'), cell.getAttribute('data-day-index'));
+    const rect = cell.getBoundingClientRect();
+    onDropReservation(cell.getAttribute('data-track-id'), cell.getAttribute('data-day-index'), {
+      pointerOffsetWithinCellPx: touch.clientX - rect.left
+    });
   };
 
   const goPrev = () => setCursor((d) => addDays(d, -dayCount));
@@ -623,7 +637,12 @@ function PlannerInner({ token, me, logout }) {
                     data-track-id={v.id}
                     data-day-index={i}
                     onDragOver={(e) => e.preventDefault()}
-                    onDrop={() => onDropReservation(v.id, i)}
+                    onDrop={(e) => {
+                      const rect = e.currentTarget.getBoundingClientRect();
+                      onDropReservation(v.id, i, {
+                        pointerOffsetWithinCellPx: e.clientX - rect.left
+                      });
+                    }}
                   />
                 ))}
 
@@ -662,9 +681,21 @@ function PlannerInner({ token, me, logout }) {
                         key={r.id}
                         className="planner-block"
                         draggable={!locked}
-                        onDragStart={() => { setDragItem(r); setDraggingId(r.id); }}
-                        onDragEnd={() => { setDragItem(null); setDraggingId(''); }}
-                        onTouchStart={() => { if (!locked) { setDragItem(r); setDraggingId(r.id); } }}
+                        onDragStart={(e) => {
+                          const rect = e.currentTarget.getBoundingClientRect();
+                          setDragItem(r);
+                          setDragMeta({ grabOffsetPx: Math.max(0, e.clientX - rect.left) });
+                          setDraggingId(r.id);
+                        }}
+                        onDragEnd={() => { setDragItem(null); setDragMeta(null); setDraggingId(''); }}
+                        onTouchStart={(e) => {
+                          if (locked) return;
+                          const touch = e.touches?.[0];
+                          const rect = e.currentTarget.getBoundingClientRect();
+                          setDragItem(r);
+                          setDragMeta({ grabOffsetPx: touch ? Math.max(0, touch.clientX - rect.left) : 0 });
+                          setDraggingId(r.id);
+                        }}
                         onTouchEnd={handleTouchDrop}
                         onClick={() => {
                           setSelectedBlock(null);
