@@ -2,6 +2,8 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
+import JSZip from 'jszip';
+import QRCode from 'qrcode';
 import { AuthGate } from '../../components/AuthGate';
 import { AppShell } from '../../components/AppShell';
 import { api } from '../../lib/client';
@@ -71,6 +73,77 @@ function toLocalDateTimeInput(value) {
   return `${year}-${month}-${day}T${hours}:${minutes}`;
 }
 
+function sanitizeFilenamePart(value, fallback = 'vehicle') {
+  const cleaned = String(value || '')
+    .trim()
+    .replace(/[<>:"/\\|?*\x00-\x1F]/g, '')
+    .replace(/\s+/g, '-')
+    .replace(/-+/g, '-')
+    .replace(/^-|-$/g, '');
+  return cleaned || fallback;
+}
+
+function loadImage(src) {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => resolve(img);
+    img.onerror = reject;
+    img.src = src;
+  });
+}
+
+async function buildVehicleQrLabelBlob(vehicle, qrUrl) {
+  const qrDataUrl = await QRCode.toDataURL(qrUrl, {
+    errorCorrectionLevel: 'M',
+    margin: 1,
+    width: 900,
+    color: { dark: '#211a38', light: '#ffffffff' }
+  });
+  const qrImg = await loadImage(qrDataUrl);
+  const canvas = document.createElement('canvas');
+  canvas.width = 1200;
+  canvas.height = 1600;
+  const ctx = canvas.getContext('2d');
+  ctx.fillStyle = '#ffffff';
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+  const grad = ctx.createLinearGradient(0, 0, canvas.width, 0);
+  grad.addColorStop(0, '#6d3df2');
+  grad.addColorStop(1, '#1fc7aa');
+  ctx.fillStyle = grad;
+  ctx.fillRect(80, 80, canvas.width - 160, 180);
+
+  ctx.fillStyle = '#ffffff';
+  ctx.font = '700 34px Aptos, Segoe UI, sans-serif';
+  ctx.fillText('RIDE FLEET VEHICLE QR', 120, 150);
+  ctx.font = '600 24px Aptos, Segoe UI, sans-serif';
+  ctx.fillText('Scan to open the vehicle profile and return workflow.', 120, 195);
+
+  ctx.fillStyle = '#211a38';
+  ctx.font = '800 74px Aptos, Segoe UI, sans-serif';
+  ctx.fillText(vehicle.plate || 'PLATE PENDING', 120, 360);
+
+  ctx.font = '700 42px Aptos, Segoe UI, sans-serif';
+  ctx.fillText(vehicle.internalNumber || 'UNIT', 120, 430);
+
+  const vehicleLine = [vehicle.year, vehicle.make, vehicle.model].filter(Boolean).join(' ') || 'Vehicle';
+  ctx.font = '500 34px Aptos, Segoe UI, sans-serif';
+  ctx.fillText(vehicleLine, 120, 486);
+
+  ctx.strokeStyle = '#d7cbff';
+  ctx.lineWidth = 3;
+  ctx.strokeRect(120, 560, 960, 960);
+  ctx.drawImage(qrImg, 180, 620, 840, 840);
+
+  ctx.fillStyle = '#6f668f';
+  ctx.font = '500 24px Aptos, Segoe UI, sans-serif';
+  ctx.fillText(qrUrl, 120, 1555);
+
+  return new Promise((resolve) => {
+    canvas.toBlob((blob) => resolve(blob), 'image/png');
+  });
+}
+
 function VehiclesInner({ token, me, logout }) {
   const router = useRouter();
   const role = String(me?.role || '').toUpperCase().trim();
@@ -119,6 +192,7 @@ function VehiclesInner({ token, me, logout }) {
   const [blockValidationReport, setBlockValidationReport] = useState(null);
   const [validatingBlockUpload, setValidatingBlockUpload] = useState(false);
   const [uploadingBlockRows, setUploadingBlockRows] = useState(false);
+  const [exportingQrPack, setExportingQrPack] = useState(false);
 
   const scopedPath = (path) => {
     if (!isSuper || !activeTenantId) return path;
@@ -369,6 +443,46 @@ function VehiclesInner({ token, me, logout }) {
     window.open(`/vehicles/${vehicle.id}?print=1`, '_blank', 'noopener,noreferrer');
   };
 
+  const exportQrPack = async () => {
+    if (typeof window === 'undefined') return;
+    if (!vehicles.length) {
+      setMsg('There are no vehicles in this tenant scope to export.');
+      return;
+    }
+    setExportingQrPack(true);
+    try {
+      const origin = window.location.origin;
+      const zip = new JSZip();
+      for (let idx = 0; idx < vehicles.length; idx += 1) {
+        const vehicle = vehicles[idx];
+        const qrUrl = `${origin}/vehicles/${vehicle.id}`;
+        const blob = await buildVehicleQrLabelBlob(vehicle, qrUrl);
+        if (!blob) continue;
+        const plateKey = sanitizeFilenamePart(vehicle.plate, 'plate-pending');
+        const unitKey = sanitizeFilenamePart(vehicle.internalNumber, `vehicle-${idx + 1}`);
+        zip.file(`${plateKey}__${unitKey}.png`, blob);
+      }
+      const zipBlob = await zip.generateAsync({ type: 'blob' });
+      const scopeName = sanitizeFilenamePart(
+        isSuper
+          ? (tenantRows.find((tenant) => tenant.id === activeTenantId)?.slug || activeTenantId || 'all-tenants')
+          : (me?.tenantSlug || me?.tenantName || 'tenant'),
+        'tenant'
+      );
+      const url = URL.createObjectURL(zipBlob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `vehicle-qr-pack-${scopeName}.zip`;
+      a.click();
+      URL.revokeObjectURL(url);
+      setMsg(`QR export complete. Packed ${vehicles.length} vehicle labels into a ZIP.`);
+    } catch (error) {
+      setMsg(error.message || 'Failed to export QR pack');
+    } finally {
+      setExportingQrPack(false);
+    }
+  };
+
   const downloadTemplate = () => {
     const sampleType = vehicleTypes[0]?.code || 'ECON';
     const csv = `internalNumber,plate,tollTagNumber,tollStickerNumber,vin,make,model,color,year,vehicleTypeCode\nUNIT-001,ABC123,TAG-1001,SELLO-1001,1HGBH41JXMN109186,Honda,Civic,Silver,2024,${sampleType}`;
@@ -586,6 +700,7 @@ function VehiclesInner({ token, me, logout }) {
             <button type="button" className="button-subtle" onClick={() => setShowAddVehicle(true)} disabled={isSuper && !activeTenantId}>Add Vehicle</button>
             <button type="button" className="button-subtle" onClick={() => setShowUpload(true)} disabled={isSuper && !activeTenantId}>Upload Inventory</button>
             <button type="button" className="button-subtle" onClick={() => setShowBlockUpload(true)} disabled={isSuper && !activeTenantId}>Upload Blocks</button>
+            <button type="button" className="button-subtle" onClick={exportQrPack} disabled={(isSuper && !activeTenantId) || !vehicles.length || exportingQrPack}>{exportingQrPack ? 'Exporting QR Pack...' : 'Export QR Pack'}</button>
           </div>
           {fleetOpsHub.nextItems.length ? (
             <div className="app-card-grid compact">
@@ -611,6 +726,7 @@ function VehiclesInner({ token, me, logout }) {
             <button onClick={() => setShowAddVehicle(true)} disabled={isSuper && !activeTenantId}>Add Vehicle</button>
             <button onClick={() => setShowUpload(true)} disabled={isSuper && !activeTenantId}>Upload Inventory</button>
             <button onClick={() => setShowBlockUpload(true)} disabled={isSuper && !activeTenantId}>Upload Blocks</button>
+            <button className="button-subtle" onClick={exportQrPack} disabled={(isSuper && !activeTenantId) || !vehicles.length || exportingQrPack}>{exportingQrPack ? 'Exporting...' : 'Export QR Pack'}</button>
           </div>
         </div>
         {msg ? <p className="label">{msg}</p> : null}
