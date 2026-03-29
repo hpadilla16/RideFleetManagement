@@ -28,15 +28,17 @@ import { issueCenterRouter, publicIssueCenterRouter } from './modules/issue-cent
 import { tollsRouter } from './modules/tolls/tolls.routes.js';
 import { startTollAutoSyncScheduler, stopTollAutoSyncScheduler } from './modules/tolls/tolls.scheduler.js';
 import { buildOpenApiSpec, swaggerHtml } from './docs/openapi.js';
+import { captureBackendException, flushSentry, initSentry, isSentryEnabled } from './lib/sentry.js';
 
 assertAuthConfig();
+initSentry();
 
 const app = express();
 app.use(cors({ origin: ['http://localhost:3000', 'http://127.0.0.1:3000'] }));
 app.use(express.json({ limit: '12mb' }));
 
 app.get('/health', (_req, res) => {
-  res.json({ ok: true, service: 'fleet-management-backend' });
+  res.json({ ok: true, service: 'fleet-management-backend', sentryEnabled: isSentryEnabled() });
 });
 
 app.get('/api/docs/openapi.json', (req, res) => {
@@ -74,7 +76,15 @@ app.use('/api/people', requireAuth, requireModuleAccess('people'), peopleRouter)
 app.use('/api/settings', requireAuth, requireModuleAccess('settings'), settingsRouter);
 app.use('/api/tenants', requireAuth, requireModuleAccess('tenants'), tenantsRouter);
 
-app.use((err, _req, res, _next) => {
+app.use((err, req, res, _next) => {
+  captureBackendException(err, {
+    request: {
+      method: req.method,
+      path: req.originalUrl || req.url,
+      tenantId: req.user?.tenantId || null
+    },
+    user: req.user?.sub ? { id: req.user.sub, tenantId: req.user?.tenantId || null, role: req.user?.role || null } : undefined
+  });
   console.error(err);
   res.status(500).json({ error: 'Internal server error' });
 });
@@ -87,12 +97,26 @@ app.listen(port, () => {
 
 process.on('SIGINT', async () => {
   stopTollAutoSyncScheduler();
+  await flushSentry();
   await prisma.$disconnect();
   process.exit(0);
 });
 
 process.on('SIGTERM', async () => {
   stopTollAutoSyncScheduler();
+  await flushSentry();
   await prisma.$disconnect();
   process.exit(0);
+});
+
+process.on('unhandledRejection', async (reason) => {
+  captureBackendException(reason instanceof Error ? reason : new Error(String(reason)), {
+    lifecycle: 'unhandledRejection'
+  });
+  await flushSentry();
+});
+
+process.on('uncaughtException', async (error) => {
+  captureBackendException(error, { lifecycle: 'uncaughtException' });
+  await flushSentry();
 });
