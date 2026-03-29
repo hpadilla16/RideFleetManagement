@@ -554,13 +554,21 @@ function PlannerInner({ token, me, logout }) {
             return (
               <div key={v.id} className="planner-row" style={{ gridTemplateColumns: `260px repeat(${dayCount}, ${DAY_WIDTH}px)` }}>
                 <div className="planner-cell planner-sticky planner-track-meta" style={{ minHeight: rowHeight }}>
+                  {activeAvailabilityBlock(v) ? (
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+                      <span className="status-chip warning">Blocked</span>
+                      <span className="label" style={{ textTransform: 'none', letterSpacing: 0 }}>
+                        Free {new Date(activeAvailabilityBlock(v).availableFrom).toLocaleString()}
+                      </span>
+                    </div>
+                  ) : null}
                   <div style={{ fontWeight: 700 }}>{v.make} {v.model} {v.year || ''}</div>
                   <div className="label">#{v.internalNumber} | {v.vehicleType?.code || '-'}</div>
                   {v.id !== '__unassigned__' ? (
                     <>
                       {activeAvailabilityBlock(v) ? (
-                        <div className="label" style={{ marginTop: 6, textTransform: 'none', letterSpacing: 0 }}>
-                          Blocked until {new Date(activeAvailabilityBlock(v).availableFrom).toLocaleString()}
+                        <div className="surface-note" style={{ marginTop: 6 }}>
+                          Hold reason: {activeAvailabilityBlock(v).reason || 'Legacy contract migration hold'}
                         </div>
                       ) : null}
                       <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 8 }}>
