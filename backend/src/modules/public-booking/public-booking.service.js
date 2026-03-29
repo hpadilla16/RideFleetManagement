@@ -431,7 +431,16 @@ export const publicBookingService = {
           rate: money(service.rate),
           total: money(service.total),
           taxable: !!service.taxable,
-          mandatory: !!service.mandatory
+          mandatory: !!service.mandatory,
+          linkedFee: service.linkedFee ? {
+            feeId: service.linkedFee.feeId,
+            code: service.linkedFee.code || null,
+            name: service.linkedFee.name,
+            description: service.linkedFee.description || '',
+            mode: service.linkedFee.mode || 'FIXED',
+            amount: money(service.linkedFee.amount),
+            taxable: !!service.linkedFee.taxable
+          } : null
         })),
         mandatoryFees: (result.mandatoryFees || []).map((fee) => ({
           feeId: fee.feeId,

@@ -277,6 +277,7 @@ export default function PublicBookingConfirmationPage() {
                       <BreakdownRow label="Estimated taxes" value={fmtMoney(pricing.estimatedTaxes)} />
                       <BreakdownRow label="Base reservation total" value={fmtMoney(pricing.baseReservationTotal)} />
                       <BreakdownRow label="Additional services" value={fmtMoney(pricing.additionalServicesTotal)} />
+                      <BreakdownRow label="Auto-applied service fees" value={fmtMoney(pricing.linkedServiceFeesTotal)} />
                       <BreakdownRow label="Insurance" value={fmtMoney(pricing.insuranceTotal)} />
                       <BreakdownRow label="Estimated reservation total" value={fmtMoney(pricing.reservationEstimate)} strong />
                       <BreakdownRow label="Due now for pre-check-in" value={fmtMoney(pricing.depositDueNow)} strong />
@@ -303,6 +304,20 @@ export default function PublicBookingConfirmationPage() {
                       <div key={service.serviceId || service.name} className="row-between" style={{ gap: 12 }}>
                         <span>{service.name} x {service.quantity}</span>
                         <strong>{fmtMoney(service.total)}</strong>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ) : null}
+
+              {confirmation.linkedServiceFees?.length ? (
+                <div className="surface-note">
+                  <strong>Auto-Applied Service Fees</strong>
+                  <div className="stack" style={{ marginTop: 10 }}>
+                    {confirmation.linkedServiceFees.map((fee) => (
+                      <div key={`${fee.feeId || fee.code || fee.name}-${fee.serviceId || ''}`} className="row-between" style={{ gap: 12 }}>
+                        <span>{fee.name}</span>
+                        <strong>{fmtMoney(fee.total)}</strong>
                       </div>
                     ))}
                   </div>

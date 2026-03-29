@@ -27,6 +27,14 @@ function fmtMoney(value) {
   return `$${Number(value || 0).toFixed(2)}`;
 }
 
+function computeFeeLineTotal(fee, { baseAmount = 0, days = 1 } = {}) {
+  const amount = Number(fee?.amount || 0);
+  const mode = String(fee?.mode || 'FIXED').toUpperCase();
+  if (mode === 'PERCENTAGE') return Number((baseAmount * (amount / 100)).toFixed(2));
+  if (mode === 'PER_DAY') return Number((amount * Math.max(1, Number(days || 1))).toFixed(2));
+  return Number(amount.toFixed(2));
+}
+
 function fmtRating(value, count = 0) {
   const rating = Number(value || 0);
   if (!count) return 'New host';
@@ -493,6 +501,27 @@ function PublicBookingPageInner() {
     () => chosenAdditionalServices.reduce((sum, service) => sum + Number(service.total || 0), 0),
     [chosenAdditionalServices]
   );
+  const linkedServiceFees = useMemo(() => {
+    if (!chosenAdditionalServices.length) return [];
+    const bookingDays = searchMode === 'RENTAL'
+      ? Number(selectedResult?.quote?.days || 1)
+      : Number(selectedResult?.quote?.tripDays || 1);
+    const baseAmount = searchMode === 'RENTAL'
+      ? Number(selectedResult?.quote?.baseTotal || 0) + Number(selectedResult?.quote?.mandatoryFees || 0) + chosenAdditionalServicesTotal
+      : Number(selectedResult?.quote?.subtotal || 0) + chosenAdditionalServicesTotal;
+    return chosenAdditionalServices
+      .filter((service) => service.linkedFee?.feeId)
+      .map((service) => ({
+        ...service.linkedFee,
+        serviceId: service.serviceId,
+        serviceName: service.name,
+        total: computeFeeLineTotal(service.linkedFee, { baseAmount, days: bookingDays })
+      }));
+  }, [chosenAdditionalServices, chosenAdditionalServicesTotal, searchMode, selectedResult]);
+  const linkedServiceFeesTotal = useMemo(
+    () => linkedServiceFees.reduce((sum, fee) => sum + Number(fee.total || 0), 0),
+    [linkedServiceFees]
+  );
   const mandatoryBookingFees = useMemo(
     () => Array.isArray(selectedResult?.mandatoryFees) ? selectedResult.mandatoryFees : [],
     [selectedResult]
@@ -523,8 +552,8 @@ function PublicBookingPageInner() {
             ? (selectedResult?.quote?.deliveryTotal || selectedResult?.quote?.total || 0)
             : (selectedResult?.quote?.pickupTotal || selectedResult?.quote?.total || 0)
         );
-    return baseTotal + chosenAdditionalServicesTotal + selectedInsuranceTotal;
-  }, [chosenAdditionalServicesTotal, searchMode, selectedFulfillmentChoice, selectedInsuranceTotal, selectedResult]);
+    return baseTotal + chosenAdditionalServicesTotal + linkedServiceFeesTotal + selectedInsuranceTotal;
+  }, [chosenAdditionalServicesTotal, linkedServiceFeesTotal, searchMode, selectedFulfillmentChoice, selectedInsuranceTotal, selectedResult]);
 
   const selectedCarSharingGuestTripFee = useMemo(() => {
     if (searchMode !== 'CAR_SHARING' || !selectedResult) return 0;
@@ -1312,6 +1341,7 @@ function PublicBookingPageInner() {
                                     : `${fmtMoney(service.rate)} / ${service.unitLabel.toLowerCase()}`}
                                   {service.taxable ? ' | Taxable' : ''}
                                   {service.mandatory ? ' | Required' : ''}
+                                  {service.linkedFee?.name ? ` | Auto fee ${service.linkedFee.name}` : ''}
                                 </span>
                               </div>
                               <label style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
@@ -1365,9 +1395,35 @@ function PublicBookingPageInner() {
                                 <input value={fmtMoney(serviceTotal)} disabled />
                               </div>
                             </div>
+                            {service.linkedFee?.name ? (
+                              <div className="surface-note">
+                                Selecting this service also adds the fee <strong>{service.linkedFee.name}</strong>
+                                {service.linkedFee.mode ? ` (${String(service.linkedFee.mode).replaceAll('_', ' ')})` : ''}.
+                              </div>
+                            ) : null}
                           </div>
                         );
                       })}
+                    </div>
+                  </div>
+                ) : null}
+                {linkedServiceFees.length ? (
+                  <div className="stack" style={{ marginBottom: 18 }}>
+                    <div>
+                      <div className="section-title" style={{ fontSize: 16 }}>Auto-Applied Service Fees</div>
+                      <p className="ui-muted">These fees are automatically added because of the services selected above.</p>
+                    </div>
+                    <div className="stack">
+                      {linkedServiceFees.map((fee) => (
+                        <div key={`${fee.feeId}-${fee.serviceId}`} className="surface-note" style={{ display: 'grid', gap: 8 }}>
+                          <strong>{fee.name}</strong>
+                          <span className="ui-muted">Triggered by {fee.serviceName}</span>
+                          <div className="row-between" style={{ gap: 12 }}>
+                            <span className="eyebrow">{String(fee.mode || 'FIXED').replaceAll('_', ' ')}</span>
+                            <strong>{fmtMoney(fee.total)}</strong>
+                          </div>
+                        </div>
+                      ))}
                     </div>
                   </div>
                 ) : null}
@@ -1480,8 +1536,8 @@ function PublicBookingPageInner() {
                   <div className="surface-note">
                     Base trip total {fmtMoney(selectedResult?.quote?.estimatedTripTotal)}.
                     {mandatoryBookingFeesTotal ? ` Required fees included: ${fmtMoney(mandatoryBookingFeesTotal)}.` : ''}
-                    {chosenAdditionalServicesTotal || selectedInsuranceTotal
-                      ? ` With extras and insurance: ${fmtMoney(checkoutEstimatedTotal)}.`
+                    {chosenAdditionalServicesTotal || linkedServiceFeesTotal || selectedInsuranceTotal
+                      ? ` With extras${linkedServiceFeesTotal ? ', linked service fees' : ''} and insurance: ${fmtMoney(checkoutEstimatedTotal)}.`
                       : ' Additional services and insurance will be reflected here before checkout.'}
                   </div>
                 ) : null}

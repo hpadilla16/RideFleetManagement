@@ -155,7 +155,29 @@ function computeAdditionalServiceLine(service, days, quantityOverride) {
     rate: money(rate),
     total: money(total),
     taxable: !!service.taxable,
-    mandatory: !!service.mandatory
+    mandatory: !!service.mandatory,
+    linkedFee: service?.linkedFee ? {
+      feeId: service.linkedFee.id,
+      code: service.linkedFee.code || null,
+      name: service.linkedFee.name,
+      description: service.linkedFee.description || '',
+      mode: String(service.linkedFee.mode || 'FIXED').toUpperCase(),
+      amount: money(service.linkedFee.amount),
+      taxable: !!service.linkedFee.taxable
+    } : null
+  };
+}
+
+function computeLinkedFeeLineForService(service, fee, { baseAmount = 0, days = 1 } = {}) {
+  if (!service?.serviceId || !fee?.id) return null;
+  const normalizedFee = computePublicFeeLine(fee, baseAmount, days);
+  return {
+    ...normalizedFee,
+    source: 'SERVICE_LINKED_FEE',
+    serviceId: service.serviceId,
+    serviceCode: service.code || null,
+    serviceName: service.name || 'Additional service',
+    name: `${normalizedFee.name} | ${service.name || 'Service'}`
   };
 }
 
@@ -385,6 +407,9 @@ async function listPublicAdditionalServices({ tenantId, locationId, vehicleTypeI
         { locationId: null },
         ...(locationId ? [{ locationId }] : [])
       ]
+    },
+    include: {
+      linkedFee: true
     },
     orderBy: [{ sortOrder: 'asc' }, { name: 'asc' }]
   });
@@ -1123,6 +1148,12 @@ export const bookingEngineService = {
           ? money(Number(service.rate || 0) * Number(selected.quote?.days || 1) * Number(service.quantity || 1))
           : money(Number(service.rate || 0) * Number(service.quantity || 1))
       }));
+      const linkedServiceFees = normalizedChosenServices
+        .map((service) => computeLinkedFeeLineForService(service, service.linkedFee, {
+          baseAmount: Number(selected.quote?.subtotal || 0) + normalizedChosenServices.reduce((sum, row) => sum + Number(row.total || 0), 0),
+          days: Number(selected.quote?.days || 1)
+        }))
+        .filter(Boolean);
       const insuranceLine = selectedInsurancePlan
         ? {
             ...selectedInsurancePlan,
@@ -1134,7 +1165,8 @@ export const bookingEngineService = {
       const mandatoryFeesTotal = money(mandatoryFees.reduce((sum, fee) => sum + Number(fee.total || 0), 0));
       const insuranceTotal = money(Number(insuranceLine?.total || 0));
       const addOnsTotal = money(normalizedChosenServices.reduce((sum, service) => sum + Number(service.total || 0), 0));
-      const estimatedTotal = money(Number(selected.quote.total || 0) + addOnsTotal + insuranceTotal);
+      const linkedServiceFeesTotal = money(linkedServiceFees.reduce((sum, fee) => sum + Number(fee.total || 0), 0));
+      const estimatedTotal = money(Number(selected.quote.total || 0) + addOnsTotal + linkedServiceFeesTotal + insuranceTotal);
 
       const reservation = await reservationsService.create({
         reservationNumber: generateReservationNumber('WEB'),
@@ -1184,7 +1216,7 @@ export const bookingEngineService = {
         }
       });
 
-      if (normalizedChosenServices.length || insuranceLine || mandatoryFees.length) {
+      if (normalizedChosenServices.length || linkedServiceFees.length || insuranceLine || mandatoryFees.length) {
         await prisma.reservationCharge.createMany({
           data: [
             ...mandatoryFees.map((fee, idx) => ({
@@ -1215,6 +1247,21 @@ export const bookingEngineService = {
               source: 'ADDITIONAL_SERVICE',
               sourceRefId: service.serviceId
             })),
+            ...linkedServiceFees.map((fee, idx) => ({
+              reservationId: reservation.id,
+              code: fee.code,
+              name: fee.name,
+              chargeType: 'UNIT',
+              quantity: 1,
+              rate: Number(fee.mode === 'PERCENTAGE' ? fee.amount : fee.total || 0),
+              total: Number(fee.total || 0),
+              taxable: !!fee.taxable,
+              selected: true,
+              sortOrder: idx + mandatoryFees.length + normalizedChosenServices.length,
+              source: 'SERVICE_LINKED_FEE',
+              sourceRefId: `${fee.feeId}:${fee.serviceId}`,
+              notes: fee.serviceName ? `Auto-added because service "${fee.serviceName}" was selected` : 'Auto-added because a linked service was selected'
+            })),
             ...(insuranceLine ? [{
               reservationId: reservation.id,
               code: insuranceLine.code,
@@ -1225,7 +1272,7 @@ export const bookingEngineService = {
               total: Number(insuranceLine.total || 0),
               taxable: !!insuranceLine.taxable,
               selected: true,
-              sortOrder: normalizedChosenServices.length + mandatoryFees.length,
+              sortOrder: normalizedChosenServices.length + mandatoryFees.length + linkedServiceFees.length,
               source: 'INSURANCE',
               sourceRefId: insuranceLine.code
             }] : [])
@@ -1280,6 +1327,7 @@ export const bookingEngineService = {
           estimatedTaxes: money(selected.quote?.taxes),
           baseReservationTotal: money(selected.quote?.total),
           additionalServicesTotal: addOnsTotal,
+          linkedServiceFeesTotal,
           insuranceTotal,
           reservationEstimate: estimatedTotal,
           depositDueNow: money(selected.deposit?.amountDue),
@@ -1288,6 +1336,7 @@ export const bookingEngineService = {
         },
         mandatoryFees,
         additionalServices: normalizedChosenServices,
+        linkedServiceFees,
         insuranceSelection: insuranceLine
           ? {
               type: 'PLAN',

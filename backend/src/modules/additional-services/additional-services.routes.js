@@ -35,12 +35,22 @@ additionalServicesRouter.post('/', async (req, res, next) => {
     if (missing.length) return res.status(400).json({ error: `Missing required fields: ${missing.join(', ')}` });
     const row = await additionalServicesService.create(req.body || {}, scopeFor(req));
     res.status(201).json(row);
-  } catch (e) { next(e); }
+  } catch (e) {
+    if (String(e?.message || '').includes('Linked fee not found')) {
+      return res.status(400).json({ error: 'Linked fee not found for this tenant' });
+    }
+    next(e);
+  }
 });
 
 additionalServicesRouter.patch('/:id', async (req, res) => {
   try { res.json(await additionalServicesService.update(req.params.id, req.body || {}, scopeFor(req))); }
-  catch { res.status(404).json({ error: 'Additional service not found' }); }
+  catch (e) {
+    if (String(e?.message || '').includes('Linked fee not found')) {
+      return res.status(400).json({ error: 'Linked fee not found for this tenant' });
+    }
+    res.status(404).json({ error: 'Additional service not found' });
+  }
 });
 
 additionalServicesRouter.delete('/:id', async (req, res) => {

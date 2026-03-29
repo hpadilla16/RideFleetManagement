@@ -1447,6 +1447,7 @@ model Fee {
   updatedAt   DateTime @updatedAt
 
   locationFees LocationFee[]
+  linkedServices AdditionalService[] @relation("AdditionalServiceLinkedFee")
 
   @@index([isActive, name])
   @@unique([tenantId, code])
@@ -1493,6 +1494,8 @@ model AdditionalService {
 
   locationId      String?
   location        Location? @relation(fields: [locationId], references: [id])
+  linkedFeeId     String?
+  linkedFee       Fee?      @relation("AdditionalServiceLinkedFee", fields: [linkedFeeId], references: [id])
 
   createdAt       DateTime  @default(now())
   updatedAt       DateTime  @updatedAt
@@ -1501,6 +1504,7 @@ model AdditionalService {
   commissionLines AgreementCommissionLine[]
 
   @@index([locationId, isActive])
+  @@index([linkedFeeId])
 }
 
 model AppSetting {

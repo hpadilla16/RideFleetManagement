@@ -152,7 +152,7 @@ const EMPTY_SERVICE = {
   code: '', name: '', description: '', chargeType: 'UNIT', unitLabel: 'Unit', calculationBy: '24_HOUR_TIME',
   rate: '', dailyRate: '', weeklyRate: '', monthlyRate: '', commissionValueType: '', commissionPercentValue: '', commissionFixedAmount: '', taxable: false, defaultQty: '1', sortOrder: '0',
   allVehicleTypes: true, vehicleTypeIds: [], displayOnline: false, defaultRencars: false, mandatory: false, coversTolls: false,
-  isActive: true, locationId: ''
+  isActive: true, locationId: '', linkedFeeId: ''
 };
 const EMPTY_VEHICLE_TYPE = { code: '', name: '', description: '', imageUrl: '' };
 const EMPTY_COMMISSION_PLAN = {
@@ -698,7 +698,8 @@ function SettingsInner({ token, me, logout }) {
       defaultQty: Number(serviceForm.defaultQty || 1),
       sortOrder: Number(serviceForm.sortOrder || 0),
       vehicleTypeIds: JSON.stringify(serviceForm.vehicleTypeIds || []),
-      locationId: serviceForm.locationId || null
+      locationId: serviceForm.locationId || null,
+      linkedFeeId: serviceForm.linkedFeeId || null
     };
     await api(scopedSettingsPath(serviceEditId ? `/api/additional-services/${serviceEditId}` : '/api/additional-services'), {
       method: serviceEditId ? 'PATCH' : 'POST',
@@ -1139,7 +1140,8 @@ function SettingsInner({ token, me, logout }) {
       mandatory: !!svc.mandatory,
       coversTolls: !!svc.coversTolls,
       isActive: svc.isActive !== false,
-      locationId: svc.locationId || ''
+      locationId: svc.locationId || '',
+      linkedFeeId: svc.linkedFeeId || ''
     });
   };
 
@@ -2242,14 +2244,30 @@ function SettingsInner({ token, me, logout }) {
                   </select>
                 </div>
                 <div className="stack">
-                  <label className="label">Daily*</label>
-                  <input value={serviceForm.dailyRate} onChange={(e) => setServiceForm({ ...serviceForm, dailyRate: e.target.value, rate: e.target.value })} />
+                  <label className="label">One-Time / Flat Rate</label>
+                  <input type="number" min="0" step="0.01" value={serviceForm.rate} onChange={(e) => setServiceForm({ ...serviceForm, rate: e.target.value })} />
                 </div>
               </div>
 
+              <div className="grid3">
+                <div className="stack"><label className="label">Daily</label><input type="number" min="0" step="0.01" value={serviceForm.dailyRate} onChange={(e) => setServiceForm({ ...serviceForm, dailyRate: e.target.value })} /></div>
+                <div className="stack"><label className="label">Weekly</label><input type="number" min="0" step="0.01" value={serviceForm.weeklyRate} onChange={(e) => setServiceForm({ ...serviceForm, weeklyRate: e.target.value })} /></div>
+                <div className="stack"><label className="label">Monthly</label><input type="number" min="0" step="0.01" value={serviceForm.monthlyRate} onChange={(e) => setServiceForm({ ...serviceForm, monthlyRate: e.target.value })} /></div>
+              </div>
+
               <div className="grid2">
-                <div className="stack"><label className="label">Weekly</label><input value={serviceForm.weeklyRate} onChange={(e) => setServiceForm({ ...serviceForm, weeklyRate: e.target.value })} /></div>
-                <div className="stack"><label className="label">Monthly*</label><input value={serviceForm.monthlyRate} onChange={(e) => setServiceForm({ ...serviceForm, monthlyRate: e.target.value })} /></div>
+                <div className="stack">
+                  <label className="label">Linked Fee (optional)</label>
+                  <select value={serviceForm.linkedFeeId} onChange={(e) => setServiceForm({ ...serviceForm, linkedFeeId: e.target.value })}>
+                    <option value="">No linked fee</option>
+                    {fees.map((fee) => <option key={fee.id} value={fee.id}>{fee.name} {fee.code ? `(${fee.code})` : ''}</option>)}
+                  </select>
+                  <div className="label">If selected, this fee is automatically added when the service is chosen.</div>
+                </div>
+                <div className="stack">
+                  <label className="label">Default Qty</label>
+                  <input type="number" min="1" step="1" value={serviceForm.defaultQty} onChange={(e) => setServiceForm({ ...serviceForm, defaultQty: e.target.value })} />
+                </div>
               </div>
 
               <div className="glass card stack" style={{ padding: 12 }}>
@@ -2309,13 +2327,21 @@ function SettingsInner({ token, me, logout }) {
             </form>
 
             <table>
-              <thead><tr><th>Name</th><th>Type</th><th>Rate</th><th>Commission</th><th>Qty</th><th>Location</th><th>Toll Package</th><th>Online</th><th>Active</th><th>Actions</th></tr></thead>
+              <thead><tr><th>Name</th><th>Type</th><th>Pricing</th><th>Linked Fee</th><th>Commission</th><th>Qty</th><th>Location</th><th>Toll Package</th><th>Online</th><th>Active</th><th>Actions</th></tr></thead>
               <tbody>
                 {services.map((s) => (
                   <tr key={s.id}>
                     <td>{s.name}</td>
                     <td>{s.chargeType}</td>
-                    <td>${Number(s.rate || 0).toFixed(2)}</td>
+                    <td>
+                      {[
+                        Number(s.rate || 0) > 0 ? `Flat $${Number(s.rate || 0).toFixed(2)}` : null,
+                        Number(s.dailyRate || 0) > 0 ? `Daily $${Number(s.dailyRate || 0).toFixed(2)}` : null,
+                        Number(s.weeklyRate || 0) > 0 ? `Weekly $${Number(s.weeklyRate || 0).toFixed(2)}` : null,
+                        Number(s.monthlyRate || 0) > 0 ? `Monthly $${Number(s.monthlyRate || 0).toFixed(2)}` : null
+                      ].filter(Boolean).join(' | ') || '$0.00'}
+                    </td>
+                    <td>{s.linkedFee?.name || 'None'}</td>
                     <td>
                       {s.commissionValueType === 'PERCENT' ? `${Number(s.commissionPercentValue || 0).toFixed(2)}%` :
                         s.commissionValueType ? `$${Number(s.commissionFixedAmount || 0).toFixed(2)}` :

@@ -15,12 +15,12 @@ function pricingEditorState(pricing, reservation) {
   const charges = Array.isArray(pricing?.charges) ? pricing.charges : [];
   if (snapshot || charges.length) {
     const serviceNames = charges
-      .filter((c) => String(c?.source || '').toUpperCase() === 'SERVICE')
+      .filter((c) => ['SERVICE', 'ADDITIONAL_SERVICE'].includes(String(c?.source || '').toUpperCase()))
       .map((c) => stripChargePrefix(c?.name, /^Service:\s*/i))
       .filter(Boolean)
       .join(', ');
     const feeNames = charges
-      .filter((c) => String(c?.source || '').toUpperCase() === 'FEE')
+      .filter((c) => ['FEE', 'SERVICE_LINKED_FEE'].includes(String(c?.source || '').toUpperCase()))
       .map((c) => stripChargePrefix(c?.name, /^Fee:\s*/i))
       .filter(Boolean)
       .join(', ');
@@ -47,8 +47,8 @@ function structuredDisplayChargeRows(pricingRows = []) {
   return (Array.isArray(pricingRows) ? pricingRows : []).map((r, idx) => {
     const source = String(r?.source || '').toUpperCase();
     let displayId = String(r?.id || idx);
-    if (source === 'SERVICE') displayId = `service-${r?.sourceRefId || idx}`;
-    if (source === 'FEE') displayId = `fee-${r?.sourceRefId || idx}`;
+    if (['SERVICE', 'ADDITIONAL_SERVICE'].includes(source)) displayId = `service-${r?.sourceRefId || idx}`;
+    if (['FEE', 'SERVICE_LINKED_FEE'].includes(source)) displayId = `fee-${r?.sourceRefId || idx}`;
     if (source === 'DEPOSIT_DUE') displayId = 'deposit-due';
     if (source === 'SECURITY_DEPOSIT') displayId = 'security-deposit';
     if (source === 'INSURANCE') displayId = `insurance-${r?.sourceRefId || idx}`;
@@ -1030,6 +1030,37 @@ total: toMoneyNum(rate * unit),
 };
 });
 
+const linkedFeeRows = serviceRows
+  .map((serviceRow, idx) => {
+    const serviceName = String(serviceRow.name || '').replace(/^Service:\s*/i, '').trim().toLowerCase();
+    const serviceOpt = serviceOptions.find((s) => (s.name || s.code || '').trim().toLowerCase() === serviceName);
+    const linkedFee = serviceOpt?.linkedFee;
+    if (!linkedFee?.id) return null;
+    const baseAmount = toMoneyNum(
+      toMoneyNum((chargeModel.dailyRate || row?.dailyRate || 0) * breakdown.days)
+      + serviceRows.reduce((sum, currentRow) => sum + toMoneyNum(currentRow.total), 0)
+    );
+    const feeAmount = toMoneyNum(linkedFee.amount || 0);
+    const mode = String(linkedFee.mode || 'FIXED').toUpperCase();
+    const total = mode === 'PERCENTAGE'
+      ? toMoneyNum(baseAmount * (feeAmount / 100))
+      : mode === 'PER_DAY'
+        ? toMoneyNum(feeAmount * breakdown.days)
+        : feeAmount;
+    return {
+      id: `linked-fee-${idx}`,
+      name: `${linkedFee.name} | ${serviceOpt?.name || serviceRow.name}`,
+      chargeType: 'UNIT',
+      quantity: 1,
+      rate: mode === 'PERCENTAGE' ? feeAmount : total,
+      total,
+      taxable: linkedFee.taxable !== false,
+      source: 'SERVICE_LINKED_FEE',
+      sourceRefId: `${linkedFee.id}:${serviceOpt?.id || idx}`
+    };
+  })
+  .filter(Boolean);
+
 const insuranceRows = [];
 if (insurancePlan) {
   const planLabel = insurancePlan.label || insurancePlan.name || insurancePlan.code;
@@ -1091,7 +1122,7 @@ total: toMoneyNum(taxableSubTotal * (Number(chargeModel.taxRate) / 100)),
 }
 : null;
 
-const normalizedRows = taxRow ? [...coreRows, taxRow] : coreRows;
+const normalizedRows = taxRow ? [...coreRows, ...linkedFeeRows, taxRow] : [...coreRows, ...linkedFeeRows];
 
 const depositRows = [];
 if (Number(depositOverrides.depositDue || 0) > 0) {
@@ -1176,7 +1207,7 @@ token
       .filter((row) => row.name !== 'Service:');
     if (chargeEdit) return editorRows;
     return (pricing?.charges || [])
-      .filter((j) => String(j?.source || '').toUpperCase() === 'SERVICE')
+      .filter((j) => ['SERVICE', 'ADDITIONAL_SERVICE'].includes(String(j?.source || '').toUpperCase()))
       .map((j, i) => ({ id: `svc-${j?.sourceRefId || i}`, name: String(j?.name || '') }));
   }, [pricing?.charges, chargeEdit, chargeModel.serviceNames]);
 
@@ -1187,7 +1218,7 @@ token
       .filter((row) => row.name !== 'Fee:');
     if (chargeEdit) return editorRows;
     return (pricing?.charges || [])
-      .filter((j) => String(j?.source || '').toUpperCase() === 'FEE')
+      .filter((j) => ['FEE', 'SERVICE_LINKED_FEE'].includes(String(j?.source || '').toUpperCase()))
       .map((j, i) => ({ id: `fee-${j?.sourceRefId || i}`, name: String(j?.name || '') }));
   }, [pricing?.charges, chargeEdit, chargeModel.feeNames]);
 
@@ -1251,10 +1282,39 @@ token
       return { id: r.id, name: r.name, unit, rate, total, taxable };
     });
 
+    const linkedFeeRows = serviceRows
+      .map((serviceRow, idx) => {
+        const raw = String(serviceRow.name || '').replace(/^Service:\s*/i, '').trim().toLowerCase();
+        const serviceOpt = (serviceOptions || []).find((s) => {
+          const n = String(s?.name || s?.code || '').trim().toLowerCase();
+          return n === raw;
+        });
+        const linkedFee = serviceOpt?.linkedFee;
+        if (!linkedFee?.id) return null;
+        const baseAmount = toMoneyNum(breakdown.base + serviceRows.reduce((sum, currentRow) => sum + toMoneyNum(currentRow.total), 0));
+        const feeAmount = toMoneyNum(linkedFee.amount || 0);
+        const mode = String(linkedFee.mode || 'FIXED').toUpperCase();
+        const total = mode === 'PERCENTAGE'
+          ? toMoneyNum(baseAmount * (feeAmount / 100))
+          : mode === 'PER_DAY'
+            ? toMoneyNum(feeAmount * breakdown.days)
+            : feeAmount;
+        return {
+          id: `linked-fee-preview-${idx}`,
+          name: `${linkedFee.name} | ${serviceOpt?.name || serviceRow.name}`,
+          unit: 1,
+          rate: mode === 'PERCENTAGE' ? feeAmount : total,
+          total,
+          taxable: linkedFee.taxable !== false
+        };
+      })
+      .filter(Boolean);
+
     const rows = [
       { id: 'daily', name: 'Daily', unit: breakdown.days, rate: breakdown.daily, total: breakdown.base, taxable: true },
       ...serviceRows,
-      ...feeRows
+      ...feeRows,
+      ...linkedFeeRows
     ];
 
     const taxRatePct = toMoneyNum(chargeModel.taxRate || breakdown.taxRate || 0);
