@@ -54,6 +54,43 @@ vehiclesRouter.post('/bulk/import', async (req, res, next) => {
   }
 });
 
+vehiclesRouter.post('/availability-blocks/validate', async (req, res) => {
+  const rows = Array.isArray(req.body?.rows) ? req.body.rows : [];
+  const report = await vehiclesService.validateBulkAvailabilityBlocks(rows, scopeFor(req));
+  res.json(report);
+});
+
+vehiclesRouter.post('/availability-blocks/import', async (req, res, next) => {
+  const rows = Array.isArray(req.body?.rows) ? req.body.rows : [];
+  try {
+    const out = await vehiclesService.importBulkAvailabilityBlocks(rows, scopeFor(req));
+    res.json(out);
+  } catch (e) {
+    next(e);
+  }
+});
+
+vehiclesRouter.post('/:id/availability-blocks', async (req, res, next) => {
+  try {
+    const row = await vehiclesService.createAvailabilityBlock(req.params.id, req.body || {}, scopeFor(req));
+    res.status(201).json(row);
+  } catch (e) {
+    if (/Vehicle not found/i.test(String(e?.message || ''))) return res.status(404).json({ error: 'Vehicle not found' });
+    if (/availableFrom is required|availableFrom must be after blockedFrom/i.test(String(e?.message || ''))) return res.status(400).json({ error: String(e.message) });
+    next(e);
+  }
+});
+
+vehiclesRouter.post('/availability-blocks/:id/release', async (req, res, next) => {
+  try {
+    const row = await vehiclesService.releaseAvailabilityBlock(req.params.id, scopeFor(req));
+    res.json(row);
+  } catch (e) {
+    if (/Availability block not found/i.test(String(e?.message || ''))) return res.status(404).json({ error: 'Availability block not found' });
+    next(e);
+  }
+});
+
 vehiclesRouter.patch('/:id', async (req, res, next) => {
   try {
     const row = await vehiclesService.update(req.params.id, req.body || {}, scopeFor(req));

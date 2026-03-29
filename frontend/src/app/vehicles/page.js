@@ -32,6 +32,28 @@ function agreementInspectionSummary(agreement) {
   };
 }
 
+function activeAvailabilityBlock(vehicle) {
+  const now = Date.now();
+  return (Array.isArray(vehicle?.availabilityBlocks) ? vehicle.availabilityBlocks : []).find((block) => {
+    const releasedAt = block?.releasedAt ? new Date(block.releasedAt).getTime() : null;
+    const blockedFrom = block?.blockedFrom ? new Date(block.blockedFrom).getTime() : now;
+    const availableFrom = block?.availableFrom ? new Date(block.availableFrom).getTime() : null;
+    return !releasedAt && blockedFrom <= now && availableFrom && availableFrom > now;
+  }) || null;
+}
+
+function toLocalDateTimeInput(value) {
+  if (!value) return '';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '';
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  const hours = String(date.getHours()).padStart(2, '0');
+  const minutes = String(date.getMinutes()).padStart(2, '0');
+  return `${year}-${month}-${day}T${hours}:${minutes}`;
+}
+
 function VehiclesInner({ token, me, logout }) {
   const role = String(me?.role || '').toUpperCase().trim();
   const isSuper = role === 'SUPER_ADMIN';
@@ -46,6 +68,8 @@ function VehiclesInner({ token, me, logout }) {
   const [showRent, setShowRent] = useState(false);
   const [showAddVehicle, setShowAddVehicle] = useState(false);
   const [showUpload, setShowUpload] = useState(false);
+  const [showBlockVehicle, setShowBlockVehicle] = useState(false);
+  const [showBlockUpload, setShowBlockUpload] = useState(false);
   const [showEditVehicle, setShowEditVehicle] = useState(false);
   const [msg, setMsg] = useState('');
 
@@ -65,6 +89,17 @@ function VehiclesInner({ token, me, logout }) {
   const [validationReport, setValidationReport] = useState(null);
   const [validating, setValidating] = useState(false);
   const [uploading, setUploading] = useState(false);
+  const [blockForm, setBlockForm] = useState({
+    blockedFrom: toLocalDateTimeInput(new Date()),
+    availableFrom: '',
+    reason: '',
+    notes: ''
+  });
+  const [blockWizardStep, setBlockWizardStep] = useState(1);
+  const [blockUploadRows, setBlockUploadRows] = useState([]);
+  const [blockValidationReport, setBlockValidationReport] = useState(null);
+  const [validatingBlockUpload, setValidatingBlockUpload] = useState(false);
+  const [uploadingBlockRows, setUploadingBlockRows] = useState(false);
 
   const scopedPath = (path) => {
     if (!isSuper || !activeTenantId) return path;
@@ -120,7 +155,8 @@ function VehiclesInner({ token, me, logout }) {
   }, [vehicles, query]);
 
   const fleetOpsHub = useMemo(() => {
-    const available = vehicles.filter((v) => String(v?.status || '').toUpperCase() === 'AVAILABLE');
+    const blockedTemporarily = vehicles.filter((v) => !!activeAvailabilityBlock(v));
+    const available = vehicles.filter((v) => String(v?.status || '').toUpperCase() === 'AVAILABLE' && !activeAvailabilityBlock(v));
     const onRent = vehicles.filter((v) => String(v?.status || '').toUpperCase() === 'ON_RENT');
     const serviceRisk = vehicles.filter((v) => ['IN_MAINTENANCE', 'OUT_OF_SERVICE'].includes(String(v?.status || '').toUpperCase()));
     const carSharing = vehicles.filter((v) => ['CAR_SHARING_ONLY', 'BOTH'].includes(String(v?.fleetMode || '').toUpperCase()));
@@ -163,6 +199,7 @@ function VehiclesInner({ token, me, logout }) {
       available: available.length,
       onRent: onRent.length,
       serviceRisk: serviceRisk.length,
+      blockedTemporarily: blockedTemporarily.length,
       carSharing: carSharing.length,
       nextItems
     };
@@ -261,6 +298,19 @@ function VehiclesInner({ token, me, logout }) {
     setShowEditVehicle(true);
   };
 
+  const openBlockVehicle = (vehicle) => {
+    setSelected(vehicle);
+    const activeBlock = activeAvailabilityBlock(vehicle);
+    const baseStart = activeBlock?.blockedFrom ? toLocalDateTimeInput(activeBlock.blockedFrom) : toLocalDateTimeInput(new Date());
+    setBlockForm({
+      blockedFrom: baseStart,
+      availableFrom: activeBlock?.availableFrom ? toLocalDateTimeInput(activeBlock.availableFrom) : '',
+      reason: activeBlock?.reason || '',
+      notes: activeBlock?.notes || ''
+    });
+    setShowBlockVehicle(true);
+  };
+
   const saveEditVehicle = async (e) => {
     e.preventDefault();
     if (!selected) return;
@@ -348,6 +398,95 @@ function VehiclesInner({ token, me, logout }) {
     setValidationReport(null);
   };
 
+  const resetBlockWizard = () => {
+    setBlockWizardStep(1);
+    setBlockUploadRows([]);
+    setBlockValidationReport(null);
+  };
+
+  const downloadBlockTemplate = () => {
+    const sampleUnit = rows[0]?.internalNumber || 'UNIT-001';
+    const csv = `internalNumber,blockedFrom,availableFrom,reason,notes\n${sampleUnit},${toLocalDateTimeInput(new Date())},2026-04-15T10:00,Legacy contract,Migrating active contract from prior system`;
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'vehicle_availability_block_template.csv';
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const onSelectBlockUploadFile = async (file) => {
+    if (!file) return;
+    const text = await file.text();
+    setBlockUploadRows(parseCsv(text));
+  };
+
+  const validateBlockUpload = async () => {
+    setValidatingBlockUpload(true);
+    setBlockValidationReport(null);
+    try {
+      const report = await api(scopedPath('/api/vehicles/availability-blocks/validate'), {
+        method: 'POST',
+        body: JSON.stringify({ rows: blockUploadRows })
+      }, token);
+      setBlockValidationReport(report);
+    } catch (e2) {
+      setMsg(e2.message);
+    } finally {
+      setValidatingBlockUpload(false);
+    }
+  };
+
+  const proceedBlockUpload = async () => {
+    setUploadingBlockRows(true);
+    try {
+      const out = await api(scopedPath('/api/vehicles/availability-blocks/import'), {
+        method: 'POST',
+        body: JSON.stringify({ rows: blockUploadRows })
+      }, token);
+      setMsg(`Vehicle blocks uploaded. Created ${out.created}, skipped ${out.skipped}.`);
+      setShowBlockUpload(false);
+      resetBlockWizard();
+      await load();
+    } catch (e2) {
+      setMsg(e2.message);
+    } finally {
+      setUploadingBlockRows(false);
+    }
+  };
+
+  const saveVehicleBlock = async (e) => {
+    e.preventDefault();
+    if (!selected) return;
+    try {
+      await api(scopedPath(`/api/vehicles/${selected.id}/availability-blocks`), {
+        method: 'POST',
+        body: JSON.stringify(blockForm)
+      }, token);
+      setMsg(`Vehicle ${selected.internalNumber} blocked until ${new Date(blockForm.availableFrom).toLocaleString()}`);
+      setShowBlockVehicle(false);
+      setSelected(null);
+      await load();
+    } catch (e2) {
+      setMsg(e2.message);
+    }
+  };
+
+  const releaseVehicleBlock = async (blockId) => {
+    try {
+      await api(scopedPath(`/api/vehicles/availability-blocks/${blockId}/release`), {
+        method: 'POST',
+        body: JSON.stringify({})
+      }, token);
+      setMsg('Vehicle block released');
+      setSelected(null);
+      await load();
+    } catch (e2) {
+      setMsg(e2.message);
+    }
+  };
+
   return (
     <AppShell me={me} logout={logout}>
       <section className="glass card-lg section-card" style={{ marginBottom: 16 }}>
@@ -394,11 +533,17 @@ function VehiclesInner({ token, me, logout }) {
               <strong>{fleetOpsHub.serviceRisk}</strong>
               <span className="ui-muted">Units in maintenance or out of service.</span>
             </div>
+            <div className="info-tile">
+              <span className="label">Temp Blocks</span>
+              <strong>{fleetOpsHub.blockedTemporarily}</strong>
+              <span className="ui-muted">Vehicles blocked until migrated contracts clear.</span>
+            </div>
           </div>
           <div className="app-banner-list">
             <span className="app-banner-pill">Car Sharing Supply {fleetOpsHub.carSharing}</span>
             <button type="button" className="button-subtle" onClick={() => setShowAddVehicle(true)} disabled={isSuper && !activeTenantId}>Add Vehicle</button>
             <button type="button" className="button-subtle" onClick={() => setShowUpload(true)} disabled={isSuper && !activeTenantId}>Upload Inventory</button>
+            <button type="button" className="button-subtle" onClick={() => setShowBlockUpload(true)} disabled={isSuper && !activeTenantId}>Upload Blocks</button>
           </div>
           {fleetOpsHub.nextItems.length ? (
             <div className="app-card-grid compact">
@@ -423,6 +568,7 @@ function VehiclesInner({ token, me, logout }) {
             <input placeholder="Search unit, plate, toll tag, sticker, make/model, VIN" value={query} onChange={(e) => setQuery(e.target.value)} />
             <button onClick={() => setShowAddVehicle(true)} disabled={isSuper && !activeTenantId}>Add Vehicle</button>
             <button onClick={() => setShowUpload(true)} disabled={isSuper && !activeTenantId}>Upload Inventory</button>
+            <button onClick={() => setShowBlockUpload(true)} disabled={isSuper && !activeTenantId}>Upload Blocks</button>
           </div>
         </div>
         {msg ? <p className="label">{msg}</p> : null}
@@ -440,12 +586,15 @@ function VehiclesInner({ token, me, logout }) {
               <th>Type</th>
               <th>Current Location</th>
               <th>Status</th>
+              <th>Blocked Until</th>
               <th>Fleet Mode</th>
               <th>Rent</th>
             </tr>
           </thead>
           <tbody>
-            {rows.map((v) => (
+            {rows.map((v) => {
+              const currentBlock = activeAvailabilityBlock(v);
+              return (
               <tr key={v.id} onClick={() => setSelected(v)} style={{ cursor: 'pointer' }}>
                 <td>{v.internalNumber}</td>
                 <td>{v.plate || '-'}</td>
@@ -458,12 +607,13 @@ function VehiclesInner({ token, me, logout }) {
                 <td>{v.vehicleType?.name || '-'}</td>
                 <td>{v.homeLocation?.name || '-'}</td>
                 <td><span className="badge">{v.status}</span></td>
+                <td>{currentBlock ? `${new Date(currentBlock.availableFrom).toLocaleString()}` : '-'}</td>
                 <td><span className="badge">{v.fleetMode || 'RENTAL_ONLY'}</span></td>
                 <td>
-                  <button onClick={(e) => { e.stopPropagation(); openRent(v); }} disabled={v.status !== 'AVAILABLE'}>Rent</button>
+                  <button onClick={(e) => { e.stopPropagation(); openRent(v); }} disabled={v.status !== 'AVAILABLE' || !!currentBlock}>Rent</button>
                 </td>
               </tr>
-            ))}
+            )})}
           </tbody>
         </table>
       </section>
@@ -482,10 +632,36 @@ function VehiclesInner({ token, me, logout }) {
             <div><span className="label">Type</span><div>{selected.vehicleType?.name || '-'}</div></div>
             <div><span className="label">Home Location</span><div>{selected.homeLocation?.name || '-'}</div></div>
             <div><span className="label">Fleet Mode</span><div>{selected.fleetMode || 'RENTAL_ONLY'}</div></div>
-            <div style={{ display: 'flex', gap: 8 }}>
-              <button onClick={() => openRent(selected)} disabled={selected.status !== 'AVAILABLE'}>Rent this vehicle</button>
-              <button onClick={() => openEditVehicle(selected)}>Edit vehicle</button>
+            <div>
+              <span className="label">Temporary Block</span>
+              <div>
+                {activeAvailabilityBlock(selected)
+                  ? `Blocked until ${new Date(activeAvailabilityBlock(selected).availableFrom).toLocaleString()}`
+                  : 'No active temporary block'}
+              </div>
             </div>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <button onClick={() => openRent(selected)} disabled={selected.status !== 'AVAILABLE' || !!activeAvailabilityBlock(selected)}>Rent this vehicle</button>
+              <button onClick={() => openEditVehicle(selected)}>Edit vehicle</button>
+              <button onClick={() => openBlockVehicle(selected)}>Block until available</button>
+              {activeAvailabilityBlock(selected) ? (
+                <button onClick={() => releaseVehicleBlock(activeAvailabilityBlock(selected).id)}>Release block</button>
+              ) : null}
+            </div>
+
+            {activeAvailabilityBlock(selected) ? (
+              <div className="glass card" style={{ padding: 10 }}>
+                <div className="row-between">
+                  <strong>Current Migration Hold</strong>
+                  <span className="badge">BLOCKED</span>
+                </div>
+                <div className="label" style={{ marginTop: 6, textTransform: 'none', letterSpacing: 0 }}>
+                  From {new Date(activeAvailabilityBlock(selected).blockedFrom).toLocaleString()} until {new Date(activeAvailabilityBlock(selected).availableFrom).toLocaleString()}
+                </div>
+                {activeAvailabilityBlock(selected).reason ? <div className="label" style={{ marginTop: 6, textTransform: 'none', letterSpacing: 0 }}>Reason: {activeAvailabilityBlock(selected).reason}</div> : null}
+                {activeAvailabilityBlock(selected).notes ? <div className="label" style={{ marginTop: 6, textTransform: 'none', letterSpacing: 0 }}>Notes: {activeAvailabilityBlock(selected).notes}</div> : null}
+              </div>
+            ) : null}
 
             <div className="glass card" style={{ padding: 10, marginTop: 8 }}>
               <div className="row-between"><strong>Inspection History</strong><span className="badge">{(selected.rentalAgreements || []).filter((a) => !!agreementInspectionSummary(a)).length}</span></div>
@@ -601,6 +777,33 @@ function VehiclesInner({ token, me, logout }) {
         </div>
       )}
 
+      {showBlockVehicle && selected && (
+        <div className="modal-backdrop" onClick={() => setShowBlockVehicle(false)}>
+          <div className="rent-modal glass" onClick={(e) => e.stopPropagation()}>
+            <h3>Temporary Block · {selected.internalNumber}</h3>
+            <form className="stack" onSubmit={saveVehicleBlock}>
+              <div className="grid2">
+                <div className="stack">
+                  <label className="label">Blocked From</label>
+                  <input type="datetime-local" value={blockForm.blockedFrom} onChange={(e) => setBlockForm({ ...blockForm, blockedFrom: e.target.value })} />
+                </div>
+                <div className="stack">
+                  <label className="label">Available Again*</label>
+                  <input required type="datetime-local" value={blockForm.availableFrom} onChange={(e) => setBlockForm({ ...blockForm, availableFrom: e.target.value })} />
+                </div>
+              </div>
+              <input placeholder="Reason (migration hold, legacy contract, etc.)" value={blockForm.reason} onChange={(e) => setBlockForm({ ...blockForm, reason: e.target.value })} />
+              <textarea rows={4} placeholder="Notes" value={blockForm.notes} onChange={(e) => setBlockForm({ ...blockForm, notes: e.target.value })} />
+              <div className="surface-note">This keeps the vehicle out of booking and planner availability until the selected release date without changing its permanent vehicle status.</div>
+              <div className="row-between">
+                <button type="button" onClick={() => setShowBlockVehicle(false)}>Cancel</button>
+                <button type="submit">Save Block</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
       {showUpload && (
         <div className="modal-backdrop" onClick={() => { setShowUpload(false); resetWizard(); }}>
           <div className="rent-modal glass" onClick={(e) => e.stopPropagation()}>
@@ -647,6 +850,59 @@ function VehiclesInner({ token, me, logout }) {
                 <div style={{ display: 'flex', gap: 8 }}>
                   <button type="button" onClick={resetWizard}>Try again</button>
                   <button type="button" onClick={proceedUpload} disabled={validationReport.valid === 0 || uploading}>{uploading ? 'Uploading…' : 'Proceed with Upload'}</button>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {showBlockUpload && (
+        <div className="modal-backdrop" onClick={() => { setShowBlockUpload(false); resetBlockWizard(); }}>
+          <div className="rent-modal glass" onClick={(e) => e.stopPropagation()}>
+            <h3>Upload Vehicle Blocks</h3>
+
+            {blockWizardStep === 1 && (
+              <div className="stack">
+                <p className="label">Step 1: Review instructions</p>
+                <ul>
+                  <li>Use CSV format.</li>
+                  <li>Required columns: <code>internalNumber</code> or <code>plate</code>, plus <code>availableFrom</code>.</li>
+                  <li>Optional columns: <code>blockedFrom</code>, <code>reason</code>, <code>notes</code>.</li>
+                  <li>Use this for migrated legacy contracts so the vehicle stays blocked until it returns.</li>
+                  <li>These temporary blocks appear in the planner and are excluded from booking availability.</li>
+                </ul>
+                <div style={{ display: 'flex', gap: 8 }}>
+                  <button type="button" onClick={downloadBlockTemplate}>Download Template</button>
+                  <button type="button" onClick={() => setBlockWizardStep(2)}>Next</button>
+                </div>
+              </div>
+            )}
+
+            {blockWizardStep === 2 && (
+              <div className="stack">
+                <p className="label">Step 2: Upload file and validate</p>
+                <input type="file" accept=".csv,text/csv" onChange={(e) => onSelectBlockUploadFile(e.target.files?.[0])} />
+                <p className="label">Rows loaded: {blockUploadRows.length}</p>
+                <div style={{ display: 'flex', gap: 8 }}>
+                  <button type="button" onClick={resetBlockWizard}>Try again</button>
+                  <button type="button" onClick={validateBlockUpload} disabled={!blockUploadRows.length || validatingBlockUpload}>{validatingBlockUpload ? 'Validating…' : 'Validate'}</button>
+                </div>
+              </div>
+            )}
+
+            {blockValidationReport && (
+              <div className="stack" style={{ marginTop: 12 }}>
+                <p><strong>Validation report</strong></p>
+                <p className="label">Found: {blockValidationReport.found} · Valid: {blockValidationReport.valid} · Invalid: {blockValidationReport.invalid}</p>
+                <div style={{ maxHeight: 140, overflow: 'auto', border: '1px solid #eee8ff', borderRadius: 8, padding: 8 }}>
+                  {blockValidationReport.rows.slice(0, 50).map((r) => (
+                    <div key={r.row} className="label">Row {r.row}: {r.valid ? 'valid' : r.errors.join(', ')}</div>
+                  ))}
+                </div>
+                <div style={{ display: 'flex', gap: 8 }}>
+                  <button type="button" onClick={resetBlockWizard}>Try again</button>
+                  <button type="button" onClick={proceedBlockUpload} disabled={blockValidationReport.valid === 0 || uploadingBlockRows}>{uploadingBlockRows ? 'Uploading…' : 'Proceed with Upload'}</button>
                 </div>
               </div>
             )}

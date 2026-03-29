@@ -645,7 +645,21 @@ async function rentalAvailabilityCount({ tenantId, vehicleTypeId, pickupAt, retu
     select: { vehicleId: true }
   });
 
+  const blockedAvailability = await prisma.vehicleAvailabilityBlock.findMany({
+    where: {
+      tenantId,
+      vehicleId: { in: vehicles.map((row) => row.id) },
+      releasedAt: null,
+      blockedFrom: { lt: returnAt },
+      availableFrom: { gt: pickupAt }
+    },
+    select: { vehicleId: true }
+  });
+
   const blocked = new Set(blockedReservations.map((row) => row.vehicleId).filter(Boolean));
+  blockedAvailability.forEach((row) => {
+    if (row?.vehicleId) blocked.add(row.vehicleId);
+  });
   return vehicles.filter((row) => !blocked.has(row.id)).length;
 }
 

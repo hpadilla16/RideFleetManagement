@@ -22,6 +22,29 @@ function uniqueBy(items = [], getKey) {
   });
 }
 
+function activeBlockWhere(now = new Date()) {
+  return {
+    releasedAt: null,
+    blockedFrom: { lte: now },
+    availableFrom: { gt: now }
+  };
+}
+
+function toDateOrNull(value) {
+  if (!value) return null;
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+function normalizeBlockRow(row = {}) {
+  return {
+    blockedFrom: toDateOrNull(row.blockedFrom) || new Date(),
+    availableFrom: toDateOrNull(row.availableFrom),
+    reason: norm(row.reason) || null,
+    notes: norm(row.notes) || null
+  };
+}
+
 export const vehiclesService = {
   list(scope = {}) {
     return prisma.vehicle.findMany({
@@ -31,6 +54,10 @@ export const vehiclesService = {
         tenant: true,
         vehicleType: true,
         homeLocation: true,
+        availabilityBlocks: {
+          where: { releasedAt: null },
+          orderBy: [{ blockedFrom: 'asc' }, { availableFrom: 'asc' }]
+        },
         rentalAgreements: {
           orderBy: { createdAt: 'desc' },
           take: 20,
@@ -53,6 +80,10 @@ export const vehiclesService = {
         tenant: true,
         vehicleType: true,
         homeLocation: true,
+        availabilityBlocks: {
+          where: { releasedAt: null },
+          orderBy: [{ blockedFrom: 'asc' }, { availableFrom: 'asc' }]
+        },
         rentalAgreements: {
           orderBy: { createdAt: 'desc' },
           take: 50,
@@ -102,6 +133,120 @@ export const vehiclesService = {
     const current = await prisma.vehicle.findFirst({ where: { id, ...(byTenantWhere(scope) || {}) }, select: { id: true } });
     if (!current) throw new Error('Vehicle not found');
     return prisma.vehicle.delete({ where: { id } });
+  },
+
+  async createAvailabilityBlock(vehicleId, payload = {}, scope = {}) {
+    const vehicle = await prisma.vehicle.findFirst({
+      where: { id: vehicleId, ...(byTenantWhere(scope) || {}) },
+      select: { id: true, tenantId: true, internalNumber: true }
+    });
+    if (!vehicle) throw new Error('Vehicle not found');
+    const block = normalizeBlockRow(payload);
+    if (!block.availableFrom) throw new Error('availableFrom is required');
+    if (block.availableFrom <= block.blockedFrom) throw new Error('availableFrom must be after blockedFrom');
+    return prisma.vehicleAvailabilityBlock.create({
+      data: {
+        tenantId: vehicle.tenantId || scope?.tenantId || null,
+        vehicleId: vehicle.id,
+        blockedFrom: block.blockedFrom,
+        availableFrom: block.availableFrom,
+        reason: block.reason,
+        notes: block.notes,
+        sourceType: payload?.sourceType ? String(payload.sourceType).trim().toUpperCase() : 'MANUAL'
+      }
+    });
+  },
+
+  async releaseAvailabilityBlock(blockId, scope = {}) {
+    const block = await prisma.vehicleAvailabilityBlock.findFirst({
+      where: {
+        id: blockId,
+        releasedAt: null,
+        ...(scope?.tenantId ? { tenantId: scope.tenantId } : {})
+      },
+      select: { id: true }
+    });
+    if (!block) throw new Error('Availability block not found');
+    return prisma.vehicleAvailabilityBlock.update({
+      where: { id: block.id },
+      data: { releasedAt: new Date() }
+    });
+  },
+
+  async validateBulkAvailabilityBlocks(rows = [], scope = {}) {
+    const vehicles = await prisma.vehicle.findMany({
+      where: byTenantWhere(scope),
+      select: { id: true, internalNumber: true, plate: true }
+    });
+    const vehicleByInternal = new Map(vehicles.map((row) => [norm(row.internalNumber).toLowerCase(), row]));
+    const vehicleByPlate = new Map(vehicles.map((row) => [norm(row.plate).toLowerCase(), row]).filter(([key]) => key));
+
+    let valid = 0;
+    let invalid = 0;
+    const reportRows = rows.map((row, idx) => {
+      const internalNumber = norm(row.internalNumber);
+      const plate = norm(row.plate);
+      const vehicle = internalNumber
+        ? vehicleByInternal.get(internalNumber.toLowerCase())
+        : (plate ? vehicleByPlate.get(plate.toLowerCase()) : null);
+      const normalized = normalizeBlockRow(row);
+      const errors = [];
+      if (!vehicle) errors.push('vehicle not found');
+      if (!normalized.availableFrom) errors.push('availableFrom required');
+      if (normalized.availableFrom && normalized.availableFrom <= normalized.blockedFrom) errors.push('availableFrom must be after blockedFrom');
+      if (errors.length) invalid += 1;
+      else valid += 1;
+      return {
+        row: idx + 1,
+        internalNumber,
+        plate,
+        vehicleId: vehicle?.id || null,
+        blockedFrom: normalized.blockedFrom,
+        availableFrom: normalized.availableFrom,
+        reason: normalized.reason,
+        notes: normalized.notes,
+        valid: !errors.length,
+        errors
+      };
+    });
+
+    return {
+      found: rows.length,
+      valid,
+      invalid,
+      rows: reportRows
+    };
+  },
+
+  async importBulkAvailabilityBlocks(rows = [], scope = {}) {
+    const validation = await this.validateBulkAvailabilityBlocks(rows, scope);
+    const validRows = validation.rows.filter((row) => row.valid);
+    if (!validRows.length) return { created: 0, skipped: validation.found, validation };
+
+    for (const row of validRows) {
+      const vehicle = await prisma.vehicle.findFirst({
+        where: { id: row.vehicleId, ...(byTenantWhere(scope) || {}) },
+        select: { id: true, tenantId: true }
+      });
+      if (!vehicle) continue;
+      await prisma.vehicleAvailabilityBlock.create({
+        data: {
+          tenantId: vehicle.tenantId || scope?.tenantId || null,
+          vehicleId: vehicle.id,
+          blockedFrom: row.blockedFrom,
+          availableFrom: row.availableFrom,
+          reason: row.reason,
+          notes: row.notes,
+          sourceType: 'BULK_IMPORT'
+        }
+      });
+    }
+
+    return {
+      created: validRows.length,
+      skipped: validation.found - validRows.length,
+      validation
+    };
   },
 
   async validateBulk(rows = [], scope = {}) {

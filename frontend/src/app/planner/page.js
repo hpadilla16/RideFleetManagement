@@ -38,6 +38,11 @@ function statusColor(r, locked) {
   }
 }
 
+function blockColor(block) {
+  const sourceType = String(block?.sourceType || '').toUpperCase();
+  return sourceType === 'BULK_IMPORT' ? '#64748b' : '#6b7280';
+}
+
 function dayIndexInRange(rangeStart, dt) {
   return Math.floor((startOfDay(dt) - rangeStart) / DAY_MS);
 }
@@ -60,6 +65,7 @@ function PlannerInner({ token, me, logout }) {
   const [dragItem, setDragItem] = useState(null);
   const [draggingId, setDraggingId] = useState('');
   const [selectedReservation, setSelectedReservation] = useState(null);
+  const [selectedBlock, setSelectedBlock] = useState(null);
   const [plannerFocus, setPlannerFocus] = useState('ALL');
 
   const dayCount = view === 'DAY' ? 1 : view === 'WEEK' ? 7 : 30;
@@ -122,7 +128,23 @@ function PlannerInner({ token, me, logout }) {
       const start = Math.max(0, (pickup.getTime() - rangeStart.getTime()) / DAY_MS);
       const end = Math.min(dayCount, (ret.getTime() - rangeStart.getTime()) / DAY_MS);
       const span = Math.max(0.15, end - start);
-      map.get(vid).push({ reservation: r, start, span, end });
+      map.get(vid).push({ kind: 'reservation', reservation: r, start, span, end });
+    }
+
+    for (const vehicle of vehicles || []) {
+      if (!map.has(vehicle.id)) continue;
+      for (const block of Array.isArray(vehicle.availabilityBlocks) ? vehicle.availabilityBlocks : []) {
+        const blockedFrom = new Date(block.blockedFrom || block.createdAt || new Date());
+        const availableFrom = new Date(block.availableFrom);
+        const releasedAt = block?.releasedAt ? new Date(block.releasedAt) : null;
+        if (releasedAt || Number.isNaN(blockedFrom.getTime()) || Number.isNaN(availableFrom.getTime())) continue;
+        if (!(blockedFrom < rangeEnd && availableFrom > rangeStart)) continue;
+
+        const start = Math.max(0, (blockedFrom.getTime() - rangeStart.getTime()) / DAY_MS);
+        const end = Math.min(dayCount, (availableFrom.getTime() - rangeStart.getTime()) / DAY_MS);
+        const span = Math.max(0.15, end - start);
+        map.get(vehicle.id).push({ kind: 'block', block, vehicle, start, span, end });
+      }
     }
 
     for (const [k, arr] of map) {
@@ -142,7 +164,7 @@ function PlannerInner({ token, me, logout }) {
     }
 
     return map;
-  }, [tracks, reservations, rangeStart, rangeEnd, dayCount]);
+  }, [tracks, reservations, vehicles, rangeStart, rangeEnd, dayCount]);
 
   const onDropReservation = async (trackVehicleId, dayIndexRaw) => {
     if (!dragItem) return;
@@ -461,6 +483,32 @@ function PlannerInner({ token, me, logout }) {
 
                 <div className="planner-overlay" style={{ left: 260, width: dayCount * DAY_WIDTH, height: rowHeight }}>
                   {rows.map((rowItem) => {
+                    if (rowItem.kind === 'block') {
+                      const block = rowItem.block;
+                      return (
+                        <div
+                          key={`block-${block.id}`}
+                          className="planner-block"
+                          onClick={() => {
+                            setSelectedReservation(null);
+                            setSelectedBlock({ block, vehicle: rowItem.vehicle });
+                          }}
+                          style={{
+                            left: rowItem.start * DAY_WIDTH + 2,
+                            top: rowItem.lane * lanePitch + 4,
+                            height: blockHeight,
+                            width: Math.max(12, rowItem.span * DAY_WIDTH - 4),
+                            background: blockColor(block),
+                            opacity: 0.92,
+                            cursor: 'pointer'
+                          }}
+                          title={`Blocked until ${new Date(block.availableFrom).toLocaleString()}`}
+                        >
+                          <span className="planner-block-text">Blocked | {block.reason || 'Legacy contract'} | Free {new Date(block.availableFrom).toLocaleDateString()}</span>
+                        </div>
+                      );
+                    }
+
                     const r = rowItem.reservation;
                     const locked = lockedReservationIds.has(r.id);
                     return (
@@ -472,7 +520,10 @@ function PlannerInner({ token, me, logout }) {
                         onDragEnd={() => { setDragItem(null); setDraggingId(''); }}
                         onTouchStart={() => { if (!locked) { setDragItem(r); setDraggingId(r.id); } }}
                         onTouchEnd={handleTouchDrop}
-                        onClick={() => setSelectedReservation({ reservation: r, locked })}
+                        onClick={() => {
+                          setSelectedBlock(null);
+                          setSelectedReservation({ reservation: r, locked });
+                        }}
                         style={{ left: rowItem.start * DAY_WIDTH + 2, top: rowItem.lane * lanePitch + 4, height: blockHeight, width: Math.max(12, rowItem.span * DAY_WIDTH - 4), background: statusColor(r, locked), opacity: locked ? 0.7 : (draggingId === r.id ? 0.85 : 1) }}
                         title={`${r.reservationNumber} ${locked ? '(locked by agreement)' : ''}`}
                       >
@@ -501,6 +552,22 @@ function PlannerInner({ token, me, logout }) {
           <div style={{ display: 'grid', gap: 8 }}>
             <Link href={`/reservations/${selectedReservation.reservation.id}`}><button>Open Reservation</button></Link>
           </div>
+        </aside>
+      ) : null}
+
+      {selectedBlock ? (
+        <aside className="planner-sidepanel glass card">
+          <div className="row-between" style={{ marginBottom: 6 }}>
+            <h3>Vehicle Block</h3>
+            <button onClick={() => setSelectedBlock(null)}>Close</button>
+          </div>
+          <div style={{ fontWeight: 700 }}>{selectedBlock.vehicle?.internalNumber || 'Vehicle'}</div>
+          <div className="label">{selectedBlock.vehicle?.year || ''} {selectedBlock.vehicle?.make || ''} {selectedBlock.vehicle?.model || ''}</div>
+          <div className="label">Blocked from: {new Date(selectedBlock.block.blockedFrom).toLocaleString()}</div>
+          <div className="label">Available again: {new Date(selectedBlock.block.availableFrom).toLocaleString()}</div>
+          <div className="label">Reason: {selectedBlock.block.reason || 'Legacy contract migration hold'}</div>
+          {selectedBlock.block.notes ? <div className="label" style={{ marginBottom: 8 }}>Notes: {selectedBlock.block.notes}</div> : null}
+          <div className="label" style={{ marginBottom: 8 }}>Source: {selectedBlock.block.sourceType || 'MANUAL'}</div>
         </aside>
       ) : null}
     </AppShell>
