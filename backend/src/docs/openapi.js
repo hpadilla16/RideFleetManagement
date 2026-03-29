@@ -48,10 +48,13 @@ export function buildOpenApiSpec(serverUrl) {
       { name: 'Health', description: 'Service health checks' },
       { name: 'Auth', description: 'Authentication and lock PIN flows' },
       { name: 'Public Portal', description: 'Customer signature and payment token flows' },
+      { name: 'Public Booking', description: 'Marketplace booking, guest signup, and host onboarding' },
       { name: 'Reservations', description: 'Reservation lifecycle and structured pricing/payments' },
       { name: 'Rental Agreements', description: 'Agreement lifecycle, payments, signatures, inspections' },
       { name: 'Customers', description: 'Customer management' },
       { name: 'Vehicles', description: 'Vehicle management' },
+      { name: 'Issue Center', description: 'Internal incident handling and public response flows' },
+      { name: 'Tolls', description: 'Puerto Rico toll sync, review, and reservation posting' },
       { name: 'Reports', description: 'Operational dashboards and exports' },
       { name: 'Settings', description: 'Tenant/location business settings' },
       { name: 'Tenants', description: 'Super-admin tenant management' }
@@ -427,6 +430,141 @@ export function buildOpenApiSpec(serverUrl) {
             ]
           }
         },
+        CustomerBulkRowsPayload: {
+          type: 'object',
+          properties: {
+            rows: {
+              type: 'array',
+              items: { type: 'object', additionalProperties: true }
+            }
+          },
+          example: {
+            rows: [
+              { firstName: 'Jane', lastName: 'Doe', phone: '7875550000', email: 'jane@example.com' }
+            ]
+          }
+        },
+        ReservationBulkRowsPayload: {
+          type: 'object',
+          properties: {
+            rows: {
+              type: 'array',
+              items: { type: 'object', additionalProperties: true }
+            }
+          },
+          example: {
+            rows: [
+              {
+                reservationNumber: 'RES-1001',
+                pickupAt: '2026-03-29T10:00:00.000Z',
+                returnAt: '2026-03-31T10:00:00.000Z',
+                pickupLocationCode: 'SJU',
+                returnLocationCode: 'SJU',
+                vehicleTypeCode: 'SUV'
+              }
+            ]
+          }
+        },
+        VehicleAvailabilityBlockPayload: {
+          type: 'object',
+          properties: {
+            blockedFrom: { type: 'string', format: 'date-time', nullable: true },
+            availableFrom: { type: 'string', format: 'date-time' },
+            blockType: { type: 'string', enum: ['MIGRATION_HOLD', 'MAINTENANCE_HOLD', 'OUT_OF_SERVICE_HOLD'] },
+            reason: { type: 'string', nullable: true },
+            notes: { type: 'string', nullable: true }
+          },
+          required: ['availableFrom']
+        },
+        VehicleAvailabilityBlockBulkPayload: {
+          type: 'object',
+          properties: {
+            rows: {
+              type: 'array',
+              items: { type: 'object', additionalProperties: true }
+            }
+          },
+          example: {
+            rows: [
+              {
+                internalNumber: 'UNIT-001',
+                blockType: 'MIGRATION_HOLD',
+                availableFrom: '2026-04-15T10:00:00.000Z',
+                reason: 'Legacy contract still open'
+              }
+            ]
+          }
+        },
+        IssueIncidentPayload: {
+          type: 'object',
+          properties: {
+            reservationId: { type: 'string', nullable: true },
+            reservationNumber: { type: 'string', nullable: true },
+            tripId: { type: 'string', nullable: true },
+            tripCode: { type: 'string', nullable: true },
+            type: { type: 'string', example: 'TOLL' },
+            title: { type: 'string' },
+            description: { type: 'string', nullable: true },
+            amountClaimed: { type: 'number', nullable: true }
+          },
+          required: ['type', 'title']
+        },
+        TollProviderAccountPayload: {
+          type: 'object',
+          properties: {
+            username: { type: 'string', nullable: true },
+            password: { type: 'string', nullable: true },
+            loginUrl: { type: 'string', nullable: true },
+            notes: { type: 'string', nullable: true },
+            active: { type: 'boolean', nullable: true }
+          }
+        },
+        TollManualImportPayload: {
+          type: 'object',
+          properties: {
+            rows: {
+              type: 'array',
+              items: { type: 'object', additionalProperties: true }
+            }
+          },
+          example: {
+            rows: [
+              {
+                transactionAt: '2026-03-29T14:30:00.000Z',
+                amount: 1.4,
+                location: 'Buchanan',
+                plate: 'ABC123',
+                tag: 'TAG-1001',
+                sello: 'PRHT-1001'
+              }
+            ]
+          }
+        },
+        TollReviewActionPayload: {
+          type: 'object',
+          properties: {
+            action: { type: 'string', example: 'MARK_DISPUTED' },
+            reservationId: { type: 'string', nullable: true },
+            notes: { type: 'string', nullable: true }
+          },
+          required: ['action']
+        },
+        PublicHostSignupPayload: {
+          type: 'object',
+          properties: {
+            tenantSlug: { type: 'string', nullable: true },
+            fullName: { type: 'string' },
+            email: { type: 'string', format: 'email' },
+            password: { type: 'string' },
+            phone: { type: 'string', nullable: true },
+            vehicleTypeId: { type: 'string', nullable: true },
+            make: { type: 'string', nullable: true },
+            model: { type: 'string', nullable: true },
+            year: { type: 'integer', nullable: true },
+            pickupSpotLabel: { type: 'string', nullable: true }
+          },
+          required: ['fullName', 'email', 'password']
+        },
         ReportsOverviewResponse: {
           type: 'object',
           properties: {
@@ -754,6 +892,29 @@ export function buildOpenApiSpec(serverUrl) {
           responses: {
             204: { description: 'Reservation deleted' },
             404: ok('Reservation not found', '#/components/schemas/ErrorResponse')
+          }
+        }
+      },
+      '/api/reservations/bulk/validate': {
+        post: {
+          tags: ['Reservations'],
+          summary: 'Validate reservation migration rows',
+          security: bearerSecurity(),
+          requestBody: body(true, '#/components/schemas/ReservationBulkRowsPayload'),
+          responses: {
+            200: ok('Validation report')
+          }
+        }
+      },
+      '/api/reservations/bulk/import': {
+        post: {
+          tags: ['Reservations'],
+          summary: 'Import reservation migration rows',
+          security: bearerSecurity(),
+          requestBody: body(true, '#/components/schemas/ReservationBulkRowsPayload'),
+          responses: {
+            200: ok('Bulk import result'),
+            409: ok('Duplicate reservation or vehicle conflict', '#/components/schemas/ErrorResponse')
           }
         }
       },
@@ -1162,6 +1323,28 @@ export function buildOpenApiSpec(serverUrl) {
           }
         }
       },
+      '/api/customers/bulk/validate': {
+        post: {
+          tags: ['Customers'],
+          summary: 'Validate customer migration rows',
+          security: bearerSecurity(),
+          requestBody: body(true, '#/components/schemas/CustomerBulkRowsPayload'),
+          responses: {
+            200: ok('Validation report')
+          }
+        }
+      },
+      '/api/customers/bulk/import': {
+        post: {
+          tags: ['Customers'],
+          summary: 'Import customer migration rows',
+          security: bearerSecurity(),
+          requestBody: body(true, '#/components/schemas/CustomerBulkRowsPayload'),
+          responses: {
+            200: ok('Bulk import result')
+          }
+        }
+      },
       '/api/vehicles': {
         get: {
           tags: ['Vehicles'],
@@ -1232,6 +1415,217 @@ export function buildOpenApiSpec(serverUrl) {
           requestBody: body(true, '#/components/schemas/VehicleBulkRowsPayload'),
           responses: {
             200: ok('Bulk import result')
+          }
+        }
+      },
+      '/api/vehicles/availability-blocks/validate': {
+        post: {
+          tags: ['Vehicles'],
+          summary: 'Validate bulk vehicle availability blocks',
+          security: bearerSecurity(),
+          requestBody: body(true, '#/components/schemas/VehicleAvailabilityBlockBulkPayload'),
+          responses: {
+            200: ok('Validation report')
+          }
+        }
+      },
+      '/api/vehicles/availability-blocks/import': {
+        post: {
+          tags: ['Vehicles'],
+          summary: 'Import bulk vehicle availability blocks',
+          security: bearerSecurity(),
+          requestBody: body(true, '#/components/schemas/VehicleAvailabilityBlockBulkPayload'),
+          responses: {
+            200: ok('Bulk import result')
+          }
+        }
+      },
+      '/api/vehicles/{id}/availability-blocks': {
+        post: {
+          tags: ['Vehicles'],
+          summary: 'Create a vehicle availability block',
+          security: bearerSecurity(),
+          parameters: [pathId()],
+          requestBody: body(true, '#/components/schemas/VehicleAvailabilityBlockPayload'),
+          responses: {
+            201: ok('Availability block created'),
+            400: ok('Invalid availability block request', '#/components/schemas/ErrorResponse'),
+            404: ok('Vehicle not found', '#/components/schemas/ErrorResponse')
+          }
+        }
+      },
+      '/api/vehicles/availability-blocks/{id}/release': {
+        post: {
+          tags: ['Vehicles'],
+          summary: 'Release a vehicle availability block',
+          security: bearerSecurity(),
+          parameters: [pathId()],
+          responses: {
+            200: ok('Availability block released'),
+            404: ok('Availability block not found', '#/components/schemas/ErrorResponse')
+          }
+        }
+      },
+      '/api/issue-center/dashboard': {
+        get: {
+          tags: ['Issue Center'],
+          summary: 'Get issue center dashboard',
+          security: bearerSecurity(),
+          parameters: [
+            { name: 'q', in: 'query', schema: { type: 'string' } },
+            { name: 'status', in: 'query', schema: { type: 'string' } },
+            { name: 'type', in: 'query', schema: { type: 'string' } }
+          ],
+          responses: {
+            200: ok('Issue center dashboard')
+          }
+        }
+      },
+      '/api/issue-center/incidents': {
+        post: {
+          tags: ['Issue Center'],
+          summary: 'Create internal incident',
+          security: bearerSecurity(),
+          requestBody: body(true, '#/components/schemas/IssueIncidentPayload'),
+          responses: {
+            201: ok('Incident created'),
+            400: ok('Invalid incident payload', '#/components/schemas/ErrorResponse')
+          }
+        }
+      },
+      '/api/tolls/dashboard': {
+        get: {
+          tags: ['Tolls'],
+          summary: 'Get toll dashboard and review queue',
+          security: bearerSecurity(),
+          parameters: [
+            { name: 'tenantId', in: 'query', schema: { type: 'string' }, description: 'Optional tenant scope for super admins' },
+            { name: 'q', in: 'query', schema: { type: 'string' } },
+            { name: 'status', in: 'query', schema: { type: 'string' } },
+            { name: 'reservationId', in: 'query', schema: { type: 'string' } },
+            { name: 'needsReview', in: 'query', schema: { type: 'boolean' } }
+          ],
+          responses: {
+            200: ok('Toll dashboard'),
+            403: ok('Tolls disabled', '#/components/schemas/ErrorResponse')
+          }
+        }
+      },
+      '/api/tolls/provider-account': {
+        get: {
+          tags: ['Tolls'],
+          summary: 'Get AutoExpreso provider account',
+          security: bearerSecurity(),
+          parameters: [{ name: 'tenantId', in: 'query', schema: { type: 'string' }, description: 'Optional tenant scope for super admins' }],
+          responses: { 200: ok('Provider account') }
+        },
+        put: {
+          tags: ['Tolls'],
+          summary: 'Save AutoExpreso provider account',
+          security: bearerSecurity(),
+          parameters: [{ name: 'tenantId', in: 'query', schema: { type: 'string' }, description: 'Optional tenant scope for super admins' }],
+          requestBody: body(true, '#/components/schemas/TollProviderAccountPayload'),
+          responses: {
+            200: ok('Provider account saved'),
+            400: ok('Invalid provider account payload', '#/components/schemas/ErrorResponse')
+          }
+        }
+      },
+      '/api/tolls/provider-account/health-check': {
+        post: {
+          tags: ['Tolls'],
+          summary: 'Run AutoExpreso provider health check',
+          security: bearerSecurity(),
+          parameters: [{ name: 'tenantId', in: 'query', schema: { type: 'string' }, description: 'Optional tenant scope for super admins' }],
+          responses: { 200: ok('Health check result') }
+        }
+      },
+      '/api/tolls/provider-account/live-sync': {
+        post: {
+          tags: ['Tolls'],
+          summary: 'Run live AutoExpreso sync',
+          security: bearerSecurity(),
+          parameters: [{ name: 'tenantId', in: 'query', schema: { type: 'string' }, description: 'Optional tenant scope for super admins' }],
+          responses: {
+            200: ok('Live sync result'),
+            400: ok('Sync failed or provider not ready', '#/components/schemas/ErrorResponse')
+          }
+        }
+      },
+      '/api/tolls/transactions/manual-import': {
+        post: {
+          tags: ['Tolls'],
+          summary: 'Import manual toll transactions',
+          security: bearerSecurity(),
+          parameters: [{ name: 'tenantId', in: 'query', schema: { type: 'string' }, description: 'Optional tenant scope for super admins' }],
+          requestBody: body(true, '#/components/schemas/TollManualImportPayload'),
+          responses: {
+            201: ok('Manual tolls created'),
+            400: ok('Invalid toll import payload', '#/components/schemas/ErrorResponse')
+          }
+        }
+      },
+      '/api/tolls/transactions/{id}/confirm-match': {
+        post: {
+          tags: ['Tolls'],
+          summary: 'Confirm toll match to reservation',
+          security: bearerSecurity(),
+          parameters: [pathId(), { name: 'tenantId', in: 'query', schema: { type: 'string' }, description: 'Optional tenant scope for super admins' }],
+          requestBody: body(false, '#/components/schemas/GenericObject'),
+          responses: { 200: ok('Toll match confirmed') }
+        }
+      },
+      '/api/tolls/transactions/{id}/review-action': {
+        post: {
+          tags: ['Tolls'],
+          summary: 'Apply toll review action',
+          security: bearerSecurity(),
+          parameters: [pathId(), { name: 'tenantId', in: 'query', schema: { type: 'string' }, description: 'Optional tenant scope for super admins' }],
+          requestBody: body(true, '#/components/schemas/TollReviewActionPayload'),
+          responses: {
+            200: ok('Review action applied'),
+            400: ok('Invalid review action payload', '#/components/schemas/ErrorResponse')
+          }
+        }
+      },
+      '/api/tolls/reservations/{reservationId}': {
+        get: {
+          tags: ['Tolls'],
+          summary: 'List tolls linked to reservation',
+          security: bearerSecurity(),
+          parameters: [pathId('reservationId', 'Reservation identifier'), { name: 'tenantId', in: 'query', schema: { type: 'string' }, description: 'Optional tenant scope for super admins' }],
+          responses: {
+            200: ok('Reservation toll list'),
+            404: ok('Reservation not found', '#/components/schemas/ErrorResponse')
+          }
+        }
+      },
+      '/api/public/booking/vehicle-classes': {
+        get: {
+          tags: ['Public Booking'],
+          summary: 'Get public vehicle classes',
+          parameters: [
+            { name: 'tenantId', in: 'query', schema: { type: 'string' } },
+            { name: 'tenantSlug', in: 'query', schema: { type: 'string' } },
+            { name: 'pickupLocationId', in: 'query', schema: { type: 'string' } },
+            { name: 'pickupAt', in: 'query', schema: { type: 'string', format: 'date-time' } },
+            { name: 'returnAt', in: 'query', schema: { type: 'string', format: 'date-time' } },
+            { name: 'limit', in: 'query', schema: { type: 'integer' } }
+          ],
+          responses: {
+            200: ok('Public vehicle classes'),
+            400: ok('Invalid public booking query', '#/components/schemas/ErrorResponse')
+          }
+        }
+      },
+      '/api/public/booking/host-signup': {
+        post: {
+          tags: ['Public Booking'],
+          summary: 'Create public host signup submission',
+          requestBody: body(true, '#/components/schemas/PublicHostSignupPayload'),
+          responses: {
+            201: ok('Host signup created'),
+            400: ok('Invalid host signup payload', '#/components/schemas/ErrorResponse')
           }
         }
       },

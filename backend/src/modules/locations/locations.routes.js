@@ -28,12 +28,19 @@ locationsRouter.post('/', async (req, res, next) => {
     if (missing.length) return res.status(400).json({ error: `Missing required fields: ${missing.join(', ')}` });
     const row = await locationsService.create(req.body, scopeFor(req));
     res.status(201).json(row);
-  } catch (e) { next(e); }
+  } catch (e) {
+    if (e?.code === 'P2002') return res.status(409).json({ error: 'A location with that code already exists in this tenant' });
+    next(e);
+  }
 });
 
-locationsRouter.patch('/:id', async (req, res) => {
+locationsRouter.patch('/:id', async (req, res, next) => {
   try { res.json(await locationsService.update(req.params.id, req.body || {}, scopeFor(req))); }
-  catch { res.status(404).json({ error: 'Location not found' }); }
+  catch (e) {
+    if (e?.code === 'P2002') return res.status(409).json({ error: 'A location with that code already exists in this tenant' });
+    if (/not found/i.test(String(e?.message || ''))) return res.status(404).json({ error: 'Location not found' });
+    next(e);
+  }
 });
 
 locationsRouter.delete('/:id', async (req, res) => {

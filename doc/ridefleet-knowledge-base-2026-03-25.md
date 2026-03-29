@@ -762,6 +762,157 @@ Revisar:
 - health check
 - credenciales faltantes
 
+## Fleet, Planner y QR
+
+### Vehicle Uploads
+
+El upload de vehiculos ya no debe depender de IDs internos de vehicle type.
+
+Usar:
+
+- `vehicleTypeCode`
+- o `vehicleType`
+
+El template tambien soporta:
+
+- `year`
+- `tollTagNumber`
+- `tollStickerNumber`
+
+### Bloqueos Temporales de Flota
+
+Ahora existen tipos de bloqueo distintos para los carros:
+
+- `MIGRATION_HOLD`
+- `MAINTENANCE_HOLD`
+- `OUT_OF_SERVICE_HOLD`
+
+Reglas:
+
+- `MIGRATION_HOLD`
+  - bloquea disponibilidad
+  - pero sigue contando como flota comprometida para utilization
+- `MAINTENANCE_HOLD`
+  - bloquea disponibilidad
+  - cuenta como maintenance/service risk
+- `OUT_OF_SERVICE_HOLD`
+  - bloquea disponibilidad
+  - cuenta como unidad fuera de servicio
+
+Estos bloqueos se pueden crear:
+
+- singularmente desde `Vehicles`
+- en bulk por CSV
+- y ahora tambien desde `Planner`
+
+### Planner
+
+`Planner` ahora sirve mejor como tablero real de flota porque:
+
+- deja crear bloqueos directamente desde la linea del vehiculo
+- deja ajustar o liberar bloqueos
+- ensena el tipo de hold
+- ensena cuando vuelve a estar disponible
+- separa visualmente migration holds de service holds
+
+### QR Codes de Vehiculos
+
+Cada vehiculo ahora tiene:
+
+- profile page dedicada
+- QR code imprimible
+- export individual
+- export masivo ZIP para stickers
+
+El QR abre el profile del vehiculo, donde se puede ver:
+
+- datos del vehiculo
+- hold activo
+- reservacion activa si esta `CHECKED_OUT`
+- proxima reservacion
+- historial reciente
+
+Si el carro esta afuera:
+
+- debe salir la reservacion que necesita return
+- desde ahi el rental agent puede brincar al workflow de `check-in`
+
+## Pricing, Fees y Add-Ons
+
+### Dynamic Daily Pricing
+
+`Rates` ahora soporta import de precios diarios por fecha.
+
+Ejemplo:
+
+- `2026-03-01 = $5`
+- `2026-03-02 = $6`
+
+Esto permite yield management simple por dia usando template CSV friendly para
+Excel.
+
+### Mandatory Fees
+
+Los fees ahora pueden marcarse como `mandatory`.
+
+Si el fee:
+
+- esta marcado mandatory
+- y esta asignado a la location
+
+entonces debe salir automaticamente en:
+
+- booking publico
+- reserva
+- pricing del agreement
+
+### Additional Services
+
+Additional Services ahora soporta:
+
+- `one-time flat rate`
+- rates diarios/semanales/mensuales
+- `linked fee`
+
+Si el servicio tiene linked fee:
+
+- al seleccionar el servicio, ese fee se agrega automaticamente
+
+### Insurance Commissions
+
+Los insurance plans ahora tambien soportan comisiones, igual que los
+additional services.
+
+### Review Request de Rental / Loaner
+
+`Settings > Emails` ahora tiene template configurable para el mensaje de review
+que sale despues de `check-in` en:
+
+- rental normal
+- dealership loaner
+
+No afecta el review flow de car sharing para hosts.
+
+## Tolls y Billing
+
+Si el tenant tiene `Tolls` enabled:
+
+- los peajes ya pueden entrar automaticamente al modulo de charges
+
+Si la location tiene policy de peajes:
+
+- se debe respetar esa policy para calcular el cargo o fee correspondiente
+
+Si la reservacion tiene un additional service tipo:
+
+- `Toll Package`
+- `Prepaid Tolls`
+
+entonces:
+
+- no debe aplicar el toll policy programado
+- porque el cliente ya prepago los peajes
+
 ## Orden Recomendado Para Entrenamiento
 
 ### Para Super Admin

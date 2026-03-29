@@ -9,6 +9,7 @@ const anchors = [
   { id: 'front-desk', label: 'Front Desk' },
   { id: 'reservations', label: 'Reservations SOP' },
   { id: 'reservation-migration', label: 'Reservation Migration' },
+  { id: 'fleet', label: 'Fleet, Planner & QR' },
   { id: 'support', label: 'Support & Issues' },
   { id: 'loaner', label: 'Loaner Program' },
   { id: 'car-sharing', label: 'Car Sharing' },
@@ -187,6 +188,45 @@ const reservationMigrationGuides = [
   }
 ];
 
+const fleetPlaybooks = [
+  {
+    title: 'Vehicle Inventory and Tenant Scope',
+    route: '/vehicles',
+    bullets: [
+      'Super admins should always confirm Inventory Tenant Scope before adding, editing, importing, or exporting anything.',
+      'Vehicle upload templates now use vehicleTypeCode or vehicleType instead of internal vehicle type IDs.',
+      'Vehicle uploads also support year, toll tag number, and toll sticker number so migration data lands cleaner on day one.'
+    ]
+  },
+  {
+    title: 'Migration Holds and Service Holds',
+    route: '/planner',
+    bullets: [
+      'Use Migration Hold when a unit is still on contract in the old system and you need it blocked until a known availability date.',
+      'Use Maintenance Hold or Out Of Service Hold when the unit should be removed from sellable inventory for service reasons.',
+      'Migration holds count as committed fleet for utilization tracking, while maintenance and out-of-service holds count as service risk.'
+    ]
+  },
+  {
+    title: 'Planner Workflow',
+    route: '/planner',
+    bullets: [
+      'Planner now shows hold type, release timing, and quick actions to create, adjust, or release holds without leaving the timeline.',
+      'Use Planner when operations needs to see what is on rent, what is blocked for migration, and what is unavailable because of service.',
+      'If a lane shows Blocked, open the lane detail first before assigning the unit manually.'
+    ]
+  },
+  {
+    title: 'Vehicle QR Labels',
+    route: '/vehicles',
+    bullets: [
+      'Each vehicle has a profile page with a printable QR label that opens the unit profile when scanned.',
+      'The QR profile shows unit details, active checked-out reservation for return, next reservation, and recent inspection history.',
+      'Use Export QR Pack to download a ZIP of printable PNG labels for the tenant scope currently selected.'
+    ]
+  }
+];
+
 const issuePlaybooks = [
   {
     title: 'When to Use Issue Center',
@@ -230,8 +270,16 @@ const tollPlaybooks = [
       'Make sure the tenant has Tolls enabled and the AutoExpreso provider account is configured.',
       'Review Automatic AutoExpreso Sync status, last run, next run, and sweep stats.',
       'Confirm or reset suggested matches in the review queue.',
-      'Post valid tolls to the reservation once the match is correct.',
+      'Matched tolls now auto-sync into reservation charges unless the reservation has a prepaid toll package or the location toll policy changes the billing behavior.',
       'If the toll is disputed, mark it disputed and move it into Issue Center.'
+    ]
+  },
+  {
+    title: 'Location Toll Policy and Prepaid Toll Package',
+    bullets: [
+      'If a tenant has Tolls enabled, toll charges now flow into reservation charges automatically.',
+      'If the pickup location has a toll policy programmed, that policy controls how toll charges or toll policy fees are billed.',
+      'If the reservation has a Toll Package or Prepaid Tolls additional service selected, toll policy billing is bypassed because the customer already prepaid.'
     ]
   },
   {
@@ -251,7 +299,11 @@ const adminPlaybooks = [
     bullets: [
       'Use Settings to manage agreement text, locations, rates, fees, additional services, insurance plans, email templates, payment gateways, and tenant modules.',
       'Super admins should verify Settings Tenant Scope before making changes.',
-      'If the website booking or shortcode pricing looks wrong, Rates, Vehicle Types, and Additional Services are the first places to review.'
+      'If the website booking or shortcode pricing looks wrong, Rates, Vehicle Types, Fees, and Additional Services are the first places to review.',
+      'Rates now support dynamic daily pricing import by date, so one vehicle class can price differently day by day.',
+      'Fees can now be mandatory so they auto-apply to booking and reservation pricing when attached to the location.',
+      'Additional Services now support one-time flat rates, linked fees, and prepaid toll package behavior.',
+      'Insurance plans now support commissions just like Additional Services.'
     ]
   },
   {
@@ -277,7 +329,7 @@ const adminPlaybooks = [
 const quickTroubleshooting = [
   {
     title: 'Pricing or availability looks wrong on website',
-    answer: 'Check Settings > Rates, Vehicle Types, Additional Services, online display flags, and tenant slug used in the shortcode before touching WordPress content.'
+    answer: 'Check Settings > Rates, Vehicle Types, Fees, Additional Services, online display flags, and tenant slug used in the shortcode before touching WordPress content.'
   },
   {
     title: 'User cannot see a module',
@@ -290,6 +342,14 @@ const quickTroubleshooting = [
   {
     title: 'A customer is disputing charges at return',
     answer: 'Do not force closeout blindly. Review check-in inspection, payments, tolls, and if needed open or continue the case in Issue Center.'
+  },
+  {
+    title: 'A vehicle is missing from booking availability',
+    answer: 'Check whether the unit has an active Migration Hold, Maintenance Hold, or Out Of Service Hold. Planner and Vehicle Profile now show that clearly.'
+  },
+  {
+    title: 'A QR scan opened the vehicle profile but the unit cannot be returned',
+    answer: 'Open the active reservation card on the vehicle profile. If the unit is checked out, use the Check-In workflow button from that page instead of searching manually.'
   }
 ];
 
@@ -305,6 +365,14 @@ const faq = [
   {
     question: 'Where do tolls show up now?',
     answer: 'Use Tolls for AutoExpreso sync, review, dispute handling, and posting to reservation billing. Reservation detail pages also show the toll panel once charges are linked.'
+  },
+  {
+    question: 'How do I know whether a car is blocked for migration or for maintenance?',
+    answer: 'Open Vehicles or Planner. The unit now shows the hold type, when it will be available again, and whether it is a migration hold versus a service hold.'
+  },
+  {
+    question: 'How do we print QR stickers for the fleet?',
+    answer: 'Open Vehicles and use Export QR Pack for the current tenant scope, or open a single vehicle profile and print that unit label directly.'
   },
   {
     question: 'How do we place booking on the existing WordPress website?',
@@ -435,6 +503,34 @@ export default function KnowledgeBasePage() {
                   <li>If customers do not already exist in Ride Fleet, make sure first name, last name, and phone are present so the importer can create them.</li>
                   <li>After upload, spot-check Reservations, Loaner Program, and Customers before telling staff the migration is complete.</li>
                 </ol>
+              </div>
+            </section>
+
+            <section id="fleet" className="glass card-lg section-card">
+              <div className="row-between">
+                <div>
+                  <div className="section-title">Fleet, Planner & QR</div>
+                  <p className="ui-muted">Use this for inventory onboarding, temporary holds, timeline control, and vehicle QR label operations.</p>
+                </div>
+                <div className="inline-actions">
+                  <Link href="/vehicles"><button type="button">Open Vehicles</button></Link>
+                  <Link href="/planner"><button type="button" className="button-subtle">Open Planner</button></Link>
+                </div>
+              </div>
+              <div className="knowledge-grid">
+                {fleetPlaybooks.map((item) => (
+                  <article key={item.title} className="surface-note stack">
+                    <div className="row-between">
+                      <strong>{item.title}</strong>
+                      <Link href={item.route}><button type="button" className="button-subtle">Open</button></Link>
+                    </div>
+                    <ul className="knowledge-list">
+                      {item.bullets.map((bullet) => (
+                        <li key={bullet}>{bullet}</li>
+                      ))}
+                    </ul>
+                  </article>
+                ))}
               </div>
             </section>
 

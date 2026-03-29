@@ -285,7 +285,7 @@ model Location {
   id        String    @id @default(cuid())
   tenantId  String?
   tenant    Tenant?   @relation(fields: [tenantId], references: [id])
-  code      String    @unique
+  code      String
   name      String
   address   String?
   city      String?
@@ -310,6 +310,8 @@ model Location {
   hostPickupSpotsAnchor HostPickupSpot[] @relation("HostPickupSpotAnchorLocation")
   carSharingPickupTrips Trip[] @relation("TripPickupLocation")
   carSharingReturnTrips Trip[] @relation("TripReturnLocation")
+
+  @@unique([tenantId, code])
 }
 
 model VehicleType {
@@ -338,7 +340,7 @@ model Vehicle {
   tenant         Tenant?       @relation(fields: [tenantId], references: [id])
   internalNumber String
   vin            String?       @unique
-  plate          String?       @unique
+  plate          String?
   tollTagNumber  String?
   tollStickerNumber String?
   make           String?
@@ -367,6 +369,7 @@ model Vehicle {
   tollAssignments TollAssignment[]
   availabilityBlocks VehicleAvailabilityBlock[]
 
+  @@unique([tenantId, plate])
   @@unique([tenantId, internalNumber])
 }
 
