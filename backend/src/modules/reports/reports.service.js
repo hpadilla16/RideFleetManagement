@@ -1,4 +1,5 @@
 import { prisma } from '../../lib/prisma.js';
+import { isMigrationHoldType, isServiceHoldType } from '../vehicles/vehicle-blocks.js';
 
 function toNumber(value, fallback = 0) {
   const n = Number(value);
@@ -116,12 +117,23 @@ export const reportsService = {
         ...(locationId ? { homeLocationId: locationId } : {})
       }
     };
+    const activeVehicleBlockWhere = {
+      tenantId: effectiveTenantId || undefined,
+      releasedAt: null,
+      blockedFrom: { lte: now },
+      availableFrom: { gt: now },
+      vehicle: {
+        ...(whereScope || {}),
+        ...(locationId ? { homeLocationId: locationId } : {})
+      }
+    };
 
     const [
       reservations,
       reservationPayments,
       agreements,
       vehicles,
+      activeVehicleBlocks,
       locations,
       tenants,
       dueTodayCount,
@@ -162,6 +174,10 @@ export const reportsService = {
       prisma.vehicle.findMany({
         where: vehicleWhere,
         select: { id: true, status: true }
+      }),
+      prisma.vehicleAvailabilityBlock.findMany({
+        where: activeVehicleBlockWhere,
+        select: { vehicleId: true, blockType: true }
       }),
       prisma.location.findMany({
         where: { ...whereScope, isActive: true },
@@ -210,11 +226,29 @@ export const reportsService = {
     const activeAgreements = agreements.filter((row) => !['CLOSED', 'CANCELLED'].includes(String(row.status || '').toUpperCase()));
     const closedInRange = agreements.filter((row) => row.closedAt && row.closedAt >= start && row.closedAt <= end);
     const openBalance = Number(activeAgreements.reduce((sum, row) => sum + Math.max(0, toNumber(row.balance)), 0).toFixed(2));
-    const fleetTotal = vehicles.filter((row) => String(row.status || '').toUpperCase() !== 'OUT_OF_SERVICE').length;
-    const onRent = vehicles.filter((row) => String(row.status || '').toUpperCase() === 'ON_RENT').length;
-    const vehicleMaintenanceCount = vehicles.filter((row) => String(row.status || '').toUpperCase() === 'IN_MAINTENANCE').length;
-    const jobVehicleCount = new Set((maintenanceJobs || []).map((row) => row.vehicleId).filter(Boolean)).size;
-    const vehiclesInMaintenance = Math.max(vehicleMaintenanceCount, jobVehicleCount);
+    const migrationBlockIds = new Set((activeVehicleBlocks || []).filter((row) => isMigrationHoldType(row.blockType)).map((row) => row.vehicleId).filter(Boolean));
+    const serviceBlockRows = (activeVehicleBlocks || []).filter((row) => isServiceHoldType(row.blockType));
+    const serviceBlockIds = new Set(serviceBlockRows.map((row) => row.vehicleId).filter(Boolean));
+    const maintenanceBlockIds = new Set(serviceBlockRows.filter((row) => String(row.blockType || '').toUpperCase() === 'MAINTENANCE_HOLD').map((row) => row.vehicleId).filter(Boolean));
+    const outOfServiceBlockIds = new Set(serviceBlockRows.filter((row) => String(row.blockType || '').toUpperCase() === 'OUT_OF_SERVICE_HOLD').map((row) => row.vehicleId).filter(Boolean));
+    const outOfServiceStatusIds = new Set(vehicles.filter((row) => String(row.status || '').toUpperCase() === 'OUT_OF_SERVICE').map((row) => row.id));
+    const maintenanceStatusIds = new Set(vehicles.filter((row) => String(row.status || '').toUpperCase() === 'IN_MAINTENANCE').map((row) => row.id));
+    const fleetTotal = vehicles.filter((row) => {
+      const status = String(row.status || '').toUpperCase();
+      if (['IN_MAINTENANCE', 'OUT_OF_SERVICE'].includes(status)) return false;
+      if (serviceBlockIds.has(row.id)) return false;
+      return true;
+    }).length;
+    const onRentStatusIds = new Set(vehicles.filter((row) => String(row.status || '').toUpperCase() === 'ON_RENT').map((row) => row.id));
+    const onRent = new Set([...onRentStatusIds, ...migrationBlockIds]).size;
+    const vehiclesInMaintenance = new Set([...maintenanceStatusIds, ...maintenanceBlockIds, ...(maintenanceJobs || []).map((row) => row.vehicleId).filter(Boolean)]).size;
+    const vehiclesOutOfService = new Set([...outOfServiceStatusIds, ...outOfServiceBlockIds]).size;
+    const availableFleet = vehicles.filter((row) => {
+      const status = String(row.status || '').toUpperCase();
+      if (['ON_RENT', 'IN_MAINTENANCE', 'OUT_OF_SERVICE'].includes(status)) return false;
+      if (migrationBlockIds.has(row.id) || serviceBlockIds.has(row.id)) return false;
+      return true;
+    }).length;
     const utilizationPct = fleetTotal > 0 ? Number(((onRent / fleetTotal) * 100).toFixed(1)) : 0;
 
     const locationNameById = new Map(locations.map((row) => [row.id, row.name]));
@@ -268,7 +302,10 @@ export const reportsService = {
         openBalance,
         fleetTotal,
         onRent,
+        availableFleet,
+        migrationHeld: migrationBlockIds.size,
         vehiclesInMaintenance,
+        vehiclesOutOfService,
         utilizationPct
       },
       reservationStatusBreakdown: Object.entries(reservationStatusCounts).map(([status, count]) => ({ status, count })),

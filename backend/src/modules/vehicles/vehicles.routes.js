@@ -76,7 +76,7 @@ vehiclesRouter.post('/:id/availability-blocks', async (req, res, next) => {
     res.status(201).json(row);
   } catch (e) {
     if (/Vehicle not found/i.test(String(e?.message || ''))) return res.status(404).json({ error: 'Vehicle not found' });
-    if (/availableFrom is required|availableFrom must be after blockedFrom/i.test(String(e?.message || ''))) return res.status(400).json({ error: String(e.message) });
+    if (/availableFrom is required|availableFrom must be after blockedFrom|blockType is invalid/i.test(String(e?.message || ''))) return res.status(400).json({ error: String(e.message) });
     next(e);
   }
 });

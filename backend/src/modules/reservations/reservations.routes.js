@@ -9,6 +9,7 @@ import { reservationPricingService } from './reservation-pricing.service.js';
 import { reservationAdditionalDriversService } from './reservation-additional-drivers.service.js';
 import { settingsService } from '../settings/settings.service.js';
 import { ratesService } from '../rates/rates.service.js';
+import { activeVehicleBlockOverlapWhere } from '../vehicles/vehicle-blocks.js';
 import { isSuperAdmin } from '../../middleware/auth.js';
 
 export const reservationsRouter = Router();
@@ -230,6 +231,17 @@ reservationsRouter.get('/:id/available-vehicles', async (req, res, next) => {
     });
 
     const blockedIds = overlaps.map((x) => x.vehicleId).filter(Boolean);
+    const blockedAvailability = await prisma.vehicleAvailabilityBlock.findMany({
+      where: {
+        ...(scopeFor(req).tenantId ? { tenantId: scopeFor(req).tenantId } : {}),
+        vehicleId: { not: null },
+        ...activeVehicleBlockOverlapWhere({ start: pickupAt, end: returnAt })
+      },
+      select: { vehicleId: true }
+    });
+    blockedAvailability.forEach((row) => {
+      if (row?.vehicleId) blockedIds.push(row.vehicleId);
+    });
 
     let vehicles = await prisma.vehicle.findMany({
       where: {

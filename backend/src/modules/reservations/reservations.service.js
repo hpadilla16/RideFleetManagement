@@ -1,4 +1,5 @@
 import { prisma } from '../../lib/prisma.js';
+import { activeVehicleBlockOverlapWhere } from '../vehicles/vehicle-blocks.js';
 import { hostReviewsService } from '../host-reviews/host-reviews.service.js';
 
 function parseLocationConfig(raw) {
@@ -577,6 +578,18 @@ async function pickAvailableVehicle({ vehicleTypeId, pickupLocationId, pickupAt,
     select: { vehicleId: true }
   });
   const blocked = new Set(conflicts.map((c) => c.vehicleId));
+
+  const blockedAvailability = await prisma.vehicleAvailabilityBlock.findMany({
+    where: {
+      ...(scope?.tenantId ? { tenantId: scope.tenantId } : {}),
+      vehicleId: { in: ids },
+      ...activeVehicleBlockOverlapWhere({ start, end })
+    },
+    select: { vehicleId: true }
+  });
+  blockedAvailability.forEach((row) => {
+    if (row?.vehicleId) blocked.add(row.vehicleId);
+  });
 
   const available = candidates.filter((c) => !blocked.has(c.id));
   if (!available.length) return null;

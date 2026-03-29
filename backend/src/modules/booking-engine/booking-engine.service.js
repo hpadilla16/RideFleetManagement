@@ -6,6 +6,7 @@ import { carSharingService } from '../car-sharing/car-sharing.service.js';
 import { sendEmail } from '../../lib/mailer.js';
 import { settingsService } from '../settings/settings.service.js';
 import { computeMarketplaceTripPricing } from '../car-sharing/car-sharing-pricing.js';
+import { activeVehicleBlockOverlapWhere } from '../vehicles/vehicle-blocks.js';
 
 function parseLocationConfig(raw) {
   try {
@@ -649,9 +650,7 @@ async function rentalAvailabilityCount({ tenantId, vehicleTypeId, pickupAt, retu
     where: {
       tenantId,
       vehicleId: { in: vehicles.map((row) => row.id) },
-      releasedAt: null,
-      blockedFrom: { lt: returnAt },
-      availableFrom: { gt: pickupAt }
+      ...activeVehicleBlockOverlapWhere({ start: pickupAt, end: returnAt })
     },
     select: { vehicleId: true }
   });

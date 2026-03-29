@@ -120,6 +120,12 @@ enum VehicleOwnershipType {
   HOST_OWNED
 }
 
+enum VehicleBlockType {
+  MIGRATION_HOLD
+  MAINTENANCE_HOLD
+  OUT_OF_SERVICE_HOLD
+}
+
 enum VehicleFleetMode {
   RENTAL_ONLY
   CAR_SHARING_ONLY
@@ -370,6 +376,7 @@ model VehicleAvailabilityBlock {
   tenant        Tenant?  @relation(fields: [tenantId], references: [id])
   vehicleId      String
   vehicle        Vehicle  @relation(fields: [vehicleId], references: [id], onDelete: Cascade)
+  blockType      VehicleBlockType @default(MIGRATION_HOLD)
   blockedFrom    DateTime @default(now())
   availableFrom  DateTime
   reason         String?

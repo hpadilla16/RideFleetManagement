@@ -6,11 +6,36 @@ import { AuthGate } from '../components/AuthGate';
 import { AppShell } from '../components/AppShell';
 import { api } from '../lib/client';
 
+function activeAvailabilityBlock(vehicle) {
+  const now = Date.now();
+  return (Array.isArray(vehicle?.availabilityBlocks) ? vehicle.availabilityBlocks : []).find((block) => {
+    const releasedAt = block?.releasedAt ? new Date(block.releasedAt).getTime() : null;
+    const blockedFrom = block?.blockedFrom ? new Date(block.blockedFrom).getTime() : now;
+    const availableFrom = block?.availableFrom ? new Date(block.availableFrom).getTime() : null;
+    return !releasedAt && blockedFrom <= now && availableFrom && availableFrom > now;
+  }) || null;
+}
+
+function isMigrationHold(block) {
+  return String(block?.blockType || '').toUpperCase() === 'MIGRATION_HOLD';
+}
+
+function isServiceHold(block) {
+  return ['MAINTENANCE_HOLD', 'OUT_OF_SERVICE_HOLD'].includes(String(block?.blockType || '').toUpperCase());
+}
+
 function VehicleStatusDonut({ vehicles }) {
   const counts = useMemo(() => {
-    const available = vehicles.filter((v) => v.status === 'AVAILABLE').length;
-    const onRent = vehicles.filter((v) => ['RESERVED', 'ON_RENT'].includes(v.status)).length;
-    const out = vehicles.filter((v) => ['OUT_OF_SERVICE', 'IN_MAINTENANCE'].includes(v.status)).length;
+    const available = vehicles.filter((v) => v.status === 'AVAILABLE' && !activeAvailabilityBlock(v)).length;
+    const onRentIds = new Set(vehicles.filter((v) => ['RESERVED', 'ON_RENT'].includes(v.status)).map((v) => v.id));
+    const outIds = new Set(vehicles.filter((v) => ['OUT_OF_SERVICE', 'IN_MAINTENANCE'].includes(v.status)).map((v) => v.id));
+    vehicles.forEach((vehicle) => {
+      const block = activeAvailabilityBlock(vehicle);
+      if (isMigrationHold(block)) onRentIds.add(vehicle.id);
+      if (isServiceHold(block)) outIds.add(vehicle.id);
+    });
+    const onRent = onRentIds.size;
+    const out = outIds.size;
     return { available, onRent, out, total: Math.max(vehicles.length, 1) };
   }, [vehicles]);
 
@@ -234,7 +259,9 @@ function DashboardInner({ token, me, logout }) {
     }
   };
 
-  const available = vehicles.filter((v) => v.status === 'AVAILABLE').length;
+  const available = vehicles.filter((v) => v.status === 'AVAILABLE' && !activeAvailabilityBlock(v)).length;
+  const migrationHeld = vehicles.filter((v) => isMigrationHold(activeAvailabilityBlock(v))).length;
+  const serviceHeld = vehicles.filter((v) => isServiceHold(activeAvailabilityBlock(v))).length;
   const activeReservations = reservations.filter((r) => ['NEW', 'CONFIRMED', 'CHECKED_OUT'].includes(r.status)).length;
   const feeAdvisoryCount = reservations.filter((r) => /\[FEE_ADVISORY_OPEN\s+/i.test(String(r.notes || ''))).length;
   const today = new Date();
@@ -287,11 +314,13 @@ function DashboardInner({ token, me, logout }) {
     return {
       totalVehicles: vehicles.length,
       available,
+      migrationHeld,
+      serviceHeld,
       activeReservations,
       feeAdvisoryCount,
       nextItems
     };
-  }, [pickups, returns, feeAdvisoryCount, vehicles.length, available, activeReservations, router]);
+  }, [pickups, returns, feeAdvisoryCount, vehicles.length, available, migrationHeld, serviceHeld, activeReservations, router]);
 
   return (
     <AppShell me={me} logout={logout}>
@@ -317,6 +346,16 @@ function DashboardInner({ token, me, logout }) {
               <span className="label">Available</span>
               <strong>{workspaceOpsHub.available}</strong>
               <span className="ui-muted">Units ready to move today.</span>
+            </div>
+            <div className="info-tile">
+              <span className="label">Migration Holds</span>
+              <strong>{workspaceOpsHub.migrationHeld}</strong>
+              <span className="ui-muted">Legacy-contract units still committed to fleet usage.</span>
+            </div>
+            <div className="info-tile">
+              <span className="label">Maintenance / OOS</span>
+              <strong>{workspaceOpsHub.serviceHeld}</strong>
+              <span className="ui-muted">Units blocked for maintenance or out-of-service work.</span>
             </div>
             <div className="info-tile">
               <span className="label">Active Reservations</span>

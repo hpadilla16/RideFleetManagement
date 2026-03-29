@@ -42,6 +42,22 @@ function activeAvailabilityBlock(vehicle) {
   }) || null;
 }
 
+function blockTypeLabel(value) {
+  switch (String(value || '').toUpperCase()) {
+    case 'MAINTENANCE_HOLD': return 'Maintenance Hold';
+    case 'OUT_OF_SERVICE_HOLD': return 'Out Of Service';
+    default: return 'Migration Hold';
+  }
+}
+
+function isMigrationHold(block) {
+  return String(block?.blockType || '').toUpperCase() === 'MIGRATION_HOLD';
+}
+
+function isServiceHold(block) {
+  return ['MAINTENANCE_HOLD', 'OUT_OF_SERVICE_HOLD'].includes(String(block?.blockType || '').toUpperCase());
+}
+
 function toLocalDateTimeInput(value) {
   if (!value) return '';
   const date = new Date(value);
@@ -90,6 +106,7 @@ function VehiclesInner({ token, me, logout }) {
   const [validating, setValidating] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [blockForm, setBlockForm] = useState({
+    blockType: 'MIGRATION_HOLD',
     blockedFrom: toLocalDateTimeInput(new Date()),
     availableFrom: '',
     reason: '',
@@ -155,10 +172,16 @@ function VehiclesInner({ token, me, logout }) {
   }, [vehicles, query]);
 
   const fleetOpsHub = useMemo(() => {
-    const blockedTemporarily = vehicles.filter((v) => !!activeAvailabilityBlock(v));
+    const activeBlocks = vehicles.map((vehicle) => ({ vehicle, block: activeAvailabilityBlock(vehicle) })).filter((row) => !!row.block);
+    const migrationHolds = activeBlocks.filter((row) => isMigrationHold(row.block));
+    const serviceBlocks = activeBlocks.filter((row) => isServiceHold(row.block));
     const available = vehicles.filter((v) => String(v?.status || '').toUpperCase() === 'AVAILABLE' && !activeAvailabilityBlock(v));
-    const onRent = vehicles.filter((v) => String(v?.status || '').toUpperCase() === 'ON_RENT');
-    const serviceRisk = vehicles.filter((v) => ['IN_MAINTENANCE', 'OUT_OF_SERVICE'].includes(String(v?.status || '').toUpperCase()));
+    const onRentIds = new Set(vehicles.filter((v) => String(v?.status || '').toUpperCase() === 'ON_RENT').map((v) => v.id));
+    migrationHolds.forEach((row) => onRentIds.add(row.vehicle.id));
+    const serviceRiskIds = new Set(vehicles.filter((v) => ['IN_MAINTENANCE', 'OUT_OF_SERVICE'].includes(String(v?.status || '').toUpperCase())).map((v) => v.id));
+    serviceBlocks.forEach((row) => serviceRiskIds.add(row.vehicle.id));
+    const onRent = vehicles.filter((v) => onRentIds.has(v.id));
+    const serviceRisk = vehicles.filter((v) => serviceRiskIds.has(v.id));
     const carSharing = vehicles.filter((v) => ['CAR_SHARING_ONLY', 'BOTH'].includes(String(v?.fleetMode || '').toUpperCase()));
 
     const nextItems = [
@@ -199,7 +222,8 @@ function VehiclesInner({ token, me, logout }) {
       available: available.length,
       onRent: onRent.length,
       serviceRisk: serviceRisk.length,
-      blockedTemporarily: blockedTemporarily.length,
+      migrationHolds: migrationHolds.length,
+      serviceBlocks: serviceBlocks.length,
       carSharing: carSharing.length,
       nextItems
     };
@@ -303,6 +327,7 @@ function VehiclesInner({ token, me, logout }) {
     const activeBlock = activeAvailabilityBlock(vehicle);
     const baseStart = activeBlock?.blockedFrom ? toLocalDateTimeInput(activeBlock.blockedFrom) : toLocalDateTimeInput(new Date());
     setBlockForm({
+      blockType: activeBlock?.blockType || 'MIGRATION_HOLD',
       blockedFrom: baseStart,
       availableFrom: activeBlock?.availableFrom ? toLocalDateTimeInput(activeBlock.availableFrom) : '',
       reason: activeBlock?.reason || '',
@@ -406,7 +431,7 @@ function VehiclesInner({ token, me, logout }) {
 
   const downloadBlockTemplate = () => {
     const sampleUnit = rows[0]?.internalNumber || 'UNIT-001';
-    const csv = `internalNumber,blockedFrom,availableFrom,reason,notes\n${sampleUnit},${toLocalDateTimeInput(new Date())},2026-04-15T10:00,Legacy contract,Migrating active contract from prior system`;
+    const csv = `internalNumber,blockType,blockedFrom,availableFrom,reason,notes\n${sampleUnit},MIGRATION_HOLD,${toLocalDateTimeInput(new Date())},2026-04-15T10:00,Legacy contract,Migrating active contract from prior system`;
     const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -535,8 +560,13 @@ function VehiclesInner({ token, me, logout }) {
             </div>
             <div className="info-tile">
               <span className="label">Temp Blocks</span>
-              <strong>{fleetOpsHub.blockedTemporarily}</strong>
-              <span className="ui-muted">Vehicles blocked until migrated contracts clear.</span>
+              <strong>{fleetOpsHub.migrationHolds}</strong>
+              <span className="ui-muted">Legacy-contract units still counted as fleet in rental.</span>
+            </div>
+            <div className="info-tile">
+              <span className="label">Service Holds</span>
+              <strong>{fleetOpsHub.serviceBlocks}</strong>
+              <span className="ui-muted">Vehicles blocked for maintenance or out-of-service windows.</span>
             </div>
           </div>
           <div className="app-banner-list">
@@ -586,6 +616,7 @@ function VehiclesInner({ token, me, logout }) {
               <th>Type</th>
               <th>Current Location</th>
               <th>Status</th>
+              <th>Block Type</th>
               <th>Blocked Until</th>
               <th>Fleet Mode</th>
               <th>Rent</th>
@@ -607,6 +638,7 @@ function VehiclesInner({ token, me, logout }) {
                 <td>{v.vehicleType?.name || '-'}</td>
                 <td>{v.homeLocation?.name || '-'}</td>
                 <td><span className="badge">{v.status}</span></td>
+                <td>{currentBlock ? blockTypeLabel(currentBlock.blockType) : '-'}</td>
                 <td>{currentBlock ? `${new Date(currentBlock.availableFrom).toLocaleString()}` : '-'}</td>
                 <td><span className="badge">{v.fleetMode || 'RENTAL_ONLY'}</span></td>
                 <td>
@@ -636,7 +668,7 @@ function VehiclesInner({ token, me, logout }) {
               <span className="label">Temporary Block</span>
               <div>
                 {activeAvailabilityBlock(selected)
-                  ? `Blocked until ${new Date(activeAvailabilityBlock(selected).availableFrom).toLocaleString()}`
+                  ? `${blockTypeLabel(activeAvailabilityBlock(selected).blockType)} until ${new Date(activeAvailabilityBlock(selected).availableFrom).toLocaleString()}`
                   : 'No active temporary block'}
               </div>
             </div>
@@ -652,9 +684,10 @@ function VehiclesInner({ token, me, logout }) {
             {activeAvailabilityBlock(selected) ? (
               <div className="glass card" style={{ padding: 10 }}>
                 <div className="row-between">
-                  <strong>Current Migration Hold</strong>
+                  <strong>Current Vehicle Hold</strong>
                   <span className="badge">BLOCKED</span>
                 </div>
+                <div className="label" style={{ marginTop: 6, textTransform: 'none', letterSpacing: 0 }}>Type: {blockTypeLabel(activeAvailabilityBlock(selected).blockType)}</div>
                 <div className="label" style={{ marginTop: 6, textTransform: 'none', letterSpacing: 0 }}>
                   From {new Date(activeAvailabilityBlock(selected).blockedFrom).toLocaleString()} until {new Date(activeAvailabilityBlock(selected).availableFrom).toLocaleString()}
                 </div>
@@ -783,6 +816,14 @@ function VehiclesInner({ token, me, logout }) {
             <h3>Temporary Block · {selected.internalNumber}</h3>
             <form className="stack" onSubmit={saveVehicleBlock}>
               <div className="grid2">
+                <select value={blockForm.blockType} onChange={(e) => setBlockForm({ ...blockForm, blockType: e.target.value })}>
+                  <option value="MIGRATION_HOLD">Migration Hold</option>
+                  <option value="MAINTENANCE_HOLD">Maintenance Hold</option>
+                  <option value="OUT_OF_SERVICE_HOLD">Out Of Service Hold</option>
+                </select>
+                <div />
+              </div>
+              <div className="grid2">
                 <div className="stack">
                   <label className="label">Blocked From</label>
                   <input type="datetime-local" value={blockForm.blockedFrom} onChange={(e) => setBlockForm({ ...blockForm, blockedFrom: e.target.value })} />
@@ -794,7 +835,7 @@ function VehiclesInner({ token, me, logout }) {
               </div>
               <input placeholder="Reason (migration hold, legacy contract, etc.)" value={blockForm.reason} onChange={(e) => setBlockForm({ ...blockForm, reason: e.target.value })} />
               <textarea rows={4} placeholder="Notes" value={blockForm.notes} onChange={(e) => setBlockForm({ ...blockForm, notes: e.target.value })} />
-              <div className="surface-note">This keeps the vehicle out of booking and planner availability until the selected release date without changing its permanent vehicle status.</div>
+              <div className="surface-note">Migration holds count as fleet already out on legacy contracts. Maintenance and out-of-service holds remove the unit from rentable service until the selected release date.</div>
               <div className="row-between">
                 <button type="button" onClick={() => setShowBlockVehicle(false)}>Cancel</button>
                 <button type="submit">Save Block</button>
@@ -867,9 +908,9 @@ function VehiclesInner({ token, me, logout }) {
                 <p className="label">Step 1: Review instructions</p>
                 <ul>
                   <li>Use CSV format.</li>
-                  <li>Required columns: <code>internalNumber</code> or <code>plate</code>, plus <code>availableFrom</code>.</li>
+                  <li>Required columns: <code>internalNumber</code> or <code>plate</code>, <code>blockType</code>, plus <code>availableFrom</code>.</li>
                   <li>Optional columns: <code>blockedFrom</code>, <code>reason</code>, <code>notes</code>.</li>
-                  <li>Use this for migrated legacy contracts so the vehicle stays blocked until it returns.</li>
+                  <li>Use <code>MIGRATION_HOLD</code>, <code>MAINTENANCE_HOLD</code>, or <code>OUT_OF_SERVICE_HOLD</code>.</li>
                   <li>These temporary blocks appear in the planner and are excluded from booking availability.</li>
                 </ul>
                 <div style={{ display: 'flex', gap: 8 }}>

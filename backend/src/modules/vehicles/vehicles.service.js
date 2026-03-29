@@ -1,4 +1,5 @@
 import { prisma } from '../../lib/prisma.js';
+import { normalizeVehicleBlockType } from './vehicle-blocks.js';
 
 function norm(v) {
   return String(v || '').trim();
@@ -37,7 +38,9 @@ function toDateOrNull(value) {
 }
 
 function normalizeBlockRow(row = {}) {
+  const blockType = normalizeVehicleBlockType(row.blockType || row.type || row.holdType);
   return {
+    blockType,
     blockedFrom: toDateOrNull(row.blockedFrom) || new Date(),
     availableFrom: toDateOrNull(row.availableFrom),
     reason: norm(row.reason) || null,
@@ -142,12 +145,14 @@ export const vehiclesService = {
     });
     if (!vehicle) throw new Error('Vehicle not found');
     const block = normalizeBlockRow(payload);
+    if (!block.blockType) throw new Error('blockType is invalid');
     if (!block.availableFrom) throw new Error('availableFrom is required');
     if (block.availableFrom <= block.blockedFrom) throw new Error('availableFrom must be after blockedFrom');
     return prisma.vehicleAvailabilityBlock.create({
       data: {
         tenantId: vehicle.tenantId || scope?.tenantId || null,
         vehicleId: vehicle.id,
+        blockType: block.blockType,
         blockedFrom: block.blockedFrom,
         availableFrom: block.availableFrom,
         reason: block.reason,
@@ -192,6 +197,7 @@ export const vehiclesService = {
       const normalized = normalizeBlockRow(row);
       const errors = [];
       if (!vehicle) errors.push('vehicle not found');
+      if (!normalized.blockType) errors.push('blockType invalid');
       if (!normalized.availableFrom) errors.push('availableFrom required');
       if (normalized.availableFrom && normalized.availableFrom <= normalized.blockedFrom) errors.push('availableFrom must be after blockedFrom');
       if (errors.length) invalid += 1;
@@ -201,6 +207,7 @@ export const vehiclesService = {
         internalNumber,
         plate,
         vehicleId: vehicle?.id || null,
+        blockType: normalized.blockType,
         blockedFrom: normalized.blockedFrom,
         availableFrom: normalized.availableFrom,
         reason: normalized.reason,
@@ -233,6 +240,7 @@ export const vehiclesService = {
         data: {
           tenantId: vehicle.tenantId || scope?.tenantId || null,
           vehicleId: vehicle.id,
+          blockType: row.blockType,
           blockedFrom: row.blockedFrom,
           availableFrom: row.availableFrom,
           reason: row.reason,

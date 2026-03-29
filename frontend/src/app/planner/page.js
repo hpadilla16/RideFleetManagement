@@ -39,6 +39,9 @@ function statusColor(r, locked) {
 }
 
 function blockColor(block) {
+  const blockType = String(block?.blockType || '').toUpperCase();
+  if (blockType === 'MAINTENANCE_HOLD') return '#f59e0b';
+  if (blockType === 'OUT_OF_SERVICE_HOLD') return '#ef4444';
   const sourceType = String(block?.sourceType || '').toUpperCase();
   return sourceType === 'BULK_IMPORT' ? '#64748b' : '#6b7280';
 }
@@ -51,6 +54,22 @@ function activeAvailabilityBlock(vehicle) {
     const availableFrom = block?.availableFrom ? new Date(block.availableFrom).getTime() : null;
     return !releasedAt && blockedFrom <= now && availableFrom && availableFrom > now;
   }) || null;
+}
+
+function blockTypeLabel(value) {
+  switch (String(value || '').toUpperCase()) {
+    case 'MAINTENANCE_HOLD': return 'Maintenance Hold';
+    case 'OUT_OF_SERVICE_HOLD': return 'Out Of Service';
+    default: return 'Migration Hold';
+  }
+}
+
+function isMigrationHold(block) {
+  return String(block?.blockType || '').toUpperCase() === 'MIGRATION_HOLD';
+}
+
+function isServiceHold(block) {
+  return ['MAINTENANCE_HOLD', 'OUT_OF_SERVICE_HOLD'].includes(String(block?.blockType || '').toUpperCase());
 }
 
 function toLocalDateTimeInput(value) {
@@ -91,6 +110,7 @@ function PlannerInner({ token, me, logout }) {
   const [showBlockVehicle, setShowBlockVehicle] = useState(false);
   const [selectedVehicleForBlock, setSelectedVehicleForBlock] = useState(null);
   const [blockForm, setBlockForm] = useState({
+    blockType: 'MIGRATION_HOLD',
     blockedFrom: toLocalDateTimeInput(new Date()),
     availableFrom: '',
     reason: '',
@@ -126,6 +146,7 @@ function PlannerInner({ token, me, logout }) {
     setSelectedBlock(null);
     setSelectedVehicleForBlock(vehicle);
     setBlockForm({
+      blockType: activeBlock?.blockType || 'MIGRATION_HOLD',
       blockedFrom: baseStart,
       availableFrom: activeBlock?.availableFrom ? toLocalDateTimeInput(activeBlock.availableFrom) : '',
       reason: activeBlock?.reason || '',
@@ -383,7 +404,8 @@ function PlannerInner({ token, me, logout }) {
       pickupsToday: (reservations || []).filter((r) => sameDay(r.pickupAt)).length,
       returnsToday: (reservations || []).filter((r) => sameDay(r.returnAt)).length,
       checkedOut: (reservations || []).filter((r) => String(r?.status || '').toUpperCase() === 'CHECKED_OUT').length,
-      migrationHolds: (vehicles || []).filter((vehicle) => !!activeAvailabilityBlock(vehicle)).length,
+      migrationHolds: (vehicles || []).filter((vehicle) => isMigrationHold(activeAvailabilityBlock(vehicle))).length,
+      serviceHolds: (vehicles || []).filter((vehicle) => isServiceHold(activeAvailabilityBlock(vehicle))).length,
       unassigned: unassigned.length,
       nextItems
     };
@@ -451,6 +473,11 @@ function PlannerInner({ token, me, logout }) {
               <span className="label">Migration Holds</span>
               <strong>{plannerOpsBoard.migrationHolds}</strong>
               <span className="ui-muted">Vehicles blocked until legacy contracts are expected back.</span>
+            </div>
+            <div className="info-tile">
+              <span className="label">Service Holds</span>
+              <strong>{plannerOpsBoard.serviceHolds}</strong>
+              <span className="ui-muted">Maintenance and out-of-service windows on the board.</span>
             </div>
             <div className="info-tile">
               <span className="label">Unassigned</span>
@@ -532,6 +559,8 @@ function PlannerInner({ token, me, logout }) {
           <span className="app-banner-pill">Blue = New</span>
           <span className="app-banner-pill">Purple = Checked Out</span>
           <span className="app-banner-pill">Gray = Migration Hold</span>
+          <span className="app-banner-pill">Orange = Maintenance</span>
+          <span className="app-banner-pill">Red = Out Of Service</span>
         </div>
 
         <div className="planner-scroll">
@@ -568,7 +597,7 @@ function PlannerInner({ token, me, logout }) {
                     <>
                       {activeAvailabilityBlock(v) ? (
                         <div className="surface-note" style={{ marginTop: 6 }}>
-                          Hold reason: {activeAvailabilityBlock(v).reason || 'Legacy contract migration hold'}
+                          {blockTypeLabel(activeAvailabilityBlock(v).blockType)} | {activeAvailabilityBlock(v).reason || 'Legacy contract migration hold'}
                         </div>
                       ) : null}
                       <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 8 }}>
@@ -621,7 +650,7 @@ function PlannerInner({ token, me, logout }) {
                           }}
                           title={`Blocked until ${new Date(block.availableFrom).toLocaleString()}`}
                         >
-                          <span className="planner-block-text">Blocked | {block.reason || 'Legacy contract'} | Free {new Date(block.availableFrom).toLocaleDateString()}</span>
+                          <span className="planner-block-text">{blockTypeLabel(block.blockType)} | {block.reason || 'Legacy contract'} | Free {new Date(block.availableFrom).toLocaleDateString()}</span>
                         </div>
                       );
                     }
@@ -680,6 +709,7 @@ function PlannerInner({ token, me, logout }) {
           </div>
           <div style={{ fontWeight: 700 }}>{selectedBlock.vehicle?.internalNumber || 'Vehicle'}</div>
           <div className="label">{selectedBlock.vehicle?.year || ''} {selectedBlock.vehicle?.make || ''} {selectedBlock.vehicle?.model || ''}</div>
+          <div className="label">Type: {blockTypeLabel(selectedBlock.block.blockType)}</div>
           <div className="label">Blocked from: {new Date(selectedBlock.block.blockedFrom).toLocaleString()}</div>
           <div className="label">Available again: {new Date(selectedBlock.block.availableFrom).toLocaleString()}</div>
           <div className="label">Reason: {selectedBlock.block.reason || 'Legacy contract migration hold'}</div>
@@ -698,6 +728,14 @@ function PlannerInner({ token, me, logout }) {
             <h3>Temporary Hold | {selectedVehicleForBlock.internalNumber}</h3>
             <form className="stack" onSubmit={saveVehicleBlock}>
               <div className="grid2">
+                <select value={blockForm.blockType} onChange={(e) => setBlockForm({ ...blockForm, blockType: e.target.value })}>
+                  <option value="MIGRATION_HOLD">Migration Hold</option>
+                  <option value="MAINTENANCE_HOLD">Maintenance Hold</option>
+                  <option value="OUT_OF_SERVICE_HOLD">Out Of Service Hold</option>
+                </select>
+                <div />
+              </div>
+              <div className="grid2">
                 <div className="stack">
                   <label className="label">Blocked From</label>
                   <input type="datetime-local" value={blockForm.blockedFrom} onChange={(e) => setBlockForm({ ...blockForm, blockedFrom: e.target.value })} />
@@ -709,7 +747,7 @@ function PlannerInner({ token, me, logout }) {
               </div>
               <input placeholder="Reason (migration hold, legacy contract, etc.)" value={blockForm.reason} onChange={(e) => setBlockForm({ ...blockForm, reason: e.target.value })} />
               <textarea rows={4} placeholder="Notes" value={blockForm.notes} onChange={(e) => setBlockForm({ ...blockForm, notes: e.target.value })} />
-              <div className="surface-note">Use this when a vehicle is still out on a legacy contract and should stay blocked until the expected return date.</div>
+              <div className="surface-note">Migration holds count as already committed fleet. Maintenance and out-of-service holds remove units from rentable service until the selected release date.</div>
               <div className="row-between">
                 <button type="button" onClick={() => { setShowBlockVehicle(false); setSelectedVehicleForBlock(null); }}>Cancel</button>
                 <button type="submit">Save Hold</button>

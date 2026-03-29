@@ -32,9 +32,11 @@ function metricCards(report) {
     { label: 'Checked Out', value: kpis.checkedOut || 0 },
     { label: 'Checked In', value: kpis.checkedIn || 0 },
     { label: 'Due Today', value: kpis.agreementsDueToday || 0 },
+    { label: 'Available Fleet', value: kpis.availableFleet || 0 },
+    { label: 'Migration Held', value: kpis.migrationHeld || 0 },
     { label: 'Collected', value: fmtMoney(kpis.collectedPayments) },
     { label: 'Open Balance', value: fmtMoney(kpis.openBalance) },
-    { label: 'In Maintenance', value: kpis.vehiclesInMaintenance || 0 },
+    { label: 'Maintenance / OOS', value: (Number(kpis.vehiclesInMaintenance || 0) + Number(kpis.vehiclesOutOfService || 0)) || 0 },
     { label: 'Utilization', value: `${Number(kpis.utilizationPct || 0).toFixed(1)}%` }
   ];
 }
@@ -182,6 +184,12 @@ function Inner({ token, me, logout }) {
         note: Number(kpis.utilizationPct || 0) >= 70
           ? 'Fleet utilization is healthy in the current window.'
           : 'There may be room to improve fleet usage in this range.'
+      },
+      {
+        id: 'fleet-balance',
+        title: 'Fleet Balance',
+        detail: `${Number(kpis.availableFleet || 0)} available / ${Number(kpis.onRent || 0)} committed`,
+        note: `${Number(kpis.vehiclesInMaintenance || 0) + Number(kpis.vehiclesOutOfService || 0)} units are in maintenance or out of service right now.`
       }
     ].filter(Boolean);
 
