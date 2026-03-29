@@ -48,6 +48,33 @@ function normalizeBlockRow(row = {}) {
   };
 }
 
+const vehicleReservationSelect = {
+  id: true,
+  reservationNumber: true,
+  status: true,
+  workflowMode: true,
+  pickupAt: true,
+  returnAt: true,
+  notes: true,
+  pickupLocation: { select: { id: true, name: true, code: true } },
+  returnLocation: { select: { id: true, name: true, code: true } },
+  customer: { select: { id: true, firstName: true, lastName: true, email: true, phone: true } },
+  rentalAgreement: {
+    select: {
+      id: true,
+      agreementNumber: true,
+      status: true,
+      balance: true,
+      finalizedAt: true,
+      closedAt: true,
+      inspections: {
+        orderBy: { capturedAt: 'desc' },
+        select: { phase: true, capturedAt: true }
+      }
+    }
+  }
+};
+
 export const vehiclesService = {
   list(scope = {}) {
     return prisma.vehicle.findMany({
@@ -76,8 +103,8 @@ export const vehiclesService = {
     });
   },
 
-  getById(id, scope = {}) {
-    return prisma.vehicle.findFirst({
+  async getById(id, scope = {}) {
+    const vehicle = await prisma.vehicle.findFirst({
       where: { id, ...(byTenantWhere(scope) || {}) },
       include: {
         tenant: true,
@@ -100,6 +127,45 @@ export const vehiclesService = {
         }
       }
     });
+    if (!vehicle) return null;
+
+    const reservationWhere = {
+      vehicleId: vehicle.id,
+      ...(scope?.tenantId ? { tenantId: scope.tenantId } : {})
+    };
+    const now = new Date();
+    const [activeReservation, nextReservation, recentReservations] = await Promise.all([
+      prisma.reservation.findFirst({
+        where: {
+          ...reservationWhere,
+          status: 'CHECKED_OUT'
+        },
+        orderBy: [{ returnAt: 'asc' }, { pickupAt: 'asc' }],
+        select: vehicleReservationSelect
+      }),
+      prisma.reservation.findFirst({
+        where: {
+          ...reservationWhere,
+          status: { in: ['NEW', 'CONFIRMED'] },
+          returnAt: { gte: now }
+        },
+        orderBy: [{ pickupAt: 'asc' }, { returnAt: 'asc' }],
+        select: vehicleReservationSelect
+      }),
+      prisma.reservation.findMany({
+        where: reservationWhere,
+        orderBy: [{ pickupAt: 'desc' }, { createdAt: 'desc' }],
+        take: 12,
+        select: vehicleReservationSelect
+      })
+    ]);
+
+    return {
+      ...vehicle,
+      activeReservation,
+      nextReservation,
+      recentReservations
+    };
   },
 
   create(data, scope = {}) {

@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
+import { useRouter } from 'next/navigation';
 import { AuthGate } from '../../components/AuthGate';
 import { AppShell } from '../../components/AppShell';
 import { api } from '../../lib/client';
@@ -71,6 +72,7 @@ function toLocalDateTimeInput(value) {
 }
 
 function VehiclesInner({ token, me, logout }) {
+  const router = useRouter();
   const role = String(me?.role || '').toUpperCase().trim();
   const isSuper = role === 'SUPER_ADMIN';
   const [vehicles, setVehicles] = useState([]);
@@ -357,6 +359,16 @@ function VehiclesInner({ token, me, logout }) {
     }
   };
 
+  const openVehicleProfile = (vehicle) => {
+    if (!vehicle?.id) return;
+    router.push(`/vehicles/${vehicle.id}`);
+  };
+
+  const printVehicleQr = (vehicle) => {
+    if (!vehicle?.id || typeof window === 'undefined') return;
+    window.open(`/vehicles/${vehicle.id}?print=1`, '_blank', 'noopener,noreferrer');
+  };
+
   const downloadTemplate = () => {
     const sampleType = vehicleTypes[0]?.code || 'ECON';
     const csv = `internalNumber,plate,tollTagNumber,tollStickerNumber,vin,make,model,color,year,vehicleTypeCode\nUNIT-001,ABC123,TAG-1001,SELLO-1001,1HGBH41JXMN109186,Honda,Civic,Silver,2024,${sampleType}`;
@@ -620,6 +632,7 @@ function VehiclesInner({ token, me, logout }) {
               <th>Blocked Until</th>
               <th>Fleet Mode</th>
               <th>Rent</th>
+              <th>Profile</th>
             </tr>
           </thead>
           <tbody>
@@ -643,6 +656,12 @@ function VehiclesInner({ token, me, logout }) {
                 <td><span className="badge">{v.fleetMode || 'RENTAL_ONLY'}</span></td>
                 <td>
                   <button onClick={(e) => { e.stopPropagation(); openRent(v); }} disabled={v.status !== 'AVAILABLE' || !!currentBlock}>Rent</button>
+                </td>
+                <td>
+                  <div className="inline-actions">
+                    <button onClick={(e) => { e.stopPropagation(); openVehicleProfile(v); }}>Open</button>
+                    <button className="button-subtle" onClick={(e) => { e.stopPropagation(); printVehicleQr(v); }}>QR</button>
+                  </div>
                 </td>
               </tr>
             )})}
@@ -674,6 +693,8 @@ function VehiclesInner({ token, me, logout }) {
             </div>
             <div style={{ display: 'flex', gap: 8 }}>
               <button onClick={() => openRent(selected)} disabled={selected.status !== 'AVAILABLE' || !!activeAvailabilityBlock(selected)}>Rent this vehicle</button>
+              <button onClick={() => openVehicleProfile(selected)}>Open profile</button>
+              <button className="button-subtle" onClick={() => printVehicleQr(selected)}>Print QR label</button>
               <button onClick={() => openEditVehicle(selected)}>Edit vehicle</button>
               <button onClick={() => openBlockVehicle(selected)}>Block until available</button>
               {activeAvailabilityBlock(selected) ? (
@@ -704,7 +725,7 @@ function VehiclesInner({ token, me, logout }) {
                   if (!rep) return null;
                   return (
                     <div key={a.id} className="label" style={{ textTransform: 'none', letterSpacing: 0 }}>
-                      {a.agreementNumber} • {a.reservation?.reservationNumber || '-'} • Checkout: {rep?.checkout?.at ? 'Yes' : 'No'} • Check-in: {rep?.checkin?.at ? 'Yes' : 'No'}
+                      {a.agreementNumber} | {a.reservation?.reservationNumber || '-'} | Checkout: {rep?.checkout?.at ? 'Yes' : 'No'} | Check-in: {rep?.checkin?.at ? 'Yes' : 'No'}
                     </div>
                   );
                 })}
@@ -764,7 +785,7 @@ function VehiclesInner({ token, me, logout }) {
       {showEditVehicle && selected && (
         <div className="modal-backdrop" onClick={() => setShowEditVehicle(false)}>
           <div className="rent-modal glass" onClick={(e) => e.stopPropagation()}>
-            <h3>Edit Vehicle · {selected.internalNumber}</h3>
+            <h3>Edit Vehicle | {selected.internalNumber}</h3>
             <form className="stack" onSubmit={saveEditVehicle}>
               <div className="grid2">
                 <input required placeholder="Unit ID" value={editVehicleForm.internalNumber} onChange={(e) => setEditVehicleForm({ ...editVehicleForm, internalNumber: e.target.value })} />
@@ -813,7 +834,7 @@ function VehiclesInner({ token, me, logout }) {
       {showBlockVehicle && selected && (
         <div className="modal-backdrop" onClick={() => setShowBlockVehicle(false)}>
           <div className="rent-modal glass" onClick={(e) => e.stopPropagation()}>
-            <h3>Temporary Block · {selected.internalNumber}</h3>
+            <h3>Temporary Block | {selected.internalNumber}</h3>
             <form className="stack" onSubmit={saveVehicleBlock}>
               <div className="grid2">
                 <select value={blockForm.blockType} onChange={(e) => setBlockForm({ ...blockForm, blockType: e.target.value })}>
@@ -874,7 +895,7 @@ function VehiclesInner({ token, me, logout }) {
                 <p className="label">Rows loaded: {uploadRows.length}</p>
                 <div style={{ display: 'flex', gap: 8 }}>
                   <button type="button" onClick={resetWizard}>Try again</button>
-                  <button type="button" onClick={validateUpload} disabled={!uploadRows.length || validating}>{validating ? 'Validating…' : 'Validate'}</button>
+                  <button type="button" onClick={validateUpload} disabled={!uploadRows.length || validating}>{validating ? 'Validating...' : 'Validate'}</button>
                 </div>
               </div>
             )}
@@ -927,7 +948,7 @@ function VehiclesInner({ token, me, logout }) {
                 <p className="label">Rows loaded: {blockUploadRows.length}</p>
                 <div style={{ display: 'flex', gap: 8 }}>
                   <button type="button" onClick={resetBlockWizard}>Try again</button>
-                  <button type="button" onClick={validateBlockUpload} disabled={!blockUploadRows.length || validatingBlockUpload}>{validatingBlockUpload ? 'Validating…' : 'Validate'}</button>
+                  <button type="button" onClick={validateBlockUpload} disabled={!blockUploadRows.length || validatingBlockUpload}>{validatingBlockUpload ? 'Validating...' : 'Validate'}</button>
                 </div>
               </div>
             )}
