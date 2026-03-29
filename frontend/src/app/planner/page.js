@@ -140,6 +140,37 @@ function PlannerInner({ token, me, logout }) {
 
   useEffect(() => { load(); }, [token]);
 
+  const replaceReservationInState = (updatedReservation) => {
+    if (!updatedReservation?.id) return;
+    setReservations((current) => current.map((row) => (
+      row.id === updatedReservation.id
+        ? { ...row, ...updatedReservation }
+        : row
+    )));
+    setSelectedReservation((current) => (
+      current?.reservation?.id === updatedReservation.id
+        ? { ...current, reservation: { ...current.reservation, ...updatedReservation } }
+        : current
+    ));
+  };
+
+  const upsertVehicleBlockInState = (vehicleId, block) => {
+    if (!vehicleId || !block?.id) return;
+    setVehicles((current) => current.map((vehicle) => {
+      if (vehicle.id !== vehicleId) return vehicle;
+      const existing = Array.isArray(vehicle.availabilityBlocks) ? vehicle.availabilityBlocks : [];
+      const nextBlocks = existing.some((row) => row.id === block.id)
+        ? existing.map((row) => (row.id === block.id ? { ...row, ...block } : row))
+        : [...existing, block];
+      return { ...vehicle, availabilityBlocks: nextBlocks };
+    }));
+    setSelectedBlock((current) => (
+      current?.block?.id === block.id
+        ? { ...current, block: { ...current.block, ...block } }
+        : current
+    ));
+  };
+
   const openBlockVehicle = (vehicle) => {
     const activeBlock = activeAvailabilityBlock(vehicle);
     const baseStart = activeBlock?.blockedFrom ? toLocalDateTimeInput(activeBlock.blockedFrom) : toLocalDateTimeInput(new Date());
@@ -160,14 +191,14 @@ function PlannerInner({ token, me, logout }) {
     e.preventDefault();
     if (!selectedVehicleForBlock) return;
     try {
-      await api(`/api/vehicles/${selectedVehicleForBlock.id}/availability-blocks`, {
+      const createdBlock = await api(`/api/vehicles/${selectedVehicleForBlock.id}/availability-blocks`, {
         method: 'POST',
         body: JSON.stringify(blockForm)
       }, token);
+      upsertVehicleBlockInState(selectedVehicleForBlock.id, createdBlock);
       setMsg(`Vehicle ${selectedVehicleForBlock.internalNumber} blocked until ${new Date(blockForm.availableFrom).toLocaleString()}`);
       setShowBlockVehicle(false);
       setSelectedVehicleForBlock(null);
-      await load();
     } catch (error) {
       setMsg(error.message);
     }
@@ -175,15 +206,15 @@ function PlannerInner({ token, me, logout }) {
 
   const releaseVehicleBlock = async (blockId) => {
     try {
-      await api(`/api/vehicles/availability-blocks/${blockId}/release`, {
+      const releasedBlock = await api(`/api/vehicles/availability-blocks/${blockId}/release`, {
         method: 'POST',
         body: JSON.stringify({})
       }, token);
+      upsertVehicleBlockInState(releasedBlock?.vehicleId || selectedBlock?.vehicle?.id || selectedVehicleForBlock?.id || null, releasedBlock);
       setMsg('Vehicle block released');
       setSelectedBlock(null);
       setShowBlockVehicle(false);
       setSelectedVehicleForBlock(null);
-      await load();
     } catch (error) {
       setMsg(error.message);
     }
@@ -308,7 +339,7 @@ function PlannerInner({ token, me, logout }) {
         return;
       }
 
-      await api(`/api/reservations/${r.id}`, {
+      const updatedReservation = await api(`/api/reservations/${r.id}`, {
         method: 'PATCH',
         body: JSON.stringify({
           vehicleId: trackVehicleId === '__unassigned__' ? null : trackVehicleId,
@@ -316,11 +347,11 @@ function PlannerInner({ token, me, logout }) {
           returnAt: newReturn.toISOString()
         })
       }, token);
+      replaceReservationInState(updatedReservation);
       setMsg(`Reservation ${r.reservationNumber} moved`);
       setDragItem(null);
       setDragMeta(null);
       setDraggingId('');
-      await load();
     } catch (e) {
       setMsg(e.message);
       setDragItem(null);
