@@ -43,6 +43,28 @@ function blockColor(block) {
   return sourceType === 'BULK_IMPORT' ? '#64748b' : '#6b7280';
 }
 
+function activeAvailabilityBlock(vehicle) {
+  const now = Date.now();
+  return (Array.isArray(vehicle?.availabilityBlocks) ? vehicle.availabilityBlocks : []).find((block) => {
+    const releasedAt = block?.releasedAt ? new Date(block.releasedAt).getTime() : null;
+    const blockedFrom = block?.blockedFrom ? new Date(block.blockedFrom).getTime() : now;
+    const availableFrom = block?.availableFrom ? new Date(block.availableFrom).getTime() : null;
+    return !releasedAt && blockedFrom <= now && availableFrom && availableFrom > now;
+  }) || null;
+}
+
+function toLocalDateTimeInput(value) {
+  if (!value) return '';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '';
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  const hours = String(date.getHours()).padStart(2, '0');
+  const minutes = String(date.getMinutes()).padStart(2, '0');
+  return `${year}-${month}-${day}T${hours}:${minutes}`;
+}
+
 function dayIndexInRange(rangeStart, dt) {
   return Math.floor((startOfDay(dt) - rangeStart) / DAY_MS);
 }
@@ -66,6 +88,14 @@ function PlannerInner({ token, me, logout }) {
   const [draggingId, setDraggingId] = useState('');
   const [selectedReservation, setSelectedReservation] = useState(null);
   const [selectedBlock, setSelectedBlock] = useState(null);
+  const [showBlockVehicle, setShowBlockVehicle] = useState(false);
+  const [selectedVehicleForBlock, setSelectedVehicleForBlock] = useState(null);
+  const [blockForm, setBlockForm] = useState({
+    blockedFrom: toLocalDateTimeInput(new Date()),
+    availableFrom: '',
+    reason: '',
+    notes: ''
+  });
   const [plannerFocus, setPlannerFocus] = useState('ALL');
 
   const dayCount = view === 'DAY' ? 1 : view === 'WEEK' ? 7 : 30;
@@ -88,6 +118,54 @@ function PlannerInner({ token, me, logout }) {
   };
 
   useEffect(() => { load(); }, [token]);
+
+  const openBlockVehicle = (vehicle) => {
+    const activeBlock = activeAvailabilityBlock(vehicle);
+    const baseStart = activeBlock?.blockedFrom ? toLocalDateTimeInput(activeBlock.blockedFrom) : toLocalDateTimeInput(new Date());
+    setSelectedReservation(null);
+    setSelectedBlock(null);
+    setSelectedVehicleForBlock(vehicle);
+    setBlockForm({
+      blockedFrom: baseStart,
+      availableFrom: activeBlock?.availableFrom ? toLocalDateTimeInput(activeBlock.availableFrom) : '',
+      reason: activeBlock?.reason || '',
+      notes: activeBlock?.notes || ''
+    });
+    setShowBlockVehicle(true);
+  };
+
+  const saveVehicleBlock = async (e) => {
+    e.preventDefault();
+    if (!selectedVehicleForBlock) return;
+    try {
+      await api(`/api/vehicles/${selectedVehicleForBlock.id}/availability-blocks`, {
+        method: 'POST',
+        body: JSON.stringify(blockForm)
+      }, token);
+      setMsg(`Vehicle ${selectedVehicleForBlock.internalNumber} blocked until ${new Date(blockForm.availableFrom).toLocaleString()}`);
+      setShowBlockVehicle(false);
+      setSelectedVehicleForBlock(null);
+      await load();
+    } catch (error) {
+      setMsg(error.message);
+    }
+  };
+
+  const releaseVehicleBlock = async (blockId) => {
+    try {
+      await api(`/api/vehicles/availability-blocks/${blockId}/release`, {
+        method: 'POST',
+        body: JSON.stringify({})
+      }, token);
+      setMsg('Vehicle block released');
+      setSelectedBlock(null);
+      setShowBlockVehicle(false);
+      setSelectedVehicleForBlock(null);
+      await load();
+    } catch (error) {
+      setMsg(error.message);
+    }
+  };
 
   const lockedReservationIds = useMemo(
     () => new Set((reservations || []).filter((r) => String(r.status || '').toUpperCase() === 'CHECKED_OUT').map((r) => r.id)),
@@ -305,10 +383,11 @@ function PlannerInner({ token, me, logout }) {
       pickupsToday: (reservations || []).filter((r) => sameDay(r.pickupAt)).length,
       returnsToday: (reservations || []).filter((r) => sameDay(r.returnAt)).length,
       checkedOut: (reservations || []).filter((r) => String(r?.status || '').toUpperCase() === 'CHECKED_OUT').length,
+      migrationHolds: (vehicles || []).filter((vehicle) => !!activeAvailabilityBlock(vehicle)).length,
       unassigned: unassigned.length,
       nextItems
     };
-  }, [reservations, lockedReservationIds]);
+  }, [reservations, lockedReservationIds, vehicles]);
 
   const plannerFocusOptions = useMemo(() => ([
     { id: 'ALL', label: 'All Queues', count: plannerOpsBoard.nextItems.length },
@@ -369,6 +448,11 @@ function PlannerInner({ token, me, logout }) {
               <span className="ui-muted">Bookings currently out and locked by agreement.</span>
             </div>
             <div className="info-tile">
+              <span className="label">Migration Holds</span>
+              <strong>{plannerOpsBoard.migrationHolds}</strong>
+              <span className="ui-muted">Vehicles blocked until legacy contracts are expected back.</span>
+            </div>
+            <div className="info-tile">
               <span className="label">Unassigned</span>
               <strong>{plannerOpsBoard.unassigned}</strong>
               <span className="ui-muted">Reservations still waiting for a vehicle track.</span>
@@ -384,7 +468,7 @@ function PlannerInner({ token, me, logout }) {
                   onClick={() => setPlannerFocus(option.id)}
                   style={{ minHeight: 36, paddingInline: 14 }}
                 >
-                  {option.label} · {option.count}
+                  {option.label} | {option.count}
                 </button>
               ))}
             </div>
@@ -436,13 +520,19 @@ function PlannerInner({ token, me, logout }) {
           </div>
           <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
             <button onClick={goToday}>Today</button>
-            <button onClick={goPrev}>◀</button>
+            <button onClick={goPrev}>Previous</button>
             <div className="label" style={{ minWidth: 180, textAlign: 'center' }}>{fmtDay(rangeStart)} - {fmtDay(addDays(rangeEnd, -1))}</div>
-            <button onClick={goNext}>▶</button>
+            <button onClick={goNext}>Next</button>
           </div>
         </div>
 
         {msg ? <p className="label">{msg}</p> : null}
+        <div className="app-banner-list" style={{ marginBottom: 12 }}>
+          <span className="app-banner-pill">Green = Confirmed</span>
+          <span className="app-banner-pill">Blue = New</span>
+          <span className="app-banner-pill">Purple = Checked Out</span>
+          <span className="app-banner-pill">Gray = Migration Hold</span>
+        </div>
 
         <div className="planner-scroll">
           <div className="planner-head" style={{ gridTemplateColumns: `260px repeat(${dayCount}, ${DAY_WIDTH}px)` }}>
@@ -465,7 +555,26 @@ function PlannerInner({ token, me, logout }) {
               <div key={v.id} className="planner-row" style={{ gridTemplateColumns: `260px repeat(${dayCount}, ${DAY_WIDTH}px)` }}>
                 <div className="planner-cell planner-sticky planner-track-meta" style={{ minHeight: rowHeight }}>
                   <div style={{ fontWeight: 700 }}>{v.make} {v.model} {v.year || ''}</div>
-                  <div className="label">#{v.internalNumber} · {v.vehicleType?.code || '-'}</div>
+                  <div className="label">#{v.internalNumber} | {v.vehicleType?.code || '-'}</div>
+                  {v.id !== '__unassigned__' ? (
+                    <>
+                      {activeAvailabilityBlock(v) ? (
+                        <div className="label" style={{ marginTop: 6, textTransform: 'none', letterSpacing: 0 }}>
+                          Blocked until {new Date(activeAvailabilityBlock(v).availableFrom).toLocaleString()}
+                        </div>
+                      ) : null}
+                      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 8 }}>
+                        <button type="button" className="button-subtle" onClick={() => openBlockVehicle(v)}>
+                          {activeAvailabilityBlock(v) ? 'Adjust Hold' : 'Add Hold'}
+                        </button>
+                        {activeAvailabilityBlock(v) ? (
+                          <button type="button" className="button-subtle" onClick={() => releaseVehicleBlock(activeAvailabilityBlock(v).id)}>
+                            Release
+                          </button>
+                        ) : null}
+                      </div>
+                    </>
+                  ) : null}
                 </div>
 
                 {Array.from({ length: dayCount }).map((_, i) => (
@@ -527,7 +636,7 @@ function PlannerInner({ token, me, logout }) {
                         style={{ left: rowItem.start * DAY_WIDTH + 2, top: rowItem.lane * lanePitch + 4, height: blockHeight, width: Math.max(12, rowItem.span * DAY_WIDTH - 4), background: statusColor(r, locked), opacity: locked ? 0.7 : (draggingId === r.id ? 0.85 : 1) }}
                         title={`${r.reservationNumber} ${locked ? '(locked by agreement)' : ''}`}
                       >
-                        <span className="planner-block-text">{locked ? '🔒 ' : ''}{r.reservationNumber} · {r.customer?.firstName || ''} {r.customer?.lastName || ''}</span>
+                        <span className="planner-block-text">{locked ? 'Locked | ' : ''}{r.reservationNumber} | {r.customer?.firstName || ''} {r.customer?.lastName || ''}</span>
                       </div>
                     );
                   })}
@@ -548,7 +657,7 @@ function PlannerInner({ token, me, logout }) {
           <div className="label">{selectedReservation.reservation.customer?.firstName || ''} {selectedReservation.reservation.customer?.lastName || ''}</div>
           <div className="label">From: {new Date(selectedReservation.reservation.pickupAt).toLocaleString()}</div>
           <div className="label">To: {new Date(selectedReservation.reservation.returnAt).toLocaleString()}</div>
-          <div className="label" style={{ marginBottom: 8 }}>{selectedReservation.locked ? '🔒 Locked (Agreement exists)' : 'Movable Reservation'}</div>
+          <div className="label" style={{ marginBottom: 8 }}>{selectedReservation.locked ? 'Locked by agreement' : 'Movable reservation'}</div>
           <div style={{ display: 'grid', gap: 8 }}>
             <Link href={`/reservations/${selectedReservation.reservation.id}`}><button>Open Reservation</button></Link>
           </div>
@@ -568,7 +677,38 @@ function PlannerInner({ token, me, logout }) {
           <div className="label">Reason: {selectedBlock.block.reason || 'Legacy contract migration hold'}</div>
           {selectedBlock.block.notes ? <div className="label" style={{ marginBottom: 8 }}>Notes: {selectedBlock.block.notes}</div> : null}
           <div className="label" style={{ marginBottom: 8 }}>Source: {selectedBlock.block.sourceType || 'MANUAL'}</div>
+          <div style={{ display: 'grid', gap: 8 }}>
+            <button type="button" onClick={() => releaseVehicleBlock(selectedBlock.block.id)}>Release Block</button>
+            <button type="button" className="button-subtle" onClick={() => openBlockVehicle(selectedBlock.vehicle)}>Edit Block</button>
+          </div>
         </aside>
+      ) : null}
+
+      {showBlockVehicle && selectedVehicleForBlock ? (
+        <div className="modal-backdrop" onClick={() => { setShowBlockVehicle(false); setSelectedVehicleForBlock(null); }}>
+          <div className="rent-modal glass" onClick={(e) => e.stopPropagation()}>
+            <h3>Temporary Hold | {selectedVehicleForBlock.internalNumber}</h3>
+            <form className="stack" onSubmit={saveVehicleBlock}>
+              <div className="grid2">
+                <div className="stack">
+                  <label className="label">Blocked From</label>
+                  <input type="datetime-local" value={blockForm.blockedFrom} onChange={(e) => setBlockForm({ ...blockForm, blockedFrom: e.target.value })} />
+                </div>
+                <div className="stack">
+                  <label className="label">Available Again*</label>
+                  <input required type="datetime-local" value={blockForm.availableFrom} onChange={(e) => setBlockForm({ ...blockForm, availableFrom: e.target.value })} />
+                </div>
+              </div>
+              <input placeholder="Reason (migration hold, legacy contract, etc.)" value={blockForm.reason} onChange={(e) => setBlockForm({ ...blockForm, reason: e.target.value })} />
+              <textarea rows={4} placeholder="Notes" value={blockForm.notes} onChange={(e) => setBlockForm({ ...blockForm, notes: e.target.value })} />
+              <div className="surface-note">Use this when a vehicle is still out on a legacy contract and should stay blocked until the expected return date.</div>
+              <div className="row-between">
+                <button type="button" onClick={() => { setShowBlockVehicle(false); setSelectedVehicleForBlock(null); }}>Cancel</button>
+                <button type="submit">Save Hold</button>
+              </div>
+            </form>
+          </div>
+        </div>
       ) : null}
     </AppShell>
   );
