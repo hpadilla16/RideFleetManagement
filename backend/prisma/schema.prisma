@@ -1565,6 +1565,7 @@ model TollProviderAccount {
   transactions      TollTransaction[]
 
   @@index([tenantId, provider, isActive])
+  @@unique([tenantId, provider])
 }
 
 model TollImportRun {
@@ -1632,6 +1633,7 @@ model TollTransaction {
   @@index([tenantId, plateNormalized, transactionAt])
   @@index([tenantId, tagNormalized, transactionAt])
   @@index([tenantId, selloNormalized, transactionAt])
+  @@unique([tenantId, externalId])
 }
 
 model TollAssignment {
