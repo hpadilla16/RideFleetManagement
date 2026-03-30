@@ -1647,6 +1647,7 @@ export const tollsService = {
         const autoMatchedCount = Number(autoMatch?.autoConfirmed || 0);
         const suggestedCount = Number(autoMatch?.suggested || 0);
         const pendingReviewCount = Number(autoMatch?.pendingReviewCount || 0);
+        const syncSummary = liveSync?.summary || {};
 
         if (liveSync?.importRun?.id) {
           const currentRun = await prisma.tollImportRun.findUnique({
@@ -1661,6 +1662,9 @@ export const tollsService = {
                 metadataJson: JSON.stringify({
                   ...existingMeta,
                   autoSync: {
+                    scrapedCount: Number(syncSummary?.scrapedCount || 0),
+                    dedupedInRunCount: Number(syncSummary?.dedupedInRunCount || 0),
+                    duplicateExistingCount: Number(syncSummary?.duplicateExistingCount || 0),
                     importedCount,
                     autoMatchedCount,
                     suggestedCount,
@@ -1677,12 +1681,18 @@ export const tollsService = {
           orderBy: [{ isActive: 'desc' }, { updatedAt: 'desc' }]
         });
         if (providerAccount) {
+          const syncMessage = buildSyncSummaryMessage({
+            scrapedCount: Number(syncSummary?.scrapedCount || 0),
+            dedupedInRunCount: Number(syncSummary?.dedupedInRunCount || 0),
+            duplicateExistingCount: Number(syncSummary?.duplicateExistingCount || 0),
+            importedCount
+          });
           await prisma.tollProviderAccount.update({
             where: { id: providerAccount.id },
             data: {
               lastSyncAt: new Date(),
               lastSyncStatus: 'SYNC_OK',
-              lastSyncMessage: `Imported ${importedCount} | Auto-matched ${autoMatchedCount} | Suggested ${suggestedCount} | Pending review ${pendingReviewCount}`
+              lastSyncMessage: `${syncMessage} | Auto-matched ${autoMatchedCount} | Suggested ${suggestedCount} | Pending review ${pendingReviewCount}`
             }
           });
         }
@@ -1691,6 +1701,8 @@ export const tollsService = {
           tenantId,
           ok: true,
           createdCount: importedCount,
+          scrapedCount: Number(syncSummary?.scrapedCount || 0),
+          duplicateExistingCount: Number(syncSummary?.duplicateExistingCount || 0),
           autoMatched: autoMatchedCount,
           suggested: suggestedCount,
           pendingReviewCount
