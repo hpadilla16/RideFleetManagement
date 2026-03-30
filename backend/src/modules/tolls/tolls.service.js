@@ -497,20 +497,8 @@ async function getTenantTollsState(scope = {}) {
 }
 
 async function listTenantVehiclesForMatch(scope = {}, transaction = null) {
-  const where = tenantWhereForScope(scope);
-  if (transaction) {
-    const matches = [];
-    const plate = normalizeNullableToken(transaction.plateRaw || transaction.plateNormalized);
-    const tag = normalizeNullableToken(transaction.tagRaw || transaction.tagNormalized);
-    const sello = normalizeNullableToken(transaction.selloRaw || transaction.selloNormalized);
-    if (plate) matches.push({ plate });
-    if (tag) matches.push({ tollTagNumber: tag });
-    if (sello) matches.push({ tollStickerNumber: sello });
-    if (matches.length) where.OR = matches;
-  }
-
   const rows = await prisma.vehicle.findMany({
-    where,
+    where: tenantWhereForScope(scope),
     select: {
       id: true,
       tenantId: true,
@@ -524,12 +512,25 @@ async function listTenantVehiclesForMatch(scope = {}, transaction = null) {
     }
   });
 
-  return rows.map((row) => ({
+  const normalizedRows = rows.map((row) => ({
     ...row,
     plateNormalized: normalizeNullableToken(row.plate),
     tollTagNumberNormalized: normalizeNullableToken(row.tollTagNumber),
     tollStickerNumberNormalized: normalizeNullableToken(row.tollStickerNumber)
   }));
+
+  if (!transaction) return normalizedRows;
+
+  const plate = normalizeNullableToken(transaction.plateRaw || transaction.plateNormalized);
+  const tag = normalizeNullableToken(transaction.tagRaw || transaction.tagNormalized);
+  const sello = normalizeNullableToken(transaction.selloRaw || transaction.selloNormalized);
+  if (!plate && !tag && !sello) return normalizedRows;
+
+  return normalizedRows.filter((row) => (
+    (plate && row.plateNormalized && row.plateNormalized === plate)
+    || (tag && row.tollTagNumberNormalized && row.tollTagNumberNormalized === tag)
+    || (sello && row.tollStickerNumberNormalized && row.tollStickerNumberNormalized === sello)
+  ));
 }
 
 async function listReservationCandidates(scope = {}, vehicleIds = [], transactionAt = null) {
