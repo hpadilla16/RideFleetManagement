@@ -103,10 +103,16 @@ function buildChargeRows(reservationId, charges = []) {
   }));
 }
 
+function isSecurityDepositCharge(row = {}) {
+  const source = String(row?.source || '').trim().toUpperCase();
+  const name = String(row?.name || '').trim().toUpperCase();
+  return source === 'SECURITY_DEPOSIT' || name === 'SECURITY DEPOSIT';
+}
+
 function summarizeChargeTotals(charges = []) {
   const rows = Array.isArray(charges) ? charges : [];
   const subtotal = Number(rows
-    .filter((r) => String(r?.chargeType || '').toUpperCase() !== 'TAX')
+    .filter((r) => String(r?.chargeType || '').toUpperCase() !== 'TAX' && !isSecurityDepositCharge(r))
     .reduce((sum, r) => sum + toNumber(r?.total), 0)
     .toFixed(2));
   const taxes = Number(rows

@@ -270,10 +270,16 @@ function structuredReservationChargeRows(reservation) {
   }));
 }
 
+function isSecurityDepositCharge(row = {}) {
+  const source = String(row?.source || '').trim().toUpperCase();
+  const name = String(row?.name || '').trim().toUpperCase();
+  return source === 'SECURITY_DEPOSIT' || name === 'SECURITY DEPOSIT';
+}
+
 function structuredReservationTotals(rows = []) {
   const normalized = Array.isArray(rows) ? rows : [];
   const subtotal = Number(normalized
-    .filter((row) => String(row?.chargeType || '').toUpperCase() !== 'TAX')
+    .filter((row) => String(row?.chargeType || '').toUpperCase() !== 'TAX' && !isSecurityDepositCharge(row))
     .reduce((sum, row) => sum + Number(row?.total || 0), 0)
     .toFixed(2));
   const taxes = Number(normalized
@@ -856,15 +862,14 @@ export const rentalAgreementsService = {
         if (incomingRows && incomingRows.length) {
           const normalizedRows = incomingRows.map((r) => ({
             name: String(r?.name || 'Line Item'),
+            source: r?.source || null,
             chargeType: String(r?.chargeType || 'UNIT').toUpperCase(),
             quantity: Number(r?.quantity || 1),
             rate: Number(r?.rate || 0),
             total: Number(r?.total != null ? r.total : (Number(r?.quantity || 1) * Number(r?.rate || 0))),
             taxable: !!r?.taxable,
           }));
-          const subtotal = Number(normalizedRows.filter((r) => r.chargeType !== 'TAX').reduce((s, r) => s + Number(r.total || 0), 0).toFixed(2));
-          const taxes = Number(normalizedRows.filter((r) => r.chargeType === 'TAX').reduce((s, r) => s + Number(r.total || 0), 0).toFixed(2));
-          const total = Number(normalizedRows.reduce((s, r) => s + Number(r.total || 0), 0).toFixed(2));
+          const { subtotal, taxes, total } = structuredReservationTotals(normalizedRows);
 
           await prisma.rentalAgreementCharge.deleteMany({ where: { rentalAgreementId: existing.id } });
           await prisma.rentalAgreementCharge.createMany({
@@ -878,7 +883,8 @@ export const rentalAgreementsService = {
               total: r.total,
               taxable: r.taxable,
               selected: true,
-              sortOrder: idx
+              sortOrder: idx,
+              source: r.source || null
             }))
           });
 
@@ -925,7 +931,7 @@ export const rentalAgreementsService = {
         const depositAmount = depositMeta.requireDeposit ? Number(depositMeta.depositAmountDue || 0) : 0;
         if (depositAmount > 0) {
           feesTotal += depositAmount;
-          chargeRows.push({ rentalAgreementId: existing.id, name: 'Deposit Due', chargeType: 'DEPOSIT', quantity: 1, rate: depositAmount, total: depositAmount, taxable: false, selected: true, sortOrder: chargeRows.length });
+          chargeRows.push({ rentalAgreementId: existing.id, name: 'Deposit Due', chargeType: 'DEPOSIT', quantity: 1, rate: depositAmount, total: depositAmount, taxable: false, selected: true, sortOrder: chargeRows.length, source: 'DEPOSIT_DUE' });
         }
 
         let securityDepositAmount = 0;
@@ -940,8 +946,7 @@ export const rentalAgreementsService = {
           } catch {}
         }
         if (securityDepositAmount > 0) {
-          feesTotal += securityDepositAmount;
-          chargeRows.push({ rentalAgreementId: existing.id, name: 'Security Deposit', chargeType: 'DEPOSIT', quantity: 1, rate: securityDepositAmount, total: securityDepositAmount, taxable: false, selected: true, sortOrder: chargeRows.length });
+          chargeRows.push({ rentalAgreementId: existing.id, name: 'Security Deposit', chargeType: 'DEPOSIT', quantity: 1, rate: securityDepositAmount, total: securityDepositAmount, taxable: false, selected: true, sortOrder: chargeRows.length, source: 'SECURITY_DEPOSIT' });
         }
 
         const discountTotal = discounts.reduce((sum, d) => {
@@ -1048,14 +1053,14 @@ export const rentalAgreementsService = {
       const normalizedRows = incomingRows.map((r) => ({
         name: String(r?.name || 'Line Item'),
         code: r?.code || null,
+        source: r?.source || null,
         chargeType: String(r?.chargeType || 'UNIT').toUpperCase(),
         quantity: Number(r?.quantity || 1),
         rate: Number(r?.rate || 0),
         total: Number(r?.total != null ? r.total : (Number(r?.quantity || 1) * Number(r?.rate || 0))),
         taxable: !!r?.taxable,
       }));
-      const subtotal = Number(normalizedRows.filter((r) => r.chargeType !== 'TAX').reduce((s, r) => s + Number(r.total || 0), 0).toFixed(2));
-      const taxes = Number(normalizedRows.filter((r) => r.chargeType === 'TAX').reduce((s, r) => s + Number(r.total || 0), 0).toFixed(2));
+      const { subtotal, taxes, total } = structuredReservationTotals(normalizedRows);
 
       await prisma.rentalAgreementCharge.createMany({
         data: normalizedRows.map((r, idx) => ({
@@ -1068,7 +1073,8 @@ export const rentalAgreementsService = {
           total: r.total,
           taxable: r.taxable,
           selected: true,
-          sortOrder: idx
+          sortOrder: idx,
+          source: r.source || null
         }))
       });
 
@@ -1090,7 +1096,6 @@ export const rentalAgreementsService = {
         }
       }
 
-      const total = Number(normalizedRows.reduce((s, r) => s + Number(r.total || 0), 0).toFixed(2));
       await prisma.rentalAgreement.update({
         where: { id: agreement.id },
         data: {
@@ -1212,7 +1217,8 @@ export const rentalAgreementsService = {
         total: depositAmount,
         taxable: false,
         selected: true,
-        sortOrder: chargeRows.length
+        sortOrder: chargeRows.length,
+        source: 'DEPOSIT_DUE'
       });
     }
 
@@ -1228,7 +1234,6 @@ export const rentalAgreementsService = {
       } catch {}
     }
     if (securityDepositAmount > 0) {
-      feesTotal += securityDepositAmount;
       chargeRows.push({
         rentalAgreementId: agreement.id,
         name: 'Security Deposit',
@@ -1238,7 +1243,8 @@ export const rentalAgreementsService = {
         total: securityDepositAmount,
         taxable: false,
         selected: true,
-        sortOrder: chargeRows.length
+        sortOrder: chargeRows.length,
+        source: 'SECURITY_DEPOSIT'
       });
     }
 
@@ -1639,7 +1645,7 @@ export const rentalAgreementsService = {
     const charges = await prisma.rentalAgreementCharge.findMany({ where: { rentalAgreementId: id, selected: true } });
 
     const subtotal = charges
-      .filter((c) => c.chargeType !== 'TAX')
+      .filter((c) => c.chargeType !== 'TAX' && !isSecurityDepositCharge(c))
       .reduce((sum, c) => sum + Number(c.total), 0);
     const taxes = charges
       .filter((c) => c.chargeType === 'TAX')

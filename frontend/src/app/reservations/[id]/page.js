@@ -58,9 +58,17 @@ function structuredDisplayChargeRows(pricingRows = []) {
       unit: Number(r?.quantity || 1),
       rate: Number(r?.rate || 0),
       total: Number(r?.total || 0),
-      taxable: !!r?.taxable
+      taxable: !!r?.taxable,
+      source
     };
   });
+}
+
+function isSecurityDepositDisplayRow(row = {}) {
+  const source = String(row?.source || '').trim().toUpperCase();
+  const id = String(row?.id || '').trim().toLowerCase();
+  const name = String(row?.name || '').trim().toUpperCase();
+  return source === 'SECURITY_DEPOSIT' || id === 'security-deposit' || name === 'SECURITY DEPOSIT';
 }
 
 
@@ -1334,7 +1342,14 @@ token
     return rows;
   }, [chargeEdit, pricing?.charges, breakdown, selectedServiceRows, selectedFeeRows, serviceOptions, feeOptions, chargeModel?.taxRate, depositOverrides.depositDue, depositOverrides.securityDeposit]);
 
-  const displayTotal = useMemo(() => toMoneyNum(displayChargeRows.reduce((s, r) => s + toMoneyNum(r?.total), 0)), [displayChargeRows]);
+  const securityDepositDisplayTotal = useMemo(
+    () => toMoneyNum(displayChargeRows.filter((r) => isSecurityDepositDisplayRow(r)).reduce((s, r) => s + toMoneyNum(r?.total), 0)),
+    [displayChargeRows]
+  );
+  const displayTotal = useMemo(
+    () => toMoneyNum(displayChargeRows.filter((r) => !isSecurityDepositDisplayRow(r)).reduce((s, r) => s + toMoneyNum(r?.total), 0)),
+    [displayChargeRows]
+  );
   const effectiveChargeTotal = displayTotal;
   const unpaidBalance = useMemo(
     () => Number((Math.max(0, toMoneyNum(displayTotal) - toMoneyNum(paidTotal))).toFixed(2)),
@@ -1976,6 +1991,17 @@ token
                       <td colSpan={3}><strong>Total</strong></td>
                       <td style={{ whiteSpace: 'nowrap', textAlign: 'right' }}><strong>{money(displayTotal)}</strong></td>
                     </tr>
+                    {securityDepositDisplayTotal > 0 ? (
+                      <tr>
+                        <td colSpan={3}><strong>Security Deposit Hold</strong></td>
+                        <td style={{ whiteSpace: 'nowrap', textAlign: 'right' }}>
+                          <strong>{money(securityDepositDisplayTotal)}</strong>
+                          <div className="label" style={{ textTransform: 'none', letterSpacing: 0 }}>
+                            {row?.rentalAgreement?.securityDepositCaptured ? 'Authorized in payments' : 'Pending authorization'}
+                          </div>
+                        </td>
+                      </tr>
+                    ) : null}
                     <tr>
                       <td colSpan={3}><strong>Unpaid Balance</strong></td>
                       <td style={{ whiteSpace: 'nowrap', textAlign: 'right' }}><strong>{money(unpaidBalance)}</strong></td>

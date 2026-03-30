@@ -39,6 +39,19 @@ function deriveTotalFromReservationRow(row) {
   const computed = Number((base + fee + tax).toFixed(2));
   return computed > 0 ? computed : 0;
 }
+
+function deriveSecurityDepositHold(row) {
+  const agreement = row?.rentalAgreement || null;
+  const amount = Number(agreement?.securityDepositAmount || 0);
+  return {
+    amount: Number.isFinite(amount) ? amount : 0,
+    captured: !!agreement?.securityDepositCaptured,
+    capturedAt: agreement?.securityDepositCapturedAt || null,
+    releasedAt: agreement?.securityDepositReleasedAt || null,
+    reference: agreement?.securityDepositReference || ''
+  };
+}
+
 export default function Page() {
   return <AuthGate>{({ token, me, logout }) => <Inner token={token} me={me} logout={logout} />}</AuthGate>;
 }
@@ -80,6 +93,7 @@ function Inner({ token, me, logout }) {
   const unpaid = useMemo(() => Math.max(0, Number((total - paid).toFixed(2))), [total, paid]);
   const paymentCount = payments.length;
   const dueNowLabel = unpaid > 0 ? 'Payment Still Needed' : 'Paid In Full';
+  const securityDepositHold = useMemo(() => deriveSecurityDepositHold(row), [row]);
 
   const addPayment = async () => {
     try {
@@ -138,6 +152,19 @@ function Inner({ token, me, logout }) {
               <span className="label">Payments Logged</span>
               <strong>{paymentCount}</strong>
             </div>
+            <div className="info-tile">
+              <span className="label">Security Deposit Hold</span>
+              <strong>{securityDepositHold.amount > 0 ? `$${securityDepositHold.amount.toFixed(2)}` : '$0.00'}</strong>
+              <span className="ui-muted">
+                {securityDepositHold.releasedAt
+                  ? 'Released'
+                  : securityDepositHold.captured
+                    ? 'Authorized'
+                    : securityDepositHold.amount > 0
+                      ? 'Pending authorization'
+                      : 'Not required'}
+              </span>
+            </div>
           </div>
         </div>
 
@@ -149,6 +176,17 @@ function Inner({ token, me, logout }) {
         <div className="label" style={{ textTransform: 'none', letterSpacing: 0 }}>Total: ${total.toFixed(2)}</div>
         <div className="label" style={{ textTransform: 'none', letterSpacing: 0 }}>Total Payments: ${paid.toFixed(2)}</div>
         <div className="label" style={{ textTransform: 'none', letterSpacing: 0, marginBottom: 10 }}>Unpaid Balance: ${unpaid.toFixed(2)}</div>
+        {securityDepositHold.amount > 0 ? (
+          <div className="surface-note" style={{ marginBottom: 12 }}>
+            <strong>Security Deposit Hold:</strong> ${securityDepositHold.amount.toFixed(2)}{' '}
+            {securityDepositHold.releasedAt
+              ? `released on ${new Date(securityDepositHold.releasedAt).toLocaleString()}`
+              : securityDepositHold.captured
+                ? `authorized${securityDepositHold.capturedAt ? ` on ${new Date(securityDepositHold.capturedAt).toLocaleString()}` : ''}`
+                : 'still pending authorization'}
+            {securityDepositHold.reference ? ` | Ref ${securityDepositHold.reference}` : ''}
+          </div>
+        ) : null}
 
         <div className="grid3" style={{ marginBottom: 10 }}>
           <div className="stack"><label className="label">Amount</label><input type="number" min="0" step="0.01" value={amount} onChange={(e) => setAmount(e.target.value)} /></div>
