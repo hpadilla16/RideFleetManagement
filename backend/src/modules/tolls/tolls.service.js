@@ -317,6 +317,17 @@ function serializeImportRun(row) {
   };
 }
 
+function buildSyncSummaryMessage(summary = {}) {
+  const scrapedCount = Number(summary.scrapedCount || 0);
+  const dedupedInRunCount = Number(summary.dedupedInRunCount || 0);
+  const duplicateExistingCount = Number(summary.duplicateExistingCount || 0);
+  const importedCount = Number(summary.importedCount || 0);
+  if (scrapedCount > 0 || dedupedInRunCount > 0 || duplicateExistingCount > 0) {
+    return `Scraped ${scrapedCount} | Imported ${importedCount} | Existing duplicates ${duplicateExistingCount} | Deduped in run ${dedupedInRunCount}`;
+  }
+  return `Imported ${importedCount}`;
+}
+
 function parseAutoExpresoDateTime(raw) {
   const text = String(raw || '').trim();
   if (!text) throw new Error('AutoExpreso transaction date/time missing');
@@ -1387,6 +1398,7 @@ export const tollsService = {
 
       const rows = [];
       const seenExternalIds = new Set();
+      let dedupedInRunCount = 0;
       let pageNumber = 0;
       while (pageNumber < maxPages) {
         const pageRows = await scrapeAutoExpresoBalanceRows(page);
@@ -1395,7 +1407,11 @@ export const tollsService = {
             const transactionAt = parseAutoExpresoDateTime(raw.datetimeFull);
             const amount = Number(raw.amount);
             const externalId = normalizeToken(`${raw.plateRaw}|${raw.selloRaw}|${transactionAt.toISOString()}|${amount}|${raw.location}`);
-            if (!externalId || seenExternalIds.has(externalId)) continue;
+            if (!externalId) continue;
+            if (seenExternalIds.has(externalId)) {
+              dedupedInRunCount += 1;
+              continue;
+            }
             seenExternalIds.add(externalId);
             rows.push({
               transactionAt: transactionAt.toISOString(),
@@ -1440,7 +1456,13 @@ export const tollsService = {
             metadataJson: JSON.stringify({
               liveSync: true,
               actorUserId: actorUserId || null,
-              note: 'AutoExpreso sync completed with no new rows'
+              note: 'AutoExpreso sync completed with no new rows',
+              autoSync: {
+                scrapedCount: 0,
+                dedupedInRunCount,
+                duplicateExistingCount: 0,
+                importedCount: 0
+              }
             })
           }
         });
@@ -1450,7 +1472,12 @@ export const tollsService = {
           data: {
             lastSyncAt: startedAt,
             lastSyncStatus: 'SYNC_OK',
-            lastSyncMessage: 'AutoExpreso sync completed with no new rows'
+            lastSyncMessage: buildSyncSummaryMessage({
+              scrapedCount: 0,
+              dedupedInRunCount,
+              duplicateExistingCount: 0,
+              importedCount: 0
+            })
           }
         });
 
@@ -1463,7 +1490,11 @@ export const tollsService = {
 
       const created = await this.createManualTransactions(rows, scope, actorUserId, {
         sourceType: 'AUTOEXPRESO_SYNC',
-        providerAccountId: row.id
+        providerAccountId: row.id,
+        importMeta: {
+          scrapedCount: rows.length,
+          dedupedInRunCount
+        }
       });
 
       await prisma.tollProviderAccount.update({
@@ -1471,13 +1502,18 @@ export const tollsService = {
         data: {
           lastSyncAt: new Date(),
           lastSyncStatus: 'SYNC_OK',
-          lastSyncMessage: `Imported ${Array.isArray(created?.created) ? created.created.length : 0} toll rows from AutoExpreso`
+          lastSyncMessage: buildSyncSummaryMessage(created?.summary || {
+            scrapedCount: rows.length,
+            dedupedInRunCount,
+            importedCount: Array.isArray(created?.created) ? created.created.length : 0
+          })
         }
       });
 
       return {
         ok: true,
         createdCount: Array.isArray(created?.created) ? created.created.length : 0,
+        summary: created?.summary || null,
         importRun: created?.importRun || null
       };
     } catch (error) {
@@ -1708,6 +1744,7 @@ export const tollsService = {
     });
 
     const created = [];
+    let duplicateExistingCount = 0;
     const reservationIdsToSync = new Set();
     for (const raw of inputRows) {
       const transactionAt = normalizeDateTime(raw.transactionAt);
@@ -1744,6 +1781,7 @@ export const tollsService = {
           select: { id: true }
         });
         if (existing) {
+          duplicateExistingCount += 1;
           continue;
         }
       }
@@ -1798,6 +1836,13 @@ export const tollsService = {
       await syncReservationTollCharges(reservationId, scope);
     }
 
+    const summary = {
+      scrapedCount: Number(options?.importMeta?.scrapedCount || inputRows.length || 0),
+      dedupedInRunCount: Number(options?.importMeta?.dedupedInRunCount || 0),
+      duplicateExistingCount,
+      importedCount: created.length
+    };
+
     await prisma.tollImportRun.update({
       where: { id: importRun.id },
       data: {
@@ -1805,12 +1850,19 @@ export const tollsService = {
         status: 'COMPLETED',
         importedCount: created.length,
         matchedCount: created.filter((row) => String(row.status || '').toUpperCase() === 'MATCHED').length,
-        reviewCount: created.filter((row) => !!row.needsReview).length
+        reviewCount: created.filter((row) => !!row.needsReview).length,
+        metadataJson: JSON.stringify({
+          ...(options?.importMeta || {}),
+          duplicateExistingCount,
+          importedCount: created.length
+        })
       }
     });
 
     return {
-      created: created.map(serializeTransaction)
+      created: created.map(serializeTransaction),
+      summary,
+      importRun: serializeImportRun(await prisma.tollImportRun.findUnique({ where: { id: importRun.id } }))
     };
   },
 
