@@ -216,35 +216,35 @@ reservationsRouter.get('/:id/available-vehicles', async (req, res, next) => {
     if (!reservation) return res.status(404).json({ error: 'Reservation not found' });
     const tenantScope = reservation?.tenantId ? { tenantId: reservation.tenantId } : scopeFor(req);
 
-    const pickupAt = req.query?.pickupAt ? new Date(String(req.query.pickupAt)) : reservation.pickupAt;
-    const returnAt = req.query?.returnAt ? new Date(String(req.query.returnAt)) : reservation.returnAt;
-
-    const overlaps = await prisma.reservation.findMany({
-      where: {
-        ...(tenantScope.tenantId ? { tenantId: tenantScope.tenantId } : {}),
-        id: { not: reservation.id },
-        vehicleId: { not: null },
-        status: { in: ['NEW', 'CONFIRMED', 'CHECKED_OUT'] },
-        pickupAt: { lt: returnAt },
-        returnAt: { gt: pickupAt }
-      },
-      select: { vehicleId: true }
-    });
-
-    const blockedIds = overlaps.map((x) => x.vehicleId).filter(Boolean);
-    const blockedAvailability = await prisma.vehicleAvailabilityBlock.findMany({
-      where: {
-        ...(tenantScope.tenantId ? { tenantId: tenantScope.tenantId } : {}),
-        vehicleId: { not: null },
-        ...activeVehicleBlockOverlapWhere({ start: pickupAt, end: returnAt })
-      },
-      select: { vehicleId: true }
-    });
-    blockedAvailability.forEach((row) => {
-      if (row?.vehicleId) blockedIds.push(row.vehicleId);
-    });
-
     try {
+      const pickupAt = req.query?.pickupAt ? new Date(String(req.query.pickupAt)) : reservation.pickupAt;
+      const returnAt = req.query?.returnAt ? new Date(String(req.query.returnAt)) : reservation.returnAt;
+
+      const overlaps = await prisma.reservation.findMany({
+        where: {
+          ...(tenantScope.tenantId ? { tenantId: tenantScope.tenantId } : {}),
+          id: { not: reservation.id },
+          vehicleId: { not: null },
+          status: { in: ['NEW', 'CONFIRMED', 'CHECKED_OUT'] },
+          pickupAt: { lt: returnAt },
+          returnAt: { gt: pickupAt }
+        },
+        select: { vehicleId: true }
+      });
+
+      const blockedIds = overlaps.map((x) => x.vehicleId).filter(Boolean);
+      const blockedAvailability = await prisma.vehicleAvailabilityBlock.findMany({
+        where: {
+          ...(tenantScope.tenantId ? { tenantId: tenantScope.tenantId } : {}),
+          vehicleId: { not: null },
+          ...activeVehicleBlockOverlapWhere({ start: pickupAt, end: returnAt })
+        },
+        select: { vehicleId: true }
+      });
+      blockedAvailability.forEach((row) => {
+        if (row?.vehicleId) blockedIds.push(row.vehicleId);
+      });
+
       let vehicles = await prisma.vehicle.findMany({
         where: {
           ...(tenantScope.tenantId ? { tenantId: tenantScope.tenantId } : {}),
