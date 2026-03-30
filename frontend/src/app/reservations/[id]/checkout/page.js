@@ -22,13 +22,22 @@ function Inner({ token, me, logout }) {
   const selectedVehicle = vehicles.find((vehicle) => String(vehicle.id) === String(form.vehicleId)) || null;
 
   const load = async () => {
+    setMsg('');
     const r = await api(`/api/reservations/${id}`, {}, token);
-    const av = await api(`/api/reservations/${id}/available-vehicles`, {}, token);
     setRow(r);
-    setVehicles(av || []);
     setForm((f) => ({ ...f, vehicleId: r?.vehicleId || '', signerName: `${r?.customer?.firstName || ''} ${r?.customer?.lastName || ''}`.trim() }));
+    try {
+      const av = await api(`/api/reservations/${id}/available-vehicles`, {}, token);
+      setVehicles(Array.isArray(av) ? av : []);
+    } catch (e) {
+      setVehicles([]);
+      setMsg(String(e?.message || 'Unable to load available vehicles for this tenant.'));
+    }
   };
-  useEffect(() => { if (id) load(); }, [id, token]);
+  useEffect(() => {
+    if (!id || !token) return;
+    load().catch((e) => setMsg(String(e?.message || 'Unable to load checkout wizard.')));
+  }, [id, token]);
 
   const ensureAgreementId = async () => {
     const out = await api(`/api/reservations/${id}/start-rental`, { method: 'POST', body: JSON.stringify({}) }, token);

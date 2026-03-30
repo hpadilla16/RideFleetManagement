@@ -214,13 +214,14 @@ reservationsRouter.get('/:id/available-vehicles', async (req, res, next) => {
   try {
     const reservation = await reservationsService.getById(req.params.id, scopeFor(req));
     if (!reservation) return res.status(404).json({ error: 'Reservation not found' });
+    const tenantScope = reservation?.tenantId ? { tenantId: reservation.tenantId } : scopeFor(req);
 
     const pickupAt = req.query?.pickupAt ? new Date(String(req.query.pickupAt)) : reservation.pickupAt;
     const returnAt = req.query?.returnAt ? new Date(String(req.query.returnAt)) : reservation.returnAt;
 
     const overlaps = await prisma.reservation.findMany({
       where: {
-        ...(scopeFor(req).tenantId ? { tenantId: scopeFor(req).tenantId } : {}),
+        ...(tenantScope.tenantId ? { tenantId: tenantScope.tenantId } : {}),
         id: { not: reservation.id },
         vehicleId: { not: null },
         status: { in: ['NEW', 'CONFIRMED', 'CHECKED_OUT'] },
@@ -233,7 +234,7 @@ reservationsRouter.get('/:id/available-vehicles', async (req, res, next) => {
     const blockedIds = overlaps.map((x) => x.vehicleId).filter(Boolean);
     const blockedAvailability = await prisma.vehicleAvailabilityBlock.findMany({
       where: {
-        ...(scopeFor(req).tenantId ? { tenantId: scopeFor(req).tenantId } : {}),
+        ...(tenantScope.tenantId ? { tenantId: tenantScope.tenantId } : {}),
         vehicleId: { not: null },
         ...activeVehicleBlockOverlapWhere({ start: pickupAt, end: returnAt })
       },
@@ -245,7 +246,7 @@ reservationsRouter.get('/:id/available-vehicles', async (req, res, next) => {
 
     let vehicles = await prisma.vehicle.findMany({
       where: {
-        ...(scopeFor(req).tenantId ? { tenantId: scopeFor(req).tenantId } : {}),
+        ...(tenantScope.tenantId ? { tenantId: tenantScope.tenantId } : {}),
         OR: [
           reservation.vehicleId ? { id: reservation.vehicleId } : undefined,
           {
@@ -263,7 +264,7 @@ reservationsRouter.get('/:id/available-vehicles', async (req, res, next) => {
     if (!vehicles.length) {
       vehicles = await prisma.vehicle.findMany({
         where: {
-          ...(scopeFor(req).tenantId ? { tenantId: scopeFor(req).tenantId } : {}),
+          ...(tenantScope.tenantId ? { tenantId: tenantScope.tenantId } : {}),
           status: { notIn: ['IN_MAINTENANCE', 'OUT_OF_SERVICE'] },
           ...(reservation.vehicleTypeId ? { vehicleTypeId: reservation.vehicleTypeId } : {}),
           ...(reservation.pickupLocationId ? {
@@ -282,7 +283,7 @@ reservationsRouter.get('/:id/available-vehicles', async (req, res, next) => {
     if (!vehicles.length) {
       vehicles = await prisma.vehicle.findMany({
         where: {
-          ...(scopeFor(req).tenantId ? { tenantId: scopeFor(req).tenantId } : {}),
+          ...(tenantScope.tenantId ? { tenantId: tenantScope.tenantId } : {}),
           status: { notIn: ['IN_MAINTENANCE', 'OUT_OF_SERVICE'] }
         },
         include: { vehicleType: true, homeLocation: true },
