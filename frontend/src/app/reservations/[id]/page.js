@@ -691,6 +691,8 @@ function ReservationDetailInner({ token, me, logout }) {
       statusLabel
     };
   }, [row]);
+  const canMarkDocsReviewed = precheckinStatus.hasSubmitted || precheckinStatus.isChecklistComplete;
+  const readyNeedsOverride = !precheckinStatus.isChecklistComplete;
   const isLoanerWorkflow = String(row?.workflowMode || '').toUpperCase() === 'DEALERSHIP_LOANER';
   const loanerPacketComplete = useMemo(() => {
     return !!(
@@ -1674,11 +1676,25 @@ token
                 <div>{precheckinStatus.missingItems.map((item) => item.label).join(', ')}</div>
               </div>
             ) : null}
+            {!canMarkDocsReviewed ? (
+              <div className="surface-note" style={{ marginBottom: 10 }}>
+                Customer has not submitted the full pre-check-in packet yet. Staff review stays locked until the guest submits their checklist.
+              </div>
+            ) : null}
+            {readyNeedsOverride && !precheckinStatus.isReadyForPickup ? (
+              <div className="surface-note warning" style={{ marginBottom: 10 }}>
+                Marking this reservation ready right now would be an override because required pre-check-in items are still missing.
+              </div>
+            ) : null}
             {canManagePrecheckin ? (
               <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 10 }}>
-                <button type="button" onClick={markPrecheckinReviewed}>Mark Docs Reviewed</button>
+                <button type="button" onClick={markPrecheckinReviewed} disabled={!canMarkDocsReviewed}>
+                  {canMarkDocsReviewed ? 'Mark Docs Reviewed' : 'Awaiting Customer Submission'}
+                </button>
                 {!precheckinStatus.isReadyForPickup ? (
-                  <button type="button" onClick={() => setReadyForPickup(true)}>Mark Ready For Pickup</button>
+                  <button type="button" onClick={() => setReadyForPickup(true)}>
+                    {readyNeedsOverride ? 'Override Ready For Pickup' : 'Mark Ready For Pickup'}
+                  </button>
                 ) : (
                   <button type="button" onClick={() => setReadyForPickup(false)}>Clear Ready For Pickup</button>
                 )}
