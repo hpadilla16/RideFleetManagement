@@ -32,6 +32,15 @@ function dateTimeLabel(value) {
   return Number.isNaN(date.getTime()) ? String(value) : date.toLocaleString();
 }
 
+function importRunDiagnostics(run) {
+  const autoSync = run?.metadata?.autoSync || {};
+  const scrapedCount = Number(autoSync.scrapedCount || run?.metadata?.scrapedCount || 0);
+  const duplicateExistingCount = Number(autoSync.duplicateExistingCount || run?.metadata?.duplicateExistingCount || 0);
+  const dedupedInRunCount = Number(autoSync.dedupedInRunCount || run?.metadata?.dedupedInRunCount || 0);
+  if (!scrapedCount && !duplicateExistingCount && !dedupedInRunCount) return '';
+  return `Scraped ${scrapedCount} | Existing duplicates ${duplicateExistingCount} | Deduped in run ${dedupedInRunCount}`;
+}
+
 function normalizeHeader(value) {
   return String(value || '').trim().toLowerCase().replace(/[^a-z0-9]+/g, '');
 }
@@ -690,7 +699,12 @@ function TollsInner({ token, me, logout }) {
                   <tr key={run.id}>
                     <td>{new Date(run.startedAt).toLocaleString()}</td>
                     <td>{run.sourceType || '-'}</td>
-                    <td>{run.status || '-'}</td>
+                    <td>
+                      <div>{run.status || '-'}</div>
+                      {importRunDiagnostics(run) ? (
+                        <div className="label" style={{ marginTop: '0.25rem' }}>{importRunDiagnostics(run)}</div>
+                      ) : null}
+                    </td>
                     <td>{run.importedCount}</td>
                     <td>{run.matchedCount}</td>
                     <td>{run.reviewCount}</td>
