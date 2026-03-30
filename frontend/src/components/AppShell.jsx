@@ -53,8 +53,8 @@ export function AppShell({ me, logout, children }) {
   const [failedUnlockAttempts, setFailedUnlockAttempts] = useState(0);
   const [now, setNow] = useState(new Date());
   const [canReturnSuper, setCanReturnSuper] = useState(false);
-  const [carSharingVisible, setCarSharingVisible] = useState(() => String(me?.role || '').toUpperCase() === 'SUPER_ADMIN');
-  const [dealershipLoanerVisible, setDealershipLoanerVisible] = useState(() => String(me?.role || '').toUpperCase() === 'SUPER_ADMIN');
+  const [carSharingVisible, setCarSharingVisible] = useState(() => isModuleEnabled(me, 'carSharing'));
+  const [dealershipLoanerVisible, setDealershipLoanerVisible] = useState(() => isModuleEnabled(me, 'loaner'));
 
   const idleTimerRef = useRef(null);
   const role = String(me?.role || '').toUpperCase();
@@ -114,50 +114,9 @@ export function AppShell({ me, logout, children }) {
   }, [darkMode]);
 
   useEffect(() => {
-    const currentRole = String(me?.role || '').toUpperCase();
-    if (currentRole === 'SUPER_ADMIN') {
-      setCarSharingVisible(true);
-      setDealershipLoanerVisible(true);
-      return;
-    }
-    if (!['ADMIN', 'OPS', 'AGENT'].includes(currentRole)) {
-      setCarSharingVisible(false);
-      setDealershipLoanerVisible(false);
-      return;
-    }
-
-    (async () => {
-      try {
-        const token = readStoredToken();
-        if (!token) return;
-        const [carSharingRes, loanerRes] = await Promise.all([
-          currentRole === 'AGENT'
-            ? Promise.resolve(null)
-            : fetch(`${API_BASE}/api/car-sharing/config`, {
-                headers: { Authorization: `Bearer ${token}` }
-              }),
-          fetch(`${API_BASE}/api/dealership-loaner/config`, {
-            headers: { Authorization: `Bearer ${token}` }
-          })
-        ]);
-        if (carSharingRes?.ok) {
-          const json = await carSharingRes.json();
-          setCarSharingVisible(!!json?.enabled);
-        } else {
-          setCarSharingVisible(false);
-        }
-        if (loanerRes.ok) {
-          const json = await loanerRes.json();
-          setDealershipLoanerVisible(!!json?.enabled);
-        } else {
-          setDealershipLoanerVisible(false);
-        }
-      } catch {
-        setCarSharingVisible(false);
-        setDealershipLoanerVisible(false);
-      }
-    })();
-  }, [me?.role]);
+    setCarSharingVisible(isModuleEnabled(me, 'carSharing'));
+    setDealershipLoanerVisible(isModuleEnabled(me, 'loaner'));
+  }, [me]);
 
   useEffect(() => {
     if (!locked) return;
