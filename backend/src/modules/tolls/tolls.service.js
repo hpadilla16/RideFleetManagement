@@ -167,6 +167,19 @@ async function scrapeAutoExpresoBalanceRows(page) {
       });
     };
 
+    const bodyText = String(document.body?.innerText || '');
+    const recordRegex = /(?:VEH[IÍ]CULO:\s*([^\n\r]+)\s*[\r\n]+)?Tablilla:\s*([A-Z0-9-]+)\s*[\r\n]+Sello:\s*([A-Z0-9-]+)\s*[\r\n]+\$\s*(-?\d[\d,]*\.?\d*)\s*[\r\n]+Peaje:\s*([^\n\r]+)\s*[\r\n]+(\d{1,2}\/\d{1,2}\/\d{4}\s+\d{1,2}:\d{2}:\d{2}\s*[AP]M)/gi;
+    for (const match of bodyText.matchAll(recordRegex)) {
+      addCandidate({
+        plateRaw: match[2] || '',
+        selloRaw: match[3] || '',
+        amountRaw: `$${match[4] || ''}`,
+        location: match[5] || '',
+        datetimeFull: match[6] || '',
+        rawText: match[0] || ''
+      });
+    }
+
     const blocks = Array.from(document.querySelectorAll('div, li, article, section'));
 
     for (const node of blocks) {
@@ -193,7 +206,6 @@ async function scrapeAutoExpresoBalanceRows(page) {
       });
     }
 
-    const bodyText = String(document.body?.innerText || '');
     const chunks = bodyText.split(/(?=Tablilla:\s*[A-Z0-9-]+)/i);
     for (const chunk of chunks) {
       const rawText = String(chunk || '').trim();
@@ -203,7 +215,13 @@ async function scrapeAutoExpresoBalanceRows(page) {
       const selloMatch = rawText.match(/Sello:\s*([A-Z0-9-]+)/i);
       const peajeMatch = rawText.match(/Peaje:\s*([^\n\r]+)/i);
       const dateMatch = rawText.match(/\d{1,2}\/\d{1,2}\/\d{4}\s+\d{1,2}:\d{2}:\d{2}\s*[AP]M/i);
-      const amountMatch = rawText.match(/\$\s*-?\s*\d[\d,]*\.?\d*/i);
+      const amountLines = String(rawText)
+        .split(/\r?\n/)
+        .map((line) => line.trim())
+        .filter((line) => /^\$\s*-?\s*\d[\d,]*\.?\d*$/.test(line));
+      const amountMatch = amountLines.length
+        ? [amountLines[amountLines.length - 1]]
+        : rawText.match(/\$\s*-?\s*\d[\d,]*\.?\d*/i);
       addCandidate({
         plateRaw: plateMatch ? plateMatch[1] : '',
         selloRaw: selloMatch ? selloMatch[1] : '',
@@ -1421,6 +1439,7 @@ export const tollsService = {
           try {
             const transactionAt = parseAutoExpresoDateTime(raw.datetimeFull);
             const amount = Number(raw.amount);
+            if (!Number.isFinite(amount) || amount <= 0 || amount > 100) continue;
             const externalId = normalizeToken(`${raw.plateRaw}|${raw.selloRaw}|${transactionAt.toISOString()}|${amount}|${raw.location}`);
             if (!externalId) continue;
             if (seenExternalIds.has(externalId)) {
