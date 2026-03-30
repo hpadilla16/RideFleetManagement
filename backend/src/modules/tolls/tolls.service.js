@@ -2053,19 +2053,21 @@ export const tollsService = {
         });
       }
 
-      await tx.auditLog.create({
-        data: {
-          tenantId: transaction.tenantId,
-          reservationId: transaction.reservationId || null,
-          actorUserId: actorUserId || null,
-          action: 'UPDATE',
-          metadata: JSON.stringify({
-            tollReviewAction: action,
-            tollTransactionId: transaction.id,
-            note: note || null
-          })
-        }
-      });
+      if (transaction.reservationId) {
+        await tx.auditLog.create({
+          data: {
+            tenantId: transaction.tenantId,
+            reservationId: transaction.reservationId,
+            actorUserId: actorUserId || null,
+            action: 'UPDATE',
+            metadata: JSON.stringify({
+              tollReviewAction: action,
+              tollTransactionId: transaction.id,
+              note: note || null
+            })
+          }
+        });
+      }
     });
 
     let issueIncident = null;
