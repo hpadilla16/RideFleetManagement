@@ -244,44 +244,60 @@ reservationsRouter.get('/:id/available-vehicles', async (req, res, next) => {
       if (row?.vehicleId) blockedIds.push(row.vehicleId);
     });
 
-    let vehicles = await prisma.vehicle.findMany({
-      where: {
-        ...(tenantScope.tenantId ? { tenantId: tenantScope.tenantId } : {}),
-        OR: [
-          reservation.vehicleId ? { id: reservation.vehicleId } : undefined,
-          {
-            status: 'AVAILABLE',
-            id: { notIn: blockedIds.length ? blockedIds : ['__none__'] }
-          }
-        ].filter(Boolean)
-      },
-      include: { vehicleType: true, homeLocation: true },
-      orderBy: [{ make: 'asc' }, { model: 'asc' }, { internalNumber: 'asc' }]
-    });
-
-    // Fallback for ops checkout flow: if strict availability returns nothing,
-    // still show assignable fleet (except hard-unavailable statuses) so user can proceed manually.
-    if (!vehicles.length) {
-      vehicles = await prisma.vehicle.findMany({
+    try {
+      let vehicles = await prisma.vehicle.findMany({
         where: {
           ...(tenantScope.tenantId ? { tenantId: tenantScope.tenantId } : {}),
-          status: { notIn: ['IN_MAINTENANCE', 'OUT_OF_SERVICE'] },
-          ...(reservation.vehicleTypeId ? { vehicleTypeId: reservation.vehicleTypeId } : {}),
-          ...(reservation.pickupLocationId ? {
-            OR: [
-              { homeLocationId: reservation.pickupLocationId },
-              { homeLocationId: null }
-            ]
-          } : {})
+          OR: [
+            reservation.vehicleId ? { id: reservation.vehicleId } : undefined,
+            {
+              status: 'AVAILABLE',
+              id: { notIn: blockedIds.length ? blockedIds : ['__none__'] }
+            }
+          ].filter(Boolean)
         },
         include: { vehicleType: true, homeLocation: true },
         orderBy: [{ make: 'asc' }, { model: 'asc' }, { internalNumber: 'asc' }]
       });
-    }
 
-    // Last-chance fallback: allow any non-maintenance vehicle even if type/location mismatched.
-    if (!vehicles.length) {
-      vehicles = await prisma.vehicle.findMany({
+      if (!vehicles.length) {
+        vehicles = await prisma.vehicle.findMany({
+          where: {
+            ...(tenantScope.tenantId ? { tenantId: tenantScope.tenantId } : {}),
+            status: { notIn: ['IN_MAINTENANCE', 'OUT_OF_SERVICE'] },
+            ...(reservation.vehicleTypeId ? { vehicleTypeId: reservation.vehicleTypeId } : {}),
+            ...(reservation.pickupLocationId ? {
+              OR: [
+                { homeLocationId: reservation.pickupLocationId },
+                { homeLocationId: null }
+              ]
+            } : {})
+          },
+          include: { vehicleType: true, homeLocation: true },
+          orderBy: [{ make: 'asc' }, { model: 'asc' }, { internalNumber: 'asc' }]
+        });
+      }
+
+      if (!vehicles.length) {
+        vehicles = await prisma.vehicle.findMany({
+          where: {
+            ...(tenantScope.tenantId ? { tenantId: tenantScope.tenantId } : {}),
+            status: { notIn: ['IN_MAINTENANCE', 'OUT_OF_SERVICE'] }
+          },
+          include: { vehicleType: true, homeLocation: true },
+          orderBy: [{ make: 'asc' }, { model: 'asc' }, { internalNumber: 'asc' }]
+        });
+      }
+
+      return res.json(vehicles);
+    } catch (error) {
+      console.error('[reservations] available-vehicles fallback activated', {
+        reservationId: reservation.id,
+        tenantId: tenantScope.tenantId || null,
+        error: String(error?.message || error)
+      });
+
+      const fallbackVehicles = await prisma.vehicle.findMany({
         where: {
           ...(tenantScope.tenantId ? { tenantId: tenantScope.tenantId } : {}),
           status: { notIn: ['IN_MAINTENANCE', 'OUT_OF_SERVICE'] }
@@ -289,9 +305,8 @@ reservationsRouter.get('/:id/available-vehicles', async (req, res, next) => {
         include: { vehicleType: true, homeLocation: true },
         orderBy: [{ make: 'asc' }, { model: 'asc' }, { internalNumber: 'asc' }]
       });
+      return res.json(fallbackVehicles);
     }
-
-    res.json(vehicles);
   } catch (e) {
     next(e);
   }
