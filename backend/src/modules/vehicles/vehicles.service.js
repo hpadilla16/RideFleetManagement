@@ -1,5 +1,6 @@
 import { prisma } from '../../lib/prisma.js';
 import { normalizeVehicleBlockType } from './vehicle-blocks.js';
+import { assertTenantVehicleCapacity } from '../../lib/tenant-plan-limits.js';
 
 function norm(v) {
   return String(v || '').trim();
@@ -168,10 +169,12 @@ export const vehiclesService = {
     };
   },
 
-  create(data, scope = {}) {
+  async create(data, scope = {}) {
+    const tenantId = scope?.allowCrossTenant ? (data.tenantId || null) : (scope?.tenantId || data.tenantId || null);
+    await assertTenantVehicleCapacity(tenantId, { vehicleDelta: 1 });
     return prisma.vehicle.create({
       data: {
-        tenantId: scope?.allowCrossTenant ? (data.tenantId || null) : (scope?.tenantId || data.tenantId || null),
+        tenantId,
         internalNumber: data.internalNumber,
         vin: data.vin ?? null,
         plate: data.plate ?? null,
@@ -435,6 +438,8 @@ export const vehiclesService = {
     if (!validRows.length) {
       return { created: 0, skipped: validation.found, validation };
     }
+
+    await assertTenantVehicleCapacity(scope?.tenantId || null, { vehicleDelta: validRows.length });
 
     for (const r of validRows) {
       await prisma.vehicle.create({

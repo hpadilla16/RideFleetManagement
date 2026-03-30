@@ -11,6 +11,10 @@ function vehicleDuplicateMessage(error) {
   return 'A vehicle with that internal number already exists in this tenant';
 }
 
+function isTenantLimitError(error) {
+  return /allows up to .*vehicles|adding more cars/i.test(String(error?.message || ''));
+}
+
 function scopeFor(req) {
   if (isSuperAdmin(req.user)) return req.query?.tenantId ? { allowCrossTenant: true, tenantId: String(req.query.tenantId) } : { allowCrossTenant: true };
   return { tenantId: req.user?.tenantId || null, allowCrossTenant: false };
@@ -35,6 +39,9 @@ vehiclesRouter.post('/', async (req, res, next) => {
     const row = await vehiclesService.create(req.body, scopeFor(req));
     res.status(201).json(row);
   } catch (e) {
+    if (isTenantLimitError(e)) {
+      return res.status(400).json({ error: e.message });
+    }
     if (e?.code === 'P2002') {
       return res.status(409).json({ error: vehicleDuplicateMessage(e) });
     }
@@ -54,6 +61,9 @@ vehiclesRouter.post('/bulk/import', async (req, res, next) => {
     const out = await vehiclesService.importBulk(rows, scopeFor(req));
     res.json(out);
   } catch (e) {
+    if (isTenantLimitError(e)) {
+      return res.status(400).json({ error: e.message });
+    }
     if (e?.code === 'P2002') {
       return res.status(409).json({ error: 'One or more vehicles already exist in this tenant by unit ID, plate, or VIN. Re-run validation and refresh the inventory list.' });
     }

@@ -1,6 +1,7 @@
 import bcrypt from 'bcryptjs';
 import { prisma } from '../../lib/prisma.js';
 import { sendEmail } from '../../lib/mailer.js';
+import { assertTenantUserCapacity } from '../../lib/tenant-plan-limits.js';
 
 const SALT_ROUNDS = 10;
 
@@ -135,6 +136,14 @@ function canTenantAdminManageRecord(scope = {}, target = {}) {
   return target?.createdByUserId === actorUserId;
 }
 
+function countsAsInternalUser(user = {}) {
+  return !user?.hostProfile && !!user?.isActive && ['ADMIN', 'OPS', 'AGENT'].includes(String(user?.role || '').toUpperCase());
+}
+
+function countsAsInternalAdmin(user = {}) {
+  return countsAsInternalUser(user) && String(user?.role || '').toUpperCase() === 'ADMIN';
+}
+
 export const peopleService = {
   async listPeople(scope = {}) {
     const where = scope?.tenantId ? { tenantId: scope.tenantId } : undefined;
@@ -194,6 +203,13 @@ export const peopleService = {
     if (!fullName) throw new Error('fullName or displayName is required');
     if (enableLogin && !email) throw new Error('email is required when login is enabled');
     if ((personType === 'ADMIN' || personType === 'EMPLOYEE') && !email) throw new Error('email is required');
+
+    if (personType === 'ADMIN' || personType === 'EMPLOYEE') {
+      await assertTenantUserCapacity(tenantId, {
+        userDelta: 1,
+        adminDelta: personType === 'ADMIN' ? 1 : 0
+      });
+    }
 
     let user = null;
     let tempPassword = null;
@@ -339,6 +355,22 @@ export const peopleService = {
         userPatch.role = allowedRoleForPayload(payload.personType || 'EMPLOYEE', payload.role || user.role);
       } else if (payload.role) {
         userPatch.role = allowedRoleForPayload('HOST', payload.role);
+      }
+
+      const currentUsageShape = {
+        hostProfile: user.hostProfile,
+        isActive: user.isActive,
+        role: user.role
+      };
+      const nextUsageShape = {
+        hostProfile: user.hostProfile,
+        isActive: userPatch.isActive,
+        role: userPatch.role || user.role
+      };
+      const userDelta = (countsAsInternalUser(nextUsageShape) ? 1 : 0) - (countsAsInternalUser(currentUsageShape) ? 1 : 0);
+      const adminDelta = (countsAsInternalAdmin(nextUsageShape) ? 1 : 0) - (countsAsInternalAdmin(currentUsageShape) ? 1 : 0);
+      if (userDelta > 0 || adminDelta > 0) {
+        await assertTenantUserCapacity(nextTenantId, { userDelta, adminDelta });
       }
 
       let hostPatch = null;

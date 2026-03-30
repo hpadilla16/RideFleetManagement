@@ -1,6 +1,13 @@
 import bcrypt from 'bcryptjs';
 import { prisma } from '../../lib/prisma.js';
 import { authService } from '../auth/auth.service.js';
+import {
+  assertTenantUserCapacity,
+  getTenantPlanCatalog,
+  getTenantPlanUsage,
+  resolveTenantPlanConfig,
+  saveTenantPlanCatalog
+} from '../../lib/tenant-plan-limits.js';
 
 const SALT_ROUNDS = 10;
 
@@ -25,21 +32,52 @@ function mapTenantWriteError(error, fallback = 'Unable to save tenant changes') 
 }
 
 export const tenantsService = {
-  list() {
-    return prisma.tenant.findMany({
-      orderBy: { createdAt: 'desc' },
-      include: {
-        _count: {
-          select: {
-            users: true,
-            locations: true,
-            customers: true,
-            vehicles: true,
-            reservations: true
+  async list() {
+    const [tenants, catalog] = await Promise.all([
+      prisma.tenant.findMany({
+        orderBy: { createdAt: 'desc' },
+        include: {
+          _count: {
+            select: {
+              users: true,
+              locations: true,
+              customers: true,
+              vehicles: true,
+              reservations: true
+            }
           }
         }
-      }
+      }),
+      getTenantPlanCatalog()
+    ]);
+
+    const usageEntries = await Promise.all(
+      tenants.map(async (tenant) => [tenant.id, await getTenantPlanUsage(tenant.id)]),
+    );
+    const usageByTenantId = new Map(usageEntries);
+
+    return tenants.map((tenant) => {
+      const planConfig = resolveTenantPlanConfig(tenant.plan, catalog);
+      const planUsage = usageByTenantId.get(tenant.id) || { admins: 0, users: 0, vehicles: 0 };
+      return {
+        ...tenant,
+        planConfig,
+        planUsage,
+        planStatus: {
+          overAdmins: planConfig.maxAdmins != null && planUsage.admins > planConfig.maxAdmins,
+          overUsers: planConfig.maxUsers != null && planUsage.users > planConfig.maxUsers,
+          overVehicles: planConfig.maxVehicles != null && planUsage.vehicles > planConfig.maxVehicles
+        }
+      };
     });
+  },
+
+  getPlanCatalog() {
+    return getTenantPlanCatalog();
+  },
+
+  savePlanCatalog(plans = []) {
+    return saveTenantPlanCatalog(plans);
   },
 
   async createTenant(data = {}) {
@@ -85,6 +123,8 @@ export const tenantsService = {
     const fullName = String(payload.fullName || '').trim();
     const password = String(payload.password || 'TempPass123!');
     if (!email || !fullName) throw new Error('email and fullName are required');
+
+    await assertTenantUserCapacity(tenantId, { userDelta: 1, adminDelta: 1 });
 
     const passwordHash = await bcrypt.hash(password, SALT_ROUNDS);
     let user;

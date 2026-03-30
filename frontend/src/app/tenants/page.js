@@ -7,6 +7,11 @@ import { api, TOKEN_KEY, USER_KEY } from '../../lib/client';
 
 const EMPTY_TENANT = { name: '', slug: '', status: 'ACTIVE', plan: 'BETA', carSharingEnabled: false, dealershipLoanerEnabled: false, tollsEnabled: false };
 const EMPTY_ADMIN = { email: '', fullName: '', password: 'TempPass123!' };
+const EMPTY_PLAN = { code: '', name: '', maxAdmins: '', maxUsers: '', maxVehicles: '', isActive: true };
+
+function limitLabel(value) {
+  return value == null || value === '' ? 'Unlimited' : String(value);
+}
 
 export default function TenantsPage() {
   return <AuthGate>{({ token, me, logout }) => <Inner token={token} me={me} logout={logout} />}</AuthGate>;
@@ -15,6 +20,7 @@ export default function TenantsPage() {
 function Inner({ token, me, logout }) {
   const [msg, setMsg] = useState('');
   const [rows, setRows] = useState([]);
+  const [planCatalog, setPlanCatalog] = useState([]);
   const [tenantForm, setTenantForm] = useState(EMPTY_TENANT);
   const [adminForm, setAdminForm] = useState(EMPTY_ADMIN);
   const [activeTenantId, setActiveTenantId] = useState('');
@@ -29,11 +35,16 @@ function Inner({ token, me, logout }) {
   const loanerTenants = rows.filter((row) => row.dealershipLoanerEnabled).length;
   const tollTenants = rows.filter((row) => row.tollsEnabled).length;
   const enterpriseTenants = rows.filter((row) => row.plan === 'ENTERPRISE').length;
+  const activePlanOptions = planCatalog.filter((row) => row.isActive !== false);
 
   const load = async () => {
     try {
-      const list = await api('/api/tenants', {}, token);
+      const [list, plans] = await Promise.all([
+        api('/api/tenants', {}, token),
+        api('/api/tenants/plan-catalog', {}, token)
+      ]);
       setRows(list || []);
+      setPlanCatalog(plans || []);
       if (!activeTenantId && list?.length) setActiveTenantId(list[0].id);
       setMsg('');
     } catch (e) {
@@ -61,6 +72,29 @@ function Inner({ token, me, logout }) {
       setMsg(`Tenant created: ${created.slug}`);
       await load();
       setActiveTenantId(created.id);
+    } catch (e) {
+      setMsg(e.message);
+    }
+  };
+
+  const savePlanCatalog = async () => {
+    try {
+      const payload = planCatalog.map((row) => ({
+        ...row,
+        code: String(row.code || '').trim().toUpperCase(),
+        name: String(row.name || '').trim(),
+        maxAdmins: row.maxAdmins === '' ? null : Number(row.maxAdmins),
+        maxUsers: row.maxUsers === '' ? null : Number(row.maxUsers),
+        maxVehicles: row.maxVehicles === '' ? null : Number(row.maxVehicles),
+        isActive: !!row.isActive
+      }));
+      const saved = await api('/api/tenants/plan-catalog', {
+        method: 'PUT',
+        body: JSON.stringify({ plans: payload })
+      }, token);
+      setPlanCatalog(saved || []);
+      setMsg('Tenant plan catalog updated');
+      await load();
     } catch (e) {
       setMsg(e.message);
     }
@@ -181,10 +215,52 @@ function Inner({ token, me, logout }) {
             </div>
           </div>
           <div className="inline-actions">
+            <button type="button" onClick={() => document.getElementById('tenant-plan-card')?.scrollIntoView({ behavior: 'smooth', block: 'start' })}>Plan Catalog</button>
             <button type="button" onClick={() => document.getElementById('tenant-create-card')?.scrollIntoView({ behavior: 'smooth', block: 'start' })}>Create Tenant</button>
             <button type="button" onClick={() => document.getElementById('tenant-edit-card')?.scrollIntoView({ behavior: 'smooth', block: 'start' })}>Edit Tenants</button>
             <button type="button" onClick={() => document.getElementById('tenant-admin-card')?.scrollIntoView({ behavior: 'smooth', block: 'start' })}>Tenant Admins</button>
           </div>
+        </div>
+
+        <div id="tenant-plan-card" className="glass card" style={{ padding: 12 }}>
+          <div className="row-between">
+            <div>
+              <h3 className="section-title">Plan Catalog</h3>
+              <div className="label">Define the tenant plans you sell and the limits for admins, users, and fleet size.</div>
+            </div>
+            <div className="inline-actions">
+              <button type="button" onClick={() => setPlanCatalog((prev) => [...prev, { ...EMPTY_PLAN, code: `PLAN${prev.length + 1}` }])}>Add Plan</button>
+              <button type="button" onClick={savePlanCatalog}>Save Plan Catalog</button>
+            </div>
+          </div>
+          <table>
+            <thead>
+              <tr>
+                <th>Code</th>
+                <th>Name</th>
+                <th>Max Admins</th>
+                <th>Max Users</th>
+                <th>Max Vehicles</th>
+                <th>Active</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {planCatalog.length ? planCatalog.map((plan, idx) => (
+                <tr key={`${plan.code || 'new'}-${idx}`}>
+                  <td><input value={plan.code || ''} onChange={(e) => setPlanCatalog((prev) => prev.map((row, rowIdx) => rowIdx === idx ? { ...row, code: e.target.value.toUpperCase() } : row))} /></td>
+                  <td><input value={plan.name || ''} onChange={(e) => setPlanCatalog((prev) => prev.map((row, rowIdx) => rowIdx === idx ? { ...row, name: e.target.value } : row))} /></td>
+                  <td><input type="number" min="0" placeholder="Unlimited" value={plan.maxAdmins ?? ''} onChange={(e) => setPlanCatalog((prev) => prev.map((row, rowIdx) => rowIdx === idx ? { ...row, maxAdmins: e.target.value } : row))} /></td>
+                  <td><input type="number" min="0" placeholder="Unlimited" value={plan.maxUsers ?? ''} onChange={(e) => setPlanCatalog((prev) => prev.map((row, rowIdx) => rowIdx === idx ? { ...row, maxUsers: e.target.value } : row))} /></td>
+                  <td><input type="number" min="0" placeholder="Unlimited" value={plan.maxVehicles ?? ''} onChange={(e) => setPlanCatalog((prev) => prev.map((row, rowIdx) => rowIdx === idx ? { ...row, maxVehicles: e.target.value } : row))} /></td>
+                  <td><label className="label"><input type="checkbox" checked={plan.isActive !== false} onChange={(e) => setPlanCatalog((prev) => prev.map((row, rowIdx) => rowIdx === idx ? { ...row, isActive: e.target.checked } : row))} /> Active</label></td>
+                  <td><button type="button" className="button-subtle" onClick={() => setPlanCatalog((prev) => prev.filter((_, rowIdx) => rowIdx !== idx))}>Remove</button></td>
+                </tr>
+              )) : (
+                <tr><td colSpan="7">No plans configured yet.</td></tr>
+              )}
+            </tbody>
+          </table>
         </div>
 
         <div id="tenant-create-card" className="glass card" style={{ padding: 12 }}>
@@ -197,9 +273,9 @@ function Inner({ token, me, logout }) {
               <option value="SUSPENDED">SUSPENDED</option>
             </select>
             <select value={tenantForm.plan} onChange={(e) => setTenantForm((f) => ({ ...f, plan: e.target.value }))}>
-              <option value="BETA">BETA</option>
-              <option value="PRO">PRO</option>
-              <option value="ENTERPRISE">ENTERPRISE</option>
+              {(activePlanOptions.length ? activePlanOptions : [{ code: 'BETA', name: 'Beta' }]).map((plan) => (
+                <option key={plan.code} value={plan.code}>{plan.code}</option>
+              ))}
             </select>
             <label className="label"><input type="checkbox" checked={tenantForm.carSharingEnabled} onChange={(e) => setTenantForm((f) => ({ ...f, carSharingEnabled: e.target.checked }))} /> Car Sharing Enabled</label>
             <label className="label"><input type="checkbox" checked={tenantForm.dealershipLoanerEnabled} onChange={(e) => setTenantForm((f) => ({ ...f, dealershipLoanerEnabled: e.target.checked }))} /> Dealership Loaner Enabled</label>
@@ -225,10 +301,13 @@ function Inner({ token, me, logout }) {
                   </td>
                   <td>
                     <select value={r.plan || 'BETA'} onChange={(e) => setRows((prev) => prev.map((x) => x.id === r.id ? { ...x, plan: e.target.value } : x))}>
-                      <option value="BETA">BETA</option>
-                      <option value="PRO">PRO</option>
-                      <option value="ENTERPRISE">ENTERPRISE</option>
+                      {Array.from(new Map([...activePlanOptions, ...(r.plan && !activePlanOptions.some((plan) => plan.code === r.plan) ? [{ code: r.plan, name: r.plan, isActive: false }] : [])].map((plan) => [plan.code, plan])).values()).map((plan) => (
+                        <option key={plan.code} value={plan.code}>{plan.code}</option>
+                      ))}
                     </select>
+                    <div className="label">
+                      {r.planConfig?.name || r.plan || 'Plan'} | Admins {limitLabel(r.planConfig?.maxAdmins)} | Users {limitLabel(r.planConfig?.maxUsers)} | Vehicles {limitLabel(r.planConfig?.maxVehicles)}
+                    </div>
                   </td>
                   <td>
                     <label className="label">
@@ -245,7 +324,11 @@ function Inner({ token, me, logout }) {
                       <input type="checkbox" checked={!!r.tollsEnabled} onChange={(e) => setRows((prev) => prev.map((x) => x.id === r.id ? { ...x, tollsEnabled: e.target.checked } : x))} /> Enabled
                     </label>
                   </td>
-                  <td className="label">U:{r?._count?.users || 0} L:{r?._count?.locations || 0} C:{r?._count?.customers || 0} V:{r?._count?.vehicles || 0} R:{r?._count?.reservations || 0}</td>
+                  <td className="label">
+                    Staff {r?.planUsage?.users ?? 0}/{limitLabel(r?.planConfig?.maxUsers)} | Admins {r?.planUsage?.admins ?? 0}/{limitLabel(r?.planConfig?.maxAdmins)} | Vehicles {r?.planUsage?.vehicles ?? 0}/{limitLabel(r?.planConfig?.maxVehicles)}
+                    <div>L:{r?._count?.locations || 0} C:{r?._count?.customers || 0} R:{r?._count?.reservations || 0}</div>
+                    {r?.planStatus?.overUsers || r?.planStatus?.overAdmins || r?.planStatus?.overVehicles ? <div className="error">Over current plan limit</div> : null}
+                  </td>
                   <td><button onClick={() => { setActiveTenantId(r.id); saveTenant(r); }}>Save</button></td>
                 </tr>
               ))}

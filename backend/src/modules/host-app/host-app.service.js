@@ -1,6 +1,7 @@
 import { prisma } from '../../lib/prisma.js';
 import { carSharingService } from '../car-sharing/car-sharing.service.js';
 import { issueCenterService } from '../issue-center/issue-center.service.js';
+import { assertTenantVehicleCapacity } from '../../lib/tenant-plan-limits.js';
 
 function listingInclude() {
   return {
@@ -683,6 +684,8 @@ export const hostAppService = {
     if (!submission) throw new Error('Vehicle submission not found');
     if (submission.vehicleId && submission.listingId) return submission;
     const anchorLocationId = submission.preferredLocationId || submission.preferredPickupSpot?.anchorLocationId || null;
+
+    await assertTenantVehicleCapacity(submission.tenantId || null, { vehicleDelta: 1 });
 
     const internalNumber = generateHostVehicleNumber();
     const vehicle = await prisma.vehicle.create({

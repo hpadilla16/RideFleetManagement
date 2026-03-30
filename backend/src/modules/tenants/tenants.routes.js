@@ -20,6 +20,22 @@ tenantsRouter.get('/', async (_req, res, next) => {
   }
 });
 
+tenantsRouter.get('/plan-catalog', async (_req, res, next) => {
+  try {
+    res.json(await tenantsService.getPlanCatalog());
+  } catch (e) {
+    next(e);
+  }
+});
+
+tenantsRouter.put('/plan-catalog', async (req, res) => {
+  try {
+    res.json(await tenantsService.savePlanCatalog(req.body?.plans || []));
+  } catch (e) {
+    res.status(400).json({ error: e.message });
+  }
+});
+
 tenantsRouter.post('/', async (req, res, next) => {
   try {
     const tenant = await tenantsService.createTenant(req.body || {});
