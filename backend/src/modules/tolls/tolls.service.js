@@ -127,43 +127,81 @@ async function scrapeAutoExpresoBalanceRows(page) {
   return page.evaluate(() => {
     const normalize = (value = '') => String(value).replace(/\s+/g, ' ').trim();
     const amountFromText = (value = '') => {
-      const match = String(value).match(/\$\s*-?\d[\d,]*\.?\d*/);
+      const match = String(value).match(/\$\s*-?\s*\d[\d,]*\.?\d*/);
       if (!match) return null;
       const parsed = Number(match[0].replace(/[^0-9.-]/g, ''));
       return Number.isFinite(parsed) ? Math.abs(parsed) : null;
     };
 
+    const rows = [];
     const seen = new Set();
+    const addCandidate = (raw) => {
+      const plateRaw = normalize(raw.plateRaw || '');
+      const selloRaw = normalize(raw.selloRaw || '');
+      const datetimeFull = normalize(raw.datetimeFull || '');
+      const location = normalize(raw.location || '');
+      const amountRaw = normalize(raw.amountRaw || '');
+      const key = `${plateRaw}|${selloRaw}|${datetimeFull}|${amountRaw}|${location}`;
+      if (!plateRaw || !datetimeFull || !amountRaw || seen.has(key)) return;
+      seen.add(key);
+      rows.push({
+        plateRaw,
+        selloRaw,
+        amountRaw,
+        location,
+        datetimeFull,
+        rawText: normalize(raw.rawText || '')
+      });
+    };
+
     const blocks = Array.from(document.querySelectorAll('div, li, article, section'));
-    const candidates = [];
 
     for (const node of blocks) {
-      const text = normalize(node.innerText || '');
+      const rawText = String(node.innerText || '').trim();
+      const text = normalize(rawText);
       if (!text) continue;
       if (!/tablilla:/i.test(text)) continue;
       if (!/peaje:/i.test(text)) continue;
-      if (!/\d{2}\/\d{2}\/\d{4}\s+\d{2}:\d{2}:\d{2}\s*[AP]M/i.test(text)) continue;
-      if (seen.has(text)) continue;
-      seen.add(text);
+      if (!/\d{1,2}\/\d{1,2}\/\d{4}\s+\d{1,2}:\d{2}:\d{2}\s*[AP]M/i.test(text)) continue;
 
-      const lines = text.split('\n').map((line) => normalize(line)).filter(Boolean);
-      const plateMatch = text.match(/Tablilla:\s*([A-Z0-9-]+)/i);
-      const selloMatch = text.match(/Sello:\s*([A-Z0-9-]+)/i);
-      const peajeLine = lines.find((line) => /^Peaje:/i.test(line)) || '';
-      const dateLine = lines.find((line) => /\d{2}\/\d{2}\/\d{4}\s+\d{2}:\d{2}:\d{2}\s*[AP]M/i.test(line)) || '';
-      const amountLine = lines.find((line) => /\$\s*-?\d[\d,]*\.?\d*/.test(line)) || text;
+      const plateMatch = rawText.match(/Tablilla:\s*([A-Z0-9-]+)/i);
+      const selloMatch = rawText.match(/Sello:\s*([A-Z0-9-]+)/i);
+      const peajeMatch = rawText.match(/Peaje:\s*([^\n\r]+)/i);
+      const dateMatch = rawText.match(/\d{1,2}\/\d{1,2}\/\d{4}\s+\d{1,2}:\d{2}:\d{2}\s*[AP]M/i);
+      const amountMatch = rawText.match(/\$\s*-?\s*\d[\d,]*\.?\d*/i);
 
-      candidates.push({
-        plateRaw: plateMatch ? normalize(plateMatch[1]) : '',
-        selloRaw: selloMatch ? normalize(selloMatch[1]) : '',
-        amountRaw: amountLine,
-        location: peajeLine.replace(/^Peaje:\s*/i, '').trim(),
-        datetimeFull: dateLine,
-        rawText: text
+      addCandidate({
+        plateRaw: plateMatch ? plateMatch[1] : '',
+        selloRaw: selloMatch ? selloMatch[1] : '',
+        amountRaw: amountMatch ? amountMatch[0] : '',
+        location: peajeMatch ? peajeMatch[1] : '',
+        datetimeFull: dateMatch ? dateMatch[0] : '',
+        rawText
       });
     }
 
-    return candidates
+    const bodyText = String(document.body?.innerText || '');
+    const chunks = bodyText.split(/(?=Tablilla:\s*[A-Z0-9-]+)/i);
+    for (const chunk of chunks) {
+      const rawText = String(chunk || '').trim();
+      if (!rawText) continue;
+      if (!/tablilla:/i.test(rawText) || !/peaje:/i.test(rawText)) continue;
+      const plateMatch = rawText.match(/Tablilla:\s*([A-Z0-9-]+)/i);
+      const selloMatch = rawText.match(/Sello:\s*([A-Z0-9-]+)/i);
+      const peajeMatch = rawText.match(/Peaje:\s*([^\n\r]+)/i);
+      const dateMatch = rawText.match(/\d{1,2}\/\d{1,2}\/\d{4}\s+\d{1,2}:\d{2}:\d{2}\s*[AP]M/i);
+      const amountMatch = rawText.match(/\$\s*-?\s*\d[\d,]*\.?\d*/i);
+      addCandidate({
+        plateRaw: plateMatch ? plateMatch[1] : '',
+        selloRaw: selloMatch ? selloMatch[1] : '',
+        amountRaw: amountMatch ? amountMatch[0] : '',
+        location: peajeMatch ? peajeMatch[1] : '',
+        datetimeFull: dateMatch ? dateMatch[0] : '',
+        rawText
+      });
+    }
+
+    return rows
       .map((row) => ({
         ...row,
         amount: amountFromText(row.amountRaw)
