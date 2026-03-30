@@ -368,38 +368,45 @@ async function attachIssueIncidents(rows = [], scope = {}) {
   const transactions = Array.isArray(rows) ? rows : [];
   const tollTransactionIds = transactions.map((row) => row.id).filter(Boolean);
   if (!tollTransactionIds.length) return transactions;
+  try {
+    const incidents = await prisma.tripIncident.findMany({
+      where: {
+        ...tenantWhereForScope(scope),
+        type: 'TOLL',
+        OR: tollTransactionIds.map((id) => ({
+          evidenceJson: { contains: id }
+        }))
+      },
+      select: {
+        id: true,
+        status: true,
+        title: true,
+        createdAt: true,
+        reservationId: true,
+        evidenceJson: true
+      },
+      orderBy: [{ createdAt: 'desc' }]
+    });
 
-  const incidents = await prisma.tripIncident.findMany({
-    where: {
-      ...tenantWhereForScope(scope),
-      type: 'TOLL',
-      OR: tollTransactionIds.map((id) => ({
-        evidenceJson: { contains: id }
-      }))
-    },
-    select: {
-      id: true,
-      status: true,
-      title: true,
-      createdAt: true,
-      reservationId: true,
-      evidenceJson: true
-    },
-    orderBy: [{ createdAt: 'desc' }]
-  });
+    const incidentByTollId = new Map();
+    for (const incident of incidents) {
+      const source = safeJsonParse(incident.evidenceJson, null);
+      const tollTransactionId = source?.tollTransactionId ? String(source.tollTransactionId) : '';
+      if (!tollTransactionId || incidentByTollId.has(tollTransactionId)) continue;
+      incidentByTollId.set(tollTransactionId, incident);
+    }
 
-  const incidentByTollId = new Map();
-  for (const incident of incidents) {
-    const source = safeJsonParse(incident.evidenceJson, null);
-    const tollTransactionId = source?.tollTransactionId ? String(source.tollTransactionId) : '';
-    if (!tollTransactionId || incidentByTollId.has(tollTransactionId)) continue;
-    incidentByTollId.set(tollTransactionId, incident);
+    return transactions.map((row) => ({
+      ...row,
+      issueIncident: incidentByTollId.get(row.id) || null
+    }));
+  } catch (error) {
+    console.warn('[tolls] failed to attach issue incidents', error?.message || error);
+    return transactions.map((row) => ({
+      ...row,
+      issueIncident: null
+    }));
   }
-
-  return transactions.map((row) => ({
-    ...row,
-    issueIncident: incidentByTollId.get(row.id) || null
-  }));
 }
 
 async function ensureTenantAllowsTolls(scope = {}) {
