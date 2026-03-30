@@ -2333,18 +2333,31 @@ export const rentalAgreementsService = {
   async finalize(id, payload = {}) {
     const agreement = await prisma.rentalAgreement.findUnique({
       where: { id },
-      include: { reservation: true, pickupLocation: true }
+      include: {
+        reservation: {
+          include: {
+            customer: true,
+            pickupLocation: true
+          }
+        },
+        pickupLocation: true
+      }
     });
     if (!agreement) throw new Error('Rental agreement not found');
 
     const odometerOut = payload.odometerOut ?? agreement.odometerOut;
     const fuelOut = payload.fuelOut ?? agreement.fuelOut;
     const paymentMethod = payload.paymentMethod ?? agreement.paymentMethod;
+    const customerFirstName = String(agreement.customerFirstName || agreement.reservation?.customer?.firstName || '').trim();
+    const customerLastName = String(agreement.customerLastName || agreement.reservation?.customer?.lastName || '').trim();
+    const licenseNumber = String(agreement.licenseNumber || agreement.reservation?.customer?.licenseNumber || '').trim();
+    const dateOfBirth = agreement.dateOfBirth || agreement.reservation?.customer?.dateOfBirth || null;
+    const pickupLocationConfigSource = agreement.pickupLocation?.locationConfig || agreement.reservation?.pickupLocation?.locationConfig || null;
 
-    if (!agreement.customerFirstName || !agreement.customerLastName) {
+    if (!customerFirstName || !customerLastName) {
       throw new Error('Customer first and last name are required before finalizing');
     }
-    if (!agreement.licenseNumber) {
+    if (!licenseNumber) {
       throw new Error('Customer license number is required before finalizing');
     }
     if (odometerOut === null || odometerOut === undefined) {
@@ -2363,7 +2376,7 @@ export const rentalAgreementsService = {
 
     const paidAmount = toDecimal(payload.paidAmount, agreement.paidAmount);
 
-    const locationConfig = parseLocationConfig(agreement.pickupLocation?.locationConfig);
+    const locationConfig = parseLocationConfig(pickupLocationConfigSource);
     const paymentDueAction = String(locationConfig?.paymentDueAction || 'AT_BOOKING');
     if ((paymentDueAction === 'AT_BOOKING' || paymentDueAction === 'AT_PICKUP') && paidAmount <= 0) {
       throw new Error('This location requires payment at booking/pickup before finalizing');
@@ -2371,7 +2384,7 @@ export const rentalAgreementsService = {
 
     const minAge = Number(locationConfig?.chargeAgeMin || 0);
     const maxAge = Number(locationConfig?.chargeAgeMax || 0);
-    const age = ageOnDate(agreement.dateOfBirth, agreement.pickupAt);
+    const age = ageOnDate(dateOfBirth, agreement.pickupAt);
     if (age !== null) {
       if (minAge > 0 && age < minAge) throw new Error(`Driver age ${age} is below minimum age ${minAge} for this location`);
       if (maxAge > 0 && age > maxAge) throw new Error(`Driver age ${age} exceeds maximum age ${maxAge} for this location`);
@@ -2413,6 +2426,10 @@ export const rentalAgreementsService = {
         status: 'FINALIZED',
         paymentMethod,
         paymentReference: payload.paymentReference ?? agreement.paymentReference,
+        customerFirstName,
+        customerLastName,
+        licenseNumber,
+        dateOfBirth,
         odometerOut,
         fuelOut,
         paidAmount,

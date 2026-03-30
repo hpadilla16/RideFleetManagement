@@ -363,6 +363,9 @@ rentalAgreementsRouter.post('/:id/finalize', async (req, res, next) => {
     res.json(row);
   } catch (e) {
     if (/not found/i.test(e.message)) return res.status(404).json({ error: e.message });
+    if (/required|payment at booking\/pickup|selected charge|minimum age|maximum age|below minimum age|exceeds maximum age/i.test(String(e?.message || ''))) {
+      return res.status(400).json({ error: e.message });
+    }
     next(e);
   }
 });
