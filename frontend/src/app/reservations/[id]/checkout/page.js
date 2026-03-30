@@ -16,7 +16,7 @@ function Inner({ token, me, logout }) {
   const [row, setRow] = useState(null);
   const [vehicles, setVehicles] = useState([]);
   const [msg, setMsg] = useState('');
-  const [form, setForm] = useState({ vehicleId: '', odometerOut: '', fuelOut: '1.000', cleanlinessOut: '5', signerName: '', paymentMethod: 'CASH' });
+  const [form, setForm] = useState({ vehicleId: '', odometerOut: '', fuelOut: '1.000', cleanlinessOut: '5', signerName: '' });
   const sigRef = useRef(null);
   const drawing = useRef(false);
   const selectedVehicle = vehicles.find((vehicle) => String(vehicle.id) === String(form.vehicleId)) || null;
@@ -95,7 +95,7 @@ function Inner({ token, me, logout }) {
       const signatureDataUrl = sig();
       if (!signer || !signatureDataUrl) return setMsg('Customer signature is required');
 
-      const checkoutLine = `[RES_CHECKOUT ${new Date().toISOString()}] odometerOut=${Number(form.odometerOut || 0)} fuelOut=${Number(form.fuelOut || 0)} cleanlinessOut=${Number(form.cleanlinessOut || 5)} paymentMethod=${String(form.paymentMethod || 'CASH')}`;
+      const checkoutLine = `[RES_CHECKOUT ${new Date().toISOString()}] odometerOut=${Number(form.odometerOut || 0)} fuelOut=${Number(form.fuelOut || 0)} cleanlinessOut=${Number(form.cleanlinessOut || 5)}`;
       const baseNotes = String(row?.notes || '').trim();
       const nextNotes = `${baseNotes}${baseNotes ? '\n' : ''}${checkoutLine}`;
 
@@ -135,8 +135,7 @@ function Inner({ token, me, logout }) {
         body: JSON.stringify({
           odometerOut: Number(form.odometerOut || 0),
           fuelOut: Number(form.fuelOut || 0),
-          cleanlinessOut: Number(form.cleanlinessOut || 5),
-          paymentMethod: String(form.paymentMethod || 'CASH')
+          cleanlinessOut: Number(form.cleanlinessOut || 5)
         })
       }, token);
 
@@ -181,8 +180,8 @@ function Inner({ token, me, logout }) {
               <strong>{row?.pickupAt ? new Date(row.pickupAt).toLocaleString() : '-'}</strong>
             </div>
             <div className="info-tile">
-              <span className="label">Payment Method</span>
-              <strong>{form.paymentMethod || '-'}</strong>
+              <span className="label">Readiness</span>
+              <strong>{form.signerName && form.vehicleId ? 'Ready to sign' : 'Needs setup'}</strong>
             </div>
           </div>
         </div>
@@ -197,7 +196,6 @@ function Inner({ token, me, logout }) {
           <div className="stack"><label className="label">Odometer Out</label><input type="number" min="0" value={form.odometerOut} onChange={(e) => setForm({ ...form, odometerOut: e.target.value })} /></div>
           <div className="stack"><label className="label">Fuel Out</label><select value={form.fuelOut} onChange={(e) => setForm({ ...form, fuelOut: e.target.value })}>{['0.000','0.125','0.250','0.375','0.500','0.625','0.750','0.875','1.000'].map((v, i) => <option key={v} value={v}>{i}/8</option>)}</select></div>
           <div className="stack"><label className="label">Cleanliness Out (1-5)</label><input type="number" min="1" max="5" value={form.cleanlinessOut} onChange={(e) => setForm({ ...form, cleanlinessOut: e.target.value })} /></div>
-          <div className="stack"><label className="label">Payment Method</label><select value={form.paymentMethod} onChange={(e) => setForm({ ...form, paymentMethod: e.target.value })}>{['CASH','CARD','ZELLE','ATH_MOVIL','OTHER'].map((m)=><option key={m} value={m}>{m}</option>)}</select></div>
         </div>
 
         <div className="row-between" style={{ marginTop: 8 }}>

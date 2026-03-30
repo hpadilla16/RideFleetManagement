@@ -2347,7 +2347,9 @@ export const rentalAgreementsService = {
 
     const odometerOut = payload.odometerOut ?? agreement.odometerOut;
     const fuelOut = payload.fuelOut ?? agreement.fuelOut;
-    const paymentMethod = payload.paymentMethod ?? agreement.paymentMethod;
+    const hasExplicitPaymentMethod = payload.paymentMethod !== undefined && payload.paymentMethod !== null && String(payload.paymentMethod).trim() !== '';
+    const hasExplicitPaidAmount = payload.paidAmount !== undefined && payload.paidAmount !== null && String(payload.paidAmount).trim() !== '';
+    const paymentMethod = hasExplicitPaymentMethod ? payload.paymentMethod : agreement.paymentMethod;
     const customerFirstName = String(agreement.customerFirstName || agreement.reservation?.customer?.firstName || '').trim();
     const customerLastName = String(agreement.customerLastName || agreement.reservation?.customer?.lastName || '').trim();
     const licenseNumber = String(agreement.licenseNumber || agreement.reservation?.customer?.licenseNumber || '').trim();
@@ -2363,10 +2365,6 @@ export const rentalAgreementsService = {
     if (odometerOut === null || odometerOut === undefined) {
       throw new Error('Odometer out is required before finalizing');
     }
-    if (!paymentMethod) {
-      throw new Error('Payment method is required before finalizing');
-    }
-
     const selectedCharges = await prisma.rentalAgreementCharge.count({
       where: { rentalAgreementId: id, selected: true }
     });
@@ -2374,7 +2372,9 @@ export const rentalAgreementsService = {
       throw new Error('At least one selected charge is required before finalizing');
     }
 
-    const paidAmount = toDecimal(payload.paidAmount, agreement.paidAmount);
+    const paidAmount = hasExplicitPaidAmount
+      ? toDecimal(payload.paidAmount, agreement.paidAmount)
+      : Number(agreement.paidAmount || 0);
 
     const locationConfig = parseLocationConfig(pickupLocationConfigSource);
     const paymentDueAction = String(locationConfig?.paymentDueAction || 'AT_BOOKING');
@@ -2424,7 +2424,7 @@ export const rentalAgreementsService = {
       where: { id },
       data: {
         status: 'FINALIZED',
-        paymentMethod,
+        paymentMethod: paymentMethod || null,
         paymentReference: payload.paymentReference ?? agreement.paymentReference,
         customerFirstName,
         customerLastName,
@@ -2443,11 +2443,11 @@ export const rentalAgreementsService = {
       data: { status: 'CHECKED_OUT' }
     });
 
-    if (paidAmount > 0 && payload.paymentMethod) {
+    if (hasExplicitPaidAmount && paidAmount > 0 && paymentMethod) {
       await prisma.rentalAgreementPayment.create({
         data: {
           rentalAgreementId: id,
-          method: payload.paymentMethod,
+          method: paymentMethod,
           amount: paidAmount,
           reference: payload.paymentReference ?? null,
           status: 'PAID'
