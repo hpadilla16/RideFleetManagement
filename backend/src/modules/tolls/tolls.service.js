@@ -123,6 +123,19 @@ async function waitForAutoExpresoTransactionState(page, timeoutMs = 30000) {
   return 'timeout';
 }
 
+async function waitForAutoExpresoRows(page, timeoutMs = 15000) {
+  const startedAt = Date.now();
+  while (Date.now() - startedAt < timeoutMs) {
+    const hasRows = await page.evaluate(() => {
+      const text = String(document.body?.innerText || '');
+      return /Tablilla:\s*[A-Z0-9-]+/i.test(text) && /Peaje:/i.test(text);
+    }).catch(() => false);
+    if (hasRows) return true;
+    await new Promise((resolve) => setTimeout(resolve, 1000));
+  }
+  return false;
+}
+
 async function scrapeAutoExpresoBalanceRows(page) {
   return page.evaluate(() => {
     const normalize = (value = '') => String(value).replace(/\s+/g, ' ').trim();
@@ -1395,6 +1408,7 @@ export const tollsService = {
           : '';
         throw new Error(`AutoExpreso sync could not open transactions (${transactionState}). URL: ${pageState.url || 'unknown'} | Title: ${pageState.title || 'unknown'}${pageState.hint ? ` | Hint: ${pageState.hint}` : ''}${accountStatementHint}`);
       }
+      await waitForAutoExpresoRows(page, 20000);
 
       const rows = [];
       const seenExternalIds = new Set();
@@ -1434,6 +1448,7 @@ export const tollsService = {
         const moved = await clickAutoExpresoNextPage(page);
         if (!moved) break;
         await page.waitForFunction((previous) => String(document.body?.innerText || '').slice(0, 2000) !== previous, { timeout: 15000 }, beforeSnapshot).catch(() => null);
+        await waitForAutoExpresoRows(page, 10000);
         await new Promise((resolve) => setTimeout(resolve, 1000));
         pageNumber += 1;
       }
