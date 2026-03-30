@@ -6,6 +6,16 @@ import { PortalFrame, portalStyles } from '../_components/PortalFrame';
 import { PortalTimelineCard } from '../_components/PortalTimelineCard';
 
 const PRECHECKIN_DRAFT_PREFIX = 'customer.precheckin.';
+const MAX_INLINE_PDF_BYTES = 350 * 1024;
+
+function loadImage(dataUrl) {
+  return new Promise((resolve, reject) => {
+    const image = new Image();
+    image.onload = () => resolve(image);
+    image.onerror = () => reject(new Error('Unable to process image'));
+    image.src = dataUrl;
+  });
+}
 
 function toDateInput(value) {
   if (!value) return '';
@@ -22,6 +32,64 @@ async function fileToDataUrl(file) {
     reader.onerror = () => reject(new Error('Unable to read file'));
     reader.readAsDataURL(file);
   });
+}
+
+async function compressImageDataUrl(dataUrl, { maxWidth = 1400, maxHeight = 1400, quality = 0.72 } = {}) {
+  const image = await loadImage(dataUrl);
+  let width = image.width || maxWidth;
+  let height = image.height || maxHeight;
+  const scale = Math.min(1, maxWidth / width, maxHeight / height);
+  width = Math.max(1, Math.round(width * scale));
+  height = Math.max(1, Math.round(height * scale));
+
+  const canvas = document.createElement('canvas');
+  canvas.width = width;
+  canvas.height = height;
+  const ctx = canvas.getContext('2d');
+  ctx.drawImage(image, 0, 0, width, height);
+  return canvas.toDataURL('image/jpeg', quality);
+}
+
+async function toCompactUploadPayload(file) {
+  if (!file) return '';
+  if (String(file.type || '').startsWith('image/')) {
+    const raw = await fileToDataUrl(file);
+    return compressImageDataUrl(raw);
+  }
+  if (String(file.type || '').includes('pdf')) {
+    if (Number(file.size || 0) > MAX_INLINE_PDF_BYTES) {
+      throw new Error(`PDF "${file.name}" is too large. Please keep PDFs under ${Math.round(MAX_INLINE_PDF_BYTES / 1024)} KB.`);
+    }
+    return fileToDataUrl(file);
+  }
+  return fileToDataUrl(file);
+}
+
+async function compactPrecheckinPayload(form) {
+  const next = { ...form };
+  if (String(next.idPhotoUrl || '').startsWith('data:image/')) {
+    next.idPhotoUrl = await compressImageDataUrl(next.idPhotoUrl, { maxWidth: 1400, maxHeight: 1400, quality: 0.72 });
+  }
+  if (String(next.insuranceDocumentUrl || '').startsWith('data:image/')) {
+    next.insuranceDocumentUrl = await compressImageDataUrl(next.insuranceDocumentUrl, { maxWidth: 1400, maxHeight: 1400, quality: 0.72 });
+  }
+  return next;
+}
+
+async function readJsonOrThrowFriendly(res) {
+  const text = await res.text();
+  if (!text) return {};
+  try {
+    return JSON.parse(text);
+  } catch {
+    if (/entity too large|request entity too large|payload too large|413/i.test(text)) {
+      throw new Error('The uploaded files are too large. Please use smaller photos or a PDF under 350 KB.');
+    }
+    if (/<html/i.test(text)) {
+      throw new Error('The server rejected the pre-check-in upload. Please re-upload smaller document images and try again.');
+    }
+    throw new Error(text.slice(0, 240));
+  }
 }
 
 const EMPTY_FORM = {
@@ -149,7 +217,7 @@ export default function PrecheckinPage() {
 
   const uploadField = async (key, file) => {
     try {
-      const dataUrl = await fileToDataUrl(file);
+      const dataUrl = await toCompactUploadPayload(file);
       updateField(key, dataUrl);
     } catch (e) {
       setError(String(e.message || e));
@@ -164,12 +232,13 @@ export default function PrecheckinPage() {
       if (missingRequiredFields.length) {
         throw new Error(`Complete the required pre-check-in items first: ${missingRequiredFields.join(', ')}`);
       }
+      const payload = await compactPrecheckinPayload(form);
       const res = await fetch(`${API_BASE}/api/public/customer-info/${encodeURIComponent(token)}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(form)
+        body: JSON.stringify(payload)
       });
-      const json = await res.json();
+      const json = await readJsonOrThrowFriendly(res);
       if (!res.ok) throw new Error(json?.error || 'Unable to submit pre-check-in');
       setOk(json?.message || 'Pre-check-in completed.');
       try { localStorage.removeItem(precheckinDraftKey(token)); } catch {}
@@ -179,7 +248,7 @@ export default function PrecheckinPage() {
         reservation: {
           ...(prev?.reservation || {}),
           customerInfoCompletedAt: json?.completedAt || new Date().toISOString(),
-          customer: { ...(prev?.reservation?.customer || {}), ...form }
+          customer: { ...(prev?.reservation?.customer || {}), ...payload }
         }
       }));
     } catch (e) {
