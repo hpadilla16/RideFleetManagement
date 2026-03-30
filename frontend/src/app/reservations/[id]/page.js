@@ -1934,44 +1934,55 @@ token
                         </div>
                       </div></>
               ) : null}
-              <table>
-                <thead><tr><th>Charge</th><th>Unit</th><th>Rate</th><th>Total</th></tr></thead>
-                <tbody>
-                  {displayChargeRows.map((r) => {
-                    const canDelete = ['service', 'fee', 'deposit-due', 'security-deposit'].some((key) =>
-                      String(r.id || '').toLowerCase().includes(key.replace('-', ''))
-                    );
+              <div className="table-shell">
+                <table style={{ minWidth: 0, tableLayout: 'fixed' }}>
+                  <thead>
+                    <tr>
+                      <th style={{ width: '48%' }}>Charge</th>
+                      <th style={{ width: '14%' }}>Unit</th>
+                      <th style={{ width: '18%' }}>Rate</th>
+                      <th style={{ width: '20%', textAlign: 'right' }}>Total</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {displayChargeRows.map((r) => {
+                      const canDelete = ['service', 'fee', 'deposit-due', 'security-deposit'].some((key) =>
+                        String(r.id || '').toLowerCase().includes(key.replace('-', ''))
+                      );
 
-                    return (
-                      <tr key={r.id}>
-                        <td style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                          {r.name}
-                          {chargeEdit && canDelete ? (
-                            <button
-                              className="link"
-                              onClick={() => removeChargeRow(r)}
-                              title="Remove row"
-                            >
-                              Delete
-                            </button>
-                          ) : null}
-                        </td>
-                        <td>{toMoneyNum(r.unit || 1)}</td>
-                        <td>{money(r.rate)}</td>
-                        <td>{money(r.total)}</td>
-                      </tr>
-                    );
-                  })}
-                  <tr>
-                    <td colSpan={3}><strong>Total</strong></td>
-                    <td><strong>{money(displayTotal)}</strong></td>
-                  </tr>
-                  <tr>
-                    <td colSpan={3}><strong>Unpaid Balance</strong></td>
-                    <td><strong>{money(unpaidBalance)}</strong></td>
-                  </tr>
-                </tbody>
-              </table>
+                      return (
+                        <tr key={r.id}>
+                          <td style={{ whiteSpace: 'normal', wordBreak: 'break-word' }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                              <span>{r.name}</span>
+                              {chargeEdit && canDelete ? (
+                                <button
+                                  className="link"
+                                  onClick={() => removeChargeRow(r)}
+                                  title="Remove row"
+                                >
+                                  Delete
+                                </button>
+                              ) : null}
+                            </div>
+                          </td>
+                          <td style={{ whiteSpace: 'nowrap' }}>{toMoneyNum(r.unit || 1)}</td>
+                          <td style={{ whiteSpace: 'nowrap' }}>{money(r.rate)}</td>
+                          <td style={{ whiteSpace: 'nowrap', textAlign: 'right' }}>{money(r.total)}</td>
+                        </tr>
+                      );
+                    })}
+                    <tr>
+                      <td colSpan={3}><strong>Total</strong></td>
+                      <td style={{ whiteSpace: 'nowrap', textAlign: 'right' }}><strong>{money(displayTotal)}</strong></td>
+                    </tr>
+                    <tr>
+                      <td colSpan={3}><strong>Unpaid Balance</strong></td>
+                      <td style={{ whiteSpace: 'nowrap', textAlign: 'right' }}><strong>{money(unpaidBalance)}</strong></td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
               {canManageCommissionOwner && row?.rentalAgreement?.id ? (
                 <div className="card" style={{ marginTop: 14 }}>
                   <div className="row-between" style={{ marginBottom: 8 }}>
