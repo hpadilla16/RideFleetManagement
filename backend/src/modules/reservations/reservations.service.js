@@ -108,6 +108,18 @@ function parseDateInput(value) {
   return parsed;
 }
 
+function isLegacyPlaceholderDate(value) {
+  const raw = norm(value).toLowerCase();
+  if (!raw) return false;
+  return (
+    raw === '1900-01-00t00:00'
+    || raw.startsWith('1900-01-00')
+    || raw === '0000-00-00t00:00'
+    || raw.startsWith('0000-00-00')
+    || raw === '0'
+  );
+}
+
 function parseNumberInput(value) {
   if (value === null || value === undefined || value === '') return null;
   const parsed = Number(value);
@@ -302,7 +314,13 @@ function normalizeImportRow(row) {
   const reservationNumber = norm(row.reservationNumber);
   const sourceRef = norm(row.sourceRef) || null;
   const pickupAt = parseDateInput(row.pickupAt);
-  const returnAt = parseDateInput(row.returnAt);
+  const rawReturnAt = norm(row.returnAt);
+  let returnAt = parseDateInput(rawReturnAt);
+  let returnAtUsedPlaceholder = false;
+  if (!returnAt && pickupAt && isLegacyPlaceholderDate(rawReturnAt)) {
+    returnAt = new Date(pickupAt.getTime() + (24 * 60 * 60 * 1000));
+    returnAtUsedPlaceholder = true;
+  }
   const status = norm(row.status || 'CONFIRMED').toUpperCase();
   const paymentStatus = norm(row.paymentStatus || 'PENDING').toUpperCase();
   const workflowMode = norm(row.workflowMode || 'RENTAL').toUpperCase();
@@ -315,6 +333,7 @@ function normalizeImportRow(row) {
     sourceRef,
     pickupAt,
     returnAt,
+    returnAtUsedPlaceholder,
     status,
     paymentStatus,
     workflowMode,
@@ -356,6 +375,7 @@ async function buildReservationImportRow(row, index, scope = {}, cache = {}) {
   if (!normalized.pickupAt) errors.push('pickupAt invalid');
   if (!normalized.returnAt) errors.push('returnAt invalid');
   if (normalized.pickupAt && normalized.returnAt && normalized.pickupAt >= normalized.returnAt) errors.push('returnAt must be after pickupAt');
+  if (normalized.returnAtUsedPlaceholder) warnings.push('returnAt placeholder detected in legacy file; import defaulted it to pickupAt + 1 day');
   if (!pickupLocation) errors.push('pickup location not found');
   if (!returnLocation) errors.push('return location not found');
   if (!vehicleType && !vehicle) errors.push('vehicleType or assigned vehicle is required');
@@ -931,6 +951,11 @@ export const reservationsService = {
     for (const row of validRows) {
       const prepared = row.normalized;
       const customerId = await createImportedCustomer(prepared, row);
+      const importNotes = [
+        prepared.notes || null,
+        '[IMPORT_MIGRATION] Uploaded from reservation migration tool',
+        prepared.returnAtUsedPlaceholder ? '[IMPORT_MIGRATION] Legacy return date placeholder detected; returnAt defaulted to pickupAt + 1 day.' : null
+      ].filter(Boolean).join('\n');
       const reservation = await prisma.reservation.create({
         data: {
           tenantId: prepared.tenantId,
@@ -963,7 +988,7 @@ export const reservationsService = {
           estimatedTotal: prepared.estimatedTotal,
           paymentStatus: prepared.paymentStatus || 'PENDING',
           sendConfirmationEmail: false,
-          notes: prepared.notes ? `${prepared.notes}\n[IMPORT_MIGRATION] Uploaded from reservation migration tool` : '[IMPORT_MIGRATION] Uploaded from reservation migration tool'
+          notes: importNotes
         }
       });
 
