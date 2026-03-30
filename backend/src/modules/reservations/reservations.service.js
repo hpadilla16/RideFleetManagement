@@ -221,7 +221,13 @@ async function resolveImportVehicleType(tenantId, row, cache) {
 async function resolveImportVehicle(tenantId, row, cache) {
   const directId = norm(row.vehicleId);
   const internalNumber = norm(row.vehicleInternalNumber);
-  const plate = norm(row.vehiclePlate);
+  const plate = norm(
+    row.vehiclePlate
+    || row.AssignedVehicleLicensePlate
+    || row.assignedVehicleLicensePlate
+    || row.licensePlate
+    || row.plate,
+  );
   const value = directId || internalNumber || plate;
   if (!value) return null;
   const cacheKey = `${tenantId || 'global'}:${value.toLowerCase()}`;
@@ -285,7 +291,7 @@ async function resolveImportCustomer(tenantId, row, cache) {
     if (cache.customer.get(key)) return { customer: cache.customer.get(key), action: 'existing' };
   }
 
-  if (firstName && lastName && phone) {
+  if (firstName && lastName) {
     return { customer: null, action: 'create' };
   }
 
@@ -354,7 +360,7 @@ async function buildReservationImportRow(row, index, scope = {}, cache = {}) {
   if (!returnLocation) errors.push('return location not found');
   if (!vehicleType && !vehicle) errors.push('vehicleType or assigned vehicle is required');
   if (!customerResolution.customer && customerResolution.action !== 'create') {
-    errors.push('customer not found; provide customerId/email/phone or customerFirstName/customerLastName/customerPhone');
+    errors.push('customer not found; provide customerId/email/phone or customerFirstName/customerLastName');
   }
   if (normalized.status && !reservationStatuses.has(normalized.status)) errors.push(`status invalid (${normalized.status})`);
   if (normalized.paymentStatus && !paymentStatuses.has(normalized.paymentStatus)) errors.push(`paymentStatus invalid (${normalized.paymentStatus})`);
@@ -429,13 +435,17 @@ async function buildReservationImportRow(row, index, scope = {}, cache = {}) {
 
 async function createImportedCustomer(prepared, row) {
   if (prepared.customerId) return prepared.customerId;
+  const fallbackPhone = prepared.customerPhone || `MIG-${prepared.reservationNumber || Date.now()}`;
   const customer = await prisma.customer.create({
     data: {
       tenantId: prepared.tenantId,
       firstName: prepared.customerFirstName,
       lastName: prepared.customerLastName,
       email: prepared.customerEmail || null,
-      phone: prepared.customerPhone
+      phone: fallbackPhone,
+      notes: prepared.customerPhone
+        ? null
+        : '[IMPORT_MIGRATION] Legacy customer imported without phone. Placeholder value assigned automatically.'
     },
     select: { id: true }
   });

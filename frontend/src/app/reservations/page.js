@@ -274,7 +274,7 @@ function ReservationsInner({ token, me, logout }) {
     const samplePickupCode = locations[0]?.code || 'SJU';
     const sampleReturnCode = locations[1]?.code || samplePickupCode;
     const sampleVehicleTypeCode = vehicleTypes[0]?.code || 'ECON';
-    const csv = `${sampleTenantSlug}reservationNumber,sourceRef,workflowMode,status,paymentStatus,customerFirstName,customerLastName,customerEmail,customerPhone,vehicleTypeCode,vehicleInternalNumber,pickupAt,returnAt,pickupLocationCode,returnLocationCode,dailyRate,estimatedTotal,notes\n${sampleTenantValue}MIG-1001,LEGACY-1001,RENTAL,CONFIRMED,PENDING,Jose,Diaz,jose@example.com,7875550101,${sampleVehicleTypeCode},,2026-03-30T10:00,2026-04-02T10:00,${samplePickupCode},${sampleReturnCode},49.99,149.97,Imported from legacy platform`;
+    const csv = `${sampleTenantSlug}reservationNumber,sourceRef,workflowMode,status,paymentStatus,customerFirstName,customerLastName,customerEmail,customerPhone,vehicleTypeCode,AssignedVehicleLicensePlate,pickupAt,returnAt,pickupLocationCode,returnLocationCode,dailyRate,estimatedTotal,notes\n${sampleTenantValue}MIG-1001,LEGACY-1001,RENTAL,CONFIRMED,PENDING,Jose,Diaz,jose@example.com,,${sampleVehicleTypeCode},KJU499,2026-03-30T10:00,2026-04-02T10:00,${samplePickupCode},${sampleReturnCode},49.99,149.97,Imported from legacy platform`;
     const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -629,8 +629,10 @@ function ReservationsInner({ token, me, logout }) {
                 <ul>
                   <li>Use CSV format exported from the legacy platform.</li>
                   <li>Required columns: <code>reservationNumber</code>, <code>pickupAt</code>, <code>returnAt</code>, <code>pickupLocationCode</code>, <code>returnLocationCode</code>.</li>
-                  <li>Identify the customer with <code>customerId</code>, <code>customerEmail</code>, <code>customerPhone</code>, or provide <code>customerFirstName</code>, <code>customerLastName</code>, and <code>customerPhone</code> so Ride Fleet can create the customer.</li>
-                  <li>Recommended columns: <code>sourceRef</code>, <code>vehicleTypeCode</code>, <code>vehicleInternalNumber</code>, <code>dailyRate</code>, <code>estimatedTotal</code>, <code>notes</code>.</li>
+                  <li>Identify the customer with <code>customerId</code>, <code>customerEmail</code>, <code>customerPhone</code>, or provide <code>customerFirstName</code> and <code>customerLastName</code> so Ride Fleet can create the customer.</li>
+                  <li><code>customerEmail</code> and <code>customerPhone</code> may be blank in migration uploads.</li>
+                  <li>Use <code>AssignedVehicleLicensePlate</code> to assign the reservation to a vehicle by plate number.</li>
+                  <li>Recommended columns: <code>sourceRef</code>, <code>vehicleTypeCode</code>, <code>AssignedVehicleLicensePlate</code>, <code>dailyRate</code>, <code>estimatedTotal</code>, <code>notes</code>.</li>
                   <li>For dealership migrations, use the loaner template and include <code>workflowMode=DEALERSHIP_LOANER</code>, plus advisor and RO/claim fields.</li>
                   {!me?.tenantId ? <li>For super admin imports, include <code>tenantSlug</code> in every row.</li> : null}
                   <li>Duplicate reservation numbers or source refs are skipped.</li>
