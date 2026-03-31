@@ -766,6 +766,18 @@ function inspectionReportFromAgreement(agreement) {
 }
 
 export const rentalAgreementsService = {
+  getAccessibleAgreement(id, scope = null) {
+    return prisma.rentalAgreement.findFirst({
+      where: { id, ...(scope?.tenantId ? { tenantId: scope.tenantId } : {}) },
+      select: {
+        id: true,
+        tenantId: true,
+        reservationId: true,
+        status: true
+      }
+    });
+  },
+
   async resolveLatestAgreementId(id, scope = null) {
     const current = await prisma.rentalAgreement.findFirst({ where: { id, ...(scope?.tenantId ? { tenantId: scope.tenantId } : {}) }, select: { id: true, reservationId: true } });
     if (!current) throw new Error('Rental agreement not found');
@@ -1610,8 +1622,12 @@ export const rentalAgreementsService = {
 
   async emailAgreement(id, payload = {}, actorUserId = null) {
     const latestId = await this.resolveLatestAgreementId(id);
-    const agreement = await this.getById(latestId);
+    const context = await this.agreementPrintContext(latestId);
+    const agreement = context?.agreement;
     if (!agreement) throw new Error('Rental agreement not found');
+    const cfg = context?.cfg || {};
+    const paidAmountForPrint = Number(context?.paidAmountForPrint || 0);
+    const amountDueForPrint = Number(context?.amountDueForPrint || 0);
 
     const to = String(payload.to || agreement.customerEmail || agreement.reservation?.customer?.email || '').trim();
     if (!to) throw new Error('Customer email is required');
@@ -1621,21 +1637,19 @@ export const rentalAgreementsService = {
     const { settingsService } = await import('../settings/settings.service.js');
     const tpl = await settingsService.getEmailTemplates();
 
-    const paidAmount = Number((agreement.paidAmount != null ? agreement.paidAmount : (agreement.payments || []).reduce((s, p) => s + Number(p.amount || 0), 0)) || 0);
-    const amountDue = Number((Number(agreement.total || 0) - paidAmount).toFixed(2));
     const base = (process.env.APP_BASE_URL || process.env.FRONTEND_BASE_URL || 'http://localhost:3000').replace(/\/$/, '');
     const vars = {
-      companyName: agreement?.reservation?.pickupLocation?.name || 'Ride Fleet',
-      companyAddress: agreement?.reservation?.pickupLocation?.address1 || '',
-      companyPhone: agreement?.reservation?.pickupLocation?.phone || '',
+      companyName: cfg.companyName || agreement?.reservation?.pickupLocation?.name || 'Ride Fleet',
+      companyAddress: cfg.companyAddress || agreement?.reservation?.pickupLocation?.address || '',
+      companyPhone: cfg.companyPhone || '',
       agreementNumber: agreement.agreementNumber,
       reservationNumber: agreement?.reservation?.reservationNumber || '-',
       customerName: `${agreement.customerFirstName || ''} ${agreement.customerLastName || ''}`.trim(),
       pickupAt: fmtDate(agreement.pickupAt),
       returnAt: fmtDate(agreement.returnAt),
       total: Number(agreement.total || 0).toFixed(2),
-      amountPaid: paidAmount.toFixed(2),
-      amountDue: amountDue.toFixed(2),
+      amountPaid: paidAmountForPrint.toFixed(2),
+      amountDue: amountDueForPrint.toFixed(2),
       portalLink: `${base}/reservations/${agreement.reservationId}`
     };
 

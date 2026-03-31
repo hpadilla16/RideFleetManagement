@@ -23,6 +23,16 @@ async function ensureEditable(id, user) {
   return row;
 }
 
+async function ensureAccessible(id, user) {
+  const row = await rentalAgreementsService.getAccessibleAgreement(id, user);
+  if (!row) {
+    const err = new Error('Rental agreement not found');
+    err.statusCode = 404;
+    throw err;
+  }
+  return row;
+}
+
 rentalAgreementsRouter.get('/', async (req, res, next) => {
   try {
     const rows = await rentalAgreementsService.list(req.user);
@@ -121,7 +131,7 @@ rentalAgreementsRouter.post('/:id/credit', async (req, res, next) => {
 
 rentalAgreementsRouter.get('/:id/print', async (req, res, next) => {
   try {
-    await ensureEditable(req.params.id, req.user);
+    await ensureAccessible(req.params.id, req.user);
     const html = await rentalAgreementsService.renderAgreementHtml(req.params.id);
     res.setHeader('Content-Type', 'text/html; charset=utf-8');
     res.send(html);
@@ -133,7 +143,7 @@ rentalAgreementsRouter.get('/:id/print', async (req, res, next) => {
 
 rentalAgreementsRouter.post('/:id/email-agreement', async (req, res, next) => {
   try {
-    await ensureEditable(req.params.id, req.user);
+    await ensureAccessible(req.params.id, req.user);
     const out = await rentalAgreementsService.emailAgreement(req.params.id, req.body || {}, req.user?.sub || null);
     res.json(out);
   } catch (e) {
