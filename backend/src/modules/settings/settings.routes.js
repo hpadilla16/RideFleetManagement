@@ -20,9 +20,6 @@ async function enforceUserModuleScope(req, res, next) {
     if (!target) return res.status(404).json({ error: 'User not found' });
     if (!isSuperAdmin(req.user)) {
       if (!req.user?.tenantId || req.user.tenantId !== target.tenantId) return res.status(403).json({ error: 'Forbidden' });
-      if (String(req.user?.role || '').toUpperCase() === 'ADMIN' && target.id !== req.user.id && target.createdByUserId !== req.user.id) {
-        return res.status(403).json({ error: 'Tenant admins can only manage users they created' });
-      }
     }
     req.targetUser = target;
     next();
