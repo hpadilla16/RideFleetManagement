@@ -63,6 +63,30 @@ function VehicleStatusDonut({ metrics }) {
   );
 }
 
+function deriveKpisFromVehicles(vehicles = []) {
+  const rows = Array.isArray(vehicles) ? vehicles : [];
+  const activeBlocks = rows
+    .map((vehicle) => (Array.isArray(vehicle?.availabilityBlocks) ? vehicle.availabilityBlocks : []).find((block) => !block?.releasedAt))
+    .filter(Boolean);
+  const fleetTotal = rows.length;
+  const vehiclesInMaintenance = rows.filter((vehicle) => String(vehicle?.status || '').toUpperCase() === 'IN_MAINTENANCE').length;
+  const vehiclesOutOfService = rows.filter((vehicle) => String(vehicle?.status || '').toUpperCase() === 'OUT_OF_SERVICE').length;
+  const migrationHeld = activeBlocks.filter((block) => String(block?.blockType || '').toUpperCase() === 'MIGRATION_HOLD').length;
+  const availableFleet = rows.filter((vehicle) => {
+    const status = String(vehicle?.status || '').toUpperCase();
+    return !['ON_RENT', 'IN_MAINTENANCE', 'OUT_OF_SERVICE'].includes(status);
+  }).length;
+  const onRent = rows.filter((vehicle) => String(vehicle?.status || '').toUpperCase() === 'ON_RENT').length + migrationHeld;
+  return {
+    fleetTotal,
+    availableFleet,
+    migrationHeld,
+    vehiclesInMaintenance,
+    vehiclesOutOfService,
+    onRent
+  };
+}
+
 function SalesRevenueChart({ reservations }) {
   const svgRef = useRef(null);
   const [activeIdx, setActiveIdx] = useState(11);
@@ -201,25 +225,34 @@ function DashboardInner({ token, me, logout }) {
   const [overview, setOverview] = useState(null);
   const [msg, setMsg] = useState('');
   const canSeeOverview = me?.moduleAccess?.reports !== false;
+  const canSeeVehicles = me?.moduleAccess?.vehicles !== false;
 
   const load = async () => {
-    const [reservationsResult, overviewResult] = await Promise.allSettled([
+    const [reservationsResult, overviewResult, vehiclesResult] = await Promise.allSettled([
       api('/api/reservations', {}, token),
-      canSeeOverview ? api('/api/reports/overview', {}, token) : Promise.resolve(null)
+      canSeeOverview ? api('/api/reports/overview', {}, token) : Promise.resolve(null),
+      !canSeeOverview && canSeeVehicles ? api('/api/vehicles', {}, token) : Promise.resolve([])
     ]);
 
     if (reservationsResult.status === 'fulfilled') setReservations(reservationsResult.value || []);
     else setReservations([]);
 
-    if (overviewResult.status === 'fulfilled') setOverview(overviewResult.value || null);
-    else setOverview(null);
+    if (overviewResult.status === 'fulfilled' && overviewResult.value) {
+      setOverview(overviewResult.value || null);
+    } else if (!canSeeOverview && vehiclesResult.status === 'fulfilled') {
+      setOverview({ kpis: deriveKpisFromVehicles(vehiclesResult.value || []) });
+    } else {
+      setOverview(null);
+    }
 
-    if (reservationsResult.status === 'rejected' && overviewResult.status === 'rejected') {
-      setMsg(reservationsResult.reason?.message || overviewResult.reason?.message || 'Unable to load dashboard');
+    if (reservationsResult.status === 'rejected' && overviewResult.status === 'rejected' && vehiclesResult.status === 'rejected') {
+      setMsg(reservationsResult.reason?.message || overviewResult.reason?.message || vehiclesResult.reason?.message || 'Unable to load dashboard');
     } else if (reservationsResult.status === 'rejected') {
       setMsg('Dashboard loaded with limited reservation data');
     } else if (canSeeOverview && overviewResult.status === 'rejected') {
       setMsg('Dashboard loaded with limited KPI data');
+    } else if (!canSeeOverview && canSeeVehicles && vehiclesResult.status === 'rejected') {
+      setMsg('Dashboard loaded with limited fleet metrics');
     } else {
       setMsg('');
     }
