@@ -45,10 +45,14 @@ export default function ReservationsPage() {
 
 function ReservationsInner({ token, me, logout }) {
   const router = useRouter();
+  const role = String(me?.role || '').toUpperCase().trim();
+  const isSuper = role === 'SUPER_ADMIN';
   const [reservations, setReservations] = useState([]);
   const [customers, setCustomers] = useState([]);
   const [locations, setLocations] = useState([]);
   const [vehicleTypes, setVehicleTypes] = useState([]);
+  const [tenantRows, setTenantRows] = useState([]);
+  const [activeTenantId, setActiveTenantId] = useState('');
   const [services, setServices] = useState([]);
   const [fees, setFees] = useState([]);
   const [insurancePlans, setInsurancePlans] = useState([]);
@@ -71,15 +75,31 @@ function ReservationsInner({ token, me, logout }) {
 
   const hasFeeAdvisory = (notes) => /\[FEE_ADVISORY_OPEN\s+/i.test(String(notes || ''));
 
+  const scopedPath = (path) => {
+    if (!isSuper || !activeTenantId) return path;
+    const joiner = path.includes('?') ? '&' : '?';
+    return `${path}${joiner}tenantId=${encodeURIComponent(activeTenantId)}`;
+  };
+
   const load = async () => {
+    if (isSuper && !activeTenantId) {
+      setReservations([]);
+      setCustomers([]);
+      setLocations([]);
+      setVehicleTypes([]);
+      setServices([]);
+      setFees([]);
+      setInsurancePlans([]);
+      return;
+    }
     const results = await Promise.allSettled([
-      api('/api/reservations', {}, token),
-      api('/api/customers', {}, token),
-      api('/api/locations', {}, token),
-      api('/api/vehicle-types', {}, token),
-      api('/api/additional-services?activeOnly=1', {}, token),
-      api('/api/fees', {}, token),
-      api('/api/settings/insurance-plans', {}, token)
+      api(scopedPath('/api/reservations'), {}, token),
+      api(scopedPath('/api/customers'), {}, token),
+      api(scopedPath('/api/locations'), {}, token),
+      api(scopedPath('/api/vehicle-types'), {}, token),
+      api(scopedPath('/api/additional-services?activeOnly=1'), {}, token),
+      api(scopedPath('/api/fees'), {}, token),
+      api(scopedPath('/api/settings/insurance-plans'), {}, token)
     ]);
 
     const [r, c, l, vt, s, f, ip] = results;
@@ -103,7 +123,17 @@ function ReservationsInner({ token, me, logout }) {
     else if (r.status === 'rejected') setMsg(r.reason?.message || 'Unable to load reservations');
     else setMsg('');
   };
-  useEffect(() => { load(); }, [token]);
+  useEffect(() => {
+    if (!isSuper) return;
+    api('/api/tenants', {}, token)
+      .then((rows) => {
+        const nextRows = Array.isArray(rows) ? rows : [];
+        setTenantRows(nextRows);
+        if (!activeTenantId && nextRows[0]?.id) setActiveTenantId(nextRows[0].id);
+      })
+      .catch((error) => setMsg(error.message));
+  }, [token, isSuper]);
+  useEffect(() => { load(); }, [token, isSuper, activeTenantId]);
 
   useEffect(() => {
     const canResolve = createOpen && createForm.vehicleTypeId && createForm.pickupLocationId && createForm.pickupAt && createForm.returnAt;
@@ -121,7 +151,7 @@ function ReservationsInner({ token, me, logout }) {
           pickupAt: createForm.pickupAt,
           returnAt: createForm.returnAt
         });
-        const out = await api(`/api/rates/resolve?${q.toString()}`, {}, token);
+        const out = await api(scopedPath(`/api/rates/resolve?${q.toString()}`), {}, token);
         if (cancelled) return;
         setRateError('');
         setCreateForm((f) => ({ ...f, dailyRate: String(out?.dailyRate ?? ''), estimatedTotal: String(out?.baseTotal ?? '') }));
@@ -204,7 +234,7 @@ function ReservationsInner({ token, me, logout }) {
   };
   const setStatus = async (id, status) => {
     try {
-      await api(`/api/reservations/${id}`, { method: 'PATCH', body: JSON.stringify({ status }) }, token);
+      await api(scopedPath(`/api/reservations/${id}`), { method: 'PATCH', body: JSON.stringify({ status }) }, token);
       setMsg(status === 'CANCELLED' ? 'Reservation cancelled' : status === 'NO_SHOW' ? 'Reservation marked as no show' : 'Status updated');
       await load();
     } catch (e) {
@@ -218,7 +248,7 @@ function ReservationsInner({ token, me, logout }) {
         setMsg('New customer requires first name, last name and phone');
         return;
       }
-      const created = await api('/api/customers', {
+      const created = await api(scopedPath('/api/customers'), {
         method: 'POST',
         body: JSON.stringify({
           firstName: newCustomer.firstName,
@@ -251,7 +281,7 @@ function ReservationsInner({ token, me, logout }) {
       const addOnsTotal = 0;
       const addonSummary = ''; // moved to Charges edit flow
 
-      await api('/api/reservations', {
+      await api(scopedPath('/api/reservations'), {
         method: 'POST',
         body: JSON.stringify({
           reservationNumber,
@@ -324,7 +354,7 @@ function ReservationsInner({ token, me, logout }) {
     setValidatingImport(true);
     setImportReport(null);
     try {
-      const report = await api('/api/reservations/bulk/validate', {
+      const report = await api(scopedPath('/api/reservations/bulk/validate'), {
         method: 'POST',
         body: JSON.stringify({ rows: importRows })
       }, token);
@@ -339,7 +369,7 @@ function ReservationsInner({ token, me, logout }) {
   const proceedImport = async () => {
     setImportingRows(true);
     try {
-      const out = await api('/api/reservations/bulk/import', {
+      const out = await api(scopedPath('/api/reservations/bulk/import'), {
         method: 'POST',
         body: JSON.stringify({ rows: importRows })
       }, token);
@@ -440,6 +470,8 @@ function ReservationsInner({ token, me, logout }) {
     };
   }, [reservations]);
 
+  const activeTenant = tenantRows.find((tenant) => tenant.id === activeTenantId) || null;
+
   return (
     <AppShell me={me} logout={logout}>
       <section className="glass card-lg section-card" style={{ marginBottom: 16 }}>
@@ -454,6 +486,23 @@ function ReservationsInner({ token, me, logout }) {
             </div>
             <span className="status-chip neutral">Mobile Ops</span>
           </div>
+          {isSuper ? (
+            <div className="form-grid-2" style={{ marginTop: 16, marginBottom: 8 }}>
+              <div className="stack">
+                <label className="label">Reservation Tenant Scope</label>
+                <select value={activeTenantId} onChange={(e) => setActiveTenantId(e.target.value)}>
+                  {tenantRows.map((tenant) => (
+                    <option key={tenant.id} value={tenant.id}>{tenant.name} ({tenant.slug})</option>
+                  ))}
+                </select>
+              </div>
+              <div className="info-tile">
+                <span className="label">Focused Tenant</span>
+                <strong>{activeTenant?.name || 'Select tenant'}</strong>
+                <span className="ui-muted">{activeTenant?.slug || 'Reservations, create flow, and imports now follow this scope.'}</span>
+              </div>
+            </div>
+          ) : null}
           <div className="app-card-grid compact">
             <div className="info-tile">
               <span className="label">Pickups Today</span>
