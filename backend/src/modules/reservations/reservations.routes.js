@@ -77,6 +77,26 @@ reservationsRouter.get('/', async (req, res, next) => {
   }
 });
 
+reservationsRouter.get('/page', async (req, res, next) => {
+  try {
+    res.json(await reservationsService.listPage({
+      query: req.query?.q,
+      limit: req.query?.limit,
+      offset: req.query?.offset
+    }, scopeFor(req)));
+  } catch (e) {
+    next(e);
+  }
+});
+
+reservationsRouter.get('/summary', async (req, res, next) => {
+  try {
+    res.json(await reservationsService.summary(scopeFor(req)));
+  } catch (e) {
+    next(e);
+  }
+});
+
 reservationsRouter.post('/bulk/validate', async (req, res, next) => {
   try {
     const rows = Array.isArray(req.body?.rows) ? req.body.rows : [];

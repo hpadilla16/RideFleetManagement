@@ -225,8 +225,30 @@ async function buildCustomerImportRow(row, index, scope = {}, cache = {}) {
 }
 
 export const customersService = {
-  list(scope = {}) {
-    return prisma.customer.findMany({ where: scope?.tenantId ? { tenantId: scope.tenantId } : undefined, orderBy: { createdAt: 'desc' } });
+  list(scope = {}, options = {}) {
+    const query = norm(options.query);
+    const limitRaw = options.limit;
+    const limit = limitRaw == null || limitRaw === ''
+      ? undefined
+      : Math.min(250, Math.max(1, Number.parseInt(String(limitRaw), 10) || 100));
+
+    return prisma.customer.findMany({
+      where: {
+        ...(scope?.tenantId ? { tenantId: scope.tenantId } : {}),
+        ...(query
+          ? {
+              OR: [
+                { firstName: { contains: query, mode: 'insensitive' } },
+                { lastName: { contains: query, mode: 'insensitive' } },
+                { email: { contains: query, mode: 'insensitive' } },
+                { phone: { contains: query, mode: 'insensitive' } }
+              ]
+            }
+          : {})
+      },
+      orderBy: { createdAt: 'desc' },
+      ...(limit ? { take: limit } : {})
+    });
   },
 
   async getById(id, scope = {}) {

@@ -547,6 +547,7 @@ model Reservation {
   @@index([status, pickupAt])
   @@index([workflowMode, status, pickupAt])
   @@index([pickupLocationId, pickupAt])
+  @@index([tenantId, createdAt])
   @@index([repairOrderNumber])
 }
 

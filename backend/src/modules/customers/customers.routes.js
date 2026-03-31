@@ -10,7 +10,10 @@ function scopeFor(req) {
 }
 
 customersRouter.get('/', async (_req, res) => {
-  res.json(await customersService.list(scopeFor(_req)));
+  res.json(await customersService.list(scopeFor(_req), {
+    query: _req.query?.q,
+    limit: _req.query?.limit
+  }));
 });
 
 customersRouter.post('/bulk/validate', async (req, res) => {

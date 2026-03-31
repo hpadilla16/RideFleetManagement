@@ -232,6 +232,16 @@ function normLower(v) {
   return norm(v).toLowerCase();
 }
 
+function clampPositiveInt(value, fallback, min, max) {
+  const parsed = Number.parseInt(String(value ?? ''), 10);
+  if (!Number.isFinite(parsed)) return fallback;
+  return Math.min(max, Math.max(min, parsed));
+}
+
+function hasFeeAdvisoryFlag(notes) {
+  return /\[FEE_ADVISORY_OPEN\s+/i.test(String(notes || ''));
+}
+
 function parseDateInput(value) {
   if (!value) return null;
   const parsed = new Date(value);
@@ -759,6 +769,211 @@ async function pickAvailableVehicle({ vehicleTypeId, pickupLocationId, pickupAt,
 }
 
 export const reservationsService = {
+  async summary(scope = {}) {
+    const now = new Date();
+    const dayStart = new Date(now);
+    dayStart.setHours(0, 0, 0, 0);
+    const dayEnd = new Date(now);
+    dayEnd.setHours(23, 59, 59, 999);
+    const where = scope?.tenantId ? { tenantId: scope.tenantId } : {};
+
+    const [
+      pickupsToday,
+      returnsToday,
+      checkedOut,
+      feeAdvisories,
+      noShows,
+      nextPickup,
+      nextReturn,
+      nextFeeAdvisory,
+      nextNoShow
+    ] = await Promise.all([
+      prisma.reservation.count({
+        where: {
+          ...where,
+          pickupAt: { gte: dayStart, lte: dayEnd }
+        }
+      }),
+      prisma.reservation.count({
+        where: {
+          ...where,
+          returnAt: { gte: dayStart, lte: dayEnd }
+        }
+      }),
+      prisma.reservation.count({
+        where: {
+          ...where,
+          status: 'CHECKED_OUT'
+        }
+      }),
+      prisma.reservation.count({
+        where: {
+          ...where,
+          notes: { contains: '[FEE_ADVISORY_OPEN' }
+        }
+      }),
+      prisma.reservation.count({
+        where: {
+          ...where,
+          status: 'NO_SHOW'
+        }
+      }),
+      prisma.reservation.findFirst({
+        where: {
+          ...where,
+          status: { in: ['NEW', 'CONFIRMED'] }
+        },
+        orderBy: [{ pickupAt: 'asc' }],
+        select: {
+          id: true,
+          reservationNumber: true,
+          pickupAt: true,
+          customer: { select: { firstName: true, lastName: true } }
+        }
+      }),
+      prisma.reservation.findFirst({
+        where: {
+          ...where,
+          status: 'CHECKED_OUT'
+        },
+        orderBy: [{ returnAt: 'asc' }],
+        select: {
+          id: true,
+          reservationNumber: true,
+          returnAt: true,
+          customer: { select: { firstName: true, lastName: true } }
+        }
+      }),
+      prisma.reservation.findFirst({
+        where: {
+          ...where,
+          notes: { contains: '[FEE_ADVISORY_OPEN' }
+        },
+        orderBy: [{ updatedAt: 'desc' }],
+        select: {
+          id: true,
+          reservationNumber: true,
+          notes: true,
+          customer: { select: { firstName: true, lastName: true } }
+        }
+      }),
+      prisma.reservation.findFirst({
+        where: {
+          ...where,
+          status: 'NO_SHOW'
+        },
+        orderBy: [{ updatedAt: 'desc' }],
+        select: {
+          id: true,
+          reservationNumber: true,
+          customer: { select: { firstName: true, lastName: true } }
+        }
+      })
+    ]);
+
+    const customerLabel = (row) => `${row?.customer?.firstName || ''} ${row?.customer?.lastName || ''}`.trim();
+    const nextItems = [
+      nextPickup
+        ? {
+            id: `pickup-${nextPickup.id}`,
+            title: 'Next Pickup',
+            detail: `${nextPickup.reservationNumber} - ${customerLabel(nextPickup)}`.trim(),
+            note: `Pickup scheduled for ${new Date(nextPickup.pickupAt).toLocaleString()}.`,
+            href: `/reservations/${nextPickup.id}`,
+            actionLabel: 'Open Reservation'
+          }
+        : null,
+      nextReturn
+        ? {
+            id: `return-${nextReturn.id}`,
+            title: 'Next Return',
+            detail: `${nextReturn.reservationNumber} - ${customerLabel(nextReturn)}`.trim(),
+            note: `Return due at ${new Date(nextReturn.returnAt).toLocaleString()}.`,
+            href: `/reservations/${nextReturn.id}`,
+            actionLabel: 'Review Return'
+          }
+        : null,
+      nextFeeAdvisory
+        ? {
+            id: `fee-${nextFeeAdvisory.id}`,
+            title: 'Fee Advisory',
+            detail: `${nextFeeAdvisory.reservationNumber} - ${customerLabel(nextFeeAdvisory)}`.trim(),
+            note: hasFeeAdvisoryFlag(nextFeeAdvisory.notes)
+              ? 'Additional fee advisory is still open on this booking.'
+              : 'Reservation still needs fee follow-up.',
+            href: `/reservations/${nextFeeAdvisory.id}`,
+            actionLabel: 'Resolve Advisory'
+          }
+        : null,
+      nextNoShow
+        ? {
+            id: `no-show-${nextNoShow.id}`,
+            title: 'No-Show Follow-Up',
+            detail: `${nextNoShow.reservationNumber} - ${customerLabel(nextNoShow)}`.trim(),
+            note: 'This booking was marked no-show and may need follow-up.',
+            href: `/reservations/${nextNoShow.id}`,
+            actionLabel: 'Review'
+          }
+        : null
+    ].filter(Boolean);
+
+    return {
+      pickupsToday,
+      returnsToday,
+      checkedOut,
+      feeAdvisories,
+      noShows,
+      nextItems
+    };
+  },
+
+  async listPage(options = {}, scope = {}) {
+    const query = norm(options.query);
+    const take = clampPositiveInt(options.limit, 100, 1, 250);
+    const skip = clampPositiveInt(options.offset, 0, 0, 100000);
+    const where = {
+      ...(scope?.tenantId ? { tenantId: scope.tenantId } : {}),
+      ...(query
+        ? {
+            OR: [
+              { reservationNumber: { contains: query, mode: 'insensitive' } },
+              { sourceRef: { contains: query, mode: 'insensitive' } },
+              {
+                customer: {
+                  OR: [
+                    { firstName: { contains: query, mode: 'insensitive' } },
+                    { lastName: { contains: query, mode: 'insensitive' } },
+                    { email: { contains: query, mode: 'insensitive' } },
+                    { phone: { contains: query, mode: 'insensitive' } }
+                  ]
+                }
+              }
+            ]
+          }
+        : {})
+    };
+
+    const [total, rows] = await Promise.all([
+      prisma.reservation.count({ where }),
+      prisma.reservation.findMany({
+        where,
+        orderBy: { createdAt: 'desc' },
+        skip,
+        take,
+        select: reservationListBaseSelect
+      })
+    ]);
+
+    const hydrated = await hydrateReservationListRows(rows, scope);
+    return {
+      rows: hydrated,
+      total,
+      limit: take,
+      offset: skip,
+      hasMore: skip + hydrated.length < total
+    };
+  },
+
   async list(scope = {}) {
     const where = scope?.tenantId ? { tenantId: scope.tenantId } : undefined;
     try {

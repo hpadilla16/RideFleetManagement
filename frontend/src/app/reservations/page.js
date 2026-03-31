@@ -39,6 +39,9 @@ import { AuthGate } from '../../components/AuthGate';
 import { AppShell } from '../../components/AppShell';
 import { api } from '../../lib/client';
 
+const RESERVATION_PAGE_SIZE = 100;
+const CUSTOMER_PICKER_LIMIT = 100;
+
 export default function ReservationsPage() {
   return <AuthGate>{({ token, me, logout }) => <ReservationsInner token={token} me={me} logout={logout} />}</AuthGate>;
 }
@@ -49,6 +52,17 @@ function ReservationsInner({ token, me, logout }) {
   const isSuper = role === 'SUPER_ADMIN';
   const canManageReservationSetup = ['SUPER_ADMIN', 'ADMIN', 'OPS'].includes(role);
   const [reservations, setReservations] = useState([]);
+  const [reservationsTotal, setReservationsTotal] = useState(0);
+  const [reservationsHasMore, setReservationsHasMore] = useState(false);
+  const [loadingReservations, setLoadingReservations] = useState(false);
+  const [reservationSummary, setReservationSummary] = useState({
+    pickupsToday: 0,
+    returnsToday: 0,
+    checkedOut: 0,
+    feeAdvisories: 0,
+    noShows: 0,
+    nextItems: []
+  });
   const [customers, setCustomers] = useState([]);
   const [locations, setLocations] = useState([]);
   const [vehicleTypes, setVehicleTypes] = useState([]);
@@ -57,9 +71,12 @@ function ReservationsInner({ token, me, logout }) {
   const [services, setServices] = useState([]);
   const [fees, setFees] = useState([]);
   const [insurancePlans, setInsurancePlans] = useState([]);
+  const [supportLoaded, setSupportLoaded] = useState(false);
+  const [loadingSupport, setLoadingSupport] = useState(false);
   const [selectedServiceIds, setSelectedServiceIds] = useState([]);
   const [selectedFeeIds, setSelectedFeeIds] = useState([]);
   const [selectedInsuranceCode, setSelectedInsuranceCode] = useState('');
+  const [searchDraft, setSearchDraft] = useState('');
   const [query, setQuery] = useState('');
   const [msg, setMsg] = useState('');
   const [createOpen, setCreateOpen] = useState(false);
@@ -82,47 +99,117 @@ function ReservationsInner({ token, me, logout }) {
     return `${path}${joiner}tenantId=${encodeURIComponent(activeTenantId)}`;
   };
 
-  const load = async () => {
+  const clearSupportData = () => {
+    setCustomers([]);
+    setLocations([]);
+    setVehicleTypes([]);
+    setServices([]);
+    setFees([]);
+    setInsurancePlans([]);
+    setSupportLoaded(false);
+  };
+
+  const loadReservations = async ({ offset = 0, append = false, nextQuery = query } = {}) => {
     if (isSuper && !activeTenantId) {
       setReservations([]);
-      setCustomers([]);
-      setLocations([]);
-      setVehicleTypes([]);
-      setServices([]);
-      setFees([]);
-      setInsurancePlans([]);
+      setReservationsTotal(0);
+      setReservationsHasMore(false);
       return;
     }
-    const results = await Promise.allSettled([
-      api(scopedPath('/api/reservations'), {}, token),
-      canManageReservationSetup ? api(scopedPath('/api/customers'), {}, token) : Promise.resolve([]),
-      canManageReservationSetup ? api(scopedPath('/api/locations'), {}, token) : Promise.resolve([]),
-      canManageReservationSetup ? api(scopedPath('/api/vehicle-types'), {}, token) : Promise.resolve([]),
-      canManageReservationSetup ? api(scopedPath('/api/additional-services?activeOnly=1'), {}, token) : Promise.resolve([]),
-      canManageReservationSetup ? api(scopedPath('/api/fees'), {}, token) : Promise.resolve([]),
-      canManageReservationSetup ? api(scopedPath('/api/settings/insurance-plans'), {}, token) : Promise.resolve([])
-    ]);
+    setLoadingReservations(true);
+    const params = new URLSearchParams({
+      limit: String(RESERVATION_PAGE_SIZE),
+      offset: String(offset)
+    });
+    if (nextQuery) params.set('q', nextQuery);
+    try {
+      const payload = await api(scopedPath(`/api/reservations/page?${params.toString()}`), {}, token);
+      const nextRows = Array.isArray(payload?.rows) ? payload.rows : [];
+      setReservations((prev) => append ? [...prev, ...nextRows] : nextRows);
+      setReservationsTotal(Number(payload?.total || nextRows.length || 0));
+      setReservationsHasMore(!!payload?.hasMore);
+      setMsg('');
+    } catch (error) {
+      if (!append) {
+        setReservations([]);
+        setReservationsTotal(0);
+        setReservationsHasMore(false);
+      }
+      setMsg(error?.message || 'Unable to load reservations');
+    } finally {
+      setLoadingReservations(false);
+    }
+  };
 
-    const [r, c, l, vt, s, f, ip] = results;
-    if (r.status === 'fulfilled') setReservations(r.value || []);
-    else setReservations([]);
-    if (c.status === 'fulfilled') setCustomers(c.value || []);
-    else setCustomers([]);
-    if (l.status === 'fulfilled') setLocations(l.value || []);
-    else setLocations([]);
-    if (vt.status === 'fulfilled') setVehicleTypes(vt.value || []);
-    else setVehicleTypes([]);
-    if (s.status === 'fulfilled') setServices(s.value || []);
-    else setServices([]);
-    if (f.status === 'fulfilled') setFees((f.value || []).filter((x) => x?.isActive !== false));
-    else setFees([]);
-    if (ip.status === 'fulfilled') setInsurancePlans(ip.value || []);
-    else setInsurancePlans([]);
+  const loadReservationSummary = async () => {
+    if (isSuper && !activeTenantId) {
+      setReservationSummary({
+        pickupsToday: 0,
+        returnsToday: 0,
+        checkedOut: 0,
+        feeAdvisories: 0,
+        noShows: 0,
+        nextItems: []
+      });
+      return;
+    }
+    try {
+      const payload = await api(scopedPath('/api/reservations/summary'), {}, token);
+      setReservationSummary({
+        pickupsToday: Number(payload?.pickupsToday || 0),
+        returnsToday: Number(payload?.returnsToday || 0),
+        checkedOut: Number(payload?.checkedOut || 0),
+        feeAdvisories: Number(payload?.feeAdvisories || 0),
+        noShows: Number(payload?.noShows || 0),
+        nextItems: Array.isArray(payload?.nextItems) ? payload.nextItems : []
+      });
+    } catch {
+      setReservationSummary({
+        pickupsToday: 0,
+        returnsToday: 0,
+        checkedOut: 0,
+        feeAdvisories: 0,
+        noShows: 0,
+        nextItems: []
+      });
+    }
+  };
 
-    const failures = results.filter((row) => row.status === 'rejected');
-    if (failures.length && r.status === 'fulfilled' && canManageReservationSetup) setMsg('Reservations loaded with limited supporting data');
-    else if (r.status === 'rejected') setMsg(r.reason?.message || 'Unable to load reservations');
-    else setMsg('');
+  const loadSupportData = async () => {
+    if (!canManageReservationSetup || supportLoaded || loadingSupport) return;
+    if (isSuper && !activeTenantId) return;
+
+    setLoadingSupport(true);
+    try {
+      const results = await Promise.allSettled([
+        api(scopedPath(`/api/customers?limit=${CUSTOMER_PICKER_LIMIT}`), {}, token),
+        api(scopedPath('/api/locations'), {}, token),
+        api(scopedPath('/api/vehicle-types'), {}, token),
+        api(scopedPath('/api/additional-services?activeOnly=1'), {}, token),
+        api(scopedPath('/api/fees'), {}, token),
+        api(scopedPath('/api/settings/insurance-plans'), {}, token)
+      ]);
+
+      const [c, l, vt, s, f, ip] = results;
+      if (c.status === 'fulfilled') setCustomers(c.value || []);
+      else setCustomers([]);
+      if (l.status === 'fulfilled') setLocations(l.value || []);
+      else setLocations([]);
+      if (vt.status === 'fulfilled') setVehicleTypes(vt.value || []);
+      else setVehicleTypes([]);
+      if (s.status === 'fulfilled') setServices(s.value || []);
+      else setServices([]);
+      if (f.status === 'fulfilled') setFees((f.value || []).filter((x) => x?.isActive !== false));
+      else setFees([]);
+      if (ip.status === 'fulfilled') setInsurancePlans(ip.value || []);
+      else setInsurancePlans([]);
+
+      const failures = results.filter((row) => row.status === 'rejected');
+      if (failures.length) setMsg('Supporting reservation setup data loaded with some limits');
+      setSupportLoaded(true);
+    } finally {
+      setLoadingSupport(false);
+    }
   };
   useEffect(() => {
     if (!isSuper) return;
@@ -134,7 +221,17 @@ function ReservationsInner({ token, me, logout }) {
       })
       .catch((error) => setMsg(error.message));
   }, [token, isSuper]);
-  useEffect(() => { load(); }, [token, isSuper, activeTenantId, canManageReservationSetup]);
+  useEffect(() => {
+    const handle = setTimeout(() => setQuery(searchDraft.trim()), 250);
+    return () => clearTimeout(handle);
+  }, [searchDraft]);
+  useEffect(() => { clearSupportData(); }, [token, isSuper, activeTenantId, canManageReservationSetup]);
+  useEffect(() => { loadReservations({ offset: 0, append: false, nextQuery: query }); }, [token, isSuper, activeTenantId, query]);
+  useEffect(() => { loadReservationSummary(); }, [token, isSuper, activeTenantId]);
+  useEffect(() => {
+    if (!createOpen && !showImport) return;
+    loadSupportData();
+  }, [createOpen, showImport, token, isSuper, activeTenantId, canManageReservationSetup]);
 
   useEffect(() => {
     const canResolve = createOpen && createForm.vehicleTypeId && createForm.pickupLocationId && createForm.pickupAt && createForm.returnAt;
@@ -237,7 +334,8 @@ function ReservationsInner({ token, me, logout }) {
     try {
       await api(scopedPath(`/api/reservations/${id}`), { method: 'PATCH', body: JSON.stringify({ status }) }, token);
       setMsg(status === 'CANCELLED' ? 'Reservation cancelled' : status === 'NO_SHOW' ? 'Reservation marked as no show' : 'Status updated');
-      await load();
+      await loadReservations({ offset: 0, nextQuery: query });
+      await loadReservationSummary();
     } catch (e) {
       setMsg(e.message);
     }
@@ -307,7 +405,8 @@ function ReservationsInner({ token, me, logout }) {
       setSelectedFeeIds([]);
       setSelectedInsuranceCode('');
       setCreateForm({ reservationNumber: '', customerId: '', vehicleTypeId: '', pickupAt: '', returnAt: '', pickupLocationId: '', returnLocationId: '', dailyRate: '', estimatedTotal: '', notes: '' });
-      await load();
+      await loadReservations({ offset: 0, nextQuery: query });
+      await loadReservationSummary();
     } catch (e) {
       setMsg(e.message);
     }
@@ -379,7 +478,8 @@ function ReservationsInner({ token, me, logout }) {
       setImportStep(1);
       setImportRows([]);
       setImportReport(null);
-      await load();
+      await loadReservations({ offset: 0, nextQuery: query });
+      await loadReservationSummary();
     } catch (e) {
       setMsg(e.message);
     } finally {
@@ -393,83 +493,9 @@ function ReservationsInner({ token, me, logout }) {
     setImportReport(null);
   };
 
-  const rows = reservations.filter((r) => {
-    const q = query.toLowerCase();
-    return !q || r.reservationNumber.toLowerCase().includes(q) || `${r.customer?.firstName || ''} ${r.customer?.lastName || ''}`.toLowerCase().includes(q);
-  });
+  const rows = reservations;
 
-  const reservationShiftSummary = useMemo(() => {
-    const now = new Date();
-    const sameDay = (value) => {
-      if (!value) return false;
-      const date = new Date(value);
-      return (
-        date.getFullYear() === now.getFullYear() &&
-        date.getMonth() === now.getMonth() &&
-        date.getDate() === now.getDate()
-      );
-    };
-
-    const upcomingPickups = reservations
-      .filter((r) => ['CONFIRMED', 'PENDING'].includes(String(r?.status || '').toUpperCase()))
-      .sort((a, b) => new Date(a.pickupAt) - new Date(b.pickupAt));
-    const returnsDue = reservations
-      .filter((r) => String(r?.status || '').toUpperCase() === 'CHECKED_OUT')
-      .sort((a, b) => new Date(a.returnAt) - new Date(b.returnAt));
-    const feeAdvisories = reservations.filter((r) => hasFeeAdvisory(r.notes));
-    const noShows = reservations.filter((r) => String(r?.status || '').toUpperCase() === 'NO_SHOW');
-
-    const nextItems = [
-      upcomingPickups[0]
-        ? {
-            id: `pickup-${upcomingPickups[0].id}`,
-            title: 'Next Pickup',
-            detail: `${upcomingPickups[0].reservationNumber} - ${upcomingPickups[0].customer?.firstName || ''} ${upcomingPickups[0].customer?.lastName || ''}`.trim(),
-            note: `Pickup ${new Date(upcomingPickups[0].pickupAt).toLocaleString()}`,
-            href: `/reservations/${upcomingPickups[0].id}/checkout`,
-            actionLabel: 'Start Check-out'
-          }
-        : null,
-      returnsDue[0]
-        ? {
-            id: `return-${returnsDue[0].id}`,
-            title: 'Next Return',
-            detail: `${returnsDue[0].reservationNumber} - ${returnsDue[0].customer?.firstName || ''} ${returnsDue[0].customer?.lastName || ''}`.trim(),
-            note: `Return ${new Date(returnsDue[0].returnAt).toLocaleString()}`,
-            href: `/reservations/${returnsDue[0].id}/checkin`,
-            actionLabel: 'Start Check-in'
-          }
-        : null,
-      feeAdvisories[0]
-        ? {
-            id: `fee-${feeAdvisories[0].id}`,
-            title: 'Fee Advisory',
-            detail: `${feeAdvisories[0].reservationNumber} - ${feeAdvisories[0].customer?.firstName || ''} ${feeAdvisories[0].customer?.lastName || ''}`.trim(),
-            note: 'Additional fee advisory still open on this booking.',
-            href: `/reservations/${feeAdvisories[0].id}`,
-            actionLabel: 'Open Workflow'
-          }
-        : null,
-      noShows[0]
-        ? {
-            id: `noshow-${noShows[0].id}`,
-            title: 'No-Show Follow-Up',
-            detail: `${noShows[0].reservationNumber} - ${noShows[0].customer?.firstName || ''} ${noShows[0].customer?.lastName || ''}`.trim(),
-            note: 'This booking was marked no-show and may need follow-up.',
-            href: `/reservations/${noShows[0].id}`,
-            actionLabel: 'Review'
-          }
-        : null
-    ].filter(Boolean);
-
-    return {
-      pickupsToday: reservations.filter((r) => sameDay(r.pickupAt)).length,
-      returnsToday: reservations.filter((r) => sameDay(r.returnAt)).length,
-      checkedOut: reservations.filter((r) => String(r?.status || '').toUpperCase() === 'CHECKED_OUT').length,
-      feeAdvisories: feeAdvisories.length,
-      nextItems
-    };
-  }, [reservations]);
+  const reservationShiftSummary = reservationSummary;
 
   const activeTenant = tenantRows.find((tenant) => tenant.id === activeTenantId) || null;
 
@@ -543,8 +569,35 @@ function ReservationsInner({ token, me, logout }) {
         </div>
       </section>
       <section className="glass card-lg">
-        <div className="row-between"><h2>Reservations</h2><div style={{ display: 'flex', gap: 8 }}><input placeholder="Search reservation/customer" value={query} onChange={(e) => setQuery(e.target.value)} />{canManageReservationSetup ? <button onClick={() => setShowImport(true)}>Upload Migration</button> : null}{canManageReservationSetup ? <button onClick={() => { setCreateOpen(true); setSelectedServiceIds([]); setSelectedFeeIds([]); setSelectedInsuranceCode(''); setRateError(''); setAddingCustomer(false); setNewCustomer({ firstName: '', lastName: '', phone: '', email: '' }); }}>New Reservation</button> : null}</div></div>
+        <div className="row-between">
+          <h2>Reservations</h2>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <input
+              placeholder="Search reservation/customer"
+              value={searchDraft}
+              onChange={(e) => setSearchDraft(e.target.value)}
+            />
+            {canManageReservationSetup ? <button onClick={() => setShowImport(true)}>{loadingSupport && !supportLoaded ? 'Loading...' : 'Upload Migration'}</button> : null}
+            {canManageReservationSetup ? (
+              <button onClick={() => {
+                setCreateOpen(true);
+                setSelectedServiceIds([]);
+                setSelectedFeeIds([]);
+                setSelectedInsuranceCode('');
+                setRateError('');
+                setAddingCustomer(false);
+                setNewCustomer({ firstName: '', lastName: '', phone: '', email: '' });
+              }}
+              >
+                {loadingSupport && !supportLoaded ? 'Loading...' : 'New Reservation'}
+              </button>
+            ) : null}
+          </div>
+        </div>
         {msg ? <p className="label">{msg}</p> : null}
+        <p className="label">
+          Showing {rows.length} of {reservationsTotal} reservations{loadingReservations ? ' - loading...' : ''}.
+        </p>
         <table>
           <thead><tr><th>#</th><th>Status</th><th>Customer</th><th>Pickup</th><th>Return</th><th>Actions</th></tr></thead>
           <tbody>
@@ -568,6 +621,13 @@ function ReservationsInner({ token, me, logout }) {
             ))}
           </tbody>
         </table>
+        {reservationsHasMore ? (
+          <div style={{ display: 'flex', justifyContent: 'center', marginTop: 12 }}>
+            <button type="button" onClick={() => loadReservations({ offset: rows.length, append: true, nextQuery: query })} disabled={loadingReservations}>
+              {loadingReservations ? 'Loading...' : 'Load More'}
+            </button>
+          </div>
+        ) : null}
       </section>
 
       {createOpen && (
