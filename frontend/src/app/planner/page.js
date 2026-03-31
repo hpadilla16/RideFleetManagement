@@ -124,18 +124,31 @@ function PlannerInner({ token, me, logout }) {
   const rangeEnd = useMemo(() => addDays(rangeStart, dayCount), [rangeStart, dayCount]);
 
   const load = async () => {
-    const [r, a, v, vt, l] = await Promise.all([
+    const [r, a, v, vt, l] = await Promise.allSettled([
       api('/api/reservations', {}, token),
       api('/api/rental-agreements', {}, token),
       api('/api/vehicles', {}, token),
       api('/api/vehicle-types', {}, token),
       api('/api/locations', {}, token)
     ]);
-    setReservations(r || []);
-    setAgreements(a || []);
-    setVehicles(v || []);
-    setVehicleTypes(vt || []);
-    setLocations(l || []);
+    if (r.status === 'fulfilled') setReservations(r.value || []);
+    else setReservations([]);
+    if (a.status === 'fulfilled') setAgreements(a.value || []);
+    else setAgreements([]);
+    if (v.status === 'fulfilled') setVehicles(v.value || []);
+    else setVehicles([]);
+    if (vt.status === 'fulfilled') setVehicleTypes(vt.value || []);
+    else setVehicleTypes([]);
+    if (l.status === 'fulfilled') setLocations(l.value || []);
+    else setLocations([]);
+
+    if (r.status === 'rejected' || v.status === 'rejected') {
+      setMsg(r.status === 'rejected' ? (r.reason?.message || 'Unable to load planner') : (v.reason?.message || 'Unable to load planner'));
+    } else if ([a, vt, l].some((row) => row.status === 'rejected')) {
+      setMsg('Planner loaded with limited supporting data');
+    } else {
+      setMsg('');
+    }
   };
 
   useEffect(() => { load(); }, [token]);

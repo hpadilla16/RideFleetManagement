@@ -261,17 +261,24 @@ function EmployeeAppInner({ token, me, logout }) {
   async function load(query = '') {
     try {
       setLoading(true);
-      const [dash, customersOut, locationsOut, typesOut] = await Promise.all([
+      const [dash, customersOut, locationsOut, typesOut] = await Promise.allSettled([
         api(`/api/employee-app/dashboard${query ? `?q=${encodeURIComponent(query)}` : ''}`, {}, token),
         api('/api/customers', {}, token),
         api('/api/locations', {}, token),
         api('/api/vehicle-types', {}, token)
       ]);
-      setDashboard(dash);
-      setCustomers(Array.isArray(customersOut) ? customersOut : []);
-      setLocations(Array.isArray(locationsOut) ? locationsOut : []);
-      setVehicleTypes(Array.isArray(typesOut) ? typesOut : []);
-      setMsg('');
+      if (dash.status === 'fulfilled') setDashboard(dash.value || null);
+      else setDashboard(null);
+      if (customersOut.status === 'fulfilled') setCustomers(Array.isArray(customersOut.value) ? customersOut.value : []);
+      else setCustomers([]);
+      if (locationsOut.status === 'fulfilled') setLocations(Array.isArray(locationsOut.value) ? locationsOut.value : []);
+      else setLocations([]);
+      if (typesOut.status === 'fulfilled') setVehicleTypes(Array.isArray(typesOut.value) ? typesOut.value : []);
+      else setVehicleTypes([]);
+
+      if (dash.status === 'rejected') setMsg(dash.reason?.message || 'Unable to load employee app');
+      else if ([customersOut, locationsOut, typesOut].some((row) => row.status === 'rejected')) setMsg('Employee app loaded with limited supporting data');
+      else setMsg('');
     } catch (error) {
       setDashboard(null);
       setMsg(error.message);

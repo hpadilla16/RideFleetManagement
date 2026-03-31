@@ -223,16 +223,24 @@ function VehiclesInner({ token, me, logout }) {
       setVehicleTypes([]);
       return;
     }
-    const [v, c, l, vt] = await Promise.all([
+    const [v, c, l, vt] = await Promise.allSettled([
       api(scopedPath('/api/vehicles'), {}, token),
       api(scopedPath('/api/customers'), {}, token),
       api(scopedPath('/api/locations'), {}, token),
       api(scopedPath('/api/vehicle-types'), {}, token)
     ]);
-    setVehicles(v);
-    setCustomers(c);
-    setLocations(l);
-    setVehicleTypes(vt);
+    if (v.status === 'fulfilled') setVehicles(v.value || []);
+    else setVehicles([]);
+    if (c.status === 'fulfilled') setCustomers(c.value || []);
+    else setCustomers([]);
+    if (l.status === 'fulfilled') setLocations(l.value || []);
+    else setLocations([]);
+    if (vt.status === 'fulfilled') setVehicleTypes(vt.value || []);
+    else setVehicleTypes([]);
+
+    if (v.status === 'rejected') setMsg(v.reason?.message || 'Unable to load vehicles');
+    else if ([c, l, vt].some((row) => row.status === 'rejected')) setMsg('Vehicles loaded with limited supporting data');
+    else setMsg('');
   };
 
   useEffect(() => {

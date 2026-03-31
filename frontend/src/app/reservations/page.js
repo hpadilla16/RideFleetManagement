@@ -72,7 +72,7 @@ function ReservationsInner({ token, me, logout }) {
   const hasFeeAdvisory = (notes) => /\[FEE_ADVISORY_OPEN\s+/i.test(String(notes || ''));
 
   const load = async () => {
-    const [r, c, l, vt, s, f, ip] = await Promise.all([
+    const results = await Promise.allSettled([
       api('/api/reservations', {}, token),
       api('/api/customers', {}, token),
       api('/api/locations', {}, token),
@@ -81,13 +81,27 @@ function ReservationsInner({ token, me, logout }) {
       api('/api/fees', {}, token),
       api('/api/settings/insurance-plans', {}, token)
     ]);
-    setReservations(r);
-    setCustomers(c);
-    setLocations(l);
-    setVehicleTypes(vt || []);
-    setServices(s || []);
-    setFees((f || []).filter((x) => x?.isActive !== false));
-    setInsurancePlans(ip || []);
+
+    const [r, c, l, vt, s, f, ip] = results;
+    if (r.status === 'fulfilled') setReservations(r.value || []);
+    else setReservations([]);
+    if (c.status === 'fulfilled') setCustomers(c.value || []);
+    else setCustomers([]);
+    if (l.status === 'fulfilled') setLocations(l.value || []);
+    else setLocations([]);
+    if (vt.status === 'fulfilled') setVehicleTypes(vt.value || []);
+    else setVehicleTypes([]);
+    if (s.status === 'fulfilled') setServices(s.value || []);
+    else setServices([]);
+    if (f.status === 'fulfilled') setFees((f.value || []).filter((x) => x?.isActive !== false));
+    else setFees([]);
+    if (ip.status === 'fulfilled') setInsurancePlans(ip.value || []);
+    else setInsurancePlans([]);
+
+    const failures = results.filter((row) => row.status === 'rejected');
+    if (failures.length && r.status === 'fulfilled') setMsg('Reservations loaded with limited supporting data');
+    else if (r.status === 'rejected') setMsg(r.reason?.message || 'Unable to load reservations');
+    else setMsg('');
   };
   useEffect(() => { load(); }, [token]);
 

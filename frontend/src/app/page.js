@@ -202,12 +202,26 @@ function DashboardInner({ token, me, logout }) {
   const [msg, setMsg] = useState('');
 
   const load = async () => {
-    const [r, report] = await Promise.all([
+    const [reservationsResult, overviewResult] = await Promise.allSettled([
       api('/api/reservations', {}, token),
       api('/api/reports/overview', {}, token)
     ]);
-    setReservations(r);
-    setOverview(report);
+
+    if (reservationsResult.status === 'fulfilled') setReservations(reservationsResult.value || []);
+    else setReservations([]);
+
+    if (overviewResult.status === 'fulfilled') setOverview(overviewResult.value || null);
+    else setOverview(null);
+
+    if (reservationsResult.status === 'rejected' && overviewResult.status === 'rejected') {
+      setMsg(reservationsResult.reason?.message || overviewResult.reason?.message || 'Unable to load dashboard');
+    } else if (reservationsResult.status === 'rejected') {
+      setMsg('Dashboard loaded with limited reservation data');
+    } else if (overviewResult.status === 'rejected') {
+      setMsg('Dashboard loaded with limited KPI data');
+    } else {
+      setMsg('');
+    }
   };
 
   useEffect(() => {
