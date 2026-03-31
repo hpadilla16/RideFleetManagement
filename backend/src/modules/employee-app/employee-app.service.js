@@ -163,6 +163,13 @@ function incidentCard(row) {
   };
 }
 
+function monthKey(value = new Date()) {
+  const d = new Date(value);
+  const year = d.getFullYear();
+  const month = String(d.getMonth() + 1).padStart(2, '0');
+  return `${year}-${month}`;
+}
+
 export const employeeAppService = {
   async getDashboard(user, input = {}) {
     const scope = tenantScope(user);
@@ -188,6 +195,8 @@ export const employeeAppService = {
       }
     };
 
+    const selfMonthKey = monthKey(now);
+
     const [
       precheckinQueueRaw,
       checkoutQueueRaw,
@@ -199,7 +208,9 @@ export const employeeAppService = {
       loanerReturnsRaw,
       incidentEscalationsRaw,
       searchResultsRaw,
-      counts
+      counts,
+      selfUser,
+      selfCommissionRows
     ] = await Promise.all([
       prisma.reservation.findMany({
         where: {
@@ -358,11 +369,86 @@ export const employeeAppService = {
             status: 'UNDER_REVIEW'
           }
         })
-      ])
+      ]),
+      prisma.user.findFirst({
+        where: {
+          id: user?.sub || '__never__',
+          ...(scope?.tenantId ? { tenantId: scope.tenantId } : {})
+        },
+        select: {
+          id: true,
+          fullName: true,
+          email: true,
+          role: true,
+          isActive: true,
+          tenantId: true,
+          commissionPlan: {
+            select: { id: true, name: true, isActive: true }
+          }
+        }
+      }),
+      prisma.agreementCommission.findMany({
+        where: {
+          ...(scope?.tenantId ? { tenantId: scope.tenantId } : {}),
+          employeeUserId: user?.sub || '__never__',
+          monthKey: selfMonthKey
+        },
+        select: {
+          id: true,
+          status: true,
+          commissionAmount: true,
+          calculatedAt: true,
+          rentalAgreement: {
+            select: {
+              id: true,
+              agreementNumber: true,
+              reservationId: true
+            }
+          }
+        },
+        orderBy: [{ calculatedAt: 'desc' }],
+        take: 12
+      })
     ]);
+
+    const selfCommissionSummary = {
+      monthKey: selfMonthKey,
+      commissionAmount: Number((selfCommissionRows || []).reduce((sum, row) => sum + Number(row?.commissionAmount || 0), 0).toFixed(2)),
+      agreements: (selfCommissionRows || []).length,
+      pending: (selfCommissionRows || []).filter((row) => String(row?.status || '').toUpperCase() === 'PENDING').length,
+      approved: (selfCommissionRows || []).filter((row) => String(row?.status || '').toUpperCase() === 'APPROVED').length,
+      paid: (selfCommissionRows || []).filter((row) => String(row?.status || '').toUpperCase() === 'PAID').length,
+      recent: (selfCommissionRows || []).map((row) => ({
+        id: row.id,
+        status: row.status,
+        commissionAmount: Number(row?.commissionAmount || 0),
+        calculatedAt: row.calculatedAt,
+        agreementNumber: row?.rentalAgreement?.agreementNumber || null,
+        reservationId: row?.rentalAgreement?.reservationId || null
+      }))
+    };
 
     return {
       query,
+      self: {
+        profile: selfUser
+          ? {
+              id: selfUser.id,
+              fullName: selfUser.fullName,
+              email: selfUser.email,
+              role: selfUser.role,
+              isActive: !!selfUser.isActive,
+              commissionPlan: selfUser.commissionPlan
+                ? {
+                    id: selfUser.commissionPlan.id,
+                    name: selfUser.commissionPlan.name,
+                    isActive: !!selfUser.commissionPlan.isActive
+                  }
+                : null
+            }
+          : null,
+        commissions: selfCommissionSummary
+      },
       metrics: {
         openReservations: counts[0],
         activeRentals: counts[1],

@@ -257,6 +257,16 @@ function EmployeeAppInner({ token, me, logout }) {
     issueOpen: 0,
     issueUnderReview: 0
   };
+  const selfProfile = dashboard?.self?.profile || null;
+  const selfCommissions = dashboard?.self?.commissions || {
+    monthKey: '',
+    commissionAmount: 0,
+    agreements: 0,
+    pending: 0,
+    approved: 0,
+    paid: 0,
+    recent: []
+  };
 
   async function load(query = '') {
     try {
@@ -477,6 +487,7 @@ function EmployeeAppInner({ token, me, logout }) {
         stats={employeeShellStats}
         tabs={[
           { href: '#employee-hub', label: 'Hub', active: true },
+          { href: '#employee-profile', label: 'Me', active: !!selfProfile },
           { href: '#employee-shift', label: 'Shift', active: nextUpItems.length > 0 },
           { href: '#employee-search', label: 'Lookup', active: !!search || !!dashboard?.searchResults?.length },
           { href: '#employee-create', label: 'Quick Create', active: quickCreateReady },
@@ -497,6 +508,68 @@ function EmployeeAppInner({ token, me, logout }) {
             <span className="app-banner-pill">Under review {metrics.issueUnderReview}</span>
           </div>
         </div>
+
+        <section id="employee-profile" className="glass card-lg section-card">
+          <div className="row-between">
+            <div>
+              <div className="section-title">My Profile & Commissions</div>
+              <p className="ui-muted">Quick view of your employee profile, plan, and current commission month.</p>
+            </div>
+            <span className="status-chip neutral">{selfProfile?.role || 'AGENT'}</span>
+          </div>
+          <div className="app-card-grid compact">
+            <div className="doc-card">
+              <span className="label">Profile</span>
+              <strong>{selfProfile?.fullName || me?.fullName || 'Employee'}</strong>
+              <div className="doc-meta">{selfProfile?.email || me?.email || '-'}</div>
+              <div className="inline-actions" style={{ marginTop: 10 }}>
+                <span className="status-chip neutral">{selfProfile?.isActive === false ? 'Inactive' : 'Active'}</span>
+              </div>
+            </div>
+            <div className="doc-card">
+              <span className="label">Commission Plan</span>
+              <strong>{selfProfile?.commissionPlan?.name || 'No plan assigned'}</strong>
+              <div className="doc-meta">{selfCommissions?.monthKey || 'Current month'}</div>
+            </div>
+            <div className="doc-card">
+              <span className="label">This Month</span>
+              <strong>{formatMoney(selfCommissions?.commissionAmount || 0)}</strong>
+              <div className="doc-meta">{selfCommissions?.agreements || 0} agreement(s)</div>
+            </div>
+            <div className="doc-card">
+              <span className="label">Commission Status</span>
+              <strong>{selfCommissions?.pending || 0} pending</strong>
+              <div className="doc-meta">
+                {(selfCommissions?.approved || 0)} approved | {(selfCommissions?.paid || 0)} paid
+              </div>
+            </div>
+          </div>
+          <div className="stack" style={{ marginTop: 16 }}>
+            {(selfCommissions?.recent || []).length ? (
+              selfCommissions.recent.map((row) => (
+                <div key={row.id} className="surface-note" style={{ display: 'grid', gap: 8 }}>
+                  <div className="row-between" style={{ gap: 12 }}>
+                    <strong>{row.agreementNumber || 'Agreement'}</strong>
+                    <span className={statusClass(row.status)}>{row.status}</span>
+                  </div>
+                  <div className="info-grid-tight">
+                    <div className="info-tile"><span className="label">Commission</span><strong>{formatMoney(row.commissionAmount)}</strong></div>
+                    <div className="info-tile"><span className="label">Calculated</span><strong>{formatDateTime(row.calculatedAt)}</strong></div>
+                  </div>
+                  {row.reservationId ? (
+                    <div className="inline-actions">
+                      <Link href={`/reservations/${row.reservationId}`}>
+                        <button type="button" className="button-subtle">Open Reservation</button>
+                      </Link>
+                    </div>
+                  ) : null}
+                </div>
+              ))
+            ) : (
+              <div className="surface-note">No commission lines have been recorded for you yet this month.</div>
+            )}
+          </div>
+        </section>
 
         <section id="employee-hub" className="glass card-lg section-card">
           <div className="row-between">
