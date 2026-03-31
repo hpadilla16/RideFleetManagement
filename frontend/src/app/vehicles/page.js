@@ -148,6 +148,7 @@ function VehiclesInner({ token, me, logout }) {
   const router = useRouter();
   const role = String(me?.role || '').toUpperCase().trim();
   const isSuper = role === 'SUPER_ADMIN';
+  const canManageVehicleSetup = ['SUPER_ADMIN', 'ADMIN', 'OPS'].includes(role);
   const [vehicles, setVehicles] = useState([]);
   const [customers, setCustomers] = useState([]);
   const [locations, setLocations] = useState([]);
@@ -225,9 +226,9 @@ function VehiclesInner({ token, me, logout }) {
     }
     const [v, c, l, vt] = await Promise.allSettled([
       api(scopedPath('/api/vehicles'), {}, token),
-      api(scopedPath('/api/customers'), {}, token),
-      api(scopedPath('/api/locations'), {}, token),
-      api(scopedPath('/api/vehicle-types'), {}, token)
+      canManageVehicleSetup ? api(scopedPath('/api/customers'), {}, token) : Promise.resolve([]),
+      canManageVehicleSetup ? api(scopedPath('/api/locations'), {}, token) : Promise.resolve([]),
+      canManageVehicleSetup ? api(scopedPath('/api/vehicle-types'), {}, token) : Promise.resolve([])
     ]);
     if (v.status === 'fulfilled') setVehicles(v.value || []);
     else setVehicles([]);
@@ -239,7 +240,7 @@ function VehiclesInner({ token, me, logout }) {
     else setVehicleTypes([]);
 
     if (v.status === 'rejected') setMsg(v.reason?.message || 'Unable to load vehicles');
-    else if ([c, l, vt].some((row) => row.status === 'rejected')) setMsg('Vehicles loaded with limited supporting data');
+    else if (canManageVehicleSetup && [c, l, vt].some((row) => row.status === 'rejected')) setMsg('Vehicles loaded with limited supporting data');
     else setMsg('');
   };
 
@@ -255,7 +256,7 @@ function VehiclesInner({ token, me, logout }) {
       .catch((err) => setMsg(err.message));
   }, [token, isSuper]);
 
-  useEffect(() => { load(); }, [token, activeTenantId, isSuper]);
+  useEffect(() => { load(); }, [token, activeTenantId, isSuper, canManageVehicleSetup]);
 
   const rows = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -720,8 +721,8 @@ function VehiclesInner({ token, me, logout }) {
           </div>
           <div className="app-banner-list">
             <span className="app-banner-pill">Car Sharing Supply {fleetOpsHub.carSharing}</span>
-            <button type="button" className="button-subtle" onClick={() => setShowAddVehicle(true)} disabled={isSuper && !activeTenantId}>Add Vehicle</button>
-            <button type="button" className="button-subtle" onClick={() => setShowUpload(true)} disabled={isSuper && !activeTenantId}>Upload Inventory</button>
+            {canManageVehicleSetup ? <button type="button" className="button-subtle" onClick={() => setShowAddVehicle(true)} disabled={isSuper && !activeTenantId}>Add Vehicle</button> : null}
+            {canManageVehicleSetup ? <button type="button" className="button-subtle" onClick={() => setShowUpload(true)} disabled={isSuper && !activeTenantId}>Upload Inventory</button> : null}
             <button type="button" className="button-subtle" onClick={() => setShowBlockUpload(true)} disabled={isSuper && !activeTenantId}>Upload Blocks</button>
             <button type="button" className="button-subtle" onClick={exportQrPack} disabled={(isSuper && !activeTenantId) || !vehicles.length || exportingQrPack}>{exportingQrPack ? 'Exporting QR Pack...' : 'Export QR Pack'}</button>
           </div>
@@ -746,8 +747,8 @@ function VehiclesInner({ token, me, logout }) {
           <h2>Vehicle Inventory</h2>
           <div style={{ display: 'flex', gap: 8, width: 'min(720px,100%)' }}>
             <input placeholder="Search unit, plate, toll tag, sticker, make/model, VIN" value={query} onChange={(e) => setQuery(e.target.value)} />
-            <button onClick={() => setShowAddVehicle(true)} disabled={isSuper && !activeTenantId}>Add Vehicle</button>
-            <button onClick={() => setShowUpload(true)} disabled={isSuper && !activeTenantId}>Upload Inventory</button>
+            {canManageVehicleSetup ? <button onClick={() => setShowAddVehicle(true)} disabled={isSuper && !activeTenantId}>Add Vehicle</button> : null}
+            {canManageVehicleSetup ? <button onClick={() => setShowUpload(true)} disabled={isSuper && !activeTenantId}>Upload Inventory</button> : null}
             <button onClick={() => setShowBlockUpload(true)} disabled={isSuper && !activeTenantId}>Upload Blocks</button>
             <button className="button-subtle" onClick={exportQrPack} disabled={(isSuper && !activeTenantId) || !vehicles.length || exportingQrPack}>{exportingQrPack ? 'Exporting...' : 'Export QR Pack'}</button>
           </div>

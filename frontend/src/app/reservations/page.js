@@ -47,6 +47,7 @@ function ReservationsInner({ token, me, logout }) {
   const router = useRouter();
   const role = String(me?.role || '').toUpperCase().trim();
   const isSuper = role === 'SUPER_ADMIN';
+  const canManageReservationSetup = ['SUPER_ADMIN', 'ADMIN', 'OPS'].includes(role);
   const [reservations, setReservations] = useState([]);
   const [customers, setCustomers] = useState([]);
   const [locations, setLocations] = useState([]);
@@ -94,12 +95,12 @@ function ReservationsInner({ token, me, logout }) {
     }
     const results = await Promise.allSettled([
       api(scopedPath('/api/reservations'), {}, token),
-      api(scopedPath('/api/customers'), {}, token),
-      api(scopedPath('/api/locations'), {}, token),
-      api(scopedPath('/api/vehicle-types'), {}, token),
-      api(scopedPath('/api/additional-services?activeOnly=1'), {}, token),
-      api(scopedPath('/api/fees'), {}, token),
-      api(scopedPath('/api/settings/insurance-plans'), {}, token)
+      canManageReservationSetup ? api(scopedPath('/api/customers'), {}, token) : Promise.resolve([]),
+      canManageReservationSetup ? api(scopedPath('/api/locations'), {}, token) : Promise.resolve([]),
+      canManageReservationSetup ? api(scopedPath('/api/vehicle-types'), {}, token) : Promise.resolve([]),
+      canManageReservationSetup ? api(scopedPath('/api/additional-services?activeOnly=1'), {}, token) : Promise.resolve([]),
+      canManageReservationSetup ? api(scopedPath('/api/fees'), {}, token) : Promise.resolve([]),
+      canManageReservationSetup ? api(scopedPath('/api/settings/insurance-plans'), {}, token) : Promise.resolve([])
     ]);
 
     const [r, c, l, vt, s, f, ip] = results;
@@ -119,7 +120,7 @@ function ReservationsInner({ token, me, logout }) {
     else setInsurancePlans([]);
 
     const failures = results.filter((row) => row.status === 'rejected');
-    if (failures.length && r.status === 'fulfilled') setMsg('Reservations loaded with limited supporting data');
+    if (failures.length && r.status === 'fulfilled' && canManageReservationSetup) setMsg('Reservations loaded with limited supporting data');
     else if (r.status === 'rejected') setMsg(r.reason?.message || 'Unable to load reservations');
     else setMsg('');
   };
@@ -133,7 +134,7 @@ function ReservationsInner({ token, me, logout }) {
       })
       .catch((error) => setMsg(error.message));
   }, [token, isSuper]);
-  useEffect(() => { load(); }, [token, isSuper, activeTenantId]);
+  useEffect(() => { load(); }, [token, isSuper, activeTenantId, canManageReservationSetup]);
 
   useEffect(() => {
     const canResolve = createOpen && createForm.vehicleTypeId && createForm.pickupLocationId && createForm.pickupAt && createForm.returnAt;
@@ -542,7 +543,7 @@ function ReservationsInner({ token, me, logout }) {
         </div>
       </section>
       <section className="glass card-lg">
-        <div className="row-between"><h2>Reservations</h2><div style={{ display: 'flex', gap: 8 }}><input placeholder="Search reservation/customer" value={query} onChange={(e) => setQuery(e.target.value)} /><button onClick={() => setShowImport(true)}>Upload Migration</button><button onClick={() => { setCreateOpen(true); setSelectedServiceIds([]); setSelectedFeeIds([]); setSelectedInsuranceCode(''); setRateError(''); setAddingCustomer(false); setNewCustomer({ firstName: '', lastName: '', phone: '', email: '' }); }}>New Reservation</button></div></div>
+        <div className="row-between"><h2>Reservations</h2><div style={{ display: 'flex', gap: 8 }}><input placeholder="Search reservation/customer" value={query} onChange={(e) => setQuery(e.target.value)} />{canManageReservationSetup ? <button onClick={() => setShowImport(true)}>Upload Migration</button> : null}{canManageReservationSetup ? <button onClick={() => { setCreateOpen(true); setSelectedServiceIds([]); setSelectedFeeIds([]); setSelectedInsuranceCode(''); setRateError(''); setAddingCustomer(false); setNewCustomer({ firstName: '', lastName: '', phone: '', email: '' }); }}>New Reservation</button> : null}</div></div>
         {msg ? <p className="label">{msg}</p> : null}
         <table>
           <thead><tr><th>#</th><th>Status</th><th>Customer</th><th>Pickup</th><th>Return</th><th>Actions</th></tr></thead>

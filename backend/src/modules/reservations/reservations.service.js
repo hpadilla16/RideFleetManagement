@@ -93,6 +93,74 @@ function scopedSettingKey(baseKey, scope = {}) {
   return scope?.tenantId ? `tenant:${scope.tenantId}:${baseKey}` : baseKey;
 }
 
+const reservationListSelect = {
+  id: true,
+  tenantId: true,
+  reservationNumber: true,
+  sourceRef: true,
+  status: true,
+  workflowMode: true,
+  paymentStatus: true,
+  pickupAt: true,
+  returnAt: true,
+  pickupLocationId: true,
+  returnLocationId: true,
+  customerId: true,
+  vehicleId: true,
+  vehicleTypeId: true,
+  dailyRate: true,
+  estimatedTotal: true,
+  notes: true,
+  customerInfoToken: true,
+  customerInfoCompletedAt: true,
+  customerInfoReviewedAt: true,
+  readyForPickupAt: true,
+  signatureSignedAt: true,
+  underageAlert: true,
+  underageAlertAge: true,
+  underageAlertThreshold: true,
+  customer: {
+    select: {
+      id: true,
+      firstName: true,
+      lastName: true,
+      email: true,
+      phone: true
+    }
+  },
+  vehicleType: {
+    select: {
+      id: true,
+      code: true,
+      name: true
+    }
+  },
+  vehicle: {
+    select: {
+      id: true,
+      internalNumber: true,
+      plate: true,
+      make: true,
+      model: true,
+      year: true
+    }
+  },
+  pickupLocation: {
+    select: {
+      id: true,
+      name: true,
+      code: true
+    }
+  },
+  returnLocation: {
+    select: {
+      id: true,
+      name: true,
+      code: true
+    }
+  }
+};
+
 function norm(v) {
   return String(v ?? '').trim();
 }
@@ -630,78 +698,47 @@ async function pickAvailableVehicle({ vehicleTypeId, pickupLocationId, pickupAt,
 export const reservationsService = {
   async list(scope = {}) {
     const where = scope?.tenantId ? { tenantId: scope.tenantId } : undefined;
-    const rows = await prisma.reservation.findMany({
-      where,
-      orderBy: { createdAt: 'desc' },
-      select: {
-        id: true,
-        tenantId: true,
-        reservationNumber: true,
-        sourceRef: true,
-        status: true,
-        workflowMode: true,
-        paymentStatus: true,
-        pickupAt: true,
-        returnAt: true,
-        pickupLocationId: true,
-        returnLocationId: true,
-        customerId: true,
-        vehicleId: true,
-        vehicleTypeId: true,
-        dailyRate: true,
-        estimatedTotal: true,
-        notes: true,
-        customerInfoToken: true,
-        customerInfoCompletedAt: true,
-        customerInfoReviewedAt: true,
-        readyForPickupAt: true,
-        signatureSignedAt: true,
-        underageAlert: true,
-        underageAlertAge: true,
-        underageAlertThreshold: true,
-        customer: {
-          select: {
-            id: true,
-            firstName: true,
-            lastName: true,
-            email: true,
-            phone: true
-          }
-        },
-        vehicleType: {
-          select: {
-            id: true,
-            code: true,
-            name: true
-          }
-        },
-        vehicle: {
-          select: {
-            id: true,
-            internalNumber: true,
-            plate: true,
-            make: true,
-            model: true,
-            year: true
-          }
-        },
-        pickupLocation: {
-          select: {
-            id: true,
-            name: true,
-            code: true
-          }
-        },
-        returnLocation: {
-          select: {
-            id: true,
-            name: true,
-            code: true
-          }
+    try {
+      const rows = await prisma.reservation.findMany({
+        where,
+        orderBy: { createdAt: 'desc' },
+        select: reservationListSelect
+      });
+      return rows.map((r) => ({ ...r, ...deriveUnderageAlertForReservation(r) }));
+    } catch (error) {
+      console.error('[reservations] list fallback activated', {
+        tenantId: scope?.tenantId || null,
+        error: String(error?.message || error)
+      });
+
+      const ids = await prisma.reservation.findMany({
+        where,
+        orderBy: { createdAt: 'desc' },
+        select: { id: true }
+      });
+
+      const safeRows = [];
+      for (const row of ids) {
+        try {
+          const reservation = await prisma.reservation.findFirst({
+            where: {
+              id: row.id,
+              ...(scope?.tenantId ? { tenantId: scope.tenantId } : {})
+            },
+            select: reservationListSelect
+          });
+          if (reservation) safeRows.push({ ...reservation, ...deriveUnderageAlertForReservation(reservation) });
+        } catch (rowError) {
+          console.error('[reservations] skipped list row', {
+            reservationId: row.id,
+            tenantId: scope?.tenantId || null,
+            error: String(rowError?.message || rowError)
+          });
         }
       }
-    });
-    return rows.map((r) => ({ ...r, ...deriveUnderageAlertForReservation(r) }));
+
+      return safeRows;
+    }
   },
 
   async getById(id, scope = {}) {

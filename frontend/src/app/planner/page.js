@@ -93,6 +93,8 @@ export default function PlannerPage() {
 }
 
 function PlannerInner({ token, me, logout }) {
+  const role = String(me?.role || '').toUpperCase().trim();
+  const canManagePlannerSetup = ['SUPER_ADMIN', 'ADMIN', 'OPS'].includes(role);
   const [reservations, setReservations] = useState([]);
   const [agreements, setAgreements] = useState([]);
   const [vehicles, setVehicles] = useState([]);
@@ -128,8 +130,8 @@ function PlannerInner({ token, me, logout }) {
       api('/api/reservations', {}, token),
       api('/api/rental-agreements', {}, token),
       api('/api/vehicles', {}, token),
-      api('/api/vehicle-types', {}, token),
-      api('/api/locations', {}, token)
+      canManagePlannerSetup ? api('/api/vehicle-types', {}, token) : Promise.resolve([]),
+      canManagePlannerSetup ? api('/api/locations', {}, token) : Promise.resolve([])
     ]);
     if (r.status === 'fulfilled') setReservations(r.value || []);
     else setReservations([]);
@@ -144,14 +146,14 @@ function PlannerInner({ token, me, logout }) {
 
     if (r.status === 'rejected' || v.status === 'rejected') {
       setMsg(r.status === 'rejected' ? (r.reason?.message || 'Unable to load planner') : (v.reason?.message || 'Unable to load planner'));
-    } else if ([a, vt, l].some((row) => row.status === 'rejected')) {
+    } else if ([a].some((row) => row.status === 'rejected') || (canManagePlannerSetup && [vt, l].some((row) => row.status === 'rejected'))) {
       setMsg('Planner loaded with limited supporting data');
     } else {
       setMsg('');
     }
   };
 
-  useEffect(() => { load(); }, [token]);
+  useEffect(() => { load(); }, [token, canManagePlannerSetup]);
 
   const replaceReservationInState = (updatedReservation) => {
     if (!updatedReservation?.id) return;
