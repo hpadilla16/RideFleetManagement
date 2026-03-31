@@ -136,6 +136,26 @@ function esc(s) {
     .replaceAll('"', '&quot;');
 }
 
+function companyInitials(name = '') {
+  const words = String(name || '')
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean);
+  if (!words.length) return 'RF';
+  return words
+    .slice(0, 2)
+    .map((part) => String(part || '').charAt(0).toUpperCase())
+    .join('') || 'RF';
+}
+
+function buildCompanyLogoBlock(companyName = '', companyLogoUrl = '') {
+  const logoUrl = String(companyLogoUrl || '').trim();
+  if (logoUrl) {
+    return `<img src="${esc(logoUrl)}" alt="${esc(companyName || 'Company Logo')}" />`;
+  }
+  return `<div class="logo-fallback">${esc(companyInitials(companyName))}</div>`;
+}
+
 function applyTemplate(html, vars = {}) {
   let out = String(html || '');
   for (const [k, v] of Object.entries(vars)) {
@@ -1375,6 +1395,7 @@ export const rentalAgreementsService = {
       companyName: locCfg.companyName || agreement?.reservation?.pickupLocation?.name || globalCfg.companyName,
       companyAddress: locCfg.companyAddress || agreement?.reservation?.pickupLocation?.address1 || globalCfg.companyAddress,
       companyPhone: locCfg.companyPhone || agreement?.reservation?.pickupLocation?.phone || globalCfg.companyPhone,
+      companyLogoUrl: locCfg.companyLogoUrl || globalCfg.companyLogoUrl,
       termsText: locCfg.termsText || globalCfg.termsText,
       returnInstructionsText: locCfg.returnInstructionsText || globalCfg.returnInstructionsText
     };
@@ -1430,12 +1451,16 @@ export const rentalAgreementsService = {
     const { agreement, cfg, signatureIp, signatureTime, paymentsForPrint, paidAmountForPrint, amountDueForPrint } = await this.agreementPrintContext(id);
     const chargesRows = (agreement.charges || []).map((c) => `<tr><td>${esc(c.name)}</td><td>${Number(c.quantity || 0).toFixed(2)}</td><td>$${Number(c.rate || 0).toFixed(2)}</td><td>$${Number(c.total || 0).toFixed(2)}</td></tr>`).join('');
     const paymentsRows = (paymentsForPrint || []).map((p) => `<tr><td>${esc(fmtDate(p.paidAt || p.createdAt))}</td><td>${esc(p.method || '-')}</td><td>${esc(p.reference || '-')}</td><td>${esc(String(p.status || '-'))}</td><td>$${Number(p.amount || 0).toFixed(2)}</td></tr>`).join('');
+    const companyLogoUrl = String(cfg.companyLogoUrl || '').trim();
+    const companyLogoBlock = buildCompanyLogoBlock(cfg.companyName || '', companyLogoUrl);
 
     if (String(cfg?.agreementHtmlTemplate || '').trim()) {
       return applyTemplate(cfg.agreementHtmlTemplate, {
         companyName: esc(cfg.companyName || ''),
         companyAddress: esc(cfg.companyAddress || ''),
         companyPhone: esc(cfg.companyPhone || ''),
+        companyLogoUrl: esc(companyLogoUrl),
+        companyLogoBlock,
         agreementNumber: esc(agreement.agreementNumber || ''),
         reservationNumber: esc(agreement.reservation?.reservationNumber || '-'),
         customerName: esc(`${agreement.customerFirstName || ''} ${agreement.customerLastName || ''}`.trim()),
@@ -1465,6 +1490,8 @@ export const rentalAgreementsService = {
       companyName: esc(cfg.companyName || ''),
       companyAddress: esc(cfg.companyAddress || ''),
       companyPhone: esc(cfg.companyPhone || ''),
+      companyLogoUrl: esc(companyLogoUrl),
+      companyLogoBlock,
       agreementNumber: esc(agreement.agreementNumber || ''),
       reservationNumber: esc(agreement.reservation?.reservationNumber || '-'),
       customerName: esc(`${agreement.customerFirstName || ''} ${agreement.customerLastName || ''}`.trim()),
