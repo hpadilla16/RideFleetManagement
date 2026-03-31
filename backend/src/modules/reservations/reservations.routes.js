@@ -130,6 +130,30 @@ reservationsRouter.get('/:id/pricing', async (req, res, next) => {
   }
 });
 
+reservationsRouter.get('/:id/pricing-options', async (req, res, next) => {
+  try {
+    const reservation = await reservationsService.getById(req.params.id, scopeFor(req));
+    if (!reservation) return res.status(404).json({ error: 'Reservation not found' });
+    const tenantScope = reservation?.tenantId ? { tenantId: reservation.tenantId } : scopeFor(req);
+    const [services, fees, insurancePlans] = await Promise.all([
+      additionalServicesService.list({
+        locationId: reservation.pickupLocationId || undefined,
+        activeOnly: true,
+        tenantId: tenantScope.tenantId
+      }),
+      feesService.list(tenantScope),
+      settingsService.getInsurancePlans(tenantScope)
+    ]);
+    res.json({
+      services: Array.isArray(services) ? services : [],
+      fees: Array.isArray(fees) ? fees : [],
+      insurancePlans: Array.isArray(insurancePlans) ? insurancePlans : []
+    });
+  } catch (e) {
+    next(e);
+  }
+});
+
 reservationsRouter.put('/:id/pricing', async (req, res, next) => {
   try {
     if (!canManagePricingOverrides(req)) {

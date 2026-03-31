@@ -223,9 +223,7 @@ function ReservationDetailInner({ token, me, logout }) {
         canLoadSupportingCatalogs ? api('/api/locations', {}, token) : Promise.resolve([]),
         api('/api/customers', {}, token).catch(() => []),
         api('/api/vehicles', {}, token).catch(() => []),
-        canManagePricingOverrides ? api('/api/additional-services', {}, token) : Promise.resolve([]),
-        canManagePricingOverrides ? api('/api/fees', {}, token) : Promise.resolve([]),
-        canManagePricingOverrides ? api('/api/settings/insurance-plans', {}, token) : Promise.resolve([]),
+        canManagePricingOverrides ? api(`/api/reservations/${id}/pricing-options`, {}, token) : Promise.resolve(null),
         api(`/api/reservations/${id}/pricing`, {}, token).catch(() => null),
         api(`/api/reservations/${id}/payments`, {}, token).catch(() => []),
         api(`/api/reservations/${id}/audit-logs`, {}, token).catch(() => []),
@@ -236,13 +234,11 @@ function ReservationDetailInner({ token, me, logout }) {
       const locationsOut = valueOr(0, []);
       const customersOut = valueOr(1, []);
       const vehiclesOut = valueOr(2, []);
-      const servicesOut = valueOr(3, []);
-      const feesOut = valueOr(4, []);
-      const insuranceOut = valueOr(5, []);
-      const pricingOut = valueOr(6, null);
-      const paymentsOut = valueOr(7, []);
-      const logsOut = valueOr(8, []);
-      const tollsOut = valueOr(9, null);
+      const pricingOptionsOut = valueOr(3, null);
+      const pricingOut = valueOr(4, null);
+      const paymentsOut = valueOr(5, []);
+      const logsOut = valueOr(6, []);
+      const tollsOut = valueOr(7, null);
 
       setPricing(pricingOut);
       setPaymentRows(Array.isArray(paymentsOut) ? paymentsOut : []);
@@ -250,9 +246,9 @@ function ReservationDetailInner({ token, me, logout }) {
       setLocations(Array.isArray(locationsOut) ? locationsOut : []);
       setCustomers(Array.isArray(customersOut) ? customersOut : []);
       setVehicles(Array.isArray(vehiclesOut) ? vehiclesOut : []);
-      setServiceOptions(Array.isArray(servicesOut) ? servicesOut : []);
-      setFeeOptions(Array.isArray(feesOut) ? feesOut : []);
-      setInsurancePlans(Array.isArray(insuranceOut) ? insuranceOut : []);
+      setServiceOptions(Array.isArray(pricingOptionsOut?.services) ? pricingOptionsOut.services : []);
+      setFeeOptions(Array.isArray(pricingOptionsOut?.fees) ? pricingOptionsOut.fees : []);
+      setInsurancePlans(Array.isArray(pricingOptionsOut?.insurancePlans) ? pricingOptionsOut.insurancePlans : []);
       setTollSummary(tollsOut);
       setForm({
         customerId: reservationResult.customerId || '',
