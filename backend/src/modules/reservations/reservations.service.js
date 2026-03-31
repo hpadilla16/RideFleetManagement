@@ -99,7 +99,6 @@ const reservationListSelect = {
   reservationNumber: true,
   sourceRef: true,
   status: true,
-  workflowMode: true,
   paymentStatus: true,
   pickupAt: true,
   returnAt: true,
@@ -111,14 +110,6 @@ const reservationListSelect = {
   dailyRate: true,
   estimatedTotal: true,
   notes: true,
-  customerInfoToken: true,
-  customerInfoCompletedAt: true,
-  customerInfoReviewedAt: true,
-  readyForPickupAt: true,
-  signatureSignedAt: true,
-  underageAlert: true,
-  underageAlertAge: true,
-  underageAlertThreshold: true,
   customer: {
     select: {
       id: true,
@@ -167,7 +158,6 @@ const reservationListBaseSelect = {
   reservationNumber: true,
   sourceRef: true,
   status: true,
-  workflowMode: true,
   paymentStatus: true,
   pickupAt: true,
   returnAt: true,
@@ -179,14 +169,6 @@ const reservationListBaseSelect = {
   dailyRate: true,
   estimatedTotal: true,
   notes: true,
-  customerInfoToken: true,
-  customerInfoCompletedAt: true,
-  customerInfoReviewedAt: true,
-  readyForPickupAt: true,
-  signatureSignedAt: true,
-  underageAlert: true,
-  underageAlertAge: true,
-  underageAlertThreshold: true
 };
 
 async function hydrateReservationListRows(rows = [], scope = {}) {
