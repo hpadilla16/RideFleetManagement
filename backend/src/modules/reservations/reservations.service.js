@@ -161,6 +161,87 @@ const reservationListSelect = {
   }
 };
 
+const reservationListBaseSelect = {
+  id: true,
+  tenantId: true,
+  reservationNumber: true,
+  sourceRef: true,
+  status: true,
+  workflowMode: true,
+  paymentStatus: true,
+  pickupAt: true,
+  returnAt: true,
+  pickupLocationId: true,
+  returnLocationId: true,
+  customerId: true,
+  vehicleId: true,
+  vehicleTypeId: true,
+  dailyRate: true,
+  estimatedTotal: true,
+  notes: true,
+  customerInfoToken: true,
+  customerInfoCompletedAt: true,
+  customerInfoReviewedAt: true,
+  readyForPickupAt: true,
+  signatureSignedAt: true,
+  underageAlert: true,
+  underageAlertAge: true,
+  underageAlertThreshold: true
+};
+
+async function hydrateReservationListRows(rows = [], scope = {}) {
+  if (!rows.length) return [];
+
+  const customerIds = [...new Set(rows.map((row) => row.customerId).filter(Boolean))];
+  const vehicleTypeIds = [...new Set(rows.map((row) => row.vehicleTypeId).filter(Boolean))];
+  const vehicleIds = [...new Set(rows.map((row) => row.vehicleId).filter(Boolean))];
+  const locationIds = [...new Set(rows.flatMap((row) => [row.pickupLocationId, row.returnLocationId]).filter(Boolean))];
+
+  const [customers, vehicleTypes, vehicles, locations] = await Promise.all([
+    customerIds.length
+      ? prisma.customer.findMany({
+          where: { id: { in: customerIds }, ...(scope?.tenantId ? { tenantId: scope.tenantId } : {}) },
+          select: { id: true, firstName: true, lastName: true, email: true, phone: true }
+        })
+      : [],
+    vehicleTypeIds.length
+      ? prisma.vehicleType.findMany({
+          where: { id: { in: vehicleTypeIds }, ...(scope?.tenantId ? { tenantId: scope.tenantId } : {}) },
+          select: { id: true, code: true, name: true }
+        })
+      : [],
+    vehicleIds.length
+      ? prisma.vehicle.findMany({
+          where: { id: { in: vehicleIds }, ...(scope?.tenantId ? { tenantId: scope.tenantId } : {}) },
+          select: { id: true, internalNumber: true, plate: true, make: true, model: true, year: true }
+        })
+      : [],
+    locationIds.length
+      ? prisma.location.findMany({
+          where: { id: { in: locationIds }, ...(scope?.tenantId ? { tenantId: scope.tenantId } : {}) },
+          select: { id: true, name: true, code: true }
+        })
+      : []
+  ]);
+
+  const customerById = new Map(customers.map((row) => [row.id, row]));
+  const vehicleTypeById = new Map(vehicleTypes.map((row) => [row.id, row]));
+  const vehicleById = new Map(vehicles.map((row) => [row.id, row]));
+  const locationById = new Map(locations.map((row) => [row.id, row]));
+
+  return rows.map((row) => {
+    const hydrated = {
+      ...row,
+      customer: row.customerId ? customerById.get(row.customerId) || null : null,
+      vehicleType: row.vehicleTypeId ? vehicleTypeById.get(row.vehicleTypeId) || null : null,
+      vehicle: row.vehicleId ? vehicleById.get(row.vehicleId) || null : null,
+      pickupLocation: row.pickupLocationId ? locationById.get(row.pickupLocationId) || null : null,
+      returnLocation: row.returnLocationId ? locationById.get(row.returnLocationId) || null : null
+    };
+    return { ...hydrated, ...deriveUnderageAlertForReservation(hydrated) };
+  });
+}
+
 function norm(v) {
   return String(v ?? '').trim();
 }
@@ -702,42 +783,20 @@ export const reservationsService = {
       const rows = await prisma.reservation.findMany({
         where,
         orderBy: { createdAt: 'desc' },
-        select: reservationListSelect
+        select: reservationListBaseSelect
       });
-      return rows.map((r) => ({ ...r, ...deriveUnderageAlertForReservation(r) }));
+      return hydrateReservationListRows(rows, scope);
     } catch (error) {
       console.error('[reservations] list fallback activated', {
         tenantId: scope?.tenantId || null,
         error: String(error?.message || error)
       });
-
-      const ids = await prisma.reservation.findMany({
+      const fallbackRows = await prisma.reservation.findMany({
         where,
         orderBy: { createdAt: 'desc' },
-        select: { id: true }
+        select: reservationListBaseSelect
       });
-
-      const safeRows = [];
-      for (const row of ids) {
-        try {
-          const reservation = await prisma.reservation.findFirst({
-            where: {
-              id: row.id,
-              ...(scope?.tenantId ? { tenantId: scope.tenantId } : {})
-            },
-            select: reservationListSelect
-          });
-          if (reservation) safeRows.push({ ...reservation, ...deriveUnderageAlertForReservation(reservation) });
-        } catch (rowError) {
-          console.error('[reservations] skipped list row', {
-            reservationId: row.id,
-            tenantId: scope?.tenantId || null,
-            error: String(rowError?.message || rowError)
-          });
-        }
-      }
-
-      return safeRows;
+      return hydrateReservationListRows(fallbackRows, scope);
     }
   },
 
