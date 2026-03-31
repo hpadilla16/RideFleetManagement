@@ -136,8 +136,10 @@ function formatLoanerTimelineDetail(meta = {}, fallback = '') {
 function ReservationDetailInner({ token, me, logout }) {
   const { id } = useParams();
   const router = useRouter();
+  const role = String(me?.role || '').toUpperCase();
 
   const [row, setRow] = useState(null);
+  const [loading, setLoading] = useState(true);
   const [pricing, setPricing] = useState(null);
   const [paymentRows, setPaymentRows] = useState([]);
   const [commissionOwnerContext, setCommissionOwnerContext] = useState(null);
@@ -200,9 +202,10 @@ function ReservationDetailInner({ token, me, logout }) {
     loanerCloseoutNotes: '',
     note: ''
   });
-  const canManagePrecheckin = ['SUPER_ADMIN', 'ADMIN', 'OPS'].includes(String(me?.role || '').toUpperCase());
-  const canManagePricingOverrides = ['SUPER_ADMIN', 'ADMIN'].includes(String(me?.role || '').toUpperCase());
-  const canManageCommissionOwner = ['SUPER_ADMIN', 'ADMIN'].includes(String(me?.role || '').toUpperCase());
+  const canManagePrecheckin = ['SUPER_ADMIN', 'ADMIN', 'OPS'].includes(role);
+  const canManagePricingOverrides = ['SUPER_ADMIN', 'ADMIN'].includes(role);
+  const canManageCommissionOwner = ['SUPER_ADMIN', 'ADMIN'].includes(role);
+  const canLoadSupportingCatalogs = ['SUPER_ADMIN', 'ADMIN', 'OPS'].includes(role);
 
 
   const cleanMojibake = (val) => {
@@ -211,95 +214,116 @@ function ReservationDetailInner({ token, me, logout }) {
     try { return decodeURIComponent(escape(s)); } catch { return s; }
   };
   const load = async () => {
-    const [r, l, c, v, svc, fee, ip, pricingOut, paymentsOut, logsOut, tollsOut] = await Promise.all([
-      api(`/api/reservations/${id}`, {}, token),
-      api('/api/locations', {}, token),
-      api('/api/customers', {}, token),
-      api('/api/vehicles', {}, token).catch(() => []),
-      api('/api/additional-services', {}, token).catch(() => []),
-      api('/api/fees', {}, token).catch(() => []),
-      api('/api/settings/insurance-plans', {}, token).catch(() => []),
-      api(`/api/reservations/${id}/pricing`, {}, token).catch(() => null),
-      api(`/api/reservations/${id}/payments`, {}, token).catch(() => []),
-      api(`/api/reservations/${id}/audit-logs`, {}, token).catch(() => []),
-      api(`/api/tolls/reservations/${id}`, {}, token).catch(() => null)
-    ]);
-    setRow(r);
-    setPricing(pricingOut);
-    setPaymentRows(Array.isArray(paymentsOut) ? paymentsOut : []);
-    setAuditLogs(Array.isArray(logsOut) ? logsOut : []);
-    setLocations(l);
-    setCustomers(c);
-    setVehicles(Array.isArray(v) ? v : []);
-    setServiceOptions(Array.isArray(svc) ? svc : []);
-    setFeeOptions(Array.isArray(fee) ? fee : []);
-    setInsurancePlans(Array.isArray(ip) ? ip : []);
-    setTollSummary(tollsOut);
-    setForm({
-      customerId: r.customerId || '',
-      pickupAt: r.pickupAt ? new Date(r.pickupAt).toISOString().slice(0, 16) : '',
-      returnAt: r.returnAt ? new Date(r.returnAt).toISOString().slice(0, 16) : '',
-      pickupLocationId: r.pickupLocationId || '',
-      returnLocationId: r.returnLocationId || '',
-      notes: r.notes || ''
-    });
-    const loanerPacket = parseLoanerPacket(r.loanerBorrowerPacketJson);
-    setLoanerPacketForm({
-      driverLicenseChecked: !!loanerPacket.driverLicenseChecked,
-      insuranceCardCollected: !!loanerPacket.insuranceCardCollected,
-      registrationConfirmed: !!loanerPacket.registrationConfirmed,
-      walkaroundCompleted: !!loanerPacket.walkaroundCompleted,
-      fuelAndMileageCaptured: !!loanerPacket.fuelAndMileageCaptured,
-      notes: loanerPacket.notes || ''
-    });
-    setLoanerBillingForm({
-      loanerBillingMode: r.loanerBillingMode || 'COURTESY',
-      loanerBillingStatus: r.loanerBillingStatus || 'DRAFT',
-      loanerBillingContactName: r.loanerBillingContactName || '',
-      loanerBillingContactEmail: r.loanerBillingContactEmail || '',
-      loanerBillingContactPhone: r.loanerBillingContactPhone || '',
-      loanerBillingAuthorizationRef: r.loanerBillingAuthorizationRef || '',
-      loanerBillingNotes: r.loanerBillingNotes || ''
-    });
-    setLoanerAdvisorForm({
-      serviceAdvisorName: r.serviceAdvisorName || '',
-      serviceAdvisorEmail: r.serviceAdvisorEmail || '',
-      serviceAdvisorPhone: r.serviceAdvisorPhone || '',
-      serviceAdvisorNotes: r.serviceAdvisorNotes || '',
-      estimatedServiceCompletionAt: toLocalDateTime(r.estimatedServiceCompletionAt),
-      readyForPickup: !!r.readyForPickupAt,
-      readyForPickupNote: r.readyForPickupOverrideNote || ''
-    });
-    setLoanerReturnForm({
-      flagged: !!r.loanerReturnExceptionFlag,
-      loanerReturnExceptionNotes: r.loanerReturnExceptionNotes || ''
-    });
-    setLoanerAccountingForm({
-      loanerPurchaseOrderNumber: r.loanerPurchaseOrderNumber || '',
-      loanerDealerInvoiceNumber: r.loanerDealerInvoiceNumber || '',
-      loanerAccountingNotes: r.loanerAccountingNotes || '',
-      closeoutComplete: !!r.loanerAccountingClosedAt
-    });
-    setLoanerOpsForm({
-      vehicleId: r.vehicleId || '',
-      returnAt: r.returnAt ? new Date(r.returnAt).toISOString().slice(0, 16) : '',
-      estimatedServiceCompletionAt: toLocalDateTime(r.estimatedServiceCompletionAt),
-      loanerCloseoutNotes: r.loanerCloseoutNotes || '',
-      note: ''
-    });
-    setChargeModel(pricingEditorState(pricingOut, r));
-    if (canManageCommissionOwner && r?.rentalAgreement?.id) {
-      try {
-        const commissionCtx = await api(`/api/rental-agreements/${r.rentalAgreement.id}/commission-owner`, {}, token);
-        setCommissionOwnerContext(commissionCtx || null);
-        setCommissionOwnerPick(String(commissionCtx?.currentOwnerUserId || commissionCtx?.checkoutActorUserId || ''));
-      } catch {
+    setLoading(true);
+    try {
+      const reservationResult = await api(`/api/reservations/${id}`, {}, token);
+      setRow(reservationResult);
+
+      const optionalCalls = await Promise.allSettled([
+        canLoadSupportingCatalogs ? api('/api/locations', {}, token) : Promise.resolve([]),
+        api('/api/customers', {}, token).catch(() => []),
+        api('/api/vehicles', {}, token).catch(() => []),
+        canManagePricingOverrides ? api('/api/additional-services', {}, token) : Promise.resolve([]),
+        canManagePricingOverrides ? api('/api/fees', {}, token) : Promise.resolve([]),
+        canManagePricingOverrides ? api('/api/settings/insurance-plans', {}, token) : Promise.resolve([]),
+        api(`/api/reservations/${id}/pricing`, {}, token).catch(() => null),
+        api(`/api/reservations/${id}/payments`, {}, token).catch(() => []),
+        api(`/api/reservations/${id}/audit-logs`, {}, token).catch(() => []),
+        canLoadSupportingCatalogs ? api(`/api/tolls/reservations/${id}`, {}, token).catch(() => null) : Promise.resolve(null)
+      ]);
+
+      const valueOr = (index, fallback) => optionalCalls[index]?.status === 'fulfilled' ? optionalCalls[index].value : fallback;
+      const locationsOut = valueOr(0, []);
+      const customersOut = valueOr(1, []);
+      const vehiclesOut = valueOr(2, []);
+      const servicesOut = valueOr(3, []);
+      const feesOut = valueOr(4, []);
+      const insuranceOut = valueOr(5, []);
+      const pricingOut = valueOr(6, null);
+      const paymentsOut = valueOr(7, []);
+      const logsOut = valueOr(8, []);
+      const tollsOut = valueOr(9, null);
+
+      setPricing(pricingOut);
+      setPaymentRows(Array.isArray(paymentsOut) ? paymentsOut : []);
+      setAuditLogs(Array.isArray(logsOut) ? logsOut : []);
+      setLocations(Array.isArray(locationsOut) ? locationsOut : []);
+      setCustomers(Array.isArray(customersOut) ? customersOut : []);
+      setVehicles(Array.isArray(vehiclesOut) ? vehiclesOut : []);
+      setServiceOptions(Array.isArray(servicesOut) ? servicesOut : []);
+      setFeeOptions(Array.isArray(feesOut) ? feesOut : []);
+      setInsurancePlans(Array.isArray(insuranceOut) ? insuranceOut : []);
+      setTollSummary(tollsOut);
+      setForm({
+        customerId: reservationResult.customerId || '',
+        pickupAt: reservationResult.pickupAt ? new Date(reservationResult.pickupAt).toISOString().slice(0, 16) : '',
+        returnAt: reservationResult.returnAt ? new Date(reservationResult.returnAt).toISOString().slice(0, 16) : '',
+        pickupLocationId: reservationResult.pickupLocationId || '',
+        returnLocationId: reservationResult.returnLocationId || '',
+        notes: reservationResult.notes || ''
+      });
+      const loanerPacket = parseLoanerPacket(reservationResult.loanerBorrowerPacketJson);
+      setLoanerPacketForm({
+        driverLicenseChecked: !!loanerPacket.driverLicenseChecked,
+        insuranceCardCollected: !!loanerPacket.insuranceCardCollected,
+        registrationConfirmed: !!loanerPacket.registrationConfirmed,
+        walkaroundCompleted: !!loanerPacket.walkaroundCompleted,
+        fuelAndMileageCaptured: !!loanerPacket.fuelAndMileageCaptured,
+        notes: loanerPacket.notes || ''
+      });
+      setLoanerBillingForm({
+        loanerBillingMode: reservationResult.loanerBillingMode || 'COURTESY',
+        loanerBillingStatus: reservationResult.loanerBillingStatus || 'DRAFT',
+        loanerBillingContactName: reservationResult.loanerBillingContactName || '',
+        loanerBillingContactEmail: reservationResult.loanerBillingContactEmail || '',
+        loanerBillingContactPhone: reservationResult.loanerBillingContactPhone || '',
+        loanerBillingAuthorizationRef: reservationResult.loanerBillingAuthorizationRef || '',
+        loanerBillingNotes: reservationResult.loanerBillingNotes || ''
+      });
+      setLoanerAdvisorForm({
+        serviceAdvisorName: reservationResult.serviceAdvisorName || '',
+        serviceAdvisorEmail: reservationResult.serviceAdvisorEmail || '',
+        serviceAdvisorPhone: reservationResult.serviceAdvisorPhone || '',
+        serviceAdvisorNotes: reservationResult.serviceAdvisorNotes || '',
+        estimatedServiceCompletionAt: toLocalDateTime(reservationResult.estimatedServiceCompletionAt),
+        readyForPickup: !!reservationResult.readyForPickupAt,
+        readyForPickupNote: reservationResult.readyForPickupOverrideNote || ''
+      });
+      setLoanerReturnForm({
+        flagged: !!reservationResult.loanerReturnExceptionFlag,
+        loanerReturnExceptionNotes: reservationResult.loanerReturnExceptionNotes || ''
+      });
+      setLoanerAccountingForm({
+        loanerPurchaseOrderNumber: reservationResult.loanerPurchaseOrderNumber || '',
+        loanerDealerInvoiceNumber: reservationResult.loanerDealerInvoiceNumber || '',
+        loanerAccountingNotes: reservationResult.loanerAccountingNotes || '',
+        closeoutComplete: !!reservationResult.loanerAccountingClosedAt
+      });
+      setLoanerOpsForm({
+        vehicleId: reservationResult.vehicleId || '',
+        returnAt: reservationResult.returnAt ? new Date(reservationResult.returnAt).toISOString().slice(0, 16) : '',
+        estimatedServiceCompletionAt: toLocalDateTime(reservationResult.estimatedServiceCompletionAt),
+        loanerCloseoutNotes: reservationResult.loanerCloseoutNotes || '',
+        note: ''
+      });
+      setChargeModel(pricingEditorState(pricingOut, reservationResult));
+      if (canManageCommissionOwner && reservationResult?.rentalAgreement?.id) {
+        try {
+          const commissionCtx = await api(`/api/rental-agreements/${reservationResult.rentalAgreement.id}/commission-owner`, {}, token);
+          setCommissionOwnerContext(commissionCtx || null);
+          setCommissionOwnerPick(String(commissionCtx?.currentOwnerUserId || commissionCtx?.checkoutActorUserId || ''));
+        } catch {
+          setCommissionOwnerContext(null);
+          setCommissionOwnerPick('');
+        }
+      } else {
         setCommissionOwnerContext(null);
         setCommissionOwnerPick('');
       }
-    } else {
-      setCommissionOwnerContext(null);
-      setCommissionOwnerPick('');
+    } catch (e) {
+      setMsg(e.message || 'Unable to load reservation');
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -1395,10 +1419,10 @@ token
   }, [precheckinStatus, row, unpaidBalance]);
 
 
-	if (!row) {
+	if (loading || !row) {
 	return (
 	<AppShell me={me} logout={logout}>
-	<section className="glass card-lg">Loading reservation...</section>
+	<section className="glass card-lg">{loading ? 'Loading reservation...' : (msg || 'Unable to load reservation')}</section>
 	</AppShell>
 	);
 	}
