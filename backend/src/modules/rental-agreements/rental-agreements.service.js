@@ -1383,7 +1383,78 @@ export const rentalAgreementsService = {
 
   async agreementPrintContext(id) {
     const latestId = await this.resolveLatestAgreementId(id);
-    const agreement = await this.getById(latestId);
+    const agreement = await prisma.rentalAgreement.findFirst({
+      where: { id: latestId },
+      select: {
+        id: true,
+        tenantId: true,
+        reservationId: true,
+        agreementNumber: true,
+        customerFirstName: true,
+        customerLastName: true,
+        pickupAt: true,
+        returnAt: true,
+        total: true,
+        charges: {
+          orderBy: [{ sortOrder: 'asc' }, { createdAt: 'asc' }],
+          select: {
+            id: true,
+            name: true,
+            chargeType: true,
+            quantity: true,
+            rate: true,
+            total: true
+          }
+        },
+        payments: {
+          orderBy: { paidAt: 'desc' },
+          select: {
+            id: true,
+            paidAt: true,
+            createdAt: true,
+            method: true,
+            reference: true,
+            status: true,
+            amount: true
+          }
+        },
+        reservation: {
+          select: {
+            id: true,
+            reservationNumber: true,
+            notes: true,
+            signatureSignedAt: true,
+            signatureSignedBy: true,
+            signatureDataUrl: true,
+            pickupLocation: {
+              select: {
+                id: true,
+                name: true,
+                address: true,
+                locationConfig: true
+              }
+            },
+            customer: {
+              select: {
+                id: true,
+                email: true
+              }
+            },
+            payments: {
+              orderBy: { paidAt: 'desc' },
+              select: {
+                id: true,
+                paidAt: true,
+                method: true,
+                reference: true,
+                status: true,
+                amount: true
+              }
+            }
+          }
+        }
+      }
+    });
     if (!agreement) throw new Error('Rental agreement not found');
 
     const { settingsService } = await import('../settings/settings.service.js');
@@ -1393,8 +1464,8 @@ export const rentalAgreementsService = {
     const cfg = {
       ...globalCfg,
       companyName: locCfg.companyName || agreement?.reservation?.pickupLocation?.name || globalCfg.companyName,
-      companyAddress: locCfg.companyAddress || agreement?.reservation?.pickupLocation?.address1 || globalCfg.companyAddress,
-      companyPhone: locCfg.companyPhone || agreement?.reservation?.pickupLocation?.phone || globalCfg.companyPhone,
+      companyAddress: locCfg.companyAddress || agreement?.reservation?.pickupLocation?.address || globalCfg.companyAddress,
+      companyPhone: locCfg.companyPhone || globalCfg.companyPhone,
       companyLogoUrl: locCfg.companyLogoUrl || globalCfg.companyLogoUrl,
       termsText: locCfg.termsText || globalCfg.termsText,
       returnInstructionsText: locCfg.returnInstructionsText || globalCfg.returnInstructionsText
