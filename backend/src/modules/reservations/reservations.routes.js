@@ -8,6 +8,8 @@ import { rentalAgreementsService } from '../rental-agreements/rental-agreements.
 import { reservationPricingService } from './reservation-pricing.service.js';
 import { reservationAdditionalDriversService } from './reservation-additional-drivers.service.js';
 import { settingsService } from '../settings/settings.service.js';
+import { additionalServicesService } from '../additional-services/additional-services.service.js';
+import { feesService } from '../fees/fees.service.js';
 import { ratesService } from '../rates/rates.service.js';
 import { activeVehicleBlockOverlapWhere } from '../vehicles/vehicle-blocks.js';
 import { isSuperAdmin } from '../../middleware/auth.js';
