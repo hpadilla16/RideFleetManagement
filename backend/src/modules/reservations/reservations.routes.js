@@ -157,7 +157,7 @@ reservationsRouter.get('/:id/pricing-options', async (req, res, next) => {
     const reservation = await reservationsService.getById(req.params.id, scopeFor(req));
     if (!reservation) return res.status(404).json({ error: 'Reservation not found' });
     const tenantScope = reservation?.tenantId ? { tenantId: reservation.tenantId } : scopeFor(req);
-    const [services, fees, insurancePlans] = await Promise.all([
+    const [servicesResult, feesResult, insurancePlansResult] = await Promise.allSettled([
       additionalServicesService.list({
         locationId: reservation.pickupLocationId || undefined,
         activeOnly: true,
@@ -166,6 +166,9 @@ reservationsRouter.get('/:id/pricing-options', async (req, res, next) => {
       feesService.list(tenantScope),
       settingsService.getInsurancePlans(tenantScope)
     ]);
+    const services = servicesResult.status === 'fulfilled' ? servicesResult.value : [];
+    const fees = feesResult.status === 'fulfilled' ? feesResult.value : [];
+    const insurancePlans = insurancePlansResult.status === 'fulfilled' ? insurancePlansResult.value : [];
     res.json({
       services: Array.isArray(services) ? services : [],
       fees: Array.isArray(fees) ? fees : [],
