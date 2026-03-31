@@ -203,7 +203,7 @@ function ReservationDetailInner({ token, me, logout }) {
     note: ''
   });
   const canManagePrecheckin = ['SUPER_ADMIN', 'ADMIN', 'OPS'].includes(role);
-  const canManagePricingOverrides = ['SUPER_ADMIN', 'ADMIN'].includes(role);
+  const canManagePricingOverrides = ['SUPER_ADMIN', 'ADMIN', 'OPS', 'AGENT'].includes(role);
   const canManageCommissionOwner = ['SUPER_ADMIN', 'ADMIN'].includes(role);
   const canLoadSupportingCatalogs = ['SUPER_ADMIN', 'ADMIN', 'OPS'].includes(role);
 
@@ -1007,10 +1007,6 @@ function ReservationDetailInner({ token, me, logout }) {
 
   const saveChargeOverrides = async () => {
     try {
-if (!canManagePricingOverrides) {
-  setMsg('Admin approval required for pricing overrides');
-  return;
-}
 const serviceNames = String(chargeModel.serviceNames || '')
 .split(',')
 .map((x) => x.trim())
@@ -1884,7 +1880,7 @@ token
             </>
           ) : (
             <>
-              <div className="row-between"><h3>Charges</h3><div style={{ display: 'flex', gap: 8 }}>{canManagePricingOverrides ? <button onClick={handleEditToggle}>{chargeEdit ? 'Cancel Edit' : 'Edit'}</button> : <span className="label">Admin approval required for rate and fee overrides.</span>}{chargeEdit && canManagePricingOverrides ? <button onClick={saveChargeOverrides}>Save Override</button> : null}</div></div>
+              <div className="row-between"><h3>Charges</h3><div style={{ display: 'flex', gap: 8 }}>{canManagePricingOverrides ? <button onClick={handleEditToggle}>{chargeEdit ? 'Cancel Edit' : 'Edit'}</button> : null}{chargeEdit && canManagePricingOverrides ? <button onClick={saveChargeOverrides}>Save Override</button> : null}</div></div>
               {chargeEdit ? (
                 <><div className="grid3" style={{ marginBottom: 10 }}>
                       <div className="stack"><label className="label">Daily Rate</label><input value={chargeModel.dailyRate} onChange={(e) => setChargeModel({ ...chargeModel, dailyRate: e.target.value })} /></div>

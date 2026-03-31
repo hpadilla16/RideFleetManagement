@@ -47,7 +47,7 @@ function canManagePrecheckin(req) {
 
 function canManagePricingOverrides(req) {
   const role = String(req.user?.role || '').toUpperCase();
-  return ['SUPER_ADMIN', 'ADMIN'].includes(role);
+  return ['SUPER_ADMIN', 'ADMIN', 'OPS', 'AGENT'].includes(role);
 }
 
 function buildPrecheckinChecklist(reservation) {
@@ -133,13 +133,13 @@ reservationsRouter.get('/:id/pricing', async (req, res, next) => {
 reservationsRouter.put('/:id/pricing', async (req, res, next) => {
   try {
     if (!canManagePricingOverrides(req)) {
-      return res.status(403).json({ error: 'Admin role required for pricing overrides' });
+      return res.status(403).json({ error: 'User role not allowed to edit pricing overrides' });
     }
     const out = await reservationPricingService.replacePricing(req.params.id, req.body || {}, scopeFor(req));
     res.json(out);
   } catch (e) {
     if (/not found/i.test(String(e?.message || ''))) return res.status(404).json({ error: e.message });
-    if (/admin role required/i.test(String(e?.message || ''))) return res.status(403).json({ error: e.message });
+    if (/role not allowed/i.test(String(e?.message || ''))) return res.status(403).json({ error: e.message });
     next(e);
   }
 });
