@@ -6,38 +6,14 @@ import { AuthGate } from '../components/AuthGate';
 import { AppShell } from '../components/AppShell';
 import { api } from '../lib/client';
 
-function activeAvailabilityBlock(vehicle) {
-  const now = Date.now();
-  return (Array.isArray(vehicle?.availabilityBlocks) ? vehicle.availabilityBlocks : []).find((block) => {
-    const releasedAt = block?.releasedAt ? new Date(block.releasedAt).getTime() : null;
-    const blockedFrom = block?.blockedFrom ? new Date(block.blockedFrom).getTime() : now;
-    const availableFrom = block?.availableFrom ? new Date(block.availableFrom).getTime() : null;
-    return !releasedAt && blockedFrom <= now && availableFrom && availableFrom > now;
-  }) || null;
-}
-
-function isMigrationHold(block) {
-  return String(block?.blockType || '').toUpperCase() === 'MIGRATION_HOLD';
-}
-
-function isServiceHold(block) {
-  return ['MAINTENANCE_HOLD', 'OUT_OF_SERVICE_HOLD'].includes(String(block?.blockType || '').toUpperCase());
-}
-
-function VehicleStatusDonut({ vehicles }) {
+function VehicleStatusDonut({ metrics }) {
   const counts = useMemo(() => {
-    const available = vehicles.filter((v) => v.status === 'AVAILABLE' && !activeAvailabilityBlock(v)).length;
-    const onRentIds = new Set(vehicles.filter((v) => ['RESERVED', 'ON_RENT'].includes(v.status)).map((v) => v.id));
-    const outIds = new Set(vehicles.filter((v) => ['OUT_OF_SERVICE', 'IN_MAINTENANCE'].includes(v.status)).map((v) => v.id));
-    vehicles.forEach((vehicle) => {
-      const block = activeAvailabilityBlock(vehicle);
-      if (isMigrationHold(block)) onRentIds.add(vehicle.id);
-      if (isServiceHold(block)) outIds.add(vehicle.id);
-    });
-    const onRent = onRentIds.size;
-    const out = outIds.size;
-    return { available, onRent, out, total: Math.max(vehicles.length, 1) };
-  }, [vehicles]);
+    const available = Number(metrics?.availableFleet || 0);
+    const onRent = Number(metrics?.onRent || 0);
+    const out = Number(metrics?.vehiclesInMaintenance || 0) + Number(metrics?.vehiclesOutOfService || 0);
+    const total = Math.max(available + onRent + out, 1);
+    return { available, onRent, out, total };
+  }, [metrics]);
 
   const size = 168;
   const stroke = 20;
@@ -222,13 +198,16 @@ export default function DashboardPage() {
 function DashboardInner({ token, me, logout }) {
   const router = useRouter();
   const [reservations, setReservations] = useState([]);
-  const [vehicles, setVehicles] = useState([]);
+  const [overview, setOverview] = useState(null);
   const [msg, setMsg] = useState('');
 
   const load = async () => {
-    const [r, v] = await Promise.all([api('/api/reservations', {}, token), api('/api/vehicles', {}, token)]);
+    const [r, report] = await Promise.all([
+      api('/api/reservations', {}, token),
+      api('/api/reports/overview', {}, token)
+    ]);
     setReservations(r);
-    setVehicles(v);
+    setOverview(report);
   };
 
   useEffect(() => {
@@ -259,9 +238,11 @@ function DashboardInner({ token, me, logout }) {
     }
   };
 
-  const available = vehicles.filter((v) => v.status === 'AVAILABLE' && !activeAvailabilityBlock(v)).length;
-  const migrationHeld = vehicles.filter((v) => isMigrationHold(activeAvailabilityBlock(v))).length;
-  const serviceHeld = vehicles.filter((v) => isServiceHold(activeAvailabilityBlock(v))).length;
+  const kpis = overview?.kpis || {};
+  const totalVehicles = Number(kpis.fleetTotal || 0) + Number(kpis.vehiclesInMaintenance || 0) + Number(kpis.vehiclesOutOfService || 0);
+  const available = Number(kpis.availableFleet || 0);
+  const migrationHeld = Number(kpis.migrationHeld || 0);
+  const serviceHeld = Number(kpis.vehiclesInMaintenance || 0) + Number(kpis.vehiclesOutOfService || 0);
   const activeReservations = reservations.filter((r) => ['NEW', 'CONFIRMED', 'CHECKED_OUT'].includes(r.status)).length;
   const feeAdvisoryCount = reservations.filter((r) => /\[FEE_ADVISORY_OPEN\s+/i.test(String(r.notes || ''))).length;
   const today = new Date();
@@ -312,7 +293,7 @@ function DashboardInner({ token, me, logout }) {
     ].filter(Boolean);
 
     return {
-      totalVehicles: vehicles.length,
+      totalVehicles,
       available,
       migrationHeld,
       serviceHeld,
@@ -320,7 +301,7 @@ function DashboardInner({ token, me, logout }) {
       feeAdvisoryCount,
       nextItems
     };
-  }, [pickups, returns, feeAdvisoryCount, vehicles.length, available, migrationHeld, serviceHeld, activeReservations, router]);
+  }, [pickups, returns, feeAdvisoryCount, totalVehicles, available, migrationHeld, serviceHeld, activeReservations, router]);
 
   return (
     <AppShell me={me} logout={logout}>
@@ -383,7 +364,7 @@ function DashboardInner({ token, me, logout }) {
         </div>
       </section>
       <section className="grid4">
-        <div className="glass card"><div className="label">Total Vehicles</div><div className="value">{vehicles.length}</div></div>
+        <div className="glass card"><div className="label">Total Vehicles</div><div className="value">{totalVehicles}</div></div>
         <div className="glass card"><div className="label">Available Vehicles</div><div className="value">{available}</div></div>
         <div className="glass card"><div className="label">Reservations</div><div className="value">{reservations.length}</div></div>
         <div className="glass card"><div className="label">Active</div><div className="value">{activeReservations}</div></div>
@@ -416,7 +397,7 @@ function DashboardInner({ token, me, logout }) {
         </div>
         <div className="glass card-lg">
           <h3>Vehicle Status</h3>
-          <VehicleStatusDonut vehicles={vehicles} />
+          <VehicleStatusDonut metrics={kpis} />
         </div>
       </section>
 

@@ -32,24 +32,30 @@ function resolveApiBase() {
 export const API_BASE = resolveApiBase();
 export const TOKEN_KEY = 'fleet_jwt';
 export const USER_KEY = 'fleet_user';
+const GET_CACHE_TTL_MS = 15000;
+const getResponseCache = new Map();
+const inflightGetRequests = new Map();
 
-export function readStoredToken() {
-  if (typeof window === 'undefined') return '';
-  return (
-    localStorage.getItem(TOKEN_KEY) ||
-    localStorage.getItem('token') ||
-    localStorage.getItem('authToken') ||
-    localStorage.getItem('accessToken') ||
-    localStorage.getItem('jwt') ||
-    ''
-  );
+function cloneCachedValue(value) {
+  if (value == null) return value;
+  if (typeof structuredClone === 'function') {
+    try {
+      return structuredClone(value);
+    } catch {}
+  }
+  return value;
 }
 
-export async function api(path, opts = {}, token) {
-  const headers = { 'Content-Type': 'application/json', ...(opts.headers || {}) };
-  const authToken = token || readStoredToken();
-  if (authToken) headers.Authorization = `Bearer ${authToken}`;
-  const res = await fetch(`${API_BASE}${path}`, { ...opts, headers, cache: 'no-store' });
+function clearGetCache() {
+  getResponseCache.clear();
+  inflightGetRequests.clear();
+}
+
+function buildGetCacheKey(url, token) {
+  return `${url}::${String(token || '')}`;
+}
+
+async function parseApiResponse(res, path) {
   if (!res.ok) {
     let msg = `${path} failed (${res.status})`;
     try {
@@ -68,4 +74,56 @@ export async function api(path, opts = {}, token) {
   }
   if (res.status === 204) return null;
   return res.json();
+}
+
+export function readStoredToken() {
+  if (typeof window === 'undefined') return '';
+  return (
+    localStorage.getItem(TOKEN_KEY) ||
+    localStorage.getItem('token') ||
+    localStorage.getItem('authToken') ||
+    localStorage.getItem('accessToken') ||
+    localStorage.getItem('jwt') ||
+    ''
+  );
+}
+
+export async function api(path, opts = {}, token) {
+  const { cacheTtlMs, bypassCache, ...fetchOpts } = opts || {};
+  const method = String(fetchOpts.method || 'GET').toUpperCase();
+  const headers = { 'Content-Type': 'application/json', ...(fetchOpts.headers || {}) };
+  const authToken = token || readStoredToken();
+  if (authToken) headers.Authorization = `Bearer ${authToken}`;
+  const url = `${API_BASE}${path}`;
+  const useGetCache = typeof window !== 'undefined' && method === 'GET' && !bypassCache && cacheTtlMs !== 0;
+
+  if (!useGetCache) {
+    if (method !== 'GET') clearGetCache();
+    const res = await fetch(url, { ...fetchOpts, method, headers });
+    return parseApiResponse(res, path);
+  }
+
+  const now = Date.now();
+  const ttlMs = Math.max(1000, Number(cacheTtlMs || GET_CACHE_TTL_MS));
+  const cacheKey = buildGetCacheKey(url, authToken);
+  const cached = getResponseCache.get(cacheKey);
+  if (cached && cached.expiresAt > now) return cloneCachedValue(cached.data);
+  if (cached) getResponseCache.delete(cacheKey);
+
+  const inflight = inflightGetRequests.get(cacheKey);
+  if (inflight) return cloneCachedValue(await inflight);
+
+  const requestPromise = (async () => {
+    const res = await fetch(url, { ...fetchOpts, method, headers });
+    const data = await parseApiResponse(res, path);
+    getResponseCache.set(cacheKey, { expiresAt: Date.now() + ttlMs, data: cloneCachedValue(data) });
+    return data;
+  })();
+
+  inflightGetRequests.set(cacheKey, requestPromise);
+  try {
+    return cloneCachedValue(await requestPromise);
+  } finally {
+    inflightGetRequests.delete(cacheKey);
+  }
 }

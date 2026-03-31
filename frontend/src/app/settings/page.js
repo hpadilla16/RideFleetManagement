@@ -197,6 +197,39 @@ function parseDelimitedRows(text) {
   });
 }
 
+function normalizeInsurancePlan(p = {}) {
+  return {
+    code: p.code || '',
+    name: p.name || '',
+    label: p.label || p.name || '',
+    description: p.description || '',
+    chargeBy: p.chargeBy || p.mode || 'FIXED',
+    amount: Number(p.amount || 0),
+    commissionValueType: p.commissionValueType || '',
+    commissionPercentValue: p.commissionPercentValue ?? '',
+    commissionFixedAmount: p.commissionFixedAmount ?? '',
+    taxable: !!p.taxable,
+    isActive: p.isActive !== false,
+    locationIds: Array.isArray(p.locationIds) ? p.locationIds : [],
+    vehicleTypeIds: Array.isArray(p.vehicleTypeIds) ? p.vehicleTypeIds : []
+  };
+}
+
+const SETTINGS_CORE_SECTIONS = ['agreement', 'locations', 'vehicleTypes', 'reservationOptions', 'paymentGateway', 'tenantModules'];
+const SETTINGS_TAB_SECTIONS = {
+  agreement: [],
+  locations: ['fees'],
+  fees: ['fees'],
+  rates: ['rates'],
+  vehicleTypes: [],
+  insurance: ['insurancePlans'],
+  payments: [],
+  access: [],
+  emails: ['emailTemplates'],
+  services: ['services', 'fees'],
+  commissions: []
+};
+
 export default function SettingsPage() {
   return <AuthGate>{({ token, me, logout }) => <SettingsInner token={token} me={me} logout={logout} />}</AuthGate>;
 }
@@ -236,6 +269,7 @@ function SettingsInner({ token, me, logout }) {
   const [paymentGatewayConfig, setPaymentGatewayConfig] = useState(DEFAULT_PAYMENT_GATEWAY_CONFIG);
   const [paymentGatewayHealth, setPaymentGatewayHealth] = useState(null);
   const [tenantModuleAccess, setTenantModuleAccess] = useState({});
+  const [loadedSettingsSections, setLoadedSettingsSections] = useState({});
 
   const [locationForm, setLocationForm] = useState(EMPTY_LOCATION);
   const [feeForm, setFeeForm] = useState(EMPTY_FEE);
@@ -267,74 +301,84 @@ function SettingsInner({ token, me, logout }) {
     return `${path}${sep}tenantId=${encodeURIComponent(tenantId)}`;
   };
 
-  const load = async () => {
-    if (isSuper && !activeSettingsTenantId) return;
-    const requests = [
-      ['agreement', api(scopedSettingsPath('/api/settings/rental-agreement'), {}, token)],
-      ['locations', api(scopedSettingsPath('/api/locations'), {}, token)],
-      ['services', api(scopedSettingsPath('/api/additional-services'), {}, token)],
-      ['fees', api(scopedSettingsPath('/api/fees'), {}, token)],
-      ['rates', api(scopedSettingsPath('/api/rates'), {}, token)],
-      ['vehicleTypes', api(scopedSettingsPath('/api/vehicle-types'), {}, token)],
-      ['insurancePlans', api(scopedSettingsPath('/api/settings/insurance-plans'), {}, token)],
-      ['emailTemplates', api(scopedSettingsPath('/api/settings/email-templates'), {}, token)],
-      ['reservationOptions', api(scopedSettingsPath('/api/settings/reservation-options'), {}, token)],
-      ['paymentGateway', api(scopedSettingsPath('/api/settings/payment-gateway'), {}, token)],
-      ['tenantModules', api(scopedSettingsPath('/api/settings/tenant-modules'), {}, token)]
-    ];
-    const results = await Promise.allSettled(requests.map(([, p]) => p));
-
-    const [c, l, s, f, r, vt, ip, et, ro, pg, tm] = results;
-    if (c.status === 'fulfilled') setCfg(c.value);
-    if (l.status === 'fulfilled') setLocations(l.value);
-    if (s.status === 'fulfilled') setServices(s.value);
-    if (f.status === 'fulfilled') setFees(f.value);
-    if (r.status === 'fulfilled') setRates(r.value);
-    if (vt.status === 'fulfilled') setVehicleTypes(vt.value);
-    if (ip.status === 'fulfilled') {
-      const normalizePlan = (p = {}) => ({
-        code: p.code || '',
-        name: p.name || '',
-        label: p.label || p.name || '',
-        description: p.description || '',
-        chargeBy: p.chargeBy || p.mode || 'FIXED',
-        amount: Number(p.amount || 0),
-        commissionValueType: p.commissionValueType || '',
-        commissionPercentValue: p.commissionPercentValue ?? '',
-        commissionFixedAmount: p.commissionFixedAmount ?? '',
-        taxable: !!p.taxable,
-        isActive: p.isActive !== false,
-        locationIds: Array.isArray(p.locationIds) ? p.locationIds : [],
-        vehicleTypeIds: Array.isArray(p.vehicleTypeIds) ? p.vehicleTypeIds : []
-      });
-      setInsurancePlans((ip.value || []).map(normalizePlan));
-    }
-    if (et.status === 'fulfilled') setEmailTemplates({ ...DEFAULT_EMAIL_TEMPLATES, ...(et.value || {}) });
-    if (ro.status === 'fulfilled') setReservationOptions({ autoAssignVehicleFromType: !!ro.value?.autoAssignVehicleFromType });
-    if (pg.status === 'fulfilled') {
+  const applySettingsSection = (key, value) => {
+    if (key === 'agreement') setCfg(value || DEFAULTS);
+    if (key === 'locations') setLocations(Array.isArray(value) ? value : []);
+    if (key === 'services') setServices(Array.isArray(value) ? value : []);
+    if (key === 'fees') setFees(Array.isArray(value) ? value : []);
+    if (key === 'rates') setRates(Array.isArray(value) ? value : []);
+    if (key === 'vehicleTypes') setVehicleTypes(Array.isArray(value) ? value : []);
+    if (key === 'insurancePlans') setInsurancePlans((value || []).map(normalizeInsurancePlan));
+    if (key === 'emailTemplates') setEmailTemplates({ ...DEFAULT_EMAIL_TEMPLATES, ...(value || {}) });
+    if (key === 'reservationOptions') setReservationOptions({ autoAssignVehicleFromType: !!value?.autoAssignVehicleFromType });
+    if (key === 'paymentGateway') {
       setPaymentGatewayConfig({
         ...DEFAULT_PAYMENT_GATEWAY_CONFIG,
-        ...(pg.value || {}),
+        ...(value || {}),
         authorizenet: {
           ...DEFAULT_PAYMENT_GATEWAY_CONFIG.authorizenet,
-          ...(pg.value?.authorizenet || {})
+          ...(value?.authorizenet || {})
         },
         stripe: {
           ...DEFAULT_PAYMENT_GATEWAY_CONFIG.stripe,
-          ...(pg.value?.stripe || {})
+          ...(value?.stripe || {})
         },
         square: {
           ...DEFAULT_PAYMENT_GATEWAY_CONFIG.square,
-          ...(pg.value?.square || {})
+          ...(value?.square || {})
         }
       });
     }
-    if (tm.status === 'fulfilled') setTenantModuleAccess(tm.value?.config || {});
+    if (key === 'tenantModules') setTenantModuleAccess(value?.config || {});
+  };
 
-    const failedKeys = results
-      .map((x, i) => ({ x, key: requests[i][0] }))
-      .filter(({ x }) => x.status === 'rejected')
-      .map(({ key }) => key);
+  const sectionLoaders = {
+    agreement: (forceLoad = false) => api(scopedSettingsPath('/api/settings/rental-agreement'), forceLoad ? { bypassCache: true } : {}, token),
+    locations: (forceLoad = false) => api(scopedSettingsPath('/api/locations'), forceLoad ? { bypassCache: true } : {}, token),
+    services: (forceLoad = false) => api(scopedSettingsPath('/api/additional-services'), forceLoad ? { bypassCache: true } : {}, token),
+    fees: (forceLoad = false) => api(scopedSettingsPath('/api/fees'), forceLoad ? { bypassCache: true } : {}, token),
+    rates: (forceLoad = false) => api(scopedSettingsPath('/api/rates'), forceLoad ? { bypassCache: true } : {}, token),
+    vehicleTypes: (forceLoad = false) => api(scopedSettingsPath('/api/vehicle-types'), forceLoad ? { bypassCache: true } : {}, token),
+    insurancePlans: (forceLoad = false) => api(scopedSettingsPath('/api/settings/insurance-plans'), forceLoad ? { bypassCache: true } : {}, token),
+    emailTemplates: (forceLoad = false) => api(scopedSettingsPath('/api/settings/email-templates'), forceLoad ? { bypassCache: true } : {}, token),
+    reservationOptions: (forceLoad = false) => api(scopedSettingsPath('/api/settings/reservation-options'), forceLoad ? { bypassCache: true } : {}, token),
+    paymentGateway: (forceLoad = false) => api(scopedSettingsPath('/api/settings/payment-gateway'), forceLoad ? { bypassCache: true } : {}, token),
+    tenantModules: (forceLoad = false) => api(scopedSettingsPath('/api/settings/tenant-modules'), forceLoad ? { bypassCache: true } : {}, token)
+  };
+
+  const load = async (force = false) => {
+    if (isSuper && !activeSettingsTenantId) return;
+    const requestedSections = Array.from(new Set([
+      ...SETTINGS_CORE_SECTIONS,
+      ...(SETTINGS_TAB_SECTIONS[tab] || [])
+    ]));
+    const sectionsToLoad = force
+      ? requestedSections
+      : requestedSections.filter((key) => !loadedSettingsSections[key]);
+    if (!sectionsToLoad.length) return;
+
+    const requests = sectionsToLoad.map((key) => [key, sectionLoaders[key]?.(force)]).filter(([, request]) => request);
+    const results = await Promise.allSettled(requests.map(([, request]) => request));
+    const succeeded = [];
+    const failedKeys = [];
+
+    results.forEach((result, index) => {
+      const key = requests[index][0];
+      if (result.status === 'fulfilled') {
+        applySettingsSection(key, result.value);
+        succeeded.push(key);
+      } else {
+        failedKeys.push(key);
+      }
+    });
+
+    if (succeeded.length) {
+      setLoadedSettingsSections((prev) => ({
+        ...prev,
+        ...Object.fromEntries(succeeded.map((key) => [key, true]))
+      }));
+    }
+
     if (failedKeys.length) setMsg(`Some settings data could not be loaded: ${failedKeys.join(', ')}`);
     else setMsg('');
   };
@@ -379,9 +423,31 @@ function SettingsInner({ token, me, logout }) {
     }
   };
 
-  useEffect(() => { load(); }, [token, isSuper, activeSettingsTenantId]);
-  useEffect(() => { loadCommissionConfig(activeCommissionTenantId); }, [token, activeCommissionTenantId]);
-  useEffect(() => { loadCommissionEmployees(activeCommissionTenantId); }, [token, activeCommissionTenantId]);
+  useEffect(() => {
+    setLoadedSettingsSections({});
+    setCfg(DEFAULTS);
+    setLocations([]);
+    setServices([]);
+    setFees([]);
+    setRates([]);
+    setVehicleTypes([]);
+    setInsurancePlans([]);
+    setEmailTemplates(DEFAULT_EMAIL_TEMPLATES);
+    setReservationOptions({ autoAssignVehicleFromType: false });
+    setPaymentGatewayConfig(DEFAULT_PAYMENT_GATEWAY_CONFIG);
+    setTenantModuleAccess({});
+  }, [isSuper, activeSettingsTenantId, me?.tenant?.id]);
+
+  useEffect(() => { load(true); }, [token, isSuper, activeSettingsTenantId]);
+  useEffect(() => { load(); }, [token, tab]);
+  useEffect(() => {
+    if (tab !== 'commissions') return;
+    loadCommissionConfig(activeCommissionTenantId);
+  }, [token, activeCommissionTenantId, tab]);
+  useEffect(() => {
+    if (tab !== 'commissions') return;
+    loadCommissionEmployees(activeCommissionTenantId);
+  }, [token, activeCommissionTenantId, tab]);
   useEffect(() => { loadTenants(); }, [token, isSuper]);
 
   const saveAgreement = async () => {
@@ -479,20 +545,20 @@ function SettingsInner({ token, me, logout }) {
     await api(scopedSettingsPath('/api/locations'), { method: 'POST', body: JSON.stringify(locationForm) }, token);
     setLocationForm(EMPTY_LOCATION);
     setMsg('Location added');
-    await load();
+    await load(true);
   };
 
   const patchLocation = async (id, patch) => {
     await api(scopedSettingsPath(`/api/locations/${id}`), { method: 'PATCH', body: JSON.stringify(patch) }, token);
     setMsg('Location updated');
-    await load();
+    await load(true);
   };
 
   const removeLocation = async (id) => {
     if (!window.confirm('Remove this location?')) return;
     await api(scopedSettingsPath(`/api/locations/${id}`), { method: 'DELETE' }, token);
     setMsg('Location removed');
-    await load();
+    await load(true);
   };
 
   const copyLocationSettings = (source) => {
@@ -577,7 +643,7 @@ function SettingsInner({ token, me, logout }) {
         setMsg('Vehicle type added');
       }
       resetVehicleTypeForm();
-      await load();
+      await load(true);
     } catch (err) {
       setMsg(err?.message || 'Failed to save vehicle type');
     }
@@ -599,7 +665,7 @@ function SettingsInner({ token, me, logout }) {
       await api(scopedSettingsPath(`/api/vehicle-types/${vt.id}`), { method: 'DELETE' }, token);
       setMsg('Vehicle type removed');
       if (vehicleTypeEditId === vt.id) resetVehicleTypeForm();
-      await load();
+      await load(true);
     } catch (err) {
       setMsg(err?.message || 'Failed to remove vehicle type');
     }
@@ -707,20 +773,20 @@ function SettingsInner({ token, me, logout }) {
     }, token);
     resetServiceForm();
     setMsg(serviceEditId ? 'Additional service updated' : 'Additional service added');
-    await load();
+    await load(true);
   };
 
   const patchService = async (id, patch) => {
     await api(scopedSettingsPath(`/api/additional-services/${id}`), { method: 'PATCH', body: JSON.stringify(patch) }, token);
     setMsg('Additional service updated');
-    await load();
+    await load(true);
   };
 
   const removeService = async (id) => {
     if (!window.confirm('Remove this service?')) return;
     await api(scopedSettingsPath(`/api/additional-services/${id}`), { method: 'DELETE' }, token);
     setMsg('Service removed');
-    await load();
+    await load(true);
   };
 
   const addFee = async (e) => {
@@ -728,7 +794,7 @@ function SettingsInner({ token, me, logout }) {
     await api(scopedSettingsPath('/api/fees'), { method: 'POST', body: JSON.stringify({ ...feeForm, amount: Number(feeForm.amount || 0) }) }, token);
     setFeeForm(EMPTY_FEE);
     setMsg('Fee added');
-    await load();
+    await load(true);
   };
 
   const editFee = async (fee) => {
@@ -745,19 +811,19 @@ function SettingsInner({ token, me, logout }) {
       })
     }, token);
     setMsg('Fee updated');
-    await load();
+    await load(true);
   };
 
   const toggleFee = async (fee) => {
     await api(scopedSettingsPath(`/api/fees/${fee.id}`), { method: 'PATCH', body: JSON.stringify({ isActive: !fee.isActive }) }, token);
-    await load();
+    await load(true);
   };
 
   const removeFee = async (id) => {
     if (!window.confirm('Remove this fee?')) return;
     await api(scopedSettingsPath(`/api/fees/${id}`), { method: 'DELETE' }, token);
     setMsg('Fee removed');
-    await load();
+    await load(true);
   };
 
   const saveInsurancePlans = async (nextPlans) => {
@@ -963,7 +1029,7 @@ function SettingsInner({ token, me, logout }) {
       const text = String(err?.message || '');
       if (rateForm.id && /\/api\/rates\/.+ failed \(404\)|Rate not found/i.test(text)) {
         setMsg('That rate no longer exists. Please select it again from the list, then save.');
-        await load();
+        await load(true);
         return;
       }
       setMsg(text || 'Unable to save rate');
@@ -972,7 +1038,7 @@ function SettingsInner({ token, me, logout }) {
 
     setRateForm(EMPTY_RATE);
     resetRateDailyUpload();
-    await load();
+    await load(true);
   };
 
   const editRate = async (rate) => {
@@ -982,13 +1048,13 @@ function SettingsInner({ token, me, logout }) {
   const toggleRate = async (rate) => {
     try {
       await api(scopedSettingsPath(`/api/rates/${rate.id}`), { method: 'PATCH', body: JSON.stringify({ isActive: !rate.isActive }) }, token);
-      await load();
+      await load(true);
     } catch (err) {
       const text = String(err?.message || '');
       if (/failed \(404\)|Rate not found/i.test(text)) {
         setMsg('That rate no longer exists. The list was refreshed.');
         if (rateForm?.id === rate.id) setRateForm(EMPTY_RATE);
-        await load();
+        await load(true);
         return;
       }
       setMsg(text || 'Unable to update rate status');
@@ -1001,13 +1067,13 @@ function SettingsInner({ token, me, logout }) {
       await api(scopedSettingsPath(`/api/rates/${id}`), { method: 'DELETE' }, token);
       setMsg('Rate deleted');
       if (rateForm?.id === id) setRateForm(EMPTY_RATE);
-      await load();
+      await load(true);
     } catch (err) {
       const text = String(err?.message || '');
       if (/failed \(404\)|Rate not found/i.test(text)) {
         setMsg('That rate was already removed. The list was refreshed.');
         if (rateForm?.id === id) setRateForm(EMPTY_RATE);
-        await load();
+        await load(true);
         return;
       }
       setMsg(text || 'Unable to delete rate');
@@ -1078,7 +1144,7 @@ function SettingsInner({ token, me, logout }) {
         body: JSON.stringify({ rows: rateDailyUploadRows })
       }, token);
       if (out?.rate) applyRateToEditor(out.rate);
-      await load();
+      await load(true);
       setRateDailyUploadReport(out ? {
         validCount: out.imported || 0,
         errorCount: Array.isArray(out.errors) ? out.errors.length : 0,
@@ -1098,7 +1164,7 @@ function SettingsInner({ token, me, logout }) {
         method: 'DELETE'
       }, token);
       if (out) applyRateToEditor(out);
-      await load();
+      await load(true);
       setMsg('Dynamic daily price removed');
     } catch (err) {
       setMsg(String(err?.message || 'Unable to remove dynamic daily price'));
@@ -1350,21 +1416,31 @@ function SettingsInner({ token, me, logout }) {
   const rateDailyPrices = Array.isArray(rateForm?.dailyPrices) ? rateForm.dailyPrices : [];
   const rateDailyPricePreview = rateDailyPrices.slice(0, 24);
   const activeSettingsTenant = tenantRows.find((tenant) => tenant.id === activeSettingsTenantId) || null;
-  const activeLocationCount = locations.filter((location) => location.isActive !== false).length;
-  const activeVehicleTypeCount = vehicleTypes.length;
-  const onlineRateCount = rates.filter((rate) => rate.isActive !== false && rate.displayOnline).length;
-  const onlineServiceCount = services.filter((service) => service.isActive !== false && service.displayOnline).length;
-  const activeInsuranceCount = insurancePlans.filter((plan) => plan.isActive !== false).length;
-  const paymentGatewayLabel = {
-    authorizenet: 'Authorize.Net',
-    stripe: 'Stripe',
-    square: 'Square'
-  }[String(paymentGatewayConfig?.gateway || '').toLowerCase()] || 'Not set';
+  const activeLocationCount = loadedSettingsSections.locations
+    ? locations.filter((location) => location.isActive !== false).length
+    : null;
+  const activeVehicleTypeCount = loadedSettingsSections.vehicleTypes ? vehicleTypes.length : null;
+  const onlineRateCount = loadedSettingsSections.rates
+    ? rates.filter((rate) => rate.isActive !== false && rate.displayOnline).length
+    : null;
+  const onlineServiceCount = loadedSettingsSections.services
+    ? services.filter((service) => service.isActive !== false && service.displayOnline).length
+    : null;
+  const activeInsuranceCount = loadedSettingsSections.insurancePlans
+    ? insurancePlans.filter((plan) => plan.isActive !== false).length
+    : null;
+  const paymentGatewayLabel = loadedSettingsSections.paymentGateway
+    ? ({
+        authorizenet: 'Authorize.Net',
+        stripe: 'Stripe',
+        square: 'Square'
+      }[String(paymentGatewayConfig?.gateway || '').toLowerCase()] || 'Not set')
+    : '—';
   const settingsReadyCount = [
-    activeLocationCount > 0,
-    activeVehicleTypeCount > 0,
-    onlineRateCount > 0,
-    activeInsuranceCount > 0
+    loadedSettingsSections.locations && activeLocationCount > 0,
+    loadedSettingsSections.vehicleTypes && activeVehicleTypeCount > 0,
+    loadedSettingsSections.rates && onlineRateCount > 0,
+    loadedSettingsSections.insurancePlans && activeInsuranceCount > 0
   ].filter(Boolean).length;
   const activeTabLabel = {
     agreement: 'Agreement',
@@ -1428,23 +1504,23 @@ function SettingsInner({ token, me, logout }) {
             </div>
             <div className="info-tile">
               <span className="label">Active Locations</span>
-              <strong>{activeLocationCount}</strong>
+              <strong>{activeLocationCount ?? '—'}</strong>
             </div>
             <div className="info-tile">
               <span className="label">Vehicle Types</span>
-              <strong>{activeVehicleTypeCount}</strong>
+              <strong>{activeVehicleTypeCount ?? '—'}</strong>
             </div>
             <div className="info-tile">
               <span className="label">Online Rates</span>
-              <strong>{onlineRateCount}</strong>
+              <strong>{onlineRateCount ?? '—'}</strong>
             </div>
             <div className="info-tile">
               <span className="label">Online Services</span>
-              <strong>{onlineServiceCount}</strong>
+              <strong>{onlineServiceCount ?? '—'}</strong>
             </div>
             <div className="info-tile">
               <span className="label">Insurance Plans</span>
-              <strong>{activeInsuranceCount}</strong>
+              <strong>{activeInsuranceCount ?? '—'}</strong>
             </div>
             <div className="info-tile">
               <span className="label">Payment Gateway</span>
@@ -1753,8 +1829,8 @@ function SettingsInner({ token, me, logout }) {
                     <td>{f.name}</td><td>{f.mode}</td><td>{Number(f.amount || 0).toFixed(2)}</td><td>{f.mandatory ? 'Yes' : 'No'}</td><td>{f.isUnderageFee ? 'Yes' : 'No'}</td><td>{f.isAdditionalDriverFee ? 'Yes' : 'No'}</td><td>{f.isActive ? 'Yes' : 'No'}</td>
                     <td style={{ display: 'flex', gap: 6 }}>
                       <button onClick={() => editFee(f)}>Edit</button>
-                      <button onClick={async () => { await api(scopedSettingsPath(`/api/fees/${f.id}`), { method: 'PATCH', body: JSON.stringify({ mandatory: !f.mandatory }) }, token); setMsg('Mandatory fee flag updated'); await load(); }}>{f.mandatory ? 'Unset Mandatory' : 'Set Mandatory'}</button>
-                      <button onClick={async () => { await api(scopedSettingsPath(`/api/fees/${f.id}`), { method: 'PATCH', body: JSON.stringify({ isUnderageFee: !f.isUnderageFee }) }, token); setMsg('Underage fee flag updated'); await load(); }}>{f.isUnderageFee ? 'Unset Underage' : 'Set Underage'}</button>
+                      <button onClick={async () => { await api(scopedSettingsPath(`/api/fees/${f.id}`), { method: 'PATCH', body: JSON.stringify({ mandatory: !f.mandatory }) }, token); setMsg('Mandatory fee flag updated'); await load(true); }}>{f.mandatory ? 'Unset Mandatory' : 'Set Mandatory'}</button>
+                      <button onClick={async () => { await api(scopedSettingsPath(`/api/fees/${f.id}`), { method: 'PATCH', body: JSON.stringify({ isUnderageFee: !f.isUnderageFee }) }, token); setMsg('Underage fee flag updated'); await load(true); }}>{f.isUnderageFee ? 'Unset Underage' : 'Set Underage'}</button>
                       <button onClick={() => toggleFee(f)}>{f.isActive ? 'Disable' : 'Enable'}</button>
                       <button onClick={() => removeFee(f.id)}>Delete</button>
                     </td>
