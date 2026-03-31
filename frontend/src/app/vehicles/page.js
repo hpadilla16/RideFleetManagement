@@ -156,6 +156,7 @@ function VehiclesInner({ token, me, logout }) {
   const [activeTenantId, setActiveTenantId] = useState('');
   const [query, setQuery] = useState('');
   const [selected, setSelected] = useState(null);
+  const [selectedLoading, setSelectedLoading] = useState(false);
   const [showRent, setShowRent] = useState(false);
   const [showAddVehicle, setShowAddVehicle] = useState(false);
   const [showUpload, setShowUpload] = useState(false);
@@ -198,6 +199,20 @@ function VehiclesInner({ token, me, logout }) {
     if (!isSuper || !activeTenantId) return path;
     const joiner = path.includes('?') ? '&' : '?';
     return `${path}${joiner}tenantId=${encodeURIComponent(activeTenantId)}`;
+  };
+
+  const openVehicleDetails = async (vehicle) => {
+    if (!vehicle?.id) return;
+    setSelected(vehicle);
+    setSelectedLoading(true);
+    try {
+      const detail = await api(scopedPath(`/api/vehicles/${vehicle.id}`), {}, token);
+      setSelected((current) => (current?.id === vehicle.id ? detail : current));
+    } catch (error) {
+      setMsg(error.message);
+    } finally {
+      setSelectedLoading(false);
+    }
   };
 
   const load = async () => {
@@ -287,7 +302,7 @@ function VehiclesInner({ token, me, logout }) {
             title: 'On-Rent Unit',
             detail: `${onRent[0].internalNumber} - ${onRent[0].make || ''} ${onRent[0].model || ''}`.trim(),
             note: 'This vehicle is currently out and may need return follow-up.',
-            action: () => setSelected(onRent[0]),
+            action: () => openVehicleDetails(onRent[0]),
             actionLabel: 'Open Unit'
           }
         : null
@@ -755,7 +770,7 @@ function VehiclesInner({ token, me, logout }) {
             {rows.map((v) => {
               const currentBlock = activeAvailabilityBlock(v);
               return (
-              <tr key={v.id} onClick={() => setSelected(v)} style={{ cursor: 'pointer' }}>
+              <tr key={v.id} onClick={() => openVehicleDetails(v)} style={{ cursor: 'pointer' }}>
                 <td>{v.internalNumber}</td>
                 <td>{v.plate || '-'}</td>
                 <td>{v.tollTagNumber || '-'}</td>
@@ -788,6 +803,7 @@ function VehiclesInner({ token, me, logout }) {
       {selected && !showRent && (
         <aside className="detail-drawer glass">
           <div className="row-between"><h3>{selected.internalNumber}</h3><button onClick={() => setSelected(null)}>Close</button></div>
+          {selectedLoading ? <div className="label" style={{ marginBottom: 8 }}>Loading latest vehicle detail...</div> : null}
           <div className="stack">
             <div><span className="label">VIN</span><div>{selected.vin || '-'}</div></div>
             <div><span className="label">Plate</span><div>{selected.plate || '-'}</div></div>

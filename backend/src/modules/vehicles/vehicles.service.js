@@ -81,23 +81,37 @@ export const vehiclesService = {
     return prisma.vehicle.findMany({
       where: byTenantWhere(scope),
       orderBy: { createdAt: 'desc' },
-      include: {
-        tenant: true,
+      select: {
+        id: true,
+        tenantId: true,
+        internalNumber: true,
+        vin: true,
+        plate: true,
+        tollTagNumber: true,
+        tollStickerNumber: true,
+        make: true,
+        model: true,
+        year: true,
+        color: true,
+        mileage: true,
+        status: true,
+        fleetMode: true,
+        vehicleTypeId: true,
+        homeLocationId: true,
+        createdAt: true,
         vehicleType: true,
         homeLocation: true,
         availabilityBlocks: {
           where: { releasedAt: null },
-          orderBy: [{ blockedFrom: 'asc' }, { availableFrom: 'asc' }]
-        },
-        rentalAgreements: {
-          orderBy: { createdAt: 'desc' },
-          take: 20,
+          orderBy: [{ blockedFrom: 'asc' }, { availableFrom: 'asc' }],
           select: {
             id: true,
-            agreementNumber: true,
-            createdAt: true,
-            inspections: { select: { phase: true, capturedAt: true } },
-            reservation: { select: { reservationNumber: true, customer: { select: { firstName: true, lastName: true } } } }
+            blockType: true,
+            blockedFrom: true,
+            availableFrom: true,
+            releasedAt: true,
+            reason: true,
+            notes: true
           }
         }
       }

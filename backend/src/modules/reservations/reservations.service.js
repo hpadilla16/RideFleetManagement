@@ -633,15 +633,72 @@ export const reservationsService = {
     const rows = await prisma.reservation.findMany({
       where,
       orderBy: { createdAt: 'desc' },
-      include: {
-        customer: true,
-        vehicleType: true,
-        vehicle: true,
-        pickupLocation: true,
-        returnLocation: true,
-        additionalDrivers: { orderBy: { createdAt: 'asc' } },
-        customerInfoReviewedByUser: { select: { id: true, fullName: true, email: true, role: true } },
-        readyForPickupByUser: { select: { id: true, fullName: true, email: true, role: true } }
+      select: {
+        id: true,
+        tenantId: true,
+        reservationNumber: true,
+        sourceRef: true,
+        status: true,
+        workflowMode: true,
+        paymentStatus: true,
+        pickupAt: true,
+        returnAt: true,
+        pickupLocationId: true,
+        returnLocationId: true,
+        customerId: true,
+        vehicleId: true,
+        vehicleTypeId: true,
+        dailyRate: true,
+        estimatedTotal: true,
+        notes: true,
+        customerInfoToken: true,
+        customerInfoCompletedAt: true,
+        customerInfoReviewedAt: true,
+        readyForPickupAt: true,
+        signatureSignedAt: true,
+        underageAlert: true,
+        underageAlertAge: true,
+        underageAlertThreshold: true,
+        customer: {
+          select: {
+            id: true,
+            firstName: true,
+            lastName: true,
+            email: true,
+            phone: true
+          }
+        },
+        vehicleType: {
+          select: {
+            id: true,
+            code: true,
+            name: true
+          }
+        },
+        vehicle: {
+          select: {
+            id: true,
+            internalNumber: true,
+            plate: true,
+            make: true,
+            model: true,
+            year: true
+          }
+        },
+        pickupLocation: {
+          select: {
+            id: true,
+            name: true,
+            code: true
+          }
+        },
+        returnLocation: {
+          select: {
+            id: true,
+            name: true,
+            code: true
+          }
+        }
       }
     });
     return rows.map((r) => ({ ...r, ...deriveUnderageAlertForReservation(r) }));
