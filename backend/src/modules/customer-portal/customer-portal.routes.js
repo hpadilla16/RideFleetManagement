@@ -1022,8 +1022,7 @@ customerPortalRouter.post('/payment/:token/create-session', async (req, res, nex
               settingValue: JSON.stringify({
                 showCreditCard: true,
                 showBankAccount: false,
-                cardCodeRequired: false,
-                customerProfileId: false
+                cardCodeRequired: false
               })
             },
             {
