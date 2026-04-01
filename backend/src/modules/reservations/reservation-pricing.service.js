@@ -387,30 +387,45 @@ export const reservationPricingService = {
     };
 
     const created = await prisma.reservationPayment.create({ data: paymentData });
-    const agreementPayment = await maybeCreateAgreementPayment({ reservation, payment: created });
 
-    if (agreementPayment?.id) {
-      await prisma.reservationPayment.update({
-        where: { id: created.id },
-        data: { rentalAgreementPaymentId: agreementPayment.id }
-      });
+    try {
+      const agreementPayment = await maybeCreateAgreementPayment({ reservation, payment: created });
+      if (agreementPayment?.id) {
+        await prisma.reservationPayment.update({
+          where: { id: created.id },
+          data: { rentalAgreementPaymentId: agreementPayment.id }
+        });
+      }
+    } catch {
+      if (reservation?.rentalAgreement?.id) {
+        const paidAmount = Number((toNumber(reservation.rentalAgreement.paidAmount) + amount).toFixed(2));
+        const balance = Number((toNumber(reservation.rentalAgreement.total) - paidAmount).toFixed(2));
+        try {
+          await prisma.rentalAgreement.update({
+            where: { id: reservation.rentalAgreement.id },
+            data: { paidAmount, balance }
+          });
+        } catch {}
+      }
     }
 
-    await prisma.auditLog.create({
-      data: {
-        tenantId: reservation.tenantId || null,
-        reservationId,
-        actorUserId: actorUserId || null,
-        action: 'UPDATE',
-        metadata: JSON.stringify({
-          reservationPaymentPosted: true,
-          amount,
-          method: paymentData.method,
-          origin: paymentData.origin,
-          reference: paymentData.reference
-        })
-      }
-    });
+    try {
+      await prisma.auditLog.create({
+        data: {
+          tenantId: reservation.tenantId || null,
+          reservationId,
+          actorUserId: actorUserId || null,
+          action: 'UPDATE',
+          metadata: JSON.stringify({
+            reservationPaymentPosted: true,
+            amount,
+            method: paymentData.method,
+            origin: paymentData.origin,
+            reference: paymentData.reference
+          })
+        }
+      });
+    } catch {}
 
     return prisma.reservationPayment.findUnique({ where: { id: created.id } });
   }
