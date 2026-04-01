@@ -161,6 +161,9 @@ export default function CustomerPayPage() {
       event?.stopPropagation?.();
       setError('');
       if (String(model?.gateway || '').toLowerCase() === 'authorizenet') {
+        if (!model?.authnetPublic?.apiLoginID || !model?.authnetPublic?.clientKey) {
+          throw new Error('Authorize.Net Client Key is missing for this tenant. Add the public Client Key in payment settings before collecting portal payments.');
+        }
         if (!window.Accept || typeof window.Accept.dispatchData !== 'function') {
           throw new Error('Authorize.Net secure form is still loading. Please wait a moment and try again.');
         }
@@ -449,7 +452,9 @@ export default function CustomerPayPage() {
 
             {!model.gatewayReady ? (
               <div style={{ ...portalStyles.notice, marginTop: 14, background: 'rgba(245, 158, 11, 0.15)', color: '#92400e' }}>
-                Gateway not configured for {String(model.gateway || '').toUpperCase()}. Set the required backend credentials first.
+                {String(model.gateway || '').toLowerCase() === 'authorizenet'
+                  ? 'Authorize.Net portal payments require API Login ID, Transaction Key, and the public Client Key in tenant payment settings.'
+                  : `Gateway not configured for ${String(model.gateway || '').toUpperCase()}. Set the required backend credentials first.`}
               </div>
             ) : null}
           </div>

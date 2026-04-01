@@ -30,6 +30,9 @@ function authNetHostedBaseForConfig(config = {}) {
 function authNetEnabled(config = {}) {
   return !!(config?.authorizenet?.enabled !== false && config?.authorizenet?.loginId && config?.authorizenet?.transactionKey);
 }
+function authNetPortalReady(config = {}) {
+  return !!(authNetEnabled(config) && config?.authorizenet?.clientKey);
+}
 function stripeEnabled(config = {}) {
   return !!(config?.stripe?.enabled && config?.stripe?.secretKey);
 }
@@ -912,7 +915,7 @@ customerPortalRouter.get('/payment/:token', async (req, res, next) => {
     const gatewayConfig = await paymentGatewayConfigForTenant(reservation.tenantId || null);
     const gateway = currentGateway(gatewayConfig);
     const gatewayReady = gateway === 'authorizenet'
-      ? authNetEnabled(gatewayConfig)
+      ? authNetPortalReady(gatewayConfig)
       : gateway === 'stripe'
         ? stripeEnabled(gatewayConfig)
         : squareEnabled(gatewayConfig);
@@ -935,7 +938,7 @@ customerPortalRouter.get('/payment/:token', async (req, res, next) => {
       portal: await buildPortalSummary(reservation, 'payment', token),
       gateway,
       gatewayReady,
-      authnetPublic: gateway === 'authorizenet' && gatewayReady
+      authnetPublic: gateway === 'authorizenet' && authNetPortalReady(gatewayConfig)
         ? {
             apiLoginID: String(gatewayConfig.authorizenet?.loginId || '').trim(),
             clientKey: String(gatewayConfig.authorizenet?.clientKey || '').trim(),
@@ -1002,6 +1005,9 @@ customerPortalRouter.post('/payment/:token/create-session', async (req, res, nex
 
     // Authorize.Net
     if (!authNetEnabled(gatewayConfig)) return res.status(400).json({ error: 'Authorize.Net is not configured for this tenant' });
+    if (!gatewayConfig.authorizenet?.clientKey) {
+      return res.status(400).json({ error: 'Authorize.Net Client Key is required for portal payments. Add the public Client Key in tenant payment settings.' });
+    }
     const amount = Number(Math.max(0.5, Number(amountDue || 0))).toFixed(2);
     const returnUrl = `${portalBase().replace(/\/$/, '')}/customer/pay?token=${encodeURIComponent(token)}&success=1`;
     const cancelUrl = `${portalBase().replace(/\/$/, '')}/customer/pay?token=${encodeURIComponent(token)}&canceled=1`;
