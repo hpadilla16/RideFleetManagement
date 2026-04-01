@@ -1138,7 +1138,7 @@ customerPortalRouter.post('/payment/:token/confirm', async (req, res, next) => {
       const tx = authnet?.transactionResponse || {};
       const ok = String(authnet?.messages?.resultCode || '').trim() === 'Ok' && String(tx?.responseCode || '').trim() === '1';
       if (!ok) {
-        return res.status(400).json({ error: authNetMessage(authnet) || 'Authorize.Net payment failed' });
+        return res.status(400).json({ error: extractAuthNetMessage(authnet) || 'Authorize.Net payment failed' });
       }
       paidAmount = Number(tx?.authAmount || tx?.settleAmount || chargeAmount || 0);
       reference = `AUTHNET:${tx.transId || 'UNKNOWN'}`;
