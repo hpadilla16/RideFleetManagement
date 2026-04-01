@@ -1019,7 +1019,20 @@ customerPortalRouter.post('/payment/:token/create-session', async (req, res, nex
             },
             {
               settingName: 'hostedPaymentPaymentOptions',
-              settingValue: JSON.stringify({ showCreditCard: true, showBankAccount: false, cardCodeRequired: false })
+              settingValue: JSON.stringify({
+                showCreditCard: true,
+                showBankAccount: false,
+                cardCodeRequired: false,
+                customerProfileId: false
+              })
+            },
+            {
+              settingName: 'hostedPaymentCustomerOptions',
+              settingValue: JSON.stringify({
+                showEmail: false,
+                requiredEmail: false,
+                addPaymentProfile: false
+              })
             },
             {
               settingName: 'hostedPaymentVisaCheckoutOptions',
