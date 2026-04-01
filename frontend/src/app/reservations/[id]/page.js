@@ -220,9 +220,8 @@ function ReservationDetailInner({ token, me, logout }) {
       setRow(reservationResult);
 
       const optionalCalls = await Promise.allSettled([
-        canLoadSupportingCatalogs ? api('/api/locations', {}, token) : Promise.resolve([]),
         api('/api/customers', {}, token).catch(() => []),
-        api('/api/vehicles', {}, token).catch(() => []),
+        api(`/api/reservations/${id}/available-vehicles`, {}, token).catch(() => []),
         canManagePricingOverrides ? api(`/api/reservations/${id}/pricing-options`, {}, token) : Promise.resolve(null),
         api(`/api/reservations/${id}/pricing`, {}, token).catch(() => null),
         api(`/api/reservations/${id}/payments`, {}, token).catch(() => []),
@@ -231,19 +230,19 @@ function ReservationDetailInner({ token, me, logout }) {
       ]);
 
       const valueOr = (index, fallback) => optionalCalls[index]?.status === 'fulfilled' ? optionalCalls[index].value : fallback;
-      const locationsOut = valueOr(0, []);
-      const customersOut = valueOr(1, []);
-      const vehiclesOut = valueOr(2, []);
-      const pricingOptionsOut = valueOr(3, null);
-      const pricingOut = valueOr(4, null);
-      const paymentsOut = valueOr(5, []);
-      const logsOut = valueOr(6, []);
-      const tollsOut = valueOr(7, null);
+      const customersOut = valueOr(0, []);
+      const vehiclesOut = valueOr(1, []);
+      const pricingOptionsOut = valueOr(2, null);
+      const pricingOut = valueOr(3, null);
+      const paymentsOut = valueOr(4, []);
+      const logsOut = valueOr(5, []);
+      const tollsOut = valueOr(6, null);
+      const locationsOut = Array.isArray(pricingOptionsOut?.locations) ? pricingOptionsOut.locations : [];
 
       setPricing(pricingOut);
       setPaymentRows(Array.isArray(paymentsOut) ? paymentsOut : []);
       setAuditLogs(Array.isArray(logsOut) ? logsOut : []);
-      setLocations(Array.isArray(locationsOut) ? locationsOut : []);
+      setLocations(locationsOut);
       setCustomers(Array.isArray(customersOut) ? customersOut : []);
       setVehicles(Array.isArray(vehiclesOut) ? vehiclesOut : []);
       setServiceOptions(Array.isArray(pricingOptionsOut?.services) ? pricingOptionsOut.services : []);
