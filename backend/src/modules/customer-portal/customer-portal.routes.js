@@ -48,6 +48,7 @@ function currentGateway(config = {}) {
 function extractAuthNetMessage(payload) {
   const roots = [
     payload?.getHostedPaymentPageResponse,
+    payload?.createTransactionResponse,
     payload?.createCustomerProfileFromTransactionResponse,
     payload?.createCustomerProfileResponse,
     payload
@@ -1135,10 +1136,12 @@ customerPortalRouter.post('/payment/:token/confirm', async (req, res, next) => {
           }
         }
       }, gatewayConfig);
-      const tx = authnet?.transactionResponse || {};
-      const ok = String(authnet?.messages?.resultCode || '').trim() === 'Ok' && String(tx?.responseCode || '').trim() === '1';
+      const authnetBody = authnet?.body || {};
+      const authnetResponse = authnetBody?.createTransactionResponse || authnetBody;
+      const tx = authnetResponse?.transactionResponse || {};
+      const ok = String(authnetResponse?.messages?.resultCode || '').trim() === 'Ok' && String(tx?.responseCode || '').trim() === '1';
       if (!ok) {
-        return res.status(400).json({ error: extractAuthNetMessage(authnet) || 'Authorize.Net payment failed' });
+        return res.status(400).json({ error: extractAuthNetMessage(authnetResponse) || extractAuthNetMessage(authnetBody) || 'Authorize.Net payment failed' });
       }
       paidAmount = Number(tx?.authAmount || tx?.settleAmount || chargeAmount || 0);
       reference = `AUTHNET:${tx.transId || 'UNKNOWN'}`;
