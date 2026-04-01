@@ -68,6 +68,9 @@ function Inner({ token, me, logout }) {
   const [method, setMethod] = useState('CASH');
   const [reference, setReference] = useState('');
   const [saving, setSaving] = useState(false);
+  const [cardChargeAmount, setCardChargeAmount] = useState('');
+  const [holdAmount, setHoldAmount] = useState('');
+  const [actionBusy, setActionBusy] = useState('');
 
   const load = async () => {
     const [r, payments, pricingOut] = await Promise.all([
@@ -94,6 +97,19 @@ function Inner({ token, me, logout }) {
   const paymentCount = payments.length;
   const dueNowLabel = unpaid > 0 ? 'Payment Still Needed' : 'Paid In Full';
   const securityDepositHold = useMemo(() => deriveSecurityDepositHold(row), [row]);
+  const cardOnFileReady = !!(row?.customer?.authnetCustomerProfileId && row?.customer?.authnetPaymentProfileId);
+
+  useEffect(() => {
+    if (!cardChargeAmount && unpaid > 0) {
+      setCardChargeAmount(unpaid.toFixed(2));
+    }
+  }, [unpaid, cardChargeAmount]);
+
+  useEffect(() => {
+    if (!holdAmount && securityDepositHold.amount > 0) {
+      setHoldAmount(securityDepositHold.amount.toFixed(2));
+    }
+  }, [securityDepositHold.amount, holdAmount]);
 
   const addPayment = async () => {
     try {
@@ -119,6 +135,72 @@ function Inner({ token, me, logout }) {
     } finally {
       setSaving(false);
     }
+  };
+
+  const runPaymentAction = async (path, { body, successMessage, busyKey } = {}) => {
+    try {
+      setActionBusy(busyKey || path);
+      setMsg('');
+      await api(path, {
+        method: 'POST',
+        body: body ? JSON.stringify(body) : undefined
+      }, token);
+      await load();
+      setMsg(successMessage || 'Action completed');
+    } catch (e) {
+      setMsg(String(e.message || e));
+    } finally {
+      setActionBusy('');
+    }
+  };
+
+  const chargeSavedCard = async () => {
+    const v = Number(cardChargeAmount || 0);
+    if (!(v > 0)) return setMsg('Enter a valid card charge amount');
+    await runPaymentAction(`/api/reservations/${id}/payments/charge-card-on-file`, {
+      body: { amount: v },
+      successMessage: `Charged card on file: $${v.toFixed(2)}`,
+      busyKey: 'charge-card'
+    });
+  };
+
+  const captureHold = async () => {
+    const v = Number(holdAmount || securityDepositHold.amount || 0);
+    if (!(v > 0)) return setMsg('Enter a valid security deposit amount');
+    await runPaymentAction(`/api/reservations/${id}/agreement/security-deposit/capture`, {
+      body: { amount: v },
+      successMessage: `Security deposit hold authorized: $${v.toFixed(2)}`,
+      busyKey: 'capture-hold'
+    });
+  };
+
+  const releaseHold = async () => {
+    await runPaymentAction(`/api/reservations/${id}/agreement/security-deposit/release`, {
+      body: {},
+      successMessage: 'Security deposit hold released',
+      busyKey: 'release-hold'
+    });
+  };
+
+  const saveCardOnFile = async (paymentId) => {
+    await runPaymentAction(`/api/reservations/${id}/payments/${paymentId}/save-card-on-file`, {
+      body: {},
+      successMessage: 'Customer card saved on file',
+      busyKey: `save-card-${paymentId}`
+    });
+  };
+
+  const refundPayment = async (payment) => {
+    const max = Number(payment?.amount || 0);
+    const input = window.prompt('Refund amount', max > 0 ? max.toFixed(2) : '0.00');
+    if (input == null) return;
+    const amountToRefund = Number(input || 0);
+    if (!(amountToRefund > 0)) return setMsg('Enter a valid refund amount');
+    await runPaymentAction(`/api/reservations/${id}/payments/${payment.id}/refund`, {
+      body: { amount: amountToRefund },
+      successMessage: `Refund posted: $${amountToRefund.toFixed(2)}`,
+      busyKey: `refund-${payment.id}`
+    });
   };
 
   return (
@@ -204,8 +286,41 @@ function Inner({ token, me, logout }) {
         </div>
         <button onClick={addPayment} disabled={saving}>{saving ? 'Saving...' : 'Record OTC Payment'}</button>
 
+        <div className="grid3" style={{ marginTop: 16, marginBottom: 10 }}>
+          <div className="stack">
+            <label className="label">Charge Saved Card</label>
+            <input type="number" min="0" step="0.01" value={cardChargeAmount} onChange={(e) => setCardChargeAmount(e.target.value)} />
+            <span className="ui-muted">{cardOnFileReady ? 'Customer already has an Authorize.Net card profile on file.' : 'Save a card from an Authorize.Net payment before charging on file.'}</span>
+          </div>
+          <div className="stack">
+            <label className="label">Security Deposit Hold</label>
+            <input type="number" min="0" step="0.01" value={holdAmount} onChange={(e) => setHoldAmount(e.target.value)} />
+            <span className="ui-muted">
+              {securityDepositHold.captured
+                ? `Authorized${securityDepositHold.reference ? ` | Ref ${securityDepositHold.reference}` : ''}`
+                : 'Places an auth-only hold on the saved card at pickup.'}
+            </span>
+          </div>
+          <div className="stack" style={{ alignSelf: 'end' }}>
+            <button onClick={chargeSavedCard} disabled={!cardOnFileReady || !!actionBusy}>
+              {actionBusy === 'charge-card' ? 'Charging...' : 'Charge Card On File'}
+            </button>
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 8 }}>
+              {!securityDepositHold.captured ? (
+                <button onClick={captureHold} disabled={!cardOnFileReady || !!actionBusy}>
+                  {actionBusy === 'capture-hold' ? 'Authorizing...' : 'Authorize Hold'}
+                </button>
+              ) : (
+                <button onClick={releaseHold} disabled={!!actionBusy}>
+                  {actionBusy === 'release-hold' ? 'Releasing...' : 'Release Hold'}
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+
         <table style={{ marginTop: 12 }}>
-          <thead><tr><th>Date</th><th>Method</th><th>Amount</th><th>Reference</th></tr></thead>
+          <thead><tr><th>Date</th><th>Method</th><th>Amount</th><th>Reference</th><th>Actions</th></tr></thead>
           <tbody>
             {payments.length ? payments.map((p) => (
               <tr key={p.id}>
@@ -213,8 +328,22 @@ function Inner({ token, me, logout }) {
                 <td>{p.method}</td>
                 <td>${Number(p.amount || 0).toFixed(2)}</td>
                 <td>{p.reference}</td>
+                <td>
+                  <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                    {Number(p.amount || 0) > 0 ? (
+                      <button onClick={() => refundPayment(p)} disabled={!!actionBusy}>
+                        {actionBusy === `refund-${p.id}` ? 'Refunding...' : 'Refund'}
+                      </button>
+                    ) : null}
+                    {String(p.reference || '').toUpperCase().startsWith('AUTHNET:') ? (
+                      <button onClick={() => saveCardOnFile(p.id)} disabled={cardOnFileReady || !!actionBusy}>
+                        {cardOnFileReady ? 'Card Saved' : actionBusy === `save-card-${p.id}` ? 'Saving Card...' : 'Save Card To File'}
+                      </button>
+                    ) : null}
+                  </div>
+                </td>
               </tr>
-            )) : <tr><td colSpan={4}>No payments yet</td></tr>}
+            )) : <tr><td colSpan={5}>No payments yet</td></tr>}
           </tbody>
         </table>
       </section>

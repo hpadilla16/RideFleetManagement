@@ -113,6 +113,82 @@ async function authNetRequest(payload, scope = {}) {
   return r.json();
 }
 
+function authNetMessage(payload = {}) {
+  const directMessages = Array.isArray(payload?.messages?.message)
+    ? payload.messages.message
+    : payload?.messages?.message
+      ? [payload.messages.message]
+      : [];
+  const direct = directMessages.map((row) => String(row?.text || '').trim()).find(Boolean);
+  if (direct) return direct;
+
+  const txErrors = Array.isArray(payload?.transactionResponse?.errors?.error)
+    ? payload.transactionResponse.errors.error
+    : payload?.transactionResponse?.errors?.error
+      ? [payload.transactionResponse.errors.error]
+      : [];
+  return txErrors.map((row) => String(row?.errorText || row?.text || '').trim()).find(Boolean) || '';
+}
+
+async function authNetTransactionDetails(transId, scope = {}) {
+  const cfg = await authNetConfig(scope);
+  if (!cfg.loginId || !cfg.transactionKey) throw new Error('Authorize.Net is not configured');
+  const out = await authNetRequest({
+    getTransactionDetailsRequest: {
+      merchantAuthentication: {
+        name: cfg.loginId,
+        transactionKey: cfg.transactionKey
+      },
+      transId: String(transId || '').trim()
+    }
+  }, scope);
+  return out?.getTransactionDetailsResponse || out || {};
+}
+
+async function saveAuthNetCardProfileFromReference({ customerId, reference, scope = {} }) {
+  const cfg = await authNetConfig(scope);
+  if (!cfg.loginId || !cfg.transactionKey) throw new Error('Authorize.Net is not configured');
+  const rawRef = String(reference || '').trim();
+  const transId = rawRef.startsWith('AUTHNET:') ? rawRef.slice('AUTHNET:'.length).trim() : rawRef;
+  if (!transId) throw new Error('Authorize.Net transaction reference is required');
+
+  const out = await authNetRequest({
+    createCustomerProfileFromTransactionRequest: {
+      merchantAuthentication: {
+        name: cfg.loginId,
+        transactionKey: cfg.transactionKey
+      },
+      transId
+    }
+  }, scope);
+
+  const resp = out?.createCustomerProfileResponse || out?.createCustomerProfileFromTransactionResponse || out || {};
+  if (String(resp?.messages?.resultCode || '').trim() !== 'Ok') {
+    throw new Error(authNetMessage(resp) || 'Unable to save card on file from Authorize.Net transaction');
+  }
+
+  const customerProfileId = resp?.customerProfileId || null;
+  const paymentProfileId = Array.isArray(resp?.customerPaymentProfileIdList?.numericString)
+    ? resp.customerPaymentProfileIdList.numericString[0]
+    : (resp?.customerPaymentProfileIdList?.numericString || null);
+  if (!customerProfileId || !paymentProfileId) {
+    throw new Error('Authorize.Net did not return a reusable customer payment profile');
+  }
+
+  await prisma.customer.update({
+    where: { id: customerId },
+    data: {
+      authnetCustomerProfileId: String(customerProfileId),
+      authnetPaymentProfileId: String(paymentProfileId)
+    }
+  });
+
+  return {
+    customerProfileId: String(customerProfileId),
+    paymentProfileId: String(paymentProfileId)
+  };
+}
+
 function ageOnDate(dob, onDate) {
   if (!dob || !onDate) return null;
   const birth = new Date(dob);
@@ -1940,6 +2016,53 @@ export const rentalAgreementsService = {
     return this.getById(id);
   },
 
+  async saveCardOnFileFromPayment(id, paymentId, actorUserId = null) {
+    const agreement = await prisma.rentalAgreement.findUnique({
+      where: { id },
+      include: {
+        reservation: {
+          include: {
+            customer: true
+          }
+        }
+      }
+    });
+    if (!agreement) throw new Error('Rental agreement not found');
+    if (!agreement.reservation?.customer?.id) throw new Error('Customer not found');
+
+    const payment = await prisma.reservationPayment.findFirst({
+      where: {
+        id: paymentId,
+        reservationId: agreement.reservationId
+      }
+    });
+    if (!payment) throw new Error('Payment not found');
+    if (!(Number(payment.amount || 0) > 0)) throw new Error('Only positive payment transactions can be saved as card on file');
+    if (!String(payment.reference || '').trim().toUpperCase().startsWith('AUTHNET:')) {
+      throw new Error('Only Authorize.Net transactions can be saved as card on file');
+    }
+
+    const out = await saveAuthNetCardProfileFromReference({
+      customerId: agreement.reservation.customer.id,
+      reference: payment.reference,
+      scope: agreement?.tenantId ? { tenantId: agreement.tenantId } : {}
+    });
+
+    await prisma.auditLog.create({
+      data: {
+        reservationId: agreement.reservationId,
+        actorUserId: actorUserId || null,
+        action: 'UPDATE',
+        reason: `Saved customer card on file from payment ${paymentId}`
+      }
+    });
+
+    return {
+      ok: true,
+      ...out
+    };
+  },
+
   async chargeCardOnFile(id, payload = {}, actorUserId = null) {
     const amount = Number(payload.amount || 0);
     if (!Number.isFinite(amount) || amount <= 0) throw new Error('Charge amount must be greater than 0');
@@ -2052,6 +2175,150 @@ export const rentalAgreementsService = {
     });
     await prisma.auditLog.create({ data: { reservationId: agreement.reservationId, actorUserId: actorUserId || null, action: 'UPDATE', reason: 'Security deposit released' } });
     return this.getById(id);
+  },
+
+  async refundPayment(id, paymentId, payload = {}, actorUserId = null) {
+    const agreement = await prisma.rentalAgreement.findUnique({
+      where: { id },
+      include: {
+        reservation: {
+          include: {
+            customer: true
+          }
+        }
+      }
+    });
+    if (!agreement) throw new Error('Rental agreement not found');
+
+    const payment = await prisma.reservationPayment.findFirst({
+      where: {
+        id: paymentId,
+        reservationId: agreement.reservationId
+      }
+    });
+    if (!payment) throw new Error('Payment not found');
+    if (!(Number(payment.amount || 0) > 0)) throw new Error('Only captured payments can be refunded');
+
+    const refundAmount = Number(payload.amount || payment.amount || 0);
+    if (!Number.isFinite(refundAmount) || refundAmount <= 0) throw new Error('Refund amount must be greater than 0');
+    if (refundAmount - Number(payment.amount || 0) > 0.009) throw new Error('Refund amount cannot exceed the original payment');
+
+    const priorRefunds = await prisma.reservationPayment.findMany({
+      where: {
+        reservationId: agreement.reservationId,
+        notes: { contains: `Refund for payment ${paymentId}` }
+      },
+      select: {
+        amount: true
+      }
+    });
+    const alreadyRefunded = Math.abs(priorRefunds.reduce((sum, row) => sum + Number(row.amount || 0), 0));
+    if (alreadyRefunded + refundAmount - Number(payment.amount || 0) > 0.009) {
+      throw new Error('Refund amount exceeds the remaining refundable balance');
+    }
+
+    const rawReference = String(payment.reference || '').trim();
+    if (rawReference.toUpperCase().startsWith('AUTHNET:')) {
+      const transId = rawReference.slice('AUTHNET:'.length).trim();
+      const scope = agreement?.tenantId ? { tenantId: agreement.tenantId } : {};
+      const details = await authNetTransactionDetails(transId, scope);
+      const tx = details?.transaction || {};
+      const txStatus = String(tx?.transactionStatus || '').trim();
+      const cfg = await authNetConfig(scope);
+      const gatewayPayload = {
+        createTransactionRequest: {
+          merchantAuthentication: {
+            name: cfg.loginId,
+            transactionKey: cfg.transactionKey
+          },
+          transactionRequest: {
+            transactionType: '',
+            refTransId: transId
+          }
+        }
+      };
+
+      if (txStatus === 'capturedPendingSettlement') {
+        if (Math.abs(refundAmount - Number(payment.amount || 0)) > 0.009) {
+          throw new Error('Pending Authorize.Net transactions can only be voided for the full amount');
+        }
+        gatewayPayload.createTransactionRequest.transactionRequest.transactionType = 'voidTransaction';
+      } else {
+        gatewayPayload.createTransactionRequest.transactionRequest.transactionType = 'refundTransaction';
+        gatewayPayload.createTransactionRequest.transactionRequest.amount = refundAmount.toFixed(2);
+        gatewayPayload.createTransactionRequest.transactionRequest.payment = {
+          creditCard: {
+            cardNumber: String(tx?.payment?.creditCard?.cardNumber || '').trim(),
+            expirationDate: 'XXXX'
+          }
+        };
+      }
+
+      const authnet = await authNetRequest(gatewayPayload, scope);
+      const txResp = authnet?.transactionResponse || {};
+      const ok = String(authnet?.messages?.resultCode || '').trim() === 'Ok' && String(txResp?.responseCode || '').trim() === '1';
+      if (!ok) {
+        throw new Error(authNetMessage(authnet) || 'Authorize.Net refund failed');
+      }
+    }
+
+    const refundReference = `REFUND:${paymentId}`;
+    const refundPaidAt = new Date();
+    const reservationRefund = await prisma.reservationPayment.create({
+      data: {
+        reservationId: agreement.reservationId,
+        method: payment.method,
+        amount: -refundAmount,
+        reference: refundReference,
+        status: 'PAID',
+        paidAt: refundPaidAt,
+        origin: payment.origin || 'OTC',
+        gateway: payment.gateway || null,
+        notes: `Refund for payment ${paymentId}`
+      }
+    });
+
+    const agreementRefund = await prisma.rentalAgreementPayment.create({
+      data: {
+        rentalAgreementId: agreement.id,
+        method: payment.method,
+        amount: -refundAmount,
+        reference: refundReference,
+        status: 'PAID',
+        paidAt: refundPaidAt,
+        notes: `Refund for payment ${paymentId}`
+      }
+    });
+
+    await prisma.reservationPayment.update({
+      where: { id: reservationRefund.id },
+      data: { rentalAgreementPaymentId: agreementRefund.id }
+    });
+
+    const nextPaidAmount = Math.max(0, Number((Number(agreement.paidAmount || 0) - refundAmount).toFixed(2)));
+    const nextBalance = Math.max(0, Number((Number(agreement.total || 0) - nextPaidAmount).toFixed(2)));
+    await prisma.rentalAgreement.update({
+      where: { id: agreement.id },
+      data: {
+        paidAmount: nextPaidAmount,
+        balance: nextBalance
+      }
+    });
+
+    await prisma.auditLog.create({
+      data: {
+        reservationId: agreement.reservationId,
+        actorUserId: actorUserId || null,
+        action: 'UPDATE',
+        reason: `Refund posted for payment ${paymentId}: ${refundAmount.toFixed(2)}`
+      }
+    });
+
+    return {
+      ok: true,
+      refundedAmount: refundAmount,
+      balance: nextBalance
+    };
   },
 
   async saveInspection(id, payload = {}, actorUserId = null, actorIp = null, actorRole = 'AGENT') {

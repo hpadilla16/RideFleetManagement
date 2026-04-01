@@ -1012,7 +1012,7 @@ reservationsRouter.post('/:id/agreement/security-deposit/release', async (req, r
   try {
     const agreementId = await latestAgreementByReservationId(req.params.id, scopeFor(req));
     if (!agreementId) return res.status(400).json({ error: 'No rental agreement exists for this reservation yet' });
-    const row = await rentalAgreementsService.releaseSecurityDeposit(agreementId, req.user?.sub || null);
+    const row = await rentalAgreementsService.releaseSecurityDeposit(agreementId, req.body || {}, req.user?.sub || null);
     res.json(row);
   } catch (e) {
     next(e);
@@ -1118,6 +1118,19 @@ reservationsRouter.post('/:id/payments/:paymentId/refund', async (req, res, next
   } catch (e) {
     if (/not found/i.test(e.message)) return res.status(404).json({ error: e.message });
     if (/cannot|invalid|already|amount/i.test(e.message)) return res.status(400).json({ error: e.message });
+    next(e);
+  }
+});
+
+reservationsRouter.post('/:id/payments/:paymentId/save-card-on-file', async (req, res, next) => {
+  try {
+    const agreementId = await latestAgreementByReservationId(req.params.id, scopeFor(req));
+    if (!agreementId) return res.status(404).json({ error: 'Agreement not found for reservation' });
+    const row = await rentalAgreementsService.saveCardOnFileFromPayment(agreementId, req.params.paymentId, req.user?.id || null);
+    res.json(row);
+  } catch (e) {
+    if (/not found/i.test(e.message)) return res.status(404).json({ error: e.message });
+    if (/cannot|invalid|missing|unable|only/i.test(e.message)) return res.status(400).json({ error: e.message });
     next(e);
   }
 });
