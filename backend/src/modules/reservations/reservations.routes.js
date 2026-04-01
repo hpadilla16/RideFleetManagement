@@ -44,6 +44,13 @@ async function latestAgreementByReservationId(reservationId, scope = {}) {
   return row?.id || null;
 }
 
+async function ensureAgreementByReservationId(reservationId, scope = {}) {
+  const existingId = await latestAgreementByReservationId(reservationId, scope);
+  if (existingId) return existingId;
+  const agreement = await rentalAgreementsService.startFromReservation(reservationId, scope);
+  return agreement?.id || null;
+}
+
 function canManagePrecheckin(req) {
   const role = String(req.user?.role || '').toUpperCase();
   return ['SUPER_ADMIN', 'ADMIN', 'OPS'].includes(role);
@@ -980,7 +987,7 @@ reservationsRouter.post('/:id/precheckin/ready', async (req, res, next) => {
 
 reservationsRouter.post('/:id/agreement/payments/manual', async (req, res, next) => {
   try {
-    const agreementId = await latestAgreementByReservationId(req.params.id, scopeFor(req));
+    const agreementId = await ensureAgreementByReservationId(req.params.id, scopeFor(req));
     if (!agreementId) return res.status(400).json({ error: 'No rental agreement exists for this reservation yet' });
     const row = await rentalAgreementsService.addManualPayment(agreementId, req.body || {}, req.user?.sub || null);
     res.json(row);
@@ -991,7 +998,7 @@ reservationsRouter.post('/:id/agreement/payments/manual', async (req, res, next)
 
 reservationsRouter.post('/:id/agreement/payments/charge-card-on-file', async (req, res, next) => {
   try {
-    const agreementId = await latestAgreementByReservationId(req.params.id, scopeFor(req));
+    const agreementId = await ensureAgreementByReservationId(req.params.id, scopeFor(req));
     if (!agreementId) return res.status(400).json({ error: 'No rental agreement exists for this reservation yet' });
     const row = await rentalAgreementsService.chargeCardOnFile(agreementId, req.body || {}, req.user?.sub || null);
     res.json(row);
@@ -1002,7 +1009,7 @@ reservationsRouter.post('/:id/agreement/payments/charge-card-on-file', async (re
 
 reservationsRouter.post('/:id/agreement/security-deposit/capture', async (req, res, next) => {
   try {
-    const agreementId = await latestAgreementByReservationId(req.params.id, scopeFor(req));
+    const agreementId = await ensureAgreementByReservationId(req.params.id, scopeFor(req));
     if (!agreementId) return res.status(400).json({ error: 'No rental agreement exists for this reservation yet' });
     const row = await rentalAgreementsService.captureSecurityDeposit(agreementId, req.body || {}, req.user?.sub || null);
     res.json(row);
@@ -1013,7 +1020,7 @@ reservationsRouter.post('/:id/agreement/security-deposit/capture', async (req, r
 
 reservationsRouter.post('/:id/agreement/security-deposit/release', async (req, res, next) => {
   try {
-    const agreementId = await latestAgreementByReservationId(req.params.id, scopeFor(req));
+    const agreementId = await ensureAgreementByReservationId(req.params.id, scopeFor(req));
     if (!agreementId) return res.status(400).json({ error: 'No rental agreement exists for this reservation yet' });
     const row = await rentalAgreementsService.releaseSecurityDeposit(agreementId, req.body || {}, req.user?.sub || null);
     res.json(row);
@@ -1024,7 +1031,7 @@ reservationsRouter.post('/:id/agreement/security-deposit/release', async (req, r
 
 reservationsRouter.post('/:id/agreement/customer/card-on-file', async (req, res, next) => {
   try {
-    const agreementId = await latestAgreementByReservationId(req.params.id, scopeFor(req));
+    const agreementId = await ensureAgreementByReservationId(req.params.id, scopeFor(req));
     if (!agreementId) return res.status(400).json({ error: 'No rental agreement exists for this reservation yet' });
     const row = await rentalAgreementsService.captureCustomerCardOnFile(agreementId, req.body || {}, req.user?.sub || null);
     res.json(row);
@@ -1071,7 +1078,7 @@ reservationsRouter.delete('/:id', async (req, res) => {
 // Reservation-native payment delete endpoint
 reservationsRouter.post('/:id/payments/:paymentId/delete', async (req, res, next) => {
   try {
-    const agreementId = await latestAgreementByReservationId(req.params.id, scopeFor(req));
+    const agreementId = await ensureAgreementByReservationId(req.params.id, scopeFor(req));
     if (!agreementId) return res.status(404).json({ error: 'Agreement not found for reservation' });
     const agreement = await prisma.rentalAgreement.findFirst({
       where: { id: agreementId, ...(scopeFor(req).tenantId ? { tenantId: scopeFor(req).tenantId } : {}) },
@@ -1114,7 +1121,7 @@ reservationsRouter.post('/:id/payments/:paymentId/delete', async (req, res, next
 
 reservationsRouter.post('/:id/payments/:paymentId/refund', async (req, res, next) => {
   try {
-    const agreementId = await latestAgreementByReservationId(req.params.id, scopeFor(req));
+    const agreementId = await ensureAgreementByReservationId(req.params.id, scopeFor(req));
     if (!agreementId) return res.status(404).json({ error: 'Agreement not found for reservation' });
     const row = await rentalAgreementsService.refundPayment(agreementId, req.params.paymentId, req.body || {}, req.user?.id || null);
     res.json(row);
@@ -1127,7 +1134,7 @@ reservationsRouter.post('/:id/payments/:paymentId/refund', async (req, res, next
 
 reservationsRouter.post('/:id/payments/:paymentId/save-card-on-file', async (req, res, next) => {
   try {
-    const agreementId = await latestAgreementByReservationId(req.params.id, scopeFor(req));
+    const agreementId = await ensureAgreementByReservationId(req.params.id, scopeFor(req));
     if (!agreementId) return res.status(404).json({ error: 'Agreement not found for reservation' });
     const row = await rentalAgreementsService.saveCardOnFileFromPayment(agreementId, req.params.paymentId, req.user?.id || null);
     res.json(row);
@@ -1140,7 +1147,7 @@ reservationsRouter.post('/:id/payments/:paymentId/save-card-on-file', async (req
 
 reservationsRouter.post('/:id/payments/charge-card-on-file', async (req, res, next) => {
   try {
-    const agreementId = await latestAgreementByReservationId(req.params.id, scopeFor(req));
+    const agreementId = await ensureAgreementByReservationId(req.params.id, scopeFor(req));
     if (!agreementId) return res.status(404).json({ error: 'Agreement not found for reservation' });
     const row = await rentalAgreementsService.chargeCardOnFile(agreementId, req.body || {}, req.user?.id || null);
     res.json(row);
