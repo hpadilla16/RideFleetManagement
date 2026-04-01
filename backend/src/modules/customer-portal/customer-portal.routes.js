@@ -222,6 +222,12 @@ function authNetCleanValue(value, fallback = '') {
   return text.replace(/\s+/g, ' ').slice(0, 255);
 }
 
+function isSecurityDepositCharge(row = {}) {
+  const source = String(row?.source || '').trim().toUpperCase();
+  const name = String(row?.name || '').trim().toUpperCase();
+  return source === 'SECURITY_DEPOSIT' || name === 'SECURITY DEPOSIT' || name === 'SECURITY DEPOSIT HOLD';
+}
+
 async function buildPortalSummary(reservation, kind, token) {
   const agreement = await latestAgreementForReservation(reservation.id);
   const payments = mergePayments(reservation, agreement);
@@ -477,17 +483,18 @@ function isUnderageReservation(reservation) {
 async function buildReservationBreakdown(reservation) {
   const structuredCharges = Array.isArray(reservation?.charges) ? reservation.charges : [];
   if (structuredCharges.length) {
-    const lines = structuredCharges.map((c) => ({
+    const visibleCharges = structuredCharges.filter((c) => !isSecurityDepositCharge(c));
+    const lines = visibleCharges.map((c) => ({
       name: c.name,
       qty: Number(c.quantity || 0),
       rate: Number(c.rate || 0),
       total: Number(c.total || 0)
     }));
-    const subtotal = Number(structuredCharges
+    const subtotal = Number(visibleCharges
       .filter((c) => String(c?.chargeType || '').toUpperCase() !== 'TAX')
       .reduce((sum, c) => sum + Number(c.total || 0), 0)
       .toFixed(2));
-    const tax = Number(structuredCharges
+    const tax = Number(visibleCharges
       .filter((c) => String(c?.chargeType || '').toUpperCase() === 'TAX')
       .reduce((sum, c) => sum + Number(c.total || 0), 0)
       .toFixed(2));
