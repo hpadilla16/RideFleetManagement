@@ -934,7 +934,14 @@ customerPortalRouter.get('/payment/:token', async (req, res, next) => {
       breakdown,
       portal: await buildPortalSummary(reservation, 'payment', token),
       gateway,
-      gatewayReady
+      gatewayReady,
+      authnetPublic: gateway === 'authorizenet' && gatewayReady
+        ? {
+            apiLoginID: String(gatewayConfig.authorizenet?.loginId || '').trim(),
+            clientKey: String(gatewayConfig.authorizenet?.clientKey || '').trim(),
+            environment: String(gatewayConfig.authorizenet?.environment || 'sandbox').trim().toLowerCase()
+          }
+        : null
     });
   } catch (e) { next(e); }
 });
@@ -1083,6 +1090,44 @@ customerPortalRouter.post('/payment/:token/confirm', async (req, res, next) => {
       if (!session || session.payment_status !== 'paid') return res.status(400).json({ error: 'Stripe payment not completed' });
       paidAmount = Number(((session.amount_total || 0) / 100).toFixed(2));
       reference = `STRIPE:${session.id}`;
+    } else if (gateway === 'authorizenet' && req.body?.opaqueData?.dataDescriptor && req.body?.opaqueData?.dataValue) {
+      if (!authNetEnabled(gatewayConfig)) return res.status(400).json({ error: 'Authorize.Net not configured for this tenant' });
+      const opaqueData = {
+        dataDescriptor: String(req.body.opaqueData.dataDescriptor || '').trim(),
+        dataValue: String(req.body.opaqueData.dataValue || '').trim()
+      };
+      if (!opaqueData.dataDescriptor || !opaqueData.dataValue) {
+        return res.status(400).json({ error: 'Authorize.Net opaque payment data is required' });
+      }
+
+      const chargeAmount = Number(await amountDueForReservation(reservation.id, reservation.estimatedTotal));
+      const authnet = await authNetRequest({
+        createTransactionRequest: {
+          merchantAuthentication: {
+            name: gatewayConfig.authorizenet.loginId,
+            transactionKey: gatewayConfig.authorizenet.transactionKey
+          },
+          transactionRequest: {
+            transactionType: 'authCaptureTransaction',
+            amount: Number(Math.max(0.5, chargeAmount)).toFixed(2),
+            payment: {
+              opaqueData
+            },
+            billTo: {
+              firstName: authNetCleanValue(reservation.customer?.firstName || '', ''),
+              lastName: authNetCleanValue(reservation.customer?.lastName || '', ''),
+              zip: authNetCleanValue(req.body?.billingZip || '', '')
+            }
+          }
+        }
+      }, gatewayConfig);
+      const tx = authnet?.transactionResponse || {};
+      const ok = String(authnet?.messages?.resultCode || '').trim() === 'Ok' && String(tx?.responseCode || '').trim() === '1';
+      if (!ok) {
+        return res.status(400).json({ error: authNetMessage(authnet) || 'Authorize.Net payment failed' });
+      }
+      paidAmount = Number(tx?.authAmount || tx?.settleAmount || chargeAmount || 0);
+      reference = `AUTHNET:${tx.transId || 'UNKNOWN'}`;
     } else if (gateway === 'authorizenet') {
       if (!authNetEnabled(gatewayConfig)) return res.status(400).json({ error: 'Authorize.Net not configured for this tenant' });
       const transId = String(

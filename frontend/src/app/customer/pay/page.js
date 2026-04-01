@@ -29,6 +29,12 @@ function restorePaymentPortalState(token) {
   }
 }
 
+function authNetScriptUrl(environment = 'sandbox') {
+  return String(environment || '').toLowerCase() === 'production'
+    ? 'https://js.authorize.net/v1/Accept.js'
+    : 'https://jstest.authorize.net/v1/Accept.js';
+}
+
 export default function CustomerPayPage() {
   const [token, setToken] = useState('');
   const [success, setSuccess] = useState('');
@@ -40,6 +46,12 @@ export default function CustomerPayPage() {
   const [error, setError] = useState('');
   const [ok, setOk] = useState('');
   const [model, setModel] = useState(null);
+  const [cardNumber, setCardNumber] = useState('');
+  const [expMonth, setExpMonth] = useState('');
+  const [expYear, setExpYear] = useState('');
+  const [cardCode, setCardCode] = useState('');
+  const [billingZip, setBillingZip] = useState('');
+  const [processingAuthnet, setProcessingAuthnet] = useState(false);
 
   useEffect(() => {
     const p = new URLSearchParams(window.location.search);
@@ -87,6 +99,17 @@ export default function CustomerPayPage() {
     };
     run();
   }, [token]);
+
+  useEffect(() => {
+    if (!model || String(model.gateway || '').toLowerCase() !== 'authorizenet') return;
+    if (!model.authnetPublic?.apiLoginID || !model.authnetPublic?.clientKey) return;
+    const src = authNetScriptUrl(model.authnetPublic.environment);
+    if (document.querySelector(`script[src="${src}"]`)) return;
+    const script = document.createElement('script');
+    script.src = src;
+    script.async = true;
+    document.body.appendChild(script);
+  }, [model]);
 
   useEffect(() => {
     const autoConfirmReturn = async () => {
@@ -137,6 +160,51 @@ export default function CustomerPayPage() {
       event?.preventDefault?.();
       event?.stopPropagation?.();
       setError('');
+      if (String(model?.gateway || '').toLowerCase() === 'authorizenet') {
+        if (!window.Accept || typeof window.Accept.dispatchData !== 'function') {
+          throw new Error('Authorize.Net secure form is still loading. Please wait a moment and try again.');
+        }
+        if (!cardNumber || !expMonth || !expYear || !cardCode) {
+          throw new Error('Enter card number, expiration month/year, and card code.');
+        }
+        setProcessingAuthnet(true);
+        const opaqueData = await new Promise((resolve, reject) => {
+          window.Accept.dispatchData({
+            authData: {
+              clientKey: model.authnetPublic.clientKey,
+              apiLoginID: model.authnetPublic.apiLoginID
+            },
+            cardData: {
+              cardNumber: String(cardNumber).replace(/\s+/g, ''),
+              month: String(expMonth).trim(),
+              year: String(expYear).trim(),
+              cardCode: String(cardCode).trim()
+            }
+          }, (response) => {
+            if (response?.messages?.resultCode === 'Error') {
+              const msg = (response?.messages?.message || []).map((row) => String(row?.text || '').trim()).find(Boolean) || 'Authorize.Net tokenization failed';
+              reject(new Error(msg));
+              return;
+            }
+            if (!response?.opaqueData?.dataDescriptor || !response?.opaqueData?.dataValue) {
+              reject(new Error('Authorize.Net secure payment token missing'));
+              return;
+            }
+            resolve(response.opaqueData);
+          });
+        });
+        const res = await fetch(`${API_BASE}/api/public/payment/${encodeURIComponent(token)}/confirm`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ opaqueData, billingZip })
+        });
+        const j = await res.json();
+        if (!res.ok) throw new Error(j?.error || 'Unable to process payment');
+        setModel((prev) => ({ ...(prev || {}), portal: j?.portal || prev?.portal || null }));
+        setOk(`Payment recorded successfully: $${Number(j.paidAmount || 0).toFixed(2)}` + (j?.savedCardOnFile ? ' Card on file saved.' : ''));
+        setError('');
+        return;
+      }
       const res = await fetch(`${API_BASE}/api/public/payment/${encodeURIComponent(token)}/create-session`, { method: 'POST' });
       const j = await res.json();
       if (!res.ok) throw new Error(j?.error || 'Unable to start checkout');
@@ -160,6 +228,8 @@ export default function CustomerPayPage() {
       window.location.href = j.checkoutUrl;
     } catch (e) {
       setError(String(e.message || e));
+    } finally {
+      setProcessingAuthnet(false);
     }
   };
 
@@ -294,6 +364,37 @@ export default function CustomerPayPage() {
             </div>
           ) : null}
 
+          {String(model.gateway || '').toLowerCase() === 'authorizenet' && model.authnetPublic?.clientKey ? (
+            <div style={portalStyles.card}>
+              <h2 style={portalStyles.cardTitle}>Secure Card Payment</h2>
+              <div style={portalStyles.statGrid}>
+                <div style={portalStyles.statTile}>
+                  <div style={portalStyles.statLabel}>Card Number</div>
+                  <input value={cardNumber} onChange={(e) => setCardNumber(e.target.value)} placeholder="4111111111111111" />
+                </div>
+                <div style={portalStyles.statTile}>
+                  <div style={portalStyles.statLabel}>Exp Month</div>
+                  <input value={expMonth} onChange={(e) => setExpMonth(e.target.value)} placeholder="MM" />
+                </div>
+                <div style={portalStyles.statTile}>
+                  <div style={portalStyles.statLabel}>Exp Year</div>
+                  <input value={expYear} onChange={(e) => setExpYear(e.target.value)} placeholder="YYYY" />
+                </div>
+                <div style={portalStyles.statTile}>
+                  <div style={portalStyles.statLabel}>Card Code</div>
+                  <input value={cardCode} onChange={(e) => setCardCode(e.target.value)} placeholder="CVV" />
+                </div>
+                <div style={portalStyles.statTile}>
+                  <div style={portalStyles.statLabel}>Billing Zip</div>
+                  <input value={billingZip} onChange={(e) => setBillingZip(e.target.value)} placeholder="ZIP" />
+                </div>
+              </div>
+              <div style={{ marginTop: 12, color: '#55456f', lineHeight: 1.6 }}>
+                Your card details are tokenized by Authorize.Net before Ride Fleet processes the payment.
+              </div>
+            </div>
+          ) : null}
+
           <div style={portalStyles.card}>
             <h2 style={portalStyles.cardTitle}>Next Step</h2>
             {fullyPaid ? (
@@ -321,12 +422,16 @@ export default function CustomerPayPage() {
             ) : !success ? (
               <div style={{ display: 'grid', gap: 12 }}>
                 <div style={{ color: '#55456f', lineHeight: 1.6 }}>
-                  {balanceDue > 0
-                    ? `When you continue, you will be redirected to the secure payment page to pay the remaining $${balanceDue.toFixed(2)}.`
-                    : 'When you continue, you will be redirected to the secure payment page configured for this reservation.'}
+                  {String(model.gateway || '').toLowerCase() === 'authorizenet'
+                    ? `Enter your card details below to securely pay the remaining $${balanceDue.toFixed(2)} without leaving this page.`
+                    : balanceDue > 0
+                      ? `When you continue, you will be redirected to the secure payment page to pay the remaining $${balanceDue.toFixed(2)}.`
+                      : 'When you continue, you will be redirected to the secure payment page configured for this reservation.'}
                 </div>
                 <div>
-                  <button type="button" onClick={startCheckout} disabled={!model.gatewayReady} style={portalStyles.button}>Pay Now</button>
+                  <button type="button" onClick={startCheckout} disabled={!model.gatewayReady || processingAuthnet} style={portalStyles.button}>
+                    {processingAuthnet ? 'Processing Payment...' : 'Pay Now'}
+                  </button>
                 </div>
               </div>
             ) : model.gateway === 'stripe' ? (
