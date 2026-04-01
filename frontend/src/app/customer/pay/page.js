@@ -105,6 +105,24 @@ export default function CustomerPayPage() {
           setOk(`Payment recorded successfully: $${Number(j.paidAmount || 0).toFixed(2)}` + (j?.savedCardOnFile ? ' Card on file saved.' : ''));
           return;
         }
+        if (model.gateway === 'authorizenet') {
+          if (!returnTransId) {
+            setOk('Payment return detected for Authorize.Net. Waiting for transaction reference to reconcile the payment.');
+            setError('');
+            return;
+          }
+          const res = await fetch(`${API_BASE}/api/public/payment/${encodeURIComponent(token)}/confirm`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ transId: returnTransId })
+          });
+          const j = await res.json();
+          if (!res.ok) throw new Error(j?.error || 'Authorize.Net confirmation failed');
+          setModel((prev) => ({ ...(prev || {}), portal: j?.portal || prev?.portal || null }));
+          setOk(`Payment recorded successfully: $${Number(j.paidAmount || 0).toFixed(2)}` + (j?.savedCardOnFile ? ' Card on file saved.' : ''));
+          setError('');
+          return;
+        }
         setOk(`Payment return detected for ${String(model.gateway || '').toUpperCase()}. Verification must be completed through a server-side gateway callback or internal reconciliation.`);
         setError('');
       } catch (e) {

@@ -125,6 +125,21 @@ async function trySaveAuthNetCardOnFileFromTransaction({ reservation, reference 
   return true;
 }
 
+async function getAuthNetTransactionDetails(transId, config = {}) {
+  const cleanTransId = String(transId || '').trim();
+  if (!cleanTransId) throw new Error('Authorize.Net transId is required');
+  const out = await authNetRequest({
+    getTransactionDetailsRequest: {
+      merchantAuthentication: {
+        name: config.authorizenet.loginId,
+        transactionKey: config.authorizenet.transactionKey
+      },
+      transId: cleanTransId
+    }
+  }, config);
+  return out?.body?.getTransactionDetailsResponse || out?.body || {};
+}
+
 async function findReservationByToken(kind, token) {
   if (kind === 'customer-info') {
     return prisma.reservation.findFirst({
@@ -993,6 +1008,16 @@ customerPortalRouter.post('/payment/:token/create-session', async (req, res, nex
         hostedPaymentSettings: {
           setting: [
             {
+              settingName: 'hostedPaymentReturnOptions',
+              settingValue: JSON.stringify({
+                showReceipt: false,
+                url: returnUrl,
+                urlText: 'Return to Ride Fleet',
+                cancelUrl,
+                cancelUrlText: 'Cancel and go back'
+              })
+            },
+            {
               settingName: 'hostedPaymentPaymentOptions',
               settingValue: JSON.stringify({ showCreditCard: true, showBankAccount: false, cardCodeRequired: false })
             },
@@ -1046,11 +1071,60 @@ customerPortalRouter.post('/payment/:token/confirm', async (req, res, next) => {
       if (!session || session.payment_status !== 'paid') return res.status(400).json({ error: 'Stripe payment not completed' });
       paidAmount = Number(((session.amount_total || 0) / 100).toFixed(2));
       reference = `STRIPE:${session.id}`;
+    } else if (gateway === 'authorizenet') {
+      if (!authNetEnabled(gatewayConfig)) return res.status(400).json({ error: 'Authorize.Net not configured for this tenant' });
+      const transId = String(
+        req.body?.transId ||
+        req.body?.transactionId ||
+        req.body?.xTransId ||
+        req.body?.x_trans_id ||
+        req.body?.reference ||
+        ''
+      ).trim();
+      if (!transId) {
+        return res.status(400).json({ error: 'Authorize.Net transId is required' });
+      }
+
+      reference = `AUTHNET:${transId}`;
+      const existing = await prisma.reservationPayment.findFirst({
+        where: {
+          reservationId: reservation.id,
+          reference
+        }
+      });
+      if (existing) {
+        const refreshed = await findReservationByToken('payment', token);
+        return res.json({
+          ok: true,
+          paidAmount: Number(existing.amount || 0),
+          savedCardOnFile: false,
+          duplicate: true,
+          portal: refreshed ? await buildPortalSummary(refreshed, 'payment', token) : null
+        });
+      }
+
+      const details = await getAuthNetTransactionDetails(transId, gatewayConfig);
+      const tx = details?.transaction || {};
+      const resultCode = String(details?.messages?.resultCode || '').trim();
+      const responseCode = String(tx?.responseCode || '').trim();
+      const txStatus = String(tx?.transactionStatus || '').trim();
+      const allowedStatuses = new Set(['capturedPendingSettlement', 'settledSuccessfully']);
+      if (resultCode !== 'Ok' || responseCode !== '1' || !allowedStatuses.has(txStatus)) {
+        const detail = extractAuthNetMessage(details) || 'Authorize.Net payment has not reached a captured state yet';
+        return res.status(400).json({ error: detail });
+      }
+
+      paidAmount = Number(tx?.authAmount || tx?.settleAmount || 0);
+      if (!(paidAmount > 0)) {
+        return res.status(400).json({ error: 'Authorize.Net payment amount is missing' });
+      }
     } else {
       return res.status(400).json({
         error: gateway === 'stripe'
           ? 'Stripe sessionId is required'
-          : `Public payment confirmation is disabled for ${String(gateway || 'this gateway').toUpperCase()}. Use verified gateway callbacks or internal reconciliation.`
+          : gateway === 'authorizenet'
+            ? 'Authorize.Net payment confirmation requires a hosted payment transId'
+            : `Public payment confirmation is disabled for ${String(gateway || 'this gateway').toUpperCase()}. Use verified gateway callbacks or internal reconciliation.`
       });
     }
 
