@@ -241,6 +241,12 @@ function authNetCleanValue(value, fallback = '') {
   return text.replace(/\s+/g, ' ').slice(0, 255);
 }
 
+function authNetCompactObject(obj = {}) {
+  return Object.fromEntries(
+    Object.entries(obj).filter(([, value]) => String(value ?? '').trim() !== '')
+  );
+}
+
 function isSecurityDepositCharge(row = {}) {
   const source = String(row?.source || '').trim().toUpperCase();
   const name = String(row?.name || '').trim().toUpperCase();
@@ -1116,6 +1122,21 @@ customerPortalRouter.post('/payment/:token/confirm', async (req, res, next) => {
       }
 
       const chargeAmount = Number(await amountDueForReservation(reservation.id, reservation.estimatedTotal));
+      const billingZip = authNetCleanValue(req.body?.billingZip || reservation.customer?.zip || '', '');
+      const customerPayload = authNetCompactObject({
+        id: authNetCleanValue(reservation.customer?.id || reservation.id || '', ''),
+        email: authNetCleanValue(reservation.customer?.email || '', '')
+      });
+      const billToPayload = authNetCompactObject({
+        firstName: authNetCleanValue(reservation.customer?.firstName || '', ''),
+        lastName: authNetCleanValue(reservation.customer?.lastName || '', ''),
+        address: authNetCleanValue(reservation.customer?.address1 || '', ''),
+        city: authNetCleanValue(reservation.customer?.city || '', ''),
+        state: authNetCleanValue(reservation.customer?.state || '', ''),
+        zip: billingZip,
+        country: authNetCleanValue(reservation.customer?.country || 'USA', ''),
+        phoneNumber: authNetCleanValue(reservation.customer?.phone || '', '')
+      });
       const authnet = await authNetRequest({
         createTransactionRequest: {
           merchantAuthentication: {
@@ -1128,11 +1149,8 @@ customerPortalRouter.post('/payment/:token/confirm', async (req, res, next) => {
             payment: {
               opaqueData
             },
-            billTo: {
-              firstName: authNetCleanValue(reservation.customer?.firstName || '', ''),
-              lastName: authNetCleanValue(reservation.customer?.lastName || '', ''),
-              zip: authNetCleanValue(req.body?.billingZip || '', '')
-            }
+            ...(Object.keys(customerPayload).length ? { customer: customerPayload } : {}),
+            ...(Object.keys(billToPayload).length ? { billTo: billToPayload } : {})
           }
         }
       }, gatewayConfig);
