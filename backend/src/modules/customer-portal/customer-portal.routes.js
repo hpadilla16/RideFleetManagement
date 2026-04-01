@@ -982,12 +982,6 @@ customerPortalRouter.post('/payment/:token/create-session', async (req, res, nex
         transactionRequest: {
           transactionType: 'authCaptureTransaction',
           amount
-        },
-        hostedPaymentSettings: {
-          setting: [
-            { settingName: 'hostedPaymentReturnOptions', settingValue: JSON.stringify({ showReceipt: false, url: returnUrl, urlText: 'Return to Reservation', cancelUrl, cancelUrlText: 'Cancel' }) },
-            { settingName: 'hostedPaymentButtonOptions', settingValue: JSON.stringify({ text: 'Pay Now' }) }
-          ]
         }
       }
     };
