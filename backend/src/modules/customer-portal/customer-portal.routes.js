@@ -982,6 +982,18 @@ customerPortalRouter.post('/payment/:token/create-session', async (req, res, nex
         transactionRequest: {
           transactionType: 'authCaptureTransaction',
           amount
+        },
+        hostedPaymentSettings: {
+          setting: [
+            {
+              settingName: 'hostedPaymentPaymentOptions',
+              settingValue: JSON.stringify({ showCreditCard: true, showBankAccount: false, cardCodeRequired: false })
+            },
+            {
+              settingName: 'hostedPaymentVisaCheckoutOptions',
+              settingValue: JSON.stringify({ apiKey: '', displayName: '', message: '' })
+            }
+          ]
         }
       }
     };
