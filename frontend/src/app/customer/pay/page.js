@@ -114,8 +114,10 @@ export default function CustomerPayPage() {
     autoConfirmReturn();
   }, [token, success, sessionId, model, returnTransId]);
 
-  const startCheckout = async () => {
+  const startCheckout = async (event) => {
     try {
+      event?.preventDefault?.();
+      event?.stopPropagation?.();
       setError('');
       const res = await fetch(`${API_BASE}/api/public/payment/${encodeURIComponent(token)}/create-session`, { method: 'POST' });
       const j = await res.json();
@@ -290,7 +292,7 @@ export default function CustomerPayPage() {
                     : 'When you continue, you will be redirected to the secure payment page configured for this reservation.'}
                 </div>
                 <div>
-                  <button onClick={startCheckout} disabled={!model.gatewayReady} style={portalStyles.button}>Pay Now</button>
+                  <button type="button" onClick={startCheckout} disabled={!model.gatewayReady} style={portalStyles.button}>Pay Now</button>
                 </div>
               </div>
             ) : model.gateway === 'stripe' ? (
