@@ -207,6 +207,15 @@ function ReservationDetailInner({ token, me, logout }) {
   const canManageCommissionOwner = ['SUPER_ADMIN', 'ADMIN'].includes(role);
   const canLoadSupportingCatalogs = ['SUPER_ADMIN', 'ADMIN', 'OPS'].includes(role);
 
+  const loadAvailableVehicles = async () => {
+    try {
+      const vehiclesOut = await api(`/api/reservations/${id}/available-vehicles`, {}, token);
+      setVehicles(Array.isArray(vehiclesOut) ? vehiclesOut : []);
+    } catch {
+      setVehicles([]);
+    }
+  };
+
 
   const cleanMojibake = (val) => {
     const s = String(val || '');
@@ -221,7 +230,6 @@ function ReservationDetailInner({ token, me, logout }) {
 
       const optionalCalls = await Promise.allSettled([
         api('/api/customers', {}, token).catch(() => []),
-        api(`/api/reservations/${id}/available-vehicles`, {}, token).catch(() => []),
         canManagePricingOverrides ? api(`/api/reservations/${id}/pricing-options`, {}, token) : Promise.resolve(null),
         api(`/api/reservations/${id}/pricing`, {}, token).catch(() => null),
         api(`/api/reservations/${id}/payments`, {}, token).catch(() => []),
@@ -231,12 +239,11 @@ function ReservationDetailInner({ token, me, logout }) {
 
       const valueOr = (index, fallback) => optionalCalls[index]?.status === 'fulfilled' ? optionalCalls[index].value : fallback;
       const customersOut = valueOr(0, []);
-      const vehiclesOut = valueOr(1, []);
-      const pricingOptionsOut = valueOr(2, null);
-      const pricingOut = valueOr(3, null);
-      const paymentsOut = valueOr(4, []);
-      const logsOut = valueOr(5, []);
-      const tollsOut = valueOr(6, null);
+      const pricingOptionsOut = valueOr(1, null);
+      const pricingOut = valueOr(2, null);
+      const paymentsOut = valueOr(3, []);
+      const logsOut = valueOr(4, []);
+      const tollsOut = valueOr(5, null);
       const locationsOut = Array.isArray(pricingOptionsOut?.locations) ? pricingOptionsOut.locations : [];
 
       setPricing(pricingOut);
@@ -244,7 +251,7 @@ function ReservationDetailInner({ token, me, logout }) {
       setAuditLogs(Array.isArray(logsOut) ? logsOut : []);
       setLocations(locationsOut);
       setCustomers(Array.isArray(customersOut) ? customersOut : []);
-      setVehicles(Array.isArray(vehiclesOut) ? vehiclesOut : []);
+      setVehicles((prev) => (Array.isArray(prev) ? prev : []));
       setServiceOptions(Array.isArray(pricingOptionsOut?.services) ? pricingOptionsOut.services : []);
       setFeeOptions(Array.isArray(pricingOptionsOut?.fees) ? pricingOptionsOut.fees : []);
       setInsurancePlans(Array.isArray(pricingOptionsOut?.insurancePlans) ? pricingOptionsOut.insurancePlans : []);
@@ -1528,7 +1535,11 @@ token
               <div className="loaner-workflow-grid" style={{ marginBottom: 0 }}>
                 <section className="glass card section-card">
                   <div className="section-title">Loaner Operations</div>
-                  <select value={loanerOpsForm.vehicleId} onChange={(e) => setLoanerOpsForm({ ...loanerOpsForm, vehicleId: e.target.value })}>
+                  <select
+                    value={loanerOpsForm.vehicleId}
+                    onFocus={() => { if (!vehicles.length) loadAvailableVehicles(); }}
+                    onChange={(e) => setLoanerOpsForm({ ...loanerOpsForm, vehicleId: e.target.value })}
+                  >
                     <option value="">Select assigned loaner vehicle</option>
                     {loanerVehicleChoices.map((vehicle) => (
                       <option key={vehicle.id} value={vehicle.id}>
