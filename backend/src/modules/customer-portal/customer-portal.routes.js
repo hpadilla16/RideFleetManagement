@@ -1,3 +1,4 @@
+import crypto from 'node:crypto';
 import { Router } from 'express';
 import Stripe from 'stripe';
 import { prisma } from '../../lib/prisma.js';
@@ -239,6 +240,14 @@ function customerPortalLink(kind, token) {
 function authNetCleanValue(value, fallback = '') {
   const text = String(value ?? fallback ?? '').trim();
   return text.replace(/\s+/g, ' ').slice(0, 255);
+}
+
+function authNetCustomerIdValue(customerId = '', reservationId = '') {
+  const seed = String(customerId || reservationId || '').trim();
+  if (!seed) return '';
+  const compact = seed.replace(/[^a-z0-9]/gi, '').slice(0, 20);
+  if (compact.length >= 6 && compact.length <= 20) return compact;
+  return `RF${crypto.createHash('sha1').update(seed).digest('hex').slice(0, 18)}`;
 }
 
 function authNetCompactObject(obj = {}) {
@@ -1124,7 +1133,7 @@ customerPortalRouter.post('/payment/:token/confirm', async (req, res, next) => {
       const chargeAmount = Number(await amountDueForReservation(reservation.id, reservation.estimatedTotal));
       const billingZip = authNetCleanValue(req.body?.billingZip || reservation.customer?.zip || '', '');
       const customerPayload = authNetCompactObject({
-        id: authNetCleanValue(reservation.customer?.id || reservation.id || '', ''),
+        id: authNetCustomerIdValue(reservation.customer?.id || '', reservation.id || ''),
         email: authNetCleanValue(reservation.customer?.email || '', '')
       });
       const billToPayload = authNetCompactObject({
