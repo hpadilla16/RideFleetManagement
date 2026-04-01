@@ -123,6 +123,22 @@ export default function CustomerPayPage() {
       const j = await res.json();
       if (!res.ok) throw new Error(j?.error || 'Unable to start checkout');
       if (!j.checkoutUrl) throw new Error('Checkout URL missing');
+      if (String(j.gateway || '').toLowerCase() === 'authorizenet' && String(j.checkoutMethod || '').toUpperCase() === 'POST' && j.checkoutToken) {
+        const form = document.createElement('form');
+        form.method = 'POST';
+        form.action = j.checkoutUrl;
+        form.style.display = 'none';
+
+        const tokenField = document.createElement('input');
+        tokenField.type = 'hidden';
+        tokenField.name = 'token';
+        tokenField.value = j.checkoutToken;
+        form.appendChild(tokenField);
+
+        document.body.appendChild(form);
+        form.submit();
+        return;
+      }
       window.location.href = j.checkoutUrl;
     } catch (e) {
       setError(String(e.message || e));

@@ -1003,7 +1003,12 @@ customerPortalRouter.post('/payment/:token/create-session', async (req, res, nex
     }
 
     const hostedBase = authNetHostedBaseForConfig(gatewayConfig);
-    res.json({ checkoutUrl: `${hostedBase}?token=${encodeURIComponent(hostedToken)}`, gateway });
+    res.json({
+      gateway,
+      checkoutUrl: hostedBase,
+      checkoutMethod: 'POST',
+      checkoutToken: hostedToken
+    });
   } catch (e) { next(e); }
 });
 
