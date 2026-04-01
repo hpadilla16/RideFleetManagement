@@ -1022,6 +1022,18 @@ customerPortalRouter.post('/payment/:token/create-session', async (req, res, nex
               settingValue: JSON.stringify({ showCreditCard: true, showBankAccount: false, cardCodeRequired: false })
             },
             {
+              settingName: 'hostedPaymentButtonOptions',
+              settingValue: JSON.stringify({ text: 'Pay Securely' })
+            },
+            {
+              settingName: 'hostedPaymentStyleOptions',
+              settingValue: JSON.stringify({ bgColor: 'lavender' })
+            },
+            {
+              settingName: 'hostedPaymentOrderOptions',
+              settingValue: JSON.stringify({ show: true, merchantName: 'Ride Fleet' })
+            },
+            {
               settingName: 'hostedPaymentVisaCheckoutOptions',
               settingValue: JSON.stringify({ apiKey: '', displayName: '', message: '' })
             }
