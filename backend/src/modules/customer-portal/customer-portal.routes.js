@@ -42,9 +42,47 @@ function currentGateway(config = {}) {
   return ['authorizenet', 'stripe', 'square'].includes(gateway) ? gateway : 'authorizenet';
 }
 
+function extractAuthNetMessage(payload) {
+  const roots = [
+    payload?.getHostedPaymentPageResponse,
+    payload?.createCustomerProfileFromTransactionResponse,
+    payload?.createCustomerProfileResponse,
+    payload
+  ].filter(Boolean);
+
+  for (const root of roots) {
+    const direct = root?.messages?.message;
+    const list = Array.isArray(direct) ? direct : direct ? [direct] : [];
+    const text = list.map((item) => String(item?.text || '').trim()).find(Boolean);
+    if (text) return text;
+
+    const errorList = Array.isArray(root?.transactionResponse?.errors?.error)
+      ? root.transactionResponse.errors.error
+      : root?.transactionResponse?.errors?.error
+        ? [root.transactionResponse.errors.error]
+        : [];
+    const errorText = errorList.map((item) => String(item?.errorText || item?.text || '').trim()).find(Boolean);
+    if (errorText) return errorText;
+  }
+
+  return '';
+}
+
 async function authNetRequest(payload, config = {}) {
   const r = await fetch(authNetApiForConfig(config), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
-  return r.json();
+  const raw = await r.text();
+  let parsed = null;
+  try {
+    parsed = raw ? JSON.parse(raw) : {};
+  } catch {
+    parsed = { raw };
+  }
+  return {
+    ok: r.ok,
+    status: r.status,
+    raw,
+    body: parsed
+  };
 }
 
 async function trySaveAuthNetCardOnFileFromTransaction({ reservation, reference }) {
@@ -65,7 +103,8 @@ async function trySaveAuthNetCardOnFileFromTransaction({ reservation, reference 
   };
 
   const out = await authNetRequest(reqPayload, config);
-  const resp = out?.createCustomerProfileResponse || out?.createCustomerProfileFromTransactionResponse || out;
+  const payload = out?.body || {};
+  const resp = payload?.createCustomerProfileResponse || payload?.createCustomerProfileFromTransactionResponse || payload;
   const ok = resp?.messages?.resultCode === 'Ok';
   if (!ok) return false;
 
@@ -951,10 +990,15 @@ customerPortalRouter.post('/payment/:token/create-session', async (req, res, nex
     };
 
     const authnet = await authNetRequest(requestPayload, gatewayConfig);
-    const response = authnet?.getHostedPaymentPageResponse;
+    const payload = authnet?.body || {};
+    const response = payload?.getHostedPaymentPageResponse;
     const hostedToken = response?.token;
     if (response?.messages?.resultCode !== 'Ok' || !hostedToken) {
-      return res.status(400).json({ error: response?.messages?.message?.[0]?.text || 'Authorize.Net token creation failed' });
+      const detail = extractAuthNetMessage(payload) || extractAuthNetMessage(response) || '';
+      const fallback = authnet?.raw && !String(authnet.raw || '').trim().startsWith('{')
+        ? `Authorize.Net token creation failed (${authnet.status || 400})`
+        : 'Authorize.Net token creation failed';
+      return res.status(400).json({ error: detail || fallback });
     }
 
     const hostedBase = authNetHostedBaseForConfig(gatewayConfig);
