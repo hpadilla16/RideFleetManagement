@@ -978,7 +978,6 @@ customerPortalRouter.post('/payment/:token/create-session', async (req, res, nex
     const cancelUrl = `${portalBase().replace(/\/$/, '')}/customer/pay?token=${encodeURIComponent(token)}&canceled=1`;
     const customerFirstName = authNetCleanValue(reservation.customer?.firstName, 'Customer');
     const customerLastName = authNetCleanValue(reservation.customer?.lastName, 'Guest');
-    const customerEmail = authNetCleanValue(reservation.customer?.email);
     const customerPhone = authNetCleanValue(reservation.customer?.phone);
     const customerAddress1 = authNetCleanValue(reservation.customer?.address1);
     const customerCity = authNetCleanValue(reservation.customer?.city);
@@ -1004,15 +1003,14 @@ customerPortalRouter.post('/payment/:token/create-session', async (req, res, nex
             invoiceNumber: authNetCleanValue(reservation.reservationNumber, `RES-${reservation.id}`),
             description: authNetCleanValue(`Reservation ${reservation.reservationNumber} payment`)
           },
-          billTo,
-          customer: customerEmail ? { email: customerEmail } : undefined
+          billTo
         },
         hostedPaymentSettings: {
           setting: [
             { settingName: 'hostedPaymentReturnOptions', settingValue: JSON.stringify({ showReceipt: false, url: returnUrl, urlText: 'Return to Reservation', cancelUrl, cancelUrlText: 'Cancel' }) },
             { settingName: 'hostedPaymentButtonOptions', settingValue: JSON.stringify({ text: 'Pay Now' }) },
             { settingName: 'hostedPaymentBillingAddressOptions', settingValue: JSON.stringify({ show: false, required: false }) },
-            { settingName: 'hostedPaymentCustomerOptions', settingValue: JSON.stringify({ showEmail: !!customerEmail, requiredEmail: false, addPaymentProfile: false }) },
+            { settingName: 'hostedPaymentCustomerOptions', settingValue: JSON.stringify({ showEmail: true, requiredEmail: false, addPaymentProfile: false }) },
             { settingName: 'hostedPaymentOrderOptions', settingValue: JSON.stringify({ show: true, merchantName: false }) }
           ]
         }
