@@ -991,9 +991,10 @@ customerPortalRouter.post('/payment/:token/create-session', async (req, res, nex
 
     const authnet = await authNetRequest(requestPayload, gatewayConfig);
     const payload = authnet?.body || {};
-    const response = payload?.getHostedPaymentPageResponse;
-    const hostedToken = response?.token;
-    if (response?.messages?.resultCode !== 'Ok' || !hostedToken) {
+    const response = payload?.getHostedPaymentPageResponse || payload;
+    const hostedToken = response?.token || payload?.token;
+    const resultCode = response?.messages?.resultCode || payload?.messages?.resultCode;
+    if (resultCode !== 'Ok' || !hostedToken) {
       const detail = extractAuthNetMessage(payload) || extractAuthNetMessage(response) || '';
       const fallback = authnet?.raw && !String(authnet.raw || '').trim().startsWith('{')
         ? `Authorize.Net token creation failed (${authnet.status || 400})`
