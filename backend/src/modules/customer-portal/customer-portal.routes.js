@@ -17,6 +17,15 @@ async function paymentGatewayConfigForTenant(tenantId = null) {
   return cfg || {};
 }
 
+async function tenantDisplayName(tenantId = null) {
+  if (!tenantId) return 'Ride Fleet';
+  const tenant = await prisma.tenant.findUnique({
+    where: { id: tenantId },
+    select: { name: true }
+  });
+  return authNetCleanValue(tenant?.name || 'Ride Fleet', 'Ride Fleet');
+}
+
 function authNetApiForConfig(config = {}) {
   const env = String(config?.authorizenet?.environment || 'sandbox').toLowerCase();
   return env === 'production' ? 'https://api2.authorize.net/xml/v1/request.api' : 'https://apitest.authorize.net/xml/v1/request.api';
@@ -996,6 +1005,7 @@ customerPortalRouter.post('/payment/:token/create-session', async (req, res, nex
     // Authorize.Net
     if (!authNetEnabled(gatewayConfig)) return res.status(400).json({ error: 'Authorize.Net is not configured for this tenant' });
     const amount = Number(Math.max(0.5, Number(amountDue || 0))).toFixed(2);
+    const merchantName = await tenantDisplayName(reservation.tenantId || null);
     const returnUrl = `${portalBase().replace(/\/$/, '')}/customer/pay?token=${encodeURIComponent(token)}&success=1`;
     const cancelUrl = `${portalBase().replace(/\/$/, '')}/customer/pay?token=${encodeURIComponent(token)}&canceled=1`;
     const requestPayload = {
@@ -1012,9 +1022,9 @@ customerPortalRouter.post('/payment/:token/create-session', async (req, res, nex
               settingValue: JSON.stringify({
                 showReceipt: false,
                 url: returnUrl,
-                urlText: 'Return to Ride Fleet',
+                urlText: `Return to ${merchantName}`,
                 cancelUrl,
-                cancelUrlText: 'Cancel and go back'
+                cancelUrlText: `Cancel and return to ${merchantName}`
               })
             },
             {
@@ -1031,7 +1041,7 @@ customerPortalRouter.post('/payment/:token/create-session', async (req, res, nex
             },
             {
               settingName: 'hostedPaymentOrderOptions',
-              settingValue: JSON.stringify({ show: true, merchantName: 'Ride Fleet' })
+              settingValue: JSON.stringify({ show: true, merchantName })
             },
             {
               settingName: 'hostedPaymentVisaCheckoutOptions',
