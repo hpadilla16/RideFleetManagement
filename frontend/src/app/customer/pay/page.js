@@ -81,6 +81,15 @@ export default function CustomerPayPage() {
   }, [canceled, returnTransId, sessionId, success, token]);
 
   useEffect(() => {
+    if (!token || !model || String(model.gateway || '').toLowerCase() !== 'authorizenet') return;
+    if (!success || returnTransId) return;
+    setSuccess('');
+    try {
+      sessionStorage.removeItem(paymentPortalStateKey(token));
+    } catch {}
+  }, [model, returnTransId, success, token]);
+
+  useEffect(() => {
     const run = async () => {
       if (!token) {
         setLoading(false);
@@ -130,8 +139,6 @@ export default function CustomerPayPage() {
         }
         if (model.gateway === 'authorizenet') {
           if (!returnTransId) {
-            setOk('Payment return detected for Authorize.Net. Waiting for transaction reference to reconcile the payment.');
-            setError('');
             return;
           }
           const res = await fetch(`${API_BASE}/api/public/payment/${encodeURIComponent(token)}/confirm`, {
@@ -160,6 +167,12 @@ export default function CustomerPayPage() {
       event?.preventDefault?.();
       event?.stopPropagation?.();
       setError('');
+      setOk('');
+      setSuccess('');
+      setCanceled('');
+      setSessionId('');
+      setReturnTransId('');
+      try { sessionStorage.removeItem(paymentPortalStateKey(token)); } catch {}
       if (String(model?.gateway || '').toLowerCase() === 'authorizenet') {
         if (!model?.authnetPublic?.apiLoginID || !model?.authnetPublic?.clientKey) {
           throw new Error('Authorize.Net Client Key is missing for this tenant. Add the public Client Key in payment settings before collecting portal payments.');

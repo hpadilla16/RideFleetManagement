@@ -1219,7 +1219,17 @@ customerPortalRouter.post('/payment/:token/confirm', async (req, res, next) => {
       });
     }
 
-    await postPayment({ reservation, paidAmount, reference, gateway });
+    try {
+      await postPayment({ reservation, paidAmount, reference, gateway });
+    } catch (postErr) {
+      const message = String(postErr?.message || postErr || 'Unable to record payment');
+      return res.status(500).json({
+        error: `Payment captured but Ride Fleet could not record it yet: ${message}`,
+        captured: true,
+        reference,
+        paidAmount
+      });
+    }
 
     let savedCardOnFile = false;
     try {
