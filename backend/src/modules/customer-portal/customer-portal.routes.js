@@ -1011,7 +1011,7 @@ customerPortalRouter.post('/payment/:token/create-session', async (req, res, nex
             { settingName: 'hostedPaymentButtonOptions', settingValue: JSON.stringify({ text: 'Pay Now' }) },
             { settingName: 'hostedPaymentBillingAddressOptions', settingValue: JSON.stringify({ show: false, required: false }) },
             { settingName: 'hostedPaymentCustomerOptions', settingValue: JSON.stringify({ showEmail: true, requiredEmail: false, addPaymentProfile: false }) },
-            { settingName: 'hostedPaymentOrderOptions', settingValue: JSON.stringify({ show: true, merchantName: false }) }
+            { settingName: 'hostedPaymentOrderOptions', settingValue: JSON.stringify({ show: true }) }
           ]
         }
       }
