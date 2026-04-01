@@ -51,6 +51,7 @@ function ReservationsInner({ token, me, logout }) {
   const role = String(me?.role || '').toUpperCase().trim();
   const isSuper = role === 'SUPER_ADMIN';
   const canManageReservationSetup = ['SUPER_ADMIN', 'ADMIN', 'OPS'].includes(role);
+  const canCreateReservation = ['SUPER_ADMIN', 'ADMIN', 'OPS', 'AGENT'].includes(role);
   const [reservations, setReservations] = useState([]);
   const [reservationsTotal, setReservationsTotal] = useState(0);
   const [reservationsHasMore, setReservationsHasMore] = useState(false);
@@ -176,7 +177,7 @@ function ReservationsInner({ token, me, logout }) {
   };
 
   const loadSupportData = async () => {
-    if (!canManageReservationSetup || supportLoaded || loadingSupport) return;
+    if (!canCreateReservation || supportLoaded || loadingSupport) return;
     if (isSuper && !activeTenantId) return;
 
     setLoadingSupport(true);
@@ -225,13 +226,13 @@ function ReservationsInner({ token, me, logout }) {
     const handle = setTimeout(() => setQuery(searchDraft.trim()), 250);
     return () => clearTimeout(handle);
   }, [searchDraft]);
-  useEffect(() => { clearSupportData(); }, [token, isSuper, activeTenantId, canManageReservationSetup]);
+  useEffect(() => { clearSupportData(); }, [token, isSuper, activeTenantId, canCreateReservation]);
   useEffect(() => { loadReservations({ offset: 0, append: false, nextQuery: query }); }, [token, isSuper, activeTenantId, query]);
   useEffect(() => { loadReservationSummary(); }, [token, isSuper, activeTenantId]);
   useEffect(() => {
     if (!createOpen && !showImport) return;
     loadSupportData();
-  }, [createOpen, showImport, token, isSuper, activeTenantId, canManageReservationSetup]);
+  }, [createOpen, showImport, token, isSuper, activeTenantId, canCreateReservation]);
 
   useEffect(() => {
     const canResolve = createOpen && createForm.vehicleTypeId && createForm.pickupLocationId && createForm.pickupAt && createForm.returnAt;
@@ -578,7 +579,7 @@ function ReservationsInner({ token, me, logout }) {
               onChange={(e) => setSearchDraft(e.target.value)}
             />
             {canManageReservationSetup ? <button onClick={() => setShowImport(true)}>{loadingSupport && !supportLoaded ? 'Loading...' : 'Upload Migration'}</button> : null}
-            {canManageReservationSetup ? (
+            {canCreateReservation ? (
               <button onClick={() => {
                 setCreateOpen(true);
                 setSelectedServiceIds([]);
