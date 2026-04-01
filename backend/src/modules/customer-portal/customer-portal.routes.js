@@ -651,7 +651,15 @@ async function postPayment({ reservation, paidAmount, reference, gateway }) {
     notes: `Paid via ${gateway} customer payment portal`
   }, {}, null);
 
-  await prisma.auditLog.create({ data: { reservationId: reservation.id, action: 'UPDATE', metadata: JSON.stringify({ paymentPortalCompleted: true, reference, amount: paidAmount, gateway }) } });
+  try {
+    await prisma.auditLog.create({
+      data: {
+        reservationId: reservation.id,
+        action: 'UPDATE',
+        metadata: JSON.stringify({ paymentPortalCompleted: true, reference, amount: paidAmount, gateway })
+      }
+    });
+  } catch {}
 
   try {
     const to = String(reservation.customer?.email || '').trim();
@@ -1134,6 +1142,26 @@ customerPortalRouter.post('/payment/:token/confirm', async (req, res, next) => {
       }
       paidAmount = Number(tx?.authAmount || tx?.settleAmount || chargeAmount || 0);
       reference = `AUTHNET:${tx.transId || 'UNKNOWN'}`;
+      const existing = await prisma.reservationPayment.findFirst({
+        where: {
+          reservationId: reservation.id,
+          reference
+        }
+      });
+      if (existing) {
+        let portal = null;
+        try {
+          const refreshed = await findReservationByToken('payment', token);
+          portal = refreshed ? await buildPortalSummary(refreshed, 'payment', token) : null;
+        } catch {}
+        return res.json({
+          ok: true,
+          paidAmount: Number(existing.amount || 0),
+          savedCardOnFile: false,
+          duplicate: true,
+          portal
+        });
+      }
     } else if (gateway === 'authorizenet') {
       if (!authNetEnabled(gatewayConfig)) return res.status(400).json({ error: 'Authorize.Net not configured for this tenant' });
       const transId = String(
@@ -1200,8 +1228,12 @@ customerPortalRouter.post('/payment/:token/confirm', async (req, res, next) => {
       }
     } catch {}
 
-    const refreshed = await findReservationByToken('payment', token);
-    res.json({ ok: true, paidAmount, savedCardOnFile, portal: refreshed ? await buildPortalSummary(refreshed, 'payment', token) : null });
+    let portal = null;
+    try {
+      const refreshed = await findReservationByToken('payment', token);
+      portal = refreshed ? await buildPortalSummary(refreshed, 'payment', token) : null;
+    } catch {}
+    res.json({ ok: true, paidAmount, savedCardOnFile, portal });
   } catch (e) { next(e); }
 });
 
