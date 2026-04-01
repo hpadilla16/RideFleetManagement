@@ -217,6 +217,11 @@ function customerPortalLink(kind, token) {
   return `${customerPortalBaseUrl()}${customerPortalPath(kind)}?token=${encodeURIComponent(token)}`;
 }
 
+function authNetCleanValue(value, fallback = '') {
+  const text = String(value ?? fallback ?? '').trim();
+  return text.replace(/\s+/g, ' ').slice(0, 255);
+}
+
 async function buildPortalSummary(reservation, kind, token) {
   const agreement = await latestAgreementForReservation(reservation.id);
   const payments = mergePayments(reservation, agreement);
@@ -971,6 +976,23 @@ customerPortalRouter.post('/payment/:token/create-session', async (req, res, nex
     const amount = Number(Math.max(0.5, Number(amountDue || 0))).toFixed(2);
     const returnUrl = `${portalBase().replace(/\/$/, '')}/customer/pay?token=${encodeURIComponent(token)}&success=1`;
     const cancelUrl = `${portalBase().replace(/\/$/, '')}/customer/pay?token=${encodeURIComponent(token)}&canceled=1`;
+    const customerFirstName = authNetCleanValue(reservation.customer?.firstName, 'Customer');
+    const customerLastName = authNetCleanValue(reservation.customer?.lastName, 'Guest');
+    const customerEmail = authNetCleanValue(reservation.customer?.email);
+    const customerPhone = authNetCleanValue(reservation.customer?.phone);
+    const customerAddress1 = authNetCleanValue(reservation.customer?.address1);
+    const customerCity = authNetCleanValue(reservation.customer?.city);
+    const customerState = authNetCleanValue(reservation.customer?.state);
+    const customerZip = authNetCleanValue(reservation.customer?.zip);
+    const billTo = {
+      firstName: customerFirstName,
+      lastName: customerLastName
+    };
+    if (customerAddress1) billTo.address = customerAddress1;
+    if (customerCity) billTo.city = customerCity;
+    if (customerState) billTo.state = customerState;
+    if (customerZip) billTo.zip = customerZip;
+    if (customerPhone) billTo.phoneNumber = customerPhone;
 
     const requestPayload = {
       getHostedPaymentPageRequest: {
@@ -978,12 +1000,20 @@ customerPortalRouter.post('/payment/:token/create-session', async (req, res, nex
         transactionRequest: {
           transactionType: 'authCaptureTransaction',
           amount,
-          order: { invoiceNumber: reservation.reservationNumber, description: `Reservation ${reservation.reservationNumber} payment` }
+          order: {
+            invoiceNumber: authNetCleanValue(reservation.reservationNumber, `RES-${reservation.id}`),
+            description: authNetCleanValue(`Reservation ${reservation.reservationNumber} payment`)
+          },
+          billTo,
+          customer: customerEmail ? { email: customerEmail } : undefined
         },
         hostedPaymentSettings: {
           setting: [
             { settingName: 'hostedPaymentReturnOptions', settingValue: JSON.stringify({ showReceipt: false, url: returnUrl, urlText: 'Return to Reservation', cancelUrl, cancelUrlText: 'Cancel' }) },
-            { settingName: 'hostedPaymentButtonOptions', settingValue: JSON.stringify({ text: 'Pay Now' }) }
+            { settingName: 'hostedPaymentButtonOptions', settingValue: JSON.stringify({ text: 'Pay Now' }) },
+            { settingName: 'hostedPaymentBillingAddressOptions', settingValue: JSON.stringify({ show: false, required: false }) },
+            { settingName: 'hostedPaymentCustomerOptions', settingValue: JSON.stringify({ showEmail: !!customerEmail, requiredEmail: false, addPaymentProfile: false }) },
+            { settingName: 'hostedPaymentOrderOptions', settingValue: JSON.stringify({ show: true, merchantName: false }) }
           ]
         }
       }
