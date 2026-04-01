@@ -140,12 +140,11 @@ settingsRouter.post('/payment-gateway/health-check', requireRole('ADMIN'), async
       authorizenet: {
         selected: gateway === 'authorizenet',
         enabled: !!cfg?.authorizenet?.enabled,
-        ready: !!(cfg?.authorizenet?.enabled && cfg?.authorizenet?.loginId && cfg?.authorizenet?.transactionKey && cfg?.authorizenet?.clientKey),
+        ready: !!(cfg?.authorizenet?.enabled && cfg?.authorizenet?.loginId && cfg?.authorizenet?.transactionKey),
         environment: cfg?.authorizenet?.environment || 'sandbox',
         missing: [
           ...(!cfg?.authorizenet?.loginId ? ['API Login ID'] : []),
-          ...(!cfg?.authorizenet?.transactionKey ? ['Transaction Key'] : []),
-          ...(!cfg?.authorizenet?.clientKey ? ['Client Key'] : [])
+          ...(!cfg?.authorizenet?.transactionKey ? ['Transaction Key'] : [])
         ]
       },
       stripe: {

@@ -1642,7 +1642,7 @@ function SettingsInner({ token, me, logout }) {
                   <input value={paymentGatewayConfig.authorizenet?.transactionKey || ''} onChange={(e) => setPaymentGatewayConfig({ ...paymentGatewayConfig, authorizenet: { ...paymentGatewayConfig.authorizenet, transactionKey: e.target.value } })} />
                 </div>
                 <div className="stack">
-                  <label className="label">Client Key</label>
+                  <label className="label">Client Key (Optional)</label>
                   <input value={paymentGatewayConfig.authorizenet?.clientKey || ''} onChange={(e) => setPaymentGatewayConfig({ ...paymentGatewayConfig, authorizenet: { ...paymentGatewayConfig.authorizenet, clientKey: e.target.value } })} />
                 </div>
               </div>

@@ -32,7 +32,7 @@ function authNetEnabled(config = {}) {
   return !!(config?.authorizenet?.enabled !== false && config?.authorizenet?.loginId && config?.authorizenet?.transactionKey);
 }
 function authNetPortalReady(config = {}) {
-  return !!(authNetEnabled(config) && config?.authorizenet?.clientKey);
+  return authNetEnabled(config);
 }
 function stripeEnabled(config = {}) {
   return !!(config?.stripe?.enabled && config?.stripe?.secretKey);
@@ -205,9 +205,16 @@ function mergePayments(reservation, agreement) {
   const seen = new Set();
   const rows = [...(Array.isArray(reservation?.payments) ? reservation.payments : []), ...(Array.isArray(agreement?.payments) ? agreement.payments : [])];
   return rows.filter((payment) => {
-    const id = String(payment?.id || '');
-    if (!id || seen.has(id)) return false;
-    seen.add(id);
+    const reference = String(payment?.reference || '').trim().toUpperCase();
+    const amount = Number(payment?.amount || 0).toFixed(2);
+    const paidAt = payment?.paidAt || payment?.createdAt || null;
+    const paidAtKey = paidAt ? new Date(paidAt).toISOString() : '';
+    const fallbackId = String(payment?.id || '').trim();
+    const dedupeKey = reference
+      ? `ref:${reference}|amt:${amount}`
+      : `row:${fallbackId}|amt:${amount}|at:${paidAtKey}`;
+    if (seen.has(dedupeKey)) return false;
+    seen.add(dedupeKey);
     return true;
   });
 }
@@ -961,14 +968,7 @@ customerPortalRouter.get('/payment/:token', async (req, res, next) => {
       breakdown,
       portal: await buildPortalSummary(reservation, 'payment', token),
       gateway,
-      gatewayReady,
-      authnetPublic: gateway === 'authorizenet' && authNetPortalReady(gatewayConfig)
-        ? {
-            apiLoginID: String(gatewayConfig.authorizenet?.loginId || '').trim(),
-            clientKey: String(gatewayConfig.authorizenet?.clientKey || '').trim(),
-            environment: String(gatewayConfig.authorizenet?.environment || 'sandbox').trim().toLowerCase()
-          }
-        : null
+      gatewayReady
     });
   } catch (e) { next(e); }
 });
@@ -1029,9 +1029,6 @@ customerPortalRouter.post('/payment/:token/create-session', async (req, res, nex
 
     // Authorize.Net
     if (!authNetEnabled(gatewayConfig)) return res.status(400).json({ error: 'Authorize.Net is not configured for this tenant' });
-    if (!gatewayConfig.authorizenet?.clientKey) {
-      return res.status(400).json({ error: 'Authorize.Net Client Key is required for portal payments. Add the public Client Key in tenant payment settings.' });
-    }
     const amount = Number(Math.max(0.5, Number(amountDue || 0))).toFixed(2);
     const returnUrl = `${portalBase().replace(/\/$/, '')}/customer/pay?token=${encodeURIComponent(token)}&success=1`;
     const cancelUrl = `${portalBase().replace(/\/$/, '')}/customer/pay?token=${encodeURIComponent(token)}&canceled=1`;
