@@ -250,7 +250,7 @@ function ReservationsInner({ token, me, logout }) {
           pickupAt: createForm.pickupAt,
           returnAt: createForm.returnAt
         });
-        const out = await api(scopedPath(`/api/rates/resolve?${q.toString()}`), {}, token);
+        const out = await api(scopedPath(`/api/reservations/resolve-rate?${q.toString()}`), {}, token);
         if (cancelled) return;
         setRateError('');
         setCreateForm((f) => ({ ...f, dailyRate: String(out?.dailyRate ?? ''), estimatedTotal: String(out?.baseTotal ?? '') }));

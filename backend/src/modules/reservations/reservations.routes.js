@@ -125,6 +125,30 @@ reservationsRouter.get('/create-options', async (req, res, next) => {
   }
 });
 
+reservationsRouter.get('/resolve-rate', async (req, res, next) => {
+  try {
+    const vehicleTypeId = String(req.query?.vehicleTypeId || '').trim();
+    const pickupLocationId = String(req.query?.pickupLocationId || '').trim();
+    const pickupAt = String(req.query?.pickupAt || '').trim();
+    const returnAt = String(req.query?.returnAt || '').trim();
+    if (!vehicleTypeId || !pickupLocationId || !pickupAt || !returnAt) {
+      return res.status(400).json({ error: 'vehicleTypeId, pickupLocationId, pickupAt and returnAt are required' });
+    }
+    const out = await ratesService.resolveForRental({
+      vehicleTypeId,
+      pickupLocationId,
+      pickupAt,
+      returnAt
+    });
+    if (!out) {
+      return res.status(400).json({ error: 'No rate tables found for selected vehicle type, location and dates' });
+    }
+    res.json(out);
+  } catch (e) {
+    next(e);
+  }
+});
+
 reservationsRouter.post('/bulk/validate', async (req, res, next) => {
   try {
     const rows = Array.isArray(req.body?.rows) ? req.body.rows : [];
