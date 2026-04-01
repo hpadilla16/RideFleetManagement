@@ -11,6 +11,8 @@ import { settingsService } from '../settings/settings.service.js';
 import { additionalServicesService } from '../additional-services/additional-services.service.js';
 import { feesService } from '../fees/fees.service.js';
 import { ratesService } from '../rates/rates.service.js';
+import { locationsService } from '../locations/locations.service.js';
+import { vehicleTypesService } from '../vehicle-types/vehicle-types.service.js';
 import { activeVehicleBlockOverlapWhere } from '../vehicles/vehicle-blocks.js';
 import { isSuperAdmin } from '../../middleware/auth.js';
 
@@ -92,6 +94,32 @@ reservationsRouter.get('/page', async (req, res, next) => {
 reservationsRouter.get('/summary', async (req, res, next) => {
   try {
     res.json(await reservationsService.summary(scopeFor(req)));
+  } catch (e) {
+    next(e);
+  }
+});
+
+reservationsRouter.get('/create-options', async (req, res, next) => {
+  try {
+    const tenantScope = scopeFor(req);
+    const [locationsResult, vehicleTypesResult, servicesResult, feesResult, insurancePlansResult] = await Promise.allSettled([
+      locationsService.list(tenantScope),
+      vehicleTypesService.list(tenantScope),
+      additionalServicesService.list({
+        activeOnly: true,
+        tenantId: tenantScope.tenantId
+      }),
+      feesService.list(tenantScope),
+      settingsService.getInsurancePlans(tenantScope)
+    ]);
+
+    res.json({
+      locations: locationsResult.status === 'fulfilled' && Array.isArray(locationsResult.value) ? locationsResult.value : [],
+      vehicleTypes: vehicleTypesResult.status === 'fulfilled' && Array.isArray(vehicleTypesResult.value) ? vehicleTypesResult.value : [],
+      services: servicesResult.status === 'fulfilled' && Array.isArray(servicesResult.value) ? servicesResult.value : [],
+      fees: feesResult.status === 'fulfilled' && Array.isArray(feesResult.value) ? feesResult.value : [],
+      insurancePlans: insurancePlansResult.status === 'fulfilled' && Array.isArray(insurancePlansResult.value) ? insurancePlansResult.value : []
+    });
   } catch (e) {
     next(e);
   }

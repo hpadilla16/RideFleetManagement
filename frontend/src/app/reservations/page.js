@@ -184,26 +184,26 @@ function ReservationsInner({ token, me, logout }) {
     try {
       const results = await Promise.allSettled([
         api(scopedPath(`/api/customers?limit=${CUSTOMER_PICKER_LIMIT}`), {}, token),
-        api(scopedPath('/api/locations'), {}, token),
-        api(scopedPath('/api/vehicle-types'), {}, token),
-        api(scopedPath('/api/additional-services?activeOnly=1'), {}, token),
-        api(scopedPath('/api/fees'), {}, token),
-        api(scopedPath('/api/settings/insurance-plans'), {}, token)
+        api(scopedPath('/api/reservations/create-options'), {}, token)
       ]);
 
-      const [c, l, vt, s, f, ip] = results;
+      const [c, createOptions] = results;
       if (c.status === 'fulfilled') setCustomers(c.value || []);
       else setCustomers([]);
-      if (l.status === 'fulfilled') setLocations(l.value || []);
-      else setLocations([]);
-      if (vt.status === 'fulfilled') setVehicleTypes(vt.value || []);
-      else setVehicleTypes([]);
-      if (s.status === 'fulfilled') setServices(s.value || []);
-      else setServices([]);
-      if (f.status === 'fulfilled') setFees((f.value || []).filter((x) => x?.isActive !== false));
-      else setFees([]);
-      if (ip.status === 'fulfilled') setInsurancePlans(ip.value || []);
-      else setInsurancePlans([]);
+      if (createOptions.status === 'fulfilled') {
+        const payload = createOptions.value || {};
+        setLocations(Array.isArray(payload.locations) ? payload.locations : []);
+        setVehicleTypes(Array.isArray(payload.vehicleTypes) ? payload.vehicleTypes : []);
+        setServices(Array.isArray(payload.services) ? payload.services : []);
+        setFees(Array.isArray(payload.fees) ? payload.fees.filter((x) => x?.isActive !== false) : []);
+        setInsurancePlans(Array.isArray(payload.insurancePlans) ? payload.insurancePlans : []);
+      } else {
+        setLocations([]);
+        setVehicleTypes([]);
+        setServices([]);
+        setFees([]);
+        setInsurancePlans([]);
+      }
 
       const failures = results.filter((row) => row.status === 'rejected');
       if (failures.length) setMsg('Supporting reservation setup data loaded with some limits');
