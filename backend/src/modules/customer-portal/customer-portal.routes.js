@@ -1237,6 +1237,35 @@ customerPortalRouter.post('/payment/:token/confirm', async (req, res, next) => {
   } catch (e) { next(e); }
 });
 
+customerPortalRouter.get('/payment/:token/confirm', async (req, res, next) => {
+  try {
+    const token = String(req.params.token || '').trim();
+    if (!token) return res.status(400).send('token required');
+
+    const params = new URLSearchParams();
+    params.set('token', token);
+
+    const success = String(req.query?.success || req.query?.approved || '1').trim();
+    if (success) params.set('success', success);
+
+    const canceled = String(req.query?.canceled || '').trim();
+    if (canceled) params.set('canceled', canceled);
+
+    const transId = String(
+      req.query?.transId ||
+      req.query?.transactionId ||
+      req.query?.x_trans_id ||
+      req.query?.xTransId ||
+      ''
+    ).trim();
+    if (transId) params.set('transId', transId);
+
+    return res.redirect(`${portalBase().replace(/\/$/, '')}/customer/pay?${params.toString()}`);
+  } catch (e) {
+    next(e);
+  }
+});
+
 customerPortalRouter.get('/document/:kind/:token/:asset', async (req, res, next) => {
   try {
     const kind = String(req.params.kind || '').trim();
