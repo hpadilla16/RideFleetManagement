@@ -53,6 +53,15 @@ export default function CustomerPayPage() {
   const [billingZip, setBillingZip] = useState('');
   const [processingAuthnet, setProcessingAuthnet] = useState(false);
 
+  const loadModel = async (paymentToken) => {
+    if (!paymentToken) return null;
+    const res = await fetch(`${API_BASE}/api/public/payment/${encodeURIComponent(paymentToken)}`);
+    const j = await res.json();
+    if (!res.ok) throw new Error(j?.error || 'Unable to load payment page');
+    setModel(j);
+    return j;
+  };
+
   useEffect(() => {
     const p = new URLSearchParams(window.location.search);
     const nextToken = p.get('token') || '';
@@ -96,10 +105,7 @@ export default function CustomerPayPage() {
         return;
       }
       try {
-        const res = await fetch(`${API_BASE}/api/public/payment/${encodeURIComponent(token)}`);
-        const j = await res.json();
-        if (!res.ok) throw new Error(j?.error || 'Unable to load payment page');
-        setModel(j);
+        await loadModel(token);
       } catch (e) {
         setError(String(e.message || e));
       } finally {
@@ -133,7 +139,9 @@ export default function CustomerPayPage() {
           });
           const j = await res.json();
           if (!res.ok) throw new Error(j?.error || 'Stripe confirmation failed');
-          setModel((prev) => ({ ...(prev || {}), portal: j?.portal || prev?.portal || null }));
+          await loadModel(token).catch(() => {
+            setModel((prev) => ({ ...(prev || {}), portal: j?.portal || prev?.portal || null }));
+          });
           setOk(`Payment recorded successfully: $${Number(j.paidAmount || 0).toFixed(2)}` + (j?.savedCardOnFile ? ' Card on file saved.' : ''));
           return;
         }
@@ -148,7 +156,9 @@ export default function CustomerPayPage() {
           });
           const j = await res.json();
           if (!res.ok) throw new Error(j?.error || 'Authorize.Net confirmation failed');
-          setModel((prev) => ({ ...(prev || {}), portal: j?.portal || prev?.portal || null }));
+          await loadModel(token).catch(() => {
+            setModel((prev) => ({ ...(prev || {}), portal: j?.portal || prev?.portal || null }));
+          });
           setOk(`Payment recorded successfully: $${Number(j.paidAmount || 0).toFixed(2)}` + (j?.savedCardOnFile ? ' Card on file saved.' : ''));
           setError('');
           return;
@@ -216,7 +226,9 @@ export default function CustomerPayPage() {
         });
         const j = await res.json();
         if (!res.ok) throw new Error(j?.error || 'Unable to process payment');
-        setModel((prev) => ({ ...(prev || {}), portal: j?.portal || prev?.portal || null }));
+        await loadModel(token).catch(() => {
+          setModel((prev) => ({ ...(prev || {}), portal: j?.portal || prev?.portal || null }));
+        });
         setOk(`Payment recorded successfully: $${Number(j.paidAmount || 0).toFixed(2)}` + (j?.savedCardOnFile ? ' Card on file saved.' : ''));
         setError('');
         return;
@@ -254,7 +266,7 @@ export default function CustomerPayPage() {
   const fullyPaid = balanceDue <= 0;
   const nextPortalStep = model?.portal?.nextStep;
   const agreementDoc = (model?.portal?.documents || []).find((doc) => doc.key === 'agreement' && doc.available);
-  const paidAmount = Number(model?.breakdown?.paidAmount || 0);
+  const paidAmount = Number(model?.portal?.payment?.paidAmount ?? model?.breakdown?.paidAmount ?? 0);
   const gatewayLabel = String(model?.gateway || '').toUpperCase() || '-';
 
   useEffect(() => {
@@ -334,7 +346,7 @@ export default function CustomerPayPage() {
               </div>
               <div style={portalStyles.statTile}>
                 <div style={portalStyles.statLabel}>Amount Due</div>
-                <div style={portalStyles.statValue}>${Number(model.amountDue || 0).toFixed(2)}</div>
+                <div style={portalStyles.statValue}>${balanceDue.toFixed(2)}</div>
               </div>
               <div style={portalStyles.statTile}>
                 <div style={portalStyles.statLabel}>Payment Status</div>

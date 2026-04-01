@@ -2030,6 +2030,17 @@ export const rentalAgreementsService = {
     if (!agreement) throw new Error('Rental agreement not found');
     if (!agreement.reservation?.customer?.id) throw new Error('Customer not found');
 
+    const existingCustomerProfileId = String(agreement.reservation.customer.authnetCustomerProfileId || '').trim();
+    const existingPaymentProfileId = String(agreement.reservation.customer.authnetPaymentProfileId || '').trim();
+    if (existingCustomerProfileId && existingPaymentProfileId) {
+      return {
+        ok: true,
+        customerProfileId: existingCustomerProfileId,
+        paymentProfileId: existingPaymentProfileId,
+        alreadySaved: true
+      };
+    }
+
     const payment = await prisma.reservationPayment.findFirst({
       where: {
         id: paymentId,
@@ -2048,14 +2059,16 @@ export const rentalAgreementsService = {
       scope: agreement?.tenantId ? { tenantId: agreement.tenantId } : {}
     });
 
-    await prisma.auditLog.create({
-      data: {
-        reservationId: agreement.reservationId,
-        actorUserId: actorUserId || null,
-        action: 'UPDATE',
-        reason: `Saved customer card on file from payment ${paymentId}`
-      }
-    });
+    try {
+      await prisma.auditLog.create({
+        data: {
+          reservationId: agreement.reservationId,
+          actorUserId: actorUserId || null,
+          action: 'UPDATE',
+          reason: `Saved customer card on file from payment ${paymentId}`
+        }
+      });
+    } catch {}
 
     return {
       ok: true,
