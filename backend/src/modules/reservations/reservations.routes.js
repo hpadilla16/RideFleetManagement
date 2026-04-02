@@ -1145,6 +1145,24 @@ reservationsRouter.post('/:id/payments/:paymentId/save-card-on-file', async (req
   }
 });
 
+reservationsRouter.post('/:id/payments/reconcile-authorizenet', async (req, res, next) => {
+  try {
+    const row = await rentalAgreementsService.reconcileLatestAuthNetReservationPayment(
+      req.params.id,
+      req.body || {},
+      scopeFor(req),
+      req.user?.id || null
+    );
+    res.json(row);
+  } catch (e) {
+    if (/not found/i.test(e.message)) return res.status(404).json({ error: e.message });
+    if (/cannot|invalid|missing|unable|duplicate|captured|recent|amount|payment/i.test(e.message)) {
+      return res.status(400).json({ error: e.message });
+    }
+    next(e);
+  }
+});
+
 reservationsRouter.post('/:id/payments/charge-card-on-file', async (req, res, next) => {
   try {
     const agreementId = await ensureAgreementByReservationId(req.params.id, scopeFor(req));

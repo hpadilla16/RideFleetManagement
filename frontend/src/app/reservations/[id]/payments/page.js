@@ -141,12 +141,12 @@ function Inner({ token, me, logout }) {
     try {
       setActionBusy(busyKey || path);
       setMsg('');
-      await api(path, {
+      const response = await api(path, {
         method: 'POST',
         body: body ? JSON.stringify(body) : undefined
       }, token);
       await load();
-      setMsg(successMessage || 'Action completed');
+      setMsg(typeof successMessage === 'function' ? successMessage(response) : (successMessage || 'Action completed'));
     } catch (e) {
       setMsg(String(e.message || e));
     } finally {
@@ -187,6 +187,19 @@ function Inner({ token, me, logout }) {
       body: {},
       successMessage: 'Customer card saved on file',
       busyKey: `save-card-${paymentId}`
+    });
+  };
+
+  const reconcileAuthNetPayment = async () => {
+    await runPaymentAction(`/api/reservations/${id}/payments/reconcile-authorizenet`, {
+      body: { amount: unpaid > 0 ? unpaid : undefined },
+      successMessage: (response) => {
+        const amountPosted = Number(response?.amount || unpaid || 0);
+        const referencePosted = String(response?.reference || '').trim();
+        const savedCard = !!response?.savedCardOnFile;
+        return `Authorize.Net payment reconciled${amountPosted > 0 ? `: $${amountPosted.toFixed(2)}` : ''}${referencePosted ? ` | ${referencePosted}` : ''}${savedCard ? ' | card saved on file' : ''}`;
+      },
+      busyKey: 'reconcile-authnet'
     });
   };
 
@@ -252,7 +265,12 @@ function Inner({ token, me, logout }) {
 
         <div className="row-between">
           <h2>Reservation Payments</h2>
-          <button onClick={() => router.push(`/reservations/${id}`)}>Back</button>
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+            <button onClick={reconcileAuthNetPayment} disabled={!!actionBusy}>
+              {actionBusy === 'reconcile-authnet' ? 'Reconciling...' : 'Reconcile Latest AuthNet Payment'}
+            </button>
+            <button onClick={() => router.push(`/reservations/${id}`)}>Back</button>
+          </div>
         </div>
         {msg ? <div className="label" style={{ marginBottom: 8 }}>{msg}</div> : null}
         <div className="label" style={{ textTransform: 'none', letterSpacing: 0 }}>Total: ${total.toFixed(2)}</div>

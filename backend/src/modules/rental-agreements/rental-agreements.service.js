@@ -4,6 +4,7 @@ import { fileURLToPath } from 'node:url';
 import puppeteer from 'puppeteer';
 import { prisma } from '../../lib/prisma.js';
 import { hostReviewsService } from '../host-reviews/host-reviews.service.js';
+import { reservationPricingService } from '../reservations/reservation-pricing.service.js';
 import { settingsService } from '../settings/settings.service.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -166,7 +167,75 @@ async function authNetCustomerProfile(profileId, scope = {}) {
   return out?.getCustomerProfileResponse || out || {};
 }
 
+function authNetExtractPaymentProfileId(profileResp = {}) {
+  const profile = profileResp?.profile || profileResp?.customerProfile || null;
+  const paymentProfiles = Array.isArray(profile?.paymentProfiles)
+    ? profile.paymentProfiles
+    : profile?.paymentProfiles
+      ? [profile.paymentProfiles]
+      : [];
+  return paymentProfiles
+    .map((row) => row?.customerPaymentProfileId || row?.paymentProfileId || '')
+    .map((value) => String(value || '').trim())
+    .find(Boolean) || '';
+}
+
+async function authNetResolveStoredCustomerProfile(customerId, scope = {}) {
+  if (!customerId) return null;
+  const customer = await prisma.customer.findUnique({
+    where: { id: customerId },
+    select: {
+      authnetCustomerProfileId: true,
+      authnetPaymentProfileId: true
+    }
+  });
+  const customerProfileId = String(customer?.authnetCustomerProfileId || '').trim();
+  const paymentProfileId = String(customer?.authnetPaymentProfileId || '').trim();
+  if (customerProfileId && paymentProfileId) {
+    return { customerProfileId, paymentProfileId, alreadySaved: true };
+  }
+  if (!customerProfileId) return null;
+  const profileResp = await authNetCustomerProfile(customerProfileId, scope);
+  const resolvedPaymentProfileId = authNetExtractPaymentProfileId(profileResp);
+  if (!resolvedPaymentProfileId) return null;
+  await prisma.customer.update({
+    where: { id: customerId },
+    data: {
+      authnetCustomerProfileId: customerProfileId,
+      authnetPaymentProfileId: resolvedPaymentProfileId
+    }
+  });
+  return {
+    customerProfileId,
+    paymentProfileId: resolvedPaymentProfileId,
+    alreadySaved: true
+  };
+}
+
+async function authNetUnsettledTransactions(scope = {}) {
+  const cfg = await authNetConfig(scope);
+  if (!cfg.loginId || !cfg.transactionKey) throw new Error('Authorize.Net is not configured');
+  const out = await authNetRequest({
+    getUnsettledTransactionListRequest: {
+      merchantAuthentication: {
+        name: cfg.loginId,
+        transactionKey: cfg.transactionKey
+      }
+    }
+  }, scope);
+  const resp = out?.getUnsettledTransactionListResponse || out || {};
+  const transactions = Array.isArray(resp?.transactions?.transaction)
+    ? resp.transactions.transaction
+    : resp?.transactions?.transaction
+      ? [resp.transactions.transaction]
+      : [];
+  return transactions;
+}
+
 async function saveAuthNetCardProfileFromReference({ customerId, reference, scope = {} }) {
+  const existing = await authNetResolveStoredCustomerProfile(customerId, scope);
+  if (existing) return existing;
+
   const cfg = await authNetConfig(scope);
   if (!cfg.loginId || !cfg.transactionKey) throw new Error('Authorize.Net is not configured');
   const rawRef = String(reference || '').trim();
@@ -186,19 +255,12 @@ async function saveAuthNetCardProfileFromReference({ customerId, reference, scop
   const resp = out?.createCustomerProfileResponse || out?.createCustomerProfileFromTransactionResponse || out || {};
   if (String(resp?.messages?.resultCode || '').trim() !== 'Ok') {
     const message = authNetMessage(resp) || 'Unable to save card on file from Authorize.Net transaction';
+    const retryExisting = await authNetResolveStoredCustomerProfile(customerId, scope);
+    if (retryExisting) return retryExisting;
     const duplicateProfileId = authNetDuplicateProfileId(message);
     if (duplicateProfileId) {
       const profileResp = await authNetCustomerProfile(duplicateProfileId, scope);
-      const profile = profileResp?.profile || profileResp?.customerProfile || null;
-      const paymentProfiles = Array.isArray(profile?.paymentProfiles)
-        ? profile.paymentProfiles
-        : profile?.paymentProfiles
-          ? [profile.paymentProfiles]
-          : [];
-      const paymentProfileId = paymentProfiles
-        .map((row) => row?.customerPaymentProfileId || row?.paymentProfileId || '')
-        .map((value) => String(value || '').trim())
-        .find(Boolean);
+      const paymentProfileId = authNetExtractPaymentProfileId(profileResp);
       if (paymentProfileId) {
         await prisma.customer.update({
           where: { id: customerId },
@@ -2167,6 +2229,105 @@ export const rentalAgreementsService = {
 
     const reference = `AUTHNET:${tx.transId || 'UNKNOWN'}`;
     return this.addManualPayment(id, { amount, method: 'CARD', reference, notes: 'Charged card on file via Authorize.Net' }, actorUserId);
+  },
+
+  async reconcileLatestAuthNetReservationPayment(reservationId, payload = {}, scope = {}, actorUserId = null) {
+    const reservation = await prisma.reservation.findFirst({
+      where: {
+        id: reservationId,
+        ...(scope?.tenantId ? { tenantId: scope.tenantId } : {})
+      },
+      include: {
+        customer: true,
+        rentalAgreement: {
+          select: {
+            id: true,
+            total: true,
+            paidAmount: true,
+            balance: true
+          }
+        },
+        payments: {
+          orderBy: { paidAt: 'desc' },
+          select: {
+            id: true,
+            reference: true
+          }
+        }
+      }
+    });
+    if (!reservation) throw new Error('Reservation not found');
+
+    const expectedAmount = Number(payload.amount || reservation.rentalAgreement?.balance || 0);
+    if (!(expectedAmount > 0)) throw new Error('No unpaid Authorize.Net amount to reconcile');
+
+    const tenantScope = reservation?.tenantId ? { tenantId: reservation.tenantId } : scope;
+    const existingReferences = new Set(
+      (Array.isArray(reservation.payments) ? reservation.payments : [])
+        .map((row) => String(row?.reference || '').trim().toUpperCase())
+        .filter(Boolean)
+    );
+    const now = Date.now();
+    const transactions = await authNetUnsettledTransactions(tenantScope);
+    const match = transactions
+      .map((tx) => {
+        const transId = String(tx?.transId || '').trim();
+        const reference = transId ? `AUTHNET:${transId}` : '';
+        const amount = Number(tx?.authAmount || tx?.settleAmount || tx?.amount || 0);
+        const submittedAt = tx?.submitTimeUTC || tx?.submitTimeLocal || tx?.submitTime || null;
+        const submittedMs = submittedAt ? new Date(submittedAt).getTime() : 0;
+        return {
+          tx,
+          transId,
+          reference,
+          amount,
+          submittedMs: Number.isFinite(submittedMs) ? submittedMs : 0,
+          transactionStatus: String(tx?.transactionStatus || '').trim()
+        };
+      })
+      .filter((row) => row.transId && row.reference && !existingReferences.has(row.reference.toUpperCase()))
+      .filter((row) => Math.abs(row.amount - expectedAmount) < 0.01)
+      .filter((row) => !row.submittedMs || Math.abs(now - row.submittedMs) <= 1000 * 60 * 60 * 12)
+      .sort((a, b) => b.submittedMs - a.submittedMs)[0];
+
+    if (!match) {
+      throw new Error(`No recent Authorize.Net payment found for $${expectedAmount.toFixed(2)}`);
+    }
+
+    const txStatus = String(match.transactionStatus || '').trim();
+    if (txStatus && !['capturedPendingSettlement', 'settledSuccessfully'].includes(txStatus)) {
+      throw new Error(`Authorize.Net payment is not yet captured (${txStatus})`);
+    }
+
+    await reservationPricingService.postPayment(reservationId, {
+      amount: expectedAmount,
+      method: 'CARD',
+      reference: match.reference,
+      status: 'PAID',
+      origin: 'PORTAL',
+      gateway: 'authorizenet',
+      notes: 'Reconciled from Authorize.Net hosted payment'
+    }, scope, actorUserId);
+
+    let savedCardOnFile = false;
+    try {
+      if (reservation?.customer?.id) {
+        await saveAuthNetCardProfileFromReference({
+          customerId: reservation.customer.id,
+          reference: match.reference,
+          scope: tenantScope
+        });
+        savedCardOnFile = true;
+      }
+    } catch {}
+
+    return {
+      ok: true,
+      amount: expectedAmount,
+      reference: match.reference,
+      transId: match.transId,
+      savedCardOnFile
+    };
   },
 
   async captureSecurityDeposit(id, payload = {}, actorUserId = null) {
