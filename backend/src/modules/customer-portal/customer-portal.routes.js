@@ -341,10 +341,12 @@ function authNetSignatureKeyHex(value = '') {
 }
 
 function authNetVerifyWebhookSignature(rawBody = '', header = '', signatureKey = '') {
-  const payload = String(rawBody || '');
+  const payloadBuffer = Buffer.isBuffer(rawBody)
+    ? rawBody
+    : Buffer.from(String(rawBody || ''), 'utf8');
   const signatureHex = authNetSignatureKeyHex(signatureKey);
   const rawHeader = String(header || '').trim();
-  if (!payload || !signatureHex || !rawHeader) return { ok: false, expectedHex: '', actualHex: '' };
+  if (!payloadBuffer.length || !signatureHex || !rawHeader) return { ok: false, expectedHex: '', actualHex: '' };
 
   const actualHex = String(rawHeader.toLowerCase().startsWith('sha512=') ? rawHeader.slice(7) : rawHeader)
     .trim()
@@ -354,7 +356,7 @@ function authNetVerifyWebhookSignature(rawBody = '', header = '', signatureKey =
   try {
     const expectedHex = crypto
       .createHmac('sha512', Buffer.from(signatureHex, 'hex'))
-      .update(Buffer.from(payload, 'utf8'))
+      .update(payloadBuffer)
       .digest('hex')
       .toLowerCase();
     if (expectedHex.length !== actualHex.length) return { ok: false, expectedHex, actualHex };
@@ -420,9 +422,11 @@ function authNetSignatureFingerprint(value = '') {
 }
 
 async function authNetWebhookConfigForRequest(req) {
-  const rawBody = String(req.rawBody || '');
+  const rawBody = Buffer.isBuffer(req.rawBodyBuffer) && req.rawBodyBuffer.length
+    ? req.rawBodyBuffer
+    : Buffer.from(String(req.rawBody || ''), 'utf8');
   const signatureHeader = String(req.get('X-ANET-Signature') || req.get('x-anet-signature') || '').trim();
-  if (!rawBody || !signatureHeader) return null;
+  if (!rawBody.length || !signatureHeader) return null;
   const configs = await authNetWebhookConfigs();
   const attempts = configs.map((row) => ({
     row,
