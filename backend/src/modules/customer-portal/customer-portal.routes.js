@@ -344,12 +344,12 @@ function authNetVerifyWebhookSignature(rawBody = '', header = '', signatureKey =
   const payload = String(rawBody || '');
   const signatureHex = authNetSignatureKeyHex(signatureKey);
   const rawHeader = String(header || '').trim();
-  if (!payload || !signatureHex || !rawHeader) return false;
+  if (!payload || !signatureHex || !rawHeader) return { ok: false, expectedHex: '', actualHex: '' };
 
   const actualHex = String(rawHeader.toLowerCase().startsWith('sha512=') ? rawHeader.slice(7) : rawHeader)
     .trim()
     .toLowerCase();
-  if (!actualHex || actualHex.length % 2 !== 0) return false;
+  if (!actualHex || actualHex.length % 2 !== 0) return { ok: false, expectedHex: '', actualHex };
 
   try {
     const expectedHex = crypto
@@ -357,10 +357,14 @@ function authNetVerifyWebhookSignature(rawBody = '', header = '', signatureKey =
       .update(Buffer.from(payload, 'utf8'))
       .digest('hex')
       .toLowerCase();
-    if (expectedHex.length !== actualHex.length) return false;
-    return crypto.timingSafeEqual(Buffer.from(expectedHex, 'hex'), Buffer.from(actualHex, 'hex'));
+    if (expectedHex.length !== actualHex.length) return { ok: false, expectedHex, actualHex };
+    return {
+      ok: crypto.timingSafeEqual(Buffer.from(expectedHex, 'hex'), Buffer.from(actualHex, 'hex')),
+      expectedHex,
+      actualHex
+    };
   } catch {
-    return false;
+    return { ok: false, expectedHex: '', actualHex };
   }
 }
 
@@ -420,16 +424,22 @@ async function authNetWebhookConfigForRequest(req) {
   const signatureHeader = String(req.get('X-ANET-Signature') || req.get('x-anet-signature') || '').trim();
   if (!rawBody || !signatureHeader) return null;
   const configs = await authNetWebhookConfigs();
-  const match = configs.find((row) => authNetVerifyWebhookSignature(rawBody, signatureHeader, row.signatureKey)) || null;
+  const attempts = configs.map((row) => ({
+    row,
+    result: authNetVerifyWebhookSignature(rawBody, signatureHeader, row.signatureKey)
+  }));
+  const match = attempts.find((entry) => entry.result?.ok)?.row || null;
   if (match) return match;
   return {
     _invalidSignature: true,
     debug: {
       configCount: configs.length,
       headerPrefix: String(signatureHeader || '').slice(0, 24),
-      tenants: configs.map((row) => ({
-        tenantId: row.tenantId || 'global',
-        fingerprint: authNetSignatureFingerprint(row.signatureKey)
+      tenants: attempts.map((entry) => ({
+        tenantId: entry.row.tenantId || 'global',
+        fingerprint: authNetSignatureFingerprint(entry.row.signatureKey),
+        expectedPrefix: String(entry.result?.expectedHex || '').slice(0, 24),
+        actualPrefix: String(entry.result?.actualHex || '').slice(0, 24)
       }))
     }
   };
