@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import { AuthGate } from '../../../../components/AuthGate';
 import { AppShell } from '../../../../components/AppShell';
@@ -71,6 +71,8 @@ function Inner({ token, me, logout }) {
   const [cardChargeAmount, setCardChargeAmount] = useState('');
   const [holdAmount, setHoldAmount] = useState('');
   const [actionBusy, setActionBusy] = useState('');
+  const autoReconcileAttemptsRef = useRef(0);
+  const autoReconcileKeyRef = useRef('');
 
   const load = async () => {
     const [r, payments, pricingOut] = await Promise.all([
@@ -146,18 +148,22 @@ function Inner({ token, me, logout }) {
     }
   };
 
-  const runPaymentAction = async (path, { body, successMessage, busyKey } = {}) => {
+  const runPaymentAction = async (path, { body, successMessage, busyKey, silent = false } = {}) => {
     try {
       setActionBusy(busyKey || path);
-      setMsg('');
+      if (!silent) setMsg('');
       const response = await api(path, {
         method: 'POST',
         body: body ? JSON.stringify(body) : undefined
       }, token);
       await load();
-      setMsg(typeof successMessage === 'function' ? successMessage(response) : (successMessage || 'Action completed'));
+      if (!silent) {
+        setMsg(typeof successMessage === 'function' ? successMessage(response) : (successMessage || 'Action completed'));
+      }
+      return response;
     } catch (e) {
-      setMsg(String(e.message || e));
+      if (!silent) setMsg(String(e.message || e));
+      throw e;
     } finally {
       setActionBusy('');
     }
@@ -215,6 +221,27 @@ function Inner({ token, me, logout }) {
     });
   };
 
+  const silentReconcileAuthNetPayment = async () => {
+    try {
+      await runPaymentAction(`/api/reservations/${id}/payments/reconcile-authorizenet`, {
+        body: {
+          amount: unpaid > 0 ? unpaid : undefined
+        },
+        busyKey: 'reconcile-authnet',
+        silent: true
+      });
+      setMsg('Authorize.Net payment detected and posted automatically.');
+      return true;
+    } catch (e) {
+      const message = String(e?.message || e || '');
+      if (/No recent Authorize\.Net payment found|not yet captured/i.test(message)) {
+        return false;
+      }
+      setMsg(message || 'Unable to auto-reconcile Authorize.Net payment');
+      return false;
+    }
+  };
+
   const refundPayment = async (payment) => {
     const max = Number(payment?.amount || 0);
     const input = window.prompt('Refund amount', max > 0 ? max.toFixed(2) : '0.00');
@@ -227,6 +254,35 @@ function Inner({ token, me, logout }) {
       busyKey: `refund-${payment.id}`
     });
   };
+
+  useEffect(() => {
+    if (!id) return;
+    const nextKey = `${id}:${paymentCount}:${unpaid.toFixed(2)}`;
+    if (autoReconcileKeyRef.current !== nextKey) {
+      autoReconcileKeyRef.current = nextKey;
+      autoReconcileAttemptsRef.current = 0;
+    }
+  }, [id, paymentCount, unpaid]);
+
+  useEffect(() => {
+    if (!id || unpaid <= 0 || actionBusy) return undefined;
+    if (autoReconcileAttemptsRef.current >= 12) return undefined;
+
+    const runAutoReconcile = async () => {
+      autoReconcileAttemptsRef.current += 1;
+      const reconciled = await silentReconcileAuthNetPayment();
+      if (reconciled) {
+        autoReconcileAttemptsRef.current = 12;
+      }
+    };
+
+    const timer = window.setTimeout(() => {
+      if (document.visibilityState === 'hidden') return;
+      runAutoReconcile().catch(() => {});
+    }, autoReconcileAttemptsRef.current === 0 ? 1200 : 15000);
+
+    return () => window.clearTimeout(timer);
+  }, [id, unpaid, actionBusy, paymentCount]);
 
   return (
     <AppShell me={me} logout={logout}>
@@ -288,6 +344,11 @@ function Inner({ token, me, logout }) {
         <div className="label" style={{ textTransform: 'none', letterSpacing: 0 }}>Total: ${total.toFixed(2)}</div>
         <div className="label" style={{ textTransform: 'none', letterSpacing: 0 }}>Total Payments: ${paid.toFixed(2)}</div>
         <div className="label" style={{ textTransform: 'none', letterSpacing: 0, marginBottom: 10 }}>Unpaid Balance: ${unpaid.toFixed(2)}</div>
+        {unpaid > 0 ? (
+          <div className="label" style={{ textTransform: 'none', letterSpacing: 0, marginBottom: 10 }}>
+            Ride Fleet will keep checking Authorize.Net automatically for a recent hosted payment while this page is open.
+          </div>
+        ) : null}
         <div className="label" style={{ textTransform: 'none', letterSpacing: 0, marginBottom: 10 }}>
           Tip: paste the raw Authorize.Net `transId` or `AUTHNET:...` into `Reference`, then use `Reconcile Latest AuthNet Payment` if the webhook has not posted the payment yet.
         </div>
