@@ -115,6 +115,12 @@ async function authNetRequest(payload, scope = {}) {
 }
 
 function authNetMessage(payload = {}) {
+  const nestedBody = payload?.body || null;
+  const nestedResponse = payload?.createTransactionResponse || nestedBody?.createTransactionResponse || null;
+  if (nestedResponse && nestedResponse !== payload) {
+    const nestedMessage = authNetMessage(nestedResponse);
+    if (nestedMessage) return nestedMessage;
+  }
   const directMessages = Array.isArray(payload?.messages?.message)
     ? payload.messages.message
     : payload?.messages?.message
@@ -129,6 +135,11 @@ function authNetMessage(payload = {}) {
       ? [payload.transactionResponse.errors.error]
       : [];
   return txErrors.map((row) => String(row?.errorText || row?.text || '').trim()).find(Boolean) || '';
+}
+
+function authNetTransactionEnvelope(payload = {}) {
+  const body = payload?.body || null;
+  return payload?.createTransactionResponse || body?.createTransactionResponse || body || payload || {};
 }
 
 function authNetInvoiceNumberValue(value = '') {
@@ -2493,10 +2504,11 @@ export const rentalAgreementsService = {
       }
     }, tenantScope);
 
-    const tx = authnet?.transactionResponse;
-    const ok = authnet?.messages?.resultCode === 'Ok' && tx?.responseCode === '1';
+    const authnetBody = authNetTransactionEnvelope(authnet);
+    const tx = authnetBody?.transactionResponse || {};
+    const ok = String(authnetBody?.messages?.resultCode || '').trim() === 'Ok' && String(tx?.responseCode || '').trim() === '1';
     if (!ok) {
-      const err = tx?.errors?.[0]?.errorText || authnet?.messages?.message?.[0]?.text || 'Authorize.Net charge failed';
+      const err = authNetMessage(authnetBody) || 'Authorize.Net charge failed';
       throw new Error(err);
     }
 
@@ -2729,7 +2741,7 @@ export const rentalAgreementsService = {
             }
           }
         }, tenantScope);
-        const authnetBody = authnet?.createTransactionResponse || authnet || {};
+        const authnetBody = authNetTransactionEnvelope(authnet);
         const tx = authnetBody?.transactionResponse || {};
         const ok = String(authnetBody?.messages?.resultCode || '').trim() === 'Ok' && String(tx?.responseCode || '').trim() === '1';
         if (!ok) {

@@ -1003,6 +1003,10 @@ reservationsRouter.post('/:id/agreement/payments/charge-card-on-file', async (re
     const row = await rentalAgreementsService.chargeCardOnFile(agreementId, req.body || {}, req.user?.sub || null);
     res.json(row);
   } catch (e) {
+    if (/not found/i.test(String(e?.message || ''))) return res.status(404).json({ error: e.message });
+    if (/Authorize\.Net|card profile|amount|invalid|missing/i.test(String(e?.message || ''))) {
+      return res.status(400).json({ error: e.message });
+    }
     next(e);
   }
 });
@@ -1014,6 +1018,10 @@ reservationsRouter.post('/:id/agreement/security-deposit/capture', async (req, r
     const row = await rentalAgreementsService.captureSecurityDeposit(agreementId, req.body || {}, req.user?.sub || null);
     res.json(row);
   } catch (e) {
+    if (/not found/i.test(String(e?.message || ''))) return res.status(404).json({ error: e.message });
+    if (/Authorize\.Net|security deposit|amount|invalid|missing|captured|released/i.test(String(e?.message || ''))) {
+      return res.status(400).json({ error: e.message });
+    }
     next(e);
   }
 });
@@ -1025,6 +1033,10 @@ reservationsRouter.post('/:id/agreement/security-deposit/release', async (req, r
     const row = await rentalAgreementsService.releaseSecurityDeposit(agreementId, req.body || {}, req.user?.sub || null);
     res.json(row);
   } catch (e) {
+    if (/not found/i.test(String(e?.message || ''))) return res.status(404).json({ error: e.message });
+    if (/Authorize\.Net|security deposit|invalid|missing|captured|released/i.test(String(e?.message || ''))) {
+      return res.status(400).json({ error: e.message });
+    }
     next(e);
   }
 });
