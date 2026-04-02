@@ -1140,7 +1140,7 @@ reservationsRouter.post('/:id/payments/:paymentId/save-card-on-file', async (req
     res.json(row);
   } catch (e) {
     if (/not found/i.test(e.message)) return res.status(404).json({ error: e.message });
-    if (/cannot|invalid|missing|unable|only/i.test(e.message)) return res.status(400).json({ error: e.message });
+    if (/cannot|invalid|missing|unable|only|duplicate|exists|profile/i.test(e.message)) return res.status(400).json({ error: e.message });
     next(e);
   }
 });

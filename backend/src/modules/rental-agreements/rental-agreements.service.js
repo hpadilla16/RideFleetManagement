@@ -145,6 +145,27 @@ async function authNetTransactionDetails(transId, scope = {}) {
   return out?.getTransactionDetailsResponse || out || {};
 }
 
+function authNetDuplicateProfileId(message = '') {
+  const text = String(message || '').trim();
+  const match = text.match(/\bduplicate record with ID\s+(\d+)\b/i) || text.match(/\brecord with ID\s+(\d+)\b/i);
+  return match?.[1] ? String(match[1]).trim() : '';
+}
+
+async function authNetCustomerProfile(profileId, scope = {}) {
+  const cfg = await authNetConfig(scope);
+  if (!cfg.loginId || !cfg.transactionKey) throw new Error('Authorize.Net is not configured');
+  const out = await authNetRequest({
+    getCustomerProfileRequest: {
+      merchantAuthentication: {
+        name: cfg.loginId,
+        transactionKey: cfg.transactionKey
+      },
+      customerProfileId: String(profileId || '').trim()
+    }
+  }, scope);
+  return out?.getCustomerProfileResponse || out || {};
+}
+
 async function saveAuthNetCardProfileFromReference({ customerId, reference, scope = {} }) {
   const cfg = await authNetConfig(scope);
   if (!cfg.loginId || !cfg.transactionKey) throw new Error('Authorize.Net is not configured');
@@ -164,7 +185,36 @@ async function saveAuthNetCardProfileFromReference({ customerId, reference, scop
 
   const resp = out?.createCustomerProfileResponse || out?.createCustomerProfileFromTransactionResponse || out || {};
   if (String(resp?.messages?.resultCode || '').trim() !== 'Ok') {
-    throw new Error(authNetMessage(resp) || 'Unable to save card on file from Authorize.Net transaction');
+    const message = authNetMessage(resp) || 'Unable to save card on file from Authorize.Net transaction';
+    const duplicateProfileId = authNetDuplicateProfileId(message);
+    if (duplicateProfileId) {
+      const profileResp = await authNetCustomerProfile(duplicateProfileId, scope);
+      const profile = profileResp?.profile || profileResp?.customerProfile || null;
+      const paymentProfiles = Array.isArray(profile?.paymentProfiles)
+        ? profile.paymentProfiles
+        : profile?.paymentProfiles
+          ? [profile.paymentProfiles]
+          : [];
+      const paymentProfileId = paymentProfiles
+        .map((row) => row?.customerPaymentProfileId || row?.paymentProfileId || '')
+        .map((value) => String(value || '').trim())
+        .find(Boolean);
+      if (paymentProfileId) {
+        await prisma.customer.update({
+          where: { id: customerId },
+          data: {
+            authnetCustomerProfileId: String(duplicateProfileId),
+            authnetPaymentProfileId: String(paymentProfileId)
+          }
+        });
+        return {
+          customerProfileId: String(duplicateProfileId),
+          paymentProfileId: String(paymentProfileId),
+          alreadySaved: true
+        };
+      }
+    }
+    throw new Error(message);
   }
 
   const customerProfileId = resp?.customerProfileId || null;
