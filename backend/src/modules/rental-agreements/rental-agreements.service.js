@@ -2488,7 +2488,7 @@ export const rentalAgreementsService = {
             customerProfileId: customer.authnetCustomerProfileId,
             paymentProfile: { paymentProfileId: customer.authnetPaymentProfileId }
           },
-          order: { invoiceNumber: agreement.agreementNumber || undefined }
+          order: { invoiceNumber: authNetInvoiceNumberValue(agreement.agreementNumber || agreement.reservationId || '') || undefined }
         }
       }
     }, tenantScope);
@@ -2725,7 +2725,7 @@ export const rentalAgreementsService = {
               customerProfileId: customer.authnetCustomerProfileId,
               paymentProfile: { paymentProfileId: customer.authnetPaymentProfileId }
             },
-            order: { invoiceNumber: agreement.agreementNumber || undefined }
+            order: { invoiceNumber: authNetInvoiceNumberValue(agreement.agreementNumber || agreement.reservationId || '') || undefined }
             }
           }
         }, tenantScope);
