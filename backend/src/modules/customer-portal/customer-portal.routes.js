@@ -1030,8 +1030,6 @@ customerPortalRouter.post('/payment/:token/create-session', async (req, res, nex
     // Authorize.Net
     if (!authNetEnabled(gatewayConfig)) return res.status(400).json({ error: 'Authorize.Net is not configured for this tenant' });
     const amount = Number(Math.max(0.5, Number(amountDue || 0))).toFixed(2);
-    const returnUrl = `${portalBase().replace(/\/$/, '')}/customer/pay?token=${encodeURIComponent(token)}&success=1`;
-    const cancelUrl = `${portalBase().replace(/\/$/, '')}/customer/pay?token=${encodeURIComponent(token)}&canceled=1`;
     const requestPayload = {
       getHostedPaymentPageRequest: {
         merchantAuthentication: { name: gatewayConfig.authorizenet.loginId, transactionKey: gatewayConfig.authorizenet.transactionKey },
@@ -1042,29 +1040,11 @@ customerPortalRouter.post('/payment/:token/create-session', async (req, res, nex
         hostedPaymentSettings: {
           setting: [
             {
-              settingName: 'hostedPaymentReturnOptions',
-              settingValue: JSON.stringify({
-                showReceipt: false,
-                url: returnUrl,
-                urlText: 'Return to Ride Fleet',
-                cancelUrl,
-                cancelUrlText: 'Cancel and go back'
-              })
-            },
-            {
               settingName: 'hostedPaymentPaymentOptions',
               settingValue: JSON.stringify({
                 showCreditCard: true,
                 showBankAccount: false,
                 cardCodeRequired: false
-              })
-            },
-            {
-              settingName: 'hostedPaymentCustomerOptions',
-              settingValue: JSON.stringify({
-                showEmail: false,
-                requiredEmail: false,
-                addPaymentProfile: false
               })
             },
             {
