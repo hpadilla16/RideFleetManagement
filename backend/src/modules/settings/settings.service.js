@@ -59,7 +59,8 @@ function defaultPaymentGatewayConfig() {
       environment: String(process.env.AUTHNET_ENV || 'sandbox').toLowerCase(),
       loginId: String(process.env.AUTHNET_API_LOGIN_ID || ''),
       transactionKey: String(process.env.AUTHNET_TRANSACTION_KEY || ''),
-      clientKey: String(process.env.AUTHNET_CLIENT_KEY || '')
+      clientKey: String(process.env.AUTHNET_CLIENT_KEY || ''),
+      signatureKey: String(process.env.AUTHNET_SIGNATURE_KEY || '')
     },
     stripe: {
       enabled: !!process.env.STRIPE_SECRET_KEY,
@@ -254,7 +255,8 @@ export const settingsService = {
         environment: String(payload?.authorizenet?.environment || defaults.authorizenet.environment).trim().toLowerCase(),
         loginId: String(payload?.authorizenet?.loginId || '').trim(),
         transactionKey: String(payload?.authorizenet?.transactionKey || '').trim(),
-        clientKey: String(payload?.authorizenet?.clientKey || '').trim()
+        clientKey: String(payload?.authorizenet?.clientKey || '').trim(),
+        signatureKey: String(payload?.authorizenet?.signatureKey || '').trim()
       },
       stripe: {
         ...defaults.stripe,

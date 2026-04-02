@@ -35,7 +35,12 @@ initSentry();
 
 const app = express();
 app.use(cors({ origin: ['http://localhost:3000', 'http://127.0.0.1:3000'] }));
-app.use(express.json({ limit: '12mb' }));
+app.use(express.json({
+  limit: '12mb',
+  verify: (req, _res, buf) => {
+    req.rawBody = buf?.length ? Buffer.from(buf).toString('utf8') : '';
+  }
+}));
 
 app.get('/health', (_req, res) => {
   res.json({ ok: true, service: 'fleet-management-backend', sentryEnabled: isSentryEnabled() });

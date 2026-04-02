@@ -136,15 +136,22 @@ settingsRouter.post('/payment-gateway/health-check', requireRole('ADMIN'), async
   try {
     const cfg = await settingsService.getPaymentGatewayConfig(scopeFor(req));
     const gateway = String(cfg?.gateway || 'authorizenet').toLowerCase();
+    const portalBaseUrl = (process.env.CUSTOMER_PORTAL_BASE_URL || process.env.APP_BASE_URL || process.env.FRONTEND_BASE_URL || `${req.protocol}://${req.get('host')}`).replace(/\/$/, '');
+    const authNetWebhookUrl = `${portalBaseUrl}/api/public/payment-gateway/authorizenet/webhook`;
     const checks = {
       authorizenet: {
         selected: gateway === 'authorizenet',
         enabled: !!cfg?.authorizenet?.enabled,
         ready: !!(cfg?.authorizenet?.enabled && cfg?.authorizenet?.loginId && cfg?.authorizenet?.transactionKey),
+        webhookReady: !!(cfg?.authorizenet?.enabled && cfg?.authorizenet?.signatureKey),
         environment: cfg?.authorizenet?.environment || 'sandbox',
+        webhookUrl: authNetWebhookUrl,
         missing: [
           ...(!cfg?.authorizenet?.loginId ? ['API Login ID'] : []),
           ...(!cfg?.authorizenet?.transactionKey ? ['Transaction Key'] : [])
+        ],
+        webhookMissing: [
+          ...(!cfg?.authorizenet?.signatureKey ? ['Signature Key'] : [])
         ]
       },
       stripe: {
@@ -172,7 +179,9 @@ settingsRouter.post('/payment-gateway/health-check', requireRole('ADMIN'), async
       gateway,
       ready: !!active.ready,
       summary: active.ready
-        ? `${String(gateway).toUpperCase()} is configured and ready for this tenant`
+        ? gateway === 'authorizenet' && !active.webhookReady
+          ? `${String(gateway).toUpperCase()} checkout is ready, but webhook auto-confirm still needs Signature Key`
+          : `${String(gateway).toUpperCase()} is configured and ready for this tenant`
         : `${String(gateway).toUpperCase()} is missing required credentials for this tenant`,
       checks
     });

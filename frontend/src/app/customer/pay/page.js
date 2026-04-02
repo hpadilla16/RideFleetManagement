@@ -22,7 +22,8 @@ function restorePaymentPortalState(token) {
       success: typeof parsed.success === 'string' ? parsed.success : '',
       canceled: typeof parsed.canceled === 'string' ? parsed.canceled : '',
       sessionId: typeof parsed.sessionId === 'string' ? parsed.sessionId : '',
-      returnTransId: typeof parsed.returnTransId === 'string' ? parsed.returnTransId : ''
+      returnTransId: typeof parsed.returnTransId === 'string' ? parsed.returnTransId : '',
+      checkoutStartedAt: Number(parsed.checkoutStartedAt || 0)
     };
   } catch {
     return null;
@@ -35,6 +36,7 @@ export default function CustomerPayPage() {
   const [canceled, setCanceled] = useState('');
   const [sessionId, setSessionId] = useState('');
   const [returnTransId, setReturnTransId] = useState('');
+  const [checkoutStartedAt, setCheckoutStartedAt] = useState(0);
 
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -43,7 +45,7 @@ export default function CustomerPayPage() {
 
   const loadModel = async (paymentToken) => {
     if (!paymentToken) return null;
-    const res = await fetch(`${API_BASE}/api/public/payment/${encodeURIComponent(paymentToken)}`);
+    const res = await fetch(`${API_BASE}/api/public/payment/${encodeURIComponent(paymentToken)}`, { cache: 'no-store' });
     const j = await res.json();
     if (!res.ok) throw new Error(j?.error || 'Unable to load payment page');
     setModel(j);
@@ -59,6 +61,7 @@ export default function CustomerPayPage() {
     setCanceled(p.get('canceled') || stored?.canceled || '');
     setSessionId(p.get('session_id') || stored?.sessionId || '');
     setReturnTransId(p.get('transId') || p.get('x_trans_id') || p.get('transaction_id') || stored?.returnTransId || '');
+    setCheckoutStartedAt(Number(stored?.checkoutStartedAt || 0));
   }, []);
 
   useEffect(() => {
@@ -69,13 +72,14 @@ export default function CustomerPayPage() {
           success,
           canceled,
           sessionId,
-          returnTransId
+          returnTransId,
+          checkoutStartedAt
         }));
       } else {
         sessionStorage.removeItem(paymentPortalStateKey(token));
       }
     } catch {}
-  }, [canceled, returnTransId, sessionId, success, token]);
+  }, [canceled, checkoutStartedAt, returnTransId, sessionId, success, token]);
 
   useEffect(() => {
     if (!token || !model || String(model.gateway || '').toLowerCase() !== 'authorizenet') return;
@@ -102,6 +106,39 @@ export default function CustomerPayPage() {
     };
     run();
   }, [token]);
+
+  useEffect(() => {
+    if (!token || !model || String(model.gateway || '').toLowerCase() !== 'authorizenet') return undefined;
+    const currentBalanceDue = Number(model?.portal?.payment?.balanceDue ?? model?.amountDue ?? 0);
+    if (!checkoutStartedAt || canceled || currentBalanceDue <= 0) return undefined;
+    if (Date.now() - checkoutStartedAt > 1000 * 60 * 15) return undefined;
+
+    let disposed = false;
+    const timer = window.setInterval(async () => {
+      if (document.visibilityState === 'hidden') return;
+      try {
+        const next = await loadModel(token);
+        const nextBalance = Number(next?.portal?.payment?.balanceDue ?? next?.amountDue ?? 0);
+        if (!disposed && nextBalance <= 0) {
+          setOk((prev) => prev || 'Payment recorded successfully.');
+          setError('');
+          setSuccess('');
+          setCanceled('');
+          setSessionId('');
+          setReturnTransId('');
+          setCheckoutStartedAt(0);
+          try {
+            sessionStorage.removeItem(paymentPortalStateKey(token));
+          } catch {}
+        }
+      } catch {}
+    }, 6000);
+
+    return () => {
+      disposed = true;
+      window.clearInterval(timer);
+    };
+  }, [canceled, checkoutStartedAt, model, token]);
 
   useEffect(() => {
     const autoConfirmReturn = async () => {
@@ -159,7 +196,17 @@ export default function CustomerPayPage() {
       setCanceled('');
       setSessionId('');
       setReturnTransId('');
+      setCheckoutStartedAt(Date.now());
       try { sessionStorage.removeItem(paymentPortalStateKey(token)); } catch {}
+      try {
+        sessionStorage.setItem(paymentPortalStateKey(token), JSON.stringify({
+          success: '',
+          canceled: '',
+          sessionId: '',
+          returnTransId: '',
+          checkoutStartedAt: Date.now()
+        }));
+      } catch {}
       const res = await fetch(`${API_BASE}/api/public/payment/${encodeURIComponent(token)}/create-session`, { method: 'POST' });
       const j = await res.json();
       if (!res.ok) throw new Error(j?.error || 'Unable to start checkout');
@@ -362,10 +409,10 @@ export default function CustomerPayPage() {
               <div style={{ display: 'grid', gap: 8, color: '#55456f', lineHeight: 1.6 }}>
                 <div><strong>Payment return detected.</strong></div>
                 <div>
-                  Public confirmation is disabled for {String(model.gateway || '').toUpperCase()}.
-                  {returnTransId ? ` Return reference detected: ${returnTransId}.` : ''}
+                  {returnTransId
+                    ? `Return reference detected: ${returnTransId}. Finalizing payment now.`
+                    : 'Waiting for gateway confirmation. This page will refresh automatically as soon as Ride Fleet receives the payment event.'}
                 </div>
-                <div>Ask staff to verify and post the payment through the internal workflow or a server-side callback.</div>
               </div>
             )}
 

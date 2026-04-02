@@ -1139,9 +1139,9 @@ reservationsRouter.post('/:id/payments/:paymentId/save-card-on-file', async (req
     const row = await rentalAgreementsService.saveCardOnFileFromPayment(agreementId, req.params.paymentId, req.user?.id || null);
     res.json(row);
   } catch (e) {
-    if (/not found/i.test(e.message)) return res.status(404).json({ error: e.message });
-    if (/cannot|invalid|missing|unable|only|duplicate|exists|profile/i.test(e.message)) return res.status(400).json({ error: e.message });
-    next(e);
+    const message = String(e?.message || e || 'Unable to save card on file');
+    if (/not found/i.test(message)) return res.status(404).json({ error: message });
+    return res.status(400).json({ error: message });
   }
 });
 

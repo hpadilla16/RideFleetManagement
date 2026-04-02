@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react';
 import { AuthGate } from '../../components/AuthGate';
 import { AppShell } from '../../components/AppShell';
-import { api } from '../../lib/client';
+import { API_BASE, api } from '../../lib/client';
 import { MODULE_DEFINITIONS } from '../../lib/moduleAccess';
 
 const DEFAULTS = {
@@ -47,7 +47,8 @@ const DEFAULT_PAYMENT_GATEWAY_CONFIG = {
     environment: 'sandbox',
     loginId: '',
     transactionKey: '',
-    clientKey: ''
+    clientKey: '',
+    signatureKey: ''
   },
   stripe: {
     enabled: false,
@@ -1641,12 +1642,25 @@ function SettingsInner({ token, me, logout }) {
                   <label className="label">Transaction Key</label>
                   <input value={paymentGatewayConfig.authorizenet?.transactionKey || ''} onChange={(e) => setPaymentGatewayConfig({ ...paymentGatewayConfig, authorizenet: { ...paymentGatewayConfig.authorizenet, transactionKey: e.target.value } })} />
                 </div>
-                <div className="stack">
-                  <label className="label">Client Key (Optional)</label>
-                  <input value={paymentGatewayConfig.authorizenet?.clientKey || ''} onChange={(e) => setPaymentGatewayConfig({ ...paymentGatewayConfig, authorizenet: { ...paymentGatewayConfig.authorizenet, clientKey: e.target.value } })} />
+                  <div className="stack">
+                    <label className="label">Client Key (Optional)</label>
+                    <input value={paymentGatewayConfig.authorizenet?.clientKey || ''} onChange={(e) => setPaymentGatewayConfig({ ...paymentGatewayConfig, authorizenet: { ...paymentGatewayConfig.authorizenet, clientKey: e.target.value } })} />
+                  </div>
                 </div>
-              </div>
-            </section>
+                <div className="form-grid-2">
+                  <div className="stack">
+                    <label className="label">Signature Key</label>
+                    <input value={paymentGatewayConfig.authorizenet?.signatureKey || ''} onChange={(e) => setPaymentGatewayConfig({ ...paymentGatewayConfig, authorizenet: { ...paymentGatewayConfig.authorizenet, signatureKey: e.target.value } })} />
+                  </div>
+                  <div className="stack">
+                    <label className="label">Webhook URL</label>
+                    <input value={`${API_BASE}/api/public/payment-gateway/authorizenet/webhook`} readOnly />
+                  </div>
+                </div>
+                <div className="surface-note">
+                  Use the hosted Authorize.Net checkout for PCI scope reduction. To auto-confirm portal payments in Ride Fleet, add the webhook URL above in Authorize.Net and paste the webhook Signature Key here.
+                </div>
+              </section>
 
             <section className="glass card section-card">
               <div className="row-between">

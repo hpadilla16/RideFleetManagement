@@ -34,6 +34,9 @@ function authNetEnabled(config = {}) {
 function authNetPortalReady(config = {}) {
   return authNetEnabled(config);
 }
+function authNetWebhookReady(config = {}) {
+  return !!(authNetEnabled(config) && String(config?.authorizenet?.signatureKey || '').trim());
+}
 function stripeEnabled(config = {}) {
   return !!(config?.stripe?.enabled && config?.stripe?.secretKey);
 }
@@ -93,6 +96,17 @@ async function authNetRequest(payload, config = {}) {
 async function trySaveAuthNetCardOnFileFromTransaction({ reservation, reference }) {
   const config = await paymentGatewayConfigForTenant(reservation?.tenantId || null);
   if (!authNetEnabled(config)) return false;
+  if (!reservation?.customerId) return false;
+  const customer = await prisma.customer.findUnique({
+    where: { id: reservation.customerId },
+    select: {
+      authnetCustomerProfileId: true,
+      authnetPaymentProfileId: true
+    }
+  });
+  if (customer?.authnetCustomerProfileId && customer?.authnetPaymentProfileId) {
+    return true;
+  }
   const rawRef = String(reference || '').trim();
   const transId = rawRef.startsWith('AUTHNET:') ? rawRef.slice('AUTHNET:'.length).trim() : rawRef;
   if (!transId) return false;
@@ -111,14 +125,32 @@ async function trySaveAuthNetCardOnFileFromTransaction({ reservation, reference 
   const payload = out?.body || {};
   const resp = payload?.createCustomerProfileResponse || payload?.createCustomerProfileFromTransactionResponse || payload;
   const ok = resp?.messages?.resultCode === 'Ok';
-  if (!ok) return false;
+  if (!ok) {
+    const duplicateProfileId = authNetDuplicateProfileId(extractAuthNetMessage(resp));
+    if (!duplicateProfileId) return false;
+    try {
+      const profileResp = await authNetCustomerProfile(duplicateProfileId, config);
+      const paymentProfileId = authNetExtractPaymentProfileId(profileResp);
+      if (!paymentProfileId) return false;
+      await prisma.customer.update({
+        where: { id: reservation.customerId },
+        data: {
+          authnetCustomerProfileId: String(duplicateProfileId),
+          authnetPaymentProfileId: String(paymentProfileId)
+        }
+      });
+      return true;
+    } catch {
+      return false;
+    }
+  }
 
   const customerProfileId = resp?.customerProfileId || null;
   const paymentProfileId = Array.isArray(resp?.customerPaymentProfileIdList?.numericString)
     ? resp.customerPaymentProfileIdList.numericString[0]
     : (resp?.customerPaymentProfileIdList?.numericString || null);
 
-  if (!customerProfileId || !paymentProfileId || !reservation?.customerId) return false;
+  if (!customerProfileId || !paymentProfileId) return false;
 
   await prisma.customer.update({
     where: { id: reservation.customerId },
@@ -143,6 +175,40 @@ async function getAuthNetTransactionDetails(transId, config = {}) {
     }
   }, config);
   return out?.body?.getTransactionDetailsResponse || out?.body || {};
+}
+
+function authNetDuplicateProfileId(message = '') {
+  const text = String(message || '').trim();
+  const match = text.match(/\bduplicate record with ID\s+(\d+)\b/i) || text.match(/\brecord with ID\s+(\d+)\b/i);
+  return match?.[1] ? String(match[1]).trim() : '';
+}
+
+async function authNetCustomerProfile(profileId, config = {}) {
+  const cleanProfileId = String(profileId || '').trim();
+  if (!cleanProfileId) throw new Error('Authorize.Net customerProfileId is required');
+  const out = await authNetRequest({
+    getCustomerProfileRequest: {
+      merchantAuthentication: {
+        name: config.authorizenet.loginId,
+        transactionKey: config.authorizenet.transactionKey
+      },
+      customerProfileId: cleanProfileId
+    }
+  }, config);
+  return out?.body?.getCustomerProfileResponse || out?.body || {};
+}
+
+function authNetExtractPaymentProfileId(profileResp = {}) {
+  const profile = profileResp?.profile || profileResp?.customerProfile || null;
+  const paymentProfiles = Array.isArray(profile?.paymentProfiles)
+    ? profile.paymentProfiles
+    : profile?.paymentProfiles
+      ? [profile.paymentProfiles]
+      : [];
+  return paymentProfiles
+    .map((row) => row?.customerPaymentProfileId || row?.paymentProfileId || '')
+    .map((value) => String(value || '').trim())
+    .find(Boolean) || '';
 }
 
 async function findReservationByToken(kind, token) {
@@ -268,6 +334,180 @@ function authNetCompactObject(obj = {}) {
   return Object.fromEntries(
     Object.entries(obj).filter(([, value]) => String(value ?? '').trim() !== '')
   );
+}
+
+function authNetSignatureKeyHex(value = '') {
+  return String(value || '').replace(/[^a-fA-F0-9]/g, '').trim();
+}
+
+function authNetVerifyWebhookSignature(rawBody = '', header = '', signatureKey = '') {
+  const payload = String(rawBody || '');
+  const signatureHex = authNetSignatureKeyHex(signatureKey);
+  const rawHeader = String(header || '').trim();
+  if (!payload || !signatureHex || !rawHeader) return false;
+
+  const actualHex = String(rawHeader.toLowerCase().startsWith('sha512=') ? rawHeader.slice(7) : rawHeader)
+    .trim()
+    .toLowerCase();
+  if (!actualHex || actualHex.length % 2 !== 0) return false;
+
+  try {
+    const expectedHex = crypto
+      .createHmac('sha512', Buffer.from(signatureHex, 'hex'))
+      .update(Buffer.from(payload, 'utf8'))
+      .digest('hex')
+      .toLowerCase();
+    if (expectedHex.length !== actualHex.length) return false;
+    return crypto.timingSafeEqual(Buffer.from(expectedHex, 'hex'), Buffer.from(actualHex, 'hex'));
+  } catch {
+    return false;
+  }
+}
+
+async function authNetWebhookConfigs() {
+  const rows = await prisma.appSetting.findMany({
+    where: {
+      OR: [
+        { key: 'paymentGatewayConfig' },
+        { key: { endsWith: ':paymentGatewayConfig' } }
+      ]
+    },
+    select: {
+      key: true,
+      value: true
+    }
+  });
+
+  const configs = [];
+  for (const row of rows) {
+    try {
+      const parsed = JSON.parse(row.value || '{}') || {};
+      if (!authNetWebhookReady(parsed)) continue;
+      const key = String(row.key || '').trim();
+      const tenantId = key.startsWith('tenant:') ? key.split(':')[1] || null : null;
+      configs.push({
+        tenantId,
+        config: parsed,
+        signatureKey: String(parsed?.authorizenet?.signatureKey || '').trim()
+      });
+    } catch {}
+  }
+
+  if (!configs.some((row) => !row.tenantId)) {
+    try {
+      const rootConfig = await settingsService.getPaymentGatewayConfig({});
+      if (authNetWebhookReady(rootConfig)) {
+        configs.push({
+          tenantId: null,
+          config: rootConfig,
+          signatureKey: String(rootConfig?.authorizenet?.signatureKey || '').trim()
+        });
+      }
+    } catch {}
+  }
+
+  return configs;
+}
+
+async function authNetWebhookConfigForRequest(req) {
+  const rawBody = String(req.rawBody || '');
+  const signatureHeader = String(req.get('X-ANET-Signature') || req.get('x-anet-signature') || '').trim();
+  if (!rawBody || !signatureHeader) return null;
+  const configs = await authNetWebhookConfigs();
+  return configs.find((row) => authNetVerifyWebhookSignature(rawBody, signatureHeader, row.signatureKey)) || null;
+}
+
+async function findReservationByAuthNetInvoiceNumber(invoiceNumber = '') {
+  const normalized = authNetInvoiceNumberValue(invoiceNumber);
+  if (!normalized) return null;
+  return prisma.reservation.findFirst({
+    where: { reservationNumber: normalized },
+    include: { customer: true }
+  });
+}
+
+async function postAuthNetPaymentToReservation({ reservation, transId, gatewayConfig, token = '', origin = 'WEBHOOK' }) {
+  const cleanTransId = String(transId || '').trim();
+  if (!reservation?.id || !cleanTransId) throw new Error('Reservation and Authorize.Net transId are required');
+
+  const reference = `AUTHNET:${cleanTransId}`;
+  const existing = await prisma.reservationPayment.findFirst({
+    where: {
+      reservationId: reservation.id,
+      reference
+    }
+  });
+  if (existing) {
+    let savedCardOnFile = !!(reservation?.customer?.authnetCustomerProfileId && reservation?.customer?.authnetPaymentProfileId);
+    if (!savedCardOnFile) {
+      try {
+        savedCardOnFile = await trySaveAuthNetCardOnFileFromTransaction({ reservation, reference });
+      } catch {}
+    }
+    let portal = null;
+    if (token) {
+      try {
+        const refreshed = await findReservationByToken('payment', token);
+        portal = refreshed ? await buildPortalSummary(refreshed, 'payment', token) : null;
+      } catch {}
+    }
+    return {
+      ok: true,
+      duplicate: true,
+      reference,
+      amount: Number(existing.amount || 0),
+      savedCardOnFile,
+      portal
+    };
+  }
+
+  const details = await getAuthNetTransactionDetails(cleanTransId, gatewayConfig);
+  const tx = details?.transaction || {};
+  const resultCode = String(details?.messages?.resultCode || '').trim();
+  const responseCode = String(tx?.responseCode || '').trim();
+  const txStatus = String(tx?.transactionStatus || '').trim();
+  const allowedStatuses = new Set(['capturedPendingSettlement', 'settledSuccessfully']);
+  if (resultCode !== 'Ok' || responseCode !== '1' || !allowedStatuses.has(txStatus)) {
+    throw new Error(extractAuthNetMessage(details) || `Authorize.Net payment is not yet captured (${txStatus || 'unknown'})`);
+  }
+
+  const paidAmount = Number(tx?.authAmount || tx?.settleAmount || 0);
+  if (!(paidAmount > 0)) throw new Error('Authorize.Net payment amount is missing');
+
+  await reservationPricingService.postPayment(reservation.id, {
+    amount: paidAmount,
+    method: 'CARD',
+    reference,
+    status: 'PAID',
+    origin,
+    gateway: 'authorizenet',
+    paidAt: tx?.submitTimeUTC || tx?.submitTimeLocal || undefined,
+    notes: origin === 'WEBHOOK'
+      ? 'Posted from Authorize.Net webhook'
+      : 'Posted from Authorize.Net confirmation'
+  }, reservation?.tenantId ? { tenantId: reservation.tenantId } : {});
+
+  let savedCardOnFile = false;
+  try {
+    savedCardOnFile = await trySaveAuthNetCardOnFileFromTransaction({ reservation, reference });
+  } catch {}
+
+  let portal = null;
+  if (token) {
+    try {
+      const refreshed = await findReservationByToken('payment', token);
+      portal = refreshed ? await buildPortalSummary(refreshed, 'payment', token) : null;
+    } catch {}
+  }
+
+  return {
+    ok: true,
+    duplicate: false,
+    reference,
+    amount: paidAmount,
+    savedCardOnFile,
+    portal
+  };
 }
 
 function isSecurityDepositCharge(row = {}) {
@@ -941,6 +1181,63 @@ customerPortalRouter.post('/signature/:token', async (req, res, next) => {
   } catch (e) { next(e); }
 });
 
+customerPortalRouter.post('/payment-gateway/authorizenet/webhook', async (req, res, next) => {
+  try {
+    const payload = req.body || {};
+    const webhookConfig = await authNetWebhookConfigForRequest(req);
+    if (!webhookConfig) {
+      return res.status(401).json({ error: 'Invalid Authorize.Net webhook signature' });
+    }
+
+    const eventType = String(payload?.eventType || '').trim();
+    const supportedEvents = new Set([
+      'net.authorize.payment.authcapture.created',
+      'net.authorize.payment.capture.created',
+      'net.authorize.payment.authorization.created'
+    ]);
+    if (!supportedEvents.has(eventType)) {
+      return res.json({ ok: true, ignored: true, reason: `Unsupported event ${eventType || 'unknown'}` });
+    }
+
+    const transId = String(payload?.payload?.id || payload?.payload?.entityId || payload?.id || '').trim();
+    if (!transId) {
+      return res.json({ ok: true, ignored: true, reason: 'Missing transaction id' });
+    }
+
+    const details = await getAuthNetTransactionDetails(transId, webhookConfig.config);
+    const invoiceNumber = authNetInvoiceNumberValue(
+      details?.transaction?.order?.invoiceNumber ||
+      details?.transaction?.invoiceNumber ||
+      payload?.payload?.invoiceNumber ||
+      ''
+    );
+    if (!invoiceNumber) {
+      return res.json({ ok: true, ignored: true, reason: 'Missing reservation invoice number' });
+    }
+
+    const reservation = await findReservationByAuthNetInvoiceNumber(invoiceNumber);
+    if (!reservation) {
+      return res.json({ ok: true, ignored: true, reason: `Reservation not found for ${invoiceNumber}` });
+    }
+
+    const tenantGatewayConfig = await paymentGatewayConfigForTenant(reservation.tenantId || webhookConfig.tenantId || null);
+    const result = await postAuthNetPaymentToReservation({
+      reservation,
+      transId,
+      gatewayConfig: tenantGatewayConfig,
+      origin: 'PORTAL'
+    });
+
+    return res.json({
+      ok: true,
+      eventType,
+      reservationId: reservation.id,
+      reservationNumber: reservation.reservationNumber,
+      ...result
+    });
+  } catch (e) { next(e); }
+});
+
 customerPortalRouter.get('/payment/:token', async (req, res, next) => {
   try {
     const token = String(req.params.token || '');
@@ -1210,22 +1507,21 @@ customerPortalRouter.post('/payment/:token/confirm', async (req, res, next) => {
           portal: refreshed ? await buildPortalSummary(refreshed, 'payment', token) : null
         });
       }
-
-      const details = await getAuthNetTransactionDetails(transId, gatewayConfig);
-      const tx = details?.transaction || {};
-      const resultCode = String(details?.messages?.resultCode || '').trim();
-      const responseCode = String(tx?.responseCode || '').trim();
-      const txStatus = String(tx?.transactionStatus || '').trim();
-      const allowedStatuses = new Set(['capturedPendingSettlement', 'settledSuccessfully']);
-      if (resultCode !== 'Ok' || responseCode !== '1' || !allowedStatuses.has(txStatus)) {
-        const detail = extractAuthNetMessage(details) || 'Authorize.Net payment has not reached a captured state yet';
-        return res.status(400).json({ error: detail });
-      }
-
-      paidAmount = Number(tx?.authAmount || tx?.settleAmount || 0);
-      if (!(paidAmount > 0)) {
-        return res.status(400).json({ error: 'Authorize.Net payment amount is missing' });
-      }
+      const result = await postAuthNetPaymentToReservation({
+        reservation,
+        transId,
+        gatewayConfig,
+        token,
+        origin: 'PORTAL'
+      });
+      return res.json({
+        ok: true,
+        paidAmount: Number(result.amount || 0),
+        savedCardOnFile: !!result.savedCardOnFile,
+        duplicate: !!result.duplicate,
+        portal: result.portal || null,
+        reference: result.reference || null
+      });
     } else {
       return res.status(400).json({
         error: gateway === 'stripe'

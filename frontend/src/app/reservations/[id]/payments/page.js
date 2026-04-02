@@ -74,9 +74,9 @@ function Inner({ token, me, logout }) {
 
   const load = async () => {
     const [r, payments, pricingOut] = await Promise.all([
-      api(`/api/reservations/${id}`, {}, token),
-      api(`/api/reservations/${id}/payments`, {}, token).catch(() => []),
-      api(`/api/reservations/${id}/pricing`, {}, token).catch(() => null)
+      api(`/api/reservations/${id}`, { bypassCache: true }, token),
+      api(`/api/reservations/${id}/payments`, { bypassCache: true }, token).catch(() => []),
+      api(`/api/reservations/${id}/pricing`, { bypassCache: true }, token).catch(() => null)
     ]);
     setRow(r);
     setPaymentRows(normalizePaymentRows(payments));
@@ -110,6 +110,15 @@ function Inner({ token, me, logout }) {
       setHoldAmount(securityDepositHold.amount.toFixed(2));
     }
   }, [securityDepositHold.amount, holdAmount]);
+
+  useEffect(() => {
+    if (!id || unpaid <= 0) return undefined;
+    const timer = window.setInterval(() => {
+      if (document.visibilityState === 'hidden') return;
+      load().catch(() => {});
+    }, 10000);
+    return () => window.clearInterval(timer);
+  }, [id, unpaid]);
 
   const addPayment = async () => {
     try {
