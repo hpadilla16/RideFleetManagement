@@ -139,6 +139,14 @@ function authNetInvoiceNumberValue(value = '') {
     .toUpperCase();
 }
 
+function authNetTransIdValue(value = '') {
+  const raw = String(value || '').trim();
+  if (!raw) return '';
+  return raw.toUpperCase().startsWith('AUTHNET:')
+    ? raw.slice('AUTHNET:'.length).trim()
+    : raw;
+}
+
 async function authNetTransactionDetails(transId, scope = {}) {
   const cfg = await authNetConfig(scope);
   if (!cfg.loginId || !cfg.transactionKey) throw new Error('Authorize.Net is not configured');
@@ -2367,6 +2375,60 @@ export const rentalAgreementsService = {
         .map((row) => String(row?.reference || '').trim().toUpperCase())
         .filter(Boolean)
     );
+    const requestedTransId = authNetTransIdValue(payload?.transId || payload?.reference || '');
+
+    if (requestedTransId) {
+      const requestedReference = `AUTHNET:${requestedTransId}`;
+      if (existingReferences.has(requestedReference.toUpperCase())) {
+        throw new Error(`Authorize.Net payment ${requestedReference} is already recorded`);
+      }
+
+      const details = await authNetTransactionDetails(requestedTransId, tenantScope);
+      const tx = details?.transaction || {};
+      const txStatus = String(tx?.transactionStatus || '').trim();
+      if (txStatus && !['capturedPendingSettlement', 'settledSuccessfully'].includes(txStatus)) {
+        throw new Error(`Authorize.Net payment is not yet captured (${txStatus})`);
+      }
+
+      const reconciledAmount = Number(tx?.authAmount || tx?.settleAmount || tx?.amount || expectedAmount || 0);
+      if (!(reconciledAmount > 0)) throw new Error('Authorize.Net transaction amount is missing');
+
+      const invoiceNumber = authNetInvoiceNumberValue(tx?.order?.invoiceNumber || tx?.invoiceNumber || '');
+      if (invoiceNumber && invoiceNumber !== expectedInvoiceNumber) {
+        throw new Error(`Authorize.Net transaction belongs to ${invoiceNumber}, not ${expectedInvoiceNumber}`);
+      }
+
+      await reservationPricingService.postPayment(reservationId, {
+        amount: reconciledAmount,
+        method: 'CARD',
+        reference: requestedReference,
+        status: 'PAID',
+        origin: 'PORTAL',
+        gateway: 'authorizenet',
+        notes: 'Reconciled from Authorize.Net transaction reference'
+      }, scope, actorUserId);
+
+      let savedCardOnFile = false;
+      try {
+        if (reservation?.customer?.id) {
+          await saveAuthNetCardProfileFromReference({
+            customerId: reservation.customer.id,
+            reference: requestedReference,
+            scope: tenantScope
+          });
+          savedCardOnFile = true;
+        }
+      } catch {}
+
+      return {
+        ok: true,
+        amount: reconciledAmount,
+        reference: requestedReference,
+        transId: requestedTransId,
+        savedCardOnFile
+      };
+    }
+
     const now = Date.now();
     const transactions = await authNetRecentTransactions(tenantScope);
     const candidates = transactions
@@ -2408,7 +2470,7 @@ export const rentalAgreementsService = {
     if (!match) {
       throw new Error(
         expectedInvoiceNumber
-          ? `No recent Authorize.Net payment found for ${expectedInvoiceNumber} / $${expectedAmount.toFixed(2)}`
+          ? `No recent Authorize.Net payment found for ${expectedInvoiceNumber} / $${expectedAmount.toFixed(2)}. Paste the AuthNet transId in Reference and retry reconcile.`
           : `No recent Authorize.Net payment found for $${expectedAmount.toFixed(2)}`
       );
     }

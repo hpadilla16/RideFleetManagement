@@ -201,7 +201,10 @@ function Inner({ token, me, logout }) {
 
   const reconcileAuthNetPayment = async () => {
     await runPaymentAction(`/api/reservations/${id}/payments/reconcile-authorizenet`, {
-      body: { amount: unpaid > 0 ? unpaid : undefined },
+      body: {
+        amount: unpaid > 0 ? unpaid : undefined,
+        reference: String(reference || '').trim() || undefined
+      },
       successMessage: (response) => {
         const amountPosted = Number(response?.amount || unpaid || 0);
         const referencePosted = String(response?.reference || '').trim();
@@ -285,6 +288,9 @@ function Inner({ token, me, logout }) {
         <div className="label" style={{ textTransform: 'none', letterSpacing: 0 }}>Total: ${total.toFixed(2)}</div>
         <div className="label" style={{ textTransform: 'none', letterSpacing: 0 }}>Total Payments: ${paid.toFixed(2)}</div>
         <div className="label" style={{ textTransform: 'none', letterSpacing: 0, marginBottom: 10 }}>Unpaid Balance: ${unpaid.toFixed(2)}</div>
+        <div className="label" style={{ textTransform: 'none', letterSpacing: 0, marginBottom: 10 }}>
+          Tip: paste the raw Authorize.Net `transId` or `AUTHNET:...` into `Reference`, then use `Reconcile Latest AuthNet Payment` if the webhook has not posted the payment yet.
+        </div>
         {securityDepositHold.amount > 0 ? (
           <div className="surface-note" style={{ marginBottom: 12 }}>
             <strong>Security Deposit Hold:</strong> ${securityDepositHold.amount.toFixed(2)}{' '}
