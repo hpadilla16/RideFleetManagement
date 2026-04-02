@@ -340,11 +340,21 @@ function authNetSignatureKeyHex(value = '') {
   return String(value || '').replace(/[^a-fA-F0-9]/g, '').trim();
 }
 
+function authNetSafeHexEqual(expectedHex = '', actualHex = '') {
+  if (!expectedHex || !actualHex || expectedHex.length !== actualHex.length) return false;
+  try {
+    return crypto.timingSafeEqual(Buffer.from(expectedHex, 'hex'), Buffer.from(actualHex, 'hex'));
+  } catch {
+    return false;
+  }
+}
+
 function authNetVerifyWebhookSignature(rawBody = '', header = '', signatureKey = '') {
   const payloadBuffer = Buffer.isBuffer(rawBody)
     ? rawBody
     : Buffer.from(String(rawBody || ''), 'utf8');
   const signatureHex = authNetSignatureKeyHex(signatureKey);
+  const signatureText = String(signatureKey || '').trim();
   const rawHeader = String(header || '').trim();
   if (!payloadBuffer.length || !signatureHex || !rawHeader) return { ok: false, expectedHex: '', actualHex: '' };
 
@@ -354,16 +364,24 @@ function authNetVerifyWebhookSignature(rawBody = '', header = '', signatureKey =
   if (!actualHex || actualHex.length % 2 !== 0) return { ok: false, expectedHex: '', actualHex };
 
   try {
-    const expectedHex = crypto
+    const expectedHexBinary = crypto
       .createHmac('sha512', Buffer.from(signatureHex, 'hex'))
       .update(payloadBuffer)
       .digest('hex')
       .toLowerCase();
-    if (expectedHex.length !== actualHex.length) return { ok: false, expectedHex, actualHex };
+    const expectedHexLatin1 = signatureText
+      ? crypto.createHmac('sha512', Buffer.from(signatureText, 'latin1')).update(payloadBuffer).digest('hex').toLowerCase()
+      : '';
+
+    const matchesBinary = authNetSafeHexEqual(expectedHexBinary, actualHex);
+    const matchesLatin1 = authNetSafeHexEqual(expectedHexLatin1, actualHex);
+
     return {
-      ok: crypto.timingSafeEqual(Buffer.from(expectedHex, 'hex'), Buffer.from(actualHex, 'hex')),
-      expectedHex,
-      actualHex
+      ok: matchesBinary || matchesLatin1,
+      expectedHex: expectedHexBinary,
+      expectedHexAlt: expectedHexLatin1,
+      actualHex,
+      method: matchesBinary ? 'hex-bytes' : matchesLatin1 ? 'latin1-text' : ''
     };
   } catch {
     return { ok: false, expectedHex: '', actualHex };
@@ -443,6 +461,7 @@ async function authNetWebhookConfigForRequest(req) {
         tenantId: entry.row.tenantId || 'global',
         fingerprint: authNetSignatureFingerprint(entry.row.signatureKey),
         expectedPrefix: String(entry.result?.expectedHex || '').slice(0, 24),
+        expectedAltPrefix: String(entry.result?.expectedHexAlt || '').slice(0, 24),
         actualPrefix: String(entry.result?.actualHex || '').slice(0, 24)
       }))
     }
@@ -1232,6 +1251,12 @@ customerPortalRouter.post('/payment-gateway/authorizenet/webhook', async (req, r
       });
       return res.status(401).json({ error: 'Invalid Authorize.Net webhook signature' });
     }
+
+    console.log('[authnet webhook] signature verified', {
+      eventType: eventType || null,
+      transId: rawTransId || null,
+      tenantId: webhookConfig?.tenantId || null
+    });
 
     const supportedEvents = new Set([
       'net.authorize.payment.authcapture.created',
