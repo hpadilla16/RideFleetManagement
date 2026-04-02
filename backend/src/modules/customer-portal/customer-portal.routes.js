@@ -409,12 +409,30 @@ async function authNetWebhookConfigs() {
   return configs;
 }
 
+function authNetSignatureFingerprint(value = '') {
+  const hex = authNetSignatureKeyHex(value);
+  if (!hex) return '';
+  return `${hex.slice(0, 6)}...${hex.slice(-6)} (${hex.length})`;
+}
+
 async function authNetWebhookConfigForRequest(req) {
   const rawBody = String(req.rawBody || '');
   const signatureHeader = String(req.get('X-ANET-Signature') || req.get('x-anet-signature') || '').trim();
   if (!rawBody || !signatureHeader) return null;
   const configs = await authNetWebhookConfigs();
-  return configs.find((row) => authNetVerifyWebhookSignature(rawBody, signatureHeader, row.signatureKey)) || null;
+  const match = configs.find((row) => authNetVerifyWebhookSignature(rawBody, signatureHeader, row.signatureKey)) || null;
+  if (match) return match;
+  return {
+    _invalidSignature: true,
+    debug: {
+      configCount: configs.length,
+      headerPrefix: String(signatureHeader || '').slice(0, 24),
+      tenants: configs.map((row) => ({
+        tenantId: row.tenantId || 'global',
+        fingerprint: authNetSignatureFingerprint(row.signatureKey)
+      }))
+    }
+  };
 }
 
 async function findReservationByAuthNetInvoiceNumber(invoiceNumber = '') {
@@ -1192,10 +1210,11 @@ customerPortalRouter.post('/payment-gateway/authorizenet/webhook', async (req, r
     });
 
     const webhookConfig = await authNetWebhookConfigForRequest(req);
-    if (!webhookConfig) {
+    if (!webhookConfig || webhookConfig?._invalidSignature) {
       console.warn('[authnet webhook] rejected invalid signature', {
         eventType: eventType || null,
-        transId: rawTransId || null
+        transId: rawTransId || null,
+        ...(webhookConfig?.debug || {})
       });
       return res.status(401).json({ error: 'Invalid Authorize.Net webhook signature' });
     }
