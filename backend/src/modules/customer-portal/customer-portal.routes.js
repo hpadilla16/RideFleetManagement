@@ -171,13 +171,20 @@ async function trySaveAuthNetCardOnFileFromTransaction({ reservation, reference 
     ? resp.customerPaymentProfileIdList.numericString[0]
     : (resp?.customerPaymentProfileIdList?.numericString || null);
 
-  if (!customerProfileId || !paymentProfileId) return false;
+  const resolvedCustomerProfileId = String(customerProfileId || '').trim();
+  let resolvedPaymentProfileId = String(paymentProfileId || '').trim();
+  if (resolvedCustomerProfileId && !resolvedPaymentProfileId) {
+    const profileResp = await authNetCustomerProfile(resolvedCustomerProfileId, config);
+    resolvedPaymentProfileId = authNetExtractPaymentProfileId(profileResp);
+  }
+
+  if (!resolvedCustomerProfileId || !resolvedPaymentProfileId) return false;
 
   await prisma.customer.update({
     where: { id: reservation.customerId },
     data: {
-      authnetCustomerProfileId: String(customerProfileId),
-      authnetPaymentProfileId: String(paymentProfileId)
+      authnetCustomerProfileId: resolvedCustomerProfileId,
+      authnetPaymentProfileId: resolvedPaymentProfileId
     }
   });
   return true;

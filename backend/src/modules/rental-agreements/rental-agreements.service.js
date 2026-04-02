@@ -548,21 +548,27 @@ async function saveAuthNetCardProfileFromReference({ customerId, reference, scop
   const paymentProfileId = Array.isArray(resp?.customerPaymentProfileIdList?.numericString)
     ? resp.customerPaymentProfileIdList.numericString[0]
     : (resp?.customerPaymentProfileIdList?.numericString || null);
-  if (!customerProfileId || !paymentProfileId) {
+  let resolvedPaymentProfileId = String(paymentProfileId || '').trim();
+  const resolvedCustomerProfileId = String(customerProfileId || '').trim();
+  if (resolvedCustomerProfileId && !resolvedPaymentProfileId) {
+    const profileResp = await authNetCustomerProfile(resolvedCustomerProfileId, scope);
+    resolvedPaymentProfileId = authNetExtractPaymentProfileId(profileResp);
+  }
+  if (!resolvedCustomerProfileId || !resolvedPaymentProfileId) {
     throw new Error('Authorize.Net did not return a reusable customer payment profile');
   }
 
   await prisma.customer.update({
     where: { id: customerId },
     data: {
-      authnetCustomerProfileId: String(customerProfileId),
-      authnetPaymentProfileId: String(paymentProfileId)
+      authnetCustomerProfileId: resolvedCustomerProfileId,
+      authnetPaymentProfileId: resolvedPaymentProfileId
     }
   });
 
   return {
-    customerProfileId: String(customerProfileId),
-    paymentProfileId: String(paymentProfileId)
+    customerProfileId: resolvedCustomerProfileId,
+    paymentProfileId: resolvedPaymentProfileId
   };
 }
 
