@@ -248,6 +248,89 @@ async function authNetUnsettledTransactions(scope = {}) {
   return transactions;
 }
 
+async function authNetSettledBatchTransactions(scope = {}, daysBack = 3) {
+  const cfg = await authNetConfig(scope);
+  if (!cfg.loginId || !cfg.transactionKey) throw new Error('Authorize.Net is not configured');
+
+  const now = new Date();
+  const firstSettlementDate = new Date(now.getTime() - Math.max(1, Number(daysBack || 1)) * 24 * 60 * 60 * 1000);
+  const out = await authNetRequest({
+    getSettledBatchListRequest: {
+      merchantAuthentication: {
+        name: cfg.loginId,
+        transactionKey: cfg.transactionKey
+      },
+      includeStatistics: false,
+      firstSettlementDate: firstSettlementDate.toISOString(),
+      lastSettlementDate: now.toISOString()
+    }
+  }, scope);
+  const resp = out?.getSettledBatchListResponse || out || {};
+  const batches = Array.isArray(resp?.batchList?.batch)
+    ? resp.batchList.batch
+    : resp?.batchList?.batch
+      ? [resp.batchList.batch]
+      : [];
+
+  const recentBatches = batches
+    .map((batch) => {
+      const settledAt = batch?.settlementTimeUTC || batch?.settlementTimeLocal || batch?.settlementTime || null;
+      const settledMs = settledAt ? new Date(settledAt).getTime() : 0;
+      return {
+        batchId: String(batch?.batchId || '').trim(),
+        settledMs: Number.isFinite(settledMs) ? settledMs : 0
+      };
+    })
+    .filter((row) => row.batchId)
+    .sort((a, b) => b.settledMs - a.settledMs)
+    .slice(0, 6);
+
+  const transactions = [];
+  for (const batch of recentBatches) {
+    const txOut = await authNetRequest({
+      getTransactionListRequest: {
+        merchantAuthentication: {
+          name: cfg.loginId,
+          transactionKey: cfg.transactionKey
+        },
+        batchId: batch.batchId,
+        sorting: {
+          orderBy: 'submitTimeUTC',
+          orderDescending: true
+        },
+        paging: {
+          limit: 100,
+          offset: 1
+        }
+      }
+    }, scope);
+    const txResp = txOut?.getTransactionListResponse || txOut || {};
+    const batchTransactions = Array.isArray(txResp?.transactions?.transaction)
+      ? txResp.transactions.transaction
+      : txResp?.transactions?.transaction
+        ? [txResp.transactions.transaction]
+        : [];
+    transactions.push(...batchTransactions);
+  }
+
+  return transactions;
+}
+
+async function authNetRecentTransactions(scope = {}) {
+  const [unsettled, settled] = await Promise.all([
+    authNetUnsettledTransactions(scope).catch(() => []),
+    authNetSettledBatchTransactions(scope).catch(() => [])
+  ]);
+
+  const seen = new Set();
+  return [...unsettled, ...settled].filter((row) => {
+    const transId = String(row?.transId || '').trim();
+    if (!transId || seen.has(transId)) return false;
+    seen.add(transId);
+    return true;
+  });
+}
+
 async function saveAuthNetCardProfileFromReference({ customerId, reference, scope = {} }) {
   const existing = await authNetResolveStoredCustomerProfile(customerId, scope);
   if (existing) return existing;
@@ -2285,7 +2368,7 @@ export const rentalAgreementsService = {
         .filter(Boolean)
     );
     const now = Date.now();
-    const transactions = await authNetUnsettledTransactions(tenantScope);
+    const transactions = await authNetRecentTransactions(tenantScope);
     const candidates = transactions
       .map((tx) => {
         const transId = String(tx?.transId || '').trim();
@@ -2305,16 +2388,22 @@ export const rentalAgreementsService = {
         };
       })
       .filter((row) => row.transId && row.reference && !existingReferences.has(row.reference.toUpperCase()))
-      .filter((row) => Math.abs(row.amount - expectedAmount) < 0.01)
       .filter((row) => !row.submittedMs || Math.abs(now - row.submittedMs) <= 1000 * 60 * 60 * 24);
 
-    const match = candidates
+    const exactInvoiceMatches = candidates
+      .filter((row) => row.invoiceNumber && row.invoiceNumber === expectedInvoiceNumber)
       .sort((a, b) => {
-        const aInvoice = a.invoiceNumber === expectedInvoiceNumber ? 1 : 0;
-        const bInvoice = b.invoiceNumber === expectedInvoiceNumber ? 1 : 0;
-        if (aInvoice !== bInvoice) return bInvoice - aInvoice;
+        const aExactAmount = Math.abs(a.amount - expectedAmount) < 0.01 ? 1 : 0;
+        const bExactAmount = Math.abs(b.amount - expectedAmount) < 0.01 ? 1 : 0;
+        if (aExactAmount !== bExactAmount) return bExactAmount - aExactAmount;
         return b.submittedMs - a.submittedMs;
-      })[0];
+      });
+
+    const amountMatches = candidates
+      .filter((row) => Math.abs(row.amount - expectedAmount) < 0.01)
+      .sort((a, b) => b.submittedMs - a.submittedMs);
+
+    const match = exactInvoiceMatches[0] || amountMatches[0] || null;
 
     if (!match) {
       throw new Error(
@@ -2329,14 +2418,18 @@ export const rentalAgreementsService = {
       throw new Error(`Authorize.Net payment is not yet captured (${txStatus})`);
     }
 
+    const reconciledAmount = Number(match.amount || expectedAmount || 0);
+
     await reservationPricingService.postPayment(reservationId, {
-      amount: expectedAmount,
+      amount: reconciledAmount,
       method: 'CARD',
       reference: match.reference,
       status: 'PAID',
       origin: 'PORTAL',
       gateway: 'authorizenet',
-      notes: 'Reconciled from Authorize.Net hosted payment'
+      notes: Math.abs(reconciledAmount - expectedAmount) > 0.009
+        ? `Reconciled from Authorize.Net hosted payment (expected $${expectedAmount.toFixed(2)}, matched $${reconciledAmount.toFixed(2)})`
+        : 'Reconciled from Authorize.Net hosted payment'
     }, scope, actorUserId);
 
     let savedCardOnFile = false;
@@ -2353,7 +2446,7 @@ export const rentalAgreementsService = {
 
     return {
       ok: true,
-      amount: expectedAmount,
+      amount: reconciledAmount,
       reference: match.reference,
       transId: match.transId,
       savedCardOnFile
