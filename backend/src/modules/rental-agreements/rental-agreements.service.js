@@ -339,6 +339,53 @@ async function authNetRecentTransactions(scope = {}) {
   });
 }
 
+async function authNetEnrichRecentTransactions(transactions = [], scope = {}, limit = 12) {
+  const rows = Array.isArray(transactions) ? transactions : [];
+  if (!rows.length) return [];
+  const recent = rows
+    .map((row) => {
+      const submittedAt = row?.submitTimeUTC || row?.submitTimeLocal || row?.submitTime || null;
+      const submittedMs = submittedAt ? new Date(submittedAt).getTime() : 0;
+      return {
+        row,
+        transId: String(row?.transId || '').trim(),
+        submittedMs: Number.isFinite(submittedMs) ? submittedMs : 0
+      };
+    })
+    .filter((entry) => entry.transId)
+    .sort((a, b) => b.submittedMs - a.submittedMs)
+    .slice(0, Math.max(1, Number(limit || 12)));
+
+  const enriched = await Promise.all(recent.map(async (entry) => {
+    try {
+      const details = await authNetTransactionDetails(entry.transId, scope);
+      const tx = details?.transaction || {};
+      return {
+        ...entry.row,
+        ...tx,
+        order: tx?.order || entry.row?.order || null,
+        invoiceNumber: tx?.order?.invoiceNumber || tx?.invoiceNumber || entry.row?.invoiceNumber || entry.row?.order?.invoiceNumber || '',
+        authAmount: tx?.authAmount || entry.row?.authAmount || '',
+        settleAmount: tx?.settleAmount || entry.row?.settleAmount || '',
+        amount: tx?.authAmount || tx?.settleAmount || entry.row?.authAmount || entry.row?.settleAmount || entry.row?.amount || '',
+        transactionStatus: tx?.transactionStatus || entry.row?.transactionStatus || '',
+        submitTimeUTC: tx?.submitTimeUTC || entry.row?.submitTimeUTC || '',
+        submitTimeLocal: tx?.submitTimeLocal || entry.row?.submitTimeLocal || ''
+      };
+    } catch {
+      return entry.row;
+    }
+  }));
+
+  const seen = new Set();
+  return enriched.filter((row) => {
+    const transId = String(row?.transId || '').trim();
+    if (!transId || seen.has(transId)) return false;
+    seen.add(transId);
+    return true;
+  });
+}
+
 async function saveAuthNetCardProfileFromReference({ customerId, reference, scope = {} }) {
   const existing = await authNetResolveStoredCustomerProfile(customerId, scope);
   if (existing) return existing;
@@ -2430,7 +2477,8 @@ export const rentalAgreementsService = {
     }
 
     const now = Date.now();
-    const transactions = await authNetRecentTransactions(tenantScope);
+    const recentTransactions = await authNetRecentTransactions(tenantScope);
+    const transactions = await authNetEnrichRecentTransactions(recentTransactions, tenantScope, 15);
     const candidates = transactions
       .map((tx) => {
         const transId = String(tx?.transId || '').trim();
@@ -2468,6 +2516,22 @@ export const rentalAgreementsService = {
     const match = exactInvoiceMatches[0] || amountMatches[0] || null;
 
     if (!match) {
+      console.info('[authnet reconcile] no match', {
+        reservationId,
+        reservationNumber: reservation.reservationNumber || null,
+        expectedInvoiceNumber,
+        expectedAmount,
+        recentTransactionCount: transactions.length,
+        candidateCount: candidates.length,
+        candidateInvoices: candidates
+          .map((row) => row.invoiceNumber || '')
+          .filter(Boolean)
+          .slice(0, 10),
+        candidateAmounts: candidates
+          .map((row) => Number(row.amount || 0))
+          .filter((value) => value > 0)
+          .slice(0, 10)
+      });
       throw new Error(
         expectedInvoiceNumber
           ? `No recent Authorize.Net payment found for ${expectedInvoiceNumber} / $${expectedAmount.toFixed(2)}. Paste the AuthNet transId in Reference and retry reconcile.`
