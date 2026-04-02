@@ -160,8 +160,7 @@ function authNetCustomerIdValue(customerId = '', reservationId = '') {
 function authNetCustomerSupplement(customer = null, reservationId = '') {
   const customerPayload = authNetCompactObject({
     merchantCustomerId: authNetCustomerIdValue(customer?.id || '', reservationId || ''),
-    email: authNetCleanValue(customer?.email || '', ''),
-    description: authNetCleanValue([customer?.firstName, customer?.lastName].filter(Boolean).join(' '), '')
+    email: authNetCleanValue(customer?.email || '', '')
   });
   const billToPayload = authNetCompactObject({
     firstName: authNetCleanValue(customer?.firstName || '', ''),

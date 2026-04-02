@@ -113,8 +113,7 @@ async function trySaveAuthNetCardOnFileFromTransaction({ reservation, reference 
 
   const customerPayload = authNetCompactObject({
     merchantCustomerId: authNetCustomerIdValue(reservation.customer?.id || reservation.customerId || '', reservation.id || ''),
-    email: authNetCleanValue(reservation.customer?.email || '', ''),
-    description: authNetCleanValue([reservation.customer?.firstName, reservation.customer?.lastName].filter(Boolean).join(' '), '')
+    email: authNetCleanValue(reservation.customer?.email || '', '')
   });
   const billToPayload = authNetCompactObject({
     firstName: authNetCleanValue(reservation.customer?.firstName || '', ''),
