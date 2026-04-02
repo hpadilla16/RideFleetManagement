@@ -2713,30 +2713,31 @@ export const rentalAgreementsService = {
     const customer = agreement.reservation?.customer;
     const tenantScope = agreement?.tenantId ? { tenantId: agreement.tenantId } : {};
     const authNetCfg = await authNetConfig(tenantScope);
-    if (customer?.authnetCustomerProfileId && customer?.authnetPaymentProfileId && authNetCfg.loginId) {
-      const cfg = authNetCfg;
-      const authnet = await authNetRequest({
-        createTransactionRequest: {
-          merchantAuthentication: { name: cfg.loginId, transactionKey: cfg.transactionKey },
-          transactionRequest: {
-            transactionType: 'authOnlyTransaction',
-            amount: amount.toFixed(2),
+      if (customer?.authnetCustomerProfileId && customer?.authnetPaymentProfileId && authNetCfg.loginId) {
+        const cfg = authNetCfg;
+        const authnet = await authNetRequest({
+          createTransactionRequest: {
+            merchantAuthentication: { name: cfg.loginId, transactionKey: cfg.transactionKey },
+            transactionRequest: {
+              transactionType: 'authOnlyTransaction',
+              amount: amount.toFixed(2),
             profile: {
               customerProfileId: customer.authnetCustomerProfileId,
               paymentProfile: { paymentProfileId: customer.authnetPaymentProfileId }
             },
             order: { invoiceNumber: agreement.agreementNumber || undefined }
+            }
           }
+        }, tenantScope);
+        const authnetBody = authnet?.createTransactionResponse || authnet || {};
+        const tx = authnetBody?.transactionResponse || {};
+        const ok = String(authnetBody?.messages?.resultCode || '').trim() === 'Ok' && String(tx?.responseCode || '').trim() === '1';
+        if (!ok) {
+          const err = authNetMessage(authnetBody) || 'Authorize.Net deposit capture failed';
+          throw new Error(err);
         }
-      }, tenantScope);
-      const tx = authnet?.transactionResponse;
-      const ok = authnet?.messages?.resultCode === 'Ok' && tx?.responseCode === '1';
-      if (!ok) {
-        const err = tx?.errors?.[0]?.errorText || authnet?.messages?.message?.[0]?.text || 'Authorize.Net deposit capture failed';
-        throw new Error(err);
+        reference = `AUTHNET_AUTH:${tx.transId || 'UNKNOWN'}`;
       }
-      reference = `AUTHNET_AUTH:${tx.transId || 'UNKNOWN'}`;
-    }
 
     await prisma.rentalAgreement.update({
       where: { id },
