@@ -249,6 +249,13 @@ function authNetCleanValue(value, fallback = '') {
   return text.replace(/\s+/g, ' ').slice(0, 255);
 }
 
+function authNetInvoiceNumberValue(value = '') {
+  return String(value || '')
+    .trim()
+    .replace(/\s+/g, ' ')
+    .slice(0, 20);
+}
+
 function authNetCustomerIdValue(customerId = '', reservationId = '') {
   const seed = String(customerId || reservationId || '').trim();
   if (!seed) return '';
@@ -1035,7 +1042,10 @@ customerPortalRouter.post('/payment/:token/create-session', async (req, res, nex
         merchantAuthentication: { name: gatewayConfig.authorizenet.loginId, transactionKey: gatewayConfig.authorizenet.transactionKey },
         transactionRequest: {
           transactionType: 'authCaptureTransaction',
-          amount
+          amount,
+          order: {
+            invoiceNumber: authNetInvoiceNumberValue(reservation.reservationNumber || reservation.id)
+          }
         },
         hostedPaymentSettings: {
           setting: [

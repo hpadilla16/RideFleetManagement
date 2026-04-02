@@ -131,6 +131,14 @@ function authNetMessage(payload = {}) {
   return txErrors.map((row) => String(row?.errorText || row?.text || '').trim()).find(Boolean) || '';
 }
 
+function authNetInvoiceNumberValue(value = '') {
+  return String(value || '')
+    .trim()
+    .replace(/\s+/g, ' ')
+    .slice(0, 20)
+    .toUpperCase();
+}
+
 async function authNetTransactionDetails(transId, scope = {}) {
   const cfg = await authNetConfig(scope);
   if (!cfg.loginId || !cfg.transactionKey) throw new Error('Authorize.Net is not configured');
@@ -220,6 +228,14 @@ async function authNetUnsettledTransactions(scope = {}) {
       merchantAuthentication: {
         name: cfg.loginId,
         transactionKey: cfg.transactionKey
+      },
+      sorting: {
+        orderBy: 'submitTimeUTC',
+        orderDescending: true
+      },
+      paging: {
+        limit: 100,
+        offset: 1
       }
     }
   }, scope);
@@ -2262,6 +2278,7 @@ export const rentalAgreementsService = {
     if (!(expectedAmount > 0)) throw new Error('No unpaid Authorize.Net amount to reconcile');
 
     const tenantScope = reservation?.tenantId ? { tenantId: reservation.tenantId } : scope;
+    const expectedInvoiceNumber = authNetInvoiceNumberValue(reservation.reservationNumber || reservationId);
     const existingReferences = new Set(
       (Array.isArray(reservation.payments) ? reservation.payments : [])
         .map((row) => String(row?.reference || '').trim().toUpperCase())
@@ -2269,29 +2286,42 @@ export const rentalAgreementsService = {
     );
     const now = Date.now();
     const transactions = await authNetUnsettledTransactions(tenantScope);
-    const match = transactions
+    const candidates = transactions
       .map((tx) => {
         const transId = String(tx?.transId || '').trim();
         const reference = transId ? `AUTHNET:${transId}` : '';
         const amount = Number(tx?.authAmount || tx?.settleAmount || tx?.amount || 0);
         const submittedAt = tx?.submitTimeUTC || tx?.submitTimeLocal || tx?.submitTime || null;
         const submittedMs = submittedAt ? new Date(submittedAt).getTime() : 0;
+        const invoiceNumber = authNetInvoiceNumberValue(tx?.invoiceNumber || tx?.order?.invoiceNumber || '');
         return {
           tx,
           transId,
           reference,
           amount,
+          invoiceNumber,
           submittedMs: Number.isFinite(submittedMs) ? submittedMs : 0,
           transactionStatus: String(tx?.transactionStatus || '').trim()
         };
       })
       .filter((row) => row.transId && row.reference && !existingReferences.has(row.reference.toUpperCase()))
       .filter((row) => Math.abs(row.amount - expectedAmount) < 0.01)
-      .filter((row) => !row.submittedMs || Math.abs(now - row.submittedMs) <= 1000 * 60 * 60 * 12)
-      .sort((a, b) => b.submittedMs - a.submittedMs)[0];
+      .filter((row) => !row.submittedMs || Math.abs(now - row.submittedMs) <= 1000 * 60 * 60 * 24);
+
+    const match = candidates
+      .sort((a, b) => {
+        const aInvoice = a.invoiceNumber === expectedInvoiceNumber ? 1 : 0;
+        const bInvoice = b.invoiceNumber === expectedInvoiceNumber ? 1 : 0;
+        if (aInvoice !== bInvoice) return bInvoice - aInvoice;
+        return b.submittedMs - a.submittedMs;
+      })[0];
 
     if (!match) {
-      throw new Error(`No recent Authorize.Net payment found for $${expectedAmount.toFixed(2)}`);
+      throw new Error(
+        expectedInvoiceNumber
+          ? `No recent Authorize.Net payment found for ${expectedInvoiceNumber} / $${expectedAmount.toFixed(2)}`
+          : `No recent Authorize.Net payment found for $${expectedAmount.toFixed(2)}`
+      );
     }
 
     const txStatus = String(match.transactionStatus || '').trim();
