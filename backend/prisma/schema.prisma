@@ -940,6 +940,7 @@ model RentalAgreement {
   charges           RentalAgreementCharge[]
   payments          RentalAgreementPayment[]
   inspections       RentalAgreementInspection[]
+  vehicleSwaps      RentalAgreementVehicleSwap[]
   commissions       AgreementCommission[]
 
   @@index([status, pickupAt])
@@ -1284,6 +1285,29 @@ model RentalAgreementInspection {
 
   @@unique([rentalAgreementId, phase])
   @@index([rentalAgreementId, capturedAt])
+}
+
+model RentalAgreementVehicleSwap {
+  id                    String          @id @default(cuid())
+  rentalAgreementId     String
+  rentalAgreement       RentalAgreement @relation(fields: [rentalAgreementId], references: [id], onDelete: Cascade)
+
+  actorUserId           String?
+  previousVehicleId     String?
+  previousVehicleLabel  String?
+  nextVehicleId         String
+  nextVehicleLabel      String?
+  note                  String?
+
+  previousCheckedInAt   DateTime?
+  nextCheckedOutAt      DateTime?
+  previousInspectionJson String?
+  nextInspectionJson    String?
+
+  createdAt             DateTime        @default(now())
+  updatedAt             DateTime        @updatedAt
+
+  @@index([rentalAgreementId, createdAt])
 }
 
 model ReservationPricingSnapshot {

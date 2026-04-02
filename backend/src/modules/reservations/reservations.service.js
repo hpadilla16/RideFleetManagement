@@ -238,6 +238,29 @@ function clampPositiveInt(value, fallback, min, max) {
   return Math.min(max, Math.max(min, parsed));
 }
 
+function vehicleDisplayLabel(vehicle = {}) {
+  return [
+    [vehicle?.year, vehicle?.make, vehicle?.model].filter(Boolean).join(' ').trim(),
+    vehicle?.plate || vehicle?.internalNumber || ''
+  ].filter(Boolean).join(' • ');
+}
+
+function normalizeSwapInspectionPayload(payload = {}) {
+  return {
+    exterior: String(payload?.exterior || 'GOOD').trim().toUpperCase(),
+    interior: String(payload?.interior || 'GOOD').trim().toUpperCase(),
+    tires: String(payload?.tires || 'GOOD').trim().toUpperCase(),
+    lights: String(payload?.lights || 'GOOD').trim().toUpperCase(),
+    windshield: String(payload?.windshield || 'GOOD').trim().toUpperCase(),
+    fuelLevel: payload?.fuelLevel === '' || payload?.fuelLevel == null ? null : String(payload.fuelLevel),
+    odometer: payload?.odometer === '' || payload?.odometer == null ? null : Number(payload.odometer),
+    cleanliness: payload?.cleanliness === '' || payload?.cleanliness == null ? null : Number(payload.cleanliness),
+    damages: String(payload?.damages || '').trim() || null,
+    notes: String(payload?.notes || '').trim() || null,
+    photos: payload?.photos && typeof payload.photos === 'object' ? payload.photos : {}
+  };
+}
+
 function hasFeeAdvisoryFlag(notes) {
   return /\[FEE_ADVISORY_OPEN\s+/i.test(String(notes || ''));
 }
@@ -1250,6 +1273,105 @@ export const reservationsService = {
     }
 
     return updated;
+  },
+
+  async swapVehicle(id, payload = {}, scope = {}, actorUserId = null, actorIp = null) {
+    const current = await prisma.reservation.findFirst({
+      where: {
+        id,
+        ...(scope?.tenantId ? { tenantId: scope.tenantId } : {})
+      },
+      include: {
+        vehicle: true,
+        rentalAgreement: true
+      }
+    });
+    if (!current) throw new Error('Reservation not found');
+    if (!current.vehicleId || !current.vehicle) throw new Error('Assign a vehicle to the reservation before swapping');
+    if (String(current.status || '').toUpperCase() !== 'CHECKED_OUT') {
+      throw new Error('Vehicle swap is only available after the reservation is checked out');
+    }
+    if (!current.rentalAgreement?.id) throw new Error('No rental agreement exists for this reservation yet');
+
+    const nextVehicleId = String(payload?.vehicleId || '').trim();
+    if (!nextVehicleId) throw new Error('vehicleId is required');
+    if (nextVehicleId === String(current.vehicleId || '')) throw new Error('Select a different vehicle to swap');
+
+    const nextVehicle = await prisma.vehicle.findFirst({
+      where: {
+        id: nextVehicleId,
+        ...(scope?.tenantId ? { tenantId: scope.tenantId } : {})
+      }
+    });
+    if (!nextVehicle) throw new Error('Selected replacement vehicle not found');
+
+    await ensureNoVehicleConflict({
+      vehicleId: nextVehicleId,
+      pickupAt: current.pickupAt,
+      returnAt: current.returnAt,
+      ignoreReservationId: id
+    }, scope);
+
+    const previousInspection = normalizeSwapInspectionPayload(payload?.currentCheckin || {});
+    const nextInspection = normalizeSwapInspectionPayload(payload?.nextCheckout || {});
+    const swapNote = String(payload?.note || '').trim() || null;
+    const now = new Date();
+
+    await prisma.$transaction(async (tx) => {
+      await tx.reservation.update({
+        where: { id },
+        data: {
+          vehicle: { connect: { id: nextVehicleId } },
+          loanerLastVehicleSwapAt: now
+        }
+      });
+
+      await tx.rentalAgreement.update({
+        where: { id: current.rentalAgreement.id },
+        data: {
+          odometerOut: Number.isFinite(nextInspection.odometer) ? nextInspection.odometer : undefined,
+          fuelOut: nextInspection.fuelLevel == null ? undefined : Number(nextInspection.fuelLevel),
+          cleanlinessOut: Number.isFinite(nextInspection.cleanliness) ? nextInspection.cleanliness : undefined
+        }
+      });
+
+      await tx.rentalAgreementVehicleSwap.create({
+        data: {
+          rentalAgreementId: current.rentalAgreement.id,
+          actorUserId: actorUserId || null,
+          previousVehicleId: current.vehicleId,
+          previousVehicleLabel: vehicleDisplayLabel(current.vehicle),
+          nextVehicleId,
+          nextVehicleLabel: vehicleDisplayLabel(nextVehicle),
+          note: swapNote,
+          previousCheckedInAt: now,
+          nextCheckedOutAt: now,
+          previousInspectionJson: JSON.stringify(previousInspection),
+          nextInspectionJson: JSON.stringify(nextInspection)
+        }
+      });
+
+      await tx.auditLog.create({
+        data: {
+          tenantId: current.tenantId || null,
+          reservationId: id,
+          actorUserId: actorUserId || null,
+          action: 'UPDATE',
+          reason: `Vehicle swapped from ${vehicleDisplayLabel(current.vehicle) || current.vehicleId} to ${vehicleDisplayLabel(nextVehicle) || nextVehicleId}`,
+          metadata: JSON.stringify({
+            reservationVehicleSwap: true,
+            previousVehicleId: current.vehicleId,
+            nextVehicleId,
+            actorIp: actorIp || null,
+            note: swapNote,
+            currentCheckin: previousInspection,
+            nextCheckout: nextInspection
+          })
+        }
+      });
+    });
+
+    return this.getById(id, scope);
   },
 
   async remove(id, scope = {}) {

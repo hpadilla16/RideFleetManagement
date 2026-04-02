@@ -38,6 +38,8 @@ function Block({ title, data, selected, toggleSelect, openPhoto }) {
       <h3>{title}</h3>
       <p><b>Time:</b> {fmt(data.at)}</p>
       <p><b>Exterior:</b> {data.exterior || '-'} | <b>Interior:</b> {data.interior || '-'} | <b>Tires:</b> {data.tires || '-'} | <b>Lights:</b> {data.lights || '-'} | <b>Windshield:</b> {data.windshield || '-'}</p>
+      <p><b>Fuel:</b> {data.fuelLevel ?? '-'} | <b>Odometer:</b> {data.odometer ?? '-'} | <b>Cleanliness:</b> {data.cleanliness ?? '-'}</p>
+      <p><b>Damages:</b> {data.damages || '-'}</p>
       <p><b>Notes:</b> {data.notes || '-'}</p>
       <Photos title={title} data={data} selected={selected} toggleSelect={toggleSelect} openPhoto={openPhoto} />
     </section>
@@ -152,14 +154,28 @@ function Inner({ token }) {
               <div className="photo-cap">Selected To Compare</div>
               <div style={{ fontWeight: 700 }}>{selected.length}/2</div>
             </div>
+            <div className="photo-card">
+              <div className="photo-cap">Vehicle Swaps</div>
+              <div style={{ fontWeight: 700 }}>{Array.isArray(report?.vehicleSwaps) ? report.vehicleSwaps.length : 0}</div>
+            </div>
           </div>
         </div>
       ) : null}
 
       {msg ? <div className="print-card" style={{ color: '#b91c1c' }}>{msg}</div> : null}
-      {!report?.checkoutInspection && !report?.checkinInspection ? <div className="print-card"><div className="muted">No inspection data found.</div></div> : null}
+      {!report?.checkoutInspection && !report?.checkinInspection && !(Array.isArray(report?.vehicleSwaps) && report.vehicleSwaps.length) ? <div className="print-card"><div className="muted">No inspection data found.</div></div> : null}
       <Block title="Checkout Inspection" data={report?.checkoutInspection} selected={selected} toggleSelect={toggleSelect} openPhoto={openPhoto} />
       <Block title="Check-in Inspection" data={report?.checkinInspection} selected={selected} toggleSelect={toggleSelect} openPhoto={openPhoto} />
+      {(Array.isArray(report?.vehicleSwaps) ? report.vehicleSwaps : []).map((swap, index) => (
+        <section key={swap.id || index} className="print-card">
+          <h3>Vehicle Swap #{index + 1}</h3>
+          <p><b>From:</b> {swap.previousVehicleLabel || swap.previousVehicleId || '-'}</p>
+          <p><b>To:</b> {swap.nextVehicleLabel || swap.nextVehicleId || '-'}</p>
+          <p><b>Note:</b> {swap.note || '-'}</p>
+          <Block title={`Swap ${index + 1} • Previous Vehicle Check-In`} data={swap.previousInspection} selected={selected} toggleSelect={toggleSelect} openPhoto={openPhoto} />
+          <Block title={`Swap ${index + 1} • Replacement Vehicle Check-Out`} data={swap.nextInspection} selected={selected} toggleSelect={toggleSelect} openPhoto={openPhoto} />
+        </section>
+      ))}
     </main>
   );
 }

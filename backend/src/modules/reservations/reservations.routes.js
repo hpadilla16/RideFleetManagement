@@ -1052,6 +1052,25 @@ reservationsRouter.post('/:id/agreement/customer/card-on-file', async (req, res,
   }
 });
 
+reservationsRouter.post('/:id/swap-vehicle', async (req, res, next) => {
+  try {
+    const row = await reservationsService.swapVehicle(
+      req.params.id,
+      req.body || {},
+      scopeFor(req),
+      req.user?.sub || null,
+      req.ip || null
+    );
+    res.json(row);
+  } catch (e) {
+    if (/not found/i.test(String(e?.message || ''))) return res.status(404).json({ error: e.message });
+    if (/required|different vehicle|checked out|assign a vehicle|conflict|available/i.test(String(e?.message || ''))) {
+      return res.status(400).json({ error: e.message });
+    }
+    next(e);
+  }
+});
+
 reservationsRouter.post('/:id/agreement/credit', async (req, res, next) => {
   try {
     const amount = Number(req.body?.amount || 0);

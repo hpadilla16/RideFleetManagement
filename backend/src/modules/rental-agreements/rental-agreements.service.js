@@ -1225,13 +1225,55 @@ function normalizeInspectionRow(row) {
   };
 }
 
+function normalizeSwapInspectionPayload(raw, at = null) {
+  if (!raw) return null;
+  let parsed = raw;
+  try {
+    if (typeof raw === 'string') parsed = JSON.parse(raw);
+  } catch {
+    parsed = {};
+  }
+  if (!parsed || typeof parsed !== 'object') return null;
+  return {
+    at: at || null,
+    exterior: parsed.exterior || null,
+    interior: parsed.interior || null,
+    tires: parsed.tires || null,
+    lights: parsed.lights || null,
+    windshield: parsed.windshield || null,
+    fuelLevel: parsed.fuelLevel ?? null,
+    odometer: parsed.odometer ?? null,
+    cleanliness: parsed.cleanliness ?? null,
+    damages: parsed.damages || null,
+    notes: parsed.notes || null,
+    photos: parsed.photos && typeof parsed.photos === 'object' ? parsed.photos : {}
+  };
+}
+
+function normalizeVehicleSwapRow(row) {
+  if (!row) return null;
+  return {
+    id: row.id,
+    previousVehicleId: row.previousVehicleId || null,
+    previousVehicleLabel: row.previousVehicleLabel || null,
+    nextVehicleId: row.nextVehicleId || null,
+    nextVehicleLabel: row.nextVehicleLabel || null,
+    note: row.note || null,
+    previousInspection: normalizeSwapInspectionPayload(row.previousInspectionJson, row.previousCheckedInAt),
+    nextInspection: normalizeSwapInspectionPayload(row.nextInspectionJson, row.nextCheckedOutAt),
+    createdAt: row.createdAt || null
+  };
+}
+
 function inspectionReportFromAgreement(agreement) {
   const structured = Array.isArray(agreement?.inspections) ? agreement.inspections : [];
+  const swaps = Array.isArray(agreement?.vehicleSwaps) ? agreement.vehicleSwaps : [];
   const checkout = structured.find((row) => String(row.phase || '').toUpperCase() === 'CHECKOUT') || null;
   const checkin = structured.find((row) => String(row.phase || '').toUpperCase() === 'CHECKIN') || null;
   return {
     checkout: normalizeInspectionRow(checkout),
-    checkin: normalizeInspectionRow(checkin)
+    checkin: normalizeInspectionRow(checkin),
+    swaps: swaps.map(normalizeVehicleSwapRow).filter(Boolean)
   };
 }
 
@@ -3030,7 +3072,10 @@ export const rentalAgreementsService = {
 
     const refreshed = await prisma.rentalAgreement.findUnique({
       where: { id },
-      include: { inspections: { orderBy: { createdAt: 'asc' } } }
+      include: {
+        inspections: { orderBy: { createdAt: 'asc' } },
+        vehicleSwaps: { orderBy: { createdAt: 'asc' } }
+      }
     });
     return { report: inspectionReportFromAgreement(refreshed) };
   },
@@ -3040,7 +3085,8 @@ export const rentalAgreementsService = {
       where: { id },
       include: {
         reservation: { include: { customer: true, vehicle: true } },
-        inspections: { orderBy: { createdAt: 'asc' } }
+        inspections: { orderBy: { createdAt: 'asc' } },
+        vehicleSwaps: { orderBy: { createdAt: 'asc' } }
       }
     });
     if (!agreement) throw new Error('Rental agreement not found');
@@ -3076,7 +3122,8 @@ export const rentalAgreementsService = {
         cleanliness: agreement.cleanlinessIn ?? null
       },
       checkoutInspection: report.checkout,
-      checkinInspection: report.checkin
+      checkinInspection: report.checkin,
+      vehicleSwaps: report.swaps
     };
   },
 

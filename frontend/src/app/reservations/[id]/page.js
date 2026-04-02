@@ -158,7 +158,7 @@ function ReservationDetailInner({ token, me, logout }) {
   const [auditLogs, setAuditLogs] = useState([]);
   const [chargeEdit, setChargeEdit] = useState(false);
   const [chargeModel, setChargeModel] = useState({ dailyRate: '0', serviceFee: '0', taxRate: '11.5', serviceNames: '', feeNames: '', insuranceCode: '' });
-  const [form, setForm] = useState({ customerId: '', pickupAt: '', returnAt: '', pickupLocationId: '', returnLocationId: '', notes: '' });
+  const [form, setForm] = useState({ customerId: '', vehicleId: '', pickupAt: '', returnAt: '', pickupLocationId: '', returnLocationId: '', notes: '' });
   const [loanerPacketForm, setLoanerPacketForm] = useState({
     driverLicenseChecked: false,
     insuranceCardCollected: false,
@@ -258,6 +258,7 @@ function ReservationDetailInner({ token, me, logout }) {
       setTollSummary(tollsOut);
       setForm({
         customerId: reservationResult.customerId || '',
+        vehicleId: reservationResult.vehicleId || '',
         pickupAt: reservationResult.pickupAt ? new Date(reservationResult.pickupAt).toISOString().slice(0, 16) : '',
         returnAt: reservationResult.returnAt ? new Date(reservationResult.returnAt).toISOString().slice(0, 16) : '',
         pickupLocationId: reservationResult.pickupLocationId || '',
@@ -333,10 +334,11 @@ function ReservationDetailInner({ token, me, logout }) {
 
   const save = async () => {
     try {
-      const updated = await api(`/api/reservations/${id}`, {
+      await api(`/api/reservations/${id}`, {
         method: 'PATCH',
         body: JSON.stringify({
           customerId: form.customerId,
+          vehicleId: form.vehicleId || null,
           pickupAt: form.pickupAt,
           returnAt: form.returnAt,
           pickupLocationId: form.pickupLocationId,
@@ -344,7 +346,7 @@ function ReservationDetailInner({ token, me, logout }) {
           notes: form.notes
         })
       }, token);
-      setRow(updated);
+      await load();
       setMsg('Reservation updated');
     } catch (e) { setMsg(e.message); }
   };
@@ -744,6 +746,13 @@ function ReservationDetailInner({ token, me, logout }) {
       return !['IN_MAINTENANCE', 'OUT_OF_SERVICE', 'ON_RENT'].includes(status);
     });
   }, [vehicles, row?.vehicleId]);
+  const reservationVehicleChoices = useMemo(() => {
+    const loaded = Array.isArray(vehicles) ? vehicles : [];
+    const currentVehicle = row?.vehicle && !loaded.some((vehicle) => String(vehicle?.id || '') === String(row.vehicle?.id || ''))
+      ? [row.vehicle]
+      : [];
+    return [...currentVehicle, ...loaded];
+  }, [vehicles, row?.vehicle]);
   const loanerTimeline = useMemo(() => {
     if (!isLoanerWorkflow || !row) return [];
     const events = [];
@@ -1464,6 +1473,9 @@ token
           <div className="app-banner-list">
             <button type="button" className="button-subtle" onClick={() => router.push(`/reservations/${id}/checkout`)}>Start Check-out</button>
             <button type="button" className="button-subtle" onClick={() => router.push(`/reservations/${id}/checkin`)}>Start Check-in</button>
+            {row?.vehicleId && row?.rentalAgreement?.id && String(row?.status || '').toUpperCase() === 'CHECKED_OUT' ? (
+              <button type="button" className="button-subtle" onClick={() => router.push(`/reservations/${id}/swap`)}>Swap Vehicle</button>
+            ) : null}
             <button type="button" className="button-subtle" onClick={() => router.push(`/reservations/${id}/payments?total=${Number(effectiveChargeTotal || 0)}`)}>Payments</button>
             <button type="button" className="button-subtle" onClick={() => router.push(`/reservations/${id}/inspection`)}>Inspection</button>
           </div>
@@ -1491,7 +1503,21 @@ token
                 {customers.map((c) => <option key={c.id} value={c.id}>{String(c.firstName || "").trim()} {String(c.lastName || "").trim()}</option>)}
               </select>
             </div>
-            <div><span className="label">Vehicle</span><div>{row.vehicle ? `${row.vehicle.year || ''} ${row.vehicle.make || ''} ${row.vehicle.model || ''}` : 'No vehicle assigned'}</div></div>
+            <div>
+              <span className="label">Vehicle</span>
+              <select
+                value={form.vehicleId}
+                onFocus={() => { if (!reservationVehicleChoices.length) loadAvailableVehicles(); }}
+                onChange={(e) => setForm({ ...form, vehicleId: e.target.value })}
+              >
+                <option value="">No vehicle assigned</option>
+                {reservationVehicleChoices.map((vehicle) => (
+                  <option key={vehicle.id} value={vehicle.id}>
+                    {[vehicle.year, vehicle.make, vehicle.model].filter(Boolean).join(' ')}{vehicle.plate || vehicle.internalNumber ? ` • ${vehicle.plate || vehicle.internalNumber}` : ''}
+                  </option>
+                ))}
+              </select>
+            </div>
             <div><span className="label">Pickup Date</span><input type="datetime-local" value={form.pickupAt} onChange={(e) => setForm({ ...form, pickupAt: e.target.value })} /></div>
             <div><span className="label">Return Date</span><input type="datetime-local" value={form.returnAt} onChange={(e) => setForm({ ...form, returnAt: e.target.value })} /></div>
             <div><span className="label">Pickup Location</span><select value={form.pickupLocationId} onChange={(e) => setForm({ ...form, pickupLocationId: e.target.value })}><option value="">Select</option>{locations.map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}</select></div>
