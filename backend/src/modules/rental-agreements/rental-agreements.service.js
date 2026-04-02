@@ -139,6 +139,43 @@ function authNetInvoiceNumberValue(value = '') {
     .toUpperCase();
 }
 
+function authNetCleanValue(value, fallback = '') {
+  const text = String(value ?? fallback ?? '').trim();
+  return text.replace(/\s+/g, ' ').slice(0, 255);
+}
+
+function authNetCompactObject(obj = {}) {
+  return Object.fromEntries(
+    Object.entries(obj).filter(([, value]) => String(value ?? '').trim() !== '')
+  );
+}
+
+function authNetCustomerIdValue(customerId = '', reservationId = '') {
+  return String(customerId || reservationId || '')
+    .trim()
+    .replace(/[^a-z0-9]/gi, '')
+    .slice(0, 20);
+}
+
+function authNetCustomerSupplement(customer = null, reservationId = '') {
+  const customerPayload = authNetCompactObject({
+    merchantCustomerId: authNetCustomerIdValue(customer?.id || '', reservationId || ''),
+    email: authNetCleanValue(customer?.email || '', ''),
+    description: authNetCleanValue([customer?.firstName, customer?.lastName].filter(Boolean).join(' '), '')
+  });
+  const billToPayload = authNetCompactObject({
+    firstName: authNetCleanValue(customer?.firstName || '', ''),
+    lastName: authNetCleanValue(customer?.lastName || '', ''),
+    address: authNetCleanValue(customer?.address1 || '', ''),
+    city: authNetCleanValue(customer?.city || '', ''),
+    state: authNetCleanValue(customer?.state || '', ''),
+    zip: authNetCleanValue(customer?.zip || '', ''),
+    country: authNetCleanValue(customer?.country || 'USA', ''),
+    phoneNumber: authNetCleanValue(customer?.phone || '', '')
+  });
+  return { customerPayload, billToPayload };
+}
+
 function authNetTransIdValue(value = '') {
   const raw = String(value || '').trim();
   if (!raw) return '';
@@ -386,7 +423,7 @@ async function authNetEnrichRecentTransactions(transactions = [], scope = {}, li
   });
 }
 
-async function saveAuthNetCardProfileFromReference({ customerId, reference, scope = {} }) {
+async function saveAuthNetCardProfileFromReference({ customerId, reference, scope = {}, customer = null, reservationId = '' }) {
   const existing = await authNetResolveStoredCustomerProfile(customerId, scope);
   if (existing) return existing;
 
@@ -396,19 +433,34 @@ async function saveAuthNetCardProfileFromReference({ customerId, reference, scop
   const transId = rawRef.startsWith('AUTHNET:') ? rawRef.slice('AUTHNET:'.length).trim() : rawRef;
   if (!transId) throw new Error('Authorize.Net transaction reference is required');
 
-  const out = await authNetRequest({
+  const { customerPayload, billToPayload } = authNetCustomerSupplement(customer, reservationId);
+  const buildRequest = (includeSupplement = false) => ({
     createCustomerProfileFromTransactionRequest: {
       merchantAuthentication: {
         name: cfg.loginId,
         transactionKey: cfg.transactionKey
       },
-      transId
+      transId,
+      ...(includeSupplement && Object.keys(customerPayload).length ? { customer: customerPayload } : {}),
+      ...(includeSupplement && Object.keys(billToPayload).length ? { billTo: billToPayload } : {})
     }
-  }, scope);
+  });
 
-  const resp = out?.createCustomerProfileResponse || out?.createCustomerProfileFromTransactionResponse || out || {};
+  let out = await authNetRequest(buildRequest(false), scope);
+  let resp = out?.createCustomerProfileResponse || out?.createCustomerProfileFromTransactionResponse || out || {};
+  let message = authNetMessage(resp) || 'Unable to save card on file from Authorize.Net transaction';
+
+  if (
+    String(resp?.messages?.resultCode || '').trim() !== 'Ok'
+    && /customer info is missing/i.test(message)
+    && (Object.keys(customerPayload).length || Object.keys(billToPayload).length)
+  ) {
+    out = await authNetRequest(buildRequest(true), scope);
+    resp = out?.createCustomerProfileResponse || out?.createCustomerProfileFromTransactionResponse || out || {};
+    message = authNetMessage(resp) || message;
+  }
+
   if (String(resp?.messages?.resultCode || '').trim() !== 'Ok') {
-    const message = authNetMessage(resp) || 'Unable to save card on file from Authorize.Net transaction';
     const retryExisting = await authNetResolveStoredCustomerProfile(customerId, scope);
     if (retryExisting) return retryExisting;
     const duplicateProfileId = authNetDuplicateProfileId(message);
@@ -2322,7 +2374,9 @@ export const rentalAgreementsService = {
     const out = await saveAuthNetCardProfileFromReference({
       customerId: agreement.reservation.customer.id,
       reference: payment.reference,
-      scope: agreement?.tenantId ? { tenantId: agreement.tenantId } : {}
+      scope: agreement?.tenantId ? { tenantId: agreement.tenantId } : {},
+      customer: agreement.reservation.customer,
+      reservationId: agreement.reservationId
     });
 
     try {

@@ -111,22 +111,50 @@ async function trySaveAuthNetCardOnFileFromTransaction({ reservation, reference 
   const transId = rawRef.startsWith('AUTHNET:') ? rawRef.slice('AUTHNET:'.length).trim() : rawRef;
   if (!transId) return false;
 
-  const reqPayload = {
+  const customerPayload = authNetCompactObject({
+    merchantCustomerId: authNetCustomerIdValue(reservation.customer?.id || reservation.customerId || '', reservation.id || ''),
+    email: authNetCleanValue(reservation.customer?.email || '', ''),
+    description: authNetCleanValue([reservation.customer?.firstName, reservation.customer?.lastName].filter(Boolean).join(' '), '')
+  });
+  const billToPayload = authNetCompactObject({
+    firstName: authNetCleanValue(reservation.customer?.firstName || '', ''),
+    lastName: authNetCleanValue(reservation.customer?.lastName || '', ''),
+    address: authNetCleanValue(reservation.customer?.address1 || '', ''),
+    city: authNetCleanValue(reservation.customer?.city || '', ''),
+    state: authNetCleanValue(reservation.customer?.state || '', ''),
+    zip: authNetCleanValue(reservation.customer?.zip || '', ''),
+    country: authNetCleanValue(reservation.customer?.country || 'USA', ''),
+    phoneNumber: authNetCleanValue(reservation.customer?.phone || '', '')
+  });
+  const buildRequest = (includeSupplement = false) => ({
     createCustomerProfileFromTransactionRequest: {
       merchantAuthentication: {
         name: config.authorizenet.loginId,
         transactionKey: config.authorizenet.transactionKey
       },
-      transId
+      transId,
+      ...(includeSupplement && Object.keys(customerPayload).length ? { customer: customerPayload } : {}),
+      ...(includeSupplement && Object.keys(billToPayload).length ? { billTo: billToPayload } : {})
     }
-  };
+  });
 
-  const out = await authNetRequest(reqPayload, config);
+  let out = await authNetRequest(buildRequest(false), config);
   const payload = out?.body || {};
-  const resp = payload?.createCustomerProfileResponse || payload?.createCustomerProfileFromTransactionResponse || payload;
+  let resp = payload?.createCustomerProfileResponse || payload?.createCustomerProfileFromTransactionResponse || payload;
+  let message = extractAuthNetMessage(resp);
+  if (
+    resp?.messages?.resultCode !== 'Ok'
+    && /customer info is missing/i.test(String(message || ''))
+    && (Object.keys(customerPayload).length || Object.keys(billToPayload).length)
+  ) {
+    out = await authNetRequest(buildRequest(true), config);
+    const retryPayload = out?.body || {};
+    resp = retryPayload?.createCustomerProfileResponse || retryPayload?.createCustomerProfileFromTransactionResponse || retryPayload;
+    message = extractAuthNetMessage(resp);
+  }
   const ok = resp?.messages?.resultCode === 'Ok';
   if (!ok) {
-    const duplicateProfileId = authNetDuplicateProfileId(extractAuthNetMessage(resp));
+    const duplicateProfileId = authNetDuplicateProfileId(message);
     if (!duplicateProfileId) return false;
     try {
       const profileResp = await authNetCustomerProfile(duplicateProfileId, config);
