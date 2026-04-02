@@ -41,8 +41,18 @@ const sections = [
   {
     title: 'Payments And Financial Data',
     body: [
-      'Ride Fleet may support different payment gateways by tenant. Payment details may be processed by third-party payment providers rather than stored directly by Ride Fleet.',
-      'Billing, payment status, and transaction metadata may still be stored inside Ride Fleet to support operations, reporting, customer service, and audit history.'
+      'Ride Fleet may support different payment gateways by tenant. For tenants using Authorize.Net, cardholder payment entry may be completed on Authorize.Net hosted payment pages or other Authorize.Net controlled experiences rather than being stored directly by Ride Fleet.',
+      'Ride Fleet does not store full card numbers or card security codes (CVV). Payment card processing is handled by the payment gateway, while Ride Fleet stores operational records such as transaction references, payment status, amount, timestamps, and related reservation or agreement metadata.',
+      'When a customer or tenant chooses to save a card on file, Ride Fleet stores gateway-issued profile or token references, such as an Authorize.Net customer profile ID and payment profile ID, so that future authorized charges, refunds, or security deposit holds can be managed through the gateway without storing raw card data in Ride Fleet.',
+      'Ride Fleet may also store limited payment descriptors provided by the gateway, such as card type, masked card details, approval or transaction IDs, and status updates needed for customer service, reconciliation, accounting, fraud review, and audit history.'
+    ]
+  },
+  {
+    title: 'Saved Cards And Security Deposit Holds',
+    body: [
+      'If a customer authorizes a card to be saved on file, the reusable payment credential is stored with the payment gateway, not as full card data inside Ride Fleet.',
+      'Authorized tenant staff may use that saved payment credential to place an authorization hold for a security deposit, capture approved charges, release an unused hold, or process refunds when permitted by the gateway, the tenant workflow, and applicable law.',
+      'Security deposit holds may appear as pending authorizations with the payment gateway or issuing bank and may be released according to gateway, card-network, or bank timing rules that are outside Ride Fleet direct control.'
     ]
   },
   {
@@ -63,6 +73,7 @@ const sections = [
     title: 'Security',
     body: [
       'Ride Fleet uses role-based access controls, tenant scoping, user module access controls, and workflow-level audit logging to help protect platform data.',
+      'Payment operations may rely on third-party gateway security controls, hosted payment pages, tokenization, customer payment profiles, and gateway-side authorization workflows to reduce the amount of sensitive card data handled directly by Ride Fleet.',
       'No system can guarantee absolute security, so users and tenants should also protect credentials, devices, uploaded files, and internal access policies.'
     ]
   },
@@ -111,7 +122,7 @@ export default function PrivacyPolicyPage() {
           guest portal, host workflows, employee tools, issue center, and dealership loaner program.
         </p>
         <div className="hero-meta">
-          <span className="hero-pill">Effective Date: March 25, 2026</span>
+          <span className="hero-pill">Effective Date: April 2, 2026</span>
           <span className="hero-pill">Applies To Web And Mobile</span>
           <span className="hero-pill">ridefleetmanager.com</span>
         </div>
