@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
-import { api, TOKEN_KEY, USER_KEY } from '../lib/client';
+import { api, AUTH_EXPIRED_EVENT, TOKEN_KEY, USER_KEY, clearStoredAuth } from '../lib/client';
 
 function parseJwt(token) {
   try {
@@ -27,6 +27,14 @@ export function AuthGate({ children }) {
   const [guestSignUp, setGuestSignUp] = useState({ firstName: '', lastName: '', email: '', phone: '' });
 
   useEffect(() => {
+    const handleAuthExpired = (event) => {
+      clearStoredAuth();
+      setToken('');
+      setMe(null);
+      setError(event?.detail?.message || 'Your session expired. Please sign in again.');
+    };
+    window.addEventListener(AUTH_EXPIRED_EVENT, handleAuthExpired);
+
     const t = localStorage.getItem(TOKEN_KEY) || '';
     const rawUser = localStorage.getItem(USER_KEY);
     setToken(t);
@@ -49,8 +57,11 @@ export function AuthGate({ children }) {
             setMe(out.user);
           }
         })
-        .catch(() => {});
+        .catch((err) => {
+          if (err?.status === 401) handleAuthExpired({ detail: { message: 'Your session expired. Please sign in again.' } });
+        });
     }
+    return () => window.removeEventListener(AUTH_EXPIRED_EVENT, handleAuthExpired);
   }, []);
 
   const login = async (e) => {
@@ -68,8 +79,7 @@ export function AuthGate({ children }) {
   };
 
   const logout = () => {
-    localStorage.removeItem(TOKEN_KEY);
-    localStorage.removeItem(USER_KEY);
+    clearStoredAuth();
     setToken('');
     setMe(null);
   };

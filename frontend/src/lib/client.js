@@ -32,6 +32,7 @@ function resolveApiBase() {
 export const API_BASE = resolveApiBase();
 export const TOKEN_KEY = 'fleet_jwt';
 export const USER_KEY = 'fleet_user';
+export const AUTH_EXPIRED_EVENT = 'ridefleet:auth-expired';
 const GET_CACHE_TTL_MS = 15000;
 const getResponseCache = new Map();
 const inflightGetRequests = new Map();
@@ -70,10 +71,31 @@ async function parseApiResponse(res, path) {
         }
       }
     } catch {}
-    throw new Error(msg);
+    const error = new Error(msg);
+    error.status = res.status;
+    if (
+      typeof window !== 'undefined' &&
+      res.status === 401 &&
+      readStoredToken() &&
+      !String(path || '').startsWith('/api/auth/login') &&
+      !String(path || '').startsWith('/api/public/')
+    ) {
+      window.dispatchEvent(new CustomEvent(AUTH_EXPIRED_EVENT, {
+        detail: { path, message: msg }
+      }));
+    }
+    throw error;
   }
   if (res.status === 204) return null;
   return res.json();
+}
+
+export function clearStoredAuth() {
+  if (typeof window === 'undefined') return;
+  try {
+    localStorage.removeItem(TOKEN_KEY);
+    localStorage.removeItem(USER_KEY);
+  } catch {}
 }
 
 export function readStoredToken() {
