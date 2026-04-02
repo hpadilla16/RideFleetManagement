@@ -2813,6 +2813,35 @@ export const rentalAgreementsService = {
     if (!agreement.securityDepositCaptured) throw new Error('Security deposit is not captured');
     if (agreement.securityDepositReleasedAt) throw new Error('Security deposit already released');
 
+    const tenantScope = agreement?.tenantId ? { tenantId: agreement.tenantId } : {};
+    const rawReference = String(agreement.securityDepositReference || payload.reference || '').trim();
+    const authRef = rawReference.toUpperCase().startsWith('AUTHNET_AUTH:')
+      ? rawReference.slice('AUTHNET_AUTH:'.length).trim()
+      : '';
+
+    if (authRef) {
+      const cfg = await authNetConfig(tenantScope);
+      const authnet = await authNetRequest({
+        createTransactionRequest: {
+          merchantAuthentication: {
+            name: cfg.loginId,
+            transactionKey: cfg.transactionKey
+          },
+          transactionRequest: {
+            transactionType: 'voidTransaction',
+            refTransId: authRef
+          }
+        }
+      }, tenantScope);
+
+      const authnetBody = authNetTransactionEnvelope(authnet);
+      const tx = authnetBody?.transactionResponse || {};
+      const ok = String(authnetBody?.messages?.resultCode || '').trim() === 'Ok' && String(tx?.responseCode || '').trim() === '1';
+      if (!ok) {
+        throw new Error(authNetMessage(authnetBody) || 'Authorize.Net security deposit release failed');
+      }
+    }
+
     await prisma.rentalAgreement.update({
       where: { id },
       data: {
@@ -2820,8 +2849,23 @@ export const rentalAgreementsService = {
         securityDepositCaptured: false
       }
     });
-    await prisma.auditLog.create({ data: { reservationId: agreement.reservationId, actorUserId: actorUserId || null, action: 'UPDATE', reason: 'Security deposit released' } });
-    return this.getById(id);
+
+    try {
+      await prisma.auditLog.create({
+        data: {
+          tenantId: agreement.tenantId || null,
+          reservationId: agreement.reservationId,
+          actorUserId: actorUserId || null,
+          action: 'UPDATE',
+          reason: 'Security deposit released',
+          metadata: JSON.stringify({ reference: rawReference || null })
+        }
+      });
+    } catch {}
+
+    const refreshed = await this.getById(id);
+    if (!refreshed) throw new Error('Rental agreement not found after releasing security deposit');
+    return refreshed;
   },
 
   async refundPayment(id, paymentId, payload = {}, actorUserId = null) {
