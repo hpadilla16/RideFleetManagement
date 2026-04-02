@@ -1184,23 +1184,40 @@ customerPortalRouter.post('/signature/:token', async (req, res, next) => {
 customerPortalRouter.post('/payment-gateway/authorizenet/webhook', async (req, res, next) => {
   try {
     const payload = req.body || {};
+    const eventType = String(payload?.eventType || '').trim();
+    const rawTransId = String(payload?.payload?.id || payload?.payload?.entityId || payload?.id || '').trim();
+    console.log('[authnet webhook] received', {
+      eventType: eventType || null,
+      transId: rawTransId || null
+    });
+
     const webhookConfig = await authNetWebhookConfigForRequest(req);
     if (!webhookConfig) {
+      console.warn('[authnet webhook] rejected invalid signature', {
+        eventType: eventType || null,
+        transId: rawTransId || null
+      });
       return res.status(401).json({ error: 'Invalid Authorize.Net webhook signature' });
     }
 
-    const eventType = String(payload?.eventType || '').trim();
     const supportedEvents = new Set([
       'net.authorize.payment.authcapture.created',
       'net.authorize.payment.capture.created',
       'net.authorize.payment.authorization.created'
     ]);
     if (!supportedEvents.has(eventType)) {
+      console.log('[authnet webhook] ignored unsupported event', {
+        eventType: eventType || null,
+        transId: rawTransId || null
+      });
       return res.json({ ok: true, ignored: true, reason: `Unsupported event ${eventType || 'unknown'}` });
     }
 
-    const transId = String(payload?.payload?.id || payload?.payload?.entityId || payload?.id || '').trim();
+    const transId = rawTransId;
     if (!transId) {
+      console.warn('[authnet webhook] ignored missing transaction id', {
+        eventType: eventType || null
+      });
       return res.json({ ok: true, ignored: true, reason: 'Missing transaction id' });
     }
 
@@ -1212,11 +1229,20 @@ customerPortalRouter.post('/payment-gateway/authorizenet/webhook', async (req, r
       ''
     );
     if (!invoiceNumber) {
+      console.warn('[authnet webhook] ignored missing invoice number', {
+        eventType,
+        transId
+      });
       return res.json({ ok: true, ignored: true, reason: 'Missing reservation invoice number' });
     }
 
     const reservation = await findReservationByAuthNetInvoiceNumber(invoiceNumber);
     if (!reservation) {
+      console.warn('[authnet webhook] ignored reservation not found', {
+        eventType,
+        transId,
+        invoiceNumber
+      });
       return res.json({ ok: true, ignored: true, reason: `Reservation not found for ${invoiceNumber}` });
     }
 
@@ -1226,6 +1252,16 @@ customerPortalRouter.post('/payment-gateway/authorizenet/webhook', async (req, r
       transId,
       gatewayConfig: tenantGatewayConfig,
       origin: 'PORTAL'
+    });
+
+    console.log('[authnet webhook] posted payment', {
+      eventType,
+      transId,
+      invoiceNumber,
+      reservationId: reservation.id,
+      reservationNumber: reservation.reservationNumber,
+      duplicate: !!result?.duplicate,
+      amount: Number(result?.amount || 0)
     });
 
     return res.json({
