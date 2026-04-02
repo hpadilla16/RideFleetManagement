@@ -111,42 +111,36 @@ async function trySaveAuthNetCardOnFileFromTransaction({ reservation, reference 
   const transId = rawRef.startsWith('AUTHNET:') ? rawRef.slice('AUTHNET:'.length).trim() : rawRef;
   if (!transId) return false;
 
-  const customerPayload = authNetCompactObject({
-    merchantCustomerId: authNetCustomerIdValue(reservation.customer?.id || reservation.customerId || '', reservation.id || ''),
-    email: authNetCleanValue(reservation.customer?.email || '', '')
-  });
-  const billToPayload = authNetCompactObject({
-    firstName: authNetCleanValue(reservation.customer?.firstName || '', ''),
-    lastName: authNetCleanValue(reservation.customer?.lastName || '', ''),
-    address: authNetCleanValue(reservation.customer?.address1 || '', ''),
-    city: authNetCleanValue(reservation.customer?.city || '', ''),
-    state: authNetCleanValue(reservation.customer?.state || '', ''),
-    zip: authNetCleanValue(reservation.customer?.zip || '', ''),
-    country: authNetCleanValue(reservation.customer?.country || 'USA', ''),
-    phoneNumber: authNetCleanValue(reservation.customer?.phone || '', '')
-  });
-  const buildRequest = (includeSupplement = false) => ({
-    createCustomerProfileFromTransactionRequest: {
-      merchantAuthentication: {
-        name: config.authorizenet.loginId,
-        transactionKey: config.authorizenet.transactionKey
-      },
-      transId,
-      ...(includeSupplement && Object.keys(customerPayload).length ? { customer: customerPayload } : {}),
-      ...(includeSupplement && Object.keys(billToPayload).length ? { billTo: billToPayload } : {})
-    }
-  });
+  const buildRequest = () => ({
+      createCustomerProfileFromTransactionRequest: {
+        merchantAuthentication: {
+          name: config.authorizenet.loginId,
+          transactionKey: config.authorizenet.transactionKey
+        },
+        transId
+      }
+    });
 
-  let out = await authNetRequest(buildRequest(false), config);
+  let out = await authNetRequest(buildRequest(), config);
   const payload = out?.body || {};
   let resp = payload?.createCustomerProfileResponse || payload?.createCustomerProfileFromTransactionResponse || payload;
   let message = extractAuthNetMessage(resp);
   if (
     resp?.messages?.resultCode !== 'Ok'
     && /customer info is missing/i.test(String(message || ''))
-    && (Object.keys(customerPayload).length || Object.keys(billToPayload).length)
+    && reservation?.customerId
   ) {
-    out = await authNetRequest(buildRequest(true), config);
+    const customerProfileId = await authNetEnsureCustomerProfileForReservation(reservation, config);
+    out = await authNetRequest({
+      createCustomerProfileFromTransactionRequest: {
+        merchantAuthentication: {
+          name: config.authorizenet.loginId,
+          transactionKey: config.authorizenet.transactionKey
+        },
+        transId,
+        customerProfileId
+      }
+    }, config);
     const retryPayload = out?.body || {};
     resp = retryPayload?.createCustomerProfileResponse || retryPayload?.createCustomerProfileFromTransactionResponse || retryPayload;
     message = extractAuthNetMessage(resp);
@@ -208,6 +202,53 @@ function authNetDuplicateProfileId(message = '') {
   const text = String(message || '').trim();
   const match = text.match(/\bduplicate record with ID\s+(\d+)\b/i) || text.match(/\brecord with ID\s+(\d+)\b/i);
   return match?.[1] ? String(match[1]).trim() : '';
+}
+
+async function authNetEnsureCustomerProfileForReservation(reservation, config = {}) {
+  const customerId = String(reservation?.customer?.id || reservation?.customerId || '').trim();
+  if (!customerId) throw new Error('Customer not found');
+
+  const existing = await prisma.customer.findUnique({
+    where: { id: customerId },
+    select: { authnetCustomerProfileId: true }
+  });
+  const existingProfileId = String(existing?.authnetCustomerProfileId || '').trim();
+  if (existingProfileId) return existingProfileId;
+
+  const profilePayload = authNetCompactObject({
+    merchantCustomerId: authNetCustomerIdValue(customerId, reservation?.id || ''),
+    email: authNetCleanValue(reservation?.customer?.email || '', ''),
+    description: authNetCleanValue([reservation?.customer?.firstName, reservation?.customer?.lastName].filter(Boolean).join(' '), '')
+  });
+
+  const out = await authNetRequest({
+    createCustomerProfileRequest: {
+      merchantAuthentication: {
+        name: config.authorizenet.loginId,
+        transactionKey: config.authorizenet.transactionKey
+      },
+      profile: profilePayload
+    }
+  }, config);
+  const resp = out?.body?.createCustomerProfileResponse || out?.body || {};
+
+  if (String(resp?.messages?.resultCode || '').trim() !== 'Ok') {
+    const duplicateProfileId = authNetDuplicateProfileId(extractAuthNetMessage(resp));
+    if (!duplicateProfileId) throw new Error(extractAuthNetMessage(resp) || 'Unable to create Authorize.Net customer profile');
+    await prisma.customer.update({
+      where: { id: customerId },
+      data: { authnetCustomerProfileId: String(duplicateProfileId) }
+    });
+    return String(duplicateProfileId);
+  }
+
+  const customerProfileId = String(resp?.customerProfileId || '').trim();
+  if (!customerProfileId) throw new Error('Authorize.Net did not return a customer profile ID');
+  await prisma.customer.update({
+    where: { id: customerId },
+    data: { authnetCustomerProfileId: customerProfileId }
+  });
+  return customerProfileId;
 }
 
 async function authNetCustomerProfile(profileId, config = {}) {

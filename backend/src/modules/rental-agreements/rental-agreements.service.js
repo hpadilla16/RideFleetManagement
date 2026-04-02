@@ -204,6 +204,59 @@ function authNetDuplicateProfileId(message = '') {
   return match?.[1] ? String(match[1]).trim() : '';
 }
 
+async function authNetEnsureCustomerProfile({ customer, reservationId = '', scope = {} }) {
+  const customerId = String(customer?.id || '').trim();
+  if (!customerId) throw new Error('Customer not found');
+
+  const existing = await prisma.customer.findUnique({
+    where: { id: customerId },
+    select: { authnetCustomerProfileId: true }
+  });
+  const existingProfileId = String(existing?.authnetCustomerProfileId || '').trim();
+  if (existingProfileId) return existingProfileId;
+
+  const cfg = await authNetConfig(scope);
+  if (!cfg.loginId || !cfg.transactionKey) throw new Error('Authorize.Net is not configured');
+
+  const profilePayload = authNetCompactObject({
+    merchantCustomerId: authNetCustomerIdValue(customerId, reservationId),
+    description: authNetCleanValue([customer?.firstName, customer?.lastName].filter(Boolean).join(' '), ''),
+    email: authNetCleanValue(customer?.email || '', '')
+  });
+
+  const out = await authNetRequest({
+    createCustomerProfileRequest: {
+      merchantAuthentication: {
+        name: cfg.loginId,
+        transactionKey: cfg.transactionKey
+      },
+      profile: profilePayload
+    }
+  }, scope);
+
+  const resp = out?.createCustomerProfileResponse || out || {};
+  if (String(resp?.messages?.resultCode || '').trim() !== 'Ok') {
+    const duplicateProfileId = authNetDuplicateProfileId(authNetMessage(resp));
+    if (!duplicateProfileId) {
+      throw new Error(authNetMessage(resp) || 'Unable to create Authorize.Net customer profile');
+    }
+    await prisma.customer.update({
+      where: { id: customerId },
+      data: { authnetCustomerProfileId: String(duplicateProfileId) }
+    });
+    return String(duplicateProfileId);
+  }
+
+  const customerProfileId = String(resp?.customerProfileId || '').trim();
+  if (!customerProfileId) throw new Error('Authorize.Net did not return a customer profile ID');
+
+  await prisma.customer.update({
+    where: { id: customerId },
+    data: { authnetCustomerProfileId: customerProfileId }
+  });
+  return customerProfileId;
+}
+
 async function authNetCustomerProfile(profileId, scope = {}) {
   const cfg = await authNetConfig(scope);
   if (!cfg.loginId || !cfg.transactionKey) throw new Error('Authorize.Net is not configured');
@@ -432,29 +485,36 @@ async function saveAuthNetCardProfileFromReference({ customerId, reference, scop
   const transId = rawRef.startsWith('AUTHNET:') ? rawRef.slice('AUTHNET:'.length).trim() : rawRef;
   if (!transId) throw new Error('Authorize.Net transaction reference is required');
 
-  const { customerPayload, billToPayload } = authNetCustomerSupplement(customer, reservationId);
-  const buildRequest = (includeSupplement = false) => ({
+  const buildRequest = () => ({
     createCustomerProfileFromTransactionRequest: {
       merchantAuthentication: {
         name: cfg.loginId,
         transactionKey: cfg.transactionKey
       },
-      transId,
-      ...(includeSupplement && Object.keys(customerPayload).length ? { customer: customerPayload } : {}),
-      ...(includeSupplement && Object.keys(billToPayload).length ? { billTo: billToPayload } : {})
+      transId
     }
   });
 
-  let out = await authNetRequest(buildRequest(false), scope);
+  let out = await authNetRequest(buildRequest(), scope);
   let resp = out?.createCustomerProfileResponse || out?.createCustomerProfileFromTransactionResponse || out || {};
   let message = authNetMessage(resp) || 'Unable to save card on file from Authorize.Net transaction';
 
   if (
     String(resp?.messages?.resultCode || '').trim() !== 'Ok'
     && /customer info is missing/i.test(message)
-    && (Object.keys(customerPayload).length || Object.keys(billToPayload).length)
+    && customer
   ) {
-    out = await authNetRequest(buildRequest(true), scope);
+    const customerProfileId = await authNetEnsureCustomerProfile({ customer, reservationId, scope });
+    out = await authNetRequest({
+      createCustomerProfileFromTransactionRequest: {
+        merchantAuthentication: {
+          name: cfg.loginId,
+          transactionKey: cfg.transactionKey
+        },
+        transId,
+        customerProfileId
+      }
+    }, scope);
     resp = out?.createCustomerProfileResponse || out?.createCustomerProfileFromTransactionResponse || out || {};
     message = authNetMessage(resp) || message;
   }
