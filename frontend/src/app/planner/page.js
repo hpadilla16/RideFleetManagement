@@ -740,6 +740,9 @@ function PlannerInner({ token, me, logout }) {
                   ) : null}
                   <div style={{ fontWeight: 700 }}>{v.make} {v.model} {v.year || ''}</div>
                   <div className="label">#{v.internalNumber} | {v.vehicleType?.code || '-'}</div>
+                  <div className="label" style={{ textTransform: 'none', letterSpacing: 0 }}>
+                    Plate {v.plate || 'Pending'}
+                  </div>
                   {v.id !== '__unassigned__' ? (
                     <>
                       {activeAvailabilityBlock(v) ? (
