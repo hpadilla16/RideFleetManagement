@@ -88,6 +88,16 @@ function dayIndexInRange(rangeStart, dt) {
   return Math.floor((startOfDay(dt) - rangeStart) / DAY_MS);
 }
 
+function reservationVehicleTypeLabel(reservation) {
+  return (
+    reservation?.vehicleType?.name
+    || reservation?.vehicle?.vehicleType?.name
+    || reservation?.vehicleType?.code
+    || reservation?.vehicle?.vehicleType?.code
+    || 'Unspecified'
+  );
+}
+
 export default function PlannerPage() {
   return <AuthGate>{({ token, me, logout }) => <PlannerInner token={token} me={me} logout={logout} />}</AuthGate>;
 }
@@ -240,7 +250,7 @@ function PlannerInner({ token, me, logout }) {
     [reservations]
   );
 
-  const tracks = useMemo(() => {
+  const vehicleTracks = useMemo(() => {
     const filtered = (vehicles || []).filter((v) => {
       if (filterVehicleTypeId && v.vehicleTypeId !== filterVehicleTypeId) return false;
       if (filterLocationId && v.homeLocationId !== filterLocationId) return false;
@@ -254,15 +264,62 @@ function PlannerInner({ token, me, logout }) {
         model: 'Reservations',
         year: '',
         internalNumber: '-',
-        vehicleType: { code: 'N/A' }
+        vehicleTypeId: '__unassigned__',
+        vehicleType: { code: 'N/A', name: 'Unassigned Reservations' }
       },
-      ...filtered
+      ...filtered.sort((left, right) => {
+        const leftType = `${left?.vehicleType?.name || ''}${left?.vehicleType?.code || ''}`.toLowerCase();
+        const rightType = `${right?.vehicleType?.name || ''}${right?.vehicleType?.code || ''}`.toLowerCase();
+        if (leftType !== rightType) return leftType.localeCompare(rightType);
+        const leftLabel = `${left?.make || ''} ${left?.model || ''} ${left?.internalNumber || ''}`.toLowerCase();
+        const rightLabel = `${right?.make || ''} ${right?.model || ''} ${right?.internalNumber || ''}`.toLowerCase();
+        return leftLabel.localeCompare(rightLabel);
+      })
     ];
   }, [vehicles, filterVehicleTypeId, filterLocationId]);
 
+  const trackRows = useMemo(() => {
+    const rows = [{
+      kind: 'track',
+      id: '__track__unassigned__',
+      vehicle: vehicleTracks[0]
+    }];
+    const grouped = new Map();
+    vehicleTracks.slice(1).forEach((vehicle) => {
+      const typeId = String(vehicle?.vehicleTypeId || vehicle?.vehicleType?.id || 'unknown');
+      const current = grouped.get(typeId) || {
+        id: typeId,
+        label: vehicle?.vehicleType?.name || vehicle?.vehicleType?.code || 'Other Vehicles',
+        code: vehicle?.vehicleType?.code || '',
+        vehicles: []
+      };
+      current.vehicles.push(vehicle);
+      grouped.set(typeId, current);
+    });
+    [...grouped.values()]
+      .sort((left, right) => `${left.label} ${left.code}`.localeCompare(`${right.label} ${right.code}`))
+      .forEach((group) => {
+        rows.push({
+          kind: 'group',
+          id: `group-${group.id}`,
+          label: group.label,
+          code: group.code,
+          count: group.vehicles.length
+        });
+        group.vehicles.forEach((vehicle) => {
+          rows.push({
+            kind: 'track',
+            id: `track-${vehicle.id}`,
+            vehicle
+          });
+        });
+      });
+    return rows;
+  }, [vehicleTracks]);
+
   const itemsByTrack = useMemo(() => {
     const map = new Map();
-    for (const t of tracks) map.set(t.id, []);
+    for (const t of vehicleTracks) map.set(t.id, []);
 
     for (const r of reservations || []) {
       const pickup = new Date(r.pickupAt);
@@ -310,7 +367,7 @@ function PlannerInner({ token, me, logout }) {
     }
 
     return map;
-  }, [tracks, reservations, vehicles, rangeStart, rangeEnd, dayCount]);
+  }, [vehicleTracks, reservations, vehicles, rangeStart, rangeEnd, dayCount]);
 
   const onDropReservation = async (trackVehicleId, dayIndexRaw, dropMetrics = null) => {
     if (!dragItem) return;
@@ -339,7 +396,7 @@ function PlannerInner({ token, me, logout }) {
 
       const targetVehicle = trackVehicleId === '__unassigned__'
         ? 'Unassigned'
-        : (tracks.find((t) => t.id === trackVehicleId)?.internalNumber || 'Selected Vehicle');
+        : (vehicleTracks.find((t) => t.id === trackVehicleId)?.internalNumber || 'Selected Vehicle');
       const ok = window.confirm(
         `Move reservation ${r.reservationNumber}?\n\n` +
         `Pickup: ${newPickup.toLocaleString()}\n` +
@@ -632,7 +689,37 @@ function PlannerInner({ token, me, logout }) {
             })}
           </div>
 
-          {tracks.map((v) => {
+          {trackRows.map((row) => {
+            if (row.kind === 'group') {
+              return (
+                <div key={row.id} className="planner-row" style={{ gridTemplateColumns: `260px repeat(${dayCount}, ${DAY_WIDTH}px)` }}>
+                  <div
+                    className="planner-cell planner-sticky planner-track-meta"
+                    style={{ minHeight: 54, justifyContent: 'center', background: 'linear-gradient(180deg, #faf7ff, #f4efff)' }}
+                  >
+                    <div style={{ fontWeight: 800 }}>{row.label}</div>
+                    <div className="label">{row.code || 'Vehicle section'}</div>
+                  </div>
+                  <div
+                    className="planner-cell"
+                    style={{
+                      gridColumn: `2 / span ${dayCount}`,
+                      minHeight: 54,
+                      display: 'flex',
+                      alignItems: 'center',
+                      paddingInline: 14,
+                      background: 'linear-gradient(180deg, #faf7ff, #f7f4ff)',
+                      fontWeight: 700,
+                      color: '#5b4aa3'
+                    }}
+                  >
+                    {row.count} vehicle{row.count === 1 ? '' : 's'}
+                  </div>
+                </div>
+              );
+            }
+
+            const v = row.vehicle;
             const trackLayout = itemsByTrack.get(v.id) || { items: [], lanes: 1 };
             const rows = trackLayout.items;
             const laneCount = Math.max(1, trackLayout.lanes || 1);
@@ -769,6 +856,10 @@ function PlannerInner({ token, me, logout }) {
           </div>
           <div style={{ fontWeight: 700 }}>{selectedReservation.reservation.reservationNumber}</div>
           <div className="label">{selectedReservation.reservation.customer?.firstName || ''} {selectedReservation.reservation.customer?.lastName || ''}</div>
+          <div className="label">Vehicle type: {reservationVehicleTypeLabel(selectedReservation.reservation)}</div>
+          <div className="label">
+            Vehicle: {selectedReservation.reservation.vehicle?.internalNumber || 'Unassigned'}
+          </div>
           <div className="label">From: {new Date(selectedReservation.reservation.pickupAt).toLocaleString()}</div>
           <div className="label">To: {new Date(selectedReservation.reservation.returnAt).toLocaleString()}</div>
           <div className="label" style={{ marginBottom: 8 }}>{selectedReservation.locked ? 'Locked by agreement' : 'Movable reservation'}</div>
