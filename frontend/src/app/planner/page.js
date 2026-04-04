@@ -25,7 +25,8 @@ function fmtDay(d) {
   return new Date(d).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
 }
 
-function statusColor(r, locked) {
+function statusColor(r, locked, overbooked = false) {
+  if (overbooked) return '#ef4444';
   if (locked) return '#9ca3af';
   switch (r.status) {
     case 'CONFIRMED': return '#22c55e';
@@ -88,6 +89,81 @@ function dayIndexInRange(rangeStart, dt) {
   return Math.floor((startOfDay(dt) - rangeStart) / DAY_MS);
 }
 
+function reservationOverlapsRange(reservation, rangeStart, rangeEnd) {
+  const pickup = new Date(reservation?.pickupAt);
+  const ret = new Date(reservation?.returnAt);
+  return pickup < rangeEnd && ret > rangeStart;
+}
+
+function isPlannerMovableReservation(reservation) {
+  const status = String(reservation?.status || '').toUpperCase();
+  return !['CHECKED_OUT', 'CANCELLED', 'NO_SHOW'].includes(status);
+}
+
+function intervalsOverlap(startA, endA, startB, endB) {
+  return startA < endB && endA > startB;
+}
+
+function reservationVehicleTypeId(reservation) {
+  return reservation?.vehicleTypeId || reservation?.vehicleType?.id || null;
+}
+
+function buildTrackOccupancy({ vehicles, reservations, ignoredReservationIds = new Set() }) {
+  const occupancy = new Map();
+  (vehicles || []).forEach((vehicle) => occupancy.set(vehicle.id, []));
+
+  (reservations || []).forEach((reservation) => {
+    if (!reservation?.vehicleId || ignoredReservationIds.has(reservation.id) || !isPlannerMovableReservation(reservation) && String(reservation?.status || '').toUpperCase() !== 'CHECKED_OUT') return;
+    if (!occupancy.has(reservation.vehicleId)) return;
+    const start = new Date(reservation.pickupAt).getTime();
+    const end = new Date(reservation.returnAt).getTime();
+    if (!Number.isFinite(start) || !Number.isFinite(end)) return;
+    occupancy.get(reservation.vehicleId).push({
+      type: 'reservation',
+      reservationId: reservation.id,
+      start,
+      end
+    });
+  });
+
+  (vehicles || []).forEach((vehicle) => {
+    const list = occupancy.get(vehicle.id) || [];
+    (Array.isArray(vehicle?.availabilityBlocks) ? vehicle.availabilityBlocks : []).forEach((block) => {
+      if (block?.releasedAt) return;
+      const start = new Date(block.blockedFrom || block.createdAt || new Date()).getTime();
+      const end = new Date(block.availableFrom).getTime();
+      if (!Number.isFinite(start) || !Number.isFinite(end)) return;
+      list.push({
+        type: 'block',
+        blockId: block.id,
+        start,
+        end
+      });
+    });
+    list.sort((a, b) => a.start - b.start);
+    occupancy.set(vehicle.id, list);
+  });
+
+  return occupancy;
+}
+
+function scoreVehicleFit(vehicle, reservation, intervals) {
+  const start = new Date(reservation.pickupAt).getTime();
+  const end = new Date(reservation.returnAt).getTime();
+  const previous = [...intervals].filter((row) => row.end <= start).sort((a, b) => b.end - a.end)[0] || null;
+  const next = [...intervals].filter((row) => row.start >= end).sort((a, b) => a.start - b.start)[0] || null;
+  const gapBefore = previous ? Math.max(0, start - previous.end) : 4 * DAY_MS;
+  const gapAfter = next ? Math.max(0, next.start - end) : 4 * DAY_MS;
+  const pickupLocationId = reservation?.pickupLocationId || reservation?.locationId || null;
+  const returnLocationId = reservation?.returnLocationId || null;
+  const homeLocationId = vehicle?.homeLocationId || null;
+  const locationPenalty =
+    homeLocationId && (pickupLocationId || returnLocationId)
+      ? ((pickupLocationId && homeLocationId !== pickupLocationId ? 3 * DAY_MS : 0) + (returnLocationId && homeLocationId !== returnLocationId ? 1.5 * DAY_MS : 0))
+      : 0;
+  return locationPenalty + gapBefore + gapAfter;
+}
+
 function reservationVehicleTypeLabel(reservation) {
   return (
     reservation?.vehicleType?.name
@@ -130,6 +206,8 @@ function PlannerInner({ token, me, logout }) {
     notes: ''
   });
   const [plannerFocus, setPlannerFocus] = useState('ALL');
+  const [plannerRunning, setPlannerRunning] = useState('');
+  const [overbookedReservationIds, setOverbookedReservationIds] = useState([]);
 
   const dayCount = view === 'DAY' ? 1 : view === 'WEEK' ? 7 : 30;
   const rangeStart = useMemo(() => startOfDay(cursor), [cursor]);
@@ -165,6 +243,10 @@ function PlannerInner({ token, me, logout }) {
 
   useEffect(() => { load(); }, [token, canManagePlannerSetup]);
 
+  useEffect(() => {
+    setOverbookedReservationIds([]);
+  }, [cursor, view, filterVehicleTypeId, filterLocationId]);
+
   const replaceReservationInState = (updatedReservation) => {
     if (!updatedReservation?.id) return;
     setReservations((current) => current.map((row) => (
@@ -172,9 +254,14 @@ function PlannerInner({ token, me, logout }) {
         ? { ...row, ...updatedReservation }
         : row
     )));
+    setOverbookedReservationIds((current) => (
+      updatedReservation?.vehicleId
+        ? current.filter((id) => id !== updatedReservation.id)
+        : current
+    ));
     setSelectedReservation((current) => (
       current?.reservation?.id === updatedReservation.id
-        ? { ...current, reservation: { ...current.reservation, ...updatedReservation } }
+        ? { ...current, reservation: { ...current.reservation, ...updatedReservation }, overbooked: updatedReservation?.vehicleId ? false : current.overbooked }
         : current
     ));
   };
@@ -250,12 +337,16 @@ function PlannerInner({ token, me, logout }) {
     [reservations]
   );
 
-  const vehicleTracks = useMemo(() => {
-    const filtered = (vehicles || []).filter((v) => {
+  const filteredVehicles = useMemo(() => (
+    (vehicles || []).filter((v) => {
       if (filterVehicleTypeId && v.vehicleTypeId !== filterVehicleTypeId) return false;
       if (filterLocationId && v.homeLocationId !== filterLocationId) return false;
       return true;
-    });
+    })
+  ), [vehicles, filterVehicleTypeId, filterLocationId]);
+
+  const vehicleTracks = useMemo(() => {
+    const filtered = filteredVehicles;
 
     return [
       {
@@ -276,7 +367,7 @@ function PlannerInner({ token, me, logout }) {
         return leftLabel.localeCompare(rightLabel);
       })
     ];
-  }, [vehicles, filterVehicleTypeId, filterLocationId]);
+  }, [filteredVehicles]);
 
   const trackRows = useMemo(() => {
     const rows = [{
@@ -432,6 +523,135 @@ function PlannerInner({ token, me, logout }) {
     }
   };
 
+  const reassignReservations = async (updates, successMessage, overbookedIds = []) => {
+    if (!updates.length) {
+      setOverbookedReservationIds(overbookedIds);
+      setMsg(successMessage);
+      return;
+    }
+    for (const update of updates) {
+      const updatedReservation = await api(`/api/reservations/${update.id}`, {
+        method: 'PATCH',
+        body: JSON.stringify(update.patch)
+      }, token);
+      replaceReservationInState(updatedReservation);
+    }
+    setOverbookedReservationIds(overbookedIds);
+    setMsg(successMessage);
+  };
+
+  const clearVisibleAssignments = async () => {
+    const candidates = (reservations || []).filter((reservation) => (
+      reservation?.vehicleId &&
+      reservationOverlapsRange(reservation, rangeStart, rangeEnd) &&
+      isPlannerMovableReservation(reservation)
+    ));
+    if (!candidates.length) {
+      setMsg('No movable reservations are currently assigned in this planner range.');
+      return;
+    }
+    const ok = window.confirm(`Move ${candidates.length} reservation(s) back to Unassigned for this visible planner range?`);
+    if (!ok) return;
+    setPlannerRunning('clear');
+    try {
+      await reassignReservations(
+        candidates.map((reservation) => ({ id: reservation.id, patch: { vehicleId: null } })),
+        `${candidates.length} reservation(s) moved back to Unassigned.`,
+        []
+      );
+    } catch (error) {
+      setMsg(error.message || 'Unable to clear assignments');
+    } finally {
+      setPlannerRunning('');
+    }
+  };
+
+  const autoAssignUnassignedReservations = async () => {
+    const candidates = (reservations || [])
+      .filter((reservation) => (
+        !reservation?.vehicleId &&
+        reservationOverlapsRange(reservation, rangeStart, rangeEnd) &&
+        isPlannerMovableReservation(reservation)
+      ))
+      .sort((left, right) => {
+        const pickupDiff = new Date(left.pickupAt) - new Date(right.pickupAt);
+        if (pickupDiff !== 0) return pickupDiff;
+        const leftDuration = new Date(left.returnAt) - new Date(left.pickupAt);
+        const rightDuration = new Date(right.returnAt) - new Date(right.pickupAt);
+        return rightDuration - leftDuration;
+      });
+
+    if (!candidates.length) {
+      setMsg('No unassigned movable reservations were found in this planner range.');
+      setOverbookedReservationIds([]);
+      return;
+    }
+
+    const vehiclePool = filteredVehicles;
+    const occupancy = buildTrackOccupancy({
+      vehicles: vehiclePool,
+      reservations,
+      ignoredReservationIds: new Set(candidates.map((reservation) => reservation.id))
+    });
+
+    const updates = [];
+    const overbookedIds = [];
+
+    candidates.forEach((reservation) => {
+      const requiredVehicleTypeId = reservationVehicleTypeId(reservation);
+      const reservationStart = new Date(reservation.pickupAt).getTime();
+      const reservationEnd = new Date(reservation.returnAt).getTime();
+      const compatibleVehicles = vehiclePool
+        .filter((vehicle) => (!requiredVehicleTypeId || vehicle.vehicleTypeId === requiredVehicleTypeId))
+        .map((vehicle) => {
+          const intervals = occupancy.get(vehicle.id) || [];
+          const hasConflict = intervals.some((interval) => intervalsOverlap(interval.start, interval.end, reservationStart, reservationEnd));
+          if (hasConflict) return null;
+          return {
+            vehicle,
+            score: scoreVehicleFit(vehicle, reservation, intervals)
+          };
+        })
+        .filter(Boolean)
+        .sort((left, right) => left.score - right.score);
+
+      const bestFit = compatibleVehicles[0];
+      if (!bestFit) {
+        overbookedIds.push(reservation.id);
+        return;
+      }
+
+      updates.push({
+        id: reservation.id,
+        patch: { vehicleId: bestFit.vehicle.id }
+      });
+      const intervals = occupancy.get(bestFit.vehicle.id) || [];
+      intervals.push({
+        type: 'reservation',
+        reservationId: reservation.id,
+        start: reservationStart,
+        end: reservationEnd
+      });
+      intervals.sort((a, b) => a.start - b.start);
+      occupancy.set(bestFit.vehicle.id, intervals);
+    });
+
+    setPlannerRunning('assign');
+    try {
+      await reassignReservations(
+        updates,
+        overbookedIds.length
+          ? `${updates.length} reservation(s) assigned. ${overbookedIds.length} remain overbooked in this planner range.`
+          : `${updates.length} reservation(s) assigned automatically.`,
+        overbookedIds
+      );
+    } catch (error) {
+      setMsg(error.message || 'Unable to auto-assign reservations');
+    } finally {
+      setPlannerRunning('');
+    }
+  };
+
   const handleTouchDrop = (ev) => {
     if (!dragItem) return;
     const touch = ev.changedTouches?.[0];
@@ -524,9 +744,10 @@ function PlannerInner({ token, me, logout }) {
       migrationHolds: (vehicles || []).filter((vehicle) => isMigrationHold(activeAvailabilityBlock(vehicle))).length,
       serviceHolds: (vehicles || []).filter((vehicle) => isServiceHold(activeAvailabilityBlock(vehicle))).length,
       unassigned: unassigned.length,
+      overbooked: overbookedReservationIds.length,
       nextItems
     };
-  }, [reservations, lockedReservationIds, vehicles]);
+  }, [reservations, lockedReservationIds, vehicles, overbookedReservationIds]);
 
   const plannerFocusOptions = useMemo(() => ([
     { id: 'ALL', label: 'All Queues', count: plannerOpsBoard.nextItems.length },
@@ -601,6 +822,11 @@ function PlannerInner({ token, me, logout }) {
               <strong>{plannerOpsBoard.unassigned}</strong>
               <span className="ui-muted">Reservations still waiting for a vehicle track.</span>
             </div>
+            <div className="info-tile">
+              <span className="label">Overbooked</span>
+              <strong>{plannerOpsBoard.overbooked}</strong>
+              <span className="ui-muted">Unassigned bookings that still do not fit after auto-accommodate.</span>
+            </div>
           </div>
           {plannerFocusOptions.length ? (
             <div className="app-banner-list">
@@ -663,6 +889,12 @@ function PlannerInner({ token, me, logout }) {
             </div>
           </div>
           <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+            <button type="button" className="button-subtle" onClick={clearVisibleAssignments} disabled={plannerRunning === 'clear' || plannerRunning === 'assign'}>
+              {plannerRunning === 'clear' ? 'Moving...' : 'Move To Unassigned'}
+            </button>
+            <button type="button" onClick={autoAssignUnassignedReservations} disabled={plannerRunning === 'assign' || plannerRunning === 'clear'}>
+              {plannerRunning === 'assign' ? 'Auto-Placing...' : 'Auto-Accommodate'}
+            </button>
             <button onClick={goToday}>Today</button>
             <button onClick={goPrev}>Previous</button>
             <div className="label" style={{ minWidth: 180, textAlign: 'center' }}>{fmtDay(rangeStart)} - {fmtDay(addDays(rangeEnd, -1))}</div>
@@ -678,6 +910,7 @@ function PlannerInner({ token, me, logout }) {
           <span className="app-banner-pill">Gray = Migration Hold</span>
           <span className="app-banner-pill">Orange = Maintenance</span>
           <span className="app-banner-pill">Red = Out Of Service</span>
+          <span className="app-banner-pill" style={{ background: '#fee2e2', color: '#991b1b', borderColor: '#fecaca' }}>Bright Red = Overbooked</span>
         </div>
 
         <div className="planner-scroll">
@@ -743,6 +976,11 @@ function PlannerInner({ token, me, logout }) {
                   <div className="label" style={{ textTransform: 'none', letterSpacing: 0 }}>
                     Plate {v.plate || 'Pending'}
                   </div>
+                  {v.id === '__unassigned__' && plannerOpsBoard.overbooked ? (
+                    <div className="surface-note" style={{ marginTop: 6, background: '#fef2f2', borderColor: '#fecaca', color: '#991b1b' }}>
+                      {plannerOpsBoard.overbooked} booking(s) still flagged as overbooking in this visible range.
+                    </div>
+                  ) : null}
                   {v.id !== '__unassigned__' ? (
                     <>
                       {activeAvailabilityBlock(v) ? (
@@ -812,6 +1050,7 @@ function PlannerInner({ token, me, logout }) {
 
                     const r = rowItem.reservation;
                     const locked = lockedReservationIds.has(r.id);
+                    const overbooked = overbookedReservationIds.includes(r.id);
                     return (
                       <div
                         key={r.id}
@@ -835,12 +1074,12 @@ function PlannerInner({ token, me, logout }) {
                         onTouchEnd={handleTouchDrop}
                         onClick={() => {
                           setSelectedBlock(null);
-                          setSelectedReservation({ reservation: r, locked });
+                          setSelectedReservation({ reservation: r, locked, overbooked });
                         }}
-                        style={{ left: rowItem.start * DAY_WIDTH + 2, top: rowItem.lane * lanePitch + 4, height: blockHeight, width: Math.max(12, rowItem.span * DAY_WIDTH - 4), background: statusColor(r, locked), opacity: locked ? 0.7 : (draggingId === r.id ? 0.85 : 1) }}
+                        style={{ left: rowItem.start * DAY_WIDTH + 2, top: rowItem.lane * lanePitch + 4, height: blockHeight, width: Math.max(12, rowItem.span * DAY_WIDTH - 4), background: statusColor(r, locked, overbooked), opacity: locked ? 0.7 : (draggingId === r.id ? 0.85 : 1) }}
                         title={`${r.reservationNumber} ${locked ? '(locked by agreement)' : ''}`}
                       >
-                        <span className="planner-block-text">{locked ? 'Locked | ' : ''}{r.reservationNumber} | {r.customer?.firstName || ''} {r.customer?.lastName || ''}</span>
+                        <span className="planner-block-text">{overbooked ? 'Overbooked | ' : ''}{locked ? 'Locked | ' : ''}{r.reservationNumber} | {r.customer?.firstName || ''} {r.customer?.lastName || ''}</span>
                       </div>
                     );
                   })}
@@ -866,6 +1105,11 @@ function PlannerInner({ token, me, logout }) {
           <div className="label">From: {new Date(selectedReservation.reservation.pickupAt).toLocaleString()}</div>
           <div className="label">To: {new Date(selectedReservation.reservation.returnAt).toLocaleString()}</div>
           <div className="label" style={{ marginBottom: 8 }}>{selectedReservation.locked ? 'Locked by agreement' : 'Movable reservation'}</div>
+          {selectedReservation.overbooked ? (
+            <div className="surface-note" style={{ marginBottom: 8, background: '#fef2f2', borderColor: '#fecaca', color: '#991b1b' }}>
+              This reservation could not be auto-accommodated and is currently counted as overbooking in this planner range.
+            </div>
+          ) : null}
           <div style={{ display: 'grid', gap: 8 }}>
             <Link href={`/reservations/${selectedReservation.reservation.id}`}><button>Open Reservation</button></Link>
           </div>
