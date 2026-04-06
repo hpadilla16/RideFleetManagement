@@ -42,6 +42,30 @@ import { api } from '../../lib/client';
 const RESERVATION_PAGE_SIZE = 100;
 const CUSTOMER_PICKER_LIMIT = 100;
 
+function formatReservationWallClock(value, tenantTimeZone = 'America/Puerto_Rico') {
+  if (!value) return '-';
+  const raw = String(value);
+  const isoLikeMatch = raw.match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/);
+  if (isoLikeMatch) {
+    const [, year, month, day, hourRaw, minute] = isoLikeMatch;
+    const hour24 = Number(hourRaw);
+    const suffix = hour24 >= 12 ? 'PM' : 'AM';
+    const hour12 = ((hour24 + 11) % 12) + 1;
+    return `${Number(month)}/${Number(day)}/${year}, ${hour12}:${minute} ${suffix}`;
+  }
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return raw;
+  return date.toLocaleString('en-US', {
+    timeZone: tenantTimeZone,
+    year: 'numeric',
+    month: 'numeric',
+    day: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+    hour12: true
+  });
+}
+
 export default function ReservationsPage() {
   return <AuthGate>{({ token, me, logout }) => <ReservationsInner token={token} me={me} logout={logout} />}</AuthGate>;
 }
@@ -62,7 +86,8 @@ function ReservationsInner({ token, me, logout }) {
     checkedOut: 0,
     feeAdvisories: 0,
     noShows: 0,
-    nextItems: []
+    nextItems: [],
+    tenantTimeZone: 'America/Puerto_Rico'
   });
   const [customers, setCustomers] = useState([]);
   const [locations, setLocations] = useState([]);
@@ -150,7 +175,8 @@ function ReservationsInner({ token, me, logout }) {
         checkedOut: 0,
         feeAdvisories: 0,
         noShows: 0,
-        nextItems: []
+        nextItems: [],
+        tenantTimeZone: 'America/Puerto_Rico'
       });
       return;
     }
@@ -162,7 +188,8 @@ function ReservationsInner({ token, me, logout }) {
         checkedOut: Number(payload?.checkedOut || 0),
         feeAdvisories: Number(payload?.feeAdvisories || 0),
         noShows: Number(payload?.noShows || 0),
-        nextItems: Array.isArray(payload?.nextItems) ? payload.nextItems : []
+        nextItems: Array.isArray(payload?.nextItems) ? payload.nextItems : [],
+        tenantTimeZone: String(payload?.tenantTimeZone || 'America/Puerto_Rico')
       });
     } catch {
       setReservationSummary({
@@ -171,7 +198,8 @@ function ReservationsInner({ token, me, logout }) {
         checkedOut: 0,
         feeAdvisories: 0,
         noShows: 0,
-        nextItems: []
+        nextItems: [],
+        tenantTimeZone: 'America/Puerto_Rico'
       });
     }
   };
@@ -607,8 +635,8 @@ function ReservationsInner({ token, me, logout }) {
                 <td><Link href={`/reservations/${r.id}`}>{r.reservationNumber}</Link></td>
                 <td><span className="badge">{r.status}</span>{hasFeeAdvisory(r.notes) ? <span title="Additional fee advisory" style={{ marginLeft: 6 }}>⚠️</span> : null}</td>
                 <td>{r.customer?.firstName} {r.customer?.lastName}</td>
-                <td>{new Date(r.pickupAt).toLocaleString()}</td>
-                <td>{new Date(r.returnAt).toLocaleString()}</td>
+                <td>{formatReservationWallClock(r.pickupAt, reservationSummary.tenantTimeZone)}</td>
+                <td>{formatReservationWallClock(r.returnAt, reservationSummary.tenantTimeZone)}</td>
                 <td>
                   {r.status === 'CHECKED_OUT' ? null : (
                     <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>

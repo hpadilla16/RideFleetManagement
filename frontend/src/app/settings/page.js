@@ -149,6 +149,20 @@ const EMPTY_RATE = {
   rateItems: [],
   dailyPrices: []
 };
+
+const TENANT_TIMEZONE_OPTIONS = [
+  'America/Puerto_Rico',
+  'America/New_York',
+  'America/Chicago',
+  'America/Denver',
+  'America/Phoenix',
+  'America/Los_Angeles',
+  'America/Santo_Domingo',
+  'America/Mexico_City',
+  'America/Bogota',
+  'America/Lima',
+  'UTC'
+];
 const EMPTY_SERVICE = {
   code: '', name: '', description: '', chargeType: 'UNIT', unitLabel: 'Unit', calculationBy: '24_HOUR_TIME',
   rate: '', dailyRate: '', weeklyRate: '', monthlyRate: '', commissionValueType: '', commissionPercentValue: '', commissionFixedAmount: '', taxable: false, defaultQty: '1', sortOrder: '0',
@@ -266,7 +280,7 @@ function SettingsInner({ token, me, logout }) {
     vehicleTypeIds: []
   });
   const [emailTemplates, setEmailTemplates] = useState(DEFAULT_EMAIL_TEMPLATES);
-  const [reservationOptions, setReservationOptions] = useState({ autoAssignVehicleFromType: false });
+  const [reservationOptions, setReservationOptions] = useState({ autoAssignVehicleFromType: false, tenantTimeZone: 'America/Puerto_Rico' });
   const [paymentGatewayConfig, setPaymentGatewayConfig] = useState(DEFAULT_PAYMENT_GATEWAY_CONFIG);
   const [paymentGatewayHealth, setPaymentGatewayHealth] = useState(null);
   const [tenantModuleAccess, setTenantModuleAccess] = useState({});
@@ -311,7 +325,10 @@ function SettingsInner({ token, me, logout }) {
     if (key === 'vehicleTypes') setVehicleTypes(Array.isArray(value) ? value : []);
     if (key === 'insurancePlans') setInsurancePlans((value || []).map(normalizeInsurancePlan));
     if (key === 'emailTemplates') setEmailTemplates({ ...DEFAULT_EMAIL_TEMPLATES, ...(value || {}) });
-    if (key === 'reservationOptions') setReservationOptions({ autoAssignVehicleFromType: !!value?.autoAssignVehicleFromType });
+    if (key === 'reservationOptions') setReservationOptions({
+      autoAssignVehicleFromType: !!value?.autoAssignVehicleFromType,
+      tenantTimeZone: String(value?.tenantTimeZone || 'America/Puerto_Rico')
+    });
     if (key === 'paymentGateway') {
       setPaymentGatewayConfig({
         ...DEFAULT_PAYMENT_GATEWAY_CONFIG,
@@ -434,7 +451,7 @@ function SettingsInner({ token, me, logout }) {
     setVehicleTypes([]);
     setInsurancePlans([]);
     setEmailTemplates(DEFAULT_EMAIL_TEMPLATES);
-    setReservationOptions({ autoAssignVehicleFromType: false });
+    setReservationOptions({ autoAssignVehicleFromType: false, tenantTimeZone: 'America/Puerto_Rico' });
     setPaymentGatewayConfig(DEFAULT_PAYMENT_GATEWAY_CONFIG);
     setTenantModuleAccess({});
   }, [isSuper, activeSettingsTenantId, me?.tenant?.id]);
@@ -500,7 +517,10 @@ function SettingsInner({ token, me, logout }) {
 
   const saveReservationOptions = async () => {
     const out = await api(scopedSettingsPath('/api/settings/reservation-options'), { method: 'PUT', body: JSON.stringify(reservationOptions) }, token);
-    setReservationOptions({ autoAssignVehicleFromType: !!out?.autoAssignVehicleFromType });
+    setReservationOptions({
+      autoAssignVehicleFromType: !!out?.autoAssignVehicleFromType,
+      tenantTimeZone: String(out?.tenantTimeZone || 'America/Puerto_Rico')
+    });
     setMsg('Reservation options saved');
   };
 
@@ -1583,6 +1603,22 @@ function SettingsInner({ token, me, logout }) {
 
             <div className="glass card" style={{ padding: 12 }}>
               <h3 style={{ marginBottom: 8 }}>Reservation Options</h3>
+              <div className="form-grid-2" style={{ marginBottom: 12 }}>
+                <div className="stack">
+                  <label className="label">Tenant Time Zone</label>
+                  <select
+                    value={reservationOptions.tenantTimeZone || 'America/Puerto_Rico'}
+                    onChange={(e) => setReservationOptions({ ...reservationOptions, tenantTimeZone: e.target.value })}
+                  >
+                    {TENANT_TIMEZONE_OPTIONS.map((zone) => (
+                      <option key={zone} value={zone}>{zone}</option>
+                    ))}
+                  </select>
+                </div>
+                <div className="surface-note">
+                  This tenant-wide time zone applies across the reservation dashboard and all locations under this tenant so pickup and return times display consistently for staff.
+                </div>
+              </div>
               <label className="label" style={{ display: 'inline-flex', alignItems: 'center', gap: 8, textTransform: 'none', letterSpacing: 0, fontSize: 13 }}>
                 <input
                   type="checkbox"

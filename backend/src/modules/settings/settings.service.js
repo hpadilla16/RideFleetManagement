@@ -47,7 +47,8 @@ const DEFAULT_EMAIL_TEMPLATES = {
 };
 
 const DEFAULT_RESERVATION_OPTIONS = {
-  autoAssignVehicleFromType: false
+  autoAssignVehicleFromType: false,
+  tenantTimeZone: 'America/Puerto_Rico'
 };
 
 function defaultPaymentGatewayConfig() {
@@ -203,7 +204,8 @@ export const settingsService = {
     const next = {
       ...DEFAULT_RESERVATION_OPTIONS,
       ...(payload || {}),
-      autoAssignVehicleFromType: !!payload?.autoAssignVehicleFromType
+      autoAssignVehicleFromType: !!payload?.autoAssignVehicleFromType,
+      tenantTimeZone: String(payload?.tenantTimeZone || DEFAULT_RESERVATION_OPTIONS.tenantTimeZone).trim() || DEFAULT_RESERVATION_OPTIONS.tenantTimeZone
     };
     const key = scopedKey('reservationOptions', scope);
     await prisma.appSetting.upsert({

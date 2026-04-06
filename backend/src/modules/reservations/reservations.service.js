@@ -1,6 +1,7 @@
 import { prisma } from '../../lib/prisma.js';
 import { activeVehicleBlockOverlapWhere } from '../vehicles/vehicle-blocks.js';
 import { hostReviewsService } from '../host-reviews/host-reviews.service.js';
+import { settingsService } from '../settings/settings.service.js';
 
 function parseLocationConfig(raw) {
   try {
@@ -91,6 +92,18 @@ function resolveHoursForDate(cfg, date) {
 
 function scopedSettingKey(baseKey, scope = {}) {
   return scope?.tenantId ? `tenant:${scope.tenantId}:${baseKey}` : baseKey;
+}
+
+function formatReservationWallClock(value) {
+  if (!value) return '-';
+  const iso = value instanceof Date ? value.toISOString() : String(value);
+  const match = iso.match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/);
+  if (!match) return String(value);
+  const [, year, month, day, hourRaw, minute] = match;
+  const hour24 = Number(hourRaw);
+  const suffix = hour24 >= 12 ? 'PM' : 'AM';
+  const hour12 = ((hour24 + 11) % 12) + 1;
+  return `${Number(month)}/${Number(day)}/${year}, ${hour12}:${minute} ${suffix}`;
 }
 
 const reservationListSelect = {
@@ -793,6 +806,8 @@ async function pickAvailableVehicle({ vehicleTypeId, pickupLocationId, pickupAt,
 
 export const reservationsService = {
   async summary(scope = {}) {
+    const reservationOptions = await settingsService.getReservationOptions(scope);
+    const tenantTimeZone = String(reservationOptions?.tenantTimeZone || 'America/Puerto_Rico');
     const now = new Date();
     const dayStart = new Date(now);
     dayStart.setHours(0, 0, 0, 0);
@@ -901,7 +916,7 @@ export const reservationsService = {
             id: `pickup-${nextPickup.id}`,
             title: 'Next Pickup',
             detail: `${nextPickup.reservationNumber} - ${customerLabel(nextPickup)}`.trim(),
-            note: `Pickup scheduled for ${new Date(nextPickup.pickupAt).toLocaleString()}.`,
+            note: `Pickup scheduled for ${formatReservationWallClock(nextPickup.pickupAt)}.`,
             href: `/reservations/${nextPickup.id}`,
             actionLabel: 'Open Reservation'
           }
@@ -911,7 +926,7 @@ export const reservationsService = {
             id: `return-${nextReturn.id}`,
             title: 'Next Return',
             detail: `${nextReturn.reservationNumber} - ${customerLabel(nextReturn)}`.trim(),
-            note: `Return due at ${new Date(nextReturn.returnAt).toLocaleString()}.`,
+            note: `Return due at ${formatReservationWallClock(nextReturn.returnAt)}.`,
             href: `/reservations/${nextReturn.id}`,
             actionLabel: 'Review Return'
           }
@@ -946,7 +961,8 @@ export const reservationsService = {
       checkedOut,
       feeAdvisories,
       noShows,
-      nextItems
+      nextItems,
+      tenantTimeZone
     };
   },
 
