@@ -362,6 +362,168 @@ async function issueCustomerInfoRequest(reservation) {
   return issuePortalRequest('customer-info', reservation, { sendEmailToCustomer: true });
 }
 
+function displayDateTime(value) {
+  const parsed = value ? new Date(value) : null;
+  if (!parsed || Number.isNaN(parsed.getTime())) return '-';
+  return parsed.toLocaleString();
+}
+
+function renderTemplateString(value = '', replacements = {}) {
+  return Object.entries(replacements).reduce(
+    (out, [key, replacement]) => out.replaceAll(`{{${key}}}`, String(replacement ?? '')),
+    String(value || '')
+  );
+}
+
+async function sendPublicBookingConfirmationEmail({
+  reservation,
+  customer,
+  tenant,
+  pricingBreakdown = {},
+  nextActions = {},
+  bookingType = 'RENTAL',
+  trip = null,
+  vehicleLabel = ''
+} = {}) {
+  if (!reservation?.id || !customer?.email) {
+    return {
+      emailSent: false,
+      sentTo: [],
+      warning: 'No customer email found for booking confirmation'
+    };
+  }
+
+  const fullReservation = await prisma.reservation.findUnique({
+    where: { id: reservation.id },
+    include: {
+      customer: true,
+      pickupLocation: true,
+      returnLocation: true,
+      vehicle: true,
+      vehicleType: true
+    }
+  });
+
+  if (!fullReservation) {
+    return {
+      emailSent: false,
+      sentTo: [],
+      warning: 'Reservation not found for booking confirmation email'
+    };
+  }
+
+  const guestName = customerName(fullReservation.customer || customer);
+  const reference = trip?.tripCode || fullReservation.reservationNumber || reservation.reservationNumber || '-';
+  const resolvedVehicleLabel = vehicleLabel
+    || [
+      fullReservation.vehicle?.year || '',
+      fullReservation.vehicle?.make || '',
+      fullReservation.vehicle?.model || ''
+    ].filter(Boolean).join(' ')
+    || fullReservation.vehicleType?.name
+    || 'Vehicle';
+  const dueNow = money(
+    pricingBreakdown?.dueNow
+    ?? pricingBreakdown?.depositDueNow
+    ?? pricingBreakdown?.depositDue
+    ?? pricingBreakdown?.amountDueNow
+    ?? reservation?.amountDueNow
+    ?? trip?.amountDueNow
+    ?? 0
+  );
+  const estimatedTotal = money(
+    pricingBreakdown?.guestTotal
+    ?? pricingBreakdown?.reservationEstimate
+    ?? pricingBreakdown?.estimatedTotal
+    ?? reservation?.estimatedTotal
+    ?? trip?.quotedTotal
+    ?? 0
+  );
+
+  const replacements = {
+    customerName: guestName,
+    reservationNumber: String(fullReservation.reservationNumber || reservation?.reservationNumber || ''),
+    tripCode: String(trip?.tripCode || ''),
+    reference,
+    bookingType: String(bookingType || 'RENTAL'),
+    status: String(trip?.status || fullReservation.status || reservation?.status || '-'),
+    pickupAt: displayDateTime(fullReservation.pickupAt || reservation?.pickupAt),
+    returnAt: displayDateTime(fullReservation.returnAt || reservation?.returnAt),
+    pickupLocation: fullReservation.pickupLocation?.name || '-',
+    returnLocation: fullReservation.returnLocation?.name || '-',
+    vehicle: resolvedVehicleLabel,
+    dailyRate: reservation?.dailyRate != null ? `$${Number(reservation.dailyRate).toFixed(2)}` : '-',
+    estimatedTotal: `$${estimatedTotal.toFixed(2)}`,
+    dueNow: `$${dueNow.toFixed(2)}`,
+    companyName: tenant?.name || fullReservation.pickupLocation?.name || 'Ride Fleet',
+    customerInfoLink: nextActions?.customerInfo?.link || '',
+    signatureLink: nextActions?.signature?.link || '',
+    paymentLink: nextActions?.payment?.link || ''
+  };
+
+  const tpl = await settingsService.getEmailTemplates({ tenantId: fullReservation.tenantId || null });
+  const subject = renderTemplateString(
+    tpl.reservationDetailSubject || 'Reservation Details - {{reservationNumber}}',
+    replacements
+  );
+  const baseText = renderTemplateString(
+    tpl.reservationDetailBody || 'Hello {{customerName}},\n\nReservation #: {{reservationNumber}}',
+    replacements
+  );
+  const baseHtml = renderTemplateString(
+    tpl.reservationDetailHtml || String(baseText).replaceAll('\n', '<br/>'),
+    replacements
+  );
+
+  const nextStepLines = [
+    '',
+    'Next steps:',
+    nextActions?.customerInfo?.link ? `Complete customer info: ${nextActions.customerInfo.link}` : null,
+    nextActions?.signature?.link ? `Open agreement signature: ${nextActions.signature.link}` : null,
+    nextActions?.payment?.link ? `Pay now: ${nextActions.payment.link}` : null,
+    '',
+    dueNow > 0 ? `Amount due now: $${dueNow.toFixed(2)}` : 'No payment is due right now.'
+  ].filter(Boolean);
+
+  const nextStepHtml = `
+    <div style="margin-top:18px;padding-top:14px;border-top:1px solid #e5e7eb">
+      <div style="font-weight:700;margin-bottom:8px">Next steps</div>
+      ${nextActions?.customerInfo?.link ? `<div style="margin-bottom:6px">Complete customer info: <a href="${nextActions.customerInfo.link}">${nextActions.customerInfo.link}</a></div>` : ''}
+      ${nextActions?.signature?.link ? `<div style="margin-bottom:6px">Open agreement signature: <a href="${nextActions.signature.link}">${nextActions.signature.link}</a></div>` : ''}
+      ${nextActions?.payment?.link ? `<div style="margin-bottom:6px">Pay now: <a href="${nextActions.payment.link}">${nextActions.payment.link}</a></div>` : ''}
+      <div style="margin-top:10px">${dueNow > 0 ? `Amount due now: <strong>$${dueNow.toFixed(2)}</strong>` : 'No payment is due right now.'}</div>
+    </div>
+  `;
+
+  try {
+    await sendEmail({
+      to: customer.email,
+      subject,
+      text: [baseText, ...nextStepLines].join('\n'),
+      html: `${baseHtml}${nextStepHtml}`
+    });
+    const note = `[PUBLIC BOOKING CONFIRMATION EMAIL ${new Date().toISOString()}] emailed to ${customer.email}`;
+    await prisma.reservation.update({
+      where: { id: fullReservation.id },
+      data: {
+        notes: fullReservation.notes ? `${fullReservation.notes}\n${note}` : note
+      }
+    });
+    return {
+      emailSent: true,
+      sentTo: [customer.email],
+      warning: null
+    };
+  } catch (mailError) {
+    const warning = `Unable to send reservation confirmation email: ${String(mailError?.message || mailError)}`;
+    return {
+      emailSent: false,
+      sentTo: [customer.email],
+      warning
+    };
+  }
+}
+
 function existingPortalAction(kind, reservation) {
   const { tokenField, expiresField } = tokenFieldMap(kind);
   const token = reservation?.[tokenField];
@@ -1314,6 +1476,25 @@ export const bookingEngineService = {
         issuePortalRequest('signature', reservation),
         issuePortalRequest('payment', reservation)
       ]);
+      const nextActions = {
+        customerInfo: customerInfoRequest,
+        signature: signatureRequest,
+        payment: paymentRequest,
+        primaryStep: 'customer-info'
+      };
+      const confirmationEmail = await sendPublicBookingConfirmationEmail({
+        reservation,
+        customer,
+        tenant,
+        pricingBreakdown: {
+          dueNow: money(selected.deposit?.amountDue),
+          estimatedTotal,
+          reservationEstimate: estimatedTotal
+        },
+        nextActions,
+        bookingType: 'RENTAL',
+        vehicleLabel: selected?.vehicleType?.name || 'Vehicle'
+      });
       return {
         bookingType: 'RENTAL',
         tenant: { id: tenant.id, name: tenant.name, slug: tenant.slug },
@@ -1361,12 +1542,8 @@ export const bookingEngineService = {
               type: 'OWN_POLICY',
               ownPolicyNumber: insuranceSelection?.ownPolicyNumber ? String(insuranceSelection.ownPolicyNumber).trim() : ''
             },
-        nextActions: {
-          customerInfo: customerInfoRequest,
-          signature: signatureRequest,
-          payment: paymentRequest,
-          primaryStep: 'customer-info'
-        }
+        nextActions,
+        confirmationEmail
       };
     }
 
@@ -1454,6 +1631,25 @@ export const bookingEngineService = {
           payment: { kind: 'payment', link: '', expiresAt: null, emailSent: false, warning: 'Trip created without linked reservation workflow' },
           primaryStep: 'customer-info'
         };
+    const confirmationEmail = trip?.reservation
+      ? await sendPublicBookingConfirmationEmail({
+          reservation: trip.reservation,
+          customer,
+          tenant,
+          pricingBreakdown: {
+            dueNow: money(selected.quote?.amountDueNow),
+            guestTotal: money(Number(trip.quotedTotal || 0) + normalizedChosenServices.reduce((sum, service) => sum + Number(service.total || 0), 0))
+          },
+          nextActions,
+          bookingType: 'CAR_SHARING',
+          trip,
+          vehicleLabel: selected.listing?.vehicle?.label || selected.listing?.title || 'Vehicle'
+        })
+      : {
+          emailSent: false,
+          sentTo: customer?.email ? [customer.email] : [],
+          warning: 'Trip created without linked reservation workflow'
+        };
 
     return {
       bookingType: 'CAR_SHARING',
@@ -1518,7 +1714,8 @@ export const bookingEngineService = {
         status: trip.reservation.status
       } : null,
       additionalServices: normalizedChosenServices,
-      nextActions
+      nextActions,
+      confirmationEmail
     };
   },
 
