@@ -180,6 +180,56 @@ enum TripIncidentStatus {
   CLOSED
 }
 
+enum TripIncidentPriority {
+  LOW
+  MEDIUM
+  HIGH
+  URGENT
+}
+
+enum TripIncidentSeverity {
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
+}
+
+enum TripIncidentResolutionCode {
+  CUSTOMER_CHARGED
+  WAIVED
+  INVALID_REPORT
+  DUPLICATE
+  GOODWILL
+  OTHER
+}
+
+enum TripIncidentLiabilityDecision {
+  PENDING
+  CUSTOMER
+  TENANT
+  HOST
+  SHARED
+  WAIVED
+}
+
+enum TripIncidentChargeDecision {
+  PENDING
+  CHARGE_CUSTOMER
+  CHARGE_HOST
+  CHARGE_TENANT
+  WAIVE
+}
+
+enum TripIncidentRecoveryStage {
+  INTAKE
+  EVIDENCE
+  LIABILITY_REVIEW
+  READY_TO_CHARGE
+  CHARGED
+  WAIVED
+  CLOSED
+}
+
 enum HostReviewStatus {
   REQUESTED
   SUBMITTED
@@ -843,6 +893,7 @@ model User {
   createdUsers User[] @relation("UserCreatedBy")
   createdHostProfiles HostProfile[] @relation("HostProfileCreatedBy")
   approvedHostVehicleSubmissions HostVehicleSubmission[]
+  ownedTripIncidents TripIncident[] @relation("TripIncidentOwner")
 
   @@index([tenantId, role, isActive])
   @@index([commissionPlanId])
@@ -1261,6 +1312,17 @@ model TripIncident {
   reservation       Reservation?       @relation(fields: [reservationId], references: [id], onDelete: Cascade)
   type              TripIncidentType
   status            TripIncidentStatus @default(OPEN)
+  priority          TripIncidentPriority @default(MEDIUM)
+  severity          TripIncidentSeverity @default(LOW)
+  ownerUserId       String?
+  ownerUser         User?              @relation("TripIncidentOwner", fields: [ownerUserId], references: [id])
+  dueAt             DateTime?
+  resolutionCode    TripIncidentResolutionCode?
+  liabilityDecision TripIncidentLiabilityDecision @default(PENDING)
+  chargeDecision    TripIncidentChargeDecision @default(PENDING)
+  recoveryStage     TripIncidentRecoveryStage @default(INTAKE)
+  waiveReason       String?
+  customerChargeReady Boolean          @default(false)
   title             String
   description       String?
   amountClaimed     Decimal?           @db.Decimal(10, 2)
@@ -1274,6 +1336,8 @@ model TripIncident {
 
   @@index([tripId, status])
   @@index([reservationId, status])
+  @@index([ownerUserId, status, priority])
+  @@index([status, priority, dueAt])
 }
 
 model TripIncidentCommunication {
