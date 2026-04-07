@@ -6,11 +6,12 @@
   "scripts": {
     "dev": "node src/main.js",
     "start": "node src/main.js",
-    "test": "npm run test:vehicles && npm run test:planner && npm run test:rates && npm run test:portal",
+    "test": "npm run test:vehicles && npm run test:planner && npm run test:rates && npm run test:portal && npm run test:tolls",
     "test:vehicles": "node --test src/modules/vehicles/vehicle-intelligence.test.mjs src/modules/vehicles/telematics-zubie.test.mjs",
     "test:planner": "node --test src/modules/planner/planner.service.test.mjs",
     "test:rates": "node --test src/modules/rates/revenue-pricing.test.mjs",
     "test:portal": "node --test src/modules/customer-portal/customer-portal-self-service.test.mjs",
+    "test:tolls": "node --test src/modules/tolls/tolls-responsibility.test.mjs src/modules/tolls/tolls-billing-policy.test.mjs",
     "verify": "npm run test",
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate dev --name init",

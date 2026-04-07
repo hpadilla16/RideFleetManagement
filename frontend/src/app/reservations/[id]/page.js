@@ -82,6 +82,27 @@ const toMoneyNum = (v) => {
 
 const money = (n) => `$${toMoneyNum(n).toFixed(2)}`;
 
+function tollReviewLabel(row = {}) {
+  if (row?.coveredByTollPackage || row?.billingMode === 'USAGE_ONLY') {
+    return 'Usage recorded by toll package';
+  }
+  if (row?.dispatchConfirmationRequired || row?.reviewCategory === 'DISPATCH_CONFIRMATION_REQUIRED') {
+    return 'Dispatch confirmation required';
+  }
+  if (row?.needsReview) return 'Needs review';
+  return String(row?.billingStatus || '').replaceAll('_', ' ').toLowerCase() || 'linked';
+}
+
+function tollReviewHint(row = {}) {
+  if (row?.coveredByTollPackage || row?.billingMode === 'USAGE_ONLY') {
+    return 'This toll package covers the transaction. Usage is tracked on the reservation, but the tenant rules say not to bill it.';
+  }
+  if (row?.dispatchConfirmationRequired || row?.reviewCategory === 'DISPATCH_CONFIRMATION_REQUIRED') {
+    return 'This toll hit before formal checkout on the assigned/swap vehicle. Confirm whether the vehicle was actually dispatched to this customer.';
+  }
+  return row?.latestAssignment?.matchReason || row?.reviewNotes || 'reservation-linked';
+}
+
 function toLocalDateTime(value) {
   if (!value) return '';
   const date = new Date(value);
@@ -366,6 +387,25 @@ function ReservationDetailInner({ token, me, logout }) {
         body: JSON.stringify({})
       }, token);
       setMsg('Toll posted to reservation charges');
+      await load();
+    } catch (e) {
+      setMsg(e.message);
+    }
+  };
+
+  const runReservationTollReviewAction = async (transactionId, action) => {
+    const notePrompt = action === 'CONFIRM_DISPATCHED'
+      ? 'Optional dispatch confirmation note'
+      : action === 'MARK_NOT_DISPATCHED'
+        ? 'Optional note for why this vehicle was not dispatched'
+        : 'Optional toll review note';
+    const note = window.prompt(notePrompt, '') || '';
+    try {
+      await api(`/api/tolls/transactions/${transactionId}/review-action`, {
+        method: 'POST',
+        body: JSON.stringify({ action, note })
+      }, token);
+      setMsg(action === 'CONFIRM_DISPATCHED' ? 'Dispatch confirmed and toll kept on reservation' : 'Toll removed from reservation review');
       await load();
     } catch (e) {
       setMsg(e.message);
@@ -1845,6 +1885,8 @@ token
             <div className="grid2" style={{ marginBottom: 10 }}>
               <div><span className="label">Total Tolls</span><div>{money(tollSummary?.totals?.totalAmount || 0)}</div></div>
               <div><span className="label">Posted To Charges</span><div>{money(tollSummary?.totals?.postedAmount || 0)}</div></div>
+              <div><span className="label">Usage Only</span><div>{money(tollSummary?.totals?.usageOnlyAmount || 0)}</div></div>
+              <div><span className="label">Usage Transactions</span><div>{Number(tollSummary?.totals?.usageOnlyCount || 0)}</div></div>
             </div>
             {Array.isArray(tollSummary?.transactions) && tollSummary.transactions.length ? (
               <div className="stack" style={{ gap: 8 }}>
@@ -1852,17 +1894,28 @@ token
                   <div key={toll.id} className="surface-note" style={{ display: 'grid', gap: 8 }}>
                     <div className="row-between" style={{ marginBottom: 0 }}>
                       <strong>{money(toll.amount)} {toll.location ? `- ${toll.location}` : ''}</strong>
-                      <span className={`status-chip ${toll.needsReview ? 'warn' : toll.billingStatus === 'POSTED_TO_RESERVATION' ? 'good' : 'neutral'}`}>
-                        {toll.needsReview ? 'Needs review' : toll.billingStatus.replaceAll('_', ' ').toLowerCase()}
+                      <span className={`status-chip ${(toll.coveredByTollPackage || toll.billingMode === 'USAGE_ONLY') ? 'good' : toll.needsReview ? 'warn' : toll.billingStatus === 'POSTED_TO_RESERVATION' ? 'good' : 'neutral'}`}>
+                        {tollReviewLabel(toll)}
                       </span>
                     </div>
                     <div className="label" style={{ textTransform: 'none', letterSpacing: 0 }}>
                       {new Date(toll.transactionAt).toLocaleString()} · Plate {toll.plateRaw || '-'} · Tag {toll.tagRaw || '-'} · Sello {toll.selloRaw || '-'}
                     </div>
                     <div className="label" style={{ textTransform: 'none', letterSpacing: 0 }}>
-                      Match: {toll.latestAssignment?.matchReason || toll.reviewNotes || 'reservation-linked'} · Score {toll.latestAssignment?.confidence ?? toll.matchConfidence ?? 0}
+                      Match: {tollReviewHint(toll)} · Score {toll.latestAssignment?.confidence ?? toll.matchConfidence ?? 0}
                     </div>
-                    {toll.billingStatus === 'PENDING' ? (
+                    {toll.dispatchConfirmationRequired ? (
+                      <div className="inline-actions">
+                        <button type="button" className="button-subtle" onClick={() => runReservationTollReviewAction(toll.id, 'CONFIRM_DISPATCHED')}>
+                          Yes, Vehicle Was Dispatched
+                        </button>
+                        <button type="button" className="button-subtle" onClick={() => runReservationTollReviewAction(toll.id, 'MARK_NOT_DISPATCHED')}>
+                          No, Remove Toll
+                        </button>
+                        <button type="button" className="button-subtle" onClick={() => router.push('/tolls')}>Open Toll Queue</button>
+                      </div>
+                    ) : null}
+                    {toll.billingStatus === 'PENDING' && !toll.needsReview && !(toll.coveredByTollPackage || toll.billingMode === 'USAGE_ONLY') ? (
                       <div className="inline-actions">
                         <button type="button" className="button-subtle" onClick={() => postReservationToll(toll.id)}>Post Toll To Charges</button>
                         <button type="button" className="button-subtle" onClick={() => router.push('/tolls')}>Open Toll Queue</button>
@@ -1873,7 +1926,7 @@ token
               </div>
             ) : (
               <div className="surface-note">
-                No tolls are linked to this reservation yet. Once imported into the tenant toll queue, matching uses the assigned vehicle, toll tag, toll sticker, and pickup/return timestamps.
+                No tolls are linked to this reservation yet. Once imported into the tenant toll queue, matching uses the assigned vehicle, toll tag, toll sticker, pickup/return timestamps, and swap history.
               </div>
             )}
           </div>
