@@ -180,7 +180,47 @@ const DEFAULT_SELF_SERVICE_CONFIG = {
   dropoffInstructions: '',
   supportPhone: '',
   readinessMode: 'STRICT',
+  carSharingAutoRevealEnabled: true,
+  carSharingAutoRevealModes: ['LOCKBOX', 'REMOTE_UNLOCK', 'SELF_SERVICE'],
+  carSharingDefaultRevealWindowHours: 24,
+  carSharingAirportRevealWindowHours: 12,
+  carSharingHotelRevealWindowHours: 8,
+  carSharingNeighborhoodRevealWindowHours: 24,
+  carSharingStationRevealWindowHours: 10,
+  carSharingHostPickupRevealWindowHours: 18,
+  carSharingBranchRevealWindowHours: 0,
+  carSharingDefaultHandoffMode: 'IN_PERSON',
+  carSharingAirportHandoffMode: 'LOCKBOX',
+  carSharingHotelHandoffMode: 'IN_PERSON',
+  carSharingNeighborhoodHandoffMode: 'SELF_SERVICE',
+  carSharingStationHandoffMode: 'LOCKBOX',
+  carSharingHostPickupHandoffMode: 'LOCKBOX',
+  carSharingBranchHandoffMode: 'SELF_SERVICE',
+  carSharingAirportInstructionsTemplate: 'Share the terminal, parking garage, level, stall, and timing for access or key retrieval.',
+  carSharingHotelInstructionsTemplate: 'Share the hotel entrance, lobby, valet, or curbside meeting instructions and exact timing.',
+  carSharingNeighborhoodInstructionsTemplate: 'Share the street, landmark, parking side, and how the guest should access the vehicle.',
+  carSharingStationInstructionsTemplate: 'Share the station meeting point, garage/lot, and platform or entrance guidance.',
+  carSharingHostPickupInstructionsTemplate: 'Share the driveway, garage, gate, lockbox, or parking notes the guest should follow on arrival.',
+  carSharingBranchInstructionsTemplate: 'Share the branch lot, kiosk, desk, or self-service pickup steps the guest should follow.',
   tenantPlan: 'BETA'
+};
+
+const DEFAULT_CAR_SHARING_PRESET = {
+  id: '',
+  placeType: 'AIRPORT',
+  label: '',
+  publicLabel: '',
+  anchorLocationId: '',
+  city: '',
+  state: '',
+  postalCode: '',
+  country: 'Puerto Rico',
+  radiusMiles: '',
+  visibilityMode: 'APPROXIMATE_ONLY',
+  searchable: true,
+  isActive: true,
+  pickupEligible: true,
+  deliveryEligible: true
 };
 
 const EMPTY_LOCATION = { code: '', name: '', address: '', city: '', state: '', country: 'Puerto Rico', taxRate: '11.5', isActive: true };
@@ -360,6 +400,7 @@ const SETTINGS_TAB_SECTIONS = {
   fees: ['fees'],
   rates: ['rates'],
   revenue: ['revenuePricing'],
+  carSharing: ['carSharingSearchPlaces'],
   selfService: ['selfService'],
   vehicleTypes: [],
   insurance: ['insurancePlans'],
@@ -417,6 +458,7 @@ function SettingsInner({ token, me, logout }) {
   const [revenuePricingPreview, setRevenuePricingPreview] = useState(DEFAULT_REVENUE_PRICING_PREVIEW);
   const [revenuePricingPreviewResult, setRevenuePricingPreviewResult] = useState(null);
   const [selfServiceConfig, setSelfServiceConfig] = useState(DEFAULT_SELF_SERVICE_CONFIG);
+  const [carSharingSearchPlaces, setCarSharingSearchPlaces] = useState([]);
   const [tenantModuleAccess, setTenantModuleAccess] = useState({});
   const [loadedSettingsSections, setLoadedSettingsSections] = useState({});
 
@@ -427,6 +469,7 @@ function SettingsInner({ token, me, logout }) {
   const [rateDailyUploadName, setRateDailyUploadName] = useState('');
   const [rateDailyUploadReport, setRateDailyUploadReport] = useState(null);
   const [serviceForm, setServiceForm] = useState(EMPTY_SERVICE);
+  const [carSharingPresetForm, setCarSharingPresetForm] = useState(DEFAULT_CAR_SHARING_PRESET);
   const [serviceEditId, setServiceEditId] = useState(null);
   const [locationEditor, setLocationEditor] = useState(null);
   const [locationEditorTab, setLocationEditorTab] = useState('main');
@@ -529,6 +572,9 @@ function SettingsInner({ token, me, logout }) {
         ...(value || {})
       });
     }
+    if (key === 'carSharingSearchPlaces') {
+      setCarSharingSearchPlaces(Array.isArray(value) ? value : []);
+    }
     if (key === 'selfService') {
       setSelfServiceConfig({
         ...DEFAULT_SELF_SERVICE_CONFIG,
@@ -553,6 +599,7 @@ function SettingsInner({ token, me, logout }) {
     plannerCopilotUsage: (forceLoad = false) => api(scopedSettingsPath('/api/settings/planner-copilot/usage'), forceLoad ? { bypassCache: true } : {}, token),
     telematics: (forceLoad = false) => api(scopedSettingsPath('/api/settings/telematics'), forceLoad ? { bypassCache: true } : {}, token),
     revenuePricing: (forceLoad = false) => api(scopedSettingsPath('/api/settings/revenue-pricing'), forceLoad ? { bypassCache: true } : {}, token),
+    carSharingSearchPlaces: (forceLoad = false) => api(scopedSettingsPath('/api/settings/car-sharing-search-places'), forceLoad ? { bypassCache: true } : {}, token),
     selfService: (forceLoad = false) => api(scopedSettingsPath('/api/settings/self-service'), forceLoad ? { bypassCache: true } : {}, token),
     tenantModules: (forceLoad = false) => api(scopedSettingsPath('/api/settings/tenant-modules'), forceLoad ? { bypassCache: true } : {}, token)
   };
@@ -868,7 +915,29 @@ function SettingsInner({ token, me, logout }) {
         pickupInstructions: String(selfServiceConfig.pickupInstructions || ''),
         dropoffInstructions: String(selfServiceConfig.dropoffInstructions || ''),
         supportPhone: String(selfServiceConfig.supportPhone || ''),
-        readinessMode: String(selfServiceConfig.readinessMode || 'STRICT').toUpperCase()
+        readinessMode: String(selfServiceConfig.readinessMode || 'STRICT').toUpperCase(),
+        carSharingAutoRevealEnabled: !!selfServiceConfig.carSharingAutoRevealEnabled,
+        carSharingAutoRevealModes: Array.isArray(selfServiceConfig.carSharingAutoRevealModes) ? selfServiceConfig.carSharingAutoRevealModes : [],
+        carSharingDefaultRevealWindowHours: Number(selfServiceConfig.carSharingDefaultRevealWindowHours || 0),
+        carSharingAirportRevealWindowHours: Number(selfServiceConfig.carSharingAirportRevealWindowHours || 0),
+        carSharingHotelRevealWindowHours: Number(selfServiceConfig.carSharingHotelRevealWindowHours || 0),
+        carSharingNeighborhoodRevealWindowHours: Number(selfServiceConfig.carSharingNeighborhoodRevealWindowHours || 0),
+        carSharingStationRevealWindowHours: Number(selfServiceConfig.carSharingStationRevealWindowHours || 0),
+        carSharingHostPickupRevealWindowHours: Number(selfServiceConfig.carSharingHostPickupRevealWindowHours || 0),
+        carSharingBranchRevealWindowHours: Number(selfServiceConfig.carSharingBranchRevealWindowHours || 0),
+        carSharingDefaultHandoffMode: String(selfServiceConfig.carSharingDefaultHandoffMode || 'IN_PERSON').toUpperCase(),
+        carSharingAirportHandoffMode: String(selfServiceConfig.carSharingAirportHandoffMode || 'LOCKBOX').toUpperCase(),
+        carSharingHotelHandoffMode: String(selfServiceConfig.carSharingHotelHandoffMode || 'IN_PERSON').toUpperCase(),
+        carSharingNeighborhoodHandoffMode: String(selfServiceConfig.carSharingNeighborhoodHandoffMode || 'SELF_SERVICE').toUpperCase(),
+        carSharingStationHandoffMode: String(selfServiceConfig.carSharingStationHandoffMode || 'LOCKBOX').toUpperCase(),
+        carSharingHostPickupHandoffMode: String(selfServiceConfig.carSharingHostPickupHandoffMode || 'LOCKBOX').toUpperCase(),
+        carSharingBranchHandoffMode: String(selfServiceConfig.carSharingBranchHandoffMode || 'SELF_SERVICE').toUpperCase(),
+        carSharingAirportInstructionsTemplate: String(selfServiceConfig.carSharingAirportInstructionsTemplate || ''),
+        carSharingHotelInstructionsTemplate: String(selfServiceConfig.carSharingHotelInstructionsTemplate || ''),
+        carSharingNeighborhoodInstructionsTemplate: String(selfServiceConfig.carSharingNeighborhoodInstructionsTemplate || ''),
+        carSharingStationInstructionsTemplate: String(selfServiceConfig.carSharingStationInstructionsTemplate || ''),
+        carSharingHostPickupInstructionsTemplate: String(selfServiceConfig.carSharingHostPickupInstructionsTemplate || ''),
+        carSharingBranchInstructionsTemplate: String(selfServiceConfig.carSharingBranchInstructionsTemplate || '')
       })
     }, token);
     setSelfServiceConfig({
@@ -876,6 +945,50 @@ function SettingsInner({ token, me, logout }) {
       ...(out || {})
     });
     setMsg('Self-service settings saved');
+  };
+
+  const saveCarSharingPreset = async () => {
+    const payload = {
+      placeType: carSharingPresetForm.placeType,
+      label: String(carSharingPresetForm.label || ''),
+      publicLabel: String(carSharingPresetForm.publicLabel || ''),
+      anchorLocationId: carSharingPresetForm.anchorLocationId || null,
+      city: String(carSharingPresetForm.city || ''),
+      state: String(carSharingPresetForm.state || ''),
+      postalCode: String(carSharingPresetForm.postalCode || ''),
+      country: String(carSharingPresetForm.country || ''),
+      radiusMiles: carSharingPresetForm.radiusMiles === '' ? null : Number(carSharingPresetForm.radiusMiles),
+      visibilityMode: carSharingPresetForm.visibilityMode,
+      searchable: !!carSharingPresetForm.searchable,
+      isActive: !!carSharingPresetForm.isActive,
+      pickupEligible: !!carSharingPresetForm.pickupEligible,
+      deliveryEligible: !!carSharingPresetForm.deliveryEligible
+    };
+    if (carSharingPresetForm.id) {
+      await api(scopedSettingsPath(`/api/settings/car-sharing-search-places/${carSharingPresetForm.id}`), {
+        method: 'PATCH',
+        body: JSON.stringify(payload)
+      }, token);
+      setMsg('Car sharing preset updated');
+    } else {
+      await api(scopedSettingsPath('/api/settings/car-sharing-search-places'), {
+        method: 'POST',
+        body: JSON.stringify(payload)
+      }, token);
+      setMsg('Car sharing preset created');
+    }
+    setCarSharingPresetForm(DEFAULT_CAR_SHARING_PRESET);
+    await load(true);
+  };
+
+  const removeCarSharingPreset = async (id) => {
+    if (!window.confirm('Remove this car sharing preset?')) return;
+    await api(scopedSettingsPath(`/api/settings/car-sharing-search-places/${id}`), {
+      method: 'DELETE'
+    }, token);
+    setMsg('Car sharing preset removed');
+    if (carSharingPresetForm.id === id) setCarSharingPresetForm(DEFAULT_CAR_SHARING_PRESET);
+    await load(true);
   };
 
   const runRevenuePricingPreview = async () => {
@@ -1810,6 +1923,7 @@ function SettingsInner({ token, me, logout }) {
     fees: 'Fees',
     rates: 'Rates',
     revenue: 'Revenue',
+    carSharing: 'Car Sharing',
     selfService: 'Self-Service',
     vehicleTypes: 'Vehicle Types',
     insurance: 'Insurance',
@@ -1898,6 +2012,7 @@ function SettingsInner({ token, me, logout }) {
             <button type="button" onClick={() => setTab('locations')}>Locations</button>
             <button type="button" onClick={() => setTab('rates')}>Rates</button>
             <button type="button" onClick={() => setTab('revenue')}>Revenue</button>
+            <button type="button" onClick={() => setTab('carSharing')}>Car Sharing</button>
             <button type="button" onClick={() => setTab('selfService')}>Self-Service</button>
             <button type="button" onClick={() => setTab('services')}>Online Services</button>
             <button type="button" onClick={() => setTab('insurance')}>Insurance</button>
@@ -1915,6 +2030,7 @@ function SettingsInner({ token, me, logout }) {
           <button onClick={() => setTab('fees')}>Fees</button>
           <button onClick={() => setTab('rates')}>Rates</button>
           <button onClick={() => setTab('revenue')}>Revenue</button>
+          <button onClick={() => setTab('carSharing')}>Car Sharing</button>
           <button onClick={() => setTab('selfService')}>Self-Service</button>
           <button onClick={() => setTab('vehicleTypes')}>Vehicle Types</button>
           <button onClick={() => setTab('insurance')}>Insurance</button>
@@ -3091,6 +3207,122 @@ function SettingsInner({ token, me, logout }) {
                 </div>
               </div>
 
+              <div className="surface-note" style={{ display: 'grid', gap: 12 }}>
+                <div>
+                  <strong>Car Sharing Handoff Intelligence</strong>
+                  <div className="ui-muted" style={{ marginTop: 6 }}>
+                    Automatically reveal exact handoff details close to pickup for lockbox, remote unlock, and self-service trips, with different windows by place type.
+                  </div>
+                </div>
+
+                <label className="label" style={{ textTransform: 'none', letterSpacing: 0, fontSize: 13 }}>
+                  <input
+                    type="checkbox"
+                    checked={!!selfServiceConfig.carSharingAutoRevealEnabled}
+                    onChange={(e) => setSelfServiceConfig((current) => ({ ...current, carSharingAutoRevealEnabled: e.target.checked }))}
+                  /> Enable automatic exact-handoff reveal for car sharing
+                </label>
+
+                <div className="form-grid-2">
+                  {['LOCKBOX', 'REMOTE_UNLOCK', 'SELF_SERVICE', 'IN_PERSON'].map((mode) => (
+                    <label key={mode} className="label" style={{ textTransform: 'none', letterSpacing: 0, fontSize: 13 }}>
+                      <input
+                        type="checkbox"
+                        checked={Array.isArray(selfServiceConfig.carSharingAutoRevealModes) && selfServiceConfig.carSharingAutoRevealModes.includes(mode)}
+                        onChange={(e) => {
+                          const current = Array.isArray(selfServiceConfig.carSharingAutoRevealModes) ? selfServiceConfig.carSharingAutoRevealModes : [];
+                          const next = e.target.checked
+                            ? Array.from(new Set([...current, mode]))
+                            : current.filter((item) => item !== mode);
+                          setSelfServiceConfig((config) => ({ ...config, carSharingAutoRevealModes: next }));
+                        }}
+                      /> Auto reveal for {mode.replaceAll('_', ' ').toLowerCase()}
+                    </label>
+                  ))}
+                </div>
+
+                <div className="form-grid-3">
+                  <div className="stack">
+                    <label className="label">Default Reveal Window (Hours)</label>
+                    <input type="number" min="0" max="168" value={selfServiceConfig.carSharingDefaultRevealWindowHours ?? 24} onChange={(e) => setSelfServiceConfig((current) => ({ ...current, carSharingDefaultRevealWindowHours: e.target.value }))} />
+                  </div>
+                  <div className="stack">
+                    <label className="label">Airport Reveal Window</label>
+                    <input type="number" min="0" max="168" value={selfServiceConfig.carSharingAirportRevealWindowHours ?? 12} onChange={(e) => setSelfServiceConfig((current) => ({ ...current, carSharingAirportRevealWindowHours: e.target.value }))} />
+                  </div>
+                  <div className="stack">
+                    <label className="label">Hotel Reveal Window</label>
+                    <input type="number" min="0" max="168" value={selfServiceConfig.carSharingHotelRevealWindowHours ?? 8} onChange={(e) => setSelfServiceConfig((current) => ({ ...current, carSharingHotelRevealWindowHours: e.target.value }))} />
+                  </div>
+                  <div className="stack">
+                    <label className="label">Neighborhood Reveal Window</label>
+                    <input type="number" min="0" max="168" value={selfServiceConfig.carSharingNeighborhoodRevealWindowHours ?? 24} onChange={(e) => setSelfServiceConfig((current) => ({ ...current, carSharingNeighborhoodRevealWindowHours: e.target.value }))} />
+                  </div>
+                  <div className="stack">
+                    <label className="label">Station Reveal Window</label>
+                    <input type="number" min="0" max="168" value={selfServiceConfig.carSharingStationRevealWindowHours ?? 10} onChange={(e) => setSelfServiceConfig((current) => ({ ...current, carSharingStationRevealWindowHours: e.target.value }))} />
+                  </div>
+                  <div className="stack">
+                    <label className="label">Host Pickup Reveal Window</label>
+                    <input type="number" min="0" max="168" value={selfServiceConfig.carSharingHostPickupRevealWindowHours ?? 18} onChange={(e) => setSelfServiceConfig((current) => ({ ...current, carSharingHostPickupRevealWindowHours: e.target.value }))} />
+                  </div>
+                  <div className="stack">
+                    <label className="label">Branch Area Reveal Window</label>
+                    <input type="number" min="0" max="168" value={selfServiceConfig.carSharingBranchRevealWindowHours ?? 0} onChange={(e) => setSelfServiceConfig((current) => ({ ...current, carSharingBranchRevealWindowHours: e.target.value }))} />
+                  </div>
+                </div>
+
+                <div className="stack" style={{ gap: 12 }}>
+                  <strong>Car Sharing Handoff Presets</strong>
+                  <div className="ui-muted">
+                    Suggest the best handoff mode and starter instructions by search place type so hosts can release airport, hotel, and neighborhood trips faster.
+                  </div>
+
+                  <div className="form-grid-2">
+                    <div className="stack">
+                      <label className="label">Default Handoff Mode</label>
+                      <select value={selfServiceConfig.carSharingDefaultHandoffMode || 'IN_PERSON'} onChange={(e) => setSelfServiceConfig((current) => ({ ...current, carSharingDefaultHandoffMode: e.target.value }))}>
+                        <option value="IN_PERSON">In-person</option>
+                        <option value="LOCKBOX">Lockbox</option>
+                        <option value="REMOTE_UNLOCK">Remote unlock</option>
+                        <option value="SELF_SERVICE">Self-service</option>
+                      </select>
+                    </div>
+                  </div>
+
+                  {[
+                    ['Airport', 'Airport', 'carSharingAirportHandoffMode', 'carSharingAirportInstructionsTemplate'],
+                    ['Hotel', 'Hotel', 'carSharingHotelHandoffMode', 'carSharingHotelInstructionsTemplate'],
+                    ['Neighborhood', 'Neighborhood', 'carSharingNeighborhoodHandoffMode', 'carSharingNeighborhoodInstructionsTemplate'],
+                    ['Station', 'Station', 'carSharingStationHandoffMode', 'carSharingStationInstructionsTemplate'],
+                    ['Host Pickup', 'Host Pickup Spot', 'carSharingHostPickupHandoffMode', 'carSharingHostPickupInstructionsTemplate'],
+                    ['Branch', 'Branch Area', 'carSharingBranchHandoffMode', 'carSharingBranchInstructionsTemplate']
+                  ].map(([key, label, modeKey, instructionsKey]) => (
+                    <div key={key} className="surface-note" style={{ display: 'grid', gap: 12 }}>
+                      <div className="row-between" style={{ alignItems: 'center', gap: 12 }}>
+                        <strong>{label}</strong>
+                        <span className="status-chip neutral">Preset</span>
+                      </div>
+                      <div className="form-grid-2">
+                        <div className="stack">
+                          <label className="label">Suggested Handoff Mode</label>
+                          <select value={selfServiceConfig[modeKey] || selfServiceConfig.carSharingDefaultHandoffMode || 'IN_PERSON'} onChange={(e) => setSelfServiceConfig((current) => ({ ...current, [modeKey]: e.target.value }))}>
+                            <option value="IN_PERSON">In-person</option>
+                            <option value="LOCKBOX">Lockbox</option>
+                            <option value="REMOTE_UNLOCK">Remote unlock</option>
+                            <option value="SELF_SERVICE">Self-service</option>
+                          </select>
+                        </div>
+                        <div className="stack">
+                          <label className="label">Instruction Template</label>
+                          <textarea rows={3} value={selfServiceConfig[instructionsKey] || ''} onChange={(e) => setSelfServiceConfig((current) => ({ ...current, [instructionsKey]: e.target.value }))} placeholder="Starter instructions for hosts using this type of place." />
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
               <div className="inline-actions">
                 <button type="button" onClick={saveSelfServiceConfig}>Save Self-Service</button>
                 <button type="button" className="button-subtle" onClick={() => setSelfServiceConfig(DEFAULT_SELF_SERVICE_CONFIG)}>Reset to Defaults</button>
@@ -3387,6 +3619,174 @@ function SettingsInner({ token, me, logout }) {
                   ) : null}
                 </div>
               ) : null}
+            </section>
+          </div>
+        )}
+
+        {tab === 'carSharing' && (
+          <div className="stack">
+            <h2>Car Sharing Search Place Presets</h2>
+            <div className="surface-note">
+              Create tenant-approved airports, hotels, neighborhoods, and stations so guests can search meaningful places without depending only on host pickup spots. This is the layer that should feel closer to a marketplace like Turo, while still staying tenant-governed.
+            </div>
+
+            <section className="glass card section-card">
+              <div className="row-between" style={{ alignItems: 'flex-start', gap: 12 }}>
+                <div className="stack" style={{ gap: 6 }}>
+                  <h3 style={{ margin: 0 }}>{carSharingPresetForm.id ? 'Edit Search Place Preset' : 'Create Search Place Preset'}</h3>
+                  <div className="ui-muted">
+                    Use these presets for airports, hotels, neighborhoods, and other canonical guest search places.
+                  </div>
+                </div>
+                {carSharingPresetForm.id ? (
+                  <button type="button" className="button-subtle" onClick={() => setCarSharingPresetForm(DEFAULT_CAR_SHARING_PRESET)}>Clear</button>
+                ) : null}
+              </div>
+
+              <div className="form-grid-3">
+                <div className="stack">
+                  <label className="label">Place Type</label>
+                  <select value={carSharingPresetForm.placeType} onChange={(e) => setCarSharingPresetForm((current) => ({ ...current, placeType: e.target.value }))}>
+                    <option value="AIRPORT">Airport</option>
+                    <option value="HOTEL">Hotel</option>
+                    <option value="NEIGHBORHOOD">Neighborhood</option>
+                    <option value="STATION">Station</option>
+                    <option value="TENANT_BRANCH">Tenant Branch Search Place</option>
+                  </select>
+                </div>
+                <div className="stack">
+                  <label className="label">Internal Label</label>
+                  <input value={carSharingPresetForm.label} onChange={(e) => setCarSharingPresetForm((current) => ({ ...current, label: e.target.value }))} placeholder="SJU Airport" />
+                </div>
+                <div className="stack">
+                  <label className="label">Public Label</label>
+                  <input value={carSharingPresetForm.publicLabel} onChange={(e) => setCarSharingPresetForm((current) => ({ ...current, publicLabel: e.target.value }))} placeholder="San Juan Airport" />
+                </div>
+                <div className="stack">
+                  <label className="label">Anchor Location</label>
+                  <select value={carSharingPresetForm.anchorLocationId} onChange={(e) => setCarSharingPresetForm((current) => ({ ...current, anchorLocationId: e.target.value }))}>
+                    <option value="">No anchor location</option>
+                    {locations.map((location) => (
+                      <option key={location.id} value={location.id}>{location.name}</option>
+                    ))}
+                  </select>
+                </div>
+                <div className="stack">
+                  <label className="label">Visibility Mode</label>
+                  <select value={carSharingPresetForm.visibilityMode} onChange={(e) => setCarSharingPresetForm((current) => ({ ...current, visibilityMode: e.target.value }))}>
+                    <option value="APPROXIMATE_ONLY">Approximate only</option>
+                    <option value="REVEAL_AFTER_BOOKING">Reveal after booking</option>
+                    <option value="PUBLIC_EXACT">Public exact</option>
+                  </select>
+                </div>
+                <div className="stack">
+                  <label className="label">Radius Miles</label>
+                  <input type="number" min="0" value={carSharingPresetForm.radiusMiles} onChange={(e) => setCarSharingPresetForm((current) => ({ ...current, radiusMiles: e.target.value }))} placeholder="Optional" />
+                </div>
+                <div className="stack">
+                  <label className="label">City</label>
+                  <input value={carSharingPresetForm.city} onChange={(e) => setCarSharingPresetForm((current) => ({ ...current, city: e.target.value }))} />
+                </div>
+                <div className="stack">
+                  <label className="label">State</label>
+                  <input value={carSharingPresetForm.state} onChange={(e) => setCarSharingPresetForm((current) => ({ ...current, state: e.target.value }))} />
+                </div>
+                <div className="stack">
+                  <label className="label">Postal Code</label>
+                  <input value={carSharingPresetForm.postalCode} onChange={(e) => setCarSharingPresetForm((current) => ({ ...current, postalCode: e.target.value }))} />
+                </div>
+                <div className="stack">
+                  <label className="label">Country</label>
+                  <input value={carSharingPresetForm.country} onChange={(e) => setCarSharingPresetForm((current) => ({ ...current, country: e.target.value }))} />
+                </div>
+              </div>
+
+              <div className="form-grid-2">
+                <label className="label" style={{ textTransform: 'none', letterSpacing: 0, fontSize: 13 }}>
+                  <input type="checkbox" checked={!!carSharingPresetForm.searchable} onChange={(e) => setCarSharingPresetForm((current) => ({ ...current, searchable: e.target.checked }))} /> Searchable in marketplace
+                </label>
+                <label className="label" style={{ textTransform: 'none', letterSpacing: 0, fontSize: 13 }}>
+                  <input type="checkbox" checked={!!carSharingPresetForm.isActive} onChange={(e) => setCarSharingPresetForm((current) => ({ ...current, isActive: e.target.checked }))} /> Active
+                </label>
+                <label className="label" style={{ textTransform: 'none', letterSpacing: 0, fontSize: 13 }}>
+                  <input type="checkbox" checked={!!carSharingPresetForm.pickupEligible} onChange={(e) => setCarSharingPresetForm((current) => ({ ...current, pickupEligible: e.target.checked }))} /> Pickup eligible
+                </label>
+                <label className="label" style={{ textTransform: 'none', letterSpacing: 0, fontSize: 13 }}>
+                  <input type="checkbox" checked={!!carSharingPresetForm.deliveryEligible} onChange={(e) => setCarSharingPresetForm((current) => ({ ...current, deliveryEligible: e.target.checked }))} /> Delivery eligible
+                </label>
+              </div>
+
+              <div className="inline-actions">
+                <button type="button" onClick={saveCarSharingPreset}>{carSharingPresetForm.id ? 'Save Preset' : 'Create Preset'}</button>
+              </div>
+            </section>
+
+            <section className="glass card section-card">
+              <div className="row-between" style={{ alignItems: 'flex-start', gap: 12 }}>
+                <div className="stack" style={{ gap: 6 }}>
+                  <h3 style={{ margin: 0 }}>Preset Library</h3>
+                  <div className="ui-muted">
+                    These search places appear as tenant-curated destinations for car sharing search.
+                  </div>
+                </div>
+                <span className="status-chip neutral">{carSharingSearchPlaces.length} presets</span>
+              </div>
+
+              {carSharingSearchPlaces.length ? (
+                <div style={{ overflowX: 'auto' }}>
+                  <table>
+                    <thead>
+                      <tr>
+                        <th>Type</th>
+                        <th>Public Label</th>
+                        <th>City</th>
+                        <th>Anchor</th>
+                        <th>Visibility</th>
+                        <th>Search</th>
+                        <th>Eligibility</th>
+                        <th>Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {carSharingSearchPlaces.map((place) => (
+                        <tr key={place.id}>
+                          <td>{String(place.placeType || '').replace(/_/g, ' ')}</td>
+                          <td>{place.publicLabel || place.label}</td>
+                          <td>{[place.city, place.state].filter(Boolean).join(', ') || '—'}</td>
+                          <td>{place.anchorLocation?.name || '—'}</td>
+                          <td>{String(place.visibilityMode || '').replace(/_/g, ' ')}</td>
+                          <td>{place.searchable ? 'Yes' : 'No'}</td>
+                          <td>{[place.pickupEligible ? 'Pickup' : '', place.deliveryEligible ? 'Delivery' : ''].filter(Boolean).join(' / ') || '—'}</td>
+                          <td style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                            <button type="button" onClick={() => setCarSharingPresetForm({
+                              id: place.id,
+                              placeType: place.placeType || 'AIRPORT',
+                              label: place.label || '',
+                              publicLabel: place.publicLabel || '',
+                              anchorLocationId: place.anchorLocationId || '',
+                              city: place.city || '',
+                              state: place.state || '',
+                              postalCode: place.postalCode || '',
+                              country: place.country || 'Puerto Rico',
+                              radiusMiles: place.radiusMiles == null ? '' : String(place.radiusMiles),
+                              visibilityMode: place.visibilityMode || 'APPROXIMATE_ONLY',
+                              searchable: !!place.searchable,
+                              isActive: !!place.isActive,
+                              pickupEligible: !!place.pickupEligible,
+                              deliveryEligible: !!place.deliveryEligible
+                            })}>Edit</button>
+                            <button type="button" className="button-subtle" onClick={() => removeCarSharingPreset(place.id)}>Remove</button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              ) : (
+                <div className="surface-note">
+                  No search place presets yet. Start with airports, top hotels, and neighborhoods so the marketplace search feels more natural for guests.
+                </div>
+              )}
             </section>
           </div>
         )}

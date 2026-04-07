@@ -33,6 +33,32 @@ function formatDate(value) {
   try { return new Date(value).toLocaleDateString(); } catch { return String(value); }
 }
 
+function resolveHandoffDraftFromPlan(plan) {
+  if (!plan) {
+    return {
+      handoffMode: 'IN_PERSON',
+      exactAddress1: '',
+      exactAddress2: '',
+      city: '',
+      state: '',
+      postalCode: '',
+      country: '',
+      instructions: ''
+    };
+  }
+  const preset = plan.handoffPreset || {};
+  return {
+    handoffMode: plan.handoffMode || preset.suggestedHandoffMode || 'IN_PERSON',
+    exactAddress1: plan.exactAddress1 || '',
+    exactAddress2: plan.exactAddress2 || '',
+    city: plan.city || '',
+    state: plan.state || '',
+    postalCode: plan.postalCode || '',
+    country: plan.country || '',
+    instructions: plan.instructions || preset.suggestedInstructions || ''
+  };
+}
+
 function parsePhotoList(value) {
   try {
     const parsed = typeof value === 'string' ? JSON.parse(value) : value;
@@ -196,6 +222,52 @@ function guestFlowLabel(trip) {
   return 'Guest ready for handoff';
 }
 
+function searchPlaceLabel(place, fallbackLocation = null) {
+  if (place?.label) {
+    const area = [place.city, place.state].filter(Boolean).join(', ');
+    return [place.label, area].filter(Boolean).join(' · ');
+  }
+  return fallbackLocation?.name || 'Search place';
+}
+
+function revealModeLabel(mode) {
+  const value = String(mode || 'REVEAL_AFTER_BOOKING').toUpperCase();
+  if (value === 'PUBLIC_EXACT') return 'Exact visible before booking';
+  if (value === 'APPROXIMATE_ONLY') return 'Approximate before booking';
+  return 'Reveal after booking';
+}
+
+function handoffModeLabel(mode) {
+  const value = String(mode || 'IN_PERSON').toUpperCase();
+  if (value === 'LOCKBOX') return 'Lockbox';
+  if (value === 'REMOTE_UNLOCK') return 'Remote unlock';
+  if (value === 'SELF_SERVICE') return 'Self-service';
+  return 'In-person';
+}
+
+function formatApprovalStatus(value) {
+  const current = String(value || 'PENDING').trim().replace(/_/g, ' ').toLowerCase();
+  return current ? current.replace(/\b\w/g, (char) => char.toUpperCase()) : 'Pending';
+}
+
+function formatSearchPlaceType(value) {
+  const current = String(value || '').toUpperCase();
+  if (current === 'HOST_PICKUP_SPOT') return 'Host Pickup Spot';
+  if (current === 'DELIVERY_ZONE') return 'Delivery Zone';
+  if (current === 'TENANT_BRANCH') return 'Tenant Branch';
+  if (current === 'AIRPORT') return 'Airport';
+  if (current === 'HOTEL') return 'Hotel';
+  if (current === 'NEIGHBORHOOD') return 'Neighborhood';
+  if (current === 'STATION') return 'Station';
+  return formatApprovalStatus(current);
+}
+
+function formatServiceType(value) {
+  const current = String(value || 'PICKUP').toUpperCase();
+  if (current === 'DELIVERY') return 'Delivery';
+  return 'Pickup';
+}
+
 function fulfillmentModeLabel(mode) {
   const value = String(mode || 'PICKUP_ONLY').toUpperCase();
   if (value === 'DELIVERY_ONLY') return 'Delivery only';
@@ -310,6 +382,17 @@ const EMPTY_ISSUE_FORM = {
   tripId: '', type: 'OTHER', title: '', description: '', amountClaimed: ''
 };
 
+const EMPTY_HANDOFF_DRAFT = {
+  handoffMode: 'IN_PERSON',
+  exactAddress1: '',
+  exactAddress2: '',
+  city: '',
+  state: '',
+  postalCode: '',
+  country: '',
+  instructions: ''
+};
+
 function WatchCard({ trip, onMove }) {
   const attention = hostAttention(trip);
   const nextAction = tripActionsFor(trip.status)[0];
@@ -330,6 +413,15 @@ function WatchCard({ trip, onMove }) {
         <div className="metric-card"><span className="label">Status</span><strong>{trip.status}</strong></div>
         <div className="metric-card"><span className="label">Earnings</span><strong>{formatMoney(trip.hostEarnings)}</strong></div>
       </div>
+      {trip.fulfillmentPlan ? (
+        <div style={{ color: '#55456f', lineHeight: 1.5 }}>
+          {[
+            searchPlaceLabel(trip.fulfillmentPlan.searchPlace, trip.listing?.location),
+            handoffModeLabel(trip.fulfillmentPlan.handoffMode),
+            revealModeLabel(trip.fulfillmentPlan.pickupRevealMode)
+          ].filter(Boolean).join(' · ')}
+        </div>
+      ) : null}
       <div className="inline-actions">
         {trip.reservation?.id ? <a href={`/reservations/${trip.reservation.id}`}><button type="button">Open Workflow</button></a> : null}
         {nextAction ? <button type="button" className="button-subtle" onClick={onMove}>{nextAction}</button> : null}
@@ -363,6 +455,9 @@ function HostAppInner({ token, me, logout }) {
   const [issueForm, setIssueForm] = useState(EMPTY_ISSUE_FORM);
   const [submissionForm, setSubmissionForm] = useState(EMPTY_SUBMISSION_FORM);
   const [pickupSpotForm, setPickupSpotForm] = useState(EMPTY_PICKUP_SPOT_FORM);
+  const [searchPlaceDrafts, setSearchPlaceDrafts] = useState({});
+  const [serviceAreaDrafts, setServiceAreaDrafts] = useState({});
+  const [handoffDraft, setHandoffDraft] = useState(EMPTY_HANDOFF_DRAFT);
   const [loading, setLoading] = useState(true);
 
   const isAdminViewer = !!dashboard?.isAdminViewer;
@@ -424,6 +519,8 @@ function HostAppInner({ token, me, logout }) {
   const vehicleTypes = dashboard?.vehicleTypes || [];
   const locations = dashboard?.locations || [];
   const pickupSpots = dashboard?.pickupSpots || [];
+  const searchPlaces = dashboard?.searchPlaces || [];
+  const serviceAreas = dashboard?.serviceAreas || [];
   const selectedSubmissionPickupSpot = pickupSpots.find((row) => row.id === submissionForm.preferredPickupSpotId) || null;
   const submissionDeliveryAreaSuggestions = buildDeliveryAreaSuggestions(
     selectedSubmissionPickupSpot?.city,
@@ -482,6 +579,15 @@ function HostAppInner({ token, me, logout }) {
       readyForHandoff
     };
   }, [hostSnapshot.upcomingPickups, hostSnapshot.watchlist, trips]);
+  const nextHandoffPlan = hostTripOpsSnapshot.nextHandoffTrip?.fulfillmentPlan || null;
+
+  useEffect(() => {
+    if (!nextHandoffPlan) {
+      setHandoffDraft(EMPTY_HANDOFF_DRAFT);
+      return;
+    }
+    setHandoffDraft(resolveHandoffDraftFromPlan(nextHandoffPlan));
+  }, [nextHandoffPlan?.id, nextHandoffPlan?.handoffMode, nextHandoffPlan?.exactAddress1, nextHandoffPlan?.exactAddress2, nextHandoffPlan?.city, nextHandoffPlan?.state, nextHandoffPlan?.postalCode, nextHandoffPlan?.country, nextHandoffPlan?.instructions, nextHandoffPlan?.handoffPreset?.suggestedHandoffMode, nextHandoffPlan?.handoffPreset?.suggestedInstructions]);
 
   const hostShellStats = useMemo(() => ([
     { label: 'Listings', value: `${metrics.activeListings}/${metrics.listings || 0} active` },
@@ -730,6 +836,183 @@ function HostAppInner({ token, me, logout }) {
     }
   }
 
+  async function syncListingDiscovery(listingId) {
+    if (!listingId) {
+      setMsg('Choose a listing first');
+      return;
+    }
+    try {
+      await api(`/api/host-app/listings/${listingId}/discovery-sync`, {
+        method: 'POST',
+        body: JSON.stringify({
+          hostProfileId: isAdminViewer ? (selectedHostProfileId || host?.id || '') : undefined
+        })
+      }, token);
+      setMsg('Location discovery synced for listing');
+      await load();
+    } catch (error) {
+      setMsg(error.message);
+    }
+  }
+
+  async function setSearchPlaceApproval(placeId, approvalStatus) {
+    try {
+      await api(`/api/host-app/search-places/${placeId}`, {
+        method: 'PATCH',
+        body: JSON.stringify({
+          hostProfileId: isAdminViewer ? (selectedHostProfileId || host?.id || '') : undefined,
+          approvalStatus
+        })
+      }, token);
+      setMsg(`Search place moved to ${approvalStatus}`);
+      await load();
+    } catch (error) {
+      setMsg(error.message);
+    }
+  }
+
+  async function setSearchPlaceVisibility(placeId, visibilityMode) {
+    try {
+      await api(`/api/host-app/search-places/${placeId}`, {
+        method: 'PATCH',
+        body: JSON.stringify({
+          hostProfileId: isAdminViewer ? (selectedHostProfileId || host?.id || '') : undefined,
+          visibilityMode
+        })
+      }, token);
+      setMsg('Search place visibility updated');
+      await load();
+    } catch (error) {
+      setMsg(error.message);
+    }
+  }
+
+  async function toggleServiceArea(areaId, isActive) {
+    try {
+      await api(`/api/host-app/service-areas/${areaId}`, {
+        method: 'PATCH',
+        body: JSON.stringify({
+          hostProfileId: isAdminViewer ? (selectedHostProfileId || host?.id || '') : undefined,
+          isActive
+        })
+      }, token);
+      setMsg(`Service area ${isActive ? 'enabled' : 'paused'}`);
+      await load();
+    } catch (error) {
+      setMsg(error.message);
+    }
+  }
+
+  function patchSearchPlaceDraft(placeId, patch) {
+    setSearchPlaceDrafts((current) => ({
+      ...current,
+      [placeId]: {
+        ...(current[placeId] || {}),
+        ...patch
+      }
+    }));
+  }
+
+  function patchServiceAreaDraft(areaId, patch) {
+    setServiceAreaDrafts((current) => ({
+      ...current,
+      [areaId]: {
+        ...(current[areaId] || {}),
+        ...patch
+      }
+    }));
+  }
+
+  async function saveSearchPlace(place) {
+    try {
+      const draft = searchPlaceDrafts[place.id] || {};
+      await api(`/api/host-app/search-places/${place.id}`, {
+        method: 'PATCH',
+        body: JSON.stringify({
+          hostProfileId: isAdminViewer ? (selectedHostProfileId || host?.id || '') : undefined,
+          publicLabel: Object.prototype.hasOwnProperty.call(draft, 'publicLabel') ? draft.publicLabel : (place.publicLabel || ''),
+          visibilityMode: draft.visibilityMode || place.visibilityMode || 'REVEAL_AFTER_BOOKING',
+          searchable: Object.prototype.hasOwnProperty.call(draft, 'searchable') ? !!draft.searchable : !!place.searchable,
+          isActive: Object.prototype.hasOwnProperty.call(draft, 'isActive') ? !!draft.isActive : !!place.isActive,
+          radiusMiles: Object.prototype.hasOwnProperty.call(draft, 'radiusMiles')
+            ? (draft.radiusMiles === '' ? null : Number(draft.radiusMiles))
+            : (place.radiusMiles ?? null),
+          pickupEligible: Object.prototype.hasOwnProperty.call(draft, 'pickupEligible') ? !!draft.pickupEligible : !!place.pickupEligible,
+          deliveryEligible: Object.prototype.hasOwnProperty.call(draft, 'deliveryEligible') ? !!draft.deliveryEligible : !!place.deliveryEligible
+        })
+      }, token);
+      setSearchPlaceDrafts((current) => {
+        const next = { ...current };
+        delete next[place.id];
+        return next;
+      });
+      setMsg('Search place updated');
+      await load();
+    } catch (error) {
+      setMsg(error.message);
+    }
+  }
+
+  async function saveServiceArea(area) {
+    try {
+      const draft = serviceAreaDrafts[area.id] || {};
+      await api(`/api/host-app/service-areas/${area.id}`, {
+        method: 'PATCH',
+        body: JSON.stringify({
+          hostProfileId: isAdminViewer ? (selectedHostProfileId || host?.id || '') : undefined,
+          isActive: Object.prototype.hasOwnProperty.call(draft, 'isActive') ? !!draft.isActive : !!area.isActive,
+          feeOverride: Object.prototype.hasOwnProperty.call(draft, 'feeOverride')
+            ? (draft.feeOverride === '' ? null : Number(draft.feeOverride))
+            : (area.feeOverride ?? null),
+          leadTimeMinutes: Object.prototype.hasOwnProperty.call(draft, 'leadTimeMinutes')
+            ? (draft.leadTimeMinutes === '' ? null : Number(draft.leadTimeMinutes))
+            : (area.leadTimeMinutes ?? null),
+          afterHoursAllowed: Object.prototype.hasOwnProperty.call(draft, 'afterHoursAllowed')
+            ? !!draft.afterHoursAllowed
+            : !!area.afterHoursAllowed
+        })
+      }, token);
+      setServiceAreaDrafts((current) => {
+        const next = { ...current };
+        delete next[area.id];
+        return next;
+      });
+      setMsg('Service area updated');
+      await load();
+    } catch (error) {
+      setMsg(error.message);
+    }
+  }
+
+  async function saveTripHandoff(tripId, options = {}) {
+    if (!tripId) {
+      setMsg('Choose a trip first');
+      return;
+    }
+    try {
+      await api(`/api/host-app/trips/${tripId}/fulfillment-plan`, {
+        method: 'PATCH',
+        body: JSON.stringify({
+          hostProfileId: isAdminViewer ? (selectedHostProfileId || host?.id || '') : undefined,
+          handoffMode: handoffDraft.handoffMode,
+          exactAddress1: handoffDraft.exactAddress1,
+          exactAddress2: handoffDraft.exactAddress2,
+          city: handoffDraft.city,
+          state: handoffDraft.state,
+          postalCode: handoffDraft.postalCode,
+          country: handoffDraft.country,
+          instructions: handoffDraft.instructions,
+          confirmExactDetails: !!options.confirmExactDetails,
+          clearConfirmation: !!options.clearConfirmation
+        })
+      }, token);
+      setMsg(options.confirmExactDetails ? 'Exact handoff confirmed for guest release' : (options.clearConfirmation ? 'Exact handoff confirmation cleared' : 'Trip handoff updated'));
+      await load();
+    } catch (error) {
+      setMsg(error.message);
+    }
+  }
+
   function uploadListingPhotos(files) {
     const incoming = Array.from(files || []).slice(0, 6);
     if (!incoming.length) return;
@@ -957,6 +1240,10 @@ function HostAppInner({ token, me, logout }) {
                     <div className="doc-meta">{formatDateTime(hostTripOpsSnapshot.nextHandoffTrip.scheduledPickupAt)}</div>
                   </div>
                   <div className="doc-card">
+                    <strong>Search Place</strong>
+                    <div className="doc-meta">{searchPlaceLabel(hostTripOpsSnapshot.nextHandoffTrip.fulfillmentPlan?.searchPlace, hostTripOpsSnapshot.nextHandoffTrip.listing?.location)}</div>
+                  </div>
+                  <div className="doc-card">
                     <strong>Guest Flow</strong>
                     <div className="doc-meta">{guestFlowLabel(hostTripOpsSnapshot.nextHandoffTrip)}</div>
                   </div>
@@ -969,6 +1256,91 @@ function HostAppInner({ token, me, logout }) {
                     <div className="doc-meta">{hostTripOpsSnapshot.nextHandoffTrip.incidents?.length || 0} case{(hostTripOpsSnapshot.nextHandoffTrip.incidents?.length || 0) === 1 ? '' : 's'} on this trip.</div>
                   </div>
                 </div>
+                {hostTripOpsSnapshot.nextHandoffTrip.fulfillmentPlan ? (
+                  <div style={{ color: '#55456f', lineHeight: 1.5 }}>
+                    {[
+                      handoffModeLabel(hostTripOpsSnapshot.nextHandoffTrip.fulfillmentPlan.handoffMode),
+                      revealModeLabel(hostTripOpsSnapshot.nextHandoffTrip.fulfillmentPlan.pickupRevealMode),
+                      hostTripOpsSnapshot.nextHandoffTrip.fulfillmentPlan.deliveryAreaChoiceLabel
+                        ? `Delivery area ${hostTripOpsSnapshot.nextHandoffTrip.fulfillmentPlan.deliveryAreaChoiceLabel}`
+                        : ''
+                      ].filter(Boolean).join(' · ')}
+                  </div>
+                ) : null}
+                {hostTripOpsSnapshot.nextHandoffTrip.fulfillmentPlan ? (
+                  <div className="surface-note" style={{ display: 'grid', gap: 10 }}>
+                    <div className="row-between" style={{ gap: 12 }}>
+                      <strong>Exact Handoff Confirmation</strong>
+                      <span className={statusChip(hostTripOpsSnapshot.nextHandoffTrip.fulfillmentPlan.confirmedAt ? 'ACTIVE' : 'PENDING')}>
+                        {hostTripOpsSnapshot.nextHandoffTrip.fulfillmentPlan.confirmedAt ? 'Confirmed For Guest' : 'Pending Release'}
+                      </span>
+                    </div>
+                    <div className="label" style={{ textTransform: 'none', letterSpacing: 0, fontSize: 12 }}>
+                      {hostTripOpsSnapshot.nextHandoffTrip.fulfillmentPlan.confirmedAt
+                        ? `Confirmed ${formatDateTime(hostTripOpsSnapshot.nextHandoffTrip.fulfillmentPlan.confirmedAt)}`
+                        : hostTripOpsSnapshot.nextHandoffTrip.fulfillmentPlan.autoRevealAt
+                          ? `Guests will keep seeing the search place until ${formatDateTime(hostTripOpsSnapshot.nextHandoffTrip.fulfillmentPlan.autoRevealAt)}, unless you release the exact handoff sooner.`
+                          : 'Guests will keep seeing the search place until you confirm the exact handoff details.'}
+                    </div>
+                    <div className="inline-actions" style={{ flexWrap: 'wrap' }}>
+                      {hostTripOpsSnapshot.nextHandoffTrip.fulfillmentPlan.selfServiceLabel ? (
+                        <span className="status-chip neutral">{hostTripOpsSnapshot.nextHandoffTrip.fulfillmentPlan.selfServiceLabel}</span>
+                      ) : null}
+                      {hostTripOpsSnapshot.nextHandoffTrip.fulfillmentPlan.autoRevealEligible ? (
+                        <span className="status-chip neutral">
+                          Auto reveal {hostTripOpsSnapshot.nextHandoffTrip.fulfillmentPlan.autoRevealWindowHours}h before pickup
+                        </span>
+                      ) : null}
+                      {hostTripOpsSnapshot.nextHandoffTrip.fulfillmentPlan.handoffPreset?.suggestedLabel ? (
+                        <span className="status-chip neutral">
+                          {hostTripOpsSnapshot.nextHandoffTrip.fulfillmentPlan.handoffPreset.suggestedLabel}
+                        </span>
+                      ) : null}
+                    </div>
+                    {hostTripOpsSnapshot.nextHandoffTrip.fulfillmentPlan.handoffPreset ? (
+                      <div className="surface-note" style={{ display: 'grid', gap: 6 }}>
+                        <strong>Preset suggestion</strong>
+                        <div>
+                          Suggested mode: {String(hostTripOpsSnapshot.nextHandoffTrip.fulfillmentPlan.handoffPreset.suggestedHandoffMode || 'IN_PERSON').replaceAll('_', ' ').toLowerCase()}
+                        </div>
+                        {hostTripOpsSnapshot.nextHandoffTrip.fulfillmentPlan.handoffPreset.suggestedInstructions ? (
+                          <div>{hostTripOpsSnapshot.nextHandoffTrip.fulfillmentPlan.handoffPreset.suggestedInstructions}</div>
+                        ) : null}
+                      </div>
+                    ) : null}
+                    <div className="form-grid-3">
+                      <div className="stack">
+                        <label className="label">Handoff Mode</label>
+                        <select value={handoffDraft.handoffMode} onChange={(event) => setHandoffDraft((current) => ({ ...current, handoffMode: event.target.value }))}>
+                          <option value="IN_PERSON">In-person</option>
+                          <option value="LOCKBOX">Lockbox</option>
+                          <option value="REMOTE_UNLOCK">Remote unlock</option>
+                          <option value="SELF_SERVICE">Self-service</option>
+                        </select>
+                      </div>
+                      <div className="stack"><label className="label">Address Line 1</label><input value={handoffDraft.exactAddress1} onChange={(event) => setHandoffDraft((current) => ({ ...current, exactAddress1: event.target.value }))} /></div>
+                      <div className="stack"><label className="label">Address Line 2</label><input value={handoffDraft.exactAddress2} onChange={(event) => setHandoffDraft((current) => ({ ...current, exactAddress2: event.target.value }))} /></div>
+                      <div className="stack"><label className="label">City</label><input value={handoffDraft.city} onChange={(event) => setHandoffDraft((current) => ({ ...current, city: event.target.value }))} /></div>
+                      <div className="stack"><label className="label">State</label><input value={handoffDraft.state} onChange={(event) => setHandoffDraft((current) => ({ ...current, state: event.target.value }))} /></div>
+                      <div className="stack"><label className="label">Postal Code</label><input value={handoffDraft.postalCode} onChange={(event) => setHandoffDraft((current) => ({ ...current, postalCode: event.target.value }))} /></div>
+                      <div className="stack"><label className="label">Country</label><input value={handoffDraft.country} onChange={(event) => setHandoffDraft((current) => ({ ...current, country: event.target.value }))} /></div>
+                    </div>
+                    <div className="stack">
+                      <label className="label">Guest Instructions</label>
+                      <textarea rows={3} value={handoffDraft.instructions} onChange={(event) => setHandoffDraft((current) => ({ ...current, instructions: event.target.value }))} placeholder="Parking stall, lockbox code timing, meet-up instructions, or access notes" />
+                    </div>
+                    <div className="inline-actions" style={{ flexWrap: 'wrap' }}>
+                      {hostTripOpsSnapshot.nextHandoffTrip.fulfillmentPlan.handoffPreset ? (
+                        <button type="button" className="button-subtle" onClick={() => setHandoffDraft(resolveHandoffDraftFromPlan(hostTripOpsSnapshot.nextHandoffTrip.fulfillmentPlan))}>Apply Preset</button>
+                      ) : null}
+                      <button type="button" className="button-subtle" onClick={() => saveTripHandoff(hostTripOpsSnapshot.nextHandoffTrip.id)}>Save Draft</button>
+                      <button type="button" onClick={() => saveTripHandoff(hostTripOpsSnapshot.nextHandoffTrip.id, { confirmExactDetails: true })}>Confirm Exact Handoff</button>
+                      {hostTripOpsSnapshot.nextHandoffTrip.fulfillmentPlan.confirmedAt ? (
+                        <button type="button" className="button-subtle" onClick={() => saveTripHandoff(hostTripOpsSnapshot.nextHandoffTrip.id, { clearConfirmation: true })}>Hide Exact Details</button>
+                      ) : null}
+                    </div>
+                  </div>
+                ) : null}
                 <div className="inline-actions">
                   {hostTripOpsSnapshot.nextHandoffTrip.reservation?.id ? <a href={`/reservations/${hostTripOpsSnapshot.nextHandoffTrip.reservation.id}`}><button type="button">Open Workflow</button></a> : null}
                   {tripActionsFor(hostTripOpsSnapshot.nextHandoffTrip.status)[0] ? (
@@ -996,7 +1368,11 @@ function HostAppInner({ token, me, logout }) {
                     <span className={statusChip(trip.status)}>{trip.status}</span>
                   </div>
                   <div style={{ color: '#55456f', lineHeight: 1.5 }}>
-                    {[trip.listing?.title || 'Listing', guestFlowLabel(trip)].join(' · ')}
+                    {[
+                      trip.listing?.title || 'Listing',
+                      searchPlaceLabel(trip.fulfillmentPlan?.searchPlace, trip.listing?.location),
+                      guestFlowLabel(trip)
+                    ].join(' · ')}
                   </div>
                   <div className="inline-actions">
                     {trip.reservation?.id ? <a href={`/reservations/${trip.reservation.id}`}><button type="button" className="button-subtle">Open Workflow</button></a> : null}
@@ -1025,6 +1401,170 @@ function HostAppInner({ token, me, logout }) {
           </div>
         </section>
       ) : null}
+
+      <section className="split-panel" style={{ marginBottom: 18 }}>
+        <section className="glass card-lg section-card">
+          <div className="row-between">
+            <div>
+              <div className="section-title">Search Place Discovery</div>
+              <p className="ui-muted">These are the guest-facing places we expose in car sharing search. Keep the public label clear and the reveal policy safe.</p>
+            </div>
+            <span className="status-chip neutral">{searchPlaces.length} places</span>
+          </div>
+          {searchPlaces.length ? (
+            <div className="stack">
+              {searchPlaces.map((place) => {
+                const draft = searchPlaceDrafts[place.id] || {};
+                const publicLabel = Object.prototype.hasOwnProperty.call(draft, 'publicLabel') ? draft.publicLabel : (place.publicLabel || '');
+                const visibilityMode = draft.visibilityMode || place.visibilityMode || 'REVEAL_AFTER_BOOKING';
+                const searchable = Object.prototype.hasOwnProperty.call(draft, 'searchable') ? !!draft.searchable : !!place.searchable;
+                const isActive = Object.prototype.hasOwnProperty.call(draft, 'isActive') ? !!draft.isActive : !!place.isActive;
+                const pickupEligible = Object.prototype.hasOwnProperty.call(draft, 'pickupEligible') ? !!draft.pickupEligible : !!place.pickupEligible;
+                const deliveryEligible = Object.prototype.hasOwnProperty.call(draft, 'deliveryEligible') ? !!draft.deliveryEligible : !!place.deliveryEligible;
+                const radiusMiles = Object.prototype.hasOwnProperty.call(draft, 'radiusMiles') ? draft.radiusMiles : (place.radiusMiles ?? '');
+                return (
+                  <div key={place.id} className="surface-note" style={{ display: 'grid', gap: 10 }}>
+                    <div className="row-between" style={{ gap: 12, alignItems: 'start' }}>
+                      <div>
+                        <strong>{place.publicLabel || place.label}</strong>
+                        <div className="label" style={{ textTransform: 'none', letterSpacing: 0, fontSize: 12 }}>
+                          {[formatSearchPlaceType(place.placeType), place.city, place.state].filter(Boolean).join(' · ')}
+                        </div>
+                      </div>
+                      <span className={statusChip(place.approvalStatus || (place.isActive ? 'ACTIVE' : 'PAUSED'))}>
+                        {formatApprovalStatus(place.approvalStatus || (place.isActive ? 'ACTIVE' : 'PAUSED'))}
+                      </span>
+                    </div>
+                    <div style={{ color: '#55456f', lineHeight: 1.5 }}>
+                      {[
+                        place.anchorLocation?.name ? `Anchor ${place.anchorLocation.name}` : '',
+                        place.hostPickupSpot?.label ? `Pickup spot ${place.hostPickupSpot.label}` : '',
+                        `Reveal ${revealModeLabel(place.visibilityMode)}`,
+                        place.deliveryEligible ? 'Delivery eligible' : '',
+                        place.pickupEligible ? 'Pickup eligible' : ''
+                      ].filter(Boolean).join(' · ')}
+                    </div>
+                    <div className="form-grid-3">
+                      <div className="stack">
+                        <label className="label">Public Label</label>
+                        <input value={publicLabel} onChange={(event) => patchSearchPlaceDraft(place.id, { publicLabel: event.target.value })} placeholder="What guests should see" />
+                      </div>
+                      <div className="stack">
+                        <label className="label">Reveal Mode</label>
+                        <select value={visibilityMode} onChange={(event) => patchSearchPlaceDraft(place.id, { visibilityMode: event.target.value })}>
+                          <option value="REVEAL_AFTER_BOOKING">Reveal after booking</option>
+                          <option value="APPROXIMATE_ONLY">Approximate only</option>
+                          <option value="PUBLIC_EXACT">Public exact</option>
+                        </select>
+                      </div>
+                      <div className="stack">
+                        <label className="label">Radius Miles</label>
+                        <input type="number" min="0" value={radiusMiles} onChange={(event) => patchSearchPlaceDraft(place.id, { radiusMiles: event.target.value })} placeholder="Optional" />
+                      </div>
+                    </div>
+                    <div className="inline-actions" style={{ flexWrap: 'wrap' }}>
+                      <label style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+                        <input type="checkbox" checked={searchable} onChange={(event) => patchSearchPlaceDraft(place.id, { searchable: event.target.checked })} />
+                        <span className="label" style={{ margin: 0 }}>Searchable</span>
+                      </label>
+                      <label style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+                        <input type="checkbox" checked={isActive} onChange={(event) => patchSearchPlaceDraft(place.id, { isActive: event.target.checked })} />
+                        <span className="label" style={{ margin: 0 }}>Active</span>
+                      </label>
+                      <label style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+                        <input type="checkbox" checked={pickupEligible} onChange={(event) => patchSearchPlaceDraft(place.id, { pickupEligible: event.target.checked })} />
+                        <span className="label" style={{ margin: 0 }}>Pickup</span>
+                      </label>
+                      <label style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+                        <input type="checkbox" checked={deliveryEligible} onChange={(event) => patchSearchPlaceDraft(place.id, { deliveryEligible: event.target.checked })} />
+                        <span className="label" style={{ margin: 0 }}>Delivery</span>
+                      </label>
+                    </div>
+                    <div className="inline-actions" style={{ flexWrap: 'wrap' }}>
+                      <button type="button" onClick={() => saveSearchPlace(place)}>Save Search Place</button>
+                      {isAdminViewer ? (
+                        <>
+                          <button type="button" className="button-subtle" onClick={() => setSearchPlaceApproval(place.id, 'APPROVED')}>Approve</button>
+                          <button type="button" className="button-subtle" onClick={() => setSearchPlaceApproval(place.id, 'PENDING')}>Mark Pending</button>
+                        </>
+                      ) : null}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          ) : (
+            <div className="surface-note">No search places yet. Sync a listing or save a pickup spot to start building public discovery.</div>
+          )}
+        </section>
+
+        <section className="glass card-lg section-card">
+          <div className="row-between">
+            <div>
+              <div className="section-title">Service Area Controls</div>
+              <p className="ui-muted">Pickup and delivery lanes should stay explicit by listing so search stays honest and ops can control lead time.</p>
+            </div>
+            <span className="status-chip neutral">{serviceAreas.length} service areas</span>
+          </div>
+          {serviceAreas.length ? (
+            <div className="stack">
+              {serviceAreas.map((area) => {
+                const draft = serviceAreaDrafts[area.id] || {};
+                const feeOverride = Object.prototype.hasOwnProperty.call(draft, 'feeOverride') ? draft.feeOverride : (area.feeOverride ?? '');
+                const leadTimeMinutes = Object.prototype.hasOwnProperty.call(draft, 'leadTimeMinutes') ? draft.leadTimeMinutes : (area.leadTimeMinutes ?? '');
+                const afterHoursAllowed = Object.prototype.hasOwnProperty.call(draft, 'afterHoursAllowed') ? !!draft.afterHoursAllowed : !!area.afterHoursAllowed;
+                const isActive = Object.prototype.hasOwnProperty.call(draft, 'isActive') ? !!draft.isActive : !!area.isActive;
+                return (
+                  <div key={area.id} className="surface-note" style={{ display: 'grid', gap: 10 }}>
+                    <div className="row-between" style={{ gap: 12, alignItems: 'start' }}>
+                      <div>
+                        <strong>{area.searchPlace?.publicLabel || area.searchPlace?.label || 'Search place pending'}</strong>
+                        <div className="label" style={{ textTransform: 'none', letterSpacing: 0, fontSize: 12 }}>
+                          {[area.listing?.title || 'Listing pending', formatServiceType(area.serviceType)].join(' · ')}
+                        </div>
+                      </div>
+                      <span className={statusChip(isActive ? 'ACTIVE' : 'PAUSED')}>{isActive ? 'Active' : 'Paused'}</span>
+                    </div>
+                    <div style={{ color: '#55456f', lineHeight: 1.5 }}>
+                      {[
+                        area.searchPlace?.approvalStatus ? `Search place ${formatApprovalStatus(area.searchPlace.approvalStatus)}` : '',
+                        area.searchPlace?.anchorLocation?.name ? `Anchor ${area.searchPlace.anchorLocation.name}` : '',
+                        afterHoursAllowed ? 'After-hours allowed' : 'After-hours off'
+                      ].filter(Boolean).join(' · ')}
+                    </div>
+                    <div className="form-grid-3">
+                      <div className="stack">
+                        <label className="label">Fee Override</label>
+                        <input type="number" min="0" step="0.01" value={feeOverride} onChange={(event) => patchServiceAreaDraft(area.id, { feeOverride: event.target.value })} placeholder="Optional" />
+                      </div>
+                      <div className="stack">
+                        <label className="label">Lead Time Minutes</label>
+                        <input type="number" min="0" value={leadTimeMinutes} onChange={(event) => patchServiceAreaDraft(area.id, { leadTimeMinutes: event.target.value })} placeholder="Optional" />
+                      </div>
+                      <label style={{ display: 'inline-flex', alignItems: 'center', gap: 8, alignSelf: 'end' }}>
+                        <input type="checkbox" checked={afterHoursAllowed} onChange={(event) => patchServiceAreaDraft(area.id, { afterHoursAllowed: event.target.checked })} />
+                        <span className="label" style={{ margin: 0 }}>After-hours allowed</span>
+                      </label>
+                    </div>
+                    <div className="inline-actions" style={{ flexWrap: 'wrap' }}>
+                      <label style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+                        <input type="checkbox" checked={isActive} onChange={(event) => patchServiceAreaDraft(area.id, { isActive: event.target.checked })} />
+                        <span className="label" style={{ margin: 0 }}>Active service area</span>
+                      </label>
+                      <button type="button" onClick={() => saveServiceArea(area)}>Save Service Area</button>
+                      <button type="button" className="button-subtle" onClick={() => toggleServiceArea(area.id, !area.isActive)}>
+                        {area.isActive ? 'Pause Now' : 'Enable Now'}
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          ) : (
+            <div className="surface-note">No service areas yet. Sync a listing after updating pickup or delivery settings to generate them.</div>
+          )}
+        </section>
+      </section>
 
       <section className="split-panel">
       <section id="host-actions" className="glass card-lg section-card">
@@ -1083,7 +1623,13 @@ function HostAppInner({ token, me, logout }) {
                       {[spot.address1, spot.city, spot.state, spot.postalCode].filter(Boolean).join(' · ') || 'No detailed address yet'}
                     </div>
                     <div style={{ color: '#55456f', lineHeight: 1.5 }}>
-                      {[spot.anchorLocation?.name ? `Ops hub ${spot.anchorLocation.name}` : '', spot.instructions || '', spot.isDefault ? 'Default pickup spot' : ''].filter(Boolean).join(' · ')}
+                      {[
+                        spot.anchorLocation?.name ? `Ops hub ${spot.anchorLocation.name}` : '',
+                        spot.searchPlace?.publicLabel || spot.searchPlace?.label ? `Search label ${spot.searchPlace?.publicLabel || spot.searchPlace?.label}` : '',
+                        spot.searchPlace?.visibilityMode ? revealModeLabel(spot.searchPlace.visibilityMode) : '',
+                        spot.instructions || '',
+                        spot.isDefault ? 'Default pickup spot' : ''
+                      ].filter(Boolean).join(' · ')}
                     </div>
                   </div>
                 ))}
@@ -1359,9 +1905,15 @@ function HostAppInner({ token, me, logout }) {
                   <div className="surface-note" style={{ color: '#55456f', lineHeight: 1.5 }}>
                     {[fulfillmentModeLabel(listing.fulfillmentMode), listing.deliveryRadiusMiles ? `Delivery radius ${listing.deliveryRadiusMiles} mi` : '', parseDeliveryAreas(listing.deliveryAreasJson).length ? `${parseDeliveryAreas(listing.deliveryAreasJson).length} delivery areas` : '', 'Change daily rate, cleaning fee, delivery fee, deposit, host add-ons, and photos from the editor below.'].filter(Boolean).join(' · ')}
                   </div>
+                  <div className="label" style={{ textTransform: 'none', letterSpacing: 0, fontSize: 12 }}>
+                    {`${serviceAreas.filter((area) => area.listing?.id === listing.id && area.isActive).length} active service areas · ${
+                      searchPlaces.filter((place) => place.hostPickupSpotId && String(place.hostPickupSpotId || '') === String(listing.pickupSpotId || '')).length
+                    } linked pickup search place`}
+                  </div>
                   <div className="inline-actions">
                     <button type="button" onClick={() => setListingEdit(listingToEdit(listing))}>Edit Rates And Listing</button>
                     <button type="button" className="button-subtle" onClick={() => loadAvailability(listing.id)}>Availability</button>
+                    <button type="button" className="button-subtle" onClick={() => syncListingDiscovery(listing.id)}>Sync Discovery</button>
                   </div>
                 </div>
               ))}
@@ -1419,6 +1971,9 @@ function HostAppInner({ token, me, logout }) {
                   Hosts should confirm four things before publishing: daily rate, photo coverage, add-ons if applicable, and whether the listing should be instant book or approval based.
                 </div>
               ) : null}
+              <div className="inline-actions">
+                <button type="button" className="button-subtle" onClick={() => syncListingDiscovery(listingEdit.id)}>Sync Discovery For This Listing</button>
+              </div>
               <div className="stack"><label className="label">Short Description</label><input value={listingEdit.shortDescription} onChange={(event) => setListingEdit((current) => ({ ...current, shortDescription: event.target.value }))} /></div>
               <div className="stack"><label className="label">Description</label><textarea rows={4} value={listingEdit.description} onChange={(event) => setListingEdit((current) => ({ ...current, description: event.target.value }))} /></div>
               <div className="surface-note">
@@ -1717,7 +2272,12 @@ function HostAppInner({ token, me, logout }) {
                 return (
                   <tr key={trip.id}>
                     <td>{trip.tripCode}</td>
-                    <td>{trip.listing?.title || '-'}</td>
+                    <td>
+                      <div>{trip.listing?.title || '-'}</div>
+                      <div className="label" style={{ textTransform: 'none', letterSpacing: 0, fontSize: 11 }}>
+                        {searchPlaceLabel(trip.fulfillmentPlan?.searchPlace, trip.listing?.location)}
+                      </div>
+                    </td>
                     <td>{trip.guestCustomer ? [trip.guestCustomer.firstName, trip.guestCustomer.lastName].filter(Boolean).join(' ') : '-'}</td>
                     <td><span className={statusChip(trip.status)}>{trip.status}</span></td>
                     <td>{formatDateTime(trip.scheduledPickupAt)}</td>

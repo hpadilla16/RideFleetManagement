@@ -25,6 +25,29 @@ function pickupSpotHint(pickupSpot) {
   return [pickupSpot?.address1, pickupSpot?.city, pickupSpot?.state, pickupSpot?.postalCode].filter(Boolean).join(' · ');
 }
 
+function searchPlaceLabel(place, fallbackLocation = null) {
+  if (place?.label) {
+    const area = [place.city, place.state].filter(Boolean).join(', ');
+    return [place.label, area].filter(Boolean).join(' · ');
+  }
+  return fallbackLocation ? publicLocationLabel(fallbackLocation) : 'Search place';
+}
+
+function revealModeLabel(mode) {
+  const value = String(mode || 'REVEAL_AFTER_BOOKING').toUpperCase();
+  if (value === 'PUBLIC_EXACT') return 'Exact location visible before booking';
+  if (value === 'APPROXIMATE_ONLY') return 'Approximate handoff area';
+  return 'Exact handoff shared after booking';
+}
+
+function handoffModeLabel(mode) {
+  const value = String(mode || 'IN_PERSON').toUpperCase();
+  if (value === 'LOCKBOX') return 'Lockbox handoff';
+  if (value === 'REMOTE_UNLOCK') return 'Remote unlock';
+  if (value === 'SELF_SERVICE') return 'Self-service handoff';
+  return 'In-person handoff';
+}
+
 function fulfillmentModeLabel(mode) {
   const value = String(mode || 'PICKUP_ONLY').toUpperCase();
   if (value === 'DELIVERY_ONLY') return 'Delivery only';
@@ -46,6 +69,15 @@ function resolvePortalAction(confirmation, key) {
   if (nextActions[key]) return nextActions[key];
   if (key === 'customerInfo' && nextActions?.link) return nextActions;
   return null;
+}
+
+function formatDateTime(value) {
+  if (!value) return '-';
+  try {
+    return new Date(value).toLocaleString();
+  } catch {
+    return String(value);
+  }
 }
 
 function tokenFromLink(link) {
@@ -222,12 +254,23 @@ export default function PublicBookingConfirmationPage() {
                 <div className="surface-note" style={{ display: 'grid', gap: 8 }}>
                   <strong>Pickup Plan</strong>
                   <div>
-                    Pickup spot: {publicPickupSpotLabel(confirmation.trip?.pickupSpot, confirmation.trip?.location)}
+                    Search place: {searchPlaceLabel(confirmation.trip?.fulfillmentPlan?.searchPlace || confirmation.trip?.searchPlace, confirmation.trip?.location)}
                   </div>
                   <div>
                     Fulfillment: {fulfillmentModeLabel(confirmation.trip?.fulfillmentMode)}
                     {confirmation.trip?.deliveryRadiusMiles ? ` · ${confirmation.trip.deliveryRadiusMiles} mi radius` : ''}
                   </div>
+                  {confirmation.trip?.fulfillmentPlan ? (
+                    <div>
+                      {handoffModeLabel(confirmation.trip.fulfillmentPlan.handoffMode)} · {revealModeLabel(confirmation.trip.fulfillmentPlan.pickupRevealMode)}
+                    </div>
+                  ) : null}
+                  {confirmation.trip?.fulfillmentPlan?.selfServiceLabel ? (
+                    <div>Handoff flow: <strong>{confirmation.trip.fulfillmentPlan.selfServiceLabel}</strong></div>
+                  ) : null}
+                  {confirmation.trip?.fulfillmentPlan?.autoRevealAt ? (
+                    <div>Exact handoff unlocks automatically on <strong>{formatDateTime(confirmation.trip.fulfillmentPlan.autoRevealAt)}</strong></div>
+                  ) : null}
                   {Array.isArray(confirmation.trip?.deliveryAreas) && confirmation.trip.deliveryAreas.length ? (
                     <div>Allowed delivery areas: {confirmation.trip.deliveryAreas.join(' | ')}</div>
                   ) : null}
@@ -240,8 +283,28 @@ export default function PublicBookingConfirmationPage() {
                   {confirmation.trip?.deliveryAreaChoice ? (
                     <div>Selected delivery area: <strong>{confirmation.trip.deliveryAreaChoice}</strong></div>
                   ) : null}
-                  {pickupSpotHint(confirmation.trip?.pickupSpot) ? (
-                    <div>{pickupSpotHint(confirmation.trip?.pickupSpot)}</div>
+                  {confirmation.trip?.fulfillmentPlan?.pickupSpot?.label ? (
+                    <div>Pickup spot: {publicPickupSpotLabel(confirmation.trip.fulfillmentPlan.pickupSpot, confirmation.trip?.location)}</div>
+                  ) : null}
+                  {confirmation.trip?.fulfillmentPlan?.exactHandoffVisible && confirmation.trip.fulfillmentPlan.exactHandoff ? (
+                    <div>
+                      Exact handoff: {[
+                        confirmation.trip.fulfillmentPlan.exactHandoff.address1,
+                        confirmation.trip.fulfillmentPlan.exactHandoff.address2,
+                        confirmation.trip.fulfillmentPlan.exactHandoff.city,
+                        confirmation.trip.fulfillmentPlan.exactHandoff.state,
+                        confirmation.trip.fulfillmentPlan.exactHandoff.postalCode
+                      ].filter(Boolean).join(', ')}
+                    </div>
+                  ) : null}
+                  {confirmation.trip?.fulfillmentPlan?.exactHandoffVisible && confirmation.trip.fulfillmentPlan.exactHandoff?.instructions ? (
+                    <div>{confirmation.trip.fulfillmentPlan.exactHandoff.instructions}</div>
+                  ) : null}
+                  {confirmation.trip?.fulfillmentPlan?.exactHandoffPending ? (
+                    <div>{confirmation.trip.fulfillmentPlan.exactHandoffPendingReason || 'The exact handoff address is still being finalized by the host and will show in your guest portal once confirmed.'}</div>
+                  ) : null}
+                  {pickupSpotHint(confirmation.trip?.fulfillmentPlan?.pickupSpot || confirmation.trip?.pickupSpot) ? (
+                    <div>{pickupSpotHint(confirmation.trip?.fulfillmentPlan?.pickupSpot || confirmation.trip?.pickupSpot)}</div>
                   ) : null}
                   {confirmation.trip?.deliveryNotes ? (
                     <div>{confirmation.trip.deliveryNotes}</div>

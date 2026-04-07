@@ -238,6 +238,50 @@ settingsRouter.get('/telematics', async (req, res, next) => {
   }
 });
 
+settingsRouter.get('/car-sharing-search-places', requireRole('ADMIN'), async (req, res, next) => {
+  try {
+    res.json(await settingsService.listCarSharingSearchPlacePresets(scopeFor(req)));
+  } catch (e) {
+    if (/tenantId is required/i.test(String(e?.message || ''))) {
+      return res.status(400).json({ error: 'tenantId is required for car sharing presets' });
+    }
+    next(e);
+  }
+});
+
+settingsRouter.post('/car-sharing-search-places', requireRole('ADMIN'), async (req, res, next) => {
+  try {
+    res.status(201).json(await settingsService.createCarSharingSearchPlacePreset(req.body || {}, scopeFor(req)));
+  } catch (e) {
+    if (/tenantId is required|label is required|invalid|anchor location/i.test(String(e?.message || ''))) {
+      return res.status(400).json({ error: e.message });
+    }
+    next(e);
+  }
+});
+
+settingsRouter.patch('/car-sharing-search-places/:id', requireRole('ADMIN'), async (req, res, next) => {
+  try {
+    res.json(await settingsService.updateCarSharingSearchPlacePreset(req.params.id, req.body || {}, scopeFor(req)));
+  } catch (e) {
+    if (/tenantId is required|not found|invalid|anchor location/i.test(String(e?.message || ''))) {
+      return res.status(400).json({ error: e.message });
+    }
+    next(e);
+  }
+});
+
+settingsRouter.delete('/car-sharing-search-places/:id', requireRole('ADMIN'), async (req, res, next) => {
+  try {
+    res.json(await settingsService.deleteCarSharingSearchPlacePreset(req.params.id, scopeFor(req)));
+  } catch (e) {
+    if (/tenantId is required|not found/i.test(String(e?.message || ''))) {
+      return res.status(400).json({ error: e.message });
+    }
+    next(e);
+  }
+});
+
 settingsRouter.put('/telematics', requireRole('ADMIN'), async (req, res, next) => {
   try {
     const cfg = await settingsService.updateTelematicsConfig(req.body || {}, scopeFor(req));

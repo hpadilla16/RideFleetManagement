@@ -52,6 +52,29 @@ function formatTime(value) {
   }
 }
 
+function searchPlaceLabel(place, fallbackLocation = null) {
+  if (place?.label) {
+    const area = [place.city, place.state].filter(Boolean).join(', ');
+    return [place.label, area].filter(Boolean).join(' · ');
+  }
+  return fallbackLocation?.name || 'Search place';
+}
+
+function revealModeLabel(mode) {
+  const value = String(mode || 'REVEAL_AFTER_BOOKING').toUpperCase();
+  if (value === 'PUBLIC_EXACT') return 'Exact location visible';
+  if (value === 'APPROXIMATE_ONLY') return 'Approximate handoff area';
+  return 'Exact handoff shared after booking';
+}
+
+function handoffModeLabel(mode) {
+  const value = String(mode || 'IN_PERSON').toUpperCase();
+  if (value === 'LOCKBOX') return 'Lockbox handoff';
+  if (value === 'REMOTE_UNLOCK') return 'Remote unlock';
+  if (value === 'SELF_SERVICE') return 'Self-service handoff';
+  return 'In-person handoff';
+}
+
 function statusTone(status) {
   const value = String(status || '').toLowerCase();
   if (value === 'completed') return { color: '#12633d', background: 'rgba(43, 174, 96, 0.14)' };
@@ -158,7 +181,9 @@ export default function GuestAppPage() {
   const timeline = portalStatus?.timeline || [];
   const hostReview = result?.trip?.hostReview || null;
   const bookingReference = result?.trip?.tripCode || result?.reservation?.reservationNumber || '-';
-  const pickupLabel = result?.reservation?.pickupLocation?.name || result?.trip?.locationName || result?.trip?.listing?.location?.name || 'Pickup location to be confirmed';
+  const pickupLabel = result?.bookingType === 'CAR_SHARING'
+    ? searchPlaceLabel(result?.trip?.fulfillmentPlan?.searchPlace || result?.trip?.searchPlace, result?.trip?.location || result?.trip?.listing?.location)
+    : (result?.reservation?.pickupLocation?.name || result?.trip?.locationName || result?.trip?.listing?.location?.name || 'Pickup location to be confirmed');
   const returnLabel = result?.reservation?.returnLocation?.name || result?.trip?.locationName || result?.trip?.listing?.location?.name || pickupLabel;
   const bookingVehicleLabel = [
     result?.trip?.listing?.vehicle?.year || result?.reservation?.vehicle?.year || result?.reservation?.vehicleType?.name || '',
@@ -699,6 +724,9 @@ export default function GuestAppPage() {
                       <span className="app-banner-pill">Trip total {fmtMoney(result.trip?.quotedTotal)}</span>
                       <span className="app-banner-pill">Host rating {fmtTrustLabel(result.trip?.host?.averageRating, result.trip?.host?.reviewCount)}</span>
                       <span className="app-banner-pill">Pickup {pickupLabel}</span>
+                      {result.trip?.fulfillmentPlan ? (
+                        <span className="app-banner-pill">{handoffModeLabel(result.trip.fulfillmentPlan.handoffMode)}</span>
+                      ) : null}
                     </>
                   ) : (
                   <>
@@ -812,8 +840,48 @@ export default function GuestAppPage() {
                 <div className="info-tile"><span className="label">Return Location</span><strong>{returnLabel}</strong></div>
                 <div className="info-tile"><span className="label">Return Date</span><strong>{formatDate(result.reservation?.returnAt)}</strong></div>
                 <div className="info-tile"><span className="label">Return Time</span><strong>{formatTime(result.reservation?.returnAt)}</strong></div>
+                {result.bookingType === 'CAR_SHARING' && result.trip?.fulfillmentPlan ? (
+                  <>
+                    <div className="info-tile"><span className="label">Handoff Mode</span><strong>{handoffModeLabel(result.trip.fulfillmentPlan.handoffMode)}</strong></div>
+                    <div className="info-tile"><span className="label">Location Reveal</span><strong>{revealModeLabel(result.trip.fulfillmentPlan.pickupRevealMode)}</strong></div>
+                    <div className="info-tile"><span className="label">Handoff Flow</span><strong>{result.trip.fulfillmentPlan.selfServiceLabel || 'Host confirmation required'}</strong></div>
+                    <div className="info-tile"><span className="label">Auto Reveal</span><strong>{result.trip.fulfillmentPlan.autoRevealAt ? formatDateTime(result.trip.fulfillmentPlan.autoRevealAt) : 'Host confirmation'}</strong></div>
+                  </>
+                ) : null}
               </div>
               <div className="instruction-grid">
+                {result.bookingType === 'CAR_SHARING' && result.trip?.fulfillmentPlan?.exactHandoffVisible && result.trip.fulfillmentPlan.exactHandoff ? (
+                  <div className="surface-note">
+                    <strong>Exact handoff</strong>
+                    <br />
+                    {[
+                      result.trip.fulfillmentPlan.exactHandoff.address1,
+                      result.trip.fulfillmentPlan.exactHandoff.address2,
+                      result.trip.fulfillmentPlan.exactHandoff.city,
+                      result.trip.fulfillmentPlan.exactHandoff.state,
+                      result.trip.fulfillmentPlan.exactHandoff.postalCode
+                    ].filter(Boolean).join(', ')}
+                    {result.trip.fulfillmentPlan.exactHandoff.instructions ? (
+                      <>
+                        <br />
+                        {result.trip.fulfillmentPlan.exactHandoff.instructions}
+                      </>
+                    ) : null}
+                  </div>
+                ) : null}
+                {result.bookingType === 'CAR_SHARING' && result.trip?.fulfillmentPlan?.exactHandoffPending ? (
+                  <div className="surface-note">
+                    <strong>Exact handoff pending</strong>
+                    <br />
+                    {result.trip.fulfillmentPlan.exactHandoffPendingReason || 'Your host is still confirming the final pickup details. Keep checking this guest portal as your pickup window gets closer.'}
+                    {result.trip.fulfillmentPlan.autoRevealAt ? (
+                      <>
+                        <br />
+                        Scheduled reveal: {formatDateTime(result.trip.fulfillmentPlan.autoRevealAt)}
+                      </>
+                    ) : null}
+                  </div>
+                ) : null}
                 <div className="surface-note">
                   <strong>Before pickup</strong>
                   <br />

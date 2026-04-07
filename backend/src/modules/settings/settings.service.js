@@ -108,7 +108,29 @@ const DEFAULT_SELF_SERVICE_CONFIG = {
   pickupInstructions: '',
   dropoffInstructions: '',
   supportPhone: '',
-  readinessMode: 'STRICT'
+  readinessMode: 'STRICT',
+  carSharingAutoRevealEnabled: true,
+  carSharingAutoRevealModes: ['LOCKBOX', 'REMOTE_UNLOCK', 'SELF_SERVICE'],
+  carSharingDefaultRevealWindowHours: 24,
+  carSharingAirportRevealWindowHours: 12,
+  carSharingHotelRevealWindowHours: 8,
+  carSharingNeighborhoodRevealWindowHours: 24,
+  carSharingStationRevealWindowHours: 10,
+  carSharingHostPickupRevealWindowHours: 18,
+  carSharingBranchRevealWindowHours: 0,
+  carSharingDefaultHandoffMode: 'IN_PERSON',
+  carSharingAirportHandoffMode: 'LOCKBOX',
+  carSharingHotelHandoffMode: 'IN_PERSON',
+  carSharingNeighborhoodHandoffMode: 'SELF_SERVICE',
+  carSharingStationHandoffMode: 'LOCKBOX',
+  carSharingHostPickupHandoffMode: 'LOCKBOX',
+  carSharingBranchHandoffMode: 'SELF_SERVICE',
+  carSharingAirportInstructionsTemplate: 'Share the terminal, parking garage, level, stall, and timing for access or key retrieval.',
+  carSharingHotelInstructionsTemplate: 'Share the hotel entrance, lobby, valet, or curbside meeting instructions and exact timing.',
+  carSharingNeighborhoodInstructionsTemplate: 'Share the street, landmark, parking side, and how the guest should access the vehicle.',
+  carSharingStationInstructionsTemplate: 'Share the station meeting point, garage/lot, and platform or entrance guidance.',
+  carSharingHostPickupInstructionsTemplate: 'Share the driveway, garage, gate, lockbox, or parking notes the guest should follow on arrival.',
+  carSharingBranchInstructionsTemplate: 'Share the branch lot, kiosk, desk, or self-service pickup steps the guest should follow.'
 };
 
 function buildPlannerCopilotPlanDefaults(planConfig = null) {
@@ -167,6 +189,37 @@ function normalizeDayWindow(value, fallback = 0, max = 365) {
   return Math.max(0, Math.min(max, Math.floor(parsed)));
 }
 
+function normalizeHourWindow(value, fallback = 0, max = 168) {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return Number(fallback || 0);
+  return Math.max(0, Math.min(max, Math.floor(parsed)));
+}
+
+function normalizeHandoffModeList(value, fallback = []) {
+  const raw = Array.isArray(value)
+    ? value
+    : String(value || '')
+        .split(',')
+        .map((item) => item.trim())
+        .filter(Boolean);
+  return Array.from(new Set(
+    raw
+      .map((item) => String(item || '').trim().toUpperCase())
+      .filter((item) => ['LOCKBOX', 'REMOTE_UNLOCK', 'SELF_SERVICE', 'IN_PERSON'].includes(item))
+  )).length
+    ? Array.from(new Set(
+        raw
+          .map((item) => String(item || '').trim().toUpperCase())
+          .filter((item) => ['LOCKBOX', 'REMOTE_UNLOCK', 'SELF_SERVICE', 'IN_PERSON'].includes(item))
+      ))
+    : fallback;
+}
+
+function normalizeSingleHandoffMode(value, fallback = 'IN_PERSON') {
+  const normalized = String(value || fallback).trim().toUpperCase();
+  return ['LOCKBOX', 'REMOTE_UNLOCK', 'SELF_SERVICE', 'IN_PERSON'].includes(normalized) ? normalized : fallback;
+}
+
 function normalizeSelfServiceConfig(raw = {}, options = {}) {
   const tenantPlan = String(options.tenantPlan || 'BETA').trim().toUpperCase() || 'BETA';
   const keyExchangeMode = ['DESK', 'LOCKBOX', 'SMART_LOCK', 'KEY_CABINET'].includes(String(raw?.keyExchangeMode || '').trim().toUpperCase())
@@ -189,6 +242,28 @@ function normalizeSelfServiceConfig(raw = {}, options = {}) {
     dropoffInstructions: String(raw?.dropoffInstructions || '').trim(),
     supportPhone: String(raw?.supportPhone || '').trim(),
     readinessMode,
+    carSharingAutoRevealEnabled: raw?.carSharingAutoRevealEnabled == null ? !!DEFAULT_SELF_SERVICE_CONFIG.carSharingAutoRevealEnabled : !!raw?.carSharingAutoRevealEnabled,
+    carSharingAutoRevealModes: normalizeHandoffModeList(raw?.carSharingAutoRevealModes, DEFAULT_SELF_SERVICE_CONFIG.carSharingAutoRevealModes),
+    carSharingDefaultRevealWindowHours: normalizeHourWindow(raw?.carSharingDefaultRevealWindowHours, DEFAULT_SELF_SERVICE_CONFIG.carSharingDefaultRevealWindowHours),
+    carSharingAirportRevealWindowHours: normalizeHourWindow(raw?.carSharingAirportRevealWindowHours, DEFAULT_SELF_SERVICE_CONFIG.carSharingAirportRevealWindowHours),
+    carSharingHotelRevealWindowHours: normalizeHourWindow(raw?.carSharingHotelRevealWindowHours, DEFAULT_SELF_SERVICE_CONFIG.carSharingHotelRevealWindowHours),
+    carSharingNeighborhoodRevealWindowHours: normalizeHourWindow(raw?.carSharingNeighborhoodRevealWindowHours, DEFAULT_SELF_SERVICE_CONFIG.carSharingNeighborhoodRevealWindowHours),
+    carSharingStationRevealWindowHours: normalizeHourWindow(raw?.carSharingStationRevealWindowHours, DEFAULT_SELF_SERVICE_CONFIG.carSharingStationRevealWindowHours),
+    carSharingHostPickupRevealWindowHours: normalizeHourWindow(raw?.carSharingHostPickupRevealWindowHours, DEFAULT_SELF_SERVICE_CONFIG.carSharingHostPickupRevealWindowHours),
+    carSharingBranchRevealWindowHours: normalizeHourWindow(raw?.carSharingBranchRevealWindowHours, DEFAULT_SELF_SERVICE_CONFIG.carSharingBranchRevealWindowHours),
+    carSharingDefaultHandoffMode: normalizeSingleHandoffMode(raw?.carSharingDefaultHandoffMode, DEFAULT_SELF_SERVICE_CONFIG.carSharingDefaultHandoffMode),
+    carSharingAirportHandoffMode: normalizeSingleHandoffMode(raw?.carSharingAirportHandoffMode, DEFAULT_SELF_SERVICE_CONFIG.carSharingAirportHandoffMode),
+    carSharingHotelHandoffMode: normalizeSingleHandoffMode(raw?.carSharingHotelHandoffMode, DEFAULT_SELF_SERVICE_CONFIG.carSharingHotelHandoffMode),
+    carSharingNeighborhoodHandoffMode: normalizeSingleHandoffMode(raw?.carSharingNeighborhoodHandoffMode, DEFAULT_SELF_SERVICE_CONFIG.carSharingNeighborhoodHandoffMode),
+    carSharingStationHandoffMode: normalizeSingleHandoffMode(raw?.carSharingStationHandoffMode, DEFAULT_SELF_SERVICE_CONFIG.carSharingStationHandoffMode),
+    carSharingHostPickupHandoffMode: normalizeSingleHandoffMode(raw?.carSharingHostPickupHandoffMode, DEFAULT_SELF_SERVICE_CONFIG.carSharingHostPickupHandoffMode),
+    carSharingBranchHandoffMode: normalizeSingleHandoffMode(raw?.carSharingBranchHandoffMode, DEFAULT_SELF_SERVICE_CONFIG.carSharingBranchHandoffMode),
+    carSharingAirportInstructionsTemplate: String(raw?.carSharingAirportInstructionsTemplate ?? DEFAULT_SELF_SERVICE_CONFIG.carSharingAirportInstructionsTemplate).trim(),
+    carSharingHotelInstructionsTemplate: String(raw?.carSharingHotelInstructionsTemplate ?? DEFAULT_SELF_SERVICE_CONFIG.carSharingHotelInstructionsTemplate).trim(),
+    carSharingNeighborhoodInstructionsTemplate: String(raw?.carSharingNeighborhoodInstructionsTemplate ?? DEFAULT_SELF_SERVICE_CONFIG.carSharingNeighborhoodInstructionsTemplate).trim(),
+    carSharingStationInstructionsTemplate: String(raw?.carSharingStationInstructionsTemplate ?? DEFAULT_SELF_SERVICE_CONFIG.carSharingStationInstructionsTemplate).trim(),
+    carSharingHostPickupInstructionsTemplate: String(raw?.carSharingHostPickupInstructionsTemplate ?? DEFAULT_SELF_SERVICE_CONFIG.carSharingHostPickupInstructionsTemplate).trim(),
+    carSharingBranchInstructionsTemplate: String(raw?.carSharingBranchInstructionsTemplate ?? DEFAULT_SELF_SERVICE_CONFIG.carSharingBranchInstructionsTemplate).trim(),
     tenantPlan
   };
 }
@@ -302,6 +377,31 @@ function normalizeRevenuePricingConfig(raw = {}, options = {}) {
     maxAdjustmentPct: normalizePercentSetting(raw?.maxAdjustmentPct, DEFAULT_REVENUE_PRICING_CONFIG.maxAdjustmentPct),
     tenantPlan
   };
+}
+
+const CAR_SHARING_PRESET_TYPES = ['AIRPORT', 'HOTEL', 'NEIGHBORHOOD', 'STATION', 'TENANT_BRANCH'];
+const CAR_SHARING_PRESET_VISIBILITY = ['PUBLIC_EXACT', 'APPROXIMATE_ONLY', 'REVEAL_AFTER_BOOKING'];
+
+function normalizeCarSharingPresetType(value) {
+  const normalized = String(value || '').trim().toUpperCase();
+  if (!CAR_SHARING_PRESET_TYPES.includes(normalized)) throw new Error('Invalid car sharing preset type');
+  return normalized;
+}
+
+function normalizeCarSharingPresetVisibility(value) {
+  const normalized = String(value || 'APPROXIMATE_ONLY').trim().toUpperCase();
+  if (!CAR_SHARING_PRESET_VISIBILITY.includes(normalized)) throw new Error('Invalid car sharing preset visibility');
+  return normalized;
+}
+
+async function ensureScopedLocation(locationId, tenantId) {
+  if (!locationId) return null;
+  const location = await prisma.location.findFirst({
+    where: { id: locationId, tenantId, isActive: true },
+    select: { id: true }
+  });
+  if (!location) throw new Error('Anchor location not found');
+  return location.id;
 }
 
 function defaultPaymentGatewayConfig() {
@@ -706,6 +806,118 @@ export const settingsService = {
       update: { value: JSON.stringify(next) }
     });
     return this.getSelfServiceConfig(scope);
+  },
+
+  async listCarSharingSearchPlacePresets(scope = {}) {
+    if (!scope?.tenantId) throw new Error('tenantId is required');
+    return prisma.carSharingSearchPlace.findMany({
+      where: {
+        tenantId: scope.tenantId,
+        hostProfileId: null,
+        placeType: { in: CAR_SHARING_PRESET_TYPES }
+      },
+      include: {
+        anchorLocation: {
+          select: { id: true, name: true, city: true, state: true }
+        }
+      },
+      orderBy: [{ placeType: 'asc' }, { label: 'asc' }]
+    });
+  },
+
+  async createCarSharingSearchPlacePreset(payload = {}, scope = {}) {
+    if (!scope?.tenantId) throw new Error('tenantId is required');
+    const placeType = normalizeCarSharingPresetType(payload?.placeType);
+    const anchorLocationId = await ensureScopedLocation(payload?.anchorLocationId ? String(payload.anchorLocationId).trim() : null, scope.tenantId);
+    const label = String(payload?.label || '').trim();
+    if (!label) throw new Error('label is required');
+    const row = await prisma.carSharingSearchPlace.create({
+      data: {
+        tenantId: scope.tenantId,
+        hostProfileId: null,
+        anchorLocationId,
+        placeType,
+        label,
+        publicLabel: String(payload?.publicLabel || label).trim() || label,
+        city: payload?.city ? String(payload.city).trim() : null,
+        state: payload?.state ? String(payload.state).trim() : null,
+        postalCode: payload?.postalCode ? String(payload.postalCode).trim() : null,
+        country: payload?.country ? String(payload.country).trim() : null,
+        radiusMiles: payload?.radiusMiles === '' || payload?.radiusMiles == null ? null : Math.max(0, Math.floor(Number(payload.radiusMiles))),
+        searchable: payload?.searchable !== false,
+        isActive: payload?.isActive !== false,
+        approvalStatus: 'APPROVED',
+        visibilityMode: normalizeCarSharingPresetVisibility(payload?.visibilityMode),
+        deliveryEligible: !!payload?.deliveryEligible,
+        pickupEligible: payload?.pickupEligible !== false
+      },
+      include: {
+        anchorLocation: {
+          select: { id: true, name: true, city: true, state: true }
+        }
+      }
+    });
+    return row;
+  },
+
+  async updateCarSharingSearchPlacePreset(id, payload = {}, scope = {}) {
+    if (!scope?.tenantId) throw new Error('tenantId is required');
+    const current = await prisma.carSharingSearchPlace.findFirst({
+      where: {
+        id,
+        tenantId: scope.tenantId,
+        hostProfileId: null,
+        placeType: { in: CAR_SHARING_PRESET_TYPES }
+      }
+    });
+    if (!current) throw new Error('Car sharing preset not found');
+    const anchorLocationId = Object.prototype.hasOwnProperty.call(payload || {}, 'anchorLocationId')
+      ? await ensureScopedLocation(payload?.anchorLocationId ? String(payload.anchorLocationId).trim() : null, scope.tenantId)
+      : undefined;
+    return prisma.carSharingSearchPlace.update({
+      where: { id: current.id },
+      data: {
+        placeType: Object.prototype.hasOwnProperty.call(payload || {}, 'placeType') ? normalizeCarSharingPresetType(payload?.placeType) : undefined,
+        anchorLocationId,
+        label: Object.prototype.hasOwnProperty.call(payload || {}, 'label') ? String(payload?.label || '').trim() : undefined,
+        publicLabel: Object.prototype.hasOwnProperty.call(payload || {}, 'publicLabel') ? (payload?.publicLabel ? String(payload.publicLabel).trim() : null) : undefined,
+        city: Object.prototype.hasOwnProperty.call(payload || {}, 'city') ? (payload?.city ? String(payload.city).trim() : null) : undefined,
+        state: Object.prototype.hasOwnProperty.call(payload || {}, 'state') ? (payload?.state ? String(payload.state).trim() : null) : undefined,
+        postalCode: Object.prototype.hasOwnProperty.call(payload || {}, 'postalCode') ? (payload?.postalCode ? String(payload.postalCode).trim() : null) : undefined,
+        country: Object.prototype.hasOwnProperty.call(payload || {}, 'country') ? (payload?.country ? String(payload.country).trim() : null) : undefined,
+        radiusMiles: Object.prototype.hasOwnProperty.call(payload || {}, 'radiusMiles')
+          ? (payload?.radiusMiles === '' || payload?.radiusMiles == null ? null : Math.max(0, Math.floor(Number(payload.radiusMiles))))
+          : undefined,
+        searchable: Object.prototype.hasOwnProperty.call(payload || {}, 'searchable') ? !!payload?.searchable : undefined,
+        isActive: Object.prototype.hasOwnProperty.call(payload || {}, 'isActive') ? !!payload?.isActive : undefined,
+        visibilityMode: Object.prototype.hasOwnProperty.call(payload || {}, 'visibilityMode') ? normalizeCarSharingPresetVisibility(payload?.visibilityMode) : undefined,
+        deliveryEligible: Object.prototype.hasOwnProperty.call(payload || {}, 'deliveryEligible') ? !!payload?.deliveryEligible : undefined,
+        pickupEligible: Object.prototype.hasOwnProperty.call(payload || {}, 'pickupEligible') ? !!payload?.pickupEligible : undefined
+      },
+      include: {
+        anchorLocation: {
+          select: { id: true, name: true, city: true, state: true }
+        }
+      }
+    });
+  },
+
+  async deleteCarSharingSearchPlacePreset(id, scope = {}) {
+    if (!scope?.tenantId) throw new Error('tenantId is required');
+    const current = await prisma.carSharingSearchPlace.findFirst({
+      where: {
+        id,
+        tenantId: scope.tenantId,
+        hostProfileId: null,
+        placeType: { in: CAR_SHARING_PRESET_TYPES }
+      },
+      select: { id: true }
+    });
+    if (!current) throw new Error('Car sharing preset not found');
+    await prisma.carSharingSearchPlace.delete({
+      where: { id: current.id }
+    });
+    return { ok: true };
   },
 
   async updatePlannerCopilotConfig(payload = {}, scope = {}) {
