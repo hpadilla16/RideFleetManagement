@@ -1,5 +1,14 @@
 import { prisma } from '../../lib/prisma.js';
 import { issueCenterService } from '../issue-center/issue-center.service.js';
+import { evaluateTollBillingPolicy } from './tolls-billing-policy.service.js';
+import {
+  DISPATCH_CONFIRMATION_REVIEW_CATEGORY,
+  appendReviewCategory,
+  clearDispatchConfirmationReview,
+  inferReviewCategory,
+  reservationReferencesVehicle,
+  resolveReservationResponsibility
+} from './tolls-responsibility.service.js';
 
 const DEFAULT_PRE_PICKUP_GRACE_MINUTES = 120;
 const DEFAULT_POST_RETURN_GRACE_MINUTES = 180;
@@ -301,6 +310,14 @@ function mergeChargeNotes(existing, nextNote) {
   return `${base}\n${incoming}`;
 }
 
+function transactionCoveredByTollPackage(row = {}) {
+  return String(row?.reviewNotes || '').toLowerCase().includes('covered by prepaid toll package');
+}
+
+function transactionUsageOnly(row = {}) {
+  return transactionCoveredByTollPackage(row);
+}
+
 function transactionStatusLabel(status) {
   return String(status || '').replaceAll('_', ' ').toLowerCase();
 }
@@ -383,6 +400,8 @@ function serializeIssueIncidentSummary(incident) {
 
 function serializeTransaction(row) {
   const latestAssignment = Array.isArray(row.assignments) && row.assignments.length ? row.assignments[0] : null;
+  const reviewCategory = inferReviewCategory(row.reviewNotes || latestAssignment?.matchReason || '');
+  const coveredByTollPackage = transactionCoveredByTollPackage(row);
   return {
     id: row.id,
     externalId: row.externalId || '',
@@ -403,6 +422,10 @@ function serializeTransaction(row) {
     statusLabel: transactionStatusLabel(row.status),
     billingStatus: row.billingStatus,
     needsReview: !!row.needsReview,
+    reviewCategory,
+    dispatchConfirmationRequired: reviewCategory === DISPATCH_CONFIRMATION_REVIEW_CATEGORY,
+    coveredByTollPackage,
+    billingMode: coveredByTollPackage ? 'USAGE_ONLY' : 'CHARGEABLE',
     matchConfidence: row.matchConfidence == null ? null : Number(row.matchConfidence),
     reviewNotes: row.reviewNotes || '',
     vehicle: row.vehicle ? {
@@ -451,8 +474,14 @@ async function attachIssueIncidents(rows = [], scope = {}) {
   try {
     const incidents = await prisma.tripIncident.findMany({
       where: {
-        ...tenantWhereForScope(scope),
         type: 'TOLL',
+        ...(scope?.tenantId ? {
+          reservation: {
+            is: {
+              tenantId: scope.tenantId
+            }
+          }
+        } : {}),
         OR: tollTransactionIds.map((id) => ({
           evidenceJson: { contains: id }
         }))
@@ -560,7 +589,30 @@ async function listReservationCandidates(scope = {}, vehicleIds = [], transactio
   return prisma.reservation.findMany({
     where: {
       ...tenantWhereForScope(scope),
-      vehicleId: { in: vehicleIds },
+      OR: [
+        { vehicleId: { in: vehicleIds } },
+        {
+          rentalAgreement: {
+            is: {
+              vehicleId: { in: vehicleIds }
+            }
+          }
+        },
+        {
+          rentalAgreement: {
+            is: {
+              vehicleSwaps: {
+                some: {
+                  OR: [
+                    { previousVehicleId: { in: vehicleIds } },
+                    { nextVehicleId: { in: vehicleIds } }
+                  ]
+                }
+              }
+            }
+          }
+        }
+      ],
       pickupAt: { lte: dayWindowEnd },
       returnAt: { gte: dayWindowStart },
       status: { not: 'CANCELLED' }
@@ -574,6 +626,29 @@ async function listReservationCandidates(scope = {}, vehicleIds = [], transactio
           plate: true,
           tollTagNumber: true,
           tollStickerNumber: true
+        }
+      },
+      rentalAgreement: {
+        select: {
+          id: true,
+          vehicleId: true,
+          finalizedAt: true,
+          inspections: {
+            where: { phase: 'CHECKOUT' },
+            select: { phase: true, capturedAt: true, createdAt: true },
+            orderBy: [{ capturedAt: 'asc' }, { createdAt: 'asc' }],
+            take: 1
+          },
+          vehicleSwaps: {
+            select: {
+              previousVehicleId: true,
+              nextVehicleId: true,
+              previousCheckedInAt: true,
+              nextCheckedOutAt: true,
+              createdAt: true
+            },
+            orderBy: [{ createdAt: 'asc' }]
+          }
         }
       }
     },
@@ -589,14 +664,29 @@ function scoreCandidate({ transaction, vehicle, reservation, siblingCandidates =
   const vehicleTag = normalizeNullableToken(vehicle?.tollTagNumber);
   const vehicleSello = normalizeNullableToken(vehicle?.tollStickerNumber);
   const when = normalizeDateTime(transaction.transactionAt);
+  const responsibility = resolveReservationResponsibility({
+    reservation,
+    vehicleId: vehicle?.id || null,
+    transactionAt: when,
+    prePickupGraceMinutes: DEFAULT_PRE_PICKUP_GRACE_MINUTES,
+    postReturnGraceMinutes: DEFAULT_POST_RETURN_GRACE_MINUTES
+  });
 
   let score = 0;
   const reasons = [];
-  let withinTripWindow = false;
+  let withinTripWindow = responsibility.withinTripWindow;
 
+  if (responsibility.withinEffectiveWindow && vehicle?.id) {
+    score += 70;
+    reasons.push('vehicleResponsibilityWindow');
+  }
   if (vehicle?.id && reservation?.vehicleId && vehicle.id === reservation.vehicleId) {
-    score += 60;
-    reasons.push('vehicleId');
+    score += 15;
+    reasons.push('currentVehicleId');
+  }
+  if (vehicle?.id && reservation?.rentalAgreement?.vehicleId && vehicle.id === reservation.rentalAgreement.vehicleId) {
+    score += 10;
+    reasons.push('agreementVehicleId');
   }
   if (plate && vehiclePlate && plate === vehiclePlate) {
     score += 25;
@@ -613,18 +703,23 @@ function scoreCandidate({ transaction, vehicle, reservation, siblingCandidates =
 
   const prePickupAt = new Date(reservation.pickupAt.getTime() - DEFAULT_PRE_PICKUP_GRACE_MINUTES * 60 * 1000);
   const postReturnAt = new Date(reservation.returnAt.getTime() + DEFAULT_POST_RETURN_GRACE_MINUTES * 60 * 1000);
-  if (when >= reservation.pickupAt && when <= reservation.returnAt) {
+  if (responsibility.withinTripWindow || (when >= reservation.pickupAt && when <= reservation.returnAt)) {
     withinTripWindow = true;
     score += 25;
     reasons.push('withinTripWindow');
-  } else if (when >= prePickupAt && when <= postReturnAt) {
+  } else if (responsibility.withinGraceWindow || (when >= prePickupAt && when <= postReturnAt)) {
     score += 10;
     reasons.push('withinGraceWindow');
   }
 
-  if (withinTripWindow && vehicle?.id && reservation?.vehicleId && vehicle.id === reservation.vehicleId) {
+  if (withinTripWindow && responsibility.withinEffectiveWindow) {
     score += 20;
-    reasons.push('assignedVehicleTripWindow');
+    reasons.push('effectiveVehicleTripWindow');
+  }
+
+  if (responsibility.dispatchConfirmationRequired) {
+    reasons.push('dispatchConfirmationRequired');
+    score = Math.min(score, 79);
   }
 
   if (siblingCandidates > 1) {
@@ -634,7 +729,9 @@ function scoreCandidate({ transaction, vehicle, reservation, siblingCandidates =
 
   return {
     score,
-    matchReason: reasons.join(',') || 'manual-review'
+    matchReason: reasons.join(',') || 'manual-review',
+    reviewCategory: responsibility.reviewCategory,
+    dispatchConfirmationRequired: responsibility.dispatchConfirmationRequired
   };
 }
 
@@ -664,26 +761,44 @@ async function buildMatchSuggestion(transaction, scope = {}) {
     };
   }
 
-  const candidates = reservations.map((reservation) => {
-    const vehicle = vehicles.find((item) => item.id === reservation.vehicleId) || reservation.vehicle;
-    const siblingCandidates = reservations.filter((item) => item.vehicleId === reservation.vehicleId).length;
-    const scored = scoreCandidate({ transaction, vehicle, reservation, siblingCandidates });
+  const candidates = reservations.flatMap((reservation) => vehicles
+    .filter((vehicle) => reservationReferencesVehicle(reservation, vehicle.id))
+    .map((vehicle) => {
+      const siblingCandidates = reservations.filter((item) => reservationReferencesVehicle(item, vehicle.id)).length;
+      const scored = scoreCandidate({ transaction, vehicle, reservation, siblingCandidates });
+      return {
+        vehicle,
+        reservation,
+        score: scored.score,
+        reviewCategory: scored.reviewCategory,
+        dispatchConfirmationRequired: scored.dispatchConfirmationRequired,
+        matchReason: appendReviewCategory(scored.matchReason, scored.reviewCategory)
+      };
+    }))
+    .filter((candidate) => candidate.score > 0)
+    .sort((a, b) => b.score - a.score || new Date(a.reservation.pickupAt).getTime() - new Date(b.reservation.pickupAt).getTime());
+
+  if (!candidates.length) {
     return {
-      vehicle,
-      reservation,
-      score: scored.score,
-      matchReason: scored.matchReason
+      vehicle: vehicles.length === 1 ? vehicles[0] : null,
+      reservation: null,
+      score: vehicles.length === 1 ? 45 : 0,
+      matchStatus: null,
+      needsReview: true,
+      matchReason: vehicles.length === 1 ? 'vehicle-found-no-responsibility-window' : 'multiple-vehicles-no-responsibility-window'
     };
-  }).sort((a, b) => b.score - a.score || new Date(a.reservation.pickupAt).getTime() - new Date(b.reservation.pickupAt).getTime());
+  }
 
   const top = candidates[0];
-  const matchStatus = top.score >= 85 ? 'AUTO_CONFIRMED' : top.score >= 60 ? 'SUGGESTED' : null;
+  const matchStatus = top.dispatchConfirmationRequired
+    ? 'SUGGESTED'
+    : top.score >= 85 ? 'AUTO_CONFIRMED' : top.score >= 60 ? 'SUGGESTED' : null;
   return {
     vehicle: top.vehicle || null,
     reservation: top.reservation || null,
     score: top.score,
     matchStatus,
-    needsReview: matchStatus !== 'AUTO_CONFIRMED',
+    needsReview: top.dispatchConfirmationRequired || matchStatus !== 'AUTO_CONFIRMED',
     matchReason: top.matchReason || 'manual-review',
     candidates: candidates.slice(0, 5).map((candidate) => ({
       reservationId: candidate.reservation.id,
@@ -691,7 +806,8 @@ async function buildMatchSuggestion(transaction, scope = {}) {
       vehicleId: candidate.vehicle?.id || candidate.reservation.vehicleId || null,
       vehicleInternalNumber: candidate.vehicle?.internalNumber || candidate.reservation.vehicle?.internalNumber || '',
       score: candidate.score,
-      matchReason: candidate.matchReason
+      matchReason: candidate.matchReason,
+      reviewCategory: candidate.reviewCategory || null
     }))
   };
 }
@@ -896,7 +1012,6 @@ async function syncReservationTollCharges(reservationId, scope = {}, options = {
         }
       })
     : 0;
-  const coveredByTollPackage = prepaidTollServiceCount > 0;
   const transactions = await prisma.tollTransaction.findMany({
     where: {
       reservationId,
@@ -920,6 +1035,10 @@ async function syncReservationTollCharges(reservationId, scope = {}, options = {
   let nextSortOrder = currentMaxSort + 1;
   const activeTransactionIds = new Set(transactions.map((row) => String(row.id)));
   const note = String(options?.note || '').trim();
+  const billingDecision = evaluateTollBillingPolicy({
+    prepaidTollServiceCount,
+    transactions
+  });
 
   await prisma.$transaction(async (tx) => {
     for (const transaction of transactions) {
@@ -932,15 +1051,15 @@ async function syncReservationTollCharges(reservationId, scope = {}, options = {
           status: 'BILLED',
           reviewNotes: mergeChargeNotes(
             transaction.reviewNotes,
-            coveredByTollPackage
-              ? 'Covered by prepaid toll package'
+            billingDecision.coveredByTollPackage
+              ? 'Covered by prepaid toll package; usage recorded without billing'
               : (note ? `Posted to reservation: ${note}` : 'Posted to reservation automatically')
           )
         }
       });
     }
 
-    if (!coveredByTollPackage) {
+    if (billingDecision.shouldCreateChargeRows) {
       for (const transaction of transactions) {
         const sourceRefId = String(transaction.id);
         const existing = existingTollChargeByRef.get(sourceRefId);
@@ -976,7 +1095,7 @@ async function syncReservationTollCharges(reservationId, scope = {}, options = {
     }
 
     const staleTollChargeIds = existingTollCharges
-      .filter((row) => coveredByTollPackage || !activeTransactionIds.has(String(row.sourceRefId || '')))
+      .filter((row) => billingDecision.coveredByTollPackage || !activeTransactionIds.has(String(row.sourceRefId || '')))
       .map((row) => row.id);
     if (staleTollChargeIds.length) {
       await tx.reservationCharge.deleteMany({
@@ -987,7 +1106,7 @@ async function syncReservationTollCharges(reservationId, scope = {}, options = {
       });
     }
 
-    const policyCharge = coveredByTollPackage ? null : buildTollPolicyChargeShape(policy, transactions);
+    const policyCharge = billingDecision.shouldApplyPolicyFee ? buildTollPolicyChargeShape(policy, transactions) : null;
     const existingPolicyCharge = existingPolicyCharges.find((row) => String(row.sourceRefId || '') === policySourceRefId) || existingPolicyCharges[0] || null;
 
     if (policyCharge) {
@@ -1035,8 +1154,11 @@ async function syncReservationTollCharges(reservationId, scope = {}, options = {
     reservationId,
     tollsEnabled: true,
     syncedChargeCount: transactions.length,
-    policyFeeApplied: !coveredByTollPackage && !!buildTollPolicyChargeShape(policy, transactions),
-    coveredByTollPackage,
+    usageOnlyCount: billingDecision.usageOnlyCount,
+    chargeableCount: billingDecision.chargeableCount,
+    policyFeeApplied: billingDecision.shouldApplyPolicyFee && !!buildTollPolicyChargeShape(policy, transactions),
+    coveredByTollPackage: billingDecision.coveredByTollPackage,
+    billingMode: billingDecision.billingMode,
     policy
   };
 }
@@ -1078,6 +1200,10 @@ function reviewActionLabel(action) {
   switch (String(action || '').toUpperCase()) {
     case 'RESET_MATCH':
       return 'match reset';
+    case 'CONFIRM_DISPATCHED':
+      return 'dispatch confirmed';
+    case 'MARK_NOT_DISPATCHED':
+      return 'marked not dispatched';
     case 'MARK_DISPUTED':
       return 'marked disputed';
     case 'MARK_NOT_BILLABLE':
@@ -2002,7 +2128,7 @@ export const tollsService = {
     const transaction = await getTransactionOrThrow(id, scope);
     const action = String(payload.action || '').toUpperCase();
     const note = String(payload.note || '').trim();
-    if (!['RESET_MATCH', 'MARK_DISPUTED', 'MARK_NOT_BILLABLE'].includes(action)) {
+    if (!['RESET_MATCH', 'CONFIRM_DISPATCHED', 'MARK_NOT_DISPATCHED', 'MARK_DISPUTED', 'MARK_NOT_BILLABLE'].includes(action)) {
       throw new Error('Unsupported toll review action');
     }
 
@@ -2025,6 +2151,69 @@ export const tollsService = {
             matchConfidence: null,
             billingStatus: transaction.billingStatus === 'DISPUTED' ? 'DISPUTED' : 'PENDING',
             reviewNotes: mergeChargeNotes(transaction.reviewNotes, note || 'Match reset for manual review')
+          }
+        });
+      }
+
+      if (action === 'CONFIRM_DISPATCHED') {
+        if (!transaction.reservationId) {
+          throw new Error('Reservation match is required before confirming dispatch');
+        }
+
+        const reservation = await tx.reservation.findUnique({
+          where: { id: transaction.reservationId },
+          include: { vehicle: true }
+        });
+        if (!reservation) throw new Error('Reservation not found for dispatch confirmation');
+
+        await tx.tollAssignment.updateMany({
+          where: {
+            tollTransactionId: transaction.id,
+            status: { in: ['SUGGESTED', 'AUTO_CONFIRMED', 'CONFIRMED'] }
+          },
+          data: { status: 'REJECTED' }
+        });
+
+        await tx.tollTransaction.update({
+          where: { id: transaction.id },
+          data: {
+            vehicleId: transaction.vehicleId || reservation.vehicleId || reservation.vehicle?.id || null,
+            status: 'MATCHED',
+            needsReview: false,
+            billingStatus: transaction.billingStatus === 'DISPUTED' ? 'DISPUTED' : 'PENDING',
+            reviewNotes: mergeChargeNotes(
+              clearDispatchConfirmationReview(transaction.reviewNotes),
+              note || 'Dispatch confirmed without formal checkout'
+            )
+          }
+        });
+
+        await createAssignmentRecord(tx, transaction, {
+          vehicle: reservation.vehicle || null,
+          reservation,
+          score: transaction.matchConfidence != null ? Number(transaction.matchConfidence) : 100,
+          matchStatus: 'CONFIRMED',
+          matchReason: 'dispatch-confirmed'
+        }, actorUserId);
+      }
+
+      if (action === 'MARK_NOT_DISPATCHED') {
+        await tx.tollAssignment.updateMany({
+          where: {
+            tollTransactionId: transaction.id,
+            status: { in: ['SUGGESTED', 'AUTO_CONFIRMED', 'CONFIRMED'] }
+          },
+          data: { status: 'REJECTED' }
+        });
+
+        await tx.tollTransaction.update({
+          where: { id: transaction.id },
+          data: {
+            reservationId: null,
+            status: 'VOID',
+            needsReview: false,
+            billingStatus: 'WAIVED',
+            reviewNotes: mergeChargeNotes(transaction.reviewNotes, note || 'Vehicle was not dispatched to this customer')
           }
         });
       }
@@ -2158,6 +2347,11 @@ export const tollsService = {
     const totalAmount = Number(rowsWithIssues.reduce((sum, row) => sum + toMoney(row.amount), 0).toFixed(2));
     const postedAmount = Number(rowsWithIssues
       .filter((row) => ['POSTED_TO_RESERVATION', 'POSTED_TO_AGREEMENT'].includes(String(row.billingStatus || '').toUpperCase()))
+      .filter((row) => !transactionUsageOnly(row))
+      .reduce((sum, row) => sum + toMoney(row.amount), 0)
+      .toFixed(2));
+    const usageOnlyAmount = Number(rowsWithIssues
+      .filter((row) => transactionUsageOnly(row))
       .reduce((sum, row) => sum + toMoney(row.amount), 0)
       .toFixed(2));
 
@@ -2167,7 +2361,9 @@ export const tollsService = {
       totals: {
         totalAmount,
         postedAmount,
-        reviewCount: rowsWithIssues.filter((row) => row.needsReview).length
+        usageOnlyAmount,
+        reviewCount: rowsWithIssues.filter((row) => row.needsReview).length,
+        usageOnlyCount: rowsWithIssues.filter((row) => transactionUsageOnly(row)).length
       },
       transactions: rowsWithIssues.map(serializeTransaction)
     };

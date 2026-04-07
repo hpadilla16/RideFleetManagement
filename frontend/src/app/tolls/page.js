@@ -32,6 +32,27 @@ function dateTimeLabel(value) {
   return Number.isNaN(date.getTime()) ? String(value) : date.toLocaleString();
 }
 
+function tollReviewLabel(row = {}) {
+  if (row?.coveredByTollPackage || row?.billingMode === 'USAGE_ONLY') {
+    return 'Usage recorded by toll package';
+  }
+  if (row?.dispatchConfirmationRequired || row?.reviewCategory === 'DISPATCH_CONFIRMATION_REQUIRED') {
+    return 'Dispatch confirmation required';
+  }
+  if (row?.needsReview) return 'Needs review';
+  return row?.statusLabel || 'Review updated';
+}
+
+function tollReviewHint(row = {}) {
+  if (row?.coveredByTollPackage || row?.billingMode === 'USAGE_ONLY') {
+    return 'The tenant toll package covers this transaction. Usage is recorded for reporting, but no charge should be added to the reservation.';
+  }
+  if (row?.dispatchConfirmationRequired || row?.reviewCategory === 'DISPATCH_CONFIRMATION_REQUIRED') {
+    return 'This toll landed inside a vehicle responsibility window before formal checkout. Confirm whether the vehicle was actually dispatched to this customer.';
+  }
+  return row?.latestAssignment?.matchReason || row?.reviewNotes || '';
+}
+
 function importRunDiagnostics(run) {
   const autoSync = run?.metadata?.autoSync || {};
   const scrapedCount = Number(autoSync.scrapedCount || run?.metadata?.scrapedCount || 0);
@@ -96,6 +117,7 @@ function TollsInner({ token, me, logout }) {
   });
   const [statusFilter, setStatusFilter] = useState('');
   const [reviewOnly, setReviewOnly] = useState(true);
+  const [queueView, setQueueView] = useState('ALL');
   const [query, setQuery] = useState('');
   const [bulkImportText, setBulkImportText] = useState('');
   const [importForm, setImportForm] = useState(() => ({
@@ -158,6 +180,20 @@ function TollsInner({ token, me, logout }) {
   }, [token, statusFilter, reviewOnly, activeTenantId, isSuper]);
 
   const transactions = useMemo(() => Array.isArray(dashboard?.transactions) ? dashboard.transactions : [], [dashboard]);
+  const queueCounts = useMemo(() => ({
+    ALL: transactions.length,
+    DISPATCH_REVIEW: transactions.filter((row) => row.dispatchConfirmationRequired).length,
+    USAGE_ONLY: transactions.filter((row) => row.coveredByTollPackage || row.billingMode === 'USAGE_ONLY').length,
+    READY_TO_POST: transactions.filter((row) => row.reservation?.id && row.billingStatus === 'PENDING' && !row.needsReview && !(row.coveredByTollPackage || row.billingMode === 'USAGE_ONLY')).length
+  }), [transactions]);
+  const visibleTransactions = useMemo(() => {
+    if (queueView === 'DISPATCH_REVIEW') return transactions.filter((row) => row.dispatchConfirmationRequired);
+    if (queueView === 'USAGE_ONLY') return transactions.filter((row) => row.coveredByTollPackage || row.billingMode === 'USAGE_ONLY');
+    if (queueView === 'READY_TO_POST') {
+      return transactions.filter((row) => row.reservation?.id && row.billingStatus === 'PENDING' && !row.needsReview && !(row.coveredByTollPackage || row.billingMode === 'USAGE_ONLY'));
+    }
+    return transactions;
+  }, [queueView, transactions]);
 
   const saveManualImport = async (event) => {
     event.preventDefault();
@@ -257,6 +293,10 @@ function TollsInner({ token, me, logout }) {
   const runReviewAction = async (row, action) => {
     const notePrompt = action === 'MARK_DISPUTED'
       ? 'Optional dispute note'
+      : action === 'CONFIRM_DISPATCHED'
+        ? 'Optional dispatch confirmation note'
+        : action === 'MARK_NOT_DISPATCHED'
+          ? 'Optional note for why this vehicle was not dispatched'
       : action === 'MARK_NOT_BILLABLE'
         ? 'Optional waiver note'
         : 'Optional reset note';
@@ -360,7 +400,7 @@ function TollsInner({ token, me, logout }) {
               <span className="eyebrow">Toll Operations</span>
               <h2 className="page-title" style={{ marginTop: 6 }}>Match Puerto Rico tolls against tenant fleet and reservation windows.</h2>
               <p className="ui-muted">
-                This queue uses the tenant's real vehicles, plate, toll tag, toll sticker, and reservation pickup and return timestamps to suggest or confirm toll ownership.
+                This queue uses the tenant's real vehicles, plate, toll tag, toll sticker, reservation windows, and vehicle swaps to suggest or confirm toll ownership.
               </p>
             </div>
             <span className="status-chip neutral">Review Queue</span>
@@ -399,6 +439,10 @@ function TollsInner({ token, me, logout }) {
             <div className="info-tile">
               <span className="label">Posted To Billing</span>
               <strong>{dashboard?.metrics?.postedToBilling || 0}</strong>
+            </div>
+            <div className="info-tile">
+              <span className="label">Usage Only</span>
+              <strong>{transactions.filter((row) => row.coveredByTollPackage || row.billingMode === 'USAGE_ONLY').length}</strong>
             </div>
           </div>
         </div>
@@ -456,7 +500,7 @@ function TollsInner({ token, me, logout }) {
             </div>
           ) : null}
           <div className="surface-note" style={{ marginTop: 10 }}>
-            The backend now runs AutoExpreso sync sweeps automatically for active tenants with tolls enabled, then re-checks pending tolls against the assigned vehicle and reservation window.
+            The backend now runs AutoExpreso sync sweeps automatically for active tenants with tolls enabled, then re-checks pending tolls against the assigned vehicle, swap-aware responsibility window, and dispatch state.
           </div>
         </div>
 
@@ -563,6 +607,35 @@ function TollsInner({ token, me, logout }) {
               <button type="button" onClick={load}>Refresh</button>
             </div>
           </div>
+          <div className="inline-actions" style={{ marginBottom: 10, flexWrap: 'wrap' }}>
+            <button type="button" className={queueView === 'ALL' ? '' : 'button-subtle'} onClick={() => setQueueView('ALL')}>
+              All ({queueCounts.ALL})
+            </button>
+            <button type="button" className={queueView === 'DISPATCH_REVIEW' ? '' : 'button-subtle'} onClick={() => setQueueView('DISPATCH_REVIEW')}>
+              Dispatch Review ({queueCounts.DISPATCH_REVIEW})
+            </button>
+            <button type="button" className={queueView === 'USAGE_ONLY' ? '' : 'button-subtle'} onClick={() => setQueueView('USAGE_ONLY')}>
+              Usage Only ({queueCounts.USAGE_ONLY})
+            </button>
+            <button type="button" className={queueView === 'READY_TO_POST' ? '' : 'button-subtle'} onClick={() => setQueueView('READY_TO_POST')}>
+              Ready To Post ({queueCounts.READY_TO_POST})
+            </button>
+          </div>
+          {queueView === 'DISPATCH_REVIEW' ? (
+            <div className="surface-note" style={{ marginBottom: 10 }}>
+              These tolls need an operations decision because the vehicle is generating toll activity before formal checkout was completed.
+            </div>
+          ) : null}
+          {queueView === 'USAGE_ONLY' ? (
+            <div className="surface-note" style={{ marginBottom: 10 }}>
+              These tolls are being tracked for usage, but tenant rules say not to bill them because a toll package covers the reservation.
+            </div>
+          ) : null}
+          {queueView === 'READY_TO_POST' ? (
+            <div className="surface-note" style={{ marginBottom: 10 }}>
+              These tolls are matched, not under review, and ready to be posted into reservation charges.
+            </div>
+          ) : null}
 
           <table>
             <thead>
@@ -576,7 +649,7 @@ function TollsInner({ token, me, logout }) {
               </tr>
             </thead>
             <tbody>
-              {transactions.map((row) => (
+              {visibleTransactions.map((row) => (
                 <tr key={row.id}>
                   <td>
                     <div>{new Date(row.transactionAt).toLocaleString()}</div>
@@ -620,10 +693,15 @@ function TollsInner({ token, me, logout }) {
                     )}
                   </td>
                   <td>
-                    <span className={`status-chip ${row.needsReview ? 'warn' : row.billingStatus === 'POSTED_TO_RESERVATION' ? 'good' : 'neutral'}`}>
-                      {row.needsReview ? 'Needs review' : row.statusLabel}
+                    <span className={`status-chip ${(row.coveredByTollPackage || row.billingMode === 'USAGE_ONLY') ? 'good' : row.needsReview ? 'warn' : row.billingStatus === 'POSTED_TO_RESERVATION' ? 'good' : 'neutral'}`}>
+                      {tollReviewLabel(row)}
                     </span>
                     <div className="label" style={{ textTransform: 'none', letterSpacing: 0 }}>{row.billingStatus}</div>
+                    {tollReviewHint(row) ? (
+                      <div className="label" style={{ textTransform: 'none', letterSpacing: 0 }}>
+                        {tollReviewHint(row)}
+                      </div>
+                    ) : null}
                     {row.issueIncident?.id ? (
                       <div className="label" style={{ textTransform: 'none', letterSpacing: 0 }}>
                         Issue {row.issueIncident.id} - {row.issueIncident.status || 'OPEN'}
@@ -632,12 +710,22 @@ function TollsInner({ token, me, logout }) {
                   </td>
                   <td>
                     <div className="stack" style={{ gap: 6 }}>
+                      {row.dispatchConfirmationRequired && row.reservation?.id ? (
+                        <>
+                          <button type="button" onClick={() => runReviewAction(row, 'CONFIRM_DISPATCHED')} disabled={busyId === `CONFIRM_DISPATCHED-${row.id}`}>
+                            {busyId === `CONFIRM_DISPATCHED-${row.id}` ? 'Saving...' : 'Yes, Vehicle Was Dispatched'}
+                          </button>
+                          <button type="button" className="button-subtle" onClick={() => runReviewAction(row, 'MARK_NOT_DISPATCHED')} disabled={busyId === `MARK_NOT_DISPATCHED-${row.id}`}>
+                            {busyId === `MARK_NOT_DISPATCHED-${row.id}` ? 'Saving...' : 'No, Remove Toll'}
+                          </button>
+                        </>
+                      ) : null}
                       {(row.latestAssignment?.reservation || reservationDrafts[row.id]) ? (
                         <button type="button" onClick={() => confirmMatch(row)} disabled={busyId === `confirm-${row.id}`}>
                           {busyId === `confirm-${row.id}` ? 'Matching...' : 'Confirm Match'}
                         </button>
                       ) : null}
-                      {row.reservation?.id && row.billingStatus === 'PENDING' ? (
+                      {row.reservation?.id && row.billingStatus === 'PENDING' && !row.needsReview && !(row.coveredByTollPackage || row.billingMode === 'USAGE_ONLY') ? (
                         <button type="button" onClick={() => postToReservation(row)} disabled={busyId === `post-${row.id}`}>
                           {busyId === `post-${row.id}` ? 'Posting...' : 'Post To Reservation'}
                         </button>
@@ -671,9 +759,9 @@ function TollsInner({ token, me, logout }) {
                   </td>
                 </tr>
               ))}
-              {!transactions.length ? (
+              {!visibleTransactions.length ? (
                 <tr>
-                  <td colSpan={6} className="label">No toll transactions matched this filter yet.</td>
+                  <td colSpan={6} className="label">No toll transactions matched this queue view yet.</td>
                 </tr>
               ) : null}
             </tbody>
