@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { isSuperAdmin } from '../../middleware/auth.js';
+import { isSuperAdmin, requireRole } from '../../middleware/auth.js';
 import { reportsService } from './reports.service.js';
 
 export const reportsRouter = Router();
@@ -26,6 +26,15 @@ reportsRouter.get('/overview.csv', async (req, res, next) => {
     res.setHeader('Content-Type', 'text/csv; charset=utf-8');
     res.setHeader('Content-Disposition', `attachment; filename="reports-overview-${start}-to-${end}.csv"`);
     res.send(csv);
+  } catch (e) {
+    next(e);
+  }
+});
+
+reportsRouter.post('/overview/email', requireRole('ADMIN', 'OPS'), async (req, res, next) => {
+  try {
+    const out = await reportsService.sendOverviewEmail(req.body || {}, scopeFor(req));
+    res.json(out);
   } catch (e) {
     next(e);
   }

@@ -1,9 +1,22 @@
 import { Router } from 'express';
 import { issueCenterService } from './issue-center.service.js';
 import { hostAppService } from '../host-app/host-app.service.js';
+import { requireString, assertPlainObject } from '../../lib/request-validation.js';
+import { attachPublicRequestMeta, createOptionalIdempotencyGuard, createPublicRateLimitGuard } from '../../middleware/public-endpoint-guards.js';
 
 export const issueCenterRouter = Router();
 export const publicIssueCenterRouter = Router();
+
+const publicIssueReadGuard = [
+  attachPublicRequestMeta('public-issue-center-read'),
+  createPublicRateLimitGuard({ name: 'public-issue-center-read', maxRequests: 90, windowMs: 60 * 1000 })
+];
+
+const publicIssueWriteGuard = [
+  attachPublicRequestMeta('public-issue-center-write'),
+  createPublicRateLimitGuard({ name: 'public-issue-center-write', maxRequests: 25, windowMs: 60 * 1000 }),
+  createOptionalIdempotencyGuard({ name: 'public-issue-center-write', windowMs: 15 * 60 * 1000 })
+];
 
 issueCenterRouter.get('/dashboard', async (req, res, next) => {
   try {
@@ -72,9 +85,9 @@ issueCenterRouter.post('/vehicle-submissions/:id/approve', async (req, res, next
   }
 });
 
-publicIssueCenterRouter.get('/respond/:token', async (req, res, next) => {
+publicIssueCenterRouter.get('/respond/:token', publicIssueReadGuard, async (req, res, next) => {
   try {
-    res.json(await issueCenterService.getPublicResponsePrompt(req.params.token));
+    res.json(await issueCenterService.getPublicResponsePrompt(requireString(req.params.token, 'token')));
   } catch (error) {
     if (/invalid|expired|required/i.test(String(error?.message || ''))) {
       return res.status(400).json({ error: error.message });
@@ -83,9 +96,10 @@ publicIssueCenterRouter.get('/respond/:token', async (req, res, next) => {
   }
 });
 
-publicIssueCenterRouter.post('/respond/:token', async (req, res, next) => {
+publicIssueCenterRouter.post('/respond/:token', publicIssueWriteGuard, async (req, res, next) => {
   try {
-    res.json(await issueCenterService.submitPublicResponse(req.params.token, req.body || {}));
+    assertPlainObject(req.body || {}, 'public issue response payload');
+    res.json(await issueCenterService.submitPublicResponse(requireString(req.params.token, 'token'), req.body || {}));
   } catch (error) {
     if (/invalid|expired|required/i.test(String(error?.message || ''))) {
       return res.status(400).json({ error: error.message });

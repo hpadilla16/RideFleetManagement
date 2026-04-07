@@ -1,6 +1,47 @@
 import { prisma } from '../../lib/prisma.js';
 import { normalizeVehicleBlockType } from './vehicle-blocks.js';
 import { assertTenantVehicleCapacity } from '../../lib/tenant-plan-limits.js';
+import { buildVehicleOperationalSignalsMap } from './vehicle-intelligence.service.js';
+import { settingsService } from '../settings/settings.service.js';
+import { normalizeZubieWebhookPayload } from './telematics-zubie.js';
+
+const SUPPORTED_TELEMATICS_PROVIDERS = [
+  {
+    code: 'ZUBIE',
+    label: 'Zubie',
+    recommended: true,
+    integrationStatus: 'PLANNED',
+    notes: 'Preferred rental-fleet telematics placeholder. Native webhook and API sync can plug into this provider next.'
+  },
+  {
+    code: 'GENERIC',
+    label: 'Generic',
+    recommended: false,
+    integrationStatus: 'READY',
+    notes: 'Use for manual pings or any provider that is not yet mapped natively.'
+  },
+  {
+    code: 'SAMSARA',
+    label: 'Samsara',
+    recommended: false,
+    integrationStatus: 'PLANNED',
+    notes: 'Enterprise telematics placeholder reserved for a future connector.'
+  },
+  {
+    code: 'GEOTAB',
+    label: 'Geotab',
+    recommended: false,
+    integrationStatus: 'PLANNED',
+    notes: 'Open-platform telematics placeholder reserved for a future connector.'
+  },
+  {
+    code: 'AZUGA',
+    label: 'Azuga',
+    recommended: false,
+    integrationStatus: 'PLANNED',
+    notes: 'Webhook-friendly placeholder reserved for a future connector.'
+  }
+];
 
 function norm(v) {
   return String(v || '').trim();
@@ -32,10 +73,26 @@ function activeBlockWhere(now = new Date()) {
   };
 }
 
+function activeAvailabilityBlock(blocks = [], now = new Date()) {
+  const nowValue = now.getTime();
+  return (Array.isArray(blocks) ? blocks : []).find((block) => {
+    const releasedAt = block?.releasedAt ? new Date(block.releasedAt).getTime() : null;
+    const blockedFrom = block?.blockedFrom ? new Date(block.blockedFrom).getTime() : nowValue;
+    const availableFrom = block?.availableFrom ? new Date(block.availableFrom).getTime() : null;
+    return !releasedAt && blockedFrom <= nowValue && availableFrom && availableFrom > nowValue;
+  }) || null;
+}
+
 function toDateOrNull(value) {
   if (!value) return null;
   const date = new Date(value);
   return Number.isNaN(date.getTime()) ? null : date;
+}
+
+function toNumberOrNull(value) {
+  if (value === '' || value == null) return null;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
 }
 
 function normalizeBlockRow(row = {}) {
@@ -46,6 +103,62 @@ function normalizeBlockRow(row = {}) {
     availableFrom: toDateOrNull(row.availableFrom),
     reason: norm(row.reason) || null,
     notes: norm(row.notes) || null
+  };
+}
+
+function normalizeTelematicsDeviceRow(row = {}) {
+  const provider = normalizeTelematicsProvider(row.provider || '');
+  return {
+    id: row.id,
+    provider,
+    providerLabel: telematicsProviderLabel(provider),
+    externalDeviceId: row.externalDeviceId || '',
+    label: row.label || '',
+    serialNumber: row.serialNumber || '',
+    isActive: !!row.isActive,
+    installedAt: row.installedAt || null,
+    lastSeenAt: row.lastSeenAt || null,
+    metadata: row.metadataJson ? (() => {
+      try { return JSON.parse(row.metadataJson); } catch { return {}; }
+    })() : {}
+  };
+}
+
+function telematicsProviderCodes() {
+  return new Set(SUPPORTED_TELEMATICS_PROVIDERS.map((row) => row.code));
+}
+
+function normalizeTelematicsProvider(value = '') {
+  const normalized = norm(value).toUpperCase();
+  if (!normalized) return 'ZUBIE';
+  return telematicsProviderCodes().has(normalized) ? normalized : 'GENERIC';
+}
+
+function telematicsProviderLabel(code = '') {
+  return SUPPORTED_TELEMATICS_PROVIDERS.find((row) => row.code === String(code || '').toUpperCase())?.label || 'Generic';
+}
+
+function normalizeTelematicsEventRow(row = {}) {
+  const payload = row.payloadJson ? (() => {
+    try { return JSON.parse(row.payloadJson); } catch { return {}; }
+  })() : {};
+  return {
+    id: row.id,
+    deviceId: row.deviceId || null,
+    eventType: row.eventType || 'PING',
+    eventAt: row.eventAt || null,
+    latitude: row.latitude == null ? null : Number(row.latitude),
+    longitude: row.longitude == null ? null : Number(row.longitude),
+    speedMph: row.speedMph == null ? null : Number(row.speedMph),
+    heading: row.heading ?? null,
+    odometer: row.odometer ?? null,
+    fuelPct: row.fuelPct == null ? null : Number(row.fuelPct),
+    batteryPct: row.batteryPct == null ? null : Number(row.batteryPct),
+    engineOn: typeof row.engineOn === 'boolean' ? row.engineOn : null,
+    payload,
+    rawPayload: payload?.rawPayload || payload?.raw || payload,
+    providerMeta: payload?.providerMeta || null,
+    mappingSummary: payload?.mappingSummary || null
   };
 }
 
@@ -77,6 +190,10 @@ const vehicleReservationSelect = {
 };
 
 export const vehiclesService = {
+  listTelematicsProviders() {
+    return SUPPORTED_TELEMATICS_PROVIDERS.map((row) => ({ ...row }));
+  },
+
   list(scope = {}) {
     return prisma.vehicle.findMany({
       where: byTenantWhere(scope),
@@ -129,6 +246,10 @@ export const vehiclesService = {
           where: { releasedAt: null },
           orderBy: [{ blockedFrom: 'asc' }, { availableFrom: 'asc' }]
         },
+        telematicsDevices: {
+          where: { isActive: true },
+          orderBy: [{ updatedAt: 'desc' }, { createdAt: 'desc' }]
+        },
         rentalAgreements: {
           orderBy: { createdAt: 'desc' },
           take: 50,
@@ -175,8 +296,26 @@ export const vehiclesService = {
       })
     ]);
 
+    const [recentTelematicsEvent, telematicsConfig] = await Promise.all([
+      prisma.vehicleTelematicsEvent.findFirst({
+        where: {
+          vehicleId: vehicle.id,
+          ...(scope?.tenantId ? { tenantId: scope.tenantId } : {})
+        },
+        orderBy: [{ eventAt: 'desc' }, { createdAt: 'desc' }]
+      }),
+      settingsService.getTelematicsConfig(scope).catch(() => null)
+    ]);
+    const effectiveSignalsMap = await buildVehicleOperationalSignalsMap([vehicle.id], scope, {
+      activeBlocksByVehicleId: new Map([[vehicle.id, activeAvailabilityBlock(vehicle.availabilityBlocks)]].filter(([, block]) => !!block)),
+      telematicsFeatureEnabled: telematicsConfig?.ready !== false
+    });
+
     return {
       ...vehicle,
+      telematicsDevices: (vehicle.telematicsDevices || []).map(normalizeTelematicsDeviceRow),
+      latestTelematicsEvent: recentTelematicsEvent ? normalizeTelematicsEventRow(recentTelematicsEvent) : null,
+      operationalSignals: effectiveSignalsMap.get(vehicle.id) || null,
       activeReservation,
       nextReservation,
       recentReservations
@@ -259,6 +398,208 @@ export const vehiclesService = {
       where: { id: block.id },
       data: { releasedAt: new Date() }
     });
+  },
+
+  async listTelematics(vehicleId, scope = {}) {
+    const vehicle = await prisma.vehicle.findFirst({
+      where: { id: vehicleId, ...(byTenantWhere(scope) || {}) },
+      select: { id: true }
+    });
+    if (!vehicle) throw new Error('Vehicle not found');
+
+    const [devices, events, telematicsConfig] = await Promise.all([
+      prisma.vehicleTelematicsDevice.findMany({
+        where: { vehicleId, ...(byTenantWhere(scope) || {}) },
+        orderBy: [{ isActive: 'desc' }, { updatedAt: 'desc' }, { createdAt: 'desc' }]
+      }),
+      prisma.vehicleTelematicsEvent.findMany({
+        where: { vehicleId, ...(byTenantWhere(scope) || {}) },
+        orderBy: [{ eventAt: 'desc' }, { createdAt: 'desc' }],
+        take: 12
+      }),
+      settingsService.getTelematicsConfig(scope).catch(() => null)
+    ]);
+    const effectiveSignalsMap = await buildVehicleOperationalSignalsMap([vehicleId], scope, {
+      telematicsFeatureEnabled: telematicsConfig?.ready !== false
+    });
+
+    return {
+      devices: devices.map(normalizeTelematicsDeviceRow),
+      recentEvents: events.map(normalizeTelematicsEventRow),
+      operationalSignals: effectiveSignalsMap.get(vehicleId) || null
+    };
+  },
+
+  async registerTelematicsDevice(vehicleId, payload = {}, scope = {}) {
+    const vehicle = await prisma.vehicle.findFirst({
+      where: { id: vehicleId, ...(byTenantWhere(scope) || {}) },
+      select: { id: true, tenantId: true }
+    });
+    if (!vehicle) throw new Error('Vehicle not found');
+
+    const provider = normalizeTelematicsProvider(payload.provider || 'ZUBIE');
+    const externalDeviceId = norm(payload.externalDeviceId || payload.deviceId);
+    if (!provider) throw new Error('provider is required');
+    if (!externalDeviceId) throw new Error('externalDeviceId is required');
+
+    const row = await prisma.vehicleTelematicsDevice.upsert({
+      where: {
+        provider_externalDeviceId: {
+          provider,
+          externalDeviceId
+        }
+      },
+      create: {
+        tenantId: vehicle.tenantId || scope?.tenantId || null,
+        vehicleId: vehicle.id,
+        provider,
+        externalDeviceId,
+        label: norm(payload.label) || null,
+        serialNumber: norm(payload.serialNumber) || null,
+        isActive: payload?.isActive !== false,
+        installedAt: toDateOrNull(payload.installedAt),
+        metadataJson: payload?.metadata ? JSON.stringify(payload.metadata) : null
+      },
+      update: {
+        vehicleId: vehicle.id,
+        label: norm(payload.label) || null,
+        serialNumber: norm(payload.serialNumber) || null,
+        isActive: payload?.isActive !== false,
+        installedAt: toDateOrNull(payload.installedAt),
+        metadataJson: payload?.metadata ? JSON.stringify(payload.metadata) : null
+      }
+    });
+
+    return normalizeTelematicsDeviceRow(row);
+  },
+
+  async ingestZubieWebhook(payload = {}, scope = {}, options = {}) {
+    const mapped = normalizeZubieWebhookPayload(payload, {
+      ingestSource: options?.ingestSource,
+      requestMetadata: options?.requestMetadata
+    });
+    const externalDeviceId = norm(mapped.externalDeviceId);
+    if (!externalDeviceId) throw new Error('externalDeviceId is required');
+
+    const device = await prisma.vehicleTelematicsDevice.findFirst({
+      where: {
+        provider: 'ZUBIE',
+        externalDeviceId,
+        ...(byTenantWhere(scope) || {})
+      },
+      select: {
+        id: true,
+        vehicleId: true
+      }
+    });
+    if (!device?.vehicleId) throw new Error('Telematics device not found for this vehicle');
+
+    const eventPayload = {
+      deviceId: device.id,
+      eventType: mapped.eventType,
+      eventAt: mapped.eventAt,
+      odometer: mapped.odometer,
+      fuelPct: mapped.fuelPct,
+      batteryPct: mapped.batteryPct,
+      speedMph: mapped.speedMph,
+      latitude: mapped.latitude,
+      longitude: mapped.longitude,
+      engineOn: mapped.engineOn,
+      payload: {
+        rawPayload: mapped.rawPayload,
+        providerMeta: mapped.providerMeta,
+        mappingSummary: mapped.mappingSummary
+      }
+    };
+
+    const event = await this.ingestTelematicsEvent(device.vehicleId, eventPayload, scope);
+    return {
+      accepted: true,
+      provider: 'ZUBIE',
+      mode: 'PLACEHOLDER',
+      ingestSource: mapped.providerMeta?.ingestSource || 'WEBHOOK',
+      deviceId: externalDeviceId,
+      vehicleId: device.vehicleId,
+      providerMeta: mapped.providerMeta,
+      mappingSummary: mapped.mappingSummary,
+      event
+    };
+  },
+
+  async ingestTelematicsEvent(vehicleId, payload = {}, scope = {}) {
+    const vehicle = await prisma.vehicle.findFirst({
+      where: { id: vehicleId, ...(byTenantWhere(scope) || {}) },
+      select: { id: true, tenantId: true, mileage: true }
+    });
+    if (!vehicle) throw new Error('Vehicle not found');
+
+    let device = null;
+    if (payload?.deviceId) {
+      device = await prisma.vehicleTelematicsDevice.findFirst({
+        where: {
+          id: String(payload.deviceId),
+          vehicleId: vehicle.id,
+          ...(byTenantWhere(scope) || {})
+        }
+      });
+      if (!device) throw new Error('Telematics device not found for this vehicle');
+    } else {
+      device = await prisma.vehicleTelematicsDevice.findFirst({
+        where: {
+          vehicleId: vehicle.id,
+          isActive: true,
+          ...(byTenantWhere(scope) || {})
+        },
+        orderBy: [{ updatedAt: 'desc' }, { createdAt: 'desc' }]
+      });
+    }
+
+    const eventAt = toDateOrNull(payload.eventAt) || new Date();
+    const odometer = toNumberOrNull(payload.odometer);
+    const fuelPct = toNumberOrNull(payload.fuelPct);
+    const speedMph = toNumberOrNull(payload.speedMph);
+    const batteryPct = toNumberOrNull(payload.batteryPct);
+    const latitude = toNumberOrNull(payload.latitude);
+    const longitude = toNumberOrNull(payload.longitude);
+
+    const row = await prisma.$transaction(async (tx) => {
+      const created = await tx.vehicleTelematicsEvent.create({
+        data: {
+          tenantId: vehicle.tenantId || scope?.tenantId || null,
+          vehicleId: vehicle.id,
+          deviceId: device?.id || null,
+          eventType: norm(payload.eventType || 'PING').toUpperCase() || 'PING',
+          eventAt,
+          latitude,
+          longitude,
+          speedMph,
+          heading: toNumberOrNull(payload.heading),
+          odometer,
+          fuelPct,
+          batteryPct,
+          engineOn: typeof payload?.engineOn === 'boolean' ? payload.engineOn : null,
+          payloadJson: payload?.payload ? JSON.stringify(payload.payload) : null
+        }
+      });
+
+      if (device?.id) {
+        await tx.vehicleTelematicsDevice.update({
+          where: { id: device.id },
+          data: { lastSeenAt: eventAt }
+        });
+      }
+
+      if (Number.isFinite(odometer) && odometer > Number(vehicle.mileage || 0)) {
+        await tx.vehicle.update({
+          where: { id: vehicle.id },
+          data: { mileage: odometer }
+        });
+      }
+
+      return created;
+    });
+
+    return normalizeTelematicsEventRow(row);
   },
 
   async validateBulkAvailabilityBlocks(rows = [], scope = {}) {

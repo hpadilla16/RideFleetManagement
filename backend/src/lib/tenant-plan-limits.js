@@ -9,6 +9,26 @@ export const DEFAULT_TENANT_PLAN_CATALOG = [
     maxAdmins: 2,
     maxUsers: 10,
     maxVehicles: 25,
+    smartPlannerIncluded: true,
+    plannerCopilotIncluded: false,
+    plannerCopilotMonthlyQueryCap: 50,
+    plannerCopilotAllowedModels: ['gpt-4.1-mini'],
+    telematicsIncluded: false,
+    inspectionIntelligenceIncluded: true,
+    isActive: true
+  },
+  {
+    code: 'STARTER',
+    name: 'Starter',
+    maxAdmins: 2,
+    maxUsers: 10,
+    maxVehicles: 40,
+    smartPlannerIncluded: true,
+    plannerCopilotIncluded: true,
+    plannerCopilotMonthlyQueryCap: 150,
+    plannerCopilotAllowedModels: ['gpt-4.1-mini'],
+    telematicsIncluded: false,
+    inspectionIntelligenceIncluded: true,
     isActive: true
   },
   {
@@ -17,6 +37,12 @@ export const DEFAULT_TENANT_PLAN_CATALOG = [
     maxAdmins: 5,
     maxUsers: 50,
     maxVehicles: 250,
+    smartPlannerIncluded: true,
+    plannerCopilotIncluded: true,
+    plannerCopilotMonthlyQueryCap: 1000,
+    plannerCopilotAllowedModels: ['gpt-4.1-mini', 'gpt-4.1'],
+    telematicsIncluded: true,
+    inspectionIntelligenceIncluded: true,
     isActive: true
   },
   {
@@ -25,6 +51,12 @@ export const DEFAULT_TENANT_PLAN_CATALOG = [
     maxAdmins: null,
     maxUsers: null,
     maxVehicles: null,
+    smartPlannerIncluded: true,
+    plannerCopilotIncluded: true,
+    plannerCopilotMonthlyQueryCap: null,
+    plannerCopilotAllowedModels: ['gpt-4.1-mini', 'gpt-4.1'],
+    telematicsIncluded: true,
+    inspectionIntelligenceIncluded: true,
     isActive: true
   }
 ];
@@ -47,6 +79,15 @@ function normalizeLimit(value) {
   return parsed;
 }
 
+function normalizeBoolean(value, fallback = false) {
+  return value == null ? !!fallback : !!value;
+}
+
+function normalizeStringList(value = [], fallback = []) {
+  const source = Array.isArray(value) ? value : fallback;
+  return Array.from(new Set(source.map((item) => String(item || '').trim()).filter(Boolean)));
+}
+
 export function normalizeTenantPlanCatalog(plans = []) {
   const source = Array.isArray(plans) && plans.length ? plans : DEFAULT_TENANT_PLAN_CATALOG;
   const seen = new Set();
@@ -61,6 +102,12 @@ export function normalizeTenantPlanCatalog(plans = []) {
       maxAdmins: normalizeLimit(plan?.maxAdmins),
       maxUsers: normalizeLimit(plan?.maxUsers),
       maxVehicles: normalizeLimit(plan?.maxVehicles),
+      smartPlannerIncluded: normalizeBoolean(plan?.smartPlannerIncluded, true),
+      plannerCopilotIncluded: normalizeBoolean(plan?.plannerCopilotIncluded, false),
+      plannerCopilotMonthlyQueryCap: normalizeLimit(plan?.plannerCopilotMonthlyQueryCap),
+      plannerCopilotAllowedModels: normalizeStringList(plan?.plannerCopilotAllowedModels, ['gpt-4.1-mini']),
+      telematicsIncluded: normalizeBoolean(plan?.telematicsIncluded, false),
+      inspectionIntelligenceIncluded: normalizeBoolean(plan?.inspectionIntelligenceIncluded, true),
       isActive: plan?.isActive !== false
     };
   });
@@ -99,6 +146,12 @@ export function resolveTenantPlanConfig(planCode, catalog = DEFAULT_TENANT_PLAN_
     maxAdmins: null,
     maxUsers: null,
     maxVehicles: null,
+    smartPlannerIncluded: true,
+    plannerCopilotIncluded: false,
+    plannerCopilotMonthlyQueryCap: null,
+    plannerCopilotAllowedModels: ['gpt-4.1-mini'],
+    telematicsIncluded: false,
+    inspectionIntelligenceIncluded: true,
     isActive: false
   };
 }

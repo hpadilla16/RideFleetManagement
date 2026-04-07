@@ -260,7 +260,18 @@ export default function CustomerPayPage() {
       eyebrow="Ride Fleet Self-Service"
       title="Complete Your Payment"
       subtitle="Review your balance, understand exactly what is due, and finish payment without calling the counter."
-      aside={<PortalTimelineCard portal={model?.portal} reservation={model?.reservation} breakdown={model?.breakdown} currentStepKey="payment" currentStepLabel="Payment" />}
+      aside={(
+        <PortalTimelineCard
+          portal={model?.portal}
+          reservation={model?.reservation}
+          breakdown={model?.breakdown}
+          currentStepKey="payment"
+          currentStepLabel="Payment"
+          portalKind="payment"
+          token={token}
+          onPortalUpdate={(nextPortal) => setModel((prev) => ({ ...(prev || {}), portal: nextPortal }))}
+        />
+      )}
     >
       {notices}
 

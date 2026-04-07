@@ -31,6 +31,25 @@ ratesRouter.get('/resolve', async (req, res, next) => {
   } catch (e) { next(e); }
 });
 
+ratesRouter.get('/revenue-recommendation', async (req, res, next) => {
+  try {
+    const { vehicleTypeId, pickupLocationId, pickupAt, returnAt, displayOnline } = req.query || {};
+    if (!vehicleTypeId || !pickupAt || !returnAt) {
+      return res.status(400).json({ error: 'vehicleTypeId, pickupAt, returnAt are required' });
+    }
+    const out = await ratesService.getRevenueRecommendation({
+      vehicleTypeId: String(vehicleTypeId),
+      pickupLocationId: pickupLocationId ? String(pickupLocationId) : null,
+      pickupAt: String(pickupAt),
+      returnAt: String(returnAt)
+    }, scopeFor(req), {
+      displayOnline: String(displayOnline || '').trim().toLowerCase() === 'true'
+    });
+    if (!out) return res.status(404).json({ error: 'No matching active rate found' });
+    res.json(out);
+  } catch (e) { next(e); }
+});
+
 ratesRouter.post('/', async (req, res, next) => {
   try {
     if (!req.body?.rateCode) return res.status(400).json({ error: 'Missing required field: rateCode' });
@@ -86,4 +105,3 @@ ratesRouter.delete('/:id', async (req, res) => {
   try { await ratesService.remove(req.params.id, scopeFor(req)); res.status(204).send(); }
   catch { res.status(404).json({ error: 'Rate not found' }); }
 });
-

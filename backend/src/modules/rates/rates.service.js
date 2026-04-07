@@ -1,4 +1,5 @@
 import { prisma } from '../../lib/prisma.js';
+import { settingsService } from '../settings/settings.service.js';
 
 const RATE_INCLUDE = {
   location: true,
@@ -86,6 +87,188 @@ function parseDynamicPriceDate(value) {
 function buildChargeDates(pickupAt, days) {
   const start = startOfUtcDay(pickupAt);
   return Array.from({ length: Number(days || 0) }, (_, idx) => new Date(start.getTime() + idx * 86400000));
+}
+
+function addUtcDays(value, days) {
+  return new Date(startOfUtcDay(value).getTime() + (Number(days || 0) * 86400000));
+}
+
+function roundMoney(value) {
+  return Number(Number(value || 0).toFixed(2));
+}
+
+function dayDiffFromNow(dateValue) {
+  const diffMs = new Date(dateValue).getTime() - Date.now();
+  return diffMs / 86400000;
+}
+
+function intervalOverlaps(startA, endA, startB, endB) {
+  return startA < endB && endA > startB;
+}
+
+function isWeekendDate(value) {
+  const day = new Date(value).getUTCDay();
+  return day === 0 || day === 6;
+}
+
+export function classifyRevenuePressure({ utilizationPct = 0, shortageUnits = 0 } = {}, revenueConfig = {}) {
+  if (Number(shortageUnits || 0) > 0) {
+    return {
+      code: 'SHORTAGE',
+      label: 'Fleet shortage',
+      markupPct: Number(revenueConfig?.shortageMarkupPct || 0),
+      pressureBand: 'SHORTAGE'
+    };
+  }
+  if (Number(utilizationPct || 0) >= Number(revenueConfig?.utilizationCriticalThresholdPct || 0)) {
+    return {
+      code: 'UTILIZATION_CRITICAL',
+      label: 'Critical utilization',
+      markupPct: Number(revenueConfig?.utilizationCriticalMarkupPct || 0),
+      pressureBand: 'CRITICAL'
+    };
+  }
+  if (Number(utilizationPct || 0) >= Number(revenueConfig?.utilizationHighThresholdPct || 0)) {
+    return {
+      code: 'UTILIZATION_HIGH',
+      label: 'High utilization',
+      markupPct: Number(revenueConfig?.utilizationHighMarkupPct || 0),
+      pressureBand: 'HIGH'
+    };
+  }
+  if (Number(utilizationPct || 0) >= Number(revenueConfig?.utilizationMediumThresholdPct || 0)) {
+    return {
+      code: 'UTILIZATION_MEDIUM',
+      label: 'Medium utilization',
+      markupPct: Number(revenueConfig?.utilizationMediumMarkupPct || 0),
+      pressureBand: 'MEDIUM'
+    };
+  }
+  return {
+    code: 'NORMAL',
+    label: 'Normal demand',
+    markupPct: 0,
+    pressureBand: 'NORMAL'
+  };
+}
+
+export function buildDailyDemandSignals({ chargeDates = [], reservations = [], fleetCount = 0, revenueConfig = {} } = {}) {
+  const normalizedFleetCount = Math.max(0, Number(fleetCount || 0));
+  const rows = Array.isArray(reservations) ? reservations : [];
+  return chargeDates.map((chargeDate) => {
+    const dayStart = startOfUtcDay(chargeDate);
+    const dayEnd = addUtcDays(dayStart, 1);
+    const demandCount = rows.reduce((sum, reservation) => {
+      const pickup = new Date(reservation?.pickupAt);
+      const ret = new Date(reservation?.returnAt);
+      if (Number.isNaN(pickup.getTime()) || Number.isNaN(ret.getTime())) return sum;
+      return sum + (intervalOverlaps(pickup, ret, dayStart, dayEnd) ? 1 : 0);
+    }, 0);
+    const availableUnits = Math.max(0, normalizedFleetCount - demandCount);
+    const shortageUnits = Math.max(0, demandCount - normalizedFleetCount);
+    const utilizationPct = normalizedFleetCount > 0 ? roundMoney((demandCount / normalizedFleetCount) * 100) : 0;
+    const pressure = classifyRevenuePressure({ utilizationPct, shortageUnits }, revenueConfig);
+    return {
+      date: dayKey(dayStart),
+      weekend: isWeekendDate(dayStart),
+      demandCount,
+      availableUnits,
+      shortageUnits,
+      utilizationPct,
+      pressureBand: pressure.pressureBand,
+      pressureCode: pressure.code,
+      pressureMarkupPct: roundMoney(pressure.markupPct)
+    };
+  });
+}
+
+export function summarizeDailyDemandSignals(dailySignals = [], { fleetCount = 0, overlappingDemandCount = 0 } = {}) {
+  const rows = Array.isArray(dailySignals) ? dailySignals : [];
+  const peakSignal = rows.reduce((best, current) => {
+    if (!best) return current;
+    if (Number(current.shortageUnits || 0) > Number(best.shortageUnits || 0)) return current;
+    if (Number(current.utilizationPct || 0) > Number(best.utilizationPct || 0)) return current;
+    return best;
+  }, null);
+  const totalDemand = rows.reduce((sum, row) => sum + Number(row.demandCount || 0), 0);
+  const totalAvailable = rows.reduce((sum, row) => sum + Number(row.availableUnits || 0), 0);
+  const averageDemandCount = rows.length ? roundMoney(totalDemand / rows.length) : 0;
+  const averageAvailableUnits = rows.length ? roundMoney(totalAvailable / rows.length) : Math.max(0, Number(fleetCount || 0));
+  const averageUtilizationPct = rows.length ? roundMoney(rows.reduce((sum, row) => sum + Number(row.utilizationPct || 0), 0) / rows.length) : 0;
+  const pressureDaysCount = rows.filter((row) => String(row.pressureBand || 'NORMAL') !== 'NORMAL').length;
+  return {
+    overlappingDemandCount: Number(overlappingDemandCount || 0),
+    availableUnits: Math.max(0, Number(fleetCount || 0) - Number(overlappingDemandCount || 0)),
+    utilizationPct: peakSignal ? Number(peakSignal.utilizationPct || 0) : 0,
+    shortageUnits: peakSignal ? Number(peakSignal.shortageUnits || 0) : 0,
+    averageDemandCount,
+    averageAvailableUnits,
+    averageUtilizationPct,
+    peakDemandCount: peakSignal ? Number(peakSignal.demandCount || 0) : 0,
+    peakAvailableUnits: peakSignal ? Number(peakSignal.availableUnits || 0) : Math.max(0, Number(fleetCount || 0)),
+    peakUtilizationPct: peakSignal ? Number(peakSignal.utilizationPct || 0) : 0,
+    peakShortageUnits: peakSignal ? Number(peakSignal.shortageUnits || 0) : 0,
+    peakPressureDate: peakSignal?.date || null,
+    peakPressureBand: peakSignal?.pressureBand || 'NORMAL',
+    pressureDaysCount
+  };
+}
+
+export function buildRevenueDailyRecommendations({
+  baseDailyBreakdown = [],
+  dailySignals = [],
+  revenueConfig = {},
+  leadTimeDays = 0,
+  weekendPickup = false
+} = {}) {
+  const leadAdjustmentPct = leadTimeDays <= Number(revenueConfig?.lastMinuteWindowDays || 0) && Number(revenueConfig?.lastMinuteMarkupPct || 0) > 0
+    ? Number(revenueConfig.lastMinuteMarkupPct || 0)
+    : leadTimeDays <= Number(revenueConfig?.shortLeadWindowDays || 0) && Number(revenueConfig?.shortLeadMarkupPct || 0) > 0
+      ? Number(revenueConfig.shortLeadMarkupPct || 0)
+      : 0;
+  const weekendAdjustmentPct = weekendPickup && Number(revenueConfig?.weekendMarkupPct || 0) > 0
+    ? Number(revenueConfig.weekendMarkupPct || 0)
+    : 0;
+
+  const recommendedDailyBreakdown = (Array.isArray(baseDailyBreakdown) ? baseDailyBreakdown : []).map((row) => {
+    const signal = (Array.isArray(dailySignals) ? dailySignals : []).find((entry) => entry.date === row.date) || null;
+    const pressure = classifyRevenuePressure({
+      utilizationPct: signal?.utilizationPct || 0,
+      shortageUnits: signal?.shortageUnits || 0
+    }, revenueConfig);
+    const pressureAdjustmentPct = roundMoney(pressure.markupPct || 0);
+    const adjustmentPct = Math.min(
+      Number(revenueConfig?.maxAdjustmentPct || 0),
+      roundMoney(leadAdjustmentPct + weekendAdjustmentPct + pressureAdjustmentPct)
+    );
+    return {
+      date: row.date,
+      baseDailyRate: roundMoney(row.dailyRate),
+      recommendedDailyRate: roundMoney(Number(row.dailyRate || 0) * (1 + (adjustmentPct / 100))),
+      adjustmentPct,
+      leadAdjustmentPct: roundMoney(leadAdjustmentPct),
+      weekendAdjustmentPct: roundMoney(weekendAdjustmentPct),
+      pressureAdjustmentPct,
+      pressureBand: signal?.pressureBand || 'NORMAL',
+      demandCount: Number(signal?.demandCount || 0),
+      availableUnits: Number(signal?.availableUnits || 0),
+      shortageUnits: Number(signal?.shortageUnits || 0),
+      utilizationPct: Number(signal?.utilizationPct || 0)
+    };
+  });
+
+  const recommendedBaseTotal = roundMoney(recommendedDailyBreakdown.reduce((sum, row) => sum + Number(row.recommendedDailyRate || 0), 0));
+  const recommendedDailyRate = roundMoney(
+    recommendedDailyBreakdown.length ? recommendedBaseTotal / recommendedDailyBreakdown.length : 0
+  );
+
+  return {
+    leadAdjustmentPct: roundMoney(leadAdjustmentPct),
+    weekendAdjustmentPct: roundMoney(weekendAdjustmentPct),
+    recommendedDailyBreakdown,
+    recommendedBaseTotal,
+    recommendedDailyRate
+  };
 }
 
 async function getRateForScope(id, scope = {}) {
@@ -388,6 +571,179 @@ export const ratesService = {
       dailyBreakdown: dynamicBreakdown,
       gracePeriodMin,
       source: chosen.locationId ? 'LOCATION' : 'GLOBAL'
+    };
+  },
+
+  async getRevenueRecommendation({ vehicleTypeId, pickupLocationId, pickupAt, returnAt }, scope = {}, options = {}) {
+    const baseQuote = await this.resolveForRental(
+      { vehicleTypeId, pickupLocationId, pickupAt, returnAt },
+      scope,
+      { displayOnline: !!options?.displayOnline }
+    );
+    if (!baseQuote) return null;
+
+    const revenueConfig = await settingsService.getRevenuePricingConfig(scope).catch(() => null);
+    if (!revenueConfig?.enabled) {
+      const chargeDates = buildChargeDates(pickupAt, Number(baseQuote.days || 0));
+      return {
+        enabled: false,
+        baseQuote,
+        recommendedDailyBreakdown: (baseQuote.dailyBreakdown || []).map((row) => ({
+          date: row.date,
+          baseDailyRate: Number(row.dailyRate || 0),
+          recommendedDailyRate: Number(row.dailyRate || 0),
+          adjustmentPct: 0,
+          leadAdjustmentPct: 0,
+          weekendAdjustmentPct: 0,
+          pressureAdjustmentPct: 0,
+          pressureBand: 'NORMAL'
+        })),
+        recommendedDailyRate: baseQuote.dailyRate,
+        recommendedBaseTotal: baseQuote.baseTotal,
+        adjustmentPct: 0,
+        factors: [],
+        metrics: {
+          leadTimeDays: roundMoney(dayDiffFromNow(pickupAt)),
+          weekendPickup: [0, 5, 6].includes(new Date(pickupAt).getDay()),
+          tripDays: chargeDates.length,
+          fleetCount: 0,
+          overlappingDemandCount: 0,
+          availableUnits: 0,
+          utilizationPct: 0,
+          shortageUnits: 0,
+          averageDemandCount: 0,
+          averageAvailableUnits: 0,
+          averageUtilizationPct: 0,
+          peakDemandCount: 0,
+          peakAvailableUnits: 0,
+          peakUtilizationPct: 0,
+          peakShortageUnits: 0,
+          peakPressureDate: null,
+          peakPressureBand: 'NORMAL',
+          pressureDaysCount: 0,
+          dailySignals: []
+        },
+        summary: 'Revenue pricing is disabled for this tenant, so the base rate remains unchanged.'
+      };
+    }
+
+    const [fleetCount, overlappingReservations] = await Promise.all([
+      prisma.vehicle.count({
+        where: {
+          ...(scope?.tenantId ? { tenantId: scope.tenantId } : {}),
+          ...(vehicleTypeId ? { vehicleTypeId } : {}),
+          ...(pickupLocationId ? { homeLocationId: pickupLocationId } : {}),
+          isActive: true
+        }
+      }),
+      prisma.reservation.findMany({
+        where: {
+          ...(scope?.tenantId ? { tenantId: scope.tenantId } : {}),
+          ...(vehicleTypeId ? { vehicleTypeId } : {}),
+          ...(pickupLocationId ? { pickupLocationId } : {}),
+          status: { notIn: ['CANCELLED', 'NO_SHOW'] },
+          pickupAt: { lt: new Date(returnAt) },
+          returnAt: { gt: new Date(pickupAt) }
+        },
+        select: {
+          id: true,
+          pickupAt: true,
+          returnAt: true
+        }
+      })
+    ]);
+
+    const overlappingDemandCount = overlappingReservations.length;
+    const chargeDates = buildChargeDates(pickupAt, Number(baseQuote.days || 0));
+    const dailySignals = buildDailyDemandSignals({
+      chargeDates,
+      reservations: overlappingReservations,
+      fleetCount,
+      revenueConfig
+    });
+    const demandSummary = summarizeDailyDemandSignals(dailySignals, {
+      fleetCount,
+      overlappingDemandCount
+    });
+    const leadTimeDays = roundMoney(dayDiffFromNow(pickupAt));
+    const weekendPickup = [0, 5, 6].includes(new Date(pickupAt).getDay());
+    const factors = [];
+
+    if (weekendPickup && revenueConfig.weekendMarkupPct > 0) {
+      factors.push({
+        code: 'WEEKEND',
+        label: 'Weekend demand',
+        adjustmentPct: revenueConfig.weekendMarkupPct,
+        reason: 'Pickup lands on a higher-demand weekend day.'
+      });
+    }
+
+    if (leadTimeDays <= revenueConfig.lastMinuteWindowDays && revenueConfig.lastMinuteMarkupPct > 0) {
+      factors.push({
+        code: 'LAST_MINUTE',
+        label: 'Last-minute lead time',
+        adjustmentPct: revenueConfig.lastMinuteMarkupPct,
+        reason: `Pickup is within ${revenueConfig.lastMinuteWindowDays} day(s).`
+      });
+    } else if (leadTimeDays <= revenueConfig.shortLeadWindowDays && revenueConfig.shortLeadMarkupPct > 0) {
+      factors.push({
+        code: 'SHORT_LEAD',
+        label: 'Short lead time',
+        adjustmentPct: revenueConfig.shortLeadMarkupPct,
+        reason: `Pickup is within ${revenueConfig.shortLeadWindowDays} day(s).`
+      });
+    }
+
+    const peakPressure = classifyRevenuePressure({
+      utilizationPct: demandSummary.peakUtilizationPct,
+      shortageUnits: demandSummary.peakShortageUnits
+    }, revenueConfig);
+    if (peakPressure.code !== 'NORMAL' && peakPressure.markupPct > 0) {
+      factors.push({
+        code: peakPressure.code,
+        label: peakPressure.label,
+        adjustmentPct: roundMoney(peakPressure.markupPct),
+        reason: peakPressure.code === 'SHORTAGE'
+          ? `Peak shortage hits ${demandSummary.peakShortageUnits} unit(s) on ${demandSummary.peakPressureDate || 'the busiest day'} across ${demandSummary.pressureDaysCount} pressured day(s).`
+          : `Peak utilization reaches ${demandSummary.peakUtilizationPct.toFixed(2)}% on ${demandSummary.peakPressureDate || 'the busiest day'} across ${demandSummary.pressureDaysCount} pressured day(s).`
+      });
+    }
+
+    const pricingPlan = buildRevenueDailyRecommendations({
+      baseDailyBreakdown: baseQuote.dailyBreakdown || [],
+      dailySignals,
+      revenueConfig,
+      leadTimeDays,
+      weekendPickup
+    });
+    const recommendedDailyBreakdown = pricingPlan.recommendedDailyBreakdown;
+    const recommendedBaseTotal = pricingPlan.recommendedBaseTotal;
+    const recommendedDailyRate = pricingPlan.recommendedDailyRate || baseQuote.dailyRate;
+    const adjustmentPct = baseQuote.baseTotal > 0
+      ? roundMoney(((recommendedBaseTotal - Number(baseQuote.baseTotal || 0)) / Number(baseQuote.baseTotal || 0)) * 100)
+      : 0;
+
+    return {
+      enabled: true,
+      recommendationMode: revenueConfig.recommendationMode,
+      applyToPublicQuotes: !!revenueConfig.applyToPublicQuotes,
+      baseQuote,
+      recommendedDailyBreakdown,
+      recommendedDailyRate,
+      recommendedBaseTotal,
+      adjustmentPct,
+      factors,
+      metrics: {
+        leadTimeDays,
+        weekendPickup,
+        tripDays: chargeDates.length,
+        fleetCount,
+        ...demandSummary,
+        dailySignals
+      },
+      summary: factors.length
+        ? `Recommended +${adjustmentPct.toFixed(2)}% versus base rate using date-aware demand pressure, lead-time, and class/location signals.`
+        : 'No dynamic pricing uplift is recommended for this request.'
     };
   },
 

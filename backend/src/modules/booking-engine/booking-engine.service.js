@@ -858,8 +858,8 @@ export const bookingEngineService = {
       const vehicleTypes = vehicleTypesByTenant.get(tenant.id) || [];
 
       for (const vehicleType of vehicleTypes) {
-        const [quote, availableUnits] = await Promise.all([
-          ratesService.resolveForRental({
+        const [revenueRecommendation, availableUnits] = await Promise.all([
+          ratesService.getRevenueRecommendation({
             vehicleTypeId: vehicleType.id,
             pickupLocationId: location.id,
             pickupAt: pickupDate.toISOString(),
@@ -873,7 +873,15 @@ export const bookingEngineService = {
           })
         ]);
 
-        if (!quote) continue;
+        if (!revenueRecommendation?.baseQuote) continue;
+        const revenuePricingApplied = !!(revenueRecommendation.enabled && revenueRecommendation.applyToPublicQuotes);
+        const quote = revenuePricingApplied
+          ? {
+              ...revenueRecommendation.baseQuote,
+              dailyRate: revenueRecommendation.recommendedDailyRate,
+              baseTotal: revenueRecommendation.recommendedBaseTotal
+            }
+          : revenueRecommendation.baseQuote;
 
         const [additionalServices, insurancePlans, mandatoryFees] = await Promise.all([
           listPublicAdditionalServices({
@@ -923,11 +931,22 @@ export const bookingEngineService = {
           days: Number(quote.days || 0),
           dailyRate: money(quote.dailyRate),
           subtotal: money(quote.baseTotal),
+          baseDailyRate: money(revenueRecommendation.baseQuote?.dailyRate),
+          baseSubtotal: money(revenueRecommendation.baseQuote?.baseTotal),
           fees: mandatoryFeesTotal,
           taxes,
           total,
           gracePeriodMin: Number(quote.gracePeriodMin || 0),
-          source: quote.source || 'GLOBAL'
+          source: quote.source || 'GLOBAL',
+          revenuePricingApplied,
+          revenueRecommendationMode: revenueRecommendation.recommendationMode || 'ADVISORY',
+          revenueAdjustmentPct: money(revenueRecommendation.adjustmentPct),
+          revenueFactors: Array.isArray(revenueRecommendation.factors) ? revenueRecommendation.factors : [],
+          revenueSummary: revenueRecommendation.summary || '',
+          revenueMetrics: revenueRecommendation.metrics || null,
+          revenueDailyBreakdown: Array.isArray(revenueRecommendation.recommendedDailyBreakdown)
+            ? revenueRecommendation.recommendedDailyBreakdown
+            : []
         },
           deposit: depositSnapshot({ location, quote }),
           additionalServices,

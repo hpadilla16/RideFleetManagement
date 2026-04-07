@@ -19,6 +19,13 @@ function monthInput(value) {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
 }
 
+function humanDate(value) {
+  if (!value) return '-';
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return String(value);
+  return parsed.toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' });
+}
+
 function daysAgo(n) {
   const d = new Date();
   d.setDate(d.getDate() - n);
@@ -34,6 +41,7 @@ function metricCards(report) {
     { label: 'Due Today', value: kpis.agreementsDueToday || 0 },
     { label: 'Available Fleet', value: kpis.availableFleet || 0 },
     { label: 'Migration Held', value: kpis.migrationHeld || 0 },
+    { label: 'Wash Held', value: kpis.washHeld || 0 },
     { label: 'Collected', value: fmtMoney(kpis.collectedPayments) },
     { label: 'Open Balance', value: fmtMoney(kpis.openBalance) },
     { label: 'Maintenance / OOS', value: (Number(kpis.vehiclesInMaintenance || 0) + Number(kpis.vehiclesOutOfService || 0)) || 0 },
@@ -80,6 +88,8 @@ function Inner({ token, me, logout }) {
   const [servicesSold, setServicesSold] = useState(null);
   const [commissionMonth, setCommissionMonth] = useState(monthInput(new Date()));
   const [commissionLedger, setCommissionLedger] = useState([]);
+  const [opsEmailRecipients, setOpsEmailRecipients] = useState('');
+  const [sendingOpsEmail, setSendingOpsEmail] = useState(false);
   const [msg, setMsg] = useState('');
   const [loading, setLoading] = useState(true);
 
@@ -189,7 +199,7 @@ function Inner({ token, me, logout }) {
         id: 'fleet-balance',
         title: 'Fleet Balance',
         detail: `${Number(kpis.availableFleet || 0)} available / ${Number(kpis.onRent || 0)} committed`,
-        note: `${Number(kpis.vehiclesInMaintenance || 0) + Number(kpis.vehiclesOutOfService || 0)} units are in maintenance or out of service right now.`
+        note: `${Number(kpis.vehiclesInMaintenance || 0) + Number(kpis.vehiclesOutOfService || 0)} units are in maintenance or out of service, plus ${Number(kpis.washHeld || 0)} in wash hold.`
       }
     ].filter(Boolean);
 
@@ -234,6 +244,33 @@ function Inner({ token, me, logout }) {
     }
   };
 
+  const printReport = () => {
+    if (typeof window === 'undefined') return;
+    window.setTimeout(() => window.print(), 80);
+  };
+
+  const sendOpsEmail = async () => {
+    try {
+      setSendingOpsEmail(true);
+      setMsg('');
+      const out = await api('/api/reports/overview/email', {
+        method: 'POST',
+        body: JSON.stringify({
+          start: filters.start,
+          end: filters.end,
+          ...(filters.tenantId ? { tenantId: filters.tenantId } : {}),
+          ...(filters.locationId ? { locationId: filters.locationId } : {}),
+          recipients: opsEmailRecipients
+        })
+      }, token);
+      setMsg(`Daily ops email sent to ${Array.isArray(out?.recipients) ? out.recipients.join(', ') : 'configured recipients'}`);
+    } catch (e) {
+      setMsg(e.message);
+    } finally {
+      setSendingOpsEmail(false);
+    }
+  };
+
   const commissionLines = (commissionLedger || [])
     .flatMap((row) => (row.lines || []).map((line) => ({
       ...line,
@@ -260,10 +297,11 @@ function Inner({ token, me, logout }) {
             <div className="row-between" style={{ marginBottom: 0 }}>
               <div>
                 <div className="section-title">Report controls</div>
-                <div className="ui-muted">Adjust the scope, export a CSV, and refresh the operational snapshot.</div>
+                <div className="ui-muted">Adjust the scope, export CSV, print/save PDF, and refresh the operational snapshot.</div>
               </div>
-              <div className="inline-actions">
+              <div className="inline-actions reports-screen-only">
                 <button onClick={exportCsv} disabled={loading}>Export CSV</button>
+                <button className="button-subtle" onClick={printReport} disabled={loading}>Print / Save PDF</button>
                 <button className="button-subtle" onClick={() => load(filters)} disabled={loading}>Refresh</button>
               </div>
             </div>
@@ -344,11 +382,41 @@ function Inner({ token, me, logout }) {
               <button onClick={() => load(filters)} disabled={loading}>Apply Range</button>
               {loading ? <span className="status-chip neutral">Loading report</span> : null}
             </div>
+
+            <div className="stack reports-screen-only">
+              <label className="label">Daily Ops Email Recipients</label>
+              <input
+                placeholder="ops@company.com, manager@company.com"
+                value={opsEmailRecipients}
+                onChange={(e) => setOpsEmailRecipients(e.target.value)}
+              />
+              <div className="ui-muted">Leave blank to use the configured `locationEmail` values for the selected report scope.</div>
+              <div className="inline-actions">
+                <button onClick={sendOpsEmail} disabled={loading || sendingOpsEmail}>
+                  {sendingOpsEmail ? 'Sending Daily Ops Email...' : 'Send Daily Ops Email'}
+                </button>
+              </div>
+            </div>
           </section>
         </div>
       </section>
 
       {msg ? <div className="surface-note" style={{ marginBottom: 16 }}>{msg}</div> : null}
+
+      <section className="reports-print-header reports-print-only">
+        <div className="reports-print-title">Ride Fleet Reports Overview</div>
+        <div className="reports-print-meta">
+          <span>Range: {humanDate(filters.start)} to {humanDate(filters.end)}</span>
+          <span>Tenant: {report?.filters?.tenantName || 'All Tenants'}</span>
+          <span>Location: {report?.filters?.locationName || 'All Locations'}</span>
+          <span>Commission Month: {commissionMonth}</span>
+        </div>
+        <div className="reports-print-meta">
+          {(report?.fleetHoldBreakdown || []).map((row) => (
+            <span key={row.id}>{row.label}: {row.count}</span>
+          ))}
+        </div>
+      </section>
 
       <section className="glass card-lg section-card" style={{ marginBottom: 18 }}>
         <div className="app-banner">
@@ -497,6 +565,40 @@ function Inner({ token, me, logout }) {
         />
       </section>
 
+      <section className="split-panel" style={{ marginBottom: 18 }}>
+        <DataTable
+          title="Fleet Hold Breakdown"
+          subtitle="Separate migration, wash, maintenance, and out-of-service pressure on the fleet."
+          columns={['Hold Type', 'Count', 'Operational Note']}
+          rows={report?.fleetHoldBreakdown || []}
+          emptyText="No active fleet holds are present for this range."
+          renderRow={(row) => (
+            <tr key={row.id}>
+              <td>{row.label}</td>
+              <td>{row.count}</td>
+              <td>{row.note}</td>
+            </tr>
+          )}
+        />
+
+        <section className="glass card-lg section-card">
+          <div className="row-between" style={{ marginBottom: 0 }}>
+            <div>
+              <div className="section-title">Hold Pressure Snapshot</div>
+              <div className="ui-muted">Quick operational read on where temporary capacity is being absorbed.</div>
+            </div>
+          </div>
+          <div className="metric-grid">
+            {(report?.fleetHoldBreakdown || []).map((row) => (
+              <div key={row.id} className="metric-card">
+                <span className="label">{row.label}</span>
+                <strong>{row.count}</strong>
+              </div>
+            ))}
+          </div>
+        </section>
+      </section>
+
       <section className="glass card-lg section-card" style={{ marginBottom: 18 }}>
         <div className="row-between" style={{ marginBottom: 0 }}>
           <div>
@@ -635,6 +737,88 @@ function Inner({ token, me, logout }) {
           />
         </div>
       </section>
+
+      <style jsx global>{`
+        .reports-print-only {
+          display: none;
+        }
+
+        @media print {
+          @page {
+            size: auto;
+            margin: 10mm;
+          }
+
+          .reports-screen-only,
+          .page-hero,
+          .surface-note {
+            display: none !important;
+          }
+
+          .reports-print-only {
+            display: block !important;
+          }
+
+          .reports-print-header {
+            margin-bottom: 16px;
+            padding-bottom: 12px;
+            border-bottom: 1px solid #d1d5db;
+          }
+
+          .reports-print-title {
+            font-size: 22px;
+            font-weight: 700;
+            margin-bottom: 8px;
+          }
+
+          .reports-print-meta {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px 16px;
+            font-size: 12px;
+            color: #4b5563;
+            margin-bottom: 6px;
+          }
+
+          .glass,
+          .metric-card,
+          .hero-pill,
+          .info-tile,
+          .surface-note,
+          .status-chip {
+            background: #fff !important;
+            border-color: #d1d5db !important;
+            box-shadow: none !important;
+            color: #111 !important;
+          }
+
+          .section-card,
+          .metric-card,
+          .table-shell,
+          table,
+          tr,
+          .split-panel > section {
+            break-inside: avoid;
+            page-break-inside: avoid;
+          }
+
+          .app-banner,
+          .metric-grid,
+          .split-panel,
+          .app-card-grid {
+            gap: 12px !important;
+          }
+
+          table {
+            font-size: 12px;
+          }
+
+          .ui-muted,
+          .label {
+            color: #4b5563 !important;
+          }
+        }
+      `}</style>
     </AppShell>
   );
 }

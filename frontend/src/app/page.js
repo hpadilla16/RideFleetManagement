@@ -66,21 +66,26 @@ function VehicleStatusDonut({ metrics }) {
 function deriveKpisFromVehicles(vehicles = []) {
   const rows = Array.isArray(vehicles) ? vehicles : [];
   const activeBlocks = rows
-    .map((vehicle) => (Array.isArray(vehicle?.availabilityBlocks) ? vehicle.availabilityBlocks : []).find((block) => !block?.releasedAt))
-    .filter(Boolean);
+    .map((vehicle) => ({
+      vehicle,
+      block: (Array.isArray(vehicle?.availabilityBlocks) ? vehicle.availabilityBlocks : []).find((block) => !block?.releasedAt) || null
+    }))
+    .filter((row) => !!row.block);
   const fleetTotal = rows.length;
   const vehiclesInMaintenance = rows.filter((vehicle) => String(vehicle?.status || '').toUpperCase() === 'IN_MAINTENANCE').length;
   const vehiclesOutOfService = rows.filter((vehicle) => String(vehicle?.status || '').toUpperCase() === 'OUT_OF_SERVICE').length;
-  const migrationHeld = activeBlocks.filter((block) => String(block?.blockType || '').toUpperCase() === 'MIGRATION_HOLD').length;
+  const migrationHeld = activeBlocks.filter((row) => String(row?.block?.blockType || '').toUpperCase() === 'MIGRATION_HOLD').length;
+  const washHeld = activeBlocks.filter((row) => String(row?.block?.blockType || '').toUpperCase() === 'WASH_HOLD').length;
   const availableFleet = rows.filter((vehicle) => {
     const status = String(vehicle?.status || '').toUpperCase();
-    return !['ON_RENT', 'IN_MAINTENANCE', 'OUT_OF_SERVICE'].includes(status);
+    return !['ON_RENT', 'IN_MAINTENANCE', 'OUT_OF_SERVICE'].includes(status) && !activeBlocks.some((row) => row?.vehicle?.id === vehicle.id);
   }).length;
   const onRent = rows.filter((vehicle) => String(vehicle?.status || '').toUpperCase() === 'ON_RENT').length + migrationHeld;
   return {
     fleetTotal,
     availableFleet,
     migrationHeld,
+    washHeld,
     vehiclesInMaintenance,
     vehiclesOutOfService,
     onRent
@@ -290,6 +295,7 @@ function DashboardInner({ token, me, logout }) {
   const totalVehicles = Number(kpis.fleetTotal || 0) + Number(kpis.vehiclesInMaintenance || 0) + Number(kpis.vehiclesOutOfService || 0);
   const available = Number(kpis.availableFleet || 0);
   const migrationHeld = Number(kpis.migrationHeld || 0);
+  const washHeld = Number(kpis.washHeld || 0);
   const serviceHeld = Number(kpis.vehiclesInMaintenance || 0) + Number(kpis.vehiclesOutOfService || 0);
   const activeReservations = reservations.filter((r) => ['NEW', 'CONFIRMED', 'CHECKED_OUT'].includes(r.status)).length;
   const feeAdvisoryCount = reservations.filter((r) => /\[FEE_ADVISORY_OPEN\s+/i.test(String(r.notes || ''))).length;
@@ -344,6 +350,7 @@ function DashboardInner({ token, me, logout }) {
       totalVehicles,
       available,
       migrationHeld,
+      washHeld,
       serviceHeld,
       activeReservations,
       feeAdvisoryCount,
@@ -385,6 +392,11 @@ function DashboardInner({ token, me, logout }) {
               <span className="label">Maintenance / OOS</span>
               <strong>{workspaceOpsHub.serviceHeld}</strong>
               <span className="ui-muted">Units blocked for maintenance or out-of-service work.</span>
+            </div>
+            <div className="info-tile">
+              <span className="label">Wash Holds</span>
+              <strong>{workspaceOpsHub.washHeld}</strong>
+              <span className="ui-muted">Units temporarily blocked for wash and turnaround prep.</span>
             </div>
             <div className="info-tile">
               <span className="label">Active Reservations</span>

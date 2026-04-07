@@ -3,7 +3,7 @@
 Fecha base: 2026-03-17
 
 ## Objetivo
-Cerrar las brechas mas importantes entre el producto actual y plataformas como TSD, HQ Rental Software, Rent Centric y RentALL, sin perder foco en el negocio principal de rental operations.
+Cerrar las brechas mas importantes entre el producto actual y plataformas como TSD, HQ Rental Software, Rent Centric, RentALL y Renthub, sin perder foco en el negocio principal de rental operations.
 
 ## Estado Actual Resumido
 - Fortaleza actual: reservas, rental agreements, inspecciones, portal publico de firma/pago, configuracion por tenant/location, auditoria, fees/rates/depositos.
@@ -19,9 +19,11 @@ Cerrar las brechas mas importantes entre el producto actual y plataformas como T
 | Datos estructurados vs `notes` | Mucha metadata embebida | Todos los maduros | Alta |
 | Delivery / collection | No dedicado | TSD, Rent Centric | Media-alta |
 | Telematics / connected fleet | No visible hoy | HQ, TSD | Media-alta |
-| Pricing avanzado | Reglas base si; optimization no | HQ | Media |
+| Pricing avanzado | Reglas base si; optimization no | HQ, Renthub | Media |
 | Customer messaging / inbox | Email templates si; portal conversacional no | RentALL | Media |
 | Verificacion documental / seguro | Base parcial | TSD, Rent Centric, RentALL | Media |
+| Self-service pickup / drop-off | Base parcial por portal y mobile web | Rent Centric, Renthub | Media-alta |
+| Claims / dispute workspace | Issue center parcial, no end-to-end claims ops | Renthub, Record360 | Media-alta |
 
 ## Principios Del Roadmap
 1. Primero cerrar producto vendible.
@@ -86,6 +88,11 @@ Extender el sistema a operaciones de campo y automatizacion externa.
   - ventanas horarias
   - capacidad por location / agente
   - checklist de handoff
+- Self-service pickup / drop-off readiness v1:
+  - elegibilidad por tenant/location
+  - checklist de salida y devolucion
+  - gates de llaves/documentos/inspection antes de handoff
+  - base de `key exchange readiness`
 - Webhooks/API v1:
   - customer created/updated
   - reservation created/updated
@@ -121,11 +128,21 @@ Agregar capacidades diferenciales de mercado y preparar posicionamiento comercia
   - reglas por lead time
   - reglas por temporada
   - reglas por branch/location
+- Revenue / dynamic pricing foundation:
+  - price inputs por demanda, lead time y utilization
+  - occupancy pressure signals
+  - overrides por canal y tenant
+  - base de yield engine explicable
 - Customer experience v2:
   - portal con historial de transacciones
   - recibos descargables
   - recordatorios automatizados
   - SMS/WhatsApp trigger design
+- Claims / dispute workspace:
+  - cola de damage review
+  - packet de evidencia de inspeccion
+  - workflow de reclamacion/cobro
+  - sync entre issue center, inspection compare y rental agreement
 - Compliance v2:
   - MFA real para usuarios internos
   - workflow de verificacion documental
@@ -148,8 +165,10 @@ Agregar capacidades diferenciales de mercado y preparar posicionamiento comercia
 4. Webhooks + API + integraciones
 5. Delivery/collection
 6. Telematics
-7. Pricing avanzado
-8. Messaging/comms avanzadas
+7. Revenue / dynamic pricing foundation
+8. Self-service pickup/drop-off + key exchange readiness
+9. Claims / dispute workspace
+10. Messaging/comms avanzadas
 
 ## Riesgos A Vigilar
 - Seguir agregando logica en `notes` y romper reporting futuro.
@@ -162,6 +181,7 @@ Agregar capacidades diferenciales de mercado y preparar posicionamiento comercia
 - Frente a TSD: competir en UX moderna y configuracion rapida, no de entrada en todo el ecosistema enterprise.
 - Frente a Rent Centric: acercarte con mobile ops, contactless y webhooks.
 - Frente a RentALL: tomar ideas de UX cliente, messaging e identidad, no necesariamente su enfoque marketplace.
+- Frente a Renthub: ganarle con `Smart Planner`, `Planner Autopilot`, connected telematics, tenant rules mas profundas y claims/dispute mas operativo.
 
 ## Fuentes De Referencia
 - HQ Pricing: https://hqrentalsoftware.com/pricing/

@@ -172,7 +172,18 @@ export default function SignAgreementPage() {
       eyebrow="Ride Fleet Self-Service"
       title="Review and Sign Your Agreement"
       subtitle="Review your reservation details, verify the full cost breakdown, and sign the agreement digitally in one secure step."
-      aside={<PortalTimelineCard portal={portal} reservation={reservation} breakdown={breakdown} currentStepKey="signature" currentStepLabel="Signature" />}
+      aside={(
+        <PortalTimelineCard
+          portal={portal}
+          reservation={reservation}
+          breakdown={breakdown}
+          currentStepKey="signature"
+          currentStepLabel="Signature"
+          portalKind="signature"
+          token={token}
+          onPortalUpdate={setPortal}
+        />
+      )}
     >
       {notices}
 

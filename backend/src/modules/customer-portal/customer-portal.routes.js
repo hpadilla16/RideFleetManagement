@@ -6,6 +6,7 @@ import { sendEmail } from '../../lib/mailer.js';
 import { rentalAgreementsService } from '../rental-agreements/rental-agreements.service.js';
 import { reservationPricingService } from '../reservations/reservation-pricing.service.js';
 import { settingsService } from '../settings/settings.service.js';
+import { buildSelfServiceSnapshot } from './customer-portal-self-service.js';
 
 export const customerPortalRouter = Router();
 
@@ -342,6 +343,57 @@ async function latestAgreementForReservation(reservationId) {
   });
 }
 
+function parseAuditMetadata(raw) {
+  try {
+    return raw ? JSON.parse(raw) : {};
+  } catch {
+    return {};
+  }
+}
+
+async function getSelfServiceConfirmations(reservationId) {
+  if (!reservationId) {
+    return {
+      pickup: { confirmedAt: null, reason: '', note: '' },
+      dropoff: { confirmedAt: null, reason: '', note: '' }
+    };
+  }
+  const logs = await prisma.auditLog.findMany({
+    where: {
+      reservationId,
+      action: 'UPDATE'
+    },
+    orderBy: { createdAt: 'desc' },
+    take: 50,
+    select: {
+      createdAt: true,
+      metadata: true
+    }
+  });
+  const out = {
+    pickup: { confirmedAt: null, reason: '', note: '' },
+    dropoff: { confirmedAt: null, reason: '', note: '' }
+  };
+  for (const log of logs) {
+    const metadata = parseAuditMetadata(log.metadata);
+    if (!out.pickup.confirmedAt && metadata?.selfServiceEvent === 'PICKUP_CONFIRMED') {
+      out.pickup = {
+        confirmedAt: metadata?.confirmedAt || log.createdAt?.toISOString?.() || log.createdAt || null,
+        reason: String(metadata?.reason || '').trim(),
+        note: String(metadata?.note || '').trim()
+      };
+    }
+    if (!out.dropoff.confirmedAt && metadata?.selfServiceEvent === 'DROPOFF_CONFIRMED') {
+      out.dropoff = {
+        confirmedAt: metadata?.confirmedAt || log.createdAt?.toISOString?.() || log.createdAt || null,
+        reason: String(metadata?.reason || '').trim(),
+        note: String(metadata?.note || '').trim()
+      };
+    }
+  }
+  return out;
+}
+
 function mergePayments(reservation, agreement) {
   const seen = new Set();
   const rows = [...(Array.isArray(reservation?.payments) ? reservation.payments : []), ...(Array.isArray(agreement?.payments) ? agreement.payments : [])];
@@ -644,6 +696,10 @@ function isSecurityDepositCharge(row = {}) {
 
 async function buildPortalSummary(reservation, kind, token) {
   const agreement = await latestAgreementForReservation(reservation.id);
+  const selfServiceConfig = reservation?.tenantId
+    ? await settingsService.getSelfServiceConfig({ tenantId: reservation.tenantId }).catch(() => null)
+    : null;
+  const selfServiceConfirmations = await getSelfServiceConfirmations(reservation.id);
   const payments = mergePayments(reservation, agreement);
   const paidAmount = paidFromStructuredPayments(payments);
   const balanceDue = await amountDueForReservation(reservation.id, reservation.estimatedTotal);
@@ -765,6 +821,15 @@ async function buildPortalSummary(reservation, kind, token) {
         : agreementActive
           ? { key: 'agreement', label: 'Agreement ready for pickup', link: links.signature || links.customerInfo || links.payment || null }
           : null;
+  const selfService = buildSelfServiceSnapshot({
+    reservation,
+    agreement,
+    selfServiceConfig,
+    confirmations: selfServiceConfirmations,
+    customerInfoComplete,
+    signatureComplete,
+    paymentComplete
+  });
 
   return {
     kind,
@@ -788,6 +853,7 @@ async function buildPortalSummary(reservation, kind, token) {
     },
     documents: docs,
     links,
+    selfService,
     nextStep,
     timeline,
     progress: {
@@ -1303,6 +1369,68 @@ customerPortalRouter.post('/signature/:token', async (req, res, next) => {
       emailedSignedAgreement,
       message: emailedSignedAgreement ? 'Signature captured. Signed agreement has been sent to your email.' : 'Signature captured successfully.',
       portal: refreshed ? await buildPortalSummary(refreshed, 'signature', token) : null
+    });
+  } catch (e) { next(e); }
+});
+
+customerPortalRouter.post('/self-service/:kind/:token/confirm', async (req, res, next) => {
+  try {
+    const kind = String(req.params.kind || '').trim();
+    const token = String(req.params.token || '').trim();
+    if (!['customer-info', 'signature', 'payment'].includes(kind)) {
+      return res.status(400).json({ error: 'Unsupported portal kind' });
+    }
+
+    const stage = String(req.body?.stage || '').trim().toUpperCase();
+    if (!['PICKUP', 'DROPOFF'].includes(stage)) {
+      return res.status(400).json({ error: 'stage must be PICKUP or DROPOFF' });
+    }
+
+    const reservation = await findReservationByToken(kind, token);
+    if (!reservation) return res.status(404).json({ error: 'Invalid or expired self-service link' });
+
+    const portal = await buildPortalSummary(reservation, kind, token);
+    const selfService = portal?.selfService || null;
+    if (!selfService?.enabled) {
+      return res.status(400).json({ error: 'Self-service is not enabled for this reservation.' });
+    }
+
+    if (stage === 'PICKUP' && !selfService.readyForPickup) {
+      return res.status(400).json({ error: selfService.pickup?.blockers?.[0] || 'Pickup is not ready for self-service confirmation.' });
+    }
+    if (stage === 'DROPOFF' && !selfService.readyForDropoff) {
+      return res.status(400).json({ error: selfService.dropoff?.blockers?.[0] || 'Drop-off is not ready for self-service confirmation.' });
+    }
+    if (stage === 'PICKUP' && selfService.confirmations?.pickup?.confirmedAt) {
+      return res.json({ ok: true, duplicate: true, portal });
+    }
+    if (stage === 'DROPOFF' && selfService.confirmations?.dropoff?.confirmedAt) {
+      return res.json({ ok: true, duplicate: true, portal });
+    }
+
+    const confirmedAt = new Date().toISOString();
+    await prisma.auditLog.create({
+      data: {
+        tenantId: reservation.tenantId || null,
+        reservationId: reservation.id,
+        action: 'UPDATE',
+        reason: stage === 'PICKUP' ? 'Self-service pickup confirmed' : 'Self-service drop-off confirmed',
+        metadata: JSON.stringify({
+          selfServiceEvent: stage === 'PICKUP' ? 'PICKUP_CONFIRMED' : 'DROPOFF_CONFIRMED',
+          confirmedAt,
+          note: String(req.body?.note || '').trim(),
+          source: 'CUSTOMER_PORTAL',
+          ip: req.ip || null
+        })
+      }
+    });
+
+    const refreshed = await findReservationByToken(kind, token);
+    res.json({
+      ok: true,
+      duplicate: false,
+      confirmedAt,
+      portal: refreshed ? await buildPortalSummary(refreshed, kind, token) : portal
     });
   } catch (e) { next(e); }
 });

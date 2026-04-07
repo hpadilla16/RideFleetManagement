@@ -1,13 +1,26 @@
 import { Router } from 'express';
 import { publicBookingService } from './public-booking.service.js';
+import { optionalNumber, optionalString, assertPlainObject } from '../../lib/request-validation.js';
+import { attachPublicRequestMeta, createOptionalIdempotencyGuard, createPublicRateLimitGuard } from '../../middleware/public-endpoint-guards.js';
 
 export const publicBookingRouter = Router();
 
-publicBookingRouter.get('/bootstrap', async (req, res, next) => {
+const bookingReadGuard = [
+  attachPublicRequestMeta('public-booking-read'),
+  createPublicRateLimitGuard({ name: 'public-booking-read', maxRequests: 120, windowMs: 60 * 1000 })
+];
+
+const bookingWriteGuard = [
+  attachPublicRequestMeta('public-booking-write'),
+  createPublicRateLimitGuard({ name: 'public-booking-write', maxRequests: 40, windowMs: 60 * 1000 }),
+  createOptionalIdempotencyGuard({ name: 'public-booking-write', windowMs: 15 * 60 * 1000 })
+];
+
+publicBookingRouter.get('/bootstrap', bookingReadGuard, async (req, res, next) => {
   try {
     const payload = await publicBookingService.getBootstrap({
-      tenantId: req.query?.tenantId ? String(req.query.tenantId) : undefined,
-      tenantSlug: req.query?.tenantSlug ? String(req.query.tenantSlug) : undefined
+      tenantId: optionalString(req.query?.tenantId, { fallback: undefined }),
+      tenantSlug: optionalString(req.query?.tenantSlug, { fallback: undefined })
     });
     res.json(payload);
   } catch (error) {
@@ -15,15 +28,15 @@ publicBookingRouter.get('/bootstrap', async (req, res, next) => {
   }
 });
 
-publicBookingRouter.get('/vehicle-classes', async (req, res, next) => {
+publicBookingRouter.get('/vehicle-classes', bookingReadGuard, async (req, res, next) => {
   try {
     const payload = await publicBookingService.getVehicleClasses({
-      tenantId: req.query?.tenantId ? String(req.query.tenantId) : undefined,
-      tenantSlug: req.query?.tenantSlug ? String(req.query.tenantSlug) : undefined,
-      pickupLocationId: req.query?.pickupLocationId ? String(req.query.pickupLocationId) : undefined,
-      pickupAt: req.query?.pickupAt ? String(req.query.pickupAt) : undefined,
-      returnAt: req.query?.returnAt ? String(req.query.returnAt) : undefined,
-      limit: req.query?.limit ? Number(req.query.limit) : undefined
+      tenantId: optionalString(req.query?.tenantId, { fallback: undefined }),
+      tenantSlug: optionalString(req.query?.tenantSlug, { fallback: undefined }),
+      pickupLocationId: optionalString(req.query?.pickupLocationId, { fallback: undefined }),
+      pickupAt: optionalString(req.query?.pickupAt, { fallback: undefined }),
+      returnAt: optionalString(req.query?.returnAt, { fallback: undefined }),
+      limit: optionalNumber(req.query?.limit, 'limit', { integer: true, min: 1, fallback: undefined })
     });
     res.json(payload);
   } catch (error) {
@@ -34,8 +47,9 @@ publicBookingRouter.get('/vehicle-classes', async (req, res, next) => {
   }
 });
 
-publicBookingRouter.post('/rental-search', async (req, res, next) => {
+publicBookingRouter.post('/rental-search', bookingWriteGuard, async (req, res, next) => {
   try {
+    assertPlainObject(req.body || {}, 'booking search payload');
     const payload = await publicBookingService.searchRentalQuotes(req.body || {});
     res.json(payload);
   } catch (error) {
@@ -46,8 +60,9 @@ publicBookingRouter.post('/rental-search', async (req, res, next) => {
   }
 });
 
-publicBookingRouter.post('/car-sharing-search', async (req, res, next) => {
+publicBookingRouter.post('/car-sharing-search', bookingWriteGuard, async (req, res, next) => {
   try {
+    assertPlainObject(req.body || {}, 'car sharing search payload');
     const payload = await publicBookingService.searchCarSharingListings(req.body || {});
     res.json(payload);
   } catch (error) {
@@ -58,8 +73,9 @@ publicBookingRouter.post('/car-sharing-search', async (req, res, next) => {
   }
 });
 
-publicBookingRouter.post('/checkout', async (req, res, next) => {
+publicBookingRouter.post('/checkout', bookingWriteGuard, async (req, res, next) => {
   try {
+    assertPlainObject(req.body || {}, 'checkout payload');
     const payload = await publicBookingService.createBooking(req.body || {});
     res.status(201).json(payload);
   } catch (error) {
@@ -70,8 +86,9 @@ publicBookingRouter.post('/checkout', async (req, res, next) => {
   }
 });
 
-publicBookingRouter.post('/lookup', async (req, res, next) => {
+publicBookingRouter.post('/lookup', bookingWriteGuard, async (req, res, next) => {
   try {
+    assertPlainObject(req.body || {}, 'lookup payload');
     const payload = await publicBookingService.lookupBooking(req.body || {});
     res.json(payload);
   } catch (error) {
@@ -82,8 +99,9 @@ publicBookingRouter.post('/lookup', async (req, res, next) => {
   }
 });
 
-publicBookingRouter.post('/guest-signin/request', async (req, res, next) => {
+publicBookingRouter.post('/guest-signin/request', bookingWriteGuard, async (req, res, next) => {
   try {
+    assertPlainObject(req.body || {}, 'guest sign-in request payload');
     res.json(await publicBookingService.requestGuestSignIn(req.body || {}));
   } catch (error) {
     if (/required|not found/i.test(String(error?.message || ''))) {
@@ -93,8 +111,9 @@ publicBookingRouter.post('/guest-signin/request', async (req, res, next) => {
   }
 });
 
-publicBookingRouter.post('/guest-signup', async (req, res, next) => {
+publicBookingRouter.post('/guest-signup', bookingWriteGuard, async (req, res, next) => {
   try {
+    assertPlainObject(req.body || {}, 'guest signup payload');
     res.status(201).json(await publicBookingService.createGuestAccount(req.body || {}));
   } catch (error) {
     if (/required|not found/i.test(String(error?.message || ''))) {
@@ -104,8 +123,9 @@ publicBookingRouter.post('/guest-signup', async (req, res, next) => {
   }
 });
 
-publicBookingRouter.post('/host-signup', async (req, res, next) => {
+publicBookingRouter.post('/host-signup', bookingWriteGuard, async (req, res, next) => {
   try {
+    assertPlainObject(req.body || {}, 'host signup payload');
     res.status(201).json(await publicBookingService.createHostSignup(req.body || {}));
   } catch (error) {
     if (/required|not found|enabled|registered|exists|password|vehicle type|photo|insurance|registration|inspection|location|pickup spot/i.test(String(error?.message || ''))) {
@@ -115,7 +135,7 @@ publicBookingRouter.post('/host-signup', async (req, res, next) => {
   }
 });
 
-publicBookingRouter.get('/guest-signin/:token', async (req, res, next) => {
+publicBookingRouter.get('/guest-signin/:token', bookingReadGuard, async (req, res, next) => {
   try {
     res.json(await publicBookingService.getGuestSession(req.params.token));
   } catch (error) {
@@ -126,8 +146,9 @@ publicBookingRouter.get('/guest-signin/:token', async (req, res, next) => {
   }
 });
 
-publicBookingRouter.post('/issues', async (req, res, next) => {
+publicBookingRouter.post('/issues', bookingWriteGuard, async (req, res, next) => {
   try {
+    assertPlainObject(req.body || {}, 'issue payload');
     res.status(201).json(await publicBookingService.createIssue(req.body || {}));
   } catch (error) {
     if (/required|not found/i.test(String(error?.message || ''))) {
@@ -137,7 +158,7 @@ publicBookingRouter.post('/issues', async (req, res, next) => {
   }
 });
 
-publicBookingRouter.get('/hosts/:id', async (req, res, next) => {
+publicBookingRouter.get('/hosts/:id', bookingReadGuard, async (req, res, next) => {
   try {
     res.json(await publicBookingService.getHostProfile(req.params.id));
   } catch (error) {
@@ -148,7 +169,7 @@ publicBookingRouter.get('/hosts/:id', async (req, res, next) => {
   }
 });
 
-publicBookingRouter.get('/host-reviews/:token', async (req, res, next) => {
+publicBookingRouter.get('/host-reviews/:token', bookingReadGuard, async (req, res, next) => {
   try {
     res.json(await publicBookingService.getHostReviewPrompt(req.params.token));
   } catch (error) {
@@ -159,8 +180,9 @@ publicBookingRouter.get('/host-reviews/:token', async (req, res, next) => {
   }
 });
 
-publicBookingRouter.post('/host-reviews/:token', async (req, res, next) => {
+publicBookingRouter.post('/host-reviews/:token', bookingWriteGuard, async (req, res, next) => {
   try {
+    assertPlainObject(req.body || {}, 'host review payload');
     res.json(await publicBookingService.submitHostReview(req.params.token, req.body || {}));
   } catch (error) {
     if (/invalid|expired|required|submitted|rating/i.test(String(error?.message || ''))) {

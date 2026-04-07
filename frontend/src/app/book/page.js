@@ -950,6 +950,14 @@ function PublicBookingPageInner() {
                 {searchMode === 'RENTAL'
                   ? `${selectedResult.vehicleType?.name || 'Rental option'} | Estimated total ${fmtMoney(selectedResult.quote?.estimatedTripTotal)}`
                   : `${selectedResult.title || 'Vehicle'} | Estimated total ${fmtMoney(checkoutEstimatedTotal)}`}
+                {searchMode === 'RENTAL' && selectedResult?.quote?.revenuePricingApplied ? (
+                  <>
+                    <br />
+                    <span className="ui-muted">
+                      Revenue-adjusted quote: base daily {fmtMoney(selectedResult.quote?.baseDailyRate)} to current daily {fmtMoney(selectedResult.quote?.dailyRate)}.
+                    </span>
+                  </>
+                ) : null}
               </div>
             ) : null}
             <div className="grid2" style={{ marginBottom: 0 }}>
@@ -964,11 +972,13 @@ function PublicBookingPageInner() {
                       imageUrl={result.primaryImageUrl}
                       imageUrls={result.imageUrls}
                       hints={[
+                        ...(result.quote?.revenuePricingApplied ? [`Revenue adjusted +${Number(result.quote?.revenueAdjustmentPct || 0).toFixed(2)}%`] : []),
                         ...(result.additionalServices?.length ? [`${result.additionalServices.length} add-on${result.additionalServices.length === 1 ? '' : 's'} online`] : []),
                         ...(result.insurancePlans?.length ? [`${result.insurancePlans.length} insurance option${result.insurancePlans.length === 1 ? '' : 's'}`] : [])
                       ]}
                       quote={[
                         { label: 'Daily Rate', value: fmtMoney(result.quote.dailyRate) },
+                        ...(result.quote?.revenuePricingApplied ? [{ label: 'Base Daily', value: fmtMoney(result.quote.baseDailyRate) }] : []),
                         { label: 'Trip Total', value: fmtMoney(result.quote.estimatedTripTotal) },
                         { label: 'Deposit Due', value: fmtMoney(result.quote.depositAmountDue) },
                         { label: 'Security Deposit', value: fmtMoney(result.quote.securityDepositAmount) }
@@ -1568,6 +1578,4 @@ export default function PublicBookingPage() {
     </Suspense>
   );
 }
-
-
 

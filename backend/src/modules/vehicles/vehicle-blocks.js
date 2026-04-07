@@ -1,4 +1,4 @@
-export const VEHICLE_BLOCK_TYPES = ['MIGRATION_HOLD', 'MAINTENANCE_HOLD', 'OUT_OF_SERVICE_HOLD'];
+export const VEHICLE_BLOCK_TYPES = ['MIGRATION_HOLD', 'MAINTENANCE_HOLD', 'WASH_HOLD', 'OUT_OF_SERVICE_HOLD'];
 
 export function normalizeVehicleBlockType(value) {
   const normalized = String(value || '').trim().toUpperCase();

@@ -7,7 +7,20 @@ import { api, TOKEN_KEY, USER_KEY } from '../../lib/client';
 
 const EMPTY_TENANT = { name: '', slug: '', status: 'ACTIVE', plan: 'BETA', carSharingEnabled: false, dealershipLoanerEnabled: false, tollsEnabled: false };
 const EMPTY_ADMIN = { email: '', fullName: '', password: 'TempPass123!' };
-const EMPTY_PLAN = { code: '', name: '', maxAdmins: '', maxUsers: '', maxVehicles: '', isActive: true };
+const EMPTY_PLAN = {
+  code: '',
+  name: '',
+  maxAdmins: '',
+  maxUsers: '',
+  maxVehicles: '',
+  smartPlannerIncluded: true,
+  plannerCopilotIncluded: false,
+  plannerCopilotMonthlyQueryCap: '',
+  plannerCopilotAllowedModels: ['gpt-4.1-mini'],
+  telematicsIncluded: false,
+  inspectionIntelligenceIncluded: true,
+  isActive: true
+};
 
 function limitLabel(value) {
   return value == null || value === '' ? 'Unlimited' : String(value);
@@ -86,6 +99,12 @@ function Inner({ token, me, logout }) {
         maxAdmins: row.maxAdmins === '' ? null : Number(row.maxAdmins),
         maxUsers: row.maxUsers === '' ? null : Number(row.maxUsers),
         maxVehicles: row.maxVehicles === '' ? null : Number(row.maxVehicles),
+        smartPlannerIncluded: row.smartPlannerIncluded !== false,
+        plannerCopilotIncluded: !!row.plannerCopilotIncluded,
+        plannerCopilotMonthlyQueryCap: row.plannerCopilotMonthlyQueryCap === '' ? null : Number(row.plannerCopilotMonthlyQueryCap),
+        plannerCopilotAllowedModels: Array.isArray(row.plannerCopilotAllowedModels) ? row.plannerCopilotAllowedModels : [],
+        telematicsIncluded: !!row.telematicsIncluded,
+        inspectionIntelligenceIncluded: row.inspectionIntelligenceIncluded !== false,
         isActive: !!row.isActive
       }));
       const saved = await api('/api/tenants/plan-catalog', {
@@ -241,6 +260,11 @@ function Inner({ token, me, logout }) {
                 <th>Max Admins</th>
                 <th>Max Users</th>
                 <th>Max Vehicles</th>
+                <th>Copilot</th>
+                <th>Cap</th>
+                <th>Models</th>
+                <th>Telematics</th>
+                <th>Inspection</th>
                 <th>Active</th>
                 <th>Actions</th>
               </tr>
@@ -253,11 +277,16 @@ function Inner({ token, me, logout }) {
                   <td><input type="number" min="0" placeholder="Unlimited" value={plan.maxAdmins ?? ''} onChange={(e) => setPlanCatalog((prev) => prev.map((row, rowIdx) => rowIdx === idx ? { ...row, maxAdmins: e.target.value } : row))} /></td>
                   <td><input type="number" min="0" placeholder="Unlimited" value={plan.maxUsers ?? ''} onChange={(e) => setPlanCatalog((prev) => prev.map((row, rowIdx) => rowIdx === idx ? { ...row, maxUsers: e.target.value } : row))} /></td>
                   <td><input type="number" min="0" placeholder="Unlimited" value={plan.maxVehicles ?? ''} onChange={(e) => setPlanCatalog((prev) => prev.map((row, rowIdx) => rowIdx === idx ? { ...row, maxVehicles: e.target.value } : row))} /></td>
+                  <td><label className="label"><input type="checkbox" checked={plan.plannerCopilotIncluded === true} onChange={(e) => setPlanCatalog((prev) => prev.map((row, rowIdx) => rowIdx === idx ? { ...row, plannerCopilotIncluded: e.target.checked } : row))} /> Included</label></td>
+                  <td><input type="number" min="0" placeholder="Unlimited" value={plan.plannerCopilotMonthlyQueryCap ?? ''} onChange={(e) => setPlanCatalog((prev) => prev.map((row, rowIdx) => rowIdx === idx ? { ...row, plannerCopilotMonthlyQueryCap: e.target.value } : row))} /></td>
+                  <td><input value={Array.isArray(plan.plannerCopilotAllowedModels) ? plan.plannerCopilotAllowedModels.join(', ') : ''} onChange={(e) => setPlanCatalog((prev) => prev.map((row, rowIdx) => rowIdx === idx ? { ...row, plannerCopilotAllowedModels: e.target.value.split(',').map((item) => item.trim()).filter(Boolean) } : row))} placeholder="gpt-4.1-mini, gpt-4.1" /></td>
+                  <td><label className="label"><input type="checkbox" checked={plan.telematicsIncluded === true} onChange={(e) => setPlanCatalog((prev) => prev.map((row, rowIdx) => rowIdx === idx ? { ...row, telematicsIncluded: e.target.checked } : row))} /> Included</label></td>
+                  <td><label className="label"><input type="checkbox" checked={plan.inspectionIntelligenceIncluded !== false} onChange={(e) => setPlanCatalog((prev) => prev.map((row, rowIdx) => rowIdx === idx ? { ...row, inspectionIntelligenceIncluded: e.target.checked } : row))} /> Included</label></td>
                   <td><label className="label"><input type="checkbox" checked={plan.isActive !== false} onChange={(e) => setPlanCatalog((prev) => prev.map((row, rowIdx) => rowIdx === idx ? { ...row, isActive: e.target.checked } : row))} /> Active</label></td>
                   <td><button type="button" className="button-subtle" onClick={() => setPlanCatalog((prev) => prev.filter((_, rowIdx) => rowIdx !== idx))}>Remove</button></td>
                 </tr>
               )) : (
-                <tr><td colSpan="7">No plans configured yet.</td></tr>
+                <tr><td colSpan="12">No plans configured yet.</td></tr>
               )}
             </tbody>
           </table>

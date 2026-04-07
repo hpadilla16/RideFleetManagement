@@ -158,7 +158,54 @@ function Inner({ token }) {
               <div className="photo-cap">Vehicle Swaps</div>
               <div style={{ fontWeight: 700 }}>{Array.isArray(report?.vehicleSwaps) ? report.vehicleSwaps.length : 0}</div>
             </div>
+            <div className="photo-card">
+              <div className="photo-cap">Intelligence Status</div>
+              <div style={{ fontWeight: 700 }}>{report?.intelligence?.status || 'NO DATA'}</div>
+            </div>
+            <div className="photo-card">
+              <div className="photo-cap">Photo Coverage</div>
+              <div style={{ fontWeight: 700 }}>
+                {report?.intelligence?.photoCoverage?.captured || 0}/{report?.intelligence?.photoCoverage?.required || 8}
+              </div>
+            </div>
+            <div className="photo-card">
+              <div className="photo-cap">Condition Flags</div>
+              <div style={{ fontWeight: 700 }}>{report?.intelligence?.conditionAttentionCount || 0}</div>
+            </div>
+            <div className="photo-card">
+              <div className="photo-cap">Damage Reported</div>
+              <div style={{ fontWeight: 700 }}>{report?.intelligence?.damageReported ? 'Yes' : 'No'}</div>
+            </div>
+            <div className="photo-card">
+              <div className="photo-cap">Damage Severity</div>
+              <div style={{ fontWeight: 700 }}>{report?.intelligence?.damageTriage?.severity || 'NONE'}</div>
+            </div>
+            <div className="photo-card">
+              <div className="photo-cap">Damage Confidence</div>
+              <div style={{ fontWeight: 700 }}>{report?.intelligence?.damageTriage?.confidence || 'LOW'}</div>
+            </div>
           </div>
+          {report?.intelligence?.summary ? <div className="muted" style={{ marginTop: 10 }}>{report.intelligence.summary}</div> : null}
+          {report?.intelligence?.damageTriage?.recommendedAction ? (
+            <div
+              className="print-card"
+              style={{
+                marginTop: 12,
+                background: String(report?.intelligence?.damageTriage?.severity || '').toUpperCase() === 'HIGH' ? '#3a1212' : '#24160b',
+                borderColor: String(report?.intelligence?.damageTriage?.severity || '').toUpperCase() === 'HIGH' ? '#7f1d1d' : '#9a3412'
+              }}
+            >
+              <div className="muted" style={{ textTransform: 'uppercase', letterSpacing: '.08em', marginBottom: 8 }}>Damage Triage</div>
+              <div style={{ fontWeight: 700, marginBottom: 6 }}>{report?.intelligence?.damageTriage?.summary || 'No damage triage summary available.'}</div>
+              <div className="muted">{report?.intelligence?.damageTriage?.recommendedAction}</div>
+              {Array.isArray(report?.intelligence?.damageTriage?.categories) && report.intelligence.damageTriage.categories.length ? (
+                <div className="muted" style={{ marginTop: 8 }}>Categories: {report.intelligence.damageTriage.categories.join(', ')}</div>
+              ) : null}
+              {Array.isArray(report?.intelligence?.damageTriage?.keywords) && report.intelligence.damageTriage.keywords.length ? (
+                <div className="muted" style={{ marginTop: 4 }}>Keywords: {report.intelligence.damageTriage.keywords.join(', ')}</div>
+              ) : null}
+            </div>
+          ) : null}
         </div>
       ) : null}
 

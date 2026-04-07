@@ -48,6 +48,7 @@ function activeAvailabilityBlock(vehicle) {
 function blockTypeLabel(value) {
   switch (String(value || '').toUpperCase()) {
     case 'MAINTENANCE_HOLD': return 'Maintenance Hold';
+    case 'WASH_HOLD': return 'Wash Buffer';
     case 'OUT_OF_SERVICE_HOLD': return 'Out Of Service';
     default: return 'Migration Hold';
   }
@@ -59,6 +60,10 @@ function isMigrationHold(block) {
 
 function isServiceHold(block) {
   return ['MAINTENANCE_HOLD', 'OUT_OF_SERVICE_HOLD'].includes(String(block?.blockType || '').toUpperCase());
+}
+
+function isWashHold(block) {
+  return String(block?.blockType || '').toUpperCase() === 'WASH_HOLD';
 }
 
 function toLocalDateTimeInput(value) {
@@ -275,6 +280,7 @@ function VehiclesInner({ token, me, logout }) {
     const activeBlocks = vehicles.map((vehicle) => ({ vehicle, block: activeAvailabilityBlock(vehicle) })).filter((row) => !!row.block);
     const migrationHolds = activeBlocks.filter((row) => isMigrationHold(row.block));
     const serviceBlocks = activeBlocks.filter((row) => isServiceHold(row.block));
+    const washBlocks = activeBlocks.filter((row) => isWashHold(row.block));
     const available = vehicles.filter((v) => String(v?.status || '').toUpperCase() === 'AVAILABLE' && !activeAvailabilityBlock(v));
     const onRentIds = new Set(vehicles.filter((v) => String(v?.status || '').toUpperCase() === 'ON_RENT').map((v) => v.id));
     migrationHolds.forEach((row) => onRentIds.add(row.vehicle.id));
@@ -324,6 +330,7 @@ function VehiclesInner({ token, me, logout }) {
       serviceRisk: serviceRisk.length,
       migrationHolds: migrationHolds.length,
       serviceBlocks: serviceBlocks.length,
+      washBlocks: washBlocks.length,
       carSharing: carSharing.length,
       nextItems
     };
@@ -718,6 +725,11 @@ function VehiclesInner({ token, me, logout }) {
               <strong>{fleetOpsHub.serviceBlocks}</strong>
               <span className="ui-muted">Vehicles blocked for maintenance or out-of-service windows.</span>
             </div>
+            <div className="info-tile">
+              <span className="label">Wash Holds</span>
+              <strong>{fleetOpsHub.washBlocks}</strong>
+              <span className="ui-muted">Vehicles temporarily blocked for wash and turnaround buffers.</span>
+            </div>
           </div>
           <div className="app-banner-list">
             <span className="app-banner-pill">Car Sharing Supply {fleetOpsHub.carSharing}</span>
@@ -981,6 +993,7 @@ function VehiclesInner({ token, me, logout }) {
                 <select value={blockForm.blockType} onChange={(e) => setBlockForm({ ...blockForm, blockType: e.target.value })}>
                   <option value="MIGRATION_HOLD">Migration Hold</option>
                   <option value="MAINTENANCE_HOLD">Maintenance Hold</option>
+                  <option value="WASH_HOLD">Wash Buffer Hold</option>
                   <option value="OUT_OF_SERVICE_HOLD">Out Of Service Hold</option>
                 </select>
                 <div />
@@ -1072,7 +1085,7 @@ function VehiclesInner({ token, me, logout }) {
                   <li>Use CSV format.</li>
                   <li>Required columns: <code>internalNumber</code> or <code>plate</code>, <code>blockType</code>, plus <code>availableFrom</code>.</li>
                   <li>Optional columns: <code>blockedFrom</code>, <code>reason</code>, <code>notes</code>.</li>
-                  <li>Use <code>MIGRATION_HOLD</code>, <code>MAINTENANCE_HOLD</code>, or <code>OUT_OF_SERVICE_HOLD</code>.</li>
+                  <li>Use <code>MIGRATION_HOLD</code>, <code>MAINTENANCE_HOLD</code>, <code>WASH_HOLD</code>, or <code>OUT_OF_SERVICE_HOLD</code>.</li>
                   <li>These temporary blocks appear in the planner and are excluded from booking availability.</li>
                 </ul>
                 <div style={{ display: 'flex', gap: 8 }}>

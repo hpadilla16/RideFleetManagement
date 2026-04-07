@@ -32,6 +32,7 @@ function activeAvailabilityBlock(vehicle) {
 function blockTypeLabel(value) {
   switch (String(value || '').toUpperCase()) {
     case 'MAINTENANCE_HOLD': return 'Maintenance Hold';
+    case 'WASH_HOLD': return 'Wash Buffer';
     case 'OUT_OF_SERVICE_HOLD': return 'Out Of Service';
     default: return 'Migration Hold';
   }
@@ -44,6 +45,23 @@ function reservationTone(status) {
     case 'CONFIRMED': return 'good';
     case 'NEW': return 'neutral';
     default: return 'neutral';
+  }
+}
+
+function statusTone(value) {
+  switch (String(value || '').toUpperCase()) {
+    case 'READY':
+    case 'ONLINE':
+      return 'good';
+    case 'WATCH':
+      return 'neutral';
+    case 'ATTENTION':
+    case 'BLOCKED':
+    case 'STALE':
+    case 'NO_SIGNAL':
+      return 'warn';
+    default:
+      return 'neutral';
   }
 }
 
@@ -61,6 +79,16 @@ function vehicleDisplayName(row) {
   return [row?.year, row?.make, row?.model].filter(Boolean).join(' ') || row?.plate || row?.internalNumber || 'Vehicle';
 }
 
+function telematicsProviderLabel(provider) {
+  switch (String(provider || '').toUpperCase()) {
+    case 'ZUBIE': return 'Zubie';
+    case 'SAMSARA': return 'Samsara';
+    case 'GEOTAB': return 'Geotab';
+    case 'AZUGA': return 'Azuga';
+    default: return 'Generic';
+  }
+}
+
 export default function VehicleProfilePage() {
   return <AuthGate>{({ token, me, logout }) => <VehicleProfileInner token={token} me={me} logout={logout} />}</AuthGate>;
 }
@@ -76,13 +104,36 @@ function VehicleProfileInner({ token, me, logout }) {
   const [qrUrl, setQrUrl] = useState('');
   const [qrDataUrl, setQrDataUrl] = useState('');
   const [msg, setMsg] = useState('');
+  const [savingTelematics, setSavingTelematics] = useState('');
+  const [telematicsProviders, setTelematicsProviders] = useState([]);
+  const [telematicsConfig, setTelematicsConfig] = useState(null);
+  const [deviceForm, setDeviceForm] = useState({ provider: 'ZUBIE', externalDeviceId: '', label: '', serialNumber: '' });
+  const [eventForm, setEventForm] = useState({ eventType: 'PING', odometer: '', fuelPct: '', speedMph: '', latitude: '', longitude: '', engineOn: false });
+
+  const loadVehicle = async () => {
+    const out = await api(`/api/vehicles/${id}`, {}, token);
+    setRow(out);
+  };
 
   useEffect(() => {
     if (!id) return;
-    api(`/api/vehicles/${id}`, {}, token)
-      .then((out) => setRow(out))
+    loadVehicle()
       .catch((error) => setMsg(error.message));
   }, [id, token]);
+
+  useEffect(() => {
+    api('/api/vehicles/telematics/providers', {}, token)
+      .then((out) => setTelematicsProviders(Array.isArray(out) ? out : []))
+      .catch(() => setTelematicsProviders([]));
+  }, [token]);
+
+  useEffect(() => {
+    if (!row?.tenantId && !me?.tenantId) return;
+    const query = me?.role === 'SUPER_ADMIN' && row?.tenantId ? `?tenantId=${encodeURIComponent(row.tenantId)}` : '';
+    api(`/api/settings/telematics${query}`, {}, token)
+      .then((out) => setTelematicsConfig(out || null))
+      .catch(() => setTelematicsConfig(null));
+  }, [token, me?.role, me?.tenantId, row?.tenantId]);
 
   useEffect(() => {
     if (typeof window === 'undefined' || !id) return;
@@ -116,6 +167,12 @@ function VehicleProfileInner({ token, me, logout }) {
   const nextReservation = row?.nextReservation || null;
   const recentReservations = Array.isArray(row?.recentReservations) ? row.recentReservations : [];
   const inspectionHistory = Array.isArray(row?.rentalAgreements) ? row.rentalAgreements : [];
+  const operationalSignals = row?.operationalSignals || null;
+  const telematicsDevices = Array.isArray(row?.telematicsDevices) ? row.telematicsDevices : [];
+  const latestTelematicsEvent = row?.latestTelematicsEvent || null;
+  const canManageTelematics = ['SUPER_ADMIN', 'ADMIN', 'OPS'].includes(String(me?.role || '').toUpperCase());
+  const selectedTelematicsProvider = telematicsProviders.find((provider) => provider.code === String(deviceForm.provider || '').toUpperCase()) || null;
+  const telematicsFeatureReady = telematicsConfig?.ready !== false;
 
   const statusSummary = useMemo(() => {
     if (activeReservation) {
@@ -149,6 +206,48 @@ function VehicleProfileInner({ token, me, logout }) {
   const printQr = () => {
     if (typeof window === 'undefined' || !row?.id) return;
     window.open(`/vehicles/${row.id}?print=1`, '_blank', 'noopener,noreferrer');
+  };
+
+  const saveTelematicsDevice = async () => {
+    try {
+      setSavingTelematics('device');
+      setMsg('');
+      await api(`/api/vehicles/${id}/telematics/devices`, {
+        method: 'POST',
+        body: JSON.stringify(deviceForm)
+      }, token);
+      await loadVehicle();
+      setDeviceForm((current) => ({ ...current, externalDeviceId: '', label: '', serialNumber: '' }));
+      setMsg('Telematics device linked to vehicle');
+    } catch (error) {
+      setMsg(error.message);
+    } finally {
+      setSavingTelematics('');
+    }
+  };
+
+  const logTelematicsPing = async () => {
+    try {
+      setSavingTelematics('event');
+      setMsg('');
+      await api(`/api/vehicles/${id}/telematics/events`, {
+        method: 'POST',
+        body: JSON.stringify({
+          ...eventForm,
+          odometer: eventForm.odometer === '' ? null : Number(eventForm.odometer),
+          fuelPct: eventForm.fuelPct === '' ? null : Number(eventForm.fuelPct),
+          speedMph: eventForm.speedMph === '' ? null : Number(eventForm.speedMph),
+          latitude: eventForm.latitude === '' ? null : Number(eventForm.latitude),
+          longitude: eventForm.longitude === '' ? null : Number(eventForm.longitude)
+        })
+      }, token);
+      await loadVehicle();
+      setMsg('Telematics event logged');
+    } catch (error) {
+      setMsg(error.message);
+    } finally {
+      setSavingTelematics('');
+    }
   };
 
   return (
@@ -264,6 +363,256 @@ function VehicleProfileInner({ token, me, logout }) {
                   <div className="surface-note">
                     {blockTypeLabel(currentBlock.blockType)} from {formatDateTime(currentBlock.blockedFrom)} until {formatDateTime(currentBlock.availableFrom)}
                     {currentBlock.reason ? ` | ${currentBlock.reason}` : ''}
+                  </div>
+                ) : null}
+              </section>
+
+              <section className="glass card-lg section-card">
+                <div className="row-between">
+                  <h2>Operational Intelligence</h2>
+                  <span className={`status-chip ${statusTone(operationalSignals?.status)}`}>{operationalSignals?.status || 'NO DATA'}</span>
+                </div>
+                <div className="app-card-grid compact">
+                  <div className="info-tile">
+                    <span className="label">Turn-Ready Score</span>
+                    <strong>{operationalSignals?.turnReady?.score ?? '-'}</strong>
+                    <span className="ui-muted">{operationalSignals?.turnReady?.summary || 'Turn-readiness has not been scored yet.'}</span>
+                  </div>
+                  <div className="info-tile">
+                    <span className="label">Turn-Ready Status</span>
+                    <strong>{operationalSignals?.turnReady?.status || 'NO DATA'}</strong>
+                    <span className="ui-muted">{operationalSignals?.turnReady?.activeBlockLabel ? `Current blocker: ${operationalSignals.turnReady.activeBlockLabel}.` : 'No active hold is reducing turn readiness right now.'}</span>
+                  </div>
+                  <div className="info-tile">
+                    <span className="label">Inspection Readiness</span>
+                    <strong>{operationalSignals?.inspection?.status || 'NO DATA'}</strong>
+                    <span className="ui-muted">{operationalSignals?.inspection?.summary || 'No inspection signal available yet.'}</span>
+                  </div>
+                  <div className="info-tile">
+                    <span className="label">Latest Inspection</span>
+                    <strong>{operationalSignals?.inspection?.latestPhase || '-'}</strong>
+                    <span className="ui-muted">{formatDateTime(operationalSignals?.inspection?.latestAt)}</span>
+                  </div>
+                  <div className="info-tile">
+                    <span className="label">Photo Coverage</span>
+                    <strong>{operationalSignals?.inspection?.photoCoverage?.captured || 0}/{operationalSignals?.inspection?.photoCoverage?.required || 8}</strong>
+                    <span className="ui-muted">Required inspection photo set completion.</span>
+                  </div>
+                  <div className="info-tile">
+                    <span className="label">Condition Flags</span>
+                    <strong>{operationalSignals?.inspection?.conditionAttentionCount || 0}</strong>
+                    <span className="ui-muted">{operationalSignals?.inspection?.damageReported ? 'Damage was reported on the latest inspection.' : 'No latest damage note on file.'}</span>
+                  </div>
+                  <div className="info-tile">
+                    <span className="label">Damage Triage</span>
+                    <strong>{operationalSignals?.inspection?.damageTriage?.severity || 'NONE'}</strong>
+                    <span className="ui-muted">{operationalSignals?.inspection?.damageTriage?.summary || 'Damage triage has not flagged this unit.'}</span>
+                  </div>
+                  <div className="info-tile">
+                    <span className="label">Next Damage Action</span>
+                    <strong>{operationalSignals?.inspection?.damageTriage?.confidence || 'LOW'} confidence</strong>
+                    <span className="ui-muted">{operationalSignals?.inspection?.damageTriage?.recommendedAction || 'No damage action is currently recommended.'}</span>
+                  </div>
+                  <div className="info-tile">
+                    <span className="label">Telematics</span>
+                    <strong>{operationalSignals?.telematics?.status || 'NO DEVICE'}</strong>
+                    <span className="ui-muted">{operationalSignals?.telematics?.summary || 'No telematics feed linked yet.'}</span>
+                  </div>
+                  <div className="info-tile">
+                    <span className="label">Last Signal</span>
+                    <strong>{formatDateTime(operationalSignals?.telematics?.lastEventAt || operationalSignals?.telematics?.lastSeenAt)}</strong>
+                    <span className="ui-muted">{operationalSignals?.telematics?.provider || 'Provider pending'}</span>
+                  </div>
+                  <div className="info-tile">
+                    <span className="label">Fuel Status</span>
+                    <strong>{operationalSignals?.telematics?.fuelStatus || 'UNKNOWN'}</strong>
+                    <span className="ui-muted">{operationalSignals?.telematics?.fuelPct == null ? 'No live fuel reading yet.' : `Latest reading ${operationalSignals.telematics.fuelPct}%`}</span>
+                  </div>
+                  <div className="info-tile">
+                    <span className="label">GPS Status</span>
+                    <strong>{operationalSignals?.telematics?.gpsStatus || 'UNKNOWN'}</strong>
+                    <span className="ui-muted">{operationalSignals?.telematics?.latitude != null && operationalSignals?.telematics?.longitude != null ? `${operationalSignals.telematics.latitude}, ${operationalSignals.telematics.longitude}` : 'Latest update did not include coordinates.'}</span>
+                  </div>
+                  <div className="info-tile">
+                    <span className="label">Odometer Feed</span>
+                    <strong>{operationalSignals?.telematics?.odometerStatus || 'UNKNOWN'}</strong>
+                    <span className="ui-muted">{operationalSignals?.telematics?.odometer == null ? 'No live mileage reported yet.' : `Latest live odometer ${operationalSignals.telematics.odometer}`}</span>
+                  </div>
+                  <div className="info-tile">
+                    <span className="label">Battery</span>
+                    <strong>{operationalSignals?.telematics?.batteryStatus || 'UNKNOWN'}</strong>
+                    <span className="ui-muted">{operationalSignals?.telematics?.batteryPct == null ? 'No battery reading reported.' : `Latest battery ${operationalSignals.telematics.batteryPct}%`}</span>
+                  </div>
+                </div>
+                {operationalSignals?.attentionReasons?.length ? (
+                  <div className="timeline-list" style={{ marginTop: 12 }}>
+                    {operationalSignals.attentionReasons.map((reason) => (
+                      <div key={reason} className="surface-note" style={{ background: '#fff7ed', borderColor: '#fed7aa', color: '#9a3412' }}>{reason}</div>
+                    ))}
+                  </div>
+                ) : null}
+                {operationalSignals?.turnReady?.reasons?.length ? (
+                  <div className="timeline-list" style={{ marginTop: 12 }}>
+                    {operationalSignals.turnReady.reasons.map((reason) => (
+                      <div key={reason} className="surface-note">{reason}</div>
+                    ))}
+                  </div>
+                ) : null}
+                {operationalSignals?.turnReady?.blockers?.length ? (
+                  <div className="timeline-list" style={{ marginTop: 12 }}>
+                    {operationalSignals.turnReady.blockers.map((reason) => (
+                      <div key={reason} className="surface-note" style={{ background: '#fef2f2', borderColor: '#fecaca', color: '#991b1b' }}>{reason}</div>
+                    ))}
+                  </div>
+                ) : null}
+                {operationalSignals?.telematics?.alerts?.length ? (
+                  <div className="timeline-list" style={{ marginTop: 12 }}>
+                    {operationalSignals.telematics.alerts.map((reason) => (
+                      <div key={reason} className="surface-note">{reason}</div>
+                    ))}
+                  </div>
+                ) : null}
+              </section>
+
+              <section className="glass card-lg section-card">
+                <div className="row-between">
+                  <h2>Telematics</h2>
+                  <span className={`status-chip ${statusTone(operationalSignals?.telematics?.status)}`}>{operationalSignals?.telematics?.status || 'NO DEVICE'}</span>
+                </div>
+                <div className="app-card-grid compact">
+                  <div className="info-tile"><span className="label">Provider</span><strong>{operationalSignals?.telematics?.provider || '-'}</strong></div>
+                  <div className="info-tile"><span className="label">Device</span><strong>{operationalSignals?.telematics?.deviceLabel || operationalSignals?.telematics?.externalDeviceId || '-'}</strong></div>
+                  <div className="info-tile"><span className="label">Odometer</span><strong>{operationalSignals?.telematics?.odometer ?? '-'}</strong></div>
+                  <div className="info-tile"><span className="label">Odometer Status</span><strong>{operationalSignals?.telematics?.odometerStatus || 'UNKNOWN'}</strong></div>
+                  <div className="info-tile"><span className="label">Fuel %</span><strong>{operationalSignals?.telematics?.fuelPct ?? '-'}</strong></div>
+                  <div className="info-tile"><span className="label">Fuel Status</span><strong>{operationalSignals?.telematics?.fuelStatus || 'UNKNOWN'}</strong></div>
+                  <div className="info-tile"><span className="label">Battery %</span><strong>{operationalSignals?.telematics?.batteryPct ?? '-'}</strong></div>
+                  <div className="info-tile"><span className="label">Battery Status</span><strong>{operationalSignals?.telematics?.batteryStatus || 'UNKNOWN'}</strong></div>
+                  <div className="info-tile"><span className="label">Speed MPH</span><strong>{operationalSignals?.telematics?.speedMph ?? '-'}</strong></div>
+                  <div className="info-tile"><span className="label">Movement</span><strong>{operationalSignals?.telematics?.movementStatus || 'UNKNOWN'}</strong></div>
+                  <div className="info-tile"><span className="label">GPS</span><strong>{operationalSignals?.telematics?.gpsStatus || 'UNKNOWN'}</strong></div>
+                  <div className="info-tile"><span className="label">Coordinates</span><strong>{operationalSignals?.telematics?.latitude != null && operationalSignals?.telematics?.longitude != null ? `${operationalSignals.telematics.latitude}, ${operationalSignals.telematics.longitude}` : '-'}</strong></div>
+                </div>
+                {operationalSignals?.telematics?.recommendedAction ? (
+                  <div className="surface-note" style={{ marginTop: 12 }}>{operationalSignals.telematics.recommendedAction}</div>
+                ) : null}
+                {telematicsConfig && !telematicsFeatureReady ? (
+                  <div className="surface-note" style={{ marginTop: 12, background: '#fff7ed', borderColor: '#fed7aa', color: '#9a3412' }}>
+                    Telematics is currently disabled for this tenant or not included in the current package.
+                  </div>
+                ) : null}
+                {telematicsDevices.length ? (
+                  <div className="timeline-list" style={{ marginTop: 12 }}>
+                    {telematicsDevices.map((device) => (
+                      <article key={device.id} className="timeline-item">
+                        <div className="row-between" style={{ marginBottom: 0 }}>
+                          <strong>{device.label || device.externalDeviceId}</strong>
+                          <span className={`status-chip ${device.isActive ? 'good' : 'neutral'}`}>{device.isActive ? 'Active' : 'Inactive'}</span>
+                        </div>
+                        <div className="ui-muted">{device.providerLabel || telematicsProviderLabel(device.provider)} | Serial {device.serialNumber || '-'}</div>
+                        <div className="ui-muted">Last seen {formatDateTime(device.lastSeenAt)}</div>
+                      </article>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="surface-note" style={{ marginTop: 12 }}>No telematics device is linked to this vehicle yet.</div>
+                )}
+                {latestTelematicsEvent ? (
+                  <div className="surface-note" style={{ marginTop: 12 }}>
+                    Latest event {latestTelematicsEvent.eventType} at {formatDateTime(latestTelematicsEvent.eventAt)} | Odometer {latestTelematicsEvent.odometer ?? '-'} | Fuel {latestTelematicsEvent.fuelPct ?? '-'}%
+                  </div>
+                ) : null}
+                {canManageTelematics ? (
+                  <div className="stack" style={{ marginTop: 14, gap: 12 }}>
+                    <div className="glass card" style={{ padding: 12 }}>
+                      <div className="section-title" style={{ fontSize: 15, marginBottom: 8 }}>Link Telematics Device</div>
+                      <div className="app-card-grid compact">
+                        <div className="stack">
+                          <label className="label">Provider</label>
+                          <select value={deviceForm.provider} onChange={(e) => setDeviceForm((current) => ({ ...current, provider: e.target.value }))}>
+                            {(telematicsProviders.length ? telematicsProviders : [{ code: 'ZUBIE', label: 'Zubie', recommended: true }, { code: 'GENERIC', label: 'Generic', recommended: false }]).map((provider) => (
+                              <option key={provider.code} value={provider.code}>
+                                {provider.label}{provider.recommended ? ' | Recommended' : ''}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                        <div className="stack">
+                          <label className="label">External Device ID</label>
+                          <input value={deviceForm.externalDeviceId} onChange={(e) => setDeviceForm((current) => ({ ...current, externalDeviceId: e.target.value }))} />
+                        </div>
+                        <div className="stack">
+                          <label className="label">Label</label>
+                          <input value={deviceForm.label} onChange={(e) => setDeviceForm((current) => ({ ...current, label: e.target.value }))} />
+                        </div>
+                        <div className="stack">
+                          <label className="label">Serial Number</label>
+                          <input value={deviceForm.serialNumber} onChange={(e) => setDeviceForm((current) => ({ ...current, serialNumber: e.target.value }))} />
+                        </div>
+                      </div>
+                      {selectedTelematicsProvider ? (
+                        <div
+                          className="surface-note"
+                          style={{
+                            marginTop: 10,
+                            background: String(selectedTelematicsProvider.code || '').toUpperCase() === 'ZUBIE' ? '#eff6ff' : undefined,
+                            borderColor: String(selectedTelematicsProvider.code || '').toUpperCase() === 'ZUBIE' ? '#bfdbfe' : undefined,
+                            color: String(selectedTelematicsProvider.code || '').toUpperCase() === 'ZUBIE' ? '#1d4ed8' : undefined
+                          }}
+                        >
+                          <strong>{selectedTelematicsProvider.label}</strong>
+                          {' | '}
+                          {selectedTelematicsProvider.notes || 'Telematics provider placeholder.'}
+                        </div>
+                      ) : null}
+                      <div className="inline-actions" style={{ marginTop: 10 }}>
+                        <button type="button" onClick={saveTelematicsDevice} disabled={savingTelematics === 'device' || !telematicsFeatureReady}>
+                          {savingTelematics === 'device' ? 'Linking...' : 'Link Device'}
+                        </button>
+                      </div>
+                    </div>
+
+                    {!telematicsFeatureReady ? (
+                      <div className="surface-note">
+                        Telematics management is off for this tenant right now. Turn it on in Settings before linking devices or logging events.
+                      </div>
+                    ) : null}
+
+                    <div className="glass card" style={{ padding: 12 }}>
+                      <div className="section-title" style={{ fontSize: 15, marginBottom: 8 }}>Log Telematics Ping</div>
+                      <div className="app-card-grid compact">
+                        <div className="stack">
+                          <label className="label">Event Type</label>
+                          <input value={eventForm.eventType} onChange={(e) => setEventForm((current) => ({ ...current, eventType: e.target.value }))} />
+                        </div>
+                        <div className="stack">
+                          <label className="label">Odometer</label>
+                          <input type="number" min="0" value={eventForm.odometer} onChange={(e) => setEventForm((current) => ({ ...current, odometer: e.target.value }))} />
+                        </div>
+                        <div className="stack">
+                          <label className="label">Fuel %</label>
+                          <input type="number" min="0" max="100" step="0.01" value={eventForm.fuelPct} onChange={(e) => setEventForm((current) => ({ ...current, fuelPct: e.target.value }))} />
+                        </div>
+                        <div className="stack">
+                          <label className="label">Speed MPH</label>
+                          <input type="number" min="0" step="0.01" value={eventForm.speedMph} onChange={(e) => setEventForm((current) => ({ ...current, speedMph: e.target.value }))} />
+                        </div>
+                        <div className="stack">
+                          <label className="label">Latitude</label>
+                          <input type="number" step="0.000001" value={eventForm.latitude} onChange={(e) => setEventForm((current) => ({ ...current, latitude: e.target.value }))} />
+                        </div>
+                        <div className="stack">
+                          <label className="label">Longitude</label>
+                          <input type="number" step="0.000001" value={eventForm.longitude} onChange={(e) => setEventForm((current) => ({ ...current, longitude: e.target.value }))} />
+                        </div>
+                      </div>
+                      <label className="label" style={{ marginTop: 10 }}><input type="checkbox" checked={eventForm.engineOn} onChange={(e) => setEventForm((current) => ({ ...current, engineOn: e.target.checked }))} /> Engine on</label>
+                      <div className="inline-actions" style={{ marginTop: 10 }}>
+                        <button type="button" onClick={logTelematicsPing} disabled={savingTelematics === 'event' || !telematicsFeatureReady || telematicsConfig?.allowManualEventIngest === false}>
+                          {savingTelematics === 'event' ? 'Logging...' : 'Log Ping'}
+                        </button>
+                      </div>
+                    </div>
                   </div>
                 ) : null}
               </section>

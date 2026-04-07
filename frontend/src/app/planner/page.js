@@ -1,178 +1,29 @@
 'use client';
 
-import Link from 'next/link';
 import { useEffect, useMemo, useState } from 'react';
 import { AuthGate } from '../../components/AuthGate';
 import { AppShell } from '../../components/AppShell';
-import { api } from '../../lib/client';
-
-const DAY_MS = 24 * 60 * 60 * 1000;
-const DAY_WIDTH = 72;
-
-function startOfDay(d) {
-  const x = new Date(d);
-  x.setHours(0, 0, 0, 0);
-  return x;
-}
-
-function addDays(d, n) {
-  const x = new Date(d);
-  x.setDate(x.getDate() + n);
-  return x;
-}
-
-function fmtDay(d) {
-  return new Date(d).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
-}
-
-function statusColor(r, locked, overbooked = false) {
-  if (overbooked) return '#ef4444';
-  if (locked) return '#9ca3af';
-  switch (r.status) {
-    case 'CONFIRMED': return '#22c55e';
-    case 'NEW': return '#38bdf8';
-    case 'CHECKED_OUT': return '#a78bfa';
-    case 'CHECKED_IN': return '#f59e0b';
-    case 'CANCELLED': return '#ef4444';
-    case 'NO_SHOW': return '#f97316';
-    default: return '#60a5fa';
-  }
-}
-
-function blockColor(block) {
-  const blockType = String(block?.blockType || '').toUpperCase();
-  if (blockType === 'MAINTENANCE_HOLD') return '#f59e0b';
-  if (blockType === 'OUT_OF_SERVICE_HOLD') return '#ef4444';
-  const sourceType = String(block?.sourceType || '').toUpperCase();
-  return sourceType === 'BULK_IMPORT' ? '#64748b' : '#6b7280';
-}
-
-function activeAvailabilityBlock(vehicle) {
-  const now = Date.now();
-  return (Array.isArray(vehicle?.availabilityBlocks) ? vehicle.availabilityBlocks : []).find((block) => {
-    const releasedAt = block?.releasedAt ? new Date(block.releasedAt).getTime() : null;
-    const blockedFrom = block?.blockedFrom ? new Date(block.blockedFrom).getTime() : now;
-    const availableFrom = block?.availableFrom ? new Date(block.availableFrom).getTime() : null;
-    return !releasedAt && blockedFrom <= now && availableFrom && availableFrom > now;
-  }) || null;
-}
-
-function blockTypeLabel(value) {
-  switch (String(value || '').toUpperCase()) {
-    case 'MAINTENANCE_HOLD': return 'Maintenance Hold';
-    case 'OUT_OF_SERVICE_HOLD': return 'Out Of Service';
-    default: return 'Migration Hold';
-  }
-}
-
-function isMigrationHold(block) {
-  return String(block?.blockType || '').toUpperCase() === 'MIGRATION_HOLD';
-}
-
-function isServiceHold(block) {
-  return ['MAINTENANCE_HOLD', 'OUT_OF_SERVICE_HOLD'].includes(String(block?.blockType || '').toUpperCase());
-}
-
-function toLocalDateTimeInput(value) {
-  if (!value) return '';
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return '';
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, '0');
-  const day = String(date.getDate()).padStart(2, '0');
-  const hours = String(date.getHours()).padStart(2, '0');
-  const minutes = String(date.getMinutes()).padStart(2, '0');
-  return `${year}-${month}-${day}T${hours}:${minutes}`;
-}
-
-function dayIndexInRange(rangeStart, dt) {
-  return Math.floor((startOfDay(dt) - rangeStart) / DAY_MS);
-}
-
-function reservationOverlapsRange(reservation, rangeStart, rangeEnd) {
-  const pickup = new Date(reservation?.pickupAt);
-  const ret = new Date(reservation?.returnAt);
-  return pickup < rangeEnd && ret > rangeStart;
-}
-
-function isPlannerMovableReservation(reservation) {
-  const status = String(reservation?.status || '').toUpperCase();
-  return !['CHECKED_OUT', 'CANCELLED', 'NO_SHOW'].includes(status);
-}
-
-function intervalsOverlap(startA, endA, startB, endB) {
-  return startA < endB && endA > startB;
-}
-
-function reservationVehicleTypeId(reservation) {
-  return reservation?.vehicleTypeId || reservation?.vehicleType?.id || null;
-}
-
-function buildTrackOccupancy({ vehicles, reservations, ignoredReservationIds = new Set() }) {
-  const occupancy = new Map();
-  (vehicles || []).forEach((vehicle) => occupancy.set(vehicle.id, []));
-
-  (reservations || []).forEach((reservation) => {
-    if (!reservation?.vehicleId || ignoredReservationIds.has(reservation.id) || !isPlannerMovableReservation(reservation) && String(reservation?.status || '').toUpperCase() !== 'CHECKED_OUT') return;
-    if (!occupancy.has(reservation.vehicleId)) return;
-    const start = new Date(reservation.pickupAt).getTime();
-    const end = new Date(reservation.returnAt).getTime();
-    if (!Number.isFinite(start) || !Number.isFinite(end)) return;
-    occupancy.get(reservation.vehicleId).push({
-      type: 'reservation',
-      reservationId: reservation.id,
-      start,
-      end
-    });
-  });
-
-  (vehicles || []).forEach((vehicle) => {
-    const list = occupancy.get(vehicle.id) || [];
-    (Array.isArray(vehicle?.availabilityBlocks) ? vehicle.availabilityBlocks : []).forEach((block) => {
-      if (block?.releasedAt) return;
-      const start = new Date(block.blockedFrom || block.createdAt || new Date()).getTime();
-      const end = new Date(block.availableFrom).getTime();
-      if (!Number.isFinite(start) || !Number.isFinite(end)) return;
-      list.push({
-        type: 'block',
-        blockId: block.id,
-        start,
-        end
-      });
-    });
-    list.sort((a, b) => a.start - b.start);
-    occupancy.set(vehicle.id, list);
-  });
-
-  return occupancy;
-}
-
-function scoreVehicleFit(vehicle, reservation, intervals) {
-  const start = new Date(reservation.pickupAt).getTime();
-  const end = new Date(reservation.returnAt).getTime();
-  const previous = [...intervals].filter((row) => row.end <= start).sort((a, b) => b.end - a.end)[0] || null;
-  const next = [...intervals].filter((row) => row.start >= end).sort((a, b) => a.start - b.start)[0] || null;
-  const gapBefore = previous ? Math.max(0, start - previous.end) : 4 * DAY_MS;
-  const gapAfter = next ? Math.max(0, next.start - end) : 4 * DAY_MS;
-  const pickupLocationId = reservation?.pickupLocationId || reservation?.locationId || null;
-  const returnLocationId = reservation?.returnLocationId || null;
-  const homeLocationId = vehicle?.homeLocationId || null;
-  const locationPenalty =
-    homeLocationId && (pickupLocationId || returnLocationId)
-      ? ((pickupLocationId && homeLocationId !== pickupLocationId ? 3 * DAY_MS : 0) + (returnLocationId && homeLocationId !== returnLocationId ? 1.5 * DAY_MS : 0))
-      : 0;
-  return locationPenalty + gapBefore + gapAfter;
-}
-
-function reservationVehicleTypeLabel(reservation) {
-  return (
-    reservation?.vehicleType?.name
-    || reservation?.vehicle?.vehicleType?.name
-    || reservation?.vehicleType?.code
-    || reservation?.vehicle?.vehicleType?.code
-    || 'Unspecified'
-  );
-}
+import {
+  DAY_WIDTH,
+  addDays,
+  createPlannerCopilotConfig,
+  createPlannerRulesForm,
+  fmtDay,
+  startOfDay,
+} from './planner-utils.mjs';
+import { PlannerBlockSidepanel } from './PlannerBlockSidepanel.jsx';
+import { PlannerCopilotPanel } from './PlannerCopilotPanel.jsx';
+import { PlannerHoldModal } from './PlannerHoldModal.jsx';
+import { PlannerOpsBoard } from './PlannerOpsBoard.jsx';
+import { PlannerRecommendationPanels } from './PlannerRecommendationPanels.jsx';
+import { PlannerReservationSidepanel } from './PlannerReservationSidepanel.jsx';
+import { PlannerRulesPanel } from './PlannerRulesPanel.jsx';
+import { PlannerTrackRow } from './PlannerTrackRow.jsx';
+import { PlannerToolbar } from './PlannerToolbar.jsx';
+import { usePlannerActions } from './usePlannerActions.js';
+import { usePlannerBoard } from './usePlannerBoard.js';
+import { usePlannerData } from './usePlannerData.js';
+import { usePlannerPanels } from './usePlannerPanels.js';
 
 export default function PlannerPage() {
   return <AuthGate>{({ token, me, logout }) => <PlannerInner token={token} me={me} logout={logout} />}</AuthGate>;
@@ -181,11 +32,6 @@ export default function PlannerPage() {
 function PlannerInner({ token, me, logout }) {
   const role = String(me?.role || '').toUpperCase().trim();
   const canManagePlannerSetup = ['SUPER_ADMIN', 'ADMIN', 'OPS'].includes(role);
-  const [reservations, setReservations] = useState([]);
-  const [agreements, setAgreements] = useState([]);
-  const [vehicles, setVehicles] = useState([]);
-  const [vehicleTypes, setVehicleTypes] = useState([]);
-  const [locations, setLocations] = useState([]);
   const [msg, setMsg] = useState('');
   const [view, setView] = useState('MONTH');
   const [cursor, setCursor] = useState(startOfDay(new Date()));
@@ -194,58 +40,63 @@ function PlannerInner({ token, me, logout }) {
   const [dragItem, setDragItem] = useState(null);
   const [dragMeta, setDragMeta] = useState(null);
   const [draggingId, setDraggingId] = useState('');
-  const [selectedReservation, setSelectedReservation] = useState(null);
-  const [selectedBlock, setSelectedBlock] = useState(null);
-  const [showBlockVehicle, setShowBlockVehicle] = useState(false);
-  const [selectedVehicleForBlock, setSelectedVehicleForBlock] = useState(null);
-  const [blockForm, setBlockForm] = useState({
-    blockType: 'MIGRATION_HOLD',
-    blockedFrom: toLocalDateTimeInput(new Date()),
-    availableFrom: '',
-    reason: '',
-    notes: ''
-  });
   const [plannerFocus, setPlannerFocus] = useState('ALL');
-  const [plannerRunning, setPlannerRunning] = useState('');
-  const [overbookedReservationIds, setOverbookedReservationIds] = useState([]);
+  const [plannerReloadKey, setPlannerReloadKey] = useState(0);
+  const [plannerRulesForm, setPlannerRulesForm] = useState(() => createPlannerRulesForm());
+  const [plannerRulesSaving, setPlannerRulesSaving] = useState(false);
 
   const dayCount = view === 'DAY' ? 1 : view === 'WEEK' ? 7 : 30;
   const rangeStart = useMemo(() => startOfDay(cursor), [cursor]);
   const rangeEnd = useMemo(() => addDays(rangeStart, dayCount), [rangeStart, dayCount]);
-
-  const load = async () => {
-    const [r, a, v, vt, l] = await Promise.allSettled([
-      api('/api/reservations', {}, token),
-      api('/api/rental-agreements', {}, token),
-      api('/api/vehicles', {}, token),
-      canManagePlannerSetup ? api('/api/vehicle-types', {}, token) : Promise.resolve([]),
-      canManagePlannerSetup ? api('/api/locations', {}, token) : Promise.resolve([])
-    ]);
-    if (r.status === 'fulfilled') setReservations(r.value || []);
-    else setReservations([]);
-    if (a.status === 'fulfilled') setAgreements(a.value || []);
-    else setAgreements([]);
-    if (v.status === 'fulfilled') setVehicles(v.value || []);
-    else setVehicles([]);
-    if (vt.status === 'fulfilled') setVehicleTypes(vt.value || []);
-    else setVehicleTypes([]);
-    if (l.status === 'fulfilled') setLocations(l.value || []);
-    else setLocations([]);
-
-    if (r.status === 'rejected' || v.status === 'rejected') {
-      setMsg(r.status === 'rejected' ? (r.reason?.message || 'Unable to load planner') : (v.reason?.message || 'Unable to load planner'));
-    } else if ([a].some((row) => row.status === 'rejected') || (canManagePlannerSetup && [vt, l].some((row) => row.status === 'rejected'))) {
-      setMsg('Planner loaded with limited supporting data');
-    } else {
-      setMsg('');
-    }
-  };
-
-  useEffect(() => { load(); }, [token, canManagePlannerSetup]);
-
-  useEffect(() => {
-    setOverbookedReservationIds([]);
-  }, [cursor, view, filterVehicleTypeId, filterLocationId]);
+  const reloadPlannerSnapshot = () => setPlannerReloadKey((current) => current + 1);
+  const [plannerCopilotConfigBootstrap, setPlannerCopilotConfigBootstrap] = useState(() => createPlannerCopilotConfig());
+  const {
+    reservations,
+    setReservations,
+    vehicles,
+    setVehicles,
+    vehicleTypes,
+    locations,
+    overbookedReservationIds,
+    setOverbookedReservationIds,
+    plannerRules,
+    setPlannerRules,
+    plannerShortage,
+    setPlannerShortage,
+    plannerRecommendationSummary
+  } = usePlannerData({
+    token,
+    canManagePlannerSetup,
+    rangeStart,
+    rangeEnd,
+    filterLocationId,
+    filterVehicleTypeId,
+    plannerReloadKey,
+    setPlannerCopilotConfig: setPlannerCopilotConfigBootstrap,
+    createPlannerCopilotConfig,
+    onMessage: setMsg
+  });
+  const {
+    selectedReservation,
+    selectedBlock,
+    showBlockVehicle,
+    selectedVehicleForBlock,
+    blockForm,
+    setBlockForm,
+    selectReservation,
+    selectBlock,
+    closeSelectedReservation,
+    closeSelectedBlock,
+    closeBlockVehicle,
+    syncUpdatedReservation,
+    openBlockVehicle,
+    saveVehicleBlock,
+    releaseVehicleBlock
+  } = usePlannerPanels({
+    token,
+    setVehicles,
+    onMessage: setMsg
+  });
 
   const replaceReservationInState = (updatedReservation) => {
     if (!updatedReservation?.id) return;
@@ -259,398 +110,135 @@ function PlannerInner({ token, me, logout }) {
         ? current.filter((id) => id !== updatedReservation.id)
         : current
     ));
-    setSelectedReservation((current) => (
-      current?.reservation?.id === updatedReservation.id
-        ? { ...current, reservation: { ...current.reservation, ...updatedReservation }, overbooked: updatedReservation?.vehicleId ? false : current.overbooked }
-        : current
-    ));
+    syncUpdatedReservation(updatedReservation);
   };
 
-  const upsertVehicleBlockInState = (vehicleId, block) => {
-    if (!vehicleId || !block?.id) return;
-    setVehicles((current) => current.map((vehicle) => {
-      if (vehicle.id !== vehicleId) return vehicle;
-      const existing = Array.isArray(vehicle.availabilityBlocks) ? vehicle.availabilityBlocks : [];
-      const nextBlocks = existing.some((row) => row.id === block.id)
-        ? existing.map((row) => (row.id === block.id ? { ...row, ...block } : row))
-        : [...existing, block];
-      return { ...vehicle, availabilityBlocks: nextBlocks };
+  const handlePlannerRuleValueChange = (key, value) => {
+    setPlannerRulesForm((current) => ({
+      ...current,
+      [key]: value
     }));
-    setSelectedBlock((current) => (
-      current?.block?.id === block.id
-        ? { ...current, block: { ...current.block, ...block } }
-        : current
-    ));
   };
 
-  const openBlockVehicle = (vehicle) => {
-    const activeBlock = activeAvailabilityBlock(vehicle);
-    const baseStart = activeBlock?.blockedFrom ? toLocalDateTimeInput(activeBlock.blockedFrom) : toLocalDateTimeInput(new Date());
-    setSelectedReservation(null);
-    setSelectedBlock(null);
-    setSelectedVehicleForBlock(vehicle);
-    setBlockForm({
-      blockType: activeBlock?.blockType || 'MIGRATION_HOLD',
-      blockedFrom: baseStart,
-      availableFrom: activeBlock?.availableFrom ? toLocalDateTimeInput(activeBlock.availableFrom) : '',
-      reason: activeBlock?.reason || '',
-      notes: activeBlock?.notes || ''
-    });
-    setShowBlockVehicle(true);
+  const handlePlannerRuleToggle = (key, checked) => {
+    setPlannerRulesForm((current) => ({
+      ...current,
+      [key]: checked
+    }));
   };
 
-  const saveVehicleBlock = async (e) => {
-    e.preventDefault();
-    if (!selectedVehicleForBlock) return;
+  const savePlannerRules = async (event) => {
+    event.preventDefault();
+    if (!canManagePlannerSetup) return;
+
+    setPlannerRulesSaving(true);
     try {
-      const createdBlock = await api(`/api/vehicles/${selectedVehicleForBlock.id}/availability-blocks`, {
-        method: 'POST',
-        body: JSON.stringify(blockForm)
-      }, token);
-      upsertVehicleBlockInState(selectedVehicleForBlock.id, createdBlock);
-      setMsg(`Vehicle ${selectedVehicleForBlock.internalNumber} blocked until ${new Date(blockForm.availableFrom).toLocaleString()}`);
-      setShowBlockVehicle(false);
-      setSelectedVehicleForBlock(null);
-    } catch (error) {
-      setMsg(error.message);
-    }
-  };
-
-  const releaseVehicleBlock = async (blockId) => {
-    try {
-      const releasedBlock = await api(`/api/vehicles/availability-blocks/${blockId}/release`, {
-        method: 'POST',
-        body: JSON.stringify({})
-      }, token);
-      upsertVehicleBlockInState(releasedBlock?.vehicleId || selectedBlock?.vehicle?.id || selectedVehicleForBlock?.id || null, releasedBlock);
-      setMsg('Vehicle block released');
-      setSelectedBlock(null);
-      setShowBlockVehicle(false);
-      setSelectedVehicleForBlock(null);
-    } catch (error) {
-      setMsg(error.message);
-    }
-  };
-
-  const lockedReservationIds = useMemo(
-    () => new Set((reservations || []).filter((r) => String(r.status || '').toUpperCase() === 'CHECKED_OUT').map((r) => r.id)),
-    [reservations]
-  );
-
-  const filteredVehicles = useMemo(() => (
-    (vehicles || []).filter((v) => {
-      if (filterVehicleTypeId && v.vehicleTypeId !== filterVehicleTypeId) return false;
-      if (filterLocationId && v.homeLocationId !== filterLocationId) return false;
-      return true;
-    })
-  ), [vehicles, filterVehicleTypeId, filterLocationId]);
-
-  const vehicleTracks = useMemo(() => {
-    const filtered = filteredVehicles;
-
-    return [
-      {
-        id: '__unassigned__',
-        make: 'Unassigned',
-        model: 'Reservations',
-        year: '',
-        internalNumber: '-',
-        vehicleTypeId: '__unassigned__',
-        vehicleType: { code: 'N/A', name: 'Unassigned Reservations' }
-      },
-      ...filtered.sort((left, right) => {
-        const leftType = `${left?.vehicleType?.name || ''}${left?.vehicleType?.code || ''}`.toLowerCase();
-        const rightType = `${right?.vehicleType?.name || ''}${right?.vehicleType?.code || ''}`.toLowerCase();
-        if (leftType !== rightType) return leftType.localeCompare(rightType);
-        const leftLabel = `${left?.make || ''} ${left?.model || ''} ${left?.internalNumber || ''}`.toLowerCase();
-        const rightLabel = `${right?.make || ''} ${right?.model || ''} ${right?.internalNumber || ''}`.toLowerCase();
-        return leftLabel.localeCompare(rightLabel);
-      })
-    ];
-  }, [filteredVehicles]);
-
-  const trackRows = useMemo(() => {
-    const rows = [{
-      kind: 'track',
-      id: '__track__unassigned__',
-      vehicle: vehicleTracks[0]
-    }];
-    const grouped = new Map();
-    vehicleTracks.slice(1).forEach((vehicle) => {
-      const typeId = String(vehicle?.vehicleTypeId || vehicle?.vehicleType?.id || 'unknown');
-      const current = grouped.get(typeId) || {
-        id: typeId,
-        label: vehicle?.vehicleType?.name || vehicle?.vehicleType?.code || 'Other Vehicles',
-        code: vehicle?.vehicleType?.code || '',
-        vehicles: []
+      const payload = {
+        minTurnaroundMinutes: Number.parseInt(plannerRulesForm.minTurnaroundMinutes || '0', 10),
+        washBufferMinutes: Number.parseInt(plannerRulesForm.washBufferMinutes || '0', 10),
+        prepBufferMinutes: Number.parseInt(plannerRulesForm.prepBufferMinutes || '0', 10),
+        maintenanceBufferMinutes: Number.parseInt(plannerRulesForm.maintenanceBufferMinutes || '0', 10),
+        lockWindowMinutesBeforePickup: Number.parseInt(plannerRulesForm.lockWindowMinutesBeforePickup || '0', 10),
+        sameDayReservationBufferMinutes: Number.parseInt(plannerRulesForm.sameDayReservationBufferMinutes || '0', 10),
+        allowCrossLocationReassignment: !!plannerRulesForm.allowCrossLocationReassignment,
+        strictVehicleTypeMatch: !!plannerRulesForm.strictVehicleTypeMatch,
+        allowUpgrade: !!plannerRulesForm.allowUpgrade,
+        allowDowngrade: !!plannerRulesForm.allowDowngrade,
+        defaultWashRequired: !!plannerRulesForm.defaultWashRequired,
+        assignmentMode: plannerRulesForm.assignmentMode,
+        maintenanceMode: plannerRulesForm.maintenanceMode
       };
-      current.vehicles.push(vehicle);
-      grouped.set(typeId, current);
-    });
-    [...grouped.values()]
-      .sort((left, right) => `${left.label} ${left.code}`.localeCompare(`${right.label} ${right.code}`))
-      .forEach((group) => {
-        rows.push({
-          kind: 'group',
-          id: `group-${group.id}`,
-          label: group.label,
-          code: group.code,
-          count: group.vehicles.length
-        });
-        group.vehicles.forEach((vehicle) => {
-          rows.push({
-            kind: 'track',
-            id: `track-${vehicle.id}`,
-            vehicle
-          });
-        });
-      });
-    return rows;
-  }, [vehicleTracks]);
-
-  const itemsByTrack = useMemo(() => {
-    const map = new Map();
-    for (const t of vehicleTracks) map.set(t.id, []);
-
-    for (const r of reservations || []) {
-      const pickup = new Date(r.pickupAt);
-      const ret = new Date(r.returnAt);
-      if (!(pickup < rangeEnd && ret > rangeStart)) continue;
-      const vid = r.vehicleId || '__unassigned__';
-      if (!map.has(vid)) continue;
-
-      const start = Math.max(0, (pickup.getTime() - rangeStart.getTime()) / DAY_MS);
-      const end = Math.min(dayCount, (ret.getTime() - rangeStart.getTime()) / DAY_MS);
-      const span = Math.max(0.15, end - start);
-      map.get(vid).push({ kind: 'reservation', reservation: r, start, span, end });
-    }
-
-    for (const vehicle of vehicles || []) {
-      if (!map.has(vehicle.id)) continue;
-      for (const block of Array.isArray(vehicle.availabilityBlocks) ? vehicle.availabilityBlocks : []) {
-        const blockedFrom = new Date(block.blockedFrom || block.createdAt || new Date());
-        const availableFrom = new Date(block.availableFrom);
-        const releasedAt = block?.releasedAt ? new Date(block.releasedAt) : null;
-        if (releasedAt || Number.isNaN(blockedFrom.getTime()) || Number.isNaN(availableFrom.getTime())) continue;
-        if (!(blockedFrom < rangeEnd && availableFrom > rangeStart)) continue;
-
-        const start = Math.max(0, (blockedFrom.getTime() - rangeStart.getTime()) / DAY_MS);
-        const end = Math.min(dayCount, (availableFrom.getTime() - rangeStart.getTime()) / DAY_MS);
-        const span = Math.max(0.15, end - start);
-        map.get(vehicle.id).push({ kind: 'block', block, vehicle, start, span, end });
-      }
-    }
-
-    for (const [k, arr] of map) {
-      arr.sort((a, b) => a.start - b.start);
-      const laneEnds = [];
-      const laid = arr.map((item) => {
-        let lane = laneEnds.findIndex((x) => x <= item.start);
-        if (lane < 0) {
-          lane = laneEnds.length;
-          laneEnds.push(item.end);
-        } else {
-          laneEnds[lane] = item.end;
-        }
-        return { ...item, lane };
-      });
-      map.set(k, { items: laid, lanes: Math.max(1, laneEnds.length) });
-    }
-
-    return map;
-  }, [vehicleTracks, reservations, vehicles, rangeStart, rangeEnd, dayCount]);
-
-  const onDropReservation = async (trackVehicleId, dayIndexRaw, dropMetrics = null) => {
-    if (!dragItem) return;
-    const r = dragItem;
-    if (lockedReservationIds.has(r.id)) return;
-
-    const dayIndex = Number(dayIndexRaw);
-    if (!Number.isFinite(dayIndex) || dayIndex < 0) return;
-
-    try {
-      const oldPickup = new Date(r.pickupAt);
-      const oldReturn = new Date(r.returnAt);
-      const duration = oldReturn.getTime() - oldPickup.getTime();
-
-      let startDayIndex = dayIndex;
-      if (dropMetrics && Number.isFinite(dropMetrics.pointerOffsetWithinCellPx) && Number.isFinite(dragMeta?.grabOffsetPx)) {
-        const rawLeftPx = dayIndex * DAY_WIDTH + dropMetrics.pointerOffsetWithinCellPx - dragMeta.grabOffsetPx;
-        const preciseStart = Math.max(0, rawLeftPx) / DAY_WIDTH;
-        startDayIndex = Math.max(0, Math.floor(preciseStart));
-      }
-
-      const newStartDay = addDays(rangeStart, startDayIndex);
-      const newPickup = new Date(newStartDay);
-      newPickup.setHours(oldPickup.getHours(), oldPickup.getMinutes(), oldPickup.getSeconds(), oldPickup.getMilliseconds());
-      const newReturn = new Date(newPickup.getTime() + duration);
-
-      const targetVehicle = trackVehicleId === '__unassigned__'
-        ? 'Unassigned'
-        : (vehicleTracks.find((t) => t.id === trackVehicleId)?.internalNumber || 'Selected Vehicle');
-      const ok = window.confirm(
-        `Move reservation ${r.reservationNumber}?\n\n` +
-        `Pickup: ${newPickup.toLocaleString()}\n` +
-        `Return: ${newReturn.toLocaleString()}\n` +
-        `Vehicle: ${targetVehicle}`
-      );
-      if (!ok) {
-        setMsg('Move cancelled');
-        setDragItem(null);
-        setDragMeta(null);
-        setDraggingId('');
-        return;
-      }
-
-      const updatedReservation = await api(`/api/reservations/${r.id}`, {
-        method: 'PATCH',
-        body: JSON.stringify({
-          vehicleId: trackVehicleId === '__unassigned__' ? null : trackVehicleId,
-          pickupAt: newPickup.toISOString(),
-          returnAt: newReturn.toISOString()
-        })
+      const saved = await api('/api/planner/rules', {
+        method: 'PUT',
+        body: JSON.stringify(payload)
       }, token);
-      replaceReservationInState(updatedReservation);
-      setMsg(`Reservation ${r.reservationNumber} moved`);
-      setDragItem(null);
-      setDragMeta(null);
-      setDraggingId('');
-    } catch (e) {
-      setMsg(e.message);
-      setDragItem(null);
-      setDragMeta(null);
-      setDraggingId('');
-    }
-  };
-
-  const reassignReservations = async (updates, successMessage, overbookedIds = []) => {
-    if (!updates.length) {
-      setOverbookedReservationIds(overbookedIds);
-      setMsg(successMessage);
-      return;
-    }
-    for (const update of updates) {
-      const updatedReservation = await api(`/api/reservations/${update.id}`, {
-        method: 'PATCH',
-        body: JSON.stringify(update.patch)
-      }, token);
-      replaceReservationInState(updatedReservation);
-    }
-    setOverbookedReservationIds(overbookedIds);
-    setMsg(successMessage);
-  };
-
-  const clearVisibleAssignments = async () => {
-    const candidates = (reservations || []).filter((reservation) => (
-      reservation?.vehicleId &&
-      reservationOverlapsRange(reservation, rangeStart, rangeEnd) &&
-      isPlannerMovableReservation(reservation)
-    ));
-    if (!candidates.length) {
-      setMsg('No movable reservations are currently assigned in this planner range.');
-      return;
-    }
-    const ok = window.confirm(`Move ${candidates.length} reservation(s) back to Unassigned for this visible planner range?`);
-    if (!ok) return;
-    setPlannerRunning('clear');
-    try {
-      await reassignReservations(
-        candidates.map((reservation) => ({ id: reservation.id, patch: { vehicleId: null } })),
-        `${candidates.length} reservation(s) moved back to Unassigned.`,
-        []
-      );
+      setPlannerRules(saved || null);
+      resetPlannerInsights();
+      reloadPlannerSnapshot();
+      setMsg('Smart Planner rules updated.');
     } catch (error) {
-      setMsg(error.message || 'Unable to clear assignments');
+      setMsg(error.message || 'Unable to save Smart Planner rules');
     } finally {
-      setPlannerRunning('');
+      setPlannerRulesSaving(false);
     }
   };
 
-  const autoAssignUnassignedReservations = async () => {
-    const candidates = (reservations || [])
-      .filter((reservation) => (
-        !reservation?.vehicleId &&
-        reservationOverlapsRange(reservation, rangeStart, rangeEnd) &&
-        isPlannerMovableReservation(reservation)
-      ))
-      .sort((left, right) => {
-        const pickupDiff = new Date(left.pickupAt) - new Date(right.pickupAt);
-        if (pickupDiff !== 0) return pickupDiff;
-        const leftDuration = new Date(left.returnAt) - new Date(left.pickupAt);
-        const rightDuration = new Date(right.returnAt) - new Date(right.pickupAt);
-        return rightDuration - leftDuration;
-      });
+  const {
+    lockedReservationIds,
+    vehicleTracks,
+    trackRows,
+    itemsByTrack,
+    plannerOpsBoard,
+    plannerFocusOptions,
+    plannerFocusSummary,
+    plannerFocusItems
+  } = usePlannerBoard({
+    reservations,
+    vehicles,
+    filterVehicleTypeId,
+    filterLocationId,
+    rangeStart,
+    rangeEnd,
+    dayCount,
+    overbookedReservationIds,
+    plannerMaintenancePlan,
+    plannerWashPlan,
+    plannerFocus
+  });
 
-    if (!candidates.length) {
-      setMsg('No unassigned movable reservations were found in this planner range.');
-      setOverbookedReservationIds([]);
-      return;
-    }
+  const {
+    plannerRunning,
+    plannerScenario,
+    plannerMaintenancePlan,
+    plannerWashPlan,
+    plannerCopilotQuestion,
+    plannerCopilot,
+    plannerCopilotConfig,
+    setPlannerCopilotConfig,
+    setPlannerCopilotQuestion,
+    resetPlannerInsights,
+    onDropReservation,
+    clearVisibleAssignments,
+    autoAssignUnassignedReservations,
+    applyPlannerScenario,
+    simulateMaintenancePlan,
+    simulateWashPlan,
+    applyMaintenancePlan,
+    applyWashPlan,
+    askPlannerCopilot
+  } = usePlannerActions({
+    token,
+    reservations,
+    rangeStart,
+    rangeEnd,
+    filterLocationId,
+    filterVehicleTypeId,
+    plannerRules,
+    vehicleTracks,
+    dragItem,
+    dragMeta,
+    lockedReservationIds,
+    replaceReservationInState,
+    reloadPlannerSnapshot,
+    setMsg,
+    setDragItem,
+    setDragMeta,
+    setDraggingId,
+    setOverbookedReservationIds,
+    setPlannerShortage
+  });
 
-    const vehiclePool = filteredVehicles;
-    const occupancy = buildTrackOccupancy({
-      vehicles: vehiclePool,
-      reservations,
-      ignoredReservationIds: new Set(candidates.map((reservation) => reservation.id))
-    });
+  useEffect(() => {
+    resetPlannerInsights();
+  }, [cursor, view, filterVehicleTypeId, filterLocationId, resetPlannerInsights]);
 
-    const updates = [];
-    const overbookedIds = [];
+  useEffect(() => {
+    setPlannerRulesForm(createPlannerRulesForm(plannerRules));
+  }, [plannerRules]);
 
-    candidates.forEach((reservation) => {
-      const requiredVehicleTypeId = reservationVehicleTypeId(reservation);
-      const reservationStart = new Date(reservation.pickupAt).getTime();
-      const reservationEnd = new Date(reservation.returnAt).getTime();
-      const compatibleVehicles = vehiclePool
-        .filter((vehicle) => (!requiredVehicleTypeId || vehicle.vehicleTypeId === requiredVehicleTypeId))
-        .map((vehicle) => {
-          const intervals = occupancy.get(vehicle.id) || [];
-          const hasConflict = intervals.some((interval) => intervalsOverlap(interval.start, interval.end, reservationStart, reservationEnd));
-          if (hasConflict) return null;
-          return {
-            vehicle,
-            score: scoreVehicleFit(vehicle, reservation, intervals)
-          };
-        })
-        .filter(Boolean)
-        .sort((left, right) => left.score - right.score);
-
-      const bestFit = compatibleVehicles[0];
-      if (!bestFit) {
-        overbookedIds.push(reservation.id);
-        return;
-      }
-
-      updates.push({
-        id: reservation.id,
-        patch: { vehicleId: bestFit.vehicle.id }
-      });
-      const intervals = occupancy.get(bestFit.vehicle.id) || [];
-      intervals.push({
-        type: 'reservation',
-        reservationId: reservation.id,
-        start: reservationStart,
-        end: reservationEnd
-      });
-      intervals.sort((a, b) => a.start - b.start);
-      occupancy.set(bestFit.vehicle.id, intervals);
-    });
-
-    setPlannerRunning('assign');
-    try {
-      await reassignReservations(
-        updates,
-        overbookedIds.length
-          ? `${updates.length} reservation(s) assigned. ${overbookedIds.length} remain overbooked in this planner range.`
-          : `${updates.length} reservation(s) assigned automatically.`,
-        overbookedIds
-      );
-    } catch (error) {
-      setMsg(error.message || 'Unable to auto-assign reservations');
-    } finally {
-      setPlannerRunning('');
-    }
-  };
+  useEffect(() => {
+    setPlannerCopilotConfig(plannerCopilotConfigBootstrap);
+  }, [plannerCopilotConfigBootstrap, setPlannerCopilotConfig]);
 
   const handleTouchDrop = (ev) => {
     if (!dragItem) return;
@@ -669,249 +257,94 @@ function PlannerInner({ token, me, logout }) {
     });
   };
 
+  const handleDragReservationStart = (reservation, event) => {
+    const rect = event.currentTarget.getBoundingClientRect();
+    setDragItem(reservation);
+    setDragMeta({ grabOffsetPx: Math.max(0, event.clientX - rect.left) });
+    setDraggingId(reservation.id);
+  };
+
+  const handleDragReservationEnd = () => {
+    setDragItem(null);
+    setDragMeta(null);
+    setDraggingId('');
+  };
+
+  const handleTouchReservationStart = (reservation, event) => {
+    const touch = event.touches?.[0];
+    const rect = event.currentTarget.getBoundingClientRect();
+    setDragItem(reservation);
+    setDragMeta({ grabOffsetPx: touch ? Math.max(0, touch.clientX - rect.left) : 0 });
+    setDraggingId(reservation.id);
+  };
+
   const goPrev = () => setCursor((d) => addDays(d, -dayCount));
   const goNext = () => setCursor((d) => addDays(d, dayCount));
   const goToday = () => setCursor(startOfDay(new Date()));
 
-  const plannerOpsBoard = useMemo(() => {
-    const sameDay = (value) => {
-      const date = new Date(value);
-      const today = startOfDay(new Date());
-      const check = startOfDay(date);
-      return check.getTime() === today.getTime();
-    };
-
-    const upcoming = (reservations || [])
-      .filter((r) => ['CONFIRMED', 'NEW'].includes(String(r?.status || '').toUpperCase()))
-      .sort((a, b) => new Date(a.pickupAt) - new Date(b.pickupAt));
-    const returns = (reservations || [])
-      .filter((r) => String(r?.status || '').toUpperCase() === 'CHECKED_OUT')
-      .sort((a, b) => new Date(a.returnAt) - new Date(b.returnAt));
-    const unassigned = (reservations || []).filter((r) => !r?.vehicleId);
-    const movable = upcoming.find((r) => !lockedReservationIds.has(r.id)) || unassigned[0] || returns[0] || null;
-
-    const nextItems = [
-      upcoming[0]
-        ? {
-            id: `pickup-${upcoming[0].id}`,
-            focus: 'PICKUPS',
-            title: 'Next Pickup',
-            detail: `${upcoming[0].reservationNumber} - ${upcoming[0].customer?.firstName || ''} ${upcoming[0].customer?.lastName || ''}`.trim(),
-            note: `Pickup ${new Date(upcoming[0].pickupAt).toLocaleString()}`,
-            href: `/reservations/${upcoming[0].id}/checkout`,
-            actionLabel: 'Open Check-out'
-          }
-        : null,
-      returns[0]
-        ? {
-            id: `return-${returns[0].id}`,
-            focus: 'RETURNS',
-            title: 'Next Return',
-            detail: `${returns[0].reservationNumber} - ${returns[0].customer?.firstName || ''} ${returns[0].customer?.lastName || ''}`.trim(),
-            note: `Return ${new Date(returns[0].returnAt).toLocaleString()}`,
-            href: `/reservations/${returns[0].id}/checkin`,
-            actionLabel: 'Open Check-in'
-          }
-        : null,
-      unassigned[0]
-        ? {
-            id: `unassigned-${unassigned[0].id}`,
-            focus: 'UNASSIGNED',
-            title: 'Unassigned Unit',
-            detail: `${unassigned[0].reservationNumber} - ${unassigned[0].customer?.firstName || ''} ${unassigned[0].customer?.lastName || ''}`.trim(),
-            note: 'This booking still needs a vehicle assignment in the planner.',
-            href: `/reservations/${unassigned[0].id}`,
-            actionLabel: 'Open Workflow'
-          }
-        : null,
-      movable
-        ? {
-            id: `move-${movable.id}`,
-            focus: 'MOVABLE',
-            title: 'Next Movable Booking',
-            detail: `${movable.reservationNumber} - ${movable.customer?.firstName || ''} ${movable.customer?.lastName || ''}`.trim(),
-            note: movable.vehicleId ? 'Booking can be dragged on the planner if the lane needs to rebalance inventory.' : 'Best candidate to place onto a vehicle track.',
-            href: `/reservations/${movable.id}`,
-            actionLabel: 'Review Booking'
-          }
-        : null
-    ].filter(Boolean);
-
-    return {
-      pickupsToday: (reservations || []).filter((r) => sameDay(r.pickupAt)).length,
-      returnsToday: (reservations || []).filter((r) => sameDay(r.returnAt)).length,
-      checkedOut: (reservations || []).filter((r) => String(r?.status || '').toUpperCase() === 'CHECKED_OUT').length,
-      migrationHolds: (vehicles || []).filter((vehicle) => isMigrationHold(activeAvailabilityBlock(vehicle))).length,
-      serviceHolds: (vehicles || []).filter((vehicle) => isServiceHold(activeAvailabilityBlock(vehicle))).length,
-      unassigned: unassigned.length,
-      overbooked: overbookedReservationIds.length,
-      nextItems
-    };
-  }, [reservations, lockedReservationIds, vehicles, overbookedReservationIds]);
-
-  const plannerFocusOptions = useMemo(() => ([
-    { id: 'ALL', label: 'All Queues', count: plannerOpsBoard.nextItems.length },
-    { id: 'PICKUPS', label: 'Pickups', count: plannerOpsBoard.nextItems.filter((item) => item.focus === 'PICKUPS').length },
-    { id: 'RETURNS', label: 'Returns', count: plannerOpsBoard.nextItems.filter((item) => item.focus === 'RETURNS').length },
-    { id: 'UNASSIGNED', label: 'Unassigned', count: plannerOpsBoard.nextItems.filter((item) => item.focus === 'UNASSIGNED').length },
-    { id: 'MOVABLE', label: 'Movable', count: plannerOpsBoard.nextItems.filter((item) => item.focus === 'MOVABLE').length }
-  ]), [plannerOpsBoard]);
-
-  const plannerFocusSummary = useMemo(() => {
-    switch (plannerFocus) {
-      case 'PICKUPS':
-        return 'Focus the lane on departures that still need keys, documents, or unit readiness before release.';
-      case 'RETURNS':
-        return 'Keep only return work visible so the shift can receive vehicles faster from phone or tablet.';
-      case 'UNASSIGNED':
-        return 'Show only bookings still waiting on a vehicle assignment before they hit the counter.';
-      case 'MOVABLE':
-        return 'Highlight the best booking to drag next when rebalancing inventory across the timeline.';
-      default:
-        return 'Quick counters and next bookings to touch before dragging units around the planner grid.';
-    }
-  }, [plannerFocus]);
-
-  const plannerFocusItems = useMemo(() => {
-    if (plannerFocus === 'ALL') return plannerOpsBoard.nextItems;
-    return plannerOpsBoard.nextItems.filter((item) => item.focus === plannerFocus);
-  }, [plannerFocus, plannerOpsBoard]);
-
   return (
     <AppShell me={me} logout={logout}>
-      <section className="glass card-lg section-card" style={{ marginBottom: 16 }}>
-        <div className="app-banner">
-          <div className="row-between" style={{ alignItems: 'start', marginBottom: 0 }}>
-            <div>
-              <span className="eyebrow">Planner Ops Board</span>
-              <h2 className="page-title" style={{ marginTop: 6 }}>
-                Keep the yard balanced before you drop into the timeline.
-              </h2>
-              <p className="ui-muted">{plannerFocusSummary}</p>
-            </div>
-            <span className="status-chip neutral">Planner Hub</span>
-          </div>
-          <div className="app-card-grid compact">
-            <div className="info-tile">
-              <span className="label">Pickups Today</span>
-              <strong>{plannerOpsBoard.pickupsToday}</strong>
-              <span className="ui-muted">Reservations scheduled to leave today.</span>
-            </div>
-            <div className="info-tile">
-              <span className="label">Returns Today</span>
-              <strong>{plannerOpsBoard.returnsToday}</strong>
-              <span className="ui-muted">Bookings expected back today.</span>
-            </div>
-            <div className="info-tile">
-              <span className="label">Checked Out</span>
-              <strong>{plannerOpsBoard.checkedOut}</strong>
-              <span className="ui-muted">Bookings currently out and locked by agreement.</span>
-            </div>
-            <div className="info-tile">
-              <span className="label">Migration Holds</span>
-              <strong>{plannerOpsBoard.migrationHolds}</strong>
-              <span className="ui-muted">Vehicles blocked until legacy contracts are expected back.</span>
-            </div>
-            <div className="info-tile">
-              <span className="label">Service Holds</span>
-              <strong>{plannerOpsBoard.serviceHolds}</strong>
-              <span className="ui-muted">Maintenance and out-of-service windows on the board.</span>
-            </div>
-            <div className="info-tile">
-              <span className="label">Unassigned</span>
-              <strong>{plannerOpsBoard.unassigned}</strong>
-              <span className="ui-muted">Reservations still waiting for a vehicle track.</span>
-            </div>
-            <div className="info-tile">
-              <span className="label">Overbooked</span>
-              <strong>{plannerOpsBoard.overbooked}</strong>
-              <span className="ui-muted">Unassigned bookings that still do not fit after auto-accommodate.</span>
-            </div>
-          </div>
-          {plannerFocusOptions.length ? (
-            <div className="app-banner-list">
-              {plannerFocusOptions.map((option) => (
-                <button
-                  key={option.id}
-                  type="button"
-                  className={plannerFocus === option.id ? '' : 'button-subtle'}
-                  onClick={() => setPlannerFocus(option.id)}
-                  style={{ minHeight: 36, paddingInline: 14 }}
-                >
-                  {option.label} | {option.count}
-                </button>
-              ))}
-            </div>
-          ) : null}
-          {plannerFocusItems.length ? (
-            <div className="app-card-grid compact">
-              {plannerFocusItems.map((item) => (
-                <section key={item.id} className="glass card section-card">
-                  <div className="section-title" style={{ fontSize: 15 }}>{item.title}</div>
-                  <div className="ui-muted">{item.detail}</div>
-                  <div className="surface-note">{item.note}</div>
-                  <div className="inline-actions">
-                    <Link href={item.href}><button type="button">{item.actionLabel}</button></Link>
-                  </div>
-                </section>
-              ))}
-            </div>
-          ) : plannerOpsBoard.nextItems.length ? (
-            <div className="surface-note">No bookings match this planner focus right now. Switch filters to review another lane.</div>
-          ) : null}
-        </div>
-      </section>
+      <PlannerOpsBoard
+        plannerFocusSummary={plannerFocusSummary}
+        plannerOpsBoard={plannerOpsBoard}
+        plannerFocusOptions={plannerFocusOptions}
+        plannerFocus={plannerFocus}
+        setPlannerFocus={setPlannerFocus}
+        plannerFocusItems={plannerFocusItems}
+        vehicles={vehicles}
+        plannerShortage={plannerShortage}
+        plannerRecommendationSummary={plannerRecommendationSummary}
+      />
       <section className="glass card-lg planner-wrap">
-        <div className="row-between" style={{ alignItems: 'flex-end', flexWrap: 'wrap' }}>
-          <div style={{ display: 'flex', gap: 10, alignItems: 'flex-end', flexWrap: 'wrap' }}>
-            <h2>Daily Planner</h2>
-            <div className="stack" style={{ minWidth: 180 }}>
-              <label className="label">Vehicle Type</label>
-              <select value={filterVehicleTypeId} onChange={(e) => setFilterVehicleTypeId(e.target.value)}>
-                <option value="">All</option>
-                {vehicleTypes.map((vt) => <option key={vt.id} value={vt.id}>{vt.name}</option>)}
-              </select>
-            </div>
-            <div className="stack" style={{ minWidth: 180 }}>
-              <label className="label">Location</label>
-              <select value={filterLocationId} onChange={(e) => setFilterLocationId(e.target.value)}>
-                <option value="">All</option>
-                {locations.map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}
-              </select>
-            </div>
-            <div className="stack" style={{ minWidth: 130 }}>
-              <label className="label">View</label>
-              <select value={view} onChange={(e) => setView(e.target.value)}>
-                <option value="DAY">Day</option>
-                <option value="WEEK">Week</option>
-                <option value="MONTH">Month</option>
-              </select>
-            </div>
-          </div>
-          <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-            <button type="button" className="button-subtle" onClick={clearVisibleAssignments} disabled={plannerRunning === 'clear' || plannerRunning === 'assign'}>
-              {plannerRunning === 'clear' ? 'Moving...' : 'Move To Unassigned'}
-            </button>
-            <button type="button" onClick={autoAssignUnassignedReservations} disabled={plannerRunning === 'assign' || plannerRunning === 'clear'}>
-              {plannerRunning === 'assign' ? 'Auto-Placing...' : 'Auto-Accommodate'}
-            </button>
-            <button onClick={goToday}>Today</button>
-            <button onClick={goPrev}>Previous</button>
-            <div className="label" style={{ minWidth: 180, textAlign: 'center' }}>{fmtDay(rangeStart)} - {fmtDay(addDays(rangeEnd, -1))}</div>
-            <button onClick={goNext}>Next</button>
-          </div>
-        </div>
-
-        {msg ? <p className="label">{msg}</p> : null}
-        <div className="app-banner-list" style={{ marginBottom: 12 }}>
-          <span className="app-banner-pill">Green = Confirmed</span>
-          <span className="app-banner-pill">Blue = New</span>
-          <span className="app-banner-pill">Purple = Checked Out</span>
-          <span className="app-banner-pill">Gray = Migration Hold</span>
-          <span className="app-banner-pill">Orange = Maintenance</span>
-          <span className="app-banner-pill">Red = Out Of Service</span>
-          <span className="app-banner-pill" style={{ background: '#fee2e2', color: '#991b1b', borderColor: '#fecaca' }}>Bright Red = Overbooked</span>
-        </div>
+        <PlannerToolbar
+          vehicleTypes={vehicleTypes}
+          filterVehicleTypeId={filterVehicleTypeId}
+          setFilterVehicleTypeId={setFilterVehicleTypeId}
+          locations={locations}
+          filterLocationId={filterLocationId}
+          setFilterLocationId={setFilterLocationId}
+          view={view}
+          setView={setView}
+          clearVisibleAssignments={clearVisibleAssignments}
+          autoAssignUnassignedReservations={autoAssignUnassignedReservations}
+          simulateMaintenancePlan={simulateMaintenancePlan}
+          simulateWashPlan={simulateWashPlan}
+          goToday={goToday}
+          goPrev={goPrev}
+          goNext={goNext}
+          rangeStart={rangeStart}
+          rangeEnd={rangeEnd}
+          fmtDay={fmtDay}
+          plannerRunning={plannerRunning}
+          msg={msg}
+          plannerRules={plannerRules}
+        />
+        <PlannerCopilotPanel
+          plannerCopilotConfig={plannerCopilotConfig}
+          plannerCopilot={plannerCopilot}
+          plannerCopilotQuestion={plannerCopilotQuestion}
+          setPlannerCopilotQuestion={setPlannerCopilotQuestion}
+          askPlannerCopilot={askPlannerCopilot}
+          plannerRunning={plannerRunning}
+        />
+        <PlannerRulesPanel
+          canManagePlannerSetup={canManagePlannerSetup}
+          savePlannerRules={savePlannerRules}
+          plannerRulesSaving={plannerRulesSaving}
+          plannerRunning={plannerRunning}
+          plannerRulesForm={plannerRulesForm}
+          handlePlannerRuleValueChange={handlePlannerRuleValueChange}
+          handlePlannerRuleToggle={handlePlannerRuleToggle}
+        />
+        <PlannerRecommendationPanels
+          plannerMaintenancePlan={plannerMaintenancePlan}
+          plannerWashPlan={plannerWashPlan}
+          plannerScenario={plannerScenario}
+          plannerRunning={plannerRunning}
+          applyMaintenancePlan={applyMaintenancePlan}
+          applyWashPlan={applyWashPlan}
+          applyPlannerScenario={applyPlannerScenario}
+        />
 
         <div className="planner-scroll">
           <div className="planner-head" style={{ gridTemplateColumns: `260px repeat(${dayCount}, ${DAY_WIDTH}px)` }}>
@@ -960,217 +393,51 @@ function PlannerInner({ token, me, logout }) {
             const lanePitch = laneCount <= 2 ? 30 : Math.max(14, Math.floor((maxRowHeight - 12) / laneCount));
             const blockHeight = Math.max(10, lanePitch - 6);
             const rowHeight = Math.max(64, Math.min(maxRowHeight, laneCount * lanePitch + 12));
-            return (
-              <div key={v.id} className="planner-row" style={{ gridTemplateColumns: `260px repeat(${dayCount}, ${DAY_WIDTH}px)` }}>
-                <div className="planner-cell planner-sticky planner-track-meta" style={{ minHeight: rowHeight }}>
-                  {activeAvailabilityBlock(v) ? (
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, marginBottom: 6 }}>
-                      <span className="status-chip warning">Blocked</span>
-                      <span className="label" style={{ textTransform: 'none', letterSpacing: 0 }}>
-                        Free {new Date(activeAvailabilityBlock(v).availableFrom).toLocaleString()}
-                      </span>
-                    </div>
-                  ) : null}
-                  <div style={{ fontWeight: 700 }}>{v.make} {v.model} {v.year || ''}</div>
-                  <div className="label">#{v.internalNumber} | {v.vehicleType?.code || '-'}</div>
-                  <div className="label" style={{ textTransform: 'none', letterSpacing: 0 }}>
-                    Plate {v.plate || 'Pending'}
-                  </div>
-                  {v.id === '__unassigned__' && plannerOpsBoard.overbooked ? (
-                    <div className="surface-note" style={{ marginTop: 6, background: '#fef2f2', borderColor: '#fecaca', color: '#991b1b' }}>
-                      {plannerOpsBoard.overbooked} booking(s) still flagged as overbooking in this visible range.
-                    </div>
-                  ) : null}
-                  {v.id !== '__unassigned__' ? (
-                    <>
-                      {activeAvailabilityBlock(v) ? (
-                        <div className="surface-note" style={{ marginTop: 6 }}>
-                          {blockTypeLabel(activeAvailabilityBlock(v).blockType)} | {activeAvailabilityBlock(v).reason || 'Legacy contract migration hold'}
-                        </div>
-                      ) : null}
-                      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 8 }}>
-                        <button type="button" className="button-subtle" onClick={() => openBlockVehicle(v)}>
-                          {activeAvailabilityBlock(v) ? 'Adjust Hold' : 'Add Hold'}
-                        </button>
-                        {activeAvailabilityBlock(v) ? (
-                          <button type="button" className="button-subtle" onClick={() => releaseVehicleBlock(activeAvailabilityBlock(v).id)}>
-                            Release
-                          </button>
-                        ) : null}
-                      </div>
-                    </>
-                  ) : null}
-                </div>
-
-                {Array.from({ length: dayCount }).map((_, i) => (
-                  <div
-                    key={i}
-                    className="planner-cell planner-drop"
-                    style={{ minHeight: rowHeight }}
-                    data-drop-cell="1"
-                    data-track-id={v.id}
-                    data-day-index={i}
-                    onDragOver={(e) => e.preventDefault()}
-                    onDrop={(e) => {
-                      const rect = e.currentTarget.getBoundingClientRect();
-                      onDropReservation(v.id, i, {
-                        pointerOffsetWithinCellPx: e.clientX - rect.left
-                      });
-                    }}
-                  />
-                ))}
-
-                <div className="planner-overlay" style={{ left: 260, width: dayCount * DAY_WIDTH, height: rowHeight }}>
-                  {rows.map((rowItem) => {
-                    if (rowItem.kind === 'block') {
-                      const block = rowItem.block;
-                      return (
-                        <div
-                          key={`block-${block.id}`}
-                          className="planner-block"
-                          onClick={() => {
-                            setSelectedReservation(null);
-                            setSelectedBlock({ block, vehicle: rowItem.vehicle });
-                          }}
-                          style={{
-                            left: rowItem.start * DAY_WIDTH + 2,
-                            top: rowItem.lane * lanePitch + 4,
-                            height: blockHeight,
-                            width: Math.max(12, rowItem.span * DAY_WIDTH - 4),
-                            background: blockColor(block),
-                            opacity: 0.92,
-                            cursor: 'pointer'
-                          }}
-                          title={`Blocked until ${new Date(block.availableFrom).toLocaleString()}`}
-                        >
-                          <span className="planner-block-text">{blockTypeLabel(block.blockType)} | {block.reason || 'Legacy contract'} | Free {new Date(block.availableFrom).toLocaleDateString()}</span>
-                        </div>
-                      );
-                    }
-
-                    const r = rowItem.reservation;
-                    const locked = lockedReservationIds.has(r.id);
-                    const overbooked = overbookedReservationIds.includes(r.id);
-                    return (
-                      <div
-                        key={r.id}
-                        className="planner-block"
-                        draggable={!locked}
-                        onDragStart={(e) => {
-                          const rect = e.currentTarget.getBoundingClientRect();
-                          setDragItem(r);
-                          setDragMeta({ grabOffsetPx: Math.max(0, e.clientX - rect.left) });
-                          setDraggingId(r.id);
-                        }}
-                        onDragEnd={() => { setDragItem(null); setDragMeta(null); setDraggingId(''); }}
-                        onTouchStart={(e) => {
-                          if (locked) return;
-                          const touch = e.touches?.[0];
-                          const rect = e.currentTarget.getBoundingClientRect();
-                          setDragItem(r);
-                          setDragMeta({ grabOffsetPx: touch ? Math.max(0, touch.clientX - rect.left) : 0 });
-                          setDraggingId(r.id);
-                        }}
-                        onTouchEnd={handleTouchDrop}
-                        onClick={() => {
-                          setSelectedBlock(null);
-                          setSelectedReservation({ reservation: r, locked, overbooked });
-                        }}
-                        style={{ left: rowItem.start * DAY_WIDTH + 2, top: rowItem.lane * lanePitch + 4, height: blockHeight, width: Math.max(12, rowItem.span * DAY_WIDTH - 4), background: statusColor(r, locked, overbooked), opacity: locked ? 0.7 : (draggingId === r.id ? 0.85 : 1) }}
-                        title={`${r.reservationNumber} ${locked ? '(locked by agreement)' : ''}`}
-                      >
-                        <span className="planner-block-text">{overbooked ? 'Overbooked | ' : ''}{locked ? 'Locked | ' : ''}{r.reservationNumber} | {r.customer?.firstName || ''} {r.customer?.lastName || ''}</span>
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-            );
-          })}
-        </div>
+          return (
+            <PlannerTrackRow
+              key={v.id}
+              vehicle={v}
+              trackLayout={trackLayout}
+              dayCount={dayCount}
+              dayWidth={DAY_WIDTH}
+              plannerOverbookedCount={plannerOpsBoard.overbooked}
+              lockedReservationIds={lockedReservationIds}
+              overbookedReservationIds={overbookedReservationIds}
+              draggingId={draggingId}
+              onDropReservation={onDropReservation}
+              onDragReservationStart={handleDragReservationStart}
+              onDragReservationEnd={handleDragReservationEnd}
+              onTouchReservationStart={handleTouchReservationStart}
+              onTouchDrop={handleTouchDrop}
+              onSelectReservation={selectReservation}
+              onSelectBlock={selectBlock}
+              onOpenBlockVehicle={openBlockVehicle}
+              onReleaseVehicleBlock={releaseVehicleBlock}
+            />
+          );
+        })}
+      </div>
       </section>
 
-      {selectedReservation ? (
-        <aside className="planner-sidepanel glass card">
-          <div className="row-between" style={{ marginBottom: 6 }}>
-            <h3>Reservation</h3>
-            <button onClick={() => setSelectedReservation(null)}>Close</button>
-          </div>
-          <div style={{ fontWeight: 700 }}>{selectedReservation.reservation.reservationNumber}</div>
-          <div className="label">{selectedReservation.reservation.customer?.firstName || ''} {selectedReservation.reservation.customer?.lastName || ''}</div>
-          <div className="label">Vehicle type: {reservationVehicleTypeLabel(selectedReservation.reservation)}</div>
-          <div className="label">
-            Vehicle: {selectedReservation.reservation.vehicle?.internalNumber || 'Unassigned'}
-          </div>
-          <div className="label">From: {new Date(selectedReservation.reservation.pickupAt).toLocaleString()}</div>
-          <div className="label">To: {new Date(selectedReservation.reservation.returnAt).toLocaleString()}</div>
-          <div className="label" style={{ marginBottom: 8 }}>{selectedReservation.locked ? 'Locked by agreement' : 'Movable reservation'}</div>
-          {selectedReservation.overbooked ? (
-            <div className="surface-note" style={{ marginBottom: 8, background: '#fef2f2', borderColor: '#fecaca', color: '#991b1b' }}>
-              This reservation could not be auto-accommodated and is currently counted as overbooking in this planner range.
-            </div>
-          ) : null}
-          <div style={{ display: 'grid', gap: 8 }}>
-            <Link href={`/reservations/${selectedReservation.reservation.id}`}><button>Open Reservation</button></Link>
-          </div>
-        </aside>
-      ) : null}
-
-      {selectedBlock ? (
-        <aside className="planner-sidepanel glass card">
-          <div className="row-between" style={{ marginBottom: 6 }}>
-            <h3>Vehicle Block</h3>
-            <button onClick={() => setSelectedBlock(null)}>Close</button>
-          </div>
-          <div style={{ fontWeight: 700 }}>{selectedBlock.vehicle?.internalNumber || 'Vehicle'}</div>
-          <div className="label">{selectedBlock.vehicle?.year || ''} {selectedBlock.vehicle?.make || ''} {selectedBlock.vehicle?.model || ''}</div>
-          <div className="label">Type: {blockTypeLabel(selectedBlock.block.blockType)}</div>
-          <div className="label">Blocked from: {new Date(selectedBlock.block.blockedFrom).toLocaleString()}</div>
-          <div className="label">Available again: {new Date(selectedBlock.block.availableFrom).toLocaleString()}</div>
-          <div className="label">Reason: {selectedBlock.block.reason || 'Legacy contract migration hold'}</div>
-          {selectedBlock.block.notes ? <div className="label" style={{ marginBottom: 8 }}>Notes: {selectedBlock.block.notes}</div> : null}
-          <div className="label" style={{ marginBottom: 8 }}>Source: {selectedBlock.block.sourceType || 'MANUAL'}</div>
-          <div style={{ display: 'grid', gap: 8 }}>
-            <button type="button" onClick={() => releaseVehicleBlock(selectedBlock.block.id)}>Release Block</button>
-            <button type="button" className="button-subtle" onClick={() => openBlockVehicle(selectedBlock.vehicle)}>Edit Block</button>
-          </div>
-        </aside>
-      ) : null}
-
-      {showBlockVehicle && selectedVehicleForBlock ? (
-        <div className="modal-backdrop" onClick={() => { setShowBlockVehicle(false); setSelectedVehicleForBlock(null); }}>
-          <div className="rent-modal glass" onClick={(e) => e.stopPropagation()}>
-            <h3>Temporary Hold | {selectedVehicleForBlock.internalNumber}</h3>
-            <form className="stack" onSubmit={saveVehicleBlock}>
-              <div className="grid2">
-                <select value={blockForm.blockType} onChange={(e) => setBlockForm({ ...blockForm, blockType: e.target.value })}>
-                  <option value="MIGRATION_HOLD">Migration Hold</option>
-                  <option value="MAINTENANCE_HOLD">Maintenance Hold</option>
-                  <option value="OUT_OF_SERVICE_HOLD">Out Of Service Hold</option>
-                </select>
-                <div />
-              </div>
-              <div className="grid2">
-                <div className="stack">
-                  <label className="label">Blocked From</label>
-                  <input type="datetime-local" value={blockForm.blockedFrom} onChange={(e) => setBlockForm({ ...blockForm, blockedFrom: e.target.value })} />
-                </div>
-                <div className="stack">
-                  <label className="label">Available Again*</label>
-                  <input required type="datetime-local" value={blockForm.availableFrom} onChange={(e) => setBlockForm({ ...blockForm, availableFrom: e.target.value })} />
-                </div>
-              </div>
-              <input placeholder="Reason (migration hold, legacy contract, etc.)" value={blockForm.reason} onChange={(e) => setBlockForm({ ...blockForm, reason: e.target.value })} />
-              <textarea rows={4} placeholder="Notes" value={blockForm.notes} onChange={(e) => setBlockForm({ ...blockForm, notes: e.target.value })} />
-              <div className="surface-note">Migration holds count as already committed fleet. Maintenance and out-of-service holds remove units from rentable service until the selected release date.</div>
-              <div className="row-between">
-                <button type="button" onClick={() => { setShowBlockVehicle(false); setSelectedVehicleForBlock(null); }}>Cancel</button>
-                <button type="submit">Save Hold</button>
-              </div>
-            </form>
-          </div>
-        </div>
-      ) : null}
+      <PlannerReservationSidepanel
+        selectedReservation={selectedReservation}
+        vehicles={vehicles}
+        onClose={closeSelectedReservation}
+      />
+      <PlannerBlockSidepanel
+        selectedBlock={selectedBlock}
+        onClose={closeSelectedBlock}
+        onReleaseVehicleBlock={releaseVehicleBlock}
+        onOpenBlockVehicle={openBlockVehicle}
+      />
+      <PlannerHoldModal
+        showBlockVehicle={showBlockVehicle}
+        selectedVehicleForBlock={selectedVehicleForBlock}
+        blockForm={blockForm}
+        setBlockForm={setBlockForm}
+        saveVehicleBlock={saveVehicleBlock}
+        onClose={closeBlockVehicle}
+      />
     </AppShell>
   );
 }

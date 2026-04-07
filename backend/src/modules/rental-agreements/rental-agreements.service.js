@@ -6,6 +6,7 @@ import { prisma } from '../../lib/prisma.js';
 import { hostReviewsService } from '../host-reviews/host-reviews.service.js';
 import { reservationPricingService } from '../reservations/reservation-pricing.service.js';
 import { settingsService } from '../settings/settings.service.js';
+import { buildInspectionIntelligence } from '../vehicles/vehicle-intelligence.service.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -1273,6 +1274,10 @@ function inspectionReportFromAgreement(agreement) {
   return {
     checkout: normalizeInspectionRow(checkout),
     checkin: normalizeInspectionRow(checkin),
+    intelligence: buildInspectionIntelligence({
+      checkout: normalizeInspectionRow(checkout),
+      checkin: normalizeInspectionRow(checkin)
+    }),
     swaps: swaps.map(normalizeVehicleSwapRow).filter(Boolean)
   };
 }
@@ -3167,6 +3172,7 @@ export const rentalAgreementsService = {
       },
       checkoutInspection: report.checkout,
       checkinInspection: report.checkin,
+      intelligence: report.intelligence,
       vehicleSwaps: report.swaps
     };
   },
@@ -3563,6 +3569,5 @@ export const rentalAgreementsService = {
     return { ok: true };
   }
 };
-
 
 

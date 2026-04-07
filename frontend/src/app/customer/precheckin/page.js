@@ -292,7 +292,17 @@ export default function PrecheckinPage() {
       eyebrow="Ride Fleet Self-Service"
       title="Complete Your Pre-Check-in"
       subtitle="Share your contact details, driver information, and supporting documents before pickup so the counter team can get you on the road faster."
-      aside={<PortalTimelineCard portal={model?.portal} reservation={reservation} currentStepKey="customerInfo" currentStepLabel="Pre-check-in" />}
+      aside={(
+        <PortalTimelineCard
+          portal={model?.portal}
+          reservation={reservation}
+          currentStepKey="customerInfo"
+          currentStepLabel="Pre-check-in"
+          portalKind="customer-info"
+          token={token}
+          onPortalUpdate={(nextPortal) => setModel((prev) => ({ ...(prev || {}), portal: nextPortal }))}
+        />
+      )}
     >
       {notices}
 

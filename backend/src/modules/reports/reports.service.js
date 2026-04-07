@@ -1,4 +1,6 @@
 import { prisma } from '../../lib/prisma.js';
+import { sendEmail } from '../../lib/mailer.js';
+import { settingsService } from '../settings/settings.service.js';
 import { isMigrationHoldType, isServiceHoldType } from '../vehicles/vehicle-blocks.js';
 
 function toNumber(value, fallback = 0) {
@@ -66,6 +68,122 @@ function normalizeTenantId(query = {}) {
 function normalizeEmployeeUserId(query = {}) {
   const raw = String(query?.employeeUserId || '').trim();
   return raw || null;
+}
+
+function parseLocationConfig(raw) {
+  try {
+    if (!raw) return {};
+    if (typeof raw === 'string') return JSON.parse(raw);
+    if (typeof raw === 'object') return raw;
+  } catch {}
+  return {};
+}
+
+function money(value) {
+  return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(Number(value || 0));
+}
+
+function prettyDate(value) {
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return String(value || '');
+  return parsed.toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' });
+}
+
+function escapeHtml(value) {
+  return String(value ?? '')
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;')
+    .replaceAll("'", '&#39;');
+}
+
+function applyTemplate(value = '', vars = {}) {
+  return Object.entries(vars || {}).reduce(
+    (out, [key, next]) => out.replaceAll(`{{${key}}}`, String(next ?? '')),
+    String(value || '')
+  );
+}
+
+function parseRecipients(input) {
+  const values = Array.isArray(input) ? input : String(input || '').split(',');
+  return [...new Set(values.map((item) => String(item || '').trim()).filter(Boolean))];
+}
+
+function textSummary(rows = [], formatter) {
+  const list = (Array.isArray(rows) ? rows : []).map(formatter).filter(Boolean);
+  return list.length ? list.join('\n') : 'No items in this section.';
+}
+
+function htmlTableRows(rows = [], formatter, emptyColspan = 2) {
+  const list = (Array.isArray(rows) ? rows : []).map(formatter).filter(Boolean);
+  if (list.length) return list.join('');
+  return `<tr><td colspan="${emptyColspan}" style="padding:8px;border:1px solid #e5e7eb;color:#6b7280">No items in this section.</td></tr>`;
+}
+
+async function resolveEmailRecipients(query = {}, scope = {}) {
+  const direct = parseRecipients(query?.recipients);
+  if (direct.length) return direct;
+
+  const effectiveTenantId = scope?.tenantId || normalizeTenantId(query);
+  const locationId = normalizeLocationId(query);
+  if (!effectiveTenantId && !locationId) return [];
+  const locations = await prisma.location.findMany({
+    where: {
+      ...(effectiveTenantId ? { tenantId: effectiveTenantId } : {}),
+      ...(locationId ? { id: locationId } : {}),
+      isActive: true
+    },
+    select: { locationConfig: true }
+  });
+
+  const derived = locations.flatMap((row) => parseRecipients(parseLocationConfig(row.locationConfig)?.locationEmail));
+  return [...new Set(derived)];
+}
+
+function buildDailyOpsVars(report, companyName) {
+  const kpis = report?.kpis || {};
+  const fleetHoldBreakdown = report?.fleetHoldBreakdown || [];
+  const topPickupLocations = report?.topPickupLocations || [];
+  const reservationStatusBreakdown = report?.reservationStatusBreakdown || [];
+
+  return {
+    companyName: companyName || 'Ride Fleet',
+    reportStart: prettyDate(report?.range?.start),
+    reportEnd: prettyDate(report?.range?.end),
+    reportDays: Number(report?.range?.days || 0),
+    tenantName: report?.filters?.tenantName || 'All Tenants',
+    locationName: report?.filters?.locationName || 'All Locations',
+    reservationsCreated: Number(kpis.reservationsCreated || 0),
+    checkedOut: Number(kpis.checkedOut || 0),
+    checkedIn: Number(kpis.checkedIn || 0),
+    availableFleet: Number(kpis.availableFleet || 0),
+    migrationHeld: Number(kpis.migrationHeld || 0),
+    washHeld: Number(kpis.washHeld || 0),
+    maintenanceHeld: Number(kpis.vehiclesInMaintenance || 0),
+    outOfServiceHeld: Number(kpis.vehiclesOutOfService || 0),
+    utilizationPct: `${Number(kpis.utilizationPct || 0).toFixed(1)}%`,
+    collectedPayments: money(kpis.collectedPayments),
+    openBalance: money(kpis.openBalance),
+    fleetHoldSummary: textSummary(fleetHoldBreakdown, (row) => `${row.label}: ${row.count}${row.note ? ` - ${row.note}` : ''}`),
+    topPickupSummary: textSummary(topPickupLocations, (row) => `${row.name}: ${row.count}`),
+    statusSummary: textSummary(reservationStatusBreakdown, (row) => `${row.status}: ${row.count}`),
+    fleetHoldRowsHtml: htmlTableRows(
+      fleetHoldBreakdown,
+      (row) => `<tr><td style="padding:8px;border:1px solid #e5e7eb">${escapeHtml(row.label)}</td><td style="padding:8px;border:1px solid #e5e7eb">${escapeHtml(row.count)}</td><td style="padding:8px;border:1px solid #e5e7eb">${escapeHtml(row.note || '')}</td></tr>`,
+      3
+    ),
+    topPickupRowsHtml: htmlTableRows(
+      topPickupLocations,
+      (row) => `<tr><td style="padding:8px;border:1px solid #e5e7eb">${escapeHtml(row.name)}</td><td style="padding:8px;border:1px solid #e5e7eb">${escapeHtml(row.count)}</td></tr>`,
+      2
+    ),
+    statusRowsHtml: htmlTableRows(
+      reservationStatusBreakdown,
+      (row) => `<tr><td style="padding:8px;border:1px solid #e5e7eb">${escapeHtml(row.status)}</td><td style="padding:8px;border:1px solid #e5e7eb">${escapeHtml(row.count)}</td></tr>`,
+      2
+    )
+  };
 }
 
 export const reportsService = {
@@ -229,6 +347,7 @@ export const reportsService = {
     const migrationBlockIds = new Set((activeVehicleBlocks || []).filter((row) => isMigrationHoldType(row.blockType)).map((row) => row.vehicleId).filter(Boolean));
     const serviceBlockRows = (activeVehicleBlocks || []).filter((row) => isServiceHoldType(row.blockType));
     const serviceBlockIds = new Set(serviceBlockRows.map((row) => row.vehicleId).filter(Boolean));
+    const washBlockIds = new Set((activeVehicleBlocks || []).filter((row) => String(row.blockType || '').toUpperCase() === 'WASH_HOLD').map((row) => row.vehicleId).filter(Boolean));
     const maintenanceBlockIds = new Set(serviceBlockRows.filter((row) => String(row.blockType || '').toUpperCase() === 'MAINTENANCE_HOLD').map((row) => row.vehicleId).filter(Boolean));
     const outOfServiceBlockIds = new Set(serviceBlockRows.filter((row) => String(row.blockType || '').toUpperCase() === 'OUT_OF_SERVICE_HOLD').map((row) => row.vehicleId).filter(Boolean));
     const outOfServiceStatusIds = new Set(vehicles.filter((row) => String(row.status || '').toUpperCase() === 'OUT_OF_SERVICE').map((row) => row.id));
@@ -246,7 +365,7 @@ export const reportsService = {
     const availableFleet = vehicles.filter((row) => {
       const status = String(row.status || '').toUpperCase();
       if (['ON_RENT', 'IN_MAINTENANCE', 'OUT_OF_SERVICE'].includes(status)) return false;
-      if (migrationBlockIds.has(row.id) || serviceBlockIds.has(row.id)) return false;
+      if (migrationBlockIds.has(row.id) || serviceBlockIds.has(row.id) || washBlockIds.has(row.id)) return false;
       return true;
     }).length;
     const utilizationPct = fleetTotal > 0 ? Number(((onRent / fleetTotal) * 100).toFixed(1)) : 0;
@@ -304,10 +423,17 @@ export const reportsService = {
         onRent,
         availableFleet,
         migrationHeld: migrationBlockIds.size,
+        washHeld: washBlockIds.size,
         vehiclesInMaintenance,
         vehiclesOutOfService,
         utilizationPct
       },
+      fleetHoldBreakdown: [
+        { id: 'migration', label: 'Migration Held', count: migrationBlockIds.size, note: 'Legacy-contract units still committed outside the current native workflow.' },
+        { id: 'wash', label: 'Wash Held', count: washBlockIds.size, note: 'Temporary wash and turnaround buffers currently blocking units.' },
+        { id: 'maintenance', label: 'Maintenance Held', count: maintenanceBlockIds.size, note: 'Units blocked by maintenance holds plus active maintenance workflow.' },
+        { id: 'out_of_service', label: 'Out Of Service Held', count: outOfServiceBlockIds.size, note: 'Units blocked as out of service and unavailable for assignment.' }
+      ],
       reservationStatusBreakdown: Object.entries(reservationStatusCounts).map(([status, count]) => ({ status, count })),
       reservationsByDay: Array.from(reservationsByDayMap.entries()).map(([date, count]) => ({ date, count })),
       paymentsByDay: Array.from(paymentsByDayMap.entries()).map(([date, amount]) => ({ date, amount })),
@@ -330,6 +456,12 @@ export const reportsService = {
     lines.push(csvLine(['KPI', 'Value']));
     for (const [key, value] of Object.entries(report.kpis || {})) {
       lines.push(csvLine([key, value]));
+    }
+    lines.push('');
+
+    lines.push(csvLine(['Fleet Hold Breakdown', 'Count', 'Note']));
+    for (const row of report.fleetHoldBreakdown || []) {
+      lines.push(csvLine([row.label, row.count, row.note || '']));
     }
     lines.push('');
 
@@ -357,6 +489,41 @@ export const reportsService = {
     }
 
     return lines.join('\n');
+  },
+
+  async sendOverviewEmail(query = {}, scope = {}) {
+    const effectiveTenantId = scope?.tenantId || normalizeTenantId(query);
+    const recipients = await resolveEmailRecipients(query, scope);
+    if (!recipients.length) {
+      throw new Error('No report recipients were provided and no location email is configured for this scope');
+    }
+
+    const [report, templates, companyConfig] = await Promise.all([
+      this.overview(query, scope),
+      settingsService.getEmailTemplates({ tenantId: effectiveTenantId || null }),
+      settingsService.getRentalAgreementConfig({ tenantId: effectiveTenantId || null })
+    ]);
+
+    const vars = buildDailyOpsVars(report, companyConfig?.companyName || 'Ride Fleet');
+    const subject = applyTemplate(templates.dailyOpsReportSubject, vars);
+    const text = applyTemplate(templates.dailyOpsReportBody, vars);
+    const html = applyTemplate(
+      templates.dailyOpsReportHtml || String(templates.dailyOpsReportBody || '').replaceAll('\n', '<br/>'),
+      vars
+    );
+
+    await sendEmail({
+      to: recipients,
+      subject,
+      text,
+      html
+    });
+
+    return {
+      sent: true,
+      recipients,
+      subject
+    };
   },
 
   async servicesSold(query = {}, scope = {}) {

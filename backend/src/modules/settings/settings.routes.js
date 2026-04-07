@@ -190,6 +190,114 @@ settingsRouter.post('/payment-gateway/health-check', requireRole('ADMIN'), async
   }
 });
 
+settingsRouter.get('/planner-copilot', requireRole('ADMIN'), async (req, res, next) => {
+  try {
+    const cfg = await settingsService.getPlannerCopilotConfig(scopeFor(req));
+    res.json(cfg);
+  } catch (e) {
+    if (/tenantId is required/i.test(String(e?.message || ''))) {
+      return res.status(400).json({ error: 'tenantId is required for planner copilot settings' });
+    }
+    next(e);
+  }
+});
+
+settingsRouter.put('/planner-copilot', requireRole('ADMIN'), async (req, res, next) => {
+  try {
+    const cfg = await settingsService.updatePlannerCopilotConfig(req.body || {}, scopeFor(req));
+    res.json(cfg);
+  } catch (e) {
+    if (/tenantId is required/i.test(String(e?.message || ''))) {
+      return res.status(400).json({ error: 'tenantId is required for planner copilot settings' });
+    }
+    next(e);
+  }
+});
+
+settingsRouter.get('/planner-copilot/usage', requireRole('ADMIN'), async (req, res, next) => {
+  try {
+    const usage = await settingsService.getPlannerCopilotUsage(scopeFor(req));
+    res.json(usage);
+  } catch (e) {
+    if (/tenantId is required/i.test(String(e?.message || ''))) {
+      return res.status(400).json({ error: 'tenantId is required for planner copilot usage' });
+    }
+    next(e);
+  }
+});
+
+settingsRouter.get('/telematics', async (req, res, next) => {
+  try {
+    const cfg = await settingsService.getTelematicsConfig(scopeFor(req));
+    res.json(cfg);
+  } catch (e) {
+    if (/tenantId is required/i.test(String(e?.message || ''))) {
+      return res.status(400).json({ error: 'tenantId is required for telematics settings' });
+    }
+    next(e);
+  }
+});
+
+settingsRouter.put('/telematics', requireRole('ADMIN'), async (req, res, next) => {
+  try {
+    const cfg = await settingsService.updateTelematicsConfig(req.body || {}, scopeFor(req));
+    res.json(cfg);
+  } catch (e) {
+    if (/tenantId is required/i.test(String(e?.message || ''))) {
+      return res.status(400).json({ error: 'tenantId is required for telematics settings' });
+    }
+    next(e);
+  }
+});
+
+settingsRouter.get('/revenue-pricing', requireRole('ADMIN'), async (req, res, next) => {
+  try {
+    const cfg = await settingsService.getRevenuePricingConfig(scopeFor(req));
+    res.json(cfg);
+  } catch (e) {
+    if (/tenantId is required/i.test(String(e?.message || ''))) {
+      return res.status(400).json({ error: 'tenantId is required for revenue pricing settings' });
+    }
+    next(e);
+  }
+});
+
+settingsRouter.put('/revenue-pricing', requireRole('ADMIN'), async (req, res, next) => {
+  try {
+    const cfg = await settingsService.updateRevenuePricingConfig(req.body || {}, scopeFor(req));
+    res.json(cfg);
+  } catch (e) {
+    if (/tenantId is required/i.test(String(e?.message || ''))) {
+      return res.status(400).json({ error: 'tenantId is required for revenue pricing settings' });
+    }
+    next(e);
+  }
+});
+
+settingsRouter.get('/self-service', requireRole('ADMIN'), async (req, res, next) => {
+  try {
+    const cfg = await settingsService.getSelfServiceConfig(scopeFor(req));
+    res.json(cfg);
+  } catch (e) {
+    if (/tenantId is required/i.test(String(e?.message || ''))) {
+      return res.status(400).json({ error: 'tenantId is required for self-service settings' });
+    }
+    next(e);
+  }
+});
+
+settingsRouter.put('/self-service', requireRole('ADMIN'), async (req, res, next) => {
+  try {
+    const cfg = await settingsService.updateSelfServiceConfig(req.body || {}, scopeFor(req));
+    res.json(cfg);
+  } catch (e) {
+    if (/tenantId is required/i.test(String(e?.message || ''))) {
+      return res.status(400).json({ error: 'tenantId is required for self-service settings' });
+    }
+    next(e);
+  }
+});
+
 settingsRouter.get('/rental-agreement', async (_req, res, next) => {
   try {
     const cfg = await settingsService.getRentalAgreementConfig(scopeFor(_req));
@@ -207,4 +315,3 @@ settingsRouter.put('/rental-agreement', requireRole('ADMIN'), async (req, res, n
     next(e);
   }
 });
-

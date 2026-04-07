@@ -470,7 +470,7 @@ export function buildOpenApiSpec(serverUrl) {
           properties: {
             blockedFrom: { type: 'string', format: 'date-time', nullable: true },
             availableFrom: { type: 'string', format: 'date-time' },
-            blockType: { type: 'string', enum: ['MIGRATION_HOLD', 'MAINTENANCE_HOLD', 'OUT_OF_SERVICE_HOLD'] },
+            blockType: { type: 'string', enum: ['MIGRATION_HOLD', 'MAINTENANCE_HOLD', 'WASH_HOLD', 'OUT_OF_SERVICE_HOLD'] },
             reason: { type: 'string', nullable: true },
             notes: { type: 'string', nullable: true }
           },

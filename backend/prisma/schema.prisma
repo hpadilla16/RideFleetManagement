@@ -123,6 +123,7 @@ enum VehicleOwnershipType {
 enum VehicleBlockType {
   MIGRATION_HOLD
   MAINTENANCE_HOLD
+  WASH_HOLD
   OUT_OF_SERVICE_HOLD
 }
 
@@ -242,6 +243,29 @@ enum HostVehicleSubmissionStatus {
   REJECTED
 }
 
+enum PlannerActionType {
+  ASSIGN_VEHICLE
+  UNASSIGN_VEHICLE
+  MOVE_RESERVATION_TIME
+  CREATE_WASH_BLOCK
+  CREATE_MAINTENANCE_BLOCK
+  CREATE_OUT_OF_SERVICE_BLOCK
+}
+
+enum PlannerRecommendationType {
+  VEHICLE_ASSIGNMENT
+  REBALANCE
+  OVERBOOKING_ALERT
+  FLEET_SHORTAGE
+  MAINTENANCE_SLOT
+  WASH_SLOT
+}
+
+enum PlannerRuleMode {
+  STRICT
+  FLEXIBLE
+}
+
 model Tenant {
   id        String   @id @default(cuid())
   name      String
@@ -279,6 +303,11 @@ model Tenant {
   tollTransactions TollTransaction[]
   tollAssignments TollAssignment[]
   tollImportRuns TollImportRun[]
+  telematicsDevices VehicleTelematicsDevice[]
+  telematicsEvents VehicleTelematicsEvent[]
+  plannerRuleSet PlannerRuleSet?
+  plannerScenarios PlannerScenario[]
+  plannerRecommendationAudits PlannerRecommendationAudit[]
 }
 
 model Location {
@@ -368,6 +397,8 @@ model Vehicle {
   tollTransactions TollTransaction[]
   tollAssignments TollAssignment[]
   availabilityBlocks VehicleAvailabilityBlock[]
+  telematicsDevices VehicleTelematicsDevice[]
+  telematicsEvents VehicleTelematicsEvent[]
 
   @@unique([tenantId, plate])
   @@unique([tenantId, internalNumber])
@@ -391,6 +422,54 @@ model VehicleAvailabilityBlock {
 
   @@index([tenantId, vehicleId, blockedFrom, availableFrom])
   @@index([vehicleId, releasedAt, availableFrom])
+}
+
+model VehicleTelematicsDevice {
+  id               String   @id @default(cuid())
+  tenantId         String?
+  tenant           Tenant?  @relation(fields: [tenantId], references: [id])
+  vehicleId        String
+  vehicle          Vehicle  @relation(fields: [vehicleId], references: [id], onDelete: Cascade)
+  provider         String
+  externalDeviceId String
+  label            String?
+  serialNumber     String?
+  isActive         Boolean  @default(true)
+  installedAt      DateTime?
+  lastSeenAt       DateTime?
+  metadataJson     String?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  events           VehicleTelematicsEvent[]
+
+  @@unique([provider, externalDeviceId])
+  @@index([tenantId, vehicleId, isActive])
+}
+
+model VehicleTelematicsEvent {
+  id            String   @id @default(cuid())
+  tenantId      String?
+  tenant        Tenant?  @relation(fields: [tenantId], references: [id])
+  vehicleId     String
+  vehicle       Vehicle  @relation(fields: [vehicleId], references: [id], onDelete: Cascade)
+  deviceId      String?
+  device        VehicleTelematicsDevice? @relation(fields: [deviceId], references: [id], onDelete: SetNull)
+  eventType     String   @default("PING")
+  eventAt       DateTime
+  latitude      Decimal? @db.Decimal(9, 6)
+  longitude     Decimal? @db.Decimal(9, 6)
+  speedMph      Decimal? @db.Decimal(8, 2)
+  heading       Int?
+  odometer      Int?
+  fuelPct       Decimal? @db.Decimal(5, 2)
+  batteryPct    Decimal? @db.Decimal(5, 2)
+  engineOn      Boolean?
+  payloadJson   String?
+  createdAt     DateTime @default(now())
+
+  @@index([tenantId, vehicleId, eventAt])
+  @@index([deviceId, eventAt])
 }
 
 model Customer {
@@ -1570,6 +1649,87 @@ model AppSetting {
   updatedAt DateTime @updatedAt
 }
 
+model PlannerRuleSet {
+  id                              String          @id @default(cuid())
+  tenantId                        String          @unique
+  tenant                          Tenant          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  minTurnaroundMinutes            Int             @default(60)
+  washBufferMinutes               Int             @default(30)
+  prepBufferMinutes               Int             @default(15)
+  maintenanceBufferMinutes        Int             @default(120)
+  lockWindowMinutesBeforePickup   Int             @default(180)
+  sameDayReservationBufferMinutes Int             @default(45)
+  allowCrossLocationReassignment  Boolean         @default(false)
+  strictVehicleTypeMatch          Boolean         @default(true)
+  allowUpgrade                    Boolean         @default(true)
+  allowDowngrade                  Boolean         @default(false)
+  defaultWashRequired             Boolean         @default(true)
+  assignmentMode                  PlannerRuleMode @default(STRICT)
+  maintenanceMode                 PlannerRuleMode @default(FLEXIBLE)
+  vehicleTypeOverridesJson        String?
+  locationOverridesJson           String?
+  scoringWeightsJson              String?
+  createdAt                       DateTime        @default(now())
+  updatedAt                       DateTime        @updatedAt
+}
+
+model PlannerScenario {
+  id                String                  @id @default(cuid())
+  tenantId          String
+  tenant            Tenant                  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  startAt           DateTime
+  endAt             DateTime
+  locationId        String?
+  vehicleTypeId     String?
+  scenarioType      String
+  status            String                  @default("SIMULATED")
+  summaryJson       String?
+  rulesSnapshotJson String?
+  createdByUserId   String?
+  createdAt         DateTime                @default(now())
+  updatedAt         DateTime                @updatedAt
+
+  actions           PlannerScenarioAction[]
+
+  @@index([tenantId, startAt, endAt])
+  @@index([tenantId, scenarioType, createdAt])
+}
+
+model PlannerScenarioAction {
+  id                String            @id @default(cuid())
+  scenarioId        String
+  scenario          PlannerScenario   @relation(fields: [scenarioId], references: [id], onDelete: Cascade)
+  reservationId     String?
+  vehicleId         String?
+  actionType        PlannerActionType
+  actionPayloadJson String
+  reasonSummary     String?
+  score             Decimal?          @db.Decimal(8, 2)
+  sortOrder         Int               @default(0)
+  createdAt         DateTime          @default(now())
+
+  @@index([scenarioId, sortOrder])
+}
+
+model PlannerRecommendationAudit {
+  id                 String                    @id @default(cuid())
+  tenantId           String
+  tenant             Tenant                    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  recommendationType PlannerRecommendationType
+  reservationId      String?
+  vehicleId          String?
+  scenarioId         String?
+  title              String
+  detail             String?
+  recommendationJson String
+  applied            Boolean                   @default(false)
+  appliedByUserId    String?
+  appliedAt          DateTime?
+  createdAt          DateTime                  @default(now())
+
+  @@index([tenantId, recommendationType, createdAt])
+}
+
 model TollProviderAccount {
   id                String       @id @default(cuid())
   tenantId          String
@@ -1682,4 +1842,3 @@ model TollAssignment {
   @@index([tenantId, reservationId, status])
   @@index([tollTransactionId, status])
 }
-
