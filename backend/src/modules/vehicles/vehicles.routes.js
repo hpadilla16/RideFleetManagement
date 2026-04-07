@@ -2,6 +2,7 @@
 import { Router } from 'express';
 import { vehiclesService } from './vehicles.service.js';
 import { isSuperAdmin } from '../../middleware/auth.js';
+import { crossTenantScopeFor as scopeFor } from '../../lib/tenant-scope.js';
 import { settingsService } from '../settings/settings.service.js';
 import { requireString, assertPlainObject } from '../../lib/request-validation.js';
 import { attachPublicRequestMeta, createOptionalIdempotencyGuard, createPublicRateLimitGuard } from '../../middleware/public-endpoint-guards.js';
@@ -24,11 +25,6 @@ function vehicleDuplicateMessage(error) {
 
 function isTenantLimitError(error) {
   return /allows up to .*vehicles|adding more cars/i.test(String(error?.message || ''));
-}
-
-function scopeFor(req) {
-  if (isSuperAdmin(req.user)) return req.query?.tenantId ? { allowCrossTenant: true, tenantId: String(req.query.tenantId) } : { allowCrossTenant: true };
-  return { tenantId: req.user?.tenantId || null, allowCrossTenant: false };
 }
 
 function scopeForTenantId(tenantId) {

@@ -15,13 +15,9 @@ import { locationsService } from '../locations/locations.service.js';
 import { vehicleTypesService } from '../vehicle-types/vehicle-types.service.js';
 import { activeVehicleBlockOverlapWhere } from '../vehicles/vehicle-blocks.js';
 import { isSuperAdmin } from '../../middleware/auth.js';
+import { crossTenantScopeFor as scopeFor } from '../../lib/tenant-scope.js';
 
 export const reservationsRouter = Router();
-
-function scopeFor(req) {
-  if (isSuperAdmin(req.user)) return { allowCrossTenant: true };
-  return { tenantId: req.user?.tenantId || null, allowCrossTenant: false };
-}
 
 function parseLocationConfig(raw) {
   try {
@@ -80,7 +76,7 @@ function buildPrecheckinChecklist(reservation) {
 
 reservationsRouter.get('/', async (req, res, next) => {
   try {
-    res.json(await reservationsService.list(scopeFor(req)));
+    res.json(await reservationsService.list(scopeFor(req), { page: req.query?.page, limit: req.query?.limit }));
   } catch (e) {
     next(e);
   }

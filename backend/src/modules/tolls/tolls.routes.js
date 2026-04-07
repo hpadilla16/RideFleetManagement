@@ -1,16 +1,10 @@
 import { Router } from 'express';
 import { prisma } from '../../lib/prisma.js';
-import { isSuperAdmin, requireRole } from '../../middleware/auth.js';
+import { requireRole, isSuperAdmin } from '../../middleware/auth.js';
+import { scopeFor } from '../../lib/tenant-scope.js';
 import { tollsService } from './tolls.service.js';
 
 export const tollsRouter = Router();
-
-function scopeFor(req) {
-  if (isSuperAdmin(req.user)) {
-    return req.query?.tenantId ? { tenantId: String(req.query.tenantId) } : {};
-  }
-  return { tenantId: req.user?.tenantId || null };
-}
 
 async function ensureTollsEnabled(req, res, next) {
   try {

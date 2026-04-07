@@ -323,6 +323,7 @@ export default function IssueCenterPage() {
 
 function IssueCenterInner({ token, me, logout }) {
   const [dashboard, setDashboard] = useState(null);
+  const [loading, setLoading] = useState(true);
   const [msg, setMsg] = useState('');
   const [createForm, setCreateForm] = useState(EMPTY_CREATE);
   const [search, setSearch] = useState(() => {
@@ -351,6 +352,7 @@ function IssueCenterInner({ token, me, logout }) {
   }, [search, status, type]);
 
   async function load() {
+    setLoading(true);
     try {
       const payload = await api(`/api/issue-center/dashboard${scopedQuery}`, {}, token);
       setDashboard(payload);
@@ -399,6 +401,8 @@ function IssueCenterInner({ token, me, logout }) {
     } catch (error) {
       setDashboard(null);
       setMsg(error.message);
+    } finally {
+      setLoading(false);
     }
   }
 
@@ -859,8 +863,19 @@ function IssueCenterInner({ token, me, logout }) {
         </div>
       </section>
 
-      {msg ? <div className="surface-note" style={{ color: /updated|saved/i.test(msg) ? '#166534' : '#991b1b', marginBottom: 18 }}>{msg}</div> : null}
+      {loading ? (
+        <div className="surface-note" style={{ marginBottom: 18, textAlign: 'center', color: '#6b7280' }}>Loading issue center…</div>
+      ) : null}
 
+      {!loading && msg ? (
+        <div className="surface-note" style={{ color: /updated|saved|sent/i.test(msg) ? '#166534' : '#991b1b', marginBottom: 18 }}>
+          {msg}
+          <button onClick={() => setMsg('')} style={{ marginLeft: 12, background: 'none', border: 'none', cursor: 'pointer', color: 'inherit', fontWeight: 700 }}>✕</button>
+        </div>
+      ) : null}
+
+      {dashboard ? (
+      <>
       <section className="app-section-grid" style={{ marginBottom: 18 }}>
         <div className="app-banner">
           <div className="section-title">Customer Service Hub</div>
@@ -1655,6 +1670,8 @@ function IssueCenterInner({ token, me, logout }) {
           emptySubmissionEdit={EMPTY_SUBMISSION_EDIT}
         />
       </section>
+      </>
+      ) : null}
     </AppShell>
   );
 }

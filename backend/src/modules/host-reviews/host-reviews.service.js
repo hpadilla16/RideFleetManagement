@@ -1,6 +1,7 @@
 import crypto from 'node:crypto';
 import { prisma } from '../../lib/prisma.js';
 import { sendEmail } from '../../lib/mailer.js';
+import { money } from '../../lib/money.js';
 
 function reviewBaseUrl() {
   return (process.env.CUSTOMER_PORTAL_BASE_URL || process.env.APP_BASE_URL || process.env.FRONTEND_BASE_URL || 'http://localhost:3000').replace(/\/$/, '');
@@ -8,10 +9,6 @@ function reviewBaseUrl() {
 
 function reviewLink(token) {
   return token ? `${reviewBaseUrl()}/host-review?token=${encodeURIComponent(token)}` : '';
-}
-
-function money(value) {
-  return Number(Number(value || 0).toFixed(2));
 }
 
 function ratingNumber(value) {

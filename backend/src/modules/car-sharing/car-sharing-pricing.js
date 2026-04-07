@@ -1,6 +1,4 @@
-function money(value) {
-  return Number(Number(value || 0).toFixed(2));
-}
+import { money } from '../../lib/money.js';
 
 export function computeCancellationRefund({
   quotedTotal = 0,

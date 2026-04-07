@@ -1,13 +1,8 @@
 ﻿import { Router } from 'express';
 import { locationsService } from './locations.service.js';
-import { isSuperAdmin } from '../../middleware/auth.js';
+import { scopeFor } from '../../lib/tenant-scope.js';
 
 export const locationsRouter = Router();
-
-function scopeFor(req) {
-  if (isSuperAdmin(req.user)) return req.query?.tenantId ? { tenantId: String(req.query.tenantId) } : {};
-  return { tenantId: req.user?.tenantId || null };
-}
 
 locationsRouter.get('/', async (_req, res, next) => {
   try { res.json(await locationsService.list(scopeFor(_req))); } catch (e) { next(e); }

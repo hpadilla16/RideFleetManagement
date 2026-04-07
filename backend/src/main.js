@@ -28,14 +28,19 @@ import { issueCenterRouter, publicIssueCenterRouter } from './modules/issue-cent
 import { tollsRouter } from './modules/tolls/tolls.routes.js';
 import { plannerRouter } from './modules/planner/planner.routes.js';
 import { startTollAutoSyncScheduler, stopTollAutoSyncScheduler } from './modules/tolls/tolls.scheduler.js';
+import { startHandoffReminderScheduler, stopHandoffReminderScheduler } from './modules/car-sharing/car-sharing.scheduler.js';
 import { buildOpenApiSpec, swaggerHtml } from './docs/openapi.js';
 import { captureBackendException, flushSentry, initSentry, isSentryEnabled } from './lib/sentry.js';
+import { appErrorHandler } from './lib/errors.js';
 
 assertAuthConfig();
 initSentry();
 
 const app = express();
-app.use(cors({ origin: ['http://localhost:3000', 'http://127.0.0.1:3000'] }));
+const allowedOrigins = process.env.ALLOWED_ORIGINS
+  ? process.env.ALLOWED_ORIGINS.split(',').map((o) => o.trim()).filter(Boolean)
+  : ['http://localhost:3000', 'http://127.0.0.1:3000'];
+app.use(cors({ origin: allowedOrigins, credentials: true }));
 app.use(express.json({
   limit: '12mb',
   verify: (req, _res, buf) => {
@@ -85,6 +90,10 @@ app.use('/api/people', requireAuth, requireModuleAccess('people'), peopleRouter)
 app.use('/api/settings', requireAuth, requireModuleAccess('settings'), settingsRouter);
 app.use('/api/tenants', requireAuth, requireModuleAccess('tenants'), tenantsRouter);
 
+// Map AppError subclasses (ValidationError, NotFoundError, etc.) to their status codes
+app.use(appErrorHandler);
+
+// Catch-all: log to Sentry + return 500
 app.use((err, req, res, _next) => {
   captureBackendException(err, {
     request: {
@@ -102,10 +111,12 @@ const port = process.env.PORT || 4000;
 app.listen(port, () => {
   console.log(`Fleet backend listening on http://localhost:${port}`);
   startTollAutoSyncScheduler();
+  startHandoffReminderScheduler();
 });
 
 process.on('SIGINT', async () => {
   stopTollAutoSyncScheduler();
+  stopHandoffReminderScheduler();
   await flushSentry();
   await prisma.$disconnect();
   process.exit(0);
@@ -113,6 +124,7 @@ process.on('SIGINT', async () => {
 
 process.on('SIGTERM', async () => {
   stopTollAutoSyncScheduler();
+  stopHandoffReminderScheduler();
   await flushSentry();
   await prisma.$disconnect();
   process.exit(0);

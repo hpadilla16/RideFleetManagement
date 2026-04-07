@@ -1,15 +1,11 @@
 ﻿import { Router } from 'express';
 import { settingsService } from './settings.service.js';
 import { requireRole, isSuperAdmin } from '../../middleware/auth.js';
+import { scopeFor } from '../../lib/tenant-scope.js';
 
 import { prisma } from '../../lib/prisma.js';
 
 export const settingsRouter = Router();
-
-function scopeFor(req) {
-  if (isSuperAdmin(req.user)) return req.query?.tenantId ? { tenantId: String(req.query.tenantId) } : {};
-  return { tenantId: req.user?.tenantId || null };
-}
 
 async function enforceUserModuleScope(req, res, next) {
   try {

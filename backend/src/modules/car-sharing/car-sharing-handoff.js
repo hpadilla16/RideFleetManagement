@@ -1,21 +1,11 @@
+import { normalizeDate, normalizeWindowHours } from '../../lib/date-utils.js';
+
 function normalizeRevealMode(value) {
   return String(value || 'REVEAL_AFTER_BOOKING').trim().toUpperCase();
 }
 
 function normalizeHandoffMode(value) {
   return String(value || 'IN_PERSON').trim().toUpperCase();
-}
-
-function normalizeWindowHours(value, fallback = null) {
-  const parsed = Number(value);
-  if (!Number.isFinite(parsed) || parsed < 0) return fallback;
-  return Math.floor(parsed);
-}
-
-function normalizeDate(value) {
-  if (!value) return null;
-  const date = value instanceof Date ? value : new Date(value);
-  return Number.isNaN(date.getTime()) ? null : date;
 }
 
 function hasExactHandoffPayload(plan = null) {

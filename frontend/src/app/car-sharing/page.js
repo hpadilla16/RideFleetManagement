@@ -290,6 +290,7 @@ function CarSharingInner({ token, me, logout }) {
   const [tripForm, setTripForm] = useState(EMPTY_TRIP);
   const [activeTenantId, setActiveTenantId] = useState('');
   const [loading, setLoading] = useState(true);
+  const [reloadKey, setReloadKey] = useState(0);
   const [opsFocus, setOpsFocus] = useState('ALL');
   const [handoffAlerts, setHandoffAlerts] = useState([]);
   const [pendingSearchPlaces, setPendingSearchPlaces] = useState([]);
@@ -334,53 +335,57 @@ function CarSharingInner({ token, me, logout }) {
     });
   }, [eligibleVehicles, activeTenantId, isSuper]);
 
-  const load = async () => {
-    try {
-      setLoading(true);
-      const reqs = [
-        api(`/api/car-sharing/hosts${scopedQuery}`, {}, token),
-        api(`/api/car-sharing/listings${scopedQuery}`, {}, token),
-        api(`/api/car-sharing/trips${scopedQuery}`, {}, token),
-        api(`/api/car-sharing/eligible-vehicles${scopedQuery}`, {}, token),
-        api('/api/vehicles', {}, token),
-        api('/api/customers', {}, token),
-        api('/api/locations', {}, token),
-        api(`/api/car-sharing/config${scopedQuery}`, {}, token)
-      ];
-      if (isSuper) reqs.push(api('/api/tenants', {}, token));
-      const results = await Promise.all(reqs);
-      setHosts(Array.isArray(results[0]) ? results[0] : []);
-      setListings(Array.isArray(results[1]) ? results[1] : []);
-      setTrips(Array.isArray(results[2]) ? results[2] : []);
-      setEligibleVehicles(Array.isArray(results[3]) ? results[3] : []);
-      setVehicles(Array.isArray(results[4]) ? results[4] : []);
-      setCustomers(Array.isArray(results[5]) ? results[5] : []);
-      setLocations(Array.isArray(results[6]) ? results[6] : []);
-      setTenantConfig(results[7] || null);
-      if (isSuper) {
-        const rows = Array.isArray(results[8]) ? results[8] : [];
-        setTenants(rows);
-        if (!activeTenantId && rows[0]?.id) setActiveTenantId(rows[0].id);
-      }
-      // Load ops panels in parallel — non-blocking
-      Promise.all([
-        api(`/api/car-sharing/search-places/pending${scopedQuery}`, {}, token).catch(() => []),
-        api(`/api/car-sharing/ops/handoff-alerts${scopedQuery}`, {}, token).catch(() => [])
-      ]).then(([places, alerts]) => {
-        setPendingSearchPlaces(Array.isArray(places) ? places : []);
-        setHandoffAlerts(Array.isArray(alerts) ? alerts : []);
-      });
-      setMsg('');
-    } catch (e) {
-      setMsg(e.message);
-    } finally {
-      setLoading(false);
-    }
-  };
-
   useEffect(() => {
-    load();
-  }, [token, scopedQuery]);
+    let cancelled = false;
+    const safeLoad = async () => {
+      setLoading(true);
+      try {
+        const reqs = [
+          api(`/api/car-sharing/hosts${scopedQuery}`, {}, token),
+          api(`/api/car-sharing/listings${scopedQuery}`, {}, token),
+          api(`/api/car-sharing/trips${scopedQuery}`, {}, token),
+          api(`/api/car-sharing/eligible-vehicles${scopedQuery}`, {}, token),
+          api('/api/vehicles', {}, token),
+          api('/api/customers', {}, token),
+          api('/api/locations', {}, token),
+          api(`/api/car-sharing/config${scopedQuery}`, {}, token)
+        ];
+        if (isSuper) reqs.push(api('/api/tenants', {}, token));
+        const results = await Promise.all(reqs);
+        if (cancelled) return;
+        setHosts(Array.isArray(results[0]) ? results[0] : []);
+        setListings(Array.isArray(results[1]?.items) ? results[1].items : (Array.isArray(results[1]) ? results[1] : []));
+        setTrips(Array.isArray(results[2]?.items) ? results[2].items : (Array.isArray(results[2]) ? results[2] : []));
+        setEligibleVehicles(Array.isArray(results[3]) ? results[3] : []);
+        setVehicles(Array.isArray(results[4]) ? results[4] : []);
+        setCustomers(Array.isArray(results[5]) ? results[5] : []);
+        setLocations(Array.isArray(results[6]) ? results[6] : []);
+        setTenantConfig(results[7] || null);
+        if (isSuper) {
+          const rows = Array.isArray(results[8]) ? results[8] : [];
+          setTenants(rows);
+          if (!activeTenantId && rows[0]?.id) setActiveTenantId(rows[0].id);
+        }
+        Promise.all([
+          api(`/api/car-sharing/search-places/pending${scopedQuery}`, {}, token).catch(() => []),
+          api(`/api/car-sharing/ops/handoff-alerts${scopedQuery}`, {}, token).catch(() => [])
+        ]).then(([places, alerts]) => {
+          if (cancelled) return;
+          setPendingSearchPlaces(Array.isArray(places) ? places : []);
+          setHandoffAlerts(Array.isArray(alerts) ? alerts : []);
+        });
+        setMsg('');
+      } catch (e) {
+        if (!cancelled) setMsg(e.message);
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    };
+    safeLoad();
+    return () => { cancelled = true; };
+  }, [token, scopedQuery, reloadKey]);
+
+  const load = () => setReloadKey((k) => k + 1);
 
   const resetHostForm = () => setHostForm(EMPTY_HOST);
   const resetListingForm = () => {
@@ -726,7 +731,16 @@ function CarSharingInner({ token, me, logout }) {
         </div>
       </section>
 
-      {msg ? <div className="surface-note" style={{ marginBottom: 16 }}>{msg}</div> : null}
+      {loading ? (
+        <div className="surface-note" style={{ marginBottom: 16, textAlign: 'center', color: '#6b7280' }}>Loading car sharing data…</div>
+      ) : null}
+
+      {!loading && msg ? (
+        <div className="surface-note" style={{ color: /updated|saved|created|sent|approved|rejected/i.test(msg) ? '#166534' : '#991b1b', marginBottom: 16 }}>
+          {msg}
+          <button onClick={() => setMsg('')} style={{ marginLeft: 12, background: 'none', border: 'none', cursor: 'pointer', color: 'inherit', fontWeight: 700 }}>✕</button>
+        </div>
+      ) : null}
 
       {isSuper ? (
         <section className="glass card-lg section-card" style={{ marginBottom: 18 }}>

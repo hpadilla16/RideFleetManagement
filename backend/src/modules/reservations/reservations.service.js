@@ -727,13 +727,13 @@ async function validateLocationWindow({ locationId, at, label }, scope = {}) {
   }
 }
 
-async function ensureNoVehicleConflict({ vehicleId, pickupAt, returnAt, ignoreReservationId = null }, scope = {}) {
+async function ensureNoVehicleConflict({ vehicleId, pickupAt, returnAt, ignoreReservationId = null }, scope = {}, db = prisma) {
   if (!vehicleId) return;
 
   const start = new Date(pickupAt);
   const end = new Date(returnAt);
 
-  const conflict = await prisma.reservation.findFirst({
+  const conflict = await db.reservation.findFirst({
     where: {
       ...(scope?.tenantId ? { tenantId: scope.tenantId } : {}),
       vehicleId,
@@ -1013,26 +1013,23 @@ export const reservationsService = {
     };
   },
 
-  async list(scope = {}) {
+  async list(scope = {}, { page = 1, limit = 100 } = {}) {
+    const take = Math.min(Math.max(1, Number(limit) || 100), 500);
+    const skip = (Math.max(1, Number(page) || 1) - 1) * take;
     const where = scope?.tenantId ? { tenantId: scope.tenantId } : undefined;
     try {
-      const rows = await prisma.reservation.findMany({
-        where,
-        orderBy: { createdAt: 'desc' },
-        select: reservationListBaseSelect
-      });
-      return hydrateReservationListRows(rows, scope);
+      const [rows, total] = await Promise.all([
+        prisma.reservation.findMany({ where, orderBy: { createdAt: 'desc' }, skip, take, select: reservationListBaseSelect }),
+        prisma.reservation.count({ where })
+      ]);
+      return { items: hydrateReservationListRows(rows, scope), total, page: Number(page), limit: take, pages: Math.ceil(total / take) };
     } catch (error) {
-      console.error('[reservations] list fallback activated', {
-        tenantId: scope?.tenantId || null,
-        error: String(error?.message || error)
-      });
-      const fallbackRows = await prisma.reservation.findMany({
-        where,
-        orderBy: { createdAt: 'desc' },
-        select: reservationListBaseSelect
-      });
-      return hydrateReservationListRows(fallbackRows, scope);
+      console.error('[reservations] list fallback activated', { tenantId: scope?.tenantId || null, error: String(error?.message || error) });
+      const [fallbackRows, total] = await Promise.all([
+        prisma.reservation.findMany({ where, orderBy: { createdAt: 'desc' }, skip, take, select: reservationListBaseSelect }),
+        prisma.reservation.count({ where })
+      ]);
+      return { items: hydrateReservationListRows(fallbackRows, scope), total, page: Number(page), limit: take, pages: Math.ceil(total / take) };
     }
   },
 
@@ -1101,19 +1098,21 @@ export const reservationsService = {
       }
     }
 
-    await ensureNoVehicleConflict({
-      vehicleId: assignedVehicleId,
-      pickupAt: data.pickupAt,
-      returnAt: data.returnAt
-    }, scope);
-
     const underageAlert = await buildUnderageAlertNote({
       customerId: data.customerId,
       pickupLocationId: data.pickupLocationId,
       pickupAt: data.pickupAt
     }, scope);
 
-    return prisma.reservation.create({
+    return prisma.$transaction(async (tx) => {
+      // Re-check conflict inside the transaction to prevent race conditions
+      await ensureNoVehicleConflict({
+        vehicleId: assignedVehicleId,
+        pickupAt: data.pickupAt,
+        returnAt: data.returnAt
+      }, scope, tx);
+
+      return tx.reservation.create({
       data: {
         tenantId: scope?.tenantId || data.tenantId || null,
         reservationNumber: data.reservationNumber,
@@ -1176,6 +1175,7 @@ export const reservationsService = {
         sendConfirmationEmail: data.sendConfirmationEmail ?? true,
         notes: mergeUnderageAlert(data.notes ?? null, underageAlert)
       }
+      });
     });
   },
 

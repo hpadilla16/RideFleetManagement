@@ -2,15 +2,9 @@ import { Router } from 'express';
 import { prisma } from '../../lib/prisma.js';
 import { isSuperAdmin } from '../../middleware/auth.js';
 import { carSharingService } from './car-sharing.service.js';
+import { carSharingScopeFor as scopeFor } from '../../lib/tenant-scope.js';
 
 export const carSharingRouter = Router();
-
-function scopeFor(req) {
-  if (isSuperAdmin(req.user)) {
-    return req.query?.tenantId ? { tenantId: String(req.query.tenantId), allowUnassigned: true } : { allowUnassigned: true };
-  }
-  return { tenantId: req.user?.tenantId || null, allowUnassigned: false };
-}
 
 async function ensureCarSharingEnabled(req, res, next) {
   try {
@@ -81,7 +75,9 @@ carSharingRouter.get('/listings', async (req, res, next) => {
     res.json(await carSharingService.listListings({
       ...scope,
       hostProfileId: req.query?.hostProfileId ? String(req.query.hostProfileId) : undefined,
-      status: req.query?.status ? String(req.query.status).toUpperCase() : undefined
+      status: req.query?.status ? String(req.query.status).toUpperCase() : undefined,
+      page: req.query?.page,
+      limit: req.query?.limit
     }));
   } catch (e) {
     next(e);
@@ -94,7 +90,9 @@ carSharingRouter.get('/trips', async (req, res, next) => {
     res.json(await carSharingService.listTrips({
       ...scope,
       listingId: req.query?.listingId ? String(req.query.listingId) : undefined,
-      status: req.query?.status ? String(req.query.status).toUpperCase() : undefined
+      status: req.query?.status ? String(req.query.status).toUpperCase() : undefined,
+      page: req.query?.page,
+      limit: req.query?.limit
     }));
   } catch (e) {
     next(e);

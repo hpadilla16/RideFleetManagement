@@ -5,11 +5,8 @@ import { authService } from '../auth/auth.service.js';
 import { createHostVehicleSubmissionForProfile } from '../host-app/host-app.service.js';
 import { prisma } from '../../lib/prisma.js';
 import { sendEmail } from '../../lib/mailer.js';
+import { money } from '../../lib/money.js';
 import crypto from 'node:crypto';
-
-function money(value) {
-  return Number(Number(value || 0).toFixed(2));
-}
 
 function baseUrl() {
   return (process.env.CUSTOMER_PORTAL_BASE_URL || process.env.APP_BASE_URL || process.env.FRONTEND_BASE_URL || 'http://localhost:3000').replace(/\/$/, '');

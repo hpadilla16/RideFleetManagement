@@ -1,13 +1,8 @@
 ﻿import { Router } from 'express';
 import { ratesService } from './rates.service.js';
-import { isSuperAdmin } from '../../middleware/auth.js';
+import { scopeFor } from '../../lib/tenant-scope.js';
 
 export const ratesRouter = Router();
-
-function scopeFor(req) {
-  if (isSuperAdmin(req.user)) return req.query?.tenantId ? { tenantId: String(req.query.tenantId) } : {};
-  return { tenantId: req.user?.tenantId || null };
-}
 
 ratesRouter.get('/', async (req, res, next) => {
   try { res.json(await ratesService.list({ query: req.query?.query ? String(req.query.query) : '' }, scopeFor(req))); }

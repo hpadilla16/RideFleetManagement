@@ -1,13 +1,8 @@
 ﻿import { Router } from 'express';
 import { additionalServicesService } from './additional-services.service.js';
-import { isSuperAdmin } from '../../middleware/auth.js';
+import { scopeFor } from '../../lib/tenant-scope.js';
 
 export const additionalServicesRouter = Router();
-
-function scopeFor(req) {
-  if (isSuperAdmin(req.user)) return req.query?.tenantId ? { tenantId: String(req.query.tenantId) } : {};
-  return { tenantId: req.user?.tenantId || null };
-}
 
 additionalServicesRouter.get('/', async (req, res, next) => {
   try {

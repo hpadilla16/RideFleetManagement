@@ -4,6 +4,7 @@ import { computeMarketplaceTripPricing, computeCancellationRefund } from './car-
 import { sendEmail } from '../../lib/mailer.js';
 import { buildTripFulfillmentPlanData, resolveDeliveryFeeOverride } from './car-sharing-fulfillment.js';
 import { resolveHandoffConfirmationAlerts } from './car-sharing-handoff.js';
+import { startOfUtcDay, addUtcDays, ceilTripDays, overlapsWindow } from '../../lib/date-utils.js';
 
 function slugify(input) {
   return String(input || '')
@@ -116,24 +117,6 @@ function generateTripCode() {
 
 function generateReservationNumber() {
   return `CS-${Date.now().toString().slice(-8)}`;
-}
-
-function ceilTripDays(startAt, endAt) {
-  return Math.max(1, Math.ceil((endAt.getTime() - startAt.getTime()) / (24 * 60 * 60 * 1000)));
-}
-
-function overlapsWindow(windowStart, windowEnd, tripStart, tripEnd) {
-  return windowStart < tripEnd && windowEnd > tripStart;
-}
-
-function startOfUtcDay(dt) {
-  return new Date(Date.UTC(dt.getUTCFullYear(), dt.getUTCMonth(), dt.getUTCDate()));
-}
-
-function addUtcDays(dt, days) {
-  const copy = new Date(dt);
-  copy.setUTCDate(copy.getUTCDate() + days);
-  return copy;
 }
 
 function resolveFulfillmentChoice(listing, requestedChoice) {
@@ -525,28 +508,34 @@ export const carSharingService = {
     });
   },
 
-  async listListings({ tenantId, hostProfileId, status } = {}) {
-    return prisma.hostVehicleListing.findMany({
-      where: {
-        ...(tenantId ? { tenantId } : {}),
-        ...(hostProfileId ? { hostProfileId } : {}),
-        ...(status ? { status } : {})
-      },
-      include: listingInclude(),
-      orderBy: [{ createdAt: 'desc' }]
-    });
+  async listListings({ tenantId, hostProfileId, status, page = 1, limit = 50 } = {}) {
+    const take = Math.min(Math.max(1, Number(limit) || 50), 200);
+    const skip = (Math.max(1, Number(page) || 1) - 1) * take;
+    const where = {
+      ...(tenantId ? { tenantId } : {}),
+      ...(hostProfileId ? { hostProfileId } : {}),
+      ...(status ? { status } : {})
+    };
+    const [items, total] = await Promise.all([
+      prisma.hostVehicleListing.findMany({ where, include: listingInclude(), orderBy: [{ createdAt: 'desc' }], skip, take }),
+      prisma.hostVehicleListing.count({ where })
+    ]);
+    return { items, total, page: Number(page), limit: take, pages: Math.ceil(total / take) };
   },
 
-  async listTrips({ tenantId, listingId, status } = {}) {
-    return prisma.trip.findMany({
-      where: {
-        ...(tenantId ? { tenantId } : {}),
-        ...(listingId ? { listingId } : {}),
-        ...(status ? { status } : {})
-      },
-      include: tripInclude(),
-      orderBy: [{ createdAt: 'desc' }]
-    });
+  async listTrips({ tenantId, listingId, status, page = 1, limit = 100 } = {}) {
+    const take = Math.min(Math.max(1, Number(limit) || 100), 500);
+    const skip = (Math.max(1, Number(page) || 1) - 1) * take;
+    const where = {
+      ...(tenantId ? { tenantId } : {}),
+      ...(listingId ? { listingId } : {}),
+      ...(status ? { status } : {})
+    };
+    const [items, total] = await Promise.all([
+      prisma.trip.findMany({ where, include: tripInclude(), orderBy: [{ createdAt: 'desc' }], skip, take }),
+      prisma.trip.count({ where })
+    ]);
+    return { items, total, page: Number(page), limit: take, pages: Math.ceil(total / take) };
   },
 
   async listAvailabilityWindows(listingId, scope = {}) {
@@ -778,21 +767,6 @@ export const carSharingService = {
       fulfillmentChoice: data?.fulfillmentChoice || null,
       searchPlaceId: data?.searchPlaceId || data?.requestedSearchPlaceId || null
     });
-    const conflictingTrip = await prisma.trip.findFirst({
-      where: {
-        listingId: listing.id,
-        status: { in: ['RESERVED', 'CONFIRMED', 'READY_FOR_PICKUP', 'IN_PROGRESS'] },
-        AND: [
-          { scheduledPickupAt: { lt: returnAt } },
-          { scheduledReturnAt: { gt: pickupAt } }
-        ]
-      },
-      select: { id: true, tripCode: true }
-    });
-    if (conflictingTrip) {
-      throw new Error(`This listing is already booked for the selected dates (${conflictingTrip.tripCode})`);
-    }
-
     const quote = computeTripPricing(listing, overlappingWindows, pickupAt, returnAt, data?.fulfillmentChoice || null, deliveryFeeOverride);
     const deliveryAreaChoice = data?.deliveryAreaChoice ? String(data.deliveryAreaChoice).trim() : null;
     const pickupLocationId = data?.pickupLocationId || listing.locationId || null;
@@ -819,7 +793,23 @@ export const carSharingService = {
       searchPlaceId: data?.searchPlaceId || data?.requestedSearchPlaceId || null,
       deliveryAreaChoice
     });
-    const trip = await prisma.trip.create({
+    const trip = await prisma.$transaction(async (tx) => {
+      // Re-check inside transaction to close the race window between check and insert
+      const conflictingTrip = await tx.trip.findFirst({
+        where: {
+          listingId: listing.id,
+          status: { in: ['RESERVED', 'CONFIRMED', 'READY_FOR_PICKUP', 'IN_PROGRESS'] },
+          AND: [
+            { scheduledPickupAt: { lt: returnAt } },
+            { scheduledReturnAt: { gt: pickupAt } }
+          ]
+        },
+        select: { id: true, tripCode: true }
+      });
+      if (conflictingTrip) {
+        throw new Error(`This listing is already booked for the selected dates (${conflictingTrip.tripCode})`);
+      }
+      return tx.trip.create({
       data: {
         tenantId,
         listingId: listing.id,
@@ -872,7 +862,8 @@ export const carSharingService = {
           }]
         }
       },
-      include: tripInclude()
+        include: tripInclude()
+      });
     });
     return trip;
   },

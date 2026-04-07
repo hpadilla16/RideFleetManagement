@@ -8,6 +8,8 @@ import { settingsService } from '../settings/settings.service.js';
 import { computeMarketplaceTripPricing } from '../car-sharing/car-sharing-pricing.js';
 import { serializePublicTripFulfillmentPlan } from '../car-sharing/car-sharing-handoff.js';
 import { resolveDeliveryAreaHints } from '../car-sharing/car-sharing-fulfillment.js';
+import { money } from '../../lib/money.js';
+import { startOfUtcDay, addUtcDays, ceilTripDays } from '../../lib/date-utils.js';
 import { activeVehicleBlockOverlapWhere } from '../vehicles/vehicle-blocks.js';
 import {
   compareCarSharingSearchResults,
@@ -32,24 +34,6 @@ function toDate(value) {
 
 function overlap(startA, endA, startB, endB) {
   return startA < endB && endA > startB;
-}
-
-function startOfUtcDay(dt) {
-  return new Date(Date.UTC(dt.getUTCFullYear(), dt.getUTCMonth(), dt.getUTCDate()));
-}
-
-function addUtcDays(dt, days) {
-  const copy = new Date(dt);
-  copy.setUTCDate(copy.getUTCDate() + days);
-  return copy;
-}
-
-function ceilTripDays(startAt, endAt) {
-  return Math.max(1, Math.ceil((endAt.getTime() - startAt.getTime()) / (24 * 60 * 60 * 1000)));
-}
-
-function money(value) {
-  return Number(Number(value || 0).toFixed(2));
 }
 
 function ratingNumber(value) {
