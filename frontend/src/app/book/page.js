@@ -50,6 +50,29 @@ function publicLocationLabel(location) {
   return [location?.name, location?.city, location?.state].filter(Boolean).join(' | ') || 'Location';
 }
 
+function buildPublicLocationOptions(locations = []) {
+  const groups = new Map();
+  locations.forEach((location) => {
+    const key = publicLocationLabel(location);
+    if (!groups.has(key)) {
+      groups.set(key, {
+        id: key,
+        label: key,
+        locationIds: [],
+        tenantIds: [],
+        locations: []
+      });
+    }
+    const group = groups.get(key);
+    group.locationIds.push(location.id);
+    if (location.tenantId && !group.tenantIds.includes(location.tenantId)) {
+      group.tenantIds.push(location.tenantId);
+    }
+    group.locations.push(location);
+  });
+  return Array.from(groups.values()).sort((a, b) => a.label.localeCompare(b.label));
+}
+
 function publicPickupSpotLabel(pickupSpot, fallbackLocation = null) {
   if (pickupSpot?.label) {
     const address = [pickupSpot?.city, pickupSpot?.state].filter(Boolean).join(', ');
@@ -61,6 +84,91 @@ function publicPickupSpotLabel(pickupSpot, fallbackLocation = null) {
 
 function pickupSpotHint(pickupSpot) {
   return [pickupSpot?.address1, pickupSpot?.city, pickupSpot?.state, pickupSpot?.postalCode].filter(Boolean).join(' | ');
+}
+
+function searchPlaceTypeLabel(type) {
+  const normalized = String(type || 'HOST_PICKUP_SPOT').trim().toUpperCase();
+  if (normalized === 'AIRPORT') return 'Airport';
+  if (normalized === 'HOTEL') return 'Hotel';
+  if (normalized === 'NEIGHBORHOOD') return 'Neighborhood';
+  if (normalized === 'STATION') return 'Station';
+  if (normalized === 'TENANT_BRANCH') return 'Branch area';
+  if (normalized === 'HOST_PICKUP_SPOT') return 'Host pickup';
+  return normalized.replaceAll('_', ' ').toLowerCase();
+}
+
+function searchPlaceGroupLabel(type) {
+  const normalized = String(type || 'HOST_PICKUP_SPOT').trim().toUpperCase();
+  if (normalized === 'AIRPORT') return 'Airports';
+  if (normalized === 'HOTEL') return 'Hotels';
+  if (normalized === 'NEIGHBORHOOD') return 'Neighborhoods';
+  if (normalized === 'STATION') return 'Stations';
+  if (normalized === 'TENANT_BRANCH') return 'Branch areas';
+  if (normalized === 'HOST_PICKUP_SPOT') return 'Host pickup spots';
+  return 'Other search places';
+}
+
+function searchPlaceTypePriority(type) {
+  const normalized = String(type || 'HOST_PICKUP_SPOT').trim().toUpperCase();
+  if (normalized === 'AIRPORT') return 10;
+  if (normalized === 'HOTEL') return 20;
+  if (normalized === 'NEIGHBORHOOD') return 30;
+  if (normalized === 'STATION') return 40;
+  if (normalized === 'HOST_PICKUP_SPOT') return 50;
+  if (normalized === 'TENANT_BRANCH') return 60;
+  return 90;
+}
+
+function carSharingSearchPlaceLabel(place) {
+  if (!place) return 'Search place';
+  const bits = [place.label || place.rawLabel || 'Search place'];
+  const area = [place.city, place.state].filter(Boolean).join(', ');
+  if (area) bits.push(area);
+  return bits.join(' | ');
+}
+
+function carSharingSearchPlaceHint(place) {
+  if (!place) return '';
+  const type = searchPlaceTypeLabel(place.placeType);
+  const visibility = place.visibilityMode === 'PUBLIC_EXACT'
+    ? 'Exact handoff can be shown before booking'
+    : place.visibilityMode === 'APPROXIMATE_ONLY'
+      ? 'Approximate area shown before booking'
+      : 'Exact handoff shared after booking';
+  const fulfillment = [
+    place.pickupEligible ? 'pickup' : '',
+    place.deliveryEligible ? 'delivery' : ''
+  ].filter(Boolean).join(' + ');
+  return [type, fulfillment || 'pickup', visibility].filter(Boolean).join(' | ');
+}
+
+function buildCarSharingSearchOptionGroups(options = []) {
+  const groups = new Map();
+  options.forEach((option) => {
+    const key = option.groupLabel || 'Other search places';
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(option);
+  });
+  return Array.from(groups.entries()).map(([label, items]) => ({
+    label,
+    options: items.sort((left, right) => String(left.label || '').localeCompare(String(right.label || '')))
+  }));
+}
+
+function uniqueLabels(items = []) {
+  return Array.from(new Set((Array.isArray(items) ? items : []).map((item) => String(item || '').trim()).filter(Boolean)));
+}
+
+function carSharingDiscoveryBadges(result) {
+  if (!result) return [];
+  return uniqueLabels([
+    result.recommendedBadge,
+    result.trustBadge,
+    result.searchPlaceType ? searchPlaceTypeLabel(result.searchPlaceType) : '',
+    result.instantBook ? 'Instant book' : '',
+    Array.isArray(result.availableFulfillmentChoices) && result.availableFulfillmentChoices.includes('DELIVERY') ? 'Delivery available' : '',
+    result.exactLocationHidden ? 'Exact details after booking' : 'Exact area visible'
+  ]).slice(0, 5);
 }
 
 function fulfillmentModeLabel(mode) {
@@ -91,7 +199,7 @@ function locationLabelFromId(locations, id) {
   return match ? publicLocationLabel(match) : '';
 }
 
-function buildServiceSelectionState(result, mode) {
+function buildServiceSelectionState(result) {
   return Object.fromEntries(
     (result?.additionalServices || []).map((service) => [
       service.serviceId,
@@ -103,7 +211,7 @@ function buildServiceSelectionState(result, mode) {
   );
 }
 
-function buildInsuranceSelectionState(result, mode) {
+function buildInsuranceSelectionState(_result, mode) {
   if (mode !== 'RENTAL') {
     return {
       selectedPlanCode: '',
@@ -250,6 +358,7 @@ function PublicBookingPageInner() {
   const [searchMode, setSearchMode] = useState(querySearchMode || initialDraft?.searchMode || 'RENTAL');
   const [pickupLocationId, setPickupLocationId] = useState(initialDraft?.pickupLocationId || '');
   const [returnLocationId, setReturnLocationId] = useState(initialDraft?.returnLocationId || '');
+  const [carSharingSearchPlaceId, setCarSharingSearchPlaceId] = useState(initialDraft?.carSharingSearchPlaceId || '');
   const [vehicleTypeId, setVehicleTypeId] = useState(queryVehicleTypeId || initialDraft?.vehicleTypeId || '');
   const [pickupAt, setPickupAt] = useState(queryPickupAt || initialDraft?.pickupAt || toLocalInputValue(addDays(new Date(), 1)));
   const [returnAt, setReturnAt] = useState(queryReturnAt || initialDraft?.returnAt || toLocalInputValue(addDays(new Date(), 4)));
@@ -289,6 +398,8 @@ function PublicBookingPageInner() {
       setBootstrap(payload);
       const selectedSlug = payload?.selectedTenant?.slug || '';
       setTenantSlug(selectedSlug);
+      const nextLocationOptions = buildPublicLocationOptions(payload?.locations || []);
+      const nextSearchPlaces = Array.isArray(payload?.carSharingSearchPlaces) ? payload.carSharingSearchPlaces : [];
       const firstLocationId = payload?.locations?.[0] ? publicLocationLabel(payload.locations[0]) : '';
       const preferredPickupLocation = locationLabelFromId(payload?.locations, queryPickupLocationId) || firstLocationId;
       const preferredReturnLocation = locationLabelFromId(payload?.locations, queryReturnLocationId) || preferredPickupLocation || firstLocationId;
@@ -301,6 +412,23 @@ function PublicBookingPageInner() {
       setVehicleTypeId((current) => {
         if (current && payload?.vehicleTypes?.some((item) => item.id === current)) return current;
         if (queryVehicleTypeId && payload?.vehicleTypes?.some((item) => item.id === queryVehicleTypeId)) return queryVehicleTypeId;
+        return '';
+      });
+      setCarSharingSearchPlaceId((current) => {
+        const validCurrent = current && (
+          nextSearchPlaces.some((item) => `place:${item.id}` === current)
+          || nextLocationOptions.some((item) => `branch:${item.id}` === current)
+        );
+        if (validCurrent) return current;
+        if (queryPickupLocationId && nextSearchPlaces.some((item) => String(item.id) === String(queryPickupLocationId))) {
+          return `place:${queryPickupLocationId}`;
+        }
+        const matchingBranch = queryPickupLocationId
+          ? nextLocationOptions.find((option) => option.locationIds.some((id) => String(id) === String(queryPickupLocationId)))
+          : null;
+        if (matchingBranch) return `branch:${matchingBranch.id}`;
+        if (nextSearchPlaces[0]?.id) return `place:${nextSearchPlaces[0].id}`;
+        if (nextLocationOptions[0]?.id) return `branch:${nextLocationOptions[0].id}`;
         return '';
       });
     } catch (err) {
@@ -323,6 +451,7 @@ function PublicBookingPageInner() {
         searchMode,
         pickupLocationId,
         returnLocationId,
+        carSharingSearchPlaceId,
         vehicleTypeId,
         pickupAt,
         returnAt,
@@ -338,6 +467,7 @@ function PublicBookingPageInner() {
     } catch {}
   }, [
     checkoutState,
+    carSharingSearchPlaceId,
     insuranceSelection,
     lookupState,
     pickupAt,
@@ -363,7 +493,7 @@ function PublicBookingPageInner() {
       setSelectedDeliveryArea('');
       return;
     }
-    setSelectedServices(buildServiceSelectionState(selectedResult, searchMode));
+    setSelectedServices(buildServiceSelectionState(selectedResult));
     setInsuranceSelection(buildInsuranceSelectionState(selectedResult, searchMode));
     if (searchMode === 'CAR_SHARING') {
       setSelectedFulfillmentChoice(defaultFulfillmentChoice(selectedResult));
@@ -391,11 +521,12 @@ function PublicBookingPageInner() {
     if (autoSearchDone || loadingBootstrap || !bootstrap) return;
     const shouldAutoSearch = !!queryVehicleTypeId || (!!queryPickupLocationId && !!queryPickupAt && !!queryReturnAt);
     if (!shouldAutoSearch) return;
-    if (!pickupLocationId) return;
+    if (searchMode === 'CAR_SHARING' && !carSharingSearchPlaceId && !pickupLocationId) return;
+    if (searchMode === 'RENTAL' && !pickupLocationId) return;
     setAutoSearchDone(true);
     runSearch();
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [autoSearchDone, bootstrap, loadingBootstrap, pickupLocationId]);
+  }, [autoSearchDone, bootstrap, carSharingSearchPlaceId, loadingBootstrap, pickupLocationId, searchMode]);
 
   useEffect(() => {
     if (autoSelectionDone || !queryVehicleTypeId || !results?.results?.length) return;
@@ -408,34 +539,58 @@ function PublicBookingPageInner() {
   }, [autoSelectionDone, queryVehicleTypeId, results]);
 
   const locations = bootstrap?.locations || [];
+  const carSharingSearchPlaces = bootstrap?.carSharingSearchPlaces || [];
   const vehicleTypes = bootstrap?.vehicleTypes || [];
   const featuredListings = bootstrap?.featuredCarSharingListings || [];
   const bookingStage = uiStep === 'checkout' ? 'checkout' : uiStep === 'select' ? 'select' : 'search';
-  const publicLocationOptions = useMemo(() => {
-    const groups = new Map();
-    locations.forEach((location) => {
-      const key = publicLocationLabel(location);
-      if (!groups.has(key)) {
-        groups.set(key, {
-          id: key,
-          label: key,
-          locationIds: [],
-          tenantIds: [],
-          locations: []
-        });
-      }
-      const group = groups.get(key);
-      group.locationIds.push(location.id);
-      if (location.tenantId && !group.tenantIds.includes(location.tenantId)) {
-        group.tenantIds.push(location.tenantId);
-      }
-      group.locations.push(location);
+  const publicLocationOptions = useMemo(() => buildPublicLocationOptions(locations), [locations]);
+  const carSharingSearchOptions = useMemo(() => {
+    const directPlaces = carSharingSearchPlaces.map((place) => ({
+      id: `place:${place.id}`,
+      mode: 'SEARCH_PLACE',
+      searchPlaceId: place.id,
+      placeType: place.placeType || 'HOST_PICKUP_SPOT',
+      groupLabel: searchPlaceGroupLabel(place.placeType),
+      typeLabel: searchPlaceTypeLabel(place.placeType),
+      label: carSharingSearchPlaceLabel(place),
+      hint: carSharingSearchPlaceHint(place),
+      place
+    }));
+    const branchFallbacks = publicLocationOptions.map((location) => ({
+      id: `branch:${location.id}`,
+      mode: 'LOCATION_GROUP',
+      searchPlaceId: '',
+      placeType: 'TENANT_BRANCH',
+      groupLabel: 'Branch areas',
+      typeLabel: 'Branch area',
+      locationIds: location.locationIds,
+      label: `${location.label} | Branch area`,
+      hint: 'Search host pickups and deliveries anchored to this branch area',
+      location
+    }));
+    return [...directPlaces, ...branchFallbacks].sort((left, right) => {
+      const priorityDiff = searchPlaceTypePriority(left.placeType) - searchPlaceTypePriority(right.placeType);
+      if (priorityDiff !== 0) return priorityDiff;
+      return String(left.label || '').localeCompare(String(right.label || ''));
     });
-    return Array.from(groups.values()).sort((a, b) => a.label.localeCompare(b.label));
-  }, [locations]);
+  }, [carSharingSearchPlaces, publicLocationOptions]);
+  const carSharingSearchOptionGroups = useMemo(
+    () => buildCarSharingSearchOptionGroups(carSharingSearchOptions),
+    [carSharingSearchOptions]
+  );
+  const featuredCarSharingSearchOptions = useMemo(
+    () => carSharingSearchOptions
+      .filter((option) => option.mode === 'SEARCH_PLACE' && ['AIRPORT', 'HOTEL', 'NEIGHBORHOOD', 'STATION'].includes(String(option.placeType || '').toUpperCase()))
+      .slice(0, 6),
+    [carSharingSearchOptions]
+  );
   const selectedPickupLocationOption = useMemo(
     () => publicLocationOptions.find((location) => location.id === pickupLocationId) || null,
     [publicLocationOptions, pickupLocationId]
+  );
+  const selectedCarSharingSearchOption = useMemo(
+    () => carSharingSearchOptions.find((option) => option.id === carSharingSearchPlaceId) || null,
+    [carSharingSearchOptions, carSharingSearchPlaceId]
   );
   const availableReturnLocations = useMemo(() => {
     if (!selectedPickupLocationOption?.tenantIds?.length) return publicLocationOptions;
@@ -582,8 +737,15 @@ function PublicBookingPageInner() {
   const runSearch = async () => {
     const pickupLocationIds = publicLocationOptions.find((location) => location.id === pickupLocationId)?.locationIds || [];
     const returnLocationIds = publicLocationOptions.find((location) => location.id === returnLocationId)?.locationIds || pickupLocationIds;
+    const selectedSearchOption = carSharingSearchOptions.find((option) => option.id === carSharingSearchPlaceId) || null;
     if (!pickupLocationIds.length) {
-      setError('Choose a location before searching.');
+      if (searchMode === 'RENTAL') {
+        setError('Choose a location before searching.');
+        return;
+      }
+    }
+    if (searchMode === 'CAR_SHARING' && !selectedSearchOption && !pickupLocationIds.length) {
+      setError('Choose a search place before searching car sharing.');
       return;
     }
     setSearching(true);
@@ -597,12 +759,18 @@ function PublicBookingPageInner() {
         method: 'POST',
         body: JSON.stringify({
           tenantSlug,
-          pickupLocationId: pickupLocationIds[0],
-          pickupLocationIds,
-          returnLocationId: returnLocationIds[0] || pickupLocationIds[0],
-          returnLocationIds,
-          locationId: pickupLocationIds[0],
-          locationIds: pickupLocationIds,
+          pickupLocationId: searchMode === 'RENTAL' ? pickupLocationIds[0] : '',
+          pickupLocationIds: searchMode === 'RENTAL' ? pickupLocationIds : [],
+          returnLocationId: searchMode === 'RENTAL' ? (returnLocationIds[0] || pickupLocationIds[0]) : '',
+          returnLocationIds: searchMode === 'RENTAL' ? returnLocationIds : [],
+          locationId: searchMode === 'CAR_SHARING'
+            ? (selectedSearchOption?.mode === 'LOCATION_GROUP' ? selectedSearchOption.locationIds?.[0] || '' : '')
+            : pickupLocationIds[0],
+          locationIds: searchMode === 'CAR_SHARING'
+            ? (selectedSearchOption?.mode === 'LOCATION_GROUP' ? selectedSearchOption.locationIds || [] : [])
+            : pickupLocationIds,
+          searchPlaceId: searchMode === 'CAR_SHARING' ? (selectedSearchOption?.searchPlaceId || '') : '',
+          searchPlaceIds: searchMode === 'CAR_SHARING' && selectedSearchOption?.searchPlaceId ? [selectedSearchOption.searchPlaceId] : [],
           vehicleTypeId: vehicleTypeId || null,
           pickupAt,
           returnAt
@@ -730,14 +898,54 @@ function PublicBookingPageInner() {
                 <input type="datetime-local" value={returnAt} onChange={(event) => setReturnAt(event.target.value)} />
               </div>
               <div>
-                <div className="label">{searchMode === 'RENTAL' ? 'Pickup Location' : 'Preferred Location'}</div>
-                <select value={pickupLocationId} onChange={(event) => setPickupLocationId(event.target.value)}>
-                  {publicLocationOptions.map((location) => (
-                    <option key={location.id} value={location.id}>{location.label}</option>
-                  ))}
-                </select>
+                <div className="label">{searchMode === 'RENTAL' ? 'Pickup Location' : 'Where do you want the car?'}</div>
+                {searchMode === 'RENTAL' ? (
+                  <select value={pickupLocationId} onChange={(event) => setPickupLocationId(event.target.value)}>
+                    {publicLocationOptions.map((location) => (
+                      <option key={location.id} value={location.id}>{location.label}</option>
+                    ))}
+                  </select>
+                ) : (
+                  <select value={carSharingSearchPlaceId} onChange={(event) => setCarSharingSearchPlaceId(event.target.value)}>
+                    {carSharingSearchOptionGroups.map((group) => (
+                      <optgroup key={group.label} label={group.label}>
+                        {group.options.map((option) => (
+                          <option key={option.id} value={option.id}>{option.label}</option>
+                        ))}
+                      </optgroup>
+                    ))}
+                  </select>
+                )}
               </div>
             </div>
+
+            {searchMode === 'CAR_SHARING' && featuredCarSharingSearchOptions.length ? (
+              <div className="surface-note" style={{ marginTop: 12, display: 'grid', gap: 10 }}>
+                <strong>Popular search presets</strong>
+                <div className="inline-actions">
+                  {featuredCarSharingSearchOptions.map((option) => (
+                    <button
+                      key={option.id}
+                      type="button"
+                      className={carSharingSearchPlaceId === option.id ? '' : 'button-subtle'}
+                      onClick={() => setCarSharingSearchPlaceId(option.id)}
+                    >
+                      {option.place?.publicLabel || option.place?.label || option.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            ) : null}
+
+            {searchMode === 'CAR_SHARING' && selectedCarSharingSearchOption ? (
+              <div className="surface-note" style={{ marginTop: 12 }}>
+                <strong>{selectedCarSharingSearchOption.label}</strong>
+                <br />
+                {selectedCarSharingSearchOption.typeLabel}
+                <br />
+                {selectedCarSharingSearchOption.hint}
+              </div>
+            ) : null}
 
             <div className={searchMode === 'RENTAL' ? 'form-grid-2' : 'form-grid-1'}>
               {searchMode === 'RENTAL' ? (
@@ -796,7 +1004,7 @@ function PublicBookingPageInner() {
                     {Array.isArray(listing.deliveryAreas) && listing.deliveryAreas.length ? ` | ${listing.deliveryAreas.length} delivery areas` : ''}
                     {listing.deliveryNotes ? ` | ${listing.deliveryNotes}` : ''}
                     <br />
-                    Pickup spot: {publicPickupSpotLabel(listing.pickupSpot, listing.location)}
+                    Search place: {listing.searchPlace ? carSharingSearchPlaceLabel(listing.searchPlace) : publicPickupSpotLabel(listing.pickupSpot, listing.location)}
                     {pickupSpotHint(listing.pickupSpot) ? (
                       <>
                         <br />
@@ -887,7 +1095,7 @@ function PublicBookingPageInner() {
               <p className="ui-muted">
                 {searchMode === 'RENTAL'
                   ? `${selectedPickupLocationOption?.label || 'Selected location'} | ${pickupAt} to ${returnAt}`
-                  : `${selectedPickupLocationOption?.label || 'Selected location'} | ${pickupAt} to ${returnAt}`}
+                  : `${selectedCarSharingSearchOption?.label || selectedPickupLocationOption?.label || 'Selected search place'} | ${pickupAt} to ${returnAt}`}
               </p>
             </div>
             <div className="inline-actions">
@@ -899,6 +1107,9 @@ function PublicBookingPageInner() {
           </div>
           <div className="app-banner-list">
             <span className="app-banner-pill">{selectedPickupLocationOption?.label || 'Selected location'}</span>
+            {searchMode === 'CAR_SHARING' && selectedCarSharingSearchOption ? (
+              <span className="app-banner-pill">{selectedCarSharingSearchOption.label}</span>
+            ) : null}
             <span className="app-banner-pill">{pickupAt}</span>
             <span className="app-banner-pill">{returnAt}</span>
             {selectedResult ? (
@@ -910,7 +1121,7 @@ function PublicBookingPageInner() {
           <div className="app-card-grid compact">
             <div className="info-tile">
               <span className="label">Pickup</span>
-              <strong>{selectedPickupLocationOption?.label || 'Selected location'}</strong>
+              <strong>{searchMode === 'CAR_SHARING' ? (selectedCarSharingSearchOption?.label || 'Selected search place') : (selectedPickupLocationOption?.label || 'Selected location')}</strong>
             </div>
             <div className="info-tile">
               <span className="label">Trip Length</span>
@@ -994,17 +1205,24 @@ function PublicBookingPageInner() {
                     <BookingCard
                       key={result.id}
                       title={result.title}
-                      subtitle={`${result.vehicle?.label || 'Vehicle'}${result.location?.name ? ` | ${result.location.name}` : ''}`}
-                      meta={result.instantBook ? 'Instant book ready' : `Hosted by ${result.host?.displayName || 'Host'}`}
+                      subtitle={`${result.vehicle?.label || 'Vehicle'}${result.searchPlace?.label ? ` | ${result.searchPlace.label}` : result.location?.name ? ` | ${result.location.name}` : ''}`}
+                      meta={result.recommendedBadge || (result.instantBook ? 'Instant book ready' : `Hosted by ${result.host?.displayName || 'Host'}`)}
                       selected={selectedResult?.id === result.id}
                       imageUrl={result.primaryImageUrl}
                       imageUrls={result.imageUrls}
                       hostSummary={result.host ? `${result.host.displayName} | ${fmtRating(result.host.averageRating, result.host.reviewCount)}` : ''}
                       hostHref={result.host?.id ? `/host-profile/${result.host.id}` : ''}
                       hints={[
-                        result.instantBook ? 'Instant book' : 'Approval flow',
+                        ...carSharingDiscoveryBadges(result),
+                        ...(result.trustScore ? [`Trust score ${result.trustScore}/100`] : []),
+                        ...(result.trustTripSignals?.completionRatePct ? [`${Math.round(Number(result.trustTripSignals.completionRatePct || 0))}% trip completion`] : []),
+                        ...(result.trustTripSignals?.handoffConfirmationRatePct ? [`${Math.round(Number(result.trustTripSignals.handoffConfirmationRatePct || 0))}% handoff confirmation`] : []),
+                        ...((result.trustReasons || []).slice(0, 2)),
+                        ...((result.rankingReasons || []).slice(0, 2)),
+                        ...(!result.instantBook ? ['Approval flow'] : []),
                         `${Math.max(1, Number(result.minTripDays || 1))}+ day minimum`,
                         fulfillmentHint(result),
+                        ...(result.searchPlace?.label ? [`Search place: ${result.searchPlace.label}`] : []),
                         ...(result.pickupSpot?.label ? [`Pickup spot: ${result.pickupSpot.label}`] : []),
                         ...(pickupSpotHint(result.pickupSpot) ? [pickupSpotHint(result.pickupSpot)] : []),
                         ...(result.deliveryNotes ? [result.deliveryNotes] : []),
@@ -1015,7 +1233,8 @@ function PublicBookingPageInner() {
                         { label: 'Daily Rate', value: fmtMoney(result.quote.subtotal / Math.max(1, result.quote.tripDays)) },
                         { label: 'Trip Total', value: fmtMoney(result.quote.total) },
                         { label: 'Trip Fee', value: fmtMoney(result.quote.guestTripFee) },
-                        { label: 'Minimum Trip', value: `${Math.max(1, Number(result.minTripDays || 1))} day${Math.max(1, Number(result.minTripDays || 1)) === 1 ? '' : 's'}` }
+                        { label: 'Minimum Trip', value: `${Math.max(1, Number(result.minTripDays || 1))} day${Math.max(1, Number(result.minTripDays || 1)) === 1 ? '' : 's'}` },
+                        ...(result.trustScore ? [{ label: 'Trust Score', value: `${result.trustScore}/100` }] : [])
                       ]}
                       cta={result.instantBook ? 'Continue' : 'Request Booking'}
                       onClick={() => {
@@ -1090,8 +1309,12 @@ function PublicBookingPageInner() {
                 ) : null}
                 {searchMode === 'CAR_SHARING' ? (
                   <>
-                    {`Pickup ${publicPickupSpotLabel(selectedResult.pickupSpot, selectedResult.location)}`}
+                    {`Search place ${selectedResult.searchPlace?.label || publicPickupSpotLabel(selectedResult.pickupSpot, selectedResult.location)}`}
                     {pickupSpotHint(selectedResult.pickupSpot) ? ` | ${pickupSpotHint(selectedResult.pickupSpot)}` : ''}
+                    <br />
+                    {uniqueLabels([selectedResult.recommendedBadge, selectedResult.matchReason]).join(' | ')}
+                    <br />
+                    {selectedResult.trustBadge ? `${selectedResult.trustBadge} | ` : ''}{selectedResult.trustScore ? `Trust score ${selectedResult.trustScore}/100` : ''}
                     <br />
                   </>
                 ) : null}
@@ -1153,10 +1376,40 @@ function PublicBookingPageInner() {
                   <div className="surface-note" style={{ marginBottom: 12, display: 'grid', gap: 10 }}>
                     <strong>Pickup Or Delivery</strong>
                     <div>{fulfillmentHint(selectedResult)}</div>
+                    {selectedResult.recommendedBadge ? <div>{selectedResult.recommendedBadge}</div> : null}
+                    {selectedResult.matchReason ? <div>{selectedResult.matchReason}</div> : null}
+                    {(selectedResult.trustScore || selectedResult.trustBadge) ? (
+                      <div>
+                        {selectedResult.trustBadge ? `${selectedResult.trustBadge} · ` : ''}
+                        {selectedResult.trustScore ? `Trust score ${selectedResult.trustScore}/100` : ''}
+                      </div>
+                    ) : null}
+                    {selectedResult.trustTripSignals ? (
+                      <div>
+                        {selectedResult.trustTripSignals.tripCount ? `${selectedResult.trustTripSignals.tripCount} recent trip${selectedResult.trustTripSignals.tripCount === 1 ? '' : 's'}` : 'New listing'}
+                        {selectedResult.trustTripSignals.completionRatePct ? ` · ${Math.round(Number(selectedResult.trustTripSignals.completionRatePct || 0))}% completion` : ''}
+                        {selectedResult.trustTripSignals.pickupReliabilityPct ? ` · ${Math.round(Number(selectedResult.trustTripSignals.pickupReliabilityPct || 0))}% pickup reliability` : ''}
+                      </div>
+                    ) : null}
+                    {(selectedResult.rankingReasons || []).length ? (
+                      <div className="inline-actions">
+                        {selectedResult.rankingReasons.slice(0, 4).map((reason) => (
+                          <span key={reason} className="status-chip neutral">{reason}</span>
+                        ))}
+                      </div>
+                    ) : null}
+                    {(selectedResult.trustReasons || []).length ? (
+                      <div className="inline-actions">
+                        {selectedResult.trustReasons.slice(0, 4).map((reason) => (
+                          <span key={reason} className="status-chip neutral">{reason}</span>
+                        ))}
+                      </div>
+                    ) : null}
+                    {selectedResult.exactLocationHidden ? <div>Exact pickup details will be shared after booking confirmation.</div> : null}
                     {Array.isArray(selectedResult.deliveryAreas) && selectedResult.deliveryAreas.length ? (
                       <div>Allowed delivery areas: {selectedResult.deliveryAreas.join(' | ')}</div>
                     ) : null}
-                    {listing.deliveryNotes ? <div>{listing.deliveryNotes}</div> : null}
+                    {selectedResult.deliveryNotes ? <div>{selectedResult.deliveryNotes}</div> : null}
                     {String(selectedResult.fulfillmentMode || 'PICKUP_ONLY').toUpperCase() === 'PICKUP_OR_DELIVERY' ? (
                       <div className="inline-actions">
                         <button type="button" className={selectedFulfillmentChoice === 'PICKUP' ? '' : 'button-subtle'} onClick={() => setSelectedFulfillmentChoice('PICKUP')}>
@@ -1173,14 +1426,40 @@ function PublicBookingPageInner() {
                           : `Pickup is required for this listing${Number(selectedResult.pickupFee || 0) > 0 ? ` | ${fmtMoney(selectedResult.pickupFee)}` : ''}.`}
                       </div>
                     )}
-                    {selectedFulfillmentChoice === 'DELIVERY' && Array.isArray(selectedResult.deliveryAreas) && selectedResult.deliveryAreas.length ? (
-                      <div>
-                        <div className="label">Delivery Area</div>
-                        <select value={selectedDeliveryArea} onChange={(event) => setSelectedDeliveryArea(event.target.value)}>
-                          {selectedResult.deliveryAreas.map((area) => <option key={area} value={area}>{area}</option>)}
-                        </select>
-                      </div>
-                    ) : null}
+                    {selectedFulfillmentChoice === 'DELIVERY' && (() => {
+                      const hints = Array.isArray(selectedResult.deliveryAreaHints) && selectedResult.deliveryAreaHints.length
+                        ? selectedResult.deliveryAreaHints
+                        : null;
+                      const legacyAreas = Array.isArray(selectedResult.deliveryAreas) ? selectedResult.deliveryAreas : [];
+                      if (hints) {
+                        return (
+                          <div>
+                            <div className="label">Delivery Area</div>
+                            <select value={selectedDeliveryArea} onChange={(event) => setSelectedDeliveryArea(event.target.value)}>
+                              {hints.map((hint) => {
+                                const label = [
+                                  hint.label || hint.city || hint.searchPlaceId,
+                                  hint.radiusMiles ? `${hint.radiusMiles} mi radius` : null,
+                                  hint.feeOverride != null ? `$${Number(hint.feeOverride).toFixed(2)}` : null
+                                ].filter(Boolean).join(' · ');
+                                return <option key={hint.id || hint.searchPlaceId} value={hint.label || hint.searchPlaceId}>{label}</option>;
+                              })}
+                            </select>
+                          </div>
+                        );
+                      }
+                      if (legacyAreas.length) {
+                        return (
+                          <div>
+                            <div className="label">Delivery Area</div>
+                            <select value={selectedDeliveryArea} onChange={(event) => setSelectedDeliveryArea(event.target.value)}>
+                              {legacyAreas.map((area) => <option key={area} value={area}>{area}</option>)}
+                            </select>
+                          </div>
+                        );
+                      }
+                      return null;
+                    })()}
                   </div>
                 ) : null}
                 <div className="section-title">Guest Details</div>
@@ -1493,7 +1772,8 @@ function PublicBookingPageInner() {
                       setSubmitting(true);
                       setError('');
                       try {
-                        if (searchMode === 'CAR_SHARING' && selectedFulfillmentChoice === 'DELIVERY' && Array.isArray(selectedResult?.deliveryAreas) && selectedResult.deliveryAreas.length && !selectedDeliveryArea) {
+                        const hasDeliveryAreaChoices = (Array.isArray(selectedResult?.deliveryAreaHints) && selectedResult.deliveryAreaHints.length) || (Array.isArray(selectedResult?.deliveryAreas) && selectedResult.deliveryAreas.length);
+                        if (searchMode === 'CAR_SHARING' && selectedFulfillmentChoice === 'DELIVERY' && hasDeliveryAreaChoices && !selectedDeliveryArea) {
                           setError('Choose one of the allowed delivery areas for this listing.');
                           setSubmitting(false);
                           return;
@@ -1507,6 +1787,12 @@ function PublicBookingPageInner() {
                             returnAt,
                             pickupLocationId: selectedResult?.location?.id || '',
                             returnLocationId: searchMode === 'RENTAL' ? resolveReturnLocationForSelection() : (selectedResult?.location?.id || ''),
+                            searchPlaceId: searchMode === 'CAR_SHARING'
+                              ? (selectedResult?.searchPlace?.id || selectedCarSharingSearchOption?.searchPlaceId || '')
+                              : '',
+                            requestedSearchPlaceId: searchMode === 'CAR_SHARING'
+                              ? (selectedCarSharingSearchOption?.searchPlaceId || '')
+                              : '',
                             vehicleTypeId: searchMode === 'RENTAL' ? selectedResult?.vehicleType?.id : null,
                             listingId: searchMode === 'CAR_SHARING' ? selectedResult?.id : null,
                             fulfillmentChoice: searchMode === 'CAR_SHARING' ? selectedFulfillmentChoice : null,
@@ -1578,4 +1864,3 @@ export default function PublicBookingPage() {
     </Suspense>
   );
 }
-

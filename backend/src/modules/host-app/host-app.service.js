@@ -1,6 +1,8 @@
 import { prisma } from '../../lib/prisma.js';
 import { carSharingService } from '../car-sharing/car-sharing.service.js';
+import { serializePublicTripFulfillmentPlan } from '../car-sharing/car-sharing-handoff.js';
 import { issueCenterService } from '../issue-center/issue-center.service.js';
+import { settingsService } from '../settings/settings.service.js';
 import { assertTenantVehicleCapacity } from '../../lib/tenant-plan-limits.js';
 
 function listingInclude() {
@@ -9,7 +11,12 @@ function listingInclude() {
     location: true,
     pickupSpot: {
       include: {
-        anchorLocation: true
+        anchorLocation: true,
+        searchPlace: {
+          include: {
+            anchorLocation: true
+          }
+        }
       }
     },
     tenant: true,
@@ -39,7 +46,17 @@ function tripInclude() {
     listing: {
       include: {
         vehicle: { include: { vehicleType: true } },
-        location: true
+        location: true,
+        pickupSpot: {
+          include: {
+            anchorLocation: true,
+            searchPlace: {
+              include: {
+                anchorLocation: true
+              }
+            }
+          }
+        }
       }
     },
     guestCustomer: true,
@@ -56,12 +73,58 @@ function tripInclude() {
     hostReview: true,
     pickupLocation: true,
     returnLocation: true,
+    fulfillmentPlan: {
+      include: {
+        searchPlace: {
+          include: {
+            anchorLocation: true
+          }
+        },
+        pickupSpot: {
+          include: {
+            anchorLocation: true,
+            searchPlace: {
+              include: {
+                anchorLocation: true
+              }
+            }
+          }
+        },
+        serviceArea: {
+          include: {
+            searchPlace: {
+              include: {
+                anchorLocation: true
+              }
+            }
+          }
+        }
+      }
+    },
     timelineEvents: { orderBy: [{ eventAt: 'desc' }], take: 10 }
   };
 }
 
 function isAdminViewer(user) {
   return ['SUPER_ADMIN', 'ADMIN', 'OPS'].includes(String(user?.role || '').toUpperCase());
+}
+
+function enrichHostTripFulfillmentPlan(trip, selfServiceConfig = {}) {
+  if (!trip?.fulfillmentPlan) return trip;
+  const derived = serializePublicTripFulfillmentPlan(trip.fulfillmentPlan, {
+    pickupAt: trip?.reservation?.pickupAt || null,
+    selfServiceConfig,
+    serializeSearchPlace: (value) => value,
+    serializePickupSpot: (value) => value,
+    serializeServiceAreaSearchPlace: (value) => value
+  });
+  return {
+    ...trip,
+    fulfillmentPlan: {
+      ...trip.fulfillmentPlan,
+      ...(derived || {})
+    }
+  };
 }
 
 async function resolveHostContext(user, requestedHostProfileId) {
@@ -189,6 +252,212 @@ function parseTextList(value) {
     .map((row) => row.trim())
     .filter(Boolean)
     .slice(0, 12);
+}
+
+async function syncPickupSpotSearchPlace(spot) {
+  if (!spot?.id || !spot?.tenantId || !spot?.hostProfileId) return null;
+  const searchable = !!spot.isActive;
+  const isApproved = String(spot.approvalStatus || '').toUpperCase() === 'APPROVED';
+  const values = {
+    tenantId: spot.tenantId,
+    hostProfileId: spot.hostProfileId,
+    anchorLocationId: spot.anchorLocationId || null,
+    placeType: 'HOST_PICKUP_SPOT',
+    label: spot.label,
+    publicLabel: spot.label,
+    city: spot.city || null,
+    state: spot.state || null,
+    postalCode: spot.postalCode || null,
+    country: spot.country || null,
+    latitude: spot.latitude ?? null,
+    longitude: spot.longitude ?? null,
+    searchable,
+    isActive: !!spot.isActive,
+    approvalStatus: isApproved ? 'APPROVED' : 'PENDING',
+    visibilityMode: isApproved ? 'REVEAL_AFTER_BOOKING' : 'APPROXIMATE_ONLY',
+    deliveryEligible: false,
+    pickupEligible: true
+  };
+
+  return prisma.carSharingSearchPlace.upsert({
+    where: { hostPickupSpotId: spot.id },
+    create: {
+      hostPickupSpotId: spot.id,
+      ...values
+    },
+    update: values,
+    include: {
+      anchorLocation: true,
+      hostPickupSpot: {
+        include: {
+          anchorLocation: true
+        }
+      }
+    }
+  });
+}
+
+async function syncListingServiceAreas({ listingId, tenantId, hostProfileId }) {
+  if (!listingId || !tenantId || !hostProfileId) return [];
+  const listing = await prisma.hostVehicleListing.findFirst({
+    where: { id: listingId, tenantId, hostProfileId },
+    include: {
+      location: true,
+      pickupSpot: {
+        include: {
+          anchorLocation: true,
+          searchPlace: {
+            include: {
+              anchorLocation: true
+            }
+          }
+        }
+      },
+      serviceAreas: true
+    }
+  });
+  if (!listing) throw new Error('Listing not found for discovery sync');
+
+  if (listing.pickupSpot) {
+    await syncPickupSpotSearchPlace({
+      ...listing.pickupSpot,
+      tenantId,
+      hostProfileId
+    });
+  }
+
+  const freshPickupSpot = listing.pickupSpot?.id
+    ? await prisma.hostPickupSpot.findUnique({
+        where: { id: listing.pickupSpot.id },
+        include: {
+          anchorLocation: true,
+          searchPlace: {
+            include: {
+              anchorLocation: true
+            }
+          }
+        }
+      })
+    : null;
+
+  const keepServiceAreaIds = new Set();
+  const listingMode = String(listing.fulfillmentMode || 'PICKUP_ONLY').toUpperCase();
+  const deliveryLabels = parseTextList(listing.deliveryAreasJson);
+
+  if (listingMode !== 'DELIVERY_ONLY' && freshPickupSpot?.searchPlace?.id) {
+    const existingPickupArea = (listing.serviceAreas || []).find((row) =>
+      String(row.serviceType || '').toUpperCase() === 'PICKUP' && String(row.searchPlaceId || '') === String(freshPickupSpot.searchPlace.id)
+    );
+    const pickupArea = existingPickupArea
+      ? await prisma.hostServiceArea.update({
+          where: { id: existingPickupArea.id },
+          data: {
+            searchPlaceId: freshPickupSpot.searchPlace.id,
+            isActive: true
+          }
+        })
+      : await prisma.hostServiceArea.create({
+          data: {
+            tenantId,
+            hostProfileId,
+            listingId: listing.id,
+            searchPlaceId: freshPickupSpot.searchPlace.id,
+            serviceType: 'PICKUP',
+            isActive: true
+          }
+        });
+    if (pickupArea?.id) keepServiceAreaIds.add(pickupArea.id);
+  }
+
+  if (listingMode !== 'PICKUP_ONLY') {
+    for (const areaLabel of deliveryLabels) {
+      let searchPlace = await prisma.carSharingSearchPlace.findFirst({
+        where: {
+          tenantId,
+          hostProfileId,
+          placeType: 'DELIVERY_ZONE',
+          anchorLocationId: listing.locationId || freshPickupSpot?.anchorLocationId || null,
+          OR: [
+            { label: { equals: areaLabel, mode: 'insensitive' } },
+            { publicLabel: { equals: areaLabel, mode: 'insensitive' } }
+          ]
+        }
+      });
+
+      if (!searchPlace) {
+        searchPlace = await prisma.carSharingSearchPlace.create({
+          data: {
+            tenantId,
+            hostProfileId,
+            anchorLocationId: listing.locationId || freshPickupSpot?.anchorLocationId || null,
+            placeType: 'DELIVERY_ZONE',
+            label: areaLabel,
+            publicLabel: areaLabel,
+            city: listing.location?.city || freshPickupSpot?.city || null,
+            state: listing.location?.state || freshPickupSpot?.state || null,
+            searchable: true,
+            isActive: true,
+            approvalStatus: 'PENDING',
+            visibilityMode: 'APPROXIMATE_ONLY',
+            deliveryEligible: true,
+            pickupEligible: false
+          }
+        });
+      }
+
+      const existingArea = (listing.serviceAreas || []).find((row) =>
+        String(row.serviceType || '').toUpperCase() === 'DELIVERY'
+        && String(row.searchPlaceId || '') === String(searchPlace.id)
+      );
+      const deliveryArea = existingArea
+        ? await prisma.hostServiceArea.update({
+            where: { id: existingArea.id },
+            data: {
+              searchPlaceId: searchPlace.id,
+              isActive: true
+            }
+          })
+        : await prisma.hostServiceArea.create({
+            data: {
+              tenantId,
+              hostProfileId,
+              listingId: listing.id,
+              searchPlaceId: searchPlace.id,
+              serviceType: 'DELIVERY',
+              isActive: true
+            }
+          });
+      if (deliveryArea?.id) keepServiceAreaIds.add(deliveryArea.id);
+    }
+  }
+
+  const staleServiceAreaIds = (listing.serviceAreas || [])
+    .map((row) => row.id)
+    .filter((id) => !keepServiceAreaIds.has(id));
+  if (staleServiceAreaIds.length) {
+    await prisma.hostServiceArea.updateMany({
+      where: { id: { in: staleServiceAreaIds } },
+      data: { isActive: false }
+    });
+  }
+
+  return prisma.hostServiceArea.findMany({
+    where: { listingId: listing.id },
+    include: {
+      searchPlace: {
+        include: {
+          anchorLocation: true
+        }
+      },
+      listing: {
+        select: {
+          id: true,
+          title: true
+        }
+      }
+    },
+    orderBy: [{ serviceType: 'asc' }, { createdAt: 'asc' }]
+  });
 }
 
 export async function createHostVehicleSubmissionForProfile({ hostProfileId, tenantId, payload = {} }) {
@@ -324,7 +593,7 @@ export const hostAppService = {
 
     const hostTenantId = await resolveHostTenantId(context.hostProfile);
 
-    const [vehicleTypes, locations, submissions, pickupSpots] = await Promise.all([
+    const [vehicleTypes, locations, submissions, pickupSpots, searchPlaces, serviceAreas] = await Promise.all([
       prisma.vehicleType.findMany({
         where: hostTenantId ? { tenantId: hostTenantId } : { id: '__never__' },
         orderBy: [{ name: 'asc' }]
@@ -343,9 +612,47 @@ export const hostAppService = {
           ? { tenantId: hostTenantId, hostProfileId: context.hostProfile.id }
           : { id: '__never__' },
         include: {
-          anchorLocation: true
+          anchorLocation: true,
+          searchPlace: {
+            include: {
+              anchorLocation: true
+            }
+          }
         },
         orderBy: [{ isDefault: 'desc' }, { createdAt: 'desc' }]
+      }),
+      prisma.carSharingSearchPlace.findMany({
+        where: hostTenantId
+          ? { tenantId: hostTenantId, hostProfileId: context.hostProfile.id }
+          : { id: '__never__' },
+        include: {
+          anchorLocation: true,
+          hostPickupSpot: {
+            include: {
+              anchorLocation: true
+            }
+          }
+        },
+        orderBy: [{ createdAt: 'desc' }]
+      }),
+      prisma.hostServiceArea.findMany({
+        where: hostTenantId
+          ? { tenantId: hostTenantId, hostProfileId: context.hostProfile.id }
+          : { id: '__never__' },
+        include: {
+          listing: {
+            select: {
+              id: true,
+              title: true
+            }
+          },
+          searchPlace: {
+            include: {
+              anchorLocation: true
+            }
+          }
+        },
+        orderBy: [{ createdAt: 'desc' }]
       })
     ]);
 
@@ -366,6 +673,10 @@ export const hostAppService = {
       include: tripInclude(),
       orderBy: [{ createdAt: 'desc' }]
     });
+    const selfServiceConfig = hostTenantId
+      ? await settingsService.getSelfServiceConfig({ tenantId: hostTenantId }).catch(() => null)
+      : null;
+    const enrichedTrips = trips.map((trip) => enrichHostTripFulfillmentPlan(trip, selfServiceConfig || {}));
 
     return {
       isAdminViewer: !!context.adminViewer,
@@ -392,7 +703,7 @@ export const hostAppService = {
           : null
       },
       listings,
-      trips,
+      trips: enrichedTrips,
       recentReviews: recentReviews.map((review) => ({
         id: review.id,
         rating: review.rating == null ? null : Number(review.rating),
@@ -403,9 +714,11 @@ export const hostAppService = {
       vehicleTypes,
       locations,
       pickupSpots,
+      searchPlaces,
+      serviceAreas,
       vehicleSubmissions: submissions,
       metrics: {
-        ...hostMetrics(listings, trips),
+        ...hostMetrics(listings, enrichedTrips),
         pendingVehicleApprovals: submissions.filter((row) => ['PENDING_REVIEW', 'PENDING_INFO'].includes(String(row.status || '').toUpperCase())).length
       }
     };
@@ -514,9 +827,15 @@ export const hostAppService = {
       addOnsJson: Object.prototype.hasOwnProperty.call(payload, 'addOnsJson') ? payload.addOnsJson : undefined
     };
 
-    return carSharingService.updateListing(id, allowedPatch, {
+    const updated = await carSharingService.updateListing(id, allowedPatch, {
       tenantId: listing.tenantId || undefined
     });
+    await syncListingServiceAreas({
+      listingId: listing.id,
+      tenantId: listing.tenantId || null,
+      hostProfileId: listing.hostProfileId
+    });
+    return updated;
   },
 
   async updateTripStatus(user, id, payload = {}) {
@@ -542,6 +861,98 @@ export const hostAppService = {
       tenantId: trip.tenantId || undefined,
       actorUserId: user?.id || user?.sub || null
     });
+  },
+
+  async updateTripFulfillmentPlan(user, id, payload = {}) {
+    const requestedHostProfileId = payload?.hostProfileId ? String(payload.hostProfileId).trim() : null;
+    const context = await resolveHostContext(user, requestedHostProfileId || null);
+    if (!context.hostProfile) throw new Error('No host profile is linked to this login yet');
+
+    const trip = await prisma.trip.findFirst({
+      where: {
+        id,
+        hostProfileId: context.hostProfile.id
+      },
+      include: {
+        fulfillmentPlan: true
+      }
+    });
+    if (!trip) throw new Error('Trip not found for this host');
+    if (!trip.fulfillmentPlan) throw new Error('Trip handoff plan not found');
+
+    const exactAddress1 = Object.prototype.hasOwnProperty.call(payload || {}, 'exactAddress1')
+      ? (payload?.exactAddress1 ? String(payload.exactAddress1).trim() : null)
+      : undefined;
+    const exactAddress2 = Object.prototype.hasOwnProperty.call(payload || {}, 'exactAddress2')
+      ? (payload?.exactAddress2 ? String(payload.exactAddress2).trim() : null)
+      : undefined;
+    const city = Object.prototype.hasOwnProperty.call(payload || {}, 'city')
+      ? (payload?.city ? String(payload.city).trim() : null)
+      : undefined;
+    const state = Object.prototype.hasOwnProperty.call(payload || {}, 'state')
+      ? (payload?.state ? String(payload.state).trim() : null)
+      : undefined;
+    const postalCode = Object.prototype.hasOwnProperty.call(payload || {}, 'postalCode')
+      ? (payload?.postalCode ? String(payload.postalCode).trim() : null)
+      : undefined;
+    const country = Object.prototype.hasOwnProperty.call(payload || {}, 'country')
+      ? (payload?.country ? String(payload.country).trim() : null)
+      : undefined;
+    const instructions = Object.prototype.hasOwnProperty.call(payload || {}, 'instructions')
+      ? (payload?.instructions ? String(payload.instructions).trim() : null)
+      : undefined;
+    const handoffMode = Object.prototype.hasOwnProperty.call(payload || {}, 'handoffMode')
+      ? String(payload?.handoffMode || trip.fulfillmentPlan.handoffMode).trim().toUpperCase()
+      : undefined;
+    const confirmExactDetails = !!payload?.confirmExactDetails;
+    const clearConfirmation = !!payload?.clearConfirmation;
+
+    if (handoffMode && !['IN_PERSON', 'LOCKBOX', 'REMOTE_UNLOCK', 'SELF_SERVICE'].includes(handoffMode)) {
+      throw new Error('Invalid handoff mode');
+    }
+
+    const updated = await prisma.tripFulfillmentPlan.update({
+      where: { id: trip.fulfillmentPlan.id },
+      data: {
+        exactAddress1,
+        exactAddress2,
+        city,
+        state,
+        postalCode,
+        country,
+        instructions,
+        handoffMode,
+        confirmedAt: confirmExactDetails ? new Date() : (clearConfirmation ? null : undefined)
+      }
+    });
+
+    await prisma.tripTimelineEvent.create({
+      data: {
+        tripId: trip.id,
+        eventType: confirmExactDetails ? 'TRIP_HANDOFF_CONFIRMED' : 'TRIP_HANDOFF_UPDATED',
+        actorType: 'TENANT_USER',
+        actorRefId: user?.id || user?.sub || null,
+        notes: confirmExactDetails
+          ? 'Exact handoff details confirmed for guest release'
+          : (clearConfirmation ? 'Exact handoff confirmation cleared' : 'Trip handoff details updated'),
+        metadata: JSON.stringify({
+          fulfillmentPlanId: updated.id,
+          handoffMode: updated.handoffMode,
+          confirmedAt: updated.confirmedAt,
+          pickupRevealMode: updated.pickupRevealMode
+        })
+      }
+    });
+
+    const updatedTrip = await prisma.trip.findUnique({
+      where: { id: trip.id },
+      include: tripInclude()
+    });
+    const hostTenantId = await resolveHostTenantId(context.hostProfile);
+    const selfServiceConfig = hostTenantId
+      ? await settingsService.getSelfServiceConfig({ tenantId: hostTenantId }).catch(() => null)
+      : null;
+    return enrichHostTripFulfillmentPlan(updatedTrip, selfServiceConfig || {});
   },
 
   async createTripIncident(user, id, payload = {}) {
@@ -589,7 +1000,7 @@ export const hostAppService = {
       });
     }
 
-    return prisma.hostPickupSpot.create({
+    const created = await prisma.hostPickupSpot.create({
       data: {
         tenantId,
         hostProfileId: context.hostProfile.id,
@@ -610,6 +1021,18 @@ export const hostAppService = {
       },
       include: {
         anchorLocation: true
+      }
+    });
+    await syncPickupSpotSearchPlace(created);
+    return prisma.hostPickupSpot.findUnique({
+      where: { id: created.id },
+      include: {
+        anchorLocation: true,
+        searchPlace: {
+          include: {
+            anchorLocation: true
+          }
+        }
       }
     });
   },
@@ -648,7 +1071,7 @@ export const hostAppService = {
       });
     }
 
-    return prisma.hostPickupSpot.update({
+    const updated = await prisma.hostPickupSpot.update({
       where: { id: current.id },
       data: {
         label: Object.prototype.hasOwnProperty.call(payload || {}, 'label') ? String(payload?.label || '').trim() : undefined,
@@ -668,6 +1091,117 @@ export const hostAppService = {
       },
       include: {
         anchorLocation: true
+      }
+    });
+    await syncPickupSpotSearchPlace(updated);
+    return prisma.hostPickupSpot.findUnique({
+      where: { id: updated.id },
+      include: {
+        anchorLocation: true,
+        searchPlace: {
+          include: {
+            anchorLocation: true
+          }
+        }
+      }
+    });
+  },
+
+  async syncListingDiscovery(user, id, payload = {}) {
+    const requestedHostProfileId = payload?.hostProfileId ? String(payload.hostProfileId).trim() : null;
+    const context = await resolveHostContext(user, requestedHostProfileId || null);
+    if (!context.hostProfile) throw new Error('No host profile is linked to this login yet');
+    const listing = await prisma.hostVehicleListing.findFirst({
+      where: {
+        id,
+        hostProfileId: context.hostProfile.id
+      },
+      select: {
+        id: true,
+        tenantId: true,
+        hostProfileId: true
+      }
+    });
+    if (!listing) throw new Error('Listing not found for this host');
+    const serviceAreas = await syncListingServiceAreas({
+      listingId: listing.id,
+      tenantId: listing.tenantId || null,
+      hostProfileId: listing.hostProfileId
+    });
+    return { listingId: listing.id, serviceAreas };
+  },
+
+  async updateSearchPlace(user, id, payload = {}) {
+    const role = String(user?.role || '').toUpperCase();
+    const requestedHostProfileId = payload?.hostProfileId ? String(payload.hostProfileId).trim() : null;
+    const context = await resolveHostContext(user, requestedHostProfileId || null);
+    if (!context.hostProfile) throw new Error('No host profile is linked to this login yet');
+    const tenantFilter = role === 'SUPER_ADMIN' ? {} : context.hostProfile.tenantId ? { tenantId: context.hostProfile.tenantId } : {};
+    const current = await prisma.carSharingSearchPlace.findFirst({
+      where: {
+        id,
+        hostProfileId: context.hostProfile.id,
+        ...tenantFilter
+      }
+    });
+    if (!current) throw new Error('Search place not found for this host');
+    const isAdmin = isAdminViewer(user);
+    return prisma.carSharingSearchPlace.update({
+      where: { id: current.id },
+      data: {
+        publicLabel: Object.prototype.hasOwnProperty.call(payload || {}, 'publicLabel') ? (payload?.publicLabel ? String(payload.publicLabel).trim() : null) : undefined,
+        searchable: Object.prototype.hasOwnProperty.call(payload || {}, 'searchable') ? !!payload?.searchable : undefined,
+        isActive: Object.prototype.hasOwnProperty.call(payload || {}, 'isActive') ? !!payload?.isActive : undefined,
+        visibilityMode: Object.prototype.hasOwnProperty.call(payload || {}, 'visibilityMode') ? String(payload?.visibilityMode || current.visibilityMode).trim().toUpperCase() : undefined,
+        radiusMiles: Object.prototype.hasOwnProperty.call(payload || {}, 'radiusMiles') ? (payload?.radiusMiles ? Number(payload.radiusMiles) : null) : undefined,
+        pickupEligible: Object.prototype.hasOwnProperty.call(payload || {}, 'pickupEligible') ? !!payload?.pickupEligible : undefined,
+        deliveryEligible: Object.prototype.hasOwnProperty.call(payload || {}, 'deliveryEligible') ? !!payload?.deliveryEligible : undefined,
+        approvalStatus: isAdmin && Object.prototype.hasOwnProperty.call(payload || {}, 'approvalStatus')
+          ? String(payload?.approvalStatus || current.approvalStatus).trim().toUpperCase()
+          : undefined
+      },
+      include: {
+        anchorLocation: true,
+        hostPickupSpot: {
+          include: {
+            anchorLocation: true
+          }
+        }
+      }
+    });
+  },
+
+  async updateServiceArea(user, id, payload = {}) {
+    const requestedHostProfileId = payload?.hostProfileId ? String(payload.hostProfileId).trim() : null;
+    const context = await resolveHostContext(user, requestedHostProfileId || null);
+    if (!context.hostProfile) throw new Error('No host profile is linked to this login yet');
+    const current = await prisma.hostServiceArea.findFirst({
+      where: {
+        id,
+        hostProfileId: context.hostProfile.id
+      }
+    });
+    if (!current) throw new Error('Service area not found for this host');
+    return prisma.hostServiceArea.update({
+      where: { id: current.id },
+      data: {
+        isActive: Object.prototype.hasOwnProperty.call(payload || {}, 'isActive') ? !!payload?.isActive : undefined,
+        feeOverride: Object.prototype.hasOwnProperty.call(payload || {}, 'feeOverride') ? (payload?.feeOverride === '' || payload?.feeOverride == null ? null : Number(payload.feeOverride)) : undefined,
+        leadTimeMinutes: Object.prototype.hasOwnProperty.call(payload || {}, 'leadTimeMinutes') ? (payload?.leadTimeMinutes === '' || payload?.leadTimeMinutes == null ? null : Number(payload.leadTimeMinutes)) : undefined,
+        afterHoursAllowed: Object.prototype.hasOwnProperty.call(payload || {}, 'afterHoursAllowed') ? !!payload?.afterHoursAllowed : undefined
+      },
+      include: {
+        listing: {
+          select: {
+            id: true,
+            title: true
+          }
+        },
+        searchPlace: {
+          include: {
+            anchorLocation: true
+          }
+        }
       }
     });
   },

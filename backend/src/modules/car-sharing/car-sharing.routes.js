@@ -184,3 +184,52 @@ carSharingRouter.delete('/availability/:id', async (req, res, next) => {
     res.status(404).json({ error: e.message });
   }
 });
+
+carSharingRouter.get('/ops/handoff-alerts', async (req, res, next) => {
+  try {
+    res.json(await carSharingService.listHandoffConfirmationAlerts({
+      ...scopeFor(req),
+      warningHours: req.query?.warningHours ? Number(req.query.warningHours) : 24
+    }));
+  } catch (e) {
+    next(e);
+  }
+});
+
+carSharingRouter.post('/ops/send-handoff-reminders', async (req, res, next) => {
+  try {
+    res.json(await carSharingService.sendHandoffConfirmationReminders({
+      ...scopeFor(req),
+      warningHours: req.body?.warningHours ?? 24
+    }));
+  } catch (e) {
+    next(e);
+  }
+});
+
+carSharingRouter.get('/search-places/pending', async (req, res, next) => {
+  try {
+    res.json(await carSharingService.listPendingSearchPlaces(scopeFor(req)));
+  } catch (e) {
+    next(e);
+  }
+});
+
+carSharingRouter.patch('/search-places/:id/approve', async (req, res, next) => {
+  try {
+    res.json(await carSharingService.approveSearchPlace(req.params.id, scopeFor(req)));
+  } catch (e) {
+    res.status(404).json({ error: e.message });
+  }
+});
+
+carSharingRouter.patch('/search-places/:id/reject', async (req, res, next) => {
+  try {
+    res.json(await carSharingService.rejectSearchPlace(req.params.id, {
+      reason: req.body?.reason || '',
+      ...scopeFor(req)
+    }));
+  } catch (e) {
+    res.status(404).json({ error: e.message });
+  }
+});

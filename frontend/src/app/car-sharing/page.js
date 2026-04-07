@@ -55,6 +55,9 @@ const EMPTY_TRIP = {
   scheduledReturnAt: '',
   pickupLocationId: '',
   returnLocationId: '',
+  fulfillmentChoice: 'PICKUP',
+  searchPlaceId: '',
+  deliveryAreaChoice: '',
   notes: ''
 };
 
@@ -288,6 +291,8 @@ function CarSharingInner({ token, me, logout }) {
   const [activeTenantId, setActiveTenantId] = useState('');
   const [loading, setLoading] = useState(true);
   const [opsFocus, setOpsFocus] = useState('ALL');
+  const [handoffAlerts, setHandoffAlerts] = useState([]);
+  const [pendingSearchPlaces, setPendingSearchPlaces] = useState([]);
 
   const isSuper = String(me?.role || '').toUpperCase() === 'SUPER_ADMIN';
 
@@ -357,6 +362,14 @@ function CarSharingInner({ token, me, logout }) {
         setTenants(rows);
         if (!activeTenantId && rows[0]?.id) setActiveTenantId(rows[0].id);
       }
+      // Load ops panels in parallel — non-blocking
+      Promise.all([
+        api(`/api/car-sharing/search-places/pending${scopedQuery}`, {}, token).catch(() => []),
+        api(`/api/car-sharing/ops/handoff-alerts${scopedQuery}`, {}, token).catch(() => [])
+      ]).then(([places, alerts]) => {
+        setPendingSearchPlaces(Array.isArray(places) ? places : []);
+        setHandoffAlerts(Array.isArray(alerts) ? alerts : []);
+      });
       setMsg('');
     } catch (e) {
       setMsg(e.message);
@@ -601,6 +614,9 @@ function CarSharingInner({ token, me, logout }) {
           scheduledReturnAt: tripForm.scheduledReturnAt,
           pickupLocationId: tripForm.pickupLocationId || null,
           returnLocationId: tripForm.returnLocationId || null,
+          fulfillmentChoice: tripForm.fulfillmentChoice || 'PICKUP',
+          searchPlaceId: tripForm.searchPlaceId || null,
+          deliveryAreaChoice: tripForm.deliveryAreaChoice || null,
           notes: tripForm.notes || null
         })
       }, token);
@@ -641,6 +657,35 @@ function CarSharingInner({ token, me, logout }) {
         ? `Workflow created and linked to reservation ${trip.reservation.reservationNumber}`
         : 'Workflow created for trip');
       await load();
+    } catch (e) {
+      setMsg(e.message);
+    }
+  };
+
+  const approveSearchPlace = async (id) => {
+    try {
+      await api(`/api/car-sharing/search-places/${id}/approve`, { method: 'PATCH', body: JSON.stringify({}) }, token);
+      setMsg('Search place approved');
+      await load();
+    } catch (e) {
+      setMsg(e.message);
+    }
+  };
+
+  const rejectSearchPlace = async (id) => {
+    try {
+      await api(`/api/car-sharing/search-places/${id}/reject`, { method: 'PATCH', body: JSON.stringify({ reason: 'Rejected by admin' }) }, token);
+      setMsg('Search place rejected');
+      await load();
+    } catch (e) {
+      setMsg(e.message);
+    }
+  };
+
+  const sendHandoffReminders = async () => {
+    try {
+      const result = await api(`/api/car-sharing/ops/send-handoff-reminders${scopedQuery}`, { method: 'POST', body: JSON.stringify({}) }, token);
+      setMsg(`Reminders: ${result?.sent ?? 0} sent, ${result?.skipped ?? 0} skipped`);
     } catch (e) {
       setMsg(e.message);
     }
@@ -1023,6 +1068,26 @@ function CarSharingInner({ token, me, logout }) {
                   </select>
                 </div>
               </div>
+              <div className="stack">
+                <label className="label">Fulfillment</label>
+                <select value={tripForm.fulfillmentChoice} onChange={(e) => setTripForm({ ...tripForm, fulfillmentChoice: e.target.value })}>
+                  <option value="PICKUP">Pickup</option>
+                  <option value="DELIVERY">Delivery</option>
+                </select>
+              </div>
+              {tripForm.fulfillmentChoice === 'DELIVERY' && (selectedListing?.serviceAreas || []).filter((a) => ['DELIVERY', 'BOTH'].includes(String(a.serviceType || '').toUpperCase())).length ? (
+                <div className="stack">
+                  <label className="label">Delivery Area</label>
+                  <select value={tripForm.deliveryAreaChoice} onChange={(e) => setTripForm({ ...tripForm, deliveryAreaChoice: e.target.value, searchPlaceId: e.target.value })}>
+                    <option value="">Any delivery area</option>
+                    {(selectedListing.serviceAreas || []).filter((a) => ['DELIVERY', 'BOTH'].includes(String(a.serviceType || '').toUpperCase())).map((area) => (
+                      <option key={area.id} value={area.searchPlace?.id || area.id}>
+                        {area.searchPlace?.displayName || area.searchPlace?.name || area.id}{area.radiusMiles ? ` (${area.radiusMiles} mi)` : ''}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              ) : null}
               <div className="stack"><label className="label">Notes</label><textarea rows={2} value={tripForm.notes} onChange={(e) => setTripForm({ ...tripForm, notes: e.target.value })} /></div>
               <div className="inline-actions"><button type="submit">Create Trip</button></div>
             </form>
@@ -1034,6 +1099,7 @@ function CarSharingInner({ token, me, logout }) {
                   <th>Trip</th>
                   <th>Reservation</th>
                   <th>Workflow</th>
+                  <th>Handoff</th>
                   <th>Guest</th>
                   <th>Status</th>
                   <th>Pickup</th>
@@ -1087,6 +1153,17 @@ function CarSharingInner({ token, me, logout }) {
                           ))}
                         </div>
                       </div>
+                    </td>
+                    <td>
+                      {trip.fulfillmentPlan ? (
+                        <div className="stack" style={{ gap: 3, fontSize: 11 }}>
+                          <span>{trip.fulfillmentPlan.fulfillmentChoice || 'PICKUP'}</span>
+                          <span className="label" style={{ textTransform: 'none', letterSpacing: 0 }}>{trip.fulfillmentPlan.handoffMode || 'IN_PERSON'}</span>
+                          {trip.fulfillmentPlan.confirmedAt
+                            ? <span style={{ color: '#047857' }}>Confirmed</span>
+                            : <span style={{ color: '#b45309' }}>Unconfirmed</span>}
+                        </div>
+                      ) : <span className="ui-muted" style={{ fontSize: 11 }}>No plan</span>}
                     </td>
                     <td>{trip.guestCustomer ? [trip.guestCustomer.firstName, trip.guestCustomer.lastName].filter(Boolean).join(' ') : '-'}</td>
                     <td><span className={tripStatusClass(trip.status)}>{trip.status}</span></td>
@@ -1177,6 +1254,82 @@ function CarSharingInner({ token, me, logout }) {
         </div>
         {!assignableVehicles.length && !loading ? <div className="surface-note">No vehicles found for this tenant.</div> : null}
       </section>
+
+      {handoffAlerts.length ? (
+        <section className="glass card-lg section-card" style={{ marginTop: 18 }}>
+          <div className="row-between">
+            <h3 style={{ margin: 0 }}>Handoff Confirmation Alerts ({handoffAlerts.length})</h3>
+            <button type="button" onClick={sendHandoffReminders}>Send Reminders</button>
+          </div>
+          <div className="table-shell">
+            <table>
+              <thead>
+                <tr>
+                  <th>Trip</th>
+                  <th>Listing</th>
+                  <th>Pickup</th>
+                  <th>Hours Until</th>
+                  <th>Handoff Mode</th>
+                  <th>Status</th>
+                  <th>Note</th>
+                </tr>
+              </thead>
+              <tbody>
+                {handoffAlerts.map((alert) => (
+                  <tr key={alert.tripId}>
+                    <td>{alert.tripCode || alert.tripId}</td>
+                    <td>{alert.listingId}</td>
+                    <td>{alert.scheduledPickupAt ? new Date(alert.scheduledPickupAt).toLocaleString() : '-'}</td>
+                    <td>{alert.isOverdue ? <span style={{ color: '#b91c1c' }}>OVERDUE</span> : `${alert.hoursUntilPickup}h`}</td>
+                    <td>{alert.handoffMode}</td>
+                    <td>{alert.pickupRevealMode}</td>
+                    <td style={{ fontSize: 11 }}>{alert.reason}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </section>
+      ) : null}
+
+      {pendingSearchPlaces.length ? (
+        <section className="glass card-lg section-card" style={{ marginTop: 18 }}>
+          <div className="row-between">
+            <h3 style={{ margin: 0 }}>Pending Search Places ({pendingSearchPlaces.length})</h3>
+          </div>
+          <div className="table-shell">
+            <table>
+              <thead>
+                <tr>
+                  <th>Name</th>
+                  <th>Type</th>
+                  <th>City</th>
+                  <th>State</th>
+                  <th>Tenant</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {pendingSearchPlaces.map((place) => (
+                  <tr key={place.id}>
+                    <td>{place.displayName || place.name || place.id}</td>
+                    <td>{place.placeType || '-'}</td>
+                    <td>{place.city || '-'}</td>
+                    <td>{place.state || '-'}</td>
+                    <td>{place.tenantId || 'Global'}</td>
+                    <td>
+                      <div className="inline-actions">
+                        <button type="button" onClick={() => approveSearchPlace(place.id)}>Approve</button>
+                        <button type="button" className="button-subtle" onClick={() => rejectSearchPlace(place.id)}>Reject</button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </section>
+      ) : null}
 
       <section className="glass card-lg section-card" style={{ marginTop: 18 }}>
         <h3 style={{ margin: 0 }}>Launch Direction</h3>

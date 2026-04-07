@@ -1,6 +1,9 @@
 import { prisma } from '../../lib/prisma.js';
 import { hostReviewsService } from '../host-reviews/host-reviews.service.js';
-import { computeMarketplaceTripPricing } from './car-sharing-pricing.js';
+import { computeMarketplaceTripPricing, computeCancellationRefund } from './car-sharing-pricing.js';
+import { sendEmail } from '../../lib/mailer.js';
+import { buildTripFulfillmentPlanData, resolveDeliveryFeeOverride } from './car-sharing-fulfillment.js';
+import { resolveHandoffConfirmationAlerts } from './car-sharing-handoff.js';
 
 function slugify(input) {
   return String(input || '')
@@ -18,8 +21,16 @@ function listingInclude() {
     location: true,
     pickupSpot: {
       include: {
-        anchorLocation: true
+        anchorLocation: true,
+        searchPlace: { include: { anchorLocation: true } }
       }
+    },
+    serviceAreas: {
+      where: { isActive: true },
+      include: {
+        searchPlace: { include: { anchorLocation: true } }
+      },
+      orderBy: [{ createdAt: 'asc' }]
     },
     tenant: true,
     availabilityWindows: {
@@ -36,7 +47,22 @@ function tripInclude() {
         location: true,
         pickupSpot: {
           include: {
-            anchorLocation: true
+            anchorLocation: true,
+            searchPlace: {
+              include: {
+                anchorLocation: true
+              }
+            }
+          }
+        },
+        serviceAreas: {
+          where: { isActive: true },
+          include: {
+            searchPlace: {
+              include: {
+                anchorLocation: true
+              }
+            }
           }
         }
       }
@@ -52,6 +78,34 @@ function tripInclude() {
     hostReview: true,
     pickupLocation: true,
     returnLocation: true,
+    fulfillmentPlan: {
+      include: {
+        searchPlace: {
+          include: {
+            anchorLocation: true
+          }
+        },
+        pickupSpot: {
+          include: {
+            anchorLocation: true,
+            searchPlace: {
+              include: {
+                anchorLocation: true
+              }
+            }
+          }
+        },
+        serviceArea: {
+          include: {
+            searchPlace: {
+              include: {
+                anchorLocation: true
+              }
+            }
+          }
+        }
+      }
+    },
     timelineEvents: { orderBy: [{ eventAt: 'desc' }], take: 10 }
   };
 }
@@ -113,7 +167,7 @@ function parseTextList(value) {
     .slice(0, 12);
 }
 
-function computeTripPricing(listing, windows, startAt, endAt, requestedChoice = null) {
+function computeTripPricing(listing, windows, startAt, endAt, requestedChoice = null, deliveryFeeOverride = null) {
   const tripDays = ceilTripDays(startAt, endAt);
   const dayRates = [];
   const tripStartDay = startOfUtcDay(startAt);
@@ -130,13 +184,16 @@ function computeTripPricing(listing, windows, startAt, endAt, requestedChoice = 
   const subtotal = dayRates.reduce((sum, value) => sum + value, 0);
   const fulfillmentMode = String(listing.fulfillmentMode || 'PICKUP_ONLY').toUpperCase();
   const selectedChoice = resolveFulfillmentChoice(listing, requestedChoice);
+  const effectiveDeliveryFee = (deliveryFeeOverride !== null && deliveryFeeOverride !== undefined)
+    ? money(Number(deliveryFeeOverride))
+    : money(Number(listing.deliveryFee ?? 0));
   const pickupPricing = fulfillmentMode === 'DELIVERY_ONLY'
     ? null
     : computeMarketplaceTripPricing({
         subtotal,
         cleaningFee: Number(listing.cleaningFee ?? 0),
         pickupFee: Number(listing.pickupFee ?? 0),
-        deliveryFee: Number(listing.deliveryFee ?? 0),
+        deliveryFee: effectiveDeliveryFee,
         fulfillmentChoice: 'PICKUP',
         taxes: 0,
         hostProfile: listing.hostProfile
@@ -147,7 +204,7 @@ function computeTripPricing(listing, windows, startAt, endAt, requestedChoice = 
         subtotal,
         cleaningFee: Number(listing.cleaningFee ?? 0),
         pickupFee: Number(listing.pickupFee ?? 0),
-        deliveryFee: Number(listing.deliveryFee ?? 0),
+        deliveryFee: effectiveDeliveryFee,
         fulfillmentChoice: 'DELIVERY',
         taxes: 0,
         hostProfile: listing.hostProfile
@@ -668,6 +725,26 @@ export const carSharingService = {
       include: {
         hostProfile: true,
         vehicle: { select: { vehicleTypeId: true } },
+        pickupSpot: {
+          include: {
+            anchorLocation: true,
+            searchPlace: {
+              include: {
+                anchorLocation: true
+              }
+            }
+          }
+        },
+        serviceAreas: {
+          where: { isActive: true },
+          include: {
+            searchPlace: {
+              include: {
+                anchorLocation: true
+              }
+            }
+          }
+        },
         availabilityWindows: { orderBy: [{ startAt: 'asc' }] }
       }
     });
@@ -696,7 +773,27 @@ export const carSharingService = {
       throw new Error(`Selected dates require at least ${minStayViolation.minTripDaysOverride} day(s)`);
     }
 
-    const quote = computeTripPricing(listing, overlappingWindows, pickupAt, returnAt, data?.fulfillmentChoice || null);
+    const deliveryFeeOverride = resolveDeliveryFeeOverride({
+      listing,
+      fulfillmentChoice: data?.fulfillmentChoice || null,
+      searchPlaceId: data?.searchPlaceId || data?.requestedSearchPlaceId || null
+    });
+    const conflictingTrip = await prisma.trip.findFirst({
+      where: {
+        listingId: listing.id,
+        status: { in: ['RESERVED', 'CONFIRMED', 'READY_FOR_PICKUP', 'IN_PROGRESS'] },
+        AND: [
+          { scheduledPickupAt: { lt: returnAt } },
+          { scheduledReturnAt: { gt: pickupAt } }
+        ]
+      },
+      select: { id: true, tripCode: true }
+    });
+    if (conflictingTrip) {
+      throw new Error(`This listing is already booked for the selected dates (${conflictingTrip.tripCode})`);
+    }
+
+    const quote = computeTripPricing(listing, overlappingWindows, pickupAt, returnAt, data?.fulfillmentChoice || null, deliveryFeeOverride);
     const deliveryAreaChoice = data?.deliveryAreaChoice ? String(data.deliveryAreaChoice).trim() : null;
     const pickupLocationId = data?.pickupLocationId || listing.locationId || null;
     const returnLocationId = data?.returnLocationId || listing.locationId || null;
@@ -715,6 +812,12 @@ export const carSharingService = {
       quote,
       tripCode,
       notes: data?.notes ? String(data.notes).trim() : null
+    });
+    const fulfillmentPlanData = buildTripFulfillmentPlanData({
+      listing,
+      fulfillmentChoice: quote.fulfillmentChoice,
+      searchPlaceId: data?.searchPlaceId || data?.requestedSearchPlaceId || null,
+      deliveryAreaChoice
     });
     const trip = await prisma.trip.create({
       data: {
@@ -741,6 +844,12 @@ export const carSharingService = {
         platformFee: quote.platformFee,
         platformRevenue: quote.platformRevenue,
         notes: [data?.notes ? String(data.notes).trim() : '', `Fulfillment: ${quote.fulfillmentChoice}`, deliveryAreaChoice ? `Delivery area: ${deliveryAreaChoice}` : ''].filter(Boolean).join(' · '),
+        fulfillmentPlan: {
+          create: {
+            tenantId,
+            ...fulfillmentPlanData
+          }
+        },
         timelineEvents: {
           create: [{
             eventType: 'TRIP_CREATED',
@@ -754,6 +863,9 @@ export const carSharingService = {
               tripDays: quote.tripDays,
               quotedTotal: quote.total,
               fulfillmentChoice: quote.fulfillmentChoice,
+              searchPlaceId: fulfillmentPlanData.searchPlaceId,
+              pickupSpotId: fulfillmentPlanData.pickupSpotId,
+              serviceAreaId: fulfillmentPlanData.serviceAreaId,
               deliveryAreaChoice,
               selectedFulfillmentFee: quote.selectedFulfillmentFee
             })
@@ -768,7 +880,13 @@ export const carSharingService = {
   async updateTripStatus(id, patch, scope = {}) {
     const current = await prisma.trip.findFirst({
       where: { id, ...(scope?.tenantId ? { tenantId: scope.tenantId } : {}) },
-      include: { listing: { select: { tenantId: true } } }
+      select: {
+        id: true, status: true, tenantId: true,
+        actualPickupAt: true, actualReturnAt: true,
+        quotedTotal: true, guestTripFee: true,
+        scheduledPickupAt: true,
+        listing: { select: { tenantId: true } }
+      }
     });
     if (!current) throw new Error('Trip not found');
     await assertTenantCarSharingEnabled(current.tenantId);
@@ -779,6 +897,15 @@ export const carSharingService = {
       throw new Error(`Cannot move trip from ${current.status} to ${nextStatus}`);
     }
     const now = new Date();
+    const cancellationRefund = nextStatus === 'CANCELLED'
+      ? computeCancellationRefund({
+          quotedTotal: Number(current.quotedTotal || 0),
+          guestTripFee: Number(current.guestTripFee || 0),
+          scheduledPickupAt: current.scheduledPickupAt,
+          cancelledAt: now,
+          policy: 'STANDARD'
+        })
+      : null;
     const updatedTrip = await prisma.trip.update({
       where: { id },
       data: {
@@ -793,7 +920,8 @@ export const carSharingService = {
             notes: patch?.note ? String(patch.note).trim() : `Trip moved to ${nextStatus}`,
             metadata: JSON.stringify({
               previousStatus: current.status,
-              nextStatus
+              nextStatus,
+              ...(cancellationRefund ? { cancellationRefund } : {})
             })
           }]
         }
@@ -812,6 +940,38 @@ export const carSharingService = {
 
   async ensureTripWorkflow(id, scope = {}) {
     return ensureReservationForTrip(id, scope);
+  },
+
+  async listHandoffConfirmationAlerts({ tenantId, warningHours = 24 } = {}) {
+    const now = new Date();
+    const cutoff = new Date(now.getTime() + warningHours * 60 * 60 * 1000);
+    const trips = await prisma.trip.findMany({
+      where: {
+        ...(tenantId ? { tenantId } : {}),
+        status: { in: ['CONFIRMED', 'READY_FOR_PICKUP'] },
+        scheduledPickupAt: { lte: cutoff },
+        fulfillmentPlan: {
+          confirmedAt: null,
+          pickupRevealMode: { not: 'PUBLIC_EXACT' }
+        }
+      },
+      select: {
+        id: true,
+        tripCode: true,
+        listingId: true,
+        hostProfileId: true,
+        scheduledPickupAt: true,
+        fulfillmentPlan: {
+          select: {
+            confirmedAt: true,
+            pickupRevealMode: true,
+            handoffMode: true
+          }
+        }
+      },
+      orderBy: [{ scheduledPickupAt: 'asc' }]
+    });
+    return resolveHandoffConfirmationAlerts(trips, { warningHoursBeforePickup: warningHours, now });
   },
 
   async updateListing(id, patch, scope = {}) {
@@ -900,6 +1060,123 @@ export const carSharingService = {
       },
       include: listingInclude()
     });
+  },
+
+  async sendHandoffConfirmationReminders({ tenantId, warningHours = 24 } = {}) {
+    const alerts = await this.listHandoffConfirmationAlerts({ tenantId, warningHours });
+    if (!alerts.length) return { sent: 0, skipped: 0, total: 0, results: [] };
+
+    let sent = 0;
+    let skipped = 0;
+    const results = [];
+
+    for (const alert of alerts) {
+      const trip = await prisma.trip.findUnique({
+        where: { id: alert.tripId },
+        select: {
+          id: true,
+          tripCode: true,
+          scheduledPickupAt: true,
+          tenantId: true,
+          hostProfile: { select: { email: true, displayName: true } },
+          listing: { select: { title: true } },
+          timelineEvents: {
+            where: { eventType: 'HOST_HANDOFF_REMINDER_SENT' },
+            orderBy: [{ eventAt: 'desc' }],
+            take: 1
+          }
+        }
+      });
+
+      if (!trip) { skipped++; results.push({ tripId: alert.tripId, action: 'skipped', reason: 'Trip not found' }); continue; }
+
+      const lastReminder = trip.timelineEvents[0];
+      if (lastReminder) {
+        const hoursSinceLast = (Date.now() - new Date(lastReminder.eventAt).getTime()) / (60 * 60 * 1000);
+        if (hoursSinceLast < 8) { skipped++; results.push({ tripId: alert.tripId, action: 'skipped', reason: 'Reminder sent in last 8 hours' }); continue; }
+      }
+
+      if (!trip.hostProfile?.email) { skipped++; results.push({ tripId: alert.tripId, action: 'skipped', reason: 'Host has no email on file' }); continue; }
+
+      try {
+        const hostName = trip.hostProfile.displayName || 'Host';
+        const listingTitle = trip.listing?.title || 'your listing';
+        const pickupStr = trip.scheduledPickupAt ? new Date(trip.scheduledPickupAt).toLocaleString() : 'your scheduled time';
+        await sendEmail({
+          to: trip.hostProfile.email,
+          subject: `Action needed: Confirm handoff for trip ${trip.tripCode}`,
+          text: [
+            `Hi ${hostName},`,
+            '',
+            `Your guest has ${alert.hoursUntilPickup} hour(s) until they pick up "${listingTitle}".`,
+            '',
+            `Please confirm the exact handoff details (address, instructions) so your guest knows where to go.`,
+            '',
+            `Trip: ${trip.tripCode}`,
+            `Pickup: ${pickupStr}`,
+            '',
+            `Log into your host dashboard to confirm handoff details.`,
+            '',
+            'Ride Fleet Marketplace'
+          ].join('\n')
+        });
+
+        await prisma.tripTimelineEvent.create({
+          data: {
+            tripId: trip.id,
+            eventType: 'HOST_HANDOFF_REMINDER_SENT',
+            actorType: 'SYSTEM',
+            notes: `Host reminded to confirm handoff details. ${alert.hoursUntilPickup}h until pickup.`,
+            metadata: JSON.stringify({ hoursUntilPickup: alert.hoursUntilPickup, sentTo: trip.hostProfile.email })
+          }
+        });
+
+        sent++;
+        results.push({ tripId: alert.tripId, action: 'sent', email: trip.hostProfile.email });
+      } catch (error) {
+        skipped++;
+        results.push({ tripId: alert.tripId, action: 'failed', reason: error.message });
+      }
+    }
+
+    return { sent, skipped, total: alerts.length, results };
+  },
+
+  async listPendingSearchPlaces({ tenantId } = {}) {
+    return prisma.carSharingSearchPlace.findMany({
+      where: {
+        approvalStatus: 'PENDING',
+        ...(tenantId ? { tenantId } : {})
+      },
+      include: {
+        anchorLocation: true,
+        tenant: { select: { id: true, name: true } }
+      },
+      orderBy: [{ createdAt: 'asc' }]
+    });
+  },
+
+  async approveSearchPlace(id, scope = {}) {
+    const place = await prisma.carSharingSearchPlace.findFirst({
+      where: { id, ...(scope?.tenantId ? { tenantId: scope.tenantId } : {}) },
+      select: { id: true }
+    });
+    if (!place) throw new Error('Search place not found');
+    return prisma.carSharingSearchPlace.update({
+      where: { id },
+      data: { approvalStatus: 'APPROVED', searchable: true, isActive: true }
+    });
+  },
+
+  async rejectSearchPlace(id, { reason = '', ...scope } = {}) {
+    const place = await prisma.carSharingSearchPlace.findFirst({
+      where: { id, ...(scope?.tenantId ? { tenantId: scope.tenantId } : {}) },
+      select: { id: true }
+    });
+    if (!place) throw new Error('Search place not found');
+    return prisma.carSharingSearchPlace.update({
+      where: { id },
+      data: { approvalStatus: 'REJECTED', searchable: false, isActive: false }
+    });
   }
 };
-

@@ -146,6 +146,40 @@ enum ListingFulfillmentMode {
   PICKUP_OR_DELIVERY
 }
 
+enum CarSharingSearchPlaceType {
+  AIRPORT
+  HOTEL
+  NEIGHBORHOOD
+  STATION
+  TENANT_BRANCH
+  HOST_PICKUP_SPOT
+  DELIVERY_ZONE
+}
+
+enum CarSharingPlaceVisibilityMode {
+  APPROXIMATE_ONLY
+  REVEAL_AFTER_BOOKING
+  PUBLIC_EXACT
+}
+
+enum HostServiceAreaType {
+  PICKUP
+  DELIVERY
+  BOTH
+}
+
+enum TripFulfillmentChoice {
+  PICKUP
+  DELIVERY
+}
+
+enum TripHandoffMode {
+  IN_PERSON
+  LOCKBOX
+  REMOTE_UNLOCK
+  SELF_SERVICE
+}
+
 enum TripStatus {
   INQUIRY
   RESERVED
@@ -345,8 +379,11 @@ model Tenant {
   agreementCommissions AgreementCommission[]
   hostProfiles HostProfile[]
   hostPickupSpots HostPickupSpot[]
+  carSharingSearchPlaces CarSharingSearchPlace[]
+  hostServiceAreas HostServiceArea[]
   carSharingListings HostVehicleListing[]
   carSharingTrips Trip[]
+  tripFulfillmentPlans TripFulfillmentPlan[]
   tripPayouts TripPayout[]
   hostVehicleSubmissions HostVehicleSubmission[]
   tollProviderAccounts TollProviderAccount[]
@@ -387,6 +424,7 @@ model Location {
   carSharingListings HostVehicleListing[]
   hostVehicleSubmissionPreferred HostVehicleSubmission[]
   hostPickupSpotsAnchor HostPickupSpot[] @relation("HostPickupSpotAnchorLocation")
+  carSharingSearchPlacesAnchor CarSharingSearchPlace[] @relation("CarSharingSearchPlaceAnchorLocation")
   carSharingPickupTrips Trip[] @relation("TripPickupLocation")
   carSharingReturnTrips Trip[] @relation("TripReturnLocation")
 
@@ -760,6 +798,7 @@ model HostVehicleListing {
   updatedAt         DateTime            @updatedAt
 
   availabilityWindows ListingAvailabilityWindow[]
+  serviceAreas      HostServiceArea[]
   trips             Trip[]
   vehicleSubmission HostVehicleSubmission?
 
@@ -925,6 +964,8 @@ model HostProfile {
 
   listings          HostVehicleListing[]
   pickupSpots       HostPickupSpot[]
+  searchPlaces      CarSharingSearchPlace[]
+  serviceAreas      HostServiceArea[]
   trips             Trip[]    @relation("TripHost")
   payouts           TripPayout[]
   vehicleSubmissions HostVehicleSubmission[]
@@ -961,10 +1002,76 @@ model HostPickupSpot {
 
   preferredBySubmissions HostVehicleSubmission[]
   listings          HostVehicleListing[]
+  searchPlace       CarSharingSearchPlace?
+  fulfillmentPlans  TripFulfillmentPlan[]
 
   @@index([tenantId, hostProfileId, isActive])
   @@index([hostProfileId, approvalStatus])
   @@index([anchorLocationId])
+}
+
+model CarSharingSearchPlace {
+  id                String                        @id @default(cuid())
+  tenantId          String?
+  tenant            Tenant?                       @relation(fields: [tenantId], references: [id])
+  hostProfileId     String?
+  hostProfile       HostProfile?                  @relation(fields: [hostProfileId], references: [id])
+  hostPickupSpotId  String?                       @unique
+  hostPickupSpot    HostPickupSpot?               @relation(fields: [hostPickupSpotId], references: [id], onDelete: SetNull)
+  anchorLocationId  String?
+  anchorLocation    Location?                     @relation("CarSharingSearchPlaceAnchorLocation", fields: [anchorLocationId], references: [id])
+  placeType         CarSharingSearchPlaceType
+  label             String
+  publicLabel       String?
+  city              String?
+  state             String?
+  postalCode        String?
+  country           String?
+  latitude          Decimal?                      @db.Decimal(10, 7)
+  longitude         Decimal?                      @db.Decimal(10, 7)
+  radiusMiles       Int?
+  searchable        Boolean                       @default(true)
+  isActive          Boolean                       @default(true)
+  approvalStatus    String                        @default("PENDING")
+  visibilityMode    CarSharingPlaceVisibilityMode @default(REVEAL_AFTER_BOOKING)
+  deliveryEligible  Boolean                       @default(false)
+  pickupEligible    Boolean                       @default(true)
+  createdAt         DateTime                      @default(now())
+  updatedAt         DateTime                      @updatedAt
+
+  serviceAreas      HostServiceArea[]
+  fulfillmentPlans  TripFulfillmentPlan[]
+
+  @@index([tenantId, placeType, searchable, isActive])
+  @@index([hostProfileId, searchable, isActive])
+  @@index([anchorLocationId, placeType])
+  @@index([approvalStatus, isActive])
+}
+
+model HostServiceArea {
+  id                String              @id @default(cuid())
+  tenantId          String?
+  tenant            Tenant?             @relation(fields: [tenantId], references: [id])
+  hostProfileId     String
+  hostProfile       HostProfile         @relation(fields: [hostProfileId], references: [id], onDelete: Cascade)
+  listingId         String?
+  listing           HostVehicleListing? @relation(fields: [listingId], references: [id], onDelete: SetNull)
+  searchPlaceId     String?
+  searchPlace       CarSharingSearchPlace? @relation(fields: [searchPlaceId], references: [id], onDelete: SetNull)
+  serviceType       HostServiceAreaType @default(PICKUP)
+  radiusMiles       Int?
+  feeOverride       Decimal?            @db.Decimal(10, 2)
+  leadTimeMinutes   Int?
+  afterHoursAllowed Boolean             @default(false)
+  isActive          Boolean             @default(true)
+  createdAt         DateTime            @default(now())
+  updatedAt         DateTime            @updatedAt
+
+  fulfillmentPlans  TripFulfillmentPlan[]
+
+  @@index([tenantId, hostProfileId, isActive])
+  @@index([listingId, serviceType, isActive])
+  @@index([searchPlaceId, serviceType, isActive])
 }
 
 model AuditLog {
@@ -1118,10 +1225,46 @@ model Trip {
   incidents         TripIncident[]
   timelineEvents    TripTimelineEvent[]
   hostReview        HostReview?
+  fulfillmentPlan   TripFulfillmentPlan?
 
   @@index([tenantId, status, scheduledPickupAt])
   @@index([hostProfileId, status, scheduledPickupAt])
   @@index([guestCustomerId, status, scheduledPickupAt])
+}
+
+model TripFulfillmentPlan {
+  id                      String                        @id @default(cuid())
+  tenantId                String?
+  tenant                  Tenant?                       @relation(fields: [tenantId], references: [id])
+  tripId                  String                        @unique
+  trip                    Trip                          @relation(fields: [tripId], references: [id], onDelete: Cascade)
+  searchPlaceId           String?
+  searchPlace             CarSharingSearchPlace?        @relation(fields: [searchPlaceId], references: [id], onDelete: SetNull)
+  pickupSpotId            String?
+  pickupSpot              HostPickupSpot?               @relation(fields: [pickupSpotId], references: [id], onDelete: SetNull)
+  serviceAreaId           String?
+  serviceArea             HostServiceArea?              @relation(fields: [serviceAreaId], references: [id], onDelete: SetNull)
+  fulfillmentChoice       TripFulfillmentChoice         @default(PICKUP)
+  deliveryAreaChoiceLabel String?
+  pickupRevealMode        CarSharingPlaceVisibilityMode @default(REVEAL_AFTER_BOOKING)
+  handoffMode             TripHandoffMode               @default(IN_PERSON)
+  exactAddress1           String?
+  exactAddress2           String?
+  city                    String?
+  state                   String?
+  postalCode              String?
+  country                 String?
+  latitude                Decimal?                      @db.Decimal(10, 7)
+  longitude               Decimal?                      @db.Decimal(10, 7)
+  instructions            String?
+  confirmedAt             DateTime?
+  createdAt               DateTime                      @default(now())
+  updatedAt               DateTime                      @updatedAt
+
+  @@index([tenantId, fulfillmentChoice, confirmedAt])
+  @@index([searchPlaceId])
+  @@index([pickupSpotId])
+  @@index([serviceAreaId])
 }
 
 model AgreementDriver {

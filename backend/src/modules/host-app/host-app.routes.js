@@ -91,6 +91,17 @@ hostAppRouter.patch('/trips/:id/status', async (req, res, next) => {
   }
 });
 
+hostAppRouter.patch('/trips/:id/fulfillment-plan', async (req, res, next) => {
+  try {
+    res.json(await hostAppService.updateTripFulfillmentPlan(req.user, req.params.id, req.body || {}));
+  } catch (error) {
+    if (/not found|required|linked|handoff|fulfillment/i.test(String(error?.message || ''))) {
+      return res.status(400).json({ error: error.message });
+    }
+    next(error);
+  }
+});
+
 hostAppRouter.post('/trips/:id/incidents', async (req, res, next) => {
   try {
     res.status(201).json(await hostAppService.createTripIncident(req.user, req.params.id, req.body || {}));
@@ -129,6 +140,39 @@ hostAppRouter.patch('/pickup-spots/:id', async (req, res, next) => {
     res.json(await hostAppService.updatePickupSpot(req.user, req.params.id, req.body || {}));
   } catch (error) {
     if (/not found|required|linked|pickup spot|anchor/i.test(String(error?.message || ''))) {
+      return res.status(400).json({ error: error.message });
+    }
+    next(error);
+  }
+});
+
+hostAppRouter.post('/listings/:id/discovery-sync', async (req, res, next) => {
+  try {
+    res.json(await hostAppService.syncListingDiscovery(req.user, req.params.id, req.body || {}));
+  } catch (error) {
+    if (/not found|required|linked|discovery/i.test(String(error?.message || ''))) {
+      return res.status(400).json({ error: error.message });
+    }
+    next(error);
+  }
+});
+
+hostAppRouter.patch('/search-places/:id', async (req, res, next) => {
+  try {
+    res.json(await hostAppService.updateSearchPlace(req.user, req.params.id, req.body || {}));
+  } catch (error) {
+    if (/not found|required|linked|search place/i.test(String(error?.message || ''))) {
+      return res.status(400).json({ error: error.message });
+    }
+    next(error);
+  }
+});
+
+hostAppRouter.patch('/service-areas/:id', async (req, res, next) => {
+  try {
+    res.json(await hostAppService.updateServiceArea(req.user, req.params.id, req.body || {}));
+  } catch (error) {
+    if (/not found|required|linked|service area/i.test(String(error?.message || ''))) {
       return res.status(400).json({ error: error.message });
     }
     next(error);

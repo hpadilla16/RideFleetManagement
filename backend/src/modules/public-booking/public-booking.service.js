@@ -216,6 +216,7 @@ export const publicBookingService = {
       tenants: payload.tenants || [],
       selectedTenant: payload.tenant || null,
       locations: payload.locations || [],
+      carSharingSearchPlaces: payload.carSharingSearchPlaces || [],
       vehicleTypes: payload.vehicleTypes || [],
       featuredCarSharingListings: (payload.featuredListings || []).map((listing) => ({
         id: listing.id,
@@ -236,6 +237,9 @@ export const publicBookingService = {
         vehicle: listing.vehicle || null,
         location: listing.location || null,
         pickupSpot: listing.pickupSpot || null,
+        searchPlace: listing.searchPlace || null,
+        visibilityMode: listing.pickupSpot?.visibilityMode || 'REVEAL_AFTER_BOOKING',
+        exactLocationHidden: !!listing.pickupSpot?.exactLocationHidden,
         primaryImageUrl: listing.primaryImageUrl || '',
         imageUrls: listing.imageUrls || []
       }))
@@ -484,6 +488,8 @@ export const publicBookingService = {
       searchType: 'CAR_SHARING',
       pickupAt: payload.pickupAt,
       returnAt: payload.returnAt,
+      searchPlaces: payload.searchPlaces || [],
+      locations: payload.locations || [],
       tripDays: payload.results?.[0]?.quote?.tripDays || null,
       results: (payload.results || []).map((result) => ({
         id: result.listing.id,
@@ -498,6 +504,7 @@ export const publicBookingService = {
         fulfillmentMode: result.listing.fulfillmentMode || 'PICKUP_ONLY',
         deliveryRadiusMiles: result.listing.deliveryRadiusMiles ? Number(result.listing.deliveryRadiusMiles) : null,
         deliveryAreas: normalizeDeliveryAreas(result.listing.deliveryAreas || result.listing.deliveryAreasJson),
+        deliveryAreaHints: Array.isArray(result.listing.deliveryAreaHints) ? result.listing.deliveryAreaHints : [],
         pickupFee: money(result.listing.pickupFee),
         deliveryFee: money(result.listing.deliveryFee),
         deliveryNotes: result.listing.deliveryNotes || '',
@@ -505,6 +512,25 @@ export const publicBookingService = {
         vehicle: result.listing.vehicle || null,
         location: result.listing.location || null,
         pickupSpot: result.listing.pickupSpot || null,
+        searchPlace: result.listing.searchPlace || null,
+        searchMatch: result.listing.searchMatch || null,
+        trustSummary: result.listing.trustSummary || null,
+        trustScore: Number(result.listing.trustSummary?.score || 0),
+        trustBadge: result.listing.trustSummary?.badge || '',
+        trustReasons: Array.isArray(result.listing.trustSummary?.reasons) ? result.listing.trustSummary.reasons : [],
+        trustTripSignals: result.listing.trustSummary?.tripSignals || null,
+        searchPlaceType: result.listing.searchMatch?.searchPlaceType || result.listing.searchPlace?.placeType || null,
+        matchReason: result.listing.searchMatch?.matchReason || '',
+        matchReasonCode: result.listing.searchMatch?.matchReasonCode || null,
+        recommendedBadge: result.listing.searchMatch?.recommendedBadge || '',
+        rankingReasons: Array.isArray(result.listing.searchMatch?.rankingReasons)
+          ? result.listing.searchMatch.rankingReasons
+          : [],
+        visibilityMode: result.listing.searchMatch?.visibilityMode || result.listing.pickupSpot?.visibilityMode || 'REVEAL_AFTER_BOOKING',
+        exactLocationHidden: !!(result.listing.searchMatch?.exactLocationHidden ?? result.listing.pickupSpot?.exactLocationHidden),
+        availableFulfillmentChoices: Array.isArray(result.listing.searchMatch?.availableFulfillmentChoices)
+          ? result.listing.searchMatch.availableFulfillmentChoices
+          : [],
         additionalServices: (result.listing.additionalServices || []).map((service) => ({
           serviceId: service.serviceId,
           code: service.code,

@@ -6,7 +6,15 @@ import { carSharingService } from '../car-sharing/car-sharing.service.js';
 import { sendEmail } from '../../lib/mailer.js';
 import { settingsService } from '../settings/settings.service.js';
 import { computeMarketplaceTripPricing } from '../car-sharing/car-sharing-pricing.js';
+import { serializePublicTripFulfillmentPlan } from '../car-sharing/car-sharing-handoff.js';
+import { resolveDeliveryAreaHints } from '../car-sharing/car-sharing-fulfillment.js';
 import { activeVehicleBlockOverlapWhere } from '../vehicles/vehicle-blocks.js';
+import {
+  compareCarSharingSearchResults,
+  resolveListingSearchMatch,
+  serializeCarSharingSearchPlace,
+  serializePublicPickupSpot
+} from './car-sharing-discovery.js';
 
 function parseLocationConfig(raw) {
   try {
@@ -90,11 +98,116 @@ function normalizeHostAddOns(value) {
     .filter(Boolean);
 }
 
+function countHostAddOns(value) {
+  return normalizeHostAddOns(value).length;
+}
+
 function normalizeDeliveryAreas(value) {
   return parseJsonArray(value)
     .map((item) => String(item || '').trim())
     .filter(Boolean)
     .slice(0, 12);
+}
+
+function countListingPhotos(value) {
+  return normalizePhotoList(value).length;
+}
+
+function roundScore(value) {
+  return Math.max(0, Math.min(100, Math.round(Number(value || 0))));
+}
+
+function pct(part, total) {
+  if (!total) return 0;
+  return Number(((Number(part || 0) / Number(total || 1)) * 100).toFixed(2));
+}
+
+function buildListingTrustSignals(trips = []) {
+  const recentTrips = Array.isArray(trips) ? trips.slice(0, 12) : [];
+  const completedTrips = recentTrips.filter((trip) => String(trip?.status || '').toUpperCase() === 'COMPLETED');
+  const cancelledTrips = recentTrips.filter((trip) => String(trip?.status || '').toUpperCase() === 'CANCELLED');
+  const confirmedHandoffTrips = recentTrips.filter((trip) => !!trip?.fulfillmentPlan?.confirmedAt);
+  const reviewedTrips = recentTrips.filter((trip) => !!trip?.hostReview?.submittedAt);
+  const onTimePickupTrips = recentTrips.filter((trip) => {
+    const scheduled = trip?.scheduledPickupAt ? new Date(trip.scheduledPickupAt) : null;
+    const actual = trip?.actualPickupAt ? new Date(trip.actualPickupAt) : null;
+    if (!scheduled || !actual || Number.isNaN(scheduled.getTime()) || Number.isNaN(actual.getTime())) return false;
+    return Math.abs(actual.getTime() - scheduled.getTime()) <= (90 * 60 * 1000);
+  });
+
+  return {
+    tripCount: recentTrips.length,
+    completedTripCount: completedTrips.length,
+    cancelledTripCount: cancelledTrips.length,
+    confirmedHandoffCount: confirmedHandoffTrips.length,
+    reviewedTripCount: reviewedTrips.length,
+    onTimePickupCount: onTimePickupTrips.length,
+    completionRatePct: pct(completedTrips.length, recentTrips.length),
+    cancellationRatePct: pct(cancelledTrips.length, recentTrips.length),
+    handoffConfirmationRatePct: pct(confirmedHandoffTrips.length, recentTrips.length),
+    pickupReliabilityPct: pct(onTimePickupTrips.length, completedTrips.length || recentTrips.length)
+  };
+}
+
+function buildCarSharingTrustSummary({ listing, searchMatch, trustSignals = null } = {}) {
+  const rating = Number(listing?.hostProfile?.averageRating || 0);
+  const reviewCount = Number(listing?.hostProfile?.reviewCount || 0);
+  const photoCount = countListingPhotos(listing?.photosJson);
+  const addOnCount = countHostAddOns(listing?.addOnsJson);
+  const fulfillmentMode = String(listing?.fulfillmentMode || 'PICKUP_ONLY').trim().toUpperCase();
+  const exactVisible = String(searchMatch?.visibilityMode || 'REVEAL_AFTER_BOOKING').trim().toUpperCase() === 'PUBLIC_EXACT';
+  const exactMatch = ['HOST_PICKUP_SPOT_EXACT', 'DELIVERY_ZONE_EXACT', 'TENANT_BRANCH'].includes(String(searchMatch?.matchReasonCode || '').trim().toUpperCase());
+  const signals = trustSignals || buildListingTrustSignals([]);
+
+  let score = 30;
+  if (listing?.instantBook) score += 15;
+  score += Math.min(25, rating * 5);
+  score += Math.min(12, reviewCount >= 1 ? (Math.log10(reviewCount + 1) * 10) : 0);
+  if (photoCount >= 5) score += 12;
+  else if (photoCount >= 3) score += 8;
+  else if (photoCount >= 1) score += 4;
+  if (addOnCount >= 3) score += 5;
+  else if (addOnCount >= 1) score += 3;
+  if (fulfillmentMode === 'PICKUP_OR_DELIVERY') score += 6;
+  else if (fulfillmentMode === 'DELIVERY_ONLY') score += 4;
+  if (exactVisible) score += 5;
+  if (exactMatch) score += 5;
+  score += Math.min(10, (signals.completionRatePct || 0) / 10);
+  score += Math.min(8, (signals.handoffConfirmationRatePct || 0) / 12.5);
+  score += Math.min(8, (signals.pickupReliabilityPct || 0) / 12.5);
+  score -= Math.min(10, (signals.cancellationRatePct || 0) / 8);
+
+  const normalizedScore = roundScore(score);
+  const reasons = [];
+  if (listing?.instantBook) reasons.push('Instant book ready');
+  if (reviewCount >= 10) reasons.push('Strong review history');
+  else if (reviewCount >= 3) reasons.push('Reviewed host');
+  if (rating >= 4.8 && reviewCount) reasons.push('Top-rated host');
+  else if (rating >= 4.5 && reviewCount) reasons.push('Highly rated host');
+  if (photoCount >= 5) reasons.push('Rich photo gallery');
+  else if (photoCount >= 3) reasons.push('Solid photo coverage');
+  if (addOnCount >= 1) reasons.push('Trip add-ons available');
+  if (fulfillmentMode === 'PICKUP_OR_DELIVERY') reasons.push('Flexible pickup or delivery');
+  if (exactVisible) reasons.push('Exact handoff visible');
+  if (signals.tripCount >= 3 && signals.completionRatePct >= 80) reasons.push('Strong trip completion history');
+  if (signals.tripCount >= 3 && signals.handoffConfirmationRatePct >= 70) reasons.push('Reliable handoff release');
+  if (signals.completedTripCount >= 2 && signals.pickupReliabilityPct >= 70) reasons.push('Pickup timing looks reliable');
+  if (searchMatch?.recommendedBadge) reasons.push(searchMatch.recommendedBadge);
+
+  let badge = 'Hosted match';
+  if (normalizedScore >= 90) badge = 'Top match';
+  else if (normalizedScore >= 80) badge = 'Trusted match';
+  else if (normalizedScore >= 70) badge = 'Strong host match';
+  else if (normalizedScore >= 60) badge = 'Solid host option';
+
+  return {
+    score: normalizedScore,
+    badge,
+    photoCount,
+    addOnCount,
+    tripSignals: signals,
+    reasons: Array.from(new Set(reasons)).slice(0, 5)
+  };
 }
 
 function bookingImageSet({ vehicleTypeImageUrl, listingPhotos }) {
@@ -129,6 +242,109 @@ function publicHostSummary(hostProfile) {
     averageRating: ratingNumber(hostProfile.averageRating),
     reviewCount: Number(hostProfile.reviewCount || 0),
     createdAt: hostProfile.createdAt || null
+  };
+}
+
+function publicSearchPlaceWhere({ directTenant = null } = {}) {
+  return {
+    searchable: true,
+    isActive: true,
+    approvalStatus: 'APPROVED',
+    tenant: {
+      status: 'ACTIVE',
+      ...(directTenant ? { id: directTenant.id } : { carSharingEnabled: true })
+    }
+  };
+}
+
+async function listPublicCarSharingSearchPlaces({ directTenant = null, take = 100 } = {}) {
+  const rows = await prisma.carSharingSearchPlace.findMany({
+    where: publicSearchPlaceWhere({ directTenant }),
+    include: {
+      anchorLocation: { select: { id: true, name: true, city: true, state: true } }
+    },
+    orderBy: [{ publicLabel: 'asc' }, { label: 'asc' }],
+    take
+  });
+  return rows.map((row) => serializeCarSharingSearchPlace(row));
+}
+
+async function resolveCarSharingSearchScope({ directTenant = null, requestedIds = [], searchPlaceIds = [] } = {}) {
+  const normalizedRequestedIds = Array.from(new Set([
+    ...(Array.isArray(requestedIds) ? requestedIds : []).map((value) => String(value)).filter(Boolean),
+    ...(Array.isArray(searchPlaceIds) ? searchPlaceIds : []).map((value) => String(value)).filter(Boolean)
+  ]));
+
+  const locationWhere = {
+    id: { in: normalizedRequestedIds },
+    isActive: true,
+    tenant: {
+      status: 'ACTIVE',
+      ...(directTenant ? { id: directTenant.id } : { carSharingEnabled: true })
+    }
+  };
+
+  const explicitSearchPlaceWhere = {
+    id: { in: normalizedRequestedIds },
+    ...publicSearchPlaceWhere({ directTenant })
+  };
+
+  const [matchedLocations, explicitSearchPlaces] = await Promise.all([
+    normalizedRequestedIds.length
+      ? prisma.location.findMany({
+          where: locationWhere,
+          select: { id: true, tenantId: true, name: true, city: true, state: true }
+        })
+      : Promise.resolve([]),
+    normalizedRequestedIds.length
+      ? prisma.carSharingSearchPlace.findMany({
+          where: explicitSearchPlaceWhere,
+          include: {
+            anchorLocation: { select: { id: true, name: true, city: true, state: true } }
+          }
+        })
+      : Promise.resolve([])
+  ]);
+
+  const anchorLocationIds = matchedLocations.map((row) => String(row.id));
+  const anchoredSearchPlaces = anchorLocationIds.length
+    ? await prisma.carSharingSearchPlace.findMany({
+        where: {
+          anchorLocationId: { in: anchorLocationIds },
+          ...publicSearchPlaceWhere({ directTenant })
+        },
+        include: {
+          anchorLocation: { select: { id: true, name: true, city: true, state: true } }
+        }
+      })
+    : [];
+
+  const searchPlaceMap = new Map();
+  [...explicitSearchPlaces, ...anchoredSearchPlaces].forEach((place) => {
+    if (place?.id) searchPlaceMap.set(String(place.id), place);
+  });
+
+  return {
+    matchedLocations,
+    resolvedSearchPlaces: Array.from(searchPlaceMap.values()),
+    requestedIds: normalizedRequestedIds
+  };
+}
+
+function serializeListingSearchSummary(match) {
+  if (!match) return null;
+  return {
+    searchPlace: match.searchPlaceSummary || null,
+    searchPlaceType: match.searchPlaceType || match.searchPlaceSummary?.placeType || 'HOST_PICKUP_SPOT',
+    matchReason: match.matchReason || 'Available in this area',
+    matchReasonCode: match.matchReasonCode || null,
+    recommendedBadge: match.recommendedBadge || '',
+    rankingReasons: Array.isArray(match.rankingReasons) ? match.rankingReasons : [],
+    visibilityMode: match.visibilityMode || 'REVEAL_AFTER_BOOKING',
+    exactLocationHidden: !!match.exactLocationHidden,
+    availableFulfillmentChoices: Array.isArray(match.availableFulfillmentChoices)
+      ? match.availableFulfillmentChoices
+      : ['PICKUP']
   };
 }
 
@@ -829,7 +1045,7 @@ export const bookingEngineService = {
     const tenant = await resolvePublicTenant({ tenantSlug, tenantId });
 
     if (!tenant) {
-      const [tenants, locations, vehicleTypes, featuredListings] = await Promise.all([
+      const [tenants, locations, vehicleTypes, featuredListings, carSharingSearchPlaces] = await Promise.all([
         prisma.tenant.findMany({
           where: { status: 'ACTIVE' },
           select: {
@@ -864,17 +1080,24 @@ export const bookingEngineService = {
             hostProfile: { select: publicHostSelect() },
             vehicle: { select: { id: true, make: true, model: true, year: true, color: true, plate: true, vehicleType: { select: { imageUrl: true } } } },
             location: { select: { id: true, name: true, city: true, state: true } },
-            pickupSpot: { include: { anchorLocation: { select: { id: true, name: true, city: true, state: true } } } }
+            pickupSpot: {
+              include: {
+                anchorLocation: { select: { id: true, name: true, city: true, state: true } },
+                searchPlace: { include: { anchorLocation: { select: { id: true, name: true, city: true, state: true } } } }
+              }
+            }
           },
           orderBy: [{ publishedAt: 'desc' }, { createdAt: 'desc' }],
           take: 8
-        })
+        }),
+        listPublicCarSharingSearchPlaces({ directTenant: null, take: 120 })
       ]);
 
       return {
         tenant: null,
         tenants,
         locations,
+        carSharingSearchPlaces,
         vehicleTypes,
         featuredListings: featuredListings.map((listing) => ({
           id: listing.id,
@@ -893,7 +1116,8 @@ export const bookingEngineService = {
           host: publicHostSummary(listing.hostProfile),
           vehicle: listing.vehicle,
           location: listing.location,
-          pickupSpot: listing.pickupSpot,
+          pickupSpot: serializePublicPickupSpot(listing.pickupSpot),
+          searchPlace: serializeCarSharingSearchPlace(listing.pickupSpot?.searchPlace),
           ...bookingImageSet({
             vehicleTypeImageUrl: listing.vehicle?.vehicleType?.imageUrl,
             listingPhotos: listing.photosJson
@@ -906,7 +1130,7 @@ export const bookingEngineService = {
       };
     }
 
-    const [locations, vehicleTypes, featuredListings, tenants] = await Promise.all([
+    const [locations, vehicleTypes, featuredListings, tenants, carSharingSearchPlaces] = await Promise.all([
       prisma.location.findMany({
         where: { tenantId: tenant.id, isActive: true },
         select: { id: true, tenantId: true, name: true, city: true, state: true, taxRate: true },
@@ -923,7 +1147,12 @@ export const bookingEngineService = {
           hostProfile: { select: publicHostSelect() },
           vehicle: { select: { id: true, make: true, model: true, year: true, color: true, plate: true, vehicleType: { select: { imageUrl: true } } } },
           location: { select: { id: true, name: true, city: true, state: true } },
-          pickupSpot: { include: { anchorLocation: { select: { id: true, name: true, city: true, state: true } } } }
+          pickupSpot: {
+            include: {
+              anchorLocation: { select: { id: true, name: true, city: true, state: true } },
+              searchPlace: { include: { anchorLocation: { select: { id: true, name: true, city: true, state: true } } } }
+            }
+          }
         },
         orderBy: [{ publishedAt: 'desc' }, { createdAt: 'desc' }],
         take: 8
@@ -937,7 +1166,8 @@ export const bookingEngineService = {
           carSharingEnabled: true
         },
         orderBy: [{ name: 'asc' }]
-      })
+      }),
+      listPublicCarSharingSearchPlaces({ directTenant: tenant, take: 120 })
     ]);
 
     return {
@@ -949,6 +1179,7 @@ export const bookingEngineService = {
       },
       tenants,
       locations,
+      carSharingSearchPlaces,
       vehicleTypes,
       featuredListings: featuredListings.map((listing) => ({
         id: listing.id,
@@ -967,7 +1198,8 @@ export const bookingEngineService = {
         host: publicHostSummary(listing.hostProfile),
         vehicle: listing.vehicle,
         location: listing.location,
-        pickupSpot: listing.pickupSpot,
+        pickupSpot: serializePublicPickupSpot(listing.pickupSpot),
+        searchPlace: serializeCarSharingSearchPlace(listing.pickupSpot?.searchPlace),
         ...bookingImageSet({
           vehicleTypeImageUrl: listing.vehicle?.vehicleType?.imageUrl,
           listingPhotos: listing.photosJson
@@ -1127,7 +1359,16 @@ export const bookingEngineService = {
     };
   },
 
-  async searchCarSharing({ tenantSlug, tenantId, pickupAt, returnAt, locationId, locationIds = [] }) {
+  async searchCarSharing({
+    tenantSlug,
+    tenantId,
+    pickupAt,
+    returnAt,
+    locationId,
+    locationIds = [],
+    searchPlaceId,
+    searchPlaceIds = []
+  }) {
     const pickupDate = toDate(pickupAt);
     const returnDate = toDate(returnAt);
     if (!pickupDate || !returnDate || pickupDate >= returnDate) {
@@ -1138,27 +1379,104 @@ export const bookingEngineService = {
     const normalizedLocationIds = Array.isArray(locationIds) && locationIds.length
       ? locationIds.map((value) => String(value)).filter(Boolean)
       : locationId ? [String(locationId)] : [];
-    if (!normalizedLocationIds.length) throw new Error('Choose a valid location before searching car sharing');
+    const explicitSearchPlaceIds = Array.isArray(searchPlaceIds) && searchPlaceIds.length
+      ? searchPlaceIds.map((value) => String(value)).filter(Boolean)
+      : searchPlaceId ? [String(searchPlaceId)] : [];
+    if (!normalizedLocationIds.length && !explicitSearchPlaceIds.length) {
+      throw new Error('Choose a valid location before searching car sharing');
+    }
+
+    const scope = await resolveCarSharingSearchScope({
+      directTenant,
+      requestedIds: normalizedLocationIds,
+      searchPlaceIds: explicitSearchPlaceIds
+    });
+    const resolvedLocationIds = scope.matchedLocations.map((row) => String(row.id));
+    const resolvedSearchPlaceIds = scope.resolvedSearchPlaces.map((row) => String(row.id));
+    const resolvedPickupSpotIds = scope.resolvedSearchPlaces
+      .map((row) => row?.hostPickupSpotId ? String(row.hostPickupSpotId) : '')
+      .filter(Boolean);
+    if (!resolvedLocationIds.length && !resolvedSearchPlaceIds.length) {
+      throw new Error('Choose a valid location before searching car sharing');
+    }
 
     const listings = await prisma.hostVehicleListing.findMany({
       where: {
         status: 'PUBLISHED',
-        locationId: { in: normalizedLocationIds },
         tenant: {
           status: 'ACTIVE',
           ...(directTenant ? { id: directTenant.id } : {}),
           carSharingEnabled: true
-        }
+        },
+        OR: [
+          resolvedLocationIds.length ? { locationId: { in: resolvedLocationIds } } : null,
+          resolvedPickupSpotIds.length ? { pickupSpotId: { in: resolvedPickupSpotIds } } : null,
+          resolvedLocationIds.length ? {
+            pickupSpot: {
+              isActive: true,
+              approvalStatus: 'APPROVED',
+              anchorLocationId: { in: resolvedLocationIds }
+            }
+          } : null,
+          resolvedSearchPlaceIds.length ? {
+            serviceAreas: {
+              some: {
+                isActive: true,
+                searchPlaceId: { in: resolvedSearchPlaceIds }
+              }
+            }
+          } : null
+        ].filter(Boolean)
       },
       include: {
         hostProfile: { select: publicHostSelect() },
         vehicle: { select: { id: true, make: true, model: true, year: true, color: true, plate: true, vehicleType: { select: { imageUrl: true } } } },
         location: { select: { id: true, name: true, city: true, state: true } },
-        pickupSpot: { include: { anchorLocation: { select: { id: true, name: true, city: true, state: true } } } },
+        pickupSpot: {
+          include: {
+            anchorLocation: { select: { id: true, name: true, city: true, state: true } },
+            searchPlace: { include: { anchorLocation: { select: { id: true, name: true, city: true, state: true } } } }
+          }
+        },
+        serviceAreas: {
+          where: { isActive: true },
+          include: {
+            searchPlace: {
+              include: { anchorLocation: { select: { id: true, name: true, city: true, state: true } } }
+            }
+          }
+        },
         availabilityWindows: { orderBy: [{ startAt: 'asc' }] }
       },
       orderBy: [{ publishedAt: 'desc' }, { createdAt: 'desc' }]
     });
+    const listingIds = listings.map((listing) => String(listing.id)).filter(Boolean);
+    const recentTripRows = listingIds.length
+      ? await prisma.trip.findMany({
+          where: { listingId: { in: listingIds } },
+          select: {
+            id: true,
+            listingId: true,
+            status: true,
+            scheduledPickupAt: true,
+            actualPickupAt: true,
+            actualReturnAt: true,
+            createdAt: true,
+            fulfillmentPlan: { select: { confirmedAt: true } },
+            hostReview: { select: { submittedAt: true, rating: true } }
+          },
+          orderBy: [{ createdAt: 'desc' }]
+        })
+      : [];
+    const listingTripMap = new Map();
+    for (const row of recentTripRows) {
+      const key = String(row.listingId || '');
+      if (!key) continue;
+      const current = listingTripMap.get(key) || [];
+      if (current.length >= 12) continue;
+      current.push(row);
+      listingTripMap.set(key, current);
+    }
     if (!directTenant && !listings.length) {
       throw new Error('No car sharing vehicles are available for this location yet');
     }
@@ -1175,6 +1493,17 @@ export const bookingEngineService = {
       if (overlappingWindows.some((window) => window.minTripDaysOverride && tripDays < Number(window.minTripDaysOverride))) return [];
 
       const quote = computeCarSharingQuote(listing, overlappingWindows, pickupDate, returnDate);
+      const searchMatch = resolveListingSearchMatch({
+        listing,
+        requestedLocationIds: resolvedLocationIds,
+        requestedSearchPlaceIds: resolvedSearchPlaceIds
+      });
+      if (!searchMatch) return [];
+      const trustSummary = buildCarSharingTrustSummary({
+        listing,
+        searchMatch,
+        trustSignals: buildListingTrustSignals(listingTripMap.get(String(listing.id)) || [])
+      });
       return [{
         listing: {
           id: listing.id,
@@ -1188,25 +1517,36 @@ export const bookingEngineService = {
           fulfillmentMode: listing.fulfillmentMode,
           deliveryRadiusMiles: listing.deliveryRadiusMiles,
           deliveryAreas: normalizeDeliveryAreas(listing.deliveryAreasJson),
+          deliveryAreaHints: resolveDeliveryAreaHints(listing),
           deliveryNotes: listing.deliveryNotes,
           host: publicHostSummary(listing.hostProfile),
           vehicle: listing.vehicle,
           location: listing.location,
-          pickupSpot: listing.pickupSpot,
+          pickupSpot: serializePublicPickupSpot(listing.pickupSpot),
+          searchPlace: searchMatch.searchPlaceSummary || null,
+          searchMatch: serializeListingSearchSummary(searchMatch),
+          trustSummary,
           additionalServices: normalizeHostAddOns(listing.addOnsJson),
+          publishedAt: listing.publishedAt || null,
+          createdAt: listing.createdAt || null,
           ...bookingImageSet({
             vehicleTypeImageUrl: listing.vehicle?.vehicleType?.imageUrl,
             listingPhotos: listing.photosJson
           })
         },
-        quote
+        quote,
+        searchMatch
       }];
     });
+
+    results.sort(compareCarSharingSearchResults);
 
     return {
       tenant: directTenant ? { id: directTenant.id, name: directTenant.name, slug: directTenant.slug } : null,
       pickupAt: pickupDate,
       returnAt: returnDate,
+      searchPlaces: scope.resolvedSearchPlaces.map((row) => serializeCarSharingSearchPlace(row)),
+      locations: scope.matchedLocations,
       results
     };
   },
@@ -1227,7 +1567,12 @@ export const bookingEngineService = {
         hostProfile: { select: publicHostSelect() },
         vehicle: { select: { id: true, make: true, model: true, year: true, color: true, plate: true, vehicleType: { select: { imageUrl: true } } } },
         location: { select: { id: true, name: true, city: true, state: true } },
-        pickupSpot: { include: { anchorLocation: { select: { id: true, name: true, city: true, state: true } } } },
+        pickupSpot: {
+          include: {
+            anchorLocation: { select: { id: true, name: true, city: true, state: true } },
+            searchPlace: { include: { anchorLocation: { select: { id: true, name: true, city: true, state: true } } } }
+          }
+        },
         availabilityWindows: { orderBy: [{ startAt: 'asc' }] }
       }
     });
@@ -1250,12 +1595,14 @@ export const bookingEngineService = {
       fulfillmentMode: listing.fulfillmentMode,
       deliveryRadiusMiles: listing.deliveryRadiusMiles,
       deliveryAreas: normalizeDeliveryAreas(listing.deliveryAreasJson),
+      deliveryAreaHints: resolveDeliveryAreaHints(listing),
       deliveryNotes: listing.deliveryNotes,
       tripRules: listing.tripRules,
       host: publicHostSummary(listing.hostProfile),
       vehicle: listing.vehicle,
       location: listing.location,
-      pickupSpot: listing.pickupSpot,
+      pickupSpot: serializePublicPickupSpot(listing.pickupSpot),
+      searchPlace: serializeCarSharingSearchPlace(listing.pickupSpot?.searchPlace),
       ...bookingImageSet({
         vehicleTypeImageUrl: listing.vehicle?.vehicleType?.imageUrl,
         listingPhotos: listing.photosJson
@@ -1567,10 +1914,16 @@ export const bookingEngineService = {
     }
 
     const search = await this.searchCarSharing({
+      tenantSlug: tenant.slug,
+      tenantId: tenant.id,
       pickupAt: input?.pickupAt,
       returnAt: input?.returnAt,
       locationId: input?.pickupLocationId || null,
-      locationIds: input?.pickupLocationId ? [input.pickupLocationId] : []
+      locationIds: input?.pickupLocationId ? [input.pickupLocationId] : [],
+      searchPlaceId: input?.searchPlaceId || input?.requestedSearchPlaceId || null,
+      searchPlaceIds: input?.searchPlaceId || input?.requestedSearchPlaceId
+        ? [String(input?.searchPlaceId || input?.requestedSearchPlaceId)]
+        : []
     });
     const selected = (search.results || []).find((row) => row.listing?.id === String(input?.listingId || ''));
     if (!selected) throw new Error('Selected car sharing listing is no longer available');
@@ -1605,6 +1958,8 @@ export const bookingEngineService = {
       scheduledReturnAt: input?.returnAt,
       pickupLocationId: input?.pickupLocationId || null,
       returnLocationId: input?.returnLocationId || input?.pickupLocationId || null,
+      searchPlaceId: input?.searchPlaceId || selected.listing?.searchPlace?.id || null,
+      requestedSearchPlaceId: input?.requestedSearchPlaceId || input?.searchPlaceId || null,
       fulfillmentChoice,
       deliveryAreaChoice,
       notes: ['[PUBLIC BOOKING] Created from booking web', deliveryAreaChoice ? `Delivery area: ${deliveryAreaChoice}` : ''].filter(Boolean).join(' · ')
@@ -1669,6 +2024,9 @@ export const bookingEngineService = {
           sentTo: customer?.email ? [customer.email] : [],
           warning: 'Trip created without linked reservation workflow'
         };
+    const selfServiceConfig = trip?.tenantId
+      ? await settingsService.getSelfServiceConfig({ tenantId: trip.tenantId }).catch(() => null)
+      : null;
 
     return {
       bookingType: 'CAR_SHARING',
@@ -1694,11 +2052,21 @@ export const bookingEngineService = {
         platformRevenue: money(trip.platformRevenue),
         location: selected.listing?.location || null,
         pickupSpot: selected.listing?.pickupSpot || null,
+        searchPlace: selected.listing?.searchPlace || null,
+        searchMatch: selected.listing?.searchMatch || null,
+        fulfillmentPlan: serializePublicTripFulfillmentPlan(trip?.fulfillmentPlan, {
+          pickupAt: trip?.reservation?.pickupAt || null,
+          selfServiceConfig: selfServiceConfig || {},
+          serializeSearchPlace: serializeCarSharingSearchPlace,
+          serializePickupSpot: serializePublicPickupSpot,
+          serializeServiceAreaSearchPlace: serializeCarSharingSearchPlace
+        }),
         vehicleLabel: selected.listing?.vehicle?.label || '',
         selectedFulfillmentChoice: fulfillmentChoice,
         fulfillmentMode: selected.listing?.fulfillmentMode || 'PICKUP_ONLY',
         deliveryRadiusMiles: selected.listing?.deliveryRadiusMiles || null,
         deliveryAreas: normalizeDeliveryAreas(selected.listing?.deliveryAreasJson || selected.listing?.deliveryAreas || []),
+        deliveryAreaHints: resolveDeliveryAreaHints(selected.listing),
         deliveryAreaChoice: deliveryAreaChoice || null,
         deliveryNotes: selected.listing?.deliveryNotes || null,
         pickupFee: money(selected.listing?.pickupFee || 0),
@@ -1769,6 +2137,10 @@ export const bookingEngineService = {
       },
       include: {
         customer: true,
+        pickupLocation: true,
+        returnLocation: true,
+        vehicle: true,
+        vehicleType: true,
         incidents: {
           orderBy: [{ createdAt: 'desc' }],
           take: 10
@@ -1785,9 +2157,60 @@ export const bookingEngineService = {
           guestCustomer: customerFilter
         },
         include: {
+          listing: {
+            include: {
+              vehicle: { include: { vehicleType: true } },
+              location: true,
+              pickupSpot: {
+                include: {
+                  anchorLocation: true,
+                  searchPlace: {
+                    include: {
+                      anchorLocation: true
+                    }
+                  }
+                }
+              }
+            }
+          },
           hostProfile: { select: publicHostSelect() },
           guestCustomer: true,
-          reservation: true,
+          reservation: {
+            include: {
+              pickupLocation: true,
+              returnLocation: true,
+              vehicle: true,
+              vehicleType: true
+            }
+          },
+          fulfillmentPlan: {
+            include: {
+              searchPlace: {
+                include: {
+                  anchorLocation: true
+                }
+              },
+              pickupSpot: {
+                include: {
+                  anchorLocation: true,
+                  searchPlace: {
+                    include: {
+                      anchorLocation: true
+                    }
+                  }
+                }
+              },
+              serviceArea: {
+                include: {
+                  searchPlace: {
+                    include: {
+                      anchorLocation: true
+                    }
+                  }
+                }
+              }
+            }
+          },
           hostReview: true,
           incidents: {
             orderBy: [{ createdAt: 'desc' }],
@@ -1800,8 +2223,52 @@ export const bookingEngineService = {
       trip = await prisma.trip.findFirst({
         where: { reservationId: reservation.id },
         include: {
+          listing: {
+            include: {
+              vehicle: { include: { vehicleType: true } },
+              location: true,
+              pickupSpot: {
+                include: {
+                  anchorLocation: true,
+                  searchPlace: {
+                    include: {
+                      anchorLocation: true
+                    }
+                  }
+                }
+              }
+            }
+          },
           hostProfile: { select: publicHostSelect() },
           guestCustomer: true,
+          fulfillmentPlan: {
+            include: {
+              searchPlace: {
+                include: {
+                  anchorLocation: true
+                }
+              },
+              pickupSpot: {
+                include: {
+                  anchorLocation: true,
+                  searchPlace: {
+                    include: {
+                      anchorLocation: true
+                    }
+                  }
+                }
+              },
+              serviceArea: {
+                include: {
+                  searchPlace: {
+                    include: {
+                      anchorLocation: true
+                    }
+                  }
+                }
+              }
+            }
+          },
           hostReview: true,
           incidents: {
             orderBy: [{ createdAt: 'desc' }],
@@ -1842,6 +2309,9 @@ export const bookingEngineService = {
           payment: { kind: 'payment', link: '', expiresAt: null, emailSent: false, warning: 'No linked reservation workflow found' },
           primaryStep: 'customer-info'
         };
+    const selfServiceConfig = (reservation?.tenantId || trip?.tenantId)
+      ? await settingsService.getSelfServiceConfig({ tenantId: reservation?.tenantId || trip?.tenantId }).catch(() => null)
+      : null;
 
     return {
       bookingType: trip ? 'CAR_SHARING' : 'RENTAL',
@@ -1889,6 +2359,23 @@ export const bookingEngineService = {
             hostEarnings: money(trip.hostEarnings),
             platformFee: money(trip.platformFee),
             platformRevenue: money(trip.platformRevenue),
+            location: trip.listing?.location
+              ? {
+                  id: trip.listing.location.id,
+                  name: trip.listing.location.name,
+                  city: trip.listing.location.city,
+                  state: trip.listing.location.state
+                }
+              : null,
+            pickupSpot: serializePublicPickupSpot(trip.fulfillmentPlan?.pickupSpot || trip.listing?.pickupSpot),
+            searchPlace: serializeCarSharingSearchPlace(trip.fulfillmentPlan?.searchPlace || trip.listing?.pickupSpot?.searchPlace),
+            fulfillmentPlan: serializePublicTripFulfillmentPlan(trip.fulfillmentPlan, {
+              pickupAt: reservation?.pickupAt || null,
+              selfServiceConfig: selfServiceConfig || {},
+              serializeSearchPlace: serializeCarSharingSearchPlace,
+              serializePickupSpot: serializePublicPickupSpot,
+              serializeServiceAreaSearchPlace: serializeCarSharingSearchPlace
+            }),
             host: publicHostSummary(trip.hostProfile),
             hostReview: trip.hostReview
               ? {
