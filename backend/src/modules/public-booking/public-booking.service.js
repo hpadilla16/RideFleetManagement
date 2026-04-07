@@ -504,6 +504,7 @@ export const publicBookingService = {
         fulfillmentMode: result.listing.fulfillmentMode || 'PICKUP_ONLY',
         deliveryRadiusMiles: result.listing.deliveryRadiusMiles ? Number(result.listing.deliveryRadiusMiles) : null,
         deliveryAreas: normalizeDeliveryAreas(result.listing.deliveryAreas || result.listing.deliveryAreasJson),
+        deliveryAreaHints: Array.isArray(result.listing.deliveryAreaHints) ? result.listing.deliveryAreaHints : [],
         pickupFee: money(result.listing.pickupFee),
         deliveryFee: money(result.listing.deliveryFee),
         deliveryNotes: result.listing.deliveryNotes || '',

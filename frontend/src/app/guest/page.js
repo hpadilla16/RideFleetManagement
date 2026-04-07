@@ -882,6 +882,28 @@ export default function GuestAppPage() {
                     ) : null}
                   </div>
                 ) : null}
+                {result.bookingType === 'CAR_SHARING' && result.trip?.fulfillmentPlan?.selfServiceReady && result.trip.fulfillmentPlan.exactHandoffVisible ? (
+                  <div className="surface-note" style={{ borderLeft: '3px solid #6e49ff' }}>
+                    <strong>{result.trip.fulfillmentPlan.selfServiceLabel || 'Self-service handoff ready'}</strong>
+                    <br />
+                    {['LOCKBOX', 'SELF_SERVICE'].includes(String(result.trip.fulfillmentPlan.handoffMode || '').toUpperCase())
+                      ? 'Use the code or key provided in the handoff instructions below to access the vehicle.'
+                      : 'Your host will remotely unlock the vehicle. You do not need to meet anyone in person.'}
+                    {result.trip.fulfillmentPlan.exactHandoff?.instructions ? (
+                      <div style={{ marginTop: 8, padding: '8px 12px', background: 'rgba(110,73,255,0.07)', borderRadius: 8, fontFamily: 'monospace', fontSize: 13 }}>
+                        {result.trip.fulfillmentPlan.exactHandoff.instructions}
+                      </div>
+                    ) : null}
+                  </div>
+                ) : null}
+                {result.bookingType === 'CAR_SHARING' && result.trip?.fulfillmentPlan?.autoRevealAt && !result.trip.fulfillmentPlan.exactHandoffVisible ? (
+                  <div className="surface-note">
+                    <strong>Automatic reveal scheduled</strong>
+                    <br />
+                    The exact pickup details will be revealed automatically at {formatDateTime(result.trip.fulfillmentPlan.autoRevealAt)}.
+                    {result.trip.fulfillmentPlan.autoRevealWindowHours ? ` That is ${result.trip.fulfillmentPlan.autoRevealWindowHours} hour(s) before your scheduled pickup.` : ''}
+                  </div>
+                ) : null}
                 <div className="surface-note">
                   <strong>Before pickup</strong>
                   <br />

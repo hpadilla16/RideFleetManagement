@@ -1426,14 +1426,40 @@ function PublicBookingPageInner() {
                           : `Pickup is required for this listing${Number(selectedResult.pickupFee || 0) > 0 ? ` | ${fmtMoney(selectedResult.pickupFee)}` : ''}.`}
                       </div>
                     )}
-                    {selectedFulfillmentChoice === 'DELIVERY' && Array.isArray(selectedResult.deliveryAreas) && selectedResult.deliveryAreas.length ? (
-                      <div>
-                        <div className="label">Delivery Area</div>
-                        <select value={selectedDeliveryArea} onChange={(event) => setSelectedDeliveryArea(event.target.value)}>
-                          {selectedResult.deliveryAreas.map((area) => <option key={area} value={area}>{area}</option>)}
-                        </select>
-                      </div>
-                    ) : null}
+                    {selectedFulfillmentChoice === 'DELIVERY' && (() => {
+                      const hints = Array.isArray(selectedResult.deliveryAreaHints) && selectedResult.deliveryAreaHints.length
+                        ? selectedResult.deliveryAreaHints
+                        : null;
+                      const legacyAreas = Array.isArray(selectedResult.deliveryAreas) ? selectedResult.deliveryAreas : [];
+                      if (hints) {
+                        return (
+                          <div>
+                            <div className="label">Delivery Area</div>
+                            <select value={selectedDeliveryArea} onChange={(event) => setSelectedDeliveryArea(event.target.value)}>
+                              {hints.map((hint) => {
+                                const label = [
+                                  hint.label || hint.city || hint.searchPlaceId,
+                                  hint.radiusMiles ? `${hint.radiusMiles} mi radius` : null,
+                                  hint.feeOverride != null ? `$${Number(hint.feeOverride).toFixed(2)}` : null
+                                ].filter(Boolean).join(' · ');
+                                return <option key={hint.id || hint.searchPlaceId} value={hint.label || hint.searchPlaceId}>{label}</option>;
+                              })}
+                            </select>
+                          </div>
+                        );
+                      }
+                      if (legacyAreas.length) {
+                        return (
+                          <div>
+                            <div className="label">Delivery Area</div>
+                            <select value={selectedDeliveryArea} onChange={(event) => setSelectedDeliveryArea(event.target.value)}>
+                              {legacyAreas.map((area) => <option key={area} value={area}>{area}</option>)}
+                            </select>
+                          </div>
+                        );
+                      }
+                      return null;
+                    })()}
                   </div>
                 ) : null}
                 <div className="section-title">Guest Details</div>
@@ -1746,7 +1772,8 @@ function PublicBookingPageInner() {
                       setSubmitting(true);
                       setError('');
                       try {
-                        if (searchMode === 'CAR_SHARING' && selectedFulfillmentChoice === 'DELIVERY' && Array.isArray(selectedResult?.deliveryAreas) && selectedResult.deliveryAreas.length && !selectedDeliveryArea) {
+                        const hasDeliveryAreaChoices = (Array.isArray(selectedResult?.deliveryAreaHints) && selectedResult.deliveryAreaHints.length) || (Array.isArray(selectedResult?.deliveryAreas) && selectedResult.deliveryAreas.length);
+                        if (searchMode === 'CAR_SHARING' && selectedFulfillmentChoice === 'DELIVERY' && hasDeliveryAreaChoices && !selectedDeliveryArea) {
                           setError('Choose one of the allowed delivery areas for this listing.');
                           setSubmitting(false);
                           return;

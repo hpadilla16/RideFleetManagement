@@ -36,6 +36,23 @@ export function resolveDeliveryFeeOverride({ listing, fulfillmentChoice, searchP
   return null;
 }
 
+export function resolveDeliveryAreaHints(listing) {
+  const areas = Array.isArray(listing?.serviceAreas) ? listing.serviceAreas : [];
+  return areas
+    .filter((area) => ['DELIVERY', 'BOTH'].includes(String(area?.serviceType || '').toUpperCase()) && area.isActive !== false)
+    .map((area) => ({
+      id: area.id,
+      searchPlaceId: area.searchPlaceId || null,
+      label: area.searchPlace?.displayName || area.searchPlace?.name || area.deliveryAreaChoiceLabel || null,
+      city: area.searchPlace?.city || null,
+      state: area.searchPlace?.state || null,
+      placeType: area.searchPlace?.placeType || null,
+      radiusMiles: area.radiusMiles ?? null,
+      feeOverride: area.feeOverride ?? null,
+      serviceType: String(area.serviceType || 'DELIVERY').toUpperCase()
+    }));
+}
+
 export function buildTripFulfillmentPlanData({ listing, fulfillmentChoice, searchPlaceId, deliveryAreaChoice = null }) {
   const choice = String(fulfillmentChoice || 'PICKUP').toUpperCase() === 'DELIVERY' ? 'DELIVERY' : 'PICKUP';
   const requestedSearchPlaceId = cleanString(searchPlaceId);

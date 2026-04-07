@@ -7,6 +7,7 @@ import { sendEmail } from '../../lib/mailer.js';
 import { settingsService } from '../settings/settings.service.js';
 import { computeMarketplaceTripPricing } from '../car-sharing/car-sharing-pricing.js';
 import { serializePublicTripFulfillmentPlan } from '../car-sharing/car-sharing-handoff.js';
+import { resolveDeliveryAreaHints } from '../car-sharing/car-sharing-fulfillment.js';
 import { activeVehicleBlockOverlapWhere } from '../vehicles/vehicle-blocks.js';
 import {
   compareCarSharingSearchResults,
@@ -1516,6 +1517,7 @@ export const bookingEngineService = {
           fulfillmentMode: listing.fulfillmentMode,
           deliveryRadiusMiles: listing.deliveryRadiusMiles,
           deliveryAreas: normalizeDeliveryAreas(listing.deliveryAreasJson),
+          deliveryAreaHints: resolveDeliveryAreaHints(listing),
           deliveryNotes: listing.deliveryNotes,
           host: publicHostSummary(listing.hostProfile),
           vehicle: listing.vehicle,
@@ -1593,6 +1595,7 @@ export const bookingEngineService = {
       fulfillmentMode: listing.fulfillmentMode,
       deliveryRadiusMiles: listing.deliveryRadiusMiles,
       deliveryAreas: normalizeDeliveryAreas(listing.deliveryAreasJson),
+      deliveryAreaHints: resolveDeliveryAreaHints(listing),
       deliveryNotes: listing.deliveryNotes,
       tripRules: listing.tripRules,
       host: publicHostSummary(listing.hostProfile),
@@ -2063,6 +2066,7 @@ export const bookingEngineService = {
         fulfillmentMode: selected.listing?.fulfillmentMode || 'PICKUP_ONLY',
         deliveryRadiusMiles: selected.listing?.deliveryRadiusMiles || null,
         deliveryAreas: normalizeDeliveryAreas(selected.listing?.deliveryAreasJson || selected.listing?.deliveryAreas || []),
+        deliveryAreaHints: resolveDeliveryAreaHints(selected.listing),
         deliveryAreaChoice: deliveryAreaChoice || null,
         deliveryNotes: selected.listing?.deliveryNotes || null,
         pickupFee: money(selected.listing?.pickupFee || 0),

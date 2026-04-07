@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { computeMarketplaceTripPricing } from './car-sharing-pricing.js';
-import { resolveDeliveryFeeOverride } from './car-sharing-fulfillment.js';
+import { resolveDeliveryFeeOverride, resolveDeliveryAreaHints } from './car-sharing-fulfillment.js';
 import { resolveHandoffConfirmationAlerts } from './car-sharing-handoff.js';
 
 // ─── computeMarketplaceTripPricing ───────────────────────────────────────────
@@ -89,6 +89,31 @@ test('computeMarketplaceTripPricing host service fee tiers work correctly', () =
   assert.equal(baseTier.hostServiceFeeRate, 15);
   assert.ok(topTier.hostEarnings > midTier.hostEarnings, 'top tier host earns more');
   assert.ok(midTier.hostEarnings > baseTier.hostEarnings, 'mid tier host earns more than base');
+});
+
+// ─── resolveDeliveryAreaHints ─────────────────────────────────────────────────
+
+test('resolveDeliveryAreaHints returns only delivery service areas with correct shape', () => {
+  const listing = {
+    serviceAreas: [
+      { id: 'sa1', searchPlaceId: 'sp1', serviceType: 'DELIVERY', radiusMiles: 15, feeOverride: 40, isActive: true, searchPlace: { displayName: 'Miami Airport', city: 'Miami', state: 'FL', placeType: 'AIRPORT' } },
+      { id: 'sa2', searchPlaceId: 'sp2', serviceType: 'PICKUP', radiusMiles: null, feeOverride: null, isActive: true, searchPlace: { displayName: 'Downtown', city: 'Miami', state: 'FL', placeType: 'NEIGHBORHOOD' } },
+      { id: 'sa3', searchPlaceId: 'sp3', serviceType: 'BOTH', radiusMiles: 8, feeOverride: null, isActive: true, searchPlace: { displayName: 'Port Miami', city: 'Miami', state: 'FL', placeType: 'STATION' } }
+    ]
+  };
+  const hints = resolveDeliveryAreaHints(listing);
+  assert.equal(hints.length, 2, 'only DELIVERY and BOTH areas');
+  assert.equal(hints[0].label, 'Miami Airport');
+  assert.equal(hints[0].radiusMiles, 15);
+  assert.equal(hints[0].feeOverride, 40);
+  assert.equal(hints[1].label, 'Port Miami');
+  assert.equal(hints[1].radiusMiles, 8);
+  assert.equal(hints[1].feeOverride, null);
+});
+
+test('resolveDeliveryAreaHints returns empty array for listing with no service areas', () => {
+  assert.deepEqual(resolveDeliveryAreaHints(null), []);
+  assert.deepEqual(resolveDeliveryAreaHints({ serviceAreas: [] }), []);
 });
 
 // ─── resolveDeliveryFeeOverride ───────────────────────────────────────────────
