@@ -52,6 +52,67 @@ issueCenterRouter.patch('/incidents/:id', async (req, res, next) => {
   }
 });
 
+issueCenterRouter.post('/incidents/:id/actions', async (req, res, next) => {
+  try {
+    res.json(await issueCenterService.applyWorkflowAction(req.user, req.params.id, req.body || {}));
+  } catch (error) {
+    if (/not found|required|action must be/i.test(String(error?.message || ''))) {
+      return res.status(400).json({ error: error.message });
+    }
+    next(error);
+  }
+});
+
+issueCenterRouter.post('/incidents/:id/charge-draft', async (req, res, next) => {
+  try {
+    res.json(await issueCenterService.createChargeDraft(req.user, req.params.id, req.body || {}));
+  } catch (error) {
+    if (/not found|required|greater than 0/i.test(String(error?.message || ''))) {
+      return res.status(400).json({ error: error.message });
+    }
+    next(error);
+  }
+});
+
+issueCenterRouter.post('/incidents/:id/charge-card-on-file', async (req, res, next) => {
+  try {
+    res.json(await issueCenterService.chargeCardOnFile(req.user, req.params.id, req.body || {}));
+  } catch (error) {
+    if (/not found|required|greater than 0|Authorize\.Net|card on file|payment profile|reservation/i.test(String(error?.message || ''))) {
+      return res.status(400).json({ error: error.message });
+    }
+    next(error);
+  }
+});
+
+issueCenterRouter.get('/incidents/:id/packet.txt', async (req, res, next) => {
+  try {
+    const packet = await issueCenterService.getIncidentPacket(req.user, requireString(req.params.id, 'id'));
+    res.setHeader('Content-Type', packet.contentType || 'text/plain; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename="${packet.filename || 'claims-packet.txt'}"`);
+    res.send(packet.body || '');
+  } catch (error) {
+    if (/not found|required/i.test(String(error?.message || ''))) {
+      return res.status(400).json({ error: error.message });
+    }
+    next(error);
+  }
+});
+
+issueCenterRouter.get('/incidents/:id/packet-print', async (req, res, next) => {
+  try {
+    const packet = await issueCenterService.getIncidentPacketPrint(req.user, requireString(req.params.id, 'id'));
+    res.setHeader('Content-Type', packet.contentType || 'text/html; charset=utf-8');
+    res.setHeader('Content-Disposition', `inline; filename="${packet.filename || 'claims-packet.html'}"`);
+    res.send(packet.body || '');
+  } catch (error) {
+    if (/not found|required/i.test(String(error?.message || ''))) {
+      return res.status(400).json({ error: error.message });
+    }
+    next(error);
+  }
+});
+
 issueCenterRouter.post('/incidents/:id/request-info', async (req, res, next) => {
   try {
     res.json(await issueCenterService.requestMoreInfo(req.user, req.params.id, req.body || {}));

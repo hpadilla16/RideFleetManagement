@@ -3,17 +3,36 @@
 import { useEffect, useMemo, useState } from 'react';
 import { AuthGate } from '../../components/AuthGate';
 import { AppShell } from '../../components/AppShell';
-import { api } from '../../lib/client';
+import { API_BASE, api } from '../../lib/client';
+import { HostVehicleApprovalsQueue } from './HostVehicleApprovalsQueue';
+import { HostVehicleApprovalWorkspace } from './HostVehicleApprovalWorkspace';
 
 const EMPTY_EDIT = {
   id: '',
   status: 'OPEN',
+  priority: 'MEDIUM',
+  severity: 'LOW',
+  ownerUserId: '',
+  dueAt: '',
+  resolutionCode: '',
+  liabilityDecision: 'PENDING',
+  chargeDecision: 'PENDING',
+  recoveryStage: 'INTAKE',
+  waiveReason: '',
+  customerChargeReady: false,
   title: '',
   description: '',
   amountResolved: '',
   note: '',
   history: [],
   communications: [],
+  operationalContext: null,
+  evidenceChecklist: null,
+  evidenceCapture: null,
+  evidenceRequestDrafts: null,
+  recoveryActions: null,
+  inspectionCompare: null,
+  nextBestAction: null,
   requestNote: ''
 };
 
@@ -21,6 +40,15 @@ const EMPTY_CREATE = {
   subjectType: 'TRIP',
   reference: '',
   type: 'OTHER',
+  priority: 'MEDIUM',
+  severity: 'LOW',
+  ownerUserId: '',
+  dueAt: '',
+  liabilityDecision: 'PENDING',
+  chargeDecision: 'PENDING',
+  recoveryStage: 'INTAKE',
+  waiveReason: '',
+  customerChargeReady: false,
   title: '',
   description: '',
   amountClaimed: ''
@@ -113,6 +141,25 @@ function submissionReplyState(submission) {
   };
 }
 
+function incidentAwaitingReply(incident) {
+  return (incident?.communications || []).some((entry) => entry.publicTokenExpiresAt && !entry.respondedAt);
+}
+
+function incidentIsActive(incident) {
+  return ['OPEN', 'UNDER_REVIEW'].includes(String(incident?.status || '').toUpperCase());
+}
+
+function incidentDueSoon(incident) {
+  if (!incident?.dueAt || !incidentIsActive(incident)) return false;
+  const dueAt = new Date(incident.dueAt).getTime();
+  if (Number.isNaN(dueAt)) return false;
+  return dueAt <= (Date.now() + 1000 * 60 * 60 * 24 * 2);
+}
+
+function incidentReadyToClose(incident) {
+  return String(incident?.status || '').toUpperCase() === 'RESOLVED' && !incidentAwaitingReply(incident);
+}
+
 function incidentHeadline(incident) {
   return [
     incident?.trip?.tripCode || incident?.reservation?.reservationNumber || '',
@@ -124,12 +171,29 @@ function incidentToEdit(incident) {
   return {
     id: incident.id,
     status: incident.status,
+    priority: incident.priority || 'MEDIUM',
+    severity: incident.severity || 'LOW',
+    ownerUserId: incident.ownerUser?.id || '',
+    dueAt: incident.dueAt ? String(incident.dueAt).slice(0, 16) : '',
+    resolutionCode: incident.resolutionCode || '',
+    liabilityDecision: incident.liabilityDecision || 'PENDING',
+    chargeDecision: incident.chargeDecision || 'PENDING',
+    recoveryStage: incident.recoveryStage || 'INTAKE',
+    waiveReason: incident.waiveReason || '',
+    customerChargeReady: !!incident.customerChargeReady,
     title: incident.title,
     description: incident.description || '',
     amountResolved: incident.amountResolved ? String(incident.amountResolved) : '',
     note: '',
     history: incident.history || [],
     communications: incident.communications || [],
+    operationalContext: incident.operationalContext || null,
+    evidenceChecklist: incident.evidenceChecklist || null,
+    evidenceCapture: incident.evidenceCapture || null,
+    evidenceRequestDrafts: incident.evidenceRequestDrafts || null,
+    recoveryActions: incident.recoveryActions || null,
+    inspectionCompare: incident.inspectionCompare || null,
+    nextBestAction: incident.nextBestAction || null,
     requestNote: ''
   };
 }
@@ -273,6 +337,7 @@ function IssueCenterInner({ token, me, logout }) {
     if (typeof window === 'undefined') return '';
     try { return localStorage.getItem(ISSUE_TYPE_KEY) || ''; } catch { return ''; }
   });
+  const [claimsLane, setClaimsLane] = useState('ALL');
   const [edit, setEdit] = useState(EMPTY_EDIT);
   const [submissionEdit, setSubmissionEdit] = useState(EMPTY_SUBMISSION_EDIT);
 
@@ -295,11 +360,28 @@ function IssueCenterInner({ token, me, logout }) {
           setEdit((current) => ({
             ...current,
             status: refreshed.status,
+            priority: refreshed.priority || 'MEDIUM',
+            severity: refreshed.severity || 'LOW',
+            ownerUserId: refreshed.ownerUser?.id || '',
+            dueAt: refreshed.dueAt ? String(refreshed.dueAt).slice(0, 16) : '',
+            resolutionCode: refreshed.resolutionCode || '',
+            liabilityDecision: refreshed.liabilityDecision || 'PENDING',
+            chargeDecision: refreshed.chargeDecision || 'PENDING',
+            recoveryStage: refreshed.recoveryStage || 'INTAKE',
+            waiveReason: refreshed.waiveReason || '',
+            customerChargeReady: !!refreshed.customerChargeReady,
             title: refreshed.title,
             description: refreshed.description || '',
             amountResolved: refreshed.amountResolved ? String(refreshed.amountResolved) : '',
             history: refreshed.history || [],
-            communications: refreshed.communications || []
+            communications: refreshed.communications || [],
+            operationalContext: refreshed.operationalContext || null,
+            evidenceChecklist: refreshed.evidenceChecklist || null,
+            evidenceCapture: refreshed.evidenceCapture || null,
+            evidenceRequestDrafts: refreshed.evidenceRequestDrafts || null,
+            recoveryActions: refreshed.recoveryActions || null,
+            inspectionCompare: refreshed.inspectionCompare || null,
+            nextBestAction: refreshed.nextBestAction || null
           }));
         }
       }
@@ -362,6 +444,16 @@ function IssueCenterInner({ token, me, logout }) {
         method: 'PATCH',
         body: JSON.stringify({
           status: edit.status,
+          priority: edit.priority,
+          severity: edit.severity,
+          ownerUserId: edit.ownerUserId || null,
+          dueAt: edit.dueAt || null,
+          resolutionCode: edit.resolutionCode || null,
+          liabilityDecision: edit.liabilityDecision,
+          chargeDecision: edit.chargeDecision,
+          recoveryStage: edit.recoveryStage,
+          waiveReason: edit.waiveReason || null,
+          customerChargeReady: !!edit.customerChargeReady,
           title: edit.title,
           description: edit.description,
           amountResolved: edit.amountResolved === '' ? null : Number(edit.amountResolved),
@@ -386,6 +478,15 @@ function IssueCenterInner({ token, me, logout }) {
           subjectType: createForm.subjectType,
           reference: createForm.reference,
           type: createForm.type,
+          priority: createForm.priority,
+          severity: createForm.severity,
+          ownerUserId: createForm.ownerUserId || null,
+          dueAt: createForm.dueAt || null,
+          liabilityDecision: createForm.liabilityDecision,
+          chargeDecision: createForm.chargeDecision,
+          recoveryStage: createForm.recoveryStage,
+          waiveReason: createForm.waiveReason || null,
+          customerChargeReady: !!createForm.customerChargeReady,
           title: createForm.title,
           description: createForm.description,
           amountClaimed: createForm.amountClaimed === '' ? null : Number(createForm.amountClaimed)
@@ -400,20 +501,184 @@ function IssueCenterInner({ token, me, logout }) {
     }
   }
 
-  async function requestInfo(recipientType) {
+  async function requestInfo(recipientType, action = null) {
     if (!edit.id) return;
     try {
       const payload = await api(`/api/issue-center/incidents/${edit.id}/request-info`, {
         method: 'POST',
         body: JSON.stringify({
           recipientType,
-          note: edit.requestNote
+          note: String(action?.note || edit.requestNote || '').trim() || null,
+          requestKey: action?.key || null,
+          quickActionLabel: action?.label || null
         })
       }, token);
-      setMsg(`Request sent to ${payload.recipientType.toLowerCase()}`);
+      setMsg(`${payload.quickActionLabel || 'Request'} sent to ${payload.recipientType.toLowerCase()}`);
       setEdit((current) => ({ ...current, requestNote: '' }));
       await load();
     } catch (error) {
+      setMsg(error.message);
+    }
+  }
+
+  function applySuggestedRequestNote(recipientType) {
+    const key = String(recipientType || '').toUpperCase() === 'HOST' ? 'hostNote' : 'guestNote';
+    setEdit((current) => ({
+      ...current,
+      requestNote: current?.evidenceRequestDrafts?.[key] || current.requestNote || ''
+    }));
+  }
+
+  function applyQuickEvidenceRequest(action) {
+    if (!action) return;
+    setEdit((current) => ({
+      ...current,
+      requestNote: action.note || current.requestNote || ''
+    }));
+  }
+
+  async function sendQuickEvidenceRequest(action) {
+    if (!action) return;
+    await requestInfo(action.recipientType || 'GUEST', action);
+  }
+
+  async function runRecoveryAction(action) {
+    if (!action) return;
+    if (action.kind === 'workflow' && action.action) {
+      await runWorkflowAction(action.action);
+      return;
+    }
+    if (action.kind === 'service' && action.service === 'CREATE_CHARGE_DRAFT') {
+      try {
+        const out = await api(`/api/issue-center/incidents/${edit.id}/charge-draft`, {
+          method: 'POST',
+          body: JSON.stringify({})
+        }, token);
+        setMsg(`Charge draft created: ${formatMoney(out?.amount || 0)}`);
+        await load();
+      } catch (error) {
+        setMsg(error.message);
+      }
+      return;
+    }
+    if (action.kind === 'service' && action.service === 'CHARGE_CARD_ON_FILE') {
+      try {
+        const out = await api(`/api/issue-center/incidents/${edit.id}/charge-card-on-file`, {
+          method: 'POST',
+          body: JSON.stringify({})
+        }, token);
+        setMsg(`Card on file charged: ${formatMoney(out?.amount || 0)}`);
+        await load();
+      } catch (error) {
+        setMsg(error.message);
+      }
+      return;
+    }
+    if (action.kind === 'link' && action.href) {
+      window.open(action.href, '_blank');
+    }
+  }
+
+  async function runWorkflowAction(action, extra = {}) {
+    if (!edit.id) return;
+    try {
+      await api(`/api/issue-center/incidents/${edit.id}/actions`, {
+        method: 'POST',
+        body: JSON.stringify({
+          action,
+          ...extra
+        })
+      }, token);
+      setMsg('Workflow action applied');
+      await load();
+    } catch (error) {
+      setMsg(error.message);
+    }
+  }
+
+  async function downloadClaimsPacket() {
+    if (!edit.id) return;
+    try {
+      const res = await fetch(`${API_BASE}/api/issue-center/incidents/${encodeURIComponent(edit.id)}/packet.txt`, {
+        headers: {
+          Authorization: `Bearer ${token}`
+        }
+      });
+      if (!res.ok) {
+        let message = `Claims packet failed (${res.status})`;
+        try {
+          const text = await res.text();
+          if (text) {
+            try {
+              const payload = JSON.parse(text);
+              if (payload?.error) message = payload.error;
+              else message = `${message}: ${text.slice(0, 200)}`;
+            } catch {
+              message = `${message}: ${text.slice(0, 200)}`;
+            }
+          }
+        } catch {}
+        throw new Error(message);
+      }
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const anchor = document.createElement('a');
+      anchor.href = url;
+      anchor.download = `claims-packet-${edit.id}.txt`;
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+      URL.revokeObjectURL(url);
+      setMsg('Claims packet downloaded');
+    } catch (error) {
+      setMsg(error.message);
+    }
+  }
+
+  async function printClaimsPacket() {
+    if (!edit.id) return;
+    const printWindow = window.open('', '_blank');
+    if (!printWindow) {
+      setMsg('Pop-up blocked. Please allow pop-ups to print the claims packet.');
+      return;
+    }
+    printWindow.opener = null;
+    printWindow.document.write('<html><body style="font-family:Inter, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif;padding:32px;text-align:center;background:#0b0a12;color:#fff;">Preparing claims packet...</body></html>');
+    printWindow.document.close();
+    try {
+      const res = await fetch(`${API_BASE}/api/issue-center/incidents/${encodeURIComponent(edit.id)}/packet-print`, {
+        headers: {
+          Authorization: `Bearer ${token}`
+        },
+        cache: 'no-store'
+      });
+      if (!res.ok) {
+        let message = `Claims packet print failed (${res.status})`;
+        try {
+          const text = await res.text();
+          if (text) {
+            try {
+              const payload = JSON.parse(text);
+              if (payload?.error) message = payload.error;
+              else message = `${message}: ${text.slice(0, 200)}`;
+            } catch {
+              message = `${message}: ${text.slice(0, 200)}`;
+            }
+          }
+        } catch {}
+        throw new Error(message);
+      }
+      const html = await res.text();
+      printWindow.document.open();
+      printWindow.document.write(html);
+      printWindow.document.close();
+      printWindow.focus();
+      printWindow.print();
+      setMsg('Claims packet opened for printing');
+    } catch (error) {
+      printWindow.document.open();
+      printWindow.document.write(`<p style="font-family: sans-serif; padding: 24px;">${error.message || 'Unable to print claims packet'}</p>`);
+      printWindow.document.close();
       setMsg(error.message);
     }
   }
@@ -456,13 +721,25 @@ function IssueCenterInner({ token, me, logout }) {
   const metrics = dashboard?.metrics || { open: 0, underReview: 0, resolved: 0, closed: 0, total: 0 };
   const incidents = dashboard?.incidents || [];
   const vehicleSubmissions = dashboard?.vehicleSubmissions || [];
-  const awaitingIncidentReplies = incidents.filter((incident) =>
-    (incident.communications || []).some((entry) => entry.publicTokenExpiresAt && !entry.respondedAt)
-  ).length;
+  const teamMembers = dashboard?.teamMembers || [];
+  const awaitingIncidentReplies = incidents.filter((incident) => incidentAwaitingReply(incident)).length;
   const awaitingVehicleReplies = vehicleSubmissions.filter((submission) =>
     (submission.communications || []).some((entry) => entry.publicTokenExpiresAt && !entry.respondedAt)
   ).length;
   const disputedTrips = incidents.filter((incident) => String(incident?.trip?.status || '').toUpperCase() === 'DISPUTED').length;
+  const unassignedIncidents = useMemo(() => incidents.filter((incident) => incidentIsActive(incident) && !incident?.ownerUser?.id), [incidents]);
+  const urgentIncidents = useMemo(() => incidents.filter((incident) => incidentIsActive(incident) && String(incident?.priority || '').toUpperCase() === 'URGENT'), [incidents]);
+  const dueSoonIncidents = useMemo(() => incidents.filter((incident) => incidentDueSoon(incident)), [incidents]);
+  const awaitingReplyIncidents = useMemo(() => incidents.filter((incident) => incidentAwaitingReply(incident)), [incidents]);
+  const readyToCloseIncidents = useMemo(() => incidents.filter((incident) => incidentReadyToClose(incident)), [incidents]);
+  const visibleIncidents = useMemo(() => {
+    if (claimsLane === 'UNASSIGNED') return unassignedIncidents;
+    if (claimsLane === 'URGENT') return urgentIncidents;
+    if (claimsLane === 'DUE_SOON') return dueSoonIncidents;
+    if (claimsLane === 'AWAITING_REPLY') return awaitingReplyIncidents;
+    if (claimsLane === 'READY_TO_CLOSE') return readyToCloseIncidents;
+    return incidents;
+  }, [awaitingReplyIncidents, claimsLane, dueSoonIncidents, incidents, readyToCloseIncidents, unassignedIncidents, urgentIncidents]);
   const selectedSubmission = submissionEdit.id ? vehicleSubmissions.find((row) => row.id === submissionEdit.id) : null;
   const selectedSubmissionChecklist = selectedSubmission ? submissionChecklist(selectedSubmission) : null;
   const selectedSubmissionReply = selectedSubmission ? submissionReplyState(selectedSubmission) : null;
@@ -574,6 +851,8 @@ function IssueCenterInner({ token, me, logout }) {
               <div className="metric-card"><span className="label">Under Review</span><strong>{metrics.underReview}</strong></div>
               <div className="metric-card"><span className="label">Resolved</span><strong>{metrics.resolved}</strong></div>
               <div className="metric-card"><span className="label">Closed</span><strong>{metrics.closed}</strong></div>
+              <div className="metric-card"><span className="label">Urgent</span><strong>{metrics.urgent || 0}</strong></div>
+              <div className="metric-card"><span className="label">Due Soon</span><strong>{metrics.dueSoon || 0}</strong></div>
               <div className="metric-card"><span className="label">Vehicle Approvals</span><strong>{metrics.vehicleApprovalsPending || 0}</strong></div>
             </div>
           </div>
@@ -591,6 +870,8 @@ function IssueCenterInner({ token, me, logout }) {
             <span className="app-banner-pill">Guest or host replies {awaitingIncidentReplies + awaitingVehicleReplies}</span>
             <span className="app-banner-pill">Vehicle approvals {metrics.vehicleApprovalsPending || 0}</span>
             <span className="app-banner-pill">Disputed trips {disputedTrips}</span>
+            <span className="app-banner-pill">Urgent claims {metrics.urgent || 0}</span>
+            <span className="app-banner-pill">Due soon {metrics.dueSoon || 0}</span>
           </div>
         </div>
 
@@ -620,6 +901,18 @@ function IssueCenterInner({ token, me, logout }) {
               count={metrics.vehicleApprovalsPending || 0}
               note="Host fleet submissions waiting on document, photo, pricing, or inspection review."
               tone={(metrics.vehicleApprovalsPending || 0) > 0 ? 'warn' : 'neutral'}
+            />
+            <ServiceLaneCard
+              label="Urgent Claims"
+              count={metrics.urgent || 0}
+              note="Claims tagged urgent and still open or under review."
+              tone={(metrics.urgent || 0) > 0 ? 'warn' : 'neutral'}
+            />
+            <ServiceLaneCard
+              label="Due Soon"
+              count={metrics.dueSoon || 0}
+              note="Claims due in the next 48 hours that should be actively worked."
+              tone={(metrics.dueSoon || 0) > 0 ? 'warn' : 'neutral'}
             />
             <ServiceLaneCard
               label="Resolved And Closed"
@@ -671,6 +964,27 @@ function IssueCenterInner({ token, me, logout }) {
             <div className="surface-note">No urgent support priorities are open right now. You can work from the queues below.</div>
           )}
         </section>
+
+        <section className="glass card-lg section-card">
+          <div className="row-between">
+            <div>
+              <div className="section-title">Claims Lanes</div>
+              <p className="ui-muted">Work the queue by ownership, urgency, due date, reply dependency, or closeout readiness.</p>
+            </div>
+            <span className="status-chip neutral">{visibleIncidents.length} visible</span>
+          </div>
+          <div className="inline-actions" style={{ gap: 8, flexWrap: 'wrap' }}>
+            <button type="button" className={claimsLane === 'ALL' ? '' : 'button-subtle'} onClick={() => setClaimsLane('ALL')}>All {incidents.length}</button>
+            <button type="button" className={claimsLane === 'UNASSIGNED' ? '' : 'button-subtle'} onClick={() => setClaimsLane('UNASSIGNED')}>Unassigned {unassignedIncidents.length}</button>
+            <button type="button" className={claimsLane === 'URGENT' ? '' : 'button-subtle'} onClick={() => setClaimsLane('URGENT')}>Urgent {urgentIncidents.length}</button>
+            <button type="button" className={claimsLane === 'DUE_SOON' ? '' : 'button-subtle'} onClick={() => setClaimsLane('DUE_SOON')}>Due Soon {dueSoonIncidents.length}</button>
+            <button type="button" className={claimsLane === 'AWAITING_REPLY' ? '' : 'button-subtle'} onClick={() => setClaimsLane('AWAITING_REPLY')}>Awaiting Reply {awaitingReplyIncidents.length}</button>
+            <button type="button" className={claimsLane === 'READY_TO_CLOSE' ? '' : 'button-subtle'} onClick={() => setClaimsLane('READY_TO_CLOSE')}>Ready To Close {readyToCloseIncidents.length}</button>
+          </div>
+          <div className="surface-note">
+            Suggested order: `Unassigned`, then `Urgent`, then `Due Soon`, then `Awaiting Reply`, then `Ready To Close`.
+          </div>
+        </section>
       </section>
 
       <section className="split-panel">
@@ -680,7 +994,7 @@ function IssueCenterInner({ token, me, logout }) {
               <div className="section-title">Open Queue</div>
               <p className="ui-muted">Search by trip code, reservation, guest, host, or incident title.</p>
             </div>
-            <span className="status-chip neutral">{metrics.total} total</span>
+            <span className="status-chip neutral">{visibleIncidents.length} in lane</span>
           </div>
           <div className="form-grid-3">
             <div>
@@ -709,12 +1023,13 @@ function IssueCenterInner({ token, me, logout }) {
               </select>
             </div>
           </div>
-          {incidents.length ? (
+          {visibleIncidents.length ? (
             <div className="stack">
-              {incidents.map((incident) => (
+              {visibleIncidents.map((incident) => (
                 <div key={incident.id} className="surface-note" style={{ display: 'grid', gap: 10 }}>
                   {(() => {
                     const reservation = incident.reservation || incident.trip?.reservation || null;
+                    const operationalContext = incident.operationalContext || null;
                     const guestName = incident.trip?.guestCustomer
                       ? [incident.trip.guestCustomer.firstName, incident.trip.guestCustomer.lastName].filter(Boolean).join(' ')
                       : incident.guestCustomer
@@ -732,13 +1047,47 @@ function IssueCenterInner({ token, me, logout }) {
                           subjectRef,
                           workflowLabel,
                           incident.type,
+                          incident.priority,
+                          incident.severity,
                           guestName,
                           incident.trip?.hostProfile?.displayName || ''
                         ].filter(Boolean).join(' - ')}
                       </div>
+                      <div className="inline-actions" style={{ gap: 8, marginTop: 6, flexWrap: 'wrap' }}>
+                        <span className={incident.priority === 'URGENT' ? 'status-chip warn' : incident.priority === 'HIGH' ? 'status-chip neutral' : 'status-chip neutral'}>{incident.priority || 'MEDIUM'}</span>
+                        <span className={['HIGH', 'CRITICAL'].includes(String(incident.severity || '').toUpperCase()) ? 'status-chip warn' : 'status-chip neutral'}>{incident.severity || 'LOW'}</span>
+                        <span className="status-chip neutral">Liability {incident.liabilityDecision || 'PENDING'}</span>
+                        <span className="status-chip neutral">Recovery {incident.recoveryStage || 'INTAKE'}</span>
+                        <span className={String(incident.chargeDecision || '').toUpperCase() === 'CHARGE_CUSTOMER' ? 'status-chip good' : 'status-chip neutral'}>{incident.chargeDecision || 'PENDING'}</span>
+                        {incident.ownerUser?.fullName ? <span className="status-chip neutral">{incident.ownerUser.fullName}</span> : null}
+                        {incident.dueAt ? <span className="status-chip neutral">Due {formatDateTime(incident.dueAt)}</span> : null}
+                        {incident.customerChargeReady ? <span className="status-chip good">Charge Ready</span> : null}
+                        {operationalContext?.turnReady?.status ? <span className={['BLOCKED', 'ATTENTION'].includes(String(operationalContext.turnReady.status || '').toUpperCase()) ? 'status-chip warn' : 'status-chip neutral'}>Turn-Ready {operationalContext.turnReady.status}</span> : null}
+                        {operationalContext?.inspection?.damageTriage?.severity && String(operationalContext.inspection.damageTriage.severity).toUpperCase() !== 'NONE' ? <span className={['HIGH', 'CRITICAL'].includes(String(operationalContext.inspection.damageTriage.severity || '').toUpperCase()) ? 'status-chip warn' : 'status-chip neutral'}>Damage {operationalContext.inspection.damageTriage.severity}</span> : null}
+                        {operationalContext?.telematics?.status ? <span className={['OFFLINE', 'STALE', 'NO_SIGNAL'].includes(String(operationalContext.telematics.status || '').toUpperCase()) ? 'status-chip warn' : 'status-chip neutral'}>Telematics {operationalContext.telematics.status}</span> : null}
+                        {Number(operationalContext?.swapCount || 0) > 0 ? <span className="status-chip neutral">{operationalContext.swapCount} swap{Number(operationalContext.swapCount) === 1 ? '' : 's'}</span> : null}
+                      </div>
                       {String(incident.type || '').toUpperCase() === 'TOLL' ? (
                         <div style={{ marginTop: 6 }}>
                           <span className="status-chip warn">Toll Dispute</span>
+                        </div>
+                      ) : null}
+                      {incident.nextBestAction?.label ? (
+                        <div className="surface-note" style={{ marginTop: 10 }}>
+                          <strong>Next:</strong> {incident.nextBestAction.label}
+                          {incident.nextBestAction.detail ? <div style={{ marginTop: 6 }}>{incident.nextBestAction.detail}</div> : null}
+                        </div>
+                      ) : null}
+                      {incident.evidenceChecklist ? (
+                        <div className="surface-note" style={{ marginTop: 10 }}>
+                          <strong>Evidence Checklist:</strong> {incident.evidenceChecklist.status} ({incident.evidenceChecklist.completionPct ?? 0}%)
+                          {incident.evidenceChecklist.summary ? <div style={{ marginTop: 6 }}>{incident.evidenceChecklist.summary}</div> : null}
+                        </div>
+                      ) : null}
+                      {incident.evidenceCapture ? (
+                        <div className="surface-note" style={{ marginTop: 10 }}>
+                          <strong>Evidence Capture:</strong> {incident.evidenceCapture.status} ({incident.evidenceCapture.completionPct ?? 0}%)
+                          {incident.evidenceCapture.summary ? <div style={{ marginTop: 6 }}>{incident.evidenceCapture.summary}</div> : null}
                         </div>
                       ) : null}
                     </div>
@@ -751,6 +1100,14 @@ function IssueCenterInner({ token, me, logout }) {
                     <div className="info-tile"><span className="label">{incident.subjectType === 'RESERVATION' ? 'Reservation' : 'Trip'}</span><strong>{incident.subjectType === 'RESERVATION' ? (reservation?.status || '-') : (incident.trip?.status || '-')}</strong></div>
                   </div>
                   <div style={{ color: '#55456f', lineHeight: 1.5 }}>{incident.description || 'No description provided.'}</div>
+                  {operationalContext ? (
+                    <div className="surface-note">
+                      {[operationalContext.turnReady?.summary, operationalContext.inspection?.damageTriage?.summary, operationalContext.telematics?.summary]
+                        .filter(Boolean)
+                        .slice(0, 2)
+                        .join(' | ') || 'Connected operational context is attached to this claim.'}
+                    </div>
+                  ) : null}
                   <details>
                     <summary style={{ cursor: 'pointer', fontWeight: 600 }}>Issue History</summary>
                     <div style={{ marginTop: 10 }}>
@@ -773,7 +1130,7 @@ function IssueCenterInner({ token, me, logout }) {
               ))}
             </div>
           ) : (
-            <div className="surface-note">No issues match the current filters.</div>
+            <div className="surface-note">No issues match the current filters and lane selection.</div>
           )}
         </section>
 
@@ -826,6 +1183,86 @@ function IssueCenterInner({ token, me, logout }) {
                 />
               </div>
             </div>
+            <div className="form-grid-2">
+              <div className="stack">
+                <div className="label">Priority</div>
+                <select value={createForm.priority} onChange={(e) => setCreateForm((current) => ({ ...current, priority: e.target.value }))}>
+                  <option value="LOW">LOW</option>
+                  <option value="MEDIUM">MEDIUM</option>
+                  <option value="HIGH">HIGH</option>
+                  <option value="URGENT">URGENT</option>
+                </select>
+              </div>
+              <div className="stack">
+                <div className="label">Severity</div>
+                <select value={createForm.severity} onChange={(e) => setCreateForm((current) => ({ ...current, severity: e.target.value }))}>
+                  <option value="LOW">LOW</option>
+                  <option value="MEDIUM">MEDIUM</option>
+                  <option value="HIGH">HIGH</option>
+                  <option value="CRITICAL">CRITICAL</option>
+                </select>
+              </div>
+            </div>
+            <div className="form-grid-2">
+              <div className="stack">
+                <div className="label">Owner</div>
+                <select value={createForm.ownerUserId} onChange={(e) => setCreateForm((current) => ({ ...current, ownerUserId: e.target.value }))}>
+                  <option value="">Unassigned</option>
+                  {teamMembers.map((member) => (
+                    <option key={member.id} value={member.id}>{member.fullName}</option>
+                  ))}
+                </select>
+              </div>
+              <div className="stack">
+                <div className="label">Due At</div>
+                <input type="datetime-local" value={createForm.dueAt} onChange={(e) => setCreateForm((current) => ({ ...current, dueAt: e.target.value }))} />
+              </div>
+            </div>
+            <div className="form-grid-3">
+              <div className="stack">
+                <div className="label">Liability</div>
+                <select value={createForm.liabilityDecision} onChange={(e) => setCreateForm((current) => ({ ...current, liabilityDecision: e.target.value }))}>
+                  <option value="PENDING">PENDING</option>
+                  <option value="CUSTOMER">CUSTOMER</option>
+                  <option value="TENANT">TENANT</option>
+                  <option value="HOST">HOST</option>
+                  <option value="SHARED">SHARED</option>
+                  <option value="WAIVED">WAIVED</option>
+                </select>
+              </div>
+              <div className="stack">
+                <div className="label">Charge Decision</div>
+                <select value={createForm.chargeDecision} onChange={(e) => setCreateForm((current) => ({ ...current, chargeDecision: e.target.value }))}>
+                  <option value="PENDING">PENDING</option>
+                  <option value="CHARGE_CUSTOMER">CHARGE_CUSTOMER</option>
+                  <option value="CHARGE_HOST">CHARGE_HOST</option>
+                  <option value="CHARGE_TENANT">CHARGE_TENANT</option>
+                  <option value="WAIVE">WAIVE</option>
+                </select>
+              </div>
+              <div className="stack">
+                <div className="label">Recovery Stage</div>
+                <select value={createForm.recoveryStage} onChange={(e) => setCreateForm((current) => ({ ...current, recoveryStage: e.target.value }))}>
+                  <option value="INTAKE">INTAKE</option>
+                  <option value="EVIDENCE">EVIDENCE</option>
+                  <option value="LIABILITY_REVIEW">LIABILITY_REVIEW</option>
+                  <option value="READY_TO_CHARGE">READY_TO_CHARGE</option>
+                  <option value="CHARGED">CHARGED</option>
+                  <option value="WAIVED">WAIVED</option>
+                  <option value="CLOSED">CLOSED</option>
+                </select>
+              </div>
+            </div>
+            <div className="form-grid-2">
+              <div className="stack">
+                <div className="label">Waive Reason</div>
+                <input value={createForm.waiveReason} onChange={(e) => setCreateForm((current) => ({ ...current, waiveReason: e.target.value }))} placeholder="Optional waiver note" />
+              </div>
+              <label className="surface-note" style={{ display: 'flex', gap: 10, alignItems: 'center', alignSelf: 'end' }}>
+                <input type="checkbox" checked={!!createForm.customerChargeReady} onChange={(e) => setCreateForm((current) => ({ ...current, customerChargeReady: e.target.checked }))} />
+                <span>Customer charge ready</span>
+              </label>
+            </div>
             <div className="stack">
               <div className="label">Title</div>
               <input value={createForm.title} onChange={(e) => setCreateForm((current) => ({ ...current, title: e.target.value }))} placeholder="Short case title" />
@@ -853,9 +1290,101 @@ function IssueCenterInner({ token, me, logout }) {
                   <option value="CLOSED">CLOSED</option>
                 </select>
               </div>
+              <div className="form-grid-2">
+                <div className="stack">
+                  <div className="label">Priority</div>
+                  <select value={edit.priority} onChange={(e) => setEdit((current) => ({ ...current, priority: e.target.value }))}>
+                    <option value="LOW">LOW</option>
+                    <option value="MEDIUM">MEDIUM</option>
+                    <option value="HIGH">HIGH</option>
+                    <option value="URGENT">URGENT</option>
+                  </select>
+                </div>
+                <div className="stack">
+                  <div className="label">Severity</div>
+                  <select value={edit.severity} onChange={(e) => setEdit((current) => ({ ...current, severity: e.target.value }))}>
+                    <option value="LOW">LOW</option>
+                    <option value="MEDIUM">MEDIUM</option>
+                    <option value="HIGH">HIGH</option>
+                    <option value="CRITICAL">CRITICAL</option>
+                  </select>
+                </div>
+              </div>
+              <div className="form-grid-2">
+                <div className="stack">
+                  <div className="label">Owner</div>
+                  <select value={edit.ownerUserId} onChange={(e) => setEdit((current) => ({ ...current, ownerUserId: e.target.value }))}>
+                    <option value="">Unassigned</option>
+                    {teamMembers.map((member) => (
+                      <option key={member.id} value={member.id}>{member.fullName}</option>
+                    ))}
+                  </select>
+                </div>
+                <div className="stack">
+                  <div className="label">Due At</div>
+                  <input type="datetime-local" value={edit.dueAt} onChange={(e) => setEdit((current) => ({ ...current, dueAt: e.target.value }))} />
+                </div>
+              </div>
               <div className="stack">
                 <div className="label">Amount Resolved</div>
                 <input type="number" min="0" step="0.01" value={edit.amountResolved} onChange={(e) => setEdit((current) => ({ ...current, amountResolved: e.target.value }))} />
+              </div>
+              <div className="stack">
+                <div className="label">Resolution Code</div>
+                <select value={edit.resolutionCode} onChange={(e) => setEdit((current) => ({ ...current, resolutionCode: e.target.value }))}>
+                  <option value="">None</option>
+                  <option value="CUSTOMER_CHARGED">CUSTOMER_CHARGED</option>
+                  <option value="WAIVED">WAIVED</option>
+                  <option value="INVALID_REPORT">INVALID_REPORT</option>
+                  <option value="DUPLICATE">DUPLICATE</option>
+                  <option value="GOODWILL">GOODWILL</option>
+                  <option value="OTHER">OTHER</option>
+                </select>
+              </div>
+              <div className="form-grid-3">
+                <div className="stack">
+                  <div className="label">Liability</div>
+                  <select value={edit.liabilityDecision} onChange={(e) => setEdit((current) => ({ ...current, liabilityDecision: e.target.value }))}>
+                    <option value="PENDING">PENDING</option>
+                    <option value="CUSTOMER">CUSTOMER</option>
+                    <option value="TENANT">TENANT</option>
+                    <option value="HOST">HOST</option>
+                    <option value="SHARED">SHARED</option>
+                    <option value="WAIVED">WAIVED</option>
+                  </select>
+                </div>
+                <div className="stack">
+                  <div className="label">Charge Decision</div>
+                  <select value={edit.chargeDecision} onChange={(e) => setEdit((current) => ({ ...current, chargeDecision: e.target.value }))}>
+                    <option value="PENDING">PENDING</option>
+                    <option value="CHARGE_CUSTOMER">CHARGE_CUSTOMER</option>
+                    <option value="CHARGE_HOST">CHARGE_HOST</option>
+                    <option value="CHARGE_TENANT">CHARGE_TENANT</option>
+                    <option value="WAIVE">WAIVE</option>
+                  </select>
+                </div>
+                <div className="stack">
+                  <div className="label">Recovery Stage</div>
+                  <select value={edit.recoveryStage} onChange={(e) => setEdit((current) => ({ ...current, recoveryStage: e.target.value }))}>
+                    <option value="INTAKE">INTAKE</option>
+                    <option value="EVIDENCE">EVIDENCE</option>
+                    <option value="LIABILITY_REVIEW">LIABILITY_REVIEW</option>
+                    <option value="READY_TO_CHARGE">READY_TO_CHARGE</option>
+                    <option value="CHARGED">CHARGED</option>
+                    <option value="WAIVED">WAIVED</option>
+                    <option value="CLOSED">CLOSED</option>
+                  </select>
+                </div>
+              </div>
+              <div className="form-grid-2">
+                <div className="stack">
+                  <div className="label">Waive Reason</div>
+                  <input value={edit.waiveReason} onChange={(e) => setEdit((current) => ({ ...current, waiveReason: e.target.value }))} placeholder="Optional waiver note" />
+                </div>
+                <label className="surface-note" style={{ display: 'flex', gap: 10, alignItems: 'center', alignSelf: 'end' }}>
+                  <input type="checkbox" checked={!!edit.customerChargeReady} onChange={(e) => setEdit((current) => ({ ...current, customerChargeReady: e.target.checked }))} />
+                  <span>Customer charge ready</span>
+                </label>
               </div>
               <div className="stack">
                 <div className="label">Description</div>
@@ -867,10 +1396,211 @@ function IssueCenterInner({ token, me, logout }) {
               </div>
               <div className="inline-actions">
                 <button type="submit">Save Case</button>
+                <button type="button" className="button-subtle" onClick={downloadClaimsPacket}>Download Claims Packet</button>
+                <button type="button" className="button-subtle" onClick={printClaimsPacket}>Print / Save PDF</button>
               </div>
+              {edit.nextBestAction ? (
+                <div className="glass card section-card" style={{ padding: 14 }}>
+                  <div className="row-between">
+                    <div className="section-title" style={{ marginBottom: 0 }}>Next Best Action</div>
+                    <span className={edit.nextBestAction.tone === 'good' ? 'status-chip good' : edit.nextBestAction.tone === 'warn' ? 'status-chip warn' : 'status-chip neutral'}>
+                      {edit.nextBestAction.label}
+                    </span>
+                  </div>
+                  <div className="surface-note" style={{ marginTop: 12 }}>{edit.nextBestAction.detail || 'Review this case and decide the next move.'}</div>
+                  <div className="inline-actions" style={{ marginTop: 12 }}>
+                    <button type="button" className="button-subtle" onClick={() => runWorkflowAction('SET_LIABILITY_CUSTOMER')}>Set Liability To Customer</button>
+                    <button type="button" className="button-subtle" onClick={() => runWorkflowAction('MARK_READY_TO_CHARGE')}>Mark Ready To Charge</button>
+                    <button type="button" className="button-subtle" onClick={() => runWorkflowAction('WAIVE_CLAIM', { waiveReason: edit.waiveReason || null })}>Waive Claim</button>
+                    <button type="button" className="button-subtle" onClick={() => runWorkflowAction('CLOSE_CLAIM')}>Close Claim</button>
+                  </div>
+                </div>
+              ) : null}
+              {edit.evidenceChecklist ? (
+                <div className="glass card section-card" style={{ padding: 14 }}>
+                  <div className="row-between">
+                    <div className="section-title" style={{ marginBottom: 0 }}>Evidence Checklist</div>
+                    <span className={edit.evidenceChecklist.status === 'READY' ? 'status-chip good' : edit.evidenceChecklist.status === 'PARTIAL' ? 'status-chip warn' : 'status-chip neutral'}>
+                      {edit.evidenceChecklist.status} {edit.evidenceChecklist.completionPct != null ? `(${edit.evidenceChecklist.completionPct}%)` : ''}
+                    </span>
+                  </div>
+                  <div className="surface-note" style={{ marginTop: 12 }}>{edit.evidenceChecklist.summary || 'No checklist summary available.'}</div>
+                  <div className="timeline-list" style={{ marginTop: 12 }}>
+                    {(edit.evidenceChecklist.items || []).map((item) => (
+                      <div key={item.key || item.label} className="surface-note" style={item.complete ? undefined : { background: '#fff7ed', borderColor: '#fed7aa', color: '#9a3412' }}>
+                        <strong>{item.label}</strong>: {item.complete ? 'Complete' : 'Missing'}
+                        <div style={{ marginTop: 6 }}>{item.detail || '-'}</div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ) : null}
+              {edit.evidenceCapture ? (
+                <div className="glass card section-card" style={{ padding: 14 }}>
+                  <div className="row-between">
+                    <div className="section-title" style={{ marginBottom: 0 }}>Evidence Capture</div>
+                    <span className={edit.evidenceCapture.status === 'READY' ? 'status-chip good' : edit.evidenceCapture.status === 'PARTIAL' ? 'status-chip warn' : 'status-chip neutral'}>
+                      {edit.evidenceCapture.status} {edit.evidenceCapture.completionPct != null ? `(${edit.evidenceCapture.completionPct}%)` : ''}
+                    </span>
+                  </div>
+                  <div className="surface-note" style={{ marginTop: 12 }}>{edit.evidenceCapture.summary || 'No evidence capture summary available.'}</div>
+                  <div className="timeline-list" style={{ marginTop: 12 }}>
+                    {(edit.evidenceCapture.slots || []).map((entry) => (
+                      <div key={entry.key || entry.label} className="surface-note" style={entry.ready ? undefined : { background: '#fff7ed', borderColor: '#fed7aa', color: '#9a3412' }}>
+                        <strong>{entry.label}</strong>: {entry.status || (entry.ready ? 'READY' : 'MISSING')}
+                        <div style={{ marginTop: 6 }}>{entry.guidance || '-'}</div>
+                        <div className="label" style={{ textTransform: 'none', letterSpacing: 0, fontSize: 12, marginTop: 6 }}>
+                          Sources: {entry.sourceLabels?.length ? entry.sourceLabels.join(' - ') : 'None yet'}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ) : null}
+              {edit.recoveryActions?.length ? (
+                <div className="glass card section-card" style={{ padding: 14 }}>
+                  <div className="row-between">
+                    <div className="section-title" style={{ marginBottom: 0 }}>Recovery Quick Actions</div>
+                    <span className="status-chip neutral">{edit.recoveryActions.length} action{edit.recoveryActions.length === 1 ? '' : 's'}</span>
+                  </div>
+                  <div className="inline-actions" style={{ marginTop: 12 }}>
+                    {edit.recoveryActions.map((action) => (
+                      <button key={action.key} type="button" className="button-subtle" onClick={() => runRecoveryAction(action)}>
+                        {action.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              ) : null}
+              {edit.inspectionCompare ? (
+                <div className="glass card section-card" style={{ padding: 14 }}>
+                  <div className="row-between">
+                    <div className="section-title" style={{ marginBottom: 0 }}>Inspection Compare</div>
+                    <span className={edit.inspectionCompare.status === 'COMPARE_READY' ? 'status-chip good' : 'status-chip neutral'}>
+                      {edit.inspectionCompare.status || 'NO DATA'}
+                    </span>
+                  </div>
+                  <div className="surface-note" style={{ marginTop: 12 }}>{edit.inspectionCompare.summary || 'No inspection compare summary attached.'}</div>
+                  <div className="app-card-grid compact" style={{ marginTop: 12 }}>
+                    <div className="info-tile">
+                      <span className="label">Changed Fields</span>
+                      <strong>{edit.inspectionCompare.changedCount ?? 0}</strong>
+                      <span className="ui-muted">Checkout vs check-in differences detected.</span>
+                    </div>
+                    <div className="info-tile">
+                      <span className="label">Photo Coverage</span>
+                      <strong>{edit.inspectionCompare?.photoCoverage?.checkout ?? 0}/{edit.inspectionCompare?.photoCoverage?.checkin ?? 0}</strong>
+                      <span className="ui-muted">Comparable photos: {edit.inspectionCompare?.photoCoverage?.common ?? 0}</span>
+                    </div>
+                  </div>
+                  {edit.inspectionCompare?.previews?.length ? (
+                    <div className="timeline-list" style={{ marginTop: 12 }}>
+                      {edit.inspectionCompare.previews.map((preview) => (
+                        <div key={preview.key} className="surface-note">
+                          <div style={{ fontWeight: 700, marginBottom: 8 }}>{preview.label}</div>
+                          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+                            <div>
+                              <div className="label" style={{ textTransform: 'none', letterSpacing: 0, fontSize: 12, marginBottom: 6 }}>Checkout</div>
+                              {preview.checkoutSrc ? <img src={preview.checkoutSrc} alt={`${preview.label} checkout`} style={{ width: '100%', maxHeight: 160, objectFit: 'cover', borderRadius: 10, border: '1px solid #d7d2e4' }} /> : <div className="ui-muted">No checkout photo</div>}
+                            </div>
+                            <div>
+                              <div className="label" style={{ textTransform: 'none', letterSpacing: 0, fontSize: 12, marginBottom: 6 }}>Check-In</div>
+                              {preview.checkinSrc ? <img src={preview.checkinSrc} alt={`${preview.label} checkin`} style={{ width: '100%', maxHeight: 160, objectFit: 'cover', borderRadius: 10, border: '1px solid #d7d2e4' }} /> : <div className="ui-muted">No check-in photo</div>}
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  ) : null}
+                  {edit.inspectionCompare?.changes?.filter((entry) => entry.changed).length ? (
+                    <div className="timeline-list" style={{ marginTop: 12 }}>
+                      {edit.inspectionCompare.changes.filter((entry) => entry.changed).map((entry) => (
+                        <div key={entry.key} className="surface-note" style={{ background: '#fff7ed', borderColor: '#fed7aa', color: '#9a3412' }}>
+                          <strong>{entry.label}</strong>
+                          <div style={{ marginTop: 6 }}>{entry.before}{' -> '}{entry.after}</div>
+                        </div>
+                      ))}
+                    </div>
+                  ) : null}
+                  {edit.inspectionCompare?.links?.inspectionReportHref ? (
+                    <div className="inline-actions" style={{ marginTop: 12 }}>
+                      <button type="button" className="button-subtle" onClick={() => window.open(edit.inspectionCompare.links.inspectionReportHref, '_blank')}>Open Inspection Report</button>
+                    </div>
+                  ) : null}
+                </div>
+              ) : null}
+              {edit.operationalContext ? (
+                <div className="glass card section-card" style={{ padding: 14 }}>
+                  <div className="row-between">
+                    <div className="section-title" style={{ marginBottom: 0 }}>Connected Ops Context</div>
+                    <span className={['BLOCKED', 'ATTENTION'].includes(String(edit.operationalContext?.turnReady?.status || '').toUpperCase()) ? 'status-chip warn' : 'status-chip neutral'}>
+                      {edit.operationalContext?.turnReady?.status || 'NO DATA'}
+                    </span>
+                  </div>
+                  <div className="app-card-grid compact" style={{ marginTop: 12 }}>
+                    <div className="info-tile">
+                      <span className="label">Vehicle</span>
+                      <strong>{edit.operationalContext?.vehicle ? [edit.operationalContext.vehicle.internalNumber ? `Unit ${edit.operationalContext.vehicle.internalNumber}` : '', edit.operationalContext.vehicle.year, edit.operationalContext.vehicle.make, edit.operationalContext.vehicle.model].filter(Boolean).join(' ') : '-'}</strong>
+                      <span className="ui-muted">{edit.operationalContext?.vehicle?.plate || 'No assigned plate on this case context.'}</span>
+                    </div>
+                    <div className="info-tile">
+                      <span className="label">Turn-Ready</span>
+                      <strong>{edit.operationalContext?.turnReady?.score ?? '-'}</strong>
+                      <span className="ui-muted">{edit.operationalContext?.turnReady?.summary || 'No turn-ready summary yet.'}</span>
+                    </div>
+                    <div className="info-tile">
+                      <span className="label">Damage Triage</span>
+                      <strong>{edit.operationalContext?.inspection?.damageTriage?.severity || 'NONE'}</strong>
+                      <span className="ui-muted">{edit.operationalContext?.inspection?.damageTriage?.recommendedAction || edit.operationalContext?.inspection?.summary || 'No damage triage signal attached.'}</span>
+                    </div>
+                    <div className="info-tile">
+                      <span className="label">Telematics</span>
+                      <strong>{edit.operationalContext?.telematics?.status || 'NO DATA'}</strong>
+                      <span className="ui-muted">{edit.operationalContext?.telematics?.summary || 'No telematics summary attached.'}</span>
+                    </div>
+                  </div>
+                  {edit.operationalContext?.attentionReasons?.length ? (
+                    <div className="timeline-list" style={{ marginTop: 12 }}>
+                      {edit.operationalContext.attentionReasons.map((reason) => (
+                        <div key={reason} className="surface-note" style={{ background: '#fff7ed', borderColor: '#fed7aa', color: '#9a3412' }}>{reason}</div>
+                      ))}
+                    </div>
+                  ) : null}
+                  {edit.operationalContext?.telematics?.alerts?.length ? (
+                    <div className="timeline-list" style={{ marginTop: 12 }}>
+                      {edit.operationalContext.telematics.alerts.map((reason) => (
+                        <div key={reason} className="surface-note">{reason}</div>
+                      ))}
+                    </div>
+                  ) : null}
+                </div>
+              ) : null}
               <div className="glass card section-card" style={{ padding: 14 }}>
                 <div className="section-title" style={{ marginBottom: 10 }}>Request More Information</div>
                 <div className="stack">
+                  {edit.evidenceRequestDrafts?.actions?.length ? (
+                    <div className="stack">
+                      <div className="label">Quick Evidence Requests</div>
+                      <div className="inline-actions">
+                        {edit.evidenceRequestDrafts.actions.map((action) => (
+                          <span key={`${action.key}-${action.recipientType}`} style={{ display: 'inline-flex', gap: 8, flexWrap: 'wrap' }}>
+                            <button type="button" className="button-subtle" onClick={() => applyQuickEvidenceRequest(action)}>
+                              {action.label}
+                            </button>
+                            <button type="button" className="button-subtle" onClick={() => sendQuickEvidenceRequest(action)}>
+                              Send Now
+                            </button>
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  ) : null}
+                  {edit.evidenceRequestDrafts ? (
+                    <div className="inline-actions">
+                      <button type="button" className="button-subtle" onClick={() => applySuggestedRequestNote('GUEST')}>Use Suggested Guest Note</button>
+                      <button type="button" className="button-subtle" onClick={() => applySuggestedRequestNote('HOST')}>Use Suggested Host Note</button>
+                    </div>
+                  ) : null}
                   <div className="label">Representative Request Note</div>
                   <textarea rows={4} value={edit.requestNote} onChange={(e) => setEdit((current) => ({ ...current, requestNote: e.target.value }))} placeholder="Explain what support or documents are needed to continue processing this issue." />
                   <div className="inline-actions">
@@ -895,202 +1625,35 @@ function IssueCenterInner({ token, me, logout }) {
       </section>
 
       <section className="split-panel" style={{ marginTop: 18 }}>
-        <section className="glass card-lg section-card">
-          <div className="row-between">
-            <div>
-              <div className="section-title">Host Vehicle Approvals</div>
-              <p className="ui-muted">Review new host fleet submissions, request more info, and approve vehicles when everything checks out.</p>
-            </div>
-            <span className="status-chip warn">{metrics.vehicleApprovalsPending || 0} pending</span>
-          </div>
-          {vehicleSubmissions.length ? (
-            <div className="stack">
-              {vehicleSubmissions.map((submission) => (
-                <div key={submission.id} className="surface-note" style={{ display: 'grid', gap: 10 }}>
-                  {(() => {
-                    const checklist = submissionChecklist(submission);
-                    const replyState = submissionReplyState(submission);
-                    return (
-                      <>
-                  <div className="row-between" style={{ gap: 12, alignItems: 'start' }}>
-                    <div>
-                      <div style={{ fontWeight: 700 }}>{[submission.year, submission.make, submission.model].filter(Boolean).join(' ') || 'Vehicle Submission'}</div>
-                      <div className="label" style={{ textTransform: 'none', letterSpacing: 0, fontSize: 12 }}>
-                        {[
-                          submission.hostProfile?.displayName || 'Host',
-                          submission.vehicleType?.name || '-',
-                          submission.preferredLocation?.name || '-'
-                        ].filter(Boolean).join(' - ')}
-                      </div>
-                    </div>
-                    <span className={submissionToneClass(submission.status)}>{submission.status}</span>
-                  </div>
-                  <div className="info-grid-tight">
-                    <div className="info-tile"><span className="label">Daily Rate</span><strong>{formatMoney(submission.baseDailyRate)}</strong></div>
-                    <div className="info-tile"><span className="label">Docs</span><strong>{`${checklist.docCount}/3`}</strong></div>
-                    <div className="info-tile"><span className="label">Photos</span><strong>{checklist.photoCount}</strong></div>
-                    <div className="info-tile"><span className="label">Submitted</span><strong>{formatDateTime(submission.createdAt)}</strong></div>
-                  </div>
-                  <div className="inline-actions" style={{ gap: 8, flexWrap: 'wrap' }}>
-                    <span className={checklist.docsReady ? 'status-chip good' : 'status-chip warn'}>{checklist.docsReady ? 'Docs Ready' : 'Docs Missing'}</span>
-                    <span className={checklist.photoReady ? 'status-chip good' : 'status-chip warn'}>{checklist.photoReady ? 'Photos Ready' : 'No Photos'}</span>
-                    <span className={checklist.hasInspectionNotes ? 'status-chip good' : 'status-chip neutral'}>{checklist.hasInspectionNotes ? 'Inspection Notes' : 'No Inspection Notes'}</span>
-                    {checklist.addOnCount ? <span className="status-chip neutral">{`${checklist.addOnCount} Host Add-On${checklist.addOnCount > 1 ? 's' : ''}`}</span> : null}
-                  </div>
-                  <div style={{ color: '#55456f', lineHeight: 1.5 }}>
-                    {[
-                      submission.plate ? `Plate ${submission.plate}` : '',
-                      submission.vin ? `VIN ${submission.vin}` : '',
-                      submission.reviewNotes || 'Awaiting review.'
-                    ].filter(Boolean).join(' - ')}
-                  </div>
-                  {replyState.awaitingReply ? (
-                    <div className="surface-note" style={{ padding: '10px 12px' }}>
-                      Waiting on host reply since {formatDateTime(replyState.pending?.createdAt)}.
-                    </div>
-                  ) : null}
-                  <div className="inline-actions">
-                    {replyState.awaitingReply ? <span className="status-chip warn">Info Requested</span> : replyState.responded ? <span className="status-chip good">Host Replied</span> : null}
-                    <button
-                      type="button"
-                      onClick={() => setSubmissionEdit(submissionToEdit(submission))}
-                    >
-                      Review Vehicle
-                    </button>
-                    {submission.listing?.id ? <span className="status-chip good">Active</span> : null}
-                  </div>
-                      </>
-                    );
-                  })()}
-                </div>
-              ))}
-            </div>
-          ) : (
-            <div className="surface-note">No host vehicle approvals match the current search.</div>
-          )}
-        </section>
+        <HostVehicleApprovalsQueue
+          vehicleSubmissions={vehicleSubmissions}
+          metrics={metrics}
+          formatMoney={formatMoney}
+          formatDateTime={formatDateTime}
+          submissionToneClass={submissionToneClass}
+          submissionChecklist={submissionChecklist}
+          submissionReplyState={submissionReplyState}
+          submissionToEdit={submissionToEdit}
+          onSelectSubmission={setSubmissionEdit}
+        />
 
-        <section className="glass card-lg section-card">
-          <div className="row-between">
-            <div>
-              <div className="section-title">Vehicle Approval Review</div>
-              <p className="ui-muted">Inspect photos, docs, host add-ons, and communications before approving the vehicle.</p>
-            </div>
-            {submissionEdit.id ? <button type="button" className="button-subtle" onClick={() => setSubmissionEdit(EMPTY_SUBMISSION_EDIT)}>Clear</button> : null}
-          </div>
-          {selectedSubmission ? (
-            <div className="stack">
-              <div className="row-between" style={{ gap: 12, alignItems: 'start' }}>
-                <div>
-                  <div style={{ fontWeight: 700, fontSize: 20 }}>{[selectedSubmission.year, selectedSubmission.make, selectedSubmission.model].filter(Boolean).join(' ') || 'Vehicle Submission'}</div>
-                  <div className="label" style={{ textTransform: 'none', letterSpacing: 0, fontSize: 12 }}>
-                    {[selectedSubmission.hostProfile?.displayName || 'Host', selectedSubmission.hostProfile?.email || '', selectedSubmission.hostProfile?.phone || ''].filter(Boolean).join(' - ')}
-                  </div>
-                </div>
-                <span className={submissionToneClass(selectedSubmission.status)}>{selectedSubmission.status}</span>
-              </div>
-              <div className="info-grid-tight">
-                <div className="info-tile"><span className="label">Vehicle Type</span><strong>{selectedSubmission.vehicleType?.name || '-'}</strong></div>
-                <div className="info-tile"><span className="label">Location</span><strong>{selectedSubmission.preferredLocation?.name || '-'}</strong></div>
-                <div className="info-tile"><span className="label">Mileage</span><strong>{selectedSubmission.mileage || 0}</strong></div>
-                <div className="info-tile"><span className="label">Trip Days</span><strong>{`${selectedSubmission.minTripDays || 1} - ${selectedSubmission.maxTripDays || '-'}`}</strong></div>
-                <div className="info-tile"><span className="label">Daily Rate</span><strong>{formatMoney(selectedSubmission.baseDailyRate)}</strong></div>
-                <div className="info-tile"><span className="label">Security Deposit</span><strong>{formatMoney(selectedSubmission.securityDeposit)}</strong></div>
-              </div>
-              <div className="metric-grid">
-                <div className="metric-card"><span className="label">Photos Ready</span><strong>{selectedSubmissionChecklist?.photoCount || 0}</strong></div>
-                <div className="metric-card"><span className="label">Docs Ready</span><strong>{`${selectedSubmissionChecklist?.docCount || 0}/3`}</strong></div>
-                <div className="metric-card"><span className="label">Host Add-Ons</span><strong>{selectedSubmissionChecklist?.addOnCount || 0}</strong></div>
-                <div className="metric-card"><span className="label">Reply State</span><strong>{selectedSubmissionReply?.awaitingReply ? 'Waiting' : selectedSubmissionReply?.responded ? 'Replied' : 'No Request'}</strong></div>
-              </div>
-              <div className="inline-actions" style={{ gap: 8, flexWrap: 'wrap' }}>
-                <span className={selectedSubmissionChecklist?.docsReady ? 'status-chip good' : 'status-chip warn'}>{selectedSubmissionChecklist?.docsReady ? 'Documents Ready' : 'Documents Missing'}</span>
-                <span className={selectedSubmissionChecklist?.photoReady ? 'status-chip good' : 'status-chip warn'}>{selectedSubmissionChecklist?.photoReady ? 'Photos Ready' : 'Photos Missing'}</span>
-                <span className={selectedSubmissionChecklist?.hasInspectionNotes ? 'status-chip good' : 'status-chip neutral'}>{selectedSubmissionChecklist?.hasInspectionNotes ? 'Inspection Notes Included' : 'Inspection Notes Missing'}</span>
-                {selectedSubmissionReply?.awaitingReply ? <span className="status-chip warn">Waiting On Host Reply</span> : null}
-                {!selectedSubmissionReply?.awaitingReply && selectedSubmissionReply?.responded ? <span className="status-chip good">Host Replied</span> : null}
-              </div>
-              <div className="split-panel" style={{ alignItems: 'start' }}>
-                <div className="surface-note">
-                  <strong style={{ display: 'block', marginBottom: 6 }}>Host Contact</strong>
-                  {[selectedSubmission.hostProfile?.displayName || 'Host', selectedSubmission.hostProfile?.email || 'No email', selectedSubmission.hostProfile?.phone || 'No phone'].join(' · ')}
-                </div>
-                <div className="surface-note">
-                  <strong style={{ display: 'block', marginBottom: 6 }}>Review Guidance</strong>
-                  {selectedSubmissionReply?.awaitingReply
-                    ? `More info was requested on ${formatDateTime(selectedSubmissionReply.pending?.createdAt)}. Review the new reply or attachments before approving.`
-                    : 'Verify photos, ownership docs, inspection notes, and pricing before approving the vehicle.'}
-                </div>
-              </div>
-              {selectedSubmission.shortDescription || selectedSubmission.description ? (
-                <div className="surface-note" style={{ color: '#55456f', lineHeight: 1.6 }}>
-                  <strong style={{ display: 'block', color: '#1f1637', marginBottom: 6 }}>{selectedSubmission.shortDescription || 'Vehicle Summary'}</strong>
-                  {selectedSubmission.description || 'No extra description provided.'}
-                </div>
-              ) : null}
-              <div>
-                <div className="section-title" style={{ marginBottom: 10 }}>Vehicle Photos</div>
-                {submissionPhotos.length ? (
-                  <div className="metric-grid">
-                    {submissionPhotos.map((photo, index) => (
-                      <a key={`${selectedSubmission.id}-photo-${index}`} href={photo} target="_blank" rel="noreferrer" className="surface-note" style={{ textDecoration: 'none', display: 'grid', gap: 8 }}>
-                        <img src={photo} alt={`Submission ${index + 1}`} style={{ width: '100%', aspectRatio: '16 / 10', objectFit: 'cover', borderRadius: 14 }} />
-                        <span style={{ color: '#4338ca', fontWeight: 600 }}>Open Photo {index + 1}</span>
-                      </a>
-                    ))}
-                  </div>
-                ) : <div className="surface-note">No host photos uploaded.</div>}
-              </div>
-              <div>
-                <div className="section-title" style={{ marginBottom: 10 }}>Documents</div>
-                <FileLinks files={submissionDocuments} />
-              </div>
-              <div className="split-panel" style={{ alignItems: 'start' }}>
-                <div className="stack">
-                  <div className="section-title">Host Add-Ons</div>
-                  {(selectedSubmission.addOns || []).length ? (
-                    <div className="stack">
-                      {selectedSubmission.addOns.map((row, index) => (
-                        <div key={`${selectedSubmission.id}-addon-${index}`} className="surface-note" style={{ display: 'grid', gap: 6 }}>
-                          <strong>{row.name || `Service ${index + 1}`}</strong>
-                          <div className="label" style={{ textTransform: 'none', letterSpacing: 0, fontSize: 12 }}>{formatMoney(row.price)}</div>
-                          <div style={{ color: '#55456f', lineHeight: 1.5 }}>{row.description || 'No description.'}</div>
-                        </div>
-                      ))}
-                    </div>
-                  ) : <div className="surface-note">No host-specific add-ons submitted.</div>}
-                </div>
-                <div className="stack">
-                  <div className="section-title">Inspection Notes</div>
-                  <div className="surface-note" style={{ color: '#55456f', lineHeight: 1.6 }}>
-                    {selectedSubmission.initialInspectionNotes || 'No initial inspection notes were included.'}
-                  </div>
-                </div>
-              </div>
-              <div className="stack">
-                <div className="label">Review Notes</div>
-                <textarea rows={4} value={submissionEdit.reviewNotes} onChange={(e) => setSubmissionEdit((current) => ({ ...current, reviewNotes: e.target.value }))} placeholder="Internal review notes or approval comments" />
-              </div>
-              <div className="glass card section-card" style={{ padding: 14 }}>
-                <div className="section-title" style={{ marginBottom: 10 }}>Request More Information</div>
-                <div className="stack">
-                  <div className="label">Representative Request Note</div>
-                  <textarea rows={4} value={submissionEdit.requestNote} onChange={(e) => setSubmissionEdit((current) => ({ ...current, requestNote: e.target.value }))} placeholder="Explain what documents, photos, or corrections the host needs to send back." />
-                  <div className="inline-actions">
-                    <button type="button" className="button-subtle" onClick={requestSubmissionInfo}>Email Host For Info</button>
-                    <button type="button" onClick={approveSubmission}>Approve Vehicle</button>
-                  </div>
-                </div>
-              </div>
-              <div>
-                <div className="section-title" style={{ marginBottom: 10 }}>Communications</div>
-                <CommunicationList rows={submissionEdit.communications || []} />
-              </div>
-            </div>
-          ) : (
-            <div className="surface-note">Choose a host vehicle submission from the queue to review it here.</div>
-          )}
-        </section>
+        <HostVehicleApprovalWorkspace
+          submissionEdit={submissionEdit}
+          setSubmissionEdit={setSubmissionEdit}
+          selectedSubmission={selectedSubmission}
+          selectedSubmissionChecklist={selectedSubmissionChecklist}
+          selectedSubmissionReply={selectedSubmissionReply}
+          submissionPhotos={submissionPhotos}
+          submissionDocuments={submissionDocuments}
+          formatMoney={formatMoney}
+          formatDateTime={formatDateTime}
+          submissionToneClass={submissionToneClass}
+          FileLinks={FileLinks}
+          CommunicationList={CommunicationList}
+          requestSubmissionInfo={requestSubmissionInfo}
+          approveSubmission={approveSubmission}
+          emptySubmissionEdit={EMPTY_SUBMISSION_EDIT}
+        />
       </section>
     </AppShell>
   );
