@@ -9,6 +9,8 @@ const EMPTY_RECOMMENDATION_SUMMARY = { assignmentRecommendations: 0, fleetShorta
 
 export function usePlannerData({
   token,
+  activeTenantId,
+  isSuper,
   canManagePlannerSetup,
   rangeStart,
   rangeEnd,
@@ -32,13 +34,32 @@ export function usePlannerData({
     let cancelled = false;
 
     const load = async () => {
-      const snapshotPath = buildPlannerQuery(rangeStart, rangeEnd, filterLocationId, filterVehicleTypeId);
+      if (isSuper && !activeTenantId) {
+        setReservations([]);
+        setVehicles([]);
+        setVehicleTypes([]);
+        setLocations([]);
+        setOverbookedReservationIds([]);
+        setPlannerRules(null);
+        setPlannerShortage(EMPTY_SHORTAGE);
+        setPlannerRecommendationSummary(EMPTY_RECOMMENDATION_SUMMARY);
+        setPlannerCopilotConfig(createPlannerCopilotConfig());
+        onMessage?.('Select a tenant to load the planner.');
+        return;
+      }
+
+      const scopedPath = (path) => {
+        if (!isSuper || !activeTenantId) return path;
+        const joiner = path.includes('?') ? '&' : '?';
+        return `${path}${joiner}tenantId=${encodeURIComponent(activeTenantId)}`;
+      };
+      const snapshotPath = buildPlannerQuery(rangeStart, rangeEnd, filterLocationId, filterVehicleTypeId, activeTenantId);
       const [snapshotResult, rulesResult, copilotConfigResult, vehicleTypesResult, locationsResult] = await Promise.allSettled([
         api(snapshotPath, { bypassCache: true }, token),
-        api('/api/planner/rules', { bypassCache: true }, token),
-        api('/api/planner/copilot-config', { bypassCache: true }, token),
-        canManagePlannerSetup ? api('/api/vehicle-types', {}, token) : Promise.resolve([]),
-        canManagePlannerSetup ? api('/api/locations', {}, token) : Promise.resolve([])
+        api(scopedPath('/api/planner/rules'), { bypassCache: true }, token),
+        api(scopedPath('/api/planner/copilot-config'), { bypassCache: true }, token),
+        canManagePlannerSetup ? api(scopedPath('/api/vehicle-types'), {}, token) : Promise.resolve([]),
+        canManagePlannerSetup ? api(scopedPath('/api/locations'), {}, token) : Promise.resolve([])
       ]);
 
       if (cancelled) return;
@@ -88,6 +109,8 @@ export function usePlannerData({
     };
   }, [
     token,
+    activeTenantId,
+    isSuper,
     canManagePlannerSetup,
     rangeStart,
     rangeEnd,

@@ -71,10 +71,11 @@ export function buildVehicleClearUpdates(candidates) {
   }));
 }
 
-export function buildPlannerRangePayload({ rangeStart, rangeEnd, filterLocationId, filterVehicleTypeId, extra = {} }) {
+export function buildPlannerRangePayload({ rangeStart, rangeEnd, filterLocationId, filterVehicleTypeId, tenantId = '', extra = {} }) {
   return {
     start: rangeStart.toISOString(),
     end: rangeEnd.toISOString(),
+    tenantId: tenantId || null,
     locationId: filterLocationId || null,
     vehicleTypeId: filterVehicleTypeId || null,
     ...extra

@@ -42,6 +42,7 @@ export default function PlannerPage() {
 
 function PlannerInner({ token, me, logout }) {
   const role = String(me?.role || '').toUpperCase().trim();
+  const isSuper = role === 'SUPER_ADMIN';
   const canManagePlannerSetup = ['SUPER_ADMIN', 'ADMIN', 'OPS'].includes(role);
   const [msg, setMsg] = useState('');
   const [view, setView] = useState('MONTH');
@@ -55,6 +56,8 @@ function PlannerInner({ token, me, logout }) {
   const [plannerReloadKey, setPlannerReloadKey] = useState(0);
   const [plannerRulesForm, setPlannerRulesForm] = useState(() => createPlannerRulesForm());
   const [plannerRulesSaving, setPlannerRulesSaving] = useState(false);
+  const [tenantRows, setTenantRows] = useState([]);
+  const [activeTenantId, setActiveTenantId] = useState('');
 
   const dayCount = view === 'DAY' ? 1 : view === 'WEEK' ? 7 : 30;
   const rangeStart = useMemo(() => startOfDay(cursor), [cursor]);
@@ -77,6 +80,8 @@ function PlannerInner({ token, me, logout }) {
     plannerRecommendationSummary
   } = usePlannerData({
     token,
+    activeTenantId,
+    isSuper,
     canManagePlannerSetup,
     rangeStart,
     rangeEnd,
@@ -159,9 +164,15 @@ function PlannerInner({ token, me, logout }) {
         assignmentMode: plannerRulesForm.assignmentMode,
         maintenanceMode: plannerRulesForm.maintenanceMode
       };
-      const saved = await api('/api/planner/rules', {
+      const rulePath = isSuper && activeTenantId
+        ? `/api/planner/rules?tenantId=${encodeURIComponent(activeTenantId)}`
+        : '/api/planner/rules';
+      const saved = await api(rulePath, {
         method: 'PUT',
-        body: JSON.stringify(payload)
+        body: JSON.stringify({
+          ...payload,
+          ...(isSuper && activeTenantId ? { tenantId: activeTenantId } : {})
+        })
       }, token);
       setPlannerRules(saved || null);
       resetPlannerInsights();
@@ -224,6 +235,8 @@ function PlannerInner({ token, me, logout }) {
     askPlannerCopilot
   } = usePlannerActions({
     token,
+    activeTenantId,
+    isSuper,
     reservations,
     rangeStart,
     rangeEnd,
@@ -243,6 +256,17 @@ function PlannerInner({ token, me, logout }) {
     setOverbookedReservationIds,
     setPlannerShortage
   });
+
+  useEffect(() => {
+    if (!isSuper) return;
+    api('/api/tenants', {}, token)
+      .then((rows) => {
+        const nextRows = Array.isArray(rows) ? rows : [];
+        setTenantRows(nextRows);
+        if (!activeTenantId && nextRows[0]?.id) setActiveTenantId(nextRows[0].id);
+      })
+      .catch((error) => setMsg(error.message || 'Unable to load tenants for planner'));
+  }, [token, isSuper, activeTenantId]);
 
   const plannerOpsBoard = useMemo(
     () => buildPlannerOpsBoard({
@@ -344,6 +368,10 @@ function PlannerInner({ token, me, logout }) {
       />
       <section className="glass card-lg planner-wrap">
         <PlannerToolbar
+          isSuper={isSuper}
+          tenantRows={tenantRows}
+          activeTenantId={activeTenantId}
+          setActiveTenantId={setActiveTenantId}
           vehicleTypes={vehicleTypes}
           filterVehicleTypeId={filterVehicleTypeId}
           setFilterVehicleTypeId={setFilterVehicleTypeId}

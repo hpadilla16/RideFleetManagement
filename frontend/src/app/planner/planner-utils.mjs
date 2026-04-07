@@ -216,13 +216,14 @@ export function reservationVehicleTypeLabel(reservation) {
   );
 }
 
-export function buildPlannerQuery(rangeStart, rangeEnd, filterLocationId, filterVehicleTypeId) {
+export function buildPlannerQuery(rangeStart, rangeEnd, filterLocationId, filterVehicleTypeId, tenantId = '') {
   const params = new URLSearchParams({
     start: rangeStart.toISOString(),
     end: rangeEnd.toISOString()
   });
   if (filterLocationId) params.set('locationId', filterLocationId);
   if (filterVehicleTypeId) params.set('vehicleTypeId', filterVehicleTypeId);
+  if (tenantId) params.set('tenantId', tenantId);
   return `/api/planner/snapshot?${params.toString()}`;
 }
 

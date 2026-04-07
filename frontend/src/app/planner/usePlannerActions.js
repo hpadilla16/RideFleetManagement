@@ -15,6 +15,8 @@ import {
 
 export function usePlannerActions({
   token,
+  activeTenantId,
+  isSuper,
   reservations,
   rangeStart,
   rangeEnd,
@@ -41,6 +43,11 @@ export function usePlannerActions({
   const [plannerCopilotQuestion, setPlannerCopilotQuestion] = useState('What should ops focus on next in this visible planner range?');
   const [plannerCopilot, setPlannerCopilot] = useState(null);
   const [plannerCopilotConfig, setPlannerCopilotConfig] = useState(() => createPlannerCopilotConfig());
+  const scopedPath = useCallback((path) => {
+    if (!isSuper || !activeTenantId) return path;
+    const joiner = path.includes('?') ? '&' : '?';
+    return `${path}${joiner}tenantId=${encodeURIComponent(activeTenantId)}`;
+  }, [activeTenantId, isSuper]);
 
   const resetPlannerInsights = useCallback(() => {
     setPlannerScenario(null);
@@ -88,7 +95,10 @@ export function usePlannerActions({
 
       const updatedReservation = await api(`/api/reservations/${reservation.id}`, {
         method: 'PATCH',
-        body: JSON.stringify(movePlan.patch)
+        body: JSON.stringify({
+          ...movePlan.patch,
+          ...(isSuper && activeTenantId ? { tenantId: activeTenantId } : {})
+        })
       }, token);
       replaceReservationInState(updatedReservation);
       setMsg(`Reservation ${reservation.reservationNumber} moved`);
@@ -108,7 +118,10 @@ export function usePlannerActions({
     for (const update of updates) {
       const updatedReservation = await api(`/api/reservations/${update.id}`, {
         method: 'PATCH',
-        body: JSON.stringify(update.patch)
+        body: JSON.stringify({
+          ...update.patch,
+          ...(isSuper && activeTenantId ? { tenantId: activeTenantId } : {})
+        })
       }, token);
       replaceReservationInState(updatedReservation);
     }
@@ -149,9 +162,9 @@ export function usePlannerActions({
 
     setPlannerRunning('assign');
     try {
-      const result = await api('/api/planner/simulate-auto-accommodate', {
+      const result = await api(scopedPath('/api/planner/simulate-auto-accommodate'), {
         method: 'POST',
-        body: JSON.stringify(buildPlannerRangePayload({ rangeStart, rangeEnd, filterLocationId, filterVehicleTypeId }))
+        body: JSON.stringify(buildPlannerRangePayload({ rangeStart, rangeEnd, filterLocationId, filterVehicleTypeId, tenantId: activeTenantId }))
       }, token);
       setPlannerScenario(result || null);
       setOverbookedReservationIds((result?.unresolved || []).map((row) => row.reservationId));
@@ -190,10 +203,11 @@ export function usePlannerActions({
 
     setPlannerRunning('apply');
     try {
-      const result = await api('/api/planner/apply-plan', {
+      const result = await api(scopedPath('/api/planner/apply-plan'), {
         method: 'POST',
         body: JSON.stringify({
-          scenarioId: plannerScenario.scenarioId
+          scenarioId: plannerScenario.scenarioId,
+          ...(isSuper && activeTenantId ? { tenantId: activeTenantId } : {})
         })
       }, token);
       setPlannerScenario(null);
@@ -210,13 +224,14 @@ export function usePlannerActions({
   const simulateMaintenancePlan = async () => {
     setPlannerRunning('maintenance');
     try {
-      const result = await api('/api/planner/simulate-maintenance', {
+      const result = await api(scopedPath('/api/planner/simulate-maintenance'), {
         method: 'POST',
         body: JSON.stringify(buildPlannerRangePayload({
           rangeStart,
           rangeEnd,
           filterLocationId,
           filterVehicleTypeId,
+          tenantId: activeTenantId,
           extra: { durationMinutes: plannerRules?.maintenanceBufferMinutes || 120 }
         }))
       }, token);
@@ -239,9 +254,9 @@ export function usePlannerActions({
   const simulateWashPlan = async () => {
     setPlannerRunning('wash');
     try {
-      const result = await api('/api/planner/simulate-wash-plan', {
+      const result = await api(scopedPath('/api/planner/simulate-wash-plan'), {
         method: 'POST',
-        body: JSON.stringify(buildPlannerRangePayload({ rangeStart, rangeEnd, filterLocationId, filterVehicleTypeId }))
+        body: JSON.stringify(buildPlannerRangePayload({ rangeStart, rangeEnd, filterLocationId, filterVehicleTypeId, tenantId: activeTenantId }))
       }, token);
       setPlannerWashPlan(result || null);
       if (result?.violations?.length) {
@@ -273,10 +288,11 @@ export function usePlannerActions({
 
     setPlannerRunning('maintenance');
     try {
-      const result = await api('/api/planner/apply-plan', {
+      const result = await api(scopedPath('/api/planner/apply-plan'), {
         method: 'POST',
         body: JSON.stringify({
-          scenarioId: plannerMaintenancePlan.scenarioId
+          scenarioId: plannerMaintenancePlan.scenarioId,
+          ...(isSuper && activeTenantId ? { tenantId: activeTenantId } : {})
         })
       }, token);
       setPlannerMaintenancePlan(null);
@@ -303,10 +319,11 @@ export function usePlannerActions({
 
     setPlannerRunning('wash');
     try {
-      const result = await api('/api/planner/apply-plan', {
+      const result = await api(scopedPath('/api/planner/apply-plan'), {
         method: 'POST',
         body: JSON.stringify({
-          scenarioId: plannerWashPlan.scenarioId
+          scenarioId: plannerWashPlan.scenarioId,
+          ...(isSuper && activeTenantId ? { tenantId: activeTenantId } : {})
         })
       }, token);
       setPlannerWashPlan(null);
@@ -326,26 +343,27 @@ export function usePlannerActions({
     }
     setPlannerRunning('copilot');
     try {
-      const result = await api('/api/planner/copilot', {
+      const result = await api(scopedPath('/api/planner/copilot'), {
         method: 'POST',
         body: JSON.stringify(buildPlannerRangePayload({
           rangeStart,
           rangeEnd,
           filterLocationId,
           filterVehicleTypeId,
+          tenantId: activeTenantId,
           extra: { question: plannerCopilotQuestion }
         }))
       }, token);
       setPlannerCopilot(result || null);
       try {
-        const cfg = await api('/api/planner/copilot-config', { bypassCache: true }, token);
+        const cfg = await api(scopedPath('/api/planner/copilot-config'), { bypassCache: true }, token);
         setPlannerCopilotConfig(createPlannerCopilotConfig(cfg));
       } catch {}
       setMsg(result?.mode === 'AI' ? 'Planner Copilot responded with AI guidance.' : (result?.aiError ? `Planner Copilot fallback used: ${result.aiError}` : 'Planner Copilot generated a heuristic ops brief.'));
     } catch (error) {
       setPlannerCopilot(null);
       try {
-        const cfg = await api('/api/planner/copilot-config', { bypassCache: true }, token);
+        const cfg = await api(scopedPath('/api/planner/copilot-config'), { bypassCache: true }, token);
         setPlannerCopilotConfig(createPlannerCopilotConfig(cfg));
       } catch {}
       setMsg(error.message || 'Unable to load Planner Copilot guidance');

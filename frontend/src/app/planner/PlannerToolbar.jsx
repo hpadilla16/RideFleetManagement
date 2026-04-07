@@ -1,6 +1,10 @@
 'use client';
 
 export function PlannerToolbar({
+  isSuper,
+  tenantRows,
+  activeTenantId,
+  setActiveTenantId,
   vehicleTypes,
   filterVehicleTypeId,
   setFilterVehicleTypeId,
@@ -30,6 +34,19 @@ export function PlannerToolbar({
       <div className="row-between" style={{ alignItems: 'flex-end', flexWrap: 'wrap' }}>
         <div style={{ display: 'flex', gap: 10, alignItems: 'flex-end', flexWrap: 'wrap' }}>
           <h2>Daily Planner</h2>
+          {isSuper ? (
+            <div className="stack" style={{ minWidth: 260 }}>
+              <label className="label">Tenant</label>
+              <select value={activeTenantId} onChange={(e) => setActiveTenantId(e.target.value)}>
+                <option value="">Select tenant</option>
+                {tenantRows.map((tenant) => (
+                  <option key={tenant.id} value={tenant.id}>
+                    {tenant.name}{tenant.slug ? ` (${tenant.slug})` : ''}
+                  </option>
+                ))}
+              </select>
+            </div>
+          ) : null}
           <div className="stack" style={{ minWidth: 180 }}>
             <label className="label">Vehicle Type</label>
             <select value={filterVehicleTypeId} onChange={(e) => setFilterVehicleTypeId(e.target.value)}>
@@ -74,6 +91,11 @@ export function PlannerToolbar({
       </div>
 
       {msg ? <p className="label">{msg}</p> : null}
+      {isSuper && !activeTenantId ? (
+        <div className="surface-note" style={{ marginBottom: 12 }}>
+          Select a tenant to load planner reservations, vehicles, and Smart Planner actions.
+        </div>
+      ) : null}
       <div className="app-banner-list" style={{ marginBottom: 12 }}>
         <span className="app-banner-pill">Green = Confirmed</span>
         <span className="app-banner-pill">Blue = New</span>
