@@ -990,7 +990,7 @@ export const bookingEngineService = {
 
     const rentalDays = ceilTripDays(pickupDate, returnDate);
     const directTenant = await resolvePublicTenant({ tenantSlug, tenantId });
-    const requestedLocationIds = Array.isArray(pickupLocationIds)
+    const requestedLocationIds = Array.isArray(pickupLocationIds) && pickupLocationIds.length
       ? pickupLocationIds.map((value) => String(value)).filter(Boolean)
       : pickupLocationId ? [String(pickupLocationId)] : [];
     const locations = await prisma.location.findMany({
@@ -1135,7 +1135,7 @@ export const bookingEngineService = {
     }
 
     const directTenant = await resolvePublicTenant({ tenantSlug, tenantId });
-    const normalizedLocationIds = Array.isArray(locationIds)
+    const normalizedLocationIds = Array.isArray(locationIds) && locationIds.length
       ? locationIds.map((value) => String(value)).filter(Boolean)
       : locationId ? [String(locationId)] : [];
     if (!normalizedLocationIds.length) throw new Error('Choose a valid location before searching car sharing');

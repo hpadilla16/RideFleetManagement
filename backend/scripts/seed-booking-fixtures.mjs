@@ -36,7 +36,14 @@ async function upsertTenant() {
 
 async function upsertLocation(tenantId, codeSuffix, payload) {
   const code = `${PREFIX}-${codeSuffix}`;
-  const existing = await prisma.location.findUnique({ where: { code } });
+  const existing = await prisma.location.findUnique({
+    where: {
+      tenantId_code: {
+        tenantId,
+        code
+      }
+    }
+  });
   if (existing) {
     return prisma.location.update({
       where: { id: existing.id },
@@ -96,7 +103,12 @@ async function upsertVehicle(tenantId, internalNumber, payload) {
 async function upsertRate(tenantId, locationId, economyTypeId, suvTypeId) {
   const rateCode = `${PREFIX}-PUBLIC-ONLINE`;
   const existing = await prisma.rate.findUnique({
-    where: { rateCode },
+    where: {
+      tenantId_rateCode: {
+        tenantId,
+        rateCode
+      }
+    },
     include: { rateItems: true }
   });
 
