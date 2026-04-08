@@ -332,6 +332,7 @@ const EMPTY_SERVICE = {
   code: '', name: '', description: '', chargeType: 'UNIT', unitLabel: 'Unit', calculationBy: '24_HOUR_TIME',
   rate: '', dailyRate: '', weeklyRate: '', monthlyRate: '', commissionValueType: '', commissionPercentValue: '', commissionFixedAmount: '', taxable: false, defaultQty: '1', sortOrder: '0',
   allVehicleTypes: true, vehicleTypeIds: [], displayOnline: false, defaultRencars: false, mandatory: false, coversTolls: false,
+  displayDescription: '', displayPriority: '0',
   isActive: true, locationId: '', linkedFeeId: ''
 };
 const EMPTY_VEHICLE_TYPE = { code: '', name: '', description: '', imageUrl: '' };
@@ -1258,6 +1259,8 @@ function SettingsInner({ token, me, logout }) {
       commissionFixedAmount: serviceForm.commissionFixedAmount === '' ? null : Number(serviceForm.commissionFixedAmount),
       defaultQty: Number(serviceForm.defaultQty || 1),
       sortOrder: Number(serviceForm.sortOrder || 0),
+      displayDescription: serviceForm.displayDescription || null,
+      displayPriority: Number(serviceForm.displayPriority || 0),
       vehicleTypeIds: JSON.stringify(serviceForm.vehicleTypeIds || []),
       locationId: serviceForm.locationId || null,
       linkedFeeId: serviceForm.linkedFeeId || null
@@ -4234,12 +4237,29 @@ function SettingsInner({ token, me, logout }) {
                 <label className="label"><input type="checkbox" checked={serviceForm.isActive} onChange={(e) => setServiceForm({ ...serviceForm, isActive: e.target.checked })} /> Active</label>
               </div>
 
+              <div>
+                <label className="label">Customer Display Description</label>
+                <textarea
+                  placeholder="Description shown to customers on the display screen (leave blank to use internal description)"
+                  value={serviceForm.displayDescription}
+                  onChange={(e) => setServiceForm({ ...serviceForm, displayDescription: e.target.value })}
+                  rows={2}
+                  style={{ width: '100%', resize: 'vertical' }}
+                />
+              </div>
               <div className="grid2">
                 <select value={serviceForm.locationId} onChange={(e) => setServiceForm({ ...serviceForm, locationId: e.target.value })}>
                   <option value="">All locations (global)</option>
                   {locations.map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}
                 </select>
                 <input placeholder="Sort Order" value={serviceForm.sortOrder} onChange={(e) => setServiceForm({ ...serviceForm, sortOrder: e.target.value })} />
+              </div>
+              <div className="grid2">
+                <div>
+                  <label className="label">Display Priority</label>
+                  <input type="number" min="0" max="100" placeholder="0 = auto, higher = shown first" value={serviceForm.displayPriority} onChange={(e) => setServiceForm({ ...serviceForm, displayPriority: e.target.value })} />
+                  <div className="ui-muted" style={{ fontSize: '0.78rem', marginTop: 2 }}>Higher priority services appear first on the customer display. 0 = automatic (context-based).</div>
+                </div>
               </div>
 
               <div style={{ display: 'flex', gap: 8 }}>

@@ -139,12 +139,12 @@ function buildRecommendations({ row, charges, insurancePlans, additionalServices
     const dailyCost = perDay ? price : (tripDays > 0 ? Number((price / tripDays).toFixed(2)) : price);
     recs.push({
       type: 'insurance', priority: 10, item: pick,
-      headline: 'Trip Protection',
+      headline: pick.name || 'Trip Protection',
       reason: dailyCost <= 25
         ? `For just ${money(dailyCost)}/day, drive worry-free with full coverage`
-        : 'Protect yourself from unexpected costs during your rental',
+        : (pick.description || 'Protect yourself from unexpected costs during your rental'),
       price, priceLabel: perDay ? '/day' : '',
-      cta: 'Your agent can add this in seconds',
+      cta: pick.description && dailyCost <= 25 ? pick.description : 'Your agent can add this in seconds',
     });
     // If multiple plans, note alternatives
     if (insurancePlans.length > 1) {
@@ -153,51 +153,64 @@ function buildRecommendations({ row, charges, insurancePlans, additionalServices
   }
 
   // 2. Smart service recommendations based on context
-  const availableServices = additionalServices.filter(s => !selectedServiceIds.has(s.id) && !s.mandatory);
+  // Sort by tenant-defined displayPriority (higher = more important), then sortOrder
+  const availableServices = additionalServices
+    .filter(s => !selectedServiceIds.has(s.id) && !s.mandatory)
+    .sort((a, b) => (Number(b.displayPriority || 0)) - (Number(a.displayPriority || 0)) || (Number(a.sortOrder || 0)) - (Number(b.sortOrder || 0)));
 
   for (const svc of availableServices) {
     if (recs.length >= 4) break; // We'll cap at 3 later, but gather 4 candidates
     const rate = Number(svc.rate || 0);
     const unitLabel = svc.chargeType === 'UNIT' ? `/${svc.unitLabel || 'unit'}` : '/day';
+    const customerDesc = svc.displayDescription || svc.description || null;
+    const linkedFee = svc.linkedFee;
+    const totalWithFee = linkedFee ? rate + Number(linkedFee.amount || 0) : rate;
+    const feeNote = linkedFee ? `Includes ${linkedFee.name}${linkedFee.description ? ` \u2014 ${linkedFee.description}` : ''} (${money(linkedFee.amount)})` : null;
+
+    // If tenant set a displayPriority > 0, honor that as the base priority
+    const tenantPriority = Number(svc.displayPriority || 0);
 
     // Toll pass — recommend if location suggests highways/bridges
     if (svcMatches(svc, 'toll', 'sunpass', 'e-pass', 'peaje') && !hasTolls) {
+      const contextBoost = isAirport ? 8 : 6;
       recs.push({
-        type: 'service', priority: isAirport ? 8 : 6, item: svc,
+        type: 'service', priority: Math.max(tenantPriority, contextBoost), item: svc,
         headline: svc.name,
-        reason: isAirport
+        reason: customerDesc || (isAirport
           ? 'Most travelers from the airport use toll roads \u2014 avoid surprise charges'
-          : 'Covers electronic toll charges so you don\u2019t have to worry about cash or fines',
-        price: rate, priceLabel: unitLabel,
-        cta: svc.description || null,
+          : 'Covers electronic toll charges so you don\u2019t have to worry about cash or fines'),
+        price: totalWithFee, priceLabel: unitLabel,
+        cta: feeNote,
       });
       continue;
     }
 
     // GPS / Navigation
     if (svcMatches(svc, 'gps', 'navigation', 'nav ')) {
+      const contextBoost = isAirport ? 7 : 4;
       recs.push({
-        type: 'service', priority: isAirport ? 7 : 4, item: svc,
+        type: 'service', priority: Math.max(tenantPriority, contextBoost), item: svc,
         headline: svc.name,
-        reason: isAirport
+        reason: customerDesc || (isAirport
           ? 'Navigate unfamiliar roads with confidence from day one'
-          : 'Never miss a turn \u2014 built-in navigation for your trip',
-        price: rate, priceLabel: unitLabel,
-        cta: svc.description || null,
+          : 'Never miss a turn \u2014 built-in navigation for your trip'),
+        price: totalWithFee, priceLabel: unitLabel,
+        cta: feeNote,
       });
       continue;
     }
 
     // Roadside assistance — higher priority for longer trips
     if (svcMatches(svc, 'roadside', 'assistance', 'breakdown', 'tow')) {
+      const contextBoost = tripDays >= 5 ? 7 : 5;
       recs.push({
-        type: 'service', priority: tripDays >= 5 ? 7 : 5, item: svc,
+        type: 'service', priority: Math.max(tenantPriority, contextBoost), item: svc,
         headline: svc.name,
-        reason: tripDays >= 5
+        reason: customerDesc || (tripDays >= 5
           ? `${tripDays}-day trip \u2014 peace of mind for longer adventures`
-          : '24/7 help if you ever need it on the road',
-        price: rate, priceLabel: unitLabel,
-        cta: svc.description || null,
+          : '24/7 help if you ever need it on the road'),
+        price: totalWithFee, priceLabel: unitLabel,
+        cta: feeNote,
       });
       continue;
     }
@@ -205,49 +218,51 @@ function buildRecommendations({ row, charges, insurancePlans, additionalServices
     // Child/baby seat
     if (svcMatches(svc, 'child', 'baby', 'booster', 'infant', 'car seat', 'carseat')) {
       recs.push({
-        type: 'service', priority: 3, item: svc,
+        type: 'service', priority: Math.max(tenantPriority, 3), item: svc,
         headline: svc.name,
-        reason: 'Traveling with little ones? We have seats ready to install',
-        price: rate, priceLabel: unitLabel,
-        cta: svc.description || null,
+        reason: customerDesc || 'Traveling with little ones? We have seats ready to install',
+        price: totalWithFee, priceLabel: unitLabel,
+        cta: feeNote,
       });
       continue;
     }
 
     // WiFi / hotspot
     if (svcMatches(svc, 'wifi', 'hotspot', 'internet', 'connectivity')) {
+      const contextBoost = tripDays >= 3 ? 5 : 3;
       recs.push({
-        type: 'service', priority: tripDays >= 3 ? 5 : 3, item: svc,
+        type: 'service', priority: Math.max(tenantPriority, contextBoost), item: svc,
         headline: svc.name,
-        reason: 'Stay connected on the go \u2014 great for navigation and streaming',
-        price: rate, priceLabel: unitLabel,
-        cta: svc.description || null,
+        reason: customerDesc || 'Stay connected on the go \u2014 great for navigation and streaming',
+        price: totalWithFee, priceLabel: unitLabel,
+        cta: feeNote,
       });
       continue;
     }
 
     // Prepaid fuel
     if (svcMatches(svc, 'fuel', 'gas', 'prepaid fuel', 'refuel')) {
+      const contextBoost = isAirport ? 6 : 4;
       recs.push({
-        type: 'service', priority: isAirport ? 6 : 4, item: svc,
+        type: 'service', priority: Math.max(tenantPriority, contextBoost), item: svc,
         headline: svc.name,
-        reason: isAirport
+        reason: customerDesc || (isAirport
           ? 'Skip the gas station rush before your flight \u2014 return with any fuel level'
-          : 'No need to refuel before returning \u2014 we handle it',
-        price: rate, priceLabel: unitLabel,
-        cta: svc.description || null,
+          : 'No need to refuel before returning \u2014 we handle it'),
+        price: totalWithFee, priceLabel: unitLabel,
+        cta: feeNote,
       });
       continue;
     }
 
-    // Generic fallback for any other service — lower priority
-    if (svc.description) {
+    // Any service with tenant priority or description
+    if (tenantPriority > 0 || customerDesc) {
       recs.push({
-        type: 'service', priority: 2, item: svc,
+        type: 'service', priority: Math.max(tenantPriority, 2), item: svc,
         headline: svc.name,
-        reason: svc.description,
-        price: rate, priceLabel: unitLabel,
-        cta: null,
+        reason: customerDesc || svc.name,
+        price: totalWithFee, priceLabel: unitLabel,
+        cta: feeNote,
       });
     }
   }
@@ -421,7 +436,7 @@ function ActiveView({ data, branding }) {
 
       {/* ── INCLUDED WITH YOUR TRIP ─────────────────────────────── */}
       {/* Shows what the customer already has — reinforces good choices */}
-      {(charges.length > 0 || includedItems.length > 0) && !isOtaPrepaid && (
+      {charges.filter(c => c.source !== 'OTA_PREPAID_VOUCHER').length > 0 && (
         <div style={card}>
           <div style={sectionTitle}>Included with Your Trip</div>
           <div style={{ display: 'grid', gap: 6 }}>

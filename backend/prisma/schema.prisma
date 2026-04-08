@@ -1832,6 +1832,8 @@ model AdditionalService {
   defaultRencars  Boolean   @default(false)
   mandatory       Boolean   @default(false)
   coversTolls     Boolean   @default(false)
+  displayDescription String?
+  displayPriority Int       @default(0)
   isActive        Boolean   @default(true)
 
   locationId      String?

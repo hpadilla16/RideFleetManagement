@@ -208,7 +208,12 @@ reservationsRouter.get('/:id/display-data', async (req, res, next) => {
       tenantId ? prisma.additionalService.findMany({
         where: { tenantId, isActive: true, displayOnline: true },
         orderBy: { sortOrder: 'asc' },
-        select: { id: true, code: true, name: true, description: true, rate: true, chargeType: true, unitLabel: true, mandatory: true, taxable: true, defaultQty: true, coversTolls: true }
+        select: {
+          id: true, code: true, name: true, description: true, rate: true, chargeType: true,
+          unitLabel: true, mandatory: true, taxable: true, defaultQty: true, coversTolls: true,
+          displayDescription: true, displayPriority: true,
+          linkedFee: { select: { id: true, name: true, amount: true, description: true, mode: true } }
+        }
       }) : [],
       tenantId ? settingsService.getRentalAgreementConfig({ tenantId }) : {}
     ]);

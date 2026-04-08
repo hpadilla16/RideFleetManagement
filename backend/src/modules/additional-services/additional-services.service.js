@@ -119,6 +119,8 @@ export const additionalServicesService = {
       defaultRencars: data.defaultRencars ?? false,
       mandatory: data.mandatory ?? false,
       coversTolls: data.coversTolls ?? false,
+      displayDescription: data.displayDescription ?? null,
+      displayPriority: data.displayPriority ?? 0,
       isActive: data.isActive ?? true,
       locationId: data.locationId || null,
       linkedFeeId
