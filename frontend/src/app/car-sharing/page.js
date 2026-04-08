@@ -340,14 +340,22 @@ function CarSharingInner({ token, me, logout }) {
     const safeLoad = async () => {
       setLoading(true);
       try {
+        if (isSuper && !activeTenantId) {
+          const rows = await api('/api/tenants', {}, token);
+          if (cancelled) return;
+          const tenantRows = Array.isArray(rows) ? rows : [];
+          setTenants(tenantRows);
+          if (tenantRows[0]?.id) setActiveTenantId(tenantRows[0].id);
+          return;
+        }
         const reqs = [
           api(`/api/car-sharing/hosts${scopedQuery}`, {}, token),
           api(`/api/car-sharing/listings${scopedQuery}`, {}, token),
           api(`/api/car-sharing/trips${scopedQuery}`, {}, token),
           api(`/api/car-sharing/eligible-vehicles${scopedQuery}`, {}, token),
-          api('/api/vehicles', {}, token),
-          api('/api/customers', {}, token),
-          api('/api/locations', {}, token),
+          api(`/api/vehicles${scopedQuery}`, {}, token),
+          api(`/api/customers${scopedQuery}`, {}, token),
+          api(`/api/locations${scopedQuery}`, {}, token),
           api(`/api/car-sharing/config${scopedQuery}`, {}, token)
         ];
         if (isSuper) reqs.push(api('/api/tenants', {}, token));
