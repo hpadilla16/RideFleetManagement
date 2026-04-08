@@ -1839,6 +1839,28 @@ token
                 )}
               </div>
             ) : null}
+            {(row?.customer?.idPhotoUrl || row?.customer?.insuranceDocumentUrl || precheckinThirdPartyInfo?.voucherUrl) && (
+              <div style={{ marginBottom: 12, padding: '14px 16px', borderRadius: 14, background: 'rgba(110,73,255,.03)', border: '1px solid rgba(110,73,255,.1)' }}>
+                <div style={{ fontWeight: 700, fontSize: '0.88rem', color: '#1a1230', marginBottom: 10 }}>Customer Documents</div>
+                <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                  {row?.customer?.idPhotoUrl && (
+                    <a href={row.customer.idPhotoUrl} target="_blank" rel="noreferrer" className="button-subtle" style={{ display: 'inline-flex', alignItems: 'center', gap: 6, textDecoration: 'none', fontSize: '0.85rem' }}>
+                      ID / License Photo
+                    </a>
+                  )}
+                  {row?.customer?.insuranceDocumentUrl && (
+                    <a href={row.customer.insuranceDocumentUrl} target="_blank" rel="noreferrer" className="button-subtle" style={{ display: 'inline-flex', alignItems: 'center', gap: 6, textDecoration: 'none', fontSize: '0.85rem' }}>
+                      Insurance Document
+                    </a>
+                  )}
+                  {precheckinThirdPartyInfo?.voucherUrl && (
+                    <a href={precheckinThirdPartyInfo.voucherUrl} target="_blank" rel="noreferrer" className="button-subtle" style={{ display: 'inline-flex', alignItems: 'center', gap: 6, textDecoration: 'none', fontSize: '0.85rem', background: 'rgba(245,158,11,.08)', borderColor: 'rgba(245,158,11,.2)', color: '#92400e' }}>
+                      OTA Voucher
+                    </a>
+                  )}
+                </div>
+              </div>
+            )}
             <table>
               <thead><tr><th>Requirement</th><th>Status</th></tr></thead>
               <tbody>
