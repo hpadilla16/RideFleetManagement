@@ -277,6 +277,7 @@ export function AppShell({ me, logout, children }) {
 
           <div className="topbar-actions">
             {canReturnSuper ? <button className="button-subtle topbar-action-btn topbar-action-wide" title="Return to Super Admin" onClick={returnToSuperAdmin}>Return</button> : null}
+            <button className="button-subtle topbar-action-btn" title="Open Customer Display on second screen" style={{ background: 'rgba(22,163,74,.1)', borderColor: 'rgba(22,163,74,.2)', color: '#166534' }} onClick={() => window.open('/customer-display', 'customer-display', 'width=600,height=900,scrollbars=yes,resizable=yes')}>Display</button>
             <button className="button-subtle topbar-action-btn" title="Toggle dark mode" onClick={() => setDarkMode((v) => !v)}>{darkMode ? 'Light' : 'Dark'}</button>
             <button className="button-subtle topbar-action-btn" title="Lock screen" onClick={lockNow}>Lock</button>
             <button className="topbar-action-btn" onClick={logout}>Logout</button>

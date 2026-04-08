@@ -197,6 +197,36 @@ reservationsRouter.get('/:id', async (req, res, next) => {
   }
 });
 
+reservationsRouter.get('/:id/display-data', async (req, res, next) => {
+  try {
+    const scope = scopeFor(req);
+    const row = await reservationsService.getById(req.params.id, scope);
+    if (!row) return res.status(404).json({ error: 'Reservation not found' });
+    const tenantId = row.tenantId || scope.tenantId;
+    const [insurancePlans, additionalServices, rentalSettings] = await Promise.all([
+      tenantId ? settingsService.getInsurancePlans({ tenantId }) : [],
+      tenantId ? prisma.additionalService.findMany({
+        where: { tenantId, isActive: true, displayOnline: true },
+        orderBy: { sortOrder: 'asc' },
+        select: { id: true, code: true, name: true, description: true, rate: true, chargeType: true, unitLabel: true, mandatory: true, taxable: true, defaultQty: true, coversTolls: true }
+      }) : [],
+      tenantId ? settingsService.getRentalAgreementSettings({ tenantId }) : {}
+    ]);
+    res.json({
+      reservation: row,
+      insurancePlans: (insurancePlans || []).filter(p => p.isActive !== false),
+      additionalServices,
+      branding: {
+        companyName: rentalSettings?.companyName || 'Ride Fleet',
+        companyLogoUrl: rentalSettings?.companyLogoUrl || '',
+        companyPhone: rentalSettings?.companyPhone || ''
+      }
+    });
+  } catch (e) {
+    next(e);
+  }
+});
+
 reservationsRouter.get('/:id/pricing', async (req, res, next) => {
   try {
     const out = await reservationPricingService.getPricing(req.params.id, scopeFor(req));

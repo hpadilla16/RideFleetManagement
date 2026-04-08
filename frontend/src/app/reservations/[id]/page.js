@@ -1548,7 +1548,7 @@ token
             ) : null}
             <button type="button" className="button-subtle" onClick={() => router.push(`/reservations/${id}/payments?total=${Number(effectiveChargeTotal || 0)}`)}>Payments</button>
             <button type="button" className="button-subtle" onClick={() => router.push(`/reservations/${id}/inspection`)}>Inspection</button>
-            <button type="button" className="button-subtle" style={{ background: 'rgba(22,163,74,.1)', borderColor: 'rgba(22,163,74,.2)', color: '#166534' }} onClick={() => window.open(`/reservations/${id}/customer-view`, `customer-view-${id}`, 'width=600,height=900,scrollbars=yes,resizable=yes')}>Customer View</button>
+            <button type="button" className="button-subtle" style={{ background: 'rgba(22,163,74,.1)', borderColor: 'rgba(22,163,74,.2)', color: '#166534' }} onClick={() => { try { new BroadcastChannel('customer-display').postMessage({ type: 'load-reservation', id }); } catch {} }}>Customer View</button>
           </div>
         </div>
       </section>
@@ -1923,7 +1923,8 @@ token
               <section className="ios-action-card">
                 <div className="ios-action-head">Customer Experience</div>
                 <div className="ios-action-list">
-                  <button className="ios-action-btn" style={{ background: 'rgba(22,163,74,.08)', color: '#166534', fontWeight: 800 }} onClick={() => window.open(`/reservations/${id}/customer-view`, `customer-view-${id}`, 'width=600,height=900,scrollbars=yes,resizable=yes')}>Open Customer View</button>
+                  <button className="ios-action-btn" style={{ background: 'rgba(22,163,74,.08)', color: '#166534', fontWeight: 800 }} onClick={() => { try { new BroadcastChannel('customer-display').postMessage({ type: 'load-reservation', id }); } catch {} }}>Show on Customer Display</button>
+                  <button className="ios-action-btn" style={{ color: '#6b7a9a' }} onClick={() => { try { new BroadcastChannel('customer-display').postMessage({ type: 'exit' }); } catch {} }}>Exit Customer View</button>
                 </div>
               </section>
 
