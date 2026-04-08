@@ -172,6 +172,7 @@ function ReservationDetailInner({ token, me, logout }) {
   const [feeOptions, setFeeOptions] = useState([]);
   const [insurancePlans, setInsurancePlans] = useState([]);
   const [tollSummary, setTollSummary] = useState(null);
+  const [docViewer, setDocViewer] = useState(null);
   const [servicePick, setServicePick] = useState('');
   const [feePick, setFeePick] = useState('');
   const [msg, setMsg] = useState('');
@@ -1844,19 +1845,19 @@ token
                 <div style={{ fontWeight: 700, fontSize: '0.88rem', color: '#1a1230', marginBottom: 10 }}>Customer Documents</div>
                 <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
                   {row?.customer?.idPhotoUrl && (
-                    <a href={row.customer.idPhotoUrl} target="_blank" rel="noreferrer" className="button-subtle" style={{ display: 'inline-flex', alignItems: 'center', gap: 6, textDecoration: 'none', fontSize: '0.85rem' }}>
+                    <button type="button" className="button-subtle" style={{ fontSize: '0.85rem' }} onClick={() => setDocViewer({ title: 'ID / License Photo', url: row.customer.idPhotoUrl })}>
                       ID / License Photo
-                    </a>
+                    </button>
                   )}
                   {row?.customer?.insuranceDocumentUrl && (
-                    <a href={row.customer.insuranceDocumentUrl} target="_blank" rel="noreferrer" className="button-subtle" style={{ display: 'inline-flex', alignItems: 'center', gap: 6, textDecoration: 'none', fontSize: '0.85rem' }}>
+                    <button type="button" className="button-subtle" style={{ fontSize: '0.85rem' }} onClick={() => setDocViewer({ title: 'Insurance Document', url: row.customer.insuranceDocumentUrl })}>
                       Insurance Document
-                    </a>
+                    </button>
                   )}
                   {precheckinThirdPartyInfo?.voucherUrl && (
-                    <a href={precheckinThirdPartyInfo.voucherUrl} target="_blank" rel="noreferrer" className="button-subtle" style={{ display: 'inline-flex', alignItems: 'center', gap: 6, textDecoration: 'none', fontSize: '0.85rem', background: 'rgba(245,158,11,.08)', borderColor: 'rgba(245,158,11,.2)', color: '#92400e' }}>
+                    <button type="button" className="button-subtle" style={{ fontSize: '0.85rem', background: 'rgba(245,158,11,.08)', borderColor: 'rgba(245,158,11,.2)', color: '#92400e' }} onClick={() => setDocViewer({ title: 'OTA Voucher', url: precheckinThirdPartyInfo.voucherUrl })}>
                       OTA Voucher
-                    </a>
+                    </button>
                   )}
                 </div>
               </div>
@@ -2280,6 +2281,25 @@ token
           )}
         </div>
       </section>
+      {docViewer && (
+        <div style={{ position: 'fixed', inset: 0, zIndex: 9999, background: 'rgba(0,0,0,.75)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }} onClick={() => setDocViewer(null)}>
+          <div style={{ background: '#fff', borderRadius: 16, maxWidth: 700, maxHeight: '90vh', width: '100%', overflow: 'hidden', boxShadow: '0 20px 60px rgba(0,0,0,.3)' }} onClick={(e) => e.stopPropagation()}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '14px 20px', borderBottom: '1px solid #eee' }}>
+              <div style={{ fontWeight: 800, fontSize: '0.95rem', color: '#1a1230' }}>{docViewer.title}</div>
+              <button type="button" onClick={() => setDocViewer(null)} style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '1.3rem', color: '#6b7a9a', padding: '4px 8px' }}>&times;</button>
+            </div>
+            <div style={{ padding: 20, overflow: 'auto', maxHeight: 'calc(90vh - 60px)', textAlign: 'center' }}>
+              {String(docViewer.url || '').match(/^data:image\/|\.(?:jpg|jpeg|png|gif|webp|svg)/i) ? (
+                <img src={docViewer.url} alt={docViewer.title} style={{ maxWidth: '100%', maxHeight: '70vh', objectFit: 'contain', borderRadius: 8 }} />
+              ) : String(docViewer.url || '').match(/^data:application\/pdf|\.pdf/i) ? (
+                <iframe src={docViewer.url} title={docViewer.title} style={{ width: '100%', height: '70vh', border: 'none', borderRadius: 8 }} />
+              ) : (
+                <img src={docViewer.url} alt={docViewer.title} style={{ maxWidth: '100%', maxHeight: '70vh', objectFit: 'contain', borderRadius: 8 }} />
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </AppShell>
   );
 }
