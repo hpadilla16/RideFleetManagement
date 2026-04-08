@@ -1389,10 +1389,46 @@ customerPortalRouter.post('/customer-info/:token', async (req, res, next) => {
     // Process third-party / OTA prepaid voucher
     const thirdPartyBooking = body.thirdPartyBooking || null;
     if (thirdPartyBooking?.isThirdParty) {
-      // Zero out daily-rate charges — customer prepaid through OTA
+      // Remove daily-rate related charges only — keep insurance, services, and their taxes
       await prisma.reservationCharge.deleteMany({
-        where: { reservationId: reservation.id, source: { in: ['DAILY', 'TAX', 'FEE', 'SERVICE_LINKED_FEE'] } }
+        where: { reservationId: reservation.id, source: { in: ['DAILY', 'FEE', 'SERVICE_LINKED_FEE'] } }
       });
+
+      // Recalculate tax on remaining taxable charges (insurance + services)
+      const remainingCharges = await prisma.reservationCharge.findMany({
+        where: { reservationId: reservation.id, selected: true }
+      });
+      // Delete old tax rows (chargeType TAX) so we can recalculate
+      await prisma.reservationCharge.deleteMany({
+        where: { reservationId: reservation.id, chargeType: 'TAX' }
+      });
+      const taxableTotal = remainingCharges
+        .filter(c => c.taxable && String(c.chargeType || '').toUpperCase() !== 'TAX')
+        .reduce((sum, c) => sum + Number(c.total || 0), 0);
+      if (taxableTotal > 0) {
+        // Get tax rate from pricing snapshot or pickup location
+        const loc = reservation.pickupLocationId
+          ? await prisma.location.findUnique({ where: { id: reservation.pickupLocationId }, select: { taxRate: true } })
+          : null;
+        const taxRate = Number(reservation.pricingSnapshot?.taxRate ?? loc?.taxRate ?? 0);
+        if (taxRate > 0) {
+          const taxAmount = Number((taxableTotal * taxRate / 100).toFixed(2));
+          await prisma.reservationCharge.create({
+            data: {
+              reservationId: reservation.id,
+              source: 'TAX_RECALC',
+              name: `Sales Tax (${taxRate.toFixed(2)}%)`,
+              chargeType: 'TAX',
+              quantity: 1,
+              rate: taxAmount,
+              total: taxAmount,
+              taxable: false,
+              selected: true,
+              sortOrder: 999
+            }
+          });
+        }
+      }
 
       // Store a voucher charge marker so the agreement knows this is prepaid
       const existingVoucher = await prisma.reservationCharge.findFirst({
