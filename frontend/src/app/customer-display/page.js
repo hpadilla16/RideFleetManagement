@@ -132,35 +132,47 @@ function buildRecommendations({ row, charges, insurancePlans, additionalServices
     return keywords.some(k => hay.includes(k));
   };
 
-  // 1. Insurance — highest priority if missing
-  if (!hasInsurance && insurancePlans.length > 0) {
-    // Sort by tenant displayPriority (desc), then pick highest priority or mid-tier by price
-    const withPriority = [...insurancePlans].sort((a, b) => Number(b.displayPriority || 0) - Number(a.displayPriority || 0));
-    const topPriority = Number(withPriority[0]?.displayPriority || 0);
-    // If tenant set priorities, use the top one; otherwise pick mid-tier by price
-    let pick;
-    if (topPriority > 0) {
-      pick = withPriority[0];
-    } else {
-      const sorted = [...insurancePlans].sort((a, b) => Number(a.amount || a.rate || 0) - Number(b.amount || b.rate || 0));
-      pick = sorted.length >= 3 ? sorted[1] : sorted[0];
-    }
-    const price = Number(pick.total || pick.amount || pick.rate || 0);
-    const perDay = pick.chargeBy === 'PER_DAY';
-    const dailyCost = perDay ? price : (tripDays > 0 ? Number((price / tripDays).toFixed(2)) : price);
-    const custDesc = pick.displayDescription || pick.description || null;
-    recs.push({
-      type: 'insurance', priority: Math.max(Number(pick.displayPriority || 0), 10), item: pick,
-      headline: pick.name || 'Trip Protection',
-      reason: custDesc || (dailyCost <= 25
-        ? `For just ${money(dailyCost)}/day, drive worry-free with full coverage`
-        : 'Protect yourself from unexpected costs during your rental'),
-      price, priceLabel: perDay ? '/day' : '',
-      cta: !custDesc && dailyCost <= 25 ? `For just ${money(dailyCost)}/day` : 'Your agent can add this in seconds',
-    });
-    // If multiple plans, note alternatives
-    if (insurancePlans.length > 1) {
-      recs[recs.length - 1].altNote = `${insurancePlans.length} plans available \u2014 ask about the best fit for your trip`;
+  // 1. Insurance — recommend if none selected, or suggest upgrades if they have a lower-tier plan
+  if (insurancePlans.length > 0) {
+    const currentInsuranceCharge = charges.find(c => c.source === 'INSURANCE');
+    const currentCode = String(currentInsuranceCharge?.sourceRefId || '').toUpperCase();
+    const currentAmount = Number(currentInsuranceCharge?.total || currentInsuranceCharge?.rate || 0);
+
+    // Filter to plans they don't already have
+    const availablePlans = insurancePlans.filter(p => String(p.code || '').toUpperCase() !== currentCode);
+    // If they have insurance, only show upgrade plans (higher price)
+    const candidatePlans = hasInsurance
+      ? availablePlans.filter(p => Number(p.amount || p.rate || 0) > currentAmount)
+      : availablePlans;
+
+    if (candidatePlans.length > 0) {
+      // Sort by tenant displayPriority (desc), then pick best
+      const withPriority = [...candidatePlans].sort((a, b) => Number(b.displayPriority || 0) - Number(a.displayPriority || 0));
+      const topPriority = Number(withPriority[0]?.displayPriority || 0);
+      let pick;
+      if (topPriority > 0) {
+        pick = withPriority[0];
+      } else {
+        const sorted = [...candidatePlans].sort((a, b) => Number(a.amount || a.rate || 0) - Number(b.amount || b.rate || 0));
+        pick = sorted[0]; // Cheapest upgrade or cheapest plan if none selected
+      }
+      const price = Number(pick.total || pick.amount || pick.rate || 0);
+      const perDay = pick.chargeBy === 'PER_DAY';
+      const dailyCost = perDay ? price : (tripDays > 0 ? Number((price / tripDays).toFixed(2)) : price);
+      const custDesc = pick.displayDescription || pick.description || null;
+      const isUpgrade = hasInsurance;
+      recs.push({
+        type: 'insurance', priority: Math.max(Number(pick.displayPriority || 0), isUpgrade ? 7 : 10), item: pick,
+        headline: pick.name || 'Trip Protection',
+        reason: custDesc || (isUpgrade
+          ? `Upgrade your coverage \u2014 ${pick.name} offers more protection`
+          : (dailyCost <= 25 ? `For just ${money(dailyCost)}/day, drive worry-free` : 'Protect yourself from unexpected costs')),
+        price, priceLabel: perDay ? '/day' : '',
+        cta: isUpgrade ? 'Ask your agent about upgrading' : 'Your agent can add this in seconds',
+      });
+      if (candidatePlans.length > 1) {
+        recs[recs.length - 1].altNote = `${candidatePlans.length} ${isUpgrade ? 'upgrade options' : 'plans'} available`;
+      }
     }
   }
 
