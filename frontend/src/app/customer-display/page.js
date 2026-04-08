@@ -529,18 +529,28 @@ export default function CustomerDisplayPage() {
   const [data, setData] = useState(null);
   const [branding, setBranding] = useState(null);
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
   const pollRef = useRef(null);
   const channelRef = useRef(null);
 
   const loadReservation = useCallback(async (id) => {
     try {
       const token = readStoredToken();
-      if (!token) return;
-      const result = await api(`/api/reservations/${id}/display-data`, { bypassCache: true }, token);
+      if (!token) { setError('Session expired — please log in and reopen the display'); setLoading(false); return; }
+      let result;
+      try {
+        result = await api(`/api/reservations/${id}/display-data`, { bypassCache: true }, token);
+      } catch {
+        // Fallback: if display-data endpoint not available, use regular reservation endpoint
+        const reservation = await api(`/api/reservations/${id}`, { bypassCache: true }, token);
+        result = { reservation, insurancePlans: [], additionalServices: [] };
+      }
       setData(result);
+      setError('');
       if (result?.branding) setBranding(result.branding);
     } catch (e) {
       console.error('Customer display fetch error:', e);
+      setError(e?.message || 'Unable to load reservation');
     } finally {
       setLoading(false);
     }
@@ -613,7 +623,7 @@ export default function CustomerDisplayPage() {
     return <IdleScreen branding={branding} />;
   }
 
-  if (loading && !data) {
+  if ((loading && !data) || (!data && reservationId && !error)) {
     return (
       <div style={{
         minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center',
@@ -622,6 +632,21 @@ export default function CustomerDisplayPage() {
       }}>
         <div style={{ ...card, textAlign: 'center', padding: 48, maxWidth: 400 }}>
           <p style={{ color: '#6b7a9a', fontWeight: 600 }}>Loading reservation...</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (error && !data) {
+    return (
+      <div style={{
+        minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center',
+        background: 'linear-gradient(145deg, #f0eef8, #e8e4f4, #f5f3fa)',
+        fontFamily: "Aptos, 'Segoe UI Variable', 'Segoe UI', system-ui, sans-serif",
+      }}>
+        <div style={{ ...card, textAlign: 'center', padding: 48, maxWidth: 400 }}>
+          <p style={{ color: '#991b1b', fontWeight: 600 }}>{error}</p>
+          <p style={{ color: '#6b7a9a', fontSize: '0.85rem', marginTop: 8 }}>The display will retry automatically, or click Customer View again.</p>
         </div>
       </div>
     );
