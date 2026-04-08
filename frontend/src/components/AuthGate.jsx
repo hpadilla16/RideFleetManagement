@@ -128,60 +128,14 @@ export function AuthGate({ children }) {
 
         <div className="glass card-lg login-card centered-login login-float-in">
           <h1>Ride Fleet</h1>
-          <p className="label">Guest booking, host operations, and staff access in one app.</p>
+          <p className="label">Staff and operations access.</p>
           {error ? <p className="error">{error}</p> : null}
-          <div className="hero-meta" style={{ justifyContent: 'center', marginTop: 8 }}>
-            <button type="button" className={guestMode === 'signin' ? '' : 'button-subtle'} onClick={() => setGuestMode('signin')}>Guest Sign In</button>
-            <button type="button" className={guestMode === 'signup' ? '' : 'button-subtle'} onClick={() => setGuestMode('signup')}>Guest Sign Up</button>
-            <button type="button" className={guestMode === 'staff' ? '' : 'button-subtle'} onClick={() => setGuestMode('staff')}>Staff Login</button>
-          </div>
 
-          {guestMode !== 'staff' ? (
-            <div className="surface-note" style={{ textAlign: 'left', marginTop: 12 }}>
-              Guest accounts can only use the marketplace and guest portal: search vehicles, make bookings, view reservations, and manage trip steps.
-            </div>
-          ) : null}
-
-          {guestMsg ? <div className="surface-note" style={{ color: /sent|created|ready|continue/i.test(guestMsg) ? '#166534' : '#991b1b', textAlign: 'left' }}>{guestMsg}</div> : null}
-
-          {guestMode === 'signin' ? (
-            <form onSubmit={requestGuestSignIn} className="stack">
-              <input placeholder="Guest email" type="email" value={guestSignInEmail} onChange={(e) => setGuestSignInEmail(e.target.value)} required />
-              <button type="submit" disabled={guestLoading}>{guestLoading ? 'Sending...' : 'Send Guest Sign-In Link'}</button>
-              <div className="inline-actions" style={{ justifyContent: 'center' }}>
-                <button type="button" className="button-subtle" onClick={() => { window.location.href = '/guest'; }}>Open Guest Portal</button>
-                <button type="button" className="button-subtle" onClick={() => { window.location.href = '/book'; }}>Browse Marketplace</button>
-                <button type="button" className="button-subtle" onClick={() => { window.location.href = '/become-a-host'; }}>Become a Host</button>
-              </div>
-            </form>
-          ) : null}
-
-          {guestMode === 'signup' ? (
-            <form onSubmit={createGuestAccount} className="stack">
-              <div className="form-grid-2">
-                <input placeholder="First name" value={guestSignUp.firstName} onChange={(e) => setGuestSignUp({ ...guestSignUp, firstName: e.target.value })} required />
-                <input placeholder="Last name" value={guestSignUp.lastName} onChange={(e) => setGuestSignUp({ ...guestSignUp, lastName: e.target.value })} required />
-                <input placeholder="Email" type="email" value={guestSignUp.email} onChange={(e) => setGuestSignUp({ ...guestSignUp, email: e.target.value })} required />
-                <input placeholder="Phone" value={guestSignUp.phone} onChange={(e) => setGuestSignUp({ ...guestSignUp, phone: e.target.value })} required />
-              </div>
-              <button type="submit" disabled={guestLoading}>{guestLoading ? 'Creating...' : 'Create Guest Account'}</button>
-              <div className="inline-actions" style={{ justifyContent: 'center' }}>
-                <button type="button" className="button-subtle" onClick={() => { window.location.href = '/book'; }}>Browse Marketplace</button>
-                <button type="button" className="button-subtle" onClick={() => { window.location.href = '/become-a-host'; }}>Become a Host</button>
-              </div>
-            </form>
-          ) : null}
-
-          {guestMode === 'staff' ? (
-            <form onSubmit={login} className="stack">
-              <input placeholder="Email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} required />
-              <input placeholder="Password" type="password" value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} required />
-              <button type="submit">Login</button>
-              <div className="inline-actions" style={{ justifyContent: 'center' }}>
-                <button type="button" className="button-subtle" onClick={() => { window.location.href = '/become-a-host'; }}>Become a Host</button>
-              </div>
-            </form>
-          ) : null}
+          <form onSubmit={login} className="stack" style={{ marginTop: 12 }}>
+            <input placeholder="Email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} required />
+            <input placeholder="Password" type="password" value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} required />
+            <button type="submit">Login</button>
+          </form>
 
           <div className="auth-legal-row">
             <span className="ui-muted">By using Ride Fleet, you agree to the current platform policies.</span>
