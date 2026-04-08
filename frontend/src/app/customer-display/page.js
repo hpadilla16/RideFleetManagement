@@ -290,8 +290,8 @@ function buildRecommendations({ row, charges, insurancePlans, additionalServices
       continue;
     }
 
-    // Any service with tenant priority or description
-    if (tenantPriority > 0 || customerDesc) {
+    // Any remaining service — always include
+    {
       recs.push({
         type: 'service', priority: Math.max(tenantPriority, 2), item: svc,
         headline: svc.name,
@@ -384,194 +384,178 @@ function ActiveView({ data, branding }) {
 
   const companyName = branding?.companyName || 'Ride Fleet';
 
+  // Charge calculations for panel
+  const hideSources = ['OTA_PREPAID_VOUCHER', 'SECURITY_DEPOSIT'];
+  const visibleCharges = charges.filter(c => !hideSources.includes(c.source) && Number(c.total || 0) > 0 && String(c.chargeType || '').toUpperCase() !== 'TAX');
+  const taxCharges = charges.filter(c => String(c.chargeType || '').toUpperCase() === 'TAX' && Number(c.total || 0) > 0);
+  const depositCharge = charges.find(c => c.source === 'SECURITY_DEPOSIT' && Number(c.total || 0) > 0);
+  const taxTotal = taxCharges.reduce((s, c) => s + Number(c.total || 0), 0);
+  const chargesSubtotal = visibleCharges.reduce((s, c) => s + Number(c.total || 0), 0);
+
   return (
-    <div style={shell}>
-      {/* Brand header */}
-      <div style={{ textAlign: 'center', padding: '16px 0 6px' }}>
-        {branding?.companyLogoUrl ? (
-          <img src={branding.companyLogoUrl} alt={companyName} style={{ maxHeight: 36, maxWidth: 180, objectFit: 'contain' }} />
-        ) : (
-          <div style={{ fontWeight: 900, fontSize: '1.3rem', color: '#1a1230', letterSpacing: '-.02em' }}>{companyName}</div>
-        )}
-      </div>
-
-      {/* Welcome + Status */}
-      <div style={card}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12, flexWrap: 'wrap' }}>
-          <div>
-            <div style={{ fontWeight: 900, fontSize: '1.2rem', color: '#1a1230' }}>
-              {customer.firstName ? `Welcome, ${customer.firstName}` : 'Your Reservation'}
-            </div>
-            <div style={{ fontSize: '0.88rem', color: '#6b7a9a', marginTop: 3 }}>
-              Reservation #{row?.reservationNumber}
-            </div>
+    <div style={{ maxWidth: 960, margin: '0 auto', padding: '10px 16px 20px', minHeight: '100vh', fontFamily: "Aptos, 'Segoe UI Variable', 'Segoe UI', system-ui, sans-serif" }}>
+      {/* Brand header bar */}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 0 8px' }}>
+        <div>
+          {branding?.companyLogoUrl ? (
+            <img src={branding.companyLogoUrl} alt={companyName} style={{ maxHeight: 32, maxWidth: 160, objectFit: 'contain' }} />
+          ) : (
+            <div style={{ fontWeight: 900, fontSize: '1.2rem', color: '#1a1230', letterSpacing: '-.02em' }}>{companyName}</div>
+          )}
+        </div>
+        <div style={{ textAlign: 'right' }}>
+          <div style={{ fontWeight: 900, fontSize: '1.05rem', color: '#1a1230' }}>
+            {customer.firstName ? `Welcome, ${customer.firstName}` : 'Your Reservation'}
           </div>
-          <StatusBadge status={status} />
+          <div style={{ fontSize: '0.8rem', color: '#6b7a9a' }}>#{row?.reservationNumber}</div>
         </div>
       </div>
 
-      {/* Trip Details */}
-      <div style={card}>
-        <div style={sectionTitle}>Trip Details</div>
-        <div style={grid2}>
-          <div style={tile}>
-            <div style={tileLabel}>Pickup</div>
-            <div style={tileValue}>{fmtDate(row?.pickupAt)}</div>
-            {pickupLocation && <div style={tileSub}>{[pickupLocation.name, pickupLocation.city].filter(Boolean).join(', ')}</div>}
-          </div>
-          <div style={tile}>
-            <div style={tileLabel}>Return</div>
-            <div style={tileValue}>{fmtDate(row?.returnAt)}</div>
-            {returnLocation && <div style={tileSub}>{[returnLocation.name, returnLocation.city].filter(Boolean).join(', ')}</div>}
-          </div>
-        </div>
-      </div>
+      {/* 2x2 Panel Grid */}
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
 
-      {/* Vehicle — with actual photo */}
-      {vehicleLabel && (
-        <div style={card}>
-          <div style={sectionTitle}>Your Vehicle</div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
-            <div style={{
-              width: 90, height: 68, borderRadius: 14, flexShrink: 0, overflow: 'hidden',
-              background: vehicleTypeImage ? '#f8f7fc' : 'linear-gradient(135deg, rgba(110,73,255,.1), rgba(31,199,170,.08))',
-              display: 'flex', alignItems: 'center', justifyContent: 'center',
-              border: '1px solid rgba(110,73,255,.1)',
-            }}>
-              {vehicleTypeImage ? (
-                <img src={vehicleTypeImage} alt={vehicleType?.name || ''} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-              ) : (
-                <span style={{ fontSize: '2rem' }}>{'\uD83D\uDE97'}</span>
-              )}
+        {/* ── PANEL 1: Trip + Vehicle ──────────────────────────── */}
+        <div style={panel}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
+            <div style={panelTitle}>Your Trip</div>
+            <StatusBadge status={status} />
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 10 }}>
+            <div style={tileCompact}>
+              <div style={tileLabelSm}>Pickup</div>
+              <div style={tileValueSm}>{fmtDate(row?.pickupAt)}</div>
+              {pickupLocation && <div style={tileSubSm}>{[pickupLocation.name, pickupLocation.city].filter(Boolean).join(', ')}</div>}
             </div>
-            <div>
-              <div style={{ fontWeight: 800, color: '#1a1230', fontSize: '1.08rem' }}>{vehicleLabel}</div>
-              {vehicleType?.name && <div style={{ fontSize: '0.82rem', color: '#6b7a9a', marginTop: 2 }}>{vehicleType.name}</div>}
-              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 6 }}>
-                {vehicleColor && <span style={chip}>{vehicleColor}</span>}
-                {vehiclePlate && <span style={chip}>Plate: {vehiclePlate}</span>}
+            <div style={tileCompact}>
+              <div style={tileLabelSm}>Return</div>
+              <div style={tileValueSm}>{fmtDate(row?.returnAt)}</div>
+              {returnLocation && <div style={tileSubSm}>{[returnLocation.name, returnLocation.city].filter(Boolean).join(', ')}</div>}
+            </div>
+          </div>
+          {vehicleLabel && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '10px 12px', borderRadius: 12, background: 'rgba(110,73,255,.03)', border: '1px solid rgba(110,73,255,.08)' }}>
+              <div style={{
+                width: 64, height: 48, borderRadius: 10, flexShrink: 0, overflow: 'hidden',
+                background: vehicleTypeImage ? '#f8f7fc' : 'linear-gradient(135deg, rgba(110,73,255,.1), rgba(31,199,170,.08))',
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                border: '1px solid rgba(110,73,255,.08)',
+              }}>
+                {vehicleTypeImage ? (
+                  <img src={vehicleTypeImage} alt={vehicleType?.name || ''} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                ) : (
+                  <span style={{ fontSize: '1.4rem' }}>{'\uD83D\uDE97'}</span>
+                )}
+              </div>
+              <div>
+                <div style={{ fontWeight: 800, color: '#1a1230', fontSize: '0.95rem' }}>{vehicleLabel}</div>
+                <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 3 }}>
+                  {vehicleColor && <span style={chipSm}>{vehicleColor}</span>}
+                  {vehiclePlate && <span style={chipSm}>{vehiclePlate}</span>}
+                </div>
               </div>
             </div>
+          )}
+        </div>
+
+        {/* ── PANEL 2: Progress ────────────────────────────────── */}
+        <div style={panel}>
+          <div style={panelTitle}>Reservation Progress</div>
+          <div style={{ display: 'grid', gap: 8, padding: '2px 0' }}>
+            <ProgressStep label="Reservation Created" done />
+            <ProgressStep label="Pre-Check-in" done={precheckinDone} active={!precheckinDone && !isCheckedOut} />
+            <ProgressStep label="Agreement Signed" done={signatureDone} active={precheckinDone && !signatureDone && !isCheckedOut} />
+            <ProgressStep label="Payment" done={paymentDone} active={signatureDone && !paymentDone && !isCheckedOut} />
+            <ProgressStep label="Checked Out" done={isCheckedOut || isCheckedIn} active={false} />
+            <ProgressStep label="Returned" done={isCheckedIn} active={isCheckedOut} />
           </div>
+          {isComplete && (
+            <div style={{ textAlign: 'center', marginTop: 12, padding: '10px', borderRadius: 12, background: 'rgba(22,163,74,.06)' }}>
+              <div style={{ fontWeight: 900, color: '#166534' }}>{'\u2705'} Trip Complete</div>
+              <div style={{ fontSize: '0.82rem', color: '#55456f', marginTop: 2 }}>Thank you for renting with us!</div>
+            </div>
+          )}
         </div>
-      )}
 
-      {/* Progress */}
-      <div style={card}>
-        <div style={sectionTitle}>Reservation Progress</div>
-        <div style={{ display: 'grid', gap: 10, padding: '4px 0' }}>
-          <ProgressStep label="Reservation Created" done />
-          <ProgressStep label="Pre-Check-in" done={precheckinDone} active={!precheckinDone && !isCheckedOut} />
-          <ProgressStep label="Agreement Signed" done={signatureDone} active={precheckinDone && !signatureDone && !isCheckedOut} />
-          <ProgressStep label="Payment" done={paymentDone} active={signatureDone && !paymentDone && !isCheckedOut} />
-          <ProgressStep label="Checked Out" done={isCheckedOut || isCheckedIn} active={false} />
-          <ProgressStep label="Returned" done={isCheckedIn} active={isCheckedOut} />
-        </div>
-      </div>
-
-      {/* ── INCLUDED WITH YOUR TRIP ─────────────────────────────── */}
-      {/* Compact view: hide $0 items and internal noise, show only meaningful charges */}
-      {(() => {
-        const hideSources = ['OTA_PREPAID_VOUCHER', 'SECURITY_DEPOSIT'];
-        const visibleCharges = charges.filter(c => !hideSources.includes(c.source) && Number(c.total || 0) > 0 && String(c.chargeType || '').toUpperCase() !== 'TAX');
-        const taxCharges = charges.filter(c => String(c.chargeType || '').toUpperCase() === 'TAX' && Number(c.total || 0) > 0);
-        const depositCharge = charges.find(c => c.source === 'SECURITY_DEPOSIT' && Number(c.total || 0) > 0);
-        const taxTotal = taxCharges.reduce((s, c) => s + Number(c.total || 0), 0);
-        const chargesSubtotal = visibleCharges.reduce((s, c) => s + Number(c.total || 0), 0);
-        if (visibleCharges.length === 0 && !isOtaPrepaid) return null;
-        return (
-          <div style={card}>
-            <div style={sectionTitle}>{isOtaPrepaid ? 'Your Add-ons' : 'Included with Your Trip'}</div>
-            {isOtaPrepaid && (
-              <div style={{ fontSize: '0.82rem', color: '#92400e', background: 'rgba(245,158,11,.06)', padding: '8px 12px', borderRadius: 10, marginBottom: 10, fontWeight: 600 }}>
-                Base rental prepaid {'\u2713'} \u2014 add-on charges shown below
-              </div>
-            )}
-            <div style={{ display: 'grid', gap: 4 }}>
+        {/* ── PANEL 3: Charges / Included ──────────────────────── */}
+        <div style={panel}>
+          <div style={panelTitle}>{isOtaPrepaid ? 'Your Add-ons' : 'Trip Summary'}</div>
+          {isOtaPrepaid && (
+            <div style={{ fontSize: '0.78rem', color: '#92400e', background: 'rgba(245,158,11,.06)', padding: '6px 10px', borderRadius: 8, marginBottom: 8, fontWeight: 600 }}>
+              Base rental prepaid {'\u2713'}
+            </div>
+          )}
+          {visibleCharges.length > 0 ? (
+            <div style={{ display: 'grid', gap: 3 }}>
               {visibleCharges.map((c, i) => {
                 const isProtection = c.source === 'INSURANCE';
                 const isService = ['ADDITIONAL_SERVICE', 'ADDITIONAL_SERVICE_PRECHECKIN', 'SERVICE'].includes(c.source);
                 return (
-                  <div key={c.id || i} style={{
-                    display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-                    fontSize: '0.88rem', padding: '4px 0',
-                    color: isProtection ? '#166534' : isService ? '#0d9488' : '#53607b',
-                  }}>
+                  <div key={c.id || i} style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.84rem', padding: '3px 0', color: isProtection ? '#166534' : isService ? '#0d9488' : '#53607b' }}>
                     <span>{c.name || 'Charge'}</span>
                     <strong style={{ color: '#1a1230' }}>{money(c.total)}</strong>
                   </div>
                 );
               })}
               {taxTotal > 0 && (
-                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.82rem', color: '#6b7a9a', padding: '2px 0' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.78rem', color: '#6b7a9a', padding: '2px 0' }}>
                   <span>Tax</span><span>{money(taxTotal)}</span>
                 </div>
               )}
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', paddingTop: 8, marginTop: 4, borderTop: '2px solid rgba(110,73,255,.12)' }}>
-                <span style={{ fontWeight: 800, color: '#1a1230' }}>Total</span>
-                <span style={{ fontWeight: 900, fontSize: '1.15rem', color: '#1a1230' }}>{money(chargesSubtotal + taxTotal)}</span>
+              <div style={{ display: 'flex', justifyContent: 'space-between', paddingTop: 6, marginTop: 4, borderTop: '2px solid rgba(110,73,255,.12)' }}>
+                <span style={{ fontWeight: 800, color: '#1a1230', fontSize: '0.9rem' }}>Total</span>
+                <span style={{ fontWeight: 900, fontSize: '1.05rem', color: '#1a1230' }}>{money(chargesSubtotal + taxTotal)}</span>
               </div>
               {depositCharge && (
-                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.82rem', color: '#6b7a9a', padding: '2px 0' }}>
-                  <span>Security Deposit (hold)</span><span>{money(depositCharge.total)}</span>
-                </div>
-              )}
-              {paidTotal > 0 && (
-                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.85rem', color: '#166534' }}>
-                  <span>Paid</span><strong>{money(paidTotal)}</strong>
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.78rem', color: '#6b7a9a' }}>
+                  <span>Deposit (hold)</span><span>{money(depositCharge.total)}</span>
                 </div>
               )}
               {balance > 0 && (
-                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.85rem', color: '#b45309' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.84rem', color: '#b45309', marginTop: 2 }}>
                   <span>Balance Due</span><strong>{money(balance)}</strong>
                 </div>
               )}
             </div>
-          </div>
-        );
-      })()}
+          ) : (
+            <div style={{ fontSize: '0.85rem', color: '#94a3b8', fontStyle: 'italic' }}>No charges yet</div>
+          )}
+        </div>
 
-      {/* ── RECOMMENDED FOR YOU ─────────────────────────────────── */}
-      {/* Smart, contextual suggestions — max 3, never pushy */}
-      {recommendations.length > 0 && !isComplete && (
+        {/* ── PANEL 4: Recommendations ─────────────────────────── */}
         <div style={{
-          ...card,
-          background: 'linear-gradient(145deg, rgba(255,255,255,.95), rgba(110,73,255,.03))',
-          borderColor: 'rgba(110,73,255,.12)',
+          ...panel,
+          background: recommendations.length > 0 ? 'linear-gradient(145deg, rgba(255,255,255,.95), rgba(110,73,255,.03))' : 'rgba(255,255,255,.92)',
           position: 'relative', overflow: 'hidden',
         }}>
-          {/* Subtle ambient dot */}
-          <div style={{ position: 'absolute', top: -20, right: -20, width: 80, height: 80, borderRadius: '50%', background: 'radial-gradient(circle, rgba(110,73,255,.06) 0%, transparent 70%)', pointerEvents: 'none' }} />
-
-          <div style={{ ...sectionTitle, display: 'flex', alignItems: 'center', gap: 8 }}>
-            <span style={{ fontSize: '1rem' }}>{'\u2728'}</span>
-            Recommended for You
-          </div>
-          <div style={{ display: 'grid', gap: 10 }}>
-            {recommendations.map((rec, i) => (
-              <RecommendationCard key={rec.item?.code || rec.item?.id || i} rec={rec} index={i} />
-            ))}
-          </div>
-          <div style={{
-            marginTop: 14, textAlign: 'center', padding: '10px 16px',
-            borderRadius: 12, background: 'rgba(110,73,255,.04)',
-            fontSize: '0.86rem', color: '#6b7a9a', fontWeight: 600, lineHeight: 1.5,
-          }}>
-            Interested in any of these? Just let your agent know
-          </div>
+          {recommendations.length > 0 && !isComplete ? (
+            <>
+              <div style={{ position: 'absolute', top: -15, right: -15, width: 60, height: 60, borderRadius: '50%', background: 'radial-gradient(circle, rgba(110,73,255,.06) 0%, transparent 70%)', pointerEvents: 'none' }} />
+              <div style={{ ...panelTitle, display: 'flex', alignItems: 'center', gap: 6 }}>
+                <span>{'\u2728'}</span> Recommended for You
+              </div>
+              <div style={{ display: 'grid', gap: 8 }}>
+                {recommendations.map((rec, i) => (
+                  <RecommendationCard key={rec.item?.code || rec.item?.id || i} rec={rec} index={i} />
+                ))}
+              </div>
+              <div style={{ marginTop: 10, textAlign: 'center', padding: '8px 12px', borderRadius: 10, background: 'rgba(110,73,255,.04)', fontSize: '0.82rem', color: '#6b7a9a', fontWeight: 600 }}>
+                Interested? Just let your agent know
+              </div>
+            </>
+          ) : (
+            <>
+              <div style={panelTitle}>You&apos;re All Set</div>
+              <div style={{ textAlign: 'center', padding: '20px 0' }}>
+                <div style={{ fontSize: '2rem', marginBottom: 8 }}>{'\uD83C\uDF1F'}</div>
+                <div style={{ fontWeight: 800, color: '#166534', fontSize: '0.95rem' }}>Everything looks great!</div>
+                <div style={{ fontSize: '0.84rem', color: '#6b7a9a', marginTop: 4 }}>Your reservation is all set. Let your agent know if you need anything.</div>
+              </div>
+            </>
+          )}
         </div>
-      )}
+      </div>
 
-      {/* Completion */}
-      {isComplete && (
-        <div style={{ ...card, background: 'linear-gradient(135deg, rgba(22,163,74,.06), rgba(110,73,255,.04))', borderColor: 'rgba(22,163,74,.18)', textAlign: 'center' }}>
-          <div style={{ fontSize: '2.2rem', marginBottom: 8 }}>{'\u2705'}</div>
-          <div style={{ fontWeight: 900, color: '#166534', fontSize: '1.15rem' }}>Trip Complete</div>
-          <div style={{ fontSize: '0.9rem', color: '#55456f', marginTop: 4 }}>
-            Thank you for renting with us! We hope you had a great experience.
-          </div>
-        </div>
-      )}
+      {/* Footer */}
 
       {/* Footer */}
       <div style={{ textAlign: 'center', padding: '12px 0 20px', fontSize: '0.78rem', color: '#94a3b8' }}>
@@ -724,13 +708,6 @@ export default function CustomerDisplayPage() {
 }
 
 /* ─── Shared Styles ─────────────────────────────────────────────── */
-const shell = {
-  maxWidth: 520,
-  margin: '0 auto',
-  padding: '8px 18px 24px',
-  minHeight: '100vh',
-};
-
 const card = {
   padding: '18px 22px',
   borderRadius: 20,
@@ -740,34 +717,42 @@ const card = {
   marginBottom: 14,
 };
 
-const sectionTitle = {
+const panel = {
+  padding: '16px 18px',
+  borderRadius: 18,
+  background: 'rgba(255,255,255,.92)',
+  border: '1px solid rgba(110,73,255,.1)',
+  boxShadow: '0 6px 20px rgba(47,58,114,.05)',
+};
+
+const panelTitle = {
   fontWeight: 800,
-  fontSize: '0.86rem',
+  fontSize: '0.82rem',
   color: '#6b7a9a',
   textTransform: 'uppercase',
   letterSpacing: '.06em',
-  marginBottom: 12,
+  marginBottom: 10,
 };
 
-const grid2 = { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 };
+const sectionTitle = panelTitle;
 
-const tile = {
-  padding: '12px 14px',
-  borderRadius: 14,
+const tileCompact = {
+  padding: '8px 10px',
+  borderRadius: 10,
   background: 'rgba(110,73,255,.04)',
-  border: '1px solid rgba(110,73,255,.08)',
+  border: '1px solid rgba(110,73,255,.06)',
 };
 
-const tileLabel = {
-  fontSize: '0.72rem', fontWeight: 700, color: '#6b7a9a',
-  textTransform: 'uppercase', letterSpacing: '.06em', marginBottom: 4,
+const tileLabelSm = {
+  fontSize: '0.68rem', fontWeight: 700, color: '#6b7a9a',
+  textTransform: 'uppercase', letterSpacing: '.05em', marginBottom: 2,
 };
 
-const tileValue = { fontWeight: 800, color: '#1a1230', fontSize: '0.92rem' };
-const tileSub = { fontSize: '0.8rem', color: '#6b7a9a', marginTop: 3 };
+const tileValueSm = { fontWeight: 800, color: '#1a1230', fontSize: '0.84rem' };
+const tileSubSm = { fontSize: '0.74rem', color: '#6b7a9a', marginTop: 2 };
 
-const chip = {
-  display: 'inline-block', padding: '3px 10px', borderRadius: 999,
-  background: 'rgba(110,73,255,.06)', border: '1px solid rgba(110,73,255,.12)',
-  color: '#4c1d95', fontSize: '0.78rem', fontWeight: 700,
+const chipSm = {
+  display: 'inline-block', padding: '2px 8px', borderRadius: 999,
+  background: 'rgba(110,73,255,.06)', border: '1px solid rgba(110,73,255,.1)',
+  color: '#4c1d95', fontSize: '0.72rem', fontWeight: 700,
 };
