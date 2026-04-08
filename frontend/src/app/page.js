@@ -239,8 +239,10 @@ function DashboardInner({ token, me, logout }) {
       !canSeeOverview && canSeeVehicles ? api('/api/vehicles', {}, token) : Promise.resolve([])
     ]);
 
-    if (reservationsResult.status === 'fulfilled') setReservations(reservationsResult.value || []);
-    else setReservations([]);
+    if (reservationsResult.status === 'fulfilled') {
+      const val = reservationsResult.value;
+      setReservations(Array.isArray(val) ? val : (Array.isArray(val?.items) ? val.items : []));
+    } else setReservations([]);
 
     if (overviewResult.status === 'fulfilled' && overviewResult.value) {
       setOverview(overviewResult.value || null);
