@@ -210,7 +210,7 @@ reservationsRouter.get('/:id/display-data', async (req, res, next) => {
         orderBy: { sortOrder: 'asc' },
         select: { id: true, code: true, name: true, description: true, rate: true, chargeType: true, unitLabel: true, mandatory: true, taxable: true, defaultQty: true, coversTolls: true }
       }) : [],
-      tenantId ? settingsService.getRentalAgreementSettings({ tenantId }) : {}
+      tenantId ? settingsService.getRentalAgreementConfig({ tenantId }) : {}
     ]);
     res.json({
       reservation: row,
