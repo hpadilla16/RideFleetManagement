@@ -1106,10 +1106,31 @@ const insurancePlan = insuranceCode
 
 const serviceRows = serviceNames.map((name, idx) => {
 const opt = serviceOptions.find((s) => (s.name || s.code || '').trim().toLowerCase() === name.toLowerCase());
-const rate = toMoneyNum(opt?.price ?? opt?.rate ?? opt?.amount ?? 0);
-const perDay = [/PER_DAY|DAILY|DAY/i.test(String(opt?.mode || ''))] ||
-['true', '1'].includes(String(opt?.isPerDay || opt?.perDay || '').toLowerCase());
-const unit = perDay ? breakdown.days : 1;
+// Pick the best rate: dailyRate for per-day services, weeklyRate/monthlyRate for longer trips, flat rate as fallback
+const flatRate = toMoneyNum(opt?.price ?? opt?.rate ?? opt?.amount ?? 0);
+const dailyRate = toMoneyNum(opt?.dailyRate || 0);
+const weeklyRate = toMoneyNum(opt?.weeklyRate || 0);
+const monthlyRate = toMoneyNum(opt?.monthlyRate || 0);
+let rate = flatRate;
+let unit = 1;
+if (dailyRate > 0) {
+  rate = dailyRate;
+  unit = breakdown.days;
+  // Use weekly rate if trip >= 7 days and it's cheaper
+  if (breakdown.days >= 7 && weeklyRate > 0) {
+    const weeks = Math.ceil(breakdown.days / 7);
+    if (weeklyRate * weeks < dailyRate * breakdown.days) { rate = weeklyRate; unit = weeks; }
+  }
+  // Use monthly rate if trip >= 28 days and it's cheaper
+  if (breakdown.days >= 28 && monthlyRate > 0) {
+    const months = Math.ceil(breakdown.days / 30);
+    if (monthlyRate * months < dailyRate * breakdown.days) { rate = monthlyRate; unit = months; }
+  }
+} else {
+  const perDay = [/PER_DAY|DAILY|DAY/i.test(String(opt?.mode || ''))] ||
+  ['true', '1'].includes(String(opt?.isPerDay || opt?.perDay || '').toLowerCase());
+  unit = perDay ? breakdown.days : 1;
+}
 return {
 id: `svc-${idx}`,
 name: `Service: ${name}`,
