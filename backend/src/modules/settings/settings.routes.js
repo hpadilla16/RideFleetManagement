@@ -314,6 +314,22 @@ settingsRouter.put('/revenue-pricing', requireRole('ADMIN'), async (req, res, ne
   }
 });
 
+settingsRouter.get('/precheckin-discount', requireRole('ADMIN'), async (req, res, next) => {
+  try {
+    res.json(await settingsService.getPrecheckinDiscount(scopeFor(req)));
+  } catch (e) {
+    next(e);
+  }
+});
+
+settingsRouter.put('/precheckin-discount', requireRole('ADMIN'), async (req, res, next) => {
+  try {
+    res.json(await settingsService.updatePrecheckinDiscount(req.body || {}, scopeFor(req)));
+  } catch (e) {
+    next(e);
+  }
+});
+
 settingsRouter.get('/self-service', requireRole('ADMIN'), async (req, res, next) => {
   try {
     const cfg = await settingsService.getSelfServiceConfig(scopeFor(req));

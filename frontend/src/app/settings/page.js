@@ -166,6 +166,8 @@ const DEFAULT_REVENUE_PRICING_PREVIEW = {
   displayOnline: true
 };
 
+const DEFAULT_PRECHECKIN_DISCOUNT = { enabled: false, type: 'PERCENTAGE', value: 0 };
+
 const DEFAULT_SELF_SERVICE_CONFIG = {
   enabled: false,
   allowPickup: true,
@@ -458,6 +460,7 @@ function SettingsInner({ token, me, logout }) {
   const [revenuePricingPreview, setRevenuePricingPreview] = useState(DEFAULT_REVENUE_PRICING_PREVIEW);
   const [revenuePricingPreviewResult, setRevenuePricingPreviewResult] = useState(null);
   const [selfServiceConfig, setSelfServiceConfig] = useState(DEFAULT_SELF_SERVICE_CONFIG);
+  const [precheckinDiscount, setPrecheckinDiscount] = useState(DEFAULT_PRECHECKIN_DISCOUNT);
   const [carSharingSearchPlaces, setCarSharingSearchPlaces] = useState([]);
   const [tenantModuleAccess, setTenantModuleAccess] = useState({});
   const [loadedSettingsSections, setLoadedSettingsSections] = useState({});
@@ -575,6 +578,9 @@ function SettingsInner({ token, me, logout }) {
     if (key === 'carSharingSearchPlaces') {
       setCarSharingSearchPlaces(Array.isArray(value) ? value : []);
     }
+    if (key === 'precheckinDiscount') {
+      setPrecheckinDiscount({ ...DEFAULT_PRECHECKIN_DISCOUNT, ...(value || {}) });
+    }
     if (key === 'selfService') {
       setSelfServiceConfig({
         ...DEFAULT_SELF_SERVICE_CONFIG,
@@ -600,6 +606,7 @@ function SettingsInner({ token, me, logout }) {
     telematics: (forceLoad = false) => api(scopedSettingsPath('/api/settings/telematics'), forceLoad ? { bypassCache: true } : {}, token),
     revenuePricing: (forceLoad = false) => api(scopedSettingsPath('/api/settings/revenue-pricing'), forceLoad ? { bypassCache: true } : {}, token),
     carSharingSearchPlaces: (forceLoad = false) => api(scopedSettingsPath('/api/settings/car-sharing-search-places'), forceLoad ? { bypassCache: true } : {}, token),
+    precheckinDiscount: (forceLoad = false) => api(scopedSettingsPath('/api/settings/precheckin-discount'), forceLoad ? { bypassCache: true } : {}, token),
     selfService: (forceLoad = false) => api(scopedSettingsPath('/api/settings/self-service'), forceLoad ? { bypassCache: true } : {}, token),
     tenantModules: (forceLoad = false) => api(scopedSettingsPath('/api/settings/tenant-modules'), forceLoad ? { bypassCache: true } : {}, token)
   };
@@ -897,6 +904,19 @@ function SettingsInner({ token, me, logout }) {
       ...(out || {})
     });
     setMsg('Revenue pricing settings saved');
+  };
+
+  const savePrecheckinDiscount = async () => {
+    const out = await api(scopedSettingsPath('/api/settings/precheckin-discount'), {
+      method: 'PUT',
+      body: JSON.stringify({
+        enabled: !!precheckinDiscount.enabled,
+        type: String(precheckinDiscount.type || 'PERCENTAGE').toUpperCase(),
+        value: Math.max(0, Number(precheckinDiscount.value || 0))
+      })
+    }, token);
+    setPrecheckinDiscount({ ...DEFAULT_PRECHECKIN_DISCOUNT, ...(out || {}) });
+    setMsg('Pre-check-in discount settings saved');
   };
 
   const saveSelfServiceConfig = async () => {
@@ -3326,6 +3346,74 @@ function SettingsInner({ token, me, logout }) {
               <div className="inline-actions">
                 <button type="button" onClick={saveSelfServiceConfig}>Save Self-Service</button>
                 <button type="button" className="button-subtle" onClick={() => setSelfServiceConfig(DEFAULT_SELF_SERVICE_CONFIG)}>Reset to Defaults</button>
+              </div>
+            </section>
+
+            <section className="glass card section-card">
+              <div className="row-between" style={{ alignItems: 'flex-start', gap: 12 }}>
+                <div className="stack" style={{ gap: 6 }}>
+                  <h3 style={{ margin: 0 }}>Pre-Check-in Discount</h3>
+                  <div className="ui-muted">
+                    Offer a discount on insurance plans and add-on services when customers select them during pre-check-in instead of at the counter.
+                    The customer sees the counter price crossed out with the discounted pre-check-in price.
+                  </div>
+                </div>
+                <span className={`status-chip ${precheckinDiscount.enabled ? 'good' : 'neutral'}`}>
+                  {precheckinDiscount.enabled ? 'Active' : 'Off'}
+                </span>
+              </div>
+
+              <div className="form-grid-2" style={{ marginTop: 14 }}>
+                <label className="label" style={{ textTransform: 'none', letterSpacing: 0, fontSize: 13 }}>
+                  <input
+                    type="checkbox"
+                    checked={!!precheckinDiscount.enabled}
+                    onChange={(e) => setPrecheckinDiscount((c) => ({ ...c, enabled: e.target.checked }))}
+                  /> Enable pre-check-in discount
+                </label>
+                <div className="surface-note">
+                  When enabled, insurance and services selected during the self-service pre-check-in flow will be charged at the discounted rate instead of the counter rate.
+                </div>
+              </div>
+
+              {precheckinDiscount.enabled && (
+                <div className="form-grid-2" style={{ marginTop: 12 }}>
+                  <div>
+                    <label className="label">Discount Type</label>
+                    <select
+                      value={precheckinDiscount.type || 'PERCENTAGE'}
+                      onChange={(e) => setPrecheckinDiscount((c) => ({ ...c, type: e.target.value }))}
+                    >
+                      <option value="PERCENTAGE">Percentage (%)</option>
+                      <option value="FIXED">Fixed Amount ($)</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="label">
+                      {precheckinDiscount.type === 'FIXED' ? 'Discount Amount ($)' : 'Discount Percentage (%)'}
+                    </label>
+                    <input
+                      type="number"
+                      step={precheckinDiscount.type === 'FIXED' ? '0.01' : '1'}
+                      min="0"
+                      max={precheckinDiscount.type === 'PERCENTAGE' ? '100' : undefined}
+                      value={precheckinDiscount.value || ''}
+                      onChange={(e) => setPrecheckinDiscount((c) => ({ ...c, value: e.target.value }))}
+                      placeholder={precheckinDiscount.type === 'FIXED' ? '5.00' : '10'}
+                    />
+                  </div>
+                  <div className="surface-note" style={{ gridColumn: '1 / -1' }}>
+                    {precheckinDiscount.type === 'PERCENTAGE'
+                      ? `Example: a $50 insurance plan would be charged at $${(50 * (1 - (Number(precheckinDiscount.value) || 0) / 100)).toFixed(2)} (${Number(precheckinDiscount.value) || 0}% off).`
+                      : `Example: a $50 insurance plan would be charged at $${Math.max(0, 50 - (Number(precheckinDiscount.value) || 0)).toFixed(2)} ($${Number(precheckinDiscount.value || 0).toFixed(2)} off).`
+                    }
+                  </div>
+                </div>
+              )}
+
+              <div className="inline-actions" style={{ marginTop: 12 }}>
+                <button type="button" onClick={savePrecheckinDiscount}>Save Discount Settings</button>
+                <button type="button" className="button-subtle" onClick={() => setPrecheckinDiscount(DEFAULT_PRECHECKIN_DISCOUNT)}>Reset</button>
               </div>
             </section>
           </div>

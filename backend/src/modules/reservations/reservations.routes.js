@@ -352,6 +352,16 @@ reservationsRouter.get('/:id/available-vehicles', async (req, res, next) => {
         if (row?.vehicleId) blockedIds.push(row.vehicleId);
       });
 
+      const vehicleSelect = {
+        id: true, tenantId: true, internalNumber: true, vin: true, plate: true,
+        make: true, model: true, year: true, color: true, mileage: true,
+        status: true, fleetMode: true, vehicleTypeId: true, homeLocationId: true,
+        vehicleType: { select: { id: true, name: true } },
+        homeLocation: { select: { id: true, name: true, city: true, state: true } }
+      };
+      const vehicleOrder = [{ make: 'asc' }, { model: 'asc' }, { internalNumber: 'asc' }];
+      const maxResults = 200;
+
       let vehicles = await prisma.vehicle.findMany({
         where: {
           ...(tenantScope.tenantId ? { tenantId: tenantScope.tenantId } : {}),
@@ -363,8 +373,9 @@ reservationsRouter.get('/:id/available-vehicles', async (req, res, next) => {
             }
           ].filter(Boolean)
         },
-        include: { vehicleType: true, homeLocation: true },
-        orderBy: [{ make: 'asc' }, { model: 'asc' }, { internalNumber: 'asc' }]
+        select: vehicleSelect,
+        orderBy: vehicleOrder,
+        take: maxResults
       });
 
       if (!vehicles.length) {
@@ -380,8 +391,9 @@ reservationsRouter.get('/:id/available-vehicles', async (req, res, next) => {
               ]
             } : {})
           },
-          include: { vehicleType: true, homeLocation: true },
-          orderBy: [{ make: 'asc' }, { model: 'asc' }, { internalNumber: 'asc' }]
+          select: vehicleSelect,
+          orderBy: vehicleOrder,
+          take: maxResults
         });
       }
 
@@ -391,8 +403,9 @@ reservationsRouter.get('/:id/available-vehicles', async (req, res, next) => {
             ...(tenantScope.tenantId ? { tenantId: tenantScope.tenantId } : {}),
             status: { notIn: ['IN_MAINTENANCE', 'OUT_OF_SERVICE'] }
           },
-          include: { vehicleType: true, homeLocation: true },
-          orderBy: [{ make: 'asc' }, { model: 'asc' }, { internalNumber: 'asc' }]
+          select: vehicleSelect,
+          orderBy: vehicleOrder,
+          take: maxResults
         });
       }
 
@@ -409,8 +422,15 @@ reservationsRouter.get('/:id/available-vehicles', async (req, res, next) => {
           ...(tenantScope.tenantId ? { tenantId: tenantScope.tenantId } : {}),
           status: { notIn: ['IN_MAINTENANCE', 'OUT_OF_SERVICE'] }
         },
-        include: { vehicleType: true, homeLocation: true },
-        orderBy: [{ make: 'asc' }, { model: 'asc' }, { internalNumber: 'asc' }]
+        select: {
+          id: true, tenantId: true, internalNumber: true, vin: true, plate: true,
+          make: true, model: true, year: true, color: true, mileage: true,
+          status: true, fleetMode: true, vehicleTypeId: true, homeLocationId: true,
+          vehicleType: { select: { id: true, name: true } },
+          homeLocation: { select: { id: true, name: true, city: true, state: true } }
+        },
+        orderBy: [{ make: 'asc' }, { model: 'asc' }, { internalNumber: 'asc' }],
+        take: 200
       });
       return res.json(fallbackVehicles);
     }

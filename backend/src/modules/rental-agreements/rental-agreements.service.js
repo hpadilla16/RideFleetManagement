@@ -743,6 +743,32 @@ function parseSecurityDepositMetaFromNotes(notes) {
   };
 }
 
+function resolveInsuranceSource(reservation) {
+  const charges = Array.isArray(reservation?.charges) ? reservation.charges : [];
+  const insuranceCharge = charges.find((c) => c.source === 'INSURANCE' && c.selected);
+  if (insuranceCharge) return 'PLAN';
+  if (reservation?.customer?.insurancePolicyNumber) return 'DECLINED_OWN';
+  const snapshot = reservation?.pricingSnapshot;
+  if (snapshot?.selectedInsuranceCode) return 'PLAN';
+  return null;
+}
+
+function resolveInsurancePlanField(reservation, field) {
+  const charges = Array.isArray(reservation?.charges) ? reservation.charges : [];
+  const insuranceCharge = charges.find((c) => c.source === 'INSURANCE' && c.selected);
+  if (insuranceCharge) {
+    if (field === 'code') return insuranceCharge.sourceRefId || insuranceCharge.code || null;
+    if (field === 'name') return insuranceCharge.name || insuranceCharge.description || null;
+    if (field === 'rate') return Number(insuranceCharge.rate || insuranceCharge.total || insuranceCharge.amount || 0) || null;
+  }
+  const snapshot = reservation?.pricingSnapshot;
+  if (snapshot) {
+    if (field === 'code') return snapshot.selectedInsuranceCode || null;
+    if (field === 'name') return snapshot.selectedInsuranceName || null;
+  }
+  return null;
+}
+
 function structuredReservationChargeRows(reservation) {
   const rows = Array.isArray(reservation?.charges) ? reservation.charges : [];
   if (!rows.length) return null;
@@ -1553,12 +1579,12 @@ export const rentalAgreementsService = {
           dateOfBirth: reservation.customer.dateOfBirth,
           licenseNumber: reservation.customer.licenseNumber,
           licenseState: reservation.customer.licenseState,
-          insuranceSource: reservation.customer.insurancePolicyNumber ? 'THEIRS' : null,
+          insuranceSource: resolveInsuranceSource(reservation),
           insurancePolicyNumber: reservation.customer.insurancePolicyNumber,
           insuranceDocumentUrl: reservation.customer.insuranceDocumentUrl,
-          insurancePlanCode: null,
-          insurancePlanName: null,
-          insurancePlanRate: null,
+          insurancePlanCode: resolveInsurancePlanField(reservation, 'code'),
+          insurancePlanName: resolveInsurancePlanField(reservation, 'name'),
+          insurancePlanRate: resolveInsurancePlanField(reservation, 'rate'),
           notes: reservation.notes
         }
       });

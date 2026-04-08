@@ -560,6 +560,36 @@ export const settingsService = {
     return payload;
   },
 
+  async getPrecheckinDiscount(scope = {}) {
+    const row = await prisma.appSetting.findUnique({ where: { key: scopedKey('precheckinDiscount', scope) } });
+    if (!row?.value) return { enabled: false, type: 'PERCENTAGE', value: 0 };
+    try {
+      const parsed = JSON.parse(row.value);
+      return {
+        enabled: !!parsed?.enabled,
+        type: String(parsed?.type || 'PERCENTAGE').toUpperCase() === 'FIXED' ? 'FIXED' : 'PERCENTAGE',
+        value: Number(parsed?.value || 0)
+      };
+    } catch {
+      return { enabled: false, type: 'PERCENTAGE', value: 0 };
+    }
+  },
+
+  async updatePrecheckinDiscount(payload = {}, scope = {}) {
+    const next = {
+      enabled: !!payload?.enabled,
+      type: String(payload?.type || 'PERCENTAGE').toUpperCase() === 'FIXED' ? 'FIXED' : 'PERCENTAGE',
+      value: Math.max(0, Number(payload?.value || 0))
+    };
+    const key = scopedKey('precheckinDiscount', scope);
+    await prisma.appSetting.upsert({
+      where: { key },
+      create: { key, value: JSON.stringify(next) },
+      update: { value: JSON.stringify(next) }
+    });
+    return next;
+  },
+
   async getReservationOptions(scope = {}) {
     const row = await prisma.appSetting.findUnique({ where: { key: scopedKey('reservationOptions', scope) } });
     if (!row?.value) return { ...DEFAULT_RESERVATION_OPTIONS };

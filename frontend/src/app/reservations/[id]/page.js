@@ -732,15 +732,45 @@ function ReservationDetailInner({ token, me, logout }) {
     return Number((paymentRows || []).reduce((sum, payment) => sum + Number(payment?.amount || 0), 0).toFixed(2));
   }, [paymentRows]);
 
+  const precheckinInsuranceInfo = useMemo(() => {
+    const logs = Array.isArray(auditLogs) ? auditLogs : [];
+    for (const log of logs) {
+      const meta = parseAuditMetadata(log.metadata);
+      if (meta?.insuranceSelection) return meta.insuranceSelection;
+    }
+    return null;
+  }, [auditLogs]);
+
+  const precheckinThirdPartyInfo = useMemo(() => {
+    const logs = Array.isArray(auditLogs) ? auditLogs : [];
+    for (const log of logs) {
+      const meta = parseAuditMetadata(log.metadata);
+      if (meta?.thirdPartyBooking) return meta.thirdPartyBooking;
+    }
+    return null;
+  }, [auditLogs]);
+
+  const isOtaPrepaid = useMemo(() => {
+    const charges = Array.isArray(row?.charges) ? row.charges : [];
+    return charges.some((c) => c.source === 'OTA_PREPAID_VOUCHER');
+  }, [row]);
+
+  const hasCompanyInsurance = useMemo(() => {
+    const charges = Array.isArray(row?.charges) ? row.charges : [];
+    return charges.some((c) => c.source === 'INSURANCE' && c.selected);
+  }, [row]);
+
   const precheckinStatus = useMemo(() => {
     const customer = row?.customer || {};
+    const insuranceDocRequired = !hasCompanyInsurance;
     const items = [
       { label: 'Contact Info', done: !!(customer.firstName && customer.lastName && customer.email && customer.phone) },
       { label: 'Date of Birth', done: !!customer.dateOfBirth },
       { label: 'Driver License', done: !!(customer.licenseNumber && customer.licenseState) },
       { label: 'Address', done: !!(customer.address1 && customer.city && customer.state && customer.zip) },
       { label: 'ID / License Photo', done: !!customer.idPhotoUrl },
-      { label: 'Insurance Document', done: !!customer.insuranceDocumentUrl }
+      ...(insuranceDocRequired ? [{ label: 'Insurance Document', done: !!customer.insuranceDocumentUrl }] : []),
+      { label: 'Trip Protection', done: hasCompanyInsurance || !!(precheckinInsuranceInfo?.declinedCoverage && customer.insuranceDocumentUrl) }
     ];
     const completed = items.filter((item) => item.done).length;
     const missingItems = items.filter((item) => !item.done);
@@ -1518,6 +1548,7 @@ token
             ) : null}
             <button type="button" className="button-subtle" onClick={() => router.push(`/reservations/${id}/payments?total=${Number(effectiveChargeTotal || 0)}`)}>Payments</button>
             <button type="button" className="button-subtle" onClick={() => router.push(`/reservations/${id}/inspection`)}>Inspection</button>
+            <button type="button" className="button-subtle" style={{ background: 'rgba(22,163,74,.1)', borderColor: 'rgba(22,163,74,.2)', color: '#166534' }} onClick={() => window.open(`/reservations/${id}/customer-view`, `customer-view-${id}`, 'width=600,height=900,scrollbars=yes,resizable=yes')}>Customer View</button>
           </div>
         </div>
       </section>
@@ -1767,7 +1798,8 @@ token
               <div><span className="label">Staff Review</span><div>{precheckinStatus.isStaffReviewed ? 'Reviewed' : 'Pending review'}</div></div>
               <div><span className="label">Reviewed By</span><div>{row?.customerInfoReviewedByUser?.fullName || row?.customerInfoReviewedByUser?.email || '-'}</div></div>
               <div><span className="label">ID / License Photo</span><div>{row?.customer?.idPhotoUrl ? 'Uploaded' : 'Missing'}</div></div>
-              <div><span className="label">Insurance Doc</span><div>{row?.customer?.insuranceDocumentUrl ? 'Uploaded' : 'Missing'}</div></div>
+              <div><span className="label">Insurance Doc</span><div>{row?.customer?.insuranceDocumentUrl ? 'Uploaded' : (hasCompanyInsurance ? 'N/A (Company plan)' : 'Missing')}</div></div>
+              <div><span className="label">Trip Protection</span><div>{hasCompanyInsurance ? 'Company Plan' : precheckinInsuranceInfo?.declinedCoverage ? 'Declined — Own Insurance' : 'Not Selected'}</div></div>
               <div><span className="label">Ready By</span><div>{row?.readyForPickupByUser?.fullName || row?.readyForPickupByUser?.email || '-'}</div></div>
               <div><span className="label">Override Note</span><div>{row?.readyForPickupOverrideNote || '-'}</div></div>
             </div>
@@ -1818,6 +1850,59 @@ token
                 ))}
               </tbody>
             </table>
+            {isOtaPrepaid && (
+              <div className="surface-note" style={{ marginTop: 12, background: 'rgba(245,158,11,0.08)', borderColor: 'rgba(245,158,11,0.22)' }}>
+                <div style={{ fontWeight: 700, marginBottom: 6, color: '#92400e' }}>OTA / Third-Party Prepaid Booking</div>
+                <div style={{ fontSize: '0.88rem', color: '#78716c', lineHeight: 1.6 }}>
+                  Customer indicated this reservation was booked through a third-party website. Daily rate, taxes, and standard fees were removed. Only add-on services and insurance apply.
+                </div>
+                {precheckinThirdPartyInfo?.voucherUrl && (
+                  <div style={{ marginTop: 8, display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <span style={{ fontWeight: 700, fontSize: '0.85rem', color: '#92400e' }}>Voucher:</span>
+                    <a href={precheckinThirdPartyInfo.voucherUrl} target="_blank" rel="noreferrer" style={{ color: '#6e49ff', fontWeight: 700, fontSize: '0.85rem' }}>
+                      View uploaded voucher
+                    </a>
+                  </div>
+                )}
+                {canManagePrecheckin && (
+                  <div style={{ marginTop: 8, fontSize: '0.84rem', color: '#6b7a9a' }}>
+                    To override: re-add the daily rate in the Pricing section above if this is not actually a prepaid OTA booking.
+                  </div>
+                )}
+              </div>
+            )}
+            {precheckinInsuranceInfo?.declinedCoverage && (
+              <div className="surface-note" style={{ marginTop: 12, background: 'rgba(220,38,38,0.06)', borderColor: 'rgba(220,38,38,0.18)' }}>
+                <div style={{ fontWeight: 700, marginBottom: 8, color: '#991b1b' }}>Insurance Declined — Customer Using Own Coverage</div>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 8 }}>
+                  <div><span className="label">Deny Coverage Initials</span><div style={{ fontWeight: 800, fontSize: '1.1rem', letterSpacing: '.04em' }}>{precheckinInsuranceInfo.denyInitials || '—'}</div></div>
+                  <div><span className="label">Responsibility Initials</span><div style={{ fontWeight: 800, fontSize: '1.1rem', letterSpacing: '.04em' }}>{precheckinInsuranceInfo.responsibilityInitials || '—'}</div></div>
+                  <div><span className="label">Charge Authorization Initials</span><div style={{ fontWeight: 800, fontSize: '1.1rem', letterSpacing: '.04em' }}>{precheckinInsuranceInfo.chargeInitials || '—'}</div></div>
+                  <div><span className="label">Own Policy Number</span><div>{precheckinInsuranceInfo.ownPolicyNumber || row?.customer?.insurancePolicyNumber || '—'}</div></div>
+                </div>
+                <div style={{ marginTop: 8, fontSize: '0.85rem', color: '#7f1d1d', lineHeight: 1.5 }}>
+                  Customer acknowledged: (1) declining company coverage, (2) accepting 100% financial responsibility, (3) authorizing card-on-file charges for any damage.
+                  {canManagePrecheckin && (
+                    <span style={{ display: 'block', marginTop: 6, color: '#6b7a9a' }}>
+                      To override: select a company insurance plan in the Pricing section above. This replaces the customer&apos;s decline choice.
+                    </span>
+                  )}
+                </div>
+              </div>
+            )}
+            {hasCompanyInsurance && (
+              <div className="surface-note" style={{ marginTop: 12, background: 'rgba(22,163,74,0.06)', borderColor: 'rgba(22,163,74,0.18)' }}>
+                <div style={{ fontWeight: 700, color: '#166534' }}>Company Insurance Plan Selected</div>
+                <div style={{ fontSize: '0.88rem', color: '#55456f', marginTop: 4 }}>
+                  Customer selected a company protection plan during pre-check-in. Insurance document upload was not required.
+                  {canManagePrecheckin && (
+                    <span style={{ display: 'block', marginTop: 4, color: '#6b7a9a' }}>
+                      To change: update the insurance plan in the Pricing section above, or clear it to require the customer&apos;s own insurance.
+                    </span>
+                  )}
+                </div>
+              </div>
+            )}
           </div>
 
           <div className="ios-actions-wrap" style={{ marginTop: 12 }}>
@@ -1832,6 +1917,13 @@ token
                   <button className="ios-action-btn" onClick={() => router.push(`/reservations/${id}/ops-view?section=checkin`)}>View Check-in</button>
                   <button className="ios-action-btn" onClick={() => setStatus('NO_SHOW')}>Mark No Show</button>
                   <button className="ios-action-btn" onClick={() => setStatus('CANCELLED')}>Cancel Reservation</button>
+                </div>
+              </section>
+
+              <section className="ios-action-card">
+                <div className="ios-action-head">Customer Experience</div>
+                <div className="ios-action-list">
+                  <button className="ios-action-btn" style={{ background: 'rgba(22,163,74,.08)', color: '#166534', fontWeight: 800 }} onClick={() => window.open(`/reservations/${id}/customer-view`, `customer-view-${id}`, 'width=600,height=900,scrollbars=yes,resizable=yes')}>Open Customer View</button>
                 </div>
               </section>
 

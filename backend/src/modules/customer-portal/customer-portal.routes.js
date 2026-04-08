@@ -1221,10 +1221,34 @@ customerPortalRouter.get('/customer-info/:token', async (req, res, next) => {
     const reservation = await findReservationByToken('customer-info', token);
     if (!reservation) return res.status(404).json({ error: 'Invalid or expired customer info token' });
 
+    // Load insurance plans and additional services for this reservation's tenant
+    const tenantId = reservation.tenantId;
+    const [insurancePlans, precheckinDiscount] = await Promise.all([
+      tenantId ? settingsService.getInsurancePlans({ tenantId }) : [],
+      tenantId ? settingsService.getPrecheckinDiscount({ tenantId }) : { enabled: false, type: 'PERCENTAGE', value: 0 }
+    ]);
+    const additionalServices = tenantId
+      ? await prisma.additionalService.findMany({
+          where: { tenantId, isActive: true, displayOnline: true },
+          orderBy: { sortOrder: 'asc' },
+          select: { id: true, code: true, name: true, description: true, rate: true, chargeType: true, unitLabel: true, mandatory: true, taxable: true, defaultQty: true }
+        })
+      : [];
+
+    // Also load existing charges on the reservation
+    const existingCharges = await prisma.reservationCharge.findMany({
+      where: { reservationId: reservation.id },
+      select: { id: true, source: true, sourceRefId: true, name: true, rate: true, total: true, quantity: true, selected: true }
+    });
+
     res.json({
       reservation: serializeCustomerInfoReservation(reservation),
       expiresAt: reservation.customerInfoTokenExpiresAt,
-      portal: await buildPortalSummary(reservation, 'customer-info', token)
+      portal: await buildPortalSummary(reservation, 'customer-info', token),
+      insurancePlans: (insurancePlans || []).filter(p => p.isActive !== false),
+      additionalServices,
+      existingCharges,
+      precheckinDiscount: precheckinDiscount?.enabled ? precheckinDiscount : null
     });
   } catch (e) {
     next(e);
@@ -1244,6 +1268,8 @@ customerPortalRouter.post('/customer-info/:token', async (req, res, next) => {
     const lastName = String(body.lastName || '').trim();
     const email = String(body.email || '').trim().toLowerCase();
     const phone = String(body.phone || '').trim();
+    const insuranceSelection = body.insuranceSelection || null;
+    const customerSelectedOurInsurance = insuranceSelection?.selectedPlanCode && !insuranceSelection?.declinedCoverage;
     const requiredChecks = [
       ['firstName', firstName, 'First Name'],
       ['lastName', lastName, 'Last Name'],
@@ -1258,7 +1284,7 @@ customerPortalRouter.post('/customer-info/:token', async (req, res, next) => {
       ['zip', String(body.zip || '').trim(), 'ZIP'],
       ['country', String(body.country || '').trim(), 'Country'],
       ['idPhotoUrl', String(body.idPhotoUrl || '').trim(), 'ID / License Photo'],
-      ['insuranceDocumentUrl', String(body.insuranceDocumentUrl || '').trim(), 'Insurance Document']
+      ...(customerSelectedOurInsurance ? [] : [['insuranceDocumentUrl', String(body.insuranceDocumentUrl || '').trim(), 'Insurance Document']])
     ];
     const missing = requiredChecks.filter(([, value]) => !value).map(([, , label]) => label);
     if (missing.length) {
@@ -1287,6 +1313,129 @@ customerPortalRouter.post('/customer-info/:token', async (req, res, next) => {
       }
     });
 
+    // Load pre-checkin discount for this tenant
+    const discount = reservation.tenantId
+      ? await settingsService.getPrecheckinDiscount({ tenantId: reservation.tenantId })
+      : null;
+    const applyDiscount = (amount) => {
+      if (!discount?.enabled || !amount) return amount;
+      if (discount.type === 'PERCENTAGE') return Number((amount * (1 - discount.value / 100)).toFixed(2));
+      return Number(Math.max(0, amount - discount.value).toFixed(2));
+    };
+
+    // Process insurance selection
+    if (insuranceSelection) {
+      await prisma.reservationCharge.deleteMany({
+        where: { reservationId: reservation.id, source: 'INSURANCE' }
+      });
+
+      if (insuranceSelection.selectedPlanCode) {
+        const plans = reservation.tenantId ? await settingsService.getInsurancePlans({ tenantId: reservation.tenantId }) : [];
+        const plan = plans.find(p => String(p.code).toUpperCase() === String(insuranceSelection.selectedPlanCode).toUpperCase());
+        if (plan) {
+          const counterPrice = Number(plan.total || plan.amount || plan.rate || 0);
+          const discountedPrice = applyDiscount(counterPrice);
+          await prisma.reservationCharge.create({
+            data: {
+              reservationId: reservation.id,
+              source: 'INSURANCE',
+              sourceRefId: plan.code,
+              name: discountedPrice < counterPrice ? `${plan.name} (Pre-checkin rate)` : plan.name,
+              rate: discountedPrice,
+              total: discountedPrice,
+              quantity: 1,
+              selected: true,
+              sortOrder: 0,
+              notes: discountedPrice < counterPrice ? `Counter price: $${counterPrice.toFixed(2)}, pre-checkin discount applied` : null
+            }
+          });
+        }
+      }
+    }
+
+    // Process additional services selection
+    const selectedServices = body.selectedServices || null;
+    if (selectedServices && Array.isArray(selectedServices)) {
+      await prisma.reservationCharge.deleteMany({
+        where: { reservationId: reservation.id, source: 'ADDITIONAL_SERVICE_PRECHECKIN' }
+      });
+
+      for (const svc of selectedServices) {
+        if (!svc.serviceId || !svc.selected) continue;
+        const service = await prisma.additionalService.findFirst({
+          where: { id: svc.serviceId, tenantId: reservation.tenantId, isActive: true }
+        });
+        if (!service) continue;
+        const qty = Math.max(1, Number(svc.quantity || service.defaultQty || 1));
+        const counterRate = Number(service.rate || 0);
+        const discountedRate = applyDiscount(counterRate);
+        await prisma.reservationCharge.create({
+          data: {
+            reservationId: reservation.id,
+            source: 'ADDITIONAL_SERVICE_PRECHECKIN',
+            sourceRefId: service.id,
+            name: discountedRate < counterRate ? `${service.name} (Pre-checkin rate)` : service.name,
+            rate: discountedRate,
+            total: discountedRate * qty,
+            quantity: qty,
+            selected: true,
+            sortOrder: 10,
+            notes: discountedRate < counterRate ? `Counter price: $${counterRate.toFixed(2)}/unit, pre-checkin discount applied` : null
+          }
+        });
+      }
+    }
+
+    // Process third-party / OTA prepaid voucher
+    const thirdPartyBooking = body.thirdPartyBooking || null;
+    if (thirdPartyBooking?.isThirdParty) {
+      // Zero out daily-rate charges — customer prepaid through OTA
+      await prisma.reservationCharge.deleteMany({
+        where: { reservationId: reservation.id, source: { in: ['DAILY', 'TAX', 'FEE', 'SERVICE_LINKED_FEE'] } }
+      });
+
+      // Store a voucher charge marker so the agreement knows this is prepaid
+      const existingVoucher = await prisma.reservationCharge.findFirst({
+        where: { reservationId: reservation.id, source: 'OTA_PREPAID_VOUCHER' }
+      });
+      if (!existingVoucher) {
+        await prisma.reservationCharge.create({
+          data: {
+            reservationId: reservation.id,
+            source: 'OTA_PREPAID_VOUCHER',
+            sourceRefId: 'third-party-voucher',
+            name: 'Prepaid Third-Party Voucher',
+            chargeType: 'UNIT',
+            quantity: 1,
+            rate: 0,
+            total: 0,
+            taxable: false,
+            selected: true,
+            sortOrder: -1,
+            notes: thirdPartyBooking.voucherUrl ? 'Voucher document attached' : 'No voucher document uploaded'
+          }
+        });
+      }
+
+      // Update reservation notes/pricing snapshot to flag prepaid status
+      const currentNotes = reservation.notes || '';
+      const prepaidNote = '[OTA PREPAID] Customer indicated third-party prepaid booking during pre-check-in.';
+      if (!currentNotes.includes('[OTA PREPAID]')) {
+        await prisma.reservation.update({
+          where: { id: reservation.id },
+          data: { notes: currentNotes ? `${currentNotes}\n${prepaidNote}` : prepaidNote }
+        });
+      }
+
+      // Store voucher URL on the customer record
+      if (thirdPartyBooking.voucherUrl) {
+        await prisma.customer.update({
+          where: { id: reservation.customerId },
+          data: { notes: `[VOUCHER] Third-party voucher uploaded during pre-check-in` }
+        });
+      }
+    }
+
     const completedAt = new Date();
     await prisma.reservation.update({
       where: { id: reservation.id },
@@ -1304,7 +1453,10 @@ customerPortalRouter.post('/customer-info/:token', async (req, res, next) => {
           customerInfoCompleted: true,
           completedAt: completedAt.toISOString(),
           source: 'PUBLIC_PRECHECKIN',
-          ip: req.ip || null
+          ip: req.ip || null,
+          insuranceSelection: insuranceSelection || null,
+          selectedServices: selectedServices || null,
+          thirdPartyBooking: thirdPartyBooking || null
         })
       }
     });

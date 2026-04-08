@@ -194,10 +194,29 @@ export const vehiclesService = {
     return SUPPORTED_TELEMATICS_PROVIDERS.map((row) => ({ ...row }));
   },
 
-  list(scope = {}) {
+  list(scope = {}, { limit, offset, search } = {}) {
+    const take = Math.min(Number(limit) || 200, 500);
+    const skip = Math.max(Number(offset) || 0, 0);
+    const where = byTenantWhere(scope);
+    const searchTrim = String(search || '').trim();
+    const searchWhere = searchTrim
+      ? {
+          ...where,
+          OR: [
+            { internalNumber: { contains: searchTrim, mode: 'insensitive' } },
+            { plate: { contains: searchTrim, mode: 'insensitive' } },
+            { vin: { contains: searchTrim, mode: 'insensitive' } },
+            { make: { contains: searchTrim, mode: 'insensitive' } },
+            { model: { contains: searchTrim, mode: 'insensitive' } },
+          ]
+        }
+      : where;
+
     return prisma.vehicle.findMany({
-      where: byTenantWhere(scope),
+      where: searchWhere,
       orderBy: { createdAt: 'desc' },
+      take,
+      skip,
       select: {
         id: true,
         tenantId: true,
@@ -216,11 +235,12 @@ export const vehiclesService = {
         vehicleTypeId: true,
         homeLocationId: true,
         createdAt: true,
-        vehicleType: true,
-        homeLocation: true,
+        vehicleType: { select: { id: true, name: true } },
+        homeLocation: { select: { id: true, name: true, city: true, state: true } },
         availabilityBlocks: {
           where: { releasedAt: null },
           orderBy: [{ blockedFrom: 'asc' }, { availableFrom: 'asc' }],
+          take: 5,
           select: {
             id: true,
             blockType: true,

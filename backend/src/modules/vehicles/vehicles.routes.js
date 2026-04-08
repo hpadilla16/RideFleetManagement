@@ -129,7 +129,11 @@ publicVehicleTelematicsRouter.post('/zubie/:tenantId/webhook', publicTelematicsW
 });
 
 vehiclesRouter.get('/', async (_req, res) => {
-  res.json(await vehiclesService.list(scopeFor(_req)));
+  res.json(await vehiclesService.list(scopeFor(_req), {
+    limit: _req.query?.limit,
+    offset: _req.query?.offset,
+    search: _req.query?.search
+  }));
 });
 
 vehiclesRouter.get('/telematics/providers', async (_req, res) => {
