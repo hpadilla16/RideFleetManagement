@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { publicBookingService } from './public-booking.service.js';
 import { optionalNumber, optionalString, assertPlainObject } from '../../lib/request-validation.js';
 import { attachPublicRequestMeta, createOptionalIdempotencyGuard, createPublicRateLimitGuard } from '../../middleware/public-endpoint-guards.js';
+import { requireAuth } from '../../middleware/auth.js';
 
 export const publicBookingRouter = Router();
 
@@ -188,6 +189,15 @@ publicBookingRouter.post('/host-reviews/:token', bookingWriteGuard, async (req, 
     if (/invalid|expired|required|submitted|rating/i.test(String(error?.message || ''))) {
       return res.status(400).json({ error: error.message });
     }
+    next(error);
+  }
+});
+
+publicBookingRouter.get('/host-status', requireAuth, async (req, res, next) => {
+  try {
+    res.json(await publicBookingService.getHostStatus(req.user));
+  } catch (error) {
+    if (error?.status === 401) return res.status(401).json({ error: error.message });
     next(error);
   }
 });

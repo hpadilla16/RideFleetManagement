@@ -736,6 +736,25 @@ export const publicBookingService = {
       });
 
       const sessionUser = await authService.getSessionUser(userId);
+
+      // Send welcome email to the new host (non-blocking)
+      sendHostWelcomeEmail({
+        email,
+        displayName,
+        vehicle: [submission.year, submission.make, submission.model].filter(Boolean).join(' '),
+        tenantName: tenant.name
+      }).catch(() => {});
+
+      // Notify tenant admins about the new submission (non-blocking)
+      notifyTenantAdminsNewSubmission({
+        tenantId: tenant.id,
+        tenantName: tenant.name,
+        hostDisplayName: displayName,
+        hostEmail: email,
+        vehicle: [submission.year, submission.make, submission.model].filter(Boolean).join(' '),
+        submissionId: submission.id
+      }).catch(() => {});
+
       return {
         ok: true,
         token: registration.token,
@@ -838,5 +857,152 @@ export const publicBookingService = {
 
   async submitHostReview(token, input = {}) {
     return hostReviewsService.submitPublicReview(token, input);
+  },
+
+  async getHostStatus(user) {
+    if (!user?.id) throw Object.assign(new Error('Unauthorized'), { status: 401 });
+
+    const hostProfile = await prisma.hostProfile.findFirst({
+      where: { userId: user.id },
+      select: { id: true, displayName: true, email: true, phone: true, status: true, tenantId: true }
+    });
+
+    if (!hostProfile) {
+      return { hostProfile: null, submissions: [] };
+    }
+
+    const submissions = await prisma.hostVehicleSubmission.findMany({
+      where: { hostProfileId: hostProfile.id, tenantId: hostProfile.tenantId },
+      include: {
+        vehicleType: { select: { id: true, name: true } },
+        preferredLocation: { select: { id: true, name: true, city: true, state: true } },
+        communications: { orderBy: [{ createdAt: 'desc' }], take: 20 }
+      },
+      orderBy: [{ createdAt: 'desc' }],
+      take: 10
+    });
+
+    return {
+      hostProfile: {
+        id: hostProfile.id,
+        displayName: hostProfile.displayName,
+        email: hostProfile.email,
+        phone: hostProfile.phone,
+        status: hostProfile.status
+      },
+      submissions: submissions.map((sub) => ({
+        id: sub.id,
+        status: sub.status,
+        year: sub.year,
+        make: sub.make,
+        model: sub.model,
+        color: sub.color,
+        plate: sub.plate,
+        baseDailyRate: sub.baseDailyRate,
+        reviewNotes: sub.reviewNotes,
+        createdAt: sub.createdAt,
+        updatedAt: sub.updatedAt,
+        vehicleType: sub.vehicleType,
+        preferredLocation: sub.preferredLocation,
+        communications: (sub.communications || []).map((c) => ({
+          id: c.id,
+          direction: c.direction,
+          channel: c.channel,
+          subject: c.subject,
+          message: c.message,
+          createdAt: c.createdAt,
+          respondedAt: c.respondedAt
+        }))
+      }))
+    };
   }
 };
+
+async function sendHostWelcomeEmail({ email, displayName, vehicle, tenantName }) {
+  if (!email) return;
+  const subject = `Welcome to ${tenantName || 'Ride Fleet'} — your host account is ready`;
+  const text = [
+    `Hello ${displayName || 'Host'},`,
+    '',
+    `Your host account has been created on ${tenantName || 'Ride Fleet'}.`,
+    '',
+    vehicle ? `Vehicle submitted: ${vehicle}` : '',
+    'Your vehicle submission is now pending review. Our team typically reviews new vehicles within 48 hours.',
+    '',
+    'What happens next:',
+    '1. Our review team checks your vehicle details and documents',
+    '2. You\'ll receive an email when your vehicle is approved (or if we need more info)',
+    '3. Once approved, your listing goes live and guests can start booking',
+    '',
+    'You can check your submission status anytime by signing in at the car sharing website.',
+    '',
+    'Thank you for hosting with us!',
+    `— The ${tenantName || 'Ride Fleet'} Team`
+  ].filter(Boolean).join('\n');
+
+  const html = `
+    <div style="font-family:Arial,sans-serif;font-size:14px;line-height:1.6;color:#111;max-width:560px">
+      <div style="padding:24px 28px;border-radius:16px;background:linear-gradient(135deg,#f5f0ff,#faf7ff);border:1px solid #e6dfff">
+        <h1 style="margin:0 0 16px;font-size:22px;color:#1a1230">Welcome, ${(displayName || 'Host').replace(/</g, '&lt;')}!</h1>
+        <p>Your host account on <strong>${(tenantName || 'Ride Fleet').replace(/</g, '&lt;')}</strong> has been created.</p>
+        ${vehicle ? `<p style="margin:12px 0;padding:10px 14px;border-radius:10px;background:#fff;border:1px solid #e6dfff"><strong>Vehicle submitted:</strong> ${vehicle.replace(/</g, '&lt;')}</p>` : ''}
+        <p>Your submission is now <strong>pending review</strong>. We typically review within 48 hours.</p>
+        <h3 style="margin:20px 0 10px;font-size:16px;color:#1a1230">What happens next</h3>
+        <ol style="margin:0;padding-left:20px">
+          <li>Our team reviews your details and documents</li>
+          <li>You'll get an email when approved or if we need more info</li>
+          <li>Once approved, your listing goes live</li>
+        </ol>
+        <p style="margin-top:20px;font-size:13px;color:#6f668f">Thank you for hosting with us!</p>
+      </div>
+    </div>
+  `;
+
+  return sendEmail({ to: email, subject, text, html });
+}
+
+async function notifyTenantAdminsNewSubmission({ tenantId, tenantName, hostDisplayName, hostEmail, vehicle, submissionId }) {
+  if (!tenantId) return;
+
+  // Get tenant-scoped admins/ops AND platform super admins
+  const [tenantAdmins, superAdmins] = await Promise.all([
+    prisma.user.findMany({
+      where: { tenantId, role: { in: ['ADMIN', 'OPS'] }, isActive: true },
+      select: { email: true }
+    }),
+    prisma.user.findMany({
+      where: { role: 'SUPER_ADMIN', isActive: true },
+      select: { email: true }
+    })
+  ]);
+
+  const adminEmails = [...new Set([...tenantAdmins, ...superAdmins].map((a) => a.email).filter(Boolean))];
+  if (!adminEmails.length) return;
+
+  const subject = `New host vehicle submission: ${vehicle || 'Vehicle'} from ${hostDisplayName || hostEmail || 'New host'}`;
+  const text = [
+    `A new host vehicle submission has been received on ${tenantName || 'Ride Fleet'}.`,
+    '',
+    `Host: ${hostDisplayName || '-'} (${hostEmail || '-'})`,
+    `Vehicle: ${vehicle || '-'}`,
+    `Submission ID: ${submissionId || '-'}`,
+    '',
+    'This submission is pending review. Log in to the Ride Fleet admin dashboard to review and approve.',
+    '',
+    `— ${tenantName || 'Ride Fleet'} notifications`
+  ].join('\n');
+
+  const html = `
+    <div style="font-family:Arial,sans-serif;font-size:14px;line-height:1.6;color:#111;max-width:560px">
+      <div style="padding:20px 24px;border-radius:14px;background:#fffbeb;border:1px solid #fde68a">
+        <h2 style="margin:0 0 12px;font-size:18px;color:#92400e">New Host Vehicle Submission</h2>
+        <p style="margin:0 0 8px"><strong>Host:</strong> ${(hostDisplayName || '-').replace(/</g, '&lt;')} (${(hostEmail || '-').replace(/</g, '&lt;')})</p>
+        <p style="margin:0 0 8px"><strong>Vehicle:</strong> ${(vehicle || '-').replace(/</g, '&lt;')}</p>
+        <p style="margin:0 0 8px"><strong>Status:</strong> Pending Review</p>
+        <p style="margin:16px 0 0;font-size:13px;color:#78716c">Log in to the admin dashboard to review this submission.</p>
+      </div>
+    </div>
+  `;
+
+  return sendEmail({ to: adminEmails.join(','), subject, text, html });
+}
