@@ -384,6 +384,8 @@ function normalizeInsurancePlan(p = {}) {
     name: p.name || '',
     label: p.label || p.name || '',
     description: p.description || '',
+    displayDescription: p.displayDescription || '',
+    displayPriority: Number(p.displayPriority || 0),
     chargeBy: p.chargeBy || p.mode || 'FIXED',
     amount: Number(p.amount || 0),
     commissionValueType: p.commissionValueType || '',
@@ -1359,6 +1361,8 @@ function SettingsInner({ token, me, logout }) {
       name: insuranceForm.name,
       label: insuranceForm.label || insuranceForm.name,
       description: insuranceForm.description || '',
+      displayDescription: insuranceForm.displayDescription || '',
+      displayPriority: Number(insuranceForm.displayPriority || 0),
       chargeBy: insuranceForm.chargeBy,
       amount: Number(insuranceForm.amount || 0),
       commissionValueType: insuranceForm.commissionValueType || '',
@@ -3067,6 +3071,23 @@ function SettingsInner({ token, me, logout }) {
                 ) : <div />}
               </div>
 
+              <div>
+                <label className="label">Customer Display Description</label>
+                <textarea
+                  placeholder="Description shown to customers on the display screen (leave blank to use internal description)"
+                  value={insuranceForm.displayDescription}
+                  onChange={(e) => setInsuranceForm({ ...insuranceForm, displayDescription: e.target.value })}
+                  rows={2}
+                  style={{ width: '100%', resize: 'vertical' }}
+                />
+              </div>
+              <div className="grid2">
+                <div>
+                  <label className="label">Display Priority</label>
+                  <input type="number" min="0" max="100" placeholder="0 = auto" value={insuranceForm.displayPriority} onChange={(e) => setInsuranceForm({ ...insuranceForm, displayPriority: e.target.value })} />
+                  <div className="ui-muted" style={{ fontSize: '0.78rem', marginTop: 2 }}>Higher priority plans appear first on the customer display. 0 = automatic.</div>
+                </div>
+              </div>
               <label className="label"><input type="checkbox" checked={!!insuranceForm.isActive} onChange={(e) => setInsuranceForm({ ...insuranceForm, isActive: e.target.checked })} /> Active</label>
               <div style={{ display: 'flex', gap: 8 }}>
                 <button type="submit">{insuranceEditIdx >= 0 ? 'Update Insurance Plan' : 'Add Insurance Plan'}</button>

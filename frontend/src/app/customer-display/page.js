@@ -131,20 +131,29 @@ function buildRecommendations({ row, charges, insurancePlans, additionalServices
 
   // 1. Insurance — highest priority if missing
   if (!hasInsurance && insurancePlans.length > 0) {
-    // Pick the mid-tier plan (best value), or the first if only one
-    const sorted = [...insurancePlans].sort((a, b) => Number(a.amount || a.rate || 0) - Number(b.amount || b.rate || 0));
-    const pick = sorted.length >= 3 ? sorted[1] : sorted[0];
+    // Sort by tenant displayPriority (desc), then pick highest priority or mid-tier by price
+    const withPriority = [...insurancePlans].sort((a, b) => Number(b.displayPriority || 0) - Number(a.displayPriority || 0));
+    const topPriority = Number(withPriority[0]?.displayPriority || 0);
+    // If tenant set priorities, use the top one; otherwise pick mid-tier by price
+    let pick;
+    if (topPriority > 0) {
+      pick = withPriority[0];
+    } else {
+      const sorted = [...insurancePlans].sort((a, b) => Number(a.amount || a.rate || 0) - Number(b.amount || b.rate || 0));
+      pick = sorted.length >= 3 ? sorted[1] : sorted[0];
+    }
     const price = Number(pick.total || pick.amount || pick.rate || 0);
     const perDay = pick.chargeBy === 'PER_DAY';
     const dailyCost = perDay ? price : (tripDays > 0 ? Number((price / tripDays).toFixed(2)) : price);
+    const custDesc = pick.displayDescription || pick.description || null;
     recs.push({
-      type: 'insurance', priority: 10, item: pick,
+      type: 'insurance', priority: Math.max(Number(pick.displayPriority || 0), 10), item: pick,
       headline: pick.name || 'Trip Protection',
-      reason: dailyCost <= 25
+      reason: custDesc || (dailyCost <= 25
         ? `For just ${money(dailyCost)}/day, drive worry-free with full coverage`
-        : (pick.description || 'Protect yourself from unexpected costs during your rental'),
+        : 'Protect yourself from unexpected costs during your rental'),
       price, priceLabel: perDay ? '/day' : '',
-      cta: pick.description && dailyCost <= 25 ? pick.description : 'Your agent can add this in seconds',
+      cta: !custDesc && dailyCost <= 25 ? `For just ${money(dailyCost)}/day` : 'Your agent can add this in seconds',
     });
     // If multiple plans, note alternatives
     if (insurancePlans.length > 1) {
