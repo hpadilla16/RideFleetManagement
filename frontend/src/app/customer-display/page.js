@@ -169,12 +169,35 @@ function buildRecommendations({ row, charges, insurancePlans, additionalServices
 
   for (const svc of availableServices) {
     if (recs.length >= 4) break; // We'll cap at 3 later, but gather 4 candidates
-    const rate = Number(svc.rate || 0);
-    const unitLabel = svc.chargeType === 'UNIT' ? `/${svc.unitLabel || 'unit'}` : '/day';
+    // Pick the best rate for the trip duration
+    const flatRate = Number(svc.rate || 0);
+    const dailyRate = Number(svc.dailyRate || 0);
+    const weeklyRate = Number(svc.weeklyRate || 0);
+    const monthlyRate = Number(svc.monthlyRate || 0);
+    let rate = flatRate;
+    let unitLabel = svc.chargeType === 'UNIT' ? `/${svc.unitLabel || 'unit'}` : '/day';
+    if (dailyRate > 0) {
+      rate = dailyRate;
+      unitLabel = '/day';
+      // Show weekly rate if trip is 7+ days and it's cheaper
+      if (tripDays >= 7 && weeklyRate > 0 && weeklyRate < dailyRate * 7) {
+        rate = weeklyRate;
+        unitLabel = '/week';
+      }
+      // Show monthly rate if trip is 28+ days and it's cheaper
+      if (tripDays >= 28 && monthlyRate > 0 && monthlyRate < dailyRate * 28) {
+        rate = monthlyRate;
+        unitLabel = '/month';
+      }
+    } else if (flatRate <= 0 && weeklyRate > 0) {
+      rate = weeklyRate;
+      unitLabel = '/week';
+    }
     const customerDesc = svc.displayDescription || svc.description || null;
     const linkedFee = svc.linkedFee;
-    const totalWithFee = linkedFee ? rate + Number(linkedFee.amount || 0) : rate;
-    const feeNote = linkedFee ? `Includes ${linkedFee.name}${linkedFee.description ? ` \u2014 ${linkedFee.description}` : ''} (${money(linkedFee.amount)})` : null;
+    const feeAmount = Number(linkedFee?.amount || 0);
+    const totalWithFee = feeAmount > 0 ? rate + feeAmount : rate;
+    const feeNote = linkedFee && feeAmount > 0 ? `+ ${linkedFee.name} ${money(feeAmount)} one-time${linkedFee.description ? ` \u2014 ${linkedFee.description}` : ''}` : null;
 
     // If tenant set a displayPriority > 0, honor that as the base priority
     const tenantPriority = Number(svc.displayPriority || 0);
@@ -188,7 +211,7 @@ function buildRecommendations({ row, charges, insurancePlans, additionalServices
         reason: customerDesc || (isAirport
           ? 'Most travelers from the airport use toll roads \u2014 avoid surprise charges'
           : 'Covers electronic toll charges so you don\u2019t have to worry about cash or fines'),
-        price: totalWithFee, priceLabel: unitLabel,
+        price: rate, priceLabel: unitLabel,
         cta: feeNote,
       });
       continue;
@@ -203,7 +226,7 @@ function buildRecommendations({ row, charges, insurancePlans, additionalServices
         reason: customerDesc || (isAirport
           ? 'Navigate unfamiliar roads with confidence from day one'
           : 'Never miss a turn \u2014 built-in navigation for your trip'),
-        price: totalWithFee, priceLabel: unitLabel,
+        price: rate, priceLabel: unitLabel,
         cta: feeNote,
       });
       continue;
@@ -218,7 +241,7 @@ function buildRecommendations({ row, charges, insurancePlans, additionalServices
         reason: customerDesc || (tripDays >= 5
           ? `${tripDays}-day trip \u2014 peace of mind for longer adventures`
           : '24/7 help if you ever need it on the road'),
-        price: totalWithFee, priceLabel: unitLabel,
+        price: rate, priceLabel: unitLabel,
         cta: feeNote,
       });
       continue;
@@ -230,7 +253,7 @@ function buildRecommendations({ row, charges, insurancePlans, additionalServices
         type: 'service', priority: Math.max(tenantPriority, 3), item: svc,
         headline: svc.name,
         reason: customerDesc || 'Traveling with little ones? We have seats ready to install',
-        price: totalWithFee, priceLabel: unitLabel,
+        price: rate, priceLabel: unitLabel,
         cta: feeNote,
       });
       continue;
@@ -243,7 +266,7 @@ function buildRecommendations({ row, charges, insurancePlans, additionalServices
         type: 'service', priority: Math.max(tenantPriority, contextBoost), item: svc,
         headline: svc.name,
         reason: customerDesc || 'Stay connected on the go \u2014 great for navigation and streaming',
-        price: totalWithFee, priceLabel: unitLabel,
+        price: rate, priceLabel: unitLabel,
         cta: feeNote,
       });
       continue;
@@ -258,7 +281,7 @@ function buildRecommendations({ row, charges, insurancePlans, additionalServices
         reason: customerDesc || (isAirport
           ? 'Skip the gas station rush before your flight \u2014 return with any fuel level'
           : 'No need to refuel before returning \u2014 we handle it'),
-        price: totalWithFee, priceLabel: unitLabel,
+        price: rate, priceLabel: unitLabel,
         cta: feeNote,
       });
       continue;
@@ -270,7 +293,7 @@ function buildRecommendations({ row, charges, insurancePlans, additionalServices
         type: 'service', priority: Math.max(tenantPriority, 2), item: svc,
         headline: svc.name,
         reason: customerDesc || svc.name,
-        price: totalWithFee, priceLabel: unitLabel,
+        price: rate, priceLabel: unitLabel,
         cta: feeNote,
       });
     }
