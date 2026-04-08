@@ -107,11 +107,14 @@ function IdleScreen({ branding }) {
    ═══════════════════════════════════════════════════════════════════ */
 function buildRecommendations({ row, charges, insurancePlans, additionalServices }) {
   const recs = [];
-  const selectedServiceIds = new Set(
-    charges.filter(c => c.source === 'ADDITIONAL_SERVICE' || c.source === 'ADDITIONAL_SERVICE_PRECHECKIN').map(c => c.sourceRefId)
-  );
+  // Match selected services by sourceRefId OR by name (charges from pricing editor use source 'SERVICE' and name 'Service: XYZ')
+  const serviceSources = ['ADDITIONAL_SERVICE', 'ADDITIONAL_SERVICE_PRECHECKIN', 'SERVICE'];
+  const serviceCharges = charges.filter(c => serviceSources.includes(c.source));
+  const selectedServiceIds = new Set(serviceCharges.map(c => c.sourceRefId).filter(Boolean));
+  const selectedServiceNames = new Set(serviceCharges.map(c => String(c.name || '').replace(/^(Service:\s*|Fee:\s*)/i, '').trim().toLowerCase()).filter(Boolean));
+  const isServiceSelected = (svc) => selectedServiceIds.has(svc.id) || selectedServiceNames.has(String(svc.name || '').trim().toLowerCase());
   const hasInsurance = charges.some(c => c.source === 'INSURANCE');
-  const hasTolls = charges.some(c => c.coversTolls) || additionalServices.some(s => s.coversTolls && selectedServiceIds.has(s.id));
+  const hasTolls = charges.some(c => c.coversTolls) || additionalServices.some(s => s.coversTolls && isServiceSelected(s));
 
   // Trip context
   const pickup = row?.pickupAt ? new Date(row.pickupAt) : null;
@@ -164,7 +167,7 @@ function buildRecommendations({ row, charges, insurancePlans, additionalServices
   // 2. Smart service recommendations based on context
   // Sort by tenant-defined displayPriority (higher = more important), then sortOrder
   const availableServices = additionalServices
-    .filter(s => !selectedServiceIds.has(s.id) && !s.mandatory)
+    .filter(s => !isServiceSelected(s) && !s.mandatory)
     .sort((a, b) => (Number(b.displayPriority || 0)) - (Number(a.displayPriority || 0)) || (Number(a.sortOrder || 0)) - (Number(b.sortOrder || 0)));
 
   for (const svc of availableServices) {
@@ -467,56 +470,66 @@ function ActiveView({ data, branding }) {
       </div>
 
       {/* ── INCLUDED WITH YOUR TRIP ─────────────────────────────── */}
-      {/* Shows what the customer already has — reinforces good choices */}
-      {charges.filter(c => c.source !== 'OTA_PREPAID_VOUCHER').length > 0 && (
-        <div style={card}>
-          <div style={sectionTitle}>Included with Your Trip</div>
-          <div style={{ display: 'grid', gap: 6 }}>
-            {charges.filter(c => c.source !== 'OTA_PREPAID_VOUCHER').map((c, i) => {
-              const isProtection = c.source === 'INSURANCE';
-              const isAddon = c.source === 'ADDITIONAL_SERVICE' || c.source === 'ADDITIONAL_SERVICE_PRECHECKIN';
-              return (
-                <div key={c.id || i} style={{
-                  display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-                  fontSize: '0.9rem', padding: '6px 0',
-                  borderBottom: '1px solid rgba(110,73,255,.06)',
-                  color: isProtection ? '#166534' : isAddon ? '#0d9488' : '#53607b',
-                }}>
-                  <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                    {isProtection && <span style={{ fontSize: '0.85rem' }}>{'\uD83D\uDEE1\uFE0F'}</span>}
-                    {isAddon && <span style={{ fontSize: '0.85rem' }}>{'\u2713'}</span>}
-                    {c.name || 'Charge'}
-                  </span>
-                  <strong style={{ color: '#1a1230' }}>{money(c.total)}</strong>
+      {/* Compact view: hide $0 items and internal noise, show only meaningful charges */}
+      {(() => {
+        const hideSources = ['OTA_PREPAID_VOUCHER', 'SECURITY_DEPOSIT'];
+        const visibleCharges = charges.filter(c => !hideSources.includes(c.source) && Number(c.total || 0) > 0 && String(c.chargeType || '').toUpperCase() !== 'TAX');
+        const taxCharges = charges.filter(c => String(c.chargeType || '').toUpperCase() === 'TAX' && Number(c.total || 0) > 0);
+        const depositCharge = charges.find(c => c.source === 'SECURITY_DEPOSIT' && Number(c.total || 0) > 0);
+        const taxTotal = taxCharges.reduce((s, c) => s + Number(c.total || 0), 0);
+        const chargesSubtotal = visibleCharges.reduce((s, c) => s + Number(c.total || 0), 0);
+        if (visibleCharges.length === 0 && !isOtaPrepaid) return null;
+        return (
+          <div style={card}>
+            <div style={sectionTitle}>{isOtaPrepaid ? 'Your Add-ons' : 'Included with Your Trip'}</div>
+            {isOtaPrepaid && (
+              <div style={{ fontSize: '0.82rem', color: '#92400e', background: 'rgba(245,158,11,.06)', padding: '8px 12px', borderRadius: 10, marginBottom: 10, fontWeight: 600 }}>
+                Base rental prepaid {'\u2713'} \u2014 add-on charges shown below
+              </div>
+            )}
+            <div style={{ display: 'grid', gap: 4 }}>
+              {visibleCharges.map((c, i) => {
+                const isProtection = c.source === 'INSURANCE';
+                const isService = ['ADDITIONAL_SERVICE', 'ADDITIONAL_SERVICE_PRECHECKIN', 'SERVICE'].includes(c.source);
+                return (
+                  <div key={c.id || i} style={{
+                    display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                    fontSize: '0.88rem', padding: '4px 0',
+                    color: isProtection ? '#166534' : isService ? '#0d9488' : '#53607b',
+                  }}>
+                    <span>{c.name || 'Charge'}</span>
+                    <strong style={{ color: '#1a1230' }}>{money(c.total)}</strong>
+                  </div>
+                );
+              })}
+              {taxTotal > 0 && (
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.82rem', color: '#6b7a9a', padding: '2px 0' }}>
+                  <span>Tax</span><span>{money(taxTotal)}</span>
                 </div>
-              );
-            })}
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', paddingTop: 10, borderTop: '2px solid rgba(110,73,255,.12)' }}>
-              <span style={{ fontWeight: 800, color: '#1a1230' }}>Total</span>
-              <span style={{ fontWeight: 900, fontSize: '1.2rem', color: '#1a1230' }}>{money(agreementTotal)}</span>
+              )}
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', paddingTop: 8, marginTop: 4, borderTop: '2px solid rgba(110,73,255,.12)' }}>
+                <span style={{ fontWeight: 800, color: '#1a1230' }}>Total</span>
+                <span style={{ fontWeight: 900, fontSize: '1.15rem', color: '#1a1230' }}>{money(chargesSubtotal + taxTotal)}</span>
+              </div>
+              {depositCharge && (
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.82rem', color: '#6b7a9a', padding: '2px 0' }}>
+                  <span>Security Deposit (hold)</span><span>{money(depositCharge.total)}</span>
+                </div>
+              )}
+              {paidTotal > 0 && (
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.85rem', color: '#166534' }}>
+                  <span>Paid</span><strong>{money(paidTotal)}</strong>
+                </div>
+              )}
+              {balance > 0 && (
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.85rem', color: '#b45309' }}>
+                  <span>Balance Due</span><strong>{money(balance)}</strong>
+                </div>
+              )}
             </div>
-            {paidTotal > 0 && (
-              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.88rem', color: '#166534' }}>
-                <span>Paid</span><strong>{money(paidTotal)}</strong>
-              </div>
-            )}
-            {balance > 0 && (
-              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.88rem', color: '#b45309' }}>
-                <span>Remaining Balance</span><strong>{money(balance)}</strong>
-              </div>
-            )}
           </div>
-        </div>
-      )}
-
-      {isOtaPrepaid && (
-        <div style={{ ...card, background: 'rgba(245,158,11,.06)', borderColor: 'rgba(245,158,11,.2)' }}>
-          <div style={{ fontWeight: 800, color: '#92400e', marginBottom: 6 }}>Prepaid Booking</div>
-          <div style={{ fontSize: '0.88rem', color: '#78716c', lineHeight: 1.6 }}>
-            Your base rental is covered. Any add-on services selected below apply separately.
-          </div>
-        </div>
-      )}
+        );
+      })()}
 
       {/* ── RECOMMENDED FOR YOU ─────────────────────────────────── */}
       {/* Smart, contextual suggestions — max 3, never pushy */}
