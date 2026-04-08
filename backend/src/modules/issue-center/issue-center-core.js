@@ -1,7 +1,8 @@
 import crypto from 'node:crypto';
 import { prisma } from '../../lib/prisma.js';
 import { sendEmail } from '../../lib/mailer.js';
-export { money } from '../../lib/money.js';
+import { money } from '../../lib/money.js';
+export { money };
 
 export function tenantWhereFor(user) {
   const role = String(user?.role || '').toUpperCase();
