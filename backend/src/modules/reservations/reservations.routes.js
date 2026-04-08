@@ -203,6 +203,12 @@ reservationsRouter.get('/:id/display-data', async (req, res, next) => {
     const row = await reservationsService.getById(req.params.id, scope);
     if (!row) return res.status(404).json({ error: 'Reservation not found' });
     const tenantId = row.tenantId || scope.tenantId;
+    // Fetch reservation-level charges (not included by getById)
+    const reservationCharges = await prisma.reservationCharge.findMany({
+      where: { reservationId: row.id },
+      orderBy: [{ sortOrder: 'asc' }, { createdAt: 'asc' }]
+    });
+    row.charges = reservationCharges;
     const [insurancePlans, additionalServices, rentalSettings] = await Promise.all([
       tenantId ? settingsService.getInsurancePlans({ tenantId }) : [],
       tenantId ? prisma.additionalService.findMany({
