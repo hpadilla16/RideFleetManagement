@@ -711,7 +711,7 @@ tr:hover td { background: rgba(135,82,254,.05); }
   }
   .topbar-actions {
     display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
+    grid-template-columns: repeat(auto-fit, minmax(60px, 1fr));
     gap: 8px;
     width: 100%;
   }
@@ -1030,7 +1030,7 @@ label input[type="checkbox"],
   }
   .topbar-actions {
     display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
+    grid-template-columns: repeat(auto-fit, minmax(60px, 1fr));
     gap: 8px;
     width: 100%;
     margin-top: 2px;
