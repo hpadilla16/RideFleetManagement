@@ -1,7 +1,18 @@
 import { Router } from 'express';
 import { hostAppService } from './host-app.service.js';
+import { hostMessagingRouter } from '../messaging/messaging.routes.js';
 
 export const hostAppRouter = Router();
+
+// Attach host context for messaging sub-routes
+hostAppRouter.use('/messages', async (req, res, next) => {
+  try {
+    const access = await hostAppService.getAccess(req.user);
+    req.hostProfileId = access?.hostProfileId || null;
+    req.hostDisplayName = access?.hostDisplayName || '';
+    next();
+  } catch { next(); }
+}, hostMessagingRouter);
 
 hostAppRouter.get('/access', async (req, res, next) => {
   try {

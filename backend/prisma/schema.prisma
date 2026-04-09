@@ -395,6 +395,7 @@ model Tenant {
   plannerRuleSet PlannerRuleSet?
   plannerScenarios PlannerScenario[]
   plannerRecommendationAudits PlannerRecommendationAudit[]
+  conversations   Conversation[]
 }
 
 model Location {
@@ -596,6 +597,7 @@ model Customer {
   reservations    Reservation[]
   guestTrips      Trip[] @relation("TripGuestCustomer")
   hostReviews     HostReview[]
+  conversations   Conversation[]
 
   @@index([lastName, firstName])
   @@index([phone])
@@ -970,6 +972,7 @@ model HostProfile {
   payouts           TripPayout[]
   vehicleSubmissions HostVehicleSubmission[]
   reviews           HostReview[]
+  conversations     Conversation[] @relation("ConversationHost")
 
   @@index([tenantId, status])
   @@index([email])
@@ -1226,6 +1229,7 @@ model Trip {
   timelineEvents    TripTimelineEvent[]
   hostReview        HostReview?
   fulfillmentPlan   TripFulfillmentPlan?
+  conversations     Conversation[]
 
   @@index([tenantId, status, scheduledPickupAt])
   @@index([hostProfileId, status, scheduledPickupAt])
@@ -2050,4 +2054,40 @@ model TollAssignment {
 
   @@index([tenantId, reservationId, status])
   @@index([tollTransactionId, status])
+}
+
+model Conversation {
+  id              String    @id @default(cuid())
+  tenantId        String?
+  tenant          Tenant?   @relation(fields: [tenantId], references: [id])
+  tripId          String?
+  trip            Trip?     @relation(fields: [tripId], references: [id])
+  hostProfileId   String
+  hostProfile     HostProfile @relation("ConversationHost", fields: [hostProfileId], references: [id])
+  customerId      String
+  customer        Customer  @relation(fields: [customerId], references: [id])
+  subject         String?
+  lastMessageAt   DateTime?
+  lastMessageText String?
+  closedAt        DateTime?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+  messages        Message[]
+
+  @@index([hostProfileId, lastMessageAt])
+  @@index([customerId, lastMessageAt])
+  @@index([tripId])
+}
+
+model Message {
+  id              String       @id @default(cuid())
+  conversationId  String
+  conversation    Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  senderType      String       // 'GUEST' | 'HOST'
+  senderName      String?
+  body            String
+  readAt          DateTime?
+  createdAt       DateTime     @default(now())
+
+  @@index([conversationId, createdAt])
 }

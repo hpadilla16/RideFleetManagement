@@ -3,8 +3,11 @@ import { publicBookingService } from './public-booking.service.js';
 import { optionalNumber, optionalString, assertPlainObject } from '../../lib/request-validation.js';
 import { attachPublicRequestMeta, createOptionalIdempotencyGuard, createPublicRateLimitGuard } from '../../middleware/public-endpoint-guards.js';
 import { requireAuth } from '../../middleware/auth.js';
+import { guestMessagingRouter } from '../messaging/messaging.routes.js';
 
 export const publicBookingRouter = Router();
+
+publicBookingRouter.use('/messages', guestMessagingRouter);
 
 const bookingReadGuard = [
   attachPublicRequestMeta('public-booking-read'),
