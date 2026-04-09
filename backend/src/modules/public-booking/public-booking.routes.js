@@ -147,6 +147,19 @@ publicBookingRouter.get('/guest-signin/:token', bookingReadGuard, async (req, re
   }
 });
 
+publicBookingRouter.post('/guest-signin/verify', bookingWriteGuard, async (req, res, next) => {
+  try {
+    const token = req.body?.token;
+    if (!token) return res.status(400).json({ error: 'Token is required' });
+    res.json(await publicBookingService.getGuestSession(String(token)));
+  } catch (error) {
+    if (/invalid|expired|required|not found/i.test(String(error?.message || ''))) {
+      return res.status(400).json({ error: error.message });
+    }
+    next(error);
+  }
+});
+
 publicBookingRouter.post('/issues', bookingWriteGuard, async (req, res, next) => {
   try {
     assertPlainObject(req.body || {}, 'issue payload');
