@@ -1,5 +1,6 @@
 import './globals.css';
 import { SentryBoot } from '../components/SentryBoot';
+import { I18nBoot } from '../components/I18nBoot';
 
 export const metadata = {
   title: 'Ride Fleet',
@@ -42,6 +43,7 @@ export default function RootLayout({ children }) {
     <html lang="en" suppressHydrationWarning>
       <body>
         <SentryBoot />
+        <I18nBoot />
         <script dangerouslySetInnerHTML={{ __html: themeBootScript }} />
         {children}
       </body>

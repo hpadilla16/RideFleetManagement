@@ -5,25 +5,27 @@ import { usePathname } from 'next/navigation';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { API_BASE, TOKEN_KEY, USER_KEY, readStoredToken } from '../lib/client';
 import { isModuleEnabled, pathnameToModule } from '../lib/moduleAccess';
+import { useTranslation } from 'react-i18next';
+import { setLanguage } from '../lib/i18n';
 
 const NAV_ITEMS = [
-  { href: '/dashboard', label: 'Dashboard', moduleKey: 'dashboard' },
-  { href: '/reservations', label: 'Reservations', moduleKey: 'reservations' },
-  { href: '/vehicles', label: 'Vehicles', moduleKey: 'vehicles' },
-  { href: '/customers', label: 'Customers', moduleKey: 'customers' },
-  { href: '/people', label: 'People', adminOnly: true, moduleKey: 'people' },
-  { href: '/planner', label: 'Planner', moduleKey: 'planner' },
-  { href: '/reports', label: 'Reports', moduleKey: 'reports' },
-  { href: '/car-sharing', label: 'Car Sharing', feature: 'carSharing', moduleKey: 'carSharing' },
-  { href: '/host', label: 'Host App', feature: 'carSharing', moduleKey: 'hostApp' },
-  { href: '/employee', label: 'Employee App', moduleKey: 'employeeApp' },
-  { href: '/issues', label: 'Issue Center', moduleKey: 'issueCenter' },
-  { href: '/loaner', label: 'Loaner Program', feature: 'dealershipLoaner', moduleKey: 'loaner' },
-  { href: '/tolls', label: 'Tolls', moduleKey: 'tolls' },
-  { href: '/knowledge-base', label: 'Knowledge Base' },
-  { href: '/settings', label: 'Settings', moduleKey: 'settings' },
-  { href: '/tenants', label: 'Tenants', superOnly: true, moduleKey: 'tenants' },
-  { href: '/settings/security', label: 'Security', adminOnly: true, moduleKey: 'security' }
+  { href: '/dashboard', labelKey: 'nav.dashboard', moduleKey: 'dashboard' },
+  { href: '/reservations', labelKey: 'nav.reservations', moduleKey: 'reservations' },
+  { href: '/vehicles', labelKey: 'nav.vehicles', moduleKey: 'vehicles' },
+  { href: '/customers', labelKey: 'nav.customers', moduleKey: 'customers' },
+  { href: '/people', labelKey: 'nav.people', adminOnly: true, moduleKey: 'people' },
+  { href: '/planner', labelKey: 'nav.planner', moduleKey: 'planner' },
+  { href: '/reports', labelKey: 'nav.reports', moduleKey: 'reports' },
+  { href: '/car-sharing', labelKey: 'nav.carSharing', feature: 'carSharing', moduleKey: 'carSharing' },
+  { href: '/host', labelKey: 'nav.hostApp', feature: 'carSharing', moduleKey: 'hostApp' },
+  { href: '/employee', labelKey: 'nav.employeeApp', moduleKey: 'employeeApp' },
+  { href: '/issues', labelKey: 'nav.issueCenter', moduleKey: 'issueCenter' },
+  { href: '/loaner', labelKey: 'nav.loaner', feature: 'dealershipLoaner', moduleKey: 'loaner' },
+  { href: '/tolls', labelKey: 'nav.tolls', moduleKey: 'tolls' },
+  { href: '/knowledge-base', labelKey: 'nav.knowledgeBase' },
+  { href: '/settings', labelKey: 'nav.settings', moduleKey: 'settings' },
+  { href: '/tenants', labelKey: 'nav.tenants', superOnly: true, moduleKey: 'tenants' },
+  { href: '/settings/security', labelKey: 'nav.security', adminOnly: true, moduleKey: 'security' }
 ];
 
 const IDLE_LOCK_MS = 2 * 60 * 1000;
@@ -37,6 +39,7 @@ function formatTime(d) {
 }
 
 export function AppShell({ me, logout, children }) {
+  const { t, i18n } = useTranslation();
   const pathname = usePathname();
   const [mobileOpen, setMobileOpen] = useState(false);
   const [darkMode, setDarkMode] = useState(() => {
@@ -240,7 +243,7 @@ export function AppShell({ me, logout, children }) {
             .map((item) => (
               item.disabled ? (
                 <span key={item.href} className="nav-link" style={{ opacity: 0.55, cursor: 'not-allowed' }}>
-                  <span className="nav-label">{item.label}</span>
+                  <span className="nav-label">{t(item.labelKey)}</span>
                 </span>
               ) : (
                 <Link
@@ -249,7 +252,7 @@ export function AppShell({ me, logout, children }) {
                   className={`nav-link ${pathname?.startsWith(item.href) ? 'active' : ''}`}
                   onClick={() => setMobileOpen(false)}
                 >
-                  <span className="nav-label">{item.label}</span>
+                  <span className="nav-label">{t(item.labelKey)}</span>
                 </Link>
               )
             ))}
@@ -276,11 +279,12 @@ export function AppShell({ me, logout, children }) {
           </div>
 
           <div className="topbar-actions">
-            {canReturnSuper ? <button className="button-subtle topbar-action-btn topbar-action-wide" title="Return to Super Admin" onClick={returnToSuperAdmin}>Return</button> : null}
+            {canReturnSuper ? <button className="button-subtle topbar-action-btn topbar-action-wide" title={t('topbar.returnToSuperAdmin')} onClick={returnToSuperAdmin}>Return</button> : null}
             <button className="button-subtle topbar-action-btn" title="Open Customer Display on second screen" style={{ background: 'rgba(22,163,74,.1)', borderColor: 'rgba(22,163,74,.2)', color: '#166534' }} onClick={() => window.open('/customer-display', 'customer-display', 'width=600,height=900,scrollbars=yes,resizable=yes')}>Display</button>
-            <button className="button-subtle topbar-action-btn" title="Toggle dark mode" onClick={() => setDarkMode((v) => !v)}>{darkMode ? 'Light' : 'Dark'}</button>
-            <button className="button-subtle topbar-action-btn" title="Lock screen" onClick={lockNow}>Lock</button>
-            <button className="topbar-action-btn" onClick={logout}>Logout</button>
+            <button className="button-subtle topbar-action-btn" onClick={() => setLanguage(i18n.language === 'es' ? 'en' : 'es')} style={{ fontWeight: 700, letterSpacing: '.03em' }}>{i18n.language === 'es' ? 'EN' : 'ES'}</button>
+            <button className="button-subtle topbar-action-btn" title="Toggle dark mode" onClick={() => setDarkMode((v) => !v)}>{darkMode ? t('topbar.light') : t('topbar.dark')}</button>
+            <button className="button-subtle topbar-action-btn" title={t('topbar.lock')} onClick={lockNow}>{t('topbar.lock')}</button>
+            <button className="topbar-action-btn" onClick={logout}>{t('topbar.logout')}</button>
           </div>
         </div>
 
@@ -316,29 +320,29 @@ export function AppShell({ me, logout, children }) {
             <div className="screenlock-user">{me?.fullName || me?.name || me?.email || 'User'}</div>
 
             <div className="screenlock-card glass card">
-              <h3 style={{ marginBottom: 8 }}>Screen Locked</h3>
+              <h3 style={{ marginBottom: 8 }}>{t('lockScreen.screenLocked')}</h3>
               {hasPin ? (
                 <input
                   type="password"
-                  placeholder="Enter PIN"
+                  placeholder={t('lockScreen.enterPin')}
                   value={pinInput}
                   onChange={(e) => setPinInput(e.target.value)}
                   onKeyDown={(e) => { if (e.key === 'Enter') unlock(); }}
                 />
               ) : (
                 <div className="stack">
-                  <div className="label" style={{ textTransform: 'none', letterSpacing: 0, fontSize: 12 }}>Set your unlock PIN (first time).</div>
-                  <input type="password" placeholder="New PIN (min 4 digits)" value={newPin} onChange={(e) => setNewPin(e.target.value)} />
-                  <input type="password" placeholder="Confirm PIN" value={newPin2} onChange={(e) => setNewPin2(e.target.value)} />
+                  <div className="label" style={{ textTransform: 'none', letterSpacing: 0, fontSize: 12 }}>{t('lockScreen.setPin')}</div>
+                  <input type="password" placeholder={t('lockScreen.newPin')} value={newPin} onChange={(e) => setNewPin(e.target.value)} />
+                  <input type="password" placeholder={t('lockScreen.confirmPin')} value={newPin2} onChange={(e) => setNewPin2(e.target.value)} />
                 </div>
               )}
 
               {lockMsg ? <div className="label" style={{ marginTop: 8, color: '#fca5a5' }}>{lockMsg}</div> : null}
 
               <div style={{ display: 'flex', gap: 8, marginTop: 10, flexWrap: 'wrap' }}>
-                <button onClick={unlock}>Unlock</button>
+                <button onClick={unlock}>{t('lockScreen.unlock')}</button>
                 <button className="button-subtle" onClick={resetMyPin}>Reset PIN</button>
-                <button className="button-subtle" onClick={logout}>Logout</button>
+                <button className="button-subtle" onClick={logout}>{t('topbar.logout')}</button>
               </div>
             </div>
           </div>
