@@ -1,6 +1,7 @@
 import crypto from 'crypto';
 import { prisma } from '../../lib/prisma.js';
 import { sendEmail } from '../../lib/mailer.js';
+import { broadcastToConversation } from './chat-events.js';
 
 const CHAT_TOKEN_EXPIRY_DAYS = 14;
 const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL || 'https://ride-carsharing.com';
@@ -131,6 +132,9 @@ async function addSystemMessage(conversationId, body) {
     where: { id: conversationId },
     data: { lastMessageAt: new Date(), lastMessageText: body.slice(0, 200) }
   });
+  broadcastToConversation(conversationId, 'message', {
+    id: msg.id, senderType: 'SYSTEM', senderName: 'Ride', body: msg.body, messageType: 'SYSTEM', createdAt: msg.createdAt
+  });
   return msg;
 }
 
@@ -218,7 +222,9 @@ export const tripChatService = {
       })
     ]);
 
-    return { id: msg.id, senderType: role, senderName, body: msg.body, messageType: 'TEXT', createdAt: msg.createdAt };
+    const result = { id: msg.id, senderType: role, senderName, body: msg.body, messageType: 'TEXT', createdAt: msg.createdAt };
+    broadcastToConversation(conv.id, 'message', result, role);
+    return result;
   },
 
   /**
@@ -338,7 +344,9 @@ export const tripChatService = {
       }).catch(() => {});
     }
 
-    return { id: msg.id, senderType: role, senderName, body: msg.body, messageType: 'TEXT', createdAt: msg.createdAt };
+    const actionResult = { id: msg.id, senderType: role, senderName, body: msg.body, messageType: 'TEXT', createdAt: msg.createdAt };
+    broadcastToConversation(conv.id, 'message', actionResult, role);
+    return actionResult;
   },
 
   /**
@@ -441,5 +449,102 @@ export const tripChatService = {
       ticketRef: incident.id.slice(-6).toUpperCase(),
       message: `Issue ticket created. Reference: ${incident.id.slice(-6).toUpperCase()}`
     };
+  },
+
+  /**
+   * Get pre-built message templates for hosts.
+   */
+  getHostMessageTemplates() {
+    return [
+      { id: 'PICKUP_INSTRUCTIONS', label: 'Pickup Instructions', body: 'Hi! Here are the pickup details for your trip. Please arrive at the location shown above and look for the vehicle. Text me when you arrive!' },
+      { id: 'RETURN_REMINDER', label: 'Return Reminder', body: 'Hi! Just a reminder that your trip ends soon. Please return the vehicle to the same location and ensure the tank is at the same level as pickup. Thanks!' },
+      { id: 'FUEL_REMINDER', label: 'Fuel Reminder', body: 'Please make sure to refuel before returning the vehicle. The tank should be at the same level as when you picked up. Thank you!' },
+      { id: 'WELCOME', label: 'Welcome Message', body: 'Welcome! I hope you enjoy your trip. Feel free to reach out if you have any questions about the vehicle. Drive safe!' },
+      { id: 'LATE_RETURN', label: 'Late Return Notice', body: 'Hi, I noticed the return time has passed. Please let me know your status. Late returns may incur additional charges.' },
+      { id: 'CUSTOM_THANKS', label: 'Thank You', body: 'Thank you for taking great care of the vehicle! It was a pleasure hosting you. Please leave a review if you have a moment!' },
+    ];
+  },
+
+  /**
+   * Send a template message from host.
+   */
+  async sendTemplateMessage(token, { templateId, customBody }) {
+    const { conv, role, senderName } = await resolveTokenLight(token);
+    if (role !== 'HOST') throw new Error('Only hosts can use message templates');
+    if (conv.closedAt) throw new Error('This chat has been closed');
+
+    const templates = this.getHostMessageTemplates();
+    const template = templates.find((t) => t.id === templateId);
+    const body = customBody ? String(customBody).trim().slice(0, MAX_MESSAGE_LENGTH) : template?.body;
+    if (!body) throw new Error('Template not found or empty');
+
+    const now = new Date();
+    const [msg] = await prisma.$transaction([
+      prisma.message.create({
+        data: { conversationId: conv.id, senderType: 'HOST', senderName, body, messageType: 'TEXT' }
+      }),
+      prisma.conversation.update({
+        where: { id: conv.id },
+        data: { lastMessageAt: now, lastMessageText: body.slice(0, 200) }
+      })
+    ]);
+
+    const result = { id: msg.id, senderType: 'HOST', senderName, body: msg.body, messageType: 'TEXT', createdAt: msg.createdAt };
+    broadcastToConversation(conv.id, 'message', result, 'HOST');
+    return result;
+  },
+
+  /**
+   * Block conversation — closes chat and notifies the other party.
+   */
+  async blockConversation(token) {
+    const { conv, role } = await resolveTokenLight(token);
+    if (conv.closedAt) return { ok: true, alreadyClosed: true };
+
+    await prisma.conversation.update({
+      where: { id: conv.id },
+      data: { closedAt: new Date() }
+    });
+
+    const blocker = role === 'HOST' ? 'The host' : 'The guest';
+    await addSystemMessage(conv.id, `${blocker} has ended this conversation.`);
+
+    return { ok: true };
+  },
+
+  /**
+   * Send image/file message via token.
+   */
+  async sendImageMessage(token, { imageUrl, caption }) {
+    if (!imageUrl || !String(imageUrl).trim()) throw new Error('Image URL is required');
+    const cleanUrl = String(imageUrl).trim();
+    if (cleanUrl.length > 2000) throw new Error('Image URL too long');
+    const cleanCaption = String(caption || '').trim().slice(0, 500);
+
+    const { conv, role, senderName } = await resolveTokenLight(token);
+    if (conv.closedAt) throw new Error('This chat has been closed');
+
+    const body = cleanCaption ? `📷 ${cleanCaption}` : '📷 Shared an image';
+    const now = new Date();
+
+    const [msg] = await prisma.$transaction([
+      prisma.message.create({
+        data: {
+          conversationId: conv.id,
+          senderType: role,
+          senderName,
+          body: `${body}\n${cleanUrl}`,
+          messageType: 'IMAGE'
+        }
+      }),
+      prisma.conversation.update({
+        where: { id: conv.id },
+        data: { lastMessageAt: now, lastMessageText: body.slice(0, 200) }
+      })
+    ]);
+
+    const result = { id: msg.id, senderType: role, senderName, body: msg.body, messageType: 'IMAGE', createdAt: msg.createdAt };
+    broadcastToConversation(conv.id, 'message', result, role);
+    return result;
   }
 };
