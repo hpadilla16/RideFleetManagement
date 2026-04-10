@@ -2,24 +2,48 @@ import { Router } from 'express';
 import { authService } from './auth.service.js';
 import { isPublicRegisterEnabled } from './auth.config.js';
 import { isSuperAdmin, requireAuth, requireRole } from '../../middleware/auth.js';
+import { createPublicRateLimitGuard, attachPublicRequestMeta } from '../../middleware/public-endpoint-guards.js';
 
 export const authRouter = Router();
+
+const authRateLimit = [
+  attachPublicRequestMeta('auth'),
+  createPublicRateLimitGuard({ name: 'auth-login', maxRequests: 5, windowMs: 60 * 1000 })
+];
+const pinRateLimit = [
+  attachPublicRequestMeta('auth-pin'),
+  createPublicRateLimitGuard({ name: 'auth-pin', maxRequests: 5, windowMs: 60 * 1000 })
+];
+
+const PASSWORD_MIN_LENGTH = 12;
+const PASSWORD_REGEX = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[^a-zA-Z0-9]).{12,}$/;
+
+function validatePassword(password) {
+  if (!password || password.length < PASSWORD_MIN_LENGTH) {
+    return `Password must be at least ${PASSWORD_MIN_LENGTH} characters`;
+  }
+  if (!PASSWORD_REGEX.test(password)) {
+    return 'Password must include uppercase, lowercase, a number, and a special character';
+  }
+  return null;
+}
 
 function scopeFor(req) {
   if (isSuperAdmin(req.user)) return {};
   return { tenantId: req.user?.tenantId || null };
 }
 
-authRouter.post('/register', async (req, res) => {
+authRouter.post('/register', authRateLimit, async (req, res) => {
   try {
     if (!isPublicRegisterEnabled()) {
       return res.status(403).json({ error: 'Public registration is disabled' });
     }
-
     const { email, password, fullName } = req.body || {};
     if (!email || !password || !fullName) {
       return res.status(400).json({ error: 'email, password, and fullName are required' });
     }
+    const pwError = validatePassword(password);
+    if (pwError) return res.status(400).json({ error: pwError });
     const result = await authService.register({ email, password, fullName });
     res.status(201).json(result);
   } catch (e) {
@@ -27,7 +51,7 @@ authRouter.post('/register', async (req, res) => {
   }
 });
 
-authRouter.post('/login', async (req, res) => {
+authRouter.post('/login', authRateLimit, async (req, res) => {
   try {
     const { email, password } = req.body || {};
     if (!email || !password) return res.status(400).json({ error: 'email and password are required' });
@@ -72,7 +96,7 @@ authRouter.get('/lock-pin/status', requireAuth, async (req, res, next) => {
   }
 });
 
-authRouter.post('/lock-pin/set', requireAuth, async (req, res, next) => {
+authRouter.post('/lock-pin/set', requireAuth, pinRateLimit, async (req, res, next) => {
   try {
     res.json(await authService.setLockPin(req.user?.id, req.body?.pin, scopeFor(req)));
   } catch (e) {
@@ -82,7 +106,7 @@ authRouter.post('/lock-pin/set', requireAuth, async (req, res, next) => {
   }
 });
 
-authRouter.post('/lock-pin/verify', requireAuth, async (req, res, next) => {
+authRouter.post('/lock-pin/verify', requireAuth, pinRateLimit, async (req, res, next) => {
   try {
     res.json(await authService.verifyLockPin(req.user?.id, req.body?.pin, scopeFor(req)));
   } catch (e) {

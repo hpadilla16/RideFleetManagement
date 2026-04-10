@@ -1,5 +1,6 @@
 import express from 'express';
 import cors from 'cors';
+import compression from 'compression';
 import { reservationsRouter } from './modules/reservations/reservations.routes.js';
 import { customersRouter } from './modules/customers/customers.routes.js';
 import { publicVehicleTelematicsRouter, vehiclesRouter } from './modules/vehicles/vehicles.routes.js';
@@ -40,6 +41,7 @@ const app = express();
 const allowedOrigins = process.env.ALLOWED_ORIGINS
   ? process.env.ALLOWED_ORIGINS.split(',').map((o) => o.trim()).filter(Boolean)
   : ['http://localhost:3000', 'http://127.0.0.1:3000'];
+app.use(compression({ threshold: 1024 }));
 app.use(cors({ origin: allowedOrigins, credentials: true }));
 app.use(express.json({
   limit: '12mb',
