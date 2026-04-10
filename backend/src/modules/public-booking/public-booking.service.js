@@ -832,6 +832,26 @@ export const publicBookingService = {
 
     const bookings = [...deduped.values()].sort((a, b) => new Date(b.pickupAt).getTime() - new Date(a.pickupAt).getTime());
 
+    const customerIds = customers.map((c) => c.id);
+    const pendingReviews = await prisma.hostReview.findMany({
+      where: {
+        guestCustomerId: { in: customerIds },
+        status: 'REQUESTED',
+        publicToken: { not: null },
+        publicTokenExpiresAt: { gt: new Date() }
+      },
+      select: {
+        id: true,
+        publicToken: true,
+        publicTokenExpiresAt: true,
+        status: true,
+        tripId: true,
+        hostProfile: { select: { id: true, displayName: true } },
+        trip: { select: { tripCode: true, listing: { select: { title: true } } } }
+      },
+      orderBy: [{ requestedAt: 'desc' }]
+    });
+
     return {
       customer: {
         id: primary.id,
@@ -839,7 +859,15 @@ export const publicBookingService = {
         lastName: primary.lastName,
         email: primary.email
       },
-      bookings
+      bookings,
+      pendingReviews: pendingReviews.map((r) => ({
+        id: r.id,
+        token: r.publicToken,
+        expiresAt: r.publicTokenExpiresAt,
+        tripCode: r.trip?.tripCode || '',
+        listingTitle: r.trip?.listing?.title || '',
+        hostDisplayName: r.hostProfile?.displayName || ''
+      }))
     };
   },
 
