@@ -274,6 +274,7 @@ function DashboardInner({ token, me, logout }) {
   };
 
   const markCancelled = async (id) => {
+    if (!window.confirm('Are you sure you want to cancel this reservation? This action cannot be undone.')) return;
     try {
       await api(`/api/reservations/${id}`, { method: 'PATCH', body: JSON.stringify({ status: 'CANCELLED' }) }, token);
       setMsg('Reservation cancelled');
@@ -284,6 +285,7 @@ function DashboardInner({ token, me, logout }) {
   };
 
   const markNoShow = async (id) => {
+    if (!window.confirm('Mark this reservation as no-show? The guest will be charged the full amount.')) return;
     try {
       await api(`/api/reservations/${id}`, { method: 'PATCH', body: JSON.stringify({ status: 'NO_SHOW' }) }, token);
       setMsg('Reservation marked as no show');
