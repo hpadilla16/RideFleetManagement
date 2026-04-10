@@ -1,6 +1,7 @@
 import express from 'express';
 import cors from 'cors';
 import compression from 'compression';
+import logger, { requestLogger } from './lib/logger.js';
 import { reservationsRouter } from './modules/reservations/reservations.routes.js';
 import { customersRouter } from './modules/customers/customers.routes.js';
 import { publicVehicleTelematicsRouter, vehiclesRouter } from './modules/vehicles/vehicles.routes.js';
@@ -28,6 +29,7 @@ import { dealershipLoanerRouter } from './modules/dealership-loaner/dealership-l
 import { issueCenterRouter, publicIssueCenterRouter } from './modules/issue-center/issue-center.routes.js';
 import { tollsRouter } from './modules/tolls/tolls.routes.js';
 import { plannerRouter } from './modules/planner/planner.routes.js';
+import { paymentGatewayRouter } from './modules/payment-gateway/payment-gateway.routes.js';
 import { startTollAutoSyncScheduler, stopTollAutoSyncScheduler } from './modules/tolls/tolls.scheduler.js';
 import { startHandoffReminderScheduler, stopHandoffReminderScheduler } from './modules/car-sharing/car-sharing.scheduler.js';
 import { buildOpenApiSpec, swaggerHtml } from './docs/openapi.js';
@@ -42,6 +44,7 @@ const allowedOrigins = process.env.ALLOWED_ORIGINS
   ? process.env.ALLOWED_ORIGINS.split(',').map((o) => o.trim()).filter(Boolean)
   : ['http://localhost:3000', 'http://127.0.0.1:3000'];
 app.use(compression({ threshold: 1024 }));
+app.use(requestLogger());
 app.use(cors({ origin: allowedOrigins, credentials: true }));
 app.use(express.json({
   limit: '12mb',
@@ -87,6 +90,7 @@ app.use('/api/dealership-loaner', requireAuth, requireModuleAccess('loaner'), de
 app.use('/api/issue-center', requireAuth, requireModuleAccess('issueCenter'), issueCenterRouter);
 app.use('/api/tolls', requireAuth, requireModuleAccess('tolls'), tollsRouter);
 app.use('/api/planner', requireAuth, requireModuleAccess('planner'), plannerRouter);
+app.use('/api/payment-gateway', requireAuth, requireRole('ADMIN', 'OPS'), paymentGatewayRouter);
 
 app.use('/api/reservations', requireAuth, requireModuleAccess('reservations'), reservationsRouter);
 app.use('/api/customers', requireAuth, requireModuleAccess('customers'), customersRouter);
