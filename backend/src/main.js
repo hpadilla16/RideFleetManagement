@@ -51,8 +51,20 @@ app.use(express.json({
   }
 }));
 
-app.get('/health', (_req, res) => {
-  res.json({ ok: true, service: 'fleet-management-backend', sentryEnabled: isSentryEnabled() });
+app.get('/health', async (_req, res) => {
+  const checks = { database: false };
+  try {
+    await prisma.$queryRaw`SELECT 1`;
+    checks.database = true;
+  } catch {}
+  const ok = checks.database;
+  res.status(ok ? 200 : 503).json({
+    ok,
+    service: 'fleet-management-backend',
+    uptime: Math.floor(process.uptime()),
+    checks,
+    sentryEnabled: isSentryEnabled()
+  });
 });
 
 app.get('/api/docs/openapi.json', (req, res) => {

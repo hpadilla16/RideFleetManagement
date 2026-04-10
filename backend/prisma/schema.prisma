@@ -599,6 +599,8 @@ model Customer {
   hostReviews     HostReview[]
   conversations   Conversation[]
 
+  @@index([tenantId])
+  @@index([tenantId, lastName])
   @@index([lastName, firstName])
   @@index([phone])
   @@index([email])
@@ -717,6 +719,7 @@ model Reservation {
   @@index([workflowMode, status, pickupAt])
   @@index([pickupLocationId, pickupAt])
   @@index([tenantId, createdAt])
+  @@index([tenantId, status, pickupAt])
   @@index([repairOrderNumber])
 }
 

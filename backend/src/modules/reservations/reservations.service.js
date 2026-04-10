@@ -165,7 +165,7 @@ const reservationListSelect = {
   }
 };
 
-const reservationListBaseSelect = {
+const reservationListSelect = {
   id: true,
   tenantId: true,
   reservationNumber: true,
@@ -182,7 +182,14 @@ const reservationListBaseSelect = {
   dailyRate: true,
   estimatedTotal: true,
   notes: true,
+  customer: { select: { id: true, firstName: true, lastName: true, email: true, phone: true } },
+  vehicle: { select: { id: true, internalNumber: true, plate: true, make: true, model: true, year: true } },
+  vehicleType: { select: { id: true, code: true, name: true } },
+  pickupLocation: { select: { id: true, name: true, code: true } },
+  returnLocation: { select: { id: true, name: true, code: true } },
 };
+// Legacy alias
+const reservationListBaseSelect = reservationListSelect;
 
 async function hydrateReservationListRows(rows = [], scope = {}) {
   if (!rows.length) return [];
@@ -1017,20 +1024,13 @@ export const reservationsService = {
     const take = Math.min(Math.max(1, Number(limit) || 100), 500);
     const skip = (Math.max(1, Number(page) || 1) - 1) * take;
     const where = scope?.tenantId ? { tenantId: scope.tenantId } : undefined;
-    try {
-      const [rows, total] = await Promise.all([
-        prisma.reservation.findMany({ where, orderBy: { createdAt: 'desc' }, skip, take, select: reservationListBaseSelect }),
-        prisma.reservation.count({ where })
-      ]);
-      return { items: hydrateReservationListRows(rows, scope), total, page: Number(page), limit: take, pages: Math.ceil(total / take) };
-    } catch (error) {
-      console.error('[reservations] list fallback activated', { tenantId: scope?.tenantId || null, error: String(error?.message || error) });
-      const [fallbackRows, total] = await Promise.all([
-        prisma.reservation.findMany({ where, orderBy: { createdAt: 'desc' }, skip, take, select: reservationListBaseSelect }),
-        prisma.reservation.count({ where })
-      ]);
-      return { items: hydrateReservationListRows(fallbackRows, scope), total, page: Number(page), limit: take, pages: Math.ceil(total / take) };
-    }
+    const [rows, total] = await Promise.all([
+      prisma.reservation.findMany({ where, orderBy: { createdAt: 'desc' }, skip, take, select: reservationListSelect }),
+      prisma.reservation.count({ where })
+    ]);
+    // Relations already included via select — add underage alert derivation
+    const items = rows.map((row) => ({ ...row, ...deriveUnderageAlertForReservation(row) }));
+    return { items, total, page: Number(page), limit: take, pages: Math.ceil(total / take) };
   },
 
   async getById(id, scope = {}) {
