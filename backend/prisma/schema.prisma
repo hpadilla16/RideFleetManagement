@@ -2070,6 +2070,17 @@ model Conversation {
   lastMessageAt   DateTime?
   lastMessageText String?
   closedAt        DateTime?
+  // Token-based chat room access (no login required)
+  hostToken       String?   @unique
+  guestToken      String?   @unique
+  hostTokenExpiresAt  DateTime?
+  guestTokenExpiresAt DateTime?
+  // Pickup coordination
+  pickupAddress   String?
+  pickupLat       Decimal?  @db.Decimal(10, 7)
+  pickupLng       Decimal?  @db.Decimal(10, 7)
+  pickupInstructions String?
+  pickupPhotoUrl  String?
   createdAt       DateTime  @default(now())
   updatedAt       DateTime  @updatedAt
   messages        Message[]
@@ -2083,9 +2094,10 @@ model Message {
   id              String       @id @default(cuid())
   conversationId  String
   conversation    Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
-  senderType      String       // 'GUEST' | 'HOST'
+  senderType      String       // 'GUEST' | 'HOST' | 'SYSTEM'
   senderName      String?
   body            String
+  messageType     String       @default("TEXT") // TEXT | SYSTEM | PICKUP_DETAILS
   readAt          DateTime?
   createdAt       DateTime     @default(now())
 

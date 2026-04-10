@@ -1,5 +1,6 @@
 import { prisma } from '../../lib/prisma.js';
 import { hostReviewsService } from '../host-reviews/host-reviews.service.js';
+import { tripChatService } from '../messaging/trip-chat.service.js';
 import { computeMarketplaceTripPricing, computeCancellationRefund } from './car-sharing-pricing.js';
 import { sendEmail } from '../../lib/mailer.js';
 import { buildTripFulfillmentPlanData, resolveDeliveryFeeOverride } from './car-sharing-fulfillment.js';
@@ -919,12 +920,29 @@ export const carSharingService = {
       },
       include: tripInclude()
     });
+    if (nextStatus === 'CONFIRMED') {
+      try {
+        await tripChatService.createTripChatRoom({
+          tripId: updatedTrip.id,
+          hostProfileId: updatedTrip.hostProfileId,
+          customerId: updatedTrip.guestCustomerId,
+          tenantId: updatedTrip.tenantId
+        });
+        await tripChatService.sendAutoMessage(updatedTrip.id, 'PAYMENT_CONFIRMED');
+      } catch (error) {
+        console.error('Unable to create trip chat room', error);
+      }
+    }
     if (nextStatus === 'COMPLETED') {
       try {
         await hostReviewsService.issueGuestReviewRequestForTrip(updatedTrip.id);
+        await tripChatService.sendAutoMessage(updatedTrip.id, 'TRIP_COMPLETED');
       } catch (error) {
         console.error('Unable to issue host review request', error);
       }
+    }
+    if (nextStatus === 'IN_PROGRESS') {
+      try { await tripChatService.sendAutoMessage(updatedTrip.id, 'TRIP_STARTED'); } catch {}
     }
     return updatedTrip;
   },

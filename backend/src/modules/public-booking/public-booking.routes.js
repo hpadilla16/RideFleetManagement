@@ -4,10 +4,12 @@ import { optionalNumber, optionalString, assertPlainObject } from '../../lib/req
 import { attachPublicRequestMeta, createOptionalIdempotencyGuard, createPublicRateLimitGuard } from '../../middleware/public-endpoint-guards.js';
 import { requireAuth } from '../../middleware/auth.js';
 import { guestMessagingRouter } from '../messaging/messaging.routes.js';
+import { tripChatRouter } from '../messaging/trip-chat.routes.js';
 
 export const publicBookingRouter = Router();
 
 publicBookingRouter.use('/messages', guestMessagingRouter);
+publicBookingRouter.use('/trip-chat', tripChatRouter);
 
 const bookingReadGuard = [
   attachPublicRequestMeta('public-booking-read'),
