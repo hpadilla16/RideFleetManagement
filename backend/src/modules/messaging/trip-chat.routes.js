@@ -1,5 +1,19 @@
 import { Router } from 'express';
 import { tripChatService } from './trip-chat.service.js';
+import { attachPublicRequestMeta, createPublicRateLimitGuard } from '../../middleware/public-endpoint-guards.js';
+
+const chatReadGuard = [
+  attachPublicRequestMeta('chat-read'),
+  createPublicRateLimitGuard({ name: 'chat-read', maxRequests: 30, windowMs: 60 * 1000 })
+];
+const chatWriteGuard = [
+  attachPublicRequestMeta('chat-write'),
+  createPublicRateLimitGuard({ name: 'chat-write', maxRequests: 10, windowMs: 60 * 1000 })
+];
+const chatNotifyGuard = [
+  attachPublicRequestMeta('chat-notify'),
+  createPublicRateLimitGuard({ name: 'chat-notify', maxRequests: 3, windowMs: 60 * 1000 })
+];
 
 /**
  * Public trip chat routes — token-based, no auth required.
@@ -8,7 +22,7 @@ import { tripChatService } from './trip-chat.service.js';
 export const tripChatRouter = Router();
 
 // Get chat room by token
-tripChatRouter.get('/:token', async (req, res, next) => {
+tripChatRouter.get('/:token', chatReadGuard, async (req, res, next) => {
   try {
     res.json(await tripChatService.getChatRoomByToken(req.params.token));
   } catch (e) {
@@ -18,7 +32,7 @@ tripChatRouter.get('/:token', async (req, res, next) => {
 });
 
 // Send message via token
-tripChatRouter.post('/:token/messages', async (req, res, next) => {
+tripChatRouter.post('/:token/messages', chatWriteGuard, async (req, res, next) => {
   try {
     res.status(201).json(await tripChatService.sendMessageByToken(req.params.token, req.body || {}));
   } catch (e) {
@@ -28,7 +42,7 @@ tripChatRouter.post('/:token/messages', async (req, res, next) => {
 });
 
 // Mark as read via token
-tripChatRouter.post('/:token/read', async (req, res, next) => {
+tripChatRouter.post('/:token/read', chatWriteGuard, async (req, res, next) => {
   try {
     res.json(await tripChatService.markReadByToken(req.params.token));
   } catch (e) {
@@ -37,7 +51,7 @@ tripChatRouter.post('/:token/read', async (req, res, next) => {
 });
 
 // Update pickup details (host token only)
-tripChatRouter.patch('/:token/pickup', async (req, res, next) => {
+tripChatRouter.patch('/:token/pickup', chatWriteGuard, async (req, res, next) => {
   try {
     res.json(await tripChatService.updatePickupDetails(req.params.token, req.body || {}));
   } catch (e) {
@@ -47,7 +61,7 @@ tripChatRouter.patch('/:token/pickup', async (req, res, next) => {
 });
 
 // Hot action button (arrived, running late, etc.)
-tripChatRouter.post('/:token/action', async (req, res, next) => {
+tripChatRouter.post('/:token/action', chatWriteGuard, async (req, res, next) => {
   try {
     res.status(201).json(await tripChatService.sendHotAction(req.params.token, req.body || {}));
   } catch (e) {
@@ -57,7 +71,7 @@ tripChatRouter.post('/:token/action', async (req, res, next) => {
 });
 
 // Notify other party about unread messages via email
-tripChatRouter.post('/:token/notify', async (req, res, next) => {
+tripChatRouter.post('/:token/notify', chatNotifyGuard, async (req, res, next) => {
   try {
     const clean = String(req.params.token).trim();
     let conv = await (await import('../../lib/prisma.js')).prisma.conversation.findUnique({ where: { hostToken: clean }, select: { id: true } });
@@ -70,7 +84,7 @@ tripChatRouter.post('/:token/notify', async (req, res, next) => {
 });
 
 // Report issue with transcript (host only)
-tripChatRouter.post('/:token/report-issue', async (req, res, next) => {
+tripChatRouter.post('/:token/report-issue', chatWriteGuard, async (req, res, next) => {
   try {
     res.status(201).json(await tripChatService.reportIssueWithTranscript(req.params.token, req.body || {}));
   } catch (e) {
