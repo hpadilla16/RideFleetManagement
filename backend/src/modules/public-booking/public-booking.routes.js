@@ -5,11 +5,13 @@ import { attachPublicRequestMeta, createOptionalIdempotencyGuard, createPublicRa
 import { requireAuth } from '../../middleware/auth.js';
 import { guestMessagingRouter } from '../messaging/messaging.routes.js';
 import { tripChatRouter } from '../messaging/trip-chat.routes.js';
+import { aiSearchRouter } from '../ai-search/ai-search.routes.js';
 
 export const publicBookingRouter = Router();
 
 publicBookingRouter.use('/messages', guestMessagingRouter);
 publicBookingRouter.use('/trip-chat', tripChatRouter);
+publicBookingRouter.use('/ai-search', aiSearchRouter);
 
 const bookingReadGuard = [
   attachPublicRequestMeta('public-booking-read'),
