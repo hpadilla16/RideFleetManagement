@@ -61,7 +61,33 @@ export function AuthGate({ children }) {
           if (err?.status === 401) handleAuthExpired({ detail: { message: 'Your session expired. Please sign in again.' } });
         });
     }
-    return () => window.removeEventListener(AUTH_EXPIRED_EVENT, handleAuthExpired);
+    // Auto-refresh token before expiry
+    let refreshTimer;
+    if (t) {
+      const claims = parseJwt(t);
+      if (claims?.exp) {
+        const expiresInMs = (claims.exp * 1000) - Date.now();
+        const refreshInMs = Math.max(expiresInMs - (5 * 60 * 1000), 30 * 1000); // 5 min before expiry, min 30s
+        refreshTimer = setTimeout(async () => {
+          try {
+            const out = await api('/api/auth/refresh', { method: 'POST' });
+            if (out?.token) {
+              localStorage.setItem(TOKEN_KEY, out.token);
+              if (out.user) localStorage.setItem(USER_KEY, JSON.stringify(out.user));
+              setToken(out.token);
+              if (out.user) setMe(out.user);
+            }
+          } catch {
+            // Refresh failed — token will expire naturally and trigger auth expired
+          }
+        }, refreshInMs);
+      }
+    }
+
+    return () => {
+      window.removeEventListener(AUTH_EXPIRED_EVENT, handleAuthExpired);
+      if (refreshTimer) clearTimeout(refreshTimer);
+    };
   }, []);
 
   const login = async (e) => {

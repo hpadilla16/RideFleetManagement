@@ -54,6 +54,16 @@ export const authService = {
     return buildSessionUser(user);
   },
 
+  async refreshToken(userId) {
+    const user = await prisma.user.findUnique({
+      where: { id: userId },
+      include: { hostProfile: { select: { id: true } } }
+    });
+    if (!user || !user.isActive) throw new Error('User not found or inactive');
+    const token = signToken(user);
+    return { token, user: await buildSessionUser(user) };
+  },
+
   async register({ email, password, fullName, tenantId }) {
     const normalizedEmail = String(email || '').trim().toLowerCase();
     const existing = await prisma.user.findUnique({ where: { email: normalizedEmail } });

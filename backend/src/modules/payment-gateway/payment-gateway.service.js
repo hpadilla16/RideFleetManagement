@@ -2,12 +2,14 @@ import { ValidationError } from '../../lib/errors.js';
 import { prisma } from '../../lib/prisma.js';
 import { spinClient } from './spin-client.js';
 import logger from '../../lib/logger.js';
+import { cache } from '../../lib/cache.js';
 
 /**
- * Resolve SPIn config for a tenant.
+ * Resolve SPIn config for a tenant (cached 3 min).
  */
 async function getTenantSpinConfig(tenantId) {
   if (!tenantId) return {};
+  return cache.getOrSet(`spin:config:${tenantId}`, async () => {
   const tenant = await prisma.tenant.findUnique({
     where: { id: tenantId },
     select: { id: true, name: true, settingsJson: true }
@@ -23,6 +25,7 @@ async function getTenantSpinConfig(tenantId) {
     spinProxyTimeout: settings?.spinProxyTimeout || 120,
     spinSandbox: settings?.spinSandbox !== false,
   };
+  }, 3 * 60 * 1000); // cache 3 min
 }
 
 export const paymentGatewayService = {

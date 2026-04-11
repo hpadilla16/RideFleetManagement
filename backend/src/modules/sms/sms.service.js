@@ -3,12 +3,14 @@ import { prisma } from '../../lib/prisma.js';
 import { sendSms } from './sms-providers.js';
 import { getTemplates, getTemplate, renderTemplate, renderCustom } from './sms-templates.js';
 import logger from '../../lib/logger.js';
+import { cache } from '../../lib/cache.js';
 
 /**
  * Resolve SMS config for a tenant.
  */
 async function getTenantSmsConfig(tenantId) {
   if (!tenantId) return null;
+  return cache.getOrSet(`sms:config:${tenantId}`, async () => {
   const tenant = await prisma.tenant.findUnique({
     where: { id: tenantId },
     select: { id: true, name: true, settingsJson: true }
@@ -33,6 +35,7 @@ async function getTenantSmsConfig(tenantId) {
   }
 
   return { provider, fromNumber, companyName, credentials, enabled: !!fromNumber && Object.values(credentials).some(Boolean) };
+  }, 3 * 60 * 1000); // cache 3 min
 }
 
 /**

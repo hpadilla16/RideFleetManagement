@@ -70,6 +70,16 @@ authRouter.get('/me', requireAuth, async (req, res, next) => {
   }
 });
 
+authRouter.post('/refresh', requireAuth, async (req, res, next) => {
+  try {
+    const userId = req.user?.id || req.user?.sub;
+    if (!userId) return res.status(401).json({ error: 'Invalid session' });
+    res.json(await authService.refreshToken(userId));
+  } catch (e) {
+    res.status(401).json({ error: e.message });
+  }
+});
+
 authRouter.get('/users', requireAuth, requireRole('ADMIN'), async (req, res, next) => {
   try {
     res.json(await authService.listUsers(scopeFor(req)));
