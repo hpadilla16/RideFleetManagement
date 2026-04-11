@@ -165,29 +165,6 @@ const reservationListSelect = {
   }
 };
 
-const reservationListSelect = {
-  id: true,
-  tenantId: true,
-  reservationNumber: true,
-  sourceRef: true,
-  status: true,
-  paymentStatus: true,
-  pickupAt: true,
-  returnAt: true,
-  pickupLocationId: true,
-  returnLocationId: true,
-  customerId: true,
-  vehicleId: true,
-  vehicleTypeId: true,
-  dailyRate: true,
-  estimatedTotal: true,
-  notes: true,
-  customer: { select: { id: true, firstName: true, lastName: true, email: true, phone: true } },
-  vehicle: { select: { id: true, internalNumber: true, plate: true, make: true, model: true, year: true } },
-  vehicleType: { select: { id: true, code: true, name: true } },
-  pickupLocation: { select: { id: true, name: true, code: true } },
-  returnLocation: { select: { id: true, name: true, code: true } },
-};
 // Legacy alias
 const reservationListBaseSelect = reservationListSelect;
 
