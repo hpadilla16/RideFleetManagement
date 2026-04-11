@@ -34,6 +34,7 @@ import { startTollAutoSyncScheduler, stopTollAutoSyncScheduler } from './modules
 import { startHandoffReminderScheduler, stopHandoffReminderScheduler } from './modules/car-sharing/car-sharing.scheduler.js';
 import { buildOpenApiSpec, swaggerHtml } from './docs/openapi.js';
 import { smsRouter } from './modules/sms/sms.routes.js';
+import { knowledgeBaseRouter } from './modules/knowledge-base/knowledge-base.routes.js';
 import { captureBackendException, flushSentry, initSentry, isSentryEnabled } from './lib/sentry.js';
 import { appErrorHandler } from './lib/errors.js';
 
@@ -93,6 +94,7 @@ app.use('/api/tolls', requireAuth, requireModuleAccess('tolls'), tollsRouter);
 app.use('/api/planner', requireAuth, requireModuleAccess('planner'), plannerRouter);
 app.use('/api/payment-gateway', requireAuth, requireRole('ADMIN', 'OPS'), paymentGatewayRouter);
 app.use('/api/sms', requireAuth, requireRole('ADMIN', 'OPS'), smsRouter);
+app.use('/api/knowledge-base', requireAuth, knowledgeBaseRouter);
 
 app.use('/api/reservations', requireAuth, requireModuleAccess('reservations'), reservationsRouter);
 app.use('/api/customers', requireAuth, requireModuleAccess('customers'), customersRouter);

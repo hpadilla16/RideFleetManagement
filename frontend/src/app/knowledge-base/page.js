@@ -1,8 +1,10 @@
 'use client';
 
+import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { AuthGate } from '../../components/AuthGate';
 import { AppShell } from '../../components/AppShell';
+import { api } from '../../lib/client';
 
 const anchors = [
   { id: 'start-here', label: 'Start Here' },
@@ -384,10 +386,116 @@ const faq = [
   }
 ];
 
+function DynamicArticles({ token }) {
+  const [articles, setArticles] = useState([]);
+  const [categories, setCategories] = useState([]);
+  const [search, setSearch] = useState('');
+  const [activeCategory, setActiveCategory] = useState('');
+  const [activeArticle, setActiveArticle] = useState(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    Promise.all([
+      api('/api/knowledge-base/categories', {}, token).catch(() => []),
+      api('/api/knowledge-base?limit=100', {}, token).catch(() => ({ items: [] })),
+    ]).then(([cats, result]) => {
+      setCategories(Array.isArray(cats) ? cats : []);
+      setArticles(Array.isArray(result?.items) ? result.items : (Array.isArray(result) ? result : []));
+      setLoading(false);
+    });
+  }, [token]);
+
+  useEffect(() => {
+    const qs = new URLSearchParams();
+    if (search) qs.set('q', search);
+    if (activeCategory) qs.set('category', activeCategory);
+    qs.set('limit', '100');
+    api(`/api/knowledge-base?${qs.toString()}`, {}, token)
+      .then((result) => setArticles(Array.isArray(result?.items) ? result.items : []))
+      .catch(() => {});
+  }, [search, activeCategory, token]);
+
+  async function openArticle(slug) {
+    try {
+      const article = await api(`/api/knowledge-base/article/${slug}`, {}, token);
+      setActiveArticle(article);
+    } catch { /* ignore */ }
+  }
+
+  async function markHelpful(id) {
+    await api(`/api/knowledge-base/${id}/helpful`, { method: 'POST' }, token).catch(() => {});
+    setActiveArticle((a) => a?.id === id ? { ...a, helpfulCount: (a.helpfulCount || 0) + 1 } : a);
+  }
+
+  async function seedArticles() {
+    await api('/api/knowledge-base/seed', { method: 'POST' }, token).catch(() => {});
+    const result = await api('/api/knowledge-base?limit=100', {}, token).catch(() => ({ items: [] }));
+    setArticles(Array.isArray(result?.items) ? result.items : []);
+  }
+
+  if (loading) return <div className="surface-note" style={{ textAlign: 'center', color: '#6b7280' }}>Loading knowledge base...</div>;
+
+  if (activeArticle) {
+    return (
+      <section className="glass card-lg" style={{ padding: '28px 24px' }}>
+        <button onClick={() => setActiveArticle(null)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#6e49ff', fontWeight: 700, fontSize: '0.86rem', marginBottom: 12 }}>← Back to articles</button>
+        <div className="eyebrow">{activeArticle.category}</div>
+        <h2 style={{ margin: '4px 0 16px', fontSize: '1.3rem' }}>{activeArticle.title}</h2>
+        <div style={{ color: '#374151', lineHeight: 1.8, whiteSpace: 'pre-wrap', fontSize: '0.94rem' }}>{activeArticle.body}</div>
+        <div style={{ display: 'flex', gap: 12, marginTop: 20, alignItems: 'center' }}>
+          <button onClick={() => markHelpful(activeArticle.id)} className="button-subtle" style={{ fontSize: '0.84rem' }}>👍 Helpful ({activeArticle.helpfulCount || 0})</button>
+          <span className="ui-muted" style={{ fontSize: '0.78rem' }}>{activeArticle.viewCount || 0} views</span>
+          {activeArticle.tags?.length > 0 && (
+            <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+              {activeArticle.tags.map((tag) => (
+                <span key={tag} style={{ padding: '2px 8px', borderRadius: 6, background: 'rgba(110,73,255,.06)', color: '#6e49ff', fontSize: '0.72rem', fontWeight: 600 }}>{tag}</span>
+              ))}
+            </div>
+          )}
+        </div>
+      </section>
+    );
+  }
+
+  return (
+    <section className="glass card-lg" style={{ padding: '24px' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16, flexWrap: 'wrap', gap: 10 }}>
+        <h2 style={{ margin: 0, fontSize: '1.1rem', fontWeight: 700 }}>Knowledge Articles</h2>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search articles..." style={{ minWidth: 200 }} />
+          {articles.length === 0 && <button onClick={seedArticles} className="button-subtle" style={{ fontSize: '0.82rem' }}>Seed defaults</button>}
+        </div>
+      </div>
+      <div style={{ display: 'flex', gap: 6, marginBottom: 14, flexWrap: 'wrap' }}>
+        <button onClick={() => setActiveCategory('')} className={!activeCategory ? '' : 'button-subtle'} style={{ fontSize: '0.8rem', padding: '4px 12px' }}>All</button>
+        {categories.map((cat) => (
+          <button key={cat.id} onClick={() => setActiveCategory(cat.id)} className={activeCategory === cat.id ? '' : 'button-subtle'} style={{ fontSize: '0.8rem', padding: '4px 12px' }}>{cat.label}</button>
+        ))}
+      </div>
+      {articles.length === 0 && <div className="ui-muted">No articles found. Click "Seed defaults" to create starter articles.</div>}
+      <div className="stack" style={{ gap: 8 }}>
+        {articles.map((article) => (
+          <button key={article.id} onClick={() => openArticle(article.slug)} style={{ textAlign: 'left', padding: '14px 16px', borderRadius: 12, border: '1px solid rgba(135,82,254,.08)', background: 'rgba(135,82,254,.02)', cursor: 'pointer', display: 'grid', gap: 4, width: '100%' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <strong style={{ color: '#1e2847', fontSize: '0.95rem' }}>{article.title}</strong>
+              <span style={{ fontSize: '0.72rem', color: '#6b7a9a', fontWeight: 600, textTransform: 'uppercase' }}>{article.category?.replace(/_/g, ' ')}</span>
+            </div>
+            <div style={{ display: 'flex', gap: 8, fontSize: '0.78rem', color: '#6b7a9a' }}>
+              <span>👁 {article.viewCount || 0}</span>
+              <span>👍 {article.helpfulCount || 0}</span>
+              {article.tags?.slice(0, 3).map((tag) => <span key={tag} style={{ padding: '1px 6px', borderRadius: 4, background: 'rgba(110,73,255,.06)', color: '#6e49ff' }}>{tag}</span>)}
+            </div>
+          </button>
+        ))}
+      </div>
+    </section>
+  );
+}
+
 export default function KnowledgeBasePage() {
   return (
     <AuthGate>
-      {({ me, logout }) => (
+      {({ me, logout, token }) => (
         <AppShell me={me} logout={logout}>
           <div className="stack" style={{ gap: 18 }}>
             <section className="glass card-lg knowledge-hero">
@@ -404,6 +512,8 @@ export default function KnowledgeBasePage() {
                 ))}
               </div>
             </section>
+
+            <DynamicArticles token={token} />
 
             <section id="start-here" className="glass card-lg section-card">
               <div className="row-between">
