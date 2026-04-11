@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { isSuperAdmin } from '../../middleware/auth.js';
 import { commissionsService } from './commissions.service.js';
+import { calculateCarSharingCommission, HOST_TIERS, TRIP_PROTECTION_TIERS, GUEST_SERVICE_FEE_PCT, PROTECTION_EXCLUSIONS, OPTIONAL_ADDONS } from './car-sharing-commission.js';
 
 export const commissionsRouter = Router();
 
@@ -132,6 +133,43 @@ commissionsRouter.patch('/employees/:id/plan', async (req, res) => {
   } catch (e) {
     if (/employee not found/i.test(String(e?.message || ''))) return res.status(404).json({ error: 'Employee not found' });
     if (/commission plan not found/i.test(String(e?.message || ''))) return res.status(404).json({ error: 'Commission plan not found' });
+    res.status(400).json({ error: e.message });
+  }
+});
+
+// ── Car Sharing Commission Endpoints ──
+
+// Get host tier options
+commissionsRouter.get('/car-sharing/host-tiers', (req, res) => {
+  res.json(Object.values(HOST_TIERS));
+});
+
+// Get trip protection tiers + exclusions + add-ons
+commissionsRouter.get('/car-sharing/protection', (req, res) => {
+  res.json({
+    tiers: Object.values(TRIP_PROTECTION_TIERS),
+    exclusions: PROTECTION_EXCLUSIONS,
+    addons: Object.values(OPTIONAL_ADDONS),
+    guestServiceFeePct: GUEST_SERVICE_FEE_PCT,
+    disclaimer: 'Trip Protection is NOT insurance. It is a limited program where Ride reimburses the host\'s insurance deductible only. Tire damage, glass damage, and wear and tear are NOT covered. These can be purchased separately as add-ons if the host offers them.',
+  });
+});
+
+// Calculate commission breakdown
+commissionsRouter.post('/car-sharing/calculate', (req, res) => {
+  try {
+    const { baseDailyRate, days, hostTier, protectionTier, deliveryFee, cleaningFee, guestAge } = req.body || {};
+    if (!baseDailyRate || !days) return res.status(400).json({ error: 'baseDailyRate and days are required' });
+    res.json(calculateCarSharingCommission({
+      baseDailyRate: Number(baseDailyRate),
+      days: Number(days),
+      hostTier: hostTier || 'STARTER',
+      protectionTier: protectionTier || 'BASIC',
+      deliveryFee: Number(deliveryFee || 0),
+      cleaningFee: Number(cleaningFee || 0),
+      guestAge: Number(guestAge || 25),
+    }));
+  } catch (e) {
     res.status(400).json({ error: e.message });
   }
 });
