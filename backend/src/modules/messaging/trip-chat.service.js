@@ -1,6 +1,7 @@
 import crypto from 'crypto';
 import { prisma } from '../../lib/prisma.js';
 import { sendEmail } from '../../lib/mailer.js';
+import { ValidationError, NotFoundError } from '../../lib/errors.js';
 import { broadcastToConversation } from './chat-events.js';
 
 const CHAT_TOKEN_EXPIRY_DAYS = 14;
@@ -20,21 +21,21 @@ function sanitizeName(name) {
  */
 async function resolveTokenContext(token) {
   const clean = String(token || '').trim();
-  if (!clean) throw new Error('Token is required');
+  if (!clean) throw new ValidationError('Token is required');
 
   let conv = await prisma.conversation.findUnique({ where: { hostToken: clean }, include: chatInclude });
   if (conv) {
-    if (conv.hostTokenExpiresAt && conv.hostTokenExpiresAt < new Date()) throw new Error('This chat link has expired');
+    if (conv.hostTokenExpiresAt && conv.hostTokenExpiresAt < new Date()) throw new NotFoundError('This chat link has expired');
     return { conv, role: 'HOST' };
   }
 
   conv = await prisma.conversation.findUnique({ where: { guestToken: clean }, include: chatInclude });
   if (conv) {
-    if (conv.guestTokenExpiresAt && conv.guestTokenExpiresAt < new Date()) throw new Error('This chat link has expired');
+    if (conv.guestTokenExpiresAt && conv.guestTokenExpiresAt < new Date()) throw new NotFoundError('This chat link has expired');
     return { conv, role: 'GUEST' };
   }
 
-  throw new Error('Invalid or expired chat link');
+  throw new NotFoundError('Invalid or expired chat link');
 }
 
 /**
@@ -42,14 +43,14 @@ async function resolveTokenContext(token) {
  */
 async function resolveTokenLight(token) {
   const clean = String(token || '').trim();
-  if (!clean) throw new Error('Token is required');
+  if (!clean) throw new ValidationError('Token is required');
 
   let conv = await prisma.conversation.findUnique({
     where: { hostToken: clean },
     select: { id: true, closedAt: true, hostTokenExpiresAt: true, hostProfile: { select: { displayName: true } }, customer: { select: { firstName: true, lastName: true } }, trip: { select: { tripCode: true } } }
   });
   if (conv) {
-    if (conv.hostTokenExpiresAt && conv.hostTokenExpiresAt < new Date()) throw new Error('This chat link has expired');
+    if (conv.hostTokenExpiresAt && conv.hostTokenExpiresAt < new Date()) throw new NotFoundError('This chat link has expired');
     return { conv, role: 'HOST', senderName: sanitizeName(conv.hostProfile?.displayName || 'Host') };
   }
 
@@ -58,11 +59,11 @@ async function resolveTokenLight(token) {
     select: { id: true, closedAt: true, guestTokenExpiresAt: true, customer: { select: { firstName: true, lastName: true } }, hostProfile: { select: { displayName: true } }, trip: { select: { tripCode: true } } }
   });
   if (conv) {
-    if (conv.guestTokenExpiresAt && conv.guestTokenExpiresAt < new Date()) throw new Error('This chat link has expired');
+    if (conv.guestTokenExpiresAt && conv.guestTokenExpiresAt < new Date()) throw new NotFoundError('This chat link has expired');
     return { conv, role: 'GUEST', senderName: sanitizeName([conv.customer?.firstName, conv.customer?.lastName].filter(Boolean).join(' ') || 'Guest') };
   }
 
-  throw new Error('Invalid or expired chat link');
+  throw new NotFoundError('Invalid or expired chat link');
 }
 
 function generateToken() {
@@ -204,12 +205,12 @@ export const tripChatService = {
    * Send a message via token.
    */
   async sendMessageByToken(token, { body }) {
-    if (!body || !String(body).trim()) throw new Error('Message is required');
+    if (!body || !String(body).trim()) throw new ValidationError('Message is required');
     const cleanBody = String(body).trim();
     if (cleanBody.length > MAX_MESSAGE_LENGTH) throw new Error(`Message cannot exceed ${MAX_MESSAGE_LENGTH} characters`);
 
     const { conv, role, senderName } = await resolveTokenLight(token);
-    if (conv.closedAt) throw new Error('This chat has been closed');
+    if (conv.closedAt) throw new ValidationError('This chat has been closed');
 
     const now = new Date();
     const [msg] = await prisma.$transaction([
@@ -398,7 +399,7 @@ export const tripChatService = {
    */
   async reportIssueWithTranscript(token, { issueType, description }) {
     const clean = String(token || '').trim();
-    if (!clean) throw new Error('Token is required');
+    if (!clean) throw new ValidationError('Token is required');
     const conv = await prisma.conversation.findUnique({
       where: { hostToken: clean },
       include: {
@@ -409,7 +410,7 @@ export const tripChatService = {
       }
     });
     if (!conv) throw new Error('Only the host can report issues from this chat');
-    if (conv.hostTokenExpiresAt && conv.hostTokenExpiresAt < new Date()) throw new Error('This chat link has expired');
+    if (conv.hostTokenExpiresAt && conv.hostTokenExpiresAt < new Date()) throw new NotFoundError('This chat link has expired');
     if (!conv.trip) throw new Error('No trip associated with this chat');
     const cleanDescription = String(description || '').trim().slice(0, 2000);
     if (!cleanDescription) throw new Error('Please describe the issue');
@@ -471,7 +472,7 @@ export const tripChatService = {
   async sendTemplateMessage(token, { templateId, customBody }) {
     const { conv, role, senderName } = await resolveTokenLight(token);
     if (role !== 'HOST') throw new Error('Only hosts can use message templates');
-    if (conv.closedAt) throw new Error('This chat has been closed');
+    if (conv.closedAt) throw new ValidationError('This chat has been closed');
 
     const templates = this.getHostMessageTemplates();
     const template = templates.find((t) => t.id === templateId);
@@ -522,7 +523,7 @@ export const tripChatService = {
     const cleanCaption = String(caption || '').trim().slice(0, 500);
 
     const { conv, role, senderName } = await resolveTokenLight(token);
-    if (conv.closedAt) throw new Error('This chat has been closed');
+    if (conv.closedAt) throw new ValidationError('This chat has been closed');
 
     const body = cleanCaption ? `📷 ${cleanCaption}` : '📷 Shared an image';
     const now = new Date();

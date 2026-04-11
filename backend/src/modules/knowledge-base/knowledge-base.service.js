@@ -1,4 +1,6 @@
 import { prisma } from '../../lib/prisma.js';
+import { ValidationError, NotFoundError } from '../../lib/errors.js';
+import { cache } from '../../lib/cache.js';
 
 function slugify(text) {
   return String(text || '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 120);
@@ -23,6 +25,12 @@ export const knowledgeBaseService = {
   },
 
   async list({ tenantId, category, status = 'PUBLISHED', search, page = 1, limit = 50 }) {
+    // Cache non-search list queries for 2 minutes
+    if (!search) {
+      const cacheKey = `kb:list:${tenantId || 'global'}:${category || 'all'}:${status}:${page}:${limit}`;
+      const cached = cache.get(cacheKey);
+      if (cached) return cached;
+    }
     const take = Math.min(Math.max(1, Number(limit) || 50), 200);
     const skip = (Math.max(1, Number(page) || 1) - 1) * take;
     const where = {
@@ -53,7 +61,12 @@ export const knowledgeBaseService = {
       prisma.knowledgeArticle.count({ where })
     ]);
 
-    return { items, total, page: Number(page), limit: take, pages: Math.ceil(total / take) };
+    const result = { items, total, page: Number(page), limit: take, pages: Math.ceil(total / take) };
+    if (!search) {
+      const cacheKey = `kb:list:${tenantId || 'global'}:${category || 'all'}:${status}:${page}:${limit}`;
+      cache.set(cacheKey, result, 2 * 60 * 1000); // 2 min
+    }
+    return result;
   },
 
   async getBySlug(slug, { tenantId }) {
@@ -64,7 +77,7 @@ export const knowledgeBaseService = {
         ...(tenantId ? { OR: [{ tenantId }, { tenantId: null }] } : { tenantId: null }),
       }
     });
-    if (!article) throw new Error('Article not found');
+    if (!article) throw new NotFoundError('Article not found');
 
     // Increment view count (fire and forget)
     prisma.knowledgeArticle.update({
@@ -77,15 +90,15 @@ export const knowledgeBaseService = {
 
   async create(data, { tenantId, userId }) {
     const title = String(data.title || '').trim();
-    if (!title) throw new Error('Title is required');
+    if (!title) throw new ValidationError('Title is required');
     const body = String(data.body || '').trim();
-    if (!body) throw new Error('Body is required');
+    if (!body) throw new ValidationError('Body is required');
 
     const slug = data.slug ? slugify(data.slug) : slugify(title);
     const category = String(data.category || 'GENERAL').toUpperCase();
     const tags = Array.isArray(data.tags) ? data.tags.map((t) => String(t).toLowerCase().trim()).filter(Boolean) : [];
 
-    return prisma.knowledgeArticle.create({
+    const created = await prisma.knowledgeArticle.create({
       data: {
         tenantId: tenantId || null,
         title,
@@ -98,13 +111,15 @@ export const knowledgeBaseService = {
         createdBy: userId || null,
       }
     });
+    cache.invalidate('kb:list:');
+    return created;
   },
 
   async update(id, data, { tenantId }) {
     const article = await prisma.knowledgeArticle.findFirst({
       where: { id, ...(tenantId ? { tenantId } : {}) }
     });
-    if (!article) throw new Error('Article not found');
+    if (!article) throw new NotFoundError('Article not found');
 
     const updateData = {};
     if (data.title !== undefined) updateData.title = String(data.title).trim();
@@ -115,15 +130,18 @@ export const knowledgeBaseService = {
     if (data.status !== undefined) updateData.status = String(data.status).toUpperCase();
     if (data.sortOrder !== undefined) updateData.sortOrder = Number(data.sortOrder || 0);
 
-    return prisma.knowledgeArticle.update({ where: { id }, data: updateData });
+    const updated = await prisma.knowledgeArticle.update({ where: { id }, data: updateData });
+    cache.invalidate('kb:list:');
+    return updated;
   },
 
   async delete(id, { tenantId }) {
     const article = await prisma.knowledgeArticle.findFirst({
       where: { id, ...(tenantId ? { tenantId } : {}) }
     });
-    if (!article) throw new Error('Article not found');
+    if (!article) throw new NotFoundError('Article not found');
     await prisma.knowledgeArticle.delete({ where: { id } });
+    cache.invalidate('kb:list:');
     return { ok: true };
   },
 

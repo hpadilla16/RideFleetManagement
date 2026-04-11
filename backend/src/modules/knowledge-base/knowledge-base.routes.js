@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { knowledgeBaseService } from './knowledge-base.service.js';
 import { isSuperAdmin } from '../../middleware/auth.js';
+import { AppError } from '../../lib/errors.js';
 
 export const knowledgeBaseRouter = Router();
 
@@ -32,10 +33,7 @@ knowledgeBaseRouter.get('/', async (req, res, next) => {
 knowledgeBaseRouter.get('/article/:slug', async (req, res, next) => {
   try {
     res.json(await knowledgeBaseService.getBySlug(req.params.slug, scopeFor(req)));
-  } catch (e) {
-    if (/not found/i.test(e?.message)) return res.status(404).json({ error: e.message });
-    next(e);
-  }
+  } catch (e) { next(e); }
 });
 
 // Create article (admin only)
@@ -55,20 +53,14 @@ knowledgeBaseRouter.post('/', async (req, res, next) => {
 knowledgeBaseRouter.patch('/:id', async (req, res, next) => {
   try {
     res.json(await knowledgeBaseService.update(req.params.id, req.body || {}, scopeFor(req)));
-  } catch (e) {
-    if (/not found/i.test(e?.message)) return res.status(404).json({ error: e.message });
-    res.status(400).json({ error: e.message });
-  }
+  } catch (e) { next(e); }
 });
 
 // Delete article
 knowledgeBaseRouter.delete('/:id', async (req, res, next) => {
   try {
     res.json(await knowledgeBaseService.delete(req.params.id, scopeFor(req)));
-  } catch (e) {
-    if (/not found/i.test(e?.message)) return res.status(404).json({ error: e.message });
-    next(e);
-  }
+  } catch (e) { next(e); }
 });
 
 // Mark article as helpful

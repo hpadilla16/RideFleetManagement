@@ -1,3 +1,4 @@
+import { ValidationError } from '../../lib/errors.js';
 import { prisma } from '../../lib/prisma.js';
 import { sendSms } from './sms-providers.js';
 import { getTemplates, getTemplate, renderTemplate, renderCustom } from './sms-templates.js';
@@ -65,7 +66,7 @@ export const smsService = {
    */
   async sendForReservation({ reservationId, templateId, customBody, tenantId }) {
     const config = await getTenantSmsConfig(tenantId);
-    if (!config?.enabled) throw new Error('SMS is not configured for this tenant. Set smsProvider, smsFromNumber, and API credentials in tenant settings.');
+    if (!config?.enabled) throw new ValidationError('SMS is not configured for this tenant. Set smsProvider, smsFromNumber, and API credentials in tenant settings.');
 
     const reservation = await prisma.reservation.findFirst({
       where: { id: reservationId, ...(tenantId ? { tenantId } : {}) },
@@ -77,10 +78,10 @@ export const smsService = {
         carSharingTrip: { select: { tripCode: true, hostProfile: { select: { displayName: true } } } }
       }
     });
-    if (!reservation) throw new Error('Reservation not found');
+    if (!reservation) throw new ValidationError('Reservation not found');
 
     const phone = reservation.customer?.phone;
-    if (!phone) throw new Error('Customer has no phone number on file');
+    if (!phone) throw new ValidationError('Customer has no phone number on file');
 
     const variables = buildReservationVariables(reservation, config);
     const body = customBody
@@ -116,9 +117,9 @@ export const smsService = {
    */
   async sendCustom({ to, body, tenantId }) {
     const config = await getTenantSmsConfig(tenantId);
-    if (!config?.enabled) throw new Error('SMS is not configured for this tenant');
-    if (!to) throw new Error('Phone number is required');
-    if (!body) throw new Error('Message body is required');
+    if (!config?.enabled) throw new ValidationError('SMS is not configured for this tenant');
+    if (!to) throw new ValidationError('Phone number is required');
+    if (!body) throw new ValidationError('Message body is required');
 
     return sendSms({
       to,

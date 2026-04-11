@@ -1,3 +1,4 @@
+import { ValidationError } from '../../lib/errors.js';
 import { prisma } from '../../lib/prisma.js';
 import { spinClient } from './spin-client.js';
 import logger from '../../lib/logger.js';
