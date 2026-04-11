@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "node src/main.js",
     "start": "node src/main.js",
-    "test": "npm run test:vehicles && npm run test:planner && npm run test:rates && npm run test:portal && npm run test:carsharing && npm run test:issues && npm run test:tolls",
+    "test": "npm run test:vehicles && npm run test:planner && npm run test:rates && npm run test:portal && npm run test:carsharing && npm run test:issues && npm run test:tolls && npm run test:sms && npm run test:payments && npm run test:auth",
     "test:vehicles": "node --test src/modules/vehicles/vehicle-intelligence.test.mjs src/modules/vehicles/telematics-zubie.test.mjs",
     "test:planner": "node --test src/modules/planner/planner.service.test.mjs",
     "test:rates": "node --test src/modules/rates/revenue-pricing.test.mjs",
@@ -14,6 +14,9 @@
     "test:carsharing": "node --test src/modules/car-sharing/car-sharing-fulfillment.test.mjs src/modules/car-sharing/car-sharing-handoff.test.mjs",
     "test:issues": "node --test src/modules/issue-center/issue-center-attachments.test.mjs src/modules/issue-center/issue-center-claims-fields.test.mjs src/modules/issue-center/issue-center-packets.test.mjs src/modules/issue-center/issue-center-packet-html.test.mjs src/modules/issue-center/issue-center-next-best-action.test.mjs src/modules/issue-center/issue-center-workflow-actions.test.mjs src/modules/issue-center/issue-center-evidence-checklist.test.mjs src/modules/issue-center/issue-center-evidence-capture.test.mjs src/modules/issue-center/issue-center-evidence-request.test.mjs src/modules/issue-center/issue-center-request-workflow.test.mjs src/modules/issue-center/issue-center-recovery-actions.test.mjs src/modules/issue-center/issue-center-inspection-compare.test.mjs src/modules/issue-center/issue-center-charge-draft.test.mjs",
     "test:tolls": "node --test src/modules/tolls/tolls-responsibility.test.mjs src/modules/tolls/tolls-billing-policy.test.mjs",
+    "test:sms": "node --test src/modules/sms/sms-templates.test.mjs",
+    "test:payments": "node --test src/modules/payment-gateway/spin-client.test.mjs",
+    "test:auth": "node --test src/modules/auth/auth-validation.test.mjs",
     "verify": "npm run test",
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate dev --name init",
