@@ -1,3 +1,26 @@
+/**
+ * Settings Page — Multi-tab tenant configuration panel.
+ *
+ * Section Index (search for these markers):
+ *   SECTION:agreement    — Line ~1693  Company, branding, agreement templates
+ *   SECTION:payments     — Line ~1753  Payment gateway config
+ *   SECTION:ai           — Line ~1888  Planner copilot / AI config
+ *   SECTION:access       — Line ~2218  Module access controls
+ *   SECTION:locations    — Line ~2253  Location management
+ *   SECTION:fees         — Line ~2293  Fee configuration
+ *   SECTION:rates        — Line ~2340  Rate plans and pricing
+ *   SECTION:vehicleTypes — Line ~2554  Vehicle type management
+ *   SECTION:insurance    — Line ~2608  Insurance plan management
+ *   SECTION:selfService  — Line ~2752  Self-service / car sharing handoff config
+ *   SECTION:revenue      — Line ~3066  Revenue pricing engine
+ *   SECTION:carSharing   — Line ~3358  Car sharing search places
+ *   SECTION:telematics   — Line ~3526  Telematics / Zubie config
+ *   SECTION:emails       — Line ~3719  Email template management
+ *   SECTION:services     — Line ~3789  Additional services
+ *   SECTION:commissions  — Line ~3951  Commission plans and rules
+ *
+ * Constants: imported from ./settings-constants.js (~390 lines)
+ */
 'use client';
 
 import { useEffect, useState } from 'react';

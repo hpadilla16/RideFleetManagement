@@ -6,8 +6,9 @@
     "dev": "next dev -p 3000",
     "build": "next build",
     "start": "next start -p 3000",
-    "test": "npm run test:planner",
+    "test": "npm run test:planner && npm run test:components",
     "test:planner": "node --test src/app/planner/*.test.mjs",
+    "test:components": "npx vitest run",
     "test:smoke": "npm run test:planner",
     "verify": "npm run test && npm run build",
     "mobile:add:android": "npx cap add android",
@@ -30,5 +31,11 @@
     "react": "18.3.1",
     "react-dom": "18.3.1",
     "react-i18next": "^17.0.2"
+  },
+  "devDependencies": {
+    "@testing-library/jest-dom": "^6.9.1",
+    "@testing-library/react": "^16.3.2",
+    "jsdom": "^29.0.2",
+    "vitest": "^4.1.4"
   }
 }
