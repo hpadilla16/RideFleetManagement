@@ -801,6 +801,7 @@ function computeInsuranceLine(plan, baseAmount, days) {
     code: String(plan?.code || '').trim(),
     name: label,
     description: plan?.description || '',
+    displayDescription: plan?.displayDescription || '',
     chargeBy: mode,
     amount: money(amount),
     taxable: !!plan?.taxable,
@@ -1642,14 +1643,17 @@ export const bookingEngineService = {
       if (!selected) throw new Error('Selected rental vehicle type is no longer available');
       if (!selected.availability?.available) throw new Error('Selected rental vehicle type is sold out for those dates');
       const insuranceSelection = input?.insuranceSelection || {};
-      const selectedInsuranceCode = String(insuranceSelection?.selectedPlanCode || '').trim();
-      const selectedInsurancePlan = selectedInsuranceCode
-        ? (selected.insurancePlans || []).find((plan) => String(plan.code || '').trim().toUpperCase() === selectedInsuranceCode.toUpperCase())
-        : null;
+      const selectedPlanCodes = Array.isArray(insuranceSelection?.selectedPlanCodes) && insuranceSelection.selectedPlanCodes.length
+        ? insuranceSelection.selectedPlanCodes.map(c => String(c).trim().toUpperCase()).filter(Boolean)
+        : insuranceSelection?.selectedPlanCode ? [String(insuranceSelection.selectedPlanCode).trim().toUpperCase()] : [];
+      const selectedInsurancePlans = selectedPlanCodes
+        .map(code => (selected.insurancePlans || []).find((plan) => String(plan.code || '').trim().toUpperCase() === code))
+        .filter(Boolean);
+      const selectedInsurancePlan = selectedInsurancePlans[0] || null;
       const declinedCoverage = !!insuranceSelection?.declinedCoverage;
       const usingOwnInsurance = !!insuranceSelection?.usingOwnInsurance;
       const liabilityAccepted = !!insuranceSelection?.liabilityAccepted;
-      if (!selectedInsurancePlan) {
+      if (!selectedInsurancePlans.length) {
         if (!(declinedCoverage && usingOwnInsurance && liabilityAccepted)) {
           throw new Error('Select one of our insurance plans or accept responsibility and confirm you will use your own insurance');
         }
@@ -1679,16 +1683,15 @@ export const bookingEngineService = {
           days: Number(selected.quote?.days || 1)
         }))
         .filter(Boolean);
-      const insuranceLine = selectedInsurancePlan
-        ? {
-            ...selectedInsurancePlan,
-            source: 'INSURANCE',
-            sourceRefId: selectedInsurancePlan.code
-          }
-        : null;
+      const insuranceLines = selectedInsurancePlans.map(plan => ({
+        ...plan,
+        source: 'INSURANCE',
+        sourceRefId: plan.code
+      }));
+      const insuranceLine = insuranceLines[0] || null;
       const mandatoryFees = Array.isArray(selected.mandatoryFees) ? selected.mandatoryFees : [];
       const mandatoryFeesTotal = money(mandatoryFees.reduce((sum, fee) => sum + Number(fee.total || 0), 0));
-      const insuranceTotal = money(Number(insuranceLine?.total || 0));
+      const insuranceTotal = money(insuranceLines.reduce((sum, line) => sum + Number(line.total || 0), 0));
       const addOnsTotal = money(normalizedChosenServices.reduce((sum, service) => sum + Number(service.total || 0), 0));
       const linkedServiceFeesTotal = money(linkedServiceFees.reduce((sum, fee) => sum + Number(fee.total || 0), 0));
       const estimatedTotal = money(Number(selected.quote.total || 0) + addOnsTotal + linkedServiceFeesTotal + insuranceTotal);
@@ -1888,12 +1891,13 @@ export const bookingEngineService = {
         mandatoryFees,
         additionalServices: normalizedChosenServices,
         linkedServiceFees,
-        insuranceSelection: insuranceLine
+        insuranceSelection: insuranceLines.length
           ? {
               type: 'PLAN',
               code: insuranceLine.code,
               name: insuranceLine.name,
-              total: insuranceLine.total
+              total: insuranceTotal,
+              plans: insuranceLines.map(l => ({ code: l.code, name: l.name, total: l.total }))
             }
           : {
               type: 'OWN_POLICY',
