@@ -283,19 +283,33 @@ function CommunicationList({ rows }) {
 
 function FileLinks({ files }) {
   if (!files?.length) return <div className="surface-note">No files attached yet.</div>;
+  const openFile = (dataUrl, name) => {
+    if (!dataUrl) return;
+    if (dataUrl.startsWith('data:image/')) {
+      const win = window.open('', '_blank');
+      if (win) { win.document.write(`<html><head><title>${name}</title></head><body style="margin:0;display:flex;justify-content:center;align-items:center;min-height:100vh;background:#f5f5f5"><img src="${dataUrl}" style="max-width:100%;max-height:100vh;object-fit:contain" /></body></html>`); win.document.close(); }
+    } else if (dataUrl.startsWith('data:application/pdf') || dataUrl.startsWith('data:application/octet')) {
+      const win = window.open('', '_blank');
+      if (win) { win.document.write(`<html><head><title>${name}</title></head><body style="margin:0"><iframe src="${dataUrl}" style="width:100%;height:100vh;border:none"></iframe></body></html>`); win.document.close(); }
+    } else {
+      window.open(dataUrl, '_blank');
+    }
+  };
   return (
     <div className="stack">
       {files.map((file, index) => (
-        <a
+        <button
+          type="button"
           key={`${file.name || 'file'}-${index}`}
-          href={file.dataUrl || file}
-          target="_blank"
-          rel="noreferrer"
+          onClick={() => openFile(file.dataUrl || file, file.name || `Attachment ${index + 1}`)}
           className="surface-note"
-          style={{ textDecoration: 'none', color: '#4338ca' }}
+          style={{ textDecoration: 'none', color: '#4338ca', cursor: 'pointer', textAlign: 'left', border: 'none', background: 'inherit', font: 'inherit', padding: 'inherit' }}
         >
+          {(file.dataUrl || '').startsWith('data:image/') ? (
+            <img src={file.dataUrl} alt={file.name} style={{ width: '100%', maxHeight: 200, objectFit: 'contain', borderRadius: 10, marginBottom: 6 }} />
+          ) : null}
           Open {file.name || `Attachment ${index + 1}`}
-        </a>
+        </button>
       ))}
     </div>
   );
