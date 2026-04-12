@@ -1693,10 +1693,17 @@ export const bookingEngineService = {
       const linkedServiceFeesTotal = money(linkedServiceFees.reduce((sum, fee) => sum + Number(fee.total || 0), 0));
       const estimatedTotal = money(Number(selected.quote.total || 0) + addOnsTotal + linkedServiceFeesTotal + insuranceTotal);
 
+      // Recalculate deposit at checkout time with full totals (add-ons, insurance, fees)
+      const checkoutDeposit = depositSnapshot({
+        location: search.location,
+        quote: { ...selected.quote, baseTotal: Number(selected.quote?.baseTotal || selected.quote?.subtotal || 0) },
+        addOnsTotal: money(addOnsTotal + linkedServiceFeesTotal + insuranceTotal + mandatoryFeesTotal)
+      });
+
       const reservation = await reservationsService.create({
         reservationNumber: generateReservationNumber('WEB'),
         sourceRef: `PUBLICBOOK:${crypto.randomBytes(8).toString('hex')}`,
-        status: selected.deposit?.required ? 'NEW' : 'CONFIRMED',
+        status: checkoutDeposit?.required ? 'NEW' : 'CONFIRMED',
         customerId: customer.id,
         vehicleTypeId: selected.vehicleType.id,
         pickupAt: input.pickupAt,
@@ -1718,12 +1725,12 @@ export const bookingEngineService = {
           taxRate: Number(search.location?.taxRate || 0),
           selectedInsuranceCode: insuranceLine?.code || null,
           selectedInsuranceName: insuranceLine?.name || null,
-          depositRequired: !!selected.deposit?.required,
-          depositMode: selected.deposit?.mode || null,
-          depositValue: selected.deposit?.value ?? null,
-          depositAmountDue: selected.deposit?.amountDue ?? 0,
-          securityDepositRequired: !!selected.deposit?.securityDepositRequired,
-          securityDepositAmount: selected.deposit?.securityDepositAmount ?? 0,
+          depositRequired: !!checkoutDeposit?.required,
+          depositMode: checkoutDeposit?.mode || null,
+          depositValue: checkoutDeposit?.value ?? null,
+          depositAmountDue: checkoutDeposit?.amountDue ?? 0,
+          securityDepositRequired: !!checkoutDeposit?.securityDepositRequired,
+          securityDepositAmount: checkoutDeposit?.securityDepositAmount ?? 0,
           source: 'PUBLIC_BOOKING'
         },
         update: {
@@ -1731,12 +1738,12 @@ export const bookingEngineService = {
           taxRate: Number(search.location?.taxRate || 0),
           selectedInsuranceCode: insuranceLine?.code || null,
           selectedInsuranceName: insuranceLine?.name || null,
-          depositRequired: !!selected.deposit?.required,
-          depositMode: selected.deposit?.mode || null,
-          depositValue: selected.deposit?.value ?? null,
-          depositAmountDue: selected.deposit?.amountDue ?? 0,
-          securityDepositRequired: !!selected.deposit?.securityDepositRequired,
-          securityDepositAmount: selected.deposit?.securityDepositAmount ?? 0,
+          depositRequired: !!checkoutDeposit?.required,
+          depositMode: checkoutDeposit?.mode || null,
+          depositValue: checkoutDeposit?.value ?? null,
+          depositAmountDue: checkoutDeposit?.amountDue ?? 0,
+          securityDepositRequired: !!checkoutDeposit?.securityDepositRequired,
+          securityDepositAmount: checkoutDeposit?.securityDepositAmount ?? 0,
           source: 'PUBLIC_BOOKING'
         }
       });
@@ -1837,7 +1844,7 @@ export const bookingEngineService = {
         customer,
         tenant,
         pricingBreakdown: {
-          dueNow: money(selected.deposit?.amountDue),
+          dueNow: money(checkoutDeposit?.amountDue),
           estimatedTotal,
           reservationEstimate: estimatedTotal
         },
@@ -1874,8 +1881,8 @@ export const bookingEngineService = {
           linkedServiceFeesTotal,
           insuranceTotal,
           reservationEstimate: estimatedTotal,
-          depositDueNow: money(selected.deposit?.amountDue),
-          securityDeposit: money(selected.deposit?.securityDepositAmount),
+          depositDueNow: money(checkoutDeposit?.amountDue),
+          securityDeposit: money(checkoutDeposit?.securityDepositAmount),
           currency: 'USD'
         },
         mandatoryFees,
