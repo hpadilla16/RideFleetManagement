@@ -24,6 +24,17 @@ const bookingWriteGuard = [
   createOptionalIdempotencyGuard({ name: 'public-booking-write', windowMs: 15 * 60 * 1000 })
 ];
 
+// Public: get all policies, add-ons, protection tiers for checkout display
+publicBookingRouter.get('/policies', bookingReadGuard, async (req, res) => {
+  const { getAllPolicies } = await import('../commissions/car-sharing-policies.js');
+  const { TRIP_PROTECTION_TIERS, PROTECTION_EXCLUSIONS, OPTIONAL_ADDONS: COMMISSION_ADDONS } = await import('../commissions/car-sharing-commission.js');
+  res.json({
+    policies: getAllPolicies(),
+    protectionTiers: TRIP_PROTECTION_TIERS,
+    protectionExclusions: PROTECTION_EXCLUSIONS,
+  });
+});
+
 publicBookingRouter.get('/bootstrap', bookingReadGuard, async (req, res, next) => {
   try {
     const payload = await publicBookingService.getBootstrap({
