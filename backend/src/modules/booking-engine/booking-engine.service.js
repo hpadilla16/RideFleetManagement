@@ -1463,7 +1463,7 @@ export const bookingEngineService = {
       listingTripMap.set(key, current);
     }
     if (!directTenant && !listings.length) {
-      throw new Error('No car sharing vehicles are available for this location yet');
+      return { tenant: null, locations: [], searchPlaces: [], pickupAt: pickupDate.toISOString(), returnAt: returnDate.toISOString(), results: [] };
     }
 
     const tripDays = ceilTripDays(pickupDate, returnDate);
