@@ -1,7 +1,8 @@
 import { Router } from 'express';
 import { isSuperAdmin } from '../../middleware/auth.js';
 import { commissionsService } from './commissions.service.js';
-import { calculateCarSharingCommission, HOST_TIERS, TRIP_PROTECTION_TIERS, GUEST_SERVICE_FEE_PCT, PROTECTION_EXCLUSIONS, OPTIONAL_ADDONS } from './car-sharing-commission.js';
+import { calculateCarSharingCommission, HOST_TIERS, TRIP_PROTECTION_TIERS, GUEST_SERVICE_FEE_PCT, PROTECTION_EXCLUSIONS, OPTIONAL_ADDONS as COMMISSION_ADDONS } from './car-sharing-commission.js';
+import { getAllPolicies } from './car-sharing-policies.js';
 
 export const commissionsRouter = Router();
 
@@ -172,4 +173,9 @@ commissionsRouter.post('/car-sharing/calculate', (req, res) => {
   } catch (e) {
     res.status(400).json({ error: e.message });
   }
+});
+
+// Get ALL car sharing policies (fees, rules, add-ons, procedures)
+commissionsRouter.get('/car-sharing/policies', (req, res) => {
+  res.json(getAllPolicies());
 });
