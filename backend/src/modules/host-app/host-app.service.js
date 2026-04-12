@@ -506,7 +506,7 @@ export async function createHostVehicleSubmissionForProfile({ hostProfileId, ten
   if (!photos.length) throw new Error('At least one vehicle photo is required');
   if (!payload?.insuranceDocumentUrl) throw new Error('Insurance document is required');
   if (!payload?.registrationDocumentUrl) throw new Error('Registration document is required');
-  if (!payload?.initialInspectionDocumentUrl) throw new Error('Initial inspection document is required');
+  // Inspection document is optional — hosts can submit it later
 
   return prisma.hostVehicleSubmission.create({
     data: {
