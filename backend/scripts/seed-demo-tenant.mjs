@@ -23,6 +23,8 @@ function pastDate(daysAgo, hour = 10) {
   return d;
 }
 
+const tenantConnect = { tenant: { connect: { id: TENANT_ID } } };
+
 async function upsertLocation(codeSuffix, payload) {
   const code = `${PREFIX}-${codeSuffix}`;
   const existing = await prisma.location.findUnique({
@@ -31,7 +33,7 @@ async function upsertLocation(codeSuffix, payload) {
   if (existing) {
     return prisma.location.update({ where: { id: existing.id }, data: payload });
   }
-  return prisma.location.create({ data: { tenantId: TENANT_ID, code, ...payload } });
+  return prisma.location.create({ data: { ...tenantConnect, code, ...payload } });
 }
 
 async function upsertVehicleType(codeSuffix, payload) {
@@ -40,15 +42,18 @@ async function upsertVehicleType(codeSuffix, payload) {
   if (existing) {
     return prisma.vehicleType.update({ where: { id: existing.id }, data: payload });
   }
-  return prisma.vehicleType.create({ data: { tenantId: TENANT_ID, code, ...payload } });
+  return prisma.vehicleType.create({ data: { ...tenantConnect, code, ...payload } });
 }
 
 async function upsertVehicle(internalNumber, payload) {
   const existing = await prisma.vehicle.findUnique({ where: { internalNumber } });
   if (existing) {
-    return prisma.vehicle.update({ where: { id: existing.id }, data: { tenantId: TENANT_ID, ...payload } });
+    return prisma.vehicle.update({ where: { id: existing.id }, data: payload });
   }
-  return prisma.vehicle.create({ data: { tenantId: TENANT_ID, internalNumber, ...payload } });
+  const { vehicleTypeId, homeLocationId, ...rest } = payload;
+  const createData = { ...tenantConnect, internalNumber, ...rest, vehicleType: { connect: { id: vehicleTypeId } } };
+  if (homeLocationId) createData.homeLocation = { connect: { id: homeLocationId } };
+  return prisma.vehicle.create({ data: createData });
 }
 
 async function upsertCustomer(phone, payload) {
@@ -56,7 +61,7 @@ async function upsertCustomer(phone, payload) {
   if (existing) {
     return prisma.customer.update({ where: { id: existing.id }, data: payload });
   }
-  return prisma.customer.create({ data: { tenantId: TENANT_ID, phone, ...payload } });
+  return prisma.customer.create({ data: { ...tenantConnect, phone, ...payload } });
 }
 
 async function upsertFee(code, payload) {
@@ -64,7 +69,7 @@ async function upsertFee(code, payload) {
   if (existing) {
     return prisma.fee.update({ where: { id: existing.id }, data: payload });
   }
-  return prisma.fee.create({ data: { tenantId: TENANT_ID, code, ...payload } });
+  return prisma.fee.create({ data: { ...tenantConnect, code, ...payload } });
 }
 
 async function upsertService(code, payload) {
@@ -72,7 +77,7 @@ async function upsertService(code, payload) {
   if (existing) {
     return prisma.additionalService.update({ where: { id: existing.id }, data: payload });
   }
-  return prisma.additionalService.create({ data: { tenantId: TENANT_ID, code, ...payload } });
+  return prisma.additionalService.create({ data: { ...tenantConnect, code, ...payload } });
 }
 
 async function upsertReservation(reservationNumber, payload) {
@@ -80,7 +85,16 @@ async function upsertReservation(reservationNumber, payload) {
   if (existing) {
     return prisma.reservation.update({ where: { id: existing.id }, data: payload });
   }
-  return prisma.reservation.create({ data: { tenantId: TENANT_ID, reservationNumber, ...payload } });
+  const { customerId, vehicleId, vehicleTypeId, pickupLocationId, returnLocationId, ...rest } = payload;
+  const createData = {
+    ...tenantConnect, reservationNumber, ...rest,
+    customer: { connect: { id: customerId } },
+    pickupLocation: { connect: { id: pickupLocationId } },
+    returnLocation: { connect: { id: returnLocationId } },
+  };
+  if (vehicleId) createData.vehicle = { connect: { id: vehicleId } };
+  if (vehicleTypeId) createData.vehicleType = { connect: { id: vehicleTypeId } };
+  return prisma.reservation.create({ data: createData });
 }
 
 async function main() {
@@ -89,10 +103,10 @@ async function main() {
   // --- Locations ---
   const locMIA = await upsertLocation('MIA', {
     name: 'Miami International Airport',
-    address1: '2100 NW 42nd Ave',
+    address: '2100 NW 42nd Ave',
     city: 'Miami',
     state: 'FL',
-    zip: '33142',
+
     country: 'United States',
     taxRate: money(7),
     isActive: true,
@@ -108,10 +122,10 @@ async function main() {
 
   const locFLL = await upsertLocation('FLL', {
     name: 'Fort Lauderdale Airport',
-    address1: '100 Terminal Dr',
+    address: '100 Terminal Dr',
     city: 'Fort Lauderdale',
     state: 'FL',
-    zip: '33315',
+
     country: 'United States',
     taxRate: money(7),
     isActive: true,
@@ -126,10 +140,10 @@ async function main() {
 
   const locDTN = await upsertLocation('DTN', {
     name: 'Downtown Miami',
-    address1: '150 SE 2nd Ave',
+    address: '150 SE 2nd Ave',
     city: 'Miami',
     state: 'FL',
-    zip: '33131',
+
     country: 'United States',
     taxRate: money(7),
     isActive: true,
@@ -216,7 +230,7 @@ async function main() {
   } else {
     rate = await prisma.rate.create({
       data: {
-        tenantId: TENANT_ID,
+        ...tenantConnect,
         rateCode,
         name: 'Standard Daily Rates',
         rateType: 'MULTIPLE_CLASSES',
