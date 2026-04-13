@@ -814,7 +814,7 @@ function ReservationDetailInner({ token, me, logout }) {
       { label: 'Address', done: !!(customer.address1 && customer.city && customer.state && customer.zip) },
       { label: 'ID / License Photo', done: !!customer.idPhotoUrl },
       ...(insuranceDocRequired ? [{ label: 'Insurance Document', done: !!customer.insuranceDocumentUrl }] : []),
-      { label: 'Trip Protection', done: hasCompanyInsurance || !!(precheckinInsuranceInfo?.declinedCoverage && customer.insuranceDocumentUrl) }
+      { label: 'Trip Protection', done: hasCompanyInsurance || !!customer.insuranceDocumentUrl }
     ];
     const completed = items.filter((item) => item.done).length;
     const missingItems = items.filter((item) => !item.done);
@@ -1963,28 +1963,30 @@ token
                 )}
               </div>
             ) : null}
-            {(row?.customer?.idPhotoUrl || row?.customer?.insuranceDocumentUrl || precheckinThirdPartyInfo?.voucherUrl) && (
-              <div style={{ marginBottom: 12, padding: '14px 16px', borderRadius: 14, background: 'rgba(110,73,255,.03)', border: '1px solid rgba(110,73,255,.1)' }}>
-                <div style={{ fontWeight: 700, fontSize: '0.88rem', color: '#1a1230', marginBottom: 10 }}>Customer Documents</div>
-                <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                  {row?.customer?.idPhotoUrl && (
-                    <button type="button" className="button-subtle" style={{ fontSize: '0.85rem' }} onClick={() => setDocViewer({ title: 'ID / License Photo', url: row.customer.idPhotoUrl })}>
-                      ID / License Photo
-                    </button>
-                  )}
-                  {row?.customer?.insuranceDocumentUrl && (
-                    <button type="button" className="button-subtle" style={{ fontSize: '0.85rem' }} onClick={() => setDocViewer({ title: 'Insurance Document', url: row.customer.insuranceDocumentUrl })}>
-                      Insurance Document
-                    </button>
-                  )}
-                  {precheckinThirdPartyInfo?.voucherUrl && (
-                    <button type="button" className="button-subtle" style={{ fontSize: '0.85rem', background: 'rgba(245,158,11,.08)', borderColor: 'rgba(245,158,11,.2)', color: '#92400e' }} onClick={() => setDocViewer({ title: 'OTA Voucher', url: precheckinThirdPartyInfo.voucherUrl })}>
-                      OTA Voucher
-                    </button>
-                  )}
-                </div>
+            <div style={{ marginBottom: 12, padding: '14px 16px', borderRadius: 14, background: 'rgba(110,73,255,.03)', border: '1px solid rgba(110,73,255,.1)' }}>
+              <div style={{ fontWeight: 700, fontSize: '0.88rem', color: '#1a1230', marginBottom: 10 }}>Customer Documents</div>
+              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                {row?.customer?.idPhotoUrl ? (
+                  <button type="button" className="button-subtle" style={{ fontSize: '0.85rem' }} onClick={() => setDocViewer({ title: 'ID / License Photo', url: row.customer.idPhotoUrl })}>
+                    ID / License Photo
+                  </button>
+                ) : (
+                  <span className="label" style={{ textTransform: 'none', letterSpacing: 0, color: '#b91c1c', fontSize: '0.82rem' }}>ID / License Photo — Not uploaded</span>
+                )}
+                {row?.customer?.insuranceDocumentUrl ? (
+                  <button type="button" className="button-subtle" style={{ fontSize: '0.85rem' }} onClick={() => setDocViewer({ title: 'Insurance Document', url: row.customer.insuranceDocumentUrl })}>
+                    Insurance Document
+                  </button>
+                ) : (
+                  <span className="label" style={{ textTransform: 'none', letterSpacing: 0, color: hasCompanyInsurance ? '#6b7a9a' : '#b91c1c', fontSize: '0.82rem' }}>{hasCompanyInsurance ? 'Insurance — Company plan selected' : 'Insurance Document — Not uploaded'}</span>
+                )}
+                {precheckinThirdPartyInfo?.voucherUrl && (
+                  <button type="button" className="button-subtle" style={{ fontSize: '0.85rem', background: 'rgba(245,158,11,.08)', borderColor: 'rgba(245,158,11,.2)', color: '#92400e' }} onClick={() => setDocViewer({ title: 'OTA Voucher', url: precheckinThirdPartyInfo.voucherUrl })}>
+                    OTA Voucher
+                  </button>
+                )}
               </div>
-            )}
+            </div>
             <table>
               <thead><tr><th>Requirement</th><th>Status</th></tr></thead>
               <tbody>
