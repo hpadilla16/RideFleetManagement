@@ -224,6 +224,14 @@ function ReservationDetailInner({ token, me, logout }) {
     loanerCloseoutNotes: '',
     note: ''
   });
+  const [staffCheckinOpen, setStaffCheckinOpen] = useState(false);
+  const [staffCheckinForm, setStaffCheckinForm] = useState({
+    firstName: '', lastName: '', email: '', phone: '',
+    dateOfBirth: '', licenseNumber: '', licenseState: '',
+    address1: '', city: '', state: '', zip: '', country: 'US',
+    idPhotoUrl: '', insuranceDocumentUrl: ''
+  });
+  const [staffCheckinSaving, setStaffCheckinSaving] = useState(false);
   const canManagePrecheckin = ['SUPER_ADMIN', 'ADMIN', 'OPS'].includes(role);
   const canManagePricingOverrides = ['SUPER_ADMIN', 'ADMIN', 'OPS', 'AGENT'].includes(role);
   const canManageCommissionOwner = ['SUPER_ADMIN', 'ADMIN'].includes(role);
@@ -701,6 +709,41 @@ function ReservationDetailInner({ token, me, logout }) {
       setMsg(ready ? 'Reservation marked ready for pickup' : 'Ready-for-pickup cleared');
     } catch (e) {
       setMsg(e.message);
+    }
+  };
+  const openStaffCheckin = () => {
+    const c = row?.customer || {};
+    setStaffCheckinForm({
+      firstName: c.firstName || '', lastName: c.lastName || '', email: c.email || '', phone: c.phone || '',
+      dateOfBirth: c.dateOfBirth ? new Date(c.dateOfBirth).toISOString().slice(0, 10) : '',
+      licenseNumber: c.licenseNumber || '', licenseState: c.licenseState || '',
+      address1: c.address1 || '', city: c.city || '', state: c.state || '', zip: c.zip || '', country: c.country || 'US',
+      idPhotoUrl: c.idPhotoUrl || '', insuranceDocumentUrl: c.insuranceDocumentUrl || ''
+    });
+    setStaffCheckinOpen(true);
+  };
+  const handleStaffFileUpload = (key, file) => {
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => setStaffCheckinForm((prev) => ({ ...prev, [key]: reader.result }));
+    reader.readAsDataURL(file);
+  };
+  const submitStaffCheckin = async () => {
+    const f = staffCheckinForm;
+    if (!f.firstName || !f.lastName || !f.phone) { setMsg('First name, last name, and phone are required'); return; }
+    try {
+      setStaffCheckinSaving(true);
+      await api(`/api/reservations/${id}/precheckin/staff-complete`, {
+        method: 'POST',
+        body: JSON.stringify(f)
+      }, token);
+      setStaffCheckinOpen(false);
+      setMsg('Customer info saved and pre-check-in completed by staff');
+      await load();
+    } catch (e) {
+      setMsg(e.message);
+    } finally {
+      setStaffCheckinSaving(false);
     }
   };
   const breakdown = useMemo(() => {
@@ -1858,6 +1901,43 @@ token
                   </button>
                 ) : (
                   <button type="button" onClick={() => setReadyForPickup(false)}>Clear Ready For Pickup</button>
+                )}
+              </div>
+            ) : null}
+            {canManagePrecheckin && !precheckinStatus.isChecklistComplete ? (
+              <div style={{ marginBottom: 10 }}>
+                {!staffCheckinOpen ? (
+                  <button type="button" className="ios-action-btn" style={{ background: 'rgba(22,163,74,.08)', color: '#166534', fontWeight: 800 }} onClick={openStaffCheckin}>
+                    Fill In For Customer
+                  </button>
+                ) : (
+                  <div style={{ padding: 14, borderRadius: 14, background: 'rgba(22,163,74,.04)', border: '1px solid rgba(22,163,74,.15)' }}>
+                    <div className="row-between" style={{ marginBottom: 10 }}>
+                      <div style={{ fontWeight: 700, color: '#166534' }}>Staff Pre-Check-In</div>
+                      <button type="button" style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#6b7a9a', fontSize: '0.85rem' }} onClick={() => setStaffCheckinOpen(false)}>Cancel</button>
+                    </div>
+                    <div className="grid2" style={{ gap: 8, marginBottom: 8 }}>
+                      <div className="stack"><label className="label">First Name*</label><input value={staffCheckinForm.firstName} onChange={(e) => setStaffCheckinForm((p) => ({ ...p, firstName: e.target.value }))} /></div>
+                      <div className="stack"><label className="label">Last Name*</label><input value={staffCheckinForm.lastName} onChange={(e) => setStaffCheckinForm((p) => ({ ...p, lastName: e.target.value }))} /></div>
+                      <div className="stack"><label className="label">Email</label><input type="email" value={staffCheckinForm.email} onChange={(e) => setStaffCheckinForm((p) => ({ ...p, email: e.target.value }))} /></div>
+                      <div className="stack"><label className="label">Phone*</label><input value={staffCheckinForm.phone} onChange={(e) => setStaffCheckinForm((p) => ({ ...p, phone: e.target.value }))} /></div>
+                      <div className="stack"><label className="label">Date of Birth</label><input type="date" value={staffCheckinForm.dateOfBirth} onChange={(e) => setStaffCheckinForm((p) => ({ ...p, dateOfBirth: e.target.value }))} /></div>
+                      <div className="stack"><label className="label">License Number</label><input value={staffCheckinForm.licenseNumber} onChange={(e) => setStaffCheckinForm((p) => ({ ...p, licenseNumber: e.target.value }))} /></div>
+                      <div className="stack"><label className="label">License State</label><input value={staffCheckinForm.licenseState} onChange={(e) => setStaffCheckinForm((p) => ({ ...p, licenseState: e.target.value }))} /></div>
+                      <div className="stack"><label className="label">Address</label><input value={staffCheckinForm.address1} onChange={(e) => setStaffCheckinForm((p) => ({ ...p, address1: e.target.value }))} /></div>
+                      <div className="stack"><label className="label">City</label><input value={staffCheckinForm.city} onChange={(e) => setStaffCheckinForm((p) => ({ ...p, city: e.target.value }))} /></div>
+                      <div className="stack"><label className="label">State</label><input value={staffCheckinForm.state} onChange={(e) => setStaffCheckinForm((p) => ({ ...p, state: e.target.value }))} /></div>
+                      <div className="stack"><label className="label">ZIP</label><input value={staffCheckinForm.zip} onChange={(e) => setStaffCheckinForm((p) => ({ ...p, zip: e.target.value }))} /></div>
+                      <div className="stack"><label className="label">Country</label><input value={staffCheckinForm.country} onChange={(e) => setStaffCheckinForm((p) => ({ ...p, country: e.target.value }))} /></div>
+                    </div>
+                    <div className="grid2" style={{ gap: 8, marginBottom: 10 }}>
+                      <div className="stack"><label className="label">ID / License Photo</label><input type="file" accept="image/*" onChange={(e) => handleStaffFileUpload('idPhotoUrl', e.target.files?.[0])} />{staffCheckinForm.idPhotoUrl ? <span style={{ fontSize: '0.8rem', color: '#166534' }}>Uploaded</span> : null}</div>
+                      <div className="stack"><label className="label">Insurance Document</label><input type="file" accept="image/*,.pdf" onChange={(e) => handleStaffFileUpload('insuranceDocumentUrl', e.target.files?.[0])} />{staffCheckinForm.insuranceDocumentUrl ? <span style={{ fontSize: '0.8rem', color: '#166534' }}>Uploaded</span> : null}</div>
+                    </div>
+                    <button type="button" className="ios-action-btn" onClick={submitStaffCheckin} disabled={staffCheckinSaving} style={{ background: '#166534', color: '#fff' }}>
+                      {staffCheckinSaving ? 'Saving...' : 'Complete Pre-Check-In'}
+                    </button>
+                  </div>
                 )}
               </div>
             ) : null}

@@ -1042,6 +1042,71 @@ reservationsRouter.post('/:id/precheckin/ready', async (req, res, next) => {
   }
 });
 
+reservationsRouter.post('/:id/precheckin/staff-complete', async (req, res, next) => {
+  try {
+    if (!canManagePrecheckin(req)) {
+      return res.status(403).json({ error: 'Admin or ops role required' });
+    }
+
+    const current = await reservationsService.getById(req.params.id, scopeFor(req));
+    if (!current) return res.status(404).json({ error: 'Reservation not found' });
+
+    const customerId = current.customerId;
+    if (!customerId) return res.status(400).json({ error: 'Reservation has no customer linked' });
+
+    const body = req.body || {};
+    const customerUpdate = {};
+    const fields = [
+      'firstName', 'lastName', 'email', 'phone', 'dateOfBirth',
+      'licenseNumber', 'licenseState', 'address1', 'address2',
+      'city', 'state', 'zip', 'country',
+      'idPhotoUrl', 'insuranceDocumentUrl', 'insurancePolicyNumber'
+    ];
+    for (const key of fields) {
+      if (body[key] !== undefined) {
+        if (key === 'dateOfBirth' && body[key]) {
+          customerUpdate[key] = new Date(body[key]);
+        } else {
+          customerUpdate[key] = body[key] || null;
+        }
+      }
+    }
+
+    if (Object.keys(customerUpdate).length) {
+      await prisma.customer.update({
+        where: { id: customerId },
+        data: customerUpdate
+      });
+    }
+
+    const now = new Date();
+    const row = await reservationsService.update(req.params.id, {
+      customerInfoCompletedAt: now,
+      customerInfoReviewedAt: now,
+      customerInfoReviewedByUserId: req.user?.sub || null,
+      customerInfoReviewNote: 'Completed by staff on behalf of customer'
+    }, scopeFor(req));
+
+    await prisma.auditLog.create({
+      data: {
+        tenantId: row.tenantId || req.user?.tenantId || null,
+        reservationId: row.id,
+        action: 'ADMIN_OVERRIDE',
+        actorUserId: req.user?.sub || null,
+        metadata: JSON.stringify({
+          staffPrecheckinComplete: true,
+          completedAt: now.toISOString(),
+          fieldsUpdated: Object.keys(customerUpdate)
+        })
+      }
+    });
+
+    res.json({ ok: true, reservation: row });
+  } catch (e) {
+    next(e);
+  }
+});
+
 reservationsRouter.post('/:id/agreement/payments/manual', async (req, res, next) => {
   try {
     const agreementId = await ensureAgreementByReservationId(req.params.id, scopeFor(req));
