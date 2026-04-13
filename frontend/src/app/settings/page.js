@@ -172,6 +172,10 @@ function SettingsInner({ token, me, logout }) {
         square: {
           ...DEFAULT_PAYMENT_GATEWAY_CONFIG.square,
           ...(value?.square || {})
+        },
+        spin: {
+          ...DEFAULT_PAYMENT_GATEWAY_CONFIG.spin,
+          ...(value?.spin || {})
         }
       });
     }
@@ -441,6 +445,10 @@ function SettingsInner({ token, me, logout }) {
       square: {
         ...DEFAULT_PAYMENT_GATEWAY_CONFIG.square,
         ...(out?.square || {})
+      },
+      spin: {
+        ...DEFAULT_PAYMENT_GATEWAY_CONFIG.spin,
+        ...(out?.spin || {})
       }
     });
     setMsg('Payment gateway settings saved');
@@ -1794,6 +1802,7 @@ function SettingsInner({ token, me, logout }) {
                   <option value="authorizenet">Authorize.Net</option>
                   <option value="stripe">Stripe</option>
                   <option value="square">Square</option>
+                  <option value="spin">SPIn</option>
                 </select>
               </div>
               <div className="stack">
@@ -1893,6 +1902,49 @@ function SettingsInner({ token, me, logout }) {
                   <label className="label">Location ID</label>
                   <input value={paymentGatewayConfig.square?.locationId || ''} onChange={(e) => setPaymentGatewayConfig({ ...paymentGatewayConfig, square: { ...paymentGatewayConfig.square, locationId: e.target.value } })} />
                 </div>
+              </div>
+            </section>
+
+            <section className="glass card section-card">
+              <div className="row-between">
+                <h3 style={{ margin: 0 }}>SPIn Terminal</h3>
+                <label className="label"><input type="checkbox" checked={!!paymentGatewayConfig.spin?.enabled} onChange={(e) => setPaymentGatewayConfig({ ...paymentGatewayConfig, spin: { ...paymentGatewayConfig.spin, enabled: e.target.checked } })} /> Enabled</label>
+              </div>
+              <div className="form-grid-2">
+                <div className="stack">
+                  <label className="label">Environment</label>
+                  <select value={paymentGatewayConfig.spin?.environment || 'sandbox'} onChange={(e) => setPaymentGatewayConfig({ ...paymentGatewayConfig, spin: { ...paymentGatewayConfig.spin, environment: e.target.value } })}>
+                    <option value="sandbox">Sandbox</option>
+                    <option value="production">Production</option>
+                  </select>
+                </div>
+                <div className="stack">
+                  <label className="label">Auth Key</label>
+                  <input value={paymentGatewayConfig.spin?.authKey || ''} onChange={(e) => setPaymentGatewayConfig({ ...paymentGatewayConfig, spin: { ...paymentGatewayConfig.spin, authKey: e.target.value } })} />
+                </div>
+              </div>
+              <div className="form-grid-2">
+                <div className="stack">
+                  <label className="label">TPN (Terminal Profile Number)</label>
+                  <input value={paymentGatewayConfig.spin?.tpn || ''} onChange={(e) => setPaymentGatewayConfig({ ...paymentGatewayConfig, spin: { ...paymentGatewayConfig.spin, tpn: e.target.value } })} />
+                </div>
+                <div className="stack">
+                  <label className="label">Merchant Number</label>
+                  <input value={paymentGatewayConfig.spin?.merchantNumber || '1'} onChange={(e) => setPaymentGatewayConfig({ ...paymentGatewayConfig, spin: { ...paymentGatewayConfig.spin, merchantNumber: e.target.value } })} />
+                </div>
+              </div>
+              <div className="form-grid-2">
+                <div className="stack">
+                  <label className="label">Callback URL</label>
+                  <input value={paymentGatewayConfig.spin?.callbackUrl || ''} onChange={(e) => setPaymentGatewayConfig({ ...paymentGatewayConfig, spin: { ...paymentGatewayConfig.spin, callbackUrl: e.target.value } })} placeholder="https://yoursite.com/api/public/payment-gateway/spin/callback" />
+                </div>
+                <div className="stack">
+                  <label className="label">Proxy Timeout (seconds)</label>
+                  <input type="number" value={paymentGatewayConfig.spin?.proxyTimeout || '120'} onChange={(e) => setPaymentGatewayConfig({ ...paymentGatewayConfig, spin: { ...paymentGatewayConfig.spin, proxyTimeout: e.target.value } })} />
+                </div>
+              </div>
+              <div className="surface-note">
+                SPIn is a card-present terminal gateway for in-person payments. Configure the Auth Key and TPN from your SPIn merchant portal.
               </div>
             </section>
 

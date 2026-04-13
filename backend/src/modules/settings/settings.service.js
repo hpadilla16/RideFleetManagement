@@ -428,6 +428,15 @@ function defaultPaymentGatewayConfig() {
       accessToken: String(process.env.SQUARE_ACCESS_TOKEN || ''),
       applicationId: String(process.env.SQUARE_APPLICATION_ID || ''),
       locationId: String(process.env.SQUARE_LOCATION_ID || '')
+    },
+    spin: {
+      enabled: !!process.env.SPIN_AUTH_KEY,
+      environment: String(process.env.SPIN_ENV || 'sandbox').toLowerCase(),
+      authKey: String(process.env.SPIN_AUTH_KEY || ''),
+      tpn: String(process.env.SPIN_TPN || ''),
+      merchantNumber: String(process.env.SPIN_MERCHANT_NUMBER || '1'),
+      callbackUrl: String(process.env.SPIN_CALLBACK_URL || ''),
+      proxyTimeout: String(process.env.SPIN_PROXY_TIMEOUT || '120')
     }
   };
 }
@@ -637,6 +646,10 @@ export const settingsService = {
         square: {
           ...defaults.square,
           ...(parsed?.square || {})
+        },
+        spin: {
+          ...defaults.spin,
+          ...(parsed?.spin || {})
         }
       };
     } catch {
@@ -677,6 +690,17 @@ export const settingsService = {
         accessToken: String(payload?.square?.accessToken || '').trim(),
         applicationId: String(payload?.square?.applicationId || '').trim(),
         locationId: String(payload?.square?.locationId || '').trim()
+      },
+      spin: {
+        ...defaults.spin,
+        ...(payload?.spin || {}),
+        enabled: !!payload?.spin?.enabled,
+        environment: String(payload?.spin?.environment || defaults.spin.environment).trim().toLowerCase(),
+        authKey: String(payload?.spin?.authKey || '').trim(),
+        tpn: String(payload?.spin?.tpn || '').trim(),
+        merchantNumber: String(payload?.spin?.merchantNumber || '1').trim(),
+        callbackUrl: String(payload?.spin?.callbackUrl || '').trim(),
+        proxyTimeout: String(payload?.spin?.proxyTimeout || '120').trim()
       }
     };
     const key = scopedKey('paymentGatewayConfig', scope);

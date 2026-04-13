@@ -57,6 +57,15 @@ export const DEFAULT_PAYMENT_GATEWAY_CONFIG = {
     accessToken: '',
     applicationId: '',
     locationId: ''
+  },
+  spin: {
+    enabled: false,
+    environment: 'sandbox',
+    authKey: '',
+    tpn: '',
+    merchantNumber: '1',
+    callbackUrl: '',
+    proxyTimeout: '120'
   }
 };
 
