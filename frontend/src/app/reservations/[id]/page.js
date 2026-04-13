@@ -232,7 +232,7 @@ function ReservationDetailInner({ token, me, logout }) {
     idPhotoUrl: '', insuranceDocumentUrl: ''
   });
   const [staffCheckinSaving, setStaffCheckinSaving] = useState(false);
-  const canManagePrecheckin = ['SUPER_ADMIN', 'ADMIN', 'OPS'].includes(role);
+  const canManagePrecheckin = ['SUPER_ADMIN', 'ADMIN', 'OPS', 'AGENT'].includes(role);
   const canManagePricingOverrides = ['SUPER_ADMIN', 'ADMIN', 'OPS', 'AGENT'].includes(role);
   const canManageCommissionOwner = ['SUPER_ADMIN', 'ADMIN'].includes(role);
   const canLoadSupportingCatalogs = ['SUPER_ADMIN', 'ADMIN', 'OPS'].includes(role);

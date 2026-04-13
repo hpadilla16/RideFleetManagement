@@ -49,7 +49,7 @@ async function ensureAgreementByReservationId(reservationId, scope = {}) {
 
 function canManagePrecheckin(req) {
   const role = String(req.user?.role || '').toUpperCase();
-  return ['SUPER_ADMIN', 'ADMIN', 'OPS'].includes(role);
+  return ['SUPER_ADMIN', 'ADMIN', 'OPS', 'AGENT'].includes(role);
 }
 
 function canManagePricingOverrides(req) {
