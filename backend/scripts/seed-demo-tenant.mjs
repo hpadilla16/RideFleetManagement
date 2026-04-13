@@ -175,7 +175,7 @@ async function main() {
     // Standard fleet
     upsertVehicle('DEMO-004', { vin: 'DEMO00000000000004', plate: 'DMO-004', make: 'Toyota', model: 'Camry', year: 2025, color: 'Black', mileage: 5600, status: 'AVAILABLE', fleetMode: 'RENTAL_ONLY', vehicleTypeId: vtStd.id, homeLocationId: locMIA.id }),
     upsertVehicle('DEMO-005', { vin: 'DEMO00000000000005', plate: 'DMO-005', make: 'Honda', model: 'Accord', year: 2025, color: 'Gray', mileage: 9800, status: 'AVAILABLE', fleetMode: 'RENTAL_ONLY', vehicleTypeId: vtStd.id, homeLocationId: locFLL.id }),
-    upsertVehicle('DEMO-006', { vin: 'DEMO00000000000006', plate: 'DMO-006', make: 'Hyundai', model: 'Sonata', year: 2024, color: 'White', mileage: 22100, status: 'MAINTENANCE', fleetMode: 'RENTAL_ONLY', vehicleTypeId: vtStd.id, homeLocationId: locDTN.id }),
+    upsertVehicle('DEMO-006', { vin: 'DEMO00000000000006', plate: 'DMO-006', make: 'Hyundai', model: 'Sonata', year: 2024, color: 'White', mileage: 22100, status: 'IN_MAINTENANCE', fleetMode: 'RENTAL_ONLY', vehicleTypeId: vtStd.id, homeLocationId: locDTN.id }),
     // SUV fleet
     upsertVehicle('DEMO-007', { vin: 'DEMO00000000000007', plate: 'DMO-007', make: 'Toyota', model: 'RAV4', year: 2025, color: 'Red', mileage: 7300, status: 'AVAILABLE', fleetMode: 'RENTAL_ONLY', vehicleTypeId: vtSUV.id, homeLocationId: locMIA.id }),
     upsertVehicle('DEMO-008', { vin: 'DEMO00000000000008', plate: 'DMO-008', make: 'Ford', model: 'Explorer', year: 2025, color: 'Blue', mileage: 11200, status: 'AVAILABLE', fleetMode: 'RENTAL_ONLY', vehicleTypeId: vtSUV.id, homeLocationId: locFLL.id }),
@@ -186,8 +186,8 @@ async function main() {
     // Minivan fleet
     upsertVehicle('DEMO-012', { vin: 'DEMO00000000000012', plate: 'DMO-012', make: 'Chrysler', model: 'Pacifica', year: 2025, color: 'Gray', mileage: 6700, status: 'AVAILABLE', fleetMode: 'RENTAL_ONLY', vehicleTypeId: vtVan.id, homeLocationId: locMIA.id }),
     // Rented out vehicles
-    upsertVehicle('DEMO-013', { vin: 'DEMO00000000000013', plate: 'DMO-013', make: 'Kia', model: 'Forte', year: 2025, color: 'Red', mileage: 14200, status: 'RENTED', fleetMode: 'RENTAL_ONLY', vehicleTypeId: vtEcon.id, homeLocationId: locMIA.id }),
-    upsertVehicle('DEMO-014', { vin: 'DEMO00000000000014', plate: 'DMO-014', make: 'Hyundai', model: 'Tucson', year: 2025, color: 'Black', mileage: 8900, status: 'RENTED', fleetMode: 'RENTAL_ONLY', vehicleTypeId: vtSUV.id, homeLocationId: locFLL.id }),
+    upsertVehicle('DEMO-013', { vin: 'DEMO00000000000013', plate: 'DMO-013', make: 'Kia', model: 'Forte', year: 2025, color: 'Red', mileage: 14200, status: 'ON_RENT', fleetMode: 'RENTAL_ONLY', vehicleTypeId: vtEcon.id, homeLocationId: locMIA.id }),
+    upsertVehicle('DEMO-014', { vin: 'DEMO00000000000014', plate: 'DMO-014', make: 'Hyundai', model: 'Tucson', year: 2025, color: 'Black', mileage: 8900, status: 'ON_RENT', fleetMode: 'RENTAL_ONLY', vehicleTypeId: vtSUV.id, homeLocationId: locFLL.id }),
     upsertVehicle('DEMO-015', { vin: 'DEMO00000000000015', plate: 'DMO-015', make: 'Toyota', model: 'Highlander', year: 2024, color: 'White', mileage: 25600, status: 'AVAILABLE', fleetMode: 'RENTAL_ONLY', vehicleTypeId: vtSUV.id, homeLocationId: locMIA.id }),
   ]);
 
@@ -294,10 +294,10 @@ async function main() {
     { number: 'DEMO-10006', status: 'NEW', customerId: customers[5].id, vehicleTypeId: vtVan.id, pickupLocationId: locMIA.id, returnLocationId: locMIA.id, pickupAt: futureDate(5, 10), returnAt: futureDate(8, 10), dailyRate: money(75), estimatedTotal: money(225) },
 
     // Completed rentals (returned in the past)
-    { number: 'DEMO-10007', status: 'COMPLETED', customerId: customers[6].id, vehicleTypeId: vtEcon.id, pickupLocationId: locMIA.id, returnLocationId: locMIA.id, pickupAt: pastDate(14, 10), returnAt: pastDate(10, 10), dailyRate: money(39), estimatedTotal: money(156) },
-    { number: 'DEMO-10008', status: 'COMPLETED', customerId: customers[7].id, vehicleTypeId: vtSUV.id, pickupLocationId: locFLL.id, returnLocationId: locMIA.id, pickupAt: pastDate(21, 9), returnAt: pastDate(14, 15), dailyRate: money(65), estimatedTotal: money(455) },
-    { number: 'DEMO-10009', status: 'COMPLETED', customerId: customers[8].id, vehicleTypeId: vtStd.id, pickupLocationId: locDTN.id, returnLocationId: locDTN.id, pickupAt: pastDate(30, 10), returnAt: pastDate(25, 10), dailyRate: money(49), estimatedTotal: money(245) },
-    { number: 'DEMO-10010', status: 'COMPLETED', customerId: customers[0].id, vehicleTypeId: vtLux.id, pickupLocationId: locMIA.id, returnLocationId: locMIA.id, pickupAt: pastDate(45, 11), returnAt: pastDate(42, 11), dailyRate: money(120), estimatedTotal: money(360) },
+    { number: 'DEMO-10007', status: 'CHECKED_IN', customerId: customers[6].id, vehicleTypeId: vtEcon.id, pickupLocationId: locMIA.id, returnLocationId: locMIA.id, pickupAt: pastDate(14, 10), returnAt: pastDate(10, 10), dailyRate: money(39), estimatedTotal: money(156) },
+    { number: 'DEMO-10008', status: 'CHECKED_IN', customerId: customers[7].id, vehicleTypeId: vtSUV.id, pickupLocationId: locFLL.id, returnLocationId: locMIA.id, pickupAt: pastDate(21, 9), returnAt: pastDate(14, 15), dailyRate: money(65), estimatedTotal: money(455) },
+    { number: 'DEMO-10009', status: 'CHECKED_IN', customerId: customers[8].id, vehicleTypeId: vtStd.id, pickupLocationId: locDTN.id, returnLocationId: locDTN.id, pickupAt: pastDate(30, 10), returnAt: pastDate(25, 10), dailyRate: money(49), estimatedTotal: money(245) },
+    { number: 'DEMO-10010', status: 'CHECKED_IN', customerId: customers[0].id, vehicleTypeId: vtLux.id, pickupLocationId: locMIA.id, returnLocationId: locMIA.id, pickupAt: pastDate(45, 11), returnAt: pastDate(42, 11), dailyRate: money(120), estimatedTotal: money(360) },
 
     // Cancelled
     { number: 'DEMO-10011', status: 'CANCELLED', customerId: customers[9].id, vehicleTypeId: vtEcon.id, pickupLocationId: locMIA.id, returnLocationId: locMIA.id, pickupAt: futureDate(7, 10), returnAt: futureDate(10, 10), dailyRate: money(39), estimatedTotal: money(117) },
