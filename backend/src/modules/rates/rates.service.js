@@ -548,13 +548,14 @@ export const ratesService = {
     );
     const dynamicBreakdown = chargeDates.map((date) => {
       const dateKey = dayKey(date);
-      const daily = chosen.sameSpecialRates && overrideMap.has(dateKey)
+      const hasOverride = overrideMap.has(dateKey);
+      const daily = hasOverride
         ? Number(overrideMap.get(dateKey) || 0)
         : baseDailyRate;
       return {
         date: dateKey,
         dailyRate: Number(daily.toFixed(2)),
-        overridden: chosen.sameSpecialRates && overrideMap.has(dateKey)
+        overridden: hasOverride
       };
     });
     const baseTotal = Number(dynamicBreakdown.reduce((sum, row) => sum + Number(row.dailyRate || 0), 0).toFixed(2));

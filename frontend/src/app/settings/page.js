@@ -39,7 +39,7 @@ import {
   EMPTY_LOCATION, LOCATION_CONFIG_DEFAULT, EMPTY_FEE,
   EMPTY_VEHICLE_TYPE, EMPTY_RATE, EMPTY_SERVICE,
   EMPTY_COMMISSION_PLAN, EMPTY_COMMISSION_RULE,
-  TENANT_TIMEZONE_OPTIONS, normalizeInsurancePlan
+  TENANT_TIMEZONE_OPTIONS, normalizeInsurancePlan, parseDelimitedRows
 } from './settings-constants';
 
 
@@ -1245,14 +1245,20 @@ function SettingsInner({ token, me, logout }) {
     window.URL.revokeObjectURL(url);
   };
 
-  const loadRateDailyPricingFile = async (file) => {
+  const loadRateDailyPricingFile = async (e) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
     if (!file) return;
-    const text = await file.text();
-    const rows = parseDelimitedRows(text);
-    setRateDailyUploadRows(rows);
-    setRateDailyUploadName(file.name || 'pricing-upload.csv');
-    setRateDailyUploadReport(null);
-    setMsg(rows.length ? `Loaded ${rows.length} dynamic pricing row(s) from ${file.name}` : 'No pricing rows found in that file');
+    try {
+      const text = await file.text();
+      const rows = parseDelimitedRows(text);
+      setRateDailyUploadRows(rows);
+      setRateDailyUploadName(file.name || 'pricing-upload.csv');
+      setRateDailyUploadReport(null);
+      setMsg(rows.length ? `Loaded ${rows.length} dynamic pricing row(s) from ${file.name}` : 'No pricing rows found in that file');
+    } catch (err) {
+      setMsg(`Failed to read file: ${err.message}`);
+    }
   };
 
   const validateRateDailyPricing = async () => {
@@ -2493,7 +2499,7 @@ function SettingsInner({ token, me, logout }) {
                           type="file"
                           accept=".csv,.txt,text/csv"
                           style={{ display: 'none' }}
-                          onChange={(e) => loadRateDailyPricingFile(e.target.files?.[0])}
+                          onChange={loadRateDailyPricingFile}
                         />
                       </label>
                       <button type="button" className="button-subtle" onClick={validateRateDailyPricing} disabled={!rateDailyUploadRows.length}>Validate Upload</button>
