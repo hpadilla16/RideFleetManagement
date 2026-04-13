@@ -30,7 +30,7 @@ function pricingEditorState(pricing, reservation) {
       taxRate: String(snapshot?.taxRate ?? '11.5'),
       serviceNames,
       feeNames,
-      insuranceCode: snapshot?.selectedInsuranceCode || ''
+      insuranceCodes: snapshot?.selectedInsuranceCodes || snapshot?.selectedInsuranceCode || ''
     };
   }
   return {
@@ -39,7 +39,7 @@ function pricingEditorState(pricing, reservation) {
     taxRate: '11.5',
     serviceNames: '',
     feeNames: '',
-    insuranceCode: ''
+    insuranceCodes: ''
   };
 }
 
@@ -179,7 +179,7 @@ function ReservationDetailInner({ token, me, logout }) {
   const [activePanel, setActivePanel] = useState('overview');
   const [auditLogs, setAuditLogs] = useState([]);
   const [chargeEdit, setChargeEdit] = useState(false);
-  const [chargeModel, setChargeModel] = useState({ dailyRate: '0', serviceFee: '0', taxRate: '11.5', serviceNames: '', feeNames: '', insuranceCode: '' });
+  const [chargeModel, setChargeModel] = useState({ dailyRate: '0', serviceFee: '0', taxRate: '11.5', serviceNames: '', feeNames: '', insuranceCodes: '' });
   const [form, setForm] = useState({ customerId: '', vehicleId: '', pickupAt: '', returnAt: '', pickupLocationId: '', returnLocationId: '', notes: '' });
   const [loanerPacketForm, setLoanerPacketForm] = useState({
     driverLicenseChecked: false,
@@ -1115,8 +1115,12 @@ function ReservationDetailInner({ token, me, logout }) {
       return;
     }
 
-    if (id.startsWith('ins-') || id.startsWith('insurance-') || id === 'insurance') {
-      setChargeModel((prev) => ({ ...prev, insuranceCode: '' }));
+    if (id.startsWith('ins-')) {
+      const codeToRemove = id.replace('ins-', '');
+      setChargeModel((prev) => {
+        const current = String(prev.insuranceCodes || '').split(',').map((x) => x.trim()).filter(Boolean);
+        return { ...prev, insuranceCodes: current.filter((c) => c.toUpperCase() !== codeToRemove.toUpperCase()).join(', ') };
+      });
       return;
     }
 
@@ -1142,10 +1146,14 @@ const feeNames = String(chargeModel.feeNames || '')
 .map((x) => x.trim())
 .filter(Boolean);
 
-const insuranceCode = String(chargeModel.insuranceCode || '').trim();
-const insurancePlan = insuranceCode
-  ? (insurancePlans || []).find((p) => String(p.code || '').trim().toUpperCase() === insuranceCode.toUpperCase())
-  : null;
+const selectedInsuranceCodes = String(chargeModel.insuranceCodes || '')
+  .split(',')
+  .map((x) => x.trim())
+  .filter(Boolean);
+
+const selectedInsurancePlansList = selectedInsuranceCodes
+  .map((code) => (insurancePlans || []).find((p) => String(p.code || '').trim().toUpperCase() === code.toUpperCase()))
+  .filter(Boolean);
 
 const serviceRows = serviceNames.map((name, idx) => {
 const opt = serviceOptions.find((s) => (s.name || s.code || '').trim().toLowerCase() === name.toLowerCase());
@@ -1237,11 +1245,10 @@ const linkedFeeRows = serviceRows
   })
   .filter(Boolean);
 
-const insuranceRows = [];
-if (insurancePlan) {
-  const planLabel = insurancePlan.label || insurancePlan.name || insurancePlan.code;
-  const mode = String(insurancePlan.chargeBy || insurancePlan.mode || 'FIXED').toUpperCase();
-  const amount = toMoneyNum(insurancePlan.amount || 0);
+const insuranceRows = selectedInsurancePlansList.map((plan) => {
+  const planLabel = plan.label || plan.name || plan.code;
+  const mode = String(plan.chargeBy || plan.mode || 'FIXED').toUpperCase();
+  const amount = toMoneyNum(plan.amount || 0);
   let quantity = 1;
   let rate = amount;
   let total = amount;
@@ -1253,18 +1260,18 @@ if (insurancePlan) {
     total = toMoneyNum(toMoneyNum((chargeModel.dailyRate || row?.dailyRate || 0) * breakdown.days) * (amount / 100));
     rate = total;
   }
-  insuranceRows.push({
-    id: `ins-${insurancePlan.code}`,
+  return {
+    id: `ins-${plan.code}`,
     name: `Insurance: ${planLabel}`,
     chargeType: 'UNIT',
     quantity,
     rate,
     total,
-    taxable: !!insurancePlan.taxable,
+    taxable: !!plan.taxable,
     source: 'INSURANCE',
-    sourceRefId: insurancePlan.code
-  });
-}
+    sourceRefId: plan.code
+  };
+});
 
 const baseRow = {
 id: 'daily',
@@ -1333,8 +1340,9 @@ method: 'PUT',
 body: JSON.stringify({
 dailyRate: Number(chargeModel.dailyRate || row?.dailyRate || 0),
 taxRate: Number(chargeModel.taxRate || 0),
-selectedInsuranceCode: insurancePlan ? insurancePlan.code : '',
-selectedInsuranceName: insurancePlan ? (insurancePlan.label || insurancePlan.name || insurancePlan.code) : null,
+selectedInsuranceCodes: selectedInsuranceCodes.join(', '),
+selectedInsuranceCode: selectedInsuranceCodes[0] || '',
+selectedInsuranceName: selectedInsurancePlansList.length ? selectedInsurancePlansList.map((p) => p.label || p.name || p.code).join(', ') : null,
 depositRequired: Number(depositOverrides.depositDue || 0) > 0,
 depositMode: Number(depositOverrides.depositDue || 0) > 0 ? 'FIXED' : null,
 depositValue: Number(depositOverrides.depositDue || 0),
@@ -1411,11 +1419,10 @@ token
     });
   }, [insurancePlans, row?.vehicleTypeId, row?.pickupLocationId]);
 
-  const selectedInsurancePlan = useMemo(() => {
-    if (!chargeModel.insuranceCode) return null;
-    const code = String(chargeModel.insuranceCode || '').trim().toUpperCase();
-    return filteredInsurancePlans.find((p) => String(p.code || '').trim().toUpperCase() === code) || null;
-  }, [filteredInsurancePlans, chargeModel.insuranceCode]);
+  const selectedInsurancePlansDisplay = useMemo(() => {
+    const codes = String(chargeModel.insuranceCodes || '').split(',').map((x) => x.trim()).filter(Boolean);
+    return codes.map((code) => filteredInsurancePlans.find((p) => String(p.code || '').trim().toUpperCase() === code.toUpperCase())).filter(Boolean);
+  }, [filteredInsurancePlans, chargeModel.insuranceCodes]);
 
   const displayChargeRows = useMemo(() => {
     if (!chargeEdit && pricing?.charges?.length) {
@@ -1428,14 +1435,29 @@ token
         const n = String(s?.name || s?.code || '').trim().toLowerCase();
         return n === raw;
       });
-      const rate = toMoneyNum(opt?.price ?? opt?.rate ?? opt?.amount ?? 0);
-      const mode = String(opt?.mode || opt?.billingType || opt?.chargeType || opt?.calculationType || opt?.priceType || opt?.amountType || opt?.frequency || opt?.apply || '').toUpperCase();
-      const perDay =
-        ['1', 'TRUE', 'YES', 'Y', 'PER_DAY', 'PER-DAY', 'DAILY', 'DAY', 'BY_DAY', 'PERDAY'].includes(String(opt?.isPerDay).toUpperCase()) ||
-        ['1', 'TRUE', 'YES', 'Y', 'PER_DAY', 'PER-DAY', 'DAILY', 'DAY', 'BY_DAY', 'PERDAY'].includes(String(opt?.perDay).toUpperCase()) ||
-        ['PER_DAY', 'PER-DAY', 'DAILY', 'DAY', 'BY_DAY', 'PERDAY'].includes(mode);
+      const flatRate = toMoneyNum(opt?.price ?? opt?.rate ?? opt?.amount ?? 0);
+      const dailyRate = toMoneyNum(opt?.dailyRate || 0);
+      const weeklyRate = toMoneyNum(opt?.weeklyRate || 0);
+      const monthlyRate = toMoneyNum(opt?.monthlyRate || 0);
+      let rate = flatRate;
+      let unit = 1;
+      if (dailyRate > 0) {
+        rate = dailyRate;
+        unit = breakdown.days;
+        if (breakdown.days >= 7 && weeklyRate > 0) {
+          const weeks = Math.ceil(breakdown.days / 7);
+          if (weeklyRate * weeks < dailyRate * breakdown.days) { rate = weeklyRate; unit = weeks; }
+        }
+        if (breakdown.days >= 28 && monthlyRate > 0) {
+          const months = Math.ceil(breakdown.days / 30);
+          if (monthlyRate * months < dailyRate * breakdown.days) { rate = monthlyRate; unit = months; }
+        }
+      } else {
+        const mode = String(opt?.mode || opt?.chargeType || '').toUpperCase();
+        const perDay = ['PER_DAY', 'DAILY', 'DAY', 'BY_DAY'].includes(mode);
+        unit = perDay ? toMoneyNum(breakdown.days) : 1;
+      }
       const taxable = opt?.taxable === undefined ? true : !!opt?.taxable;
-      const unit = perDay ? toMoneyNum(breakdown.days) : 1;
       const total = toMoneyNum(rate * unit);
       return { id: r.id, name: r.name, unit, rate, total, taxable };
     });
@@ -2224,24 +2246,31 @@ token
                       <div className="stack">
                         <label className="label">Insurance</label>
                         <div style={{ display: 'flex', gap: 6 }}>
-                          <select value={chargeModel.insuranceCode || ''} onChange={(e) => setChargeModel({ ...chargeModel, insuranceCode: e.target.value })}>
-                            <option value="">No insurance selected</option>
+                          <select value="" onChange={(e) => { const v = String(e.target.value || '').trim(); if (!v) return; const curr = String(chargeModel.insuranceCodes || '').split(',').map((x) => x.trim()).filter(Boolean); if (!curr.some((c) => c.toUpperCase() === v.toUpperCase())) setChargeModel({ ...chargeModel, insuranceCodes: [...curr, v].join(', ') }); }}>
+                            <option value="">Select insurance plan</option>
                             {filteredInsurancePlans.map((plan) => {
                               const label = (plan.label || plan.name || plan.code || '').trim();
                               const mode = String(plan.chargeBy || plan.mode || 'FIXED').toUpperCase();
                               const amount = toMoneyNum(plan.amount || 0);
                               const descriptor = mode === 'PERCENTAGE' ? `${amount}%` : money(amount);
-                              return <option key={plan.id || plan.code} value={plan.code}>{`${label} — ${descriptor}`}</option>;
+                              const alreadySelected = String(chargeModel.insuranceCodes || '').split(',').map((x) => x.trim()).some((c) => c.toUpperCase() === String(plan.code).toUpperCase());
+                              return <option key={plan.id || plan.code} value={plan.code} disabled={alreadySelected}>{`${label} — ${descriptor}${alreadySelected ? ' (added)' : ''}`}</option>;
                             })}
                           </select>
-                          {chargeModel.insuranceCode ? (
-                            <button type="button" onClick={() => setChargeModel({ ...chargeModel, insuranceCode: '' })}>Clear</button>
-                          ) : null}
+                          <button type="button" onClick={() => { const v = ''; setChargeModel({ ...chargeModel, insuranceCodes: '' }); }}>Clear</button>
+                        </div>
+                        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 4 }}>
+                          {selectedInsurancePlansDisplay.map((plan) => (
+                            <span key={plan.code} className="label" style={{ textTransform: 'none', letterSpacing: 0, border: '1px solid #3a2d5f', borderRadius: 12, padding: '2px 8px', display: 'inline-flex', gap: 6, alignItems: 'center' }}>
+                              {plan.label || plan.name || plan.code}
+                              <button type="button" title="Remove plan" onClick={() => { const next = String(chargeModel.insuranceCodes || '').split(',').map((x) => x.trim()).filter(Boolean).filter((c) => c.toUpperCase() !== String(plan.code).toUpperCase()); setChargeModel({ ...chargeModel, insuranceCodes: next.join(', ') }); }}>×</button>
+                            </span>
+                          ))}
                         </div>
                         <div className="label" style={{ textTransform: 'none', letterSpacing: 0 }}>
-                          {selectedInsurancePlan
-                            ? (selectedInsurancePlan.description || 'Plan applied to this reservation.')
-                            : 'Optional protection plan for this reservation.'}
+                          {selectedInsurancePlansDisplay.length
+                            ? `${selectedInsurancePlansDisplay.length} plan(s) selected`
+                            : 'Optional protection plans for this reservation.'}
                         </div>
                       </div>
                     </div><div className="grid2">
