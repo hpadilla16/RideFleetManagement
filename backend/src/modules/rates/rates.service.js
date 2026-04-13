@@ -850,36 +850,35 @@ export const ratesService = {
       };
     }
 
-    await prisma.$transaction(async (tx) => {
-      await tx.rate.update({
-        where: { id: rateId },
-        data: {
-          sameSpecialRates: true,
-          variesPricing: true
-        }
-      });
+    await prisma.rate.update({
+      where: { id: rateId },
+      data: { sameSpecialRates: true, variesPricing: true }
+    });
 
-      for (const row of report.rows) {
-        await tx.rateDailyPrice.upsert({
-          where: {
-            rateId_vehicleTypeId_date: {
+    const BATCH_SIZE = 80;
+    for (let i = 0; i < report.rows.length; i += BATCH_SIZE) {
+      const batch = report.rows.slice(i, i + BATCH_SIZE);
+      await prisma.$transaction(
+        batch.map((row) =>
+          prisma.rateDailyPrice.upsert({
+            where: {
+              rateId_vehicleTypeId_date: {
+                rateId,
+                vehicleTypeId: row.vehicleTypeId,
+                date: row.date
+              }
+            },
+            update: { daily: row.daily },
+            create: {
               rateId,
               vehicleTypeId: row.vehicleTypeId,
-              date: row.date
+              date: row.date,
+              daily: row.daily
             }
-          },
-          update: {
-            daily: row.daily
-          },
-          create: {
-            rateId,
-            vehicleTypeId: row.vehicleTypeId,
-            date: row.date,
-            daily: row.daily
-          }
-        });
-      }
-    });
+          })
+        )
+      );
+    }
 
     return {
       imported: report.rows.length,
