@@ -15,8 +15,8 @@ async function ensureEditable(id, user) {
     err.statusCode = 404;
     throw err;
   }
-  if (row.locked && user?.role !== 'ADMIN') {
-    const err = new Error('Agreement is closed and locked. Admin access required for changes.');
+  if (row.locked && !['ADMIN', 'SUPER_ADMIN', 'OPS', 'AGENT'].includes(String(user?.role || '').toUpperCase())) {
+    const err = new Error('Agreement is closed and locked. Staff access required for changes.');
     err.statusCode = 403;
     throw err;
   }
