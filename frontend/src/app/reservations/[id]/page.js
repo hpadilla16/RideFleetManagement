@@ -1286,7 +1286,7 @@ total: toMoneyNum((chargeModel.dailyRate || row?.dailyRate || 0) * breakdown.day
 
 const coreRows = [baseRow, ...serviceRows, ...feeRows, ...insuranceRows];
 
-const taxableSubTotal = coreRows.reduce(
+const taxableSubTotal = [...coreRows, ...linkedFeeRows].reduce(
 (sum, r) => sum + (r.taxable === false ? 0 : toMoneyNum(r.total)),
 0
 );
