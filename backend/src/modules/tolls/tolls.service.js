@@ -15,10 +15,29 @@ const DEFAULT_POST_RETURN_GRACE_MINUTES = 180;
 const DEFAULT_AUTO_SYNC_INTERVAL_MINUTES = 15;
 const AUTOEXPRESO_LOGIN_URL = 'https://www.autoexpreso.com/login?v=0.0.1';
 const AUTOEXPRESO_BALANCE_URL = 'https://www.autoexpreso.com/dashboard/balance';
+const SUNPASS_LOGIN_URL = 'https://www.sunpass.com/vector/account/home/accountLogin.do';
+const SUNPASS_ACTIVITY_URL = 'https://www.sunpass.com/vector/account/transactions/webtransactionSearch.do';
 const AUTOEXPRESO_USERNAME_SELECTOR = "input[placeholder='Usuario o Correo Electronico'], input[placeholder='Usuario o Correo Electrónico'], input[placeholder*='Usuario'], input[placeholder*='Correo'], input[type='email'], input[type='text']";
 const AUTOEXPRESO_PASSWORD_SELECTOR = "input[formcontrolname='password'], input[type='password']";
 const AUTOEXPRESO_ACTIVITY_SELECTOR = 'div.az-media-list-activity';
 const tollSyncLocks = new Set();
+
+async function resolveActiveProvider(tenantId) {
+  if (!tenantId) return 'AUTOEXPRESO';
+  const accounts = await prisma.tollProviderAccount.findMany({
+    where: { tenantId, isActive: true },
+    select: { provider: true },
+    orderBy: [{ updatedAt: 'desc' }]
+  });
+  if (accounts.length) return accounts[0].provider;
+  // Fallback: check any account even if inactive
+  const any = await prisma.tollProviderAccount.findFirst({
+    where: { tenantId },
+    select: { provider: true },
+    orderBy: [{ updatedAt: 'desc' }]
+  });
+  return any?.provider || 'AUTOEXPRESO';
+}
 
 function tenantWhereForScope(scope = {}) {
   return scope?.tenantId ? { tenantId: scope.tenantId } : {};
@@ -385,6 +404,193 @@ function parseAutoExpresoDateTime(raw) {
   const parsed = new Date(`${month}/${day}/${year} ${timePart}`);
   if (Number.isNaN(parsed.getTime())) throw new Error(`Unsupported AutoExpreso date/time: ${text}`);
   return parsed;
+}
+
+// ─── SunPass scraper helpers ───
+
+async function sunpassLogin(page, username, password) {
+  await page.goto(SUNPASS_LOGIN_URL, { waitUntil: 'networkidle2', timeout: 45000 });
+  await page.waitForSelector('input[name="loginUsername"], input#loginUsername, input[type="text"]', { timeout: 20000 });
+  const usernameSelector = await page.$('input[name="loginUsername"]') ? 'input[name="loginUsername"]' : 'input#loginUsername';
+  const passwordSelector = await page.$('input[name="loginPassword"]') ? 'input[name="loginPassword"]' : 'input#loginPassword';
+  await page.click(usernameSelector, { clickCount: 3 }).catch(() => null);
+  await page.type(usernameSelector, username);
+  await page.click(passwordSelector, { clickCount: 3 }).catch(() => null);
+  await page.type(passwordSelector, password);
+  await Promise.all([
+    page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 45000 }).catch(() => null),
+    page.evaluate(() => {
+      const btns = Array.from(document.querySelectorAll('input[type="submit"], button[type="submit"], button'));
+      const login = btns.find((b) => /log\s*in|sign\s*in|submit/i.test(b.textContent || b.value || ''));
+      if (login) login.click();
+    })
+  ]);
+}
+
+async function sunpassNavigateToActivity(page) {
+  await page.goto(SUNPASS_ACTIVITY_URL, { waitUntil: 'networkidle2', timeout: 45000 });
+  await page.waitForTimeout(2000);
+}
+
+async function sunpassFilterAndSearch(page, dateStr) {
+  // Select "Toll Transaction" type
+  await page.evaluate(() => {
+    const selects = Array.from(document.querySelectorAll('select'));
+    for (const sel of selects) {
+      const label = String(sel.previousElementSibling?.textContent || sel.closest('label')?.textContent || sel.name || sel.id || '').toLowerCase();
+      if (label.includes('transaction') || label.includes('type') || sel.name?.includes('ransaction') || sel.id?.includes('ransaction')) {
+        const tollOpt = Array.from(sel.options).find((o) => /toll/i.test(o.text));
+        if (tollOpt) { sel.value = tollOpt.value; sel.dispatchEvent(new Event('change', { bubbles: true })); }
+        break;
+      }
+    }
+  });
+
+  // Select "Transaction Date" as date type
+  await page.evaluate(() => {
+    const selects = Array.from(document.querySelectorAll('select'));
+    for (const sel of selects) {
+      const label = String(sel.previousElementSibling?.textContent || sel.closest('label')?.textContent || sel.name || sel.id || '').toLowerCase();
+      if (label.includes('date') && !label.includes('start') && !label.includes('end')) {
+        const txnOpt = Array.from(sel.options).find((o) => /transaction\s*date/i.test(o.text));
+        if (txnOpt) { sel.value = txnOpt.value; sel.dispatchEvent(new Event('change', { bubbles: true })); }
+        break;
+      }
+    }
+  });
+
+  // Set start and end date to today
+  await page.evaluate((date) => {
+    const inputs = Array.from(document.querySelectorAll('input'));
+    for (const input of inputs) {
+      const label = String(input.previousElementSibling?.textContent || input.closest('label')?.textContent || input.name || input.id || input.placeholder || '').toLowerCase();
+      if (label.includes('start') || label.includes('from') || input.name?.includes('tart') || input.id?.includes('tart')) {
+        input.value = date;
+        input.dispatchEvent(new Event('input', { bubbles: true }));
+        input.dispatchEvent(new Event('change', { bubbles: true }));
+      }
+      if (label.includes('end') || label.includes('to') || input.name?.includes('nd') || input.id?.includes('nd')) {
+        input.value = date;
+        input.dispatchEvent(new Event('input', { bubbles: true }));
+        input.dispatchEvent(new Event('change', { bubbles: true }));
+      }
+    }
+  }, dateStr);
+
+  // Click View button
+  await Promise.all([
+    page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 45000 }).catch(() => null),
+    page.evaluate(() => {
+      const btns = Array.from(document.querySelectorAll('input[type="submit"], button[type="submit"], button, input[type="button"]'));
+      const viewBtn = btns.find((b) => /^view$/i.test(String(b.textContent || b.value || '').trim()));
+      if (viewBtn) viewBtn.click();
+    })
+  ]);
+
+  await page.waitForTimeout(3000);
+}
+
+async function scrapeSunPassRows(page) {
+  return page.evaluate(() => {
+    const normalize = (value = '') => String(value).replace(/\s+/g, ' ').trim();
+    const amountFromText = (value = '') => {
+      const match = String(value).match(/-?\$?\s*\d[\d,]*\.?\d*/);
+      if (!match) return null;
+      const parsed = Number(match[0].replace(/[^0-9.-]/g, ''));
+      return Number.isFinite(parsed) ? Math.abs(parsed) : null;
+    };
+
+    const rows = [];
+    const seen = new Set();
+
+    // Try to scrape from HTML table
+    const tables = Array.from(document.querySelectorAll('table'));
+    for (const table of tables) {
+      const headerCells = Array.from(table.querySelectorAll('thead th, thead td, tr:first-child th, tr:first-child td'));
+      const headers = headerCells.map((cell) => normalize(cell.textContent).toLowerCase());
+      // Look for toll-related headers
+      const hasPlaza = headers.some((h) => h.includes('plaza') || h.includes('location'));
+      const hasAmount = headers.some((h) => h.includes('amount') || h.includes('charge'));
+      if (!hasPlaza && !hasAmount) continue;
+
+      const colIdx = {
+        postedDate: headers.findIndex((h) => h.includes('posted')),
+        transactionDate: headers.findIndex((h) => h.includes('transaction') && h.includes('date')),
+        transponder: headers.findIndex((h) => h.includes('transponder')),
+        plate: headers.findIndex((h) => h.includes('plate') || h.includes('license')),
+        plaza: headers.findIndex((h) => h.includes('plaza') || h.includes('location')),
+        amount: headers.findIndex((h) => h.includes('amount') || h.includes('charge'))
+      };
+
+      const bodyRows = Array.from(table.querySelectorAll('tbody tr, tr')).filter((tr) => {
+        const cells = tr.querySelectorAll('td');
+        return cells.length >= 3;
+      });
+
+      for (const tr of bodyRows) {
+        const cells = Array.from(tr.querySelectorAll('td'));
+        if (!cells.length) continue;
+        const getText = (idx) => idx >= 0 && idx < cells.length ? normalize(cells[idx].textContent) : '';
+
+        const transactionDate = getText(colIdx.transactionDate) || getText(colIdx.postedDate);
+        const transponder = getText(colIdx.transponder);
+        const plate = getText(colIdx.plate);
+        const plaza = getText(colIdx.plaza);
+        const amountText = getText(colIdx.amount);
+        const amount = amountFromText(amountText);
+
+        if (!transactionDate || amount === null || amount <= 0) continue;
+        const key = `${plate}|${transponder}|${transactionDate}|${amount}|${plaza}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+
+        rows.push({
+          transactionDate,
+          transponder,
+          plate,
+          plaza,
+          amount,
+          amountRaw: amountText
+        });
+      }
+    }
+
+    // Fallback: regex on body text if no table rows found
+    if (!rows.length) {
+      const bodyText = String(document.body?.innerText || '');
+      const regex = /(\d{1,2}\/\d{1,2}\/\d{4})\s+(\d{1,2}:\d{2}:\d{2}\s*[AP]M)\s+(\w+[-\s]?\w*)\s+([A-Z0-9-]+)\s+(.+?)\s+\$?\s*(\d+\.?\d*)/gi;
+      for (const match of bodyText.matchAll(regex)) {
+        const transactionDate = `${match[1]} ${match[2]}`;
+        const transponder = match[3] || '';
+        const plate = match[4] || '';
+        const plaza = match[5] || '';
+        const amount = Number(match[6]);
+        if (!Number.isFinite(amount) || amount <= 0) continue;
+        const key = `${plate}|${transponder}|${transactionDate}|${amount}|${plaza}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        rows.push({ transactionDate, transponder, plate, plaza, amount, amountRaw: `$${match[6]}` });
+      }
+    }
+
+    return rows;
+  });
+}
+
+function parseSunPassDateTime(raw) {
+  const text = String(raw || '').trim();
+  if (!text) throw new Error('SunPass transaction date/time missing');
+  // Handle formats: MM/DD/YYYY HH:MM:SS AM/PM or MM/DD/YYYY
+  const parsed = new Date(text);
+  if (!Number.isNaN(parsed.getTime())) return parsed;
+  // Try manual parse for MM/DD/YYYY HH:MM:SS AM
+  const match = text.match(/(\d{1,2})\/(\d{1,2})\/(\d{4})\s*(.*)/);
+  if (match) {
+    const [, month, day, year, timePart] = match;
+    const fallback = new Date(`${month}/${day}/${year} ${timePart || '12:00:00 PM'}`);
+    if (!Number.isNaN(fallback.getTime())) return fallback;
+  }
+  throw new Error(`Unsupported SunPass date/time: ${text}`);
 }
 
 function serializeIssueIncidentSummary(incident) {
@@ -1313,8 +1519,7 @@ export const tollsService = {
       }),
       scope?.tenantId ? prisma.tollProviderAccount.findFirst({
         where: {
-          tenantId: scope.tenantId,
-          provider: 'AUTOEXPRESO'
+          tenantId: scope.tenantId
         },
         orderBy: [{ isActive: 'desc' }, { updatedAt: 'desc' }]
       }) : null,
@@ -1363,6 +1568,9 @@ export const tollsService = {
     await ensureTenantAllowsTolls(scope);
     if (!scope?.tenantId) throw new Error('tenantId is required for toll provider setup');
 
+    const provider = ['AUTOEXPRESO', 'SUNPASS'].includes(String(payload.provider || '').toUpperCase())
+      ? String(payload.provider).toUpperCase()
+      : 'AUTOEXPRESO';
     const username = String(payload.username || '').trim();
     const password = String(payload.password || '').trim();
     const isActive = payload.isActive !== false;
@@ -1374,10 +1582,22 @@ export const tollsService = {
     const existing = await prisma.tollProviderAccount.findFirst({
       where: {
         tenantId: scope.tenantId,
-        provider: 'AUTOEXPRESO'
+        provider
       },
       orderBy: [{ isActive: 'desc' }, { updatedAt: 'desc' }]
     });
+
+    // If switching providers, deactivate the old one
+    if (isActive) {
+      await prisma.tollProviderAccount.updateMany({
+        where: {
+          tenantId: scope.tenantId,
+          provider: { not: provider },
+          isActive: true
+        },
+        data: { isActive: false }
+      });
+    }
 
     const row = existing
       ? await prisma.tollProviderAccount.update({
@@ -1393,7 +1613,7 @@ export const tollsService = {
       : await prisma.tollProviderAccount.create({
           data: {
             tenantId: scope.tenantId,
-            provider: 'AUTOEXPRESO',
+            provider,
             username: username || null,
             passwordEncrypted: password ? encodeSecret(password) : null,
             isActive,
@@ -1405,50 +1625,193 @@ export const tollsService = {
     return serializeProviderAccount(row);
   },
 
-  async runProviderHealthCheck(scope = {}) {
+  async runProviderHealthCheck(scope = {}, requestedProvider = null) {
     await ensureTenantAllowsTolls(scope);
     if (!scope?.tenantId) throw new Error('tenantId is required for toll provider setup');
+    const provider = requestedProvider || await resolveActiveProvider(scope.tenantId);
     const row = await prisma.tollProviderAccount.findFirst({
       where: {
         tenantId: scope.tenantId,
-        provider: 'AUTOEXPRESO'
+        provider
       },
       orderBy: [{ isActive: 'desc' }, { updatedAt: 'desc' }]
     });
-    if (!row) throw new Error('AutoExpreso provider account is not configured');
+    if (!row) throw new Error(`${provider} provider account is not configured`);
 
     const missing = [];
     if (!String(row.username || '').trim()) missing.push('username');
     if (!decodeSecret(row.passwordEncrypted)) missing.push('password');
     const ready = missing.length === 0 && !!row.isActive;
 
+    const providerLabel = provider === 'SUNPASS' ? 'SunPass' : 'AutoExpreso';
     const updated = await prisma.tollProviderAccount.update({
       where: { id: row.id },
       data: {
         lastSyncAt: new Date(),
         lastSyncStatus: ready ? 'READY' : 'MISSING_CONFIG',
-        lastSyncMessage: ready ? 'Provider account looks ready for AutoExpreso sync' : `Missing: ${missing.join(', ')}${row.isActive ? '' : ' | account inactive'}`
+        lastSyncMessage: ready ? `Provider account looks ready for ${providerLabel} sync` : `Missing: ${missing.join(', ')}${row.isActive ? '' : ' | account inactive'}`
       }
     });
 
     return {
       ready,
       missing,
+      provider,
       providerAccount: serializeProviderAccount(updated)
     };
+  },
+
+  async _runSunPassSync(providerAccount, scope, actorUserId, syncLockKey) {
+    let puppeteer;
+    try {
+      puppeteer = await import('puppeteer');
+    } catch {
+      throw new Error('Puppeteer is not installed on backend for live toll sync');
+    }
+
+    const username = String(providerAccount.username || '').trim();
+    const password = decodeSecret(providerAccount.passwordEncrypted);
+    const today = new Date();
+    const dateStr = `${String(today.getMonth() + 1).padStart(2, '0')}/${String(today.getDate()).padStart(2, '0')}/${today.getFullYear()}`;
+
+    const browser = await puppeteer.default.launch({
+      headless: true,
+      executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || undefined,
+      args: ['--no-sandbox', '--disable-setuid-sandbox']
+    });
+    const page = await browser.newPage();
+
+    try {
+      // Login
+      await sunpassLogin(page, username, password);
+      // Navigate to activity
+      await sunpassNavigateToActivity(page);
+      // Filter and search for today
+      await sunpassFilterAndSearch(page, dateStr);
+
+      // Scrape rows
+      const pageRows = await scrapeSunPassRows(page);
+      await browser.close();
+
+      const rows = [];
+      const seenExternalIds = new Set();
+      let dedupedInRunCount = 0;
+
+      for (const raw of pageRows) {
+        try {
+          const transactionAt = parseSunPassDateTime(raw.transactionDate);
+          const amount = Number(raw.amount);
+          if (!Number.isFinite(amount) || amount <= 0 || amount > 500) continue;
+          const plate = String(raw.plate || '').trim();
+          const tag = String(raw.transponder || '').trim();
+          const externalId = normalizeToken(`${plate}|${tag}|${transactionAt.toISOString()}|${amount}|${raw.plaza}`);
+          if (!externalId) continue;
+          if (seenExternalIds.has(externalId)) {
+            dedupedInRunCount += 1;
+            continue;
+          }
+          seenExternalIds.add(externalId);
+          rows.push({
+            transactionAt: transactionAt.toISOString(),
+            amount,
+            location: String(raw.plaza || '').trim(),
+            lane: '',
+            direction: '',
+            plate,
+            tag,
+            sello: '',
+            transactionTimeRaw: String(raw.transactionDate || '').split(/\s+/).slice(1).join(' '),
+            externalId
+          });
+        } catch {
+          // Skip malformed rows
+        }
+      }
+
+      if (!rows.length) {
+        const startedAt = new Date();
+        const run = await prisma.tollImportRun.create({
+          data: {
+            tenantId: scope.tenantId,
+            providerAccountId: providerAccount.id,
+            sourceType: 'SUNPASS_SYNC',
+            status: 'COMPLETED',
+            importedCount: 0,
+            matchedCount: 0,
+            reviewCount: 0,
+            startedAt,
+            completedAt: startedAt,
+            metadataJson: JSON.stringify({
+              liveSync: true,
+              provider: 'SUNPASS',
+              actorUserId: actorUserId || null,
+              note: 'SunPass sync completed with no new rows',
+              autoSync: { scrapedCount: 0, dedupedInRunCount, duplicateExistingCount: 0, importedCount: 0 }
+            })
+          }
+        });
+
+        await prisma.tollProviderAccount.update({
+          where: { id: providerAccount.id },
+          data: {
+            lastSyncAt: startedAt,
+            lastSyncStatus: 'SYNC_OK',
+            lastSyncMessage: buildSyncSummaryMessage({ scrapedCount: 0, dedupedInRunCount, duplicateExistingCount: 0, importedCount: 0 })
+          }
+        });
+
+        return { ok: true, createdCount: 0, importRun: serializeImportRun(run) };
+      }
+
+      const created = await this.createManualTransactions(rows, scope, actorUserId, {
+        sourceType: 'SUNPASS_SYNC',
+        providerAccountId: providerAccount.id,
+        importMeta: { scrapedCount: rows.length, dedupedInRunCount }
+      });
+
+      await prisma.tollProviderAccount.update({
+        where: { id: providerAccount.id },
+        data: {
+          lastSyncAt: new Date(),
+          lastSyncStatus: 'SYNC_OK',
+          lastSyncMessage: buildSyncSummaryMessage(created?.summary || { scrapedCount: rows.length, dedupedInRunCount, importedCount: Array.isArray(created?.created) ? created.created.length : 0 })
+        }
+      });
+
+      return {
+        ok: true,
+        createdCount: Array.isArray(created?.created) ? created.created.length : 0,
+        summary: created?.summary || null,
+        importRun: created?.importRun || null
+      };
+    } catch (error) {
+      await browser.close().catch(() => null);
+      await prisma.tollProviderAccount.update({
+        where: { id: providerAccount.id },
+        data: {
+          lastSyncAt: new Date(),
+          lastSyncStatus: 'SYNC_FAILED',
+          lastSyncMessage: String(error?.message || 'SunPass sync failed')
+        }
+      });
+      throw error;
+    } finally {
+      tollSyncLocks.delete(syncLockKey);
+    }
   },
 
   async runMockSync(scope = {}, actorUserId = null) {
     await ensureTenantAllowsTolls(scope);
     if (!scope?.tenantId) throw new Error('tenantId is required for toll provider setup');
+    const provider = await resolveActiveProvider(scope.tenantId);
     const row = await prisma.tollProviderAccount.findFirst({
       where: {
         tenantId: scope.tenantId,
-        provider: 'AUTOEXPRESO'
+        provider
       },
       orderBy: [{ isActive: 'desc' }, { updatedAt: 'desc' }]
     });
-    if (!row) throw new Error('AutoExpreso provider account is not configured');
+    if (!row) throw new Error(`${provider} provider account is not configured`);
 
     const health = await this.runProviderHealthCheck(scope);
     if (!health.ready) throw new Error(`Provider not ready: ${(health.missing || []).join(', ')}`);
@@ -1493,27 +1856,32 @@ export const tollsService = {
     if (!scope?.tenantId) throw new Error('tenantId is required for toll provider setup');
     const syncLockKey = String(scope.tenantId);
     if (tollSyncLocks.has(syncLockKey)) {
-      throw new Error('AutoExpreso sync already running for this tenant');
+      throw new Error('Toll sync already running for this tenant');
     }
 
     tollSyncLocks.add(syncLockKey);
+    const provider = await resolveActiveProvider(scope.tenantId);
     const row = await prisma.tollProviderAccount.findFirst({
       where: {
         tenantId: scope.tenantId,
-        provider: 'AUTOEXPRESO'
+        provider
       },
       orderBy: [{ isActive: 'desc' }, { updatedAt: 'desc' }]
     });
-    if (!row) throw new Error('AutoExpreso provider account is not configured');
+    if (!row) throw new Error(`${provider} provider account is not configured`);
 
-    const health = await this.runProviderHealthCheck(scope);
+    const health = await this.runProviderHealthCheck(scope, provider);
     if (!health.ready) throw new Error(`Provider not ready: ${(health.missing || []).join(', ')}`);
+
+    if (provider === 'SUNPASS') {
+      return this._runSunPassSync(row, scope, actorUserId, syncLockKey);
+    }
 
     let puppeteer;
     try {
       puppeteer = await import('puppeteer');
     } catch {
-      throw new Error('Puppeteer is not installed on backend for live AutoExpreso sync');
+      throw new Error('Puppeteer is not installed on backend for live toll sync');
     }
 
     const settings = safeJsonParse(row.settingsJson, {});
@@ -1838,7 +2206,7 @@ export const tollsService = {
         }
 
         const providerAccount = await prisma.tollProviderAccount.findFirst({
-          where: { tenantId, provider: 'AUTOEXPRESO' },
+          where: { tenantId, isActive: true },
           orderBy: [{ isActive: 'desc' }, { updatedAt: 'desc' }]
         });
         if (providerAccount) {
@@ -1889,10 +2257,11 @@ export const tollsService = {
     const inputRows = (Array.isArray(rows) ? rows : []).filter(Boolean);
     if (!inputRows.length) throw new Error('rows are required');
 
+    const activeProvider = await resolveActiveProvider(scope.tenantId);
     const providerAccount = await prisma.tollProviderAccount.findFirst({
       where: {
         tenantId: scope.tenantId,
-        provider: 'AUTOEXPRESO'
+        provider: activeProvider
       },
       orderBy: [{ isActive: 'desc' }, { updatedAt: 'desc' }]
     });
@@ -1900,7 +2269,7 @@ export const tollsService = {
     const effectiveProviderAccount = providerAccount || await prisma.tollProviderAccount.create({
       data: {
         tenantId: scope.tenantId,
-        provider: 'AUTOEXPRESO',
+        provider: activeProvider,
         isActive: false,
         lastSyncStatus: 'PENDING_SETUP',
         lastSyncMessage: 'Created automatically from manual toll import'

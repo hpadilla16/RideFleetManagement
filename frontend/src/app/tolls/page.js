@@ -109,6 +109,7 @@ function TollsInner({ token, me, logout }) {
   const [tenantRows, setTenantRows] = useState([]);
   const [activeTenantId, setActiveTenantId] = useState('');
   const [providerForm, setProviderForm] = useState({
+    provider: 'AUTOEXPRESO',
     username: '',
     password: '',
     loginUrl: '',
@@ -159,6 +160,7 @@ function TollsInner({ token, me, logout }) {
       setDashboard(out);
       const provider = out?.providerAccount || null;
       setProviderForm((current) => ({
+        provider: provider?.provider || 'AUTOEXPRESO',
         username: provider?.username || '',
         password: '',
         loginUrl: provider?.settings?.loginUrl || '',
@@ -334,7 +336,7 @@ function TollsInner({ token, me, logout }) {
         method: 'PUT',
         body: JSON.stringify(providerForm)
       }, token);
-      setMsg('AutoExpreso provider setup saved');
+      setMsg('Toll provider setup saved');
       await load();
     } catch (error) {
       setMsg(error.message);
@@ -506,18 +508,25 @@ function TollsInner({ token, me, logout }) {
 
         <div className="glass card section-card">
           <div className="row-between">
-            <div className="section-title">AutoExpreso Provider Setup</div>
+            <div className="section-title">Toll Provider Setup</div>
             <span className={`status-chip ${dashboard?.providerAccount?.isActive ? 'good' : 'neutral'}`}>
               {dashboard?.providerAccount?.isActive ? 'Provider Ready' : 'Not configured'}
             </span>
           </div>
           <div className="surface-note" style={{ marginBottom: 10 }}>
-            Puerto Rico uses AutoExpreso as the toll provider. Configure the login credentials for this tenant and then run health check or sync.
+            Select your toll provider and configure login credentials. The system will scrape toll transactions from the provider portal and match them to your fleet.
           </div>
           <div className="grid2">
-            <input placeholder="AutoExpreso username" value={providerForm.username} onChange={(e) => setProviderForm((prev) => ({ ...prev, username: e.target.value }))} />
-            <input placeholder={dashboard?.providerAccount?.hasPassword ? 'Leave blank to keep current password' : 'AutoExpreso password'} type="password" value={providerForm.password} onChange={(e) => setProviderForm((prev) => ({ ...prev, password: e.target.value }))} />
-            <input placeholder="Login URL (optional)" value={providerForm.loginUrl} onChange={(e) => setProviderForm((prev) => ({ ...prev, loginUrl: e.target.value }))} />
+            <div className="stack">
+              <label className="label">Toll Provider</label>
+              <select value={providerForm.provider} onChange={(e) => setProviderForm((prev) => ({ ...prev, provider: e.target.value }))}>
+                <option value="AUTOEXPRESO">AutoExpreso (Puerto Rico)</option>
+                <option value="SUNPASS">SunPass (Florida)</option>
+              </select>
+            </div>
+            <input placeholder={`${providerForm.provider === 'SUNPASS' ? 'SunPass' : 'AutoExpreso'} username`} value={providerForm.username} onChange={(e) => setProviderForm((prev) => ({ ...prev, username: e.target.value }))} />
+            <input placeholder={dashboard?.providerAccount?.hasPassword ? 'Leave blank to keep current password' : `${providerForm.provider === 'SUNPASS' ? 'SunPass' : 'AutoExpreso'} password`} type="password" value={providerForm.password} onChange={(e) => setProviderForm((prev) => ({ ...prev, password: e.target.value }))} />
+            <input placeholder="Login URL (optional override)" value={providerForm.loginUrl} onChange={(e) => setProviderForm((prev) => ({ ...prev, loginUrl: e.target.value }))} />
           </div>
           <textarea rows={3} placeholder="Provider notes or login behavior notes" value={providerForm.notes} onChange={(e) => setProviderForm((prev) => ({ ...prev, notes: e.target.value }))} />
           <div className="inline-actions" style={{ marginTop: 10 }}>
@@ -532,7 +541,7 @@ function TollsInner({ token, me, logout }) {
               {busyId === 'provider-sync' ? 'Running...' : 'Run Mock Sync'}
             </button>
             <button type="button" className="button-subtle" disabled={busyId === 'provider-live-sync' || (isSuper && !activeTenantId)} onClick={runLiveSync}>
-              {busyId === 'provider-live-sync' ? 'Syncing...' : 'Run AutoExpreso Sync'}
+              {busyId === 'provider-live-sync' ? 'Syncing...' : `Run ${providerForm.provider === 'SUNPASS' ? 'SunPass' : 'AutoExpreso'} Sync`}
             </button>
           </div>
           {dashboard?.providerAccount?.lastSyncStatus || dashboard?.providerAccount?.lastSyncMessage ? (
