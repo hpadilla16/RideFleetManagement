@@ -3052,19 +3052,9 @@ export const rentalAgreementsService = {
 
     const phase = String(payload.phase || '').toUpperCase();
     if (!['CHECKOUT', 'CHECKIN'].includes(phase)) throw new Error('phase must be CHECKOUT or CHECKIN');
-    const isAdminActor = ['SUPER_ADMIN', 'ADMIN'].includes(String(actorRole || '').toUpperCase());
     const existingInspection = Array.isArray(agreement.inspections)
       ? agreement.inspections.find((row) => String(row?.phase || '').toUpperCase() === phase)
       : null;
-    if (
-      phase === 'CHECKOUT'
-      && existingInspection?.actorUserId
-      && actorUserId
-      && String(existingInspection.actorUserId) !== String(actorUserId)
-      && !isAdminActor
-    ) {
-      throw new Error('Only admin can reassign checkout commission ownership after checkout has been captured');
-    }
 
     const inspectionBlock = {
       phase,
