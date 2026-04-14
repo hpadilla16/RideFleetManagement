@@ -17,310 +17,275 @@
 --brand2:#c084fc;
 --ok:#22c55e;
 --warn:#f59e0b;
---radius:10px;
---shadow:0 8px 24px rgba(0,0,0,.35);
+--radius:8px;
 }
 
-*{box-sizing:border-box}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%}
 body{
-margin:0;
 font-family: Inter, ui-sans-serif, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
 color:var(--ink);
-background:
-radial-gradient(900px 400px at -10% -10%, #2a1c4d 0%, transparent 60%),
-radial-gradient(700px 350px at 110% -10%, #2f1a52 0%, transparent 60%),
-linear-gradient(180deg,var(--bg),var(--bg-2));
-padding:14px;
-font-size:11px;
+background:var(--bg);
+font-size:9.5px;
+line-height:1.35;
+-webkit-print-color-adjust:exact;
+print-color-adjust:exact;
 }
 
-.wrap{max-width:1050px;margin:0 auto}
-.card{
-background:linear-gradient(180deg,var(--card),var(--card-2));
-border:1px solid var(--line);
-border-radius:var(--radius);
-box-shadow:var(--shadow);
+/* ── Page container ── */
+.page{
+width:100%;
+padding:20px 28px;
 }
+.page-break{page-break-before:always}
 
+/* ── Header / Hero ── */
 .hero{
-padding:10px 14px;
 display:flex;
 justify-content:space-between;
 align-items:center;
-gap:10px;
-margin-bottom:6px;
+gap:12px;
+padding:12px 16px;
+background:linear-gradient(135deg,#1a1530 0%,#231840 100%);
+border:1px solid var(--line);
+border-radius:var(--radius);
+margin-bottom:10px;
 }
-
-.brand{display:flex;align-items:center;gap:10px;min-width:0;flex:1 1 auto;max-width:min(50%, 720px)}
+.brand{display:flex;align-items:center;gap:12px;min-width:0;flex:1 1 auto}
 .logo{
-width:auto;min-width:40px;max-width:min(50vw, 400px);height:42px;border-radius:8px;
-border:1px solid #4b3b74;background:#120f1e;
+width:auto;min-width:36px;max-width:220px;height:38px;
+border-radius:6px;border:1px solid #4b3b74;background:#120f1e;
 display:flex;align-items:center;justify-content:center;overflow:hidden;
-padding:4px 8px;
-flex:0 0 auto;
+padding:3px 6px;flex-shrink:0;
 }
 .logo img{width:auto;height:100%;max-width:100%;object-fit:contain;display:block}
 .logo-fallback{
-width:40px;height:40px;display:flex;align-items:center;justify-content:center;
-color:#d7c7ff;font-size:14px;font-weight:800;letter-spacing:.03em;
+width:36px;height:36px;display:flex;align-items:center;justify-content:center;
+color:#d7c7ff;font-size:13px;font-weight:800;letter-spacing:.03em;
 }
-
-.title{
-margin:0;
-font-size:20px;
-line-height:1.1;
-letter-spacing:-.02em;
-font-weight:850;
+.co-name{
+font-size:16px;font-weight:800;letter-spacing:-.02em;
 background:linear-gradient(90deg,var(--brand),var(--brand2));
--webkit-background-clip:text;
-background-clip:text;
-color:transparent;
+-webkit-background-clip:text;background-clip:text;color:transparent;
 white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
 }
-.sub{margin-top:3px;color:var(--muted);font-size:9px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-
-.pill{
-border:1px solid #5d4691;
-color:#dccdff;
-background:#231a39;
-border-radius:999px;
-padding:5px 10px;
-font-size:9px;
-font-weight:700;
-white-space:nowrap;
+.co-sub{color:var(--muted);font-size:8px;margin-top:1px}
+.ag-badge{
+border:1px solid #5d4691;color:#dccdff;background:#231a39;
+border-radius:999px;padding:4px 10px;font-size:8.5px;font-weight:700;white-space:nowrap;
 }
 
-.section{padding:8px 10px;margin-top:6px}
-.section h3{margin:0 0 5px;font-size:12px;color:#efe9ff}
-
-.grid{
+/* ── Info tiles ── */
+.info-grid{
 display:grid;
-grid-template-columns:repeat(4,minmax(0,1fr));
+grid-template-columns:repeat(4,1fr);
 gap:5px;
+margin-bottom:8px;
 }
 .tile{
-border:1px solid #3a2d5f;
-border-radius:8px;
-padding:5px 7px;
-background:#1a1530;
+border:1px solid #3a2d5f;border-radius:6px;padding:5px 7px;background:#1a1530;
 }
-.k{
-color:#9f93be;
-font-size:7px;
-text-transform:uppercase;
-letter-spacing:.08em;
-margin-bottom:2px;
+.tile .k{
+color:#9f93be;font-size:6.5px;text-transform:uppercase;letter-spacing:.08em;margin-bottom:1px;
 }
-.v{font-size:11px;font-weight:650}
+.tile .v{font-size:10px;font-weight:650}
 .money{font-variant-numeric:tabular-nums}
 .paid{color:var(--ok)}
 .due{color:var(--warn)}
 
+/* ── Section card ── */
+.section{
+border:1px solid var(--line);
+border-radius:var(--radius);
+background:linear-gradient(180deg,var(--card),var(--card-2));
+padding:8px 10px;
+margin-bottom:8px;
+}
+.section h3{font-size:10px;font-weight:700;color:#efe9ff;margin-bottom:5px}
+
+/* ── Tables ── */
 table{
-width:100%;
-border-collapse:separate;
-border-spacing:0;
-border:1px solid #3a2d5f;
-border-radius:8px;
-overflow:hidden;
-background:#18132b;
+width:100%;border-collapse:separate;border-spacing:0;
+border:1px solid #3a2d5f;border-radius:6px;overflow:hidden;background:#18132b;
 }
-th,td{
-padding:4px 6px;
-font-size:9px;
-border-bottom:1px solid #31264f;
-vertical-align:top;
-}
+th,td{padding:3px 6px;font-size:8.5px;border-bottom:1px solid #31264f;vertical-align:top}
 tr:last-child td{border-bottom:none}
 th{
-background:#21193a;
-color:#ac9ed0;
-text-transform:uppercase;
-letter-spacing:.07em;
-font-size:7px;
-text-align:left;
+background:#21193a;color:#ac9ed0;text-transform:uppercase;
+letter-spacing:.07em;font-size:6.5px;text-align:left;
 }
 .num{text-align:right;font-variant-numeric:tabular-nums}
 
+/* ── Terms ── */
 .terms{
-border:1px solid #3a2d5f;
-border-radius:8px;
-background:#17122a;
-color:#c8bcdf;
-padding:6px 8px;
-font-size:6.5px;
-line-height:1.4;
+border:1px solid #3a2d5f;border-radius:6px;background:#17122a;
+color:#c8bcdf;padding:6px 8px;font-size:6.5px;line-height:1.4;
 white-space:pre-wrap;
-max-height:none;
 }
 
-.sig{
-display:grid;
-grid-template-columns:1fr 160px;
-gap:6px;
+/* ── Signature ── */
+.sig-row{
+display:grid;grid-template-columns:1fr 150px;gap:8px;margin-top:6px;
 }
-.sig-main{
-border:1px dashed #5a468d;
-border-radius:8px;
-background:#18132b;
-padding:6px;
-min-height:60px;
+.sig-box{
+border:1px dashed #5a468d;border-radius:8px;background:#18132b;
+padding:8px;min-height:70px;display:flex;flex-direction:column;
 }
-.sig-meta{font-size:8px;color:#aa9ec8;margin-bottom:4px}
-.sig-main img{max-height:50px;max-width:280px;object-fit:contain;filter:contrast(1.05)}
+.sig-meta{font-size:7.5px;color:#aa9ec8;margin-bottom:4px}
+.sig-img{
+flex:1;display:flex;align-items:center;justify-content:flex-start;
+}
+.sig-img img{
+max-height:60px;max-width:320px;width:auto;height:auto;
+object-fit:contain;display:block;
+}
+.sig-line{
+margin-top:auto;padding-top:6px;
+border-top:1px solid #5a468d;
+}
+.sig-line-label{font-size:7px;color:#9f93be;text-transform:uppercase;letter-spacing:.06em}
 
-.verify{
-border:1px solid #3a2d5f;
-border-radius:8px;
-background:#19132d;
-padding:6px;
-display:flex;flex-direction:column;gap:4px;
+.verify-box{
+border:1px solid #3a2d5f;border-radius:8px;background:#19132d;
+padding:8px;display:flex;flex-direction:column;gap:3px;
 }
-.verify h4{
-margin:0;
-font-size:8px;
-text-transform:uppercase;
-letter-spacing:.08em;
-color:#d6c5ff;
-}
-.qr{
-width:60px;height:60px;
-border:1px solid #4f3d7f;
-border-radius:6px;
-display:flex;align-items:center;justify-content:center;
-color:#9d8fc1;font-size:7px;background:#120f21;
-}
-.vline{font-size:8px;color:#bfb3da;word-break:break-word}
+.verify-box h4{margin:0;font-size:7.5px;text-transform:uppercase;letter-spacing:.08em;color:#d6c5ff}
+.vline{font-size:7.5px;color:#bfb3da;word-break:break-word}
 .vline code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:7px;color:#f0e8ff}
 
+/* ── Footer ── */
 .footer{
-margin-top:6px;
-text-align:center;
-color:#9185af;
-font-size:7px;
-letter-spacing:.03em;
+text-align:center;color:#9185af;font-size:6.5px;letter-spacing:.03em;
+padding-top:6px;
 }
 
-@media (max-width:940px){
-.grid{grid-template-columns:repeat(2,minmax(0,1fr))}
-.sig{grid-template-columns:1fr}
-.brand{max-width:100%}
-.logo{max-width:min(60vw, 320px);height:40px}
-}
-
+/* ── Print overrides ── */
 @media print{
-body{padding:8px;background:#fff;color:#111;font-size:10px}
-.card,.tile,table,.terms,.sig-main,.verify{
-background:#fff !important;
-color:#111 !important;
-border-color:#ddd !important;
-box-shadow:none !important;
+body{background:#fff;color:#1a1a1a;font-size:9px}
+.page{padding:0}
+.hero{background:#f8f7fc;border-color:#e2dff0}
+.co-name{color:#1a1a1a !important;-webkit-text-fill-color:#1a1a1a;background:none}
+.co-sub,.k,.sig-meta,.footer,.vline,.sig-line-label{color:#666 !important}
+.ag-badge{background:#f0edf8;border-color:#c4bbd9;color:#4a3d6a}
+.tile,.section,table,.terms,.sig-box,.verify-box{
+background:#fff !important;border-color:#ddd !important;box-shadow:none !important;
 }
-th{background:#f5f5f5 !important;color:#555 !important}
-.title{color:#111 !important;-webkit-text-fill-color:#111;background:none}
-.sub,.k,.sig-meta,.footer,.vline{color:#555 !important}
+.tile{background:#f9f8fc !important}
+th{background:#f5f3fa !important;color:#555 !important}
+td{color:#222 !important}
+.terms{color:#444 !important;background:#fafafa !important}
 .paid{color:#166534 !important}
 .due{color:#92400e !important}
-.section{page-break-inside:avoid}
-.terms{font-size:6px;line-height:1.35}
+.logo{background:#f9f8fc;border-color:#e2dff0}
+.logo-fallback{color:#4a3d6a}
+.sig-box{border-color:#ccc;background:#fafafa !important}
+.sig-img img{filter:none}
+}
+
+@page{
+margin:0.3in 0.35in;
 }
 </style>
 </head>
 <body>
-<div class="wrap">
 
-<div class="card hero">
-<div class="brand">
-<div class="logo">
-{{companyLogoBlock}}
-</div>
-<div style="min-width:0">
-<h1 class="title">{{companyName}}</h1>
-<div class="sub">{{companyAddress}} • {{companyPhone}}</div>
-</div>
-</div>
-<div class="pill">Agreement {{agreementNumber}}</div>
-</div>
+<!-- ════════════════ PAGE 1 — Agreement Details ════════════════ -->
+<div class="page">
 
-<div class="card section">
-<div class="grid">
-<div class="tile"><div class="k">Customer</div><div class="v">{{customerName}}</div></div>
-<div class="tile"><div class="k">Reservation</div><div class="v">{{reservationNumber}}</div></div>
-<div class="tile"><div class="k">Pickup</div><div class="v">{{pickupAt}}</div></div>
-<div class="tile"><div class="k">Return</div><div class="v">{{returnAt}}</div></div>
-
-<div class="tile"><div class="k">Tax Config</div><div class="v">{{taxConfig}}</div></div>
-<div class="tile"><div class="k">Total</div><div class="v money">${{total}}</div></div>
-<div class="tile"><div class="k">Amount Paid</div><div class="v money paid">${{amountPaid}}</div></div>
-<div class="tile"><div class="k">Amount Due</div><div class="v money due">${{amountDue}}</div></div>
-</div>
+<div class="hero">
+  <div class="brand">
+    <div class="logo">{{companyLogoBlock}}</div>
+    <div>
+      <div class="co-name">{{companyName}}</div>
+      <div class="co-sub">{{companyAddress}} &bull; {{companyPhone}}</div>
+    </div>
+  </div>
+  <div class="ag-badge">Agreement {{agreementNumber}}</div>
 </div>
 
-<div class="card section">
-<h3>Charges</h3>
-<table>
-<thead>
-<tr>
-<th>Description</th>
-<th class="num">Qty</th>
-<th class="num">Rate</th>
-<th class="num">Total</th>
-</tr>
-</thead>
-<tbody>
-{{chargesRows}}
-</tbody>
-</table>
+<div class="info-grid">
+  <div class="tile"><div class="k">Customer</div><div class="v">{{customerName}}</div></div>
+  <div class="tile"><div class="k">Reservation</div><div class="v">{{reservationNumber}}</div></div>
+  <div class="tile"><div class="k">Pickup</div><div class="v">{{pickupAt}}</div></div>
+  <div class="tile"><div class="k">Return</div><div class="v">{{returnAt}}</div></div>
+  <div class="tile"><div class="k">Tax Config</div><div class="v">{{taxConfig}}</div></div>
+  <div class="tile"><div class="k">Total</div><div class="v money">${{total}}</div></div>
+  <div class="tile"><div class="k">Amount Paid</div><div class="v money paid">${{amountPaid}}</div></div>
+  <div class="tile"><div class="k">Amount Due</div><div class="v money due">${{amountDue}}</div></div>
 </div>
 
-<div class="card section">
-<h3>Payments</h3>
-<table>
-<thead>
-<tr>
-<th>Date</th>
-<th>Method</th>
-<th>Reference</th>
-<th>Status</th>
-<th class="num">Amount</th>
-</tr>
-</thead>
-<tbody>
-{{paymentsRows}}
-</tbody>
-</table>
+<div class="section">
+  <h3>Charges</h3>
+  <table>
+    <thead><tr><th>Description</th><th class="num">Qty</th><th class="num">Rate</th><th class="num">Total</th></tr></thead>
+    <tbody>{{chargesRows}}</tbody>
+  </table>
 </div>
 
-<div class="card section">
-<h3>Terms & Conditions</h3>
-<div class="terms">{{termsText}}</div>
-</div>
-
-<div class="card section">
-<h3>Signature & Verification</h3>
-<div class="sig">
-<div class="sig-main">
-<div class="sig-meta">
-Signed by: <strong>{{signatureSignedBy}}</strong> &nbsp;|&nbsp;
-Date/Time: <strong>{{signatureDateTime}}</strong> &nbsp;|&nbsp;
-IP: <strong>{{signatureIp}}</strong>
-</div>
-{{signatureImageBlock}}
-</div>
-<div class="verify">
-<h4>Verification</h4>
-<div class="qr">QR PLACEHOLDER</div>
-<div class="vline">Agreement: <code>{{agreementNumber}}</code></div>
-<div class="vline">Reservation: <code>{{reservationNumber}}</code></div>
-<div class="vline">Issuer: {{companyName}}</div>
-</div>
-</div>
+<div class="section">
+  <h3>Payments</h3>
+  <table>
+    <thead><tr><th>Date</th><th>Method</th><th>Reference</th><th>Status</th><th class="num">Amount</th></tr></thead>
+    <tbody>{{paymentsRows}}</tbody>
+  </table>
 </div>
 
 <div class="footer">
-{{companyName}} • Agreement {{agreementNumber}} • Reservation {{reservationNumber}}
+  {{companyName}} &bull; Agreement {{agreementNumber}} &bull; Page 1 of 2
 </div>
 
 </div>
+
+<!-- ════════════════ PAGE 2 — Terms & Signature ════════════════ -->
+<div class="page page-break">
+
+<div class="hero">
+  <div class="brand">
+    <div class="logo">{{companyLogoBlock}}</div>
+    <div>
+      <div class="co-name">{{companyName}}</div>
+      <div class="co-sub">Agreement {{agreementNumber}} &mdash; Terms &amp; Signature</div>
+    </div>
+  </div>
+  <div class="ag-badge">{{reservationNumber}}</div>
+</div>
+
+<div class="section">
+  <h3>Terms &amp; Conditions</h3>
+  <div class="terms">{{termsText}}</div>
+</div>
+
+<div class="section">
+  <h3>Customer Signature</h3>
+  <div class="sig-row">
+    <div class="sig-box">
+      <div class="sig-meta">
+        Signed by: <strong>{{signatureSignedBy}}</strong> &nbsp;&middot;&nbsp;
+        Date: <strong>{{signatureDateTime}}</strong> &nbsp;&middot;&nbsp;
+        IP: <strong>{{signatureIp}}</strong>
+      </div>
+      <div class="sig-img">
+        {{signatureImageBlock}}
+      </div>
+      <div class="sig-line">
+        <div class="sig-line-label">Customer Signature</div>
+      </div>
+    </div>
+    <div class="verify-box">
+      <h4>Verification</h4>
+      <div class="vline">Agreement:<br/><code>{{agreementNumber}}</code></div>
+      <div class="vline">Reservation:<br/><code>{{reservationNumber}}</code></div>
+      <div class="vline">Issuer:<br/>{{companyName}}</div>
+      <div class="vline">Customer:<br/>{{customerName}}</div>
+    </div>
+  </div>
+</div>
+
+<div class="footer">
+  {{companyName}} &bull; Agreement {{agreementNumber}} &bull; Page 2 of 2
+</div>
+
+</div>
+
 </body>
 </html>

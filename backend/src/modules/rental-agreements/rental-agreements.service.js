@@ -1977,6 +1977,7 @@ export const rentalAgreementsService = {
           select: {
             id: true,
             reservationNumber: true,
+            franchiseId: true,
             notes: true,
             signatureSignedAt: true,
             signatureSignedBy: true,
@@ -2013,17 +2014,31 @@ export const rentalAgreementsService = {
     if (!agreement) throw new Error('Rental agreement not found');
 
     const { settingsService } = await import('../settings/settings.service.js');
+    const { franchiseService } = await import('../settings/franchise.service.js');
     const agreementScope = agreement?.tenantId ? { tenantId: agreement.tenantId } : {};
     const globalCfg = await settingsService.getRentalAgreementConfig(agreementScope);
+    const franchiseCfg = await franchiseService.getAgreementConfig(
+      agreement?.reservation?.franchiseId, { tenantId: agreement?.tenantId }
+    );
     const locCfg = parseLocationConfig(agreement?.reservation?.pickupLocation?.locationConfig);
     const cfg = {
       ...globalCfg,
-      companyName: locCfg.companyName || agreement?.reservation?.pickupLocation?.name || globalCfg.companyName,
-      companyAddress: locCfg.companyAddress || agreement?.reservation?.pickupLocation?.address || globalCfg.companyAddress,
-      companyPhone: locCfg.companyPhone || globalCfg.companyPhone,
-      companyLogoUrl: locCfg.companyLogoUrl || globalCfg.companyLogoUrl,
-      termsText: locCfg.termsText || globalCfg.termsText,
-      returnInstructionsText: locCfg.returnInstructionsText || globalCfg.returnInstructionsText
+      ...(franchiseCfg ? {
+        companyName: franchiseCfg.companyName || globalCfg.companyName,
+        companyAddress: franchiseCfg.companyAddress || globalCfg.companyAddress,
+        companyPhone: franchiseCfg.companyPhone || globalCfg.companyPhone,
+        companyLogoUrl: franchiseCfg.companyLogoUrl || globalCfg.companyLogoUrl,
+        termsText: franchiseCfg.termsText || globalCfg.termsText,
+        returnInstructionsText: franchiseCfg.returnInstructionsText || globalCfg.returnInstructionsText,
+        agreementHtmlTemplate: franchiseCfg.agreementHtmlTemplate || globalCfg.agreementHtmlTemplate,
+      } : {}),
+      // Location config has highest priority (overrides franchise + tenant)
+      companyName: locCfg.companyName || (franchiseCfg?.companyName) || agreement?.reservation?.pickupLocation?.name || globalCfg.companyName,
+      companyAddress: locCfg.companyAddress || (franchiseCfg?.companyAddress) || agreement?.reservation?.pickupLocation?.address || globalCfg.companyAddress,
+      companyPhone: locCfg.companyPhone || (franchiseCfg?.companyPhone) || globalCfg.companyPhone,
+      companyLogoUrl: locCfg.companyLogoUrl || (franchiseCfg?.companyLogoUrl) || globalCfg.companyLogoUrl,
+      termsText: locCfg.termsText || (franchiseCfg?.termsText) || globalCfg.termsText,
+      returnInstructionsText: locCfg.returnInstructionsText || (franchiseCfg?.returnInstructionsText) || globalCfg.returnInstructionsText
     };
 
     const sigLog = await prisma.auditLog.findFirst({
@@ -2080,36 +2095,12 @@ export const rentalAgreementsService = {
     const companyLogoUrl = String(cfg.companyLogoUrl || '').trim();
     const companyLogoBlock = buildCompanyLogoBlock(cfg.companyName || '', companyLogoUrl);
 
-    if (String(cfg?.agreementHtmlTemplate || '').trim()) {
-      return applyTemplate(cfg.agreementHtmlTemplate, {
-        companyName: esc(cfg.companyName || ''),
-        companyAddress: esc(cfg.companyAddress || ''),
-        companyPhone: esc(cfg.companyPhone || ''),
-        companyLogoUrl: esc(companyLogoUrl),
-        companyLogoBlock,
-        agreementNumber: esc(agreement.agreementNumber || ''),
-        reservationNumber: esc(agreement.reservation?.reservationNumber || '-'),
-        customerName: esc(`${agreement.customerFirstName || ''} ${agreement.customerLastName || ''}`.trim()),
-        pickupAt: esc(fmtDate(agreement.pickupAt)),
-        returnAt: esc(fmtDate(agreement.returnAt)),
-        taxConfig: esc((agreement.charges || []).find((c) => String(c.chargeType || '').toUpperCase() === 'TAX')?.name || '-'),
-        total: Number(agreement.total || 0).toFixed(2),
-        amountPaid: paidAmountForPrint.toFixed(2),
-        amountDue: amountDueForPrint.toFixed(2),
-        chargesRows,
-        paymentsRows: paymentsRows || '<tr><td colspan="5">No payments recorded</td></tr>',
-        termsText: esc(cfg.termsText || ''),
-        signatureSignedBy: esc(agreement.reservation?.signatureSignedBy || '-'),
-        signatureDateTime: esc(fmtDate(signatureTime)),
-        signatureIp: esc(signatureIp),
-        signatureDataUrl: agreement.reservation?.signatureDataUrl || ''
-      });
-    }
-
     const chargesRowsHtml = chargesRows || '<tr><td colspan="4">No charges recorded</td></tr>';
     const paymentsRowsHtml = paymentsForPrint.length ? paymentsRows : '<tr><td colspan="5">No payments recorded</td></tr>';
-    const signatureImageBlock = agreement.reservation?.signatureDataUrl
-      ? `<img src="${agreement.reservation.signatureDataUrl}" alt="Signature" />`
+
+    const rawSigUrl = String(agreement.reservation?.signatureDataUrl || '').trim();
+    const signatureImageBlock = rawSigUrl
+      ? `<img src="${rawSigUrl}" alt="Signature" style="max-height:60px;max-width:320px;width:auto;height:auto;display:block;object-fit:contain" />`
       : '<div class="sig-meta">No signature on file</div>';
 
     const templateVars = {
@@ -2133,8 +2124,13 @@ export const rentalAgreementsService = {
       signatureSignedBy: esc(agreement.reservation?.signatureSignedBy || '-'),
       signatureDateTime: esc(fmtDate(signatureTime)),
       signatureIp: esc(signatureIp),
-      signatureImageBlock
+      signatureImageBlock,
+      signatureDataUrl: rawSigUrl
     };
+
+    if (String(cfg?.agreementHtmlTemplate || '').trim()) {
+      return applyTemplate(cfg.agreementHtmlTemplate, templateVars);
+    }
 
     const defaultTemplate = getModernAgreementTemplate();
     return applyTemplate(defaultTemplate, templateVars);
@@ -2150,11 +2146,19 @@ export const rentalAgreementsService = {
     });
     try {
       const page = await browser.newPage();
-      await page.setContent(html, { waitUntil: 'networkidle0' });
+      await page.setContent(html, { waitUntil: ['load', 'networkidle0'] });
+      // Ensure all inline/data-URL images are decoded before PDF render
+      await page.evaluate(() => Promise.all(
+        Array.from(document.images)
+          .filter((img) => !img.complete)
+          .map((img) => new Promise((resolve) => {
+            img.addEventListener('load', resolve, { once: true });
+            img.addEventListener('error', resolve, { once: true });
+          }))
+      ));
       const pdfBuffer = await page.pdf({
         format: 'Letter',
-        printBackground: true,
-        margin: { top: '0.3in', bottom: '0.3in', left: '0.4in', right: '0.4in' }
+        printBackground: true
       });
       await page.close();
       return pdfBuffer;

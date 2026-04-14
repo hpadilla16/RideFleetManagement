@@ -1,5 +1,6 @@
 ﻿import { Router } from 'express';
 import { settingsService } from './settings.service.js';
+import { franchiseService } from './franchise.service.js';
 import { requireRole, isSuperAdmin } from '../../middleware/auth.js';
 import { scopeFor } from '../../lib/tenant-scope.js';
 
@@ -370,4 +371,42 @@ settingsRouter.put('/rental-agreement', requireRole('ADMIN'), async (req, res, n
   } catch (e) {
     next(e);
   }
+});
+
+// ── Franchise Management ──
+
+settingsRouter.get('/franchises', async (req, res, next) => {
+  try {
+    res.json(await franchiseService.listAll(scopeFor(req)));
+  } catch (e) { next(e); }
+});
+
+settingsRouter.get('/franchises/active', async (req, res, next) => {
+  try {
+    res.json(await franchiseService.list(scopeFor(req)));
+  } catch (e) { next(e); }
+});
+
+settingsRouter.get('/franchises/:id', async (req, res, next) => {
+  try {
+    res.json(await franchiseService.getById(req.params.id, scopeFor(req)));
+  } catch (e) { next(e); }
+});
+
+settingsRouter.post('/franchises', async (req, res, next) => {
+  try {
+    res.status(201).json(await franchiseService.create(req.body || {}, scopeFor(req)));
+  } catch (e) { next(e); }
+});
+
+settingsRouter.patch('/franchises/:id', async (req, res, next) => {
+  try {
+    res.json(await franchiseService.update(req.params.id, req.body || {}, scopeFor(req)));
+  } catch (e) { next(e); }
+});
+
+settingsRouter.delete('/franchises/:id', async (req, res, next) => {
+  try {
+    res.json(await franchiseService.delete(req.params.id, scopeFor(req)));
+  } catch (e) { next(e); }
 });

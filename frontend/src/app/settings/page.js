@@ -60,7 +60,8 @@ const SETTINGS_TAB_SECTIONS = {
   access: [],
   emails: ['emailTemplates'],
   services: ['services', 'fees'],
-  commissions: []
+  commissions: [],
+  franchises: []
 };
 
 export default function SettingsPage() {
@@ -133,6 +134,9 @@ function SettingsInner({ token, me, logout }) {
   const [activeCommissionPlanId, setActiveCommissionPlanId] = useState('');
   const [commissionPlanForm, setCommissionPlanForm] = useState(EMPTY_COMMISSION_PLAN);
   const [commissionRuleForm, setCommissionRuleForm] = useState(EMPTY_COMMISSION_RULE);
+  const [franchises, setFranchises] = useState([]);
+  const [franchiseForm, setFranchiseForm] = useState({ name: '', code: '', logoUrl: '', address: '', phone: '', email: '', termsText: '', returnInstructionsText: '', agreementHtmlTemplate: '', isDefault: false, isActive: true });
+  const [franchiseEditId, setFranchiseEditId] = useState(null);
 
   const role = String(me?.role || '').toUpperCase().trim();
   const isAdmin = role === 'ADMIN' || role === 'SUPER_ADMIN';
@@ -300,6 +304,38 @@ function SettingsInner({ token, me, logout }) {
     else setMsg('');
   };
 
+  const loadFranchises = async () => {
+    try {
+      const rows = await api(scopedSettingsPath('/api/settings/franchises'), {}, token);
+      setFranchises(Array.isArray(rows) ? rows : []);
+    } catch (e) { setMsg(e.message); }
+  };
+
+  const saveFranchise = async () => {
+    try {
+      if (!franchiseForm.name) { setMsg('Franchise name is required'); return; }
+      if (franchiseEditId) {
+        await api(scopedSettingsPath(`/api/settings/franchises/${franchiseEditId}`), { method: 'PATCH', body: JSON.stringify(franchiseForm) }, token);
+        setMsg('Franchise updated');
+      } else {
+        await api(scopedSettingsPath('/api/settings/franchises'), { method: 'POST', body: JSON.stringify(franchiseForm) }, token);
+        setMsg('Franchise created');
+      }
+      setFranchiseEditId(null);
+      setFranchiseForm({ name: '', code: '', logoUrl: '', address: '', phone: '', email: '', termsText: '', returnInstructionsText: '', agreementHtmlTemplate: '', isDefault: false, isActive: true });
+      await loadFranchises();
+    } catch (e) { setMsg(e.message); }
+  };
+
+  const deleteFranchise = async (id) => {
+    if (!confirm('Delete this franchise? If reservations exist it will be deactivated instead.')) return;
+    try {
+      await api(scopedSettingsPath(`/api/settings/franchises/${id}`), { method: 'DELETE' }, token);
+      setMsg('Franchise removed');
+      await loadFranchises();
+    } catch (e) { setMsg(e.message); }
+  };
+
   const loadCommissionConfig = async (tenantId = activeCommissionTenantId) => {
     try {
       const qs = new URLSearchParams();
@@ -368,6 +404,10 @@ function SettingsInner({ token, me, logout }) {
     if (tab !== 'commissions') return;
     loadCommissionEmployees(activeCommissionTenantId);
   }, [token, activeCommissionTenantId, tab]);
+  useEffect(() => {
+    if (tab !== 'franchises') return;
+    loadFranchises();
+  }, [token, tab, activeSettingsTenantId]);
   useEffect(() => { loadTenants(); }, [token, isSuper]);
 
   const saveAgreement = async () => {
@@ -1707,6 +1747,7 @@ function SettingsInner({ token, me, logout }) {
             <button type="button" onClick={() => setTab('telematics')}>Telematics</button>
             <button type="button" onClick={() => setTab('access')}>Access Control</button>
             <button type="button" onClick={() => setTab('agreement')}>Agreement</button>
+            <button type="button" onClick={() => setTab('franchises')}>Franchises</button>
           </div>
         </div>
 
@@ -1727,6 +1768,7 @@ function SettingsInner({ token, me, logout }) {
           <button onClick={() => setTab('emails')}>Emails</button>
           <button onClick={() => setTab('services')}>Additional Services</button>
           <button onClick={() => setTab('commissions')}>Commissions</button>
+          <button onClick={() => setTab('franchises')}>Franchises</button>
         </div>
 
         {tab === 'agreement' && (
@@ -4301,6 +4343,61 @@ function SettingsInner({ token, me, logout }) {
                 </tbody>
               </table>
             </div>
+          </div>
+        )}
+
+        {tab === 'franchises' && (
+          <div className="stack">
+            <h2>Franchise Management</h2>
+            <p className="label">Manage franchises for this tenant. Each franchise can have its own logo, terms, and agreement template used when generating rental agreements.</p>
+
+            <div className="glass card" style={{ padding: 16 }}>
+              <h3>{franchiseEditId ? 'Edit Franchise' : 'New Franchise'}</h3>
+              <div className="grid2">
+                <div className="stack"><label className="label">Name*</label><input value={franchiseForm.name} onChange={(e) => setFranchiseForm({ ...franchiseForm, name: e.target.value })} placeholder="Franchise name" /></div>
+                <div className="stack"><label className="label">Code</label><input value={franchiseForm.code} onChange={(e) => setFranchiseForm({ ...franchiseForm, code: e.target.value })} placeholder="Auto-generated if blank" /></div>
+              </div>
+              <div className="grid2">
+                <div className="stack"><label className="label">Address</label><input value={franchiseForm.address} onChange={(e) => setFranchiseForm({ ...franchiseForm, address: e.target.value })} /></div>
+                <div className="stack"><label className="label">Phone</label><input value={franchiseForm.phone} onChange={(e) => setFranchiseForm({ ...franchiseForm, phone: e.target.value })} /></div>
+              </div>
+              <div className="grid2">
+                <div className="stack"><label className="label">Email</label><input value={franchiseForm.email} onChange={(e) => setFranchiseForm({ ...franchiseForm, email: e.target.value })} /></div>
+                <div className="stack"><label className="label">Logo URL</label><input value={franchiseForm.logoUrl} onChange={(e) => setFranchiseForm({ ...franchiseForm, logoUrl: e.target.value })} placeholder="https://..." /></div>
+              </div>
+              <div className="stack"><label className="label">Terms &amp; Policies</label><textarea rows={4} value={franchiseForm.termsText} onChange={(e) => setFranchiseForm({ ...franchiseForm, termsText: e.target.value })} placeholder="Franchise-specific terms shown on rental agreements" /></div>
+              <div className="stack"><label className="label">Return Instructions</label><textarea rows={3} value={franchiseForm.returnInstructionsText} onChange={(e) => setFranchiseForm({ ...franchiseForm, returnInstructionsText: e.target.value })} placeholder="Return instructions for this franchise" /></div>
+              <div className="stack"><label className="label">Agreement HTML Template</label><textarea rows={6} value={franchiseForm.agreementHtmlTemplate} onChange={(e) => setFranchiseForm({ ...franchiseForm, agreementHtmlTemplate: e.target.value })} placeholder="Custom HTML template (uses {{companyName}}, {{termsText}}, etc.)" /></div>
+              <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                <label className="label"><input type="checkbox" checked={franchiseForm.isDefault} onChange={(e) => setFranchiseForm({ ...franchiseForm, isDefault: e.target.checked })} /> Default franchise</label>
+                <label className="label"><input type="checkbox" checked={franchiseForm.isActive} onChange={(e) => setFranchiseForm({ ...franchiseForm, isActive: e.target.checked })} /> Active</label>
+              </div>
+              <div style={{ display: 'flex', gap: 8 }}>
+                <button type="button" onClick={saveFranchise}>{franchiseEditId ? 'Update' : 'Create'} Franchise</button>
+                {franchiseEditId && <button type="button" onClick={() => { setFranchiseEditId(null); setFranchiseForm({ name: '', code: '', logoUrl: '', address: '', phone: '', email: '', termsText: '', returnInstructionsText: '', agreementHtmlTemplate: '', isDefault: false, isActive: true }); }}>Cancel</button>}
+              </div>
+            </div>
+
+            {franchises.length > 0 && (
+              <table>
+                <thead><tr><th>Name</th><th>Code</th><th>Default</th><th>Active</th><th>Actions</th></tr></thead>
+                <tbody>
+                  {franchises.map((f) => (
+                    <tr key={f.id}>
+                      <td>{f.name}</td>
+                      <td>{f.code}</td>
+                      <td>{f.isDefault ? 'Yes' : ''}</td>
+                      <td>{f.isActive ? 'Yes' : 'No'}</td>
+                      <td style={{ display: 'flex', gap: 4 }}>
+                        <button type="button" onClick={() => { setFranchiseEditId(f.id); setFranchiseForm({ name: f.name || '', code: f.code || '', logoUrl: f.logoUrl || '', address: f.address || '', phone: f.phone || '', email: f.email || '', termsText: f.termsText || '', returnInstructionsText: f.returnInstructionsText || '', agreementHtmlTemplate: f.agreementHtmlTemplate || '', isDefault: !!f.isDefault, isActive: f.isActive !== false }); }}>Edit</button>
+                        <button type="button" onClick={() => deleteFranchise(f.id)}>Delete</button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+            {!franchises.length && <div className="label">No franchises configured yet.</div>}
           </div>
         )}
       </section>

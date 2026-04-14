@@ -398,6 +398,7 @@ model Tenant {
   plannerRecommendationAudits PlannerRecommendationAudit[]
   conversations   Conversation[]
   knowledgeArticles KnowledgeArticle[]
+  franchises      Franchise[]
 }
 
 model Location {
@@ -675,6 +676,9 @@ model Reservation {
 
   returnLocationId  String
   returnLocation    Location          @relation("ReservationReturnLocation", fields: [returnLocationId], references: [id])
+
+  franchiseId       String?
+  franchise         Franchise?        @relation("ReservationFranchise", fields: [franchiseId], references: [id])
 
   dailyRate         Decimal?          @db.Decimal(10, 2)
   estimatedTotal    Decimal?          @db.Decimal(10, 2)
@@ -2129,4 +2133,27 @@ model KnowledgeArticle {
   @@index([tenantId, category, status])
   @@index([tenantId, status, sortOrder])
   @@unique([tenantId, slug])
+}
+
+model Franchise {
+  id                     String    @id @default(cuid())
+  tenantId               String
+  tenant                 Tenant    @relation(fields: [tenantId], references: [id])
+  code                   String
+  name                   String
+  logoUrl                String?
+  address                String?
+  phone                  String?
+  email                  String?
+  termsText              String?   @db.Text
+  returnInstructionsText String?   @db.Text
+  agreementHtmlTemplate  String?   @db.Text
+  isDefault              Boolean   @default(false)
+  isActive               Boolean   @default(true)
+  createdAt              DateTime  @default(now())
+  updatedAt              DateTime  @updatedAt
+  reservations           Reservation[] @relation("ReservationFranchise")
+
+  @@unique([tenantId, code])
+  @@index([tenantId, isActive])
 }

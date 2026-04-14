@@ -162,6 +162,14 @@ const reservationListSelect = {
       name: true,
       code: true
     }
+  },
+  franchiseId: true,
+  franchise: {
+    select: {
+      id: true,
+      code: true,
+      name: true
+    }
   }
 };
 
@@ -1022,6 +1030,7 @@ export const reservationsService = {
         vehicle: true,
         pickupLocation: true,
         returnLocation: true,
+        franchise: true,
         additionalDrivers: { orderBy: { createdAt: 'asc' } },
         customerInfoReviewedByUser: { select: { id: true, fullName: true, email: true, role: true } },
         readyForPickupByUser: { select: { id: true, fullName: true, email: true, role: true } },
@@ -1146,6 +1155,7 @@ export const reservationsService = {
         returnAt: new Date(data.returnAt),
         pickupLocationId: data.pickupLocationId,
         returnLocationId: data.returnLocationId,
+        franchiseId: data.franchiseId ?? null,
         dailyRate: data.dailyRate ?? null,
         estimatedTotal: data.estimatedTotal ?? null,
         paymentStatus: data.paymentStatus ?? 'PENDING',
@@ -1245,12 +1255,16 @@ export const reservationsService = {
     if (patch.vehicleId !== undefined) {
       data.vehicle = patch.vehicleId ? { connect: { id: patch.vehicleId } } : { disconnect: true };
     }
+    if (patch.franchiseId !== undefined) {
+      data.franchise = patch.franchiseId ? { connect: { id: patch.franchiseId } } : { disconnect: true };
+    }
 
     delete data.customerId;
     delete data.pickupLocationId;
     delete data.returnLocationId;
     delete data.vehicleTypeId;
     delete data.vehicleId;
+    delete data.franchiseId;
 
     const updated = await prisma.reservation.update({
       where: { id },

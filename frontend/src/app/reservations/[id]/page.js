@@ -180,7 +180,8 @@ function ReservationDetailInner({ token, me, logout }) {
   const [auditLogs, setAuditLogs] = useState([]);
   const [chargeEdit, setChargeEdit] = useState(false);
   const [chargeModel, setChargeModel] = useState({ dailyRate: '0', serviceFee: '0', taxRate: '11.5', serviceNames: '', feeNames: '', insuranceCodes: '' });
-  const [form, setForm] = useState({ customerId: '', vehicleId: '', pickupAt: '', returnAt: '', pickupLocationId: '', returnLocationId: '', notes: '' });
+  const [form, setForm] = useState({ customerId: '', vehicleId: '', pickupAt: '', returnAt: '', pickupLocationId: '', returnLocationId: '', notes: '', franchiseId: '' });
+  const [franchises, setFranchises] = useState([]);
   const [loanerPacketForm, setLoanerPacketForm] = useState({
     driverLicenseChecked: false,
     insuranceCardCollected: false,
@@ -285,6 +286,7 @@ function ReservationDetailInner({ token, me, logout }) {
       setServiceOptions(Array.isArray(pricingOptionsOut?.services) ? pricingOptionsOut.services : []);
       setFeeOptions(Array.isArray(pricingOptionsOut?.fees) ? pricingOptionsOut.fees : []);
       setInsurancePlans(Array.isArray(pricingOptionsOut?.insurancePlans) ? pricingOptionsOut.insurancePlans : []);
+      setFranchises(Array.isArray(pricingOptionsOut?.franchises) ? pricingOptionsOut.franchises : []);
       setTollSummary(tollsOut);
       setForm({
         customerId: reservationResult.customerId || '',
@@ -293,7 +295,8 @@ function ReservationDetailInner({ token, me, logout }) {
         returnAt: reservationResult.returnAt ? new Date(reservationResult.returnAt).toISOString().slice(0, 16) : '',
         pickupLocationId: reservationResult.pickupLocationId || '',
         returnLocationId: reservationResult.returnLocationId || '',
-        notes: reservationResult.notes || ''
+        notes: reservationResult.notes || '',
+        franchiseId: reservationResult.franchiseId || ''
       });
       const loanerPacket = parseLoanerPacket(reservationResult.loanerBorrowerPacketJson);
       setLoanerPacketForm({
@@ -373,6 +376,7 @@ function ReservationDetailInner({ token, me, logout }) {
           returnAt: form.returnAt,
           pickupLocationId: form.pickupLocationId,
           returnLocationId: form.returnLocationId,
+          franchiseId: form.franchiseId || null,
           notes: form.notes
         })
       }, token);
@@ -1680,6 +1684,9 @@ token
             <div><span className="label">Return Date</span><input type="datetime-local" value={form.returnAt} onChange={(e) => setForm({ ...form, returnAt: e.target.value })} /></div>
             <div><span className="label">Pickup Location</span><select value={form.pickupLocationId} onChange={(e) => setForm({ ...form, pickupLocationId: e.target.value })}><option value="">Select</option>{locations.map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}</select></div>
             <div><span className="label">Return Location</span><select value={form.returnLocationId} onChange={(e) => setForm({ ...form, returnLocationId: e.target.value })}><option value="">Select</option>{locations.map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}</select></div>
+            {franchises.length > 0 && (
+            <div><span className="label">Franchise</span><select value={form.franchiseId} onChange={(e) => setForm({ ...form, franchiseId: e.target.value })}><option value="">— No franchise —</option>{franchises.map((f) => <option key={f.id} value={f.id}>{f.name}{f.code ? ` (${f.code})` : ''}</option>)}</select></div>
+            )}
           </div>
 
           {isLoanerWorkflow ? (

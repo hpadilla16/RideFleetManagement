@@ -15,6 +15,7 @@ import { locationsService } from '../locations/locations.service.js';
 import { vehicleTypesService } from '../vehicle-types/vehicle-types.service.js';
 import { activeVehicleBlockOverlapWhere } from '../vehicles/vehicle-blocks.js';
 import { isSuperAdmin } from '../../middleware/auth.js';
+import { franchiseService } from '../settings/franchise.service.js';
 import { crossTenantScopeFor as scopeFor } from '../../lib/tenant-scope.js';
 
 export const reservationsRouter = Router();
@@ -105,7 +106,7 @@ reservationsRouter.get('/summary', async (req, res, next) => {
 reservationsRouter.get('/create-options', async (req, res, next) => {
   try {
     const tenantScope = scopeFor(req);
-    const [locationsResult, vehicleTypesResult, servicesResult, feesResult, insurancePlansResult] = await Promise.allSettled([
+    const [locationsResult, vehicleTypesResult, servicesResult, feesResult, insurancePlansResult, franchisesResult] = await Promise.allSettled([
       locationsService.list(tenantScope),
       vehicleTypesService.list(tenantScope),
       additionalServicesService.list({
@@ -113,7 +114,8 @@ reservationsRouter.get('/create-options', async (req, res, next) => {
         tenantId: tenantScope.tenantId
       }),
       feesService.list(tenantScope),
-      settingsService.getInsurancePlans(tenantScope)
+      settingsService.getInsurancePlans(tenantScope),
+      franchiseService.list(tenantScope)
     ]);
 
     res.json({
@@ -121,7 +123,8 @@ reservationsRouter.get('/create-options', async (req, res, next) => {
       vehicleTypes: vehicleTypesResult.status === 'fulfilled' && Array.isArray(vehicleTypesResult.value) ? vehicleTypesResult.value : [],
       services: servicesResult.status === 'fulfilled' && Array.isArray(servicesResult.value) ? servicesResult.value : [],
       fees: feesResult.status === 'fulfilled' && Array.isArray(feesResult.value) ? feesResult.value : [],
-      insurancePlans: insurancePlansResult.status === 'fulfilled' && Array.isArray(insurancePlansResult.value) ? insurancePlansResult.value : []
+      insurancePlans: insurancePlansResult.status === 'fulfilled' && Array.isArray(insurancePlansResult.value) ? insurancePlansResult.value : [],
+      franchises: franchisesResult.status === 'fulfilled' && Array.isArray(franchisesResult.value) ? franchisesResult.value : []
     });
   } catch (e) {
     next(e);
@@ -253,7 +256,7 @@ reservationsRouter.get('/:id/pricing-options', async (req, res, next) => {
     const reservation = await reservationsService.getById(req.params.id, scopeFor(req));
     if (!reservation) return res.status(404).json({ error: 'Reservation not found' });
     const tenantScope = reservation?.tenantId ? { tenantId: reservation.tenantId } : scopeFor(req);
-    const [locationsResult, servicesResult, feesResult, insurancePlansResult] = await Promise.allSettled([
+    const [locationsResult, servicesResult, feesResult, insurancePlansResult, franchisesResult] = await Promise.allSettled([
       locationsService.list(tenantScope),
       additionalServicesService.list({
         locationId: reservation.pickupLocationId || undefined,
@@ -261,17 +264,20 @@ reservationsRouter.get('/:id/pricing-options', async (req, res, next) => {
         tenantId: tenantScope.tenantId
       }),
       feesService.list(tenantScope),
-      settingsService.getInsurancePlans(tenantScope)
+      settingsService.getInsurancePlans(tenantScope),
+      franchiseService.list(tenantScope)
     ]);
     const locations = locationsResult.status === 'fulfilled' ? locationsResult.value : [];
     const services = servicesResult.status === 'fulfilled' ? servicesResult.value : [];
     const fees = feesResult.status === 'fulfilled' ? feesResult.value : [];
     const insurancePlans = insurancePlansResult.status === 'fulfilled' ? insurancePlansResult.value : [];
+    const franchisesOut = franchisesResult.status === 'fulfilled' ? franchisesResult.value : [];
     res.json({
       locations: Array.isArray(locations) ? locations : [],
       services: Array.isArray(services) ? services : [],
       fees: Array.isArray(fees) ? fees : [],
-      insurancePlans: Array.isArray(insurancePlans) ? insurancePlans : []
+      insurancePlans: Array.isArray(insurancePlans) ? insurancePlans : [],
+      franchises: Array.isArray(franchisesOut) ? franchisesOut : []
     });
   } catch (e) {
     next(e);

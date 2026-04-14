@@ -97,6 +97,7 @@ function ReservationsInner({ token, me, logout }) {
   const [services, setServices] = useState([]);
   const [fees, setFees] = useState([]);
   const [insurancePlans, setInsurancePlans] = useState([]);
+  const [franchises, setFranchises] = useState([]);
   const [supportLoaded, setSupportLoaded] = useState(false);
   const [loadingSupport, setLoadingSupport] = useState(false);
   const [selectedServiceIds, setSelectedServiceIds] = useState([]);
@@ -115,7 +116,7 @@ function ReservationsInner({ token, me, logout }) {
   const [rateError, setRateError] = useState('');
   const [addingCustomer, setAddingCustomer] = useState(false);
   const [newCustomer, setNewCustomer] = useState({ firstName: '', lastName: '', phone: '', email: '' });
-  const [createForm, setCreateForm] = useState({ reservationNumber: '', customerId: '', vehicleTypeId: '', pickupAt: '', returnAt: '', pickupLocationId: '', returnLocationId: '', dailyRate: '', estimatedTotal: '', notes: '' });
+  const [createForm, setCreateForm] = useState({ reservationNumber: '', customerId: '', vehicleTypeId: '', pickupAt: '', returnAt: '', pickupLocationId: '', returnLocationId: '', dailyRate: '', estimatedTotal: '', notes: '', franchiseId: '' });
 
   const hasFeeAdvisory = (notes) => /\[FEE_ADVISORY_OPEN\s+/i.test(String(notes || ''));
 
@@ -132,6 +133,7 @@ function ReservationsInner({ token, me, logout }) {
     setServices([]);
     setFees([]);
     setInsurancePlans([]);
+    setFranchises([]);
     setSupportLoaded(false);
   };
 
@@ -225,12 +227,14 @@ function ReservationsInner({ token, me, logout }) {
         setServices(Array.isArray(payload.services) ? payload.services : []);
         setFees(Array.isArray(payload.fees) ? payload.fees.filter((x) => x?.isActive !== false) : []);
         setInsurancePlans(Array.isArray(payload.insurancePlans) ? payload.insurancePlans : []);
+        setFranchises(Array.isArray(payload.franchises) ? payload.franchises : []);
       } else {
         setLocations([]);
         setVehicleTypes([]);
         setServices([]);
         setFees([]);
         setInsurancePlans([]);
+        setFranchises([]);
       }
 
       const failures = results.filter((row) => row.status === 'rejected');
@@ -422,6 +426,7 @@ function ReservationsInner({ token, me, logout }) {
           dailyRate: createForm.dailyRate ? Number(createForm.dailyRate) : null,
           estimatedTotal: estimatedWithExtras,
           addOnsTotal,
+          franchiseId: createForm.franchiseId || null,
           status: 'CONFIRMED',
           sendConfirmationEmail: false,
           notes: createForm.notes || null
@@ -433,7 +438,7 @@ function ReservationsInner({ token, me, logout }) {
       setSelectedServiceIds([]);
       setSelectedFeeIds([]);
       setSelectedInsuranceCode('');
-      setCreateForm({ reservationNumber: '', customerId: '', vehicleTypeId: '', pickupAt: '', returnAt: '', pickupLocationId: '', returnLocationId: '', dailyRate: '', estimatedTotal: '', notes: '' });
+      setCreateForm({ reservationNumber: '', customerId: '', vehicleTypeId: '', pickupAt: '', returnAt: '', pickupLocationId: '', returnLocationId: '', dailyRate: '', estimatedTotal: '', notes: '', franchiseId: '' });
       await loadReservations({ offset: 0, nextQuery: query });
       await loadReservationSummary();
     } catch (e) {
@@ -707,6 +712,11 @@ function ReservationsInner({ token, me, logout }) {
                 <div className="stack"><label className="label">Pickup Location*</label><select value={createForm.pickupLocationId} onChange={(e) => setCreateForm({ ...createForm, pickupLocationId: e.target.value })}><option value="">Select</option>{locations.map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}</select></div>
                 <div className="stack"><label className="label">Return Location*</label><select value={createForm.returnLocationId} onChange={(e) => setCreateForm({ ...createForm, returnLocationId: e.target.value })}><option value="">Select</option>{locations.map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}</select></div>
               </div>
+              {franchises.length > 0 && (
+              <div className="grid2">
+                <div className="stack"><label className="label">Franchise</label><select value={createForm.franchiseId} onChange={(e) => setCreateForm({ ...createForm, franchiseId: e.target.value })}><option value="">— No franchise —</option>{franchises.map((f) => <option key={f.id} value={f.id}>{f.name}{f.code ? ` (${f.code})` : ''}</option>)}</select></div>
+              </div>
+              )}
               <div className="grid2">
                 <div className="stack"><label className="label">Daily Rate (auto from rate table)</label><input value={createForm.dailyRate} readOnly /></div>
                 <div className="stack"><label className="label">Base Estimate (auto)</label><input value={createForm.estimatedTotal} readOnly /></div>
