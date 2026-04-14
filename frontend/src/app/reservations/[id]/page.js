@@ -1178,8 +1178,8 @@ if (dailyRate > 0) {
     if (monthlyRate * months < dailyRate * breakdown.days) { rate = monthlyRate; unit = months; }
   }
 } else {
-  const perDay = [/PER_DAY|DAILY|DAY/i.test(String(opt?.mode || ''))] ||
-  ['true', '1'].includes(String(opt?.isPerDay || opt?.perDay || '').toLowerCase());
+  const svcMode = String(opt?.mode || opt?.chargeType || '').toUpperCase();
+  const perDay = ['PER_DAY', 'DAILY', 'DAY', 'BY_DAY'].includes(svcMode);
   unit = perDay ? breakdown.days : 1;
 }
 return {
@@ -1198,8 +1198,8 @@ total: toMoneyNum(rate * unit),
 const feeRows = feeNames.map((name, idx) => {
 const opt = feeOptions.find((f) => (f.name || f.code || '').trim().toLowerCase() === name.toLowerCase());
 const rate = toMoneyNum(opt?.amount ?? opt?.price ?? opt?.rate ?? 0);
-const perDay = [/PER_DAY|DAILY|DAY/i.test(String(opt?.mode || ''))] ||
-['true', '1'].includes(String(opt?.isPerDay || opt?.perDay || '').toLowerCase());
+const mode = String(opt?.mode || '').toUpperCase();
+const perDay = ['PER_DAY', 'DAILY', 'DAY', 'BY_DAY'].includes(mode);
 const unit = perDay ? breakdown.days : 1;
 return {
 id: `fee-${idx}`,
