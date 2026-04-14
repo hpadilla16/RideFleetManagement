@@ -999,7 +999,7 @@ async function syncReservationTollCharges(reservationId, scope = {}, options = {
   const policy = resolveReservationTollPolicy(reservation);
   const selectedServiceIds = Array.from(new Set(
     (reservation.charges || [])
-      .filter((row) => row.selected && String(row.source || '').toUpperCase() === 'ADDITIONAL_SERVICE' && row.sourceRefId)
+      .filter((row) => row.selected && ['ADDITIONAL_SERVICE', 'SERVICE'].includes(String(row.source || '').toUpperCase()) && row.sourceRefId)
       .map((row) => String(row.sourceRefId))
   ));
   const prepaidTollServiceCount = selectedServiceIds.length
