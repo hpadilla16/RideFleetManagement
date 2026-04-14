@@ -262,11 +262,11 @@ export async function getEditableModuleAccessForUser(user) {
 
   for (const key of MODULE_KEYS) {
     const tenantEnabled = tenantConfig[key] !== false;
+    const hasUserOverride = Object.prototype.hasOwnProperty.call(storedConfig, key);
     const roleEnabled = roleAllowed[key] !== false;
-    const storedEnabled = Object.prototype.hasOwnProperty.call(storedConfig, key)
-      ? !!storedConfig[key]
-      : true;
-    config[key] = !!tenantEnabled && !!roleEnabled && !!storedEnabled;
+    // User-level override takes priority over role default, but tenant config is always enforced
+    const moduleEnabled = hasUserOverride ? !!storedConfig[key] : roleEnabled;
+    config[key] = !!tenantEnabled && !!moduleEnabled;
   }
 
   return { tenantConfig, storedConfig, config };
