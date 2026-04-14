@@ -2154,7 +2154,7 @@ export const rentalAgreementsService = {
       const pdfBuffer = await page.pdf({
         format: 'Letter',
         printBackground: true,
-        margin: { top: '0.5in', bottom: '0.6in', left: '0.5in', right: '0.5in' }
+        margin: { top: '0.3in', bottom: '0.3in', left: '0.4in', right: '0.4in' }
       });
       await page.close();
       return pdfBuffer;

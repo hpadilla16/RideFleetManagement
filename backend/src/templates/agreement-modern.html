@@ -17,8 +17,8 @@
 --brand2:#c084fc;
 --ok:#22c55e;
 --warn:#f59e0b;
---radius:16px;
---shadow:0 12px 36px rgba(0,0,0,.45);
+--radius:10px;
+--shadow:0 8px 24px rgba(0,0,0,.35);
 }
 
 *{box-sizing:border-box}
@@ -30,7 +30,8 @@ background:
 radial-gradient(900px 400px at -10% -10%, #2a1c4d 0%, transparent 60%),
 radial-gradient(700px 350px at 110% -10%, #2f1a52 0%, transparent 60%),
 linear-gradient(180deg,var(--bg),var(--bg-2));
-padding:24px;
+padding:14px;
+font-size:11px;
 }
 
 .wrap{max-width:1050px;margin:0 auto}
@@ -42,32 +43,32 @@ box-shadow:var(--shadow);
 }
 
 .hero{
-padding:18px 20px;
+padding:10px 14px;
 display:flex;
 justify-content:space-between;
 align-items:center;
-gap:14px;
-margin-bottom:12px;
+gap:10px;
+margin-bottom:6px;
 }
 
-.brand{display:flex;align-items:center;gap:12px;min-width:0;flex:1 1 auto;max-width:min(50%, 720px)}
+.brand{display:flex;align-items:center;gap:10px;min-width:0;flex:1 1 auto;max-width:min(50%, 720px)}
 .logo{
-width:auto;min-width:52px;max-width:min(50vw, 520px);height:60px;border-radius:12px;
+width:auto;min-width:40px;max-width:min(50vw, 400px);height:42px;border-radius:8px;
 border:1px solid #4b3b74;background:#120f1e;
 display:flex;align-items:center;justify-content:center;overflow:hidden;
-padding:6px 10px;
+padding:4px 8px;
 flex:0 0 auto;
 }
 .logo img{width:auto;height:100%;max-width:100%;object-fit:contain;display:block}
 .logo-fallback{
-width:52px;height:52px;display:flex;align-items:center;justify-content:center;
-color:#d7c7ff;font-size:18px;font-weight:800;letter-spacing:.03em;
+width:40px;height:40px;display:flex;align-items:center;justify-content:center;
+color:#d7c7ff;font-size:14px;font-weight:800;letter-spacing:.03em;
 }
 
 .title{
 margin:0;
-font-size:30px;
-line-height:1.05;
+font-size:20px;
+line-height:1.1;
 letter-spacing:-.02em;
 font-weight:850;
 background:linear-gradient(90deg,var(--brand),var(--brand2));
@@ -76,41 +77,41 @@ background-clip:text;
 color:transparent;
 white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
 }
-.sub{margin-top:6px;color:var(--muted);font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.sub{margin-top:3px;color:var(--muted);font-size:9px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 
 .pill{
 border:1px solid #5d4691;
 color:#dccdff;
 background:#231a39;
 border-radius:999px;
-padding:9px 13px;
-font-size:12px;
+padding:5px 10px;
+font-size:9px;
 font-weight:700;
 white-space:nowrap;
 }
 
-.section{padding:13px;margin-top:10px}
-.section h3{margin:0 0 9px;font-size:17px;color:#efe9ff}
+.section{padding:8px 10px;margin-top:6px}
+.section h3{margin:0 0 5px;font-size:12px;color:#efe9ff}
 
 .grid{
 display:grid;
 grid-template-columns:repeat(4,minmax(0,1fr));
-gap:9px;
+gap:5px;
 }
 .tile{
 border:1px solid #3a2d5f;
-border-radius:11px;
-padding:9px 10px;
+border-radius:8px;
+padding:5px 7px;
 background:#1a1530;
 }
 .k{
 color:#9f93be;
-font-size:10px;
+font-size:7px;
 text-transform:uppercase;
 letter-spacing:.08em;
-margin-bottom:4px;
+margin-bottom:2px;
 }
-.v{font-size:14px;font-weight:650}
+.v{font-size:11px;font-weight:650}
 .money{font-variant-numeric:tabular-nums}
 .paid{color:var(--ok)}
 .due{color:var(--warn)}
@@ -120,13 +121,13 @@ width:100%;
 border-collapse:separate;
 border-spacing:0;
 border:1px solid #3a2d5f;
-border-radius:12px;
+border-radius:8px;
 overflow:hidden;
 background:#18132b;
 }
 th,td{
-padding:9px 10px;
-font-size:12px;
+padding:4px 6px;
+font-size:9px;
 border-bottom:1px solid #31264f;
 vertical-align:top;
 }
@@ -136,66 +137,67 @@ background:#21193a;
 color:#ac9ed0;
 text-transform:uppercase;
 letter-spacing:.07em;
-font-size:10px;
+font-size:7px;
 text-align:left;
 }
 .num{text-align:right;font-variant-numeric:tabular-nums}
 
 .terms{
 border:1px solid #3a2d5f;
-border-radius:12px;
+border-radius:8px;
 background:#17122a;
 color:#c8bcdf;
-padding:12px;
-font-size:12px;
-line-height:1.55;
+padding:6px 8px;
+font-size:6.5px;
+line-height:1.4;
 white-space:pre-wrap;
+max-height:none;
 }
 
 .sig{
 display:grid;
-grid-template-columns:1fr 230px;
-gap:10px;
+grid-template-columns:1fr 160px;
+gap:6px;
 }
 .sig-main{
 border:1px dashed #5a468d;
-border-radius:12px;
+border-radius:8px;
 background:#18132b;
-padding:10px;
-min-height:92px;
+padding:6px;
+min-height:60px;
 }
-.sig-meta{font-size:11px;color:#aa9ec8;margin-bottom:8px}
-.sig-main img{max-height:74px;max-width:340px;object-fit:contain;filter:contrast(1.05)}
+.sig-meta{font-size:8px;color:#aa9ec8;margin-bottom:4px}
+.sig-main img{max-height:50px;max-width:280px;object-fit:contain;filter:contrast(1.05)}
 
 .verify{
 border:1px solid #3a2d5f;
-border-radius:12px;
+border-radius:8px;
 background:#19132d;
-padding:10px;
-display:flex;flex-direction:column;gap:8px;
+padding:6px;
+display:flex;flex-direction:column;gap:4px;
 }
 .verify h4{
 margin:0;
-font-size:11px;
+font-size:8px;
 text-transform:uppercase;
 letter-spacing:.08em;
 color:#d6c5ff;
 }
 .qr{
-width:90px;height:90px;
+width:60px;height:60px;
 border:1px solid #4f3d7f;
-border-radius:10px;
+border-radius:6px;
 display:flex;align-items:center;justify-content:center;
-color:#9d8fc1;font-size:10px;background:#120f21;
+color:#9d8fc1;font-size:7px;background:#120f21;
 }
-.vline{font-size:11px;color:#bfb3da;word-break:break-word}
-.vline code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:10px;color:#f0e8ff}
+.vline{font-size:8px;color:#bfb3da;word-break:break-word}
+.vline code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:7px;color:#f0e8ff}
 
 .footer{
-margin-top:10px;
+margin-top:6px;
 text-align:center;
 color:#9185af;
-font-size:10px;
+font-size:7px;
 letter-spacing:.03em;
 }
 
@@ -203,11 +205,11 @@ letter-spacing:.03em;
 .grid{grid-template-columns:repeat(2,minmax(0,1fr))}
 .sig{grid-template-columns:1fr}
 .brand{max-width:100%}
-.logo{max-width:min(60vw, 320px);height:54px}
+.logo{max-width:min(60vw, 320px);height:40px}
 }
 
 @media print{
-body{padding:0;background:#fff;color:#111}
+body{padding:8px;background:#fff;color:#111;font-size:10px}
 .card,.tile,table,.terms,.sig-main,.verify{
 background:#fff !important;
 color:#111 !important;
@@ -219,6 +221,8 @@ th{background:#f5f5f5 !important;color:#555 !important}
 .sub,.k,.sig-meta,.footer,.vline{color:#555 !important}
 .paid{color:#166534 !important}
 .due{color:#92400e !important}
+.section{page-break-inside:avoid}
+.terms{font-size:6px;line-height:1.35}
 }
 </style>
 </head>
@@ -288,7 +292,7 @@ th{background:#f5f5f5 !important;color:#555 !important}
 </div>
 
 <div class="card section">
-<h3>Terms</h3>
+<h3>Terms & Conditions</h3>
 <div class="terms">{{termsText}}</div>
 </div>
 
