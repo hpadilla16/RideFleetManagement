@@ -3490,10 +3490,6 @@ export const rentalAgreementsService = {
       : Number(agreement.paidAmount || 0);
 
     const locationConfig = parseLocationConfig(pickupLocationConfigSource);
-    const paymentDueAction = String(locationConfig?.paymentDueAction || 'AT_BOOKING');
-    if ((paymentDueAction === 'AT_BOOKING' || paymentDueAction === 'AT_PICKUP') && paidAmount <= 0) {
-      throw new Error('This location requires payment at booking/pickup before finalizing');
-    }
 
     const minAge = Number(locationConfig?.chargeAgeMin || 0);
     const maxAge = Number(locationConfig?.chargeAgeMax || 0);

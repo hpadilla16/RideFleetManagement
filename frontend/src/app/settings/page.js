@@ -4447,11 +4447,6 @@ function SettingsInner({ token, me, logout }) {
                     <option value="USD">USD</option>
                     <option value="EUR">EUR</option>
                   </select></div>
-                  <div className="stack"><label className="label">Payment Due Action</label><select value={locationEditor.config?.paymentDueAction || 'AT_BOOKING'} onChange={(e) => setLocationEditor({ ...locationEditor, config: { ...(locationEditor.config || {}), paymentDueAction: e.target.value } })}>
-                    <option value="AT_BOOKING">At Booking</option>
-                    <option value="AT_PICKUP">At Pickup</option>
-                    <option value="AT_RETURN">At Return</option>
-                  </select></div>
                   <label className="label"><input type="checkbox" checked={!!locationEditor.config?.requirePaymentOnDebit} onChange={(e) => setLocationEditor({ ...locationEditor, config: { ...(locationEditor.config || {}), requirePaymentOnDebit: e.target.checked } })} /> Require Payment if Debit</label>
                   <label className="label"><input type="checkbox" checked={!!locationEditor.config?.requireRefundIfDue} onChange={(e) => setLocationEditor({ ...locationEditor, config: { ...(locationEditor.config || {}), requireRefundIfDue: e.target.checked } })} /> Require Refund if Due</label>
 
