@@ -20,7 +20,7 @@ function pricingEditorState(pricing, reservation) {
       .filter(Boolean)
       .join(', ');
     const feeNames = charges
-      .filter((c) => ['FEE', 'SERVICE_LINKED_FEE'].includes(String(c?.source || '').toUpperCase()))
+      .filter((c) => String(c?.source || '').toUpperCase() === 'FEE')
       .map((c) => stripChargePrefix(c?.name, /^Fee:\s*/i))
       .filter(Boolean)
       .join(', ');
@@ -1438,7 +1438,7 @@ token
       .filter((row) => row.name !== 'Fee:');
     if (chargeEdit) return editorRows;
     return (pricing?.charges || [])
-      .filter((j) => ['FEE', 'SERVICE_LINKED_FEE'].includes(String(j?.source || '').toUpperCase()))
+      .filter((j) => String(j?.source || '').toUpperCase() === 'FEE')
       .map((j, i) => ({ id: `fee-${j?.sourceRefId || i}`, name: String(j?.name || '') }));
   }, [pricing?.charges, chargeEdit, chargeModel.feeNames]);
 
@@ -2383,9 +2383,9 @@ token
                   </thead>
                   <tbody>
                     {displayChargeRows.map((r) => {
-                      const canDelete = ['service', 'fee', 'deposit-due', 'security-deposit', 'ins-', 'linked-fee'].some((key) =>
-                        String(r.id || '').toLowerCase().includes(key.replace('-', ''))
-                      );
+                      const rid = String(r.id || '').toLowerCase();
+                      const isFixed = rid === 'daily' || rid === 'tax';
+                      const canDelete = !isFixed;
 
                       return (
                         <tr key={r.id}>
