@@ -187,7 +187,7 @@ async function hydrateReservationListRows(rows = [], scope = {}) {
   const [customers, vehicleTypes, vehicles, locations] = await Promise.all([
     customerIds.length
       ? prisma.customer.findMany({
-          where: { id: { in: customerIds }, ...(scope?.tenantId ? { tenantId: scope.tenantId } : {}) },
+          where: { id: { in: customerIds } },
           select: { id: true, firstName: true, lastName: true, email: true, phone: true }
         })
       : [],
