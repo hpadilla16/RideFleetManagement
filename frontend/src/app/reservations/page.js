@@ -358,7 +358,7 @@ function ReservationsInner({ token, me, logout }) {
     if (mode === 'PERCENTAGE') return baseEstimate * (amount / 100);
     return amount;
   })();
-  const estimatedWithExtras = Number((baseEstimate + servicesTotal + feesTotal + insuranceTotal).toFixed(2));
+  const estimatedWithExtras = Number((baseEstimate + servicesTotal + feesTotal).toFixed(2));
 
   const startRental = async (id) => {
     router.push(`/reservations/${id}/checkout`);
@@ -712,11 +712,9 @@ function ReservationsInner({ token, me, logout }) {
                 <div className="stack"><label className="label">Pickup Location*</label><select value={createForm.pickupLocationId} onChange={(e) => setCreateForm({ ...createForm, pickupLocationId: e.target.value })}><option value="">Select</option>{locations.map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}</select></div>
                 <div className="stack"><label className="label">Return Location*</label><select value={createForm.returnLocationId} onChange={(e) => setCreateForm({ ...createForm, returnLocationId: e.target.value })}><option value="">Select</option>{locations.map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}</select></div>
               </div>
-              {franchises.length > 0 && (
               <div className="grid2">
                 <div className="stack"><label className="label">Franchise</label><select value={createForm.franchiseId} onChange={(e) => setCreateForm({ ...createForm, franchiseId: e.target.value })}><option value="">— No franchise —</option>{franchises.map((f) => <option key={f.id} value={f.id}>{f.name}{f.code ? ` (${f.code})` : ''}</option>)}</select></div>
               </div>
-              )}
               <div className="grid2">
                 <div className="stack"><label className="label">Daily Rate (auto from rate table)</label><input value={createForm.dailyRate} readOnly /></div>
                 <div className="stack"><label className="label">Base Estimate (auto)</label><input value={createForm.estimatedTotal} readOnly /></div>
@@ -755,18 +753,9 @@ function ReservationsInner({ token, me, logout }) {
                 </div>
               </div>
 
-              <div className="glass card" style={{ padding: 10 }}>
-                <h4 style={{ marginBottom: 8 }}>Insurance</h4>
-                <select value={selectedInsuranceCode} onChange={(e) => setSelectedInsuranceCode(e.target.value)}>
-                  <option value="">No insurance selected</option>
-                  {filteredInsurance.map((p, idx) => <option key={`${p.code || idx}`} value={p.code}>{p.name || p.label || p.code} ({String(p.chargeBy || p.mode || 'FIXED')})</option>)}
-                </select>
-              </div>
-
               <div className="grid2">
                 <div className="stack"><label className="label">Services Total (estimated)</label><input value={servicesTotal.toFixed(2)} readOnly /></div>
                 <div className="stack"><label className="label">Fees Total (estimated)</label><input value={feesTotal.toFixed(2)} readOnly /></div>
-                <div className="stack"><label className="label">Insurance Total (estimated)</label><input value={insuranceTotal.toFixed(2)} readOnly /></div>
                 <div className="stack"><label className="label">Estimated Total with Selections</label><input value={estimatedWithExtras.toFixed(2)} readOnly /></div>
                 <div className="stack"><label className="label">Rental Days (estimated)</label><input value={String(rentalDays || 0)} readOnly /></div>
               </div>
