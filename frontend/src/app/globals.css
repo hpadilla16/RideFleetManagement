@@ -458,8 +458,8 @@ tr:hover td { background: rgba(135,82,254,.05); }
 }
 .rent-modal {
   width: min(620px, 96vw);
-  max-height: 90vh;
-  overflow-y: auto;
+  max-height: none;
+  overflow: visible;
   -webkit-overflow-scrolling: touch;
   touch-action: pan-y;
   padding: 16px;
