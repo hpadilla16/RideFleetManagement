@@ -1751,10 +1751,36 @@ export const bookingEngineService = {
         }
       });
 
-      if (normalizedChosenServices.length || linkedServiceFees.length || insuranceLine || mandatoryFees.length) {
+      {
+        const days = Number(selected.quote?.days || 1);
+        const dailyRate = money(selected.quote?.dailyRate || 0);
+        const baseTotal = money(dailyRate * days);
+        const taxRate = Number(search.location?.taxRate || 0);
+        const taxableBase = money(baseTotal
+          + normalizedChosenServices.filter(s => s.taxable !== false).reduce((sum, s) => sum + Number(s.total || 0), 0)
+          + linkedServiceFees.filter(f => f.taxable !== false).reduce((sum, f) => sum + Number(f.total || 0), 0)
+          + insuranceLines.filter(p => p.taxable).reduce((sum, p) => sum + Number(p.total || 0), 0)
+          + mandatoryFees.filter(f => f.taxable).reduce((sum, f) => sum + Number(f.total || 0), 0)
+        );
+        const taxTotal = money(taxableBase * (taxRate / 100));
+        let sortIdx = 0;
+
         await prisma.reservationCharge.createMany({
           data: [
-            ...mandatoryFees.map((fee, idx) => ({
+            {
+              reservationId: reservation.id,
+              code: 'DAILY',
+              name: 'Daily',
+              chargeType: 'UNIT',
+              quantity: days,
+              rate: dailyRate,
+              total: baseTotal,
+              taxable: true,
+              selected: true,
+              sortOrder: sortIdx++,
+              source: 'BASE_RATE'
+            },
+            ...mandatoryFees.map((fee) => ({
               reservationId: reservation.id,
               code: fee.code,
               name: fee.name,
@@ -1764,11 +1790,11 @@ export const bookingEngineService = {
               total: Number(fee.total || 0),
               taxable: !!fee.taxable,
               selected: true,
-              sortOrder: idx,
+              sortOrder: sortIdx++,
               source: 'MANDATORY_FEE',
               sourceRefId: fee.feeId
             })),
-            ...normalizedChosenServices.map((service, idx) => ({
+            ...normalizedChosenServices.map((service) => ({
               reservationId: reservation.id,
               code: service.code,
               name: service.name,
@@ -1778,11 +1804,11 @@ export const bookingEngineService = {
               total: Number(service.total || 0),
               taxable: !!service.taxable,
               selected: true,
-              sortOrder: idx + mandatoryFees.length,
-              source: 'ADDITIONAL_SERVICE',
+              sortOrder: sortIdx++,
+              source: 'SERVICE',
               sourceRefId: service.serviceId
             })),
-            ...linkedServiceFees.map((fee, idx) => ({
+            ...linkedServiceFees.map((fee) => ({
               reservationId: reservation.id,
               code: fee.code,
               name: fee.name,
@@ -1792,24 +1818,63 @@ export const bookingEngineService = {
               total: Number(fee.total || 0),
               taxable: !!fee.taxable,
               selected: true,
-              sortOrder: idx + mandatoryFees.length + normalizedChosenServices.length,
+              sortOrder: sortIdx++,
               source: 'SERVICE_LINKED_FEE',
               sourceRefId: `${fee.feeId}:${fee.serviceId}`,
               notes: fee.serviceName ? `Auto-added because service "${fee.serviceName}" was selected` : 'Auto-added because a linked service was selected'
             })),
-            ...(insuranceLine ? [{
+            ...insuranceLines.map((plan) => ({
               reservationId: reservation.id,
-              code: insuranceLine.code,
-              name: `Insurance: ${insuranceLine.name}`,
+              code: plan.code,
+              name: `Insurance: ${plan.name}`,
               chargeType: 'UNIT',
-              quantity: Number(insuranceLine.quantity || 1),
-              rate: Number(insuranceLine.rate || 0),
-              total: Number(insuranceLine.total || 0),
-              taxable: !!insuranceLine.taxable,
+              quantity: Number(plan.quantity || 1),
+              rate: Number(plan.rate || 0),
+              total: Number(plan.total || 0),
+              taxable: !!plan.taxable,
               selected: true,
-              sortOrder: normalizedChosenServices.length + mandatoryFees.length + linkedServiceFees.length,
+              sortOrder: sortIdx++,
               source: 'INSURANCE',
-              sourceRefId: insuranceLine.code
+              sourceRefId: plan.code
+            })),
+            ...(taxTotal > 0 ? [{
+              reservationId: reservation.id,
+              code: 'TAX',
+              name: `Sales Tax (${taxRate.toFixed(2)}%)`,
+              chargeType: 'TAX',
+              quantity: 1,
+              rate: taxTotal,
+              total: taxTotal,
+              taxable: false,
+              selected: true,
+              sortOrder: sortIdx++,
+              source: 'TAX'
+            }] : []),
+            ...(checkoutDeposit?.amountDue > 0 ? [{
+              reservationId: reservation.id,
+              code: 'DEPOSIT',
+              name: 'Deposit (Due Now)',
+              chargeType: 'UNIT',
+              quantity: 1,
+              rate: money(checkoutDeposit.amountDue),
+              total: money(checkoutDeposit.amountDue),
+              taxable: false,
+              selected: true,
+              sortOrder: sortIdx++,
+              source: 'DEPOSIT'
+            }] : []),
+            ...(checkoutDeposit?.securityDepositRequired && checkoutDeposit?.securityDepositAmount > 0 ? [{
+              reservationId: reservation.id,
+              code: 'SECURITY_DEPOSIT',
+              name: 'Security Deposit',
+              chargeType: 'UNIT',
+              quantity: 1,
+              rate: money(checkoutDeposit.securityDepositAmount),
+              total: money(checkoutDeposit.securityDepositAmount),
+              taxable: false,
+              selected: true,
+              sortOrder: sortIdx++,
+              source: 'SECURITY_DEPOSIT'
             }] : [])
           ]
         });

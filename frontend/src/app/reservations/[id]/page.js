@@ -71,6 +71,16 @@ function isSecurityDepositDisplayRow(row = {}) {
   return source === 'SECURITY_DEPOSIT' || id === 'security-deposit' || name === 'SECURITY DEPOSIT';
 }
 
+function isDepositDisplayRow(row = {}) {
+  const source = String(row?.source || '').trim().toUpperCase();
+  const id = String(row?.id || '').trim().toLowerCase();
+  return source === 'DEPOSIT' || source === 'DEPOSIT_DUE' || id === 'deposit-due';
+}
+
+function isExcludedFromTotal(row = {}) {
+  return isSecurityDepositDisplayRow(row) || isDepositDisplayRow(row);
+}
+
 
 export default function ReservationDetailPage() {
 return <AuthGate>{({ token, me, logout }) => <ReservationDetailInner token={token} me={me} logout={logout} />}</AuthGate>;
@@ -1569,8 +1579,12 @@ token
     () => toMoneyNum(displayChargeRows.filter((r) => isSecurityDepositDisplayRow(r)).reduce((s, r) => s + toMoneyNum(r?.total), 0)),
     [displayChargeRows]
   );
+  const depositDueDisplayTotal = useMemo(
+    () => toMoneyNum(displayChargeRows.filter((r) => isDepositDisplayRow(r)).reduce((s, r) => s + toMoneyNum(r?.total), 0)),
+    [displayChargeRows]
+  );
   const displayTotal = useMemo(
-    () => toMoneyNum(displayChargeRows.filter((r) => !isSecurityDepositDisplayRow(r)).reduce((s, r) => s + toMoneyNum(r?.total), 0)),
+    () => toMoneyNum(displayChargeRows.filter((r) => !isExcludedFromTotal(r)).reduce((s, r) => s + toMoneyNum(r?.total), 0)),
     [displayChargeRows]
   );
   const effectiveChargeTotal = displayTotal;
