@@ -1099,6 +1099,7 @@ export const reservationsService = {
       }, scope, tx);
 
       return tx.reservation.create({
+      include: { customer: { select: { id: true, firstName: true, lastName: true, email: true, phone: true } } },
       data: {
         tenantId: scope?.tenantId || data.tenantId || null,
         reservationNumber: data.reservationNumber,
