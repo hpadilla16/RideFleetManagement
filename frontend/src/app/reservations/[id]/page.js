@@ -1544,11 +1544,23 @@ token
       })
       .filter(Boolean);
 
+    const insuranceDisplayRows = selectedInsurancePlansDisplay.map((plan) => {
+      const mode = String(plan.chargeBy || plan.mode || 'FIXED').toUpperCase();
+      const amount = toMoneyNum(plan.amount || 0);
+      let quantity = 1;
+      let rate = amount;
+      let total = amount;
+      if (mode === 'PER_DAY') { quantity = Math.max(1, breakdown.days); total = toMoneyNum(amount * quantity); }
+      else if (mode === 'PERCENTAGE') { total = toMoneyNum(toMoneyNum(breakdown.daily * breakdown.days) * (amount / 100)); rate = total; }
+      return { id: `ins-${plan.code}`, name: `Insurance: ${plan.label || plan.name || plan.code}`, unit: quantity, rate, total, taxable: !!plan.taxable };
+    });
+
     const rawRows = [
       { id: 'daily', name: 'Daily', unit: breakdown.days, rate: breakdown.daily, total: breakdown.base, taxable: true },
       ...serviceRows,
       ...feeRows,
-      ...linkedFeeRows
+      ...linkedFeeRows,
+      ...insuranceDisplayRows
     ];
 
     // Apply inline overrides from agent edits
@@ -1573,7 +1585,7 @@ token
     }
 
     return rows;
-  }, [chargeEdit, pricing?.charges, breakdown, selectedServiceRows, selectedFeeRows, serviceOptions, feeOptions, chargeModel?.taxRate, depositOverrides.depositDue, depositOverrides.securityDeposit, chargeOverrides]);
+  }, [chargeEdit, pricing?.charges, breakdown, selectedServiceRows, selectedFeeRows, selectedInsurancePlansDisplay, serviceOptions, feeOptions, chargeModel?.taxRate, depositOverrides.depositDue, depositOverrides.securityDeposit, chargeOverrides]);
 
   const securityDepositDisplayTotal = useMemo(
     () => toMoneyNum(displayChargeRows.filter((r) => isSecurityDepositDisplayRow(r)).reduce((s, r) => s + toMoneyNum(r?.total), 0)),
