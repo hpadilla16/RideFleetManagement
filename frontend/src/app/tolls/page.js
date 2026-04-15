@@ -393,6 +393,25 @@ function TollsInner({ token, me, logout }) {
     }
   };
 
+  const runBulkAutoMatch = async () => {
+    try {
+      setBusyId('bulk-auto-match');
+      const out = await api(scopedTollsPath('/api/tolls/transactions/bulk-auto-match'), {
+        method: 'POST',
+        body: JSON.stringify({ limit: 500 })
+      }, token);
+      const confirmed = Number(out?.autoConfirmed || 0);
+      const suggested = Number(out?.suggested || 0);
+      const reviewed = Number(out?.reviewed || 0);
+      setMsg(`Bulk match complete: ${confirmed} auto-confirmed, ${suggested} suggested, ${reviewed} reviewed`);
+      await load();
+    } catch (error) {
+      setMsg(error.message);
+    } finally {
+      setBusyId('');
+    }
+  };
+
   return (
     <AppShell me={me} logout={logout}>
       <section className="glass card-lg stack">
@@ -400,7 +419,7 @@ function TollsInner({ token, me, logout }) {
           <div className="row-between" style={{ alignItems: 'start', marginBottom: 0 }}>
             <div>
               <span className="eyebrow">Toll Operations</span>
-              <h2 className="page-title" style={{ marginTop: 6 }}>Match Puerto Rico tolls against tenant fleet and reservation windows.</h2>
+              <h2 className="page-title" style={{ marginTop: 6 }}>Match tolls against tenant fleet and reservation windows.</h2>
               <p className="ui-muted">
                 This queue uses the tenant's real vehicles, plate, toll tag, toll sticker, reservation windows, and vehicle swaps to suggest or confirm toll ownership.
               </p>
@@ -599,10 +618,10 @@ function TollsInner({ token, me, logout }) {
         </div>
 
         <div className="glass card section-card">
-          <div className="row-between">
+          <div className="row-between" style={{ flexWrap: 'wrap', gap: 8 }}>
             <div className="section-title">Review Queue</div>
-            <div className="inline-actions">
-              <input placeholder="Search plate, tag, sticker, location, reservation" value={query} onChange={(e) => setQuery(e.target.value)} />
+            <div className="inline-actions" style={{ flexWrap: 'wrap', gap: 6 }}>
+              <input placeholder="Search plate, tag, location, reservation" style={{ minWidth: 200 }} value={query} onChange={(e) => setQuery(e.target.value)} />
               <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}>
                 <option value="">All statuses</option>
                 <option value="IMPORTED">Imported</option>
@@ -614,6 +633,9 @@ function TollsInner({ token, me, logout }) {
               </select>
               <label className="label"><input type="checkbox" checked={reviewOnly} onChange={(e) => setReviewOnly(e.target.checked)} /> Review only</label>
               <button type="button" onClick={load}>Refresh</button>
+              <button type="button" style={{ background: '#166534', color: '#fff', fontWeight: 700 }} onClick={runBulkAutoMatch} disabled={busyId === 'bulk-auto-match' || (isSuper && !activeTenantId)}>
+                {busyId === 'bulk-auto-match' ? 'Matching...' : 'Auto-Match All'}
+              </button>
             </div>
           </div>
           <div className="inline-actions" style={{ marginBottom: 10, flexWrap: 'wrap' }}>
@@ -646,59 +668,58 @@ function TollsInner({ token, me, logout }) {
             </div>
           ) : null}
 
-          <table>
+          <table style={{ fontSize: '0.88rem' }}>
             <thead>
               <tr>
-                <th>When</th>
-                <th>Toll</th>
-                <th>Vehicle Match</th>
-                <th>Reservation Match</th>
-                <th>Status</th>
-                <th>Actions</th>
+                <th style={{ width: '15%' }}>When / Location</th>
+                <th style={{ width: '12%' }}>Amount</th>
+                <th style={{ width: '18%' }}>Vehicle</th>
+                <th style={{ width: '20%' }}>Reservation</th>
+                <th style={{ width: '12%' }}>Status</th>
+                <th style={{ width: '23%' }}>Actions</th>
               </tr>
             </thead>
             <tbody>
               {visibleTransactions.map((row) => (
                 <tr key={row.id}>
-                  <td>
-                    <div>{new Date(row.transactionAt).toLocaleString()}</div>
-                    <div className="label" style={{ textTransform: 'none', letterSpacing: 0 }}>{row.location || row.lane || '-'}</div>
+                  <td style={{ fontSize: '0.82rem' }}>
+                    <div style={{ fontWeight: 600 }}>{new Date(row.transactionAt).toLocaleDateString()}</div>
+                    <div style={{ color: '#6b7a9a', fontSize: '0.78rem' }}>{new Date(row.transactionAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</div>
+                    <div style={{ color: '#6b7a9a', fontSize: '0.78rem' }}>{row.location || '-'}</div>
                   </td>
                   <td>
-                    <div>{money(row.amount)}</div>
-                    <div className="label" style={{ textTransform: 'none', letterSpacing: 0 }}>
-                      Plate: {row.plateRaw || '-'} · Tag: {row.tagRaw || '-'} · Sello: {row.selloRaw || '-'}
+                    <div style={{ fontWeight: 700, fontSize: '0.95rem' }}>{money(row.amount)}</div>
+                    <div style={{ color: '#6b7a9a', fontSize: '0.72rem' }}>
+                      {row.plateRaw || '-'}
                     </div>
                   </td>
-                  <td>
+                  <td style={{ fontSize: '0.82rem' }}>
                     {row.vehicle ? (
-                      <>
-                        <div>{row.vehicle.internalNumber}</div>
-                        <div className="label" style={{ textTransform: 'none', letterSpacing: 0 }}>{row.vehicle.plate || '-'} · {row.vehicle.tollTagNumber || '-'} · {row.vehicle.tollStickerNumber || '-'}</div>
-                      </>
+                      <div>
+                        <div style={{ fontWeight: 600 }}>{row.vehicle.internalNumber}</div>
+                        <div style={{ color: '#6b7a9a', fontSize: '0.75rem' }}>{row.vehicle.plate || '-'}</div>
+                      </div>
                     ) : (
-                      <div className="label">No tenant vehicle resolved yet</div>
+                      <span style={{ color: '#b91c1c', fontSize: '0.78rem' }}>Unmatched</span>
                     )}
                   </td>
-                  <td>
+                  <td style={{ fontSize: '0.82rem' }}>
                     {row.latestAssignment?.reservation ? (
-                      <>
-                        <div>{row.latestAssignment.reservation.reservationNumber}</div>
-                        <div className="label" style={{ textTransform: 'none', letterSpacing: 0 }}>
-                          Score {row.latestAssignment.confidence ?? row.matchConfidence ?? 0} · {row.latestAssignment.matchReason || 'suggested'}
+                      <div>
+                        <div style={{ fontWeight: 600 }}>{row.latestAssignment.reservation.reservationNumber}</div>
+                        <div style={{ color: '#6b7a9a', fontSize: '0.72rem' }}>
+                          {row.latestAssignment.matchReason || 'suggested'}
                         </div>
-                      </>
-                    ) : row.reservation ? (
-                      <div>{row.reservation.reservationNumber}</div>
-                    ) : (
-                      <div className="stack" style={{ gap: 6 }}>
-                        <div className="label">Manual reservation lookup</div>
-                        <input
-                          placeholder="Reservation number"
-                          value={reservationDrafts[row.id] || ''}
-                          onChange={(e) => setReservationDrafts((prev) => ({ ...prev, [row.id]: e.target.value }))}
-                        />
                       </div>
+                    ) : row.reservation ? (
+                      <div style={{ fontWeight: 600 }}>{row.reservation.reservationNumber}</div>
+                    ) : (
+                      <input
+                        placeholder="Reservation #"
+                        style={{ fontSize: '0.8rem', padding: '4px 6px', width: '100%' }}
+                        value={reservationDrafts[row.id] || ''}
+                        onChange={(e) => setReservationDrafts((prev) => ({ ...prev, [row.id]: e.target.value }))}
+                      />
                     )}
                   </td>
                   <td>
@@ -718,51 +739,44 @@ function TollsInner({ token, me, logout }) {
                     ) : null}
                   </td>
                   <td>
-                    <div className="stack" style={{ gap: 6 }}>
+                    <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
                       {row.dispatchConfirmationRequired && row.reservation?.id ? (
                         <>
-                          <button type="button" onClick={() => runReviewAction(row, 'CONFIRM_DISPATCHED')} disabled={busyId === `CONFIRM_DISPATCHED-${row.id}`}>
-                            {busyId === `CONFIRM_DISPATCHED-${row.id}` ? 'Saving...' : 'Yes, Vehicle Was Dispatched'}
+                          <button type="button" style={{ fontSize: '0.75rem', padding: '3px 8px' }} onClick={() => runReviewAction(row, 'CONFIRM_DISPATCHED')} disabled={busyId === `CONFIRM_DISPATCHED-${row.id}`}>
+                            Dispatched
                           </button>
-                          <button type="button" className="button-subtle" onClick={() => runReviewAction(row, 'MARK_NOT_DISPATCHED')} disabled={busyId === `MARK_NOT_DISPATCHED-${row.id}`}>
-                            {busyId === `MARK_NOT_DISPATCHED-${row.id}` ? 'Saving...' : 'No, Remove Toll'}
+                          <button type="button" className="button-subtle" style={{ fontSize: '0.75rem', padding: '3px 8px' }} onClick={() => runReviewAction(row, 'MARK_NOT_DISPATCHED')} disabled={busyId === `MARK_NOT_DISPATCHED-${row.id}`}>
+                            Remove
                           </button>
                         </>
                       ) : null}
                       {(row.latestAssignment?.reservation || reservationDrafts[row.id]) ? (
-                        <button type="button" onClick={() => confirmMatch(row)} disabled={busyId === `confirm-${row.id}`}>
-                          {busyId === `confirm-${row.id}` ? 'Matching...' : 'Confirm Match'}
+                        <button type="button" style={{ fontSize: '0.75rem', padding: '3px 8px' }} onClick={() => confirmMatch(row)} disabled={busyId === `confirm-${row.id}`}>
+                          Confirm
                         </button>
                       ) : null}
                       {row.reservation?.id && row.billingStatus === 'PENDING' && !row.needsReview && !(row.coveredByTollPackage || row.billingMode === 'USAGE_ONLY') ? (
-                        <button type="button" onClick={() => postToReservation(row)} disabled={busyId === `post-${row.id}`}>
-                          {busyId === `post-${row.id}` ? 'Posting...' : 'Post To Reservation'}
+                        <button type="button" style={{ fontSize: '0.75rem', padding: '3px 8px' }} onClick={() => postToReservation(row)} disabled={busyId === `post-${row.id}`}>
+                          Post
                         </button>
                       ) : null}
                       {(row.latestAssignment?.reservation || row.reservation?.id) ? (
-                        <button type="button" className="button-subtle" onClick={() => runReviewAction(row, 'RESET_MATCH')} disabled={busyId === `RESET_MATCH-${row.id}`}>
-                          {busyId === `RESET_MATCH-${row.id}` ? 'Resetting...' : 'Reset Match'}
+                        <button type="button" className="button-subtle" style={{ fontSize: '0.75rem', padding: '3px 8px' }} onClick={() => runReviewAction(row, 'RESET_MATCH')} disabled={busyId === `RESET_MATCH-${row.id}`}>
+                          Reset
                         </button>
                       ) : null}
                       {row.billingStatus !== 'DISPUTED' ? (
-                        <button type="button" className="button-subtle" onClick={() => runReviewAction(row, 'MARK_DISPUTED')} disabled={busyId === `MARK_DISPUTED-${row.id}`}>
-                          {busyId === `MARK_DISPUTED-${row.id}` ? 'Saving...' : 'Mark Disputed'}
+                        <button type="button" className="button-subtle" style={{ fontSize: '0.75rem', padding: '3px 8px' }} onClick={() => runReviewAction(row, 'MARK_DISPUTED')} disabled={busyId === `MARK_DISPUTED-${row.id}`}>
+                          Dispute
                         </button>
                       ) : null}
-                      {row.issueIncident?.id ? (
-                        <button type="button" className="button-subtle" onClick={() => openIssueCase(row.issueIncident.id)}>
-                          Open Issue Case
+                      {row.billingStatus !== 'WAIVED' ? (
+                        <button type="button" className="button-subtle" style={{ fontSize: '0.75rem', padding: '3px 8px' }} onClick={() => runReviewAction(row, 'MARK_NOT_BILLABLE')} disabled={busyId === `MARK_NOT_BILLABLE-${row.id}`}>
+                          Waive
                         </button>
                       ) : null}
                       {row.reservation?.id ? (
-                        <a href={`/reservations/${row.reservation.id}`}>
-                          <button type="button" className="button-subtle">Open Reservation Workflow</button>
-                        </a>
-                      ) : null}
-                      {row.billingStatus !== 'WAIVED' ? (
-                        <button type="button" className="button-subtle" onClick={() => runReviewAction(row, 'MARK_NOT_BILLABLE')} disabled={busyId === `MARK_NOT_BILLABLE-${row.id}`}>
-                          {busyId === `MARK_NOT_BILLABLE-${row.id}` ? 'Saving...' : 'Mark Not Billable'}
-                        </button>
+                        <a href={`/reservations/${row.reservation.id}`} style={{ fontSize: '0.72rem', color: '#6e49ff' }}>View</a>
                       ) : null}
                     </div>
                   </td>

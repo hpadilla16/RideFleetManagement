@@ -138,6 +138,20 @@ tollsRouter.post('/transactions/:id/review-action', requireRole('ADMIN', 'OPS'),
   }
 });
 
+tollsRouter.post('/transactions/bulk-auto-match', requireRole('ADMIN', 'OPS'), async (req, res, next) => {
+  try {
+    const result = await tollsService.autoMatchPendingTransactions(scopeFor(req), req.user?.id || req.user?.sub || null, {
+      limit: Number(req.body?.limit || 500)
+    });
+    res.json(result);
+  } catch (error) {
+    if (/not found|required|enabled/i.test(String(error?.message || ''))) {
+      return res.status(400).json({ error: error.message });
+    }
+    next(error);
+  }
+});
+
 tollsRouter.get('/reservations/:reservationId', async (req, res, next) => {
   try {
     res.json(await tollsService.listReservationTolls(req.params.reservationId, scopeFor(req)));
