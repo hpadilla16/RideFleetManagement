@@ -1082,10 +1082,20 @@ function ReservationDetailInner({ token, me, logout }) {
     });
   }, [pricing?.snapshot]);
 
+  const [chargeOverrides, setChargeOverrides] = useState({});
+
+  const setChargeOverride = (rowId, field, value) => {
+    setChargeOverrides((prev) => ({
+      ...prev,
+      [rowId]: { ...(prev[rowId] || {}), [field]: value }
+    }));
+  };
+
   const handleEditToggle = () => {
     if (!canManagePricingOverrides) return;
     if (!chargeEdit) {
       setChargeModel(pricingEditorState(pricing, row));
+      setChargeOverrides({});
     }
     setChargeEdit((v) => !v);
   };
@@ -1288,9 +1298,21 @@ total: toMoneyNum((chargeModel.dailyRate || row?.dailyRate || 0) * breakdown.day
  source: 'DAILY'
 };
 
-const coreRows = [baseRow, ...serviceRows, ...feeRows, ...insuranceRows];
+const coreRowsRaw = [baseRow, ...serviceRows, ...feeRows, ...insuranceRows];
+const linkedFeeRowsRaw = linkedFeeRows;
 
-const taxableSubTotal = [...coreRows, ...linkedFeeRows].reduce(
+// Apply inline rate/quantity overrides from agent edits
+const applyOv = (r) => {
+  const ov = chargeOverrides[r.id];
+  if (!ov) return r;
+  const rate = ov.rate !== undefined ? toMoneyNum(ov.rate) : r.rate;
+  const quantity = ov.unit !== undefined ? toMoneyNum(ov.unit) : r.quantity;
+  return { ...r, rate, quantity, total: toMoneyNum(rate * quantity) };
+};
+const coreRows = coreRowsRaw.map(applyOv);
+const linkedFeeRowsFinal = linkedFeeRowsRaw.map(applyOv);
+
+const taxableSubTotal = [...coreRows, ...linkedFeeRowsFinal].reduce(
 (sum, r) => sum + (r.taxable === false ? 0 : toMoneyNum(r.total)),
 0
 );
@@ -1309,7 +1331,7 @@ total: toMoneyNum(taxableSubTotal * (Number(chargeModel.taxRate) / 100)),
 }
 : null;
 
-const normalizedRows = taxRow ? [...coreRows, ...linkedFeeRows, taxRow] : [...coreRows, ...linkedFeeRows];
+const normalizedRows = taxRow ? [...coreRows, ...linkedFeeRowsFinal, taxRow] : [...coreRows, ...linkedFeeRowsFinal];
 
 const depositRows = [];
 if (Number(depositOverrides.depositDue || 0) > 0) {
@@ -1512,12 +1534,21 @@ token
       })
       .filter(Boolean);
 
-    const rows = [
+    const rawRows = [
       { id: 'daily', name: 'Daily', unit: breakdown.days, rate: breakdown.daily, total: breakdown.base, taxable: true },
       ...serviceRows,
       ...feeRows,
       ...linkedFeeRows
     ];
+
+    // Apply inline overrides from agent edits
+    const rows = rawRows.map((r) => {
+      const ov = chargeOverrides[r.id];
+      if (!ov) return r;
+      const rate = ov.rate !== undefined ? toMoneyNum(ov.rate) : r.rate;
+      const unit = ov.unit !== undefined ? toMoneyNum(ov.unit) : r.unit;
+      return { ...r, rate, unit, total: toMoneyNum(rate * unit) };
+    });
 
     const taxRatePct = toMoneyNum(chargeModel.taxRate || breakdown.taxRate || 0);
     const taxableSubTotal = toMoneyNum(rows.reduce((s, r) => s + (r?.taxable === false ? 0 : toMoneyNum(r?.total)), 0));
@@ -1532,7 +1563,7 @@ token
     }
 
     return rows;
-  }, [chargeEdit, pricing?.charges, breakdown, selectedServiceRows, selectedFeeRows, serviceOptions, feeOptions, chargeModel?.taxRate, depositOverrides.depositDue, depositOverrides.securityDeposit]);
+  }, [chargeEdit, pricing?.charges, breakdown, selectedServiceRows, selectedFeeRows, serviceOptions, feeOptions, chargeModel?.taxRate, depositOverrides.depositDue, depositOverrides.securityDeposit, chargeOverrides]);
 
   const securityDepositDisplayTotal = useMemo(
     () => toMoneyNum(displayChargeRows.filter((r) => isSecurityDepositDisplayRow(r)).reduce((s, r) => s + toMoneyNum(r?.total), 0)),
@@ -2341,8 +2372,16 @@ token
                               ) : null}
                             </div>
                           </td>
-                          <td style={{ whiteSpace: 'nowrap' }}>{toMoneyNum(r.unit || 1)}</td>
-                          <td style={{ whiteSpace: 'nowrap' }}>{money(r.rate)}</td>
+                          <td style={{ whiteSpace: 'nowrap' }}>
+                            {chargeEdit && canDelete ? (
+                              <input type="number" min="0" step="0.01" style={{ width: 60 }} value={chargeOverrides[r.id]?.unit !== undefined ? chargeOverrides[r.id].unit : (r.unit || 1)} onChange={(e) => setChargeOverride(r.id, 'unit', e.target.value)} />
+                            ) : toMoneyNum(r.unit || 1)}
+                          </td>
+                          <td style={{ whiteSpace: 'nowrap' }}>
+                            {chargeEdit && canDelete ? (
+                              <input type="number" min="0" step="0.01" style={{ width: 80 }} value={chargeOverrides[r.id]?.rate !== undefined ? chargeOverrides[r.id].rate : r.rate} onChange={(e) => setChargeOverride(r.id, 'rate', e.target.value)} />
+                            ) : money(r.rate)}
+                          </td>
                           <td style={{ whiteSpace: 'nowrap', textAlign: 'right' }}>{money(r.total)}</td>
                         </tr>
                       );
