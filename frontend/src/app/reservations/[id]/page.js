@@ -1516,6 +1516,7 @@ token
       return { id: r.id, name: r.name, unit, rate, total, taxable };
     });
 
+    const feeNamesLower = feeRows.map((r) => String(r.name || '').toLowerCase());
     const linkedFeeRows = serviceRows
       .map((serviceRow, idx) => {
         const raw = String(serviceRow.name || '').replace(/^Service:\s*/i, '').trim().toLowerCase();
@@ -1525,6 +1526,10 @@ token
         });
         const linkedFee = serviceOpt?.linkedFee;
         if (!linkedFee?.id) return null;
+        // Skip if this linked fee already exists as a manually-added or saved fee row
+        const linkedFeeName = `${linkedFee.name} | ${serviceOpt?.name || ''}`.toLowerCase();
+        const alreadyInFees = feeNamesLower.some((n) => n.includes(linkedFee.name.toLowerCase()));
+        if (alreadyInFees) return null;
         const baseAmount = toMoneyNum(breakdown.base + serviceRows.reduce((sum, currentRow) => sum + toMoneyNum(currentRow.total), 0));
         const feeAmount = toMoneyNum(linkedFee.amount || 0);
         const mode = String(linkedFee.mode || 'FIXED').toUpperCase();
@@ -2378,7 +2383,7 @@ token
                   </thead>
                   <tbody>
                     {displayChargeRows.map((r) => {
-                      const canDelete = ['service', 'fee', 'deposit-due', 'security-deposit'].some((key) =>
+                      const canDelete = ['service', 'fee', 'deposit-due', 'security-deposit', 'ins-', 'linked-fee'].some((key) =>
                         String(r.id || '').toLowerCase().includes(key.replace('-', ''))
                       );
 
