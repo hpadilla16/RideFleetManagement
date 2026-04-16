@@ -248,6 +248,16 @@ function ReservationDetailInner({ token, me, logout }) {
   const canManageCommissionOwner = ['SUPER_ADMIN', 'ADMIN'].includes(role);
   const canLoadSupportingCatalogs = ['SUPER_ADMIN', 'ADMIN', 'OPS'].includes(role);
 
+  const loadCustomers = async () => {
+    if (customers.length > 0) return;
+    try {
+      const out = await api('/api/customers', {}, token);
+      setCustomers(Array.isArray(out) ? out : []);
+    } catch {
+      setCustomers([]);
+    }
+  };
+
   const loadAvailableVehicles = async () => {
     try {
       const vehiclesOut = await api(`/api/reservations/${id}/available-vehicles`, {}, token);
@@ -270,7 +280,7 @@ function ReservationDetailInner({ token, me, logout }) {
       setRow(reservationResult);
 
       const optionalCalls = await Promise.allSettled([
-        api('/api/customers', {}, token).catch(() => []),
+        Promise.resolve([]),
         canManagePricingOverrides ? api(`/api/reservations/${id}/pricing-options`, {}, token) : Promise.resolve(null),
         api(`/api/reservations/${id}/pricing`, {}, token).catch(() => null),
         api(`/api/reservations/${id}/payments`, {}, token).catch(() => []),
@@ -1740,8 +1750,8 @@ token
             <div><span className="label">Signature File</span><div>{row.signatureDataUrl ? 'Available' : '-'}</div></div>
             <div>
               <span className="label">Customer</span>
-              <select value={form.customerId} onChange={(e) => setForm({ ...form, customerId: e.target.value })}>
-                <option value="">Select customer</option>
+              <select value={form.customerId} onFocus={loadCustomers} onChange={(e) => setForm({ ...form, customerId: e.target.value })}>
+                <option value="">{customers.length ? 'Select customer' : 'Click to load customers'}</option>
                 {customers.map((c) => <option key={c.id} value={c.id}>{String(c.firstName || "").trim()} {String(c.lastName || "").trim()}</option>)}
               </select>
             </div>
