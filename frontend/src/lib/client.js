@@ -64,7 +64,7 @@ async function parseApiResponse(res, path) {
       if (text) {
         try {
           const j = JSON.parse(text);
-          if (j?.error) msg = j.error;
+          if (j?.error) msg = Array.isArray(j.details) && j.details.length ? j.details.join('. ') : j.error;
           else msg = `${msg}: ${text.slice(0, 300)}`;
         } catch {
           msg = `${msg}: ${text.slice(0, 300)}`;

@@ -622,7 +622,7 @@ reservationsRouter.patch('/:id', async (req, res, next) => {
     if (!current) return res.status(404).json({ error: 'Reservation not found' });
 
     const patch = { ...(req.body || {}) };
-    const validationErrors = validateReservationPatch(current, patch);
+    const validationErrors = validateReservationPatch(current, patch, { role: req.user?.role });
     if (validationErrors.length) {
       return res.status(400).json({ error: 'Validation failed', details: validationErrors });
     }

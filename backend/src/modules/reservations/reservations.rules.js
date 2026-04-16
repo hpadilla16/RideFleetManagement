@@ -7,6 +7,12 @@ const allowedTransitions = {
   NO_SHOW: []
 };
 
+// Admin/Super Admin can force-cancel from these additional states
+const adminOnlyTransitions = {
+  CHECKED_OUT: ['CANCELLED'],
+  CHECKED_IN: ['CANCELLED']
+};
+
 export function validateReservationCreate(input) {
   const errors = [];
 
@@ -34,7 +40,7 @@ export function validateReservationCreate(input) {
   return errors;
 }
 
-export function validateReservationPatch(current, patch) {
+export function validateReservationPatch(current, patch, { role } = {}) {
   const errors = [];
 
   if (patch.pickupAt || patch.returnAt) {
@@ -49,8 +55,14 @@ export function validateReservationPatch(current, patch) {
 
   if (patch.status && patch.status !== current.status) {
     const allowed = allowedTransitions[current.status] || [];
-    if (!allowed.includes(patch.status)) {
-      errors.push(`invalid status transition: ${current.status} -> ${patch.status}`);
+    const isAdmin = role === 'SUPER_ADMIN' || role === 'ADMIN';
+    const adminAllowed = isAdmin ? (adminOnlyTransitions[current.status] || []) : [];
+    if (!allowed.includes(patch.status) && !adminAllowed.includes(patch.status)) {
+      if (adminOnlyTransitions[current.status]?.includes(patch.status)) {
+        errors.push(`Only an Admin can cancel a reservation that is already ${current.status.replace('_', ' ').toLowerCase()}. Please contact your administrator.`);
+      } else {
+        errors.push(`invalid status transition: ${current.status} -> ${patch.status}`);
+      }
     }
 
     if (patch.status === 'CHECKED_OUT' && !(patch.vehicleId || current.vehicleId)) {
