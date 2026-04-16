@@ -29,6 +29,8 @@ services:
       PORT: 4000
       DATABASE_URL: ${DATABASE_URL:-postgresql://postgres:postgres@db:5432/fleet_management}
       PUPPETEER_EXECUTABLE_PATH: /usr/local/bin/chrome
+      CLUSTER_WORKERS: "1"
+      DATABASE_POOL_SIZE: "10"
     ports:
       - "4000:4000"
     depends_on:
