@@ -50,7 +50,7 @@ app.use(compression({ threshold: 1024 }));
 app.use(requestLogger());
 app.use(cors({ origin: allowedOrigins, credentials: true }));
 app.use(express.json({
-  limit: '12mb',
+  limit: '50mb',
   verify: (req, _res, buf) => {
     req.rawBodyBuffer = buf?.length ? Buffer.from(buf) : Buffer.alloc(0);
     req.rawBody = buf?.length ? Buffer.from(buf).toString('utf8') : '';
