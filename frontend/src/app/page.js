@@ -304,10 +304,14 @@ function DashboardInner({ token, me, logout }) {
   const serviceHeld = Number(kpis.vehiclesInMaintenance || 0) + Number(kpis.vehiclesOutOfService || 0);
   const activeReservations = reservations.filter((r) => ['NEW', 'CONFIRMED', 'CHECKED_OUT'].includes(r.status)).length;
   const feeAdvisoryCount = reservations.filter((r) => /\[FEE_ADVISORY_OPEN\s+/i.test(String(r.notes || ''))).length;
-  const today = new Date();
-  const dayEq = (d) => d.getDate() === today.getDate() && d.getMonth() === today.getMonth() && d.getFullYear() === today.getFullYear();
-  const pickups = reservations.filter((r) => dayEq(new Date(r.pickupAt)) && ['NEW', 'CONFIRMED'].includes(r.status));
-  const returns = reservations.filter((r) => dayEq(new Date(r.returnAt)) && ['CHECKED_OUT', 'CONFIRMED'].includes(r.status));
+  const [boardDate, setBoardDate] = useState(() => {
+    const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  });
+  const boardDateObj = useMemo(() => new Date(boardDate + 'T00:00:00'), [boardDate]);
+  const dayEq = (d, ref) => d.getDate() === ref.getDate() && d.getMonth() === ref.getMonth() && d.getFullYear() === ref.getFullYear();
+  const isToday = dayEq(boardDateObj, new Date());
+  const pickups = reservations.filter((r) => dayEq(new Date(r.pickupAt), boardDateObj) && ['NEW', 'CONFIRMED'].includes(r.status));
+  const returns = reservations.filter((r) => dayEq(new Date(r.returnAt), boardDateObj) && ['CHECKED_OUT', 'CONFIRMED'].includes(r.status));
   const timeline = reservations.slice().sort((a, b) => new Date(b.updatedAt) - new Date(a.updatedAt)).slice(0, 10);
   const workspaceOpsHub = useMemo(() => {
     const nextItems = [
@@ -439,26 +443,56 @@ function DashboardInner({ token, me, logout }) {
 
       <section className="grid2">
         <div className="glass card-lg">
-          <h3>Operations Board</h3>
-          <p className="label">Pickups Today: <strong>{pickups.length}</strong> · Returns Today: <strong>{returns.length}</strong></p>
-          <div className="stack">
-            {pickups.slice(0, 6).map((r) => (
-              <div key={r.id} className="row" style={{ alignItems: 'center' }}>
-                <span>#{r.reservationNumber} · {r.customer?.firstName} {r.customer?.lastName}</span>
-                <div style={{ display: 'flex', gap: 6 }}>
-                  <button onClick={() => startCheckout(r.id)}>Start Check-out</button>
-                  <button onClick={() => markCancelled(r.id)}>Cancel</button>
-                  <button onClick={() => markNoShow(r.id)}>No Show</button>
-                </div>
-              </div>
-            ))}
-            {returns.slice(0, 6).map((r) => (
-              <div key={`ret-${r.id}`} className="row">
-                <span>Returning: #{r.reservationNumber} · {r.customer?.firstName} {r.customer?.lastName}</span>
-                <span className="label">Awaiting return processing</span>
-              </div>
-            ))}
+          <div className="row-between" style={{ alignItems: 'center', marginBottom: 8 }}>
+            <h3 style={{ margin: 0 }}>Operations Board</h3>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <button onClick={() => { const d = new Date(boardDate + 'T00:00:00'); d.setDate(d.getDate() - 1); setBoardDate(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`); }} style={{ padding: '4px 8px', minWidth: 0 }}>&larr;</button>
+              <input type="date" value={boardDate} onChange={(e) => setBoardDate(e.target.value)} style={{ padding: '4px 8px', borderRadius: 8, border: '1px solid var(--border-soft)', background: 'var(--bg-soft)', color: 'var(--charcoal)', fontSize: 13, fontWeight: 600 }} />
+              <button onClick={() => { const d = new Date(boardDate + 'T00:00:00'); d.setDate(d.getDate() + 1); setBoardDate(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`); }} style={{ padding: '4px 8px', minWidth: 0 }}>&rarr;</button>
+              {!isToday && <button onClick={() => { const d = new Date(); setBoardDate(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`); }} style={{ padding: '4px 10px', fontSize: 12 }}>Today</button>}
+            </div>
           </div>
+          <p className="label" style={{ marginBottom: 8 }}>
+            {isToday ? 'Today' : boardDateObj.toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric' })} — Pickups: <strong>{pickups.length}</strong> · Returns: <strong>{returns.length}</strong>
+          </p>
+
+          {pickups.length > 0 && (
+            <>
+              <div className="label" style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.05em', color: 'var(--brand)', marginBottom: 4 }}>Pickups</div>
+              <div className="stack" style={{ marginBottom: 12 }}>
+                {pickups.sort((a, b) => new Date(a.pickupAt) - new Date(b.pickupAt)).map((r) => (
+                  <div key={r.id} className="row" style={{ alignItems: 'center', gap: 8 }}>
+                    <span style={{ minWidth: 70, fontWeight: 600, fontSize: 13, color: 'var(--charcoal)' }}>{new Date(r.pickupAt).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}</span>
+                    <span style={{ flex: 1 }}>#{r.reservationNumber} · {r.customer?.firstName} {r.customer?.lastName}{r.vehicle ? ` · ${r.vehicle.year || ''} ${r.vehicle.make || ''} ${r.vehicle.model || ''}`.trim() : ''}</span>
+                    <div style={{ display: 'flex', gap: 6 }}>
+                      <button onClick={() => startCheckout(r.id)}>Start Check-out</button>
+                      <button onClick={() => markCancelled(r.id)}>Cancel</button>
+                      <button onClick={() => markNoShow(r.id)}>No Show</button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </>
+          )}
+
+          {returns.length > 0 && (
+            <>
+              <div className="label" style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.05em', color: '#30D5C8', marginBottom: 4 }}>Returns</div>
+              <div className="stack">
+                {returns.sort((a, b) => new Date(a.returnAt) - new Date(b.returnAt)).map((r) => (
+                  <div key={`ret-${r.id}`} className="row" style={{ alignItems: 'center', gap: 8 }}>
+                    <span style={{ minWidth: 70, fontWeight: 600, fontSize: 13, color: 'var(--charcoal)' }}>{new Date(r.returnAt).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}</span>
+                    <span style={{ flex: 1 }}>#{r.reservationNumber} · {r.customer?.firstName} {r.customer?.lastName}{r.vehicle ? ` · ${r.vehicle.year || ''} ${r.vehicle.make || ''} ${r.vehicle.model || ''}`.trim() : ''}</span>
+                    <span className="status-chip neutral" style={{ fontSize: 11 }}>Awaiting Return</span>
+                  </div>
+                ))}
+              </div>
+            </>
+          )}
+
+          {pickups.length === 0 && returns.length === 0 && (
+            <p className="ui-muted" style={{ textAlign: 'center', padding: 20 }}>No pickups or returns scheduled for this date.</p>
+          )}
         </div>
         <div className="glass card-lg">
           <h3>Vehicle Status</h3>
