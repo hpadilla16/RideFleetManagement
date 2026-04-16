@@ -529,11 +529,13 @@ reservationsRouter.post('/', async (req, res, next) => {
       select: { locationConfig: true, taxRate: true }
     });
     const cfg = parseLocationConfig(pickupLoc?.locationConfig);
-    const requireDeposit = !!cfg?.requireDeposit;
+    const bookingChannel = String(req.body?.bookingChannel || 'STAFF');
+    const isExternalBooking = bookingChannel === 'WEBSITE' || bookingChannel === 'CAR_SHARING';
+    const requireDeposit = isExternalBooking && !!cfg?.requireDeposit;
     const depositMode = String(cfg?.depositMode || 'FIXED').toUpperCase();
     const depositValue = Number(cfg?.depositAmount || 0);
     const basis = Array.isArray(cfg?.depositPercentBasis) && cfg.depositPercentBasis.length ? cfg.depositPercentBasis : ['rate'];
-    const requireSecurityDeposit = !!cfg?.requireSecurityDeposit;
+    const requireSecurityDeposit = isExternalBooking && !!cfg?.requireSecurityDeposit;
     const securityDepositAmount = requireSecurityDeposit ? Number(cfg?.securityDepositAmount || 0) : 0;
     let depositAmountDue = 0;
     if (requireDeposit && Number.isFinite(depositValue) && depositValue > 0) {

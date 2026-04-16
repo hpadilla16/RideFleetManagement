@@ -1740,6 +1740,7 @@ token
             <div><span className="label">Status</span><div>{row.status}</div></div>
             <div><span className="label">Type</span><div>{row.vehicleType?.name || '-'}</div></div>
             <div><span className="label">Workflow Mode</span><div>{row.workflowMode || 'RENTAL'}</div></div>
+            <div><span className="label">Booking Channel</span><div><span className={`status-chip ${row.bookingChannel === 'WEBSITE' || row.bookingChannel === 'CAR_SHARING' ? 'warning' : 'neutral'}`}>{(row.bookingChannel || 'STAFF').replaceAll('_', ' ')}</span></div></div>
             <div><span className="label">Pre-check-in</span><div>{precheckinStatus.statusLabel}</div></div>
             <div><span className="label">Pre-check-in Completed At</span><div>{row.customerInfoCompletedAt ? new Date(row.customerInfoCompletedAt).toLocaleString() : '-'}</div></div>
             <div><span className="label">Docs Reviewed At</span><div>{row.customerInfoReviewedAt ? new Date(row.customerInfoReviewedAt).toLocaleString() : '-'}</div></div>

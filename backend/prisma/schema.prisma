@@ -662,6 +662,8 @@ model Reservation {
   loanerLastExtendedAt DateTime?
   loanerLastVehicleSwapAt DateTime?
 
+  bookingChannel    String            @default("STAFF")
+
   customerId        String
   customer          Customer          @relation(fields: [customerId], references: [id])
 

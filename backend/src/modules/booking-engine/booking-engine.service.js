@@ -825,7 +825,11 @@ async function listPublicInsurancePlans({ tenantId, locationId, vehicleTypeId, b
     .map((plan) => computeInsuranceLine(plan, baseAmount, days));
 }
 
-function depositSnapshot({ location, quote, addOnsTotal = 0 }) {
+function depositSnapshot({ location, quote, addOnsTotal = 0, bookingChannel = 'STAFF' }) {
+  // Deposits only apply to external bookings (website / car sharing)
+  if (bookingChannel === 'STAFF' || bookingChannel === 'MIGRATION') {
+    return { required: false, mode: null, value: null, amountDue: 0, securityDepositRequired: false, securityDepositAmount: 0 };
+  }
   const cfg = parseLocationConfig(location?.locationConfig);
   const requireDeposit = !!cfg?.requireDeposit;
   const depositMode = String(cfg?.depositMode || 'FIXED').toUpperCase();
@@ -1327,7 +1331,7 @@ export const bookingEngineService = {
             ? revenueRecommendation.recommendedDailyBreakdown
             : []
         },
-          deposit: depositSnapshot({ location, quote }),
+          deposit: depositSnapshot({ location, quote, bookingChannel: 'WEBSITE' }),
           additionalServices,
           mandatoryFees,
           insurancePlans
@@ -1700,12 +1704,14 @@ export const bookingEngineService = {
       const checkoutDeposit = depositSnapshot({
         location: search.location,
         quote: { ...selected.quote, baseTotal: Number(selected.quote?.baseTotal || selected.quote?.subtotal || 0) },
-        addOnsTotal: money(addOnsTotal + linkedServiceFeesTotal + insuranceTotal + mandatoryFeesTotal)
+        addOnsTotal: money(addOnsTotal + linkedServiceFeesTotal + insuranceTotal + mandatoryFeesTotal),
+        bookingChannel: 'WEBSITE'
       });
 
       const reservation = await reservationsService.create({
         reservationNumber: generateReservationNumber('WEB'),
         sourceRef: `PUBLICBOOK:${crypto.randomBytes(8).toString('hex')}`,
+        bookingChannel: 'WEBSITE',
         status: checkoutDeposit?.required ? 'NEW' : 'CONFIRMED',
         customerId: customer.id,
         vehicleTypeId: selected.vehicleType.id,
