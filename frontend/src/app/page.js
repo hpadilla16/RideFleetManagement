@@ -6,6 +6,23 @@ import { AuthGate } from '../components/AuthGate';
 import { AppShell } from '../components/AppShell';
 import { api } from '../lib/client';
 
+function fmtWallClockTime(value) {
+  if (!value) return '-';
+  const m = String(value).match(/T(\d{2}):(\d{2})/);
+  if (!m) return '-';
+  const h24 = Number(m[1]);
+  const suffix = h24 >= 12 ? 'PM' : 'AM';
+  const h12 = ((h24 + 11) % 12) + 1;
+  return `${h12}:${m[2]} ${suffix}`;
+}
+
+function wallClockDate(value) {
+  if (!value) return null;
+  const m = String(value).match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (!m) return null;
+  return `${m[1]}-${m[2]}-${m[3]}`;
+}
+
 function VehicleStatusDonut({ metrics }) {
   const counts = useMemo(() => {
     const available = Number(metrics?.availableFleet || 0);
@@ -307,11 +324,11 @@ function DashboardInner({ token, me, logout }) {
   const [boardDate, setBoardDate] = useState(() => {
     const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
   });
-  const boardDateObj = useMemo(() => new Date(boardDate + 'T00:00:00'), [boardDate]);
-  const dayEq = (d, ref) => d.getDate() === ref.getDate() && d.getMonth() === ref.getMonth() && d.getFullYear() === ref.getFullYear();
-  const isToday = dayEq(boardDateObj, new Date());
-  const pickups = reservations.filter((r) => dayEq(new Date(r.pickupAt), boardDateObj) && ['NEW', 'CONFIRMED'].includes(r.status));
-  const returns = reservations.filter((r) => dayEq(new Date(r.returnAt), boardDateObj) && ['CHECKED_OUT', 'CONFIRMED'].includes(r.status));
+  const todayStr = useMemo(() => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; }, []);
+  const isToday = boardDate === todayStr;
+  const boardLabel = isToday ? 'Today' : new Date(boardDate + 'T12:00:00').toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric' });
+  const pickups = reservations.filter((r) => wallClockDate(r.pickupAt) === boardDate && ['NEW', 'CONFIRMED'].includes(r.status));
+  const returns = reservations.filter((r) => wallClockDate(r.returnAt) === boardDate && ['CHECKED_OUT', 'CONFIRMED'].includes(r.status));
   const timeline = reservations.slice().sort((a, b) => new Date(b.updatedAt) - new Date(a.updatedAt)).slice(0, 10);
   const workspaceOpsHub = useMemo(() => {
     const nextItems = [
@@ -453,16 +470,16 @@ function DashboardInner({ token, me, logout }) {
             </div>
           </div>
           <p className="label" style={{ marginBottom: 8 }}>
-            {isToday ? 'Today' : boardDateObj.toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric' })} — Pickups: <strong>{pickups.length}</strong> · Returns: <strong>{returns.length}</strong>
+            {boardLabel} — Pickups: <strong>{pickups.length}</strong> · Returns: <strong>{returns.length}</strong>
           </p>
 
           {pickups.length > 0 && (
             <>
               <div className="label" style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.05em', color: 'var(--brand)', marginBottom: 4 }}>Pickups</div>
               <div className="stack" style={{ marginBottom: 12 }}>
-                {pickups.sort((a, b) => new Date(a.pickupAt) - new Date(b.pickupAt)).map((r) => (
+                {pickups.sort((a, b) => String(a.pickupAt).localeCompare(String(b.pickupAt))).map((r) => (
                   <div key={r.id} className="row" style={{ alignItems: 'center', gap: 8 }}>
-                    <span style={{ minWidth: 70, fontWeight: 600, fontSize: 13, color: 'var(--charcoal)' }}>{new Date(r.pickupAt).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}</span>
+                    <span style={{ minWidth: 70, fontWeight: 600, fontSize: 13, color: 'var(--charcoal)' }}>{fmtWallClockTime(r.pickupAt)}</span>
                     <span style={{ flex: 1 }}>#{r.reservationNumber} · {r.customer?.firstName} {r.customer?.lastName}{r.vehicle ? ` · ${r.vehicle.year || ''} ${r.vehicle.make || ''} ${r.vehicle.model || ''}`.trim() : ''}</span>
                     <div style={{ display: 'flex', gap: 6 }}>
                       <button onClick={() => startCheckout(r.id)}>Start Check-out</button>
@@ -479,9 +496,9 @@ function DashboardInner({ token, me, logout }) {
             <>
               <div className="label" style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.05em', color: '#30D5C8', marginBottom: 4 }}>Returns</div>
               <div className="stack">
-                {returns.sort((a, b) => new Date(a.returnAt) - new Date(b.returnAt)).map((r) => (
+                {returns.sort((a, b) => String(a.returnAt).localeCompare(String(b.returnAt))).map((r) => (
                   <div key={`ret-${r.id}`} className="row" style={{ alignItems: 'center', gap: 8 }}>
-                    <span style={{ minWidth: 70, fontWeight: 600, fontSize: 13, color: 'var(--charcoal)' }}>{new Date(r.returnAt).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}</span>
+                    <span style={{ minWidth: 70, fontWeight: 600, fontSize: 13, color: 'var(--charcoal)' }}>{fmtWallClockTime(r.returnAt)}</span>
                     <span style={{ flex: 1 }}>#{r.reservationNumber} · {r.customer?.firstName} {r.customer?.lastName}{r.vehicle ? ` · ${r.vehicle.year || ''} ${r.vehicle.make || ''} ${r.vehicle.model || ''}`.trim() : ''}</span>
                     <span className="status-chip neutral" style={{ fontSize: 11 }}>Awaiting Return</span>
                   </div>
