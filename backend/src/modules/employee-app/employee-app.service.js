@@ -10,11 +10,19 @@ function includeReservation() {
   return {
     customer: true,
     vehicle: { include: { vehicleType: true } },
-    vehicleType: true,
     pickupLocation: true,
     returnLocation: true,
     pricingSnapshot: true,
     rentalAgreement: true
+  };
+}
+
+function includeReservationLight() {
+  return {
+    customer: { select: { id: true, firstName: true, lastName: true, phone: true, email: true } },
+    vehicle: { select: { id: true, internalNumber: true, make: true, model: true, year: true, plate: true, vehicleTypeId: true } },
+    pickupLocation: { select: { id: true, name: true, code: true } },
+    returnLocation: { select: { id: true, name: true, code: true } }
   };
 }
 
@@ -221,7 +229,7 @@ export const employeeAppService = {
           ],
           status: { in: ['NEW', 'CONFIRMED'] }
         },
-        include: includeReservation(),
+        include: includeReservationLight(),
         orderBy: [{ pickupAt: 'asc' }],
         take: 8
       }),
@@ -231,7 +239,7 @@ export const employeeAppService = {
           status: { in: ['NEW', 'CONFIRMED'] },
           pickupAt: { gte: startOfToday, lte: next72h }
         },
-        include: includeReservation(),
+        include: includeReservationLight(),
         orderBy: [{ pickupAt: 'asc' }],
         take: 8
       }),
@@ -241,7 +249,7 @@ export const employeeAppService = {
           status: 'CHECKED_OUT',
           returnAt: { gte: startOfToday, lte: next72h }
         },
-        include: includeReservation(),
+        include: includeReservationLight(),
         orderBy: [{ returnAt: 'asc' }],
         take: 8
       }),
@@ -250,7 +258,7 @@ export const employeeAppService = {
           ...scope,
           status: 'CHECKED_OUT'
         },
-        include: includeReservation(),
+        include: includeReservationLight(),
         orderBy: [{ returnAt: 'asc' }],
         take: 8
       }),
@@ -260,7 +268,7 @@ export const employeeAppService = {
           readyForPickupAt: { not: null },
           status: { in: ['NEW', 'CONFIRMED'] }
         },
-        include: includeReservation(),
+        include: includeReservationLight(),
         orderBy: [{ readyForPickupAt: 'desc' }, { pickupAt: 'asc' }],
         take: 8
       }),
@@ -274,7 +282,7 @@ export const employeeAppService = {
             { loanerBillingStatus: 'DENIED' }
           ]
         },
-        include: includeReservation(),
+        include: includeReservationLight(),
         orderBy: [{ estimatedServiceCompletionAt: 'asc' }, { pickupAt: 'asc' }],
         take: 8
       }),
@@ -285,7 +293,7 @@ export const employeeAppService = {
           loanerBillingMode: { in: ['CUSTOMER_PAY', 'WARRANTY', 'INSURANCE'] },
           loanerBillingStatus: { not: 'SETTLED' }
         },
-        include: includeReservation(),
+        include: includeReservationLight(),
         orderBy: [{ loanerBillingSubmittedAt: 'asc' }, { pickupAt: 'asc' }],
         take: 8
       }),
@@ -295,7 +303,7 @@ export const employeeAppService = {
           status: 'CHECKED_OUT',
           returnAt: { lte: next72h }
         },
-        include: includeReservation(),
+        include: includeReservationLight(),
         orderBy: [{ returnAt: 'asc' }],
         take: 8
       }),

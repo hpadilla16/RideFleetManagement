@@ -164,6 +164,12 @@ async function resolveVehicleRules(scope, vehicle) {
   });
 }
 
+function resolveVehicleRulesFromCache(ruleSet, vehicle) {
+  const locationOverrides = vehicle?.homeLocationId ? (ruleSet.locationOverrides?.[vehicle.homeLocationId] || {}) : {};
+  const vehicleTypeOverrides = vehicle?.vehicleTypeId ? (ruleSet.vehicleTypeOverrides?.[vehicle.vehicleTypeId] || {}) : {};
+  return { ...ruleSet, ...locationOverrides, ...vehicleTypeOverrides };
+}
+
 async function createPlannerScenario({
   scope = {},
   start,
@@ -207,10 +213,11 @@ async function createPlannerScenario({
 }
 
 async function buildMaintenanceRecommendations({ start, end, locationId = null, vehicleTypeId = null, vehicleIds = [], durationMinutes = null, scope = {} }) {
-  const [vehicles, reservations, baseRules] = await Promise.all([
+  const [vehicles, reservations, baseRules, fullRuleSet] = await Promise.all([
     loadPlannerVehicles({ start, end, locationId, vehicleTypeId, scope }),
     loadPlannerReservations({ start, end, locationId, vehicleTypeId, scope }),
-    plannerRulesService.resolveEffectiveRules({ scope, locationId, vehicleTypeId })
+    plannerRulesService.resolveEffectiveRules({ scope, locationId, vehicleTypeId }),
+    plannerRulesService.getRuleSet(scope)
   ]);
   const selectedVehicleIds = new Set((Array.isArray(vehicleIds) ? vehicleIds : []).map((value) => String(value)));
   const visibleVehicles = selectedVehicleIds.size ? vehicles.filter((vehicle) => selectedVehicleIds.has(vehicle.id)) : vehicles;
@@ -228,7 +235,7 @@ async function buildMaintenanceRecommendations({ start, end, locationId = null, 
   const windowEndMs = end.getTime();
 
   for (const vehicle of candidateVehicles) {
-    const rules = await resolveVehicleRules(scope, vehicle);
+    const rules = resolveVehicleRulesFromCache(fullRuleSet, vehicle);
     const requiredMinutes = normalizePositiveInteger(durationToUse, Number(rules.maintenanceBufferMinutes || durationToUse));
     const intervals = occupancy.get(vehicle.id) || [];
     const windows = buildAvailabilityWindows(intervals, windowStartMs, windowEndMs)
@@ -308,10 +315,11 @@ async function buildMaintenanceRecommendations({ start, end, locationId = null, 
 }
 
 async function buildWashPlan({ start, end, locationId = null, vehicleTypeId = null, vehicleIds = [], scope = {} }) {
-  const [vehicles, reservations, baseRules] = await Promise.all([
+  const [vehicles, reservations, baseRules, fullRuleSet] = await Promise.all([
     loadPlannerVehicles({ start, end, locationId, vehicleTypeId, scope }),
     loadPlannerReservations({ start, end, locationId, vehicleTypeId, scope }),
-    plannerRulesService.resolveEffectiveRules({ scope, locationId, vehicleTypeId })
+    plannerRulesService.resolveEffectiveRules({ scope, locationId, vehicleTypeId }),
+    plannerRulesService.getRuleSet(scope)
   ]);
   const selectedVehicleIds = new Set((Array.isArray(vehicleIds) ? vehicleIds : []).map((value) => String(value)));
   const visibleVehicles = selectedVehicleIds.size ? vehicles.filter((vehicle) => selectedVehicleIds.has(vehicle.id)) : vehicles;
@@ -320,7 +328,7 @@ async function buildWashPlan({ start, end, locationId = null, vehicleTypeId = nu
   const violations = [];
 
   for (const vehicle of visibleVehicles) {
-    const rules = await resolveVehicleRules(scope, vehicle);
+    const rules = resolveVehicleRulesFromCache(fullRuleSet, vehicle);
     const washMinutes = Math.max(0, Number(rules.washBufferMinutes || baseRules.washBufferMinutes || 0));
     const prepMinutes = Math.max(0, Number(rules.prepBufferMinutes || baseRules.prepBufferMinutes || 0));
     if (washMinutes <= 0) continue;
@@ -435,10 +443,11 @@ export const plannerRecommendationService = {
     const vehicleTypeId = input.vehicleTypeId ? String(input.vehicleTypeId) : null;
     const requestedReservationIds = new Set(Array.isArray(input.reservationIds) ? input.reservationIds.map((value) => String(value)) : []);
 
-    const [reservations, vehicles, baseRules] = await Promise.all([
+    const [reservations, vehicles, baseRules, fullRuleSet] = await Promise.all([
       loadPlannerReservations({ start, end, locationId, vehicleTypeId, scope }),
       loadPlannerVehicles({ start, end, locationId, vehicleTypeId, scope }),
-      plannerRulesService.resolveEffectiveRules({ scope, locationId, vehicleTypeId })
+      plannerRulesService.resolveEffectiveRules({ scope, locationId, vehicleTypeId }),
+      plannerRulesService.getRuleSet(scope)
     ]);
 
     const candidates = reservations
@@ -460,11 +469,11 @@ export const plannerRecommendationService = {
     const unresolved = [];
 
     for (const reservation of candidates) {
-      const effectiveRules = await plannerRulesService.resolveEffectiveRules({
-        scope,
-        locationId: reservationLocationId(reservation),
-        vehicleTypeId: reservationVehicleTypeId(reservation)
-      });
+      const resLocationId = reservationLocationId(reservation);
+      const resVehicleTypeId = reservationVehicleTypeId(reservation);
+      const locationOverrides = resLocationId ? (fullRuleSet.locationOverrides?.[resLocationId] || {}) : {};
+      const vehicleTypeOverrides = resVehicleTypeId ? (fullRuleSet.vehicleTypeOverrides?.[resVehicleTypeId] || {}) : {};
+      const effectiveRules = { ...fullRuleSet, ...locationOverrides, ...vehicleTypeOverrides };
       const startMs = new Date(reservation.pickupAt).getTime();
       const endMs = new Date(reservation.returnAt).getTime();
       const ranked = vehicles

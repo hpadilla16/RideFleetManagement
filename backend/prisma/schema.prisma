@@ -433,6 +433,7 @@ model Location {
   carSharingReturnTrips Trip[] @relation("TripReturnLocation")
 
   @@unique([tenantId, code])
+  @@index([tenantId])
 }
 
 model VehicleType {
@@ -453,6 +454,7 @@ model VehicleType {
   hostVehicleSubmissions HostVehicleSubmission[]
 
   @@unique([tenantId, code])
+  @@index([tenantId])
 }
 
 model Vehicle {
@@ -494,6 +496,7 @@ model Vehicle {
 
   @@unique([tenantId, plate])
   @@unique([tenantId, internalNumber])
+  @@index([tenantId, status])
 }
 
 model VehicleAvailabilityBlock {
@@ -1193,6 +1196,7 @@ model RentalAgreement {
   commissions       AgreementCommission[]
 
   @@index([status, pickupAt])
+  @@index([tenantId, status])
 }
 
 model Trip {
@@ -1745,6 +1749,7 @@ model Rate {
 
   @@index([locationId, isActive])
   @@unique([tenantId, rateCode])
+  @@index([tenantId, isActive])
 }
 
 model RateItem {
@@ -1806,6 +1811,7 @@ model Fee {
 
   @@index([isActive, name])
   @@unique([tenantId, code])
+  @@index([tenantId, isActive])
 }
 
 model LocationFee {
@@ -1862,6 +1868,7 @@ model AdditionalService {
 
   @@index([locationId, isActive])
   @@index([linkedFeeId])
+  @@index([tenantId, isActive])
 }
 
 model AppSetting {

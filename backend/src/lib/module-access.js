@@ -1,4 +1,5 @@
 import { prisma } from './prisma.js';
+import { cache } from './cache.js';
 
 export const MODULE_KEYS = [
   'dashboard',
@@ -230,6 +231,8 @@ export async function updateTenantModuleConfig(tenantId, payload = {}) {
     create: { key, value: JSON.stringify(next) },
     update: { value: JSON.stringify(next) }
   });
+  // Invalidate all cached sessions since tenant config affects all users in this tenant
+  cache.invalidate('session:');
   return next;
 }
 
@@ -251,6 +254,8 @@ export async function updateStoredUserModuleConfig(userId, payload = {}) {
     create: { key, value: JSON.stringify(next) },
     update: { value: JSON.stringify(next) }
   });
+  // Invalidate cached session for this user
+  cache.del(`session:${userId}`);
   return next;
 }
 

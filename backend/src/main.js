@@ -1,3 +1,4 @@
+import cluster from 'node:cluster';
 import express from 'express';
 import cors from 'cors';
 import compression from 'compression';
@@ -130,10 +131,14 @@ app.use((err, req, res, _next) => {
 });
 
 const port = process.env.PORT || 4000;
+const isFirstWorker = !cluster.isWorker || cluster.worker.id === 1;
 app.listen(port, () => {
-  console.log(`Fleet backend listening on http://localhost:${port}`);
-  startTollAutoSyncScheduler();
-  startHandoffReminderScheduler();
+  console.log(`Fleet backend listening on http://localhost:${port} (pid=${process.pid})`);
+  // Only start schedulers in the first worker to avoid duplicate runs
+  if (isFirstWorker) {
+    startTollAutoSyncScheduler();
+    startHandoffReminderScheduler();
+  }
 });
 
 process.on('SIGINT', async () => {

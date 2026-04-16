@@ -3,6 +3,9 @@ import jwt from 'jsonwebtoken';
 import { prisma } from '../../lib/prisma.js';
 import { getJwtExpiresIn, getJwtSecret } from './auth.config.js';
 import { getEffectiveModuleAccessForUser } from '../../lib/module-access.js';
+import { cache } from '../../lib/cache.js';
+
+const SESSION_CACHE_TTL_MS = 2 * 60 * 1000; // 2 minutes
 
 const LOCK_PIN_SALT_ROUNDS = 10;
 
@@ -37,24 +40,31 @@ export const authService = {
   },
 
   async getSessionUser(userId) {
-    const user = await prisma.user.findUnique({
-      where: { id: userId },
-      select: {
-        id: true,
-        email: true,
-        fullName: true,
-        role: true,
-        tenantId: true,
-        createdByUserId: true,
-        isActive: true,
-        hostProfile: { select: { id: true } }
-      }
-    });
-    if (!user || !user.isActive) return null;
-    return buildSessionUser(user);
+    return cache.getOrSet(`session:${userId}`, async () => {
+      const user = await prisma.user.findUnique({
+        where: { id: userId },
+        select: {
+          id: true,
+          email: true,
+          fullName: true,
+          role: true,
+          tenantId: true,
+          createdByUserId: true,
+          isActive: true,
+          hostProfile: { select: { id: true } }
+        }
+      });
+      if (!user || !user.isActive) return null;
+      return buildSessionUser(user);
+    }, SESSION_CACHE_TTL_MS);
+  },
+
+  invalidateSessionCache(userId) {
+    if (userId) cache.del(`session:${userId}`);
   },
 
   async refreshToken(userId) {
+    cache.del(`session:${userId}`);
     const user = await prisma.user.findUnique({
       where: { id: userId },
       include: { hostProfile: { select: { id: true } } }

@@ -1428,80 +1428,88 @@ export const reservationsService = {
     }
 
     let created = 0;
-    for (const row of validRows) {
-      const prepared = row.normalized;
-      const customerId = await createImportedCustomer(prepared, row);
-      const importNotes = [
-        prepared.notes || null,
-        '[IMPORT_MIGRATION] Uploaded from reservation migration tool',
-        prepared.returnAtUsedPlaceholder ? '[IMPORT_MIGRATION] Legacy return date placeholder detected; returnAt defaulted to pickupAt + 1 day.' : null
-      ].filter(Boolean).join('\n');
-      const reservation = await prisma.reservation.create({
-        data: {
-          tenantId: prepared.tenantId,
-          reservationNumber: prepared.reservationNumber,
-          sourceRef: prepared.sourceRef || null,
-          status: prepared.status || 'CONFIRMED',
-          workflowMode: prepared.workflowMode || 'RENTAL',
-          loanerBillingMode: prepared.loanerBillingMode || null,
-          repairOrderNumber: prepared.repairOrderNumber || null,
-          claimNumber: prepared.claimNumber || null,
-          serviceAdvisorName: prepared.serviceAdvisorName || null,
-          serviceAdvisorEmail: prepared.serviceAdvisorEmail || null,
-          serviceAdvisorPhone: prepared.serviceAdvisorPhone || null,
-          serviceStartAt: prepared.serviceStartAt || null,
-          estimatedServiceCompletionAt: prepared.estimatedServiceCompletionAt || null,
-          serviceVehicleYear: prepared.serviceVehicleYear || null,
-          serviceVehicleMake: prepared.serviceVehicleMake || null,
-          serviceVehicleModel: prepared.serviceVehicleModel || null,
-          serviceVehiclePlate: prepared.serviceVehiclePlate || null,
-          serviceVehicleVin: prepared.serviceVehicleVin || null,
-          loanerProgramNotes: prepared.loanerProgramNotes || null,
-          customerId,
-          vehicleId: prepared.vehicleId || null,
-          vehicleTypeId: prepared.vehicleTypeId || null,
-          pickupAt: prepared.pickupAt,
-          returnAt: prepared.returnAt,
-          pickupLocationId: prepared.pickupLocationId,
-          returnLocationId: prepared.returnLocationId,
-          dailyRate: prepared.dailyRate,
-          estimatedTotal: prepared.estimatedTotal,
-          paymentStatus: prepared.paymentStatus || 'PENDING',
-          sendConfirmationEmail: false,
-          notes: importNotes
-        }
-      });
+    // Pre-resolve all customer IDs in parallel before the transaction
+    const customerIds = await Promise.all(
+      validRows.map((row) => createImportedCustomer(row.normalized, row))
+    );
 
-      await prisma.reservationPricingSnapshot.upsert({
-        where: { reservationId: reservation.id },
-        create: {
-          reservationId: reservation.id,
-          dailyRate: prepared.dailyRate,
-          source: 'RESERVATION_IMPORT'
-        },
-        update: {
-          dailyRate: prepared.dailyRate,
-          source: 'RESERVATION_IMPORT'
-        }
-      });
+    await prisma.$transaction(async (tx) => {
+      for (let i = 0; i < validRows.length; i++) {
+        const prepared = validRows[i].normalized;
+        const customerId = customerIds[i];
+        const importNotes = [
+          prepared.notes || null,
+          '[IMPORT_MIGRATION] Uploaded from reservation migration tool',
+          prepared.returnAtUsedPlaceholder ? '[IMPORT_MIGRATION] Legacy return date placeholder detected; returnAt defaulted to pickupAt + 1 day.' : null
+        ].filter(Boolean).join('\n');
+        const reservation = await tx.reservation.create({
+          data: {
+            tenantId: prepared.tenantId,
+            reservationNumber: prepared.reservationNumber,
+            sourceRef: prepared.sourceRef || null,
+            status: prepared.status || 'CONFIRMED',
+            workflowMode: prepared.workflowMode || 'RENTAL',
+            loanerBillingMode: prepared.loanerBillingMode || null,
+            repairOrderNumber: prepared.repairOrderNumber || null,
+            claimNumber: prepared.claimNumber || null,
+            serviceAdvisorName: prepared.serviceAdvisorName || null,
+            serviceAdvisorEmail: prepared.serviceAdvisorEmail || null,
+            serviceAdvisorPhone: prepared.serviceAdvisorPhone || null,
+            serviceStartAt: prepared.serviceStartAt || null,
+            estimatedServiceCompletionAt: prepared.estimatedServiceCompletionAt || null,
+            serviceVehicleYear: prepared.serviceVehicleYear || null,
+            serviceVehicleMake: prepared.serviceVehicleMake || null,
+            serviceVehicleModel: prepared.serviceVehicleModel || null,
+            serviceVehiclePlate: prepared.serviceVehiclePlate || null,
+            serviceVehicleVin: prepared.serviceVehicleVin || null,
+            loanerProgramNotes: prepared.loanerProgramNotes || null,
+            customerId,
+            vehicleId: prepared.vehicleId || null,
+            vehicleTypeId: prepared.vehicleTypeId || null,
+            pickupAt: prepared.pickupAt,
+            returnAt: prepared.returnAt,
+            pickupLocationId: prepared.pickupLocationId,
+            returnLocationId: prepared.returnLocationId,
+            dailyRate: prepared.dailyRate,
+            estimatedTotal: prepared.estimatedTotal,
+            paymentStatus: prepared.paymentStatus || 'PENDING',
+            sendConfirmationEmail: false,
+            notes: importNotes
+          }
+        });
 
-      await prisma.auditLog.create({
-        data: {
-          tenantId: reservation.tenantId,
-          reservationId: reservation.id,
-          action: 'CREATE',
-          actorUserId,
-          toStatus: reservation.status,
-          metadata: JSON.stringify({
-            reservationNumber: reservation.reservationNumber,
-            importMigration: true,
-            sourceRef: reservation.sourceRef || null
+        await Promise.all([
+          tx.reservationPricingSnapshot.upsert({
+            where: { reservationId: reservation.id },
+            create: {
+              reservationId: reservation.id,
+              dailyRate: prepared.dailyRate,
+              source: 'RESERVATION_IMPORT'
+            },
+            update: {
+              dailyRate: prepared.dailyRate,
+              source: 'RESERVATION_IMPORT'
+            }
+          }),
+          tx.auditLog.create({
+            data: {
+              tenantId: reservation.tenantId,
+              reservationId: reservation.id,
+              action: 'CREATE',
+              actorUserId,
+              toStatus: reservation.status,
+              metadata: JSON.stringify({
+                reservationNumber: reservation.reservationNumber,
+                importMigration: true,
+                sourceRef: reservation.sourceRef || null
+              })
+            }
           })
-        }
-      });
+        ]);
 
-      created += 1;
-    }
+        created += 1;
+      }
+    });
 
     return {
       created,

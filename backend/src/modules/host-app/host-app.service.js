@@ -585,15 +585,16 @@ export const hostAppService = {
       };
     }
 
-    const listings = await prisma.hostVehicleListing.findMany({
-      where: { hostProfileId: context.hostProfile.id },
-      include: listingInclude(),
-      orderBy: [{ createdAt: 'desc' }]
-    });
+    const [listings, hostTenantId] = await Promise.all([
+      prisma.hostVehicleListing.findMany({
+        where: { hostProfileId: context.hostProfile.id },
+        include: listingInclude(),
+        orderBy: [{ createdAt: 'desc' }]
+      }),
+      resolveHostTenantId(context.hostProfile)
+    ]);
 
-    const hostTenantId = await resolveHostTenantId(context.hostProfile);
-
-    const [vehicleTypes, locations, submissions, pickupSpots, searchPlaces, serviceAreas] = await Promise.all([
+    const [vehicleTypes, locations, submissions, pickupSpots, searchPlaces, serviceAreas, recentReviews, trips, selfServiceConfig] = await Promise.all([
       prisma.vehicleType.findMany({
         where: hostTenantId ? { tenantId: hostTenantId } : { id: '__never__' },
         orderBy: [{ name: 'asc' }]
@@ -653,29 +654,29 @@ export const hostAppService = {
           }
         },
         orderBy: [{ createdAt: 'desc' }]
-      })
+      }),
+      prisma.hostReview.findMany({
+        where: {
+          hostProfileId: context.hostProfile.id,
+          status: 'SUBMITTED'
+        },
+        orderBy: [{ submittedAt: 'desc' }],
+        take: 6
+      }),
+      prisma.trip.findMany({
+        where: {
+          hostProfileId: context.hostProfile.id,
+          ...(input?.tripStatus ? { status: String(input.tripStatus).toUpperCase() } : {})
+        },
+        include: tripInclude(),
+        orderBy: [{ createdAt: 'desc' }],
+        take: 50
+      }),
+      hostTenantId
+        ? settingsService.getSelfServiceConfig({ tenantId: hostTenantId }).catch(() => null)
+        : Promise.resolve(null)
     ]);
 
-    const recentReviews = await prisma.hostReview.findMany({
-      where: {
-        hostProfileId: context.hostProfile.id,
-        status: 'SUBMITTED'
-      },
-      orderBy: [{ submittedAt: 'desc' }],
-      take: 6
-    });
-
-    const trips = await prisma.trip.findMany({
-      where: {
-        hostProfileId: context.hostProfile.id,
-        ...(input?.tripStatus ? { status: String(input.tripStatus).toUpperCase() } : {})
-      },
-      include: tripInclude(),
-      orderBy: [{ createdAt: 'desc' }]
-    });
-    const selfServiceConfig = hostTenantId
-      ? await settingsService.getSelfServiceConfig({ tenantId: hostTenantId }).catch(() => null)
-      : null;
     const enrichedTrips = trips.map((trip) => enrichHostTripFulfillmentPlan(trip, selfServiceConfig || {}));
 
     return {

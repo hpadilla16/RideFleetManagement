@@ -57,6 +57,7 @@ async function applyCreditToUnpaidAgreements(customerId, scope = {}) {
     orderBy: { createdAt: 'asc' }
   });
 
+  const operations = [];
   for (const a of agreements) {
     if (credit <= 0) break;
     const bal = Number(a.balance || 0);
@@ -64,8 +65,8 @@ async function applyCreditToUnpaidAgreements(customerId, scope = {}) {
     const used = Math.min(credit, bal);
     const nextBal = Number((bal - used).toFixed(2));
 
-    await prisma.rentalAgreement.update({ where: { id: a.id }, data: { balance: nextBal } });
-    await prisma.rentalAgreementPayment.create({
+    operations.push(prisma.rentalAgreement.update({ where: { id: a.id }, data: { balance: nextBal } }));
+    operations.push(prisma.rentalAgreementPayment.create({
       data: {
         rentalAgreementId: a.id,
         method: 'OTHER',
@@ -74,10 +75,11 @@ async function applyCreditToUnpaidAgreements(customerId, scope = {}) {
         status: 'PAID',
         notes: 'Automatically applied from customer credit balance'
       }
-    });
+    }));
 
     credit = Number((credit - used).toFixed(2));
   }
+  if (operations.length) await prisma.$transaction(operations);
 
   if (credit !== Number(customer?.creditBalance || 0)) {
     const consumed = Number((Number(customer?.creditBalance || 0) - credit).toFixed(2));
@@ -347,33 +349,31 @@ export const customersService = {
       return { created: 0, skipped: validation.found, validation };
     }
 
-    for (const row of validRows) {
-      await prisma.customer.create({
-        data: {
-          tenantId: row.normalized.tenantId,
-          firstName: row.normalized.firstName,
-          lastName: row.normalized.lastName,
-          email: row.normalized.email,
-          phone: row.normalized.phone,
-          dateOfBirth: row.normalized.dateOfBirth,
-          address1: row.normalized.address1,
-          address2: row.normalized.address2,
-          city: row.normalized.city,
-          state: row.normalized.state,
-          zip: row.normalized.zip,
-          country: row.normalized.country,
-          licenseNumber: row.normalized.licenseNumber,
-          licenseState: row.normalized.licenseState,
-          insurancePolicyNumber: row.normalized.insurancePolicyNumber,
-          insuranceDocumentUrl: row.normalized.insuranceDocumentUrl,
-          idPhotoUrl: row.normalized.idPhotoUrl,
-          creditBalance: row.normalized.creditBalance,
-          doNotRent: row.normalized.doNotRent,
-          doNotRentReason: row.normalized.doNotRentReason,
-          notes: row.normalized.notes
-        }
-      });
-    }
+    await prisma.customer.createMany({
+      data: validRows.map((row) => ({
+        tenantId: row.normalized.tenantId,
+        firstName: row.normalized.firstName,
+        lastName: row.normalized.lastName,
+        email: row.normalized.email,
+        phone: row.normalized.phone,
+        dateOfBirth: row.normalized.dateOfBirth,
+        address1: row.normalized.address1,
+        address2: row.normalized.address2,
+        city: row.normalized.city,
+        state: row.normalized.state,
+        zip: row.normalized.zip,
+        country: row.normalized.country,
+        licenseNumber: row.normalized.licenseNumber,
+        licenseState: row.normalized.licenseState,
+        insurancePolicyNumber: row.normalized.insurancePolicyNumber,
+        insuranceDocumentUrl: row.normalized.insuranceDocumentUrl,
+        idPhotoUrl: row.normalized.idPhotoUrl,
+        creditBalance: row.normalized.creditBalance,
+        doNotRent: row.normalized.doNotRent,
+        doNotRentReason: row.normalized.doNotRentReason,
+        notes: row.normalized.notes
+      }))
+    });
 
     return {
       created: validRows.length,

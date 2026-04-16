@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "node src/main.js",
     "start": "node src/main.js",
+    "start:cluster": "node src/cluster.js",
     "test": "npm run test:vehicles && npm run test:planner && npm run test:rates && npm run test:portal && npm run test:carsharing && npm run test:issues && npm run test:tolls && npm run test:sms && npm run test:payments && npm run test:auth && npm run test:cache && npm run test:commissions",
     "test:vehicles": "node --test src/modules/vehicles/vehicle-intelligence.test.mjs src/modules/vehicles/telematics-zubie.test.mjs",
     "test:planner": "node --test src/modules/planner/planner.service.test.mjs",

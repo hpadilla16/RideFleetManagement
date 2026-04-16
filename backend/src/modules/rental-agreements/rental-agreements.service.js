@@ -1947,9 +1947,56 @@ export const rentalAgreementsService = {
         agreementNumber: true,
         customerFirstName: true,
         customerLastName: true,
+        customerEmail: true,
+        customerPhone: true,
+        customerAddress1: true,
+        customerAddress2: true,
+        customerCity: true,
+        customerState: true,
+        customerZip: true,
+        customerCountry: true,
+        dateOfBirth: true,
+        licenseNumber: true,
+        licenseState: true,
+        licenseExpiry: true,
+        insuranceSource: true,
+        insurancePolicyNumber: true,
+        insurancePlanName: true,
         pickupAt: true,
         returnAt: true,
+        pickupLocationId: true,
+        pickupLocation: { select: { id: true, name: true, address: true } },
+        returnLocationId: true,
+        returnLocation: { select: { id: true, name: true, address: true } },
+        vehicleId: true,
+        vehicle: {
+          select: {
+            id: true,
+            internalNumber: true,
+            make: true,
+            model: true,
+            year: true,
+            color: true,
+            plate: true,
+            vin: true,
+            mileage: true,
+            vehicleType: { select: { name: true } }
+          }
+        },
+        odometerOut: true,
+        odometerIn: true,
+        fuelOut: true,
+        fuelIn: true,
+        cleanlinessOut: true,
+        cleanlinessIn: true,
+        subtotal: true,
+        taxes: true,
+        fees: true,
         total: true,
+        deposit: true,
+        securityDepositAmount: true,
+        paidAmount: true,
+        balance: true,
         charges: {
           orderBy: [{ sortOrder: 'asc' }, { createdAt: 'asc' }],
           select: {
@@ -2103,6 +2150,36 @@ export const rentalAgreementsService = {
       ? `<img src="${rawSigUrl}" alt="Signature" style="max-height:60px;max-width:320px;width:auto;height:auto;display:block;object-fit:contain" />`
       : '<div class="sig-meta">No signature on file</div>';
 
+    // Build customer address line
+    const addrParts = [agreement.customerAddress1, agreement.customerAddress2, agreement.customerCity, agreement.customerState, agreement.customerZip, agreement.customerCountry].filter(Boolean);
+    const customerAddress = addrParts.join(', ') || '-';
+
+    // Build vehicle description
+    const v = agreement.vehicle;
+    const vehicleDesc = v ? [v.year, v.make, v.model].filter(Boolean).join(' ') : '-';
+    const vehiclePlate = v?.plate || '-';
+    const vehicleVin = v?.vin || '-';
+    const vehicleColor = v?.color || '-';
+    const vehicleType = v?.vehicleType?.name || '-';
+    const vehicleInternal = v?.internalNumber || '-';
+    const vehicleMileage = v?.mileage != null ? Number(v.mileage).toLocaleString() : '-';
+
+    // Inspection data
+    const odometerOut = agreement.odometerOut != null ? Number(agreement.odometerOut).toLocaleString() : '-';
+    const odometerIn = agreement.odometerIn != null ? Number(agreement.odometerIn).toLocaleString() : '-';
+    const fuelOutVal = agreement.fuelOut != null ? `${Math.round(Number(agreement.fuelOut) * 100)}%` : '-';
+    const fuelInVal = agreement.fuelIn != null ? `${Math.round(Number(agreement.fuelIn) * 100)}%` : '-';
+    const cleanlinessOutVal = agreement.cleanlinessOut != null ? `${agreement.cleanlinessOut}/5` : '-';
+    const cleanlinessInVal = agreement.cleanlinessIn != null ? `${agreement.cleanlinessIn}/5` : '-';
+
+    // Financial summary
+    const subtotal = Number(agreement.subtotal || 0).toFixed(2);
+    const taxesAmount = Number(agreement.taxes || 0).toFixed(2);
+    const feesAmount = Number(agreement.fees || 0).toFixed(2);
+    const depositAmount = Number(agreement.deposit || 0).toFixed(2);
+    const securityDeposit = Number(agreement.securityDepositAmount || 0).toFixed(2);
+    const balanceAmount = Number(agreement.balance || 0).toFixed(2);
+
     const templateVars = {
       companyName: esc(cfg.companyName || ''),
       companyAddress: esc(cfg.companyAddress || ''),
@@ -2111,13 +2188,50 @@ export const rentalAgreementsService = {
       companyLogoBlock,
       agreementNumber: esc(agreement.agreementNumber || ''),
       reservationNumber: esc(agreement.reservation?.reservationNumber || '-'),
+      // Customer info
       customerName: esc(`${agreement.customerFirstName || ''} ${agreement.customerLastName || ''}`.trim()),
+      customerEmail: esc(agreement.customerEmail || '-'),
+      customerPhone: esc(agreement.customerPhone || '-'),
+      customerAddress: esc(customerAddress),
+      customerDob: esc(agreement.dateOfBirth ? fmtDate(agreement.dateOfBirth) : '-'),
+      licenseNumber: esc(agreement.licenseNumber || '-'),
+      licenseState: esc(agreement.licenseState || '-'),
+      licenseExpiry: esc(agreement.licenseExpiry ? fmtDate(agreement.licenseExpiry) : '-'),
+      insuranceProvider: esc(agreement.insuranceSource || agreement.insurancePlanName || '-'),
+      insurancePolicy: esc(agreement.insurancePolicyNumber || '-'),
+      // Dates & locations
       pickupAt: esc(fmtDate(agreement.pickupAt)),
       returnAt: esc(fmtDate(agreement.returnAt)),
+      pickupLocation: esc(agreement.pickupLocation?.name || '-'),
+      pickupLocationAddress: esc(agreement.pickupLocation?.address || ''),
+      returnLocation: esc(agreement.returnLocation?.name || '-'),
+      returnLocationAddress: esc(agreement.returnLocation?.address || ''),
+      // Vehicle info
+      vehicleDesc: esc(vehicleDesc),
+      vehiclePlate: esc(vehiclePlate),
+      vehicleVin: esc(vehicleVin),
+      vehicleColor: esc(vehicleColor),
+      vehicleType: esc(vehicleType),
+      vehicleInternal: esc(vehicleInternal),
+      vehicleMileage: esc(vehicleMileage),
+      // Inspection
+      odometerOut: esc(odometerOut),
+      odometerIn: esc(odometerIn),
+      fuelOut: esc(fuelOutVal),
+      fuelIn: esc(fuelInVal),
+      cleanlinessOut: esc(cleanlinessOutVal),
+      cleanlinessIn: esc(cleanlinessInVal),
+      // Financial
       taxConfig: esc((agreement.charges || []).find((c) => String(c.chargeType || '').toUpperCase() === 'TAX')?.name || '-'),
+      subtotal,
+      taxesAmount,
+      feesAmount,
+      depositAmount,
+      securityDeposit,
       total: Number(agreement.total || 0).toFixed(2),
       amountPaid: paidAmountForPrint.toFixed(2),
       amountDue: amountDueForPrint.toFixed(2),
+      balance: balanceAmount,
       chargesRows: chargesRowsHtml,
       paymentsRows: paymentsRowsHtml,
       termsText: esc(cfg.termsText || ''),
