@@ -56,6 +56,10 @@ export function validateReservationPatch(current, patch) {
     if (patch.status === 'CHECKED_OUT' && !(patch.vehicleId || current.vehicleId)) {
       errors.push('vehicleId is required before CHECKED_OUT');
     }
+
+    if (patch.status === 'CANCELLED' && !String(patch.cancellationReason || '').trim()) {
+      errors.push('cancellationReason is required when cancelling a reservation');
+    }
   }
 
   return errors;

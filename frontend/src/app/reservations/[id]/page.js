@@ -397,7 +397,13 @@ function ReservationDetailInner({ token, me, logout }) {
 
   const setStatus = async (status) => {
     try {
-      await api(`/api/reservations/${id}`, { method: 'PATCH', body: JSON.stringify({ status }) }, token);
+      const body = { status };
+      if (status === 'CANCELLED') {
+        const reason = window.prompt('Enter a reason for cancellation (required):');
+        if (!reason || !reason.trim()) return setMsg('Cancellation requires a reason');
+        body.cancellationReason = reason.trim();
+      }
+      await api(`/api/reservations/${id}`, { method: 'PATCH', body: JSON.stringify(body) }, token);
       await load();
       setMsg(`Reservation set to ${status}`);
     } catch (e) { setMsg(e.message); }

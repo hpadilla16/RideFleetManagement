@@ -365,7 +365,13 @@ function ReservationsInner({ token, me, logout }) {
   };
   const setStatus = async (id, status) => {
     try {
-      await api(scopedPath(`/api/reservations/${id}`), { method: 'PATCH', body: JSON.stringify({ status }) }, token);
+      const body = { status };
+      if (status === 'CANCELLED') {
+        const reason = window.prompt('Enter a reason for cancellation (required):');
+        if (!reason || !reason.trim()) { if (reason !== null) setMsg('Cancellation requires a reason'); return; }
+        body.cancellationReason = reason.trim();
+      }
+      await api(scopedPath(`/api/reservations/${id}`), { method: 'PATCH', body: JSON.stringify(body) }, token);
       setMsg(status === 'CANCELLED' ? 'Reservation cancelled' : status === 'NO_SHOW' ? 'Reservation marked as no show' : 'Status updated');
       await loadReservations({ offset: 0, nextQuery: query });
       await loadReservationSummary();

@@ -274,9 +274,10 @@ function DashboardInner({ token, me, logout }) {
   };
 
   const markCancelled = async (id) => {
-    if (!window.confirm('Are you sure you want to cancel this reservation? This action cannot be undone.')) return;
+    const reason = window.prompt('Enter a reason for cancellation (required):');
+    if (!reason || !reason.trim()) { if (reason !== null) setMsg('Cancellation requires a reason'); return; }
     try {
-      await api(`/api/reservations/${id}`, { method: 'PATCH', body: JSON.stringify({ status: 'CANCELLED' }) }, token);
+      await api(`/api/reservations/${id}`, { method: 'PATCH', body: JSON.stringify({ status: 'CANCELLED', cancellationReason: reason.trim() }) }, token);
       setMsg('Reservation cancelled');
       await load();
     } catch (e) {

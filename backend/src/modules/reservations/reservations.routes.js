@@ -619,12 +619,22 @@ reservationsRouter.patch('/:id', async (req, res, next) => {
     const current = await reservationsService.getById(req.params.id, scopeFor(req));
     if (!current) return res.status(404).json({ error: 'Reservation not found' });
 
-    const validationErrors = validateReservationPatch(current, req.body || {});
+    const patch = { ...(req.body || {}) };
+    const validationErrors = validateReservationPatch(current, patch);
     if (validationErrors.length) {
       return res.status(400).json({ error: 'Validation failed', details: validationErrors });
     }
 
-    const row = await reservationsService.update(req.params.id, req.body || {}, scopeFor(req), req.user?.sub || null);
+    // Append cancellation reason to notes when cancelling
+    if (patch.status === 'CANCELLED' && patch.cancellationReason) {
+      const reason = String(patch.cancellationReason).trim();
+      const actorName = req.user?.fullName || req.user?.email || 'Unknown';
+      const cancelNote = `[CANCELLED ${new Date().toISOString()}] by ${actorName}: ${reason}`;
+      patch.notes = current.notes ? `${current.notes}\n${cancelNote}` : cancelNote;
+      delete patch.cancellationReason;
+    }
+
+    const row = await reservationsService.update(req.params.id, patch, scopeFor(req), req.user?.sub || null);
 
     await prisma.auditLog.create({
       data: {
