@@ -99,7 +99,7 @@ function SettingsInner({ token, me, logout }) {
     vehicleTypeIds: []
   });
   const [emailTemplates, setEmailTemplates] = useState(DEFAULT_EMAIL_TEMPLATES);
-  const [reservationOptions, setReservationOptions] = useState({ autoAssignVehicleFromType: false, tenantTimeZone: 'America/Puerto_Rico' });
+  const [reservationOptions, setReservationOptions] = useState({ autoAssignVehicleFromType: false, requireFranchiseSelection: false, tenantTimeZone: 'America/Puerto_Rico' });
   const [paymentGatewayConfig, setPaymentGatewayConfig] = useState(DEFAULT_PAYMENT_GATEWAY_CONFIG);
   const [paymentGatewayHealth, setPaymentGatewayHealth] = useState(null);
   const [plannerCopilotConfig, setPlannerCopilotConfig] = useState(DEFAULT_PLANNER_COPILOT_CONFIG);
@@ -159,6 +159,7 @@ function SettingsInner({ token, me, logout }) {
     if (key === 'emailTemplates') setEmailTemplates({ ...DEFAULT_EMAIL_TEMPLATES, ...(value || {}) });
     if (key === 'reservationOptions') setReservationOptions({
       autoAssignVehicleFromType: !!value?.autoAssignVehicleFromType,
+      requireFranchiseSelection: !!value?.requireFranchiseSelection,
       tenantTimeZone: String(value?.tenantTimeZone || 'America/Puerto_Rico')
     });
     if (key === 'paymentGateway') {
@@ -386,7 +387,7 @@ function SettingsInner({ token, me, logout }) {
     setVehicleTypes([]);
     setInsurancePlans([]);
     setEmailTemplates(DEFAULT_EMAIL_TEMPLATES);
-    setReservationOptions({ autoAssignVehicleFromType: false, tenantTimeZone: 'America/Puerto_Rico' });
+    setReservationOptions({ autoAssignVehicleFromType: false, requireFranchiseSelection: false, tenantTimeZone: 'America/Puerto_Rico' });
     setPaymentGatewayConfig(DEFAULT_PAYMENT_GATEWAY_CONFIG);
     setPlannerCopilotConfig(DEFAULT_PLANNER_COPILOT_CONFIG);
     setPlannerCopilotUsage(DEFAULT_PLANNER_COPILOT_USAGE);
@@ -461,6 +462,7 @@ function SettingsInner({ token, me, logout }) {
     const out = await api(scopedSettingsPath('/api/settings/reservation-options'), { method: 'PUT', body: JSON.stringify(reservationOptions) }, token);
     setReservationOptions({
       autoAssignVehicleFromType: !!out?.autoAssignVehicleFromType,
+      requireFranchiseSelection: !!out?.requireFranchiseSelection,
       tenantTimeZone: String(out?.tenantTimeZone || 'America/Puerto_Rico')
     });
     setMsg('Reservation options saved');
@@ -1823,6 +1825,14 @@ function SettingsInner({ token, me, logout }) {
                   onChange={(e) => setReservationOptions({ ...reservationOptions, autoAssignVehicleFromType: e.target.checked })}
                 />
                 Auto-assign vehicle on reservation create (from available vehicles in selected vehicle type)
+              </label>
+              <label className="label" style={{ display: 'inline-flex', alignItems: 'center', gap: 8, textTransform: 'none', letterSpacing: 0, fontSize: 13, marginTop: 8 }}>
+                <input
+                  type="checkbox"
+                  checked={!!reservationOptions.requireFranchiseSelection}
+                  onChange={(e) => setReservationOptions({ ...reservationOptions, requireFranchiseSelection: e.target.checked })}
+                />
+                Require franchise selection before check-out (agent must assign a franchise to complete checkout)
               </label>
               <div style={{ marginTop: 10 }}>
                 <button onClick={saveReservationOptions}>Save Reservation Options</button>

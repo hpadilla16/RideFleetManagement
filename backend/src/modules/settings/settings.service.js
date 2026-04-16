@@ -52,6 +52,7 @@ const DEFAULT_EMAIL_TEMPLATES = {
 
 const DEFAULT_RESERVATION_OPTIONS = {
   autoAssignVehicleFromType: false,
+  requireFranchiseSelection: false,
   tenantTimeZone: 'America/Puerto_Rico'
 };
 
@@ -615,6 +616,7 @@ export const settingsService = {
       ...DEFAULT_RESERVATION_OPTIONS,
       ...(payload || {}),
       autoAssignVehicleFromType: !!payload?.autoAssignVehicleFromType,
+      requireFranchiseSelection: !!payload?.requireFranchiseSelection,
       tenantTimeZone: String(payload?.tenantTimeZone || DEFAULT_RESERVATION_OPTIONS.tenantTimeZone).trim() || DEFAULT_RESERVATION_OPTIONS.tenantTimeZone
     };
     const key = scopedKey('reservationOptions', scope);

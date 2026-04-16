@@ -16,7 +16,10 @@ function Inner({ token, me, logout }) {
   const [row, setRow] = useState(null);
   const [vehicles, setVehicles] = useState([]);
   const [msg, setMsg] = useState('');
-  const [form, setForm] = useState({ vehicleId: '', odometerOut: '', fuelOut: '1.000', cleanlinessOut: '5', signerName: '' });
+  const [form, setForm] = useState({ vehicleId: '', odometerOut: '', fuelOut: '1.000', cleanlinessOut: '5', signerName: '', franchiseId: '' });
+  const [franchises, setFranchises] = useState([]);
+  const [requireFranchise, setRequireFranchise] = useState(false);
+  const [checkoutErrors, setCheckoutErrors] = useState(null);
   const sigRef = useRef(null);
   const drawing = useRef(false);
   const selectedVehicle = vehicles.find((vehicle) => String(vehicle.id) === String(form.vehicleId)) || null;
@@ -25,14 +28,16 @@ function Inner({ token, me, logout }) {
     setMsg('');
     const r = await api(`/api/reservations/${id}`, {}, token);
     setRow(r);
-    setForm((f) => ({ ...f, vehicleId: r?.vehicleId || '', signerName: `${r?.customer?.firstName || ''} ${r?.customer?.lastName || ''}`.trim() }));
-    try {
-      const av = await api(`/api/reservations/${id}/available-vehicles`, {}, token);
-      setVehicles(Array.isArray(av) ? av : []);
-    } catch (e) {
-      setVehicles([]);
-      setMsg(String(e?.message || 'Unable to load available vehicles for this tenant.'));
-    }
+    setForm((f) => ({ ...f, vehicleId: r?.vehicleId || '', franchiseId: r?.franchiseId || '', signerName: `${r?.customer?.firstName || ''} ${r?.customer?.lastName || ''}`.trim() }));
+    const [vehiclesRes, optionsRes, pricingRes] = await Promise.allSettled([
+      api(`/api/reservations/${id}/available-vehicles`, {}, token),
+      api('/api/settings/reservation-options', {}, token),
+      api(`/api/reservations/${id}/pricing-options`, {}, token)
+    ]);
+    if (vehiclesRes.status === 'fulfilled') setVehicles(Array.isArray(vehiclesRes.value) ? vehiclesRes.value : []);
+    else setMsg('Unable to load available vehicles.');
+    if (optionsRes.status === 'fulfilled') setRequireFranchise(!!optionsRes.value?.requireFranchiseSelection);
+    if (pricingRes.status === 'fulfilled') setFranchises(Array.isArray(pricingRes.value?.franchises) ? pricingRes.value.franchises : []);
   };
   useEffect(() => {
     if (!id || !token) return;
@@ -89,11 +94,20 @@ function Inner({ token, me, logout }) {
 
   const complete = async () => {
     try {
-      if (!form.vehicleId) return setMsg('Select a vehicle');
-      if (!form.odometerOut) return setMsg('Odometer out is required');
+      // Validate all required fields and show popup if anything is missing
+      const errors = [];
+      if (!form.vehicleId) errors.push({ field: 'Vehicle', detail: 'Select an available vehicle from the dropdown before checkout.' });
+      if (!form.odometerOut) errors.push({ field: 'Odometer Out', detail: 'Record the current odometer reading at the time of handoff.' });
       const signer = String(form.signerName || '').trim();
       const signatureDataUrl = sig();
-      if (!signer || !signatureDataUrl) return setMsg('Customer signature is required');
+      if (!signer) errors.push({ field: 'Signer Name', detail: 'Enter the full name of the person signing the rental agreement.' });
+      if (!signatureDataUrl) errors.push({ field: 'Customer Signature', detail: 'The customer must sign on the signature pad before checkout can be completed.' });
+      if (requireFranchise && !form.franchiseId) errors.push({ field: 'Franchise', detail: 'This tenant requires a franchise to be assigned. Select the franchise operating this rental before checkout.' });
+      if (errors.length > 0) {
+        setCheckoutErrors(errors);
+        return;
+      }
+      setCheckoutErrors(null);
 
       const checkoutLine = `[RES_CHECKOUT ${new Date().toISOString()}] odometerOut=${Number(form.odometerOut || 0)} fuelOut=${Number(form.fuelOut || 0)} cleanlinessOut=${Number(form.cleanlinessOut || 5)}`;
       const baseNotes = String(row?.notes || '').trim();
@@ -103,6 +117,7 @@ function Inner({ token, me, logout }) {
         method: 'PATCH',
         body: JSON.stringify({
           vehicleId: form.vehicleId,
+          franchiseId: form.franchiseId || null,
           notes: nextNotes
         })
       }, token);
@@ -196,6 +211,15 @@ function Inner({ token, me, logout }) {
           <div className="stack"><label className="label">Odometer Out</label><input type="number" min="0" value={form.odometerOut} onChange={(e) => setForm({ ...form, odometerOut: e.target.value })} /></div>
           <div className="stack"><label className="label">Fuel Out</label><select value={form.fuelOut} onChange={(e) => setForm({ ...form, fuelOut: e.target.value })}>{['0.000','0.125','0.250','0.375','0.500','0.625','0.750','0.875','1.000'].map((v, i) => <option key={v} value={v}>{i}/8</option>)}</select></div>
           <div className="stack"><label className="label">Cleanliness Out (1-5)</label><input type="number" min="1" max="5" value={form.cleanlinessOut} onChange={(e) => setForm({ ...form, cleanlinessOut: e.target.value })} /></div>
+          {(requireFranchise || franchises.length > 0) && (
+            <div className="stack">
+              <label className="label">Franchise{requireFranchise ? ' *' : ''}</label>
+              <select value={form.franchiseId} onChange={(e) => setForm({ ...form, franchiseId: e.target.value })}>
+                <option value="">{requireFranchise ? 'Select franchise (required)' : '— No franchise —'}</option>
+                {franchises.map((f) => <option key={f.id} value={f.id}>{f.name}{f.code ? ` (${f.code})` : ''}</option>)}
+              </select>
+            </div>
+          )}
         </div>
 
         <div className="row-between" style={{ marginTop: 8 }}>
@@ -207,6 +231,32 @@ function Inner({ token, me, logout }) {
           <button onClick={clearSig}>Clear Signature</button>
           <button className="ios-action-btn" onClick={complete}>Complete Check-out</button>
         </div>
+
+        {/* Checkout validation error popup */}
+        {checkoutErrors && (
+          <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 9999 }} onClick={() => setCheckoutErrors(null)}>
+            <div style={{ background: '#fff', borderRadius: 16, padding: 28, maxWidth: 480, width: '90%', boxShadow: '0 24px 48px rgba(0,0,0,0.15)' }} onClick={(e) => e.stopPropagation()}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 16 }}>
+                <span style={{ fontSize: 28 }}>&#9888;</span>
+                <div>
+                  <h3 style={{ margin: 0, fontSize: 18, fontWeight: 800, color: '#1e2847' }}>Unable to Complete Check-out</h3>
+                  <p style={{ margin: '4px 0 0', fontSize: 13, color: '#6b7a9a' }}>The following items must be resolved before the contract can be checked out:</p>
+                </div>
+              </div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                {checkoutErrors.map((err, idx) => (
+                  <div key={idx} style={{ padding: '10px 14px', borderRadius: 10, background: '#fef2f2', border: '1px solid #fecaca' }}>
+                    <div style={{ fontWeight: 700, fontSize: 14, color: '#991b1b', marginBottom: 2 }}>{err.field}</div>
+                    <div style={{ fontSize: 13, color: '#7f1d1d' }}>{err.detail}</div>
+                  </div>
+                ))}
+              </div>
+              <div style={{ marginTop: 16, display: 'flex', justifyContent: 'flex-end' }}>
+                <button className="ios-action-btn" onClick={() => setCheckoutErrors(null)} style={{ padding: '10px 24px' }}>Got it</button>
+              </div>
+            </div>
+          </div>
+        )}
       </section>
     </AppShell>
   );
