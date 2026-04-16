@@ -245,15 +245,17 @@ function DashboardInner({ token, me, logout }) {
   const router = useRouter();
   const [reservations, setReservations] = useState([]);
   const [overview, setOverview] = useState(null);
+  const [resSummary, setResSummary] = useState(null);
   const [msg, setMsg] = useState('');
   const canSeeOverview = me?.moduleAccess?.reports !== false;
   const canSeeVehicles = me?.moduleAccess?.vehicles !== false;
 
   const load = async () => {
-    const [reservationsResult, overviewResult, vehiclesResult] = await Promise.allSettled([
+    const [reservationsResult, overviewResult, vehiclesResult, summaryResult] = await Promise.allSettled([
       api('/api/reservations', {}, token),
       canSeeOverview ? api('/api/reports/overview', {}, token) : Promise.resolve(null),
-      !canSeeOverview && canSeeVehicles ? api('/api/vehicles', {}, token) : Promise.resolve([])
+      !canSeeOverview && canSeeVehicles ? api('/api/vehicles', {}, token) : Promise.resolve([]),
+      api('/api/reservations/summary', {}, token)
     ]);
 
     if (reservationsResult.status === 'fulfilled') {
@@ -268,6 +270,8 @@ function DashboardInner({ token, me, logout }) {
     } else {
       setOverview(null);
     }
+
+    if (summaryResult.status === 'fulfilled') setResSummary(summaryResult.value || null);
 
     if (reservationsResult.status === 'rejected' && overviewResult.status === 'rejected' && vehiclesResult.status === 'rejected') {
       setMsg(reservationsResult.reason?.message || overviewResult.reason?.message || vehiclesResult.reason?.message || 'Unable to load dashboard');
@@ -470,7 +474,7 @@ function DashboardInner({ token, me, logout }) {
             </div>
           </div>
           <p className="label" style={{ marginBottom: 8 }}>
-            {boardLabel} — Pickups: <strong>{pickups.length}</strong> · Returns: <strong>{returns.length}</strong>
+            {boardLabel} — Pickups: <strong>{isToday && resSummary ? resSummary.pickupsToday : pickups.length}</strong> · Returns: <strong>{isToday && resSummary ? resSummary.returnsToday : returns.length}</strong>
           </p>
 
           {pickups.length > 0 && (

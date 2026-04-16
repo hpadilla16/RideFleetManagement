@@ -800,11 +800,11 @@ export const reservationsService = {
   async summary(scope = {}) {
     const reservationOptions = await settingsService.getReservationOptions(scope);
     const tenantTimeZone = String(reservationOptions?.tenantTimeZone || 'America/Puerto_Rico');
-    const now = new Date();
-    const dayStart = new Date(now);
-    dayStart.setHours(0, 0, 0, 0);
-    const dayEnd = new Date(now);
-    dayEnd.setHours(23, 59, 59, 999);
+    // Use wall clock "today" in tenant timezone so counts match what staff see
+    const nowInTz = new Date(new Date().toLocaleString('en-US', { timeZone: tenantTimeZone }));
+    const todayStr = `${nowInTz.getFullYear()}-${String(nowInTz.getMonth() + 1).padStart(2, '0')}-${String(nowInTz.getDate()).padStart(2, '0')}`;
+    const dayStart = new Date(`${todayStr}T00:00:00`);
+    const dayEnd = new Date(`${todayStr}T23:59:59.999`);
     const where = scope?.tenantId ? { tenantId: scope.tenantId } : {};
 
     const [
