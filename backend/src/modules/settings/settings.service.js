@@ -74,7 +74,12 @@ const DEFAULT_TELEMATICS_CONFIG = {
   allowManualEventIngest: true,
   allowZubieConnector: true,
   webhookAuthMode: 'HEADER_SECRET',
-  zubieWebhookSecret: ''
+  zubieWebhookSecret: '',
+  // Voltswitch GPS pull-based integration
+  allowVoltswitchConnector: false,
+  voltswitchApiEmail: '',
+  voltswitchApiPassword: '',
+  voltswitchSyncIntervalMinutes: 5
 };
 
 const DEFAULT_REVENUE_PRICING_CONFIG = {
@@ -327,7 +332,8 @@ function normalizeTelematicsConfig(raw = {}, options = {}) {
   const tenantPlan = String(options.tenantPlan || 'BETA').trim().toUpperCase() || 'BETA';
   const planDefaults = buildPlannerCopilotPlanDefaults(options.planConfig || null);
   const enabled = raw?.enabled == null ? !!planDefaults.telematicsIncluded : !!raw?.enabled;
-  const provider = ['ZUBIE', 'GENERIC', 'SAMSARA', 'GEOTAB', 'AZUGA'].includes(String(raw?.provider || DEFAULT_TELEMATICS_CONFIG.provider).trim().toUpperCase())
+  const validProviders = ['ZUBIE', 'GENERIC', 'SAMSARA', 'GEOTAB', 'AZUGA', 'VOLTSWITCH'];
+  const provider = validProviders.includes(String(raw?.provider || DEFAULT_TELEMATICS_CONFIG.provider).trim().toUpperCase())
     ? String(raw?.provider || DEFAULT_TELEMATICS_CONFIG.provider).trim().toUpperCase()
     : DEFAULT_TELEMATICS_CONFIG.provider;
   const allowManualEventIngest = raw?.allowManualEventIngest == null ? !!DEFAULT_TELEMATICS_CONFIG.allowManualEventIngest : !!raw?.allowManualEventIngest;
@@ -335,6 +341,14 @@ function normalizeTelematicsConfig(raw = {}, options = {}) {
   const zubieWebhookSecret = String(raw?.zubieWebhookSecret || '').trim();
   const webhookAuthMode = normalizeWebhookAuthMode(raw?.webhookAuthMode);
   const connectorEnabled = provider === 'ZUBIE' && allowZubieConnector;
+
+  // Voltswitch GPS
+  const allowVoltswitchConnector = raw?.allowVoltswitchConnector == null ? !!DEFAULT_TELEMATICS_CONFIG.allowVoltswitchConnector : !!raw?.allowVoltswitchConnector;
+  const voltswitchApiEmail = String(raw?.voltswitchApiEmail || '').trim();
+  const voltswitchApiPassword = String(raw?.voltswitchApiPassword || '').trim();
+  const voltswitchSyncIntervalMinutes = Math.max(1, Math.min(60, Number(raw?.voltswitchSyncIntervalMinutes) || DEFAULT_TELEMATICS_CONFIG.voltswitchSyncIntervalMinutes));
+  const voltswitchConnectorReady = provider === 'VOLTSWITCH' && allowVoltswitchConnector && !!voltswitchApiEmail && !!voltswitchApiPassword;
+
   return {
     enabled,
     provider,
@@ -344,6 +358,14 @@ function normalizeTelematicsConfig(raw = {}, options = {}) {
     zubieWebhookSecret: includeSecret ? zubieWebhookSecret : '',
     zubieWebhookSecretMasked: zubieWebhookSecret ? maskSecret(zubieWebhookSecret) : '',
     hasZubieWebhookSecret: !!zubieWebhookSecret,
+    // Voltswitch
+    allowVoltswitchConnector,
+    voltswitchApiEmail,
+    voltswitchApiPassword: includeSecret ? voltswitchApiPassword : '',
+    voltswitchApiPasswordMasked: voltswitchApiPassword ? maskSecret(voltswitchApiPassword) : '',
+    hasVoltswitchCredentials: !!voltswitchApiEmail && !!voltswitchApiPassword,
+    voltswitchSyncIntervalMinutes,
+    voltswitchConnectorReady,
     tenantPlan,
     planDefaults: {
       telematicsIncluded: !!planDefaults.telematicsIncluded,

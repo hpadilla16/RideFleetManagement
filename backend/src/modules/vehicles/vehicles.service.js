@@ -4,6 +4,7 @@ import { assertTenantVehicleCapacity } from '../../lib/tenant-plan-limits.js';
 import { buildVehicleOperationalSignalsMap } from './vehicle-intelligence.service.js';
 import { settingsService } from '../settings/settings.service.js';
 import { normalizeZubieWebhookPayload } from './telematics-zubie.js';
+import { authenticate as voltswitchAuth, clearSession as voltswitchClearSession, getAllDevices as voltswitchGetAllDevices, getDeviceLocation as voltswitchGetLocation, normalizeDevice as voltswitchNormalizeDevice } from './telematics-voltswitch.js';
 
 const SUPPORTED_TELEMATICS_PROVIDERS = [
   {
@@ -40,6 +41,13 @@ const SUPPORTED_TELEMATICS_PROVIDERS = [
     recommended: false,
     integrationStatus: 'PLANNED',
     notes: 'Webhook-friendly placeholder reserved for a future connector.'
+  },
+  {
+    code: 'VOLTSWITCH',
+    label: 'Voltswitch GPS',
+    recommended: true,
+    integrationStatus: 'ACTIVE',
+    notes: 'Pull-based GPS telematics. Periodic sync fetches device positions, speed, odometer, and engine status from Voltswitch API.'
   }
 ];
 
@@ -841,5 +849,100 @@ export const vehiclesService = {
       skipped: validation.found - validRows.length,
       validation
     };
+  },
+
+  /**
+   * Sync all Voltswitch devices and their current locations into the telematics pipeline.
+   * Registers new devices, updates existing ones, and ingests location events.
+   */
+  async syncVoltswitchDevices(scope = {}) {
+    const config = await settingsService.getTelematicsConfig(scope, { includeSecret: true });
+    if (!config.voltswitchConnectorReady) throw new Error('Voltswitch connector is not configured. Set provider to VOLTSWITCH, enable the connector, and enter API credentials in Settings > Telematics.');
+
+    const session = await voltswitchAuth({
+      email: config.voltswitchApiEmail,
+      password: config.voltswitchApiPassword,
+      tenantId: scope.tenantId
+    });
+
+    const rawDevices = await voltswitchGetAllDevices(session);
+    const results = { synced: 0, skipped: 0, errors: [], devices: [] };
+
+    for (const raw of rawDevices) {
+      const normalized = voltswitchNormalizeDevice(raw);
+      if (!normalized.externalDeviceId) { results.skipped++; continue; }
+
+      try {
+        // Find matching fleet vehicle by VIN or plate
+        let vehicle = null;
+        if (normalized.vin) {
+          vehicle = await prisma.vehicle.findFirst({ where: { vin: normalized.vin, ...(byTenantWhere(scope) || {}) } });
+        }
+        if (!vehicle && normalized.licensePlate) {
+          vehicle = await prisma.vehicle.findFirst({ where: { plate: normalized.licensePlate, ...(byTenantWhere(scope) || {}) } });
+        }
+
+        // Register/update device
+        const device = await prisma.vehicleTelematicsDevice.upsert({
+          where: { provider_externalDeviceId: { provider: 'VOLTSWITCH', externalDeviceId: normalized.externalDeviceId } },
+          create: {
+            tenantId: scope.tenantId || null,
+            vehicleId: vehicle?.id || null,
+            provider: 'VOLTSWITCH',
+            externalDeviceId: normalized.externalDeviceId,
+            label: normalized.label,
+            serialNumber: normalized.serialNumber,
+            isActive: normalized.isActive,
+            installedAt: new Date(),
+            metadataJson: JSON.stringify({ vin: normalized.vin, plate: normalized.licensePlate, ownerName: normalized.ownerName })
+          },
+          update: {
+            label: normalized.label,
+            serialNumber: normalized.serialNumber,
+            isActive: normalized.isActive,
+            vehicleId: vehicle?.id || undefined,
+            metadataJson: JSON.stringify({ vin: normalized.vin, plate: normalized.licensePlate, ownerName: normalized.ownerName })
+          }
+        });
+
+        // Fetch and ingest current location if device is linked to a vehicle
+        if (device.vehicleId) {
+          try {
+            const location = await voltswitchGetLocation(session, { deviceId: normalized.externalDeviceId });
+            if (location && (location.latitude || location.longitude)) {
+              await this.ingestTelematicsEvent(device.vehicleId, {
+                deviceId: device.id,
+                eventType: 'PING',
+                eventAt: location.eventAt,
+                latitude: location.latitude,
+                longitude: location.longitude,
+                speedMph: location.speedMph,
+                heading: location.heading,
+                odometer: location.odometer,
+                fuelPct: location.fuelPct,
+                batteryPct: location.batteryPct,
+                engineOn: location.engineOn,
+                payload: location.raw
+              }, scope);
+            }
+          } catch (locErr) {
+            results.errors.push({ deviceId: normalized.externalDeviceId, error: locErr.message });
+          }
+        }
+
+        results.synced++;
+        results.devices.push({
+          externalDeviceId: normalized.externalDeviceId,
+          label: normalized.label,
+          vehicleId: device.vehicleId,
+          matched: !!vehicle
+        });
+      } catch (err) {
+        results.errors.push({ deviceId: normalized.externalDeviceId, error: err.message });
+        results.skipped++;
+      }
+    }
+
+    return results;
   }
 };

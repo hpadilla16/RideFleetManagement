@@ -161,6 +161,21 @@ vehiclesRouter.post('/telematics/zubie/webhook', enforceTelematicsFeature, async
   }
 });
 
+vehiclesRouter.post('/telematics/voltswitch/sync', enforceTelematicsFeature, async (req, res, next) => {
+  try {
+    if (String(req.telematicsConfig?.provider || '').toUpperCase() !== 'VOLTSWITCH' || !req.telematicsConfig?.allowVoltswitchConnector) {
+      return res.status(403).json({ error: 'Voltswitch connector is not enabled for this tenant' });
+    }
+    const results = await vehiclesService.syncVoltswitchDevices(scopeFor(req));
+    res.json(results);
+  } catch (e) {
+    if (/not configured/i.test(String(e?.message || ''))) {
+      return res.status(400).json({ error: String(e.message) });
+    }
+    next(e);
+  }
+});
+
 vehiclesRouter.get('/:id', async (req, res) => {
   const row = await vehiclesService.getById(req.params.id, scopeFor(req));
   if (!row) return res.status(404).json({ error: 'Vehicle not found' });
