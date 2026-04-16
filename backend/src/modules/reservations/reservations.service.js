@@ -1177,35 +1177,37 @@ export const reservationsService = {
     const nextReturnAt = patch.returnAt ? new Date(patch.returnAt) : current.returnAt;
 
     const nextCustomerId = patch.customerId !== undefined ? patch.customerId : current.customerId;
-    if (nextCustomerId) {
-      const customer = await prisma.customer.findFirst({
-        where: { id: nextCustomerId, ...(scope?.tenantId ? { tenantId: scope.tenantId } : {}) },
-        select: { doNotRent: true, doNotRentReason: true }
-      });
-      if (customer?.doNotRent) {
-        throw new Error(`Customer is marked DO NOT RENT${customer.doNotRentReason ? `: ${customer.doNotRentReason}` : ''}`);
-      }
-    }
-
     const nextPickupLocationId = patch.pickupLocationId !== undefined ? patch.pickupLocationId : current.pickupLocationId;
     const nextReturnLocationId = patch.returnLocationId !== undefined ? patch.returnLocationId : current.returnLocationId;
 
-    await validateLocationWindow({ locationId: nextPickupLocationId, at: nextPickupAt, label: 'Pickup' }, scope);
-    await validateLocationWindow({ locationId: nextReturnLocationId, at: nextReturnAt, label: 'Return' }, scope);
+    // Run all validations in parallel
+    const [customerCheck, , , , underageAlert] = await Promise.all([
+      nextCustomerId
+        ? prisma.customer.findFirst({
+            where: { id: nextCustomerId, ...(scope?.tenantId ? { tenantId: scope.tenantId } : {}) },
+            select: { doNotRent: true, doNotRentReason: true }
+          })
+        : null,
+      validateLocationWindow({ locationId: nextPickupLocationId, at: nextPickupAt, label: 'Pickup' }, scope),
+      validateLocationWindow({ locationId: nextReturnLocationId, at: nextReturnAt, label: 'Return' }, scope),
+      ensureNoVehicleConflict({
+        vehicleId: nextVehicleId,
+        pickupAt: nextPickupAt,
+        returnAt: nextReturnAt,
+        ignoreReservationId: id
+      }, scope),
+      buildUnderageAlertNote({
+        customerId: nextCustomerId,
+        pickupLocationId: nextPickupLocationId,
+        pickupAt: nextPickupAt
+      }, scope)
+    ]);
 
-    await ensureNoVehicleConflict({
-      vehicleId: nextVehicleId,
-      pickupAt: nextPickupAt,
-      returnAt: nextReturnAt,
-      ignoreReservationId: id
-    }, scope);
+    if (customerCheck?.doNotRent) {
+      throw new Error(`Customer is marked DO NOT RENT${customerCheck.doNotRentReason ? `: ${customerCheck.doNotRentReason}` : ''}`);
+    }
 
     const nextNotesInput = patch.notes !== undefined ? patch.notes : current.notes;
-    const underageAlert = await buildUnderageAlertNote({
-      customerId: nextCustomerId,
-      pickupLocationId: nextPickupLocationId,
-      pickupAt: nextPickupAt
-    }, scope);
 
     const data = {
       ...patch,

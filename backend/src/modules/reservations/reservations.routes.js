@@ -713,6 +713,7 @@ reservationsRouter.get('/:id/audit-logs', async (req, res, next) => {
         ...(scopeFor(req).tenantId ? { tenantId: scopeFor(req).tenantId } : {})
       },
       orderBy: { createdAt: 'desc' },
+      take: 100,
       include: { actorUser: { select: { id: true, email: true, fullName: true, role: true } } }
     });
     res.json(logs);

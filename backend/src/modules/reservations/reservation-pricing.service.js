@@ -297,9 +297,11 @@ async function syncMandatoryLocationFees(reservationId, scope = {}) {
 
 export const reservationPricingService = {
   async getPricing(reservationId, scope = {}) {
-    await syncMandatoryLocationFees(reservationId, scope);
-    await tollsService.syncReservationCharges(reservationId, scope);
-    await syncAgreementCharges(reservationId, scope);
+    await Promise.all([
+      syncMandatoryLocationFees(reservationId, scope),
+      tollsService.syncReservationCharges(reservationId, scope),
+      syncAgreementCharges(reservationId, scope)
+    ]);
     const row = await getReservationOrThrow(reservationId, scope);
     const charges = Array.isArray(row.charges) ? row.charges : [];
     const snapshot = row.pricingSnapshot || null;

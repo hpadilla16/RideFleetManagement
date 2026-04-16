@@ -732,6 +732,10 @@ model Reservation {
   @@index([tenantId, createdAt])
   @@index([tenantId, status, pickupAt])
   @@index([repairOrderNumber])
+  @@index([customerId])
+  @@index([returnAt])
+  @@index([tenantId, status, returnAt])
+  @@index([vehicleId])
 }
 
 model Invoice {
