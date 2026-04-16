@@ -273,17 +273,32 @@ function ReservationDetailInner({ token, me, logout }) {
     if (!s) return '';
     try { return decodeURIComponent(escape(s)); } catch { return s; }
   };
+  // Light refresh: only reservation + pricing + payments (fast, called after every action)
+  const refresh = async () => {
+    try {
+      const [resResult, pricingResult, paymentsResult] = await Promise.allSettled([
+        api(`/api/reservations/${id}`, { bypassCache: true }, token),
+        api(`/api/reservations/${id}/pricing`, { bypassCache: true }, token).catch(() => null),
+        api(`/api/reservations/${id}/payments`, { bypassCache: true }, token).catch(() => [])
+      ]);
+      if (resResult.status === 'fulfilled') setRow(resResult.value);
+      if (pricingResult.status === 'fulfilled') setPricing(pricingResult.value);
+      if (paymentsResult.status === 'fulfilled') setPaymentRows(Array.isArray(paymentsResult.value) ? paymentsResult.value : []);
+    } catch {}
+  };
+
+  // Full load: reservation + all catalogs + logs (heavy, called once on mount)
   const load = async () => {
     setLoading(true);
     try {
-      const reservationResult = await api(`/api/reservations/${id}`, {}, token);
+      const reservationResult = await api(`/api/reservations/${id}`, { bypassCache: true }, token);
       setRow(reservationResult);
 
       const optionalCalls = await Promise.allSettled([
         Promise.resolve([]),
         canManagePricingOverrides ? api(`/api/reservations/${id}/pricing-options`, {}, token) : Promise.resolve(null),
-        api(`/api/reservations/${id}/pricing`, {}, token).catch(() => null),
-        api(`/api/reservations/${id}/payments`, {}, token).catch(() => []),
+        api(`/api/reservations/${id}/pricing`, { bypassCache: true }, token).catch(() => null),
+        api(`/api/reservations/${id}/payments`, { bypassCache: true }, token).catch(() => []),
         api(`/api/reservations/${id}/audit-logs`, {}, token).catch(() => []),
         canLoadSupportingCatalogs ? api(`/api/tolls/reservations/${id}`, {}, token).catch(() => null) : Promise.resolve(null)
       ]);
@@ -400,7 +415,7 @@ function ReservationDetailInner({ token, me, logout }) {
           notes: form.notes
         })
       }, token);
-      await load();
+      await refresh();
       setMsg('Reservation updated');
     } catch (e) { setMsg(e.message); }
   };
@@ -414,7 +429,7 @@ function ReservationDetailInner({ token, me, logout }) {
         body.cancellationReason = reason.trim();
       }
       await api(`/api/reservations/${id}`, { method: 'PATCH', body: JSON.stringify(body) }, token);
-      await load();
+      await refresh();
       setMsg(`Reservation set to ${status}`);
     } catch (e) { setMsg(e.message); }
   };
@@ -426,7 +441,7 @@ function ReservationDetailInner({ token, me, logout }) {
         body: JSON.stringify({})
       }, token);
       setMsg('Toll posted to reservation charges');
-      await load();
+      await refresh();
     } catch (e) {
       setMsg(e.message);
     }
@@ -445,7 +460,7 @@ function ReservationDetailInner({ token, me, logout }) {
         body: JSON.stringify({ action, note })
       }, token);
       setMsg(action === 'CONFIRM_DISPATCHED' ? 'Dispatch confirmed and toll kept on reservation' : 'Toll removed from reservation review');
-      await load();
+      await refresh();
     } catch (e) {
       setMsg(e.message);
     }
@@ -524,7 +539,7 @@ function ReservationDetailInner({ token, me, logout }) {
       } else {
         setMsg(`${actionLabel} email sent to ${out?.sentTo?.join(', ') || recipients.join(', ')}`);
       }
-      await load();
+      await refresh();
     } catch (e) {
       setMsg(e.message);
     }
@@ -547,7 +562,7 @@ function ReservationDetailInner({ token, me, logout }) {
       }, token);
 
       setMsg(`Reservation Detail email sent to ${out?.sentTo?.join(', ') || recipients.join(', ')}`);
-      await load();
+      await refresh();
     } catch (e) { setMsg(e.message); }
   };
   const emailAgreementToCustomer = async () => {
@@ -569,7 +584,7 @@ function ReservationDetailInner({ token, me, logout }) {
         body: JSON.stringify({ to, cc: extraEmails.filter((x) => x !== to).join(',') || undefined })
       }, token);
       setMsg('Agreement emailed successfully');
-      await load();
+      await refresh();
     } catch (e) { setMsg(e.message); }
   };
 
@@ -725,7 +740,7 @@ function ReservationDetailInner({ token, me, logout }) {
         method: 'POST',
         body: JSON.stringify({ note })
       }, token);
-      await load();
+      await refresh();
       setMsg('Pre-check-in reviewed');
     } catch (e) {
       setMsg(e.message);
@@ -747,7 +762,7 @@ function ReservationDetailInner({ token, me, logout }) {
         method: 'POST',
         body: JSON.stringify({ ready, note })
       }, token);
-      await load();
+      await refresh();
       setMsg(ready ? 'Reservation marked ready for pickup' : 'Ready-for-pickup cleared');
     } catch (e) {
       setMsg(e.message);
@@ -781,7 +796,7 @@ function ReservationDetailInner({ token, me, logout }) {
       }, token);
       setStaffCheckinOpen(false);
       setMsg('Customer info saved and pre-check-in completed by staff');
-      await load();
+      await refresh();
     } catch (e) {
       setMsg(e.message);
     } finally {
@@ -1000,7 +1015,7 @@ function ReservationDetailInner({ token, me, logout }) {
         method: 'POST',
         body: JSON.stringify(loanerPacketForm)
       }, token);
-      await load();
+      await refresh();
       setMsg('Loaner borrower packet saved');
     } catch (e) {
       setMsg(e.message);
@@ -1013,7 +1028,7 @@ function ReservationDetailInner({ token, me, logout }) {
         method: 'POST',
         body: JSON.stringify(loanerBillingForm)
       }, token);
-      await load();
+      await refresh();
       setMsg('Loaner billing details saved');
     } catch (e) {
       setMsg(e.message);
@@ -1026,7 +1041,7 @@ function ReservationDetailInner({ token, me, logout }) {
         method: 'POST',
         body: JSON.stringify(loanerAccountingForm)
       }, token);
-      await load();
+      await refresh();
       setMsg('Loaner accounting closeout saved');
     } catch (e) {
       setMsg(e.message);
@@ -1039,7 +1054,7 @@ function ReservationDetailInner({ token, me, logout }) {
         method: 'POST',
         body: JSON.stringify(loanerAdvisorForm)
       }, token);
-      await load();
+      await refresh();
       setMsg('Loaner advisor operations saved');
     } catch (e) {
       setMsg(e.message);
@@ -1052,7 +1067,7 @@ function ReservationDetailInner({ token, me, logout }) {
         method: 'POST',
         body: JSON.stringify(loanerReturnForm)
       }, token);
-      await load();
+      await refresh();
       setMsg(loanerReturnForm.flagged ? 'Loaner return exception saved' : 'Loaner return exception cleared');
     } catch (e) {
       setMsg(e.message);
@@ -1069,7 +1084,7 @@ function ReservationDetailInner({ token, me, logout }) {
           note: loanerOpsForm.note
         })
       }, token);
-      await load();
+      await refresh();
       setMsg('Loaner return window updated');
     } catch (e) {
       setMsg(e.message);
@@ -1085,7 +1100,7 @@ function ReservationDetailInner({ token, me, logout }) {
           note: loanerOpsForm.note
         })
       }, token);
-      await load();
+      await refresh();
       setMsg('Loaner vehicle swapped');
     } catch (e) {
       setMsg(e.message);
@@ -1101,7 +1116,7 @@ function ReservationDetailInner({ token, me, logout }) {
           loanerCloseoutNotes: loanerOpsForm.loanerCloseoutNotes
         })
       }, token);
-      await load();
+      await refresh();
       setMsg('Loaner service marked complete');
     } catch (e) {
       setMsg(e.message);
@@ -1421,7 +1436,7 @@ charges: [...normalizedRows, ...depositRows]
 token
 );
 
-  await load();
+  await refresh();
   setChargeEdit(false);
   setMsg('Charges updated');
     } catch (e) {
@@ -1442,7 +1457,7 @@ token
       setCommissionOwnerContext(refreshed || null);
       setCommissionOwnerPick(String(refreshed?.currentOwnerUserId || refreshed?.checkoutActorUserId || employeeUserId));
       setMsg('Commission owner updated');
-      await load();
+      await refresh();
     } catch (e) {
       setMsg(e.message);
     }
