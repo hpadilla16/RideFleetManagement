@@ -563,6 +563,14 @@ function ReservationDetailInner({ token, me, logout }) {
     } catch (e) { setMsg(e.message); }
   };
 
+  const waitForImages = (win) => {
+    const images = win.document.querySelectorAll('img');
+    if (!images.length) return Promise.resolve();
+    return Promise.all(Array.from(images).map(img =>
+      img.complete ? Promise.resolve() : new Promise(r => { img.onload = r; img.onerror = r; })
+    ));
+  };
+
   const handlePrintAgreement = async () => {
     const status = String(row?.status || '').toUpperCase();
     if (!(status === 'CHECKED_OUT' || status === 'CHECKED_IN')) {
@@ -592,6 +600,7 @@ function ReservationDetailInner({ token, me, logout }) {
       printWindow.document.write(html);
       printWindow.document.close();
       printWindow.focus();
+      await waitForImages(printWindow);
       printWindow.print();
     } catch (e) {
       printWindow.document.open();
@@ -621,6 +630,7 @@ function ReservationDetailInner({ token, me, logout }) {
       printWindow.document.write(html);
       printWindow.document.close();
       printWindow.focus();
+      await waitForImages(printWindow);
       printWindow.print();
     } catch (e) {
       printWindow.document.open();
@@ -650,6 +660,7 @@ function ReservationDetailInner({ token, me, logout }) {
       printWindow.document.write(html);
       printWindow.document.close();
       printWindow.focus();
+      await waitForImages(printWindow);
       printWindow.print();
     } catch (e) {
       printWindow.document.open();
@@ -679,6 +690,7 @@ function ReservationDetailInner({ token, me, logout }) {
       printWindow.document.write(html);
       printWindow.document.close();
       printWindow.focus();
+      await waitForImages(printWindow);
       printWindow.print();
     } catch (e) {
       printWindow.document.open();
