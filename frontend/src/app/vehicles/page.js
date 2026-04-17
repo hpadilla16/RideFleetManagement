@@ -229,24 +229,40 @@ function VehiclesInner({ token, me, logout }) {
       setVehicleTypes([]);
       return;
     }
-    const [v, c, l, vt] = await Promise.allSettled([
+    // Customers are intentionally NOT loaded here. With ~300+ customers per tenant
+    // the response was ~48MB and added 10s to every vehicles-page load. They are now
+    // loaded lazily by ensureCustomersLoaded() the first time the rental modal opens.
+    const [v, l, vt] = await Promise.allSettled([
       api(scopedPath('/api/vehicles'), {}, token),
-      canManageVehicleSetup ? api(scopedPath('/api/customers'), {}, token) : Promise.resolve([]),
       canManageVehicleSetup ? api(scopedPath('/api/locations'), {}, token) : Promise.resolve([]),
       canManageVehicleSetup ? api(scopedPath('/api/vehicle-types'), {}, token) : Promise.resolve([])
     ]);
+    setCustomers([]);
     if (v.status === 'fulfilled') setVehicles(v.value || []);
     else setVehicles([]);
-    if (c.status === 'fulfilled') setCustomers(c.value || []);
-    else setCustomers([]);
     if (l.status === 'fulfilled') setLocations(l.value || []);
     else setLocations([]);
     if (vt.status === 'fulfilled') setVehicleTypes(vt.value || []);
     else setVehicleTypes([]);
 
     if (v.status === 'rejected') setMsg(v.reason?.message || 'Unable to load vehicles');
-    else if (canManageVehicleSetup && [c, l, vt].some((row) => row.status === 'rejected')) setMsg('Vehicles loaded with limited supporting data');
+    else if (canManageVehicleSetup && [l, vt].some((row) => row.status === 'rejected')) setMsg('Vehicles loaded with limited supporting data');
     else setMsg('');
+  };
+
+  const [customersLoading, setCustomersLoading] = useState(false);
+  const ensureCustomersLoaded = async () => {
+    if (!canManageVehicleSetup) return;
+    if (customers.length > 0 || customersLoading) return;
+    setCustomersLoading(true);
+    try {
+      const out = await api(scopedPath('/api/customers'), {}, token);
+      setCustomers(Array.isArray(out) ? out : []);
+    } catch (error) {
+      setMsg(error?.message || 'Unable to load customers');
+    } finally {
+      setCustomersLoading(false);
+    }
   };
 
   useEffect(() => {
@@ -349,6 +365,8 @@ function VehiclesInner({ token, me, logout }) {
       dailyRate: ''
     });
     setShowRent(true);
+    // Load customers on demand (was previously eager-loaded on every page mount — 48MB / 10s).
+    ensureCustomersLoaded();
   };
 
   const createReservation = async (e) => {
@@ -1131,8 +1149,8 @@ function VehiclesInner({ token, me, logout }) {
           <div className="rent-modal glass" onClick={(e) => e.stopPropagation()}>
             <h3>Start Reservation · {selected.internalNumber}</h3>
             <form className="stack" onSubmit={createReservation}>
-              <select required value={rentForm.customerId} onChange={(e) => setRentForm({ ...rentForm, customerId: e.target.value })}>
-                <option value="">Select customer</option>
+              <select required value={rentForm.customerId} onChange={(e) => setRentForm({ ...rentForm, customerId: e.target.value })} disabled={customersLoading}>
+                <option value="">{customersLoading ? 'Loading customers...' : 'Select customer'}</option>
                 {customers.map((c) => <option key={c.id} value={c.id}>{c.firstName} {c.lastName}</option>)}
               </select>
               <div className="grid2">
