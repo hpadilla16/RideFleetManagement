@@ -44,3 +44,15 @@ reportsRouter.get('/services-sold', async (req, res, next) => {
     next(e);
   }
 });
+
+reportsRouter.get('/contracts.xlsx', async (req, res, next) => {
+  try {
+    const { buffer, filename } = await reportsService.contractsExcel(req.query || {}, scopeFor(req));
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    res.setHeader('Content-Length', buffer.byteLength);
+    res.end(Buffer.from(buffer));
+  } catch (e) {
+    next(e);
+  }
+});
