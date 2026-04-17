@@ -627,35 +627,6 @@ function applyTemplate(html, vars = {}) {
   return out;
 }
 
-function parseReservationPaymentsFromNotes(notes) {
-  const txt = String(notes || '');
-  const lines = txt.split(/\r?\n/).map((x) => x.trim()).filter(Boolean);
-  const out = [];
-  for (const line of lines) {
-    // format: [PAYMENT <ISO>] GATEWAY paid 123.45 ref=XYZ
-    const m = line.match(/^\[PAYMENT\s+([^\]]+)\]\s+([^\s]+)\s+paid\s+([0-9]+(?:\.[0-9]+)?)\s+ref=(.+)$/i);
-    if (!m) continue;
-    const paidAt = new Date(m[1]);
-    const gateway = String(m[2] || 'PORTAL').toUpperCase();
-    const amount = Number(m[3] || 0);
-    const reference = String(m[4] || '').trim();
-    if (!Number.isFinite(amount) || amount <= 0) continue;
-    out.push({
-      paidAt: Number.isFinite(paidAt.getTime()) ? paidAt : new Date(),
-      amount,
-      reference,
-      notes: `Imported from reservation payment (${gateway})`
-    });
-  }
-  return out;
-}
-
-function parseReservationChargesMeta(notes) {
-  const m = String(notes || '').match(/\[RES_CHARGES_META\](\{[^\n]*\})/);
-  if (!m) return null;
-  try { return JSON.parse(m[1]); } catch { return null; }
-}
-
 function rentalDays(pickupAt, returnAt) {
   const ms = Number(new Date(returnAt)) - Number(new Date(pickupAt));
   if (!Number.isFinite(ms) || ms <= 0) return 1;
@@ -705,13 +676,7 @@ function parseDepositMetaFromNotes(notes) {
       return { requireDeposit: !!j?.requireDeposit || amount > 0, depositAmountDue: Number.isFinite(amount) ? amount : 0 };
     } catch {}
   }
-
-  const chargesMeta = parseReservationChargesMeta(notes);
-  const amount = Number(chargesMeta?.depositMeta?.depositAmountDue || 0);
-  return {
-    requireDeposit: !!chargesMeta?.depositMeta?.requireDeposit || amount > 0,
-    depositAmountDue: Number.isFinite(amount) ? amount : 0
-  };
+  return { requireDeposit: false, depositAmountDue: 0 };
 }
 
 function parseSecurityDepositMetaFromNotes(notes) {
@@ -726,13 +691,7 @@ function parseSecurityDepositMetaFromNotes(notes) {
       };
     } catch {}
   }
-
-  const chargesMeta = parseReservationChargesMeta(notes);
-  const amount = Number(chargesMeta?.securityDepositMeta?.securityDepositAmount || 0);
-  return {
-    requireSecurityDeposit: !!chargesMeta?.securityDepositMeta?.requireSecurityDeposit || amount > 0,
-    securityDepositAmount: Number.isFinite(amount) ? amount : 0
-  };
+  return { requireSecurityDeposit: false, securityDepositAmount: 0 };
 }
 
 function resolveInsuranceSource(reservation) {
@@ -1396,11 +1355,10 @@ export const rentalAgreementsService = {
           return this.getById(existing.id);
         }
 
-        const meta = parseReservationChargesMeta(reservation.notes) || {};
         const tenantWhere = reservation.tenantId ? { tenantId: reservation.tenantId } : {};
-        const selectedServiceIds = Array.isArray(meta?.selectedServices) ? meta.selectedServices : [];
-        const selectedFeeIds = Array.isArray(meta?.selectedFees) ? meta.selectedFees : [];
-        const discounts = Array.isArray(meta?.discounts) ? meta.discounts : [];
+        const selectedServiceIds = [];
+        const selectedFeeIds = [];
+        const discounts = [];
 
         // Always include auto fees computed on reservation side (underage/additional-driver) even if not in meta.
         const underageFromNotes = /UNDERAGE ALERT/i.test(String(reservation.notes || ''));
@@ -1605,17 +1563,14 @@ export const rentalAgreementsService = {
     await syncAgreementAdditionalDrivers(agreement.id, reservation);
 
     // Import any customer payments made before agreement creation
-    const structuredPrePayments = structuredReservationPayments(reservation);
-    const prePayments = structuredPrePayments.length ? structuredPrePayments : parseReservationPaymentsFromNotes(reservation.notes);
+    const prePayments = structuredReservationPayments(reservation);
     const prePaidTotal = prePayments.reduce((sum, p) => sum + Number(p.amount || 0), 0);
 
     const days = rentalDays(reservation.pickupAt, reservation.returnAt);
     const dailyRate = Number(reservation?.pricingSnapshot?.dailyRate ?? reservation.dailyRate ?? 0);
     const tenantWhere = reservation.tenantId ? { tenantId: reservation.tenantId } : {};
 
-    const structuredRows = structuredReservationChargeRows(reservation);
-    const meta = structuredRows?.length ? null : (parseReservationChargesMeta(reservation.notes) || {});
-    const incomingRows = structuredRows?.length ? structuredRows : (Array.isArray(meta?.chargeRows) ? meta.chargeRows : null);
+    const incomingRows = structuredReservationChargeRows(reservation);
     if (incomingRows && incomingRows.length) {
       const normalizedRows = incomingRows.map((r) => ({
         name: String(r?.name || 'Line Item'),
@@ -1646,21 +1601,7 @@ export const rentalAgreementsService = {
       });
 
       if (prePayments.length) {
-        if (structuredPrePayments.length) {
-          await importStructuredReservationPaymentsToAgreement(agreement.id, structuredPrePayments);
-        } else {
-          await prisma.rentalAgreementPayment.createMany({
-            data: prePayments.map((p) => ({
-              rentalAgreementId: agreement.id,
-              method: 'CARD',
-              amount: Number(p.amount),
-              reference: p.reference || null,
-              status: 'PAID',
-              paidAt: p.paidAt,
-              notes: p.notes
-            }))
-          });
-        }
+        await importStructuredReservationPaymentsToAgreement(agreement.id, prePayments);
       }
 
       await prisma.rentalAgreement.update({
@@ -1857,21 +1798,7 @@ export const rentalAgreementsService = {
     await prisma.rentalAgreementCharge.createMany({ data: chargeRows });
 
     if (prePayments.length) {
-      if (structuredPrePayments.length) {
-        await importStructuredReservationPaymentsToAgreement(agreement.id, structuredPrePayments);
-      } else {
-        await prisma.rentalAgreementPayment.createMany({
-          data: prePayments.map((p) => ({
-            rentalAgreementId: agreement.id,
-            method: 'CARD',
-            amount: Number(p.amount),
-            reference: p.reference || null,
-            status: 'PAID',
-            paidAt: p.paidAt,
-            notes: p.notes
-          }))
-        });
-      }
+      await importStructuredReservationPaymentsToAgreement(agreement.id, prePayments);
     }
 
     await prisma.rentalAgreement.update({
@@ -2102,19 +2029,8 @@ export const rentalAgreementsService = {
       status: payment.status || 'PAID',
       amount: Number(payment.amount || 0)
     }));
-    const legacyReservationPrintPayments = structuredReservationPrintPayments.length
-      ? []
-      : parseReservationPaymentsFromNotes(agreement?.reservation?.notes).map((p, idx) => ({
-      id: `note-${idx}-${Number(p.amount || 0).toFixed(2)}-${String(p.reference || '')}`,
-      paidAt: p.paidAt,
-      method: 'OTC',
-      reference: p.reference,
-      status: 'SETTLED',
-      amount: Number(p.amount || 0)
-    }));
-
     const seen = new Set();
-    const paymentsForPrint = [...dbPayments, ...structuredReservationPrintPayments, ...legacyReservationPrintPayments].filter((p) => {
+    const paymentsForPrint = [...dbPayments, ...structuredReservationPrintPayments].filter((p) => {
       const k = `${new Date(p.paidAt || p.createdAt || Date.now()).toISOString().slice(0,19)}|${Number(p.amount || 0).toFixed(2)}|${String(p.reference || '').trim()}`;
       if (seen.has(k)) return false;
       seen.add(k);
