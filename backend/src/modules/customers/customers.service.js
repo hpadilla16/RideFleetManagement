@@ -219,30 +219,45 @@ async function buildCustomerImportRow(row, index, scope = {}, cache = {}) {
 }
 
 export const customersService = {
-  list(scope = {}, options = {}) {
+  // Returns a slim shape via raw SQL so the heavy idPhotoUrl/insuranceDocumentUrl fields
+  // (which can each hold ~1-3 MB of base64 image data) never leave Postgres. The list endpoint
+  // was previously returning the full payload (~48 MB for 300 customers, ~10s to transfer)
+  // just so the table could render "Yes/No" indicators. We expose hasIdPhoto /
+  // hasInsuranceDocument booleans computed in SQL instead. Full record still available via
+  // getById(:id) when the user opens a specific customer.
+  async list(scope = {}, options = {}) {
     const query = norm(options.query);
     const limitRaw = options.limit;
     const limit = limitRaw == null || limitRaw === ''
-      ? undefined
-      : Math.min(250, Math.max(1, Number.parseInt(String(limitRaw), 10) || 100));
+      ? 200
+      : Math.min(500, Math.max(1, Number.parseInt(String(limitRaw), 10) || 200));
 
-    return prisma.customer.findMany({
-      where: {
-        ...(scope?.tenantId ? { tenantId: scope.tenantId } : {}),
-        ...(query
-          ? {
-              OR: [
-                { firstName: { contains: query, mode: 'insensitive' } },
-                { lastName: { contains: query, mode: 'insensitive' } },
-                { email: { contains: query, mode: 'insensitive' } },
-                { phone: { contains: query, mode: 'insensitive' } }
-              ]
-            }
-          : {})
-      },
-      orderBy: { createdAt: 'desc' },
-      ...(limit ? { take: limit } : {})
-    });
+    const tenantId = scope?.tenantId || null;
+    const searchPattern = query ? `%${query.toLowerCase()}%` : null;
+
+    // Tagged-template parameterization keeps this safe from SQL injection.
+    return prisma.$queryRaw`
+      SELECT
+        id, "tenantId", "firstName", "lastName", email, phone,
+        "dateOfBirth", "licenseNumber", "licenseState",
+        city, state,
+        "creditBalance", "doNotRent", "doNotRentReason",
+        "createdAt", "updatedAt",
+        ("idPhotoUrl" IS NOT NULL AND "idPhotoUrl" <> '') AS "hasIdPhoto",
+        ("insuranceDocumentUrl" IS NOT NULL AND "insuranceDocumentUrl" <> '') AS "hasInsuranceDocument"
+      FROM "Customer"
+      WHERE
+        (${tenantId}::text IS NULL OR "tenantId" = ${tenantId})
+        AND (
+          ${searchPattern}::text IS NULL
+          OR LOWER("firstName") LIKE ${searchPattern}
+          OR LOWER("lastName") LIKE ${searchPattern}
+          OR LOWER(COALESCE(email, '')) LIKE ${searchPattern}
+          OR LOWER(phone) LIKE ${searchPattern}
+        )
+      ORDER BY "createdAt" DESC
+      LIMIT ${limit}
+    `;
   },
 
   async getById(id, scope = {}) {

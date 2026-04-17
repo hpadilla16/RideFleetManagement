@@ -78,7 +78,7 @@ function CustomersInner({ token, me, logout }) {
 
   const customerSupportHub = useMemo(() => {
     const holds = rows.filter((r) => r.doNotRent);
-    const docsMissing = rows.filter((r) => !r.idPhotoUrl || !r.insuranceDocumentUrl);
+    const docsMissing = rows.filter((r) => !(r.hasIdPhoto ?? !!r.idPhotoUrl) || !(r.hasInsuranceDocument ?? !!r.insuranceDocumentUrl));
     const withEmail = rows.filter((r) => !!r.email);
     const recentNeedAttention = [
       holds[0]
@@ -96,7 +96,7 @@ function CustomersInner({ token, me, logout }) {
             id: `docs-${docsMissing[0].id}`,
             title: 'Missing Documents',
             detail: `${docsMissing[0].firstName || ''} ${docsMissing[0].lastName || ''}`.trim(),
-            note: `${docsMissing[0].idPhotoUrl ? 'ID ready' : 'ID missing'} - ${docsMissing[0].insuranceDocumentUrl ? 'Insurance ready' : 'Insurance missing'}`,
+            note: `${(docsMissing[0].hasIdPhoto ?? !!docsMissing[0].idPhotoUrl) ? 'ID ready' : 'ID missing'} - ${(docsMissing[0].hasInsuranceDocument ?? !!docsMissing[0].insuranceDocumentUrl) ? 'Insurance ready' : 'Insurance missing'}`,
             href: `/customers/${docsMissing[0].id}`,
             actionLabel: 'Review Docs'
           }
@@ -156,14 +156,28 @@ function CustomersInner({ token, me, logout }) {
     setWizardOpen(true);
   };
 
-  const openEdit = (c) => {
+  const openEdit = async (c) => {
+    // The list endpoint returns a slim shape (no base64 photos, no notes, no full address).
+    // Fetch the full record so the wizard can pre-populate every field.
+    setStep(0);
+    setWizardOpen(true);
     setForm({
       ...EMPTY,
       ...c,
       dateOfBirth: c.dateOfBirth ? new Date(c.dateOfBirth).toISOString().slice(0, 10) : ''
     });
-    setStep(0);
-    setWizardOpen(true);
+    try {
+      const full = await api(`/api/customers/${c.id}`, {}, token);
+      if (full && full.id === c.id) {
+        setForm({
+          ...EMPTY,
+          ...full,
+          dateOfBirth: full.dateOfBirth ? new Date(full.dateOfBirth).toISOString().slice(0, 10) : ''
+        });
+      }
+    } catch (error) {
+      setMsg(error?.message || 'Loaded customer with limited data — re-open to edit photos/notes');
+    }
   };
 
   const onPickIdPhoto = (file) => {
@@ -415,7 +429,7 @@ function CustomersInner({ token, me, logout }) {
                 <td>{c.email || '-'}</td>
                 <td>{[c.city, c.state].filter(Boolean).join(', ') || '-'}</td>
                 <td>{c.licenseNumber || '-'}</td>
-                <td>{c.idPhotoUrl ? 'Yes' : 'No'}</td>
+                <td>{(c.hasIdPhoto ?? !!c.idPhotoUrl) ? 'Yes' : 'No'}</td>
                 <td style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
                   <button onClick={() => openEdit(c)}>Edit</button>
                   {me?.role === 'ADMIN' ? <button onClick={() => issuePasswordReset(c)}>Password Reset</button> : null}
