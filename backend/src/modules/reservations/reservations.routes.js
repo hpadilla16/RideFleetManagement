@@ -417,7 +417,6 @@ reservationsRouter.get('/:id/available-vehicles', async (req, res, next) => {
       prisma.vehicleAvailabilityBlock.findMany({
         where: {
           ...tenantWhere,
-          vehicleId: { not: null },
           ...activeVehicleBlockOverlapWhere({ start: pickupAt, end: returnAt })
         },
         select: { vehicleId: true }
