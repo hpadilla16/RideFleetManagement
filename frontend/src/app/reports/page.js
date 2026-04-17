@@ -244,6 +244,36 @@ function Inner({ token, me, logout }) {
     }
   };
 
+  const exportContractsXlsx = async () => {
+    try {
+      setMsg('');
+      const qs = new URLSearchParams({
+        start: filters.start,
+        end: filters.end,
+        ...(filters.tenantId ? { tenantId: filters.tenantId } : {})
+      });
+      const res = await fetch(`${API_BASE}/api/reports/contracts.xlsx?${qs.toString()}`, {
+        headers: { Authorization: `Bearer ${token}` },
+        cache: 'no-store'
+      });
+      if (!res.ok) {
+        const text = await res.text();
+        throw new Error(text || `Excel export failed (${res.status})`);
+      }
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `rental-contracts-${filters.start}-to-${filters.end}${filters.tenantId ? `-${filters.tenantId}` : ''}.xlsx`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    } catch (e) {
+      setMsg(e.message);
+    }
+  };
+
   const printReport = () => {
     if (typeof window === 'undefined') return;
     window.setTimeout(() => window.print(), 80);
@@ -300,7 +330,8 @@ function Inner({ token, me, logout }) {
                 <div className="ui-muted">Adjust the scope, export CSV, print/save PDF, and refresh the operational snapshot.</div>
               </div>
               <div className="inline-actions reports-screen-only">
-                <button onClick={exportCsv} disabled={loading}>Export CSV</button>
+                <button onClick={exportContractsXlsx} disabled={loading}>Export Contracts Excel</button>
+                <button className="button-subtle" onClick={exportCsv} disabled={loading}>Export CSV</button>
                 <button className="button-subtle" onClick={printReport} disabled={loading}>Print / Save PDF</button>
                 <button className="button-subtle" onClick={() => load(filters)} disabled={loading}>Refresh</button>
               </div>

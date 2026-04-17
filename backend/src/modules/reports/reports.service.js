@@ -1,3 +1,4 @@
+import ExcelJS from 'exceljs';
 import { prisma } from '../../lib/prisma.js';
 import { sendEmail } from '../../lib/mailer.js';
 import { settingsService } from '../settings/settings.service.js';
@@ -706,6 +707,247 @@ export const reportsService = {
       },
       byService,
       byEmployee
+    };
+  },
+
+  // Excel export — one row per reservation in the date range, with dynamic columns for each
+  // distinct service/fee/insurance name the tenant has actually used (names come from the
+  // reservation charges themselves, not from hardcoded labels — so "Full Super Collision"
+  // appears as its own column instead of being bucketed under a generic "Insurance" header).
+  // Mirrors the "Weekly Payouts and Comms" workbook the operator has been maintaining by hand.
+  async contractsExcel(query = {}, scope = {}) {
+    const start = query.start ? startOfDay(query.start) : startOfDay(new Date(Date.now() - 30 * 24 * 60 * 60 * 1000));
+    const end = query.end ? endOfDay(query.end) : endOfDay(new Date());
+    const whereScope = scopeWhere(scope);
+
+    const reservations = await prisma.reservation.findMany({
+      where: {
+        ...whereScope,
+        pickupAt: { gte: start, lte: end }
+      },
+      select: {
+        id: true,
+        reservationNumber: true,
+        pickupAt: true,
+        returnAt: true,
+        status: true,
+        tenantId: true,
+        pricingSnapshot: { select: { dailyRate: true, taxRate: true } },
+        franchise: { select: { id: true, name: true } },
+        rentalAgreement: {
+          select: {
+            id: true,
+            agreementNumber: true,
+            total: true,
+            subtotal: true,
+            taxes: true,
+            paidAmount: true,
+            balance: true
+          }
+        },
+        charges: {
+          where: { selected: true },
+          select: {
+            name: true,
+            source: true,
+            chargeType: true,
+            quantity: true,
+            rate: true,
+            total: true
+          }
+        }
+      },
+      orderBy: { pickupAt: 'asc' }
+    });
+
+    // Categories we already know how to map explicitly. Everything else falls into the
+    // dynamic "Service" / "Fee" / "Insurance" name columns based on charge.name.
+    const EXCLUDED_FROM_ADDON_COLUMNS = new Set(['DAILY', 'TAX', 'DEPOSIT', 'DEPOSIT_DUE', 'SECURITY_DEPOSIT']);
+
+    // First pass — discover every add-on column name actually used in this date range.
+    const addonColumnNames = new Set();
+    for (const reservation of reservations) {
+      for (const charge of (reservation.charges || [])) {
+        const source = String(charge.source || '').toUpperCase();
+        const chargeType = String(charge.chargeType || '').toUpperCase();
+        if (EXCLUDED_FROM_ADDON_COLUMNS.has(source)) continue;
+        if (EXCLUDED_FROM_ADDON_COLUMNS.has(chargeType)) continue;
+        const label = String(charge.name || '').replace(/^(Service|Fee|Insurance)\s*:\s*/i, '').trim();
+        if (label) addonColumnNames.add(label);
+      }
+    }
+    const addonColumns = Array.from(addonColumnNames).sort((a, b) => a.localeCompare(b));
+
+    // Build rows.
+    const rows = reservations.map((reservation) => {
+      const pickup = reservation.pickupAt ? new Date(reservation.pickupAt) : null;
+      const ret = reservation.returnAt ? new Date(reservation.returnAt) : null;
+      const days = pickup && ret ? Math.max(1, Math.ceil((ret.getTime() - pickup.getTime()) / (24 * 60 * 60 * 1000))) : 0;
+      const dailyRate = toNumber(reservation.pricingSnapshot?.dailyRate, 0);
+      const tmTotal = Number((dailyRate * days).toFixed(2));
+
+      const addonTotals = Object.fromEntries(addonColumns.map((name) => [name, 0]));
+      let taxTotal = 0;
+      let tollPackageSelected = false;
+      let tollChargeApplied = false;
+
+      for (const charge of (reservation.charges || [])) {
+        const source = String(charge.source || '').toUpperCase();
+        const chargeType = String(charge.chargeType || '').toUpperCase();
+        const label = String(charge.name || '').replace(/^(Service|Fee|Insurance)\s*:\s*/i, '').trim();
+        const total = toNumber(charge.total, 0);
+
+        if (source === 'TAX' || chargeType === 'TAX') {
+          taxTotal += total;
+          continue;
+        }
+        if (EXCLUDED_FROM_ADDON_COLUMNS.has(source) || EXCLUDED_FROM_ADDON_COLUMNS.has(chargeType)) {
+          continue;
+        }
+        if (label && Object.prototype.hasOwnProperty.call(addonTotals, label)) {
+          addonTotals[label] = Number((addonTotals[label] + total).toFixed(2));
+        }
+
+        const labelLower = label.toLowerCase();
+        if (labelLower.includes('toll')) {
+          if (labelLower.includes('package') || labelLower.includes('pre-paid') || labelLower.includes('prepaid')) {
+            tollPackageSelected = true;
+          } else {
+            tollChargeApplied = true;
+          }
+        }
+      }
+
+      const agreementTotal = toNumber(reservation.rentalAgreement?.total, 0);
+      const paidAmount = toNumber(reservation.rentalAgreement?.paidAmount, 0);
+      const balance = reservation.rentalAgreement?.balance != null
+        ? toNumber(reservation.rentalAgreement.balance, 0)
+        : Number((agreementTotal - paidAmount).toFixed(2));
+
+      return {
+        reservationNumber: reservation.reservationNumber || '',
+        agreementNumber: reservation.rentalAgreement?.agreementNumber || '',
+        dateOut: pickup,
+        dateIn: ret,
+        days,
+        tm: tmTotal,
+        addonTotals,
+        taxTotal: Number(taxTotal.toFixed(2)),
+        paid: paidAmount,
+        unpaidBalance: balance,
+        tollPackage: tollPackageSelected ? 'Y' : 'N',
+        tollCharge: tollChargeApplied ? 'Y' : 'N',
+        company: reservation.franchise?.name || ''
+      };
+    });
+
+    // Build the workbook.
+    const workbook = new ExcelJS.Workbook();
+    workbook.creator = 'Ride Fleet Management';
+    workbook.created = new Date();
+
+    const sheet = workbook.addWorksheet('Contracts', {
+      views: [{ state: 'frozen', ySplit: 2 }]
+    });
+
+    const staticBefore = [
+      { header: 'Reservation #', key: 'reservationNumber', width: 16 },
+      { header: 'Agreement #', key: 'agreementNumber', width: 16 },
+      { header: 'Date Out', key: 'dateOut', width: 12, style: { numFmt: 'yyyy-mm-dd' } },
+      { header: 'Date In', key: 'dateIn', width: 12, style: { numFmt: 'yyyy-mm-dd' } },
+      { header: 'Days', key: 'days', width: 6 },
+      { header: 'T&M', key: 'tm', width: 10, style: { numFmt: '"$"#,##0.00' } }
+    ];
+    const addonColumnDefs = addonColumns.map((name) => ({
+      header: name,
+      key: `addon_${name}`,
+      width: Math.max(10, Math.min(20, name.length + 2)),
+      style: { numFmt: '"$"#,##0.00' }
+    }));
+    const staticAfter = [
+      { header: 'Tax', key: 'taxTotal', width: 10, style: { numFmt: '"$"#,##0.00' } },
+      { header: 'Paid', key: 'paid', width: 12, style: { numFmt: '"$"#,##0.00' } },
+      { header: 'Unpaid Balance', key: 'unpaidBalance', width: 14, style: { numFmt: '"$"#,##0.00' } },
+      { header: 'Toll Package', key: 'tollPackage', width: 12 },
+      { header: 'Toll Charge', key: 'tollCharge', width: 12 },
+      { header: 'Company', key: 'company', width: 14 }
+    ];
+
+    sheet.columns = [...staticBefore, ...addonColumnDefs, ...staticAfter];
+
+    // Row 1: title (merged banner). Row 2: headers (already in sheet.columns, written at row 1 actually).
+    // Actually exceljs writes the header row at row 1. Let's shift by inserting a banner above.
+    sheet.spliceRows(1, 0, []);
+    const headerTitle = `Rental Contracts — ${isoDay(start)} to ${isoDay(end)}`;
+    sheet.getCell('A1').value = headerTitle;
+    sheet.getCell('A1').font = { bold: true, size: 13 };
+    const lastColLetter = sheet.getColumn(sheet.columns.length).letter;
+    sheet.mergeCells(`A1:${lastColLetter}1`);
+    sheet.getCell('A1').alignment = { horizontal: 'left', vertical: 'middle' };
+    sheet.getRow(1).height = 22;
+
+    // Style the header row (row 2).
+    const headerRow = sheet.getRow(2);
+    headerRow.font = { bold: true };
+    headerRow.alignment = { vertical: 'middle', wrapText: true };
+    headerRow.height = 28;
+    headerRow.eachCell((cell) => {
+      cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF6E49FF' } };
+      cell.font = { bold: true, color: { argb: 'FFFFFFFF' } };
+      cell.border = { bottom: { style: 'thin', color: { argb: 'FF3E29A0' } } };
+    });
+
+    // Data rows.
+    for (const row of rows) {
+      const flat = {
+        reservationNumber: row.reservationNumber,
+        agreementNumber: row.agreementNumber,
+        dateOut: row.dateOut,
+        dateIn: row.dateIn,
+        days: row.days,
+        tm: row.tm,
+        ...Object.fromEntries(addonColumns.map((name) => [`addon_${name}`, row.addonTotals[name] || 0])),
+        taxTotal: row.taxTotal,
+        paid: row.paid,
+        unpaidBalance: row.unpaidBalance,
+        tollPackage: row.tollPackage,
+        tollCharge: row.tollCharge,
+        company: row.company
+      };
+      const added = sheet.addRow(flat);
+      // Flag unpaid balances with a red font so the operator can scan quickly.
+      if (row.unpaidBalance > 0.009) {
+        const unpaidCell = added.getCell('unpaidBalance');
+        unpaidCell.font = { color: { argb: 'FFC00000' }, bold: true };
+      }
+    }
+
+    // Totals row at the bottom.
+    if (rows.length) {
+      const totalsRow = sheet.addRow({
+        reservationNumber: 'TOTALS',
+        days: rows.reduce((sum, r) => sum + (r.days || 0), 0),
+        tm: Number(rows.reduce((sum, r) => sum + (r.tm || 0), 0).toFixed(2)),
+        ...Object.fromEntries(addonColumns.map((name) => [
+          `addon_${name}`,
+          Number(rows.reduce((sum, r) => sum + (r.addonTotals[name] || 0), 0).toFixed(2))
+        ])),
+        taxTotal: Number(rows.reduce((sum, r) => sum + (r.taxTotal || 0), 0).toFixed(2)),
+        paid: Number(rows.reduce((sum, r) => sum + (r.paid || 0), 0).toFixed(2)),
+        unpaidBalance: Number(rows.reduce((sum, r) => sum + (r.unpaidBalance || 0), 0).toFixed(2))
+      });
+      totalsRow.font = { bold: true };
+      totalsRow.eachCell((cell) => {
+        cell.border = { top: { style: 'thin' } };
+        cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF0EEFF' } };
+      });
+    }
+
+    // Stream as buffer.
+    return {
+      buffer: await workbook.xlsx.writeBuffer(),
+      filename: `rental-contracts-${isoDay(start)}-to-${isoDay(end)}.xlsx`,
+      rowCount: rows.length
     };
   }
 };
