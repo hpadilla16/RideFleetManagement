@@ -1,5 +1,6 @@
 import { prisma } from '../../lib/prisma.js';
 import { tollsService } from '../tolls/tolls.service.js';
+import logger from '../../lib/logger.js';
 
 function toNumber(value, fallback = 0) {
   const n = Number(value);
@@ -407,7 +408,13 @@ export const reservationPricingService = {
             where: { id: reservation.rentalAgreement.id },
             data: { paidAmount, balance }
           });
-        } catch {}
+        } catch (agreementErr) {
+          logger.warn('reservation-pricing: rentalAgreement balance fallback update failed', {
+            reservationId,
+            rentalAgreementId: reservation.rentalAgreement.id,
+            error: String(agreementErr?.message || agreementErr)
+          });
+        }
       }
     }
 
@@ -427,7 +434,12 @@ export const reservationPricingService = {
           })
         }
       });
-    } catch {}
+    } catch (auditErr) {
+      logger.warn('reservation-pricing: auditLog write failed for payment post', {
+        reservationId,
+        error: String(auditErr?.message || auditErr)
+      });
+    }
 
     return prisma.reservationPayment.findUnique({ where: { id: created.id } });
   }

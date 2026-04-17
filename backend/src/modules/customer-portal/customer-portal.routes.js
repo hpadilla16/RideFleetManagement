@@ -7,6 +7,7 @@ import { rentalAgreementsService } from '../rental-agreements/rental-agreements.
 import { reservationPricingService } from '../reservations/reservation-pricing.service.js';
 import { settingsService } from '../settings/settings.service.js';
 import { buildSelfServiceSnapshot } from './customer-portal-self-service.js';
+import { parseLocationConfig } from '../../lib/location-config.js';
 
 export const customerPortalRouter = Router();
 
@@ -930,15 +931,6 @@ function paidFromStructuredPayments(payments) {
     .filter((p) => String(p?.status || '').toUpperCase() !== 'VOID')
     .reduce((sum, p) => sum + Number(p?.amount || 0), 0)
     .toFixed(2));
-}
-
-function parseLocationConfig(raw) {
-  try {
-    if (!raw) return {};
-    if (typeof raw === 'string') return JSON.parse(raw);
-    if (typeof raw === 'object') return raw;
-  } catch {}
-  return {};
 }
 
 function ageOnDate(dob, onDate) {

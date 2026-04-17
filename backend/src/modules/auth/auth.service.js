@@ -5,7 +5,12 @@ import { getJwtExpiresIn, getJwtSecret } from './auth.config.js';
 import { getEffectiveModuleAccessForUser } from '../../lib/module-access.js';
 import { cache } from '../../lib/cache.js';
 
-const SESSION_CACHE_TTL_MS = 2 * 60 * 1000; // 2 minutes
+// 30s TTL bounds cross-worker staleness: role/module-access invalidations only
+// clear the current worker's cache, so siblings keep stale permissions until TTL expires.
+// 30s is short enough that a demoted user can't retain admin rights for long, and the
+// extra user-table lookups are negligible (primary-key reads on an indexed column).
+// Revisit when Redis is added — see docs/SCALING_ROADMAP.md.
+const SESSION_CACHE_TTL_MS = 30 * 1000;
 
 const LOCK_PIN_SALT_ROUNDS = 10;
 

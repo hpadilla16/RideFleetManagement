@@ -1,11 +1,4 @@
-function parseLocationConfig(raw) {
-  try {
-    if (!raw) return {};
-    if (typeof raw === 'string') return JSON.parse(raw);
-    if (typeof raw === 'object') return raw;
-  } catch {}
-  return {};
-}
+import { parseLocationConfig } from '../../lib/location-config.js';
 
 function normalizeTimeValue(value = '') {
   const match = String(value || '').trim().match(/^(\d{1,2}):(\d{2})$/);

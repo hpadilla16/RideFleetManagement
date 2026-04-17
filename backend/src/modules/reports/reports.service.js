@@ -2,6 +2,7 @@ import { prisma } from '../../lib/prisma.js';
 import { sendEmail } from '../../lib/mailer.js';
 import { settingsService } from '../settings/settings.service.js';
 import { isMigrationHoldType, isServiceHoldType } from '../vehicles/vehicle-blocks.js';
+import { parseLocationConfig } from '../../lib/location-config.js';
 
 function toNumber(value, fallback = 0) {
   const n = Number(value);
@@ -68,15 +69,6 @@ function normalizeTenantId(query = {}) {
 function normalizeEmployeeUserId(query = {}) {
   const raw = String(query?.employeeUserId || '').trim();
   return raw || null;
-}
-
-function parseLocationConfig(raw) {
-  try {
-    if (!raw) return {};
-    if (typeof raw === 'string') return JSON.parse(raw);
-    if (typeof raw === 'object') return raw;
-  } catch {}
-  return {};
 }
 
 function money(value) {

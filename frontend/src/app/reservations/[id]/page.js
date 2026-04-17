@@ -287,15 +287,14 @@ function ReservationDetailInner({ token, me, logout }) {
     } catch {}
   };
 
-  // Full load: reservation + all catalogs + logs (heavy, called once on mount)
+  // Full load: reservation + all catalogs + logs (heavy, called once on mount).
+  // All requests fire in parallel — they only depend on `id`, not on the reservation row,
+  // so there's no reason to await the main fetch before starting the others.
   const load = async () => {
     setLoading(true);
     try {
-      const reservationResult = await api(`/api/reservations/${id}`, { bypassCache: true }, token);
-      setRow(reservationResult);
-
-      const optionalCalls = await Promise.allSettled([
-        Promise.resolve([]),
+      const allCalls = await Promise.allSettled([
+        api(`/api/reservations/${id}`, { bypassCache: true }, token),
         canManagePricingOverrides ? api(`/api/reservations/${id}/pricing-options`, {}, token) : Promise.resolve(null),
         api(`/api/reservations/${id}/pricing`, { bypassCache: true }, token).catch(() => null),
         api(`/api/reservations/${id}/payments`, { bypassCache: true }, token).catch(() => []),
@@ -303,8 +302,14 @@ function ReservationDetailInner({ token, me, logout }) {
         canLoadSupportingCatalogs ? api(`/api/tolls/reservations/${id}`, {}, token).catch(() => null) : Promise.resolve(null)
       ]);
 
-      const valueOr = (index, fallback) => optionalCalls[index]?.status === 'fulfilled' ? optionalCalls[index].value : fallback;
-      const customersOut = valueOr(0, []);
+      const valueOr = (index, fallback) => allCalls[index]?.status === 'fulfilled' ? allCalls[index].value : fallback;
+      const reservationResult = valueOr(0, null);
+      if (!reservationResult) {
+        throw new Error(allCalls[0]?.reason?.message || 'Unable to load reservation');
+      }
+      setRow(reservationResult);
+
+      const customersOut = [];
       const pricingOptionsOut = valueOr(1, null);
       const pricingOut = valueOr(2, null);
       const paymentsOut = valueOr(3, []);

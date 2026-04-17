@@ -1,13 +1,31 @@
 /**
- * Simple in-memory TTL cache.
- * Suitable for single-instance deployments.
- * For multi-instance, replace with Redis.
+ * In-memory TTL cache.
+ *
+ * IMPORTANT — multi-worker deployments:
+ * This process is run clustered (see cluster.js / CLUSTER_WORKERS env var).
+ * Each worker has its OWN cache Map — they do not share state.
+ * Writes invalidated in one worker remain cached in siblings until TTL expires.
+ * For writes that must be globally consistent (permissions, module access,
+ * auth sessions), prefer short TTLs and tolerate up to TTL seconds of staleness,
+ * or swap this module out for a Redis-backed implementation.
+ *
+ * Callers should pass explicit short TTLs (≤60s) for anything that must be
+ * globally consistent; longer TTLs are fine for tenant config / session data
+ * that tolerates brief staleness.
  */
 
 const store = new Map();
 
 const DEFAULT_TTL_MS = 5 * 60 * 1000; // 5 minutes
 const MAX_ENTRIES = 500;
+
+if (parseInt(process.env.CLUSTER_WORKERS || '1', 10) > 1 && !process.env.REDIS_URL) {
+  console.warn(
+    '[cache] Running clustered with in-memory cache only — cache state is NOT shared across workers. ' +
+    'Writes in one worker take up to TTL seconds to be visible in others. ' +
+    'Set REDIS_URL and swap cache.js for a Redis driver when this becomes a problem.'
+  );
+}
 
 function cleanup() {
   const now = Date.now();

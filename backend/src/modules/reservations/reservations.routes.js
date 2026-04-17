@@ -17,16 +17,32 @@ import { activeVehicleBlockOverlapWhere } from '../vehicles/vehicle-blocks.js';
 import { isSuperAdmin } from '../../middleware/auth.js';
 import { franchiseService } from '../settings/franchise.service.js';
 import { crossTenantScopeFor as scopeFor } from '../../lib/tenant-scope.js';
+import { parseLocationConfig } from '../../lib/location-config.js';
+import { cache } from '../../lib/cache.js';
 
 export const reservationsRouter = Router();
 
-function parseLocationConfig(raw) {
-  try {
-    if (!raw) return {};
-    if (typeof raw === 'string') return JSON.parse(raw);
-    if (typeof raw === 'object') return raw;
-  } catch {}
-  return {};
+// Short cooldown (30s) between customer-facing token issuances for the same reservation/kind.
+// Prevents accidental double-clicks and abuse where a staff user could spam a customer's
+// inbox or rotate tokens faster than they can be used. Per-worker (in-memory) guard;
+// briefly bypassable under heavy cluster load — that's an acceptable trade-off for rate UX.
+const TOKEN_ISSUANCE_COOLDOWN_MS = 30 * 1000;
+function checkTokenIssuanceCooldown(reservationId, kind) {
+  const key = `token-issue:${kind}:${reservationId}`;
+  if (cache.get(key) !== undefined) return false;
+  cache.set(key, 1, TOKEN_ISSUANCE_COOLDOWN_MS);
+  return true;
+}
+
+// Caps reservation.notes growth. System events (signature/payment/email/override audit trail)
+// append here; without this guard, rows grew unbounded and bloated every detail fetch.
+// Keeps the most recent tail so operators still see the latest activity.
+const MAX_NOTES_BYTES = 16 * 1024;
+function appendSystemNote(existingNotes, line) {
+  const base = existingNotes || '';
+  const combined = base ? `${base}\n${line}` : line;
+  if (combined.length <= MAX_NOTES_BYTES) return combined;
+  return combined.slice(combined.length - MAX_NOTES_BYTES);
 }
 
 async function latestAgreementByReservationId(reservationId, scope = {}) {
@@ -369,14 +385,27 @@ reservationsRouter.get('/:id/available-vehicles', async (req, res, next) => {
     const reservation = await reservationsService.getById(req.params.id, scopeFor(req));
     if (!reservation) return res.status(404).json({ error: 'Reservation not found' });
     const tenantScope = reservation?.tenantId ? { tenantId: reservation.tenantId } : scopeFor(req);
+    const tenantWhere = tenantScope.tenantId ? { tenantId: tenantScope.tenantId } : {};
 
-    try {
-      const pickupAt = req.query?.pickupAt ? new Date(String(req.query.pickupAt)) : reservation.pickupAt;
-      const returnAt = req.query?.returnAt ? new Date(String(req.query.returnAt)) : reservation.returnAt;
+    const pickupAt = req.query?.pickupAt ? new Date(String(req.query.pickupAt)) : reservation.pickupAt;
+    const returnAt = req.query?.returnAt ? new Date(String(req.query.returnAt)) : reservation.returnAt;
 
-      const overlaps = await prisma.reservation.findMany({
+    const vehicleSelect = {
+      id: true, tenantId: true, internalNumber: true, vin: true, plate: true,
+      make: true, model: true, year: true, color: true, mileage: true,
+      status: true, fleetMode: true, vehicleTypeId: true, homeLocationId: true,
+      vehicleType: { select: { id: true, name: true } },
+      homeLocation: { select: { id: true, name: true, city: true, state: true } }
+    };
+    const vehicleOrder = [{ make: 'asc' }, { model: 'asc' }, { internalNumber: 'asc' }];
+    const maxResults = 200;
+
+    // Run all three probes in parallel — overlaps + blocks + broad candidate set.
+    // Tiering happens in-memory so we never pay for a second round-trip.
+    const [overlaps, blockedAvailability, candidates] = await Promise.all([
+      prisma.reservation.findMany({
         where: {
-          ...(tenantScope.tenantId ? { tenantId: tenantScope.tenantId } : {}),
+          ...tenantWhere,
           id: { not: reservation.id },
           vehicleId: { not: null },
           status: { in: ['NEW', 'CONFIRMED', 'CHECKED_OUT'] },
@@ -384,103 +413,66 @@ reservationsRouter.get('/:id/available-vehicles', async (req, res, next) => {
           returnAt: { gt: pickupAt }
         },
         select: { vehicleId: true }
-      });
-
-      const blockedIds = overlaps.map((x) => x.vehicleId).filter(Boolean);
-      const blockedAvailability = await prisma.vehicleAvailabilityBlock.findMany({
+      }),
+      prisma.vehicleAvailabilityBlock.findMany({
         where: {
-          ...(tenantScope.tenantId ? { tenantId: tenantScope.tenantId } : {}),
+          ...tenantWhere,
           vehicleId: { not: null },
           ...activeVehicleBlockOverlapWhere({ start: pickupAt, end: returnAt })
         },
         select: { vehicleId: true }
-      });
-      blockedAvailability.forEach((row) => {
-        if (row?.vehicleId) blockedIds.push(row.vehicleId);
-      });
-
-      const vehicleSelect = {
-        id: true, tenantId: true, internalNumber: true, vin: true, plate: true,
-        make: true, model: true, year: true, color: true, mileage: true,
-        status: true, fleetMode: true, vehicleTypeId: true, homeLocationId: true,
-        vehicleType: { select: { id: true, name: true } },
-        homeLocation: { select: { id: true, name: true, city: true, state: true } }
-      };
-      const vehicleOrder = [{ make: 'asc' }, { model: 'asc' }, { internalNumber: 'asc' }];
-      const maxResults = 200;
-
-      let vehicles = await prisma.vehicle.findMany({
+      }),
+      prisma.vehicle.findMany({
         where: {
-          ...(tenantScope.tenantId ? { tenantId: tenantScope.tenantId } : {}),
+          ...tenantWhere,
           OR: [
             reservation.vehicleId ? { id: reservation.vehicleId } : undefined,
-            {
-              status: 'AVAILABLE',
-              id: { notIn: blockedIds.length ? blockedIds : ['__none__'] }
-            }
+            { status: { notIn: ['IN_MAINTENANCE', 'OUT_OF_SERVICE'] } }
           ].filter(Boolean)
         },
         select: vehicleSelect,
         orderBy: vehicleOrder,
         take: maxResults
-      });
+      })
+    ]);
 
-      if (!vehicles.length) {
-        vehicles = await prisma.vehicle.findMany({
-          where: {
-            ...(tenantScope.tenantId ? { tenantId: tenantScope.tenantId } : {}),
-            status: { notIn: ['IN_MAINTENANCE', 'OUT_OF_SERVICE'] },
-            ...(reservation.vehicleTypeId ? { vehicleTypeId: reservation.vehicleTypeId } : {}),
-            ...(reservation.pickupLocationId ? {
-              OR: [
-                { homeLocationId: reservation.pickupLocationId },
-                { homeLocationId: null }
-              ]
-            } : {})
-          },
-          select: vehicleSelect,
-          orderBy: vehicleOrder,
-          take: maxResults
-        });
+    const blockedIds = new Set();
+    overlaps.forEach((r) => r.vehicleId && blockedIds.add(r.vehicleId));
+    blockedAvailability.forEach((r) => r.vehicleId && blockedIds.add(r.vehicleId));
+
+    const preferredVehicleTypeId = reservation.vehicleTypeId || null;
+    const preferredLocationId = reservation.pickupLocationId || null;
+
+    const preferred = [];
+    const typeOrLocationMatch = [];
+    const others = [];
+
+    for (const v of candidates) {
+      if (v.id === reservation.vehicleId) {
+        preferred.unshift(v);
+        continue;
       }
+      if (blockedIds.has(v.id)) continue;
 
-      if (!vehicles.length) {
-        vehicles = await prisma.vehicle.findMany({
-          where: {
-            ...(tenantScope.tenantId ? { tenantId: tenantScope.tenantId } : {}),
-            status: { notIn: ['IN_MAINTENANCE', 'OUT_OF_SERVICE'] }
-          },
-          select: vehicleSelect,
-          orderBy: vehicleOrder,
-          take: maxResults
-        });
+      if (v.status === 'AVAILABLE') {
+        preferred.push(v);
+      } else if (
+        (preferredVehicleTypeId && v.vehicleTypeId === preferredVehicleTypeId) ||
+        (preferredLocationId && (v.homeLocationId === preferredLocationId || !v.homeLocationId))
+      ) {
+        typeOrLocationMatch.push(v);
+      } else {
+        others.push(v);
       }
-
-      return res.json(vehicles);
-    } catch (error) {
-      console.error('[reservations] available-vehicles fallback activated', {
-        reservationId: reservation.id,
-        tenantId: tenantScope.tenantId || null,
-        error: String(error?.message || error)
-      });
-
-      const fallbackVehicles = await prisma.vehicle.findMany({
-        where: {
-          ...(tenantScope.tenantId ? { tenantId: tenantScope.tenantId } : {}),
-          status: { notIn: ['IN_MAINTENANCE', 'OUT_OF_SERVICE'] }
-        },
-        select: {
-          id: true, tenantId: true, internalNumber: true, vin: true, plate: true,
-          make: true, model: true, year: true, color: true, mileage: true,
-          status: true, fleetMode: true, vehicleTypeId: true, homeLocationId: true,
-          vehicleType: { select: { id: true, name: true } },
-          homeLocation: { select: { id: true, name: true, city: true, state: true } }
-        },
-        orderBy: [{ make: 'asc' }, { model: 'asc' }, { internalNumber: 'asc' }],
-        take: 200
-      });
-      return res.json(fallbackVehicles);
     }
+
+    const vehicles = preferred.length
+      ? preferred
+      : typeOrLocationMatch.length
+        ? typeOrLocationMatch
+        : others;
+
+    return res.json(vehicles);
   } catch (e) {
     next(e);
   }
@@ -632,7 +624,7 @@ reservationsRouter.patch('/:id', async (req, res, next) => {
       const reason = String(patch.cancellationReason).trim();
       const actorName = req.user?.fullName || req.user?.email || 'Unknown';
       const cancelNote = `[CANCELLED ${new Date().toISOString()}] by ${actorName}: ${reason}`;
-      patch.notes = current.notes ? `${current.notes}\n${cancelNote}` : cancelNote;
+      patch.notes = appendSystemNote(current.notes, cancelNote);
       delete patch.cancellationReason;
     }
 
@@ -675,7 +667,7 @@ reservationsRouter.post('/:id/admin-transition', async (req, res, next) => {
     if (!current) return res.status(404).json({ error: 'Reservation not found' });
 
     const noteLine = `[ADMIN OVERRIDE ${new Date().toISOString()}] ${current.status} -> ${status}${reason ? ` | reason: ${reason}` : ''}`;
-    const nextNotes = current.notes ? `${current.notes}\n${noteLine}` : noteLine;
+    const nextNotes = appendSystemNote(current.notes, noteLine);
 
     const row = await reservationsService.update(req.params.id, {
       status,
@@ -748,6 +740,9 @@ reservationsRouter.post('/:id/request-customer-info', async (req, res, next) => 
   try {
     const current = await reservationsService.getById(req.params.id, scopeFor(req));
     if (!current) return res.status(404).json({ error: 'Reservation not found' });
+    if (!checkTokenIssuanceCooldown(current.id, 'customer-info')) {
+      return res.status(429).json({ error: 'A customer info link was just issued for this reservation. Please wait a moment before issuing another.' });
+    }
 
     const token = crypto.randomBytes(24).toString('hex');
     const expiresAt = new Date(Date.now() + 1000 * 60 * 60 * 24 * 2);
@@ -755,7 +750,7 @@ reservationsRouter.post('/:id/request-customer-info', async (req, res, next) => 
     const link = `${base.replace(/\/$/, '')}/customer/precheckin?token=${token}`;
 
     const note = `[REQUEST CUSTOMER INFO ${new Date().toISOString()}] token issued`;
-    const notes = current.notes ? `${current.notes}\n${note}` : note;
+    const notes = appendSystemNote(current.notes, note);
 
     await reservationsService.update(req.params.id, {
       customerInfoToken: token,
@@ -773,6 +768,9 @@ reservationsRouter.post('/:id/request-signature', async (req, res, next) => {
   try {
     const current = await reservationsService.getById(req.params.id, scopeFor(req));
     if (!current) return res.status(404).json({ error: 'Reservation not found' });
+    if (!checkTokenIssuanceCooldown(current.id, 'signature')) {
+      return res.status(429).json({ error: 'A signature link was just issued for this reservation. Please wait a moment before issuing another.' });
+    }
 
     const token = crypto.randomBytes(24).toString('hex');
     const expiresAt = new Date(Date.now() + 1000 * 60 * 60 * 24 * 2);
@@ -780,7 +778,7 @@ reservationsRouter.post('/:id/request-signature', async (req, res, next) => {
     const link = `${base.replace(/\/$/, '')}/customer/sign-agreement?token=${token}`;
 
     const note = `[REQUEST SIGNATURE ${new Date().toISOString()}] token issued`;
-    const notes = current.notes ? `${current.notes}\n${note}` : note;
+    const notes = appendSystemNote(current.notes, note);
 
     await reservationsService.update(req.params.id, {
       signatureToken: token,
@@ -798,6 +796,9 @@ reservationsRouter.post('/:id/request-payment', async (req, res, next) => {
   try {
     const current = await reservationsService.getById(req.params.id, scopeFor(req));
     if (!current) return res.status(404).json({ error: 'Reservation not found' });
+    if (!checkTokenIssuanceCooldown(current.id, 'payment')) {
+      return res.status(429).json({ error: 'A payment link was just issued for this reservation. Please wait a moment before issuing another.' });
+    }
 
     const token = crypto.randomBytes(24).toString('hex');
     const expiresAt = new Date(Date.now() + 1000 * 60 * 60 * 24 * 2);
@@ -805,7 +806,7 @@ reservationsRouter.post('/:id/request-payment', async (req, res, next) => {
     const link = `${base.replace(/\/$/, '')}/customer/pay?token=${token}`;
 
     const note = `[REQUEST PAYMENT ${new Date().toISOString()}] token issued`;
-    const notes = current.notes ? `${current.notes}\n${note}` : note;
+    const notes = appendSystemNote(current.notes, note);
 
     await reservationsService.update(req.params.id, {
       paymentRequestToken: token,
@@ -827,6 +828,9 @@ reservationsRouter.post('/:id/send-request-email', async (req, res, next) => {
     const kind = String(req.body?.kind || '').toLowerCase();
     if (!['signature', 'customer-info', 'payment'].includes(kind)) {
       return res.status(400).json({ error: 'kind must be signature|customer-info|payment' });
+    }
+    if (!checkTokenIssuanceCooldown(current.id, `email:${kind}`)) {
+      return res.status(429).json({ error: `A ${kind} email was just sent for this reservation. Please wait a moment before resending.` });
     }
 
     const primary = String(current.customer?.email || '').trim();
@@ -875,11 +879,11 @@ reservationsRouter.post('/:id/send-request-email', async (req, res, next) => {
         html: render(htmlTpl || String(bodyTpl || '').replaceAll('\n', '<br/>'))
       });
       const note = `[${notePrefix} ${new Date().toISOString()}] emailed to ${recipients.join(', ')}`;
-      await reservationsService.update(req.params.id, { notes: current.notes ? `${current.notes}\n${note}` : note }, scopeFor(req));
+      await reservationsService.update(req.params.id, { notes: appendSystemNote(current.notes, note) }, scopeFor(req));
       res.json({ ok: true, sentTo: recipients, link, expiresAt, emailSent: true });
     } catch (mailError) {
       const failNote = `[${notePrefix} ${new Date().toISOString()}] email failed for ${recipients.join(', ')} | ${String(mailError?.message || mailError)}`;
-      await reservationsService.update(req.params.id, { notes: current.notes ? `${current.notes}\n${failNote}` : failNote }, scopeFor(req));
+      await reservationsService.update(req.params.id, { notes: appendSystemNote(current.notes, failNote) }, scopeFor(req));
       await prisma.auditLog.create({
         data: {
           tenantId: current.tenantId || req.user?.tenantId || null,
@@ -954,7 +958,7 @@ reservationsRouter.post('/:id/send-detail-email', async (req, res, next) => {
     });
 
     const note = `[RESERVATION DETAIL EMAIL ${new Date().toISOString()}] emailed to ${recipients.join(', ')}`;
-    await reservationsService.update(req.params.id, { notes: current.notes ? `${current.notes}\n${note}` : note }, scopeFor(req));
+    await reservationsService.update(req.params.id, { notes: appendSystemNote(current.notes, note) }, scopeFor(req));
 
     res.json({ ok: true, sentTo: recipients });
   } catch (e) {

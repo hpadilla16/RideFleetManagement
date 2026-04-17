@@ -2,15 +2,7 @@ import { prisma } from '../../lib/prisma.js';
 import { activeVehicleBlockOverlapWhere } from '../vehicles/vehicle-blocks.js';
 import { hostReviewsService } from '../host-reviews/host-reviews.service.js';
 import { settingsService } from '../settings/settings.service.js';
-
-function parseLocationConfig(raw) {
-  try {
-    if (!raw) return {};
-    if (typeof raw === 'string') return JSON.parse(raw);
-    if (typeof raw === 'object') return raw;
-  } catch {}
-  return {};
-}
+import { parseLocationConfig } from '../../lib/location-config.js';
 
 function ageOnDate(dob, onDate) {
   if (!dob || !onDate) return null;
