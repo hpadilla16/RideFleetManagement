@@ -860,7 +860,7 @@ export const vehiclesService = {
     if (!config.voltswitchConnectorReady) throw new Error('Voltswitch connector is not configured. Set provider to VOLTSWITCH, enable the connector, and enter API credentials in Settings > Telematics.');
 
     const session = await voltswitchAuth({
-      email: config.voltswitchApiEmail,
+      username: config.voltswitchApiEmail,
       password: config.voltswitchApiPassword,
       tenantId: scope.tenantId
     });
@@ -908,7 +908,7 @@ export const vehiclesService = {
         // Fetch and ingest current location if device is linked to a vehicle
         if (device.vehicleId) {
           try {
-            const location = await voltswitchGetLocation(session, { deviceId: normalized.externalDeviceId });
+            const location = await voltswitchGetLocation(session, { imei: normalized.externalDeviceId });
             if (location && (location.latitude || location.longitude)) {
               await this.ingestTelematicsEvent(device.vehicleId, {
                 deviceId: device.id,
