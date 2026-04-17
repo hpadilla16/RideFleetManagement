@@ -162,6 +162,14 @@ const reservationListSelect = {
       code: true,
       name: true
     }
+  },
+  rentalAgreement: {
+    select: {
+      id: true,
+      total: true,
+      paidAmount: true,
+      balance: true
+    }
   }
 };
 

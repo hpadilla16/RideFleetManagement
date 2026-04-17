@@ -317,6 +317,34 @@ function DashboardInner({ token, me, logout }) {
     }
   };
 
+  const requestCustomerInfo = async (id) => {
+    try {
+      const out = await api(`/api/reservations/${id}/request-customer-info`, { method: 'POST', body: JSON.stringify({}) }, token);
+      const link = out?.link || '';
+      if (link && navigator?.clipboard) {
+        try { await navigator.clipboard.writeText(link); } catch {}
+      }
+      setMsg(link ? `Customer info link copied to clipboard: ${link}` : 'Customer info link issued');
+    } catch (e) {
+      setMsg(e.message);
+    }
+  };
+
+  const startCheckin = (id) => {
+    router.push(`/reservations/${id}/checkin`);
+  };
+
+  const openReservation = (id) => {
+    router.push(`/reservations/${id}`);
+  };
+
+  const unpaidBalance = (r) => {
+    const balance = Number(r?.rentalAgreement?.balance);
+    return Number.isFinite(balance) && balance > 0 ? balance : 0;
+  };
+
+  const moneyShort = (n) => `$${Number(n || 0).toFixed(2)}`;
+
   const kpis = overview?.kpis || {};
   const totalVehicles = Number(kpis.fleetTotal || 0) + Number(kpis.vehiclesInMaintenance || 0) + Number(kpis.vehiclesOutOfService || 0);
   const available = Number(kpis.availableFleet || 0);
@@ -462,62 +490,92 @@ function DashboardInner({ token, me, logout }) {
       </section>
       {msg ? <p className="label" style={{ margin: '4px 0 10px 2px' }}>{msg}</p> : null}
 
+      <section className="glass card-lg" style={{ marginBottom: 12 }}>
+        <div className="row-between" style={{ alignItems: 'center' }}>
+          <h3 style={{ margin: 0 }}>Operations Board</h3>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <button onClick={() => { const d = new Date(boardDate + 'T00:00:00'); d.setDate(d.getDate() - 1); setBoardDate(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`); }} style={{ padding: '4px 8px', minWidth: 0 }}>&larr;</button>
+            <input type="date" value={boardDate} onChange={(e) => setBoardDate(e.target.value)} style={{ padding: '4px 8px', borderRadius: 8, border: '1px solid var(--border-soft)', background: 'var(--bg-soft)', color: 'var(--charcoal)', fontSize: 13, fontWeight: 600 }} />
+            <button onClick={() => { const d = new Date(boardDate + 'T00:00:00'); d.setDate(d.getDate() + 1); setBoardDate(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`); }} style={{ padding: '4px 8px', minWidth: 0 }}>&rarr;</button>
+            {!isToday && <button onClick={() => { const d = new Date(); setBoardDate(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`); }} style={{ padding: '4px 10px', fontSize: 12 }}>Today</button>}
+          </div>
+        </div>
+        <p className="label" style={{ marginTop: 6, marginBottom: 0 }}>
+          {boardLabel} — Pickups: <strong>{isToday && resSummary ? resSummary.pickupsToday : pickups.length}</strong> · Returns: <strong>{isToday && resSummary ? resSummary.returnsToday : returns.length}</strong>
+        </p>
+      </section>
+
       <section className="grid2">
         <div className="glass card-lg">
-          <div className="row-between" style={{ alignItems: 'center', marginBottom: 8 }}>
-            <h3 style={{ margin: 0 }}>Operations Board</h3>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-              <button onClick={() => { const d = new Date(boardDate + 'T00:00:00'); d.setDate(d.getDate() - 1); setBoardDate(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`); }} style={{ padding: '4px 8px', minWidth: 0 }}>&larr;</button>
-              <input type="date" value={boardDate} onChange={(e) => setBoardDate(e.target.value)} style={{ padding: '4px 8px', borderRadius: 8, border: '1px solid var(--border-soft)', background: 'var(--bg-soft)', color: 'var(--charcoal)', fontSize: 13, fontWeight: 600 }} />
-              <button onClick={() => { const d = new Date(boardDate + 'T00:00:00'); d.setDate(d.getDate() + 1); setBoardDate(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`); }} style={{ padding: '4px 8px', minWidth: 0 }}>&rarr;</button>
-              {!isToday && <button onClick={() => { const d = new Date(); setBoardDate(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`); }} style={{ padding: '4px 10px', fontSize: 12 }}>Today</button>}
-            </div>
-          </div>
-          <p className="label" style={{ marginBottom: 8 }}>
-            {boardLabel} — Pickups: <strong>{isToday && resSummary ? resSummary.pickupsToday : pickups.length}</strong> · Returns: <strong>{isToday && resSummary ? resSummary.returnsToday : returns.length}</strong>
-          </p>
-
-          {pickups.length > 0 && (
-            <>
-              <div className="label" style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.05em', color: 'var(--brand)', marginBottom: 4 }}>Pickups</div>
-              <div className="stack" style={{ marginBottom: 12 }}>
-                {pickups.sort((a, b) => String(a.pickupAt).localeCompare(String(b.pickupAt))).map((r) => (
-                  <div key={r.id} className="row" style={{ alignItems: 'center', gap: 8 }}>
+          <div className="label" style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.05em', color: 'var(--brand)', marginBottom: 8 }}>Pickups ({pickups.length})</div>
+          {pickups.length === 0 ? (
+            <p className="ui-muted" style={{ textAlign: 'center', padding: 20, margin: 0 }}>No pickups scheduled.</p>
+          ) : (
+            <div className="stack">
+              {pickups.sort((a, b) => String(a.pickupAt).localeCompare(String(b.pickupAt))).map((r) => {
+                const balance = unpaidBalance(r);
+                return (
+                  <div
+                    key={r.id}
+                    role="button"
+                    tabIndex={0}
+                    onClick={() => openReservation(r.id)}
+                    onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openReservation(r.id); } }}
+                    className="row"
+                    style={{ alignItems: 'center', gap: 8, cursor: 'pointer', padding: '6px 4px', borderRadius: 8, transition: 'background 0.15s' }}
+                    onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--bg-soft)'; }}
+                    onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
+                  >
                     <span style={{ minWidth: 70, fontWeight: 600, fontSize: 13, color: 'var(--charcoal)' }}>{fmtWallClockTime(r.pickupAt)}</span>
-                    <span style={{ flex: 1 }}>#{r.reservationNumber} · {r.customer?.firstName} {r.customer?.lastName}{r.vehicle ? ` · ${r.vehicle.year || ''} ${r.vehicle.make || ''} ${r.vehicle.model || ''}`.trim() : ''}</span>
-                    <div style={{ display: 'flex', gap: 6 }}>
-                      <button onClick={() => startCheckout(r.id)}>Start Check-out</button>
-                      <button onClick={() => markCancelled(r.id)}>Cancel</button>
-                      <button onClick={() => markNoShow(r.id)}>No Show</button>
+                    <span style={{ flex: 1 }}>
+                      #{r.reservationNumber} · {r.customer?.firstName} {r.customer?.lastName}{r.vehicle ? ` · ${r.vehicle.year || ''} ${r.vehicle.make || ''} ${r.vehicle.model || ''}`.trim() : ''}
+                      {balance > 0 ? <span className="status-chip warn" style={{ fontSize: 10, marginLeft: 6 }}>Unpaid {moneyShort(balance)}</span> : null}
+                    </span>
+                    <div style={{ display: 'flex', gap: 6 }} onClick={(e) => e.stopPropagation()}>
+                      <button onClick={(e) => { e.stopPropagation(); startCheckout(r.id); }}>Start Check-out</button>
+                      <button onClick={(e) => { e.stopPropagation(); requestCustomerInfo(r.id); }}>Request Info</button>
+                      <button onClick={(e) => { e.stopPropagation(); markNoShow(r.id); }}>No Show</button>
                     </div>
                   </div>
-                ))}
-              </div>
-            </>
-          )}
-
-          {returns.length > 0 && (
-            <>
-              <div className="label" style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.05em', color: '#30D5C8', marginBottom: 4 }}>Returns</div>
-              <div className="stack">
-                {returns.sort((a, b) => String(a.returnAt).localeCompare(String(b.returnAt))).map((r) => (
-                  <div key={`ret-${r.id}`} className="row" style={{ alignItems: 'center', gap: 8 }}>
-                    <span style={{ minWidth: 70, fontWeight: 600, fontSize: 13, color: 'var(--charcoal)' }}>{fmtWallClockTime(r.returnAt)}</span>
-                    <span style={{ flex: 1 }}>#{r.reservationNumber} · {r.customer?.firstName} {r.customer?.lastName}{r.vehicle ? ` · ${r.vehicle.year || ''} ${r.vehicle.make || ''} ${r.vehicle.model || ''}`.trim() : ''}</span>
-                    <span className="status-chip neutral" style={{ fontSize: 11 }}>Awaiting Return</span>
-                  </div>
-                ))}
-              </div>
-            </>
-          )}
-
-          {pickups.length === 0 && returns.length === 0 && (
-            <p className="ui-muted" style={{ textAlign: 'center', padding: 20 }}>No pickups or returns scheduled for this date.</p>
+                );
+              })}
+            </div>
           )}
         </div>
+
         <div className="glass card-lg">
-          <h3>Vehicle Status</h3>
-          <VehicleStatusDonut metrics={kpis} />
+          <div className="label" style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.05em', color: '#30D5C8', marginBottom: 8 }}>Returns ({returns.length})</div>
+          {returns.length === 0 ? (
+            <p className="ui-muted" style={{ textAlign: 'center', padding: 20, margin: 0 }}>No returns scheduled.</p>
+          ) : (
+            <div className="stack">
+              {returns.sort((a, b) => String(a.returnAt).localeCompare(String(b.returnAt))).map((r) => {
+                const balance = unpaidBalance(r);
+                return (
+                  <div
+                    key={`ret-${r.id}`}
+                    role="button"
+                    tabIndex={0}
+                    onClick={() => openReservation(r.id)}
+                    onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openReservation(r.id); } }}
+                    className="row"
+                    style={{ alignItems: 'center', gap: 8, cursor: 'pointer', padding: '6px 4px', borderRadius: 8, transition: 'background 0.15s' }}
+                    onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--bg-soft)'; }}
+                    onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
+                  >
+                    <span style={{ minWidth: 70, fontWeight: 600, fontSize: 13, color: 'var(--charcoal)' }}>{fmtWallClockTime(r.returnAt)}</span>
+                    <span style={{ flex: 1 }}>
+                      #{r.reservationNumber} · {r.customer?.firstName} {r.customer?.lastName}{r.vehicle ? ` · ${r.vehicle.year || ''} ${r.vehicle.make || ''} ${r.vehicle.model || ''}`.trim() : ''}
+                      {balance > 0 ? <span className="status-chip warn" style={{ fontSize: 10, marginLeft: 6 }}>Unpaid {moneyShort(balance)}</span> : null}
+                    </span>
+                    <div style={{ display: 'flex', gap: 6 }} onClick={(e) => e.stopPropagation()}>
+                      <button onClick={(e) => { e.stopPropagation(); startCheckin(r.id); }}>Start Check-in</button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
         </div>
       </section>
 
