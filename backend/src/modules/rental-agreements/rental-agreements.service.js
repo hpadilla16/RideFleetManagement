@@ -1383,7 +1383,7 @@ export const rentalAgreementsService = {
           ? await prisma.fee.findMany({ where: { ...tenantWhere, id: { in: uniqueSelectedFeeIds } } })
           : [];
 
-        const incomingRows = Array.isArray(meta?.chargeRows) ? meta.chargeRows : null;
+        const incomingRows = structuredReservationChargeRows(reservation);
         if (incomingRows && incomingRows.length) {
           const normalizedRows = incomingRows.map((r) => ({
             name: String(r?.name || 'Line Item'),
@@ -1483,7 +1483,7 @@ export const rentalAgreementsService = {
         }, 0);
 
         const subtotal = Math.max(0, base + servicesTotal + feesTotal - discountTotal);
-        const taxRate = Number(reservation?.pricingSnapshot?.taxRate ?? meta?.taxRate ?? reservation.pickupLocation?.taxRate ?? 0);
+        const taxRate = Number(reservation?.pricingSnapshot?.taxRate ?? reservation.pickupLocation?.taxRate ?? 0);
         const taxes = subtotal * (taxRate / 100);
         const total = subtotal + taxes;
 
@@ -1633,11 +1633,11 @@ export const rentalAgreementsService = {
       });
     }
 
-    const selectedServiceIds = Array.isArray(meta?.selectedServices) ? meta.selectedServices : [];
-    const selectedFeeIds = Array.isArray(meta?.selectedFees) ? meta.selectedFees : [];
-    const discounts = Array.isArray(meta?.discounts) ? meta.discounts : [];
+    const selectedServiceIds = [];
+    const selectedFeeIds = [];
+    const discounts = [];
 
-    // Always include auto fees computed on reservation side (underage/additional-driver) even if not in meta.
+    // Always include auto fees computed on reservation side (underage/additional-driver).
     const underageFromNotes = /UNDERAGE ALERT/i.test(String(reservation.notes || ''));
     if (reservation.underageAlert || underageFromNotes) {
       const autoUnderage = await prisma.fee.findMany({ where: { ...tenantWhere, isActive: true, isUnderageFee: true }, select: { id: true } });
@@ -1765,7 +1765,7 @@ export const rentalAgreementsService = {
     }, 0);
 
     const subtotal = Math.max(0, base + servicesTotal + feesTotal - discountTotal);
-    const taxRate = Number(reservation?.pricingSnapshot?.taxRate ?? meta?.taxRate ?? reservation.pickupLocation?.taxRate ?? 0);
+    const taxRate = Number(reservation?.pricingSnapshot?.taxRate ?? reservation.pickupLocation?.taxRate ?? 0);
     const taxes = subtotal * (taxRate / 100);
     const total = subtotal + taxes;
 
