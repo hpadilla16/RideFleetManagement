@@ -21,6 +21,7 @@ function getEnvOrDotenv(key) {
 function preferredProvider() {
   const explicit = String(getEnvOrDotenv('MAIL_PROVIDER') || '').trim().toLowerCase();
   if (explicit) return explicit;
+  if (getEnvOrDotenv('MAILERSEND_API_KEY')) return 'mailersend';
   if (getEnvOrDotenv('RESEND_API_KEY')) return 'resend';
   return 'smtp';
 }
@@ -104,6 +105,63 @@ async function sendViaResend({ to, subject, text, html, attachments }) {
   return res.json();
 }
 
+async function sendViaMailersend({ to, subject, text, html, attachments }) {
+  const apiKey = getEnvOrDotenv('MAILERSEND_API_KEY');
+  const fromEmail = getEnvOrDotenv('MAILERSEND_FROM') || getEnvOrDotenv('SMTP_FROM') || getEnvOrDotenv('SMTP_USER');
+  const fromName = getEnvOrDotenv('MAILERSEND_FROM_NAME') || 'Ride Fleet';
+  if (!apiKey || !fromEmail) {
+    throw new Error('MailerSend is not configured (MAILERSEND_API_KEY/MAILERSEND_FROM)');
+  }
+
+  const recipientList = Array.isArray(to)
+    ? to.filter(Boolean)
+    : String(to || '')
+        .split(',')
+        .map((value) => value.trim())
+        .filter(Boolean);
+
+  const payload = {
+    from: { email: fromEmail, name: fromName },
+    to: recipientList.map((email) => ({ email })),
+    subject,
+    text,
+    html
+  };
+
+  if (Array.isArray(attachments) && attachments.length) {
+    payload.attachments = attachments.map((item) => ({
+      filename: item.filename,
+      content: toBase64(item.content),
+      disposition: 'attachment'
+    }));
+  }
+
+  const res = await fetch('https://api.mailersend.com/v1/email', {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify(payload)
+  });
+
+  if (!res.ok) {
+    let detail = '';
+    try {
+      detail = await res.text();
+    } catch {}
+    throw new Error(`MailerSend request failed (${res.status})${detail ? `: ${detail.slice(0, 300)}` : ''}`);
+  }
+
+  // MailerSend returns 202 Accepted with no body on success
+  if (res.status === 202) return { ok: true };
+  try {
+    return await res.json();
+  } catch {
+    return { ok: true };
+  }
+}
+
 async function sendViaSmtp({ to, subject, text, html, attachments }) {
   const tx = getTransporter();
   const from = getEnvOrDotenv('SMTP_FROM') || getEnvOrDotenv('SMTP_USER');
@@ -111,7 +169,11 @@ async function sendViaSmtp({ to, subject, text, html, attachments }) {
 }
 
 export async function sendEmail({ to, subject, text, html, attachments }) {
-  if (preferredProvider() === 'resend') {
+  const provider = preferredProvider();
+  if (provider === 'mailersend') {
+    return sendViaMailersend({ to, subject, text, html, attachments });
+  }
+  if (provider === 'resend') {
     return sendViaResend({ to, subject, text, html, attachments });
   }
   return sendViaSmtp({ to, subject, text, html, attachments });
