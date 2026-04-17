@@ -9,6 +9,7 @@ import {
   reservationReferencesVehicle,
   resolveReservationResponsibility
 } from './tolls-responsibility.service.js';
+import { parseLocationConfig } from '../../lib/location-config.js';
 
 const DEFAULT_PRE_PICKUP_GRACE_MINUTES = 120;
 const DEFAULT_POST_RETURN_GRACE_MINUTES = 180;
@@ -1089,14 +1090,6 @@ async function refreshReservationEstimatedTotal(reservationId) {
   return estimatedTotal;
 }
 
-function parseLocationConfig(raw) {
-  try {
-    if (!raw) return {};
-    if (typeof raw === 'string') return JSON.parse(raw);
-    if (typeof raw === 'object') return raw;
-  } catch {}
-  return {};
-}
 
 function normalizeTollPolicy(config = {}) {
   const mode = String(config?.tollAdditionalFeeMode || 'FIXED').trim().toUpperCase();

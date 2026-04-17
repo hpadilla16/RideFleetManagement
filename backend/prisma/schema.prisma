@@ -1691,6 +1691,7 @@ model ReservationPayment {
 
   @@index([reservationId, paidAt])
   @@index([reference])
+  @@index([status, paidAt])
 }
 
 model ReservationAdditionalDriver {

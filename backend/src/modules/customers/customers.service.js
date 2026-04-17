@@ -1,5 +1,6 @@
 import crypto from 'node:crypto';
 import { prisma } from '../../lib/prisma.js';
+import { parseLocationConfig } from '../../lib/location-config.js';
 
 function norm(v) {
   return String(v ?? '').trim();
@@ -20,15 +21,6 @@ function parseNumberInput(value) {
   if (value === null || value === undefined || value === '') return null;
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : null;
-}
-
-function parseLocationConfig(raw) {
-  try {
-    if (!raw) return {};
-    if (typeof raw === 'string') return JSON.parse(raw);
-    if (typeof raw === 'object') return raw;
-  } catch {}
-  return {};
 }
 
 function ageOnDate(dob, onDate) {

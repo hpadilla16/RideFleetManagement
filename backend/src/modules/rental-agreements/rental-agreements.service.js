@@ -7,6 +7,7 @@ import { hostReviewsService } from '../host-reviews/host-reviews.service.js';
 import { reservationPricingService } from '../reservations/reservation-pricing.service.js';
 import { settingsService } from '../settings/settings.service.js';
 import { buildInspectionIntelligence } from '../vehicles/vehicle-intelligence.service.js';
+import { parseLocationConfig } from '../../lib/location-config.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -82,15 +83,6 @@ async function completeLinkedCarSharingTripForReservation(reservationId, actorUs
   }
 
   return trip;
-}
-
-function parseLocationConfig(raw) {
-  try {
-    if (!raw) return {};
-    if (typeof raw === 'string') return JSON.parse(raw);
-    if (typeof raw === 'object') return raw;
-  } catch {}
-  return {};
 }
 
 async function authNetConfig(scope = {}) {

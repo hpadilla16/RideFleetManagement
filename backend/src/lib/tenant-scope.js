@@ -1,14 +1,28 @@
 import { isSuperAdmin } from '../middleware/auth.js';
 
 /**
+ * Sentinel scope that matches no rows. Returned when a non-super-admin user
+ * is missing a tenantId — we'd rather fail closed (no data) than return all
+ * tenants' data or anything with a null tenantId.
+ */
+const DENY_ALL_SCOPE = { tenantId: '__no_tenant__' };
+
+function resolveTenantScopedUser(user, extras = {}) {
+  const tenantId = user?.tenantId;
+  if (!tenantId) return { ...DENY_ALL_SCOPE, ...extras };
+  return { tenantId, ...extras };
+}
+
+/**
  * Standard tenant scope — used by most modules (rates, fees, locations, etc.).
  * Super-admins can pass ?tenantId= to narrow to a specific tenant, otherwise global.
+ * Non-super-admins without a tenantId get a deny-all scope (fail-closed).
  */
 export function scopeFor(req) {
   if (isSuperAdmin(req.user)) {
     return req.query?.tenantId ? { tenantId: String(req.query.tenantId) } : {};
   }
-  return { tenantId: req.user?.tenantId || null };
+  return resolveTenantScopedUser(req.user);
 }
 
 /**
@@ -20,7 +34,7 @@ export function carSharingScopeFor(req) {
       ? { tenantId: String(req.query.tenantId), allowUnassigned: true }
       : { allowUnassigned: true };
   }
-  return { tenantId: req.user?.tenantId || null, allowUnassigned: false };
+  return resolveTenantScopedUser(req.user, { allowUnassigned: false });
 }
 
 /**
@@ -32,5 +46,5 @@ export function crossTenantScopeFor(req) {
       ? { allowCrossTenant: true, tenantId: String(req.query.tenantId) }
       : { allowCrossTenant: true };
   }
-  return { tenantId: req.user?.tenantId || null, allowCrossTenant: false };
+  return resolveTenantScopedUser(req.user, { allowCrossTenant: false });
 }

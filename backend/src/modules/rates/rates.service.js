@@ -1,5 +1,6 @@
 import { prisma } from '../../lib/prisma.js';
 import { settingsService } from '../settings/settings.service.js';
+import { parseLocationConfig } from '../../lib/location-config.js';
 
 const RATE_INCLUDE = {
   location: true,
@@ -23,15 +24,6 @@ const RATE_INCLUDE = {
 function dayFlagFromDate(dt) {
   const d = new Date(dt).getDay(); // 0 Sun ... 6 Sat
   return ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'][d];
-}
-
-function parseLocationConfig(raw) {
-  try {
-    if (!raw) return {};
-    if (typeof raw === 'string') return JSON.parse(raw);
-    if (typeof raw === 'object') return raw;
-  } catch {}
-  return {};
 }
 
 function rentalDays(pickupAt, returnAt, minChargeDays = 1, gracePeriodMin = 0) {

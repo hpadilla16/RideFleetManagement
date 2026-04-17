@@ -17,15 +17,7 @@ import {
   serializeCarSharingSearchPlace,
   serializePublicPickupSpot
 } from './car-sharing-discovery.js';
-
-function parseLocationConfig(raw) {
-  try {
-    if (!raw) return {};
-    if (typeof raw === 'string') return JSON.parse(raw);
-    if (typeof raw === 'object') return raw;
-  } catch {}
-  return {};
-}
+import { parseLocationConfig } from '../../lib/location-config.js';
 
 function toDate(value) {
   const dt = value ? new Date(value) : null;
