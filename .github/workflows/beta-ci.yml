@@ -38,6 +38,19 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Generate backend/.env for CI
+        run: |
+          cat > backend/.env <<'EOF'
+          DATABASE_URL="postgresql://postgres:postgres@db:5432/fleet_management?schema=public"
+          PORT=4000
+          JWT_SECRET="ci-test-secret-do-not-use-in-prod"
+          JWT_EXPIRES_IN="12h"
+          ALLOW_PUBLIC_REGISTER="false"
+          SENTRY_DSN=""
+          SENTRY_ENV="ci"
+          SENTRY_RELEASE=""
+          SENTRY_TRACES_SAMPLE_RATE="0"
+          EOF
       - name: Start stack
         run: docker compose -f docker-compose.yml up -d --build
       - name: Wait for backend
