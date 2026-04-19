@@ -1223,7 +1223,13 @@ customerPortalRouter.get('/customer-info/:token', async (req, res, next) => {
       ? await prisma.additionalService.findMany({
           where: { tenantId, isActive: true, displayOnline: true },
           orderBy: { sortOrder: 'asc' },
-          select: { id: true, code: true, name: true, description: true, rate: true, chargeType: true, unitLabel: true, mandatory: true, taxable: true, defaultQty: true }
+          // dailyRate/weeklyRate must be returned so the portal UI can show per-day pricing
+          // and the POST handler can honor PER_DAY services instead of treating them as flat.
+          select: {
+            id: true, code: true, name: true, description: true,
+            rate: true, dailyRate: true, weeklyRate: true, monthlyRate: true,
+            chargeType: true, unitLabel: true, mandatory: true, taxable: true, defaultQty: true
+          }
         })
       : [];
 
@@ -1314,6 +1320,27 @@ customerPortalRouter.post('/customer-info/:token', async (req, res, next) => {
       if (discount.type === 'PERCENTAGE') return Number((amount * (1 - discount.value / 100)).toFixed(2));
       return Number(Math.max(0, amount - discount.value).toFixed(2));
     };
+    const money = (value) => Number(Number(value || 0).toFixed(2));
+
+    // Rental length in days (mirrors backend/src/modules/reservations/reservation-pricing.service.js#rentalDays)
+    // Used to scale PER_DAY insurance plans and daily-rated additional services correctly.
+    const rentalDays = (() => {
+      const start = new Date(reservation.pickupAt || Date.now());
+      const end = new Date(reservation.returnAt || Date.now());
+      const diffMs = end.getTime() - start.getTime();
+      return Math.max(1, Math.ceil(diffMs / (1000 * 60 * 60 * 24)) || 1);
+    })();
+
+    // Base amount for PERCENTAGE insurance plans: sum of existing taxable non-tax, non-insurance charges
+    // (daily rate + selected services + mandatory fees) at the time the customer submits the pre-checkin.
+    const chargesForBase = await prisma.reservationCharge.findMany({
+      where: { reservationId: reservation.id, selected: true }
+    });
+    const insuranceBaseAmount = chargesForBase
+      .filter(c => String(c.source || '').toUpperCase() !== 'INSURANCE'
+        && String(c.chargeType || '').toUpperCase() !== 'TAX'
+        && String(c.chargeType || '').toUpperCase() !== 'DEPOSIT')
+      .reduce((sum, c) => sum + Number(c.total || 0), 0);
 
     // Process insurance selection
     if (insuranceSelection) {
@@ -1325,20 +1352,49 @@ customerPortalRouter.post('/customer-info/:token', async (req, res, next) => {
         const plans = reservation.tenantId ? await settingsService.getInsurancePlans({ tenantId: reservation.tenantId }) : [];
         const plan = plans.find(p => String(p.code).toUpperCase() === String(insuranceSelection.selectedPlanCode).toUpperCase());
         if (plan) {
-          const counterPrice = Number(plan.total || plan.amount || plan.rate || 0);
-          const discountedPrice = applyDiscount(counterPrice);
+          // Respect the plan's pricing mode. Mirrors computeInsuranceLine() in booking-engine.service.js
+          // so a PER_DAY plan is charged days×rate instead of being collapsed to a single unit.
+          const mode = String(plan.chargeBy || plan.mode || 'FIXED').toUpperCase();
+          const amount = Number(plan.amount || plan.rate || plan.total || 0);
+          const discountedAmount = applyDiscount(amount);
+
+          let chargeQuantity = 1;
+          let chargeRate = money(discountedAmount);
+          let chargeTotal = money(discountedAmount);
+          let counterTotal = money(amount);
+          let counterNote = null;
+
+          if (mode === 'PER_DAY') {
+            chargeQuantity = rentalDays;
+            chargeRate = money(discountedAmount);
+            chargeTotal = money(discountedAmount * rentalDays);
+            counterTotal = money(amount * rentalDays);
+            counterNote = `Counter price: $${amount.toFixed(2)}/day × ${rentalDays} day(s)`;
+          } else if (mode === 'PERCENTAGE') {
+            // Percentage plans are always a single line whose value is the pct of the base.
+            chargeQuantity = 1;
+            chargeRate = money(insuranceBaseAmount * (discountedAmount / 100));
+            chargeTotal = chargeRate;
+            counterTotal = money(insuranceBaseAmount * (amount / 100));
+            counterNote = `Counter price: ${amount.toFixed(2)}% of $${insuranceBaseAmount.toFixed(2)}`;
+          } else {
+            // FIXED
+            counterNote = `Counter price: $${amount.toFixed(2)}`;
+          }
+
+          const discounted = chargeTotal < counterTotal;
           await prisma.reservationCharge.create({
             data: {
               reservationId: reservation.id,
               source: 'INSURANCE',
               sourceRefId: plan.code,
-              name: discountedPrice < counterPrice ? `${plan.name} (Pre-checkin rate)` : plan.name,
-              rate: discountedPrice,
-              total: discountedPrice,
-              quantity: 1,
+              name: discounted ? `${plan.name} (Pre-checkin rate)` : plan.name,
+              rate: chargeRate,
+              total: chargeTotal,
+              quantity: chargeQuantity,
               selected: true,
               sortOrder: 0,
-              notes: discountedPrice < counterPrice ? `Counter price: $${counterPrice.toFixed(2)}, pre-checkin discount applied` : null
+              notes: discounted ? `${counterNote}, pre-checkin discount applied` : null
             }
           });
         }
@@ -1359,20 +1415,38 @@ customerPortalRouter.post('/customer-info/:token', async (req, res, next) => {
         });
         if (!service) continue;
         const qty = Math.max(1, Number(svc.quantity || service.defaultQty || 1));
-        const counterRate = Number(service.rate || 0);
+
+        // Respect the service's pricing mode. Mirrors computeAdditionalServiceLine() in
+        // booking-engine.service.js: dailyRate (when >0) is the per-day price and total
+        // scales with rental days; otherwise the flat rate applies.
+        const perDay = Number(service.dailyRate || 0);
+        const isPerDay = perDay > 0 || String(service.chargeType || '').toUpperCase() === 'DAILY';
+        const counterRate = isPerDay && perDay > 0 ? perDay : Number(service.rate || 0);
         const discountedRate = applyDiscount(counterRate);
+
+        const chargeTotal = isPerDay
+          ? money(discountedRate * rentalDays * qty)
+          : money(discountedRate * qty);
+        const counterTotal = isPerDay
+          ? money(counterRate * rentalDays * qty)
+          : money(counterRate * qty);
+        const discounted = discountedRate < counterRate;
+        const counterNote = isPerDay
+          ? `Counter price: $${counterRate.toFixed(2)}/day × ${rentalDays} day(s) × ${qty} unit(s)`
+          : `Counter price: $${counterRate.toFixed(2)}/unit × ${qty} unit(s)`;
+
         await prisma.reservationCharge.create({
           data: {
             reservationId: reservation.id,
             source: 'ADDITIONAL_SERVICE_PRECHECKIN',
             sourceRefId: service.id,
-            name: discountedRate < counterRate ? `${service.name} (Pre-checkin rate)` : service.name,
-            rate: discountedRate,
-            total: discountedRate * qty,
-            quantity: qty,
+            name: discounted ? `${service.name} (Pre-checkin rate)` : service.name,
+            rate: money(discountedRate),
+            total: chargeTotal,
+            quantity: isPerDay ? rentalDays * qty : qty,
             selected: true,
             sortOrder: 10,
-            notes: discountedRate < counterRate ? `Counter price: $${counterRate.toFixed(2)}/unit, pre-checkin discount applied` : null
+            notes: discounted ? `${counterNote}, pre-checkin discount applied` : null
           }
         });
       }
