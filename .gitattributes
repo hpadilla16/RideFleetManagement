@@ -1,0 +1,35 @@
+# Normalize line endings across the repo.
+# Every text file is stored with LF in the git blob. On checkout Windows sees
+# LF too (no CRLF inflation on the working tree), which keeps diffs sane when
+# agents edit files from a Linux sandbox. If a Windows-only tool insists on
+# CRLF for something, add a targeted override below.
+
+* text=auto eol=lf
+
+# Shell scripts must be LF (bash refuses CRLF).
+*.sh text eol=lf
+*.bash text eol=lf
+
+# PowerShell scripts stay CRLF — Windows-native tooling prefers it.
+*.ps1 text eol=crlf
+
+# Binary files — never touch.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.pdf binary
+*.zip binary
+*.gz binary
+*.xlsx binary
+*.xls binary
+*.docx binary
+*.doc binary
+*.pptx binary
+*.ppt binary
+*.woff binary
+*.woff2 binary
+*.ttf binary
+*.otf binary
+*.eot binary
