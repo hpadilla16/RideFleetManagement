@@ -46,6 +46,7 @@ jobs:
           JWT_SECRET="ci-test-secret-do-not-use-in-prod"
           JWT_EXPIRES_IN="12h"
           ALLOW_PUBLIC_REGISTER="false"
+          RATE_LIMIT_DISABLED="1"
           SENTRY_DSN=""
           SENTRY_ENV="ci"
           SENTRY_RELEASE=""

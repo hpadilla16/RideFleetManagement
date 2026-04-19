@@ -35,6 +35,9 @@ export function createPublicRateLimitGuard(options = {}) {
   const maxRequests = Number.isFinite(options?.maxRequests) ? options.maxRequests : 60;
 
   return (req, res, next) => {
+    // CI / test bypass: when RATE_LIMIT_DISABLED=1 the guard becomes a passthrough.
+    // Never set this in production — it removes the brute-force protection on auth endpoints.
+    if (process.env.RATE_LIMIT_DISABLED === '1') return next();
     const currentTime = nowMs();
     cleanupExpired(rateLimitBuckets, currentTime);
     const bucketKey = `${name}:${requestIp(req)}`;
