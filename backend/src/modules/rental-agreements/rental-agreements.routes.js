@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import { rentalAgreementsService } from './rental-agreements.service.js';
+import logger from '../../lib/logger.js';
 
 export const rentalAgreementsRouter = Router();
 
@@ -144,9 +145,24 @@ rentalAgreementsRouter.get('/:id/print', async (req, res, next) => {
 rentalAgreementsRouter.post('/:id/email-agreement', async (req, res, next) => {
   try {
     await ensureAccessible(req.params.id, req.user);
-    const out = await rentalAgreementsService.emailAgreement(req.params.id, req.body || {}, req.user?.sub || null);
-    res.json(out);
+    // Fire-and-forget: Puppeteer PDF render + SMTP send used to block the
+    // response for 4-5s on checkout. The service schedules the heavy work via
+    // setImmediate (interim; SCALING_ROADMAP.md plans a Redis/BullMQ queue).
+    // We pass tenantId as defense-in-depth so the async findAgreement default
+    // can never cross tenants, even if ensureAccessible is later refactored.
+    // Super-admins get null → no tenant filter (matches crossTenantScopeFor).
+    const isSuperAdmin = String(req.user?.role || '').toUpperCase() === 'SUPER_ADMIN';
+    const tenantId = isSuperAdmin ? null : (req.user?.tenantId || null);
+    const out = await rentalAgreementsService.scheduleEmailDelivery(
+      req.params.id,
+      req.body || {},
+      req.user?.sub || null,
+      tenantId,
+      { logger }
+    );
+    res.status(202).json(out);
   } catch (e) {
+    if (e?.statusCode === 400) return res.status(400).json({ error: e.message });
     if (/not found/i.test(e.message)) return res.status(404).json({ error: e.message });
     if (/required/i.test(e.message)) return res.status(400).json({ error: e.message });
     next(e);

@@ -155,11 +155,15 @@ function Inner({ token, me, logout }) {
       }, token);
 
       // Auto-email PDF copy after successful checkout.
-      try {
-        await api(`/api/rental-agreements/${agreementId}/email-agreement`, { method: 'POST', body: JSON.stringify({}) }, token);
-      } catch {
-        // Non-blocking: checkout already completed.
-      }
+      // Backend responds 202 immediately and runs Puppeteer + SMTP in the
+      // background, so we intentionally do NOT await here. UI redirects right
+      // away; failures land in Sentry + an audit-log entry on the agreement.
+      api(`/api/rental-agreements/${agreementId}/email-agreement`, { method: 'POST', body: JSON.stringify({}) }, token)
+        .catch((err) => {
+          // Best-effort console visibility during dev — real error surface is
+          // Sentry backend + the auditLog entry on the agreement.
+          console.warn('[checkout] email-agreement dispatch failed (non-blocking):', err?.message || err);
+        });
 
       router.push(`/reservations/${id}`);
     } catch (e) { setMsg(e.message); }

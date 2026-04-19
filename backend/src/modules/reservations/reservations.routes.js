@@ -727,7 +727,18 @@ reservationsRouter.post('/:id/start-rental', async (req, res, next) => {
         metadata: JSON.stringify({ startRental: true, agreementId: agreement.id })
       }
     });
-    res.status(201).json(agreement);
+    // Slim response: web frontend only needs `id` (to chain into PUT /rental,
+    // POST /signature, POST /finalize). Mobile clients refetch via GET /:id
+    // when they need the full agreement tree. Cuts ~475 KB → ~200 bytes.
+    res.status(201).json({
+      id: agreement.id,
+      agreementNumber: agreement.agreementNumber,
+      reservationId: agreement.reservationId,
+      status: agreement.status,
+      total: agreement.total,
+      paidAmount: agreement.paidAmount,
+      balance: agreement.balance
+    });
   } catch (e) {
     if (/not found/i.test(e.message)) return res.status(404).json({ error: e.message });
     if (/cannot start/i.test(e.message)) return res.status(400).json({ error: e.message });
@@ -1136,6 +1147,7 @@ reservationsRouter.post('/:id/agreement/payments/manual', async (req, res, next)
     const row = await rentalAgreementsService.addManualPayment(agreementId, req.body || {}, req.user?.sub || null);
     res.json(row);
   } catch (e) {
+    if (/not found/i.test(String(e?.message || ''))) return res.status(404).json({ error: e.message });
     next(e);
   }
 });
