@@ -21,8 +21,8 @@ async function ensureTenantPack(tag) {
 
   const locationCode = `LOC-${tag.toUpperCase()}`;
   const location = await prisma.location.upsert({
-    where: { code: locationCode },
-    update: { tenantId: tenant.id, name: `Location ${tag.toUpperCase()}`, taxRate: 11.5 },
+    where: { tenantId_code: { tenantId: tenant.id, code: locationCode } },
+    update: { name: `Location ${tag.toUpperCase()}`, taxRate: 11.5 },
     create: { tenantId: tenant.id, code: locationCode, name: `Location ${tag.toUpperCase()}`, taxRate: 11.5, isActive: true }
   });
 
