@@ -32,3 +32,12 @@ Thumbs.db
 # Local backups
 backups/
 
+# Business deliverables — live in Google Drive, not in the repo
+# (contracts, brochures, training guides, competitive analysis, audits)
+/_drive-upload/
+/Ride_*.docx
+/RideFleet_*.docx
+/TRAINING_GUIDE.docx
+/TRAINING_GUIDE.md
+/Auditoria_*.md
+
