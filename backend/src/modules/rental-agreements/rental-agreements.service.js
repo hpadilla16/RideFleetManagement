@@ -1259,6 +1259,88 @@ function inspectionReportFromAgreement(agreement) {
   };
 }
 
+// Test-surface helper: the body of the finalize() $transaction callback,
+// extracted so we can verify with a fake `tx` that all writes go through the
+// transaction client (never through the global prisma) and that the steps
+// fire in the right order with the right conditional branches. Production
+// code calls this from inside prisma.$transaction(...).
+//
+// This function MUST only touch `tx.*`, never `prisma.*`. If you find
+// yourself wanting to read something here, do it BEFORE calling this helper
+// and pass the value through `ctx`.
+export async function applyFinalizeWritesTx(tx, ctx) {
+  if (ctx.creditApplied > 0 && ctx.customerIdForCredit) {
+    await tx.customer.update({
+      where: { id: ctx.customerIdForCredit },
+      data: {
+        creditBalance: ctx.nextCustomerCredit,
+        notes: ctx.creditNoteForCustomer
+      }
+    });
+  }
+
+  const updated = await tx.rentalAgreement.update({
+    where: { id: ctx.id },
+    data: {
+      status: 'FINALIZED',
+      paymentMethod: ctx.paymentMethod || null,
+      paymentReference: ctx.payload?.paymentReference ?? ctx.priorPaymentReference,
+      customerFirstName: ctx.customerFirstName,
+      customerLastName: ctx.customerLastName,
+      licenseNumber: ctx.licenseNumber,
+      dateOfBirth: ctx.dateOfBirth,
+      odometerOut: ctx.odometerOut,
+      fuelOut: ctx.fuelOut,
+      paidAmount: ctx.paidAmount,
+      balance: ctx.balance,
+      finalizedAt: new Date()
+    }
+  });
+
+  await tx.reservation.update({
+    where: { id: updated.reservationId },
+    data: { status: 'CHECKED_OUT' }
+  });
+
+  if (ctx.hasExplicitPaidAmount && ctx.paidAmount > 0 && ctx.paymentMethod) {
+    await tx.rentalAgreementPayment.create({
+      data: {
+        rentalAgreementId: ctx.id,
+        method: ctx.paymentMethod,
+        amount: ctx.paidAmount,
+        reference: ctx.payload?.paymentReference ?? null,
+        status: 'PAID'
+      }
+    });
+  }
+
+  if (ctx.creditApplied > 0) {
+    await tx.rentalAgreementPayment.create({
+      data: {
+        rentalAgreementId: ctx.id,
+        method: 'OTHER',
+        amount: ctx.creditApplied,
+        reference: 'CUSTOMER_CREDIT_AUTO_APPLIED',
+        status: 'PAID',
+        notes: 'Automatically applied from customer credit balance'
+      }
+    });
+  }
+
+  return updated;
+}
+
+// Test-surface helper: the body of the startFromReservation() chargesync
+// $transaction callback (the structuredRows path; the other 2 paths follow
+// the same shape). Same contract as applyFinalizeWritesTx — touch only `tx`.
+export async function applyChargesSyncTx(tx, { agreementId, normalizedRows, agreementUpdate }) {
+  await tx.rentalAgreementCharge.deleteMany({ where: { rentalAgreementId: agreementId } });
+  if (normalizedRows.length > 0) {
+    await tx.rentalAgreementCharge.createMany({ data: normalizedRows });
+  }
+  return tx.rentalAgreement.update({ where: { id: agreementId }, data: agreementUpdate });
+}
+
 export const rentalAgreementsService = {
   getAccessibleAgreement(id, scope = null) {
     return prisma.rentalAgreement.findFirst({
@@ -1339,19 +1421,24 @@ export const rentalAgreementsService = {
           }));
           const { subtotal, taxes, total } = structuredReservationTotals(normalizedRows);
 
-          await prisma.rentalAgreementCharge.deleteMany({ where: { rentalAgreementId: existing.id } });
-          await prisma.rentalAgreementCharge.createMany({ data: normalizedRows });
-
-          await prisma.rentalAgreement.update({
-            where: { id: existing.id },
-            data: {
-              notes: reservation.notes,
-              subtotal,
-              taxes,
-              total,
-              balance: Number((total - paid).toFixed(2))
-            }
-          });
+          // Atomic re-sync: charges wipe + insert + agreement totals must
+          // commit together. Without the transaction, a failure between
+          // deleteMany and createMany would leave the agreement with no
+          // line items, a state the UI doesn't handle gracefully.
+          await prisma.$transaction([
+            prisma.rentalAgreementCharge.deleteMany({ where: { rentalAgreementId: existing.id } }),
+            prisma.rentalAgreementCharge.createMany({ data: normalizedRows }),
+            prisma.rentalAgreement.update({
+              where: { id: existing.id },
+              data: {
+                notes: reservation.notes,
+                subtotal,
+                taxes,
+                total,
+                balance: Number((total - paid).toFixed(2))
+              }
+            })
+          ], { timeout: 10000 });
           return this.getById(existing.id);
         }
 
@@ -1396,24 +1483,29 @@ export const rentalAgreementsService = {
           }));
           const { subtotal, taxes, total } = structuredReservationTotals(normalizedRows);
 
-          await prisma.rentalAgreementCharge.deleteMany({ where: { rentalAgreementId: existing.id } });
-          await prisma.rentalAgreementCharge.createMany({
-            data: normalizedRows.map((r, idx) => ({
-              rentalAgreementId: existing.id,
-              code: r.code || null,
-              name: r.name,
-              chargeType: r.chargeType,
-              quantity: r.quantity,
-              rate: r.rate,
-              total: r.total,
-              taxable: r.taxable,
-              selected: true,
-              sortOrder: idx,
-              source: r.source || null
-            }))
-          });
-
-          await prisma.rentalAgreement.update({ where: { id: existing.id }, data: { notes: reservation.notes, subtotal, taxes, total, balance: Number((total - paid).toFixed(2)) } });
+          // Atomic re-sync (incomingRows path).
+          await prisma.$transaction([
+            prisma.rentalAgreementCharge.deleteMany({ where: { rentalAgreementId: existing.id } }),
+            prisma.rentalAgreementCharge.createMany({
+              data: normalizedRows.map((r, idx) => ({
+                rentalAgreementId: existing.id,
+                code: r.code || null,
+                name: r.name,
+                chargeType: r.chargeType,
+                quantity: r.quantity,
+                rate: r.rate,
+                total: r.total,
+                taxable: r.taxable,
+                selected: true,
+                sortOrder: idx,
+                source: r.source || null
+              }))
+            }),
+            prisma.rentalAgreement.update({
+              where: { id: existing.id },
+              data: { notes: reservation.notes, subtotal, taxes, total, balance: Number((total - paid).toFixed(2)) }
+            })
+          ], { timeout: 10000 });
           return this.getById(existing.id);
         }
 
@@ -1492,20 +1584,22 @@ export const rentalAgreementsService = {
         }
         chargeRows.push({ rentalAgreementId: existing.id, name: `Tax (${taxRate.toFixed(2)}%)`, chargeType: 'TAX', quantity: 1, rate: taxes, total: taxes, taxable: false, selected: true, sortOrder: chargeRows.length });
 
-        await prisma.rentalAgreementCharge.deleteMany({ where: { rentalAgreementId: existing.id } });
-        await prisma.rentalAgreementCharge.createMany({ data: chargeRows });
-
-        await prisma.rentalAgreement.update({
-          where: { id: existing.id },
-          data: {
-            tenantId: existing.tenantId || reservation.tenantId || null,
-            notes: reservation.notes,
-            subtotal,
-            taxes,
-            total,
-            balance: Number((total - paid).toFixed(2))
-          }
-        });
+        // Atomic re-sync (default chargeRows path — auto-fees + services + tax).
+        await prisma.$transaction([
+          prisma.rentalAgreementCharge.deleteMany({ where: { rentalAgreementId: existing.id } }),
+          prisma.rentalAgreementCharge.createMany({ data: chargeRows }),
+          prisma.rentalAgreement.update({
+            where: { id: existing.id },
+            data: {
+              tenantId: existing.tenantId || reservation.tenantId || null,
+              notes: reservation.notes,
+              subtotal,
+              taxes,
+              total,
+              balance: Number((total - paid).toFixed(2))
+            }
+          })
+        ], { timeout: 10000 });
       }
       return this.getById(existing.id);
     }
@@ -3624,7 +3718,13 @@ export const rentalAgreementsService = {
 
     let balance = Number((Number(agreement.total) - paidAmount).toFixed(2));
     let creditApplied = 0;
+    let creditNoteForCustomer = null;
+    let nextCustomerCredit = null;
+    let customerIdForCredit = null;
 
+    // Read-only lookups outside the tx — they don't need atomicity with the
+    // writes and keep the tx footprint small (Prisma's interactive tx holds
+    // a connection open for its full duration).
     const reservationWithCustomer = await prisma.reservation.findUnique({
       where: { id: agreement.reservationId },
       select: { customerId: true }
@@ -3640,65 +3740,42 @@ export const rentalAgreementsService = {
         creditApplied = Math.min(availableCredit, balance);
         balance = Number((balance - creditApplied).toFixed(2));
 
-        const nextCredit = Number((availableCredit - creditApplied).toFixed(2));
+        nextCustomerCredit = Number((availableCredit - creditApplied).toFixed(2));
         const note = `[CREDIT AUTO-APPLIED ${new Date().toISOString()}] -${creditApplied.toFixed(2)} to agreement ${agreement.agreementNumber}`;
-        await prisma.customer.update({
-          where: { id: reservationWithCustomer.customerId },
-          data: {
-            creditBalance: nextCredit,
-            notes: customer?.notes ? `${customer.notes}\n${note}` : note
-          }
-        });
+        creditNoteForCustomer = customer?.notes ? `${customer.notes}\n${note}` : note;
+        customerIdForCredit = reservationWithCustomer.customerId;
       }
     }
 
-    const updated = await prisma.rentalAgreement.update({
-      where: { id },
-      data: {
-        status: 'FINALIZED',
-        paymentMethod: paymentMethod || null,
-        paymentReference: payload.paymentReference ?? agreement.paymentReference,
-        customerFirstName,
-        customerLastName,
-        licenseNumber,
-        dateOfBirth,
-        odometerOut,
-        fuelOut,
-        paidAmount,
-        balance,
-        finalizedAt: new Date()
-      }
-    });
-
-    await prisma.reservation.update({
-      where: { id: updated.reservationId },
-      data: { status: 'CHECKED_OUT' }
-    });
-
-    if (hasExplicitPaidAmount && paidAmount > 0 && paymentMethod) {
-      await prisma.rentalAgreementPayment.create({
-        data: {
-          rentalAgreementId: id,
-          method: paymentMethod,
-          amount: paidAmount,
-          reference: payload.paymentReference ?? null,
-          status: 'PAID'
-        }
-      });
-    }
-
-    if (creditApplied > 0) {
-      await prisma.rentalAgreementPayment.create({
-        data: {
-          rentalAgreementId: id,
-          method: 'OTHER',
-          amount: creditApplied,
-          reference: 'CUSTOMER_CREDIT_AUTO_APPLIED',
-          status: 'PAID',
-          notes: 'Automatically applied from customer credit balance'
-        }
-      });
-    }
+    // All the finalization writes go in one atomic transaction. Without this,
+    // a failure between the agreement update and the reservation update would
+    // leave the agreement marked FINALIZED but the reservation still
+    // CONFIRMED — a state the UI presents as "checkout is half-done" with no
+    // recovery path. The customer credit deduction is included so we never
+    // debit a customer for a checkout that didn't actually finalize.
+    const txCtx = {
+      id,
+      paymentMethod,
+      payload,
+      priorPaymentReference: agreement.paymentReference,
+      customerFirstName,
+      customerLastName,
+      licenseNumber,
+      dateOfBirth,
+      odometerOut,
+      fuelOut,
+      paidAmount,
+      balance,
+      hasExplicitPaidAmount,
+      creditApplied,
+      customerIdForCredit,
+      nextCustomerCredit,
+      creditNoteForCustomer
+    };
+    let updated;
+    await prisma.$transaction(async (tx) => {
+      updated = await applyFinalizeWritesTx(tx, txCtx);
+    }, { timeout: 10000 });
 
     return this.getById(id);
   },

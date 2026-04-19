@@ -20,7 +20,7 @@
     "test:auth": "node --test src/modules/auth/auth-validation.test.mjs",
     "test:cache": "node --test src/lib/cache.test.mjs",
     "test:puppeteer": "node --test src/lib/puppeteer-browser.test.mjs",
-    "test:rental-agreements": "node --test src/modules/rental-agreements/rental-agreements-email-async.test.mjs",
+    "test:rental-agreements": "node --test src/modules/rental-agreements/rental-agreements-email-async.test.mjs src/modules/rental-agreements/rental-agreements-finalize-tx.test.mjs",
     "test:commissions": "node --test src/modules/commissions/car-sharing-commission.test.mjs",
     "verify": "npm run test",
     "prisma:generate": "prisma generate",
