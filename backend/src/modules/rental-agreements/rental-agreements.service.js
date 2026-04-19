@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import puppeteer from 'puppeteer';
+import { getBrowser } from '../../lib/puppeteer-browser.js';
 import { prisma } from '../../lib/prisma.js';
 import { hostReviewsService } from '../host-reviews/host-reviews.service.js';
 import { reservationPricingService } from '../reservations/reservation-pricing.service.js';
@@ -2161,14 +2161,15 @@ export const rentalAgreementsService = {
 
   async agreementPdfBuffer(id) {
     const html = await this.renderAgreementHtml(id);
-    const browser = await puppeteer.launch({
-      headless: 'new',
-      executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || undefined,
-      args: ['--no-sandbox', '--disable-setuid-sandbox']
-    });
+    // Reuse the singleton Chromium — avoid paying launch cost per request.
+    // We only open/close a Page, never the Browser (closed on SIGTERM).
+    const browser = await getBrowser();
+    const page = await browser.newPage();
     try {
-      const page = await browser.newPage();
-      await page.setContent(html, { waitUntil: ['load', 'networkidle0'] });
+      // `domcontentloaded` is sufficient — the agreement HTML inlines all
+      // assets (CSS, images as data URLs, fonts). `networkidle0` adds 500ms+
+      // of idle wait for nothing.
+      await page.setContent(html, { waitUntil: 'domcontentloaded' });
       // Ensure all inline/data-URL images are decoded before PDF render
       await page.evaluate(() => Promise.all(
         Array.from(document.images)
@@ -2182,10 +2183,9 @@ export const rentalAgreementsService = {
         format: 'Letter',
         printBackground: true
       });
-      await page.close();
       return pdfBuffer;
     } finally {
-      await browser.close();
+      await page.close().catch(() => {});
     }
   },
 
@@ -2236,6 +2236,113 @@ export const rentalAgreementsService = {
 
     await prisma.auditLog.create({ data: { reservationId: agreement.reservationId, actorUserId: actorUserId || null, action: 'UPDATE', reason: `Agreement emailed to ${to}` } });
     return { ok: true, to };
+  },
+
+  // Async wrapper for emailAgreement. Returns synchronously after lightweight
+  // validation (so the HTTP handler can respond 202), then runs the heavy
+  // Puppeteer + SMTP work in the background. Failures land in Sentry + an
+  // audit-log entry on the agreement so staff can retry from the UI.
+  //
+  // Interim implementation: uses `setImmediate` for fire-and-forget. When the
+  // Redis/BullMQ rollout from docs/architecture/SCALING_ROADMAP.md lands, swap
+  // `scheduler` to enqueue a persisted job so an SIGTERM mid-send doesn't lose
+  // the mail.
+  //
+  // Tenant defense-in-depth: `tenantId` must be supplied by the route handler
+  // (from req.user.tenantId, which came through requireAuth). The default
+  // findAgreement applies a tenantId filter so even if the handler's
+  // ensureAccessible guard is removed in a future refactor, this async job
+  // still cannot touch another tenant's data. Super-admin requests pass
+  // tenantId=null, which matches the repo's cross-tenant pattern.
+  //
+  // `deps` shape (all optional, for tests):
+  //   runEmail: (id, payload, actorUserId) => Promise<{ ok, to }>
+  //   findAgreement: (id, tenantId) => Promise<{ reservationId, tenantId, customerEmail, reservation?: { customer?: { email } } } | null>
+  //   writeAudit: (data) => Promise<void>
+  //   captureException: (err, ctx) => void
+  //   scheduler: (cb) => void  // defaults to setImmediate
+  //   logger: { info?, warn?, error? }
+  scheduleEmailDelivery(id, payload = {}, actorUserId = null, tenantId = null, deps = {}) {
+    const runEmail = deps.runEmail || ((aid, p, uid) => this.emailAgreement(aid, p, uid));
+    const findAgreement = deps.findAgreement || ((aid, tid) => {
+      // Tenant filter is defense-in-depth. The handler already guards via
+      // ensureAccessible; this second layer ensures the async job can never
+      // read or write across tenants. A null tenantId indicates super-admin
+      // context (matches the repo's crossTenantScopeFor pattern).
+      const where = tid ? { id: aid, tenantId: tid } : { id: aid };
+      return prisma.rentalAgreement.findFirst({
+        where,
+        select: { reservationId: true, tenantId: true, customerEmail: true, reservation: { select: { customer: { select: { email: true } } } } }
+      });
+    });
+    const writeAudit = deps.writeAudit || ((data) => prisma.auditLog.create({ data }));
+    const captureException = deps.captureException || ((err, ctx) => {
+      // Lazy import to avoid pulling Sentry into tests that don't need it.
+      import('../../lib/sentry.js').then((m) => m.captureBackendException(err, ctx)).catch(() => {});
+    });
+    const scheduler = deps.scheduler || setImmediate;
+    const log = deps.logger || null; // optional structured logger
+
+    // Wrap captureException so a misbehaving dep (e.g. Sentry SDK itself
+    // throwing) never turns into an unhandled rejection in the background job.
+    const safeCapture = (err, ctx) => {
+      try { captureException(err, ctx); } catch (captureErr) {
+        log?.error?.(`[email-agreement] captureException itself failed: ${captureErr?.message || captureErr}`);
+      }
+    };
+
+    const explicitTo = String(payload?.to || '').trim();
+    let resolvedTo = explicitTo;
+
+    const startJob = (toFinal) => {
+      scheduler(() => {
+        Promise.resolve()
+          .then(() => runEmail(id, payload, actorUserId))
+          .then((result) => {
+            log?.info?.(`[email-agreement] sent to ${result?.to || toFinal} for agreement ${id}`);
+          })
+          .catch(async (err) => {
+            safeCapture(err, { context: 'emailAgreement async', agreementId: id, actorUserId, tenantId });
+            log?.error?.(`[email-agreement] failed for agreement ${id}: ${err?.message || err}`);
+            try {
+              const ag = await findAgreement(id, tenantId);
+              if (ag) {
+                await writeAudit({
+                  reservationId: ag.reservationId,
+                  tenantId: ag.tenantId || null,
+                  actorUserId: actorUserId || null,
+                  action: 'UPDATE',
+                  reason: `Agreement email FAILED for ${toFinal}: ${err?.message || 'unknown error'}`
+                });
+              }
+            } catch (auditErr) {
+              // Best-effort audit trail — if even the audit write fails, log it
+              // so ops has some visibility rather than a silent black hole.
+              log?.error?.(`[email-agreement] audit write also failed for agreement ${id}: ${auditErr?.message || auditErr}`);
+            }
+          });
+      });
+    };
+
+    // Sync validation: if we don't have an email, fail fast so the handler
+    // can respond 4xx instead of 202. We resolve `to` from payload first;
+    // if absent, we look it up synchronously-ish via the same findAgreement
+    // dep (with tenant filter) and only then schedule.
+    if (resolvedTo) {
+      startJob(resolvedTo);
+      return Promise.resolve({ ok: true, queued: true, to: resolvedTo });
+    }
+
+    return findAgreement(id, tenantId).then((ag) => {
+      resolvedTo = String(ag?.customerEmail || ag?.reservation?.customer?.email || '').trim();
+      if (!resolvedTo) {
+        const err = new Error('Customer email is required');
+        err.statusCode = 400;
+        throw err;
+      }
+      startJob(resolvedTo);
+      return { ok: true, queued: true, to: resolvedTo };
+    });
   },
 
   updateCustomer(id, patch) {

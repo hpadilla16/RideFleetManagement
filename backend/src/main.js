@@ -38,6 +38,7 @@ import { smsRouter } from './modules/sms/sms.routes.js';
 import { knowledgeBaseRouter } from './modules/knowledge-base/knowledge-base.routes.js';
 import { captureBackendException, flushSentry, initSentry, isSentryEnabled } from './lib/sentry.js';
 import { appErrorHandler } from './lib/errors.js';
+import { closeBrowser } from './lib/puppeteer-browser.js';
 
 assertAuthConfig();
 initSentry();
@@ -144,6 +145,7 @@ app.listen(port, () => {
 process.on('SIGINT', async () => {
   stopTollAutoSyncScheduler();
   stopHandoffReminderScheduler();
+  await closeBrowser();
   await flushSentry();
   await prisma.$disconnect();
   process.exit(0);
@@ -152,6 +154,7 @@ process.on('SIGINT', async () => {
 process.on('SIGTERM', async () => {
   stopTollAutoSyncScheduler();
   stopHandoffReminderScheduler();
+  await closeBrowser();
   await flushSentry();
   await prisma.$disconnect();
   process.exit(0);
