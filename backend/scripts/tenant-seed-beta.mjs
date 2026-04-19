@@ -26,13 +26,20 @@ async function ensureTenantPack(tag) {
     create: { tenantId: tenant.id, code: locationCode, name: `Location ${tag.toUpperCase()}`, taxRate: 11.5, isActive: true }
   });
 
+  const vehicleTypeCode = `VT-${tag.toUpperCase()}`;
+  const vehicleType = await prisma.vehicleType.upsert({
+    where: { tenantId_code: { tenantId: tenant.id, code: vehicleTypeCode } },
+    update: { name: `Compact ${tag.toUpperCase()}` },
+    create: { tenantId: tenant.id, code: vehicleTypeCode, name: `Compact ${tag.toUpperCase()}`, description: `Beta seed vehicle type ${tag.toUpperCase()}` }
+  });
+
   const phone = tag === 'a' ? '+1555000101' : '+1555000202';
   const existingCustomer = await prisma.customer.findFirst({ where: { phone } });
   const customer = existingCustomer
     ? await prisma.customer.update({ where: { id: existingCustomer.id }, data: { tenantId: tenant.id, firstName: `Cust${tag.toUpperCase()}`, lastName: 'Beta' } })
     : await prisma.customer.create({ data: { tenantId: tenant.id, firstName: `Cust${tag.toUpperCase()}`, lastName: 'Beta', phone, email: `cust+${tag}@fleetbeta.local` } });
 
-  return { tenantId: tenant.id, userId: user.id, locationId: location.id, customerId: customer.id };
+  return { tenantId: tenant.id, userId: user.id, locationId: location.id, vehicleTypeId: vehicleType.id, customerId: customer.id };
 }
 
 const out = {
