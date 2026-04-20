@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import { rentalAgreementsService } from './rental-agreements.service.js';
+import { compactAgreementResponse } from './rental-agreements-compact.js';
 import logger from '../../lib/logger.js';
 
 export const rentalAgreementsRouter = Router();
@@ -173,7 +174,7 @@ rentalAgreementsRouter.post('/:id/signature', async (req, res, next) => {
   try {
     await ensureEditable(req.params.id, req.user);
     const row = await rentalAgreementsService.signAgreement(req.params.id, req.body || {}, req.user?.sub || null, req.ip || null);
-    res.json(row);
+    res.json(compactAgreementResponse(row));
   } catch (e) {
     if (/not found/i.test(e.message)) return res.status(404).json({ error: e.message });
     if (/required/i.test(e.message)) return res.status(400).json({ error: e.message });
@@ -386,7 +387,7 @@ rentalAgreementsRouter.post('/:id/finalize', async (req, res, next) => {
   try {
     await ensureEditable(req.params.id, req.user);
     const row = await rentalAgreementsService.finalize(req.params.id, req.body || {});
-    res.json(row);
+    res.json(compactAgreementResponse(row));
   } catch (e) {
     if (/not found/i.test(e.message)) return res.status(404).json({ error: e.message });
     if (/required|payment at booking\/pickup|selected charge|minimum age|maximum age|below minimum age|exceeds maximum age/i.test(String(e?.message || ''))) {

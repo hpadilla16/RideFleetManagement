@@ -19,6 +19,7 @@ import { franchiseService } from '../settings/franchise.service.js';
 import { crossTenantScopeFor as scopeFor } from '../../lib/tenant-scope.js';
 import { parseLocationConfig } from '../../lib/location-config.js';
 import { cache } from '../../lib/cache.js';
+import { compactStartRentalResponse } from './start-rental-compact.js';
 
 export const reservationsRouter = Router();
 
@@ -730,15 +731,7 @@ reservationsRouter.post('/:id/start-rental', async (req, res, next) => {
     // Slim response: web frontend only needs `id` (to chain into PUT /rental,
     // POST /signature, POST /finalize). Mobile clients refetch via GET /:id
     // when they need the full agreement tree. Cuts ~475 KB → ~200 bytes.
-    res.status(201).json({
-      id: agreement.id,
-      agreementNumber: agreement.agreementNumber,
-      reservationId: agreement.reservationId,
-      status: agreement.status,
-      total: agreement.total,
-      paidAmount: agreement.paidAmount,
-      balance: agreement.balance
-    });
+    res.status(201).json(compactStartRentalResponse(agreement));
   } catch (e) {
     if (/not found/i.test(e.message)) return res.status(404).json({ error: e.message });
     if (/cannot start/i.test(e.message)) return res.status(400).json({ error: e.message });
