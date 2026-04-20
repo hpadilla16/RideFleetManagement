@@ -5,7 +5,6 @@ import { useParams, useRouter } from 'next/navigation';
 import { AuthGate } from '../../../../components/AuthGate';
 import { AppShell } from '../../../../components/AppShell';
 import { api, API_BASE } from '../../../../lib/client';
-import { syncRentalAndInspection } from './checkout-sync';
 
 export default function Page() {
   return <AuthGate>{({ token, me, logout }) => <Inner token={token} me={me} logout={logout} />}</AuthGate>;
@@ -48,6 +47,14 @@ function Inner({ token, me, logout }) {
   const ensureAgreementId = async () => {
     const out = await api(`/api/reservations/${id}/start-rental`, { method: 'POST', body: JSON.stringify({}) }, token);
     return out?.id;
+  };
+
+  const ensureCheckoutInspectionComplete = async (agreementId) => {
+    const report = await api(`/api/rental-agreements/${agreementId}/inspection-report`, {}, token);
+    if (!report?.checkoutInspection?.at) {
+      throw new Error('Checkout inspection is required before completing check-out');
+    }
+    return report;
   };
 
   const p = (e, c) => {
@@ -118,21 +125,17 @@ function Inner({ token, me, logout }) {
       const agreementId = await ensureAgreementId();
       if (!agreementId) throw new Error('No rental agreement available for checkout');
 
-      // PR 4: parallelize PUT /rental and GET /inspection-report. They are
-      // independent (neither reads what the other produces), so overlapping
-      // their RTT trims ~300-600 ms off the checkout. `syncRentalAndInspection`
-      // also enforces the "checkout inspection must be complete" guard that
-      // used to run sequentially after the PUT.
-      await syncRentalAndInspection(
-        agreementId,
-        {
+      await api(`/api/rental-agreements/${agreementId}/rental`, {
+        method: 'PUT',
+        body: JSON.stringify({
           vehicleId: form.vehicleId,
           odometerOut: Number(form.odometerOut || 0),
           fuelOut: Number(form.fuelOut || 0),
           cleanlinessOut: Number(form.cleanlinessOut || 5)
-        },
-        { api, token }
-      );
+        })
+      }, token);
+
+      await ensureCheckoutInspectionComplete(agreementId);
 
       await api(`/api/rental-agreements/${agreementId}/signature`, {
         method: 'POST',
@@ -252,4 +255,13 @@ function Inner({ token, me, logout }) {
                   </div>
                 ))}
               </div>
-              <div style={{ marginTop: 16, display: 'flex', justifyContent: 'flex-
+              <div style={{ marginTop: 16, display: 'flex', justifyContent: 'flex-end' }}>
+                <button className="ios-action-btn" onClick={() => setCheckoutErrors(null)} style={{ padding: '10px 24px' }}>Got it</button>
+              </div>
+            </div>
+          </div>
+        )}
+      </section>
+    </AppShell>
+  );
+}
