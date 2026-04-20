@@ -1,12 +1,15 @@
 import { api, login, summary } from './_api.mjs';
 
-function nextWeekdayAtHour(targetWeekday, hourUtc) {
+// Generate a date N days from "now" at a fixed UTC hour. Chronologically
+// deterministic — the previous `nextWeekdayAtHour` helper was weekday-
+// dependent: when the CI run landed on a Monday, asking for "next Monday"
+// (target weekday 1) returned 7 days out while "next Tuesday" (target 2)
+// returned 1 day out, producing pickupAt > returnAt and failing the
+// reservation validator. Replaced 2026-04-20 during v0.9.0-beta.3 recovery.
+function daysAheadAtHour(daysAhead, hourUtc) {
   const d = new Date();
+  d.setUTCDate(d.getUTCDate() + daysAhead);
   d.setUTCHours(hourUtc, 0, 0, 0);
-  for (let i = 0; i < 14; i += 1) {
-    d.setUTCDate(d.getUTCDate() + 1);
-    if (d.getUTCDay() === targetWeekday) return d.toISOString();
-  }
   return d.toISOString();
 }
 
@@ -27,8 +30,8 @@ const createRes = (token, c, l, vt, n) => api('POST', '/reservations', token, {
   vehicleTypeId: vt.id,
   pickupLocationId: l.id,
   returnLocationId: l.id,
-  pickupAt: nextWeekdayAtHour(1, 16),
-  returnAt: nextWeekdayAtHour(2, 16),
+  pickupAt: daysAheadAtHour(7, 16),
+  returnAt: daysAheadAtHour(8, 16),
   dailyRate: 20,
   estimatedTotal: 40,
   status: 'CONFIRMED',
