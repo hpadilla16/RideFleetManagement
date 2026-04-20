@@ -238,7 +238,11 @@ export const publicBookingService = {
         visibilityMode: listing.pickupSpot?.visibilityMode || 'REVEAL_AFTER_BOOKING',
         exactLocationHidden: !!listing.pickupSpot?.exactLocationHidden,
         primaryImageUrl: listing.primaryImageUrl || '',
-        imageUrls: listing.imageUrls || []
+        imageUrls: listing.imageUrls || [],
+        // `photos` is the canonical shape for native mobile clients that expect
+        // structured image metadata. `imageUrls` is retained for backwards
+        // compatibility with existing web/admin consumers — do not remove.
+        photos: (listing.imageUrls || []).map((url) => ({ url, caption: null }))
       }))
     };
   },
@@ -543,6 +547,8 @@ export const publicBookingService = {
         })),
         primaryImageUrl: result.listing.primaryImageUrl || '',
         imageUrls: result.listing.imageUrls || [],
+        // Canonical shape for native clients (see notes above).
+        photos: (result.listing.imageUrls || []).map((url) => ({ url, caption: null })),
         quote: {
           tripDays: Number(result.quote?.tripDays || 0),
           subtotal: money(result.quote?.subtotal),
@@ -852,13 +858,27 @@ export const publicBookingService = {
       orderBy: [{ requestedAt: 'desc' }]
     });
 
+    // Issue a guest-role JWT alongside the magic-link session data so native
+    // mobile clients (ride-fleet-car-sharing-app) can treat the redeem as a
+    // completed sign-in. Expiry is handled by auth.service (currently 7d) and
+    // surfaced to clients via `jwtExpiresInSeconds` so they can schedule
+    // re-auth before the token lapses.
+    const jwtExpiresIn = authService.guestJwtExpiresIn();
+    const jwtExpiresInSeconds =
+      typeof jwtExpiresIn === 'string' && jwtExpiresIn.endsWith('d')
+        ? Number.parseInt(jwtExpiresIn, 10) * 24 * 60 * 60
+        : null;
+
     return {
       customer: {
         id: primary.id,
         firstName: primary.firstName,
         lastName: primary.lastName,
-        email: primary.email
+        email: primary.email,
+        tenantId: primary.tenantId || null
       },
+      jwt: authService.issueGuestToken(primary),
+      jwtExpiresInSeconds,
       bookings,
       pendingReviews: pendingReviews.map((r) => ({
         id: r.id,

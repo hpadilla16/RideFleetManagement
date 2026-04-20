@@ -2100,6 +2100,11 @@ export const bookingEngineService = {
         id: trip.id,
         tripCode: trip.tripCode,
         status: trip.status,
+        // Surface pickupAt/returnAt at the top level of the trip payload so
+        // native mobile clients don't have to reach into trip.reservation.*.
+        // Web consumers already use the display fields below via other paths.
+        pickupAt: trip?.reservation?.pickupAt || null,
+        returnAt: trip?.reservation?.returnAt || null,
         quotedTotal: money(trip.quotedTotal),
         hostGrossRevenue: money(trip.hostGrossRevenue),
         hostServiceFeeRate: money(trip.hostServiceFeeRate),
