@@ -21,6 +21,9 @@
 
 set -euo pipefail
 
+# Ensure `aws` via snap (/snap/bin/) is on PATH even in minimal environments.
+export PATH="/snap/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:$PATH"
+
 if [ $# -lt 2 ]; then
   cat <<'USAGE' >&2
 Usage: ops/restore.sh <s3-dump-key> <target-db>

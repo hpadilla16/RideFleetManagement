@@ -26,6 +26,10 @@
 
 set -euo pipefail
 
+# Ensure `aws` and other common locations are on PATH even when invoked from
+# cron (which has a minimal default PATH). `aws` via snap lives in /snap/bin/.
+export PATH="/snap/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:$PATH"
+
 # -------- Configuration (override via env if needed) --------
 : "${BACKUP_DIR:=/var/backups/ridefleet}"
 : "${S3_BUCKET:=ridefleet-backup}"
