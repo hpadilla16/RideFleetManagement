@@ -31,12 +31,26 @@ snap install aws-cli --classic
 aws --version   # verify; expect aws-cli/1.x or 2.x
 ```
 
-Install `postgresql-client` for `pg_dump` / `pg_restore` on the host:
+Install `postgresql-client-17` from the official PostgreSQL APT repo (`pgdg`). Ubuntu 24.04's default `postgresql-client` is version 16, which **refuses** to dump from Supabase's PG 17 server (version mismatch is a hard error, not a warning). pgdg provides current versions:
 
 ```bash
-apt update && apt install -y postgresql-client
-pg_dump --version   # should be 16.x or 17.x, compatible with Supabase server
+# Add the pgdg repo
+install -d /usr/share/postgresql-common/pgdg
+curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc \
+  -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc
+echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" \
+  > /etc/apt/sources.list.d/pgdg.list
+apt update
+
+# Install pg-client-17 and drop pg-client-16 so `pg_dump` on PATH points to 17
+apt install -y postgresql-client-17
+apt remove -y postgresql-client-16 postgresql-client 2>/dev/null || true
+
+# Verify — should report PostgreSQL 17.x
+pg_dump --version
 ```
+
+Note: `ops/backup.sh` auto-discovers the newest `pg_dump` under `/usr/lib/postgresql/*/bin/`, so as long as pg-client-17 is installed, the script picks it up regardless of what `pg_dump` on PATH points to. When Supabase moves to PG 18 eventually, just `apt install postgresql-client-18` and the script adapts.
 
 ### 2. Configure the `digitalocean` profile
 
@@ -141,44 +155,83 @@ Output is sorted chronologically; pick the key you want.
 
 ---
 
-## Restore procedure — SCRATCH DATABASE (for rehearsal or testing)
+## Restore procedure — SCRATCH CONTAINER (for monthly rehearsal)
 
-Use this for the monthly rehearsal or for investigating historical data without touching production.
+Use this to prove the backup is actually restorable. A backup you've never tested is not a backup.
 
 ```bash
 cd /root/RideFleetManagement
-ops/restore.sh daily/fleet-prod-2026-04-21-020003.dump fleet_scratch
+./ops/restore.sh daily/fleet-prod-2026-04-21-171949.dump
 ```
 
 Script will:
-1. Download the dump from Spaces to `/var/backups/ridefleet/restore/`.
-2. DROP and recreate the `fleet_scratch` database inside `fleet-db-prod`.
-3. Run `pg_restore` to populate it.
-4. Print the table count as a sanity check.
+1. Download the dump from DO Spaces to `/var/backups/ridefleet/restore/`.
+2. Start a throwaway `fleet-db-scratch` container (`postgres:17-alpine`).
+3. Run `pg_restore` into the `fleet_scratch` database inside it.
+4. Print table count + row counts for key tables (Tenant, Reservation, RentalAgreement, Vehicle, Customer) as sanity check.
+5. Leave the container running for you to inspect.
 
-Verify the restored DB:
-
-```bash
-docker compose -f docker-compose.prod.yml exec db \
-    psql -U postgres -d fleet_scratch -c '\dt'
-
-docker compose -f docker-compose.prod.yml exec db \
-    psql -U postgres -d fleet_scratch \
-    -c 'SELECT count(*) FROM "Reservation";'
-```
-
-When done, clean up:
+Inspect the restored DB:
 
 ```bash
-docker compose -f docker-compose.prod.yml exec db \
-    psql -U postgres -d postgres -c 'DROP DATABASE fleet_scratch;'
+docker exec -it fleet-db-scratch psql -U postgres -d fleet_scratch
+# (\dt to list tables, \q to exit)
+
+docker exec fleet-db-scratch psql -U postgres -d fleet_scratch \
+    -c 'SELECT MAX("createdAt") FROM "Reservation";'
+# ↑ should be close to the backup's timestamp
 ```
+
+When done, clean up the scratch container:
+
+```bash
+docker rm -f fleet-db-scratch
+rm -f /var/backups/ridefleet/restore/*.dump
+```
+
+**Note on versions:** the scratch container runs PG 17 (matches Supabase's production version) regardless of what's in the local `fleet-db-prod` container. That container remains untouched by this script — it's just sitting there empty, as before. We may retire it in a future Wave once we confirm it has no purpose.
 
 ---
 
 ## Restore procedure — PRODUCTION DATABASE (EMERGENCY)
 
-**Do not use this procedure without reading it through twice first.** This will drop the live DB.
+**Do not use this procedure without reading it through twice first.** In our topology, the production database is on Supabase. `ops/restore.sh` as currently written restores into a scratch container, not into Supabase — that's intentional (an automated script that can overwrite the live DB is too dangerous). Production restore is a manual procedure coordinating with Supabase.
+
+### If Supabase data is intact but corrupted / wrong
+
+Use Supabase's built-in Point-in-Time Recovery (Pro plan feature, $25/mo). In the Supabase dashboard → Database → Backups → PITR, roll back to the exact moment before the incident. This is always faster and safer than restoring from our off-site `.dump`.
+
+### If Supabase is lost / project deleted (disaster)
+
+1. **Stop application writes** — scale backend containers to 0 so nothing writes to a partially-restored DB:
+   ```bash
+   cd /root/RideFleetManagement
+   docker compose -f docker-compose.prod.yml stop backend
+   ```
+2. **Provision a new Supabase project** (or new PG instance of your choice). Get its direct connection URL (session mode, port 5432).
+3. **Download the latest dump** to the droplet:
+   ```bash
+   aws --profile digitalocean --endpoint-url https://nyc3.digitaloceanspaces.com \
+       s3 ls s3://ridefleet-backup/daily/ --human-readable
+   # pick the latest; then:
+   aws --profile digitalocean --endpoint-url https://nyc3.digitaloceanspaces.com \
+       s3 cp s3://ridefleet-backup/daily/<latest-key> /tmp/recovery.dump
+   ```
+4. **pg_restore into the new Postgres**:
+   ```bash
+   pg_restore -d "postgresql://postgres:<new-password>@<new-host>:5432/postgres" \
+     --no-owner --no-privileges --clean --if-exists /tmp/recovery.dump
+   ```
+5. **Update `backend/.env`** with the new DATABASE_URL, restart backend:
+   ```bash
+   docker compose -f docker-compose.prod.yml up -d backend
+   curl -sS http://localhost:4000/health  # verify database:true
+   ```
+6. **Announce completion** in team channel. Include backup timestamp used; anything written after that timestamp is lost.
+
+### If you're unsure which scenario you're in
+
+Contact Supabase support first (check the status page, open a ticket). Most incidents don't require a full restore — PITR fixes them.
 
 ### Pre-flight (5 minutes, cannot be skipped)
 

@@ -55,7 +55,19 @@ fail() { log "FAIL: $*"; exit "${2:-1}"; }
 
 # -------- Preflight --------
 command -v aws >/dev/null 2>&1 || fail "awscli not installed (snap install aws-cli --classic)" 1
-command -v pg_dump >/dev/null 2>&1 || fail "pg_dump not installed (apt install -y postgresql-client)" 1
+
+# Resolve the newest pg_dump available. Supabase bumps its server version from
+# time to time; using the newest installed pg_dump client keeps us compatible.
+# Preference: explicit PG_DUMP env var > /usr/lib/postgresql/<N>/bin/pg_dump for
+# the highest N present > plain `pg_dump` on PATH.
+if [ -z "${PG_DUMP:-}" ]; then
+  PG_DUMP="$(ls -d /usr/lib/postgresql/*/bin/pg_dump 2>/dev/null | sort -Vr | head -1)"
+  [ -n "$PG_DUMP" ] || PG_DUMP="$(command -v pg_dump || true)"
+fi
+[ -n "$PG_DUMP" ] && [ -x "$PG_DUMP" ] \
+  || fail "pg_dump not found (install postgresql-client-17 from pgdg: see docs/operations/backup-runbook.md)" 1
+log "Using pg_dump at: $PG_DUMP ($("$PG_DUMP" --version))"
+
 mkdir -p "$BACKUP_DIR"
 
 # -------- Resolve DATABASE_URL --------
@@ -89,7 +101,7 @@ TIMESTAMP="$(date -u +%Y-%m-%d-%H%M%S)"
 DUMP_FILE="$BACKUP_DIR/fleet-prod-${TIMESTAMP}.dump"
 
 log "Starting pg_dump → $DUMP_FILE"
-if ! pg_dump -Fc --no-owner --no-privileges "$BACKUP_URL" > "$DUMP_FILE"; then
+if ! "$PG_DUMP" -Fc --no-owner --no-privileges "$BACKUP_URL" > "$DUMP_FILE"; then
   fail "pg_dump failed — check network to Supabase, password, and DATABASE_URL format" 1
 fi
 
