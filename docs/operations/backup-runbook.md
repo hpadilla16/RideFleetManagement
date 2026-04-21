@@ -233,62 +233,7 @@ Use Supabase's built-in Point-in-Time Recovery (Pro plan feature, $25/mo). In th
 
 Contact Supabase support first (check the status page, open a ticket). Most incidents don't require a full restore — PITR fixes them.
 
-### Pre-flight (5 minutes, cannot be skipped)
-
-1. **Stop application writes.** Scale the backend down so nothing can write during the restore:
-   ```bash
-   cd /root/RideFleetManagement
-   docker compose -f docker-compose.prod.yml stop backend
-   ```
-2. **Take a fresh dump of the current (even corrupt) state** — this is your last line of defense if the restore itself goes bad:
-   ```bash
-   ops/backup.sh
-   ```
-   Note the key from the output (e.g., `daily/fleet-prod-2026-04-21-143022.dump`). Save it in your incident log.
-3. **Pick the target dump to restore from.** List backups, confirm the timestamp matches the pre-incident state you want:
-   ```bash
-   aws --profile digitalocean --endpoint-url https://nyc3.digitaloceanspaces.com \
-       s3 ls s3://ridefleet-backup/daily/
-   ```
-4. **Post in the team channel** with: "Restoring prod DB from `<key>`. Expected downtime: ~15 min. Will update."
-
-### Execute the restore
-
-```bash
-cd /root/RideFleetManagement
-FORCE_RESTORE_PROD=yes ops/restore.sh daily/fleet-prod-<your-chosen-timestamp>.dump fleet_management
-```
-
-Watch the output. Expect:
-- Download step: ~10 seconds for a few MB, ~1-2 min for hundreds of MB
-- DROP + CREATE DATABASE: instantaneous
-- `pg_restore`: takes roughly 1 minute per 100 MB of dump on this droplet
-- Table count sanity check at the end — compare to your pre-incident expectation
-
-### Post-restore
-
-1. **Spot check with `psql`:**
-   ```bash
-   docker compose -f docker-compose.prod.yml exec db \
-       psql -U postgres -d fleet_management \
-       -c 'SELECT count(*) FROM "Tenant";'
-   docker compose -f docker-compose.prod.yml exec db \
-       psql -U postgres -d fleet_management \
-       -c 'SELECT max("createdAt") FROM "Reservation";'
-   ```
-   The max `createdAt` should be close to the backup timestamp you restored from (within a day, depending on how old the dump was).
-
-2. **Bring the backend back up:**
-   ```bash
-   docker compose -f docker-compose.prod.yml start backend
-   ```
-
-3. **Verify `/health`:**
-   ```bash
-   curl -sS http://localhost:4000/health
-   ```
-
-4. **Post in the team channel:** "Restore complete. DB at state from `<backup timestamp>`. Everything after that timestamp is lost unless WAL archiving is in place (it is not, as of Wave 1)."
+**Note:** there is no production-restore script in `ops/`. Any recovery that writes to production has to be done with intent and coordination — the commands in the sections above are the template. Earlier drafts of this runbook referenced a `FORCE_RESTORE_PROD=yes ops/restore.sh ...` flow that pointed at a local `fleet-db-prod` container; that container is not the production DB (production is on Supabase), so the old flow does not apply and has been removed.
 
 ---
 
@@ -297,7 +242,7 @@ Watch the output. Expect:
 ### `awscli not installed`
 
 ```bash
-apt install -y awscli
+snap install aws-cli --classic
 ```
 
 ### `pg_dump failed`

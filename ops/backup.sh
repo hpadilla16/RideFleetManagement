@@ -96,14 +96,37 @@ BACKUP_URL="${BACKUP_URL%\?}"
 MASKED_URL="$(printf '%s' "$BACKUP_URL" | sed 's|://[^@]*@|://<REDACTED>@|')"
 log "Backup target: $MASKED_URL"
 
+# Split password out of the URL so pg_dump doesn't expose it via `ps aux`.
+# We pass the password to pg_dump via PGPASSWORD env var and feed pg_dump a URL
+# without embedded credentials. URL-decode the password via Python (bash doesn't
+# natively handle %XX escapes; passwords from Supabase are URL-encoded in the URL).
+export BACKUP_URL
+PGPASSWORD="$(python3 -c '
+import os, urllib.parse as u
+print(u.unquote(u.urlparse(os.environ["BACKUP_URL"]).password or ""))
+')"
+STRIPPED_URL="$(python3 -c '
+import os, urllib.parse as u
+r = u.urlparse(os.environ["BACKUP_URL"])
+host = r.hostname or ""
+port = ":" + str(r.port) if r.port else ""
+user = r.username or ""
+nl = (user + "@" if user else "") + host + port
+print(u.urlunparse((r.scheme, nl, r.path, r.params, r.query, r.fragment)))
+')"
+export PGPASSWORD
+unset BACKUP_URL   # no reason for it to live in the env after this point
+
 # -------- 1. pg_dump --------
 TIMESTAMP="$(date -u +%Y-%m-%d-%H%M%S)"
 DUMP_FILE="$BACKUP_DIR/fleet-prod-${TIMESTAMP}.dump"
 
 log "Starting pg_dump → $DUMP_FILE"
-if ! "$PG_DUMP" -Fc --no-owner --no-privileges "$BACKUP_URL" > "$DUMP_FILE"; then
+if ! "$PG_DUMP" -Fc --no-owner --no-privileges "$STRIPPED_URL" > "$DUMP_FILE"; then
+  unset PGPASSWORD
   fail "pg_dump failed — check network to Supabase, password, and DATABASE_URL format" 1
 fi
+unset PGPASSWORD
 
 DUMP_SIZE="$(stat -c%s "$DUMP_FILE")"
 if [ "$DUMP_SIZE" -lt 1024 ]; then
@@ -119,15 +142,27 @@ if ! aws --profile "$AWS_PROFILE" --endpoint-url "$S3_ENDPOINT" \
      --only-show-errors; then
   fail "S3 upload failed" 2
 fi
-log "Upload OK"
+
+# Verify the uploaded object matches the local file size; catches
+# silent truncation on the network path.
+REMOTE_SIZE="$(aws --profile "$AWS_PROFILE" --endpoint-url "$S3_ENDPOINT" \
+               s3api head-object --bucket "$S3_BUCKET" --key "$S3_KEY" \
+               --query 'ContentLength' --output text 2>/dev/null || echo "0")"
+if [ "$REMOTE_SIZE" != "$DUMP_SIZE" ]; then
+  fail "remote size ($REMOTE_SIZE) != local size ($DUMP_SIZE) — upload may be corrupt" 2
+fi
+log "Upload OK (remote size verified: ${REMOTE_SIZE}B)"
 
 # -------- 3. Rotate remote backups older than RETENTION_DAYS --------
 CUTOFF_DATE="$(date -u --date="${RETENTION_DAYS} days ago" +%Y-%m-%d)"
 log "Rotating remote backups older than ${CUTOFF_DATE} (retention: ${RETENTION_DAYS} days)"
 
+# Strict less-than (not <=) on the cutoff instant so a backup uploaded at
+# exactly midnight on the cutoff date isn't clipped. Cutoff date is already
+# RETENTION_DAYS days in the past; the comparison is to the START of that day.
 OLD_KEYS="$(aws --profile "$AWS_PROFILE" --endpoint-url "$S3_ENDPOINT" \
             s3api list-objects-v2 --bucket "$S3_BUCKET" --prefix "daily/" \
-            --query "Contents[?LastModified<='${CUTOFF_DATE}T00:00:00Z'].Key" \
+            --query "Contents[?LastModified<'${CUTOFF_DATE}T00:00:00Z'].Key" \
             --output text 2>/dev/null || true)"
 
 if [ -n "${OLD_KEYS:-}" ] && [ "$OLD_KEYS" != "None" ]; then
