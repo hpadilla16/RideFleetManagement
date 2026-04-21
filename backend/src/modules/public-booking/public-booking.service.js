@@ -238,7 +238,11 @@ export const publicBookingService = {
         visibilityMode: listing.pickupSpot?.visibilityMode || 'REVEAL_AFTER_BOOKING',
         exactLocationHidden: !!listing.pickupSpot?.exactLocationHidden,
         primaryImageUrl: listing.primaryImageUrl || '',
-        imageUrls: listing.imageUrls || []
+        imageUrls: listing.imageUrls || [],
+        // `photos` is the canonical shape for native mobile clients that expect
+        // structured image metadata. `imageUrls` is retained for backwards
+        // compatibility with existing web/admin consumers — do not remove.
+        photos: (listing.imageUrls || []).map((url) => ({ url, caption: null }))
       }))
     };
   },
@@ -543,6 +547,8 @@ export const publicBookingService = {
         })),
         primaryImageUrl: result.listing.primaryImageUrl || '',
         imageUrls: result.listing.imageUrls || [],
+        // Canonical shape for native clients (see notes above).
+        photos: (result.listing.imageUrls || []).map((url) => ({ url, caption: null })),
         quote: {
           tripDays: Number(result.quote?.tripDays || 0),
           subtotal: money(result.quote?.subtotal),
@@ -852,13 +858,27 @@ export const publicBookingService = {
       orderBy: [{ requestedAt: 'desc' }]
     });
 
+    // Issue a guest-role JWT alongside the magic-link session data so native
+    // mobile clients (ride-fleet-car-sharing-app) can treat the redeem as a
+    // completed sign-in. Expiry is handled by auth.service (currently 7d) and
+    // surfaced to clients via `jwtExpiresInSeconds` so they can schedule
+    // re-auth before the token lapses.
+    const jwtExpiresIn = authService.guestJwtExpiresIn();
+    const jwtExpiresInSeconds =
+      typeof jwtExpiresIn === 'string' && jwtExpiresIn.endsWith('d')
+        ? Number.parseInt(jwtExpiresIn, 10) * 24 * 60 * 60
+        : null;
+
     return {
       customer: {
         id: primary.id,
         firstName: primary.firstName,
         lastName: primary.lastName,
-        email: primary.email
+        email: primary.email,
+        tenantId: primary.tenantId || null
       },
+      jwt: authService.issueGuestToken(primary),
+      jwtExpiresInSeconds,
       bookings,
       pendingReviews: pendingReviews.map((r) => ({
         id: r.id,
@@ -885,6 +905,93 @@ export const publicBookingService = {
 
   async submitHostReview(token, input = {}) {
     return hostReviewsService.submitPublicReview(token, input);
+  },
+
+  // ── Pre-check-in documents (Sprint 4) ────────────────────────────
+  async getTripDocuments(tripCode) {
+    const trip = await _findTripByCode(tripCode);
+    const docs = await prisma.tripDocument.findMany({
+      where: { tripId: trip.id },
+      orderBy: { submittedAt: 'asc' },
+    });
+    return _formatTripDocumentsResponse(trip, docs);
+  },
+
+  async submitTripDocuments(tripCode, payload) {
+    const trip = await _findTripByCode(tripCode);
+
+    // Body is { license?: dataUrl, insurance?: dataUrl, addressProof?: dataUrl }.
+    // At least one field is required per POST; idempotent by type so a
+    // resubmit replaces the earlier row.
+    const toWrite = [];
+    if (payload.license != null) {
+      toWrite.push({
+        type: 'LICENSE',
+        dataUrl: _validateDocDataUrl(payload.license, 'license'),
+      });
+    }
+    if (payload.insurance != null) {
+      toWrite.push({
+        type: 'INSURANCE',
+        dataUrl: _validateDocDataUrl(payload.insurance, 'insurance'),
+      });
+    }
+    if (payload.addressProof != null) {
+      toWrite.push({
+        type: 'ADDRESS_PROOF',
+        dataUrl: _validateDocDataUrl(payload.addressProof, 'addressProof'),
+      });
+    }
+    if (toWrite.length === 0) {
+      throw new Error(
+        'At least one of license, insurance, or addressProof is required',
+      );
+    }
+
+    await prisma.$transaction(
+      toWrite.map((doc) =>
+        prisma.tripDocument.upsert({
+          where: {
+            tripId_documentType: {
+              tripId: trip.id,
+              documentType: doc.type,
+            },
+          },
+          create: {
+            tripId: trip.id,
+            documentType: doc.type,
+            dataUrl: doc.dataUrl,
+            status: 'PENDING',
+          },
+          update: {
+            dataUrl: doc.dataUrl,
+            status: 'PENDING',
+            rejectReason: null,
+            submittedAt: new Date(),
+            reviewedAt: null,
+          },
+        }),
+      ),
+    );
+
+    // Host-facing notification fires on each submission so their
+    // review queue sees an update even when the guest re-captures a
+    // single doc. Keep it best-effort — we don't want the POST to fail
+    // because MailerSend hiccupped.
+    try {
+      await _notifyHostOfDocumentSubmission(trip, toWrite.map((d) => d.type));
+    } catch (err) {
+      console.warn(
+        '[pre-check-in] failed to notify host of document submission',
+        err,
+      );
+    }
+
+    const docs = await prisma.tripDocument.findMany({
+      where: { tripId: trip.id },
+      orderBy: { submittedAt: 'asc' },
+    });
+    return _formatTripDocumentsResponse(trip, docs);
   },
 
   async getHostStatus(user) {
@@ -1033,4 +1140,121 @@ async function notifyTenantAdminsNewSubmission({ tenantId, tenantName, hostDispl
   `;
 
   return sendEmail({ to: adminEmails.join(','), subject, text, html });
+}
+
+// ── Pre-check-in helpers (Sprint 4) ─────────────────────────────────
+
+async function _findTripByCode(tripCode) {
+  const clean = String(tripCode || '').trim();
+  if (!clean) throw new Error('tripCode is required');
+  const trip = await prisma.trip.findUnique({
+    where: { tripCode: clean },
+    select: {
+      id: true,
+      tenantId: true,
+      tripCode: true,
+      status: true,
+      hostProfileId: true,
+      hostProfile: {
+        select: { id: true, displayName: true, email: true, phone: true },
+      },
+      guestCustomerId: true,
+      guestCustomer: { select: { firstName: true, email: true } },
+    },
+  });
+  if (!trip) throw new Error(`Trip not found: ${clean}`);
+  return trip;
+}
+
+// Accepts `data:image/<type>;base64,<payload>` — same convention used
+// by trip-chat attachments. Enforces ~8 MB hard limit on the raw
+// base64 payload so a misbehaving client can't stuff a video in.
+const _ALLOWED_DOC_MIMES = ['image/jpeg', 'image/jpg', 'image/png', 'image/heic', 'application/pdf'];
+const _MAX_DOC_BYTES = 8 * 1024 * 1024; // 8 MB
+
+function _validateDocDataUrl(value, fieldLabel) {
+  const raw = String(value || '').trim();
+  if (!raw) throw new Error(`${fieldLabel} is required`);
+  const match = raw.match(/^data:([^;,]+);base64,(.*)$/i);
+  if (!match) {
+    throw new Error(`${fieldLabel} must be a base64 data URL (data:<mime>;base64,…)`);
+  }
+  const mimeType = match[1].toLowerCase();
+  if (!_ALLOWED_DOC_MIMES.includes(mimeType)) {
+    throw new Error(
+      `${fieldLabel} has unsupported mime type ${mimeType}. Allowed: ${_ALLOWED_DOC_MIMES.join(', ')}`,
+    );
+  }
+  const payload = match[2].replace(/\s+/g, '');
+  const approxBytes = Math.floor((payload.length * 3) / 4);
+  if (approxBytes > _MAX_DOC_BYTES) {
+    throw new Error(
+      `${fieldLabel} is too large (${Math.round(approxBytes / 1024 / 1024)} MB). Max is 8 MB.`,
+    );
+  }
+  return raw;
+}
+
+function _serializeDocument(doc) {
+  return {
+    type: doc.documentType,
+    status: doc.status,
+    submittedAt: doc.submittedAt,
+    reviewedAt: doc.reviewedAt,
+    rejectReason: doc.rejectReason,
+  };
+}
+
+function _formatTripDocumentsResponse(trip, docs) {
+  // Trip.status is normally only moved by host-facing actions; we
+  // surface it here so the Flutter client can bail out early if the
+  // backend already advanced the trip past RESERVED.
+  return {
+    tripCode: trip.tripCode,
+    tripStatus: trip.status,
+    documents: docs.map(_serializeDocument),
+    requiredTypes: ['LICENSE', 'INSURANCE', 'ADDRESS_PROOF'],
+  };
+}
+
+async function _notifyHostOfDocumentSubmission(trip, typesSubmitted) {
+  const hostEmail = trip.hostProfile?.email;
+  if (!hostEmail) return; // silent — host may not have email configured
+
+  const subject = 'Guest pre-check-in documents submitted';
+  const prettyTypes = typesSubmitted
+    .map((t) => _prettyDocType(t))
+    .join(', ');
+  const text = [
+    `Trip ${trip.tripCode}`,
+    `Guest: ${trip.guestCustomer?.firstName || trip.guestCustomer?.email || 'Guest'}`,
+    `Submitted: ${prettyTypes}`,
+    '',
+    'Log in to the Ride Fleet admin dashboard to review and approve.',
+  ].join('\n');
+  const html = `
+    <div style="font-family:Arial,sans-serif;font-size:14px;line-height:1.6;color:#111;max-width:560px">
+      <div style="padding:20px 24px;border-radius:14px;background:#f5f3ff;border:1px solid #c4b5fd">
+        <h2 style="margin:0 0 12px;font-size:18px;color:#5b21b6">Pre-check-in documents submitted</h2>
+        <p style="margin:0 0 8px"><strong>Trip:</strong> ${trip.tripCode}</p>
+        <p style="margin:0 0 8px"><strong>Submitted:</strong> ${prettyTypes.replace(/</g, '&lt;')}</p>
+        <p style="margin:16px 0 0;font-size:13px;color:#6d28d9">Review in the Ride Fleet admin dashboard.</p>
+      </div>
+    </div>
+  `;
+
+  return sendEmail({ to: hostEmail, subject, text, html });
+}
+
+function _prettyDocType(type) {
+  switch (type) {
+    case 'LICENSE':
+      return 'Driver license';
+    case 'INSURANCE':
+      return 'Insurance card';
+    case 'ADDRESS_PROOF':
+      return 'Proof of address';
+    default:
+      return type;
+  }
 }

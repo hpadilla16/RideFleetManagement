@@ -232,3 +232,54 @@ publicBookingRouter.get('/host-status', requireAuth, async (req, res, next) => {
     next(error);
   }
 });
+
+// ── Pre-check-in documents (Sprint 4) ────────────────────────────────
+// GET returns the current document submission state for the trip. The
+// Flutter app hits this on the pre-check-in overview screen so
+// returning guests don't re-capture docs they already submitted.
+publicBookingRouter.get(
+  '/trips/:tripCode/documents',
+  bookingReadGuard,
+  async (req, res, next) => {
+    try {
+      res.json(
+        await publicBookingService.getTripDocuments(req.params.tripCode),
+      );
+    } catch (error) {
+      if (/not found/i.test(String(error?.message || ''))) {
+        return res.status(404).json({ error: error.message });
+      }
+      next(error);
+    }
+  },
+);
+
+// POST uploads up to 3 document types (license, insurance, addressProof)
+// as base64 data URLs. Idempotent per-type — a re-submit replaces the
+// prior row while host review is still pending. Returns the full
+// up-to-date list of documents so the client renders the success state
+// without a follow-up GET.
+publicBookingRouter.post(
+  '/trips/:tripCode/documents',
+  bookingWriteGuard,
+  async (req, res, next) => {
+    try {
+      assertPlainObject(req.body || {}, 'documents payload');
+      res.json(
+        await publicBookingService.submitTripDocuments(
+          req.params.tripCode,
+          req.body || {},
+        ),
+      );
+    } catch (error) {
+      const msg = String(error?.message || '');
+      if (/not found/i.test(msg)) {
+        return res.status(404).json({ error: msg });
+      }
+      if (/required|invalid|too large|unsupported|already/i.test(msg)) {
+        return res.status(400).json({ error: msg });
+      }
+      next(error);
+    }
+  },
+);

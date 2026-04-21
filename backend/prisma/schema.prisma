@@ -1249,10 +1249,32 @@ model Trip {
   hostReview        HostReview?
   fulfillmentPlan   TripFulfillmentPlan?
   conversations     Conversation[]
+  documents         TripDocument[]
 
   @@index([tenantId, status, scheduledPickupAt])
   @@index([hostProfileId, status, scheduledPickupAt])
   @@index([guestCustomerId, status, scheduledPickupAt])
+}
+
+// Per-trip pre-check-in documents uploaded by the guest (see
+// `POST /api/public/booking/trips/:tripCode/documents` — Sprint 4).
+// Stored as base64 data URLs for v0.1; swap to object-store URLs
+// later without changing the API shape. One row per (trip,
+// documentType) — a resubmit upserts the same row, which is why the
+// unique constraint exists.
+model TripDocument {
+  id           String   @id @default(cuid())
+  tripId       String
+  trip         Trip     @relation(fields: [tripId], references: [id], onDelete: Cascade)
+  documentType String   // LICENSE | INSURANCE | ADDRESS_PROOF
+  dataUrl      String
+  status       String   @default("PENDING") // PENDING | APPROVED | REJECTED
+  rejectReason String?
+  submittedAt  DateTime @default(now())
+  reviewedAt   DateTime?
+
+  @@unique([tripId, documentType])
+  @@index([tripId])
 }
 
 model TripFulfillmentPlan {
