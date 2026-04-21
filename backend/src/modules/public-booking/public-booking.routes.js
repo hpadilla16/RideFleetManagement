@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import { publicBookingService } from './public-booking.service.js';
+import { createGuestPaymentSession, renderReturnPage } from './payment-session.service.js';
 import { optionalNumber, optionalString, assertPlainObject } from '../../lib/request-validation.js';
 import { attachPublicRequestMeta, createOptionalIdempotencyGuard, createPublicRateLimitGuard } from '../../middleware/public-endpoint-guards.js';
 import { requireAuth } from '../../middleware/auth.js';
@@ -334,5 +335,71 @@ publicBookingRouter.post(
       }
       next(error);
     }
+  },
+);
+
+// Sprint 6 — Flutter payment WebView.
+//
+// POST /api/public/booking/trips/:tripCode/payment-session
+// Returns a gateway-agnostic shape so the Flutter client never knows
+// (or cares) whether Authorize.Net, Stripe, or SPIn is doing the
+// work. See payment-session.service.js for the phased rollout strategy
+// — today `gateway: 'authorizenet'` with Accept Hosted; later we flip
+// the internal branch to SPIn with zero Flutter release.
+//
+// Payment posting is webhook-driven (customer-portal's authnet webhook),
+// so there's no PUT/confirm endpoint here — the Flutter client simply
+// closes the WebView when it sees `successMatchUrl` in the navigation
+// stream and polls the trip for the PAID flip.
+publicBookingRouter.post(
+  '/trips/:tripCode/payment-session',
+  bookingWriteGuard,
+  async (req, res, next) => {
+    try {
+      const session = await createGuestPaymentSession({
+        tripCode: req.params.tripCode,
+        tenantId: optionalString(req.query?.tenantId, { fallback: null }),
+      });
+      res.json(session);
+    } catch (error) {
+      const code = error?.code;
+      if (code === 'NOT_FOUND') return res.status(404).json({ error: error.message });
+      if (code === 'ALREADY_PAID') return res.status(409).json({ error: error.message });
+      if (code === 'NOT_PAYABLE') return res.status(409).json({ error: error.message });
+      if (code === 'VALIDATION') return res.status(400).json({ error: error.message });
+      if (code === 'GATEWAY_NOT_CONFIGURED') {
+        return res.status(503).json({ error: error.message });
+      }
+      if (code === 'GATEWAY_ERROR') {
+        return res.status(502).json({ error: error.message });
+      }
+      next(error);
+    }
+  },
+);
+
+// GET .../payment-return and .../payment-cancel — the Flutter WebView
+// watches for these URLs in its navigation stream and closes before
+// the page actually loads. If a user ever lands here from a browser
+// (e.g. tapped an email receipt link), we serve a tiny "you can close
+// this page" HTML response. No DB writes here — the silent webhook is
+// the source of truth for reservation.paymentStatus.
+publicBookingRouter.get(
+  '/trips/:tripCode/payment-return',
+  bookingReadGuard,
+  (req, res) => {
+    res.set('Cache-Control', 'no-store');
+    res.set('Content-Type', 'text/html; charset=utf-8');
+    res.send(renderReturnPage({ status: 'success' }));
+  },
+);
+
+publicBookingRouter.get(
+  '/trips/:tripCode/payment-cancel',
+  bookingReadGuard,
+  (req, res) => {
+    res.set('Cache-Control', 'no-store');
+    res.set('Content-Type', 'text/html; charset=utf-8');
+    res.send(renderReturnPage({ status: 'cancel' }));
   },
 );
