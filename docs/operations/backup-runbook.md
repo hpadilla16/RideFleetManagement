@@ -6,6 +6,8 @@
 
 This runbook covers daily Postgres backups of the Ride Fleet production database to DigitalOcean Spaces, and the operator procedure for restoring from a backup. Scripts referenced live in `ops/backup.sh` and `ops/restore.sh`.
 
+**Source of truth for production data:** Supabase managed Postgres (project ref in `backend/.env` DATABASE_URL, pooler in AWS us-east-1). The `fleet-db-prod` Docker container on the droplet is *not* the production DB — it exists but is empty; the backend connects to Supabase over the network. `ops/backup.sh` reads DATABASE_URL, rewrites the pooler port from 6543 (transaction mode, incompatible with pg_dump) to 5432 (session mode), and runs `pg_dump` from the droplet against Supabase directly.
+
 ---
 
 ## What runs when
@@ -20,11 +22,20 @@ This runbook covers daily Postgres backups of the Ride Fleet production database
 
 ## Prerequisites (one-time setup on the droplet)
 
-### 1. Install `awscli`
+### 1. Install `awscli` and `postgresql-client`
+
+On Ubuntu 24.04, `awscli` is not in the default apt repositories — use snap:
 
 ```bash
-apt update && apt install -y awscli
+snap install aws-cli --classic
 aws --version   # verify; expect aws-cli/1.x or 2.x
+```
+
+Install `postgresql-client` for `pg_dump` / `pg_restore` on the host:
+
+```bash
+apt update && apt install -y postgresql-client
+pg_dump --version   # should be 16.x or 17.x, compatible with Supabase server
 ```
 
 ### 2. Configure the `digitalocean` profile
@@ -89,12 +100,13 @@ Expected output ends with `[backup] YYYY-MM-DDTHH:MM:SSZ Done (size=<N>B, key=da
 ## Daily backup flow (what happens at 02:00 UTC)
 
 1. `cron` fires `ops/backup.sh` as `root`.
-2. Script runs `pg_dump -Fc` inside the `fleet-db-prod` container via `docker compose exec`.
-3. Output is streamed to `/var/backups/ridefleet/fleet-prod-<timestamp>.dump` (compressed custom format).
-4. File is uploaded to `s3://ridefleet-backups/daily/fleet-prod-<timestamp>.dump`.
-5. Remote objects older than 30 days (by `LastModified`) are deleted.
-6. Local files older than the last 3 are removed (keeps 3 days of local recoveries for fast rollback).
-7. Non-zero exit on any failure — cron captures stderr to `/var/log/ridefleet-backup.log` so a failed run leaves a trail.
+2. Script reads `DATABASE_URL` from `/root/RideFleetManagement/backend/.env`, rewrites the pooler port (`:6543` → `:5432`) and strips `?pgbouncer=true`, then masks the password in its logs.
+3. Runs `pg_dump -Fc --no-owner --no-privileges` from the host against Supabase over the network (~5-30 seconds depending on DB size).
+4. Output is written to `/var/backups/ridefleet/fleet-prod-<timestamp>.dump` (compressed custom format).
+5. File is uploaded to `s3://ridefleet-backup/daily/fleet-prod-<timestamp>.dump`.
+6. Remote objects older than 30 days (by `LastModified`) are deleted.
+7. Local files older than the last 3 are removed (keeps 3 days of local recoveries for fast rollback).
+8. Non-zero exit on any failure — cron captures stderr to `/var/log/ridefleet-backup.log` so a failed run leaves a trail.
 
 ### Monitoring the log
 

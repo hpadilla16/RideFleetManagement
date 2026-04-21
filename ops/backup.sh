@@ -1,24 +1,34 @@
 #!/usr/bin/env bash
 #
-# ops/backup.sh — Automated Postgres backup to DigitalOcean Spaces.
+# ops/backup.sh — Automated Postgres backup of the Supabase-hosted production
+# database to DigitalOcean Spaces.
+#
+# The production DB for Ride Fleet is NOT on the droplet; it's on Supabase
+# (managed Postgres in AWS us-east-1), accessed via the pgbouncer pooler in
+# backend/.env's DATABASE_URL. This script reads DATABASE_URL, rewrites it to
+# hit the session-mode port (5432) since pg_dump is incompatible with
+# transaction-mode pooling (6543), runs pg_dump via the host's postgresql-client,
+# and uploads the resulting custom-format dump to DigitalOcean Spaces.
 #
 # Usage (on the droplet):
 #   /root/RideFleetManagement/ops/backup.sh
 #
-# Typical cron entry (edit with `crontab -e` as root):
+# Cron entry (edit with `crontab -e` as root):
 #   0 2 * * *  /root/RideFleetManagement/ops/backup.sh >> /var/log/ridefleet-backup.log 2>&1
 #
-# Required:
-#   - awscli v1 or v2 installed and on PATH (`apt install awscli` or awscliv2)
-#   - an AWS profile (default: `digitalocean`) pointing at DO Spaces with
-#     credentials saved via `aws configure --profile digitalocean`
-#   - docker + docker-compose available; the prod stack running
+# Required on the droplet:
+#   - awscli installed (recommended: `snap install aws-cli --classic`) and a
+#     profile (default: `digitalocean`) configured with DO Spaces credentials
+#     via `aws configure --profile digitalocean`
+#   - postgresql-client installed (`apt install -y postgresql-client`) — provides
+#     pg_dump compatible with the server version
+#   - readable /root/RideFleetManagement/backend/.env with a DATABASE_URL line
 #
-# See `docs/operations/backup-runbook.md` for setup + restore operator flow.
+# See `docs/operations/backup-runbook.md` for setup + restore flow.
 #
 # Exit codes:
 #   0  success
-#   1  pg_dump failed or preflight check failed
+#   1  preflight failed, pg_dump failed, or dump too small
 #   2  S3 upload failed
 #
 # Wave 1, Item 1.1 of the production-readiness plan
@@ -35,30 +45,52 @@ export PATH="/snap/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/
 : "${S3_BUCKET:=ridefleet-backup}"
 : "${S3_ENDPOINT:=https://nyc3.digitaloceanspaces.com}"
 : "${AWS_PROFILE:=digitalocean}"
-: "${DB_CONTAINER:=fleet-db-prod}"
-: "${DB_NAME:=fleet_management}"
-: "${DB_USER:=postgres}"
 : "${RETENTION_DAYS:=30}"
 : "${REPO_DIR:=/root/RideFleetManagement}"
+: "${DATABASE_URL:=}"   # will try to read from ${REPO_DIR}/backend/.env if empty
 
 # -------- Helpers --------
 log() { echo "[backup] $(date -u +%Y-%m-%dT%H:%M:%SZ) $*" >&2; }
 fail() { log "FAIL: $*"; exit "${2:-1}"; }
 
 # -------- Preflight --------
-command -v aws >/dev/null 2>&1 || fail "awscli not installed" 1
-command -v docker >/dev/null 2>&1 || fail "docker not available" 1
+command -v aws >/dev/null 2>&1 || fail "awscli not installed (snap install aws-cli --classic)" 1
+command -v pg_dump >/dev/null 2>&1 || fail "pg_dump not installed (apt install -y postgresql-client)" 1
 mkdir -p "$BACKUP_DIR"
+
+# -------- Resolve DATABASE_URL --------
+# Prefer an explicit env var; fall back to backend/.env.
+if [ -z "$DATABASE_URL" ] && [ -r "${REPO_DIR}/backend/.env" ]; then
+  DATABASE_URL="$(grep -E '^DATABASE_URL=' "${REPO_DIR}/backend/.env" | head -1 | cut -d= -f2-)"
+  # Strip optional surrounding quotes
+  DATABASE_URL="${DATABASE_URL%\"}"
+  DATABASE_URL="${DATABASE_URL#\"}"
+  DATABASE_URL="${DATABASE_URL%\'}"
+  DATABASE_URL="${DATABASE_URL#\'}"
+fi
+[ -n "$DATABASE_URL" ] || fail "DATABASE_URL not set (export it or populate ${REPO_DIR}/backend/.env)" 1
+
+# Transform Supabase pooler URL for pg_dump compatibility:
+# - Replace port :6543 (pgbouncer transaction mode) with :5432 (session mode).
+#   pg_dump uses LOCK TABLE and temp-table constructs that don't survive
+#   transaction pooling; session mode behaves like a direct connection.
+# - Strip ?pgbouncer=true and &pgbouncer=true (no-op on direct, breaks nothing).
+BACKUP_URL="${DATABASE_URL//:6543/:5432}"
+BACKUP_URL="$(printf '%s' "$BACKUP_URL" | sed 's/[?&]pgbouncer=true//g')"
+# Clean up possible trailing ? left after stripping the only query param
+BACKUP_URL="${BACKUP_URL%\?}"
+
+# Log a masked URL so the password never hits logs.
+MASKED_URL="$(printf '%s' "$BACKUP_URL" | sed 's|://[^@]*@|://<REDACTED>@|')"
+log "Backup target: $MASKED_URL"
 
 # -------- 1. pg_dump --------
 TIMESTAMP="$(date -u +%Y-%m-%d-%H%M%S)"
 DUMP_FILE="$BACKUP_DIR/fleet-prod-${TIMESTAMP}.dump"
 
 log "Starting pg_dump → $DUMP_FILE"
-cd "$REPO_DIR"
-if ! docker compose -f docker-compose.prod.yml exec -T db \
-     pg_dump -U "$DB_USER" -Fc "$DB_NAME" > "$DUMP_FILE"; then
-  fail "pg_dump failed (container: $DB_CONTAINER, db: $DB_NAME)" 1
+if ! pg_dump -Fc --no-owner --no-privileges "$BACKUP_URL" > "$DUMP_FILE"; then
+  fail "pg_dump failed — check network to Supabase, password, and DATABASE_URL format" 1
 fi
 
 DUMP_SIZE="$(stat -c%s "$DUMP_FILE")"
