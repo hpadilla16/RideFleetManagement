@@ -233,6 +233,59 @@ publicBookingRouter.get('/host-status', requireAuth, async (req, res, next) => {
   }
 });
 
+// ── Rental agreement signature (Sprint 5) ────────────────────────────
+// GET resolves the magic-link signature token issued on the admin side
+// and returns the agreement metadata + key terms the Flutter guest app
+// renders on phone A of design/mockups/sprint5/agreement-and-review.html.
+publicBookingRouter.get(
+  '/rental-agreements/:token',
+  bookingReadGuard,
+  async (req, res, next) => {
+    try {
+      res.json(
+        await publicBookingService.getGuestAgreement(req.params.token),
+      );
+    } catch (error) {
+      const msg = String(error?.message || '');
+      if (/invalid|expired|not found/i.test(msg)) {
+        return res.status(404).json({ error: msg });
+      }
+      next(error);
+    }
+  },
+);
+
+// POST accepts either a signaturePng (data URL from the Flutter canvas)
+// or a typedName (VoiceOver/TalkBack accessibility fallback). Once one
+// is supplied the token is single-use — a second POST returns 409.
+publicBookingRouter.post(
+  '/rental-agreements/:token/signature',
+  bookingWriteGuard,
+  async (req, res, next) => {
+    try {
+      assertPlainObject(req.body || {}, 'signature payload');
+      res.json(
+        await publicBookingService.submitGuestSignature(
+          req.params.token,
+          req.body || {},
+        ),
+      );
+    } catch (error) {
+      const msg = String(error?.message || '');
+      if (/invalid|expired|not found/i.test(msg)) {
+        return res.status(404).json({ error: msg });
+      }
+      if (/already signed/i.test(msg)) {
+        return res.status(409).json({ error: msg });
+      }
+      if (/required|invalid|too large|unsupported/i.test(msg)) {
+        return res.status(400).json({ error: msg });
+      }
+      next(error);
+    }
+  },
+);
+
 // ── Pre-check-in documents (Sprint 4) ────────────────────────────────
 // GET returns the current document submission state for the trip. The
 // Flutter app hits this on the pre-check-in overview screen so

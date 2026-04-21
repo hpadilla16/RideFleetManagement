@@ -907,6 +907,88 @@ export const publicBookingService = {
     return hostReviewsService.submitPublicReview(token, input);
   },
 
+  // ── Rental agreement signature (Sprint 5) ────────────────────────
+  async getGuestAgreement(token) {
+    const reservation = await _findReservationBySignatureToken(token);
+    return _formatAgreementResponse(reservation);
+  },
+
+  async submitGuestSignature(token, payload) {
+    const reservation = await _findReservationBySignatureToken(token);
+    if (reservation.signatureSignedAt) {
+      throw new Error('Agreement already signed');
+    }
+
+    const signaturePng = payload.signaturePng != null
+      ? _validateSignatureDataUrl(payload.signaturePng)
+      : null;
+    const typedName = payload.typedName != null
+      ? String(payload.typedName).trim()
+      : null;
+
+    if (!signaturePng && !typedName) {
+      throw new Error(
+        'Either signaturePng (canvas data URL) or typedName is required',
+      );
+    }
+    if (typedName && typedName.length < 2) {
+      throw new Error('typedName is too short — provide at least 2 characters');
+    }
+
+    const signerName = typedName ||
+      [reservation.customer?.firstName, reservation.customer?.lastName]
+        .filter(Boolean)
+        .join(' ')
+        .trim() ||
+      reservation.customer?.email ||
+      'Guest';
+    const signedAt = new Date();
+
+    const note = `[SIGNATURE ${signedAt.toISOString()}] signed by ${signerName} via Flutter guest app`;
+
+    await prisma.$transaction(async (tx) => {
+      await tx.reservation.update({
+        where: { id: reservation.id },
+        data: {
+          signatureSignedAt: signedAt,
+          signatureSignedBy: signerName,
+          signatureDataUrl: signaturePng || null,
+          notes: reservation.notes ? `${reservation.notes}\n${note}` : note,
+        },
+      });
+      const latestAgreement = await tx.rentalAgreement.findFirst({
+        where: { reservationId: reservation.id },
+        orderBy: { createdAt: 'desc' },
+        select: { id: true },
+      });
+      if (latestAgreement?.id) {
+        await tx.rentalAgreement.update({
+          where: { id: latestAgreement.id },
+          data: { locked: true },
+        });
+      }
+      await tx.auditLog.create({
+        data: {
+          reservationId: reservation.id,
+          action: 'UPDATE',
+          metadata: JSON.stringify({
+            signatureCompleted: true,
+            signerName,
+            typedSignature: !!typedName && !signaturePng,
+            source: 'public-booking',
+          }),
+        },
+      });
+    });
+
+    // Re-fetch so the response carries the fresh signedAt + any server-
+    // side mutations that fired in the transaction.
+    const updated = await _findReservationBySignatureToken(token, {
+      allowSigned: true,
+    });
+    return _formatAgreementResponse(updated);
+  },
+
   // ── Pre-check-in documents (Sprint 4) ────────────────────────────
   async getTripDocuments(tripCode) {
     const trip = await _findTripByCode(tripCode);
@@ -1249,4 +1331,128 @@ function _prettyDocType(type) {
     default:
       return type;
   }
+}
+
+// ── Agreement helpers (Sprint 5) ─────────────────────────────────────
+
+async function _findReservationBySignatureToken(token, { allowSigned = false } = {}) {
+  const clean = String(token || '').trim();
+  if (!clean) throw new Error('Signature token is required');
+  const reservation = await prisma.reservation.findFirst({
+    where: {
+      signatureToken: clean,
+      // When signing is completing, we re-fetch from the transaction —
+      // allow lookups past the stored expiry in that case.
+      ...(allowSigned
+        ? {}
+        : { signatureTokenExpiresAt: { gt: new Date() } }),
+    },
+    include: {
+      customer: {
+        select: { firstName: true, lastName: true, email: true },
+      },
+      vehicle: { select: { year: true, make: true, model: true, color: true } },
+      vehicleType: { select: { label: true } },
+      pickupLocation: { select: { name: true } },
+      returnLocation: { select: { name: true } },
+      carSharingTrip: { select: { tripCode: true } },
+    },
+  });
+  if (!reservation) {
+    throw new Error('Invalid or expired signature link');
+  }
+  return reservation;
+}
+
+// Signature PNG comes in as a `data:image/png;base64,…` URL. Same
+// shape the trip-chat + pre-check-in endpoints use. Smaller cap (2 MB)
+// since it's always a tiny PNG of a handwritten stroke.
+const _SIGNATURE_MAX_BYTES = 2 * 1024 * 1024;
+
+function _validateSignatureDataUrl(value) {
+  const raw = String(value || '').trim();
+  if (!raw) throw new Error('signaturePng is required');
+  const match = raw.match(/^data:(image\/png|image\/jpeg|image\/jpg);base64,(.*)$/i);
+  if (!match) {
+    throw new Error(
+      'signaturePng must be a base64 data URL (data:image/png;base64,…)',
+    );
+  }
+  const payload = match[2].replace(/\s+/g, '');
+  const approxBytes = Math.floor((payload.length * 3) / 4);
+  if (approxBytes > _SIGNATURE_MAX_BYTES) {
+    throw new Error(
+      `signaturePng is too large (${Math.round(approxBytes / 1024)} KB). Max is 2 MB.`,
+    );
+  }
+  return raw;
+}
+
+function _formatAgreementResponse(reservation) {
+  const firstName = reservation.customer?.firstName || '';
+  const lastName = reservation.customer?.lastName || '';
+  const vehicle = reservation.vehicle;
+  const vehicleLabel = vehicle
+    ? [vehicle.year, vehicle.make, vehicle.model].filter(Boolean).join(' ').trim()
+    : reservation.vehicleType?.label || 'Selected vehicle';
+
+  return {
+    agreementToken: reservation.signatureToken,
+    tripCode: reservation.carSharingTrip?.tripCode || null,
+    reservationNumber: reservation.reservationNumber,
+    signedAt: reservation.signatureSignedAt,
+    signedBy: reservation.signatureSignedBy,
+    customerName: [firstName, lastName].filter(Boolean).join(' ').trim() || null,
+    vehicleLabel,
+    pickupAt: reservation.pickupAt,
+    returnAt: reservation.returnAt,
+    pickupLocationName: reservation.pickupLocation?.name || null,
+    returnLocationName: reservation.returnLocation?.name || null,
+    pdfUrl: null, // PDF generation is served via the admin-side HTML
+                  // render today; a public-facing PDF URL lands in a
+                  // later sprint when we swap HTML→PDF pipeline.
+    keyTerms: _deriveKeyTerms(reservation),
+  };
+}
+
+function _deriveKeyTerms(reservation) {
+  const pickupAt = reservation.pickupAt;
+  const returnAt = reservation.returnAt;
+  const hasMileageCap = Number(reservation.dailyMileageCap || 0) > 0;
+  const depositAmount = Number(reservation.securityDepositAmount || 300);
+
+  const returnFmt = returnAt
+    ? new Date(returnAt).toLocaleString('en-US', {
+        month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit',
+      })
+    : 'the scheduled return time';
+
+  return [
+    {
+      icon: 'clock',
+      title: `Return by ${returnFmt}`,
+      detail:
+        'Grace window: 30 minutes. After that, a $50/hour late fee applies.',
+    },
+    {
+      icon: 'road',
+      title: hasMileageCap
+        ? `${reservation.dailyMileageCap} miles/day included`
+        : 'Mileage included per listing',
+      detail:
+        'Overage billed at $0.45/mi against the Renter\'s card at return.',
+    },
+    {
+      icon: 'money',
+      title: `$${depositAmount.toFixed(0)} security deposit`,
+      detail:
+        'Authorized on the card at pickup, released within 3 business days after return.',
+    },
+    {
+      icon: 'car',
+      title: 'Damage and wear',
+      detail:
+        "Renter is responsible for damage beyond normal wear, up to the deposit. Anything above goes through the incident flow.",
+    },
+  ];
 }
