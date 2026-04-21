@@ -10,6 +10,12 @@ import {
   mintAcceptHostedToken,
   renderReturnPage as _renderReturnPage,
 } from './authnet-accept-hosted.js';
+import {
+  payarcEnabled,
+  selectPaymentGateway,
+  signBridgeNonce,
+  dollarsToCents,
+} from './payarc-hosted-fields.js';
 
 /**
  * Gateway-agnostic guest payment session minting for the Flutter
@@ -56,13 +62,15 @@ async function _findReservationForPayment(tripCode, tenantId) {
   if (trip?.reservationId) {
     reservation = await prisma.reservation.findUnique({
       where: { id: trip.reservationId },
-      include: { payments: true },
+      // pickupLocation is needed for the PR/US gateway routing
+      // decision in selectPaymentGateway().
+      include: { payments: true, pickupLocation: true },
     });
   }
   if (!reservation) {
     reservation = await prisma.reservation.findFirst({
       where: { reservationNumber: clean },
-      include: { payments: true },
+      include: { payments: true, pickupLocation: true },
     });
   }
   if (!reservation) {
@@ -99,7 +107,14 @@ export async function createGuestPaymentSession({
   const config = await settings.getPaymentGatewayConfig(
     reservation.tenantId ? { tenantId: reservation.tenantId } : {},
   );
-  const gateway = currentGateway(config || {});
+  // Gateway selection is location-driven for car-sharing (PR always
+  // Auth.Net, US uses PayArc when configured). For non-car-sharing
+  // reservations (no pickupLocation loaded, or fleet rentals), fall
+  // back to the tenant-wide gateway config.
+  const routed = selectPaymentGateway(reservation, config || {});
+  const gateway = reservation?.pickupLocation
+    ? routed
+    : currentGateway(config || {});
 
   const apiBase = _publicApiBase();
   const cleanCode = String(tripCode || '').trim();
@@ -140,6 +155,49 @@ export async function createGuestPaymentSession({
       successMatchUrl,
       cancelMatchUrl,
       gateway: 'authorizenet',
+      expiresAt,
+      amountDue,
+      currency: String(reservation.currency || 'USD').toUpperCase(),
+    };
+  }
+
+  if (gateway === 'payarc') {
+    if (!payarcEnabled(config || {})) {
+      const err = new Error('PayArc is not configured for this tenant');
+      err.code = 'GATEWAY_NOT_CONFIGURED';
+      throw err;
+    }
+    // The "checkout URL" for PayArc is our OWN backend's bridge page
+    // (PayArc doesn't offer a full-page hosted redirect — only
+    // Hosted Fields iframe). The bridge embeds payarc.js, collects
+    // the card, tokenizes in-iframe, then POSTs to /payarc-charge.
+    // The Flutter WebView is none the wiser — it just loads the URL
+    // and watches for the match URLs.
+    const amountCents = dollarsToCents(amountDue);
+    const nonce = signBridgeNonce({
+      tripCode: cleanCode,
+      reservationId: reservation.id,
+      amountCents,
+      secret: config.payarc.webhookSecret || config.payarc.bearerToken,
+      issuedAt: now.getTime(),
+    });
+    const bridgeUrl = `${apiBase}/api/public/booking/trips/${encodeURIComponent(
+      cleanCode,
+    )}/payarc-bridge?s=${encodeURIComponent(nonce)}`;
+    logger.info?.('payment-session minted', {
+      tripCode,
+      reservationId: reservation.id,
+      gateway,
+      amount: amountDue,
+    });
+    return {
+      checkoutUrl: bridgeUrl,
+      // GET — the Flutter WebView just navigates to the bridge page.
+      checkoutMethod: 'GET',
+      checkoutFields: {},
+      successMatchUrl,
+      cancelMatchUrl,
+      gateway: 'payarc',
       expiresAt,
       amountDue,
       currency: String(reservation.currency || 'USD').toUpperCase(),

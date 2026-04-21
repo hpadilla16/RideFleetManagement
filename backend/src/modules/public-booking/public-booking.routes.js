@@ -1,6 +1,13 @@
 import { Router } from 'express';
 import { publicBookingService } from './public-booking.service.js';
 import { createGuestPaymentSession, renderReturnPage } from './payment-session.service.js';
+import {
+  confirmPayArcCharge,
+  preparePayArcBridge,
+  handlePayArcWebhook,
+} from './payarc-session.service.js';
+import { renderPayArcBridge } from './payarc-bridge-html.js';
+import { PAYARC_JS_URL } from './payarc-hosted-fields.js';
 import { optionalNumber, optionalString, assertPlainObject } from '../../lib/request-validation.js';
 import { attachPublicRequestMeta, createOptionalIdempotencyGuard, createPublicRateLimitGuard } from '../../middleware/public-endpoint-guards.js';
 import { requireAuth } from '../../middleware/auth.js';
@@ -401,5 +408,115 @@ publicBookingRouter.get(
     res.set('Cache-Control', 'no-store');
     res.set('Content-Type', 'text/html; charset=utf-8');
     res.send(renderReturnPage({ status: 'cancel' }));
+  },
+);
+
+// ── PayArc WebView bridge (US-mainland pickups only) ─────────────
+//
+// GET /payarc-bridge?s=<signed-nonce>
+//   Serves a minimal HTML page that embeds payarc.js Hosted Fields.
+//   The Flutter WebView loads this in place of a gateway-hosted URL.
+//
+// POST /payarc-charge
+//   Body: { nonce, tokenId }. The bridge HTML POSTs here after
+//   tokenizing the card. On success the inline JS redirects the
+//   WebView to the successMatchUrl returned by payment-session.
+publicBookingRouter.get(
+  '/trips/:tripCode/payarc-bridge',
+  bookingReadGuard,
+  async (req, res, next) => {
+    try {
+      const data = await preparePayArcBridge({
+        tripCode: req.params.tripCode,
+        nonce: String(req.query?.s || ''),
+      });
+      res.set('Cache-Control', 'no-store');
+      res.set('Content-Type', 'text/html; charset=utf-8');
+      res.send(
+        renderPayArcBridge({
+          ...data,
+          payarcJsUrl: data.payarcJsUrl || PAYARC_JS_URL,
+        }),
+      );
+    } catch (error) {
+      const code = error?.code;
+      if (code === 'NOT_FOUND') return res.status(404).send('Not found');
+      if (code === 'INVALID_NONCE') {
+        return res.status(400).send('Invalid or expired payment link');
+      }
+      if (code === 'GATEWAY_NOT_CONFIGURED') {
+        return res.status(503).send('Secure payment temporarily unavailable');
+      }
+      next(error);
+    }
+  },
+);
+
+publicBookingRouter.post(
+  '/trips/:tripCode/payarc-charge',
+  bookingWriteGuard,
+  async (req, res, next) => {
+    try {
+      assertPlainObject(req.body || {}, 'charge payload');
+      const result = await confirmPayArcCharge({
+        tripCode: req.params.tripCode,
+        body: req.body || {},
+      });
+      res.json(result);
+    } catch (error) {
+      const code = error?.code;
+      if (code === 'NOT_FOUND') return res.status(404).json({ error: error.message });
+      if (code === 'INVALID_NONCE') return res.status(400).json({ error: error.message });
+      if (code === 'VALIDATION') return res.status(400).json({ error: error.message });
+      if (code === 'CARD_DECLINED' || code === 'CARD_EXPIRED' || code === 'CARD_INVALID_CVC') {
+        return res.status(402).json({ error: error.message, code });
+      }
+      if (code === 'GATEWAY_NOT_CONFIGURED') {
+        return res.status(503).json({ error: error.message });
+      }
+      if (code === 'GATEWAY_ERROR') {
+        return res.status(502).json({ error: error.message });
+      }
+      next(error);
+    }
+  },
+);
+
+// ── PayArc webhook ───────────────────────────────────────────────
+// Mounted at /api/public/payment-gateway/payarc/webhook by the
+// parent public router. The signature verification reads raw body,
+// so we rely on express.json() having preserved it. Returns 200 for
+// ignored events (so PayArc doesn't retry).
+//
+// NOTE: this route lives on the generic public-booking router for
+// co-location with the session service; it will be mounted at
+// `/api/public/booking/payment-gateway/payarc/webhook` via the
+// express parent. If PayArc expects the exact URL
+// `/api/public/payment-gateway/payarc/webhook` (mirroring the
+// existing Authorize.Net endpoint), we can add a short alias in the
+// main routes file — trivial to move once Hector registers the URL
+// in the PayArc dashboard.
+publicBookingRouter.post(
+  '/payment-gateway/payarc/webhook',
+  async (req, res) => {
+    try {
+      const rawBody =
+        typeof req.rawBody === 'string' || Buffer.isBuffer(req.rawBody)
+          ? req.rawBody
+          : JSON.stringify(req.body || {});
+      const result = await handlePayArcWebhook({
+        rawBody,
+        headers: req.headers || {},
+        body: req.body || {},
+      });
+      res.json(result);
+    } catch (error) {
+      if (error?.code === 'UNAUTHORIZED') {
+        return res.status(401).json({ error: 'Invalid signature' });
+      }
+      // Always 200 on parse/match failures — PayArc retries on 5xx
+      // and we don't want to thrash if the payload just isn't ours.
+      res.json({ ok: true, ignored: true, reason: error?.message || 'unhandled' });
+    }
   },
 );
