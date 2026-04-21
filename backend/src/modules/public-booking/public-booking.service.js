@@ -920,9 +920,9 @@ export const publicBookingService = {
   async submitTripDocuments(tripCode, payload) {
     const trip = await _findTripByCode(tripCode);
 
-    // Body is { license?: dataUrl, insurance?: dataUrl, addressProof?: dataUrl }.
-    // At least one field is required per POST; idempotent by type so a
-    // resubmit replaces the earlier row.
+    // Body is { license?: dataUrl, insurance?: dataUrl }. At least one
+    // field is required per POST; idempotent by type so a resubmit
+    // replaces the earlier row.
     const toWrite = [];
     if (payload.license != null) {
       toWrite.push({
@@ -936,15 +936,9 @@ export const publicBookingService = {
         dataUrl: _validateDocDataUrl(payload.insurance, 'insurance'),
       });
     }
-    if (payload.addressProof != null) {
-      toWrite.push({
-        type: 'ADDRESS_PROOF',
-        dataUrl: _validateDocDataUrl(payload.addressProof, 'addressProof'),
-      });
-    }
     if (toWrite.length === 0) {
       throw new Error(
-        'At least one of license, insurance, or addressProof is required',
+        'At least one of license or insurance is required',
       );
     }
 
@@ -1213,7 +1207,7 @@ function _formatTripDocumentsResponse(trip, docs) {
     tripCode: trip.tripCode,
     tripStatus: trip.status,
     documents: docs.map(_serializeDocument),
-    requiredTypes: ['LICENSE', 'INSURANCE', 'ADDRESS_PROOF'],
+    requiredTypes: ['LICENSE', 'INSURANCE'],
   };
 }
 
@@ -1252,8 +1246,6 @@ function _prettyDocType(type) {
       return 'Driver license';
     case 'INSURANCE':
       return 'Insurance card';
-    case 'ADDRESS_PROOF':
-      return 'Proof of address';
     default:
       return type;
   }
