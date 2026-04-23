@@ -399,6 +399,7 @@ model Tenant {
   conversations   Conversation[]
   knowledgeArticles KnowledgeArticle[]
   franchises      Franchise[]
+  agreementAddendums RentalAgreementAddendum[]
 }
 
 model Location {
@@ -1200,9 +1201,49 @@ model RentalAgreement {
   inspections       RentalAgreementInspection[]
   vehicleSwaps      RentalAgreementVehicleSwap[]
   commissions       AgreementCommission[]
+  addendums         RentalAgreementAddendum[]
 
   @@index([status, pickupAt])
   @@index([tenantId, status])
+}
+
+// Rental agreement addendum (BUG-001 Option C). Post-signature date
+// changes create a new addendum row instead of mutating the signed parent.
+model RentalAgreementAddendum {
+  id                   String   @id @default(cuid())
+  rentalAgreementId    String
+  rentalAgreement      RentalAgreement @relation(fields: [rentalAgreementId], references: [id], onDelete: Cascade)
+
+  tenantId             String?
+  tenant               Tenant?  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  pickupAt             DateTime
+  returnAt             DateTime
+
+  reason               String
+  reasonCategory       String?  @default("admin_correction")
+
+  initiatedBy          String?
+  initiatedByRole      String?
+
+  status               String   @default("PENDING_SIGNATURE")
+
+  signatureSignedBy    String?
+  signatureDataUrl     String?
+  signatureSignedAt    DateTime?
+  signatureIp          String?
+
+  originalCharges      String?
+  newCharges           String?
+  chargeDelta          String?
+
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+
+  @@index([rentalAgreementId])
+  @@index([tenantId, status])
+  @@index([status, createdAt])
+  @@index([tenantId, createdAt])
 }
 
 model Trip {
