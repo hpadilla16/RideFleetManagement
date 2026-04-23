@@ -176,6 +176,14 @@ async function issueGuestAccess({ customers = [], email, customerName, subject =
 }
 
 function bookingSummaryFromReservation(reservation) {
+  // Trip chat conversation: created by tripChatService at CONFIRMED
+  // transition (see messaging/trip-chat.service.js). For a guest looking
+  // at their own bookings the relation is effectively 1:1, so we take
+  // the first conversation and surface only the guest-scoped fields —
+  // the Flutter car-sharing app uses `conversation.guestToken` to open
+  // /api/public/booking/trip-chat/:token/* directly from trip detail.
+  // Null for trips that haven't reached CONFIRMED yet.
+  const conv = reservation.carSharingTrip?.conversations?.[0] || null;
   return {
     type: reservation.workflowMode === 'CAR_SHARING' ? 'CAR_SHARING' : 'RENTAL',
     reference: reservation.workflowMode === 'CAR_SHARING'
@@ -201,6 +209,12 @@ function bookingSummaryFromReservation(reservation) {
           displayName: reservation.carSharingTrip.hostProfile.displayName,
           averageRating: Number(reservation.carSharingTrip.hostProfile.averageRating || 0),
           reviewCount: Number(reservation.carSharingTrip.hostProfile.reviewCount || 0)
+        }
+      : null,
+    conversation: conv
+      ? {
+          guestToken: conv.guestToken,
+          guestTokenExpiresAt: conv.guestTokenExpiresAt
         }
       : null
   };
@@ -238,7 +252,11 @@ export const publicBookingService = {
         visibilityMode: listing.pickupSpot?.visibilityMode || 'REVEAL_AFTER_BOOKING',
         exactLocationHidden: !!listing.pickupSpot?.exactLocationHidden,
         primaryImageUrl: listing.primaryImageUrl || '',
-        imageUrls: listing.imageUrls || []
+        imageUrls: listing.imageUrls || [],
+        // `photos` is the canonical shape for native mobile clients that expect
+        // structured image metadata. `imageUrls` is retained for backwards
+        // compatibility with existing web/admin consumers — do not remove.
+        photos: (listing.imageUrls || []).map((url) => ({ url, caption: null }))
       }))
     };
   },
@@ -543,6 +561,8 @@ export const publicBookingService = {
         })),
         primaryImageUrl: result.listing.primaryImageUrl || '',
         imageUrls: result.listing.imageUrls || [],
+        // Canonical shape for native clients (see notes above).
+        photos: (result.listing.imageUrls || []).map((url) => ({ url, caption: null })),
         quote: {
           tripDays: Number(result.quote?.tripDays || 0),
           subtotal: money(result.quote?.subtotal),
@@ -811,6 +831,18 @@ export const publicBookingService = {
                   include: {
                     vehicle: true
                   }
+                },
+                // Pull the guest-scoped chat token so the Flutter client
+                // can open /trip-chat/:token/* straight from trip detail.
+                // Only one conversation per trip in practice; `take: 1`
+                // keeps the Prisma plan small. We select only the two
+                // fields the guest needs — never leak hostToken.
+                conversations: {
+                  select: {
+                    guestToken: true,
+                    guestTokenExpiresAt: true
+                  },
+                  take: 1
                 }
               }
             }
@@ -852,13 +884,27 @@ export const publicBookingService = {
       orderBy: [{ requestedAt: 'desc' }]
     });
 
+    // Issue a guest-role JWT alongside the magic-link session data so native
+    // mobile clients (ride-fleet-car-sharing-app) can treat the redeem as a
+    // completed sign-in. Expiry is handled by auth.service (currently 7d) and
+    // surfaced to clients via `jwtExpiresInSeconds` so they can schedule
+    // re-auth before the token lapses.
+    const jwtExpiresIn = authService.guestJwtExpiresIn();
+    const jwtExpiresInSeconds =
+      typeof jwtExpiresIn === 'string' && jwtExpiresIn.endsWith('d')
+        ? Number.parseInt(jwtExpiresIn, 10) * 24 * 60 * 60
+        : null;
+
     return {
       customer: {
         id: primary.id,
         firstName: primary.firstName,
         lastName: primary.lastName,
-        email: primary.email
+        email: primary.email,
+        tenantId: primary.tenantId || null
       },
+      jwt: authService.issueGuestToken(primary),
+      jwtExpiresInSeconds,
       bookings,
       pendingReviews: pendingReviews.map((r) => ({
         id: r.id,
@@ -885,6 +931,169 @@ export const publicBookingService = {
 
   async submitHostReview(token, input = {}) {
     return hostReviewsService.submitPublicReview(token, input);
+  },
+
+  // ── Rental agreement signature (Sprint 5) ────────────────────────
+  async getGuestAgreement(token) {
+    const reservation = await _findReservationBySignatureToken(token);
+    return _formatAgreementResponse(reservation);
+  },
+
+  async submitGuestSignature(token, payload) {
+    const reservation = await _findReservationBySignatureToken(token);
+    if (reservation.signatureSignedAt) {
+      throw new Error('Agreement already signed');
+    }
+
+    const signaturePng = payload.signaturePng != null
+      ? _validateSignatureDataUrl(payload.signaturePng)
+      : null;
+    const typedName = payload.typedName != null
+      ? String(payload.typedName).trim()
+      : null;
+
+    if (!signaturePng && !typedName) {
+      throw new Error(
+        'Either signaturePng (canvas data URL) or typedName is required',
+      );
+    }
+    if (typedName && typedName.length < 2) {
+      throw new Error('typedName is too short — provide at least 2 characters');
+    }
+
+    const signerName = typedName ||
+      [reservation.customer?.firstName, reservation.customer?.lastName]
+        .filter(Boolean)
+        .join(' ')
+        .trim() ||
+      reservation.customer?.email ||
+      'Guest';
+    const signedAt = new Date();
+
+    const note = `[SIGNATURE ${signedAt.toISOString()}] signed by ${signerName} via Flutter guest app`;
+
+    await prisma.$transaction(async (tx) => {
+      await tx.reservation.update({
+        where: { id: reservation.id },
+        data: {
+          signatureSignedAt: signedAt,
+          signatureSignedBy: signerName,
+          signatureDataUrl: signaturePng || null,
+          notes: reservation.notes ? `${reservation.notes}\n${note}` : note,
+        },
+      });
+      const latestAgreement = await tx.rentalAgreement.findFirst({
+        where: { reservationId: reservation.id },
+        orderBy: { createdAt: 'desc' },
+        select: { id: true },
+      });
+      if (latestAgreement?.id) {
+        await tx.rentalAgreement.update({
+          where: { id: latestAgreement.id },
+          data: { locked: true },
+        });
+      }
+      await tx.auditLog.create({
+        data: {
+          reservationId: reservation.id,
+          action: 'UPDATE',
+          metadata: JSON.stringify({
+            signatureCompleted: true,
+            signerName,
+            typedSignature: !!typedName && !signaturePng,
+            source: 'public-booking',
+          }),
+        },
+      });
+    });
+
+    // Re-fetch so the response carries the fresh signedAt + any server-
+    // side mutations that fired in the transaction.
+    const updated = await _findReservationBySignatureToken(token, {
+      allowSigned: true,
+    });
+    return _formatAgreementResponse(updated);
+  },
+
+  // ── Pre-check-in documents (Sprint 4) ────────────────────────────
+  async getTripDocuments(tripCode) {
+    const trip = await _findTripByCode(tripCode);
+    const docs = await prisma.tripDocument.findMany({
+      where: { tripId: trip.id },
+      orderBy: { submittedAt: 'asc' },
+    });
+    return _formatTripDocumentsResponse(trip, docs);
+  },
+
+  async submitTripDocuments(tripCode, payload) {
+    const trip = await _findTripByCode(tripCode);
+
+    // Body is { license?: dataUrl, insurance?: dataUrl }. At least one
+    // field is required per POST; idempotent by type so a resubmit
+    // replaces the earlier row.
+    const toWrite = [];
+    if (payload.license != null) {
+      toWrite.push({
+        type: 'LICENSE',
+        dataUrl: _validateDocDataUrl(payload.license, 'license'),
+      });
+    }
+    if (payload.insurance != null) {
+      toWrite.push({
+        type: 'INSURANCE',
+        dataUrl: _validateDocDataUrl(payload.insurance, 'insurance'),
+      });
+    }
+    if (toWrite.length === 0) {
+      throw new Error(
+        'At least one of license or insurance is required',
+      );
+    }
+
+    await prisma.$transaction(
+      toWrite.map((doc) =>
+        prisma.tripDocument.upsert({
+          where: {
+            tripId_documentType: {
+              tripId: trip.id,
+              documentType: doc.type,
+            },
+          },
+          create: {
+            tripId: trip.id,
+            documentType: doc.type,
+            dataUrl: doc.dataUrl,
+            status: 'PENDING',
+          },
+          update: {
+            dataUrl: doc.dataUrl,
+            status: 'PENDING',
+            rejectReason: null,
+            submittedAt: new Date(),
+            reviewedAt: null,
+          },
+        }),
+      ),
+    );
+
+    // Host-facing notification fires on each submission so their
+    // review queue sees an update even when the guest re-captures a
+    // single doc. Keep it best-effort — we don't want the POST to fail
+    // because MailerSend hiccupped.
+    try {
+      await _notifyHostOfDocumentSubmission(trip, toWrite.map((d) => d.type));
+    } catch (err) {
+      console.warn(
+        '[pre-check-in] failed to notify host of document submission',
+        err,
+      );
+    }
+
+    const docs = await prisma.tripDocument.findMany({
+      where: { tripId: trip.id },
+      orderBy: { submittedAt: 'asc' },
+    });
+    return _formatTripDocumentsResponse(trip, docs);
   },
 
   async getHostStatus(user) {
@@ -1033,4 +1242,243 @@ async function notifyTenantAdminsNewSubmission({ tenantId, tenantName, hostDispl
   `;
 
   return sendEmail({ to: adminEmails.join(','), subject, text, html });
+}
+
+// ── Pre-check-in helpers (Sprint 4) ─────────────────────────────────
+
+async function _findTripByCode(tripCode) {
+  const clean = String(tripCode || '').trim();
+  if (!clean) throw new Error('tripCode is required');
+  const trip = await prisma.trip.findUnique({
+    where: { tripCode: clean },
+    select: {
+      id: true,
+      tenantId: true,
+      tripCode: true,
+      status: true,
+      hostProfileId: true,
+      hostProfile: {
+        select: { id: true, displayName: true, email: true, phone: true },
+      },
+      guestCustomerId: true,
+      guestCustomer: { select: { firstName: true, email: true } },
+    },
+  });
+  if (!trip) throw new Error(`Trip not found: ${clean}`);
+  return trip;
+}
+
+// Accepts `data:image/<type>;base64,<payload>` — same convention used
+// by trip-chat attachments. Enforces ~8 MB hard limit on the raw
+// base64 payload so a misbehaving client can't stuff a video in.
+const _ALLOWED_DOC_MIMES = ['image/jpeg', 'image/jpg', 'image/png', 'image/heic', 'application/pdf'];
+const _MAX_DOC_BYTES = 8 * 1024 * 1024; // 8 MB
+
+function _validateDocDataUrl(value, fieldLabel) {
+  const raw = String(value || '').trim();
+  if (!raw) throw new Error(`${fieldLabel} is required`);
+  const match = raw.match(/^data:([^;,]+);base64,(.*)$/i);
+  if (!match) {
+    throw new Error(`${fieldLabel} must be a base64 data URL (data:<mime>;base64,…)`);
+  }
+  const mimeType = match[1].toLowerCase();
+  if (!_ALLOWED_DOC_MIMES.includes(mimeType)) {
+    throw new Error(
+      `${fieldLabel} has unsupported mime type ${mimeType}. Allowed: ${_ALLOWED_DOC_MIMES.join(', ')}`,
+    );
+  }
+  const payload = match[2].replace(/\s+/g, '');
+  const approxBytes = Math.floor((payload.length * 3) / 4);
+  if (approxBytes > _MAX_DOC_BYTES) {
+    throw new Error(
+      `${fieldLabel} is too large (${Math.round(approxBytes / 1024 / 1024)} MB). Max is 8 MB.`,
+    );
+  }
+  return raw;
+}
+
+function _serializeDocument(doc) {
+  return {
+    type: doc.documentType,
+    status: doc.status,
+    submittedAt: doc.submittedAt,
+    reviewedAt: doc.reviewedAt,
+    rejectReason: doc.rejectReason,
+  };
+}
+
+function _formatTripDocumentsResponse(trip, docs) {
+  // Trip.status is normally only moved by host-facing actions; we
+  // surface it here so the Flutter client can bail out early if the
+  // backend already advanced the trip past RESERVED.
+  return {
+    tripCode: trip.tripCode,
+    tripStatus: trip.status,
+    documents: docs.map(_serializeDocument),
+    requiredTypes: ['LICENSE', 'INSURANCE'],
+  };
+}
+
+async function _notifyHostOfDocumentSubmission(trip, typesSubmitted) {
+  const hostEmail = trip.hostProfile?.email;
+  if (!hostEmail) return; // silent — host may not have email configured
+
+  const subject = 'Guest pre-check-in documents submitted';
+  const prettyTypes = typesSubmitted
+    .map((t) => _prettyDocType(t))
+    .join(', ');
+  const text = [
+    `Trip ${trip.tripCode}`,
+    `Guest: ${trip.guestCustomer?.firstName || trip.guestCustomer?.email || 'Guest'}`,
+    `Submitted: ${prettyTypes}`,
+    '',
+    'Log in to the Ride Fleet admin dashboard to review and approve.',
+  ].join('\n');
+  const html = `
+    <div style="font-family:Arial,sans-serif;font-size:14px;line-height:1.6;color:#111;max-width:560px">
+      <div style="padding:20px 24px;border-radius:14px;background:#f5f3ff;border:1px solid #c4b5fd">
+        <h2 style="margin:0 0 12px;font-size:18px;color:#5b21b6">Pre-check-in documents submitted</h2>
+        <p style="margin:0 0 8px"><strong>Trip:</strong> ${trip.tripCode}</p>
+        <p style="margin:0 0 8px"><strong>Submitted:</strong> ${prettyTypes.replace(/</g, '&lt;')}</p>
+        <p style="margin:16px 0 0;font-size:13px;color:#6d28d9">Review in the Ride Fleet admin dashboard.</p>
+      </div>
+    </div>
+  `;
+
+  return sendEmail({ to: hostEmail, subject, text, html });
+}
+
+function _prettyDocType(type) {
+  switch (type) {
+    case 'LICENSE':
+      return 'Driver license';
+    case 'INSURANCE':
+      return 'Insurance card';
+    default:
+      return type;
+  }
+}
+
+// ── Agreement helpers (Sprint 5) ─────────────────────────────────────
+
+async function _findReservationBySignatureToken(token, { allowSigned = false } = {}) {
+  const clean = String(token || '').trim();
+  if (!clean) throw new Error('Signature token is required');
+  const reservation = await prisma.reservation.findFirst({
+    where: {
+      signatureToken: clean,
+      // When signing is completing, we re-fetch from the transaction —
+      // allow lookups past the stored expiry in that case.
+      ...(allowSigned
+        ? {}
+        : { signatureTokenExpiresAt: { gt: new Date() } }),
+    },
+    include: {
+      customer: {
+        select: { firstName: true, lastName: true, email: true },
+      },
+      vehicle: { select: { year: true, make: true, model: true, color: true } },
+      vehicleType: { select: { label: true } },
+      pickupLocation: { select: { name: true } },
+      returnLocation: { select: { name: true } },
+      carSharingTrip: { select: { tripCode: true } },
+    },
+  });
+  if (!reservation) {
+    throw new Error('Invalid or expired signature link');
+  }
+  return reservation;
+}
+
+// Signature PNG comes in as a `data:image/png;base64,…` URL. Same
+// shape the trip-chat + pre-check-in endpoints use. Smaller cap (2 MB)
+// since it's always a tiny PNG of a handwritten stroke.
+const _SIGNATURE_MAX_BYTES = 2 * 1024 * 1024;
+
+function _validateSignatureDataUrl(value) {
+  const raw = String(value || '').trim();
+  if (!raw) throw new Error('signaturePng is required');
+  const match = raw.match(/^data:(image\/png|image\/jpeg|image\/jpg);base64,(.*)$/i);
+  if (!match) {
+    throw new Error(
+      'signaturePng must be a base64 data URL (data:image/png;base64,…)',
+    );
+  }
+  const payload = match[2].replace(/\s+/g, '');
+  const approxBytes = Math.floor((payload.length * 3) / 4);
+  if (approxBytes > _SIGNATURE_MAX_BYTES) {
+    throw new Error(
+      `signaturePng is too large (${Math.round(approxBytes / 1024)} KB). Max is 2 MB.`,
+    );
+  }
+  return raw;
+}
+
+function _formatAgreementResponse(reservation) {
+  const firstName = reservation.customer?.firstName || '';
+  const lastName = reservation.customer?.lastName || '';
+  const vehicle = reservation.vehicle;
+  const vehicleLabel = vehicle
+    ? [vehicle.year, vehicle.make, vehicle.model].filter(Boolean).join(' ').trim()
+    : reservation.vehicleType?.label || 'Selected vehicle';
+
+  return {
+    agreementToken: reservation.signatureToken,
+    tripCode: reservation.carSharingTrip?.tripCode || null,
+    reservationNumber: reservation.reservationNumber,
+    signedAt: reservation.signatureSignedAt,
+    signedBy: reservation.signatureSignedBy,
+    customerName: [firstName, lastName].filter(Boolean).join(' ').trim() || null,
+    vehicleLabel,
+    pickupAt: reservation.pickupAt,
+    returnAt: reservation.returnAt,
+    pickupLocationName: reservation.pickupLocation?.name || null,
+    returnLocationName: reservation.returnLocation?.name || null,
+    pdfUrl: null, // PDF generation is served via the admin-side HTML
+                  // render today; a public-facing PDF URL lands in a
+                  // later sprint when we swap HTML→PDF pipeline.
+    keyTerms: _deriveKeyTerms(reservation),
+  };
+}
+
+function _deriveKeyTerms(reservation) {
+  const pickupAt = reservation.pickupAt;
+  const returnAt = reservation.returnAt;
+  const hasMileageCap = Number(reservation.dailyMileageCap || 0) > 0;
+  const depositAmount = Number(reservation.securityDepositAmount || 300);
+
+  const returnFmt = returnAt
+    ? new Date(returnAt).toLocaleString('en-US', {
+        month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit',
+      })
+    : 'the scheduled return time';
+
+  return [
+    {
+      icon: 'clock',
+      title: `Return by ${returnFmt}`,
+      detail:
+        'Grace window: 30 minutes. After that, a $50/hour late fee applies.',
+    },
+    {
+      icon: 'road',
+      title: hasMileageCap
+        ? `${reservation.dailyMileageCap} miles/day included`
+        : 'Mileage included per listing',
+      detail:
+        'Overage billed at $0.45/mi against the Renter\'s card at return.',
+    },
+    {
+      icon: 'money',
+      title: `$${depositAmount.toFixed(0)} security deposit`,
+      detail:
+        'Authorized on the card at pickup, released within 3 business days after return.',
+    },
+    {
+      icon: 'car',
+      title: 'Damage and wear',
+      detail:
+        "Renter is responsible for damage beyond normal wear, up to the deposit. Anything above goes through the incident flow.",
+    },
+  ];
 }
