@@ -283,7 +283,7 @@ export const LOCATION_CONFIG_DEFAULT = {
   closedWeekdays: [],
   closedDates: []
 };
-export const EMPTY_FEE = { code: '', name: '', description: '', mode: 'FIXED', amount: '', taxable: false, isActive: true, mandatory: false, isUnderageFee: false, isAdditionalDriverFee: false };
+export const EMPTY_FEE = { code: '', name: '', description: '', mode: 'FIXED', amount: '', taxable: false, isActive: true, mandatory: false, isUnderageFee: false, isAdditionalDriverFee: false, displayOnline: false };
 export const EMPTY_RATE = {
   id: '',
   rateCode: '',
