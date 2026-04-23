@@ -4,7 +4,8 @@ const files = [
   'v3-read-isolation.mjs',
   'v4-write-isolation.mjs',
   'v5-superadmin.mjs',
-  'v6-lifecycle.mjs'
+  'v6-lifecycle.mjs',
+  'v7-website-fees.mjs'
 ];
 
 const results = [];

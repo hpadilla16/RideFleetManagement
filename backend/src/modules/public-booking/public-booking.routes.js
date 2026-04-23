@@ -66,6 +66,21 @@ publicBookingRouter.get('/vehicle-classes', bookingReadGuard, async (req, res, n
   }
 });
 
+publicBookingRouter.get('/website-fees', bookingReadGuard, async (req, res, next) => {
+  try {
+    const payload = await publicBookingService.getWebsiteMandatoryFees({
+      tenantId: optionalString(req.query?.tenantId, { fallback: undefined }),
+      tenantSlug: optionalString(req.query?.tenantSlug, { fallback: undefined })
+    });
+    res.json(payload);
+  } catch (error) {
+    if (/required|not found/i.test(String(error?.message || ''))) {
+      return res.status(400).json({ error: error.message });
+    }
+    next(error);
+  }
+});
+
 publicBookingRouter.post('/rental-search', bookingWriteGuard, async (req, res, next) => {
   try {
     assertPlainObject(req.body || {}, 'booking search payload');

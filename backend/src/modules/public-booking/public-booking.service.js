@@ -943,6 +943,37 @@ export const publicBookingService = {
         }))
       }))
     };
+  },
+
+  async getWebsiteMandatoryFees({ tenantId, tenantSlug }) {
+    // Resolve tenant from ID or slug (same pattern as resolvePublicCarSharingTenant)
+    const scopedTenantId = tenantId ? String(tenantId).trim() : '';
+    const scopedTenantSlug = tenantSlug ? String(tenantSlug).trim().toLowerCase() : '';
+    if (!scopedTenantId && !scopedTenantSlug) throw new Error('tenantSlug or tenantId is required');
+
+    const tenant = await prisma.tenant.findFirst({
+      where: {
+        status: 'ACTIVE',
+        ...(scopedTenantId ? { id: scopedTenantId } : {}),
+        ...(scopedTenantSlug ? { slug: scopedTenantSlug } : {})
+      },
+      select: { id: true }
+    });
+
+    if (!tenant) throw new Error('Tenant not found');
+
+    // Fetch only mandatory, active, displayOnline=true fees
+    const fees = await prisma.fee.findMany({
+      where: {
+        tenantId: tenant.id,
+        isActive: true,
+        mandatory: true,
+        displayOnline: true
+      },
+      orderBy: { createdAt: 'asc' }
+    });
+
+    return { tenantId: tenant.id, fees };
   }
 };
 
