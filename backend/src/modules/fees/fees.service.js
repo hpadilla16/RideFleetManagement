@@ -20,7 +20,8 @@ export const feesService = {
         isActive: data.isActive ?? true,
         mandatory: data.mandatory ?? false,
         isUnderageFee: data.isUnderageFee ?? false,
-        isAdditionalDriverFee: data.isAdditionalDriverFee ?? false
+        isAdditionalDriverFee: data.isAdditionalDriverFee ?? false,
+        displayOnline: data.displayOnline ?? false
       }
     });
   },
