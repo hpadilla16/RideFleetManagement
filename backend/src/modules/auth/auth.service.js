@@ -22,6 +22,30 @@ function signToken(user) {
   );
 }
 
+// Guest JWTs are issued at magic-link redeem time so native mobile clients
+// (see the ride-fleet-car-sharing-app repo) can treat the redeem as a
+// sign-in completion. They're signed against the same secret as User JWTs
+// but carry role='GUEST' + customerId claim; middleware/auth.js treats
+// role='GUEST' as unauthenticated for internal routes (only public-booking
+// endpoints that already accept magic-link tokens are reachable with it),
+// so there's no path-escalation risk. Expiry is tied to the magic-link
+// window so a new magic link resets the clock.
+const GUEST_JWT_EXPIRES_IN = '7d';
+
+function signGuestToken(customer) {
+  return jwt.sign(
+    {
+      sub: customer.id,
+      customerId: customer.id,
+      email: customer.email || null,
+      role: 'GUEST',
+      tenantId: customer.tenantId || null
+    },
+    getJwtSecret(),
+    { expiresIn: GUEST_JWT_EXPIRES_IN }
+  );
+}
+
 async function buildSessionUser(user) {
   if (!user) return null;
   const moduleAccess = await getEffectiveModuleAccessForUser(user);
@@ -42,6 +66,14 @@ async function buildSessionUser(user) {
 export const authService = {
   issueTokenForUser(user) {
     return signToken(user);
+  },
+
+  issueGuestToken(customer) {
+    return signGuestToken(customer);
+  },
+
+  guestJwtExpiresIn() {
+    return GUEST_JWT_EXPIRES_IN;
   },
 
   async getSessionUser(userId) {
