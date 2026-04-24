@@ -1832,6 +1832,7 @@ model Fee {
   mandatory     Boolean  @default(false)
   isUnderageFee       Boolean  @default(false)
   isAdditionalDriverFee Boolean  @default(false)
+  displayOnline Boolean  @default(false)  // NEW: controls visibility on public website
   createdAt     DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
@@ -1841,6 +1842,7 @@ model Fee {
   @@index([isActive, name])
   @@unique([tenantId, code])
   @@index([tenantId, isActive])
+  @@index([tenantId, isActive, mandatory, displayOnline])  // NEW: optimized for website fees fetch
 }
 
 model LocationFee {

@@ -353,6 +353,7 @@ function PublicBookingPageInner() {
   const queryPickupLocationId = String(searchParams.get('pickupLocationId') || '').trim();
   const queryReturnLocationId = String(searchParams.get('returnLocationId') || '').trim();
   const [bootstrap, setBootstrap] = useState(null);
+  const [websiteFees, setWebsiteFees] = useState([]);
   const [tenantSlug, setTenantSlug] = useState(queryTenantSlug || initialDraft?.tenantSlug || '');
   const [uiStep, setUiStep] = useState(initialDraft?.uiStep || 'search');
   const [searchMode, setSearchMode] = useState(querySearchMode || initialDraft?.searchMode || 'RENTAL');
@@ -442,6 +443,20 @@ function PublicBookingPageInner() {
     loadBootstrap(queryTenantSlug || initialDraft?.tenantSlug || '');
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  useEffect(() => {
+    if (!tenantSlug) { setWebsiteFees([]); return; }
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await api(`/api/public/booking/website-fees?tenantSlug=${encodeURIComponent(tenantSlug)}`);
+        if (!cancelled) setWebsiteFees(Array.isArray(res?.fees) ? res.fees : []);
+      } catch {
+        if (!cancelled) setWebsiteFees([]);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [tenantSlug]);
 
   useEffect(() => {
     try {
@@ -686,6 +701,13 @@ function PublicBookingPageInner() {
     [mandatoryBookingFees]
   );
 
+  const websiteFeesTotal = useMemo(() => {
+    if (!selectedResult || !websiteFees.length) return 0;
+    const baseTotal = Number(selectedResult?.quote?.estimatedTripTotal || selectedResult?.quote?.subtotal || selectedResult?.quote?.total || 0);
+    const days = Math.max(1, Number(selectedResult?.quote?.tripDays || 1));
+    return websiteFees.reduce((sum, fee) => sum + computeFeeLineTotal(fee, { baseAmount: baseTotal, days }), 0);
+  }, [websiteFees, selectedResult]);
+
   const selectedInsurancePlan = useMemo(() => {
     if (searchMode !== 'RENTAL') return null;
     const code = String(insuranceSelection.selectedPlanCode || '').trim().toUpperCase();
@@ -707,8 +729,8 @@ function PublicBookingPageInner() {
             ? (selectedResult?.quote?.deliveryTotal || selectedResult?.quote?.total || 0)
             : (selectedResult?.quote?.pickupTotal || selectedResult?.quote?.total || 0)
         );
-    return baseTotal + chosenAdditionalServicesTotal + linkedServiceFeesTotal + selectedInsuranceTotal;
-  }, [chosenAdditionalServicesTotal, linkedServiceFeesTotal, searchMode, selectedFulfillmentChoice, selectedInsuranceTotal, selectedResult]);
+    return baseTotal + chosenAdditionalServicesTotal + linkedServiceFeesTotal + selectedInsuranceTotal + websiteFeesTotal;
+  }, [chosenAdditionalServicesTotal, linkedServiceFeesTotal, searchMode, selectedFulfillmentChoice, selectedInsuranceTotal, selectedResult, websiteFeesTotal]);
 
   const selectedCarSharingGuestTripFee = useMemo(() => {
     if (searchMode !== 'CAR_SHARING' || !selectedResult) return 0;
@@ -1558,6 +1580,38 @@ function PublicBookingPageInner() {
                     </div>
                   </div>
                 ) : null}
+                {websiteFees.length ? (
+                  <div className="stack" style={{ marginBottom: 18 }}>
+                    <div>
+                      <div className="section-title" style={{ fontSize: 16 }}>Mandatory Website Fees</div>
+                      <p className="ui-muted">These fees apply to bookings placed through this website and are automatically included in the total.</p>
+                    </div>
+                    <div className="stack">
+                      {websiteFees.map((fee) => {
+                        const baseAmount = Number(selectedResult?.quote?.estimatedTripTotal || selectedResult?.quote?.subtotal || selectedResult?.quote?.total || 0);
+                        const lineTotal = computeFeeLineTotal(fee, { baseAmount, days: tripLengthDays || 1 });
+                        return (
+                          <div key={fee.id} className="surface-note" style={{ display: 'grid', gap: 10 }}>
+                            <div className="row-between" style={{ alignItems: 'start', gap: 12 }}>
+                              <div className="stack" style={{ gap: 4 }}>
+                                <strong>{fee.name}</strong>
+                                {fee.description ? <span className="ui-muted">{fee.description}</span> : null}
+                                <span className="eyebrow">Website fee{fee.mode ? ` | ${String(fee.mode).replaceAll('_', ' ')}` : ''}</span>
+                              </div>
+                              <span className="status-chip neutral">Included</span>
+                            </div>
+                            <div className="form-grid-2">
+                              <div>
+                                <div className="label">Fee Total</div>
+                                <input value={fmtMoney(lineTotal)} disabled />
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                ) : null}
                 {searchMode === 'RENTAL' && mandatoryBookingFees.length ? (
                   <div className="stack" style={{ marginBottom: 18 }}>
                     <div>
@@ -1810,6 +1864,13 @@ function PublicBookingPageInner() {
                                   ownPolicyNumber: insuranceSelection.ownPolicyNumber || ''
                                 }
                               : null,
+                            websiteFeesApplied: websiteFees.map((fee) => ({
+                              feeId: fee.id,
+                              amount: computeFeeLineTotal(fee, {
+                                baseAmount: Number(selectedResult?.quote?.estimatedTripTotal || selectedResult?.quote?.subtotal || selectedResult?.quote?.total || 0),
+                                days: tripLengthDays || 1
+                              })
+                            })),
                             customer: checkoutState
                           })
                         });

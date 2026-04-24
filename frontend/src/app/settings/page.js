@@ -2448,20 +2448,22 @@ function SettingsInner({ token, me, logout }) {
                 <label className="label"><input type="checkbox" checked={!!feeForm.mandatory} onChange={(e) => setFeeForm({ ...feeForm, mandatory: e.target.checked })} /> Mandatory</label>
                 <label className="label"><input type="checkbox" checked={!!feeForm.isUnderageFee} onChange={(e) => setFeeForm({ ...feeForm, isUnderageFee: e.target.checked })} /> Underage Fee</label>
                 <label className="label"><input type="checkbox" checked={!!feeForm.isAdditionalDriverFee} onChange={(e) => setFeeForm({ ...feeForm, isAdditionalDriverFee: e.target.checked })} /> Additional Driver Fee</label>
+                <label className="label"><input type="checkbox" checked={!!feeForm.displayOnline} onChange={(e) => setFeeForm({ ...feeForm, displayOnline: e.target.checked })} /> Display Online</label>
               </div>
               <button type="submit">Add Fee</button>
             </form>
 
             <table>
-              <thead><tr><th>Name</th><th>Mode</th><th>Amount</th><th>Mandatory</th><th>Underage Fee</th><th>Addl Driver Fee</th><th>Active</th><th>Actions</th></tr></thead>
+              <thead><tr><th>Name</th><th>Mode</th><th>Amount</th><th>Mandatory</th><th>Underage Fee</th><th>Addl Driver Fee</th><th>Active</th><th>Display Online</th><th>Actions</th></tr></thead>
               <tbody>
                 {fees.map((f) => (
                   <tr key={f.id}>
-                    <td>{f.name}</td><td>{f.mode}</td><td>{Number(f.amount || 0).toFixed(2)}</td><td>{f.mandatory ? 'Yes' : 'No'}</td><td>{f.isUnderageFee ? 'Yes' : 'No'}</td><td>{f.isAdditionalDriverFee ? 'Yes' : 'No'}</td><td>{f.isActive ? 'Yes' : 'No'}</td>
+                    <td>{f.name}</td><td>{f.mode}</td><td>{Number(f.amount || 0).toFixed(2)}</td><td>{f.mandatory ? 'Yes' : 'No'}</td><td>{f.isUnderageFee ? 'Yes' : 'No'}</td><td>{f.isAdditionalDriverFee ? 'Yes' : 'No'}</td><td>{f.isActive ? 'Yes' : 'No'}</td><td>{f.displayOnline ? 'Yes' : 'No'}</td>
                     <td style={{ display: 'flex', gap: 6 }}>
                       <button onClick={() => editFee(f)}>Edit</button>
                       <button onClick={async () => { await api(scopedSettingsPath(`/api/fees/${f.id}`), { method: 'PATCH', body: JSON.stringify({ mandatory: !f.mandatory }) }, token); setMsg('Mandatory fee flag updated'); await load(true); }}>{f.mandatory ? 'Unset Mandatory' : 'Set Mandatory'}</button>
                       <button onClick={async () => { await api(scopedSettingsPath(`/api/fees/${f.id}`), { method: 'PATCH', body: JSON.stringify({ isUnderageFee: !f.isUnderageFee }) }, token); setMsg('Underage fee flag updated'); await load(true); }}>{f.isUnderageFee ? 'Unset Underage' : 'Set Underage'}</button>
+                      <button onClick={async () => { await api(scopedSettingsPath(`/api/fees/${f.id}`), { method: 'PATCH', body: JSON.stringify({ displayOnline: !f.displayOnline }) }, token); setMsg('Website display updated'); await load(true); }}>{f.displayOnline ? 'Hide from Website' : 'Show on Website'}</button>
                       <button onClick={() => toggleFee(f)}>{f.isActive ? 'Disable' : 'Enable'}</button>
                       <button onClick={() => removeFee(f.id)}>Delete</button>
                     </td>
