@@ -10,6 +10,7 @@ import { locationsRouter } from './modules/locations/locations.routes.js';
 import { vehicleTypesRouter } from './modules/vehicle-types/vehicle-types.routes.js';
 import { additionalServicesRouter } from './modules/additional-services/additional-services.routes.js';
 import { feesRouter } from './modules/fees/fees.routes.js';
+import { stopSalesRouter } from './modules/stop-sales/stop-sales.routes.js';
 import { ratesRouter } from './modules/rates/rates.routes.js';
 import { authRouter } from './modules/auth/auth.routes.js';
 import { rentalAgreementsRouter } from './modules/rental-agreements/rental-agreements.routes.js';
@@ -105,6 +106,7 @@ app.use('/api/locations', requireAuth, requireModuleAccess('settings'), requireR
 app.use('/api/vehicle-types', requireAuth, requireModuleAccess('settings'), requireRole('ADMIN', 'OPS'), vehicleTypesRouter);
 app.use('/api/additional-services', requireAuth, requireModuleAccess('settings'), requireRole('ADMIN', 'OPS'), additionalServicesRouter);
 app.use('/api/fees', requireAuth, requireModuleAccess('settings'), requireRole('ADMIN', 'OPS'), feesRouter);
+app.use('/api/stop-sales', requireAuth, requireModuleAccess('settings'), requireRole('ADMIN', 'OPS'), stopSalesRouter);
 app.use('/api/rates', requireAuth, requireModuleAccess('settings'), requireRole('ADMIN', 'OPS'), ratesRouter);
 app.use('/api/rental-agreements', requireAuth, requireModuleAccess('reservations'), rentalAgreementsRouter);
 app.use('/api/reports', requireAuth, requireModuleAccess('reports'), reportsRouter);

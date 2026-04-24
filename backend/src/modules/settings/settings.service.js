@@ -50,6 +50,18 @@ const DEFAULT_EMAIL_TEMPLATES = {
   agreementEmailHtml: '<div style="font-family:Arial,sans-serif;font-size:14px;line-height:1.6;color:#111">Hello {{customerName}},<br/><br/>Attached is your rental agreement <b>{{agreementNumber}}</b> for reservation <b>{{reservationNumber}}</b>.<br/><br/>Total: <b>${{total}}</b><br/>Amount Paid: <b>${{amountPaid}}</b><br/>Amount Due: <b>${{amountDue}}</b><br/><br/><a href="{{portalLink}}">Open Portal</a><br/><br/>Thank you,<br/>{{companyName}}</div>'
 };
 
+const DEFAULT_REVIEW_EMAIL_CONFIG = {
+  enabled: false,
+  trigger: 'CHECKED_IN', // 'OFF' | 'CHECKED_OUT' | 'CHECKED_IN'
+  reviewLinkUrl: ''
+};
+
+function normalizeReviewTrigger(raw) {
+  const v = String(raw || '').toUpperCase();
+  return ['OFF', 'CHECKED_OUT', 'CHECKED_IN'].includes(v) ? v : 'CHECKED_IN';
+}
+
+
 const DEFAULT_RESERVATION_OPTIONS = {
   autoAssignVehicleFromType: false,
   requireFranchiseSelection: false,
@@ -567,6 +579,37 @@ export const settingsService = {
   async updateEmailTemplates(payload = {}, scope = {}) {
     const next = { ...DEFAULT_EMAIL_TEMPLATES, ...(payload || {}) };
     const key = scopedKey('emailTemplates', scope);
+    await prisma.appSetting.upsert({
+      where: { key },
+      create: { key, value: JSON.stringify(next) },
+      update: { value: JSON.stringify(next) }
+    });
+    return next;
+  },
+
+  async getReviewEmailConfig(scope = {}) {
+    const row = await prisma.appSetting.findUnique({ where: { key: scopedKey('reviewEmail', scope) } });
+    if (!row?.value) return { ...DEFAULT_REVIEW_EMAIL_CONFIG };
+    try {
+      const parsed = JSON.parse(row.value);
+      return {
+        ...DEFAULT_REVIEW_EMAIL_CONFIG,
+        enabled: !!parsed?.enabled,
+        trigger: normalizeReviewTrigger(parsed?.trigger),
+        reviewLinkUrl: String(parsed?.reviewLinkUrl || '')
+      };
+    } catch {
+      return { ...DEFAULT_REVIEW_EMAIL_CONFIG };
+    }
+  },
+
+  async updateReviewEmailConfig(payload = {}, scope = {}) {
+    const next = {
+      enabled: !!payload?.enabled,
+      trigger: normalizeReviewTrigger(payload?.trigger),
+      reviewLinkUrl: String(payload?.reviewLinkUrl || '')
+    };
+    const key = scopedKey('reviewEmail', scope);
     await prisma.appSetting.upsert({
       where: { key },
       create: { key, value: JSON.stringify(next) },

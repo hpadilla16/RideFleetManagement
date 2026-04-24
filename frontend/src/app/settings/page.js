@@ -36,7 +36,7 @@ import {
   DEFAULT_TELEMATICS_CONFIG, DEFAULT_REVENUE_PRICING_CONFIG,
   DEFAULT_REVENUE_PRICING_PREVIEW, DEFAULT_PRECHECKIN_DISCOUNT,
   DEFAULT_SELF_SERVICE_CONFIG, DEFAULT_CAR_SHARING_PRESET,
-  EMPTY_LOCATION, LOCATION_CONFIG_DEFAULT, EMPTY_FEE,
+  EMPTY_LOCATION, LOCATION_CONFIG_DEFAULT, EMPTY_FEE, EMPTY_STOP_SALE, DEFAULT_REVIEW_EMAIL_CONFIG,
   EMPTY_VEHICLE_TYPE, EMPTY_RATE, EMPTY_SERVICE,
   EMPTY_COMMISSION_PLAN, EMPTY_COMMISSION_RULE,
   TENANT_TIMEZONE_OPTIONS, normalizeInsurancePlan, parseDelimitedRows
@@ -58,8 +58,9 @@ const SETTINGS_TAB_SECTIONS = {
   ai: ['plannerCopilot', 'plannerCopilotUsage'],
   telematics: ['telematics'],
   access: [],
-  emails: ['emailTemplates'],
+  emails: ['emailTemplates', 'reviewEmail'],
   services: ['services', 'fees'],
+  stopSales: ['stopSales', 'vehicleTypes'],
   commissions: [],
   franchises: []
 };
@@ -99,6 +100,7 @@ function SettingsInner({ token, me, logout }) {
     vehicleTypeIds: []
   });
   const [emailTemplates, setEmailTemplates] = useState(DEFAULT_EMAIL_TEMPLATES);
+  const [reviewEmailConfig, setReviewEmailConfig] = useState(DEFAULT_REVIEW_EMAIL_CONFIG);
   const [reservationOptions, setReservationOptions] = useState({ autoAssignVehicleFromType: false, requireFranchiseSelection: false, tenantTimeZone: 'America/Puerto_Rico' });
   const [paymentGatewayConfig, setPaymentGatewayConfig] = useState(DEFAULT_PAYMENT_GATEWAY_CONFIG);
   const [paymentGatewayHealth, setPaymentGatewayHealth] = useState(null);
@@ -137,6 +139,9 @@ function SettingsInner({ token, me, logout }) {
   const [franchises, setFranchises] = useState([]);
   const [franchiseForm, setFranchiseForm] = useState({ name: '', code: '', logoUrl: '', address: '', phone: '', email: '', termsText: '', returnInstructionsText: '', agreementHtmlTemplate: '', isDefault: false, isActive: true });
   const [franchiseEditId, setFranchiseEditId] = useState(null);
+  const [stopSales, setStopSales] = useState([]);
+  const [stopSaleForm, setStopSaleForm] = useState(EMPTY_STOP_SALE);
+  const [stopSaleEditId, setStopSaleEditId] = useState(null);
 
   const role = String(me?.role || '').toUpperCase().trim();
   const isAdmin = role === 'ADMIN' || role === 'SUPER_ADMIN';
@@ -153,10 +158,19 @@ function SettingsInner({ token, me, logout }) {
     if (key === 'locations') setLocations(Array.isArray(value) ? value : []);
     if (key === 'services') setServices(Array.isArray(value) ? value : []);
     if (key === 'fees') setFees(Array.isArray(value) ? value : []);
+    if (key === 'stopSales') setStopSales(Array.isArray(value) ? value : []);
     if (key === 'rates') setRates(Array.isArray(value) ? value : []);
     if (key === 'vehicleTypes') setVehicleTypes(Array.isArray(value) ? value : []);
     if (key === 'insurancePlans') setInsurancePlans((value || []).map(normalizeInsurancePlan));
     if (key === 'emailTemplates') setEmailTemplates({ ...DEFAULT_EMAIL_TEMPLATES, ...(value || {}) });
+    if (key === 'reviewEmail') setReviewEmailConfig({
+      ...DEFAULT_REVIEW_EMAIL_CONFIG,
+      ...(value || {}),
+      enabled: !!(value?.enabled),
+      trigger: ['OFF', 'CHECKED_OUT', 'CHECKED_IN'].includes(String(value?.trigger || '').toUpperCase())
+        ? String(value.trigger).toUpperCase() : 'CHECKED_IN',
+      reviewLinkUrl: String(value?.reviewLinkUrl || '')
+    });
     if (key === 'reservationOptions') setReservationOptions({
       autoAssignVehicleFromType: !!value?.autoAssignVehicleFromType,
       requireFranchiseSelection: !!value?.requireFranchiseSelection,
@@ -252,10 +266,12 @@ function SettingsInner({ token, me, logout }) {
     locations: (forceLoad = false) => api(scopedSettingsPath('/api/locations'), forceLoad ? { bypassCache: true } : {}, token),
     services: (forceLoad = false) => api(scopedSettingsPath('/api/additional-services'), forceLoad ? { bypassCache: true } : {}, token),
     fees: (forceLoad = false) => api(scopedSettingsPath('/api/fees'), forceLoad ? { bypassCache: true } : {}, token),
+    stopSales: (forceLoad = false) => api(scopedSettingsPath('/api/stop-sales'), forceLoad ? { bypassCache: true } : {}, token),
     rates: (forceLoad = false) => api(scopedSettingsPath('/api/rates'), forceLoad ? { bypassCache: true } : {}, token),
     vehicleTypes: (forceLoad = false) => api(scopedSettingsPath('/api/vehicle-types'), forceLoad ? { bypassCache: true } : {}, token),
     insurancePlans: (forceLoad = false) => api(scopedSettingsPath('/api/settings/insurance-plans'), forceLoad ? { bypassCache: true } : {}, token),
     emailTemplates: (forceLoad = false) => api(scopedSettingsPath('/api/settings/email-templates'), forceLoad ? { bypassCache: true } : {}, token),
+    reviewEmail: (forceLoad = false) => api(scopedSettingsPath('/api/settings/review-email'), forceLoad ? { bypassCache: true } : {}, token),
     reservationOptions: (forceLoad = false) => api(scopedSettingsPath('/api/settings/reservation-options'), forceLoad ? { bypassCache: true } : {}, token),
     paymentGateway: (forceLoad = false) => api(scopedSettingsPath('/api/settings/payment-gateway'), forceLoad ? { bypassCache: true } : {}, token),
     plannerCopilot: (forceLoad = false) => api(scopedSettingsPath('/api/settings/planner-copilot'), forceLoad ? { bypassCache: true } : {}, token),
@@ -303,6 +319,74 @@ function SettingsInner({ token, me, logout }) {
 
     if (failedKeys.length) setMsg(`Some settings data could not be loaded: ${failedKeys.join(', ')}`);
     else setMsg('');
+  };
+
+  const editStopSale = (s) => {
+    setStopSaleEditId(s.id);
+    const toLocal = (iso) => {
+      if (!iso) return '';
+      const d = new Date(iso);
+      if (Number.isNaN(d.getTime())) return '';
+      // datetime-local wants "YYYY-MM-DDTHH:MM" in LOCAL time, not UTC
+      const pad = (n) => String(n).padStart(2, '0');
+      return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+    };
+    setStopSaleForm({
+      vehicleTypeId: s.vehicleTypeId || s.vehicleType?.id || '',
+      startDate: toLocal(s.startDate),
+      endDate: toLocal(s.endDate),
+      reason: s.reason || '',
+      notes: s.notes || '',
+      isActive: !!s.isActive
+    });
+  };
+
+  const cancelEditStopSale = () => {
+    setStopSaleEditId(null);
+    setStopSaleForm(EMPTY_STOP_SALE);
+  };
+
+  const saveStopSale = async (e) => {
+    if (e?.preventDefault) e.preventDefault();
+    try {
+      if (!stopSaleForm.vehicleTypeId || !stopSaleForm.startDate || !stopSaleForm.endDate) {
+        setMsg('Vehicle class, start date, and end date are required');
+        return;
+      }
+      const payload = {
+        vehicleTypeId: stopSaleForm.vehicleTypeId,
+        startDate: new Date(stopSaleForm.startDate).toISOString(),
+        endDate: new Date(stopSaleForm.endDate).toISOString(),
+        reason: stopSaleForm.reason || null,
+        notes: stopSaleForm.notes || null,
+        isActive: !!stopSaleForm.isActive
+      };
+      if (stopSaleEditId) {
+        await api(scopedSettingsPath(`/api/stop-sales/${stopSaleEditId}`), { method: 'PATCH', body: JSON.stringify(payload) }, token);
+        setMsg('Stop sale updated');
+      } else {
+        await api(scopedSettingsPath('/api/stop-sales'), { method: 'POST', body: JSON.stringify(payload) }, token);
+        setMsg('Stop sale added');
+      }
+      cancelEditStopSale();
+      await load(true);
+    } catch (err) { setMsg(err.message || 'Could not save stop sale'); }
+  };
+
+  const toggleStopSale = async (s) => {
+    try {
+      await api(scopedSettingsPath(`/api/stop-sales/${s.id}`), { method: 'PATCH', body: JSON.stringify({ isActive: !s.isActive }) }, token);
+      setMsg('Stop sale updated');
+      await load(true);
+    } catch (err) { setMsg(err.message || 'Could not update stop sale'); }
+  };
+
+  const removeStopSale = async (id) => {
+    try {
+      await api(scopedSettingsPath(`/api/stop-sales/${id}`), { method: 'DELETE' }, token);
+      setMsg('Stop sale removed');
+      await load(true);
+    } catch (err) { setMsg(err.message || 'Could not remove stop sale'); }
   };
 
   const loadFranchises = async () => {
@@ -450,6 +534,19 @@ function SettingsInner({ token, me, logout }) {
     w.document.open();
     w.document.write(html);
     w.document.close();
+  };
+
+  const saveReviewEmailConfig = async () => {
+    try {
+      const payload = {
+        enabled: !!reviewEmailConfig.enabled,
+        trigger: String(reviewEmailConfig.trigger || 'CHECKED_IN').toUpperCase(),
+        reviewLinkUrl: String(reviewEmailConfig.reviewLinkUrl || '')
+      };
+      const out = await api(scopedSettingsPath('/api/settings/review-email'), { method: 'PUT', body: JSON.stringify(payload) }, token);
+      setReviewEmailConfig({ ...DEFAULT_REVIEW_EMAIL_CONFIG, ...(out || {}) });
+      setMsg('Review email automation saved');
+    } catch (err) { setMsg(err.message || 'Could not save review email settings'); }
   };
 
   const saveEmailTemplates = async () => {
@@ -1757,6 +1854,7 @@ function SettingsInner({ token, me, logout }) {
           <button onClick={() => setTab('agreement')}>Agreement</button>
           <button onClick={() => setTab('locations')}>Locations</button>
           <button onClick={() => setTab('fees')}>Fees</button>
+          <button onClick={() => setTab('stopSales')}>Stop Sales</button>
           <button onClick={() => setTab('rates')}>Rates</button>
           <button onClick={() => setTab('revenue')}>Revenue</button>
           <button onClick={() => setTab('carSharing')}>Car Sharing</button>
@@ -2466,6 +2564,68 @@ function SettingsInner({ token, me, logout }) {
                       <button onClick={async () => { await api(scopedSettingsPath(`/api/fees/${f.id}`), { method: 'PATCH', body: JSON.stringify({ displayOnline: !f.displayOnline }) }, token); setMsg('Website display updated'); await load(true); }}>{f.displayOnline ? 'Hide from Website' : 'Show on Website'}</button>
                       <button onClick={() => toggleFee(f)}>{f.isActive ? 'Disable' : 'Enable'}</button>
                       <button onClick={() => removeFee(f.id)}>Delete</button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+
+        {tab === 'stopSales' && (
+          <div className="stack">
+            <h2>Stop Sales (Website)</h2>
+            <p className="label" style={{ textTransform: 'none', letterSpacing: 0, fontSize: 13 }}>
+              Block a vehicle class from appearing on the public booking website for a date range.
+              Backoffice and manual reservations are not affected - staff can still book these vehicles.
+            </p>
+            <form className="stack" onSubmit={saveStopSale}>
+              <div className="grid2">
+                <select required value={stopSaleForm.vehicleTypeId} onChange={(e) => setStopSaleForm({ ...stopSaleForm, vehicleTypeId: e.target.value })}>
+                  <option value="">Select a vehicle class...</option>
+                  {vehicleTypes.map((vt) => (
+                    <option key={vt.id} value={vt.id}>{vt.name} ({vt.code})</option>
+                  ))}
+                </select>
+                <input placeholder="Reason (e.g. Maintenance, Internal Use, Event)" value={stopSaleForm.reason} onChange={(e) => setStopSaleForm({ ...stopSaleForm, reason: e.target.value })} />
+              </div>
+              <div className="grid2">
+                <label className="label" style={{ textTransform: 'none', letterSpacing: 0 }}>
+                  Start Date &amp; Time
+                  <input required type="datetime-local" value={stopSaleForm.startDate} onChange={(e) => setStopSaleForm({ ...stopSaleForm, startDate: e.target.value })} />
+                </label>
+                <label className="label" style={{ textTransform: 'none', letterSpacing: 0 }}>
+                  End Date &amp; Time
+                  <input required type="datetime-local" value={stopSaleForm.endDate} onChange={(e) => setStopSaleForm({ ...stopSaleForm, endDate: e.target.value })} />
+                </label>
+              </div>
+              <textarea rows={2} placeholder="Notes (optional)" value={stopSaleForm.notes} onChange={(e) => setStopSaleForm({ ...stopSaleForm, notes: e.target.value })} />
+              <label className="label"><input type="checkbox" checked={!!stopSaleForm.isActive} onChange={(e) => setStopSaleForm({ ...stopSaleForm, isActive: e.target.checked })} /> Active</label>
+              <div style={{ display: 'flex', gap: 8 }}>
+                <button type="submit">{stopSaleEditId ? 'Update Stop Sale' : 'Add Stop Sale'}</button>
+                {stopSaleEditId && <button type="button" onClick={cancelEditStopSale}>Cancel</button>}
+              </div>
+            </form>
+
+            <table>
+              <thead>
+                <tr><th>Vehicle Class</th><th>Start</th><th>End</th><th>Reason</th><th>Active</th><th>Actions</th></tr>
+              </thead>
+              <tbody>
+                {stopSales.length === 0 && (
+                  <tr><td colSpan={6} style={{ textAlign: 'center', color: 'var(--text-muted, #888)', padding: 14 }}>No stop sales configured. Add one above to hide a class from the public website.</td></tr>
+                )}
+                {stopSales.map((s) => (
+                  <tr key={s.id}>
+                    <td>{s.vehicleType?.name || '-'}{s.vehicleType?.code ? ` (${s.vehicleType.code})` : ''}</td>
+                    <td>{s.startDate ? new Date(s.startDate).toLocaleString() : '-'}</td>
+                    <td>{s.endDate ? new Date(s.endDate).toLocaleString() : '-'}</td>
+                    <td>{s.reason || '-'}</td>
+                    <td><span className="badge">{s.isActive ? 'Active' : 'Inactive'}</span></td>
+                    <td style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                      <button onClick={() => editStopSale(s)}>Edit</button>
+                      <button onClick={() => toggleStopSale(s)}>{s.isActive ? 'Disable' : 'Enable'}</button>
+                      <button onClick={() => removeStopSale(s.id)}>Delete</button>
                     </td>
                   </tr>
                 ))}
@@ -3911,6 +4071,43 @@ function SettingsInner({ token, me, logout }) {
               <input placeholder="Subject" value={emailTemplates.rentalReviewRequestSubject || ''} onChange={(e) => setEmailTemplates({ ...emailTemplates, rentalReviewRequestSubject: e.target.value })} />
               <textarea rows={5} placeholder="Body (text)" value={emailTemplates.rentalReviewRequestBody || ''} onChange={(e) => setEmailTemplates({ ...emailTemplates, rentalReviewRequestBody: e.target.value })} />
               <textarea rows={6} placeholder="Body (HTML)" value={emailTemplates.rentalReviewRequestHtml || ''} onChange={(e) => setEmailTemplates({ ...emailTemplates, rentalReviewRequestHtml: e.target.value })} />
+            </div>
+
+            <div className="glass card stack" style={{ padding: 12 }}>
+              <h3>Review Email Automation</h3>
+              <div className="surface-note">
+                Automatically send the Rental / Loaner Review Request email when a reservation reaches the selected status. The email uses the template above. Leave the review link blank if you do not want to embed a review URL.
+              </div>
+              <label className="label" style={{ textTransform: 'none', letterSpacing: 0, fontSize: 13 }}>
+                <input
+                  type="checkbox"
+                  checked={!!reviewEmailConfig.enabled}
+                  onChange={(e) => setReviewEmailConfig((current) => ({ ...current, enabled: e.target.checked }))}
+                /> Enable automatic review email
+              </label>
+              <label className="label" style={{ textTransform: 'none', letterSpacing: 0, fontSize: 13 }}>
+                Send when reservation is:
+                <select
+                  value={reviewEmailConfig.trigger || 'CHECKED_IN'}
+                  onChange={(e) => setReviewEmailConfig((current) => ({ ...current, trigger: e.target.value }))}
+                  style={{ marginLeft: 8 }}
+                >
+                  <option value="OFF">Off (never send)</option>
+                  <option value="CHECKED_OUT">Checked Out (pickup)</option>
+                  <option value="CHECKED_IN">Checked In (return)</option>
+                </select>
+              </label>
+              <label className="label" style={{ textTransform: 'none', letterSpacing: 0, fontSize: 13 }}>
+                Review link URL (optional - exposed as {'{{reviewLink}}'} in the template)
+                <input
+                  placeholder="https://g.page/r/your-business/review"
+                  value={reviewEmailConfig.reviewLinkUrl || ''}
+                  onChange={(e) => setReviewEmailConfig((current) => ({ ...current, reviewLinkUrl: e.target.value }))}
+                />
+              </label>
+              <div>
+                <button onClick={saveReviewEmailConfig}>Save Review Email Automation</button>
+              </div>
             </div>
 
             <div className="glass card stack" style={{ padding: 12 }}>
