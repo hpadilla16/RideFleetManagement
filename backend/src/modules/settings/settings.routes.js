@@ -75,6 +75,24 @@ settingsRouter.put('/email-templates', requireRole('ADMIN'), async (req, res, ne
   }
 });
 
+settingsRouter.get('/review-email', async (_req, res, next) => {
+  try {
+    const cfg = await settingsService.getReviewEmailConfig(scopeFor(_req));
+    res.json(cfg);
+  } catch (e) {
+    next(e);
+  }
+});
+
+settingsRouter.put('/review-email', requireRole('ADMIN'), async (req, res, next) => {
+  try {
+    const cfg = await settingsService.updateReviewEmailConfig(req.body || {}, scopeFor(req));
+    res.json(cfg);
+  } catch (e) {
+    next(e);
+  }
+});
+
 settingsRouter.get('/insurance-plans', async (_req, res, next) => {
   try {
     const plans = await settingsService.getInsurancePlans(scopeFor(_req));

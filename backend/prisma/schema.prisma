@@ -399,6 +399,7 @@ model Tenant {
   conversations   Conversation[]
   knowledgeArticles KnowledgeArticle[]
   franchises      Franchise[]
+  vehicleClassStopSales VehicleClassStopSale[]
 }
 
 model Location {
@@ -452,6 +453,7 @@ model VehicleType {
   rateItems    RateItem[]
   rateDailyPrices RateDailyPrice[]
   hostVehicleSubmissions HostVehicleSubmission[]
+  vehicleClassStopSales VehicleClassStopSale[]
 
   @@unique([tenantId, code])
   @@index([tenantId])
@@ -517,6 +519,28 @@ model VehicleAvailabilityBlock {
 
   @@index([tenantId, vehicleId, blockedFrom, availableFrom])
   @@index([vehicleId, releasedAt, availableFrom])
+}
+
+// Website-only stop-sale: hide a vehicle class from the public booking
+// website for a date range without affecting backoffice/manual reservations.
+// The existing VehicleAvailabilityBlock model (per-VIN, blocks ALL channels)
+// is unchanged - this is a separate concept on purpose.
+model VehicleClassStopSale {
+  id            String      @id @default(cuid())
+  tenantId      String
+  tenant        Tenant      @relation(fields: [tenantId], references: [id])
+  vehicleTypeId String
+  vehicleType   VehicleType @relation(fields: [vehicleTypeId], references: [id], onDelete: Cascade)
+  startDate     DateTime
+  endDate       DateTime
+  reason        String?
+  notes         String?
+  isActive      Boolean     @default(true)
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
+
+  @@index([tenantId, vehicleTypeId, isActive, startDate, endDate])
+  @@index([tenantId, isActive])
 }
 
 model VehicleTelematicsDevice {
