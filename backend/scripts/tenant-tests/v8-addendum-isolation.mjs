@@ -92,10 +92,14 @@ const crossPrint = (agreementIdA && addendumIdA)
 
 // --- Date-edit gate cross-check: tenant A trying to PATCH the parent
 // reservation's dates while a PENDING_SIGNATURE addendum exists must be
-// blocked with 409. This is the BUG-001 gate working end-to-end. ---
+// blocked with 409. This is the BUG-001 gate working end-to-end.
+// Send BOTH pickupAt + returnAt so validateReservationPatch (which runs
+// BEFORE the gate) doesn't 400 on the orphaned-pickup case where the new
+// pickup ends up after the unchanged returnAt. ---
 const gatePatch = (resA.ok && addendumIdA)
   ? await api('PATCH', `/reservations/${resA.data.id}`, A.token, {
-      pickupAt: daysAheadAtHour(12, 16)
+      pickupAt: daysAheadAtHour(12, 16),
+      returnAt: daysAheadAtHour(13, 16)
     })
   : { ok: false, status: 0 };
 
