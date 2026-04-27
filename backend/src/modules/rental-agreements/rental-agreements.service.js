@@ -8,6 +8,7 @@ import { reservationPricingService } from '../reservations/reservation-pricing.s
 import { settingsService } from '../settings/settings.service.js';
 import { buildInspectionIntelligence } from '../vehicles/vehicle-intelligence.service.js';
 import { parseLocationConfig } from '../../lib/location-config.js';
+import { refundCharge as payarcRefundCharge } from '../public-booking/payarc-hosted-fields.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -3167,7 +3168,23 @@ export const rentalAgreementsService = {
     }
 
     const rawReference = String(payment.reference || '').trim();
-    if (rawReference.toUpperCase().startsWith('AUTHNET:')) {
+    if (rawReference.toUpperCase().startsWith('PAYARC:')) {
+      // PayArc refund dispatch — hits POST /v1/charges/:id/void
+      // first, falls through to /refunds for already-settled
+      // charges. See payarc-hosted-fields.refundCharge().
+      const chargeId = rawReference.slice('PAYARC:'.length).trim();
+      const scope = agreement?.tenantId ? { tenantId: agreement.tenantId } : {};
+      const cfg = await settingsService.getPaymentGatewayConfig(scope);
+      if (!cfg?.payarc?.bearerToken) {
+        throw new Error('PayArc is not configured for this tenant');
+      }
+      await payarcRefundCharge({
+        chargeId,
+        amountDollars: refundAmount,
+        reason: 'requested_by_customer',
+        config: cfg,
+      });
+    } else if (rawReference.toUpperCase().startsWith('AUTHNET:')) {
       const transId = rawReference.slice('AUTHNET:'.length).trim();
       const scope = agreement?.tenantId ? { tenantId: agreement.tenantId } : {};
       const details = await authNetTransactionDetails(transId, scope);

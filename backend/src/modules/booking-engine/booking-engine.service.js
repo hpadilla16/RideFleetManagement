@@ -18,6 +18,9 @@ import {
   serializePublicPickupSpot
 } from './car-sharing-discovery.js';
 import { parseLocationConfig } from '../../lib/location-config.js';
+import { filterMandatoryFeesForChannel } from './fee-channel-filter.js';
+import { stopSalesService } from '../stop-sales/stop-sales.service.js';
+export { filterMandatoryFeesForChannel };
 
 function toDate(value) {
   const dt = value ? new Date(value) : null;
@@ -395,7 +398,7 @@ function computePublicFeeLine(fee, baseAmount, days) {
   };
 }
 
-async function listMandatoryFeesForLocation({ tenantId, locationId, baseAmount, days }) {
+async function listMandatoryFeesForLocation({ tenantId, locationId, baseAmount, days, bookingChannel = 'WEBSITE' }) {
   if (!tenantId || !locationId) return [];
   const location = await prisma.location.findFirst({
     where: { id: String(locationId), tenantId: String(tenantId) },
@@ -407,10 +410,11 @@ async function listMandatoryFeesForLocation({ tenantId, locationId, baseAmount, 
       }
     }
   });
-  return (location?.locationFees || [])
-    .map((row) => row.fee)
-    .filter((fee) => fee?.isActive && fee?.mandatory)
-    .map((fee) => computePublicFeeLine(fee, baseAmount, days));
+  const eligibleFees = filterMandatoryFeesForChannel(
+    (location?.locationFees || []).map((row) => row.fee),
+    bookingChannel
+  );
+  return eligibleFees.map((fee) => computePublicFeeLine(fee, baseAmount, days));
 }
 
 function generateReservationNumber(prefix = 'WEB') {
@@ -1232,7 +1236,19 @@ export const bookingEngineService = {
       }
       const vehicleTypes = vehicleTypesByTenant.get(tenant.id) || [];
 
+      // Website-only stop-sale filter. Hides vehicle classes that have an
+      // active stop-sale overlapping [pickupDate, returnDate) from public
+      // booking results. Backoffice/manual booking paths are unaffected
+      // because they never go through searchRental.
+      const stopSaleBlockedTypeIds = await stopSalesService.vehicleTypesBlockedForRange({
+        tenantId: tenant.id,
+        vehicleTypeIds: vehicleTypes.map((vt) => vt.id),
+        pickupAt: pickupDate,
+        returnAt: returnDate
+      });
+
       for (const vehicleType of vehicleTypes) {
+        if (stopSaleBlockedTypeIds.has(vehicleType.id)) continue;
         const [revenueRecommendation, availableUnits] = await Promise.all([
           ratesService.getRevenueRecommendation({
             vehicleTypeId: vehicleType.id,
@@ -2100,6 +2116,11 @@ export const bookingEngineService = {
         id: trip.id,
         tripCode: trip.tripCode,
         status: trip.status,
+        // Surface pickupAt/returnAt at the top level of the trip payload so
+        // native mobile clients don't have to reach into trip.reservation.*.
+        // Web consumers already use the display fields below via other paths.
+        pickupAt: trip?.reservation?.pickupAt || null,
+        returnAt: trip?.reservation?.returnAt || null,
         quotedTotal: money(trip.quotedTotal),
         hostGrossRevenue: money(trip.hostGrossRevenue),
         hostServiceFeeRate: money(trip.hostServiceFeeRate),

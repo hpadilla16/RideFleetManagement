@@ -50,6 +50,18 @@ const DEFAULT_EMAIL_TEMPLATES = {
   agreementEmailHtml: '<div style="font-family:Arial,sans-serif;font-size:14px;line-height:1.6;color:#111">Hello {{customerName}},<br/><br/>Attached is your rental agreement <b>{{agreementNumber}}</b> for reservation <b>{{reservationNumber}}</b>.<br/><br/>Total: <b>${{total}}</b><br/>Amount Paid: <b>${{amountPaid}}</b><br/>Amount Due: <b>${{amountDue}}</b><br/><br/><a href="{{portalLink}}">Open Portal</a><br/><br/>Thank you,<br/>{{companyName}}</div>'
 };
 
+const DEFAULT_REVIEW_EMAIL_CONFIG = {
+  enabled: false,
+  trigger: 'CHECKED_IN', // 'OFF' | 'CHECKED_OUT' | 'CHECKED_IN'
+  reviewLinkUrl: ''
+};
+
+function normalizeReviewTrigger(raw) {
+  const v = String(raw || '').toUpperCase();
+  return ['OFF', 'CHECKED_OUT', 'CHECKED_IN'].includes(v) ? v : 'CHECKED_IN';
+}
+
+
 const DEFAULT_RESERVATION_OPTIONS = {
   autoAssignVehicleFromType: false,
   requireFranchiseSelection: false,
@@ -460,6 +472,25 @@ function defaultPaymentGatewayConfig() {
       merchantNumber: String(process.env.SPIN_MERCHANT_NUMBER || '1'),
       callbackUrl: String(process.env.SPIN_CALLBACK_URL || ''),
       proxyTimeout: String(process.env.SPIN_PROXY_TIMEOUT || '120')
+    },
+    // PayArc — used for US-mainland car-sharing pickups. Puerto Rico
+    // pickups stay on Authorize.Net regardless. Selector lives in
+    // public-booking/payarc-hosted-fields.js → selectPaymentGateway().
+    //
+    // `bearerToken`  — server-only API key (Authorization: Bearer <key>)
+    // `publicKey`    — safe to embed in the mobile WebView bridge page
+    // `webhookSecret`— HMAC secret for incoming webhook validation
+    //                  (TODO: confirm header name + algorithm against
+    //                  docs.payarc.net/reference/add-webhooks once
+    //                  dashboard access is available)
+    payarc: {
+      enabled: !!process.env.PAYARC_BEARER_TOKEN,
+      environment: String(process.env.PAYARC_ENV || 'sandbox').toLowerCase(),
+      bearerToken: String(process.env.PAYARC_BEARER_TOKEN || ''),
+      publicKey: String(process.env.PAYARC_PUBLIC_KEY || ''),
+      webhookSecret: String(process.env.PAYARC_WEBHOOK_SECRET || ''),
+      merchantId: String(process.env.PAYARC_MERCHANT_ID || ''),
+      merchantEmail: String(process.env.PAYARC_MERCHANT_EMAIL || '')
     }
   };
 }
@@ -548,6 +579,37 @@ export const settingsService = {
   async updateEmailTemplates(payload = {}, scope = {}) {
     const next = { ...DEFAULT_EMAIL_TEMPLATES, ...(payload || {}) };
     const key = scopedKey('emailTemplates', scope);
+    await prisma.appSetting.upsert({
+      where: { key },
+      create: { key, value: JSON.stringify(next) },
+      update: { value: JSON.stringify(next) }
+    });
+    return next;
+  },
+
+  async getReviewEmailConfig(scope = {}) {
+    const row = await prisma.appSetting.findUnique({ where: { key: scopedKey('reviewEmail', scope) } });
+    if (!row?.value) return { ...DEFAULT_REVIEW_EMAIL_CONFIG };
+    try {
+      const parsed = JSON.parse(row.value);
+      return {
+        ...DEFAULT_REVIEW_EMAIL_CONFIG,
+        enabled: !!parsed?.enabled,
+        trigger: normalizeReviewTrigger(parsed?.trigger),
+        reviewLinkUrl: String(parsed?.reviewLinkUrl || '')
+      };
+    } catch {
+      return { ...DEFAULT_REVIEW_EMAIL_CONFIG };
+    }
+  },
+
+  async updateReviewEmailConfig(payload = {}, scope = {}) {
+    const next = {
+      enabled: !!payload?.enabled,
+      trigger: normalizeReviewTrigger(payload?.trigger),
+      reviewLinkUrl: String(payload?.reviewLinkUrl || '')
+    };
+    const key = scopedKey('reviewEmail', scope);
     await prisma.appSetting.upsert({
       where: { key },
       create: { key, value: JSON.stringify(next) },
@@ -674,6 +736,10 @@ export const settingsService = {
         spin: {
           ...defaults.spin,
           ...(parsed?.spin || {})
+        },
+        payarc: {
+          ...defaults.payarc,
+          ...(parsed?.payarc || {})
         }
       };
     } catch {
@@ -725,6 +791,17 @@ export const settingsService = {
         merchantNumber: String(payload?.spin?.merchantNumber || '1').trim(),
         callbackUrl: String(payload?.spin?.callbackUrl || '').trim(),
         proxyTimeout: String(payload?.spin?.proxyTimeout || '120').trim()
+      },
+      payarc: {
+        ...defaults.payarc,
+        ...(payload?.payarc || {}),
+        enabled: !!payload?.payarc?.enabled,
+        environment: String(payload?.payarc?.environment || defaults.payarc.environment).trim().toLowerCase(),
+        bearerToken: String(payload?.payarc?.bearerToken || '').trim(),
+        publicKey: String(payload?.payarc?.publicKey || '').trim(),
+        webhookSecret: String(payload?.payarc?.webhookSecret || '').trim(),
+        merchantId: String(payload?.payarc?.merchantId || '').trim(),
+        merchantEmail: String(payload?.payarc?.merchantEmail || '').trim()
       }
     };
     const key = scopedKey('paymentGatewayConfig', scope);

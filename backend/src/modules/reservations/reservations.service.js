@@ -1,5 +1,6 @@
 import { prisma } from '../../lib/prisma.js';
 import { activeVehicleBlockOverlapWhere } from '../vehicles/vehicle-blocks.js';
+import { maybeSendReviewRequestEmail } from './review-email.service.js';
 import { hostReviewsService } from '../host-reviews/host-reviews.service.js';
 import { settingsService } from '../settings/settings.service.js';
 import { parseLocationConfig } from '../../lib/location-config.js';
@@ -1282,6 +1283,11 @@ export const reservationsService = {
         'Trip auto-completed from reservation status patch'
       );
     }
+
+    // Fire the "review us" email if the tenant has enabled it for this
+    // transition. Non-blocking: errors here must never abort the update.
+    maybeSendReviewRequestEmail({ reservation: updated, previousStatus: current.status })
+      .catch((err) => { try { logger?.warn?.('review-email post-update failed', { err: err?.message || String(err) }); } catch { /* logger optional */ } });
 
     return updated;
   },

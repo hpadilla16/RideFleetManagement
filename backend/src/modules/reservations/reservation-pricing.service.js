@@ -1,5 +1,6 @@
 import { prisma } from '../../lib/prisma.js';
 import { tollsService } from '../tolls/tolls.service.js';
+import { filterMandatoryFeesForChannel } from '../booking-engine/fee-channel-filter.js';
 import logger from '../../lib/logger.js';
 
 function toNumber(value, fallback = 0) {
@@ -220,9 +221,14 @@ async function syncMandatoryLocationFees(reservationId, scope = {}) {
   });
   if (!reservation) throw new Error('Reservation not found');
 
-  const mandatoryFees = (reservation.pickupLocation?.locationFees || [])
-    .map((row) => row.fee)
-    .filter((fee) => fee?.isActive && fee?.mandatory);
+  // Filter mandatory fees by the reservation's booking channel.
+  // displayOnline=true fees are website-only and must NOT auto-apply to
+  // STAFF or CAR_SHARING reservations. See filterMandatoryFeesForChannel
+  // in booking-engine.service.js for the full rule set.
+  const mandatoryFees = filterMandatoryFeesForChannel(
+    (reservation.pickupLocation?.locationFees || []).map((row) => row.fee),
+    reservation.bookingChannel
+  );
 
   const existingCharges = Array.isArray(reservation.charges) ? reservation.charges : [];
   const existingMandatoryCharges = existingCharges.filter((row) => String(row.source || '').toUpperCase() === 'MANDATORY_FEE');
