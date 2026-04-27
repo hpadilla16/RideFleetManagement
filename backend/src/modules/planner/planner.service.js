@@ -43,6 +43,28 @@ function reservationOverlapsRange(reservation, start, end) {
   return pickup < end && ret > start;
 }
 
+/**
+ * Test whether a reservation occupies day [dayStart, nextDayStart) for SHORTAGE
+ * forecasting purposes — distinct from "any overlap".
+ *
+ * Industry "rental day" model tracks 24-hour cycles forward from pickup time.
+ * A rental that picks up 4/6 10:00 and returns 4/8 10:00 is two rental days
+ * (4/6 + 4/7); the car is back in inventory by end-of-business on 4/8 so it
+ * should NOT register as a shortage on 4/8.
+ *
+ * Rule: the rental occupies day D iff at the END of D (== start of D+1) the
+ * car is still rented (pickup < nextDay && return > nextDay). This excludes
+ * mid-day returns from the return day.
+ *
+ * Known edge case: same-day rentals (pickup and return both on D) currently
+ * under-count here. Acceptable trade-off for now; tracked as a follow-up.
+ */
+function reservationOccupiesDayForShortage(reservation, nextDayStart) {
+  const pickup = new Date(reservation?.pickupAt);
+  const ret = new Date(reservation?.returnAt);
+  return pickup < nextDayStart && ret > nextDayStart;
+}
+
 function intervalsOverlap(startA, endA, startB, endB) {
   return startA < endB && endA > startB;
 }
@@ -402,7 +424,7 @@ function calculateShortage({ start, end, reservations = [], vehicles = [] }) {
   for (let day = new Date(startCursor); day < endCursor; day = addDays(day, 1)) {
     const nextDay = addDays(day, 1);
     const activeReservations = reservations.filter((reservation) => (
-      isMovablePlannerStatus(reservation.status) && reservationOverlapsRange(reservation, day, nextDay)
+      isMovablePlannerStatus(reservation.status) && reservationOccupiesDayForShortage(reservation, nextDay)
     ));
     const activeVehicles = vehicles.filter((vehicle) => {
       if (['IN_MAINTENANCE', 'OUT_OF_SERVICE'].includes(String(vehicle.status || '').toUpperCase())) return false;
