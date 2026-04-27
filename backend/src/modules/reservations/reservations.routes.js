@@ -647,6 +647,10 @@ reservationsRouter.patch('/:id', async (req, res, next) => {
     if (/vehicle conflict/i.test(e.message)) {
       return res.status(409).json({ error: e.message });
     }
+    // BUG-001 / addendum flow: date-edit gate violations are 409 conflicts.
+    if (e.code === 'ADDENDUM_PENDING' || e.code === 'AGREEMENT_IMMUTABLE') {
+      return res.status(409).json({ error: e.message, code: e.code });
+    }
     if (/outside operating hours|location is closed|DO NOT RENT/i.test(e.message)) {
       return res.status(400).json({ error: e.message });
     }
