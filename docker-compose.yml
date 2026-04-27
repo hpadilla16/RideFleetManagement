@@ -19,6 +19,10 @@ services:
       - "4000:4000"
     env_file:
       - ./backend/.env
+    environment:
+      # Override .env's host-side DATABASE_URL so the backend container can reach the db service
+      # (host uses localhost:5433 for `npm run dev` + `npx prisma`; container uses db:5432).
+      - DATABASE_URL=postgresql://postgres:postgres@db:5432/fleet_management?schema=public
     volumes:
       - ./backend:/app
       - /app/node_modules
