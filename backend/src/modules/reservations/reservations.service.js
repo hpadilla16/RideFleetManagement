@@ -1286,8 +1286,10 @@ export const reservationsService = {
 
     // Fire the "review us" email if the tenant has enabled it for this
     // transition. Non-blocking: errors here must never abort the update.
+    // maybeSendReviewRequestEmail logs its own failures via review-email.service.js's
+    // imported logger; the catch here is just to ensure no unhandled promise rejection.
     maybeSendReviewRequestEmail({ reservation: updated, previousStatus: current.status })
-      .catch((err) => { try { logger?.warn?.('review-email post-update failed', { err: err?.message || String(err) }); } catch { /* logger optional */ } });
+      .catch(() => { /* swallowed — see comment above */ });
 
     return updated;
   },
