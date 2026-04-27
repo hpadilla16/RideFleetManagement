@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { AuthGate } from '../../../components/AuthGate';
 import { AppShell } from '../../../components/AppShell';
+import { AgreementAddendumsCard } from '../../../components/AgreementAddendumsCard';
 import { api, API_BASE } from '../../../lib/client';
 
 function stripChargePrefix(name = '', prefix) {
@@ -2534,6 +2535,13 @@ token
                     </div>
                   </div>
                 </div>
+              ) : null}
+              {row?.rentalAgreement?.id ? (
+                <AgreementAddendumsCard
+                  rentalAgreementId={row.rentalAgreement.id}
+                  role={role}
+                  reservation={row}
+                />
               ) : null}
             </>
           )}
