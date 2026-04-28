@@ -3806,6 +3806,143 @@ export const rentalAgreementsService = {
     await prisma.rentalAgreementPayment.deleteMany({ where: { rentalAgreementId: id } });
     await prisma.rentalAgreement.delete({ where: { id } });
     return { ok: true };
+  },
+
+  // ===================== Rental Agreement Addendum (BUG-001) =====================
+  // Addendum flow: when reservation dates change post-signature, a new addendum
+  // row captures the modified dates + its own signature lifecycle. The parent
+  // agreement stays immutable (the legal record of what was originally signed).
+
+  async createAddendum(rentalAgreementId, {
+    newPickupAt,
+    newReturnAt,
+    reason = 'Date correction',
+    reasonCategory = 'admin_correction',
+    initiatedBy = null,
+    initiatedByRole = 'ADMIN'
+  } = {}) {
+    if (!rentalAgreementId) throw new Error('rentalAgreementId is required');
+    if (!newPickupAt || !newReturnAt) throw new Error('newPickupAt and newReturnAt are required');
+
+    const agreement = await prisma.rentalAgreement.findUnique({
+      where: { id: rentalAgreementId },
+      include: {
+        charges: true,
+        reservation: { select: { pickupAt: true, returnAt: true, tenantId: true } }
+      }
+    });
+    if (!agreement) throw new Error('Rental agreement not found');
+
+    // Snapshot original charges at time of addendum creation.
+    const originalCharges = (agreement.charges || []).map((c) => ({
+      id: c.id,
+      description: c.description,
+      amount: c.amount?.toString?.() ?? String(c.amount ?? ''),
+      category: c.category ?? null
+    }));
+
+    // TODO (Commit 2b / Phase 2): recalculate charges via reservationPricingService
+    // for the new [newPickupAt, newReturnAt] window. For MVP, admin is expected
+    // to reconcile charges out-of-band; newCharges stays empty.
+    const newCharges = [];
+    const chargeDelta = { added: [], removed: [], modified: [] };
+
+    return prisma.rentalAgreementAddendum.create({
+      data: {
+        rentalAgreementId,
+        tenantId: agreement.tenantId,
+        pickupAt: new Date(newPickupAt),
+        returnAt: new Date(newReturnAt),
+        reason: String(reason).trim(),
+        reasonCategory: String(reasonCategory).trim(),
+        initiatedBy: initiatedBy ? String(initiatedBy).trim() : null,
+        initiatedByRole: String(initiatedByRole).trim(),
+        status: 'PENDING_SIGNATURE',
+        originalCharges: JSON.stringify(originalCharges),
+        newCharges: JSON.stringify(newCharges),
+        chargeDelta: JSON.stringify(chargeDelta)
+      }
+    });
+  },
+
+  async signAddendum(addendumId, { signatureDataUrl, signatureSignedBy, ip } = {}) {
+    if (!addendumId) throw new Error('addendumId is required');
+    const dataUrl = String(signatureDataUrl || '').trim();
+    if (!dataUrl) throw new Error('Signature is required');
+
+    const addendum = await prisma.rentalAgreementAddendum.findUnique({ where: { id: addendumId } });
+    if (!addendum) throw new Error('Addendum not found');
+    if (addendum.status !== 'PENDING_SIGNATURE') {
+      throw new Error(`Cannot sign addendum with status ${addendum.status}`);
+    }
+
+    return prisma.rentalAgreementAddendum.update({
+      where: { id: addendumId },
+      data: {
+        status: 'SIGNED',
+        signatureSignedBy: String(signatureSignedBy || 'Unknown').trim(),
+        signatureDataUrl: dataUrl,
+        signatureSignedAt: new Date(),
+        signatureIp: String(ip || '-').trim()
+      }
+    });
+  },
+
+  async listAddendums(rentalAgreementId, scope = {}) {
+    if (!rentalAgreementId) throw new Error('rentalAgreementId is required');
+    return prisma.rentalAgreementAddendum.findMany({
+      where: {
+        rentalAgreementId,
+        ...(scope?.tenantId ? { tenantId: scope.tenantId } : {})
+      },
+      orderBy: { createdAt: 'desc' }
+    });
+  },
+
+  async getAddendumById(addendumId, scope = {}) {
+    if (!addendumId) throw new Error('addendumId is required');
+    return prisma.rentalAgreementAddendum.findFirst({
+      where: {
+        id: addendumId,
+        ...(scope?.tenantId ? { tenantId: scope.tenantId } : {})
+      }
+    });
+  },
+
+  async voidAddendum(addendumId, reason = 'Cancelled', scope = {}) {
+    if (!addendumId) throw new Error('addendumId is required');
+    const existing = await this.getAddendumById(addendumId, scope);
+    if (!existing) throw new Error('Addendum not found');
+    return prisma.rentalAgreementAddendum.update({
+      where: { id: addendumId },
+      data: { status: 'VOID' }
+    });
+  },
+
+  async renderAddendumHtml(addendumId) {
+    if (!addendumId) throw new Error('addendumId is required');
+
+    const addendum = await prisma.rentalAgreementAddendum.findUnique({
+      where: { id: addendumId },
+      include: {
+        rentalAgreement: {
+          select: {
+            id: true,
+            agreementNumber: true,
+            customerFirstName: true,
+            customerLastName: true
+          }
+        }
+      }
+    });
+    if (!addendum) throw new Error('Addendum not found');
+
+    const fmtDate = (d) => d ? new Date(d).toLocaleDateString('en-US', { year: 'numeric', month: '2-digit', day: '2-digit' }) : '';
+    const signedBlock = addendum.status === 'SIGNED'
+      ? `<div class="signature-box"><h3>Customer Signature</h3>${addendum.signatureDataUrl ? `<img src="${addendum.signatureDataUrl}" class="sig-image" alt="Signature">` : '<p>No signature on file</p>'}<p>Signed by: ${addendum.signatureSignedBy || '-'}</p><p>Date: ${fmtDate(addendum.signatureSignedAt)}</p></div>`
+      : `<div class="signature-box"><p><strong>Pending Customer Signature</strong></p><p>Status: ${addendum.status}</p></div>`;
+
+    return `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Rental Agreement Addendum</title><style>body{font-family:Arial,sans-serif;margin:40px}.header{text-align:center;margin-bottom:30px}.section{margin:20px 0}.field-row{display:flex;margin:10px 0}.label{font-weight:bold;width:200px}.value{flex:1}.signature-box{border:1px solid #ccc;padding:20px;margin-top:20px;text-align:center}.sig-image{max-width:300px;max-height:100px}</style></head><body><div class="header"><h1>Rental Agreement Addendum</h1><p>This addendum modifies the original rental agreement referenced below.</p></div><div class="section"><h3>Original Agreement Reference</h3><div class="field-row"><div class="label">Agreement Number:</div><div class="value">${addendum.rentalAgreement?.agreementNumber || '-'}</div></div><div class="field-row"><div class="label">Customer:</div><div class="value">${addendum.rentalAgreement?.customerFirstName || ''} ${addendum.rentalAgreement?.customerLastName || ''}</div></div></div><div class="section"><h3>Updated Rental Dates</h3><div class="field-row"><div class="label">New Pickup:</div><div class="value">${fmtDate(addendum.pickupAt)} ${new Date(addendum.pickupAt).toLocaleTimeString()}</div></div><div class="field-row"><div class="label">New Return:</div><div class="value">${fmtDate(addendum.returnAt)} ${new Date(addendum.returnAt).toLocaleTimeString()}</div></div></div><div class="section"><h3>Reason for Change</h3><div class="field-row"><div class="value">${String(addendum.reason || '').trim()}</div></div></div>${signedBlock}<hr><p style="font-size:0.9em;color:#666">Created: ${new Date(addendum.createdAt).toLocaleString()}</p></body></html>`;
   }
 };
 

@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { rentalAgreementsService } from './rental-agreements.service.js';
 import { compactAgreementResponse } from './rental-agreements-compact.js';
+import { scheduleAddendumNotification } from './addendum-notification.service.js';
 import logger from '../../lib/logger.js';
 
 export const rentalAgreementsRouter = Router();
@@ -407,6 +408,153 @@ rentalAgreementsRouter.post('/:id/payments/:paymentId/delete', async (req, res, 
   } catch (e) {
     if (/not found/i.test(e.message)) return res.status(404).json({ error: e.message });
     if (/cannot|invalid|already/i.test(e.message)) return res.status(400).json({ error: e.message });
+    next(e);
+  }
+});
+
+
+// ============================================================================
+// ADDENDUM_ROUTES (BUG-001 / Option C)
+// Wire the addendum service methods (createAddendum, signAddendum, listAddendums,
+// getAddendumById, voidAddendum, renderAddendumHtml) to HTTP. Tenant scoping is
+// enforced via the existing ensureAccessible / ensureEditable helpers + scope
+// `{ tenantId }` passed into service calls.
+// ============================================================================
+
+rentalAgreementsRouter.get('/:id/addendums', async (req, res, next) => {
+  try {
+    await ensureAccessible(req.params.id, req.user);
+    const rows = await rentalAgreementsService.listAddendums(req.params.id, {
+      tenantId: req.user?.tenantId || null
+    });
+    res.json(rows);
+  } catch (e) {
+    if (/not found/i.test(e.message)) return res.status(404).json({ error: e.message });
+    next(e);
+  }
+});
+
+rentalAgreementsRouter.get('/:id/addendums/:addendumId', async (req, res, next) => {
+  try {
+    await ensureAccessible(req.params.id, req.user);
+    const row = await rentalAgreementsService.getAddendumById(req.params.addendumId, {
+      tenantId: req.user?.tenantId || null
+    });
+    if (!row) return res.status(404).json({ error: 'Addendum not found' });
+    if (row.rentalAgreementId !== req.params.id) {
+      return res.status(404).json({ error: 'Addendum not found' });
+    }
+    res.json(row);
+  } catch (e) {
+    if (/not found/i.test(e.message)) return res.status(404).json({ error: e.message });
+    next(e);
+  }
+});
+
+rentalAgreementsRouter.post('/:id/addendums', async (req, res, next) => {
+  try {
+    if (!isAdminRole(req.user)) {
+      return res.status(403).json({ error: 'Admin role required to create an addendum' });
+    }
+    await ensureEditable(req.params.id, req.user);
+
+    const { newPickupAt, newReturnAt, reason, reasonCategory } = req.body || {};
+    if (!newPickupAt || !newReturnAt) {
+      return res.status(400).json({ error: 'newPickupAt and newReturnAt are required' });
+    }
+
+    const row = await rentalAgreementsService.createAddendum(req.params.id, {
+      newPickupAt,
+      newReturnAt,
+      reason: reason || 'Date correction',
+      reasonCategory: reasonCategory || 'admin_correction',
+      initiatedBy: req.user?.sub || null,
+      initiatedByRole: String(req.user?.role || 'ADMIN').toUpperCase()
+    });
+
+    // Fire-and-forget customer notification. Failures are logged inside the helper
+    // and never surface to the caller — addendum creation must not roll back if
+    // SMTP is down or the customer has no email on file.
+    scheduleAddendumNotification(req.params.id, row.id, row.tenantId)
+      .catch(() => { /* swallowed — internal logger handles failures */ });
+
+    res.status(201).json(row);
+  } catch (e) {
+    if (/not found/i.test(e.message)) return res.status(404).json({ error: e.message });
+    if (/required|invalid/i.test(e.message)) return res.status(400).json({ error: e.message });
+    next(e);
+  }
+});
+
+rentalAgreementsRouter.post('/:id/addendums/:addendumId/signature', async (req, res, next) => {
+  try {
+    const { signatureDataUrl, signatureSignedBy } = req.body || {};
+    if (!signatureDataUrl) {
+      return res.status(400).json({ error: 'signatureDataUrl is required' });
+    }
+
+    // Confirm the addendum belongs to this agreement and (when scoped) this tenant.
+    const existing = await rentalAgreementsService.getAddendumById(req.params.addendumId, {
+      tenantId: req.user?.tenantId || null
+    });
+    if (!existing || existing.rentalAgreementId !== req.params.id) {
+      return res.status(404).json({ error: 'Addendum not found' });
+    }
+
+    const row = await rentalAgreementsService.signAddendum(req.params.addendumId, {
+      signatureDataUrl,
+      signatureSignedBy: signatureSignedBy || req.user?.fullName || req.user?.email || null,
+      ip: req.ip
+    });
+    res.json(row);
+  } catch (e) {
+    if (/not found/i.test(e.message)) return res.status(404).json({ error: e.message });
+    if (/cannot sign|required|invalid/i.test(e.message)) return res.status(400).json({ error: e.message });
+    next(e);
+  }
+});
+
+rentalAgreementsRouter.post('/:id/addendums/:addendumId/void', async (req, res, next) => {
+  try {
+    if (!isAdminRole(req.user)) {
+      return res.status(403).json({ error: 'Admin role required to void an addendum' });
+    }
+    await ensureEditable(req.params.id, req.user);
+
+    const existing = await rentalAgreementsService.getAddendumById(req.params.addendumId, {
+      tenantId: req.user?.tenantId || null
+    });
+    if (!existing || existing.rentalAgreementId !== req.params.id) {
+      return res.status(404).json({ error: 'Addendum not found' });
+    }
+
+    const reason = req.body?.reason || 'Voided by admin';
+    const row = await rentalAgreementsService.voidAddendum(req.params.addendumId, reason, {
+      tenantId: req.user?.tenantId || null
+    });
+    res.json(row);
+  } catch (e) {
+    if (/not found/i.test(e.message)) return res.status(404).json({ error: e.message });
+    next(e);
+  }
+});
+
+rentalAgreementsRouter.get('/:id/addendums/:addendumId/print', async (req, res, next) => {
+  try {
+    await ensureAccessible(req.params.id, req.user);
+
+    // Tenant + agreement-membership check before render.
+    const existing = await rentalAgreementsService.getAddendumById(req.params.addendumId, {
+      tenantId: req.user?.tenantId || null
+    });
+    if (!existing || existing.rentalAgreementId !== req.params.id) {
+      return res.status(404).json({ error: 'Addendum not found' });
+    }
+
+    const html = await rentalAgreementsService.renderAddendumHtml(req.params.addendumId);
+    res.set('Content-Type', 'text/html').send(html);
+  } catch (e) {
+    if (/not found/i.test(e.message)) return res.status(404).json({ error: e.message });
     next(e);
   }
 });

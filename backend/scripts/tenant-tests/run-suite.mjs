@@ -5,7 +5,9 @@ const files = [
   'v4-write-isolation.mjs',
   'v5-superadmin.mjs',
   'v6-lifecycle.mjs',
-  'v7-website-fees.mjs'
+  'v7-website-fees.mjs',
+  'v8-addendum-isolation.mjs',
+  'v8-stop-sale-isolation.mjs'
 ];
 
 const results = [];

@@ -1173,6 +1173,55 @@ export const reservationsService = {
     const current = await prisma.reservation.findFirst({ where: { id, ...(scope?.tenantId ? { tenantId: scope.tenantId } : {}) } });
     if (!current) throw new Error('Reservation not found');
 
+    // Date-edit gate (BUG-001 / Option C addendum flow).
+    // Once a rental agreement on this reservation is past DRAFT, reservation
+    // pickup/return date changes must go through the addendum flow rather than
+    // silently mutating the immutable signed contract. Also block while a
+    // PENDING_SIGNATURE addendum exists — that addendum must be signed or
+    // voided before another date change can be made.
+    const dateBeingChanged =
+      (patch.pickupAt !== undefined &&
+        new Date(patch.pickupAt).getTime() !== new Date(current.pickupAt).getTime()) ||
+      (patch.returnAt !== undefined &&
+        new Date(patch.returnAt).getTime() !== new Date(current.returnAt).getTime());
+    if (dateBeingChanged) {
+      const parentAgreement = await prisma.rentalAgreement.findFirst({
+        where: {
+          reservationId: id,
+          ...(scope?.tenantId ? { tenantId: scope.tenantId } : {})
+        },
+        select: { id: true, status: true }
+      });
+      if (parentAgreement) {
+        const pendingAddendum = await prisma.rentalAgreementAddendum.findFirst({
+          where: {
+            rentalAgreementId: parentAgreement.id,
+            status: 'PENDING_SIGNATURE',
+            ...(scope?.tenantId ? { tenantId: scope.tenantId } : {})
+          },
+          select: { id: true }
+        });
+        if (pendingAddendum) {
+          const err = new Error(
+            `Cannot change reservation dates while addendum ${pendingAddendum.id} ` +
+            `is awaiting signature. Sign or void the pending addendum first.`
+          );
+          err.code = 'ADDENDUM_PENDING';
+          throw err;
+        }
+        const isPostDraft = String(parentAgreement.status || '').toUpperCase() !== 'DRAFT';
+        if (isPostDraft) {
+          const err = new Error(
+            `Reservation has a signed rental agreement (status=${parentAgreement.status}). ` +
+            `Use the addendum flow (POST /api/rental-agreements/${parentAgreement.id}/addendums) ` +
+            `to record the date change.`
+          );
+          err.code = 'AGREEMENT_IMMUTABLE';
+          throw err;
+        }
+      }
+    }
+
     const nextVehicleId = patch.vehicleId !== undefined ? patch.vehicleId : current.vehicleId;
     const nextPickupAt = patch.pickupAt ? new Date(patch.pickupAt) : current.pickupAt;
     const nextReturnAt = patch.returnAt ? new Date(patch.returnAt) : current.returnAt;
