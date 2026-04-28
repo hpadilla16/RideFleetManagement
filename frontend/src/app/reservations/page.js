@@ -105,6 +105,12 @@ function ReservationsInner({ token, me, logout }) {
   const [selectedInsuranceCode, setSelectedInsuranceCode] = useState('');
   const [searchDraft, setSearchDraft] = useState('');
   const [query, setQuery] = useState('');
+  // Date filter — overlap semantics handled server-side. Both inputs
+  // are optional. Setting only `dateFrom` shows reservations on/after
+  // that day; only `dateTo` shows on/before; both shows the range;
+  // setting them equal acts as a single-day filter.
+  const [dateFrom, setDateFrom] = useState('');
+  const [dateTo, setDateTo] = useState('');
   const [msg, setMsg] = useState('');
   const [createOpen, setCreateOpen] = useState(false);
   const [showImport, setShowImport] = useState(false);
@@ -137,7 +143,7 @@ function ReservationsInner({ token, me, logout }) {
     setSupportLoaded(false);
   };
 
-  const loadReservations = async ({ offset = 0, append = false, nextQuery = query } = {}) => {
+  const loadReservations = async ({ offset = 0, append = false, nextQuery = query, nextDateFrom = dateFrom, nextDateTo = dateTo } = {}) => {
     if (isSuper && !activeTenantId) {
       setReservations([]);
       setReservationsTotal(0);
@@ -150,6 +156,8 @@ function ReservationsInner({ token, me, logout }) {
       offset: String(offset)
     });
     if (nextQuery) params.set('q', nextQuery);
+    if (nextDateFrom) params.set('dateFrom', nextDateFrom);
+    if (nextDateTo) params.set('dateTo', nextDateTo);
     try {
       const payload = await api(scopedPath(`/api/reservations/page?${params.toString()}`), {}, token);
       const nextRows = Array.isArray(payload?.rows) ? payload.rows : [];
@@ -259,7 +267,9 @@ function ReservationsInner({ token, me, logout }) {
     return () => clearTimeout(handle);
   }, [searchDraft]);
   useEffect(() => { clearSupportData(); }, [token, isSuper, activeTenantId, canCreateReservation]);
-  useEffect(() => { loadReservations({ offset: 0, append: false, nextQuery: query }); }, [token, isSuper, activeTenantId, query]);
+  useEffect(() => {
+    loadReservations({ offset: 0, append: false, nextQuery: query, nextDateFrom: dateFrom, nextDateTo: dateTo });
+  }, [token, isSuper, activeTenantId, query, dateFrom, dateTo]);
   useEffect(() => { loadReservationSummary(); }, [token, isSuper, activeTenantId]);
   useEffect(() => {
     if (!createOpen && !showImport) return;
@@ -611,12 +621,42 @@ function ReservationsInner({ token, me, logout }) {
       <section className="glass card-lg">
         <div className="row-between">
           <h2>Reservations</h2>
-          <div style={{ display: 'flex', gap: 8 }}>
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
             <input
               placeholder="Search reservation/customer"
               value={searchDraft}
               onChange={(e) => setSearchDraft(e.target.value)}
             />
+            <label style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 13 }}>
+              <span className="label" style={{ margin: 0 }}>Date</span>
+              <input
+                type="date"
+                value={dateFrom}
+                onChange={(e) => setDateFrom(e.target.value)}
+                title="Show reservations active on or after this date (set both Date and To for a range)"
+                aria-label="Filter from date"
+              />
+            </label>
+            <label style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 13 }}>
+              <span className="label" style={{ margin: 0 }}>To</span>
+              <input
+                type="date"
+                value={dateTo}
+                onChange={(e) => setDateTo(e.target.value)}
+                title="Show reservations active on or before this date (leave empty for single-day filter)"
+                aria-label="Filter to date"
+              />
+            </label>
+            {(dateFrom || dateTo) ? (
+              <button
+                type="button"
+                className="button-subtle"
+                onClick={() => { setDateFrom(''); setDateTo(''); }}
+                title="Clear date filter"
+              >
+                Clear dates
+              </button>
+            ) : null}
             {canManageReservationSetup ? <button onClick={() => setShowImport(true)}>{loadingSupport && !supportLoaded ? 'Loading...' : 'Upload Migration'}</button> : null}
             {canCreateReservation ? (
               <button onClick={() => {
@@ -663,7 +703,7 @@ function ReservationsInner({ token, me, logout }) {
         </table>
         {reservationsHasMore ? (
           <div style={{ display: 'flex', justifyContent: 'center', marginTop: 12 }}>
-            <button type="button" onClick={() => loadReservations({ offset: rows.length, append: true, nextQuery: query })} disabled={loadingReservations}>
+            <button type="button" onClick={() => loadReservations({ offset: rows.length, append: true, nextQuery: query, nextDateFrom: dateFrom, nextDateTo: dateTo })} disabled={loadingReservations}>
               {loadingReservations ? 'Loading...' : 'Load More'}
             </button>
           </div>

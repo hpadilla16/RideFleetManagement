@@ -244,6 +244,56 @@ function clampPositiveInt(value, fallback, min, max) {
   return Math.min(max, Math.max(min, parsed));
 }
 
+// Parse the listPage date filter inputs into a {start, end} window.
+// Accepts:
+//   - dateOn = "YYYY-MM-DD" (single day) — expands to [00:00, 23:59:59.999]
+//   - dateFrom + dateTo (explicit range) — both dates inclusive
+//   - dateFrom alone — open-ended range from that day forward
+//   - dateTo alone — open-ended range up to that day
+// Returns null when no valid date input is provided. Invalid date strings
+// are silently dropped (the filter is just skipped) so a malformed input
+// never 500s the list endpoint.
+function parseListDateRange(options = {}) {
+  const dateOnRaw = String(options?.dateOn ?? '').trim();
+  const dateFromRaw = String(options?.dateFrom ?? '').trim();
+  const dateToRaw = String(options?.dateTo ?? '').trim();
+
+  // Explicit range wins over single-date.
+  if (dateFromRaw || dateToRaw) {
+    const start = parseStartOfDay(dateFromRaw);
+    const end = parseEndOfDay(dateToRaw);
+    if (!start && !end) return null;
+    return {
+      start: start || new Date('1970-01-01T00:00:00.000Z'),
+      end: end || new Date('9999-12-31T23:59:59.999Z')
+    };
+  }
+
+  if (!dateOnRaw) return null;
+  const start = parseStartOfDay(dateOnRaw);
+  const end = parseEndOfDay(dateOnRaw);
+  if (!start || !end) return null;
+  return { start, end };
+}
+
+function parseStartOfDay(raw) {
+  if (!raw) return null;
+  const match = String(raw).match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (!match) return null;
+  const [, y, m, d] = match;
+  const out = new Date(`${y}-${m}-${d}T00:00:00.000`);
+  return Number.isNaN(out.getTime()) ? null : out;
+}
+
+function parseEndOfDay(raw) {
+  if (!raw) return null;
+  const match = String(raw).match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (!match) return null;
+  const [, y, m, d] = match;
+  const out = new Date(`${y}-${m}-${d}T23:59:59.999`);
+  return Number.isNaN(out.getTime()) ? null : out;
+}
+
 function vehicleDisplayLabel(vehicle = {}) {
   return [
     [vehicle?.year, vehicle?.make, vehicle?.model].filter(Boolean).join(' ').trim(),
@@ -963,8 +1013,26 @@ export const reservationsService = {
     const query = norm(options.query);
     const take = clampPositiveInt(options.limit, 100, 1, 250);
     const skip = clampPositiveInt(options.offset, 0, 0, 100000);
+
+    // Date filter — overlap semantics: a reservation matches if its rental
+    // window includes any part of the requested window. That is:
+    //   pickupAt <= rangeEnd AND returnAt >= rangeStart
+    // Inputs:
+    //   - dateOn = "YYYY-MM-DD" expands to [00:00, 23:59:59.999] of that day
+    //   - dateFrom + dateTo can override for an explicit range
+    //   - When both are set, the explicit range wins (dateOn ignored)
+    //   - Invalid date strings are silently dropped (no filter applied)
+    const dateRange = parseListDateRange(options);
+    const dateWhere = dateRange
+      ? {
+          pickupAt: { lte: dateRange.end },
+          returnAt: { gte: dateRange.start }
+        }
+      : {};
+
     const where = {
       ...(scope?.tenantId ? { tenantId: scope.tenantId } : {}),
+      ...dateWhere,
       ...(query
         ? {
             OR: [
