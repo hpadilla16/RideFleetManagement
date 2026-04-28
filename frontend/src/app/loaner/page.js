@@ -1157,6 +1157,7 @@ function LoanerProgramInner({ token, me, logout }) {
                 rows={section.rows}
                 emptyText={section.emptyText}
                 actions={section.actions}
+                loading={loading && !dashboard}
               />
             ))}
           </div>
