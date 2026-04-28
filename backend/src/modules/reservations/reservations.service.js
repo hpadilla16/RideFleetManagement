@@ -131,11 +131,19 @@ const reservationListSelect = {
       dateOfBirth: true
     }
   },
+  // tenantId is included on the four tenant-scoped relations below as a
+  // defense-in-depth check. The schema doesn't enforce that
+  // reservation.vehicleId points to a Vehicle in the SAME tenant — the
+  // application layer (and the old hydrate step) ensured this. With the
+  // hydrate step gone, maskCrossTenantRelations() below uses these
+  // tenantId fields to null out any drifted cross-tenant relation before
+  // the row leaves the API.
   vehicleType: {
     select: {
       id: true,
       code: true,
-      name: true
+      name: true,
+      tenantId: true
     }
   },
   vehicle: {
@@ -145,7 +153,8 @@ const reservationListSelect = {
       plate: true,
       make: true,
       model: true,
-      year: true
+      year: true,
+      tenantId: true
     }
   },
   pickupLocation: {
@@ -153,14 +162,16 @@ const reservationListSelect = {
       id: true,
       name: true,
       code: true,
-      locationConfig: true
+      locationConfig: true,
+      tenantId: true
     }
   },
   returnLocation: {
     select: {
       id: true,
       name: true,
-      code: true
+      code: true,
+      tenantId: true
     }
   },
   franchiseId: true,
@@ -183,6 +194,33 @@ const reservationListSelect = {
 
 // Legacy alias
 const reservationListBaseSelect = reservationListSelect;
+
+// Defense-in-depth: null out any cross-tenant relation that drifted into a
+// reservation row. The schema doesn't enforce that vehicle.tenantId equals
+// reservation.tenantId — the old hydrateReservationListRows() applied this
+// scoping by re-fetching with `where: { tenantId: scope.tenantId }`. With
+// hydrate gone, this helper does the equivalent in-memory check on each row.
+//
+// Only applied when scopeTenantId is set (i.e., a tenant-scoped request).
+// SUPER_ADMIN cross-tenant requests pass through untouched, which matches
+// the old hydrate behavior (hydrate ran without a tenant filter when the
+// scope had no tenantId).
+//
+// Customer is intentionally NOT masked here — the original hydrate fetched
+// customers without a tenant filter, so list views have always been able
+// to surface a customer's record regardless of tenant. Changing that is
+// a separate decision.
+function maskCrossTenantRelations(row, scopeTenantId) {
+  if (!scopeTenantId) return row;
+  const expected = row?.tenantId;
+  if (!expected) return row;
+  const out = { ...row };
+  if (out.vehicle?.tenantId && out.vehicle.tenantId !== expected) out.vehicle = null;
+  if (out.vehicleType?.tenantId && out.vehicleType.tenantId !== expected) out.vehicleType = null;
+  if (out.pickupLocation?.tenantId && out.pickupLocation.tenantId !== expected) out.pickupLocation = null;
+  if (out.returnLocation?.tenantId && out.returnLocation.tenantId !== expected) out.returnLocation = null;
+  return out;
+}
 
 function norm(v) {
   return String(v ?? '').trim();
@@ -956,7 +994,16 @@ export const reservationsService = {
     // separate batch fetches needed. This used to call hydrateReservationListRows()
     // which ran 4 redundant prisma queries — the count + findMany already had
     // everything except dateOfBirth/locationConfig, which the select now covers.
-    const items = rows.map((row) => ({ ...row, ...deriveUnderageAlertForReservation(row) }));
+    //
+    // maskCrossTenantRelations restores the tenant-isolation defense the old
+    // hydrate provided: if a reservation row has a vehicle/vehicleType/location
+    // ID pointing to another tenant's record (data drift), null out that
+    // relation before responding. SUPER_ADMIN cross-tenant requests
+    // (scope.tenantId undefined) pass through unmasked, matching old behavior.
+    const items = rows.map((row) => {
+      const masked = maskCrossTenantRelations(row, scope?.tenantId);
+      return { ...masked, ...deriveUnderageAlertForReservation(masked) };
+    });
     return {
       rows: items,
       total,
@@ -975,7 +1022,12 @@ export const reservationsService = {
       prisma.reservation.count({ where })
     ]);
     // Relations already included via select — add underage alert derivation
-    const items = rows.map((row) => ({ ...row, ...deriveUnderageAlertForReservation(row) }));
+    // and mask any drifted cross-tenant relation (defense in depth, matches
+    // listPage behavior).
+    const items = rows.map((row) => {
+      const masked = maskCrossTenantRelations(row, scope?.tenantId);
+      return { ...masked, ...deriveUnderageAlertForReservation(masked) };
+    });
     return { items, total, page: Number(page), limit: take, pages: Math.ceil(total / take) };
   },
 
