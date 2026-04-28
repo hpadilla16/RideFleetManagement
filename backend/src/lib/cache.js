@@ -48,6 +48,12 @@ let redisPub = null;
 let redisSub = null;
 let redisReady = false;
 let redisInitPromise = null;
+// When the initial bootstrap fails (DNS / auth / network blip), record when
+// so we can throttle retries without spamming connect attempts on every
+// publish call. After REDIS_INIT_RETRY_MS, the next publish triggers a
+// fresh bootstrap attempt.
+let redisInitFailedAt = 0;
+const REDIS_INIT_RETRY_MS = 30 * 1000;
 
 // Init Redis lazily on first cache use that wants to publish. Tests and
 // dev workflows that don't set REDIS_URL never touch the import; CI without
@@ -55,6 +61,11 @@ let redisInitPromise = null;
 async function ensureRedis() {
   if (!REDIS_URL) return false;
   if (redisInitPromise) return redisInitPromise;
+  // Throttle retries after a recent failure — avoids hot-looping reconnect
+  // attempts on every publish() if Redis is misconfigured or unreachable.
+  if (redisInitFailedAt && Date.now() - redisInitFailedAt < REDIS_INIT_RETRY_MS) {
+    return false;
+  }
   redisInitPromise = (async () => {
     try {
       const mod = await import('redis');
@@ -72,12 +83,24 @@ async function ensureRedis() {
       await redisSub.connect();
       await redisSub.subscribe(INVALIDATION_CHANNEL, handleRemoteEvent);
       redisReady = true;
+      redisInitFailedAt = 0;
       const safeUrl = REDIS_URL.replace(/:[^:@/]*@/, ':***@');
       console.log(`[cache] redis pub/sub ready (channel=${INVALIDATION_CHANNEL}, url=${safeUrl})`);
       return true;
     } catch (err) {
-      console.warn('[cache] redis init failed; running with local-only invalidation:', err?.message);
+      console.warn('[cache] redis init failed; running with local-only invalidation (will retry):', err?.message);
       redisReady = false;
+      // CRITICAL: reset state so the next call retries the full bootstrap.
+      // Without this, the settled-failed promise is reused forever and
+      // pub/sub stays dead even after Redis becomes healthy.
+      redisInitPromise = null;
+      redisInitFailedAt = Date.now();
+      // Best-effort: tear down any half-initialized clients so the retry
+      // starts from a clean slate.
+      try { if (redisPub) await redisPub.quit().catch(() => {}); } catch {}
+      try { if (redisSub) await redisSub.quit().catch(() => {}); } catch {}
+      redisPub = null;
+      redisSub = null;
       return false;
     }
   })();
@@ -231,6 +254,7 @@ export const cache = {
     try { if (redisSub) await redisSub.quit(); } catch {}
     redisReady = false;
     redisInitPromise = null;
+    redisInitFailedAt = 0;
     redisPub = null;
     redisSub = null;
   }
