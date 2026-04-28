@@ -40,6 +40,60 @@ const LOANER_QUEUE_FOCUS_KEY = 'loaner.queueFocus';
 const LOANER_EXPORT_FILTERS_KEY = 'loaner.exportFilters';
 const LOANER_INTAKE_FORM_KEY = 'loaner.intakeForm';
 
+// Small inline accent marking a required form field. Inline-style to avoid
+// touching globals.css; matches the rest of the page's inline-style approach.
+function RequiredMark() {
+  return (
+    <span
+      aria-hidden="true"
+      title="Required"
+      style={{ color: '#dc2626', marginLeft: 4, fontWeight: 700 }}
+    >
+      *
+    </span>
+  );
+}
+
+// Skeleton placeholder for the initial dashboard fetch. Avoids the
+// "blank cards for 1-3s" feel on slow networks.
+function SkeletonCard({ height = 64, lines = 1 }) {
+  return (
+    <div
+      style={{
+        display: 'grid',
+        gap: 8,
+        padding: 14,
+        borderRadius: 16,
+        background: 'rgba(102,79,177,0.04)',
+        border: '1px solid rgba(102,79,177,0.10)'
+      }}
+    >
+      {Array.from({ length: lines }).map((_, i) => (
+        <div
+          key={i}
+          style={{
+            height: height / Math.max(1, lines) - 4,
+            borderRadius: 8,
+            background:
+              'linear-gradient(90deg, rgba(102,79,177,0.10), rgba(102,79,177,0.18), rgba(102,79,177,0.10))',
+            backgroundSize: '200% 100%',
+            animation: 'loaner-skeleton-shimmer 1.4s ease-in-out infinite'
+          }}
+        />
+      ))}
+    </div>
+  );
+}
+
+// Inject the keyframes once. Idempotent — only runs in the browser, only adds
+// the rule if it doesn't already exist.
+if (typeof document !== 'undefined' && !document.getElementById('loaner-skeleton-keyframes')) {
+  const style = document.createElement('style');
+  style.id = 'loaner-skeleton-keyframes';
+  style.textContent = `@keyframes loaner-skeleton-shimmer { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }`;
+  document.head.appendChild(style);
+}
+
 function restoreLoanerExportFilters() {
   if (typeof window === 'undefined') {
     return {
@@ -159,6 +213,12 @@ function LoanerProgramInner({ token, me, logout }) {
   const [msg, setMsg] = useState('');
   const [loading, setLoading] = useState(true);
   const [form, setForm] = useState(() => restoreLoanerForm());
+  // Track in-flight async actions so we can disable their buttons + flip labels.
+  // Prevents double-submits on intake / double-downloads on exports / double-popups on print.
+  const [submitting, setSubmitting] = useState(false);
+  const [exportingBilling, setExportingBilling] = useState(false);
+  const [exportingStatement, setExportingStatement] = useState(false);
+  const [printing, setPrinting] = useState(false);
 
   const metrics = dashboard?.metrics || {
     openLoaners: 0,
@@ -343,21 +403,21 @@ function LoanerProgramInner({ token, me, logout }) {
   const queueSections = useMemo(() => ([
     {
       key: 'INTAKE',
-      title: 'Intake And Delivery',
-      subtitle: 'Customers about to take a loaner or still waiting on delivery steps.',
+      title: 'New loaner check-ins',
+      subtitle: 'Customers about to take a loaner — finish handoff and get keys in their hands.',
       rows: dashboard?.queues?.intake || [],
-      emptyText: 'No loaner pickups in the active intake queue.',
+      emptyText: 'No loaner check-ins waiting right now.',
       actions: (row) => (
         <>
-          <Link href={reservationHref(row)}><button type="button">Open Workflow</button></Link>
-          <Link href={reservationHref(row, 'checkout')}><button type="button" className="button-subtle">Checkout</button></Link>
+          <Link href={reservationHref(row)}><button type="button">Open</button></Link>
+          <Link href={reservationHref(row, 'checkout')}><button type="button" className="button-subtle">Check out</button></Link>
         </>
       )
     },
     {
       key: 'ACTIVE',
-      title: 'Active Loaners',
-      subtitle: 'Vehicles currently out in service-loaner status.',
+      title: 'Active loaners',
+      subtitle: 'Vehicles currently out with customers.',
       rows: dashboard?.queues?.active || [],
       emptyText: 'No active loaners right now.',
       actions: (row) => (
@@ -370,52 +430,52 @@ function LoanerProgramInner({ token, me, logout }) {
     {
       key: 'RETURNS',
       title: 'Returns',
-      subtitle: 'Loaners coming back from service customers.',
+      subtitle: 'Loaners coming back — inspect and close out.',
       rows: dashboard?.queues?.returns || [],
-      emptyText: 'No loaner returns in queue right now.',
+      emptyText: 'No returns waiting right now.',
       actions: (row) => (
         <>
-          <Link href={reservationHref(row, 'checkin')}><button type="button">Check-in</button></Link>
+          <Link href={reservationHref(row, 'checkin')}><button type="button">Check in</button></Link>
           <Link href={reservationHref(row, 'inspection')}><button type="button" className="button-subtle">Inspect</button></Link>
         </>
       )
     },
     {
       key: 'ADVISOR',
-      title: 'Advisor Follow-Up',
-      subtitle: 'Reservations that still need lane guidance, borrower packet progress, or ready-for-pickup decisions.',
+      title: 'Service advisor follow-up',
+      subtitle: 'Need lane guidance, customer-agreement progress, or ready-for-pickup approval.',
       rows: dashboard?.queues?.advisor || [],
-      emptyText: 'No advisor follow-up items right now.',
+      emptyText: 'No advisor follow-ups right now.',
       actions: (row) => (
         <>
-          <Link href={reservationHref(row)}><button type="button">Open Workflow</button></Link>
-          <Link href={reservationHref(row, 'checkout')}><button type="button" className="button-subtle">Checkout</button></Link>
+          <Link href={reservationHref(row)}><button type="button">Open</button></Link>
+          <Link href={reservationHref(row, 'checkout')}><button type="button" className="button-subtle">Check out</button></Link>
         </>
       )
     },
     {
       key: 'BILLING',
-      title: 'Billing Review',
-      subtitle: 'Warranty, insurer, and customer-pay loaners that still need billing follow-up.',
+      title: 'Billing review',
+      subtitle: 'Warranty, insurance, and customer-pay loaners still needing billing follow-up.',
       rows: dashboard?.queues?.billing || [],
-      emptyText: 'No loaner billing items waiting right now.',
+      emptyText: 'No billing items waiting right now.',
       actions: (row) => (
         <>
-          <Link href={reservationHref(row)}><button type="button">Open Workflow</button></Link>
+          <Link href={reservationHref(row)}><button type="button">Open</button></Link>
           <Link href={reservationHref(row, 'payments')}><button type="button" className="button-subtle">Payments</button></Link>
         </>
       )
     },
     {
       key: 'ALERTS',
-      title: 'Overdue And SLA Alerts',
-      subtitle: 'Past-due returns, missed service ETAs, and denied billing items that need action now.',
+      title: 'Overdue and at-risk',
+      subtitle: 'Past-due returns, missed service ETAs, and denied billing — act now.',
       rows: dashboard?.queues?.alerts || [],
-      emptyText: 'No overdue or SLA-risk loaner alerts right now.',
+      emptyText: 'No overdue or at-risk loaners right now.',
       actions: (row) => (
         <>
-          <Link href={reservationHref(row)}><button type="button">Open Workflow</button></Link>
-          <Link href={reservationHref(row, row.overdueReturn ? 'checkin' : 'checkout')}><button type="button" className="button-subtle">{row.overdueReturn ? 'Check-in' : 'Checkout'}</button></Link>
+          <Link href={reservationHref(row)}><button type="button">Open</button></Link>
+          <Link href={reservationHref(row, row.overdueReturn ? 'checkin' : 'checkout')}><button type="button" className="button-subtle">{row.overdueReturn ? 'Check in' : 'Check out'}</button></Link>
         </>
       )
     }
@@ -428,10 +488,28 @@ function LoanerProgramInner({ token, me, logout }) {
 
   async function createLoaner(event) {
     event.preventDefault();
+
+    // Build a named-fields validation error so the user knows EXACTLY what's
+    // missing instead of a generic "complete the required fields" hint.
     if (!loanerReady) {
-      setMsg('Complete the required loaner intake fields first.');
+      const missing = [];
+      if (!selectedCustomer && !(form.firstName && form.lastName && form.phone)) {
+        missing.push('Customer (pick existing or fill first name + last name + phone)');
+      }
+      if (!form.vehicleTypeId) missing.push('Vehicle Type');
+      if (!form.pickupAt) missing.push('Pickup date/time');
+      if (!form.returnAt) missing.push('Return date/time');
+      if (!form.pickupLocationId || !form.returnLocationId) missing.push('Pickup + Return locations');
+      if (!form.loanerLiabilityAccepted) missing.push('Liability acceptance checkbox');
+      setMsg(
+        missing.length
+          ? `Please complete: ${missing.join(' · ')}`
+          : 'Complete the required loaner intake fields first.'
+      );
       return;
     }
+
+    setSubmitting(true);
     try {
       const payload = await api('/api/dealership-loaner/intake', {
         method: 'POST',
@@ -447,6 +525,8 @@ function LoanerProgramInner({ token, me, logout }) {
       await load(payload?.reservationNumber || '');
     } catch (error) {
       setMsg(error.message);
+    } finally {
+      setSubmitting(false);
     }
   }
 
@@ -467,6 +547,8 @@ function LoanerProgramInner({ token, me, logout }) {
   }
 
   async function exportBillingCsv() {
+    if (exportingBilling) return;
+    setExportingBilling(true);
     try {
       const query = new URLSearchParams();
       if (search.trim()) query.set('q', search.trim());
@@ -489,6 +571,8 @@ function LoanerProgramInner({ token, me, logout }) {
       setMsg('Loaner billing export downloaded');
     } catch (error) {
       setMsg(error.message);
+    } finally {
+      setExportingBilling(false);
     }
   }
 
@@ -503,6 +587,8 @@ function LoanerProgramInner({ token, me, logout }) {
   }
 
   async function exportStatementCsv() {
+    if (exportingStatement) return;
+    setExportingStatement(true);
     try {
       const query = buildStatementQuery();
       const res = await fetch(`${API_BASE}/api/dealership-loaner/statement-export${query.toString() ? `?${query.toString()}` : ''}`, {
@@ -520,13 +606,18 @@ function LoanerProgramInner({ token, me, logout }) {
       setMsg('Dealer statement export downloaded');
     } catch (error) {
       setMsg(error.message);
+    } finally {
+      setExportingStatement(false);
     }
   }
 
   async function printStatementPacket() {
+    if (printing) return;
+    setPrinting(true);
     const printWindow = window.open('', '_blank');
     if (!printWindow) {
       setMsg('Pop-up blocked. Please allow pop-ups to print the dealer statement.');
+      setPrinting(false);
       return;
     }
     printWindow.opener = null;
@@ -550,6 +641,8 @@ function LoanerProgramInner({ token, me, logout }) {
       printWindow.document.write(`<p style="font-family: sans-serif; padding: 24px;">${error.message || 'Unable to print dealer statement'}</p>`);
       printWindow.document.close();
       setMsg(error.message);
+    } finally {
+      setPrinting(false);
     }
   }
 
@@ -653,7 +746,9 @@ function LoanerProgramInner({ token, me, logout }) {
             <a href="#loaner-intake" className="app-banner-pill">Open Intake</a>
             <a href="#loaner-lookup" className="app-banner-pill">Loaner Lookup</a>
             <a href="#loaner-queues" className="app-banner-pill">Jump To Queues</a>
-            <button type="button" className="button-subtle" onClick={printStatementPacket}>Print Monthly Packet</button>
+            <button type="button" className="button-subtle" onClick={printStatementPacket} disabled={printing}>
+              {printing ? 'Preparing packet…' : 'Print Monthly Packet'}
+            </button>
           </div>
         </div>
       </section>
@@ -666,7 +761,15 @@ function LoanerProgramInner({ token, me, logout }) {
           </div>
           <span className="status-chip neutral">Mobile Ops</span>
         </div>
-        {serviceLanePriorityItems.length ? (
+        {loading && !dashboard ? (
+          <div className="app-card-grid compact" aria-busy="true" aria-label="Loading priority board">
+            <SkeletonCard height={88} lines={3} />
+            <SkeletonCard height={88} lines={3} />
+            <SkeletonCard height={88} lines={3} />
+            <SkeletonCard height={88} lines={3} />
+            <SkeletonCard height={88} lines={3} />
+          </div>
+        ) : serviceLanePriorityItems.length ? (
           <div className="app-card-grid compact">
             {serviceLanePriorityItems.map((item) => (
               <section key={item.id} className="glass card section-card">
@@ -699,9 +802,15 @@ function LoanerProgramInner({ token, me, logout }) {
             </div>
             <div className="inline-actions">
               <span className="status-chip neutral">Service Lane</span>
-              <button type="button" className="button-subtle" onClick={exportBillingCsv}>Export Billing CSV</button>
-              <button type="button" className="button-subtle" onClick={exportStatementCsv}>Export Statement CSV</button>
-              <button type="button" className="button-subtle" onClick={printStatementPacket}>Print Monthly Packet</button>
+              <button type="button" className="button-subtle" onClick={exportBillingCsv} disabled={exportingBilling}>
+                {exportingBilling ? 'Exporting billing…' : 'Export Billing CSV'}
+              </button>
+              <button type="button" className="button-subtle" onClick={exportStatementCsv} disabled={exportingStatement}>
+                {exportingStatement ? 'Exporting statement…' : 'Export Statement CSV'}
+              </button>
+              <button type="button" className="button-subtle" onClick={printStatementPacket} disabled={printing}>
+                {printing ? 'Preparing packet…' : 'Print Monthly Packet'}
+              </button>
             </div>
           </div>
 
@@ -865,8 +974,8 @@ function LoanerProgramInner({ token, me, logout }) {
                 <input value={form.serviceAdvisorPhone} onChange={(event) => setForm((current) => ({ ...current, serviceAdvisorPhone: event.target.value }))} />
               </div>
               <div>
-                <div className="label">Vehicle Type</div>
-                <select value={form.vehicleTypeId} onChange={(event) => setForm((current) => ({ ...current, vehicleTypeId: event.target.value }))}>
+                <div className="label">Vehicle Type<RequiredMark /></div>
+                <select value={form.vehicleTypeId} onChange={(event) => setForm((current) => ({ ...current, vehicleTypeId: event.target.value }))} aria-required="true">
                   <option value="">Select type</option>
                   {vehicleTypes.map((row) => (
                     <option key={row.id} value={row.id}>{row.name}</option>
@@ -885,8 +994,8 @@ function LoanerProgramInner({ token, me, logout }) {
                 </select>
               </div>
               <div>
-                <div className="label">Pickup Location</div>
-                <select value={form.pickupLocationId} onChange={(event) => setForm((current) => ({ ...current, pickupLocationId: event.target.value }))}>
+                <div className="label">Pickup Location<RequiredMark /></div>
+                <select value={form.pickupLocationId} onChange={(event) => setForm((current) => ({ ...current, pickupLocationId: event.target.value }))} aria-required="true">
                   <option value="">Select location</option>
                   {locations.map((row) => (
                     <option key={row.id} value={row.id}>{row.name}</option>
@@ -894,8 +1003,8 @@ function LoanerProgramInner({ token, me, logout }) {
                 </select>
               </div>
               <div>
-                <div className="label">Return Location</div>
-                <select value={form.returnLocationId} onChange={(event) => setForm((current) => ({ ...current, returnLocationId: event.target.value }))}>
+                <div className="label">Return Location<RequiredMark /></div>
+                <select value={form.returnLocationId} onChange={(event) => setForm((current) => ({ ...current, returnLocationId: event.target.value }))} aria-required="true">
                   <option value="">Select location</option>
                   {locations.map((row) => (
                     <option key={row.id} value={row.id}>{row.name}</option>
@@ -903,12 +1012,12 @@ function LoanerProgramInner({ token, me, logout }) {
                 </select>
               </div>
               <div>
-                <div className="label">Pickup At</div>
-                <input type="datetime-local" value={form.pickupAt} onChange={(event) => setForm((current) => ({ ...current, pickupAt: event.target.value }))} />
+                <div className="label">Pickup At<RequiredMark /></div>
+                <input type="datetime-local" value={form.pickupAt} onChange={(event) => setForm((current) => ({ ...current, pickupAt: event.target.value }))} aria-required="true" />
               </div>
               <div>
-                <div className="label">Return At</div>
-                <input type="datetime-local" value={form.returnAt} onChange={(event) => setForm((current) => ({ ...current, returnAt: event.target.value }))} />
+                <div className="label">Return At<RequiredMark /></div>
+                <input type="datetime-local" value={form.returnAt} onChange={(event) => setForm((current) => ({ ...current, returnAt: event.target.value }))} aria-required="true" />
               </div>
             </div>
 
@@ -947,17 +1056,30 @@ function LoanerProgramInner({ token, me, logout }) {
               <div className="label">Service Advisor Notes</div>
               <textarea rows={3} value={form.serviceAdvisorNotes} onChange={(event) => setForm((current) => ({ ...current, serviceAdvisorNotes: event.target.value }))} placeholder="Advisor follow-up, promised completion, customer expectations, or service context" />
             </div>
-            <label className="label">
+            <label className="label" style={{ display: 'flex', alignItems: 'flex-start', gap: 8 }}>
               <input
                 type="checkbox"
                 checked={form.loanerLiabilityAccepted}
                 onChange={(event) => setForm((current) => ({ ...current, loanerLiabilityAccepted: event.target.checked }))}
+                aria-required="true"
               />
-              Customer accepted responsibility and liability for the loaner vehicle.
+              <span>
+                Customer accepted responsibility and liability for the loaner vehicle.
+                <RequiredMark />
+              </span>
             </label>
             <div className="inline-actions">
-              <button type="submit">Create Loaner Intake</button>
-              <button type="button" className="button-subtle" onClick={() => setForm(EMPTY_FORM)}>Reset</button>
+              <button type="submit" disabled={submitting}>
+                {submitting ? 'Creating loaner intake…' : 'Create Loaner Intake'}
+              </button>
+              <button
+                type="button"
+                className="button-subtle"
+                onClick={() => setForm(EMPTY_FORM)}
+                disabled={submitting}
+              >
+                Reset
+              </button>
             </div>
           </form>
         </section>
@@ -992,6 +1114,7 @@ function LoanerProgramInner({ token, me, logout }) {
                   rows={section.rows}
                   emptyText={section.emptyText}
                   actions={section.actions}
+                  loading={loading && !dashboard}
                 />
               ))}
             </div>
@@ -1005,6 +1128,7 @@ function LoanerProgramInner({ token, me, logout }) {
                   rows={section.rows}
                   emptyText={section.emptyText}
                   actions={section.actions}
+                  loading={loading && !dashboard}
                 />
               ))}
             </div>
@@ -1018,6 +1142,7 @@ function LoanerProgramInner({ token, me, logout }) {
                   rows={section.rows}
                   emptyText={section.emptyText}
                   actions={section.actions}
+                  loading={loading && !dashboard}
                 />
               ))}
             </div>
@@ -1073,12 +1198,17 @@ function LoanerProgramInner({ token, me, logout }) {
   );
 }
 
-function LoanerQueueCard({ title, subtitle, rows, emptyText, actions }) {
+function LoanerQueueCard({ title, subtitle, rows, emptyText, actions, loading }) {
   return (
     <section className="glass card section-card">
       <div className="section-title">{title}</div>
       <p className="ui-muted" style={{ marginTop: -6 }}>{subtitle}</p>
-      {rows.length ? (
+      {loading ? (
+        <div className="stack" aria-busy="true" aria-label={`Loading ${title}`}>
+          <SkeletonCard height={96} lines={3} />
+          <SkeletonCard height={96} lines={3} />
+        </div>
+      ) : rows.length ? (
         <div className="stack">
           {rows.map((row) => (
             <div key={row.id} className="surface-note" style={{ display: 'grid', gap: 10 }}>
@@ -1106,9 +1236,9 @@ function LoanerQueueCard({ title, subtitle, rows, emptyText, actions }) {
               ) : null}
               <div className="inline-actions" style={{ gap: 8 }}>
                 <span className={`status-chip ${row.loanerBorrowerPacketCompletedAt ? 'good' : 'warn'}`}>
-                  {row.loanerBorrowerPacketCompletedAt ? 'Packet Complete' : 'Packet Pending'}
+                  {row.loanerBorrowerPacketCompletedAt ? 'Agreement complete' : 'Agreement pending'}
                 </span>
-                {row.loanerReturnExceptionFlag ? <span className="status-chip warn">Return Exception</span> : null}
+                {row.loanerReturnExceptionFlag ? <span className="status-chip warn">Return issue flagged</span> : null}
                 {row.alertReason ? <span className={`status-chip ${row.alertSeverity === 'warn' ? 'warn' : 'neutral'}`}>{row.alertReason}</span> : null}
               </div>
               <div className="label" style={{ textTransform: 'none', letterSpacing: 0, fontSize: 12 }}>
