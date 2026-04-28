@@ -66,4 +66,37 @@ describe('TTL Cache', () => {
     assert.equal(s.size, 2);
     assert.ok(s.maxEntries > 0);
   });
+
+  // L-1 (Redis pub/sub for cross-worker invalidation): the new cache.js
+  // ships with optional Redis fan-out for del / invalidate / clear events.
+  // When REDIS_URL is unset (the case in this test run), behavior must be
+  // identical to the old in-memory-only implementation. These tests pin
+  // that contract so a future Redis change can't silently regress local
+  // behavior.
+  it('stats reports redis as not configured when REDIS_URL is unset', () => {
+    const s = cache.stats();
+    assert.ok(s.redis, 'stats should always include a redis section');
+    assert.equal(s.redis.configured, false);
+    assert.equal(s.redis.ready, false);
+  });
+
+  it('del / invalidate / clear still work synchronously without REDIS_URL', () => {
+    cache.set('a:1', 1);
+    cache.set('a:2', 2);
+    cache.set('b:1', 3);
+
+    // Sync del — both the local entry is gone AND the call returns sync
+    cache.del('a:1');
+    assert.equal(cache.get('a:1'), undefined);
+    assert.equal(cache.get('a:2'), 2, 'sibling key untouched');
+
+    // Sync invalidate-by-prefix
+    cache.invalidate('a:');
+    assert.equal(cache.get('a:2'), undefined);
+    assert.equal(cache.get('b:1'), 3, 'other-prefix key untouched');
+
+    // Sync clear
+    cache.clear();
+    assert.equal(cache.get('b:1'), undefined);
+  });
 });

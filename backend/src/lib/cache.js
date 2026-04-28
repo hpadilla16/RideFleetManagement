@@ -1,31 +1,158 @@
 /**
- * In-memory TTL cache.
+ * In-memory TTL cache with optional Redis pub/sub for cross-worker invalidation.
  *
- * IMPORTANT — multi-worker deployments:
- * This process is run clustered (see cluster.js / CLUSTER_WORKERS env var).
- * Each worker has its OWN cache Map — they do not share state.
- * Writes invalidated in one worker remain cached in siblings until TTL expires.
- * For writes that must be globally consistent (permissions, module access,
- * auth sessions), prefer short TTLs and tolerate up to TTL seconds of staleness,
- * or swap this module out for a Redis-backed implementation.
+ * Reads + writes stay LOCAL and SYNCHRONOUS — zero new latency on the hot
+ * path. Redis is used only as a fan-out mechanism for `del` / `invalidate` /
+ * `clear` events between workers (and across instances). Each worker
+ * subscribes to a single channel; on a remote event, the worker applies the
+ * same operation to its own in-memory store.
  *
- * Callers should pass explicit short TTLs (≤60s) for anything that must be
- * globally consistent; longer TTLs are fine for tenant config / session data
- * that tolerates brief staleness.
+ * Why pub/sub-only (no L2 read-through):
+ *   1. Phase 1 + 2 caches are read-hot, write-rare. Sub-millisecond Map.get
+ *      is the right thing on the request path.
+ *   2. The actual cross-worker problem is stale data after a write — a
+ *      worker that didn't run the write still has the old value in its
+ *      local Map until TTL expires. Pub/sub fixes exactly that.
+ *   3. No breaking change to the cache API (still sync); no change to call
+ *      sites; rollout is "set REDIS_URL".
+ *
+ * Failure mode:
+ *   If REDIS_URL is unset, behavior is identical to the previous in-memory-only
+ *   implementation. If Redis is configured but unreachable, the local cache
+ *   continues to work; remote invalidations simply don't propagate (logged
+ *   once on connect failure). The request path never blocks on Redis.
+ *
+ * Caveats:
+ *   - `set` is NOT broadcast. If worker A sets `key` to V1 while worker B
+ *     has V0 cached, B keeps serving V0 until its TTL expires (or someone
+ *     publishes a del/invalidate for that key). This is intentional — both
+ *     V0 and V1 are valid prisma reads at different points; the only
+ *     correctness-critical event is "this data is stale" (i.e. invalidation).
+ *   - There's a brief race window: between the local `del` and the remote
+ *     subscriber processing the event, sibling workers may serve stale
+ *     reads. Acceptable trade-off for a TTL-bounded cache.
  */
+
+import { randomUUID } from 'node:crypto';
 
 const store = new Map();
 
 const DEFAULT_TTL_MS = 5 * 60 * 1000; // 5 minutes
 const MAX_ENTRIES = 500;
 
-if (parseInt(process.env.CLUSTER_WORKERS || '1', 10) > 1 && !process.env.REDIS_URL) {
+const PROCESS_ID = randomUUID();
+const REDIS_URL = process.env.REDIS_URL || '';
+const INVALIDATION_CHANNEL = process.env.REDIS_INVALIDATION_CHANNEL || 'fleet:cache-invalidate';
+
+let redisPub = null;
+let redisSub = null;
+let redisReady = false;
+let redisInitPromise = null;
+// When the initial bootstrap fails (DNS / auth / network blip), record when
+// so we can throttle retries without spamming connect attempts on every
+// publish call. After REDIS_INIT_RETRY_MS, the next publish triggers a
+// fresh bootstrap attempt.
+let redisInitFailedAt = 0;
+const REDIS_INIT_RETRY_MS = 30 * 1000;
+
+// Init Redis lazily on first cache use that wants to publish. Tests and
+// dev workflows that don't set REDIS_URL never touch the import; CI without
+// Redis stays green.
+async function ensureRedis() {
+  if (!REDIS_URL) return false;
+  if (redisInitPromise) return redisInitPromise;
+  // Throttle retries after a recent failure — avoids hot-looping reconnect
+  // attempts on every publish() if Redis is misconfigured or unreachable.
+  if (redisInitFailedAt && Date.now() - redisInitFailedAt < REDIS_INIT_RETRY_MS) {
+    return false;
+  }
+  redisInitPromise = (async () => {
+    try {
+      const mod = await import('redis');
+      const { createClient } = mod;
+      redisPub = createClient({ url: REDIS_URL });
+      redisSub = redisPub.duplicate();
+      redisPub.on('error', (err) => {
+        // Avoid log spam — Redis client retries internally.
+        if (redisReady) console.warn('[cache] redis pub error', err?.message);
+      });
+      redisSub.on('error', (err) => {
+        if (redisReady) console.warn('[cache] redis sub error', err?.message);
+      });
+      await redisPub.connect();
+      await redisSub.connect();
+      await redisSub.subscribe(INVALIDATION_CHANNEL, handleRemoteEvent);
+      redisReady = true;
+      redisInitFailedAt = 0;
+      const safeUrl = REDIS_URL.replace(/:[^:@/]*@/, ':***@');
+      console.log(`[cache] redis pub/sub ready (channel=${INVALIDATION_CHANNEL}, url=${safeUrl})`);
+      return true;
+    } catch (err) {
+      console.warn('[cache] redis init failed; running with local-only invalidation (will retry):', err?.message);
+      redisReady = false;
+      // CRITICAL: reset state so the next call retries the full bootstrap.
+      // Without this, the settled-failed promise is reused forever and
+      // pub/sub stays dead even after Redis becomes healthy.
+      redisInitPromise = null;
+      redisInitFailedAt = Date.now();
+      // Best-effort: tear down any half-initialized clients so the retry
+      // starts from a clean slate.
+      try { if (redisPub) await redisPub.quit().catch(() => {}); } catch {}
+      try { if (redisSub) await redisSub.quit().catch(() => {}); } catch {}
+      redisPub = null;
+      redisSub = null;
+      return false;
+    }
+  })();
+  return redisInitPromise;
+}
+
+function handleRemoteEvent(message) {
+  let evt;
+  try {
+    evt = JSON.parse(message);
+  } catch {
+    return;
+  }
+  // Skip our own publishes — we already applied them locally.
+  if (!evt || evt.from === PROCESS_ID) return;
+  if (evt.type === 'del' && typeof evt.key === 'string') {
+    store.delete(evt.key);
+  } else if (evt.type === 'invalidate' && typeof evt.prefix === 'string') {
+    for (const key of store.keys()) {
+      if (key.startsWith(evt.prefix)) store.delete(key);
+    }
+  } else if (evt.type === 'clear') {
+    store.clear();
+  }
+}
+
+function publish(event) {
+  if (!REDIS_URL) return;
+  // Kick off Redis init on first publish; don't block the request path.
+  ensureRedis().then(() => {
+    if (!redisReady || !redisPub) return;
+    redisPub
+      .publish(INVALIDATION_CHANNEL, JSON.stringify({ ...event, from: PROCESS_ID }))
+      .catch((err) => {
+        // Best-effort. Local invalidation already happened.
+        if (redisReady) console.warn('[cache] redis publish failed', err?.message);
+      });
+  });
+}
+
+if (parseInt(process.env.CLUSTER_WORKERS || '1', 10) > 1 && !REDIS_URL) {
   console.warn(
     '[cache] Running clustered with in-memory cache only — cache state is NOT shared across workers. ' +
     'Writes in one worker take up to TTL seconds to be visible in others. ' +
-    'Set REDIS_URL and swap cache.js for a Redis driver when this becomes a problem.'
+    'Set REDIS_URL to enable Redis pub/sub for cross-worker invalidation.'
   );
 }
+
+// Eagerly start the Redis connection at module import when REDIS_URL is set
+// so the subscriber is ready by the time the first invalidation fires.
+// Failures here are logged but never thrown.
+if (REDIS_URL) ensureRedis();
 
 function cleanup() {
   const now = Date.now();
@@ -55,7 +182,7 @@ export const cache = {
   },
 
   /**
-   * Set a value with TTL (default 5 min).
+   * Set a value with TTL (default 5 min). NOT broadcast — see file header.
    */
   set(key, value, ttlMs = DEFAULT_TTL_MS) {
     cleanup();
@@ -67,26 +194,30 @@ export const cache = {
   },
 
   /**
-   * Delete a specific key.
+   * Delete a specific key. Broadcast to other workers via Redis pub/sub
+   * when REDIS_URL is configured.
    */
   del(key) {
     store.delete(key);
+    publish({ type: 'del', key });
   },
 
   /**
-   * Delete all keys matching a prefix.
+   * Delete all keys matching a prefix. Broadcast to other workers.
    */
   invalidate(prefix) {
     for (const key of store.keys()) {
       if (key.startsWith(prefix)) store.delete(key);
     }
+    publish({ type: 'invalidate', prefix });
   },
 
   /**
-   * Clear all cache.
+   * Clear all cache. Broadcast to other workers.
    */
   clear() {
     store.clear();
+    publish({ type: 'clear' });
   },
 
   /**
@@ -101,10 +232,30 @@ export const cache = {
   },
 
   /**
-   * Stats for monitoring.
+   * Stats for monitoring. Includes Redis pub/sub readiness when configured.
    */
   stats() {
     cleanup();
-    return { size: store.size, maxEntries: MAX_ENTRIES };
+    return {
+      size: store.size,
+      maxEntries: MAX_ENTRIES,
+      redis: REDIS_URL
+        ? { configured: true, ready: redisReady, channel: INVALIDATION_CHANNEL }
+        : { configured: false, ready: false }
+    };
   },
+
+  /**
+   * Test-only: shut down the Redis clients cleanly. Lets node --test exit
+   * without dangling sockets when REDIS_URL is set during a test run.
+   */
+  async _shutdownForTests() {
+    try { if (redisPub) await redisPub.quit(); } catch {}
+    try { if (redisSub) await redisSub.quit(); } catch {}
+    redisReady = false;
+    redisInitPromise = null;
+    redisInitFailedAt = 0;
+    redisPub = null;
+    redisSub = null;
+  }
 };
