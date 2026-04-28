@@ -7,15 +7,13 @@
     "dev": "node src/main.js",
     "start": "node src/main.js",
     "start:cluster": "node src/cluster.js",
-
-   "test": "npm run test:vehicles && npm run test:fees && npm run test:booking-engine && npm run test:stop-sales && npm run test:review-email && npm run test:public-booking && npm run test:planner && npm run test:rates && npm run test:portal && npm run test:carsharing && npm run test:issues && npm run test:tolls && npm run test:sms && npm run test:payments && npm run test:auth && npm run test:cache && npm run test:commissions && npm run test:puppeteer && npm run test:rental-agreements",
-
+    "test": "npm run test:vehicles && npm run test:fees && npm run test:booking-engine && npm run test:stop-sales && npm run test:review-email && npm run test:public-booking && npm run test:planner && npm run test:rates && npm run test:portal && npm run test:carsharing && npm run test:issues && npm run test:tolls && npm run test:sms && npm run test:payments && npm run test:auth && npm run test:cache && npm run test:commissions && npm run test:puppeteer && npm run test:rental-agreements",
     "test:vehicles": "node --test src/modules/vehicles/vehicle-intelligence.test.mjs src/modules/vehicles/telematics-zubie.test.mjs",
     "test:fees": "node --test src/modules/fees/fees.test.mjs",
     "test:booking-engine": "node --test src/modules/booking-engine/booking-engine.test.mjs",
     "test:stop-sales": "node --test src/modules/stop-sales/stop-sales.test.mjs",
     "test:review-email": "node --test src/modules/reservations/review-email.test.mjs",
-    "test:public-booking": "node --test src/modules/public-booking/public-booking.test.mjs",
+    "test:public-booking": "node --test src/modules/public-booking/payment-session.test.mjs src/modules/public-booking/payarc-hosted-fields.test.mjs",
     "test:planner": "node --test src/modules/planner/planner.service.test.mjs",
     "test:rates": "node --test src/modules/rates/revenue-pricing.test.mjs",
     "test:portal": "node --test src/modules/customer-portal/customer-portal-self-service.test.mjs",
@@ -29,7 +27,6 @@
     "test:puppeteer": "node --test src/lib/puppeteer-browser.test.mjs",
     "test:rental-agreements": "node --test src/modules/rental-agreements/rental-agreements-email-async.test.mjs src/modules/rental-agreements/rental-agreements-finalize-tx.test.mjs",
     "test:commissions": "node --test src/modules/commissions/car-sharing-commission.test.mjs",
-    "test:public-booking": "node --test src/modules/public-booking/payment-session.test.mjs src/modules/public-booking/payarc-hosted-fields.test.mjs",
     "verify": "npm run test",
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate dev --name init",
@@ -51,6 +48,7 @@
     "nodemailer": "^6.10.1",
     "pdfkit": "^0.17.2",
     "puppeteer": "^24.39.1",
+    "redis": "^4.7.1",
     "stripe": "^16.10.0",
     "winston": "^3.19.0"
   },
