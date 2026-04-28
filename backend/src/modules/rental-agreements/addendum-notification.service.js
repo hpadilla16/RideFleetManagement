@@ -15,35 +15,46 @@ function baseUrl() {
 }
 
 /**
- * Fire a customer-facing email notifying that a new rental agreement addendum
- * has been created and is awaiting their signature.
+ * Fire customer- and admin-facing emails on rental agreement addendum
+ * creation.
  *
- * The function NEVER throws: a missing customer email, SMTP failure, or any
- * other error must not roll back the addendum write that triggered it. All
- * failures are logged and swallowed.
+ * NEVER throws. The two notifications are independent — a customer-side
+ * failure (missing email, SMTP error) does not block the admin notification
+ * and vice versa. All failures are logged and swallowed.
  *
  * Called from the addendum-create route immediately after the row is written.
  *
  * @param {string} rentalAgreementId
  * @param {string} addendumId
  * @param {string|null} tenantId  - tenant scope; when present, lookups are filtered.
- * @returns {Promise<{ sent?: true, skipped?: string, error?: string }>}
+ * @returns {Promise<{
+ *   customer: { sent?: true, skipped?: string, error?: string },
+ *   admin:    { sent?: true, recipientCount?: number, skipped?: string, error?: string }
+ * }>}
  */
 export async function scheduleAddendumNotification(rentalAgreementId, addendumId, tenantId = null) {
-  try {
-    if (!rentalAgreementId || !addendumId) {
-      return { skipped: 'missing-ids' };
-    }
+  if (!rentalAgreementId || !addendumId) {
+    return {
+      customer: { skipped: 'missing-ids' },
+      admin: { skipped: 'missing-ids' }
+    };
+  }
 
-    const [agreement, addendum] = await Promise.all([
+  // One DB round-trip up front; the customer + admin paths share the same data.
+  let agreement = null;
+  let addendum = null;
+  try {
+    [agreement, addendum] = await Promise.all([
       prisma.rentalAgreement.findFirst({
         where: { id: rentalAgreementId, ...(tenantId ? { tenantId } : {}) },
         select: {
           id: true,
           agreementNumber: true,
+          reservationId: true,
           customerEmail: true,
           customerFirstName: true,
-          customerLastName: true
+          customerLastName: true,
+          tenant: { select: { id: true, name: true } }
         }
       }),
       prisma.rentalAgreementAddendum.findFirst({
@@ -53,35 +64,76 @@ export async function scheduleAddendumNotification(rentalAgreementId, addendumId
           pickupAt: true,
           returnAt: true,
           reason: true,
+          reasonCategory: true,
           status: true,
-          signatureToken: true
+          signatureToken: true,
+          initiatedBy: true,
+          initiatedByRole: true
         }
       })
     ]);
+  } catch (err) {
+    logger?.warn?.('addendum-notification lookup failed', {
+      rentalAgreementId,
+      addendumId,
+      tenantId,
+      err: err?.message || String(err)
+    });
+    return {
+      customer: { error: err?.message || String(err) },
+      admin: { error: err?.message || String(err) }
+    };
+  }
 
-    if (!agreement || !addendum) return { skipped: 'no-record' };
+  if (!agreement || !addendum) {
+    return {
+      customer: { skipped: 'no-record' },
+      admin: { skipped: 'no-record' }
+    };
+  }
+
+  // Fire both notifications in parallel. Each helper has its own try/catch
+  // and never throws — Promise.allSettled is belt-and-suspenders so an
+  // unexpected throw in one path doesn't take down the other.
+  const [customerResult, adminResult] = await Promise.allSettled([
+    _notifyAddendumCustomer({ agreement, addendum }),
+    _notifyAddendumAdmins({ agreement, addendum, tenantId })
+  ]);
+
+  return {
+    customer: customerResult.status === 'fulfilled'
+      ? customerResult.value
+      : { error: String(customerResult.reason?.message || customerResult.reason) },
+    admin: adminResult.status === 'fulfilled'
+      ? adminResult.value
+      : { error: String(adminResult.reason?.message || adminResult.reason) }
+  };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Internal: customer-facing email — token-based magic link to the public
+// signing page at /customer/sign-addendum?token=... . The token is the auth;
+// it's generated in createAddendum and consumed (via status transition) on
+// successful signature submission. If the addendum has no signatureToken
+// (legacy data, cleared, etc.), we skip the email rather than send an
+// unsignable link — admin can still sign on behalf out-of-band.
+// ─────────────────────────────────────────────────────────────────────────────
+async function _notifyAddendumCustomer({ agreement, addendum }) {
+  try {
     if (!agreement.customerEmail) return { skipped: 'no-customer-email' };
+    if (!addendum.signatureToken) {
+      logger?.info?.('addendum-notification customer skipped — no signature token on addendum', {
+        rentalAgreementId: agreement.id,
+        addendumId: addendum.id,
+        tenantId: agreement.tenant?.id ?? null
+      });
+      return { skipped: 'no-signature-token' };
+    }
 
     const fmt = (d) => d ? new Date(d).toLocaleString('en-US') : '-';
     const customerName =
       `${agreement.customerFirstName || ''} ${agreement.customerLastName || ''}`.trim() || 'Customer';
 
-    // Customer-portal magic link. Token-based — the URL token is the auth
-    // (no JWT). The new /customer/sign-addendum page calls
-    // /api/public/addendum-signature/:token to load the addendum and submit
-    // the signature. Token is consumed server-side after a successful sign.
-    //
-    // If the addendum was created without a signature token (legacy data,
-    // or token explicitly cleared), skip the email rather than send an
-    // unsignable link — the admin still has out-of-band sign-on-behalf.
-    if (!addendum.signatureToken) {
-      logger?.info?.('addendum-notification skipped — no signature token on addendum', {
-        rentalAgreementId,
-        addendumId,
-        tenantId
-      });
-      return { skipped: 'no-signature-token' };
-    }
     const portalLink = `${baseUrl()}/customer/sign-addendum?token=${encodeURIComponent(addendum.signatureToken)}`;
 
     const subject = `Action required: please sign addendum to agreement ${agreement.agreementNumber || agreement.id}`;
@@ -102,16 +154,106 @@ export async function scheduleAddendumNotification(rentalAgreementId, addendumId
 
     await sendEmail({ to: agreement.customerEmail, subject, text });
 
-    logger?.info?.('addendum-notification sent', {
-      rentalAgreementId,
-      addendumId,
-      tenantId
+    logger?.info?.('addendum-notification customer sent', {
+      rentalAgreementId: agreement.id,
+      addendumId: addendum.id,
+      tenantId: agreement.tenant?.id ?? null
     });
     return { sent: true };
   } catch (err) {
-    logger?.warn?.('addendum-notification send failed', {
-      rentalAgreementId,
-      addendumId,
+    logger?.warn?.('addendum-notification customer send failed', {
+      rentalAgreementId: agreement.id,
+      addendumId: addendum.id,
+      err: err?.message || String(err)
+    });
+    return { error: err?.message || String(err) };
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Internal: admin-facing email — tenant-scoped ADMIN/OPS users + platform
+// SUPER_ADMIN, deduped by email. Mirrors the recipient-resolution pattern in
+// public-booking.service.js → notifyTenantAdminsNewSubmission so the routing
+// rules stay consistent across the codebase.
+// ─────────────────────────────────────────────────────────────────────────────
+async function _notifyAddendumAdmins({ agreement, addendum, tenantId }) {
+  try {
+    // Always notify platform SUPER_ADMINs — they're not tenant-scoped, so
+    // their notification doesn't depend on a tenantId being present. The
+    // tenant-scoped ADMIN/OPS query is conditional: skipped when tenantId
+    // is missing (super-admin-initiated calls or scope-less internal calls
+    // can omit it).
+    //
+    // Previous behavior — returning early on missing tenantId — silently
+    // suppressed all admin alerts including super-admin ones, contradicting
+    // the function's documented "tenant ADMIN/OPS + platform SUPER_ADMIN"
+    // recipient set. Codex bot caught it.
+    const adminQueries = [
+      prisma.user.findMany({
+        where: { role: 'SUPER_ADMIN', isActive: true },
+        select: { email: true }
+      })
+    ];
+    if (tenantId) {
+      adminQueries.push(
+        prisma.user.findMany({
+          where: { tenantId, role: { in: ['ADMIN', 'OPS'] }, isActive: true },
+          select: { email: true }
+        })
+      );
+    }
+    const adminQueryResults = await Promise.all(adminQueries);
+
+    const adminEmails = [
+      ...new Set(
+        adminQueryResults
+          .flat()
+          .map((a) => a.email)
+          .filter(Boolean)
+      )
+    ];
+    if (!adminEmails.length) return { skipped: 'no-admin-recipients' };
+
+    const fmt = (d) => d ? new Date(d).toLocaleString('en-US') : '-';
+    const customerName =
+      `${agreement.customerFirstName || ''} ${agreement.customerLastName || ''}`.trim() || 'Customer';
+    const tenantName = agreement.tenant?.name || 'Ride Fleet';
+
+    const subject = `[${tenantName}] New addendum on agreement ${agreement.agreementNumber || agreement.id}`;
+    const text = [
+      `A new rental agreement addendum has been created and is awaiting customer signature.`,
+      ``,
+      `Tenant: ${tenantName}`,
+      `Agreement: ${agreement.agreementNumber || agreement.id}`,
+      `Customer: ${customerName} (${agreement.customerEmail || 'no email on file'})`,
+      `Reservation ID: ${agreement.reservationId || '-'}`,
+      ``,
+      `Reason: ${addendum.reason}`,
+      `Category: ${addendum.reasonCategory || '-'}`,
+      `Initiated by: ${addendum.initiatedBy || '-'} (${addendum.initiatedByRole || '-'})`,
+      ``,
+      `New pickup: ${fmt(addendum.pickupAt)}`,
+      `New return: ${fmt(addendum.returnAt)}`,
+      ``,
+      `Status: ${addendum.status}`,
+      ``,
+      `Open the reservation in the admin dashboard to view, sign on behalf of`,
+      `the customer, or void the addendum.`
+    ].join('\n');
+
+    await sendEmail({ to: adminEmails.join(','), subject, text });
+
+    logger?.info?.('addendum-notification admins sent', {
+      rentalAgreementId: agreement.id,
+      addendumId: addendum.id,
+      tenantId,
+      recipientCount: adminEmails.length
+    });
+    return { sent: true, recipientCount: adminEmails.length };
+  } catch (err) {
+    logger?.warn?.('addendum-notification admins send failed', {
+      rentalAgreementId: agreement.id,
+      addendumId: addendum.id,
       tenantId,
       err: err?.message || String(err)
     });
