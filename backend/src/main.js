@@ -137,14 +137,22 @@ app.use((err, req, res, _next) => {
 
 const port = process.env.PORT || 4000;
 const isFirstWorker = !cluster.isWorker || cluster.worker.id === 1;
-app.listen(port, () => {
-  console.log(`Fleet backend listening on http://localhost:${port} (pid=${process.pid})`);
-  // Only start schedulers in the first worker to avoid duplicate runs
-  if (isFirstWorker) {
-    startTollAutoSyncScheduler();
-    startHandoffReminderScheduler();
-  }
-});
+
+// SKIP_LISTEN=1 lets the CI's backend-check job import this module to walk
+// the full transitive import graph (catching ERR_MODULE_NOT_FOUND on missing
+// files — the class of bug behind BUG-003) without actually opening a port
+// or starting schedulers. Production / dev / docker-compose all leave it
+// unset, so the listener starts as before.
+if (process.env.SKIP_LISTEN !== '1') {
+  app.listen(port, () => {
+    console.log(`Fleet backend listening on http://localhost:${port} (pid=${process.pid})`);
+    // Only start schedulers in the first worker to avoid duplicate runs
+    if (isFirstWorker) {
+      startTollAutoSyncScheduler();
+      startHandoffReminderScheduler();
+    }
+  });
+}
 
 process.on('SIGINT', async () => {
   stopTollAutoSyncScheduler();
