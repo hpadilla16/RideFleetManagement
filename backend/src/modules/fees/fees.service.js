@@ -2,12 +2,28 @@ import { prisma } from '../../lib/prisma.js';
 import { cache } from '../../lib/cache.js';
 
 // Reference data; rarely changes. 5-min TTL with active invalidation on writes.
+//
+// Cache invalidation correctness — see comments in invalidateListCacheForTenant
+// below. We always invalidate by the WRITTEN ROW's effective tenantId, never by
+// the request scope alone. SUPER_ADMIN can write into a specific tenant via
+// data.tenantId without `?tenantId=` in the request; if we keyed invalidation
+// off `scope` only, the per-tenant cache would stay stale for up to TTL.
 const LIST_TTL_MS = 5 * 60 * 1000;
 function listCacheKey(scope = {}) {
   return `fees:list:${scope?.tenantId || 'global'}`;
 }
-function invalidateListCache(scope = {}) {
-  cache.del(listCacheKey(scope));
+function invalidateListCacheForTenant(effectiveTenantId) {
+  // Clear the bucket the row actually lives in. If tenantId is null (truly
+  // global fee), this clears `fees:list:global` which is the unfiltered
+  // SUPER_ADMIN list. If tenantId is set, this clears the per-tenant bucket.
+  cache.del(listCacheKey({ tenantId: effectiveTenantId || null }));
+  // The unfiltered SUPER_ADMIN list (`fees:list:global`) returns rows from
+  // ALL tenants because findMany was called with `where: undefined`. Any
+  // tenant-scoped write therefore also makes it stale; clear it too.
+  if (effectiveTenantId) cache.del('fees:list:global');
+  // Locations include nested fee data in their list response — invalidate
+  // every tenant's locations:list bucket. Cheap; locations writes are rare.
+  cache.invalidate('locations:list:');
 }
 
 export const feesService = {
@@ -38,27 +54,29 @@ export const feesService = {
         displayOnline: data.displayOnline ?? false
       }
     });
-    invalidateListCache(scope);
-    // Locations include fees in their nested response — invalidate them too.
-    cache.invalidate('locations:list:');
+    invalidateListCacheForTenant(out.tenantId);
     return out;
   },
   async update(id, patch, scope = {}) {
-    const current = await prisma.fee.findFirst({ where: { id, ...(scope?.tenantId ? { tenantId: scope.tenantId } : {}) }, select: { id: true } });
+    const current = await prisma.fee.findFirst({
+      where: { id, ...(scope?.tenantId ? { tenantId: scope.tenantId } : {}) },
+      select: { id: true, tenantId: true }
+    });
     if (!current) throw new Error('Fee not found');
     const data = { ...(patch || {}) };
     delete data.tenantId;
     const out = await prisma.fee.update({ where: { id }, data });
-    invalidateListCache(scope);
-    cache.invalidate('locations:list:');
+    invalidateListCacheForTenant(current.tenantId);
     return out;
   },
   async remove(id, scope = {}) {
-    const current = await prisma.fee.findFirst({ where: { id, ...(scope?.tenantId ? { tenantId: scope.tenantId } : {}) }, select: { id: true } });
+    const current = await prisma.fee.findFirst({
+      where: { id, ...(scope?.tenantId ? { tenantId: scope.tenantId } : {}) },
+      select: { id: true, tenantId: true }
+    });
     if (!current) throw new Error('Fee not found');
     const out = await prisma.fee.delete({ where: { id } });
-    invalidateListCache(scope);
-    cache.invalidate('locations:list:');
+    invalidateListCacheForTenant(current.tenantId);
     return out;
   }
 };

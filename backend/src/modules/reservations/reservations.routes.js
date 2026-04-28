@@ -290,6 +290,14 @@ reservationsRouter.get('/:id/pricing', async (req, res, next) => {
 // stays correct. Underlying lookups (locationsService.list, feesService.list,
 // etc.) are also cached separately at 5min TTL — this layer just avoids the
 // 5-fan-out query orchestration cost on cache hit.
+//
+// IMPORTANT — only cache fully-fulfilled responses. The original implementation
+// used cache.getOrSet which would store degraded payloads (with [] for any
+// rejected dependency) for the full TTL. A single transient blip in
+// locations/services/fees/insurance/franchise would then poison the cache for
+// 60s, every staff member opening the reservation seeing missing data. The
+// pattern below explicitly checks rejected vs fulfilled and skips cache.set
+// on partial failure so the next request can recover immediately.
 const PRICING_OPTIONS_TTL_MS = 60 * 1000;
 function pricingOptionsCacheKey(tenantId, reservationId, pickupLocationId) {
   return `reservations:pricing-options:${tenantId || 'global'}:${reservationId}:${pickupLocationId || 'no-loc'}`;
@@ -301,32 +309,44 @@ reservationsRouter.get('/:id/pricing-options', async (req, res, next) => {
     if (!reservation) return res.status(404).json({ error: 'Reservation not found' });
     const tenantScope = reservation?.tenantId ? { tenantId: reservation.tenantId } : scopeFor(req);
     const cacheKey = pricingOptionsCacheKey(tenantScope.tenantId, reservation.id, reservation.pickupLocationId);
-    const out = await cache.getOrSet(cacheKey, async () => {
-      const [locationsResult, servicesResult, feesResult, insurancePlansResult, franchisesResult] = await Promise.allSettled([
-        locationsService.list(tenantScope),
-        additionalServicesService.list({
-          locationId: reservation.pickupLocationId || undefined,
-          activeOnly: true,
-          tenantId: tenantScope.tenantId
-        }),
-        feesService.list(tenantScope),
-        settingsService.getInsurancePlans(tenantScope),
-        franchiseService.list(tenantScope)
-      ]);
-      const locations = locationsResult.status === 'fulfilled' ? locationsResult.value : [];
-      const services = servicesResult.status === 'fulfilled' ? servicesResult.value : [];
-      const fees = feesResult.status === 'fulfilled' ? feesResult.value : [];
-      const insurancePlans = insurancePlansResult.status === 'fulfilled' ? insurancePlansResult.value : [];
-      const franchisesOut = franchisesResult.status === 'fulfilled' ? franchisesResult.value : [];
-      return {
-        locations: Array.isArray(locations) ? locations : [],
-        services: Array.isArray(services) ? services : [],
-        fees: Array.isArray(fees) ? fees : [],
-        insurancePlans: Array.isArray(insurancePlans) ? insurancePlans : [],
-        franchises: Array.isArray(franchisesOut) ? franchisesOut : []
-      };
-    }, PRICING_OPTIONS_TTL_MS);
-    res.json(out);
+
+    const cached = cache.get(cacheKey);
+    if (cached !== undefined) return res.json(cached);
+
+    const settled = await Promise.allSettled([
+      locationsService.list(tenantScope),
+      additionalServicesService.list({
+        locationId: reservation.pickupLocationId || undefined,
+        activeOnly: true,
+        tenantId: tenantScope.tenantId
+      }),
+      feesService.list(tenantScope),
+      settingsService.getInsurancePlans(tenantScope),
+      franchiseService.list(tenantScope)
+    ]);
+    const [locationsResult, servicesResult, feesResult, insurancePlansResult, franchisesResult] = settled;
+
+    const allFulfilled = settled.every((r) => r.status === 'fulfilled');
+
+    const locations = locationsResult.status === 'fulfilled' ? locationsResult.value : [];
+    const services = servicesResult.status === 'fulfilled' ? servicesResult.value : [];
+    const fees = feesResult.status === 'fulfilled' ? feesResult.value : [];
+    const insurancePlans = insurancePlansResult.status === 'fulfilled' ? insurancePlansResult.value : [];
+    const franchisesOut = franchisesResult.status === 'fulfilled' ? franchisesResult.value : [];
+    const payload = {
+      locations: Array.isArray(locations) ? locations : [],
+      services: Array.isArray(services) ? services : [],
+      fees: Array.isArray(fees) ? fees : [],
+      insurancePlans: Array.isArray(insurancePlans) ? insurancePlans : [],
+      franchises: Array.isArray(franchisesOut) ? franchisesOut : []
+    };
+
+    // Only cache when nothing failed. Degraded payloads are returned to the
+    // caller (preserving the previous behavior on a transient blip) but are
+    // NOT persisted, so the next request can recover.
+    if (allFulfilled) cache.set(cacheKey, payload, PRICING_OPTIONS_TTL_MS);
+
+    res.json(payload);
   } catch (e) {
     next(e);
   }
