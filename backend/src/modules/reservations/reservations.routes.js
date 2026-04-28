@@ -105,7 +105,14 @@ reservationsRouter.get('/page', async (req, res, next) => {
     res.json(await reservationsService.listPage({
       query: req.query?.q,
       limit: req.query?.limit,
-      offset: req.query?.offset
+      offset: req.query?.offset,
+      // Date filter — accepts ?dateOn=YYYY-MM-DD for a single day
+      // or ?dateFrom=YYYY-MM-DD&dateTo=YYYY-MM-DD for a range.
+      // Overlap semantics: matches reservations whose rental window
+      // includes any part of the requested window.
+      dateOn: req.query?.dateOn,
+      dateFrom: req.query?.dateFrom,
+      dateTo: req.query?.dateTo
     }, scopeFor(req)));
   } catch (e) {
     next(e);

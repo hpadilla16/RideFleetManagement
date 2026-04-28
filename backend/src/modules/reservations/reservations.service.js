@@ -236,6 +236,81 @@ function clampPositiveInt(value, fallback, min, max) {
   return Math.min(max, Math.max(min, parsed));
 }
 
+// Parse the listPage date filter inputs into a {start, end} window.
+// Accepts:
+//   - dateOn = "YYYY-MM-DD" (single day) — expands to [00:00, 23:59:59.999]
+//   - dateFrom + dateTo (explicit range) — both dates inclusive
+//   - dateFrom alone — open-ended range from that day forward
+//   - dateTo alone — open-ended range up to that day
+// Returns null when no valid date input is provided. Invalid date strings
+// are silently dropped (the filter is just skipped) so a malformed input
+// never 500s the list endpoint.
+function parseListDateRange(options = {}) {
+  const dateOnRaw = String(options?.dateOn ?? '').trim();
+  const dateFromRaw = String(options?.dateFrom ?? '').trim();
+  const dateToRaw = String(options?.dateTo ?? '').trim();
+
+  // Explicit range wins over single-date.
+  if (dateFromRaw || dateToRaw) {
+    const start = parseStartOfDay(dateFromRaw);
+    const end = parseEndOfDay(dateToRaw);
+    if (!start && !end) return null;
+    return {
+      // Open-ended sentinels — explicit UTC so behavior is identical
+      // across server timezones (matches the parser's UTC contract).
+      start: start || new Date(Date.UTC(1970, 0, 1, 0, 0, 0, 0)),
+      end: end || new Date(Date.UTC(9999, 11, 31, 23, 59, 59, 999))
+    };
+  }
+
+  if (!dateOnRaw) return null;
+  const start = parseStartOfDay(dateOnRaw);
+  const end = parseEndOfDay(dateOnRaw);
+  if (!start || !end) return null;
+  return { start, end };
+}
+
+// Parse a YYYY-MM-DD calendar date into a UTC Date at the requested time.
+// Codex bot finding (PR #21): JS Date silently rolls invalid days
+// (e.g. "2026-02-31" -> March 3) instead of failing, which would apply a
+// shifted filter window. We round-trip the parsed components against the
+// resulting UTC date and reject any mismatch.
+// Sentry bot finding (PR #21): the previous implementation built dates
+// from a string with no timezone suffix, which Date parses in server local
+// time. We now construct via Date.UTC(...) so the boundary is unambiguous
+// regardless of where the backend runs.
+function parseCalendarDate(raw, { endOfDay } = { endOfDay: false }) {
+  if (!raw) return null;
+  // Anchored full-string match — defends against trailing junk like "2026-04-28T17".
+  const match = String(raw).match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!match) return null;
+  const y = Number(match[1]);
+  const m = Number(match[2]);
+  const d = Number(match[3]);
+  if (!Number.isInteger(y) || !Number.isInteger(m) || !Number.isInteger(d)) return null;
+  if (m < 1 || m > 12 || d < 1 || d > 31) return null;
+  const utcMs = endOfDay
+    ? Date.UTC(y, m - 1, d, 23, 59, 59, 999)
+    : Date.UTC(y, m - 1, d, 0, 0, 0, 0);
+  const out = new Date(utcMs);
+  if (Number.isNaN(out.getTime())) return null;
+  // Round-trip check: rejects 2026-02-31 / 2026-04-31 / 2025-02-29 etc.
+  if (
+    out.getUTCFullYear() !== y
+    || out.getUTCMonth() !== m - 1
+    || out.getUTCDate() !== d
+  ) return null;
+  return out;
+}
+
+function parseStartOfDay(raw) {
+  return parseCalendarDate(raw, { endOfDay: false });
+}
+
+function parseEndOfDay(raw) {
+  return parseCalendarDate(raw, { endOfDay: true });
+}
+
 function vehicleDisplayLabel(vehicle = {}) {
   return [
     [vehicle?.year, vehicle?.make, vehicle?.model].filter(Boolean).join(' ').trim(),
@@ -955,8 +1030,26 @@ export const reservationsService = {
     const query = norm(options.query);
     const take = clampPositiveInt(options.limit, 100, 1, 250);
     const skip = clampPositiveInt(options.offset, 0, 0, 100000);
+
+    // Date filter — overlap semantics: a reservation matches if its rental
+    // window includes any part of the requested window. That is:
+    //   pickupAt <= rangeEnd AND returnAt >= rangeStart
+    // Inputs:
+    //   - dateOn = "YYYY-MM-DD" expands to [00:00, 23:59:59.999] of that day
+    //   - dateFrom + dateTo can override for an explicit range
+    //   - When both are set, the explicit range wins (dateOn ignored)
+    //   - Invalid date strings are silently dropped (no filter applied)
+    const dateRange = parseListDateRange(options);
+    const dateWhere = dateRange
+      ? {
+          pickupAt: { lte: dateRange.end },
+          returnAt: { gte: dateRange.start }
+        }
+      : {};
+
     const where = {
       ...(scope?.tenantId ? { tenantId: scope.tenantId } : {}),
+      ...dateWhere,
       ...(query
         ? {
             OR: [
