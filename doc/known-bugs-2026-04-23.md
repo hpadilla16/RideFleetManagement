@@ -81,4 +81,29 @@ The fact that the charges line shows the correct day count (30, matching the *ne
 
 ## Closed
 
-_(none yet)_
+### BUG-003 — Commit `7cd3efc` orphaned imports / 7 PayArc + AuthorizeNet files missing from `main`
+
+**Closed:** 2026-04-25 in merge commit `a88f0ea` (PR #7), deployed as `v0.9.0-beta.6` on 2026-04-25 00:30 EDT.
+
+**Severity at time of report:** High (production backend would fail to boot if anyone ran a clean install — `import` from `public-booking.routes.js` / `public-booking.service.js` resolved to missing modules). Live droplet was unaffected because it had been built before the orphaning and ran the cached image.
+
+**Original symptom:**
+Commit `7cd3efc feat(public-booking): Sprint 4/5/6 backend + guestToken` added `public-booking.routes.js` and `public-booking.service.js` with imports to 7 files that existed in git history (in commits `00109b8` PayArc and `cefd819` AuthorizeNet/payment-session) but were never included in `7cd3efc` itself — likely a rebase or squash that absorbed implementations but dropped the files. `main` had broken transitive imports for several hours before the gap was noticed.
+
+**Files restored:**
+- `backend/src/modules/public-booking/authnet-accept-hosted.js` (from `cefd819`)
+- `backend/src/modules/public-booking/payarc-bridge-html.js` (from `00109b8`)
+- `backend/src/modules/public-booking/payarc-hosted-fields.js` (from `00109b8`)
+- `backend/src/modules/public-booking/payarc-hosted-fields.test.mjs` (from `00109b8`)
+- `backend/src/modules/public-booking/payarc-session.service.js` (from `00109b8`)
+- `backend/src/modules/public-booking/payment-session.service.js` (from `cefd819`)
+- `backend/src/modules/public-booking/payment-session.test.mjs` (from `cefd819`)
+
+**Closure path:**
+1. **2026-04-23 evening** — 1 file (`payment-session.service.js`) restored to `main` via commit `02e5d56` while diagnosing the issue.
+2. **2026-04-23 late** — remaining 6 files restored in tag-only commit `bab596d`; `v0.9.0-beta.5` was placed at that commit. The 6 files were **not** also pushed back to `main` at this point — a partial closure that wasn't caught at the time.
+3. **2026-04-24** — building the beta.6 rollup branch surfaced the gap: docker-bootstrapped backend on the rollup branch failed with `ERR_MODULE_NOT_FOUND` for `payarc-session.service.js`. Fix: cherry-picked `bab596d` onto the rollup branch as `25210dd`.
+4. **2026-04-25 00:00 EDT** — PR #7 merged via GitHub UI as `a88f0ea`, which contains the cherry-pick. All 7 files now tracked on `main`.
+5. **2026-04-25 00:30 EDT** — `v0.9.0-beta.6` deployed to production droplet, all three new feature surfaces (website-fees channel enforcement, Stop Sale tab, Review Email Automation) verified live.
+
+**Open follow-up (separate task):** CI gap — `backend-check` runs only `node --check src/main.js` (syntax check, no transitive import resolution). A future commit with a broken import would pass `backend-check` and only fail when docker boots in `tenant-isolation-suite`. Add a resolver check (e.g., `node -e "import('./src/main.js')"`) so this class of bug is caught before merge.

@@ -1240,20 +1240,57 @@ async function syncReservationTollCharges(reservationId, scope = {}, options = {
   });
 
   await prisma.$transaction(async (tx) => {
+    // Pre-compute the desired (billingStatus, status, reviewNotes) per
+    // transaction, then skip no-ops and group the rest by their target
+    // values. This collapses the previous one-UPDATE-per-row pattern into
+    // a small number of updateMany calls — typically 1 in the steady state
+    // (fresh reconciliation: all rows null reviewNotes → same merged
+    // suffix → single group). Sentry "Repeating Spans" / N+1 fix.
+    const noteSuffix = billingDecision.coveredByTollPackage
+      ? 'Covered by prepaid toll package; usage recorded without billing'
+      : (note ? `Posted to reservation: ${note}` : 'Posted to reservation automatically');
+
+    const tollUpdateGroups = new Map();
     for (const transaction of transactions) {
-      await tx.tollTransaction.update({
-        where: { id: transaction.id },
+      const targetBillingStatus = String(transaction.billingStatus || '').toUpperCase() === 'POSTED_TO_AGREEMENT'
+        ? 'POSTED_TO_AGREEMENT'
+        : 'POSTED_TO_RESERVATION';
+      const targetReviewNotes = mergeChargeNotes(transaction.reviewNotes, noteSuffix);
+
+      // Skip if the row is already in the target state — common when the
+      // pricing endpoint is hit repeatedly on a reservation that has
+      // already been reconciled. Saves a round-trip per such row.
+      const currentStatus = String(transaction.status || '');
+      const currentBillingStatus = String(transaction.billingStatus || '');
+      const currentReviewNotes = transaction.reviewNotes ?? null;
+      if (
+        currentStatus === 'BILLED' &&
+        currentBillingStatus === targetBillingStatus &&
+        currentReviewNotes === (targetReviewNotes ?? null)
+      ) {
+        continue;
+      }
+
+      const key = `${targetBillingStatus}|${targetReviewNotes ?? ''}`;
+      let group = tollUpdateGroups.get(key);
+      if (!group) {
+        group = {
+          billingStatus: targetBillingStatus,
+          reviewNotes: targetReviewNotes,
+          ids: []
+        };
+        tollUpdateGroups.set(key, group);
+      }
+      group.ids.push(transaction.id);
+    }
+
+    for (const group of tollUpdateGroups.values()) {
+      await tx.tollTransaction.updateMany({
+        where: { id: { in: group.ids } },
         data: {
-          billingStatus: String(transaction.billingStatus || '').toUpperCase() === 'POSTED_TO_AGREEMENT'
-            ? 'POSTED_TO_AGREEMENT'
-            : 'POSTED_TO_RESERVATION',
+          billingStatus: group.billingStatus,
           status: 'BILLED',
-          reviewNotes: mergeChargeNotes(
-            transaction.reviewNotes,
-            billingDecision.coveredByTollPackage
-              ? 'Covered by prepaid toll package; usage recorded without billing'
-              : (note ? `Posted to reservation: ${note}` : 'Posted to reservation automatically')
-          )
+          reviewNotes: group.reviewNotes
         }
       });
     }
