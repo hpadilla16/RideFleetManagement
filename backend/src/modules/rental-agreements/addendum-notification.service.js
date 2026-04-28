@@ -157,22 +157,36 @@ async function _notifyAddendumCustomer({ agreement, addendum }) {
 // ─────────────────────────────────────────────────────────────────────────────
 async function _notifyAddendumAdmins({ agreement, addendum, tenantId }) {
   try {
-    if (!tenantId) return { skipped: 'no-tenant-id' };
-
-    const [tenantAdmins, superAdmins] = await Promise.all([
-      prisma.user.findMany({
-        where: { tenantId, role: { in: ['ADMIN', 'OPS'] }, isActive: true },
-        select: { email: true }
-      }),
+    // Always notify platform SUPER_ADMINs — they're not tenant-scoped, so
+    // their notification doesn't depend on a tenantId being present. The
+    // tenant-scoped ADMIN/OPS query is conditional: skipped when tenantId
+    // is missing (super-admin-initiated calls or scope-less internal calls
+    // can omit it).
+    //
+    // Previous behavior — returning early on missing tenantId — silently
+    // suppressed all admin alerts including super-admin ones, contradicting
+    // the function's documented "tenant ADMIN/OPS + platform SUPER_ADMIN"
+    // recipient set. Codex bot caught it.
+    const adminQueries = [
       prisma.user.findMany({
         where: { role: 'SUPER_ADMIN', isActive: true },
         select: { email: true }
       })
-    ]);
+    ];
+    if (tenantId) {
+      adminQueries.push(
+        prisma.user.findMany({
+          where: { tenantId, role: { in: ['ADMIN', 'OPS'] }, isActive: true },
+          select: { email: true }
+        })
+      );
+    }
+    const adminQueryResults = await Promise.all(adminQueries);
 
     const adminEmails = [
       ...new Set(
-        [...tenantAdmins, ...superAdmins]
+        adminQueryResults
+          .flat()
           .map((a) => a.email)
           .filter(Boolean)
       )
