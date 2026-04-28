@@ -3,9 +3,14 @@
 **Date:** 2026-04-28
 **Owner:** Hector
 **Status:** Operational guide. Code already exists at `backend/src/cluster.js`. This doc covers when to enable it, what has to be true before you do, the rollout steps, and rollback.
-**Related:**
-[`performance-prep-2026-04-28.md`](./performance-prep-2026-04-28.md),
-[`perf-phase3-redis-cache-2026-04-28.md`](./perf-phase3-redis-cache-2026-04-28.md)
+
+**Related runbooks** (each ships in its own PR; the file links below resolve only after the corresponding PR merges into `main`):
+
+- `docs/operations/performance-prep-2026-04-28.md` — original perf plan. Ships in the `chore/post-beta8-followup` branch (already committed; available once that branch is merged).
+- `docs/operations/perf-phase3-redis-cache-2026-04-28.md` — L-1 Redis pub/sub closeout. Ships in PR #18 (`feat/perf-phase3-redis-cache`).
+- `docs/operations/perf-phase1-2026-04-28.md` — Phase 1 instrumentation closeout. Ships in PR #15 (`feat/perf-phase1`).
+
+If you're reading this doc on `main` and any of those filenames don't yet exist, the prerequisite PR hasn't been merged. The action items in this doc still hold; the links just won't render until the dependent PRs land.
 
 ## Why this matters
 
@@ -83,11 +88,26 @@ If you find any (e.g., a homegrown counter or rate-limiter), evaluate whether it
 
 ### 5. Database connection pool can absorb N× workers
 
-Each Node worker opens its own Prisma client → its own connection pool. With `DATABASE_POOL_SIZE=30` (Phase 1 default) × 4 workers = up to 120 DB connections.
+Each Node worker opens its own Prisma client → its own connection pool. The total number of DB connections opened by the backend = `pool_size × N_workers`.
+
+Defaults to use in the math:
+
+- **On `main` today (pre-Phase-1):** `DATABASE_POOL_SIZE` defaults to `20` (`backend/src/lib/prisma.js` — `process.env.DATABASE_POOL_SIZE || '20'`).
+- **After PR #15 (Phase 1) merges:** the default rises to `30`. Phase 1's pool bump is one of its quick wins.
+
+So the worst-case connection budget for a 4-worker cluster is:
+
+- Today (main): `20 × 4 = 80`.
+- After PR #15: `30 × 4 = 120`.
 
 **Check Supabase pgbouncer's max connection limit.** Free tier ≈ 60 in transaction mode. If you exceed that, requests start hanging on connection acquisition.
 
-**Mitigation:** set `DATABASE_POOL_SIZE=15` (or lower) on the droplet env when running clustered, so total stays under the pgbouncer ceiling. The Phase 1 instrumentation will surface pool timeouts in Sentry if the math doesn't work.
+**Mitigation:** set `DATABASE_POOL_SIZE` explicitly on the droplet env when running clustered, low enough that `pool_size × N_workers` stays under the pgbouncer ceiling. Reasonable starting points:
+
+- pgbouncer cap of 60, 4 workers → `DATABASE_POOL_SIZE=12-15`.
+- pgbouncer cap of 200, 4 workers → `DATABASE_POOL_SIZE=40-50`.
+
+The Phase 1 instrumentation (once PR #15 merges) will surface pool timeouts in Sentry if the math doesn't work — that's your signal to lower the per-worker pool size.
 
 ### 6. Logs are still readable
 
@@ -227,8 +247,13 @@ Each worker uses its own heap. With 4 workers at ~250 MB each, you're using ~1 G
 
 ## Cross-references
 
+Files that exist on `main` today:
+
 - Cluster code: `backend/src/cluster.js`
 - Scheduler gating: `backend/src/main.js` (`isFirstWorker` block)
 - Cache module multi-worker warnings: `backend/src/lib/cache.js`
-- Phase 1 Sentry instrumentation (helps surface clustered-mode issues): [`perf-phase1-2026-04-28.md`](./perf-phase1-2026-04-28.md)
-- Phase 3 L-1 Redis (prerequisite for clean clustered mode): [`perf-phase3-redis-cache-2026-04-28.md`](./perf-phase3-redis-cache-2026-04-28.md)
+
+Runbooks that ship in their own PRs (links may not resolve until those PRs merge):
+
+- `docs/operations/perf-phase1-2026-04-28.md` (Phase 1 Sentry instrumentation; helps surface clustered-mode issues) — PR #15 `feat/perf-phase1`.
+- `docs/operations/perf-phase3-redis-cache-2026-04-28.md` (Phase 3 L-1 Redis pub/sub; prerequisite for clean clustered mode) — PR #18 `feat/perf-phase3-redis-cache`.
