@@ -8,7 +8,11 @@
 
 CREATE TABLE IF NOT EXISTS "ReservationDailyCounter" (
   "id"            TEXT        NOT NULL,
-  "tenantId"      TEXT,
+  -- tenantId NOT NULL on purpose: Postgres unique indexes don't treat
+  -- NULL as equal, so allowing nullable tenantId would let (NULL, day)
+  -- rows duplicate on every upsert. SUPER_ADMIN cross-tenant summary
+  -- requests don't write here; they fall through to live aggregation.
+  "tenantId"      TEXT        NOT NULL,
   "day"           TIMESTAMP(3) NOT NULL,
   "pickupsToday"  INTEGER     NOT NULL DEFAULT 0,
   "returnsToday"  INTEGER     NOT NULL DEFAULT 0,

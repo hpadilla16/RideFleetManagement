@@ -813,8 +813,18 @@ export const reservationsService = {
     // 5 expensive count() queries below and only run the 4 "next item"
     // findFirst() calls. On miss/stale, fall back to live aggregation and
     // fire-and-forget a refresh so the next request hits the table.
+    //
+    // IMPORTANT: only use the counter table for tenant-scoped requests.
+    // Postgres unique indexes don't treat NULL values as equal, so a
+    // (NULL, day) row would not conflict on upsert — repeated SUPER_ADMIN
+    // global summary calls would insert duplicate rows instead of updating
+    // one. SUPER_ADMIN cross-tenant view (no scope.tenantId) falls through
+    // to the live aggregation path, which is already cached at 30s by the
+    // route layer (Phase 1).
     const counterTenantId = scope?.tenantId || null;
-    const cachedCounters = await readFreshCounters({ tenantId: counterTenantId, day: dayStart });
+    const cachedCounters = counterTenantId
+      ? await readFreshCounters({ tenantId: counterTenantId, day: dayStart })
+      : null;
 
     const [
       pickupsToday,
@@ -970,7 +980,11 @@ export const reservationsService = {
     // missing or stale), fire-and-forget a refresh so the next request
     // can serve from the table. Doesn't block the response. Errors are
     // swallowed inside refreshCountersAsync — never fails the request.
-    if (!cachedCounters) {
+    //
+    // Skip the refresh entirely when there's no tenantId (SUPER_ADMIN
+    // cross-tenant view) — see comment above. The Postgres unique index
+    // can't dedupe NULL tenantId rows, so we must not write them.
+    if (!cachedCounters && counterTenantId) {
       refreshCountersAsync({
         tenantId: counterTenantId,
         day: dayStart,

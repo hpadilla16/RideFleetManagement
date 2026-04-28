@@ -177,5 +177,36 @@ describe('reservation-summary-counters', () => {
       const out = await refreshCounters({});
       assert.equal(out, null);
     });
+
+    // Codex bot finding on PR #19: old code wrote (NULL, day) rows, which
+    // Postgres unique indexes don't deduplicate — every refresh would
+    // insert a new row. Verify SUPER_ADMIN cross-tenant calls (no tenantId)
+    // are now refused without touching prisma.
+    it('returns null without touching prisma when tenantId is absent', async () => {
+      let upsertHit = false;
+      prisma.reservationDailyCounter.upsert = async () => { upsertHit = true; return null; };
+      const out = await refreshCounters({
+        tenantId: null,
+        day: new Date(),
+        dayStart: new Date(),
+        dayEnd: new Date()
+      });
+      assert.equal(out, null);
+      assert.equal(upsertHit, false, 'must not write a NULL-tenantId row');
+      assert.equal(countCalls, 0, 'must not run count() either');
+    });
+  });
+
+  describe('readFreshCounters tenant guard', () => {
+    it('returns null when tenantId is absent (does not query prisma)', async () => {
+      let findHit = false;
+      prisma.reservationDailyCounter.findUnique = async () => { findHit = true; return null; };
+      const out = await readFreshCounters({
+        tenantId: null,
+        day: new Date('2026-04-28T00:00:00Z')
+      });
+      assert.equal(out, null);
+      assert.equal(findHit, false, 'should short-circuit before prisma');
+    });
   });
 });

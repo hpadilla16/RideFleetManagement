@@ -35,12 +35,16 @@ const DEFAULT_MAX_AGE_MS = 5 * 60 * 1000;
  * Read the counter row for a tenant on a given day, but only return it
  * if it was refreshed within maxAgeMs. Otherwise treat it as a miss so
  * the caller falls back to the live aggregation.
+ *
+ * Only valid for tenant-scoped requests. Returns null when tenantId is
+ * absent because Postgres unique indexes don't treat NULL values as
+ * equal — see the comment in refreshCounters() below for details.
  */
 export async function readFreshCounters({ tenantId, day, maxAgeMs = DEFAULT_MAX_AGE_MS } = {}) {
-  if (!day) return null;
+  if (!tenantId || !day) return null;
   try {
     const row = await prisma.reservationDailyCounter.findUnique({
-      where: { tenantId_day: { tenantId: tenantId || null, day } }
+      where: { tenantId_day: { tenantId, day } }
     });
     if (!row) return null;
     const ageMs = Date.now() - new Date(row.refreshedAt).getTime();
@@ -68,21 +72,29 @@ export async function readFreshCounters({ tenantId, day, maxAgeMs = DEFAULT_MAX_
  *
  * Pass the SAME dayStart/dayEnd window the live summary uses so the
  * stored counts match what summary() would compute live.
+ *
+ * IMPORTANT: only valid for tenant-scoped requests. Postgres unique
+ * indexes treat NULL values as distinct — a (NULL, day) row would not
+ * conflict on upsert and we'd insert a new duplicate row each time.
+ * That would cause unbounded table growth AND make findUnique
+ * unreliable (multiple rows for the same logical key). Returns null
+ * for missing tenantId so SUPER_ADMIN cross-tenant summary calls fall
+ * through to the live aggregation path (already 30s-cached at the
+ * route layer in Phase 1).
  */
 export async function refreshCounters({ tenantId, day, dayStart, dayEnd } = {}) {
-  if (!day || !dayStart || !dayEnd) return null;
-  const where = tenantId ? { tenantId } : {};
+  if (!tenantId || !day || !dayStart || !dayEnd) return null;
   try {
     const [pickupsToday, returnsToday, checkedOut, feeAdvisories, noShows] = await Promise.all([
-      prisma.reservation.count({ where: { ...where, pickupAt: { gte: dayStart, lte: dayEnd } } }),
-      prisma.reservation.count({ where: { ...where, returnAt: { gte: dayStart, lte: dayEnd } } }),
-      prisma.reservation.count({ where: { ...where, status: 'CHECKED_OUT' } }),
-      prisma.reservation.count({ where: { ...where, notes: { contains: '[FEE_ADVISORY_OPEN' } } }),
-      prisma.reservation.count({ where: { ...where, status: 'NO_SHOW' } })
+      prisma.reservation.count({ where: { tenantId, pickupAt: { gte: dayStart, lte: dayEnd } } }),
+      prisma.reservation.count({ where: { tenantId, returnAt: { gte: dayStart, lte: dayEnd } } }),
+      prisma.reservation.count({ where: { tenantId, status: 'CHECKED_OUT' } }),
+      prisma.reservation.count({ where: { tenantId, notes: { contains: '[FEE_ADVISORY_OPEN' } } }),
+      prisma.reservation.count({ where: { tenantId, status: 'NO_SHOW' } })
     ]);
 
     const data = {
-      tenantId: tenantId || null,
+      tenantId,
       day,
       pickupsToday,
       returnsToday,
@@ -93,7 +105,7 @@ export async function refreshCounters({ tenantId, day, dayStart, dayEnd } = {}) 
     };
 
     return await prisma.reservationDailyCounter.upsert({
-      where: { tenantId_day: { tenantId: tenantId || null, day } },
+      where: { tenantId_day: { tenantId, day } },
       create: data,
       update: {
         pickupsToday: data.pickupsToday,
