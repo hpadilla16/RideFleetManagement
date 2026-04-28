@@ -99,6 +99,11 @@ function formatReservationWallClock(value) {
   return `${Number(month)}/${Number(day)}/${year}, ${hour12}:${minute} ${suffix}`;
 }
 
+// Shape returned by both list() and listPage(). Includes:
+// - customer.dateOfBirth so deriveUnderageAlertForReservation can run
+//   against the row inline (without a redundant batch fetch)
+// - pickupLocation.locationConfig (string-stringified JSON) for the same
+//   reason; other location uses don't need it, so returnLocation stays lean
 const reservationListSelect = {
   id: true,
   tenantId: true,
@@ -122,14 +127,23 @@ const reservationListSelect = {
       firstName: true,
       lastName: true,
       email: true,
-      phone: true
+      phone: true,
+      dateOfBirth: true
     }
   },
+  // tenantId is included on the four tenant-scoped relations below as a
+  // defense-in-depth check. The schema doesn't enforce that
+  // reservation.vehicleId points to a Vehicle in the SAME tenant — the
+  // application layer (and the old hydrate step) ensured this. With the
+  // hydrate step gone, maskCrossTenantRelations() below uses these
+  // tenantId fields to null out any drifted cross-tenant relation before
+  // the row leaves the API.
   vehicleType: {
     select: {
       id: true,
       code: true,
-      name: true
+      name: true,
+      tenantId: true
     }
   },
   vehicle: {
@@ -139,21 +153,25 @@ const reservationListSelect = {
       plate: true,
       make: true,
       model: true,
-      year: true
+      year: true,
+      tenantId: true
     }
   },
   pickupLocation: {
     select: {
       id: true,
       name: true,
-      code: true
+      code: true,
+      locationConfig: true,
+      tenantId: true
     }
   },
   returnLocation: {
     select: {
       id: true,
       name: true,
-      code: true
+      code: true,
+      tenantId: true
     }
   },
   franchiseId: true,
@@ -177,57 +195,31 @@ const reservationListSelect = {
 // Legacy alias
 const reservationListBaseSelect = reservationListSelect;
 
-async function hydrateReservationListRows(rows = [], scope = {}) {
-  if (!rows.length) return [];
-
-  const customerIds = [...new Set(rows.map((row) => row.customerId).filter(Boolean))];
-  const vehicleTypeIds = [...new Set(rows.map((row) => row.vehicleTypeId).filter(Boolean))];
-  const vehicleIds = [...new Set(rows.map((row) => row.vehicleId).filter(Boolean))];
-  const locationIds = [...new Set(rows.flatMap((row) => [row.pickupLocationId, row.returnLocationId]).filter(Boolean))];
-
-  const [customers, vehicleTypes, vehicles, locations] = await Promise.all([
-    customerIds.length
-      ? prisma.customer.findMany({
-          where: { id: { in: customerIds } },
-          select: { id: true, firstName: true, lastName: true, email: true, phone: true }
-        })
-      : [],
-    vehicleTypeIds.length
-      ? prisma.vehicleType.findMany({
-          where: { id: { in: vehicleTypeIds }, ...(scope?.tenantId ? { tenantId: scope.tenantId } : {}) },
-          select: { id: true, code: true, name: true }
-        })
-      : [],
-    vehicleIds.length
-      ? prisma.vehicle.findMany({
-          where: { id: { in: vehicleIds }, ...(scope?.tenantId ? { tenantId: scope.tenantId } : {}) },
-          select: { id: true, internalNumber: true, plate: true, make: true, model: true, year: true }
-        })
-      : [],
-    locationIds.length
-      ? prisma.location.findMany({
-          where: { id: { in: locationIds }, ...(scope?.tenantId ? { tenantId: scope.tenantId } : {}) },
-          select: { id: true, name: true, code: true }
-        })
-      : []
-  ]);
-
-  const customerById = new Map(customers.map((row) => [row.id, row]));
-  const vehicleTypeById = new Map(vehicleTypes.map((row) => [row.id, row]));
-  const vehicleById = new Map(vehicles.map((row) => [row.id, row]));
-  const locationById = new Map(locations.map((row) => [row.id, row]));
-
-  return rows.map((row) => {
-    const hydrated = {
-      ...row,
-      customer: row.customerId ? customerById.get(row.customerId) || null : null,
-      vehicleType: row.vehicleTypeId ? vehicleTypeById.get(row.vehicleTypeId) || null : null,
-      vehicle: row.vehicleId ? vehicleById.get(row.vehicleId) || null : null,
-      pickupLocation: row.pickupLocationId ? locationById.get(row.pickupLocationId) || null : null,
-      returnLocation: row.returnLocationId ? locationById.get(row.returnLocationId) || null : null
-    };
-    return { ...hydrated, ...deriveUnderageAlertForReservation(hydrated) };
-  });
+// Defense-in-depth: null out any cross-tenant relation that drifted into a
+// reservation row. The schema doesn't enforce that vehicle.tenantId equals
+// reservation.tenantId — the old hydrateReservationListRows() applied this
+// scoping by re-fetching with `where: { tenantId: scope.tenantId }`. With
+// hydrate gone, this helper does the equivalent in-memory check on each row.
+//
+// Only applied when scopeTenantId is set (i.e., a tenant-scoped request).
+// SUPER_ADMIN cross-tenant requests pass through untouched, which matches
+// the old hydrate behavior (hydrate ran without a tenant filter when the
+// scope had no tenantId).
+//
+// Customer is intentionally NOT masked here — the original hydrate fetched
+// customers without a tenant filter, so list views have always been able
+// to surface a customer's record regardless of tenant. Changing that is
+// a separate decision.
+function maskCrossTenantRelations(row, scopeTenantId) {
+  if (!scopeTenantId) return row;
+  const expected = row?.tenantId;
+  if (!expected) return row;
+  const out = { ...row };
+  if (out.vehicle?.tenantId && out.vehicle.tenantId !== expected) out.vehicle = null;
+  if (out.vehicleType?.tenantId && out.vehicleType.tenantId !== expected) out.vehicleType = null;
+  if (out.pickupLocation?.tenantId && out.pickupLocation.tenantId !== expected) out.pickupLocation = null;
+  if (out.returnLocation?.tenantId && out.returnLocation.tenantId !== expected) out.returnLocation = null;
+  return out;
 }
 
 function norm(v) {
@@ -996,13 +988,28 @@ export const reservationsService = {
       })
     ]);
 
-    const hydrated = await hydrateReservationListRows(rows, scope);
+    // Relations already included via reservationListSelect (customer + dateOfBirth,
+    // pickupLocation + locationConfig, vehicle, vehicleType, returnLocation, franchise,
+    // rentalAgreement summary). Map inline for the underage-alert derivation; no
+    // separate batch fetches needed. This used to call hydrateReservationListRows()
+    // which ran 4 redundant prisma queries — the count + findMany already had
+    // everything except dateOfBirth/locationConfig, which the select now covers.
+    //
+    // maskCrossTenantRelations restores the tenant-isolation defense the old
+    // hydrate provided: if a reservation row has a vehicle/vehicleType/location
+    // ID pointing to another tenant's record (data drift), null out that
+    // relation before responding. SUPER_ADMIN cross-tenant requests
+    // (scope.tenantId undefined) pass through unmasked, matching old behavior.
+    const items = rows.map((row) => {
+      const masked = maskCrossTenantRelations(row, scope?.tenantId);
+      return { ...masked, ...deriveUnderageAlertForReservation(masked) };
+    });
     return {
-      rows: hydrated,
+      rows: items,
       total,
       limit: take,
       offset: skip,
-      hasMore: skip + hydrated.length < total
+      hasMore: skip + items.length < total
     };
   },
 
@@ -1015,7 +1022,12 @@ export const reservationsService = {
       prisma.reservation.count({ where })
     ]);
     // Relations already included via select — add underage alert derivation
-    const items = rows.map((row) => ({ ...row, ...deriveUnderageAlertForReservation(row) }));
+    // and mask any drifted cross-tenant relation (defense in depth, matches
+    // listPage behavior).
+    const items = rows.map((row) => {
+      const masked = maskCrossTenantRelations(row, scope?.tenantId);
+      return { ...masked, ...deriveUnderageAlertForReservation(masked) };
+    });
     return { items, total, page: Number(page), limit: take, pages: Math.ceil(total / take) };
   },
 
