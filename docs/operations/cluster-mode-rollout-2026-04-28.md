@@ -124,7 +124,7 @@ sudo systemctl restart fleet-backend
 # or whatever you use
 ```
 
-You should see this in the logs:
+You should see something like this in the logs. **Lines from different workers interleave non-deterministically** — the actual order on your screen will look messier than the example. What matters is that you observe each kind of line, not the exact sequence.
 
 ```
 Primary 12345 starting 4 workers
@@ -132,9 +132,19 @@ Worker 12346 started
 Worker 12347 started
 Worker 12348 started
 Worker 12349 started
-[cache] redis pub/sub ready (channel=fleet:cache-invalidate, ...)   # ×4 — once per worker
-Fleet backend listening on http://localhost:4000 (pid=12346)        # ×4
+Fleet backend listening on http://localhost:4000 (pid=12346)
+Fleet backend listening on http://localhost:4000 (pid=12347)
+Fleet backend listening on http://localhost:4000 (pid=12348)
+Fleet backend listening on http://localhost:4000 (pid=12349)
 ```
+
+Things to confirm in the output, not the order:
+
+- One `Primary <pid> starting N workers` line.
+- N `Worker <pid> started` lines (one per worker).
+- N `Fleet backend listening on ...` lines (one per worker — same port; cluster mode shares the listener).
+- **If `REDIS_URL` is set AND PR #18 (perf-phase3-redis-cache) is deployed:** also expect N `[cache] redis pub/sub ready (channel=...)` lines, one per worker. If that PR isn't deployed yet, this line won't appear and the per-worker caches stay isolated until TTL expires (single-tenant edits won't reflect on sibling workers within the TTL window).
+- No `[cache] Running clustered with in-memory cache only` warning lines, **unless** you intentionally chose to roll out cluster mode without Redis. The warning line is a hint to provision Redis.
 
 ### Step 4 — Verify within 5 minutes
 
@@ -145,7 +155,7 @@ curl -s http://localhost:4000/health     # should still 200 with database: true
 Then, in the dashboard / reservation list, do a workflow that exercises a write + a read:
 
 - Edit a fee.
-- Refresh the fee list. Confirm the change appears immediately, even if it's a different worker handling the read (Redis pub/sub at work).
+- Refresh the fee list a few times in a row. With Redis pub/sub deployed (PR #18), the change appears on every refresh regardless of which worker handles the read. **Without Redis** (cluster-mode-only rollout, no PR #18), the change can take up to TTL (5 min) to be visible on workers other than the one that handled the write — that's expected, not a bug.
 
 ### Step 5 — Watch Sentry for 24 hours
 
