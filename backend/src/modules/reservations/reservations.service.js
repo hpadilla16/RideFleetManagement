@@ -4,6 +4,7 @@ import { maybeSendReviewRequestEmail } from './review-email.service.js';
 import { hostReviewsService } from '../host-reviews/host-reviews.service.js';
 import { settingsService } from '../settings/settings.service.js';
 import { parseLocationConfig } from '../../lib/location-config.js';
+import { readFreshCounters, refreshCountersAsync } from './reservation-summary-counters.service.js';
 
 function ageOnDate(dob, onDate) {
   if (!dob || !onDate) return null;
@@ -808,6 +809,13 @@ export const reservationsService = {
     const dayEnd = new Date(`${todayStr}T23:59:59.999`);
     const where = scope?.tenantId ? { tenantId: scope.tenantId } : {};
 
+    // Phase 3 L-2: try the daily counter table first. On hit, we skip the
+    // 5 expensive count() queries below and only run the 4 "next item"
+    // findFirst() calls. On miss/stale, fall back to live aggregation and
+    // fire-and-forget a refresh so the next request hits the table.
+    const counterTenantId = scope?.tenantId || null;
+    const cachedCounters = await readFreshCounters({ tenantId: counterTenantId, day: dayStart });
+
     const [
       pickupsToday,
       returnsToday,
@@ -819,36 +827,46 @@ export const reservationsService = {
       nextFeeAdvisory,
       nextNoShow
     ] = await Promise.all([
-      prisma.reservation.count({
-        where: {
-          ...where,
-          pickupAt: { gte: dayStart, lte: dayEnd }
-        }
-      }),
-      prisma.reservation.count({
-        where: {
-          ...where,
-          returnAt: { gte: dayStart, lte: dayEnd }
-        }
-      }),
-      prisma.reservation.count({
-        where: {
-          ...where,
-          status: 'CHECKED_OUT'
-        }
-      }),
-      prisma.reservation.count({
-        where: {
-          ...where,
-          notes: { contains: '[FEE_ADVISORY_OPEN' }
-        }
-      }),
-      prisma.reservation.count({
-        where: {
-          ...where,
-          status: 'NO_SHOW'
-        }
-      }),
+      cachedCounters
+        ? cachedCounters.pickupsToday
+        : prisma.reservation.count({
+            where: {
+              ...where,
+              pickupAt: { gte: dayStart, lte: dayEnd }
+            }
+          }),
+      cachedCounters
+        ? cachedCounters.returnsToday
+        : prisma.reservation.count({
+            where: {
+              ...where,
+              returnAt: { gte: dayStart, lte: dayEnd }
+            }
+          }),
+      cachedCounters
+        ? cachedCounters.checkedOut
+        : prisma.reservation.count({
+            where: {
+              ...where,
+              status: 'CHECKED_OUT'
+            }
+          }),
+      cachedCounters
+        ? cachedCounters.feeAdvisories
+        : prisma.reservation.count({
+            where: {
+              ...where,
+              notes: { contains: '[FEE_ADVISORY_OPEN' }
+            }
+          }),
+      cachedCounters
+        ? cachedCounters.noShows
+        : prisma.reservation.count({
+            where: {
+              ...where,
+              status: 'NO_SHOW'
+            }
+          }),
       prisma.reservation.findFirst({
         where: {
           ...where,
@@ -947,6 +965,19 @@ export const reservationsService = {
           }
         : null
     ].filter(Boolean);
+
+    // Phase 3 L-2: if we just ran the live aggregation (counter table was
+    // missing or stale), fire-and-forget a refresh so the next request
+    // can serve from the table. Doesn't block the response. Errors are
+    // swallowed inside refreshCountersAsync — never fails the request.
+    if (!cachedCounters) {
+      refreshCountersAsync({
+        tenantId: counterTenantId,
+        day: dayStart,
+        dayStart,
+        dayEnd
+      });
+    }
 
     return {
       pickupsToday,
