@@ -1,3 +1,4 @@
+import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -3847,6 +3848,16 @@ export const rentalAgreementsService = {
     const newCharges = [];
     const chargeDelta = { added: [], removed: [], modified: [] };
 
+    // Issue a customer-portal signature token at creation time. The token is
+    // embedded in the customer notification email and consumed (set to null)
+    // after a successful signature submission via the public signing flow at
+    // /api/public/addendum-signature/{token}.
+    //
+    // 24 random bytes → 32 url-safe base64 characters; collision probability
+    // is negligible. The @unique index on signatureToken is belt-and-suspenders.
+    const signatureToken = crypto.randomBytes(24).toString('base64url');
+    const signatureTokenExpiresAt = new Date(Date.now() + 14 * 24 * 60 * 60 * 1000); // 14 days
+
     return prisma.rentalAgreementAddendum.create({
       data: {
         rentalAgreementId,
@@ -3858,6 +3869,8 @@ export const rentalAgreementsService = {
         initiatedBy: initiatedBy ? String(initiatedBy).trim() : null,
         initiatedByRole: String(initiatedByRole).trim(),
         status: 'PENDING_SIGNATURE',
+        signatureToken,
+        signatureTokenExpiresAt,
         originalCharges: JSON.stringify(originalCharges),
         newCharges: JSON.stringify(newCharges),
         chargeDelta: JSON.stringify(chargeDelta)

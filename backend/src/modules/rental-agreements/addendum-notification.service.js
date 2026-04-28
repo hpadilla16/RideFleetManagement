@@ -2,6 +2,18 @@ import { prisma } from '../../lib/prisma.js';
 import { sendEmail } from '../../lib/mailer.js';
 import logger from '../../lib/logger.js';
 
+// Mirrors the helper used by public-booking.service.js so the addendum
+// magic-link URL resolves to the same customer-portal origin in every
+// environment. Falls back to localhost:3000 for local dev.
+function baseUrl() {
+  const raw =
+    process.env.CUSTOMER_PORTAL_BASE_URL ||
+    process.env.APP_BASE_URL ||
+    process.env.FRONTEND_BASE_URL ||
+    'http://localhost:3000';
+  return String(raw).replace(/\/$/, '');
+}
+
 /**
  * Fire customer- and admin-facing emails on rental agreement addendum
  * creation.
@@ -54,6 +66,7 @@ export async function scheduleAddendumNotification(rentalAgreementId, addendumId
           reason: true,
           reasonCategory: true,
           status: true,
+          signatureToken: true,
           initiatedBy: true,
           initiatedByRole: true
         }
@@ -98,22 +111,30 @@ export async function scheduleAddendumNotification(rentalAgreementId, addendumId
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Internal: customer-facing email — link to the (token-based) portal signing
-// flow when that ships. For now the link points at the path the frontend
-// /customer/sign-agreement?type=addendum will eventually handle; until then
-// the customer email serves as a heads-up and the admin signs on their behalf.
+// Internal: customer-facing email — token-based magic link to the public
+// signing page at /customer/sign-addendum?token=... . The token is the auth;
+// it's generated in createAddendum and consumed (via status transition) on
+// successful signature submission. If the addendum has no signatureToken
+// (legacy data, cleared, etc.), we skip the email rather than send an
+// unsignable link — admin can still sign on behalf out-of-band.
 // ─────────────────────────────────────────────────────────────────────────────
 async function _notifyAddendumCustomer({ agreement, addendum }) {
   try {
     if (!agreement.customerEmail) return { skipped: 'no-customer-email' };
+    if (!addendum.signatureToken) {
+      logger?.info?.('addendum-notification customer skipped — no signature token on addendum', {
+        rentalAgreementId: agreement.id,
+        addendumId: addendum.id,
+        tenantId: agreement.tenant?.id ?? null
+      });
+      return { skipped: 'no-signature-token' };
+    }
 
     const fmt = (d) => d ? new Date(d).toLocaleString('en-US') : '-';
     const customerName =
       `${agreement.customerFirstName || ''} ${agreement.customerLastName || ''}`.trim() || 'Customer';
 
-    const portalLink = `/customer/sign-agreement?type=addendum` +
-      `&agreement=${encodeURIComponent(agreement.id)}` +
-      `&addendum=${encodeURIComponent(addendum.id)}`;
+    const portalLink = `${baseUrl()}/customer/sign-addendum?token=${encodeURIComponent(addendum.signatureToken)}`;
 
     const subject = `Action required: please sign addendum to agreement ${agreement.agreementNumber || agreement.id}`;
     const text = [

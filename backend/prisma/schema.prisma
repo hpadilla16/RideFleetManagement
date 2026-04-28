@@ -1257,6 +1257,12 @@ model RentalAgreementAddendum {
   signatureSignedAt DateTime?
   signatureIp       String?
 
+  // Token-based public signing flow (BUG-001 customer self-service follow-up).
+  // Generated at addendum creation, embedded in the customer notification
+  // email, consumed (set to null) after a successful signature submission.
+  signatureToken          String?   @unique
+  signatureTokenExpiresAt DateTime?
+
   originalCharges String?
   newCharges      String?
   chargeDelta     String?
