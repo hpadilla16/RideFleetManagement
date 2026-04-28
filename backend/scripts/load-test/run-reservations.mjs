@@ -117,9 +117,17 @@ async function vu(id) {
   }
 }
 
+// Nearest-rank percentile. For n samples sorted ascending and percentile q:
+//   idx = ceil(q * n) - 1, clamped to [0, n-1]
+// e.g. n=20 / q=0.95 -> idx 18 (the 19th element), not the max at idx 19.
+// Codex bot finding on PR #17: previous Math.floor implementation overstated
+// every non-zero percentile by one rank, biasing perf decisions.
 function quantile(sortedAsc, q) {
   if (!sortedAsc.length) return 0;
-  const idx = Math.min(sortedAsc.length - 1, Math.floor(q * sortedAsc.length));
+  if (q <= 0) return sortedAsc[0];
+  if (q >= 1) return sortedAsc[sortedAsc.length - 1];
+  const rank = Math.ceil(q * sortedAsc.length);
+  const idx = Math.min(sortedAsc.length - 1, Math.max(0, rank - 1));
   return sortedAsc[idx];
 }
 
