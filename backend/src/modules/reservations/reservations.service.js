@@ -99,6 +99,11 @@ function formatReservationWallClock(value) {
   return `${Number(month)}/${Number(day)}/${year}, ${hour12}:${minute} ${suffix}`;
 }
 
+// Shape returned by both list() and listPage(). Includes:
+// - customer.dateOfBirth so deriveUnderageAlertForReservation can run
+//   against the row inline (without a redundant batch fetch)
+// - pickupLocation.locationConfig (string-stringified JSON) for the same
+//   reason; other location uses don't need it, so returnLocation stays lean
 const reservationListSelect = {
   id: true,
   tenantId: true,
@@ -122,7 +127,8 @@ const reservationListSelect = {
       firstName: true,
       lastName: true,
       email: true,
-      phone: true
+      phone: true,
+      dateOfBirth: true
     }
   },
   vehicleType: {
@@ -146,7 +152,8 @@ const reservationListSelect = {
     select: {
       id: true,
       name: true,
-      code: true
+      code: true,
+      locationConfig: true
     }
   },
   returnLocation: {
@@ -176,59 +183,6 @@ const reservationListSelect = {
 
 // Legacy alias
 const reservationListBaseSelect = reservationListSelect;
-
-async function hydrateReservationListRows(rows = [], scope = {}) {
-  if (!rows.length) return [];
-
-  const customerIds = [...new Set(rows.map((row) => row.customerId).filter(Boolean))];
-  const vehicleTypeIds = [...new Set(rows.map((row) => row.vehicleTypeId).filter(Boolean))];
-  const vehicleIds = [...new Set(rows.map((row) => row.vehicleId).filter(Boolean))];
-  const locationIds = [...new Set(rows.flatMap((row) => [row.pickupLocationId, row.returnLocationId]).filter(Boolean))];
-
-  const [customers, vehicleTypes, vehicles, locations] = await Promise.all([
-    customerIds.length
-      ? prisma.customer.findMany({
-          where: { id: { in: customerIds } },
-          select: { id: true, firstName: true, lastName: true, email: true, phone: true }
-        })
-      : [],
-    vehicleTypeIds.length
-      ? prisma.vehicleType.findMany({
-          where: { id: { in: vehicleTypeIds }, ...(scope?.tenantId ? { tenantId: scope.tenantId } : {}) },
-          select: { id: true, code: true, name: true }
-        })
-      : [],
-    vehicleIds.length
-      ? prisma.vehicle.findMany({
-          where: { id: { in: vehicleIds }, ...(scope?.tenantId ? { tenantId: scope.tenantId } : {}) },
-          select: { id: true, internalNumber: true, plate: true, make: true, model: true, year: true }
-        })
-      : [],
-    locationIds.length
-      ? prisma.location.findMany({
-          where: { id: { in: locationIds }, ...(scope?.tenantId ? { tenantId: scope.tenantId } : {}) },
-          select: { id: true, name: true, code: true }
-        })
-      : []
-  ]);
-
-  const customerById = new Map(customers.map((row) => [row.id, row]));
-  const vehicleTypeById = new Map(vehicleTypes.map((row) => [row.id, row]));
-  const vehicleById = new Map(vehicles.map((row) => [row.id, row]));
-  const locationById = new Map(locations.map((row) => [row.id, row]));
-
-  return rows.map((row) => {
-    const hydrated = {
-      ...row,
-      customer: row.customerId ? customerById.get(row.customerId) || null : null,
-      vehicleType: row.vehicleTypeId ? vehicleTypeById.get(row.vehicleTypeId) || null : null,
-      vehicle: row.vehicleId ? vehicleById.get(row.vehicleId) || null : null,
-      pickupLocation: row.pickupLocationId ? locationById.get(row.pickupLocationId) || null : null,
-      returnLocation: row.returnLocationId ? locationById.get(row.returnLocationId) || null : null
-    };
-    return { ...hydrated, ...deriveUnderageAlertForReservation(hydrated) };
-  });
-}
 
 function norm(v) {
   return String(v ?? '').trim();
@@ -996,13 +950,19 @@ export const reservationsService = {
       })
     ]);
 
-    const hydrated = await hydrateReservationListRows(rows, scope);
+    // Relations already included via reservationListSelect (customer + dateOfBirth,
+    // pickupLocation + locationConfig, vehicle, vehicleType, returnLocation, franchise,
+    // rentalAgreement summary). Map inline for the underage-alert derivation; no
+    // separate batch fetches needed. This used to call hydrateReservationListRows()
+    // which ran 4 redundant prisma queries — the count + findMany already had
+    // everything except dateOfBirth/locationConfig, which the select now covers.
+    const items = rows.map((row) => ({ ...row, ...deriveUnderageAlertForReservation(row) }));
     return {
-      rows: hydrated,
+      rows: items,
       total,
       limit: take,
       offset: skip,
-      hasMore: skip + hydrated.length < total
+      hasMore: skip + items.length < total
     };
   },
 
