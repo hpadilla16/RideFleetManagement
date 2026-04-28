@@ -31,16 +31,20 @@ describe('reservationsService.listPage — date filter', () => {
     prisma.reservation.findMany = origFindMany;
   });
 
-  it('applies single-date filter when dateOn is set', async () => {
+  it('applies single-date filter when dateOn is set (UTC bounds)', async () => {
     await reservationsService.listPage({ dateOn: '2026-04-28' }, { tenantId: 't1' });
     const w = captured.findManyWhere;
     assert.ok(w.pickupAt?.lte, 'expected pickupAt.lte');
     assert.ok(w.returnAt?.gte, 'expected returnAt.gte');
     assert.equal(w.pickupAt.lte.toISOString().slice(0, 10), '2026-04-28');
     assert.equal(w.returnAt.gte.toISOString().slice(0, 10), '2026-04-28');
-    // start of day for returnAt.gte; end of day for pickupAt.lte
-    assert.equal(w.returnAt.gte.getHours(), 0);
-    assert.equal(w.pickupAt.lte.getHours(), 23);
+    // Bounds are UTC midnight / end-of-day-UTC — independent of server timezone.
+    // Use getUTC*() not getHours() so this passes regardless of TZ=America/Puerto_Rico,
+    // TZ=Asia/Tokyo, etc.
+    assert.equal(w.returnAt.gte.getUTCHours(), 0);
+    assert.equal(w.returnAt.gte.getUTCMinutes(), 0);
+    assert.equal(w.pickupAt.lte.getUTCHours(), 23);
+    assert.equal(w.pickupAt.lte.getUTCMinutes(), 59);
   });
 
   it('applies range filter when dateFrom + dateTo are set', async () => {
@@ -57,16 +61,17 @@ describe('reservationsService.listPage — date filter', () => {
     await reservationsService.listPage({ dateFrom: '2026-04-15' }, { tenantId: 't1' });
     const w = captured.findManyWhere;
     assert.equal(w.returnAt.gte.toISOString().slice(0, 10), '2026-04-15');
-    // upper bound should be far future
-    assert.ok(w.pickupAt.lte.getFullYear() >= 9999);
+    // upper bound is the year-9999 UTC sentinel — getUTCFullYear() because
+    // local-time conversion can roll into year 10000 in west-of-UTC TZs.
+    assert.ok(w.pickupAt.lte.getUTCFullYear() >= 9999);
   });
 
   it('open-ended range: dateTo alone', async () => {
     await reservationsService.listPage({ dateTo: '2026-04-15' }, { tenantId: 't1' });
     const w = captured.findManyWhere;
     assert.equal(w.pickupAt.lte.toISOString().slice(0, 10), '2026-04-15');
-    // lower bound should be far past
-    assert.ok(w.returnAt.gte.getFullYear() <= 1970);
+    // lower bound is the year-1970 UTC sentinel — same UTC reasoning.
+    assert.ok(w.returnAt.gte.getUTCFullYear() <= 1970);
   });
 
   it('explicit range wins over dateOn when both are set', async () => {
@@ -93,6 +98,41 @@ describe('reservationsService.listPage — date filter', () => {
     const w = captured.findManyWhere;
     assert.equal(w.pickupAt, undefined);
     assert.equal(w.returnAt, undefined);
+  });
+
+  // Codex bot finding (PR #21): JS Date silently rolls invalid days
+  // (2026-02-31 -> March 3) instead of failing. Pin the rejection.
+  it('rejects invalid calendar dates (Feb 31, Apr 31, Feb 29 in non-leap year)', async () => {
+    for (const bad of ['2026-02-31', '2026-04-31', '2025-02-29', '2026-13-01', '2026-00-15', '2026-04-00', '2026-04-32']) {
+      captured = null;
+      await reservationsService.listPage({ dateOn: bad }, { tenantId: 't1' });
+      const w = captured.findManyWhere;
+      assert.equal(w.pickupAt, undefined, `expected ${bad} to be rejected (no pickupAt filter)`);
+      assert.equal(w.returnAt, undefined, `expected ${bad} to be rejected (no returnAt filter)`);
+    }
+  });
+
+  it('rejects strings with trailing junk (anchored full-string match)', async () => {
+    await reservationsService.listPage({ dateOn: '2026-04-28T17:00:00' }, { tenantId: 't1' });
+    const w = captured.findManyWhere;
+    assert.equal(w.pickupAt, undefined, 'strict YYYY-MM-DD match — no trailing time portion');
+  });
+
+  it('accepts a leap-year Feb 29 in a leap year', async () => {
+    await reservationsService.listPage({ dateOn: '2024-02-29' }, { tenantId: 't1' });
+    const w = captured.findManyWhere;
+    assert.equal(w.returnAt.gte.toISOString().slice(0, 10), '2024-02-29');
+    assert.equal(w.pickupAt.lte.toISOString().slice(0, 10), '2024-02-29');
+  });
+
+  // Sentry bot finding (PR #21): bounds were built with a no-Z datetime
+  // string, parsed in server-local time. Pin that bounds are now UTC.
+  it('builds UTC bounds (independent of server timezone)', async () => {
+    await reservationsService.listPage({ dateOn: '2026-04-28' }, { tenantId: 't1' });
+    const w = captured.findManyWhere;
+    // Start of day UTC = 00:00:00.000 UTC; toISOString shows that directly.
+    assert.equal(w.returnAt.gte.toISOString(), '2026-04-28T00:00:00.000Z');
+    assert.equal(w.pickupAt.lte.toISOString(), '2026-04-28T23:59:59.999Z');
   });
 
   it('combines date filter with text query (both applied)', async () => {
