@@ -81,10 +81,28 @@ docker compose -f docker-compose.prod.yml run --rm backend node -e \
 **Verification (from anywhere, validates customer-facing surface):**
 
 ```bash
-# 5. Hit the public domain over HTTPS, not just localhost.
-curl -fsS https://ridefleetmanager.com/api/health || true
-# Then a DOM probe / manual check of any new UI surface (e.g. settings tab,
-# new column visible, form fields render).
+# 5a. Homepage (frontend container is serving and nginx is up).
+curl -sI https://ridefleetmanager.com/ | head -3
+# Expect: HTTP/1.1 200 OK + nginx Server header
+
+# 5b. Public /api/* routing reaches the new backend.
+#     Hit any auth-protected endpoint without a token; expect 401 from
+#     Express (NOT 404 from nginx). 401 confirms the proxy forwards /api
+#     correctly AND that the new code's routes are mounted.
+curl -is https://ridefleetmanager.com/api/rental-agreements/test-id/addendums | head -6
+# Expect: HTTP/1.1 401 Unauthorized + Content-Type: application/json
+#
+# Note: There is no public /health endpoint exposed through nginx —
+# /health on the backend container is internal-only on localhost:4000
+# (verified inside the docker network in step 4b above). If you want a
+# public health probe, add a dedicated route + nginx rule first; do not
+# assume `curl https://...com/health` or `/api/health` returns 200.
+
+# 5c. Manual DOM probe — open https://ridefleetmanager.com/, log in, and
+#     confirm any new UI surface for this release renders (e.g. a new
+#     settings tab, a new column on a list page, or — for v0.9.0-beta.7
+#     — the "Addendums" card at the bottom of the reservation detail page
+#     for any reservation with a rental agreement).
 ```
 
 **Rollback:** check out the previous release tag and re-run steps 2–4. If the schema migration is non-destructive (additive columns/tables only), no DB rollback is needed — the previous code ignores the new columns.
