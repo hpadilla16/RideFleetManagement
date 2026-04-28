@@ -44,7 +44,7 @@ Any TWO of those triggered for two consecutive weeks ⇒ time to provision the r
 **Operational complexity:**
 
 - One more thing to monitor (replica lag, replica CPU/IO, connection counts).
-- One more connection string in env (separate `DATABASE_URL_REPLICA`).
+- One more connection string in env (separate `DATABASE_REPLICA_URL`).
 - One more failure mode (replica down, replica lagged) — though queries can fall back to primary.
 
 **Engineering effort:**
@@ -182,7 +182,12 @@ The high-confidence answer: route `reportsService` + `commissionsService` to the
 7. **Roll forward** to the rest of `reportsService` + `commissionsService`.
 8. **Monitor replica lag** via Supabase dashboard. Lag > 5s sustained is a problem; investigate.
 
-Rollback at any step: unset `DATABASE_REPLICA_URL`. The fallback line in `prisma.js` makes the replica client an alias for the primary, so all queries flow back to the primary instantly.
+**Rollback** at any step:
+
+1. Unset `DATABASE_REPLICA_URL` in the droplet env.
+2. **Restart the backend** (or roll the deploy). The fallback line in `prisma.js` reads the env var at module-import time, so a running process keeps using the previously-cached client until restart. After restart, the replica client is just an alias for the primary and all queries flow back to the primary.
+
+Plan for ~30-60 seconds of restart time during incident rollback. If you need truly-instant rollback (zero restart), wire the replica routing decision through a runtime check instead of module-load time — that's a small follow-up; flag it during implementation if it matters.
 
 ## What this PR explicitly does NOT do
 
