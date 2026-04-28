@@ -2266,3 +2266,36 @@ model Franchise {
   @@unique([tenantId, code])
   @@index([tenantId, isActive])
 }
+
+// Per-tenant, per-day rollup of the count() metrics that
+// reservationsService.summary() returns. Updated by an out-of-band
+// refresh path (manual today, scheduler-ready) so the dashboard
+// endpoint can serve from a single-row read instead of running 5
+// COUNT() queries per request.
+//
+// `day` is a calendar date in the tenant's local timezone (not UTC),
+// stored as a DateTime at midnight for that day. The unique constraint
+// on (tenantId, day) lets the refresh path use upsert.
+//
+// tenantId is NOT NULL on purpose. Postgres unique indexes don't treat
+// NULL as equal — a (NULL, day) upsert would insert a duplicate row
+// every time, causing unbounded table growth and unreliable findUnique
+// reads. SUPER_ADMIN cross-tenant summary requests intentionally fall
+// through to live aggregation (already cached for 30s at the route
+// layer) and never write to this table.
+model ReservationDailyCounter {
+  id                 String   @id @default(cuid())
+  tenantId           String
+  day                DateTime
+  pickupsToday       Int      @default(0)
+  returnsToday       Int      @default(0)
+  checkedOut         Int      @default(0)
+  feeAdvisories      Int      @default(0)
+  noShows            Int      @default(0)
+  refreshedAt        DateTime @default(now())
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  @@unique([tenantId, day])
+  @@index([tenantId, refreshedAt])
+}

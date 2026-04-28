@@ -4,6 +4,7 @@ import { maybeSendReviewRequestEmail } from './review-email.service.js';
 import { hostReviewsService } from '../host-reviews/host-reviews.service.js';
 import { settingsService } from '../settings/settings.service.js';
 import { parseLocationConfig } from '../../lib/location-config.js';
+import { readFreshCounters, refreshCountersAsync } from './reservation-summary-counters.service.js';
 
 function ageOnDate(dob, onDate) {
   if (!dob || !onDate) return null;
@@ -99,6 +100,11 @@ function formatReservationWallClock(value) {
   return `${Number(month)}/${Number(day)}/${year}, ${hour12}:${minute} ${suffix}`;
 }
 
+// Shape returned by both list() and listPage(). Includes:
+// - customer.dateOfBirth so deriveUnderageAlertForReservation can run
+//   against the row inline (without a redundant batch fetch)
+// - pickupLocation.locationConfig (string-stringified JSON) for the same
+//   reason; other location uses don't need it, so returnLocation stays lean
 const reservationListSelect = {
   id: true,
   tenantId: true,
@@ -122,14 +128,23 @@ const reservationListSelect = {
       firstName: true,
       lastName: true,
       email: true,
-      phone: true
+      phone: true,
+      dateOfBirth: true
     }
   },
+  // tenantId is included on the four tenant-scoped relations below as a
+  // defense-in-depth check. The schema doesn't enforce that
+  // reservation.vehicleId points to a Vehicle in the SAME tenant — the
+  // application layer (and the old hydrate step) ensured this. With the
+  // hydrate step gone, maskCrossTenantRelations() below uses these
+  // tenantId fields to null out any drifted cross-tenant relation before
+  // the row leaves the API.
   vehicleType: {
     select: {
       id: true,
       code: true,
-      name: true
+      name: true,
+      tenantId: true
     }
   },
   vehicle: {
@@ -139,21 +154,25 @@ const reservationListSelect = {
       plate: true,
       make: true,
       model: true,
-      year: true
+      year: true,
+      tenantId: true
     }
   },
   pickupLocation: {
     select: {
       id: true,
       name: true,
-      code: true
+      code: true,
+      locationConfig: true,
+      tenantId: true
     }
   },
   returnLocation: {
     select: {
       id: true,
       name: true,
-      code: true
+      code: true,
+      tenantId: true
     }
   },
   franchiseId: true,
@@ -177,57 +196,31 @@ const reservationListSelect = {
 // Legacy alias
 const reservationListBaseSelect = reservationListSelect;
 
-async function hydrateReservationListRows(rows = [], scope = {}) {
-  if (!rows.length) return [];
-
-  const customerIds = [...new Set(rows.map((row) => row.customerId).filter(Boolean))];
-  const vehicleTypeIds = [...new Set(rows.map((row) => row.vehicleTypeId).filter(Boolean))];
-  const vehicleIds = [...new Set(rows.map((row) => row.vehicleId).filter(Boolean))];
-  const locationIds = [...new Set(rows.flatMap((row) => [row.pickupLocationId, row.returnLocationId]).filter(Boolean))];
-
-  const [customers, vehicleTypes, vehicles, locations] = await Promise.all([
-    customerIds.length
-      ? prisma.customer.findMany({
-          where: { id: { in: customerIds } },
-          select: { id: true, firstName: true, lastName: true, email: true, phone: true }
-        })
-      : [],
-    vehicleTypeIds.length
-      ? prisma.vehicleType.findMany({
-          where: { id: { in: vehicleTypeIds }, ...(scope?.tenantId ? { tenantId: scope.tenantId } : {}) },
-          select: { id: true, code: true, name: true }
-        })
-      : [],
-    vehicleIds.length
-      ? prisma.vehicle.findMany({
-          where: { id: { in: vehicleIds }, ...(scope?.tenantId ? { tenantId: scope.tenantId } : {}) },
-          select: { id: true, internalNumber: true, plate: true, make: true, model: true, year: true }
-        })
-      : [],
-    locationIds.length
-      ? prisma.location.findMany({
-          where: { id: { in: locationIds }, ...(scope?.tenantId ? { tenantId: scope.tenantId } : {}) },
-          select: { id: true, name: true, code: true }
-        })
-      : []
-  ]);
-
-  const customerById = new Map(customers.map((row) => [row.id, row]));
-  const vehicleTypeById = new Map(vehicleTypes.map((row) => [row.id, row]));
-  const vehicleById = new Map(vehicles.map((row) => [row.id, row]));
-  const locationById = new Map(locations.map((row) => [row.id, row]));
-
-  return rows.map((row) => {
-    const hydrated = {
-      ...row,
-      customer: row.customerId ? customerById.get(row.customerId) || null : null,
-      vehicleType: row.vehicleTypeId ? vehicleTypeById.get(row.vehicleTypeId) || null : null,
-      vehicle: row.vehicleId ? vehicleById.get(row.vehicleId) || null : null,
-      pickupLocation: row.pickupLocationId ? locationById.get(row.pickupLocationId) || null : null,
-      returnLocation: row.returnLocationId ? locationById.get(row.returnLocationId) || null : null
-    };
-    return { ...hydrated, ...deriveUnderageAlertForReservation(hydrated) };
-  });
+// Defense-in-depth: null out any cross-tenant relation that drifted into a
+// reservation row. The schema doesn't enforce that vehicle.tenantId equals
+// reservation.tenantId — the old hydrateReservationListRows() applied this
+// scoping by re-fetching with `where: { tenantId: scope.tenantId }`. With
+// hydrate gone, this helper does the equivalent in-memory check on each row.
+//
+// Only applied when scopeTenantId is set (i.e., a tenant-scoped request).
+// SUPER_ADMIN cross-tenant requests pass through untouched, which matches
+// the old hydrate behavior (hydrate ran without a tenant filter when the
+// scope had no tenantId).
+//
+// Customer is intentionally NOT masked here — the original hydrate fetched
+// customers without a tenant filter, so list views have always been able
+// to surface a customer's record regardless of tenant. Changing that is
+// a separate decision.
+function maskCrossTenantRelations(row, scopeTenantId) {
+  if (!scopeTenantId) return row;
+  const expected = row?.tenantId;
+  if (!expected) return row;
+  const out = { ...row };
+  if (out.vehicle?.tenantId && out.vehicle.tenantId !== expected) out.vehicle = null;
+  if (out.vehicleType?.tenantId && out.vehicleType.tenantId !== expected) out.vehicleType = null;
+  if (out.pickupLocation?.tenantId && out.pickupLocation.tenantId !== expected) out.pickupLocation = null;
+  if (out.returnLocation?.tenantId && out.returnLocation.tenantId !== expected) out.returnLocation = null;
+  return out;
 }
 
 function norm(v) {
@@ -242,6 +235,81 @@ function clampPositiveInt(value, fallback, min, max) {
   const parsed = Number.parseInt(String(value ?? ''), 10);
   if (!Number.isFinite(parsed)) return fallback;
   return Math.min(max, Math.max(min, parsed));
+}
+
+// Parse the listPage date filter inputs into a {start, end} window.
+// Accepts:
+//   - dateOn = "YYYY-MM-DD" (single day) — expands to [00:00, 23:59:59.999]
+//   - dateFrom + dateTo (explicit range) — both dates inclusive
+//   - dateFrom alone — open-ended range from that day forward
+//   - dateTo alone — open-ended range up to that day
+// Returns null when no valid date input is provided. Invalid date strings
+// are silently dropped (the filter is just skipped) so a malformed input
+// never 500s the list endpoint.
+function parseListDateRange(options = {}) {
+  const dateOnRaw = String(options?.dateOn ?? '').trim();
+  const dateFromRaw = String(options?.dateFrom ?? '').trim();
+  const dateToRaw = String(options?.dateTo ?? '').trim();
+
+  // Explicit range wins over single-date.
+  if (dateFromRaw || dateToRaw) {
+    const start = parseStartOfDay(dateFromRaw);
+    const end = parseEndOfDay(dateToRaw);
+    if (!start && !end) return null;
+    return {
+      // Open-ended sentinels — explicit UTC so behavior is identical
+      // across server timezones (matches the parser's UTC contract).
+      start: start || new Date(Date.UTC(1970, 0, 1, 0, 0, 0, 0)),
+      end: end || new Date(Date.UTC(9999, 11, 31, 23, 59, 59, 999))
+    };
+  }
+
+  if (!dateOnRaw) return null;
+  const start = parseStartOfDay(dateOnRaw);
+  const end = parseEndOfDay(dateOnRaw);
+  if (!start || !end) return null;
+  return { start, end };
+}
+
+// Parse a YYYY-MM-DD calendar date into a UTC Date at the requested time.
+// Codex bot finding (PR #21): JS Date silently rolls invalid days
+// (e.g. "2026-02-31" -> March 3) instead of failing, which would apply a
+// shifted filter window. We round-trip the parsed components against the
+// resulting UTC date and reject any mismatch.
+// Sentry bot finding (PR #21): the previous implementation built dates
+// from a string with no timezone suffix, which Date parses in server local
+// time. We now construct via Date.UTC(...) so the boundary is unambiguous
+// regardless of where the backend runs.
+function parseCalendarDate(raw, { endOfDay } = { endOfDay: false }) {
+  if (!raw) return null;
+  // Anchored full-string match — defends against trailing junk like "2026-04-28T17".
+  const match = String(raw).match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!match) return null;
+  const y = Number(match[1]);
+  const m = Number(match[2]);
+  const d = Number(match[3]);
+  if (!Number.isInteger(y) || !Number.isInteger(m) || !Number.isInteger(d)) return null;
+  if (m < 1 || m > 12 || d < 1 || d > 31) return null;
+  const utcMs = endOfDay
+    ? Date.UTC(y, m - 1, d, 23, 59, 59, 999)
+    : Date.UTC(y, m - 1, d, 0, 0, 0, 0);
+  const out = new Date(utcMs);
+  if (Number.isNaN(out.getTime())) return null;
+  // Round-trip check: rejects 2026-02-31 / 2026-04-31 / 2025-02-29 etc.
+  if (
+    out.getUTCFullYear() !== y
+    || out.getUTCMonth() !== m - 1
+    || out.getUTCDate() !== d
+  ) return null;
+  return out;
+}
+
+function parseStartOfDay(raw) {
+  return parseCalendarDate(raw, { endOfDay: false });
+}
+
+function parseEndOfDay(raw) {
+  return parseCalendarDate(raw, { endOfDay: true });
 }
 
 function vehicleDisplayLabel(vehicle = {}) {
@@ -808,6 +876,23 @@ export const reservationsService = {
     const dayEnd = new Date(`${todayStr}T23:59:59.999`);
     const where = scope?.tenantId ? { tenantId: scope.tenantId } : {};
 
+    // Phase 3 L-2: try the daily counter table first. On hit, we skip the
+    // 5 expensive count() queries below and only run the 4 "next item"
+    // findFirst() calls. On miss/stale, fall back to live aggregation and
+    // fire-and-forget a refresh so the next request hits the table.
+    //
+    // IMPORTANT: only use the counter table for tenant-scoped requests.
+    // Postgres unique indexes don't treat NULL values as equal, so a
+    // (NULL, day) row would not conflict on upsert — repeated SUPER_ADMIN
+    // global summary calls would insert duplicate rows instead of updating
+    // one. SUPER_ADMIN cross-tenant view (no scope.tenantId) falls through
+    // to the live aggregation path, which is already cached at 30s by the
+    // route layer (Phase 1).
+    const counterTenantId = scope?.tenantId || null;
+    const cachedCounters = counterTenantId
+      ? await readFreshCounters({ tenantId: counterTenantId, day: dayStart })
+      : null;
+
     const [
       pickupsToday,
       returnsToday,
@@ -819,36 +904,46 @@ export const reservationsService = {
       nextFeeAdvisory,
       nextNoShow
     ] = await Promise.all([
-      prisma.reservation.count({
-        where: {
-          ...where,
-          pickupAt: { gte: dayStart, lte: dayEnd }
-        }
-      }),
-      prisma.reservation.count({
-        where: {
-          ...where,
-          returnAt: { gte: dayStart, lte: dayEnd }
-        }
-      }),
-      prisma.reservation.count({
-        where: {
-          ...where,
-          status: 'CHECKED_OUT'
-        }
-      }),
-      prisma.reservation.count({
-        where: {
-          ...where,
-          notes: { contains: '[FEE_ADVISORY_OPEN' }
-        }
-      }),
-      prisma.reservation.count({
-        where: {
-          ...where,
-          status: 'NO_SHOW'
-        }
-      }),
+      cachedCounters
+        ? cachedCounters.pickupsToday
+        : prisma.reservation.count({
+            where: {
+              ...where,
+              pickupAt: { gte: dayStart, lte: dayEnd }
+            }
+          }),
+      cachedCounters
+        ? cachedCounters.returnsToday
+        : prisma.reservation.count({
+            where: {
+              ...where,
+              returnAt: { gte: dayStart, lte: dayEnd }
+            }
+          }),
+      cachedCounters
+        ? cachedCounters.checkedOut
+        : prisma.reservation.count({
+            where: {
+              ...where,
+              status: 'CHECKED_OUT'
+            }
+          }),
+      cachedCounters
+        ? cachedCounters.feeAdvisories
+        : prisma.reservation.count({
+            where: {
+              ...where,
+              notes: { contains: '[FEE_ADVISORY_OPEN' }
+            }
+          }),
+      cachedCounters
+        ? cachedCounters.noShows
+        : prisma.reservation.count({
+            where: {
+              ...where,
+              status: 'NO_SHOW'
+            }
+          }),
       prisma.reservation.findFirst({
         where: {
           ...where,
@@ -948,6 +1043,23 @@ export const reservationsService = {
         : null
     ].filter(Boolean);
 
+    // Phase 3 L-2: if we just ran the live aggregation (counter table was
+    // missing or stale), fire-and-forget a refresh so the next request
+    // can serve from the table. Doesn't block the response. Errors are
+    // swallowed inside refreshCountersAsync — never fails the request.
+    //
+    // Skip the refresh entirely when there's no tenantId (SUPER_ADMIN
+    // cross-tenant view) — see comment above. The Postgres unique index
+    // can't dedupe NULL tenantId rows, so we must not write them.
+    if (!cachedCounters && counterTenantId) {
+      refreshCountersAsync({
+        tenantId: counterTenantId,
+        day: dayStart,
+        dayStart,
+        dayEnd
+      });
+    }
+
     return {
       pickupsToday,
       returnsToday,
@@ -963,8 +1075,26 @@ export const reservationsService = {
     const query = norm(options.query);
     const take = clampPositiveInt(options.limit, 100, 1, 250);
     const skip = clampPositiveInt(options.offset, 0, 0, 100000);
+
+    // Date filter — overlap semantics: a reservation matches if its rental
+    // window includes any part of the requested window. That is:
+    //   pickupAt <= rangeEnd AND returnAt >= rangeStart
+    // Inputs:
+    //   - dateOn = "YYYY-MM-DD" expands to [00:00, 23:59:59.999] of that day
+    //   - dateFrom + dateTo can override for an explicit range
+    //   - When both are set, the explicit range wins (dateOn ignored)
+    //   - Invalid date strings are silently dropped (no filter applied)
+    const dateRange = parseListDateRange(options);
+    const dateWhere = dateRange
+      ? {
+          pickupAt: { lte: dateRange.end },
+          returnAt: { gte: dateRange.start }
+        }
+      : {};
+
     const where = {
       ...(scope?.tenantId ? { tenantId: scope.tenantId } : {}),
+      ...dateWhere,
       ...(query
         ? {
             OR: [
@@ -996,13 +1126,28 @@ export const reservationsService = {
       })
     ]);
 
-    const hydrated = await hydrateReservationListRows(rows, scope);
+    // Relations already included via reservationListSelect (customer + dateOfBirth,
+    // pickupLocation + locationConfig, vehicle, vehicleType, returnLocation, franchise,
+    // rentalAgreement summary). Map inline for the underage-alert derivation; no
+    // separate batch fetches needed. This used to call hydrateReservationListRows()
+    // which ran 4 redundant prisma queries — the count + findMany already had
+    // everything except dateOfBirth/locationConfig, which the select now covers.
+    //
+    // maskCrossTenantRelations restores the tenant-isolation defense the old
+    // hydrate provided: if a reservation row has a vehicle/vehicleType/location
+    // ID pointing to another tenant's record (data drift), null out that
+    // relation before responding. SUPER_ADMIN cross-tenant requests
+    // (scope.tenantId undefined) pass through unmasked, matching old behavior.
+    const items = rows.map((row) => {
+      const masked = maskCrossTenantRelations(row, scope?.tenantId);
+      return { ...masked, ...deriveUnderageAlertForReservation(masked) };
+    });
     return {
-      rows: hydrated,
+      rows: items,
       total,
       limit: take,
       offset: skip,
-      hasMore: skip + hydrated.length < total
+      hasMore: skip + items.length < total
     };
   },
 
@@ -1015,7 +1160,12 @@ export const reservationsService = {
       prisma.reservation.count({ where })
     ]);
     // Relations already included via select — add underage alert derivation
-    const items = rows.map((row) => ({ ...row, ...deriveUnderageAlertForReservation(row) }));
+    // and mask any drifted cross-tenant relation (defense in depth, matches
+    // listPage behavior).
+    const items = rows.map((row) => {
+      const masked = maskCrossTenantRelations(row, scope?.tenantId);
+      return { ...masked, ...deriveUnderageAlertForReservation(masked) };
+    });
     return { items, total, page: Number(page), limit: take, pages: Math.ceil(total / take) };
   },
 

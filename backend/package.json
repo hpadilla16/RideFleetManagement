@@ -34,7 +34,8 @@
     "seed:bootstrap": "node scripts/seed-bootstrap.mjs",
     "seed:booking-fixtures": "node scripts/seed-booking-fixtures.mjs",
     "verify:booking-fixtures": "node scripts/verify-booking-fixtures.mjs",
-    "backfill:legacy-metadata": "node scripts/backfill-legacy-metadata.mjs"
+    "backfill:legacy-metadata": "node scripts/backfill-legacy-metadata.mjs",
+    "load-test:reservations": "node scripts/load-test/run-reservations.mjs"
   },
   "dependencies": {
     "@prisma/client": "^6.14.0",
