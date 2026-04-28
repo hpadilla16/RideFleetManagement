@@ -112,9 +112,24 @@ reservationsRouter.get('/page', async (req, res, next) => {
   }
 });
 
+// 30s TTL on dashboard KPI summary. Multiple staff hitting the dashboard
+// within a 30s window share one query result. Stale-by-30s is acceptable
+// for the next-pickup / next-return widgets — operators will see the same
+// numbers refresh on their next dashboard mount.
+const RESERVATIONS_SUMMARY_TTL_MS = 30 * 1000;
+function reservationsSummaryCacheKey(scope) {
+  return `reservations:summary:${scope?.tenantId || 'global'}`;
+}
+
 reservationsRouter.get('/summary', async (req, res, next) => {
   try {
-    res.json(await reservationsService.summary(scopeFor(req)));
+    const scope = scopeFor(req);
+    const out = await cache.getOrSet(
+      reservationsSummaryCacheKey(scope),
+      () => reservationsService.summary(scope),
+      RESERVATIONS_SUMMARY_TTL_MS
+    );
+    res.json(out);
   } catch (e) {
     next(e);
   }
@@ -268,34 +283,50 @@ reservationsRouter.get('/:id/pricing', async (req, res, next) => {
   }
 });
 
+// 60s TTL on the pricing-options payload. Settings-tier data (locations,
+// services, fees, insurance plans, franchises) for one reservation. Staff
+// opening the same reservation 3x in 5 min hits cache 2/3. Keyed by tenant
+// + reservation id + pickup-location so the per-location service filter
+// stays correct. Underlying lookups (locationsService.list, feesService.list,
+// etc.) are also cached separately at 5min TTL — this layer just avoids the
+// 5-fan-out query orchestration cost on cache hit.
+const PRICING_OPTIONS_TTL_MS = 60 * 1000;
+function pricingOptionsCacheKey(tenantId, reservationId, pickupLocationId) {
+  return `reservations:pricing-options:${tenantId || 'global'}:${reservationId}:${pickupLocationId || 'no-loc'}`;
+}
+
 reservationsRouter.get('/:id/pricing-options', async (req, res, next) => {
   try {
     const reservation = await reservationsService.getById(req.params.id, scopeFor(req));
     if (!reservation) return res.status(404).json({ error: 'Reservation not found' });
     const tenantScope = reservation?.tenantId ? { tenantId: reservation.tenantId } : scopeFor(req);
-    const [locationsResult, servicesResult, feesResult, insurancePlansResult, franchisesResult] = await Promise.allSettled([
-      locationsService.list(tenantScope),
-      additionalServicesService.list({
-        locationId: reservation.pickupLocationId || undefined,
-        activeOnly: true,
-        tenantId: tenantScope.tenantId
-      }),
-      feesService.list(tenantScope),
-      settingsService.getInsurancePlans(tenantScope),
-      franchiseService.list(tenantScope)
-    ]);
-    const locations = locationsResult.status === 'fulfilled' ? locationsResult.value : [];
-    const services = servicesResult.status === 'fulfilled' ? servicesResult.value : [];
-    const fees = feesResult.status === 'fulfilled' ? feesResult.value : [];
-    const insurancePlans = insurancePlansResult.status === 'fulfilled' ? insurancePlansResult.value : [];
-    const franchisesOut = franchisesResult.status === 'fulfilled' ? franchisesResult.value : [];
-    res.json({
-      locations: Array.isArray(locations) ? locations : [],
-      services: Array.isArray(services) ? services : [],
-      fees: Array.isArray(fees) ? fees : [],
-      insurancePlans: Array.isArray(insurancePlans) ? insurancePlans : [],
-      franchises: Array.isArray(franchisesOut) ? franchisesOut : []
-    });
+    const cacheKey = pricingOptionsCacheKey(tenantScope.tenantId, reservation.id, reservation.pickupLocationId);
+    const out = await cache.getOrSet(cacheKey, async () => {
+      const [locationsResult, servicesResult, feesResult, insurancePlansResult, franchisesResult] = await Promise.allSettled([
+        locationsService.list(tenantScope),
+        additionalServicesService.list({
+          locationId: reservation.pickupLocationId || undefined,
+          activeOnly: true,
+          tenantId: tenantScope.tenantId
+        }),
+        feesService.list(tenantScope),
+        settingsService.getInsurancePlans(tenantScope),
+        franchiseService.list(tenantScope)
+      ]);
+      const locations = locationsResult.status === 'fulfilled' ? locationsResult.value : [];
+      const services = servicesResult.status === 'fulfilled' ? servicesResult.value : [];
+      const fees = feesResult.status === 'fulfilled' ? feesResult.value : [];
+      const insurancePlans = insurancePlansResult.status === 'fulfilled' ? insurancePlansResult.value : [];
+      const franchisesOut = franchisesResult.status === 'fulfilled' ? franchisesResult.value : [];
+      return {
+        locations: Array.isArray(locations) ? locations : [],
+        services: Array.isArray(services) ? services : [],
+        fees: Array.isArray(fees) ? fees : [],
+        insurancePlans: Array.isArray(insurancePlans) ? insurancePlans : [],
+        franchises: Array.isArray(franchisesOut) ? franchisesOut : []
+      };
+    }, PRICING_OPTIONS_TTL_MS);
+    res.json(out);
   } catch (e) {
     next(e);
   }

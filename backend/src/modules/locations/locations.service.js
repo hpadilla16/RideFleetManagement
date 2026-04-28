@@ -1,12 +1,24 @@
 import { prisma } from '../../lib/prisma.js';
+import { cache } from '../../lib/cache.js';
+
+// 5-minute TTL on tenant-scoped location list. Locations change rarely;
+// staff opening multiple reservations in a row should hit cache. Writes
+// (create/update/remove) below invalidate the per-tenant key.
+const LIST_TTL_MS = 5 * 60 * 1000;
+function listCacheKey(scope = {}) {
+  return `locations:list:${scope?.tenantId || 'global'}`;
+}
+function invalidateListCache(scope = {}) {
+  cache.del(listCacheKey(scope));
+}
 
 export const locationsService = {
   list(scope = {}) {
-    return prisma.location.findMany({
+    return cache.getOrSet(listCacheKey(scope), () => prisma.location.findMany({
       where: scope?.tenantId ? { tenantId: scope.tenantId } : undefined,
       orderBy: { name: 'asc' },
       include: { locationFees: { include: { fee: true } } }
-    });
+    }), LIST_TTL_MS);
   },
   getById(id, scope = {}) {
     return prisma.location.findFirst({
@@ -14,8 +26,8 @@ export const locationsService = {
       include: { locationFees: { include: { fee: true } } }
     });
   },
-  create(data, scope = {}) {
-    return prisma.location.create({
+  async create(data, scope = {}) {
+    const out = await prisma.location.create({
       data: {
         tenantId: scope?.tenantId || data.tenantId || null,
         code: data.code,
@@ -30,6 +42,8 @@ export const locationsService = {
           : null
       }
     });
+    invalidateListCache(scope);
+    return out;
   },
   async update(id, patch, scope = {}) {
     const current = await prisma.location.findFirst({ where: { id, ...(scope?.tenantId ? { tenantId: scope.tenantId } : {}) }, select: { id: true } });
@@ -50,14 +64,19 @@ export const locationsService = {
           await tx.locationFee.createMany({ data: feeIds.map((feeId) => ({ locationId: id, feeId })) });
         }
       });
+      invalidateListCache(scope);
       return this.getById(id);
     }
 
-    return prisma.location.update({ where: { id }, data: rest, include: { locationFees: { include: { fee: true } } } });
+    const out = await prisma.location.update({ where: { id }, data: rest, include: { locationFees: { include: { fee: true } } } });
+    invalidateListCache(scope);
+    return out;
   },
   async remove(id, scope = {}) {
     const current = await prisma.location.findFirst({ where: { id, ...(scope?.tenantId ? { tenantId: scope.tenantId } : {}) }, select: { id: true } });
     if (!current) throw new Error('Location not found');
-    return prisma.location.delete({ where: { id } });
+    const out = await prisma.location.delete({ where: { id } });
+    invalidateListCache(scope);
+    return out;
   }
 };
