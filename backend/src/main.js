@@ -14,6 +14,7 @@ import { stopSalesRouter } from './modules/stop-sales/stop-sales.routes.js';
 import { ratesRouter } from './modules/rates/rates.routes.js';
 import { authRouter } from './modules/auth/auth.routes.js';
 import { rentalAgreementsRouter } from './modules/rental-agreements/rental-agreements.routes.js';
+import { addendumSignaturePublicRouter } from './modules/rental-agreements/addendum-signature-public.routes.js';
 import { assertAuthConfig } from './modules/auth/auth.config.js';
 import { settingsRouter } from './modules/settings/settings.routes.js';
 import { requireAuth, requireRole, requireModuleAccess } from './middleware/auth.js';
@@ -87,6 +88,7 @@ app.get(['/api/docs', '/api/docs/'], (_req, res) => {
 app.use('/api/auth', authRouter);
 app.use('/api/public', customerPortalRouter);
 app.use('/api/public/booking', publicBookingRouter);
+app.use('/api/public/addendum-signature', addendumSignaturePublicRouter);
 app.use('/api/public/issues', publicIssueCenterRouter);
 app.use('/api/public/telematics', publicVehicleTelematicsRouter);
 app.use('/api/host-app', requireAuth, requireModuleAccess('hostApp'), hostAppRouter);
