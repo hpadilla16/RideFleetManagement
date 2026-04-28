@@ -34,6 +34,19 @@ jobs:
       - run: npm ci
       - run: npm run prisma:generate
       - run: node --check src/main.js
+      - name: Resolve transitive imports
+        # `node --check` only validates SYNTAX, not import resolution. A commit
+        # with a missing transitive import (the class of bug behind BUG-003)
+        # passes the syntax check and only fails when docker boots in the
+        # tenant-isolation-suite job. SKIP_LISTEN=1 imports main.js without
+        # opening a port; if any import is unresolvable, ERR_MODULE_NOT_FOUND
+        # surfaces here in seconds instead of minutes later.
+        env:
+          SKIP_LISTEN: '1'
+          DATABASE_URL: 'postgresql://postgres:postgres@localhost:5432/ci_resolve_only?schema=public'
+          JWT_SECRET: 'ci-resolve-only'
+          NODE_ENV: 'test'
+        run: node -e "import('./src/main.js').then(() => process.exit(0)).catch((err) => { console.error('Transitive import failed:', err?.message || err); process.exit(1); })"
   tenant-isolation-suite:
     runs-on: ubuntu-latest
     steps:
