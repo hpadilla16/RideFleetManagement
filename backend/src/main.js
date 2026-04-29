@@ -26,6 +26,7 @@ import { commissionsRouter } from './modules/commissions/commissions.routes.js';
 import { carSharingRouter } from './modules/car-sharing/car-sharing.routes.js';
 import { peopleRouter } from './modules/people/people.routes.js';
 import { publicBookingRouter } from './modules/public-booking/public-booking.routes.js';
+import { accountDeletionRouter } from './modules/public-booking/account-deletion.routes.js';
 import { hostAppRouter } from './modules/host-app/host-app.routes.js';
 import { employeeAppRouter } from './modules/employee-app/employee-app.routes.js';
 import { dealershipLoanerRouter } from './modules/dealership-loaner/dealership-loaner.routes.js';
@@ -88,6 +89,7 @@ app.get(['/api/docs', '/api/docs/'], (_req, res) => {
 app.use('/api/auth', authRouter);
 app.use('/api/public', customerPortalRouter);
 app.use('/api/public/booking', publicBookingRouter);
+app.use('/api/public/booking', accountDeletionRouter);
 app.use('/api/public/addendum-signature', addendumSignaturePublicRouter);
 app.use('/api/public/issues', publicIssueCenterRouter);
 app.use('/api/public/telematics', publicVehicleTelematicsRouter);
