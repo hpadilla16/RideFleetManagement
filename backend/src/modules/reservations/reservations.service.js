@@ -1076,9 +1076,17 @@ export const reservationsService = {
     const take = clampPositiveInt(options.limit, 100, 1, 250);
     const skip = clampPositiveInt(options.offset, 0, 0, 100000);
 
-    // Date filter — overlap semantics: a reservation matches if its rental
-    // window includes any part of the requested window. That is:
-    //   pickupAt <= rangeEnd AND returnAt >= rangeStart
+    // Date filter — pickup-date semantics (= "checkout date"). A reservation
+    // matches if its pickupAt falls within [rangeStart, rangeEnd]. This is
+    // the simplest, most intuitive behavior for staff filtering by date:
+    // "show me reservations being checked out in this window".
+    //
+    // Originally implemented with rental-window-overlap semantics
+    // (pickupAt <= end AND returnAt >= start) which surfaced any
+    // reservation active during the window — but that confused staff
+    // because a 7-day rental created Apr 22 would still show up when
+    // filtering for Apr 29. Switched 2026-04-29 to pickup-date only.
+    //
     // Inputs:
     //   - dateOn = "YYYY-MM-DD" expands to [00:00, 23:59:59.999] of that day
     //   - dateFrom + dateTo can override for an explicit range
@@ -1087,8 +1095,7 @@ export const reservationsService = {
     const dateRange = parseListDateRange(options);
     const dateWhere = dateRange
       ? {
-          pickupAt: { lte: dateRange.end },
-          returnAt: { gte: dateRange.start }
+          pickupAt: { gte: dateRange.start, lte: dateRange.end }
         }
       : {};
 

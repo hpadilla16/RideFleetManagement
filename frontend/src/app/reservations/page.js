@@ -628,13 +628,13 @@ function ReservationsInner({ token, me, logout }) {
               onChange={(e) => setSearchDraft(e.target.value)}
             />
             <label style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 13 }}>
-              <span className="label" style={{ margin: 0 }}>Date</span>
+              <span className="label" style={{ margin: 0 }}>Pickup from</span>
               <input
                 type="date"
                 value={dateFrom}
                 onChange={(e) => setDateFrom(e.target.value)}
-                title="Show reservations active on or after this date (set both Date and To for a range)"
-                aria-label="Filter from date"
+                title="Show reservations whose pickup date is on or after this date. Leave 'To' empty for a single-day filter."
+                aria-label="Pickup from date"
               />
             </label>
             <label style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 13 }}>
@@ -643,8 +643,8 @@ function ReservationsInner({ token, me, logout }) {
                 type="date"
                 value={dateTo}
                 onChange={(e) => setDateTo(e.target.value)}
-                title="Show reservations active on or before this date (leave empty for single-day filter)"
-                aria-label="Filter to date"
+                title="Show reservations whose pickup date is on or before this date."
+                aria-label="Pickup to date"
               />
             </label>
             {(dateFrom || dateTo) ? (
@@ -652,7 +652,7 @@ function ReservationsInner({ token, me, logout }) {
                 type="button"
                 className="button-subtle"
                 onClick={() => { setDateFrom(''); setDateTo(''); }}
-                title="Clear date filter"
+                title="Clear pickup-date filter"
               >
                 Clear dates
               </button>

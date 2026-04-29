@@ -31,18 +31,21 @@ describe('reservationsService.listPage — date filter', () => {
     prisma.reservation.findMany = origFindMany;
   });
 
+  // Filter semantics changed 2026-04-29: now "pickupAt falls in [from, to]"
+  // (= checkout date), not rental-window-overlap. The where shape we expect:
+  //   where.pickupAt = { gte: <start UTC>, lte: <end UTC> }
+  //   where.returnAt is NOT set
   it('applies single-date filter when dateOn is set (UTC bounds)', async () => {
     await reservationsService.listPage({ dateOn: '2026-04-28' }, { tenantId: 't1' });
     const w = captured.findManyWhere;
+    assert.ok(w.pickupAt?.gte, 'expected pickupAt.gte');
     assert.ok(w.pickupAt?.lte, 'expected pickupAt.lte');
-    assert.ok(w.returnAt?.gte, 'expected returnAt.gte');
+    assert.equal(w.returnAt, undefined, 'returnAt should NOT be filtered (pickup-only semantics)');
+    assert.equal(w.pickupAt.gte.toISOString().slice(0, 10), '2026-04-28');
     assert.equal(w.pickupAt.lte.toISOString().slice(0, 10), '2026-04-28');
-    assert.equal(w.returnAt.gte.toISOString().slice(0, 10), '2026-04-28');
     // Bounds are UTC midnight / end-of-day-UTC — independent of server timezone.
-    // Use getUTC*() not getHours() so this passes regardless of TZ=America/Puerto_Rico,
-    // TZ=Asia/Tokyo, etc.
-    assert.equal(w.returnAt.gte.getUTCHours(), 0);
-    assert.equal(w.returnAt.gte.getUTCMinutes(), 0);
+    assert.equal(w.pickupAt.gte.getUTCHours(), 0);
+    assert.equal(w.pickupAt.gte.getUTCMinutes(), 0);
     assert.equal(w.pickupAt.lte.getUTCHours(), 23);
     assert.equal(w.pickupAt.lte.getUTCMinutes(), 59);
   });
@@ -53,14 +56,15 @@ describe('reservationsService.listPage — date filter', () => {
       { tenantId: 't1' }
     );
     const w = captured.findManyWhere;
-    assert.equal(w.returnAt.gte.toISOString().slice(0, 10), '2026-04-01');
+    assert.equal(w.pickupAt.gte.toISOString().slice(0, 10), '2026-04-01');
     assert.equal(w.pickupAt.lte.toISOString().slice(0, 10), '2026-04-30');
+    assert.equal(w.returnAt, undefined);
   });
 
   it('open-ended range: dateFrom alone', async () => {
     await reservationsService.listPage({ dateFrom: '2026-04-15' }, { tenantId: 't1' });
     const w = captured.findManyWhere;
-    assert.equal(w.returnAt.gte.toISOString().slice(0, 10), '2026-04-15');
+    assert.equal(w.pickupAt.gte.toISOString().slice(0, 10), '2026-04-15');
     // upper bound is the year-9999 UTC sentinel — getUTCFullYear() because
     // local-time conversion can roll into year 10000 in west-of-UTC TZs.
     assert.ok(w.pickupAt.lte.getUTCFullYear() >= 9999);
@@ -71,7 +75,7 @@ describe('reservationsService.listPage — date filter', () => {
     const w = captured.findManyWhere;
     assert.equal(w.pickupAt.lte.toISOString().slice(0, 10), '2026-04-15');
     // lower bound is the year-1970 UTC sentinel — same UTC reasoning.
-    assert.ok(w.returnAt.gte.getUTCFullYear() <= 1970);
+    assert.ok(w.pickupAt.gte.getUTCFullYear() <= 1970);
   });
 
   it('explicit range wins over dateOn when both are set', async () => {
@@ -80,7 +84,7 @@ describe('reservationsService.listPage — date filter', () => {
       { tenantId: 't1' }
     );
     const w = captured.findManyWhere;
-    assert.equal(w.returnAt.gte.toISOString().slice(0, 10), '2026-04-01');
+    assert.equal(w.pickupAt.gte.toISOString().slice(0, 10), '2026-04-01');
     assert.equal(w.pickupAt.lte.toISOString().slice(0, 10), '2026-04-30');
   });
 
@@ -121,7 +125,7 @@ describe('reservationsService.listPage — date filter', () => {
   it('accepts a leap-year Feb 29 in a leap year', async () => {
     await reservationsService.listPage({ dateOn: '2024-02-29' }, { tenantId: 't1' });
     const w = captured.findManyWhere;
-    assert.equal(w.returnAt.gte.toISOString().slice(0, 10), '2024-02-29');
+    assert.equal(w.pickupAt.gte.toISOString().slice(0, 10), '2024-02-29');
     assert.equal(w.pickupAt.lte.toISOString().slice(0, 10), '2024-02-29');
   });
 
@@ -131,7 +135,7 @@ describe('reservationsService.listPage — date filter', () => {
     await reservationsService.listPage({ dateOn: '2026-04-28' }, { tenantId: 't1' });
     const w = captured.findManyWhere;
     // Start of day UTC = 00:00:00.000 UTC; toISOString shows that directly.
-    assert.equal(w.returnAt.gte.toISOString(), '2026-04-28T00:00:00.000Z');
+    assert.equal(w.pickupAt.gte.toISOString(), '2026-04-28T00:00:00.000Z');
     assert.equal(w.pickupAt.lte.toISOString(), '2026-04-28T23:59:59.999Z');
   });
 
@@ -141,7 +145,7 @@ describe('reservationsService.listPage — date filter', () => {
       { tenantId: 't1' }
     );
     const w = captured.findManyWhere;
-    assert.ok(w.pickupAt?.lte, 'date filter applied');
+    assert.ok(w.pickupAt?.gte && w.pickupAt?.lte, 'date filter applied');
     assert.ok(Array.isArray(w.OR), 'text query applied');
     assert.equal(w.tenantId, 't1');
   });
