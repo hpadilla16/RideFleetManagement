@@ -619,6 +619,8 @@ model Customer {
   portalResetExpiresAt     DateTime?
   guestAccessToken         String?
   guestAccessExpiresAt     DateTime?
+  deletionToken            String?   @unique
+  deletionTokenExpiresAt   DateTime?
   doNotRent                Boolean   @default(false)
   doNotRentReason          String?
   notes                    String?

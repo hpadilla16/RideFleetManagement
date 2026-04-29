@@ -13,7 +13,7 @@
     "test:booking-engine": "node --test src/modules/booking-engine/booking-engine.test.mjs",
     "test:stop-sales": "node --test src/modules/stop-sales/stop-sales.test.mjs",
     "test:review-email": "node --test src/modules/reservations/review-email.test.mjs",
-    "test:public-booking": "node --test src/modules/public-booking/payment-session.test.mjs src/modules/public-booking/payarc-hosted-fields.test.mjs",
+    "test:public-booking": "node --test src/modules/public-booking/payment-session.test.mjs src/modules/public-booking/payarc-hosted-fields.test.mjs src/modules/public-booking/account-deletion.test.mjs",
     "test:planner": "node --test src/modules/planner/planner.service.test.mjs",
     "test:rates": "node --test src/modules/rates/revenue-pricing.test.mjs",
     "test:portal": "node --test src/modules/customer-portal/customer-portal-self-service.test.mjs",
