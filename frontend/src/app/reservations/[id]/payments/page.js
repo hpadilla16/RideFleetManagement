@@ -74,18 +74,57 @@ function Inner({ token, me, logout }) {
   const autoReconcileAttemptsRef = useRef(0);
   const autoReconcileKeyRef = useRef('');
 
+  // The exact warning string we set when the reservation re-fetch can't
+  // refresh the row. Kept as a constant so the success path can clear
+  // ONLY this message — leaving any action-feedback messages (e.g.
+  // "Payment posted successfully") untouched. Codex bot finding on
+  // PR #24: previously this warning could stick across the auto-refresh
+  // interval and misrepresent state to staff.
+  const STALE_RESERVATION_WARNING = 'Reservation data could not be refreshed. Showing the last known state.';
+
   const load = async () => {
-    const [r, payments, pricingOut] = await Promise.all([
-      api(`/api/reservations/${id}`, { bypassCache: true }, token),
-      api(`/api/reservations/${id}/payments`, { bypassCache: true }, token).catch(() => []),
-      api(`/api/reservations/${id}/pricing`, { bypassCache: true }, token).catch(() => null)
-    ]);
-    setRow(r);
-    setPaymentRows(normalizePaymentRows(payments));
-    setPricing(pricingOut);
+    // Sentry root-cause finding (2026-04-28 22:00 EDT): the first call
+    // here used to lack a .catch(), so a network blip while the user was
+    // navigating into the payments page caused an unhandled rejection of
+    // the whole Promise.all. The other two already had per-call catches.
+    // Now: the first call falls back to the existing row state on
+    // failure (so a transient drop doesn't blank out a previously-loaded
+    // reservation), and the whole function is wrapped in try/catch so a
+    // truly broken state surfaces a visible message rather than silently
+    // hanging.
+    try {
+      const [r, payments, pricingOut] = await Promise.all([
+        api(`/api/reservations/${id}`, { bypassCache: true }, token).catch(() => null),
+        api(`/api/reservations/${id}/payments`, { bypassCache: true }, token).catch(() => []),
+        api(`/api/reservations/${id}/pricing`, { bypassCache: true }, token).catch(() => null)
+      ]);
+      if (r) setRow(r);
+      setPaymentRows(normalizePaymentRows(payments));
+      if (pricingOut !== null) setPricing(pricingOut);
+      if (!r) {
+        setMsg(STALE_RESERVATION_WARNING);
+      } else {
+        // Successful reservation fetch — clear the stale warning if it
+        // was previously set, but leave any other message (action
+        // feedback, success notices) alone so a recovered transient
+        // blip doesn't paper over unrelated user-facing context.
+        setMsg((current) => (current === STALE_RESERVATION_WARNING ? '' : current));
+      }
+    } catch (error) {
+      // Defense in depth — Promise.all shouldn't reject now that all three
+      // calls catch their own errors, but keep this so any future caller
+      // refactor can't reintroduce the unhandled-rejection class of bug.
+      setMsg(error?.message || 'Unable to load payments page data');
+    }
   };
 
-  useEffect(() => { if (id) load(); }, [id]);
+  useEffect(() => {
+    if (!id) return;
+    // Fire-and-forget is intentional — load() now swallows errors and
+    // surfaces them via setMsg. Wrapping the call here defends against
+    // any future change to load() that re-introduces a throw path.
+    load().catch(() => {});
+  }, [id]);
 
   const payments = useMemo(() => paymentRows, [paymentRows]);
   const totalFromQuery = useMemo(() => Number(searchParams?.get('total') || 0), [searchParams]);
