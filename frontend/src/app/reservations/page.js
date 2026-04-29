@@ -633,7 +633,7 @@ function ReservationsInner({ token, me, logout }) {
                 type="date"
                 value={dateFrom}
                 onChange={(e) => setDateFrom(e.target.value)}
-                title="Show reservations whose pickup date is on or after this date. Leave 'To' empty for a single-day filter."
+                title="Show reservations whose pickup date is on or after this date. Set 'To' to the same date for a single-day filter, or to a later date for a range."
                 aria-label="Pickup from date"
               />
             </label>
@@ -643,7 +643,7 @@ function ReservationsInner({ token, me, logout }) {
                 type="date"
                 value={dateTo}
                 onChange={(e) => setDateTo(e.target.value)}
-                title="Show reservations whose pickup date is on or before this date."
+                title="Show reservations whose pickup date is on or before this date. Set 'Pickup from' to the same date for a single-day filter."
                 aria-label="Pickup to date"
               />
             </label>
