@@ -1,6 +1,16 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
+import jwt from 'jsonwebtoken';
+
+// Test JWT secret — set BEFORE importing anything that reads it.
+const TEST_JWT_SECRET = 'test-jwt-secret-for-account-deletion';
+process.env.JWT_SECRET = TEST_JWT_SECRET;
+
+// Helper: sign a guest JWT for tests
+function signGuestJwt({ email, tenantId, customerId = 'cust-1', expiresIn = '1h' }) {
+  return jwt.sign({ sub: customerId, customerId, email, tenantId }, TEST_JWT_SECRET, { expiresIn });
+}
 
 // Mock the dependencies
 let mockPrisma = {};
@@ -44,20 +54,31 @@ async function createServiceWithMocks(prismaOverride, sendEmailOverride, loggerO
   }
 
   return {
-    async requestAccountDeletion({ email, tenantId, typedConfirmation }) {
+    async requestAccountDeletion({ guestJwt, typedConfirmation }) {
       if (typedConfirmation !== 'DELETE') {
         const err = new Error('Type DELETE to confirm.');
         err.statusCode = 400;
         throw err;
       }
 
-      const cleanEmail = String(email || '').trim().toLowerCase();
-      if (!cleanEmail || !cleanEmail.includes('@')) {
-        const err = new Error('Email is required.');
-        err.statusCode = 400;
+      // Verify JWT — identity must come from verified claims, not body.
+      let claims;
+      try {
+        claims = jwt.verify(guestJwt || '', TEST_JWT_SECRET);
+      } catch (e) {
+        const err = new Error('Sign in again to delete your account.');
+        err.statusCode = 401;
         throw err;
       }
 
+      const cleanEmail = String(claims?.email || '').trim().toLowerCase();
+      const tenantId = claims?.tenantId;
+
+      if (!cleanEmail || !cleanEmail.includes('@')) {
+        const err = new Error('Sign in again to delete your account.');
+        err.statusCode = 401;
+        throw err;
+      }
       if (!tenantId || typeof tenantId !== 'string') {
         const err = new Error('Sign in again to delete your account.');
         err.statusCode = 401;
@@ -198,61 +219,92 @@ describe('accountDeletionService', () => {
   describe('requestAccountDeletion', () => {
     it('rejects when typedConfirmation !== DELETE (400)', async () => {
       const service = await createServiceWithMocks({}, null, {});
+      const goodJwt = signGuestJwt({ email: 'user@example.com', tenantId: 'tenant-1' });
       await assert.rejects(
-        () => service.requestAccountDeletion({ email: 'user@example.com', typedConfirmation: 'cancel' }),
+        () => service.requestAccountDeletion({ guestJwt: goodJwt, typedConfirmation: 'cancel' }),
         (err) => err.statusCode === 400 && /Type DELETE to confirm/i.test(err.message)
       );
     });
 
-    it('rejects when email missing (400)', async () => {
+    it('rejects when guestJwt is missing (401)', async () => {
       const service = await createServiceWithMocks({}, null, {});
       await assert.rejects(
-        () => service.requestAccountDeletion({ email: null, typedConfirmation: 'DELETE' }),
-        (err) => err.statusCode === 400 && /Email is required/i.test(err.message)
-      );
-    });
-
-    it('rejects when email is empty string (400)', async () => {
-      const service = await createServiceWithMocks({}, null, {});
-      await assert.rejects(
-        () => service.requestAccountDeletion({ email: '', typedConfirmation: 'DELETE' }),
-        (err) => err.statusCode === 400 && /Email is required/i.test(err.message)
-      );
-    });
-
-    it('rejects when email is malformed (no @) (400)', async () => {
-      const service = await createServiceWithMocks({}, null, {});
-      await assert.rejects(
-        () => service.requestAccountDeletion({ email: 'not-an-email', typedConfirmation: 'DELETE' }),
-        (err) => err.statusCode === 400 && /Email is required/i.test(err.message)
-      );
-    });
-
-    it('rejects when tenantId is missing (401)', async () => {
-      const service = await createServiceWithMocks({}, null, {});
-      await assert.rejects(
-        () => service.requestAccountDeletion({ email: 'user@example.com', typedConfirmation: 'DELETE' }),
+        () => service.requestAccountDeletion({ guestJwt: null, typedConfirmation: 'DELETE' }),
         (err) => err.statusCode === 401 && /Sign in again/i.test(err.message)
       );
     });
 
-    it('lookup is tenant-scoped (cross-tenant safety)', async () => {
+    it('rejects when guestJwt is empty string (401)', async () => {
+      const service = await createServiceWithMocks({}, null, {});
+      await assert.rejects(
+        () => service.requestAccountDeletion({ guestJwt: '', typedConfirmation: 'DELETE' }),
+        (err) => err.statusCode === 401 && /Sign in again/i.test(err.message)
+      );
+    });
+
+    it('rejects when guestJwt is malformed (401)', async () => {
+      const service = await createServiceWithMocks({}, null, {});
+      await assert.rejects(
+        () => service.requestAccountDeletion({ guestJwt: 'not.a.jwt', typedConfirmation: 'DELETE' }),
+        (err) => err.statusCode === 401 && /Sign in again/i.test(err.message)
+      );
+    });
+
+    it('rejects when guestJwt is signed with wrong secret (401, security)', async () => {
+      const service = await createServiceWithMocks({}, null, {});
+      // Sign with a DIFFERENT secret — simulates an attacker who forged a JWT
+      const forged = jwt.sign({ email: 'victim@example.com', tenantId: 'tenant-1' }, 'attacker-secret');
+      await assert.rejects(
+        () => service.requestAccountDeletion({ guestJwt: forged, typedConfirmation: 'DELETE' }),
+        (err) => err.statusCode === 401 && /Sign in again/i.test(err.message)
+      );
+    });
+
+    it('rejects when guestJwt is expired (401)', async () => {
+      const service = await createServiceWithMocks({}, null, {});
+      // expiresIn: '-1s' makes the JWT immediately expired
+      const expired = signGuestJwt({ email: 'user@example.com', tenantId: 'tenant-1', expiresIn: '-1s' });
+      await assert.rejects(
+        () => service.requestAccountDeletion({ guestJwt: expired, typedConfirmation: 'DELETE' }),
+        (err) => err.statusCode === 401 && /Sign in again/i.test(err.message)
+      );
+    });
+
+    it('rejects when JWT has no email claim (401)', async () => {
+      const service = await createServiceWithMocks({}, null, {});
+      const noEmail = jwt.sign({ tenantId: 'tenant-1' }, TEST_JWT_SECRET);
+      await assert.rejects(
+        () => service.requestAccountDeletion({ guestJwt: noEmail, typedConfirmation: 'DELETE' }),
+        (err) => err.statusCode === 401 && /Sign in again/i.test(err.message)
+      );
+    });
+
+    it('rejects when JWT has no tenantId claim (401)', async () => {
+      const service = await createServiceWithMocks({}, null, {});
+      const noTenant = jwt.sign({ email: 'user@example.com' }, TEST_JWT_SECRET);
+      await assert.rejects(
+        () => service.requestAccountDeletion({ guestJwt: noTenant, typedConfirmation: 'DELETE' }),
+        (err) => err.statusCode === 401 && /Sign in again/i.test(err.message)
+      );
+    });
+
+    it('lookup uses verified JWT claims, not request body (security)', async () => {
       let capturedWhere = null;
       const service = await createServiceWithMocks(
         {
           customer: {
             findFirst: async (query) => {
               capturedWhere = query.where;
-              return null; // doesn't matter, we just inspect the where
+              return null;
             }
           }
         },
         null,
         {}
       );
+      const goodJwt = signGuestJwt({ email: 'BOB@Example.com', tenantId: 'tenant-XYZ' });
       await service.requestAccountDeletion({
-        email: 'BOB@Example.com',
-        tenantId: 'tenant-XYZ',
+        guestJwt: goodJwt,
         typedConfirmation: 'DELETE'
       });
       assert.equal(capturedWhere.tenantId, 'tenant-XYZ');
@@ -260,7 +312,7 @@ describe('accountDeletionService', () => {
       assert.equal(capturedWhere.email.mode, 'insensitive');
     });
 
-    it('returns 202 silently when no Customer matches email (anti-enumeration)', async () => {
+    it('returns 202 silently when no Customer matches (anti-enumeration)', async () => {
       const service = await createServiceWithMocks(
         {
           customer: {
@@ -270,9 +322,9 @@ describe('accountDeletionService', () => {
         null,
         {}
       );
+      const goodJwt = signGuestJwt({ email: 'unknown@example.com', tenantId: 'tenant-1' });
       const result = await service.requestAccountDeletion({
-        email: 'unknown@example.com',
-        tenantId: 'tenant-1',
+        guestJwt: goodJwt,
         typedConfirmation: 'DELETE'
       });
       assert.equal(result.ok, true);
@@ -299,8 +351,9 @@ describe('accountDeletionService', () => {
         null,
         {}
       );
+      const goodJwt = signGuestJwt({ email: 'user@example.com', tenantId: 'tenant-1' });
       await assert.rejects(
-        () => service.requestAccountDeletion({ email: 'user@example.com', tenantId: 'tenant-1', typedConfirmation: 'DELETE' }),
+        () => service.requestAccountDeletion({ guestJwt: goodJwt, typedConfirmation: 'DELETE' }),
         (err) => {
           return err.statusCode === 409
             && /Complete or cancel your active trip/i.test(err.message)
@@ -318,8 +371,7 @@ describe('accountDeletionService', () => {
             findFirst: async () => ({
               id: 'cust-1',
               email: 'user@example.com',
-              firstName: 'John',
-              guestAccessExpiresAt: new Date(Date.now() + 10000)
+              firstName: 'John'
             }),
             update: async () => ({})
           },
@@ -330,8 +382,9 @@ describe('accountDeletionService', () => {
         async () => { throw new Error('SMTP failure'); },
         { error: () => {} }
       );
+      const goodJwt = signGuestJwt({ email: 'user@example.com', tenantId: 'tenant-1' });
       await assert.rejects(
-        () => service.requestAccountDeletion({ email: 'user@example.com', tenantId: 'tenant-1', typedConfirmation: 'DELETE' }),
+        () => service.requestAccountDeletion({ guestJwt: goodJwt, typedConfirmation: 'DELETE' }),
         (err) => err.statusCode === 503 && /could not send the confirmation email/i.test(err.message)
       );
     });
@@ -348,8 +401,7 @@ describe('accountDeletionService', () => {
             findFirst: async () => ({
               id: 'cust-1',
               email: 'user@example.com',
-              firstName: 'John',
-              guestAccessExpiresAt: new Date(Date.now() + 10000)
+              firstName: 'John'
             }),
             update: async (data) => {
               savedToken = data.data.deletionToken;
@@ -372,16 +424,16 @@ describe('accountDeletionService', () => {
         { error: () => {}, info: () => {} }
       );
 
+      const goodJwt = signGuestJwt({ email: 'user@example.com', tenantId: 'tenant-1' });
       const result = await service.requestAccountDeletion({
-        email: 'user@example.com',
-        tenantId: 'tenant-1',
+        guestJwt: goodJwt,
         typedConfirmation: 'DELETE'
       });
 
       assert.equal(result.ok, true);
       assert.equal(result.expiresInSeconds, 86400);
       assert.ok(savedToken);
-      assert.ok(savedToken.length >= 48); // crypto.randomBytes(24).toString('hex') is 48 chars
+      assert.ok(savedToken.length >= 48);
       assert.ok(savedExpiresAt);
       assert.ok(savedExpiresAt > new Date());
       assert.equal(emailSent, true);
@@ -396,8 +448,7 @@ describe('accountDeletionService', () => {
             findFirst: async () => ({
               id: 'cust-1',
               email: 'user@example.com',
-              firstName: 'John',
-              guestAccessExpiresAt: new Date(Date.now() + 10000)
+              firstName: 'John'
             }),
             update: async (data) => {
               tokens.push(data.data.deletionToken);
@@ -412,8 +463,9 @@ describe('accountDeletionService', () => {
         { error: () => {}, info: () => {} }
       );
 
-      await service.requestAccountDeletion({ email: 'user@example.com', tenantId: 'tenant-1', typedConfirmation: 'DELETE' });
-      await service.requestAccountDeletion({ email: 'user@example.com', tenantId: 'tenant-1', typedConfirmation: 'DELETE' });
+      const goodJwt = signGuestJwt({ email: 'user@example.com', tenantId: 'tenant-1' });
+      await service.requestAccountDeletion({ guestJwt: goodJwt, typedConfirmation: 'DELETE' });
+      await service.requestAccountDeletion({ guestJwt: goodJwt, typedConfirmation: 'DELETE' });
 
       assert.notEqual(tokens[0], tokens[1]);
     });
