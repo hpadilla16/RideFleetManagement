@@ -1,7 +1,7 @@
 import crypto from 'node:crypto';
 import { prisma } from '../../lib/prisma.js';
 import { sendEmail } from '../../lib/mailer.js';
-import { logger } from '../../lib/logger.js';
+import logger from '../../lib/logger.js';
 
 const ANON_REVIEWER_NAME = 'Anonymous user';
 const ACTIVE_TRIP_STATES = ['RESERVED', 'CONFIRMED', 'READY_FOR_PICKUP', 'IN_PROGRESS', 'DISPUTED'];
