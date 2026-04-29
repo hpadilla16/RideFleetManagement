@@ -44,7 +44,7 @@ async function createServiceWithMocks(prismaOverride, sendEmailOverride, loggerO
   }
 
   return {
-    async requestAccountDeletion({ email, typedConfirmation }) {
+    async requestAccountDeletion({ email, tenantId, typedConfirmation }) {
       if (typedConfirmation !== 'DELETE') {
         const err = new Error('Type DELETE to confirm.');
         err.statusCode = 400;
@@ -58,8 +58,15 @@ async function createServiceWithMocks(prismaOverride, sendEmailOverride, loggerO
         throw err;
       }
 
+      if (!tenantId || typeof tenantId !== 'string') {
+        const err = new Error('Sign in again to delete your account.');
+        err.statusCode = 401;
+        throw err;
+      }
+
       const customer = await mockPrisma.customer?.findFirst?.({
-        where: { email: { equals: cleanEmail, mode: 'insensitive' } }
+        where: { email: { equals: cleanEmail, mode: 'insensitive' }, tenantId },
+        orderBy: { updatedAt: 'desc' }
       });
 
       // Anti-enumeration: if no customer matches, return 202 silently.
@@ -161,7 +168,7 @@ async function createServiceWithMocks(prismaOverride, sendEmailOverride, loggerO
             address2: null,
             city: null,
             state: null,
-            postalCode: null,
+            zip: null,
             country: null,
             idPhotoUrl: null,
             authnetCustomerProfileId: null,
@@ -221,6 +228,38 @@ describe('accountDeletionService', () => {
       );
     });
 
+    it('rejects when tenantId is missing (401)', async () => {
+      const service = await createServiceWithMocks({}, null, {});
+      await assert.rejects(
+        () => service.requestAccountDeletion({ email: 'user@example.com', typedConfirmation: 'DELETE' }),
+        (err) => err.statusCode === 401 && /Sign in again/i.test(err.message)
+      );
+    });
+
+    it('lookup is tenant-scoped (cross-tenant safety)', async () => {
+      let capturedWhere = null;
+      const service = await createServiceWithMocks(
+        {
+          customer: {
+            findFirst: async (query) => {
+              capturedWhere = query.where;
+              return null; // doesn't matter, we just inspect the where
+            }
+          }
+        },
+        null,
+        {}
+      );
+      await service.requestAccountDeletion({
+        email: 'BOB@Example.com',
+        tenantId: 'tenant-XYZ',
+        typedConfirmation: 'DELETE'
+      });
+      assert.equal(capturedWhere.tenantId, 'tenant-XYZ');
+      assert.equal(capturedWhere.email.equals, 'bob@example.com'); // normalized lowercase
+      assert.equal(capturedWhere.email.mode, 'insensitive');
+    });
+
     it('returns 202 silently when no Customer matches email (anti-enumeration)', async () => {
       const service = await createServiceWithMocks(
         {
@@ -233,6 +272,7 @@ describe('accountDeletionService', () => {
       );
       const result = await service.requestAccountDeletion({
         email: 'unknown@example.com',
+        tenantId: 'tenant-1',
         typedConfirmation: 'DELETE'
       });
       assert.equal(result.ok, true);
@@ -260,7 +300,7 @@ describe('accountDeletionService', () => {
         {}
       );
       await assert.rejects(
-        () => service.requestAccountDeletion({ email: 'user@example.com', typedConfirmation: 'DELETE' }),
+        () => service.requestAccountDeletion({ email: 'user@example.com', tenantId: 'tenant-1', typedConfirmation: 'DELETE' }),
         (err) => {
           return err.statusCode === 409
             && /Complete or cancel your active trip/i.test(err.message)
@@ -291,7 +331,7 @@ describe('accountDeletionService', () => {
         { error: () => {} }
       );
       await assert.rejects(
-        () => service.requestAccountDeletion({ email: 'user@example.com', typedConfirmation: 'DELETE' }),
+        () => service.requestAccountDeletion({ email: 'user@example.com', tenantId: 'tenant-1', typedConfirmation: 'DELETE' }),
         (err) => err.statusCode === 503 && /could not send the confirmation email/i.test(err.message)
       );
     });
@@ -334,6 +374,7 @@ describe('accountDeletionService', () => {
 
       const result = await service.requestAccountDeletion({
         email: 'user@example.com',
+        tenantId: 'tenant-1',
         typedConfirmation: 'DELETE'
       });
 
@@ -371,8 +412,8 @@ describe('accountDeletionService', () => {
         { error: () => {}, info: () => {} }
       );
 
-      await service.requestAccountDeletion({ email: 'user@example.com', typedConfirmation: 'DELETE' });
-      await service.requestAccountDeletion({ email: 'user@example.com', typedConfirmation: 'DELETE' });
+      await service.requestAccountDeletion({ email: 'user@example.com', tenantId: 'tenant-1', typedConfirmation: 'DELETE' });
+      await service.requestAccountDeletion({ email: 'user@example.com', tenantId: 'tenant-1', typedConfirmation: 'DELETE' });
 
       assert.notEqual(tokens[0], tokens[1]);
     });

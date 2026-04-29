@@ -46,7 +46,7 @@ function escapeHtml(s) {
 }
 
 export const accountDeletionService = {
-  async requestAccountDeletion({ email, typedConfirmation }) {
+  async requestAccountDeletion({ email, tenantId, typedConfirmation }) {
     if (typedConfirmation !== 'DELETE') {
       const err = new Error('Type DELETE to confirm.');
       err.statusCode = 400;
@@ -60,14 +60,29 @@ export const accountDeletionService = {
       throw err;
     }
 
-    // Email-based lookup. Auth model: the request itself is rate-limited
+    // Tenant scope is required to disambiguate Customers — `Customer.email`
+    // is indexed but NOT unique, so multi-tenant data can have multiple
+    // rows with the same email. Without `tenantId` in the where clause
+    // we'd risk anonymizing the wrong Customer (Codex bot finding on PR).
+    // Tenant comes from the signed-in JWT's claims on the Flutter side.
+    if (!tenantId || typeof tenantId !== 'string') {
+      const err = new Error('Sign in again to delete your account.');
+      err.statusCode = 401;
+      throw err;
+    }
+
+    // Email + tenant lookup. Auth model: the request itself is rate-limited
     // (5/hour per IP) and the actual deletion gate is the confirmation
     // email — only the email's owner can complete it. Industry-standard
     // for guest account flows (Twitter/Facebook follow this pattern).
+    // Order by updatedAt as a defensive tiebreaker if duplicates exist
+    // within the same tenant (shouldn't happen but be deterministic).
     const customer = await prisma.customer.findFirst({
       where: {
-        email: { equals: cleanEmail, mode: 'insensitive' }
-      }
+        email: { equals: cleanEmail, mode: 'insensitive' },
+        tenantId: tenantId
+      },
+      orderBy: { updatedAt: 'desc' }
     });
 
     if (!customer) {
@@ -186,7 +201,7 @@ export const accountDeletionService = {
           address2: null,
           city: null,
           state: null,
-          postalCode: null,
+          zip: null,
           country: null,
           idPhotoUrl: null,
           authnetCustomerProfileId: null,
