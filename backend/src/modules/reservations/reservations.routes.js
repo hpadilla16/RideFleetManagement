@@ -106,10 +106,12 @@ reservationsRouter.get('/page', async (req, res, next) => {
       query: req.query?.q,
       limit: req.query?.limit,
       offset: req.query?.offset,
-      // Date filter — accepts ?dateOn=YYYY-MM-DD for a single day
-      // or ?dateFrom=YYYY-MM-DD&dateTo=YYYY-MM-DD for a range.
-      // Overlap semantics: matches reservations whose rental window
-      // includes any part of the requested window.
+      // Date filter — pickup-date semantics. Accepts ?dateOn=YYYY-MM-DD
+      // for a single day, or ?dateFrom=YYYY-MM-DD&dateTo=YYYY-MM-DD for
+      // a range. Matches reservations whose pickupAt falls within the
+      // requested window. (Originally this was rental-window-overlap;
+      // changed 2026-04-29 because staff expected "filter by checkout
+      // date", not "show me anything active during this window".)
       dateOn: req.query?.dateOn,
       dateFrom: req.query?.dateFrom,
       dateTo: req.query?.dateTo
