@@ -27,9 +27,9 @@ const confirmGuard = [
 
 accountDeletionRouter.post('/account/delete-request', ...requestGuard, async (req, res) => {
   try {
-    const { email, typedConfirmation } = req.body || {};
+    const { guestJwt, typedConfirmation } = req.body || {};
     const result = await accountDeletionService.requestAccountDeletion({
-      email,
+      guestJwt,
       typedConfirmation
     });
     res.status(202).json(result);

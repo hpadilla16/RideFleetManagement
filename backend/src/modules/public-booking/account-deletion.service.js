@@ -1,7 +1,9 @@
 import crypto from 'node:crypto';
+import jwt from 'jsonwebtoken';
 import { prisma } from '../../lib/prisma.js';
 import { sendEmail } from '../../lib/mailer.js';
 import logger from '../../lib/logger.js';
+import { getJwtSecret } from '../auth/auth.config.js';
 
 const ANON_REVIEWER_NAME = 'Anonymous user';
 const ACTIVE_TRIP_STATES = ['RESERVED', 'CONFIRMED', 'READY_FOR_PICKUP', 'IN_PROGRESS', 'DISPUTED'];
@@ -46,28 +48,52 @@ function escapeHtml(s) {
 }
 
 export const accountDeletionService = {
-  async requestAccountDeletion({ email, typedConfirmation }) {
+  async requestAccountDeletion({ guestJwt, typedConfirmation }) {
     if (typedConfirmation !== 'DELETE') {
       const err = new Error('Type DELETE to confirm.');
       err.statusCode = 400;
       throw err;
     }
 
-    const cleanEmail = String(email || '').trim().toLowerCase();
-    if (!cleanEmail || !cleanEmail.includes('@')) {
-      const err = new Error('Email is required.');
-      err.statusCode = 400;
+    // Verify the guest JWT — proves the requester is the signed-in
+    // Customer and not an attacker who knows email + tenantId.
+    // (Sentry bot finding on PR #28: previous version trusted body
+    // for identity, allowing unsolicited deletion-confirm emails to
+    // any victim's email.) Identity is now derived only from the
+    // verified JWT claims.
+    let claims;
+    try {
+      claims = jwt.verify(guestJwt || '', getJwtSecret());
+    } catch (e) {
+      const err = new Error('Sign in again to delete your account.');
+      err.statusCode = 401;
       throw err;
     }
 
-    // Email-based lookup. Auth model: the request itself is rate-limited
-    // (5/hour per IP) and the actual deletion gate is the confirmation
-    // email — only the email's owner can complete it. Industry-standard
-    // for guest account flows (Twitter/Facebook follow this pattern).
+    const cleanEmail = String(claims?.email || '').trim().toLowerCase();
+    const tenantId = claims?.tenantId;
+
+    if (!cleanEmail || !cleanEmail.includes('@')) {
+      const err = new Error('Sign in again to delete your account.');
+      err.statusCode = 401;
+      throw err;
+    }
+    if (!tenantId || typeof tenantId !== 'string') {
+      const err = new Error('Sign in again to delete your account.');
+      err.statusCode = 401;
+      throw err;
+    }
+
+    // Email + tenant lookup. The JWT signature was the auth gate
+    // already; now we just resolve the Customer row. orderBy as a
+    // defensive tiebreaker if duplicates exist within the same tenant
+    // (shouldn't happen but be deterministic).
     const customer = await prisma.customer.findFirst({
       where: {
-        email: { equals: cleanEmail, mode: 'insensitive' }
-      }
+        email: { equals: cleanEmail, mode: 'insensitive' },
+        tenantId: tenantId
+      },
+      orderBy: { updatedAt: 'desc' }
     });
 
     if (!customer) {
@@ -186,7 +212,7 @@ export const accountDeletionService = {
           address2: null,
           city: null,
           state: null,
-          postalCode: null,
+          zip: null,
           country: null,
           idPhotoUrl: null,
           authnetCustomerProfileId: null,
