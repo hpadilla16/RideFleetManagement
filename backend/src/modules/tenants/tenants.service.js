@@ -85,6 +85,12 @@ export const tenantsService = {
     const slug = String(data.slug || '').trim().toLowerCase();
     if (!name || !slug) throw new Error('name and slug are required');
     try {
+      const pct = data.platformFeePct !== undefined ? Number(data.platformFeePct || 0) : 10;
+      const min = data.platformFeeMin !== undefined ? Number(data.platformFeeMin || 0) : 7;
+      const max = data.platformFeeMax !== undefined ? Number(data.platformFeeMax || 0) : 35;
+      if (pct < 0 || pct > 100) throw new Error('platformFeePct must be between 0 and 100');
+      if (min < 0) throw new Error('platformFeeMin must be non-negative');
+      if (max < 0) throw new Error('platformFeeMax must be non-negative');
       return await prisma.tenant.create({
         data: {
           name,
@@ -93,7 +99,11 @@ export const tenantsService = {
           plan: String(data.plan || 'BETA').toUpperCase(),
           carSharingEnabled: !!data.carSharingEnabled,
           dealershipLoanerEnabled: !!data.dealershipLoanerEnabled,
-          tollsEnabled: !!data.tollsEnabled
+          tollsEnabled: !!data.tollsEnabled,
+          platformFeeEnabled: data.platformFeeEnabled !== false,
+          platformFeePct: pct,
+          platformFeeMin: min,
+          platformFeeMax: max
         }
       });
     } catch (error) {
@@ -110,6 +120,22 @@ export const tenantsService = {
     if (patch.carSharingEnabled !== undefined) data.carSharingEnabled = !!patch.carSharingEnabled;
     if (patch.dealershipLoanerEnabled !== undefined) data.dealershipLoanerEnabled = !!patch.dealershipLoanerEnabled;
     if (patch.tollsEnabled !== undefined) data.tollsEnabled = !!patch.tollsEnabled;
+    if (patch.platformFeeEnabled !== undefined) data.platformFeeEnabled = !!patch.platformFeeEnabled;
+    if (patch.platformFeePct !== undefined) {
+      const pct = Number(patch.platformFeePct || 0);
+      if (pct < 0 || pct > 100) throw new Error('platformFeePct must be between 0 and 100');
+      data.platformFeePct = pct;
+    }
+    if (patch.platformFeeMin !== undefined) {
+      const min = Number(patch.platformFeeMin || 0);
+      if (min < 0) throw new Error('platformFeeMin must be non-negative');
+      data.platformFeeMin = min;
+    }
+    if (patch.platformFeeMax !== undefined) {
+      const max = Number(patch.platformFeeMax || 0);
+      if (max < 0) throw new Error('platformFeeMax must be non-negative');
+      data.platformFeeMax = max;
+    }
 
     try {
       return await prisma.tenant.update({ where: { id }, data });

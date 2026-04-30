@@ -5,7 +5,7 @@ import { reservationsService } from '../reservations/reservations.service.js';
 import { carSharingService } from '../car-sharing/car-sharing.service.js';
 import { sendEmail } from '../../lib/mailer.js';
 import { settingsService } from '../settings/settings.service.js';
-import { computeMarketplaceTripPricing } from '../car-sharing/car-sharing-pricing.js';
+import { computeMarketplaceTripPricing, tenantPlatformFeeConfig } from '../car-sharing/car-sharing-pricing.js';
 import { serializePublicTripFulfillmentPlan } from '../car-sharing/car-sharing-handoff.js';
 import { resolveDeliveryAreaHints } from '../car-sharing/car-sharing-fulfillment.js';
 import { money } from '../../lib/money.js';
@@ -855,7 +855,7 @@ function depositSnapshot({ location, quote, addOnsTotal = 0, bookingChannel = 'S
   };
 }
 
-function computeCarSharingQuote(listing, windows, pickupAt, returnAt) {
+function computeCarSharingQuote(listing, windows, pickupAt, returnAt, platformFeeConfig = null) {
   const tripDays = ceilTripDays(pickupAt, returnAt);
   const tripStartDay = startOfUtcDay(pickupAt);
   const dayRates = [];
@@ -883,7 +883,8 @@ function computeCarSharingQuote(listing, windows, pickupAt, returnAt) {
         deliveryFee: Number(listing.deliveryFee || 0),
         fulfillmentChoice: 'PICKUP',
         taxes: 0,
-        hostProfile: listing.hostProfile
+        hostProfile: listing.hostProfile,
+        platformFeeConfig
       });
   const deliveryPricing = fulfillmentMode === 'PICKUP_ONLY'
     ? null
@@ -894,7 +895,8 @@ function computeCarSharingQuote(listing, windows, pickupAt, returnAt) {
         deliveryFee: Number(listing.deliveryFee || 0),
         fulfillmentChoice: 'DELIVERY',
         taxes: 0,
-        hostProfile: listing.hostProfile
+        hostProfile: listing.hostProfile,
+        platformFeeConfig
       });
   const pricing = (defaultChoice === 'DELIVERY' ? deliveryPricing : pickupPricing) || pickupPricing || deliveryPricing;
 
@@ -1479,6 +1481,7 @@ export const bookingEngineService = {
     }
 
     const tripDays = ceilTripDays(pickupDate, returnDate);
+    const platformFeeConfig = tenantPlatformFeeConfig(directTenant);
     const results = listings.flatMap((listing) => {
       if (tripDays < Number(listing.minTripDays || 1)) return [];
       if (listing.maxTripDays && tripDays > Number(listing.maxTripDays)) return [];
@@ -1489,7 +1492,7 @@ export const bookingEngineService = {
       if (overlappingWindows.some((window) => !!window.isBlocked)) return [];
       if (overlappingWindows.some((window) => window.minTripDaysOverride && tripDays < Number(window.minTripDaysOverride))) return [];
 
-      const quote = computeCarSharingQuote(listing, overlappingWindows, pickupDate, returnDate);
+      const quote = computeCarSharingQuote(listing, overlappingWindows, pickupDate, returnDate, platformFeeConfig);
       const searchMatch = resolveListingSearchMatch({
         listing,
         requestedLocationIds: resolvedLocationIds,
@@ -2105,6 +2108,48 @@ export const bookingEngineService = {
       });
     }
 
+    // Website-mandatory fees on car-sharing trips. Tenant-scoped fees
+    // configured with mandatory=true, isActive=true, displayOnline=true
+    // apply on top of the host's quoted trip total. Server-side fetch —
+    // never trust the client for fee identity or amount. Same pattern as
+    // the rental flow above.
+    const websiteMandatoryFeesRawCS = await prisma.fee.findMany({
+      where: {
+        tenantId: tenant.id,
+        isActive: true,
+        mandatory: true,
+        displayOnline: true
+      },
+      orderBy: { createdAt: 'asc' }
+    });
+    const baseAmountForFeesCS = Number(selected.quote?.subtotal || trip?.quotedTotal || 0);
+    const daysForFeesCS = Number(selected.quote?.tripDays || 1);
+    const websiteFees = websiteMandatoryFeesRawCS.map((fee) =>
+      computePublicFeeLine(fee, baseAmountForFeesCS, daysForFeesCS)
+    );
+    const websiteFeesTotal = money(
+      websiteFees.reduce((sum, fee) => sum + Number(fee.total || 0), 0)
+    );
+
+    if (trip?.reservation && websiteFees.length) {
+      await prisma.reservationCharge.createMany({
+        data: websiteFees.map((fee, idx) => ({
+          reservationId: trip.reservation.id,
+          code: fee.code,
+          name: fee.name,
+          chargeType: 'UNIT',
+          quantity: 1,
+          rate: Number(fee.mode === 'PERCENTAGE' ? fee.amount : fee.total || 0),
+          total: Number(fee.total || 0),
+          taxable: !!fee.taxable,
+          selected: true,
+          sortOrder: 1000 + idx,
+          source: 'WEBSITE_FEE',
+          sourceRefId: fee.feeId
+        }))
+      });
+    }
+
     const nextActions = trip?.reservation
       ? {
           customerInfo: await issueCustomerInfoRequest(trip.reservation),
@@ -2133,7 +2178,8 @@ export const bookingEngineService = {
           tenant,
           pricingBreakdown: {
             dueNow: money(selected.quote?.amountDueNow),
-            guestTotal: money(Number(trip.quotedTotal || 0) + normalizedChosenServices.reduce((sum, service) => sum + Number(service.total || 0), 0))
+            websiteFeesTotal,
+            guestTotal: money(Number(trip.quotedTotal || 0) + normalizedChosenServices.reduce((sum, service) => sum + Number(service.total || 0), 0) + Number(websiteFeesTotal || 0))
           },
           nextActions,
           bookingType: 'CAR_SHARING',
@@ -2212,7 +2258,8 @@ export const bookingEngineService = {
         taxes: money(trip.quotedTaxes),
         baseTripTotal: money(trip.quotedTotal),
         additionalServicesTotal: money(normalizedChosenServices.reduce((sum, service) => sum + Number(service.total || 0), 0)),
-        guestTotal: money(Number(trip.quotedTotal || 0) + normalizedChosenServices.reduce((sum, service) => sum + Number(service.total || 0), 0)),
+        websiteFeesTotal,
+        guestTotal: money(Number(trip.quotedTotal || 0) + normalizedChosenServices.reduce((sum, service) => sum + Number(service.total || 0), 0) + Number(websiteFeesTotal || 0)),
         hostGrossRevenue: money(trip.hostGrossRevenue),
         hostServiceFeeRate: money(trip.hostServiceFeeRate),
         hostServiceFee: money(trip.hostServiceFee),
@@ -2227,6 +2274,7 @@ export const bookingEngineService = {
         status: trip.reservation.status
       } : null,
       additionalServices: normalizedChosenServices,
+      websiteFees,
       nextActions,
       confirmationEmail
     };

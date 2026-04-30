@@ -241,3 +241,66 @@ test('resolveHandoffConfirmationAlerts handles trip with no fulfillment plan', (
   const alerts = resolveHandoffConfirmationAlerts([trip], { warningHoursBeforePickup: 24, now: new Date() });
   assert.equal(alerts.length, 0);
 });
+
+// ─── platformFeeConfig tests ───────────────────────────────────────────────────
+
+test('computeMarketplaceTripPricing with platformFeeEnabled=false returns 0 guestTripFee', () => {
+  const result = computeMarketplaceTripPricing({
+    subtotal: 500,
+    cleaningFee: 50,
+    pickupFee: 25,
+    deliveryFee: 0,
+    fulfillmentChoice: 'PICKUP',
+    taxes: 0,
+    hostProfile: null,
+    platformFeeConfig: { enabled: false, pct: 10, min: 7, max: 35 }
+  });
+  assert.equal(result.guestTripFee, 0);
+  assert.equal(result.platformRevenue, result.hostServiceFee);
+});
+
+test('computeMarketplaceTripPricing with custom pct=15 uses 15% instead of 10%', () => {
+  // Use max=1000 so the percentage isn't clamped — we want to verify
+  // pct=15 is honored, not the cap behavior (covered by other tests).
+  const result = computeMarketplaceTripPricing({
+    subtotal: 300,
+    cleaningFee: 0,
+    pickupFee: 0,
+    deliveryFee: 0,
+    fulfillmentChoice: 'PICKUP',
+    taxes: 0,
+    hostProfile: null,
+    platformFeeConfig: { enabled: true, pct: 15, min: 7, max: 1000 }
+  });
+  // 15% of hostGrossRevenue (= subtotal + 0 fees = 300) = 45
+  assert.equal(result.guestTripFee, 45);
+});
+
+test('computeMarketplaceTripPricing with custom min=0, max=0 returns 0 guestTripFee', () => {
+  const result = computeMarketplaceTripPricing({
+    subtotal: 500,
+    cleaningFee: 0,
+    pickupFee: 0,
+    deliveryFee: 0,
+    fulfillmentChoice: 'PICKUP',
+    taxes: 0,
+    hostProfile: null,
+    platformFeeConfig: { enabled: true, pct: 10, min: 0, max: 0 }
+  });
+  assert.equal(result.guestTripFee, 0);
+});
+
+test('computeMarketplaceTripPricing with custom min/max clamps correctly', () => {
+  const result = computeMarketplaceTripPricing({
+    subtotal: 50,
+    cleaningFee: 0,
+    pickupFee: 0,
+    deliveryFee: 0,
+    fulfillmentChoice: 'PICKUP',
+    taxes: 0,
+    hostProfile: null,
+    platformFeeConfig: { enabled: true, pct: 10, min: 25, max: 40 }
+  });
+  // 50 * 0.1 = 5, clamped between [25, 40] = 25
+  assert.equal(result.guestTripFee, 25);
+});
