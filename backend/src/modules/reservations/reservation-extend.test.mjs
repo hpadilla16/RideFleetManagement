@@ -272,8 +272,39 @@ describe('reservation-extend (unified flow)', () => {
       assert.equal(baseAfter.total, 350, 'base DAILY total = quantity × rate');
     });
 
-    it('does NOT rescale FIXED chargeType=UNIT addons', async () => {
-      // Add a FIXED $25 child seat fee (one-time)
+    it('rescales per-day SERVICE rows stored as UNIT with quantity=oldDays (Bug 7a)', async () => {
+      // Pre-Paid Tolls service provisioned by booking-engine as
+      // chargeType=UNIT, quantity=days, rate=dailyRate (booking-engine.service.js:1822).
+      // Original 5-day rental → 5 units. Extend +2 days → must rescale to 7.
+      const state = makeMockDb({
+        initial: {
+          charges: [
+            { id: 'c-base', reservationId: 'res-1', name: 'Base rental',
+              chargeType: 'DAILY', quantity: 5, rate: 50, total: 250,
+              taxable: true, selected: true, sortOrder: 0, source: 'BASE_RATE',
+              createdAt: new Date('2026-05-01T10:00:00Z') },
+            { id: 'c-tolls', reservationId: 'res-1', name: 'Pre-Paid Tolls',
+              chargeType: 'UNIT', quantity: 5, rate: 9.99, total: 49.95,
+              taxable: true, selected: true, sortOrder: 1, source: 'SERVICE',
+              sourceRefId: 'svc-tolls',
+              createdAt: new Date('2026-05-01T10:00:00Z') }
+          ]
+        }
+      });
+      await reservationExtendService.extendReservation({
+        reservationId: 'res-1',
+        newReturnAt: new Date('2026-05-17T00:00:00Z'), // +2 days → 7 total
+        extensionDailyRate: null, note: '', actorUserId: 'u-1',
+        tenantScope: { tenantId: 'tenant-1' }
+      });
+      const tolls = state.charges.find((c) => c.id === 'c-tolls');
+      assert.equal(tolls.quantity, 7, 'per-day UNIT service rescaled to new total days');
+      assert.equal(tolls.total, Number((7 * 9.99).toFixed(2)), 'per-day UNIT total = newDays × rate');
+    });
+
+    it('does NOT rescale FIXED chargeType=UNIT addons (qty does not match oldDays)', async () => {
+      // FIXED $25 child seat — qty=1 doesn't match the 5-day pre-extension window,
+      // so the heuristic correctly leaves it alone.
       const state = makeMockDb({
         initial: {
           charges: [

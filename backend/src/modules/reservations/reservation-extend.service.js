@@ -71,15 +71,47 @@ function isTaxCharge(row = {}) {
   return String(row?.chargeType || '').trim().toUpperCase() === 'TAX';
 }
 
+// Sources whose ReservationCharge rows are provisioned per-day by the
+// booking engine (chargeType=UNIT, quantity=days, rate=dailyRate — see
+// booking-engine.service.js:1822). When the rental window grows, these
+// must rescale alongside chargeType=DAILY rows.
+const PER_DAY_LIKE_SOURCES = new Set([
+  'SERVICE',
+  'ADDITIONAL_SERVICE',
+  'FEE',
+  'SERVICE_LINKED_FEE'
+]);
+
 // Returns true if this row is a per-day charge whose quantity should
 // follow the reservation's total day count. EXTENSION_RATE has its own
 // fixed extension-window quantity and stays put. Security deposit and
 // tax rows are not consumption-based, so they don't rescale either.
-function shouldRescaleDailyRow(row = {}) {
+//
+// Detection paths:
+//   1. chargeType=DAILY — direct per-day charge (the original BASE_RATE).
+//   2. chargeType=UNIT with a per-day-like source AND quantity equal to
+//      the pre-extension day count — the booking engine stores per-day
+//      services this way (Pre-Paid Tolls, etc.). Matching quantity is
+//      the strongest signal that the row was provisioned as
+//      `quantity = days × rate = dailyRate`. Rows whose quantity has
+//      been manually overridden (e.g., agent set 1 unit instead of N
+//      days) are left alone — heuristic fails safely.
+function shouldRescaleDailyRow(row = {}, oldTotalDays = 0) {
   if (isExtensionCharge(row)) return false;
   if (isTaxCharge(row)) return false;
   if (isSecurityDepositCharge(row)) return false;
-  return String(row?.chargeType || '').trim().toUpperCase() === 'DAILY';
+  const chargeType = String(row?.chargeType || '').trim().toUpperCase();
+  if (chargeType === 'DAILY') return true;
+  if (chargeType === 'UNIT') {
+    const source = String(row?.source || '').trim().toUpperCase();
+    if (PER_DAY_LIKE_SOURCES.has(source)) {
+      const qty = Number(row?.quantity);
+      if (Number.isFinite(qty) && Number.isFinite(oldTotalDays) && qty === Number(oldTotalDays)) {
+        return true;
+      }
+    }
+  }
+  return false;
 }
 
 function snapshotCharge(row = {}) {
@@ -263,9 +295,10 @@ export const reservationExtendService = {
     // 4. Snapshot pre-extension charges for the addendum's audit trail
     const originalChargesSnapshot = (current.charges || []).map(snapshotCharge);
 
-    // 5. Compute extension days + new total days (for DAILY rescale)
+    // 5. Compute extension days + old/new total days (for rescale)
     const extensionDays = rentalDays(current.returnAt, nextReturnDate);
     const newTotalDays = rentalDays(current.pickupAt, nextReturnDate);
+    const oldTotalDays = rentalDays(current.pickupAt, current.returnAt);
 
     // 6. Set originalReturnAt on FIRST extension only. Use the
     //    persisted column as source of truth so we never overwrite it
@@ -285,11 +318,12 @@ export const reservationExtendService = {
       }
     });
 
-    // 8. Rescale per-day items: chargeType=DAILY that aren't
-    //    EXTENSION_RATE / TAX / security deposit get bumped to the
-    //    new total days.
+    // 8. Rescale per-day items: chargeType=DAILY plus per-day SERVICE/
+    //    FEE rows (UNIT chargeType, qty == oldTotalDays) get bumped to
+    //    the new total days. EXTENSION_RATE / TAX / security deposit
+    //    are skipped (see shouldRescaleDailyRow above).
     for (const row of current.charges || []) {
-      if (!shouldRescaleDailyRow(row)) continue;
+      if (!shouldRescaleDailyRow(row, oldTotalDays)) continue;
       const newQuantity = newTotalDays;
       const newTotal = Number((newQuantity * toNumber(row.rate)).toFixed(2));
       await prisma.reservationCharge.update({
@@ -347,7 +381,12 @@ export const reservationExtendService = {
         previousEstimatedTotal: toNumber(current.estimatedTotal),
         newEstimatedTotal,
         rescaledDailyChargeIds: (current.charges || [])
-          .filter(shouldRescaleDailyRow)
+          // Codex bot P2 on PR #36: passing shouldRescaleDailyRow bare to
+          // .filter makes Array.filter pass (item, index, array), so
+          // index would be treated as oldTotalDays. Wrap to thread the
+          // real oldTotalDays through — otherwise this metadata silently
+          // misses per-day UNIT rows for Bug 7a scenarios.
+          .filter((r) => shouldRescaleDailyRow(r, oldTotalDays))
           .map((r) => r.id)
       };
 
@@ -491,18 +530,25 @@ export const reservationExtendService = {
       throw new Error('Cannot recover previous return date for this extension (no addendum trail).');
     }
 
-    // Revert DAILY charges from the addendum's originalCharges snapshot.
-    // Each row in the snapshot was captured PRE-extension; we reset its
-    // quantity and total to those values. We only touch chargeType=DAILY
-    // rows that still exist (the snapshot may include rows that were
-    // deleted later, e.g., agent removed an addon — leave those alone).
+    // Revert per-day charges from the addendum's originalCharges
+    // snapshot. Each row in the snapshot was captured PRE-extension; we
+    // reset its quantity/total to those values. Only rows that were
+    // rescale-eligible at extension time get touched — extension rows,
+    // tax, security deposit are skipped. Rows that no longer exist
+    // (agent deleted an addon between extension and revert) are skipped.
+    //
+    // Bug 7a: this snapshot now includes rescaled UNIT rows (per-day
+    // SERVICE/FEE), not just chargeType=DAILY. Restoring snap.quantity
+    // is idempotent for rows that weren't rescaled, so the simplest
+    // safe rule is to revert anything that's not extension/tax/deposit.
     if (addendum?.originalCharges) {
       let snapshot = [];
       try { snapshot = JSON.parse(addendum.originalCharges); } catch { snapshot = []; }
       for (const snap of snapshot) {
         if (!snap?.id) continue;
-        if (String(snap.chargeType || '').toUpperCase() !== 'DAILY') continue;
         if (isExtensionCharge(snap)) continue;
+        if (isTaxCharge(snap)) continue;
+        if (isSecurityDepositCharge(snap)) continue;
         const live = await prisma.reservationCharge.findUnique({ where: { id: snap.id } });
         if (!live) continue;
         await prisma.reservationCharge.update({
