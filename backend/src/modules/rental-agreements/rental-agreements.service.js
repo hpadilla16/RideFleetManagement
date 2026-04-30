@@ -2055,7 +2055,19 @@ export const rentalAgreementsService = {
             customer: {
               select: {
                 id: true,
-                email: true
+                email: true,
+                firstName: true,
+                lastName: true,
+                phone: true,
+                address1: true,
+                address2: true,
+                city: true,
+                state: true,
+                zip: true,
+                country: true,
+                dateOfBirth: true,
+                licenseNumber: true,
+                licenseState: true
               }
             },
             payments: {
@@ -2154,8 +2166,15 @@ export const rentalAgreementsService = {
       ? `<img src="${rawSigUrl}" alt="Signature" style="max-height:60px;max-width:320px;width:auto;height:auto;display:block;object-fit:contain" />`
       : '<div class="sig-meta">No signature on file</div>';
 
-    // Build customer address line
-    const addrParts = [agreement.customerAddress1, agreement.customerAddress2, agreement.customerCity, agreement.customerState, agreement.customerZip, agreement.customerCountry].filter(Boolean);
+    // Build customer address line (read from live customer, fallback to snapshot)
+    const liveCustomer = agreement.reservation?.customer;
+    const customerAddress1 = liveCustomer?.address1 ?? agreement.customerAddress1;
+    const customerAddress2 = liveCustomer?.address2 ?? agreement.customerAddress2;
+    const customerCity = liveCustomer?.city ?? agreement.customerCity;
+    const customerState = liveCustomer?.state ?? agreement.customerState;
+    const customerZip = liveCustomer?.zip ?? agreement.customerZip;
+    const customerCountry = liveCustomer?.country ?? agreement.customerCountry;
+    const addrParts = [customerAddress1, customerAddress2, customerCity, customerState, customerZip, customerCountry].filter(Boolean);
     const customerAddress = addrParts.join(', ') || '-';
 
     // Build vehicle description
@@ -2192,14 +2211,14 @@ export const rentalAgreementsService = {
       companyLogoBlock,
       agreementNumber: esc(agreement.agreementNumber || ''),
       reservationNumber: esc(agreement.reservation?.reservationNumber || '-'),
-      // Customer info
-      customerName: esc(`${agreement.customerFirstName || ''} ${agreement.customerLastName || ''}`.trim()),
-      customerEmail: esc(agreement.customerEmail || '-'),
-      customerPhone: esc(agreement.customerPhone || '-'),
+      // Customer info (read from live customer, fallback to snapshot)
+      customerName: esc(`${(liveCustomer?.firstName ?? agreement.customerFirstName) || ''} ${(liveCustomer?.lastName ?? agreement.customerLastName) || ''}`.trim()),
+      customerEmail: esc((liveCustomer?.email ?? agreement.customerEmail) || '-'),
+      customerPhone: esc((liveCustomer?.phone ?? agreement.customerPhone) || '-'),
       customerAddress: esc(customerAddress),
-      customerDob: esc(agreement.dateOfBirth ? fmtDate(agreement.dateOfBirth) : '-'),
-      licenseNumber: esc(agreement.licenseNumber || '-'),
-      licenseState: esc(agreement.licenseState || '-'),
+      customerDob: esc((liveCustomer?.dateOfBirth ?? agreement.dateOfBirth) ? fmtDate(liveCustomer?.dateOfBirth ?? agreement.dateOfBirth) : '-'),
+      licenseNumber: esc((liveCustomer?.licenseNumber ?? agreement.licenseNumber) || '-'),
+      licenseState: esc((liveCustomer?.licenseState ?? agreement.licenseState) || '-'),
       licenseExpiry: esc(agreement.licenseExpiry ? fmtDate(agreement.licenseExpiry) : '-'),
       insuranceProvider: esc(agreement.insuranceSource || agreement.insurancePlanName || '-'),
       insurancePolicy: esc(agreement.insurancePolicyNumber || '-'),
@@ -2294,7 +2313,9 @@ export const rentalAgreementsService = {
     const paidAmountForPrint = Number(context?.paidAmountForPrint || 0);
     const amountDueForPrint = Number(context?.amountDueForPrint || 0);
 
-    const to = String(payload.to || agreement.customerEmail || agreement.reservation?.customer?.email || '').trim();
+    // Read from live customer, fallback to snapshot
+    const liveCustomer = agreement.reservation?.customer;
+    const to = String(payload.to || liveCustomer?.email || agreement.customerEmail || '').trim();
     if (!to) throw new Error('Customer email is required');
 
     const pdf = await this.agreementPdfBuffer(latestId);
@@ -2309,7 +2330,7 @@ export const rentalAgreementsService = {
       companyPhone: cfg.companyPhone || '',
       agreementNumber: agreement.agreementNumber,
       reservationNumber: agreement?.reservation?.reservationNumber || '-',
-      customerName: `${agreement.customerFirstName || ''} ${agreement.customerLastName || ''}`.trim(),
+      customerName: `${(liveCustomer?.firstName ?? agreement.customerFirstName) || ''} ${(liveCustomer?.lastName ?? agreement.customerLastName) || ''}`.trim(),
       pickupAt: fmtDate(agreement.pickupAt),
       returnAt: fmtDate(agreement.returnAt),
       total: Number(agreement.total || 0).toFixed(2),
@@ -3457,7 +3478,8 @@ export const rentalAgreementsService = {
       throw new Error('Both inspections are required before closing agreement: checkout + check-in (timestamp/IP missing)');
     }
 
-    const signerName = String(payload.signerName || agreement.customerFirstName || '').trim();
+    // Read signer name from live customer, fallback to snapshot, then payload
+    const signerName = String(payload.signerName || agreement.reservation?.customer?.firstName || agreement.customerFirstName || '').trim();
     const signatureDataUrl = String(
       payload.signatureDataUrl
       || agreement?.reservation?.signatureDataUrl
@@ -3518,10 +3540,12 @@ export const rentalAgreementsService = {
       const { sendEmail } = await import('../../lib/mailer.js');
       const tpl = await settingsService.getEmailTemplates({ tenantId: agreement.tenantId || null });
       const rentalCfg = await settingsService.getRentalAgreementConfig({ tenantId: agreement.tenantId || null });
-      const to = agreement.customerEmail || agreement.reservation?.customer?.email;
+      // Read from live customer, fallback to snapshot
+      const closeLiveCustomer = agreement.reservation?.customer;
+      const to = closeLiveCustomer?.email || agreement.customerEmail;
       if (to) {
         const render = (s = '') => String(s)
-          .replaceAll('{{customerName}}', `${agreement.customerFirstName || ''} ${agreement.customerLastName || ''}`.trim())
+          .replaceAll('{{customerName}}', `${(closeLiveCustomer?.firstName ?? agreement.customerFirstName) || ''} ${(closeLiveCustomer?.lastName ?? agreement.customerLastName) || ''}`.trim())
           .replaceAll('{{reservationNumber}}', String(agreement.reservation?.reservationNumber || ''))
           .replaceAll('{{pickupAt}}', String(agreement.pickupAt ? fmtDate(agreement.pickupAt) : ''))
           .replaceAll('{{returnAt}}', String(agreement.returnAt ? fmtDate(agreement.returnAt) : ''))
