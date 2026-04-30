@@ -381,7 +381,12 @@ export const reservationExtendService = {
         previousEstimatedTotal: toNumber(current.estimatedTotal),
         newEstimatedTotal,
         rescaledDailyChargeIds: (current.charges || [])
-          .filter(shouldRescaleDailyRow)
+          // Codex bot P2 on PR #36: passing shouldRescaleDailyRow bare to
+          // .filter makes Array.filter pass (item, index, array), so
+          // index would be treated as oldTotalDays. Wrap to thread the
+          // real oldTotalDays through — otherwise this metadata silently
+          // misses per-day UNIT rows for Bug 7a scenarios.
+          .filter((r) => shouldRescaleDailyRow(r, oldTotalDays))
           .map((r) => r.id)
       };
 

@@ -329,8 +329,14 @@ export const reservationPricingService = {
     // would silently wipe them — leaving the reservation with
     // originalReturnAt set, returnAt extended, and a pending addendum
     // but no charge to anchor a future "Delete extension" against.
-    // Filter incoming rows (defense in depth) AND preserve EXTENSION_RATE
-    // rows already on the reservation across the replace cycle.
+    //
+    // Codex bot P1 on PR #36: an earlier fix snapshotted EXTENSION_RATE
+    // rows and re-inserted them, but createMany generates fresh ids, so
+    // RentalAgreementAddendum.extensionChargeId would point at a
+    // non-existent charge after Edit+Save, breaking deleteExtension.
+    // Cleaner solution: don't delete EXTENSION_RATE rows in the first
+    // place. Only wipe the non-extension rows, leave extensions in
+    // place with their original ids untouched.
     const chargeRows = buildChargeRows(reservationId, payload.charges || [])
       .filter((row) => String(row?.code || '').toUpperCase() !== 'EXTENSION_RATE');
 
@@ -341,38 +347,37 @@ export const reservationPricingService = {
         update: snapshotData
       });
 
-      // Capture EXTENSION_RATE rows verbatim before the wipe so they
-      // survive the replace.
-      const preservedExtensions = await tx.reservationCharge.findMany({
-        where: { reservationId, code: 'EXTENSION_RATE' }
+      // Enumerate ids of non-extension rows. Doing this explicitly
+      // sidesteps Prisma's tri-valued logic on `not` against nullable
+      // columns (a row with code=NULL would survive `code: { not: '...' }`
+      // because NULL != X is NULL, not true). With an `id: { in: [...] }`
+      // delete we know exactly which rows go.
+      const existing = await tx.reservationCharge.findMany({
+        where: { reservationId },
+        select: { id: true, code: true }
       });
-
-      await tx.reservationCharge.deleteMany({ where: { reservationId } });
-      if (chargeRows.length) {
-        await tx.reservationCharge.createMany({ data: chargeRows });
-      }
-      if (preservedExtensions.length) {
-        await tx.reservationCharge.createMany({
-          data: preservedExtensions.map((row) => ({
-            reservationId: row.reservationId,
-            code: row.code,
-            name: row.name,
-            chargeType: row.chargeType,
-            quantity: row.quantity,
-            rate: row.rate,
-            total: row.total,
-            taxable: row.taxable,
-            selected: row.selected,
-            sortOrder: row.sortOrder,
-            source: row.source,
-            sourceRefId: row.sourceRefId,
-            notes: row.notes
-          }))
+      const nonExtensionIds = existing
+        .filter((c) => String(c?.code || '').toUpperCase() !== 'EXTENSION_RATE')
+        .map((c) => c.id);
+      if (nonExtensionIds.length) {
+        await tx.reservationCharge.deleteMany({
+          where: { id: { in: nonExtensionIds } }
         });
       }
 
+      if (chargeRows.length) {
+        await tx.reservationCharge.createMany({ data: chargeRows });
+      }
+
+      // Re-read EXTENSION_RATE rows so estimatedTotal includes their
+      // contribution. Using the live rows (not a snapshot) keeps us
+      // honest if anything else in this tx touched them.
+      const liveExtensions = await tx.reservationCharge.findMany({
+        where: { reservationId, code: 'EXTENSION_RATE' }
+      });
+
       const nextDailyRate = snapshotData.dailyRate;
-      const estimatedTotal = summarizeChargeTotals([...chargeRows, ...preservedExtensions]).total;
+      const estimatedTotal = summarizeChargeTotals([...chargeRows, ...liveExtensions]).total;
       await tx.reservation.update({
         where: { id: reservationId },
         data: {
