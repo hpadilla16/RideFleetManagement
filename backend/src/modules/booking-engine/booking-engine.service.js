@@ -2002,6 +2002,7 @@ export const bookingEngineService = {
           dailyRate: money(selected.quote?.dailyRate),
           baseSubtotal: money(selected.quote?.subtotal),
           mandatoryFeesTotal,
+          websiteFeesTotal,
           estimatedTaxes: money(selected.quote?.taxes),
           baseReservationTotal: money(selected.quote?.total),
           additionalServicesTotal: addOnsTotal,
@@ -2013,6 +2014,7 @@ export const bookingEngineService = {
           currency: 'USD'
         },
         mandatoryFees,
+        websiteFees,
         additionalServices: normalizedChosenServices,
         linkedServiceFees,
         insuranceSelection: insuranceLines.length
