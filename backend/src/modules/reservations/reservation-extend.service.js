@@ -446,9 +446,18 @@ export const reservationExtendService = {
     // created EXTENSION_RATE row. Otherwise we'd leave the chain in a
     // weird state (later extensions referencing days that the deleted
     // one set up).
+    //
+    // Order by sortOrder DESC (deterministic — extendReservation always
+    // assigns ext.sortOrder = max(prior charges) + 1), with createdAt
+    // DESC as a defensive tiebreaker for any legacy rows that may share
+    // a sortOrder.
     const allExtensions = (reservation.charges || [])
       .filter(isExtensionCharge)
-      .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+      .sort((a, b) => {
+        const so = Number(b.sortOrder ?? 0) - Number(a.sortOrder ?? 0);
+        if (so !== 0) return so;
+        return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
+      });
     if (allExtensions[0]?.id !== extensionChargeId) {
       throw new Error('Only the most recent extension can be deleted. Delete newer extensions first.');
     }
