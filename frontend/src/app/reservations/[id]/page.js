@@ -5,6 +5,7 @@ import { useParams, useRouter } from 'next/navigation';
 import { AuthGate } from '../../../components/AuthGate';
 import { AppShell } from '../../../components/AppShell';
 import { AgreementAddendumsCard } from '../../../components/AgreementAddendumsCard';
+import { ReservationExtendDialog } from '../../../components/ReservationExtendDialog';
 import { api, API_BASE } from '../../../lib/client';
 
 function stripChargePrefix(name = '', prefix) {
@@ -244,6 +245,7 @@ function ReservationDetailInner({ token, me, logout }) {
     idPhotoUrl: '', insuranceDocumentUrl: ''
   });
   const [staffCheckinSaving, setStaffCheckinSaving] = useState(false);
+  const [extendDialogOpen, setExtendDialogOpen] = useState(false);
   const canManagePrecheckin = ['SUPER_ADMIN', 'ADMIN', 'OPS', 'AGENT'].includes(role);
   const canManagePricingOverrides = ['SUPER_ADMIN', 'ADMIN', 'OPS', 'AGENT'].includes(role);
   const canManageCommissionOwner = ['SUPER_ADMIN', 'ADMIN'].includes(role);
@@ -2213,6 +2215,7 @@ token
                   <button className="ios-action-btn" onClick={() => router.push(`/reservations/${id}/payments?total=${Number(effectiveChargeTotal || 0)}&mode=otc`)}>Record OTC Payment</button>
                   <button className="ios-action-btn" onClick={() => router.push(`/reservations/${id}/additional-drivers`)}>Additional Drivers</button>
                   <button className="ios-action-btn" onClick={handlePrintAgreement}>Print Agreement</button>
+                  <button className="ios-action-btn" onClick={() => setExtendDialogOpen(true)}>Extend Reservation</button>
                   <button className="ios-action-btn" onClick={() => setActivePanel('notes')}>Notes Page</button>
                   <button className="ios-action-btn" onClick={openLogs}>Log</button>
                 </div>
@@ -2565,6 +2568,18 @@ token
             </div>
           </div>
         </div>
+      )}
+      {extendDialogOpen && row && (
+        <ReservationExtendDialog
+          reservation={row}
+          token={token}
+          onExtended={async () => {
+            setExtendDialogOpen(false);
+            setMsg('Reservation extended successfully');
+            await refresh();
+          }}
+          onCancel={() => setExtendDialogOpen(false)}
+        />
       )}
     </AppShell>
   );

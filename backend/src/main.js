@@ -4,6 +4,7 @@ import cors from 'cors';
 import compression from 'compression';
 import logger, { requestLogger } from './lib/logger.js';
 import { reservationsRouter } from './modules/reservations/reservations.routes.js';
+import { reservationExtendRouter } from './modules/reservations/reservation-extend.routes.js';
 import { customersRouter } from './modules/customers/customers.routes.js';
 import { publicVehicleTelematicsRouter, vehiclesRouter } from './modules/vehicles/vehicles.routes.js';
 import { locationsRouter } from './modules/locations/locations.routes.js';
@@ -104,6 +105,7 @@ app.use('/api/sms', requireAuth, requireRole('ADMIN', 'OPS'), smsRouter);
 app.use('/api/knowledge-base', requireAuth, knowledgeBaseRouter);
 
 app.use('/api/reservations', requireAuth, requireModuleAccess('reservations'), reservationsRouter);
+app.use('/api/reservations', requireAuth, requireModuleAccess('reservations'), reservationExtendRouter);
 app.use('/api/customers', requireAuth, requireModuleAccess('customers'), customersRouter);
 app.use('/api/vehicles', requireAuth, requireModuleAccess('vehicles'), vehiclesRouter);
 app.use('/api/locations', requireAuth, requireModuleAccess('settings'), requireRole('ADMIN', 'OPS'), locationsRouter);
