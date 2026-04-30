@@ -1703,16 +1703,46 @@ export const bookingEngineService = {
       const insuranceLine = insuranceLines[0] || null;
       const mandatoryFees = Array.isArray(selected.mandatoryFees) ? selected.mandatoryFees : [];
       const mandatoryFeesTotal = money(mandatoryFees.reduce((sum, fee) => sum + Number(fee.total || 0), 0));
+
+      // Website-mandatory fees: tenant-scoped fees configured with
+      // mandatory=true, isActive=true, displayOnline=true. Server-side
+      // fetch (don't trust client's `websiteFeesApplied`). Dedupe against
+      // location-scoped mandatory fees so the same Fee isn't applied twice.
+      const locationMandatoryFeeIds = new Set(
+        mandatoryFees.map((f) => String(f.feeId || '')).filter(Boolean)
+      );
+      const websiteMandatoryFeesRaw = await prisma.fee.findMany({
+        where: {
+          tenantId: tenant.id,
+          isActive: true,
+          mandatory: true,
+          displayOnline: true
+        },
+        orderBy: { createdAt: 'asc' }
+      });
+      const baseAmountForFees = Number(selected.quote?.subtotal || selected.quote?.total || 0);
+      const daysForFees = Number(selected.quote?.days || 1);
+      const websiteFees = websiteMandatoryFeesRaw
+        .filter((fee) => !locationMandatoryFeeIds.has(String(fee.id)))
+        .map((fee) => computePublicFeeLine(fee, baseAmountForFees, daysForFees));
+      const websiteFeesTotal = money(websiteFees.reduce((sum, fee) => sum + Number(fee.total || 0), 0));
+
       const insuranceTotal = money(insuranceLines.reduce((sum, line) => sum + Number(line.total || 0), 0));
       const addOnsTotal = money(normalizedChosenServices.reduce((sum, service) => sum + Number(service.total || 0), 0));
       const linkedServiceFeesTotal = money(linkedServiceFees.reduce((sum, fee) => sum + Number(fee.total || 0), 0));
-      const estimatedTotal = money(Number(selected.quote.total || 0) + addOnsTotal + linkedServiceFeesTotal + insuranceTotal);
+      const estimatedTotal = money(
+        Number(selected.quote.total || 0)
+          + addOnsTotal
+          + linkedServiceFeesTotal
+          + insuranceTotal
+          + websiteFeesTotal
+      );
 
       // Recalculate deposit at checkout time with full totals (add-ons, insurance, fees)
       const checkoutDeposit = depositSnapshot({
         location: search.location,
         quote: { ...selected.quote, baseTotal: Number(selected.quote?.baseTotal || selected.quote?.subtotal || 0) },
-        addOnsTotal: money(addOnsTotal + linkedServiceFeesTotal + insuranceTotal + mandatoryFeesTotal),
+        addOnsTotal: money(addOnsTotal + linkedServiceFeesTotal + insuranceTotal + mandatoryFeesTotal + websiteFeesTotal),
         bookingChannel: 'WEBSITE'
       });
 
@@ -1775,6 +1805,7 @@ export const bookingEngineService = {
           + linkedServiceFees.filter(f => f.taxable !== false).reduce((sum, f) => sum + Number(f.total || 0), 0)
           + insuranceLines.filter(p => p.taxable).reduce((sum, p) => sum + Number(p.total || 0), 0)
           + mandatoryFees.filter(f => f.taxable).reduce((sum, f) => sum + Number(f.total || 0), 0)
+          + websiteFees.filter(f => f.taxable).reduce((sum, f) => sum + Number(f.total || 0), 0)
         );
         const taxTotal = money(taxableBase * (taxRate / 100));
         let sortIdx = 0;
@@ -1806,6 +1837,20 @@ export const bookingEngineService = {
               selected: true,
               sortOrder: sortIdx++,
               source: 'MANDATORY_FEE',
+              sourceRefId: fee.feeId
+            })),
+            ...websiteFees.map((fee) => ({
+              reservationId: reservation.id,
+              code: fee.code,
+              name: fee.name,
+              chargeType: 'UNIT',
+              quantity: 1,
+              rate: Number(fee.mode === 'PERCENTAGE' ? fee.amount : fee.total || 0),
+              total: Number(fee.total || 0),
+              taxable: !!fee.taxable,
+              selected: true,
+              sortOrder: sortIdx++,
+              source: 'WEBSITE_FEE',
               sourceRefId: fee.feeId
             })),
             ...normalizedChosenServices.map((service) => ({
@@ -1957,6 +2002,7 @@ export const bookingEngineService = {
           dailyRate: money(selected.quote?.dailyRate),
           baseSubtotal: money(selected.quote?.subtotal),
           mandatoryFeesTotal,
+          websiteFeesTotal,
           estimatedTaxes: money(selected.quote?.taxes),
           baseReservationTotal: money(selected.quote?.total),
           additionalServicesTotal: addOnsTotal,
@@ -1968,6 +2014,7 @@ export const bookingEngineService = {
           currency: 'USD'
         },
         mandatoryFees,
+        websiteFees,
         additionalServices: normalizedChosenServices,
         linkedServiceFees,
         insuranceSelection: insuranceLines.length
