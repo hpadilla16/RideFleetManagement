@@ -707,6 +707,12 @@ model Reservation {
   pickupAt DateTime
   returnAt DateTime
 
+  // Captured the FIRST time a reservation is extended (the very first
+  // booked returnAt). Stays immutable across subsequent extensions so
+  // the UI can render "Originally returned X · Now returns Y". Cleared
+  // back to NULL when the only/last extension is deleted.
+  originalReturnAt DateTime?
+
   pickupLocationId String
   pickupLocation   Location @relation("ReservationPickupLocation", fields: [pickupLocationId], references: [id])
 
@@ -1273,6 +1279,12 @@ model RentalAgreementAddendum {
   newCharges      String?
   chargeDelta     String?
 
+  // Soft FK to the EXTENSION_RATE ReservationCharge that triggered this
+  // addendum (NULL for manually-created date-correction addendums). Not
+  // a hard FK — the addendum outlives its extension charge as a
+  // historical record after deleteExtension voids it.
+  extensionChargeId String?
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -1280,6 +1292,7 @@ model RentalAgreementAddendum {
   @@index([tenantId, status])
   @@index([status, createdAt])
   @@index([tenantId, createdAt])
+  @@index([extensionChargeId])
 }
 
 model Trip {
@@ -2290,17 +2303,17 @@ model Franchise {
 // through to live aggregation (already cached for 30s at the route
 // layer) and never write to this table.
 model ReservationDailyCounter {
-  id                 String   @id @default(cuid())
-  tenantId           String
-  day                DateTime
-  pickupsToday       Int      @default(0)
-  returnsToday       Int      @default(0)
-  checkedOut         Int      @default(0)
-  feeAdvisories      Int      @default(0)
-  noShows            Int      @default(0)
-  refreshedAt        DateTime @default(now())
-  createdAt          DateTime @default(now())
-  updatedAt          DateTime @updatedAt
+  id            String   @id @default(cuid())
+  tenantId      String
+  day           DateTime
+  pickupsToday  Int      @default(0)
+  returnsToday  Int      @default(0)
+  checkedOut    Int      @default(0)
+  feeAdvisories Int      @default(0)
+  noShows       Int      @default(0)
+  refreshedAt   DateTime @default(now())
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
 
   @@unique([tenantId, day])
   @@index([tenantId, refreshedAt])
