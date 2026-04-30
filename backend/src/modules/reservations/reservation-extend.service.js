@@ -113,10 +113,19 @@ export const reservationExtendService = {
       throw new Error(`Cannot extend a reservation with status ${current.status}`);
     }
 
-    // 4. Validate extensionDailyRate if provided
+    // 4. Validate extensionDailyRate if provided.
+    //
+    // Codex bot finding on PR #30: previous version used toNumber() which
+    // silently coerces 'abc' → 0, so a malformed payload like
+    // {"extensionDailyRate":"abc"} would have been treated as a free
+    // extension instead of rejected. Validate explicitly with Number()
+    // and finite-check before accepting.
     let validatedExtensionDailyRate = null;
     if (extensionDailyRate !== null && extensionDailyRate !== undefined && extensionDailyRate !== '') {
-      const rate = toNumber(extensionDailyRate);
+      const rate = Number(extensionDailyRate);
+      if (!Number.isFinite(rate)) {
+        throw new Error('extensionDailyRate must be a valid number');
+      }
       if (rate < 0) {
         throw new Error('extensionDailyRate cannot be negative');
       }

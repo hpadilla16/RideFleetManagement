@@ -181,6 +181,36 @@ describe('reservation-extend', () => {
       }
     });
 
+    it('rejects when extensionDailyRate is non-numeric (string "abc")', async () => {
+      const currentReturn = new Date('2026-05-15T00:00:00Z');
+      const nextReturn = new Date('2026-05-20T00:00:00Z');
+
+      prisma.reservation.findFirst = async () => ({
+        id: 'res-1',
+        tenantId: 'tenant-1',
+        status: 'CONFIRMED',
+        returnAt: currentReturn,
+        pickupAt: new Date('2026-05-10T00:00:00Z'),
+        dailyRate: 50,
+        pricingSnapshot: { dailyRate: 50 },
+        charges: []
+      });
+
+      try {
+        await reservationExtendService.extendReservation({
+          reservationId: 'res-1',
+          newReturnAt: nextReturn,
+          extensionDailyRate: 'abc',
+          note: '',
+          actorUserId: 'user-1',
+          tenantScope: { tenantId: 'tenant-1' }
+        });
+        assert.fail('Expected an error');
+      } catch (e) {
+        assert.match(e.message, /must be a valid number/);
+      }
+    });
+
     it('rejects when extensionDailyRate is negative', async () => {
       const currentReturn = new Date('2026-05-15T00:00:00Z');
       const nextReturn = new Date('2026-05-20T00:00:00Z');
