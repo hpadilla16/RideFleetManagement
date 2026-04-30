@@ -324,7 +324,15 @@ export const reservationPricingService = {
     await getReservationOrThrow(reservationId, scope);
 
     const snapshotData = buildSnapshotUpsertData(payload);
-    const chargeRows = buildChargeRows(reservationId, payload.charges || []);
+    // Bug 7b: the manual "Edit pricing" UI doesn't include EXTENSION_RATE
+    // rows in its synthesized payload, so a naïve deleteMany+createMany
+    // would silently wipe them — leaving the reservation with
+    // originalReturnAt set, returnAt extended, and a pending addendum
+    // but no charge to anchor a future "Delete extension" against.
+    // Filter incoming rows (defense in depth) AND preserve EXTENSION_RATE
+    // rows already on the reservation across the replace cycle.
+    const chargeRows = buildChargeRows(reservationId, payload.charges || [])
+      .filter((row) => String(row?.code || '').toUpperCase() !== 'EXTENSION_RATE');
 
     await prisma.$transaction(async (tx) => {
       await tx.reservationPricingSnapshot.upsert({
@@ -333,13 +341,38 @@ export const reservationPricingService = {
         update: snapshotData
       });
 
+      // Capture EXTENSION_RATE rows verbatim before the wipe so they
+      // survive the replace.
+      const preservedExtensions = await tx.reservationCharge.findMany({
+        where: { reservationId, code: 'EXTENSION_RATE' }
+      });
+
       await tx.reservationCharge.deleteMany({ where: { reservationId } });
       if (chargeRows.length) {
         await tx.reservationCharge.createMany({ data: chargeRows });
       }
+      if (preservedExtensions.length) {
+        await tx.reservationCharge.createMany({
+          data: preservedExtensions.map((row) => ({
+            reservationId: row.reservationId,
+            code: row.code,
+            name: row.name,
+            chargeType: row.chargeType,
+            quantity: row.quantity,
+            rate: row.rate,
+            total: row.total,
+            taxable: row.taxable,
+            selected: row.selected,
+            sortOrder: row.sortOrder,
+            source: row.source,
+            sourceRefId: row.sourceRefId,
+            notes: row.notes
+          }))
+        });
+      }
 
       const nextDailyRate = snapshotData.dailyRate;
-      const estimatedTotal = summarizeChargeTotals(chargeRows).total;
+      const estimatedTotal = summarizeChargeTotals([...chargeRows, ...preservedExtensions]).total;
       await tx.reservation.update({
         where: { id: reservationId },
         data: {
