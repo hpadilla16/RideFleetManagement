@@ -56,6 +56,10 @@ function structuredDisplayChargeRows(pricingRows = []) {
     if (source === 'INSURANCE') displayId = `insurance-${r?.sourceRefId || idx}`;
     return {
       id: displayId,
+      // Preserve the actual DB charge id + code so the table can wire
+      // Delete on EXTENSION_RATE rows to DELETE /api/reservations/:id/extension/:chargeId.
+      chargeId: r?.id ? String(r.id) : null,
+      code: r?.code ? String(r.code) : null,
       name: String(r?.name || `Charge ${idx + 1}`),
       unit: Number(r?.quantity || 1),
       rate: Number(r?.rate || 0),
@@ -246,10 +250,44 @@ function ReservationDetailInner({ token, me, logout }) {
   });
   const [staffCheckinSaving, setStaffCheckinSaving] = useState(false);
   const [extendDialogOpen, setExtendDialogOpen] = useState(false);
+  const [deletingExtensionId, setDeletingExtensionId] = useState(null);
   const canManagePrecheckin = ['SUPER_ADMIN', 'ADMIN', 'OPS', 'AGENT'].includes(role);
   const canManagePricingOverrides = ['SUPER_ADMIN', 'ADMIN', 'OPS', 'AGENT'].includes(role);
   const canManageCommissionOwner = ['SUPER_ADMIN', 'ADMIN'].includes(role);
+  const canManageExtensions = ['SUPER_ADMIN', 'ADMIN', 'OPS'].includes(role);
   const canLoadSupportingCatalogs = ['SUPER_ADMIN', 'ADMIN', 'OPS'].includes(role);
+
+  // Revert a previously-applied extension. Backend (PR #34) is LIFO and
+  // refuses if the auto-created addendum has been signed (409). Optimistic
+  // UX — let the agent click and surface the backend error verbatim if it
+  // fails, rather than pre-fetching all addendums to disable the button.
+  async function deleteExtension(chargeId, label) {
+    if (!chargeId) return;
+    if (!canManageExtensions) {
+      setMsg('Only ADMIN/OPS can delete an extension.');
+      return;
+    }
+    const confirmed = window.confirm(
+      `Delete this extension (${label})? This reverts per-day items to the pre-extension days, removes the extension charge, restores the previous return date, and voids the linked addendum.`
+    );
+    if (!confirmed) return;
+    try {
+      setDeletingExtensionId(chargeId);
+      await api(
+        `/api/reservations/${row.id}/extension/${chargeId}`,
+        { method: 'DELETE' },
+        token
+      );
+      setMsg('Extension deleted. Return date and per-day items restored.');
+      await refresh();
+    } catch (e) {
+      // 409 from backend when linked addendum is SIGNED.
+      const err = String(e?.message || 'Unable to delete extension');
+      setMsg(err);
+    } finally {
+      setDeletingExtensionId(null);
+    }
+  }
 
   const loadCustomers = async () => {
     if (customers.length > 0) return;
@@ -1795,7 +1833,29 @@ token
               </select>
             </div>
             <div><span className="label">Pickup Date</span><input type="datetime-local" value={form.pickupAt} onChange={(e) => setForm({ ...form, pickupAt: e.target.value })} /></div>
-            <div><span className="label">Return Date</span><input type="datetime-local" value={form.returnAt} onChange={(e) => setForm({ ...form, returnAt: e.target.value })} /></div>
+            <div>
+              <span className="label">Return Date</span>
+              <input type="datetime-local" value={form.returnAt} onChange={(e) => setForm({ ...form, returnAt: e.target.value })} />
+              {row?.originalReturnAt ? (
+                <div
+                  className="label"
+                  style={{ marginTop: 4, textTransform: 'none', letterSpacing: 0, color: '#6b7a9a' }}
+                  title="The reservation has been extended. Original return date is preserved here for reference."
+                >
+                  Originally returned:{' '}
+                  <span style={{ color: '#1a1230', fontWeight: 600 }}>
+                    {new Date(row.originalReturnAt).toLocaleString()}
+                  </span>
+                  {' · Now returns: '}
+                  <span style={{ color: '#1a1230', fontWeight: 600 }}>
+                    {new Date(row.returnAt).toLocaleString()}
+                  </span>
+                  <span style={{ marginLeft: 6, padding: '1px 7px', borderRadius: 6, background: '#ede5ff', color: '#6e49ff', fontSize: 10, fontWeight: 700, letterSpacing: '.05em' }}>
+                    EXTENDED
+                  </span>
+                </div>
+              ) : null}
+            </div>
             <div><span className="label">Pickup Location</span><select value={form.pickupLocationId} onChange={(e) => setForm({ ...form, pickupLocationId: e.target.value })}><option value="">Select</option>{locations.map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}</select></div>
             <div><span className="label">Return Location</span><select value={form.returnLocationId} onChange={(e) => setForm({ ...form, returnLocationId: e.target.value })}><option value="">Select</option>{locations.map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}</select></div>
             {franchises.length > 0 && (
@@ -2439,19 +2499,39 @@ token
                       const rid = String(r.id || '').toLowerCase();
                       const isFixed = rid === 'daily' || rid === 'tax';
                       const canDelete = !isFixed;
+                      const isExtensionRow = String(r.code || '').toUpperCase() === 'EXTENSION_RATE';
 
                       return (
                         <tr key={r.id}>
                           <td style={{ whiteSpace: 'normal', wordBreak: 'break-word' }}>
                             <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
                               <span>{r.name}</span>
-                              {chargeEdit && canDelete ? (
+                              {isExtensionRow ? (
+                                <span
+                                  style={{ padding: '1px 7px', borderRadius: 6, background: '#ede5ff', color: '#6e49ff', fontSize: 10, fontWeight: 700, letterSpacing: '.05em' }}
+                                  title="Extension charge — created by Extend Reservation"
+                                >
+                                  EXTENSION
+                                </span>
+                              ) : null}
+                              {chargeEdit && canDelete && !isExtensionRow ? (
                                 <button
                                   className="link"
                                   onClick={() => removeChargeRow(r)}
                                   title="Remove row"
                                 >
                                   Delete
+                                </button>
+                              ) : null}
+                              {isExtensionRow && canManageExtensions && r.chargeId ? (
+                                <button
+                                  className="link"
+                                  onClick={() => deleteExtension(r.chargeId, r.name)}
+                                  disabled={deletingExtensionId === r.chargeId}
+                                  title="Delete this extension. Reverts per-day items, restores previous return date, and voids the linked addendum (refused if the addendum has been signed)."
+                                  style={{ color: '#c62828' }}
+                                >
+                                  {deletingExtensionId === r.chargeId ? 'Deleting…' : 'Delete extension'}
                                 </button>
                               ) : null}
                             </div>
@@ -2573,9 +2653,19 @@ token
         <ReservationExtendDialog
           reservation={row}
           token={token}
-          onExtended={async () => {
+          onExtended={async (result) => {
             setExtendDialogOpen(false);
-            setMsg('Reservation extended successfully');
+            // Backend (PR #34) now auto-creates a RentalAgreementAddendum
+            // alongside the EXTENSION_RATE charge. Surface the addendum's
+            // existence in the success toast so the agent knows there's
+            // something pending signature on the agreement view.
+            const addendumNote = result?.addendum
+              ? ` · Addendum created (pending signature) — see Agreement Addendums below`
+              : '';
+            const dayNote = result?.extensionDays
+              ? ` (+${result.extensionDays} day${result.extensionDays === 1 ? '' : 's'})`
+              : '';
+            setMsg(`Reservation extended successfully${dayNote}${addendumNote}`);
             await refresh();
           }}
           onCancel={() => setExtendDialogOpen(false)}

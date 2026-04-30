@@ -416,6 +416,31 @@ describe('reservation-extend (unified flow)', () => {
       assert.equal(delta.newReturnAt, '2026-05-17T00:00:00.000Z');
     });
 
+    it('addendum captures actor role from request (Sentry finding on PR #34)', async () => {
+      const state = makeMockDb();
+      await reservationExtendService.extendReservation({
+        reservationId: 'res-1',
+        newReturnAt: new Date('2026-05-17T00:00:00Z'),
+        extensionDailyRate: null, note: '', actorUserId: 'u-1',
+        actorRole: 'AGENT', // agent did the extension, not an admin
+        tenantScope: { tenantId: 'tenant-1' }
+      });
+      assert.equal(state.addendums[0].initiatedByRole, 'AGENT',
+        'addendum.initiatedByRole reflects the actual actor role');
+    });
+
+    it('addendum.initiatedByRole defaults to ADMIN when actorRole missing', async () => {
+      const state = makeMockDb();
+      await reservationExtendService.extendReservation({
+        reservationId: 'res-1',
+        newReturnAt: new Date('2026-05-17T00:00:00Z'),
+        extensionDailyRate: null, note: '', actorUserId: 'u-1',
+        // actorRole intentionally omitted
+        tenantScope: { tenantId: 'tenant-1' }
+      });
+      assert.equal(state.addendums[0].initiatedByRole, 'ADMIN');
+    });
+
     it('skips addendum creation when reservation has no agreement', async () => {
       const state = makeMockDb({
         initial: { reservation: { rentalAgreement: null } }
