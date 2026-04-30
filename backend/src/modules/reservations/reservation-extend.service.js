@@ -218,6 +218,7 @@ export const reservationExtendService = {
     extensionDailyRate,
     note,
     actorUserId,
+    actorRole,
     tenantScope
   }) {
     // 1. Validate inputs
@@ -369,7 +370,11 @@ export const reservationExtendService = {
           reason: String(note || '').trim() || `Reservation extended to ${nextReturnDate.toISOString()}`,
           reasonCategory: 'EXTENSION',
           initiatedBy: actorUserId || null,
-          initiatedByRole: 'ADMIN',
+          // Mirror manual createAddendum's pattern (rental-agreements.service.js):
+          // capture the actor's actual role for an accurate audit trail. Sentry
+          // bot finding on PR #34 — was hardcoded 'ADMIN' which broke audit
+          // accuracy when an AGENT or OPS user did the extension.
+          initiatedByRole: String(actorRole || 'ADMIN').trim().toUpperCase(),
           status: 'PENDING_SIGNATURE',
           signatureToken,
           signatureTokenExpiresAt,

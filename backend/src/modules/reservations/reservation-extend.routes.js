@@ -26,6 +26,7 @@ reservationExtendRouter.post(
         extensionDailyRate,
         note,
         actorUserId: req.user?.sub || req.user?.id,
+        actorRole: req.user?.role,
         tenantScope: scopeFor(req)
       });
       res.json(result);
