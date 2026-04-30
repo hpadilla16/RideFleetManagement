@@ -27,7 +27,11 @@ export function ReservationExtendDialog({ reservation, token, onExtended, onCanc
         note: note.trim()
       };
 
-      const result = await api(`/api/reservations/${reservation.id}/extend`, payload, token, 'POST');
+      const result = await api(
+        `/api/reservations/${reservation.id}/extend`,
+        { method: 'POST', body: JSON.stringify(payload) },
+        token
+      );
 
       if (onExtended) {
         onExtended(result);
