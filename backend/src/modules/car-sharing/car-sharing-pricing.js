@@ -51,9 +51,19 @@ function resolveHostServiceFeeRate(hostProfile) {
   return 0.15;
 }
 
-function resolveGuestTripFee(hostGrossRevenue) {
-  const estimated = money(Number(hostGrossRevenue || 0) * 0.1);
-  return money(Math.min(35, Math.max(7, estimated)));
+function resolveGuestTripFee(hostGrossRevenue, platformFeeConfig = null) {
+  // Default behavior matches the original hardcoded values
+  // (10% / $7 min / $35 max) so tenants without explicit config
+  // get the existing behavior. When platformFeeEnabled === false,
+  // returns 0 — operator disables the platform cut entirely.
+  const enabled = platformFeeConfig?.enabled !== false;
+  if (!enabled) return 0;
+
+  const pct = Number(platformFeeConfig?.pct ?? 10);
+  const min = Number(platformFeeConfig?.min ?? 7);
+  const max = Number(platformFeeConfig?.max ?? 35);
+  const estimated = money(Number(hostGrossRevenue || 0) * (pct / 100));
+  return money(Math.min(max, Math.max(min, estimated)));
 }
 
 export function computeMarketplaceTripPricing({
@@ -63,7 +73,8 @@ export function computeMarketplaceTripPricing({
   deliveryFee = 0,
   fulfillmentChoice = 'PICKUP',
   taxes = 0,
-  hostProfile = null
+  hostProfile = null,
+  platformFeeConfig = null
 } = {}) {
   const tripSubtotal = money(subtotal);
   const normalizedChoice = String(fulfillmentChoice || 'PICKUP').trim().toUpperCase() === 'DELIVERY' ? 'DELIVERY' : 'PICKUP';
@@ -73,7 +84,7 @@ export function computeMarketplaceTripPricing({
   const hostServiceFeeRate = resolveHostServiceFeeRate(hostProfile);
   const hostServiceFeeRatePct = money(hostServiceFeeRate * 100);
   const hostServiceFee = money(hostGrossRevenue * hostServiceFeeRate);
-  const guestTripFee = resolveGuestTripFee(hostGrossRevenue);
+  const guestTripFee = resolveGuestTripFee(hostGrossRevenue, platformFeeConfig);
   const quotedFees = money(hostChargeFees + guestTripFee);
   const quotedTaxes = money(taxes);
   const quotedTotal = money(tripSubtotal + quotedFees + quotedTaxes);
@@ -95,5 +106,15 @@ export function computeMarketplaceTripPricing({
     hostEarnings,
     platformRevenue,
     platformFee: platformRevenue
+  };
+}
+
+export function tenantPlatformFeeConfig(tenant) {
+  if (!tenant) return null;
+  return {
+    enabled: tenant.platformFeeEnabled !== false,
+    pct: Number(tenant.platformFeePct ?? 10),
+    min: Number(tenant.platformFeeMin ?? 7),
+    max: Number(tenant.platformFeeMax ?? 35)
   };
 }
