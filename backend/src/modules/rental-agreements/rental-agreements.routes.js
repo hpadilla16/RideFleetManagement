@@ -558,3 +558,49 @@ rentalAgreementsRouter.get('/:id/addendums/:addendumId/print', async (req, res, 
     next(e);
   }
 });
+
+// Re-fire the customer signature email for a still-pending addendum. Surfaced
+// from the AgreementAddendumsCard "Resend signature email" button. The email
+// body is regenerated from the live row so any later edits to customerEmail
+// flow through. Cooldown is intentionally absent in v1 — the admin button
+// confirms before sending; if abuse becomes an issue we'll add a per-addendum
+// throttle.
+rentalAgreementsRouter.post('/:id/addendums/:addendumId/notify', async (req, res, next) => {
+  try {
+    if (!isAdminRole(req.user)) {
+      return res.status(403).json({ error: 'Admin role required to resend addendum signature email' });
+    }
+    await ensureAccessible(req.params.id, req.user);
+
+    const existing = await rentalAgreementsService.getAddendumById(req.params.addendumId, {
+      tenantId: req.user?.tenantId || null
+    });
+    if (!existing || existing.rentalAgreementId !== req.params.id) {
+      return res.status(404).json({ error: 'Addendum not found' });
+    }
+    const status = String(existing.status || '').toUpperCase();
+    if (status !== 'PENDING_SIGNATURE') {
+      return res.status(409).json({
+        error: `Cannot resend signature email — addendum status is ${existing.status}`
+      });
+    }
+    if (!existing.signatureToken) {
+      return res.status(409).json({
+        error: 'This addendum has no signature token (legacy data). Void it and create a new one to issue a fresh link.'
+      });
+    }
+
+    // scheduleAddendumNotification never throws — failures are returned in the
+    // result envelope { customer: {sent|skipped|error}, admin: {...} } so the
+    // caller can show a precise toast (e.g. "no email on file").
+    const result = await scheduleAddendumNotification(
+      req.params.id,
+      req.params.addendumId,
+      req.user?.tenantId || null
+    );
+    res.status(202).json(result);
+  } catch (e) {
+    if (/not found/i.test(e.message)) return res.status(404).json({ error: e.message });
+    next(e);
+  }
+});
