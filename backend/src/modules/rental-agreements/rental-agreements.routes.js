@@ -589,6 +589,20 @@ rentalAgreementsRouter.post('/:id/addendums/:addendumId/notify', async (req, res
         error: 'This addendum has no signature token (legacy data). Void it and create a new one to issue a fresh link.'
       });
     }
+    // Sentry HIGH finding on PR #37: the customer-side public signing service
+    // (addendum-signature-public.service.js) rejects with "Signature token is
+    // invalid or expired" the moment now > signatureTokenExpiresAt. Without
+    // this gate, /notify would email a fresh URL pointing at a dead link.
+    // The token is issued for 14 days at createAddendum; long-pending addendums
+    // are exactly when an admin is most likely to retry the email.
+    if (
+      existing.signatureTokenExpiresAt &&
+      new Date(existing.signatureTokenExpiresAt).getTime() < Date.now()
+    ) {
+      return res.status(409).json({
+        error: 'This addendum signing link has expired. Void it and create a new addendum to issue a fresh 14-day link.'
+      });
+    }
 
     // scheduleAddendumNotification never throws — failures are returned in the
     // result envelope { customer: {sent|skipped|error}, admin: {...} } so the
