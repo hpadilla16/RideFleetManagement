@@ -16,7 +16,8 @@
     "knowledgeBase": "Knowledge Base",
     "settings": "Settings",
     "tenants": "Tenants",
-    "security": "Security"
+    "security": "Security",
+    "actionBoards": "Action Boards"
   },
   "topbar": {
     "dark": "Dark",
