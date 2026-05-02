@@ -16,6 +16,8 @@ import { ratesRouter } from './modules/rates/rates.routes.js';
 import { authRouter } from './modules/auth/auth.routes.js';
 import { rentalAgreementsRouter } from './modules/rental-agreements/rental-agreements.routes.js';
 import { addendumSignaturePublicRouter } from './modules/rental-agreements/addendum-signature-public.routes.js';
+import { storeBoardRouter } from './modules/store-board/store-board.routes.js';
+import { storeBoardPublicRouter } from './modules/store-board/store-board-public.routes.js';
 import { assertAuthConfig } from './modules/auth/auth.config.js';
 import { settingsRouter } from './modules/settings/settings.routes.js';
 import { requireAuth, requireRole, requireModuleAccess } from './middleware/auth.js';
@@ -92,6 +94,7 @@ app.use('/api/public', customerPortalRouter);
 app.use('/api/public/booking', publicBookingRouter);
 app.use('/api/public/booking', accountDeletionRouter);
 app.use('/api/public/addendum-signature', addendumSignaturePublicRouter);
+app.use('/api/public/store-board', storeBoardPublicRouter);
 app.use('/api/public/issues', publicIssueCenterRouter);
 app.use('/api/public/telematics', publicVehicleTelematicsRouter);
 app.use('/api/host-app', requireAuth, requireModuleAccess('hostApp'), hostAppRouter);
@@ -103,6 +106,7 @@ app.use('/api/planner', requireAuth, requireModuleAccess('planner'), plannerRout
 app.use('/api/payment-gateway', requireAuth, requireRole('ADMIN', 'OPS'), paymentGatewayRouter);
 app.use('/api/sms', requireAuth, requireRole('ADMIN', 'OPS'), smsRouter);
 app.use('/api/knowledge-base', requireAuth, knowledgeBaseRouter);
+app.use('/api/store-board', requireAuth, requireRole('SUPER_ADMIN', 'ADMIN', 'OPS'), storeBoardRouter);
 
 app.use('/api/reservations', requireAuth, requireModuleAccess('reservations'), reservationsRouter);
 app.use('/api/reservations', requireAuth, requireModuleAccess('reservations'), reservationExtendRouter);

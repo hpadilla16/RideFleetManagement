@@ -2318,3 +2318,47 @@ model ReservationDailyCounter {
   @@unique([tenantId, day])
   @@index([tenantId, refreshedAt])
 }
+
+// Action Board kiosk tokens.
+//
+// Each token authorizes one read-only kiosk display (a TV mounted in the
+// store) to fetch the day's pickups + returns for ONE location. Tokens are
+// long-lived by design — the TV stays plugged in, and the URL embedded in
+// its bookmark is the entire auth.
+//
+// Tenant + Location are stored as plain string IDs (no Prisma relations) to
+// keep this model self-contained and avoid back-reference churn on the two
+// most-touched tables in the schema. Tenant-isolation is enforced at the
+// service layer via the embedded tenantId — every call resolves the token
+// then re-checks tenantId before returning data.
+//
+// Revoked tokens stay in the table (revokedAt set, not deleted) so the
+// admin UI can show audit history and a re-issue flow doesn't lose label
+// continuity.
+model StoreBoardToken {
+  id         String    @id @default(cuid())
+  tenantId   String
+  locationId String
+  // Human-readable label set when the admin mints the token, e.g.
+  // "Front Counter Display" or "Service Bay Monitor". Shown in the admin
+  // CRUD list so they know which physical TV a token belongs to.
+  label      String
+  // 32-char URL-safe random string. Generated server-side. Never hashed —
+  // matches the existing addendum signature-token pattern; the URL itself
+  // is the credential and rotation is by mint+revoke, not by hashing.
+  token      String    @unique
+  // Optional pointer to the User who minted this token, for audit. Stored
+  // as plain string ID (no FK) so user deletion doesn't cascade-delete the
+  // token row.
+  createdBy  String?
+  createdAt  DateTime  @default(now())
+  // Bumped on every successful kiosk fetch so admins can see "last seen 3
+  // min ago" and detect a TV that lost connection.
+  lastSeenAt DateTime?
+  // Soft-delete. Set when admin revokes; row stays for audit. Service
+  // refuses to serve data for tokens with revokedAt non-null.
+  revokedAt  DateTime?
+
+  @@index([tenantId])
+  @@index([locationId])
+}
