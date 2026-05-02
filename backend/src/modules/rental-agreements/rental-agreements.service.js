@@ -629,6 +629,157 @@ function applyTemplate(html, vars = {}) {
   return out;
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Addendum print rendering
+//
+// Both the agreement print AND the standalone addendum print converge on the
+// same modern dark-theme styling so the output looks like one cohesive
+// document set instead of an upmarket agreement plus a 2002-era addendum.
+// We do this by:
+//
+//   - reusing the agreement-modern.html template's chrome (doctype, head,
+//     <style>, opening <body>) as a "shell" wrapper for standalone addendums,
+//     so any future style change in agreement-modern.html flows through to
+//     addendums automatically (no CSS duplication);
+//   - exposing a body-only builder that the agreement print can splice in
+//     right before its </body>, producing a multi-page PDF where each
+//     addendum gets its own page-break section that visually matches the
+//     parent agreement (same .hero, .tile, .section, .sig-row, .verify-box).
+// ─────────────────────────────────────────────────────────────────────────────
+
+function statusLabel(s) {
+  switch (String(s || '').toUpperCase()) {
+    case 'PENDING_SIGNATURE': return 'Pending Signature';
+    case 'SIGNED': return 'Signed';
+    case 'VOID': return 'Void';
+    default: return s || '-';
+  }
+}
+
+function reasonCategoryLabel(c) {
+  return String(c || '-').replace(/_/g, ' ').replace(/\b\w/g, (l) => l.toUpperCase());
+}
+
+/**
+ * Returns the agreement-modern.html template split at <body> so callers can
+ * sandwich custom body content between a fully-styled head and a closing
+ * `</body></html>`. Callers pass the company-context vars they need (logo,
+ * company name) since the head still references some `{{...}}` placeholders.
+ */
+function getModernShell(templateVars = {}) {
+  const tpl = applyTemplate(getModernAgreementTemplate(), templateVars);
+  const bodyOpenIdx = tpl.indexOf('<body>');
+  const bodyCloseIdx = tpl.lastIndexOf('</body>');
+  if (bodyOpenIdx < 0 || bodyCloseIdx < 0) {
+    return { head: tpl, foot: '' };
+  }
+  const head = tpl.slice(0, bodyOpenIdx + '<body>'.length);
+  const foot = tpl.slice(bodyCloseIdx);
+  return { head, foot };
+}
+
+/**
+ * Builds the inner-body markup for one addendum. Reuses CSS classes already
+ * defined in agreement-modern.html (.page, .hero, .tile, .section, .sig-row,
+ * .verify-box) so this renders identically whether spliced into the agreement
+ * print or used as the only body content of a standalone addendum print.
+ *
+ * `idx` is the 1-based ordinal in the agreement's addendum series.
+ * `total` is the count of non-VOID addendums on the agreement (footer label).
+ */
+function buildAddendumPageHtml(addendum, idx, total, ctx) {
+  const status = String(addendum.status || '').toUpperCase();
+  const sigImage = addendum.signatureDataUrl
+    ? `<img src="${addendum.signatureDataUrl}" alt="Signature" style="max-height:45px;max-width:280px;width:auto;height:auto;object-fit:contain;display:block" />`
+    : `<div class="sig-meta">${
+        status === 'PENDING_SIGNATURE'
+          ? 'Awaiting customer signature'
+          : status === 'VOID'
+            ? 'Voided'
+            : 'No signature on file'
+      }</div>`;
+
+  const companyName = esc(ctx.cfg?.companyName || '');
+  const agreementNumber = esc(ctx.agreement?.agreementNumber || '');
+  const initiatedBy = addendum.initiatedByRole
+    ? `${esc(addendum.initiatedByRole)}${addendum.initiatedBy ? ` · ${esc(String(addendum.initiatedBy).slice(0, 8))}` : ''}`
+    : '-';
+
+  return `
+<div class="page page-break">
+
+  <div class="hero">
+    <div class="brand">
+      <div class="logo">${ctx.companyLogoBlock || ''}</div>
+      <div>
+        <div class="co-name">${companyName}</div>
+        <div class="co-sub">Agreement ${agreementNumber} &mdash; Addendum ${idx} of ${total}</div>
+      </div>
+    </div>
+    <div class="ag-badge">${esc(statusLabel(status))}</div>
+  </div>
+
+  <div class="g g4">
+    <div class="tile"><div class="k">Updated Pickup</div><div class="v vs">${esc(fmtDate(addendum.pickupAt))}</div></div>
+    <div class="tile"><div class="k">Updated Return</div><div class="v vs">${esc(fmtDate(addendum.returnAt))}</div></div>
+    <div class="tile"><div class="k">Created</div><div class="v vs">${esc(fmtDate(addendum.createdAt))}</div></div>
+    <div class="tile"><div class="k">Status</div><div class="v vs">${esc(statusLabel(status))}</div></div>
+  </div>
+
+  <div class="section">
+    <h3>Reason for Change</h3>
+    <div class="g g4">
+      <div class="tile span2"><div class="k">Reason</div><div class="v vs">${esc(addendum.reason || '-')}</div></div>
+      <div class="tile"><div class="k">Category</div><div class="v vs">${esc(reasonCategoryLabel(addendum.reasonCategory))}</div></div>
+      <div class="tile"><div class="k">Initiated By</div><div class="v vs">${initiatedBy}</div></div>
+    </div>
+  </div>
+
+  <div class="section">
+    <h3>Customer Signature</h3>
+    <div class="sig-row">
+      <div class="sig-box">
+        <div class="sig-meta">
+          Signed by: <strong>${esc(addendum.signatureSignedBy || '-')}</strong> &nbsp;&middot;&nbsp;
+          Date: <strong>${esc(addendum.signatureSignedAt ? fmtDate(addendum.signatureSignedAt) : '-')}</strong> &nbsp;&middot;&nbsp;
+          IP: <strong>${esc(addendum.signatureIp || '-')}</strong>
+        </div>
+        <div class="sig-img">${sigImage}</div>
+        <div class="sig-line">
+          <div class="sig-line-label">Customer Signature</div>
+        </div>
+      </div>
+      <div class="verify-box">
+        <h4>Verification</h4>
+        <div class="vline">Agreement:<br/><code>${agreementNumber}</code></div>
+        <div class="vline">Addendum:<br/><code>${idx} of ${total}</code></div>
+        <div class="vline">Issuer:<br/>${companyName}</div>
+        <div class="vline">Status:<br/>${esc(statusLabel(status))}</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="footer">
+    ${companyName} &bull; Agreement ${agreementNumber} &bull; Addendum ${idx} of ${total}
+  </div>
+
+</div>
+`;
+}
+
+/**
+ * Builds the body content for one or more addendums. VOID addendums are
+ * intentionally included so the legal record is complete (the addendum
+ * print is consumed by audit reviews, not just operational). Pass an empty
+ * array to get an empty string back (callers can short-circuit).
+ */
+function buildAddendumPagesHtml(addendums, ctx) {
+  const list = Array.isArray(addendums) ? addendums : [];
+  if (list.length === 0) return '';
+  const total = list.length;
+  return list.map((a, i) => buildAddendumPageHtml(a, i + 1, total, ctx)).join('\n');
+}
+
 function rentalDays(pickupAt, returnAt) {
   const ms = Number(new Date(returnAt)) - Number(new Date(pickupAt));
   if (!Number.isFinite(ms) || ms <= 0) return 1;
@@ -2265,13 +2416,37 @@ export const rentalAgreementsService = {
       signatureDataUrl: rawSigUrl
     };
 
-    if (String(cfg?.agreementHtmlTemplate || '').trim()) {
-      return applyTemplate(cfg.agreementHtmlTemplate, templateVars);
+    const baseTemplate = String(cfg?.agreementHtmlTemplate || '').trim()
+      ? cfg.agreementHtmlTemplate
+      : getModernAgreementTemplate();
+    const baseHtml = applyTemplate(baseTemplate, templateVars);
+
+    // Pull addendums and splice their pages onto the agreement output so
+    // every print/email of the agreement carries the addendums alongside
+    // the original signed contract. We include VOID addendums too — the
+    // legal record needs to show that an attempted change was reversed,
+    // not silently disappear it. Order is creation chronological so the
+    // "Addendum N of M" footer reads naturally.
+    const addendums = await prisma.rentalAgreementAddendum.findMany({
+      where: { rentalAgreementId: id },
+      orderBy: { createdAt: 'asc' }
+    });
+    if (!addendums.length) return baseHtml;
+
+    const addendumPages = buildAddendumPagesHtml(addendums, {
+      agreement,
+      cfg,
+      companyLogoBlock
+    });
+    if (!addendumPages) return baseHtml;
+
+    // Splice before </body>. Falls back to append if a custom tenant template
+    // happens to omit the closing tag — the addendum pages are still valid
+    // standalone HTML and the browser/Puppeteer renderer is forgiving.
+    if (/<\/body>/i.test(baseHtml)) {
+      return baseHtml.replace(/<\/body>/i, `${addendumPages}</body>`);
     }
-
-    const defaultTemplate = getModernAgreementTemplate();
-    return applyTemplate(defaultTemplate, templateVars);
-
+    return `${baseHtml}\n${addendumPages}`;
   },
 
   async agreementPdfBuffer(id) {
@@ -4052,6 +4227,14 @@ export const rentalAgreementsService = {
     });
   },
 
+  /**
+   * Standalone print of a single addendum. Reuses the agreement-modern.html
+   * chrome (head/style/body wrapper) and the same `buildAddendumPageHtml`
+   * helper that the combined agreement+addendum print uses, so a standalone
+   * View/Print of an addendum looks visually identical to the addendum pages
+   * embedded in the parent agreement print. Same dark theme, same tile/section/
+   * signature components, same print-mode overrides.
+   */
   async renderAddendumHtml(addendumId) {
     if (!addendumId) throw new Error('addendumId is required');
 
@@ -4063,19 +4246,52 @@ export const rentalAgreementsService = {
             id: true,
             agreementNumber: true,
             customerFirstName: true,
-            customerLastName: true
+            customerLastName: true,
+            tenantId: true
           }
         }
       }
     });
     if (!addendum) throw new Error('Addendum not found');
 
-    const fmtDate = (d) => d ? new Date(d).toLocaleDateString('en-US', { year: 'numeric', month: '2-digit', day: '2-digit' }) : '';
-    const signedBlock = addendum.status === 'SIGNED'
-      ? `<div class="signature-box"><h3>Customer Signature</h3>${addendum.signatureDataUrl ? `<img src="${addendum.signatureDataUrl}" class="sig-image" alt="Signature">` : '<p>No signature on file</p>'}<p>Signed by: ${addendum.signatureSignedBy || '-'}</p><p>Date: ${fmtDate(addendum.signatureSignedAt)}</p></div>`
-      : `<div class="signature-box"><p><strong>Pending Customer Signature</strong></p><p>Status: ${addendum.status}</p></div>`;
+    // Compute the addendum's ordinal in its parent agreement's series so the
+    // "Addendum X of N" header is consistent with the combined print.
+    const siblings = await prisma.rentalAgreementAddendum.findMany({
+      where: { rentalAgreementId: addendum.rentalAgreementId },
+      orderBy: { createdAt: 'asc' },
+      select: { id: true }
+    });
+    const total = siblings.length || 1;
+    const idx = Math.max(1, siblings.findIndex((s) => s.id === addendumId) + 1);
 
-    return `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Rental Agreement Addendum</title><style>body{font-family:Arial,sans-serif;margin:40px}.header{text-align:center;margin-bottom:30px}.section{margin:20px 0}.field-row{display:flex;margin:10px 0}.label{font-weight:bold;width:200px}.value{flex:1}.signature-box{border:1px solid #ccc;padding:20px;margin-top:20px;text-align:center}.sig-image{max-width:300px;max-height:100px}</style></head><body><div class="header"><h1>Rental Agreement Addendum</h1><p>This addendum modifies the original rental agreement referenced below.</p></div><div class="section"><h3>Original Agreement Reference</h3><div class="field-row"><div class="label">Agreement Number:</div><div class="value">${addendum.rentalAgreement?.agreementNumber || '-'}</div></div><div class="field-row"><div class="label">Customer:</div><div class="value">${addendum.rentalAgreement?.customerFirstName || ''} ${addendum.rentalAgreement?.customerLastName || ''}</div></div></div><div class="section"><h3>Updated Rental Dates</h3><div class="field-row"><div class="label">New Pickup:</div><div class="value">${fmtDate(addendum.pickupAt)} ${new Date(addendum.pickupAt).toLocaleTimeString()}</div></div><div class="field-row"><div class="label">New Return:</div><div class="value">${fmtDate(addendum.returnAt)} ${new Date(addendum.returnAt).toLocaleTimeString()}</div></div></div><div class="section"><h3>Reason for Change</h3><div class="field-row"><div class="value">${String(addendum.reason || '').trim()}</div></div></div>${signedBlock}<hr><p style="font-size:0.9em;color:#666">Created: ${new Date(addendum.createdAt).toLocaleString()}</p></body></html>`;
+    const scope = addendum.rentalAgreement?.tenantId ? { tenantId: addendum.rentalAgreement.tenantId } : {};
+    const cfg = await settingsService.getRentalAgreementConfig(scope);
+    const companyLogoBlock = buildCompanyLogoBlock(
+      cfg?.companyName || '',
+      cfg?.companyLogoUrl || ''
+    );
+
+    const ctx = {
+      agreement: addendum.rentalAgreement,
+      cfg,
+      companyLogoBlock
+    };
+
+    const shellVars = {
+      // The shell template references these placeholders inside <head> and
+      // the print-mode overrides, so we feed them through even though we
+      // immediately replace the body with addendum-specific content.
+      agreementNumber: esc(addendum.rentalAgreement?.agreementNumber || ''),
+      companyName: esc(cfg?.companyName || ''),
+      companyLogoBlock,
+      companyAddress: esc(cfg?.companyAddress || ''),
+      companyPhone: esc(cfg?.companyPhone || ''),
+      reservationNumber: '-'
+    };
+
+    const { head, foot } = getModernShell(shellVars);
+    const body = buildAddendumPageHtml(addendum, idx, total, ctx);
+    return `${head}\n${body}\n${foot}`;
   }
 };
 
