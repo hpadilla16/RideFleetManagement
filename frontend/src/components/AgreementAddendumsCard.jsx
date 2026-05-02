@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { api } from '../lib/client';
+import { api, API_BASE, readStoredToken } from '../lib/client';
 
 /**
  * Admin-facing card for managing rental agreement addendums (BUG-001 / Option C).
@@ -196,8 +196,59 @@ export function AgreementAddendumsCard({ rentalAgreementId, role, reservation = 
     setError('');
   };
 
-  const printUrl = (addendumId) =>
-    `/api/rental-agreements/${rentalAgreementId}/addendums/${addendumId}/print`;
+  // Authenticated print: the rental-agreements router lives behind requireAuth +
+  // requireModuleAccess('reservations'). Opening the print URL in a new tab via
+  // a plain <a target="_blank"> sends only cookies — there is no session cookie
+  // on prod, the JWT lives in localStorage, so the new tab gets a 401. Match
+  // the pattern in reservations/[id]/page.js → handlePrintAgreement: spawn the
+  // tab synchronously (popup-blocker safe), fetch the HTML with the Bearer
+  // header, then document.write into the spawned tab.
+  const handlePrint = (addendumId) => {
+    setError('');
+    setInfo('');
+    const printWindow = window.open('', '_blank');
+    if (!printWindow) {
+      setError('Pop-up blocked. Allow pop-ups for ridefleetmanager.com to print the addendum.');
+      return;
+    }
+    printWindow.opener = null;
+    printWindow.document.write(
+      '<html><body style="font-family:Inter,sans-serif;padding:32px;text-align:center;background:#0b0a12;color:#fff;">Preparing addendum...</body></html>'
+    );
+    printWindow.document.close();
+    (async () => {
+      try {
+        const token = readStoredToken();
+        const res = await fetch(
+          `${API_BASE}/api/rental-agreements/${rentalAgreementId}/addendums/${addendumId}/print`,
+          {
+            headers: token ? { Authorization: `Bearer ${token}` } : {},
+            cache: 'no-store'
+          }
+        );
+        if (!res.ok) {
+          let msg = `Print failed (${res.status})`;
+          try {
+            const j = await res.json();
+            if (j?.error) msg = j.error;
+          } catch {}
+          throw new Error(msg);
+        }
+        const html = await res.text();
+        printWindow.document.open();
+        printWindow.document.write(html);
+        printWindow.document.close();
+        printWindow.focus();
+      } catch (e) {
+        printWindow.document.open();
+        printWindow.document.write(
+          `<p style="font-family:sans-serif;padding:24px">${(e && e.message) || 'Unable to open addendum'}</p>`
+        );
+        printWindow.document.close();
+        setError(String(e?.message || e));
+      }
+    })();
+  };
 
   if (!rentalAgreementId) return null;
 
@@ -277,14 +328,13 @@ export function AgreementAddendumsCard({ rentalAgreementId, role, reservation = 
                 Created {fmtDateTime(a.createdAt)}
               </div>
               <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                <a
-                  href={printUrl(a.id)}
-                  target="_blank"
-                  rel="noreferrer"
-                  style={{ textDecoration: 'none' }}
+                <button
+                  type="button"
+                  className="button-subtle"
+                  onClick={() => handlePrint(a.id)}
                 >
-                  <button type="button" className="button-subtle">View / Print</button>
-                </a>
+                  View / Print
+                </button>
                 {isAdmin && String(a.status || '').toUpperCase() === 'PENDING_SIGNATURE' ? (
                   <>
                     <button
