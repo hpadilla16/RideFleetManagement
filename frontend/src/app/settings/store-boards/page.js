@@ -105,6 +105,19 @@ function Inner({ token, me, logout }) {
 
   useEffect(() => { refresh(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [token, includeRevoked, activeTenantId]);
 
+  // Sentry HIGH on PR #45: when SUPER_ADMIN switches tenants, the old
+  // formLocationId stays selected. Submitting then would mint against
+  // tenant B with a location ID that belongs to tenant A — backend would
+  // 404 (defense in depth check) but only after the user clicked. Clearing
+  // it on tenant change keeps the picker honest. Form label is also
+  // cleared since labels are typically tenant-specific ("Carolina Front
+  // Counter" doesn't belong on a different tenant).
+  useEffect(() => {
+    setFormLocationId('');
+    setFormLabel('');
+    setJustMinted(null);
+  }, [activeTenantId]);
+
   const submitMint = async (e) => {
     e?.preventDefault?.();
     if (isSuperAdmin && !activeTenantId) { setMsg('Pick a tenant first'); return; }
