@@ -3853,7 +3853,9 @@ export const rentalAgreementsService = {
       where: { id: rentalAgreementId },
       include: {
         charges: true,
-        reservation: { select: { pickupAt: true, returnAt: true, tenantId: true } }
+        reservation: {
+          select: { id: true, pickupAt: true, returnAt: true, originalReturnAt: true, tenantId: true }
+        }
       }
     });
     if (!agreement) throw new Error('Rental agreement not found');
@@ -3882,23 +3884,63 @@ export const rentalAgreementsService = {
     const signatureToken = crypto.randomBytes(24).toString('base64url');
     const signatureTokenExpiresAt = new Date(Date.now() + 14 * 24 * 60 * 60 * 1000); // 14 days
 
-    return prisma.rentalAgreementAddendum.create({
-      data: {
-        rentalAgreementId,
-        tenantId: agreement.tenantId,
-        pickupAt: new Date(newPickupAt),
-        returnAt: new Date(newReturnAt),
-        reason: String(reason).trim(),
-        reasonCategory: String(reasonCategory).trim(),
-        initiatedBy: initiatedBy ? String(initiatedBy).trim() : null,
-        initiatedByRole: String(initiatedByRole).trim(),
-        status: 'PENDING_SIGNATURE',
-        signatureToken,
-        signatureTokenExpiresAt,
-        originalCharges: JSON.stringify(originalCharges),
-        newCharges: JSON.stringify(newCharges),
-        chargeDelta: JSON.stringify(chargeDelta)
+    const newPickupDate = new Date(newPickupAt);
+    const newReturnDate = new Date(newReturnAt);
+
+    // Wrap addendum-create + reservation-date sync in one transaction so we
+    // never end up with an addendum recorded but the reservation operating on
+    // the old dates (the wedge that bit RES-850355 on prod 2026-05-01:
+    // planner / dashboard / billing kept showing 5/5 even after the agent had
+    // executed the date change). The agreement document stays immutable as
+    // the legal record of what was originally signed; the addendum row is
+    // the legal record of the change; the reservation reflects the change
+    // operationally so the rest of the system (planner availability, charges,
+    // notifications) operates on the accepted dates.
+    //
+    // Skipped for the unified-extend path: that flow lives in
+    // extendReservation() which updates Reservation.returnAt at extend-time
+    // and stores the addendum's pickupAt = oldReturnAt for deleteExtension's
+    // recovery. createAddendum is the manual-admin path; mirroring that
+    // codepath here would corrupt extend-flow rows.
+    return prisma.$transaction(async (tx) => {
+      const created = await tx.rentalAgreementAddendum.create({
+        data: {
+          rentalAgreementId,
+          tenantId: agreement.tenantId,
+          pickupAt: newPickupDate,
+          returnAt: newReturnDate,
+          reason: String(reason).trim(),
+          reasonCategory: String(reasonCategory).trim(),
+          initiatedBy: initiatedBy ? String(initiatedBy).trim() : null,
+          initiatedByRole: String(initiatedByRole).trim(),
+          status: 'PENDING_SIGNATURE',
+          signatureToken,
+          signatureTokenExpiresAt,
+          originalCharges: JSON.stringify(originalCharges),
+          newCharges: JSON.stringify(newCharges),
+          chargeDelta: JSON.stringify(chargeDelta)
+        }
+      });
+
+      const reservation = agreement.reservation;
+      if (reservation?.id) {
+        const updateData = {
+          pickupAt: newPickupDate,
+          returnAt: newReturnDate
+        };
+        // Preserve the FIRST original returnAt — never overwrite. Mirrors
+        // extendReservation's behavior so deleteExtension and voidAddendum
+        // both have a recovery anchor even after a chain of changes.
+        if (!reservation.originalReturnAt) {
+          updateData.originalReturnAt = reservation.returnAt;
+        }
+        await tx.reservation.update({
+          where: { id: reservation.id },
+          data: updateData
+        });
       }
+
+      return created;
     });
   },
 
@@ -3950,9 +3992,63 @@ export const rentalAgreementsService = {
     if (!addendumId) throw new Error('addendumId is required');
     const existing = await this.getAddendumById(addendumId, scope);
     if (!existing) throw new Error('Addendum not found');
-    return prisma.rentalAgreementAddendum.update({
-      where: { id: addendumId },
-      data: { status: 'VOID' }
+
+    // Wrap the status flip + reservation date revert in a single transaction
+    // so the operating system never observes a window where the addendum is
+    // VOID but the reservation still carries the addendum's date.
+    //
+    // Manual-addendum path only. The unified-extend flow uses deleteExtension
+    // for its recovery — it owns charge revert + addendum void + returnAt
+    // restoration as one operation, and we must not double-revert here.
+    // `extensionChargeId IS NOT NULL` is the discriminator (set by
+    // extendReservation, never set by createAddendum).
+    return prisma.$transaction(async (tx) => {
+      const voided = await tx.rentalAgreementAddendum.update({
+        where: { id: addendumId },
+        data: { status: 'VOID' }
+      });
+
+      if (existing.extensionChargeId) return voided;
+
+      const agreement = await tx.rentalAgreement.findUnique({
+        where: { id: existing.rentalAgreementId },
+        select: { id: true, reservationId: true }
+      });
+      if (!agreement?.reservationId) return voided;
+
+      // Only revert if no other PENDING_SIGNATURE / SIGNED addendums of
+      // ANY kind (manual OR extend-flow) exist on this agreement. If
+      // there's still an active chain, the latest one's dates are the
+      // operating dates — voiding an earlier entry must not retroactively
+      // undo a still-active later change. Mixing extend-flow and manual
+      // addendums on the same agreement is rare but possible; safest to
+      // bail out of revert and let the admin reconcile, rather than risk
+      // overwriting an extend's returnAt with the agreement's pre-extend
+      // originalReturnAt.
+      const otherActive = await tx.rentalAgreementAddendum.count({
+        where: {
+          rentalAgreementId: existing.rentalAgreementId,
+          id: { not: addendumId },
+          status: { in: ['PENDING_SIGNATURE', 'SIGNED'] }
+        }
+      });
+      if (otherActive > 0) return voided;
+
+      const reservation = await tx.reservation.findUnique({
+        where: { id: agreement.reservationId },
+        select: { id: true, originalReturnAt: true, returnAt: true }
+      });
+      if (reservation?.originalReturnAt) {
+        await tx.reservation.update({
+          where: { id: reservation.id },
+          data: {
+            returnAt: reservation.originalReturnAt,
+            originalReturnAt: null
+          }
+        });
+      }
+
+      return voided;
     });
   },
 
