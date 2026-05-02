@@ -92,9 +92,52 @@ function buildPrecheckinChecklist(reservation) {
   };
 }
 
+// Reservations list TTL caches.
+//
+// Phase 2 baseline (2026-05-02 load test, 50 VUs against prod) showed
+// /page + /list at p50=1.4s / p95=2.0s with no cache, while /summary held
+// at p50=86ms / p95=738ms thanks to its existing TTL cache. Multiple staff
+// at one of the 5 stores routinely re-list within seconds of each other
+// (refreshing the dashboard, switching between filters, returning to the
+// list after editing). 15s TTL means the worst-case "I just made a change
+// and don't see it yet" wait is one breath, in exchange for serving the
+// other 90% of identical requests from memory.
+//
+// The cache module already supports Redis pub/sub for cross-worker
+// invalidation when REDIS_URL is set; we don't invalidate explicitly here
+// (TTL is short enough), but enabling Redis later would make all 4 cluster
+// workers share one effective cache instead of running 4 cold caches in
+// parallel — which is what the warmup-period mismatch in the load test
+// (cold p99 of 2s on summary) hinted at.
+const RESERVATIONS_LIST_TTL_MS = 15 * 1000;
+const RESERVATIONS_PAGE_TTL_MS = 15 * 1000;
+
+// Build a deterministic cache key from scope + arbitrary query params.
+// Sorts keys so different param-orderings on the URL hash to the same key.
+// Coerces every value to string and skips empty/null/undefined so '?q='
+// vs no q at all collapse to the same cache entry.
+function reservationsListCacheKey(prefix, scope, params = {}) {
+  const tenant = scope?.tenantId || 'global';
+  const sup = scope?.includeAllTenants ? '1' : '0';
+  const userKey = scope?.userId || scope?.actorId || '';
+  const entries = Object.entries(params)
+    .filter(([, v]) => v !== undefined && v !== null && String(v).length > 0)
+    .map(([k, v]) => [k, String(v)])
+    .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
+  const qs = entries.map(([k, v]) => `${k}=${encodeURIComponent(v)}`).join('&');
+  return `reservations:${prefix}:${tenant}:${sup}:${userKey}:${qs}`;
+}
+
 reservationsRouter.get('/', async (req, res, next) => {
   try {
-    res.json(await reservationsService.list(scopeFor(req), { page: req.query?.page, limit: req.query?.limit }));
+    const scope = scopeFor(req);
+    const params = { page: req.query?.page, limit: req.query?.limit };
+    const out = await cache.getOrSet(
+      reservationsListCacheKey('list', scope, params),
+      () => reservationsService.list(scope, params),
+      RESERVATIONS_LIST_TTL_MS
+    );
+    res.json(out);
   } catch (e) {
     next(e);
   }
@@ -102,7 +145,8 @@ reservationsRouter.get('/', async (req, res, next) => {
 
 reservationsRouter.get('/page', async (req, res, next) => {
   try {
-    res.json(await reservationsService.listPage({
+    const scope = scopeFor(req);
+    const params = {
       query: req.query?.q,
       limit: req.query?.limit,
       offset: req.query?.offset,
@@ -115,7 +159,13 @@ reservationsRouter.get('/page', async (req, res, next) => {
       dateOn: req.query?.dateOn,
       dateFrom: req.query?.dateFrom,
       dateTo: req.query?.dateTo
-    }, scopeFor(req)));
+    };
+    const out = await cache.getOrSet(
+      reservationsListCacheKey('page', scope, params),
+      () => reservationsService.listPage(params, scope),
+      RESERVATIONS_PAGE_TTL_MS
+    );
+    res.json(out);
   } catch (e) {
     next(e);
   }
