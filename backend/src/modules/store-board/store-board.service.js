@@ -1,6 +1,7 @@
 import crypto from 'node:crypto';
 import { prisma } from '../../lib/prisma.js';
 import { cache } from '../../lib/cache.js';
+import { settingsService } from '../settings/settings.service.js';
 
 /**
  * Action Board service.
@@ -238,7 +239,13 @@ export const storeBoardService = {
       // one on returnAt. We could OR them in a single query, but separating
       // makes index usage predictable and the row counts are tiny per
       // location per day.
-      const [pickupsAll, returnsAll, location] = await Promise.all([
+      // Pull data + tenant branding in parallel. The agreement settings
+      // table is where companyName + companyLogoUrl live (per-tenant
+      // overridable), so the kiosk header reuses the same brand the
+      // customer sees on their printed contract — single source of truth
+      // means the TV display matches the paperwork they just signed.
+      const tenantScope = row.tenantId ? { tenantId: row.tenantId } : {};
+      const [pickupsAll, returnsAll, location, tenantRow, brandCfg] = await Promise.all([
         prisma.reservation.findMany({
           where: {
             tenantId: row.tenantId,
@@ -268,7 +275,15 @@ export const storeBoardService = {
         prisma.location.findUnique({
           where: { id: row.locationId },
           select: { id: true, name: true, code: true, city: true, state: true }
-        })
+        }),
+        prisma.tenant.findUnique({
+          where: { id: row.tenantId },
+          select: { id: true, name: true, slug: true }
+        }),
+        // Pulls companyName / companyLogoUrl from the agreement settings
+        // table. Falls back to {} if there's no record for this tenant
+        // (the kiosk frontend has its own initials fallback).
+        settingsService.getRentalAgreementConfig(tenantScope).catch(() => ({}))
       ]);
 
       // Split today's pickups vs tomorrow-AM peek by date boundary.
@@ -294,11 +309,21 @@ export const storeBoardService = {
         returns: rollupReturns(returns)
       };
 
+      // Brand display: prefer the agreement-config companyName (admins
+      // sometimes set a customer-facing brand that differs from the legal
+      // tenant name), fall back to Tenant.name, then to slug. Logo is
+      // optional — frontend renders initials when it's missing.
+      const tenantDisplay = {
+        id: row.tenantId,
+        name: brandCfg?.companyName || tenantRow?.name || tenantRow?.slug || 'Ride Fleet',
+        logoUrl: brandCfg?.companyLogoUrl || null
+      };
+
       return {
         generatedAt: now.toISOString(),
         date: localDate,
         timezone: cleanTz,
-        tenant: { id: row.tenantId },
+        tenant: tenantDisplay,
         location: location || { id: row.locationId },
         kiosk: { id: row.id, label: row.label },
         pickups: todayPickups,

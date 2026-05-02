@@ -237,7 +237,21 @@ function BoardView({ data, now, error }) {
 
         <header className="header">
           <div className="brand-block">
-            <div className="logo">{initials(tenantName)}</div>
+            <div className="logo">
+              {data?.tenant?.logoUrl ? (
+                // Backend sends the same logo configured on the tenant's
+                // agreement template, so the TV branding matches the
+                // customer's paperwork. Falls back to initials when the
+                // tenant hasn't set one.
+                <img
+                  src={data.tenant.logoUrl}
+                  alt={tenantName}
+                  style={{ width: '100%', height: '100%', objectFit: 'contain' }}
+                />
+              ) : (
+                initials(tenantName)
+              )}
+            </div>
             <div>
               <div className="brand-name">{tenantName}</div>
               <div className="brand-sub">Action Board</div>
