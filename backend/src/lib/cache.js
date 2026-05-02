@@ -36,6 +36,10 @@
 import { randomUUID } from 'node:crypto';
 
 const store = new Map();
+// Tracks in-flight promises for getOrSet coalescing — see the long comment
+// on getOrSet() for the rationale. Keyed by cache key, value is the pending
+// promise. Always cleared on settlement so we never leave stuck entries.
+const inflight = new Map();
 
 const DEFAULT_TTL_MS = 5 * 60 * 1000; // 5 minutes
 const MAX_ENTRIES = 500;
@@ -222,13 +226,41 @@ export const cache = {
 
   /**
    * Get or set — fetch from cache, or run fn() and cache the result.
+   *
+   * Coalesces concurrent misses on the same key. Without this guard, N VUs
+   * hitting an expired/empty key each fire their own fn() in parallel, then
+   * race to overwrite each other's cache.set. The 50-VU prod load test on
+   * 2026-05-02 surfaced exactly this: with a 15s TTL, every cycle-boundary
+   * spawned 50 simultaneous DB queries, so p50 stayed pinned at the
+   * uncached fn() latency (~1.2s) and the throughput barely moved (47 ->
+   * 53 rps). The thundering herd ate the cache savings.
+   *
+   * With coalescing, only the first miss runs fn(); subsequent callers
+   * with the same key during the in-flight window await the same promise.
+   * The inflight entry is cleared on settlement (success or failure) so a
+   * thrown fn() doesn't leave a poison promise stuck in the map.
    */
   async getOrSet(key, fn, ttlMs = DEFAULT_TTL_MS) {
     const cached = cache.get(key);
     if (cached !== undefined) return cached;
-    const value = await fn();
-    cache.set(key, value, ttlMs);
-    return value;
+
+    const existing = inflight.get(key);
+    if (existing) return existing;
+
+    const promise = (async () => {
+      try {
+        const value = await fn();
+        cache.set(key, value, ttlMs);
+        return value;
+      } finally {
+        // Always clear the inflight slot, even on rejection. Otherwise a
+        // failed fn() would deadlock every subsequent caller for that key
+        // forever.
+        inflight.delete(key);
+      }
+    })();
+    inflight.set(key, promise);
+    return promise;
   },
 
   /**
