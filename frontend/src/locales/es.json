@@ -16,7 +16,8 @@
     "knowledgeBase": "Base de Conocimiento",
     "settings": "Configuración",
     "tenants": "Inquilinos",
-    "security": "Seguridad"
+    "security": "Seguridad",
+    "actionBoards": "Action Boards"
   },
   "topbar": {
     "dark": "Oscuro",

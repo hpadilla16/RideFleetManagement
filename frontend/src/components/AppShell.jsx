@@ -25,7 +25,8 @@ const NAV_ITEMS = [
   { href: '/knowledge-base', labelKey: 'nav.knowledgeBase' },
   { href: '/settings', labelKey: 'nav.settings', moduleKey: 'settings' },
   { href: '/tenants', labelKey: 'nav.tenants', superOnly: true, moduleKey: 'tenants' },
-  { href: '/settings/security', labelKey: 'nav.security', adminOnly: true, moduleKey: 'security' }
+  { href: '/settings/security', labelKey: 'nav.security', adminOnly: true, moduleKey: 'security' },
+  { href: '/settings/store-boards', labelKey: 'nav.actionBoards', adminOnly: true, moduleKey: 'settings' }
 ];
 
 const IDLE_LOCK_MS = 2 * 60 * 1000;
