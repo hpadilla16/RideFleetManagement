@@ -55,10 +55,39 @@ ratesRouter.post('/', async (req, res, next) => {
   }
 });
 
+// Auto-detect rate(s) for a Location.code from the suggestion report. Used by
+// the Excel import flow so the user doesn't have to manually pick a Rate when
+// the Excel already says which station the prices are for.
+ratesRouter.get('/lookup-by-location/:code', async (req, res, next) => {
+  try {
+    const out = await ratesService.findRatesByLocationCode(req.params.code, scopeFor(req));
+    res.json(out);
+  } catch (e) { next(e); }
+});
+
+// Parse an uploaded .xlsx (sent as { excelBase64, filename } JSON) into normalized
+// daily-price rows. This does NOT commit anything — frontend uses it to drive
+// the auto-detect-rate flow then calls /validate or /import with the rows.
+ratesRouter.post('/parse-excel', async (req, res, next) => {
+  try {
+    const { excelBase64, filename } = req.body || {};
+    const out = await ratesService.parseDailyPriceExcel({ base64: excelBase64, filename });
+    res.json(out);
+  } catch (e) {
+    if (/required|empty|could not|expected headers/i.test(String(e?.message || ''))) {
+      return res.status(400).json({ error: e.message });
+    }
+    next(e);
+  }
+});
+
 ratesRouter.post('/:id/daily-prices/validate', async (req, res, next) => {
   try {
     const rows = Array.isArray(req.body?.rows) ? req.body.rows : [];
-    res.json(await ratesService.validateDailyPrices(req.params.id, rows, scopeFor(req)));
+    // Excel flow opts in to silent-skip-unknown-types via this body flag; CSV
+    // flow omits it so typos surface as validation errors. See Codex P2 on PR #48.
+    const options = { silentSkipUnknownTypes: req.body?.silentSkipUnknownTypes === true };
+    res.json(await ratesService.validateDailyPrices(req.params.id, rows, scopeFor(req), options));
   } catch (e) {
     if (/rate not found/i.test(String(e?.message || ''))) return res.status(404).json({ error: e.message });
     next(e);
@@ -68,7 +97,8 @@ ratesRouter.post('/:id/daily-prices/validate', async (req, res, next) => {
 ratesRouter.post('/:id/daily-prices/import', async (req, res, next) => {
   try {
     const rows = Array.isArray(req.body?.rows) ? req.body.rows : [];
-    res.json(await ratesService.importDailyPrices(req.params.id, rows, scopeFor(req)));
+    const options = { silentSkipUnknownTypes: req.body?.silentSkipUnknownTypes === true };
+    res.json(await ratesService.importDailyPrices(req.params.id, rows, scopeFor(req), options));
   } catch (e) {
     if (/rate not found/i.test(String(e?.message || ''))) return res.status(404).json({ error: e.message });
     next(e);
