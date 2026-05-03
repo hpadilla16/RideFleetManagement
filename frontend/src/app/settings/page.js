@@ -1412,14 +1412,30 @@ function SettingsInner({ token, me, logout }) {
   // hand-crafted ZIP so we don't have to bundle SheetJS just for this.
   const downloadRateDailyPricingExcelTemplate = async () => {
     const sampleTypes = vehicleTypes.slice(0, Math.max(1, Math.min(vehicleTypes.length, 3)));
+    // Resolve the location code from `rateForm.locationId` (rateForm doesn't
+    // store locationCode directly — Codex P2 review on PR #49). Fall back
+    // through: primary location → first additional locationIds → tenant's
+    // first active location → 'SJU' placeholder.
+    const findLocCode = (id) => {
+      if (!id) return null;
+      const match = locations.find((l) => l.id === id);
+      return match?.code || null;
+    };
+    const additionalIds = Array.isArray(rateForm?.locationIds) ? rateForm.locationIds : [];
+    const templateLocationCode =
+      findLocCode(rateForm?.locationId)
+      || (additionalIds.map(findLocCode).find(Boolean))
+      || locations.find((l) => l.isActive !== false)?.code
+      || 'SJU';
+
     const sampleData = sampleTypes.length
       ? sampleTypes.map((vt, idx) => ({
           sipp: vt.code,
-          location: rateForm?.locationCode || rateForm?.location?.code || 'SJU',
+          location: templateLocationCode,
           date: `2026-03-0${idx + 1}`,
           suggestedAmount: (idx + 5).toFixed(2)
         }))
-      : [{ sipp: 'ECON', location: 'SJU', date: '2026-03-01', suggestedAmount: '49.99' }];
+      : [{ sipp: 'ECON', location: templateLocationCode, date: '2026-03-01', suggestedAmount: '49.99' }];
 
     // Minimal SheetJS-free .xlsx writer: build the sharedStrings + sheet1 XML
     // manually then zip them together. xlsx is just a ZIP with a few XML
