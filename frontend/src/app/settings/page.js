@@ -1405,6 +1405,186 @@ function SettingsInner({ token, me, logout }) {
     window.URL.revokeObjectURL(url);
   };
 
+  // Excel template — mirrors the suggestion-report column layout (Sipp /
+  // PickUpDate / SuggestedAmount + Location) so a tenant who doesn't have a
+  // CarTrawler export can still build an import file in Excel/Numbers and
+  // upload it through the Excel path. Generated as a real .xlsx via a tiny
+  // hand-crafted ZIP so we don't have to bundle SheetJS just for this.
+  const downloadRateDailyPricingExcelTemplate = async () => {
+    const sampleTypes = vehicleTypes.slice(0, Math.max(1, Math.min(vehicleTypes.length, 3)));
+    // Resolve the location code from `rateForm.locationId` (rateForm doesn't
+    // store locationCode directly — Codex P2 review on PR #49). Fall back
+    // through: primary location → first additional locationIds → tenant's
+    // first active location → 'SJU' placeholder.
+    const findLocCode = (id) => {
+      if (!id) return null;
+      const match = locations.find((l) => l.id === id);
+      return match?.code || null;
+    };
+    const additionalIds = Array.isArray(rateForm?.locationIds) ? rateForm.locationIds : [];
+    const templateLocationCode =
+      findLocCode(rateForm?.locationId)
+      || (additionalIds.map(findLocCode).find(Boolean))
+      || locations.find((l) => l.isActive !== false)?.code
+      || 'SJU';
+
+    const sampleData = sampleTypes.length
+      ? sampleTypes.map((vt, idx) => ({
+          sipp: vt.code,
+          location: templateLocationCode,
+          date: `2026-03-0${idx + 1}`,
+          suggestedAmount: (idx + 5).toFixed(2)
+        }))
+      : [{ sipp: 'ECON', location: templateLocationCode, date: '2026-03-01', suggestedAmount: '49.99' }];
+
+    // Minimal SheetJS-free .xlsx writer: build the sharedStrings + sheet1 XML
+    // manually then zip them together. xlsx is just a ZIP with a few XML
+    // files — we only need the headers parseDailyPriceExcel recognizes
+    // (Sipp / Location / PickUpDate / SuggestedAmount).
+    const sheetRows = [
+      ['Sipp', 'Location', 'PickUpDate', 'SuggestedAmount'],
+      ...sampleData.map((r) => [r.sipp, r.location, r.date, Number(r.suggestedAmount)])
+    ];
+    const cellRef = (col, row) => `${String.fromCharCode(65 + col)}${row + 1}`;
+    const xmlEscape = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+
+    // Collect strings for sharedStrings.xml (keeps file smaller than inline strings).
+    const stringIndex = new Map();
+    const stringList = [];
+    const internString = (s) => {
+      const key = String(s);
+      if (stringIndex.has(key)) return stringIndex.get(key);
+      const i = stringList.length;
+      stringIndex.set(key, i);
+      stringList.push(key);
+      return i;
+    };
+
+    const sheetData = sheetRows.map((row, rIdx) => {
+      const cells = row.map((value, cIdx) => {
+        const ref = cellRef(cIdx, rIdx);
+        if (typeof value === 'number') {
+          return `<c r="${ref}"><v>${value}</v></c>`;
+        }
+        const idx = internString(value);
+        return `<c r="${ref}" t="s"><v>${idx}</v></c>`;
+      }).join('');
+      return `<row r="${rIdx + 1}">${cells}</row>`;
+    }).join('');
+
+    const sheetXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData>${sheetData}</sheetData></worksheet>`;
+    const sharedStringsXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><sst xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" count="${stringList.length}" uniqueCount="${stringList.length}">${stringList.map((s) => `<si><t>${xmlEscape(s)}</t></si>`).join('')}</sst>`;
+    const workbookXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="Suggestion Report" sheetId="1" r:id="rId1"/></sheets></workbook>`;
+    const workbookRels = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/><Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/sharedStrings" Target="sharedStrings.xml"/></Relationships>`;
+    const rootRels = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>`;
+    const contentTypes = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="xml" ContentType="application/xml"/><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/><Override PartName="/xl/sharedStrings.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sharedStrings+xml"/></Types>`;
+
+    // Build the ZIP. Each entry uses store (no compression) — the file is
+    // tiny so the size hit is irrelevant and we avoid a zlib dep.
+    const encoder = new TextEncoder();
+    const files = [
+      { name: '[Content_Types].xml', data: encoder.encode(contentTypes) },
+      { name: '_rels/.rels', data: encoder.encode(rootRels) },
+      { name: 'xl/workbook.xml', data: encoder.encode(workbookXml) },
+      { name: 'xl/_rels/workbook.xml.rels', data: encoder.encode(workbookRels) },
+      { name: 'xl/sharedStrings.xml', data: encoder.encode(sharedStringsXml) },
+      { name: 'xl/worksheets/sheet1.xml', data: encoder.encode(sheetXml) }
+    ];
+
+    // CRC32 for ZIP entries (pure JS, table-based).
+    let crcTable = downloadRateDailyPricingExcelTemplate._crcTable;
+    if (!crcTable) {
+      crcTable = new Uint32Array(256);
+      for (let i = 0; i < 256; i += 1) {
+        let c = i;
+        for (let j = 0; j < 8; j += 1) c = (c & 1) ? (0xEDB88320 ^ (c >>> 1)) : (c >>> 1);
+        crcTable[i] = c >>> 0;
+      }
+      downloadRateDailyPricingExcelTemplate._crcTable = crcTable;
+    }
+    const crc32 = (buf) => {
+      let c = 0xFFFFFFFF;
+      for (let i = 0; i < buf.length; i += 1) c = crcTable[(c ^ buf[i]) & 0xFF] ^ (c >>> 8);
+      return (c ^ 0xFFFFFFFF) >>> 0;
+    };
+
+    const localParts = [];
+    const centralParts = [];
+    let offset = 0;
+    for (const file of files) {
+      const nameBytes = encoder.encode(file.name);
+      const crc = crc32(file.data);
+      const size = file.data.length;
+      const local = new Uint8Array(30 + nameBytes.length + size);
+      const dv = new DataView(local.buffer);
+      dv.setUint32(0, 0x04034b50, true); // local file header signature
+      dv.setUint16(4, 20, true); // version
+      dv.setUint16(6, 0, true); // flags
+      dv.setUint16(8, 0, true); // method (0 = store)
+      dv.setUint16(10, 0, true); // mod time
+      dv.setUint16(12, 0, true); // mod date
+      dv.setUint32(14, crc, true);
+      dv.setUint32(18, size, true);
+      dv.setUint32(22, size, true);
+      dv.setUint16(26, nameBytes.length, true);
+      dv.setUint16(28, 0, true);
+      local.set(nameBytes, 30);
+      local.set(file.data, 30 + nameBytes.length);
+      localParts.push(local);
+
+      const central = new Uint8Array(46 + nameBytes.length);
+      const cv = new DataView(central.buffer);
+      cv.setUint32(0, 0x02014b50, true); // central directory signature
+      cv.setUint16(4, 20, true); // version made by
+      cv.setUint16(6, 20, true); // version needed
+      cv.setUint16(8, 0, true);
+      cv.setUint16(10, 0, true);
+      cv.setUint16(12, 0, true);
+      cv.setUint16(14, 0, true);
+      cv.setUint32(16, crc, true);
+      cv.setUint32(20, size, true);
+      cv.setUint32(24, size, true);
+      cv.setUint16(28, nameBytes.length, true);
+      cv.setUint16(30, 0, true);
+      cv.setUint16(32, 0, true);
+      cv.setUint16(34, 0, true);
+      cv.setUint16(36, 0, true);
+      cv.setUint32(38, 0, true);
+      cv.setUint32(42, offset, true);
+      central.set(nameBytes, 46);
+      centralParts.push(central);
+      offset += local.length;
+    }
+    const centralSize = centralParts.reduce((sum, p) => sum + p.length, 0);
+    const centralOffset = offset;
+
+    const eocd = new Uint8Array(22);
+    const ev = new DataView(eocd.buffer);
+    ev.setUint32(0, 0x06054b50, true);
+    ev.setUint16(8, files.length, true);
+    ev.setUint16(10, files.length, true);
+    ev.setUint32(12, centralSize, true);
+    ev.setUint32(16, centralOffset, true);
+
+    const totalSize = localParts.reduce((sum, p) => sum + p.length, 0) + centralSize + eocd.length;
+    const out = new Uint8Array(totalSize);
+    let pos = 0;
+    for (const p of localParts) { out.set(p, pos); pos += p.length; }
+    for (const p of centralParts) { out.set(p, pos); pos += p.length; }
+    out.set(eocd, pos);
+
+    const blob = new Blob([out], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+    const url = window.URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    const safeCode = String(rateForm?.rateCode || 'rate').replace(/[^a-z0-9_-]+/gi, '-').toLowerCase();
+    link.href = url;
+    link.download = `${safeCode || 'rate'}-suggestion-report-template.xlsx`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    window.URL.revokeObjectURL(url);
+  };
+
   const loadRateDailyPricingFile = async (e) => {
     const file = e.target.files?.[0];
     e.target.value = '';
@@ -2957,30 +3137,52 @@ function SettingsInner({ token, me, logout }) {
                     Save the rate first, then upload your date-based daily prices.
                   </div>
                 ) : (
-                  <div className="stack" style={{ marginTop: 12 }}>
-                    <div className="inline-actions">
-                      <button type="button" onClick={downloadRateDailyPricingTemplate}>Download CSV Template</button>
-                      <label className="button-subtle" style={{ display: 'inline-flex', alignItems: 'center', cursor: 'pointer' }}>
-                        Upload CSV
-                        <input
-                          type="file"
-                          accept=".csv,.txt,text/csv"
-                          style={{ display: 'none' }}
-                          onChange={loadRateDailyPricingFile}
-                        />
-                      </label>
-                      <button type="button" className="button-subtle" onClick={validateRateDailyPricing} disabled={!rateDailyUploadRows.length}>Validate CSV</button>
-                      <button type="button" className="button-subtle" onClick={importRateDailyPricing} disabled={!rateDailyUploadRows.length}>Import CSV</button>
-                      <span style={{ width: 1, height: 22, background: 'rgba(255,255,255,0.15)', alignSelf: 'center' }} />
-                      <label className="button" style={{ display: 'inline-flex', alignItems: 'center', cursor: 'pointer' }}>
-                        Upload Suggestion Report (.xlsx)
-                        <input
-                          type="file"
-                          accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-                          style={{ display: 'none' }}
-                          onChange={beginRateExcelImport}
-                        />
-                      </label>
+                  <div className="stack" style={{ marginTop: 12, gap: 10 }}>
+                    {/* Two import paths shown as parallel groups so the buttons
+                        in each group line up visually instead of mixing solid
+                        + subtle styles in one row. */}
+                    <div className="grid2" style={{ gap: 12 }}>
+                      <div className="glass card" style={{ padding: 10 }}>
+                        <div className="stack" style={{ gap: 8 }}>
+                          <span className="label" style={{ fontSize: 11, opacity: 0.75 }}>CSV Template</span>
+                          <div className="inline-actions" style={{ gap: 6, flexWrap: 'wrap' }}>
+                            <button type="button" className="button-subtle" onClick={downloadRateDailyPricingTemplate}>
+                              Download CSV
+                            </button>
+                            <label className="button-subtle" style={{ display: 'inline-flex', alignItems: 'center', cursor: 'pointer' }}>
+                              Upload CSV
+                              <input
+                                type="file"
+                                accept=".csv,.txt,text/csv"
+                                style={{ display: 'none' }}
+                                onChange={loadRateDailyPricingFile}
+                              />
+                            </label>
+                            <button type="button" className="button-subtle" onClick={validateRateDailyPricing} disabled={!rateDailyUploadRows.length}>Validate</button>
+                            <button type="button" className="button-subtle" onClick={importRateDailyPricing} disabled={!rateDailyUploadRows.length}>Import</button>
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="glass card" style={{ padding: 10 }}>
+                        <div className="stack" style={{ gap: 8 }}>
+                          <span className="label" style={{ fontSize: 11, opacity: 0.75 }}>Excel — Suggestion Report</span>
+                          <div className="inline-actions" style={{ gap: 6, flexWrap: 'wrap' }}>
+                            <button type="button" className="button-subtle" onClick={downloadRateDailyPricingExcelTemplate}>
+                              Download Excel
+                            </button>
+                            <label className="button-subtle" style={{ display: 'inline-flex', alignItems: 'center', cursor: 'pointer' }}>
+                              Upload Excel
+                              <input
+                                type="file"
+                                accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                                style={{ display: 'none' }}
+                                onChange={beginRateExcelImport}
+                              />
+                            </label>
+                          </div>
+                        </div>
+                      </div>
                     </div>
 
                     {rateDailyUploadName ? (
