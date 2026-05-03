@@ -1564,7 +1564,7 @@ function SettingsInner({ token, me, logout }) {
       }
       const out = await api(scopedSettingsPath(`/api/rates/${rateId}/daily-prices/validate`), {
         method: 'POST',
-        body: JSON.stringify({ rows: state.parsedRows })
+        body: JSON.stringify({ rows: state.parsedRows, silentSkipUnknownTypes: true })
       }, token);
       const next = { ...state, selectedRateId: rateId, report: out, applying: false };
       setRateExcelImport(next);
@@ -1586,7 +1586,7 @@ function SettingsInner({ token, me, logout }) {
       const rateId = rateExcelImport.selectedRateId;
       const out = await api(scopedSettingsPath(`/api/rates/${rateId}/daily-prices/import`), {
         method: 'POST',
-        body: JSON.stringify({ rows: rateExcelImport.parsedRows })
+        body: JSON.stringify({ rows: rateExcelImport.parsedRows, silentSkipUnknownTypes: true })
       }, token);
       if (out?.rate) applyRateToEditor(out.rate);
       await load(true);

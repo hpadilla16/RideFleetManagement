@@ -274,7 +274,15 @@ async function getRateForScope(id, scope = {}) {
   });
 }
 
-async function normalizeDailyPriceRows(rateId, rows = [], scope = {}) {
+async function normalizeDailyPriceRows(rateId, rows = [], scope = {}, options = {}) {
+  // `silentSkipUnknownTypes`: when true, rows whose vehicleTypeCode is not in
+  // the tenant's catalog are added to `skipped` instead of `errors`. This is
+  // the suggestion-report Excel contract — the report covers many SIPPs the
+  // tenant doesn't operate, and Hector asked for them to be silently ignored.
+  // For the CSV flow, leave this false so a typo in vehicleTypeCode surfaces as
+  // a validation error (preserves legacy behavior). Codex P2 review on PR #48.
+  const silentSkipUnknownTypes = options.silentSkipUnknownTypes === true;
+
   const rate = await prisma.rate.findFirst({
     where: {
       id: rateId,
@@ -341,9 +349,14 @@ async function normalizeDailyPriceRows(rateId, rows = [], scope = {}) {
 
     const vehicleType = vehicleTypeMap.get(vehicleTypeCodeRaw);
     if (!vehicleType) {
-      // Unknown SIPP for this tenant — silently skip (Hector's import contract:
-      // only update car types the tenant has programmed; ignore the rest).
-      skippedCodeCounts.set(vehicleTypeCodeRaw, (skippedCodeCounts.get(vehicleTypeCodeRaw) || 0) + 1);
+      if (silentSkipUnknownTypes) {
+        // Excel suggestion-report flow: silently skip SIPPs the tenant doesn't
+        // operate (Hector's import contract).
+        skippedCodeCounts.set(vehicleTypeCodeRaw, (skippedCodeCounts.get(vehicleTypeCodeRaw) || 0) + 1);
+      } else {
+        // CSV flow: typos should surface as errors so the user can correct them.
+        errors.push({ line, field: 'vehicleTypeCode', message: `Vehicle type code ${vehicleTypeCodeRaw} was not found in this tenant` });
+      }
       return;
     }
 
@@ -1087,8 +1100,8 @@ export const ratesService = {
     return prisma.rate.delete({ where: { id } });
   },
 
-  async validateDailyPrices(rateId, rows = [], scope = {}) {
-    const report = await normalizeDailyPriceRows(rateId, rows, scope);
+  async validateDailyPrices(rateId, rows = [], scope = {}, options = {}) {
+    const report = await normalizeDailyPriceRows(rateId, rows, scope, options);
     return {
       rateId: report.rate.id,
       rateCode: report.rate.rateCode,
@@ -1108,8 +1121,8 @@ export const ratesService = {
     };
   },
 
-  async importDailyPrices(rateId, rows = [], scope = {}) {
-    const report = await normalizeDailyPriceRows(rateId, rows, scope);
+  async importDailyPrices(rateId, rows = [], scope = {}, options = {}) {
+    const report = await normalizeDailyPriceRows(rateId, rows, scope, options);
     // Only commit rows that actually change something (added or updated). Unchanged
     // rows are skipped at write time to keep the upsert traffic minimal.
     const toWrite = [...report.added, ...report.updated];
