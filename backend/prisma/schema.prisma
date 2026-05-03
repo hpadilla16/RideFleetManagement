@@ -773,6 +773,11 @@ model Reservation {
   @@index([returnAt])
   @@index([tenantId, status, returnAt])
   @@index([vehicleId])
+  // Speeds up `/summary`'s nextNoShow findFirst:
+  // `WHERE tenantId, status='NO_SHOW' ORDER BY updatedAt DESC LIMIT 1`.
+  // Without this, Postgres filters via [tenantId, status, pickupAt] and
+  // then has to sort by updatedAt — getting slower as table grows.
+  @@index([tenantId, status, updatedAt(sort: Desc)])
 }
 
 model Invoice {
