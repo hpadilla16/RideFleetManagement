@@ -171,11 +171,17 @@ reservationsRouter.get('/page', async (req, res, next) => {
   }
 });
 
-// 30s TTL on dashboard KPI summary. Multiple staff hitting the dashboard
-// within a 30s window share one query result. Stale-by-30s is acceptable
+// 60s TTL on dashboard KPI summary. Multiple staff hitting the dashboard
+// within a 60s window share one query result. Stale-by-60s is acceptable
 // for the next-pickup / next-return widgets — operators will see the same
 // numbers refresh on their next dashboard mount.
-const RESERVATIONS_SUMMARY_TTL_MS = 30 * 1000;
+//
+// Bumped from 30s → 60s on 2026-05-03 to halve cache miss frequency
+// (the 4 nextItem findFirst queries that always run on miss are the main
+// summary cost — see reservations.service.js summary() for the queries
+// and the partial+composite indexes in schema.prisma + the matching SQL
+// migration for the missing index coverage they need).
+const RESERVATIONS_SUMMARY_TTL_MS = 60 * 1000;
 function reservationsSummaryCacheKey(scope) {
   return `reservations:summary:${scope?.tenantId || 'global'}`;
 }
