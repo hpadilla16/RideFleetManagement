@@ -122,6 +122,17 @@ function SettingsInner({ token, me, logout }) {
   const [rateDailyUploadRows, setRateDailyUploadRows] = useState([]);
   const [rateDailyUploadName, setRateDailyUploadName] = useState('');
   const [rateDailyUploadReport, setRateDailyUploadReport] = useState(null);
+  // Excel import flow — separate from the legacy CSV flow above so the diff
+  // preview state doesn't collide while a user is mid-upload.
+  const [rateExcelImport, setRateExcelImport] = useState(null);
+  const [rateLocationPicker, setRateLocationPicker] = useState(null);
+  // Calendar grid filters for the daily-overrides view (replaces the old slice(0,24)).
+  const [rateGridFilters, setRateGridFilters] = useState({
+    vehicleTypeIds: [],
+    dateFrom: '',
+    dateTo: '',
+    actionFilter: 'all'
+  });
   const [serviceForm, setServiceForm] = useState(EMPTY_SERVICE);
   const [carSharingPresetForm, setCarSharingPresetForm] = useState(DEFAULT_CAR_SHARING_PRESET);
   const [serviceEditId, setServiceEditId] = useState(null);
@@ -1211,6 +1222,8 @@ function SettingsInner({ token, me, logout }) {
     setRateDailyUploadRows([]);
     setRateDailyUploadName('');
     setRateDailyUploadReport(null);
+    setRateExcelImport(null);
+    setRateLocationPicker(null);
   };
 
   const buildRateEditorState = (rate) => ({
@@ -1455,6 +1468,137 @@ function SettingsInner({ token, me, logout }) {
     } catch (err) {
       setMsg(String(err?.message || 'Unable to import dynamic daily pricing'));
     }
+  };
+
+  // ----- Excel import flow (suggestion-report-style spreadsheets) -----
+  // Upload a competitor's daily-rate suggestion .xlsx → backend parses it →
+  // we auto-detect the target Rate by Location code → user reviews diff
+  // (added/updated/skipped/errors) → Apply commits.
+  const fileToBase64 = (file) => new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(new Error('Could not read file'));
+    reader.onload = () => {
+      const result = String(reader.result || '');
+      // Strip the data-URL prefix; the backend strips it too but we may as well be tidy.
+      const idx = result.indexOf(',');
+      resolve(idx >= 0 ? result.slice(idx + 1) : result);
+    };
+    reader.readAsDataURL(file);
+  });
+
+  const beginRateExcelImport = async (e) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    try {
+      setMsg(`Parsing ${file.name}…`);
+      const excelBase64 = await fileToBase64(file);
+      const parsed = await api(scopedSettingsPath('/api/rates/parse-excel'), {
+        method: 'POST',
+        body: JSON.stringify({ excelBase64, filename: file.name })
+      }, token);
+      const detectedCodes = Array.isArray(parsed?.detectedLocationCodes) ? parsed.detectedLocationCodes : [];
+      const primaryLocation = detectedCodes[0] || '';
+
+      let candidateRates = [];
+      let lookupResult = null;
+      if (primaryLocation) {
+        lookupResult = await api(
+          scopedSettingsPath(`/api/rates/lookup-by-location/${encodeURIComponent(primaryLocation)}`),
+          { method: 'GET' },
+          token
+        );
+        candidateRates = Array.isArray(lookupResult?.rates) ? lookupResult.rates : [];
+      }
+
+      // Stash the parsed rows + filename for the next step. The picker / preview
+      // pulls from this object; once user picks a Rate we run validate against it.
+      const importState = {
+        filename: file.name,
+        parsedRows: parsed.rows || [],
+        rowCount: parsed.rowCount || 0,
+        detectedLocationCodes: detectedCodes,
+        location: lookupResult?.location || null,
+        candidateRates,
+        selectedRateId: candidateRates.length === 1 ? candidateRates[0].id : '',
+        report: null,
+        applying: false
+      };
+      setRateExcelImport(importState);
+
+      if (candidateRates.length === 0) {
+        setMsg(
+          primaryLocation
+            ? `No active rates found at location "${primaryLocation}" for this tenant — create one first or pick a different location.`
+            : 'Could not detect a location from the Excel; pick a rate manually.'
+        );
+        // Even without a candidate, show the picker so the user can manually pick from any rate
+        setRateLocationPicker({ source: 'excel-import', forceManual: true });
+        return;
+      }
+      if (candidateRates.length > 1) {
+        setRateLocationPicker({ source: 'excel-import', forceManual: false });
+        setMsg(`Found ${candidateRates.length} rates at ${primaryLocation} — pick one.`);
+        return;
+      }
+
+      // Exactly one match — auto-validate.
+      await runExcelValidate({ ...importState });
+    } catch (err) {
+      setMsg(String(err?.message || 'Could not parse Excel file'));
+      setRateExcelImport(null);
+    }
+  };
+
+  const runExcelValidate = async (state) => {
+    try {
+      const rateId = state?.selectedRateId;
+      if (!rateId) {
+        setMsg('Pick a rate first');
+        return;
+      }
+      const out = await api(scopedSettingsPath(`/api/rates/${rateId}/daily-prices/validate`), {
+        method: 'POST',
+        body: JSON.stringify({ rows: state.parsedRows })
+      }, token);
+      const next = { ...state, selectedRateId: rateId, report: out, applying: false };
+      setRateExcelImport(next);
+      setRateLocationPicker(null);
+      setMsg(
+        `Preview ready — ${out.addedCount || 0} new, ${out.updatedCount || 0} updates, ` +
+        `${out.unchangedCount || 0} unchanged, ${out.skippedCount || 0} skipped, ` +
+        `${out.errorCount || 0} errors.`
+      );
+    } catch (err) {
+      setMsg(String(err?.message || 'Could not validate the Excel rows'));
+    }
+  };
+
+  const applyRateExcelImport = async () => {
+    if (!rateExcelImport?.selectedRateId || !rateExcelImport?.parsedRows?.length) return;
+    try {
+      setRateExcelImport((s) => (s ? { ...s, applying: true } : s));
+      const rateId = rateExcelImport.selectedRateId;
+      const out = await api(scopedSettingsPath(`/api/rates/${rateId}/daily-prices/import`), {
+        method: 'POST',
+        body: JSON.stringify({ rows: rateExcelImport.parsedRows })
+      }, token);
+      if (out?.rate) applyRateToEditor(out.rate);
+      await load(true);
+      setMsg(
+        `Applied — ${out.addedCount || 0} added, ${out.updatedCount || 0} updated, ` +
+        `${out.skippedCount || 0} skipped, ${out.errorCount || 0} errors.`
+      );
+      setRateExcelImport(null);
+    } catch (err) {
+      setMsg(String(err?.message || 'Could not apply the import'));
+      setRateExcelImport((s) => (s ? { ...s, applying: false } : s));
+    }
+  };
+
+  const cancelRateExcelImport = () => {
+    setRateExcelImport(null);
+    setRateLocationPicker(null);
   };
 
   const removeRateDailyPrice = async (dailyPriceId) => {
@@ -1714,7 +1858,55 @@ function SettingsInner({ token, me, logout }) {
   const rateDateInvalid = !!(rateForm?.effectiveDate && rateForm?.endDate && new Date(rateForm.endDate) < new Date(rateForm.effectiveDate));
   const rateFormValid = !!rateForm?.rateCode && !rateDateInvalid;
   const rateDailyPrices = Array.isArray(rateForm?.dailyPrices) ? rateForm.dailyPrices : [];
-  const rateDailyPricePreview = rateDailyPrices.slice(0, 24);
+
+  // Build the calendar grid (rows = vehicleTypes that have at least one override
+  // in the active filter; cols = dates in range; cells = price + edit/remove).
+  // This replaces the old `slice(0, 24)` that was hiding most overrides.
+  const rateGrid = (() => {
+    if (!rateDailyPrices.length) {
+      return { vehicleTypes: [], dates: [], cells: new Map(), totals: { added: 0, updated: 0, unchanged: 0 } };
+    }
+
+    const fromTs = rateGridFilters.dateFrom ? new Date(`${rateGridFilters.dateFrom}T00:00:00Z`).getTime() : null;
+    const toTs = rateGridFilters.dateTo ? new Date(`${rateGridFilters.dateTo}T00:00:00Z`).getTime() : null;
+    const allowedTypeIds = rateGridFilters.vehicleTypeIds.length
+      ? new Set(rateGridFilters.vehicleTypeIds)
+      : null;
+
+    const filtered = rateDailyPrices.filter((row) => {
+      const ts = row.date ? new Date(`${row.date}T00:00:00Z`).getTime() : null;
+      if (ts == null || Number.isNaN(ts)) return false;
+      if (fromTs != null && ts < fromTs) return false;
+      if (toTs != null && ts > toTs) return false;
+      if (allowedTypeIds && !allowedTypeIds.has(row.vehicleTypeId)) return false;
+      return true;
+    });
+
+    // Group by vehicleType and date
+    const typeMap = new Map();
+    const dateSet = new Set();
+    filtered.forEach((row) => {
+      if (!typeMap.has(row.vehicleTypeId)) {
+        typeMap.set(row.vehicleTypeId, {
+          id: row.vehicleTypeId,
+          code: row.vehicleTypeCode || '',
+          name: row.vehicleTypeName || row.vehicleTypeId
+        });
+      }
+      if (row.date) dateSet.add(row.date);
+    });
+
+    const dates = Array.from(dateSet).sort();
+    const vehicleTypes = Array.from(typeMap.values()).sort((a, b) =>
+      String(a.code).localeCompare(String(b.code))
+    );
+    const cells = new Map(); // key = `${typeId}|${date}` → row
+    filtered.forEach((row) => {
+      cells.set(`${row.vehicleTypeId}|${row.date}`, row);
+    });
+
+    return { vehicleTypes, dates, cells, totalCount: filtered.length };
+  })();
   const activeSettingsTenant = tenantRows.find((tenant) => tenant.id === activeSettingsTenantId) || null;
   const activeLocationCount = loadedSettingsSections.locations
     ? locations.filter((location) => location.isActive !== false).length
@@ -2745,10 +2937,14 @@ function SettingsInner({ token, me, logout }) {
                   <div className="stack" style={{ gap: 4 }}>
                     <label className="label">Dynamic Daily Pricing</label>
                     <div className="surface-note" style={{ margin: 0 }}>
-                      Upload an Excel-friendly CSV template to set a different daily rate by date for each vehicle class, like March 1 = $5 and March 2 = $6. Dates can be YYYY-MM-DD or MM/DD/YYYY.
+                      Override the base daily rate by date and vehicle class. Two import paths:{' '}
+                      <strong>CSV template</strong> (manually-built rates) and{' '}
+                      <strong>Suggestion Report Excel</strong> (CarTrawler / competitor exports — uses the SuggestedAmount column, ignores SIPP codes you don&apos;t have).
                     </div>
                   </div>
-                  <span className="badge">{rateDailyPrices.length} daily overrides</span>
+                  <div className="stack" style={{ gap: 4, alignItems: 'flex-end' }}>
+                    <span className="badge">{rateDailyPrices.length} total overrides</span>
+                  </div>
                 </div>
 
                 {!rateForm.id ? (
@@ -2758,7 +2954,7 @@ function SettingsInner({ token, me, logout }) {
                 ) : (
                   <div className="stack" style={{ marginTop: 12 }}>
                     <div className="inline-actions">
-                      <button type="button" onClick={downloadRateDailyPricingTemplate}>Download Template</button>
+                      <button type="button" onClick={downloadRateDailyPricingTemplate}>Download CSV Template</button>
                       <label className="button-subtle" style={{ display: 'inline-flex', alignItems: 'center', cursor: 'pointer' }}>
                         Upload CSV
                         <input
@@ -2768,19 +2964,29 @@ function SettingsInner({ token, me, logout }) {
                           onChange={loadRateDailyPricingFile}
                         />
                       </label>
-                      <button type="button" className="button-subtle" onClick={validateRateDailyPricing} disabled={!rateDailyUploadRows.length}>Validate Upload</button>
-                      <button type="button" onClick={importRateDailyPricing} disabled={!rateDailyUploadRows.length}>Import Daily Pricing</button>
+                      <button type="button" className="button-subtle" onClick={validateRateDailyPricing} disabled={!rateDailyUploadRows.length}>Validate CSV</button>
+                      <button type="button" className="button-subtle" onClick={importRateDailyPricing} disabled={!rateDailyUploadRows.length}>Import CSV</button>
+                      <span style={{ width: 1, height: 22, background: 'rgba(255,255,255,0.15)', alignSelf: 'center' }} />
+                      <label className="button" style={{ display: 'inline-flex', alignItems: 'center', cursor: 'pointer' }}>
+                        Upload Suggestion Report (.xlsx)
+                        <input
+                          type="file"
+                          accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                          style={{ display: 'none' }}
+                          onChange={beginRateExcelImport}
+                        />
+                      </label>
                     </div>
 
                     {rateDailyUploadName ? (
                       <div className="surface-note">
-                        Loaded file: <strong>{rateDailyUploadName}</strong> with <strong>{rateDailyUploadRows.length}</strong> row(s).
+                        Loaded CSV: <strong>{rateDailyUploadName}</strong> with <strong>{rateDailyUploadRows.length}</strong> row(s).
                       </div>
                     ) : null}
 
                     {rateDailyUploadReport ? (
                       <div className="surface-note">
-                        <strong>Validation summary:</strong> {rateDailyUploadReport.validCount || 0} valid row(s), {rateDailyUploadReport.errorCount || 0} issue(s).
+                        <strong>CSV summary:</strong> {rateDailyUploadReport.validCount || 0} valid row(s), {rateDailyUploadReport.errorCount || 0} issue(s).
                         {Array.isArray(rateDailyUploadReport.errors) && rateDailyUploadReport.errors.length ? (
                           <div style={{ marginTop: 8 }}>
                             {rateDailyUploadReport.errors.slice(0, 8).map((error, idx) => (
@@ -2793,28 +2999,271 @@ function SettingsInner({ token, me, logout }) {
                       </div>
                     ) : null}
 
+                    {/* ----- Excel import: rate picker ----- */}
+                    {rateExcelImport && rateLocationPicker ? (
+                      <div className="glass card" style={{ padding: 12, borderColor: '#5b8cff' }}>
+                        <div className="stack" style={{ gap: 6 }}>
+                          <strong>Pick the rate to update</strong>
+                          <div className="surface-note" style={{ margin: 0 }}>
+                            Detected location <strong>{(rateExcelImport.detectedLocationCodes || []).join(', ') || '—'}</strong>
+                            {rateExcelImport.candidateRates?.length
+                              ? ` — ${rateExcelImport.candidateRates.length} active rate(s) match. Pick one below.`
+                              : ' — no rates match this location for this tenant. Pick any rate manually.'}
+                          </div>
+                          <div className="stack" style={{ gap: 4 }}>
+                            <select
+                              value={rateExcelImport.selectedRateId || ''}
+                              onChange={(e) => setRateExcelImport((s) => (s ? { ...s, selectedRateId: e.target.value } : s))}
+                            >
+                              <option value="">— pick a rate —</option>
+                              {(rateExcelImport.candidateRates?.length
+                                ? rateExcelImport.candidateRates
+                                : rates
+                              ).map((r) => (
+                                <option key={r.id} value={r.id}>
+                                  {r.rateCode}{r.name ? ` · ${r.name}` : ''} {r.location?.code ? `· ${r.location.code}` : ''}
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+                          <div className="inline-actions">
+                            <button
+                              type="button"
+                              disabled={!rateExcelImport.selectedRateId}
+                              onClick={() => runExcelValidate(rateExcelImport)}
+                            >
+                              Continue → Preview Diff
+                            </button>
+                            <button type="button" className="button-subtle" onClick={cancelRateExcelImport}>
+                              Cancel
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    ) : null}
+
+                    {/* ----- Excel import: diff preview ----- */}
+                    {rateExcelImport && rateExcelImport.report && !rateLocationPicker ? (() => {
+                      const r = rateExcelImport.report;
+                      const targetRate = (rateExcelImport.candidateRates || []).find(x => x.id === rateExcelImport.selectedRateId)
+                        || rates.find(x => x.id === rateExcelImport.selectedRateId);
+                      const diffSamples = [...(r.added || []).slice(0, 5).map(x => ({...x, _kind: 'add'})),
+                                          ...(r.updated || []).slice(0, 5).map(x => ({...x, _kind: 'update'}))];
+                      return (
+                        <div className="glass card" style={{ padding: 12, borderColor: '#5b8cff' }}>
+                          <div className="stack" style={{ gap: 8 }}>
+                            <div className="row-between" style={{ alignItems: 'baseline' }}>
+                              <strong>Preview: {rateExcelImport.filename}</strong>
+                              <span className="label">
+                                Target: <strong>{targetRate?.rateCode || rateExcelImport.selectedRateId}</strong>
+                                {targetRate?.location?.code ? ` · ${targetRate.location.code}` : ''}
+                              </span>
+                            </div>
+                            <div className="inline-actions" style={{ gap: 8, flexWrap: 'wrap' }}>
+                              <span className="badge" style={{ background: 'rgba(34,197,94,0.18)' }}>{r.addedCount || 0} new</span>
+                              <span className="badge" style={{ background: 'rgba(59,130,246,0.18)' }}>{r.updatedCount || 0} updates</span>
+                              <span className="badge">{r.unchangedCount || 0} unchanged</span>
+                              <span className="badge" style={{ background: 'rgba(251,191,36,0.18)' }}>{r.skippedCount || 0} skipped</span>
+                              <span className="badge" style={{ background: r.errorCount ? 'rgba(239,68,68,0.18)' : undefined }}>{r.errorCount || 0} errors</span>
+                              <span className="label">Total parsed: {rateExcelImport.rowCount}</span>
+                            </div>
+
+                            {Array.isArray(r.skipped) && r.skipped.length ? (
+                              <div className="surface-note" style={{ margin: 0 }}>
+                                <strong>Skipped:</strong>
+                                <ul style={{ margin: '4px 0 0 18px' }}>
+                                  {r.skipped.map((s, i) => (<li key={i}>{s.message}</li>))}
+                                </ul>
+                              </div>
+                            ) : null}
+
+                            {Array.isArray(r.errors) && r.errors.length ? (
+                              <div className="surface-note" style={{ margin: 0, color: '#fca5a5' }}>
+                                <strong>Errors ({r.errors.length}):</strong>
+                                <ul style={{ margin: '4px 0 0 18px' }}>
+                                  {r.errors.slice(0, 6).map((e, i) => (
+                                    <li key={i}>Line {e.line} · {e.field} · {e.message}</li>
+                                  ))}
+                                  {r.errors.length > 6 ? <li>… and {r.errors.length - 6} more</li> : null}
+                                </ul>
+                              </div>
+                            ) : null}
+
+                            {diffSamples.length ? (
+                              <div className="stack" style={{ gap: 4 }}>
+                                <span className="label">Sample changes:</span>
+                                <table>
+                                  <thead>
+                                    <tr><th>Action</th><th>Date</th><th>Vehicle Type</th><th>Before</th><th>After</th></tr>
+                                  </thead>
+                                  <tbody>
+                                    {diffSamples.map((row, i) => (
+                                      <tr key={i}>
+                                        <td>
+                                          <span className="badge" style={{
+                                            background: row._kind === 'add' ? 'rgba(34,197,94,0.18)' : 'rgba(59,130,246,0.18)'
+                                          }}>{row._kind === 'add' ? 'NEW' : 'UPDATE'}</span>
+                                        </td>
+                                        <td>{row.dateKey || row.date}</td>
+                                        <td>{row.vehicleTypeCode}</td>
+                                        <td>{row.previousDaily != null ? `$${Number(row.previousDaily).toFixed(2)}` : '—'}</td>
+                                        <td><strong>${Number(row.daily).toFixed(2)}</strong></td>
+                                      </tr>
+                                    ))}
+                                  </tbody>
+                                </table>
+                                {(r.addedCount + r.updatedCount) > diffSamples.length ? (
+                                  <span className="label">… and {(r.addedCount + r.updatedCount) - diffSamples.length} more change(s) on Apply.</span>
+                                ) : null}
+                              </div>
+                            ) : null}
+
+                            <div className="inline-actions">
+                              <button
+                                type="button"
+                                onClick={applyRateExcelImport}
+                                disabled={rateExcelImport.applying || (r.addedCount + r.updatedCount === 0)}
+                              >
+                                {rateExcelImport.applying
+                                  ? 'Applying…'
+                                  : `Apply ${(r.addedCount || 0) + (r.updatedCount || 0)} change(s)`}
+                              </button>
+                              <button type="button" className="button-subtle" onClick={cancelRateExcelImport}>
+                                Cancel
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })() : null}
+
+                    {/* ----- Calendar grid view (replaces the buggy slice(0,24)) ----- */}
                     {rateDailyPrices.length ? (
-                      <div className="stack">
-                        <label className="label">Current Daily Overrides</label>
-                        <table>
-                          <thead><tr><th>Date</th><th>Vehicle Type</th><th>Daily Rate</th><th>Actions</th></tr></thead>
-                          <tbody>
-                            {rateDailyPricePreview.map((row) => (
-                              <tr key={row.id || `${row.date}-${row.vehicleTypeId}`}>
-                                <td>{row.date || '-'}</td>
-                                <td>{row.vehicleTypeCode ? `${row.vehicleTypeCode} - ${row.vehicleTypeName || ''}` : row.vehicleTypeName || row.vehicleTypeId}</td>
-                                <td>${Number(row.daily || 0).toFixed(2)}</td>
-                                <td>{row.id ? <button type="button" className="button-subtle" onClick={() => removeRateDailyPrice(row.id)}>Remove</button> : '-'}</td>
-                              </tr>
-                            ))}
-                          </tbody>
-                        </table>
-                        {rateDailyPrices.length > rateDailyPricePreview.length ? (
-                          <span className="label">Showing first {rateDailyPricePreview.length} of {rateDailyPrices.length} daily overrides.</span>
-                        ) : null}
+                      <div className="stack" style={{ gap: 8 }}>
+                        <div className="row-between" style={{ alignItems: 'baseline' }}>
+                          <label className="label">Current Daily Overrides — Calendar View</label>
+                          <span className="label">
+                            Showing {rateGrid.totalCount} of {rateDailyPrices.length} overrides
+                          </span>
+                        </div>
+
+                        <div className="inline-actions" style={{ flexWrap: 'wrap', gap: 8 }}>
+                          <div className="stack" style={{ gap: 2 }}>
+                            <span className="label" style={{ fontSize: 11 }}>From</span>
+                            <input
+                              type="date"
+                              value={rateGridFilters.dateFrom}
+                              onChange={(e) => setRateGridFilters(f => ({ ...f, dateFrom: e.target.value }))}
+                            />
+                          </div>
+                          <div className="stack" style={{ gap: 2 }}>
+                            <span className="label" style={{ fontSize: 11 }}>To</span>
+                            <input
+                              type="date"
+                              value={rateGridFilters.dateTo}
+                              onChange={(e) => setRateGridFilters(f => ({ ...f, dateTo: e.target.value }))}
+                            />
+                          </div>
+                          <div className="stack" style={{ gap: 2 }}>
+                            <span className="label" style={{ fontSize: 11 }}>Vehicle Type</span>
+                            <select
+                              value={rateGridFilters.vehicleTypeIds[0] || ''}
+                              onChange={(e) => setRateGridFilters(f => ({
+                                ...f,
+                                vehicleTypeIds: e.target.value ? [e.target.value] : []
+                              }))}
+                            >
+                              <option value="">All types</option>
+                              {Array.from(new Map(rateDailyPrices.map(p => [p.vehicleTypeId, p])).values())
+                                .sort((a, b) => String(a.vehicleTypeCode || '').localeCompare(String(b.vehicleTypeCode || '')))
+                                .map(p => (
+                                  <option key={p.vehicleTypeId} value={p.vehicleTypeId}>
+                                    {p.vehicleTypeCode}{p.vehicleTypeName ? ` · ${p.vehicleTypeName}` : ''}
+                                  </option>
+                                ))}
+                            </select>
+                          </div>
+                          {(rateGridFilters.dateFrom || rateGridFilters.dateTo || rateGridFilters.vehicleTypeIds.length) ? (
+                            <button
+                              type="button"
+                              className="button-subtle"
+                              style={{ alignSelf: 'flex-end' }}
+                              onClick={() => setRateGridFilters({ vehicleTypeIds: [], dateFrom: '', dateTo: '', actionFilter: 'all' })}
+                            >
+                              Clear filters
+                            </button>
+                          ) : null}
+                        </div>
+
+                        {rateGrid.dates.length === 0 ? (
+                          <div className="surface-note">No overrides match the current filters.</div>
+                        ) : (
+                          <div style={{ overflowX: 'auto', maxWidth: '100%' }}>
+                            <table style={{ minWidth: 'max-content' }}>
+                              <thead>
+                                <tr>
+                                  <th style={{ position: 'sticky', left: 0, background: 'inherit', zIndex: 1, minWidth: 140 }}>Vehicle Type</th>
+                                  {rateGrid.dates.map((d) => {
+                                    const dt = new Date(`${d}T00:00:00Z`);
+                                    const dow = dt.toLocaleDateString('en-US', { weekday: 'short', timeZone: 'UTC' });
+                                    const md = dt.toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' });
+                                    return (
+                                      <th key={d} style={{ minWidth: 78, textAlign: 'center', whiteSpace: 'nowrap', fontSize: 11 }}>
+                                        <div style={{ opacity: 0.6 }}>{dow}</div>
+                                        <div>{md}</div>
+                                      </th>
+                                    );
+                                  })}
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {rateGrid.vehicleTypes.map((vt) => (
+                                  <tr key={vt.id}>
+                                    <td style={{ position: 'sticky', left: 0, background: 'inherit', zIndex: 1, fontWeight: 600 }}>
+                                      {vt.code}
+                                      {vt.name ? <div style={{ fontSize: 11, opacity: 0.7, fontWeight: 400 }}>{vt.name}</div> : null}
+                                    </td>
+                                    {rateGrid.dates.map((d) => {
+                                      const cell = rateGrid.cells.get(`${vt.id}|${d}`);
+                                      if (!cell) return <td key={d} style={{ textAlign: 'center', opacity: 0.3 }}>—</td>;
+                                      return (
+                                        <td key={d} style={{ textAlign: 'center', padding: 4 }}>
+                                          <div
+                                            title={`${vt.code} on ${d}\nClick × to remove`}
+                                            style={{
+                                              display: 'inline-flex',
+                                              alignItems: 'center',
+                                              gap: 4,
+                                              padding: '2px 6px',
+                                              borderRadius: 4,
+                                              background: 'rgba(59,130,246,0.12)',
+                                              fontSize: 12,
+                                              fontVariantNumeric: 'tabular-nums'
+                                            }}
+                                          >
+                                            <span>${Number(cell.daily || 0).toFixed(2)}</span>
+                                            {cell.id ? (
+                                              <button
+                                                type="button"
+                                                className="button-subtle"
+                                                style={{ padding: '0 4px', fontSize: 10, lineHeight: 1.2 }}
+                                                onClick={() => removeRateDailyPrice(cell.id)}
+                                                title="Remove this override"
+                                              >×</button>
+                                            ) : null}
+                                          </div>
+                                        </td>
+                                      );
+                                    })}
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
+                        )}
                       </div>
                     ) : (
-                      <div className="surface-note">No daily overrides uploaded yet. Base daily rates above will still apply.</div>
+                      <div className="surface-note">No daily overrides yet. Base daily rates above will still apply.</div>
                     )}
                   </div>
                 )}

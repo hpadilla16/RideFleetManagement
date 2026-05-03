@@ -1,3 +1,4 @@
+import ExcelJS from 'exceljs';
 import { prisma } from '../../lib/prisma.js';
 import { settingsService } from '../settings/settings.service.js';
 import { parseLocationConfig } from '../../lib/location-config.js';
@@ -303,14 +304,24 @@ async function normalizeDailyPriceRows(rateId, rows = [], scope = {}) {
 
   const vehicleTypeMap = new Map(vehicleTypes.map((row) => [String(row.code || '').trim().toUpperCase(), row]));
   const errors = [];
-  const normalized = [];
+  const skipped = [];
   const dedupe = new Map();
+  // Track which raw codes were skipped so we can summarize at the end (one entry per
+  // unknown SIPP code instead of one entry per row, which would be noisy for an Excel
+  // with 14 rows per unknown code).
+  const skippedCodeCounts = new Map();
 
   rows.forEach((raw, index) => {
     const line = index + 2;
-    const dateRaw = String(raw?.date || raw?.Date || '').trim();
-    const vehicleTypeCodeRaw = String(raw?.vehicleTypeCode || raw?.vehicle_type_code || raw?.vehicleType || '').trim().toUpperCase();
-    const dailyRateRaw = String(raw?.dailyRate || raw?.daily || raw?.rate || '').trim();
+    // Accept both the existing JSON aliases and the Excel column names from the
+    // CarTrawler-style suggestion report (Sipp / PickUpDate / SuggestedAmount).
+    const dateRaw = String(raw?.date || raw?.Date || raw?.PickUpDate || raw?.pickupDate || '').trim();
+    const vehicleTypeCodeRaw = String(
+      raw?.vehicleTypeCode || raw?.vehicle_type_code || raw?.vehicleType || raw?.Sipp || raw?.SIPP || raw?.sipp || ''
+    ).trim().toUpperCase();
+    const dailyRateRaw = String(
+      raw?.dailyRate || raw?.daily || raw?.rate || raw?.SuggestedAmount || raw?.suggestedAmount || ''
+    ).trim();
 
     if (!dateRaw && !vehicleTypeCodeRaw && !dailyRateRaw) return;
 
@@ -322,21 +333,30 @@ async function normalizeDailyPriceRows(rateId, rows = [], scope = {}) {
       errors.push({ line, field: 'vehicleTypeCode', message: 'Vehicle type code is required' });
       return;
     }
-    const vehicleType = vehicleTypeMap.get(vehicleTypeCodeRaw);
-    if (!vehicleType) {
-      errors.push({ line, field: 'vehicleTypeCode', message: `Vehicle type code ${vehicleTypeCodeRaw} was not found in this tenant` });
-      return;
-    }
-
     const parsedDate = parseDynamicPriceDate(dateRaw);
     if (!parsedDate) {
       errors.push({ line, field: 'date', message: `Invalid date ${dateRaw}. Use YYYY-MM-DD or MM/DD/YYYY.` });
       return;
     }
 
+    const vehicleType = vehicleTypeMap.get(vehicleTypeCodeRaw);
+    if (!vehicleType) {
+      // Unknown SIPP for this tenant — silently skip (Hector's import contract:
+      // only update car types the tenant has programmed; ignore the rest).
+      skippedCodeCounts.set(vehicleTypeCodeRaw, (skippedCodeCounts.get(vehicleTypeCodeRaw) || 0) + 1);
+      return;
+    }
+
     const daily = Number(dailyRateRaw);
     if (!Number.isFinite(daily) || daily < 0) {
       errors.push({ line, field: 'dailyRate', message: `Invalid daily rate ${dailyRateRaw}` });
+      return;
+    }
+    // SuggestedAmount can be 0 in the input when the report has no comp data — we
+    // treat that as a no-op rather than an explicit override (avoids accidentally
+    // setting cars to $0/day if a row slipped through).
+    if (daily === 0) {
+      skippedCodeCounts.set(`${vehicleTypeCodeRaw}:zero`, (skippedCodeCounts.get(`${vehicleTypeCodeRaw}:zero`) || 0) + 1);
       return;
     }
 
@@ -349,26 +369,253 @@ async function normalizeDailyPriceRows(rateId, rows = [], scope = {}) {
       vehicleTypeName: vehicleType.name,
       daily: Number(daily.toFixed(2))
     };
+    // Last-writer-wins for duplicate keys within the input (the CarTrawler export
+    // typically has each row twice; this collapses them).
     dedupe.set(key, row);
   });
 
-  normalized.push(...dedupe.values());
-  normalized.sort((a, b) => {
+  // Summarize skipped codes once per code (not once per row).
+  for (const [code, count] of skippedCodeCounts.entries()) {
+    if (code.endsWith(':zero')) {
+      skipped.push({
+        reason: 'ZERO_PRICE',
+        vehicleTypeCode: code.slice(0, -5),
+        rowCount: count,
+        message: `Suggested amount was 0 for ${count} row(s) — left unchanged`
+      });
+    } else {
+      skipped.push({
+        reason: 'UNKNOWN_VEHICLE_TYPE',
+        vehicleTypeCode: code,
+        rowCount: count,
+        message: `Vehicle type ${code} is not configured for this tenant — ${count} row(s) ignored`
+      });
+    }
+  }
+
+  const dedupedRows = Array.from(dedupe.values());
+
+  // Pre-load existing RateDailyPrice rows for the (rateId, vehicleTypeId, date)
+  // tuples we're about to write so we can tag each row as 'add' or 'update' and
+  // expose the previous price for the diff preview.
+  let existingMap = new Map();
+  if (dedupedRows.length) {
+    const dates = Array.from(new Set(dedupedRows.map((r) => r.date.toISOString())));
+    const vehicleTypeIds = Array.from(new Set(dedupedRows.map((r) => r.vehicleTypeId)));
+    const existing = await prisma.rateDailyPrice.findMany({
+      where: {
+        rateId,
+        vehicleTypeId: { in: vehicleTypeIds },
+        date: { in: dates.map((d) => new Date(d)) }
+      },
+      select: { id: true, vehicleTypeId: true, date: true, daily: true }
+    });
+    existingMap = new Map(
+      existing.map((row) => [`${row.vehicleTypeId}|${dayKey(row.date)}`, row])
+    );
+  }
+
+  const tagged = dedupedRows.map((row) => {
+    const key = `${row.vehicleTypeId}|${row.dateKey}`;
+    const prev = existingMap.get(key);
+    if (!prev) {
+      return { ...row, action: 'add', previousDaily: null };
+    }
+    const previousDaily = Number(Number(prev.daily).toFixed(2));
+    return {
+      ...row,
+      action: previousDaily === row.daily ? 'unchanged' : 'update',
+      previousDaily,
+      existingId: prev.id
+    };
+  });
+
+  tagged.sort((a, b) => {
     if (a.dateKey === b.dateKey) return String(a.vehicleTypeCode).localeCompare(String(b.vehicleTypeCode));
     return a.dateKey.localeCompare(b.dateKey);
   });
 
+  const added = tagged.filter((r) => r.action === 'add');
+  const updated = tagged.filter((r) => r.action === 'update');
+  const unchanged = tagged.filter((r) => r.action === 'unchanged');
+
   return {
     rate,
-    rows: normalized,
+    rows: tagged,
+    added,
+    updated,
+    unchanged,
+    skipped,
     errors,
     totalRows: rows.length,
-    validCount: normalized.length,
+    validCount: tagged.length,
+    addedCount: added.length,
+    updatedCount: updated.length,
+    unchangedCount: unchanged.length,
+    skippedCount: skipped.reduce((sum, s) => sum + (s.rowCount || 0), 0),
     errorCount: errors.length
   };
 }
 
 export const ratesService = {
+  // Parses an uploaded .xlsx (sent as base64 in JSON to avoid a multer dep) into
+  // the same { date, vehicleTypeCode, dailyRate } shape the existing JSON-rows
+  // pipeline expects. Recognized headers (case-insensitive):
+  //   - vehicleTypeCode | vehicleType | sipp
+  //   - date | pickupDate
+  //   - dailyRate | daily | rate | suggestedAmount
+  // Also returns metadata (detected location code, total rows, header map) so the
+  // frontend can drive the auto-detect-rate flow.
+  async parseDailyPriceExcel({ base64, filename } = {}) {
+    if (!base64 || typeof base64 !== 'string') {
+      throw new Error('Excel content (base64) is required');
+    }
+    let buffer;
+    try {
+      // Strip any data-URL prefix the browser might attach (e.g. "data:...;base64,").
+      const cleaned = base64.includes(',') ? base64.split(',').pop() : base64;
+      buffer = Buffer.from(cleaned, 'base64');
+    } catch {
+      throw new Error('Could not decode Excel file');
+    }
+    if (!buffer?.length) throw new Error('Excel file is empty');
+
+    const workbook = new ExcelJS.Workbook();
+    try {
+      await workbook.xlsx.load(buffer);
+    } catch (err) {
+      throw new Error(`Could not parse Excel file: ${err?.message || 'unknown error'}`);
+    }
+    const sheet = workbook.worksheets[0];
+    if (!sheet) throw new Error('Excel file has no worksheets');
+
+    // Header detection: first non-empty row that has a vehicle-type column.
+    const headerSynonyms = {
+      vehicleTypeCode: ['vehicletypecode', 'vehicletype', 'vehicle_type_code', 'sipp', 'classcode'],
+      date: ['date', 'pickupdate', 'pickup_date'],
+      dailyRate: ['dailyrate', 'daily', 'rate', 'suggestedamount', 'suggested_amount'],
+      locationCode: ['location', 'locationcode', 'pickuplocation', 'station']
+    };
+    const norm = (v) => String(v || '').toLowerCase().replace(/[\s_-]+/g, '');
+    const findHeaderField = (headerRow) => {
+      const map = {};
+      headerRow.eachCell((cell, col) => {
+        const key = norm(cell.value);
+        for (const [target, synonyms] of Object.entries(headerSynonyms)) {
+          if (!map[target] && synonyms.includes(key)) {
+            map[target] = col;
+          }
+        }
+      });
+      return map;
+    };
+
+    let headerMap = {};
+    let headerRowNumber = 0;
+    for (let r = 1; r <= Math.min(sheet.rowCount, 5); r += 1) {
+      const candidate = findHeaderField(sheet.getRow(r));
+      if (candidate.vehicleTypeCode && candidate.date && candidate.dailyRate) {
+        headerMap = candidate;
+        headerRowNumber = r;
+        break;
+      }
+    }
+    if (!headerRowNumber) {
+      throw new Error(
+        'Could not find required columns. Expected headers: vehicleTypeCode (or Sipp), date (or PickUpDate), dailyRate (or SuggestedAmount).'
+      );
+    }
+
+    const cellValueAsString = (cell) => {
+      if (cell?.value == null) return '';
+      // exceljs sometimes returns rich-text or formula objects.
+      if (typeof cell.value === 'object') {
+        if (cell.value instanceof Date) return cell.value.toISOString();
+        if (cell.value.text) return String(cell.value.text);
+        if (cell.value.result != null) return String(cell.value.result);
+        if (Array.isArray(cell.value.richText)) {
+          return cell.value.richText.map((rt) => rt.text).join('');
+        }
+      }
+      return String(cell.value);
+    };
+    const cellValueAsDateString = (cell) => {
+      if (cell?.value instanceof Date) {
+        return cell.value.toISOString().slice(0, 10);
+      }
+      return cellValueAsString(cell);
+    };
+
+    const rows = [];
+    const locationCodes = new Set();
+    for (let r = headerRowNumber + 1; r <= sheet.rowCount; r += 1) {
+      const row = sheet.getRow(r);
+      if (!row || row.cellCount === 0) continue;
+
+      const vt = cellValueAsString(row.getCell(headerMap.vehicleTypeCode)).trim();
+      const dateStr = cellValueAsDateString(row.getCell(headerMap.date)).trim();
+      const rate = cellValueAsString(row.getCell(headerMap.dailyRate)).trim();
+
+      if (!vt && !dateStr && !rate) continue;
+
+      const out = { vehicleTypeCode: vt, date: dateStr, dailyRate: rate };
+      if (headerMap.locationCode) {
+        const loc = cellValueAsString(row.getCell(headerMap.locationCode)).trim();
+        if (loc) {
+          out.locationCode = loc;
+          locationCodes.add(loc.toUpperCase());
+        }
+      }
+      rows.push(out);
+    }
+
+    return {
+      filename: filename || null,
+      sheetName: sheet.name,
+      headerRowNumber,
+      headerMap,
+      rowCount: rows.length,
+      detectedLocationCodes: Array.from(locationCodes),
+      rows
+    };
+  },
+
+  // Lookup helper used by the Excel import flow: given a Location.code from the
+  // suggestion report (e.g. "SJU"), return the matching active Rates so the UI
+  // can either auto-pick (1 result) or prompt the user to choose (2+).
+  async findRatesByLocationCode(locationCodeRaw, scope = {}) {
+    const code = String(locationCodeRaw || '').trim();
+    if (!code) return { locationCode: code, location: null, rates: [] };
+
+    const location = await prisma.location.findFirst({
+      where: {
+        code,
+        ...(scope?.tenantId ? { tenantId: scope.tenantId } : {})
+      },
+      select: { id: true, code: true, name: true, isActive: true }
+    });
+    if (!location) return { locationCode: code, location: null, rates: [] };
+
+    const rates = await prisma.rate.findMany({
+      where: {
+        ...(scope?.tenantId ? { tenantId: scope.tenantId } : {}),
+        // Match by primary locationId OR by the multi-location string field
+        // (locationIds is a comma-separated string of location IDs). This mirrors
+        // how resolveForRental looks up rates that span locations.
+        OR: [
+          { locationId: location.id },
+          { locationIds: { contains: location.id } }
+        ],
+        isActive: true,
+        active: true
+      },
+      include: RATE_INCLUDE,
+      orderBy: [{ updatedAt: 'desc' }]
+    });
+
+    return { locationCode: code, location, rates };
+  },
+
   list({ query } = {}, scope = {}) {
     return prisma.rate.findMany({
       where: {
@@ -826,19 +1073,40 @@ export const ratesService = {
       rateCode: report.rate.rateCode,
       totalRows: report.totalRows,
       validCount: report.validCount,
+      addedCount: report.addedCount,
+      updatedCount: report.updatedCount,
+      unchangedCount: report.unchangedCount,
+      skippedCount: report.skippedCount,
       errorCount: report.errorCount,
       rows: report.rows,
+      added: report.added,
+      updated: report.updated,
+      unchanged: report.unchanged,
+      skipped: report.skipped,
       errors: report.errors
     };
   },
 
   async importDailyPrices(rateId, rows = [], scope = {}) {
     const report = await normalizeDailyPriceRows(rateId, rows, scope);
-    if (!report.rows.length) {
+    // Only commit rows that actually change something (added or updated). Unchanged
+    // rows are skipped at write time to keep the upsert traffic minimal.
+    const toWrite = [...report.added, ...report.updated];
+
+    if (!toWrite.length) {
       return {
         imported: 0,
-        rate: await getRateForScope(rateId, scope),
-        errors: report.errors
+        addedCount: 0,
+        updatedCount: 0,
+        unchangedCount: report.unchangedCount,
+        skippedCount: report.skippedCount,
+        errorCount: report.errorCount,
+        added: [],
+        updated: [],
+        unchanged: report.unchanged,
+        skipped: report.skipped,
+        errors: report.errors,
+        rate: await getRateForScope(rateId, scope)
       };
     }
 
@@ -848,8 +1116,8 @@ export const ratesService = {
     });
 
     const BATCH_SIZE = 80;
-    for (let i = 0; i < report.rows.length; i += BATCH_SIZE) {
-      const batch = report.rows.slice(i, i + BATCH_SIZE);
+    for (let i = 0; i < toWrite.length; i += BATCH_SIZE) {
+      const batch = toWrite.slice(i, i + BATCH_SIZE);
       await prisma.$transaction(
         batch.map((row) =>
           prisma.rateDailyPrice.upsert({
@@ -873,7 +1141,16 @@ export const ratesService = {
     }
 
     return {
-      imported: report.rows.length,
+      imported: toWrite.length,
+      addedCount: report.addedCount,
+      updatedCount: report.updatedCount,
+      unchangedCount: report.unchangedCount,
+      skippedCount: report.skippedCount,
+      errorCount: report.errorCount,
+      added: report.added,
+      updated: report.updated,
+      unchanged: report.unchanged,
+      skipped: report.skipped,
       errors: report.errors,
       rate: await getRateForScope(rateId, scope)
     };
