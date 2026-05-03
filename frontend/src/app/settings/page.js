@@ -1521,6 +1521,11 @@ function SettingsInner({ token, me, logout }) {
         location: lookupResult?.location || null,
         candidateRates,
         selectedRateId: candidateRates.length === 1 ? candidateRates[0].id : '',
+        // Suggestion-report-specific zero-amount filtering happens at parse time
+        // (see rates.service.js parseDailyPriceExcel). Carry the counts forward
+        // so the diff preview can show the user what was filtered.
+        zeroSkipped: Array.isArray(parsed.zeroSkipped) ? parsed.zeroSkipped : [],
+        zeroSkippedCount: parsed.zeroSkippedCount || 0,
         report: null,
         applying: false
       };
@@ -3063,16 +3068,19 @@ function SettingsInner({ token, me, logout }) {
                               <span className="badge" style={{ background: 'rgba(34,197,94,0.18)' }}>{r.addedCount || 0} new</span>
                               <span className="badge" style={{ background: 'rgba(59,130,246,0.18)' }}>{r.updatedCount || 0} updates</span>
                               <span className="badge">{r.unchangedCount || 0} unchanged</span>
-                              <span className="badge" style={{ background: 'rgba(251,191,36,0.18)' }}>{r.skippedCount || 0} skipped</span>
+                              <span className="badge" style={{ background: 'rgba(251,191,36,0.18)' }}>
+                                {(r.skippedCount || 0) + (rateExcelImport.zeroSkippedCount || 0)} skipped
+                              </span>
                               <span className="badge" style={{ background: r.errorCount ? 'rgba(239,68,68,0.18)' : undefined }}>{r.errorCount || 0} errors</span>
-                              <span className="label">Total parsed: {rateExcelImport.rowCount}</span>
+                              <span className="label">Total parsed: {rateExcelImport.rowCount + (rateExcelImport.zeroSkippedCount || 0)}</span>
                             </div>
 
-                            {Array.isArray(r.skipped) && r.skipped.length ? (
+                            {(Array.isArray(r.skipped) && r.skipped.length) || rateExcelImport.zeroSkipped?.length ? (
                               <div className="surface-note" style={{ margin: 0 }}>
                                 <strong>Skipped:</strong>
                                 <ul style={{ margin: '4px 0 0 18px' }}>
-                                  {r.skipped.map((s, i) => (<li key={i}>{s.message}</li>))}
+                                  {(rateExcelImport.zeroSkipped || []).map((s, i) => (<li key={`z${i}`}>{s.message}</li>))}
+                                  {(r.skipped || []).map((s, i) => (<li key={i}>{s.message}</li>))}
                                 </ul>
                               </div>
                             ) : null}

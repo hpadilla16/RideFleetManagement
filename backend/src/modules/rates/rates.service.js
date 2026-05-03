@@ -352,13 +352,11 @@ async function normalizeDailyPriceRows(rateId, rows = [], scope = {}) {
       errors.push({ line, field: 'dailyRate', message: `Invalid daily rate ${dailyRateRaw}` });
       return;
     }
-    // SuggestedAmount can be 0 in the input when the report has no comp data — we
-    // treat that as a no-op rather than an explicit override (avoids accidentally
-    // setting cars to $0/day if a row slipped through).
-    if (daily === 0) {
-      skippedCodeCounts.set(`${vehicleTypeCodeRaw}:zero`, (skippedCodeCounts.get(`${vehicleTypeCodeRaw}:zero`) || 0) + 1);
-      return;
-    }
+    // NOTE: rows with daily === 0 ARE accepted here — a tenant may legitimately
+    // want a $0 override (e.g. a free-day promotion). The "drop zero-priced rows"
+    // semantic only makes sense for the suggestion-report Excel (where 0 means
+    // "no competitor data"), and that filtering happens in `parseDailyPriceExcel`
+    // before rows are passed in. Codex P1 review on PR #48.
 
     const key = `${vehicleType.id}|${dayKey(parsedDate)}`;
     const row = {
@@ -376,21 +374,12 @@ async function normalizeDailyPriceRows(rateId, rows = [], scope = {}) {
 
   // Summarize skipped codes once per code (not once per row).
   for (const [code, count] of skippedCodeCounts.entries()) {
-    if (code.endsWith(':zero')) {
-      skipped.push({
-        reason: 'ZERO_PRICE',
-        vehicleTypeCode: code.slice(0, -5),
-        rowCount: count,
-        message: `Suggested amount was 0 for ${count} row(s) — left unchanged`
-      });
-    } else {
-      skipped.push({
-        reason: 'UNKNOWN_VEHICLE_TYPE',
-        vehicleTypeCode: code,
-        rowCount: count,
-        message: `Vehicle type ${code} is not configured for this tenant — ${count} row(s) ignored`
-      });
-    }
+    skipped.push({
+      reason: 'UNKNOWN_VEHICLE_TYPE',
+      vehicleTypeCode: code,
+      rowCount: count,
+      message: `Vehicle type ${code} is not configured for this tenant — ${count} row(s) ignored`
+    });
   }
 
   const dedupedRows = Array.from(dedupe.values());
@@ -558,6 +547,12 @@ export const ratesService = {
 
     const rows = [];
     const locationCodes = new Set();
+    // Suggestion-report-specific filter: when SuggestedAmount is 0 the report had
+    // no comp data for that day/class — applying it would zero out the rate.
+    // Track and report so the user sees what was filtered, but don't pass these
+    // through to normalizeDailyPriceRows (which intentionally accepts 0 for the
+    // CSV path where $0 may be a real promotion price). Codex P1 review on PR #48.
+    const zeroSkipCounts = new Map();
     for (let r = headerRowNumber + 1; r <= sheet.rowCount; r += 1) {
       const row = sheet.getRow(r);
       if (!row || row.cellCount === 0) continue;
@@ -567,6 +562,13 @@ export const ratesService = {
       const rate = cellValueAsString(row.getCell(headerMap.dailyRate)).trim();
 
       if (!vt && !dateStr && !rate) continue;
+
+      const rateNum = Number(rate);
+      if (Number.isFinite(rateNum) && rateNum === 0) {
+        const key = vt.toUpperCase();
+        zeroSkipCounts.set(key, (zeroSkipCounts.get(key) || 0) + 1);
+        continue;
+      }
 
       const out = { vehicleTypeCode: vt, date: dateStr, dailyRate: rate };
       if (headerMap.locationCode) {
@@ -579,6 +581,13 @@ export const ratesService = {
       rows.push(out);
     }
 
+    const zeroSkipped = Array.from(zeroSkipCounts.entries()).map(([vehicleTypeCode, count]) => ({
+      reason: 'ZERO_SUGGESTED_AMOUNT',
+      vehicleTypeCode,
+      rowCount: count,
+      message: `${count} row(s) for ${vehicleTypeCode} had SuggestedAmount = 0 — skipped (no competitor data)`
+    }));
+
     return {
       filename: filename || null,
       sheetName: sheet.name,
@@ -586,6 +595,8 @@ export const ratesService = {
       headerMap,
       rowCount: rows.length,
       detectedLocationCodes: Array.from(locationCodes),
+      zeroSkipped,
+      zeroSkippedCount: zeroSkipped.reduce((sum, s) => sum + s.rowCount, 0),
       rows
     };
   },
