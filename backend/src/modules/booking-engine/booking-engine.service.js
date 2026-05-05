@@ -1,5 +1,6 @@
 import crypto from 'node:crypto';
 import { prisma } from '../../lib/prisma.js';
+import { cache } from '../../lib/cache.js';
 import { ratesService } from '../rates/rates.service.js';
 import { reservationsService } from '../reservations/reservations.service.js';
 import { carSharingService } from '../car-sharing/car-sharing.service.js';
@@ -1029,7 +1030,17 @@ async function rentalAvailabilityCount({ tenantId, vehicleTypeId, pickupAt, retu
 
 export const bookingEngineService = {
   async getBootstrap({ tenantSlug, tenantId } = {}) {
-    const tenant = await resolvePublicTenant({ tenantSlug, tenantId });
+    // Cache the bootstrap response. This endpoint is hit on every load of
+    // the public booking site and fans out 5 parallel prisma queries per
+    // request; with the prod pool capped at 5, any concurrency exhausted
+    // it (Sentry trace 80afa31fde7ee4dea8a5c3ec3d09c097, 2026-05-05).
+    // cache.getOrSet ALSO coalesces concurrent misses onto a single
+    // in-flight batch, so even cold-cache traffic only fires one query
+    // batch at a time. TTL is short — bootstrap data (active tenants,
+    // public listings) changes a handful of times per day.
+    const cacheKey = `booking:bootstrap:slug=${tenantSlug || ''}:id=${tenantId || ''}`;
+    return cache.getOrSet(cacheKey, async () => {
+      const tenant = await resolvePublicTenant({ tenantSlug, tenantId });
 
     if (!tenant) {
       const [tenants, locations, vehicleTypes, featuredListings, carSharingSearchPlaces] = await Promise.all([
@@ -1197,6 +1208,7 @@ export const bookingEngineService = {
         carSharing: !!tenant.carSharingEnabled
       }
     };
+    }, 60_000);
   },
 
   async searchRental({ tenantSlug, tenantId, pickupLocationId, pickupLocationIds = [], pickupAt, returnAt }) {
