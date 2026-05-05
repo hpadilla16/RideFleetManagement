@@ -44,7 +44,23 @@ function appendPoolParams(url) {
   // with DATABASE_POOL_SIZE in env if Supabase pgbouncer caps lower.
   const poolSize = process.env.DATABASE_POOL_SIZE || '30';
   const timeout = process.env.DATABASE_POOL_TIMEOUT || '10';
-  // Only append if not already configured in the URL
-  if (url.includes('connection_limit=')) return url;
+  // If the URL already has its own connection_limit (e.g. Supabase pooler URLs
+  // bake one in), respect it but make the effective value visible at startup
+  // so the pool size never becomes a mystery in prod (cf. Sentry pool-timeout
+  // incident on /api/public/booking/bootstrap, 2026-05-05). DATABASE_POOL_SIZE
+  // is intentionally NOT overridden in this branch — changing the URL's value
+  // out from under the deploy platform would mask configuration drift.
+  if (url.includes('connection_limit=')) {
+    const limitMatch = url.match(/[?&]connection_limit=(\d+)/);
+    const timeoutMatch = url.match(/[?&]pool_timeout=(\d+)/);
+    const baked = limitMatch ? limitMatch[1] : '?';
+    const bakedTimeout = timeoutMatch ? timeoutMatch[1] : 'default';
+    console.log(
+      `[prisma] DATABASE_URL has connection_limit=${baked} pool_timeout=${bakedTimeout} ` +
+      `(DATABASE_POOL_SIZE env ignored — strip ?connection_limit= from URL to use env)`
+    );
+    return url;
+  }
+  console.log(`[prisma] appending connection_limit=${poolSize}&pool_timeout=${timeout} to DATABASE_URL`);
   return `${url}${separator}connection_limit=${poolSize}&pool_timeout=${timeout}`;
 }
