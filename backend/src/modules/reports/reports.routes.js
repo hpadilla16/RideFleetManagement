@@ -57,6 +57,30 @@ reportsRouter.get('/contracts.xlsx', async (req, res, next) => {
   }
 });
 
+// Reservations report. Query params: start, end, programCategory (optional),
+// workflowMode (STANDARD_RENTAL | DEALERSHIP_LOANER), status (NEW | CONFIRMED |
+// CHECKED_OUT | CANCELLED).
+reportsRouter.get('/reservations', async (req, res, next) => {
+  try {
+    const out = await reportsService.reservationsReport(req.query || {}, scopeFor(req));
+    res.json(out);
+  } catch (e) {
+    next(e);
+  }
+});
+
+reportsRouter.get('/reservations.xlsx', async (req, res, next) => {
+  try {
+    const { buffer, filename } = await reportsService.reservationsReportExcel(req.query || {}, scopeFor(req));
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    res.setHeader('Content-Length', buffer.byteLength);
+    res.end(Buffer.from(buffer));
+  } catch (e) {
+    next(e);
+  }
+});
+
 // Inventory report. Query params: start, end, programCategory (optional).
 // Returns { range, programCategory, vehicles[], totals } with utilization
 // percentages over the given window.
