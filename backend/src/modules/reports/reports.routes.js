@@ -57,6 +57,30 @@ reportsRouter.get('/contracts.xlsx', async (req, res, next) => {
   }
 });
 
+// Inventory report. Query params: start, end, programCategory (optional).
+// Returns { range, programCategory, vehicles[], totals } with utilization
+// percentages over the given window.
+reportsRouter.get('/inventory', async (req, res, next) => {
+  try {
+    const out = await reportsService.inventoryReport(req.query || {}, scopeFor(req));
+    res.json(out);
+  } catch (e) {
+    next(e);
+  }
+});
+
+reportsRouter.get('/inventory.xlsx', async (req, res, next) => {
+  try {
+    const { buffer, filename } = await reportsService.inventoryReportExcel(req.query || {}, scopeFor(req));
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    res.setHeader('Content-Length', buffer.byteLength);
+    res.end(Buffer.from(buffer));
+  } catch (e) {
+    next(e);
+  }
+});
+
 // Per-vehicle revenue. Query params: start (ISO date), end (ISO date),
 // programCategory (optional: RENTAL_ONLY | LOANER_ONLY | BOTH).
 reportsRouter.get('/vehicle-revenue', async (req, res, next) => {

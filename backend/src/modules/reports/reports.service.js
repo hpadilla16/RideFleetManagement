@@ -1070,6 +1070,206 @@ export const reportsService = {
     };
   },
 
+  // Inventory report — full fleet snapshot with utilization metrics. Triangle
+  // plan item #7 sub-item. Each row is a vehicle with: status, location,
+  // program category, vehicle type, days since last reservation, count of
+  // reservations in [start, end], total revenue in window, and utilization
+  // percentage (= days under reservation in window / total window days).
+  // Operators see at a glance which cars are idle vs working.
+  async inventoryReport(query = {}, scope = {}) {
+    const start = query.start ? startOfDay(query.start) : startOfDay(new Date(Date.now() - 30 * 24 * 60 * 60 * 1000));
+    const end = query.end ? endOfDay(query.end) : endOfDay(new Date());
+    const whereScope = scopeWhere(scope);
+    const windowDays = Math.max(1, Math.ceil((end.getTime() - start.getTime()) / (24 * 60 * 60 * 1000)));
+
+    const programCategoryFilter = query.programCategory && ['RENTAL_ONLY', 'LOANER_ONLY', 'BOTH'].includes(String(query.programCategory))
+      ? { programCategory: String(query.programCategory) }
+      : {};
+
+    const vehicles = await prisma.vehicle.findMany({
+      where: { ...whereScope, ...programCategoryFilter },
+      select: {
+        id: true,
+        internalNumber: true,
+        plate: true,
+        make: true,
+        model: true,
+        year: true,
+        color: true,
+        mileage: true,
+        status: true,
+        fleetMode: true,
+        programCategory: true,
+        vehicleType: { select: { id: true, name: true } },
+        homeLocation: { select: { id: true, name: true, city: true, state: true } }
+      },
+      orderBy: { internalNumber: 'asc' }
+    });
+
+    if (!vehicles.length) {
+      return {
+        range: { start, end, windowDays },
+        programCategory: query.programCategory || 'ALL',
+        vehicles: [],
+        totals: { vehicleCount: 0, reservationCount: 0, totalRevenue: 0, avgUtilization: 0 }
+      };
+    }
+
+    const vehicleIds = vehicles.map((v) => v.id);
+
+    const reservations = await prisma.reservation.findMany({
+      where: {
+        ...whereScope,
+        vehicleId: { in: vehicleIds },
+        // Any reservation that overlaps the window — pickupAt before window end
+        // AND returnAt after window start — counts toward utilization.
+        pickupAt: { lt: end },
+        returnAt: { gt: start }
+      },
+      select: {
+        id: true,
+        vehicleId: true,
+        status: true,
+        pickupAt: true,
+        returnAt: true,
+        charges: {
+          where: { selected: true },
+          select: { total: true }
+        }
+      },
+      orderBy: { pickupAt: 'asc' }
+    });
+
+    // Most-recent reservation per vehicle for "last reservation" column.
+    const latestPickupByVehicle = await prisma.reservation.groupBy({
+      by: ['vehicleId'],
+      where: {
+        ...whereScope,
+        vehicleId: { in: vehicleIds }
+      },
+      _max: { pickupAt: true }
+    });
+    const latestPickupMap = new Map();
+    for (const row of latestPickupByVehicle) {
+      if (row.vehicleId) latestPickupMap.set(row.vehicleId, row._max.pickupAt);
+    }
+
+    const byVehicle = new Map();
+    for (const v of vehicles) {
+      byVehicle.set(v.id, {
+        vehicleId: v.id,
+        internalNumber: v.internalNumber,
+        plate: v.plate,
+        year: v.year,
+        make: v.make,
+        model: v.model,
+        color: v.color,
+        mileage: v.mileage,
+        status: v.status,
+        fleetMode: v.fleetMode,
+        programCategory: v.programCategory,
+        vehicleTypeName: v.vehicleType?.name || null,
+        homeLocationName: v.homeLocation?.name || null,
+        homeLocationCity: v.homeLocation?.city || null,
+        lastReservationAt: latestPickupMap.get(v.id) || null,
+        daysSinceLastReservation: null,
+        reservationCount: 0,
+        utilizationDays: 0,
+        utilizationPct: 0,
+        totalRevenue: 0
+      });
+    }
+
+    const now = Date.now();
+    for (const row of byVehicle.values()) {
+      if (row.lastReservationAt) {
+        row.daysSinceLastReservation = Math.max(0, Math.floor((now - new Date(row.lastReservationAt).getTime()) / (24 * 60 * 60 * 1000)));
+      }
+    }
+
+    // Aggregate utilization + revenue per vehicle.
+    for (const r of reservations) {
+      const row = byVehicle.get(r.vehicleId);
+      if (!row) continue;
+      row.reservationCount += 1;
+      const overlapStart = new Date(Math.max(start.getTime(), new Date(r.pickupAt).getTime()));
+      const overlapEnd = new Date(Math.min(end.getTime(), new Date(r.returnAt).getTime()));
+      if (overlapEnd > overlapStart) {
+        const days = (overlapEnd.getTime() - overlapStart.getTime()) / (24 * 60 * 60 * 1000);
+        row.utilizationDays += days;
+      }
+      const charges = (r.charges || []).reduce((sum, c) => sum + Number(c.total || 0), 0);
+      row.totalRevenue += charges;
+    }
+
+    for (const row of byVehicle.values()) {
+      row.utilizationDays = Number(row.utilizationDays.toFixed(2));
+      row.utilizationPct = Number(((row.utilizationDays / windowDays) * 100).toFixed(1));
+      row.totalRevenue = Number(row.totalRevenue.toFixed(2));
+    }
+
+    const out = [...byVehicle.values()].sort((a, b) => b.utilizationPct - a.utilizationPct);
+
+    return {
+      range: { start, end, windowDays },
+      programCategory: query.programCategory || 'ALL',
+      vehicles: out,
+      totals: {
+        vehicleCount: out.length,
+        reservationCount: out.reduce((s, r) => s + r.reservationCount, 0),
+        totalRevenue: Number(out.reduce((s, r) => s + r.totalRevenue, 0).toFixed(2)),
+        avgUtilization: out.length ? Number((out.reduce((s, r) => s + r.utilizationPct, 0) / out.length).toFixed(1)) : 0
+      }
+    };
+  },
+
+  async inventoryReportExcel(query = {}, scope = {}) {
+    const data = await this.inventoryReport(query, scope);
+    const workbook = new ExcelJS.Workbook();
+    const sheet = workbook.addWorksheet('Inventory');
+
+    sheet.columns = [
+      { header: 'Unit ID', key: 'internalNumber', width: 14 },
+      { header: 'Plate', key: 'plate', width: 12 },
+      { header: 'Year', key: 'year', width: 8 },
+      { header: 'Make', key: 'make', width: 14 },
+      { header: 'Model', key: 'model', width: 14 },
+      { header: 'Color', key: 'color', width: 12 },
+      { header: 'Type', key: 'vehicleTypeName', width: 16 },
+      { header: 'Status', key: 'status', width: 14 },
+      { header: 'Program', key: 'programCategory', width: 14 },
+      { header: 'Home Location', key: 'homeLocationName', width: 18 },
+      { header: 'Mileage', key: 'mileage', width: 10 },
+      { header: 'Reservations (window)', key: 'reservationCount', width: 18 },
+      { header: 'Utilization Days', key: 'utilizationDays', width: 16 },
+      { header: 'Utilization %', key: 'utilizationPct', width: 14 },
+      { header: 'Revenue (window)', key: 'totalRevenue', width: 16 },
+      { header: 'Last Reservation', key: 'lastReservationAt', width: 20 },
+      { header: 'Days Idle', key: 'daysSinceLastReservation', width: 12 }
+    ];
+    sheet.getRow(1).font = { bold: true };
+
+    for (const v of data.vehicles) {
+      sheet.addRow({
+        ...v,
+        lastReservationAt: v.lastReservationAt ? new Date(v.lastReservationAt).toISOString().slice(0, 10) : ''
+      });
+    }
+
+    const totalsRowIdx = data.vehicles.length + 2;
+    sheet.addRow({});
+    sheet.getRow(totalsRowIdx).getCell('Reservations (window)').value = data.totals.reservationCount;
+    sheet.getRow(totalsRowIdx).getCell('Utilization %').value = data.totals.avgUtilization;
+    sheet.getRow(totalsRowIdx).getCell('Revenue (window)').value = data.totals.totalRevenue;
+    sheet.getRow(totalsRowIdx).font = { bold: true };
+
+    return {
+      buffer: await workbook.xlsx.writeBuffer(),
+      filename: `inventory-${isoDay(data.range.start)}-to-${isoDay(data.range.end)}.xlsx`,
+      rowCount: data.vehicles.length
+    };
+  },
+
   // Excel export of the per-vehicle revenue report.
   async vehicleRevenueExcel(query = {}, scope = {}) {
     const data = await this.vehicleRevenue(query, scope);
