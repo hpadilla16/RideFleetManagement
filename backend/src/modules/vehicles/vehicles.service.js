@@ -240,6 +240,7 @@ export const vehiclesService = {
         mileage: true,
         status: true,
         fleetMode: true,
+        programCategory: true,
         vehicleTypeId: true,
         homeLocationId: true,
         createdAt: true,
@@ -368,6 +369,7 @@ export const vehiclesService = {
         mileage: data.mileage ?? 0,
         status: data.status ?? 'AVAILABLE',
         fleetMode: data.fleetMode ?? 'RENTAL_ONLY',
+        programCategory: data.programCategory ?? 'BOTH',
         vehicleTypeId: data.vehicleTypeId,
         homeLocationId: data.homeLocationId ?? null
       }
