@@ -93,6 +93,9 @@ function Inner({ token, me, logout }) {
   const [vehicleRevenue, setVehicleRevenue] = useState(null);
   const [vehicleRevenueProgramFilter, setVehicleRevenueProgramFilter] = useState('ALL');
   const [exportingVehicleRevenue, setExportingVehicleRevenue] = useState(false);
+  const [inventoryReport, setInventoryReport] = useState(null);
+  const [inventoryProgramFilter, setInventoryProgramFilter] = useState('ALL');
+  const [exportingInventory, setExportingInventory] = useState(false);
   const [msg, setMsg] = useState('');
   const [loading, setLoading] = useState(true);
 
@@ -123,16 +126,24 @@ function Inner({ token, me, logout }) {
         ...(next.tenantId ? { tenantId: next.tenantId } : {}),
         ...(vehicleRevenueProgramFilter !== 'ALL' ? { programCategory: vehicleRevenueProgramFilter } : {})
       });
-      const [overviewOut, servicesOut, ledgerOut, vehicleRevenueOut] = await Promise.all([
+      const inventoryQs = new URLSearchParams({
+        start: next.start,
+        end: next.end,
+        ...(next.tenantId ? { tenantId: next.tenantId } : {}),
+        ...(inventoryProgramFilter !== 'ALL' ? { programCategory: inventoryProgramFilter } : {})
+      });
+      const [overviewOut, servicesOut, ledgerOut, vehicleRevenueOut, inventoryOut] = await Promise.all([
         api(`/api/reports/overview?${reportQs.toString()}`, {}, token),
         api(`/api/reports/services-sold?${servicesQs.toString()}`, {}, token),
         api(`/api/commissions/ledger?${ledgerQs.toString()}`, {}, token),
-        api(`/api/reports/vehicle-revenue?${vehicleRevenueQs.toString()}`, {}, token)
+        api(`/api/reports/vehicle-revenue?${vehicleRevenueQs.toString()}`, {}, token),
+        api(`/api/reports/inventory?${inventoryQs.toString()}`, {}, token)
       ]);
       setReport(overviewOut);
       setServicesSold(servicesOut);
       setCommissionLedger(Array.isArray(ledgerOut) ? ledgerOut : []);
       setVehicleRevenue(vehicleRevenueOut);
+      setInventoryReport(inventoryOut);
       setMsg('');
     } catch (e) {
       setMsg(e.message);
@@ -144,7 +155,7 @@ function Inner({ token, me, logout }) {
   useEffect(() => {
     load(filters);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [token, commissionMonth, vehicleRevenueProgramFilter]);
+  }, [token, commissionMonth, vehicleRevenueProgramFilter, inventoryProgramFilter]);
 
   const cards = useMemo(() => metricCards(report), [report]);
   const reservationSeriesMax = Math.max(1, ...(report?.reservationsByDay || []).map((row) => Number(row.count || 0)));
@@ -282,6 +293,41 @@ function Inner({ token, me, logout }) {
       URL.revokeObjectURL(url);
     } catch (e) {
       setMsg(e.message);
+    }
+  };
+
+  const exportInventoryXlsx = async () => {
+    if (exportingInventory) return;
+    try {
+      setExportingInventory(true);
+      setMsg('');
+      const qs = new URLSearchParams({
+        start: filters.start,
+        end: filters.end,
+        ...(filters.tenantId ? { tenantId: filters.tenantId } : {}),
+        ...(inventoryProgramFilter !== 'ALL' ? { programCategory: inventoryProgramFilter } : {})
+      });
+      const res = await fetch(`${API_BASE}/api/reports/inventory.xlsx?${qs.toString()}`, {
+        headers: { Authorization: `Bearer ${token}` },
+        cache: 'no-store'
+      });
+      if (!res.ok) {
+        const text = await res.text();
+        throw new Error(text || `Excel export failed (${res.status})`);
+      }
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `inventory-${filters.start}-to-${filters.end}${inventoryProgramFilter !== 'ALL' ? `-${inventoryProgramFilter}` : ''}.xlsx`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    } catch (e) {
+      setMsg(e.message);
+    } finally {
+      setExportingInventory(false);
     }
   };
 
@@ -896,6 +942,100 @@ function Inner({ token, me, logout }) {
               </table>
             ) : (
               <EmptyTableState text="No reservations against vehicles for the selected date range and program filter." />
+            )}
+          </section>
+
+          <section className="glass card-lg section-card">
+            <div className="row-between" style={{ marginBottom: 12, alignItems: 'flex-start' }}>
+              <div>
+                <h2 style={{ marginBottom: 4 }}>Inventory</h2>
+                <p className="label" style={{ marginTop: 0 }}>
+                  Full fleet snapshot with utilization metrics for the selected window.
+                  Triangle plan item #7 — see which vehicles are working, idle, or unavailable, scoped by program.
+                </p>
+              </div>
+              <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                <span className="label">Program:</span>
+                <select
+                  value={inventoryProgramFilter}
+                  onChange={(e) => setInventoryProgramFilter(e.target.value)}
+                  style={{ minWidth: 140 }}
+                >
+                  <option value="ALL">All programs</option>
+                  <option value="RENTAL_ONLY">Rental only</option>
+                  <option value="LOANER_ONLY">Loaner only</option>
+                  <option value="BOTH">Flexible only</option>
+                </select>
+                <button onClick={exportInventoryXlsx} disabled={exportingInventory || !inventoryReport?.vehicles?.length}>
+                  {exportingInventory ? 'Exporting…' : 'Export Excel'}
+                </button>
+              </div>
+            </div>
+            {inventoryReport?.totals ? (
+              <div className="metric-grid" style={{ marginBottom: 12 }}>
+                <div className="metric-card"><span className="label">Vehicles</span><strong>{inventoryReport.totals.vehicleCount}</strong></div>
+                <div className="metric-card"><span className="label">Reservations (window)</span><strong>{inventoryReport.totals.reservationCount}</strong></div>
+                <div className="metric-card"><span className="label">Avg utilization</span><strong>{Number(inventoryReport.totals.avgUtilization || 0).toFixed(1)}%</strong></div>
+                <div className="metric-card"><span className="label">Revenue (window)</span><strong>{fmtMoney(inventoryReport.totals.totalRevenue)}</strong></div>
+              </div>
+            ) : null}
+            {inventoryReport?.vehicles?.length ? (
+              <table>
+                <thead>
+                  <tr>
+                    <th>Unit</th>
+                    <th>Plate</th>
+                    <th>Vehicle</th>
+                    <th>Type</th>
+                    <th>Status</th>
+                    <th>Program</th>
+                    <th>Home</th>
+                    <th>Reservations</th>
+                    <th>Util %</th>
+                    <th>Revenue</th>
+                    <th>Last Res.</th>
+                    <th>Days idle</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {inventoryReport.vehicles.map((v) => (
+                    <tr key={v.vehicleId}>
+                      <td>{v.internalNumber}</td>
+                      <td>{v.plate || '-'}</td>
+                      <td>{[v.year, v.make, v.model].filter(Boolean).join(' ') || '-'}</td>
+                      <td>{v.vehicleTypeName || '-'}</td>
+                      <td><span className="badge">{v.status}</span></td>
+                      <td>
+                        <span
+                          className="badge"
+                          style={{
+                            background:
+                              (v.programCategory || 'BOTH') === 'LOANER_ONLY' ? 'rgba(255,140,0,0.18)'
+                              : (v.programCategory || 'BOTH') === 'RENTAL_ONLY' ? 'rgba(73,140,255,0.18)'
+                              : 'rgba(160,160,160,0.18)',
+                            color:
+                              (v.programCategory || 'BOTH') === 'LOANER_ONLY' ? '#b56300'
+                              : (v.programCategory || 'BOTH') === 'RENTAL_ONLY' ? '#1d4ed8'
+                              : '#444'
+                          }}
+                        >
+                          {(v.programCategory || 'BOTH') === 'LOANER_ONLY' ? 'Loaner'
+                            : (v.programCategory || 'BOTH') === 'RENTAL_ONLY' ? 'Rental'
+                            : 'Flex'}
+                        </span>
+                      </td>
+                      <td>{v.homeLocationName || '-'}</td>
+                      <td>{v.reservationCount}</td>
+                      <td>{Number(v.utilizationPct || 0).toFixed(1)}%</td>
+                      <td>{fmtMoney(v.totalRevenue)}</td>
+                      <td>{v.lastReservationAt ? humanDate(v.lastReservationAt) : '-'}</td>
+                      <td>{v.daysSinceLastReservation == null ? '-' : v.daysSinceLastReservation}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            ) : (
+              <EmptyTableState text="No vehicles in scope for the selected program filter." />
             )}
           </section>
         </div>
