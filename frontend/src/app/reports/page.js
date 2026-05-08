@@ -96,6 +96,11 @@ function Inner({ token, me, logout }) {
   const [inventoryReport, setInventoryReport] = useState(null);
   const [inventoryProgramFilter, setInventoryProgramFilter] = useState('ALL');
   const [exportingInventory, setExportingInventory] = useState(false);
+  const [reservationsReport, setReservationsReport] = useState(null);
+  const [reservationsProgramFilter, setReservationsProgramFilter] = useState('ALL');
+  const [reservationsWorkflowFilter, setReservationsWorkflowFilter] = useState('ALL');
+  const [reservationsStatusFilter, setReservationsStatusFilter] = useState('ALL');
+  const [exportingReservations, setExportingReservations] = useState(false);
   const [msg, setMsg] = useState('');
   const [loading, setLoading] = useState(true);
 
@@ -132,18 +137,28 @@ function Inner({ token, me, logout }) {
         ...(next.tenantId ? { tenantId: next.tenantId } : {}),
         ...(inventoryProgramFilter !== 'ALL' ? { programCategory: inventoryProgramFilter } : {})
       });
-      const [overviewOut, servicesOut, ledgerOut, vehicleRevenueOut, inventoryOut] = await Promise.all([
+      const reservationsQs = new URLSearchParams({
+        start: next.start,
+        end: next.end,
+        ...(next.tenantId ? { tenantId: next.tenantId } : {}),
+        ...(reservationsProgramFilter !== 'ALL' ? { programCategory: reservationsProgramFilter } : {}),
+        ...(reservationsWorkflowFilter !== 'ALL' ? { workflowMode: reservationsWorkflowFilter } : {}),
+        ...(reservationsStatusFilter !== 'ALL' ? { status: reservationsStatusFilter } : {})
+      });
+      const [overviewOut, servicesOut, ledgerOut, vehicleRevenueOut, inventoryOut, reservationsOut] = await Promise.all([
         api(`/api/reports/overview?${reportQs.toString()}`, {}, token),
         api(`/api/reports/services-sold?${servicesQs.toString()}`, {}, token),
         api(`/api/commissions/ledger?${ledgerQs.toString()}`, {}, token),
         api(`/api/reports/vehicle-revenue?${vehicleRevenueQs.toString()}`, {}, token),
-        api(`/api/reports/inventory?${inventoryQs.toString()}`, {}, token)
+        api(`/api/reports/inventory?${inventoryQs.toString()}`, {}, token),
+        api(`/api/reports/reservations?${reservationsQs.toString()}`, {}, token)
       ]);
       setReport(overviewOut);
       setServicesSold(servicesOut);
       setCommissionLedger(Array.isArray(ledgerOut) ? ledgerOut : []);
       setVehicleRevenue(vehicleRevenueOut);
       setInventoryReport(inventoryOut);
+      setReservationsReport(reservationsOut);
       setMsg('');
     } catch (e) {
       setMsg(e.message);
@@ -155,7 +170,7 @@ function Inner({ token, me, logout }) {
   useEffect(() => {
     load(filters);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [token, commissionMonth, vehicleRevenueProgramFilter, inventoryProgramFilter]);
+  }, [token, commissionMonth, vehicleRevenueProgramFilter, inventoryProgramFilter, reservationsProgramFilter, reservationsWorkflowFilter, reservationsStatusFilter]);
 
   const cards = useMemo(() => metricCards(report), [report]);
   const reservationSeriesMax = Math.max(1, ...(report?.reservationsByDay || []).map((row) => Number(row.count || 0)));
@@ -293,6 +308,43 @@ function Inner({ token, me, logout }) {
       URL.revokeObjectURL(url);
     } catch (e) {
       setMsg(e.message);
+    }
+  };
+
+  const exportReservationsXlsx = async () => {
+    if (exportingReservations) return;
+    try {
+      setExportingReservations(true);
+      setMsg('');
+      const qs = new URLSearchParams({
+        start: filters.start,
+        end: filters.end,
+        ...(filters.tenantId ? { tenantId: filters.tenantId } : {}),
+        ...(reservationsProgramFilter !== 'ALL' ? { programCategory: reservationsProgramFilter } : {}),
+        ...(reservationsWorkflowFilter !== 'ALL' ? { workflowMode: reservationsWorkflowFilter } : {}),
+        ...(reservationsStatusFilter !== 'ALL' ? { status: reservationsStatusFilter } : {})
+      });
+      const res = await fetch(`${API_BASE}/api/reports/reservations.xlsx?${qs.toString()}`, {
+        headers: { Authorization: `Bearer ${token}` },
+        cache: 'no-store'
+      });
+      if (!res.ok) {
+        const text = await res.text();
+        throw new Error(text || `Excel export failed (${res.status})`);
+      }
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `reservations-${filters.start}-to-${filters.end}.xlsx`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    } catch (e) {
+      setMsg(e.message);
+    } finally {
+      setExportingReservations(false);
     }
   };
 
@@ -1037,6 +1089,123 @@ function Inner({ token, me, logout }) {
             ) : (
               <EmptyTableState text="No vehicles in scope for the selected program filter." />
             )}
+          </section>
+
+          <section className="glass card-lg section-card">
+            <div className="row-between" style={{ marginBottom: 12, alignItems: 'flex-start' }}>
+              <div>
+                <h2 style={{ marginBottom: 4 }}>Reservations</h2>
+                <p className="label" style={{ marginTop: 0 }}>
+                  Flat list of every reservation with billing fields for accounting reconciliation.
+                  Triangle plan item #7 — filter by program, workflow (rental vs loaner), or status; export to Excel.
+                </p>
+              </div>
+              <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+                <select
+                  value={reservationsWorkflowFilter}
+                  onChange={(e) => setReservationsWorkflowFilter(e.target.value)}
+                  title="Workflow mode"
+                >
+                  <option value="ALL">All workflows</option>
+                  <option value="STANDARD_RENTAL">Standard rental</option>
+                  <option value="DEALERSHIP_LOANER">Dealership loaner</option>
+                </select>
+                <select
+                  value={reservationsProgramFilter}
+                  onChange={(e) => setReservationsProgramFilter(e.target.value)}
+                  title="Vehicle program"
+                >
+                  <option value="ALL">All programs</option>
+                  <option value="RENTAL_ONLY">Rental only</option>
+                  <option value="LOANER_ONLY">Loaner only</option>
+                  <option value="BOTH">Flexible only</option>
+                </select>
+                <select
+                  value={reservationsStatusFilter}
+                  onChange={(e) => setReservationsStatusFilter(e.target.value)}
+                  title="Status"
+                >
+                  <option value="ALL">All statuses</option>
+                  <option value="NEW">New</option>
+                  <option value="CONFIRMED">Confirmed</option>
+                  <option value="CHECKED_OUT">Checked out</option>
+                  <option value="CANCELLED">Cancelled</option>
+                </select>
+                <button onClick={exportReservationsXlsx} disabled={exportingReservations || !reservationsReport?.reservations?.length}>
+                  {exportingReservations ? 'Exporting…' : 'Export Excel'}
+                </button>
+              </div>
+            </div>
+            {reservationsReport?.totals ? (
+              <div className="metric-grid" style={{ marginBottom: 12 }}>
+                <div className="metric-card"><span className="label">Reservations</span><strong>{reservationsReport.totals.reservationCount}</strong></div>
+                <div className="metric-card"><span className="label">Charges</span><strong>{fmtMoney(reservationsReport.totals.totalCharges)}</strong></div>
+                <div className="metric-card"><span className="label">Agreement Total</span><strong>{fmtMoney(reservationsReport.totals.totalAgreement)}</strong></div>
+                <div className="metric-card"><span className="label">Paid</span><strong>{fmtMoney(reservationsReport.totals.totalPaid)}</strong></div>
+                <div className="metric-card"><span className="label">Open Balance</span><strong>{fmtMoney(reservationsReport.totals.totalBalance)}</strong></div>
+              </div>
+            ) : null}
+            {reservationsReport?.reservations?.length ? (
+              <table>
+                <thead>
+                  <tr>
+                    <th>Reservation</th>
+                    <th>Customer</th>
+                    <th>Pickup</th>
+                    <th>Days</th>
+                    <th>Vehicle</th>
+                    <th>Program</th>
+                    <th>Workflow</th>
+                    <th>Status</th>
+                    <th>Total</th>
+                    <th>Paid</th>
+                    <th>Balance</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {reservationsReport.reservations.slice(0, 200).map((r) => (
+                    <tr key={r.reservationId}>
+                      <td>{r.reservationNumber}</td>
+                      <td>{r.customerName || '-'}</td>
+                      <td>{humanDate(r.pickupAt)}</td>
+                      <td>{r.days}</td>
+                      <td>{r.vehicleUnit ? `${r.vehicleUnit} | ${r.vehicleLabel || ''}` : '-'}</td>
+                      <td>
+                        <span
+                          className="badge"
+                          style={{
+                            background:
+                              (r.vehicleProgramCategory || 'BOTH') === 'LOANER_ONLY' ? 'rgba(255,140,0,0.18)'
+                              : (r.vehicleProgramCategory || 'BOTH') === 'RENTAL_ONLY' ? 'rgba(73,140,255,0.18)'
+                              : 'rgba(160,160,160,0.18)',
+                            color:
+                              (r.vehicleProgramCategory || 'BOTH') === 'LOANER_ONLY' ? '#b56300'
+                              : (r.vehicleProgramCategory || 'BOTH') === 'RENTAL_ONLY' ? '#1d4ed8'
+                              : '#444'
+                          }}
+                        >
+                          {(r.vehicleProgramCategory || 'BOTH') === 'LOANER_ONLY' ? 'Loaner'
+                            : (r.vehicleProgramCategory || 'BOTH') === 'RENTAL_ONLY' ? 'Rental'
+                            : 'Flex'}
+                        </span>
+                      </td>
+                      <td>{r.workflowMode === 'DEALERSHIP_LOANER' ? 'Loaner' : 'Rental'}</td>
+                      <td><span className="badge">{r.status}</span></td>
+                      <td>{fmtMoney(r.agreementTotal)}</td>
+                      <td>{fmtMoney(r.agreementPaid)}</td>
+                      <td>{fmtMoney(r.agreementBalance)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            ) : (
+              <EmptyTableState text="No reservations match the current filters." />
+            )}
+            {reservationsReport?.reservations?.length > 200 ? (
+              <p className="label" style={{ marginTop: 8 }}>
+                Showing 200 of {reservationsReport.reservations.length} — export to Excel for the full list.
+              </p>
+            ) : null}
           </section>
         </div>
       </section>

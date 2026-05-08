@@ -1070,6 +1070,185 @@ export const reportsService = {
     };
   },
 
+  // Reservations report — flat list of every reservation in [start, end] with
+  // key fields for accounting reconciliation (invoicing, audit, exports into
+  // QuickBooks/etc). Triangle plan item #7 sub-item. Differs from contractsExcel
+  // (which expands a column per charge type) — this one is fixed-shape so the
+  // CSV/XLSX is friendly to import into other systems.
+  async reservationsReport(query = {}, scope = {}) {
+    const start = query.start ? startOfDay(query.start) : startOfDay(new Date(Date.now() - 30 * 24 * 60 * 60 * 1000));
+    const end = query.end ? endOfDay(query.end) : endOfDay(new Date());
+    const whereScope = scopeWhere(scope);
+
+    const programCategoryFilter = query.programCategory && ['RENTAL_ONLY', 'LOANER_ONLY', 'BOTH'].includes(String(query.programCategory))
+      ? { vehicle: { programCategory: String(query.programCategory) } }
+      : {};
+
+    const workflowModeFilter = query.workflowMode && ['STANDARD_RENTAL', 'DEALERSHIP_LOANER'].includes(String(query.workflowMode))
+      ? { workflowMode: String(query.workflowMode) }
+      : {};
+
+    const statusFilter = query.status && ['NEW', 'CONFIRMED', 'CHECKED_OUT', 'CANCELLED'].includes(String(query.status))
+      ? { status: String(query.status) }
+      : {};
+
+    const reservations = await prisma.reservation.findMany({
+      where: {
+        ...whereScope,
+        pickupAt: { gte: start, lte: end },
+        ...workflowModeFilter,
+        ...statusFilter,
+        ...programCategoryFilter
+      },
+      select: {
+        id: true,
+        reservationNumber: true,
+        status: true,
+        workflowMode: true,
+        pickupAt: true,
+        returnAt: true,
+        bookingChannel: true,
+        customer: { select: { firstName: true, lastName: true, email: true, phone: true } },
+        vehicle: {
+          select: {
+            id: true,
+            internalNumber: true,
+            plate: true,
+            make: true,
+            model: true,
+            year: true,
+            programCategory: true
+          }
+        },
+        vehicleType: { select: { name: true } },
+        pickupLocation: { select: { name: true, city: true } },
+        rentalAgreement: {
+          select: {
+            agreementNumber: true,
+            subtotal: true,
+            taxes: true,
+            total: true,
+            paidAmount: true,
+            balance: true
+          }
+        },
+        charges: {
+          where: { selected: true },
+          select: { total: true, source: true, chargeType: true }
+        }
+      },
+      orderBy: { pickupAt: 'asc' }
+    });
+
+    const rows = reservations.map((r) => {
+      const pickup = r.pickupAt ? new Date(r.pickupAt) : null;
+      const ret = r.returnAt ? new Date(r.returnAt) : null;
+      const days = pickup && ret ? Math.max(1, Math.ceil((ret.getTime() - pickup.getTime()) / (24 * 60 * 60 * 1000))) : 0;
+      const totalCharges = (r.charges || []).reduce((sum, c) => sum + Number(c.total || 0), 0);
+      return {
+        reservationId: r.id,
+        reservationNumber: r.reservationNumber,
+        agreementNumber: r.rentalAgreement?.agreementNumber || null,
+        status: r.status,
+        workflowMode: r.workflowMode,
+        bookingChannel: r.bookingChannel,
+        pickupAt: r.pickupAt,
+        returnAt: r.returnAt,
+        days,
+        customerName: [r.customer?.firstName, r.customer?.lastName].filter(Boolean).join(' ') || null,
+        customerEmail: r.customer?.email || null,
+        customerPhone: r.customer?.phone || null,
+        vehicleId: r.vehicle?.id || null,
+        vehicleUnit: r.vehicle?.internalNumber || null,
+        vehiclePlate: r.vehicle?.plate || null,
+        vehicleLabel: r.vehicle ? [r.vehicle.year, r.vehicle.make, r.vehicle.model].filter(Boolean).join(' ') : null,
+        vehicleProgramCategory: r.vehicle?.programCategory || null,
+        vehicleTypeName: r.vehicleType?.name || null,
+        pickupLocationName: r.pickupLocation?.name || null,
+        pickupLocationCity: r.pickupLocation?.city || null,
+        chargesTotal: Number(totalCharges.toFixed(2)),
+        agreementSubtotal: Number((r.rentalAgreement?.subtotal || 0).toFixed(2)),
+        agreementTaxes: Number((r.rentalAgreement?.taxes || 0).toFixed(2)),
+        agreementTotal: Number((r.rentalAgreement?.total || 0).toFixed(2)),
+        agreementPaid: Number((r.rentalAgreement?.paidAmount || 0).toFixed(2)),
+        agreementBalance: Number((r.rentalAgreement?.balance || 0).toFixed(2))
+      };
+    });
+
+    return {
+      range: { start, end },
+      filters: {
+        programCategory: query.programCategory || 'ALL',
+        workflowMode: query.workflowMode || 'ALL',
+        status: query.status || 'ALL'
+      },
+      reservations: rows,
+      totals: {
+        reservationCount: rows.length,
+        totalCharges: Number(rows.reduce((s, r) => s + r.chargesTotal, 0).toFixed(2)),
+        totalAgreement: Number(rows.reduce((s, r) => s + r.agreementTotal, 0).toFixed(2)),
+        totalPaid: Number(rows.reduce((s, r) => s + r.agreementPaid, 0).toFixed(2)),
+        totalBalance: Number(rows.reduce((s, r) => s + r.agreementBalance, 0).toFixed(2))
+      }
+    };
+  },
+
+  async reservationsReportExcel(query = {}, scope = {}) {
+    const data = await this.reservationsReport(query, scope);
+    const workbook = new ExcelJS.Workbook();
+    const sheet = workbook.addWorksheet('Reservations');
+
+    sheet.columns = [
+      { header: 'Reservation #', key: 'reservationNumber', width: 16 },
+      { header: 'Agreement #', key: 'agreementNumber', width: 16 },
+      { header: 'Status', key: 'status', width: 12 },
+      { header: 'Workflow', key: 'workflowMode', width: 18 },
+      { header: 'Channel', key: 'bookingChannel', width: 12 },
+      { header: 'Pickup', key: 'pickupAt', width: 16 },
+      { header: 'Return', key: 'returnAt', width: 16 },
+      { header: 'Days', key: 'days', width: 6 },
+      { header: 'Customer', key: 'customerName', width: 22 },
+      { header: 'Email', key: 'customerEmail', width: 24 },
+      { header: 'Phone', key: 'customerPhone', width: 14 },
+      { header: 'Unit', key: 'vehicleUnit', width: 10 },
+      { header: 'Plate', key: 'vehiclePlate', width: 10 },
+      { header: 'Vehicle', key: 'vehicleLabel', width: 22 },
+      { header: 'Type', key: 'vehicleTypeName', width: 14 },
+      { header: 'Program', key: 'vehicleProgramCategory', width: 12 },
+      { header: 'Location', key: 'pickupLocationName', width: 18 },
+      { header: 'Charges', key: 'chargesTotal', width: 12 },
+      { header: 'Subtotal', key: 'agreementSubtotal', width: 12 },
+      { header: 'Taxes', key: 'agreementTaxes', width: 10 },
+      { header: 'Total', key: 'agreementTotal', width: 12 },
+      { header: 'Paid', key: 'agreementPaid', width: 12 },
+      { header: 'Balance', key: 'agreementBalance', width: 12 }
+    ];
+    sheet.getRow(1).font = { bold: true };
+
+    for (const r of data.reservations) {
+      sheet.addRow({
+        ...r,
+        pickupAt: r.pickupAt ? new Date(r.pickupAt).toISOString().slice(0, 16).replace('T', ' ') : '',
+        returnAt: r.returnAt ? new Date(r.returnAt).toISOString().slice(0, 16).replace('T', ' ') : ''
+      });
+    }
+
+    const totalsRowIdx = data.reservations.length + 2;
+    sheet.addRow({});
+    sheet.getRow(totalsRowIdx).getCell('Days').value = data.reservations.reduce((s, r) => s + r.days, 0);
+    sheet.getRow(totalsRowIdx).getCell('Charges').value = data.totals.totalCharges;
+    sheet.getRow(totalsRowIdx).getCell('Total').value = data.totals.totalAgreement;
+    sheet.getRow(totalsRowIdx).getCell('Paid').value = data.totals.totalPaid;
+    sheet.getRow(totalsRowIdx).getCell('Balance').value = data.totals.totalBalance;
+    sheet.getRow(totalsRowIdx).font = { bold: true };
+
+    return {
+      buffer: await workbook.xlsx.writeBuffer(),
+      filename: `reservations-${isoDay(data.range.start)}-to-${isoDay(data.range.end)}.xlsx`,
+      rowCount: data.reservations.length
+    };
+  },
+
   // Inventory report — full fleet snapshot with utilization metrics. Triangle
   // plan item #7 sub-item. Each row is a vehicle with: status, location,
   // program category, vehicle type, days since last reservation, count of
