@@ -133,6 +133,20 @@ enum VehicleFleetMode {
   BOTH
 }
 
+// VehicleProgramCategory partitions inventory between programs that are
+// orthogonal to fleetMode. fleetMode answers "is this car offered as
+// rental or peer-to-peer car sharing"; programCategory answers "is this
+// car for the regular rental fleet, the dealership loaner program, or
+// available to both". Triangle's loaner program (200 vehicles) needs
+// LOANER_ONLY tagging so their loaner units don't surface in the public
+// booking search; their service rentals stay RENTAL_ONLY. Existing
+// vehicles default to BOTH for backward compatibility.
+enum VehicleProgramCategory {
+  RENTAL_ONLY
+  LOANER_ONLY
+  BOTH
+}
+
 enum ListingStatus {
   DRAFT
   PUBLISHED
@@ -480,6 +494,13 @@ model Vehicle {
   mileage           Int              @default(0)
   status            VehicleStatus    @default(AVAILABLE)
   fleetMode         VehicleFleetMode @default(RENTAL_ONLY)
+  // Program partition — see VehicleProgramCategory enum docs.
+  // Existing vehicles default to BOTH (no behavior change at write time);
+  // tenants with a loaner program (e.g. Triangle) tag their loaner units
+  // as LOANER_ONLY so the public rental search hides them. Filter rule:
+  //   public rental search       → programCategory IN (RENTAL_ONLY, BOTH)
+  //   dealership-loaner intake  → programCategory IN (LOANER_ONLY, BOTH)
+  programCategory   VehicleProgramCategory @default(BOTH)
 
   vehicleTypeId String
   vehicleType   VehicleType @relation(fields: [vehicleTypeId], references: [id])
@@ -504,6 +525,7 @@ model Vehicle {
   @@unique([tenantId, plate])
   @@unique([tenantId, internalNumber])
   @@index([tenantId, status])
+  @@index([tenantId, programCategory])
 }
 
 model VehicleAvailabilityBlock {

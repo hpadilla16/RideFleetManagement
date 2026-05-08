@@ -12,6 +12,7 @@ import { resolveDeliveryAreaHints } from '../car-sharing/car-sharing-fulfillment
 import { money } from '../../lib/money.js';
 import { startOfUtcDay, addUtcDays, ceilTripDays } from '../../lib/date-utils.js';
 import { activeVehicleBlockOverlapWhere } from '../vehicles/vehicle-blocks.js';
+import { RENTAL_PROGRAM_FILTER } from '../../lib/program-category.js';
 import {
   compareCarSharingSearchResults,
   resolveListingSearchMatch,
@@ -994,6 +995,10 @@ async function rentalAvailabilityCount({ tenantId, vehicleTypeId, pickupAt, retu
       tenantId,
       vehicleTypeId,
       fleetMode: { in: ['RENTAL_ONLY', 'BOTH'] },
+      // Hide vehicles tagged as LOANER_ONLY from the public rental search.
+      // Vehicles with programCategory=BOTH still surface here. See
+      // doc/triangle-inventory-separation-2026-05-08.md.
+      programCategory: RENTAL_PROGRAM_FILTER,
       status: { notIn: ['IN_MAINTENANCE', 'OUT_OF_SERVICE'] }
     },
     select: { id: true }

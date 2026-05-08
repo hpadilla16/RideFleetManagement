@@ -29,7 +29,13 @@ services:
       PORT: 4000
       PUPPETEER_EXECUTABLE_PATH: /usr/local/bin/chrome
       CLUSTER_WORKERS: "4"
-      DATABASE_POOL_SIZE: "5"
+      # Pool sizing math: pool × workers must stay under Supabase pooler cap.
+      # Current Supabase compute MICRO has max_connections=60. With 4 workers,
+      # docs/operations/cluster-mode-rollout-2026-04-28.md recommends 12-15.
+      # 12 × 4 = 48 connections from web tier, leaves 12 for migrations/admin.
+      # Bumped from 5 (sub-utilized at 11/60 in dashboard) as Fase 1 of
+      # doc/server-scaling-500-users-2026-05-08.md.
+      DATABASE_POOL_SIZE: "12"
     ports:
       - "4000:4000"
     depends_on:
