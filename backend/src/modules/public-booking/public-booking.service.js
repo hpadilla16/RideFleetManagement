@@ -415,10 +415,24 @@ export const publicBookingService = {
       taxRate: Number(payload.location?.taxRate || 0),
       defaultDepositMeta: null,
       results: (payload.results || []).map((result) => ({
-        vehicleType: result.vehicleType,
+        // Strip imageUrl from vehicleType: it was duplicating the same ~620KB
+        // base64 data URI as primaryImageUrl below. Public booking page only
+        // reads primaryImageUrl/imageUrls from quotes, not vehicleType.imageUrl
+        // (verified via grep on frontend/src). Saves ~6.6 MB per searchRental
+        // response. See R23 in pool-resilience-plan-2026-05-05.md.
+        vehicleType: result.vehicleType ? {
+          id: result.vehicleType.id,
+          code: result.vehicleType.code,
+          name: result.vehicleType.name,
+          description: result.vehicleType.description
+        } : null,
         location: result.location || payload.location,
         primaryImageUrl: result.vehicleType?.imageUrl || '',
-        imageUrls: result.vehicleType?.imageUrl ? [result.vehicleType.imageUrl] : [],
+        // imageUrls was a 1-item array containing the same value as
+        // primaryImageUrl — pure duplication, ~620KB per quote. Frontend's
+        // normalizeImageList() already falls back to primaryImageUrl when
+        // imageUrls is empty. Saves ~6.6 MB per response.
+        imageUrls: [],
         availabilityCount: Number(result.availability?.availableUnits || 0),
         soldOut: !result.availability?.available,
         sampleVehicleLabel: '',
