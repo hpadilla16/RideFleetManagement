@@ -1219,8 +1219,24 @@ export const bookingEngineService = {
     }
     if (!pickupLocationId) throw new Error('pickupLocationId is required');
 
-    const rentalDays = ceilTripDays(pickupDate, returnDate);
-    const directTenant = await resolvePublicTenant({ tenantSlug, tenantId });
+    // Cache the heavy body. searchRental is the highest-fan-out method in
+    // this service: worst case 1 + N×M×6 prisma queries from the nested
+    // loop over locations × vehicle types (~120+ queries per request with
+    // 5 locations × 4 types). Same class of bug as BUG-005 with a higher
+    // per-request query count, so it would exhaust the pool faster under
+    // any concurrency. cache.getOrSet collapses concurrent identical
+    // searches onto a single in-flight batch and serves repeats from
+    // memory. Validation throws above stay outside so bad inputs never
+    // pollute the cache or in-flight map. TTL is short — pricing /
+    // availability changes need to propagate within ~1 minute.
+    const cacheLocs = (Array.isArray(pickupLocationIds) && pickupLocationIds.length
+      ? pickupLocationIds
+      : [pickupLocationId]
+    ).map(String).filter(Boolean).sort();
+    const cacheKey = `public:searchRental:slug=${tenantSlug || ''}:id=${tenantId || ''}:locs=${cacheLocs.join(',')}:pickup=${pickupDate.toISOString()}:return=${returnDate.toISOString()}`;
+    return cache.getOrSet(cacheKey, async () => {
+      const rentalDays = ceilTripDays(pickupDate, returnDate);
+      const directTenant = await resolvePublicTenant({ tenantSlug, tenantId });
     const requestedLocationIds = Array.isArray(pickupLocationIds) && pickupLocationIds.length
       ? pickupLocationIds.map((value) => String(value)).filter(Boolean)
       : pickupLocationId ? [String(pickupLocationId)] : [];
@@ -1368,6 +1384,7 @@ export const bookingEngineService = {
       returnAt: returnDate,
       results
     };
+    }, 60_000);
   },
 
   async searchCarSharing({
