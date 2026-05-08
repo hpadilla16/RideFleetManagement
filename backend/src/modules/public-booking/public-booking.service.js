@@ -4,6 +4,7 @@ import { hostReviewsService } from '../host-reviews/host-reviews.service.js';
 import { authService } from '../auth/auth.service.js';
 import { createHostVehicleSubmissionForProfile } from '../host-app/host-app.service.js';
 import { prisma } from '../../lib/prisma.js';
+import { cache } from '../../lib/cache.js';
 import { sendEmail } from '../../lib/mailer.js';
 import { money } from '../../lib/money.js';
 import crypto from 'node:crypto';
@@ -1160,29 +1161,38 @@ export const publicBookingService = {
     const scopedTenantSlug = tenantSlug ? String(tenantSlug).trim().toLowerCase() : '';
     if (!scopedTenantId && !scopedTenantSlug) throw new Error('tenantSlug or tenantId is required');
 
-    const tenant = await prisma.tenant.findFirst({
-      where: {
-        status: 'ACTIVE',
-        ...(scopedTenantId ? { id: scopedTenantId } : {}),
-        ...(scopedTenantSlug ? { slug: scopedTenantSlug } : {})
-      },
-      select: { id: true }
-    });
+    // Cache the lookup. This endpoint is hit on every booking page load and
+    // does 2 sequential prisma queries (tenant + fees). Same risk class as
+    // BUG-005. Mandatory fees rarely change so a 120s TTL is conservative;
+    // when fees are edited, invalidate via `cache.invalidate('public:website-fees:')`
+    // from the fees admin write path. Validation throws above stay outside
+    // so bad inputs never enter the cache.
+    const cacheKey = `public:website-fees:id=${scopedTenantId}:slug=${scopedTenantSlug}`;
+    return cache.getOrSet(cacheKey, async () => {
+      const tenant = await prisma.tenant.findFirst({
+        where: {
+          status: 'ACTIVE',
+          ...(scopedTenantId ? { id: scopedTenantId } : {}),
+          ...(scopedTenantSlug ? { slug: scopedTenantSlug } : {})
+        },
+        select: { id: true }
+      });
 
-    if (!tenant) throw new Error('Tenant not found');
+      if (!tenant) throw new Error('Tenant not found');
 
-    // Fetch only mandatory, active, displayOnline=true fees
-    const fees = await prisma.fee.findMany({
-      where: {
-        tenantId: tenant.id,
-        isActive: true,
-        mandatory: true,
-        displayOnline: true
-      },
-      orderBy: { createdAt: 'asc' }
-    });
+      // Fetch only mandatory, active, displayOnline=true fees
+      const fees = await prisma.fee.findMany({
+        where: {
+          tenantId: tenant.id,
+          isActive: true,
+          mandatory: true,
+          displayOnline: true
+        },
+        orderBy: { createdAt: 'asc' }
+      });
 
-    return { tenantId: tenant.id, fees };
+      return { tenantId: tenant.id, fees };
+    }, 120_000);
   }
 };
 
