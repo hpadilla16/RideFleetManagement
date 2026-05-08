@@ -384,6 +384,28 @@ export const vehiclesService = {
     return prisma.vehicle.update({ where: { id }, data });
   },
 
+  // Bulk-set programCategory in a single updateMany. Tenant scope is
+  // enforced via the where clause: vehicles outside the caller's tenant
+  // are silently skipped (updateMany returns count of matched rows). For
+  // a Triangle-style onboarding (200 vehicles) this is one DB round-trip
+  // instead of 200 individual PATCHes — cheap, atomic, and avoids hammering
+  // the connection pool. Caller-side validation already restricted
+  // programCategory to the enum values.
+  async bulkSetProgramCategory(vehicleIds, programCategory, scope = {}) {
+    if (!Array.isArray(vehicleIds) || !vehicleIds.length) {
+      return { count: 0 };
+    }
+    const where = {
+      id: { in: vehicleIds },
+      ...(byTenantWhere(scope) || {})
+    };
+    const result = await prisma.vehicle.updateMany({
+      where,
+      data: { programCategory }
+    });
+    return { count: result.count, programCategory };
+  },
+
   async remove(id, scope = {}) {
     const current = await prisma.vehicle.findFirst({ where: { id, ...(byTenantWhere(scope) || {}) }, select: { id: true } });
     if (!current) throw new Error('Vehicle not found');

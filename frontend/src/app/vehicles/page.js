@@ -178,6 +178,11 @@ function VehiclesInner({ token, me, logout }) {
     internalNumber: '', plate: '', tollTagNumber: '', tollStickerNumber: '', vin: '', make: '', model: '', color: '', year: '', mileage: '', status: 'AVAILABLE', vehicleTypeId: '', homeLocationId: '', fleetMode: 'RENTAL_ONLY', programCategory: 'BOTH'
   });
   const [programCategoryFilter, setProgramCategoryFilter] = useState('ALL');
+  // Multi-select state for the bulk programCategory action. Stores Vehicle.id
+  // strings; cleared on every reload to avoid acting on stale rows.
+  const [selectedVehicleIds, setSelectedVehicleIds] = useState(() => new Set());
+  const [bulkProgramCategory, setBulkProgramCategory] = useState('LOANER_ONLY');
+  const [bulkApplying, setBulkApplying] = useState(false);
 
   const [rentForm, setRentForm] = useState({
     customerId: '', pickupAt: '', returnAt: '', pickupLocationId: '', returnLocationId: '', dailyRate: ''
@@ -465,6 +470,52 @@ function VehiclesInner({ token, me, logout }) {
       notes: activeBlock?.notes || ''
     });
     setShowBlockVehicle(true);
+  };
+
+  const toggleVehicleSelection = (vehicleId) => {
+    setSelectedVehicleIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(vehicleId)) next.delete(vehicleId);
+      else next.add(vehicleId);
+      return next;
+    });
+  };
+
+  const toggleSelectAll = (vehicleIds) => {
+    setSelectedVehicleIds((prev) => {
+      const allSelected = vehicleIds.length > 0 && vehicleIds.every((id) => prev.has(id));
+      if (allSelected) {
+        // unselect just the visible (filtered) rows
+        const next = new Set(prev);
+        vehicleIds.forEach((id) => next.delete(id));
+        return next;
+      }
+      // select all visible rows
+      const next = new Set(prev);
+      vehicleIds.forEach((id) => next.add(id));
+      return next;
+    });
+  };
+
+  const applyBulkProgramCategory = async () => {
+    if (selectedVehicleIds.size === 0 || bulkApplying) return;
+    setBulkApplying(true);
+    try {
+      const result = await api(scopedPath('/api/vehicles/bulk-program-category'), {
+        method: 'POST',
+        body: JSON.stringify({
+          vehicleIds: [...selectedVehicleIds],
+          programCategory: bulkProgramCategory
+        })
+      }, token);
+      setMsg(`Updated ${result?.count || 0} vehicles to ${bulkProgramCategory}`);
+      setSelectedVehicleIds(new Set());
+      await load();
+    } catch (e) {
+      setMsg(e.message || 'Bulk update failed');
+    } finally {
+      setBulkApplying(false);
+    }
   };
 
   const saveEditVehicle = async (e) => {
@@ -801,9 +852,60 @@ function VehiclesInner({ token, me, logout }) {
           </div>
         </div>
         {msg ? <p className="label">{msg}</p> : null}
+        {selectedVehicleIds.size > 0 ? (
+          <div
+            className="row-between"
+            style={{
+              padding: '10px 14px',
+              marginBottom: 12,
+              background: 'rgba(110,73,255,0.10)',
+              border: '1px solid rgba(110,73,255,0.28)',
+              borderRadius: 12
+            }}
+          >
+            <div>
+              <strong>{selectedVehicleIds.size}</strong> {selectedVehicleIds.size === 1 ? 'vehicle' : 'vehicles'} selected
+              <button
+                type="button"
+                className="button-subtle"
+                style={{ marginLeft: 12 }}
+                onClick={() => setSelectedVehicleIds(new Set())}
+              >
+                Clear selection
+              </button>
+            </div>
+            <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+              <span className="label">Set program to:</span>
+              <select
+                value={bulkProgramCategory}
+                onChange={(e) => setBulkProgramCategory(e.target.value)}
+                disabled={bulkApplying}
+              >
+                <option value="LOANER_ONLY">Loaner only</option>
+                <option value="RENTAL_ONLY">Rental only</option>
+                <option value="BOTH">Flexible (both)</option>
+              </select>
+              <button
+                type="button"
+                onClick={applyBulkProgramCategory}
+                disabled={bulkApplying}
+              >
+                {bulkApplying ? 'Applying…' : `Apply to ${selectedVehicleIds.size}`}
+              </button>
+            </div>
+          </div>
+        ) : null}
         <table>
           <thead>
             <tr>
+              <th style={{ width: 28 }}>
+                <input
+                  type="checkbox"
+                  checked={rows.length > 0 && rows.every((v) => selectedVehicleIds.has(v.id))}
+                  onChange={() => toggleSelectAll(rows.map((v) => v.id))}
+                  title="Select all visible rows"
+                />
+              </th>
               <th>Unit ID</th>
               <th>License</th>
               <th>Toll Tag</th>
@@ -828,6 +930,13 @@ function VehiclesInner({ token, me, logout }) {
               const currentBlock = activeAvailabilityBlock(v);
               return (
               <tr key={v.id} onClick={() => openVehicleDetails(v)} style={{ cursor: 'pointer' }}>
+                <td onClick={(e) => e.stopPropagation()}>
+                  <input
+                    type="checkbox"
+                    checked={selectedVehicleIds.has(v.id)}
+                    onChange={() => toggleVehicleSelection(v.id)}
+                  />
+                </td>
                 <td>{v.internalNumber}</td>
                 <td>{v.plate || '-'}</td>
                 <td>{v.tollTagNumber || '-'}</td>
