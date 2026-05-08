@@ -1142,7 +1142,12 @@ export const bookingEngineService = {
       }),
       prisma.vehicleType.findMany({
         where: { tenantId: tenant.id },
-        select: { id: true, tenantId: true, code: true, name: true, description: true, imageUrl: true },
+        // imageUrl deliberately excluded — see same select in the no-tenant
+        // branch above. R23 follow-up: the previous commit's `replace_all`
+        // only matched one of the two select clauses because the surrounding
+        // indentation differed; this completes the fix for the tenant branch
+        // (the path triggered when tenantSlug is provided in the URL).
+        select: { id: true, tenantId: true, code: true, name: true, description: true },
         orderBy: [{ name: 'asc' }]
       }),
       prisma.hostVehicleListing.findMany({
