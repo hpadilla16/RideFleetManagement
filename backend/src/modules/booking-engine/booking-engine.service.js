@@ -1142,7 +1142,12 @@ export const bookingEngineService = {
       }),
       prisma.vehicleType.findMany({
         where: { tenantId: tenant.id },
-        select: { id: true, tenantId: true, code: true, name: true, description: true, imageUrl: true },
+        // imageUrl deliberately excluded — see same select in the no-tenant
+        // branch above. R23 follow-up: the previous commit's `replace_all`
+        // only matched one of the two select clauses because the surrounding
+        // indentation differed; this completes the fix for the tenant branch
+        // (the path triggered when tenantSlug is provided in the URL).
+        select: { id: true, tenantId: true, code: true, name: true, description: true },
         orderBy: [{ name: 'asc' }]
       }),
       prisma.hostVehicleListing.findMany({
@@ -1283,8 +1288,18 @@ export const bookingEngineService = {
         returnAt: returnDate
       });
 
-      for (const vehicleType of vehicleTypes) {
-        if (stopSaleBlockedTypeIds.has(vehicleType.id)) continue;
+      // Parallelize the per-vehicleType pipeline (R8 — pool-resilience-plan).
+      // Each vehicle type's quote computation fires 2 + 3 prisma/service
+      // queries that don't depend on other vehicle types — trivially
+      // parallelizable. The previous serial for-loop was the cold-cache
+      // bottleneck (~5s for 11 vehicle types in prod, sequential round-trips).
+      // With Promise.all + a connection pool of 5, queries batch into waves
+      // and we expect ~300-500ms cold. Result order is preserved by Promise.all
+      // (matches the input filter order), so consumers see the same shape and
+      // ordering. Returning null from a task removes that vehicle type from
+      // the final results — same semantics as the previous `continue` branch.
+      const eligibleVehicleTypes = vehicleTypes.filter((vt) => !stopSaleBlockedTypeIds.has(vt.id));
+      const vehicleTypeResults = await Promise.all(eligibleVehicleTypes.map(async (vehicleType) => {
         const [revenueRecommendation, availableUnits] = await Promise.all([
           ratesService.getRevenueRecommendation({
             vehicleTypeId: vehicleType.id,
@@ -1300,7 +1315,7 @@ export const bookingEngineService = {
           })
         ]);
 
-        if (!revenueRecommendation?.baseQuote) continue;
+        if (!revenueRecommendation?.baseQuote) return null;
         const revenuePricingApplied = !!(revenueRecommendation.enabled && revenueRecommendation.applyToPublicQuotes);
         const quote = revenuePricingApplied
           ? {
@@ -1334,7 +1349,7 @@ export const bookingEngineService = {
         const taxes = money(Number(quote.baseTotal || 0) * (Number(location.taxRate || 0) / 100));
         const mandatoryFeesTotal = money((mandatoryFees || []).reduce((sum, fee) => sum + Number(fee.total || 0), 0));
         const total = money(Number(quote.baseTotal || 0) + taxes + mandatoryFeesTotal);
-        results.push({
+        return {
           location: {
             id: location.id,
             tenantId: location.tenantId,
@@ -1350,36 +1365,39 @@ export const bookingEngineService = {
             description: vehicleType.description,
             imageUrl: vehicleType.imageUrl || ''
           },
-        availability: {
-          availableUnits,
-          available: availableUnits > 0
-        },
-        quote: {
-          days: Number(quote.days || 0),
-          dailyRate: money(quote.dailyRate),
-          subtotal: money(quote.baseTotal),
-          baseDailyRate: money(revenueRecommendation.baseQuote?.dailyRate),
-          baseSubtotal: money(revenueRecommendation.baseQuote?.baseTotal),
-          fees: mandatoryFeesTotal,
-          taxes,
-          total,
-          gracePeriodMin: Number(quote.gracePeriodMin || 0),
-          source: quote.source || 'GLOBAL',
-          revenuePricingApplied,
-          revenueRecommendationMode: revenueRecommendation.recommendationMode || 'ADVISORY',
-          revenueAdjustmentPct: money(revenueRecommendation.adjustmentPct),
-          revenueFactors: Array.isArray(revenueRecommendation.factors) ? revenueRecommendation.factors : [],
-          revenueSummary: revenueRecommendation.summary || '',
-          revenueMetrics: revenueRecommendation.metrics || null,
-          revenueDailyBreakdown: Array.isArray(revenueRecommendation.recommendedDailyBreakdown)
-            ? revenueRecommendation.recommendedDailyBreakdown
-            : []
-        },
+          availability: {
+            availableUnits,
+            available: availableUnits > 0
+          },
+          quote: {
+            days: Number(quote.days || 0),
+            dailyRate: money(quote.dailyRate),
+            subtotal: money(quote.baseTotal),
+            baseDailyRate: money(revenueRecommendation.baseQuote?.dailyRate),
+            baseSubtotal: money(revenueRecommendation.baseQuote?.baseTotal),
+            fees: mandatoryFeesTotal,
+            taxes,
+            total,
+            gracePeriodMin: Number(quote.gracePeriodMin || 0),
+            source: quote.source || 'GLOBAL',
+            revenuePricingApplied,
+            revenueRecommendationMode: revenueRecommendation.recommendationMode || 'ADVISORY',
+            revenueAdjustmentPct: money(revenueRecommendation.adjustmentPct),
+            revenueFactors: Array.isArray(revenueRecommendation.factors) ? revenueRecommendation.factors : [],
+            revenueSummary: revenueRecommendation.summary || '',
+            revenueMetrics: revenueRecommendation.metrics || null,
+            revenueDailyBreakdown: Array.isArray(revenueRecommendation.recommendedDailyBreakdown)
+              ? revenueRecommendation.recommendedDailyBreakdown
+              : []
+          },
           deposit: depositSnapshot({ location, quote, bookingChannel: 'WEBSITE' }),
           additionalServices,
           mandatoryFees,
           insurancePlans
-        });
+        };
+      }));
+      for (const row of vehicleTypeResults) {
+        if (row) results.push(row);
       }
     }
 
