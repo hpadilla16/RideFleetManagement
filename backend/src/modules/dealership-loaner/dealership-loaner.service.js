@@ -1,5 +1,6 @@
 import { prisma } from '../../lib/prisma.js';
 import { reservationsService } from '../reservations/reservations.service.js';
+import { LOANER_PROGRAM_FILTER } from '../../lib/program-category.js';
 
 function tenantScope(user) {
   const role = String(user?.role || '').toUpperCase();
@@ -785,7 +786,12 @@ export const dealershipLoanerService = {
       prisma.vehicle.findMany({
         where: {
           ...(scope?.tenantId ? { tenantId: scope.tenantId } : {}),
-          status: { notIn: ['IN_MAINTENANCE', 'OUT_OF_SERVICE'] }
+          status: { notIn: ['IN_MAINTENANCE', 'OUT_OF_SERVICE'] },
+          // Only show vehicles eligible for loaner program (LOANER_ONLY or BOTH).
+          // Hides RENTAL_ONLY vehicles from the loaner intake picker so the
+          // dealership can't accidentally hand out a service rental as a loaner.
+          // See doc/triangle-inventory-separation-2026-05-08.md.
+          programCategory: LOANER_PROGRAM_FILTER
         },
         orderBy: [{ make: 'asc' }, { model: 'asc' }, { internalNumber: 'asc' }],
         select: {
