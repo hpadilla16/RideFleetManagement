@@ -1066,7 +1066,13 @@ export const bookingEngineService = {
           where: {
             tenant: { status: 'ACTIVE' }
           },
-          select: { id: true, tenantId: true, code: true, name: true, description: true, imageUrl: true },
+          // imageUrl deliberately excluded: vehicle-type imageUrls are stored as
+          // base64 data URIs (~620KB each) and the public booking page does NOT
+          // render images from bootstrap.vehicleTypes — it only uses tenantId
+          // for filtering. Including imageUrl here was inflating bootstrap to
+          // ~5.5MB per response. See R23 in pool-resilience-plan-2026-05-05.md.
+          // Once images are migrated to CDN URLs (sprint 11) we can re-add.
+          select: { id: true, tenantId: true, code: true, name: true, description: true },
           orderBy: [{ name: 'asc' }]
         }),
         prisma.hostVehicleListing.findMany({
