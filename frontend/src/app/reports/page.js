@@ -90,6 +90,9 @@ function Inner({ token, me, logout }) {
   const [commissionLedger, setCommissionLedger] = useState([]);
   const [opsEmailRecipients, setOpsEmailRecipients] = useState('');
   const [sendingOpsEmail, setSendingOpsEmail] = useState(false);
+  const [vehicleRevenue, setVehicleRevenue] = useState(null);
+  const [vehicleRevenueProgramFilter, setVehicleRevenueProgramFilter] = useState('ALL');
+  const [exportingVehicleRevenue, setExportingVehicleRevenue] = useState(false);
   const [msg, setMsg] = useState('');
   const [loading, setLoading] = useState(true);
 
@@ -114,14 +117,22 @@ function Inner({ token, me, logout }) {
         ...(next.tenantId ? { tenantId: next.tenantId } : {}),
         ...(canFilterEmployee && next.employeeUserId ? { employeeUserId: next.employeeUserId } : {})
       });
-      const [overviewOut, servicesOut, ledgerOut] = await Promise.all([
+      const vehicleRevenueQs = new URLSearchParams({
+        start: next.start,
+        end: next.end,
+        ...(next.tenantId ? { tenantId: next.tenantId } : {}),
+        ...(vehicleRevenueProgramFilter !== 'ALL' ? { programCategory: vehicleRevenueProgramFilter } : {})
+      });
+      const [overviewOut, servicesOut, ledgerOut, vehicleRevenueOut] = await Promise.all([
         api(`/api/reports/overview?${reportQs.toString()}`, {}, token),
         api(`/api/reports/services-sold?${servicesQs.toString()}`, {}, token),
-        api(`/api/commissions/ledger?${ledgerQs.toString()}`, {}, token)
+        api(`/api/commissions/ledger?${ledgerQs.toString()}`, {}, token),
+        api(`/api/reports/vehicle-revenue?${vehicleRevenueQs.toString()}`, {}, token)
       ]);
       setReport(overviewOut);
       setServicesSold(servicesOut);
       setCommissionLedger(Array.isArray(ledgerOut) ? ledgerOut : []);
+      setVehicleRevenue(vehicleRevenueOut);
       setMsg('');
     } catch (e) {
       setMsg(e.message);
@@ -133,7 +144,7 @@ function Inner({ token, me, logout }) {
   useEffect(() => {
     load(filters);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [token, commissionMonth]);
+  }, [token, commissionMonth, vehicleRevenueProgramFilter]);
 
   const cards = useMemo(() => metricCards(report), [report]);
   const reservationSeriesMax = Math.max(1, ...(report?.reservationsByDay || []).map((row) => Number(row.count || 0)));
@@ -271,6 +282,41 @@ function Inner({ token, me, logout }) {
       URL.revokeObjectURL(url);
     } catch (e) {
       setMsg(e.message);
+    }
+  };
+
+  const exportVehicleRevenueXlsx = async () => {
+    if (exportingVehicleRevenue) return;
+    try {
+      setExportingVehicleRevenue(true);
+      setMsg('');
+      const qs = new URLSearchParams({
+        start: filters.start,
+        end: filters.end,
+        ...(filters.tenantId ? { tenantId: filters.tenantId } : {}),
+        ...(vehicleRevenueProgramFilter !== 'ALL' ? { programCategory: vehicleRevenueProgramFilter } : {})
+      });
+      const res = await fetch(`${API_BASE}/api/reports/vehicle-revenue.xlsx?${qs.toString()}`, {
+        headers: { Authorization: `Bearer ${token}` },
+        cache: 'no-store'
+      });
+      if (!res.ok) {
+        const text = await res.text();
+        throw new Error(text || `Excel export failed (${res.status})`);
+      }
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `vehicle-revenue-${filters.start}-to-${filters.end}${vehicleRevenueProgramFilter !== 'ALL' ? `-${vehicleRevenueProgramFilter}` : ''}.xlsx`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    } catch (e) {
+      setMsg(e.message);
+    } finally {
+      setExportingVehicleRevenue(false);
     }
   };
 
@@ -766,6 +812,92 @@ function Inner({ token, me, logout }) {
               </tr>
             )}
           />
+
+          <section className="glass card-lg section-card">
+            <div className="row-between" style={{ marginBottom: 12, alignItems: 'flex-start' }}>
+              <div>
+                <h2 style={{ marginBottom: 4 }}>Vehicle Revenue</h2>
+                <p className="label" style={{ marginTop: 0 }}>
+                  Charges and payments aggregated per vehicle for the selected date range.
+                  Triangle plan item #3 — see which cars are pulling weight, optionally scoped to rental or loaner pool.
+                </p>
+              </div>
+              <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                <span className="label">Program:</span>
+                <select
+                  value={vehicleRevenueProgramFilter}
+                  onChange={(e) => setVehicleRevenueProgramFilter(e.target.value)}
+                  style={{ minWidth: 140 }}
+                >
+                  <option value="ALL">All programs</option>
+                  <option value="RENTAL_ONLY">Rental only</option>
+                  <option value="LOANER_ONLY">Loaner only</option>
+                  <option value="BOTH">Flexible only</option>
+                </select>
+                <button onClick={exportVehicleRevenueXlsx} disabled={exportingVehicleRevenue || !vehicleRevenue?.vehicles?.length}>
+                  {exportingVehicleRevenue ? 'Exporting…' : 'Export Excel'}
+                </button>
+              </div>
+            </div>
+            {vehicleRevenue?.totals ? (
+              <div className="metric-grid" style={{ marginBottom: 12 }}>
+                <div className="metric-card"><span className="label">Vehicles</span><strong>{vehicleRevenue.totals.vehicleCount}</strong></div>
+                <div className="metric-card"><span className="label">Reservations</span><strong>{vehicleRevenue.totals.reservationCount}</strong></div>
+                <div className="metric-card"><span className="label">Total charges</span><strong>{fmtMoney(vehicleRevenue.totals.totalCharges)}</strong></div>
+                <div className="metric-card"><span className="label">Total paid</span><strong>{fmtMoney(vehicleRevenue.totals.totalPaid)}</strong></div>
+              </div>
+            ) : null}
+            {vehicleRevenue?.vehicles?.length ? (
+              <table>
+                <thead>
+                  <tr>
+                    <th>Unit ID</th>
+                    <th>Plate</th>
+                    <th>Vehicle</th>
+                    <th>Type</th>
+                    <th>Program</th>
+                    <th>Reservations</th>
+                    <th>Charges</th>
+                    <th>Paid</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {vehicleRevenue.vehicles.map((v) => (
+                    <tr key={v.vehicleId}>
+                      <td>{v.internalNumber}</td>
+                      <td>{v.plate || '-'}</td>
+                      <td>{[v.year, v.make, v.model].filter(Boolean).join(' ') || '-'}</td>
+                      <td>{v.vehicleTypeName || '-'}</td>
+                      <td>
+                        <span
+                          className="badge"
+                          style={{
+                            background:
+                              (v.programCategory || 'BOTH') === 'LOANER_ONLY' ? 'rgba(255,140,0,0.18)'
+                              : (v.programCategory || 'BOTH') === 'RENTAL_ONLY' ? 'rgba(73,140,255,0.18)'
+                              : 'rgba(160,160,160,0.18)',
+                            color:
+                              (v.programCategory || 'BOTH') === 'LOANER_ONLY' ? '#b56300'
+                              : (v.programCategory || 'BOTH') === 'RENTAL_ONLY' ? '#1d4ed8'
+                              : '#444'
+                          }}
+                        >
+                          {(v.programCategory || 'BOTH') === 'LOANER_ONLY' ? 'Loaner'
+                            : (v.programCategory || 'BOTH') === 'RENTAL_ONLY' ? 'Rental'
+                            : 'Flex'}
+                        </span>
+                      </td>
+                      <td>{v.reservationCount}</td>
+                      <td>{fmtMoney(v.totalCharges)}</td>
+                      <td>{fmtMoney(v.totalPaid)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            ) : (
+              <EmptyTableState text="No reservations against vehicles for the selected date range and program filter." />
+            )}
+          </section>
         </div>
       </section>
 

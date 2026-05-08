@@ -172,11 +172,17 @@ function VehiclesInner({ token, me, logout }) {
   const [msg, setMsg] = useState('');
 
   const [newVehicle, setNewVehicle] = useState({
-    internalNumber: '', plate: '', tollTagNumber: '', tollStickerNumber: '', vin: '', make: '', model: '', color: '', year: '', mileage: '', vehicleTypeId: '', homeLocationId: '', fleetMode: 'RENTAL_ONLY'
+    internalNumber: '', plate: '', tollTagNumber: '', tollStickerNumber: '', vin: '', make: '', model: '', color: '', year: '', mileage: '', vehicleTypeId: '', homeLocationId: '', fleetMode: 'RENTAL_ONLY', programCategory: 'BOTH'
   });
   const [editVehicleForm, setEditVehicleForm] = useState({
-    internalNumber: '', plate: '', tollTagNumber: '', tollStickerNumber: '', vin: '', make: '', model: '', color: '', year: '', mileage: '', status: 'AVAILABLE', vehicleTypeId: '', homeLocationId: '', fleetMode: 'RENTAL_ONLY'
+    internalNumber: '', plate: '', tollTagNumber: '', tollStickerNumber: '', vin: '', make: '', model: '', color: '', year: '', mileage: '', status: 'AVAILABLE', vehicleTypeId: '', homeLocationId: '', fleetMode: 'RENTAL_ONLY', programCategory: 'BOTH'
   });
+  const [programCategoryFilter, setProgramCategoryFilter] = useState('ALL');
+  // Multi-select state for the bulk programCategory action. Stores Vehicle.id
+  // strings; cleared on every reload to avoid acting on stale rows.
+  const [selectedVehicleIds, setSelectedVehicleIds] = useState(() => new Set());
+  const [bulkProgramCategory, setBulkProgramCategory] = useState('LOANER_ONLY');
+  const [bulkApplying, setBulkApplying] = useState(false);
 
   const [rentForm, setRentForm] = useState({
     customerId: '', pickupAt: '', returnAt: '', pickupLocationId: '', returnLocationId: '', dailyRate: ''
@@ -281,8 +287,12 @@ function VehiclesInner({ token, me, logout }) {
 
   const rows = useMemo(() => {
     const q = query.trim().toLowerCase();
-    if (!q) return vehicles;
-    return vehicles.filter((v) =>
+    let filtered = vehicles;
+    if (programCategoryFilter !== 'ALL') {
+      filtered = filtered.filter((v) => (v.programCategory || 'BOTH') === programCategoryFilter);
+    }
+    if (!q) return filtered;
+    return filtered.filter((v) =>
       (v.internalNumber || '').toLowerCase().includes(q) ||
       (v.plate || '').toLowerCase().includes(q) ||
       (v.tollTagNumber || '').toLowerCase().includes(q) ||
@@ -290,7 +300,7 @@ function VehiclesInner({ token, me, logout }) {
       (v.vin || '').toLowerCase().includes(q) ||
       `${v.make || ''} ${v.model || ''}`.toLowerCase().includes(q)
     );
-  }, [vehicles, query]);
+  }, [vehicles, query, programCategoryFilter]);
 
   const fleetOpsHub = useMemo(() => {
     const activeBlocks = vehicles.map((vehicle) => ({ vehicle, block: activeAvailabilityBlock(vehicle) })).filter((row) => !!row.block);
@@ -442,7 +452,8 @@ function VehiclesInner({ token, me, logout }) {
       status: vehicle.status || 'AVAILABLE',
       vehicleTypeId: vehicle.vehicleTypeId || '',
       homeLocationId: vehicle.homeLocationId || '',
-      fleetMode: vehicle.fleetMode || 'RENTAL_ONLY'
+      fleetMode: vehicle.fleetMode || 'RENTAL_ONLY',
+      programCategory: vehicle.programCategory || 'BOTH'
     });
     setShowEditVehicle(true);
   };
@@ -459,6 +470,52 @@ function VehiclesInner({ token, me, logout }) {
       notes: activeBlock?.notes || ''
     });
     setShowBlockVehicle(true);
+  };
+
+  const toggleVehicleSelection = (vehicleId) => {
+    setSelectedVehicleIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(vehicleId)) next.delete(vehicleId);
+      else next.add(vehicleId);
+      return next;
+    });
+  };
+
+  const toggleSelectAll = (vehicleIds) => {
+    setSelectedVehicleIds((prev) => {
+      const allSelected = vehicleIds.length > 0 && vehicleIds.every((id) => prev.has(id));
+      if (allSelected) {
+        // unselect just the visible (filtered) rows
+        const next = new Set(prev);
+        vehicleIds.forEach((id) => next.delete(id));
+        return next;
+      }
+      // select all visible rows
+      const next = new Set(prev);
+      vehicleIds.forEach((id) => next.add(id));
+      return next;
+    });
+  };
+
+  const applyBulkProgramCategory = async () => {
+    if (selectedVehicleIds.size === 0 || bulkApplying) return;
+    setBulkApplying(true);
+    try {
+      const result = await api(scopedPath('/api/vehicles/bulk-program-category'), {
+        method: 'POST',
+        body: JSON.stringify({
+          vehicleIds: [...selectedVehicleIds],
+          programCategory: bulkProgramCategory
+        })
+      }, token);
+      setMsg(`Updated ${result?.count || 0} vehicles to ${bulkProgramCategory}`);
+      setSelectedVehicleIds(new Set());
+      await load();
+    } catch (e) {
+      setMsg(e.message || 'Bulk update failed');
+    } finally {
+      setBulkApplying(false);
+    }
   };
 
   const saveEditVehicle = async (e) => {
@@ -777,6 +834,17 @@ function VehiclesInner({ token, me, logout }) {
           <h2>Vehicle Inventory</h2>
           <div style={{ display: 'flex', gap: 8, width: 'min(720px,100%)' }}>
             <input placeholder="Search unit, plate, toll tag, sticker, make/model, VIN" value={query} onChange={(e) => setQuery(e.target.value)} />
+            <select
+              value={programCategoryFilter}
+              onChange={(e) => setProgramCategoryFilter(e.target.value)}
+              title="Filter by rental vs loaner program category"
+              style={{ minWidth: 140 }}
+            >
+              <option value="ALL">All programs</option>
+              <option value="RENTAL_ONLY">Rental only</option>
+              <option value="LOANER_ONLY">Loaner only</option>
+              <option value="BOTH">Flexible (both)</option>
+            </select>
             {canManageVehicleSetup ? <button onClick={() => setShowAddVehicle(true)} disabled={isSuper && !activeTenantId}>Add Vehicle</button> : null}
             {canManageVehicleSetup ? <button onClick={() => setShowUpload(true)} disabled={isSuper && !activeTenantId}>Upload Inventory</button> : null}
             <button onClick={() => setShowBlockUpload(true)} disabled={isSuper && !activeTenantId}>Upload Blocks</button>
@@ -784,9 +852,60 @@ function VehiclesInner({ token, me, logout }) {
           </div>
         </div>
         {msg ? <p className="label">{msg}</p> : null}
+        {selectedVehicleIds.size > 0 ? (
+          <div
+            className="row-between"
+            style={{
+              padding: '10px 14px',
+              marginBottom: 12,
+              background: 'rgba(110,73,255,0.10)',
+              border: '1px solid rgba(110,73,255,0.28)',
+              borderRadius: 12
+            }}
+          >
+            <div>
+              <strong>{selectedVehicleIds.size}</strong> {selectedVehicleIds.size === 1 ? 'vehicle' : 'vehicles'} selected
+              <button
+                type="button"
+                className="button-subtle"
+                style={{ marginLeft: 12 }}
+                onClick={() => setSelectedVehicleIds(new Set())}
+              >
+                Clear selection
+              </button>
+            </div>
+            <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+              <span className="label">Set program to:</span>
+              <select
+                value={bulkProgramCategory}
+                onChange={(e) => setBulkProgramCategory(e.target.value)}
+                disabled={bulkApplying}
+              >
+                <option value="LOANER_ONLY">Loaner only</option>
+                <option value="RENTAL_ONLY">Rental only</option>
+                <option value="BOTH">Flexible (both)</option>
+              </select>
+              <button
+                type="button"
+                onClick={applyBulkProgramCategory}
+                disabled={bulkApplying}
+              >
+                {bulkApplying ? 'Applying…' : `Apply to ${selectedVehicleIds.size}`}
+              </button>
+            </div>
+          </div>
+        ) : null}
         <table>
           <thead>
             <tr>
+              <th style={{ width: 28 }}>
+                <input
+                  type="checkbox"
+                  checked={rows.length > 0 && rows.every((v) => selectedVehicleIds.has(v.id))}
+                  onChange={() => toggleSelectAll(rows.map((v) => v.id))}
+                  title="Select all visible rows"
+                />
+              </th>
               <th>Unit ID</th>
               <th>License</th>
               <th>Toll Tag</th>
@@ -801,6 +920,7 @@ function VehiclesInner({ token, me, logout }) {
               <th>Block Type</th>
               <th>Blocked Until</th>
               <th>Fleet Mode</th>
+              <th>Program</th>
               <th>Rent</th>
               <th>Profile</th>
             </tr>
@@ -810,6 +930,13 @@ function VehiclesInner({ token, me, logout }) {
               const currentBlock = activeAvailabilityBlock(v);
               return (
               <tr key={v.id} onClick={() => openVehicleDetails(v)} style={{ cursor: 'pointer' }}>
+                <td onClick={(e) => e.stopPropagation()}>
+                  <input
+                    type="checkbox"
+                    checked={selectedVehicleIds.has(v.id)}
+                    onChange={() => toggleVehicleSelection(v.id)}
+                  />
+                </td>
                 <td>{v.internalNumber}</td>
                 <td>{v.plate || '-'}</td>
                 <td>{v.tollTagNumber || '-'}</td>
@@ -824,6 +951,25 @@ function VehiclesInner({ token, me, logout }) {
                 <td>{currentBlock ? blockTypeLabel(currentBlock.blockType) : '-'}</td>
                 <td>{currentBlock ? `${new Date(currentBlock.availableFrom).toLocaleString()}` : '-'}</td>
                 <td><span className="badge">{v.fleetMode || 'RENTAL_ONLY'}</span></td>
+                <td>
+                  <span
+                    className="badge"
+                    style={{
+                      background:
+                        (v.programCategory || 'BOTH') === 'LOANER_ONLY' ? 'rgba(255,140,0,0.18)'
+                        : (v.programCategory || 'BOTH') === 'RENTAL_ONLY' ? 'rgba(73,140,255,0.18)'
+                        : 'rgba(160,160,160,0.18)',
+                      color:
+                        (v.programCategory || 'BOTH') === 'LOANER_ONLY' ? '#b56300'
+                        : (v.programCategory || 'BOTH') === 'RENTAL_ONLY' ? '#1d4ed8'
+                        : '#444'
+                    }}
+                  >
+                    {(v.programCategory || 'BOTH') === 'LOANER_ONLY' ? 'Loaner'
+                     : (v.programCategory || 'BOTH') === 'RENTAL_ONLY' ? 'Rental'
+                     : 'Flex'}
+                  </span>
+                </td>
                 <td>
                   <button onClick={(e) => { e.stopPropagation(); openRent(v); }} disabled={v.status !== 'AVAILABLE' || !!currentBlock}>Rent</button>
                 </td>
@@ -947,6 +1093,12 @@ function VehiclesInner({ token, me, logout }) {
                 <option value="CAR_SHARING_ONLY">CAR_SHARING_ONLY</option>
                 <option value="BOTH">BOTH</option>
               </select>
+              <label className="label" style={{ marginBottom: 0 }}>Program category</label>
+              <select value={newVehicle.programCategory} onChange={(e) => setNewVehicle({ ...newVehicle, programCategory: e.target.value })}>
+                <option value="BOTH">Flexible (rental and loaner)</option>
+                <option value="RENTAL_ONLY">Rental only</option>
+                <option value="LOANER_ONLY">Loaner only</option>
+              </select>
               <div className="row-between"><button type="button" onClick={() => setShowAddVehicle(false)}>Cancel</button><button type="submit">Save Vehicle</button></div>
             </form>
           </div>
@@ -992,6 +1144,12 @@ function VehiclesInner({ token, me, logout }) {
                 <option value="RENTAL_ONLY">RENTAL_ONLY</option>
                 <option value="CAR_SHARING_ONLY">CAR_SHARING_ONLY</option>
                 <option value="BOTH">BOTH</option>
+              </select>
+              <label className="label" style={{ marginBottom: 0 }}>Program category</label>
+              <select value={editVehicleForm.programCategory || 'BOTH'} onChange={(e) => setEditVehicleForm({ ...editVehicleForm, programCategory: e.target.value })}>
+                <option value="BOTH">Flexible (rental and loaner)</option>
+                <option value="RENTAL_ONLY">Rental only</option>
+                <option value="LOANER_ONLY">Loaner only</option>
               </select>
               <select value={editVehicleForm.status} onChange={(e) => setEditVehicleForm({ ...editVehicleForm, status: e.target.value })}>
                 {['AVAILABLE', 'RESERVED', 'ON_RENT', 'IN_MAINTENANCE', 'OUT_OF_SERVICE'].map((s) => <option key={s} value={s}>{s}</option>)}

@@ -296,6 +296,26 @@ vehiclesRouter.post('/availability-blocks/:id/release', async (req, res, next) =
   }
 });
 
+// Bulk-set programCategory across many vehicles in one transaction. Designed
+// for tenants like Triangle who need to tag 100s of loaner units at once via
+// the admin UI's multi-select bulk action. Uses prisma.updateMany so the
+// whole batch is atomic + a single round-trip to Postgres.
+vehiclesRouter.post('/bulk-program-category', async (req, res, next) => {
+  try {
+    assertPlainObject(req.body || {}, 'bulk update payload');
+    const ids = Array.isArray(req.body.vehicleIds) ? req.body.vehicleIds.map(String).filter(Boolean) : [];
+    const programCategory = String(req.body.programCategory || '').toUpperCase();
+    if (!ids.length) return res.status(400).json({ error: 'vehicleIds must be a non-empty array' });
+    if (!['RENTAL_ONLY', 'LOANER_ONLY', 'BOTH'].includes(programCategory)) {
+      return res.status(400).json({ error: 'programCategory must be RENTAL_ONLY, LOANER_ONLY, or BOTH' });
+    }
+    const result = await vehiclesService.bulkSetProgramCategory(ids, programCategory, scopeFor(req));
+    res.json(result);
+  } catch (e) {
+    next(e);
+  }
+});
+
 vehiclesRouter.patch('/:id', async (req, res, next) => {
   try {
     const row = await vehiclesService.update(req.params.id, req.body || {}, scopeFor(req));
