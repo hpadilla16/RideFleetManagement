@@ -949,5 +949,164 @@ export const reportsService = {
       filename: `rental-contracts-${isoDay(start)}-to-${isoDay(end)}.xlsx`,
       rowCount: rows.length
     };
+  },
+
+  // Per-vehicle revenue aggregation. Triangle plan item #3 — "Produce reports
+  // showing how much revenue each car is generating". Groups every selected
+  // charge in [start, end] by Reservation.vehicleId so operators see which
+  // cars are pulling weight. Optional programCategory filter scopes the
+  // report to either the rental fleet or the loaner pool.
+  //
+  // Sizing: a tenant with 200 vehicles × ~4 reservations/month/vehicle = 800
+  // reservations / month. Loading reservations with charges into JS for
+  // aggregation is fine at that volume. If the data ever doesn't fit comfortably
+  // in memory we'd switch to a SQL-side GROUP BY, but for the foreseeable
+  // future the JS path keeps the code simple.
+  async vehicleRevenue(query = {}, scope = {}) {
+    const start = query.start ? startOfDay(query.start) : startOfDay(new Date(Date.now() - 30 * 24 * 60 * 60 * 1000));
+    const end = query.end ? endOfDay(query.end) : endOfDay(new Date());
+    const whereScope = scopeWhere(scope);
+
+    const programCategoryFilter = query.programCategory && ['RENTAL_ONLY', 'LOANER_ONLY', 'BOTH'].includes(String(query.programCategory))
+      ? { programCategory: String(query.programCategory) }
+      : {};
+
+    const vehicles = await prisma.vehicle.findMany({
+      where: {
+        ...whereScope,
+        ...programCategoryFilter
+      },
+      select: {
+        id: true,
+        internalNumber: true,
+        plate: true,
+        make: true,
+        model: true,
+        year: true,
+        programCategory: true,
+        status: true,
+        vehicleType: { select: { id: true, name: true } }
+      },
+      orderBy: { internalNumber: 'asc' }
+    });
+
+    if (!vehicles.length) {
+      return {
+        range: { start, end },
+        programCategory: query.programCategory || 'ALL',
+        vehicles: [],
+        totals: { vehicleCount: 0, reservationCount: 0, totalCharges: 0, totalPaid: 0 }
+      };
+    }
+
+    const vehicleIds = vehicles.map((v) => v.id);
+
+    const reservations = await prisma.reservation.findMany({
+      where: {
+        ...whereScope,
+        vehicleId: { in: vehicleIds },
+        pickupAt: { gte: start, lte: end }
+      },
+      select: {
+        id: true,
+        vehicleId: true,
+        status: true,
+        pickupAt: true,
+        returnAt: true,
+        charges: {
+          where: { selected: true },
+          select: { total: true }
+        },
+        rentalAgreement: {
+          select: { paidAmount: true }
+        }
+      }
+    });
+
+    const byVehicle = new Map();
+    for (const v of vehicles) {
+      byVehicle.set(v.id, {
+        vehicleId: v.id,
+        internalNumber: v.internalNumber,
+        plate: v.plate,
+        make: v.make,
+        model: v.model,
+        year: v.year,
+        vehicleTypeId: v.vehicleType?.id || null,
+        vehicleTypeName: v.vehicleType?.name || null,
+        programCategory: v.programCategory,
+        currentStatus: v.status,
+        reservationCount: 0,
+        totalCharges: 0,
+        totalPaid: 0
+      });
+    }
+
+    for (const r of reservations) {
+      const row = byVehicle.get(r.vehicleId);
+      if (!row) continue;
+      row.reservationCount += 1;
+      const charges = (r.charges || []).reduce((sum, c) => sum + Number(c.total || 0), 0);
+      row.totalCharges += charges;
+      row.totalPaid += Number(r.rentalAgreement?.paidAmount || 0);
+    }
+
+    const out = [...byVehicle.values()].sort((a, b) => b.totalCharges - a.totalCharges);
+
+    return {
+      range: { start, end },
+      programCategory: query.programCategory || 'ALL',
+      vehicles: out.map((row) => ({
+        ...row,
+        totalCharges: Number(row.totalCharges.toFixed(2)),
+        totalPaid: Number(row.totalPaid.toFixed(2))
+      })),
+      totals: {
+        vehicleCount: out.length,
+        reservationCount: out.reduce((s, r) => s + r.reservationCount, 0),
+        totalCharges: Number(out.reduce((s, r) => s + r.totalCharges, 0).toFixed(2)),
+        totalPaid: Number(out.reduce((s, r) => s + r.totalPaid, 0).toFixed(2))
+      }
+    };
+  },
+
+  // Excel export of the per-vehicle revenue report.
+  async vehicleRevenueExcel(query = {}, scope = {}) {
+    const data = await this.vehicleRevenue(query, scope);
+    const workbook = new ExcelJS.Workbook();
+    const sheet = workbook.addWorksheet('Vehicle Revenue');
+
+    sheet.columns = [
+      { header: 'Unit ID', key: 'internalNumber', width: 14 },
+      { header: 'Plate', key: 'plate', width: 12 },
+      { header: 'Year', key: 'year', width: 8 },
+      { header: 'Make', key: 'make', width: 14 },
+      { header: 'Model', key: 'model', width: 14 },
+      { header: 'Type', key: 'vehicleTypeName', width: 16 },
+      { header: 'Program', key: 'programCategory', width: 14 },
+      { header: 'Status', key: 'currentStatus', width: 14 },
+      { header: 'Reservations', key: 'reservationCount', width: 14 },
+      { header: 'Total Charges', key: 'totalCharges', width: 16 },
+      { header: 'Total Paid', key: 'totalPaid', width: 16 }
+    ];
+    sheet.getRow(1).font = { bold: true };
+
+    for (const v of data.vehicles) {
+      sheet.addRow(v);
+    }
+
+    // Totals row
+    const totalsRowIdx = data.vehicles.length + 2;
+    sheet.addRow({});
+    sheet.getRow(totalsRowIdx).getCell('Reservations').value = data.totals.reservationCount;
+    sheet.getRow(totalsRowIdx).getCell('Total Charges').value = data.totals.totalCharges;
+    sheet.getRow(totalsRowIdx).getCell('Total Paid').value = data.totals.totalPaid;
+    sheet.getRow(totalsRowIdx).font = { bold: true };
+
+    return {
+      buffer: await workbook.xlsx.writeBuffer(),
+      filename: `vehicle-revenue-${isoDay(data.range.start)}-to-${isoDay(data.range.end)}.xlsx`,
+      rowCount: data.vehicles.length
+    };
   }
 };
