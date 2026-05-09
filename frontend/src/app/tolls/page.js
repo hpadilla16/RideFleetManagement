@@ -393,6 +393,54 @@ function TollsInner({ token, me, logout }) {
     }
   };
 
+  const bulkConfirmCandidates = useMemo(() => {
+    return visibleTransactions.filter((row) => {
+      if (row.coveredByTollPackage || row.billingMode === 'USAGE_ONLY') return false;
+      if (!row.needsReview) return false;
+      if (row.dispatchConfirmationRequired && row.reservation?.id) return true;
+      if (row.latestAssignment?.reservation?.id) return true;
+      return false;
+    });
+  }, [visibleTransactions]);
+
+  const runBulkConfirm = async () => {
+    const candidates = bulkConfirmCandidates;
+    if (!candidates.length) {
+      setMsg('No tolls eligible for Confirm All in the current view (need a suggested reservation or dispatch confirmation pending).');
+      return;
+    }
+    const summary = candidates
+      .slice(0, 5)
+      .map((row) => `#${row.latestAssignment?.reservation?.reservationNumber || row.reservation?.reservationNumber || row.id}`)
+      .join(', ');
+    const more = candidates.length > 5 ? `, +${candidates.length - 5} more` : '';
+    const ok = window.confirm(`Confirm ${candidates.length} toll${candidates.length === 1 ? '' : 's'} now?\n\n${summary}${more}\n\nThis will assign each toll to its suggested reservation (or confirm dispatch where required) and post charges.`);
+    if (!ok) return;
+    try {
+      setBusyId('bulk-confirm');
+      const out = await api(scopedTollsPath('/api/tolls/transactions/bulk-confirm'), {
+        method: 'POST',
+        body: JSON.stringify({ ids: candidates.map((row) => row.id), note: 'Bulk confirm from review queue' })
+      }, token);
+      const matched = Number(out?.confirmed || 0);
+      const dispatched = Number(out?.dispatchConfirmed || 0);
+      const skipped = Number(out?.skipped || 0);
+      const failed = Number(out?.failed || 0);
+      const parts = [
+        matched ? `${matched} matched` : '',
+        dispatched ? `${dispatched} dispatch-confirmed` : '',
+        skipped ? `${skipped} skipped` : '',
+        failed ? `${failed} failed` : ''
+      ].filter(Boolean);
+      setMsg(`Bulk confirm complete: ${parts.join(', ') || 'no changes'}`);
+      await load();
+    } catch (error) {
+      setMsg(error.message);
+    } finally {
+      setBusyId('');
+    }
+  };
+
   const runBulkAutoMatch = async () => {
     try {
       setBusyId('bulk-auto-match');
@@ -636,6 +684,15 @@ function TollsInner({ token, me, logout }) {
               <button type="button" style={{ background: '#166534', color: '#fff', fontWeight: 700 }} onClick={runBulkAutoMatch} disabled={busyId === 'bulk-auto-match' || (isSuper && !activeTenantId)}>
                 {busyId === 'bulk-auto-match' ? 'Matching...' : 'Auto-Match All'}
               </button>
+              <button
+                type="button"
+                style={{ background: '#1d4ed8', color: '#fff', fontWeight: 700 }}
+                onClick={runBulkConfirm}
+                disabled={busyId === 'bulk-confirm' || (isSuper && !activeTenantId) || !bulkConfirmCandidates.length}
+                title={bulkConfirmCandidates.length ? `${bulkConfirmCandidates.length} toll${bulkConfirmCandidates.length === 1 ? '' : 's'} ready to confirm` : 'No eligible tolls in this view'}
+              >
+                {busyId === 'bulk-confirm' ? 'Confirming...' : `Confirm All${bulkConfirmCandidates.length ? ` (${bulkConfirmCandidates.length})` : ''}`}
+              </button>
             </div>
           </div>
           <div className="inline-actions" style={{ marginBottom: 10, flexWrap: 'wrap' }}>
@@ -708,7 +765,16 @@ function TollsInner({ token, me, logout }) {
                       <div>
                         <div style={{ fontWeight: 600 }}>{row.latestAssignment.reservation.reservationNumber}</div>
                         <div style={{ color: '#6b7a9a', fontSize: '0.72rem' }}>
-                          {row.latestAssignment.matchReason || 'suggested'}
+                          {(() => {
+                            const assignmentStatus = String(row.latestAssignment.status || '').toUpperCase();
+                            const stateLabel = assignmentStatus === 'AUTO_CONFIRMED'
+                              ? 'Auto-paired'
+                              : assignmentStatus === 'CONFIRMED' || assignmentStatus === 'MATCHED'
+                                ? 'Confirmed'
+                                : 'Suggested';
+                            const reason = row.latestAssignment.matchReason ? ` · ${row.latestAssignment.matchReason}` : '';
+                            return `${stateLabel}${reason}`;
+                          })()}
                         </div>
                       </div>
                     ) : row.reservation ? (

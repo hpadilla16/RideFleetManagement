@@ -863,7 +863,7 @@ async function listReservationCandidates(scope = {}, vehicleIds = [], transactio
   });
 }
 
-function scoreCandidate({ transaction, vehicle, reservation, siblingCandidates = 1 }) {
+export function scoreCandidate({ transaction, vehicle, reservation, siblingCandidates = 1 }) {
   const plate = normalizeNullableToken(transaction.plateRaw || transaction.plateNormalized);
   const tag = normalizeNullableToken(transaction.tagRaw || transaction.tagNormalized);
   const sello = normalizeNullableToken(transaction.selloRaw || transaction.selloNormalized);
@@ -882,6 +882,7 @@ function scoreCandidate({ transaction, vehicle, reservation, siblingCandidates =
   let score = 0;
   const reasons = [];
   let withinTripWindow = responsibility.withinTripWindow;
+  let strongIdentifierMatches = 0;
 
   if (responsibility.withinEffectiveWindow && vehicle?.id) {
     score += 70;
@@ -897,14 +898,17 @@ function scoreCandidate({ transaction, vehicle, reservation, siblingCandidates =
   }
   if (plate && vehiclePlate && plate === vehiclePlate) {
     score += 25;
+    strongIdentifierMatches += 1;
     reasons.push('plate');
   }
   if (tag && vehicleTag && tag === vehicleTag) {
     score += 20;
+    strongIdentifierMatches += 1;
     reasons.push('tag');
   }
   if (sello && vehicleSello && sello === vehicleSello) {
     score += 20;
+    strongIdentifierMatches += 1;
     reasons.push('sello');
   }
 
@@ -924,9 +928,24 @@ function scoreCandidate({ transaction, vehicle, reservation, siblingCandidates =
     reasons.push('effectiveVehicleTripWindow');
   }
 
+  // Multi-signal override: if 2+ unique identifiers (plate/tag/sello) all match the
+  // same vehicle AND the toll falls inside both the trip window and the vehicle's
+  // responsibility window, the evidence is overwhelming. Allow bypassing the
+  // dispatch-confirmation score cap so loaner-style reservations (which don't go
+  // through formal rental-agreement checkout) can still auto-confirm when proof
+  // is strong. See doc/toll-matching-design-review-2026-05-08.md.
+  const multiSignalOverride =
+    strongIdentifierMatches >= 2 &&
+    withinTripWindow &&
+    responsibility.withinEffectiveWindow;
+
   if (responsibility.dispatchConfirmationRequired) {
     reasons.push('dispatchConfirmationRequired');
-    score = Math.min(score, 79);
+    if (!multiSignalOverride) {
+      score = Math.min(score, 79);
+    } else {
+      reasons.push('multiSignalOverride');
+    }
   }
 
   if (siblingCandidates > 1) {
@@ -937,8 +956,15 @@ function scoreCandidate({ transaction, vehicle, reservation, siblingCandidates =
   return {
     score,
     matchReason: reasons.join(',') || 'manual-review',
-    reviewCategory: responsibility.reviewCategory,
-    dispatchConfirmationRequired: responsibility.dispatchConfirmationRequired
+    // The dispatchConfirmationRequired flag is downstream consumer's signal that the
+    // toll fired before formal checkout. With the multi-signal override active we have
+    // overwhelming proof that the match is correct, so we suppress the flag (and its
+    // matching review category) — the downstream needsReview computation in
+    // buildMatchSuggestion will then let this toll auto-confirm cleanly instead of
+    // being held in review. See doc/toll-matching-design-review-2026-05-08.md.
+    reviewCategory: multiSignalOverride ? null : responsibility.reviewCategory,
+    dispatchConfirmationRequired: responsibility.dispatchConfirmationRequired && !multiSignalOverride,
+    multiSignalOverride
   };
 }
 
@@ -2700,6 +2726,270 @@ export const tollsService = {
       actionLabel: reviewActionLabel(action),
       issueIncident,
       transaction: serializeTransaction(await getTransactionOrThrow(transaction.id, scope))
+    };
+  },
+
+  async bulkConfirmMatches(ids = [], scope = {}, actorUserId = null, options = {}) {
+    await ensureTenantAllowsTolls(scope);
+    const list = Array.isArray(ids)
+      ? ids.filter((value) => value != null && value !== '').map((value) => String(value))
+      : [];
+    if (!list.length) {
+      return { confirmed: 0, dispatchConfirmed: 0, skipped: 0, failed: 0, total: 0, results: [], elapsedMs: 0 };
+    }
+
+    const startedAt = Date.now();
+    const noteHint = String(options?.note || 'Bulk confirm');
+    const chunkSize = Number.isFinite(options?.chunkSize) && options.chunkSize > 0 ? options.chunkSize : 10;
+
+    // ---- Phase 1: single batched fetch of all transactions in scope -----------
+    const transactions = await prisma.tollTransaction.findMany({
+      where: {
+        id: { in: list },
+        ...tenantWhereForScope(scope)
+      },
+      include: {
+        vehicle: true,
+        reservation: {
+          include: {
+            customer: { select: { id: true, firstName: true, lastName: true } }
+          }
+        },
+        assignments: {
+          include: {
+            reservation: { select: { id: true, reservationNumber: true, pickupAt: true, returnAt: true, vehicleId: true } }
+          },
+          orderBy: [{ createdAt: 'desc' }]
+        }
+      }
+    });
+    const transactionById = new Map(transactions.map((row) => [row.id, row]));
+
+    // ---- Phase 2: classify each requested ID and collect required reservations
+    const plans = [];
+    const reservationIdsNeeded = new Set();
+    for (const id of list) {
+      const transaction = transactionById.get(id);
+      if (!transaction) {
+        plans.push({ id, kind: 'SKIP', message: 'Transaction not found in tenant scope' });
+        continue;
+      }
+      const latestAssignment = Array.isArray(transaction.assignments) && transaction.assignments.length
+        ? transaction.assignments[0]
+        : null;
+      const reviewCategory = inferReviewCategory(transaction.reviewNotes || latestAssignment?.matchReason || '');
+      const dispatchRequired = reviewCategory === DISPATCH_CONFIRMATION_REVIEW_CATEGORY;
+      const coveredByPackage = transactionCoveredByTollPackage(transaction);
+
+      if (coveredByPackage) {
+        plans.push({ id, transaction, kind: 'SKIP', message: 'Usage-only — covered by toll package' });
+        continue;
+      }
+
+      if (dispatchRequired && transaction.reservationId) {
+        reservationIdsNeeded.add(String(transaction.reservationId));
+        plans.push({ id, transaction, kind: 'DISPATCH', reservationId: transaction.reservationId });
+        continue;
+      }
+
+      if (latestAssignment?.reservation?.id && transaction.needsReview) {
+        reservationIdsNeeded.add(String(latestAssignment.reservation.id));
+        plans.push({
+          id,
+          transaction,
+          kind: 'MATCH',
+          reservationId: latestAssignment.reservation.id,
+          latestAssignment
+        });
+        continue;
+      }
+
+      plans.push({
+        id,
+        transaction,
+        kind: 'SKIP',
+        message: !transaction.needsReview ? 'Already confirmed' : 'No suggested reservation to confirm'
+      });
+    }
+
+    // ---- Phase 3: load all referenced reservations + vehicles in one go --------
+    const reservationsById = reservationIdsNeeded.size
+      ? new Map(
+        (await prisma.reservation.findMany({
+          where: {
+            id: { in: Array.from(reservationIdsNeeded) },
+            ...tenantWhereForScope(scope)
+          },
+          include: {
+            vehicle: true,
+            customer: { select: { id: true, firstName: true, lastName: true } }
+          }
+        })).map((row) => [row.id, row])
+      )
+      : new Map();
+
+    // ---- Phase 4: process actionable plans in parallel chunks ------------------
+    const results = new Array(plans.length);
+    const touchedReservationIds = new Set();
+    let confirmedCount = 0;
+    let dispatchConfirmedCount = 0;
+    let skippedCount = 0;
+    let failedCount = 0;
+
+    const actionable = plans
+      .map((plan, index) => ({ plan, index }))
+      .filter((entry) => entry.plan.kind === 'DISPATCH' || entry.plan.kind === 'MATCH');
+
+    // Account for SKIPs up-front
+    plans.forEach((plan, index) => {
+      if (plan.kind === 'SKIP') {
+        skippedCount += 1;
+        results[index] = { id: plan.id, action: 'SKIP', message: plan.message };
+      }
+    });
+
+    for (let offset = 0; offset < actionable.length; offset += chunkSize) {
+      const chunk = actionable.slice(offset, offset + chunkSize);
+      // eslint-disable-next-line no-await-in-loop -- chunked parallel execution by design
+      await Promise.all(chunk.map(async ({ plan, index }) => {
+        try {
+          const reservation = reservationsById.get(plan.reservationId);
+          if (!reservation) {
+            results[index] = { id: plan.id, action: 'ERROR', message: 'Reservation not found for confirm' };
+            failedCount += 1;
+            return;
+          }
+          const vehicle = reservation.vehicle
+            || (reservation.vehicleId ? await prisma.vehicle.findUnique({ where: { id: reservation.vehicleId } }) : null);
+
+          if (plan.kind === 'DISPATCH') {
+            await prisma.$transaction(async (tx) => {
+              await tx.tollAssignment.updateMany({
+                where: {
+                  tollTransactionId: plan.transaction.id,
+                  status: { in: ['SUGGESTED', 'AUTO_CONFIRMED', 'CONFIRMED'] }
+                },
+                data: { status: 'REJECTED' }
+              });
+              await tx.tollTransaction.update({
+                where: { id: plan.transaction.id },
+                data: {
+                  vehicleId: plan.transaction.vehicleId || reservation.vehicleId || vehicle?.id || null,
+                  status: 'MATCHED',
+                  needsReview: false,
+                  billingStatus: plan.transaction.billingStatus === 'DISPUTED' ? 'DISPUTED' : 'PENDING',
+                  reviewNotes: mergeChargeNotes(
+                    clearDispatchConfirmationReview(plan.transaction.reviewNotes),
+                    noteHint
+                  )
+                }
+              });
+              await createAssignmentRecord(tx, plan.transaction, {
+                vehicle: vehicle || null,
+                reservation,
+                score: plan.transaction.matchConfidence != null ? Number(plan.transaction.matchConfidence) : 100,
+                matchStatus: 'CONFIRMED',
+                matchReason: 'bulk-dispatch-confirmed'
+              }, actorUserId);
+            });
+            touchedReservationIds.add(String(reservation.id));
+            dispatchConfirmedCount += 1;
+            results[index] = { id: plan.id, action: 'CONFIRM_DISPATCHED', message: 'Dispatch confirmed' };
+            return;
+          }
+
+          // plan.kind === 'MATCH'
+          const suggestion = {
+            vehicle,
+            reservation,
+            score: plan.latestAssignment.confidence != null ? Number(plan.latestAssignment.confidence) : 100,
+            matchStatus: 'CONFIRMED',
+            matchReason: plan.latestAssignment.matchReason || 'bulk-confirmed'
+          };
+
+          await prisma.$transaction(async (tx) => {
+            if (Array.isArray(plan.transaction.assignments) && plan.transaction.assignments.length) {
+              await tx.tollAssignment.updateMany({
+                where: { tollTransactionId: plan.transaction.id, status: { in: ['SUGGESTED', 'AUTO_CONFIRMED'] } },
+                data: { status: 'REJECTED' }
+              });
+            }
+            await tx.tollTransaction.update({
+              where: { id: plan.transaction.id },
+              data: {
+                vehicleId: reservation.vehicleId || vehicle?.id || null,
+                reservationId: reservation.id,
+                status: 'MATCHED',
+                needsReview: false,
+                matchConfidence: suggestion.score,
+                reviewNotes: suggestion.matchReason
+              }
+            });
+            await createAssignmentRecord(tx, plan.transaction, suggestion, actorUserId);
+          });
+          touchedReservationIds.add(String(reservation.id));
+          confirmedCount += 1;
+          results[index] = {
+            id: plan.id,
+            action: 'CONFIRM_MATCH',
+            message: `Matched to ${reservation.reservationNumber || reservation.id}`
+          };
+        } catch (error) {
+          failedCount += 1;
+          results[index] = { id: plan.id, action: 'ERROR', message: String(error?.message || 'Failed') };
+        }
+      }));
+    }
+
+    // ---- Phase 5: deferred reservation sync (one call per touched reservation)
+    const reservationSyncErrors = [];
+    for (const reservationId of touchedReservationIds) {
+      try {
+        // eslint-disable-next-line no-await-in-loop -- sequential to avoid pool storm
+        await syncReservationTollCharges(reservationId, scope);
+      } catch (error) {
+        reservationSyncErrors.push({ reservationId, message: String(error?.message || 'Sync failed') });
+      }
+    }
+
+    // ---- Phase 6: single consolidated audit log entry --------------------------
+    if (touchedReservationIds.size && (confirmedCount + dispatchConfirmedCount) > 0) {
+      try {
+        const tenantId = transactions[0]?.tenantId || scope?.tenantId || null;
+        if (tenantId) {
+          await prisma.auditLog.create({
+            data: {
+              tenantId,
+              actorUserId: actorUserId || null,
+              action: 'UPDATE',
+              metadata: JSON.stringify({
+                bulkTollConfirm: true,
+                requested: list.length,
+                confirmed: confirmedCount,
+                dispatchConfirmed: dispatchConfirmedCount,
+                skipped: skippedCount,
+                failed: failedCount,
+                touchedReservationIds: Array.from(touchedReservationIds),
+                note: noteHint
+              })
+            }
+          });
+        }
+      } catch {
+        // Audit log is best-effort — never block the response
+      }
+    }
+
+    return {
+      confirmed: confirmedCount,
+      dispatchConfirmed: dispatchConfirmedCount,
+      skipped: skippedCount,
+      failed: failedCount,
+      total: list.length,
+      touchedReservations: touchedReservationIds.size,
+      reservationSyncErrors,
+      elapsedMs: Date.now() - startedAt,
+      results
     };
   },
 
