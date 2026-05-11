@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import { marketScrapeProfileService } from './market-scrape-profile.service.js';
+import { computeRunComparison } from './market-scrape-comparison.service.js';
 import { scopeFor } from '../../lib/tenant-scope.js';
 
 /**
@@ -12,7 +13,8 @@ import { scopeFor } from '../../lib/tenant-scope.js';
  *
  *   GET    /api/market-scraper/profiles/:id/runs
  *   GET    /api/market-scraper/runs/:runId
- *   GET    /api/market-scraper/runs/:runId/cheapest  (per-(date,sipp) cheapest)
+ *   GET    /api/market-scraper/runs/:runId/cheapest      (per-(date,sipp) cheapest)
+ *   GET    /api/market-scraper/runs/:runId/comparison    (diff vs current RateDailyPrice — B.4)
  *
  *   GET    /api/market-scraper/profiles/:id/observations
  *
@@ -97,6 +99,15 @@ marketScraperRouter.get('/runs/:runId', async (req, res, next) => {
 marketScraperRouter.get('/runs/:runId/cheapest', async (req, res, next) => {
   try {
     const out = await marketScrapeProfileService.getRunCheapestPerSipp(req.params.runId, scopeFor(req));
+    res.json(out);
+  } catch (e) { handle(e, res, next); }
+});
+
+// ----- Comparison (B.4 — diff vs current RateDailyPrice) ------------------
+
+marketScraperRouter.get('/runs/:runId/comparison', async (req, res, next) => {
+  try {
+    const out = await computeRunComparison(req.params.runId, { scope: scopeFor(req) });
     res.json(out);
   } catch (e) { handle(e, res, next); }
 });

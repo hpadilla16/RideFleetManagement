@@ -1,0 +1,252 @@
+/**
+ * Comparison stage — read-only diff between market observations and the
+ * tenant's current RateDailyPrice rows.
+ *
+ *   Cheapest competitor per (pickupDate, sipp)
+ *   -> map sipp -> VehicleType.code (tenant-scoped)
+ *   -> compare to RateDailyPrice.daily for that (rateId, vehicleTypeId, date)
+ *   -> apply the profile's pricing strategy to produce a suggestedPrice
+ *
+ * Output is the input the Correction stage (B.4 part 2) consumes when
+ * profile.autoApply === true, or what the UI renders as a diff table for
+ * human review when autoApply === false.
+ *
+ * This service does NOT mutate anything. Persisting suggestions / writing
+ * RateDailyPrice lives in market-scrape-correction.service.js.
+ */
+import { prisma } from '../../lib/prisma.js';
+
+function notFound(msg) {
+  const e = new Error(msg);
+  e.httpStatus = 404;
+  throw e;
+}
+
+function badRequest(msg) {
+  const e = new Error(msg);
+  e.httpStatus = 400;
+  throw e;
+}
+
+/**
+ * Apply the profile's pricing strategy to the cheapest competitor price.
+ *   CHEAPEST_MINUS_AMOUNT -> cheapest - strategyAmount
+ *   MATCH_CHEAPEST        -> cheapest (no discount)
+ *   CHEAPEST_PLUS_PCT     -> cheapest * (1 + strategyPct/100)
+ *   STATIC_FLOOR          -> max(cheapest, strategyFloor)
+ *
+ * The floor (when set) is also a defense-in-depth clamp: any strategy whose
+ * arithmetic would push the suggestion below the floor is raised to it. This
+ * mirrors the standalone CLI scraper's behavior so the migration to DB-driven
+ * is a no-op semantically.
+ *
+ * Returns null when `cheapest` is not a usable number.
+ */
+export function applyStrategy(cheapest, profile) {
+  if (cheapest == null || !Number.isFinite(Number(cheapest))) return null;
+  const c = Number(cheapest);
+  const amount = profile.strategyAmount != null ? Number(profile.strategyAmount) : 0;
+  const pct = profile.strategyPct != null ? Number(profile.strategyPct) : 0;
+  const floor = profile.strategyFloor != null ? Number(profile.strategyFloor) : 0;
+
+  let suggested;
+  switch (profile.strategy) {
+    case 'CHEAPEST_MINUS_AMOUNT':
+      suggested = c - amount;
+      break;
+    case 'MATCH_CHEAPEST':
+      suggested = c;
+      break;
+    case 'CHEAPEST_PLUS_PCT':
+      suggested = c * (1 + pct / 100);
+      break;
+    case 'STATIC_FLOOR':
+      suggested = Math.max(c, floor);
+      break;
+    default:
+      badRequest(`Unknown strategy: ${profile.strategy}`);
+  }
+  // Defense-in-depth: never go below floor when one is set.
+  if (floor > 0 && suggested < floor) suggested = floor;
+  return Number(suggested.toFixed(2));
+}
+
+/**
+ * Group MarketObservation rows by (pickupDateISO, sipp) and pick the cheapest
+ * dailyPrice in each bucket. Skips rows where:
+ *   - status !== 'FOUND' (UNMAPPED / ERROR / CLOSED have no usable price)
+ *   - dailyPrice is null
+ * Returns Map<"YYYY-MM-DD|SIPP", {date, sipp, cheapest, vendor, sampled}>.
+ */
+export function aggregateCheapestBySippDate(observations) {
+  const byKey = new Map();
+  for (const obs of observations) {
+    if (obs.status !== 'FOUND') continue;
+    if (obs.dailyPrice == null) continue;
+    const price = Number(obs.dailyPrice);
+    if (!Number.isFinite(price) || price <= 0) continue;
+    const dateISO = obs.pickupDate instanceof Date
+      ? obs.pickupDate.toISOString().slice(0, 10)
+      : String(obs.pickupDate).slice(0, 10);
+    const key = `${dateISO}|${obs.sipp}`;
+    const existing = byKey.get(key);
+    if (!existing) {
+      byKey.set(key, {
+        date: dateISO,
+        sipp: obs.sipp,
+        cheapest: price,
+        vendor: obs.vendor || null,
+        sampled: 1
+      });
+    } else {
+      existing.sampled += 1;
+      if (price < existing.cheapest) {
+        existing.cheapest = price;
+        existing.vendor = obs.vendor || null;
+      }
+    }
+  }
+  return byKey;
+}
+
+/**
+ * Compute the diff between a run's observations and the tenant's current
+ * RateDailyPrice rows.
+ *
+ * @param {string} runId
+ * @param {{scope: {tenantId?: string}}} opts
+ * @returns {Promise<{
+ *   profileId, runId, strategy,
+ *   targetRateId, targetRateMissing,
+ *   rows: Array<{
+ *     date, sipp, vehicleTypeId|null, vehicleTypeMissing: bool,
+ *     marketCheapest, marketVendor, marketSampled,
+ *     currentPrice|null, suggestedPrice|null,
+ *     deltaAbs|null, deltaPct|null,
+ *     willUpdate: bool        // suggestedPrice != currentPrice (with > $0.01 threshold)
+ *   }>,
+ *   summary: { sampled, withCurrent, willUpdate, missingVehicleType }
+ * }>}
+ */
+export async function computeRunComparison(runId, { scope = {} } = {}) {
+  if (!runId) badRequest('runId required');
+
+  // Load the run + its profile in one shot. We need both to apply the
+  // strategy and look up the target Rate.
+  const run = await prisma.marketScrapeRun.findFirst({
+    where: { id: runId },
+    include: { profile: true }
+  });
+  if (!run) notFound('Run not found');
+  if (scope.tenantId && run.profile.tenantId !== scope.tenantId) {
+    notFound('Run not found');
+  }
+  const profile = run.profile;
+
+  // Load observations for the run.
+  const observations = await prisma.marketObservation.findMany({
+    where: { runId },
+    orderBy: [{ pickupDate: 'asc' }, { sipp: 'asc' }]
+  });
+
+  const byKey = aggregateCheapestBySippDate(observations);
+
+  // Without a targetRate, we still compute the suggestedPrice column so the
+  // UI can show "this is what we'd charge", but currentPrice + delta are
+  // blank. Callers see targetRateMissing=true so they can prompt for setup.
+  let dailyPriceByKey = new Map(); // "YYYY-MM-DD|vehicleTypeId" -> currentPrice
+  if (profile.targetRateId) {
+    const allDates = [...new Set([...byKey.values()].map((r) => r.date))];
+    const dates = allDates.map((d) => new Date(`${d}T00:00:00.000Z`));
+    const prices = await prisma.rateDailyPrice.findMany({
+      where: { rateId: profile.targetRateId, date: { in: dates } }
+    });
+    for (const p of prices) {
+      const dISO = p.date.toISOString().slice(0, 10);
+      dailyPriceByKey.set(`${dISO}|${p.vehicleTypeId}`, Number(p.daily));
+    }
+  }
+
+  // SIPP -> VehicleType lookup (tenant-scoped). Cache in a Map so we don't
+  // hit the DB once per (date, sipp) cell.
+  const sippSet = new Set([...byKey.values()].map((r) => r.sipp));
+  const vehicleTypes = profile.tenantId && sippSet.size > 0
+    ? await prisma.vehicleType.findMany({
+        where: { tenantId: profile.tenantId, code: { in: [...sippSet] } }
+      })
+    : [];
+  const vehicleTypeBySipp = new Map();
+  for (const vt of vehicleTypes) {
+    vehicleTypeBySipp.set(vt.code, vt);
+  }
+
+  const rows = [];
+  let withCurrent = 0;
+  let willUpdate = 0;
+  let missingVehicleType = 0;
+
+  // Stable output order: by date asc, then by SIPP asc.
+  const sortedKeys = [...byKey.keys()].sort();
+  for (const key of sortedKeys) {
+    const r = byKey.get(key);
+    const vt = vehicleTypeBySipp.get(r.sipp) || null;
+    const suggested = applyStrategy(r.cheapest, profile);
+
+    let currentPrice = null;
+    if (vt && profile.targetRateId) {
+      currentPrice = dailyPriceByKey.get(`${r.date}|${vt.id}`);
+      if (currentPrice == null) currentPrice = null;
+    }
+    if (currentPrice != null) withCurrent += 1;
+    if (!vt) missingVehicleType += 1;
+
+    let deltaAbs = null;
+    let deltaPct = null;
+    let shouldUpdate = false;
+    if (currentPrice != null && suggested != null) {
+      deltaAbs = Number((suggested - currentPrice).toFixed(2));
+      deltaPct = currentPrice !== 0
+        ? Number(((suggested - currentPrice) / currentPrice * 100).toFixed(2))
+        : null;
+      // > 1¢ threshold guards against floating-point drift.
+      shouldUpdate = Math.abs(deltaAbs) >= 0.01;
+    }
+    if (shouldUpdate) willUpdate += 1;
+
+    rows.push({
+      date: r.date,
+      sipp: r.sipp,
+      vehicleTypeId: vt?.id || null,
+      vehicleTypeMissing: !vt,
+      marketCheapest: r.cheapest,
+      marketVendor: r.vendor,
+      marketSampled: r.sampled,
+      currentPrice,
+      suggestedPrice: suggested,
+      deltaAbs,
+      deltaPct,
+      willUpdate: shouldUpdate
+    });
+  }
+
+  return {
+    profileId: profile.id,
+    runId,
+    strategy: profile.strategy,
+    targetRateId: profile.targetRateId || null,
+    targetRateMissing: !profile.targetRateId,
+    rows,
+    summary: {
+      sampled: rows.length,
+      withCurrent,
+      willUpdate,
+      missingVehicleType
+    }
+  };
+}
+
+export const marketScrapeComparisonService = {
+  applyStrategy,
+  aggregateCheapestBySippDate,
+  computeRunComparison
+};
