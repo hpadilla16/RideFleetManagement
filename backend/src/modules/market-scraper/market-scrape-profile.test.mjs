@@ -209,6 +209,110 @@ describe('marketScrapeProfileService.create — validation', () => {
   });
 });
 
+describe('marketScrapeProfileService.update — merged-state revalidation (Codex P1)', () => {
+  let origFindFirst, origUpdate, origLocFindFirst, origRateFindFirst;
+  let updateCalled;
+
+  const existingProfile = {
+    id: 'profile-1',
+    tenantId: 'tenant-1',
+    name: 'SJU 1-14 Daily',
+    locationCode: 'SJU',
+    windowStartDay: 1,
+    windowEndDay: 14,
+    lorDays: 3,
+    frequency: 'DAILY',
+    scheduleHour: 4,
+    scheduleMinute: 1,
+    runTimezone: 'America/Puerto_Rico',
+    sources: ['EXPEDIA'],
+    active: true,
+    strategy: 'CHEAPEST_MINUS_AMOUNT',
+    strategyAmount: 1,
+    strategyPct: null,
+    strategyFloor: null,
+    targetRateId: null,
+    autoApply: false
+  };
+
+  beforeEach(() => {
+    updateCalled = false;
+    origFindFirst = prisma.marketScrapeProfile?.findFirst;
+    origUpdate = prisma.marketScrapeProfile?.update;
+    origLocFindFirst = prisma.location.findFirst;
+    origRateFindFirst = prisma.rate.findFirst;
+    if (!prisma.marketScrapeProfile) prisma.marketScrapeProfile = {};
+    prisma.marketScrapeProfile.findFirst = async () => existingProfile;
+    prisma.marketScrapeProfile.update = async () => {
+      updateCalled = true;
+      return { ...existingProfile };
+    };
+    prisma.location.findFirst = async () => ({ id: 'loc-stub' });
+    prisma.rate.findFirst = async () => ({ id: 'rate-stub' });
+  });
+
+  afterEach(() => {
+    if (origFindFirst) prisma.marketScrapeProfile.findFirst = origFindFirst;
+    if (origUpdate) prisma.marketScrapeProfile.update = origUpdate;
+    prisma.location.findFirst = origLocFindFirst;
+    prisma.rate.findFirst = origRateFindFirst;
+  });
+
+  it('rejects PATCH that creates invalid window via partial update', async () => {
+    // existing: windowStartDay=1, windowEndDay=14. PATCH only windowStartDay=20.
+    // Before the fix: accepted. After the fix: rejected because merged state
+    // is windowStartDay=20, windowEndDay=14, which is invalid.
+    await assert.rejects(
+      marketScrapeProfileService.update('profile-1', { windowStartDay: 20 }, { tenantId: 'tenant-1' }),
+      (err) => err.message.includes('windowEndDay must be >= windowStartDay') && err.httpStatus === 400
+    );
+    assert.equal(updateCalled, false, 'prisma.update must not be called on validation failure');
+  });
+
+  it('rejects PATCH that creates invalid window via the other side', async () => {
+    // existing: 1..14. PATCH windowEndDay=0. Merged: 1..0 invalid.
+    await assert.rejects(
+      marketScrapeProfileService.update('profile-1', { windowEndDay: 0 }, { tenantId: 'tenant-1' }),
+      (err) => err.message.includes('windowEndDay must be 1..90') || err.message.includes('windowEndDay must be >= windowStartDay')
+    );
+  });
+
+  it('rejects PATCH changing strategy to STATIC_FLOOR without setting strategyFloor', async () => {
+    // existing: CHEAPEST_MINUS_AMOUNT with no floor. PATCH to STATIC_FLOOR
+    // without providing strategyFloor. Merged state has no floor → invalid.
+    await assert.rejects(
+      marketScrapeProfileService.update('profile-1', { strategy: 'STATIC_FLOOR' }, { tenantId: 'tenant-1' }),
+      (err) => err.message.includes('strategyFloor must be > 0 for STATIC_FLOOR strategy')
+    );
+  });
+
+  it('accepts PATCH that keeps the merged window valid', async () => {
+    // PATCH windowEndDay=20. Merged: 1..20 — valid.
+    await marketScrapeProfileService.update(
+      'profile-1',
+      { windowEndDay: 20 },
+      { tenantId: 'tenant-1' }
+    );
+    assert.equal(updateCalled, true);
+  });
+
+  it('accepts PATCH switching strategy to STATIC_FLOOR with floor included', async () => {
+    await marketScrapeProfileService.update(
+      'profile-1',
+      { strategy: 'STATIC_FLOOR', strategyFloor: 25 },
+      { tenantId: 'tenant-1' }
+    );
+    assert.equal(updateCalled, true);
+  });
+
+  it('rejects PATCH enabling autoApply without targetRateId on merged state', async () => {
+    await assert.rejects(
+      marketScrapeProfileService.update('profile-1', { autoApply: true }, { tenantId: 'tenant-1' }),
+      (err) => err.message.includes('autoApply requires targetRateId')
+    );
+  });
+});
+
 describe('marketScrapeProfileService.getRunCheapestPerSipp — aggregation', () => {
   let origGetRun, origObsFindMany;
 

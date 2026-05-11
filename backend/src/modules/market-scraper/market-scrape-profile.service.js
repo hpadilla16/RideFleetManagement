@@ -195,8 +195,36 @@ export const marketScrapeProfileService = {
     const existing = await this.getById(id, scope);
     if (!existing) throw Object.assign(new Error('Profile not found'), { httpStatus: 404 });
 
-    // Re-validate cross-field constraints against the merged row state.
+    // Re-validate cross-field constraints against the MERGED row state, not
+    // just the patch. Codex P1 review on PR #64: a request like
+    // `PATCH {"windowStartDay": 20}` against an existing profile with
+    // `windowEndDay: 14` previously slipped through because validation only
+    // saw `data` (which only had windowStartDay) and didn't check against
+    // the existing.windowEndDay value.
     const merged = { ...existing, ...data };
+    const mustMerged = (cond, msg) => {
+      if (!cond) throw Object.assign(new Error(msg), { httpStatus: 400 });
+    };
+
+    // Window bounds — must hold on the merged state regardless of which
+    // field the patch touched.
+    mustMerged(
+      Number(merged.windowEndDay) >= Number(merged.windowStartDay),
+      'windowEndDay must be >= windowStartDay'
+    );
+
+    // Strategy-specific param requirements on the merged state. If the patch
+    // changes strategy to STATIC_FLOOR (or strategy was already STATIC_FLOOR
+    // and the patch nulls strategyFloor), strategyFloor must be positive.
+    if (merged.strategy === 'STATIC_FLOOR') {
+      const floor = merged.strategyFloor != null ? Number(merged.strategyFloor) : null;
+      mustMerged(
+        floor != null && floor > 0,
+        'strategyFloor must be > 0 for STATIC_FLOOR strategy'
+      );
+    }
+
+    // autoApply requires a targetRate — same rule as on create.
     if (merged.autoApply === true && !merged.targetRateId) {
       throw Object.assign(new Error('autoApply requires targetRateId'), { httpStatus: 400 });
     }
