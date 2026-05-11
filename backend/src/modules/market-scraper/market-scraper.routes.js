@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { marketScrapeProfileService } from './market-scrape-profile.service.js';
 import { computeRunComparison } from './market-scrape-comparison.service.js';
+import { applyRunSuggestions } from './market-scrape-correction.service.js';
 import { scopeFor } from '../../lib/tenant-scope.js';
 
 /**
@@ -15,6 +16,7 @@ import { scopeFor } from '../../lib/tenant-scope.js';
  *   GET    /api/market-scraper/runs/:runId
  *   GET    /api/market-scraper/runs/:runId/cheapest      (per-(date,sipp) cheapest)
  *   GET    /api/market-scraper/runs/:runId/comparison    (diff vs current RateDailyPrice — B.4)
+ *   POST   /api/market-scraper/runs/:runId/apply         (write suggestions to RateDailyPrice — B.4)
  *
  *   GET    /api/market-scraper/profiles/:id/observations
  *
@@ -108,6 +110,17 @@ marketScraperRouter.get('/runs/:runId/cheapest', async (req, res, next) => {
 marketScraperRouter.get('/runs/:runId/comparison', async (req, res, next) => {
   try {
     const out = await computeRunComparison(req.params.runId, { scope: scopeFor(req) });
+    res.json(out);
+  } catch (e) { handle(e, res, next); }
+});
+
+marketScraperRouter.post('/runs/:runId/apply', async (req, res, next) => {
+  try {
+    // force=true bypasses the profile.autoApply gate — used by the manual
+    // "Apply now" button on the comparison UI. The cron-driven path never
+    // passes force; it relies on profile.autoApply being true.
+    const force = req.body?.force === true || req.query?.force === 'true';
+    const out = await applyRunSuggestions(req.params.runId, { scope: scopeFor(req), force });
     res.json(out);
   } catch (e) { handle(e, res, next); }
 });
