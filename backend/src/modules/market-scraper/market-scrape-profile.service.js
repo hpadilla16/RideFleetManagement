@@ -81,6 +81,11 @@ function validateProfilePayload(data, { partial = false } = {}) {
     must(Array.isArray(data.sources) && data.sources.length > 0, 'sources must be a non-empty array');
     const bad = data.sources.filter((s) => !VALID_SOURCES.has(String(s)));
     must(bad.length === 0, `unknown source(s): ${bad.join(', ')} (valid: ${[...VALID_SOURCES].join(', ')})`);
+  } else if (!partial) {
+    // sources has no DB default and is required by the schema. On CREATE we
+    // must surface "missing sources" as a 400 instead of letting Prisma blow
+    // up with an opaque 500. Codex P2 review on PR #64.
+    throw Object.assign(new Error('sources is required (e.g. ["EXPEDIA"])'), { httpStatus: 400 });
   }
 
   if (data.strategy !== undefined) {

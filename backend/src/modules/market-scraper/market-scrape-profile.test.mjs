@@ -134,6 +134,17 @@ describe('marketScrapeProfileService.create — validation', () => {
     );
   });
 
+  it('rejects create without sources (regression: Codex P2 on PR #64)', async () => {
+    // Without this check, Prisma would error at the DB layer ("Argument
+    // `sources` is missing.") returning an opaque 500. We want a 400 from
+    // the service so the client gets actionable feedback.
+    const { sources, ...withoutSources } = validBase;
+    await assert.rejects(
+      marketScrapeProfileService.create(withoutSources, { tenantId: 'tenant-1' }),
+      (err) => err.message.includes('sources is required') && err.httpStatus === 400
+    );
+  });
+
   it('rejects unknown strategy', async () => {
     await assert.rejects(
       marketScrapeProfileService.create(
