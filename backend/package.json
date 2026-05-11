@@ -7,7 +7,7 @@
     "dev": "node src/main.js",
     "start": "node src/main.js",
     "start:cluster": "node src/cluster.js",
-    "test": "npm run test:vehicles && npm run test:fees && npm run test:booking-engine && npm run test:stop-sales && npm run test:review-email && npm run test:public-booking && npm run test:planner && npm run test:rates && npm run test:portal && npm run test:carsharing && npm run test:issues && npm run test:tolls && npm run test:sms && npm run test:payments && npm run test:auth && npm run test:cache && npm run test:commissions && npm run test:puppeteer && npm run test:rental-agreements && npm run test:reservations",
+    "test": "npm run test:vehicles && npm run test:fees && npm run test:booking-engine && npm run test:stop-sales && npm run test:review-email && npm run test:public-booking && npm run test:planner && npm run test:rates && npm run test:portal && npm run test:carsharing && npm run test:issues && npm run test:tolls && npm run test:sms && npm run test:payments && npm run test:auth && npm run test:cache && npm run test:commissions && npm run test:puppeteer && npm run test:rental-agreements && npm run test:reservations && npm run test:market-scraper",
     "test:vehicles": "node --test src/modules/vehicles/vehicle-intelligence.test.mjs src/modules/vehicles/telematics-zubie.test.mjs",
     "test:fees": "node --test src/modules/fees/fees.test.mjs",
     "test:booking-engine": "node --test src/modules/booking-engine/booking-engine.test.mjs",
@@ -17,6 +17,7 @@
     "test:public-booking": "node --test src/modules/public-booking/public-booking.test.mjs src/modules/public-booking/payment-session.test.mjs src/modules/public-booking/payarc-hosted-fields.test.mjs src/modules/public-booking/account-deletion.test.mjs",
     "test:planner": "node --test src/modules/planner/planner.service.test.mjs",
     "test:rates": "node --test src/modules/rates/revenue-pricing.test.mjs",
+    "test:market-scraper": "node --test src/modules/market-scraper/market-scrape-profile.test.mjs src/modules/market-scraper/market-scrape-runner.test.mjs src/modules/market-scraper/market-scrape-comparison.test.mjs src/modules/market-scraper/market-scrape-correction.test.mjs",
     "test:portal": "node --test src/modules/customer-portal/customer-portal-self-service.test.mjs",
     "test:carsharing": "node --test src/modules/car-sharing/car-sharing-smoke.test.mjs src/modules/car-sharing/car-sharing-fulfillment.test.mjs src/modules/car-sharing/car-sharing-handoff.test.mjs",
     "test:issues": "node --test src/modules/issue-center/issue-center-attachments.test.mjs src/modules/issue-center/issue-center-claims-fields.test.mjs src/modules/issue-center/issue-center-packets.test.mjs src/modules/issue-center/issue-center-packet-html.test.mjs src/modules/issue-center/issue-center-next-best-action.test.mjs src/modules/issue-center/issue-center-workflow-actions.test.mjs src/modules/issue-center/issue-center-evidence-checklist.test.mjs src/modules/issue-center/issue-center-evidence-capture.test.mjs src/modules/issue-center/issue-center-evidence-request.test.mjs src/modules/issue-center/issue-center-request-workflow.test.mjs src/modules/issue-center/issue-center-recovery-actions.test.mjs src/modules/issue-center/issue-center-inspection-compare.test.mjs src/modules/issue-center/issue-center-charge-draft.test.mjs",
@@ -55,6 +56,7 @@
     "winston": "^3.19.0"
   },
   "devDependencies": {
+    "playwright-core": "^1.59.1",
     "prisma": "^6.14.0"
   }
 }

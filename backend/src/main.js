@@ -13,6 +13,7 @@ import { additionalServicesRouter } from './modules/additional-services/addition
 import { feesRouter } from './modules/fees/fees.routes.js';
 import { stopSalesRouter } from './modules/stop-sales/stop-sales.routes.js';
 import { ratesRouter } from './modules/rates/rates.routes.js';
+import { marketScraperRouter } from './modules/market-scraper/market-scraper.routes.js';
 import { authRouter } from './modules/auth/auth.routes.js';
 import { rentalAgreementsRouter } from './modules/rental-agreements/rental-agreements.routes.js';
 import { addendumSignaturePublicRouter } from './modules/rental-agreements/addendum-signature-public.routes.js';
@@ -118,6 +119,7 @@ app.use('/api/additional-services', requireAuth, requireModuleAccess('settings')
 app.use('/api/fees', requireAuth, requireModuleAccess('settings'), requireRole('ADMIN', 'OPS'), feesRouter);
 app.use('/api/stop-sales', requireAuth, requireModuleAccess('settings'), requireRole('ADMIN', 'OPS'), stopSalesRouter);
 app.use('/api/rates', requireAuth, requireModuleAccess('settings'), requireRole('ADMIN', 'OPS'), ratesRouter);
+app.use('/api/market-scraper', requireAuth, requireModuleAccess('settings'), requireRole('ADMIN', 'OPS'), marketScraperRouter);
 app.use('/api/rental-agreements', requireAuth, requireModuleAccess('reservations'), rentalAgreementsRouter);
 app.use('/api/reports', requireAuth, requireModuleAccess('reports'), reportsRouter);
 app.use('/api/commissions', requireAuth, requireModuleAccess('reports'), commissionsRouter);

@@ -419,6 +419,7 @@ model Tenant {
   franchises                  Franchise[]
   agreementAddendums          RentalAgreementAddendum[]
   vehicleClassStopSales       VehicleClassStopSale[]
+  marketScrapeProfiles        MarketScrapeProfile[]
 }
 
 model Location {
@@ -479,11 +480,11 @@ model VehicleType {
 }
 
 model Vehicle {
-  id                String           @id @default(cuid())
+  id                String                 @id @default(cuid())
   tenantId          String?
-  tenant            Tenant?          @relation(fields: [tenantId], references: [id])
+  tenant            Tenant?                @relation(fields: [tenantId], references: [id])
   internalNumber    String
-  vin               String?          @unique
+  vin               String?                @unique
   plate             String?
   tollTagNumber     String?
   tollStickerNumber String?
@@ -491,9 +492,9 @@ model Vehicle {
   model             String?
   year              Int?
   color             String?
-  mileage           Int              @default(0)
-  status            VehicleStatus    @default(AVAILABLE)
-  fleetMode         VehicleFleetMode @default(RENTAL_ONLY)
+  mileage           Int                    @default(0)
+  status            VehicleStatus          @default(AVAILABLE)
+  fleetMode         VehicleFleetMode       @default(RENTAL_ONLY)
   // Program partition — see VehicleProgramCategory enum docs.
   // Existing vehicles default to BOTH (no behavior change at write time);
   // tenants with a loaner program (e.g. Triangle) tag their loaner units
@@ -1890,8 +1891,9 @@ model Rate {
   createdAt           DateTime  @default(now())
   updatedAt           DateTime  @updatedAt
 
-  rateItems   RateItem[]
-  dailyPrices RateDailyPrice[]
+  rateItems            RateItem[]
+  dailyPrices          RateDailyPrice[]
+  marketScrapeProfiles MarketScrapeProfile[] @relation("MarketScrapeProfileTargetRate")
 
   @@unique([tenantId, rateCode])
   @@index([locationId, isActive])
@@ -2388,4 +2390,213 @@ model StoreBoardToken {
 
   @@index([tenantId])
   @@index([locationId])
+}
+
+// =============================================================================
+// Market scraper — Rate Highway-style market intelligence pipeline.
+//
+// MarketScrapeProfile: per-tenant configuration that defines a scrape job —
+//   target location + lookahead window + LOR + frequency + schedule + pricing
+//   strategy applied to the cheapest-price results. One Rate can be the target
+//   of multiple profiles (e.g. a Daily profile for the 1-14 day window and a
+//   Weekly profile for the 15-30 day window, like Rate Highway uses).
+//
+// MarketScrapeRun: one execution of a profile. Stores aggregate metrics
+//   (request counts, observations produced) and run status. The Observations
+//   it produced live in MarketObservation.
+//
+// MarketObservation: the unit fact. One row per (run, pickupDate, sipp,
+//   vendor) — i.e. for a given scrape execution and search day, this records
+//   one competitor listing we saw for one car class from one vendor. Cheapest-
+//   per-(profile, pickupDate, sipp) is derived on read (or by an upstream
+//   aggregator before applying a strategy).
+//
+// Comparison vs current RateDailyPrice + the auto-apply ("correction") step
+// run on top of these tables; they don't need their own persistent state
+// for MVP — the import endpoint (/api/rates/:id/daily-prices/import) is the
+// audit trail for what got applied.
+// =============================================================================
+
+enum MarketScrapeFrequency {
+  // Run every day at scheduleHour:scheduleMinute (local to runTimezone).
+  DAILY
+  // Run every Monday at scheduleHour:scheduleMinute. Lower-volume use case
+  // for tenants who don't want daily noise.
+  WEEKLY
+}
+
+enum MarketScrapeRunStatus {
+  PENDING
+  RUNNING
+  SUCCESS
+  // Some requests succeeded, some failed. Partial data still usable but
+  // gaps exist for the failed (date, sipp) combinations.
+  PARTIAL
+  FAILED
+}
+
+enum MarketObservationStatus {
+  // Found a price for this (sipp, pickupDate, vendor).
+  FOUND
+  // Source returned this SIPP slot but marked it sold out / closed.
+  CLOSED
+  // Raw category from the source couldn't be mapped to an ACRISS code. Stored
+  // with rawCategory populated so we can extend the SIPP map.
+  UNMAPPED
+  // Scrape errored for this (date, sipp) — e.g. timeout, anti-bot block.
+  ERROR
+}
+
+enum MarketPricingStrategy {
+  // SuggestedPrice = cheapestCompetitor - strategyAmount.
+  CHEAPEST_MINUS_AMOUNT
+  // SuggestedPrice = cheapestCompetitor (no discount).
+  MATCH_CHEAPEST
+  // SuggestedPrice = cheapestCompetitor * (1 + strategyPct/100). For "price-up"
+  // when our brand commands a premium.
+  CHEAPEST_PLUS_PCT
+  // SuggestedPrice = MAX(cheapestCompetitor, strategyFloor). Hard floor.
+  STATIC_FLOOR
+}
+
+model MarketScrapeProfile {
+  id       String @id @default(cuid())
+  tenantId String
+  tenant   Tenant @relation(fields: [tenantId], references: [id])
+
+  // Human-readable label, must be unique per tenant. Example: "SJU 1-14 Daily"
+  // or "SJU 15-30 Weekly" mirroring Rate Highway's naming convention.
+  name String
+
+  // Airport code or Location.code in the tenant's location catalog. The
+  // scraper looks up the matching Location row when generating the search URL.
+  locationCode String
+
+  // Lookahead window relative to "today". A profile with windowStartDay=1,
+  // windowEndDay=14 scrapes pickup dates tomorrow .. today+14. Splitting
+  // near-term (1-14) vs longer-out (15-30) lets tenants apply different
+  // strategies (close-in is less price-sensitive than far-out).
+  windowStartDay Int
+  windowEndDay   Int
+
+  // Length of rental. 3 days is the typical leisure default; Rate Highway
+  // uses 1 (Daily profile) + 7 (Weekly profile).
+  lorDays Int @default(3)
+
+  // When + how often the scheduler kicks this profile off.
+  frequency      MarketScrapeFrequency @default(DAILY)
+  scheduleHour   Int                   @default(4)
+  scheduleMinute Int                   @default(1)
+  runTimezone    String                @default("America/Puerto_Rico")
+
+  // JSON array of source codes the scraper should query, e.g. ["EXPEDIA"].
+  // Future: ["EXPEDIA", "KAYAK", "PRICELINE"] for multi-source coverage.
+  sources Json
+
+  active Boolean @default(true)
+
+  // Pricing strategy applied to (cheapest competitor per (date, sipp)) to
+  // produce the SuggestedAmount we'd push to RateDailyPrice. Reusing the
+  // same vocabulary as the standalone scraper CLI.
+  strategy       MarketPricingStrategy @default(CHEAPEST_MINUS_AMOUNT)
+  strategyAmount Decimal?              @db.Decimal(10, 2)
+  strategyPct    Decimal?              @db.Decimal(5, 2)
+  strategyFloor  Decimal?              @db.Decimal(10, 2)
+
+  // The Rate whose RateDailyPrice rows we update with the suggestions. Null
+  // until the tenant wires it up — profiles without a target run for
+  // research only (XLSX output, no auto-apply).
+  targetRateId String?
+  targetRate   Rate?   @relation("MarketScrapeProfileTargetRate", fields: [targetRateId], references: [id])
+
+  // When true, the Correction stage POSTs the suggestions to
+  // /api/rates/:id/daily-prices/import after each successful run.
+  // When false, the scrape produces an XLSX for human review only.
+  autoApply Boolean @default(false)
+
+  // Last-run tracking for the Activity Queue UI.
+  lastRunAt     DateTime?
+  lastSuccessAt DateTime?
+  lastRunStatus MarketScrapeRunStatus?
+  lastRunError  String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  runs         MarketScrapeRun[]
+  observations MarketObservation[]
+
+  @@unique([tenantId, name])
+  @@index([tenantId, active])
+  @@index([targetRateId])
+}
+
+model MarketScrapeRun {
+  id        String                @id @default(cuid())
+  profileId String
+  profile   MarketScrapeProfile   @relation(fields: [profileId], references: [id], onDelete: Cascade)
+  status    MarketScrapeRunStatus @default(PENDING)
+
+  startedAt   DateTime  @default(now())
+  finishedAt  DateTime?
+  durationSec Int?
+
+  // Per-request counters so the Activity Queue can show "14 of 15 OK".
+  requestsOk  Int @default(0)
+  requestsErr Int @default(0)
+
+  // Total observations produced (across all requests). Equivalent to the
+  // count of MarketObservation rows for this run.
+  observationsCount Int @default(0)
+
+  // The number of (date, sipp) cells the Correction step actually wrote to
+  // RateDailyPrice. 0 means the profile was research-only or auto-apply
+  // produced no diff.
+  pricesApplied Int @default(0)
+
+  errorMessage String?
+
+  observations MarketObservation[]
+
+  @@index([profileId, startedAt])
+}
+
+model MarketObservation {
+  id    String          @id @default(cuid())
+  runId String
+  run   MarketScrapeRun @relation(fields: [runId], references: [id], onDelete: Cascade)
+
+  // Denormalized profileId so we can query observations across runs of the
+  // same profile (e.g. "show me the 30-day price history for SIPP=IFAR
+  // pickup=2026-05-20 at SJU"). Always equal to run.profileId.
+  profileId String
+  profile   MarketScrapeProfile @relation(fields: [profileId], references: [id], onDelete: Cascade)
+
+  observedAt DateTime @default(now())
+  pickupDate DateTime @db.Date
+  returnDate DateTime @db.Date
+  lorDays    Int
+
+  sipp        String
+  // What the source actually returned before we ran it through the SIPP map.
+  // Useful for debugging UNMAPPED rows ("our scraper saw 'Premium Convertible'
+  // but didn't know how to map it").
+  rawCategory String?
+  vendor      String?
+
+  source String @default("EXPEDIA")
+
+  dailyPrice          Decimal? @db.Decimal(10, 2)
+  totalPrice          Decimal? @db.Decimal(10, 2)
+  // Total / LOR — the "real" per-day cost including fees & taxes. The daily
+  // price Expedia shows prominently is pre-tax teaser; the effectiveDailyPrice
+  // is what the customer actually pays per day.
+  effectiveDailyPrice Decimal? @db.Decimal(10, 2)
+  currency            String   @default("USD")
+
+  status MarketObservationStatus @default(FOUND)
+
+  @@index([profileId, pickupDate, sipp])
+  @@index([runId])
+  @@index([pickupDate, sipp])
 }

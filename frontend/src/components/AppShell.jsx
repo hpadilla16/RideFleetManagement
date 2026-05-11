@@ -22,6 +22,7 @@ const NAV_ITEMS = [
   { href: '/issues', labelKey: 'nav.issueCenter', moduleKey: 'issueCenter' },
   { href: '/loaner', labelKey: 'nav.loaner', feature: 'dealershipLoaner', moduleKey: 'loaner' },
   { href: '/tolls', labelKey: 'nav.tolls', moduleKey: 'tolls' },
+  { href: '/market-intelligence', labelKey: 'nav.marketIntelligence', adminOnly: true, moduleKey: 'settings' },
   { href: '/knowledge-base', labelKey: 'nav.knowledgeBase' },
   { href: '/settings', labelKey: 'nav.settings', moduleKey: 'settings' },
   { href: '/tenants', labelKey: 'nav.tenants', superOnly: true, moduleKey: 'tenants' },
