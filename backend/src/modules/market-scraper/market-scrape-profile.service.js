@@ -100,10 +100,14 @@ function validateProfilePayload(data, { partial = false } = {}) {
     must(Number.isFinite(v), 'strategyPct must be a number');
   }
   if (effectiveStrategy === 'STATIC_FLOOR') {
-    if (data.strategyFloor !== undefined) {
+    if (data.strategyFloor != null) {
+      // Explicit value provided — must be a positive number.
       const v = Number(data.strategyFloor);
       must(Number.isFinite(v) && v > 0, 'strategyFloor must be > 0 for STATIC_FLOOR strategy');
     } else if (!partial) {
+      // CREATE: strategyFloor is required when strategy is STATIC_FLOOR. We
+      // treat both undefined and null as "not provided" so callers can clear
+      // the field without sneaking past validation.
       throw Object.assign(new Error('strategyFloor is required for STATIC_FLOOR strategy'), { httpStatus: 400 });
     }
   }
