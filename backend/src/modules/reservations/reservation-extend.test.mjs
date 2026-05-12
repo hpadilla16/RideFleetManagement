@@ -331,6 +331,87 @@ describe('reservation-extend (unified flow)', () => {
       assert.equal(base.total, 250);
     });
 
+    it('does NOT rescale multi-unit FLAT SERVICE when qty != oldTotalDays (Codex P1 on PR #67)', async () => {
+      // computeAdditionalServiceLine stores SERVICE quantity as the
+      // unit count, not days. A 2-unit FLAT child-seat service has
+      // qty=2 totally independent of the rental's day count. If the
+      // strict qty === oldTotalDays gate is dropped for SERVICE rows,
+      // those FLAT multi-unit rows get rewritten as day-count charges
+      // and overbilled on extension. Keep the strict equality check
+      // for non-INSURANCE UNIT sources so this row stays put when qty
+      // doesn't match oldTotalDays.
+      const state = makeMockDb({
+        initial: {
+          charges: [
+            { id: 'c-base', reservationId: 'res-1', name: 'Daily',
+              chargeType: 'DAILY', quantity: 3, rate: 50, total: 150,
+              taxable: true, selected: true, sortOrder: 0, source: 'BASE_RATE',
+              createdAt: new Date('2026-05-01T10:00:00Z') },
+            { id: 'c-seats', reservationId: 'res-1', name: 'Child Seats x2',
+              chargeType: 'UNIT', quantity: 2, rate: 25, total: 50,
+              taxable: true, selected: true, sortOrder: 2,
+              source: 'SERVICE', sourceRefId: 'svc-seats',
+              createdAt: new Date('2026-05-01T10:00:00Z') }
+          ],
+          reservation: {
+            pickupAt: new Date('2026-05-10T00:00:00Z'),
+            returnAt: new Date('2026-05-13T00:00:00Z') // 3 days
+          }
+        }
+      });
+      await reservationExtendService.extendReservation({
+        reservationId: 'res-1',
+        newReturnAt: new Date('2026-05-17T00:00:00Z'), // +4 days → 7 total
+        extensionDailyRate: null, note: '', actorUserId: 'u-1',
+        tenantScope: { tenantId: 'tenant-1' }
+      });
+      const seats = state.charges.find((c) => c.id === 'c-seats');
+      assert.equal(seats.quantity, 2, 'FLAT multi-unit SERVICE qty unchanged when != oldTotalDays');
+      assert.equal(seats.total, 50, 'FLAT multi-unit SERVICE total unchanged');
+    });
+
+    it('DOES rescale a per-day row even when qty != oldTotalDays (RES-368604, 2026-05-12)', async () => {
+      // RES-368604 surfaced this: Insurance was provisioned with qty=2
+      // for a 2-day rental, but a returnAt time drift (5/7 12:45 →
+      // 5/9 16:45 = 52 hours) made rentalDays() return ceil(52/24)=3.
+      // The previous strict-equality predicate (qty === oldTotalDays)
+      // refused to rescale because 2 !== 3, so Insurance got stuck at
+      // qty=2 through an extension. The relaxed predicate (qty > 1)
+      // accepts any per-day-source UNIT row with qty>1, and the rescale
+      // uses row.rate (the per-day amount) × newTotalDays, so the new
+      // total is correct regardless of the prior quantity.
+      const state = makeMockDb({
+        initial: {
+          reservation: {
+            pickupAt: new Date('2026-05-07T12:45:00Z'),
+            returnAt: new Date('2026-05-09T16:45:00Z') // 52 hours → ceil to 3 days
+          },
+          charges: [
+            { id: 'c-base', reservationId: 'res-1', name: 'Daily',
+              chargeType: 'DAILY', quantity: 3, rate: 100, total: 300,
+              taxable: true, selected: true, sortOrder: 0, source: 'BASE_RATE',
+              createdAt: new Date('2026-05-01T10:00:00Z') },
+            { id: 'c-ins', reservationId: 'res-1', name: 'Insurance: Full Super Collision',
+              chargeType: 'UNIT', quantity: 2, rate: 32.99, total: 65.98,
+              taxable: true, selected: true, sortOrder: 2,
+              source: 'INSURANCE', sourceRefId: 'plan-1',
+              createdAt: new Date('2026-05-01T10:00:00Z') }
+          ]
+        }
+      });
+      await reservationExtendService.extendReservation({
+        reservationId: 'res-1',
+        newReturnAt: new Date('2026-05-12T20:45:00Z'), // 128 hours from pickup → 6 days
+        extensionDailyRate: null, note: '', actorUserId: 'u-1',
+        tenantScope: { tenantId: 'tenant-1' }
+      });
+      const ins = state.charges.find((c) => c.id === 'c-ins');
+      assert.equal(ins.quantity, 6, 'insurance rescales to newTotalDays even though qty != oldTotalDays');
+      assert.equal(ins.total, Number((6 * 32.99).toFixed(2)), 'insurance total = newDays * rate');
+      const base = state.charges.find((c) => c.id === 'c-base');
+      assert.equal(base.quantity, 3, 'BASE_RATE still untouched');
+    });
+
     it('does NOT rescale FIXED-mode INSURANCE on a 1-day rental (Codex P1 on PR #66)', async () => {
       // FIXED / PERCENTAGE insurance rows are stored as quantity=1
       // regardless of rental length (see computeInsuranceLine in
