@@ -2192,6 +2192,15 @@ export const rentalAgreementsService = {
             reservationNumber: true,
             franchiseId: true,
             notes: true,
+            // pickupAt / returnAt / originalReturnAt added 2026-05-12 — print
+            // template needs the *current* reservation returnAt (and the
+            // original pre-extension returnAt) to render
+            // "Originally returned X · Now returns Y" on page 1 when the
+            // reservation has been extended past the signed agreement date.
+            // See renderAgreementHtml's returnAtDisplay builder.
+            pickupAt: true,
+            returnAt: true,
+            originalReturnAt: true,
             signatureSignedAt: true,
             signatureSignedBy: true,
             signatureDataUrl: true,
@@ -2375,7 +2384,36 @@ export const rentalAgreementsService = {
       insurancePolicy: esc(agreement.insurancePolicyNumber || '-'),
       // Dates & locations
       pickupAt: esc(fmtDate(agreement.pickupAt)),
-      returnAt: esc(fmtDate(agreement.returnAt)),
+      // returnAt on the print page (2026-05-12 per Hector): show both the
+      // originally signed return date AND the current (extended) return
+      // date when they differ. The reservation tracks the post-extension
+      // value on returnAt and the pre-extension value on originalReturnAt
+      // (set on the FIRST extension). agreement.returnAt is locked at
+      // signing, so any drift between agreement.returnAt and
+      // reservation.returnAt means the rental has been extended at least
+      // once. Detection: any of (originalReturnAt is set) OR
+      // (reservation.returnAt differs from agreement.returnAt). Display
+      // is inline HTML in the existing {{returnAt}} template slot, so no
+      // template changes are required (custom tenant templates still
+      // render the original date; ours adds the "Now returns" line under
+      // it).
+      returnAt: (() => {
+        const agreementReturn = agreement.returnAt;
+        const liveReturn = agreement.reservation?.returnAt;
+        const preExtensionReturn = agreement.reservation?.originalReturnAt;
+        const sameMs = (a, b) => {
+          if (!a || !b) return a === b;
+          return new Date(a).getTime() === new Date(b).getTime();
+        };
+        const extended = !!preExtensionReturn && !sameMs(liveReturn, agreementReturn);
+        if (!extended) {
+          return esc(fmtDate(agreementReturn));
+        }
+        // Use agreement.returnAt as the "original" line (it is the actual
+        // signed value; reservation.originalReturnAt should equal it but
+        // we trust the agreement column as the legal record).
+        return `${esc(fmtDate(agreementReturn))}<br><small style="color:#6b7a9a;font-weight:500">Now returns: ${esc(fmtDate(liveReturn))} (per addendum)</small>`;
+      })(),
       pickupLocation: esc(agreement.pickupLocation?.name || '-'),
       pickupLocationAddress: esc(agreement.pickupLocation?.address || ''),
       returnLocation: esc(agreement.returnLocation?.name || '-'),
