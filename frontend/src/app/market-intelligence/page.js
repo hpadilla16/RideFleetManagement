@@ -272,7 +272,7 @@ function Inner({ token, me, logout }) {
               <div style={{ marginTop: 6, display: 'flex', gap: 8 }}>
                 <button
                   onClick={(e) => { e.stopPropagation(); setEditing({ ...p }); }}
-                  style={{ fontSize: 11, padding: '2px 8px', border: '1px solid #cbd5e1', background: '#fff', borderRadius: 4, cursor: 'pointer' }}
+                  style={{ fontSize: 11, padding: '2px 8px', border: '1px solid #cbd5e1', color: '#0f172a', background: '#fff', borderRadius: 4, cursor: 'pointer' }}
                 >Edit</button>
                 <button
                   onClick={(e) => { e.stopPropagation(); deleteProfile(p.id); }}
@@ -300,6 +300,22 @@ function Inner({ token, me, logout }) {
 
           {selectedProfileId && selectedProfile && (
             <div>
+              {runs.length === 0 && (
+                <div style={{
+                  padding: 12,
+                  marginBottom: 12,
+                  background: '#fef3c7',
+                  border: '1px solid #fbbf24',
+                  borderRadius: 6,
+                  fontSize: 13,
+                  color: '#92400e'
+                }}>
+                  <strong>This profile has no runs yet.</strong> Profiles are configuration
+                  only — they don't run automatically until the scraper droplet is provisioned
+                  (Phase 3) with Bright Data Browser API + a daily cron (Phase 6). Until then,
+                  the profile sits idle. Manual run trigger from this UI is on the roadmap.
+                </div>
+              )}
               <h3 style={{ fontSize: 16, fontWeight: 600, margin: '0 0 12px' }}>{selectedProfile.name} — Recent runs</h3>
               <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13, marginBottom: 24 }}>
                 <thead>
@@ -573,23 +589,33 @@ function ProfileEditor({ initial, onCancel, onSave, tenants }) {
             style={inputStyle} placeholder="e.g. clxxx..." />
         </Field>
 
-        <div style={{ display: 'flex', gap: 16, marginTop: 8 }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 8 }}>
           <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13 }}>
             <input type="checkbox" checked={!!form.active} onChange={(e) => update('active', e.target.checked)} />
             Active
           </label>
-          <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13 }}>
-            <input
-              type="checkbox" checked={!!form.autoApply}
-              onChange={(e) => update('autoApply', e.target.checked)}
-              disabled={!form.targetRateId}
-            />
-            Auto-apply (writes to RateDailyPrice each run)
-          </label>
+          <div>
+            <label style={{
+              display: 'flex', alignItems: 'center', gap: 6, fontSize: 13,
+              opacity: !form.targetRateId ? 0.5 : 1
+            }}>
+              <input
+                type="checkbox" checked={!!form.autoApply}
+                onChange={(e) => update('autoApply', e.target.checked)}
+                disabled={!form.targetRateId}
+              />
+              Auto-apply (writes to RateDailyPrice each run)
+            </label>
+            {!form.targetRateId && (
+              <div style={{ fontSize: 11, color: '#b45309', marginLeft: 24, marginTop: 2 }}>
+                Set a Target Rate ID above to enable auto-apply. Without a target, this profile runs as research-only — observations get persisted but no prices are written.
+              </div>
+            )}
+          </div>
         </div>
 
         <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 20 }}>
-          <button onClick={onCancel} style={{ padding: '8px 16px', borderRadius: 6, border: '1px solid #cbd5e1', background: '#fff', cursor: 'pointer' }}>
+          <button onClick={onCancel} style={{ padding: '8px 16px', borderRadius: 6, border: '1px solid #cbd5e1', color: '#0f172a', background: '#fff', cursor: 'pointer' }}>
             Cancel
           </button>
           <button onClick={handleSave} style={{ padding: '8px 16px', borderRadius: 6, border: 'none', background: '#0284c7', color: '#fff', cursor: 'pointer', fontWeight: 600 }}>
