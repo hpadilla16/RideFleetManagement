@@ -279,6 +279,129 @@ describe('reservation-extend (unified flow)', () => {
       assert.equal(ext.total, 100);
     });
 
+    it('does NOT rescale base row when source is legacy "DAILY" (RES-368604)', async () => {
+      // Older booking-engine paths persisted the base rental row with
+      // source='DAILY' (not 'BASE_RATE'). RES-368604 surfaced this in
+      // prod on 2026-05-12 — the original Bug 8 fix matched only
+      // source==='BASE_RATE' and was still rescaling these legacy rows.
+      // The whitelist-based predicate must leave any DAILY row whose
+      // source is NOT in PER_DAY_LIKE_SOURCES alone.
+      const state = makeMockDb({
+        initial: {
+          charges: [
+            { id: 'c-base-legacy', reservationId: 'res-1', name: 'Daily',
+              chargeType: 'DAILY', quantity: 5, rate: 50, total: 250,
+              taxable: true, selected: true, sortOrder: 0,
+              source: 'DAILY', sourceRefId: null,
+              createdAt: new Date('2026-05-01T10:00:00Z') }
+          ]
+        }
+      });
+      await reservationExtendService.extendReservation({
+        reservationId: 'res-1',
+        newReturnAt: new Date('2026-05-17T00:00:00Z'),
+        extensionDailyRate: null, note: '', actorUserId: 'u-1',
+        tenantScope: { tenantId: 'tenant-1' }
+      });
+      const base = state.charges.find((c) => c.id === 'c-base-legacy');
+      assert.equal(base.quantity, 5, 'legacy DAILY base row not rescaled');
+      assert.equal(base.total, 250);
+    });
+
+    it('does NOT rescale base row when source is null/empty (very legacy)', async () => {
+      const state = makeMockDb({
+        initial: {
+          charges: [
+            { id: 'c-base-null', reservationId: 'res-1', name: 'Daily',
+              chargeType: 'DAILY', quantity: 5, rate: 50, total: 250,
+              taxable: true, selected: true, sortOrder: 0,
+              source: null, sourceRefId: null,
+              createdAt: new Date('2026-05-01T10:00:00Z') }
+          ]
+        }
+      });
+      await reservationExtendService.extendReservation({
+        reservationId: 'res-1',
+        newReturnAt: new Date('2026-05-17T00:00:00Z'),
+        extensionDailyRate: null, note: '', actorUserId: 'u-1',
+        tenantScope: { tenantId: 'tenant-1' }
+      });
+      const base = state.charges.find((c) => c.id === 'c-base-null');
+      assert.equal(base.quantity, 5);
+      assert.equal(base.total, 250);
+    });
+
+    it('does NOT rescale FIXED-mode INSURANCE on a 1-day rental (Codex P1 on PR #66)', async () => {
+      // FIXED / PERCENTAGE insurance rows are stored as quantity=1
+      // regardless of rental length (see computeInsuranceLine in
+      // booking-engine.service.js). On a 1-day rental, qty=1 ties with
+      // oldTotalDays=1 — without the qty > 1 guard the extension flow
+      // would wrongly multiply the one-time amount by the new day
+      // count.
+      const state = makeMockDb({
+        initial: {
+          reservation: {
+            pickupAt: new Date('2026-05-10T00:00:00Z'),
+            returnAt: new Date('2026-05-11T00:00:00Z') // 1 day
+          },
+          charges: [
+            { id: 'c-base', reservationId: 'res-1', name: 'Base rental',
+              chargeType: 'DAILY', quantity: 1, rate: 50, total: 50,
+              taxable: true, selected: true, sortOrder: 0, source: 'BASE_RATE',
+              createdAt: new Date('2026-05-01T10:00:00Z') },
+            { id: 'c-ins-fixed', reservationId: 'res-1', name: 'Insurance: Flat $40',
+              chargeType: 'UNIT', quantity: 1, rate: 40, total: 40,
+              taxable: true, selected: true, sortOrder: 2, source: 'INSURANCE',
+              sourceRefId: 'plan-fixed',
+              createdAt: new Date('2026-05-01T10:00:00Z') }
+          ]
+        }
+      });
+      await reservationExtendService.extendReservation({
+        reservationId: 'res-1',
+        newReturnAt: new Date('2026-05-14T00:00:00Z'), // +3 days
+        extensionDailyRate: null, note: '', actorUserId: 'u-1',
+        tenantScope: { tenantId: 'tenant-1' }
+      });
+      const ins = state.charges.find((c) => c.id === 'c-ins-fixed');
+      assert.equal(ins.quantity, 1, 'FIXED insurance row stays at qty=1');
+      assert.equal(ins.total, 40, 'FIXED insurance total unchanged');
+    });
+
+    it('DOES rescale INSURANCE-sourced rows (Hector, 2026-05-12)', async () => {
+      // User asked insurance to extend alongside services on
+      // 2026-05-12. Insurance lives at chargeType=UNIT, source='INSURANCE',
+      // quantity=days. Adding INSURANCE to PER_DAY_LIKE_SOURCES makes
+      // the qty==oldTotalDays heuristic pick it up.
+      const state = makeMockDb({
+        initial: {
+          charges: [
+            { id: 'c-base', reservationId: 'res-1', name: 'Daily',
+              chargeType: 'DAILY', quantity: 5, rate: 50, total: 250,
+              taxable: true, selected: true, sortOrder: 0,
+              source: 'BASE_RATE', sourceRefId: null,
+              createdAt: new Date('2026-05-01T10:00:00Z') },
+            { id: 'c-ins', reservationId: 'res-1', name: 'Insurance: Full Super',
+              chargeType: 'UNIT', quantity: 5, rate: 32.99, total: 164.95,
+              taxable: true, selected: true, sortOrder: 2,
+              source: 'INSURANCE', sourceRefId: 'plan-1',
+              createdAt: new Date('2026-05-01T10:00:00Z') }
+          ]
+        }
+      });
+      await reservationExtendService.extendReservation({
+        reservationId: 'res-1',
+        newReturnAt: new Date('2026-05-17T00:00:00Z'),
+        extensionDailyRate: null, note: '', actorUserId: 'u-1',
+        tenantScope: { tenantId: 'tenant-1' }
+      });
+      const ins = state.charges.find((c) => c.id === 'c-ins');
+      assert.equal(ins.quantity, 7, 'insurance rescales to new total days');
+      assert.equal(ins.total, Number((7 * 32.99).toFixed(2)));
+      const base = state.charges.find((c) => c.id === 'c-base');
+      assert.equal(base.quantity, 5, 'BASE_RATE still untouched');
+    });
+
     it('DOES rescale non-BASE_RATE chargeType=DAILY rows (Codex P1 on PR #65)', async () => {
       // AdditionalService configured with chargeType=DAILY flows into
       // ReservationCharge as DAILY+source='SERVICE' (see
