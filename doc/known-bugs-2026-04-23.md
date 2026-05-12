@@ -8,7 +8,58 @@
 
 ## Open
 
-_(none — BUG-001 / BUG-002 / BUG-003 / BUG-004 all closed in v0.9.0-beta.6 and v0.9.0-beta.7. Add new bugs at the top of this section as they're discovered.)_
+### BUG-008 — Extension double-counts the daily rate row
+
+**Reported:** 2026-05-12 (Hector, RES-368604)
+**Severity:** High (over-billing — customers being charged extra base-rate days that overlap the extension).
+**Status:** Fix written on local branch, pending PR / deploy.
+
+**Symptom:**
+On RES-368604 (2-day Pick Up Truck rental at $100/day, extended by 3 days), the reservation showed:
+
+- Daily: 5 × $100 = $500 (should be 2 × $100 = $200)
+- Extension (3 days @ $100/day): 3 × $100 = $300
+- → $800 in base-rate charges for what is a 5-day rental at $100/day (true value $500).
+- Sales Tax (11.50%) compounded on the inflated subtotal.
+
+Same pattern would fire for any per-day `chargeType=UNIT` SERVICE / FEE row whose qty equaled the pre-extension day count: it gets rescaled even though the extension doesn't include those services in its own line.
+
+**Root cause:**
+In `backend/src/modules/reservations/reservation-extend.service.js`, `extendReservation()` did TWO things on the same flow:
+
+1. Step 8 (rescale): bumped `chargeType=DAILY` rows AND per-day UNIT SERVICE/FEE rows from `oldTotalDays` → `newTotalDays`.
+2. Step 9 (extension charge): then ALSO created an `EXTENSION_RATE` row of `extensionDays × dailyRate`.
+
+For the BASE_RATE row both fired with the same rate, so the new days were billed twice — once via the rescaled base, once via the extension. The existing test suite even baked in the broken behavior (asserted `base.quantity === 7` after extending a 5-day rental by 2 days).
+
+**Fix:**
+In `shouldRescaleDailyRow()`, refine the `chargeType === 'DAILY'` branch to skip ONLY rows where `source === 'BASE_RATE'`. Other `chargeType=DAILY` rows (daily `AdditionalService`s, which `booking-engine.service.js:1921` propagates through with `source='SERVICE'`) still rescale because the `EXTENSION_RATE` charge only covers base rent. Per-day SERVICE / FEE rows stored as `chargeType=UNIT` (source in `PER_DAY_LIKE_SOURCES`, qty == old day count) also rescale so toll-style coverage continues over the extended window. Tax recomputes against the new (base + extension + rescaled services) taxable subtotal.
+
+The first version of this fix removed the entire `chargeType === 'DAILY'` branch — Codex bot flagged that on PR #65 as a P1 because it would silently underbill daily-priced AdditionalServices. The refinement above keeps base-rate skipping while preserving rescale on every other DAILY row.
+
+**Files changed:**
+
+- `backend/src/modules/reservations/reservation-extend.service.js`
+  - `shouldRescaleDailyRow()` — removed DAILY branch; updated header comment.
+  - Header docblock — rewrote step 4 description.
+  - Inline comment at step 8 rescale loop — updated.
+- `backend/src/modules/reservations/reservation-extend.test.mjs`
+  - Flipped the "rescales chargeType=DAILY rows" test to "does NOT rescale chargeType=DAILY base rate (Bug 8)".
+  - Updated tax recompute expectation from `$51.75` → `$40.25` (tax on `$250 base + $100 ext`, not the inflated `$350 + $100`).
+  - Updated multi-extension assertion: base stays at 5 days / $250 instead of being rescaled to 9 / $450.
+
+**Test status:** All 25 mock-based assertions pass on the macOS dev box. The Linux sandbox shows a Prisma binary-target error in teardown (`debian-openssl-3.0.x` engine missing) — environmental, not a test failure.
+
+**Deploy plan:**
+
+1. Branch `bugfix/008-extension-double-count-daily` from `main`.
+2. Commit the two files above + this knownbugs entry; reference RES-368604 in the message.
+3. Open PR. Once CI is green, smoke-test in a non-prod environment by re-creating RES-368604's scenario (2-day rental, $100/day, +3-day extension) and confirming Daily stays at `2 × $100 = $200` and the totals match.
+4. Merge to `main`; bump tag `v0.9.0-beta.X` (next free beta).
+5. Deploy with `ops/deploy-beta.ps1` (preflights frontend build, brings up `docker-compose.prod.yml`, polls /health). Use `-Tag v0.9.0-beta.X` to deploy a tagged build.
+6. **Backfill consideration:** Any reservation extended BEFORE this fix already has an inflated `DAILY` quantity. Decide separately whether to leave those records as-is (legacy data shows the historical state) or write a one-shot SQL backfill: for every reservation with an `EXTENSION_RATE` charge, set the BASE_RATE row's `quantity` to the original day count (from `RentalAgreementAddendum.originalCharges` JSON) and `total = quantity × rate`, then recompute tax. Hold this until after the fix is live so you're not racing the deploy.
+
+---
 
 ---
 

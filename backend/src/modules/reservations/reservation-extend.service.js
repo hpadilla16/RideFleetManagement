@@ -14,12 +14,25 @@ import { prisma } from '../../lib/prisma.js';
 //   3. Create the EXTENSION_RATE charge with taxable=true (yes, Hector —
 //      the extension rate IS taxed; the previous taxable=false was a
 //      bug carried over from the v1 stub).
-//   4. Rescale chargeType=DAILY rows that aren't EXTENSION_RATE itself,
-//      a tax row, or a security deposit, so quantity = newTotalDays and
-//      total = quantity × rate. FIXED and PERCENT charges are NOT
-//      touched (per Hector: percentage rows naturally re-evaluate
-//      against the new subtotal at display time, fixed fees are
-//      one-time).
+//   4. Rescale per-day rows so they keep covering the extended rental
+//      window. This means:
+//        - chargeType=DAILY rows with source != 'BASE_RATE' (daily
+//          AdditionalServices etc.) — quantity bumps to newTotalDays.
+//        - chargeType=UNIT rows with a per-day-like source (SERVICE /
+//          ADDITIONAL_SERVICE / FEE / SERVICE_LINKED_FEE) and quantity
+//          equal to the old day count — quantity bumps to newTotalDays.
+//      The BASE_RATE row is intentionally NOT rescaled — the
+//      EXTENSION_RATE charge IS the additive line for the new days,
+//      so bumping the original base rate quantity on top would
+//      double-count (Bug 8, 2026-05-12: agents reported a 2-day
+//      rental with a 3-day extension showed Daily 5 × $100 PLUS
+//      Extension 3 × $100 = $800 of base rate for what should have
+//      been $500). Codex P1 follow-up on PR #65: only filter out the
+//      BASE_RATE source, not the entire DAILY chargeType, so daily-
+//      priced AdditionalServices keep extending. FIXED and PERCENT
+//      charges are not touched — percentage rows naturally re-
+//      evaluate against the new subtotal at display time, fixed fees
+//      are one-time.
 //   5. Recompute the TAX row from the NEW taxable subtotal (which now
 //      includes the extension rate and the rescaled DAILY items).
 //   6. Update Reservation.returnAt + estimatedTotal.
@@ -83,27 +96,41 @@ const PER_DAY_LIKE_SOURCES = new Set([
 ]);
 
 // Returns true if this row is a per-day charge whose quantity should
-// follow the reservation's total day count. EXTENSION_RATE has its own
-// fixed extension-window quantity and stays put. Security deposit and
-// tax rows are not consumption-based, so they don't rescale either.
+// follow the reservation's total day count when extended. The
+// EXTENSION_RATE row, tax rows, and security deposits never rescale.
 //
-// Detection paths:
-//   1. chargeType=DAILY — direct per-day charge (the original BASE_RATE).
-//   2. chargeType=UNIT with a per-day-like source AND quantity equal to
-//      the pre-extension day count — the booking engine stores per-day
-//      services this way (Pre-Paid Tolls, etc.). Matching quantity is
-//      the strongest signal that the row was provisioned as
-//      `quantity = days × rate = dailyRate`. Rows whose quantity has
-//      been manually overridden (e.g., agent set 1 unit instead of N
-//      days) are left alone — heuristic fails safely.
+// Bug 8 (2026-05-12): the BASE_RATE row (source='BASE_RATE') is
+// intentionally NOT rescaled. The EXTENSION_RATE charge already adds
+// (extensionDays × dailyRate) for the additional days — if we also
+// bumped the original BASE_RATE row from oldTotalDays to newTotalDays,
+// the new days would be billed twice. Other chargeType=DAILY rows
+// (e.g., AdditionalService configured with chargeType=DAILY, which
+// booking-engine.service.js:1921 propagates through as a SERVICE-sourced
+// DAILY row) DO still rescale — the EXTENSION_RATE charge only covers
+// base rent, so daily-priced services would be underbilled if their
+// quantity stayed frozen at the old day count (Codex P1 finding on
+// PR #65). Tax recomputes against the new taxable subtotal at the end
+// of extendReservation either way.
+//
+// Per-day SERVICE / FEE rows stored as chargeType=UNIT (source in
+// PER_DAY_LIKE_SOURCES, quantity == old day count) also rescale —
+// matching qty == oldTotalDays is the strongest signal that the row
+// was provisioned as `quantity = days × rate = dailyRate`. Rows whose
+// quantity has been manually overridden (agent set 1 unit instead of
+// N days) are left alone — heuristic fails safely.
 function shouldRescaleDailyRow(row = {}, oldTotalDays = 0) {
   if (isExtensionCharge(row)) return false;
   if (isTaxCharge(row)) return false;
   if (isSecurityDepositCharge(row)) return false;
   const chargeType = String(row?.chargeType || '').trim().toUpperCase();
-  if (chargeType === 'DAILY') return true;
+  const source = String(row?.source || '').trim().toUpperCase();
+  if (chargeType === 'DAILY') {
+    // Skip ONLY the rental's base rate row — see header comment.
+    // All other DAILY rows (daily AdditionalServices etc.) keep
+    // rescaling so they continue to cover the extended window.
+    return source !== 'BASE_RATE';
+  }
   if (chargeType === 'UNIT') {
-    const source = String(row?.source || '').trim().toUpperCase();
     if (PER_DAY_LIKE_SOURCES.has(source)) {
       const qty = Number(row?.quantity);
       if (Number.isFinite(qty) && Number.isFinite(oldTotalDays) && qty === Number(oldTotalDays)) {
@@ -318,10 +345,14 @@ export const reservationExtendService = {
       }
     });
 
-    // 8. Rescale per-day items: chargeType=DAILY plus per-day SERVICE/
-    //    FEE rows (UNIT chargeType, qty == oldTotalDays) get bumped to
-    //    the new total days. EXTENSION_RATE / TAX / security deposit
-    //    are skipped (see shouldRescaleDailyRow above).
+    // 8. Rescale per-day rows to the new total day count so tolls /
+    //    per-day services / daily AdditionalServices keep covering the
+    //    rental window after the extension. The BASE_RATE row
+    //    (source='BASE_RATE') is the ONLY DAILY row deliberately left
+    //    alone — the EXTENSION_RATE charge is the only base-rate
+    //    line that grows (Bug 8, 2026-05-12). EXTENSION_RATE / TAX /
+    //    security deposit are also skipped (see shouldRescaleDailyRow
+    //    above).
     for (const row of current.charges || []) {
       if (!shouldRescaleDailyRow(row, oldTotalDays)) continue;
       const newQuantity = newTotalDays;
