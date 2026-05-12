@@ -17,8 +17,10 @@ import { prisma } from '../../lib/prisma.js';
 //   4. Rescale per-day add-on rows so they keep covering the extended
 //      rental window. "Per-day add-on" = source in PER_DAY_LIKE_SOURCES
 //      (SERVICE / ADDITIONAL_SERVICE / FEE / SERVICE_LINKED_FEE /
-//      INSURANCE), regardless of chargeType. The base rental's own row
-//      (any DAILY/UNIT row whose source is NOT in that whitelist) is
+//      INSURANCE), regardless of chargeType. For chargeType=UNIT rows
+//      we additionally require quantity > 1 (FIXED / PERCENTAGE rows
+//      always have quantity=1). The base rental's own row (any
+//      DAILY/UNIT row whose source is NOT in that whitelist) is
 //      intentionally NOT rescaled — the EXTENSION_RATE charge IS the
 //      additive line for the new days, so bumping the base quantity on
 //      top would double-count (Bug 8, 2026-05-12: agents reported a
@@ -145,21 +147,39 @@ function shouldRescaleDailyRow(row = {}, oldTotalDays = 0) {
   if (!PER_DAY_LIKE_SOURCES.has(source)) return false;
   if (chargeType === 'DAILY') return true;
   if (chargeType === 'UNIT') {
-    // qty == oldTotalDays is the strongest signal that the row was
-    // provisioned as `quantity = days × rate = dailyRate`. We ALSO
-    // require qty > 1 — on a 1-day rental, FIXED and PERCENTAGE
-    // insurance / mandatory-service rows are stored as quantity=1,
-    // which would tie with oldTotalDays=1 and get wrongly multiplied
-    // by the new day count on extension (Codex P1 on PR #66:
-    // computeInsuranceLine in booking-engine.service.js writes
-    // quantity=1 for non-PER_DAY modes). qty=1 alone is too ambiguous
-    // to disambiguate; for 1-day rentals the agent re-quotes per-day
-    // add-ons manually.
     const qty = Number(row?.quantity);
-    if (Number.isFinite(qty) && qty > 1
-        && Number.isFinite(oldTotalDays) && qty === Number(oldTotalDays)) {
-      return true;
-    }
+    if (!Number.isFinite(qty) || qty <= 1) return false;
+
+    // INSURANCE has a stable invariant from computeInsuranceLine in
+    // booking-engine.service.js:
+    //   PER_DAY    → quantity = days   (always > 1 on multi-day rentals)
+    //   FIXED      → quantity = 1
+    //   PERCENTAGE → quantity = 1
+    // So an INSURANCE UNIT row with qty > 1 is unambiguously per-day.
+    // Safe to rescale even when oldTotalDays has drifted from qty:
+    // surfaced on RES-368604 on 2026-05-12 — Insurance was quoted as
+    // 2 days, but a returnAt shift made rentalDays() recompute
+    // oldTotalDays = ceil(52/24) = 3, so the strict qty===oldTotalDays
+    // check refused to rescale. The INSURANCE-specific path here
+    // sidesteps that drift without putting other UNIT rows at risk.
+    if (source === 'INSURANCE') return true;
+
+    // SERVICE / FEE / etc do NOT have that invariant —
+    // computeAdditionalServiceLine stores `quantity` as the user/default
+    // unit count (chairs, GPS units, etc.), not as a day count. A FLAT
+    // 2-unit child-seat service has qty=2 totally independent of the
+    // rental's day count. So we keep the strict qty === oldTotalDays
+    // match here to avoid rewriting multi-unit FLAT rows into
+    // day-count charges (Codex P1 on PR #67). Per-day toll services
+    // provisioned as qty=days × rate=dailyRate still rescale because
+    // qty === oldTotalDays holds.
+    //
+    // Known residual gap: a multi-unit FLAT service whose `quantity`
+    // coincidentally equals oldTotalDays (e.g., 2 child seats on a
+    // 2-day rental) is still wrongly rescaled. Fully closing this
+    // requires looking up the source service's pricingMode at
+    // extension time; tracked as a follow-up.
+    if (Number.isFinite(oldTotalDays) && qty === Number(oldTotalDays)) return true;
   }
   return false;
 }
