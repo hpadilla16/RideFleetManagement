@@ -258,8 +258,11 @@ describe('reservation-extend (unified flow)', () => {
       assert.equal(result.extensionCharge.source, 'EXTENSION_DEFAULT');
     });
 
-    it('rescales chargeType=DAILY rows to new total days', async () => {
-      // 5-day base rental → extend by 2 days → base should rescale to 7 days × $50 = $350
+    it('does NOT rescale BASE_RATE row (Bug 8, 2026-05-12)', async () => {
+      // 5-day base rental, extend by 2 days. The BASE_RATE row must
+      // stay at 5 days x $50 = $250; the EXTENSION_RATE charge covers
+      // the 2 new days (2 x $50 = $100). Rescaling the base on top of
+      // creating the extension double-counted before this fix.
       const state = makeMockDb();
       await reservationExtendService.extendReservation({
         reservationId: 'res-1',
@@ -268,8 +271,47 @@ describe('reservation-extend (unified flow)', () => {
         tenantScope: { tenantId: 'tenant-1' }
       });
       const baseAfter = state.charges.find((c) => c.id === 'c-base');
-      assert.equal(baseAfter.quantity, 7, 'base DAILY rescaled to new total days');
-      assert.equal(baseAfter.total, 350, 'base DAILY total = quantity × rate');
+      assert.equal(baseAfter.quantity, 5, 'BASE_RATE row stays at original day count');
+      assert.equal(baseAfter.total, 250, 'BASE_RATE row total unchanged');
+      // The EXTENSION_RATE row is the only added base-rate billing line.
+      const ext = state.charges.find((c) => c.code === 'EXTENSION_RATE');
+      assert.equal(ext.quantity, 2);
+      assert.equal(ext.total, 100);
+    });
+
+    it('DOES rescale non-BASE_RATE chargeType=DAILY rows (Codex P1 on PR #65)', async () => {
+      // AdditionalService configured with chargeType=DAILY flows into
+      // ReservationCharge as DAILY+source='SERVICE' (see
+      // booking-engine.service.js:1921, service.chargeType is
+      // propagated verbatim). Those rows MUST keep rescaling on
+      // extension, because EXTENSION_RATE only covers the base rent.
+      const state = makeMockDb({
+        initial: {
+          charges: [
+            { id: 'c-base', reservationId: 'res-1', name: 'Base rental',
+              chargeType: 'DAILY', quantity: 5, rate: 50, total: 250,
+              taxable: true, selected: true, sortOrder: 0, source: 'BASE_RATE',
+              createdAt: new Date('2026-05-01T10:00:00Z') },
+            { id: 'c-daily-svc', reservationId: 'res-1', name: 'Daily Wash',
+              chargeType: 'DAILY', quantity: 5, rate: 7, total: 35,
+              taxable: true, selected: true, sortOrder: 1, source: 'SERVICE',
+              sourceRefId: 'svc-wash',
+              createdAt: new Date('2026-05-01T10:00:00Z') }
+          ]
+        }
+      });
+      await reservationExtendService.extendReservation({
+        reservationId: 'res-1',
+        newReturnAt: new Date('2026-05-17T00:00:00Z'), // +2 days, 7 total
+        extensionDailyRate: null, note: '', actorUserId: 'u-1',
+        tenantScope: { tenantId: 'tenant-1' }
+      });
+      const base = state.charges.find((c) => c.id === 'c-base');
+      assert.equal(base.quantity, 5, 'BASE_RATE stays at 5');
+      assert.equal(base.total, 250);
+      const svc = state.charges.find((c) => c.id === 'c-daily-svc');
+      assert.equal(svc.quantity, 7, 'daily AdditionalService rescales to new total days');
+      assert.equal(svc.total, Number((7 * 7).toFixed(2)), 'daily service total = newDays x rate');
     });
 
     it('rescales per-day SERVICE rows stored as UNIT with quantity=oldDays (Bug 7a)', async () => {
@@ -357,9 +399,9 @@ describe('reservation-extend (unified flow)', () => {
     });
 
     it('recomputes TAX row against new taxable subtotal (includes extension)', async () => {
-      // 5d × $50 = $250 base, extend +2d at $50 = +$100. Total taxable
-      // subtotal: $350 base (rescaled) + $100 extension = $450.
-      // Tax @ 11.5% = $51.75
+      // 5d × $50 = $250 base (unchanged after fix), extend +2d at $50
+      // adds an EXTENSION_RATE of $100. Total taxable subtotal:
+      // $250 base + $100 extension = $350. Tax @ 11.5% = $40.25.
       const state = makeMockDb();
       await reservationExtendService.extendReservation({
         reservationId: 'res-1',
@@ -369,8 +411,8 @@ describe('reservation-extend (unified flow)', () => {
       });
       const taxRows = state.charges.filter((c) => c.chargeType === 'TAX');
       assert.equal(taxRows.length, 1, 'exactly one TAX row after recompute');
-      assert.equal(taxRows[0].total, 51.75,
-        'tax = ($350 base + $100 ext) × 11.5% = $51.75');
+      assert.equal(taxRows[0].total, 40.25,
+        'tax = ($250 base + $100 ext) × 11.5% = $40.25');
     });
 
     it('sets originalReturnAt on first extension only', async () => {
@@ -632,10 +674,12 @@ describe('reservation-extend (unified flow)', () => {
       // Two EXTENSION_RATE charges
       const exts = state.charges.filter((c) => c.code === 'EXTENSION_RATE');
       assert.equal(exts.length, 2);
-      // Base DAILY charge rescaled to 9 days (5 → 7 → 9)
+      // Base DAILY charge stays at its original 5 days (Bug 8 fix —
+      // chargeType=DAILY no longer rescales; the two EXTENSION_RATE
+      // lines carry the extra days' base billing).
       const base = state.charges.find((c) => c.id === 'c-base');
-      assert.equal(base.quantity, 9);
-      assert.equal(base.total, 450);
+      assert.equal(base.quantity, 5);
+      assert.equal(base.total, 250);
     });
   });
 });
