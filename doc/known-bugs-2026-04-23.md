@@ -33,9 +33,15 @@ In `backend/src/modules/reservations/reservation-extend.service.js`, `extendRese
 For the BASE_RATE row both fired with the same rate, so the new days were billed twice — once via the rescaled base, once via the extension. The existing test suite even baked in the broken behavior (asserted `base.quantity === 7` after extending a 5-day rental by 2 days).
 
 **Fix:**
-In `shouldRescaleDailyRow()`, refine the `chargeType === 'DAILY'` branch to skip ONLY rows where `source === 'BASE_RATE'`. Other `chargeType=DAILY` rows (daily `AdditionalService`s, which `booking-engine.service.js:1921` propagates through with `source='SERVICE'`) still rescale because the `EXTENSION_RATE` charge only covers base rent. Per-day SERVICE / FEE rows stored as `chargeType=UNIT` (source in `PER_DAY_LIKE_SOURCES`, qty == old day count) also rescale so toll-style coverage continues over the extended window. Tax recomputes against the new (base + extension + rescaled services) taxable subtotal.
+In `shouldRescaleDailyRow()`, switch from a blacklist to a **whitelist**: rescale only rows whose `source` is in `PER_DAY_LIKE_SOURCES` (`SERVICE` / `ADDITIONAL_SERVICE` / `FEE` / `SERVICE_LINKED_FEE` / `INSURANCE`). Anything else — whether `chargeType=DAILY` or `chargeType=UNIT` — is treated as the base rental and left untouched. Tax recomputes against the new (base + extension + rescaled add-ons) taxable subtotal.
 
-The first version of this fix removed the entire `chargeType === 'DAILY'` branch — Codex bot flagged that on PR #65 as a P1 because it would silently underbill daily-priced AdditionalServices. The refinement above keeps base-rate skipping while preserving rescale on every other DAILY row.
+Why whitelist instead of `source !== 'BASE_RATE'`: real production data has had at least three source values for what is functionally the base row — `'BASE_RATE'` (current `booking-engine.service.js:1887`), `'DAILY'` (legacy, surfaced on RES-368604), and `null` (very old reservations). A blacklist had to enumerate all of them; a whitelist over `PER_DAY_LIKE_SOURCES` is robust to anything new that ever ends up in `source` for the base row.
+
+**Iteration history (so the next person doesn't re-discover the same edges):**
+
+1. **PR #65 first commit (`50ae931`)** — removed the entire `chargeType === 'DAILY'` branch. Codex bot raised a P1 that this silently underbilled daily-priced `AdditionalService`s.
+2. **PR #65 amended (`3dbc007` → squash-merged as `89a1d6c`)** — skipped only `source === 'BASE_RATE'`. Tests passed; live regression on RES-368604 showed Daily was still being rescaled because its `source` was the legacy value `'DAILY'`, not `'BASE_RATE'`.
+3. **Follow-up (PR #66)** — whitelist-based predicate. `'INSURANCE'` added to `PER_DAY_LIKE_SOURCES` per Hector — insurance now extends with the rental window. Codex bot raised a P1 on the first push that the `qty === oldTotalDays` heuristic could not distinguish FIXED/PERCENTAGE insurance (`quantity=1`) from PER_DAY insurance (`quantity=1`) on 1-day rentals, which would wrongly multiply a one-time amount by the extended day count. Amended to also require `qty > 1` in the UNIT branch — multi-day per-day rows still rescale, 1-day rentals fall back to manual re-quote for add-ons. Test coverage added for the 1-day FIXED-INSURANCE case.
 
 **Files changed:**
 

@@ -14,25 +14,32 @@ import { prisma } from '../../lib/prisma.js';
 //   3. Create the EXTENSION_RATE charge with taxable=true (yes, Hector —
 //      the extension rate IS taxed; the previous taxable=false was a
 //      bug carried over from the v1 stub).
-//   4. Rescale per-day rows so they keep covering the extended rental
-//      window. This means:
-//        - chargeType=DAILY rows with source != 'BASE_RATE' (daily
-//          AdditionalServices etc.) — quantity bumps to newTotalDays.
-//        - chargeType=UNIT rows with a per-day-like source (SERVICE /
-//          ADDITIONAL_SERVICE / FEE / SERVICE_LINKED_FEE) and quantity
-//          equal to the old day count — quantity bumps to newTotalDays.
-//      The BASE_RATE row is intentionally NOT rescaled — the
-//      EXTENSION_RATE charge IS the additive line for the new days,
-//      so bumping the original base rate quantity on top would
-//      double-count (Bug 8, 2026-05-12: agents reported a 2-day
-//      rental with a 3-day extension showed Daily 5 × $100 PLUS
+//   4. Rescale per-day add-on rows so they keep covering the extended
+//      rental window. "Per-day add-on" = source in PER_DAY_LIKE_SOURCES
+//      (SERVICE / ADDITIONAL_SERVICE / FEE / SERVICE_LINKED_FEE /
+//      INSURANCE), regardless of chargeType. The base rental's own row
+//      (any DAILY/UNIT row whose source is NOT in that whitelist) is
+//      intentionally NOT rescaled — the EXTENSION_RATE charge IS the
+//      additive line for the new days, so bumping the base quantity on
+//      top would double-count (Bug 8, 2026-05-12: agents reported a
+//      2-day rental with a 3-day extension showed Daily 5 × $100 PLUS
 //      Extension 3 × $100 = $800 of base rate for what should have
-//      been $500). Codex P1 follow-up on PR #65: only filter out the
-//      BASE_RATE source, not the entire DAILY chargeType, so daily-
-//      priced AdditionalServices keep extending. FIXED and PERCENT
-//      charges are not touched — percentage rows naturally re-
-//      evaluate against the new subtotal at display time, fixed fees
-//      are one-time.
+//      been $500).
+//
+//      Why whitelist instead of blacklist BASE_RATE: real production
+//      data has had at least three different source values for the
+//      base rental row over time — 'BASE_RATE' (current), 'DAILY'
+//      (legacy), and null/empty (very old reservations). Whitelisting
+//      what *should* extend is robust to all of those without us
+//      enumerating every base-rate label we've ever shipped.
+//
+//      Codex P1 follow-up on PR #65 originally surfaced this as
+//      "stop ignoring chargeType=DAILY entirely so daily-priced
+//      AdditionalServices keep extending" — the whitelist achieves
+//      both that and the legacy-source robustness in one rule.
+//      FIXED and PERCENT charges are not touched — percentage rows
+//      naturally re-evaluate against the new subtotal at display
+//      time, fixed fees are one-time.
 //   5. Recompute the TAX row from the NEW taxable subtotal (which now
 //      includes the extension rate and the rescaled DAILY items).
 //   6. Update Reservation.returnAt + estimatedTotal.
@@ -87,55 +94,71 @@ function isTaxCharge(row = {}) {
 // Sources whose ReservationCharge rows are provisioned per-day by the
 // booking engine (chargeType=UNIT, quantity=days, rate=dailyRate — see
 // booking-engine.service.js:1822). When the rental window grows, these
-// must rescale alongside chargeType=DAILY rows.
+// must rescale alongside daily-priced AdditionalServices.
+// INSURANCE was added 2026-05-12 per Hector — insurance coverage should
+// extend with the rental window the same way per-day services do.
 const PER_DAY_LIKE_SOURCES = new Set([
   'SERVICE',
   'ADDITIONAL_SERVICE',
   'FEE',
-  'SERVICE_LINKED_FEE'
+  'SERVICE_LINKED_FEE',
+  'INSURANCE'
 ]);
 
 // Returns true if this row is a per-day charge whose quantity should
 // follow the reservation's total day count when extended. The
 // EXTENSION_RATE row, tax rows, and security deposits never rescale.
 //
-// Bug 8 (2026-05-12): the BASE_RATE row (source='BASE_RATE') is
-// intentionally NOT rescaled. The EXTENSION_RATE charge already adds
-// (extensionDays × dailyRate) for the additional days — if we also
-// bumped the original BASE_RATE row from oldTotalDays to newTotalDays,
-// the new days would be billed twice. Other chargeType=DAILY rows
-// (e.g., AdditionalService configured with chargeType=DAILY, which
-// booking-engine.service.js:1921 propagates through as a SERVICE-sourced
-// DAILY row) DO still rescale — the EXTENSION_RATE charge only covers
-// base rent, so daily-priced services would be underbilled if their
-// quantity stayed frozen at the old day count (Codex P1 finding on
-// PR #65). Tax recomputes against the new taxable subtotal at the end
-// of extendReservation either way.
+// Bug 8 (2026-05-12): the rental's base rate row is intentionally NOT
+// rescaled. The EXTENSION_RATE charge already adds (extensionDays ×
+// dailyRate) for the additional days — if we also bumped the base
+// rate row from oldTotalDays to newTotalDays, the new days would be
+// billed twice.
 //
-// Per-day SERVICE / FEE rows stored as chargeType=UNIT (source in
-// PER_DAY_LIKE_SOURCES, quantity == old day count) also rescale —
-// matching qty == oldTotalDays is the strongest signal that the row
-// was provisioned as `quantity = days × rate = dailyRate`. Rows whose
-// quantity has been manually overridden (agent set 1 unit instead of
-// N days) are left alone — heuristic fails safely.
+// Identifying the base rate row reliably is harder than expected — we
+// have observed three different source values in production data for
+// what is functionally the same row:
+//   - 'BASE_RATE'  — current booking-engine.service.js:1887
+//   - 'DAILY'      — older booking-engine paths / migrated rows
+//   - null / ''    — very old reservations from before the source
+//                    column was reliably populated
+// So instead of trying to enumerate every "base rate" source string,
+// we WHITELIST sources that should rescale: SERVICE / ADDITIONAL_SERVICE
+// / FEE / SERVICE_LINKED_FEE / INSURANCE. Anything chargeType=DAILY
+// whose source is NOT in that whitelist is treated as the base rental
+// and left alone. This stays correct as new booking-engine code ships
+// new source labels for the base row.
+//
+// chargeType=UNIT rows follow the same whitelist; an additional check
+// requires quantity == oldTotalDays to confirm the row was provisioned
+// as `quantity = days × rate = dailyRate`. Rows whose quantity has been
+// manually overridden (agent set 1 unit instead of N days) are left
+// alone — heuristic fails safely.
 function shouldRescaleDailyRow(row = {}, oldTotalDays = 0) {
   if (isExtensionCharge(row)) return false;
   if (isTaxCharge(row)) return false;
   if (isSecurityDepositCharge(row)) return false;
   const chargeType = String(row?.chargeType || '').trim().toUpperCase();
   const source = String(row?.source || '').trim().toUpperCase();
-  if (chargeType === 'DAILY') {
-    // Skip ONLY the rental's base rate row — see header comment.
-    // All other DAILY rows (daily AdditionalServices etc.) keep
-    // rescaling so they continue to cover the extended window.
-    return source !== 'BASE_RATE';
-  }
+  // Whitelist: only rescale rows we know are per-day add-ons.
+  // Every other DAILY / UNIT row is treated as the base rental.
+  if (!PER_DAY_LIKE_SOURCES.has(source)) return false;
+  if (chargeType === 'DAILY') return true;
   if (chargeType === 'UNIT') {
-    if (PER_DAY_LIKE_SOURCES.has(source)) {
-      const qty = Number(row?.quantity);
-      if (Number.isFinite(qty) && Number.isFinite(oldTotalDays) && qty === Number(oldTotalDays)) {
-        return true;
-      }
+    // qty == oldTotalDays is the strongest signal that the row was
+    // provisioned as `quantity = days × rate = dailyRate`. We ALSO
+    // require qty > 1 — on a 1-day rental, FIXED and PERCENTAGE
+    // insurance / mandatory-service rows are stored as quantity=1,
+    // which would tie with oldTotalDays=1 and get wrongly multiplied
+    // by the new day count on extension (Codex P1 on PR #66:
+    // computeInsuranceLine in booking-engine.service.js writes
+    // quantity=1 for non-PER_DAY modes). qty=1 alone is too ambiguous
+    // to disambiguate; for 1-day rentals the agent re-quotes per-day
+    // add-ons manually.
+    const qty = Number(row?.quantity);
+    if (Number.isFinite(qty) && qty > 1
+        && Number.isFinite(oldTotalDays) && qty === Number(oldTotalDays)) {
+      return true;
     }
   }
   return false;
