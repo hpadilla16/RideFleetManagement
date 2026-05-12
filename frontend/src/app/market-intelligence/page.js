@@ -110,8 +110,22 @@ function Inner({ token, me, logout }) {
   const [editing, setEditing] = useState(null); // null | EMPTY_PROFILE | profile
   const [msg, setMsg] = useState('');
   const [applying, setApplying] = useState(false);
+  const [tenants, setTenants] = useState([]);
+  const role = String(me?.role || '').toUpperCase().trim();
+  const isSuper = role === 'SUPER_ADMIN';
 
-  useEffect(() => { loadProfiles(); }, []);
+  useEffect(() => {
+    loadProfiles();
+    // Super admins manage profiles across tenants — load tenant list so the
+    // editor can show a tenant picker. The service rejects creates that have
+    // no tenantId in scope or body, which is how Hector hit "tenantId
+    // required" the first time he tried to create a profile.
+    if (isSuper) {
+      api('/api/tenants', {}, token).then((list) => {
+        setTenants(Array.isArray(list) ? list : []);
+      }).catch(() => { /* non-fatal — editor will warn */ });
+    }
+  }, [isSuper, token]);
 
   async function loadProfiles() {
     try {
@@ -342,6 +356,7 @@ function Inner({ token, me, logout }) {
           initial={editing}
           onCancel={() => setEditing(null)}
           onSave={saveProfile}
+          tenants={isSuper ? tenants : null}
         />
       )}
     </AppShell>
@@ -435,8 +450,9 @@ function ComparisonView({ comparison, onApply, applying }) {
   );
 }
 
-function ProfileEditor({ initial, onCancel, onSave }) {
+function ProfileEditor({ initial, onCancel, onSave, tenants }) {
   const [form, setForm] = useState(initial);
+  const isSuper = tenants !== null && tenants !== undefined;
 
   function update(key, value) {
     setForm((f) => ({ ...f, [key]: value }));
@@ -469,6 +485,22 @@ function ProfileEditor({ initial, onCancel, onSave }) {
         <h3 style={{ margin: '0 0 16px', fontSize: 18, fontWeight: 600 }}>
           {form.id ? 'Edit profile' : 'New profile'}
         </h3>
+
+        {isSuper && (
+          <Field label="Tenant (Super Admin must pick which tenant owns this profile)">
+            <select
+              value={form.tenantId || ''}
+              onChange={(e) => update('tenantId', e.target.value)}
+              style={inputStyle}
+              disabled={!!form.id /* can't move a profile across tenants */}
+            >
+              <option value="">— select tenant —</option>
+              {(tenants || []).map((t) => (
+                <option key={t.id} value={t.id}>{t.name || t.code || t.id}</option>
+              ))}
+            </select>
+          </Field>
+        )}
 
         <Field label="Name (unique per tenant)">
           <input
