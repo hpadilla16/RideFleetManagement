@@ -11,6 +11,18 @@ function isAdminRole(user) {
   return ['SUPER_ADMIN', 'ADMIN'].includes(role);
 }
 
+// Addendum-specific permission. Agents need to create / void / resend /
+// sign-on-behalf addendums day-to-day (Hector 2026-05-12). This is a
+// dedicated helper rather than widening isAdminRole because other routes
+// in this file gate sensitive PII reads (e.g. GET /:id/commission-owner
+// returns the tenant employee roster — names/emails/roles — and must
+// stay admin-only). Codex P1 on PR #68 originally caught the over-broad
+// widening of isAdminRole; this helper restores the narrower split.
+function canManageAddendum(user) {
+  const role = String(user?.role || '').toUpperCase();
+  return ['SUPER_ADMIN', 'ADMIN', 'AGENT'].includes(role);
+}
+
 async function ensureEditable(id, user) {
   const row = await rentalAgreementsService.getById(id, user);
   if (!row) {
@@ -453,8 +465,8 @@ rentalAgreementsRouter.get('/:id/addendums/:addendumId', async (req, res, next) 
 
 rentalAgreementsRouter.post('/:id/addendums', async (req, res, next) => {
   try {
-    if (!isAdminRole(req.user)) {
-      return res.status(403).json({ error: 'Admin role required to create an addendum' });
+    if (!canManageAddendum(req.user)) {
+      return res.status(403).json({ error: 'Admin or agent role required to create an addendum' });
     }
     await ensureEditable(req.params.id, req.user);
 
@@ -516,8 +528,8 @@ rentalAgreementsRouter.post('/:id/addendums/:addendumId/signature', async (req, 
 
 rentalAgreementsRouter.post('/:id/addendums/:addendumId/void', async (req, res, next) => {
   try {
-    if (!isAdminRole(req.user)) {
-      return res.status(403).json({ error: 'Admin role required to void an addendum' });
+    if (!canManageAddendum(req.user)) {
+      return res.status(403).json({ error: 'Admin or agent role required to void an addendum' });
     }
     await ensureEditable(req.params.id, req.user);
 
@@ -567,8 +579,8 @@ rentalAgreementsRouter.get('/:id/addendums/:addendumId/print', async (req, res, 
 // throttle.
 rentalAgreementsRouter.post('/:id/addendums/:addendumId/notify', async (req, res, next) => {
   try {
-    if (!isAdminRole(req.user)) {
-      return res.status(403).json({ error: 'Admin role required to resend addendum signature email' });
+    if (!canManageAddendum(req.user)) {
+      return res.status(403).json({ error: 'Admin or agent role required to resend addendum signature email' });
     }
     await ensureAccessible(req.params.id, req.user);
 

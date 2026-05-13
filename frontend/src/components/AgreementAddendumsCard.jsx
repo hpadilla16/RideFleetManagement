@@ -30,7 +30,11 @@ import { api, API_BASE, readStoredToken } from '../lib/client';
  *   signer name on the sign-on-behalf modal.
  */
 export function AgreementAddendumsCard({ rentalAgreementId, role, reservation = null }) {
-  const isAdmin = ['SUPER_ADMIN', 'ADMIN'].includes(String(role || '').toUpperCase());
+  // AGENT was added 2026-05-12 per Hector — agents need to create, sign
+  // on behalf, void, and resend addendums day-to-day. The local var keeps
+  // its existing name so we don't have to rename every gated render below,
+  // even though "isAdmin" now really means "can mutate addendums."
+  const isAdmin = ['SUPER_ADMIN', 'ADMIN', 'AGENT'].includes(String(role || '').toUpperCase());
 
   const [addendums, setAddendums] = useState([]);
   const [loading, setLoading] = useState(false);
