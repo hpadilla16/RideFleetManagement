@@ -215,34 +215,88 @@ export async function scrapeOneSearch(page, opts) {
 }
 
 /**
- * Connect to a Bright Data Browser API endpoint via CDP and return a
- * Playwright-like session object the runner can use:
- *   { page, scrapeOneSearch, wait, close }
- *
- * playwright-core is a devDependency — we import it lazily so test runs that
- * mock the scraper interface don't pay the cost of loading playwright.
+ * Returns true when an exception came from Playwright after Bright Data
+ * dropped the underlying browser session.
  */
-export async function createExpediaSession({ cdpUrl, ...opts } = {}) {
+function isSessionClosed(err) {
+  const m = String(err?.message || err || '');
+  return /Target page, context or browser has been closed|Browser has been closed|Target closed/i.test(m);
+}
+
+/**
+ * Connect to Bright Data Browser API via CDP and return a session that
+ * recycles itself.
+ *
+ * Bright Data Browser API sessions close after ~9 requests (observed during
+ * 2026-05-13 demo). This wrapper:
+ *   - Proactively recycles after `maxReqsPerSession` (default 8) requests
+ *   - Reactively reconnects + retries when a Playwright "closed" error
+ *     surfaces mid-request
+ *
+ * Callers (the runner service, the CLI) keep calling `scrapeOneSearch` as
+ * if the session were forever.
+ *
+ * playwright-core is a devDependency — we import it lazily so test runs
+ * that mock the scraper interface don't pay the cost of loading playwright.
+ */
+export async function createExpediaSession({ cdpUrl, maxReqsPerSession = 8, ...opts } = {}) {
   if (!cdpUrl) {
     const e = new Error('cdpUrl is required (set BRIGHTDATA_SB_URL)');
     e.httpStatus = 400;
     throw e;
   }
   const { chromium } = await import('playwright-core');
-  const browser = await chromium.connectOverCDP(cdpUrl);
-  const context = browser.contexts()[0] || (await browser.newContext());
-  const page = await context.newPage();
+
+  let browser = null;
+  let page = null;
+  let requestsThisSession = 0;
+  let sessionsUsed = 0;
+
+  async function connect() {
+    browser = await chromium.connectOverCDP(cdpUrl);
+    const context = browser.contexts()[0] || (await browser.newContext());
+    page = await context.newPage();
+    requestsThisSession = 0;
+    sessionsUsed += 1;
+  }
+
+  async function recycle() {
+    try { await browser?.close(); } catch (_) { /* best effort */ }
+    await connect();
+  }
+
+  await connect();
 
   return {
-    page,
+    get sessionsUsed() { return sessionsUsed; },
+    get currentPage() { return page; },
     async scrapeOneSearch(searchOpts) {
-      return scrapeOneSearch(page, { ...opts, ...searchOpts });
+      if (requestsThisSession >= maxReqsPerSession) {
+        await recycle();
+      }
+      try {
+        const r = await scrapeOneSearch(page, { ...opts, ...searchOpts });
+        requestsThisSession += 1;
+        return r;
+      } catch (err) {
+        if (!isSessionClosed(err)) throw err;
+        await recycle();
+        try {
+          const r = await scrapeOneSearch(page, { ...opts, ...searchOpts });
+          requestsThisSession += 1;
+          return r;
+        } catch (err2) {
+          requestsThisSession += 1;
+          return { url: '', listings: [], error: `retry-after-reconnect-failed: ${err2.message}` };
+        }
+      }
     },
     async wait(ms) {
-      await page.waitForTimeout(ms);
+      // Plain timer — page handle may be replaced by recycle() between calls.
+      await new Promise((r) => setTimeout(r, ms));
     },
     async close() {
-      try { await browser.close(); } catch (_) { /* swallow */ }
+      try { await browser?.close(); } catch (_) { /* swallow */ }
     }
   };
 }
