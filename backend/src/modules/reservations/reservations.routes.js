@@ -3,6 +3,7 @@ import { Router } from 'express';
 import { reservationsService } from './reservations.service.js';
 import { validateReservationCreate, validateReservationPatch } from './reservations.rules.js';
 import { prisma } from '../../lib/prisma.js';
+import { withTenantSchema } from '../../lib/tenant-routing.js';
 import { sendEmail } from '../../lib/mailer.js';
 import { rentalAgreementsService } from '../rental-agreements/rental-agreements.service.js';
 import { reservationPricingService } from './reservation-pricing.service.js';
@@ -304,14 +305,14 @@ reservationsRouter.get('/:id/display-data', async (req, res, next) => {
     if (!row) return res.status(404).json({ error: 'Reservation not found' });
     const tenantId = row.tenantId || scope.tenantId;
     // Fetch reservation-level charges (not included by getById)
-    const reservationCharges = await prisma.reservationCharge.findMany({
+    const reservationCharges = await withTenantSchema(req.user.tenantId, (db) => db.reservationCharge.findMany({
       where: { reservationId: row.id },
       orderBy: [{ sortOrder: 'asc' }, { createdAt: 'asc' }]
-    });
+    }));
     row.charges = reservationCharges;
     const [insurancePlans, additionalServices, rentalSettings] = await Promise.all([
       tenantId ? settingsService.getInsurancePlans({ tenantId }) : [],
-      tenantId ? prisma.additionalService.findMany({
+      tenantId ? withTenantSchema(req.user.tenantId, (db) => db.additionalService.findMany({
         where: { tenantId, isActive: true, displayOnline: true },
         orderBy: { sortOrder: 'asc' },
         select: {
@@ -320,7 +321,7 @@ reservationsRouter.get('/:id/display-data', async (req, res, next) => {
           displayDescription: true, displayPriority: true,
           linkedFee: { select: { id: true, name: true, amount: true, description: true, mode: true } }
         }
-      }) : [],
+      })) : [],
       tenantId ? settingsService.getRentalAgreementConfig({ tenantId }) : {}
     ]);
     res.json({
@@ -477,7 +478,7 @@ reservationsRouter.put('/:id/additional-drivers', async (req, res, next) => {
       await rentalAgreementsService.startFromReservation(req.params.id, scopeFor(req));
     }
 
-    await prisma.auditLog.create({
+    await withTenantSchema(req.user.tenantId, (db) => db.auditLog.create({
       data: {
         tenantId: current.tenantId || req.user?.tenantId || null,
         reservationId: req.params.id,
@@ -488,7 +489,7 @@ reservationsRouter.put('/:id/additional-drivers', async (req, res, next) => {
           count: out.length
         })
       }
-    });
+    }));
 
     res.json(out);
   } catch (e) {
@@ -520,7 +521,7 @@ reservationsRouter.get('/:id/available-vehicles', async (req, res, next) => {
     // Run all three probes in parallel — overlaps + blocks + broad candidate set.
     // Tiering happens in-memory so we never pay for a second round-trip.
     const [overlaps, blockedAvailability, candidates] = await Promise.all([
-      prisma.reservation.findMany({
+      withTenantSchema(req.user.tenantId, (db) => db.reservation.findMany({
         where: {
           ...tenantWhere,
           id: { not: reservation.id },
@@ -530,15 +531,15 @@ reservationsRouter.get('/:id/available-vehicles', async (req, res, next) => {
           returnAt: { gt: pickupAt }
         },
         select: { vehicleId: true }
-      }),
-      prisma.vehicleAvailabilityBlock.findMany({
+      })),
+      withTenantSchema(req.user.tenantId, (db) => db.vehicleAvailabilityBlock.findMany({
         where: {
           ...tenantWhere,
           ...activeVehicleBlockOverlapWhere({ start: pickupAt, end: returnAt })
         },
         select: { vehicleId: true }
-      }),
-      prisma.vehicle.findMany({
+      })),
+      withTenantSchema(req.user.tenantId, (db) => db.vehicle.findMany({
         where: {
           ...tenantWhere,
           OR: [
@@ -549,7 +550,7 @@ reservationsRouter.get('/:id/available-vehicles', async (req, res, next) => {
         select: vehicleSelect,
         orderBy: vehicleOrder,
         take: maxResults
-      })
+      }))
     ]);
 
     const blockedIds = new Set();
@@ -629,13 +630,13 @@ reservationsRouter.post('/', async (req, res, next) => {
     const addOnsTotal = Number(req.body?.addOnsTotal || 0);
     const finalEstimate = Number((Number(quote.baseTotal || 0) + (Number.isFinite(addOnsTotal) && addOnsTotal > 0 ? addOnsTotal : 0)).toFixed(2));
 
-    const pickupLoc = await prisma.location.findFirst({
+    const pickupLoc = await withTenantSchema(req.user.tenantId, (db) => db.location.findFirst({
       where: {
         id: String(req.body.pickupLocationId),
         ...(scopeFor(req).tenantId ? { tenantId: scopeFor(req).tenantId } : {})
       },
       select: { locationConfig: true, taxRate: true }
-    });
+    }));
     const cfg = parseLocationConfig(pickupLoc?.locationConfig);
     const bookingChannel = String(req.body?.bookingChannel || 'STAFF');
     const isExternalBooking = bookingChannel === 'WEBSITE' || bookingChannel === 'CAR_SHARING';
@@ -672,7 +673,7 @@ reservationsRouter.post('/', async (req, res, next) => {
       estimatedTotal: finalEstimate
     }, scopeFor(req));
 
-    await prisma.reservationPricingSnapshot.upsert({
+    await withTenantSchema(req.user.tenantId, (db) => db.reservationPricingSnapshot.upsert({
       where: { reservationId: row.id },
       create: {
         reservationId: row.id,
@@ -699,9 +700,9 @@ reservationsRouter.post('/', async (req, res, next) => {
         securityDepositAmount: securityDepositAmount > 0 ? securityDepositAmount : 0,
         source: 'RESERVATION_CREATE'
       }
-    });
+    }));
 
-    await prisma.auditLog.create({
+    await withTenantSchema(req.user.tenantId, (db) => db.auditLog.create({
       data: {
         tenantId: row.tenantId || req.user?.tenantId || null,
         reservationId: row.id,
@@ -710,7 +711,7 @@ reservationsRouter.post('/', async (req, res, next) => {
         toStatus: row.status,
         metadata: JSON.stringify({ reservationNumber: row.reservationNumber })
       }
-    });
+    }));
 
     res.status(201).json(row);
   } catch (e) {
@@ -746,7 +747,7 @@ reservationsRouter.patch('/:id', async (req, res, next) => {
 
     const row = await reservationsService.update(req.params.id, patch, scopeFor(req), req.user?.sub || null);
 
-    await prisma.auditLog.create({
+    await withTenantSchema(req.user.tenantId, (db) => db.auditLog.create({
       data: {
         tenantId: row.tenantId || req.user?.tenantId || null,
         reservationId: row.id,
@@ -756,7 +757,7 @@ reservationsRouter.patch('/:id', async (req, res, next) => {
         toStatus: row.status,
         metadata: JSON.stringify({ patch: req.body || {} })
       }
-    });
+    }));
 
     res.json(row);
   } catch (e) {
@@ -794,7 +795,7 @@ reservationsRouter.post('/:id/admin-transition', async (req, res, next) => {
       notes: nextNotes
     }, scopeFor(req), req.user?.sub || null);
 
-    await prisma.auditLog.create({
+    await withTenantSchema(req.user.tenantId, (db) => db.auditLog.create({
       data: {
         tenantId: row.tenantId || req.user?.tenantId || null,
         reservationId: row.id,
@@ -805,7 +806,7 @@ reservationsRouter.post('/:id/admin-transition', async (req, res, next) => {
         reason: reason || null,
         metadata: JSON.stringify({ override: true })
       }
-    });
+    }));
 
     res.json({
       ok: true,
@@ -819,7 +820,7 @@ reservationsRouter.post('/:id/admin-transition', async (req, res, next) => {
 
 reservationsRouter.get('/:id/audit-logs', async (req, res, next) => {
   try {
-    const logs = await prisma.auditLog.findMany({
+    const logs = await withTenantSchema(req.user.tenantId, (db) => db.auditLog.findMany({
       where: {
         reservationId: req.params.id,
         ...(scopeFor(req).tenantId ? { tenantId: scopeFor(req).tenantId } : {})
@@ -827,7 +828,7 @@ reservationsRouter.get('/:id/audit-logs', async (req, res, next) => {
       orderBy: { createdAt: 'desc' },
       take: 100,
       include: { actorUser: { select: { id: true, email: true, fullName: true, role: true } } }
-    });
+    }));
     res.json(logs);
   } catch (e) {
     next(e);
@@ -839,7 +840,7 @@ reservationsRouter.post('/:id/start-rental', async (req, res, next) => {
     const current = await reservationsService.getById(req.params.id, scopeFor(req));
     if (!current) return res.status(404).json({ error: 'Reservation not found' });
     const agreement = await rentalAgreementsService.startFromReservation(req.params.id, scopeFor(req));
-    await prisma.auditLog.create({
+    await withTenantSchema(req.user.tenantId, (db) => db.auditLog.create({
       data: {
         tenantId: current.tenantId || req.user?.tenantId || null,
         reservationId: req.params.id,
@@ -847,7 +848,7 @@ reservationsRouter.post('/:id/start-rental', async (req, res, next) => {
         actorUserId: req.user?.sub || null,
         metadata: JSON.stringify({ startRental: true, agreementId: agreement.id })
       }
-    });
+    }));
     // Slim response: web frontend only needs `id` (to chain into PUT /rental,
     // POST /signature, POST /finalize). Mobile clients refetch via GET /:id
     // when they need the full agreement tree. Cuts ~475 KB → ~200 bytes.
@@ -1007,7 +1008,7 @@ reservationsRouter.post('/:id/send-request-email', async (req, res, next) => {
     } catch (mailError) {
       const failNote = `[${notePrefix} ${new Date().toISOString()}] email failed for ${recipients.join(', ')} | ${String(mailError?.message || mailError)}`;
       await reservationsService.update(req.params.id, { notes: appendSystemNote(current.notes, failNote) }, scopeFor(req));
-      await prisma.auditLog.create({
+      await withTenantSchema(req.user.tenantId, (db) => db.auditLog.create({
         data: {
           tenantId: current.tenantId || req.user?.tenantId || null,
           reservationId: current.id,
@@ -1021,7 +1022,7 @@ reservationsRouter.post('/:id/send-request-email', async (req, res, next) => {
             error: String(mailError?.message || mailError)
           })
         }
-      });
+      }));
 
       res.json({
         ok: false,
@@ -1107,7 +1108,7 @@ reservationsRouter.post('/:id/precheckin/review', async (req, res, next) => {
     }, scopeFor(req));
 
     const checklist = buildPrecheckinChecklist(current);
-    await prisma.auditLog.create({
+    await withTenantSchema(req.user.tenantId, (db) => db.auditLog.create({
       data: {
         tenantId: row.tenantId || req.user?.tenantId || null,
         reservationId: row.id,
@@ -1121,7 +1122,7 @@ reservationsRouter.post('/:id/precheckin/review', async (req, res, next) => {
           missingItems: checklist.missingItems
         })
       }
-    });
+    }));
 
     res.json({
       ok: true,
@@ -1162,7 +1163,7 @@ reservationsRouter.post('/:id/precheckin/ready', async (req, res, next) => {
 
     const row = await reservationsService.update(req.params.id, payload, scopeFor(req));
 
-    await prisma.auditLog.create({
+    await withTenantSchema(req.user.tenantId, (db) => db.auditLog.create({
       data: {
         tenantId: row.tenantId || req.user?.tenantId || null,
         reservationId: row.id,
@@ -1176,7 +1177,7 @@ reservationsRouter.post('/:id/precheckin/ready', async (req, res, next) => {
           missingItems: checklist.missingItems
         })
       }
-    });
+    }));
 
     res.json({
       ok: true,
@@ -1219,10 +1220,10 @@ reservationsRouter.post('/:id/precheckin/staff-complete', async (req, res, next)
     }
 
     if (Object.keys(customerUpdate).length) {
-      await prisma.customer.update({
+      await withTenantSchema(req.user.tenantId, (db) => db.customer.update({
         where: { id: customerId },
         data: customerUpdate
-      });
+      }));
     }
 
     const now = new Date();
@@ -1233,7 +1234,7 @@ reservationsRouter.post('/:id/precheckin/staff-complete', async (req, res, next)
       customerInfoReviewNote: 'Completed by staff on behalf of customer'
     }, scopeFor(req));
 
-    await prisma.auditLog.create({
+    await withTenantSchema(req.user.tenantId, (db) => db.auditLog.create({
       data: {
         tenantId: row.tenantId || req.user?.tenantId || null,
         reservationId: row.id,
@@ -1245,7 +1246,7 @@ reservationsRouter.post('/:id/precheckin/staff-complete', async (req, res, next)
           fieldsUpdated: Object.keys(customerUpdate)
         })
       }
-    });
+    }));
 
     res.json({ ok: true, reservation: row });
   } catch (e) {
@@ -1356,7 +1357,7 @@ reservationsRouter.delete('/:id', async (req, res) => {
     const current = await reservationsService.getById(req.params.id, scopeFor(req));
     if (!current) return res.status(404).json({ error: 'Reservation not found' });
 
-    await prisma.auditLog.create({
+    await withTenantSchema(req.user.tenantId, (db) => db.auditLog.create({
       data: {
         tenantId: current.tenantId || req.user?.tenantId || null,
         reservationId: current.id,
@@ -1365,7 +1366,7 @@ reservationsRouter.delete('/:id', async (req, res) => {
         fromStatus: current.status,
         metadata: JSON.stringify({ reservationNumber: current.reservationNumber })
       }
-    });
+    }));
 
     await reservationsService.remove(req.params.id, scopeFor(req));
     res.status(204).send();
@@ -1380,18 +1381,18 @@ reservationsRouter.post('/:id/payments/:paymentId/delete', async (req, res, next
   try {
     const agreementId = await ensureAgreementByReservationId(req.params.id, scopeFor(req));
     if (!agreementId) return res.status(404).json({ error: 'Agreement not found for reservation' });
-    const agreement = await prisma.rentalAgreement.findFirst({
+    const agreement = await withTenantSchema(req.user.tenantId, (db) => db.rentalAgreement.findFirst({
       where: { id: agreementId, ...(scopeFor(req).tenantId ? { tenantId: scopeFor(req).tenantId } : {}) },
       select: { id: true, total: true }
-    });
+    }));
     if (!agreement) return res.status(404).json({ error: 'Agreement not found for reservation' });
 
-    const payment = await prisma.rentalAgreementPayment.findUnique({ where: { id: req.params.paymentId } });
+    const payment = await withTenantSchema(req.user.tenantId, (db) => db.rentalAgreementPayment.findUnique({ where: { id: req.params.paymentId } }));
     if (!payment || payment.rentalAgreementId !== agreement.id) {
       return res.status(404).json({ error: 'Payment not found' });
     }
 
-    await prisma.rentalAgreementPayment.deleteMany({
+    await withTenantSchema(req.user.tenantId, (db) => db.rentalAgreementPayment.deleteMany({
       where: {
         rentalAgreementId: agreement.id,
         OR: [
@@ -1399,18 +1400,18 @@ reservationsRouter.post('/:id/payments/:paymentId/delete', async (req, res, next
           { notes: { contains: req.params.paymentId } }
         ]
       }
-    });
+    }));
 
-    await prisma.rentalAgreementPayment.delete({ where: { id: req.params.paymentId } });
+    await withTenantSchema(req.user.tenantId, (db) => db.rentalAgreementPayment.delete({ where: { id: req.params.paymentId } }));
 
-    const remaining = await prisma.rentalAgreementPayment.findMany({
+    const remaining = await withTenantSchema(req.user.tenantId, (db) => db.rentalAgreementPayment.findMany({
       where: { rentalAgreementId: agreement.id },
       select: { amount: true, status: true }
-    });
+    }));
     const paidAmount = Number(remaining.filter((x) => String(x.status || '').toUpperCase() !== 'VOIDED').reduce((sum, x) => sum + Number(x.amount || 0), 0).toFixed(2));
     const balance = Number((Number(agreement.total || 0) - paidAmount).toFixed(2));
 
-    await prisma.rentalAgreement.update({ where: { id: agreement.id }, data: { paidAmount, balance } });
+    await withTenantSchema(req.user.tenantId, (db) => db.rentalAgreement.update({ where: { id: agreement.id }, data: { paidAmount, balance } }));
     res.json({ ok: true, paidAmount, balance });
   } catch (e) {
     if (/not found/i.test(e.message)) return res.status(404).json({ error: e.message });

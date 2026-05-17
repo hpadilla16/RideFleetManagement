@@ -371,6 +371,9 @@ model Tenant {
   slug                    String   @unique
   status                  String   @default("ACTIVE")
   plan                    String   @default("BETA")
+  // Path D multi-tenancy fields (added 2026-05-17, see doc/multitenancy-hybrid-architecture.md)
+  tier                    String   @default("STANDARD")  // STANDARD | PREMIUM | ENTERPRISE
+  schemaName              String   @default("public")    // 'public' | 'tenant_<slug>'
   carSharingEnabled       Boolean  @default(false)
   dealershipLoanerEnabled Boolean  @default(false)
   tollsEnabled            Boolean  @default(false)
@@ -2599,4 +2602,27 @@ model MarketObservation {
   @@index([profileId, pickupDate, sipp])
   @@index([runId])
   @@index([pickupDate, sipp])
+}
+
+
+// Path D per-tenant volume metrics for promotion criteria automation.
+// Written by daily 02:00-ET snapshot job. Read by the promotion-flagger
+// service that surfaces candidates in SUPER_ADMIN review queue once a tenant
+// crosses 2+ thresholds for 7 consecutive days.
+//
+// See doc/multitenancy-hybrid-architecture.md sections 7 + 8.
+model LoadObservation {
+  id                      String   @id @default(cuid())
+  tenantId                String
+  observedAt              DateTime @default(now())
+  windowStart             DateTime
+  windowEnd               DateTime
+  reservationsCreated     Int      @default(0)
+  concurrentStaffPeak     Int      @default(0)
+  cacheInvalidations      Int      @default(0)
+  inspectionMediaUploads  Int      @default(0)
+  voiceAgentMinutes       Int      @default(0)
+  tierAtObservation       String   @default("STANDARD")
+
+  @@index([tenantId, observedAt(sort: Desc)])
 }
