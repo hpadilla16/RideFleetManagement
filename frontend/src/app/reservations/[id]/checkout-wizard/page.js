@@ -96,7 +96,7 @@ function CheckoutWizard({ token, me, logout }) {
       }, token);
 
       // Update agreement with checkout metrics
-      await api(`/api/rental-agreements/${agreement.id}`, {
+      await api(`/api/rental-agreements/${agreement.id}/rental`, {
         method: 'PUT',
         body: JSON.stringify({
           odometerOut: odometerOut ? Number(odometerOut) : null,
@@ -119,17 +119,18 @@ function CheckoutWizard({ token, me, logout }) {
 
       // Signature
       if (signatureDataUrl && signerName) {
-        await api(`/api/rental-agreements/${agreement.id}/sign`, {
+        await api(`/api/rental-agreements/${agreement.id}/signature`, {
           method: 'POST',
           body: JSON.stringify({ signerName, signatureDataUrl })
         }, token);
       }
 
-      // Transition status: CHECKED_OUT
-      await api(`/api/rental-agreements/${agreement.id}/status`, {
+      // Finalize the agreement — transitions reservation to CHECKED_OUT,
+      // locks the agreement, and runs validation on charges + payments.
+      await api(`/api/rental-agreements/${agreement.id}/finalize`, {
         method: 'POST',
-        body: JSON.stringify({ action: 'CHECKOUT' })
-      }, token).catch(() => {});
+        body: JSON.stringify({})
+      }, token);
 
       setStep(5);
     } catch (err) {
