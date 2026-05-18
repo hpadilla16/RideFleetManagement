@@ -12,6 +12,7 @@
 
 import logger from './lib/logger.js';
 import { registerWorker, startWorkers, shutdownQueues, queueEnabled } from './lib/queue/index.js';
+import { startAutochargePoll, stopAutochargePoll } from './modules/reservations/autocharge.poll.js';
 
 // =============================================================================
 // Bootstrap
@@ -54,9 +55,15 @@ async function main() {
   const started = await startWorkers();
   logger.info('[worker] started', { count: started.length, names: started });
 
+  // Pillar 2 — DB safety-net poll for autocharge.
+  // Catches jobs evicted from Upstash Redis (Fixed plan uses allkeys-lru).
+  // Runs every 5min by default, checks DB directly, calls the same handler.
+  startAutochargePoll();
+
   // Graceful shutdown
   const shutdown = async (signal) => {
     logger.info('[worker] shutting down', { signal });
+    stopAutochargePoll();
     await shutdownQueues();
     process.exit(0);
   };
