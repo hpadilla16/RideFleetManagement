@@ -38,8 +38,6 @@ function CheckoutWizard({ token, me, logout }) {
   const [loading, setLoading] = useState(true);
   const [reservation, setReservation] = useState(null);
   const [agreement, setAgreement] = useState(null);
-  const [pricing, setPricing] = useState(null);
-  const [reservationPayments, setReservationPayments] = useState([]);
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState('');
 
@@ -53,33 +51,18 @@ function CheckoutWizard({ token, me, logout }) {
   const [signerName, setSignerName] = useState('');
   const [signatureDataUrl, setSignatureDataUrl] = useState('');
 
-  // Load reservation + agreement + pricing + payments (mirroring the
-  // reservation-detail page which makes 3 parallel calls). The pricing
-  // endpoint returns the canonical `charges` array; payments returns the
-  // existing payment rows.
+  // Load reservation + agreement
   useEffect(() => {
     if (!reservationId) return;
     (async () => {
       try {
-        const [resResult, pricingResult, paymentsResult] = await Promise.allSettled([
-          api(`/api/reservations/${reservationId}`, {}, token),
-          api(`/api/reservations/${reservationId}/pricing`, {}, token),
-          api(`/api/reservations/${reservationId}/payments`, {}, token)
-        ]);
-        const res = resResult.status === 'fulfilled' ? resResult.value : null;
-        if (res) {
-          setReservation(res);
-          // Ensure an agreement exists (creates DRAFT if needed)
-          const ag = res?.rentalAgreement?.id
-            ? await api(`/api/rental-agreements/${res.rentalAgreement.id}`, {}, token)
-            : await api(`/api/reservations/${reservationId}/agreement`, {}, token);
-          setAgreement(ag);
-          setSignerName([res?.customer?.firstName, res?.customer?.lastName].filter(Boolean).join(' '));
-        }
-        if (pricingResult.status === 'fulfilled') setPricing(pricingResult.value);
-        if (paymentsResult.status === 'fulfilled' && Array.isArray(paymentsResult.value)) {
-          setReservationPayments(paymentsResult.value);
-        }
+        const res = await api(`/api/reservations/${reservationId}`, {}, token);
+        setReservation(res);
+        const ag = res?.rentalAgreement?.id
+          ? await api(`/api/rental-agreements/${res.rentalAgreement.id}`, {}, token)
+          : await api(`/api/reservations/${reservationId}/agreement`, {}, token);
+        setAgreement(ag);
+        setSignerName([res?.customer?.firstName, res?.customer?.lastName].filter(Boolean).join(' '));
       } catch (err) {
         console.error('Failed to load reservation', err);
       } finally {
@@ -88,69 +71,10 @@ function CheckoutWizard({ token, me, logout }) {
     })();
   }, [reservationId, token]);
 
-  // Balance comes from /api/reservations/:id/pricing → pricing.charges array
-  // (same source the reservation-detail page reads at line 17: pricing?.charges).
-  // The /api/reservations/:id main endpoint does NOT return charges — they
-  // live in the pricing service. Payments come from /api/reservations/:id/payments.
-  const pricingChargesSum = Array.isArray(pricing?.charges)
-    ? pricing.charges
-        .filter((c) => c?.selected !== false)
-        .reduce((s, c) => s + Number(c?.total || c?.amount || 0), 0)
-    : 0;
-  const reservationPaymentsSum = Array.isArray(reservationPayments)
-    ? reservationPayments
-        .filter((p) => String(p?.status || '').toUpperCase() === 'PAID')
-        .reduce((s, p) => s + Number(p?.amount || 0), 0)
-    : 0;
-  const pricingComputedBalance = Math.max(0, pricingChargesSum - reservationPaymentsSum);
-
-  // Also check agreement (in case it's been finalized and has its own charges)
-  const agreementChargesSum = Array.isArray(agreement?.charges)
-    ? agreement.charges
-        .filter((c) => c?.selected !== false)
-        .reduce((s, c) => s + Number(c?.total || c?.amount || 0), 0)
-    : 0;
-  const agreementPaymentsSum = Array.isArray(agreement?.payments)
-    ? agreement.payments
-        .filter((p) => String(p?.status || '').toUpperCase() === 'PAID')
-        .reduce((s, p) => s + Number(p?.amount || 0), 0)
-    : 0;
-  const agreementComputedBalance = Math.max(0, agreementChargesSum - agreementPaymentsSum);
-
-  const balanceDue = Math.max(
-    Number(agreement?.balance || 0),
-    pricingComputedBalance,
-    agreementComputedBalance
-  );
-
-  // Debug v2: dump full reservation + agreement keys to discover where
-  // the balance/charges actually live.
-  useEffect(() => {
-    if (reservation && agreement) {
-      const chargesSum = Array.isArray(reservation?.charges)
-        ? reservation.charges.reduce((s, c) => s + Number(c?.total || c?.amount || 0), 0)
-        : null;
-      const paymentsSum = Array.isArray(reservation?.payments)
-        ? reservation.payments
-            .filter((p) => String(p?.status || '').toUpperCase() === 'PAID')
-            .reduce((s, p) => s + Number(p?.amount || 0), 0)
-        : null;
-      // eslint-disable-next-line no-console
-      console.log('[checkout-wizard] balance debug v5', {
-        pricingChargesLen: Array.isArray(pricing?.charges) ? pricing.charges.length : 'not-array',
-        pricingChargesSum,
-        reservationPaymentsLen: Array.isArray(reservationPayments) ? reservationPayments.length : 'not-array',
-        reservationPaymentsSum,
-        pricingComputedBalance,
-        agreementChargesLength: Array.isArray(agreement?.charges) ? agreement.charges.length : 'not-array',
-        agreementComputedBalance,
-        firstPricingCharge: pricing?.charges?.[0],
-        computedBalanceDue: balanceDue
-      });
-    }
-  }, [reservation?.id, agreement?.id, pricing?.charges?.length]);
-
-  const needsPayment = balanceDue > 0 && !paymentSkipped && !(Number(paymentTaken.amount) >= balanceDue);
+  // Balance management is now handled by the reservation-detail page.
+  // The wizard validates server-side at submit time: if the reservation has
+  // an outstanding balance, finalize() will refuse and we surface the error
+  // so the agent goes back to the reservation page to collect payment first.
 
   // Vehicle assignment state — if reservation has no vehicle, staff picks here
   const [vehicleId, setVehicleId] = useState('');
@@ -189,6 +113,32 @@ function CheckoutWizard({ token, me, logout }) {
     setSubmitting(true);
     setSubmitError('');
     try {
+      // Server-side balance check via pricing endpoint. If the reservation
+      // has outstanding charges, refuse to check out — staff must collect
+      // payment on the reservation page first.
+      try {
+        const pricing = await api(`/api/reservations/${reservationId}/pricing`, {}, token);
+        const payments = await api(`/api/reservations/${reservationId}/payments`, {}, token).catch(() => []);
+        const charges = Array.isArray(pricing?.charges) ? pricing.charges : [];
+        const chargesSum = charges
+          .filter((c) => c?.selected !== false)
+          .reduce((s, c) => s + Number(c?.total || c?.amount || 0), 0);
+        const paidSum = Array.isArray(payments)
+          ? payments
+              .filter((p) => String(p?.status || '').toUpperCase() === 'PAID')
+              .reduce((s, p) => s + Number(p?.amount || 0), 0)
+          : 0;
+        const outstanding = Math.max(0, chargesSum - paidSum);
+        if (outstanding > 0) {
+          throw new Error(`Reservation has $${outstanding.toFixed(2)} outstanding. Open the reservation, collect payment, then return to checkout.`);
+        }
+      } catch (balanceErr) {
+        // If the balance check threw because outstanding > 0, propagate the message.
+        // If it threw for another reason (network, 404), block with a generic message.
+        if (/outstanding/i.test(String(balanceErr.message || ''))) throw balanceErr;
+        throw new Error('Unable to verify balance is clear. Please refresh and try again.');
+      }
+
       // Save inspection (CHECKOUT phase)
       await api(`/api/rental-agreements/${agreement.id}/inspection`, {
         method: 'POST',
@@ -201,9 +151,7 @@ function CheckoutWizard({ token, me, logout }) {
         })
       }, token);
 
-      // Update agreement with checkout metrics + vehicleId (in case the
-      // staff picked the vehicle in step 1 — reservation may have been
-      // created without one)
+      // Update agreement with checkout metrics + vehicleId
       await api(`/api/rental-agreements/${agreement.id}/rental`, {
         method: 'PUT',
         body: JSON.stringify({
@@ -214,25 +162,6 @@ function CheckoutWizard({ token, me, logout }) {
         })
       }, token);
 
-      // Manual payment if taken — surface failures so staff knows
-      if (Number(paymentTaken.amount) > 0) {
-        const ref = [paymentTaken.last4 && `****${paymentTaken.last4}`, paymentTaken.reference]
-          .filter(Boolean).join(' · ') || '';
-        try {
-          await api(`/api/rental-agreements/${agreement.id}/payments/manual`, {
-            method: 'POST',
-            body: JSON.stringify({
-              entryType: 'CHARGE',
-              amount: Number(paymentTaken.amount),
-              method: paymentTaken.method.toUpperCase(),
-              reference: ref
-            })
-          }, token);
-        } catch (payErr) {
-          throw new Error('Payment failed: ' + (payErr.message || 'unknown error'));
-        }
-      }
-
       // Signature
       if (signatureDataUrl && signerName) {
         await api(`/api/rental-agreements/${agreement.id}/signature`, {
@@ -241,14 +170,13 @@ function CheckoutWizard({ token, me, logout }) {
         }, token);
       }
 
-      // Finalize the agreement — transitions reservation to CHECKED_OUT,
-      // locks the agreement, and runs validation on charges + payments.
+      // Finalize the agreement
       await api(`/api/rental-agreements/${agreement.id}/finalize`, {
         method: 'POST',
         body: JSON.stringify({})
       }, token);
 
-      setStep(5);
+      setStep(4);  // Success step (now step index 4 in a 5-step wizard)
     } catch (err) {
       setSubmitError(err.message || 'Checkout failed');
     } finally {
@@ -260,7 +188,6 @@ function CheckoutWizard({ token, me, logout }) {
     'Confirm vehicle & customer',
     'Capture exterior inspection',
     'Capture pickup metrics',
-    'Collect outstanding balance',
     'Customer signature',
     'Keys delivered'
   ];
@@ -270,18 +197,13 @@ function CheckoutWizard({ token, me, logout }) {
       case 0: return !!reservation && !!agreement && !!vehicleId;
       case 1: return Object.keys(photos).length >= 1;
       case 2: return Number(odometerOut) > 0;
-      case 3: return balanceDue === 0 || paymentSkipped || Number(paymentTaken.amount) >= balanceDue;
-      case 4: return !!signerName && !!signatureDataUrl;
+      case 3: return !!signerName && !!signatureDataUrl;
       default: return true;
     }
   };
 
   const onNext = () => {
-    if (step === 4) return submit();
-    if (step === 3 && balanceDue === 0) {
-      setStep(4);
-      return;
-    }
+    if (step === 3) return submit();
     setStep((s) => Math.min(s + 1, steps.length - 1));
   };
 
@@ -301,20 +223,18 @@ function CheckoutWizard({ token, me, logout }) {
       <WizardShell
         title="Checkout"
         stepIndex={step}
-        totalSteps={6}
+        totalSteps={5}
         stepTitle={steps[step]}
         accent="purple"
-        onBack={step > 0 && step < 5 ? () => setStep((s) => s - 1) : null}
+        onBack={step > 0 && step < 4 ? () => setStep((s) => s - 1) : null}
         onNext={onNext}
-        nextLabel={submitting ? 'Submitting…' : step === 4 ? 'Confirm & deliver →' : step === 5 ? 'Return to reservations' : 'Continue →'}
+        nextLabel={submitting ? 'Submitting…' : step === 3 ? 'Confirm & deliver →' : step === 4 ? 'Return to reservations' : 'Continue →'}
         nextDisabled={!canAdvance() || submitting}
-        ghostAction={step === 3 && needsPayment ? { label: 'Manager skip', onClick: () => setPaymentSkipped(true) } : null}
       >
         {step === 0 && (
           <Step1Confirm
             reservation={reservation}
             agreement={agreement}
-            balanceDue={balanceDue}
             vehicleId={vehicleId}
             onVehicleChange={setVehicleId}
             availableVehicles={availableVehicles}
@@ -339,15 +259,6 @@ function CheckoutWizard({ token, me, logout }) {
           </WizGrid>
         )}
         {step === 3 && (
-          <Step4Balance
-            agreement={agreement}
-            balanceDue={balanceDue}
-            paymentTaken={paymentTaken}
-            onPaymentChange={setPaymentTaken}
-            paymentSkipped={paymentSkipped}
-          />
-        )}
-        {step === 4 && (
           <Step5Signature
             agreement={agreement}
             signerName={signerName}
@@ -357,13 +268,13 @@ function CheckoutWizard({ token, me, logout }) {
             error={submitError}
           />
         )}
-        {step === 5 && <Step6Handoff reservation={reservation} agreement={agreement} token={token} onDone={() => router.push('/reservations')} />}
+        {step === 4 && <Step6Handoff reservation={reservation} agreement={agreement} token={token} onDone={() => router.push('/reservations')} />}
       </WizardShell>
     </AppShell>
   );
 }
 
-function Step1Confirm({ reservation, agreement, balanceDue, vehicleId, onVehicleChange, availableVehicles, loadingVehicles }) {
+function Step1Confirm({ reservation, agreement, vehicleId, onVehicleChange, availableVehicles, loadingVehicles }) {
   // Read vehicle from explicit selection > reservation > agreement
   const vSelected = availableVehicles.find((x) => x.id === vehicleId);
   const v = vSelected || reservation?.vehicle || agreement?.vehicle;
@@ -444,7 +355,6 @@ function Step1Confirm({ reservation, agreement, balanceDue, vehicleId, onVehicle
             ? `${reservation.customer.cardBrand || 'Card'} ····${reservation.customer.cardLast4}`
             : 'None'
         } />
-        <RowBetween k="Balance" v={`$${balanceDue.toFixed(2)}`} valueColor={balanceDue > 0 ? '#f59e0b' : '#1fc7aa'} />
       </WizCard>
     </WizGrid>
   );

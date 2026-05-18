@@ -67,6 +67,7 @@ function Inner({ token, me, logout }) {
   const [amount, setAmount] = useState('');
   const [method, setMethod] = useState('CASH');
   const [reference, setReference] = useState('');
+  const [cardLast4, setCardLast4] = useState('');
   const [saving, setSaving] = useState(false);
   const [cardChargeAmount, setCardChargeAmount] = useState('');
   const [holdAmount, setHoldAmount] = useState('');
@@ -166,19 +167,32 @@ function Inner({ token, me, logout }) {
       const v = Number(amount || 0);
       if (!(v > 0)) return setMsg('Enter a valid amount');
       if (v - unpaid > 0.009) return setMsg(`Amount exceeds unpaid balance ($${unpaid.toFixed(2)})`);
+      // Last 4 of card is required when method is CARD — audit trail for
+      // counter card swipes, matches the auth code shown on the merchant slip.
+      if (method === 'CARD') {
+        const digits = String(cardLast4 || '').replace(/\D/g, '');
+        if (digits.length !== 4) return setMsg('Last 4 digits of card are required for card payments');
+      }
+      // Bundle the last4 into the reference string so it shows on the payment
+      // history (e.g. "****1234 · auth A8K2X9"). Stored alongside the reference.
+      const refParts = [];
+      if (method === 'CARD' && cardLast4) refParts.push(`****${String(cardLast4).replace(/\D/g, '').slice(-4)}`);
+      if (reference) refParts.push(reference);
+      const referenceFinal = refParts.join(' · ') || `OTC-${Date.now()}`;
       setSaving(true);
       await api(`/api/reservations/${id}/payments`, {
         method: 'POST',
         body: JSON.stringify({
           amount: v,
           method,
-          reference: String(reference || `OTC-${Date.now()}`),
+          reference: referenceFinal,
           origin: 'OTC'
         })
       }, token);
       await load();
       setAmount('');
       setReference('');
+      setCardLast4('');
       setMsg('Payment recorded');
     } catch (e) {
       setMsg(e.message);
@@ -415,9 +429,26 @@ function Inner({ token, me, logout }) {
               <option value="OTHER">Other</option>
             </select>
           </div>
-          <div className="stack"><label className="label">Reference</label><input value={reference} onChange={(e) => setReference(e.target.value)} /></div>
+          <div className="stack"><label className="label">Reference</label><input value={reference} onChange={(e) => setReference(e.target.value)} placeholder={method === 'CARD' ? 'Auth code (optional)' : ''} /></div>
         </div>
-        <button onClick={addPayment} disabled={saving}>{saving ? 'Saving...' : 'Record OTC Payment'}</button>
+        {method === 'CARD' && (
+          <div className="grid3" style={{ marginBottom: 10 }}>
+            <div className="stack">
+              <label className="label">Last 4 of Card <span style={{ color: '#ef4444' }}>*</span></label>
+              <input
+                type="text"
+                inputMode="numeric"
+                maxLength={4}
+                pattern="[0-9]{4}"
+                value={cardLast4}
+                onChange={(e) => setCardLast4(e.target.value.replace(/\D/g, '').slice(0, 4))}
+                placeholder="4242"
+              />
+              <span className="ui-muted">Required for card payments · audit trail for counter swipes</span>
+            </div>
+          </div>
+        )}
+        <button onClick={addPayment} disabled={saving || (method === 'CARD' && String(cardLast4).replace(/\D/g, '').length !== 4)}>{saving ? 'Saving...' : 'Record OTC Payment'}</button>
 
         <div className="grid3" style={{ marginTop: 16, marginBottom: 10 }}>
           <div className="stack">
