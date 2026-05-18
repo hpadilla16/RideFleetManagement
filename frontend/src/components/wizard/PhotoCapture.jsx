@@ -50,6 +50,7 @@ export function PhotoCapture({
 
   const currentAngle = angles[currentAngleIndex] || angles[0];
 
+  // Get the camera stream
   useEffect(() => {
     let cancelled = false;
     const startStream = async () => {
@@ -67,10 +68,6 @@ export function PhotoCapture({
           return;
         }
         streamRef.current = stream;
-        if (videoRef.current) {
-          videoRef.current.srcObject = stream;
-          await videoRef.current.play().catch(() => {});
-        }
         setStreamActive(true);
       } catch (err) {
         setStreamError(err.message || 'Camera permission denied. Use "Choose file" instead.');
@@ -85,6 +82,20 @@ export function PhotoCapture({
       }
     };
   }, []);
+
+  // Attach the stream to the video element. Runs after streamActive flips
+  // true AND the video element has mounted (videoRef has a current value).
+  // Without this two-step, the previous version set srcObject before the
+  // <video> rendered, so the stream attached to nothing and the viewfinder
+  // stayed blank.
+  useEffect(() => {
+    if (!streamActive || !videoRef.current || !streamRef.current) return;
+    videoRef.current.srcObject = streamRef.current;
+    const playPromise = videoRef.current.play();
+    if (playPromise?.catch) playPromise.catch((err) => {
+      console.warn('[photo-capture] video.play() rejected', err);
+    });
+  }, [streamActive]);
 
   const capture = async () => {
     if (capturing) return;
@@ -152,13 +163,31 @@ export function PhotoCapture({
         <div className="compare-cell">
           {comparePhoto && <div className="compare-label live">LIVE · CAPTURING NOW</div>}
           <div className="viewfinder">
-            {streamActive && (
-              <video ref={videoRef} playsInline muted />
-            )}
+            {/* Video element is ALWAYS in the DOM so videoRef.current is set
+                before the stream-attach effect runs. Hidden via CSS when the
+                stream isn't ready yet. */}
+            <video
+              ref={videoRef}
+              playsInline
+              muted
+              autoPlay
+              style={{
+                display: streamActive ? 'block' : 'none',
+                width: '100%',
+                height: '100%',
+                objectFit: 'cover'
+              }}
+            />
             {streamError && (
               <div className="vf-error">
                 <div className="vf-error-icon">📷</div>
                 <div>{streamError}</div>
+              </div>
+            )}
+            {!streamActive && !streamError && (
+              <div className="vf-error">
+                <div className="vf-error-icon">📷</div>
+                <div>Requesting camera permission…</div>
               </div>
             )}
             <div className="vf-overlay">
