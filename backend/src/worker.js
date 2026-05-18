@@ -14,28 +14,42 @@ import logger from './lib/logger.js';
 import { registerWorker, startWorkers, shutdownQueues, queueEnabled } from './lib/queue/index.js';
 
 // =============================================================================
-// Worker registrations
-// =============================================================================
-
-// Pillar 2 — auto-charge after CHECKED_IN_UNPAID.
-// Handler lives in the reservations module to keep domain logic together.
-import('./modules/reservations/autocharge.worker.js').then(({ autochargeHandler }) => {
-  registerWorker('reservation.autocharge-after-checkin', autochargeHandler, {
-    concurrency: 3
-  });
-}).catch((err) => {
-  logger.warn('[worker] autocharge handler not yet implemented', { message: err.message });
-});
-
-// =============================================================================
 // Bootstrap
 // =============================================================================
+
+async function registerAllHandlers() {
+  // Pillar 2 — auto-charge after CHECKED_IN_UNPAID.
+  // Dynamic import so a broken handler file doesn't crash the whole worker
+  // boot. If the handler fails to load, log and continue — other handlers
+  // can still run.
+  try {
+    const mod = await import('./modules/reservations/autocharge.worker.js');
+    if (typeof mod.autochargeHandler !== 'function') {
+      throw new Error('autocharge.worker.js does not export autochargeHandler');
+    }
+    registerWorker('reservation.autocharge-after-checkin', mod.autochargeHandler, {
+      concurrency: 3
+    });
+    logger.info('[worker] registered handler: reservation.autocharge-after-checkin');
+  } catch (err) {
+    logger.warn('[worker] autocharge handler not registered', {
+      message: err.message, stack: err.stack
+    });
+  }
+
+  // Future handlers go here. Each in its own try/catch so a broken one
+  // doesn't poison the others.
+}
 
 async function main() {
   if (!queueEnabled()) {
     logger.error('[worker] REDIS_URL not set — worker process cannot start');
     process.exit(1);
   }
+
+  // Register handlers BEFORE startWorkers — otherwise handlers map is empty
+  // when startWorkers reads it and no Worker instances are created.
+  await registerAllHandlers();
 
   const started = await startWorkers();
   logger.info('[worker] started', { count: started.length, names: started });
