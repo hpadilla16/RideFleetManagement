@@ -51,16 +51,20 @@ function CheckoutWizard({ token, me, logout }) {
   const [signerName, setSignerName] = useState('');
   const [signatureDataUrl, setSignatureDataUrl] = useState('');
 
-  // Load reservation + agreement
+  // Load reservation + agreement. Always use GET /reservations/:id/agreement
+  // (not /rental-agreements/:id direct), because that endpoint runs
+  // startFromReservation which SYNCS charges from the reservation pricing
+  // to the agreement. The direct rental-agreement fetch returns the row
+  // as-is, which may have an empty charges array on agreements created
+  // before the charge-sync flow ran — and finalize() then rejects with
+  // "At least one selected charge is required".
   useEffect(() => {
     if (!reservationId) return;
     (async () => {
       try {
         const res = await api(`/api/reservations/${reservationId}`, {}, token);
         setReservation(res);
-        const ag = res?.rentalAgreement?.id
-          ? await api(`/api/rental-agreements/${res.rentalAgreement.id}`, {}, token)
-          : await api(`/api/reservations/${reservationId}/agreement`, {}, token);
+        const ag = await api(`/api/reservations/${reservationId}/agreement`, {}, token);
         setAgreement(ag);
         setSignerName([res?.customer?.firstName, res?.customer?.lastName].filter(Boolean).join(' '));
       } catch (err) {
@@ -113,52 +117,13 @@ function CheckoutWizard({ token, me, logout }) {
     setSubmitting(true);
     setSubmitError('');
     try {
-      // Pull canonical charges + payments from the reservation pricing endpoint.
-      // This is the same source the reservation-detail page reads from.
-      let pricingCharges = [];
-      let paidSum = 0;
-      try {
-        const pricing = await api(`/api/reservations/${reservationId}/pricing`, {}, token);
-        const payments = await api(`/api/reservations/${reservationId}/payments`, {}, token).catch(() => []);
-        pricingCharges = Array.isArray(pricing?.charges) ? pricing.charges : [];
-        paidSum = Array.isArray(payments)
-          ? payments
-              .filter((p) => String(p?.status || '').toUpperCase() === 'PAID')
-              .reduce((s, p) => s + Number(p?.amount || 0), 0)
-          : 0;
-      } catch (priceErr) {
-        throw new Error('Unable to load reservation pricing. Please refresh and try again.');
-      }
-
-      // Block checkout if there's an outstanding balance.
-      const chargesSum = pricingCharges
-        .filter((c) => c?.selected !== false)
-        .reduce((s, c) => s + Number(c?.total || c?.amount || 0), 0);
-      const outstanding = Math.max(0, chargesSum - paidSum);
-      if (outstanding > 0) {
-        throw new Error(`Reservation has $${outstanding.toFixed(2)} outstanding. Open the reservation, collect payment, then return to checkout.`);
-      }
-
-      // Copy charges from reservation pricing to the agreement so finalize()
-      // sees selected charges (it requires >=1 selected charge to proceed).
-      // Fresh agreements have no charges of their own.
-      if (pricingCharges.length > 0) {
-        await api(`/api/rental-agreements/${agreement.id}/charges`, {
-          method: 'POST',
-          body: JSON.stringify({
-            charges: pricingCharges.map((c, idx) => ({
-              code: c.code || null,
-              name: c.name || 'Charge',
-              chargeType: c.chargeType || 'UNIT',
-              quantity: Number(c.quantity || 1),
-              rate: Number(c.rate || 0),
-              total: Number(c.total || c.amount || 0),
-              taxable: !!c.taxable,
-              selected: c.selected !== false,
-              sortOrder: typeof c.sortOrder === 'number' ? c.sortOrder : idx
-            }))
-          })
-        }, token);
+      // Re-sync agreement charges from reservation pricing one more time
+      // before finalize. The load already did this, but a) charges may have
+      // changed since, and b) re-fetching gives us authoritative balance.
+      const synced = await api(`/api/reservations/${reservationId}/agreement`, {}, token);
+      const balance = Number(synced?.balance || 0);
+      if (balance > 0) {
+        throw new Error(`Reservation has $${balance.toFixed(2)} outstanding. Open the reservation, collect payment, then return to checkout.`);
       }
 
       // Save inspection (CHECKOUT phase)
