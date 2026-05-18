@@ -2966,8 +2966,18 @@ export const rentalAgreementsService = {
     const entryType = String(payload.entryType || 'CHARGE').toUpperCase();
     if (!['CHARGE', 'DEPOSIT', 'REFUND'].includes(entryType)) throw new Error('entryType must be CHARGE, DEPOSIT, or REFUND');
 
+    // Pillar 2 (2026-05-18): receipt requirement relaxed for CARD payments
+    // with a reference (auth code). For card-on-counter swipes, the merchant
+    // terminal slip IS the receipt and the auth code provides the audit trail.
+    // CASH and CHECK still require a receipt photo because there's no other
+    // proof of payment.
     const receiptDataUrl = String(payload.receiptDataUrl || '').trim();
-    if (!receiptDataUrl) throw new Error('Receipt is required for manual entries');
+    const method = String(payload.method || 'OTHER').toUpperCase();
+    const reference = String(payload.reference || '').trim();
+    const cardWithAuth = method === 'CARD' && reference.length > 0;
+    if (!receiptDataUrl && !cardWithAuth) {
+      throw new Error('Receipt is required for manual entries (CARD payments may skip if a reference / auth code is provided)');
+    }
 
     const agreement = await prisma.rentalAgreement.findUnique({ where: { id } });
     if (!agreement) throw new Error('Rental agreement not found');

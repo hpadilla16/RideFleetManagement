@@ -105,16 +105,23 @@ function CheckoutWizard({ token, me, logout }) {
         })
       }, token);
 
-      // Manual payment if taken
+      // Manual payment if taken — surface failures so staff knows
       if (Number(paymentTaken.amount) > 0) {
-        await api(`/api/rental-agreements/${agreement.id}/payments/manual`, {
-          method: 'POST',
-          body: JSON.stringify({
-            amount: Number(paymentTaken.amount),
-            method: paymentTaken.method.toUpperCase(),
-            reference: [paymentTaken.last4 && `****${paymentTaken.last4}`, paymentTaken.reference].filter(Boolean).join(' · ') || null
-          })
-        }, token).catch(() => {});  // non-fatal
+        const ref = [paymentTaken.last4 && `****${paymentTaken.last4}`, paymentTaken.reference]
+          .filter(Boolean).join(' · ') || '';
+        try {
+          await api(`/api/rental-agreements/${agreement.id}/payments/manual`, {
+            method: 'POST',
+            body: JSON.stringify({
+              entryType: 'CHARGE',
+              amount: Number(paymentTaken.amount),
+              method: paymentTaken.method.toUpperCase(),
+              reference: ref
+            })
+          }, token);
+        } catch (payErr) {
+          throw new Error('Payment failed: ' + (payErr.message || 'unknown error'));
+        }
       }
 
       // Signature
