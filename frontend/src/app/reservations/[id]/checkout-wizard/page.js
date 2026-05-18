@@ -72,8 +72,42 @@ function CheckoutWizard({ token, me, logout }) {
     })();
   }, [reservationId, token]);
 
-  const balanceDue = Number(agreement?.balance || 0);
+  // Balance read fallback: agreement → reservation → amountDue.
+  // Fresh agreements don't carry charges yet — read from reservation
+  // which has the authoritative charges/balance until finalize copies them in.
+  const balanceDue = Number(
+    agreement?.balance ?? reservation?.balance ?? reservation?.amountDue ?? 0
+  );
   const needsPayment = balanceDue > 0 && !paymentSkipped && !(Number(paymentTaken.amount) >= balanceDue);
+
+  // Vehicle assignment state — if reservation has no vehicle, staff picks here
+  const [vehicleId, setVehicleId] = useState('');
+  const [availableVehicles, setAvailableVehicles] = useState([]);
+  const [loadingVehicles, setLoadingVehicles] = useState(false);
+
+  // Sync vehicleId from reservation/agreement when they load
+  useEffect(() => {
+    setVehicleId(reservation?.vehicleId || agreement?.vehicleId || '');
+  }, [reservation?.vehicleId, agreement?.vehicleId]);
+
+  // Load available vehicles when no vehicle is yet assigned
+  useEffect(() => {
+    if (vehicleId || !reservation) return;
+    let cancelled = false;
+    (async () => {
+      setLoadingVehicles(true);
+      try {
+        const res = await api('/api/vehicles?status=AVAILABLE', {}, token);
+        const list = Array.isArray(res?.data) ? res.data : (Array.isArray(res) ? res : []);
+        if (!cancelled) setAvailableVehicles(list);
+      } catch (err) {
+        console.warn('Failed to load vehicles', err);
+      } finally {
+        if (!cancelled) setLoadingVehicles(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [reservation, vehicleId, token]);
 
   const submit = async () => {
     if (!agreement?.id) {
@@ -95,10 +129,13 @@ function CheckoutWizard({ token, me, logout }) {
         })
       }, token);
 
-      // Update agreement with checkout metrics
+      // Update agreement with checkout metrics + vehicleId (in case the
+      // staff picked the vehicle in step 1 — reservation may have been
+      // created without one)
       await api(`/api/rental-agreements/${agreement.id}/rental`, {
         method: 'PUT',
         body: JSON.stringify({
+          vehicleId: vehicleId || undefined,
           odometerOut: odometerOut ? Number(odometerOut) : null,
           fuelOut,
           cleanlinessOut
@@ -158,7 +195,7 @@ function CheckoutWizard({ token, me, logout }) {
 
   const canAdvance = () => {
     switch (step) {
-      case 0: return !!reservation && !!agreement;
+      case 0: return !!reservation && !!agreement && !!vehicleId;
       case 1: return Object.keys(photos).length >= 1;
       case 2: return Number(odometerOut) > 0;
       case 3: return balanceDue === 0 || paymentSkipped || Number(paymentTaken.amount) >= balanceDue;
@@ -201,7 +238,17 @@ function CheckoutWizard({ token, me, logout }) {
         nextDisabled={!canAdvance() || submitting}
         ghostAction={step === 3 && needsPayment ? { label: 'Manager skip', onClick: () => setPaymentSkipped(true) } : null}
       >
-        {step === 0 && <Step1Confirm reservation={reservation} agreement={agreement} />}
+        {step === 0 && (
+          <Step1Confirm
+            reservation={reservation}
+            agreement={agreement}
+            balanceDue={balanceDue}
+            vehicleId={vehicleId}
+            onVehicleChange={setVehicleId}
+            availableVehicles={availableVehicles}
+            loadingVehicles={loadingVehicles}
+          />
+        )}
         {step === 1 && (
           <WizCard padding={20}>
             <PhotoCapture
@@ -244,21 +291,59 @@ function CheckoutWizard({ token, me, logout }) {
   );
 }
 
-function Step1Confirm({ reservation, agreement }) {
-  const v = reservation?.vehicle;
-  const vehicleDesc = v ? [v.year, v.make, v.model].filter(Boolean).join(' ') : 'Vehicle';
+function Step1Confirm({ reservation, agreement, balanceDue, vehicleId, onVehicleChange, availableVehicles, loadingVehicles }) {
+  // Read vehicle from explicit selection > reservation > agreement
+  const vSelected = availableVehicles.find((x) => x.id === vehicleId);
+  const v = vSelected || reservation?.vehicle || agreement?.vehicle;
+  const vehicleDesc = v ? [v.year, v.make, v.model].filter(Boolean).join(' ') : null;
+  const hasVehicle = !!vehicleDesc;
   return (
     <WizGrid cols={2}>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-        <WizCard accent="ink" padding={22}>
-          <div style={{ fontSize: 12, opacity: .85, fontWeight: 700, letterSpacing: '.12em' }}>VEHICLE ASSIGNED</div>
-          <div style={{ fontSize: 24, fontWeight: 800, marginTop: 6, letterSpacing: '-.01em' }}>{vehicleDesc}</div>
-          <div style={{ fontSize: 13, opacity: .9, marginTop: 4 }}>⬢ Plate {v?.plate || '—'} · Unit {v?.internalNumber || '—'} · {v?.color || ''}</div>
-          <div style={{ display: 'flex', gap: 8, marginTop: 16, flexWrap: 'wrap' }}>
-            <span style={{ background: 'rgba(255,255,255,.16)', padding: '6px 12px', borderRadius: 999, fontSize: 11, fontWeight: 700 }}>⛽ Inspection ready</span>
-            <span style={{ background: 'rgba(255,255,255,.16)', padding: '6px 12px', borderRadius: 999, fontSize: 11, fontWeight: 700 }}>Agreement {agreement?.agreementNumber || 'DRAFT'}</span>
-          </div>
-        </WizCard>
+        {hasVehicle ? (
+          <WizCard accent="ink" padding={22}>
+            <div style={{ fontSize: 12, opacity: .85, fontWeight: 700, letterSpacing: '.12em' }}>VEHICLE ASSIGNED</div>
+            <div style={{ fontSize: 24, fontWeight: 800, marginTop: 6, letterSpacing: '-.01em' }}>{vehicleDesc}</div>
+            <div style={{ fontSize: 13, opacity: .9, marginTop: 4 }}>⬢ Plate {v?.plate || '—'} · Unit {v?.internalNumber || '—'} · {v?.color || ''}</div>
+            <div style={{ display: 'flex', gap: 8, marginTop: 16, flexWrap: 'wrap' }}>
+              <span style={{ background: 'rgba(255,255,255,.16)', padding: '6px 12px', borderRadius: 999, fontSize: 11, fontWeight: 700 }}>⛽ Inspection ready</span>
+              <span style={{ background: 'rgba(255,255,255,.16)', padding: '6px 12px', borderRadius: 999, fontSize: 11, fontWeight: 700 }}>Agreement {agreement?.agreementNumber || 'DRAFT'}</span>
+            </div>
+          </WizCard>
+        ) : (
+          <WizCard accent="warn" padding={22}>
+            <div style={{ fontSize: 11, fontWeight: 800, color: '#b45309', letterSpacing: '.12em', marginBottom: 8 }}>NO VEHICLE ASSIGNED</div>
+            <div style={{ fontSize: 14, color: '#211a38', marginBottom: 12 }}>
+              Pick a vehicle from your available inventory to continue with checkout.
+            </div>
+            <label style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+              <span style={{ fontSize: 10, fontWeight: 800, color: '#6f668f', letterSpacing: '.1em' }}>SELECT VEHICLE</span>
+              <select
+                value={vehicleId}
+                onChange={(e) => onVehicleChange(e.target.value)}
+                style={{
+                  padding: '12px 14px',
+                  border: '1px solid #e6dfff',
+                  borderRadius: 12,
+                  fontSize: 14,
+                  fontWeight: 700,
+                  color: '#211a38',
+                  background: 'white',
+                  outline: 'none'
+                }}
+              >
+                <option value="">{loadingVehicles ? 'Loading…' : '— Choose a vehicle —'}</option>
+                {availableVehicles.map((veh) => (
+                  <option key={veh.id} value={veh.id}>
+                    {[veh.year, veh.make, veh.model].filter(Boolean).join(' ')}
+                    {veh.plate ? ` · ${veh.plate}` : ''}
+                    {veh.internalNumber ? ` · Unit ${veh.internalNumber}` : ''}
+                  </option>
+                ))}
+              </select>
+            </label>
+          </WizCard>
+        )}
         <WizGrid cols={2} gap={10}>
           <Tile k="Customer" v={`${reservation?.customer?.firstName || ''} ${reservation?.customer?.lastName || ''}`.trim() || '—'} />
           <Tile k="Days" v={`${rentalDays(reservation)} days`} />
@@ -287,7 +372,7 @@ function Step1Confirm({ reservation, agreement }) {
             ? `${reservation.customer.cardBrand || 'Card'} ····${reservation.customer.cardLast4}`
             : 'None'
         } />
-        <RowBetween k="Balance" v={`$${Number(agreement?.balance || 0).toFixed(2)}`} valueColor={Number(agreement?.balance) > 0 ? '#f59e0b' : '#1fc7aa'} />
+        <RowBetween k="Balance" v={`$${balanceDue.toFixed(2)}`} valueColor={balanceDue > 0 ? '#f59e0b' : '#1fc7aa'} />
       </WizCard>
     </WizGrid>
   );
