@@ -88,8 +88,12 @@ function CheckoutWizard({ token, me, logout }) {
     : 0;
   const agreementComputedBalance = Math.max(0, agreementChargesSum - agreementPaymentsSum);
 
+  // Reservation has its own top-level `charges` and `payments` arrays (the
+  // reservation-detail page reads from `row.charges` directly).
   const reservationChargesSum = Array.isArray(reservation?.charges)
-    ? reservation.charges.reduce((s, c) => s + Number(c?.total || c?.amount || 0), 0)
+    ? reservation.charges
+        .filter((c) => c?.selected !== false)
+        .reduce((s, c) => s + Number(c?.total || c?.amount || 0), 0)
     : 0;
   const reservationPaymentsSum = Array.isArray(reservation?.payments)
     ? reservation.payments
@@ -121,17 +125,15 @@ function CheckoutWizard({ token, me, logout }) {
             .reduce((s, p) => s + Number(p?.amount || 0), 0)
         : null;
       // eslint-disable-next-line no-console
-      console.log('[checkout-wizard] balance debug v3', {
-        agreementBalance: agreement?.balance,
-        agreementTotal: agreement?.total,
-        agreementPaidAmount: agreement?.paidAmount,
+      console.log('[checkout-wizard] balance debug v4', {
+        reservationChargesLen: Array.isArray(reservation?.charges) ? reservation.charges.length : 'not-array',
+        reservationChargesSum,
+        reservationPaymentsLen: Array.isArray(reservation?.payments) ? reservation.payments.length : 'not-array',
+        reservationPaymentsSum,
+        reservationComputedBalance,
         agreementChargesLength: Array.isArray(agreement?.charges) ? agreement.charges.length : 'not-array',
-        agreementPaymentsLength: Array.isArray(agreement?.payments) ? agreement.payments.length : 'not-array',
-        agreementChargesSum,
-        agreementPaymentsSum,
         agreementComputedBalance,
-        firstAgreementCharge: agreement?.charges?.[0],
-        firstAgreementPayment: agreement?.payments?.[0],
+        firstReservationCharge: reservation?.charges?.[0],
         computedBalanceDue: balanceDue
       });
     }
