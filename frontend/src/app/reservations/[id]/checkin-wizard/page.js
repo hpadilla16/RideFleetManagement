@@ -249,7 +249,7 @@ function CheckinWizard({ token, me, logout }) {
             error={submitError}
           />
         )}
-        {step === 5 && <Step6Success result={result} reservation={reservation} onDone={() => router.push('/reservations')} />}
+        {step === 5 && <Step6Success result={result} reservation={reservation} agreement={agreement} token={token} onDone={() => router.push('/reservations')} />}
       </WizardShell>
     </AppShell>
   );
@@ -624,8 +624,26 @@ function Step5Signature({ feePreview, signerName, onSignerName, signatureDataUrl
 // ─────────────────────────────────────────────────────────────────────────────
 // Step 6 — Success
 // ─────────────────────────────────────────────────────────────────────────────
-function Step6Success({ result, reservation, onDone }) {
+function Step6Success({ result, reservation, agreement, token, onDone }) {
   const isUnpaid = result?.reservationStatus === 'CHECKED_IN_UNPAID';
+  const [emailing, setEmailing] = useState(false);
+  const [emailMsg, setEmailMsg] = useState('');
+  const handleResendEmail = async () => {
+    if (!agreement?.id) return;
+    setEmailing(true);
+    setEmailMsg('');
+    try {
+      await api(`/api/rental-agreements/${agreement.id}/email-agreement`, {
+        method: 'POST',
+        body: JSON.stringify({})
+      }, token);
+      setEmailMsg('Sent ✓');
+    } catch (err) {
+      setEmailMsg('Failed: ' + (err.message || 'unknown'));
+    } finally {
+      setEmailing(false);
+    }
+  };
   return (
     <WizGrid cols={2}>
       <div>
@@ -679,10 +697,19 @@ function Step6Success({ result, reservation, onDone }) {
         )}
         <WizCard>
           <div style={{ fontSize: 11, fontWeight: 800, color: '#6f668f', letterSpacing: '.1em', marginBottom: 10 }}>STAFF ACTIONS</div>
-          <ActionLink label="Mark vehicle available" onClick={() => alert('Coming soon')} />
-          <ActionLink label="Re-send invoice email" onClick={() => alert('Coming soon')} />
-          {isUnpaid && <ActionLink label="View auto-charge job" onClick={() => alert('Coming soon')} />}
-          {isUnpaid && <ActionLink label="Cancel auto-charge (dispute)" onClick={() => alert('Coming soon')} variant="danger" />}
+          <ActionLink
+            label={`View agreement ${agreement?.agreementNumber || ''}`}
+            onClick={() => agreement?.id && (window.location.href = `/agreements/${agreement.id}`)}
+          />
+          <ActionLink
+            label="View inspection photos"
+            onClick={() => reservation?.id && (window.location.href = `/reservations/${reservation.id}/inspection-report`)}
+          />
+          <ActionLink
+            label={emailing ? 'Sending…' : (emailMsg || (isUnpaid ? 'Re-send invoice email' : 'Re-send receipt email'))}
+            onClick={handleResendEmail}
+          />
+          <ActionLink label="Return to reservations" onClick={onDone} />
         </WizCard>
       </div>
     </WizGrid>

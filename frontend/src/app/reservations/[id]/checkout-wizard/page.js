@@ -231,7 +231,7 @@ function CheckoutWizard({ token, me, logout }) {
             error={submitError}
           />
         )}
-        {step === 5 && <Step6Handoff reservation={reservation} agreement={agreement} onDone={() => router.push('/reservations')} />}
+        {step === 5 && <Step6Handoff reservation={reservation} agreement={agreement} token={token} onDone={() => router.push('/reservations')} />}
       </WizardShell>
     </AppShell>
   );
@@ -383,7 +383,27 @@ function Step5Signature({ agreement, signerName, onSignerName, signatureDataUrl,
   );
 }
 
-function Step6Handoff({ reservation, agreement, onDone }) {
+function Step6Handoff({ reservation, agreement, token, onDone }) {
+  const [emailing, setEmailing] = useState(false);
+  const [emailMsg, setEmailMsg] = useState('');
+
+  const handleResendEmail = async () => {
+    if (!agreement?.id) return;
+    setEmailing(true);
+    setEmailMsg('');
+    try {
+      await api(`/api/rental-agreements/${agreement.id}/email-agreement`, {
+        method: 'POST',
+        body: JSON.stringify({})
+      }, token);
+      setEmailMsg('Sent ✓');
+    } catch (err) {
+      setEmailMsg('Failed: ' + (err.message || 'unknown'));
+    } finally {
+      setEmailing(false);
+    }
+  };
+
   return (
     <WizGrid cols={2}>
       <div style={{
@@ -408,10 +428,19 @@ function Step6Handoff({ reservation, agreement, onDone }) {
       </div>
       <WizCard>
         <div style={{ fontSize: 11, fontWeight: 800, color: '#6f668f', letterSpacing: '.1em', marginBottom: 10 }}>NEXT</div>
-        <ActionLink label={`View agreement ${agreement?.agreementNumber || ''}`} onClick={() => alert('Coming soon')} />
-        <ActionLink label="View 8 inspection photos" onClick={() => alert('Coming soon')} />
-        <ActionLink label="Print two copies" onClick={() => window.print()} />
-        <ActionLink label="Re-send agreement email" onClick={() => alert('Coming soon')} />
+        <ActionLink
+          label={`View agreement ${agreement?.agreementNumber || ''}`}
+          onClick={() => agreement?.id && (window.location.href = `/agreements/${agreement.id}`)}
+        />
+        <ActionLink
+          label="View inspection photos"
+          onClick={() => reservation?.id && (window.location.href = `/reservations/${reservation.id}/inspection-report`)}
+        />
+        <ActionLink label="Print agreement" onClick={() => agreement?.id && window.open(`/agreements/${agreement.id}`, '_blank')} />
+        <ActionLink
+          label={emailing ? 'Sending…' : (emailMsg || 'Re-send agreement email')}
+          onClick={handleResendEmail}
+        />
       </WizCard>
     </WizGrid>
   );
