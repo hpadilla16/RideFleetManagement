@@ -113,30 +113,52 @@ function CheckoutWizard({ token, me, logout }) {
     setSubmitting(true);
     setSubmitError('');
     try {
-      // Server-side balance check via pricing endpoint. If the reservation
-      // has outstanding charges, refuse to check out — staff must collect
-      // payment on the reservation page first.
+      // Pull canonical charges + payments from the reservation pricing endpoint.
+      // This is the same source the reservation-detail page reads from.
+      let pricingCharges = [];
+      let paidSum = 0;
       try {
         const pricing = await api(`/api/reservations/${reservationId}/pricing`, {}, token);
         const payments = await api(`/api/reservations/${reservationId}/payments`, {}, token).catch(() => []);
-        const charges = Array.isArray(pricing?.charges) ? pricing.charges : [];
-        const chargesSum = charges
-          .filter((c) => c?.selected !== false)
-          .reduce((s, c) => s + Number(c?.total || c?.amount || 0), 0);
-        const paidSum = Array.isArray(payments)
+        pricingCharges = Array.isArray(pricing?.charges) ? pricing.charges : [];
+        paidSum = Array.isArray(payments)
           ? payments
               .filter((p) => String(p?.status || '').toUpperCase() === 'PAID')
               .reduce((s, p) => s + Number(p?.amount || 0), 0)
           : 0;
-        const outstanding = Math.max(0, chargesSum - paidSum);
-        if (outstanding > 0) {
-          throw new Error(`Reservation has $${outstanding.toFixed(2)} outstanding. Open the reservation, collect payment, then return to checkout.`);
-        }
-      } catch (balanceErr) {
-        // If the balance check threw because outstanding > 0, propagate the message.
-        // If it threw for another reason (network, 404), block with a generic message.
-        if (/outstanding/i.test(String(balanceErr.message || ''))) throw balanceErr;
-        throw new Error('Unable to verify balance is clear. Please refresh and try again.');
+      } catch (priceErr) {
+        throw new Error('Unable to load reservation pricing. Please refresh and try again.');
+      }
+
+      // Block checkout if there's an outstanding balance.
+      const chargesSum = pricingCharges
+        .filter((c) => c?.selected !== false)
+        .reduce((s, c) => s + Number(c?.total || c?.amount || 0), 0);
+      const outstanding = Math.max(0, chargesSum - paidSum);
+      if (outstanding > 0) {
+        throw new Error(`Reservation has $${outstanding.toFixed(2)} outstanding. Open the reservation, collect payment, then return to checkout.`);
+      }
+
+      // Copy charges from reservation pricing to the agreement so finalize()
+      // sees selected charges (it requires >=1 selected charge to proceed).
+      // Fresh agreements have no charges of their own.
+      if (pricingCharges.length > 0) {
+        await api(`/api/rental-agreements/${agreement.id}/charges`, {
+          method: 'POST',
+          body: JSON.stringify({
+            charges: pricingCharges.map((c, idx) => ({
+              code: c.code || null,
+              name: c.name || 'Charge',
+              chargeType: c.chargeType || 'UNIT',
+              quantity: Number(c.quantity || 1),
+              rate: Number(c.rate || 0),
+              total: Number(c.total || c.amount || 0),
+              taxable: !!c.taxable,
+              selected: c.selected !== false,
+              sortOrder: typeof c.sortOrder === 'number' ? c.sortOrder : idx
+            }))
+          })
+        }, token);
       }
 
       // Save inspection (CHECKOUT phase)
