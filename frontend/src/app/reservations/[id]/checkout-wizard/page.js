@@ -38,6 +38,8 @@ function CheckoutWizard({ token, me, logout }) {
   const [loading, setLoading] = useState(true);
   const [reservation, setReservation] = useState(null);
   const [agreement, setAgreement] = useState(null);
+  const [pricing, setPricing] = useState(null);
+  const [reservationPayments, setReservationPayments] = useState([]);
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState('');
 
@@ -51,19 +53,33 @@ function CheckoutWizard({ token, me, logout }) {
   const [signerName, setSignerName] = useState('');
   const [signatureDataUrl, setSignatureDataUrl] = useState('');
 
-  // Load reservation + agreement
+  // Load reservation + agreement + pricing + payments (mirroring the
+  // reservation-detail page which makes 3 parallel calls). The pricing
+  // endpoint returns the canonical `charges` array; payments returns the
+  // existing payment rows.
   useEffect(() => {
     if (!reservationId) return;
     (async () => {
       try {
-        const res = await api(`/api/reservations/${reservationId}`, {}, token);
-        setReservation(res);
-        // Ensure an agreement exists (creates DRAFT if needed)
-        const ag = res?.rentalAgreement?.id
-          ? await api(`/api/rental-agreements/${res.rentalAgreement.id}`, {}, token)
-          : await api(`/api/reservations/${reservationId}/agreement`, {}, token);
-        setAgreement(ag);
-        setSignerName([res?.customer?.firstName, res?.customer?.lastName].filter(Boolean).join(' '));
+        const [resResult, pricingResult, paymentsResult] = await Promise.allSettled([
+          api(`/api/reservations/${reservationId}`, {}, token),
+          api(`/api/reservations/${reservationId}/pricing`, {}, token),
+          api(`/api/reservations/${reservationId}/payments`, {}, token)
+        ]);
+        const res = resResult.status === 'fulfilled' ? resResult.value : null;
+        if (res) {
+          setReservation(res);
+          // Ensure an agreement exists (creates DRAFT if needed)
+          const ag = res?.rentalAgreement?.id
+            ? await api(`/api/rental-agreements/${res.rentalAgreement.id}`, {}, token)
+            : await api(`/api/reservations/${reservationId}/agreement`, {}, token);
+          setAgreement(ag);
+          setSignerName([res?.customer?.firstName, res?.customer?.lastName].filter(Boolean).join(' '));
+        }
+        if (pricingResult.status === 'fulfilled') setPricing(pricingResult.value);
+        if (paymentsResult.status === 'fulfilled' && Array.isArray(paymentsResult.value)) {
+          setReservationPayments(paymentsResult.value);
+        }
       } catch (err) {
         console.error('Failed to load reservation', err);
       } finally {
@@ -72,10 +88,23 @@ function CheckoutWizard({ token, me, logout }) {
     })();
   }, [reservationId, token]);
 
-  // Balance — agreement.balance comes back as string "0" on fresh agreements
-  // even when charges exist. Compute from agreement.charges array (sum of
-  // line items) minus agreement.payments (sum of PAID amounts).
-  // Fallback: same computation on reservation if its arrays exist instead.
+  // Balance comes from /api/reservations/:id/pricing → pricing.charges array
+  // (same source the reservation-detail page reads at line 17: pricing?.charges).
+  // The /api/reservations/:id main endpoint does NOT return charges — they
+  // live in the pricing service. Payments come from /api/reservations/:id/payments.
+  const pricingChargesSum = Array.isArray(pricing?.charges)
+    ? pricing.charges
+        .filter((c) => c?.selected !== false)
+        .reduce((s, c) => s + Number(c?.total || c?.amount || 0), 0)
+    : 0;
+  const reservationPaymentsSum = Array.isArray(reservationPayments)
+    ? reservationPayments
+        .filter((p) => String(p?.status || '').toUpperCase() === 'PAID')
+        .reduce((s, p) => s + Number(p?.amount || 0), 0)
+    : 0;
+  const pricingComputedBalance = Math.max(0, pricingChargesSum - reservationPaymentsSum);
+
+  // Also check agreement (in case it's been finalized and has its own charges)
   const agreementChargesSum = Array.isArray(agreement?.charges)
     ? agreement.charges
         .filter((c) => c?.selected !== false)
@@ -88,28 +117,10 @@ function CheckoutWizard({ token, me, logout }) {
     : 0;
   const agreementComputedBalance = Math.max(0, agreementChargesSum - agreementPaymentsSum);
 
-  // Reservation has its own top-level `charges` and `payments` arrays (the
-  // reservation-detail page reads from `row.charges` directly).
-  const reservationChargesSum = Array.isArray(reservation?.charges)
-    ? reservation.charges
-        .filter((c) => c?.selected !== false)
-        .reduce((s, c) => s + Number(c?.total || c?.amount || 0), 0)
-    : 0;
-  const reservationPaymentsSum = Array.isArray(reservation?.payments)
-    ? reservation.payments
-        .filter((p) => String(p?.status || '').toUpperCase() === 'PAID')
-        .reduce((s, p) => s + Number(p?.amount || 0), 0)
-    : 0;
-  const reservationComputedBalance = Math.max(0, reservationChargesSum - reservationPaymentsSum);
-
   const balanceDue = Math.max(
     Number(agreement?.balance || 0),
-    Number(reservation?.balance || 0),
-    Number(reservation?.amountDue || 0),
-    Number(reservation?.amountOwed || 0),
-    Number(reservation?.unpaidBalance || 0),
-    agreementComputedBalance,
-    reservationComputedBalance
+    pricingComputedBalance,
+    agreementComputedBalance
   );
 
   // Debug v2: dump full reservation + agreement keys to discover where
@@ -125,19 +136,19 @@ function CheckoutWizard({ token, me, logout }) {
             .reduce((s, p) => s + Number(p?.amount || 0), 0)
         : null;
       // eslint-disable-next-line no-console
-      console.log('[checkout-wizard] balance debug v4', {
-        reservationChargesLen: Array.isArray(reservation?.charges) ? reservation.charges.length : 'not-array',
-        reservationChargesSum,
-        reservationPaymentsLen: Array.isArray(reservation?.payments) ? reservation.payments.length : 'not-array',
+      console.log('[checkout-wizard] balance debug v5', {
+        pricingChargesLen: Array.isArray(pricing?.charges) ? pricing.charges.length : 'not-array',
+        pricingChargesSum,
+        reservationPaymentsLen: Array.isArray(reservationPayments) ? reservationPayments.length : 'not-array',
         reservationPaymentsSum,
-        reservationComputedBalance,
+        pricingComputedBalance,
         agreementChargesLength: Array.isArray(agreement?.charges) ? agreement.charges.length : 'not-array',
         agreementComputedBalance,
-        firstReservationCharge: reservation?.charges?.[0],
+        firstPricingCharge: pricing?.charges?.[0],
         computedBalanceDue: balanceDue
       });
     }
-  }, [reservation?.id, agreement?.id]);
+  }, [reservation?.id, agreement?.id, pricing?.charges?.length]);
 
   const needsPayment = balanceDue > 0 && !paymentSkipped && !(Number(paymentTaken.amount) >= balanceDue);
 
