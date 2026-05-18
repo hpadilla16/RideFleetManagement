@@ -1012,6 +1012,35 @@ function roundMoney(value) {
   return Number(Number(value || 0).toFixed(2));
 }
 
+// Pillar 2 wizards (2026-05-19): Prisma Decimal fields serialize as strings
+// via JSON.stringify (e.g. balance: "0" instead of balance: 0). This trips up
+// frontend code that compares to numeric zero or does math. Coerce all the
+// money fields on an agreement (and its nested charges/payments) to numbers
+// before returning from the service so consumers always see numbers.
+function coerceAgreementMoney(agreement) {
+  if (!agreement) return agreement;
+  const moneyFields = ['subtotal', 'taxes', 'fees', 'total', 'deposit',
+    'securityDepositAmount', 'paidAmount', 'balance', 'insurancePlanRate'];
+  for (const f of moneyFields) {
+    if (f in agreement && agreement[f] != null) {
+      agreement[f] = Number(agreement[f]);
+    }
+  }
+  if (Array.isArray(agreement.charges)) {
+    for (const c of agreement.charges) {
+      if (c?.quantity != null) c.quantity = Number(c.quantity);
+      if (c?.rate != null) c.rate = Number(c.rate);
+      if (c?.total != null) c.total = Number(c.total);
+    }
+  }
+  if (Array.isArray(agreement.payments)) {
+    for (const p of agreement.payments) {
+      if (p?.amount != null) p.amount = Number(p.amount);
+    }
+  }
+  return agreement;
+}
+
 function commissionChargeRows(charges = []) {
   return (Array.isArray(charges) ? charges : []).filter((row) => {
     if (row?.selected === false) return false;
@@ -1632,6 +1661,17 @@ export const rentalAgreementsService = {
 
     const existing = await prisma.rentalAgreement.findUnique({ where: { reservationId } });
     if (existing) {
+      // Pillar 2 (2026-05-18): once the reservation has been checked-in (paid
+      // or unpaid), the fee engine has posted final charges onto the agreement
+      // (fuel/cleaning/smoking/late). Re-syncing from reservation pricing now
+      // would wipe those — Print Agreement and Email Agreement both hit
+      // /start-rental, which would erase fees seconds after they were posted.
+      // Skip re-sync entirely for post-checkin states and just return the
+      // existing agreement as-is.
+      const reservationStatusUpper = String(reservation.status || '').toUpperCase();
+      if (reservationStatusUpper === 'CHECKED_IN' || reservationStatusUpper === 'CHECKED_IN_UNPAID') {
+        return this.getById(existing.id);
+      }
       // Keep agreement charges synced from reservation charge metadata whenever start-rental is invoked.
       // This guarantees reservation->agreement parity for checkout flow.
       const structuredRows = structuredReservationChargeRows(reservation);
@@ -1812,13 +1852,19 @@ export const rentalAgreementsService = {
           return sum + val;
         }, 0);
 
-        const subtotal = Math.max(0, base + servicesTotal + feesTotal - discountTotal);
+        // Pillar 2 wizards rounding-consistency fix (2026-05-19): round every
+        // intermediate at the boundary so the agreement's stored total matches
+        // the reservation page's displayed total byte-for-byte. Without these,
+        // the wizard's balance check sees phantom $0.01–$0.10 drifts after
+        // startFromReservation reruns mid-flow (e.g. before finalize).
+        const subtotal = roundMoney(Math.max(0, base + servicesTotal + feesTotal - discountTotal));
         const taxRate = Number(reservation?.pricingSnapshot?.taxRate ?? reservation.pickupLocation?.taxRate ?? 0);
-        const taxes = subtotal * (taxRate / 100);
-        const total = subtotal + taxes;
+        const taxes = roundMoney(subtotal * (taxRate / 100));
+        const total = roundMoney(subtotal + taxes);
 
         if (discountTotal > 0) {
-          chargeRows.push({ rentalAgreementId: existing.id, name: 'Discount', chargeType: 'UNIT', quantity: 1, rate: -discountTotal, total: -discountTotal, taxable: false, selected: true, sortOrder: chargeRows.length });
+          const discountRounded = roundMoney(discountTotal);
+          chargeRows.push({ rentalAgreementId: existing.id, name: 'Discount', chargeType: 'UNIT', quantity: 1, rate: -discountRounded, total: -discountRounded, taxable: false, selected: true, sortOrder: chargeRows.length });
         }
         chargeRows.push({ rentalAgreementId: existing.id, name: `Tax (${taxRate.toFixed(2)}%)`, chargeType: 'TAX', quantity: 1, rate: taxes, total: taxes, taxable: false, selected: true, sortOrder: chargeRows.length });
 
@@ -1834,7 +1880,7 @@ export const rentalAgreementsService = {
               subtotal,
               taxes,
               total,
-              balance: Number((total - paid).toFixed(2))
+              balance: roundMoney(total - paid)
             }
           })
         ], { timeout: 10000 });
@@ -2096,19 +2142,22 @@ export const rentalAgreementsService = {
       return sum + val;
     }, 0);
 
-    const subtotal = Math.max(0, base + servicesTotal + feesTotal - discountTotal);
+    // Pillar 2 wizards rounding-consistency fix (2026-05-19): see matching
+    // comment on the existing-agreement re-sync path above. Same reason.
+    const subtotal = roundMoney(Math.max(0, base + servicesTotal + feesTotal - discountTotal));
     const taxRate = Number(reservation?.pricingSnapshot?.taxRate ?? reservation.pickupLocation?.taxRate ?? 0);
-    const taxes = subtotal * (taxRate / 100);
-    const total = subtotal + taxes;
+    const taxes = roundMoney(subtotal * (taxRate / 100));
+    const total = roundMoney(subtotal + taxes);
 
     if (discountTotal > 0) {
+      const discountRounded = roundMoney(discountTotal);
       chargeRows.push({
         rentalAgreementId: agreement.id,
         name: 'Discount',
         chargeType: 'UNIT',
         quantity: 1,
-        rate: -discountTotal,
-        total: -discountTotal,
+        rate: -discountRounded,
+        total: -discountRounded,
         taxable: false,
         selected: true,
         sortOrder: chargeRows.length
@@ -2139,12 +2188,12 @@ export const rentalAgreementsService = {
         total,
         subtotal,
         taxes,
-        paidAmount: Number(prePaidTotal.toFixed(2)),
-        balance: Number((total - prePaidTotal).toFixed(2))
+        paidAmount: roundMoney(prePaidTotal),
+        balance: roundMoney(total - prePaidTotal)
       }
     });
 
-    return prisma.rentalAgreement.findUnique({
+    const finalRow = await prisma.rentalAgreement.findUnique({
       where: { id: agreement.id },
       include: {
         drivers: true,
@@ -2161,11 +2210,12 @@ export const rentalAgreementsService = {
         }
       }
     });
+    return coerceAgreementMoney(finalRow);
   },
 
-  getById(id, scope = null) {
-    return prisma.rentalAgreement.findFirst({
-    where: { id, ...(scope?.tenantId ? { tenantId: scope.tenantId } : {}) },
+  async getById(id, scope = null) {
+    const agreement = await prisma.rentalAgreement.findFirst({
+      where: { id, ...(scope?.tenantId ? { tenantId: scope.tenantId } : {}) },
       include: {
         reservation: {
           include: {
@@ -2185,6 +2235,7 @@ export const rentalAgreementsService = {
         inspections: { orderBy: { createdAt: 'asc' } }
       }
     });
+    return coerceAgreementMoney(agreement);
   },
 
   async agreementPrintContext(id) {

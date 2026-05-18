@@ -183,6 +183,8 @@ process.on('SIGTERM', async () => {
 });
 
 process.on('unhandledRejection', async (reason) => {
+  // Print to stderr so local dev sees it even when Sentry is off.
+  console.error('[main] unhandledRejection:', reason);
   captureBackendException(reason instanceof Error ? reason : new Error(String(reason)), {
     lifecycle: 'unhandledRejection'
   });
@@ -190,6 +192,11 @@ process.on('unhandledRejection', async (reason) => {
 });
 
 process.on('uncaughtException', async (error) => {
+  console.error('[main] uncaughtException:', error);
   captureBackendException(error, { lifecycle: 'uncaughtException' });
   await flushSentry();
 });
+
+// Also log right BEFORE listen so we can see how far execution gets if
+// SKIP_LISTEN is sneakily set somewhere.
+console.log(`[main] reached pre-listen, SKIP_LISTEN=${process.env.SKIP_LISTEN || 'unset'}, port=${process.env.PORT || 4000}`);

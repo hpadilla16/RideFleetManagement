@@ -158,21 +158,56 @@ async function syncAgreementCharges(reservationId, scope = {}) {
     source: row.source || null,
     sourceRefId: row.sourceRefId || null
   }));
-  const { subtotal, taxes, total } = summarizeChargeTotals(chargeRows);
-  const paidAmount = toNumber(agreement.paidAmount);
-  const balance = Number((total - paidAmount).toFixed(2));
 
-  await prisma.rentalAgreementCharge.deleteMany({ where: { rentalAgreementId: agreement.id } });
+  // BUG-FIX 2026-05-18 (Pillar 2): preserve FEE_ENGINE_* charges from checkin
+  // fee posting. The original delete-all + recreate-from-reservation flow
+  // wiped fuel/cleaning/smoking/late fees that the fee engine persisted
+  // during /checkin-close, because those fees live on the agreement only
+  // (no corresponding ReservationCharge row to re-sync from).
+  await prisma.rentalAgreementCharge.deleteMany({
+    where: {
+      rentalAgreementId: agreement.id,
+      NOT: { source: { startsWith: 'FEE_ENGINE_' } }
+    }
+  });
   if (chargeRows.length) {
     await prisma.rentalAgreementCharge.createMany({ data: chargeRows });
   }
 
+  // Recompute totals from the FULL set (reservation-sourced + preserved
+  // fee-engine charges) so agreement.total/fees/balance reflect everything.
+  const allCharges = await prisma.rentalAgreementCharge.findMany({
+    where: { rentalAgreementId: agreement.id, selected: true },
+    select: { chargeType: true, total: true, source: true }
+  });
+  let recSubtotal = 0;
+  let recTaxes = 0;
+  let recFees = 0;
+  for (const c of allCharges) {
+    const t = toNumber(c.total);
+    const type = String(c.chargeType || '').toUpperCase();
+    const src = String(c.source || '').toUpperCase();
+    if (type === 'TAX') {
+      recTaxes += t;
+    } else if (src.startsWith('FEE_ENGINE')) {
+      recFees += t;
+    } else {
+      recSubtotal += t;
+    }
+  }
+  const subtotal = Number(recSubtotal.toFixed(2));
+  const taxes = Number(recTaxes.toFixed(2));
+  const fees = Number(recFees.toFixed(2));
+  const total = Number((subtotal + taxes + fees).toFixed(2));
+  const paidAmount = toNumber(agreement.paidAmount);
+  const balance = Number((total - paidAmount).toFixed(2));
+
   await prisma.rentalAgreement.update({
     where: { id: agreement.id },
-    data: { subtotal, taxes, total, balance }
+    data: { subtotal, taxes, fees, total, balance }
   });
 
-  return { agreementId: agreement.id, subtotal, taxes, total, balance };
+  return { agreementId: agreement.id, subtotal, taxes, fees, total, balance };
 }
 
 async function maybeCreateAgreementPayment({ reservation, payment }) {

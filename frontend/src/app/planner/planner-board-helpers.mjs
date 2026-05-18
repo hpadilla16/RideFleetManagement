@@ -172,7 +172,7 @@ export function buildPlannerOpsBoard({
           title: 'Next Pickup',
           detail: `${upcoming[0].reservationNumber} - ${upcoming[0].customer?.firstName || ''} ${upcoming[0].customer?.lastName || ''}`.trim(),
           note: `Pickup ${new Date(upcoming[0].pickupAt).toLocaleString()}`,
-          href: `/reservations/${upcoming[0].id}/checkout`,
+          href: `/reservations/${upcoming[0].id}/checkout-wizard`,
           actionLabel: 'Open Check-out'
         }
       : null,
@@ -183,7 +183,7 @@ export function buildPlannerOpsBoard({
           title: 'Next Return',
           detail: `${returns[0].reservationNumber} - ${returns[0].customer?.firstName || ''} ${returns[0].customer?.lastName || ''}`.trim(),
           note: `Return ${new Date(returns[0].returnAt).toLocaleString()}`,
-          href: `/reservations/${returns[0].id}/checkin`,
+          href: `/reservations/${returns[0].id}/checkin-wizard`,
           actionLabel: 'Open Check-in'
         }
       : null,

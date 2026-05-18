@@ -110,7 +110,11 @@ function CheckinWizard({ token, me, logout }) {
   const photosCaptured = Object.keys(photos).length;
   const photosRequired = STANDARD_ANGLES.length;
 
-  // Submit to checkin-close
+  // Pillar 2 wizards (2026-05-19) — checkin submit sequence:
+  // 1. POST /inspection (CHECKIN phase, photos + metrics)
+  // 2. POST /signature  (writes signature to the reservation row)
+  // 3. POST /checkin-close (runs fee engine, routes status to CHECKED_IN
+  //    or CHECKED_IN_UNPAID, enqueues autocharge if pending, sends email)
   const submitCheckinClose = async () => {
     if (!agreement?.id) {
       setSubmitError('No agreement linked to this reservation');
@@ -119,6 +123,44 @@ function CheckinWizard({ token, me, logout }) {
     setSubmitting(true);
     setSubmitError('');
     try {
+      // 0. PATCH reservation notes with RES_CHECKIN audit line so the
+      // /ops-view?section=checkin page (which parses notes for the
+      // `[RES_CHECKIN ...]` marker) can show the check-in metrics side by
+      // side with check-out. The legacy /checkin page does this same step.
+      try {
+        const checkinLine = `[RES_CHECKIN ${new Date().toISOString()}] odometerIn=${Number(odometerIn || 0)} fuelIn=${Number(fuelIn || 0)} cleanlinessIn=${Number(cleanlinessIn || 5)} smokingDetected=${smokingDetected ? 'true' : 'false'}`;
+        const existingNotes = String(reservation?.notes || '');
+        const nextNotes = existingNotes.trim() ? `${existingNotes}\n${checkinLine}` : checkinLine;
+        await api(`/api/reservations/${reservationId}`, {
+          method: 'PATCH',
+          body: JSON.stringify({ notes: nextNotes })
+        }, token);
+      } catch (err) {
+        // Non-fatal: ops-view will just not surface this row.
+        console.warn('[checkin-wizard] failed to append RES_CHECKIN notes line', err);
+      }
+
+      // 1. Inspection (CHECKIN phase) with photos + metrics
+      await api(`/api/rental-agreements/${agreement.id}/inspection`, {
+        method: 'POST',
+        body: JSON.stringify({
+          phase: 'CHECKIN',
+          odometer: odometerIn ? Number(odometerIn) : null,
+          fuelLevel: String(fuelIn),
+          cleanliness: String(cleanlinessIn),
+          photos
+        })
+      }, token);
+
+      // 2. Signature
+      if (signatureDataUrl && signerName) {
+        await api(`/api/rental-agreements/${agreement.id}/signature`, {
+          method: 'POST',
+          body: JSON.stringify({ signerName, signatureDataUrl })
+        }, token);
+      }
+
+      // 3. Checkin-close — fee engine + status routing + emails
       const body = {
         odometerIn: odometerIn ? Number(odometerIn) : null,
         fuelIn,
@@ -171,6 +213,7 @@ function CheckinWizard({ token, me, logout }) {
 
   const onNext = () => {
     if (step === 4) return submitCheckinClose();
+    if (step === 5) return router.push('/reservations');
     setStep((s) => Math.min(s + 1, steps.length - 1));
   };
 
@@ -293,7 +336,13 @@ function Step1Summary({ reservation, agreement }) {
         <RowBetween k="Fuel" v={`${Math.round(Number(agreement?.fuelOut || 0) * 100)}%`} />
         <RowBetween k="Cleanliness" v={`${agreement?.cleanlinessOut || '—'}/5`} />
         <hr style={{ border: 'none', borderTop: '1px solid #e6dfff', margin: '12px 0' }} />
-        <RowBetween k="Balance paid" v={`$${Number(agreement?.paidAmount || 0).toFixed(2)}`} valueColor="#1fc7aa" />
+        <RowBetween k="Agreement total" v={`$${Number(agreement?.total || 0).toFixed(2)}`} />
+        <RowBetween k="Paid so far" v={`$${Number(agreement?.paidAmount || 0).toFixed(2)}`} valueColor="#1fc7aa" />
+        <RowBetween
+          k={<strong>Outstanding balance</strong>}
+          v={<strong>${Number(agreement?.balance || 0).toFixed(2)}</strong>}
+          valueColor={Number(agreement?.balance || 0) > 0 ? '#f59e0b' : '#1fc7aa'}
+        />
         <RowBetween k="Card on file" v={
           agreement?.reservation?.customer?.cardLast4
             ? `${agreement.reservation.customer.cardBrand || 'Card'} ····${agreement.reservation.customer.cardLast4}`
@@ -699,7 +748,7 @@ function Step6Success({ result, reservation, agreement, token, onDone }) {
           <div style={{ fontSize: 11, fontWeight: 800, color: '#6f668f', letterSpacing: '.1em', marginBottom: 10 }}>STAFF ACTIONS</div>
           <ActionLink
             label={`View agreement ${agreement?.agreementNumber || ''}`}
-            onClick={() => agreement?.id && (window.location.href = `/agreements/${agreement.id}`)}
+            onClick={() => reservation?.id && (window.location.href = `/reservations/${reservation.id}`)}
           />
           <ActionLink
             label="View inspection photos"
