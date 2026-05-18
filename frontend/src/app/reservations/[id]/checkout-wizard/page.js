@@ -72,10 +72,22 @@ function CheckoutWizard({ token, me, logout }) {
     })();
   }, [reservationId, token]);
 
-  // Balance — fresh agreements have balance=0 (not undefined) because charges
-  // haven't been copied from the reservation yet. Take MAX across all possible
-  // sources to ensure we never miss a real balance. Reservation also stores
-  // unpaidBalance / amountDue / amountOwed depending on the path.
+  // Balance — fresh agreements have balance="0" (string!) because charges
+  // haven't been copied from the reservation yet. Reservations don't expose a
+  // single balance field — we compute from the charges array minus payments,
+  // mirroring what the reservation detail page does.
+  const reservationChargesSum = Array.isArray(reservation?.charges)
+    ? reservation.charges.reduce((s, c) => s + Number(c?.total || c?.amount || 0), 0)
+    : 0;
+  const reservationPaymentsSum = Array.isArray(reservation?.payments)
+    ? reservation.payments
+        .filter((p) => String(p?.status || '').toUpperCase() === 'PAID')
+        .reduce((s, p) => s + Number(p?.amount || 0), 0)
+    : 0;
+  const reservationComputedBalance = Math.max(0, reservationChargesSum - reservationPaymentsSum);
+
+  // Take MAX across all possible sources so we never miss a real balance
+  // regardless of which API path produced the reservation.
   const balanceDue = Math.max(
     Number(agreement?.balance || 0),
     Number(reservation?.balance || 0),
@@ -83,23 +95,35 @@ function CheckoutWizard({ token, me, logout }) {
     Number(reservation?.amountOwed || 0),
     Number(reservation?.unpaidBalance || 0),
     Number(reservation?.totalCharges || 0) - Number(reservation?.paidAmount || 0),
-    Number(reservation?.total || 0) - Number(reservation?.paidAmount || 0)
+    Number(reservation?.total || 0) - Number(reservation?.paidAmount || 0),
+    reservationComputedBalance
   );
 
-  // Debug: print all balance-related fields once when reservation loads.
-  // Remove after we confirm which field the API actually returns.
+  // Debug v2: dump full reservation + agreement keys to discover where
+  // the balance/charges actually live.
   useEffect(() => {
     if (reservation && agreement) {
+      const chargesSum = Array.isArray(reservation?.charges)
+        ? reservation.charges.reduce((s, c) => s + Number(c?.total || c?.amount || 0), 0)
+        : null;
+      const paymentsSum = Array.isArray(reservation?.payments)
+        ? reservation.payments
+            .filter((p) => String(p?.status || '').toUpperCase() === 'PAID')
+            .reduce((s, p) => s + Number(p?.amount || 0), 0)
+        : null;
       // eslint-disable-next-line no-console
-      console.log('[checkout-wizard] balance debug', {
+      console.log('[checkout-wizard] balance debug v2', {
+        reservationKeys: Object.keys(reservation || {}).sort(),
+        agreementKeys: Object.keys(agreement || {}).sort(),
         agreementBalance: agreement?.balance,
-        reservationBalance: reservation?.balance,
-        reservationAmountDue: reservation?.amountDue,
-        reservationAmountOwed: reservation?.amountOwed,
-        reservationUnpaidBalance: reservation?.unpaidBalance,
-        reservationTotalCharges: reservation?.totalCharges,
-        reservationTotal: reservation?.total,
-        reservationPaidAmount: reservation?.paidAmount,
+        agreementTotal: agreement?.total,
+        agreementPaidAmount: agreement?.paidAmount,
+        chargesArrayLength: Array.isArray(reservation?.charges) ? reservation.charges.length : 'not-array',
+        chargesSum,
+        paymentsArrayLength: Array.isArray(reservation?.payments) ? reservation.payments.length : 'not-array',
+        paymentsSum,
+        firstCharge: reservation?.charges?.[0],
+        firstPayment: reservation?.payments?.[0],
         computedBalanceDue: balanceDue
       });
     }
