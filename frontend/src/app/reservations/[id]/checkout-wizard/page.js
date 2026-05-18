@@ -126,6 +126,25 @@ function CheckoutWizard({ token, me, logout }) {
       // differences vs the reservation page, so it's an unreliable gate.
       await api(`/api/reservations/${reservationId}/agreement`, {}, token);
 
+      // Debug: confirm photos state is populated before sending
+      const photoCount = Object.keys(photos || {}).length;
+      const photoTotalBytes = Object.values(photos || {}).reduce(
+        (s, dataUrl) => s + (typeof dataUrl === 'string' ? dataUrl.length : 0), 0
+      );
+      // eslint-disable-next-line no-console
+      console.log('[checkout-wizard] submitting inspection', {
+        photoCount,
+        photoKeys: Object.keys(photos || {}),
+        photoTotalBytes,
+        odometerOut,
+        fuelOut,
+        cleanlinessOut
+      });
+      if (photoCount === 0) {
+        // eslint-disable-next-line no-console
+        console.warn('[checkout-wizard] photos state empty at submit — inspection will save without photos');
+      }
+
       // Save inspection (CHECKOUT phase)
       await api(`/api/rental-agreements/${agreement.id}/inspection`, {
         method: 'POST',
@@ -148,6 +167,21 @@ function CheckoutWizard({ token, me, logout }) {
           cleanlinessOut
         })
       }, token);
+
+      // Also update reservation.vehicleId so the reservation detail page
+      // displays the assigned vehicle. Without this, only the agreement
+      // has the vehicleId and the reservation row still reads as 'No vehicle assigned'.
+      if (vehicleId) {
+        try {
+          await api(`/api/reservations/${reservationId}`, {
+            method: 'PATCH',
+            body: JSON.stringify({ vehicleId })
+          }, token);
+        } catch (vehErr) {
+          // Non-fatal — agreement still has the vehicle. Log so we can debug.
+          console.warn('[checkout-wizard] reservation vehicleId update failed', vehErr);
+        }
+      }
 
       // Signature
       if (signatureDataUrl && signerName) {
