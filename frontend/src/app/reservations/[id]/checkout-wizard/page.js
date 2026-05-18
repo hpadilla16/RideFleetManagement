@@ -72,10 +72,22 @@ function CheckoutWizard({ token, me, logout }) {
     })();
   }, [reservationId, token]);
 
-  // Balance — fresh agreements have balance="0" (string!) because charges
-  // haven't been copied from the reservation yet. Reservations don't expose a
-  // single balance field — we compute from the charges array minus payments,
-  // mirroring what the reservation detail page does.
+  // Balance — agreement.balance comes back as string "0" on fresh agreements
+  // even when charges exist. Compute from agreement.charges array (sum of
+  // line items) minus agreement.payments (sum of PAID amounts).
+  // Fallback: same computation on reservation if its arrays exist instead.
+  const agreementChargesSum = Array.isArray(agreement?.charges)
+    ? agreement.charges
+        .filter((c) => c?.selected !== false)
+        .reduce((s, c) => s + Number(c?.total || c?.amount || 0), 0)
+    : 0;
+  const agreementPaymentsSum = Array.isArray(agreement?.payments)
+    ? agreement.payments
+        .filter((p) => String(p?.status || '').toUpperCase() === 'PAID')
+        .reduce((s, p) => s + Number(p?.amount || 0), 0)
+    : 0;
+  const agreementComputedBalance = Math.max(0, agreementChargesSum - agreementPaymentsSum);
+
   const reservationChargesSum = Array.isArray(reservation?.charges)
     ? reservation.charges.reduce((s, c) => s + Number(c?.total || c?.amount || 0), 0)
     : 0;
@@ -86,16 +98,13 @@ function CheckoutWizard({ token, me, logout }) {
     : 0;
   const reservationComputedBalance = Math.max(0, reservationChargesSum - reservationPaymentsSum);
 
-  // Take MAX across all possible sources so we never miss a real balance
-  // regardless of which API path produced the reservation.
   const balanceDue = Math.max(
     Number(agreement?.balance || 0),
     Number(reservation?.balance || 0),
     Number(reservation?.amountDue || 0),
     Number(reservation?.amountOwed || 0),
     Number(reservation?.unpaidBalance || 0),
-    Number(reservation?.totalCharges || 0) - Number(reservation?.paidAmount || 0),
-    Number(reservation?.total || 0) - Number(reservation?.paidAmount || 0),
+    agreementComputedBalance,
     reservationComputedBalance
   );
 
@@ -112,18 +121,17 @@ function CheckoutWizard({ token, me, logout }) {
             .reduce((s, p) => s + Number(p?.amount || 0), 0)
         : null;
       // eslint-disable-next-line no-console
-      console.log('[checkout-wizard] balance debug v2', {
-        reservationKeys: Object.keys(reservation || {}).sort(),
-        agreementKeys: Object.keys(agreement || {}).sort(),
+      console.log('[checkout-wizard] balance debug v3', {
         agreementBalance: agreement?.balance,
         agreementTotal: agreement?.total,
         agreementPaidAmount: agreement?.paidAmount,
-        chargesArrayLength: Array.isArray(reservation?.charges) ? reservation.charges.length : 'not-array',
-        chargesSum,
-        paymentsArrayLength: Array.isArray(reservation?.payments) ? reservation.payments.length : 'not-array',
-        paymentsSum,
-        firstCharge: reservation?.charges?.[0],
-        firstPayment: reservation?.payments?.[0],
+        agreementChargesLength: Array.isArray(agreement?.charges) ? agreement.charges.length : 'not-array',
+        agreementPaymentsLength: Array.isArray(agreement?.payments) ? agreement.payments.length : 'not-array',
+        agreementChargesSum,
+        agreementPaymentsSum,
+        agreementComputedBalance,
+        firstAgreementCharge: agreement?.charges?.[0],
+        firstAgreementPayment: agreement?.payments?.[0],
         computedBalanceDue: balanceDue
       });
     }
