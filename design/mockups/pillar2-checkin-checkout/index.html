@@ -1,0 +1,2093 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>RideFleet — Checkin & Checkout Wizards · Mockups</title>
+<style>
+:root {
+  --brand-purple: #8752FE;
+  --brand-violet: #6d3df2;
+  --brand-mint: #1fc7aa;
+  --brand-ink: #211a38;
+  --brand-charcoal: #3F3F3F;
+  --bg-soft: #f4f1ff;
+  --bg-soft-2: #fcfbff;
+  --border-soft: #e6dfff;
+  --border-strong: #d7cbff;
+  --ios-surface: rgba(255,255,255,0.92);
+  --ios-text: #1f1f28;
+  --ios-muted: #6f668f;
+  --ios-radius: 16px;
+  --ios-radius-lg: 20px;
+  --shadow-soft: 0 14px 32px rgba(35,21,80,.08);
+  --shadow-strong: 0 24px 60px rgba(35,21,80,.16);
+  --warn: #f59e0b;
+  --warn-bg: #fff7ed;
+  --ok: #22c55e;
+  --danger: #ef4444;
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html, body {
+  font-family: 'Inter', 'SF Pro Text', Aptos, 'Segoe UI Variable', system-ui, -apple-system, sans-serif;
+  color: var(--ios-text);
+  background:
+    radial-gradient(1400px 700px at -10% -10%, rgba(135,82,254,.18) 0%, transparent 60%),
+    radial-gradient(1000px 500px at 110% 0%, rgba(31,199,170,.10) 0%, transparent 58%),
+    linear-gradient(180deg, #faf7ff 0%, #f4f1ff 100%);
+  min-height: 100vh;
+  letter-spacing: .01em;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* ───────────────────────────────── Page header ──── */
+.page-head {
+  max-width: 1400px;
+  margin: 0 auto;
+  padding: 48px 32px 28px;
+}
+.page-head .eyebrow {
+  color: var(--brand-violet);
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: .14em;
+  text-transform: uppercase;
+}
+.page-head h1 {
+  margin-top: 10px;
+  font-size: clamp(32px, 4vw, 52px);
+  font-weight: 850;
+  letter-spacing: -.02em;
+  color: var(--brand-ink);
+  line-height: 1.05;
+}
+.page-head h1 span.accent {
+  background: linear-gradient(135deg, var(--brand-purple), var(--brand-mint));
+  -webkit-background-clip: text; background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+.page-head p {
+  margin-top: 14px;
+  color: var(--ios-muted);
+  font-size: 17px;
+  max-width: 720px;
+  line-height: 1.6;
+}
+.page-nav {
+  margin-top: 28px;
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.page-nav a {
+  padding: 10px 18px;
+  border-radius: 999px;
+  background: rgba(255,255,255,.6);
+  border: 1px solid var(--border-soft);
+  color: var(--brand-ink);
+  font-weight: 700;
+  font-size: 13px;
+  text-decoration: none;
+  backdrop-filter: blur(10px);
+  transition: all .18s ease;
+}
+.page-nav a:hover { background: rgba(135,82,254,.10); border-color: rgba(135,82,254,.24); }
+.page-nav a.active { background: var(--brand-ink); color: white; border-color: var(--brand-ink); }
+
+/* ───────────────────────────────── Flow section ──── */
+.flow-section {
+  max-width: 1400px;
+  margin: 24px auto 0;
+  padding: 48px 32px 32px;
+}
+.flow-head {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin-bottom: 8px;
+}
+.flow-badge {
+  width: 44px; height: 44px;
+  border-radius: 14px;
+  display: flex; align-items: center; justify-content: center;
+  background: linear-gradient(135deg, var(--brand-purple), var(--brand-violet));
+  color: white;
+  font-weight: 800;
+  font-size: 18px;
+  box-shadow: var(--shadow-soft);
+}
+.flow-badge.mint {
+  background: linear-gradient(135deg, var(--brand-mint), #16a589);
+}
+.flow-head h2 {
+  font-size: 32px;
+  font-weight: 800;
+  color: var(--brand-ink);
+  letter-spacing: -.01em;
+}
+.flow-head .sub {
+  color: var(--ios-muted);
+  font-size: 14px;
+  margin-top: 4px;
+}
+.flow-meta {
+  display: flex; gap: 12px; flex-wrap: wrap;
+  margin: 24px 0 32px;
+}
+.flow-pill {
+  padding: 8px 14px;
+  border-radius: 999px;
+  background: rgba(255,255,255,.65);
+  border: 1px solid var(--border-soft);
+  color: var(--ios-muted);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: .03em;
+}
+.flow-pill strong { color: var(--brand-ink); }
+
+/* ───────────────────────────────── Screens grid ──── */
+.screen-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(880px, 1fr));
+  gap: 32px;
+}
+.screen-card {
+  background: rgba(255,255,255,.5);
+  backdrop-filter: blur(20px);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--ios-radius-lg);
+  padding: 24px;
+  box-shadow: var(--shadow-soft);
+}
+.screen-card .step-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  border-radius: 999px;
+  background: linear-gradient(135deg, rgba(135,82,254,.16), rgba(135,82,254,.08));
+  color: var(--brand-violet);
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+}
+.screen-card .step-tag .dot {
+  width: 6px; height: 6px;
+  border-radius: 50%;
+  background: var(--brand-purple);
+  box-shadow: 0 0 0 3px rgba(135,82,254,.18);
+}
+.screen-card h3 {
+  margin-top: 10px;
+  font-size: 22px;
+  font-weight: 800;
+  color: var(--brand-ink);
+  letter-spacing: -.005em;
+}
+.screen-card .desc {
+  color: var(--ios-muted);
+  font-size: 13px;
+  line-height: 1.6;
+  margin-top: 6px;
+  margin-bottom: 20px;
+  max-width: 640px;
+}
+.devices {
+  display: grid;
+  grid-template-columns: 220px 1fr;
+  gap: 28px;
+  align-items: start;
+}
+@media (max-width: 1000px) {
+  .devices { grid-template-columns: 1fr; }
+}
+
+/* ───────────────────────────────── Phone frame ──── */
+.phone-frame {
+  width: 220px;
+  height: 470px;
+  border-radius: 36px;
+  background: #1a1430;
+  padding: 10px;
+  box-shadow:
+    0 22px 50px rgba(35,21,80,.22),
+    inset 0 0 0 1px rgba(255,255,255,.08);
+  position: relative;
+}
+.phone-frame::before {
+  content: '';
+  position: absolute;
+  top: 16px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 70px;
+  height: 18px;
+  background: #1a1430;
+  border-radius: 12px;
+  z-index: 10;
+}
+.phone-screen {
+  width: 100%;
+  height: 100%;
+  border-radius: 28px;
+  background: linear-gradient(180deg, #faf7ff 0%, #f4f1ff 100%);
+  overflow: hidden;
+  position: relative;
+  font-size: 9px;
+  line-height: 1.35;
+  color: var(--ios-text);
+}
+.phone-screen .status-bar {
+  height: 22px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 14px;
+  font-size: 8px;
+  font-weight: 700;
+  color: var(--brand-ink);
+}
+
+/* ───────────────────────────────── Tablet frame ──── */
+.tablet-frame {
+  width: 100%;
+  max-width: 720px;
+  aspect-ratio: 4 / 3;
+  border-radius: 24px;
+  background: #1a1430;
+  padding: 10px;
+  box-shadow:
+    0 24px 60px rgba(35,21,80,.24),
+    inset 0 0 0 1px rgba(255,255,255,.06);
+  position: relative;
+}
+.tablet-screen {
+  width: 100%;
+  height: 100%;
+  border-radius: 16px;
+  background: linear-gradient(180deg, #faf7ff 0%, #f4f1ff 100%);
+  overflow: hidden;
+  position: relative;
+  font-size: 11px;
+  color: var(--ios-text);
+}
+
+/* ───────────────────────────────── Shared UI primitives ──── */
+.app-bar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 8px 12px 6px;
+  border-bottom: 1px solid rgba(135,82,254,.08);
+  background: rgba(255,255,255,.6);
+  backdrop-filter: blur(10px);
+}
+.app-bar .left { display: flex; align-items: center; gap: 6px; font-weight: 700; color: var(--brand-ink); font-size: 9px; }
+.app-bar .right { display: flex; align-items: center; gap: 4px; font-size: 8px; color: var(--ios-muted); }
+.tab-app-bar {
+  padding: 10px 16px;
+  font-size: 11px;
+}
+.tab-app-bar .left { font-size: 12px; }
+.tab-app-bar .right { font-size: 10px; }
+
+.stepper {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 12px;
+}
+.stepper .step {
+  height: 3px;
+  flex: 1;
+  background: rgba(135,82,254,.14);
+  border-radius: 4px;
+  position: relative;
+  overflow: hidden;
+}
+.stepper .step.done {
+  background: var(--brand-mint);
+}
+.stepper .step.current {
+  background: linear-gradient(90deg, var(--brand-purple), var(--brand-violet));
+  box-shadow: 0 0 8px rgba(135,82,254,.4);
+}
+.stepper .step.current::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(90deg, transparent, rgba(255,255,255,.6), transparent);
+  animation: shimmer 1.8s ease-in-out infinite;
+}
+@keyframes shimmer { 0% { transform: translateX(-100%); } 100% { transform: translateX(100%); } }
+
+.tab-stepper { padding: 10px 24px; gap: 6px; }
+.tab-stepper .step { height: 4px; }
+
+/* Step label */
+.step-label {
+  padding: 4px 12px 8px;
+  display: flex; justify-content: space-between; align-items: baseline;
+}
+.step-label .l-num { font-size: 8px; font-weight: 800; color: var(--brand-violet); letter-spacing: .1em; }
+.step-label .l-title { font-size: 11px; font-weight: 800; color: var(--brand-ink); letter-spacing: -.01em; }
+.tab-step-label { padding: 4px 24px 12px; }
+.tab-step-label .l-num { font-size: 10px; }
+.tab-step-label .l-title { font-size: 16px; }
+
+/* Body content area */
+.body { padding: 8px 12px 12px; height: calc(100% - 90px); overflow: hidden; }
+.tab-body { padding: 12px 24px 20px; height: calc(100% - 110px); }
+
+/* Cards */
+.card {
+  background: rgba(255,255,255,.85);
+  border: 1px solid var(--border-soft);
+  border-radius: 12px;
+  padding: 8px 10px;
+  box-shadow: 0 6px 16px rgba(35,21,80,.06);
+}
+.tab-card { border-radius: 14px; padding: 12px 16px; box-shadow: 0 8px 22px rgba(35,21,80,.08); }
+.card-title { font-size: 7px; font-weight: 800; color: var(--ios-muted); letter-spacing: .12em; text-transform: uppercase; margin-bottom: 4px; }
+.card-value { font-size: 11px; font-weight: 800; color: var(--brand-ink); letter-spacing: -.005em; }
+.tab-card-title { font-size: 10px; }
+.tab-card-value { font-size: 14px; }
+
+/* Tile rows */
+.tiles { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+.tab-tiles { gap: 10px; }
+.tile {
+  background: rgba(255,255,255,.85);
+  border: 1px solid var(--border-soft);
+  border-radius: 10px;
+  padding: 6px 8px;
+}
+.tab-tile { border-radius: 12px; padding: 9px 12px; }
+.tile .k { font-size: 6.5px; color: var(--ios-muted); text-transform: uppercase; letter-spacing: .08em; font-weight: 700; }
+.tile .v { font-size: 10px; font-weight: 750; color: var(--brand-ink); margin-top: 1px; }
+.tab-tile .k { font-size: 9px; }
+.tab-tile .v { font-size: 13px; margin-top: 3px; }
+
+/* Bottom action */
+.bottom-action {
+  position: absolute;
+  bottom: 8px; left: 8px; right: 8px;
+  display: flex; gap: 6px;
+}
+.tab-bottom-action {
+  bottom: 16px; left: 24px; right: 24px;
+  gap: 10px;
+}
+.btn {
+  flex: 1;
+  padding: 8px 0;
+  border-radius: 12px;
+  background: linear-gradient(135deg, var(--brand-purple), var(--brand-violet));
+  color: white;
+  font-size: 9px;
+  font-weight: 800;
+  text-align: center;
+  border: none;
+  box-shadow: 0 8px 20px rgba(135,82,254,.32);
+  letter-spacing: .02em;
+}
+.tab-btn { padding: 12px 0; font-size: 13px; border-radius: 14px; }
+.btn.secondary {
+  background: rgba(255,255,255,.95);
+  color: var(--brand-violet);
+  border: 1px solid var(--border-strong);
+  box-shadow: 0 4px 10px rgba(35,21,80,.06);
+}
+.btn.ghost {
+  background: transparent;
+  color: var(--ios-muted);
+  border: 1px solid var(--border-soft);
+  box-shadow: none;
+}
+
+/* Photo grid */
+.photo-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px; margin-top: 6px; }
+.tab-photo-grid { gap: 8px; grid-template-columns: repeat(4, 1fr); }
+.photo-cell {
+  aspect-ratio: 1;
+  border-radius: 7px;
+  background: linear-gradient(135deg, rgba(135,82,254,.10), rgba(135,82,254,.04));
+  border: 1.5px dashed rgba(135,82,254,.28);
+  display: flex; align-items: center; justify-content: center;
+  font-size: 13px;
+  color: var(--brand-violet);
+  position: relative;
+}
+.tab-photo-cell { border-radius: 10px; border-width: 2px; font-size: 22px; }
+.photo-cell.captured {
+  border: none;
+  background: linear-gradient(135deg, #d4f5e8 0%, #b4dffd 100%);
+  color: var(--ok);
+}
+.photo-cell.captured::after {
+  content: '✓';
+  font-size: 12px;
+  font-weight: 800;
+  color: white;
+  background: var(--ok);
+  width: 14px; height: 14px;
+  border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  position: absolute;
+  top: -3px; right: -3px;
+  box-shadow: 0 2px 6px rgba(34,197,94,.4);
+}
+.tab-photo-cell.captured::after { width: 22px; height: 22px; font-size: 14px; top: -4px; right: -4px; }
+.photo-label { font-size: 6px; color: var(--ios-muted); font-weight: 700; position: absolute; bottom: 2px; left: 3px; }
+.tab-photo-cell .photo-label { font-size: 9px; bottom: 4px; left: 6px; }
+
+/* AR camera overlay */
+.ar-frame {
+  position: relative;
+  height: 130px;
+  border-radius: 12px;
+  background:
+    linear-gradient(135deg, #2a2a3e 0%, #1a1a2e 100%),
+    radial-gradient(circle at center, rgba(255,255,255,.05) 0%, transparent 60%);
+  overflow: hidden;
+  display: flex; align-items: center; justify-content: center;
+}
+.tab-ar-frame { height: 280px; border-radius: 16px; }
+.ar-frame::before {
+  content: '';
+  position: absolute;
+  top: 50%; left: 50%; transform: translate(-50%, -50%);
+  width: 70%; height: 65%;
+  border: 2px solid var(--brand-mint);
+  border-radius: 8px;
+  box-shadow: 0 0 0 9999px rgba(0,0,0,.4);
+}
+.ar-frame::after {
+  content: '';
+  position: absolute;
+  top: 50%; left: 50%; transform: translate(-50%, -50%);
+  width: 70%; height: 65%;
+  background:
+    linear-gradient(transparent 49%, rgba(31,199,170,.7) 50%, transparent 51%) center / 100% 100%;
+  animation: scan 2.2s ease-in-out infinite;
+}
+@keyframes scan {
+  0%, 100% { background-position: 0% 0%; }
+  50% { background-position: 0% 100%; }
+}
+.ar-frame .corner {
+  position: absolute;
+  width: 14px; height: 14px;
+  border: 2px solid var(--brand-mint);
+  z-index: 2;
+}
+.ar-frame .corner.tl { top: 22%; left: 17%; border-right: none; border-bottom: none; }
+.ar-frame .corner.tr { top: 22%; right: 17%; border-left: none; border-bottom: none; }
+.ar-frame .corner.bl { bottom: 22%; left: 17%; border-right: none; border-top: none; }
+.ar-frame .corner.br { bottom: 22%; right: 17%; border-left: none; border-top: none; }
+.ar-frame .ar-label {
+  position: absolute;
+  bottom: 6%;
+  left: 50%; transform: translateX(-50%);
+  background: rgba(31,199,170,.95);
+  color: white;
+  padding: 3px 10px;
+  border-radius: 999px;
+  font-size: 7px;
+  font-weight: 800;
+  letter-spacing: .08em;
+  z-index: 3;
+}
+.tab-ar-frame .ar-label { font-size: 11px; padding: 5px 14px; }
+.ar-frame .ar-position {
+  position: absolute;
+  top: 8%;
+  left: 50%; transform: translateX(-50%);
+  background: rgba(0,0,0,.6);
+  backdrop-filter: blur(8px);
+  color: white;
+  padding: 3px 10px;
+  border-radius: 999px;
+  font-size: 7px;
+  font-weight: 700;
+  z-index: 3;
+}
+.tab-ar-frame .ar-position { font-size: 10px; padding: 5px 14px; }
+.ar-frame .ar-vehicle {
+  position: relative;
+  z-index: 1;
+  font-size: 38px;
+  opacity: .35;
+}
+.tab-ar-frame .ar-vehicle { font-size: 90px; }
+
+/* Number inputs / sliders */
+.input-row {
+  display: flex; align-items: center; gap: 6px;
+  padding: 6px 8px;
+  background: rgba(255,255,255,.85);
+  border: 1px solid var(--border-soft);
+  border-radius: 10px;
+}
+.tab-input-row { padding: 10px 14px; border-radius: 12px; }
+.input-row .lbl { flex: 1; font-size: 8px; font-weight: 700; color: var(--ios-muted); text-transform: uppercase; letter-spacing: .08em; }
+.input-row .val { font-size: 11px; font-weight: 800; color: var(--brand-ink); }
+.tab-input-row .lbl { font-size: 10px; }
+.tab-input-row .val { font-size: 16px; }
+
+/* Fuel gauge custom */
+.fuel-gauge {
+  position: relative;
+  height: 4px;
+  background: rgba(135,82,254,.12);
+  border-radius: 4px;
+  margin-top: 4px;
+}
+.fuel-gauge .fill {
+  height: 100%;
+  background: linear-gradient(90deg, var(--warn), var(--brand-mint));
+  border-radius: 4px;
+  position: relative;
+}
+.fuel-gauge .fill::after {
+  content: '';
+  position: absolute;
+  right: -3px; top: -3px;
+  width: 10px; height: 10px;
+  background: white;
+  border: 2px solid var(--brand-violet);
+  border-radius: 50%;
+  box-shadow: 0 2px 4px rgba(35,21,80,.15);
+}
+.tab-fuel-gauge { height: 6px; margin-top: 6px; }
+.tab-fuel-gauge .fill::after { width: 14px; height: 14px; right: -4px; top: -4px; }
+
+/* Cleanliness stars */
+.stars { display: flex; gap: 2px; }
+.tab-stars { gap: 4px; }
+.star { font-size: 10px; }
+.tab-star { font-size: 16px; }
+.star.filled { color: var(--brand-mint); }
+.star.empty { color: rgba(135,82,254,.2); }
+
+/* Toggle */
+.toggle {
+  width: 26px; height: 14px;
+  background: rgba(135,82,254,.18);
+  border-radius: 999px;
+  position: relative;
+}
+.tab-toggle { width: 38px; height: 22px; }
+.toggle::after {
+  content: '';
+  position: absolute;
+  top: 2px; left: 2px;
+  width: 10px; height: 10px;
+  background: white;
+  border-radius: 50%;
+  box-shadow: 0 1px 3px rgba(0,0,0,.2);
+  transition: all .2s;
+}
+.tab-toggle::after { width: 18px; height: 18px; top: 2px; left: 2px; }
+.toggle.on { background: linear-gradient(135deg, var(--brand-purple), var(--brand-violet)); }
+.toggle.on::after { left: 14px; }
+.tab-toggle.on::after { left: 18px; }
+
+/* Live fee preview */
+.fee-stack { display: grid; gap: 5px; margin-top: 6px; }
+.tab-fee-stack { gap: 8px; }
+.fee-row {
+  display: flex; align-items: center; gap: 6px;
+  padding: 5px 8px;
+  background: rgba(255,255,255,.9);
+  border: 1px solid var(--border-soft);
+  border-radius: 9px;
+  position: relative;
+}
+.tab-fee-row { padding: 9px 14px; border-radius: 12px; }
+.fee-row.fade-in {
+  animation: fadeSlideIn .35s ease-out both;
+}
+@keyframes fadeSlideIn {
+  from { opacity: 0; transform: translateX(8px); }
+  to { opacity: 1; transform: translateX(0); }
+}
+.fee-row.zero {
+  background: linear-gradient(135deg, rgba(31,199,170,.10), rgba(31,199,170,.04));
+  border-color: rgba(31,199,170,.2);
+}
+.fee-row .fee-icon {
+  width: 18px; height: 18px;
+  border-radius: 6px;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 9px;
+  font-weight: 800;
+  flex-shrink: 0;
+}
+.tab-fee-row .fee-icon { width: 28px; height: 28px; font-size: 13px; border-radius: 8px; }
+.fee-icon.mileage { background: rgba(135,82,254,.15); color: var(--brand-violet); }
+.fee-icon.fuel { background: rgba(245,158,11,.15); color: var(--warn); }
+.fee-icon.clean { background: rgba(99,102,241,.15); color: #4338ca; }
+.fee-icon.smoke { background: rgba(239,68,68,.15); color: var(--danger); }
+.fee-row .fee-name { font-size: 8px; flex: 1; font-weight: 700; color: var(--brand-ink); }
+.fee-row .fee-sub { font-size: 6.5px; color: var(--ios-muted); margin-top: 1px; }
+.tab-fee-row .fee-name { font-size: 12px; }
+.tab-fee-row .fee-sub { font-size: 9.5px; }
+.fee-row .fee-amount {
+  font-size: 10px; font-weight: 800; color: var(--brand-ink);
+  font-variant-numeric: tabular-nums;
+}
+.tab-fee-row .fee-amount { font-size: 15px; }
+
+/* Total summary */
+.total-card {
+  background: linear-gradient(135deg, var(--brand-ink) 0%, #2c1e54 100%);
+  color: white;
+  border-radius: 12px;
+  padding: 8px 10px;
+  position: relative;
+  overflow: hidden;
+  margin-top: 8px;
+}
+.tab-total-card { padding: 14px 18px; border-radius: 14px; margin-top: 12px; }
+.total-card::before {
+  content: '';
+  position: absolute;
+  top: -50%; right: -10%;
+  width: 60%; height: 200%;
+  background: radial-gradient(circle, rgba(135,82,254,.3) 0%, transparent 60%);
+}
+.total-card .row { display: flex; justify-content: space-between; align-items: baseline; position: relative; z-index: 1; }
+.total-card .label { font-size: 7px; opacity: .7; text-transform: uppercase; letter-spacing: .1em; font-weight: 700; }
+.total-card .value { font-size: 16px; font-weight: 800; letter-spacing: -.01em; }
+.tab-total-card .label { font-size: 11px; }
+.tab-total-card .value { font-size: 28px; }
+
+/* Card-on-file notice */
+.notice {
+  background: linear-gradient(135deg, rgba(245,158,11,.12), rgba(245,158,11,.04));
+  border: 1px solid rgba(245,158,11,.24);
+  border-left: 3px solid var(--warn);
+  border-radius: 10px;
+  padding: 7px 10px;
+  margin-top: 8px;
+}
+.tab-notice { padding: 12px 16px; border-radius: 12px; border-left-width: 4px; margin-top: 12px; }
+.notice .h { font-size: 7.5px; font-weight: 800; color: #b45309; text-transform: uppercase; letter-spacing: .08em; }
+.notice .body { font-size: 8px; color: #78350f; margin-top: 3px; line-height: 1.4; }
+.tab-notice .h { font-size: 11px; }
+.tab-notice .body { font-size: 11px; margin-top: 5px; }
+.notice strong { color: var(--brand-ink); font-weight: 800; }
+
+/* Signature pad */
+.sig-pad {
+  height: 60px;
+  border-radius: 10px;
+  background: rgba(255,255,255,.85);
+  border: 1.5px dashed var(--border-strong);
+  position: relative;
+  margin-top: 6px;
+  display: flex; align-items: flex-end; padding: 5px 8px;
+}
+.tab-sig-pad { height: 140px; border-radius: 12px; }
+.sig-pad svg { position: absolute; top: 5px; left: 8px; right: 8px; bottom: 18px; width: calc(100% - 16px); height: calc(100% - 23px); }
+.sig-pad .baseline { font-size: 6.5px; color: var(--ios-muted); font-weight: 700; }
+.tab-sig-pad .baseline { font-size: 9.5px; }
+
+/* Success state */
+.success-hero {
+  height: 110px;
+  border-radius: 14px;
+  background: linear-gradient(135deg, var(--brand-mint) 0%, #16a589 100%);
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  color: white;
+  position: relative;
+  overflow: hidden;
+}
+.tab-success-hero { height: 240px; border-radius: 18px; }
+.success-hero::before {
+  content: '';
+  position: absolute;
+  inset: -50%;
+  background: radial-gradient(circle, rgba(255,255,255,.18) 0%, transparent 50%);
+}
+.success-hero .check {
+  width: 38px; height: 38px;
+  border-radius: 50%;
+  background: rgba(255,255,255,.95);
+  color: var(--brand-mint);
+  display: flex; align-items: center; justify-content: center;
+  font-size: 18px;
+  font-weight: 800;
+  box-shadow: 0 8px 24px rgba(0,0,0,.16);
+  position: relative; z-index: 1;
+  animation: scaleIn .5s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+.tab-success-hero .check { width: 80px; height: 80px; font-size: 40px; }
+@keyframes scaleIn { from { transform: scale(0); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+.success-hero .title { font-size: 11px; font-weight: 800; margin-top: 6px; letter-spacing: -.005em; position: relative; z-index: 1; }
+.tab-success-hero .title { font-size: 22px; margin-top: 14px; }
+.success-hero .sub { font-size: 7.5px; opacity: .85; margin-top: 2px; font-weight: 600; position: relative; z-index: 1; }
+.tab-success-hero .sub { font-size: 12px; margin-top: 6px; }
+
+/* Manual payment row */
+.method-grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 4px; margin-top: 6px; }
+.tab-method-grid { gap: 8px; }
+.method-tile {
+  padding: 5px 4px;
+  background: rgba(255,255,255,.85);
+  border: 1px solid var(--border-soft);
+  border-radius: 9px;
+  text-align: center;
+  font-size: 7px;
+  font-weight: 700;
+  color: var(--ios-muted);
+}
+.tab-method-tile { padding: 12px 8px; border-radius: 12px; font-size: 11px; }
+.method-tile.active {
+  background: linear-gradient(135deg, var(--brand-purple), var(--brand-violet));
+  color: white;
+  border-color: transparent;
+  box-shadow: 0 6px 14px rgba(135,82,254,.32);
+}
+.method-tile .icon { font-size: 12px; display: block; margin-bottom: 2px; }
+.tab-method-tile .icon { font-size: 18px; margin-bottom: 4px; }
+
+/* Numeric keypad */
+.keypad { display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px; margin-top: 6px; }
+.tab-keypad { gap: 8px; }
+.kp-key {
+  padding: 6px 0;
+  background: rgba(255,255,255,.85);
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  text-align: center;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--brand-ink);
+}
+.tab-kp-key { padding: 14px 0; border-radius: 10px; font-size: 18px; }
+
+/* Display helpers */
+.row { display: flex; }
+.between { justify-content: space-between; align-items: center; }
+.gap-4 { gap: 4px; } .gap-6 { gap: 6px; } .gap-8 { gap: 8px; } .gap-10 { gap: 10px; } .gap-12 { gap: 12px; }
+.mt-4 { margin-top: 4px; } .mt-6 { margin-top: 6px; } .mt-8 { margin-top: 8px; } .mt-10 { margin-top: 10px; }
+.mb-4 { margin-bottom: 4px; } .mb-6 { margin-bottom: 6px; } .mb-8 { margin-bottom: 8px; }
+
+/* Footer */
+.foot {
+  max-width: 1400px;
+  margin: 40px auto 60px;
+  padding: 24px 32px;
+  border-top: 1px solid var(--border-soft);
+  color: var(--ios-muted);
+  font-size: 12px;
+  text-align: center;
+}
+.foot strong { color: var(--brand-ink); }
+</style>
+</head>
+<body>
+
+<!-- ──────────────────────────────────────────────── Header ──── -->
+<header class="page-head">
+  <div class="eyebrow">RideFleet · Pillar 2 mockups</div>
+  <h1>Checkout & Checkin <span class="accent">re-imagined</span></h1>
+  <p>An end-to-end multi-step wizard that pairs Apple Wallet's clarity with rental-counter speed. Live fee preview, AR-guided photo capture, signature on glass, and a balance gate that routes payment without slowing the staff down.</p>
+  <nav class="page-nav">
+    <a href="#checkout" class="active">Checkout flow</a>
+    <a href="#checkin">Checkin flow</a>
+    <a href="#system">System notes</a>
+  </nav>
+</header>
+
+<!-- ════════════════════════════════════════════════ CHECKOUT FLOW ════════════════════════════════════════════════ -->
+<section class="flow-section" id="checkout">
+  <div class="flow-head">
+    <div class="flow-badge">→</div>
+    <div>
+      <h2>Checkout flow</h2>
+      <div class="sub">Staff hands the vehicle to the customer · 6 steps · ~3 minutes</div>
+    </div>
+  </div>
+  <div class="flow-meta">
+    <div class="flow-pill"><strong>Step 1</strong> · Vehicle & customer</div>
+    <div class="flow-pill"><strong>Step 2</strong> · Exterior inspection</div>
+    <div class="flow-pill"><strong>Step 3</strong> · Metrics</div>
+    <div class="flow-pill"><strong>Step 4</strong> · Balance gate</div>
+    <div class="flow-pill"><strong>Step 5</strong> · Signature</div>
+    <div class="flow-pill"><strong>Step 6</strong> · Handoff</div>
+  </div>
+
+  <div class="screen-grid">
+
+    <!-- ─────────── CHECKOUT · Step 1: Vehicle confirm ─────────── -->
+    <div class="screen-card">
+      <div class="step-tag"><div class="dot"></div>Step 1 of 6</div>
+      <h3>Confirm vehicle & customer</h3>
+      <p class="desc">Single glance: the reservation summary, vehicle photo, customer profile, and any flags (underage, additional driver, insurance status). Staff taps Continue when ready.</p>
+      <div class="devices">
+        <!-- Phone -->
+        <div class="phone-frame"><div class="phone-screen">
+          <div class="status-bar"><span>9:41</span><span>●●● 5G</span></div>
+          <div class="app-bar"><div class="left">← Back</div><div class="right">RES-904623</div></div>
+          <div class="stepper">
+            <div class="step current"></div><div class="step"></div><div class="step"></div>
+            <div class="step"></div><div class="step"></div><div class="step"></div>
+          </div>
+          <div class="step-label">
+            <span class="l-num">01 / 06</span>
+            <span class="l-title">Vehicle & Customer</span>
+          </div>
+          <div class="body">
+            <div class="card mb-6" style="background: linear-gradient(135deg, var(--brand-ink), #2c1e54); color: white; border: none; padding: 10px 12px;">
+              <div style="font-size: 8px; opacity: .7; font-weight: 700; letter-spacing: .1em;">VEHICLE</div>
+              <div style="font-size: 13px; font-weight: 800; margin-top: 3px;">2024 Toyota Camry</div>
+              <div style="font-size: 8px; opacity: .8; margin-top: 1px;">⬢ AAA-123 · Unit 047 · White</div>
+            </div>
+            <div class="tiles mb-6">
+              <div class="tile"><div class="k">Customer</div><div class="v">Antonio G.</div></div>
+              <div class="tile"><div class="k">Days</div><div class="v">7</div></div>
+              <div class="tile"><div class="k">Pickup</div><div class="v">Today 9:30am</div></div>
+              <div class="tile"><div class="k">Return</div><div class="v">May 24, 9:30a</div></div>
+            </div>
+            <div class="card">
+              <div class="card-title">Insurance · Coverage</div>
+              <div class="card-value" style="font-size: 9px;">CDW · $27.99/day</div>
+            </div>
+          </div>
+          <div class="bottom-action">
+            <button class="btn">Start Inspection →</button>
+          </div>
+        </div></div>
+        <!-- Tablet -->
+        <div class="tablet-frame"><div class="tablet-screen">
+          <div class="app-bar tab-app-bar"><div class="left">RideFleet · Checkout</div><div class="right">RES-904623 · Today, 9:32 AM</div></div>
+          <div class="stepper tab-stepper">
+            <div class="step current"></div><div class="step"></div><div class="step"></div>
+            <div class="step"></div><div class="step"></div><div class="step"></div>
+          </div>
+          <div class="step-label tab-step-label">
+            <span class="l-num">STEP 01 OF 06</span>
+            <span class="l-title">Confirm vehicle & customer</span>
+          </div>
+          <div class="tab-body" style="display: grid; grid-template-columns: 1.4fr 1fr; gap: 16px;">
+            <div>
+              <div class="tab-card" style="background: linear-gradient(135deg, var(--brand-ink), #2c1e54); color: white; border: none; padding: 18px 22px;">
+                <div style="font-size: 11px; opacity: .7; font-weight: 700; letter-spacing: .12em;">VEHICLE ASSIGNED</div>
+                <div style="font-size: 22px; font-weight: 800; margin-top: 6px; letter-spacing: -.01em;">2024 Toyota Camry XSE</div>
+                <div style="font-size: 12px; opacity: .8; margin-top: 4px;">⬢ Plate AAA-123 · Unit 047 · Pearl White · 12,450 mi</div>
+                <div style="display: flex; gap: 8px; margin-top: 14px;">
+                  <div style="background: rgba(255,255,255,.16); padding: 5px 10px; border-radius: 999px; font-size: 10px; font-weight: 700;">⛽ Full tank</div>
+                  <div style="background: rgba(255,255,255,.16); padding: 5px 10px; border-radius: 999px; font-size: 10px; font-weight: 700;">✓ Clean · 5/5</div>
+                  <div style="background: rgba(255,255,255,.16); padding: 5px 10px; border-radius: 999px; font-size: 10px; font-weight: 700;">✓ Inspection ready</div>
+                </div>
+              </div>
+              <div class="tab-tiles tiles" style="margin-top: 14px; grid-template-columns: 1fr 1fr 1fr 1fr;">
+                <div class="tab-tile tile"><div class="k">Customer</div><div class="v">Antonio G.</div></div>
+                <div class="tab-tile tile"><div class="k">Days</div><div class="v">7 days</div></div>
+                <div class="tab-tile tile"><div class="k">Pickup</div><div class="v">Today 9:30a</div></div>
+                <div class="tab-tile tile"><div class="k">Return</div><div class="v">May 24 9:30a</div></div>
+              </div>
+            </div>
+            <div>
+              <div class="tab-card" style="padding: 16px;">
+                <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 10px;">
+                  <div style="width: 40px; height: 40px; border-radius: 50%; background: linear-gradient(135deg, var(--brand-purple), var(--brand-mint)); display: flex; align-items: center; justify-content: center; color: white; font-weight: 800; font-size: 14px;">AG</div>
+                  <div>
+                    <div style="font-size: 13px; font-weight: 800;">Antonio González</div>
+                    <div style="font-size: 9px; color: var(--ios-muted);">License PR · expires 2028</div>
+                  </div>
+                </div>
+                <div style="font-size: 9px; color: var(--ios-muted); border-top: 1px solid var(--border-soft); padding-top: 8px;">
+                  <div class="row between" style="padding: 3px 0;"><span>Email</span><span style="color: var(--brand-ink); font-weight: 700;">a.gonzalez@…</span></div>
+                  <div class="row between" style="padding: 3px 0;"><span>Phone</span><span style="color: var(--brand-ink); font-weight: 700;">+1 787 555 0142</span></div>
+                  <div class="row between" style="padding: 3px 0;"><span>Card on file</span><span style="color: var(--brand-ink); font-weight: 700;">Visa ····4242</span></div>
+                  <div class="row between" style="padding: 3px 0;"><span>Insurance</span><span style="color: var(--brand-mint); font-weight: 800;">CDW · Active</span></div>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="bottom-action tab-bottom-action">
+            <button class="btn tab-btn secondary">Review reservation</button>
+            <button class="btn tab-btn">Start Inspection →</button>
+          </div>
+        </div></div>
+      </div>
+    </div>
+
+    <!-- ─────────── CHECKOUT · Step 2: AR-guided photo capture ─────────── -->
+    <div class="screen-card">
+      <div class="step-tag"><div class="dot"></div>Step 2 of 6 · Innovation highlight</div>
+      <h3>AR-guided exterior inspection</h3>
+      <p class="desc">Camera viewfinder overlays a target frame with the vehicle silhouette. Staff walks around — the system prompts the next angle automatically. Photos uploaded in the background, compressed client-side to keep payloads under 400KB each.</p>
+      <div class="devices">
+        <!-- Phone -->
+        <div class="phone-frame"><div class="phone-screen">
+          <div class="status-bar"><span>9:43</span><span>●●● 5G</span></div>
+          <div class="app-bar"><div class="left">← Back</div><div class="right">3 of 8 photos</div></div>
+          <div class="stepper">
+            <div class="step done"></div><div class="step current"></div><div class="step"></div>
+            <div class="step"></div><div class="step"></div><div class="step"></div>
+          </div>
+          <div class="step-label">
+            <span class="l-num">02 / 06</span>
+            <span class="l-title">Exterior · Driver side</span>
+          </div>
+          <div class="body">
+            <div class="ar-frame">
+              <span class="ar-vehicle">🚗</span>
+              <div class="corner tl"></div><div class="corner tr"></div>
+              <div class="corner bl"></div><div class="corner br"></div>
+              <div class="ar-position">DRIVER SIDE · 3/8</div>
+              <div class="ar-label">CENTER VEHICLE IN FRAME</div>
+            </div>
+            <div class="photo-grid mt-6">
+              <div class="photo-cell captured"><span class="photo-label">Front</span></div>
+              <div class="photo-cell captured"><span class="photo-label">FL</span></div>
+              <div class="photo-cell" style="border-color: var(--brand-mint); background: rgba(31,199,170,.08); animation: pulse 1.4s infinite;">📷</div>
+              <div class="photo-cell"><span class="photo-label">FR</span></div>
+              <div class="photo-cell"><span class="photo-label">Rear</span></div>
+              <div class="photo-cell"><span class="photo-label">RR</span></div>
+              <div class="photo-cell"><span class="photo-label">RL</span></div>
+              <div class="photo-cell"><span class="photo-label">Roof</span></div>
+            </div>
+          </div>
+          <div class="bottom-action">
+            <button class="btn secondary" style="flex: 0 0 70px;">Skip</button>
+            <button class="btn">Capture →</button>
+          </div>
+        </div></div>
+        <!-- Tablet -->
+        <div class="tablet-frame"><div class="tablet-screen">
+          <div class="app-bar tab-app-bar"><div class="left">Exterior Inspection</div><div class="right">3 of 8 photos · auto-compressed</div></div>
+          <div class="stepper tab-stepper">
+            <div class="step done"></div><div class="step current"></div><div class="step"></div>
+            <div class="step"></div><div class="step"></div><div class="step"></div>
+          </div>
+          <div class="step-label tab-step-label">
+            <span class="l-num">STEP 02 OF 06</span>
+            <span class="l-title">Capture exterior · Driver side angle</span>
+          </div>
+          <div class="tab-body" style="display: grid; grid-template-columns: 1.4fr 1fr; gap: 16px;">
+            <div class="tab-ar-frame ar-frame">
+              <span class="ar-vehicle">🚗</span>
+              <div class="corner tl"></div><div class="corner tr"></div>
+              <div class="corner bl"></div><div class="corner br"></div>
+              <div class="ar-position">DRIVER SIDE · ANGLE 3/8</div>
+              <div class="ar-label">CENTER VEHICLE · TAP CAPTURE WHEN ALIGNED</div>
+            </div>
+            <div>
+              <div style="font-size: 11px; font-weight: 800; color: var(--ios-muted); letter-spacing: .1em; margin-bottom: 8px;">PROGRESS</div>
+              <div class="tab-photo-grid photo-grid" style="grid-template-columns: repeat(4,1fr);">
+                <div class="tab-photo-cell photo-cell captured"><span class="photo-label">Front</span></div>
+                <div class="tab-photo-cell photo-cell captured"><span class="photo-label">FL</span></div>
+                <div class="tab-photo-cell photo-cell" style="border-color: var(--brand-mint); background: rgba(31,199,170,.08);">📷</div>
+                <div class="tab-photo-cell photo-cell"><span class="photo-label">FR</span></div>
+                <div class="tab-photo-cell photo-cell"><span class="photo-label">Rear</span></div>
+                <div class="tab-photo-cell photo-cell"><span class="photo-label">RR</span></div>
+                <div class="tab-photo-cell photo-cell"><span class="photo-label">RL</span></div>
+                <div class="tab-photo-cell photo-cell"><span class="photo-label">Roof</span></div>
+              </div>
+              <div class="tab-card" style="margin-top: 14px; background: rgba(31,199,170,.06); border-color: rgba(31,199,170,.22);">
+                <div style="display: flex; align-items: center; gap: 8px;">
+                  <div style="width: 24px; height: 24px; background: var(--brand-mint); border-radius: 50%; display: flex; align-items: center; justify-content: center; color: white; font-weight: 800; font-size: 12px;">↑</div>
+                  <div>
+                    <div style="font-size: 11px; font-weight: 800; color: var(--brand-ink);">Auto-upload running</div>
+                    <div style="font-size: 9.5px; color: var(--ios-muted);">2/2 done · compressed 1.8MB → 312KB</div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="bottom-action tab-bottom-action">
+            <button class="btn tab-btn secondary">Skip angle</button>
+            <button class="btn tab-btn">Capture & continue →</button>
+          </div>
+        </div></div>
+      </div>
+    </div>
+
+    <!-- ─────────── CHECKOUT · Step 3: Metrics ─────────── -->
+    <div class="screen-card">
+      <div class="step-tag"><div class="dot"></div>Step 3 of 6</div>
+      <h3>Capture pickup metrics</h3>
+      <p class="desc">Odometer (OCR-assisted from a quick photo), fuel level (visual gauge), cleanliness (1-5 stars). These become the baseline that the checkin wizard later compares against to compute fees.</p>
+      <div class="devices">
+        <!-- Phone -->
+        <div class="phone-frame"><div class="phone-screen">
+          <div class="status-bar"><span>9:45</span><span>●●● 5G</span></div>
+          <div class="app-bar"><div class="left">← Back</div><div class="right">RES-904623</div></div>
+          <div class="stepper">
+            <div class="step done"></div><div class="step done"></div><div class="step current"></div>
+            <div class="step"></div><div class="step"></div><div class="step"></div>
+          </div>
+          <div class="step-label">
+            <span class="l-num">03 / 06</span>
+            <span class="l-title">Pickup metrics</span>
+          </div>
+          <div class="body">
+            <div class="card mb-6">
+              <div class="row between">
+                <div>
+                  <div class="card-title">Odometer</div>
+                  <div class="card-value">12,450 <span style="font-size: 8px; font-weight: 600; color: var(--ios-muted);">mi</span></div>
+                </div>
+                <div style="background: linear-gradient(135deg, rgba(135,82,254,.15), rgba(135,82,254,.06)); padding: 4px 8px; border-radius: 999px; font-size: 7.5px; font-weight: 800; color: var(--brand-violet);">📸 OCR</div>
+              </div>
+            </div>
+            <div class="card mb-6">
+              <div class="row between mb-4">
+                <div class="card-title">Fuel Level</div>
+                <div style="font-size: 11px; font-weight: 800; color: var(--brand-mint);">100% · Full</div>
+              </div>
+              <div class="fuel-gauge"><div class="fill" style="width: 100%;"></div></div>
+              <div class="row between mt-4" style="font-size: 6.5px; color: var(--ios-muted); font-weight: 700;">
+                <span>E</span><span>¼</span><span>½</span><span>¾</span><span>F</span>
+              </div>
+            </div>
+            <div class="card">
+              <div class="row between mb-4">
+                <div class="card-title">Cleanliness</div>
+                <div style="font-size: 9px; font-weight: 800; color: var(--brand-ink);">5/5 · Pristine</div>
+              </div>
+              <div class="stars">
+                <span class="star filled">★</span><span class="star filled">★</span><span class="star filled">★</span><span class="star filled">★</span><span class="star filled">★</span>
+              </div>
+            </div>
+          </div>
+          <div class="bottom-action">
+            <button class="btn">Continue →</button>
+          </div>
+        </div></div>
+        <!-- Tablet -->
+        <div class="tablet-frame"><div class="tablet-screen">
+          <div class="app-bar tab-app-bar"><div class="left">Pickup Metrics</div><div class="right">RES-904623</div></div>
+          <div class="stepper tab-stepper">
+            <div class="step done"></div><div class="step done"></div><div class="step current"></div>
+            <div class="step"></div><div class="step"></div><div class="step"></div>
+          </div>
+          <div class="step-label tab-step-label">
+            <span class="l-num">STEP 03 OF 06</span>
+            <span class="l-title">Capture pickup metrics</span>
+          </div>
+          <div class="tab-body" style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 14px;">
+            <div class="tab-card" style="padding: 18px;">
+              <div class="row between mb-6">
+                <div style="font-size: 10px; font-weight: 800; color: var(--ios-muted); text-transform: uppercase; letter-spacing: .12em;">Odometer</div>
+                <div style="background: linear-gradient(135deg, rgba(135,82,254,.15), rgba(135,82,254,.06)); padding: 5px 10px; border-radius: 999px; font-size: 10px; font-weight: 800; color: var(--brand-violet);">📸 OCR Scan</div>
+              </div>
+              <div style="font-size: 36px; font-weight: 800; color: var(--brand-ink); letter-spacing: -.02em;">12,450</div>
+              <div style="font-size: 11px; color: var(--ios-muted); margin-top: 2px;">miles · captured 9:43 AM</div>
+              <div style="margin-top: 14px; display: flex; gap: 6px; flex-wrap: wrap;">
+                <div style="padding: 5px 10px; background: rgba(135,82,254,.08); border-radius: 8px; font-size: 10px; font-weight: 700; color: var(--brand-violet);">Re-scan</div>
+                <div style="padding: 5px 10px; background: rgba(135,82,254,.08); border-radius: 8px; font-size: 10px; font-weight: 700; color: var(--brand-violet);">Edit manually</div>
+              </div>
+            </div>
+            <div class="tab-card" style="padding: 18px;">
+              <div class="row between mb-6">
+                <div style="font-size: 10px; font-weight: 800; color: var(--ios-muted); text-transform: uppercase; letter-spacing: .12em;">Fuel Level</div>
+                <div style="font-size: 14px; font-weight: 800; color: var(--brand-mint);">100% · Full</div>
+              </div>
+              <div class="tab-fuel-gauge fuel-gauge"><div class="fill" style="width: 100%;"></div></div>
+              <div class="row between mt-8" style="font-size: 10px; color: var(--ios-muted); font-weight: 700;">
+                <span>Empty</span><span>¼</span><span>½</span><span>¾</span><span>Full</span>
+              </div>
+              <div style="margin-top: 14px; background: rgba(31,199,170,.08); border-radius: 10px; padding: 8px 10px; font-size: 10px; color: #047857; font-weight: 700;">
+                Slide the indicator to adjust if needed
+              </div>
+            </div>
+            <div class="tab-card" style="padding: 18px;">
+              <div class="row between mb-6">
+                <div style="font-size: 10px; font-weight: 800; color: var(--ios-muted); text-transform: uppercase; letter-spacing: .12em;">Cleanliness</div>
+                <div style="font-size: 14px; font-weight: 800; color: var(--brand-ink);">5/5</div>
+              </div>
+              <div class="tab-stars stars">
+                <span class="tab-star star filled">★</span><span class="tab-star star filled">★</span><span class="tab-star star filled">★</span><span class="tab-star star filled">★</span><span class="tab-star star filled">★</span>
+              </div>
+              <div style="margin-top: 18px; font-size: 11px; color: var(--brand-ink); font-weight: 700;">Pristine</div>
+              <div style="font-size: 10px; color: var(--ios-muted); margin-top: 2px;">No visible dirt, debris, or odors</div>
+            </div>
+          </div>
+          <div class="bottom-action tab-bottom-action">
+            <button class="btn tab-btn secondary">← Back</button>
+            <button class="btn tab-btn">Continue to balance →</button>
+          </div>
+        </div></div>
+      </div>
+    </div>
+
+    <!-- ─────────── CHECKOUT · Step 4: Balance Gate + Payment ─────────── -->
+    <div class="screen-card">
+      <div class="step-tag"><div class="dot"></div>Step 4 of 6</div>
+      <h3>Balance gate · payment if needed</h3>
+      <p class="desc">If the reservation has an outstanding balance (deposit or remaining), staff must collect or skip with override. Method selector (Cash · Card · Check), receipt photo upload, card last-4 captured for the agreement.</p>
+      <div class="devices">
+        <!-- Phone -->
+        <div class="phone-frame"><div class="phone-screen">
+          <div class="status-bar"><span>9:47</span><span>●●● 5G</span></div>
+          <div class="app-bar"><div class="left">← Back</div><div class="right">$248.50 due</div></div>
+          <div class="stepper">
+            <div class="step done"></div><div class="step done"></div><div class="step done"></div>
+            <div class="step current"></div><div class="step"></div><div class="step"></div>
+          </div>
+          <div class="step-label">
+            <span class="l-num">04 / 06</span>
+            <span class="l-title">Outstanding balance</span>
+          </div>
+          <div class="body">
+            <div class="total-card mb-6">
+              <div class="row"><span class="label">Balance Due</span></div>
+              <div class="value">$248.50</div>
+              <div style="font-size: 7px; opacity: .65; margin-top: 1px; position: relative; z-index: 1;">Deposit + 50% remainder</div>
+            </div>
+            <div class="method-grid">
+              <div class="method-tile active"><span class="icon">💳</span>Card</div>
+              <div class="method-tile"><span class="icon">💵</span>Cash</div>
+              <div class="method-tile"><span class="icon">📄</span>Check</div>
+            </div>
+            <div class="input-row mt-6">
+              <span class="lbl">Last 4 digits</span>
+              <span class="val">····4242</span>
+            </div>
+            <div class="input-row mt-4">
+              <span class="lbl">Receipt photo</span>
+              <span class="val" style="color: var(--brand-mint);">✓ Attached</span>
+            </div>
+          </div>
+          <div class="bottom-action">
+            <button class="btn secondary" style="flex: 0 0 70px;">Skip</button>
+            <button class="btn">Charge →</button>
+          </div>
+        </div></div>
+        <!-- Tablet -->
+        <div class="tablet-frame"><div class="tablet-screen">
+          <div class="app-bar tab-app-bar"><div class="left">Balance Gate · Manual Payment</div><div class="right">Manager override available</div></div>
+          <div class="stepper tab-stepper">
+            <div class="step done"></div><div class="step done"></div><div class="step done"></div>
+            <div class="step current"></div><div class="step"></div><div class="step"></div>
+          </div>
+          <div class="step-label tab-step-label">
+            <span class="l-num">STEP 04 OF 06</span>
+            <span class="l-title">Collect outstanding balance</span>
+          </div>
+          <div class="tab-body" style="display: grid; grid-template-columns: 1.2fr 1fr; gap: 16px;">
+            <div>
+              <div class="total-card tab-total-card">
+                <div class="row"><span class="label">BALANCE DUE</span></div>
+                <div class="value">$248.50</div>
+                <div style="font-size: 11px; opacity: .65; margin-top: 4px; position: relative; z-index: 1;">Deposit + remainder · 50% of $497.00</div>
+                <div style="display: flex; gap: 8px; margin-top: 14px; position: relative; z-index: 1;">
+                  <div style="background: rgba(255,255,255,.18); padding: 6px 12px; border-radius: 999px; font-size: 11px; font-weight: 700;">7 days</div>
+                  <div style="background: rgba(255,255,255,.18); padding: 6px 12px; border-radius: 999px; font-size: 11px; font-weight: 700;">CDW included</div>
+                  <div style="background: rgba(255,255,255,.18); padding: 6px 12px; border-radius: 999px; font-size: 11px; font-weight: 700;">7.25% tax</div>
+                </div>
+              </div>
+              <div style="font-size: 11px; font-weight: 800; color: var(--ios-muted); letter-spacing: .1em; margin: 16px 0 8px;">METHOD</div>
+              <div class="tab-method-grid method-grid">
+                <div class="tab-method-tile method-tile active"><span class="icon">💳</span>Credit Card</div>
+                <div class="tab-method-tile method-tile"><span class="icon">💵</span>Cash</div>
+                <div class="tab-method-tile method-tile"><span class="icon">📄</span>Check</div>
+              </div>
+            </div>
+            <div>
+              <div class="tab-card" style="padding: 16px;">
+                <div style="font-size: 10px; font-weight: 800; color: var(--ios-muted); letter-spacing: .1em; margin-bottom: 8px;">CARD DETAILS</div>
+                <div class="tab-input-row input-row" style="margin-bottom: 8px;">
+                  <span class="lbl">Last 4 digits</span>
+                  <span class="val">····4242</span>
+                </div>
+                <div class="tab-input-row input-row" style="margin-bottom: 8px;">
+                  <span class="lbl">Brand</span>
+                  <span class="val">Visa</span>
+                </div>
+                <div class="tab-input-row input-row">
+                  <span class="lbl">Reference / Auth #</span>
+                  <span class="val">A8K2X9</span>
+                </div>
+              </div>
+              <div class="tab-card" style="padding: 16px; margin-top: 10px; background: rgba(31,199,170,.06); border-color: rgba(31,199,170,.22);">
+                <div class="row between">
+                  <div>
+                    <div style="font-size: 11px; font-weight: 800; color: var(--brand-ink);">Receipt photo</div>
+                    <div style="font-size: 10px; color: var(--ios-muted); margin-top: 2px;">Auto-stored to Supabase Storage</div>
+                  </div>
+                  <div style="width: 36px; height: 36px; background: var(--brand-mint); border-radius: 10px; display: flex; align-items: center; justify-content: center; color: white; font-size: 16px; font-weight: 800;">✓</div>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="bottom-action tab-bottom-action">
+            <button class="btn tab-btn secondary">← Back</button>
+            <button class="btn tab-btn ghost">Manager skip</button>
+            <button class="btn tab-btn">Charge $248.50 →</button>
+          </div>
+        </div></div>
+      </div>
+    </div>
+
+    <!-- ─────────── CHECKOUT · Step 5: Signature ─────────── -->
+    <div class="screen-card">
+      <div class="step-tag"><div class="dot"></div>Step 5 of 6</div>
+      <h3>Customer signature on glass</h3>
+      <p class="desc">iPad lays flat on the counter, customer signs with finger or stylus. Live audit trail captures actor user, IP, and timestamp. Signature data URL persists to <code>Reservation.signatureDataUrl</code> and renders inline on the contract.</p>
+      <div class="devices">
+        <!-- Phone (handoff to tablet) -->
+        <div class="phone-frame"><div class="phone-screen">
+          <div class="status-bar"><span>9:49</span><span>●●● 5G</span></div>
+          <div class="app-bar"><div class="left">← Back</div><div class="right">RES-904623</div></div>
+          <div class="stepper">
+            <div class="step done"></div><div class="step done"></div><div class="step done"></div>
+            <div class="step done"></div><div class="step current"></div><div class="step"></div>
+          </div>
+          <div class="step-label">
+            <span class="l-num">05 / 06</span>
+            <span class="l-title">Hand to customer</span>
+          </div>
+          <div class="body">
+            <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; gap: 12px;">
+              <div style="width: 80px; height: 60px; border-radius: 8px; background: linear-gradient(135deg, var(--brand-ink), #2c1e54); display: flex; align-items: center; justify-content: center; font-size: 30px; color: white;">📱</div>
+              <div style="font-size: 12px; font-weight: 800; color: var(--brand-ink); text-align: center;">Hand tablet to customer<br>for signature</div>
+              <div style="font-size: 8px; color: var(--ios-muted); text-align: center; max-width: 160px; line-height: 1.5;">Antonio González will review and sign the rental agreement on the iPad</div>
+              <div style="background: rgba(135,82,254,.1); padding: 5px 10px; border-radius: 999px; font-size: 7.5px; font-weight: 800; color: var(--brand-violet);">Tap when ready ↓</div>
+            </div>
+          </div>
+          <div class="bottom-action">
+            <button class="btn">Ready, awaiting signature</button>
+          </div>
+        </div></div>
+        <!-- Tablet -->
+        <div class="tablet-frame"><div class="tablet-screen">
+          <div class="app-bar tab-app-bar"><div class="left">Customer Signature · RA-AAA-123</div><div class="right">Reviewing · scroll to sign</div></div>
+          <div class="stepper tab-stepper">
+            <div class="step done"></div><div class="step done"></div><div class="step done"></div>
+            <div class="step done"></div><div class="step current"></div><div class="step"></div>
+          </div>
+          <div class="step-label tab-step-label">
+            <span class="l-num">STEP 05 OF 06</span>
+            <span class="l-title">Antonio, please review and sign</span>
+          </div>
+          <div class="tab-body" style="display: grid; grid-template-columns: 1fr 1.4fr; gap: 16px;">
+            <div class="tab-card" style="padding: 16px; max-height: 280px; overflow: hidden;">
+              <div style="font-size: 11px; font-weight: 800; color: var(--ios-muted); letter-spacing: .1em; margin-bottom: 8px;">AGREEMENT SUMMARY</div>
+              <div style="font-size: 14px; font-weight: 800; color: var(--brand-ink); letter-spacing: -.005em;">2024 Toyota Camry XSE</div>
+              <div style="font-size: 11px; color: var(--ios-muted); margin-top: 2px;">7 days · CDW · Pickup 9:50 AM</div>
+              <div style="border-top: 1px solid var(--border-soft); padding-top: 10px; margin-top: 10px;">
+                <div class="row between" style="font-size: 11px; padding: 3px 0;"><span style="color: var(--ios-muted);">Daily rate</span><span style="font-weight: 700;">$49.00</span></div>
+                <div class="row between" style="font-size: 11px; padding: 3px 0;"><span style="color: var(--ios-muted);">CDW (7d)</span><span style="font-weight: 700;">$195.93</span></div>
+                <div class="row between" style="font-size: 11px; padding: 3px 0;"><span style="color: var(--ios-muted);">Taxes</span><span style="font-weight: 700;">$36.04</span></div>
+                <div class="row between" style="font-size: 11px; padding: 3px 0;"><span style="color: var(--ios-muted);">Paid</span><span style="font-weight: 700; color: var(--brand-mint);">−$248.50</span></div>
+                <div class="row between" style="font-size: 13px; padding: 6px 0 0; border-top: 1px solid var(--border-soft); margin-top: 4px;"><span style="font-weight: 800;">Balance</span><span style="font-weight: 800;">$248.50</span></div>
+              </div>
+              <div class="tab-notice notice" style="margin-top: 12px; padding: 10px 12px;">
+                <div class="h" style="font-size: 10px;">POST-RENTAL CHARGES</div>
+                <div class="body" style="font-size: 9.5px;">I authorize charges to the card on file for: excess mileage · fuel · cleaning · smoking · damage.</div>
+              </div>
+            </div>
+            <div>
+              <div style="font-size: 11px; font-weight: 800; color: var(--ios-muted); letter-spacing: .1em; margin-bottom: 8px;">SIGN BELOW</div>
+              <div class="tab-sig-pad sig-pad">
+                <svg viewBox="0 0 400 80" preserveAspectRatio="none">
+                  <path d="M 20 50 Q 40 25, 65 45 T 110 40 Q 130 60, 150 35 T 190 50 Q 215 30, 240 45 T 280 40 Q 305 55, 330 38 T 370 45" stroke="#211a38" stroke-width="2.5" fill="none" stroke-linecap="round"/>
+                </svg>
+                <span class="baseline">Antonio González</span>
+              </div>
+              <div class="row between mt-6">
+                <div style="font-size: 10px; color: var(--ios-muted);">Signing as <strong style="color: var(--brand-ink);">Antonio González</strong></div>
+                <div style="font-size: 10px; color: var(--brand-violet); font-weight: 700;">Clear</div>
+              </div>
+              <div class="tab-card" style="padding: 12px; margin-top: 14px; background: rgba(31,199,170,.06); border-color: rgba(31,199,170,.22);">
+                <div style="font-size: 10px; color: var(--ios-muted);">Signature will be timestamped + IP recorded</div>
+                <div style="font-size: 9px; color: var(--ios-muted); margin-top: 2px;">May 17, 2026 · 9:51 AM AST · 73.45.xxx.xxx</div>
+              </div>
+            </div>
+          </div>
+          <div class="bottom-action tab-bottom-action">
+            <button class="btn tab-btn ghost">Decline & speak to staff</button>
+            <button class="btn tab-btn">Confirm signature →</button>
+          </div>
+        </div></div>
+      </div>
+    </div>
+
+    <!-- ─────────── CHECKOUT · Step 6: Handoff success ─────────── -->
+    <div class="screen-card">
+      <div class="step-tag"><div class="dot"></div>Step 6 of 6</div>
+      <h3>Keys delivered · agreement emailed</h3>
+      <p class="desc">Confirmation + a printable / emailable receipt. One-tap to email the agreement, print, or open the inspection report. Customer leaves with a clear timestamped record.</p>
+      <div class="devices">
+        <!-- Phone -->
+        <div class="phone-frame"><div class="phone-screen">
+          <div class="status-bar"><span>9:52</span><span>●●● 5G</span></div>
+          <div class="app-bar"><div class="left">RES-904623</div><div class="right">9:52 AM AST</div></div>
+          <div class="stepper">
+            <div class="step done"></div><div class="step done"></div><div class="step done"></div>
+            <div class="step done"></div><div class="step done"></div><div class="step done"></div>
+          </div>
+          <div class="step-label">
+            <span class="l-num">DONE</span>
+            <span class="l-title">Handoff complete</span>
+          </div>
+          <div class="body">
+            <div class="success-hero mb-6">
+              <div class="check">✓</div>
+              <div class="title">Checked Out</div>
+              <div class="sub">7-day rental confirmed</div>
+            </div>
+            <div class="tile" style="margin-bottom: 4px;"><div class="k">Customer</div><div class="v">Antonio González</div></div>
+            <div class="tile" style="margin-bottom: 4px;"><div class="k">Charged</div><div class="v">$248.50 · Visa ····4242</div></div>
+            <div class="tile"><div class="k">Agreement</div><div class="v" style="color: var(--brand-violet);">RA-2026-053</div></div>
+          </div>
+          <div class="bottom-action">
+            <button class="btn secondary" style="flex: 0 0 70px;">📧 Email</button>
+            <button class="btn">Done</button>
+          </div>
+        </div></div>
+        <!-- Tablet -->
+        <div class="tablet-frame"><div class="tablet-screen">
+          <div class="app-bar tab-app-bar"><div class="left">Checkout Complete · RA-2026-053</div><div class="right">9:52 AM AST · Today</div></div>
+          <div class="stepper tab-stepper">
+            <div class="step done"></div><div class="step done"></div><div class="step done"></div>
+            <div class="step done"></div><div class="step done"></div><div class="step done"></div>
+          </div>
+          <div class="tab-body" style="display: grid; grid-template-columns: 1.3fr 1fr; gap: 18px; padding-top: 16px;">
+            <div class="tab-success-hero success-hero">
+              <div class="check">✓</div>
+              <div class="title">All set, Antonio</div>
+              <div class="sub">2024 Toyota Camry · returns May 24, 9:30 AM</div>
+              <div style="display: flex; gap: 8px; margin-top: 18px; position: relative; z-index: 1;">
+                <div style="background: rgba(255,255,255,.22); padding: 6px 14px; border-radius: 999px; font-size: 11px; font-weight: 700;">📧 Agreement emailed</div>
+                <div style="background: rgba(255,255,255,.22); padding: 6px 14px; border-radius: 999px; font-size: 11px; font-weight: 700;">🔑 Keys handed off</div>
+              </div>
+            </div>
+            <div>
+              <div class="tab-card" style="padding: 16px; margin-bottom: 10px;">
+                <div style="font-size: 10px; font-weight: 800; color: var(--ios-muted); letter-spacing: .1em; margin-bottom: 8px;">CHARGED</div>
+                <div style="font-size: 24px; font-weight: 800; color: var(--brand-ink); letter-spacing: -.01em;">$248.50</div>
+                <div style="font-size: 11px; color: var(--ios-muted); margin-top: 3px;">Visa ····4242 · Auth A8K2X9 · 9:48 AM</div>
+              </div>
+              <div class="tab-card" style="padding: 16px;">
+                <div style="font-size: 10px; font-weight: 800; color: var(--ios-muted); letter-spacing: .1em; margin-bottom: 10px;">NEXT</div>
+                <div class="row between" style="padding: 4px 0; font-size: 11px;"><span style="color: var(--ios-muted);">Agreement</span><span style="font-weight: 700; color: var(--brand-violet);">View RA-2026-053 →</span></div>
+                <div class="row between" style="padding: 4px 0; font-size: 11px;"><span style="color: var(--ios-muted);">Inspection</span><span style="font-weight: 700; color: var(--brand-violet);">View 8 photos →</span></div>
+                <div class="row between" style="padding: 4px 0; font-size: 11px;"><span style="color: var(--ios-muted);">Print</span><span style="font-weight: 700; color: var(--brand-violet);">Two copies →</span></div>
+              </div>
+            </div>
+          </div>
+          <div class="bottom-action tab-bottom-action">
+            <button class="btn tab-btn secondary">📧 Re-send email</button>
+            <button class="btn tab-btn secondary">🖨️ Print</button>
+            <button class="btn tab-btn">Return to dashboard</button>
+          </div>
+        </div></div>
+      </div>
+    </div>
+
+  </div>
+</section>
+
+<!-- ════════════════════════════════════════════════ CHECKIN FLOW ════════════════════════════════════════════════ -->
+<section class="flow-section" id="checkin">
+  <div class="flow-head">
+    <div class="flow-badge mint">←</div>
+    <div>
+      <h2>Checkin flow</h2>
+      <div class="sub">Customer returns the vehicle · 6 steps · ~3 minutes · with live fee preview</div>
+    </div>
+  </div>
+  <div class="flow-meta">
+    <div class="flow-pill"><strong>Step 1</strong> · Return summary</div>
+    <div class="flow-pill"><strong>Step 2</strong> · Photo compare</div>
+    <div class="flow-pill"><strong>Step 3</strong> · Metrics + live fees</div>
+    <div class="flow-pill"><strong>Step 4</strong> · Payment or autocharge</div>
+    <div class="flow-pill"><strong>Step 5</strong> · Signature</div>
+    <div class="flow-pill"><strong>Step 6</strong> · Receipt</div>
+  </div>
+
+  <div class="screen-grid">
+
+    <!-- ─────────── CHECKIN · Step 1: Return summary ─────────── -->
+    <div class="screen-card">
+      <div class="step-tag"><div class="dot"></div>Step 1 of 6</div>
+      <h3>Welcome back · return summary</h3>
+      <p class="desc">Quick orientation: what was rented, when, what was due, what's been paid. Sets up staff to know if they'll be dealing with extension fees, late return penalties, or a clean balance-zero close.</p>
+      <div class="devices">
+        <!-- Phone -->
+        <div class="phone-frame"><div class="phone-screen">
+          <div class="status-bar"><span>3:18</span><span>●●● 5G</span></div>
+          <div class="app-bar"><div class="left">← Back</div><div class="right">RES-904623</div></div>
+          <div class="stepper">
+            <div class="step current"></div><div class="step"></div><div class="step"></div>
+            <div class="step"></div><div class="step"></div><div class="step"></div>
+          </div>
+          <div class="step-label">
+            <span class="l-num">01 / 06</span>
+            <span class="l-title">Return summary</span>
+          </div>
+          <div class="body">
+            <div class="card mb-6" style="background: linear-gradient(135deg, var(--brand-mint), #16a589); color: white; border: none; padding: 10px 12px;">
+              <div style="font-size: 8px; opacity: .85; font-weight: 700; letter-spacing: .1em;">RETURNING</div>
+              <div style="font-size: 13px; font-weight: 800; margin-top: 3px;">2024 Toyota Camry</div>
+              <div style="font-size: 8px; opacity: .85; margin-top: 1px;">⬢ AAA-123 · 7-day rental</div>
+            </div>
+            <div class="tiles mb-6">
+              <div class="tile"><div class="k">Customer</div><div class="v">Antonio G.</div></div>
+              <div class="tile"><div class="k">Picked up</div><div class="v">May 17 9:30a</div></div>
+              <div class="tile"><div class="k">Due back</div><div class="v">May 24 9:30a</div></div>
+              <div class="tile" style="background: rgba(31,199,170,.08); border-color: rgba(31,199,170,.24);"><div class="k">Status</div><div class="v" style="color: var(--brand-mint);">On time</div></div>
+            </div>
+            <div class="card">
+              <div class="row between">
+                <div class="card-title">Card on file</div>
+                <div style="font-size: 9px; font-weight: 800; color: var(--brand-ink);">Visa ····4242</div>
+              </div>
+            </div>
+          </div>
+          <div class="bottom-action">
+            <button class="btn">Start Inspection →</button>
+          </div>
+        </div></div>
+        <!-- Tablet -->
+        <div class="tablet-frame"><div class="tablet-screen">
+          <div class="app-bar tab-app-bar"><div class="left">Checkin · Vehicle Return</div><div class="right">Today 3:18 PM · RES-904623</div></div>
+          <div class="stepper tab-stepper">
+            <div class="step current"></div><div class="step"></div><div class="step"></div>
+            <div class="step"></div><div class="step"></div><div class="step"></div>
+          </div>
+          <div class="step-label tab-step-label">
+            <span class="l-num">STEP 01 OF 06</span>
+            <span class="l-title">Welcome back · review rental summary</span>
+          </div>
+          <div class="tab-body" style="display: grid; grid-template-columns: 1.4fr 1fr; gap: 16px;">
+            <div>
+              <div class="tab-card" style="background: linear-gradient(135deg, var(--brand-mint), #16a589); color: white; border: none; padding: 18px 22px;">
+                <div style="font-size: 11px; opacity: .85; font-weight: 700; letter-spacing: .12em;">RETURNING VEHICLE</div>
+                <div style="font-size: 22px; font-weight: 800; margin-top: 6px; letter-spacing: -.01em;">2024 Toyota Camry XSE</div>
+                <div style="font-size: 12px; opacity: .9; margin-top: 4px;">⬢ Plate AAA-123 · Unit 047 · 7-day rental</div>
+                <div style="display: flex; gap: 8px; margin-top: 14px;">
+                  <div style="background: rgba(255,255,255,.22); padding: 5px 10px; border-radius: 999px; font-size: 10px; font-weight: 700;">On time</div>
+                  <div style="background: rgba(255,255,255,.22); padding: 5px 10px; border-radius: 999px; font-size: 10px; font-weight: 700;">No incidents reported</div>
+                  <div style="background: rgba(255,255,255,.22); padding: 5px 10px; border-radius: 999px; font-size: 10px; font-weight: 700;">8 pickup photos on file</div>
+                </div>
+              </div>
+              <div class="tab-tiles tiles" style="margin-top: 14px; grid-template-columns: 1fr 1fr 1fr 1fr;">
+                <div class="tab-tile tile"><div class="k">Customer</div><div class="v">Antonio G.</div></div>
+                <div class="tab-tile tile"><div class="k">Picked up</div><div class="v">May 17 9:30a</div></div>
+                <div class="tab-tile tile"><div class="k">Due back</div><div class="v">May 24 9:30a</div></div>
+                <div class="tab-tile tile"><div class="k">Status</div><div class="v" style="color: var(--brand-mint);">On time</div></div>
+              </div>
+            </div>
+            <div>
+              <div class="tab-card" style="padding: 16px;">
+                <div style="font-size: 10px; font-weight: 800; color: var(--ios-muted); letter-spacing: .1em; margin-bottom: 8px;">PICKUP BASELINE</div>
+                <div class="row between" style="font-size: 11px; padding: 3px 0;"><span style="color: var(--ios-muted);">Odometer</span><span style="font-weight: 700;">12,450 mi</span></div>
+                <div class="row between" style="font-size: 11px; padding: 3px 0;"><span style="color: var(--ios-muted);">Fuel</span><span style="font-weight: 700;">100% · Full</span></div>
+                <div class="row between" style="font-size: 11px; padding: 3px 0;"><span style="color: var(--ios-muted);">Cleanliness</span><span style="font-weight: 700;">5/5</span></div>
+                <div style="border-top: 1px solid var(--border-soft); margin-top: 8px; padding-top: 8px;">
+                  <div class="row between" style="font-size: 11px; padding: 3px 0;"><span style="color: var(--ios-muted);">Balance paid</span><span style="font-weight: 700; color: var(--brand-mint);">$497.00</span></div>
+                  <div class="row between" style="font-size: 11px; padding: 3px 0;"><span style="color: var(--ios-muted);">Card on file</span><span style="font-weight: 700;">Visa ····4242</span></div>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="bottom-action tab-bottom-action">
+            <button class="btn tab-btn secondary">View full agreement</button>
+            <button class="btn tab-btn" style="background: linear-gradient(135deg, var(--brand-mint), #16a589); box-shadow: 0 8px 20px rgba(31,199,170,.32);">Start return inspection →</button>
+          </div>
+        </div></div>
+      </div>
+    </div>
+
+    <!-- ─────────── CHECKIN · Step 2: Photo compare ─────────── -->
+    <div class="screen-card">
+      <div class="step-tag"><div class="dot"></div>Step 2 of 6 · Innovation highlight</div>
+      <h3>Before / after photo compare</h3>
+      <p class="desc">Same 8 angles captured at pickup are surfaced side-by-side with each new capture. Staff scrubs through to flag any deltas. Foundation for AI-validated damage detection (DamageID API integration) in Phase 2.</p>
+      <div class="devices">
+        <!-- Phone -->
+        <div class="phone-frame"><div class="phone-screen">
+          <div class="status-bar"><span>3:20</span><span>●●● 5G</span></div>
+          <div class="app-bar"><div class="left">← Back</div><div class="right">Front · 1/8</div></div>
+          <div class="stepper">
+            <div class="step done"></div><div class="step current"></div><div class="step"></div>
+            <div class="step"></div><div class="step"></div><div class="step"></div>
+          </div>
+          <div class="step-label">
+            <span class="l-num">02 / 06</span>
+            <span class="l-title">Compare with pickup</span>
+          </div>
+          <div class="body">
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 4px;">
+              <div>
+                <div style="font-size: 6.5px; font-weight: 800; color: var(--ios-muted); margin-bottom: 2px; letter-spacing: .08em;">PICKUP · MAY 17</div>
+                <div class="ar-frame" style="height: 80px; background: linear-gradient(135deg, #ddd0ff 0%, #c5b1ff 100%);">
+                  <span style="font-size: 24px;">🚗</span>
+                </div>
+              </div>
+              <div>
+                <div style="font-size: 6.5px; font-weight: 800; color: var(--brand-mint); margin-bottom: 2px; letter-spacing: .08em;">NOW · LIVE</div>
+                <div class="ar-frame" style="height: 80px;">
+                  <span style="font-size: 24px; opacity: .4;">🚗</span>
+                  <div class="corner tl"></div><div class="corner tr"></div>
+                  <div class="corner bl"></div><div class="corner br"></div>
+                </div>
+              </div>
+            </div>
+            <div class="photo-grid mt-6">
+              <div class="photo-cell captured"><span class="photo-label">Front</span></div>
+              <div class="photo-cell" style="border-color: var(--brand-mint); background: rgba(31,199,170,.08);">📷</div>
+              <div class="photo-cell"><span class="photo-label">FR</span></div>
+              <div class="photo-cell"><span class="photo-label">Rear</span></div>
+              <div class="photo-cell"><span class="photo-label">RR</span></div>
+              <div class="photo-cell"><span class="photo-label">RL</span></div>
+              <div class="photo-cell"><span class="photo-label">FL</span></div>
+              <div class="photo-cell"><span class="photo-label">Top</span></div>
+            </div>
+          </div>
+          <div class="bottom-action">
+            <button class="btn secondary" style="flex: 0 0 60px;">⚠️</button>
+            <button class="btn">Capture →</button>
+          </div>
+        </div></div>
+        <!-- Tablet -->
+        <div class="tablet-frame"><div class="tablet-screen">
+          <div class="app-bar tab-app-bar"><div class="left">Before / After Inspection</div><div class="right">1 of 8 · Front angle</div></div>
+          <div class="stepper tab-stepper">
+            <div class="step done"></div><div class="step current"></div><div class="step"></div>
+            <div class="step"></div><div class="step"></div><div class="step"></div>
+          </div>
+          <div class="step-label tab-step-label">
+            <span class="l-num">STEP 02 OF 06</span>
+            <span class="l-title">Compare with pickup baseline</span>
+          </div>
+          <div class="tab-body" style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px;">
+            <div>
+              <div style="font-size: 11px; font-weight: 800; color: var(--ios-muted); letter-spacing: .12em; margin-bottom: 8px;">PICKUP BASELINE · MAY 17</div>
+              <div class="tab-ar-frame ar-frame" style="height: 180px; background: linear-gradient(135deg, #ddd0ff 0%, #c5b1ff 100%);">
+                <span style="font-size: 60px;">🚗</span>
+                <div style="position: absolute; bottom: 8px; left: 8px; right: 8px; background: rgba(0,0,0,.55); backdrop-filter: blur(8px); color: white; padding: 6px 10px; border-radius: 8px; font-size: 9.5px; font-weight: 700;">
+                  Captured 9:43 AM · 2.1MB → 312KB
+                </div>
+              </div>
+              <div class="tab-card" style="padding: 12px; margin-top: 10px;">
+                <div style="font-size: 10px; font-weight: 800; color: var(--ios-muted); letter-spacing: .08em; margin-bottom: 6px;">PICKUP NOTES</div>
+                <div style="font-size: 11px;">No visible damage · clean exterior · full fuel · all wheels straight</div>
+              </div>
+            </div>
+            <div>
+              <div style="font-size: 11px; font-weight: 800; color: var(--brand-mint); letter-spacing: .12em; margin-bottom: 8px;">LIVE · CAPTURING NOW</div>
+              <div class="tab-ar-frame ar-frame" style="height: 180px;">
+                <span style="font-size: 80px; opacity: .35;">🚗</span>
+                <div class="corner tl"></div><div class="corner tr"></div>
+                <div class="corner bl"></div><div class="corner br"></div>
+                <div class="ar-label">ALIGN · TAP TO CAPTURE</div>
+              </div>
+              <div class="tab-card" style="padding: 12px; margin-top: 10px; background: rgba(135,82,254,.06); border-color: rgba(135,82,254,.22);">
+                <div style="font-size: 10px; font-weight: 800; color: var(--brand-violet); letter-spacing: .08em; margin-bottom: 4px;">⚠ MARK DAMAGE</div>
+                <div style="font-size: 11px; color: var(--ios-muted);">Tap on the image to drop a pin where new damage is visible</div>
+              </div>
+            </div>
+          </div>
+          <div class="bottom-action tab-bottom-action">
+            <button class="btn tab-btn ghost">Flag mismatch</button>
+            <button class="btn tab-btn secondary">Skip angle</button>
+            <button class="btn tab-btn" style="background: linear-gradient(135deg, var(--brand-mint), #16a589);">Capture & next →</button>
+          </div>
+        </div></div>
+      </div>
+    </div>
+
+    <!-- ─────────── CHECKIN · Step 3: Live fee preview (KILLER FEATURE) ─────────── -->
+    <div class="screen-card" style="background: linear-gradient(135deg, rgba(255,255,255,.7) 0%, rgba(255,247,237,.6) 100%); border-color: rgba(245,158,11,.3);">
+      <div class="step-tag" style="background: linear-gradient(135deg, rgba(245,158,11,.20), rgba(245,158,11,.10)); color: #b45309;">
+        <div class="dot" style="background: var(--warn); box-shadow: 0 0 0 3px rgba(245,158,11,.18);"></div>
+        Step 3 of 6 · ⭐ Killer feature
+      </div>
+      <h3>Metrics input · live fee preview</h3>
+      <p class="desc">As staff inputs odometer-in, fuel-in, cleanliness, and the smoking toggle, the fees pane animates in real-time on the right. Each fee shows the formula. The grand total updates live. No surprises at the end — the customer sees what they owe as it accumulates.</p>
+      <div class="devices">
+        <!-- Phone -->
+        <div class="phone-frame"><div class="phone-screen">
+          <div class="status-bar"><span>3:23</span><span>●●● 5G</span></div>
+          <div class="app-bar"><div class="left">← Back</div><div class="right" style="color: var(--warn); font-weight: 800;">$144.50 fees</div></div>
+          <div class="stepper">
+            <div class="step done"></div><div class="step done"></div><div class="step current"></div>
+            <div class="step"></div><div class="step"></div><div class="step"></div>
+          </div>
+          <div class="step-label">
+            <span class="l-num">03 / 06</span>
+            <span class="l-title">Return metrics</span>
+          </div>
+          <div class="body">
+            <div class="input-row mb-4">
+              <span class="lbl">Odometer in</span>
+              <span class="val">13,156</span>
+            </div>
+            <div class="input-row mb-4">
+              <span class="lbl">Fuel · 50%</span>
+              <div class="fuel-gauge" style="width: 60px; margin: 0;"><div class="fill" style="width: 50%;"></div></div>
+            </div>
+            <div class="input-row mb-4">
+              <span class="lbl">Cleanliness</span>
+              <div class="stars"><span class="star filled">★</span><span class="star filled">★</span><span class="star empty">★</span><span class="star empty">★</span><span class="star empty">★</span></div>
+            </div>
+            <div class="input-row mb-6">
+              <span class="lbl">Smoking detected</span>
+              <div class="toggle"></div>
+            </div>
+            <div class="fee-stack" style="margin-top: 0;">
+              <div class="fee-row fade-in" style="animation-delay: .1s;">
+                <div class="fee-icon mileage">M</div>
+                <div style="flex: 1;">
+                  <div class="fee-name">Excess mileage</div>
+                  <div class="fee-sub">106 mi · $0.50/mi</div>
+                </div>
+                <div class="fee-amount">$53.00</div>
+              </div>
+              <div class="fee-row fade-in" style="animation-delay: .2s;">
+                <div class="fee-icon fuel">F</div>
+                <div style="flex: 1;">
+                  <div class="fee-name">Fuel refill</div>
+                  <div class="fee-sub">7.5 gal · $7/gal</div>
+                </div>
+                <div class="fee-amount">$52.50</div>
+              </div>
+              <div class="fee-row fade-in" style="animation-delay: .3s;">
+                <div class="fee-icon clean">C</div>
+                <div style="flex: 1;">
+                  <div class="fee-name">Cleaning · medium</div>
+                  <div class="fee-sub">2-tier drop</div>
+                </div>
+                <div class="fee-amount">$100.00</div>
+              </div>
+            </div>
+            <div class="total-card mt-6">
+              <div class="row"><span class="label">Fees Total</span></div>
+              <div class="value">$205.50</div>
+            </div>
+          </div>
+          <div class="bottom-action">
+            <button class="btn">Continue →</button>
+          </div>
+        </div></div>
+        <!-- Tablet -->
+        <div class="tablet-frame"><div class="tablet-screen">
+          <div class="app-bar tab-app-bar"><div class="left">Return Metrics · Live Fee Engine</div><div class="right" style="color: var(--warn); font-weight: 800;">$205.50 in fees · animating</div></div>
+          <div class="stepper tab-stepper">
+            <div class="step done"></div><div class="step done"></div><div class="step current"></div>
+            <div class="step"></div><div class="step"></div><div class="step"></div>
+          </div>
+          <div class="step-label tab-step-label">
+            <span class="l-num">STEP 03 OF 06 · LIVE FEE PREVIEW</span>
+            <span class="l-title">Inputs on the left · fees animate on the right</span>
+          </div>
+          <div class="tab-body" style="display: grid; grid-template-columns: 1fr 1.2fr; gap: 18px;">
+            <div>
+              <div class="tab-card" style="padding: 16px; margin-bottom: 10px;">
+                <div class="row between mb-6">
+                  <div style="font-size: 10px; font-weight: 800; color: var(--ios-muted); text-transform: uppercase; letter-spacing: .12em;">Odometer In</div>
+                  <div style="background: rgba(135,82,254,.15); padding: 4px 8px; border-radius: 999px; font-size: 9.5px; font-weight: 800; color: var(--brand-violet);">📸 OCR</div>
+                </div>
+                <div style="font-size: 32px; font-weight: 800; color: var(--brand-ink); letter-spacing: -.02em;">13,156</div>
+                <div style="font-size: 10.5px; color: var(--warn); margin-top: 2px; font-weight: 700;">+706 mi from pickup · 506 over allowance</div>
+              </div>
+              <div class="tab-card" style="padding: 16px; margin-bottom: 10px;">
+                <div class="row between mb-6">
+                  <div style="font-size: 10px; font-weight: 800; color: var(--ios-muted); text-transform: uppercase; letter-spacing: .12em;">Fuel In</div>
+                  <div style="font-size: 14px; font-weight: 800; color: var(--warn);">50% · Half</div>
+                </div>
+                <div class="tab-fuel-gauge fuel-gauge"><div class="fill" style="width: 50%;"></div></div>
+                <div style="font-size: 10.5px; color: var(--warn); margin-top: 6px; font-weight: 700;">Returned with 50% · pickup was 100%</div>
+              </div>
+              <div class="tab-card" style="padding: 16px; margin-bottom: 10px;">
+                <div class="row between mb-6">
+                  <div style="font-size: 10px; font-weight: 800; color: var(--ios-muted); text-transform: uppercase; letter-spacing: .12em;">Cleanliness</div>
+                  <div style="font-size: 14px; font-weight: 800; color: var(--warn);">2/5</div>
+                </div>
+                <div class="tab-stars stars">
+                  <span class="tab-star star filled">★</span><span class="tab-star star filled">★</span><span class="tab-star star empty">★</span><span class="tab-star star empty">★</span><span class="tab-star star empty">★</span>
+                </div>
+                <div style="font-size: 10.5px; color: var(--warn); margin-top: 6px; font-weight: 700;">3-tier drop from 5/5</div>
+              </div>
+              <div class="tab-card" style="padding: 14px 16px;">
+                <div class="row between">
+                  <div>
+                    <div style="font-size: 10px; font-weight: 800; color: var(--ios-muted); text-transform: uppercase; letter-spacing: .12em;">Smoking detected</div>
+                    <div style="font-size: 10.5px; color: var(--ios-muted); margin-top: 2px;">No smoke residue or odor</div>
+                  </div>
+                  <div class="tab-toggle toggle"></div>
+                </div>
+              </div>
+            </div>
+            <div>
+              <div style="font-size: 11px; font-weight: 800; color: var(--ios-muted); letter-spacing: .12em; margin-bottom: 8px;">FEES — UPDATING LIVE</div>
+              <div class="tab-fee-stack fee-stack" style="margin-top: 0;">
+                <div class="tab-fee-row fee-row fade-in" style="animation-delay: .1s;">
+                  <div class="fee-icon mileage">M</div>
+                  <div style="flex: 1;">
+                    <div class="fee-name">Excess mileage</div>
+                    <div class="fee-sub">506 mi × $0.50/mi · over 1,400 mi allowance</div>
+                  </div>
+                  <div class="fee-amount">$253.00</div>
+                </div>
+                <div class="tab-fee-row fee-row fade-in" style="animation-delay: .2s;">
+                  <div class="fee-icon fuel">F</div>
+                  <div style="flex: 1;">
+                    <div class="fee-name">Fuel refill</div>
+                    <div class="fee-sub">7.5 gal × $7.00/gal · 50% → empty offset</div>
+                  </div>
+                  <div class="fee-amount">$52.50</div>
+                </div>
+                <div class="tab-fee-row fee-row fade-in" style="animation-delay: .3s;">
+                  <div class="fee-icon clean">C</div>
+                  <div style="flex: 1;">
+                    <div class="fee-name">Cleaning · heavy</div>
+                    <div class="fee-sub">3-tier drop · interior shampoo + exterior wash</div>
+                  </div>
+                  <div class="fee-amount">$200.00</div>
+                </div>
+                <div class="tab-fee-row fee-row zero fade-in" style="animation-delay: .4s; opacity: .6;">
+                  <div class="fee-icon smoke">S</div>
+                  <div style="flex: 1;">
+                    <div class="fee-name">Smoking penalty</div>
+                    <div class="fee-sub">Not detected · $0</div>
+                  </div>
+                  <div class="fee-amount" style="color: var(--brand-mint);">—</div>
+                </div>
+              </div>
+              <div class="tab-total-card total-card">
+                <div class="row"><span class="label">FEES SUBTOTAL · LIVE</span></div>
+                <div class="value">$505.50</div>
+                <div style="font-size: 10px; opacity: .65; margin-top: 4px; position: relative; z-index: 1;">Will be added to the agreement · customer sees on invoice email</div>
+              </div>
+            </div>
+          </div>
+          <div class="bottom-action tab-bottom-action">
+            <button class="btn tab-btn secondary">← Adjust photos</button>
+            <button class="btn tab-btn ghost">Override fee</button>
+            <button class="btn tab-btn">Continue to payment →</button>
+          </div>
+        </div></div>
+      </div>
+    </div>
+
+    <!-- ─────────── CHECKIN · Step 4: Payment routing ─────────── -->
+    <div class="screen-card">
+      <div class="step-tag"><div class="dot"></div>Step 4 of 6</div>
+      <h3>Settle balance · or schedule auto-charge</h3>
+      <p class="desc">Two paths: <strong>Pay now</strong> (cash/check/card at counter) → balance hits zero → status CHECKED_IN. Or <strong>Auto-charge in 24h</strong> → status CHECKED_IN_UNPAID + BullMQ job scheduled + invoice email with the card-on-file notice fires immediately.</p>
+      <div class="devices">
+        <!-- Phone -->
+        <div class="phone-frame"><div class="phone-screen">
+          <div class="status-bar"><span>3:27</span><span>●●● 5G</span></div>
+          <div class="app-bar"><div class="left">← Back</div><div class="right" style="color: var(--warn); font-weight: 800;">$505.50 due</div></div>
+          <div class="stepper">
+            <div class="step done"></div><div class="step done"></div><div class="step done"></div>
+            <div class="step current"></div><div class="step"></div><div class="step"></div>
+          </div>
+          <div class="step-label">
+            <span class="l-num">04 / 06</span>
+            <span class="l-title">Balance routing</span>
+          </div>
+          <div class="body">
+            <div class="total-card mb-6">
+              <div class="row"><span class="label">Outstanding</span></div>
+              <div class="value">$505.50</div>
+            </div>
+            <div class="card mb-4" style="border: 2px solid var(--brand-violet); background: linear-gradient(135deg, rgba(135,82,254,.08), rgba(135,82,254,.02));">
+              <div class="row between mb-4">
+                <div>
+                  <div class="card-title" style="color: var(--brand-violet);">Selected</div>
+                  <div class="card-value">Auto-charge in 24h</div>
+                </div>
+                <div style="width: 16px; height: 16px; border-radius: 50%; background: var(--brand-violet); display: flex; align-items: center; justify-content: center; color: white; font-size: 9px; font-weight: 800;">✓</div>
+              </div>
+              <div style="font-size: 7.5px; color: var(--ios-muted); line-height: 1.5;">Visa ····4242 will be charged $505.50 tomorrow at 3:27 PM. Customer can dispute via reply email before then.</div>
+            </div>
+            <div class="card">
+              <div class="row between">
+                <div>
+                  <div class="card-title">Or pay now</div>
+                  <div class="card-value">Cash · Card · Check</div>
+                </div>
+                <div style="width: 16px; height: 16px; border-radius: 50%; border: 1.5px solid var(--ios-muted);"></div>
+              </div>
+            </div>
+          </div>
+          <div class="bottom-action">
+            <button class="btn">Schedule auto-charge →</button>
+          </div>
+        </div></div>
+        <!-- Tablet -->
+        <div class="tablet-frame"><div class="tablet-screen">
+          <div class="app-bar tab-app-bar"><div class="left">Balance Settlement · Choose path</div><div class="right">$505.50 outstanding</div></div>
+          <div class="stepper tab-stepper">
+            <div class="step done"></div><div class="step done"></div><div class="step done"></div>
+            <div class="step current"></div><div class="step"></div><div class="step"></div>
+          </div>
+          <div class="step-label tab-step-label">
+            <span class="l-num">STEP 04 OF 06</span>
+            <span class="l-title">How do we want to settle this?</span>
+          </div>
+          <div class="tab-body" style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px;">
+            <div>
+              <div class="tab-card" style="padding: 0; overflow: hidden; border: 2px solid var(--brand-violet);">
+                <div style="background: linear-gradient(135deg, var(--brand-purple), var(--brand-violet)); color: white; padding: 12px 18px;">
+                  <div style="display: flex; align-items: center; justify-content: space-between;">
+                    <div>
+                      <div style="font-size: 10px; opacity: .85; font-weight: 700; letter-spacing: .12em;">SELECTED</div>
+                      <div style="font-size: 16px; font-weight: 800; margin-top: 2px;">Auto-charge in 24h</div>
+                    </div>
+                    <div style="width: 28px; height: 28px; border-radius: 50%; background: white; color: var(--brand-violet); display: flex; align-items: center; justify-content: center; font-size: 16px; font-weight: 800;">✓</div>
+                  </div>
+                </div>
+                <div style="padding: 14px 18px;">
+                  <div class="row between" style="font-size: 11px; padding: 4px 0;"><span style="color: var(--ios-muted);">Amount</span><span style="font-weight: 800;">$505.50</span></div>
+                  <div class="row between" style="font-size: 11px; padding: 4px 0;"><span style="color: var(--ios-muted);">Charge time</span><span style="font-weight: 800;">Tomorrow 3:27 PM</span></div>
+                  <div class="row between" style="font-size: 11px; padding: 4px 0;"><span style="color: var(--ios-muted);">Card</span><span style="font-weight: 800;">Visa ····4242</span></div>
+                  <div class="row between" style="font-size: 11px; padding: 4px 0;"><span style="color: var(--ios-muted);">Status after</span><span style="font-weight: 800; color: var(--warn);">CHECKED_IN_UNPAID</span></div>
+                </div>
+                <div class="tab-notice notice" style="margin: 0 18px 18px; padding: 10px 12px;">
+                  <div class="h" style="font-size: 9.5px;">CUSTOMER NOTIFICATION</div>
+                  <div class="body" style="font-size: 10px;">Invoice email sent immediately. Customer can reply or call to dispute before the 24h window closes.</div>
+                </div>
+              </div>
+            </div>
+            <div>
+              <div class="tab-card" style="padding: 16px;">
+                <div class="row between" style="margin-bottom: 12px;">
+                  <div>
+                    <div style="font-size: 11px; font-weight: 800; color: var(--ios-muted); letter-spacing: .1em;">OR · COLLECT NOW</div>
+                    <div style="font-size: 14px; font-weight: 800; color: var(--brand-ink); margin-top: 4px;">Manual payment at counter</div>
+                  </div>
+                  <div style="width: 22px; height: 22px; border-radius: 50%; border: 1.5px solid var(--ios-muted);"></div>
+                </div>
+                <div class="tab-method-grid method-grid">
+                  <div class="tab-method-tile method-tile"><span class="icon">💳</span>Card</div>
+                  <div class="tab-method-tile method-tile"><span class="icon">💵</span>Cash</div>
+                  <div class="tab-method-tile method-tile"><span class="icon">📄</span>Check</div>
+                </div>
+                <div class="tab-card" style="padding: 12px; margin-top: 12px; background: rgba(31,199,170,.05); border-color: rgba(31,199,170,.18);">
+                  <div style="font-size: 10px; color: var(--ios-muted); line-height: 1.5;">
+                    If paid here, balance becomes <strong style="color: var(--brand-mint);">$0.00</strong> and the customer leaves with a paid-in-full receipt immediately.
+                  </div>
+                </div>
+              </div>
+              <div class="tab-card" style="padding: 16px; margin-top: 10px;">
+                <div style="font-size: 11px; font-weight: 800; color: var(--ios-muted); letter-spacing: .1em; margin-bottom: 8px;">AGREEMENT TERMS</div>
+                <div style="font-size: 10px; color: var(--ios-muted); line-height: 1.5;">
+                  Customer signed under post-rental charge authorization on May 17. The card-on-file is pre-authorized for these specific fee categories.
+                </div>
+                <div style="display: flex; gap: 6px; margin-top: 10px;">
+                  <span style="font-size: 9px; padding: 3px 8px; background: rgba(31,199,170,.1); color: #047857; border-radius: 999px; font-weight: 700;">✓ Mileage</span>
+                  <span style="font-size: 9px; padding: 3px 8px; background: rgba(31,199,170,.1); color: #047857; border-radius: 999px; font-weight: 700;">✓ Fuel</span>
+                  <span style="font-size: 9px; padding: 3px 8px; background: rgba(31,199,170,.1); color: #047857; border-radius: 999px; font-weight: 700;">✓ Cleaning</span>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="bottom-action tab-bottom-action">
+            <button class="btn tab-btn secondary">← Adjust fees</button>
+            <button class="btn tab-btn">Schedule auto-charge →</button>
+          </div>
+        </div></div>
+      </div>
+    </div>
+
+    <!-- ─────────── CHECKIN · Step 5: Signature ─────────── -->
+    <div class="screen-card">
+      <div class="step-tag"><div class="dot"></div>Step 5 of 6</div>
+      <h3>Return signature · acknowledge fees</h3>
+      <p class="desc">Customer reviews the fees breakdown one more time and signs to acknowledge return condition. Same signature pad as checkout. Receipt or invoice email queues up for delivery.</p>
+      <div class="devices">
+        <!-- Phone -->
+        <div class="phone-frame"><div class="phone-screen">
+          <div class="status-bar"><span>3:29</span><span>●●● 5G</span></div>
+          <div class="app-bar"><div class="left">← Back</div><div class="right">RES-904623</div></div>
+          <div class="stepper">
+            <div class="step done"></div><div class="step done"></div><div class="step done"></div>
+            <div class="step done"></div><div class="step current"></div><div class="step"></div>
+          </div>
+          <div class="step-label">
+            <span class="l-num">05 / 06</span>
+            <span class="l-title">Acknowledge & sign</span>
+          </div>
+          <div class="body">
+            <div class="card mb-4" style="background: linear-gradient(135deg, rgba(245,158,11,.08), rgba(245,158,11,.02)); border-color: rgba(245,158,11,.24);">
+              <div class="row between mb-4">
+                <div class="card-title" style="color: #b45309;">Fees acknowledged</div>
+                <div class="card-value">$505.50</div>
+              </div>
+              <div style="font-size: 7px; color: var(--ios-muted); line-height: 1.5;">Mileage $253 · Fuel $52.50 · Cleaning $200</div>
+            </div>
+            <div class="sig-pad">
+              <svg viewBox="0 0 400 80" preserveAspectRatio="none">
+                <path d="M 20 50 Q 40 25, 65 45 T 110 40 Q 130 60, 150 35 T 190 50 Q 215 30, 240 45 T 280 40" stroke="#211a38" stroke-width="2.5" fill="none" stroke-linecap="round"/>
+              </svg>
+              <span class="baseline">Antonio González</span>
+            </div>
+            <div class="row between mt-6" style="font-size: 7px; color: var(--ios-muted);">
+              <span>3:29 PM AST</span>
+              <span style="color: var(--brand-violet); font-weight: 700;">Clear</span>
+            </div>
+          </div>
+          <div class="bottom-action">
+            <button class="btn">Confirm signature →</button>
+          </div>
+        </div></div>
+        <!-- Tablet -->
+        <div class="tablet-frame"><div class="tablet-screen">
+          <div class="app-bar tab-app-bar"><div class="left">Return Signature · Antonio G.</div><div class="right">Hand the tablet to the customer</div></div>
+          <div class="stepper tab-stepper">
+            <div class="step done"></div><div class="step done"></div><div class="step done"></div>
+            <div class="step done"></div><div class="step current"></div><div class="step"></div>
+          </div>
+          <div class="step-label tab-step-label">
+            <span class="l-num">STEP 05 OF 06</span>
+            <span class="l-title">Please review the fees and sign</span>
+          </div>
+          <div class="tab-body" style="display: grid; grid-template-columns: 1fr 1.4fr; gap: 16px;">
+            <div>
+              <div class="tab-card" style="padding: 16px; background: linear-gradient(135deg, rgba(245,158,11,.08), rgba(245,158,11,.02)); border-color: rgba(245,158,11,.24);">
+                <div style="font-size: 10px; font-weight: 800; color: #b45309; letter-spacing: .1em; margin-bottom: 8px;">FEES SUMMARY</div>
+                <div class="row between" style="font-size: 11px; padding: 4px 0;"><span style="color: var(--ios-muted);">Excess mileage</span><span style="font-weight: 700;">$253.00</span></div>
+                <div class="row between" style="font-size: 11px; padding: 4px 0;"><span style="color: var(--ios-muted);">Fuel refill</span><span style="font-weight: 700;">$52.50</span></div>
+                <div class="row between" style="font-size: 11px; padding: 4px 0;"><span style="color: var(--ios-muted);">Cleaning · heavy</span><span style="font-weight: 700;">$200.00</span></div>
+                <div class="row between" style="font-size: 13px; padding: 8px 0 0; border-top: 1px solid rgba(245,158,11,.24); margin-top: 6px;"><span style="font-weight: 800;">Total fees</span><span style="font-weight: 800;">$505.50</span></div>
+              </div>
+              <div class="tab-notice notice" style="margin-top: 12px;">
+                <div class="h">CHARGE NOTICE</div>
+                <div class="body">Visa ····4242 will be charged <strong>$505.50</strong> in 24 hours. You'll receive an itemized invoice by email now.</div>
+              </div>
+            </div>
+            <div>
+              <div style="font-size: 11px; font-weight: 800; color: var(--ios-muted); letter-spacing: .1em; margin-bottom: 8px;">SIGN BELOW</div>
+              <div class="tab-sig-pad sig-pad">
+                <svg viewBox="0 0 400 80" preserveAspectRatio="none">
+                  <path d="M 20 50 Q 40 25, 65 45 T 110 40 Q 130 60, 150 35 T 190 50 Q 215 30, 240 45 T 280 40 Q 305 55, 330 38 T 370 45" stroke="#211a38" stroke-width="2.5" fill="none" stroke-linecap="round"/>
+                </svg>
+                <span class="baseline">Antonio González</span>
+              </div>
+              <div class="row between mt-6">
+                <div style="font-size: 10px; color: var(--ios-muted);">By signing, you acknowledge the fees and authorize the auto-charge.</div>
+                <div style="font-size: 10px; color: var(--brand-violet); font-weight: 700;">Clear</div>
+              </div>
+              <div class="tab-card" style="padding: 12px; margin-top: 12px; background: rgba(31,199,170,.05); border-color: rgba(31,199,170,.18);">
+                <div style="font-size: 10px; color: var(--ios-muted);">Signed at 3:29 PM AST · IP 73.45.xxx.xxx · Stored in agreement audit log</div>
+              </div>
+            </div>
+          </div>
+          <div class="bottom-action tab-bottom-action">
+            <button class="btn tab-btn ghost">Dispute fees with manager</button>
+            <button class="btn tab-btn">Confirm signature →</button>
+          </div>
+        </div></div>
+      </div>
+    </div>
+
+    <!-- ─────────── CHECKIN · Step 6: Return complete ─────────── -->
+    <div class="screen-card">
+      <div class="step-tag"><div class="dot"></div>Step 6 of 6</div>
+      <h3>Return confirmed · invoice queued</h3>
+      <p class="desc">Status now <strong>CHECKED_IN_UNPAID</strong>. Customer gets the invoice email immediately and the auto-charge fires in 24h unless disputed. Staff can mark vehicle available, void fees, or open the dispute thread.</p>
+      <div class="devices">
+        <!-- Phone -->
+        <div class="phone-frame"><div class="phone-screen">
+          <div class="status-bar"><span>3:30</span><span>●●● 5G</span></div>
+          <div class="app-bar"><div class="left">RES-904623</div><div class="right">Done · 3:30 PM</div></div>
+          <div class="stepper">
+            <div class="step done"></div><div class="step done"></div><div class="step done"></div>
+            <div class="step done"></div><div class="step done"></div><div class="step done"></div>
+          </div>
+          <div class="step-label">
+            <span class="l-num">DONE</span>
+            <span class="l-title">Return complete</span>
+          </div>
+          <div class="body">
+            <div class="success-hero mb-6">
+              <div class="check">✓</div>
+              <div class="title">Returned</div>
+              <div class="sub">Auto-charge in 24 hours</div>
+            </div>
+            <div class="tile" style="margin-bottom: 4px;"><div class="k">Status</div><div class="v" style="color: var(--warn);">CHECKED_IN_UNPAID</div></div>
+            <div class="tile" style="margin-bottom: 4px;"><div class="k">Charge at</div><div class="v">May 18 · 3:30 PM</div></div>
+            <div class="tile"><div class="k">Invoice</div><div class="v" style="color: var(--brand-mint);">✓ Sent</div></div>
+          </div>
+          <div class="bottom-action">
+            <button class="btn secondary" style="flex: 0 0 70px;">📞</button>
+            <button class="btn">Done</button>
+          </div>
+        </div></div>
+        <!-- Tablet -->
+        <div class="tablet-frame"><div class="tablet-screen">
+          <div class="app-bar tab-app-bar"><div class="left">Return Complete · Invoice queued</div><div class="right">3:30 PM AST · Today</div></div>
+          <div class="stepper tab-stepper">
+            <div class="step done"></div><div class="step done"></div><div class="step done"></div>
+            <div class="step done"></div><div class="step done"></div><div class="step done"></div>
+          </div>
+          <div class="tab-body" style="display: grid; grid-template-columns: 1.3fr 1fr; gap: 18px; padding-top: 16px;">
+            <div class="tab-success-hero success-hero">
+              <div class="check">✓</div>
+              <div class="title">Thanks, Antonio</div>
+              <div class="sub">2024 Toyota Camry returned · invoice sent</div>
+              <div style="display: flex; gap: 8px; margin-top: 18px; position: relative; z-index: 1;">
+                <div style="background: rgba(255,255,255,.22); padding: 6px 14px; border-radius: 999px; font-size: 11px; font-weight: 700;">📧 Invoice emailed</div>
+                <div style="background: rgba(255,255,255,.22); padding: 6px 14px; border-radius: 999px; font-size: 11px; font-weight: 700;">⏰ Auto-charge in 24h</div>
+              </div>
+            </div>
+            <div>
+              <div class="tab-card" style="padding: 16px; margin-bottom: 10px; background: linear-gradient(135deg, rgba(245,158,11,.08), rgba(245,158,11,.02)); border-color: rgba(245,158,11,.24);">
+                <div style="font-size: 10px; font-weight: 800; color: #b45309; letter-spacing: .1em; margin-bottom: 6px;">PENDING CHARGE</div>
+                <div style="font-size: 24px; font-weight: 800; color: var(--brand-ink); letter-spacing: -.01em;">$505.50</div>
+                <div style="font-size: 11px; color: var(--ios-muted); margin-top: 3px;">Visa ····4242 · May 18 at 3:30 PM</div>
+              </div>
+              <div class="tab-card" style="padding: 16px;">
+                <div style="font-size: 10px; font-weight: 800; color: var(--ios-muted); letter-spacing: .1em; margin-bottom: 10px;">STAFF ACTIONS</div>
+                <div class="row between" style="padding: 4px 0; font-size: 11px;"><span style="color: var(--ios-muted);">Vehicle</span><span style="font-weight: 700; color: var(--brand-mint);">Mark available →</span></div>
+                <div class="row between" style="padding: 4px 0; font-size: 11px;"><span style="color: var(--ios-muted);">Invoice</span><span style="font-weight: 700; color: var(--brand-violet);">Re-send →</span></div>
+                <div class="row between" style="padding: 4px 0; font-size: 11px;"><span style="color: var(--ios-muted);">Auto-charge</span><span style="font-weight: 700; color: var(--brand-violet);">View job →</span></div>
+                <div class="row between" style="padding: 4px 0; font-size: 11px;"><span style="color: var(--ios-muted);">Dispute</span><span style="font-weight: 700; color: var(--danger);">Cancel auto-charge</span></div>
+              </div>
+            </div>
+          </div>
+          <div class="bottom-action tab-bottom-action">
+            <button class="btn tab-btn secondary">📞 Call customer</button>
+            <button class="btn tab-btn secondary">📧 Re-send invoice</button>
+            <button class="btn tab-btn">Return to dashboard</button>
+          </div>
+        </div></div>
+      </div>
+    </div>
+
+  </div>
+</section>
+
+<!-- ════════════════════════════════════════════════ SYSTEM NOTES ════════════════════════════════════════════════ -->
+<section class="flow-section" id="system">
+  <div class="flow-head">
+    <div class="flow-badge" style="background: linear-gradient(135deg, #6366f1, #4338ca);">⚙</div>
+    <div>
+      <h2>System notes</h2>
+      <div class="sub">What's powering this · what we ship · what's deferred</div>
+    </div>
+  </div>
+  <div class="flow-meta" style="margin-bottom: 0;">
+    <div class="flow-pill"><strong>Live fee preview</strong> — pure-compute functions, no API call per keystroke</div>
+    <div class="flow-pill"><strong>AR overlay</strong> — CSS-only · positioned guides over native camera</div>
+    <div class="flow-pill"><strong>OCR odometer</strong> — Phase 2 (Tesseract.js local or vendor API)</div>
+    <div class="flow-pill"><strong>Photo compression</strong> — JPEG 0.7 / 1280px max · ships with foundation</div>
+    <div class="flow-pill"><strong>Auto-charge</strong> — BullMQ job · 24h delay · Authorize.Net CIM</div>
+    <div class="flow-pill"><strong>Signature on glass</strong> — re-uses existing pad component</div>
+  </div>
+</section>
+
+<footer class="foot">
+  Pillar 2 · Checkout & Checkin · <strong>RideFleet</strong> · designed 2026-05-17 · open in browser for full layout · phone width 220px · tablet aspect 4:3
+</footer>
+
+</body>
+</html>

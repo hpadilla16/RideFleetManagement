@@ -291,6 +291,52 @@ function authNetExtractPaymentProfileId(profileResp = {}) {
     .find(Boolean) || '';
 }
 
+// Pillar 2 — Extract denormalized card metadata from a getCustomerProfile
+// response so we can render "card ending in XXXX" without a per-display
+// API call. Returns null fields when the response is masked / absent.
+//
+// AuthNet response shape (relevant portion):
+//   profileResp.profile.paymentProfiles[0].payment.creditCard = {
+//     cardNumber: 'XXXX1111',     // last 4 visible
+//     expirationDate: 'XXXX' | 'MM/YYYY',  // masked in prod by default
+//     cardType: 'Visa' | 'MasterCard' | ...
+//   }
+function authNetExtractCardMetadata(profileResp = {}) {
+  const profile = profileResp?.profile || profileResp?.customerProfile || null;
+  const paymentProfiles = Array.isArray(profile?.paymentProfiles)
+    ? profile.paymentProfiles
+    : profile?.paymentProfiles
+      ? [profile.paymentProfiles]
+      : [];
+  const first = paymentProfiles[0] || null;
+  const cc = first?.payment?.creditCard || null;
+  if (!cc) return { cardLast4: null, cardBrand: null, cardExpiresMonth: null, cardExpiresYear: null };
+
+  // cardNumber is masked like 'XXXX1111' — pull the trailing 4 digits.
+  const last4Match = String(cc.cardNumber || '').match(/(\d{4})\s*$/);
+  const cardLast4 = last4Match ? last4Match[1] : null;
+
+  const cardBrand = String(cc.cardType || '').trim() || null;
+
+  // expirationDate may be 'XXXX' (masked, prod default), 'MM/YYYY', or
+  // 'YYYY-MM'. We only persist when we get something parseable.
+  const exp = String(cc.expirationDate || '').trim();
+  let cardExpiresMonth = null;
+  let cardExpiresYear = null;
+  const mmYY = exp.match(/^(\d{1,2})\/(\d{2}|\d{4})$/);
+  const yyMM = exp.match(/^(\d{4})-(\d{1,2})$/);
+  if (mmYY) {
+    cardExpiresMonth = Number(mmYY[1]);
+    const yr = Number(mmYY[2]);
+    cardExpiresYear = yr < 100 ? 2000 + yr : yr;
+  } else if (yyMM) {
+    cardExpiresYear = Number(yyMM[1]);
+    cardExpiresMonth = Number(yyMM[2]);
+  }
+
+  return { cardLast4, cardBrand, cardExpiresMonth, cardExpiresYear };
+}
+
 async function authNetResolveStoredCustomerProfile(customerId, scope = {}) {
   if (!customerId) return null;
   const customer = await prisma.customer.findUnique({
@@ -309,17 +355,27 @@ async function authNetResolveStoredCustomerProfile(customerId, scope = {}) {
   const profileResp = await authNetCustomerProfile(customerProfileId, scope);
   const resolvedPaymentProfileId = authNetExtractPaymentProfileId(profileResp);
   if (!resolvedPaymentProfileId) return null;
+  const cardMeta = authNetExtractCardMetadata(profileResp);
   await prisma.customer.update({
     where: { id: customerId },
     data: {
       authnetCustomerProfileId: customerProfileId,
-      authnetPaymentProfileId: resolvedPaymentProfileId
+      authnetPaymentProfileId: resolvedPaymentProfileId,
+      ...(cardMeta.cardLast4 ? {
+        cardLast4: cardMeta.cardLast4,
+        cardBrand: cardMeta.cardBrand,
+        cardExpiresMonth: cardMeta.cardExpiresMonth,
+        cardExpiresYear: cardMeta.cardExpiresYear,
+        cardUpdatedAt: new Date()
+      } : {})
     }
   });
   return {
     customerProfileId,
     paymentProfileId: resolvedPaymentProfileId,
-    alreadySaved: true
+    alreadySaved: true,
+    cardLast4: cardMeta.cardLast4,
+    cardBrand: cardMeta.cardBrand
   };
 }
 
@@ -533,11 +589,19 @@ async function saveAuthNetCardProfileFromReference({ customerId, reference, scop
       const profileResp = await authNetCustomerProfile(duplicateProfileId, scope);
       const paymentProfileId = authNetExtractPaymentProfileId(profileResp);
       if (paymentProfileId) {
+        const cardMeta = authNetExtractCardMetadata(profileResp);
         await prisma.customer.update({
           where: { id: customerId },
           data: {
             authnetCustomerProfileId: String(duplicateProfileId),
-            authnetPaymentProfileId: String(paymentProfileId)
+            authnetPaymentProfileId: String(paymentProfileId),
+            ...(cardMeta.cardLast4 ? {
+              cardLast4: cardMeta.cardLast4,
+              cardBrand: cardMeta.cardBrand,
+              cardExpiresMonth: cardMeta.cardExpiresMonth,
+              cardExpiresYear: cardMeta.cardExpiresYear,
+              cardUpdatedAt: new Date()
+            } : {})
           }
         });
         return {
@@ -556,9 +620,21 @@ async function saveAuthNetCardProfileFromReference({ customerId, reference, scop
     : (resp?.customerPaymentProfileIdList?.numericString || null);
   let resolvedPaymentProfileId = String(paymentProfileId || '').trim();
   const resolvedCustomerProfileId = String(customerProfileId || '').trim();
-  if (resolvedCustomerProfileId && !resolvedPaymentProfileId) {
-    const profileResp = await authNetCustomerProfile(resolvedCustomerProfileId, scope);
-    resolvedPaymentProfileId = authNetExtractPaymentProfileId(profileResp);
+  // Pillar 2 — fetch the profile so we can extract card metadata for the
+  // card-on-file invoice notice. Even if we already have paymentProfileId,
+  // we still need the GET to access creditCard fields.
+  let cardMeta = { cardLast4: null, cardBrand: null, cardExpiresMonth: null, cardExpiresYear: null };
+  if (resolvedCustomerProfileId) {
+    try {
+      const profileResp = await authNetCustomerProfile(resolvedCustomerProfileId, scope);
+      if (!resolvedPaymentProfileId) {
+        resolvedPaymentProfileId = authNetExtractPaymentProfileId(profileResp);
+      }
+      cardMeta = authNetExtractCardMetadata(profileResp);
+    } catch (err) {
+      // Non-fatal — card metadata is best-effort. If we can't fetch it,
+      // we still save the profile IDs so the charge path works.
+    }
   }
   if (!resolvedCustomerProfileId || !resolvedPaymentProfileId) {
     throw new Error('Authorize.Net did not return a reusable customer payment profile');
@@ -568,13 +644,22 @@ async function saveAuthNetCardProfileFromReference({ customerId, reference, scop
     where: { id: customerId },
     data: {
       authnetCustomerProfileId: resolvedCustomerProfileId,
-      authnetPaymentProfileId: resolvedPaymentProfileId
+      authnetPaymentProfileId: resolvedPaymentProfileId,
+      ...(cardMeta.cardLast4 ? {
+        cardLast4: cardMeta.cardLast4,
+        cardBrand: cardMeta.cardBrand,
+        cardExpiresMonth: cardMeta.cardExpiresMonth,
+        cardExpiresYear: cardMeta.cardExpiresYear,
+        cardUpdatedAt: new Date()
+      } : {})
     }
   });
 
   return {
     customerProfileId: resolvedCustomerProfileId,
-    paymentProfileId: resolvedPaymentProfileId
+    paymentProfileId: resolvedPaymentProfileId,
+    cardLast4: cardMeta.cardLast4,
+    cardBrand: cardMeta.cardBrand
   };
 }
 

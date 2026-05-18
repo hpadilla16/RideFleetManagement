@@ -10,13 +10,64 @@
 - Beta release: `v0.9.0-beta.N`
 - Emergency patch: `v0.9.0-beta.N+hotfix.M`
 
+### CRITICAL: stale local tags can poison a deploy
+Surfaced four deploys in a row on 2026-05-12 (BUG-008 chain — PRs #65, #66, #67, #68). Symptom every time: `git checkout v0.9.0-beta.<N>` on the droplet ends up on a *different* old commit each deploy (PR #12, PR #24, PR #28, PR #31, ...), so the running container is missing the merged feature and prod silently regresses. Sometimes for two weeks of feature work.
+
+Root cause: pre-existing local tags. At some point on 2026-04-29 (and likely earlier) `git tag -a v0.9.0-beta.<N> <some-HEAD>` was run on the Mac for several beta tags as advance staging (or as the side-effect of some script — never identified). Those tag files have been sitting in `.git/refs/tags/` for weeks, each pointing at whatever HEAD was at the time of pre-staging. Then on deploy day:
+
+1. `git tag v0.9.0-beta.<N> origin/main` is run — **silently refused**: `git tag` without `-f` does NOT overwrite an existing tag. No error message in the obvious case (you have to look for one specific line, which scrolls offscreen behind the next command).
+2. `git push origin v0.9.0-beta.<N>` pushes the *old* local tag.
+3. Droplet `git fetch --tags --force && git checkout v0.9.0-beta.<N>` lands on the old commit.
+4. Docker rebuilds happily with the stale source tree; smoke tests fail in confusing ways because the code on disk doesn't have the route / function / etc you just merged.
+
+Each beta tag was preset to a different stale HEAD, which is why the "wrong commit" landed somewhere different every time, and why "I just deleted and re-pushed the tag last cycle" wasn't enough to fix the pattern — the *next* pre-staged tag (e.g. `.10` → `.11`) was already lurking with a different stale target.
+
+### Mandatory tag-creation pattern
+Use ONE of these, never `git tag NAME` alone:
+
+```bash
+git tag -f v0.9.0-beta.<N> origin/main
+git push --force origin v0.9.0-beta.<N>
+```
+
+…or the delete-first pattern:
+
+```bash
+git tag -d v0.9.0-beta.<N>                          # remove any local copy
+git push origin :refs/tags/v0.9.0-beta.<N>          # remove the remote one too
+git tag v0.9.0-beta.<N> origin/main                 # now safe to create fresh
+git push origin v0.9.0-beta.<N>
+```
+
+### Mandatory sanity check before deploy
+Right after pushing the tag, **both** of these must print the same SHA, and it must equal `git rev-parse origin/main`:
+
+```bash
+git rev-parse v0.9.0-beta.<N>
+git log -1 --format='%H %s' v0.9.0-beta.<N>
+git rev-parse origin/main
+```
+
+If `git rev-parse v0.9.0-beta.<N>` prints a different SHA than `git log -1`, the tag is **annotated** (tag-object SHA ≠ commit SHA). That's also fine as long as `git log -1` matches origin/main — but it's a red flag that should trigger a manual verify of the commit subject.
+
+If `git log -1 v0.9.0-beta.<N>` does NOT match origin/main, **stop**. Do not SSH to the droplet. Run the delete-first pattern above and re-verify before continuing.
+
+### Periodic tag audit
+Run this on the Mac to spot any other pre-staged tags pointing at stale commits before they bite:
+
+```bash
+git tag -l 'v0.9.0-beta.*' | xargs -I {} sh -c 'echo "{}: $(git log -1 --format=%h%x09%s {})"'
+```
+
+Anything whose commit isn't an actual deploy SHA or current `origin/main` is a leftover; delete it locally and on origin.
+
 ## Hotfix flow
 1. `git checkout main && git pull`
 2. `git checkout -b hotfix/<issue>`
 3. Implement minimal fix
 4. Validate (`frontend build`, key smoke checks)
 5. Merge to `main`
-6. Tag + push (always **merge → pull → tag**, never **tag → merge** — annotated tag SHAs are not commit SHAs, dereference with `^{commit}`)
+6. Tag + push (always **merge → pull → tag**, never **tag → merge** — annotated tag SHAs are not commit SHAs, dereference with `^{commit}`). **Use the mandatory tag-creation pattern in the "Release tagging" section above** — plain `git tag NAME` silently fails when a stale local tag exists, which poisoned four deploys in a row in May 2026.
 7. Deploy to production droplet (see [Droplet deploy workflow](#droplet-deploy-workflow) below).
    `ops/deploy-beta.ps1` is a **local-staging** wrapper only — it does not touch the production droplet.
 

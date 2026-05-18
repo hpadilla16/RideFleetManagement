@@ -47,6 +47,32 @@ services:
       timeout: 5s
       retries: 15
 
+  # Pillar 2 — BullMQ worker process.
+  # Runs job handlers (auto-charge after checkin, future: snapshot jobs,
+  # email retries, etc.). Same image as the API backend, different command.
+  # Shares Redis Upstash (REDIS_URL in .env) with the cache pub/sub layer.
+  # Pool kept small — workers do mostly DB reads + AuthNet API calls; the
+  # API backend owns the heavy pool budget.
+  worker:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.prod
+    container_name: fleet-worker-prod
+    restart: unless-stopped
+    env_file:
+      - ./backend/.env
+    environment:
+      NODE_ENV: production
+      # No PORT — workers don't expose HTTP
+      DATABASE_POOL_SIZE: "4"
+      # Override the API's CLUSTER_WORKERS — irrelevant to this process
+      CLUSTER_WORKERS: "0"
+    command: ["node", "src/worker.js"]
+    depends_on:
+      db:
+        condition: service_healthy
+    # No port mapping — internal-only process
+
   frontend:
     build:
       context: ./frontend

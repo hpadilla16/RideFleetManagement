@@ -1,0 +1,170 @@
+'use client';
+
+/**
+ * Pillar 2 — Client-side fee preview hook.
+ *
+ * Mirrors the backend fee-engine.service.js pure-compute functions so the
+ * wizard UI can show fees "live" as staff adjusts inputs. The authoritative
+ * fee computation still runs on the backend at POST /agreements/:id/checkin-close.
+ *
+ * Keep this file's math IN SYNC with backend/src/modules/fees/fee-engine.service.js
+ * — both share the same fallback rates and same formulas.
+ */
+
+import { useMemo } from 'react';
+
+// Hardcoded fallback rates — mirror seeded values in pillar2-migration-phase-a.sql
+// AND the HARDCODED_RATES const in fee-engine.service.js.
+export const FALLBACK_RATES = {
+  EXCESS_MILEAGE:   { unit: 'PER_MILE',   amount: 0.50 },
+  FUEL_REFILL:      { unit: 'PER_GALLON', amount: 7.00 },
+  CLEANING_LIGHT:   { unit: 'FLAT',       amount: 50.00 },
+  CLEANING_MEDIUM:  { unit: 'FLAT',       amount: 100.00 },
+  CLEANING_HEAVY:   { unit: 'FLAT',       amount: 200.00 },
+  SMOKING:          { unit: 'FLAT',       amount: 250.00 }
+};
+
+function round2(n) {
+  return Math.round(Number(n || 0) * 100) / 100;
+}
+
+function pct(fraction) {
+  return `${Math.round(Number(fraction || 0) * 100)}%`;
+}
+
+function rateOf(rates, key) {
+  return rates?.[key] || FALLBACK_RATES[key];
+}
+
+export function computeExcessMileage({ odometerOut, odometerIn, includedMiles, rate }) {
+  const out = Number(odometerOut || 0);
+  const inn = Number(odometerIn || 0);
+  if (inn <= out) return null;
+  const driven = inn - out;
+  const excess = Math.max(0, driven - includedMiles);
+  if (excess === 0) return null;
+  return {
+    feeType: 'EXCESS_MILEAGE',
+    quantity: excess,
+    rate: rate.amount,
+    total: round2(excess * rate.amount),
+    description: `Excess mileage (${excess} miles over ${includedMiles} included)`,
+    formula: `${excess} mi × $${rate.amount.toFixed(2)}/mi`
+  };
+}
+
+export function computeFuelRefill({ fuelOut, fuelIn, tankCapacityGallons, rate }) {
+  const out = Number(fuelOut || 0);
+  const inn = Number(fuelIn || 0);
+  const gap = Math.max(0, out - inn);
+  if (gap === 0) return null;
+  const gallons = round2(gap * tankCapacityGallons);
+  if (gallons === 0) return null;
+  return {
+    feeType: 'FUEL_REFILL',
+    quantity: gallons,
+    rate: rate.amount,
+    total: round2(gallons * rate.amount),
+    description: `Fuel refill (${gallons.toFixed(2)} gal — returned at ${pct(inn)} vs ${pct(out)} at pickup)`,
+    formula: `${gallons.toFixed(2)} gal × $${rate.amount.toFixed(2)}/gal`
+  };
+}
+
+export function computeCleaningFee({ cleanlinessOut, cleanlinessIn, ratesByTier }) {
+  const out = Number(cleanlinessOut || 0);
+  const inn = Number(cleanlinessIn || 0);
+  if (out === 0 || inn === 0) return null;
+  const delta = out - inn;
+  if (delta <= 0) return null;
+  let tier;
+  if (delta >= 3) tier = 'HEAVY';
+  else if (delta === 2) tier = 'MEDIUM';
+  else tier = 'LIGHT';
+  const tierKey = `CLEANING_${tier}`;
+  const rate = ratesByTier[tierKey];
+  if (!rate) return null;
+  return {
+    feeType: tierKey,
+    quantity: 1,
+    rate: rate.amount,
+    total: round2(rate.amount),
+    description: `Cleaning fee — ${tier.toLowerCase()} (cleanliness ${out}/5 → ${inn}/5)`,
+    formula: `${tier} · ${delta}-tier drop`
+  };
+}
+
+export function computeSmokingFee({ smokingDetected, rate }) {
+  if (!smokingDetected) return null;
+  return {
+    feeType: 'SMOKING',
+    quantity: 1,
+    rate: rate.amount,
+    total: round2(rate.amount),
+    description: 'Smoking / tobacco residue cleaning',
+    formula: 'Flat penalty'
+  };
+}
+
+/**
+ * The hook itself. Pass the agreement context + current input values, get
+ * back a memoized fee list + totals. Re-runs on every input change.
+ *
+ * @param {object} params
+ * @param {object} params.rates - resolved rates from backend, or null for fallbacks
+ * @param {number} params.odometerOut, odometerIn
+ * @param {number} params.fuelOut, fuelIn (0..1)
+ * @param {number} params.cleanlinessOut, cleanlinessIn (1..5)
+ * @param {boolean} params.smokingDetected
+ * @param {number} params.includedMilesPerDay (default 200)
+ * @param {number} params.rentalDays (default 1)
+ * @param {number} params.tankCapacityGallons (default 15)
+ */
+export function useFeePreview(params) {
+  return useMemo(() => {
+    const {
+      rates,
+      odometerOut, odometerIn,
+      fuelOut, fuelIn,
+      cleanlinessOut, cleanlinessIn,
+      smokingDetected,
+      includedMilesPerDay = 200,
+      rentalDays = 1,
+      tankCapacityGallons = 15
+    } = params;
+
+    const mileageRate = rateOf(rates, 'EXCESS_MILEAGE');
+    const fuelRate    = rateOf(rates, 'FUEL_REFILL');
+    const smokingRate = rateOf(rates, 'SMOKING');
+    const ratesByTier = {
+      CLEANING_LIGHT:  rateOf(rates, 'CLEANING_LIGHT'),
+      CLEANING_MEDIUM: rateOf(rates, 'CLEANING_MEDIUM'),
+      CLEANING_HEAVY:  rateOf(rates, 'CLEANING_HEAVY')
+    };
+
+    const includedMiles = Math.max(0, Number(includedMilesPerDay) * Number(rentalDays));
+
+    const items = [];
+    const mileage = computeExcessMileage({ odometerOut, odometerIn, includedMiles, rate: mileageRate });
+    if (mileage) items.push(mileage);
+    const fuel = computeFuelRefill({ fuelOut, fuelIn, tankCapacityGallons, rate: fuelRate });
+    if (fuel) items.push(fuel);
+    const cleaning = computeCleaningFee({ cleanlinessOut, cleanlinessIn, ratesByTier });
+    if (cleaning) items.push(cleaning);
+    const smoking = computeSmokingFee({ smokingDetected, rate: smokingRate });
+    if (smoking) items.push(smoking);
+
+    const total = round2(items.reduce((s, i) => s + i.total, 0));
+    const byType = Object.fromEntries(items.map((i) => [i.feeType, i.total]));
+
+    return { items, total, byType, includedMiles };
+  }, [
+    params.rates,
+    params.odometerOut, params.odometerIn,
+    params.fuelOut, params.fuelIn,
+    params.cleanlinessOut, params.cleanlinessIn,
+    params.smokingDetected,
+    params.includedMilesPerDay,
+    params.rentalDays,
+    params.tankCapacityGallons
+  ]);
+}

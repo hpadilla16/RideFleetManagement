@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { rentalAgreementsService } from './rental-agreements.service.js';
 import { compactAgreementResponse } from './rental-agreements-compact.js';
 import { scheduleAddendumNotification } from './addendum-notification.service.js';
+import { closeAgreementWithCheckinFees } from './checkin-close.service.js';
 import logger from '../../lib/logger.js';
 
 export const rentalAgreementsRouter = Router();
@@ -295,6 +296,37 @@ rentalAgreementsRouter.post('/:id/inspection', async (req, res, next) => {
     if (/not found/i.test(e.message)) return res.status(404).json({ error: e.message });
     if (/phase/i.test(e.message)) return res.status(400).json({ error: e.message });
     if (/only admin can reassign|admin role required/i.test(String(e?.message || ''))) return res.status(403).json({ error: e.message });
+    next(e);
+  }
+});
+
+// Pillar 2 — Checkin wizard close endpoint.
+// Runs fee engine (mileage/fuel/cleaning/smoking) → recomputes balance →
+// routes to CHECKED_IN (balance=0) or CHECKED_IN_UNPAID + queues autocharge.
+//
+// Body shape:
+//   {
+//     odometerIn: number,
+//     fuelIn: number (0..1),
+//     cleanlinessIn: number (1..5),
+//     smokingDetected: boolean,
+//     signerName: string,
+//     signatureDataUrl: string,
+//     manualPayment: { amount, method, reference, last4, receiptUrl } | null
+//   }
+rentalAgreementsRouter.post('/:id/checkin-close', async (req, res, next) => {
+  try {
+    await ensureEditable(req.params.id, req.user);
+    const out = await closeAgreementWithCheckinFees(
+      req.params.id,
+      req.body || {},
+      req.user?.sub || null,
+      req.ip || null
+    );
+    res.json(out);
+  } catch (e) {
+    if (/not found/i.test(String(e?.message || ''))) return res.status(404).json({ error: e.message });
+    if (/Cannot close agreement in status/i.test(String(e?.message || ''))) return res.status(409).json({ error: e.message });
     next(e);
   }
 });

@@ -20,6 +20,7 @@ enum ReservationStatus {
   CONFIRMED
   CHECKED_OUT
   CHECKED_IN
+  CHECKED_IN_UNPAID
   CANCELLED
   NO_SHOW
 }
@@ -423,6 +424,7 @@ model Tenant {
   agreementAddendums          RentalAgreementAddendum[]
   vehicleClassStopSales       VehicleClassStopSale[]
   marketScrapeProfiles        MarketScrapeProfile[]
+  feeRates                    FeeRate[]
 }
 
 model Location {
@@ -455,6 +457,7 @@ model Location {
   carSharingSearchPlacesAnchor   CarSharingSearchPlace[] @relation("CarSharingSearchPlaceAnchorLocation")
   carSharingPickupTrips          Trip[]                  @relation("TripPickupLocation")
   carSharingReturnTrips          Trip[]                  @relation("TripReturnLocation")
+  feeRates                       FeeRate[]
 
   @@unique([tenantId, code])
   @@index([tenantId])
@@ -644,6 +647,14 @@ model Customer {
   idPhotoUrl               String?
   authnetCustomerProfileId String?
   authnetPaymentProfileId  String?
+  // Pillar 2 (added 2026-05-17) — denormalized card metadata for invoice notice
+  // Populated by saveAuthNetCardProfileFromReference + authNetResolveStoredCustomerProfile
+  // when CIM profile is saved. Backfill script: scripts/backfill-card-metadata.mjs
+  cardLast4                String?
+  cardBrand                String?
+  cardExpiresMonth         Int?
+  cardExpiresYear          Int?
+  cardUpdatedAt            DateTime?
   creditBalance            Decimal   @default(0) @db.Decimal(10, 2)
   portalResetToken         String?
   portalResetExpiresAt     DateTime?
@@ -738,6 +749,16 @@ model Reservation {
   // the UI can render "Originally returned X · Now returns Y". Cleared
   // back to NULL when the only/last extension is deleted.
   originalReturnAt DateTime?
+
+  // Pillar 2 (added 2026-05-17) — auto-charge state machine.
+  // Set when checkin completes with balance > 0 and status transitions
+  // to CHECKED_IN_UNPAID. Worker polls + charges + transitions to CHECKED_IN.
+  // autochargeBlocked = TRUE for reservations signed before terms update
+  // (no legal authorization to auto-charge).
+  autochargeBlocked   Boolean   @default(false)
+  autochargeAt        DateTime?
+  autochargeAttempts  Int       @default(0)
+  autochargeLastError String?
 
   pickupLocationId String
   pickupLocation   Location @relation("ReservationPickupLocation", fields: [pickupLocationId], references: [id])
@@ -2625,4 +2646,36 @@ model LoadObservation {
   tierAtObservation       String   @default("STANDARD")
 
   @@index([tenantId, observedAt(sort: Desc)])
+}
+
+// Pillar 2 — per-tenant/per-location fee rates for the checkin fee engine.
+// Resolution order in fee-engine.service.js:
+//   1. location-specific (locationId != null)
+//   2. tenant-default (locationId = null)
+//   3. hardcoded fallback in code (HARDCODED_RATES const)
+//
+// Phase A SQL creates two partial unique indexes that Prisma cannot model:
+//   - one-tenant-default per (tenantId, feeType) where locationId IS NULL
+//   - one-location-override per (tenantId, locationId, feeType) where locationId IS NOT NULL
+// These live in the DB only — do not let `prisma db push` drift the schema
+// or it will try to drop them.
+//
+// feeType: EXCESS_MILEAGE | FUEL_REFILL | CLEANING_LIGHT | CLEANING_MEDIUM | CLEANING_HEAVY | SMOKING
+// unit:    PER_MILE | PER_GALLON | FLAT
+model FeeRate {
+  id          String   @id @default(cuid())
+  tenantId    String
+  locationId  String?
+  feeType     String
+  unit        String
+  amount      Decimal  @db.Decimal(10, 2)
+  isActive    Boolean  @default(true)
+  notes       String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  tenant      Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  location    Location? @relation(fields: [locationId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, locationId])
 }
