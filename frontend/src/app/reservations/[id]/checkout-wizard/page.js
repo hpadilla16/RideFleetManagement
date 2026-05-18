@@ -72,12 +72,39 @@ function CheckoutWizard({ token, me, logout }) {
     })();
   }, [reservationId, token]);
 
-  // Balance read fallback: agreement → reservation → amountDue.
-  // Fresh agreements don't carry charges yet — read from reservation
-  // which has the authoritative charges/balance until finalize copies them in.
-  const balanceDue = Number(
-    agreement?.balance ?? reservation?.balance ?? reservation?.amountDue ?? 0
+  // Balance — fresh agreements have balance=0 (not undefined) because charges
+  // haven't been copied from the reservation yet. Take MAX across all possible
+  // sources to ensure we never miss a real balance. Reservation also stores
+  // unpaidBalance / amountDue / amountOwed depending on the path.
+  const balanceDue = Math.max(
+    Number(agreement?.balance || 0),
+    Number(reservation?.balance || 0),
+    Number(reservation?.amountDue || 0),
+    Number(reservation?.amountOwed || 0),
+    Number(reservation?.unpaidBalance || 0),
+    Number(reservation?.totalCharges || 0) - Number(reservation?.paidAmount || 0),
+    Number(reservation?.total || 0) - Number(reservation?.paidAmount || 0)
   );
+
+  // Debug: print all balance-related fields once when reservation loads.
+  // Remove after we confirm which field the API actually returns.
+  useEffect(() => {
+    if (reservation && agreement) {
+      // eslint-disable-next-line no-console
+      console.log('[checkout-wizard] balance debug', {
+        agreementBalance: agreement?.balance,
+        reservationBalance: reservation?.balance,
+        reservationAmountDue: reservation?.amountDue,
+        reservationAmountOwed: reservation?.amountOwed,
+        reservationUnpaidBalance: reservation?.unpaidBalance,
+        reservationTotalCharges: reservation?.totalCharges,
+        reservationTotal: reservation?.total,
+        reservationPaidAmount: reservation?.paidAmount,
+        computedBalanceDue: balanceDue
+      });
+    }
+  }, [reservation?.id, agreement?.id]);
+
   const needsPayment = balanceDue > 0 && !paymentSkipped && !(Number(paymentTaken.amount) >= balanceDue);
 
   // Vehicle assignment state — if reservation has no vehicle, staff picks here
