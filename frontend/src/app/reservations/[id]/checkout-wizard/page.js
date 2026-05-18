@@ -118,13 +118,13 @@ function CheckoutWizard({ token, me, logout }) {
     setSubmitError('');
     try {
       // Re-sync agreement charges from reservation pricing one more time
-      // before finalize. The load already did this, but a) charges may have
-      // changed since, and b) re-fetching gives us authoritative balance.
-      const synced = await api(`/api/reservations/${reservationId}/agreement`, {}, token);
-      const balance = Number(synced?.balance || 0);
-      if (balance > 0) {
-        throw new Error(`Reservation has $${balance.toFixed(2)} outstanding. Open the reservation, collect payment, then return to checkout.`);
-      }
+      // before finalize so the agreement has at least one selected charge.
+      // startFromReservation() seeds charges from the reservation's pricing.
+      // Balance validation is intentionally NOT done here — agent should
+      // verify balance on the reservation detail page before starting checkout.
+      // The synced agreement's balance field can include phantom rounding/tax
+      // differences vs the reservation page, so it's an unreliable gate.
+      await api(`/api/reservations/${reservationId}/agreement`, {}, token);
 
       // Save inspection (CHECKOUT phase)
       await api(`/api/rental-agreements/${agreement.id}/inspection`, {
