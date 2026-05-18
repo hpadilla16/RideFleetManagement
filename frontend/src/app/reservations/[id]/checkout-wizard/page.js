@@ -425,35 +425,32 @@ function Step4Balance({ agreement, balanceDue, paymentTaken, onPaymentChange, pa
 
 function Step5Signature({ agreement, signerName, onSignerName, signatureDataUrl, onSignature, error }) {
   return (
-    <WizGrid cols={2}>
-      <WizCard>
-        <div style={{ fontSize: 11, fontWeight: 800, color: '#6f668f', letterSpacing: '.1em', marginBottom: 10 }}>AGREEMENT SUMMARY</div>
-        <div style={{ fontSize: 16, fontWeight: 800, color: '#211a38' }}>{agreement?.agreementNumber || 'DRAFT'}</div>
-        <hr style={{ border: 'none', borderTop: '1px solid #e6dfff', margin: '12px 0' }} />
-        <RowBetween k="Total" v={`$${Number(agreement?.total || 0).toFixed(2)}`} />
-        <RowBetween k="Paid" v={`$${Number(agreement?.paidAmount || 0).toFixed(2)}`} valueColor="#1fc7aa" />
-        <RowBetween k="Balance" v={`$${Number(agreement?.balance || 0).toFixed(2)}`} valueColor={Number(agreement?.balance) > 0 ? '#f59e0b' : '#1fc7aa'} />
-        <div style={{ marginTop: 14, padding: 12, background: 'linear-gradient(135deg, rgba(245,158,11,.08), rgba(245,158,11,.02))', border: '1px solid rgba(245,158,11,.24)', borderRadius: 10 }}>
-          <div style={{ fontSize: 11, fontWeight: 800, color: '#b45309', letterSpacing: '.08em' }}>POST-RENTAL CHARGES</div>
-          <div style={{ fontSize: 12, color: '#211a38', marginTop: 4, lineHeight: 1.5 }}>
-            I authorize charges to the card on file for: excess mileage · fuel · cleaning · smoking · damage.
-          </div>
+    <div style={{ maxWidth: 720, margin: '0 auto' }}>
+      <div style={{
+        padding: 16,
+        background: 'linear-gradient(135deg, rgba(245,158,11,.08), rgba(245,158,11,.02))',
+        border: '1px solid rgba(245,158,11,.24)',
+        borderLeft: '4px solid #f59e0b',
+        borderRadius: 12,
+        marginBottom: 18
+      }}>
+        <div style={{ fontSize: 11, fontWeight: 800, color: '#b45309', letterSpacing: '.1em', marginBottom: 6 }}>POST-RENTAL CHARGES</div>
+        <div style={{ fontSize: 13, color: '#211a38', lineHeight: 1.55 }}>
+          I authorize charges to the card on file for: excess mileage · fuel · cleaning · smoking · damage.
         </div>
-      </WizCard>
-      <div>
-        <SignaturePad
-          height={200}
-          label="Customer Signature"
-          signerName={signerName}
-          onSignerNameChange={onSignerName}
-          onSignatureChange={onSignature}
-          helperText="By signing, you accept the rental terms and authorize the post-rental charge categories listed."
-        />
-        {error && (
-          <div style={{ marginTop: 12, padding: '10px 14px', background: 'rgba(239,68,68,.08)', border: '1px solid rgba(239,68,68,.24)', borderRadius: 10, color: '#b91c1c', fontSize: 13, fontWeight: 700 }}>⚠ {error}</div>
-        )}
       </div>
-    </WizGrid>
+      <SignaturePad
+        height={240}
+        label="Customer Signature"
+        signerName={signerName}
+        onSignerNameChange={onSignerName}
+        onSignatureChange={onSignature}
+        helperText="By signing, you accept the rental terms and authorize the post-rental charge categories listed."
+      />
+      {error && (
+        <div style={{ marginTop: 12, padding: '10px 14px', background: 'rgba(239,68,68,.08)', border: '1px solid rgba(239,68,68,.24)', borderRadius: 10, color: '#b91c1c', fontSize: 13, fontWeight: 700 }}>⚠ {error}</div>
+      )}
+    </div>
   );
 }
 
