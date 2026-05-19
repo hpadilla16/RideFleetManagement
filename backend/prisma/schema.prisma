@@ -2684,3 +2684,48 @@ model FeeRate {
 
   @@index([tenantId, locationId])
 }
+
+// PR-5 — Endpoint-level performance telemetry (PERF pillar).
+// Distinct from `LoadObservation` (business volume): this table captures raw
+// per-request samples (HTTP method, normalized route, status, duration, db
+// time, cache hit) at a configurable sample rate (default 1%).
+//
+// Writes come from `backend/src/middleware/endpoint-load-sampler.js` and are
+// fire-and-forget so a Prisma error never breaks the request.
+//
+// Daily rollup into `EndpointLoadObservationDaily` is done by
+// `backend/src/jobs/endpoint-load-rollup.js` (wired to cron in PR-6).
+model EndpointLoadObservation {
+  id          String   @id @default(cuid())
+  tenantId    String?  // nullable for public/anonymous endpoints
+  method      String   // GET, POST, etc.
+  route       String   // normalized route pattern, e.g. "/api/reservations/:id"
+  statusCode  Int
+  durationMs  Int      // total duration in ms
+  dbTimeMs    Int?     // db time if measurable
+  cacheHit    Boolean? // null if endpoint doesn't use cache
+  observedAt  DateTime @default(now())
+
+  @@index([tenantId, observedAt])
+  @@index([route, observedAt])
+  @@index([observedAt])
+}
+
+// PR-5 — Daily aggregation of EndpointLoadObservation.
+// One row per (tenantId, route, day). `cacheHitRate` is null when the endpoint
+// does not use the cache (i.e. all samples had cacheHit=null).
+model EndpointLoadObservationDaily {
+  id            String   @id @default(cuid())
+  tenantId      String?
+  route         String
+  day           DateTime // truncated to midnight UTC
+  requestCount  Int
+  p50DurationMs Int
+  p95DurationMs Int
+  p99DurationMs Int
+  errorCount    Int
+  cacheHitRate  Float?   // 0.0-1.0, null if not cached
+
+  @@unique([tenantId, route, day])
+  @@index([day])
+}

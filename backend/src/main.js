@@ -23,6 +23,7 @@ import { assertAuthConfig } from './modules/auth/auth.config.js';
 import { settingsRouter } from './modules/settings/settings.routes.js';
 import { feeRatesRouter } from './modules/fees/fee-rates.routes.js';
 import { requireAuth, requireRole, requireModuleAccess } from './middleware/auth.js';
+import { endpointLoadSampler } from './middleware/endpoint-load-sampler.js';
 import { prisma } from './lib/prisma.js';
 import { customerPortalRouter } from './modules/customer-portal/customer-portal.routes.js';
 import { tenantsRouter } from './modules/tenants/tenants.routes.js';
@@ -57,6 +58,11 @@ const allowedOrigins = process.env.ALLOWED_ORIGINS
   : ['http://localhost:3000', 'http://127.0.0.1:3000'];
 app.use(compression({ threshold: 1024 }));
 app.use(requestLogger());
+// PR-5 PERF telemetry — sampled per-request load observations. Mounted
+// here (after request-id, before auth) so it sees public endpoints too;
+// tenantId is captured inside res.on("finish") after auth has populated
+// req.user (if any). Sample rate via ENDPOINT_LOAD_SAMPLE_RATE (default 1%).
+app.use(endpointLoadSampler());
 app.use(cors({ origin: allowedOrigins, credentials: true }));
 app.use(express.json({
   limit: '50mb',
