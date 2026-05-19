@@ -269,7 +269,7 @@ function VehicleProfileInner({ token, me, logout }) {
             {activeReservation ? (
               <>
                 <Link href={`/reservations/${activeReservation.id}`} className="legal-link-pill">Open Reservation</Link>
-                <Link href={`/reservations/${activeReservation.id}/checkin`} className="legal-link-pill">Go To Check-In</Link>
+                <Link href={`/reservations/${activeReservation.id}/checkin-wizard`} className="legal-link-pill">Go To Check-In</Link>
               </>
             ) : null}
             {!activeReservation && nextReservation ? (
@@ -302,7 +302,7 @@ function VehicleProfileInner({ token, me, logout }) {
                       <span className="ui-muted">Return due {formatDateTime(activeReservation.returnAt)}</span>
                       <span className="ui-muted">Return at {activeReservation.returnLocation?.name || '-'}</span>
                       <div className="inline-actions">
-                        <Link href={`/reservations/${activeReservation.id}/checkin`} className="legal-link-pill">Check In Vehicle</Link>
+                        <Link href={`/reservations/${activeReservation.id}/checkin-wizard`} className="legal-link-pill">Check In Vehicle</Link>
                         <Link href={`/reservations/${activeReservation.id}`} className="legal-link-pill">Open Reservation</Link>
                       </div>
                     </article>
@@ -647,7 +647,7 @@ function VehicleProfileInner({ token, me, logout }) {
                               <div className="inline-actions">
                                 <Link href={`/reservations/${reservation.id}`} className="legal-link-pill">Open</Link>
                                 {String(reservation.status || '').toUpperCase() === 'CHECKED_OUT' ? (
-                                  <Link href={`/reservations/${reservation.id}/checkin`} className="legal-link-pill">Check In</Link>
+                                  <Link href={`/reservations/${reservation.id}/checkin-wizard`} className="legal-link-pill">Check In</Link>
                                 ) : null}
                               </div>
                             </td>

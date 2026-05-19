@@ -21,6 +21,7 @@ import { storeBoardRouter } from './modules/store-board/store-board.routes.js';
 import { storeBoardPublicRouter } from './modules/store-board/store-board-public.routes.js';
 import { assertAuthConfig } from './modules/auth/auth.config.js';
 import { settingsRouter } from './modules/settings/settings.routes.js';
+import { feeRatesRouter } from './modules/fees/fee-rates.routes.js';
 import { requireAuth, requireRole, requireModuleAccess } from './middleware/auth.js';
 import { prisma } from './lib/prisma.js';
 import { customerPortalRouter } from './modules/customer-portal/customer-portal.routes.js';
@@ -125,6 +126,12 @@ app.use('/api/reports', requireAuth, requireModuleAccess('reports'), reportsRout
 app.use('/api/commissions', requireAuth, requireModuleAccess('reports'), commissionsRouter);
 app.use('/api/car-sharing', requireAuth, requireModuleAccess('carSharing'), requireRole('ADMIN', 'OPS'), carSharingRouter);
 app.use('/api/people', requireAuth, requireModuleAccess('people'), peopleRouter);
+// Fee rates: GET is open to any authed user (the checkin wizard's live fee
+// preview needs to read tenant overrides even when run by OPS/AGENT who
+// don't have the 'settings' module). PUT is gated by requireRole('ADMIN')
+// inside the router file. DO NOT add requireModuleAccess here — would
+// break the preview hook in /reservations/:id/checkin-wizard.
+app.use('/api/settings/fee-rates', requireAuth, feeRatesRouter);
 app.use('/api/settings', requireAuth, requireModuleAccess('settings'), settingsRouter);
 app.use('/api/tenants', requireAuth, requireModuleAccess('tenants'), tenantsRouter);
 
@@ -183,6 +190,8 @@ process.on('SIGTERM', async () => {
 });
 
 process.on('unhandledRejection', async (reason) => {
+  // Print to stderr so local dev sees it even when Sentry is off.
+  console.error('[main] unhandledRejection:', reason);
   captureBackendException(reason instanceof Error ? reason : new Error(String(reason)), {
     lifecycle: 'unhandledRejection'
   });
@@ -190,6 +199,11 @@ process.on('unhandledRejection', async (reason) => {
 });
 
 process.on('uncaughtException', async (error) => {
+  console.error('[main] uncaughtException:', error);
   captureBackendException(error, { lifecycle: 'uncaughtException' });
   await flushSentry();
 });
+
+// Also log right BEFORE listen so we can see how far execution gets if
+// SKIP_LISTEN is sneakily set somewhere.
+console.log(`[main] reached pre-listen, SKIP_LISTEN=${process.env.SKIP_LISTEN || 'unset'}, port=${process.env.PORT || 4000}`);

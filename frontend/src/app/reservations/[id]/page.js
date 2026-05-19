@@ -179,6 +179,11 @@ function ReservationDetailInner({ token, me, logout }) {
   const [loading, setLoading] = useState(true);
   const [pricing, setPricing] = useState(null);
   const [paymentRows, setPaymentRows] = useState([]);
+  // Pillar 2: fetch the agreement separately so we can show FEE_ENGINE_*
+  // charges (fuel/cleaning/smoking/late) posted at checkin — those live on
+  // RentalAgreementCharge, not ReservationCharge, so they don't appear in
+  // the regular pricing.charges array.
+  const [agreementFull, setAgreementFull] = useState(null);
   const [commissionOwnerContext, setCommissionOwnerContext] = useState(null);
   const [commissionOwnerPick, setCommissionOwnerPick] = useState('');
   const [locations, setLocations] = useState([]);
@@ -437,6 +442,18 @@ function ReservationDetailInner({ token, me, logout }) {
         setCommissionOwnerContext(null);
         setCommissionOwnerPick('');
       }
+      // Pillar 2: fetch the full agreement (with charges) so we can render
+      // FEE_ENGINE_* charges in the "Post-Check-in Fees" panel below.
+      if (reservationResult?.rentalAgreement?.id) {
+        try {
+          const ag = await api(`/api/rental-agreements/${reservationResult.rentalAgreement.id}`, { bypassCache: true }, token);
+          setAgreementFull(ag || null);
+        } catch {
+          setAgreementFull(null);
+        }
+      } else {
+        setAgreementFull(null);
+      }
     } catch (e) {
       setMsg(e.message || 'Unable to load reservation');
     } finally {
@@ -614,7 +631,7 @@ function ReservationDetailInner({ token, me, logout }) {
   const emailAgreementToCustomer = async () => {
     try {
       const s = String(row?.status || '').toUpperCase();
-      if (!(s === 'CHECKED_OUT' || s === 'CHECKED_IN')) return setMsg('Agreement email is enabled after check-out is complete.');
+      if (!(s === 'CHECKED_OUT' || s === 'CHECKED_IN' || s === 'CHECKED_IN_UNPAID')) return setMsg('Agreement email is enabled after check-out is complete.');
       const agreement = await api(`/api/reservations/${id}/start-rental`, { method: 'POST', body: JSON.stringify({}) }, token);
       const agreementId = agreement?.id;
       if (!agreementId) return setMsg('No agreement available to email.');
@@ -644,7 +661,10 @@ function ReservationDetailInner({ token, me, logout }) {
 
   const handlePrintAgreement = async () => {
     const status = String(row?.status || '').toUpperCase();
-    if (!(status === 'CHECKED_OUT' || status === 'CHECKED_IN')) {
+    // Pillar 2: CHECKED_IN_UNPAID is also a post-checkout state — the agreement
+    // exists with all fees posted, awaiting autocharge resolution. Staff need
+    // to print/email at this stage.
+    if (!(status === 'CHECKED_OUT' || status === 'CHECKED_IN' || status === 'CHECKED_IN_UNPAID')) {
       setMsg('Print Agreement is available after check-out.');
       return;
     }
@@ -875,8 +895,24 @@ function ReservationDetailInner({ token, me, logout }) {
     };
   }, [row, form.pickupAt, form.returnAt, chargeModel]);
 
+  // AUTH_HOLD payments are security deposit authorization swipes, NOT settled
+  // rental payments. They cover the deposit charge on the agreement (so
+  // agreement.balance correctly drops), but the "unpaid balance" on the
+  // reservation page tracks rental fees + extras only (deposit excluded
+  // from displayTotal), so AUTH_HOLD must also be excluded from paidTotal
+  // to keep the math balanced. Display them separately as "Auth holds".
   const paidTotal = useMemo(() => {
-    return Number((paymentRows || []).reduce((sum, payment) => sum + Number(payment?.amount || 0), 0).toFixed(2));
+    return Number((paymentRows || [])
+      .filter((p) => String(p?.method || '').toUpperCase() !== 'AUTH_HOLD')
+      .reduce((sum, payment) => sum + Number(payment?.amount || 0), 0)
+      .toFixed(2));
+  }, [paymentRows]);
+
+  const authHoldsTotal = useMemo(() => {
+    return Number((paymentRows || [])
+      .filter((p) => String(p?.method || '').toUpperCase() === 'AUTH_HOLD')
+      .reduce((sum, payment) => sum + Number(payment?.amount || 0), 0)
+      .toFixed(2));
   }, [paymentRows]);
 
   const precheckinInsuranceInfo = useMemo(() => {
@@ -1783,8 +1819,8 @@ token
             </div>
           </div>
           <div className="app-banner-list">
-            <button type="button" className="button-subtle" onClick={() => router.push(`/reservations/${id}/checkout`)}>Start Check-out</button>
-            <button type="button" className="button-subtle" onClick={() => router.push(`/reservations/${id}/checkin`)}>Start Check-in</button>
+            <button type="button" className="button-subtle" onClick={() => router.push(`/reservations/${id}/checkout-wizard`)}>Start Check-out</button>
+            <button type="button" className="button-subtle" onClick={() => router.push(`/reservations/${id}/checkin-wizard`)}>Start Check-in</button>
             {row?.vehicleId && row?.rentalAgreement?.id && String(row?.status || '').toUpperCase() === 'CHECKED_OUT' ? (
               <button type="button" className="button-subtle" onClick={() => router.push(`/reservations/${id}/swap`)}>Swap Vehicle</button>
             ) : null}
@@ -2240,8 +2276,8 @@ token
               <section className="ios-action-card">
                 <div className="ios-action-head">Operations</div>
                 <div className="ios-action-list">
-                  <button className="ios-action-btn" onClick={() => router.push(`/reservations/${id}/checkout`)}>Start Check-out</button>
-                  <button className="ios-action-btn" onClick={() => router.push(`/reservations/${id}/checkin`)}>Start Check-in</button>
+                  <button className="ios-action-btn" onClick={() => router.push(`/reservations/${id}/checkout-wizard`)}>Start Check-out</button>
+                  <button className="ios-action-btn" onClick={() => router.push(`/reservations/${id}/checkin-wizard`)}>Start Check-in</button>
                   <button className="ios-action-btn" onClick={() => router.push(`/reservations/${id}/ops-view?section=checkout`)}>View Check-out</button>
                   <button className="ios-action-btn" onClick={() => router.push(`/reservations/${id}/ops-view?section=checkin`)}>View Check-in</button>
                   <button className="ios-action-btn" onClick={() => setStatus('NO_SHOW')}>Mark No Show</button>
@@ -2264,7 +2300,7 @@ token
                   <button className="ios-action-btn" onClick={() => issueLinkAction('signature')}>Request Signature</button>
                   <button className="ios-action-btn" onClick={() => issueLinkAction('payment')}>Request Payment</button>
                   <button className="ios-action-btn" onClick={emailReservationDetail}>Email Reservation Detail</button>
-                  <button className="ios-action-btn" onClick={emailAgreementToCustomer} disabled={!['CHECKED_OUT','CHECKED_IN'].includes(String(row?.status || '').toUpperCase())}>Email Agreement</button>
+                  <button className="ios-action-btn" onClick={emailAgreementToCustomer} disabled={!['CHECKED_OUT','CHECKED_IN','CHECKED_IN_UNPAID'].includes(String(row?.status || '').toUpperCase())}>Email Agreement</button>
                 </div>
               </section>
 
@@ -2569,9 +2605,72 @@ token
                       <td colSpan={3}><strong>Unpaid Balance</strong></td>
                       <td style={{ whiteSpace: 'nowrap', textAlign: 'right' }}><strong>{money(unpaidBalance)}</strong></td>
                     </tr>
+                    {authHoldsTotal > 0 ? (
+                      <tr>
+                        <td colSpan={3}>
+                          <span style={{ color: '#a16207', fontWeight: 600 }}>Security deposit hold</span>
+                          <div className="label" style={{ textTransform: 'none', letterSpacing: 0 }}>Authorized — not settled</div>
+                        </td>
+                        <td style={{ whiteSpace: 'nowrap', textAlign: 'right', color: '#a16207' }}>
+                          <strong>{money(authHoldsTotal)}</strong>
+                        </td>
+                      </tr>
+                    ) : null}
                   </tbody>
                 </table>
               </div>
+              {(() => {
+                // Pillar 2: render fee-engine charges (fuel/cleaning/smoking/late)
+                // that the checkin wizard posts onto the agreement. These don't
+                // live in ReservationCharge so they're invisible to the Charges
+                // table above — surface them in their own panel so staff can
+                // see what got added at return.
+                const feeEngineCharges = (agreementFull?.charges || []).filter((c) =>
+                  String(c?.source || '').toUpperCase().startsWith('FEE_ENGINE_')
+                );
+                if (feeEngineCharges.length === 0) return null;
+                const feesSubtotal = feeEngineCharges.reduce((s, c) => s + Number(c?.total || 0), 0);
+                const agreementBalance = Number(agreementFull?.balance || 0);
+                const agreementTotal = Number(agreementFull?.total || 0);
+                const agreementPaid = Number(agreementFull?.paidAmount || 0);
+                return (
+                  <div className="card" style={{ marginTop: 14, borderLeft: '3px solid #f59e0b', maxWidth: '100%', overflow: 'hidden' }}>
+                    <div className="row-between" style={{ marginBottom: 12 }}>
+                      <h3 style={{ margin: 0 }}>Post-Check-in Fees</h3>
+                      <span className="label" style={{ color: '#b45309' }}>Posted to agreement</span>
+                    </div>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                      {feeEngineCharges.map((c) => (
+                        <div key={c.id || c.sourceRefId} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12, padding: '6px 0', borderBottom: '1px solid #f1edff' }}>
+                          <div style={{ flex: 1, minWidth: 0, fontSize: 13, color: '#211a38', wordBreak: 'break-word' }}>{c.name}</div>
+                          <div style={{ whiteSpace: 'nowrap', fontWeight: 700, fontVariantNumeric: 'tabular-nums', color: '#211a38' }}>{money(Number(c.total || 0))}</div>
+                        </div>
+                      ))}
+                    </div>
+                    <div style={{ marginTop: 12, paddingTop: 10, borderTop: '1px solid #e6dfff', display: 'flex', flexDirection: 'column', gap: 6 }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13 }}>
+                        <span><strong>Fees subtotal</strong></span>
+                        <span style={{ whiteSpace: 'nowrap', fontVariantNumeric: 'tabular-nums' }}><strong>{money(feesSubtotal)}</strong></span>
+                      </div>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, color: '#6f668f' }}>
+                        <span>Agreement total</span>
+                        <span style={{ whiteSpace: 'nowrap', fontVariantNumeric: 'tabular-nums' }}>{money(agreementTotal)}</span>
+                      </div>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, color: '#6f668f' }}>
+                        <span>Paid to date</span>
+                        <span style={{ whiteSpace: 'nowrap', fontVariantNumeric: 'tabular-nums' }}>{money(agreementPaid)}</span>
+                      </div>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 14, paddingTop: 4, borderTop: '1px dashed #e6dfff' }}>
+                        <span><strong>Agreement balance</strong></span>
+                        <span style={{ whiteSpace: 'nowrap', fontVariantNumeric: 'tabular-nums', color: agreementBalance > 0 ? '#b45309' : '#1fc7aa' }}><strong>{money(agreementBalance)}</strong></span>
+                      </div>
+                    </div>
+                    <div className="label" style={{ marginTop: 12, textTransform: 'none', letterSpacing: 0, lineHeight: 1.5 }}>
+                      Calculated at check-in (fuel, cleaning, smoking, late return) and posted to the agreement. Use Print Agreement above for the full invoice.
+                    </div>
+                  </div>
+                );
+              })()}
               {canManageCommissionOwner && row?.rentalAgreement?.id ? (
                 <div className="card" style={{ marginTop: 14 }}>
                   <div className="row-between" style={{ marginBottom: 8 }}>

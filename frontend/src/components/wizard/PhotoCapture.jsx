@@ -21,16 +21,21 @@
 import { useRef, useState, useEffect } from 'react';
 import { compressToDataUrl } from '../../lib/image-compressor.js';
 
-// 8 standard inspection angles
+// 8 standard inspection angles — keys MUST match the keys consumed by
+// frontend/src/app/reservations/[id]/inspection-report/page.js (line 12).
+// If you add or rename a key here, also update the inspection-report
+// renderer or the photos will save to DB but never display.
+//
+// 4 exterior angles + 4 interior shots = 8 photos total.
 export const STANDARD_ANGLES = [
-  { key: 'FRONT',  label: 'Front',         abbr: 'Front' },
-  { key: 'FL',     label: 'Front-Left',    abbr: 'FL' },
-  { key: 'LEFT',   label: 'Driver side',   abbr: 'L' },
-  { key: 'RL',     label: 'Rear-Left',     abbr: 'RL' },
-  { key: 'REAR',   label: 'Rear',          abbr: 'Rear' },
-  { key: 'RR',     label: 'Rear-Right',    abbr: 'RR' },
-  { key: 'RIGHT',  label: 'Passenger side',abbr: 'R' },
-  { key: 'FR',     label: 'Front-Right',   abbr: 'FR' }
+  { key: 'front',     label: 'Front (exterior)',  abbr: 'Front' },
+  { key: 'rear',      label: 'Rear (exterior)',   abbr: 'Rear' },
+  { key: 'left',      label: 'Driver side',       abbr: 'Left' },
+  { key: 'right',     label: 'Passenger side',    abbr: 'Right' },
+  { key: 'frontSeat', label: 'Front seat',        abbr: 'F. Seat' },
+  { key: 'rearSeat',  label: 'Rear seat',         abbr: 'R. Seat' },
+  { key: 'dashboard', label: 'Dashboard',         abbr: 'Dash' },
+  { key: 'trunk',     label: 'Trunk',             abbr: 'Trunk' }
 ];
 
 export function PhotoCapture({

@@ -291,7 +291,7 @@ function DashboardInner({ token, me, logout }) {
   }, [token, canSeeOverview]);
 
   const startCheckout = async (id) => {
-    router.push(`/reservations/${id}/checkout`);
+    router.push(`/reservations/${id}/checkout-wizard`);
   };
 
   const markCancelled = async (id) => {
@@ -331,7 +331,7 @@ function DashboardInner({ token, me, logout }) {
   };
 
   const startCheckin = (id) => {
-    router.push(`/reservations/${id}/checkin`);
+    router.push(`/reservations/${id}/checkin-wizard`);
   };
 
   const openReservation = (id) => {
@@ -380,7 +380,7 @@ function DashboardInner({ token, me, logout }) {
             title: 'Next Return',
             detail: `#${returns[0].reservationNumber} - ${returns[0].customer?.firstName || ''} ${returns[0].customer?.lastName || ''}`.trim(),
             note: `Return ${new Date(returns[0].returnAt).toLocaleString()}`,
-            action: () => router.push(`/reservations/${returns[0].id}/checkin`),
+            action: () => router.push(`/reservations/${returns[0].id}/checkin-wizard`),
             actionLabel: 'Open Check-in'
           }
         : null,

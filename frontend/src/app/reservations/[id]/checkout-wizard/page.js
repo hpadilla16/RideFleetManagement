@@ -17,7 +17,7 @@
  * Mockups reference: design/mockups/pillar2-checkin-checkout/index.html
  */
 
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { AuthGate } from '../../../../components/AuthGate';
 import { AppShell } from '../../../../components/AppShell';
@@ -38,6 +38,8 @@ function CheckoutWizard({ token, me, logout }) {
   const [loading, setLoading] = useState(true);
   const [reservation, setReservation] = useState(null);
   const [agreement, setAgreement] = useState(null);
+  const [pricing, setPricing] = useState(null);
+  const [paymentRows, setPaymentRows] = useState([]);
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState('');
 
@@ -46,29 +48,37 @@ function CheckoutWizard({ token, me, logout }) {
   const [cleanlinessOut, setCleanlinessOut] = useState(5);
   const [photos, setPhotos] = useState({});
   const [currentAngle, setCurrentAngle] = useState(0);
-  const [paymentTaken, setPaymentTaken] = useState({ amount: '', method: 'card', last4: '', reference: '' });
-  const [paymentSkipped, setPaymentSkipped] = useState(false);
   const [signerName, setSignerName] = useState('');
   const [signatureDataUrl, setSignatureDataUrl] = useState('');
 
-  // Load reservation + agreement. Always use GET /reservations/:id/agreement
-  // (not /rental-agreements/:id direct), because that endpoint runs
-  // startFromReservation which SYNCS charges from the reservation pricing
-  // to the agreement. The direct rental-agreement fetch returns the row
-  // as-is, which may have an empty charges array on agreements created
-  // before the charge-sync flow ran — and finalize() then rejects with
-  // "At least one selected charge is required".
+  // Load reservation + agreement + pricing in parallel — mirrors the
+  // reservation-detail page's parallel fetch pattern. All three endpoints
+  // are independent of each other and read-only at load time.
+  // - reservation: source of truth for status, vehicle, customer
+  // - agreement: read via GET /reservations/:id/agreement which calls
+  //   startFromReservation and SYNCS charges from reservation pricing to
+  //   agreement. Without this, finalize() rejects with "At least one
+  //   selected charge required".
+  // - pricing: source of truth for the charges array shown in Step 4 review
   useEffect(() => {
     if (!reservationId) return;
     (async () => {
       try {
-        const res = await api(`/api/reservations/${reservationId}`, {}, token);
-        setReservation(res);
-        const ag = await api(`/api/reservations/${reservationId}/agreement`, {}, token);
-        setAgreement(ag);
-        setSignerName([res?.customer?.firstName, res?.customer?.lastName].filter(Boolean).join(' '));
+        const [resR, agR, pricingR, paymentsR] = await Promise.allSettled([
+          api(`/api/reservations/${reservationId}`, {}, token),
+          api(`/api/reservations/${reservationId}/agreement`, {}, token),
+          api(`/api/reservations/${reservationId}/pricing`, { bypassCache: true }, token),
+          api(`/api/reservations/${reservationId}/payments`, { bypassCache: true }, token)
+        ]);
+        if (resR.status === 'fulfilled') {
+          setReservation(resR.value);
+          setSignerName([resR.value?.customer?.firstName, resR.value?.customer?.lastName].filter(Boolean).join(' '));
+        }
+        if (agR.status === 'fulfilled') setAgreement(agR.value);
+        if (pricingR.status === 'fulfilled') setPricing(pricingR.value);
+        if (paymentsR.status === 'fulfilled') setPaymentRows(Array.isArray(paymentsR.value) ? paymentsR.value : []);
       } catch (err) {
-        console.error('Failed to load reservation', err);
+        console.error('Failed to load wizard data', err);
       } finally {
         setLoading(false);
       }
@@ -90,6 +100,22 @@ function CheckoutWizard({ token, me, logout }) {
     setVehicleId(reservation?.vehicleId || agreement?.vehicleId || '');
   }, [reservation?.vehicleId, agreement?.vehicleId]);
 
+  // Auto-populate odometerOut from the assigned vehicle's last recorded
+  // mileage (updated by the check-in flow on every return). This saves
+  // staff from typing the number off the dashboard and avoids fat-finger
+  // errors that would trigger phantom mileage fees at the next return.
+  // Only fills when the field is empty so a staff override is preserved.
+  useEffect(() => {
+    if (!vehicleId) return;
+    if (odometerOut !== '' && odometerOut !== 0 && odometerOut != null) return;
+    const fromAvailable = availableVehicles.find((x) => x.id === vehicleId);
+    const v = fromAvailable || reservation?.vehicle || agreement?.vehicle;
+    const m = v?.mileage;
+    if (m != null && Number(m) >= 0) {
+      setOdometerOut(String(m));
+    }
+  }, [vehicleId, availableVehicles, reservation?.vehicle, agreement?.vehicle, odometerOut]);
+
   // Load available vehicles when no vehicle is yet assigned
   useEffect(() => {
     if (vehicleId || !reservation) return;
@@ -109,95 +135,99 @@ function CheckoutWizard({ token, me, logout }) {
     return () => { cancelled = true; };
   }, [reservation, vehicleId, token]);
 
+  // Pillar 2 wizards (2026-05-19) — submit sequence mirrors legacy
+  // /reservations/[id]/checkout/page.js EXACTLY. Same calls, same order.
+  // The only addition is the inspection POST between start-rental and rental
+  // (the legacy flow expects inspections to be captured on a separate page
+  // first; the wizard inlines that step).
+  //
+  // Order is load-bearing — DO NOT REORDER without updating the audit doc:
+  // 1. PATCH reservation         — vehicle + franchise + notes onto reservation row
+  // 2. POST start-rental         — creates/syncs agreement WITH selected charges
+  // 3. POST inspection           — wizard-specific: photos + metrics before finalize
+  // 4. PUT rental                — agreement odometer/fuel/cleanliness/vehicleId
+  // 5. POST signature            — writes signerName + signatureDataUrl on reservation
+  // 6. POST finalize             — transitions reservation to CHECKED_OUT
+  // 7. POST email-agreement      — fire-and-forget PDF email
   const submit = async () => {
-    if (!agreement?.id) {
-      setSubmitError('No agreement linked');
-      return;
-    }
     setSubmitting(true);
     setSubmitError('');
     try {
-      // Re-sync agreement charges from reservation pricing one more time
-      // before finalize so the agreement has at least one selected charge.
-      // startFromReservation() seeds charges from the reservation's pricing.
-      // Balance validation is intentionally NOT done here — agent should
-      // verify balance on the reservation detail page before starting checkout.
-      // The synced agreement's balance field can include phantom rounding/tax
-      // differences vs the reservation page, so it's an unreliable gate.
-      await api(`/api/reservations/${reservationId}/agreement`, {}, token);
+      // Build checkout audit note line for the reservation
+      const checkoutLine = `[RES_CHECKOUT ${new Date().toISOString()}] odometerOut=${Number(odometerOut || 0)} fuelOut=${Number(fuelOut || 0)} cleanlinessOut=${Number(cleanlinessOut || 5)}`;
+      const baseNotes = String(reservation?.notes || '').trim();
+      const nextNotes = `${baseNotes}${baseNotes ? '\n' : ''}${checkoutLine}`;
 
-      // Debug: confirm photos state is populated before sending
-      const photoCount = Object.keys(photos || {}).length;
-      const photoTotalBytes = Object.values(photos || {}).reduce(
-        (s, dataUrl) => s + (typeof dataUrl === 'string' ? dataUrl.length : 0), 0
-      );
-      // eslint-disable-next-line no-console
-      console.log('[checkout-wizard] submitting inspection', {
-        photoCount,
-        photoKeys: Object.keys(photos || {}),
-        photoTotalBytes,
-        odometerOut,
-        fuelOut,
-        cleanlinessOut
-      });
-      if (photoCount === 0) {
-        // eslint-disable-next-line no-console
-        console.warn('[checkout-wizard] photos state empty at submit — inspection will save without photos');
-      }
+      // 1. PATCH reservation with vehicleId + notes
+      await api(`/api/reservations/${reservationId}`, {
+        method: 'PATCH',
+        body: JSON.stringify({
+          vehicleId,
+          franchiseId: reservation?.franchiseId || null,
+          notes: nextNotes
+        })
+      }, token);
 
-      // Save inspection (CHECKOUT phase)
-      await api(`/api/rental-agreements/${agreement.id}/inspection`, {
+      // 2. POST start-rental → returns agreement (creates or syncs charges)
+      const startRentalRes = await api(`/api/reservations/${reservationId}/start-rental`, {
+        method: 'POST',
+        body: JSON.stringify({})
+      }, token);
+      const agreementId = startRentalRes?.id;
+      if (!agreementId) throw new Error('No rental agreement available for checkout');
+
+      // 3. POST inspection (CHECKOUT phase) — wizard's photos + metrics
+      await api(`/api/rental-agreements/${agreementId}/inspection`, {
         method: 'POST',
         body: JSON.stringify({
           phase: 'CHECKOUT',
           odometer: odometerOut ? Number(odometerOut) : null,
           fuelLevel: String(fuelOut),
-          cleanlinessOut: String(cleanlinessOut),
+          cleanliness: String(cleanlinessOut),
           photos
         })
       }, token);
 
-      // Update agreement with checkout metrics + vehicleId
-      await api(`/api/rental-agreements/${agreement.id}/rental`, {
+      // 4. PUT rental — agreement-level checkout metrics
+      await api(`/api/rental-agreements/${agreementId}/rental`, {
         method: 'PUT',
         body: JSON.stringify({
-          vehicleId: vehicleId || undefined,
-          odometerOut: odometerOut ? Number(odometerOut) : null,
-          fuelOut,
-          cleanlinessOut
+          vehicleId,
+          odometerOut: Number(odometerOut || 0),
+          fuelOut: Number(fuelOut || 0),
+          cleanlinessOut: Number(cleanlinessOut || 5)
         })
       }, token);
 
-      // Also update reservation.vehicleId so the reservation detail page
-      // displays the assigned vehicle. Without this, only the agreement
-      // has the vehicleId and the reservation row still reads as 'No vehicle assigned'.
-      if (vehicleId) {
-        try {
-          await api(`/api/reservations/${reservationId}`, {
-            method: 'PATCH',
-            body: JSON.stringify({ vehicleId })
-          }, token);
-        } catch (vehErr) {
-          // Non-fatal — agreement still has the vehicle. Log so we can debug.
-          console.warn('[checkout-wizard] reservation vehicleId update failed', vehErr);
-        }
-      }
-
-      // Signature
-      if (signatureDataUrl && signerName) {
-        await api(`/api/rental-agreements/${agreement.id}/signature`, {
-          method: 'POST',
-          body: JSON.stringify({ signerName, signatureDataUrl })
-        }, token);
-      }
-
-      // Finalize the agreement
-      await api(`/api/rental-agreements/${agreement.id}/finalize`, {
+      // 5. POST signature
+      await api(`/api/rental-agreements/${agreementId}/signature`, {
         method: 'POST',
-        body: JSON.stringify({})
+        body: JSON.stringify({ signerName, signatureDataUrl })
       }, token);
 
-      setStep(4);  // Success step (now step index 4 in a 5-step wizard)
+      // 6. POST finalize → transitions reservation to CHECKED_OUT
+      await api(`/api/rental-agreements/${agreementId}/finalize`, {
+        method: 'POST',
+        body: JSON.stringify({
+          odometerOut: Number(odometerOut || 0),
+          fuelOut: Number(fuelOut || 0),
+          cleanlinessOut: Number(cleanlinessOut || 5)
+        })
+      }, token);
+
+      // 7. POST email-agreement (fire-and-forget; backend responds 202 + runs
+      //    Puppeteer + SMTP async). We do NOT await — failures land in Sentry +
+      //    audit log on the agreement.
+      api(`/api/rental-agreements/${agreementId}/email-agreement`, {
+        method: 'POST',
+        body: JSON.stringify({})
+      }, token).catch((err) => {
+        console.warn('[checkout-wizard] email-agreement dispatch failed (non-blocking):', err?.message || err);
+      });
+
+      // Save agreementId in state so success screen can use it
+      setAgreement((prev) => ({ ...prev, id: agreementId }));
+      setStep(5);  // Success
     } catch (err) {
       setSubmitError(err.message || 'Checkout failed');
     } finally {
@@ -206,11 +236,12 @@ function CheckoutWizard({ token, me, logout }) {
   };
 
   const steps = [
-    'Confirm vehicle & customer',
-    'Capture exterior inspection',
-    'Capture pickup metrics',
-    'Customer signature',
-    'Keys delivered'
+    'Confirm vehicle & customer',  // 0
+    'Capture exterior + interior inspection',  // 1
+    'Capture pickup metrics',  // 2
+    'Review charges',  // 3 — NEW: read-only pricing display (Pillar 2 P4b)
+    'Customer signature',  // 4
+    'Keys delivered'  // 5 (success)
   ];
 
   const canAdvance = () => {
@@ -218,13 +249,15 @@ function CheckoutWizard({ token, me, logout }) {
       case 0: return !!reservation && !!agreement && !!vehicleId;
       case 1: return Object.keys(photos).length >= 1;
       case 2: return Number(odometerOut) > 0;
-      case 3: return !!signerName && !!signatureDataUrl;
+      case 3: return true;  // review step — read-only, always advance
+      case 4: return !!signerName && !!signatureDataUrl;
       default: return true;
     }
   };
 
   const onNext = () => {
-    if (step === 3) return submit();
+    if (step === 4) return submit();
+    if (step === 5) return router.push('/reservations');
     setStep((s) => Math.min(s + 1, steps.length - 1));
   };
 
@@ -244,12 +277,12 @@ function CheckoutWizard({ token, me, logout }) {
       <WizardShell
         title="Checkout"
         stepIndex={step}
-        totalSteps={5}
+        totalSteps={6}
         stepTitle={steps[step]}
         accent="purple"
-        onBack={step > 0 && step < 4 ? () => setStep((s) => s - 1) : null}
+        onBack={step > 0 && step < 5 ? () => setStep((s) => s - 1) : null}
         onNext={onNext}
-        nextLabel={submitting ? 'Submitting…' : step === 3 ? 'Confirm & deliver →' : step === 4 ? 'Return to reservations' : 'Continue →'}
+        nextLabel={submitting ? 'Submitting…' : step === 4 ? 'Confirm & deliver →' : step === 5 ? 'Return to reservations' : 'Continue →'}
         nextDisabled={!canAdvance() || submitting}
       >
         {step === 0 && (
@@ -280,6 +313,14 @@ function CheckoutWizard({ token, me, logout }) {
           </WizGrid>
         )}
         {step === 3 && (
+          <Step4ReviewCharges
+            pricing={pricing}
+            reservation={reservation}
+            paymentRows={paymentRows}
+            reservationId={reservationId}
+          />
+        )}
+        {step === 4 && (
           <Step5Signature
             agreement={agreement}
             signerName={signerName}
@@ -289,7 +330,7 @@ function CheckoutWizard({ token, me, logout }) {
             error={submitError}
           />
         )}
-        {step === 4 && <Step6Handoff reservation={reservation} agreement={agreement} token={token} onDone={() => router.push('/reservations')} />}
+        {step === 5 && <Step6Handoff reservation={reservation} agreement={agreement} token={token} onDone={() => router.push('/reservations')} />}
       </WizardShell>
     </AppShell>
   );
@@ -301,6 +342,20 @@ function Step1Confirm({ reservation, agreement, vehicleId, onVehicleChange, avai
   const v = vSelected || reservation?.vehicle || agreement?.vehicle;
   const vehicleDesc = v ? [v.year, v.make, v.model].filter(Boolean).join(' ') : null;
   const hasVehicle = !!vehicleDesc;
+
+  // Vehicle searcher state (only used when no vehicle assigned yet)
+  const [search, setSearch] = useState('');
+  const matches = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    if (!q) return availableVehicles.slice(0, 25);
+    return availableVehicles.filter((veh) => {
+      const haystack = [
+        veh.year, veh.make, veh.model, veh.plate, veh.internalNumber, veh.color,
+        veh.vehicleType?.name
+      ].filter(Boolean).join(' ').toLowerCase();
+      return haystack.includes(q);
+    }).slice(0, 25);
+  }, [availableVehicles, search]);
   return (
     <WizGrid cols={2}>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
@@ -316,36 +371,70 @@ function Step1Confirm({ reservation, agreement, vehicleId, onVehicleChange, avai
           </WizCard>
         ) : (
           <WizCard accent="warn" padding={22}>
-            <div style={{ fontSize: 11, fontWeight: 800, color: '#b45309', letterSpacing: '.12em', marginBottom: 8 }}>NO VEHICLE ASSIGNED</div>
-            <div style={{ fontSize: 14, color: '#211a38', marginBottom: 12 }}>
-              Pick a vehicle from your available inventory to continue with checkout.
+            <div style={{ fontSize: 11, fontWeight: 800, color: '#b45309', letterSpacing: '.12em', marginBottom: 8 }}>ASSIGN VEHICLE</div>
+            <div style={{ fontSize: 13, color: '#211a38', marginBottom: 12 }}>
+              Search by plate, unit number, year/make/model, or color. {availableVehicles.length} available.
             </div>
-            <label style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-              <span style={{ fontSize: 10, fontWeight: 800, color: '#6f668f', letterSpacing: '.1em' }}>SELECT VEHICLE</span>
-              <select
-                value={vehicleId}
-                onChange={(e) => onVehicleChange(e.target.value)}
-                style={{
-                  padding: '12px 14px',
-                  border: '1px solid #e6dfff',
-                  borderRadius: 12,
-                  fontSize: 14,
-                  fontWeight: 700,
-                  color: '#211a38',
-                  background: 'white',
-                  outline: 'none'
-                }}
-              >
-                <option value="">{loadingVehicles ? 'Loading…' : '— Choose a vehicle —'}</option>
-                {availableVehicles.map((veh) => (
-                  <option key={veh.id} value={veh.id}>
-                    {[veh.year, veh.make, veh.model].filter(Boolean).join(' ')}
-                    {veh.plate ? ` · ${veh.plate}` : ''}
-                    {veh.internalNumber ? ` · Unit ${veh.internalNumber}` : ''}
-                  </option>
-                ))}
-              </select>
-            </label>
+            <input
+              type="text"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder={loadingVehicles ? 'Loading inventory…' : 'Search vehicles…'}
+              autoFocus
+              style={{
+                width: '100%',
+                padding: '12px 14px',
+                border: '1px solid #e6dfff',
+                borderRadius: 12,
+                fontSize: 14,
+                fontWeight: 700,
+                color: '#211a38',
+                background: 'white',
+                outline: 'none',
+                boxSizing: 'border-box'
+              }}
+            />
+            <div style={{ marginTop: 12, maxHeight: 320, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 6 }}>
+              {matches.length === 0 && !loadingVehicles && (
+                <div style={{ fontSize: 12, color: '#6f668f', textAlign: 'center', padding: '12px 0' }}>
+                  No vehicles match &quot;{search}&quot;
+                </div>
+              )}
+              {matches.map((veh) => {
+                const isSelected = veh.id === vehicleId;
+                const desc = [veh.year, veh.make, veh.model].filter(Boolean).join(' ');
+                return (
+                  <button
+                    key={veh.id}
+                    type="button"
+                    onClick={() => onVehicleChange(veh.id)}
+                    style={{
+                      textAlign: 'left',
+                      padding: '10px 12px',
+                      borderRadius: 10,
+                      border: isSelected ? '2px solid #6d3df2' : '1px solid #e6dfff',
+                      background: isSelected ? 'rgba(109,61,242,.06)' : 'white',
+                      cursor: 'pointer',
+                      display: 'flex',
+                      justifyContent: 'space-between',
+                      alignItems: 'center',
+                      gap: 12
+                    }}
+                  >
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontSize: 13, fontWeight: 800, color: '#211a38' }}>{desc || 'Vehicle'}</div>
+                      <div style={{ fontSize: 11, color: '#6f668f', marginTop: 2 }}>
+                        {veh.plate ? `${veh.plate} · ` : ''}
+                        {veh.internalNumber ? `Unit ${veh.internalNumber} · ` : ''}
+                        {veh.color || ''}
+                        {veh.mileage != null ? ` · ${Number(veh.mileage).toLocaleString()} mi` : ''}
+                      </div>
+                    </div>
+                    {isSelected && <span style={{ fontWeight: 800, color: '#6d3df2', fontSize: 14 }}>✓</span>}
+                  </button>
+                );
+              })}
+            </div>
           </WizCard>
         )}
         <WizGrid cols={2} gap={10}>
@@ -444,6 +533,118 @@ function Step4Balance({ agreement, balanceDue, paymentTaken, onPaymentChange, pa
   );
 }
 
+// Pillar 2 wizards P4b (2026-05-19, revised 2026-05-18) — read-only pricing display.
+// Uses PERSISTED canonical numbers: reservation.estimatedTotal as total,
+// sum of /api/reservations/:id/payments as paid. These match the reservation
+// detail page's unpaidBalance byte-for-byte because both pages read from the
+// same source.
+//
+// Why not pricing.charges?
+//   ReservationCharge only holds extras (tolls, location fees, persisted taxes).
+//   It does NOT include the base daily rate × days, which is computed UI-side
+//   on the reservation page via `breakdown`. For a fresh CONFIRMED reservation,
+//   pricing.charges may be empty/partial — so summing it ≠ the real total.
+//   The persisted estimatedTotal is the only field guaranteed to match.
+//
+// Line items from pricing.charges are shown for visibility but the math
+// at the bottom uses estimatedTotal, not the line-item sum.
+function Step4ReviewCharges({ pricing, reservation, paymentRows, reservationId }) {
+  const charges = Array.isArray(pricing?.charges) ? pricing.charges : [];
+
+  // Total source-of-truth precedence:
+  //   1. sum(pricing.charges) — pricing endpoint runs syncs that fold base
+  //      rate × days + services + fees + tolls into ReservationCharge rows.
+  //      This is what the reservation page would show after a fresh fetch.
+  //   2. reservation.estimatedTotal — persisted on Save in pricing editor.
+  //   3. dailyRate × days fallback — for cases where neither (1) nor (2) yet
+  //      populated (e.g. brand-new reservation pre-sync).
+  const chargesSum = Number(charges.reduce((s, c) => s + Number(c?.total || 0), 0).toFixed(2));
+  const persistedTotal = Number(reservation?.estimatedTotal || 0);
+  const fallbackTotal = (() => {
+    const daily = Number(reservation?.dailyRate || 0);
+    const pickupMs = new Date(reservation?.pickupAt || Date.now()).getTime();
+    const returnMs = new Date(reservation?.returnAt || Date.now()).getTime();
+    const msDiff = Number.isFinite(returnMs - pickupMs) ? returnMs - pickupMs : 0;
+    const days = Math.max(1, Math.ceil(msDiff / (1000 * 60 * 60 * 24)));
+    return Number((daily * days).toFixed(2));
+  })();
+  const total = chargesSum > 0 ? chargesSum : (persistedTotal > 0 ? persistedTotal : fallbackTotal);
+  const usingFallback = chargesSum === 0 && persistedTotal === 0 && total > 0;
+
+  const paid = (paymentRows || []).reduce((s, p) => s + Number(p?.amount || 0), 0);
+  const balance = Math.max(0, Number((total - paid).toFixed(2)));
+
+  return (
+    <WizGrid cols={2}>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+        <WizCard padding={18}>
+          <div style={{ fontSize: 11, fontWeight: 800, color: '#6f668f', letterSpacing: '.12em', marginBottom: 10 }}>LINE ITEMS</div>
+          {charges.length === 0 ? (
+            usingFallback ? (
+              <div style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 0', borderBottom: '1px solid #f1edff', fontSize: 13 }}>
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontWeight: 700, color: '#211a38' }}>Daily rate (estimate)</div>
+                  <div style={{ fontSize: 11, color: '#6f668f', marginTop: 2 }}>From reservation dailyRate × days</div>
+                </div>
+                <div style={{ fontWeight: 700, color: '#211a38', fontVariantNumeric: 'tabular-nums' }}>${total.toFixed(2)}</div>
+              </div>
+            ) : (
+              <div style={{ fontSize: 13, color: '#6f668f' }}>
+                No pricing on this reservation. Configure dailyRate or charges on the reservation page first.
+              </div>
+            )
+          ) : (
+            charges.map((c) => (
+              <div key={c.id || c.code || c.name} style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 0', borderBottom: '1px solid #f1edff', fontSize: 13 }}>
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontWeight: 700, color: '#211a38' }}>{c.name}</div>
+                  {Number(c.quantity || 1) > 1 && (
+                    <div style={{ fontSize: 11, color: '#6f668f', marginTop: 2 }}>{Number(c.quantity).toFixed(2)} × ${Number(c.rate || 0).toFixed(2)}</div>
+                  )}
+                </div>
+                <div style={{ fontWeight: 700, color: '#211a38', fontVariantNumeric: 'tabular-nums' }}>${Number(c.total || 0).toFixed(2)}</div>
+              </div>
+            ))
+          )}
+        </WizCard>
+        <div style={{ fontSize: 11, color: '#6f668f', lineHeight: 1.6, padding: '0 4px' }}>
+          Totals on the right are read-only and pulled from the persisted reservation total.
+          To edit charges, services, fees, or insurance — <a href={`/reservations/${reservationId}`} style={{ color: '#6d3df2', fontWeight: 700 }}>open the reservation page</a> and use the pricing editor there, then return.
+        </div>
+      </div>
+      <WizCard accent="ink" padding={22}>
+        <div style={{ fontSize: 11, opacity: .7, fontWeight: 700, letterSpacing: '.1em' }}>AGREEMENT TOTAL</div>
+        <div style={{ marginTop: 14, display: 'flex', flexDirection: 'column', gap: 8 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 18 }}>
+            <span style={{ fontWeight: 800 }}>Total</span>
+            <span style={{ fontWeight: 800 }}>${total.toFixed(2)}</span>
+          </div>
+          {paid > 0 && (
+            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, color: '#1fc7aa' }}>
+              <span>Paid</span>
+              <span style={{ fontWeight: 700 }}>−${paid.toFixed(2)}</span>
+            </div>
+          )}
+          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 18, marginTop: 6 }}>
+            <span style={{ fontWeight: 800, color: balance > 0 ? '#f59e0b' : '#1fc7aa' }}>Balance</span>
+            <span style={{ fontWeight: 800, color: balance > 0 ? '#f59e0b' : '#1fc7aa' }}>${balance.toFixed(2)}</span>
+          </div>
+        </div>
+        {balance > 0 && (
+          <div style={{ marginTop: 16, padding: '10px 12px', background: 'rgba(245,158,11,.15)', borderLeft: '3px solid #f59e0b', borderRadius: 6, fontSize: 12 }}>
+            ⚠ Outstanding balance. Collect payment on the reservation page before signing.
+          </div>
+        )}
+        {usingFallback && (
+          <div style={{ marginTop: 10, padding: '8px 12px', background: 'rgba(255,255,255,.08)', borderRadius: 6, fontSize: 11, opacity: .85 }}>
+            ℹ Pricing not saved yet — total computed from daily rate × days. Save pricing on the reservation page to lock the canonical total.
+          </div>
+        )}
+      </WizCard>
+    </WizGrid>
+  );
+}
+
 function Step5Signature({ agreement, signerName, onSignerName, signatureDataUrl, onSignature, error }) {
   return (
     <div style={{ maxWidth: 720, margin: '0 auto' }}>
@@ -522,13 +723,12 @@ function Step6Handoff({ reservation, agreement, token, onDone }) {
         <div style={{ fontSize: 11, fontWeight: 800, color: '#6f668f', letterSpacing: '.1em', marginBottom: 10 }}>NEXT</div>
         <ActionLink
           label={`View agreement ${agreement?.agreementNumber || ''}`}
-          onClick={() => agreement?.id && (window.location.href = `/agreements/${agreement.id}`)}
+          onClick={() => reservation?.id && (window.location.href = `/reservations/${reservation.id}`)}
         />
         <ActionLink
           label="View inspection photos"
           onClick={() => reservation?.id && (window.location.href = `/reservations/${reservation.id}/inspection-report`)}
         />
-        <ActionLink label="Print agreement" onClick={() => agreement?.id && window.open(`/agreements/${agreement.id}`, '_blank')} />
         <ActionLink
           label={emailing ? 'Sending…' : (emailMsg || 'Re-send agreement email')}
           onClick={handleResendEmail}

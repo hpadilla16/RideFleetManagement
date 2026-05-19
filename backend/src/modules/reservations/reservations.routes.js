@@ -448,7 +448,7 @@ reservationsRouter.post('/:id/payments', async (req, res, next) => {
     res.status(201).json(out);
   } catch (e) {
     if (/not found/i.test(String(e?.message || ''))) return res.status(404).json({ error: e.message });
-    if (/amount must be > 0|invalid/i.test(String(e?.message || ''))) return res.status(400).json({ error: e.message });
+    if (/amount must be > 0|invalid|reference is required/i.test(String(e?.message || ''))) return res.status(400).json({ error: e.message });
     next(e);
   }
 });

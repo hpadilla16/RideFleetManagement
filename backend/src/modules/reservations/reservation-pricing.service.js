@@ -17,7 +17,10 @@ function toNullableNumber(value) {
 function normalizePaymentMethod(method) {
   const raw = String(method || '').trim().toUpperCase();
   if (!raw) return 'CASH';
-  return ['CASH', 'CARD', 'ZELLE', 'ATH_MOVIL', 'BANK_TRANSFER', 'OTHER'].includes(raw) ? raw : 'OTHER';
+  // AUTH_HOLD = security deposit authorization hold. Included for paidAmount
+  // math (Option A) so agreement.balance correctly excludes the held amount.
+  // The hold is NOT a settled payment — distinguishable downstream via method.
+  return ['CASH', 'CARD', 'ZELLE', 'ATH_MOVIL', 'BANK_TRANSFER', 'AUTH_HOLD', 'OTHER'].includes(raw) ? raw : 'OTHER';
 }
 
 function normalizePaymentOrigin(origin) {
@@ -113,8 +116,17 @@ function isSecurityDepositCharge(row = {}) {
 
 function summarizeChargeTotals(charges = []) {
   const rows = Array.isArray(charges) ? charges : [];
+  // BUG-FIX 2026-05-19 late night (Pillar 2 AUTH_HOLD): include security
+  // deposit in subtotal/total so agreement.total reflects the full charge
+  // (rental + deposit). AUTH_HOLD payments count against paidAmount, so
+  // agreement.balance = total - paidAmount correctly excludes the held
+  // amount. Previously this function excluded deposit and broke the print
+  // template after a sync ran post-AUTH_HOLD (total dropped to $39 while
+  // paidAmount stayed $250 → balance went negative).
+  // The reservation page UI excludes deposit from its own "Unpaid Balance"
+  // display via displayChargeRows filtering — that path is independent.
   const subtotal = Number(rows
-    .filter((r) => String(r?.chargeType || '').toUpperCase() !== 'TAX' && !isSecurityDepositCharge(r))
+    .filter((r) => String(r?.chargeType || '').toUpperCase() !== 'TAX')
     .reduce((sum, r) => sum + toNumber(r?.total), 0)
     .toFixed(2));
   const taxes = Number(rows
@@ -158,21 +170,56 @@ async function syncAgreementCharges(reservationId, scope = {}) {
     source: row.source || null,
     sourceRefId: row.sourceRefId || null
   }));
-  const { subtotal, taxes, total } = summarizeChargeTotals(chargeRows);
-  const paidAmount = toNumber(agreement.paidAmount);
-  const balance = Number((total - paidAmount).toFixed(2));
 
-  await prisma.rentalAgreementCharge.deleteMany({ where: { rentalAgreementId: agreement.id } });
+  // BUG-FIX 2026-05-18 (Pillar 2): preserve FEE_ENGINE_* charges from checkin
+  // fee posting. The original delete-all + recreate-from-reservation flow
+  // wiped fuel/cleaning/smoking/late fees that the fee engine persisted
+  // during /checkin-close, because those fees live on the agreement only
+  // (no corresponding ReservationCharge row to re-sync from).
+  await prisma.rentalAgreementCharge.deleteMany({
+    where: {
+      rentalAgreementId: agreement.id,
+      NOT: { source: { startsWith: 'FEE_ENGINE_' } }
+    }
+  });
   if (chargeRows.length) {
     await prisma.rentalAgreementCharge.createMany({ data: chargeRows });
   }
 
+  // Recompute totals from the FULL set (reservation-sourced + preserved
+  // fee-engine charges) so agreement.total/fees/balance reflect everything.
+  const allCharges = await prisma.rentalAgreementCharge.findMany({
+    where: { rentalAgreementId: agreement.id, selected: true },
+    select: { chargeType: true, total: true, source: true }
+  });
+  let recSubtotal = 0;
+  let recTaxes = 0;
+  let recFees = 0;
+  for (const c of allCharges) {
+    const t = toNumber(c.total);
+    const type = String(c.chargeType || '').toUpperCase();
+    const src = String(c.source || '').toUpperCase();
+    if (type === 'TAX') {
+      recTaxes += t;
+    } else if (src.startsWith('FEE_ENGINE')) {
+      recFees += t;
+    } else {
+      recSubtotal += t;
+    }
+  }
+  const subtotal = Number(recSubtotal.toFixed(2));
+  const taxes = Number(recTaxes.toFixed(2));
+  const fees = Number(recFees.toFixed(2));
+  const total = Number((subtotal + taxes + fees).toFixed(2));
+  const paidAmount = toNumber(agreement.paidAmount);
+  const balance = Number((total - paidAmount).toFixed(2));
+
   await prisma.rentalAgreement.update({
     where: { id: agreement.id },
-    data: { subtotal, taxes, total, balance }
+    data: { subtotal, taxes, fees, total, balance }
   });
 
-  return { agreementId: agreement.id, subtotal, taxes, total, balance };
+  return { agreementId: agreement.id, subtotal, taxes, fees, total, balance };
 }
 
 async function maybeCreateAgreementPayment({ reservation, payment }) {
@@ -421,11 +468,19 @@ export const reservationPricingService = {
     const paidAt = payload.paidAt ? new Date(payload.paidAt) : new Date();
     if (Number.isNaN(paidAt.getTime())) throw new Error('paidAt is invalid');
 
+    const normalizedMethod = normalizePaymentMethod(payload.method);
+    const trimmedReference = payload.reference ? String(payload.reference).trim() : null;
+    // AUTH_HOLD requires the auth code in `reference` — it's the only audit
+    // trail for the swipe (no settled funds, no AuthNet transId).
+    if (normalizedMethod === 'AUTH_HOLD' && !trimmedReference) {
+      throw new Error('reference is required for AUTH_HOLD payments (auth code)');
+    }
+
     const paymentData = {
       reservationId,
-      method: normalizePaymentMethod(payload.method),
+      method: normalizedMethod,
       amount,
-      reference: payload.reference ? String(payload.reference).trim() : null,
+      reference: trimmedReference,
       status: String(payload.status || 'PAID').trim().toUpperCase(),
       paidAt,
       origin: normalizePaymentOrigin(payload.origin),

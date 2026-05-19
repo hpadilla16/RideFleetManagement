@@ -47,6 +47,11 @@ function CheckinWizard({ token, me, logout }) {
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState('');
   const [result, setResult] = useState(null);
+  // Pillar 2 16q: tenant-configured fee rates fetched from Settings →
+  // Inspection Fees. Used by the live fee preview in Step 3 so the
+  // numbers staff see match what the backend will actually charge.
+  // Falls back to hardcoded defaults inside useFeePreview if fetch fails.
+  const [feeRates, setFeeRates] = useState(null);
 
   // Form state
   const [odometerIn, setOdometerIn] = useState('');
@@ -60,7 +65,7 @@ function CheckinWizard({ token, me, logout }) {
   const [signerName, setSignerName] = useState('');
   const [signatureDataUrl, setSignatureDataUrl] = useState('');
 
-  // Load reservation + agreement
+  // Load reservation + agreement + tenant fee rates (for live preview)
   useEffect(() => {
     if (!reservationId) return;
     (async () => {
@@ -77,6 +82,36 @@ function CheckinWizard({ token, me, logout }) {
             res?.customer?.firstName,
             res?.customer?.lastName
           ].filter(Boolean).join(' '));
+        }
+
+        // Fetch tenant-configured fee rates so Step 3 preview matches what
+        // the backend will charge. The GET endpoint always returns 7 rows
+        // merged with platform defaults — never empty for an authed user.
+        // Pass the reservation's tenantId explicitly so super-admins viewing
+        // a tenant's reservation see THAT tenant's rates (not their own,
+        // which super-admin doesn't have). For regular tenant users this is
+        // a no-op (scopeFor uses req.user.tenantId anyway when not super).
+        try {
+          const tenantId = res?.tenantId || res?.rentalAgreement?.tenantId;
+          const ratesUrl = tenantId
+            ? `/api/settings/fee-rates?tenantId=${encodeURIComponent(tenantId)}`
+            : '/api/settings/fee-rates';
+          const ratesRes = await api(ratesUrl, { bypassCache: true }, token);
+          const rows = Array.isArray(ratesRes?.rates) ? ratesRes.rates : [];
+          // Transform to the { FEE_TYPE: { unit, amount } } shape useFeePreview expects.
+          // Use currentAmount (the override) if set, otherwise defaultAmount.
+          const dict = {};
+          for (const r of rows) {
+            const amount = r.currentAmount != null ? Number(r.currentAmount) : Number(r.defaultAmount || 0);
+            // disabled=true when tenant explicitly turned this fee off; the
+            // hook returns null for disabled rates and skips computing them.
+            const disabled = r.isActive === false;
+            dict[r.feeType] = { unit: r.unit, amount, disabled };
+          }
+          setFeeRates(dict);
+        } catch (err) {
+          // Non-fatal: useFeePreview falls back to its FALLBACK_RATES table.
+          console.warn('[checkin-wizard] failed to load tenant fee rates, using fallbacks', err);
         }
       } catch (err) {
         console.error('Failed to load reservation', err);
@@ -95,6 +130,7 @@ function CheckinWizard({ token, me, logout }) {
   }, [agreement?.pickupAt, agreement?.returnAt, reservation?.pickupAt, reservation?.returnAt]);
 
   const feePreview = useFeePreview({
+    rates: feeRates,
     odometerOut: agreement?.odometerOut,
     odometerIn: odometerIn ? Number(odometerIn) : null,
     fuelOut: agreement?.fuelOut,
@@ -110,7 +146,11 @@ function CheckinWizard({ token, me, logout }) {
   const photosCaptured = Object.keys(photos).length;
   const photosRequired = STANDARD_ANGLES.length;
 
-  // Submit to checkin-close
+  // Pillar 2 wizards (2026-05-19) — checkin submit sequence:
+  // 1. POST /inspection (CHECKIN phase, photos + metrics)
+  // 2. POST /signature  (writes signature to the reservation row)
+  // 3. POST /checkin-close (runs fee engine, routes status to CHECKED_IN
+  //    or CHECKED_IN_UNPAID, enqueues autocharge if pending, sends email)
   const submitCheckinClose = async () => {
     if (!agreement?.id) {
       setSubmitError('No agreement linked to this reservation');
@@ -119,6 +159,44 @@ function CheckinWizard({ token, me, logout }) {
     setSubmitting(true);
     setSubmitError('');
     try {
+      // 0. PATCH reservation notes with RES_CHECKIN audit line so the
+      // /ops-view?section=checkin page (which parses notes for the
+      // `[RES_CHECKIN ...]` marker) can show the check-in metrics side by
+      // side with check-out. The legacy /checkin page does this same step.
+      try {
+        const checkinLine = `[RES_CHECKIN ${new Date().toISOString()}] odometerIn=${Number(odometerIn || 0)} fuelIn=${Number(fuelIn || 0)} cleanlinessIn=${Number(cleanlinessIn || 5)} smokingDetected=${smokingDetected ? 'true' : 'false'}`;
+        const existingNotes = String(reservation?.notes || '');
+        const nextNotes = existingNotes.trim() ? `${existingNotes}\n${checkinLine}` : checkinLine;
+        await api(`/api/reservations/${reservationId}`, {
+          method: 'PATCH',
+          body: JSON.stringify({ notes: nextNotes })
+        }, token);
+      } catch (err) {
+        // Non-fatal: ops-view will just not surface this row.
+        console.warn('[checkin-wizard] failed to append RES_CHECKIN notes line', err);
+      }
+
+      // 1. Inspection (CHECKIN phase) with photos + metrics
+      await api(`/api/rental-agreements/${agreement.id}/inspection`, {
+        method: 'POST',
+        body: JSON.stringify({
+          phase: 'CHECKIN',
+          odometer: odometerIn ? Number(odometerIn) : null,
+          fuelLevel: String(fuelIn),
+          cleanliness: String(cleanlinessIn),
+          photos
+        })
+      }, token);
+
+      // 2. Signature
+      if (signatureDataUrl && signerName) {
+        await api(`/api/rental-agreements/${agreement.id}/signature`, {
+          method: 'POST',
+          body: JSON.stringify({ signerName, signatureDataUrl })
+        }, token);
+      }
+
+      // 3. Checkin-close — fee engine + status routing + emails
       const body = {
         odometerIn: odometerIn ? Number(odometerIn) : null,
         fuelIn,
@@ -171,6 +249,7 @@ function CheckinWizard({ token, me, logout }) {
 
   const onNext = () => {
     if (step === 4) return submitCheckinClose();
+    if (step === 5) return router.push('/reservations');
     setStep((s) => Math.min(s + 1, steps.length - 1));
   };
 
@@ -264,6 +343,15 @@ function Step1Summary({ reservation, agreement }) {
   const pickupAt = new Date(agreement?.pickupAt || reservation?.pickupAt).toLocaleString();
   const returnAt = new Date(agreement?.returnAt || reservation?.returnAt).toLocaleString();
   const isLate = new Date(agreement?.returnAt) < new Date();
+  // Break out AUTH_HOLD payments from settled payments so the summary
+  // shows the agent why the outstanding balance is what it is (e.g.
+  // total=$289, hold=$250, settled=$0, outstanding=$39).
+  const paymentsList = Array.isArray(agreement?.payments) ? agreement.payments : [];
+  const authHoldsTotal = paymentsList
+    .filter((p) => String(p?.method || '').toUpperCase() === 'AUTH_HOLD' && String(p?.status || 'PAID').toUpperCase() !== 'VOIDED')
+    .reduce((sum, p) => sum + Number(p?.amount || 0), 0);
+  const totalPaid = Number(agreement?.paidAmount || 0);
+  const settledPaid = Math.max(0, Number((totalPaid - authHoldsTotal).toFixed(2)));
   return (
     <WizGrid cols={2}>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
@@ -293,7 +381,16 @@ function Step1Summary({ reservation, agreement }) {
         <RowBetween k="Fuel" v={`${Math.round(Number(agreement?.fuelOut || 0) * 100)}%`} />
         <RowBetween k="Cleanliness" v={`${agreement?.cleanlinessOut || '—'}/5`} />
         <hr style={{ border: 'none', borderTop: '1px solid #e6dfff', margin: '12px 0' }} />
-        <RowBetween k="Balance paid" v={`$${Number(agreement?.paidAmount || 0).toFixed(2)}`} valueColor="#1fc7aa" />
+        <RowBetween k="Agreement total" v={`$${Number(agreement?.total || 0).toFixed(2)}`} />
+        <RowBetween k="Paid so far" v={`$${settledPaid.toFixed(2)}`} valueColor="#1fc7aa" />
+        {authHoldsTotal > 0 ? (
+          <RowBetween k="Auth holds" v={`$${authHoldsTotal.toFixed(2)}`} valueColor="#a16207" />
+        ) : null}
+        <RowBetween
+          k={<strong>Outstanding balance</strong>}
+          v={<strong>${Number(agreement?.balance || 0).toFixed(2)}</strong>}
+          valueColor={Number(agreement?.balance || 0) > 0 ? '#f59e0b' : '#1fc7aa'}
+        />
         <RowBetween k="Card on file" v={
           agreement?.reservation?.customer?.cardLast4
             ? `${agreement.reservation.customer.cardBrand || 'Card'} ····${agreement.reservation.customer.cardLast4}`
@@ -699,7 +796,7 @@ function Step6Success({ result, reservation, agreement, token, onDone }) {
           <div style={{ fontSize: 11, fontWeight: 800, color: '#6f668f', letterSpacing: '.1em', marginBottom: 10 }}>STAFF ACTIONS</div>
           <ActionLink
             label={`View agreement ${agreement?.agreementNumber || ''}`}
-            onClick={() => agreement?.id && (window.location.href = `/agreements/${agreement.id}`)}
+            onClick={() => reservation?.id && (window.location.href = `/reservations/${reservation.id}`)}
           />
           <ActionLink
             label="View inspection photos"

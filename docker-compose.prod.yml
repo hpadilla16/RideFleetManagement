@@ -30,12 +30,17 @@ services:
       PUPPETEER_EXECUTABLE_PATH: /usr/local/bin/chrome
       CLUSTER_WORKERS: "4"
       # Pool sizing math: pool × workers must stay under Supabase pooler cap.
-      # Current Supabase compute MICRO has max_connections=60. With 4 workers,
-      # docs/operations/cluster-mode-rollout-2026-04-28.md recommends 12-15.
-      # 12 × 4 = 48 connections from web tier, leaves 12 for migrations/admin.
-      # Bumped from 5 (sub-utilized at 11/60 in dashboard) as Fase 1 of
-      # doc/server-scaling-500-users-2026-05-08.md.
-      DATABASE_POOL_SIZE: "12"
+      # 2026-05-18: upgraded compute MICRO (max_connections=60) → LARGE
+      # (max_connections=160 confirmed via SELECT current_setting) to onboard
+      # a 5-location tenant. New math:
+      #   backend: 24 × 4 workers = 96
+      #   worker:  12 × 1 process  = 12
+      #   total client conns: 108 / 160 = 67% — leaves 52 for migrations/admin
+      # We route through the pgbouncer pooler (port 6543, ?pgbouncer=true)
+      # so client connections multiplex onto fewer real DB connections under
+      # typical load; the 160 cap is worst-case headroom.
+      # Bump to 32 when we go XLARGE (max_connections check first).
+      DATABASE_POOL_SIZE: "24"
     ports:
       - "4000:4000"
     depends_on:
@@ -64,9 +69,18 @@ services:
     environment:
       NODE_ENV: production
       # No PORT — workers don't expose HTTP
-      DATABASE_POOL_SIZE: "4"
+      # 2026-05-18: bumped 4 → 12 alongside Supabase LARGE upgrade.
+      # Workers now run autocharge + future Apify scraper bulk-insert jobs;
+      # 12 gives parallelism headroom while staying well under the pool cap.
+      DATABASE_POOL_SIZE: "12"
       # Override the API's CLUSTER_WORKERS — irrelevant to this process
       CLUSTER_WORKERS: "0"
+      # Worker tier statement timeout — 60s instead of API tier's 15s.
+      # Justification: workers run batch jobs (market scraper writes hundreds
+      # of pricing rows, future Excel rate imports, Apify scraper bulk insert)
+      # that legitimately exceed 15s. Hot API endpoints stay capped at 15s
+      # so a runaway query never holds a request thread.
+      DATABASE_STATEMENT_TIMEOUT_MS: "60000"
     command: ["node", "src/worker.js"]
     depends_on:
       db:

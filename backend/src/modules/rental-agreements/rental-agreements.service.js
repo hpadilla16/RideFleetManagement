@@ -958,7 +958,12 @@ function resolveInsurancePlanField(reservation, field) {
   return null;
 }
 
-function structuredReservationChargeRows(reservation) {
+// Exported for the duplicate-charges regression test. Keep this helper as the
+// single source of truth for projecting reservation.charges → row shape used
+// by every startFromReservation write path. If a caller forgets to copy
+// `source` and `sourceRefId` from these rows into its createMany payload,
+// the duplicate-charges bug recurs (see duplicate-charges.test.mjs).
+export function structuredReservationChargeRows(reservation) {
   const rows = Array.isArray(reservation?.charges) ? reservation.charges : [];
   if (!rows.length) return null;
   return rows.map((row, idx) => ({
@@ -1010,6 +1015,35 @@ function monthKey(value = new Date()) {
 
 function roundMoney(value) {
   return Number(Number(value || 0).toFixed(2));
+}
+
+// Pillar 2 wizards (2026-05-19): Prisma Decimal fields serialize as strings
+// via JSON.stringify (e.g. balance: "0" instead of balance: 0). This trips up
+// frontend code that compares to numeric zero or does math. Coerce all the
+// money fields on an agreement (and its nested charges/payments) to numbers
+// before returning from the service so consumers always see numbers.
+function coerceAgreementMoney(agreement) {
+  if (!agreement) return agreement;
+  const moneyFields = ['subtotal', 'taxes', 'fees', 'total', 'deposit',
+    'securityDepositAmount', 'paidAmount', 'balance', 'insurancePlanRate'];
+  for (const f of moneyFields) {
+    if (f in agreement && agreement[f] != null) {
+      agreement[f] = Number(agreement[f]);
+    }
+  }
+  if (Array.isArray(agreement.charges)) {
+    for (const c of agreement.charges) {
+      if (c?.quantity != null) c.quantity = Number(c.quantity);
+      if (c?.rate != null) c.rate = Number(c.rate);
+      if (c?.total != null) c.total = Number(c.total);
+    }
+  }
+  if (Array.isArray(agreement.payments)) {
+    for (const p of agreement.payments) {
+      if (p?.amount != null) p.amount = Number(p.amount);
+    }
+  }
+  return agreement;
 }
 
 function commissionChargeRows(charges = []) {
@@ -1632,6 +1666,17 @@ export const rentalAgreementsService = {
 
     const existing = await prisma.rentalAgreement.findUnique({ where: { reservationId } });
     if (existing) {
+      // Pillar 2 (2026-05-18): once the reservation has been checked-in (paid
+      // or unpaid), the fee engine has posted final charges onto the agreement
+      // (fuel/cleaning/smoking/late). Re-syncing from reservation pricing now
+      // would wipe those — Print Agreement and Email Agreement both hit
+      // /start-rental, which would erase fees seconds after they were posted.
+      // Skip re-sync entirely for post-checkin states and just return the
+      // existing agreement as-is.
+      const reservationStatusUpper = String(reservation.status || '').toUpperCase();
+      if (reservationStatusUpper === 'CHECKED_IN' || reservationStatusUpper === 'CHECKED_IN_UNPAID') {
+        return this.getById(existing.id);
+      }
       // Keep agreement charges synced from reservation charge metadata whenever start-rental is invoked.
       // This guarantees reservation->agreement parity for checkout flow.
       const structuredRows = structuredReservationChargeRows(reservation);
@@ -1645,6 +1690,16 @@ export const rentalAgreementsService = {
         }
 
         if (structuredRows?.length) {
+          // BUG-FIX 2026-05-19 (RES-083011): preserve `source` and
+          // `sourceRefId` on the agreement charges. Without these, this
+          // writer produced source=null rows while the parallel writer
+          // (reservation-pricing.service.js#syncAgreementCharges) produced
+          // rows with typed source (DAILY, SERVICE, INSURANCE, TAX,
+          // SECURITY_DEPOSIT). The two outputs were treated as different
+          // row sets by downstream code paths, leading to duplicate
+          // RentalAgreementCharge entries (one source=null + one typed)
+          // that doubled agreement.total. Aligning the shape lets either
+          // writer cleanly replace the other via its deleteMany+createMany.
           const normalizedRows = structuredRows.map((row) => ({
             rentalAgreementId: existing.id,
             code: row.code,
@@ -1655,7 +1710,9 @@ export const rentalAgreementsService = {
             total: row.total,
             taxable: row.taxable,
             selected: row.selected,
-            sortOrder: row.sortOrder
+            sortOrder: row.sortOrder,
+            source: row.source || null,
+            sourceRefId: row.sourceRefId || null
           }));
           const { subtotal, taxes, total } = structuredReservationTotals(normalizedRows);
 
@@ -1713,6 +1770,7 @@ export const rentalAgreementsService = {
           const normalizedRows = incomingRows.map((r) => ({
             name: String(r?.name || 'Line Item'),
             source: r?.source || null,
+            sourceRefId: r?.sourceRefId || null,
             chargeType: String(r?.chargeType || 'UNIT').toUpperCase(),
             quantity: Number(r?.quantity || 1),
             rate: Number(r?.rate || 0),
@@ -1736,7 +1794,8 @@ export const rentalAgreementsService = {
                 taxable: r.taxable,
                 selected: true,
                 sortOrder: idx,
-                source: r.source || null
+                source: r.source || null,
+                sourceRefId: r.sourceRefId || null
               }))
             }),
             prisma.rentalAgreement.update({
@@ -1812,13 +1871,19 @@ export const rentalAgreementsService = {
           return sum + val;
         }, 0);
 
-        const subtotal = Math.max(0, base + servicesTotal + feesTotal - discountTotal);
+        // Pillar 2 wizards rounding-consistency fix (2026-05-19): round every
+        // intermediate at the boundary so the agreement's stored total matches
+        // the reservation page's displayed total byte-for-byte. Without these,
+        // the wizard's balance check sees phantom $0.01–$0.10 drifts after
+        // startFromReservation reruns mid-flow (e.g. before finalize).
+        const subtotal = roundMoney(Math.max(0, base + servicesTotal + feesTotal - discountTotal));
         const taxRate = Number(reservation?.pricingSnapshot?.taxRate ?? reservation.pickupLocation?.taxRate ?? 0);
-        const taxes = subtotal * (taxRate / 100);
-        const total = subtotal + taxes;
+        const taxes = roundMoney(subtotal * (taxRate / 100));
+        const total = roundMoney(subtotal + taxes);
 
         if (discountTotal > 0) {
-          chargeRows.push({ rentalAgreementId: existing.id, name: 'Discount', chargeType: 'UNIT', quantity: 1, rate: -discountTotal, total: -discountTotal, taxable: false, selected: true, sortOrder: chargeRows.length });
+          const discountRounded = roundMoney(discountTotal);
+          chargeRows.push({ rentalAgreementId: existing.id, name: 'Discount', chargeType: 'UNIT', quantity: 1, rate: -discountRounded, total: -discountRounded, taxable: false, selected: true, sortOrder: chargeRows.length });
         }
         chargeRows.push({ rentalAgreementId: existing.id, name: `Tax (${taxRate.toFixed(2)}%)`, chargeType: 'TAX', quantity: 1, rate: taxes, total: taxes, taxable: false, selected: true, sortOrder: chargeRows.length });
 
@@ -1834,7 +1899,7 @@ export const rentalAgreementsService = {
               subtotal,
               taxes,
               total,
-              balance: Number((total - paid).toFixed(2))
+              balance: roundMoney(total - paid)
             }
           })
         ], { timeout: 10000 });
@@ -1908,6 +1973,7 @@ export const rentalAgreementsService = {
         name: String(r?.name || 'Line Item'),
         code: r?.code || null,
         source: r?.source || null,
+        sourceRefId: r?.sourceRefId || null,
         chargeType: String(r?.chargeType || 'UNIT').toUpperCase(),
         quantity: Number(r?.quantity || 1),
         rate: Number(r?.rate || 0),
@@ -1928,7 +1994,8 @@ export const rentalAgreementsService = {
           taxable: r.taxable,
           selected: true,
           sortOrder: idx,
-          source: r.source || null
+          source: r.source || null,
+          sourceRefId: r.sourceRefId || null
         }))
       });
 
@@ -2096,19 +2163,22 @@ export const rentalAgreementsService = {
       return sum + val;
     }, 0);
 
-    const subtotal = Math.max(0, base + servicesTotal + feesTotal - discountTotal);
+    // Pillar 2 wizards rounding-consistency fix (2026-05-19): see matching
+    // comment on the existing-agreement re-sync path above. Same reason.
+    const subtotal = roundMoney(Math.max(0, base + servicesTotal + feesTotal - discountTotal));
     const taxRate = Number(reservation?.pricingSnapshot?.taxRate ?? reservation.pickupLocation?.taxRate ?? 0);
-    const taxes = subtotal * (taxRate / 100);
-    const total = subtotal + taxes;
+    const taxes = roundMoney(subtotal * (taxRate / 100));
+    const total = roundMoney(subtotal + taxes);
 
     if (discountTotal > 0) {
+      const discountRounded = roundMoney(discountTotal);
       chargeRows.push({
         rentalAgreementId: agreement.id,
         name: 'Discount',
         chargeType: 'UNIT',
         quantity: 1,
-        rate: -discountTotal,
-        total: -discountTotal,
+        rate: -discountRounded,
+        total: -discountRounded,
         taxable: false,
         selected: true,
         sortOrder: chargeRows.length
@@ -2139,12 +2209,12 @@ export const rentalAgreementsService = {
         total,
         subtotal,
         taxes,
-        paidAmount: Number(prePaidTotal.toFixed(2)),
-        balance: Number((total - prePaidTotal).toFixed(2))
+        paidAmount: roundMoney(prePaidTotal),
+        balance: roundMoney(total - prePaidTotal)
       }
     });
 
-    return prisma.rentalAgreement.findUnique({
+    const finalRow = await prisma.rentalAgreement.findUnique({
       where: { id: agreement.id },
       include: {
         drivers: true,
@@ -2161,11 +2231,12 @@ export const rentalAgreementsService = {
         }
       }
     });
+    return coerceAgreementMoney(finalRow);
   },
 
-  getById(id, scope = null) {
-    return prisma.rentalAgreement.findFirst({
-    where: { id, ...(scope?.tenantId ? { tenantId: scope.tenantId } : {}) },
+  async getById(id, scope = null) {
+    const agreement = await prisma.rentalAgreement.findFirst({
+      where: { id, ...(scope?.tenantId ? { tenantId: scope.tenantId } : {}) },
       include: {
         reservation: {
           include: {
@@ -2185,6 +2256,7 @@ export const rentalAgreementsService = {
         inspections: { orderBy: { createdAt: 'asc' } }
       }
     });
+    return coerceAgreementMoney(agreement);
   },
 
   async agreementPrintContext(id) {
@@ -2975,8 +3047,14 @@ export const rentalAgreementsService = {
     const method = String(payload.method || 'OTHER').toUpperCase();
     const reference = String(payload.reference || '').trim();
     const cardWithAuth = method === 'CARD' && reference.length > 0;
-    if (!receiptDataUrl && !cardWithAuth) {
-      throw new Error('Receipt is required for manual entries (CARD payments may skip if a reference / auth code is provided)');
+    // AUTH_HOLD is a security-deposit authorization swipe — no receipt to
+    // attach, but the auth code in `reference` is mandatory as audit trail.
+    if (method === 'AUTH_HOLD' && !reference) {
+      throw new Error('reference is required for AUTH_HOLD payments (auth code)');
+    }
+    const authHold = method === 'AUTH_HOLD' && reference.length > 0;
+    if (!receiptDataUrl && !cardWithAuth && !authHold) {
+      throw new Error('Receipt is required for manual entries (CARD or AUTH_HOLD payments may skip if a reference / auth code is provided)');
     }
 
     const agreement = await prisma.rentalAgreement.findUnique({ where: { id } });
