@@ -4,6 +4,7 @@ import { prisma } from '../../lib/prisma.js';
 import { getJwtExpiresIn, getJwtSecret } from './auth.config.js';
 import { getEffectiveModuleAccessForUser } from '../../lib/module-access.js';
 import { cache } from '../../lib/cache.js';
+import { globalKey } from '../../lib/cache/tenantKey.js';
 
 // 30s TTL bounds cross-worker staleness: role/module-access invalidations only
 // clear the current worker's cache, so siblings keep stale permissions until TTL expires.
@@ -77,7 +78,9 @@ export const authService = {
   },
 
   async getSessionUser(userId) {
-    return cache.getOrSet(`session:${userId}`, async () => {
+    // session:<userId> is intentionally GLOBAL — user sessions span tenants
+    // (SUPER_ADMIN spans all, regular users have a tenantId on the row already).
+    return cache.getOrSet(globalKey('session', userId), async () => {
       const user = await prisma.user.findUnique({
         where: { id: userId },
         select: {
@@ -97,11 +100,11 @@ export const authService = {
   },
 
   invalidateSessionCache(userId) {
-    if (userId) cache.del(`session:${userId}`);
+    if (userId) cache.del(globalKey('session', userId));
   },
 
   async refreshToken(userId) {
-    cache.del(`session:${userId}`);
+    cache.del(globalKey('session', userId));
     const user = await prisma.user.findUnique({
       where: { id: userId },
       include: { hostProfile: { select: { id: true } } }

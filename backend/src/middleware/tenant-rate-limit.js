@@ -42,6 +42,7 @@ import logger from '../lib/logger.js';
 // without spinning up the Prisma client (which requires platform-matching
 // query-engine binaries).
 import { cache } from '../lib/cache.js';
+import { tenantKey } from '../lib/cache/tenantKey.js';
 
 const TIER_LIMITS = {
   STANDARD: 5000,
@@ -118,7 +119,7 @@ async function getTenantLimits(req, resolvePrisma) {
   }
   const tenantId = req.user?.tenantId;
   if (!tenantId) return { tier: DEFAULT_TIER, override: 0 };
-  const cacheKey = `tenant-rate-limit:tier:${tenantId}`;
+  const cacheKey = tenantKey(tenantId, 'tenant-rate-limit', 'tier');
   const cached = cache.get(cacheKey);
   if (cached) return cached;
   try {

@@ -5,6 +5,7 @@ import { authService } from '../auth/auth.service.js';
 import { createHostVehicleSubmissionForProfile } from '../host-app/host-app.service.js';
 import { prisma } from '../../lib/prisma.js';
 import { cache } from '../../lib/cache.js';
+import { tenantKey, globalKey } from '../../lib/cache/tenantKey.js';
 import { sendEmail } from '../../lib/mailer.js';
 import { money } from '../../lib/money.js';
 import crypto from 'node:crypto';
@@ -1181,7 +1182,13 @@ export const publicBookingService = {
     // when fees are edited, invalidate via `cache.invalidate('public:website-fees:')`
     // from the fees admin write path. Validation throws above stay outside
     // so bad inputs never enter the cache.
-    const cacheKey = `public:website-fees:id=${scopedTenantId}:slug=${scopedTenantSlug}`;
+    // Tenant-scoped (mandatory fees per tenant). When the caller provides
+    // an id we use tenantKey directly; when only slug is given, resolution
+    // happens inside the loader, so we namespace under globalKey with the
+    // slug baked in (different tenants cannot share a slug).
+    const cacheKey = scopedTenantId
+      ? tenantKey(scopedTenantId, 'public', 'website-fees', `slug=${scopedTenantSlug}`)
+      : globalKey('public', 'website-fees-by-slug', scopedTenantSlug);
     return cache.getOrSet(cacheKey, async () => {
       const tenant = await prisma.tenant.findFirst({
         where: {

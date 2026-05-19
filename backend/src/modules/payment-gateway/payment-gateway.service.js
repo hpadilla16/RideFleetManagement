@@ -3,13 +3,14 @@ import { prisma } from '../../lib/prisma.js';
 import { spinClient } from './spin-client.js';
 import logger from '../../lib/logger.js';
 import { cache } from '../../lib/cache.js';
+import { tenantKey } from '../../lib/cache/tenantKey.js';
 
 /**
  * Resolve SPIn config for a tenant (cached 3 min).
  */
 async function getTenantSpinConfig(tenantId) {
   if (!tenantId) return {};
-  return cache.getOrSet(`spin:config:${tenantId}`, async () => {
+  return cache.getOrSet(tenantKey(tenantId, 'spin', 'config'), async () => {
   const tenant = await prisma.tenant.findUnique({
     where: { id: tenantId },
     select: { id: true, name: true, settingsJson: true }

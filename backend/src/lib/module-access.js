@@ -1,5 +1,6 @@
 import { prisma } from './prisma.js';
 import { cache } from './cache.js';
+import { globalKey } from './cache/tenantKey.js';
 
 export const MODULE_KEYS = [
   'dashboard',
@@ -255,7 +256,9 @@ export async function updateStoredUserModuleConfig(userId, payload = {}) {
     update: { value: JSON.stringify(next) }
   });
   // Invalidate cached session for this user
-  cache.del(`session:${userId}`);
+  // session:<userId> is intentionally GLOBAL — user sessions span tenants
+  // (a SUPER_ADMIN's session is not bound to one tenant). See PR-3b.
+  cache.del(globalKey('session', userId));
   return next;
 }
 

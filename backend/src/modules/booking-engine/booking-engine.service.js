@@ -1,6 +1,7 @@
 import crypto from 'node:crypto';
 import { prisma } from '../../lib/prisma.js';
 import { cache } from '../../lib/cache.js';
+import { tenantKey, globalKey } from '../../lib/cache/tenantKey.js';
 import { ratesService } from '../rates/rates.service.js';
 import { reservationsService } from '../reservations/reservations.service.js';
 import { carSharingService } from '../car-sharing/car-sharing.service.js';
@@ -1043,7 +1044,14 @@ export const bookingEngineService = {
     // in-flight batch, so even cold-cache traffic only fires one query
     // batch at a time. TTL is short — bootstrap data (active tenants,
     // public listings) changes a handful of times per day.
-    const cacheKey = `booking:bootstrap:slug=${tenantSlug || ''}:id=${tenantId || ''}`;
+    // Public booking bootstrap. When tenantId or tenantSlug is provided the
+    // payload is scoped to that tenant; otherwise it's the cross-tenant
+    // landing payload (list of active tenants). Either way, no authenticated
+    // tenant context — keep both shapes under globalKey() with the resolver
+    // inputs baked into the key.
+    const cacheKey = tenantId
+      ? tenantKey(tenantId, 'booking', 'bootstrap', `slug=${tenantSlug || ''}`)
+      : globalKey('booking', 'bootstrap', `slug=${tenantSlug || ''}`, `id=${tenantId || ''}`);
     return cache.getOrSet(cacheKey, async () => {
       const tenant = await resolvePublicTenant({ tenantSlug, tenantId });
 
@@ -1249,7 +1257,12 @@ export const bookingEngineService = {
       ? pickupLocationIds
       : [pickupLocationId]
     ).map(String).filter(Boolean).sort();
-    const cacheKey = `public:searchRental:slug=${tenantSlug || ''}:id=${tenantId || ''}:locs=${cacheLocs.join(',')}:pickup=${pickupDate.toISOString()}:return=${returnDate.toISOString()}`;
+    // Public search. Mirrors bootstrap: tenantId-scoped when provided,
+    // otherwise cross-tenant aggregator (search returns matches across active
+    // tenants).
+    const cacheKey = tenantId
+      ? tenantKey(tenantId, 'public', 'searchRental', `slug=${tenantSlug || ''}`, `locs=${cacheLocs.join(',')}`, `pickup=${pickupDate.toISOString()}`, `return=${returnDate.toISOString()}`)
+      : globalKey('public', 'searchRental', `slug=${tenantSlug || ''}`, `id=${tenantId || ''}`, `locs=${cacheLocs.join(',')}`, `pickup=${pickupDate.toISOString()}`, `return=${returnDate.toISOString()}`);
     return cache.getOrSet(cacheKey, async () => {
       const rentalDays = ceilTripDays(pickupDate, returnDate);
       const directTenant = await resolvePublicTenant({ tenantSlug, tenantId });

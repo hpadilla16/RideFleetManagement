@@ -1,6 +1,7 @@
 import crypto from 'node:crypto';
 import { prisma } from '../../lib/prisma.js';
 import { cache } from '../../lib/cache.js';
+import { tenantKey } from '../../lib/cache/tenantKey.js';
 import { settingsService } from '../settings/settings.service.js';
 
 /**
@@ -219,7 +220,8 @@ export const storeBoardService = {
     // tolerate omission so a curl probe still works.
     const localDate = String(date || '').trim() || formatLocalDate(now, cleanTz);
 
-    const cacheKey = `store-board:${row.id}:${localDate}:${cleanTz}`;
+    // Kiosk token row carries tenantId — scope the board cache per tenant.
+    const cacheKey = tenantKey(row.tenantId, 'store-board', row.id, localDate, cleanTz);
     return cache.getOrSet(cacheKey, async () => {
       // Bump lastSeenAt opportunistically — single fire-and-forget update.
       // Wrapped in catch so a transient DB blip doesn't fail the whole

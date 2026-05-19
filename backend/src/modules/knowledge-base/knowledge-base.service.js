@@ -1,6 +1,7 @@
 import { prisma } from '../../lib/prisma.js';
 import { ValidationError, NotFoundError } from '../../lib/errors.js';
 import { cache } from '../../lib/cache.js';
+import { tenantKey, globalKey } from '../../lib/cache/tenantKey.js';
 
 function slugify(text) {
   return String(text || '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 120);
@@ -27,7 +28,12 @@ export const knowledgeBaseService = {
   async list({ tenantId, category, status = 'PUBLISHED', search, page = 1, limit = 50 }) {
     // Cache non-search list queries for 2 minutes
     if (!search) {
-      const cacheKey = `kb:list:${tenantId || 'global'}:${category || 'all'}:${status}:${page}:${limit}`;
+      // KB articles are either tenant-scoped (per-tenant overrides) or global
+      // (the default knowledge corpus visible to tenants with no overrides).
+      // Mirror that in the cache key.
+      const cacheKey = tenantId
+        ? tenantKey(tenantId, 'kb', 'list', category || 'all', status, page, limit)
+        : globalKey('kb', 'list', category || 'all', status, page, limit);
       const cached = cache.get(cacheKey);
       if (cached) return cached;
     }
@@ -63,7 +69,12 @@ export const knowledgeBaseService = {
 
     const result = { items, total, page: Number(page), limit: take, pages: Math.ceil(total / take) };
     if (!search) {
-      const cacheKey = `kb:list:${tenantId || 'global'}:${category || 'all'}:${status}:${page}:${limit}`;
+      // KB articles are either tenant-scoped (per-tenant overrides) or global
+      // (the default knowledge corpus visible to tenants with no overrides).
+      // Mirror that in the cache key.
+      const cacheKey = tenantId
+        ? tenantKey(tenantId, 'kb', 'list', category || 'all', status, page, limit)
+        : globalKey('kb', 'list', category || 'all', status, page, limit);
       cache.set(cacheKey, result, 2 * 60 * 1000); // 2 min
     }
     return result;
