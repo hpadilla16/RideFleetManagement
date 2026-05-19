@@ -47,6 +47,11 @@ function CheckinWizard({ token, me, logout }) {
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState('');
   const [result, setResult] = useState(null);
+  // Pillar 2 16q: tenant-configured fee rates fetched from Settings →
+  // Inspection Fees. Used by the live fee preview in Step 3 so the
+  // numbers staff see match what the backend will actually charge.
+  // Falls back to hardcoded defaults inside useFeePreview if fetch fails.
+  const [feeRates, setFeeRates] = useState(null);
 
   // Form state
   const [odometerIn, setOdometerIn] = useState('');
@@ -60,7 +65,7 @@ function CheckinWizard({ token, me, logout }) {
   const [signerName, setSignerName] = useState('');
   const [signatureDataUrl, setSignatureDataUrl] = useState('');
 
-  // Load reservation + agreement
+  // Load reservation + agreement + tenant fee rates (for live preview)
   useEffect(() => {
     if (!reservationId) return;
     (async () => {
@@ -77,6 +82,25 @@ function CheckinWizard({ token, me, logout }) {
             res?.customer?.firstName,
             res?.customer?.lastName
           ].filter(Boolean).join(' '));
+        }
+
+        // Fetch tenant-configured fee rates so Step 3 preview matches what
+        // the backend will charge. The GET endpoint always returns 7 rows
+        // merged with platform defaults — never empty for an authed user.
+        try {
+          const ratesRes = await api('/api/settings/fee-rates', { bypassCache: true }, token);
+          const rows = Array.isArray(ratesRes?.rates) ? ratesRes.rates : [];
+          // Transform to the { FEE_TYPE: { unit, amount } } shape useFeePreview expects.
+          // Use currentAmount (the override) if set, otherwise defaultAmount.
+          const dict = {};
+          for (const r of rows) {
+            const amount = r.currentAmount != null ? Number(r.currentAmount) : Number(r.defaultAmount || 0);
+            dict[r.feeType] = { unit: r.unit, amount };
+          }
+          setFeeRates(dict);
+        } catch (err) {
+          // Non-fatal: useFeePreview falls back to its FALLBACK_RATES table.
+          console.warn('[checkin-wizard] failed to load tenant fee rates, using fallbacks', err);
         }
       } catch (err) {
         console.error('Failed to load reservation', err);
@@ -95,6 +119,7 @@ function CheckinWizard({ token, me, logout }) {
   }, [agreement?.pickupAt, agreement?.returnAt, reservation?.pickupAt, reservation?.returnAt]);
 
   const feePreview = useFeePreview({
+    rates: feeRates,
     odometerOut: agreement?.odometerOut,
     odometerIn: odometerIn ? Number(odometerIn) : null,
     fuelOut: agreement?.fuelOut,
