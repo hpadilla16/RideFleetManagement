@@ -1,5 +1,6 @@
 import logger from '../../lib/logger.js';
 import { cache } from '../../lib/cache.js';
+import { globalKey } from '../../lib/cache/tenantKey.js';
 
 const OPENAI_API_URL = 'https://api.openai.com/v1/chat/completions';
 const MODEL = 'gpt-4o-mini';
@@ -40,7 +41,9 @@ export async function extractSearchIntent(userQuery) {
     return { query: userQuery, fallback: true };
   }
 
-  const cacheKey = `ai:search:${userQuery.toLowerCase().trim().slice(0, 100)}`;
+  // Public unauthenticated endpoint — no tenant context, so the AI search
+  // intent cache is legitimately global. See PR-3b.
+  const cacheKey = globalKey('ai-search', userQuery.toLowerCase().trim().slice(0, 100));
   const cached = cache.get(cacheKey);
   if (cached) return cached;
 

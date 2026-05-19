@@ -20,6 +20,7 @@ import { franchiseService } from '../settings/franchise.service.js';
 import { crossTenantScopeFor as scopeFor } from '../../lib/tenant-scope.js';
 import { parseLocationConfig } from '../../lib/location-config.js';
 import { cache } from '../../lib/cache.js';
+import { globalKey } from '../../lib/cache/tenantKey.js';
 import { compactStartRentalResponse } from './start-rental-compact.js';
 
 export const reservationsRouter = Router();
@@ -30,7 +31,10 @@ export const reservationsRouter = Router();
 // briefly bypassable under heavy cluster load — that's an acceptable trade-off for rate UX.
 const TOKEN_ISSUANCE_COOLDOWN_MS = 30 * 1000;
 function checkTokenIssuanceCooldown(reservationId, kind) {
-  const key = `token-issue:${kind}:${reservationId}`;
+  // Reservation IDs are globally-unique cuids; this is a short cross-process
+  // cooldown to prevent double-issue/abuse, not a tenant-isolated cache.
+  // globalKey makes the opt-out explicit. See PR-3b.
+  const key = globalKey('token-issue', kind, reservationId);
   if (cache.get(key) !== undefined) return false;
   cache.set(key, 1, TOKEN_ISSUANCE_COOLDOWN_MS);
   return true;

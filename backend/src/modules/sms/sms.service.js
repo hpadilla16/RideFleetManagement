@@ -4,13 +4,14 @@ import { sendSms } from './sms-providers.js';
 import { getTemplates, getTemplate, renderTemplate, renderCustom } from './sms-templates.js';
 import logger from '../../lib/logger.js';
 import { cache } from '../../lib/cache.js';
+import { tenantKey } from '../../lib/cache/tenantKey.js';
 
 /**
  * Resolve SMS config for a tenant.
  */
 async function getTenantSmsConfig(tenantId) {
   if (!tenantId) return null;
-  return cache.getOrSet(`sms:config:${tenantId}`, async () => {
+  return cache.getOrSet(tenantKey(tenantId, 'sms', 'config'), async () => {
   const tenant = await prisma.tenant.findUnique({
     where: { id: tenantId },
     select: { id: true, name: true, settingsJson: true }

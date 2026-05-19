@@ -25,21 +25,28 @@
  *   5. A `+`-concat key with the same shape is also a violation.
  *
  * Exit codes:
- *   - Default: exit 0, print every violation as a warning. Use in PR-3a so
- *     CI stays green while we migrate callsites in PR-3b.
- *   - `--strict` flag or STRICT=1 env: exit 1 if any violations found.
+ *   - Default (PR-3b onward): strict — exit 1 on any violation. The `test`
+ *     script chains this in front of node --test so CI fails on a fresh
+ *     bad cache callsite.
+ *   - `--warn-only` flag or WARN_ONLY=1 env: exit 0 even with violations,
+ *     for emergency hotfix workflows only.
  *
  * Usage:
- *   node scripts/lint-cache-keys.mjs            # warn-only
- *   node scripts/lint-cache-keys.mjs --strict   # CI gate
- *   STRICT=1 node scripts/lint-cache-keys.mjs
+ *   node scripts/lint-cache-keys.mjs               # strict (default)
+ *   node scripts/lint-cache-keys.mjs --warn-only   # advisory
+ *   WARN_ONLY=1 node scripts/lint-cache-keys.mjs
  */
 
 import { readdir, readFile } from 'node:fs/promises';
 import { join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-const STRICT = process.argv.includes('--strict') || process.env.STRICT === '1';
+// PR-3b: strict is the default. Pass --warn-only or WARN_ONLY=1 to fall back
+// to advisory mode (intended for emergency hotfixes only — every cache callsite
+// in src/ must route through tenantKey()/globalKey()).
+const DEFAULT_STRICT = true;
+const WARN_ONLY = process.argv.includes('--warn-only') || process.env.WARN_ONLY === '1';
+const STRICT = DEFAULT_STRICT && !WARN_ONLY;
 const ROOT = fileURLToPath(new URL('../src', import.meta.url));
 const BACKEND_ROOT = fileURLToPath(new URL('..', import.meta.url));
 
@@ -251,10 +258,10 @@ async function main() {
   }
   console.log(`\nlint-cache-keys: ${all.length} ${STRICT ? 'violation(s)' : 'warning(s)'}.`);
   if (STRICT) {
-    console.log('Run without --strict / STRICT=1 to make this advisory.');
+    console.log('Strict mode (default since PR-3b). Pass --warn-only / WARN_ONLY=1 for advisory output.');
     process.exit(1);
   } else {
-    console.log('Advisory only (PR-3a). Will become a hard failure in PR-3b once callsites are migrated.');
+    console.log('Advisory mode (--warn-only). Strict is the CI default — fix these before merging.');
     process.exit(0);
   }
 }
