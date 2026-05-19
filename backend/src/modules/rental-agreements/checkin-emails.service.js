@@ -21,6 +21,7 @@ import { sendEmail } from '../../lib/mailer.js';
 import logger from '../../lib/logger.js';
 import { settingsService } from '../settings/settings.service.js';
 import { parseLocationConfig } from '../../lib/location-config.js';
+import { rentalAgreementsService } from './rental-agreements.service.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -120,19 +121,22 @@ async function buildEmailContext({ reservationId, agreementId }) {
   const companyLogoUrl = locCfg.companyLogoUrl || globalCfg.companyLogoUrl || '';
   const companySupportEmail = locCfg.companySupportEmail || globalCfg.companySupportEmail || globalCfg.fromEmail || '';
 
+  // Logo block — inline-styled image or initials fallback (email-client safe)
   const companyLogoBlock = companyLogoUrl
-    ? `<img src="${esc(companyLogoUrl)}" alt="${esc(companyName)}" />`
-    : `<div class="logo-fallback">${esc(companyInitials(companyName))}</div>`;
+    ? `<img src="${esc(companyLogoUrl)}" alt="${esc(companyName)}" width="36" height="36" style="display:inline-block;width:36px;height:36px;object-fit:contain;border:0;" />`
+    : `<span style="display:inline-block;color:#1d1d1f;font-size:14px;font-weight:800;letter-spacing:-0.01em;">${esc(companyInitials(companyName))}</span>`;
 
-  // Charge rows
+  // Charge rows — inline styles only (email-client safe)
+  const tdBase = 'padding:10px 14px;font-size:13px;color:#1d1d1f;border-bottom:1px solid #ececf1;vertical-align:top;';
+  const tdNum = `${tdBase}text-align:right;font-variant-numeric:tabular-nums;`;
   const chargesRows = (agreement.charges || []).map((c) => {
     return `<tr>
-      <td>${esc(c.name)}</td>
-      <td class="num">${Number(c.quantity || 0).toFixed(2)}</td>
-      <td class="num">$${fmtMoney(c.rate)}</td>
-      <td class="num">$${fmtMoney(c.total)}</td>
+      <td style="${tdBase}">${esc(c.name)}</td>
+      <td style="${tdNum}">${Number(c.quantity || 0).toFixed(2)}</td>
+      <td style="${tdNum}">$${fmtMoney(c.rate)}</td>
+      <td style="${tdNum}">$${fmtMoney(c.total)}</td>
     </tr>`;
-  }).join('') || '<tr><td colspan="4">No charges recorded</td></tr>';
+  }).join('') || `<tr><td colspan="4" style="${tdBase}text-align:center;color:#6e6e73;">No charges recorded</td></tr>`;
 
   // Mileage
   const odoOut = Number(agreement.odometerOut || 0);
@@ -158,15 +162,11 @@ async function buildEmailContext({ reservationId, agreementId }) {
   const cardLast4 = customer?.cardLast4 || '????';
   const cardBrand = customer?.cardBrand || 'Card';
 
-  // Agreement URL — public token if available, otherwise fallback to internal print
-  const baseUrl = process.env.PUBLIC_PORTAL_BASE_URL || process.env.PUBLIC_BASE_URL || '';
-  const agreementUrl = baseUrl
-    ? `${baseUrl.replace(/\/$/, '')}/agreements/${agreement.id}/print`
-    : `/agreements/${agreement.id}/print`;
-
   return {
     // Recipient
     customerEmail,
+    // Surface the agreement number for the attachment filename
+    agreementNumber: agreement.agreementNumber || agreement.id,
     // Template vars
     vars: {
       companyName: esc(companyName),
@@ -177,7 +177,6 @@ async function buildEmailContext({ reservationId, agreementId }) {
 
       reservationNumber: esc(agreement.reservation?.reservationNumber || agreement.agreementNumber || '-'),
       agreementNumber: esc(agreement.agreementNumber || '-'),
-      agreementUrl: esc(agreementUrl),
 
       customerFirstName: esc(customerFirstName),
 
@@ -214,11 +213,47 @@ function companyInitials(name) {
 }
 
 // =============================================================================
+// PDF rendering — reuses rentalAgreementsService.agreementPdfBuffer which
+// already (a) renders via the singleton Puppeteer/Chromium, (b) respects
+// tenant scope via the agreementId lookup, (c) handles the prod
+// PUPPETEER_EXECUTABLE_PATH wiring. We swallow failures here so a Chrome
+// hiccup never blocks the customer's invoice/receipt email — they still
+// receive the email, just without the PDF attachment.
+// =============================================================================
+
+async function renderAgreementPdf(agreementId) {
+  try {
+    const buf = await rentalAgreementsService.agreementPdfBuffer(agreementId);
+    if (!buf || !buf.length) {
+      logger.warn('[checkin-emails] agreementPdfBuffer returned empty buffer', { agreementId });
+      return null;
+    }
+    return buf;
+  } catch (err) {
+    logger.warn('[checkin-emails] agreement PDF render failed; sending email without attachment', {
+      agreementId,
+      error: err?.message || String(err)
+    });
+    return null;
+  }
+}
+
+function buildAttachments(pdfBuffer, agreementNumber) {
+  if (!pdfBuffer) return undefined;
+  const safeName = String(agreementNumber || 'agreement').replace(/[^a-zA-Z0-9._-]+/g, '-');
+  return [{
+    filename: `Agreement-${safeName}.pdf`,
+    content: pdfBuffer,
+    contentType: 'application/pdf'
+  }];
+}
+
+// =============================================================================
 // Public API
 // =============================================================================
 
 export async function sendInvoiceAfterCheckin({ reservationId, agreementId }) {
-  const { customerEmail, vars } = await buildEmailContext({ reservationId, agreementId });
+  const { customerEmail, vars, agreementNumber } = await buildEmailContext({ reservationId, agreementId });
   if (!customerEmail) {
     logger.warn('[checkin-emails] no customer email — invoice not sent', { reservationId, agreementId });
     return { sent: false, reason: 'no_email' };
@@ -228,13 +263,18 @@ export async function sendInvoiceAfterCheckin({ reservationId, agreementId }) {
   const subject = `Invoice for your rental — ${vars.companyName} — ${vars.reservationNumber}`;
   const text = stripHtml(html);
 
-  await sendEmail({ to: customerEmail, subject, html, text });
-  logger.info('[checkin-emails] invoice sent', { reservationId, agreementId, to: customerEmail });
-  return { sent: true };
+  const pdfBuffer = await renderAgreementPdf(agreementId);
+  const attachments = buildAttachments(pdfBuffer, agreementNumber);
+
+  await sendEmail({ to: customerEmail, subject, html, text, attachments });
+  logger.info('[checkin-emails] invoice sent', {
+    reservationId, agreementId, to: customerEmail, withPdf: Boolean(pdfBuffer)
+  });
+  return { sent: true, withPdf: Boolean(pdfBuffer) };
 }
 
 export async function sendReceiptPaidInFull({ reservationId, agreementId }) {
-  const { customerEmail, vars } = await buildEmailContext({ reservationId, agreementId });
+  const { customerEmail, vars, agreementNumber } = await buildEmailContext({ reservationId, agreementId });
   if (!customerEmail) {
     logger.warn('[checkin-emails] no customer email — receipt not sent', { reservationId, agreementId });
     return { sent: false, reason: 'no_email' };
@@ -244,9 +284,14 @@ export async function sendReceiptPaidInFull({ reservationId, agreementId }) {
   const subject = `Thanks for renting with ${vars.companyName} — Receipt ${vars.reservationNumber}`;
   const text = stripHtml(html);
 
-  await sendEmail({ to: customerEmail, subject, html, text });
-  logger.info('[checkin-emails] receipt sent', { reservationId, agreementId, to: customerEmail });
-  return { sent: true };
+  const pdfBuffer = await renderAgreementPdf(agreementId);
+  const attachments = buildAttachments(pdfBuffer, agreementNumber);
+
+  await sendEmail({ to: customerEmail, subject, html, text, attachments });
+  logger.info('[checkin-emails] receipt sent', {
+    reservationId, agreementId, to: customerEmail, withPdf: Boolean(pdfBuffer)
+  });
+  return { sent: true, withPdf: Boolean(pdfBuffer) };
 }
 
 function stripHtml(html) {
