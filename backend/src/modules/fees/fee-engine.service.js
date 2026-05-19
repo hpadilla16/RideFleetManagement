@@ -39,7 +39,7 @@ import logger from '../../lib/logger.js';
 // Update both if either changes.
 // =============================================================================
 
-const HARDCODED_RATES = {
+export const HARDCODED_RATES = {
   EXCESS_MILEAGE:   { unit: 'PER_MILE',   amount: 0.50 },
   FUEL_REFILL:      { unit: 'PER_GALLON', amount: 7.00 },
   CLEANING_LIGHT:   { unit: 'FLAT',       amount: 50.00 },
