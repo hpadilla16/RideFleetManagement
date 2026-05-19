@@ -11,8 +11,13 @@
  * '__no_tenant__' is rejected via ValidationError below — fee rates are
  * inherently per-tenant, there is no cross-tenant view).
  *
- * V1: only `locationId: null` (tenant-default) rows. The per-row response
- * carries `locationId: null` for forward-compat with V2 (per-location overrides).
+ * V1: tenant-default rows (locationId IS NULL).
+ * V2 (Pillar 2 follow-up): per-location overrides (locationId = X). Selected
+ * via the optional `locationId` field on scope. When provided:
+ *   - listForScope returns the location overrides merged with the tenant
+ *     default and HARDCODED defaults so the UI can show 3-tier context.
+ *   - bulkUpsert writes rows with that locationId.
+ *   - deleteOverride deletes a single (locationId, feeType) row.
  */
 
 import { prisma } from '../../lib/prisma.js';
@@ -105,21 +110,42 @@ function assertScopedTenant(scope) {
   return scope.tenantId;
 }
 
-function buildRow(feeType, dbRow, editable) {
+function buildRow(feeType, dbRow, editable, { tenantDefault = null, locationId = null } = {}) {
   const meta = FEE_TYPE_METADATA[feeType];
   const fallback = HARDCODED_RATES[feeType] || { amount: null, unit: meta.unit };
+  // currentSource describes where the *currentAmount* on this row comes from:
+  //   - 'location'        : dbRow is a per-location override
+  //   - 'tenant_default'  : dbRow is a tenant default
+  //   - 'hardcoded'       : no dbRow at all (UI shows fallback)
+  let currentSource = 'hardcoded';
+  if (dbRow) currentSource = locationId ? 'location' : 'tenant_default';
+
+  // tenantDefaultAmount is exposed for the per-location UI: when editing a
+  // location override the UI shows the tenant default as a faded reference
+  // value. When listing tenant defaults this equals defaultAmount/currentAmount.
+  const tenantDefaultAmount = tenantDefault
+    ? Number(tenantDefault.amount)
+    : (fallback.amount ?? null);
+  const tenantDefaultSource = tenantDefault ? 'tenant_default' : 'hardcoded';
+
   return {
     feeType,
     label: meta.label,
     description: meta.description,
     unit: meta.unit,
     currentAmount: dbRow ? Number(dbRow.amount) : null,
-    currentSource: dbRow ? 'tenant_default' : 'hardcoded',
+    currentSource,
     defaultAmount: fallback.amount,
     defaultUnit: meta.unit,
+    // Tenant-level default (next layer in the precedence chain). When viewing
+    // tenant-default rows this duplicates `currentAmount`/`defaultAmount`, but
+    // when viewing per-location overrides it's the actual fallback if the
+    // override is cleared.
+    tenantDefaultAmount,
+    tenantDefaultSource,
     validRange: { min: meta.min, max: meta.max, step: meta.step },
     rateId: dbRow?.id || null,
-    locationId: null,
+    locationId: locationId || null,
     isActive: dbRow ? !!dbRow.isActive : true,
     notes: dbRow?.notes ?? null,
     updatedAt: dbRow?.updatedAt ? new Date(dbRow.updatedAt).toISOString() : null,
@@ -140,13 +166,30 @@ function buildRow(feeType, dbRow, editable) {
  */
 export async function listForScope(scope, { editable = false } = {}) {
   const tenantId = assertScopedTenant(scope);
+  const locationId = scope?.locationId || null;
 
-  const dbRows = await prisma.feeRate.findMany({
+  // We always need to know the tenant default for each feeType so the row
+  // payload can show "what would apply if this override is cleared". When
+  // listing tenant defaults this is the same query as the main one.
+  const tenantDefaultRows = await prisma.feeRate.findMany({
     where: { tenantId, locationId: null }
   });
+  const tenantDefaultsByType = new Map(tenantDefaultRows.map((r) => [r.feeType, r]));
+
+  let dbRows;
+  if (locationId) {
+    dbRows = await prisma.feeRate.findMany({ where: { tenantId, locationId } });
+  } else {
+    dbRows = tenantDefaultRows;
+  }
   const byFeeType = new Map(dbRows.map((r) => [r.feeType, r]));
 
-  return FEE_TYPE_ORDER.map((feeType) => buildRow(feeType, byFeeType.get(feeType) || null, editable));
+  return FEE_TYPE_ORDER.map((feeType) => buildRow(
+    feeType,
+    byFeeType.get(feeType) || null,
+    editable,
+    { tenantDefault: tenantDefaultsByType.get(feeType) || null, locationId }
+  ));
 }
 
 /**
@@ -231,6 +274,7 @@ export function validateBulkPayload(body) {
  */
 export async function bulkUpsert(body, scope, { actorUserId = null, actor = null, editable = true } = {}) {
   const tenantId = assertScopedTenant(scope);
+  const locationId = scope?.locationId || null;
 
   const result = validateBulkPayload(body);
   if (!result.ok) {
@@ -247,7 +291,7 @@ export async function bulkUpsert(body, scope, { actorUserId = null, actor = null
   await prisma.$transaction(async (tx) => {
     for (const r of result.rates) {
       const existing = await tx.feeRate.findFirst({
-        where: { tenantId, locationId: null, feeType: r.feeType }
+        where: { tenantId, locationId: locationId || null, feeType: r.feeType }
       });
       const before = existing ? snapshotFeeRate(existing) : null;
       let updated;
@@ -265,7 +309,7 @@ export async function bulkUpsert(body, scope, { actorUserId = null, actor = null
         updated = await tx.feeRate.create({
           data: {
             tenantId,
-            locationId: null,
+            locationId: locationId || null,
             feeType: r.feeType,
             unit: r.unit,
             amount: r.amount,
@@ -300,16 +344,117 @@ export async function bulkUpsert(body, scope, { actorUserId = null, actor = null
     }
   });
 
-  // FeeRate has no `updatedById` column today — log the audit trail via
-  // winston instead. If the column is added later, this is where to populate it.
-  logger.info('[fee-rates] tenant=%s user=%s updated %d rates: %j',
+  logger.info('[fee-rates] tenant=%s location=%s user=%s updated %d rates: %j',
     tenantId,
+    locationId || 'tenant_default',
     actorUserId || 'unknown',
     result.rates.length,
     result.rates.map((r) => ({ feeType: r.feeType, amount: r.amount }))
   );
 
-  return listForScope({ tenantId }, { editable });
+  return listForScope({ tenantId, locationId }, { editable });
+}
+
+/**
+ * Delete a single (locationId, feeType) override row. Used by the per-location
+ * UI "Reset to tenant default" affordance. No-op if the row does not exist.
+ * Tenant-default deletion is intentionally NOT supported here — clearing a
+ * tenant default should go through bulkUpsert with isActive controls.
+ */
+export async function deleteOverride(scope, { feeType }, { actorUserId = null } = {}) {
+  const tenantId = assertScopedTenant(scope);
+  const locationId = scope?.locationId || null;
+  if (!locationId) {
+    throw new ValidationError('deleteOverride requires a locationId scope');
+  }
+  if (!VALID_FEE_TYPES.has(String(feeType))) {
+    throw new ValidationError(`Unknown feeType: ${feeType}`);
+  }
+  const existing = await prisma.feeRate.findFirst({
+    where: { tenantId, locationId, feeType }
+  });
+  if (existing) {
+    await prisma.feeRate.delete({ where: { id: existing.id } });
+    logger.info('[fee-rates] tenant=%s location=%s user=%s deleted override %s',
+      tenantId, locationId, actorUserId || 'unknown', feeType);
+  }
+  return { deleted: !!existing };
+}
+
+/**
+ * Compute the effective (merged) fee rates for a tenant+location: per-location
+ * override > tenant default > HARDCODED fallback. This is what the fee engine
+ * actually applies at checkin time, exposed for UI preview.
+ */
+export async function listEffective(scope, { editable = false } = {}) {
+  const tenantId = assertScopedTenant(scope);
+  const locationId = scope?.locationId || null;
+
+  const where = locationId
+    ? { tenantId, OR: [{ locationId }, { locationId: null }] }
+    : { tenantId, locationId: null };
+  const dbRows = await prisma.feeRate.findMany({ where });
+
+  // Bucket by feeType, prefer location-specific
+  const tenantDefaultsByType = new Map();
+  const locationOverridesByType = new Map();
+  for (const r of dbRows) {
+    if (r.locationId === null) tenantDefaultsByType.set(r.feeType, r);
+    else if (r.locationId === locationId) locationOverridesByType.set(r.feeType, r);
+  }
+
+  return FEE_TYPE_ORDER.map((feeType) => {
+    const meta = FEE_TYPE_METADATA[feeType];
+    const fallback = HARDCODED_RATES[feeType] || { amount: null, unit: meta.unit };
+    const override = locationId ? locationOverridesByType.get(feeType) : null;
+    const tDef = tenantDefaultsByType.get(feeType) || null;
+
+    let effectiveAmount = fallback.amount;
+    let effectiveSource = 'hardcoded';
+    let effectiveActive = true;
+    if (override) {
+      effectiveAmount = Number(override.amount);
+      effectiveSource = 'location';
+      effectiveActive = !!override.isActive;
+    } else if (tDef) {
+      effectiveAmount = Number(tDef.amount);
+      effectiveSource = 'tenant_default';
+      effectiveActive = !!tDef.isActive;
+    }
+
+    return {
+      feeType,
+      label: meta.label,
+      unit: meta.unit,
+      effectiveAmount,
+      effectiveSource,
+      isActive: effectiveActive,
+      tenantDefaultAmount: tDef ? Number(tDef.amount) : (fallback.amount ?? null),
+      tenantDefaultSource: tDef ? 'tenant_default' : 'hardcoded',
+      locationOverrideAmount: override ? Number(override.amount) : null,
+      hardcodedAmount: fallback.amount ?? null,
+      locationId: locationId || null,
+      editable: !!editable
+    };
+  });
+}
+
+/**
+ * Return the distinct location IDs (within the tenant) that have at least one
+ * FeeRate override row. Lets the UI flag locations with custom rates without
+ * having to N+1-fetch each location's rates.
+ */
+export async function listLocationsWithOverrides(scope) {
+  const tenantId = assertScopedTenant(scope);
+  // Use groupBy to get distinct, non-null locationIds.
+  const grouped = await prisma.feeRate.groupBy({
+    by: ['locationId'],
+    where: { tenantId, locationId: { not: null } },
+    _count: { _all: true }
+  });
+  return grouped
+    .filter((g) => !!g.locationId)
+    .map((g) => ({ locationId: g.locationId, overrideCount: g._count?._all || 0 }));
 }
 
 export const feeRatesService = {
@@ -317,5 +462,8 @@ export const feeRatesService = {
   FEE_TYPE_ORDER,
   listForScope,
   validateBulkPayload,
-  bulkUpsert
+  bulkUpsert,
+  deleteOverride,
+  listEffective,
+  listLocationsWithOverrides
 };
