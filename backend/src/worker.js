@@ -38,6 +38,23 @@ async function registerAllHandlers() {
     });
   }
 
+  // TL International franchise sync (round 5)
+  // Feature-flagged — registers only if TL_INTEGRATION_ENABLED=true.
+  // Workers are cheap so we register unconditionally and let the
+  // orchestrator decide whether to enqueue jobs; but keep the guard
+  // here so failed imports of TL crypto don't break the whole worker.
+  if (String(process.env.TL_INTEGRATION_ENABLED || 'false').toLowerCase() === 'true') {
+    try {
+      const tlMod = await import('./modules/integrations/tl-international/tl-international.worker.js');
+      tlMod.registerTlSyncWorker();
+      logger.info('[worker] registered handler: tl-international.sync');
+    } catch (err) {
+      logger.warn('[worker] tl-international sync worker not registered', {
+        message: err.message, stack: err.stack
+      });
+    }
+  }
+
   // Future handlers go here. Each in its own try/catch so a broken one
   // doesn't poison the others.
 }
