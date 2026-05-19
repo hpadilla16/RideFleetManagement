@@ -175,7 +175,10 @@ function Inner({ token, me, logout }) {
     try {
       const v = Number(amount || 0);
       if (!(v > 0)) return setMsg('Enter a valid amount');
-      if (v - unpaid > 0.009) return setMsg(`Amount exceeds unpaid balance ($${unpaid.toFixed(2)})`);
+      // AUTH_HOLD bypasses the unpaid-balance cap — it's a security deposit
+      // authorization swipe, NOT a settled payment against the rental fees.
+      // The hold amount can (and usually does) exceed the rental balance.
+      if (method !== 'AUTH_HOLD' && v - unpaid > 0.009) return setMsg(`Amount exceeds unpaid balance ($${unpaid.toFixed(2)})`);
       // Last 4 of card is required when method is CARD — audit trail for
       // counter card swipes, matches the auth code shown on the merchant slip.
       if (method === 'CARD') {
