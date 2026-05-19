@@ -37,6 +37,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { AuthGate } from '../../components/AuthGate';
 import { AppShell } from '../../components/AppShell';
+import { PendingFranchiseImportsTray } from '../../components/reservations/PendingFranchiseImportsTray';
 import { api } from '../../lib/client';
 
 const RESERVATION_PAGE_SIZE = 100;
@@ -580,6 +581,13 @@ function ReservationsInner({ token, me, logout }) {
 
   return (
     <AppShell me={me} logout={logout}>
+      <PendingFranchiseImportsTray
+        token={token}
+        me={me}
+        isSuper={isSuper}
+        activeTenantId={activeTenantId}
+        scopedPath={scopedPath}
+      />
       <section className="glass card-lg section-card" style={{ marginBottom: 16 }}>
         <div className="app-banner">
           <div className="row-between" style={{ alignItems: 'start', marginBottom: 0 }}>
