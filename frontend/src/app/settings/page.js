@@ -5635,6 +5635,41 @@ function effectiveAmount(rate) {
   return Number(rate?.defaultAmount ?? 0);
 }
 
+// V2 (pillar2 followup): audit-history helpers — relative time + compact diff.
+
+function relativeTime(iso) {
+  if (!iso) return '';
+  const ms = Date.now() - new Date(iso).getTime();
+  if (!Number.isFinite(ms) || ms < 0) return new Date(iso).toLocaleString();
+  const sec = Math.floor(ms / 1000);
+  if (sec < 60) return `${sec}s ago`;
+  const min = Math.floor(sec / 60);
+  if (min < 60) return `${min}m ago`;
+  const hr = Math.floor(min / 60);
+  if (hr < 24) return `${hr}h ago`;
+  const day = Math.floor(hr / 24);
+  if (day < 30) return `${day}d ago`;
+  return new Date(iso).toLocaleDateString();
+}
+
+function diffSummary(before, after) {
+  const b = before || {};
+  const a = after || {};
+  const out = [];
+  const fmtMoney = (n) => (typeof n === 'number' ? `$${n.toFixed(2)}` : String(n));
+  if (!before && after) {
+    if (typeof a.amount === 'number') out.push(`rate set to ${fmtMoney(a.amount)}`);
+    if (a.isActive === false) out.push('isActive: false');
+    return out.length ? out.join(', ') : 'created';
+  }
+  if (before && !after) return 'deleted';
+  if (Number(b.amount) !== Number(a.amount)) out.push(`rate: ${fmtMoney(Number(b.amount))} → ${fmtMoney(Number(a.amount))}`);
+  if (!!b.isActive !== !!a.isActive) out.push(`isActive: ${!!b.isActive} → ${!!a.isActive}`);
+  if ((b.notes || '') !== (a.notes || '')) out.push('notes changed');
+  if ((b.unit || '') !== (a.unit || '')) out.push(`unit: ${b.unit} → ${a.unit}`);
+  return out.length ? out.join(', ') : 'no field-level diff';
+}
+
 function FeeRatesTab({ token, me, isSuper, tenantName, scopedSettingsPath, activeSettingsTenantId, onPageMsg }) {
   const [rates, setRates] = useState([]);
   const [draft, setDraft] = useState({});       // { feeType: { amount, notes } }
@@ -5643,6 +5678,11 @@ function FeeRatesTab({ token, me, isSuper, tenantName, scopedSettingsPath, activ
   const [errors, setErrors] = useState({});     // { feeType: 'message' }
   const [savedToast, setSavedToast] = useState('');
   const [loadError, setLoadError] = useState('');
+  // V2 (pillar2 followup): audit history panel.
+  const [auditEntries, setAuditEntries] = useState([]);
+  const [auditLoading, setAuditLoading] = useState(false);
+  const [auditError, setAuditError] = useState('');
+  const [auditOpen, setAuditOpen] = useState(false);
 
   // Build a draft snapshot from the API rows (current amount, falling back to default).
   const draftFromRates = (rows) => {
@@ -5674,6 +5714,26 @@ function FeeRatesTab({ token, me, isSuper, tenantName, scopedSettingsPath, activ
   };
 
   useEffect(() => { loadRates(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [token, activeSettingsTenantId]);
+
+  // V2: fetch the audit log for the current tenant scope. Best-effort; an
+  // error here surfaces as inline text in the History panel but never blocks
+  // the main rates UI.
+  const loadAuditEntries = async () => {
+    setAuditLoading(true);
+    setAuditError('');
+    try {
+      const res = await api(scopedSettingsPath('/api/settings/fee-rates/audit?limit=20'), { bypassCache: true }, token);
+      const entries = Array.isArray(res?.entries) ? res.entries : [];
+      setAuditEntries(entries);
+    } catch (e) {
+      setAuditError(e?.message || 'Could not load fee rate history');
+      setAuditEntries([]);
+    } finally {
+      setAuditLoading(false);
+    }
+  };
+
+  useEffect(() => { loadAuditEntries(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [token, activeSettingsTenantId]);
 
   const ratesByType = rates.reduce((acc, r) => { acc[r.feeType] = r; return acc; }, {});
 
@@ -5760,6 +5820,8 @@ function FeeRatesTab({ token, me, isSuper, tenantName, scopedSettingsPath, activ
       setSavedToast(toastMsg);
       if (typeof onPageMsg === 'function') onPageMsg('');
       setTimeout(() => setSavedToast(''), 3500);
+      // V2: refresh the audit list so the just-saved change appears at the top.
+      loadAuditEntries();
     } catch (e) {
       const msg = e?.message || 'Could not save fee rates';
       if (typeof onPageMsg === 'function') onPageMsg(msg);
@@ -6081,6 +6143,91 @@ function FeeRatesTab({ token, me, isSuper, tenantName, scopedSettingsPath, activ
           </button>
         </div>
       ) : null}
+
+      {/* V2 (pillar2 followup): Recent changes — audit history */}
+      <div
+        style={{
+          marginTop: 18,
+          border: `1px solid ${DIVIDER}`,
+          borderRadius: 12,
+          background: SURFACE,
+          overflow: 'hidden'
+        }}
+      >
+        <button
+          type="button"
+          onClick={() => setAuditOpen((v) => !v)}
+          style={{
+            width: '100%',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            padding: '12px 16px',
+            border: 'none',
+            background: 'transparent',
+            cursor: 'pointer',
+            color: INK,
+            fontSize: 13,
+            fontWeight: 600
+          }}
+          aria-expanded={auditOpen}
+        >
+          <span>Recent changes {auditEntries.length ? `(${auditEntries.length})` : ''}</span>
+          <span style={{ color: MUTED, fontSize: 18, lineHeight: 1 }}>{auditOpen ? '\u2212' : '+'}</span>
+        </button>
+        {auditOpen ? (
+          <div style={{ borderTop: `1px solid ${DIVIDER}`, padding: '8px 0' }}>
+            {auditLoading ? (
+              <p className="label" style={{ padding: '8px 16px', margin: 0, color: MUTED }}>
+                Loading history…
+              </p>
+            ) : auditError ? (
+              <div style={{ padding: '8px 16px' }}>
+                <p className="error" style={{ margin: 0 }}>{auditError}</p>
+                <button
+                  type="button"
+                  onClick={loadAuditEntries}
+                  style={{ marginTop: 6, padding: '4px 10px', borderRadius: 8, border: `1px solid ${DIVIDER}`, background: '#fff', cursor: 'pointer', fontSize: 12 }}
+                >
+                  Retry
+                </button>
+              </div>
+            ) : auditEntries.length === 0 ? (
+              <p className="label" style={{ padding: '8px 16px', margin: 0, color: MUTED }}>
+                No changes recorded yet.
+              </p>
+            ) : (
+              <ul style={{ listStyle: 'none', margin: 0, padding: 0 }}>
+                {auditEntries.map((e) => (
+                  <li
+                    key={e.id}
+                    style={{
+                      display: 'grid',
+                      gridTemplateColumns: '110px 1fr',
+                      gap: 10,
+                      padding: '8px 16px',
+                      borderTop: `1px solid ${DIVIDER}`,
+                      fontSize: 12
+                    }}
+                  >
+                    <span style={{ color: MUTED, whiteSpace: 'nowrap' }} title={e.changedAt || ''}>
+                      {relativeTime(e.changedAt)}
+                    </span>
+                    <span style={{ color: INK }}>
+                      <strong style={{ fontWeight: 600 }}>{e.feeType}</strong>
+                      <span style={{ color: MUTED }}> · {e.changeType.toLowerCase()}</span>
+                      <span style={{ marginLeft: 8 }}>{diffSummary(e.before, e.after)}</span>
+                      <span style={{ display: 'block', color: MUTED, marginTop: 2 }}>
+                        by {e.actorEmail || e.actorUserId || 'unknown'}{e.actorRole ? ` (${e.actorRole})` : ''}
+                      </span>
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        ) : null}
+      </div>
 
       {savedToast ? (
         <div

@@ -19,6 +19,11 @@ import { prisma } from '../../lib/prisma.js';
 import logger from '../../lib/logger.js';
 import { HARDCODED_RATES } from './fee-engine.service.js';
 import { ValidationError } from '../../lib/errors.js';
+import {
+  recordChange as recordFeeRateAuditChange,
+  snapshotFeeRate,
+  classifyChange
+} from './fee-rate-audit.service.js';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Metadata table — labels, descriptions, units, and validation ranges.
@@ -224,7 +229,7 @@ export function validateBulkPayload(body) {
  *
  * Returns the fresh list (same shape as listForScope) post-write.
  */
-export async function bulkUpsert(body, scope, { actorUserId = null, editable = true } = {}) {
+export async function bulkUpsert(body, scope, { actorUserId = null, actor = null, editable = true } = {}) {
   const tenantId = assertScopedTenant(scope);
 
   const result = validateBulkPayload(body);
@@ -234,13 +239,20 @@ export async function bulkUpsert(body, scope, { actorUserId = null, editable = t
     throw err;
   }
 
+  // Resolve a per-call audit actor — prefer the structured `actor` argument
+  // (id+email+role) when present, fall back to the legacy `actorUserId` so
+  // older callers (no audit context) still work.
+  const auditActor = actor || (actorUserId ? { id: actorUserId } : null);
+
   await prisma.$transaction(async (tx) => {
     for (const r of result.rates) {
       const existing = await tx.feeRate.findFirst({
         where: { tenantId, locationId: null, feeType: r.feeType }
       });
+      const before = existing ? snapshotFeeRate(existing) : null;
+      let updated;
       if (existing) {
-        await tx.feeRate.update({
+        updated = await tx.feeRate.update({
           where: { id: existing.id },
           data: {
             amount: r.amount,
@@ -250,7 +262,7 @@ export async function bulkUpsert(body, scope, { actorUserId = null, editable = t
           }
         });
       } else {
-        await tx.feeRate.create({
+        updated = await tx.feeRate.create({
           data: {
             tenantId,
             locationId: null,
@@ -261,6 +273,29 @@ export async function bulkUpsert(body, scope, { actorUserId = null, editable = t
             notes: r.notes
           }
         });
+      }
+      const after = snapshotFeeRate(updated);
+      const changeType = classifyChange(before, after);
+
+      // Audit insert is best-effort: the helper swallows DB errors and
+      // returns null on failure so the user-facing upsert is never blocked.
+      try {
+        await recordFeeRateAuditChange({
+          tx,
+          tenantId,
+          feeRateId: updated?.id || null,
+          feeType: r.feeType,
+          locationId: null,
+          actor: auditActor,
+          changeType,
+          before,
+          after
+        });
+      } catch (auditErr) {
+        // Defense-in-depth: recordChange already swallows errors, but if a
+        // future refactor makes it throw we still must not break the upsert.
+        logger.warn('[fee-rates] audit insert failed (tenant=%s feeType=%s): %s',
+          tenantId, r.feeType, auditErr?.message || auditErr);
       }
     }
   });
