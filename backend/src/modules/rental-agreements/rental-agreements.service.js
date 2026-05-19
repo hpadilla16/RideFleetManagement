@@ -9,6 +9,8 @@ import { reservationPricingService } from '../reservations/reservation-pricing.s
 import { settingsService } from '../settings/settings.service.js';
 import { buildInspectionIntelligence } from '../vehicles/vehicle-intelligence.service.js';
 import { parseLocationConfig } from '../../lib/location-config.js';
+import { getCanonicalTermsHtml } from '../../lib/terms/index.js';
+import { TC_VERSION } from '../../lib/terms/version.js';
 import { refundCharge as payarcRefundCharge } from '../public-booking/payarc-hosted-fields.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -2603,7 +2605,11 @@ export const rentalAgreementsService = {
       balance: balanceAmount,
       chargesRows: chargesRowsHtml,
       paymentsRows: paymentsRowsHtml,
-      termsText: esc(cfg.termsText || ''),
+      // Pillar 2 / 16g — canonical bilingual T&C (version TC_VERSION).
+      // The configured cfg.termsText is treated as a tenant-level
+      // ADDENDUM and appended below the canonical content; we no longer
+      // surface the editable text as the legal terms themselves.
+      termsText: getCanonicalTermsHtml() + (cfg.termsText ? `<div class="tc-tenant-addendum"><h2>Tenant Addendum</h2><p>${esc(cfg.termsText)}</p></div>` : ''),
       signatureSignedBy: esc(agreement.reservation?.signatureSignedBy || '-'),
       signatureDateTime: esc(fmtDate(signatureTime)),
       signatureIp: esc(signatureIp),

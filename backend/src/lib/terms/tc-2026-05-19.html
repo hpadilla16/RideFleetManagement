@@ -1,0 +1,729 @@
+<!--
+  Canonical Terms & Conditions — version 2026-05-19.
+  Source of truth: International Rental Corp T&C (bilingual EN/ES, 20 pages,
+  24 sections). Verbatim text from the signed PDF — DO NOT paraphrase.
+  When language changes, create a new file (tc-YYYY-MM-DD.html) and bump
+  TC_VERSION in ./version.js.
+
+  Marker tokens preserved exactly so the agreement-print template + the
+  customer-portal sign page can locate the four "initials" lines and the
+  signature/acknowledgment blocks reliably:
+
+    {{INITIALS_S4_DECLINE}}        Section 4 — decline of optional coverage
+    {{INITIALS_S11_CARD_ON_FILE}}  Section 11 — card-on-file authorization
+    {{INITIALS_S11_CNP}}           Section 11 — card-not-present transactions
+    {{INITIALS_S11_NO_CHARGEBACK}} Section 11 — no chargeback for valid charges
+    {{INITIALS_S13_POST_RENTAL}}   Section 13 — post-rental charges (1 year)
+
+  These map to fields on RentalAgreementSignature / equivalent — the print
+  template substitutes with either a clickable input (sign flow) or the
+  captured initials text (closed agreement).
+-->
+<section class="tc-doc" data-tc-version="2026-05-19" lang="en">
+  <header class="tc-head">
+    <h1>TERMS AND CONDITIONS — RENTAL AGREEMENT<br/>
+        <span lang="es">TÉRMINOS Y CONDICIONES — CONTRATO DE ALQUILER</span></h1>
+    <p class="tc-meta">International Rental Corp — including its affiliated, associated, or related entities Zezgo, Mex, Ride Car Sharing, and Go Kar LLC (collectively, the &ldquo;Company&rdquo;). Esta versi&oacute;n cancela y reemplaza cualquier versi&oacute;n anterior. / This version supersedes all prior versions.</p>
+    <p class="tc-meta tc-warn"><strong>IMPORTANT — READ BEFORE SIGNING. / IMPORTANTE — LEA ANTES DE FIRMAR.</strong></p>
+  </header>
+
+  <div class="tc-bilingual">
+    <div class="tc-col tc-en">
+      <p>This Rental Agreement (the &ldquo;Agreement&rdquo;) is entered into between the RENTER / DRIVER(S) (the &ldquo;Customer&rdquo;) and the Company for the rental of a motor vehicle (the &ldquo;Vehicle&rdquo;). By signing this Agreement, presenting a payment card, accepting the keys, or otherwise taking possession of the Vehicle, the Customer acknowledges, accepts, and agrees to be bound by every section below and by every fee, charge, and authorization stated in this document and in the attached Schedule of Fees and Charges.</p>
+      <p><strong>Card-on-file pre-authorization.</strong> By signing this Agreement, the Customer expressly authorizes the Company to retain the payment method presented at the time of rental (the &ldquo;Card on File&rdquo;) and to charge it for any and all amounts permitted under this Agreement, including amounts that become known after the Vehicle is returned, in accordance with Sections 11, 12, and 13 below.</p>
+    </div>
+    <div class="tc-col tc-es" lang="es">
+      <p>Este Contrato de Alquiler (el &ldquo;Contrato&rdquo;) se celebra entre el ARRENDATARIO / CONDUCTOR(ES) (el &ldquo;Cliente&rdquo;) y la Compa&ntilde;&iacute;a para el alquiler de un veh&iacute;culo de motor (el &ldquo;Veh&iacute;culo&rdquo;). Al firmar este Contrato, presentar una tarjeta de pago, aceptar las llaves o tomar posesi&oacute;n del Veh&iacute;culo de cualquier otra manera, el Cliente reconoce, acepta y se obliga por cada secci&oacute;n a continuaci&oacute;n y por cada cargo, tarifa y autorizaci&oacute;n indicados en este documento y en el Anejo de Tarifas y Cargos adjunto.</p>
+      <p><strong>Pre-autorizaci&oacute;n de tarjeta en archivo.</strong> Al firmar este Contrato, el Cliente autoriza expresamente a la Compa&ntilde;&iacute;a a retener el m&eacute;todo de pago presentado al momento del alquiler (la &ldquo;Tarjeta en Archivo&rdquo;) y a hacerle cargos por todas las cantidades permitidas bajo este Contrato, incluidas las que surjan despu&eacute;s de devuelto el Veh&iacute;culo, conforme a las Secciones 11, 12 y 13 m&aacute;s adelante.</p>
+    </div>
+  </div>
+
+  <h2>1. AUTHORIZED USE / USO AUTORIZADO</h2>
+  <div class="tc-bilingual">
+    <div class="tc-col tc-en">
+      <p>The Vehicle may only be operated by Authorized Drivers:</p>
+      <ul>
+        <li>The primary Renter / Driver listed on the contract; and</li>
+        <li>Additional drivers approved and recorded in writing by the Company.</li>
+      </ul>
+      <p>Prohibited use includes, but is not limited to:</p>
+      <ul>
+        <li>Operation by an unlisted or unapproved driver</li>
+        <li>Off-road use or use on unpaved roads</li>
+        <li>Towing or pushing anything</li>
+        <li>Racing, testing, training, or commercial hire (e.g., Uber, Lyft, food/package delivery) without prior written consent from the Company</li>
+        <li>Any illegal activity</li>
+        <li>Operation while impaired by alcohol, drugs, or any substance affecting the ability to drive safely</li>
+        <li>Intentional damage to the Vehicle</li>
+        <li>Taking the Vehicle outside Puerto Rico</li>
+        <li>Obtaining the Vehicle under false pretenses, false identification, or fraudulent payment information</li>
+        <li>Leaving the Vehicle unlocked, running, or with keys unsecured</li>
+      </ul>
+      <p>Any prohibited use constitutes a material breach of this Agreement and may void all insurance, waivers, and optional protections, and may result in additional fees, including the Breach-of-Contract Fee of up to $2,500 (Section 22).</p>
+    </div>
+    <div class="tc-col tc-es" lang="es">
+      <p>El Veh&iacute;culo solo puede ser operado por Conductores Autorizados:</p>
+      <ul>
+        <li>El Arrendatario / Conductor principal indicado en el contrato; y</li>
+        <li>Conductores adicionales aprobados y registrados por escrito por la Compa&ntilde;&iacute;a.</li>
+      </ul>
+      <p>El uso prohibido incluye, pero no se limita a:</p>
+      <ul>
+        <li>Operaci&oacute;n por un conductor no listado o no aprobado</li>
+        <li>Uso fuera de carretera o en caminos no pavimentados</li>
+        <li>Remolcar o empujar cualquier cosa</li>
+        <li>Carreras, pruebas, entrenamientos o uso comercial (p. ej., Uber, Lyft, entrega de comida/paquetes) sin consentimiento previo por escrito de la Compa&ntilde;&iacute;a</li>
+        <li>Cualquier actividad ilegal</li>
+        <li>Operaci&oacute;n bajo los efectos de alcohol, drogas o cualquier sustancia que afecte la capacidad de conducir con seguridad</li>
+        <li>Da&ntilde;o intencional al Veh&iacute;culo</li>
+        <li>Sacar el Veh&iacute;culo fuera de Puerto Rico</li>
+        <li>Obtener el Veh&iacute;culo bajo pretextos falsos, identificaci&oacute;n falsa o informaci&oacute;n de pago fraudulenta</li>
+        <li>Dejar el Veh&iacute;culo sin seguro, encendido o con las llaves sin asegurar</li>
+      </ul>
+      <p>Cualquier uso prohibido constituye un incumplimiento sustancial de este Contrato y puede anular todos los seguros, exenciones y protecciones opcionales, y puede resultar en cargos adicionales, incluyendo el Cargo por Incumplimiento de hasta $2,500 (Secci&oacute;n 22).</p>
+    </div>
+  </div>
+
+  <h2>2. DRIVER REQUIREMENTS &amp; IDENTIFICATION / REQUISITOS DEL CONDUCTOR E IDENTIFICACI&Oacute;N</h2>
+  <div class="tc-bilingual">
+    <div class="tc-col tc-en">
+      <ul>
+        <li>Minimum age: 25 / Maximum age: 75</li>
+        <li>Valid driver&rsquo;s license held for at least one (1) year</li>
+        <li>International Driving Permit required if the license is not in the Latin alphabet</li>
+      </ul>
+      <p><strong>Visitors must present:</strong> passport; valid driver&rsquo;s license (with certified translation if applicable); credit card in the Renter&rsquo;s name.</p>
+      <p><strong>Local renters must present:</strong> government-issued ID; valid driver&rsquo;s license; credit card in the same name as the Renter; proof of billing address.</p>
+      <p>The Company reserves the right to refuse rental to any person who fails to satisfy these requirements or whose identification, license, or payment method cannot be verified.</p>
+    </div>
+    <div class="tc-col tc-es" lang="es">
+      <ul>
+        <li>Edad m&iacute;nima: 25 / Edad m&aacute;xima: 75</li>
+        <li>Licencia de conducir v&aacute;lida con al menos un (1) a&ntilde;o de vigencia</li>
+        <li>Se requiere Permiso Internacional de Conducir si la licencia no est&aacute; en alfabeto latino</li>
+      </ul>
+      <p><strong>Los visitantes deben presentar:</strong> pasaporte; licencia de conducir v&aacute;lida (con traducci&oacute;n certificada si aplica); tarjeta de cr&eacute;dito a nombre del Arrendatario.</p>
+      <p><strong>Los arrendatarios locales deben presentar:</strong> identificaci&oacute;n emitida por el gobierno; licencia de conducir v&aacute;lida; tarjeta de cr&eacute;dito al mismo nombre del Arrendatario; comprobante de direcci&oacute;n postal.</p>
+      <p>La Compa&ntilde;&iacute;a se reserva el derecho de rechazar el alquiler a cualquier persona que no cumpla con estos requisitos o cuya identificaci&oacute;n, licencia o m&eacute;todo de pago no pueda ser verificado.</p>
+    </div>
+  </div>
+
+  <h2>3. RATES, TAXES &amp; SURCHARGES / TARIFAS, IMPUESTOS Y RECARGOS</h2>
+  <div class="tc-bilingual">
+    <div class="tc-col tc-en">
+      <p><strong>Included in the basic rate:</strong></p>
+      <ul>
+        <li>Unlimited mileage (fair usage policy applies)</li>
+        <li>Local taxes (11.5%)</li>
+        <li>Airport/location surcharge including airport shuttle (10.5%)</li>
+      </ul>
+      <p><strong>NOT included in the basic rate</strong> (charged separately, with prior disclosure):</p>
+      <ul>
+        <li>Public Liability Insurance (PLI)</li>
+        <li>Partial Damage Waiver (PDW), Loss Damage Waiver (LDW), Collision Damage Waiver (CDW)</li>
+        <li>Theft Waiver</li>
+        <li>Roadside Assistance for driver-caused issues</li>
+        <li>Fuel, tolls, key replacement, smoking fees</li>
+        <li>Additional driver fees</li>
+        <li>Child seats, tire insurance, glass insurance</li>
+        <li>Facility Fee, Energy Fee, License Fee, Trip Fee</li>
+      </ul>
+    </div>
+    <div class="tc-col tc-es" lang="es">
+      <p><strong>Incluido en la tarifa b&aacute;sica:</strong></p>
+      <ul>
+        <li>Millaje ilimitado (aplica pol&iacute;tica de uso razonable)</li>
+        <li>Impuestos locales (11.5%)</li>
+        <li>Recargo de aeropuerto/localidad incluyendo el transporte (shuttle) al aeropuerto (10.5%)</li>
+      </ul>
+      <p><strong>NO incluido en la tarifa b&aacute;sica</strong> (se cobra por separado, con divulgaci&oacute;n previa):</p>
+      <ul>
+        <li>Seguro de Responsabilidad P&uacute;blica (PLI)</li>
+        <li>Exenci&oacute;n de Da&ntilde;os Parciales (PDW), Exenci&oacute;n de P&eacute;rdida (LDW), Exenci&oacute;n de Colisi&oacute;n (CDW)</li>
+        <li>Exenci&oacute;n de Robo (Theft Waiver)</li>
+        <li>Asistencia en Carretera por incidentes causados por el conductor</li>
+        <li>Combustible, peajes, reemplazo de llaves, cargos por fumar</li>
+        <li>Cargos por conductor adicional</li>
+        <li>Asientos para ni&ntilde;os, seguro de gomas, seguro de cristales</li>
+        <li>Cargo de Facilidad, Cargo de Energ&iacute;a, Cargo de Licencia, Cargo de Viaje</li>
+      </ul>
+    </div>
+  </div>
+
+  <h2>4. INSURANCE REQUIREMENTS &amp; COVERAGE / REQUISITOS DE SEGURO Y COBERTURAS</h2>
+  <div class="tc-bilingual">
+    <div class="tc-col tc-en">
+      <p>The Company provides only the legally required insurance under Puerto Rico law. <strong>No optional coverage is included unless purchased at the counter.</strong></p>
+      <p><strong>4.1 Public Liability Insurance (PLI):</strong> Available at $21.99/day + tax. Renter may decline ONLY with acceptable proof of personal insurance per Section 4.2.</p>
+      <p><strong>4.2 Personal Insurance — Acceptance Criteria.</strong> Personal insurance MUST meet ALL of the following or it will not be accepted, and the Renter must purchase PDW or LDW:</p>
+      <ul>
+        <li>Policies that only provide liability coverage are NOT accepted.</li>
+        <li>The policy must expressly state that it provides full collision and comprehensive coverage for rental vehicles in Puerto Rico.</li>
+        <li>Collision coverage must cover the full book value (actual cash value) of the rented Vehicle, confirmed in writing on an official insurer letter.</li>
+        <li>Proof of insurance must be verified and approved by the Company.</li>
+        <li>Credit card insurance is NOT accepted under any circumstance.</li>
+      </ul>
+      <p><strong>4.3 Theft Waiver.</strong> Limits Renter liability up to a maximum vehicle value of $90,000 USD.</p>
+      <p><strong>4.4 Collision Damage Waiver (CDW).</strong> Optional. Excludes damage to: glass, tires, roof, undercarriage, interior; keys, fobs, plates, documents, tools; negligent or reckless driving; unauthorized drivers.</p>
+      <p><strong>4.5 Partial Damage Waiver (PDW).</strong> Optional. Deductible: $300 – $800 depending on vehicle class.</p>
+      <p><strong>4.6 Loss Damage Waiver (LDW).</strong> Optional. Same exclusions as CDW.</p>
+    </div>
+    <div class="tc-col tc-es" lang="es">
+      <p>La Compa&ntilde;&iacute;a solo provee el seguro requerido por ley en Puerto Rico. <strong>Ninguna cobertura opcional est&aacute; incluida a menos que se compre en el mostrador.</strong></p>
+      <p><strong>4.1 Seguro de Responsabilidad P&uacute;blica (PLI):</strong> Disponible a $21.99/d&iacute;a + impuestos. El Arrendatario solo puede declinarlo presentando evidencia aceptable de seguro personal seg&uacute;n la Secci&oacute;n 4.2.</p>
+      <p><strong>4.2 Seguro Personal — Criterios de Aceptaci&oacute;n.</strong> El seguro personal DEBE cumplir TODO lo siguiente o no ser&aacute; aceptado, y el Arrendatario deber&aacute; comprar PDW o LDW:</p>
+      <ul>
+        <li>NO se aceptan p&oacute;lizas que solo provean cobertura de responsabilidad (liability).</li>
+        <li>La p&oacute;liza debe indicar expresamente que provee cobertura completa de colisi&oacute;n y comprensiva para veh&iacute;culos de alquiler en Puerto Rico.</li>
+        <li>La cobertura de colisi&oacute;n debe cubrir el valor de libro completo (valor en efectivo real) del Veh&iacute;culo alquilado, confirmado por escrito en una carta oficial del asegurador.</li>
+        <li>La evidencia de seguro debe ser verificada y aprobada por la Compa&ntilde;&iacute;a.</li>
+        <li>NO se acepta el seguro de tarjeta de cr&eacute;dito bajo ninguna circunstancia.</li>
+      </ul>
+      <p><strong>4.3 Exenci&oacute;n de Robo (Theft Waiver).</strong> Limita la responsabilidad del Arrendatario hasta un valor m&aacute;ximo del veh&iacute;culo de $90,000 USD.</p>
+      <p><strong>4.4 Exenci&oacute;n de Da&ntilde;os por Colisi&oacute;n (CDW).</strong> Opcional. Excluye da&ntilde;os a: cristales, gomas, techo, parte inferior, interior; llaves, controles, tablillas, documentos, herramientas; conducci&oacute;n negligente o temeraria; conductores no autorizados.</p>
+      <p><strong>4.5 Exenci&oacute;n de Da&ntilde;os Parciales (PDW).</strong> Opcional. Deducible: $300 – $800 seg&uacute;n la clase del veh&iacute;culo.</p>
+      <p><strong>4.6 Exenci&oacute;n de P&eacute;rdida (LDW).</strong> Opcional. Mismas exclusiones que CDW.</p>
+    </div>
+  </div>
+
+  <div class="tc-initials-block">
+    <div class="tc-bilingual">
+      <div class="tc-col tc-en">
+        <p>I acknowledge that the Company has offered me CDW, LDW, PDW, Supplemental Liability Insurance, and Personal Accident Insurance, and I voluntarily DECLINE all such optional coverage. I elect to rely on my personal insurance and I am solely responsible for confirming that it is valid and sufficient for this rental. I assume full financial responsibility for any loss, damage, theft, liability, claims, deductibles, or expenses arising from the use of the Vehicle, including any amounts not covered or denied by my insurer. ( {{INITIALS_S4_DECLINE}} Initials )</p>
+      </div>
+      <div class="tc-col tc-es" lang="es">
+        <p>Reconozco que la Compa&ntilde;&iacute;a me ha ofrecido CDW, LDW, PDW, Seguro Suplementario de Responsabilidad y Seguro de Accidente Personal, y voluntariamente DECLINO toda esa cobertura opcional. Elijo depender de mi seguro personal y soy el &uacute;nico responsable de confirmar que sea v&aacute;lido y suficiente para este alquiler. Asumo total responsabilidad financiera por cualquier p&eacute;rdida, da&ntilde;o, robo, responsabilidad, reclamaci&oacute;n, deducible o gasto que surja del uso del Veh&iacute;culo, incluyendo cualquier monto no cubierto o denegado por mi asegurador. ( {{INITIALS_S4_DECLINE}} Iniciales )</p>
+      </div>
+    </div>
+  </div>
+
+  <h2>5. ROADSIDE ASSISTANCE / ASISTENCIA EN CARRETERA</h2>
+  <div class="tc-bilingual">
+    <div class="tc-col tc-en">
+      <p>Roadside Assistance is available ONLY during the Company&rsquo;s normal hours of operation. Outside those hours, the Renter must:</p>
+      <ul>
+        <li>Call 911 in any emergency or unsafe situation;</li>
+        <li>Secure the Vehicle safely and wait until the Company reopens;</li>
+        <li>The Company will address and resolve the matter the following business day.</li>
+      </ul>
+      <p><strong>Included (during business hours, no cost):</strong> mechanical breakdowns not caused by the Renter.</p>
+      <p><strong>NOT included (Renter is responsible):</strong> misfueling, dead battery, tire damage, lost keys, lockouts, accidents caused by Renter fault.</p>
+      <p><strong>Optional add-on ($12.99/day + tax):</strong> Roadside Assistance for driver-caused issues during business hours.</p>
+      <p><strong>After-hours limitation.</strong> The Company does not provide emergency response, towing, or on-site support outside business hours. The Renter is responsible for all safety decisions after hours, including calling authorities or emergency services.</p>
+    </div>
+    <div class="tc-col tc-es" lang="es">
+      <p>La Asistencia en Carretera est&aacute; disponible SOLAMENTE durante las horas normales de operaci&oacute;n de la Compa&ntilde;&iacute;a. Fuera de ese horario, el Arrendatario debe:</p>
+      <ul>
+        <li>Llamar al 911 ante cualquier emergencia o situaci&oacute;n insegura;</li>
+        <li>Asegurar el Veh&iacute;culo en un lugar seguro y esperar a que la Compa&ntilde;&iacute;a reabra;</li>
+        <li>La Compa&ntilde;&iacute;a atender&aacute; y resolver&aacute; el asunto el siguiente d&iacute;a laborable.</li>
+      </ul>
+      <p><strong>Incluido (durante horas laborables, sin costo):</strong> aver&iacute;as mec&aacute;nicas no causadas por el Arrendatario.</p>
+      <p><strong>NO incluido (Arrendatario responsable):</strong> error de combustible, bater&iacute;a descargada, da&ntilde;os a gomas, llaves perdidas, dejarse afuera del veh&iacute;culo, accidentes por culpa del Arrendatario.</p>
+      <p><strong>Adicional opcional ($12.99/d&iacute;a + impuestos):</strong> Asistencia en Carretera por incidentes causados por el conductor durante horas laborables.</p>
+      <p><strong>Limitaci&oacute;n fuera de horario.</strong> La Compa&ntilde;&iacute;a no provee respuesta de emergencia, gr&uacute;a, ni apoyo en sitio fuera del horario laborable. El Arrendatario es responsable de todas las decisiones de seguridad fuera de horario, incluyendo llamar a autoridades o servicios de emergencia.</p>
+    </div>
+  </div>
+
+  <h2>6. TOLLS / AUTOEXPRESO / PEAJES / AUTOEXPRESO</h2>
+  <div class="tc-bilingual">
+    <div class="tc-col tc-en">
+      <p>All Vehicles are equipped with a registered AutoExpreso device.</p>
+      <p><strong>Toll Service Package:</strong> $12.99/day, includes tolls + tax.</p>
+      <p><strong>If the package is declined:</strong> the Renter will be charged the posted toll rate + $5 service fee per toll + tax.</p>
+      <p><strong>Tampering (removing, damaging, or disabling the device):</strong></p>
+      <ul>
+        <li>$500 replacement fee + tax</li>
+        <li>$60 per toll transaction</li>
+        <li>plus any applicable fines.</li>
+      </ul>
+      <p>Toll and traffic charges may be assessed up to one (1) year after the rental ends in accordance with Section 13.</p>
+    </div>
+    <div class="tc-col tc-es" lang="es">
+      <p>Todos los Veh&iacute;culos est&aacute;n equipados con un dispositivo AutoExpreso registrado.</p>
+      <p><strong>Paquete de Servicio de Peajes:</strong> $12.99/d&iacute;a, incluye peajes + impuestos.</p>
+      <p><strong>Si se rechaza el paquete:</strong> se cobrar&aacute; al Arrendatario la tarifa publicada del peaje + $5 de cargo por servicio por peaje + impuestos.</p>
+      <p><strong>Manipulaci&oacute;n (remover, da&ntilde;ar o inhabilitar el dispositivo):</strong></p>
+      <ul>
+        <li>$500 de cargo por reemplazo + impuestos</li>
+        <li>$60 por transacci&oacute;n de peaje</li>
+        <li>m&aacute;s cualquier multa aplicable.</li>
+      </ul>
+      <p>Los cargos por peajes y tr&aacute;fico pueden ser procesados hasta un (1) a&ntilde;o despu&eacute;s de finalizado el alquiler conforme a la Secci&oacute;n 13.</p>
+    </div>
+  </div>
+
+  <h2>7. VEHICLE CONDITION &amp; RETURN / CONDICI&Oacute;N DEL VEH&Iacute;CULO Y DEVOLUCI&Oacute;N</h2>
+  <div class="tc-bilingual">
+    <div class="tc-col tc-en">
+      <p>The Vehicle must be returned:</p>
+      <ul>
+        <li>in identical condition (normal wear permitted);</li>
+        <li>at the agreed date, time, and location;</li>
+        <li>with the same fuel level as at pick-up.</li>
+      </ul>
+      <p>The Customer is responsible for all fees, damages, tolls, and violations up to the point the Vehicle is formally inspected and accepted by the Company at return.</p>
+      <p>The Company will perform a check-in inspection. Damages, missing items, or fluid/fuel discrepancies discovered during the inspection — or later, when uncovered by professional cleaning, mechanical inspection, photographs, video, telematics/GPS data, repair quotes, or insurer/police reports — will be processed under Sections 9, 10, 11, 12, and 13.</p>
+    </div>
+    <div class="tc-col tc-es" lang="es">
+      <p>El Veh&iacute;culo debe ser devuelto:</p>
+      <ul>
+        <li>en id&eacute;ntica condici&oacute;n (se permite desgaste normal);</li>
+        <li>en la fecha, hora y lugar acordados;</li>
+        <li>con el mismo nivel de combustible que al momento de recogerlo.</li>
+      </ul>
+      <p>El Cliente es responsable de todos los cargos, da&ntilde;os, peajes y multas hasta el momento en que el Veh&iacute;culo sea inspeccionado formalmente y aceptado por la Compa&ntilde;&iacute;a a la devoluci&oacute;n.</p>
+      <p>La Compa&ntilde;&iacute;a realizar&aacute; una inspecci&oacute;n de devoluci&oacute;n. Los da&ntilde;os, art&iacute;culos faltantes o discrepancias de fluidos/combustible que se descubran durante la inspecci&oacute;n — o posteriormente, al ser revelados por limpieza profesional, inspecci&oacute;n mec&aacute;nica, fotograf&iacute;as, video, datos de telemetr&iacute;a/GPS, cotizaciones de reparaci&oacute;n o informes del asegurador o de la polic&iacute;a — ser&aacute;n procesados bajo las Secciones 9, 10, 11, 12 y 13.</p>
+    </div>
+  </div>
+
+  <h2>8. RESERVATIONS, CANCELLATION &amp; NO-SHOW / RESERVAS, CANCELACI&Oacute;N Y NO PRESENTACI&Oacute;N</h2>
+  <div class="tc-bilingual">
+    <div class="tc-col tc-en">
+      <p><strong>Cancellation within 48 hours of pickup:</strong> Customer forfeits any deposit or prepaid amount.</p>
+      <p><strong>Cancellation more than 48 hours before pickup:</strong> full refund of prepaid amounts.</p>
+      <p><strong>No-show:</strong> the reservation is non-refundable.</p>
+      <p><strong>Extensions.</strong> With 48+ hours notice the standard daily rate applies. With less than 48 hours notice, a $100 late-extension fee + the daily rate applies. All extensions are subject to availability. Maximum rental period: 28 days.</p>
+      <p><strong>Early return:</strong> No refunds are issued for unused rental days.</p>
+    </div>
+    <div class="tc-col tc-es" lang="es">
+      <p><strong>Cancelaci&oacute;n dentro de 48 horas antes del recogido:</strong> el Cliente pierde cualquier dep&oacute;sito o pago anticipado.</p>
+      <p><strong>Cancelaci&oacute;n con m&aacute;s de 48 horas de antelaci&oacute;n:</strong> reembolso completo de los montos pagados por adelantado.</p>
+      <p><strong>No presentaci&oacute;n:</strong> la reserva no es reembolsable.</p>
+      <p><strong>Extensiones.</strong> Con 48 horas o m&aacute;s de aviso, aplica la tarifa diaria est&aacute;ndar. Con menos de 48 horas de aviso, aplica un cargo de extensi&oacute;n tard&iacute;a de $100 + la tarifa diaria. Todas las extensiones est&aacute;n sujetas a disponibilidad. Per&iacute;odo m&aacute;ximo de alquiler: 28 d&iacute;as.</p>
+      <p><strong>Devoluci&oacute;n temprana:</strong> No se emiten reembolsos por d&iacute;as no utilizados.</p>
+    </div>
+  </div>
+
+  <h2>9. SCHEDULE OF OPERATIONAL FEES / ANEJO DE TARIFAS OPERACIONALES</h2>
+  <p class="tc-note">All amounts in USD. Taxes additional where applicable. Amounts apply per occurrence unless otherwise stated. / Todos los montos en USD. Impuestos adicionales donde aplique. Aplican por incidente salvo indicaci&oacute;n.</p>
+  <table class="tc-fees">
+    <thead><tr><th>Fee / Charge</th><th>Cargo / Tarifa</th><th class="num">Amount</th></tr></thead>
+    <tbody>
+      <tr><td>Cleaning — light (interior debris, sand, food residue)</td><td lang="es">Limpieza — leve (residuos interiores, arena, comida)</td><td class="num">$150</td></tr>
+      <tr><td>Cleaning — heavy (stains, vomit, biohazard, deep detail)</td><td lang="es">Limpieza — pesada (manchas, v&oacute;mito, biohazard, detallado)</td><td class="num">$250 – $750</td></tr>
+      <tr><td>Smoking inside Vehicle (including e-cigarettes and vaporizers)</td><td lang="es">Fumar dentro del Veh&iacute;culo (incluye cigarrillos electr&oacute;nicos y vaporizadores)</td><td class="num">$500</td></tr>
+      <tr><td>Pet (except approved service animals)</td><td lang="es">Mascotas (excepto animales de servicio aprobados)</td><td class="num">$500</td></tr>
+      <tr><td>Key / key fob replacement (plus reprogramming cost)</td><td lang="es">Reemplazo de llave / control (m&aacute;s costo de reprogramaci&oacute;n)</td><td class="num">$500 min.</td></tr>
+      <tr><td>Tire blowout / replacement (per tire)</td><td lang="es">Goma reventada / reemplazo (por goma)</td><td class="num">$250</td></tr>
+      <tr><td>Towing (plus actual expenses)</td><td lang="es">Gr&uacute;a (m&aacute;s gastos reales)</td><td class="num">$350</td></tr>
+      <tr><td>Traffic / parking violation handling</td><td lang="es">Gesti&oacute;n de multa de tr&aacute;nsito / estacionamiento</td><td class="num">Ticket + $75 admin</td></tr>
+      <tr><td>Fuel — refill (per gallon, plus admin fee + tax)</td><td lang="es">Combustible — recarga (por gal&oacute;n, m&aacute;s cargo administrativo + impuestos)</td><td class="num">$9.99/gal + $75</td></tr>
+      <tr><td>Late return (per hour, after 30-minute grace period)</td><td lang="es">Devoluci&oacute;n tard&iacute;a (por hora, despu&eacute;s de gracia de 30 min)</td><td class="num">$25/hr</td></tr>
+      <tr><td>Additional driver fee (per day)</td><td lang="es">Cargo por conductor adicional (por d&iacute;a)</td><td class="num">$12.99/day</td></tr>
+      <tr><td>Lost or unreturned contract documents / registration</td><td lang="es">P&eacute;rdida o no devoluci&oacute;n de documentos del contrato / registro</td><td class="num">$100</td></tr>
+      <tr><td>AutoExpreso device tampering — replacement</td><td lang="es">Manipulaci&oacute;n del dispositivo AutoExpreso — reemplazo</td><td class="num">$500</td></tr>
+      <tr><td>AutoExpreso device tampering — per toll transaction</td><td lang="es">Manipulaci&oacute;n del dispositivo AutoExpreso — por transacci&oacute;n de peaje</td><td class="num">$60</td></tr>
+      <tr><td>Vehicle abandonment / repossession (plus recovery costs)</td><td lang="es">Abandono del Veh&iacute;culo / repossession (m&aacute;s costos de recuperaci&oacute;n)</td><td class="num">$500 + costs</td></tr>
+      <tr><td>Breach-of-Contract Fee (per breach, see Section 22)</td><td lang="es">Cargo por Incumplimiento (por incidente, ver Secci&oacute;n 22)</td><td class="num">up to $2,500</td></tr>
+      <tr><td>Vehicle theft reporting / case administration</td><td lang="es">Reporte de robo del Veh&iacute;culo / administraci&oacute;n del caso</td><td class="num">$1,000</td></tr>
+      <tr><td>Chargeback administration / collection (per chargeback)</td><td lang="es">Administraci&oacute;n de chargeback / cobro (por chargeback)</td><td class="num">$150 + costs</td></tr>
+    </tbody>
+  </table>
+
+  <h2>10. SCHEDULE OF DAMAGE CHARGES / ANEJO DE CARGOS POR DA&Ntilde;OS</h2>
+  <div class="tc-bilingual">
+    <div class="tc-col tc-en">
+      <p>The following amounts represent the Company&rsquo;s established charges for the most common categories of damage to the Vehicle. Where actual repair costs exceed these amounts, the Customer is responsible for the actual cost. Where the Customer has purchased PDW or LDW and the damage is not excluded, the Customer remains responsible for the applicable deductible.</p>
+      <p>All damage charges are supported by photographs, repair quotes, and inspection documentation in accordance with Section 12.</p>
+    </div>
+    <div class="tc-col tc-es" lang="es">
+      <p>Los siguientes montos representan los cargos establecidos por la Compa&ntilde;&iacute;a para las categor&iacute;as m&aacute;s comunes de da&ntilde;os al Veh&iacute;culo. Cuando el costo real de reparaci&oacute;n exceda estos montos, el Cliente es responsable del costo real. Cuando el Cliente haya comprado PDW o LDW y el da&ntilde;o no est&eacute; excluido, el Cliente sigue siendo responsable del deducible aplicable.</p>
+      <p>Todos los cargos por da&ntilde;os se respaldan con fotograf&iacute;as, cotizaciones de reparaci&oacute;n y documentaci&oacute;n de inspecci&oacute;n conforme a la Secci&oacute;n 12.</p>
+    </div>
+  </div>
+  <table class="tc-fees">
+    <thead><tr><th>Damage Category</th><th>Categor&iacute;a de Da&ntilde;o</th><th class="num">Amount</th></tr></thead>
+    <tbody>
+      <tr><td>Body — minor scratch (under 6 in / 15 cm), per panel</td><td lang="es">Carrocer&iacute;a — ray&oacute;n menor (menos de 15 cm / 6 in), por panel</td><td class="num">$250</td></tr>
+      <tr><td>Body — major scratch (6–12 in / 15–30 cm), per panel</td><td lang="es">Carrocer&iacute;a — ray&oacute;n mayor (15–30 cm / 6–12 in), por panel</td><td class="num">$450</td></tr>
+      <tr><td>Body — dent (per panel, requires PDR or panel work)</td><td lang="es">Carrocer&iacute;a — abolladura (por panel, requiere PDR o trabajo de panel)</td><td class="num">$500 – $1,200</td></tr>
+      <tr><td>Body — panel replacement (per panel, plus paint)</td><td lang="es">Carrocer&iacute;a — reemplazo de panel (por panel, m&aacute;s pintura)</td><td class="num">$800 – $2,500</td></tr>
+      <tr><td>Bumper — minor scuff/scratch</td><td lang="es">Bumper / parachoques — rasgu&ntilde;o menor</td><td class="num">$300</td></tr>
+      <tr><td>Bumper — repair or replacement</td><td lang="es">Bumper / parachoques — reparaci&oacute;n o reemplazo</td><td class="num">$650 – $1,800</td></tr>
+      <tr><td>Headlight / taillight assembly replacement (each)</td><td lang="es">Reemplazo de unidad de luz delantera/trasera (cada una)</td><td class="num">$400 – $900</td></tr>
+      <tr><td>Side mirror — minor</td><td lang="es">Espejo lateral — da&ntilde;o menor</td><td class="num">$250</td></tr>
+      <tr><td>Side mirror — replacement (with motor / camera)</td><td lang="es">Espejo lateral — reemplazo (con motor / c&aacute;mara)</td><td class="num">$450 – $900</td></tr>
+      <tr><td>Windshield — chip repair</td><td lang="es">Parabrisas — reparaci&oacute;n de astilla</td><td class="num">$150</td></tr>
+      <tr><td>Windshield — replacement</td><td lang="es">Parabrisas — reemplazo</td><td class="num">$600 – $1,500</td></tr>
+      <tr><td>Glass — side or rear window replacement</td><td lang="es">Cristal — reemplazo de ventana lateral o trasera</td><td class="num">$450 – $1,200</td></tr>
+      <tr><td>Wheel / rim — curb scuff or scratch (per rim)</td><td lang="es">Aro / llanta — raspadura de acera (por aro)</td><td class="num">$250</td></tr>
+      <tr><td>Wheel / rim — replacement (per rim)</td><td lang="es">Aro / llanta — reemplazo (por aro)</td><td class="num">$400 – $1,200</td></tr>
+      <tr><td>Tire — sidewall damage / blowout (per tire)</td><td lang="es">Goma — da&ntilde;o en pared lateral / revent&oacute;n (por goma)</td><td class="num">$250</td></tr>
+      <tr><td>Undercarriage damage (curb impact, scrape)</td><td lang="es">Da&ntilde;o en parte inferior (impacto con acera, raspadura)</td><td class="num">$500 – $2,500</td></tr>
+      <tr><td>Roof damage (scrape, dent, garage strike)</td><td lang="es">Da&ntilde;o en el techo (raspadura, abolladura, golpe en garaje)</td><td class="num">$800 – $3,500</td></tr>
+      <tr><td>Interior — upholstery burn, cut, or stain (per location)</td><td lang="es">Interior — quemadura, corte o mancha en tapicer&iacute;a (por &aacute;rea)</td><td class="num">$300 – $800</td></tr>
+      <tr><td>Interior — dashboard / electronic component damage</td><td lang="es">Interior — da&ntilde;o en tablero / componente electr&oacute;nico</td><td class="num">$500 – $2,500</td></tr>
+      <tr><td>License plate or registration sticker damage / loss</td><td lang="es">Da&ntilde;o o p&eacute;rdida de tablilla o marbete</td><td class="num">$150</td></tr>
+      <tr><td>AutoExpreso device damage or loss</td><td lang="es">Da&ntilde;o o p&eacute;rdida del dispositivo AutoExpreso</td><td class="num">$500</td></tr>
+      <tr><td>Diminished value (post-repair) — assessed by appraiser</td><td lang="es">P&eacute;rdida de valor (post-reparaci&oacute;n) — evaluada por tasador</td><td class="num">Actual</td></tr>
+      <tr><td>Loss of use (per day, while Vehicle is out of service)</td><td lang="es">P&eacute;rdida de uso (por d&iacute;a, mientras el Veh&iacute;culo est&eacute; fuera de servicio)</td><td class="num">$45 – $95</td></tr>
+      <tr><td>Total loss — actual cash value (minus salvage)</td><td lang="es">P&eacute;rdida total — valor en efectivo real (menos salvamento)</td><td class="num">Actual</td></tr>
+      <tr><td>Appraisal / inspection fee</td><td lang="es">Cargo por tasaci&oacute;n / inspecci&oacute;n</td><td class="num">$150</td></tr>
+      <tr><td>Administrative / claim processing fee (per claim)</td><td lang="es">Cargo administrativo / procesamiento de reclamaci&oacute;n (por reclamaci&oacute;n)</td><td class="num">$95</td></tr>
+    </tbody>
+  </table>
+
+  <h2>11. CARD-ON-FILE PRE-AUTHORIZATION / PRE-AUTORIZACI&Oacute;N DE TARJETA EN ARCHIVO</h2>
+  <div class="tc-bilingual">
+    <div class="tc-col tc-en">
+      <p><strong>The Customer expressly authorizes the Company to process additional charges to the payment method on file</strong> for damages, tolls, cleaning fees, traffic violations, administrative fees, extensions, fuel, key replacement, smoking, pet, recovery, loss of use, deductibles, and any other charges arising from the rental agreement, including charges processed AFTER vehicle return.</p>
+      <p>This authorization covers:</p>
+      <ul>
+        <li>every payment card presented at the time of rental, including credit, debit, and any digital wallet linked to such card;</li>
+        <li>card-present and card-not-present transactions;</li>
+        <li>both initial rental charges and any subsequent supplemental, amended, or delayed charges authorized under this Agreement and applicable payment network rules;</li>
+        <li>the full retention period set forth in Section 13 (up to one year after the end of the rental).</li>
+      </ul>
+      <p>The Customer acknowledges that:</p>
+      <ul>
+        <li>an authorization hold may be placed on the Card on File at pick-up for the estimated total rental amount plus a security reserve;</li>
+        <li>the Card on File may be charged automatically without requiring the physical presence of the card or a new signature, in accordance with this pre-authorization and applicable card network rules;</li>
+        <li>if the Card on File is declined, expired, or otherwise unusable, the Customer remains personally and contractually liable for all amounts owed and agrees to provide an alternative payment method on demand;</li>
+        <li>the Customer will not initiate a chargeback for any amount validly charged under this Agreement, and any chargeback initiated in breach of this Section may be defended by the Company using this Agreement, the inspection documentation, and the supporting evidence described in Section 12.</li>
+      </ul>
+    </div>
+    <div class="tc-col tc-es" lang="es">
+      <p><strong>El Cliente autoriza expresamente a la Compa&ntilde;&iacute;a a procesar cargos adicionales al m&eacute;todo de pago en archivo</strong> por da&ntilde;os, peajes, cargos de limpieza, multas de tr&aacute;nsito, cargos administrativos, extensiones, combustible, reemplazo de llaves, fumar, mascotas, recuperaci&oacute;n, p&eacute;rdida de uso, deducibles y cualesquiera otros cargos que surjan del contrato de alquiler, incluyendo cargos procesados DESPU&Eacute;S de la devoluci&oacute;n del veh&iacute;culo.</p>
+      <p>Esta autorizaci&oacute;n cubre:</p>
+      <ul>
+        <li>toda tarjeta de pago presentada al momento del alquiler, incluyendo cr&eacute;dito, d&eacute;bito y cualquier billetera digital vinculada a dicha tarjeta;</li>
+        <li>transacciones con tarjeta presente y transacciones con tarjeta no presente (card-not-present);</li>
+        <li>tanto los cargos iniciales del alquiler como cualesquiera cargos suplementarios, enmendados o diferidos autorizados bajo este Contrato y las reglas aplicables de la red de pagos;</li>
+        <li>el per&iacute;odo de retenci&oacute;n completo establecido en la Secci&oacute;n 13 (hasta un a&ntilde;o despu&eacute;s de finalizado el alquiler).</li>
+      </ul>
+      <p>El Cliente reconoce que:</p>
+      <ul>
+        <li>se podr&aacute; colocar un hold de autorizaci&oacute;n sobre la Tarjeta en Archivo al momento del recogido por el monto total estimado del alquiler m&aacute;s una reserva de seguridad;</li>
+        <li>la Tarjeta en Archivo puede ser cargada autom&aacute;ticamente sin requerir la presencia f&iacute;sica de la tarjeta ni una firma nueva, conforme a esta pre-autorizaci&oacute;n y las reglas aplicables de la red de tarjetas;</li>
+        <li>si la Tarjeta en Archivo es declinada, est&aacute; vencida o no es utilizable, el Cliente sigue siendo personal y contractualmente responsable de todos los montos adeudados y se obliga a proveer un m&eacute;todo de pago alterno cuando se le solicite;</li>
+        <li>el Cliente no iniciar&aacute; un chargeback (contracargo) por ning&uacute;n monto v&aacute;lidamente cobrado bajo este Contrato, y cualquier chargeback iniciado en violaci&oacute;n de esta Secci&oacute;n podr&aacute; ser defendido por la Compa&ntilde;&iacute;a utilizando este Contrato, la documentaci&oacute;n de inspecci&oacute;n y la evidencia descrita en la Secci&oacute;n 12.</li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="tc-initials-block">
+    <div class="tc-bilingual">
+      <div class="tc-col tc-en">
+        <p><strong>Card-on-file authorization</strong> — I authorize the Company to charge my payment method on file for any and all damages, fees, tolls, fines, fuel, cleaning, deductibles, administrative fees, and other amounts permitted under this Agreement, including charges processed after the Vehicle is returned. ( {{INITIALS_S11_CARD_ON_FILE}} Initials )</p>
+      </div>
+      <div class="tc-col tc-es" lang="es">
+        <p><strong>Autorizaci&oacute;n de tarjeta en archivo</strong> — autorizo a la Compa&ntilde;&iacute;a a cargar a mi m&eacute;todo de pago en archivo cualquier da&ntilde;o, cargo, peaje, multa, combustible, limpieza, deducible, cargo administrativo y cualquier otro monto permitido bajo este Contrato, incluyendo cargos procesados despu&eacute;s de devolver el Veh&iacute;culo. ( {{INITIALS_S11_CARD_ON_FILE}} Iniciales )</p>
+      </div>
+    </div>
+  </div>
+
+  <div class="tc-initials-block">
+    <div class="tc-bilingual">
+      <div class="tc-col tc-en">
+        <p><strong>Card-not-present transactions</strong> — I expressly authorize the Company to process card-not-present (manual) transactions on my Card on File for the categories of charges described in Sections 11 and 12 of this Agreement. ( {{INITIALS_S11_CNP}} Initials )</p>
+      </div>
+      <div class="tc-col tc-es" lang="es">
+        <p><strong>Transacciones sin tarjeta presente</strong> — autorizo expresamente a la Compa&ntilde;&iacute;a a procesar transacciones sin tarjeta presente (manuales) en mi Tarjeta en Archivo para las categor&iacute;as de cargos descritas en las Secciones 11 y 12 de este Contrato. ( {{INITIALS_S11_CNP}} Iniciales )</p>
+      </div>
+    </div>
+  </div>
+
+  <div class="tc-initials-block">
+    <div class="tc-bilingual">
+      <div class="tc-col tc-en">
+        <p><strong>No chargeback for valid charges</strong> — I agree not to initiate a chargeback for any amount validly charged under this Agreement and acknowledge that doing so may result in a $150 chargeback administration fee plus collection and legal costs. ( {{INITIALS_S11_NO_CHARGEBACK}} Initials )</p>
+      </div>
+      <div class="tc-col tc-es" lang="es">
+        <p><strong>No chargeback por cargos v&aacute;lidos</strong> — acepto no iniciar un chargeback por ning&uacute;n monto v&aacute;lidamente cobrado bajo este Contrato y reconozco que hacerlo puede resultar en un cargo administrativo de chargeback de $150 m&aacute;s costos de cobro y honorarios legales. ( {{INITIALS_S11_NO_CHARGEBACK}} Iniciales )</p>
+      </div>
+    </div>
+  </div>
+
+  <h2>12. DELAYED CHARGES — PROCEDURE FOR DAMAGE, THEFT, OR LOSS / CARGOS DIFERIDOS — PROCEDIMIENTO PARA DA&Ntilde;O, ROBO O P&Eacute;RDIDA</h2>
+  <div class="tc-bilingual">
+    <div class="tc-col tc-en">
+      <p>Where a charge becomes known after the Vehicle is returned and relates to physical damage, theft, or loss of use, the Company will process the charge using the Card on File in accordance with payment network rules. Specifically, before processing such a charge the Company will provide the Customer with documentation that includes ALL of the following:</p>
+      <ol>
+        <li>A written explanation of the charge that connects it to the Customer&rsquo;s use of the Vehicle during the rental period;</li>
+        <li>Any accident, police, or insurance report;</li>
+        <li>For damage to the Vehicle: at least two (2) repair estimates from organizations legally permitted to perform repairs;</li>
+        <li>The portion of the loss, theft, or damage that will be paid by insurance (if any) and the reason the Customer is liable for the amount claimed;</li>
+        <li>Notification that payment for loss, theft, or damage with the Customer&rsquo;s payment card is optional and not a required or default payment option (the Customer may choose to pay by alternative means, but agrees that if no alternative payment is received within 10 business days of notice, the Company is authorized to charge the Card on File pursuant to Section 11).</li>
+      </ol>
+      <p><strong>Notice window:</strong> the Company will provide the documentation above within ten (10) business days after the rental return, check-out, or disembarkation date.</p>
+      <p><strong>Processing window:</strong> the Company will process the damage charge within ninety (90) calendar days of the rental return, check-out, or disembarkation date.</p>
+      <p><strong>Other delayed charges</strong> (such as tolls, parking citations, and traffic fines) will be supported by documentation from the relevant civil authority that includes the Vehicle license plate, time and location of the violation, and the amount of the penalty, and may be processed under this Section and Section 11.</p>
+    </div>
+    <div class="tc-col tc-es" lang="es">
+      <p>Cuando un cargo se conozca despu&eacute;s de devuelto el Veh&iacute;culo y se relacione con da&ntilde;o f&iacute;sico, robo o p&eacute;rdida de uso, la Compa&ntilde;&iacute;a procesar&aacute; el cargo utilizando la Tarjeta en Archivo conforme a las reglas de la red de pagos. Espec&iacute;ficamente, antes de procesar dicho cargo la Compa&ntilde;&iacute;a proveer&aacute; al Cliente documentaci&oacute;n que incluya TODO lo siguiente:</p>
+      <ol>
+        <li>Una explicaci&oacute;n escrita del cargo que lo conecte con el uso del Veh&iacute;culo por parte del Cliente durante el per&iacute;odo del alquiler;</li>
+        <li>Cualquier informe de accidente, polic&iacute;a o seguro;</li>
+        <li>Para da&ntilde;os al Veh&iacute;culo: al menos dos (2) cotizaciones de reparaci&oacute;n de entidades legalmente autorizadas a realizar reparaciones;</li>
+        <li>La porci&oacute;n de la p&eacute;rdida, robo o da&ntilde;o que ser&aacute; pagada por el seguro (si alguna) y la raz&oacute;n por la cual el Cliente es responsable del monto reclamado;</li>
+        <li>Notificaci&oacute;n de que el pago por p&eacute;rdida, robo o da&ntilde;o con la tarjeta del Cliente es opcional y no es la opci&oacute;n de pago requerida ni por defecto (el Cliente puede optar por pagar por medios alternos, pero acepta que si no se recibe un pago alterno dentro de diez (10) d&iacute;as laborables del aviso, la Compa&ntilde;&iacute;a queda autorizada a cargar la Tarjeta en Archivo conforme a la Secci&oacute;n 11).</li>
+      </ol>
+      <p><strong>Plazo de notificaci&oacute;n:</strong> la Compa&ntilde;&iacute;a proveer&aacute; la documentaci&oacute;n anterior dentro de los diez (10) d&iacute;as laborables siguientes a la devoluci&oacute;n del alquiler, salida (check-out) o fecha de desembarque.</p>
+      <p><strong>Plazo de procesamiento:</strong> la Compa&ntilde;&iacute;a procesar&aacute; el cargo por da&ntilde;os dentro de los noventa (90) d&iacute;as calendario siguientes a la devoluci&oacute;n del alquiler, salida o fecha de desembarque.</p>
+      <p><strong>Otros cargos diferidos</strong> (como peajes, multas de estacionamiento e infracciones de tr&aacute;nsito) se respaldar&aacute;n con documentaci&oacute;n de la autoridad civil correspondiente que incluya la tablilla del Veh&iacute;culo, hora y lugar de la infracci&oacute;n y el monto de la penalidad, y podr&aacute;n procesarse bajo esta Secci&oacute;n y la Secci&oacute;n 11.</p>
+    </div>
+  </div>
+
+  <h2>13. PRIVACY, DATA RETENTION &amp; POST-RENTAL CHARGES / PRIVACIDAD, RETENCI&Oacute;N DE DATOS Y CARGOS POSTERIORES AL ALQUILER</h2>
+  <div class="tc-bilingual">
+    <div class="tc-col tc-en">
+      <p><strong>13.1 Collection of Information.</strong> The Company collects and maintains personal information provided by the Renter, including: driver&rsquo;s license details, passport/identification, billing address and contact, credit card authorization, insurance documentation, rental history, and GPS/telematics data related to the rented Vehicle. This information is collected for fraud prevention, contract enforcement, insurance claims, payment processing, and regulatory compliance.</p>
+      <p><strong>13.2 Data Retention.</strong> The Company may store the Customer&rsquo;s personal and rental information for up to one (1) year after the end of the rental period, in order to process delayed tolls, fines, and government penalties; resolve insurance claims; address chargebacks, fraud, and legal matters; recover unpaid balances; and comply with Puerto Rico law. After one year, personal information will be deleted or anonymized unless lawfully required to be retained longer.</p>
+      <p><strong>13.3 Post-Rental Charges.</strong> The Customer acknowledges and agrees that charges may appear on the Card on File up to one (1) year after the Vehicle is returned, including but not limited to: tolls and toll violations; parking citations and traffic fines; damages discovered after cleaning and inspection; roadside or towing charges; key replacement or equipment costs; cleaning fees; administrative fees; insurance / claim / subrogation charges; breach-of-contract penalties; and fuel charges discovered after inspection. <strong>These charges may be processed automatically using the Card on File pursuant to Sections 11 and 12.</strong></p>
+      <p><strong>13.4 Data Sharing.</strong> The Company may share relevant information with law enforcement, insurance carriers, toll authorities (AutoExpreso), collection agencies, legal representatives, merchant processors, and government agencies, strictly for lawful business purposes.</p>
+      <p><strong>13.5 Customer Consent.</strong> By signing this Agreement, the Customer acknowledges, understands, and consents to: (a) the retention of personal and rental information for up to one year; (b) the possibility of charges after the rental period; (c) the Company&rsquo;s right to process delayed or pending charges in accordance with Sections 11 and 12; and (d) the Company&rsquo;s right to disclose information for lawful or contractual purposes.</p>
+    </div>
+    <div class="tc-col tc-es" lang="es">
+      <p><strong>13.1 Recopilaci&oacute;n de Informaci&oacute;n.</strong> La Compa&ntilde;&iacute;a recopila y mantiene informaci&oacute;n personal provista por el Arrendatario, incluyendo: detalles de la licencia de conducir, pasaporte/identificaci&oacute;n, direcci&oacute;n postal y de contacto, autorizaci&oacute;n de tarjeta de cr&eacute;dito, documentaci&oacute;n de seguro, historial de alquileres y datos de GPS/telemetr&iacute;a del Veh&iacute;culo. Esta informaci&oacute;n se recopila para prevenci&oacute;n de fraude, ejecuci&oacute;n del contrato, reclamaciones de seguro, procesamiento de pagos y cumplimiento regulatorio.</p>
+      <p><strong>13.2 Retenci&oacute;n de Datos.</strong> La Compa&ntilde;&iacute;a puede almacenar la informaci&oacute;n personal y de alquiler del Cliente hasta un (1) a&ntilde;o despu&eacute;s del fin del alquiler, con el prop&oacute;sito de procesar peajes, multas y penalidades gubernamentales diferidos; resolver reclamaciones de seguro; atender chargebacks, fraudes y asuntos legales; recuperar balances impagos; y cumplir con las leyes de Puerto Rico. Pasado un a&ntilde;o, la informaci&oacute;n personal ser&aacute; eliminada o anonimizada salvo que la ley requiera retenerla por m&aacute;s tiempo.</p>
+      <p><strong>13.3 Cargos Posteriores al Alquiler.</strong> El Cliente reconoce y acepta que pueden aparecer cargos en la Tarjeta en Archivo hasta un (1) a&ntilde;o despu&eacute;s de devuelto el Veh&iacute;culo, incluyendo pero no limitado a: peajes y violaciones de peajes; multas de estacionamiento y de tr&aacute;nsito; da&ntilde;os descubiertos despu&eacute;s de la limpieza e inspecci&oacute;n; cargos de asistencia o gr&uacute;a; costos de reemplazo de llaves o equipo; cargos de limpieza; cargos administrativos; cargos de seguro / reclamaci&oacute;n / subrogaci&oacute;n; penalidades por incumplimiento; y cargos de combustible descubiertos despu&eacute;s de la inspecci&oacute;n. <strong>Estos cargos pueden procesarse autom&aacute;ticamente utilizando la Tarjeta en Archivo conforme a las Secciones 11 y 12.</strong></p>
+      <p><strong>13.4 Compartici&oacute;n de Datos.</strong> La Compa&ntilde;&iacute;a puede compartir informaci&oacute;n relevante con autoridades policiales, aseguradoras, autoridades de peajes (AutoExpreso), agencias de cobro, representantes legales, procesadores de pago y agencias gubernamentales, estrictamente para fines comerciales leg&iacute;timos.</p>
+      <p><strong>13.5 Consentimiento del Cliente.</strong> Al firmar este Contrato, el Cliente reconoce, entiende y consiente a: (a) la retenci&oacute;n de informaci&oacute;n personal y de alquiler por hasta un a&ntilde;o; (b) la posibilidad de cargos despu&eacute;s del per&iacute;odo de alquiler; (c) el derecho de la Compa&ntilde;&iacute;a de procesar cargos diferidos o pendientes conforme a las Secciones 11 y 12; y (d) el derecho de la Compa&ntilde;&iacute;a a divulgar informaci&oacute;n para fines leg&iacute;timos o contractuales.</p>
+    </div>
+  </div>
+
+  <div class="tc-initials-block">
+    <div class="tc-bilingual">
+      <div class="tc-col tc-en">
+        <p><strong>Post-rental charges</strong> — I understand and authorize that charges may appear on my payment method on file for up to one (1) year after I return the Vehicle, including delayed tolls, fines, damages discovered after inspection, and any other amounts permitted under this Agreement. ( {{INITIALS_S13_POST_RENTAL}} Initials )</p>
+      </div>
+      <div class="tc-col tc-es" lang="es">
+        <p><strong>Cargos posteriores al alquiler</strong> — entiendo y autorizo que pueden aparecer cargos en mi m&eacute;todo de pago en archivo hasta por un (1) a&ntilde;o despu&eacute;s de devolver el Veh&iacute;culo, incluyendo peajes diferidos, multas, da&ntilde;os descubiertos despu&eacute;s de la inspecci&oacute;n y cualquier otro monto permitido bajo este Contrato. ( {{INITIALS_S13_POST_RENTAL}} Iniciales )</p>
+      </div>
+    </div>
+  </div>
+
+  <h2>14. COOPERATION WITH CLAIMS &amp; INVESTIGATIONS / COOPERACI&Oacute;N CON RECLAMACIONES E INVESTIGACIONES</h2>
+  <div class="tc-bilingual">
+    <div class="tc-col tc-en">
+      <p>The Customer agrees to fully cooperate with the Company, insurance carriers, payment processors, law enforcement agencies, and claims representatives in connection with any accident, loss, theft, damage, citation, dispute, or chargeback arising from the rental transaction, including but not limited to:</p>
+      <ul>
+        <li>providing truthful statements and documentation;</li>
+        <li>responding to communications regarding damages or claims;</li>
+        <li>providing insurance information upon request;</li>
+        <li>assisting in claim resolution and chargeback representation procedures;</li>
+        <li>participating in inspections or investigations when reasonably requested.</li>
+      </ul>
+      <p>Failure to cooperate may result in additional administrative fees, denial of optional protections, collection activity, or legal action.</p>
+    </div>
+    <div class="tc-col tc-es" lang="es">
+      <p>El Cliente acepta cooperar plenamente con la Compa&ntilde;&iacute;a, aseguradoras, procesadores de pago, agencias del orden p&uacute;blico y representantes de reclamaciones en relaci&oacute;n con cualquier accidente, p&eacute;rdida, robo, da&ntilde;o, multa, disputa o chargeback que surja de la transacci&oacute;n de alquiler, incluyendo pero no limitado a:</p>
+      <ul>
+        <li>proveer declaraciones y documentaci&oacute;n veraces;</li>
+        <li>responder a comunicaciones sobre da&ntilde;os o reclamaciones;</li>
+        <li>proveer informaci&oacute;n de seguro cuando se solicite;</li>
+        <li>asistir en procesos de resoluci&oacute;n de reclamaciones y representaci&oacute;n de chargebacks;</li>
+        <li>participar en inspecciones o investigaciones cuando razonablemente se solicite.</li>
+      </ul>
+      <p>La falta de cooperaci&oacute;n puede resultar en cargos administrativos adicionales, denegaci&oacute;n de protecciones opcionales, actividad de cobro o acci&oacute;n legal.</p>
+    </div>
+  </div>
+
+  <h2>15. ACCIDENTS &amp; INCIDENT REPORTING / ACCIDENTES Y NOTIFICACI&Oacute;N DE INCIDENTES</h2>
+  <div class="tc-bilingual">
+    <div class="tc-col tc-en">
+      <p>In the event of an accident, breakdown, or unsafe condition:</p>
+      <ol>
+        <li>Move the Vehicle to a safe area if possible.</li>
+        <li>Activate hazard lights.</li>
+        <li>If there is immediate danger or injury, call 911 immediately.</li>
+        <li>If after business hours, secure the Vehicle and notify the Company once it reopens.</li>
+        <li>During business hours, contact the Company for assistance.</li>
+        <li>Complete all required accident or incident reports when requested.</li>
+      </ol>
+      <p>Failure to follow these steps may void optional protections and may be considered reckless misconduct.</p>
+    </div>
+    <div class="tc-col tc-es" lang="es">
+      <p>En caso de accidente, aver&iacute;a o condici&oacute;n insegura:</p>
+      <ol>
+        <li>Mueva el Veh&iacute;culo a un &aacute;rea segura si es posible.</li>
+        <li>Active las luces de emergencia.</li>
+        <li>Si hay peligro o lesi&oacute;n inmediata, llame al 911.</li>
+        <li>Si es fuera del horario laborable, asegure el Veh&iacute;culo y notifique a la Compa&ntilde;&iacute;a cuando reabra.</li>
+        <li>Durante horas laborables, comun&iacute;quese con la Compa&ntilde;&iacute;a para asistencia.</li>
+        <li>Complete todos los informes de accidente o incidente requeridos cuando se le solicite.</li>
+      </ol>
+      <p>El incumplimiento de estos pasos puede anular las protecciones opcionales y puede ser considerado conducta temeraria.</p>
+    </div>
+  </div>
+
+  <h2>16. TRACKING &amp; REPOSSESSION / RASTREO Y REPOSESI&Oacute;N</h2>
+  <div class="tc-bilingual">
+    <div class="tc-col tc-en">
+      <p>The Company may track, monitor, disable, or repossess the Vehicle at any time, without notice, at the Renter&rsquo;s expense, if:</p>
+      <ul>
+        <li>payment is overdue;</li>
+        <li>the Vehicle appears abandoned;</li>
+        <li>this Agreement is violated;</li>
+        <li>illegal activity is suspected.</li>
+      </ul>
+      <p>The Renter pays all associated costs, including recovery, towing, storage, and case administration fees.</p>
+    </div>
+    <div class="tc-col tc-es" lang="es">
+      <p>La Compa&ntilde;&iacute;a puede rastrear, monitorear, inhabilitar o reposeer el Veh&iacute;culo en cualquier momento, sin previo aviso, a costa del Arrendatario, si:</p>
+      <ul>
+        <li>el pago est&aacute; vencido;</li>
+        <li>el Veh&iacute;culo parece abandonado;</li>
+        <li>se viola este Contrato;</li>
+        <li>se sospecha actividad ilegal.</li>
+      </ul>
+      <p>El Arrendatario paga todos los costos asociados, incluyendo recuperaci&oacute;n, gr&uacute;a, almacenamiento y cargos de administraci&oacute;n del caso.</p>
+    </div>
+  </div>
+
+  <h2>17. RELEASE OF LIABILITY — VEHICLE USE / LIBERACI&Oacute;N DE RESPONSABILIDAD — USO DEL VEH&Iacute;CULO</h2>
+  <div class="tc-bilingual">
+    <div class="tc-col tc-en">
+      <p>By signing this Agreement, the Renter / Driver(s) expressly releases and holds harmless the Company, its owners, employees, agents, and affiliates from any and all liability, claims, losses, injuries, damages, or expenses arising from:</p>
+      <ul>
+        <li>use or operation of the rented Vehicle;</li>
+        <li>personal property loss;</li>
+        <li>accidents or collisions;</li>
+        <li>weather, road, or environmental conditions;</li>
+        <li>acts of third parties.</li>
+      </ul>
+      <p>This release applies unless prohibited by Puerto Rico law.</p>
+    </div>
+    <div class="tc-col tc-es" lang="es">
+      <p>Al firmar este Contrato, el Arrendatario / Conductor(es) expresamente libera y exonera a la Compa&ntilde;&iacute;a, sus due&ntilde;os, empleados, agentes y afiliados de toda responsabilidad, reclamaci&oacute;n, p&eacute;rdida, lesi&oacute;n, da&ntilde;o o gasto que surja de:</p>
+      <ul>
+        <li>el uso u operaci&oacute;n del Veh&iacute;culo alquilado;</li>
+        <li>p&eacute;rdida de propiedad personal;</li>
+        <li>accidentes o colisiones;</li>
+        <li>condiciones del clima, carretera o ambiente;</li>
+        <li>actos de terceros.</li>
+      </ul>
+      <p>Esta liberaci&oacute;n aplica salvo que la ley de Puerto Rico lo proh&iacute;ba.</p>
+    </div>
+  </div>
+
+  <h2>18. RELEASE OF LIABILITY — SHUTTLE SERVICE / LIBERACI&Oacute;N DE RESPONSABILIDAD — TRANSPORTE (SHUTTLE)</h2>
+  <div class="tc-bilingual">
+    <div class="tc-col tc-en">
+      <p>By boarding, using, or riding the Company shuttle, the Customer agrees that:</p>
+      <ul>
+        <li>the Company is not responsible for accidents, delays, injuries, personal property loss, or any harm occurring while entering, riding, or exiting the shuttle;</li>
+        <li>the Customer uses the shuttle at their own risk.</li>
+      </ul>
+      <p>This is a full and binding release of liability to the extent permitted under Puerto Rico law.</p>
+    </div>
+    <div class="tc-col tc-es" lang="es">
+      <p>Al abordar, usar o viajar en el shuttle de la Compa&ntilde;&iacute;a, el Cliente acepta que:</p>
+      <ul>
+        <li>la Compa&ntilde;&iacute;a no es responsable de accidentes, demoras, lesiones, p&eacute;rdida de propiedad personal o cualquier da&ntilde;o que ocurra al entrar, viajar o salir del shuttle;</li>
+        <li>el Cliente usa el shuttle bajo su propio riesgo.</li>
+      </ul>
+      <p>Esta es una liberaci&oacute;n completa y vinculante de responsabilidad hasta el m&aacute;ximo permitido por la ley de Puerto Rico.</p>
+    </div>
+  </div>
+
+  <h2>19. EARLY RETURN &amp; MAXIMUM RENTAL PERIOD / DEVOLUCI&Oacute;N TEMPRANA Y PER&Iacute;ODO M&Aacute;XIMO DE ALQUILER</h2>
+  <div class="tc-bilingual">
+    <div class="tc-col tc-en">
+      <p>No refunds are issued for unused rental days. The maximum rental length is twenty-eight (28) days; any longer period requires a new rental contract.</p>
+    </div>
+    <div class="tc-col tc-es" lang="es">
+      <p>No se emiten reembolsos por d&iacute;as no utilizados. El per&iacute;odo m&aacute;ximo de alquiler es de veintiocho (28) d&iacute;as; cualquier per&iacute;odo mayor requiere un nuevo contrato de alquiler.</p>
+    </div>
+  </div>
+
+  <h2>20. INDEMNIFICATION / INDEMNIZACI&Oacute;N</h2>
+  <div class="tc-bilingual">
+    <div class="tc-col tc-en">
+      <p>The Customer agrees to release, defend, indemnify, and hold the Company and its subsidiaries, officers, directors, employees, and agents harmless from and against any claims, liabilities, damages, losses, and expenses, including reasonable legal and accounting fees, arising out of or in any way connected with: (a) the use of the Vehicle by the Customer or any other person; (b) any violation of this Agreement; (c) any interaction with third parties during the rental; and (d) any chargeback initiated in violation of Section 11.</p>
+    </div>
+    <div class="tc-col tc-es" lang="es">
+      <p>El Cliente acepta liberar, defender, indemnizar y exonerar a la Compa&ntilde;&iacute;a y sus subsidiarias, oficiales, directores, empleados y agentes de todas las reclamaciones, responsabilidades, da&ntilde;os, p&eacute;rdidas y gastos, incluyendo honorarios legales y de contabilidad razonables, que surjan de o se relacionen con: (a) el uso del Veh&iacute;culo por el Cliente o cualquier otra persona; (b) cualquier violaci&oacute;n de este Contrato; (c) cualquier interacci&oacute;n con terceros durante el alquiler; y (d) cualquier chargeback iniciado en violaci&oacute;n de la Secci&oacute;n 11.</p>
+    </div>
+  </div>
+
+  <h2>21. RIGHT TO MODIFY / DERECHO A MODIFICAR</h2>
+  <div class="tc-bilingual">
+    <div class="tc-col tc-en">
+      <p>The Company reserves the right to change, update, or modify these Terms and Conditions at any time, without prior notice. The version in effect at the start of the rental period applies.</p>
+    </div>
+    <div class="tc-col tc-es" lang="es">
+      <p>La Compa&ntilde;&iacute;a se reserva el derecho de cambiar, actualizar o modificar estos T&eacute;rminos y Condiciones en cualquier momento, sin previo aviso. Aplica la versi&oacute;n vigente al comienzo del per&iacute;odo de alquiler.</p>
+    </div>
+  </div>
+
+  <h2>22. BREACH OF CONTRACT / INCUMPLIMIENTO DE CONTRATO</h2>
+  <div class="tc-bilingual">
+    <div class="tc-col tc-en">
+      <p>Any violation of this Agreement — including unauthorized drivers, geographic violations, tampering with tracking devices, misuse of the Vehicle, toll fraud, fraudulent insurance documentation, or chargeback initiated in violation of Section 11 — may result in:</p>
+      <ul>
+        <li>A breach-of-contract penalty of up to $2,500;</li>
+        <li>Plus all actual damages, fees, recovery costs, lost revenue, and legal expenses.</li>
+      </ul>
+    </div>
+    <div class="tc-col tc-es" lang="es">
+      <p>Cualquier violaci&oacute;n de este Contrato — incluyendo conductores no autorizados, violaciones geogr&aacute;ficas, manipulaci&oacute;n de dispositivos de rastreo, mal uso del Veh&iacute;culo, fraude de peajes, documentaci&oacute;n de seguro fraudulenta o chargebacks iniciados en violaci&oacute;n de la Secci&oacute;n 11 — puede resultar en:</p>
+      <ul>
+        <li>Una penalidad por incumplimiento de hasta $2,500;</li>
+        <li>M&aacute;s todos los da&ntilde;os reales, cargos, costos de recuperaci&oacute;n, ingresos perdidos y gastos legales.</li>
+      </ul>
+    </div>
+  </div>
+
+  <h2>23. GOVERNING LAW / LEY APLICABLE</h2>
+  <div class="tc-bilingual">
+    <div class="tc-col tc-en">
+      <p>This Agreement shall be governed by and interpreted exclusively under the laws of the Commonwealth of Puerto Rico. Any disputes shall be resolved under the jurisdiction of Puerto Rico courts. In the event of any conflict between the English and Spanish versions of this Agreement, the English version controls; provided, however, that the Spanish version is provided for the Customer&rsquo;s convenience and full understanding.</p>
+    </div>
+    <div class="tc-col tc-es" lang="es">
+      <p>Este Contrato se regir&aacute; e interpretar&aacute; exclusivamente conforme a las leyes del Estado Libre Asociado de Puerto Rico. Cualquier disputa se resolver&aacute; bajo la jurisdicci&oacute;n de los tribunales de Puerto Rico. En caso de conflicto entre las versiones en ingl&eacute;s y espa&ntilde;ol de este Contrato, prevalece la versi&oacute;n en ingl&eacute;s; sin embargo, la versi&oacute;n en espa&ntilde;ol se provee para la conveniencia y plena comprensi&oacute;n del Cliente.</p>
+    </div>
+  </div>
+
+  <h2>24. GENERAL PROVISIONS / DISPOSICIONES GENERALES</h2>
+  <div class="tc-bilingual">
+    <div class="tc-col tc-en">
+      <ul>
+        <li>No oral modification of this Agreement is valid; changes must be in writing and signed by an authorized representative of the Company.</li>
+        <li>The Customer is responsible for all fees up to the point the Vehicle is formally inspected and accepted by the Company.</li>
+        <li>The Customer agrees to reimburse the Company for all collection, legal, repossession, and chargeback-defense costs.</li>
+        <li>The Company makes no express or implied warranty as to vehicle condition or fitness.</li>
+        <li>Customer property is not insured; the Company is not responsible for lost or stolen items.</li>
+        <li>Hours of Operation: 8:00 a.m. to 6:00 p.m., Monday to Sunday. The Company may close on holidays.</li>
+        <li>If any provision of this Agreement is held to be void or unenforceable, the remaining provisions remain in full force and effect.</li>
+      </ul>
+    </div>
+    <div class="tc-col tc-es" lang="es">
+      <ul>
+        <li>Ninguna modificaci&oacute;n oral de este Contrato es v&aacute;lida; los cambios deben constar por escrito y estar firmados por un representante autorizado de la Compa&ntilde;&iacute;a.</li>
+        <li>El Cliente es responsable de todos los cargos hasta el momento en que el Veh&iacute;culo sea inspeccionado formalmente y aceptado por la Compa&ntilde;&iacute;a.</li>
+        <li>El Cliente acepta reembolsar a la Compa&ntilde;&iacute;a todos los costos de cobro, legales, de reposesi&oacute;n y de defensa de chargebacks.</li>
+        <li>La Compa&ntilde;&iacute;a no ofrece garant&iacute;as expresas ni impl&iacute;citas sobre la condici&oacute;n o aptitud del veh&iacute;culo.</li>
+        <li>La propiedad del Cliente no est&aacute; asegurada; la Compa&ntilde;&iacute;a no es responsable de art&iacute;culos perdidos o robados.</li>
+        <li>Horario de Operaciones: 8:00 a.m. a 6:00 p.m., lunes a domingo. La Compa&ntilde;&iacute;a puede cerrar en d&iacute;as feriados.</li>
+        <li>Si cualquier disposici&oacute;n de este Contrato es declarada nula o inejecutable, las dem&aacute;s disposiciones permanecen en pleno vigor y efecto.</li>
+      </ul>
+    </div>
+  </div>
+
+  <h2 class="tc-ack-head">ACKNOWLEDGMENT &amp; SIGNATURES / RECONOCIMIENTO Y FIRMAS</h2>
+  <div class="tc-bilingual">
+    <div class="tc-col tc-en">
+      <p>I, the Renter / Driver, certify that I have read this Agreement in its entirety in a language I understand. I have had the opportunity to ask questions. I voluntarily and knowingly agree to be bound by every section, including:</p>
+      <ul>
+        <li>Section 11 — Card-on-File Pre-Authorization</li>
+        <li>Section 12 — Delayed Charges Procedure</li>
+        <li>Section 13 — Privacy, Data Retention &amp; Post-Rental Charges</li>
+        <li>Section 14 — Cooperation with Claims &amp; Investigations</li>
+        <li>The Schedules of Fees and Damage Charges (Sections 9 and 10)</li>
+      </ul>
+    </div>
+    <div class="tc-col tc-es" lang="es">
+      <p>Yo, el Arrendatario / Conductor, certifico que he le&iacute;do este Contrato en su totalidad en un idioma que entiendo. He tenido la oportunidad de hacer preguntas. Voluntaria y conscientemente acepto obligarme por cada secci&oacute;n, incluyendo:</p>
+      <ul>
+        <li>Secci&oacute;n 11 — Pre-autorizaci&oacute;n de Tarjeta en Archivo</li>
+        <li>Secci&oacute;n 12 — Procedimiento de Cargos Diferidos</li>
+        <li>Secci&oacute;n 13 — Privacidad, Retenci&oacute;n de Datos y Cargos Posteriores al Alquiler</li>
+        <li>Secci&oacute;n 14 — Cooperaci&oacute;n con Reclamaciones e Investigaciones</li>
+        <li>Los Anejos de Tarifas y Cargos por Da&ntilde;os (Secciones 9 y 10)</li>
+      </ul>
+    </div>
+  </div>
+  <p class="tc-cardinfo">Card on File (last 4 digits): __________ &nbsp; Tarjeta en Archivo (&uacute;ltimos 4 d&iacute;gitos): __________<br/>Card type: __________ &nbsp; Expiration: __________ &nbsp; Tipo de tarjeta: __________ &nbsp; Vencimiento: __________</p>
+</section>

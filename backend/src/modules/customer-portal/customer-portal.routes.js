@@ -8,6 +8,8 @@ import { reservationPricingService } from '../reservations/reservation-pricing.s
 import { settingsService } from '../settings/settings.service.js';
 import { buildSelfServiceSnapshot } from './customer-portal-self-service.js';
 import { parseLocationConfig } from '../../lib/location-config.js';
+import { getCanonicalTermsHtml } from '../../lib/terms/index.js';
+import { TC_VERSION } from '../../lib/terms/version.js';
 
 export const customerPortalRouter = Router();
 
@@ -1200,7 +1202,13 @@ customerPortalRouter.get('/signature/:token', async (req, res, next) => {
       },
       breakdown,
       portal: await buildPortalSummary(reservation, 'signature', token),
-      termsText: agreementCfg?.termsText || 'Standard rental terms apply.'
+      // 16g — bilingual canonical T&C HTML (version TC_VERSION).
+      // termsText kept for backward compatibility w/ old portals that
+      // only know how to render plain text; new clients should render
+      // termsHtml (sanitized server-side) for the full bilingual layout.
+      termsText: agreementCfg?.termsText || 'Standard rental terms apply.',
+      termsHtml: getCanonicalTermsHtml(),
+      termsVersion: TC_VERSION
     });
   } catch (e) { next(e); }
 });
@@ -1593,6 +1601,10 @@ customerPortalRouter.post('/signature/:token', async (req, res, next) => {
         signatureSignedAt: new Date(),
         signatureSignedBy: signerName,
         signatureDataUrl,
+        // 16g — capture which version of the T&C was in effect when the
+        // customer accepted. Pre-update reservations (terms < TC_VERSION)
+        // remain autochargeBlocked until the unblock script runs.
+        termsVersion: TC_VERSION,
         notes: reservation.notes ? `${reservation.notes}\n${note}` : note
       }
     });

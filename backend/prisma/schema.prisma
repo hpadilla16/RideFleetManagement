@@ -799,6 +799,14 @@ model Reservation {
   signatureSignedBy            String?
   signatureDataUrl             String?
 
+  // 16g — canonical T&C version accepted by the customer at signature
+  // submission time. Lexicographic comparison against TC_VERSION from
+  // src/lib/terms/version.js determines whether a reservation may be
+  // auto-charged after the new card-on-file authorization landed.
+  // NULL on reservations created before the field was added; those rows
+  // are the 281 unblocked en masse by scripts/unblock-pre-terms-reservations.mjs.
+  termsVersion                 String?
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
