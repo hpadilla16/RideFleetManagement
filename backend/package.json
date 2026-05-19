@@ -8,7 +8,7 @@
     "start": "node src/main.js",
     "start:cluster": "node src/cluster.js",
     "worker": "node src/worker.js",
-    "test": "npm run test:vehicles && npm run test:fees && npm run test:booking-engine && npm run test:stop-sales && npm run test:review-email && npm run test:public-booking && npm run test:planner && npm run test:rates && npm run test:portal && npm run test:carsharing && npm run test:issues && npm run test:tolls && npm run test:sms && npm run test:payments && npm run test:auth && npm run test:cache && npm run test:commissions && npm run test:puppeteer && npm run test:rental-agreements && npm run test:reservations && npm run test:market-scraper",
+    "test": "npm run lint:cache-keys && npm run test:vehicles && npm run test:fees && npm run test:booking-engine && npm run test:stop-sales && npm run test:review-email && npm run test:public-booking && npm run test:planner && npm run test:rates && npm run test:portal && npm run test:carsharing && npm run test:issues && npm run test:tolls && npm run test:sms && npm run test:payments && npm run test:auth && npm run test:cache && npm run test:commissions && npm run test:puppeteer && npm run test:rental-agreements && npm run test:reservations && npm run test:market-scraper",
     "test:vehicles": "node --test src/modules/vehicles/vehicle-intelligence.test.mjs src/modules/vehicles/telematics-zubie.test.mjs",
     "test:fees": "node --test src/modules/fees/fees.test.mjs src/modules/fees/fee-engine.test.mjs",
     "test:booking-engine": "node --test src/modules/booking-engine/booking-engine.test.mjs",
@@ -26,7 +26,7 @@
     "test:sms": "node --test src/modules/sms/sms-templates.test.mjs",
     "test:payments": "node --test src/modules/payment-gateway/spin-client.test.mjs",
     "test:auth": "node --test src/modules/auth/auth-validation.test.mjs",
-    "test:cache": "node --test src/lib/cache.test.mjs",
+    "test:cache": "node --test src/lib/cache.test.mjs src/lib/cache/tenantKey.test.mjs",
     "test:puppeteer": "node --test src/lib/puppeteer-browser.test.mjs",
     "test:rental-agreements": "node --test src/modules/rental-agreements/rental-agreements-email-async.test.mjs src/modules/rental-agreements/rental-agreements-finalize-tx.test.mjs",
     "test:commissions": "node --test src/modules/commissions/car-sharing-commission.test.mjs",
@@ -38,7 +38,8 @@
     "seed:booking-fixtures": "node scripts/seed-booking-fixtures.mjs",
     "verify:booking-fixtures": "node scripts/verify-booking-fixtures.mjs",
     "backfill:legacy-metadata": "node scripts/backfill-legacy-metadata.mjs",
-    "load-test:reservations": "node scripts/load-test/run-reservations.mjs"
+    "load-test:reservations": "node scripts/load-test/run-reservations.mjs",
+    "lint:cache-keys": "node scripts/lint-cache-keys.mjs"
   },
   "dependencies": {
     "@prisma/client": "^6.14.0",
