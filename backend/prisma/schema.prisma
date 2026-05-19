@@ -1757,6 +1757,11 @@ model RentalAgreementInspection {
   damages    String?
   notes      String?
   photosJson String?
+  // 16l: Supabase Storage refs for inspection photos. Array of
+  // { path, contentType, size, uploadedAt } entries. Coexists with
+  // photosJson during migration; new writes use this field only when
+  // INSPECTION_PHOTOS_STORAGE_ENABLED=true. Old rows fall back to photosJson.
+  photoStorageRefs Json?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
