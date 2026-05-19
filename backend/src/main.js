@@ -21,6 +21,7 @@ import { storeBoardRouter } from './modules/store-board/store-board.routes.js';
 import { storeBoardPublicRouter } from './modules/store-board/store-board-public.routes.js';
 import { assertAuthConfig } from './modules/auth/auth.config.js';
 import { settingsRouter } from './modules/settings/settings.routes.js';
+import { feeRatesRouter } from './modules/fees/fee-rates.routes.js';
 import { requireAuth, requireRole, requireModuleAccess } from './middleware/auth.js';
 import { prisma } from './lib/prisma.js';
 import { customerPortalRouter } from './modules/customer-portal/customer-portal.routes.js';
@@ -125,6 +126,7 @@ app.use('/api/reports', requireAuth, requireModuleAccess('reports'), reportsRout
 app.use('/api/commissions', requireAuth, requireModuleAccess('reports'), commissionsRouter);
 app.use('/api/car-sharing', requireAuth, requireModuleAccess('carSharing'), requireRole('ADMIN', 'OPS'), carSharingRouter);
 app.use('/api/people', requireAuth, requireModuleAccess('people'), peopleRouter);
+app.use('/api/settings/fee-rates', requireAuth, requireModuleAccess('settings'), feeRatesRouter);
 app.use('/api/settings', requireAuth, requireModuleAccess('settings'), settingsRouter);
 app.use('/api/tenants', requireAuth, requireModuleAccess('tenants'), tenantsRouter);
 
