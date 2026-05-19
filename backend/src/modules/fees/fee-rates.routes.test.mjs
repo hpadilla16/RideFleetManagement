@@ -74,12 +74,28 @@ function startServer(user) {
 beforeEach(() => {
   stubs = {
     rows: [],
+    auditRows: [],
     orig: {
       findMany: prisma.feeRate.findMany,
       findFirst: prisma.feeRate.findFirst,
       create: prisma.feeRate.create,
       update: prisma.feeRate.update,
-      transaction: prisma.$transaction
+      transaction: prisma.$transaction,
+      audit: prisma.feeRateAuditLog
+    }
+  };
+  // V2: stub the audit log model so the route's transaction can write audit rows.
+  prisma.feeRateAuditLog = {
+    create: async ({ data }) => {
+      const row = { id: `aud-${stubs.auditRows.length + 1}`, changedAt: new Date(), ...data };
+      stubs.auditRows.push(row);
+      return row;
+    },
+    findMany: async ({ where = {}, orderBy, take = 50, skip = 0 } = {}) => {
+      let filtered = stubs.auditRows.filter((r) => r.tenantId === where.tenantId);
+      if (where.feeRateId) filtered = filtered.filter((r) => r.feeRateId === where.feeRateId);
+      if (orderBy?.changedAt === 'desc') filtered = [...filtered].reverse();
+      return filtered.slice(skip, skip + take);
     }
   };
   prisma.feeRate.findMany = async (args) => stubs.rows.filter((r) =>
@@ -105,6 +121,7 @@ afterEach(async () => {
   prisma.feeRate.create = stubs.orig.create;
   prisma.feeRate.update = stubs.orig.update;
   prisma.$transaction = stubs.orig.transaction;
+  prisma.feeRateAuditLog = stubs.orig.audit;
   await Promise.all(servers.map((s) => new Promise((r) => s.close(() => r()))));
   servers = [];
 });
@@ -202,5 +219,93 @@ describe('PUT /api/settings/fee-rates', () => {
     assert.equal(res.status, 400);
     assert.ok(Array.isArray(res.body.errors));
     assert.equal(res.body.errors[0].feeType, 'BOGUS');
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// V2: PUT writes an audit row (+ GET /audit returns it)
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('PUT /api/settings/fee-rates — audit trail', () => {
+  it('ADMIN PUT writes a FeeRateAuditLog row with actor + change snapshot', async () => {
+    const srv = await startServer({
+      id: 'u-admin', role: 'ADMIN', tenantId: TENANT, email: 'admin@acme.com'
+    });
+    const res = await request(srv, 'PUT', '/api/settings/fee-rates', {
+      rates: [{ feeType: 'FUEL_REFILL', amount: 9.50 }]
+    });
+    assert.equal(res.status, 200);
+    assert.equal(stubs.auditRows.length, 1);
+    const aud = stubs.auditRows[0];
+    assert.equal(aud.tenantId, TENANT);
+    assert.equal(aud.feeType, 'FUEL_REFILL');
+    assert.equal(aud.changeType, 'CREATE');
+    assert.equal(aud.actorUserId, 'u-admin');
+    assert.equal(aud.actorEmail, 'admin@acme.com');
+    assert.equal(aud.actorRole, 'ADMIN');
+    assert.equal(aud.before, null);
+    assert.equal(aud.after.amount, 9.50);
+  });
+
+  it('classifies an isActive-only change as TOGGLE', async () => {
+    const srv = await startServer({ id: 'u-admin', role: 'ADMIN', tenantId: TENANT });
+    // First PUT seeds the row at 9.50, active=true.
+    await request(srv, 'PUT', '/api/settings/fee-rates', {
+      rates: [{ feeType: 'FUEL_REFILL', amount: 9.50, isActive: true }]
+    });
+    stubs.auditRows.length = 0;
+    // Second PUT just flips isActive.
+    await request(srv, 'PUT', '/api/settings/fee-rates', {
+      rates: [{ feeType: 'FUEL_REFILL', amount: 9.50, isActive: false }]
+    });
+    assert.equal(stubs.auditRows.length, 1);
+    assert.equal(stubs.auditRows[0].changeType, 'TOGGLE');
+  });
+
+  it('PUT succeeds even if the audit insert throws', async () => {
+    // Force audit insert to throw — user-facing flow must still succeed.
+    prisma.feeRateAuditLog.create = async () => { throw new Error('audit table missing'); };
+    const srv = await startServer({ id: 'u-admin', role: 'ADMIN', tenantId: TENANT });
+    const res = await request(srv, 'PUT', '/api/settings/fee-rates', {
+      rates: [{ feeType: 'FUEL_REFILL', amount: 8.25 }]
+    });
+    assert.equal(res.status, 200);
+    assert.equal(stubs.rows.length, 1); // upsert still happened
+    assert.equal(stubs.auditRows.length, 0); // audit didn't (best-effort)
+  });
+});
+
+describe('GET /api/settings/fee-rates/audit', () => {
+  it('ADMIN GET returns audit entries for the tenant scope', async () => {
+    const srv = await startServer({ id: 'u-admin', role: 'ADMIN', tenantId: TENANT, email: 'admin@acme.com' });
+    // Seed via a real PUT so the audit row is shaped exactly like prod.
+    await request(srv, 'PUT', '/api/settings/fee-rates', {
+      rates: [{ feeType: 'FUEL_REFILL', amount: 9.50 }]
+    });
+    const res = await request(srv, 'GET', '/api/settings/fee-rates/audit');
+    assert.equal(res.status, 200);
+    assert.ok(Array.isArray(res.body.entries));
+    assert.equal(res.body.entries.length, 1);
+    assert.equal(res.body.entries[0].feeType, 'FUEL_REFILL');
+    assert.equal(res.body.entries[0].actorEmail, 'admin@acme.com');
+  });
+
+  it('tenanted user cannot see another tenant’s audit log', async () => {
+    // Seed an entry as tenant-zzz via SUPER_ADMIN
+    const sup = await startServer({ id: 'u-super', role: 'SUPER_ADMIN' });
+    await request(sup, 'PUT', '/api/settings/fee-rates?tenantId=tenant-zzz', {
+      rates: [{ feeType: 'SMOKING', amount: 400 }]
+    });
+    // ADMIN of TENANT (a different tenant) requests audit list
+    const srv = await startServer({ id: 'u-admin', role: 'ADMIN', tenantId: TENANT });
+    const res = await request(srv, 'GET', '/api/settings/fee-rates/audit');
+    assert.equal(res.status, 200);
+    assert.equal(res.body.entries.length, 0);
+  });
+
+  it('SUPER_ADMIN without ?tenantId= returns 400', async () => {
+    const srv = await startServer({ id: 'u-super', role: 'SUPER_ADMIN' });
+    const res = await request(srv, 'GET', '/api/settings/fee-rates/audit');
+    assert.equal(res.status, 400);
   });
 });

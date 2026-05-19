@@ -2698,6 +2698,34 @@ model FeeRate {
   @@index([tenantId, locationId])
 }
 
+
+// V2 — Audit history for per-tenant Fee Rate changes.
+// Captures every CREATE / UPDATE / TOGGLE / DELETE against the FeeRate table
+// (writes happen via fee-rate-audit.service.recordChange inside the same
+// Prisma transaction as the underlying mutation; insert failures degrade to
+// a logger.warn — audit is best-effort, NOT a barrier to the user flow).
+//
+// No FK to FeeRate so DELETEs don't cascade away the audit trail. feeRateId
+// is a string ref for convenience, nullable to handle deleted rows.
+model FeeRateAuditLog {
+  id          String   @id @default(cuid())
+  tenantId    String
+  feeRateId   String?
+  feeType     String
+  locationId  String?
+  actorUserId String?
+  actorEmail  String?
+  actorRole   String?
+  changeType  String   // CREATE | UPDATE | DELETE | TOGGLE
+  before      Json?
+  after       Json?
+  changedAt   DateTime @default(now())
+
+  @@index([tenantId, changedAt])
+  @@index([feeRateId])
+  @@index([changedAt])
+}
+
 // PR-5 — Endpoint-level performance telemetry (PERF pillar).
 // Distinct from `LoadObservation` (business volume): this table captures raw
 // per-request samples (HTTP method, normalized route, status, duration, db
