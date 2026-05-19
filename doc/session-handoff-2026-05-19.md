@@ -6,7 +6,7 @@
 
 ---
 
-## Tags shipped today (in order)
+## Tags shipped today (in order — 11 total)
 
 | Tag | Bundle | Branch |
 |-----|--------|--------|
@@ -17,6 +17,12 @@
 | `v0.9.0-beta.41` | Wizard passes `?tenantId=<reservation.tenantId>` to fee-rates GET (super-admin support) | feature/pillar2-followups |
 | `v0.9.0-beta.42` | Per-fee-type on/off toggle (engine skips fees with `isActive=false` instead of falling back to hardcoded) | feature/pillar2-followups |
 | `v0.9.0-beta.43` | **Pillar 1 PR-1**: Prisma pool default 6 + backend 24 / worker 12 + statement_timeout 15s API / 60s worker + P2024 → 503 with Retry-After: 5 | feature/pillar2-followups |
+| `v0.9.0-beta.44` | Dup charge writer fix (added `source`+`sourceRefId` to startFromReservation's normalizedRows) + AUTH_HOLD payment method feature (schema enum, payments form dropdown, wizard Step 1 split) | feature/pillar2-followups |
+| `v0.9.0-beta.45` | AUTH_HOLD bypasses unpaid-balance cap on payments form (hold can exceed rental balance) | feature/pillar2-followups |
+| `v0.9.0-beta.46` | AUTH_HOLD excluded from reservation page `paidTotal` (Unpaid Balance reflects rental only) + Security deposit hold row shown separately ("Authorized — not settled") | feature/pillar2-followups |
+| `v0.9.0-beta.47` | Unified `summarizeChargeTotals` to INCLUDE security deposit in agreement.total (matches fee-engine recompute + print template's expected math). Both recompute paths now produce identical results. | feature/pillar2-followups |
+
+**Backfill SQL applied tonight on RES-083011** (agreement RA-20260518155955-7821): set subtotal=$284.98, total=$289.00 after the unified recompute. Print/UI/wizard now all show consistent math.
 
 All deployed via `docker compose -f docker-compose.prod.yml up -d --build --force-recreate` on the droplet.
 
