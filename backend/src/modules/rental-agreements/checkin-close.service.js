@@ -29,6 +29,7 @@ import logger from '../../lib/logger.js';
 import { feeEngineService } from '../fees/fee-engine.service.js';
 import { sendInvoiceAfterCheckin, sendReceiptPaidInFull } from './checkin-emails.service.js';
 import { enqueueJob } from '../../lib/queue/index.js';
+import { AUTOCHARGE_PRIORITY } from '../../lib/queue/priorities.js';
 
 const AUTOCHARGE_DELAY_MS = 24 * 60 * 60 * 1000;  // 24 hours
 
@@ -252,7 +253,8 @@ export async function closeAgreementWithCheckinFees(
         { reservationId: agreement.reservationId },
         {
           delay: AUTOCHARGE_DELAY_MS,
-          jobId: autochargeJobId
+          jobId: autochargeJobId,
+          priority: AUTOCHARGE_PRIORITY
         }
       );
     } catch (err) {
