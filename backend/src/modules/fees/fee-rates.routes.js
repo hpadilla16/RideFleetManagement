@@ -1,13 +1,13 @@
 /**
  * Pillar 2 — Per-tenant Fee Rate settings router (16q).
  *
- * Mounted at /api/settings/fee-rates from main.js. The outer settings mount
- * already applies `requireAuth` + `requireModuleAccess('settings')`, so we
- * only need to layer role gates here.
+ * Mounted at /api/settings/fee-rates from main.js with `requireAuth` only —
+ * NOT requireModuleAccess('settings'), because the checkin wizard's live fee
+ * preview (run by OPS/AGENT, who don't always have the settings module) needs
+ * to read the tenant overrides to mirror what the backend will charge.
  *
- *   GET  /              — any authenticated user with `settings` access; the
- *                         `editable` boolean in each row tells the UI who can
- *                         actually write.
+ *   GET  /              — any authenticated user; the `editable` boolean
+ *                         in each row tells the UI who can actually write.
  *   PUT  /              — ADMIN only (SUPER_ADMIN passes through via
  *                         requireRole's built-in super-admin bypass).
  */

@@ -87,8 +87,16 @@ function CheckinWizard({ token, me, logout }) {
         // Fetch tenant-configured fee rates so Step 3 preview matches what
         // the backend will charge. The GET endpoint always returns 7 rows
         // merged with platform defaults — never empty for an authed user.
+        // Pass the reservation's tenantId explicitly so super-admins viewing
+        // a tenant's reservation see THAT tenant's rates (not their own,
+        // which super-admin doesn't have). For regular tenant users this is
+        // a no-op (scopeFor uses req.user.tenantId anyway when not super).
         try {
-          const ratesRes = await api('/api/settings/fee-rates', { bypassCache: true }, token);
+          const tenantId = res?.tenantId || res?.rentalAgreement?.tenantId;
+          const ratesUrl = tenantId
+            ? `/api/settings/fee-rates?tenantId=${encodeURIComponent(tenantId)}`
+            : '/api/settings/fee-rates';
+          const ratesRes = await api(ratesUrl, { bypassCache: true }, token);
           const rows = Array.isArray(ratesRes?.rates) ? ratesRes.rates : [];
           // Transform to the { FEE_TYPE: { unit, amount } } shape useFeePreview expects.
           // Use currentAmount (the override) if set, otherwise defaultAmount.

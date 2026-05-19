@@ -126,7 +126,12 @@ app.use('/api/reports', requireAuth, requireModuleAccess('reports'), reportsRout
 app.use('/api/commissions', requireAuth, requireModuleAccess('reports'), commissionsRouter);
 app.use('/api/car-sharing', requireAuth, requireModuleAccess('carSharing'), requireRole('ADMIN', 'OPS'), carSharingRouter);
 app.use('/api/people', requireAuth, requireModuleAccess('people'), peopleRouter);
-app.use('/api/settings/fee-rates', requireAuth, requireModuleAccess('settings'), feeRatesRouter);
+// Fee rates: GET is open to any authed user (the checkin wizard's live fee
+// preview needs to read tenant overrides even when run by OPS/AGENT who
+// don't have the 'settings' module). PUT is gated by requireRole('ADMIN')
+// inside the router file. DO NOT add requireModuleAccess here — would
+// break the preview hook in /reservations/:id/checkin-wizard.
+app.use('/api/settings/fee-rates', requireAuth, feeRatesRouter);
 app.use('/api/settings', requireAuth, requireModuleAccess('settings'), settingsRouter);
 app.use('/api/tenants', requireAuth, requireModuleAccess('tenants'), tenantsRouter);
 
