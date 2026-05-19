@@ -17,7 +17,10 @@ function toNullableNumber(value) {
 function normalizePaymentMethod(method) {
   const raw = String(method || '').trim().toUpperCase();
   if (!raw) return 'CASH';
-  return ['CASH', 'CARD', 'ZELLE', 'ATH_MOVIL', 'BANK_TRANSFER', 'OTHER'].includes(raw) ? raw : 'OTHER';
+  // AUTH_HOLD = security deposit authorization hold. Included for paidAmount
+  // math (Option A) so agreement.balance correctly excludes the held amount.
+  // The hold is NOT a settled payment — distinguishable downstream via method.
+  return ['CASH', 'CARD', 'ZELLE', 'ATH_MOVIL', 'BANK_TRANSFER', 'AUTH_HOLD', 'OTHER'].includes(raw) ? raw : 'OTHER';
 }
 
 function normalizePaymentOrigin(origin) {
@@ -456,11 +459,19 @@ export const reservationPricingService = {
     const paidAt = payload.paidAt ? new Date(payload.paidAt) : new Date();
     if (Number.isNaN(paidAt.getTime())) throw new Error('paidAt is invalid');
 
+    const normalizedMethod = normalizePaymentMethod(payload.method);
+    const trimmedReference = payload.reference ? String(payload.reference).trim() : null;
+    // AUTH_HOLD requires the auth code in `reference` — it's the only audit
+    // trail for the swipe (no settled funds, no AuthNet transId).
+    if (normalizedMethod === 'AUTH_HOLD' && !trimmedReference) {
+      throw new Error('reference is required for AUTH_HOLD payments (auth code)');
+    }
+
     const paymentData = {
       reservationId,
-      method: normalizePaymentMethod(payload.method),
+      method: normalizedMethod,
       amount,
-      reference: payload.reference ? String(payload.reference).trim() : null,
+      reference: trimmedReference,
       status: String(payload.status || 'PAID').trim().toUpperCase(),
       paidAt,
       origin: normalizePaymentOrigin(payload.origin),

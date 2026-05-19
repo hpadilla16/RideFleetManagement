@@ -153,6 +153,15 @@ function Inner({ token, me, logout }) {
     }
   }, [securityDepositHold.amount, holdAmount]);
 
+  // When the agent flips Method to AUTH_HOLD, prefill Amount with the
+  // configured security-deposit amount (typical workflow: swipe card for
+  // the deposit, record the auth code). Doesn't clobber a manual entry.
+  useEffect(() => {
+    if (method === 'AUTH_HOLD' && !amount && securityDepositHold.amount > 0) {
+      setAmount(securityDepositHold.amount.toFixed(2));
+    }
+  }, [method, amount, securityDepositHold.amount]);
+
   useEffect(() => {
     if (!id || unpaid <= 0) return undefined;
     const timer = window.setInterval(() => {
@@ -172,6 +181,12 @@ function Inner({ token, me, logout }) {
       if (method === 'CARD') {
         const digits = String(cardLast4 || '').replace(/\D/g, '');
         if (digits.length !== 4) return setMsg('Last 4 digits of card are required for card payments');
+      }
+      // AUTH_HOLD = security deposit authorization swipe. The auth code is
+      // the only audit trail (no settled funds, no AuthNet transId), so the
+      // Reference field must be populated.
+      if (method === 'AUTH_HOLD' && !String(reference || '').trim()) {
+        return setMsg('Auth code is required in Reference for Auth Hold payments');
       }
       // Bundle the last4 into the reference string so it shows on the payment
       // history (e.g. "****1234 · auth A8K2X9"). Stored alongside the reference.
@@ -426,11 +441,24 @@ function Inner({ token, me, logout }) {
               <option value="ZELLE">Zelle</option>
               <option value="ATH_MOVIL">ATH Movil</option>
               <option value="BANK_TRANSFER">Bank Transfer</option>
+              <option value="AUTH_HOLD">Auth Hold (Security Deposit)</option>
               <option value="OTHER">Other</option>
             </select>
           </div>
-          <div className="stack"><label className="label">Reference</label><input value={reference} onChange={(e) => setReference(e.target.value)} placeholder={method === 'CARD' ? 'Auth code (optional)' : ''} /></div>
+          <div className="stack">
+            <label className="label">Reference{method === 'AUTH_HOLD' ? <span style={{ color: '#ef4444' }}> *</span> : null}</label>
+            <input
+              value={reference}
+              onChange={(e) => setReference(e.target.value)}
+              placeholder={method === 'CARD' ? 'Auth code (optional)' : method === 'AUTH_HOLD' ? 'Auth code (required)' : ''}
+            />
+          </div>
         </div>
+        {method === 'AUTH_HOLD' && (
+          <div className="surface-note" style={{ marginBottom: 10 }}>
+            <strong>Auth Hold:</strong> records a security-deposit authorization on the customer&rsquo;s card. Funds are NOT settled — only the auth code is on file. Enter the auth code in Reference so the outstanding balance reflects rental fees only.
+          </div>
+        )}
         {method === 'CARD' && (
           <div className="grid3" style={{ marginBottom: 10 }}>
             <div className="stack">
@@ -489,7 +517,12 @@ function Inner({ token, me, logout }) {
             {payments.length ? payments.map((p) => (
               <tr key={p.id}>
                 <td>{new Date(p.paidAt).toLocaleString()}</td>
-                <td>{p.method}</td>
+                <td>
+                  {p.method}
+                  {p.method === 'AUTH_HOLD' ? (
+                    <span style={{ marginLeft: 6, padding: '2px 6px', borderRadius: 4, fontSize: 10, fontWeight: 700, background: '#fef3c7', color: '#92400e' }}>HOLD</span>
+                  ) : null}
+                </td>
                 <td>${Number(p.amount || 0).toFixed(2)}</td>
                 <td>{p.reference}</td>
                 <td>

@@ -77,6 +77,11 @@ enum AgreementPaymentMethod {
   ZELLE
   ATH_MOVIL
   BANK_TRANSFER
+  // AUTH_HOLD: security-deposit authorization hold recorded at POS.
+  // Treated like a settled payment for paidAmount/balance math so the
+  // outstanding balance excludes the deposit (rental fees only). Funds
+  // are NOT actually captured — only the auth code is on file.
+  AUTH_HOLD
   OTHER
 }
 

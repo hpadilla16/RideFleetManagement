@@ -228,7 +228,7 @@ rentalAgreementsRouter.post('/:id/payments/manual', async (req, res, next) => {
     res.json(row);
   } catch (e) {
     if (/not found/i.test(e.message)) return res.status(404).json({ error: e.message });
-    if (/amount|required|entrytype/i.test(e.message)) return res.status(400).json({ error: e.message });
+    if (/amount|required|entrytype|reference/i.test(e.message)) return res.status(400).json({ error: e.message });
     next(e);
   }
 });

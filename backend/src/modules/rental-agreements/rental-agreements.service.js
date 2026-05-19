@@ -958,7 +958,12 @@ function resolveInsurancePlanField(reservation, field) {
   return null;
 }
 
-function structuredReservationChargeRows(reservation) {
+// Exported for the duplicate-charges regression test. Keep this helper as the
+// single source of truth for projecting reservation.charges → row shape used
+// by every startFromReservation write path. If a caller forgets to copy
+// `source` and `sourceRefId` from these rows into its createMany payload,
+// the duplicate-charges bug recurs (see duplicate-charges.test.mjs).
+export function structuredReservationChargeRows(reservation) {
   const rows = Array.isArray(reservation?.charges) ? reservation.charges : [];
   if (!rows.length) return null;
   return rows.map((row, idx) => ({
@@ -1685,6 +1690,16 @@ export const rentalAgreementsService = {
         }
 
         if (structuredRows?.length) {
+          // BUG-FIX 2026-05-19 (RES-083011): preserve `source` and
+          // `sourceRefId` on the agreement charges. Without these, this
+          // writer produced source=null rows while the parallel writer
+          // (reservation-pricing.service.js#syncAgreementCharges) produced
+          // rows with typed source (DAILY, SERVICE, INSURANCE, TAX,
+          // SECURITY_DEPOSIT). The two outputs were treated as different
+          // row sets by downstream code paths, leading to duplicate
+          // RentalAgreementCharge entries (one source=null + one typed)
+          // that doubled agreement.total. Aligning the shape lets either
+          // writer cleanly replace the other via its deleteMany+createMany.
           const normalizedRows = structuredRows.map((row) => ({
             rentalAgreementId: existing.id,
             code: row.code,
@@ -1695,7 +1710,9 @@ export const rentalAgreementsService = {
             total: row.total,
             taxable: row.taxable,
             selected: row.selected,
-            sortOrder: row.sortOrder
+            sortOrder: row.sortOrder,
+            source: row.source || null,
+            sourceRefId: row.sourceRefId || null
           }));
           const { subtotal, taxes, total } = structuredReservationTotals(normalizedRows);
 
@@ -1753,6 +1770,7 @@ export const rentalAgreementsService = {
           const normalizedRows = incomingRows.map((r) => ({
             name: String(r?.name || 'Line Item'),
             source: r?.source || null,
+            sourceRefId: r?.sourceRefId || null,
             chargeType: String(r?.chargeType || 'UNIT').toUpperCase(),
             quantity: Number(r?.quantity || 1),
             rate: Number(r?.rate || 0),
@@ -1776,7 +1794,8 @@ export const rentalAgreementsService = {
                 taxable: r.taxable,
                 selected: true,
                 sortOrder: idx,
-                source: r.source || null
+                source: r.source || null,
+                sourceRefId: r.sourceRefId || null
               }))
             }),
             prisma.rentalAgreement.update({
@@ -1954,6 +1973,7 @@ export const rentalAgreementsService = {
         name: String(r?.name || 'Line Item'),
         code: r?.code || null,
         source: r?.source || null,
+        sourceRefId: r?.sourceRefId || null,
         chargeType: String(r?.chargeType || 'UNIT').toUpperCase(),
         quantity: Number(r?.quantity || 1),
         rate: Number(r?.rate || 0),
@@ -1974,7 +1994,8 @@ export const rentalAgreementsService = {
           taxable: r.taxable,
           selected: true,
           sortOrder: idx,
-          source: r.source || null
+          source: r.source || null,
+          sourceRefId: r.sourceRefId || null
         }))
       });
 
@@ -3026,8 +3047,14 @@ export const rentalAgreementsService = {
     const method = String(payload.method || 'OTHER').toUpperCase();
     const reference = String(payload.reference || '').trim();
     const cardWithAuth = method === 'CARD' && reference.length > 0;
-    if (!receiptDataUrl && !cardWithAuth) {
-      throw new Error('Receipt is required for manual entries (CARD payments may skip if a reference / auth code is provided)');
+    // AUTH_HOLD is a security-deposit authorization swipe — no receipt to
+    // attach, but the auth code in `reference` is mandatory as audit trail.
+    if (method === 'AUTH_HOLD' && !reference) {
+      throw new Error('reference is required for AUTH_HOLD payments (auth code)');
+    }
+    const authHold = method === 'AUTH_HOLD' && reference.length > 0;
+    if (!receiptDataUrl && !cardWithAuth && !authHold) {
+      throw new Error('Receipt is required for manual entries (CARD or AUTH_HOLD payments may skip if a reference / auth code is provided)');
     }
 
     const agreement = await prisma.rentalAgreement.findUnique({ where: { id } });

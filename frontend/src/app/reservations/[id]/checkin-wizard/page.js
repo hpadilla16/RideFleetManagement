@@ -343,6 +343,15 @@ function Step1Summary({ reservation, agreement }) {
   const pickupAt = new Date(agreement?.pickupAt || reservation?.pickupAt).toLocaleString();
   const returnAt = new Date(agreement?.returnAt || reservation?.returnAt).toLocaleString();
   const isLate = new Date(agreement?.returnAt) < new Date();
+  // Break out AUTH_HOLD payments from settled payments so the summary
+  // shows the agent why the outstanding balance is what it is (e.g.
+  // total=$289, hold=$250, settled=$0, outstanding=$39).
+  const paymentsList = Array.isArray(agreement?.payments) ? agreement.payments : [];
+  const authHoldsTotal = paymentsList
+    .filter((p) => String(p?.method || '').toUpperCase() === 'AUTH_HOLD' && String(p?.status || 'PAID').toUpperCase() !== 'VOIDED')
+    .reduce((sum, p) => sum + Number(p?.amount || 0), 0);
+  const totalPaid = Number(agreement?.paidAmount || 0);
+  const settledPaid = Math.max(0, Number((totalPaid - authHoldsTotal).toFixed(2)));
   return (
     <WizGrid cols={2}>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
@@ -373,7 +382,10 @@ function Step1Summary({ reservation, agreement }) {
         <RowBetween k="Cleanliness" v={`${agreement?.cleanlinessOut || '—'}/5`} />
         <hr style={{ border: 'none', borderTop: '1px solid #e6dfff', margin: '12px 0' }} />
         <RowBetween k="Agreement total" v={`$${Number(agreement?.total || 0).toFixed(2)}`} />
-        <RowBetween k="Paid so far" v={`$${Number(agreement?.paidAmount || 0).toFixed(2)}`} valueColor="#1fc7aa" />
+        <RowBetween k="Paid so far" v={`$${settledPaid.toFixed(2)}`} valueColor="#1fc7aa" />
+        {authHoldsTotal > 0 ? (
+          <RowBetween k="Auth holds" v={`$${authHoldsTotal.toFixed(2)}`} valueColor="#a16207" />
+        ) : null}
         <RowBetween
           k={<strong>Outstanding balance</strong>}
           v={<strong>${Number(agreement?.balance || 0).toFixed(2)}</strong>}
