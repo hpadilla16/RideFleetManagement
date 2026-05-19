@@ -26,6 +26,7 @@
 import { useEffect, useState } from 'react';
 import { AuthGate } from '../../components/AuthGate';
 import { AppShell } from '../../components/AppShell';
+import { TLIntegrationPanel } from '../../components/settings/TLIntegrationPanel';
 import { API_BASE, api } from '../../lib/client';
 import { MODULE_DEFINITIONS } from '../../lib/moduleAccess';
 
@@ -63,7 +64,8 @@ const SETTINGS_TAB_SECTIONS = {
   services: ['services', 'fees'],
   stopSales: ['stopSales', 'vehicleTypes'],
   commissions: [],
-  franchises: []
+  franchises: [],
+  integrations: []
 };
 
 export default function SettingsPage() {
@@ -2248,6 +2250,7 @@ function SettingsInner({ token, me, logout }) {
           <button onClick={() => setTab('services')}>Additional Services</button>
           <button onClick={() => setTab('commissions')}>Commissions</button>
           <button onClick={() => setTab('franchises')}>Franchises</button>
+          {isSuper && <button onClick={() => setTab('integrations')}>Integraciones / Integrations</button>}
         </div>
 
         {tab === 'agreement' && (
@@ -2960,6 +2963,17 @@ function SettingsInner({ token, me, logout }) {
             scopedSettingsPath={scopedSettingsPath}
             activeSettingsTenantId={activeSettingsTenantId}
             locations={locations}
+            onPageMsg={setMsg}
+          />
+        )}
+
+        {tab === 'integrations' && (
+          <TLIntegrationPanel
+            token={token}
+            me={me}
+            isSuper={isSuper}
+            activeSettingsTenantId={activeSettingsTenantId}
+            scopedSettingsPath={scopedSettingsPath}
             onPageMsg={setMsg}
           />
         )}
