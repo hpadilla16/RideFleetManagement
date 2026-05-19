@@ -121,8 +121,29 @@ letter-spacing:.07em;font-size:5.5px;text-align:left;
 .terms{
 border:1px solid #3a2d5f;border-radius:5px;background:#17122a;
 color:#c8bcdf;padding:5px 7px;font-size:6px;line-height:1.35;
-white-space:pre-wrap;
 }
+/* Bilingual T&C styling — used by the canonical tc-<version>.html
+   embedded into the {{termsText}} slot. Two-column EN/ES side-by-side
+   on print so the legal text mirrors the signed PDF source. */
+.terms .tc-doc{font-size:6px;line-height:1.35}
+.terms .tc-doc h1{font-size:8px;font-weight:700;margin:0 0 3px;color:#efe9ff}
+.terms .tc-doc h2{font-size:7px;font-weight:700;margin:5px 0 2px;color:#efe9ff;border-top:1px solid #3a2d5f;padding-top:3px}
+.terms .tc-doc h2.tc-ack-head{margin-top:6px;border-top:2px solid #5d4691}
+.terms .tc-doc .tc-head{margin-bottom:4px}
+.terms .tc-doc .tc-meta{font-size:5.5px;color:#9f93be;margin-bottom:2px}
+.terms .tc-doc .tc-warn{color:#f59e0b}
+.terms .tc-doc .tc-note{font-size:5.5px;color:#9f93be;margin:2px 0}
+.terms .tc-doc p,.terms .tc-doc ul,.terms .tc-doc ol{margin:0 0 2px}
+.terms .tc-doc ul,.terms .tc-doc ol{padding-left:12px}
+.terms .tc-doc li{margin-bottom:1px}
+.terms .tc-doc .tc-bilingual{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:2px}
+.terms .tc-doc .tc-col{min-width:0}
+.terms .tc-doc .tc-initials-block{background:#1a1530;border:1px dashed #5a468d;border-radius:4px;padding:3px 5px;margin:3px 0}
+.terms .tc-doc table.tc-fees{width:100%;border-collapse:collapse;margin:2px 0 4px;background:transparent;border:1px solid #3a2d5f;border-radius:4px;overflow:hidden}
+.terms .tc-doc table.tc-fees th,.terms .tc-doc table.tc-fees td{padding:1px 4px;font-size:5.5px;border-bottom:1px solid #2a2247;text-align:left;vertical-align:top;color:#c8bcdf}
+.terms .tc-doc table.tc-fees th{background:#21193a;color:#ac9ed0;text-transform:uppercase;letter-spacing:.06em;font-size:5px}
+.terms .tc-doc table.tc-fees td.num,.terms .tc-doc table.tc-fees th.num{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+.terms .tc-doc .tc-cardinfo{font-size:5.5px;margin-top:3px;line-height:1.5}
 
 /* ── Signature ── */
 .sig-row{display:grid;grid-template-columns:1fr 140px;gap:6px;margin-top:4px}
@@ -162,6 +183,12 @@ background:#fff !important;border-color:#ddd !important;box-shadow:none !importa
 th{background:#f5f3fa !important;color:#555 !important}
 td{color:#222 !important}
 .terms{color:#444 !important;background:#fafafa !important;font-size:5.5px}
+.terms .tc-doc h1,.terms .tc-doc h2{color:#1a1a1a !important}
+.terms .tc-doc .tc-meta,.terms .tc-doc .tc-note{color:#555 !important}
+.terms .tc-doc .tc-initials-block{background:#f9f8fc !important;border-color:#999 !important}
+.terms .tc-doc table.tc-fees{border-color:#bbb !important}
+.terms .tc-doc table.tc-fees th{background:#f5f3fa !important;color:#444 !important}
+.terms .tc-doc table.tc-fees td{color:#222 !important;border-color:#ddd !important}
 .paid{color:#166534 !important}
 .due{color:#92400e !important}
 .logo{background:#f5f3fa;border-color:#e2dff0}

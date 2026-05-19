@@ -43,6 +43,12 @@ export default function SignAgreementPage() {
   const [reservation, setReservation] = useState(null);
   const [breakdown, setBreakdown] = useState(null);
   const [termsText, setTermsText] = useState('');
+  // 16g — bilingual canonical T&C HTML returned by the backend (sanitized
+  // server-side). When present we render it instead of the legacy
+  // pre-wrap termsText so the four initials lines + section structure
+  // match the signed PDF source.
+  const [termsHtml, setTermsHtml] = useState('');
+  const [termsVersion, setTermsVersion] = useState('');
   const [portal, setPortal] = useState(null);
   const [signerName, setSignerName] = useState('');
   const [accepted, setAccepted] = useState(false);
@@ -59,6 +65,8 @@ export default function SignAgreementPage() {
         setReservation(j.reservation);
         setBreakdown(j.breakdown || null);
         setTermsText(j.termsText || '');
+        setTermsHtml(j.termsHtml || '');
+        setTermsVersion(j.termsVersion || '');
         setPortal(j.portal || null);
         const draft = restoreSignatureDraft(token);
         if (draft) {
@@ -290,8 +298,21 @@ export default function SignAgreementPage() {
           </div>
 
           <div style={portalStyles.card}>
-            <h2 style={portalStyles.cardTitle}>Terms & Conditions</h2>
-            <div style={{ whiteSpace: 'pre-wrap', lineHeight: 1.7, color: '#55456f' }}>{termsText || 'N/A'}</div>
+            <h2 style={portalStyles.cardTitle}>Terms & Conditions{termsVersion ? ` (v${termsVersion})` : ''}</h2>
+            {termsHtml ? (
+              // 16g — bilingual canonical T&C. The HTML is built server-side
+              // from backend/src/lib/terms/tc-<version>.html with the five
+              // {{INITIALS_*}} markers already substituted (blank "___" for
+              // a fresh-signature view). Marked as a "tc-doc" so the
+              // print/portal styles share class names with the PDF template.
+              <div
+                className="tc-doc"
+                style={{ lineHeight: 1.55, color: '#55456f', maxHeight: 480, overflowY: 'auto', padding: 12, border: '1px solid rgba(102, 79, 177, 0.18)', borderRadius: 12 }}
+                dangerouslySetInnerHTML={{ __html: termsHtml }}
+              />
+            ) : (
+              <div style={{ whiteSpace: 'pre-wrap', lineHeight: 1.7, color: '#55456f' }}>{termsText || 'N/A'}</div>
+            )}
           </div>
 
           <div style={portalStyles.card}>
