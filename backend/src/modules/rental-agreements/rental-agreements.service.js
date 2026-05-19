@@ -8,6 +8,11 @@ import { hostReviewsService } from '../host-reviews/host-reviews.service.js';
 import { reservationPricingService } from '../reservations/reservation-pricing.service.js';
 import { settingsService } from '../settings/settings.service.js';
 import { buildInspectionIntelligence } from '../vehicles/vehicle-intelligence.service.js';
+import {
+  isStorageEnabled as inspectionPhotosStorageEnabled,
+  uploadInspectionPhotos,
+  materializeStorageRefs as materializeInspectionStorageRefs
+} from './inspection-photos.js';
 import { parseLocationConfig } from '../../lib/location-config.js';
 import { getCanonicalTermsHtml } from '../../lib/terms/index.js';
 import { TC_VERSION } from '../../lib/terms/version.js';
@@ -1473,8 +1478,31 @@ function normalizeInspectionRow(row) {
     odometer: row.odometer ?? null,
     damages: row.damages || null,
     notes: row.notes || null,
-    photos
+    photos,
+    photoStorageRefs: Array.isArray(row.photoStorageRefs) ? row.photoStorageRefs : null
   };
+}
+
+// 16l: Async variant that resolves photo storage refs into signed URLs for
+// client consumption. Always backward-compatible — when a row has only the
+// legacy `photosJson` blob, we return it untouched in the `photos` field.
+async function normalizeInspectionRowAsync(row) {
+  const base = normalizeInspectionRow(row);
+  if (!base) return null;
+  if (base.photoStorageRefs && base.photoStorageRefs.length > 0) {
+    try {
+      const resolved = await materializeInspectionStorageRefs(base.photoStorageRefs);
+      // Overlay any resolved URLs on top of the legacy photos map. Legacy
+      // entries (still in photosJson) survive — useful during the migration
+      // window when a single row could have both.
+      base.photos = { ...(base.photos || {}), ...resolved };
+    } catch {
+      // Best effort — leave legacy photos in place if signing fails.
+    }
+  }
+  // Don't leak internal storage paths to clients.
+  delete base.photoStorageRefs;
+  return base;
 }
 
 function normalizeSwapInspectionPayload(raw, at = null) {
@@ -1517,17 +1545,21 @@ function normalizeVehicleSwapRow(row) {
   };
 }
 
-function inspectionReportFromAgreement(agreement) {
+async function inspectionReportFromAgreement(agreement) {
   const structured = Array.isArray(agreement?.inspections) ? agreement.inspections : [];
   const swaps = Array.isArray(agreement?.vehicleSwaps) ? agreement.vehicleSwaps : [];
   const checkout = structured.find((row) => String(row.phase || '').toUpperCase() === 'CHECKOUT') || null;
   const checkin = structured.find((row) => String(row.phase || '').toUpperCase() === 'CHECKIN') || null;
+  const [checkoutNorm, checkinNorm] = await Promise.all([
+    normalizeInspectionRowAsync(checkout),
+    normalizeInspectionRowAsync(checkin)
+  ]);
   return {
-    checkout: normalizeInspectionRow(checkout),
-    checkin: normalizeInspectionRow(checkin),
+    checkout: checkoutNorm,
+    checkin: checkinNorm,
     intelligence: buildInspectionIntelligence({
-      checkout: normalizeInspectionRow(checkout),
-      checkin: normalizeInspectionRow(checkin)
+      checkout: checkoutNorm,
+      checkin: checkinNorm
     }),
     swaps: swaps.map(normalizeVehicleSwapRow).filter(Boolean)
   };
@@ -3730,6 +3762,40 @@ export const rentalAgreementsService = {
       notes: payload.notes || null,
       photos: payload.photos && typeof payload.photos === 'object' ? payload.photos : {}
     };
+
+    // 16l: feature-flagged write path. When INSPECTION_PHOTOS_STORAGE_ENABLED
+    // is truthy, decode the base64 photos, push them to Supabase Storage, and
+    // persist only the slim refs array in `photoStorageRefs`. Legacy
+    // `photosJson` is left null so the row stays small. When the flag is off
+    // (default), behavior is unchanged: photos go into `photosJson` as before.
+    const useStorage = inspectionPhotosStorageEnabled();
+    let photoStorageRefs = null;
+    if (useStorage && agreement?.tenantId) {
+      // Pre-upsert so we have an inspection row id to scope the object path.
+      const existingRow = await prisma.rentalAgreementInspection.upsert({
+        where: { rentalAgreementId_phase: { rentalAgreementId: id, phase } },
+        create: {
+          rentalAgreementId: id,
+          phase,
+          capturedAt: inspectionBlock.at,
+          actorUserId: inspectionBlock.actorUserId,
+          actorIp: inspectionBlock.ip
+        },
+        update: { capturedAt: inspectionBlock.at }
+      });
+      try {
+        photoStorageRefs = await uploadInspectionPhotos({
+          photos: inspectionBlock.photos,
+          tenantId: agreement.tenantId,
+          inspectionId: existingRow.id
+        });
+      } catch (err) {
+        // If upload fails, fall back to legacy behavior for this save so the
+        // user doesn't lose data. The next attempt will retry.
+        photoStorageRefs = null;
+      }
+    }
+
     await prisma.rentalAgreementInspection.upsert({
       where: {
         rentalAgreementId_phase: {
@@ -3752,7 +3818,8 @@ export const rentalAgreementsService = {
         odometer: inspectionBlock.odometer === '' || inspectionBlock.odometer == null ? null : Number(inspectionBlock.odometer),
         damages: inspectionBlock.damages,
         notes: inspectionBlock.notes,
-        photosJson: JSON.stringify(inspectionBlock.photos || {})
+        photosJson: photoStorageRefs ? null : JSON.stringify(inspectionBlock.photos || {}),
+        photoStorageRefs: photoStorageRefs || undefined
       },
       update: {
         capturedAt: inspectionBlock.at,
@@ -3767,7 +3834,8 @@ export const rentalAgreementsService = {
         odometer: inspectionBlock.odometer === '' || inspectionBlock.odometer == null ? null : Number(inspectionBlock.odometer),
         damages: inspectionBlock.damages,
         notes: inspectionBlock.notes,
-        photosJson: JSON.stringify(inspectionBlock.photos || {})
+        photosJson: photoStorageRefs ? null : JSON.stringify(inspectionBlock.photos || {}),
+        photoStorageRefs: photoStorageRefs || undefined
       }
     });
 
@@ -3800,7 +3868,7 @@ export const rentalAgreementsService = {
         vehicleSwaps: { orderBy: { createdAt: 'asc' } }
       }
     });
-    return { report: inspectionReportFromAgreement(refreshed) };
+    return { report: await inspectionReportFromAgreement(refreshed) };
   },
 
   async inspectionReport(id) {
@@ -3814,7 +3882,7 @@ export const rentalAgreementsService = {
     });
     if (!agreement) throw new Error('Rental agreement not found');
 
-    const report = inspectionReportFromAgreement(agreement);
+    const report = await inspectionReportFromAgreement(agreement);
     return {
       agreementId: agreement.id,
       agreementNumber: agreement.agreementNumber,
@@ -3865,7 +3933,7 @@ export const rentalAgreementsService = {
       throw new Error('Agreement cannot be closed with outstanding balance');
     }
 
-    const report = inspectionReportFromAgreement(agreement);
+    const report = await inspectionReportFromAgreement(agreement);
     if (!report?.checkout?.at || !report?.checkout?.ip || !report?.checkin?.at || !report?.checkin?.ip) {
       throw new Error('Both inspections are required before closing agreement: checkout + check-in (timestamp/IP missing)');
     }
