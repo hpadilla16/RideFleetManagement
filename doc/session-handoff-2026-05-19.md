@@ -64,12 +64,72 @@ All deployed via `docker compose -f docker-compose.prod.yml up -d --build --forc
 
 ---
 
-## Pillar 2 follow-up bugs/UX known but not yet fixed
+## Pillar 2 follow-up bugs/UX — TOMORROW'S FIRST PRIORITIES
 
-1. **Date validation on New Reservation form** — return < pickup currently fires the resolve-rate endpoint which returns 400 "No rate tables found". The form should block submission OR set the return date picker `min` to `pickupAt + 1 day`. Hector hit this today and self-resolved. ~30 min frontend fix.
-2. **LATE_RETURN preview in Step 3** — backend computes & charges LATE_RETURN, but `useFeePreview` hook in `frontend/src/components/wizard/useFeePreview.js` doesn't have `computeLateReturnFee`. Step 3 misses it from the live preview. ~1h fix.
-3. **Audit history for fee rate changes** — currently only `logger.info()`. No DB row of who changed what. V2.
-4. **Per-location fee rate overrides UI** — schema supports it (FeeRate.locationId), V1 UI only exposes tenant defaults.
+### 🚨 BUG 1 — Duplicate charge writers (root cause identified, backfilled, code fix pending)
+
+**Symptom**: RentalAgreementCharge had 2 rows per charge (one with `source=null`, one with typed source). Inflated `agreement.total` to ~2x the real value. Reservation page showed live-computed $39 unpaid; checkin wizard showed $578 because it reads `agreement.balance` directly.
+
+**Affected agreements (4 found via DB-wide diagnostic, all backfilled 2026-05-19):**
+- `RA-20260501175759-8184` (was 56 charges/44 distinct)
+- `RA-20260518155955-7821` (was 10/5)
+- `RA-20260518173734-7727` (was 10/5)
+- `RA-20260519023702-7930` (was 4/2)
+
+**Backfill applied (already done tonight):** Deduplication SQL kept the row with non-null `source` per (rentalAgreementId, name, chargeType), then recomputed `subtotal/taxes/fees/total/balance` using the same logic as `recomputeAgreementTotals` in fee-engine.service.js.
+
+**Code fix still pending** (do this first thing tomorrow, ~2-3h):
+- Two writers conflict: `startFromReservation` (rental-agreements.service.js line 1676-1708) writes normalizedRows WITHOUT a `source` field → null source. `syncAgreementCharges` (reservation-pricing.service.js line 128+) writes from ReservationCharge WITH `source: row.source || null` → typed source.
+- Both have their own `deleteMany` but in different transactions, so a sequence of (startFromReservation → syncAgreementCharges) leaves the null-source ones in place and the typed ones get added on top, or vice versa.
+- **Fix**: standardize on ONE writer. Recommend: make `startFromReservation`'s structuredRows path include `source: row.source` from the source ReservationCharge, AND coordinate via a single delete-then-create within ONE transaction. Or add a unique index on `(rentalAgreementId, name, chargeType)` to defend at the DB level — quick but breaks legitimate ambiguity (e.g., two cleaning charges with same name).
+- After code fix, redeploy as beta.44 and monitor for new dups.
+
+### 🚨 FEATURE — Authorization Hold payment method (Hector requested 2026-05-19 late night)
+
+Customer "owes" $39 for rental, but agreement.total includes $250 security deposit (which is an authorization hold, not a charge to be paid). Current state: wizard Step 1 confuses the agent by showing $289 outstanding.
+
+**Solution**: Add `AUTH_HOLD` as a payment method on `ReservationPayment`. Workflow:
+1. Agent swipes card at POS for $250 authorization hold
+2. On `/reservations/[id]/payments` page, fila Amount/Method/Reference — agent selects "Auth Hold" as method, enters $250, enters auth code as reference
+3. Backend records as `ReservationPayment { method: 'AUTH_HOLD', amount: 250, reference: '<auth-code>' }`
+4. Wizard's outstanding balance computation: `total - paidAmount - sum(AUTH_HOLD)` → ($289 - $0 - $250) = $39 ✓
+
+**Schema**: no change needed — `ReservationPayment.method` is `AgreementPaymentMethod` enum (CASH, CARD, etc.). Add `AUTH_HOLD` to the enum via migration. Same for `RentalAgreementPayment` if it's reused.
+
+**Files to touch:**
+- `backend/prisma/schema.prisma` — enum add `AUTH_HOLD`
+- `backend/src/modules/reservations/*payments*` — accept method in payload
+- `frontend/src/app/reservations/[id]/payments/page.js` — method dropdown adds option
+- `frontend/src/app/reservations/[id]/checkin-wizard/page.js` Step 1 — exclude AUTH_HOLD from "Paid so far" and compute Outstanding excluding deposit when there's an auth hold
+
+Estimate: ~2-3h. Should ship as beta.44 or beta.45 alongside the dup-writer fix.
+2. **Date validation on New Reservation form** — return < pickup currently fires the resolve-rate endpoint which returns 400 "No rate tables found". The form should block submission OR set the return date picker `min` to `pickupAt + 1 day`. Hector hit this today and self-resolved. ~30 min frontend fix.
+3. **LATE_RETURN preview in Step 3** — backend computes & charges LATE_RETURN, but `useFeePreview` hook in `frontend/src/components/wizard/useFeePreview.js` doesn't have `computeLateReturnFee`. Step 3 misses it from the live preview. ~1h fix.
+4. **Audit history for fee rate changes** — currently only `logger.info()`. No DB row of who changed what. V2.
+5. **Per-location fee rate overrides UI** — schema supports it (FeeRate.locationId), V1 UI only exposes tenant defaults.
+
+### Diagnostic queries for the balance desync bug (RES-083011)
+
+```sql
+-- Q1 — agreement totals (compare balance vs total-paidAmount)
+SELECT ra."agreementNumber", ra.status, ra.subtotal, ra.taxes, ra.fees, ra.total, ra."paidAmount", ra.balance, ra.total - ra."paidAmount" AS computed_balance
+FROM "RentalAgreement" ra JOIN "Reservation" r ON r.id = ra."reservationId"
+WHERE r."reservationNumber" = 'RES-083011';
+
+-- Q2 — agreement charges (check total matches)
+SELECT rac.name, rac."chargeType", rac.quantity, rac.rate, rac.total, rac.source, rac.selected
+FROM "RentalAgreementCharge" rac JOIN "RentalAgreement" ra ON ra.id = rac."rentalAgreementId"
+JOIN "Reservation" r ON r.id = ra."reservationId" WHERE r."reservationNumber" = 'RES-083011' ORDER BY rac."sortOrder";
+
+-- Q3 — payments split across two buckets
+SELECT 'AGREEMENT' AS bucket, rap.amount, rap.method, rap.status, rap."paidAt", rap.reference
+FROM "RentalAgreementPayment" rap JOIN "RentalAgreement" ra ON ra.id = rap."rentalAgreementId"
+JOIN "Reservation" r ON r.id = ra."reservationId" WHERE r."reservationNumber" = 'RES-083011'
+UNION ALL
+SELECT 'RESERVATION' AS bucket, rp.amount, rp.method, rp.status, rp."paidAt", rp.reference
+FROM "ReservationPayment" rp JOIN "Reservation" r ON r.id = rp."reservationId"
+WHERE r."reservationNumber" = 'RES-083011' ORDER BY "paidAt";
+```
 
 ---
 

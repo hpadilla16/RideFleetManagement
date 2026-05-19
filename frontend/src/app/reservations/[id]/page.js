@@ -895,8 +895,24 @@ function ReservationDetailInner({ token, me, logout }) {
     };
   }, [row, form.pickupAt, form.returnAt, chargeModel]);
 
+  // AUTH_HOLD payments are security deposit authorization swipes, NOT settled
+  // rental payments. They cover the deposit charge on the agreement (so
+  // agreement.balance correctly drops), but the "unpaid balance" on the
+  // reservation page tracks rental fees + extras only (deposit excluded
+  // from displayTotal), so AUTH_HOLD must also be excluded from paidTotal
+  // to keep the math balanced. Display them separately as "Auth holds".
   const paidTotal = useMemo(() => {
-    return Number((paymentRows || []).reduce((sum, payment) => sum + Number(payment?.amount || 0), 0).toFixed(2));
+    return Number((paymentRows || [])
+      .filter((p) => String(p?.method || '').toUpperCase() !== 'AUTH_HOLD')
+      .reduce((sum, payment) => sum + Number(payment?.amount || 0), 0)
+      .toFixed(2));
+  }, [paymentRows]);
+
+  const authHoldsTotal = useMemo(() => {
+    return Number((paymentRows || [])
+      .filter((p) => String(p?.method || '').toUpperCase() === 'AUTH_HOLD')
+      .reduce((sum, payment) => sum + Number(payment?.amount || 0), 0)
+      .toFixed(2));
   }, [paymentRows]);
 
   const precheckinInsuranceInfo = useMemo(() => {
@@ -2589,6 +2605,17 @@ token
                       <td colSpan={3}><strong>Unpaid Balance</strong></td>
                       <td style={{ whiteSpace: 'nowrap', textAlign: 'right' }}><strong>{money(unpaidBalance)}</strong></td>
                     </tr>
+                    {authHoldsTotal > 0 ? (
+                      <tr>
+                        <td colSpan={3}>
+                          <span style={{ color: '#a16207', fontWeight: 600 }}>Security deposit hold</span>
+                          <div className="label" style={{ textTransform: 'none', letterSpacing: 0 }}>Authorized — not settled</div>
+                        </td>
+                        <td style={{ whiteSpace: 'nowrap', textAlign: 'right', color: '#a16207' }}>
+                          <strong>{money(authHoldsTotal)}</strong>
+                        </td>
+                      </tr>
+                    ) : null}
                   </tbody>
                 </table>
               </div>
