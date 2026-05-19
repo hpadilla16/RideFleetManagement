@@ -48,6 +48,7 @@ const SETTINGS_TAB_SECTIONS = {
   agreement: [],
   locations: ['fees'],
   fees: ['fees'],
+  feeRates: [],
   rates: ['rates'],
   revenue: ['revenuePricing'],
   carSharing: ['carSharingSearchPlaces'],
@@ -2231,6 +2232,7 @@ function SettingsInner({ token, me, logout }) {
           <button onClick={() => setTab('agreement')}>Agreement</button>
           <button onClick={() => setTab('locations')}>Locations</button>
           <button onClick={() => setTab('fees')}>Fees</button>
+          <button onClick={() => setTab('feeRates')}>Inspection Fees</button>
           <button onClick={() => setTab('stopSales')}>Stop Sales</button>
           <button onClick={() => setTab('rates')}>Rates</button>
           <button onClick={() => setTab('revenue')}>Revenue</button>
@@ -2947,6 +2949,18 @@ function SettingsInner({ token, me, logout }) {
               </tbody>
             </table>
           </div>
+        )}
+
+        {tab === 'feeRates' && (
+          <FeeRatesTab
+            token={token}
+            me={me}
+            isSuper={isSuper}
+            tenantName={isSuper ? (activeSettingsTenant?.name || 'Tenant') : (me?.tenant?.name || 'Current tenant')}
+            scopedSettingsPath={scopedSettingsPath}
+            activeSettingsTenantId={activeSettingsTenantId}
+            onPageMsg={setMsg}
+          />
         )}
 
         {tab === 'stopSales' && (
@@ -5568,5 +5582,480 @@ function SettingsInner({ token, me, logout }) {
         </div>
       )}
     </AppShell>
+  );
+}
+
+/**
+ * FeeRatesTab — Inspection Fees configuration (Pillar 2, 16q frontend).
+ *
+ * Lets a tenant Admin override platform-default inspection fee amounts
+ * (fuel refill, cleaning, smoking, excess mileage, late return). Non-Admin
+ * users see a read-only view. Super-admins inherit the page-level
+ * `activeSettingsTenantId` scope so writes are routed correctly.
+ *
+ * API:
+ *   GET  /api/settings/fee-rates  ->  { rates: [...] }
+ *   PUT  /api/settings/fee-rates  ->  body { rates: [{ feeType, amount, notes? }] }
+ */
+const FEE_ICONS = {
+  FUEL_REFILL: 'fuel pump',
+  CLEANING_LIGHT: 'sparkle',
+  CLEANING_MEDIUM: 'sponge',
+  CLEANING_HEAVY: 'soap',
+  SMOKING: 'no smoking',
+  EXCESS_MILEAGE: 'road',
+  LATE_RETURN: 'clock'
+};
+// Emoji map (rendered as text, no JSX-special chars in the source):
+const FEE_EMOJI = {
+  FUEL_REFILL: '⛽',          // fuel pump
+  CLEANING_LIGHT: '✨',       // sparkles
+  CLEANING_MEDIUM: '🧽',// sponge
+  CLEANING_HEAVY: '🧼', // soap
+  SMOKING: '🚬',        // smoking sign (no-smoking ban is more complex)
+  EXCESS_MILEAGE: '🛣️', // motorway
+  LATE_RETURN: '⏰'           // alarm clock
+};
+
+const UNIT_LABEL = {
+  PER_GALLON: 'per gallon',
+  FLAT: 'flat',
+  PER_MILE: 'per mile',
+  PER_HOUR: 'per hour'
+};
+
+function formatMoney(n) {
+  const num = Number(n);
+  if (!Number.isFinite(num)) return '—';
+  return `$${num.toFixed(2)}`;
+}
+
+function effectiveAmount(rate) {
+  if (rate?.currentAmount !== null && rate?.currentAmount !== undefined) return Number(rate.currentAmount);
+  return Number(rate?.defaultAmount ?? 0);
+}
+
+function FeeRatesTab({ token, me, isSuper, tenantName, scopedSettingsPath, activeSettingsTenantId, onPageMsg }) {
+  const [rates, setRates] = useState([]);
+  const [draft, setDraft] = useState({});       // { feeType: { amount, notes } }
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [errors, setErrors] = useState({});     // { feeType: 'message' }
+  const [savedToast, setSavedToast] = useState('');
+  const [loadError, setLoadError] = useState('');
+
+  // Build a draft snapshot from the API rows (current amount, falling back to default).
+  const draftFromRates = (rows) => {
+    const next = {};
+    for (const r of rows || []) {
+      next[r.feeType] = {
+        amount: String(effectiveAmount(r)),
+        notes: r.notes || ''
+      };
+    }
+    return next;
+  };
+
+  const loadRates = async () => {
+    setLoading(true);
+    setLoadError('');
+    try {
+      const res = await api(scopedSettingsPath('/api/settings/fee-rates'), { bypassCache: true }, token);
+      const rows = Array.isArray(res?.rates) ? res.rates : [];
+      setRates(rows);
+      setDraft(draftFromRates(rows));
+      setErrors({});
+    } catch (e) {
+      setLoadError(e?.message || 'Could not load inspection fee rates');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => { loadRates(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [token, activeSettingsTenantId]);
+
+  const ratesByType = rates.reduce((acc, r) => { acc[r.feeType] = r; return acc; }, {});
+
+  // Anyone editable? Backend returns per-row `editable`; in V1 the value is the same across rows.
+  const editable = rates.length === 0 ? true : rates.every((r) => r.editable);
+
+  // ───── Validation + dirty tracking ─────
+  const validateAmount = (rate, amountStr) => {
+    const n = Number(amountStr);
+    if (!Number.isFinite(n)) return 'Enter a valid number';
+    const { min, max } = rate?.validRange || {};
+    if (typeof min === 'number' && n < min) return `Min ${formatMoney(min)}`;
+    if (typeof max === 'number' && n > max) return `Max ${formatMoney(max)}`;
+    return '';
+  };
+
+  const isRowDirty = (feeType) => {
+    const rate = ratesByType[feeType];
+    if (!rate) return false;
+    const d = draft[feeType];
+    if (!d) return false;
+    return Number(d.amount) !== effectiveAmount(rate) || (d.notes || '') !== (rate.notes || '');
+  };
+
+  const dirtyFeeTypes = Object.keys(draft).filter(isRowDirty);
+  const hasErrors = Object.values(errors).some((m) => !!m);
+
+  const updateDraft = (feeType, patch) => {
+    const rate = ratesByType[feeType];
+    setDraft((prev) => {
+      const next = { ...prev, [feeType]: { ...(prev[feeType] || {}), ...patch } };
+      return next;
+    });
+    if (patch.amount !== undefined && rate) {
+      const msg = validateAmount(rate, patch.amount);
+      setErrors((prev) => ({ ...prev, [feeType]: msg }));
+    }
+  };
+
+  const resetRow = (feeType) => {
+    const rate = ratesByType[feeType];
+    if (!rate) return;
+    setDraft((prev) => ({
+      ...prev,
+      [feeType]: { amount: String(Number(rate.defaultAmount ?? 0)), notes: '' }
+    }));
+    setErrors((prev) => ({ ...prev, [feeType]: '' }));
+  };
+
+  const discardAll = () => {
+    setDraft(draftFromRates(rates));
+    setErrors({});
+  };
+
+  const save = async () => {
+    if (!editable || saving || hasErrors || dirtyFeeTypes.length === 0) return;
+    setSaving(true);
+    try {
+      const payload = {
+        rates: dirtyFeeTypes.map((feeType) => {
+          const d = draft[feeType] || {};
+          const out = { feeType, amount: Number(d.amount) };
+          if (d.notes && d.notes.trim()) out.notes = d.notes.trim();
+          return out;
+        })
+      };
+      const res = await api(
+        scopedSettingsPath('/api/settings/fee-rates'),
+        { method: 'PUT', body: JSON.stringify(payload) },
+        token
+      );
+      const nextRows = Array.isArray(res?.rates) ? res.rates : [];
+      setRates(nextRows);
+      setDraft(draftFromRates(nextRows));
+      setErrors({});
+      const customCount = nextRows.filter((r) => r.currentSource === 'tenant_default' && r.currentAmount !== null).length;
+      const toastMsg = `Fee rates updated · ${customCount} custom rate${customCount === 1 ? '' : 's'} active`;
+      setSavedToast(toastMsg);
+      if (typeof onPageMsg === 'function') onPageMsg('');
+      setTimeout(() => setSavedToast(''), 3500);
+    } catch (e) {
+      const msg = e?.message || 'Could not save fee rates';
+      if (typeof onPageMsg === 'function') onPageMsg(msg);
+      setSavedToast('');
+      // If server returned per-row errors, surface them.
+      const perRow = e?.body?.errors || e?.data?.errors;
+      if (Array.isArray(perRow)) {
+        const map = {};
+        for (const item of perRow) {
+          if (item?.feeType && item?.message) map[item.feeType] = String(item.message);
+        }
+        if (Object.keys(map).length) setErrors((prev) => ({ ...prev, ...map }));
+      }
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  // ───── Styling tokens (inline, matching mockup) ─────
+  const VIOLET = '#6d3df2';
+  const VIOLET_SOFT = 'rgba(109,61,242,.10)';
+  const VIOLET_STRONG = 'rgba(109,61,242,.22)';
+  const INK = '#1d1d1f';
+  const MUTED = '#6e6e73';
+  const DIVIDER = '#e5e5ea';
+  const DANGER = '#ff3b30';
+  const SURFACE = '#ffffff';
+
+  const cardStyle = (dirty, error) => ({
+    background: SURFACE,
+    border: `1px solid ${error ? DANGER : (dirty ? VIOLET_STRONG : DIVIDER)}`,
+    borderRadius: 16,
+    padding: '14px 16px',
+    marginBottom: 10,
+    display: 'flex',
+    alignItems: 'center',
+    gap: 14,
+    boxShadow: dirty ? '0 0 0 2px rgba(109,61,242,.08), 0 1px 2px rgba(0,0,0,.02)' : '0 1px 2px rgba(0,0,0,.02)',
+    flexWrap: 'wrap'
+  });
+
+  if (loading) {
+    return (
+      <div className="stack">
+        <h2>Inspection Fees</h2>
+        <p className="label">Loading fee rates…</p>
+      </div>
+    );
+  }
+
+  if (loadError) {
+    return (
+      <div className="stack">
+        <h2>Inspection Fees</h2>
+        <p className="error">{loadError}</p>
+        <div><button onClick={loadRates}>Retry</button></div>
+      </div>
+    );
+  }
+
+  const dirtyCount = dirtyFeeTypes.length;
+  const adminEmail = me?.tenant?.adminEmail || `admin@${me?.tenant?.slug || 'your-tenant'}`;
+
+  return (
+    <div className="stack" style={{ position: 'relative' }}>
+      <div className="row-between" style={{ alignItems: 'flex-start' }}>
+        <div className="stack" style={{ gap: 4 }}>
+          <h2 style={{ margin: 0 }}>Inspection Fees</h2>
+          <p style={{ color: MUTED, fontSize: 13, lineHeight: 1.5, maxWidth: 740, margin: 0 }}>
+            Charged on check-in when the vehicle returns dirty, low on fuel, smoked-in, or over its mileage allowance.
+          </p>
+        </div>
+        <span
+          style={{
+            padding: '6px 12px',
+            borderRadius: 999,
+            background: VIOLET_SOFT,
+            color: VIOLET,
+            fontSize: 11,
+            fontWeight: 700,
+            letterSpacing: '.04em',
+            textTransform: 'uppercase',
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: 6,
+            whiteSpace: 'nowrap'
+          }}
+        >
+          <span style={{ width: 6, height: 6, borderRadius: '50%', background: VIOLET }} />
+          {tenantName}
+        </span>
+      </div>
+
+      {isSuper && activeSettingsTenantId ? (
+        <div
+          style={{
+            background: 'linear-gradient(135deg, #ffd60a 0%, #ff9f0a 100%)',
+            color: '#5d3a00',
+            padding: '10px 14px',
+            borderRadius: 12,
+            fontSize: 13,
+            fontWeight: 600
+          }}
+        >
+          Viewing as: <strong>{tenantName}</strong> (super-admin override)
+        </div>
+      ) : null}
+
+      {!editable ? (
+        <div
+          style={{
+            background: '#fff4e0',
+            border: '1px solid #ffe0b3',
+            color: '#7a4a00',
+            padding: '12px 14px',
+            borderRadius: 12,
+            fontSize: 13
+          }}
+        >
+          Only Admin can edit fee rates. Ask <strong>{adminEmail}</strong> for changes.
+        </div>
+      ) : null}
+
+      <div className="stack" style={{ gap: 0 }}>
+        {rates.map((rate) => {
+          const d = draft[rate.feeType] || { amount: '', notes: '' };
+          const dirty = isRowDirty(rate.feeType);
+          const err = errors[rate.feeType] || '';
+          const overrideActive = rate.currentAmount !== null && rate.currentAmount !== undefined;
+          const range = rate.validRange || { min: 0, max: 9999, step: 0.01 };
+          const unitLabel = UNIT_LABEL[rate.unit] || rate.unit || '';
+          return (
+            <div key={rate.feeType} style={cardStyle(dirty, !!err)}>
+              <div
+                style={{
+                  width: 40, height: 40, borderRadius: 12,
+                  background: 'linear-gradient(135deg, rgba(109,61,242,.10), rgba(135,82,254,.04))',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  fontSize: 22, flexShrink: 0
+                }}
+                aria-hidden="true"
+              >
+                {FEE_EMOJI[rate.feeType] || '•'}
+              </div>
+
+              <div style={{ flex: '1 1 220px', minWidth: 200 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <strong style={{ color: INK, fontSize: 15 }}>{rate.label || rate.feeType}</strong>
+                  {dirty ? <span title="Modified" style={{ width: 8, height: 8, borderRadius: '50%', background: VIOLET, display: 'inline-block' }} /> : null}
+                </div>
+                <div style={{ color: MUTED, fontSize: 12, lineHeight: 1.45, marginTop: 3 }}>
+                  {rate.description}
+                </div>
+                <div style={{ marginTop: 6 }}>
+                  {overrideActive ? (
+                    <span style={{ padding: '3px 9px', borderRadius: 999, background: VIOLET_SOFT, color: VIOLET, fontSize: 11, fontWeight: 700 }}>
+                      Custom rate
+                    </span>
+                  ) : (
+                    <span style={{ padding: '3px 9px', borderRadius: 999, background: '#f0f0f3', color: MUTED, fontSize: 11, fontWeight: 600 }}>
+                      Using platform default
+                    </span>
+                  )}
+                </div>
+              </div>
+
+              <div style={{ flex: '0 0 auto', display: 'flex', flexDirection: 'column', gap: 4 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <span style={{ color: MUTED, fontWeight: 600 }}>$</span>
+                  <input
+                    type="number"
+                    inputMode="decimal"
+                    step={range.step || 0.01}
+                    min={range.min}
+                    max={range.max}
+                    disabled={!editable}
+                    value={d.amount}
+                    onChange={(e) => updateDraft(rate.feeType, { amount: e.target.value })}
+                    style={{
+                      width: 110,
+                      padding: '8px 10px',
+                      borderRadius: 10,
+                      border: `1px solid ${err ? DANGER : DIVIDER}`,
+                      fontSize: 14,
+                      fontWeight: 600,
+                      color: INK,
+                      outline: 'none',
+                      background: editable ? '#fff' : '#f5f5f7'
+                    }}
+                  />
+                  <span style={{ color: MUTED, fontSize: 12 }}>/ {unitLabel}</span>
+                </div>
+                {err ? (
+                  <div style={{ color: DANGER, fontSize: 11, fontWeight: 600 }}>{err}</div>
+                ) : null}
+              </div>
+
+              <div style={{ flex: '0 0 auto', display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 4, minWidth: 110 }}>
+                <span style={{ color: MUTED, fontSize: 11 }}>
+                  Default {formatMoney(rate.defaultAmount)}
+                </span>
+                {editable && (dirty || overrideActive) ? (
+                  <button
+                    type="button"
+                    onClick={() => resetRow(rate.feeType)}
+                    title="Reset to platform default value"
+                    style={{
+                      padding: '4px 10px',
+                      borderRadius: 8,
+                      border: `1px solid ${DIVIDER}`,
+                      background: '#fff',
+                      color: VIOLET,
+                      fontSize: 12,
+                      fontWeight: 700,
+                      cursor: 'pointer'
+                    }}
+                  >
+                    &#x21BB; Reset
+                  </button>
+                ) : null}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      {editable ? (
+        <div
+          style={{
+            position: 'sticky',
+            bottom: 0,
+            background: 'rgba(255,255,255,.92)',
+            backdropFilter: 'blur(8px)',
+            WebkitBackdropFilter: 'blur(8px)',
+            borderTop: `1px solid ${DIVIDER}`,
+            padding: '12px 0',
+            marginTop: 12,
+            display: 'flex',
+            justifyContent: 'flex-end',
+            gap: 10
+          }}
+        >
+          <button
+            type="button"
+            onClick={discardAll}
+            disabled={dirtyCount === 0 || saving}
+            style={{
+              padding: '9px 16px',
+              borderRadius: 10,
+              border: `1px solid ${DIVIDER}`,
+              background: '#fff',
+              color: INK,
+              fontSize: 13,
+              fontWeight: 600,
+              cursor: dirtyCount === 0 || saving ? 'not-allowed' : 'pointer',
+              opacity: dirtyCount === 0 || saving ? 0.55 : 1
+            }}
+          >
+            Discard changes
+          </button>
+          <button
+            type="button"
+            onClick={save}
+            disabled={dirtyCount === 0 || hasErrors || saving}
+            style={{
+              padding: '9px 18px',
+              borderRadius: 10,
+              border: 'none',
+              background: VIOLET,
+              color: '#fff',
+              fontSize: 13,
+              fontWeight: 700,
+              cursor: dirtyCount === 0 || hasErrors || saving ? 'not-allowed' : 'pointer',
+              opacity: dirtyCount === 0 || hasErrors || saving ? 0.55 : 1,
+              boxShadow: '0 4px 12px rgba(109,61,242,.32)'
+            }}
+          >
+            {saving ? 'Saving…' : `Save ${dirtyCount} change${dirtyCount === 1 ? '' : 's'}`}
+          </button>
+        </div>
+      ) : null}
+
+      {savedToast ? (
+        <div
+          role="status"
+          style={{
+            position: 'fixed',
+            left: '50%',
+            bottom: 32,
+            transform: 'translateX(-50%)',
+            background: INK,
+            color: '#fff',
+            padding: '12px 18px',
+            borderRadius: 12,
+            fontSize: 13,
+            fontWeight: 600,
+            boxShadow: '0 12px 30px rgba(0,0,0,.25)',
+            zIndex: 50
+          }}
+        >
+          {savedToast}
+        </div>
+      ) : null}
+    </div>
   );
 }

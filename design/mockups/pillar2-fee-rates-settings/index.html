@@ -1,0 +1,1800 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>RideFleet · Settings — Inspection Fees · Mockups</title>
+<style>
+:root {
+  --brand-purple: #8752FE;
+  --brand-violet: #6d3df2;
+  --brand-violet-soft: rgba(109,61,242,.10);
+  --brand-violet-strong: rgba(109,61,242,.22);
+  --brand-mint: #1fc7aa;
+  --brand-ink: #1d1d1f;
+  --ios-canvas: #f5f5f7;
+  --ios-surface: #ffffff;
+  --ios-surface-glass: rgba(255,255,255,.78);
+  --ios-text: #1d1d1f;
+  --ios-muted: #6e6e73;
+  --ios-muted-2: #86868b;
+  --ios-divider: #e5e5ea;
+  --ios-divider-strong: #d2d2d7;
+  --ok: #30d158;
+  --ok-bg: #e7f9ed;
+  --warn: #ff9f0a;
+  --warn-bg: #fff4e0;
+  --danger: #ff3b30;
+  --danger-bg: #ffe6e3;
+  --shadow-soft: 0 4px 16px rgba(0,0,0,.04), 0 1px 3px rgba(0,0,0,.05);
+  --shadow-card: 0 10px 32px rgba(0,0,0,.06), 0 2px 6px rgba(0,0,0,.04);
+  --radius-sm: 10px;
+  --radius-md: 14px;
+  --radius-lg: 18px;
+  --radius-xl: 22px;
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html, body {
+  font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'SF Pro Display', 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+  color: var(--ios-text);
+  background: var(--ios-canvas);
+  min-height: 100vh;
+  letter-spacing: -.005em;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* ───── Page header ───── */
+.page-head {
+  max-width: 1480px;
+  margin: 0 auto;
+  padding: 56px 40px 24px;
+}
+.page-head .eyebrow {
+  color: var(--brand-violet);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: .14em;
+  text-transform: uppercase;
+}
+.page-head h1 {
+  margin-top: 10px;
+  font-size: clamp(34px, 4vw, 52px);
+  font-weight: 700;
+  letter-spacing: -.025em;
+  color: var(--brand-ink);
+  line-height: 1.05;
+}
+.page-head h1 .accent {
+  background: linear-gradient(135deg, var(--brand-purple), var(--brand-violet));
+  -webkit-background-clip: text; background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+.page-head p {
+  margin-top: 14px;
+  color: var(--ios-muted);
+  font-size: 17px;
+  max-width: 760px;
+  line-height: 1.55;
+}
+.page-head .meta {
+  margin-top: 22px;
+  display: flex; gap: 8px; flex-wrap: wrap;
+}
+.page-head .meta .pill {
+  padding: 7px 13px;
+  border-radius: 999px;
+  background: var(--ios-surface);
+  border: 1px solid var(--ios-divider);
+  color: var(--ios-muted);
+  font-size: 12px;
+  font-weight: 600;
+}
+.page-head .meta .pill strong { color: var(--brand-ink); font-weight: 700; }
+
+/* ───── Section card ───── */
+.section {
+  max-width: 1480px;
+  margin: 24px auto 0;
+  padding: 32px 40px 48px;
+}
+.section-head {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-bottom: 6px;
+}
+.section-head .num {
+  width: 38px; height: 38px;
+  border-radius: 12px;
+  display: flex; align-items: center; justify-content: center;
+  background: linear-gradient(135deg, var(--brand-purple), var(--brand-violet));
+  color: white;
+  font-weight: 700;
+  font-size: 15px;
+  box-shadow: 0 6px 14px rgba(109,61,242,.32);
+}
+.section-head h2 {
+  font-size: 26px;
+  font-weight: 700;
+  color: var(--brand-ink);
+  letter-spacing: -.02em;
+}
+.section-sub {
+  color: var(--ios-muted);
+  font-size: 14px;
+  line-height: 1.55;
+  margin: 6px 0 28px 52px;
+  max-width: 740px;
+}
+
+/* ───── Frames row (phone + tablet) ───── */
+.frames-row {
+  display: grid;
+  grid-template-columns: 270px 1fr;
+  gap: 32px;
+  align-items: start;
+  background: white;
+  border: 1px solid var(--ios-divider);
+  border-radius: var(--radius-xl);
+  padding: 28px;
+  box-shadow: var(--shadow-card);
+}
+@media (max-width: 1100px) {
+  .frames-row { grid-template-columns: 1fr; }
+}
+.state-tag {
+  display: inline-flex; align-items: center; gap: 7px;
+  padding: 5px 11px;
+  border-radius: 999px;
+  background: var(--brand-violet-soft);
+  color: var(--brand-violet);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+}
+.state-tag .dot {
+  width: 6px; height: 6px;
+  border-radius: 50%;
+  background: var(--brand-violet);
+}
+.state-tag.ok { background: var(--ok-bg); color: var(--ok); }
+.state-tag.ok .dot { background: var(--ok); }
+.state-tag.warn { background: var(--warn-bg); color: #b46300; }
+.state-tag.warn .dot { background: var(--warn); }
+.state-tag.danger { background: var(--danger-bg); color: var(--danger); }
+.state-tag.danger .dot { background: var(--danger); }
+.state-tag.neutral { background: #f0f0f3; color: var(--ios-muted); }
+.state-tag.neutral .dot { background: var(--ios-muted); }
+
+.frame-col-head { margin-bottom: 14px; }
+.frame-col-head h3 {
+  margin-top: 10px;
+  font-size: 19px;
+  font-weight: 700;
+  color: var(--brand-ink);
+  letter-spacing: -.015em;
+}
+.frame-col-head p {
+  color: var(--ios-muted);
+  font-size: 13px;
+  line-height: 1.55;
+  margin-top: 4px;
+  max-width: 620px;
+}
+
+/* ───── Phone frame ───── */
+.phone-frame {
+  width: 250px;
+  height: 540px;
+  border-radius: 42px;
+  background: #1a1a1c;
+  padding: 9px;
+  box-shadow:
+    0 24px 50px rgba(0,0,0,.22),
+    inset 0 0 0 1px rgba(255,255,255,.06);
+  position: relative;
+}
+.phone-frame::before {
+  content: '';
+  position: absolute;
+  top: 17px; left: 50%;
+  transform: translateX(-50%);
+  width: 78px; height: 18px;
+  background: #1a1a1c;
+  border-radius: 12px;
+  z-index: 10;
+}
+.phone-screen {
+  width: 100%;
+  height: 100%;
+  border-radius: 34px;
+  background: var(--ios-canvas);
+  overflow: hidden;
+  position: relative;
+  font-size: 9.5px;
+  line-height: 1.4;
+  color: var(--ios-text);
+}
+.phone-screen .status-bar {
+  height: 26px;
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  padding: 0 18px 4px;
+  font-size: 8.5px;
+  font-weight: 700;
+  color: var(--brand-ink);
+}
+
+/* ───── Tablet frame ───── */
+.tablet-frame {
+  width: 100%;
+  max-width: 820px;
+  aspect-ratio: 4 / 3;
+  border-radius: 22px;
+  background: #1a1a1c;
+  padding: 9px;
+  box-shadow:
+    0 24px 60px rgba(0,0,0,.20),
+    inset 0 0 0 1px rgba(255,255,255,.05);
+  position: relative;
+}
+.tablet-screen {
+  width: 100%;
+  height: 100%;
+  border-radius: 14px;
+  background: var(--ios-canvas);
+  overflow: hidden;
+  position: relative;
+  font-size: 12px;
+  color: var(--ios-text);
+}
+
+/* ───── Settings chrome ───── */
+.s-topbar {
+  height: 38px;
+  background: var(--ios-surface-glass);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border-bottom: 1px solid var(--ios-divider);
+  display: flex;
+  align-items: center;
+  padding: 0 12px;
+  gap: 8px;
+  font-size: 9.5px;
+  font-weight: 700;
+  color: var(--brand-ink);
+}
+.s-topbar .brand {
+  display: flex; align-items: center; gap: 5px;
+  font-weight: 800;
+  letter-spacing: -.01em;
+}
+.s-topbar .brand .logo {
+  width: 14px; height: 14px;
+  border-radius: 4px;
+  background: linear-gradient(135deg, var(--brand-purple), var(--brand-violet));
+}
+.s-topbar .crumb { color: var(--ios-muted); font-weight: 600; }
+.s-topbar .crumb::before { content: '›'; margin: 0 5px; color: var(--ios-muted-2); }
+.s-topbar .scope-pill {
+  margin-left: auto;
+  padding: 4px 9px;
+  border-radius: 999px;
+  background: var(--brand-violet-soft);
+  color: var(--brand-violet);
+  font-size: 8px;
+  font-weight: 700;
+  letter-spacing: .02em;
+  display: flex; align-items: center; gap: 5px;
+}
+.s-topbar .scope-pill .dot {
+  width: 5px; height: 5px;
+  border-radius: 50%;
+  background: var(--brand-violet);
+}
+.s-topbar.tab { height: 48px; padding: 0 20px; font-size: 12px; }
+.s-topbar.tab .scope-pill { font-size: 11px; padding: 6px 12px; gap: 7px; }
+.s-topbar.tab .scope-pill .dot { width: 6px; height: 6px; }
+.s-topbar.tab .brand .logo { width: 18px; height: 18px; border-radius: 5px; }
+
+/* Settings horizontal tab strip */
+.s-tabs {
+  height: 36px;
+  display: flex; align-items: center; gap: 4px;
+  padding: 0 10px;
+  border-bottom: 1px solid var(--ios-divider);
+  background: white;
+  overflow: hidden;
+  font-size: 8.5px;
+  font-weight: 600;
+  color: var(--ios-muted);
+}
+.s-tabs .t {
+  padding: 5px 8px;
+  border-radius: 8px;
+  white-space: nowrap;
+}
+.s-tabs .t.active {
+  background: var(--brand-violet);
+  color: white;
+  font-weight: 700;
+  box-shadow: 0 3px 8px rgba(109,61,242,.28);
+}
+.s-tabs.tab { height: 46px; padding: 0 20px; font-size: 11px; gap: 6px; }
+.s-tabs.tab .t { padding: 7px 12px; border-radius: 10px; }
+
+/* ───── Page body (under chrome) ───── */
+.s-body {
+  padding: 12px 12px 56px;
+  height: calc(100% - 100px);
+  overflow: hidden;
+  position: relative;
+}
+.s-body.tab { padding: 20px 24px 72px; height: calc(100% - 124px); }
+
+.panel-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
+.panel-head h4 {
+  font-size: 13px; font-weight: 700; color: var(--brand-ink); letter-spacing: -.015em;
+}
+.s-body.tab .panel-head h4 { font-size: 19px; }
+.panel-head .role-pill {
+  padding: 3px 7px;
+  border-radius: 999px;
+  background: #f0f0f3;
+  color: var(--ios-muted);
+  font-size: 7.5px;
+  font-weight: 700;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+}
+.s-body.tab .panel-head .role-pill { font-size: 10px; padding: 5px 10px; }
+.panel-head .role-pill.admin { background: var(--brand-violet-soft); color: var(--brand-violet); }
+.panel-head .role-pill.ops { background: var(--warn-bg); color: #b46300; }
+.panel-head .role-pill.super { background: linear-gradient(135deg, #ffd60a 0%, #ff9f0a 100%); color: #5d3a00; }
+
+.panel-sub {
+  color: var(--ios-muted);
+  font-size: 8.5px;
+  line-height: 1.4;
+  margin-bottom: 12px;
+}
+.s-body.tab .panel-sub { font-size: 12px; margin-bottom: 18px; line-height: 1.5; }
+
+/* Fee row card */
+.fee-card {
+  background: white;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--ios-divider);
+  margin-bottom: 6px;
+  padding: 8px 9px;
+  display: flex; align-items: center; gap: 8px;
+  box-shadow: 0 1px 2px rgba(0,0,0,.02);
+}
+.s-body.tab .fee-card {
+  padding: 14px 16px;
+  border-radius: var(--radius-lg);
+  margin-bottom: 10px;
+  gap: 14px;
+}
+.fee-card.dirty {
+  border-color: var(--brand-violet-strong);
+  box-shadow: 0 0 0 2px rgba(109,61,242,.08), 0 1px 2px rgba(0,0,0,.02);
+}
+.fee-card.error {
+  border-color: var(--danger);
+  box-shadow: 0 0 0 2px rgba(255,59,48,.10), 0 1px 2px rgba(0,0,0,.02);
+}
+.fee-icon {
+  width: 26px; height: 26px;
+  border-radius: 9px;
+  background: linear-gradient(135deg, var(--brand-violet-soft), rgba(135,82,254,.04));
+  display: flex; align-items: center; justify-content: center;
+  font-size: 14px;
+  flex-shrink: 0;
+}
+.s-body.tab .fee-icon { width: 40px; height: 40px; font-size: 22px; border-radius: 12px; }
+.fee-meta { flex: 1; min-width: 0; }
+.fee-meta .name {
+  font-size: 9px;
+  font-weight: 700;
+  color: var(--brand-ink);
+  letter-spacing: -.01em;
+}
+.fee-meta .name .modified-dot {
+  display: inline-block;
+  width: 5px; height: 5px;
+  border-radius: 50%;
+  background: var(--brand-violet);
+  margin-left: 4px;
+  vertical-align: 2px;
+  box-shadow: 0 0 0 2px rgba(109,61,242,.16);
+}
+.s-body.tab .fee-meta .name { font-size: 14px; }
+.s-body.tab .fee-meta .name .modified-dot { width: 7px; height: 7px; margin-left: 6px; vertical-align: 3px; }
+.fee-meta .ref {
+  font-size: 7.5px;
+  color: var(--ios-muted);
+  font-weight: 600;
+  margin-top: 1px;
+}
+.s-body.tab .fee-meta .ref { font-size: 11px; margin-top: 2px; }
+.fee-meta .ref .pill {
+  display: inline-block;
+  padding: 1px 5px;
+  border-radius: 999px;
+  background: #f0f0f3;
+  color: var(--ios-muted);
+  font-size: 6.5px;
+  font-weight: 700;
+  letter-spacing: .03em;
+  margin-left: 4px;
+}
+.s-body.tab .fee-meta .ref .pill { font-size: 9px; padding: 2px 8px; margin-left: 6px; }
+.fee-meta .err {
+  font-size: 7px;
+  color: var(--danger);
+  font-weight: 700;
+  margin-top: 2px;
+}
+.s-body.tab .fee-meta .err { font-size: 11px; margin-top: 4px; }
+
+/* Number input pill */
+.fee-input {
+  display: flex; align-items: center;
+  background: var(--ios-canvas);
+  border: 1px solid var(--ios-divider);
+  border-radius: 10px;
+  padding: 5px 7px;
+  min-width: 76px;
+  justify-content: flex-end;
+  gap: 2px;
+}
+.s-body.tab .fee-input { padding: 9px 12px; min-width: 130px; border-radius: 12px; gap: 4px; }
+.fee-input .dollar {
+  font-size: 8.5px; color: var(--ios-muted); font-weight: 700;
+}
+.s-body.tab .fee-input .dollar { font-size: 14px; }
+.fee-input .num {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--brand-ink);
+  letter-spacing: -.01em;
+  font-variant-numeric: tabular-nums;
+}
+.s-body.tab .fee-input .num { font-size: 18px; }
+.fee-input .unit {
+  font-size: 7px;
+  color: var(--ios-muted);
+  font-weight: 600;
+  margin-left: 3px;
+}
+.s-body.tab .fee-input .unit { font-size: 11px; margin-left: 5px; }
+.fee-card.dirty .fee-input {
+  background: white;
+  border-color: var(--brand-violet);
+  box-shadow: 0 0 0 3px rgba(109,61,242,.10);
+}
+.fee-card.error .fee-input {
+  background: white;
+  border-color: var(--danger);
+  box-shadow: 0 0 0 3px rgba(255,59,48,.10);
+}
+.fee-card.readonly { opacity: .76; }
+.fee-card.readonly .fee-input { background: #f0f0f3; border-style: dashed; }
+.fee-card.readonly .fee-input .num { color: var(--ios-muted); }
+
+/* Sticky bottom action bar */
+.action-bar {
+  position: absolute;
+  bottom: 0; left: 0; right: 0;
+  padding: 9px 12px;
+  background: var(--ios-surface-glass);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  border-top: 1px solid var(--ios-divider);
+  display: flex; gap: 6px; align-items: center;
+}
+.s-body.tab .action-bar { padding: 14px 24px; gap: 10px; }
+.action-bar .summary {
+  flex: 1;
+  font-size: 8px;
+  color: var(--ios-muted);
+  font-weight: 600;
+}
+.s-body.tab .action-bar .summary { font-size: 11px; }
+.action-bar .summary strong { color: var(--brand-ink); font-weight: 700; }
+.btn {
+  padding: 7px 12px;
+  border-radius: 10px;
+  background: linear-gradient(135deg, var(--brand-purple), var(--brand-violet));
+  color: white;
+  font-size: 9px;
+  font-weight: 700;
+  border: none;
+  box-shadow: 0 4px 12px rgba(109,61,242,.30);
+  display: inline-flex; align-items: center; gap: 5px;
+  letter-spacing: -.005em;
+}
+.s-body.tab .btn { padding: 10px 18px; font-size: 13px; border-radius: 12px; gap: 7px; }
+.btn.secondary {
+  background: white;
+  color: var(--brand-ink);
+  border: 1px solid var(--ios-divider-strong);
+  box-shadow: none;
+}
+.btn.disabled {
+  background: #d2d2d7;
+  color: white;
+  box-shadow: none;
+  opacity: .9;
+}
+.btn .spinner {
+  width: 9px; height: 9px;
+  border: 1.5px solid rgba(255,255,255,.4);
+  border-top-color: white;
+  border-radius: 50%;
+  animation: spin .8s linear infinite;
+}
+.s-body.tab .btn .spinner { width: 13px; height: 13px; border-width: 2px; }
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* Toast */
+.toast {
+  position: absolute;
+  bottom: 50px; left: 12px; right: 12px;
+  padding: 9px 12px;
+  background: var(--brand-ink);
+  color: white;
+  border-radius: 12px;
+  font-size: 9.5px;
+  font-weight: 600;
+  display: flex; align-items: center; gap: 7px;
+  box-shadow: 0 10px 24px rgba(0,0,0,.22);
+  animation: slideUp .35s ease-out;
+}
+.s-body.tab .toast { bottom: 80px; left: 24px; right: 24px; padding: 13px 18px; font-size: 13px; border-radius: 14px; gap: 9px; }
+.toast .check {
+  width: 14px; height: 14px;
+  border-radius: 50%;
+  background: var(--ok);
+  display: flex; align-items: center; justify-content: center;
+  font-size: 9px;
+  color: white;
+  font-weight: 800;
+}
+.s-body.tab .toast .check { width: 20px; height: 20px; font-size: 12px; }
+@keyframes slideUp {
+  from { transform: translateY(20px); opacity: 0; }
+  to { transform: translateY(0); opacity: 1; }
+}
+
+/* Read-only tooltip badge */
+.readonly-banner {
+  background: var(--warn-bg);
+  border: 1px solid rgba(255,159,10,.32);
+  border-radius: 10px;
+  padding: 6px 9px;
+  font-size: 8px;
+  color: #834a00;
+  font-weight: 600;
+  margin-bottom: 8px;
+  display: flex; align-items: flex-start; gap: 6px;
+  line-height: 1.4;
+}
+.s-body.tab .readonly-banner { font-size: 12px; padding: 11px 14px; margin-bottom: 14px; border-radius: 12px; gap: 9px; }
+.readonly-banner .ico { color: var(--warn); font-weight: 800; flex-shrink: 0; }
+.readonly-banner strong { color: var(--brand-ink); font-weight: 700; }
+
+/* ───── Footer ───── */
+.page-foot {
+  max-width: 1480px;
+  margin: 24px auto 56px;
+  padding: 24px 40px;
+  color: var(--ios-muted);
+  font-size: 13px;
+  line-height: 1.6;
+}
+.page-foot h4 {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--brand-ink);
+  margin-bottom: 8px;
+  letter-spacing: -.01em;
+}
+.page-foot ul { list-style: none; padding: 0; }
+.page-foot li { padding-left: 18px; position: relative; margin-bottom: 6px; }
+.page-foot li::before {
+  content: '';
+  position: absolute;
+  left: 0; top: 9px;
+  width: 6px; height: 6px;
+  border-radius: 50%;
+  background: var(--brand-violet);
+}
+
+</style>
+</head>
+<body>
+
+<header class="page-head">
+  <div class="eyebrow">Pillar 2 · Settings</div>
+  <h1>Inspection <span class="accent">Fees</span></h1>
+  <p>
+    Per-tenant fee rates used by the checkin fee engine. Admins set the rate; the platform default is shown
+    underneath as reference. Values validate inline and persist on Save.
+  </p>
+  <div class="meta">
+    <span class="pill"><strong>Settings tab key:</strong>&nbsp;<code>'fees'</code></span>
+    <span class="pill"><strong>Endpoint:</strong>&nbsp;<code>/api/tenant/fee-rates</code></span>
+    <span class="pill"><strong>RBAC:</strong>&nbsp;Admin write · Ops read</span>
+    <span class="pill"><strong>Mockup version:</strong>&nbsp;v1 · 2026-05-18</span>
+  </div>
+</header>
+
+<!-- ───────────────────────── STATE 1 ───────────────────────── -->
+<section class="section">
+  <div class="section-head">
+    <div class="num">1</div>
+    <h2>Loaded · all defaults</h2>
+  </div>
+  <p class="section-sub">
+    First visit — tenant has no overrides. Every row falls back to platform defaults, indicated by the
+    “Using platform default” pill. Save is disabled.
+  </p>
+  <div class="frames-row">
+    <div>
+      <div class="frame-col-head">
+        <span class="state-tag neutral"><span class="dot"></span>Phone · 375</span>
+      </div>
+      <div class="phone-frame">
+        <div class="phone-screen">
+          <div class="status-bar">
+            <span>9:41</span>
+            <span>•••</span>
+          </div>
+          <div class="s-topbar">
+            <div class="brand"><div class="logo"></div>RideFleet</div>
+            <span class="crumb">Settings</span>
+            <span class="scope-pill"><span class="dot"></span>Internat'l Rental</span>
+          </div>
+          <div class="s-tabs">
+            <span class="t">Agreement</span>
+            <span class="t">Locations</span>
+            <span class="t active">Fees</span>
+            <span class="t">Rates</span>
+          </div>
+          <div class="s-body">
+            <div class="panel-head">
+              <h4>Inspection Fees</h4>
+              <span class="role-pill admin">Admin</span>
+            </div>
+            <div class="panel-sub">7 fee types · using platform defaults</div>
+
+            <div class="fee-card">
+              <div class="fee-icon">⛽</div>
+              <div class="fee-meta">
+                <div class="name">Fuel refill</div>
+                <div class="ref">Default $7.00 <span class="pill">Using default</span></div>
+              </div>
+              <div class="fee-input"><span class="dollar">$</span><span class="num">7.00</span><span class="unit">/gal</span></div>
+            </div>
+
+            <div class="fee-card">
+              <div class="fee-icon">✨</div>
+              <div class="fee-meta">
+                <div class="name">Cleaning · light</div>
+                <div class="ref">Default $50.00 <span class="pill">Using default</span></div>
+              </div>
+              <div class="fee-input"><span class="dollar">$</span><span class="num">50.00</span></div>
+            </div>
+
+            <div class="fee-card">
+              <div class="fee-icon">🧽</div>
+              <div class="fee-meta">
+                <div class="name">Cleaning · medium</div>
+                <div class="ref">Default $100.00 <span class="pill">Using default</span></div>
+              </div>
+              <div class="fee-input"><span class="dollar">$</span><span class="num">100.00</span></div>
+            </div>
+
+            <div class="fee-card">
+              <div class="fee-icon">🧼</div>
+              <div class="fee-meta">
+                <div class="name">Cleaning · heavy</div>
+                <div class="ref">Default $200.00 <span class="pill">Using default</span></div>
+              </div>
+              <div class="fee-input"><span class="dollar">$</span><span class="num">200.00</span></div>
+            </div>
+
+            <div class="action-bar">
+              <div class="summary">No changes</div>
+              <button class="btn secondary">Reset</button>
+              <button class="btn disabled">Save</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div>
+      <div class="frame-col-head">
+        <span class="state-tag neutral"><span class="dot"></span>Tablet · 768</span>
+        <h3>Pristine state — every row references the platform default</h3>
+        <p>
+          The “Using default” pill makes it explicit that nothing has been customized yet. Inputs are
+          pre-filled with the default value so the admin can edit in place.
+        </p>
+      </div>
+      <div class="tablet-frame">
+        <div class="tablet-screen">
+          <div class="s-topbar tab">
+            <div class="brand"><div class="logo"></div>RideFleet</div>
+            <span class="crumb">Settings</span><span class="crumb">Fees</span>
+            <span class="scope-pill"><span class="dot"></span>International Rental Corp · admin@intlrental.com</span>
+          </div>
+          <div class="s-tabs tab">
+            <span class="t">Agreement</span>
+            <span class="t">Locations</span>
+            <span class="t active">Fees</span>
+            <span class="t">Rates</span>
+            <span class="t">Revenue</span>
+            <span class="t">Car Sharing</span>
+            <span class="t">Insurance</span>
+          </div>
+          <div class="s-body tab">
+            <div class="panel-head">
+              <h4>Inspection Fees</h4>
+              <span class="role-pill admin">Admin · can edit</span>
+            </div>
+            <div class="panel-sub">
+              7 fee types used by the checkin engine. Each row falls back to the platform default if not
+              customized. Per-vehicle overrides go in the Vehicle drawer (not here).
+            </div>
+
+            <div class="fee-card">
+              <div class="fee-icon">⛽</div>
+              <div class="fee-meta">
+                <div class="name">Fuel refill</div>
+                <div class="ref">Default $7.00 <span class="pill">Using platform default</span></div>
+              </div>
+              <div class="fee-input"><span class="dollar">$</span><span class="num">7.00</span><span class="unit">/gal</span></div>
+            </div>
+
+            <div class="fee-card">
+              <div class="fee-icon">✨</div>
+              <div class="fee-meta">
+                <div class="name">Cleaning · light</div>
+                <div class="ref">Default $50.00 <span class="pill">Using platform default</span></div>
+              </div>
+              <div class="fee-input"><span class="dollar">$</span><span class="num">50.00</span></div>
+            </div>
+
+            <div class="fee-card">
+              <div class="fee-icon">🧽</div>
+              <div class="fee-meta">
+                <div class="name">Cleaning · medium</div>
+                <div class="ref">Default $100.00 <span class="pill">Using platform default</span></div>
+              </div>
+              <div class="fee-input"><span class="dollar">$</span><span class="num">100.00</span></div>
+            </div>
+
+            <div class="fee-card">
+              <div class="fee-icon">🧼</div>
+              <div class="fee-meta">
+                <div class="name">Cleaning · heavy</div>
+                <div class="ref">Default $200.00 <span class="pill">Using platform default</span></div>
+              </div>
+              <div class="fee-input"><span class="dollar">$</span><span class="num">200.00</span></div>
+            </div>
+
+            <div class="fee-card">
+              <div class="fee-icon">🚬</div>
+              <div class="fee-meta">
+                <div class="name">Smoking penalty</div>
+                <div class="ref">Default $250.00 <span class="pill">Using platform default</span></div>
+              </div>
+              <div class="fee-input"><span class="dollar">$</span><span class="num">250.00</span></div>
+            </div>
+
+            <div class="fee-card">
+              <div class="fee-icon">🛣️</div>
+              <div class="fee-meta">
+                <div class="name">Excess mileage</div>
+                <div class="ref">Default $0.50 <span class="pill">Using platform default</span></div>
+              </div>
+              <div class="fee-input"><span class="dollar">$</span><span class="num">0.50</span><span class="unit">/mi</span></div>
+            </div>
+
+            <div class="fee-card">
+              <div class="fee-icon">⏰</div>
+              <div class="fee-meta">
+                <div class="name">Late return</div>
+                <div class="ref">Default $25.00 <span class="pill">Using platform default</span></div>
+              </div>
+              <div class="fee-input"><span class="dollar">$</span><span class="num">25.00</span><span class="unit">/hr</span></div>
+            </div>
+
+            <div class="action-bar">
+              <div class="summary">No changes</div>
+              <button class="btn secondary">Reset to defaults</button>
+              <button class="btn disabled">Save changes</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ───────────────────────── STATE 2 ───────────────────────── -->
+<section class="section">
+  <div class="section-head">
+    <div class="num">2</div>
+    <h2>Editing · some rows dirty</h2>
+  </div>
+  <p class="section-sub">
+    Admin has raised fuel refill to $8.50 and cleaning heavy to $225. Modified rows show a small purple
+    dot beside the label and a violet outline on the input. Save becomes active.
+  </p>
+  <div class="frames-row">
+    <div>
+      <div class="frame-col-head">
+        <span class="state-tag"><span class="dot"></span>Phone · editing</span>
+      </div>
+      <div class="phone-frame">
+        <div class="phone-screen">
+          <div class="status-bar"><span>9:41</span><span>•••</span></div>
+          <div class="s-topbar">
+            <div class="brand"><div class="logo"></div>RideFleet</div>
+            <span class="crumb">Settings</span>
+            <span class="scope-pill"><span class="dot"></span>Internat'l Rental</span>
+          </div>
+          <div class="s-tabs">
+            <span class="t">Agreement</span>
+            <span class="t">Locations</span>
+            <span class="t active">Fees</span>
+            <span class="t">Rates</span>
+          </div>
+          <div class="s-body">
+            <div class="panel-head">
+              <h4>Inspection Fees</h4>
+              <span class="role-pill admin">Admin</span>
+            </div>
+            <div class="panel-sub">2 of 7 modified</div>
+
+            <div class="fee-card dirty">
+              <div class="fee-icon">⛽</div>
+              <div class="fee-meta">
+                <div class="name">Fuel refill <span class="modified-dot"></span></div>
+                <div class="ref">Default $7.00</div>
+              </div>
+              <div class="fee-input"><span class="dollar">$</span><span class="num">8.50</span><span class="unit">/gal</span></div>
+            </div>
+
+            <div class="fee-card">
+              <div class="fee-icon">✨</div>
+              <div class="fee-meta">
+                <div class="name">Cleaning · light</div>
+                <div class="ref">Default $50.00 <span class="pill">Using default</span></div>
+              </div>
+              <div class="fee-input"><span class="dollar">$</span><span class="num">50.00</span></div>
+            </div>
+
+            <div class="fee-card">
+              <div class="fee-icon">🧽</div>
+              <div class="fee-meta">
+                <div class="name">Cleaning · medium</div>
+                <div class="ref">Default $100.00 <span class="pill">Using default</span></div>
+              </div>
+              <div class="fee-input"><span class="dollar">$</span><span class="num">100.00</span></div>
+            </div>
+
+            <div class="fee-card dirty">
+              <div class="fee-icon">🧼</div>
+              <div class="fee-meta">
+                <div class="name">Cleaning · heavy <span class="modified-dot"></span></div>
+                <div class="ref">Default $200.00</div>
+              </div>
+              <div class="fee-input"><span class="dollar">$</span><span class="num">225.00</span></div>
+            </div>
+
+            <div class="action-bar">
+              <div class="summary"><strong>2</strong> changes</div>
+              <button class="btn secondary">Reset</button>
+              <button class="btn">Save</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div>
+      <div class="frame-col-head">
+        <span class="state-tag"><span class="dot"></span>Tablet · editing</span>
+        <h3>Modified rows are highlighted, not isolated</h3>
+        <p>
+          Rather than moving dirty rows to the top (jarring), they stay in-place with a violet outline
+          and dot beside the name. The summary counts the changes.
+        </p>
+      </div>
+      <div class="tablet-frame">
+        <div class="tablet-screen">
+          <div class="s-topbar tab">
+            <div class="brand"><div class="logo"></div>RideFleet</div>
+            <span class="crumb">Settings</span><span class="crumb">Fees</span>
+            <span class="scope-pill"><span class="dot"></span>International Rental Corp · admin@intlrental.com</span>
+          </div>
+          <div class="s-tabs tab">
+            <span class="t">Agreement</span>
+            <span class="t">Locations</span>
+            <span class="t active">Fees</span>
+            <span class="t">Rates</span>
+            <span class="t">Revenue</span>
+            <span class="t">Car Sharing</span>
+            <span class="t">Insurance</span>
+          </div>
+          <div class="s-body tab">
+            <div class="panel-head">
+              <h4>Inspection Fees</h4>
+              <span class="role-pill admin">Admin · can edit</span>
+            </div>
+            <div class="panel-sub">2 of 7 fee rates modified · unsaved changes</div>
+
+            <div class="fee-card dirty">
+              <div class="fee-icon">⛽</div>
+              <div class="fee-meta">
+                <div class="name">Fuel refill <span class="modified-dot"></span></div>
+                <div class="ref">Default $7.00 · was using default</div>
+              </div>
+              <div class="fee-input"><span class="dollar">$</span><span class="num">8.50</span><span class="unit">/gal</span></div>
+            </div>
+
+            <div class="fee-card">
+              <div class="fee-icon">✨</div>
+              <div class="fee-meta">
+                <div class="name">Cleaning · light</div>
+                <div class="ref">Default $50.00 <span class="pill">Using platform default</span></div>
+              </div>
+              <div class="fee-input"><span class="dollar">$</span><span class="num">50.00</span></div>
+            </div>
+
+            <div class="fee-card">
+              <div class="fee-icon">🧽</div>
+              <div class="fee-meta">
+                <div class="name">Cleaning · medium</div>
+                <div class="ref">Default $100.00 <span class="pill">Using platform default</span></div>
+              </div>
+              <div class="fee-input"><span class="dollar">$</span><span class="num">100.00</span></div>
+            </div>
+
+            <div class="fee-card dirty">
+              <div class="fee-icon">🧼</div>
+              <div class="fee-meta">
+                <div class="name">Cleaning · heavy <span class="modified-dot"></span></div>
+                <div class="ref">Default $200.00 · was using default</div>
+              </div>
+              <div class="fee-input"><span class="dollar">$</span><span class="num">225.00</span></div>
+            </div>
+
+            <div class="fee-card">
+              <div class="fee-icon">🚬</div>
+              <div class="fee-meta">
+                <div class="name">Smoking penalty</div>
+                <div class="ref">Default $250.00 <span class="pill">Using platform default</span></div>
+              </div>
+              <div class="fee-input"><span class="dollar">$</span><span class="num">250.00</span></div>
+            </div>
+
+            <div class="fee-card">
+              <div class="fee-icon">🛣️</div>
+              <div class="fee-meta">
+                <div class="name">Excess mileage</div>
+                <div class="ref">Default $0.50 <span class="pill">Using platform default</span></div>
+              </div>
+              <div class="fee-input"><span class="dollar">$</span><span class="num">0.50</span><span class="unit">/mi</span></div>
+            </div>
+
+            <div class="fee-card">
+              <div class="fee-icon">⏰</div>
+              <div class="fee-meta">
+                <div class="name">Late return</div>
+                <div class="ref">Default $25.00 <span class="pill">Using platform default</span></div>
+              </div>
+              <div class="fee-input"><span class="dollar">$</span><span class="num">25.00</span><span class="unit">/hr</span></div>
+            </div>
+
+            <div class="action-bar">
+              <div class="summary"><strong>2 changes</strong> · Fuel refill, Cleaning heavy</div>
+              <button class="btn secondary">Reset to defaults</button>
+              <button class="btn">Save changes</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ───────────────────────── STATE 3 ───────────────────────── -->
+<section class="section">
+  <div class="section-head">
+    <div class="num">3</div>
+    <h2>Validation error</h2>
+  </div>
+  <p class="section-sub">
+    Admin typed $99 into Fuel refill. The range cap is $20/gal. Red border + inline range hint. Save
+    button stays disabled until the range error clears.
+  </p>
+  <div class="frames-row">
+    <div>
+      <div class="frame-col-head">
+        <span class="state-tag danger"><span class="dot"></span>Phone · error</span>
+      </div>
+      <div class="phone-frame">
+        <div class="phone-screen">
+          <div class="status-bar"><span>9:41</span><span>•••</span></div>
+          <div class="s-topbar">
+            <div class="brand"><div class="logo"></div>RideFleet</div>
+            <span class="crumb">Settings</span>
+            <span class="scope-pill"><span class="dot"></span>Internat'l Rental</span>
+          </div>
+          <div class="s-tabs">
+            <span class="t">Agreement</span>
+            <span class="t">Locations</span>
+            <span class="t active">Fees</span>
+            <span class="t">Rates</span>
+          </div>
+          <div class="s-body">
+            <div class="panel-head">
+              <h4>Inspection Fees</h4>
+              <span class="role-pill admin">Admin</span>
+            </div>
+            <div class="panel-sub" style="color: var(--danger); font-weight: 700;">1 error · fix to save</div>
+
+            <div class="fee-card error">
+              <div class="fee-icon">⛽</div>
+              <div class="fee-meta">
+                <div class="name">Fuel refill <span class="modified-dot" style="background: var(--danger); box-shadow: 0 0 0 2px rgba(255,59,48,.18);"></span></div>
+                <div class="ref">Default $7.00</div>
+                <div class="err">$1–$20 per gallon</div>
+              </div>
+              <div class="fee-input"><span class="dollar" style="color: var(--danger);">$</span><span class="num" style="color: var(--danger);">99.00</span><span class="unit">/gal</span></div>
+            </div>
+
+            <div class="fee-card">
+              <div class="fee-icon">✨</div>
+              <div class="fee-meta">
+                <div class="name">Cleaning · light</div>
+                <div class="ref">Default $50.00 <span class="pill">Using default</span></div>
+              </div>
+              <div class="fee-input"><span class="dollar">$</span><span class="num">50.00</span></div>
+            </div>
+
+            <div class="fee-card">
+              <div class="fee-icon">🧽</div>
+              <div class="fee-meta">
+                <div class="name">Cleaning · medium</div>
+                <div class="ref">Default $100.00 <span class="pill">Using default</span></div>
+              </div>
+              <div class="fee-input"><span class="dollar">$</span><span class="num">100.00</span></div>
+            </div>
+
+            <div class="fee-card">
+              <div class="fee-icon">🧼</div>
+              <div class="fee-meta">
+                <div class="name">Cleaning · heavy</div>
+                <div class="ref">Default $200.00 <span class="pill">Using default</span></div>
+              </div>
+              <div class="fee-input"><span class="dollar">$</span><span class="num">200.00</span></div>
+            </div>
+
+            <div class="action-bar">
+              <div class="summary" style="color: var(--danger); font-weight: 700;">1 error</div>
+              <button class="btn secondary">Reset</button>
+              <button class="btn disabled">Save</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div>
+      <div class="frame-col-head">
+        <span class="state-tag danger"><span class="dot"></span>Tablet · error</span>
+        <h3>Inline range hint, not a modal</h3>
+        <p>
+          The range hint (“$1–$20 per gallon”) appears below the input on error. No alert dialog, no
+          form-level error stack — the bad row tells you exactly what it expects.
+        </p>
+      </div>
+      <div class="tablet-frame">
+        <div class="tablet-screen">
+          <div class="s-topbar tab">
+            <div class="brand"><div class="logo"></div>RideFleet</div>
+            <span class="crumb">Settings</span><span class="crumb">Fees</span>
+            <span class="scope-pill"><span class="dot"></span>International Rental Corp · admin@intlrental.com</span>
+          </div>
+          <div class="s-tabs tab">
+            <span class="t">Agreement</span>
+            <span class="t">Locations</span>
+            <span class="t active">Fees</span>
+            <span class="t">Rates</span>
+            <span class="t">Revenue</span>
+            <span class="t">Car Sharing</span>
+            <span class="t">Insurance</span>
+          </div>
+          <div class="s-body tab">
+            <div class="panel-head">
+              <h4>Inspection Fees</h4>
+              <span class="role-pill admin">Admin · can edit</span>
+            </div>
+            <div class="panel-sub" style="color: var(--danger); font-weight: 700;">1 error · fix before saving</div>
+
+            <div class="fee-card error">
+              <div class="fee-icon">⛽</div>
+              <div class="fee-meta">
+                <div class="name">Fuel refill <span class="modified-dot" style="background: var(--danger); box-shadow: 0 0 0 2px rgba(255,59,48,.18);"></span></div>
+                <div class="ref">Default $7.00</div>
+                <div class="err">$1–$20 per gallon</div>
+              </div>
+              <div class="fee-input"><span class="dollar" style="color: var(--danger);">$</span><span class="num" style="color: var(--danger);">99.00</span><span class="unit">/gal</span></div>
+            </div>
+
+            <div class="fee-card">
+              <div class="fee-icon">✨</div>
+              <div class="fee-meta">
+                <div class="name">Cleaning · light</div>
+                <div class="ref">Default $50.00 <span class="pill">Using platform default</span></div>
+              </div>
+              <div class="fee-input"><span class="dollar">$</span><span class="num">50.00</span></div>
+            </div>
+
+            <div class="fee-card">
+              <div class="fee-icon">🧽</div>
+              <div class="fee-meta">
+                <div class="name">Cleaning · medium</div>
+                <div class="ref">Default $100.00 <span class="pill">Using platform default</span></div>
+              </div>
+              <div class="fee-input"><span class="dollar">$</span><span class="num">100.00</span></div>
+            </div>
+
+            <div class="fee-card">
+              <div class="fee-icon">🧼</div>
+              <div class="fee-meta">
+                <div class="name">Cleaning · heavy</div>
+                <div class="ref">Default $200.00 <span class="pill">Using platform default</span></div>
+              </div>
+              <div class="fee-input"><span class="dollar">$</span><span class="num">200.00</span></div>
+            </div>
+
+            <div class="fee-card">
+              <div class="fee-icon">🚬</div>
+              <div class="fee-meta">
+                <div class="name">Smoking penalty</div>
+                <div class="ref">Default $250.00 <span class="pill">Using platform default</span></div>
+              </div>
+              <div class="fee-input"><span class="dollar">$</span><span class="num">250.00</span></div>
+            </div>
+
+            <div class="fee-card">
+              <div class="fee-icon">🛣️</div>
+              <div class="fee-meta">
+                <div class="name">Excess mileage</div>
+                <div class="ref">Default $0.50 <span class="pill">Using platform default</span></div>
+              </div>
+              <div class="fee-input"><span class="dollar">$</span><span class="num">0.50</span><span class="unit">/mi</span></div>
+            </div>
+
+            <div class="fee-card">
+              <div class="fee-icon">⏰</div>
+              <div class="fee-meta">
+                <div class="name">Late return</div>
+                <div class="ref">Default $25.00 <span class="pill">Using platform default</span></div>
+              </div>
+              <div class="fee-input"><span class="dollar">$</span><span class="num">25.00</span><span class="unit">/hr</span></div>
+            </div>
+
+            <div class="action-bar">
+              <div class="summary" style="color: var(--danger); font-weight: 700;">1 validation error · Fuel refill out of range</div>
+              <button class="btn secondary">Reset to defaults</button>
+              <button class="btn disabled">Save changes</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ───────────────────────── STATE 4 ───────────────────────── -->
+<section class="section">
+  <div class="section-head">
+    <div class="num">4</div>
+    <h2>Saving</h2>
+  </div>
+  <p class="section-sub">
+    User clicked Save. Button shows a spinner and "Saving…" copy. Inputs are non-editable for the
+    network round-trip (~250–600ms).
+  </p>
+  <div class="frames-row">
+    <div>
+      <div class="frame-col-head">
+        <span class="state-tag warn"><span class="dot"></span>Phone · saving</span>
+      </div>
+      <div class="phone-frame">
+        <div class="phone-screen">
+          <div class="status-bar"><span>9:41</span><span>•••</span></div>
+          <div class="s-topbar">
+            <div class="brand"><div class="logo"></div>RideFleet</div>
+            <span class="crumb">Settings</span>
+            <span class="scope-pill"><span class="dot"></span>Internat'l Rental</span>
+          </div>
+          <div class="s-tabs">
+            <span class="t">Agreement</span>
+            <span class="t">Locations</span>
+            <span class="t active">Fees</span>
+            <span class="t">Rates</span>
+          </div>
+          <div class="s-body">
+            <div class="panel-head">
+              <h4>Inspection Fees</h4>
+              <span class="role-pill admin">Admin</span>
+            </div>
+            <div class="panel-sub">Saving 2 changes…</div>
+
+            <div class="fee-card dirty" style="opacity:.7;">
+              <div class="fee-icon">⛽</div>
+              <div class="fee-meta">
+                <div class="name">Fuel refill <span class="modified-dot"></span></div>
+                <div class="ref">Default $7.00</div>
+              </div>
+              <div class="fee-input"><span class="dollar">$</span><span class="num">8.50</span><span class="unit">/gal</span></div>
+            </div>
+
+            <div class="fee-card" style="opacity:.7;">
+              <div class="fee-icon">✨</div>
+              <div class="fee-meta">
+                <div class="name">Cleaning · light</div>
+                <div class="ref">Default $50.00 <span class="pill">Using default</span></div>
+              </div>
+              <div class="fee-input"><span class="dollar">$</span><span class="num">50.00</span></div>
+            </div>
+
+            <div class="fee-card" style="opacity:.7;">
+              <div class="fee-icon">🧽</div>
+              <div class="fee-meta">
+                <div class="name">Cleaning · medium</div>
+                <div class="ref">Default $100.00 <span class="pill">Using default</span></div>
+              </div>
+              <div class="fee-input"><span class="dollar">$</span><span class="num">100.00</span></div>
+            </div>
+
+            <div class="fee-card dirty" style="opacity:.7;">
+              <div class="fee-icon">🧼</div>
+              <div class="fee-meta">
+                <div class="name">Cleaning · heavy <span class="modified-dot"></span></div>
+                <div class="ref">Default $200.00</div>
+              </div>
+              <div class="fee-input"><span class="dollar">$</span><span class="num">225.00</span></div>
+            </div>
+
+            <div class="action-bar">
+              <div class="summary"><strong>2</strong> changes</div>
+              <button class="btn secondary" style="opacity:.5;">Reset</button>
+              <button class="btn"><span class="spinner"></span>Saving…</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div>
+      <div class="frame-col-head">
+        <span class="state-tag warn"><span class="dot"></span>Tablet · saving</span>
+        <h3>Inputs dim, spinner inline on the Save button</h3>
+        <p>
+          Rather than a full-screen overlay, the inputs simply fade and the button morphs to a spinner.
+          Familiar pattern — feels like iOS Settings, not a heavyweight form post.
+        </p>
+      </div>
+      <div class="tablet-frame">
+        <div class="tablet-screen">
+          <div class="s-topbar tab">
+            <div class="brand"><div class="logo"></div>RideFleet</div>
+            <span class="crumb">Settings</span><span class="crumb">Fees</span>
+            <span class="scope-pill"><span class="dot"></span>International Rental Corp · admin@intlrental.com</span>
+          </div>
+          <div class="s-tabs tab">
+            <span class="t">Agreement</span>
+            <span class="t">Locations</span>
+            <span class="t active">Fees</span>
+            <span class="t">Rates</span>
+            <span class="t">Revenue</span>
+            <span class="t">Car Sharing</span>
+            <span class="t">Insurance</span>
+          </div>
+          <div class="s-body tab" style="--fade:.65;">
+            <div class="panel-head">
+              <h4>Inspection Fees</h4>
+              <span class="role-pill admin">Admin · can edit</span>
+            </div>
+            <div class="panel-sub">Persisting 2 fee rate changes to tenant…</div>
+
+            <div class="fee-card dirty" style="opacity:.65;">
+              <div class="fee-icon">⛽</div>
+              <div class="fee-meta">
+                <div class="name">Fuel refill <span class="modified-dot"></span></div>
+                <div class="ref">Default $7.00 · was using default</div>
+              </div>
+              <div class="fee-input"><span class="dollar">$</span><span class="num">8.50</span><span class="unit">/gal</span></div>
+            </div>
+
+            <div class="fee-card" style="opacity:.65;">
+              <div class="fee-icon">✨</div>
+              <div class="fee-meta">
+                <div class="name">Cleaning · light</div>
+                <div class="ref">Default $50.00 <span class="pill">Using platform default</span></div>
+              </div>
+              <div class="fee-input"><span class="dollar">$</span><span class="num">50.00</span></div>
+            </div>
+
+            <div class="fee-card" style="opacity:.65;">
+              <div class="fee-icon">🧽</div>
+              <div class="fee-meta">
+                <div class="name">Cleaning · medium</div>
+                <div class="ref">Default $100.00 <span class="pill">Using platform default</span></div>
+              </div>
+              <div class="fee-input"><span class="dollar">$</span><span class="num">100.00</span></div>
+            </div>
+
+            <div class="fee-card dirty" style="opacity:.65;">
+              <div class="fee-icon">🧼</div>
+              <div class="fee-meta">
+                <div class="name">Cleaning · heavy <span class="modified-dot"></span></div>
+                <div class="ref">Default $200.00 · was using default</div>
+              </div>
+              <div class="fee-input"><span class="dollar">$</span><span class="num">225.00</span></div>
+            </div>
+
+            <div class="fee-card" style="opacity:.65;">
+              <div class="fee-icon">🚬</div>
+              <div class="fee-meta">
+                <div class="name">Smoking penalty</div>
+                <div class="ref">Default $250.00 <span class="pill">Using platform default</span></div>
+              </div>
+              <div class="fee-input"><span class="dollar">$</span><span class="num">250.00</span></div>
+            </div>
+
+            <div class="fee-card" style="opacity:.65;">
+              <div class="fee-icon">🛣️</div>
+              <div class="fee-meta">
+                <div class="name">Excess mileage</div>
+                <div class="ref">Default $0.50 <span class="pill">Using platform default</span></div>
+              </div>
+              <div class="fee-input"><span class="dollar">$</span><span class="num">0.50</span><span class="unit">/mi</span></div>
+            </div>
+
+            <div class="fee-card" style="opacity:.65;">
+              <div class="fee-icon">⏰</div>
+              <div class="fee-meta">
+                <div class="name">Late return</div>
+                <div class="ref">Default $25.00 <span class="pill">Using platform default</span></div>
+              </div>
+              <div class="fee-input"><span class="dollar">$</span><span class="num">25.00</span><span class="unit">/hr</span></div>
+            </div>
+
+            <div class="action-bar">
+              <div class="summary"><strong>2 changes</strong> · Fuel refill, Cleaning heavy</div>
+              <button class="btn secondary" style="opacity:.5;">Reset to defaults</button>
+              <button class="btn"><span class="spinner"></span>Saving…</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ───────────────────────── STATE 5 ───────────────────────── -->
+<section class="section">
+  <div class="section-head">
+    <div class="num">5</div>
+    <h2>Saved · success toast</h2>
+  </div>
+  <p class="section-sub">
+    Persist succeeded. Slide-up toast at the bottom confirms “Fee rates updated” and auto-dismisses
+    after ~3s. Modified dots clear; the “Using default” pill is replaced with “Custom rate”.
+  </p>
+  <div class="frames-row">
+    <div>
+      <div class="frame-col-head">
+        <span class="state-tag ok"><span class="dot"></span>Phone · saved</span>
+      </div>
+      <div class="phone-frame">
+        <div class="phone-screen">
+          <div class="status-bar"><span>9:41</span><span>•••</span></div>
+          <div class="s-topbar">
+            <div class="brand"><div class="logo"></div>RideFleet</div>
+            <span class="crumb">Settings</span>
+            <span class="scope-pill"><span class="dot"></span>Internat'l Rental</span>
+          </div>
+          <div class="s-tabs">
+            <span class="t">Agreement</span>
+            <span class="t">Locations</span>
+            <span class="t active">Fees</span>
+            <span class="t">Rates</span>
+          </div>
+          <div class="s-body">
+            <div class="panel-head">
+              <h4>Inspection Fees</h4>
+              <span class="role-pill admin">Admin</span>
+            </div>
+            <div class="panel-sub">2 custom · 5 using defaults</div>
+
+            <div class="fee-card">
+              <div class="fee-icon">⛽</div>
+              <div class="fee-meta">
+                <div class="name">Fuel refill</div>
+                <div class="ref">Default $7.00 <span class="pill" style="background: var(--brand-violet-soft); color: var(--brand-violet);">Custom rate</span></div>
+              </div>
+              <div class="fee-input"><span class="dollar">$</span><span class="num">8.50</span><span class="unit">/gal</span></div>
+            </div>
+
+            <div class="fee-card">
+              <div class="fee-icon">✨</div>
+              <div class="fee-meta">
+                <div class="name">Cleaning · light</div>
+                <div class="ref">Default $50.00 <span class="pill">Using default</span></div>
+              </div>
+              <div class="fee-input"><span class="dollar">$</span><span class="num">50.00</span></div>
+            </div>
+
+            <div class="fee-card">
+              <div class="fee-icon">🧽</div>
+              <div class="fee-meta">
+                <div class="name">Cleaning · medium</div>
+                <div class="ref">Default $100.00 <span class="pill">Using default</span></div>
+              </div>
+              <div class="fee-input"><span class="dollar">$</span><span class="num">100.00</span></div>
+            </div>
+
+            <div class="fee-card">
+              <div class="fee-icon">🧼</div>
+              <div class="fee-meta">
+                <div class="name">Cleaning · heavy</div>
+                <div class="ref">Default $200.00 <span class="pill" style="background: var(--brand-violet-soft); color: var(--brand-violet);">Custom rate</span></div>
+              </div>
+              <div class="fee-input"><span class="dollar">$</span><span class="num">225.00</span></div>
+            </div>
+
+            <div class="toast">
+              <span class="check">✓</span>
+              <span>Fee rates updated</span>
+            </div>
+
+            <div class="action-bar">
+              <div class="summary">No changes</div>
+              <button class="btn secondary">Reset</button>
+              <button class="btn disabled">Save</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div>
+      <div class="frame-col-head">
+        <span class="state-tag ok"><span class="dot"></span>Tablet · saved</span>
+        <h3>“Custom rate” replaces “Using default” for committed overrides</h3>
+        <p>
+          Once persisted, the dirty dot disappears and the row pill swaps to a violet “Custom rate” chip.
+          That gives admins a permanent visual cue for which rates were intentionally customized.
+        </p>
+      </div>
+      <div class="tablet-frame">
+        <div class="tablet-screen">
+          <div class="s-topbar tab">
+            <div class="brand"><div class="logo"></div>RideFleet</div>
+            <span class="crumb">Settings</span><span class="crumb">Fees</span>
+            <span class="scope-pill"><span class="dot"></span>International Rental Corp · admin@intlrental.com</span>
+          </div>
+          <div class="s-tabs tab">
+            <span class="t">Agreement</span>
+            <span class="t">Locations</span>
+            <span class="t active">Fees</span>
+            <span class="t">Rates</span>
+            <span class="t">Revenue</span>
+            <span class="t">Car Sharing</span>
+            <span class="t">Insurance</span>
+          </div>
+          <div class="s-body tab">
+            <div class="panel-head">
+              <h4>Inspection Fees</h4>
+              <span class="role-pill admin">Admin · can edit</span>
+            </div>
+            <div class="panel-sub">2 custom rates · 5 using platform defaults</div>
+
+            <div class="fee-card">
+              <div class="fee-icon">⛽</div>
+              <div class="fee-meta">
+                <div class="name">Fuel refill</div>
+                <div class="ref">Default $7.00 <span class="pill" style="background: var(--brand-violet-soft); color: var(--brand-violet);">Custom rate</span></div>
+              </div>
+              <div class="fee-input"><span class="dollar">$</span><span class="num">8.50</span><span class="unit">/gal</span></div>
+            </div>
+
+            <div class="fee-card">
+              <div class="fee-icon">✨</div>
+              <div class="fee-meta">
+                <div class="name">Cleaning · light</div>
+                <div class="ref">Default $50.00 <span class="pill">Using platform default</span></div>
+              </div>
+              <div class="fee-input"><span class="dollar">$</span><span class="num">50.00</span></div>
+            </div>
+
+            <div class="fee-card">
+              <div class="fee-icon">🧽</div>
+              <div class="fee-meta">
+                <div class="name">Cleaning · medium</div>
+                <div class="ref">Default $100.00 <span class="pill">Using platform default</span></div>
+              </div>
+              <div class="fee-input"><span class="dollar">$</span><span class="num">100.00</span></div>
+            </div>
+
+            <div class="fee-card">
+              <div class="fee-icon">🧼</div>
+              <div class="fee-meta">
+                <div class="name">Cleaning · heavy</div>
+                <div class="ref">Default $200.00 <span class="pill" style="background: var(--brand-violet-soft); color: var(--brand-violet);">Custom rate</span></div>
+              </div>
+              <div class="fee-input"><span class="dollar">$</span><span class="num">225.00</span></div>
+            </div>
+
+            <div class="fee-card">
+              <div class="fee-icon">🚬</div>
+              <div class="fee-meta">
+                <div class="name">Smoking penalty</div>
+                <div class="ref">Default $250.00 <span class="pill">Using platform default</span></div>
+              </div>
+              <div class="fee-input"><span class="dollar">$</span><span class="num">250.00</span></div>
+            </div>
+
+            <div class="fee-card">
+              <div class="fee-icon">🛣️</div>
+              <div class="fee-meta">
+                <div class="name">Excess mileage</div>
+                <div class="ref">Default $0.50 <span class="pill">Using platform default</span></div>
+              </div>
+              <div class="fee-input"><span class="dollar">$</span><span class="num">0.50</span><span class="unit">/mi</span></div>
+            </div>
+
+            <div class="fee-card">
+              <div class="fee-icon">⏰</div>
+              <div class="fee-meta">
+                <div class="name">Late return</div>
+                <div class="ref">Default $25.00 <span class="pill">Using platform default</span></div>
+              </div>
+              <div class="fee-input"><span class="dollar">$</span><span class="num">25.00</span><span class="unit">/hr</span></div>
+            </div>
+
+            <div class="toast">
+              <span class="check">✓</span>
+              <span>Fee rates updated · 2 custom rates active</span>
+            </div>
+
+            <div class="action-bar">
+              <div class="summary">All changes saved · 2 custom rates active</div>
+              <button class="btn secondary">Reset to defaults</button>
+              <button class="btn disabled">Save changes</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ───────────────────────── STATE 6 ───────────────────────── -->
+<section class="section">
+  <div class="section-head">
+    <div class="num">6</div>
+    <h2>Read-only · OPS user</h2>
+  </div>
+  <p class="section-sub">
+    A user with role OPS can view the panel but cannot edit. Inputs are disabled, action bar is hidden,
+    a banner explains why and points to who has access.
+  </p>
+  <div class="frames-row">
+    <div>
+      <div class="frame-col-head">
+        <span class="state-tag warn"><span class="dot"></span>Phone · OPS</span>
+      </div>
+      <div class="phone-frame">
+        <div class="phone-screen">
+          <div class="status-bar"><span>9:41</span><span>•••</span></div>
+          <div class="s-topbar">
+            <div class="brand"><div class="logo"></div>RideFleet</div>
+            <span class="crumb">Settings</span>
+            <span class="scope-pill" style="background: var(--warn-bg); color: #b46300;"><span class="dot" style="background:#b46300;"></span>Read-only</span>
+          </div>
+          <div class="s-tabs">
+            <span class="t">Agreement</span>
+            <span class="t">Locations</span>
+            <span class="t active">Fees</span>
+            <span class="t">Rates</span>
+          </div>
+          <div class="s-body">
+            <div class="panel-head">
+              <h4>Inspection Fees</h4>
+              <span class="role-pill ops">Ops · view</span>
+            </div>
+            <div class="readonly-banner">
+              <span class="ico">!</span>
+              <span><strong>View only.</strong> Only Admin can edit fee rates.</span>
+            </div>
+
+            <div class="fee-card readonly">
+              <div class="fee-icon">⛽</div>
+              <div class="fee-meta">
+                <div class="name">Fuel refill</div>
+                <div class="ref">Default $7.00 <span class="pill" style="background: var(--brand-violet-soft); color: var(--brand-violet);">Custom rate</span></div>
+              </div>
+              <div class="fee-input"><span class="dollar">$</span><span class="num">8.50</span><span class="unit">/gal</span></div>
+            </div>
+
+            <div class="fee-card readonly">
+              <div class="fee-icon">✨</div>
+              <div class="fee-meta">
+                <div class="name">Cleaning · light</div>
+                <div class="ref">Default $50.00 <span class="pill">Using default</span></div>
+              </div>
+              <div class="fee-input"><span class="dollar">$</span><span class="num">50.00</span></div>
+            </div>
+
+            <div class="fee-card readonly">
+              <div class="fee-icon">🧽</div>
+              <div class="fee-meta">
+                <div class="name">Cleaning · medium</div>
+                <div class="ref">Default $100.00 <span class="pill">Using default</span></div>
+              </div>
+              <div class="fee-input"><span class="dollar">$</span><span class="num">100.00</span></div>
+            </div>
+
+            <div class="fee-card readonly">
+              <div class="fee-icon">🧼</div>
+              <div class="fee-meta">
+                <div class="name">Cleaning · heavy</div>
+                <div class="ref">Default $200.00 <span class="pill" style="background: var(--brand-violet-soft); color: var(--brand-violet);">Custom rate</span></div>
+              </div>
+              <div class="fee-input"><span class="dollar">$</span><span class="num">225.00</span></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div>
+      <div class="frame-col-head">
+        <span class="state-tag warn"><span class="dot"></span>Tablet · OPS</span>
+        <h3>Disabled state is honest — fields still read, action bar gone</h3>
+        <p>
+          Rather than hide the panel entirely (which would confuse ops trying to look up a number), the
+          values stay visible with a dashed disabled input + an explanatory banner. Save bar is removed.
+        </p>
+      </div>
+      <div class="tablet-frame">
+        <div class="tablet-screen">
+          <div class="s-topbar tab">
+            <div class="brand"><div class="logo"></div>RideFleet</div>
+            <span class="crumb">Settings</span><span class="crumb">Fees</span>
+            <span class="scope-pill" style="background: var(--warn-bg); color: #b46300;"><span class="dot" style="background:#b46300;"></span>Logged in as ops@intlrental.com (Read-only)</span>
+          </div>
+          <div class="s-tabs tab">
+            <span class="t">Agreement</span>
+            <span class="t">Locations</span>
+            <span class="t active">Fees</span>
+            <span class="t">Rates</span>
+            <span class="t">Revenue</span>
+            <span class="t">Car Sharing</span>
+            <span class="t">Insurance</span>
+          </div>
+          <div class="s-body tab">
+            <div class="panel-head">
+              <h4>Inspection Fees</h4>
+              <span class="role-pill ops">Ops · view only</span>
+            </div>
+            <div class="readonly-banner">
+              <span class="ico">!</span>
+              <span><strong>Only Admin can edit fee rates.</strong>
+              Ask your tenant Admin (admin@intlrental.com) to make changes. You can still reference the
+              current rates here for use in customer conversations.</span>
+            </div>
+
+            <div class="fee-card readonly">
+              <div class="fee-icon">⛽</div>
+              <div class="fee-meta">
+                <div class="name">Fuel refill</div>
+                <div class="ref">Default $7.00 <span class="pill" style="background: var(--brand-violet-soft); color: var(--brand-violet);">Custom rate</span></div>
+              </div>
+              <div class="fee-input"><span class="dollar">$</span><span class="num">8.50</span><span class="unit">/gal</span></div>
+            </div>
+
+            <div class="fee-card readonly">
+              <div class="fee-icon">✨</div>
+              <div class="fee-meta">
+                <div class="name">Cleaning · light</div>
+                <div class="ref">Default $50.00 <span class="pill">Using platform default</span></div>
+              </div>
+              <div class="fee-input"><span class="dollar">$</span><span class="num">50.00</span></div>
+            </div>
+
+            <div class="fee-card readonly">
+              <div class="fee-icon">🧽</div>
+              <div class="fee-meta">
+                <div class="name">Cleaning · medium</div>
+                <div class="ref">Default $100.00 <span class="pill">Using platform default</span></div>
+              </div>
+              <div class="fee-input"><span class="dollar">$</span><span class="num">100.00</span></div>
+            </div>
+
+            <div class="fee-card readonly">
+              <div class="fee-icon">🧼</div>
+              <div class="fee-meta">
+                <div class="name">Cleaning · heavy</div>
+                <div class="ref">Default $200.00 <span class="pill" style="background: var(--brand-violet-soft); color: var(--brand-violet);">Custom rate</span></div>
+              </div>
+              <div class="fee-input"><span class="dollar">$</span><span class="num">225.00</span></div>
+            </div>
+
+            <div class="fee-card readonly">
+              <div class="fee-icon">🚬</div>
+              <div class="fee-meta">
+                <div class="name">Smoking penalty</div>
+                <div class="ref">Default $250.00 <span class="pill">Using platform default</span></div>
+              </div>
+              <div class="fee-input"><span class="dollar">$</span><span class="num">250.00</span></div>
+            </div>
+
+            <div class="fee-card readonly">
+              <div class="fee-icon">🛣️</div>
+              <div class="fee-meta">
+                <div class="name">Excess mileage</div>
+                <div class="ref">Default $0.50 <span class="pill">Using platform default</span></div>
+              </div>
+              <div class="fee-input"><span class="dollar">$</span><span class="num">0.50</span><span class="unit">/mi</span></div>
+            </div>
+
+            <div class="fee-card readonly">
+              <div class="fee-icon">⏰</div>
+              <div class="fee-meta">
+                <div class="name">Late return</div>
+                <div class="ref">Default $25.00 <span class="pill">Using platform default</span></div>
+              </div>
+              <div class="fee-input"><span class="dollar">$</span><span class="num">25.00</span><span class="unit">/hr</span></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<footer class="page-foot">
+  <h4>Decisions captured in this mockup</h4>
+  <ul>
+    <li>Inline edit on the same panel (no modal) — feels like iOS Settings</li>
+    <li>Default is shown as reference text, not auto-filled-and-hidden; the input always holds the
+      effective value</li>
+    <li>"Using platform default" pill flips to "Custom rate" once a tenant override is persisted</li>
+    <li>Errors are inline, range-aware, and gate the Save button</li>
+    <li>OPS role keeps panel visible (so they can look up a number to quote a customer) but disables
+      inputs and removes the action bar</li>
+    <li>Toast slide-up replaces a heavyweight banner — auto-dismisses</li>
+  </ul>
+</footer>
+
+</body>
+</html>
