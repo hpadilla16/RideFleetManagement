@@ -21,8 +21,13 @@ export const FALLBACK_RATES = {
   CLEANING_LIGHT:   { unit: 'FLAT',       amount: 50.00 },
   CLEANING_MEDIUM:  { unit: 'FLAT',       amount: 100.00 },
   CLEANING_HEAVY:   { unit: 'FLAT',       amount: 200.00 },
-  SMOKING:          { unit: 'FLAT',       amount: 250.00 }
+  SMOKING:          { unit: 'FLAT',       amount: 250.00 },
+  LATE_RETURN:      { unit: 'PER_HOUR',   amount: 25.00 }
 };
+
+// Grace window (in minutes) before LATE_RETURN starts billing. Matches
+// LATE_RETURN_GRACE_MINUTES in backend/src/modules/fees/fee-engine.service.js.
+export const LATE_RETURN_GRACE_MINUTES = 30;
 
 function round2(n) {
   return Math.round(Number(n || 0) * 100) / 100;
@@ -111,6 +116,38 @@ export function computeSmokingFee({ smokingDetected, rate }) {
 }
 
 /**
+ * Mirror of backend computeLateReturnFee. Keep math byte-for-byte aligned with
+ * fee-engine.service.js so the wizard preview matches what /checkin-close will
+ * actually charge.
+ *
+ * Formula (grace = 30 min by default):
+ *   minutesLate     = max(0, returnedAt - dueBackAt) in minutes
+ *   billableMinutes = max(0, minutesLate - graceMinutes)
+ *   billableHours   = ceil(billableMinutes / 60)   — partial hours bill as full
+ *
+ * Defensive: missing dueBackAt/returnedAt → null. Future-dated dueBackAt
+ * (returnedAt < dueBackAt) → null.
+ */
+export function computeLateReturnFee({ dueBackAt, returnedAt, graceMinutes = LATE_RETURN_GRACE_MINUTES, rate }) {
+  if (!dueBackAt || !returnedAt) return null;
+  const due = new Date(dueBackAt).getTime();
+  const ret = new Date(returnedAt).getTime();
+  if (!Number.isFinite(due) || !Number.isFinite(ret)) return null;
+  const minutesLate = Math.max(0, (ret - due) / 60000);
+  const billableMinutes = Math.max(0, minutesLate - Number(graceMinutes || 0));
+  const billableHours = Math.ceil(billableMinutes / 60);
+  if (billableHours <= 0) return null;
+  return {
+    feeType: 'LATE_RETURN',
+    quantity: billableHours,
+    rate: rate.amount,
+    total: round2(billableHours * rate.amount),
+    description: `Late return — ${billableHours} hour(s) past ${graceMinutes}-minute grace period`,
+    formula: `${billableHours} hr × $${rate.amount.toFixed(2)}/hr`
+  };
+}
+
+/**
  * The hook itself. Pass the agreement context + current input values, get
  * back a memoized fee list + totals. Re-runs on every input change.
  *
@@ -120,6 +157,8 @@ export function computeSmokingFee({ smokingDetected, rate }) {
  * @param {number} params.fuelOut, fuelIn (0..1)
  * @param {number} params.cleanlinessOut, cleanlinessIn (1..5)
  * @param {boolean} params.smokingDetected
+ * @param {string|Date} params.dueBackAt - reservation/agreement return-by timestamp
+ * @param {string|Date} params.returnedAt - actual return timestamp (usually "now" in wizard)
  * @param {number} params.includedMilesPerDay (default 200)
  * @param {number} params.rentalDays (default 1)
  * @param {number} params.tankCapacityGallons (default 15)
@@ -132,14 +171,16 @@ export function useFeePreview(params) {
       fuelOut, fuelIn,
       cleanlinessOut, cleanlinessIn,
       smokingDetected,
+      dueBackAt, returnedAt,
       includedMilesPerDay = 200,
       rentalDays = 1,
       tankCapacityGallons = 15
     } = params;
 
-    const mileageRate = rateOf(rates, 'EXCESS_MILEAGE');
-    const fuelRate    = rateOf(rates, 'FUEL_REFILL');
-    const smokingRate = rateOf(rates, 'SMOKING');
+    const mileageRate    = rateOf(rates, 'EXCESS_MILEAGE');
+    const fuelRate       = rateOf(rates, 'FUEL_REFILL');
+    const smokingRate    = rateOf(rates, 'SMOKING');
+    const lateReturnRate = rateOf(rates, 'LATE_RETURN');
     const ratesByTier = {
       CLEANING_LIGHT:  rateOf(rates, 'CLEANING_LIGHT'),
       CLEANING_MEDIUM: rateOf(rates, 'CLEANING_MEDIUM'),
@@ -167,6 +208,17 @@ export function useFeePreview(params) {
       const smoking = computeSmokingFee({ smokingDetected, rate: smokingRate });
       if (smoking) items.push(smoking);
     }
+    // LATE_RETURN — mirrors backend orchestration: skips silently if the tenant
+    // disabled LATE_RETURN (rateOf → null) or if dueBackAt/returnedAt is missing.
+    if (lateReturnRate) {
+      const lateReturn = computeLateReturnFee({
+        dueBackAt,
+        returnedAt,
+        graceMinutes: LATE_RETURN_GRACE_MINUTES,
+        rate: lateReturnRate
+      });
+      if (lateReturn) items.push(lateReturn);
+    }
 
     const total = round2(items.reduce((s, i) => s + i.total, 0));
     const byType = Object.fromEntries(items.map((i) => [i.feeType, i.total]));
@@ -178,6 +230,7 @@ export function useFeePreview(params) {
     params.fuelOut, params.fuelIn,
     params.cleanlinessOut, params.cleanlinessIn,
     params.smokingDetected,
+    params.dueBackAt, params.returnedAt,
     params.includedMilesPerDay,
     params.rentalDays,
     params.tankCapacityGallons

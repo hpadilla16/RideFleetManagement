@@ -313,6 +313,28 @@ function ReservationsInner({ token, me, logout }) {
     return Math.max(1, Math.ceil(ms / (1000 * 60 * 60 * 24)));
   }, [createForm.pickupAt, createForm.returnAt]);
 
+  // Min value for the Return datetime-local input — one day after pickup.
+  // Keeps the native picker from offering an invalid date in the first place.
+  const returnMin = useMemo(() => {
+    if (!createForm.pickupAt) return '';
+    const d = new Date(createForm.pickupAt);
+    if (!Number.isFinite(d.getTime())) return '';
+    d.setDate(d.getDate() + 1);
+    // datetime-local wants YYYY-MM-DDTHH:mm (local time, no seconds/Z).
+    const pad = (n) => String(n).padStart(2, '0');
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  }, [createForm.pickupAt]);
+
+  // Inline date-range error — surfaced under the Return input when invalid.
+  const dateRangeError = useMemo(() => {
+    if (!createForm.pickupAt || !createForm.returnAt) return '';
+    const start = new Date(createForm.pickupAt);
+    const end = new Date(createForm.returnAt);
+    if (!Number.isFinite(start.getTime()) || !Number.isFinite(end.getTime())) return '';
+    if (end <= start) return 'Return must be after pickup';
+    return '';
+  }, [createForm.pickupAt, createForm.returnAt]);
+
   const filteredServices = useMemo(() => {
     const vtId = createForm.vehicleTypeId;
     const locId = createForm.pickupLocationId;
@@ -419,6 +441,13 @@ function ReservationsInner({ token, me, logout }) {
     try {
       if (!createForm.customerId || !createForm.vehicleTypeId || !createForm.pickupAt || !createForm.returnAt || !createForm.pickupLocationId || !createForm.returnLocationId) {
         setMsg('Customer, vehicle type, pickup/return dates and locations are required');
+        return;
+      }
+      // Date sanity guard — backend /api/rates/resolve rejects returnAt <= pickupAt
+      // with a 400. Block before submit so the user gets a friendly inline error
+      // instead of a network failure (matches the inline `dateRangeError` above).
+      if (new Date(createForm.returnAt) <= new Date(createForm.pickupAt)) {
+        setMsg('Return must be after pickup');
         return;
       }
       if (rateError || !createForm.dailyRate) {
@@ -752,7 +781,11 @@ function ReservationsInner({ token, me, logout }) {
               </div>
               <div className="grid2">
                 <div className="stack"><label className="label">Pickup*</label><input type="datetime-local" value={createForm.pickupAt} onChange={(e) => setCreateForm({ ...createForm, pickupAt: e.target.value })} /></div>
-                <div className="stack"><label className="label">Return*</label><input type="datetime-local" value={createForm.returnAt} onChange={(e) => setCreateForm({ ...createForm, returnAt: e.target.value })} /></div>
+                <div className="stack">
+                  <label className="label">Return*</label>
+                  <input type="datetime-local" value={createForm.returnAt} min={returnMin || undefined} onChange={(e) => setCreateForm({ ...createForm, returnAt: e.target.value })} />
+                  {dateRangeError ? <div className="label" style={{ color: '#991b1b', fontWeight: 700 }}>{dateRangeError}</div> : null}
+                </div>
               </div>
               <div className="grid2">
                 <div className="stack"><label className="label">Pickup Location*</label><select value={createForm.pickupLocationId} onChange={(e) => setCreateForm({ ...createForm, pickupLocationId: e.target.value })}><option value="">Select</option>{locations.map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}</select></div>
