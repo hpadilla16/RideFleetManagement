@@ -116,8 +116,17 @@ function isSecurityDepositCharge(row = {}) {
 
 function summarizeChargeTotals(charges = []) {
   const rows = Array.isArray(charges) ? charges : [];
+  // BUG-FIX 2026-05-19 late night (Pillar 2 AUTH_HOLD): include security
+  // deposit in subtotal/total so agreement.total reflects the full charge
+  // (rental + deposit). AUTH_HOLD payments count against paidAmount, so
+  // agreement.balance = total - paidAmount correctly excludes the held
+  // amount. Previously this function excluded deposit and broke the print
+  // template after a sync ran post-AUTH_HOLD (total dropped to $39 while
+  // paidAmount stayed $250 → balance went negative).
+  // The reservation page UI excludes deposit from its own "Unpaid Balance"
+  // display via displayChargeRows filtering — that path is independent.
   const subtotal = Number(rows
-    .filter((r) => String(r?.chargeType || '').toUpperCase() !== 'TAX' && !isSecurityDepositCharge(r))
+    .filter((r) => String(r?.chargeType || '').toUpperCase() !== 'TAX')
     .reduce((sum, r) => sum + toNumber(r?.total), 0)
     .toFixed(2));
   const taxes = Number(rows
