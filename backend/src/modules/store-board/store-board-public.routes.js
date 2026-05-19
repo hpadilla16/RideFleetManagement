@@ -1,5 +1,9 @@
 import { Router } from 'express';
 import { storeBoardService } from './store-board.service.js';
+import {
+  attachPublicRequestMeta,
+  createPublicRateLimitGuard
+} from '../../middleware/public-endpoint-guards.js';
 
 /**
  * Public token-based endpoint for the in-store kiosk display. NO JWT —
@@ -14,6 +18,15 @@ import { storeBoardService } from './store-board.service.js';
  *                pickups, tomorrowAmPickups, returns, summary }
  */
 export const storeBoardPublicRouter = Router();
+
+// Per-IP rate-limit guard for the public kiosk store-board endpoint. The
+// token is 192-bit so brute force is infeasible, but the URL printed on a
+// kiosk QR code is a soft target for scraping / DoS without a cap.
+// See doc/security-audit-2026-05-19.md §H2.
+storeBoardPublicRouter.use(
+  attachPublicRequestMeta('store-board-public'),
+  createPublicRateLimitGuard({ name: 'store-board-public', maxRequests: 60, windowMs: 60 * 1000 })
+);
 
 storeBoardPublicRouter.get('/:token', async (req, res, next) => {
   try {

@@ -10,8 +10,29 @@ import { buildSelfServiceSnapshot } from './customer-portal-self-service.js';
 import { parseLocationConfig } from '../../lib/location-config.js';
 import { getCanonicalTermsHtml } from '../../lib/terms/index.js';
 import { TC_VERSION } from '../../lib/terms/version.js';
+import {
+  attachPublicRequestMeta,
+  createPublicRateLimitGuard
+} from '../../middleware/public-endpoint-guards.js';
 
 export const customerPortalRouter = Router();
+
+// Per-IP rate-limit guards for public token-based portal endpoints. Token
+// entropy is 192 bits so brute force is infeasible, but these guards cap
+// DoS amplification and token-existence enumeration probes. See
+// doc/security-audit-2026-05-19.md §H1.
+const portalRead = [
+  attachPublicRequestMeta('customer-portal-read'),
+  createPublicRateLimitGuard({ name: 'customer-portal-read', maxRequests: 120, windowMs: 60 * 1000 })
+];
+const portalWrite = [
+  attachPublicRequestMeta('customer-portal-write'),
+  createPublicRateLimitGuard({ name: 'customer-portal-write', maxRequests: 30, windowMs: 60 * 1000 })
+];
+const portalWebhook = [
+  attachPublicRequestMeta('customer-portal-webhook'),
+  createPublicRateLimitGuard({ name: 'customer-portal-webhook', maxRequests: 120, windowMs: 60 * 1000 })
+];
 
 function portalBase() {
   return process.env.CUSTOMER_PORTAL_BASE_URL || 'http://localhost:3000';
@@ -1139,7 +1160,7 @@ async function postPayment({ reservation, paidAmount, reference, gateway }) {
   } catch {}
 }
 
-customerPortalRouter.get('/signature/:token', async (req, res, next) => {
+customerPortalRouter.get('/signature/:token', portalRead, async (req, res, next) => {
   try {
     const token = String(req.params.token || '');
     if (!token) return res.status(400).json({ error: 'token required' });
@@ -1213,7 +1234,7 @@ customerPortalRouter.get('/signature/:token', async (req, res, next) => {
   } catch (e) { next(e); }
 });
 
-customerPortalRouter.get('/customer-info/:token', async (req, res, next) => {
+customerPortalRouter.get('/customer-info/:token', portalRead, async (req, res, next) => {
   try {
     const token = String(req.params.token || '');
     if (!token) return res.status(400).json({ error: 'token required' });
@@ -1261,7 +1282,7 @@ customerPortalRouter.get('/customer-info/:token', async (req, res, next) => {
   }
 });
 
-customerPortalRouter.post('/customer-info/:token', async (req, res, next) => {
+customerPortalRouter.post('/customer-info/:token', portalWrite, async (req, res, next) => {
   try {
     const token = String(req.params.token || '');
     if (!token) return res.status(400).json({ error: 'token required' });
@@ -1583,7 +1604,7 @@ customerPortalRouter.post('/customer-info/:token', async (req, res, next) => {
   }
 });
 
-customerPortalRouter.post('/signature/:token', async (req, res, next) => {
+customerPortalRouter.post('/signature/:token', portalWrite, async (req, res, next) => {
   try {
     const token = String(req.params.token || '');
     const signerName = String(req.body?.signerName || '').trim();
@@ -1639,7 +1660,7 @@ customerPortalRouter.post('/signature/:token', async (req, res, next) => {
   } catch (e) { next(e); }
 });
 
-customerPortalRouter.post('/self-service/:kind/:token/confirm', async (req, res, next) => {
+customerPortalRouter.post('/self-service/:kind/:token/confirm', portalWrite, async (req, res, next) => {
   try {
     const kind = String(req.params.kind || '').trim();
     const token = String(req.params.token || '').trim();
@@ -1701,7 +1722,7 @@ customerPortalRouter.post('/self-service/:kind/:token/confirm', async (req, res,
   } catch (e) { next(e); }
 });
 
-customerPortalRouter.post('/payment-gateway/authorizenet/webhook', async (req, res, next) => {
+customerPortalRouter.post('/payment-gateway/authorizenet/webhook', portalWebhook, async (req, res, next) => {
   try {
     const payload = req.body || {};
     const eventType = String(payload?.eventType || '').trim();
@@ -1801,7 +1822,7 @@ customerPortalRouter.post('/payment-gateway/authorizenet/webhook', async (req, r
   } catch (e) { next(e); }
 });
 
-customerPortalRouter.get('/payment/:token', async (req, res, next) => {
+customerPortalRouter.get('/payment/:token', portalRead, async (req, res, next) => {
   try {
     const token = String(req.params.token || '');
     if (!token) return res.status(400).json({ error: 'token required' });
@@ -1840,7 +1861,7 @@ customerPortalRouter.get('/payment/:token', async (req, res, next) => {
   } catch (e) { next(e); }
 });
 
-customerPortalRouter.post('/payment/:token/create-session', async (req, res, next) => {
+customerPortalRouter.post('/payment/:token/create-session', portalWrite, async (req, res, next) => {
   try {
     const token = String(req.params.token || '');
     const reservation = await findReservationByToken('payment', token);
@@ -1949,7 +1970,7 @@ customerPortalRouter.post('/payment/:token/create-session', async (req, res, nex
   } catch (e) { next(e); }
 });
 
-customerPortalRouter.post('/payment/:token/confirm', async (req, res, next) => {
+customerPortalRouter.post('/payment/:token/confirm', portalWrite, async (req, res, next) => {
   try {
     const token = String(req.params.token || '');
     const reservation = await findReservationByToken('payment', token);
@@ -2123,7 +2144,7 @@ customerPortalRouter.post('/payment/:token/confirm', async (req, res, next) => {
   } catch (e) { next(e); }
 });
 
-customerPortalRouter.get('/payment/:token/confirm', async (req, res, next) => {
+customerPortalRouter.get('/payment/:token/confirm', portalRead, async (req, res, next) => {
   try {
     const token = String(req.params.token || '').trim();
     if (!token) return res.status(400).send('token required');
@@ -2152,7 +2173,7 @@ customerPortalRouter.get('/payment/:token/confirm', async (req, res, next) => {
   }
 });
 
-customerPortalRouter.get('/document/:kind/:token/:asset', async (req, res, next) => {
+customerPortalRouter.get('/document/:kind/:token/:asset', portalRead, async (req, res, next) => {
   try {
     const kind = String(req.params.kind || '').trim();
     const token = String(req.params.token || '').trim();
