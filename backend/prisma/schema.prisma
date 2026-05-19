@@ -23,6 +23,15 @@ enum ReservationStatus {
   CHECKED_IN_UNPAID
   CANCELLED
   NO_SHOW
+  PENDING_FRANCHISE_IMPORT
+}
+
+enum ExternalPromotionStatus {
+  PENDING
+  AUTO_PROMOTED
+  MANUAL_REVIEW
+  PROMOTED
+  REJECTED
 }
 
 enum PaymentStatus {
@@ -430,6 +439,15 @@ model Tenant {
   vehicleClassStopSales       VehicleClassStopSale[]
   marketScrapeProfiles        MarketScrapeProfile[]
   feeRates                    FeeRate[]
+
+  // TL International franchise integration (round 5)
+  integrationConfig           Json?
+  tlExternalReservations      ExternalReservation[]
+  tlExternalSyncRuns          ExternalSyncRun[]
+  tlIntegrationCredentials    IntegrationCredential[]
+  tlAcrissCategoryMaps        AcrissCategoryMap[]
+  tlLocationCodeMaps          LocationCodeMap[]
+  franchisePayoutPeriods      FranchisePayoutPeriod[]
 }
 
 model Location {
@@ -463,6 +481,7 @@ model Location {
   carSharingPickupTrips          Trip[]                  @relation("TripPickupLocation")
   carSharingReturnTrips          Trip[]                  @relation("TripReturnLocation")
   feeRates                       FeeRate[]
+  locationCodeMaps               LocationCodeMap[]
 
   @@unique([tenantId, code])
   @@index([tenantId])
@@ -822,6 +841,9 @@ model Reservation {
   hostReviews       HostReview[]
   tollTransactions  TollTransaction[]
   tollAssignments   TollAssignment[]
+
+  // TL International franchise integration (round 5)
+  externalReservation ExternalReservation? @relation("ReservationFromExternal")
 
   @@index([status, pickupAt])
   @@index([workflowMode, status, pickupAt])
@@ -2769,4 +2791,139 @@ model EndpointLoadObservationDaily {
 
   @@unique([tenantId, route, day])
   @@index([day])
+}
+
+// ============================================================================
+// TL International franchise integration (round 5 — 2026-05-20)
+//
+// Pulls reservation pickups from the TL International back-office (Zezgo
+// franchise channel hub) every 15 minutes, stages them into
+// ExternalReservation, and hybrid-promotes eligible rows into Reservation.
+//
+// See doc/tl-integration-design-2026-05-19.md
+// ============================================================================
+
+model ExternalReservation {
+  id                       String                  @id @default(cuid())
+  tenantId                 String
+  tenant                   Tenant                  @relation(fields: [tenantId], references: [id])
+  sourceSystem             String                  // 'TL_INTERNATIONAL'
+  externalRef              String                  // ZE# e.g. ZE1521152BA
+  subBrand                 String?                 // 'ZEZGO'
+  channel                  String?                 // 'EXPEDIA02'
+  supplierRef              String?
+  status                   String?                 // raw TL status
+  customerFirstName        String?
+  customerLastName         String?
+  customerEmail            String?
+  customerPhone            String?
+  customerCountry          String?
+  flightNumber             String?
+  vehicleAcriss            String?                 // 'CCAR'
+  vehicleDescription       String?
+  pickupAt                 DateTime?
+  pickupLocation           String?
+  dropoffAt                DateTime?
+  dropoffLocation          String?
+  totalAmount              Decimal?                @db.Decimal(12, 2)
+  currency                 String?                 @default("USD")
+  rawJson                  Json
+  firstSeenAt              DateTime                @default(now())
+  lastSyncedAt             DateTime                @default(now())
+  syncRunCount             Int                     @default(1)
+  promotionStatus          ExternalPromotionStatus @default(PENDING)
+  needsReviewReason        String?                 // 'customer_not_found' | 'acriss_unmapped' | 'location_unmapped' | 'currency_non_usd' | 'multiple_matches'
+  promotedToReservationId  String?                 @unique
+  promotedToReservation    Reservation?            @relation("ReservationFromExternal", fields: [promotedToReservationId], references: [id])
+  promotedAt               DateTime?
+  promotedByUserId         String?
+  rejectedReason           String?
+  rejectedAt               DateTime?
+  createdAt                DateTime                @default(now())
+  updatedAt                DateTime                @updatedAt
+
+  @@unique([sourceSystem, externalRef], name: "source_ref_unique")
+  @@index([tenantId, pickupAt])
+  @@index([tenantId, promotionStatus])
+  @@index([promotionStatus])
+  @@index([promotedToReservationId])
+}
+
+model ExternalSyncRun {
+  id              String    @id @default(cuid())
+  tenantId        String
+  tenant          Tenant    @relation(fields: [tenantId], references: [id])
+  sourceSystem    String
+  startedAt       DateTime  @default(now())
+  finishedAt      DateTime?
+  durationMs      Int?
+  status          String    // 'OK' | 'PARTIAL' | 'FAILED' | 'AUTH_EXPIRED'
+  pickupsFound    Int       @default(0)
+  newlyInserted   Int       @default(0)
+  updatedExisting Int       @default(0)
+  autoPromoted    Int       @default(0)
+  needsReview     Int       @default(0)
+  errorsCount     Int       @default(0)
+  notes           String?
+
+  @@index([tenantId, startedAt(sort: Desc)])
+}
+
+model IntegrationCredential {
+  id               String    @id @default(cuid())
+  tenantId         String
+  tenant           Tenant    @relation(fields: [tenantId], references: [id])
+  sourceSystem     String    // 'TL_INTERNATIONAL'
+  encryptedPayload String    // base64(iv || authTag || ciphertext) — AES-256-GCM
+  rotatedAt        DateTime  @default(now())
+  rotatedByUserId  String?
+  lastTestedAt     DateTime?
+  lastTestStatus   String?   // 'OK' | 'EXPIRED' | 'ERROR'
+  notes            String?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  @@unique([tenantId, sourceSystem])
+}
+
+model AcrissCategoryMap {
+  id              String   @id @default(cuid())
+  tenantId        String?  // null = global mapping
+  tenant          Tenant?  @relation(fields: [tenantId], references: [id])
+  acrissCode      String   // 'CCAR'
+  vehicleCategory String   // internal category string (matches VehicleType.classCode / category)
+  createdAt       DateTime @default(now())
+
+  @@unique([tenantId, acrissCode])
+}
+
+model LocationCodeMap {
+  id           String   @id @default(cuid())
+  tenantId     String
+  tenant       Tenant   @relation(fields: [tenantId], references: [id])
+  externalCode String   // 'SJUA01'
+  locationId   String
+  location     Location @relation(fields: [locationId], references: [id])
+  createdAt    DateTime @default(now())
+
+  @@unique([tenantId, externalCode])
+}
+
+model FranchisePayoutPeriod {
+  id             String    @id @default(cuid())
+  tenantId       String
+  tenant         Tenant    @relation(fields: [tenantId], references: [id])
+  sourceSystem   String    // 'TL_INTERNATIONAL'
+  year           Int
+  month          Int       // 1-12
+  expectedAmount Decimal   @default(0) @db.Decimal(12, 2)
+  receivedAmount Decimal?  @db.Decimal(12, 2)
+  receivedAt     DateTime?
+  notes          String?
+  closedAt       DateTime?
+  closedByUserId String?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  @@unique([tenantId, sourceSystem, year, month])
 }
