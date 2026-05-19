@@ -13,7 +13,10 @@ import {
   computeExcessMileage,
   computeFuelRefill,
   computeCleaningFee,
-  computeSmokingFee
+  computeSmokingFee,
+  computeLateReturnFee,
+  LATE_RETURN_GRACE_MINUTES,
+  feeEngineService
 } from './fee-engine.service.js';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -179,6 +182,123 @@ describe('computeSmokingFee', () => {
   it('description is descriptive (for invoice line item)', () => {
     const result = computeSmokingFee({ smokingDetected: true, rate });
     assert.match(result.description, /smoking|tobacco/i);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// computeLateReturnFee
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('computeLateReturnFee', () => {
+  const rate = { amount: 25.00 };
+  const grace = 30;  // mirror LATE_RETURN_GRACE_MINUTES for legibility
+
+  // anchor date used across tests
+  const due = new Date('2026-05-18T15:00:00.000Z');
+  const plus = (minutes) => new Date(due.getTime() + minutes * 60000);
+
+  it('exports the expected grace constant (30 min)', () => {
+    assert.equal(LATE_RETURN_GRACE_MINUTES, 30);
+  });
+
+  it('returns null when returnedAt equals dueBackAt (on-time)', () => {
+    assert.equal(computeLateReturnFee({ dueBackAt: due, returnedAt: due, graceMinutes: grace, rate }), null);
+  });
+
+  it('returns null when 15 min late (under grace)', () => {
+    assert.equal(computeLateReturnFee({ dueBackAt: due, returnedAt: plus(15), graceMinutes: grace, rate }), null);
+  });
+
+  it('returns null when exactly at grace boundary (30 min late)', () => {
+    // 30 - 30 = 0 billable minutes → ceil(0/60) = 0 hours → null
+    assert.equal(computeLateReturnFee({ dueBackAt: due, returnedAt: plus(30), graceMinutes: grace, rate }), null);
+  });
+
+  it('charges 1 hour when 35 min late (5 min past grace)', () => {
+    const result = computeLateReturnFee({ dueBackAt: due, returnedAt: plus(35), graceMinutes: grace, rate });
+    assert.equal(result.quantity, 1);
+    assert.equal(result.rate, 25);
+    assert.equal(result.total, 25);
+  });
+
+  it('charges 2 hours when 2h 10m late (1h 40m past grace)', () => {
+    // minutesLate = 130, billable = 100, ceil(100/60) = 2
+    const result = computeLateReturnFee({ dueBackAt: due, returnedAt: plus(130), graceMinutes: grace, rate });
+    assert.equal(result.quantity, 2);
+    assert.equal(result.total, 50);
+  });
+
+  it('rounds partial hours UP (ceil) — 91 min past grace = 2 hours', () => {
+    // 91 min over grace → ceil(91/60) = 2 hours
+    const result = computeLateReturnFee({ dueBackAt: due, returnedAt: plus(grace + 91), graceMinutes: grace, rate });
+    assert.equal(result.quantity, 2);
+    assert.equal(result.total, 50);
+  });
+
+  it('returns null when dueBackAt is in the future (returned before due)', () => {
+    const result = computeLateReturnFee({ dueBackAt: plus(60), returnedAt: due, graceMinutes: grace, rate });
+    assert.equal(result, null);
+  });
+
+  it('returns null when dueBackAt is missing (defensive)', () => {
+    assert.equal(computeLateReturnFee({ dueBackAt: null, returnedAt: due, graceMinutes: grace, rate }), null);
+    assert.equal(computeLateReturnFee({ dueBackAt: undefined, returnedAt: due, graceMinutes: grace, rate }), null);
+  });
+
+  it('returns null when returnedAt is missing (defensive)', () => {
+    assert.equal(computeLateReturnFee({ dueBackAt: due, returnedAt: null, graceMinutes: grace, rate }), null);
+  });
+
+  it('returns null when either date is unparseable (defensive)', () => {
+    assert.equal(computeLateReturnFee({ dueBackAt: 'not-a-date', returnedAt: due, graceMinutes: grace, rate }), null);
+  });
+
+  it('accepts ISO date strings (not just Date objects)', () => {
+    const result = computeLateReturnFee({
+      dueBackAt: '2026-05-18T15:00:00.000Z',
+      returnedAt: '2026-05-18T16:00:00.000Z',  // 60 min late, 30 over grace
+      graceMinutes: grace,
+      rate
+    });
+    assert.equal(result.quantity, 1);
+    assert.equal(result.total, 25);
+  });
+
+  it('uses default grace (30 min) when not passed explicitly', () => {
+    // 25 min late, no graceMinutes arg → default 30 → under grace → null
+    assert.equal(computeLateReturnFee({ dueBackAt: due, returnedAt: plus(25), rate }), null);
+    // 90 min late, default grace → billable 60 min → ceil(60/60) = 1 hour
+    const result = computeLateReturnFee({ dueBackAt: due, returnedAt: plus(90), rate });
+    assert.equal(result.quantity, 1);
+  });
+
+  it('description references billable hours and grace window', () => {
+    const result = computeLateReturnFee({ dueBackAt: due, returnedAt: plus(35), graceMinutes: grace, rate });
+    assert.match(result.description, /2 hour|1 hour/);
+    assert.match(result.description, /30-minute/);
+  });
+
+  it('honors tenant override rate (custom amount)', () => {
+    // Simulates the case where resolveRate returned a per-tenant FeeRate row
+    // with a non-default amount (e.g., $40/hr instead of the hardcoded $25).
+    const overrideRate = { amount: 40.00 };
+    const result = computeLateReturnFee({ dueBackAt: due, returnedAt: plus(90), graceMinutes: grace, rate: overrideRate });
+    assert.equal(result.quantity, 1);
+    assert.equal(result.rate, 40);
+    assert.equal(result.total, 40);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// HARDCODED_RATES fallback
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('HARDCODED_RATES', () => {
+  it('exposes LATE_RETURN with PER_HOUR unit and $25 default', () => {
+    const fb = feeEngineService.HARDCODED_RATES.LATE_RETURN;
+    assert.ok(fb, 'LATE_RETURN entry should exist');
+    assert.equal(fb.unit, 'PER_HOUR');
+    assert.equal(fb.amount, 25.00);
   });
 });
 

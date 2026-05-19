@@ -45,8 +45,15 @@ const HARDCODED_RATES = {
   CLEANING_LIGHT:   { unit: 'FLAT',       amount: 50.00 },
   CLEANING_MEDIUM:  { unit: 'FLAT',       amount: 100.00 },
   CLEANING_HEAVY:   { unit: 'FLAT',       amount: 200.00 },
-  SMOKING:          { unit: 'FLAT',       amount: 250.00 }
+  SMOKING:          { unit: 'FLAT',       amount: 250.00 },
+  LATE_RETURN:      { unit: 'PER_HOUR',   amount: 25.00 }
 };
+
+// Grace window (in minutes) before LATE_RETURN starts billing. Partial hours
+// after the grace window count as a full hour (ceil). Kept as a separate const
+// rather than a HARDCODED_RATES field so resolveRate stays purely a {unit, amount}
+// shape — and so we don't have to teach FeeRate rows about the grace concept.
+export const LATE_RETURN_GRACE_MINUTES = 30;
 
 // =============================================================================
 // Rate resolution
@@ -179,6 +186,40 @@ export function computeSmokingFee({ smokingDetected, rate }) {
   };
 }
 
+/**
+ * Late-return fee. Charged per hour AFTER a grace window has elapsed.
+ *
+ *   minutesLate     = max(0, returnedAt - dueBackAt) in minutes
+ *   billableMinutes = max(0, minutesLate - graceMinutes)
+ *   billableHours   = ceil(billableMinutes / 60)   — partial hours bill as full hour
+ *
+ * Examples (grace = 30 min):
+ *   on-time / early           → 0 hours, no charge
+ *   15 min late (under grace) → 0 hours, no charge
+ *   35 min late (5 over grace)→ 1 hour billed
+ *   90 min late (60 over)     → 1 hour billed
+ *   2h 10m late (1h 40m over) → 2 hours billed (ceil 100min / 60)
+ *
+ * Defensive: missing dueBackAt or returnedAt → null (no fee). Future-dated
+ * dueBackAt (returnedAt < dueBackAt) → null.
+ */
+export function computeLateReturnFee({ dueBackAt, returnedAt, graceMinutes = LATE_RETURN_GRACE_MINUTES, rate }) {
+  if (!dueBackAt || !returnedAt) return null;
+  const due = new Date(dueBackAt).getTime();
+  const ret = new Date(returnedAt).getTime();
+  if (!Number.isFinite(due) || !Number.isFinite(ret)) return null;
+  const minutesLate = Math.max(0, (ret - due) / 60000);
+  const billableMinutes = Math.max(0, minutesLate - Number(graceMinutes || 0));
+  const billableHours = Math.ceil(billableMinutes / 60);
+  if (billableHours <= 0) return null;
+  return {
+    quantity: billableHours,
+    rate: rate.amount,
+    total: round2(billableHours * rate.amount),
+    description: `Late return — ${billableHours} hour(s) past ${graceMinutes}-minute grace period`
+  };
+}
+
 // =============================================================================
 // Orchestration
 // =============================================================================
@@ -214,6 +255,8 @@ export async function computeCheckinFees(params) {
     fuelOut, fuelIn,
     cleanlinessOut, cleanlinessIn,
     smokingDetected,
+    dueBackAt = null,
+    returnedAt = null,
     includedMilesPerDay = 200,
     rentalDays = 1,
     tankCapacityGallons = 15,
@@ -227,21 +270,23 @@ export async function computeCheckinFees(params) {
     throw new Error('computeCheckinFees requires rentalAgreementId when persist=true');
   }
 
-  // Resolve all rates in parallel — 6 queries become 1 round-trip wave.
+  // Resolve all rates in parallel — 7 queries become 1 round-trip wave.
   const [
     mileageRate,
     fuelRate,
     cleaningLight,
     cleaningMedium,
     cleaningHeavy,
-    smokingRate
+    smokingRate,
+    lateReturnRate
   ] = await Promise.all([
     resolveRate({ tenantId, locationId, feeType: 'EXCESS_MILEAGE' }),
     resolveRate({ tenantId, locationId, feeType: 'FUEL_REFILL' }),
     resolveRate({ tenantId, locationId, feeType: 'CLEANING_LIGHT' }),
     resolveRate({ tenantId, locationId, feeType: 'CLEANING_MEDIUM' }),
     resolveRate({ tenantId, locationId, feeType: 'CLEANING_HEAVY' }),
-    resolveRate({ tenantId, locationId, feeType: 'SMOKING' })
+    resolveRate({ tenantId, locationId, feeType: 'SMOKING' }),
+    resolveRate({ tenantId, locationId, feeType: 'LATE_RETURN' })
   ]);
 
   const ratesByTier = {
@@ -278,6 +323,19 @@ export async function computeCheckinFees(params) {
   if (smoking) {
     items.push({ feeType: 'SMOKING', ...smoking });
     rateSources.SMOKING = smokingRate.source;
+  }
+
+  // LATE_RETURN — skips silently if dueBackAt or returnedAt is missing so
+  // existing 6-fee-type callers keep working unchanged.
+  const lateReturn = computeLateReturnFee({
+    dueBackAt,
+    returnedAt,
+    graceMinutes: LATE_RETURN_GRACE_MINUTES,
+    rate: lateReturnRate
+  });
+  if (lateReturn) {
+    items.push({ feeType: 'LATE_RETURN', ...lateReturn });
+    rateSources.LATE_RETURN = lateReturnRate.source;
   }
 
   const total = round2(items.reduce((sum, item) => sum + item.total, 0));
@@ -424,6 +482,8 @@ export const feeEngineService = {
   computeFuelRefill,
   computeCleaningFee,
   computeSmokingFee,
+  computeLateReturnFee,
   computeCheckinFees,
-  HARDCODED_RATES
+  HARDCODED_RATES,
+  LATE_RETURN_GRACE_MINUTES
 };

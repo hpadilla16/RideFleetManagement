@@ -113,6 +113,13 @@ export async function closeAgreementWithCheckinFees(
   const tankCapacity = await resolveTankCapacity(agreement);
   const includedMilesPerDay = await resolveIncludedMilesPerDay(agreement);
 
+  // LATE_RETURN inputs. Caller can pass `returnedAt` to backdate a checkin;
+  // default to now (when the wizard fires). `dueBackAt` is the scheduled
+  // return time on the agreement. If either is missing the fee engine
+  // silently skips the LATE_RETURN computation.
+  const returnedAt = payload.returnedAt ? new Date(payload.returnedAt) : new Date();
+  const dueBackAt = agreement.returnAt || null;
+
   const feeResult = await feeEngineService.computeCheckinFees({
     reservationId: agreement.reservationId,
     rentalAgreementId: agreement.id,
@@ -125,6 +132,8 @@ export async function closeAgreementWithCheckinFees(
     cleanlinessOut: agreement.cleanlinessOut,
     cleanlinessIn: cleanlinessIn ?? agreement.cleanlinessIn,
     smokingDetected: !!payload.smokingDetected,
+    dueBackAt,
+    returnedAt,
     includedMilesPerDay,
     rentalDays,
     tankCapacityGallons: tankCapacity,
