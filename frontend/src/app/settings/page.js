@@ -5650,7 +5650,8 @@ function FeeRatesTab({ token, me, isSuper, tenantName, scopedSettingsPath, activ
     for (const r of rows || []) {
       next[r.feeType] = {
         amount: String(effectiveAmount(r)),
-        notes: r.notes || ''
+        notes: r.notes || '',
+        isActive: r.isActive !== false  // default true; explicit false = disabled
       };
     }
     return next;
@@ -5694,7 +5695,13 @@ function FeeRatesTab({ token, me, isSuper, tenantName, scopedSettingsPath, activ
     if (!rate) return false;
     const d = draft[feeType];
     if (!d) return false;
-    return Number(d.amount) !== effectiveAmount(rate) || (d.notes || '') !== (rate.notes || '');
+    const draftActive = d.isActive !== false;
+    const rateActive = rate.isActive !== false;
+    return (
+      Number(d.amount) !== effectiveAmount(rate) ||
+      (d.notes || '') !== (rate.notes || '') ||
+      draftActive !== rateActive
+    );
   };
 
   const dirtyFeeTypes = Object.keys(draft).filter(isRowDirty);
@@ -5717,7 +5724,7 @@ function FeeRatesTab({ token, me, isSuper, tenantName, scopedSettingsPath, activ
     if (!rate) return;
     setDraft((prev) => ({
       ...prev,
-      [feeType]: { amount: String(Number(rate.defaultAmount ?? 0)), notes: '' }
+      [feeType]: { amount: String(Number(rate.defaultAmount ?? 0)), notes: '', isActive: true }
     }));
     setErrors((prev) => ({ ...prev, [feeType]: '' }));
   };
@@ -5734,7 +5741,7 @@ function FeeRatesTab({ token, me, isSuper, tenantName, scopedSettingsPath, activ
       const payload = {
         rates: dirtyFeeTypes.map((feeType) => {
           const d = draft[feeType] || {};
-          const out = { feeType, amount: Number(d.amount) };
+          const out = { feeType, amount: Number(d.amount), isActive: d.isActive !== false };
           if (d.notes && d.notes.trim()) out.notes = d.notes.trim();
           return out;
         })
@@ -5878,14 +5885,16 @@ function FeeRatesTab({ token, me, isSuper, tenantName, scopedSettingsPath, activ
 
       <div className="stack" style={{ gap: 0 }}>
         {rates.map((rate) => {
-          const d = draft[rate.feeType] || { amount: '', notes: '' };
+          const d = draft[rate.feeType] || { amount: '', notes: '', isActive: true };
           const dirty = isRowDirty(rate.feeType);
           const err = errors[rate.feeType] || '';
           const overrideActive = rate.currentAmount !== null && rate.currentAmount !== undefined;
           const range = rate.validRange || { min: 0, max: 9999, step: 0.01 };
           const unitLabel = UNIT_LABEL[rate.unit] || rate.unit || '';
+          const isOn = d.isActive !== false;
+          const cardOpacity = isOn ? 1 : 0.55;
           return (
-            <div key={rate.feeType} style={cardStyle(dirty, !!err)}>
+            <div key={rate.feeType} style={{ ...cardStyle(dirty, !!err), opacity: cardOpacity }}>
               <div
                 style={{
                   width: 40, height: 40, borderRadius: 12,
@@ -5906,8 +5915,12 @@ function FeeRatesTab({ token, me, isSuper, tenantName, scopedSettingsPath, activ
                 <div style={{ color: MUTED, fontSize: 12, lineHeight: 1.45, marginTop: 3 }}>
                   {rate.description}
                 </div>
-                <div style={{ marginTop: 6 }}>
-                  {overrideActive ? (
+                <div style={{ marginTop: 6, display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                  {!isOn ? (
+                    <span style={{ padding: '3px 9px', borderRadius: 999, background: '#ffe6e6', color: DANGER, fontSize: 11, fontWeight: 700 }}>
+                      Disabled
+                    </span>
+                  ) : overrideActive ? (
                     <span style={{ padding: '3px 9px', borderRadius: 999, background: VIOLET_SOFT, color: VIOLET, fontSize: 11, fontWeight: 700 }}>
                       Custom rate
                     </span>
@@ -5928,7 +5941,7 @@ function FeeRatesTab({ token, me, isSuper, tenantName, scopedSettingsPath, activ
                     step={range.step || 0.01}
                     min={range.min}
                     max={range.max}
-                    disabled={!editable}
+                    disabled={!editable || !isOn}
                     value={d.amount}
                     onChange={(e) => updateDraft(rate.feeType, { amount: e.target.value })}
                     style={{
@@ -5940,7 +5953,7 @@ function FeeRatesTab({ token, me, isSuper, tenantName, scopedSettingsPath, activ
                       fontWeight: 600,
                       color: INK,
                       outline: 'none',
-                      background: editable ? '#fff' : '#f5f5f7'
+                      background: editable && isOn ? '#fff' : '#f5f5f7'
                     }}
                   />
                   <span style={{ color: MUTED, fontSize: 12 }}>/ {unitLabel}</span>
@@ -5948,6 +5961,40 @@ function FeeRatesTab({ token, me, isSuper, tenantName, scopedSettingsPath, activ
                 {err ? (
                   <div style={{ color: DANGER, fontSize: 11, fontWeight: 600 }}>{err}</div>
                 ) : null}
+              </div>
+
+              {/* On/Off toggle — tenant can disable a fee entirely (engine skips it) */}
+              <div style={{ flex: '0 0 auto', display: 'flex', alignItems: 'center', gap: 8 }}>
+                <button
+                  type="button"
+                  disabled={!editable}
+                  onClick={() => updateDraft(rate.feeType, { isActive: !isOn })}
+                  title={isOn ? 'Disable this fee' : 'Enable this fee'}
+                  aria-pressed={isOn}
+                  style={{
+                    position: 'relative',
+                    width: 44,
+                    height: 26,
+                    borderRadius: 999,
+                    border: 'none',
+                    background: isOn ? VIOLET : '#d2d2d7',
+                    cursor: editable ? 'pointer' : 'not-allowed',
+                    padding: 0,
+                    transition: 'background 160ms ease'
+                  }}
+                >
+                  <span style={{
+                    position: 'absolute',
+                    top: 3,
+                    left: isOn ? 21 : 3,
+                    width: 20,
+                    height: 20,
+                    borderRadius: '50%',
+                    background: '#fff',
+                    boxShadow: '0 1px 3px rgba(0,0,0,.18)',
+                    transition: 'left 160ms ease'
+                  }} />
+                </button>
               </div>
 
               <div style={{ flex: '0 0 auto', display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 4, minWidth: 110 }}>

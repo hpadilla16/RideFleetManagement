@@ -103,7 +103,10 @@ function CheckinWizard({ token, me, logout }) {
           const dict = {};
           for (const r of rows) {
             const amount = r.currentAmount != null ? Number(r.currentAmount) : Number(r.defaultAmount || 0);
-            dict[r.feeType] = { unit: r.unit, amount };
+            // disabled=true when tenant explicitly turned this fee off; the
+            // hook returns null for disabled rates and skips computing them.
+            const disabled = r.isActive === false;
+            dict[r.feeType] = { unit: r.unit, amount, disabled };
           }
           setFeeRates(dict);
         } catch (err) {

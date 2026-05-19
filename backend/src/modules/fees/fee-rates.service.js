@@ -203,7 +203,12 @@ export function validateBulkPayload(body) {
       }
     }
 
-    cleaned.push({ feeType, amount, notes, unit: meta.unit });
+    // isActive toggle — when false the engine SKIPS this fee type entirely
+    // (does not fall back to hardcoded). Default true to preserve existing
+    // behavior for callers that omit the field.
+    const isActive = raw?.isActive === false ? false : true;
+
+    cleaned.push({ feeType, amount, notes, unit: meta.unit, isActive });
   }
 
   if (errors.length > 0) return { ok: false, errors };
@@ -241,7 +246,7 @@ export async function bulkUpsert(body, scope, { actorUserId = null, editable = t
             amount: r.amount,
             unit: r.unit,
             notes: r.notes,
-            isActive: true
+            isActive: r.isActive
           }
         });
       } else {
@@ -252,7 +257,7 @@ export async function bulkUpsert(body, scope, { actorUserId = null, editable = t
             feeType: r.feeType,
             unit: r.unit,
             amount: r.amount,
-            isActive: true,
+            isActive: r.isActive,
             notes: r.notes
           }
         });

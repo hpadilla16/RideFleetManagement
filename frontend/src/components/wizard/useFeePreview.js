@@ -33,7 +33,12 @@ function pct(fraction) {
 }
 
 function rateOf(rates, key) {
-  return rates?.[key] || FALLBACK_RATES[key];
+  // Return null when the tenant has explicitly disabled this fee type
+  // (isActive=false). Hook callers must skip computing the fee when this
+  // returns null — mirrors the backend resolveRate() contract.
+  const r = rates?.[key];
+  if (r && r.disabled === true) return null;
+  return r || FALLBACK_RATES[key];
 }
 
 export function computeExcessMileage({ odometerOut, odometerIn, includedMiles, rate }) {
@@ -144,14 +149,24 @@ export function useFeePreview(params) {
     const includedMiles = Math.max(0, Number(includedMilesPerDay) * Number(rentalDays));
 
     const items = [];
-    const mileage = computeExcessMileage({ odometerOut, odometerIn, includedMiles, rate: mileageRate });
-    if (mileage) items.push(mileage);
-    const fuel = computeFuelRefill({ fuelOut, fuelIn, tankCapacityGallons, rate: fuelRate });
-    if (fuel) items.push(fuel);
+    // Each compute call is guarded by the rate being non-null (rateOf returns
+    // null when the tenant disabled that fee type, mirroring the backend).
+    if (mileageRate) {
+      const mileage = computeExcessMileage({ odometerOut, odometerIn, includedMiles, rate: mileageRate });
+      if (mileage) items.push(mileage);
+    }
+    if (fuelRate) {
+      const fuel = computeFuelRefill({ fuelOut, fuelIn, tankCapacityGallons, rate: fuelRate });
+      if (fuel) items.push(fuel);
+    }
+    // Cleaning: computeCleaningFee returns null if the matching tier rate is null,
+    // so passing the tier dict directly works for partial disables.
     const cleaning = computeCleaningFee({ cleanlinessOut, cleanlinessIn, ratesByTier });
     if (cleaning) items.push(cleaning);
-    const smoking = computeSmokingFee({ smokingDetected, rate: smokingRate });
-    if (smoking) items.push(smoking);
+    if (smokingRate) {
+      const smoking = computeSmokingFee({ smokingDetected, rate: smokingRate });
+      if (smoking) items.push(smoking);
+    }
 
     const total = round2(items.reduce((s, i) => s + i.total, 0));
     const byType = Object.fromEntries(items.map((i) => [i.feeType, i.total]));

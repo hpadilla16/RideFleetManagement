@@ -63,6 +63,11 @@ export const LATE_RETURN_GRACE_MINUTES = 30;
  * Resolve the active rate for a single feeType in this tenant/location.
  * Returns { unit, amount, source } where source is one of:
  *   'location' | 'tenant_default' | 'hardcoded'.
+ *
+ * Returns NULL when the tenant has explicitly disabled this fee type
+ * (FeeRate row exists with isActive=false). Callers must skip computing
+ * the fee when this happens — falling back to hardcoded would defeat the
+ * tenant's intent to turn the fee off entirely.
  */
 export async function resolveRate({ tenantId, locationId, feeType }) {
   if (!tenantId) {
@@ -72,12 +77,14 @@ export async function resolveRate({ tenantId, locationId, feeType }) {
     throw new Error(`Unknown feeType: ${feeType}`);
   }
 
-  // 1. Location-specific override
+  // 1. Location-specific override (lookup BEFORE filtering by isActive so we
+  //    can distinguish "no row" from "explicitly disabled")
   if (locationId) {
     const locRate = await prisma.feeRate.findFirst({
-      where: { tenantId, locationId, feeType, isActive: true }
+      where: { tenantId, locationId, feeType }
     });
     if (locRate) {
+      if (locRate.isActive === false) return null; // location disabled this fee
       return {
         unit: locRate.unit,
         amount: Number(locRate.amount),
@@ -89,9 +96,10 @@ export async function resolveRate({ tenantId, locationId, feeType }) {
 
   // 2. Tenant default
   const tenantRate = await prisma.feeRate.findFirst({
-    where: { tenantId, locationId: null, feeType, isActive: true }
+    where: { tenantId, locationId: null, feeType }
   });
   if (tenantRate) {
+    if (tenantRate.isActive === false) return null; // tenant disabled this fee
     return {
       unit: tenantRate.unit,
       amount: Number(tenantRate.amount),
@@ -100,7 +108,7 @@ export async function resolveRate({ tenantId, locationId, feeType }) {
     };
   }
 
-  // 3. Hardcoded fallback
+  // 3. Hardcoded fallback — no tenant config at all, use platform default
   const fb = HARDCODED_RATES[feeType];
   return { unit: fb.unit, amount: fb.amount, source: 'hardcoded', rateId: null };
 }
@@ -297,45 +305,60 @@ export async function computeCheckinFees(params) {
 
   const includedMiles = Math.max(0, Number(includedMilesPerDay) * Number(rentalDays));
 
-  // Run pure computations
+  // Run pure computations. Each rate is null when the tenant has explicitly
+  // disabled that fee type (isActive=false on the FeeRate row) — skip the
+  // fee entirely rather than falling back to hardcoded. This is the "turn
+  // off excess mileage" use case from the Inspection Fees settings UI.
   const items = [];
   const rateSources = {};
 
-  const mileage = computeExcessMileage({ odometerOut, odometerIn, includedMiles, rate: mileageRate });
-  if (mileage) {
-    items.push({ feeType: 'EXCESS_MILEAGE', ...mileage });
-    rateSources.EXCESS_MILEAGE = mileageRate.source;
+  if (mileageRate) {
+    const mileage = computeExcessMileage({ odometerOut, odometerIn, includedMiles, rate: mileageRate });
+    if (mileage) {
+      items.push({ feeType: 'EXCESS_MILEAGE', ...mileage });
+      rateSources.EXCESS_MILEAGE = mileageRate.source;
+    }
   }
 
-  const fuel = computeFuelRefill({ fuelOut, fuelIn, tankCapacityGallons, rate: fuelRate });
-  if (fuel) {
-    items.push({ feeType: 'FUEL_REFILL', ...fuel });
-    rateSources.FUEL_REFILL = fuelRate.source;
+  if (fuelRate) {
+    const fuel = computeFuelRefill({ fuelOut, fuelIn, tankCapacityGallons, rate: fuelRate });
+    if (fuel) {
+      items.push({ feeType: 'FUEL_REFILL', ...fuel });
+      rateSources.FUEL_REFILL = fuelRate.source;
+    }
   }
 
+  // Cleaning: computeCleaningFee picks the tier (LIGHT/MEDIUM/HEAVY) based
+  // on the cleanliness delta, then looks up the rate. If the matching tier
+  // is null (tenant disabled it), it returns null and we skip. Tenant can
+  // disable e.g. only heavy cleaning while keeping light/medium.
   const cleaning = computeCleaningFee({ cleanlinessOut, cleanlinessIn, ratesByTier });
   if (cleaning) {
     items.push(cleaning);
     rateSources[cleaning.feeType] = ratesByTier[cleaning.feeType].source;
   }
 
-  const smoking = computeSmokingFee({ smokingDetected, rate: smokingRate });
-  if (smoking) {
-    items.push({ feeType: 'SMOKING', ...smoking });
-    rateSources.SMOKING = smokingRate.source;
+  if (smokingRate) {
+    const smoking = computeSmokingFee({ smokingDetected, rate: smokingRate });
+    if (smoking) {
+      items.push({ feeType: 'SMOKING', ...smoking });
+      rateSources.SMOKING = smokingRate.source;
+    }
   }
 
   // LATE_RETURN — skips silently if dueBackAt or returnedAt is missing so
   // existing 6-fee-type callers keep working unchanged.
-  const lateReturn = computeLateReturnFee({
-    dueBackAt,
-    returnedAt,
-    graceMinutes: LATE_RETURN_GRACE_MINUTES,
-    rate: lateReturnRate
-  });
-  if (lateReturn) {
-    items.push({ feeType: 'LATE_RETURN', ...lateReturn });
-    rateSources.LATE_RETURN = lateReturnRate.source;
+  if (lateReturnRate) {
+    const lateReturn = computeLateReturnFee({
+      dueBackAt,
+      returnedAt,
+      graceMinutes: LATE_RETURN_GRACE_MINUTES,
+      rate: lateReturnRate
+    });
+    if (lateReturn) {
+      items.push({ feeType: 'LATE_RETURN', ...lateReturn });
+      rateSources.LATE_RETURN = lateReturnRate.source;
+    }
   }
 
   const total = round2(items.reduce((sum, item) => sum + item.total, 0));
