@@ -2959,6 +2959,7 @@ function SettingsInner({ token, me, logout }) {
             tenantName={isSuper ? (activeSettingsTenant?.name || 'Tenant') : (me?.tenant?.name || 'Current tenant')}
             scopedSettingsPath={scopedSettingsPath}
             activeSettingsTenantId={activeSettingsTenantId}
+            locations={locations}
             onPageMsg={setMsg}
           />
         )}
@@ -5670,7 +5671,18 @@ function diffSummary(before, after) {
   return out.length ? out.join(', ') : 'no field-level diff';
 }
 
-function FeeRatesTab({ token, me, isSuper, tenantName, scopedSettingsPath, activeSettingsTenantId, onPageMsg }) {
+function FeeRatesTab({ token, me, isSuper, tenantName, scopedSettingsPath, activeSettingsTenantId, locations = [], onPageMsg }) {
+  // Selected scope: '' (or null) = tenant default. Non-empty = location id.
+  // Persisted in the URL query (?location=X) so refresh keeps the view.
+  const initialLocationId = (() => {
+    if (typeof window === 'undefined') return '';
+    try {
+      const u = new URL(window.location.href);
+      return u.searchParams.get('location') || '';
+    } catch { return ''; }
+  })();
+  const [selectedLocationId, setSelectedLocationId] = useState(initialLocationId);
+  const [locationsWithOverrides, setLocationsWithOverrides] = useState([]); // [{ locationId, overrideCount }]
   const [rates, setRates] = useState([]);
   const [draft, setDraft] = useState({});       // { feeType: { amount, notes } }
   const [loading, setLoading] = useState(true);
@@ -5683,6 +5695,15 @@ function FeeRatesTab({ token, me, isSuper, tenantName, scopedSettingsPath, activ
   const [auditLoading, setAuditLoading] = useState(false);
   const [auditError, setAuditError] = useState('');
   const [auditOpen, setAuditOpen] = useState(false);
+
+  const isLocationScope = !!selectedLocationId;
+  const selectedLocation = isLocationScope
+    ? (locations || []).find((l) => l.id === selectedLocationId) || null
+    : null;
+  const selectedLocationName = selectedLocation
+    ? (selectedLocation.name || selectedLocation.code || selectedLocationId)
+    : 'Default (Tenant-wide)';
+  const overrideLocationIds = new Set(locationsWithOverrides.map((l) => l.locationId));
 
   // Build a draft snapshot from the API rows (current amount, falling back to default).
   const draftFromRates = (rows) => {
@@ -5697,14 +5718,31 @@ function FeeRatesTab({ token, me, isSuper, tenantName, scopedSettingsPath, activ
     return next;
   };
 
+  // For the per-location editor, the draft starts empty (placeholder = "no
+  // override"). When listing tenant defaults we still pre-populate from the
+  // current value as before.
+  const draftFromRatesForLocation = (rows) => {
+    const next = {};
+    for (const r of rows || []) {
+      const hasOverride = r.currentAmount !== null && r.currentAmount !== undefined;
+      next[r.feeType] = {
+        amount: hasOverride ? String(Number(r.currentAmount)) : '',
+        notes: r.notes || '',
+        isActive: r.isActive !== false
+      };
+    }
+    return next;
+  };
+
   const loadRates = async () => {
     setLoading(true);
     setLoadError('');
     try {
-      const res = await api(scopedSettingsPath('/api/settings/fee-rates'), { bypassCache: true }, token);
+      const qs = selectedLocationId ? `?locationId=${encodeURIComponent(selectedLocationId)}` : '';
+      const res = await api(scopedSettingsPath(`/api/settings/fee-rates${qs}`), { bypassCache: true }, token);
       const rows = Array.isArray(res?.rates) ? res.rates : [];
       setRates(rows);
-      setDraft(draftFromRates(rows));
+      setDraft(selectedLocationId ? draftFromRatesForLocation(rows) : draftFromRates(rows));
       setErrors({});
     } catch (e) {
       setLoadError(e?.message || 'Could not load inspection fee rates');
@@ -5713,7 +5751,30 @@ function FeeRatesTab({ token, me, isSuper, tenantName, scopedSettingsPath, activ
     }
   };
 
-  useEffect(() => { loadRates(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [token, activeSettingsTenantId]);
+  const loadLocationsWithOverrides = async () => {
+    try {
+      const res = await api(scopedSettingsPath('/api/settings/fee-rates/locations-with-overrides'), { bypassCache: true }, token);
+      const rows = Array.isArray(res?.locations) ? res.locations : [];
+      setLocationsWithOverrides(rows);
+    } catch {
+      // Non-fatal — UI just won't show "has overrides" badges.
+      setLocationsWithOverrides([]);
+    }
+  };
+
+  useEffect(() => { loadRates(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [token, activeSettingsTenantId, selectedLocationId]);
+  useEffect(() => { loadLocationsWithOverrides(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [token, activeSettingsTenantId]);
+
+  // Sync URL (?location=) when the selector changes.
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    try {
+      const u = new URL(window.location.href);
+      if (selectedLocationId) u.searchParams.set('location', selectedLocationId);
+      else u.searchParams.delete('location');
+      window.history.replaceState(null, '', u.toString());
+    } catch { /* no-op */ }
+  }, [selectedLocationId]);
 
   // V2: fetch the audit log for the current tenant scope. Best-effort; an
   // error here surfaces as inline text in the History panel but never blocks
@@ -5757,6 +5818,18 @@ function FeeRatesTab({ token, me, isSuper, tenantName, scopedSettingsPath, activ
     if (!d) return false;
     const draftActive = d.isActive !== false;
     const rateActive = rate.isActive !== false;
+    if (isLocationScope) {
+      // For location scope, dirty = (override changed) or (toggled active).
+      // Empty string draft = "no override". rate.currentAmount === null also = "no override".
+      const trimmed = (d.amount ?? '').toString().trim();
+      const draftHasOverride = trimmed !== '';
+      const rateHasOverride = rate.currentAmount !== null && rate.currentAmount !== undefined;
+      if (draftHasOverride !== rateHasOverride) return true;
+      if (draftHasOverride && Number(d.amount) !== Number(rate.currentAmount)) return true;
+      if ((d.notes || '') !== (rate.notes || '')) return true;
+      if (draftActive !== rateActive) return true;
+      return false;
+    }
     return (
       Number(d.amount) !== effectiveAmount(rate) ||
       (d.notes || '') !== (rate.notes || '') ||
@@ -5774,23 +5847,62 @@ function FeeRatesTab({ token, me, isSuper, tenantName, scopedSettingsPath, activ
       return next;
     });
     if (patch.amount !== undefined && rate) {
-      const msg = validateAmount(rate, patch.amount);
-      setErrors((prev) => ({ ...prev, [feeType]: msg }));
+      const raw = (patch.amount ?? '').toString().trim();
+      // Empty in location scope means "no override" — not an error.
+      if (isLocationScope && raw === '') {
+        setErrors((prev) => ({ ...prev, [feeType]: '' }));
+      } else {
+        const msg = validateAmount(rate, patch.amount);
+        setErrors((prev) => ({ ...prev, [feeType]: msg }));
+      }
     }
   };
 
   const resetRow = (feeType) => {
     const rate = ratesByType[feeType];
     if (!rate) return;
-    setDraft((prev) => ({
-      ...prev,
-      [feeType]: { amount: String(Number(rate.defaultAmount ?? 0)), notes: '', isActive: true }
-    }));
+    if (isLocationScope) {
+      // For location scope, "reset" means clear the override (revert to tenant
+      // default). The actual DB delete only happens on save (we mark the row
+      // empty so isRowDirty triggers + save sends a DELETE for it).
+      setDraft((prev) => ({
+        ...prev,
+        [feeType]: { amount: '', notes: '', isActive: true }
+      }));
+    } else {
+      setDraft((prev) => ({
+        ...prev,
+        [feeType]: { amount: String(Number(rate.defaultAmount ?? 0)), notes: '', isActive: true }
+      }));
+    }
     setErrors((prev) => ({ ...prev, [feeType]: '' }));
   };
 
+  // For per-location: explicitly delete a single override row (DELETE call)
+  // and refresh the table. This is the "Reset to tenant default" affordance.
+  const deleteOverrideRow = async (feeType) => {
+    if (!isLocationScope || !editable || saving) return;
+    setSaving(true);
+    try {
+      await api(
+        scopedSettingsPath(`/api/settings/fee-rates/${encodeURIComponent(feeType)}?locationId=${encodeURIComponent(selectedLocationId)}`),
+        { method: 'DELETE' },
+        token
+      );
+      await loadRates();
+      await loadLocationsWithOverrides();
+      setSavedToast(`${feeType} override removed`);
+      setTimeout(() => setSavedToast(''), 2500);
+    } catch (e) {
+      const msg = e?.message || `Could not delete ${feeType} override`;
+      if (typeof onPageMsg === 'function') onPageMsg(msg);
+    } finally {
+      setSaving(false);
+    }
+  };
+
   const discardAll = () => {
-    setDraft(draftFromRates(rates));
+    setDraft(isLocationScope ? draftFromRatesForLocation(rates) : draftFromRates(rates));
     setErrors({});
   };
 
@@ -5798,6 +5910,43 @@ function FeeRatesTab({ token, me, isSuper, tenantName, scopedSettingsPath, activ
     if (!editable || saving || hasErrors || dirtyFeeTypes.length === 0) return;
     setSaving(true);
     try {
+      if (isLocationScope) {
+        // Bucket dirty rows: cleared (delete) vs filled (upsert).
+        const toDelete = [];
+        const toUpsert = [];
+        for (const feeType of dirtyFeeTypes) {
+          const d = draft[feeType] || {};
+          const trimmed = (d.amount ?? '').toString().trim();
+          if (trimmed === '') {
+            toDelete.push(feeType);
+          } else {
+            const out = { feeType, amount: Number(d.amount), isActive: d.isActive !== false };
+            if (d.notes && d.notes.trim()) out.notes = d.notes.trim();
+            toUpsert.push(out);
+          }
+        }
+        if (toUpsert.length > 0) {
+          await api(
+            scopedSettingsPath(`/api/settings/fee-rates?locationId=${encodeURIComponent(selectedLocationId)}`),
+            { method: 'PUT', body: JSON.stringify({ rates: toUpsert }) },
+            token
+          );
+        }
+        for (const feeType of toDelete) {
+          await api(
+            scopedSettingsPath(`/api/settings/fee-rates/${encodeURIComponent(feeType)}?locationId=${encodeURIComponent(selectedLocationId)}`),
+            { method: 'DELETE' },
+            token
+          );
+        }
+        await loadRates();
+        await loadLocationsWithOverrides();
+        const overrideCount = (rates || []).filter((r) => r.currentAmount !== null && r.currentAmount !== undefined).length;
+        setSavedToast(`Location overrides saved · ${overrideCount} active for ${selectedLocationName}`);
+        if (typeof onPageMsg === 'function') onPageMsg('');
+        setTimeout(() => setSavedToast(''), 3500);
+        return;
+      }
       const payload = {
         rates: dirtyFeeTypes.map((feeType) => {
           const d = draft[feeType] || {};
@@ -5889,9 +6038,13 @@ function FeeRatesTab({ token, me, isSuper, tenantName, scopedSettingsPath, activ
     <div className="stack" style={{ position: 'relative' }}>
       <div className="row-between" style={{ alignItems: 'flex-start' }}>
         <div className="stack" style={{ gap: 4 }}>
-          <h2 style={{ margin: 0 }}>Inspection Fees</h2>
+          <h2 style={{ margin: 0 }}>
+            {isLocationScope ? `Overrides for ${selectedLocationName}` : 'Inspection Fees'}
+          </h2>
           <p style={{ color: MUTED, fontSize: 13, lineHeight: 1.5, maxWidth: 740, margin: 0 }}>
-            Charged on check-in when the vehicle returns dirty, low on fuel, smoked-in, or over its mileage allowance.
+            {isLocationScope
+              ? 'Tenant default shown in gray; the override editor is normal weight. Leave an amount blank to keep the tenant default for that fee.'
+              : 'Charged on check-in when the vehicle returns dirty, low on fuel, smoked-in, or over its mileage allowance.'}
           </p>
         </div>
         <span
@@ -5915,7 +6068,55 @@ function FeeRatesTab({ token, me, isSuper, tenantName, scopedSettingsPath, activ
         </span>
       </div>
 
-      {isSuper && activeSettingsTenantId ? (
+      {/* Location selector — Pillar 2 follow-up. Default = tenant-wide. */}
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: 12,
+          padding: '12px 14px',
+          background: VIOLET_SOFT,
+          border: `1px solid ${VIOLET_STRONG}`,
+          borderRadius: 12,
+          flexWrap: 'wrap'
+        }}
+      >
+        <label style={{ fontSize: 12, fontWeight: 700, color: VIOLET, textTransform: 'uppercase', letterSpacing: '.04em' }}>
+          Editing
+        </label>
+        <select
+          value={selectedLocationId}
+          onChange={(e) => setSelectedLocationId(e.target.value || '')}
+          style={{
+            padding: '8px 12px',
+            borderRadius: 10,
+            border: `1px solid ${DIVIDER}`,
+            background: '#fff',
+            fontSize: 13,
+            fontWeight: 600,
+            color: INK,
+            minWidth: 240
+          }}
+        >
+          <option value="">Default (Tenant-wide)</option>
+          {(locations || []).map((l) => (
+            <option key={l.id} value={l.id}>
+              {(l.name || l.code || l.id)}{overrideLocationIds.has(l.id) ? ' • has overrides' : ''}
+            </option>
+          ))}
+        </select>
+        {isLocationScope ? (
+          <span style={{ fontSize: 12, color: MUTED }}>
+            Tenant default values are shown faded. Empty input = no override (tenant default applies).
+          </span>
+        ) : (
+          <span style={{ fontSize: 12, color: MUTED }}>
+            These are the tenant-wide defaults. Select a location to edit per-location overrides.
+          </span>
+        )}
+      </div>
+
+            {isSuper && activeSettingsTenantId ? (
         <div
           style={{
             background: 'linear-gradient(135deg, #ffd60a 0%, #ff9f0a 100%)',
@@ -5984,11 +6185,11 @@ function FeeRatesTab({ token, me, isSuper, tenantName, scopedSettingsPath, activ
                     </span>
                   ) : overrideActive ? (
                     <span style={{ padding: '3px 9px', borderRadius: 999, background: VIOLET_SOFT, color: VIOLET, fontSize: 11, fontWeight: 700 }}>
-                      Custom rate
+                      {isLocationScope ? 'Location override' : 'Custom rate'}
                     </span>
                   ) : (
                     <span style={{ padding: '3px 9px', borderRadius: 999, background: '#f0f0f3', color: MUTED, fontSize: 11, fontWeight: 600 }}>
-                      Using platform default
+                      {isLocationScope ? 'Using tenant default' : 'Using platform default'}
                     </span>
                   )}
                 </div>
@@ -6005,6 +6206,7 @@ function FeeRatesTab({ token, me, isSuper, tenantName, scopedSettingsPath, activ
                     max={range.max}
                     disabled={!editable || !isOn}
                     value={d.amount}
+                    placeholder={isLocationScope ? (rate.tenantDefaultAmount != null ? String(Number(rate.tenantDefaultAmount)) : '') : ''}
                     onChange={(e) => updateDraft(rate.feeType, { amount: e.target.value })}
                     style={{
                       width: 110,
@@ -6059,28 +6261,54 @@ function FeeRatesTab({ token, me, isSuper, tenantName, scopedSettingsPath, activ
                 </button>
               </div>
 
-              <div style={{ flex: '0 0 auto', display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 4, minWidth: 110 }}>
-                <span style={{ color: MUTED, fontSize: 11 }}>
-                  Default {formatMoney(rate.defaultAmount)}
-                </span>
+              <div style={{ flex: '0 0 auto', display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 4, minWidth: 130 }}>
+                {isLocationScope ? (
+                  <span style={{ color: MUTED, fontSize: 11 }}>
+                    Tenant default {formatMoney(rate.tenantDefaultAmount ?? rate.defaultAmount)}
+                  </span>
+                ) : (
+                  <span style={{ color: MUTED, fontSize: 11 }}>
+                    Default {formatMoney(rate.defaultAmount)}
+                  </span>
+                )}
                 {editable && (dirty || overrideActive) ? (
-                  <button
-                    type="button"
-                    onClick={() => resetRow(rate.feeType)}
-                    title="Reset to platform default value"
-                    style={{
-                      padding: '4px 10px',
-                      borderRadius: 8,
-                      border: `1px solid ${DIVIDER}`,
-                      background: '#fff',
-                      color: VIOLET,
-                      fontSize: 12,
-                      fontWeight: 700,
-                      cursor: 'pointer'
-                    }}
-                  >
-                    &#x21BB; Reset
-                  </button>
+                  isLocationScope ? (
+                    <button
+                      type="button"
+                      onClick={() => (overrideActive ? deleteOverrideRow(rate.feeType) : resetRow(rate.feeType))}
+                      title={overrideActive ? 'Delete this per-location override and revert to tenant default' : 'Clear edits to this row'}
+                      style={{
+                        padding: '4px 10px',
+                        borderRadius: 8,
+                        border: `1px solid ${DIVIDER}`,
+                        background: '#fff',
+                        color: VIOLET,
+                        fontSize: 12,
+                        fontWeight: 700,
+                        cursor: 'pointer'
+                      }}
+                    >
+                      {overrideActive ? 'Reset to tenant default' : 'Clear'}
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => resetRow(rate.feeType)}
+                      title="Reset to platform default value"
+                      style={{
+                        padding: '4px 10px',
+                        borderRadius: 8,
+                        border: `1px solid ${DIVIDER}`,
+                        background: '#fff',
+                        color: VIOLET,
+                        fontSize: 12,
+                        fontWeight: 700,
+                        cursor: 'pointer'
+                      }}
+                    >
+                      &#x21BB; Reset
+                    </button>
+                  )
                 ) : null}
               </div>
             </div>

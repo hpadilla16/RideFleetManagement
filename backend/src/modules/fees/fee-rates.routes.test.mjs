@@ -80,6 +80,8 @@ beforeEach(() => {
       findFirst: prisma.feeRate.findFirst,
       create: prisma.feeRate.create,
       update: prisma.feeRate.update,
+      delete: prisma.feeRate.delete,
+      groupBy: prisma.feeRate.groupBy,
       transaction: prisma.$transaction,
       audit: prisma.feeRateAuditLog
     }
@@ -98,10 +100,30 @@ beforeEach(() => {
       return filtered.slice(skip, skip + take);
     }
   };
-  prisma.feeRate.findMany = async (args) => stubs.rows.filter((r) =>
-    r.tenantId === args.where.tenantId && r.locationId === args.where.locationId);
-  prisma.feeRate.findFirst = async (args) => stubs.rows.find((r) =>
-    r.tenantId === args.where.tenantId && r.locationId === args.where.locationId && r.feeType === args.where.feeType) || null;
+  prisma.feeRate.findMany = async (args) => {
+    const w = args.where || {};
+    return stubs.rows.filter((r) => {
+      if (r.tenantId !== w.tenantId) return false;
+      if (w.OR && Array.isArray(w.OR)) {
+        return w.OR.some((c) => {
+          if (c.locationId === null) return r.locationId === null;
+          return r.locationId === c.locationId;
+        });
+      }
+      if (w.locationId && typeof w.locationId === 'object' && w.locationId.not !== undefined) {
+        return r.locationId !== w.locationId.not;
+      }
+      return r.locationId === (w.locationId === undefined ? null : w.locationId);
+    });
+  };
+  prisma.feeRate.findFirst = async (args) => {
+    const w = args.where || {};
+    return stubs.rows.find((r) =>
+      r.tenantId === w.tenantId
+      && r.locationId === (w.locationId === undefined ? null : w.locationId)
+      && r.feeType === w.feeType
+    ) || null;
+  };
   prisma.feeRate.create = async ({ data }) => {
     const row = { id: `id-${stubs.rows.length + 1}`, updatedAt: new Date(), ...data };
     stubs.rows.push(row);
@@ -112,6 +134,28 @@ beforeEach(() => {
     Object.assign(row, data, { updatedAt: new Date() });
     return row;
   };
+  prisma.feeRate.delete = async ({ where }) => {
+    const idx = stubs.rows.findIndex((r) => r.id === where.id);
+    if (idx === -1) return null;
+    const [row] = stubs.rows.splice(idx, 1);
+    return row;
+  };
+  prisma.feeRate.groupBy = async ({ where }) => {
+    const tenantId = where.tenantId;
+    const buckets = new Map();
+    for (const r of stubs.rows) {
+      if (r.tenantId !== tenantId) continue;
+      if (where.locationId && where.locationId.not !== undefined) {
+        if (r.locationId === where.locationId.not) continue;
+      }
+      const k = r.locationId || '__null__';
+      buckets.set(k, (buckets.get(k) || 0) + 1);
+    }
+    return Array.from(buckets.entries()).map(([k, count]) => ({
+      locationId: k === '__null__' ? null : k,
+      _count: { _all: count }
+    }));
+  };
   prisma.$transaction = async (fn) => fn(prisma);
 });
 
@@ -120,6 +164,8 @@ afterEach(async () => {
   prisma.feeRate.findFirst = stubs.orig.findFirst;
   prisma.feeRate.create = stubs.orig.create;
   prisma.feeRate.update = stubs.orig.update;
+  prisma.feeRate.delete = stubs.orig.delete;
+  prisma.feeRate.groupBy = stubs.orig.groupBy;
   prisma.$transaction = stubs.orig.transaction;
   prisma.feeRateAuditLog = stubs.orig.audit;
   await Promise.all(servers.map((s) => new Promise((r) => s.close(() => r()))));
@@ -306,6 +352,126 @@ describe('GET /api/settings/fee-rates/audit', () => {
   it('SUPER_ADMIN without ?tenantId= returns 400', async () => {
     const srv = await startServer({ id: 'u-super', role: 'SUPER_ADMIN' });
     const res = await request(srv, 'GET', '/api/settings/fee-rates/audit');
+  });
+});
+
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Per-location overrides (Pillar 2 follow-up)
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('GET /api/settings/fee-rates?locationId=...', () => {
+  it('returns location overrides only (not tenant defaults) when locationId is passed', async () => {
+    const srv = await startServer({ id: 'u-admin', role: 'ADMIN', tenantId: TENANT });
+    stubs.rows.push({ id: 'tnt-fuel', tenantId: TENANT, locationId: null, feeType: 'FUEL_REFILL', unit: 'PER_GALLON', amount: 8.5, isActive: true, notes: null, updatedAt: new Date() });
+    stubs.rows.push({ id: 'loc-fuel', tenantId: TENANT, locationId: 'loc-1', feeType: 'FUEL_REFILL', unit: 'PER_GALLON', amount: 10, isActive: true, notes: null, updatedAt: new Date() });
+
+    const res = await request(srv, 'GET', '/api/settings/fee-rates?locationId=loc-1');
+    assert.equal(res.status, 200);
+    assert.equal(res.body.locationId, 'loc-1');
+    const fuel = res.body.rates.find((r) => r.feeType === 'FUEL_REFILL');
+    assert.equal(fuel.currentAmount, 10);
+    assert.equal(fuel.currentSource, 'location');
+    assert.equal(fuel.locationId, 'loc-1');
+    assert.equal(fuel.tenantDefaultAmount, 8.5);
+    assert.equal(fuel.tenantDefaultSource, 'tenant_default');
+
+    const smoking = res.body.rates.find((r) => r.feeType === 'SMOKING');
+    assert.equal(smoking.currentAmount, null);
+    assert.equal(smoking.currentSource, 'hardcoded');
+  });
+});
+
+describe('GET /api/settings/fee-rates/effective', () => {
+  it('returns merged effective rates: location > tenant > hardcoded', async () => {
+    const srv = await startServer({ id: 'u-admin', role: 'ADMIN', tenantId: TENANT });
+    stubs.rows.push({ id: 'tnt-fuel', tenantId: TENANT, locationId: null, feeType: 'FUEL_REFILL', unit: 'PER_GALLON', amount: 8.5, isActive: true, notes: null, updatedAt: new Date() });
+    stubs.rows.push({ id: 'tnt-smoke', tenantId: TENANT, locationId: null, feeType: 'SMOKING', unit: 'FLAT', amount: 400, isActive: true, notes: null, updatedAt: new Date() });
+    stubs.rows.push({ id: 'loc-fuel', tenantId: TENANT, locationId: 'loc-1', feeType: 'FUEL_REFILL', unit: 'PER_GALLON', amount: 10, isActive: true, notes: null, updatedAt: new Date() });
+
+    const res = await request(srv, 'GET', '/api/settings/fee-rates/effective?locationId=loc-1');
+    assert.equal(res.status, 200);
+    const fuel = res.body.rates.find((r) => r.feeType === 'FUEL_REFILL');
+    assert.equal(fuel.effectiveAmount, 10);
+    assert.equal(fuel.effectiveSource, 'location');
+    assert.equal(fuel.tenantDefaultAmount, 8.5);
+    assert.equal(fuel.locationOverrideAmount, 10);
+
+    const smoke = res.body.rates.find((r) => r.feeType === 'SMOKING');
+    assert.equal(smoke.effectiveAmount, 400);
+    assert.equal(smoke.effectiveSource, 'tenant_default');
+    assert.equal(smoke.locationOverrideAmount, null);
+
+    const cleanLight = res.body.rates.find((r) => r.feeType === 'CLEANING_LIGHT');
+    assert.equal(cleanLight.effectiveSource, 'hardcoded');
+  });
+
+  it('without ?locationId= returns effective = tenant defaults / hardcoded', async () => {
+    const srv = await startServer({ id: 'u-admin', role: 'ADMIN', tenantId: TENANT });
+    stubs.rows.push({ id: 'tnt-fuel', tenantId: TENANT, locationId: null, feeType: 'FUEL_REFILL', unit: 'PER_GALLON', amount: 8.5, isActive: true, notes: null, updatedAt: new Date() });
+    const res = await request(srv, 'GET', '/api/settings/fee-rates/effective');
+    assert.equal(res.status, 200);
+    const fuel = res.body.rates.find((r) => r.feeType === 'FUEL_REFILL');
+    assert.equal(fuel.effectiveAmount, 8.5);
+    assert.equal(fuel.effectiveSource, 'tenant_default');
+  });
+});
+
+describe('GET /api/settings/fee-rates/locations-with-overrides', () => {
+  it('returns distinct locationIds that have at least one FeeRate row', async () => {
+    const srv = await startServer({ id: 'u-admin', role: 'ADMIN', tenantId: TENANT });
+    stubs.rows.push({ id: 'tnt-fuel', tenantId: TENANT, locationId: null, feeType: 'FUEL_REFILL', amount: 8.5, isActive: true });
+    stubs.rows.push({ id: 'a', tenantId: TENANT, locationId: 'loc-1', feeType: 'FUEL_REFILL', amount: 10, isActive: true });
+    stubs.rows.push({ id: 'b', tenantId: TENANT, locationId: 'loc-1', feeType: 'SMOKING', amount: 500, isActive: true });
+    stubs.rows.push({ id: 'c', tenantId: TENANT, locationId: 'loc-2', feeType: 'FUEL_REFILL', amount: 11, isActive: true });
+
+    const res = await request(srv, 'GET', '/api/settings/fee-rates/locations-with-overrides');
+    assert.equal(res.status, 200);
+    const ids = res.body.locations.map((l) => l.locationId).sort();
+    assert.deepEqual(ids, ['loc-1', 'loc-2']);
+    const loc1 = res.body.locations.find((l) => l.locationId === 'loc-1');
+    assert.equal(loc1.overrideCount, 2);
+  });
+});
+
+describe('PUT /api/settings/fee-rates?locationId=...', () => {
+  it('ADMIN writes a per-location override row', async () => {
+    const srv = await startServer({ id: 'u-admin', role: 'ADMIN', tenantId: TENANT });
+    stubs.rows.push({ id: 'tnt-fuel', tenantId: TENANT, locationId: null, feeType: 'FUEL_REFILL', unit: 'PER_GALLON', amount: 8.5, isActive: true, notes: null, updatedAt: new Date() });
+
+    const res = await request(srv, 'PUT', '/api/settings/fee-rates?locationId=loc-1', {
+      rates: [{ feeType: 'FUEL_REFILL', amount: 12.5 }]
+    });
+    assert.equal(res.status, 200);
+    assert.equal(res.body.locationId, 'loc-1');
+    const wrote = stubs.rows.find((r) => r.locationId === 'loc-1' && r.feeType === 'FUEL_REFILL');
+    assert.ok(wrote);
+    assert.equal(Number(wrote.amount), 12.5);
+    const tnt = stubs.rows.find((r) => r.id === 'tnt-fuel');
+    assert.equal(Number(tnt.amount), 8.5);
+  });
+});
+
+describe('DELETE /api/settings/fee-rates/:feeType?locationId=...', () => {
+  it('ADMIN deletes a per-location override row', async () => {
+    const srv = await startServer({ id: 'u-admin', role: 'ADMIN', tenantId: TENANT });
+    stubs.rows.push({ id: 'loc-fuel', tenantId: TENANT, locationId: 'loc-1', feeType: 'FUEL_REFILL', unit: 'PER_GALLON', amount: 10, isActive: true, notes: null, updatedAt: new Date() });
+
+    const res = await request(srv, 'DELETE', '/api/settings/fee-rates/FUEL_REFILL?locationId=loc-1');
+    assert.equal(res.status, 200);
+    assert.equal(res.body.deleted, true);
+    assert.equal(stubs.rows.find((r) => r.id === 'loc-fuel'), undefined);
+  });
+
+  it('AGENT receives 403 on DELETE', async () => {
+    const srv = await startServer({ id: 'u-agent', role: 'AGENT', tenantId: TENANT });
+    const res = await request(srv, 'DELETE', '/api/settings/fee-rates/FUEL_REFILL?locationId=loc-1');
+    assert.equal(res.status, 403);
+  });
+
+  it('ADMIN without locationId returns 400', async () => {
+    const srv = await startServer({ id: 'u-admin', role: 'ADMIN', tenantId: TENANT });
+    const res = await request(srv, 'DELETE', '/api/settings/fee-rates/FUEL_REFILL');
     assert.equal(res.status, 400);
   });
 });

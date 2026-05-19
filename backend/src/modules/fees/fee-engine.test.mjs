@@ -6,7 +6,7 @@
  * because they require a real Prisma client + test DB.
  */
 
-import { describe, it } from 'node:test';
+import { describe, it, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
@@ -16,8 +16,10 @@ import {
   computeSmokingFee,
   computeLateReturnFee,
   LATE_RETURN_GRACE_MINUTES,
+  resolveRate,
   feeEngineService
 } from './fee-engine.service.js';
+import { prisma } from '../../lib/prisma.js';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // computeExcessMileage
@@ -342,5 +344,76 @@ describe('realistic scenarios', () => {
     assert.equal(smoking.total, 250);
     // grand total = 844.5
     assert.equal(mileage.total + fuel.total + cleaning.total + smoking.total, 844.5);
+  });
+});
+
+
+// ─────────────────────────────────────────────────────────────────────────────
+// resolveRate precedence (Pillar 2 follow-up — per-location overrides)
+// Stubs prisma.feeRate.findFirst so we can exercise the layered lookup
+// without a live DB.
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('resolveRate precedence', () => {
+  const TENANT = 'tenant-rr';
+  const LOC = 'loc-rr';
+  let rows;
+  let orig;
+
+  beforeEach(() => {
+    rows = [];
+    orig = prisma.feeRate.findFirst;
+    prisma.feeRate.findFirst = async (args) => {
+      const w = args.where;
+      return rows.find((r) =>
+        r.tenantId === w.tenantId
+        && (w.locationId === null ? r.locationId === null : r.locationId === w.locationId)
+        && r.feeType === w.feeType
+      ) || null;
+    };
+  });
+
+  afterEach(() => {
+    prisma.feeRate.findFirst = orig;
+  });
+
+  it('falls back to HARDCODED when no rows exist', async () => {
+    const r = await resolveRate({ tenantId: TENANT, locationId: LOC, feeType: 'FUEL_REFILL' });
+    assert.equal(r.source, 'hardcoded');
+    assert.equal(r.rateId, null);
+    // HARDCODED FUEL_REFILL = 7.00
+    assert.equal(r.amount, 7);
+  });
+
+  it('prefers tenant default over hardcoded', async () => {
+    rows.push({ id: 'tnt1', tenantId: TENANT, locationId: null, feeType: 'FUEL_REFILL', unit: 'PER_GALLON', amount: 8.5, isActive: true });
+    const r = await resolveRate({ tenantId: TENANT, locationId: LOC, feeType: 'FUEL_REFILL' });
+    assert.equal(r.source, 'tenant_default');
+    assert.equal(r.amount, 8.5);
+    assert.equal(r.rateId, 'tnt1');
+  });
+
+  it('prefers location override over tenant default and hardcoded', async () => {
+    rows.push({ id: 'tnt1', tenantId: TENANT, locationId: null, feeType: 'FUEL_REFILL', unit: 'PER_GALLON', amount: 8.5, isActive: true });
+    rows.push({ id: 'loc1', tenantId: TENANT, locationId: LOC, feeType: 'FUEL_REFILL', unit: 'PER_GALLON', amount: 9.75, isActive: true });
+    const r = await resolveRate({ tenantId: TENANT, locationId: LOC, feeType: 'FUEL_REFILL' });
+    assert.equal(r.source, 'location');
+    assert.equal(r.amount, 9.75);
+    assert.equal(r.rateId, 'loc1');
+  });
+
+  it('isActive=false at location disables fee (does NOT fall back to tenant default)', async () => {
+    rows.push({ id: 'tnt1', tenantId: TENANT, locationId: null, feeType: 'FUEL_REFILL', unit: 'PER_GALLON', amount: 8.5, isActive: true });
+    rows.push({ id: 'loc1', tenantId: TENANT, locationId: LOC, feeType: 'FUEL_REFILL', unit: 'PER_GALLON', amount: 9.75, isActive: false });
+    const r = await resolveRate({ tenantId: TENANT, locationId: LOC, feeType: 'FUEL_REFILL' });
+    assert.equal(r, null);
+  });
+
+  it('falls back to tenant default when locationId is not passed', async () => {
+    rows.push({ id: 'tnt1', tenantId: TENANT, locationId: null, feeType: 'FUEL_REFILL', unit: 'PER_GALLON', amount: 8.5, isActive: true });
+    rows.push({ id: 'loc1', tenantId: TENANT, locationId: LOC, feeType: 'FUEL_REFILL', unit: 'PER_GALLON', amount: 9.75, isActive: true });
+    const r = await resolveRate({ tenantId: TENANT, locationId: null, feeType: 'FUEL_REFILL' });
+    assert.equal(r.source, 'tenant_default');
+    assert.equal(r.amount, 8.5);
   });
 });

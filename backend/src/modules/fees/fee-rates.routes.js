@@ -25,11 +25,49 @@ function isEditor(user) {
   return isSuperAdmin(user) || String(user?.role || '').toUpperCase() === 'ADMIN';
 }
 
+// Helper — merge ?locationId= from the query string into the tenant scope so
+// downstream service calls see it. Empty / "null" / undefined collapse to null,
+// which means "tenant default". String values are trimmed.
+function scopeWithLocation(req) {
+  const base = scopeFor(req);
+  const raw = req.query?.locationId;
+  if (raw === undefined || raw === null) return base;
+  const s = String(raw).trim();
+  if (!s || s === 'null' || s === 'undefined') return base;
+  return { ...base, locationId: s };
+}
+
 feeRatesRouter.get('/', async (req, res, next) => {
   try {
-    const scope = scopeFor(req);
+    const scope = scopeWithLocation(req);
     const rows = await feeRatesService.listForScope(scope, { editable: isEditor(req.user) });
-    res.json({ rates: rows });
+    res.json({ rates: rows, locationId: scope.locationId || null });
+  } catch (e) {
+    next(e);
+  }
+});
+
+// GET /effective — the merged (location > tenant > hardcoded) view used by the
+// UI to preview what will actually be charged at a location. Anyone authenticated
+// can read; the per-row `editable` boolean is informational only here.
+feeRatesRouter.get('/effective', async (req, res, next) => {
+  try {
+    const scope = scopeWithLocation(req);
+    const rows = await feeRatesService.listEffective(scope, { editable: isEditor(req.user) });
+    res.json({ rates: rows, locationId: scope.locationId || null });
+  } catch (e) {
+    next(e);
+  }
+});
+
+// GET /locations-with-overrides — distinct locationIds (within the tenant)
+// that have at least one FeeRate row. Lets the UI flag those locations in the
+// selector without fetching each location's rates.
+feeRatesRouter.get('/locations-with-overrides', async (req, res, next) => {
+  try {
+    const scope = scopeFor(req);
+    const rows = await feeRatesService.listLocationsWithOverrides(scope);
+    res.json({ locations: rows });
   } catch (e) {
     next(e);
   }
@@ -37,7 +75,7 @@ feeRatesRouter.get('/', async (req, res, next) => {
 
 feeRatesRouter.put('/', requireRole('ADMIN'), async (req, res, next) => {
   try {
-    const scope = scopeFor(req);
+    const scope = scopeWithLocation(req);
     const rows = await feeRatesService.bulkUpsert(req.body || {}, scope, {
       actorUserId: req.user?.id || null,
       actor: {
@@ -47,7 +85,7 @@ feeRatesRouter.put('/', requireRole('ADMIN'), async (req, res, next) => {
       },
       editable: isEditor(req.user)
     });
-    res.json({ rates: rows });
+    res.json({ rates: rows, locationId: scope.locationId || null });
   } catch (e) {
     // Validation errors with a `details` field carry per-row error info; surface
     // it in the response body. The global appErrorHandler still applies the
@@ -80,6 +118,20 @@ feeRatesRouter.get('/audit', async (req, res, next) => {
       feeRateId
     });
     res.json({ entries, limit, offset });
+  } catch (e) { next(e); }
+});
+
+// DELETE /:feeType — remove a single per-location override row. Tenant default
+// rows are NOT deletable from this endpoint (use PUT with isActive=false instead).
+feeRatesRouter.delete('/:feeType', requireRole('ADMIN'), async (req, res, next) => {
+  try {
+    const scope = scopeWithLocation(req);
+    const result = await feeRatesService.deleteOverride(
+      scope,
+      { feeType: String(req.params.feeType || '') },
+      { actorUserId: req.user?.id || null }
+    );
+    res.json({ ok: true, deleted: !!result.deleted });
   } catch (e) {
     next(e);
   }
