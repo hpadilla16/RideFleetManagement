@@ -129,6 +129,16 @@ function CheckinWizard({ token, me, logout }) {
     return Math.max(1, Math.ceil(ms / (24 * 60 * 60 * 1000)));
   }, [agreement?.pickupAt, agreement?.returnAt, reservation?.pickupAt, reservation?.returnAt]);
 
+  // Late-return preview: dueBackAt is the scheduled return-by time, returnedAt
+  // is "now" (when the user is closing checkin). The hook silently skips if the
+  // tenant disabled LATE_RETURN or if the return is on-time / inside grace.
+  const dueBackAt = agreement?.returnAt || reservation?.returnAt || null;
+  const returnedAtNow = useMemo(() => new Date().toISOString(), [
+    // Refresh once per minute while Step 3 is open so the preview keeps pace
+    // with the clock without rerendering on every keystroke.
+    Math.floor(Date.now() / 60000)
+  ]);
+
   const feePreview = useFeePreview({
     rates: feeRates,
     odometerOut: agreement?.odometerOut,
@@ -138,6 +148,8 @@ function CheckinWizard({ token, me, logout }) {
     cleanlinessOut: agreement?.cleanlinessOut,
     cleanlinessIn,
     smokingDetected,
+    dueBackAt,
+    returnedAt: returnedAtNow,
     rentalDays,
     includedMilesPerDay: 200,
     tankCapacityGallons: 15
