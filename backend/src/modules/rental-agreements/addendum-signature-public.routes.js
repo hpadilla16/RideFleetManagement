@@ -3,6 +3,10 @@ import {
   findAddendumByToken,
   submitAddendumSignature
 } from './addendum-signature-public.service.js';
+import {
+  attachPublicRequestMeta,
+  createPublicRateLimitGuard
+} from '../../middleware/public-endpoint-guards.js';
 
 /**
  * Public token-based endpoints for customer self-service signing of rental
@@ -16,7 +20,20 @@ import {
  */
 export const addendumSignaturePublicRouter = Router();
 
-addendumSignaturePublicRouter.get('/:token', async (req, res, next) => {
+// Per-IP rate-limit guards for the public addendum-signature endpoints.
+// Token is 192-bit so brute force is infeasible, but uncapped routes
+// enable DoS amplification + token-existence enumeration.
+// See doc/security-audit-2026-05-19.md §H3.
+const addendumRead = [
+  attachPublicRequestMeta('addendum-signature-read'),
+  createPublicRateLimitGuard({ name: 'addendum-signature-read', maxRequests: 60, windowMs: 60 * 1000 })
+];
+const addendumWrite = [
+  attachPublicRequestMeta('addendum-signature-write'),
+  createPublicRateLimitGuard({ name: 'addendum-signature-write', maxRequests: 20, windowMs: 60 * 1000 })
+];
+
+addendumSignaturePublicRouter.get('/:token', addendumRead, async (req, res, next) => {
   try {
     const data = await findAddendumByToken(req.params.token);
     res.json(data);
@@ -29,7 +46,7 @@ addendumSignaturePublicRouter.get('/:token', async (req, res, next) => {
   }
 });
 
-addendumSignaturePublicRouter.post('/:token/signature', async (req, res, next) => {
+addendumSignaturePublicRouter.post('/:token/signature', addendumWrite, async (req, res, next) => {
   try {
     const result = await submitAddendumSignature(req.params.token, req.body || {}, {
       ip: req.ip
