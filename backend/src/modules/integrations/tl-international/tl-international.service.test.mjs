@@ -6,8 +6,15 @@ import crypto from 'node:crypto';
 // which validates the key at first use.
 process.env.INTEGRATION_ENC_KEY = crypto.randomBytes(32).toString('base64');
 
-const { parseDashboardHtmlFallback, mapDetailToRow, TLAuthExpiredError } =
-  await import('./tl-international.service.js');
+const {
+  parseDashboardHtmlFallback,
+  parseDashboardHtml,
+  parseCookieString,
+  mapDetailToRow,
+  fetchDashboardPickups,
+  TLAuthExpiredError,
+  __test,
+} = await import('./tl-international.service.js');
 
 // ----------------------------------------------------------------------------
 // Dashboard HTML parser (regex fallback)
@@ -78,6 +85,99 @@ test('parseDashboardHtmlFallback returns [] for HTML without pickups', () => {
 test('parseDashboardHtmlFallback skips rows missing a ZE# even if "PICKUP" is present', () => {
   const html = `<tr><td>PICKUP</td><td>not-a-ze-code</td></tr>`;
   assert.deepEqual(parseDashboardHtmlFallback(html), []);
+});
+
+// ----------------------------------------------------------------------------
+// parseCookieString (Puppeteer cookie shaping)
+// ----------------------------------------------------------------------------
+
+test('parseCookieString splits "k=v; k=v" pairs', () => {
+  const out = parseCookieString('PHPSESSID=abc123; __cf_logged_in=1; CF_VERIFIED_DEVICE_x=token');
+  assert.equal(out.length, 3);
+  assert.deepEqual(out[0], { name: 'PHPSESSID', value: 'abc123' });
+  assert.deepEqual(out[1], { name: '__cf_logged_in', value: '1' });
+  assert.deepEqual(out[2], { name: 'CF_VERIFIED_DEVICE_x', value: 'token' });
+});
+
+test('parseCookieString tolerates values containing "="', () => {
+  const out = parseCookieString('token=eyJhbGc=.payload=.sig');
+  assert.equal(out.length, 1);
+  assert.equal(out[0].name, 'token');
+  assert.equal(out[0].value, 'eyJhbGc=.payload=.sig');
+});
+
+test('parseCookieString skips empty / malformed segments', () => {
+  const out = parseCookieString(' ; a=1; ;noequals; b=2 ; ');
+  assert.deepEqual(out, [
+    { name: 'a', value: '1' },
+    { name: 'b', value: '2' },
+  ]);
+});
+
+test('parseCookieString returns [] for empty / non-string input', () => {
+  assert.deepEqual(parseCookieString(''), []);
+  assert.deepEqual(parseCookieString('   '), []);
+  assert.deepEqual(parseCookieString(null), []);
+  assert.deepEqual(parseCookieString(undefined), []);
+});
+
+// ----------------------------------------------------------------------------
+// parseDashboardHtml (async wrapper used by Puppeteer path)
+// ----------------------------------------------------------------------------
+
+test('parseDashboardHtml works end-to-end on SAMPLE_HTML', async () => {
+  const rows = await parseDashboardHtml(SAMPLE_HTML);
+  assert.equal(rows.length, 2);
+  assert.deepEqual(rows.map((r) => r.externalRef).sort(), ['ZE1521152BA', 'ZE9988777CC']);
+});
+
+// ----------------------------------------------------------------------------
+// fetchDashboardPickups — Puppeteer path with stubbed loader
+// ----------------------------------------------------------------------------
+
+test('fetchDashboardPickups returns parsed pickups (loader stubbed)', async () => {
+  let captured = null;
+  __test.setPuppeteerLoader(async (tenantId, path) => {
+    captured = { tenantId, path };
+    return { html: SAMPLE_HTML, finalUrl: 'https://newadmin.tlinternationalgroup.com/dashboard.php', status: 200 };
+  });
+  try {
+    const rows = await fetchDashboardPickups('tenant-abc');
+    assert.equal(rows.length, 2);
+    assert.deepEqual(rows.map((r) => r.externalRef).sort(), ['ZE1521152BA', 'ZE9988777CC']);
+    assert.equal(captured.tenantId, 'tenant-abc');
+    assert.equal(captured.path, '/dashboard.php');
+  } finally {
+    __test.setPuppeteerLoader(null);
+  }
+});
+
+test('fetchDashboardPickups propagates TLAuthExpiredError from loader', async () => {
+  __test.setPuppeteerLoader(async () => {
+    throw new TLAuthExpiredError('Redirected to https://newadmin.tlinternationalgroup.com/login.php');
+  });
+  try {
+    await assert.rejects(
+      () => fetchDashboardPickups('tenant-abc'),
+      (err) => err instanceof TLAuthExpiredError && /login\.php/.test(err.message)
+    );
+  } finally {
+    __test.setPuppeteerLoader(null);
+  }
+});
+
+test('fetchDashboardPickups returns [] when HTML has no PICKUP rows', async () => {
+  __test.setPuppeteerLoader(async () => ({
+    html: '<html><body><table><tr><td>nothing</td></tr></table></body></html>',
+    finalUrl: 'https://newadmin.tlinternationalgroup.com/dashboard.php',
+    status: 200,
+  }));
+  try {
+    const rows = await fetchDashboardPickups('tenant-empty');
+    assert.deepEqual(rows, []);
+  } finally {
+    __test.setPuppeteerLoader(null);
+  }
 });
 
 // ----------------------------------------------------------------------------
