@@ -71,8 +71,20 @@ function CopyButton({ value, label }) {
 }
 
 function EditPromoteModal({ row, token, scopedPath, onClose, onSaved }) {
+  // TL ships customer fields either flat on the row (customerFirstName, ...)
+  // or nested under row.customer depending on which sync version produced the
+  // record. Normalize once so the rest of the modal can read from `tl`.
+  const tl = {
+    firstName: row?.customerFirstName || row?.customer?.firstName || '',
+    lastName: row?.customerLastName || row?.customer?.lastName || '',
+    email: row?.customerEmail || row?.customer?.email || '',
+    phone: row?.customerPhone || row?.customer?.phone || '',
+    country: row?.customerCountry || row?.customer?.country || ''
+  };
+  const tlFullName = `${tl.firstName} ${tl.lastName}`.trim();
+
   const [customerId, setCustomerId] = useState(row?.matchedCustomerId || '');
-  const [customerQuery, setCustomerQuery] = useState(row?.customer?.fullName || `${row?.customerFirstName || ''} ${row?.customerLastName || ''}`.trim() || '');
+  const [customerQuery, setCustomerQuery] = useState(row?.customer?.fullName || tlFullName || '');
   const [customerResults, setCustomerResults] = useState([]);
   const [vehicleCategoryOverride, setVehicleCategoryOverride] = useState(row?.suggestedVehicleTypeId || '');
   const [locationIdOverride, setLocationIdOverride] = useState(row?.suggestedLocationId || '');
@@ -81,6 +93,8 @@ function EditPromoteModal({ row, token, scopedPath, onClose, onSaved }) {
   const [locations, setLocations] = useState([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+  const [creatingCustomer, setCreatingCustomer] = useState(false);
+  const [customerCreatedMsg, setCustomerCreatedMsg] = useState('');
 
   useEffect(() => {
     let cancelled = false;
@@ -162,6 +176,22 @@ function EditPromoteModal({ row, token, scopedPath, onClose, onSaved }) {
           <div style={{ padding: 8, background: '#fee2e2', color: '#991b1b', borderRadius: 4, marginBottom: 8 }}>{error}</div>
         ) : null}
 
+        <section style={{ background: '#f0f9ff', border: '1px solid #bae6fd', padding: 10, borderRadius: 6, marginBottom: 12 }}>
+          <div style={{ fontSize: 12, fontWeight: 600, color: '#0369a1', marginBottom: 6 }}>
+            TL data for this booking
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '4px 12px', fontSize: 13 }}>
+            <div><strong>Name:</strong> {tlFullName || '-'}</div>
+            <div><strong>Email:</strong> {tl.email || '-'}</div>
+            <div><strong>Phone:</strong> {tl.phone || '-'}</div>
+            <div><strong>Country:</strong> {tl.country || '-'}</div>
+            <div><strong>Pickup:</strong> {fmtDateTime(row?.pickupAt)}</div>
+            <div><strong>Return:</strong> {fmtDateTime(row?.dropoffAt || row?.returnAt)}</div>
+            <div><strong>Vehicle ACRISS:</strong> {row?.vehicleAcriss || row?.vehicleClass || '-'}</div>
+            <div><strong>Total:</strong> {fmtMoney(row?.totalAmount)}</div>
+          </div>
+        </section>
+
         <form onSubmit={submit} className="stack" style={{ gap: 14 }}>
           <section>
             <h4 style={{ margin: '0 0 6px' }}>1. Cliente / Customer</h4>
@@ -193,6 +223,61 @@ function EditPromoteModal({ row, token, scopedPath, onClose, onSaved }) {
             ) : null}
             <div className="ui-muted" style={{ fontSize: 12, marginTop: 4 }}>
               Seleccionado / Selected: <strong>{customerId || 'Ninguno / None'}</strong>
+              {customerCreatedMsg ? (
+                <span style={{ marginLeft: 8, color: '#065f46' }}>{customerCreatedMsg}</span>
+              ) : null}
+            </div>
+            <div style={{ display: 'flex', gap: 8, marginTop: 6, flexWrap: 'wrap', alignItems: 'center' }}>
+              <button
+                type="button"
+                disabled={busy || creatingCustomer || !!customerId || !tl.firstName || !tl.lastName}
+                onClick={async () => {
+                  setCreatingCustomer(true);
+                  setError('');
+                  setCustomerCreatedMsg('');
+                  try {
+                    const payload = {
+                      firstName: tl.firstName,
+                      lastName: tl.lastName,
+                      email: tl.email || undefined,
+                      // Backend requires `phone`; fall back to a clear placeholder so
+                      // the create succeeds even when TL did not send a phone. The
+                      // agent can edit the customer later.
+                      phone: tl.phone || 'TL-IMPORT-NO-PHONE',
+                      country: tl.country || undefined
+                    };
+                    const res = await api(
+                      scopedPath('/api/customers'),
+                      { method: 'POST', body: JSON.stringify(payload) },
+                      token
+                    );
+                    const newId = res?.id || res?.customer?.id;
+                    if (newId) {
+                      setCustomerId(newId);
+                      setCustomerQuery(`${tl.firstName} ${tl.lastName} (NEW)`);
+                      setCustomerResults([]);
+                      setCustomerCreatedMsg('Cliente creado / Customer created');
+                    } else {
+                      setError('Customer create returned no id');
+                    }
+                  } catch (err) {
+                    setError(`Could not create customer: ${err?.message || 'unknown error'}`);
+                  } finally {
+                    setCreatingCustomer(false);
+                  }
+                }}
+                title={!tl.firstName || !tl.lastName ? 'Faltan datos TL / Missing TL data' : ''}
+                style={{
+                  background: (busy || creatingCustomer || !!customerId || !tl.firstName || !tl.lastName) ? '#9ca3af' : '#1fc7aa',
+                  color: 'white', border: 'none', padding: '6px 10px', borderRadius: 4, fontSize: 12,
+                  cursor: (busy || creatingCustomer || !!customerId || !tl.firstName || !tl.lastName) ? 'not-allowed' : 'pointer'
+                }}
+              >
+                {creatingCustomer ? 'Creando... / Creating...' : 'Use TL customer data (create new)'}
+              </button>
+              <span style={{ fontSize: 11, color: '#6b7280' }}>
+                Creates a Customer record using the TL data above
+              </span>
             </div>
           </section>
 
@@ -342,8 +427,8 @@ export function PendingFranchiseImportsTray({ token, me, isSuper, activeTenantId
           {msg ? (
             <div style={{ padding: 8, background: '#ecfdf5', color: '#065f46', borderRadius: 4, marginBottom: 8 }}>{msg}</div>
           ) : null}
-          <div style={{ overflowX: 'auto' }}>
-            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+          <div style={{ overflowX: 'auto', WebkitOverflowScrolling: 'touch' }}>
+            <table style={{ width: '100%', minWidth: 1200, borderCollapse: 'collapse', fontSize: 13 }}>
               <thead>
                 <tr style={{ borderBottom: '1px solid #e5e7eb', textAlign: 'left', background: '#f9fafb' }}>
                   <th style={{ padding: '6px 8px' }}>Ref TL / ZE#</th>
