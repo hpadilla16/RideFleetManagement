@@ -2264,6 +2264,19 @@ function SettingsInner({ token, me, logout }) {
             <input placeholder="Logo URL" value={cfg.companyLogoUrl || ''} onChange={(e) => setCfg({ ...cfg, companyLogoUrl: e.target.value })} />
             <input type="file" accept="image/*" onChange={(e) => uploadLogo(e.target.files?.[0])} />
             <textarea rows={6} placeholder="Terms and Conditions" value={cfg.termsText || ''} onChange={(e) => setCfg({ ...cfg, termsText: e.target.value })} />
+            <div className="stack">
+              <label className="label">Terms &amp; Conditions HTML</label>
+              <textarea
+                rows={20}
+                style={{ width: '100%' }}
+                placeholder={'<!-- Your custom T&C HTML here. Leave empty to use the canonical RideFleet T&C. -->'}
+                value={cfg.termsHtml || ''}
+                onChange={(e) => setCfg({ ...cfg, termsHtml: e.target.value })}
+              />
+              <div className="hint" style={{ fontSize: 12, color: '#6b7a9a' }}>
+                Custom T&amp;C text for this tenant. If left empty, the system uses the canonical RideFleet T&amp;C. Plain HTML or text. Use {'{{INITIALS_S4_DECLINE}}'}, {'{{INITIALS_S11_CARD_ON_FILE}}'}, {'{{INITIALS_S11_CNP}}'}, {'{{INITIALS_S11_NO_CHARGEBACK}}'}, {'{{INITIALS_S13_POST_RENTAL}}'} as initial-line placeholders.
+              </div>
+            </div>
             <textarea rows={4} placeholder="Return Instructions" value={cfg.returnInstructionsText || ''} onChange={(e) => setCfg({ ...cfg, returnInstructionsText: e.target.value })} />
             <div className="stack">
               <label className="label">Agreement HTML Template (Global)</label>

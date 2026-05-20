@@ -396,6 +396,11 @@ model Tenant {
   platformFeePct          Decimal  @default(10) @db.Decimal(6, 3)
   platformFeeMin          Decimal  @default(7) @db.Decimal(10, 2)
   platformFeeMax          Decimal  @default(35) @db.Decimal(10, 2)
+  // Per-tenant override for the canonical Terms & Conditions HTML.
+  // When non-empty, supersedes lib/terms/tc-<TC_VERSION>.html in the
+  // rental-agreement renderer (see getEffectiveTermsHtmlForTenant).
+  // When null/empty, the system continues to render the canonical T&C.
+  termsHtml               String?  @db.Text
   createdAt               DateTime @default(now())
   updatedAt               DateTime @updatedAt
 

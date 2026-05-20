@@ -5,7 +5,8 @@ export const DEFAULTS = {
   companyLogoUrl: '',
   termsText: '',
   returnInstructionsText: '',
-  agreementHtmlTemplate: ''
+  agreementHtmlTemplate: '',
+  termsHtml: ''
 };
 
 export const DEFAULT_EMAIL_TEMPLATES = {
