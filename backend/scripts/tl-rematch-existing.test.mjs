@@ -30,6 +30,7 @@ function makeStubPrisma(opts = {}) {
     locationCodeMaps = [],  // [{ tenantId, externalCode, location:{id,code,name} }]
     customers = [],         // pre-existing customers for match
     vehicleTypes = [],      // [{ tenantId, id, code }]
+    duplicates = [],        // [{ tenantId, firstName, lastName, pickupAt, reservationId, linked? }]
   } = opts;
 
   const calls = {
@@ -131,6 +132,30 @@ function makeStubPrisma(opts = {}) {
       },
     },
     $transaction: async (fn) => fn(tx),
+    // Emulate the duplicate-detector raw query. We only need to match
+    // the values shape it passes: [tenantId, fn, ln, pickup].
+    $queryRaw: async (_strings, ...values) => {
+      const [tenantId, fn, ln, pickup] = values;
+      const sameDay = (a, b) => {
+        const da = a instanceof Date ? a : new Date(a);
+        const db = b instanceof Date ? b : new Date(b);
+        return (
+          da.getUTCFullYear() === db.getUTCFullYear() &&
+          da.getUTCMonth() === db.getUTCMonth() &&
+          da.getUTCDate() === db.getUTCDate()
+        );
+      };
+      const norm = (s) => String(s || '').trim().toLowerCase();
+      const matches = duplicates.filter(
+        (d) =>
+          d.tenantId === tenantId &&
+          norm(d.firstName) === fn &&
+          norm(d.lastName) === ln &&
+          sameDay(d.pickupAt, pickup) &&
+          !d.linked,
+      );
+      return matches.slice(0, 2).map((d) => ({ id: d.reservationId }));
+    },
   };
 }
 
@@ -338,5 +363,105 @@ describe('runRematch — dry run is read-only', () => {
     assert.equal(stub.calls.reservationCreate.length, 0);
     assert.equal(stub.calls.customerCreate.length, 0);
     assert.equal(ext.promotionStatus, 'MANUAL_REVIEW'); // unchanged
+  });
+});
+
+
+describe('processOne — duplicate detection (LINK path)', () => {
+  it('links the ExternalReservation to an existing Reservation when name + day match', async () => {
+    const ext = baseExt();
+    const stub = makeStubPrisma({
+      externalReservations: [ext],
+      acrissMaps: [ACRISS],
+      locationCodeMaps: [LOC],
+      vehicleTypes: [VT],
+      duplicates: [{
+        tenantId: TENANT,
+        firstName: 'Jahleya',
+        lastName: 'Smith',
+        pickupAt: new Date('2026-05-21T15:00:00Z'),
+        reservationId: 'res-existing-1',
+      }],
+    });
+    const res = await processOne(stub, ext, { commit: true, logger: silentLogger() });
+    assert.equal(res.outcome, 'linked');
+    assert.equal(res.reservationId, 'res-existing-1');
+    // No new Reservation was created
+    assert.equal(stub.calls.reservationCreate.length, 0);
+    // ExternalReservation was updated to point at the existing one
+    assert.equal(ext.promotionStatus, 'PROMOTED');
+    assert.equal(ext.promotedToReservationId, 'res-existing-1');
+    assert.equal(ext.promotedByUserId, 'system');
+  });
+
+  it('does NOT link when no match — falls through to normal AUTO promote', async () => {
+    const ext = baseExt();
+    const existingCustomer = {
+      id: 'cust-existing', tenantId: TENANT, firstName: 'Jahleya', lastName: 'Smith',
+      email: 'jahleyasmith@gmail.com', phone: '+1 787 555 1234',
+    };
+    const stub = makeStubPrisma({
+      externalReservations: [ext],
+      acrissMaps: [ACRISS],
+      locationCodeMaps: [LOC],
+      customers: [existingCustomer],
+      vehicleTypes: [VT],
+      duplicates: [], // no duplicates -> normal flow
+    });
+    const res = await processOne(stub, ext, { commit: true, logger: silentLogger() });
+    assert.equal(res.outcome, 'promoted');
+    assert.equal(stub.calls.reservationCreate.length, 1);
+  });
+
+  it('dry-run linked path does not write', async () => {
+    const ext = baseExt();
+    const stub = makeStubPrisma({
+      externalReservations: [ext],
+      duplicates: [{
+        tenantId: TENANT,
+        firstName: 'Jahleya',
+        lastName: 'Smith',
+        pickupAt: new Date('2026-05-21T15:00:00Z'),
+        reservationId: 'res-existing-1',
+      }],
+    });
+    const res = await processOne(stub, ext, { commit: false, logger: silentLogger() });
+    assert.equal(res.outcome, 'linked');
+    assert.equal(stub.calls.externalReservationUpdate.length, 0);
+    assert.equal(ext.promotionStatus, 'MANUAL_REVIEW'); // untouched
+  });
+});
+
+describe('runRematch — summary includes linked counter', () => {
+  it('counts linked rows separately from promoted', async () => {
+    const extA = baseExt({ id: 'ext-A', externalRef: 'ZE-A' });
+    const extB = baseExt({ id: 'ext-B', externalRef: 'ZE-B', customerFirstName: 'Other', customerLastName: 'Person' });
+    const existingCustomer = {
+      id: 'cust-existing', tenantId: TENANT, firstName: 'Other', lastName: 'Person',
+      email: 'other@example.com', phone: '+1 787 555 9999',
+    };
+    extB.customerEmail = 'other@example.com';
+    extB.customerPhone = '+1 787 555 9999';
+
+    const stub = makeStubPrisma({
+      externalReservations: [extA, extB],
+      acrissMaps: [ACRISS],
+      locationCodeMaps: [LOC],
+      customers: [existingCustomer],
+      vehicleTypes: [VT],
+      duplicates: [{
+        tenantId: TENANT,
+        firstName: 'Jahleya',
+        lastName: 'Smith',
+        pickupAt: new Date('2026-05-21T15:00:00Z'),
+        reservationId: 'res-existing-1',
+      }],
+    });
+
+    const summary = await runRematch(stub, { commit: true, logger: silentLogger() });
+    assert.equal(summary.scanned, 2);
+    assert.equal(summary.linked, 1);
+    assert.equal(summary.promoted, 1);
+    assert.equal(stub.calls.reservationCreate.length, 1);
   });
 });

@@ -50,6 +50,7 @@ import {
   extractLocationCode,
   REVIEW_REASONS,
 } from '../src/modules/integrations/tl-international/promotion-matcher.service.js';
+import { findDuplicateReservation } from '../src/modules/integrations/tl-international/duplicate-detector.service.js';
 
 const SOURCE_SYSTEM = 'TL_INTERNATIONAL';
 const PROGRESS_EVERY = 25;
@@ -183,6 +184,39 @@ export async function processOne(prismaLike, extRes, { commit, logger }) {
   if (extRes.promotionStatus === 'REJECTED') {
     log(`${id}: already rejected -- skip`);
     return { outcome: 'skipped_rejected' };
+  }
+
+  // Duplicate-detection short-circuit: agent at counter may have created
+  // the Reservation manually before the TL sync hit. If a Reservation in
+  // the same tenant has matching customer name + pickup day, LINK to it
+  // instead of creating a new one.
+  let duplicateId = null;
+  try {
+    duplicateId = await findDuplicateReservation(prismaLike, extRes);
+  } catch (err) {
+    log(`${id}: duplicate check error -- ${err.message}`);
+    duplicateId = null;
+  }
+  if (duplicateId) {
+    log(`${id}: LINKED to existing Reservation ${duplicateId} (duplicate detected by name+date)`);
+    if (commit) {
+      try {
+        await prismaLike.externalReservation.update({
+          where: { id: extRes.id },
+          data: {
+            promotionStatus: 'PROMOTED',
+            promotedToReservationId: duplicateId,
+            promotedAt: new Date(),
+            promotedByUserId: 'system',
+            needsReviewReason: null,
+          },
+        });
+      } catch (err) {
+        log(`${id}: link update error -- ${err.message}`);
+        return { outcome: 'error', error: err };
+      }
+    }
+    return { outcome: 'linked', reservationId: duplicateId };
   }
 
   let decision;
@@ -355,6 +389,7 @@ export async function runRematch(prismaLike, opts = {}) {
   const summary = {
     scanned: 0,
     promoted: 0,
+    linked: 0,
     customersCreated: 0,
     leftInReview: 0,
     skipped: 0,
@@ -368,6 +403,9 @@ export async function runRematch(prismaLike, opts = {}) {
       case 'promoted':
         summary.promoted += 1;
         if (result.customerCreated) summary.customersCreated += 1;
+        break;
+      case 'linked':
+        summary.linked += 1;
         break;
       case 'left_in_review':
         summary.leftInReview += 1;
@@ -394,6 +432,7 @@ export async function runRematch(prismaLike, opts = {}) {
   log('summary:');
   log(`  scanned:           ${summary.scanned}`);
   log(`  promoted:          ${summary.promoted}`);
+  log(`  linked:            ${summary.linked}`);
   log(`  customers created: ${summary.customersCreated}`);
   log(`  left in review:    ${summary.leftInReview}`);
   log(`  skipped:           ${summary.skipped}`);

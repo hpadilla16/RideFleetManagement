@@ -49,6 +49,7 @@ import {
   SOURCE_SYSTEM,
 } from './tl-international.service.js';
 import { evaluatePromotion } from './promotion-matcher.service.js';
+import { findDuplicateReservation } from './duplicate-detector.service.js';
 
 export const QUEUE_NAME = 'tl-international.sync';
 
@@ -379,6 +380,37 @@ export async function promoteWithMappings(extRes, opts) {
 
     const pickupAt = fresh.pickupAt || new Date();
     const returnAt = fresh.dropoffAt || new Date(pickupAt.getTime() + 3 * 24 * 60 * 60 * 1000);
+
+    // Duplicate-detection short-circuit: counter agent may have created
+    // the Reservation manually before this sync hit. If a Reservation in
+    // the same tenant has matching customer name + pickup day, LINK to it
+    // instead of creating a new one. See duplicate-detector.service.js.
+    const duplicateId = await findDuplicateReservation(tx, fresh).catch(() => null);
+    if (duplicateId) {
+      const linkedReservation = await tx.reservation.findUnique({
+        where: { id: duplicateId },
+      });
+      const linkedUpdate = await tx.externalReservation.update({
+        where: { id: fresh.id },
+        data: {
+          promotionStatus: 'PROMOTED',
+          promotedToReservationId: duplicateId,
+          promotedAt: new Date(),
+          promotedByUserId: promotedByUserId || 'system',
+          needsReviewReason: null,
+        },
+      });
+      logger.info(
+        `[tl-sync] ${fresh.externalRef}: LINKED to existing Reservation ${duplicateId} (duplicate detected by name+date)`,
+        { tenantId: fresh.tenantId, externalRef: fresh.externalRef, reservationId: duplicateId },
+      );
+      return {
+        reservation: linkedReservation,
+        externalReservation: linkedUpdate,
+        alreadyPromoted: false,
+        linked: true,
+      };
+    }
 
     const reservation = await tx.reservation.create({
       data: {
