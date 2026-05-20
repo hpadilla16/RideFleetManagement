@@ -115,3 +115,53 @@ export function getCanonicalTermsPlainText() {
 }
 
 export { TC_VERSION };
+
+/**
+ * Per-tenant effective T&C HTML.
+ *
+ * If the tenant has a non-empty `termsHtml` override stored on the
+ * `Tenant` row, that body is used and the five `{{INITIALS_*}}`
+ * markers are substituted using the same rules as the canonical
+ * renderer. Otherwise we fall through to `getCanonicalTermsHtml()`,
+ * which keeps default behaviour unchanged for every tenant that has
+ * not set a custom T&C.
+ *
+ * @param {string} tenantId - id of the tenant whose rental agreement
+ *     is being rendered. Required; if falsy we just return canonical.
+ * @param {object} deps
+ * @param {import('@prisma/client').PrismaClient} deps.prisma - injected
+ *     prisma client. Injected (not imported) so this module stays
+ *     pure / mockable from tests.
+ * @param {object} [opts]
+ * @param {Record<string,string>} [opts.initials] - same shape as
+ *     getCanonicalTermsHtml; merged into both the override path and
+ *     the canonical-fallback path.
+ * @returns {Promise<string>} HTML string with markers replaced.
+ */
+export async function getEffectiveTermsHtmlForTenant(tenantId, { prisma } = {}, opts = {}) {
+  const initials = opts.initials || {};
+  if (tenantId && prisma && typeof prisma.tenant?.findUnique === 'function') {
+    let row = null;
+    try {
+      row = await prisma.tenant.findUnique({
+        where: { id: tenantId },
+        select: { termsHtml: true }
+      });
+    } catch {
+      // DB error: fall through to canonical so rendering never fails
+      // just because of a tenant-lookup hiccup.
+      row = null;
+    }
+    const override = typeof row?.termsHtml === 'string' ? row.termsHtml.trim() : '';
+    if (override) {
+      let html = override;
+      for (const key of INITIALS_KEYS) {
+        const raw = initials[key];
+        const replacement = raw ? escapeHtml(String(raw).trim()) : DEFAULT_BLANK;
+        html = html.split(`{{${key}}}`).join(replacement);
+      }
+      return html;
+    }
+  }
+  return getCanonicalTermsHtml({ initials });
+}

@@ -14,7 +14,7 @@ import {
   materializeStorageRefs as materializeInspectionStorageRefs
 } from './inspection-photos.js';
 import { parseLocationConfig } from '../../lib/location-config.js';
-import { getCanonicalTermsHtml } from '../../lib/terms/index.js';
+import { getEffectiveTermsHtmlForTenant } from '../../lib/terms/index.js';
 import { TC_VERSION } from '../../lib/terms/version.js';
 import { refundCharge as payarcRefundCharge } from '../public-booking/payarc-hosted-fields.js';
 
@@ -2641,7 +2641,7 @@ export const rentalAgreementsService = {
       // The configured cfg.termsText is treated as a tenant-level
       // ADDENDUM and appended below the canonical content; we no longer
       // surface the editable text as the legal terms themselves.
-      termsText: getCanonicalTermsHtml() + (cfg.termsText ? `<div class="tc-tenant-addendum"><h2>Tenant Addendum</h2><p>${esc(cfg.termsText)}</p></div>` : ''),
+      termsText: (await getEffectiveTermsHtmlForTenant(agreement?.tenantId || null, { prisma })) + (cfg.termsText ? `<div class="tc-tenant-addendum"><h2>Tenant Addendum</h2><p>${esc(cfg.termsText)}</p></div>` : ''),
       signatureSignedBy: esc(agreement.reservation?.signatureSignedBy || '-'),
       signatureDateTime: esc(fmtDate(signatureTime)),
       signatureIp: esc(signatureIp),

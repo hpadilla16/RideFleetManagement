@@ -19,7 +19,11 @@ const DEFAULTS = {
     'Renter acknowledges responsibility for the vehicle, traffic violations, tolls, and damages while in possession. Charges shown are estimates and may be adjusted according to final inspection, fuel level, mileage, fees, taxes, and applicable policy terms.',
   returnInstructionsText:
     '1) Return vehicle clean and with agreed fuel level. 2) Report damage before handoff. 3) Return keys/documents to staff. 4) After-hours returns may include additional fees.',
-  agreementHtmlTemplate: ''
+  agreementHtmlTemplate: '',
+  // Per-tenant override for the canonical T&C HTML. Empty string means
+  // "use the canonical lib/terms/tc-<TC_VERSION>.html"; any non-empty
+  // value supersedes it via getEffectiveTermsHtmlForTenant().
+  termsHtml: ''
 };
 
 const ALLOWED_KEYS = Object.keys(DEFAULTS);
@@ -1267,6 +1271,20 @@ export const settingsService = {
     const map = Object.fromEntries(
       rows.map((r) => [String(r.key || '').replace(/^tenant:[^:]+:/, ''), r.value])
     );
+    // Prefer the Tenant.termsHtml column over any stale AppSetting row.
+    if (scope?.tenantId) {
+      try {
+        const t = await prisma.tenant.findUnique({
+          where: { id: scope.tenantId },
+          select: { termsHtml: true }
+        });
+        if (t && typeof t.termsHtml === 'string' && t.termsHtml.length) {
+          map.termsHtml = t.termsHtml;
+        }
+      } catch {
+        // ignore — return AppSetting/defaults below
+      }
+    }
     return { ...DEFAULTS, ...map };
   },
 
@@ -1281,6 +1299,24 @@ export const settingsService = {
         create: { key, value: String(value ?? '') },
         update: { value: String(value ?? '') }
       });
+    }
+
+    // termsHtml is also mirrored onto the Tenant row so the rental-
+    // agreement renderer can resolve the override via prisma.tenant
+    // without a settings round-trip. Best-effort: if the mirror write
+    // fails we still keep the AppSetting copy (single source of truth
+    // is the Tenant column going forward).
+    if (scope?.tenantId && Object.prototype.hasOwnProperty.call(payload, 'termsHtml')) {
+      const raw = payload.termsHtml;
+      const value = typeof raw === 'string' && raw.trim() ? raw : null;
+      try {
+        await prisma.tenant.update({
+          where: { id: scope.tenantId },
+          data: { termsHtml: value }
+        });
+      } catch {
+        // ignore — AppSetting fallback already persisted above
+      }
     }
 
     return this.getRentalAgreementConfig(scope);
