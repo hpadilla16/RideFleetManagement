@@ -450,34 +450,82 @@ export async function fetchReservationDetail(tenantId, externalRef) {
 /**
  * Map the TL detail JSON onto an ExternalReservation create/update shape.
  * Pure function — exported for tests.
+ *
+ * Keys verified against production data 2026-05-20 (sample ZE40774901BA).
+ * TL's JSON uses lowercase, terse field names: `firstname`, `lastname`,
+ * `tele`, `mobile`, `flight`, `acriss`, `pickupdate` (UNIX seconds),
+ * `pickuploc`, `dropoffdate`, `dropoffloc`, `amount`, `currency`, `sourcex`,
+ * `yourref`. We keep older guessed keys as fallbacks for backwards compat
+ * (the helper is reused by tests and may be reused by another source
+ * system in the future).
+ *
+ * NOTE: TL returns `royalty` (e.g., "3.77") which is the per-booking
+ * commission TL retains. Not stored as a column to avoid a schema
+ * migration; extract from rawJson when computing the monthly payout:
+ * SUM(rawJson->>'royalty') for billable rows.
  */
 export function mapDetailToRow(d, externalRef) {
   if (!d || typeof d !== 'object') {
-    return { externalRef, rawJson: { error: 'detail-null' } };
+    return { externalRef, rawJson: d ?? { error: 'detail-null' } };
   }
-  const parseDate = (v) => {
-    if (!v) return null;
-    const d2 = new Date(v);
-    return Number.isNaN(d2.getTime()) ? null : d2;
+
+  const toDate = (v) => {
+    if (v == null || v === '') return null;
+    if (typeof v === 'number') {
+      // TL uses UNIX seconds. Anything < 10^12 is seconds, otherwise ms.
+      const ms = v < 1e12 ? v * 1000 : v;
+      const dt = new Date(ms);
+      return Number.isFinite(dt.valueOf()) ? dt : null;
+    }
+    // Numeric string from TL? Coerce.
+    if (typeof v === 'string' && /^\d+$/.test(v.trim())) {
+      const n = Number(v.trim());
+      const ms = n < 1e12 ? n * 1000 : n;
+      const dt = new Date(ms);
+      return Number.isFinite(dt.valueOf()) ? dt : null;
+    }
+    const dt = new Date(v);
+    return Number.isFinite(dt.valueOf()) ? dt : null;
   };
+
+  const toDecimalString = (v) => {
+    if (v == null) return null;
+    const s = String(v).trim();
+    if (s === '' || s === '0' || s === '0.00') return null;
+    return s;
+  };
+
+  const pickPhone = () => {
+    const tele = d.tele != null ? String(d.tele).trim() : '';
+    if (tele) return tele;
+    const mobile = d.mobile != null ? String(d.mobile).trim() : '';
+    if (mobile) return mobile;
+    const phone = d.phone != null ? String(d.phone).trim() : '';
+    if (phone) return phone;
+    const telephone = d.telephone != null ? String(d.telephone).trim() : '';
+    if (telephone) return telephone;
+    return null;
+  };
+
   return {
     externalRef,
-    channel: d.channel ?? d.supplier ?? d.bookedBy ?? null,
-    supplierRef: d.supplierRef ?? d.supplier_ref ?? null,
+    channel: d.sourcex ?? d.channel ?? d.supplier ?? d.bookedBy ?? null,
+    supplierRef: d.yourref ?? d.supplierRef ?? d.supplier_ref ?? null,
     status: d.status ?? null,
     customerFirstName: d.firstname ?? d.firstName ?? d.first_name ?? null,
     customerLastName: d.lastname ?? d.lastName ?? d.last_name ?? null,
     customerEmail: d.email ?? null,
-    customerPhone: d.phone ?? d.telephone ?? d.mobile ?? null,
+    customerPhone: pickPhone(),
     customerCountry: d.country ?? null,
     flightNumber: d.flight ?? d.flightNumber ?? d.flight_number ?? null,
-    vehicleAcriss: d.vehicleClass ?? d.acriss ?? d.vehicle_acriss ?? d.car_class ?? null,
-    vehicleDescription: d.vehicleDescription ?? d.vehicle_description ?? d.car_description ?? null,
-    pickupAt: parseDate(d.pickup ?? d.pickupAt ?? d.pickup_date),
-    pickupLocation: d.pickupLocation ?? d.pickup_location ?? d.pickup_loc ?? null,
-    dropoffAt: parseDate(d.dropoff ?? d.dropoffAt ?? d.dropoff_date ?? d.return ?? d.returnAt),
-    dropoffLocation: d.dropoffLocation ?? d.dropoff_location ?? d.return_location ?? null,
-    totalAmount: d.total ?? d.totalAmount ?? d.total_amount ?? null,
+    vehicleAcriss: d.acriss ?? d.vehicleClass ?? d.vehicle_acriss ?? d.car_class ?? null,
+    vehicleDescription:
+      d.vehname ?? d.vmake ?? d.vehicleDescription ?? d.vehicle_description ?? d.car_description ?? null,
+    pickupAt: toDate(d.pickupdate ?? d.pickup ?? d.pickupAt ?? d.pickup_date),
+    pickupLocation: d.pickuploc ?? d.pickupLocation ?? d.pickup_location ?? d.pickup_loc ?? null,
+    dropoffAt: toDate(d.dropoffdate ?? d.dropoff ?? d.dropoffAt ?? d.dropoff_date ?? d.return ?? d.returnAt),
+    dropoffLocation: d.dropoffloc ?? d.dropoffLocation ?? d.dropoff_location ?? d.return_location ?? null,
+    totalAmount: toDecimalString(d.amount ?? d.total ?? d.totalAmount ?? d.total_amount),
     currency: d.currency ?? 'USD',
     rawJson: d,
   };

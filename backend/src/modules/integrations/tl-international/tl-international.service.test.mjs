@@ -213,7 +213,7 @@ test('mapDetailToRow maps canonical fields onto schema columns', () => {
   assert.equal(row.pickupLocation, 'San Juan Airport (SJUA01)');
   assert.equal(row.flightNumber, 'AA1234');
   assert.equal(row.currency, 'USD');
-  assert.equal(row.totalAmount, 247.5);
+  assert.equal(row.totalAmount, '247.5'); // mapper coerces to decimal-string (TL ships strings)
   assert.ok(row.pickupAt instanceof Date);
   assert.ok(row.dropoffAt instanceof Date);
   assert.equal(row.rawJson, detail);
