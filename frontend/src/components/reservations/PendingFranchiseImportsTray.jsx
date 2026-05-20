@@ -72,7 +72,7 @@ function CopyButton({ value, label }) {
 
 function EditPromoteModal({ row, token, scopedPath, onClose, onSaved }) {
   const [customerId, setCustomerId] = useState(row?.matchedCustomerId || '');
-  const [customerQuery, setCustomerQuery] = useState(row?.customer?.fullName || '');
+  const [customerQuery, setCustomerQuery] = useState(row?.customer?.fullName || `${row?.customerFirstName || ''} ${row?.customerLastName || ''}`.trim() || '');
   const [customerResults, setCustomerResults] = useState([]);
   const [vehicleCategoryOverride, setVehicleCategoryOverride] = useState(row?.suggestedVehicleTypeId || '');
   const [locationIdOverride, setLocationIdOverride] = useState(row?.suggestedLocationId || '');
@@ -152,7 +152,7 @@ function EditPromoteModal({ row, token, scopedPath, onClose, onSaved }) {
           <div>
             <h3 style={{ margin: 0 }}>Editar y promover / Edit & promote</h3>
             <div className="ui-muted" style={{ fontSize: 13 }}>
-              {row?.externalRef} - {row?.customer?.fullName || '-'}
+              {row?.externalRef} - {row?.customer?.fullName || `${row?.customerFirstName || ''} ${row?.customerLastName || ''}`.trim() || '-'}
             </div>
           </div>
           <button type="button" onClick={onClose} aria-label="Cerrar">x</button>
@@ -349,6 +349,7 @@ export function PendingFranchiseImportsTray({ token, me, isSuper, activeTenantId
                   <th style={{ padding: '6px 8px' }}>Ref TL / ZE#</th>
                   <th style={{ padding: '6px 8px' }}>Cliente / Customer</th>
                   <th style={{ padding: '6px 8px' }}>Pickup</th>
+                  <th style={{ padding: '6px 8px' }}>Return</th>
                   <th style={{ padding: '6px 8px' }}>Sucursal / Location</th>
                   <th style={{ padding: '6px 8px' }}>Vehiculo / Vehicle</th>
                   <th style={{ padding: '6px 8px', textAlign: 'right' }}>Total</th>
@@ -358,7 +359,7 @@ export function PendingFranchiseImportsTray({ token, me, isSuper, activeTenantId
               </thead>
               <tbody>
                 {loading ? (
-                  <tr><td colSpan={8} style={{ padding: 12, color: '#6b7280' }}>Cargando... / Loading...</td></tr>
+                  <tr><td colSpan={9} style={{ padding: 12, color: '#6b7280' }}>Cargando... / Loading...</td></tr>
                 ) : rows.map((r) => {
                   const canAutoPromote = r.matchedCustomerId && r.suggestedVehicleTypeId && r.suggestedLocationId;
                   return (
@@ -368,11 +369,12 @@ export function PendingFranchiseImportsTray({ token, me, isSuper, activeTenantId
                         <CopyButton value={r.externalRef} />
                       </td>
                       <td style={{ padding: '6px 8px' }}>
-                        <div>{r.customer?.fullName || `${r.customer?.firstName || ''} ${r.customer?.lastName || ''}`.trim() || '-'}</div>
-                        <div className="ui-muted" style={{ fontSize: 11 }}>{r.customer?.email || r.customer?.phone || ''}</div>
+                        <div>{r.customer?.fullName || `${r.customer?.firstName || r.customerFirstName || ''} ${r.customer?.lastName || r.customerLastName || ''}`.trim() || '-'}</div>
+                        <div className="ui-muted" style={{ fontSize: 11 }}>{r.customer?.email || r.customerEmail || r.customer?.phone || r.customerPhone || ''}</div>
                       </td>
                       <td style={{ padding: '6px 8px' }}>{fmtDateTime(r.pickupAt)}</td>
-                      <td style={{ padding: '6px 8px' }}>{r.locationCode || '-'}</td>
+                      <td style={{ padding: '6px 8px' }}>{fmtDateTime(r.dropoffAt)}</td>
+                      <td style={{ padding: '6px 8px' }}>{r.locationCode || r.pickupLocation || '-'}</td>
                       <td style={{ padding: '6px 8px' }}>
                         <div><strong>{r.vehicleAcriss || r.vehicleClass || '-'}</strong></div>
                         <div className="ui-muted" style={{ fontSize: 11 }}>{r.vehicleDescription || ''}</div>

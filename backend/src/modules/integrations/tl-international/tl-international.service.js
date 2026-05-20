@@ -590,7 +590,7 @@ export function mapDetailToRow(d, externalRef) {
     status: d.status ?? null,
     customerFirstName: d.firstname ?? d.firstName ?? d.first_name ?? null,
     customerLastName: d.lastname ?? d.lastName ?? d.last_name ?? null,
-    customerEmail: d.email ?? null,
+    customerEmail: d.emailaddress ?? d.email ?? null,
     customerPhone: pickPhone(),
     customerCountry: d.country ?? null,
     flightNumber: d.flight ?? d.flightNumber ?? d.flight_number ?? null,
