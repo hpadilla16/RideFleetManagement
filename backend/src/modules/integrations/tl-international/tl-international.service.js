@@ -40,9 +40,77 @@ export const SOURCE_SYSTEM = 'TL_INTERNATIONAL';
 
 const BASE_URL = process.env.TL_INTERNATIONAL_BASE_URL
   ?? 'https://newadmin.tlinternationalgroup.com';
-const USER_AGENT = process.env.TL_INTERNATIONAL_USER_AGENT
-  ?? 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120 Edg/120';
+
+// ---------------------------------------------------------------------------
+// Stealth / anti-detection knobs
+// ---------------------------------------------------------------------------
+//
+// We rotate UA per sync run (NOT per request — a single user's browser
+// session keeps a stable UA) and randomize the per-detail-fetch sleep.
+// The cron handler in the worker also adds 0-180s jitter on top of the
+// repeatable schedule + a 2am-6am AST quiet window. See worker file for
+// the cron-side helpers.
+//
+// To override the rotation pool with a single fixed UA, set
+// TL_INTERNATIONAL_USER_AGENT - pickUserAgent() respects it. The pool
+// itself is hardcoded (not env-driven) so the list of identities can't
+// be silently mutated by ops/config.
+
+export const USER_AGENT_POOL = Object.freeze([
+  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
+  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36 Edg/131.0.0.0',
+  'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
+  'Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:132.0) Gecko/20100101 Firefox/132.0',
+  'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:132.0) Gecko/20100101 Firefox/132.0',
+  'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.6 Safari/605.1.15',
+  'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
+  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36',
+]);
+
+/**
+ * Returns a UA string for the current sync run. Caller should pick ONCE
+ * per run and cache it for the duration so every request in the run
+ * looks like the same browser session.
+ *
+ * If `TL_INTERNATIONAL_USER_AGENT` env is set, returns it verbatim
+ * (back-compat: lets ops pin a single UA when debugging).
+ */
+export function pickUserAgent() {
+  if (process.env.TL_INTERNATIONAL_USER_AGENT) {
+    return process.env.TL_INTERNATIONAL_USER_AGENT;
+  }
+  const idx = Math.floor(Math.random() * USER_AGENT_POOL.length);
+  return USER_AGENT_POOL[idx];
+}
+
+/**
+ * Returns an integer in [minMs, maxMs). Used to randomize sleeps so
+ * request cadence doesn't form an obvious pattern.
+ *
+ * If maxMs <= minMs, returns minMs (callers can pass equal bounds for
+ * back-compat without surprises).
+ */
+export function randomDelay(minMs, maxMs) {
+  const lo = Math.max(0, Number(minMs) || 0);
+  const hi = Math.max(lo, Number(maxMs) || 0);
+  if (hi <= lo) return lo;
+  return Math.floor(lo + Math.random() * (hi - lo));
+}
+
+// Legacy fixed-delay value. Retained so any external callers + tests keep
+// working. The worker now reads DETAIL_DELAY_MIN_MS / DETAIL_DELAY_MAX_MS
+// and calls randomDelay() at each detail-fetch sleep.
 export const DETAIL_DELAY_MS = Number(process.env.TL_INTERNATIONAL_DETAIL_DELAY_MS ?? 2000);
+export const DETAIL_DELAY_MIN_MS = Number(
+  process.env.TL_INTERNATIONAL_DETAIL_DELAY_MIN_MS
+    ?? process.env.TL_INTERNATIONAL_DETAIL_DELAY_MS
+    ?? 3000
+);
+export const DETAIL_DELAY_MAX_MS = Number(
+  process.env.TL_INTERNATIONAL_DETAIL_DELAY_MAX_MS
+    ?? process.env.TL_INTERNATIONAL_DETAIL_DELAY_MS
+    ?? 5000
+);
 
 const PUPPETEER_TIMEOUT_MS = Number(process.env.TL_PUPPETEER_TIMEOUT_MS ?? 30000);
 const PUPPETEER_VIEWPORT_WIDTH = Number(process.env.TL_PUPPETEER_VIEWPORT_WIDTH ?? 1366);
@@ -145,11 +213,15 @@ async function recordTestStatus(tenantId, status) {
 async function tlFetch(tenantId, path, opts = {}) {
   const cookie = await getCookie(tenantId);
   const url = path.startsWith('http') ? path : `${BASE_URL}${path}`;
+  // Stealth: callers (worker) pass `userAgent` so all requests in a run
+  // share the same identity. Standalone callers (testAuth) fall back to
+  // a fresh pickUserAgent() — still rotated, just per-call.
+  const userAgent = opts.userAgent || pickUserAgent();
   const res = await globalThis.fetch(url, {
     redirect: 'manual',
     headers: {
       Cookie: cookie,
-      'User-Agent': USER_AGENT,
+      'User-Agent': userAgent,
       Accept: opts.acceptJson ? 'application/json,*/*' : 'text/html,*/*',
       ...(opts.headers ?? {}),
     },
@@ -217,7 +289,7 @@ export function parseCookieString(s) {
  * underlying error bubble so the worker marks the run failed and the
  * next run gets a fresh browser.
  */
-async function tlPuppeteerLoad(tenantId, path) {
+async function tlPuppeteerLoad(tenantId, path, opts = {}) {
   const cookieString = await getCookie(tenantId);
   const browser = await getBrowser();
   const page = await browser.newPage();
@@ -233,7 +305,10 @@ async function tlPuppeteerLoad(tenantId, path) {
       throw new TLAuthExpiredError(`Cookie payload for tenant ${tenantId} is empty after parse`);
     }
     await page.setCookie(...cookies);
-    await page.setUserAgent(USER_AGENT);
+    // Stealth: caller pins a UA for the duration of a sync run. Falls
+    // back to a fresh pickUserAgent() for ad-hoc loads (tests, manual).
+    const userAgent = opts.userAgent || pickUserAgent();
+    await page.setUserAgent(userAgent);
     await page.setViewport({
       width: PUPPETEER_VIEWPORT_WIDTH,
       height: PUPPETEER_VIEWPORT_HEIGHT,
@@ -357,11 +432,11 @@ export async function parseDashboardHtml(html) {
   return parseDashboardHtmlFallback(html);
 }
 
-export async function fetchDashboardPickups(tenantId) {
+export async function fetchDashboardPickups(tenantId, opts = {}) {
   // CloudFlare blocks raw fetch on /dashboard.php — go straight to
   // Puppeteer. Keep the parser pure so unit tests can exercise HTML
   // without spinning up Chromium.
-  const { html } = await _puppeteerLoad(tenantId, '/dashboard.php');
+  const { html } = await _puppeteerLoad(tenantId, '/dashboard.php', { userAgent: opts.userAgent });
   const rows = await parseDashboardHtml(html);
   logger.info('[tl-international] dashboard fetched', {
     tenantId,
@@ -380,9 +455,9 @@ export async function fetchDashboardPickups(tenantId) {
  * retry the same URL through Puppeteer and parse the JSON out of the
  * page body. Returns parsed JSON (or null if non-success).
  */
-async function fetchJsonOrPuppeteer(tenantId, path) {
+async function fetchJsonOrPuppeteer(tenantId, path, opts = {}) {
   try {
-    const res = await tlFetch(tenantId, path, { acceptJson: true });
+    const res = await tlFetch(tenantId, path, { acceptJson: true, userAgent: opts.userAgent });
     return await res.json();
   } catch (err) {
     if (!(err instanceof TLAuthExpiredError)) throw err;
@@ -393,7 +468,7 @@ async function fetchJsonOrPuppeteer(tenantId, path) {
     // Fall through to Puppeteer.
   }
 
-  const { html, finalUrl } = await _puppeteerLoad(tenantId, path);
+  const { html, finalUrl } = await _puppeteerLoad(tenantId, path, { userAgent: opts.userAgent });
   // Puppeteer wraps JSON responses in <html><body><pre>…</pre></body></html>.
   // Strip tags and pull the longest plausible JSON object/array out.
   const text = stripTags(html).trim();
@@ -420,7 +495,7 @@ async function fetchJsonOrPuppeteer(tenantId, path) {
   }
 }
 
-export async function fetchReservationDetail(tenantId, externalRef) {
+export async function fetchReservationDetail(tenantId, externalRef, opts = {}) {
   if (!/^ZE\d+[A-Z]{1,3}$/.test(externalRef)) {
     throw new Error(`Invalid externalRef format: ${externalRef}`);
   }
@@ -428,7 +503,8 @@ export async function fetchReservationDetail(tenantId, externalRef) {
   try {
     payload = await fetchJsonOrPuppeteer(
       tenantId,
-      `/get-reservation-details.php?resnumber=${encodeURIComponent(externalRef)}`
+      `/get-reservation-details.php?resnumber=${encodeURIComponent(externalRef)}`,
+      { userAgent: opts.userAgent }
     );
   } catch (e) {
     if (e instanceof TLAuthExpiredError) throw e;

@@ -13,6 +13,9 @@ const {
   mapDetailToRow,
   fetchDashboardPickups,
   TLAuthExpiredError,
+  USER_AGENT_POOL,
+  pickUserAgent,
+  randomDelay,
   __test,
 } = await import('./tl-international.service.js');
 
@@ -257,4 +260,75 @@ test('TLAuthExpiredError has a stable name', () => {
   const e = new TLAuthExpiredError();
   assert.equal(e.name, 'TLAuthExpiredError');
   assert.ok(e instanceof Error);
+});
+
+// ----------------------------------------------------------------------------
+// Stealth: randomDelay()
+// ----------------------------------------------------------------------------
+
+test('randomDelay returns a value in [min, max)', () => {
+  for (let i = 0; i < 500; i++) {
+    const v = randomDelay(3000, 5000);
+    assert.ok(Number.isInteger(v), 'should be integer');
+    assert.ok(v >= 3000, `expected >= 3000, got ${v}`);
+    assert.ok(v < 5000, `expected < 5000, got ${v}`);
+  }
+});
+
+test('randomDelay returns minMs when min === max', () => {
+  assert.equal(randomDelay(2500, 2500), 2500);
+});
+
+test('randomDelay clamps max <= min to min (no negative range)', () => {
+  assert.equal(randomDelay(4000, 1000), 4000);
+});
+
+test('randomDelay treats negative min as 0', () => {
+  const v = randomDelay(-100, 50);
+  assert.ok(v >= 0 && v < 50);
+});
+
+// ----------------------------------------------------------------------------
+// Stealth: pickUserAgent()
+// ----------------------------------------------------------------------------
+
+test('pickUserAgent returns a string from USER_AGENT_POOL when no env override', () => {
+  const prev = process.env.TL_INTERNATIONAL_USER_AGENT;
+  delete process.env.TL_INTERNATIONAL_USER_AGENT;
+  try {
+    for (let i = 0; i < 100; i++) {
+      const ua = pickUserAgent();
+      assert.equal(typeof ua, 'string');
+      assert.ok(USER_AGENT_POOL.includes(ua), `unexpected UA: ${ua}`);
+    }
+  } finally {
+    if (prev === undefined) delete process.env.TL_INTERNATIONAL_USER_AGENT;
+    else process.env.TL_INTERNATIONAL_USER_AGENT = prev;
+  }
+});
+
+test('pickUserAgent respects env override when set', () => {
+  const prev = process.env.TL_INTERNATIONAL_USER_AGENT;
+  process.env.TL_INTERNATIONAL_USER_AGENT = 'CustomBot/1.0';
+  try {
+    for (let i = 0; i < 20; i++) {
+      assert.equal(pickUserAgent(), 'CustomBot/1.0');
+    }
+  } finally {
+    if (prev === undefined) delete process.env.TL_INTERNATIONAL_USER_AGENT;
+    else process.env.TL_INTERNATIONAL_USER_AGENT = prev;
+  }
+});
+
+test('USER_AGENT_POOL has at least 6 entries and all are non-empty strings', () => {
+  assert.ok(USER_AGENT_POOL.length >= 6, `pool too small: ${USER_AGENT_POOL.length}`);
+  for (const ua of USER_AGENT_POOL) {
+    assert.equal(typeof ua, 'string');
+    assert.ok(ua.length > 20, `UA looks too short: ${ua}`);
+    assert.ok(/Mozilla\/5\.0/.test(ua), `UA missing Mozilla/5.0 prefix: ${ua}`);
+  }
+});
+
+test('USER_AGENT_POOL is frozen (immutable)', () => {
+  assert.ok(Object.isFrozen(USER_AGENT_POOL));
 });

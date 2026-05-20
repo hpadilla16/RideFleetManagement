@@ -41,6 +41,10 @@ import {
   mapDetailToRow,
   sleep,
   DETAIL_DELAY_MS,
+  DETAIL_DELAY_MIN_MS,
+  DETAIL_DELAY_MAX_MS,
+  pickUserAgent,
+  randomDelay,
   TLAuthExpiredError,
   SOURCE_SYSTEM,
 } from './tl-international.service.js';
@@ -50,15 +54,90 @@ export const QUEUE_NAME = 'tl-international.sync';
 
 const BOOKING_CHANNEL = 'FRANCHISE_TL';
 
+// ---------------------------------------------------------------------------
+// Stealth helpers
+// ---------------------------------------------------------------------------
+//
+// Three cron-side mitigations live here. The per-detail-fetch randomized
+// sleep + UA rotation are pulled from the service module.
+//
+// 1) JITTER: BullMQ fires us on a fixed schedule (every 15 min by
+//    default). To break the obvious periodicity, we sleep 0-180s
+//    inside the job handler BEFORE doing any work — so requests fire
+//    at :00+0-3min, :15+0-3min, etc.
+//
+// 2) QUIET HOURS: human dispatchers don't sit at the back-office at
+//    3am. We skip cron-triggered jobs between 02:00 and 06:00 AST
+//    (Puerto Rico, UTC-4 year-round, no DST). Manual "Run now" from
+//    the UI is always allowed (triggeredBy === 'manual').
+//
+// 3) UA rotation: pickUserAgent() in the service module — called ONCE
+//    per run + threaded through every fetch.
+
+export const JITTER_MAX_MS = Number(process.env.TL_INTERNATIONAL_JITTER_MAX_MS ?? 180_000);
+
+/**
+ * Returns true if `now` falls inside the 2am-6am AST quiet window.
+ * Atlantic Standard Time is UTC-4 year-round (Puerto Rico does NOT
+ * observe DST). Exported for tests.
+ */
+export function isWithinQuietHours(now = new Date()) {
+  const prHour = (now.getUTCHours() - 4 + 24) % 24;
+  return prHour >= 2 && prHour < 6;
+}
+
+/**
+ * Whether the quiet-hours check is enabled. Default true; ops can flip
+ * to "false" via env if TL ever needs round-the-clock syncing.
+ */
+function quietHoursEnabled() {
+  const raw = (process.env.TL_INTERNATIONAL_QUIET_HOURS_ENABLED ?? 'true')
+    .toString()
+    .trim()
+    .toLowerCase();
+  return raw !== 'false' && raw !== '0' && raw !== 'no';
+}
+
 /**
  * The job handler. Exported for direct invocation from the bootstrap CLI
  * and integration tests.
+ *
+ * Stealth behavior:
+ *   - Cron-triggered runs (triggeredBy !== 'manual') honor quiet hours
+ *     AND get 0-180s jitter prepended.
+ *   - Manual runs (triggeredBy === 'manual') run immediately at any hour.
  */
 export async function tlSyncHandler(job) {
   const { tenantId, triggeredBy = 'schedule' } = job?.data || {};
   if (!tenantId) {
     throw new Error('tl-international.sync: job.data.tenantId is required');
   }
+
+  const isManual = triggeredBy === 'manual';
+
+  // (a) Quiet hours — only for cron-triggered runs.
+  if (!isManual && quietHoursEnabled() && isWithinQuietHours()) {
+    logger.info('[tl-sync] within quiet hours (2am-6am AST) — skipping', {
+      tenantId, triggeredBy,
+    });
+    return { skipped: true, reason: 'quiet_hours' };
+  }
+
+  // (b) Jitter — only for cron-triggered runs. Manual runs bypass.
+  if (!isManual && JITTER_MAX_MS > 0) {
+    const delayMs = randomDelay(0, JITTER_MAX_MS);
+    logger.info(`[tl-sync] jitter delay applied: ${delayMs}ms`, {
+      tenantId, triggeredBy, delayMs,
+    });
+    await sleep(delayMs);
+  }
+
+  // (c) Pick a UA once per run and thread it through every request so
+  // the entire run looks like one browser session.
+  const userAgent = pickUserAgent();
+  logger.info('[tl-sync] starting run', {
+    tenantId, triggeredBy, userAgent: userAgent.slice(0, 60),
+  });
 
   const startedAt = new Date();
   const runRow = await prisma.externalSyncRun.create({
@@ -80,7 +159,7 @@ export async function tlSyncHandler(job) {
   const errorSamples = [];
 
   try {
-    const pickups = await fetchDashboardPickups(tenantId);
+    const pickups = await fetchDashboardPickups(tenantId, { userAgent });
     pickupsFound = pickups.length;
     logger.info('[tl-sync] dashboard fetched', {
       tenantId, runId: runRow.id, pickupsFound,
@@ -100,7 +179,7 @@ export async function tlSyncHandler(job) {
     for (const pickup of pickups) {
       try {
         const wasKnown = knownSet.has(pickup.externalRef);
-        const detail = await fetchReservationDetail(tenantId, pickup.externalRef);
+        const detail = await fetchReservationDetail(tenantId, pickup.externalRef, { userAgent });
         if (!detail) {
           errorsCount++;
           errorSamples.push(`${pickup.externalRef}: detail returned non-success`);
@@ -161,7 +240,7 @@ export async function tlSyncHandler(job) {
           });
         }
 
-        await sleep(DETAIL_DELAY_MS);
+        await sleep(randomDelay(DETAIL_DELAY_MIN_MS, DETAIL_DELAY_MAX_MS));
       } catch (err) {
         if (err instanceof TLAuthExpiredError) throw err;
         errorsCount++;
