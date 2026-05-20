@@ -319,6 +319,83 @@ describe('PUT /api/settings/fee-rates — audit trail', () => {
     assert.equal(stubs.rows.length, 1); // upsert still happened
     assert.equal(stubs.auditRows.length, 0); // audit didn't (best-effort)
   });
+
+  // HOTFIX regression (fee-rate-toggle-500): toggling OFF a fee with no
+  // existing FeeRate row used to 500. Cause: audit insert ran inside the
+  // upsert prisma.$transaction, so when the audit insert threw (e.g. the
+  // FeeRateAuditLog migration hadn't been applied) Prisma re-raised the
+  // error at commit, rolling back the upsert AND propagating the throw —
+  // recordChange's inner try/catch wasn't enough. Audit writes now happen
+  // outside the upsert transaction.
+  it('toggle OFF a fee with no existing row succeeds even when audit insert throws (REGRESSION)', async () => {
+    // Simulate real Prisma transaction semantics: any inner query that
+    // throws (even if its caller catches) poisons the transaction commit.
+    const realTxn = prisma.$transaction;
+    prisma.$transaction = async (fn) => {
+      let innerThrew = null;
+      const wrap = (m, ctx) => async (...args) => {
+        try { return await m.apply(ctx, args); }
+        catch (e) { if (!innerThrew) innerThrew = e; throw e; }
+      };
+      const txProxy = new Proxy(prisma, {
+        get(target, prop) {
+          const val = target[prop];
+          if (val && typeof val === 'object' && !Array.isArray(val)) {
+            return new Proxy(val, {
+              get(t2, p2) {
+                const m = t2[p2];
+                return typeof m === 'function' ? wrap(m, t2) : m;
+              }
+            });
+          }
+          return val;
+        }
+      });
+      const result = await fn(txProxy);
+      if (innerThrew) throw innerThrew;
+      return result;
+    };
+    // Force the audit insert to throw — mirrors "migration not applied" prod scenario.
+    prisma.feeRateAuditLog.create = async () => { throw new Error('relation "FeeRateAuditLog" does not exist'); };
+
+    const srv = await startServer({ id: 'u-admin', role: 'ADMIN', tenantId: TENANT });
+    // CLEANING_LIGHT has no pre-existing row (stubs.rows is empty); UI
+    // sends the hardcoded default amount alongside isActive=false.
+    const res = await request(srv, 'PUT', '/api/settings/fee-rates', {
+      rates: [{ feeType: 'CLEANING_LIGHT', amount: 50, isActive: false }]
+    });
+
+    prisma.$transaction = realTxn;
+
+    assert.equal(res.status, 200);
+    // Upsert still happened: row created with isActive=false.
+    assert.equal(stubs.rows.length, 1);
+    assert.equal(stubs.rows[0].feeType, 'CLEANING_LIGHT');
+    assert.equal(stubs.rows[0].isActive, false);
+    assert.equal(Number(stubs.rows[0].amount), 50);
+    // Audit didn't persist (best-effort, table "missing") but the user flow succeeded.
+    assert.equal(stubs.auditRows.length, 0);
+  });
+
+  it('toggle OFF a fee with no existing row writes a CREATE audit entry when audit is healthy', async () => {
+    const srv = await startServer({
+      id: 'u-admin', role: 'ADMIN', tenantId: TENANT, email: 'admin@acme.com'
+    });
+    const res = await request(srv, 'PUT', '/api/settings/fee-rates', {
+      rates: [{ feeType: 'SMOKING', amount: 250, isActive: false }]
+    });
+    assert.equal(res.status, 200);
+    // FeeRate row created with isActive=false
+    assert.equal(stubs.rows.length, 1);
+    assert.equal(stubs.rows[0].isActive, false);
+    // Audit row written: before=null, after.isActive=false, changeType=CREATE
+    assert.equal(stubs.auditRows.length, 1);
+    const aud = stubs.auditRows[0];
+    assert.equal(aud.changeType, 'CREATE');
+    assert.equal(aud.before, null);
+    assert.equal(aud.after.isActive, false);
+    assert.equal(aud.feeType, 'SMOKING');
+  });
 });
 
 describe('GET /api/settings/fee-rates/audit', () => {

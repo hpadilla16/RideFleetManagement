@@ -288,6 +288,14 @@ export async function bulkUpsert(body, scope, { actorUserId = null, actor = null
   // older callers (no audit context) still work.
   const auditActor = actor || (actorUserId ? { id: actorUserId } : null);
 
+  // Collect audit-write payloads inside the transaction; write them AFTER
+  // the upsert tx commits. If an audit insert ran inside the tx and threw
+  // (e.g., FeeRateAuditLog migration not applied, transient DB error),
+  // Prisma would re-raise the error at commit time, rolling back the
+  // user-facing change — recordChange's inner try/catch isn't enough.
+  // Audit MUST be best-effort. HOTFIX (fee-rate-toggle-500).
+  const pendingAudits = [];
+
   await prisma.$transaction(async (tx) => {
     for (const r of result.rates) {
       const existing = await tx.feeRate.findFirst({
@@ -321,28 +329,30 @@ export async function bulkUpsert(body, scope, { actorUserId = null, actor = null
       const after = snapshotFeeRate(updated);
       const changeType = classifyChange(before, after);
 
-      // Audit insert is best-effort: the helper swallows DB errors and
-      // returns null on failure so the user-facing upsert is never blocked.
-      try {
-        await recordFeeRateAuditChange({
-          tx,
-          tenantId,
-          feeRateId: updated?.id || null,
-          feeType: r.feeType,
-          locationId: null,
-          actor: auditActor,
-          changeType,
-          before,
-          after
-        });
-      } catch (auditErr) {
-        // Defense-in-depth: recordChange already swallows errors, but if a
-        // future refactor makes it throw we still must not break the upsert.
-        logger.warn('[fee-rates] audit insert failed (tenant=%s feeType=%s): %s',
-          tenantId, r.feeType, auditErr?.message || auditErr);
-      }
+      pendingAudits.push({
+        tenantId,
+        feeRateId: updated?.id || null,
+        feeType: r.feeType,
+        locationId: locationId || null,
+        actor: auditActor,
+        changeType,
+        before,
+        after
+      });
     }
   });
+
+  // Audit inserts are best-effort and live OUTSIDE the upsert transaction so
+  // a failure here cannot roll back the user-facing change. recordChange
+  // already swallows DB errors; the try/catch is defense-in-depth.
+  for (const payload of pendingAudits) {
+    try {
+      await recordFeeRateAuditChange(payload);
+    } catch (auditErr) {
+      logger.warn('[fee-rates] audit insert failed (tenant=%s feeType=%s): %s',
+        tenantId, payload.feeType, auditErr?.message || auditErr);
+    }
+  }
 
   logger.info('[fee-rates] tenant=%s location=%s user=%s updated %d rates: %j',
     tenantId,
