@@ -47,6 +47,10 @@ import { buildOpenApiSpec, swaggerHtml } from './docs/openapi.js';
 import { smsRouter } from './modules/sms/sms.routes.js';
 import { knowledgeBaseRouter } from './modules/knowledge-base/knowledge-base.routes.js';
 import { tlInternationalRouter } from './modules/integrations/tl-international/tl-international.routes.js';
+import {
+  tenantFlagsAdminRouter,
+  currentUserFlagsRouter,
+} from './modules/admin/tenant-flags.routes.js';
 import { captureBackendException, flushSentry, initSentry, isSentryEnabled } from './lib/sentry.js';
 import { appErrorHandler } from './lib/errors.js';
 import { closeBrowser } from './lib/puppeteer-browser.js';
@@ -117,6 +121,9 @@ app.use('/api/payment-gateway', requireAuth, tenantRateLimit, requireRole('ADMIN
 app.use('/api/sms', requireAuth, tenantRateLimit, requireRole('ADMIN', 'OPS'), smsRouter);
 app.use('/api/knowledge-base', requireAuth, tenantRateLimit, knowledgeBaseRouter);
 app.use('/api/admin/integrations/tl-international', tenantRateLimit, tlInternationalRouter);
+// Project convention 2026-05-21 — per-tenant feature flags (SUPER_ADMIN only)
+app.use('/api/admin/tenants', requireAuth, requireRole('SUPER_ADMIN'), tenantFlagsAdminRouter);
+app.use('/api/me', requireAuth, currentUserFlagsRouter);
 app.use('/api/store-board', requireAuth, tenantRateLimit, requireRole('SUPER_ADMIN', 'ADMIN', 'OPS'), storeBoardRouter);
 
 app.use('/api/reservations', requireAuth, tenantRateLimit, requireModuleAccess('reservations'), reservationsRouter);
