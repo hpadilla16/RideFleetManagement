@@ -34,13 +34,18 @@ export const REVIEW_REASONS = Object.freeze({
 });
 
 /**
- * Parse a TL pickupLocation label like "San Juan Airport (SJUA01)" → "SJUA01".
- * Returns null if no parenthesized code present.
+ * Parse a TL pickupLocation field. Two formats supported:
+ *   1. "San Juan Airport (SJUA01)" — parenthesized code at end (TL UI label)
+ *   2. "SJUA01" — bare code (TL detail API field, what we actually get)
+ * Returns the code string or null.
  */
 export function extractLocationCode(label) {
   if (!label || typeof label !== 'string') return null;
-  const m = label.match(/\(([A-Z0-9]{3,8})\)\s*$/);
-  return m ? m[1] : null;
+  const s = label.trim();
+  const parenMatch = s.match(/\(([A-Z0-9]{3,8})\)\s*$/);
+  if (parenMatch) return parenMatch[1];
+  if (/^[A-Z0-9]{3,8}$/.test(s)) return s;
+  return null;
 }
 
 /**
