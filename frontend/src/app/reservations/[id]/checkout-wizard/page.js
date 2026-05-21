@@ -26,6 +26,7 @@ import { WizardShell, WizCard, WizGrid } from '../../../../components/wizard/Wiz
 import { OdometerInput, FuelLevelInput, CleanlinessInput } from '../../../../components/wizard/MetricInputs';
 import { PhotoCapture, STANDARD_ANGLES } from '../../../../components/wizard/PhotoCapture';
 import { SignaturePad } from '../../../../components/wizard/SignaturePad';
+import { CheckoutSignatureStep } from '../../../../components/wizard/CheckoutSignatureStep';
 
 export default function Page() {
   return <AuthGate>{({ token, me, logout }) => <CheckoutWizard token={token} me={me} logout={logout} />}</AuthGate>;
@@ -50,6 +51,9 @@ function CheckoutWizard({ token, me, logout }) {
   const [currentAngle, setCurrentAngle] = useState(0);
   const [signerName, setSignerName] = useState('');
   const [signatureDataUrl, setSignatureDataUrl] = useState('');
+  // Set to true when the Dejavoo terminal flow finishes — bypasses the
+  // legacy signerName/signatureDataUrl canAdvance gate.
+  const [terminalSigningCompleted, setTerminalSigningCompleted] = useState(false);
 
   // Load reservation + agreement + pricing in parallel — mirrors the
   // reservation-detail page's parallel fetch pattern. All three endpoints
@@ -250,7 +254,7 @@ function CheckoutWizard({ token, me, logout }) {
       case 1: return Object.keys(photos).length >= 1;
       case 2: return Number(odometerOut) > 0;
       case 3: return true;  // review step — read-only, always advance
-      case 4: return !!signerName && !!signatureDataUrl;
+      case 4: return terminalSigningCompleted || (!!signerName && !!signatureDataUrl);
       default: return true;
     }
   };
@@ -321,13 +325,17 @@ function CheckoutWizard({ token, me, logout }) {
           />
         )}
         {step === 4 && (
-          <Step5Signature
+          <CheckoutSignatureStep
+            reservationId={reservationId}
+            token={token}
             agreement={agreement}
             signerName={signerName}
             onSignerName={setSignerName}
             signatureDataUrl={signatureDataUrl}
             onSignature={setSignatureDataUrl}
             error={submitError}
+            onTerminalCompleted={() => setTerminalSigningCompleted(true)}
+            LegacySignature={Step5Signature}
           />
         )}
         {step === 5 && <Step6Handoff reservation={reservation} agreement={agreement} token={token} onDone={() => router.push('/reservations')} />}
