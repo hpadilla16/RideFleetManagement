@@ -144,10 +144,24 @@ function makeSpinStub({ onSignature, onChoice, onInput } = {}) {
       const value = onInput ? onInput(inputIdx++) : '2026-05-21';
       return makeOkResponse({ UserInput: value });
     },
+    // Round 22 — pickup SALE for rental fee; returns IPosToken for the AUTH step
+    autoRentalSale: async () =>
+      makeOkResponse({
+        AuthCode: 'SALE123',
+        IPosToken: 'TOKEN_FROM_SALE',
+        CardData: { Last4: '4242', CardType: 'VISA', EntryType: 'CHIP' },
+      }),
     autoRentalAuth: async () =>
       makeOkResponse({
         AuthCode: 'AUTH123',
+        IPosToken: 'TOKEN_FROM_AUTH',
         CardData: { Last4: '4242', CardType: 'VISA', EntryType: 'CHIP' },
+      }),
+    // Round 22 — CNP AUTH used after SALE captured a token
+    authWithToken: async () =>
+      makeOkResponse({
+        AuthCode: 'AUTH_CNP_123',
+        CardData: { Last4: '4242', CardType: 'VISA', EntryType: 'CARD_ON_FILE' },
       }),
     normalizeResponse: (resp) => ({
       approved: resp?.GeneralResponse?.StatusCode === '0000',
@@ -155,6 +169,7 @@ function makeSpinStub({ onSignature, onChoice, onInput } = {}) {
       message: resp?.GeneralResponse?.Message || '',
       detailedMessage: resp?.GeneralResponse?.DetailedMessage || '',
       authCode: resp?.AuthCode || '',
+      iposToken: resp?.IPosToken || null,
       cardData: resp?.CardData
         ? {
             last4: resp.CardData.Last4 || '',
@@ -434,8 +449,10 @@ test('runCounterCheckinFlow 422 when DATE input is not parseable', async () => {
 // ---------------------------------------------------------------------------
 
 test('runCounterCheckinFlow 402 when AUTH declined', async () => {
+  // Round 22: after SALE captures the IPosToken, the AUTH step is CNP via
+  // authWithToken — override that path for the decline case.
   const deps = baseDeps();
-  deps.spin.autoRentalAuth = async () => ({
+  deps.spin.authWithToken = async () => ({
     GeneralResponse: { ResultCode: 0, StatusCode: '0010', Message: 'CARD DECLINED' },
   });
   await assert.rejects(
@@ -594,4 +611,80 @@ test('runCounterCheckinFlow no-op override (same as default) does not audit', as
   });
   // No audit row for no-op
   assert.equal(deps.prisma.tenantAuditLog._rows.length, 0);
+});
+
+// ---------------------------------------------------------------------------
+// Round 22 — SALE-then-AUTH pickup flow
+// ---------------------------------------------------------------------------
+//
+// At pickup we charge the rental fee via SALE (single swipe → token saved on
+// Customer), then place the security deposit AUTH using the token (CNP, no
+// second swipe).
+
+test('R22 — pickup runs SALE for rental fee BEFORE AUTH', async () => {
+  const deps = baseDeps();
+  // Track call order
+  const calls = [];
+  const origSale = deps.spin.autoRentalSale;
+  const origAuthToken = deps.spin.authWithToken;
+  deps.spin.autoRentalSale = async (args) => { calls.push('SALE'); return origSale(args); };
+  deps.spin.authWithToken = async (args) => { calls.push('AUTH_TOKEN'); return origAuthToken(args); };
+  const result = await runCounterCheckinFlow({
+    reservationId: 'r1', terminalId: 'term1',
+    user: { sub: 'u', role: 'AGENT', tenantId: 't1' }, deps,
+  });
+  assert.equal(result.completed, true);
+  // SALE first, then AUTH-via-token (no second swipe)
+  assert.deepEqual(calls, ['SALE', 'AUTH_TOKEN']);
+  // SALE tx is parent of the AUTH tx
+  const saleTx = deps.prisma._state.transactions.find((t) => t.type === 'SALE');
+  const authTx = deps.prisma._state.transactions.find((t) => t.type === 'AUTH');
+  assert.ok(saleTx);
+  assert.ok(authTx);
+  assert.equal(authTx.parentTransactionId, saleTx.id);
+  // Reservation stamped with rental fee collection
+  const r = deps.prisma._state.reservations[0];
+  assert.ok(r.rentalFeeCollectedAt instanceof Date);
+  assert.equal(r.rentalFeeCollectedCents, 22500); // $225 charges total
+});
+
+test('R22 — SALE decline blocks AUTH (no charges placed)', async () => {
+  const deps = baseDeps();
+  let authCalled = false;
+  deps.spin.autoRentalSale = async () => ({
+    GeneralResponse: { ResultCode: 0, StatusCode: '0010', Message: 'CARD DECLINED' },
+  });
+  deps.spin.authWithToken = async () => { authCalled = true; return { GeneralResponse: { ResultCode: 0, StatusCode: '0000' } }; };
+  deps.spin.autoRentalAuth = async () => { authCalled = true; return { GeneralResponse: { ResultCode: 0, StatusCode: '0000' } }; };
+  await assert.rejects(
+    () => runCounterCheckinFlow({
+      reservationId: 'r1', terminalId: 'term1',
+      user: { sub: 'u', role: 'AGENT', tenantId: 't1' }, deps,
+    }),
+    (err) => err.code === 'SALE_DECLINED',
+  );
+  assert.equal(authCalled, false);
+});
+
+test('R22 — rentalFee == 0 skips SALE, AUTH falls back to autoRentalAuth (card-present)', async () => {
+  const deps = baseDeps();
+  // Zero out charges
+  deps.prisma._state.reservations[0].charges = [];
+  const calls = [];
+  const origSale = deps.spin.autoRentalSale;
+  const origAuth = deps.spin.autoRentalAuth;
+  const origAuthToken = deps.spin.authWithToken;
+  deps.spin.autoRentalSale = async (args) => { calls.push('SALE'); return origSale(args); };
+  deps.spin.autoRentalAuth = async (args) => { calls.push('AUTH_PRESENT'); return origAuth(args); };
+  deps.spin.authWithToken = async (args) => { calls.push('AUTH_TOKEN'); return origAuthToken(args); };
+  const result = await runCounterCheckinFlow({
+    reservationId: 'r1', terminalId: 'term1',
+    user: { sub: 'u', role: 'AGENT', tenantId: 't1' }, deps,
+  });
+  assert.equal(result.completed, true);
+  // No SALE, AUTH uses card-present autoRentalAuth (no token to do CNP)
+  assert.deepEqual(calls, ['AUTH_PRESENT']);
+  // No rental fee stamp on the reservation
+  const r = deps.prisma._state.reservations[0];
+  assert.equal(r.rentalFeeCollectedAt, undefined);
 });

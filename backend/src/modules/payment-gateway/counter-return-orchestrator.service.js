@@ -1,31 +1,42 @@
 /**
  * Counter RETURN orchestrator — Interactive T&C + Dejavoo P1 (2026-05-21).
  *
- * Runs when the customer returns the vehicle and the agent collects the
- * final settlement on the Dejavoo terminal. Three cases:
+ * ROUND 22 — extras-vs-deposit semantics.
  *
- *   CASE A — final <= pre-auth amount AND > 0  (the common case)
- *     → autoRentalCapture for `final`
- *     → Dejavoo automatically voids the remainder of the hold
+ * Background: at pickup we now charge the RENTAL FEE up front via SALE (single
+ * swipe → IPosToken saved on Customer), and place a separate AUTH hold for the
+ * security deposit using the token (CNP). At return, the agent collects ONLY
+ * the EXTRAS owed on top of the original rental fee — late hours, damage,
+ * fuel, tolls, etc.
  *
- *   CASE B — final > pre-auth amount  (extras: late, damage, fuel, tolls)
- *     → autoRentalCapture for full pre-auth amount
- *     → autoRentalSale for (final - pre-auth) on the same card if possible,
- *       or a fresh prompt-card sale if the card-on-file isn't usable.
- *     V1 ships the fresh-prompt branch; "use card on file" comes later.
+ *   extras = finalCharges - rentalFeeCollectedAtPickup
  *
- *   CASE C — final == 0  (nothing owed; prepaid online, no extras)
- *     → void the pre-auth — releases the hold
+ * Three branches:
+ *
+ *   CASE A — extras > 0 AND extras <= depositHold  (the common case)
+ *     → autoRentalCapture(extras) against the AUTH
+ *     → Dejavoo voids the unused portion of the hold automatically.
+ *
+ *   CASE B — extras > depositHold  (excess: huge damage bill, etc.)
+ *     → autoRentalCapture for the FULL hold
+ *     → CNP saleWithToken for (extras - depositHold) using
+ *       Customer.dejavooIposToken (no customer presence required).
+ *       If we somehow don't have a saved token, fall back to a fresh
+ *       card-present sale on the terminal.
+ *
+ *   CASE C — extras == 0  (nothing extra owed; common when there's no damage
+ *                          / late fee / fuel charge)
+ *     → void the AUTH — releases the deposit hold. Rental fee was already
+ *       collected at pickup, so no further capture is needed.
  *
  * Feature flag gate: `dejavooCounter` must resolve ON for the user.
  * `interactiveTC` is NOT required here — return can happen even if the
  * signing flow was completed on a tablet or via legacy single-sig.
  *
- * Receipt signature: every sale/capture call uses CaptureSignature=true,
- * so the customer signs the receipt on the terminal. The signature is
- * persisted to Storage as a separate signing-storage entry under the
- * existing ReservationSigning row (if present) OR as a standalone
- * DejavooTransaction.signatureStoragePath.
+ * Receipt signature: every CAPTURE / SALE call uses CaptureSignature=true,
+ * so the customer signs the receipt on the terminal IF they're present.
+ * For CNP saleWithToken there's no signature (card-not-present). The PNG,
+ * when present, is persisted to Storage as a "receipt" entry.
  *
  * Design doc: doc/interactive-tc-and-dejavoo-unified-2026-05-21.md §5–6
  */
@@ -170,11 +181,18 @@ function computeFinalAmountCents(reservation) {
  * @param {string} args.reservationId
  * @param {string} args.terminalId
  * @param {object} args.user
- * @param {number} [args.finalAmountCents]  — override; else computed from charges
+ * @param {number} [args.finalAmountCents]  — override TOTAL owed (rental + extras);
+ *                                            else computed from selected charges.
+ * @param {number} [args.extrasAmountCents] — override EXTRAS directly (rare; used
+ *                                            mostly by tests / portals where the
+ *                                            UI already knows the delta). When
+ *                                            provided this wins over finalAmountCents.
  * @param {object} [args.deps]
  * @returns {Promise<object>} {
  *   case: 'CAPTURE' | 'CAPTURE_PLUS_SALE' | 'VOID',
+ *   rentalFeeCollectedCents, extrasCents,
  *   capturedAmountCents, additionalSaleCents,
+ *   additionalSaleMode?: 'CARD_ON_FILE' | 'CARD_PRESENT',
  *   captureReferenceId, saleReferenceId?, voidReferenceId?,
  *   receiptSignaturePath?,
  *   completed: true
@@ -185,6 +203,7 @@ export async function runCounterReturnFlow({
   terminalId,
   user,
   finalAmountCents: explicitFinal,
+  extrasAmountCents: explicitExtras,
   deps = {},
 } = {}) {
   if (!reservationId) {
@@ -279,13 +298,28 @@ export async function runCounterReturnFlow({
   }
   const authAmountCents = priorAuth.amountCents || 0;
 
-  // ---- 4. Resolve final amount ------------------------------------------
+  // ---- 4. Resolve final amount + EXTRAS (round 22) ----------------------
+  // The amount we owe-or-refund AT RETURN is `extras` = final - alreadyPaid.
+  // The base rental fee was charged at pickup (`rentalFeeCollectedCents`),
+  // so extras represents add-ons accumulated during the rental: damage,
+  // late hours, fuel, tolls, cleaning, etc.
   const finalCents = typeof explicitFinal === 'number'
     ? Math.max(0, Math.round(explicitFinal))
     : computeFinalAmountCents(reservation);
+  const rentalFeeCollectedCents = Math.max(
+    0,
+    Number(reservation.rentalFeeCollectedCents) || 0
+  );
+  const extrasCents = typeof explicitExtras === 'number'
+    ? Math.max(0, Math.round(explicitExtras))
+    : Math.max(0, finalCents - rentalFeeCollectedCents);
 
   logger.info?.('[counter-return] resolved amounts', {
-    reservationId, authAmountCents, finalCents,
+    reservationId,
+    authAmountCents,
+    finalCents,
+    rentalFeeCollectedCents,
+    extrasCents,
   });
 
   // ---- 5. Resolve tenantConfig (decrypted authKey) -----------------------
@@ -295,7 +329,7 @@ export async function runCounterReturnFlow({
   const { Cart, Level3 } = buildLevel3FromReservation(
     reservation, reservation.rentalAgreement || {}, reservation.charges || []
   );
-  if (Cart.Items.length > 0) {
+  if (Cart.Items.length > 0 && extrasCents > 0) {
     const cartRef = makeRefId('CART', reservation.id);
     const cartTx = await recordPendingTx(prisma, {
       tenantId: tenant.id,
@@ -304,9 +338,14 @@ export async function runCounterReturnFlow({
       signingId: reservation.signing?.id || null,
       type: 'CART',
       referenceId: cartRef,
-      amountCents: finalCents,
-      customLabel: 'Return summary',
-      requestJson: { items: Cart.Items.length, total: Cart.Total },
+      amountCents: extrasCents,
+      customLabel: 'Return summary (extras)',
+      requestJson: {
+        items: Cart.Items.length,
+        total: Cart.Total,
+        rentalFeePaidAtPickup: rentalFeeCollectedCents,
+        extrasCents,
+      },
     });
     try {
       const raw = await spin.cart(
@@ -321,31 +360,36 @@ export async function runCounterReturnFlow({
     }
   }
 
-  // ---- 7. Branch on the 3 cases ------------------------------------------
-  if (finalCents === 0) {
+  // ---- 7. Branch on the 3 cases — driven by EXTRAS, not finalCents ------
+  if (extrasCents === 0) {
     return _caseVoid({
       prisma, spin, tenantConfig, tenant, terminal, reservation, priorAuth, logger,
+      rentalFeeCollectedCents, extrasCents, finalCents,
     });
   }
-  if (finalCents <= authAmountCents) {
+  if (extrasCents <= authAmountCents) {
     return _caseCapture({
       prisma, spin, storage, tenantConfig, tenant, terminal, reservation,
-      priorAuth, finalCents, Level3, logger,
+      priorAuth, extrasCents, Level3, logger,
+      rentalFeeCollectedCents, finalCents,
     });
   }
   return _caseCaptureAndSale({
     prisma, spin, storage, tenantConfig, tenant, terminal, reservation,
-    priorAuth, authAmountCents, finalCents, Level3, logger,
+    priorAuth, authAmountCents, extrasCents, Level3, logger,
+    rentalFeeCollectedCents, finalCents,
   });
 }
 
 // ---------------------------------------------------------------------------
-// CASE A — final <= pre-auth amount AND > 0
+// CASE A — extras > 0 AND extras <= depositHold
+// Capture the `extras` from the deposit hold; Dejavoo voids the remainder.
 // ---------------------------------------------------------------------------
 
 async function _caseCapture({
   prisma, spin, storage, tenantConfig, tenant, terminal, reservation,
-  priorAuth, finalCents, Level3, logger,
+  priorAuth, extrasCents, Level3, logger,
+  rentalFeeCollectedCents, finalCents,
 }) {
   const ref = makeRefId('CAP', reservation.id);
   const tx = await recordPendingTx(prisma, {
@@ -355,11 +399,16 @@ async function _caseCapture({
     signingId: reservation.signing?.id || null,
     type: 'CAPTURE',
     referenceId: ref,
-    amountCents: finalCents,
+    amountCents: extrasCents,
     invoiceNumber: reservation.id,
-    customLabel: 'Capture at return',
+    customLabel: 'Capture extras at return',
     parentTransactionId: priorAuth.id,
-    requestJson: { authReferenceId: priorAuth.referenceId, finalCents },
+    requestJson: {
+      authReferenceId: priorAuth.referenceId,
+      extrasCents,
+      rentalFeeCollectedCents,
+      finalCents,
+    },
   });
   let normalized;
   let raw;
@@ -367,7 +416,7 @@ async function _caseCapture({
     raw = await spin.autoRentalCapture(
       {
         referenceId: priorAuth.referenceId,
-        amount: finalCents / 100,
+        amount: extrasCents / 100,
         rentalData: Level3.RentalData,
       },
       tenantConfig
@@ -401,11 +450,15 @@ async function _caseCapture({
     data: { lastSeenAt: new Date() },
   });
   logger.info?.('[counter-return] CAPTURE done', {
-    reservationId: reservation.id, capturedCents: finalCents,
+    reservationId: reservation.id,
+    capturedCents: extrasCents,
+    rentalFeeCollectedCents,
   });
   return {
     case: 'CAPTURE',
-    capturedAmountCents: finalCents,
+    rentalFeeCollectedCents,
+    extrasCents,
+    capturedAmountCents: extrasCents,
     additionalSaleCents: 0,
     captureReferenceId: ref,
     receiptSignaturePath: sigPath || null,
@@ -414,14 +467,18 @@ async function _caseCapture({
 }
 
 // ---------------------------------------------------------------------------
-// CASE B — final > pre-auth amount (capture full hold + sale for the difference)
+// CASE B — extras > depositHold
+// Capture the FULL hold, then charge the overage. Prefer CNP saleWithToken
+// using Customer.dejavooIposToken; fall back to card-present sale if we
+// don't have a saved token.
 // ---------------------------------------------------------------------------
 
 async function _caseCaptureAndSale({
   prisma, spin, storage, tenantConfig, tenant, terminal, reservation,
-  priorAuth, authAmountCents, finalCents, Level3, logger,
+  priorAuth, authAmountCents, extrasCents, Level3, logger,
+  rentalFeeCollectedCents, finalCents,
 }) {
-  // Step 1: capture full pre-auth (no signature on this — sig comes on the sale)
+  // Step 1: capture full pre-auth (Dejavoo collects this from the hold)
   const capRef = makeRefId('CAP', reservation.id);
   const capTx = await recordPendingTx(prisma, {
     tenantId: tenant.id,
@@ -432,9 +489,15 @@ async function _caseCaptureAndSale({
     referenceId: capRef,
     amountCents: authAmountCents,
     invoiceNumber: reservation.id,
-    customLabel: 'Capture pre-auth (full)',
+    customLabel: 'Capture pre-auth (full) — extras exceed hold',
     parentTransactionId: priorAuth.id,
-    requestJson: { authReferenceId: priorAuth.referenceId, capturedCents: authAmountCents },
+    requestJson: {
+      authReferenceId: priorAuth.referenceId,
+      capturedCents: authAmountCents,
+      extrasCents,
+      rentalFeeCollectedCents,
+      finalCents,
+    },
   });
   let capNorm;
   let capRaw;
@@ -462,9 +525,12 @@ async function _caseCaptureAndSale({
   }
   await recordTxResult(prisma, capTx.id, capNorm, capRaw);
 
-  // Step 2: sale for the difference (this is the one that captures sig)
-  const diffCents = finalCents - authAmountCents;
-  const saleRef = makeRefId('SALE', reservation.id);
+  // Step 2: charge the overage. Prefer CNP via saved token; fall back to
+  // card-present sale on the terminal if the customer has no saved token.
+  const diffCents = extrasCents - authAmountCents;
+  const cardOnFileToken = reservation.customer?.dejavooIposToken || null;
+  const saleMode = cardOnFileToken ? 'CARD_ON_FILE' : 'CARD_PRESENT';
+  const saleRef = makeRefId(saleMode === 'CARD_ON_FILE' ? 'CNPS' : 'SALE', reservation.id);
   const saleTx = await recordPendingTx(prisma, {
     tenantId: tenant.id,
     terminalId: terminal.id,
@@ -474,23 +540,43 @@ async function _caseCaptureAndSale({
     referenceId: saleRef,
     amountCents: diffCents,
     invoiceNumber: reservation.id,
-    customLabel: 'Sale for additional (over pre-auth)',
+    customLabel:
+      saleMode === 'CARD_ON_FILE'
+        ? 'Sale for overage (card-on-file CNP)'
+        : 'Sale for overage (card-present, no token on file)',
     parentTransactionId: capTx.id,
-    requestJson: { diffCents },
+    requestJson: {
+      diffCents,
+      saleMode,
+      cardOnFileLast4: reservation.customer?.dejavooCardLast4 || null,
+    },
   });
   let saleNorm;
   let saleRaw;
   try {
-    saleRaw = await spin.autoRentalSale(
-      {
-        amount: diffCents / 100,
-        referenceId: saleRef,
-        invoiceNumber: reservation.id,
-        rentalData: Level3.RentalData,
-        level3: { RentalData: Level3.RentalData },
-      },
-      tenantConfig
-    );
+    if (saleMode === 'CARD_ON_FILE') {
+      saleRaw = await spin.saleWithToken(
+        {
+          amount: diffCents / 100,
+          referenceId: saleRef,
+          iposToken: cardOnFileToken,
+          invoiceNumber: reservation.id,
+          rentalData: Level3.RentalData,
+        },
+        tenantConfig
+      );
+    } else {
+      saleRaw = await spin.autoRentalSale(
+        {
+          amount: diffCents / 100,
+          referenceId: saleRef,
+          invoiceNumber: reservation.id,
+          rentalData: Level3.RentalData,
+          level3: { RentalData: Level3.RentalData },
+        },
+        tenantConfig
+      );
+    }
     saleNorm = spin.normalizeResponse(saleRaw);
   } catch (err) {
     await recordTxError(prisma, saleTx.id, err);
@@ -499,12 +585,18 @@ async function _caseCaptureAndSale({
   if (!saleNorm.approved) {
     await recordTxResult(prisma, saleTx.id, saleNorm, saleRaw);
     throw new CounterOrchestratorError(
-      `Additional sale failed: ${saleNorm.message || saleNorm.detailedMessage}. Pre-auth capture already settled; manual refund may be needed.`,
+      `Overage sale failed (${saleMode}): ${saleNorm.message || saleNorm.detailedMessage}. ` +
+      `Pre-auth capture of $${(authAmountCents / 100).toFixed(2)} already settled; ` +
+      `agent must collect the $${(diffCents / 100).toFixed(2)} overage by another means ` +
+      `or issue a manual refund.`,
       402,
       'SALE_FAILED'
     );
   }
-  const sigPath = await _persistReceiptSig({ raw: saleRaw, prisma, storage, tenant, reservation, txId: saleTx.id });
+  // CNP token sales don't capture a signature on the terminal; card-present do.
+  const sigPath = saleMode === 'CARD_PRESENT'
+    ? await _persistReceiptSig({ raw: saleRaw, prisma, storage, tenant, reservation, txId: saleTx.id })
+    : null;
   await recordTxResult(prisma, saleTx.id, saleNorm, saleRaw);
   if (sigPath) {
     await prisma.dejavooTransaction.update({
@@ -512,8 +604,13 @@ async function _caseCaptureAndSale({
       data: { signatureStoragePath: sigPath },
     });
   }
-  // Promote token to Customer card-on-file (round 20)
-  await _promoteCardOnFile({ prisma, normalized: saleNorm, reservation, logger });
+  // If we just did a CARD_PRESENT sale, the customer's physical card was
+  // dipped — promote that token (it may be a different card than the one
+  // used at pickup). For CARD_ON_FILE we already have the token, no need
+  // to re-save.
+  if (saleMode === 'CARD_PRESENT') {
+    await _promoteCardOnFile({ prisma, normalized: saleNorm, reservation, logger });
+  }
   await prisma.dejavooTerminal.update({
     where: { id: terminal.id },
     data: { lastSeenAt: new Date() },
@@ -522,11 +619,16 @@ async function _caseCaptureAndSale({
     reservationId: reservation.id,
     capturedCents: authAmountCents,
     additionalCents: diffCents,
+    saleMode,
+    rentalFeeCollectedCents,
   });
   return {
     case: 'CAPTURE_PLUS_SALE',
+    rentalFeeCollectedCents,
+    extrasCents,
     capturedAmountCents: authAmountCents,
     additionalSaleCents: diffCents,
+    additionalSaleMode: saleMode,
     captureReferenceId: capRef,
     saleReferenceId: saleRef,
     receiptSignaturePath: sigPath || null,
@@ -535,11 +637,12 @@ async function _caseCaptureAndSale({
 }
 
 // ---------------------------------------------------------------------------
-// CASE C — final == 0  (void pre-auth)
+// CASE C — extras == 0  (nothing extra owed — void the deposit hold)
 // ---------------------------------------------------------------------------
 
 async function _caseVoid({
   prisma, spin, tenantConfig, tenant, terminal, reservation, priorAuth, logger,
+  rentalFeeCollectedCents, extrasCents, finalCents,
 }) {
   const ref = makeRefId('VOID', reservation.id);
   const tx = await recordPendingTx(prisma, {
@@ -578,10 +681,14 @@ async function _caseVoid({
     data: { lastSeenAt: new Date() },
   });
   logger.info?.('[counter-return] VOID done', {
-    reservationId: reservation.id, authReferenceId: priorAuth.referenceId,
+    reservationId: reservation.id,
+    authReferenceId: priorAuth.referenceId,
+    rentalFeeCollectedCents,
   });
   return {
     case: 'VOID',
+    rentalFeeCollectedCents,
+    extrasCents: extrasCents ?? 0,
     capturedAmountCents: 0,
     additionalSaleCents: 0,
     voidReferenceId: ref,

@@ -308,21 +308,46 @@ signingStatusRouter.get('/:id/signing', async (req, res) => {
 
     // Round 21 — when complete, return AUTH transaction details for the
     // agent's card confirmation UI: cardBrand, entryType, authCode, amount.
+    // Round 22 — ALSO return the pickup SALE (rental fee charged at counter)
+    // so the COMPLETED panel can show both the payment receipt + the deposit hold.
     let authInfo = null;
+    let saleInfo = null;
     if (status === 'COMPLETED') {
-      const authTx = await prisma.dejavooTransaction.findFirst({
-        where: { reservationId, type: 'AUTH', approved: true },
-        orderBy: { startedAt: 'desc' },
-        select: {
-          referenceId: true,
-          amountCents: true,
-          authCode: true,
-          cardLast4: true,
-          cardBrand: true,
-          cardEntryType: true,
-          completedAt: true,
-        },
-      });
+      const [authTx, saleTx] = await Promise.all([
+        prisma.dejavooTransaction.findFirst({
+          where: { reservationId, type: 'AUTH', approved: true },
+          orderBy: { startedAt: 'desc' },
+          select: {
+            referenceId: true,
+            amountCents: true,
+            authCode: true,
+            cardLast4: true,
+            cardBrand: true,
+            cardEntryType: true,
+            completedAt: true,
+          },
+        }),
+        prisma.dejavooTransaction.findFirst({
+          where: {
+            reservationId,
+            type: 'SALE',
+            approved: true,
+            // Only the pickup SALE — exclude any return overage SALEs (those
+            // have a parentTransactionId set to the return CAPTURE).
+            parentTransactionId: null,
+          },
+          orderBy: { startedAt: 'asc' },
+          select: {
+            referenceId: true,
+            amountCents: true,
+            authCode: true,
+            cardLast4: true,
+            cardBrand: true,
+            cardEntryType: true,
+            completedAt: true,
+          },
+        }),
+      ]);
       if (authTx) {
         authInfo = {
           referenceId: authTx.referenceId,
@@ -332,6 +357,17 @@ signingStatusRouter.get('/:id/signing', async (req, res) => {
           cardBrand: authTx.cardBrand,
           cardEntryType: authTx.cardEntryType,
           completedAt: authTx.completedAt,
+        };
+      }
+      if (saleTx) {
+        saleInfo = {
+          referenceId: saleTx.referenceId,
+          amountCents: saleTx.amountCents,
+          authCode: saleTx.authCode,
+          cardLast4: saleTx.cardLast4,
+          cardBrand: saleTx.cardBrand,
+          cardEntryType: saleTx.cardEntryType,
+          completedAt: saleTx.completedAt,
         };
       }
     }
@@ -356,6 +392,7 @@ signingStatusRouter.get('/:id/signing', async (req, res) => {
         ? { id: signing.template.id, name: signing.template.name, version: signing.template.version }
         : null,
       auth: authInfo, // round 21 — { referenceId, amountCents, authCode, cardLast4, cardBrand, cardEntryType, completedAt }
+      sale: saleInfo, // round 22 — pickup SALE (rental fee). Same shape as auth.
     });
   } catch (err) {
     sendError(res, err);
@@ -486,6 +523,8 @@ counterRouter.post('/start-return', requireRole('ADMIN', 'OPS', 'AGENT'), async 
       },
       finalAmountCents:
         typeof body.finalAmountCents === 'number' ? body.finalAmountCents : undefined,
+      extrasAmountCents:
+        typeof body.extrasAmountCents === 'number' ? body.extrasAmountCents : undefined,
       ipAddress: req.ip || null,
       userAgent: req.headers['user-agent'] || null,
     });
@@ -728,6 +767,8 @@ counterRouter.get('/preflight', requireRole('ADMIN', 'OPS', 'AGENT'), async (req
       select: {
         id: true,
         estimatedTotal: true,
+        rentalFeeCollectedAt: true,
+        rentalFeeCollectedCents: true,
         customer: {
           select: {
             id: true,
@@ -739,9 +780,21 @@ counterRouter.get('/preflight', requireRole('ADMIN', 'OPS', 'AGENT'), async (req
             dejavooCardCapturedAt: true,
           },
         },
+        charges: {
+          where: { selected: true },
+          select: { total: true, label: true },
+        },
       },
     });
     if (!reservation) return res.status(404).json({ error: 'Reservation not found' });
+
+    // Rental fee = sum of selected ReservationCharge.total for the reservation
+    // (this is what we'll charge via SALE at pickup BEFORE the deposit AUTH).
+    const rentalFeeDollars = (reservation.charges || []).reduce((acc, c) => {
+      const n = Number(c.total);
+      return acc + (Number.isFinite(n) ? n : 0);
+    }, 0);
+    const rentalFeeAmountCents = Math.round(rentalFeeDollars * 100);
 
     const tenant = await prisma.tenant.findUnique({
       where: { id: req.user.tenantId },
@@ -778,6 +831,14 @@ counterRouter.get('/preflight', requireRole('ADMIN', 'OPS', 'AGENT'), async (req
     res.json({
       tenantId: req.user.tenantId,
       reservationId: reservation.id,
+      // Round 22: SALE-then-AUTH split.
+      // - rentalFeeAmountCents is charged at pickup via SALE (single swipe → token saved).
+      // - defaultPreAuthAmountCents is the security deposit hold placed via AUTH using
+      //   the saved IPosToken (card-not-present, no second swipe). Agent can override
+      //   the deposit (with manager approval / reason); rental fee is NOT overridable.
+      rentalFeeAmountCents,
+      rentalFeeAlreadyCollected: !!reservation.rentalFeeCollectedAt,
+      rentalFeeAlreadyCollectedCents: reservation.rentalFeeCollectedCents || 0,
       defaultPreAuthAmountCents: defaultPreAuthCents,
       defaultSource: settings?.dejavoo?.preAuthAmountCents ? 'tenant_settings' : 'computed_25pct',
       terminalAvailable: !!terminal,

@@ -187,20 +187,25 @@ export function CounterSigningProgress({
 
   if (phase === 'COMPLETED') {
     const auth = signing?.auth || null;
-    const cardLast4 = auth?.cardLast4 || signing?.customerCardLast4;
-    const cardBrand = auth?.cardBrand || '';
-    const entry = auth?.cardEntryType || '';
+    const sale = signing?.sale || null;
+    const cardLast4 = auth?.cardLast4 || sale?.cardLast4 || signing?.customerCardLast4;
+    const cardBrand = auth?.cardBrand || sale?.cardBrand || '';
+    const entry = auth?.cardEntryType || sale?.cardEntryType || '';
     const holdDollars = auth?.amountCents != null
       ? (auth.amountCents / 100).toFixed(2)
+      : null;
+    const saleDollars = sale?.amountCents != null
+      ? (sale.amountCents / 100).toFixed(2)
       : null;
     return (
       <div style={panel}>
         <div style={{ fontSize: 56 }}>✅</div>
-        <h2 style={{ marginTop: 12 }}>Signed & pre-authorized</h2>
+        <h2 style={{ marginTop: 12 }}>Signed, paid & pre-authorized</h2>
         <p style={muted}>
           {signing?.signedCount}/{signing?.totalRequired} fields signed.
         </p>
-        {auth && (
+        {/* Round 22: SALE result panel — shown when the rental fee was charged */}
+        {sale && saleDollars != null && (
           <div
             style={{
               marginTop: 20,
@@ -213,21 +218,51 @@ export function CounterSigningProgress({
             }}
           >
             <div style={{ fontSize: '0.85em', color: '#065f46', fontWeight: 600, marginBottom: 8 }}>
-              CARD ON FILE — PRE-AUTH APPROVED
+              RENTAL FEE — PAID
             </div>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+              <KV label="Charged">
+                <strong>${saleDollars}</strong>
+              </KV>
+              <KV label="Auth code">{sale.authCode || '—'}</KV>
               <KV label="Card">
                 {cardBrand ? `${cardBrand} ` : ''}
                 ending in <strong>{cardLast4 || '—'}</strong>
               </KV>
               <KV label="Entry">{entry || '—'}</KV>
+            </div>
+          </div>
+        )}
+        {auth && (
+          <div
+            style={{
+              marginTop: 12,
+              padding: 16,
+              background: '#eff6ff',
+              border: '1px solid #bfdbfe',
+              borderRadius: 10,
+              maxWidth: 480,
+              textAlign: 'left',
+            }}
+          >
+            <div style={{ fontSize: '0.85em', color: '#1e3a8a', fontWeight: 600, marginBottom: 8 }}>
+              SECURITY DEPOSIT — HOLD APPROVED (card-on-file CNP)
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
               <KV label="Hold">
                 {holdDollars != null ? <strong>${holdDollars}</strong> : '—'}
               </KV>
               <KV label="Auth code">{auth.authCode || '—'}</KV>
+              <KV label="Card">
+                {cardBrand ? `${cardBrand} ` : ''}
+                ending in <strong>{cardLast4 || '—'}</strong>
+              </KV>
+              <KV label="Entry">{entry || '—'}</KV>
             </div>
-            <div style={{ fontSize: '0.8em', color: '#065f46', marginTop: 10 }}>
-              Hold will be captured / voided / topped-up at vehicle return.
+            <div style={{ fontSize: '0.8em', color: '#1e3a8a', marginTop: 10 }}>
+              At vehicle return: extras (damage / late / fuel / tolls) are captured from
+              this hold. Any unused portion is voided automatically. Overages beyond the
+              hold are charged to the saved card with no customer presence required.
             </div>
           </div>
         )}

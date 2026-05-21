@@ -608,11 +608,22 @@ export async function runCounterCheckinFlow({
     }
   }
 
-  // ---- 7. AUTH for pre-auth security deposit -----------------------------
-  // The agent may override the tenant's configured default if a manager
-  // authorized it. We persist both the default + override + reason to
-  // both the DejavooTransaction.requestJson AND a TenantAuditLog row so
-  // there's a full audit trail.
+  // ---- 7a. Compute the rental fee amount + the security deposit amount ---
+  // Round 22 — IRC flow: at pickup we charge the RENTAL FEE first (single
+  // swipe), then place an AUTH hold for the security deposit using the
+  // saved IPosToken (no second swipe).
+  //
+  // Rental fee = sum of selected ReservationCharge.total for the reservation.
+  // Security deposit = tenant.settings.dejavoo.preAuthAmountCents (override
+  // allowed via preAuthOverrideCents).
+  const rentalFeeDollars = (reservation.charges || [])
+    .filter((c) => c.selected !== false)
+    .reduce((acc, c) => {
+      const n = Number(c.total);
+      return acc + (Number.isFinite(n) ? n : 0);
+    }, 0);
+  const rentalFeeCents = Math.round(rentalFeeDollars * 100);
+
   const defaultCents = resolvePreAuthAmountCents(tenant, reservation);
   const overrideRequested =
     typeof preAuthOverrideCents === 'number' &&
@@ -652,7 +663,80 @@ export async function runCounterCheckinFlow({
   const { Cart, Level3 } = buildLevel3FromReservation(
     reservation, reservation.rentalAgreement || {}, reservation.charges || []
   );
+
+  // ---- 7b. SALE for the rental fee (single swipe — token saved) ----------
+  // Skip the SALE step entirely if rentalFee is 0 (e.g. prepaid online,
+  // complimentary rental). In that case we go directly to the AUTH with
+  // a card-present prompt (no token yet, so we can't do CNP).
+  let saleNorm = null;
+  let saleTx = null;
+  let cardOnFileToken = null;
+
+  if (rentalFeeCents > 0) {
+    const saleRef = makeRefId('SALE', reservation.id);
+    saleTx = await recordPendingTx(prisma, {
+      tenantId: tenant.id,
+      terminalId: terminal.id,
+      reservationId: reservation.id,
+      signingId: signing.id,
+      type: 'SALE',
+      referenceId: saleRef,
+      amountCents: rentalFeeCents,
+      invoiceNumber: reservation.id,
+      customLabel: 'Rental fee at pickup',
+      requestJson: {
+        amount: rentalFeeDollars,
+        rentalData: Level3.RentalData,
+        cartItems: Cart.Items.length,
+        kind: 'pickup_rental_fee',
+      },
+    });
+    try {
+      const raw = await spin.autoRentalSale(
+        {
+          amount: rentalFeeDollars,
+          referenceId: saleRef,
+          invoiceNumber: reservation.id,
+          rentalData: Level3.RentalData,
+          cart: Cart,
+          level3: { RentalData: Level3.RentalData },
+        },
+        tenantConfig
+      );
+      saleNorm = spin.normalizeResponse(raw);
+      await recordTxResult(prisma, saleTx.id, saleNorm, raw);
+    } catch (err) {
+      await recordTxError(prisma, saleTx.id, err);
+      throw err;
+    }
+    if (!saleNorm.approved) {
+      throw new CounterOrchestratorError(
+        `Rental fee charge failed: ${saleNorm.message || saleNorm.detailedMessage}. ` +
+        `Customer's card was declined — no security deposit hold attempted.`,
+        402,
+        'SALE_DECLINED'
+      );
+    }
+    cardOnFileToken = saleNorm.iposToken || null;
+
+    // Stamp the reservation that we collected the rental fee
+    await prisma.reservation.update({
+      where: { id: reservation.id },
+      data: {
+        rentalFeeCollectedAt: new Date(),
+        rentalFeeCollectedCents: rentalFeeCents,
+      },
+    });
+    logger.info?.('[counter-orchestrator] rental fee charged at pickup', {
+      reservationId, rentalFeeCents, last4: saleNorm.cardData?.last4,
+    });
+  } else {
+    logger.info?.('[counter-orchestrator] skipping SALE — rentalFee == 0', { reservationId });
+  }
+
+  // ---- 7c. AUTH for security deposit (CNP if we have a token from SALE) --
   const authRef = makeRefId('AUTH', reservation.id);
+  const useCardOnFileForAuth = !!cardOnFileToken;
   const authTx = await recordPendingTx(prisma, {
     tenantId: tenant.id,
     terminalId: terminal.id,
@@ -663,28 +747,41 @@ export async function runCounterCheckinFlow({
     amountCents: preAuthCents,
     invoiceNumber: reservation.id,
     customLabel: overrideRequested
-      ? `Pre-auth at pickup (override: \$${(preAuthCents / 100).toFixed(2)}, default was \$${(defaultCents / 100).toFixed(2)})`
-      : 'Pre-auth at pickup',
+      ? `Security deposit (override: \$${(preAuthCents / 100).toFixed(2)}, default was \$${(defaultCents / 100).toFixed(2)})`
+      : 'Security deposit hold',
+    parentTransactionId: saleTx?.id || null,
     requestJson: {
       amount: preAuthAmount,
       defaultCents,
       overrideCents: overrideRequested ? preAuthCents : null,
       overrideReason: overrideRequested ? (preAuthOverrideReason || null) : null,
       rentalData: Level3.RentalData,
-      cartItems: Cart.Items.length,
+      cardNotPresent: useCardOnFileForAuth,
+      saleReferenceId: saleTx?.referenceId || null,
     },
   });
   let authNorm = null;
   try {
-    const raw = await spin.autoRentalAuth(
-      {
-        amount: preAuthAmount,
-        referenceId: authRef,
-        invoiceNumber: reservation.id,
-        rentalData: Level3.RentalData,
-      },
-      tenantConfig
-    );
+    const raw = useCardOnFileForAuth
+      ? await spin.authWithToken(
+          {
+            amount: preAuthAmount,
+            referenceId: authRef,
+            iposToken: cardOnFileToken,
+            invoiceNumber: reservation.id,
+            rentalData: Level3.RentalData,
+          },
+          tenantConfig
+        )
+      : await spin.autoRentalAuth(
+          {
+            amount: preAuthAmount,
+            referenceId: authRef,
+            invoiceNumber: reservation.id,
+            rentalData: Level3.RentalData,
+          },
+          tenantConfig
+        );
     authNorm = spin.normalizeResponse(raw);
     await recordTxResult(prisma, authTx.id, authNorm, raw);
   } catch (err) {
@@ -693,7 +790,10 @@ export async function runCounterCheckinFlow({
   }
   if (!authNorm.approved) {
     throw new CounterOrchestratorError(
-      `Pre-auth failed: ${authNorm.message || authNorm.detailedMessage}`,
+      `Security deposit hold failed: ${authNorm.message || authNorm.detailedMessage}. ` +
+      (useCardOnFileForAuth
+        ? 'Rental fee was already charged; manual intervention may be needed to issue a refund or retry the hold.'
+        : 'No charges placed.'),
       402,
       'AUTH_DECLINED'
     );

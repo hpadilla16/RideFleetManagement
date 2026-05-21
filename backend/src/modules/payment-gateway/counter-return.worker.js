@@ -35,12 +35,15 @@ async function getLogger() {
  * @param {string} args.reservationId
  * @param {string} args.terminalId
  * @param {object} args.userSnapshot
- * @param {number} [args.finalAmountCents]
+ * @param {number} [args.finalAmountCents]   — total bill (rental + extras)
+ * @param {number} [args.extrasAmountCents]  — explicit extras override (round 22)
  * @param {string} [args.ipAddress]
  * @param {string} [args.userAgent]
  */
 export async function enqueueCounterReturn({
-  reservationId, terminalId, userSnapshot, finalAmountCents, ipAddress, userAgent,
+  reservationId, terminalId, userSnapshot,
+  finalAmountCents, extrasAmountCents,
+  ipAddress, userAgent,
 } = {}) {
   if (!reservationId || !terminalId) {
     throw new Error('enqueueCounterReturn: reservationId + terminalId required');
@@ -55,6 +58,7 @@ export async function enqueueCounterReturn({
       terminalId,
       userSnapshot,
       finalAmountCents: typeof finalAmountCents === 'number' ? finalAmountCents : null,
+      extrasAmountCents: typeof extrasAmountCents === 'number' ? extrasAmountCents : null,
       ipAddress: ipAddress || null,
       userAgent: userAgent || null,
     },
@@ -72,7 +76,7 @@ export async function enqueueCounterReturn({
  * Worker handler.
  */
 export async function counterReturnHandler(job, deps = {}) {
-  const { reservationId, terminalId, userSnapshot, finalAmountCents } = job?.data || {};
+  const { reservationId, terminalId, userSnapshot, finalAmountCents, extrasAmountCents } = job?.data || {};
   if (!reservationId || !terminalId) {
     throw new Error('counterReturnHandler: missing reservationId/terminalId');
   }
@@ -89,10 +93,15 @@ export async function counterReturnHandler(job, deps = {}) {
       terminalId,
       user: userSnapshot,
       finalAmountCents: finalAmountCents ?? undefined,
+      extrasAmountCents: extrasAmountCents ?? undefined,
     });
     logger.info?.('[counter-return] completed', {
       reservationId, terminalId, durationMs: Date.now() - t0,
-      case: result.case, capturedCents: result.capturedAmountCents, additionalCents: result.additionalSaleCents,
+      case: result.case,
+      extrasCents: result.extrasCents,
+      capturedCents: result.capturedAmountCents,
+      additionalCents: result.additionalSaleCents,
+      saleMode: result.additionalSaleMode || null,
     });
     return result;
   } catch (err) {

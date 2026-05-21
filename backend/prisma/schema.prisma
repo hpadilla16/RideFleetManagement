@@ -872,6 +872,12 @@ model Reservation {
   dejavooTransactions DejavooTransaction[]
   signingCompletedAt  DateTime?
 
+  // Round 22 — rental fee collected at PICKUP (SALE on terminal, before AUTH deposit)
+  // null = rental fee not yet collected at counter (either prepaid online or
+  // not yet through pickup). Set by counter-orchestrator after successful SALE.
+  rentalFeeCollectedAt    DateTime?
+  rentalFeeCollectedCents Int?
+
   @@index([status, pickupAt])
   @@index([workflowMode, status, pickupAt])
   @@index([pickupLocationId, pickupAt])

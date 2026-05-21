@@ -414,3 +414,212 @@ test('resolveTenantConfigForTerminal throws when no key anywhere', async () => {
     (err) => err.code === 'AUTHKEY_MISSING'
   );
 });
+
+// ---------------------------------------------------------------------------
+// Round 22 — extras-vs-deposit semantics
+// ---------------------------------------------------------------------------
+//
+// At return, the orchestrator now reasons about EXTRAS = final - rentalFeePaid,
+// not about the raw final. The base rental fee was already charged at pickup
+// via SALE (single swipe → IPosToken saved on Customer). The deposit hold
+// (AUTH against that token) is what we capture / void / overage-charge.
+
+function baseDepsR22({
+  flagOn = true, authCents = 25000, charges, rentalFeeCollectedCents = null,
+  customerToken = null,
+} = {}) {
+  const tenants = [{ id: 't1', settingsJson: {} }];
+  const reservations = [
+    {
+      id: 'r1',
+      tenantId: 't1',
+      pickupLocation: { code: 'SJU' },
+      returnLocation: { code: 'SJU' },
+      vehicle: { plate: 'ABC123', vehicleType: { code: 'SFAR' } },
+      customer: {
+        id: 'cust1',
+        firstName: 'M',
+        lastName: 'Rivera',
+        dejavooIposToken: customerToken,
+        dejavooCardLast4: customerToken ? '4242' : null,
+        dejavooCardBrand: customerToken ? 'VISA' : null,
+      },
+      charges: charges || [{ name: 'Base', quantity: 3, rate: 75, total: 300, selected: true }],
+      rentalAgreement: { agreementNumber: 'AG-1', dailyRate: 75, totalDays: 3 },
+      signing: { id: 'sgn1' },
+      rentalFeeCollectedAt: rentalFeeCollectedCents ? new Date() : null,
+      rentalFeeCollectedCents,
+    },
+  ];
+  const terminals = [
+    { id: 'term1', tenantId: 't1', tpn: '123', authKeyEnc: 'KEY', merchantNumber: 1, status: 'ACTIVE' },
+  ];
+  const priorAuths = [
+    {
+      id: 'auth1',
+      tenantId: 't1',
+      terminalId: 'term1',
+      reservationId: 'r1',
+      type: 'AUTH',
+      referenceId: 'AUTH-REF-1',
+      amountCents: authCents,
+      approved: true,
+      createdAt: new Date(Date.now() - 60_000),
+    },
+  ];
+  return {
+    prisma: makeFakePrisma({ tenants, reservations, terminals, priorAuths }),
+    spin: makeSpinStub(),
+    storage: makeStorageStub(),
+    getFlagOn: async () => flagOn,
+  };
+}
+
+test('R22 — extras < hold with rental fee already collected → CAPTURE extras only', async () => {
+  // total charges $300, rental fee $200 already collected at pickup → extras = $100
+  // hold = $250 → capture $100, void $150 (auto by gateway).
+  const deps = baseDepsR22({
+    authCents: 25000,
+    charges: [{ name: 'Total', quantity: 1, rate: 300, total: 300, selected: true }],
+    rentalFeeCollectedCents: 20000,
+  });
+  let capturedAmount = null;
+  deps.spin.autoRentalCapture = async ({ amount }) => {
+    capturedAmount = amount;
+    return makeOkResponse({ AuthCode: 'CAP_OK', CardData: { Last4: '4242', CardType: 'VISA' } });
+  };
+  const result = await runCounterReturnFlow({
+    reservationId: 'r1', terminalId: 'term1',
+    user: { sub: 'u', role: 'AGENT', tenantId: 't1' },
+    deps,
+  });
+  assert.equal(result.case, 'CAPTURE');
+  assert.equal(result.rentalFeeCollectedCents, 20000);
+  assert.equal(result.extrasCents, 10000);
+  assert.equal(result.capturedAmountCents, 10000);
+  assert.equal(capturedAmount, 100); // dollars passed to spin
+});
+
+test('R22 — extras == 0 with rental fee fully covering total → VOID hold', async () => {
+  // Most common: customer returns with no damage / late fee / fuel.
+  // Rental fee $200 was paid at pickup, charges total $200 → extras = 0 → VOID.
+  const deps = baseDepsR22({
+    authCents: 25000,
+    charges: [{ name: 'Total', quantity: 1, rate: 200, total: 200, selected: true }],
+    rentalFeeCollectedCents: 20000,
+  });
+  const result = await runCounterReturnFlow({
+    reservationId: 'r1', terminalId: 'term1',
+    user: { sub: 'u', role: 'AGENT', tenantId: 't1' },
+    deps,
+  });
+  assert.equal(result.case, 'VOID');
+  assert.equal(result.rentalFeeCollectedCents, 20000);
+  assert.equal(result.extrasCents, 0);
+  assert.ok(result.voidReferenceId);
+});
+
+test('R22 — extras > hold WITH card-on-file → CAPTURE full + saleWithToken (CNP) for overage', async () => {
+  // total $700, rental fee $200 → extras $500 > hold $250 → capture $250 + CNP sale $250
+  const deps = baseDepsR22({
+    authCents: 25000,
+    charges: [{ name: 'Total', quantity: 1, rate: 700, total: 700, selected: true }],
+    rentalFeeCollectedCents: 20000,
+    customerToken: 'TOKEN_FROM_PICKUP',
+  });
+  let tokenSeen = null;
+  let cnpAmount = null;
+  deps.spin.saleWithToken = async ({ amount, iposToken }) => {
+    tokenSeen = iposToken;
+    cnpAmount = amount;
+    return makeOkResponse({
+      AuthCode: 'CNP_OK',
+      CardData: { Last4: '4242', CardType: 'VISA', EntryType: 'CARD_ON_FILE' },
+    });
+  };
+  const result = await runCounterReturnFlow({
+    reservationId: 'r1', terminalId: 'term1',
+    user: { sub: 'u', role: 'AGENT', tenantId: 't1' },
+    deps,
+  });
+  assert.equal(result.case, 'CAPTURE_PLUS_SALE');
+  assert.equal(result.capturedAmountCents, 25000);
+  assert.equal(result.additionalSaleCents, 25000);
+  assert.equal(result.additionalSaleMode, 'CARD_ON_FILE');
+  assert.equal(tokenSeen, 'TOKEN_FROM_PICKUP');
+  assert.equal(cnpAmount, 250); // dollars
+  // CNP sale doesn't capture a signature, so receiptSignaturePath should be null.
+  assert.equal(result.receiptSignaturePath, null);
+});
+
+test('R22 — extras > hold WITHOUT card-on-file → falls back to CARD_PRESENT sale', async () => {
+  const deps = baseDepsR22({
+    authCents: 25000,
+    charges: [{ name: 'Total', quantity: 1, rate: 600, total: 600, selected: true }],
+    rentalFeeCollectedCents: 20000,
+    customerToken: null,
+  });
+  let cnpCalled = false;
+  let cpCalled = false;
+  deps.spin.saleWithToken = async () => { cnpCalled = true; return makeOkResponse({}); };
+  const origAutoRentalSale = deps.spin.autoRentalSale;
+  deps.spin.autoRentalSale = async (args) => {
+    cpCalled = true;
+    return origAutoRentalSale(args);
+  };
+  const result = await runCounterReturnFlow({
+    reservationId: 'r1', terminalId: 'term1',
+    user: { sub: 'u', role: 'AGENT', tenantId: 't1' },
+    deps,
+  });
+  assert.equal(result.case, 'CAPTURE_PLUS_SALE');
+  assert.equal(result.additionalSaleMode, 'CARD_PRESENT');
+  assert.equal(cnpCalled, false);
+  assert.equal(cpCalled, true);
+});
+
+test('R22 — explicit extrasAmountCents wins over computed extras', async () => {
+  // Computed extras would be $0, but caller passes an explicit override of $80.
+  const deps = baseDepsR22({
+    authCents: 25000,
+    charges: [{ name: 'Total', quantity: 1, rate: 200, total: 200, selected: true }],
+    rentalFeeCollectedCents: 20000,
+  });
+  let capturedAmount = null;
+  deps.spin.autoRentalCapture = async ({ amount }) => {
+    capturedAmount = amount;
+    return makeOkResponse({ AuthCode: 'CAP_OK', CardData: { Last4: '4242', CardType: 'VISA' } });
+  };
+  const result = await runCounterReturnFlow({
+    reservationId: 'r1', terminalId: 'term1',
+    user: { sub: 'u', role: 'AGENT', tenantId: 't1' },
+    extrasAmountCents: 8000,
+    deps,
+  });
+  assert.equal(result.case, 'CAPTURE');
+  assert.equal(result.extrasCents, 8000);
+  assert.equal(result.capturedAmountCents, 8000);
+  assert.equal(capturedAmount, 80);
+});
+
+test('R22 — CNP sale declined → SALE_FAILED with helpful manual-refund hint', async () => {
+  const deps = baseDepsR22({
+    authCents: 25000,
+    charges: [{ name: 'Total', quantity: 1, rate: 700, total: 700, selected: true }],
+    rentalFeeCollectedCents: 20000,
+    customerToken: 'TOKEN_X',
+  });
+  deps.spin.saleWithToken = async () => ({
+    GeneralResponse: { ResultCode: 0, StatusCode: '0010', Message: 'DECLINED', DetailedMessage: 'Insufficient funds' },
+  });
+  await assert.rejects(
+    () => runCounterReturnFlow({
+      reservationId: 'r1', terminalId: 'term1',
+      user: { sub: 'u', role: 'AGENT', tenantId: 't1' }, deps,
+    }),
+    (err) => err instanceof CounterOrchestratorError
+      && err.code === 'SALE_FAILED'
+      && /CARD_ON_FILE/.test(err.message)
+      && /Pre-auth capture/.test(err.message),
+  );
+});

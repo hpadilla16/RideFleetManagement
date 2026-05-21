@@ -144,9 +144,12 @@ export function CheckoutSignatureStep({
     const defaultCents = preflight.defaultPreAuthAmountCents || 0;
     const effectiveCents = overrideAmount != null ? overrideAmount : defaultCents;
     const isOverride = overrideAmount != null && overrideAmount !== defaultCents;
+    // Round 22 — split out: rental fee (charged via SALE) + deposit (held via AUTH).
+    const rentalFeeCents = preflight.rentalFeeAmountCents || 0;
+    const rentalAlreadyPaid = !!preflight.rentalFeeAlreadyCollected;
     return (
       <div style={{ padding: 24, maxWidth: 720, margin: '0 auto' }}>
-        <h3 style={{ marginTop: 0 }}>Counter checkin — security deposit pre-auth</h3>
+        <h3 style={{ marginTop: 0 }}>Counter checkin — payment + security deposit</h3>
 
         {/* Customer card-on-file warning if exists */}
         {preflight.customer?.existingDejavooCard && (
@@ -158,10 +161,25 @@ export function CheckoutSignatureStep({
           </div>
         )}
 
+        {/* Rental fee — charged at pickup via SALE (single swipe) */}
+        <div style={{ background: '#f0fdf4', borderRadius: 10, padding: 16, marginTop: 16, border: '1px solid #bbf7d0' }}>
+          <div style={{ fontSize: '0.85em', color: '#065f46', marginBottom: 6, fontWeight: 600 }}>
+            Step 1 — Rental fee (charged now)
+          </div>
+          <div style={{ fontSize: 28, fontWeight: 700, marginBottom: 4, color: '#065f46' }}>
+            ${(rentalFeeCents / 100).toFixed(2)}
+          </div>
+          <div style={{ fontSize: '0.85em', color: '#065f46' }}>
+            {rentalAlreadyPaid
+              ? `Already collected (${(preflight.rentalFeeAlreadyCollectedCents / 100).toFixed(2)} on file).`
+              : 'Customer will swipe / tap / insert their card on the terminal. The card is saved on file for the deposit hold below and any future post-rental charges (tolls, late return, damage).'}
+          </div>
+        </div>
+
         {/* Pre-auth amount display + edit */}
         <div style={{ background: '#f9fafb', borderRadius: 10, padding: 16, marginTop: 16 }}>
-          <div style={{ fontSize: '0.85em', color: '#6b7280', marginBottom: 6 }}>
-            Security deposit hold
+          <div style={{ fontSize: '0.85em', color: '#6b7280', marginBottom: 6, fontWeight: 600 }}>
+            Step 2 — Security deposit hold (card-on-file, no second swipe)
           </div>
           <div style={{ fontSize: 28, fontWeight: 700, marginBottom: 4 }}>
             ${(effectiveCents / 100).toFixed(2)}
@@ -241,8 +259,10 @@ export function CheckoutSignatureStep({
 
         <p style={{ color: '#6f668f', marginTop: 16 }}>
           When you click "Start", the Dejavoo P1 will display the T&C, prompt the customer to
-          initial each required section + sign, then ask for their card to place the
-          ${(effectiveCents / 100).toFixed(2)} hold.
+          initial each required section + sign, then ask for their card ONCE to charge the
+          ${(rentalFeeCents / 100).toFixed(2)} rental fee. The
+          ${(effectiveCents / 100).toFixed(2)} deposit hold is then placed automatically
+          against the same card — no second swipe needed.
         </p>
 
         <div style={{ display: 'flex', gap: 8, justifyContent: 'space-between', marginTop: 24 }}>

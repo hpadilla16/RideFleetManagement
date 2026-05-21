@@ -420,6 +420,40 @@ export const spinClient = {
       GetExtendedData: true,
     }, tenantConfig);
   },
+
+  /**
+   * AutoRental Auth using a previously-captured IPosToken (card-not-present).
+   * Round 22 — used at pickup AFTER the SALE has charged the rental fee, to
+   * place the security deposit hold without making the customer re-swipe.
+   *
+   * The terminal does NOT prompt for card; the API call alone places the hold
+   * on the previously-tokenized card.
+   */
+  async authWithToken({
+    amount,
+    referenceId,
+    iposToken,
+    invoiceNumber,
+    paymentType = 'Credit',
+    rentalData,
+    customFields,
+  }, tenantConfig) {
+    if (!iposToken) {
+      throw new Error('authWithToken: iposToken is required');
+    }
+    return spinRequest('POST', 'v2/AutoRental/Auth', {
+      Amount: Number(amount),
+      PaymentType: paymentType,
+      ReferenceId: String(referenceId).slice(0, 50),
+      IPosToken: String(iposToken),
+      CardNotPresent: true,
+      CaptureSignature: false, // already signed during T&C / SALE step
+      ...(invoiceNumber ? { InvoiceNumber: String(invoiceNumber).slice(0, 50) } : {}),
+      ...(rentalData ? { RentalData: rentalData } : {}),
+      ...(customFields ? { CustomFields: customFields } : {}),
+      GetExtendedData: true,
+    }, tenantConfig);
+  },
 };
 
 // =============================================================================
