@@ -462,3 +462,204 @@ counterRouter.post('/start-return', requireRole('ADMIN', 'OPS', 'AGENT'), async 
     sendError(res, err);
   }
 });
+
+// ===========================================================================
+// Dedicated routers for /api/payment-gateway/transactions and
+// /api/admin/payment-gateway/terminals — mounted separately in main.js.
+// ===========================================================================
+export const transactionsRouter = Router();
+
+transactionsRouter.get('/', requireRole('ADMIN', 'OPS'), async (req, res) => {
+  try {
+    const prisma = await resolveDefaultPrisma();
+    const q = req.query || {};
+    const where = { tenantId: req.user.tenantId };
+    if (q.reservationId) where.reservationId = String(q.reservationId);
+    if (q.terminalId) where.terminalId = String(q.terminalId);
+    if (q.type) where.type = String(q.type).toUpperCase();
+    const limit = Math.min(Math.max(parseInt(q.limit, 10) || 50, 1), 200);
+    const rows = await prisma.dejavooTransaction.findMany({
+      where,
+      orderBy: { startedAt: 'desc' },
+      take: limit,
+      select: {
+        id: true, type: true, referenceId: true, amountCents: true,
+        invoiceNumber: true, customLabel: true,
+        approved: true, statusCode: true, authCode: true,
+        cardLast4: true, cardBrand: true, cardEntryType: true,
+        iposToken: false, // never return token in list
+        errorMessage: true,
+        startedAt: true, completedAt: true, callbackReceivedAt: true,
+        reservationId: true, terminalId: true, parentTransactionId: true,
+        signingId: true,
+      },
+    });
+    res.json({ count: rows.length, transactions: rows });
+  } catch (err) {
+    sendError(res, err);
+  }
+});
+
+// ===========================================================================
+// GET /api/payment-gateway/transactions/:id/evidence-pack
+// ===========================================================================
+//
+// Bundles the full chargeback evidence for the reservation linked to the
+// given DejavooTransaction id. Signed URLs valid 24h.
+//
+transactionsRouter.get('/:id/evidence-pack', requireRole('ADMIN', 'OPS'), async (req, res) => {
+  try {
+    const prisma = await resolveDefaultPrisma();
+    const tx = await prisma.dejavooTransaction.findFirst({
+      where: { id: req.params.id, tenantId: req.user.tenantId },
+      select: { id: true, reservationId: true },
+    });
+    if (!tx) {
+      return res.status(404).json({ error: 'Transaction not found in tenant scope' });
+    }
+    if (!tx.reservationId) {
+      return res.status(422).json({ error: 'Transaction has no linked reservation' });
+    }
+    const { buildEvidencePackForReservation } = await import('./evidence-pack.service.js');
+    const pack = await buildEvidencePackForReservation({
+      reservationId: tx.reservationId,
+      tenantScope: { tenantId: req.user.tenantId },
+      prisma,
+    });
+    res.json(pack);
+  } catch (err) {
+    sendError(res, err);
+  }
+});
+
+// ===========================================================================
+// Admin terminal CRUD
+// ===========================================================================
+//
+// Mounted separately under /api/admin/payment-gateway/terminals so the
+// SUPER_ADMIN-only auth chain can wrap them in main.js.
+//
+export const terminalsAdminRouter = Router();
+
+terminalsAdminRouter.get('/', async (req, res) => {
+  try {
+    const prisma = await resolveDefaultPrisma();
+    const targetTenantId = req.query?.tenantId || req.user.tenantId;
+    if (!targetTenantId) return res.status(400).json({ error: 'tenantId required' });
+    const rows = await prisma.dejavooTerminal.findMany({
+      where: { tenantId: String(targetTenantId) },
+      orderBy: { createdAt: 'desc' },
+      select: {
+        id: true, name: true, tpn: true, merchantNumber: true,
+        callbackUrl: true, sandbox: true, status: true,
+        lastSeenAt: true, notes: true, createdAt: true, updatedAt: true,
+        // Never expose authKeyEnc — read-only by code path
+      },
+    });
+    res.json({ count: rows.length, terminals: rows });
+  } catch (err) {
+    sendError(res, err);
+  }
+});
+
+terminalsAdminRouter.post('/', async (req, res) => {
+  try {
+    const prisma = await resolveDefaultPrisma();
+    const body = req.body || {};
+    if (!body.name) return res.status(400).json({ error: 'name required' });
+    if (!body.tpn) return res.status(400).json({ error: 'tpn required' });
+    if (!body.authKey) return res.status(400).json({ error: 'authKey required (plaintext, will be encrypted)' });
+    const targetTenantId = body.tenantId || req.user.tenantId;
+    if (!targetTenantId) return res.status(400).json({ error: 'tenantId required' });
+    // Encrypt authKey before persisting
+    const { encrypt } = await import('../../lib/integration-crypto.js');
+    const encrypted = `enc:v1:${encrypt(body.authKey)}`;
+    const created = await prisma.dejavooTerminal.create({
+      data: {
+        tenantId: String(targetTenantId),
+        name: String(body.name),
+        tpn: String(body.tpn),
+        authKeyEnc: encrypted,
+        merchantNumber: typeof body.merchantNumber === 'number' ? body.merchantNumber : 1,
+        callbackUrl: body.callbackUrl || null,
+        sandbox: body.sandbox !== false,
+        status: 'ACTIVE',
+        notes: body.notes || null,
+      },
+      select: {
+        id: true, name: true, tpn: true, merchantNumber: true,
+        sandbox: true, status: true, createdAt: true,
+      },
+    });
+    res.status(201).json(created);
+  } catch (err) {
+    if (err?.code === 'P2002') {
+      return res.status(409).json({ error: `Terminal with TPN ${req.body?.tpn} already exists for this tenant` });
+    }
+    sendError(res, err);
+  }
+});
+
+terminalsAdminRouter.put('/:id', async (req, res) => {
+  try {
+    const prisma = await resolveDefaultPrisma();
+    const body = req.body || {};
+    const existing = await prisma.dejavooTerminal.findUnique({ where: { id: req.params.id } });
+    if (!existing) return res.status(404).json({ error: 'Terminal not found' });
+    const updates = {};
+    if (body.name !== undefined) updates.name = String(body.name);
+    if (body.merchantNumber !== undefined) updates.merchantNumber = Number(body.merchantNumber);
+    if (body.callbackUrl !== undefined) updates.callbackUrl = body.callbackUrl || null;
+    if (body.sandbox !== undefined) updates.sandbox = !!body.sandbox;
+    if (body.status !== undefined) updates.status = String(body.status);
+    if (body.notes !== undefined) updates.notes = body.notes;
+    if (body.authKey) {
+      const { encrypt } = await import('../../lib/integration-crypto.js');
+      updates.authKeyEnc = `enc:v1:${encrypt(String(body.authKey))}`;
+    }
+    const updated = await prisma.dejavooTerminal.update({
+      where: { id: req.params.id },
+      data: updates,
+      select: {
+        id: true, name: true, tpn: true, merchantNumber: true,
+        sandbox: true, status: true, updatedAt: true,
+      },
+    });
+    res.json(updated);
+  } catch (err) {
+    sendError(res, err);
+  }
+});
+
+terminalsAdminRouter.get('/:id/status', async (req, res) => {
+  try {
+    const prisma = await resolveDefaultPrisma();
+    const terminal = await prisma.dejavooTerminal.findUnique({ where: { id: req.params.id } });
+    if (!terminal) return res.status(404).json({ error: 'Terminal not found' });
+    // Decrypt + ping
+    let authKey = terminal.authKeyEnc || '';
+    if (authKey.startsWith('enc:v1:')) {
+      const { decrypt } = await import('../../lib/integration-crypto.js');
+      authKey = decrypt(authKey.slice('enc:v1:'.length));
+    }
+    const tenantConfig = {
+      spinAuthKey: authKey,
+      spinTpn: terminal.tpn,
+      spinMerchantNumber: terminal.merchantNumber || 1,
+      spinSandbox: terminal.sandbox !== false,
+    };
+    try {
+      const result = await spinClient.terminalStatus(tenantConfig);
+      // Update lastSeenAt
+      await prisma.dejavooTerminal.update({
+        where: { id: terminal.id },
+        data: { lastSeenAt: new Date() },
+      });
+      res.json({ connected: true, result });
+    } catch (err) {
+      res.json({ connected: false, error: err.message });
+    }
+  } catch (err) {
+    sendError(res, err);
+  }
+});

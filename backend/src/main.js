@@ -55,6 +55,8 @@ import { termsTemplatesRouter } from './modules/terms/terms-templates.routes.js'
 import {
   counterRouter,
   signingStatusRouter,
+  transactionsRouter,
+  terminalsAdminRouter,
 } from './modules/payment-gateway/counter.routes.js';
 import { captureBackendException, flushSentry, initSentry, isSentryEnabled } from './lib/sentry.js';
 import { appErrorHandler } from './lib/errors.js';
@@ -135,6 +137,10 @@ app.use('/api/admin/terms-templates', requireAuth, requireRole('SUPER_ADMIN', 'A
 app.use('/api/payment-gateway/counter', requireAuth, tenantRateLimit, counterRouter);
 // Signing status polling endpoints — mounted under /api/reservations
 app.use('/api/reservations', requireAuth, tenantRateLimit, signingStatusRouter);
+// P6: transactions audit list + evidence pack (ADMIN/OPS)
+app.use('/api/payment-gateway/transactions', requireAuth, tenantRateLimit, transactionsRouter);
+// P6: SUPER_ADMIN-only terminal management
+app.use('/api/admin/payment-gateway/terminals', requireAuth, requireRole('SUPER_ADMIN'), tenantRateLimit, terminalsAdminRouter);
 app.use('/api/store-board', requireAuth, tenantRateLimit, requireRole('SUPER_ADMIN', 'ADMIN', 'OPS'), storeBoardRouter);
 
 app.use('/api/reservations', requireAuth, tenantRateLimit, requireModuleAccess('reservations'), reservationsRouter);

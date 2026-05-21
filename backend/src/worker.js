@@ -104,10 +104,28 @@ async function main() {
   // Runs every 5min by default, checks DB directly, calls the same handler.
   startAutochargePoll();
 
+  // Interactive T&C + Dejavoo — daily pre-auth release sweep (2026-05-21).
+  // Voids stale AUTHs older than PREAUTH_RELEASE_AFTER_DAYS (default 25)
+  // that have no CAPTURE/SALE/VOID child. Prevents card-issuer auto-expire
+  // chaos + keeps the audit trail clean.
+  try {
+    const releaseMod = await import('./modules/payment-gateway/pre-auth-release.scheduler.js');
+    releaseMod.startPreAuthReleaseScheduler();
+    logger.info('[worker] started: pre-auth-release scheduler');
+  } catch (err) {
+    logger.warn('[worker] pre-auth-release scheduler not started', {
+      message: err.message,
+    });
+  }
+
   // Graceful shutdown
   const shutdown = async (signal) => {
     logger.info('[worker] shutting down', { signal });
     stopAutochargePoll();
+    try {
+      const releaseMod = await import('./modules/payment-gateway/pre-auth-release.scheduler.js');
+      releaseMod.stopPreAuthReleaseScheduler();
+    } catch {}
     await shutdownQueues();
     process.exit(0);
   };
