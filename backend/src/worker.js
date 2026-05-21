@@ -55,6 +55,20 @@ async function registerAllHandlers() {
     }
   }
 
+  // Interactive T&C + Dejavoo P1 — counter checkin worker (2026-05-21).
+  // Picks up async signing-flow jobs from the start-checkin route.
+  // No-op unless the route is invoked AND the tenant has the feature
+  // flags enabled — handler itself re-checks the gate.
+  try {
+    const counterMod = await import('./modules/payment-gateway/counter-checkin.worker.js');
+    counterMod.registerCounterCheckinWorker();
+    logger.info('[worker] registered handler: counter.checkin');
+  } catch (err) {
+    logger.warn('[worker] counter.checkin worker not registered', {
+      message: err.message, stack: err.stack
+    });
+  }
+
   // Future handlers go here. Each in its own try/catch so a broken one
   // doesn't poison the others.
 }

@@ -52,6 +52,10 @@ import {
   currentUserFlagsRouter,
 } from './modules/admin/tenant-flags.routes.js';
 import { termsTemplatesRouter } from './modules/terms/terms-templates.routes.js';
+import {
+  counterRouter,
+  signingStatusRouter,
+} from './modules/payment-gateway/counter.routes.js';
 import { captureBackendException, flushSentry, initSentry, isSentryEnabled } from './lib/sentry.js';
 import { appErrorHandler } from './lib/errors.js';
 import { closeBrowser } from './lib/puppeteer-browser.js';
@@ -127,6 +131,10 @@ app.use('/api/admin/tenants', requireAuth, requireRole('SUPER_ADMIN'), tenantFla
 app.use('/api/me', requireAuth, currentUserFlagsRouter);
 // Interactive T&C + Dejavoo unified (2026-05-21) — admin terms templates
 app.use('/api/admin/terms-templates', requireAuth, requireRole('SUPER_ADMIN', 'ADMIN'), tenantRateLimit, termsTemplatesRouter);
+// Counter terminal flow — P3 routes (enqueue + abort)
+app.use('/api/payment-gateway/counter', requireAuth, tenantRateLimit, counterRouter);
+// Signing status polling endpoints — mounted under /api/reservations
+app.use('/api/reservations', requireAuth, tenantRateLimit, signingStatusRouter);
 app.use('/api/store-board', requireAuth, tenantRateLimit, requireRole('SUPER_ADMIN', 'ADMIN', 'OPS'), storeBoardRouter);
 
 app.use('/api/reservations', requireAuth, tenantRateLimit, requireModuleAccess('reservations'), reservationsRouter);
