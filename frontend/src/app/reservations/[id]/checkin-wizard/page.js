@@ -30,6 +30,7 @@ import { FeePreviewPanel } from '../../../../components/wizard/FeePreviewPanel';
 import {
   OdometerInput, FuelLevelInput, CleanlinessInput, SmokingToggle
 } from '../../../../components/wizard/MetricInputs';
+import { CheckinPaymentStep } from '../../../../components/wizard/CheckinPaymentStep';
 import { PhotoCapture, STANDARD_ANGLES } from '../../../../components/wizard/PhotoCapture';
 import { SignaturePad } from '../../../../components/wizard/SignaturePad';
 
@@ -64,6 +65,9 @@ function CheckinWizard({ token, me, logout }) {
   const [manualPayment, setManualPayment] = useState({ amount: '', method: 'card', last4: '', reference: '' });
   const [signerName, setSignerName] = useState('');
   const [signatureDataUrl, setSignatureDataUrl] = useState('');
+  // Set when the Dejavoo terminal return flow completes — bypasses the
+  // legacy signerName/signatureDataUrl canAdvance gate.
+  const [terminalReturnCompleted, setTerminalReturnCompleted] = useState(false);
 
   // Load reservation + agreement + tenant fee rates (for live preview)
   useEffect(() => {
@@ -254,7 +258,7 @@ function CheckinWizard({ token, me, logout }) {
       case 1: return photosCaptured >= 1;  // staff can override and continue with at least 1
       case 2: return Number(odometerIn) > 0 && Number(odometerIn) >= Number(agreement?.odometerOut || 0);
       case 3: return paymentMode === 'autocharge' || (paymentMode === 'manual' && Number(manualPayment.amount) > 0);
-      case 4: return !!signerName && !!signatureDataUrl;
+      case 4: return terminalReturnCompleted || (!!signerName && !!signatureDataUrl);
       default: return true;
     }
   };
@@ -328,7 +332,10 @@ function CheckinWizard({ token, me, logout }) {
           />
         )}
         {step === 4 && (
-          <Step5Signature
+          <CheckinPaymentStep
+            reservationId={reservationId}
+            token={token}
+            finalAmountCents={Math.round((Number(feePreview?.total) || 0) * 100)}
             feePreview={feePreview}
             signerName={signerName}
             onSignerName={setSignerName}
@@ -338,6 +345,8 @@ function CheckinWizard({ token, me, logout }) {
             cardLast4={reservation?.customer?.cardLast4 || agreement?.reservation?.customer?.cardLast4}
             cardBrand={reservation?.customer?.cardBrand || agreement?.reservation?.customer?.cardBrand}
             error={submitError}
+            onTerminalCompleted={() => setTerminalReturnCompleted(true)}
+            LegacySignature={Step5Signature}
           />
         )}
         {step === 5 && <Step6Success result={result} reservation={reservation} agreement={agreement} token={token} onDone={() => router.push('/reservations')} />}
