@@ -34,6 +34,7 @@ import { requireRole } from '../../middleware/auth.js';
 import { getTenantFlag, resolveFlag } from '../../lib/feature-flags.js';
 import { getActiveTemplateForTenant } from '../terms/terms-templates.service.js';
 import { enqueueCounterCheckin } from './counter-checkin.worker.js';
+import { enqueueCounterReturn } from './counter-return.worker.js';
 import { spinClient } from './spin-client.js';
 import { CounterOrchestratorError } from './counter-orchestrator.service.js';
 
@@ -380,6 +381,83 @@ signingStatusRouter.post('/:id/signing/refuse', requireRole('ADMIN', 'OPS', 'AGE
       },
     });
     res.json({ alreadyRefused: false, signing: created });
+  } catch (err) {
+    sendError(res, err);
+  }
+});
+
+// ===========================================================================
+// POST /api/payment-gateway/counter/start-return
+// ===========================================================================
+
+counterRouter.post('/start-return', requireRole('ADMIN', 'OPS', 'AGENT'), async (req, res) => {
+  try {
+    const prisma = await resolveDefaultPrisma();
+    const body = req.body || {};
+    if (!body.reservationId) {
+      return res.status(400).json({ error: 'reservationId is required' });
+    }
+
+    // Reservation must exist + be in tenant scope
+    const reservation = await prisma.reservation.findFirst({
+      where: { id: body.reservationId, tenantId: req.user.tenantId },
+      select: { id: true },
+    });
+    if (!reservation) {
+      return res.status(404).json({ error: 'Reservation not found in tenant scope' });
+    }
+
+    // Resolve dejavooCounter flag (TC isn't required for return)
+    const { getTenantFlag, resolveFlag } = await import('../../lib/feature-flags.js');
+    const djState = await getTenantFlag(req.user.tenantId, 'dejavooCounter', { prisma });
+    if (!resolveFlag(djState, req.user)) {
+      return res.status(403).json({
+        error: 'Dejavoo counter is not enabled for this tenant',
+        code: 'FLAG_OFF',
+      });
+    }
+
+    // Resolve terminal
+    let terminalId = body.terminalId || null;
+    if (!terminalId) {
+      const t = await prisma.dejavooTerminal.findFirst({
+        where: { tenantId: req.user.tenantId, status: 'ACTIVE' },
+        orderBy: { lastSeenAt: 'desc' },
+      });
+      terminalId = t?.id || null;
+    }
+    if (!terminalId) {
+      return res.status(422).json({
+        error: 'No active terminal found for this tenant',
+        code: 'NO_TERMINAL',
+      });
+    }
+
+    // Enqueue
+    const { jobId } = await enqueueCounterReturn({
+      reservationId: body.reservationId,
+      terminalId,
+      userSnapshot: {
+        sub: req.user?.sub || req.user?.id,
+        id: req.user?.id || req.user?.sub,
+        role: req.user?.role,
+        tenantId: req.user?.tenantId,
+      },
+      finalAmountCents:
+        typeof body.finalAmountCents === 'number' ? body.finalAmountCents : undefined,
+      ipAddress: req.ip || null,
+      userAgent: req.headers['user-agent'] || null,
+    });
+
+    return res.status(202).json({
+      surface: 'DEJAVOO_TERMINAL',
+      terminalId,
+      jobId,
+      // Reuse the signing poll URL — return progress shows up there as new
+      // DejavooTransaction rows on the reservation (signing.id is the same
+      // session, if it exists from the checkin).
+      pollUrl: `/api/payment-gateway/transactions?reservationId=${body.reservationId}`,
+    });
   } catch (err) {
     sendError(res, err);
   }

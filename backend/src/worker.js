@@ -69,6 +69,19 @@ async function registerAllHandlers() {
     });
   }
 
+  // Interactive T&C + Dejavoo P1 — counter RETURN worker (2026-05-21).
+  // Wraps runCounterReturnFlow. Handles capture/void/top-up cases at
+  // vehicle return on the terminal.
+  try {
+    const returnMod = await import('./modules/payment-gateway/counter-return.worker.js');
+    returnMod.registerCounterReturnWorker();
+    logger.info('[worker] registered handler: counter.return');
+  } catch (err) {
+    logger.warn('[worker] counter.return worker not registered', {
+      message: err.message, stack: err.stack
+    });
+  }
+
   // Future handlers go here. Each in its own try/catch so a broken one
   // doesn't poison the others.
 }
