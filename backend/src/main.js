@@ -58,6 +58,11 @@ import {
   transactionsRouter,
   terminalsAdminRouter,
 } from './modules/payment-gateway/counter.routes.js';
+import {
+  wizardStateReservationRouter,
+  wizardStateVehicleRouter,
+  wizardStateAgreementRouter,
+} from './modules/wizard-state/wizard-state.routes.js';
 import { captureBackendException, flushSentry, initSentry, isSentryEnabled } from './lib/sentry.js';
 import { appErrorHandler } from './lib/errors.js';
 import { closeBrowser } from './lib/puppeteer-browser.js';
@@ -137,6 +142,12 @@ app.use('/api/admin/terms-templates', requireAuth, requireRole('SUPER_ADMIN', 'A
 app.use('/api/payment-gateway/counter', requireAuth, tenantRateLimit, counterRouter);
 // Signing status polling endpoints — mounted under /api/reservations
 app.use('/api/reservations', requireAuth, tenantRateLimit, signingStatusRouter);
+// Round 23 — wizard state (checkout/checkin progress) endpoints.
+// Mounted BEFORE the broader reservationsRouter / rentalAgreementsRouter so
+// the /:id/checkout-wizard-state etc. paths match here first.
+app.use('/api/reservations', requireAuth, tenantRateLimit, wizardStateReservationRouter);
+app.use('/api/vehicles', requireAuth, tenantRateLimit, wizardStateVehicleRouter);
+app.use('/api/rental-agreements', requireAuth, tenantRateLimit, wizardStateAgreementRouter);
 // P6: transactions audit list + evidence pack (ADMIN/OPS)
 app.use('/api/payment-gateway/transactions', requireAuth, tenantRateLimit, transactionsRouter);
 // P6: SUPER_ADMIN-only terminal management

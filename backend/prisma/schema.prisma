@@ -1354,6 +1354,18 @@ model RentalAgreement {
   closedByUserId   String?
   closedByUser     User?     @relation("AgreementClosedBy", fields: [closedByUserId], references: [id])
   locked           Boolean   @default(false)
+
+  // Round 23 — wizard progress tracking so the agent can resume on any device.
+  // 0 = not started, 1 = customer info confirmed, 2 = counter signing done,
+  // 3 = inspection photos done, 4 = pickup metrics done, 5 = inspection signed,
+  // 6 = keys delivered. Mirror columns for the return wizard.
+  checkoutWizardStep            Int       @default(0)
+  checkinWizardStep             Int       @default(0)
+  checkoutInspectionSigPath     String?
+  checkinInspectionSigPath      String?
+  checkoutInspectionSignedAt    DateTime?
+  checkinInspectionSignedAt     DateTime?
+
   createdAt        DateTime  @default(now())
   updatedAt        DateTime  @updatedAt
 
@@ -1367,6 +1379,11 @@ model RentalAgreement {
 
   @@index([status, pickupAt])
   @@index([tenantId, status])
+  // Round 23 — accelerates GET /api/vehicles/:id/active-wizard.
+  // The lookup is bounded by (tenantId, vehicleId) and then filters on
+  // finalizedAt/closedAt, which without this index walks the whole tenant's
+  // agreements. With the index it's an O(log N) point lookup.
+  @@index([tenantId, vehicleId, finalizedAt, closedAt])
 }
 
 // Rental agreement addendum (BUG-001 Option C). Post-signature date

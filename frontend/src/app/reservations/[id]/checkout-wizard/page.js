@@ -3,13 +3,25 @@
 /**
  * Pillar 2 — Checkout wizard (vehicle handoff to customer).
  *
- * 6 steps:
- *   1. Vehicle & customer confirm
- *   2. Exterior inspection (8 photos · AR-guided)
- *   3. Pickup metrics (odometer · fuel · cleanliness)
- *   4. Balance gate (collect deposit/remainder if applicable)
- *   5. Customer signature
- *   6. Handoff success · keys delivered
+ * Round 23 reorder so the agent makes ONE trip counter → vehicle (not two):
+ *
+ *   0. Confirm vehicle & customer        (counter, desktop)
+ *   1. Counter signing + payment + deposit   (counter, desktop, Dejavoo terminal)
+ *      ─── HAND-OFF POINT — agent walks to vehicle with phone/tablet ───
+ *   2. Inspection photos (8 angles)       (at vehicle, phone)
+ *   3. Pickup metrics (odometer · fuel · cleanliness)  (at vehicle, phone)
+ *      ↑ Cleanliness + fuel here are LOAD-BEARING — they're the baseline
+ *        the return wizard compares against to compute cleaning fee + fuel
+ *        fee charges. Do NOT remove either field.
+ *   4. Inspection signature               (at vehicle, phone — customer signs
+ *                                          confirming they saw the car in this state)
+ *   5. Keys delivered                     (success)
+ *
+ * The wizard reads `GET /api/reservations/:id/checkout-wizard-state` on
+ * mount and jumps to the next pending step — so the agent can start on the
+ * counter desktop and resume on their phone at the vehicle (or vice versa,
+ * or on a kiosk in the back office). Each step PATCHes the wizard cursor
+ * server-side before allowing advance.
  *
  * No fee engine here — fees are checkin-only. This wizard's job is to
  * capture the baseline state cleanly so checkin can compute deltas.
@@ -35,12 +47,15 @@ export default function Page() {
 function CheckoutWizard({ token, me, logout }) {
   const { id: reservationId } = useParams();
   const router = useRouter();
-  const [step, setStep] = useState(0);
+  // step = null while we load the server-derived initial step from
+  // /checkout-wizard-state. Once resolved, step is 0..5.
+  const [step, setStep] = useState(null);
   const [loading, setLoading] = useState(true);
   const [reservation, setReservation] = useState(null);
   const [agreement, setAgreement] = useState(null);
   const [pricing, setPricing] = useState(null);
   const [paymentRows, setPaymentRows] = useState([]);
+  const [wizardState, setWizardState] = useState(null);
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState('');
 
@@ -54,6 +69,14 @@ function CheckoutWizard({ token, me, logout }) {
   // Set to true when the Dejavoo terminal flow finishes — bypasses the
   // legacy signerName/signatureDataUrl canAdvance gate.
   const [terminalSigningCompleted, setTerminalSigningCompleted] = useState(false);
+  // Round 23 — inspection signature (Step 4 in the new ordering).
+  // Captured on the agent's phone/tablet AT THE VEHICLE after photos +
+  // metrics. Stored as a base64 PNG and POSTed to
+  // /api/rental-agreements/:id/checkout-inspection-signature on advance.
+  const [inspectionSigDataUrl, setInspectionSigDataUrl] = useState('');
+  const [inspectionSigStoragePath, setInspectionSigStoragePath] = useState('');
+  const [savingStep, setSavingStep] = useState(false);
+  const [showHandoffPanel, setShowHandoffPanel] = useState(false);
 
   // Load reservation + agreement + pricing in parallel — mirrors the
   // reservation-detail page's parallel fetch pattern. All three endpoints
@@ -68,11 +91,12 @@ function CheckoutWizard({ token, me, logout }) {
     if (!reservationId) return;
     (async () => {
       try {
-        const [resR, agR, pricingR, paymentsR] = await Promise.allSettled([
+        const [resR, agR, pricingR, paymentsR, stateR] = await Promise.allSettled([
           api(`/api/reservations/${reservationId}`, {}, token),
           api(`/api/reservations/${reservationId}/agreement`, {}, token),
           api(`/api/reservations/${reservationId}/pricing`, { bypassCache: true }, token),
-          api(`/api/reservations/${reservationId}/payments`, { bypassCache: true }, token)
+          api(`/api/reservations/${reservationId}/payments`, { bypassCache: true }, token),
+          api(`/api/reservations/${reservationId}/checkout-wizard-state`, { bypassCache: true }, token)
         ]);
         if (resR.status === 'fulfilled') {
           setReservation(resR.value);
@@ -81,8 +105,29 @@ function CheckoutWizard({ token, me, logout }) {
         if (agR.status === 'fulfilled') setAgreement(agR.value);
         if (pricingR.status === 'fulfilled') setPricing(pricingR.value);
         if (paymentsR.status === 'fulfilled') setPaymentRows(Array.isArray(paymentsR.value) ? paymentsR.value : []);
+        // Round 23 — derive initial step from server, clamping into the 0..5 range
+        let initialStep = 0;
+        if (stateR.status === 'fulfilled' && stateR.value) {
+          setWizardState(stateR.value);
+          // server reports next pending in the 0..6 model; UI uses 0..5
+          // because step 6 (delivered) is folded into step 5 (success screen).
+          initialStep = Math.min(5, Math.max(0, stateR.value.nextPendingStep ?? 0));
+          // If signing already completed on the server, mark the local
+          // flag so the canAdvance gate doesn't trip when the user lands
+          // mid-wizard.
+          if (stateR.value.persisted?.signingCompletedAt) {
+            setTerminalSigningCompleted(true);
+          }
+          // Pre-fill captured metrics if server has them
+          if (stateR.value.persisted?.fuelOut != null) setFuelOut(Number(stateR.value.persisted.fuelOut));
+          if (stateR.value.persisted?.cleanlinessOut != null) setCleanlinessOut(Number(stateR.value.persisted.cleanlinessOut));
+          if (stateR.value.persisted?.odometerOut != null) setOdometerOut(String(stateR.value.persisted.odometerOut));
+          if (stateR.value.persisted?.inspectionSignedAt) setInspectionSigStoragePath('captured-server-side');
+        }
+        setStep(initialStep);
       } catch (err) {
         console.error('Failed to load wizard data', err);
+        setStep(0);
       } finally {
         setLoading(false);
       }
@@ -157,6 +202,13 @@ function CheckoutWizard({ token, me, logout }) {
     setSubmitting(true);
     setSubmitError('');
     try {
+      // Round 23 — persist the inspection signature BEFORE the finalize
+      // sequence. Captured at the vehicle on step 4 (phone/tablet).
+      if (inspectionSigDataUrl && inspectionSigStoragePath !== 'captured-server-side') {
+        try { await persistInspectionSignature(); }
+        catch (err) { console.warn('[checkout-wizard] inspection sig save failed:', err?.message); }
+      }
+
       // Build checkout audit note line for the reservation
       const checkoutLine = `[RES_CHECKOUT ${new Date().toISOString()}] odometerOut=${Number(odometerOut || 0)} fuelOut=${Number(fuelOut || 0)} cleanlinessOut=${Number(cleanlinessOut || 5)}`;
       const baseNotes = String(reservation?.notes || '').trim();
@@ -239,33 +291,103 @@ function CheckoutWizard({ token, me, logout }) {
     }
   };
 
+  // Round 23 reorder — counter signing moved up so the agent stays at the
+  // counter for steps 0-1, then walks ONCE to the vehicle for steps 2-4.
   const steps = [
-    'Confirm vehicle & customer',  // 0
-    'Capture exterior + interior inspection',  // 1
-    'Capture pickup metrics',  // 2
-    'Review charges',  // 3 — NEW: read-only pricing display (Pillar 2 P4b)
-    'Customer signature',  // 4
-    'Keys delivered'  // 5 (success)
+    'Confirm vehicle & customer',                           // 0 — counter
+    'Counter signing + payment + deposit',                  // 1 — counter (Dejavoo)
+    'Capture exterior + interior inspection',               // 2 — at vehicle
+    'Capture pickup metrics (odometer · fuel · cleanliness)', // 3 — at vehicle
+    'Customer signs the inspection',                        // 4 — at vehicle
+    'Keys delivered'                                        // 5 — success
   ];
 
   const canAdvance = () => {
     switch (step) {
       case 0: return !!reservation && !!agreement && !!vehicleId;
-      case 1: return Object.keys(photos).length >= 1;
-      case 2: return Number(odometerOut) > 0;
-      case 3: return true;  // review step — read-only, always advance
-      case 4: return terminalSigningCompleted || (!!signerName && !!signatureDataUrl);
+      case 1: return terminalSigningCompleted || (!!signerName && !!signatureDataUrl);
+      case 2: return Object.keys(photos).length >= 1;
+      case 3: return Number(odometerOut) > 0 && Number(fuelOut) >= 0 && Number(cleanlinessOut) >= 1;
+      case 4: return !!inspectionSigDataUrl || !!inspectionSigStoragePath;
       default: return true;
     }
   };
 
-  const onNext = () => {
+  // Persist the wizard cursor server-side so a device switch picks up
+  // exactly where the agent left off.
+  async function persistStep(toStep) {
+    const agreementId = agreement?.id;
+    if (!agreementId) return;
+    try {
+      await api(`/api/rental-agreements/${agreementId}/checkout-wizard-step`, {
+        method: 'PATCH',
+        body: JSON.stringify({ toStep }),
+      }, token);
+    } catch (err) {
+      console.warn('[checkout-wizard] failed to persist step', err);
+    }
+  }
+
+  // Persist metrics server-side incrementally (so a device switch mid-step
+  // doesn't lose data).
+  async function persistMetrics() {
+    const agreementId = agreement?.id;
+    if (!agreementId) return;
+    await api(`/api/rental-agreements/${agreementId}/checkout-metrics`, {
+      method: 'PATCH',
+      body: JSON.stringify({
+        fuelOut: Number(fuelOut),
+        cleanlinessOut: Number(cleanlinessOut),
+        odometerOut: Number(odometerOut),
+      }),
+    }, token);
+  }
+
+  // Persist inspection signature PNG → Storage → agreement.
+  async function persistInspectionSignature() {
+    const agreementId = agreement?.id;
+    if (!agreementId) return;
+    if (!inspectionSigDataUrl) return;
+    // Strip the data URL header so the backend gets pure base64.
+    const base64Png = inspectionSigDataUrl.replace(/^data:image\/(png|jpeg);base64,/, '');
+    const out = await api(`/api/rental-agreements/${agreementId}/checkout-inspection-signature`, {
+      method: 'POST',
+      body: JSON.stringify({ base64Png }),
+    }, token);
+    setInspectionSigStoragePath(out?.storagePath || 'captured');
+  }
+
+  const onNext = async () => {
+    // Step 4 advances to submit (which finalizes the agreement + advances to 5).
     if (step === 4) return submit();
+    // Step 5 just returns to reservations.
     if (step === 5) return router.push('/reservations');
-    setStep((s) => Math.min(s + 1, steps.length - 1));
+    // For all other steps: do any per-step persistence, then advance.
+    setSavingStep(true);
+    try {
+      if (step === 1) {
+        // Counter signing completed — show "Hand off to phone" panel before
+        // moving to step 2 (which the agent does at the vehicle).
+        setShowHandoffPanel(true);
+        await persistStep(2);
+        setStep(2);
+      } else if (step === 3) {
+        // Metrics — persist before advancing.
+        await persistMetrics();
+        await persistStep(4);
+        setStep(4);
+      } else {
+        await persistStep(step + 1);
+        setStep((s) => Math.min(s + 1, steps.length - 1));
+      }
+    } catch (err) {
+      setSubmitError(err?.message || 'Failed to save step');
+    } finally {
+      setSavingStep(false);
+    }
   };
 
-  if (loading) {
+  if (loading || step == null) {
     return <AppShell me={me} logout={logout}>
       <div style={{ padding: 60, textAlign: 'center', color: '#6f668f' }}>Loading reservation…</div>
     </AppShell>;
@@ -284,10 +406,16 @@ function CheckoutWizard({ token, me, logout }) {
         totalSteps={6}
         stepTitle={steps[step]}
         accent="purple"
-        onBack={step > 0 && step < 5 ? () => setStep((s) => s - 1) : null}
+        onBack={step > 0 && step < 2 ? () => setStep((s) => s - 1) : null}
         onNext={onNext}
-        nextLabel={submitting ? 'Submitting…' : step === 4 ? 'Confirm & deliver →' : step === 5 ? 'Return to reservations' : 'Continue →'}
-        nextDisabled={!canAdvance() || submitting}
+        nextLabel={
+          submitting || savingStep ? 'Saving…'
+          : step === 1 && terminalSigningCompleted ? 'Continue to inspection →'
+          : step === 4 ? 'Finalize & deliver keys →'
+          : step === 5 ? 'Return to reservations'
+          : 'Continue →'
+        }
+        nextDisabled={!canAdvance() || submitting || savingStep}
       >
         {step === 0 && (
           <Step1Confirm
@@ -300,7 +428,32 @@ function CheckoutWizard({ token, me, logout }) {
           />
         )}
         {step === 1 && (
+          <>
+            <CheckoutSignatureStep
+              reservationId={reservationId}
+              token={token}
+              agreement={agreement}
+              signerName={signerName}
+              onSignerName={setSignerName}
+              signatureDataUrl={signatureDataUrl}
+              onSignature={setSignatureDataUrl}
+              error={submitError}
+              onTerminalCompleted={() => setTerminalSigningCompleted(true)}
+              LegacySignature={Step5Signature}
+            />
+            {terminalSigningCompleted && (
+              <HandoffPanel
+                reservationId={reservationId}
+                onContinueHere={() => { /* user stays — Continue button moves to step 2 */ }}
+              />
+            )}
+          </>
+        )}
+        {step === 2 && (
           <WizCard padding={20}>
+            <div style={{ marginBottom: 12, padding: 10, background: '#eff6ff', borderRadius: 8, fontSize: 13, color: '#1e3a8a' }}>
+              You should be standing next to the vehicle now. Capture all required angles.
+            </div>
             <PhotoCapture
               capturedPhotos={photos}
               onCapture={(k, d) => setPhotos((p) => ({ ...p, [k]: d }))}
@@ -309,33 +462,20 @@ function CheckoutWizard({ token, me, logout }) {
             />
           </WizCard>
         )}
-        {step === 2 && (
+        {step === 3 && (
           <WizGrid cols={3} gap={14}>
             <OdometerInput value={odometerOut} onChange={setOdometerOut} allowOcr label="Odometer Out" />
             <FuelLevelInput value={fuelOut} onChange={setFuelOut} label="Fuel Out" />
             <CleanlinessInput value={cleanlinessOut} onChange={setCleanlinessOut} label="Cleanliness Out" />
           </WizGrid>
         )}
-        {step === 3 && (
-          <Step4ReviewCharges
-            pricing={pricing}
-            reservation={reservation}
-            paymentRows={paymentRows}
-            reservationId={reservationId}
-          />
-        )}
         {step === 4 && (
-          <CheckoutSignatureStep
-            reservationId={reservationId}
-            token={token}
-            agreement={agreement}
-            signerName={signerName}
-            onSignerName={setSignerName}
-            signatureDataUrl={signatureDataUrl}
-            onSignature={setSignatureDataUrl}
+          <InspectionSignatureStep
+            reservation={reservation}
+            inspectionSigDataUrl={inspectionSigDataUrl}
+            onInspectionSig={setInspectionSigDataUrl}
+            persistedAlready={!!inspectionSigStoragePath && inspectionSigStoragePath === 'captured-server-side'}
             error={submitError}
-            onTerminalCompleted={() => setTerminalSigningCompleted(true)}
-            LegacySignature={Step5Signature}
           />
         )}
         {step === 5 && <Step6Handoff reservation={reservation} agreement={agreement} token={token} onDone={() => router.push('/reservations')} />}
@@ -803,5 +943,104 @@ function Field({ label, value, onChange, type = 'text', placeholder = '' }) {
         style={{ padding: '10px 14px', border: '1px solid #e6dfff', borderRadius: 12, fontSize: 14, fontWeight: 700, color: '#211a38', outline: 'none', background: 'white' }}
       />
     </label>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Round 23 — Hand-off to phone panel (shows after counter signing)
+// ---------------------------------------------------------------------------
+function HandoffPanel({ reservationId, onContinueHere }) {
+  const [qrDataUrl, setQrDataUrl] = useState('');
+  const [wizardUrl, setWizardUrl] = useState('');
+
+  useEffect(() => {
+    if (typeof window === 'undefined' || !reservationId) return;
+    const url = `${window.location.origin}/reservations/${reservationId}/checkout-wizard`;
+    setWizardUrl(url);
+    // Lazy-import qrcode so SSR doesn't pull it in
+    import('qrcode')
+      .then((QR) => QR.toDataURL(url, { width: 280, margin: 1, errorCorrectionLevel: 'M' }))
+      .then((dataUrl) => setQrDataUrl(dataUrl))
+      .catch((err) => console.warn('QR generation failed', err));
+  }, [reservationId]);
+
+  return (
+    <div style={{
+      marginTop: 20, padding: 24, background: '#ecfdf5',
+      border: '2px solid #10b981', borderRadius: 14,
+    }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 4 }}>
+        <div style={{ fontSize: 36, lineHeight: 1 }}>✅</div>
+        <h2 style={{ margin: 0, color: '#065f46', fontSize: 22 }}>
+          Counter signing complete — time to head outside and complete the inspection
+        </h2>
+      </div>
+      <p style={{ color: '#065f46', marginTop: 12, marginBottom: 16, fontSize: 15 }}>
+        Walk to the vehicle with the customer. Take your phone or tablet — scan
+        the QR code below (or open the link in your mobile browser) and the
+        wizard will pick up exactly where you left off at <strong>Step 3 — Inspection
+        photos</strong>. You can also stay on this computer if you prefer.
+      </p>
+      <div style={{ display: 'flex', gap: 24, alignItems: 'center', flexWrap: 'wrap' }}>
+        {qrDataUrl ? (
+          <img src={qrDataUrl} alt="QR for wizard URL" style={{ width: 200, height: 200, borderRadius: 8, background: 'white', padding: 8 }} />
+        ) : (
+          <div style={{ width: 200, height: 200, background: '#d1fae5', borderRadius: 8 }} />
+        )}
+        <div style={{ flex: 1, minWidth: 280 }}>
+          <div style={{ fontSize: 13, color: '#065f46', marginBottom: 6, fontWeight: 600 }}>Or open this URL on your device:</div>
+          <code style={{ display: 'block', padding: 10, background: 'white', borderRadius: 8, fontSize: 12, wordBreak: 'break-all', color: '#211a38' }}>
+            {wizardUrl}
+          </code>
+          <div style={{ marginTop: 12, fontSize: 13, color: '#065f46' }}>
+            Tip: agents already logged into RFM on their phone don't need to log in
+            again. Scanning the vehicle's QR sticker also auto-opens the wizard —
+            no need to remember the reservation number.
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Round 23 — Inspection signature step (Step 4)
+// Customer signs on the agent's phone/tablet AT THE VEHICLE to confirm
+// they saw the car in the recorded state (photos + metrics).
+// ---------------------------------------------------------------------------
+function InspectionSignatureStep({ reservation, inspectionSigDataUrl, onInspectionSig, persistedAlready, error }) {
+  const customerName = [reservation?.customer?.firstName, reservation?.customer?.lastName].filter(Boolean).join(' ') || 'Customer';
+  if (persistedAlready) {
+    return (
+      <WizCard padding={20}>
+        <div style={{ background: '#ecfdf5', border: '1px solid #a7f3d0', borderRadius: 10, padding: 16 }}>
+          <div style={{ fontSize: 16, color: '#065f46', fontWeight: 600 }}>
+            ✅ Inspection already signed
+          </div>
+          <div style={{ fontSize: 13, color: '#065f46', marginTop: 4 }}>
+            Customer signature was captured on a previous device. You can finalize and
+            hand over the keys.
+          </div>
+        </div>
+      </WizCard>
+    );
+  }
+  return (
+    <WizCard padding={20}>
+      <h3 style={{ marginTop: 0 }}>Show the customer the vehicle's condition and have them sign</h3>
+      <p style={{ color: '#6f668f', marginBottom: 12 }}>
+        Walk {customerName} around the vehicle. Once they confirm the photos and metrics
+        you just captured reflect the actual condition, have them sign below. The signature
+        is uploaded to Storage and attached to the rental agreement.
+      </p>
+      <SignaturePad
+        label={`${customerName} — inspection signature`}
+        signerName={customerName}
+        showName={false}
+        onSignatureChange={onInspectionSig}
+        helperText="Customer confirms the photos + metrics reflect the vehicle's actual condition."
+      />
+      {error ? <div style={{ marginTop: 10, color: '#ef4444', fontSize: 13 }}>{error}</div> : null}
+    </WizCard>
   );
 }

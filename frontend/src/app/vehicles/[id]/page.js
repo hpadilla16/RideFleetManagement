@@ -121,6 +121,57 @@ function VehicleProfileInner({ token, me, logout }) {
       .catch((error) => setMsg(error.message));
   }, [id, token]);
 
+  // Round 23 — QR-scan auto-resume.
+  //
+  // When the agent scans the vehicle's QR sticker, this page loads. If the
+  // vehicle has an in-progress checkout/checkin (or is OUT on rental and
+  // ready for a return), bounce them straight into the right wizard so they
+  // don't have to navigate manually.
+  //
+  // SECURITY: the entire vehicle page sits behind AuthGate, so a customer
+  // scanning the QR hits the login screen first. We additionally gate the
+  // redirect itself behind staff roles — non-staff authenticated users see
+  // the normal vehicle page (which won't show wizard actions to them
+  // anyway).
+  // Round 23 perf — we want this check to fire ONCE per page mount, not on
+  // every state change. The effect deps are stable (id, token, me.role,
+  // router) and we use a ref-style guard via a local closure flag so a
+  // re-render due to other state (telematics, etc.) doesn't refetch.
+  const [autoResumeBanner, setAutoResumeBanner] = useState(null);
+  const [autoResumeChecked, setAutoResumeChecked] = useState(false);
+  useEffect(() => {
+    if (autoResumeChecked) return;
+    if (!id || !token || !me) return;
+    const role = String(me.role || '').toUpperCase();
+    if (!['ADMIN', 'OPS', 'AGENT', 'SUPER_ADMIN'].includes(role)) {
+      setAutoResumeChecked(true);
+      return;
+    }
+    let cancelled = false;
+    api(`/api/vehicles/${id}/active-wizard`, {}, token)
+      .then((out) => {
+        if (cancelled) return;
+        setAutoResumeChecked(true);
+        if (!out || out.kind === 'NONE') return;
+        // Auto-redirect to the relevant wizard. We also stash a banner in
+        // case a) the redirect is interrupted, b) the agent intentionally
+        // navigates back — they'll see the prompt and can click resume.
+        setAutoResumeBanner(out);
+        // Small delay so the banner is briefly visible (UX polish — agent
+        // sees what happened before the route change kicks in).
+        const t = setTimeout(() => { if (!cancelled) router.push(out.wizardUrl); }, 350);
+        return () => clearTimeout(t);
+      })
+      .catch((err) => {
+        if (!cancelled) setAutoResumeChecked(true);
+        // 403/404 are non-fatal — just stay on the normal vehicle page.
+        if (err?.status && err.status !== 403 && err.status !== 404) {
+          console.warn('[vehicle] active-wizard check failed', err);
+        }
+      });
+    return () => { cancelled = true; };
+  }, [id, token, me, router, autoResumeChecked]);
+
   useEffect(() => {
     api('/api/vehicles/telematics/providers', {}, token)
       .then((out) => setTelematicsProviders(Array.isArray(out) ? out : []))

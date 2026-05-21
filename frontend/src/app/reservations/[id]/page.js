@@ -179,6 +179,10 @@ function ReservationDetailInner({ token, me, logout }) {
   const [loading, setLoading] = useState(true);
   const [pricing, setPricing] = useState(null);
   const [paymentRows, setPaymentRows] = useState([]);
+  // Round 23 — wizard progress so we can swap "Start Check-out" for
+  // "Continue Check-out →" when the agent has already started.
+  const [checkoutWizardState, setCheckoutWizardState] = useState(null);
+  const [checkinWizardState, setCheckinWizardState] = useState(null);
   // Pillar 2: fetch the agreement separately so we can show FEE_ENGINE_*
   // charges (fuel/cleaning/smoking/late) posted at checkin — those live on
   // RentalAgreementCharge, not ReservationCharge, so they don't appear in
@@ -322,14 +326,18 @@ function ReservationDetailInner({ token, me, logout }) {
   // Light refresh: only reservation + pricing + payments (fast, called after every action)
   const refresh = async () => {
     try {
-      const [resResult, pricingResult, paymentsResult] = await Promise.allSettled([
+      const [resResult, pricingResult, paymentsResult, coutWState, cinWState] = await Promise.allSettled([
         api(`/api/reservations/${id}`, { bypassCache: true }, token),
         api(`/api/reservations/${id}/pricing`, { bypassCache: true }, token).catch(() => null),
-        api(`/api/reservations/${id}/payments`, { bypassCache: true }, token).catch(() => [])
+        api(`/api/reservations/${id}/payments`, { bypassCache: true }, token).catch(() => []),
+        api(`/api/reservations/${id}/checkout-wizard-state`, { bypassCache: true }, token).catch(() => null),
+        api(`/api/reservations/${id}/checkin-wizard-state`, { bypassCache: true }, token).catch(() => null),
       ]);
       if (resResult.status === 'fulfilled') setRow(resResult.value);
       if (pricingResult.status === 'fulfilled') setPricing(pricingResult.value);
       if (paymentsResult.status === 'fulfilled') setPaymentRows(Array.isArray(paymentsResult.value) ? paymentsResult.value : []);
+      if (coutWState.status === 'fulfilled') setCheckoutWizardState(coutWState.value || null);
+      if (cinWState.status === 'fulfilled') setCheckinWizardState(cinWState.value || null);
     } catch {}
   };
 
@@ -2276,8 +2284,16 @@ token
               <section className="ios-action-card">
                 <div className="ios-action-head">Operations</div>
                 <div className="ios-action-list">
-                  <button className="ios-action-btn" onClick={() => router.push(`/reservations/${id}/checkout-wizard`)}>Start Check-out</button>
-                  <button className="ios-action-btn" onClick={() => router.push(`/reservations/${id}/checkin-wizard`)}>Start Check-in</button>
+                  <button className="ios-action-btn" onClick={() => router.push(`/reservations/${id}/checkout-wizard`)}>
+                    {checkoutWizardState && (checkoutWizardState.nextPendingStep ?? 0) > 0 && (checkoutWizardState.nextPendingStep ?? 0) < 6
+                      ? `Continue Check-out → (step ${(checkoutWizardState.nextPendingStep ?? 0) + 1})`
+                      : 'Start Check-out'}
+                  </button>
+                  <button className="ios-action-btn" onClick={() => router.push(`/reservations/${id}/checkin-wizard`)}>
+                    {checkinWizardState && (checkinWizardState.nextPendingStep ?? 0) > 0 && (checkinWizardState.nextPendingStep ?? 0) < 5
+                      ? `Continue Check-in → (step ${(checkinWizardState.nextPendingStep ?? 0) + 1})`
+                      : 'Start Check-in'}
+                  </button>
                   <button className="ios-action-btn" onClick={() => router.push(`/reservations/${id}/ops-view?section=checkout`)}>View Check-out</button>
                   <button className="ios-action-btn" onClick={() => router.push(`/reservations/${id}/ops-view?section=checkin`)}>View Check-in</button>
                   <button className="ios-action-btn" onClick={() => setStatus('NO_SHOW')}>Mark No Show</button>
