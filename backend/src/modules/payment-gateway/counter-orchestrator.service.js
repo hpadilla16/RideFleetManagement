@@ -381,7 +381,14 @@ function resolvePreAuthAmountCents(tenant, reservation) {
  *   completed: boolean
  * }
  */
-export async function runCounterCheckinFlow({ reservationId, terminalId, user, deps = {} } = {}) {
+export async function runCounterCheckinFlow({
+  reservationId,
+  terminalId,
+  user,
+  preAuthOverrideCents,
+  preAuthOverrideReason,
+  deps = {},
+} = {}) {
   if (!reservationId) {
     throw new CounterOrchestratorError('reservationId required', 400, 'MISSING_RESERVATION_ID');
   }
@@ -602,8 +609,46 @@ export async function runCounterCheckinFlow({ reservationId, terminalId, user, d
   }
 
   // ---- 7. AUTH for pre-auth security deposit -----------------------------
-  const preAuthCents = resolvePreAuthAmountCents(tenant, reservation);
+  // The agent may override the tenant's configured default if a manager
+  // authorized it. We persist both the default + override + reason to
+  // both the DejavooTransaction.requestJson AND a TenantAuditLog row so
+  // there's a full audit trail.
+  const defaultCents = resolvePreAuthAmountCents(tenant, reservation);
+  const overrideRequested =
+    typeof preAuthOverrideCents === 'number' &&
+    preAuthOverrideCents >= 0 &&
+    preAuthOverrideCents !== defaultCents;
+  const preAuthCents = overrideRequested ? preAuthOverrideCents : defaultCents;
   const preAuthAmount = preAuthCents / 100;
+
+  if (overrideRequested) {
+    try {
+      await prisma.tenantAuditLog.create({
+        data: {
+          tenantId: tenant.id,
+          actorUserId: user.sub || user.id || null,
+          action: 'PREAUTH_OVERRIDE',
+          resource: reservation.id,
+          payload: {
+            reservationId: reservation.id,
+            defaultCents,
+            overrideCents: preAuthCents,
+            reason: preAuthOverrideReason || null,
+            at: new Date().toISOString(),
+          },
+        },
+      });
+      logger.info?.('[counter-orchestrator] pre-auth override applied', {
+        reservationId, defaultCents, overrideCents: preAuthCents, reason: preAuthOverrideReason,
+      });
+    } catch (err) {
+      // Non-fatal — log + continue
+      logger.warn?.('[counter-orchestrator] failed to audit pre-auth override', {
+        msg: err.message,
+      });
+    }
+  }
+
   const { Cart, Level3 } = buildLevel3FromReservation(
     reservation, reservation.rentalAgreement || {}, reservation.charges || []
   );
@@ -617,8 +662,17 @@ export async function runCounterCheckinFlow({ reservationId, terminalId, user, d
     referenceId: authRef,
     amountCents: preAuthCents,
     invoiceNumber: reservation.id,
-    customLabel: 'Pre-auth at pickup',
-    requestJson: { amount: preAuthAmount, rentalData: Level3.RentalData, cartItems: Cart.Items.length },
+    customLabel: overrideRequested
+      ? `Pre-auth at pickup (override: \$${(preAuthCents / 100).toFixed(2)}, default was \$${(defaultCents / 100).toFixed(2)})`
+      : 'Pre-auth at pickup',
+    requestJson: {
+      amount: preAuthAmount,
+      defaultCents,
+      overrideCents: overrideRequested ? preAuthCents : null,
+      overrideReason: overrideRequested ? (preAuthOverrideReason || null) : null,
+      rentalData: Level3.RentalData,
+      cartItems: Cart.Items.length,
+    },
   });
   let authNorm = null;
   try {

@@ -60,6 +60,8 @@ export async function enqueueCounterCheckin({
   reservationId,
   terminalId,
   userSnapshot,
+  preAuthOverrideCents,
+  preAuthOverrideReason,
   ipAddress,
   userAgent,
 } = {}) {
@@ -71,7 +73,16 @@ export async function enqueueCounterCheckin({
   }
   const job = await enqueueJob(
     QUEUE_NAME,
-    { reservationId, terminalId, userSnapshot, ipAddress: ipAddress || null, userAgent: userAgent || null },
+    {
+      reservationId,
+      terminalId,
+      userSnapshot,
+      preAuthOverrideCents:
+        typeof preAuthOverrideCents === 'number' ? preAuthOverrideCents : null,
+      preAuthOverrideReason: preAuthOverrideReason || null,
+      ipAddress: ipAddress || null,
+      userAgent: userAgent || null,
+    },
     {
       priority: AUTOCHARGE_PRIORITY, // HIGH — customer is physically at the counter
       attempts: 1, // Do NOT retry. Each step is already crash-safe + idempotent on resume.
@@ -109,6 +120,9 @@ export async function counterCheckinHandler(job, deps = {}) {
       reservationId,
       terminalId,
       user: userSnapshot,
+      preAuthOverrideCents:
+        typeof data.preAuthOverrideCents === 'number' ? data.preAuthOverrideCents : undefined,
+      preAuthOverrideReason: data.preAuthOverrideReason || undefined,
       deps: {
         ipAddress: data.ipAddress,
         userAgent: data.userAgent,

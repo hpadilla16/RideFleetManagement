@@ -99,6 +99,23 @@ function makeFakePrisma({ tenants, reservations, terminals } = {}) {
         return transactions[idx];
       },
     },
+    // Round 21 — tenantAuditLog for pre-auth override audit
+    tenantAuditLog: {
+      _rows: [],
+      async create({ data }) {
+        const row = { id: `tal_${nextId++}`, createdAt: new Date(), ...data };
+        this._rows.push(row);
+        return row;
+      },
+    },
+    // Round 20 — customer for card-on-file token promotion
+    customer: {
+      async update({ where, data }) {
+        const r = reservations.find((x) => x.customer?.id === where.id);
+        if (r && r.customer) Object.assign(r.customer, data);
+        return r?.customer || { id: where.id, ...data };
+      },
+    },
   };
 }
 
@@ -522,4 +539,59 @@ test('resolveTenantConfigForTerminal throws when no key anywhere', async () => {
       ),
     (err) => err instanceof CounterOrchestratorError && err.code === 'AUTHKEY_MISSING'
   );
+});
+
+// ---------------------------------------------------------------------------
+// Round 21 — pre-auth override
+// ---------------------------------------------------------------------------
+
+test('runCounterCheckinFlow uses tenant default pre-auth when no override', async () => {
+  const deps = baseDeps();
+  // tenant settings has preAuthAmountCents = 25000 (set in baseDeps)
+  const result = await runCounterCheckinFlow({
+    reservationId: 'r1',
+    terminalId: 'term1',
+    user: { sub: 'u', role: 'AGENT', tenantId: 't1' },
+    deps,
+  });
+  assert.equal(result.authAmountCents, 25000);
+  // No audit row written
+  assert.equal(deps.prisma.tenantAuditLog._rows.length, 0);
+});
+
+test('runCounterCheckinFlow applies pre-auth override + writes audit row', async () => {
+  const deps = baseDeps();
+  const result = await runCounterCheckinFlow({
+    reservationId: 'r1',
+    terminalId: 'term1',
+    user: { sub: 'u_alice', role: 'AGENT', tenantId: 't1' },
+    preAuthOverrideCents: 50000, // $500 override vs $250 default
+    preAuthOverrideReason: 'Manager Juan approved — corporate client',
+    deps,
+  });
+  assert.equal(result.authAmountCents, 50000);
+  // Audit row written
+  const audits = deps.prisma.tenantAuditLog._rows;
+  assert.equal(audits.length, 1);
+  assert.equal(audits[0].action, 'PREAUTH_OVERRIDE');
+  assert.equal(audits[0].actorUserId, 'u_alice');
+  assert.equal(audits[0].payload.defaultCents, 25000);
+  assert.equal(audits[0].payload.overrideCents, 50000);
+  assert.equal(audits[0].payload.reason, 'Manager Juan approved — corporate client');
+  // The AUTH DejavooTransaction.customLabel reflects the override
+  const authTx = deps.prisma._state.transactions.find((t) => t.type === 'AUTH');
+  assert.match(authTx.customLabel, /override/i);
+});
+
+test('runCounterCheckinFlow no-op override (same as default) does not audit', async () => {
+  const deps = baseDeps();
+  await runCounterCheckinFlow({
+    reservationId: 'r1',
+    terminalId: 'term1',
+    user: { sub: 'u', role: 'AGENT', tenantId: 't1' },
+    preAuthOverrideCents: 25000, // same as default
+    deps,
+  });
+  // No audit row for no-op
+  assert.equal(deps.prisma.tenantAuditLog._rows.length, 0);
 });

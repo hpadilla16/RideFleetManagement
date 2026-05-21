@@ -37,6 +37,8 @@ export function CounterSigningProgress({
   reservationId,
   token,
   terminalId,
+  preAuthAmountCents,
+  preAuthOverrideReason,
   onComplete,
   onSurfaceResolved,
   onAbort,
@@ -55,7 +57,14 @@ export function CounterSigningProgress({
     startedRef.current = true;
     (async () => {
       try {
-        const body = JSON.stringify({ reservationId, ...(terminalId ? { terminalId } : {}) });
+        const body = JSON.stringify({
+          reservationId,
+          ...(terminalId ? { terminalId } : {}),
+          ...(typeof preAuthAmountCents === 'number'
+            ? { preAuthAmountCents: Math.round(preAuthAmountCents) }
+            : {}),
+          ...(preAuthOverrideReason ? { preAuthOverrideReason } : {}),
+        });
         const out = await api(
           '/api/payment-gateway/counter/start-checkin',
           { method: 'POST', body },
@@ -177,16 +186,51 @@ export function CounterSigningProgress({
   }
 
   if (phase === 'COMPLETED') {
+    const auth = signing?.auth || null;
+    const cardLast4 = auth?.cardLast4 || signing?.customerCardLast4;
+    const cardBrand = auth?.cardBrand || '';
+    const entry = auth?.cardEntryType || '';
+    const holdDollars = auth?.amountCents != null
+      ? (auth.amountCents / 100).toFixed(2)
+      : null;
     return (
       <div style={panel}>
         <div style={{ fontSize: 56 }}>✅</div>
-        <h2 style={{ marginTop: 12 }}>Signed!</h2>
+        <h2 style={{ marginTop: 12 }}>Signed & pre-authorized</h2>
         <p style={muted}>
           {signing?.signedCount}/{signing?.totalRequired} fields signed.
-          {signing?.customerCardLast4 && (
-            <> Card on file ending in <strong>{signing.customerCardLast4}</strong>.</>
-          )}
         </p>
+        {auth && (
+          <div
+            style={{
+              marginTop: 20,
+              padding: 16,
+              background: '#ecfdf5',
+              border: '1px solid #a7f3d0',
+              borderRadius: 10,
+              maxWidth: 480,
+              textAlign: 'left',
+            }}
+          >
+            <div style={{ fontSize: '0.85em', color: '#065f46', fontWeight: 600, marginBottom: 8 }}>
+              CARD ON FILE — PRE-AUTH APPROVED
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+              <KV label="Card">
+                {cardBrand ? `${cardBrand} ` : ''}
+                ending in <strong>{cardLast4 || '—'}</strong>
+              </KV>
+              <KV label="Entry">{entry || '—'}</KV>
+              <KV label="Hold">
+                {holdDollars != null ? <strong>${holdDollars}</strong> : '—'}
+              </KV>
+              <KV label="Auth code">{auth.authCode || '—'}</KV>
+            </div>
+            <div style={{ fontSize: '0.8em', color: '#065f46', marginTop: 10 }}>
+              Hold will be captured / voided / topped-up at vehicle return.
+            </div>
+          </div>
+        )}
       </div>
     );
   }
@@ -296,6 +340,17 @@ function Spinner() {
       }}
     >
       <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+    </div>
+  );
+}
+
+function KV({ label, children }) {
+  return (
+    <div>
+      <div style={{ fontSize: '0.75em', color: '#047857', textTransform: 'uppercase' }}>
+        {label}
+      </div>
+      <div style={{ fontSize: '0.95em', color: '#065f46' }}>{children}</div>
     </div>
   );
 }

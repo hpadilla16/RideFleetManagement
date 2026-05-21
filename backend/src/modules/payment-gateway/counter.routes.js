@@ -169,6 +169,14 @@ counterRouter.post('/start-checkin', requireRole('ADMIN', 'OPS', 'AGENT'), async
     }
 
     // 3. DEJAVOO_TERMINAL: enqueue the orchestrator job
+    // Optional pre-auth override (round 21) — agent supplies a non-default
+    // amount when a manager has authorized it. Audit row is written by the
+    // orchestrator when the override differs from the tenant default.
+    const overrideCents =
+      typeof body.preAuthAmountCents === 'number'
+        ? Math.max(0, Math.round(body.preAuthAmountCents))
+        : null;
+    const overrideReason = body.preAuthOverrideReason || null;
     const { jobId } = await enqueueCounterCheckin({
       reservationId,
       terminalId: surfaceInfo.terminalId,
@@ -178,6 +186,8 @@ counterRouter.post('/start-checkin', requireRole('ADMIN', 'OPS', 'AGENT'), async
         role: req.user?.role,
         tenantId: req.user?.tenantId,
       },
+      preAuthOverrideCents: overrideCents,
+      preAuthOverrideReason: overrideReason,
       ipAddress: req.ip || req.headers['x-forwarded-for'] || null,
       userAgent: req.headers['user-agent'] || null,
     });
@@ -296,6 +306,36 @@ signingStatusRouter.get('/:id/signing', async (req, res) => {
     else if (signing.refusedAt) status = 'REFUSED';
     else if (signedCount === 0) status = 'PENDING';
 
+    // Round 21 — when complete, return AUTH transaction details for the
+    // agent's card confirmation UI: cardBrand, entryType, authCode, amount.
+    let authInfo = null;
+    if (status === 'COMPLETED') {
+      const authTx = await prisma.dejavooTransaction.findFirst({
+        where: { reservationId, type: 'AUTH', approved: true },
+        orderBy: { startedAt: 'desc' },
+        select: {
+          referenceId: true,
+          amountCents: true,
+          authCode: true,
+          cardLast4: true,
+          cardBrand: true,
+          cardEntryType: true,
+          completedAt: true,
+        },
+      });
+      if (authTx) {
+        authInfo = {
+          referenceId: authTx.referenceId,
+          amountCents: authTx.amountCents,
+          authCode: authTx.authCode,
+          cardLast4: authTx.cardLast4,
+          cardBrand: authTx.cardBrand,
+          cardEntryType: authTx.cardEntryType,
+          completedAt: authTx.completedAt,
+        };
+      }
+    }
+
     res.json({
       status,
       reservationId,
@@ -315,6 +355,7 @@ signingStatusRouter.get('/:id/signing', async (req, res) => {
       template: signing.template
         ? { id: signing.template.id, name: signing.template.name, version: signing.template.version }
         : null,
+      auth: authInfo, // round 21 — { referenceId, amountCents, authCode, cardLast4, cardBrand, cardEntryType, completedAt }
     });
   } catch (err) {
     sendError(res, err);
@@ -659,6 +700,106 @@ terminalsAdminRouter.get('/:id/status', async (req, res) => {
     } catch (err) {
       res.json({ connected: false, error: err.message });
     }
+  } catch (err) {
+    sendError(res, err);
+  }
+});
+
+// ===========================================================================
+// GET /api/payment-gateway/counter/preflight?reservationId=
+// ===========================================================================
+//
+// Frontend wizard calls this BEFORE starting the counter checkin flow to
+// know:
+//   - The tenant's configured default pre-auth amount (for display + edit)
+//   - Whether an active terminal is available
+//   - Active TermsTemplate name + field count (for the splash)
+//   - Whether the customer has a saved Dejavoo card from a prior rental
+//     (so the agent can warn if there's an existing card that'll be replaced)
+//
+counterRouter.get('/preflight', requireRole('ADMIN', 'OPS', 'AGENT'), async (req, res) => {
+  try {
+    const prisma = await resolveDefaultPrisma();
+    const reservationId = req.query?.reservationId;
+    if (!reservationId) return res.status(400).json({ error: 'reservationId required' });
+
+    const reservation = await prisma.reservation.findFirst({
+      where: { id: String(reservationId), tenantId: req.user.tenantId },
+      select: {
+        id: true,
+        estimatedTotal: true,
+        customer: {
+          select: {
+            id: true,
+            firstName: true,
+            lastName: true,
+            dejavooCardLast4: true,
+            dejavooCardBrand: true,
+            dejavooCardEntryType: true,
+            dejavooCardCapturedAt: true,
+          },
+        },
+      },
+    });
+    if (!reservation) return res.status(404).json({ error: 'Reservation not found' });
+
+    const tenant = await prisma.tenant.findUnique({
+      where: { id: req.user.tenantId },
+      select: { id: true, settingsJson: true },
+    });
+    let settings = {};
+    try {
+      settings = typeof tenant?.settingsJson === 'string'
+        ? JSON.parse(tenant.settingsJson)
+        : (tenant?.settingsJson || {});
+    } catch {}
+    let defaultPreAuthCents = settings?.dejavoo?.preAuthAmountCents;
+    if (typeof defaultPreAuthCents !== 'number' || defaultPreAuthCents <= 0) {
+      const est = Number(reservation.estimatedTotal) || 0;
+      defaultPreAuthCents = est > 0 ? Math.round(est * 0.25 * 100) : 25000;
+    }
+
+    const terminal = await prisma.dejavooTerminal.findFirst({
+      where: { tenantId: req.user.tenantId, status: 'ACTIVE' },
+      orderBy: { lastSeenAt: 'desc' },
+      select: { id: true, name: true, tpn: true, lastSeenAt: true, sandbox: true },
+    });
+
+    const template = await prisma.termsTemplate.findFirst({
+      where: { tenantId: req.user.tenantId, isActive: true },
+      select: {
+        id: true,
+        name: true,
+        version: true,
+        _count: { select: { fields: true } },
+      },
+    });
+
+    res.json({
+      tenantId: req.user.tenantId,
+      reservationId: reservation.id,
+      defaultPreAuthAmountCents: defaultPreAuthCents,
+      defaultSource: settings?.dejavoo?.preAuthAmountCents ? 'tenant_settings' : 'computed_25pct',
+      terminalAvailable: !!terminal,
+      terminal,
+      activeTemplate: template
+        ? { id: template.id, name: template.name, version: template.version, fieldCount: template._count.fields }
+        : null,
+      customer: reservation.customer
+        ? {
+            id: reservation.customer.id,
+            name: [reservation.customer.firstName, reservation.customer.lastName].filter(Boolean).join(' '),
+            existingDejavooCard: reservation.customer.dejavooCardLast4
+              ? {
+                  last4: reservation.customer.dejavooCardLast4,
+                  brand: reservation.customer.dejavooCardBrand,
+                  entryType: reservation.customer.dejavooCardEntryType,
+                  capturedAt: reservation.customer.dejavooCardCapturedAt,
+                }
+              : null,
+          }
+        : null,
+    });
   } catch (err) {
     sendError(res, err);
   }
