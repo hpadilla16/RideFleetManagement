@@ -51,6 +51,7 @@ import {
   tenantFlagsAdminRouter,
   currentUserFlagsRouter,
 } from './modules/admin/tenant-flags.routes.js';
+import { termsTemplatesRouter } from './modules/terms/terms-templates.routes.js';
 import { captureBackendException, flushSentry, initSentry, isSentryEnabled } from './lib/sentry.js';
 import { appErrorHandler } from './lib/errors.js';
 import { closeBrowser } from './lib/puppeteer-browser.js';
@@ -124,6 +125,8 @@ app.use('/api/admin/integrations/tl-international', tenantRateLimit, tlInternati
 // Project convention 2026-05-21 — per-tenant feature flags (SUPER_ADMIN only)
 app.use('/api/admin/tenants', requireAuth, requireRole('SUPER_ADMIN'), tenantFlagsAdminRouter);
 app.use('/api/me', requireAuth, currentUserFlagsRouter);
+// Interactive T&C + Dejavoo unified (2026-05-21) — admin terms templates
+app.use('/api/admin/terms-templates', requireAuth, requireRole('SUPER_ADMIN', 'ADMIN'), tenantRateLimit, termsTemplatesRouter);
 app.use('/api/store-board', requireAuth, tenantRateLimit, requireRole('SUPER_ADMIN', 'ADMIN', 'OPS'), storeBoardRouter);
 
 app.use('/api/reservations', requireAuth, tenantRateLimit, requireModuleAccess('reservations'), reservationsRouter);

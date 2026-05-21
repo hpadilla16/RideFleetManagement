@@ -456,6 +456,11 @@ model Tenant {
 
   // Project convention 2026-05-21 — tenant-level audit log (feature flags + future events)
   tenantAuditLogs TenantAuditLog[]
+
+  // Interactive T&C + Dejavoo unified (2026-05-21)
+  termsTemplates      TermsTemplate[]
+  dejavooTerminals    DejavooTerminal[]
+  dejavooTransactions DejavooTransaction[]
 }
 
 model Location {
@@ -853,6 +858,11 @@ model Reservation {
   // TL International franchise integration (round 5)
   externalReservation ExternalReservation? @relation("ReservationFromExternal")
 
+  // Interactive T&C + Dejavoo unified (2026-05-21)
+  signing             ReservationSigning?
+  dejavooTransactions DejavooTransaction[]
+  signingCompletedAt  DateTime?
+
   @@index([status, pickupAt])
   @@index([workflowMode, status, pickupAt])
   @@index([pickupLocationId, pickupAt])
@@ -1088,6 +1098,9 @@ model User {
 
   // Project convention 2026-05-21 — feature flags + tenant-level audit
   tenantAuditLogs TenantAuditLog[]
+
+  // Interactive T&C + Dejavoo unified (2026-05-21)
+  reservationSigningsWitnessed ReservationSigning[] @relation("ReservationSigningWitness")
 
   @@index([tenantId, role, isActive])
   @@index([commissionPlanId])
@@ -2960,4 +2973,196 @@ model TenantAuditLog {
 
   @@index([tenantId, createdAt])
   @@index([action, createdAt])
+}
+
+// ============================================================================
+// Interactive T&C + Dejavoo P1 — unified signing model (2026-05-21)
+//
+// Design doc: doc/interactive-tc-and-dejavoo-unified-2026-05-21.md
+//
+// Tenant authors a versioned TermsTemplate (HTML + named field markers).
+// One TermsTemplate is active per tenant at a time. Each customer
+// signing produces one ReservationSigning + N ReservationSigningField
+// rows regardless of which surface captured the signatures (tablet,
+// Dejavoo P1 terminal, or customer portal).
+//
+// Feature flags gating these surfaces:
+//   interactiveTC   = OFF | TEST | LIVE   (enables structured signing)
+//   dejavooCounter  = OFF | TEST | LIVE   (enables terminal as surface + pre-auth)
+//
+// See doc/feature-flag-convention.md for the OFF/TEST/LIVE pattern.
+// ============================================================================
+
+enum TermsFieldKind {
+  INITIAL
+  SIGNATURE
+  CHECKBOX
+  TEXT_FIELD
+  DATE
+}
+
+model TermsTemplate {
+  id              String   @id @default(cuid())
+  tenantId        String
+  tenant          Tenant   @relation(fields: [tenantId], references: [id])
+  name            String
+  version         String
+  isActive        Boolean  @default(false)
+  contentHtml     String   @db.Text
+  contentLanguage String   @default("both") // 'es' | 'en' | 'both'
+  effectiveDate   DateTime
+  createdByUserId String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  fields   TermsTemplateField[]
+  signings ReservationSigning[]
+
+  @@unique([tenantId, version])
+  @@index([tenantId, isActive])
+}
+
+model TermsTemplateField {
+  id                  String         @id @default(cuid())
+  templateId          String
+  template            TermsTemplate  @relation(fields: [templateId], references: [id], onDelete: Cascade)
+  kind                TermsFieldKind
+  label               String
+  markerKey           String
+  required            Boolean        @default(true)
+  order               Int            @default(0)
+  // Terminal-specific. If null, the orchestrator extracts the surrounding
+  // ~300 chars of contentHtml around {{markerKey}} as the context shown on
+  // the terminal Disclaimer screen before this field's prompt.
+  terminalContextText String?        @db.Text
+  // Terminal-specific. Prompt shown on the terminal during GetSignature /
+  // UserChoice / UserInput. If null, derived from `label`.
+  terminalPromptText  String?
+
+  signingFields ReservationSigningField[]
+
+  @@unique([templateId, markerKey])
+  @@index([templateId, order])
+}
+
+model ReservationSigning {
+  id                      String           @id @default(cuid())
+  reservationId           String           @unique
+  reservation             Reservation      @relation(fields: [reservationId], references: [id])
+  templateId              String
+  template                TermsTemplate    @relation(fields: [templateId], references: [id])
+  templateVersionSnapshot String           @db.Text // frozen contentHtml at sign time
+  surfaceUsed             String // 'TABLET' | 'DEJAVOO_TERMINAL' | 'CUSTOMER_PORTAL'
+  dejavooTerminalId       String?
+  dejavooTerminal         DejavooTerminal? @relation(fields: [dejavooTerminalId], references: [id])
+  startedAt               DateTime         @default(now())
+  completedAt             DateTime?
+  refusedAt               DateTime?
+  refusalReason           String?
+  agentUserId             String
+  agentUser               User             @relation("ReservationSigningWitness", fields: [agentUserId], references: [id])
+  customerName            String
+  customerLicense         String?
+  customerCardLast4       String?
+  ipAddress               String?
+  userAgent               String?
+  signedPdfStoragePath    String?
+  receiptStoragePath      String? // Dejavoo receipt slip, if any
+  createdAt               DateTime         @default(now())
+  updatedAt               DateTime         @updatedAt
+
+  fields              ReservationSigningField[]
+  dejavooTransactions DejavooTransaction[]
+
+  @@index([templateId])
+  @@index([agentUserId])
+}
+
+model ReservationSigningField {
+  id                   String              @id @default(cuid())
+  signingId            String
+  signing              ReservationSigning  @relation(fields: [signingId], references: [id], onDelete: Cascade)
+  templateFieldId      String
+  templateField        TermsTemplateField  @relation(fields: [templateFieldId], references: [id])
+  value                String?             @db.Text // CHECKBOX state, DATE ISO, TEXT_FIELD raw
+  signatureSvgOrPath   String?             @db.Text // SVG (tablet) OR Storage path (terminal PNG)
+  signedAt             DateTime?
+  dejavooTransactionId String?
+  dejavooTransaction   DejavooTransaction? @relation(fields: [dejavooTransactionId], references: [id])
+
+  @@unique([signingId, templateFieldId])
+  @@index([signingId])
+}
+
+model DejavooTerminal {
+  id             String    @id @default(cuid())
+  tenantId       String
+  tenant         Tenant    @relation(fields: [tenantId], references: [id])
+  name           String // human label, e.g. "Counter — SJU Airport"
+  tpn            String // Terminal Profile Number from Dejavoo (unique per device)
+  authKeyEnc     String?   @db.Text // encrypted Auth Key (AES-256-GCM via integration-crypto)
+  merchantNumber Int       @default(1)
+  callbackUrl    String?
+  sandbox        Boolean   @default(true)
+  status         String    @default("ACTIVE") // ACTIVE | INACTIVE
+  lastSeenAt     DateTime?
+  notes          String?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  transactions DejavooTransaction[]
+  signings     ReservationSigning[]
+
+  @@unique([tenantId, tpn])
+  @@index([tenantId, status])
+}
+
+model DejavooTransaction {
+  id            String              @id @default(cuid())
+  tenantId      String
+  tenant        Tenant              @relation(fields: [tenantId], references: [id])
+  terminalId    String
+  terminal      DejavooTerminal     @relation(fields: [terminalId], references: [id])
+  reservationId String?
+  reservation   Reservation?        @relation(fields: [reservationId], references: [id])
+  signingId     String?
+  signing       ReservationSigning? @relation(fields: [signingId], references: [id])
+
+  type          String // SALE | AUTH | CAPTURE | VOID | REFUND |
+  // GET_SIGNATURE | DISCLAIMER | USER_CHOICE | USER_INPUT | CART
+  referenceId   String  @unique
+  amountCents   Int?
+  invoiceNumber String?
+  customLabel   String? // human-readable purpose
+
+  requestJson   Json
+  responseJson  Json?
+  rawResponse   Json?
+  statusCode    String?
+  resultCode    Int?
+  approved      Boolean @default(false)
+  authCode      String?
+  iposToken     String?
+  cardLast4     String?
+  cardBrand     String?
+  cardEntryType String? // CHIP | SWIPE | CONTACTLESS | KEYED
+  errorMessage  String?
+
+  signatureStoragePath String?
+
+  parentTransactionId   String?
+  parentTransaction     DejavooTransaction?       @relation("DejavooTxParent", fields: [parentTransactionId], references: [id])
+  childTransactions     DejavooTransaction[]      @relation("DejavooTxParent")
+  signingFieldsCaptured ReservationSigningField[]
+
+  startedAt          DateTime  @default(now())
+  completedAt        DateTime?
+  callbackReceivedAt DateTime?
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+
+  @@index([tenantId, createdAt])
+  @@index([reservationId, type])
+  @@index([referenceId])
+  @@index([signingId])
 }
