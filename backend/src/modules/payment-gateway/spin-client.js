@@ -362,6 +362,64 @@ export const spinClient = {
       ...(rentalData ? { RentalData: rentalData } : {}),
     }, tenantConfig);
   },
+
+  /**
+   * Sale using a previously-captured IPosToken (card-not-present).
+   * Used for post-rental charges (tolls, late fees, damage assessments)
+   * where the customer has already left + their card was tokenized during
+   * the prior AUTH/SALE.
+   *
+   * The Dejavoo SPIn API accepts an IPosToken field on the Sale endpoint
+   * to signal "use the saved token instead of prompting the terminal."
+   * No physical card interaction; the request returns immediately.
+   *
+   * Note: CaptureSignature is DISABLED here — there's no terminal
+   * interaction so we can't capture a signature. The chargeback evidence
+   * for card-not-present transactions relies on the prior signed agreement +
+   * the original AUTH's signature.
+   *
+   * @param {object} args
+   * @param {number} args.amount
+   * @param {string} args.referenceId
+   * @param {string} args.iposToken       — the saved Dejavoo token
+   * @param {string} [args.invoiceNumber]
+   * @param {string} [args.paymentType]   — defaults to 'Credit'
+   * @param {object} [args.cart]
+   * @param {object} [args.level3]        — RentalData passthrough for L3
+   * @param {object} [args.customFields]
+   */
+  async saleWithToken({
+    amount,
+    referenceId,
+    iposToken,
+    invoiceNumber,
+    paymentType = 'Credit',
+    cart,
+    level3,
+    customFields,
+  }, tenantConfig) {
+    if (!iposToken) {
+      throw new Error('saleWithToken: iposToken is required');
+    }
+    return spinRequest('POST', 'v2/Payment/Sale', {
+      Amount: Number(amount),
+      PaymentType: paymentType,
+      ReferenceId: String(referenceId).slice(0, 50),
+      // IPosToken signals card-not-present + use the saved token.
+      // Field name per Dejavoo SPIn API spec. If the field name is
+      // different in your firmware, adjust here.
+      IPosToken: String(iposToken),
+      // CardNotPresent flag tells the API to skip terminal prompts.
+      CardNotPresent: true,
+      // Disable terminal interaction
+      CaptureSignature: false,
+      ...(invoiceNumber ? { InvoiceNumber: String(invoiceNumber).slice(0, 50) } : {}),
+      ...(cart ? { Cart: cart } : {}),
+      ...(level3 ? { Level3: level3 } : {}),
+      ...(customFields ? { CustomFields: customFields } : {}),
+      GetExtendedData: true,
+    }, tenantConfig);
+  },
 };
 
 // =============================================================================

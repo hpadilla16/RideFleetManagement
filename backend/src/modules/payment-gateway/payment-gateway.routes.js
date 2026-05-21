@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import { paymentGatewayService } from './payment-gateway.service.js';
+import { prisma } from '../../lib/prisma.js';
 import { isSuperAdmin } from '../../middleware/auth.js';
 
 export const paymentGatewayRouter = Router();
@@ -114,6 +115,49 @@ paymentGatewayRouter.get('/summary', async (req, res, next) => {
     res.json(await paymentGatewayService.getSummaryReport({ tenantId: tenantIdFor(req) }));
   } catch (e) {
     res.status(400).json({ error: e.message });
+  }
+});
+
+// Round 20 — Charge customer card-on-file via Dejavoo (card-not-present)
+//
+// Used for post-rental charges (tolls, late fees, damage assessments)
+// where the customer has already left + their card was tokenized during
+// the prior AUTH/SALE on the terminal.
+//
+// Mounted under /api/reservations/:id/charge-card-on-file in main.js when
+// the reservation has a linked customer with a dejavooIposToken.
+paymentGatewayRouter.post('/reservations/:id/charge-card-on-file', async (req, res) => {
+  try {
+    const role = String(req.user?.role || '').toUpperCase();
+    if (!['SUPER_ADMIN', 'ADMIN', 'OPS'].includes(role)) {
+      return res.status(403).json({ error: 'ADMIN or OPS only' });
+    }
+    const { amount, label } = req.body || {};
+    if (!amount || Number(amount) <= 0) {
+      return res.status(400).json({ error: 'amount must be > 0' });
+    }
+    const reservationId = req.params.id;
+    const reservation = await prisma.reservation.findFirst({
+      where: { id: reservationId, tenantId: req.user.tenantId },
+      select: { id: true, customerId: true },
+    });
+    if (!reservation) {
+      return res.status(404).json({ error: 'Reservation not found in tenant scope' });
+    }
+    if (!reservation.customerId) {
+      return res.status(422).json({ error: 'Reservation has no linked customer' });
+    }
+    const result = await paymentGatewayService.chargeCardOnFileViaDejavoo({
+      customerId: reservation.customerId,
+      amount: Number(amount),
+      reservationId,
+      label,
+      tenantId: req.user.tenantId,
+      actorUserId: req.user?.sub || req.user?.id,
+    });
+    res.json(result);
+  } catch (e) {
+    res.status(400).json({ error: e.message, spinStatusCode: e.spinStatusCode });
   }
 });
 

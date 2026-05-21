@@ -663,6 +663,37 @@ export async function runCounterCheckinFlow({ reservationId, terminalId, user, d
     data: { lastSeenAt: new Date() },
   });
 
+  // ---- 9. Promote IPosToken to Customer card-on-file (round 20) ----------
+  // The AUTH response includes an IPosToken that represents the card in
+  // Dejavoo's token vault. Saving it on the Customer record lets us run
+  // card-not-present charges later (tolls, late fees, damage assessments)
+  // without the customer being physically present.
+  if (authNorm?.iposToken && reservation.customer?.id) {
+    try {
+      await prisma.customer.update({
+        where: { id: reservation.customer.id },
+        data: {
+          dejavooIposToken: authNorm.iposToken,
+          dejavooCardLast4: authNorm.cardData?.last4 || null,
+          dejavooCardBrand: authNorm.cardData?.cardType || null,
+          dejavooCardEntryType: authNorm.cardData?.entryType || null,
+          dejavooCardCapturedAt: new Date(),
+        },
+      });
+      logger.info?.('[counter-orchestrator] saved card-on-file token', {
+        customerId: reservation.customer.id,
+        last4: authNorm.cardData?.last4,
+      });
+    } catch (err) {
+      // Non-fatal — log + continue. The transaction is already approved;
+      // we just lose the future card-on-file benefit.
+      logger.warn?.('[counter-orchestrator] failed to save card-on-file token', {
+        customerId: reservation.customer.id,
+        msg: err.message,
+      });
+    }
+  }
+
   logger.info?.('[counter-orchestrator] completed', {
     reservationId,
     signingId: signing.id,

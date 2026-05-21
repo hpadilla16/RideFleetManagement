@@ -393,6 +393,8 @@ async function _caseCapture({
       data: { signatureStoragePath: sigPath },
     });
   }
+  // Promote token to Customer card-on-file (round 20)
+  await _promoteCardOnFile({ prisma, normalized, reservation, logger });
   // Touch terminal lastSeenAt
   await prisma.dejavooTerminal.update({
     where: { id: terminal.id },
@@ -510,6 +512,8 @@ async function _caseCaptureAndSale({
       data: { signatureStoragePath: sigPath },
     });
   }
+  // Promote token to Customer card-on-file (round 20)
+  await _promoteCardOnFile({ prisma, normalized: saleNorm, reservation, logger });
   await prisma.dejavooTerminal.update({
     where: { id: terminal.id },
     data: { lastSeenAt: new Date() },
@@ -589,6 +593,39 @@ async function _caseVoid({
 // ---------------------------------------------------------------------------
 // Receipt signature persistence
 // ---------------------------------------------------------------------------
+
+/**
+ * Promote the IPosToken returned from CAPTURE/SALE up to Customer for
+ * future card-not-present charges (round 20). Non-fatal on error.
+ */
+async function _promoteCardOnFile({ prisma, normalized, reservation, logger }) {
+  if (!normalized?.iposToken || !reservation?.customer?.id) return;
+  try {
+    await prisma.customer.update({
+      where: { id: reservation.customer.id },
+      data: {
+        dejavooIposToken: normalized.iposToken,
+        dejavooCardLast4: normalized.cardData?.last4 || null,
+        dejavooCardBrand: normalized.cardData?.cardType || null,
+        dejavooCardEntryType: normalized.cardData?.entryType || null,
+        dejavooCardCapturedAt: new Date(),
+      },
+    });
+    if (logger?.info) {
+      logger.info('[counter-return] saved card-on-file token', {
+        customerId: reservation.customer.id,
+        last4: normalized.cardData?.last4,
+      });
+    }
+  } catch (err) {
+    if (logger?.warn) {
+      logger.warn('[counter-return] failed to save card-on-file token', {
+        customerId: reservation.customer.id,
+        msg: err.message,
+      });
+    }
+  }
+}
 
 async function _persistReceiptSig({ raw, prisma, storage, tenant, reservation, txId }) {
   // Dejavoo Sale/Capture responses with CaptureSignature=true include

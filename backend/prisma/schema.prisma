@@ -692,6 +692,15 @@ model Customer {
   cardExpiresMonth         Int?
   cardExpiresYear          Int?
   cardUpdatedAt            DateTime?
+  // Dejavoo SPIn card-on-file (2026-05-21 — round 20)
+  // Populated by the counter checkin/return orchestrators when the
+  // terminal returns an IPosToken after AUTH/SALE. Used for card-not-present
+  // charges (post-rental tolls, late fees, damage assessments).
+  dejavooIposToken         String?
+  dejavooCardLast4         String?
+  dejavooCardBrand         String?
+  dejavooCardEntryType     String? // CHIP | SWIPE | CONTACTLESS | KEYED
+  dejavooCardCapturedAt    DateTime?
   creditBalance            Decimal   @default(0) @db.Decimal(10, 2)
   portalResetToken         String?
   portalResetExpiresAt     DateTime?
