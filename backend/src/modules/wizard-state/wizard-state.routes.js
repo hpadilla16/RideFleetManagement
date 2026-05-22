@@ -19,6 +19,7 @@
  */
 
 import { Router } from 'express';
+import { requireRole } from '../../middleware/auth.js';
 import {
   getCheckoutWizardState,
   getCheckinWizardState,
@@ -44,15 +45,11 @@ async function resolveSigningStorage() {
   return _signingStorage;
 }
 
-function requireRole(...allowed) {
-  return (req, res, next) => {
-    if (!req.user) return res.status(401).json({ error: 'Unauthenticated' });
-    if (allowed.length && !allowed.includes(req.user.role)) {
-      return res.status(403).json({ error: 'Forbidden' });
-    }
-    next();
-  };
-}
+// Round 25: removed local requireRole — replaced with canonical import from
+// middleware/auth.js which adds the SUPER_ADMIN bypass. The local version
+// missed the bypass which caused SUPER_ADMIN 403s during smoke test even when
+// SUPER_ADMIN was in the allowed list (downstream service rejected
+// req.user.tenantId=null).
 
 function sendError(res, err) {
   if (err instanceof WizardStateError) {

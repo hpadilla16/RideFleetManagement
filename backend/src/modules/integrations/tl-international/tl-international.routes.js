@@ -43,18 +43,37 @@ tlInternationalRouter.use(requireAuth, requireRole('SUPER_ADMIN'));
 // Helpers
 // ---------------------------------------------------------------------------
 
+// Round 25 (2026-05-22): TenantRequiredError is a typed error so the
+// asyncHandler wrapper can distinguish "client forgot to pass tenantId" (400)
+// from a real server crash (500). Before this fix a plain Error was thrown
+// which leaked as a 500 Internal Server Error on the SUPER_ADMIN admin page.
+class TenantRequiredError extends Error {
+  constructor(message) {
+    super(message);
+    this.name = 'TenantRequiredError';
+    this.status = 400;
+  }
+}
+
 function resolveTenantId(req) {
   // SUPER_ADMIN can target any tenant via ?tenantId= or body.tenantId
   if (isSuperAdmin(req.user)) {
     const t = req.query?.tenantId || req.body?.tenantId || req.user?.tenantId;
-    if (!t) throw new Error('tenantId is required (SUPER_ADMIN must pick one)');
+    if (!t) throw new TenantRequiredError('tenantId is required (SUPER_ADMIN must pick one)');
     return String(t);
   }
   return req.user?.tenantId;
 }
 
 function asyncHandler(fn) {
-  return (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
+  return (req, res, next) => Promise.resolve(fn(req, res, next)).catch((err) => {
+    // Map typed validation errors to their declared status (400) instead of
+    // letting them surface as 500 through Express's default error handler.
+    if (err instanceof TenantRequiredError) {
+      return res.status(err.status).json({ error: err.message });
+    }
+    return next(err);
+  });
 }
 
 function send400(res, message) {

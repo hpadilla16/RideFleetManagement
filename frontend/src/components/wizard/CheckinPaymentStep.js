@@ -41,8 +41,11 @@ export function CheckinPaymentStep({
   error,
   onTerminalCompleted,
   LegacySignature,
+  tenantId, // Round 25 (2026-05-22): SUPER_ADMIN tenant scoping for feature flags
 }) {
-  const { flags, loading } = useFeatureFlags(token);
+  // Round 25: pass tenantId so SUPER_ADMIN viewing another tenant's reservation
+  // sees that tenant's flag state, not empty {}.
+  const { flags, loading } = useFeatureFlags(token, tenantId || null);
   const [forceLegacy, setForceLegacy] = useState(false);
   const [terminalStarted, setTerminalStarted] = useState(false);
 

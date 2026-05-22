@@ -335,6 +335,7 @@ function CheckinWizard({ token, me, logout }) {
           <CheckinPaymentStep
             reservationId={reservationId}
             token={token}
+            tenantId={reservation?.tenantId || agreement?.tenantId || null}
             finalAmountCents={Math.round((Number(feePreview?.total) || 0) * 100)}
             feePreview={feePreview}
             signerName={signerName}

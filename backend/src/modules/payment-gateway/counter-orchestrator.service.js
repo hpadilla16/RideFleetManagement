@@ -136,7 +136,11 @@ async function recordTxError(prisma, txId, err) {
   return prisma.dejavooTransaction.update({
     where: { id: txId },
     data: {
-      statusCode: err?.spinStatusCode || 'ERROR',
+      // Round 25 fix (2026-05-22): DejavooTransaction.statusCode is String?
+      // but spinStatusCode comes back as Int from SPIn. Wrap so Prisma doesn't
+      // reject the write. Without this, when the SPIn flow fails the audit row
+      // never gets persisted → we lose the trail of WHY it failed.
+      statusCode: String(err?.spinStatusCode || 'ERROR'),
       errorMessage: err?.message || 'unknown error',
       completedAt: new Date(),
     },

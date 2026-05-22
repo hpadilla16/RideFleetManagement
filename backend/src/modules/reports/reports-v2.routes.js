@@ -16,6 +16,7 @@
  */
 
 import { Router } from 'express';
+import { requireRole } from '../../middleware/auth.js';
 import {
   listReports,
   getSnapshot,
@@ -23,15 +24,10 @@ import {
 } from './reports-v2.service.js';
 import { renderReportPdf, renderReportExcel, wrapReportHtml } from './reports-export.js';
 
-function requireRole(...allowed) {
-  return (req, res, next) => {
-    if (!req.user) return res.status(401).json({ error: 'Unauthenticated' });
-    if (allowed.length && !allowed.includes(req.user.role)) {
-      return res.status(403).json({ error: 'Forbidden' });
-    }
-    next();
-  };
-}
+// Round 25: removed local requireRole — replaced with canonical import from
+// middleware/auth.js which adds the SUPER_ADMIN bypass. Without the bypass,
+// SUPER_ADMIN users got 403s on per-report endpoints that didn't list
+// SUPER_ADMIN explicitly in their allowed roles.
 
 function sendError(res, err) {
   if (err instanceof ReportsServiceError) {

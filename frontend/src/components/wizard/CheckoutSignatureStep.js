@@ -45,7 +45,9 @@ export function CheckoutSignatureStep({
   onTerminalCompleted,
   LegacySignature,
 }) {
-  const { flags, effectiveStates, loading } = useFeatureFlags(token);
+  // Round 25 (2026-05-22): pass agreement.tenantId so SUPER_ADMIN viewing
+  // another tenant's reservation sees that tenant's flag state, not empty {}.
+  const { flags, effectiveStates, loading } = useFeatureFlags(token, agreement?.tenantId || null);
   // Choice can be overridden by the agent — "Use legacy instead" link.
   const [forceLegacy, setForceLegacy] = useState(false);
   // Round 21 — preflight info + pre-auth override

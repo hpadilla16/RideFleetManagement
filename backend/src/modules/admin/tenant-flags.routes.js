@@ -104,7 +104,16 @@ export const currentUserFlagsRouter = Router();
  */
 currentUserFlagsRouter.get('/feature-flags', async (req, res) => {
   try {
-    const tenantId = req.user?.tenantId;
+    // Round 25 (2026-05-22): SUPER_ADMIN can pass ?tenantId= to view a specific
+    // tenant's flags. Without this, SUPER_ADMIN with tenantId=null in JWT got
+    // empty flags and was forced to flip flags to LIVE just to test TEST-mode
+    // features. Now SUPER_ADMIN can preview any tenant's flag state by passing
+    // ?tenantId=<id>, matching the tenant-scoping pattern used in
+    // /api/admin/integrations/tl-international and other admin endpoints.
+    let tenantId = req.user?.tenantId;
+    if (!tenantId && req.user?.role === 'SUPER_ADMIN' && req.query?.tenantId) {
+      tenantId = String(req.query.tenantId);
+    }
     if (!tenantId) {
       return res.json({ flags: {}, effectiveStates: {} });
     }
