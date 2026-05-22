@@ -47,6 +47,26 @@ import { buildOpenApiSpec, swaggerHtml } from './docs/openapi.js';
 import { smsRouter } from './modules/sms/sms.routes.js';
 import { knowledgeBaseRouter } from './modules/knowledge-base/knowledge-base.routes.js';
 import { tlInternationalRouter } from './modules/integrations/tl-international/tl-international.routes.js';
+import {
+  tenantFlagsAdminRouter,
+  currentUserFlagsRouter,
+} from './modules/admin/tenant-flags.routes.js';
+import { termsTemplatesRouter } from './modules/terms/terms-templates.routes.js';
+import {
+  counterRouter,
+  signingStatusRouter,
+  transactionsRouter,
+  terminalsAdminRouter,
+} from './modules/payment-gateway/counter.routes.js';
+import {
+  wizardStateReservationRouter,
+  wizardStateVehicleRouter,
+  wizardStateAgreementRouter,
+} from './modules/wizard-state/wizard-state.routes.js';
+import { reportsV2Router } from './modules/reports/reports-v2.routes.js';
+// Side-effect import: registers every individual report (commission, agent track record, etc.)
+// via their registerReport() calls. Must come AFTER reportsV2Router import.
+import './modules/reports/register-all-reports.js';
 import { captureBackendException, flushSentry, initSentry, isSentryEnabled } from './lib/sentry.js';
 import { appErrorHandler } from './lib/errors.js';
 import { closeBrowser } from './lib/puppeteer-browser.js';
@@ -117,6 +137,25 @@ app.use('/api/payment-gateway', requireAuth, tenantRateLimit, requireRole('ADMIN
 app.use('/api/sms', requireAuth, tenantRateLimit, requireRole('ADMIN', 'OPS'), smsRouter);
 app.use('/api/knowledge-base', requireAuth, tenantRateLimit, knowledgeBaseRouter);
 app.use('/api/admin/integrations/tl-international', tenantRateLimit, tlInternationalRouter);
+// Project convention 2026-05-21 — per-tenant feature flags (SUPER_ADMIN only)
+app.use('/api/admin/tenants', requireAuth, requireRole('SUPER_ADMIN'), tenantFlagsAdminRouter);
+app.use('/api/me', requireAuth, currentUserFlagsRouter);
+// Interactive T&C + Dejavoo unified (2026-05-21) — admin terms templates
+app.use('/api/admin/terms-templates', requireAuth, requireRole('SUPER_ADMIN', 'ADMIN'), tenantRateLimit, termsTemplatesRouter);
+// Counter terminal flow — P3 routes (enqueue + abort)
+app.use('/api/payment-gateway/counter', requireAuth, tenantRateLimit, counterRouter);
+// Signing status polling endpoints — mounted under /api/reservations
+app.use('/api/reservations', requireAuth, tenantRateLimit, signingStatusRouter);
+// Round 23 — wizard state (checkout/checkin progress) endpoints.
+// Mounted BEFORE the broader reservationsRouter / rentalAgreementsRouter so
+// the /:id/checkout-wizard-state etc. paths match here first.
+app.use('/api/reservations', requireAuth, tenantRateLimit, wizardStateReservationRouter);
+app.use('/api/vehicles', requireAuth, tenantRateLimit, wizardStateVehicleRouter);
+app.use('/api/rental-agreements', requireAuth, tenantRateLimit, wizardStateAgreementRouter);
+// P6: transactions audit list + evidence pack (ADMIN/OPS)
+app.use('/api/payment-gateway/transactions', requireAuth, tenantRateLimit, transactionsRouter);
+// P6: SUPER_ADMIN-only terminal management
+app.use('/api/admin/payment-gateway/terminals', requireAuth, requireRole('SUPER_ADMIN'), tenantRateLimit, terminalsAdminRouter);
 app.use('/api/store-board', requireAuth, tenantRateLimit, requireRole('SUPER_ADMIN', 'ADMIN', 'OPS'), storeBoardRouter);
 
 app.use('/api/reservations', requireAuth, tenantRateLimit, requireModuleAccess('reservations'), reservationsRouter);
@@ -131,6 +170,10 @@ app.use('/api/stop-sales', requireAuth, tenantRateLimit, requireModuleAccess('se
 app.use('/api/rates', requireAuth, tenantRateLimit, requireModuleAccess('settings'), requireRole('ADMIN', 'OPS'), ratesRouter);
 app.use('/api/market-scraper', requireAuth, tenantRateLimit, requireModuleAccess('settings'), requireRole('ADMIN', 'OPS'), marketScraperRouter);
 app.use('/api/rental-agreements', requireAuth, tenantRateLimit, requireModuleAccess('reservations'), rentalAgreementsRouter);
+// Round 24 — new reports v2 router mounted BEFORE the legacy reportsRouter
+// so the new /list, /snapshot, and /{slug} endpoints land first. Anything
+// the v2 router doesn't match falls through to the legacy router below.
+app.use('/api/reports', requireAuth, tenantRateLimit, requireModuleAccess('reports'), reportsV2Router);
 app.use('/api/reports', requireAuth, tenantRateLimit, requireModuleAccess('reports'), reportsRouter);
 app.use('/api/commissions', requireAuth, tenantRateLimit, requireModuleAccess('reports'), commissionsRouter);
 app.use('/api/car-sharing', requireAuth, tenantRateLimit, requireModuleAccess('carSharing'), requireRole('ADMIN', 'OPS'), carSharingRouter);
