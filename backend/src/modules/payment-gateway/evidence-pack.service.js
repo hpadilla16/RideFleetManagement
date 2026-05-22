@@ -24,7 +24,22 @@
  */
 
 import { signSignatureUrl, signSignatureUrls } from '../terms/signing-storage.js';
-import { signInspectionMediaRows } from '../inspections/inspection-media-storage.js';
+// Lazy load — inspections module ships in Pillar 2 (rounds 12-12c).
+// Until those land, evidence-pack falls back to returning an empty array
+// for inspection media (route still works, just no inspection photos in
+// the chargeback bundle).
+let _signInspectionMediaRows = null;
+async function signInspectionMediaRows(...args) {
+  if (!_signInspectionMediaRows) {
+    try {
+      const m = await import('../inspections/inspection-media-storage.js');
+      _signInspectionMediaRows = m.signInspectionMediaRows;
+    } catch {
+      _signInspectionMediaRows = () => [];
+    }
+  }
+  return _signInspectionMediaRows(...args);
+}
 
 // Lazy prisma
 let _defaultPrisma = null;
