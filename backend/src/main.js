@@ -63,6 +63,10 @@ import {
   wizardStateVehicleRouter,
   wizardStateAgreementRouter,
 } from './modules/wizard-state/wizard-state.routes.js';
+import { reportsV2Router } from './modules/reports/reports-v2.routes.js';
+// Side-effect import: registers every individual report (commission, agent track record, etc.)
+// via their registerReport() calls. Must come AFTER reportsV2Router import.
+import './modules/reports/register-all-reports.js';
 import { captureBackendException, flushSentry, initSentry, isSentryEnabled } from './lib/sentry.js';
 import { appErrorHandler } from './lib/errors.js';
 import { closeBrowser } from './lib/puppeteer-browser.js';
@@ -166,6 +170,10 @@ app.use('/api/stop-sales', requireAuth, tenantRateLimit, requireModuleAccess('se
 app.use('/api/rates', requireAuth, tenantRateLimit, requireModuleAccess('settings'), requireRole('ADMIN', 'OPS'), ratesRouter);
 app.use('/api/market-scraper', requireAuth, tenantRateLimit, requireModuleAccess('settings'), requireRole('ADMIN', 'OPS'), marketScraperRouter);
 app.use('/api/rental-agreements', requireAuth, tenantRateLimit, requireModuleAccess('reservations'), rentalAgreementsRouter);
+// Round 24 — new reports v2 router mounted BEFORE the legacy reportsRouter
+// so the new /list, /snapshot, and /{slug} endpoints land first. Anything
+// the v2 router doesn't match falls through to the legacy router below.
+app.use('/api/reports', requireAuth, tenantRateLimit, requireModuleAccess('reports'), reportsV2Router);
 app.use('/api/reports', requireAuth, tenantRateLimit, requireModuleAccess('reports'), reportsRouter);
 app.use('/api/commissions', requireAuth, tenantRateLimit, requireModuleAccess('reports'), commissionsRouter);
 app.use('/api/car-sharing', requireAuth, tenantRateLimit, requireModuleAccess('carSharing'), requireRole('ADMIN', 'OPS'), carSharingRouter);
