@@ -782,7 +782,7 @@ counterRouter.get('/preflight', requireRole('ADMIN', 'OPS', 'AGENT'), async (req
         },
         charges: {
           where: { selected: true },
-          select: { total: true, label: true },
+          select: { total: true, name: true },
         },
       },
     });

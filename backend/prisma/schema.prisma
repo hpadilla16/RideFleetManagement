@@ -401,6 +401,11 @@ model Tenant {
   // rental-agreement renderer (see getEffectiveTermsHtmlForTenant).
   // When null/empty, the system continues to render the canonical T&C.
   termsHtml               String?  @db.Text
+  // Per-tenant operational settings bag — Dejavoo preAuth amounts, flags,
+  // future per-tenant feature config. Free-form JSONB, schema-less so we
+  // can add knobs without migrations. Read via `tenant.settingsJson?.X.Y`.
+  // Added 2026-05-22 (round 25 prep) — was hotfixed in prod on 2026-05-21.
+  settingsJson            Json?    @db.JsonB @default("{}")
   createdAt               DateTime @default(now())
   updatedAt               DateTime @updatedAt
 
