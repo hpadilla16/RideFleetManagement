@@ -144,17 +144,21 @@ function makeSpinStub({ onSignature, onChoice, onInput } = {}) {
       const value = onInput ? onInput(inputIdx++) : '2026-05-21';
       return makeOkResponse({ UserInput: value });
     },
-    // Round 22 — pickup SALE for rental fee; returns IPosToken for the AUTH step
+    // Round 22 — pickup SALE for rental fee; returns IPosToken for the AUTH step.
+    // Round 25 — also returns SignatureData (PNG base64) since the SALE now
+    // captures the T&C signature inline (CaptureSignature: true).
     autoRentalSale: async () =>
       makeOkResponse({
         AuthCode: 'SALE123',
         IPosToken: 'TOKEN_FROM_SALE',
+        SignatureData: 'TC_SIG_PNG_BASE64',
         CardData: { Last4: '4242', CardType: 'VISA', EntryType: 'CHIP' },
       }),
     autoRentalAuth: async () =>
       makeOkResponse({
         AuthCode: 'AUTH123',
         IPosToken: 'TOKEN_FROM_AUTH',
+        SignatureData: 'TC_SIG_PNG_BASE64',
         CardData: { Last4: '4242', CardType: 'VISA', EntryType: 'CHIP' },
       }),
     // Round 22 — CNP AUTH used after SALE captured a token
@@ -249,7 +253,7 @@ function baseDeps({ flags = { interactiveTC: true, dejavooCounter: true }, signO
 // Happy path
 // ---------------------------------------------------------------------------
 
-test('runCounterCheckinFlow completes end-to-end with all field kinds', async () => {
+test('runCounterCheckinFlow completes end-to-end with Sale-driven flow (round 25)', async () => {
   const deps = baseDeps();
   const user = { sub: 'u_alice', role: 'AGENT', tenantId: 't1' };
   const result = await runCounterCheckinFlow({
@@ -270,15 +274,30 @@ test('runCounterCheckinFlow completes end-to-end with all field kinds', async ()
   const sgn = deps.prisma._state.signings[0];
   assert.ok(sgn.completedAt instanceof Date);
   assert.equal(sgn.customerCardLast4, '4242');
-  // 5 signing fields persisted
+  // Round 25: 5 signing fields persisted, all pointing to the SAME signature
+  // blob captured during the Sale step (single signature counts as
+  // acceptance of every required template field).
   assert.equal(deps.prisma._state.signingFields.length, 5);
-  // Many DejavooTransaction rows
+  const sigFields = deps.prisma._state.signingFields.filter((f) =>
+    f.signatureSvgOrPath
+  );
+  // Only INITIAL + SIGNATURE kinds carry the signature path (the other 3 kinds
+  // store value='true' to represent acceptance via the bundled signing).
+  assert.equal(sigFields.length, 2);
+  const uniqPaths = new Set(sigFields.map((f) => f.signatureSvgOrPath));
+  assert.equal(uniqPaths.size, 1, 'all signature fields point to the same blob');
+  // Single signature uploaded to Storage
+  assert.equal(deps.storage.uploaded.length, 1);
+  assert.equal(deps.storage.uploaded[0].fieldKey, 'tc_acceptance');
+  // DejavooTransaction rows: SALE + AUTH only (no DISCLAIMER / GET_SIGNATURE /
+  // USER_CHOICE / USER_INPUT — those endpoints were removed in round 25).
   const txTypes = deps.prisma._state.transactions.map((t) => t.type);
-  assert.ok(txTypes.includes('DISCLAIMER'));
-  assert.ok(txTypes.includes('GET_SIGNATURE'));
-  assert.ok(txTypes.includes('USER_CHOICE'));
-  assert.ok(txTypes.includes('USER_INPUT'));
+  assert.ok(txTypes.includes('SALE'));
   assert.ok(txTypes.includes('AUTH'));
+  assert.ok(!txTypes.includes('DISCLAIMER'));
+  assert.ok(!txTypes.includes('GET_SIGNATURE'));
+  assert.ok(!txTypes.includes('USER_CHOICE'));
+  assert.ok(!txTypes.includes('USER_INPUT'));
 });
 
 // ---------------------------------------------------------------------------
@@ -427,22 +446,12 @@ test('runCounterCheckinFlow 409 when reservation already signed', async () => {
 });
 
 // ---------------------------------------------------------------------------
-// Date validation
+// (Removed in round 25): "422 when DATE input is not parseable" — DATE
+// validation lived inside captureText() which was removed when we moved to
+// the Sale-driven flow. The TermsTemplateField.kind = 'DATE' rows are now
+// persisted as accepted (value='true') along with all other field kinds.
+// The tablet-based signing UX (future) will reintroduce DATE validation.
 // ---------------------------------------------------------------------------
-
-test('runCounterCheckinFlow 422 when DATE input is not parseable', async () => {
-  const deps = baseDeps({ signOpts: { onInput: (idx) => (idx === 0 ? 'PR-1234' : 'not a date') } });
-  await assert.rejects(
-    () =>
-      runCounterCheckinFlow({
-        reservationId: 'r1',
-        terminalId: 'term1',
-        user: { sub: 'u', role: 'AGENT', tenantId: 't1' },
-        deps,
-      }),
-    (err) => err.code === 'INVALID_DATE'
-  );
-});
 
 // ---------------------------------------------------------------------------
 // AUTH-decline path
@@ -489,7 +498,7 @@ test('resolvePreAuthAmountCents last-resort default 25000', () => {
 });
 
 // ---------------------------------------------------------------------------
-// makeRefId / isValidIsoDate
+// makeRefId
 // ---------------------------------------------------------------------------
 
 test('makeRefId includes prefix + reservation suffix', () => {
@@ -498,13 +507,9 @@ test('makeRefId includes prefix + reservation suffix', () => {
   assert.ok(ref.length <= 50);
 });
 
-test('isValidIsoDate accepts YYYY-MM-DD and ISO datetime', () => {
-  assert.equal(_internal.isValidIsoDate('2026-05-21'), true);
-  assert.equal(_internal.isValidIsoDate('2026-05-21T10:30:00Z'), true);
-  assert.equal(_internal.isValidIsoDate('not-a-date'), false);
-  assert.equal(_internal.isValidIsoDate(''), false);
-  assert.equal(_internal.isValidIsoDate(null), false);
-});
+// isValidIsoDate test removed in round 25 — helper was deleted alongside
+// the captureText() per-field handler. Reintroduce when the tablet signing
+// flow lands.
 
 // ---------------------------------------------------------------------------
 // AuthKey decryption fallback

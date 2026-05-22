@@ -1,35 +1,43 @@
 /**
- * Counter checkin orchestrator — Interactive T&C + Dejavoo P1 unified flow.
- * (2026-05-21)
+ * Counter checkin orchestrator — Sale-driven Dejavoo P1 flow.
+ * (2026-05-21 original; 2026-05-22 round 25 Sale-driven refactor)
  *
  * `runCounterCheckinFlow` is the entry point invoked by the route handler
- * `POST /api/payment-gateway/counter/start-checkin`. It walks the customer
- * through the entire signing + pre-auth flow on the Dejavoo terminal:
+ * `POST /api/payment-gateway/counter/start-checkin`. It runs the customer
+ * through the signing + payment flow in TWO terminal interactions:
  *
- *   1. Show full T&C once on the terminal (Disclaimer endpoint).
- *   2. Iterate every required TermsTemplateField in order:
- *        - INITIAL    → disclaimer(section context) + getSignature
- *        - SIGNATURE  → getSignature
- *        - CHECKBOX   → userChoice(prompt, ['Sí','No'])
- *        - TEXT_FIELD → userInput(prompt)
- *        - DATE       → userInput(prompt) + validate ISO date
- *   3. Persist each result to ReservationSigningField + DejavooTransaction.
- *   4. Render the final signed HTML → PDF → upload to Storage.
- *   5. Run autoRentalAuth for the security-deposit pre-auth amount.
- *   6. Return summary to the agent UI.
+ *   1. SALE for the rental fee (autoRentalSale) — this single call:
+ *        - Auto-displays the disclaimer page (configured on the terminal
+ *          profile via the iPOSpays merchant portal, not pushed per-call)
+ *        - Prompts the customer to insert / tap / swipe
+ *        - Captures the signature on screen (CaptureSignature: true)
+ *        - Returns IPosToken (saved card-on-file) + SignatureData (base64 PNG)
+ *      The signature PNG counts as acceptance of the entire T&C. We persist
+ *      one ReservationSigningField row per required TermsTemplateField, all
+ *      pointing to the same signature blob (the customer accepted them all
+ *      by signing once).
  *
- * Feature flag gates (read by the route, but the service double-checks
- * defensively): `interactiveTC` AND `dejavooCounter` must both resolve
- * to ON for the user. If only `interactiveTC` is ON, the route should
- * have already routed to the tablet UX (not this orchestrator).
+ *   2. AUTH hold for the security deposit (authWithToken using the saved
+ *      IPosToken — no second swipe required).
  *
- * Crash-safety: every step writes a DejavooTransaction BEFORE the network
- * call (status pending), then updates with response/error. If the process
- * dies mid-flow, the ReservationSigning row stays in `startedAt != null,
- * completedAt == null` state and a future "Resume signing" button can
- * pick up at the next unfinished field.
+ * Round 25 (2026-05-22) refactor notes:
+ *   - The 5 standalone interactive endpoints (Disclaimer, GetSignature,
+ *     UserChoice, UserInput, Cart) all returned 404 against api.spinpos.net.
+ *   - SPIn handles the interactive flow INSIDE the Sale request itself, not
+ *     as separate `v2/Payment/<Method>` calls.
+ *   - The per-field iteration loop (INITIAL / SIGNATURE / CHECKBOX /
+ *     TEXT_FIELD / DATE) was removed. The TermsTemplate schema stays for the
+ *     future tablet-based signing surface that DOES walk field-by-field.
  *
- * Design doc: doc/interactive-tc-and-dejavoo-unified-2026-05-21.md §5
+ * Feature flag gates: `interactiveTC` AND `dejavooCounter` must both be ON.
+ *
+ * Crash-safety: each network call writes a DejavooTransaction BEFORE the
+ * request (status PENDING) and updates with response/error. If the process
+ * dies mid-flow, ReservationSigning stays in started-but-not-completed
+ * state; the next call to `runCounterCheckinFlow` resumes from the SALE.
+ *
+ * Design doc: doc/round-25-plan-2026-05-22.md
+ * Predecessor: doc/interactive-tc-and-dejavoo-unified-2026-05-21.md §5
  */
 
 import { isFeatureOnForUser } from '../../lib/feature-flags.js';
@@ -37,8 +45,6 @@ import { getActiveTemplateForTenant } from '../terms/terms-templates.service.js'
 import {
   spinClient,
   buildLevel3FromReservation,
-  htmlToTerminalText,
-  extractContextAroundMarker,
 } from './spin-client.js';
 import { uploadSignatureBlob } from '../terms/signing-storage.js';
 
@@ -81,13 +87,6 @@ function makeRefId(prefix, reservationId) {
   const ts = Date.now().toString(36);
   const rnd = Math.random().toString(36).slice(2, 6);
   return `${prefix}-${tail}-${ts}${rnd}`.slice(0, 50);
-}
-
-function isValidIsoDate(s) {
-  if (!s || typeof s !== 'string') return false;
-  // Accept full ISO or YYYY-MM-DD
-  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return !Number.isNaN(Date.parse(s));
-  return !Number.isNaN(Date.parse(s));
 }
 
 /**
@@ -148,199 +147,20 @@ async function recordTxError(prisma, txId, err) {
 }
 
 // ---------------------------------------------------------------------------
-// Per-field handlers
+// Removed in round 25 (2026-05-22): per-field interactive handlers.
+//
+//   - captureInitialOrSignature() — invoked spin.disclaimer() + spin.getSignature()
+//   - captureChoice()             — invoked spin.userChoice()
+//   - captureText()               — invoked spin.userInput() (+ ISO date validation)
+//
+// All five SPIn endpoints (Disclaimer / GetSignature / UserChoice / UserInput
+// / Cart) returned 404 against api.spinpos.net — they aren't exposed as
+// standalone `v2/Payment/*` endpoints. The Sale-driven flow now captures the
+// customer's signature once via `autoRentalSale({ CaptureSignature: true })`
+// and treats that signature as acceptance of the entire T&C. The TermsTemplate
+// + ReservationSigningField schema stays for the future tablet-based signing
+// surface that does walk field-by-field.
 // ---------------------------------------------------------------------------
-
-async function captureInitialOrSignature({
-  prisma, field, signing, terminal, reservation, tenantConfig, spin, storage, contentHtml,
-}) {
-  // Optional Disclaimer first to show the section text
-  if (field.kind === 'INITIAL') {
-    const contextText =
-      field.terminalContextText ||
-      extractContextAroundMarker(contentHtml, field.markerKey);
-    if (contextText) {
-      const dRef = makeRefId('DISC', reservation.id);
-      const dTx = await recordPendingTx(prisma, {
-        tenantId: signing.tenantIdSnapshot,
-        terminalId: terminal.id,
-        reservationId: reservation.id,
-        signingId: signing.id,
-        type: 'DISCLAIMER',
-        referenceId: dRef,
-        customLabel: `Disclaimer for ${field.markerKey}`,
-        requestJson: { text: contextText, markerKey: field.markerKey },
-      });
-      try {
-        const resp = await spin.disclaimer(
-          { text: contextText, title: field.label, referenceId: dRef },
-          tenantConfig
-        );
-        const normalized = spin.normalizeResponse(resp);
-        await recordTxResult(prisma, dTx.id, normalized, resp);
-      } catch (err) {
-        await recordTxError(prisma, dTx.id, err);
-        throw err;
-      }
-    }
-  }
-
-  // GetSignature
-  const sRef = makeRefId(field.kind === 'INITIAL' ? 'INIT' : 'SIG', reservation.id);
-  const tx = await recordPendingTx(prisma, {
-    tenantId: signing.tenantIdSnapshot,
-    terminalId: terminal.id,
-    reservationId: reservation.id,
-    signingId: signing.id,
-    type: 'GET_SIGNATURE',
-    referenceId: sRef,
-    customLabel: field.label,
-    requestJson: { prompt: field.terminalPromptText || field.label, markerKey: field.markerKey },
-  });
-  let normalized;
-  let raw;
-  try {
-    raw = await spin.getSignature(
-      { promptText: field.terminalPromptText || field.label, referenceId: sRef },
-      tenantConfig
-    );
-    normalized = spin.normalizeResponse(raw);
-  } catch (err) {
-    await recordTxError(prisma, tx.id, err);
-    throw err;
-  }
-
-  if (!normalized.approved) {
-    await recordTxResult(prisma, tx.id, normalized, raw);
-    throw new CounterOrchestratorError(
-      `Signature capture failed for ${field.markerKey}: ${normalized.message || normalized.detailedMessage}`,
-      409,
-      'SIGNATURE_FAILED'
-    );
-  }
-
-  // Persist signature PNG to Storage
-  const base64 = raw?.SignatureData || raw?.Signature || null;
-  let storagePath = null;
-  if (base64) {
-    const uploaded = await storage.uploadSignatureBlob({
-      tenantId: signing.tenantIdSnapshot,
-      reservationId: reservation.id,
-      fieldKey: field.markerKey,
-      body: base64,
-      contentType: 'image/png',
-      kind: field.kind === 'INITIAL' ? 'initial' : 'agreement',
-    });
-    storagePath = uploaded.storagePath;
-  }
-
-  // Update tx with the signature path
-  await prisma.dejavooTransaction.update({
-    where: { id: tx.id },
-    data: {
-      signatureStoragePath: storagePath,
-      responseJson: normalized,
-      rawResponse: raw,
-      statusCode: normalized.statusCode,
-      approved: true,
-      completedAt: new Date(),
-    },
-  });
-
-  return { signatureStoragePath: storagePath, dejavooTransactionId: tx.id };
-}
-
-async function captureChoice({
-  prisma, field, signing, terminal, reservation, tenantConfig, spin,
-}) {
-  const ref = makeRefId('UC', reservation.id);
-  const choices = ['Sí', 'No'];
-  const tx = await recordPendingTx(prisma, {
-    tenantId: signing.tenantIdSnapshot,
-    terminalId: terminal.id,
-    reservationId: reservation.id,
-    signingId: signing.id,
-    type: 'USER_CHOICE',
-    referenceId: ref,
-    customLabel: field.label,
-    requestJson: { prompt: field.terminalPromptText || field.label, choices, markerKey: field.markerKey },
-  });
-  let raw;
-  let normalized;
-  try {
-    raw = await spin.userChoice(
-      { prompt: field.terminalPromptText || field.label, choices, referenceId: ref },
-      tenantConfig
-    );
-    normalized = spin.normalizeResponse(raw);
-  } catch (err) {
-    await recordTxError(prisma, tx.id, err);
-    throw err;
-  }
-  await recordTxResult(prisma, tx.id, normalized, raw);
-  if (!normalized.approved) {
-    throw new CounterOrchestratorError(
-      `UserChoice failed for ${field.markerKey}: ${normalized.message}`,
-      409,
-      'CHOICE_FAILED'
-    );
-  }
-  const selected = raw?.SelectedChoice || raw?.Selected || raw?.UserChoice;
-  const value = selected === choices[0] ? 'true' : 'false';
-  return { value, dejavooTransactionId: tx.id };
-}
-
-async function captureText({
-  prisma, field, signing, terminal, reservation, tenantConfig, spin, validateDate,
-}) {
-  const ref = makeRefId('UI', reservation.id);
-  const tx = await recordPendingTx(prisma, {
-    tenantId: signing.tenantIdSnapshot,
-    terminalId: terminal.id,
-    reservationId: reservation.id,
-    signingId: signing.id,
-    type: 'USER_INPUT',
-    referenceId: ref,
-    customLabel: field.label,
-    requestJson: { prompt: field.terminalPromptText || field.label, markerKey: field.markerKey, isDate: !!validateDate },
-  });
-  let raw;
-  let normalized;
-  try {
-    raw = await spin.userInput(
-      { prompt: field.terminalPromptText || field.label, referenceId: ref },
-      tenantConfig
-    );
-    normalized = spin.normalizeResponse(raw);
-  } catch (err) {
-    await recordTxError(prisma, tx.id, err);
-    throw err;
-  }
-  await recordTxResult(prisma, tx.id, normalized, raw);
-  if (!normalized.approved) {
-    throw new CounterOrchestratorError(
-      `UserInput failed for ${field.markerKey}: ${normalized.message}`,
-      409,
-      'INPUT_FAILED'
-    );
-  }
-  const value = String(raw?.UserInput || raw?.InputText || '').trim();
-  if (!value) {
-    throw new CounterOrchestratorError(
-      `Empty input for required field ${field.markerKey}`,
-      422,
-      'EMPTY_INPUT'
-    );
-  }
-  if (validateDate && !isValidIsoDate(value)) {
-    throw new CounterOrchestratorError(
-      `Invalid date format for ${field.markerKey}: '${value}' (expected YYYY-MM-DD or ISO)`,
-      422,
-      'INVALID_DATE'
-    );
-  }
-  return { value, dejavooTransactionId: tx.id };
-}
 
 // ---------------------------------------------------------------------------
 // Pre-auth resolver
@@ -530,87 +350,26 @@ export async function runCounterCheckinFlow({
     requiredFields: requiredFields.length,
   });
 
-  // ---- 5. Show the full T&C once on the terminal -------------------------
-  if (pendingFields.length === requiredFields.length) {
-    // First run only — skip the intro Disclaimer on resume so we don't
-    // make the customer re-read.
-    const introRef = makeRefId('TC', reservation.id);
-    const introTx = await recordPendingTx(prisma, {
-      tenantId: tenant.id,
-      terminalId: terminal.id,
-      reservationId: reservation.id,
-      signingId: signing.id,
-      type: 'DISCLAIMER',
-      referenceId: introRef,
-      customLabel: 'Full T&C',
-      requestJson: { kind: 'intro', length: template.contentHtml.length },
-    });
-    try {
-      const text = htmlToTerminalText(template.contentHtml);
-      const raw = await spin.disclaimer(
-        { text, title: template.name || 'Acuerdo de Renta', referenceId: introRef },
-        tenantConfig
-      );
-      const normalized = spin.normalizeResponse(raw);
-      await recordTxResult(prisma, introTx.id, normalized, raw);
-    } catch (err) {
-      await recordTxError(prisma, introTx.id, err);
-      throw err;
-    }
-  }
+  // ---- 5. (Removed in round 25) ------------------------------------------
+  //
+  // The previous flow showed the full T&C on the terminal via spin.disclaimer
+  // (step 5) and then iterated TermsTemplateField records calling
+  // spin.getSignature / spin.userChoice / spin.userInput per field (step 6).
+  // All 5 endpoints returned 404 against api.spinpos.net — they aren't
+  // exposed as standalone v2/Payment/* methods.
+  //
+  // New flow: the terminal profile is configured (via iPOSpays merchant
+  // portal) to auto-display the disclaimer page before every Sale. The
+  // customer's acceptance is captured by the Sale request itself via
+  // CaptureSignature: true (see step 7b below). That single signature
+  // counts as acceptance of every required field — we persist one row per
+  // TermsTemplateField pointing to the same signature blob after the Sale
+  // returns successfully.
+  //
+  // See: doc/round-25-plan-2026-05-22.md
+  // ------------------------------------------------------------------------
 
-  // ---- 6. Iterate fields --------------------------------------------------
-  for (const field of pendingFields) {
-    let result;
-    if (field.kind === 'INITIAL' || field.kind === 'SIGNATURE') {
-      result = await captureInitialOrSignature({
-        prisma, field, signing, terminal, reservation, tenantConfig, spin, storage,
-        contentHtml: template.contentHtml,
-      });
-      await prisma.reservationSigningField.create({
-        data: {
-          signingId: signing.id,
-          templateFieldId: field.id,
-          signatureSvgOrPath: result.signatureStoragePath,
-          signedAt: new Date(),
-          dejavooTransactionId: result.dejavooTransactionId,
-        },
-      });
-    } else if (field.kind === 'CHECKBOX') {
-      result = await captureChoice({
-        prisma, field, signing, terminal, reservation, tenantConfig, spin,
-      });
-      await prisma.reservationSigningField.create({
-        data: {
-          signingId: signing.id,
-          templateFieldId: field.id,
-          value: result.value,
-          signedAt: new Date(),
-          dejavooTransactionId: result.dejavooTransactionId,
-        },
-      });
-    } else if (field.kind === 'TEXT_FIELD' || field.kind === 'DATE') {
-      result = await captureText({
-        prisma, field, signing, terminal, reservation, tenantConfig, spin,
-        validateDate: field.kind === 'DATE',
-      });
-      await prisma.reservationSigningField.create({
-        data: {
-          signingId: signing.id,
-          templateFieldId: field.id,
-          value: result.value,
-          signedAt: new Date(),
-          dejavooTransactionId: result.dejavooTransactionId,
-        },
-      });
-    } else {
-      throw new CounterOrchestratorError(
-        `Unknown field kind '${field.kind}' for ${field.markerKey}`,
-        400,
-        'UNKNOWN_KIND'
-      );
-    }
-  }
+  // ---- 6. (Removed — see step 5 note above) ------------------------------
 
   // ---- 7a. Compute the rental fee amount + the security deposit amount ---
   // Round 22 — IRC flow: at pickup we charge the RENTAL FEE first (single
@@ -672,9 +431,17 @@ export async function runCounterCheckinFlow({
   // Skip the SALE step entirely if rentalFee is 0 (e.g. prepaid online,
   // complimentary rental). In that case we go directly to the AUTH with
   // a card-present prompt (no token yet, so we can't do CNP).
+  //
+  // Round 25 (2026-05-22): autoRentalSale has CaptureSignature: true set,
+  // so the response carries the customer's T&C signature as SignatureData
+  // (base64 PNG). We extract + upload to Storage immediately so subsequent
+  // ReservationSigningField rows (one per required template field) can
+  // point at the same blob.
   let saleNorm = null;
   let saleTx = null;
   let cardOnFileToken = null;
+  let signatureStoragePath = null;
+  let signatureSourceTxId = null;
 
   if (rentalFeeCents > 0) {
     const saleRef = makeRefId('SALE', reservation.id);
@@ -709,6 +476,25 @@ export async function runCounterCheckinFlow({
       );
       saleNorm = spin.normalizeResponse(raw);
       await recordTxResult(prisma, saleTx.id, saleNorm, raw);
+
+      // Extract T&C signature from the Sale response (CaptureSignature: true)
+      const saleSig = raw?.SignatureData || raw?.Signature || null;
+      if (saleSig) {
+        const uploaded = await storage.uploadSignatureBlob({
+          tenantId: tenant.id,
+          reservationId: reservation.id,
+          fieldKey: 'tc_acceptance',
+          body: saleSig,
+          contentType: 'image/png',
+          kind: 'agreement',
+        });
+        signatureStoragePath = uploaded.storagePath;
+        signatureSourceTxId = saleTx.id;
+        await prisma.dejavooTransaction.update({
+          where: { id: saleTx.id },
+          data: { signatureStoragePath },
+        });
+      }
     } catch (err) {
       await recordTxError(prisma, saleTx.id, err);
       throw err;
@@ -732,10 +518,10 @@ export async function runCounterCheckinFlow({
       },
     });
     logger.info?.('[counter-orchestrator] rental fee charged at pickup', {
-      reservationId, rentalFeeCents, last4: saleNorm.cardData?.last4,
+      reservationId, rentalFeeCents, last4: saleNorm.cardData?.last4, hasSignature: !!signatureStoragePath,
     });
   } else {
-    logger.info?.('[counter-orchestrator] skipping SALE — rentalFee == 0', { reservationId });
+    logger.info?.('[counter-orchestrator] skipping SALE — rentalFee == 0; signature captured by AUTH below', { reservationId });
   }
 
   // ---- 7c. AUTH for security deposit (CNP if we have a token from SALE) --
@@ -788,6 +574,29 @@ export async function runCounterCheckinFlow({
         );
     authNorm = spin.normalizeResponse(raw);
     await recordTxResult(prisma, authTx.id, authNorm, raw);
+
+    // Round 25 fallback: if no SALE ran (rentalFee == 0), autoRentalAuth
+    // captures the signature instead (CaptureSignature: true on the
+    // autoRentalAuth body; authWithToken is CNP so no sig). Extract here.
+    if (!signatureStoragePath && !useCardOnFileForAuth) {
+      const authSig = raw?.SignatureData || raw?.Signature || null;
+      if (authSig) {
+        const uploaded = await storage.uploadSignatureBlob({
+          tenantId: tenant.id,
+          reservationId: reservation.id,
+          fieldKey: 'tc_acceptance',
+          body: authSig,
+          contentType: 'image/png',
+          kind: 'agreement',
+        });
+        signatureStoragePath = uploaded.storagePath;
+        signatureSourceTxId = authTx.id;
+        await prisma.dejavooTransaction.update({
+          where: { id: authTx.id },
+          data: { signatureStoragePath },
+        });
+      }
+    }
   } catch (err) {
     await recordTxError(prisma, authTx.id, err);
     throw err;
@@ -801,6 +610,36 @@ export async function runCounterCheckinFlow({
       402,
       'AUTH_DECLINED'
     );
+  }
+
+  // ---- 7d. Persist ReservationSigningField rows --------------------------
+  //
+  // Round 25 (2026-05-22): we no longer walk fields one by one — the
+  // customer's single signature on the Sale/Auth screen counts as
+  // acceptance of every required field. We persist one row per
+  // TermsTemplateField pointing to the SAME signature blob. For non-
+  // signature kinds (CHECKBOX / TEXT_FIELD / DATE) we mark them accepted
+  // (value='true') via the bundled signing.
+  const fieldsToPersist = requiredFields.filter((f) => !alreadySigned.has(f.id));
+  if (fieldsToPersist.length > 0) {
+    const signedAt = new Date();
+    const sourceTxId = signatureSourceTxId || saleTx?.id || authTx.id;
+    for (const field of fieldsToPersist) {
+      const isSignatureKind = field.kind === 'INITIAL' || field.kind === 'SIGNATURE';
+      await prisma.reservationSigningField.create({
+        data: {
+          signingId: signing.id,
+          templateFieldId: field.id,
+          signatureSvgOrPath: isSignatureKind ? (signatureStoragePath || null) : null,
+          value: isSignatureKind ? null : 'true',
+          signedAt,
+          dejavooTransactionId: sourceTxId,
+        },
+      });
+    }
+    logger.info?.('[counter-orchestrator] persisted signing fields', {
+      reservationId, count: fieldsToPersist.length, signatureCaptured: !!signatureStoragePath,
+    });
   }
 
   // ---- 8. Finalize ReservationSigning ------------------------------------
@@ -926,5 +765,4 @@ export const _internal = {
   resolveTenantConfigForTerminal,
   resolvePreAuthAmountCents,
   makeRefId,
-  isValidIsoDate,
 };

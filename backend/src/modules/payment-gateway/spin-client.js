@@ -237,67 +237,28 @@ export const spinClient = {
   // { Authkey, Tpn, MerchantNumber, ReferenceId, ... } envelope.
   // =========================================================================
 
-  /**
-   * Display arbitrary text on the terminal screen and wait for the customer
-   * to acknowledge (Continue / Cancel). Used to show T&C sections before
-   * each initial prompt.
-   */
-  async disclaimer({ text, title, referenceId }, tenantConfig) {
-    return spinRequest('POST', 'v2/Payment/Disclaimer', {
-      Text: String(text || '').slice(0, 6000),
-      Title: title || 'Acuerdo de Renta',
-      ReferenceId: String(referenceId).slice(0, 50),
-    }, tenantConfig);
-  },
-
-  /**
-   * Capture a signature from the terminal screen. Response includes
-   * SignatureData as a base64 PNG.
-   */
-  async getSignature({ promptText, referenceId }, tenantConfig) {
-    return spinRequest('POST', 'v2/Payment/GetSignature', {
-      PromptText: String(promptText || 'Please sign').slice(0, 200),
-      ReferenceId: String(referenceId).slice(0, 50),
-    }, tenantConfig);
-  },
-
-  /**
-   * Ask the customer a multiple-choice question on the terminal screen.
-   * Returns SelectedChoice in the response.
-   */
-  async userChoice({ prompt, choices, referenceId }, tenantConfig) {
-    return spinRequest('POST', 'v2/Payment/UserChoice', {
-      PromptText: String(prompt || '').slice(0, 200),
-      Choices: Array.isArray(choices) ? choices : ['Sí', 'No'],
-      ReferenceId: String(referenceId).slice(0, 50),
-    }, tenantConfig);
-  },
-
-  /**
-   * Collect free-form text input from the customer on the terminal.
-   * Returns UserInput in the response.
-   */
-  async userInput({ prompt, referenceId }, tenantConfig) {
-    return spinRequest('POST', 'v2/Payment/UserInput', {
-      PromptText: String(prompt || '').slice(0, 200),
-      ReferenceId: String(referenceId).slice(0, 50),
-    }, tenantConfig);
-  },
-
-  /**
-   * Display an itemized cart on the terminal screen (Items + Total).
-   * Read-only display — does NOT charge. Used to show line items before
-   * the customer confirms the sale.
-   *
-   * items: [{ Name, Quantity, UnitPrice, Total }]
-   */
-  async cart({ items, total, referenceId }, tenantConfig) {
-    return spinRequest('POST', 'v2/Payment/Cart', {
-      Items: Array.isArray(items) ? items : [],
-      Total: typeof total === 'number' ? total : 0,
-      ReferenceId: String(referenceId).slice(0, 50),
-    }, tenantConfig);
-  },
+  // ============================================================================
+  // Removed in round 25 (2026-05-22): standalone interactive endpoints.
+  //
+  //   disclaimer()    POST v2/Payment/Disclaimer    — 404 on api.spinpos.net
+  //   getSignature()  POST v2/Payment/GetSignature  — 404 on api.spinpos.net
+  //   userChoice()    POST v2/Payment/UserChoice    — 404 on api.spinpos.net
+  //   userInput()     POST v2/Payment/UserInput     — 404 on api.spinpos.net
+  //   cart()          POST v2/Payment/Cart          — 404 on api.spinpos.net
+  //
+  // The SPIn REST API doesn't expose these as standalone endpoints under
+  // `v2/Payment/*`. The interactive flow is handled INSIDE the Sale request:
+  //
+  //   - The disclaimer page is configured on the terminal profile via the
+  //     iPOSpays merchant portal — it auto-displays before each Sale.
+  //   - The signature is captured by the Sale request itself when
+  //     `CaptureSignature: true` is passed in the body. The signature PNG
+  //     comes back in the response's `SignatureData` field.
+  //   - Cart line items travel inline inside Sale/Capture bodies via the
+  //     Cart + Level3 envelopes (see autoRentalSale below).
+  //
+  // See: doc/round-25-plan-2026-05-22.md for the full rationale.
+  // ============================================================================
 
   /**
    * AutoRental Sale — same as Sale but with car-rental-specific RentalData

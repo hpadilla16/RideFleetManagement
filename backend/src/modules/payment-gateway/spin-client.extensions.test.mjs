@@ -45,93 +45,15 @@ beforeEach(() => {
 });
 
 // ---------------------------------------------------------------------------
-// disclaimer
+// Removed in round 25 (2026-05-22): tests for disclaimer / getSignature /
+// userChoice / userInput / cart methods. Those methods were deleted from
+// spin-client.js — the SPIn REST API doesn't expose them as standalone
+// endpoints under v2/Payment/*. The interactive flow is now handled inside
+// the Sale request itself (CaptureSignature: true + disclaimer configured
+// on the terminal profile).
+//
+// See: doc/round-25-plan-2026-05-22.md
 // ---------------------------------------------------------------------------
-
-test('disclaimer POSTs to v2/Payment/Disclaimer with text+title+ref', async () => {
-  await spinClient.disclaimer({ text: 'terms here', title: 'Agreement', referenceId: 'REF1' }, TENANT_CONFIG);
-  assert.match(lastRequest.url, /v2\/Payment\/Disclaimer$/);
-  assert.equal(lastRequest.method, 'POST');
-  assert.equal(lastRequest.body.Text, 'terms here');
-  assert.equal(lastRequest.body.Title, 'Agreement');
-  assert.equal(lastRequest.body.ReferenceId, 'REF1');
-  assert.equal(lastRequest.body.Authkey, 'TEST_KEY');
-  assert.equal(lastRequest.body.Tpn, '12345');
-});
-
-test('disclaimer truncates text to 6000 chars', async () => {
-  const long = 'x'.repeat(7000);
-  await spinClient.disclaimer({ text: long, referenceId: 'r' }, TENANT_CONFIG);
-  assert.equal(lastRequest.body.Text.length, 6000);
-});
-
-test('disclaimer defaults title when omitted', async () => {
-  await spinClient.disclaimer({ text: 'x', referenceId: 'r' }, TENANT_CONFIG);
-  assert.equal(lastRequest.body.Title, 'Acuerdo de Renta');
-});
-
-// ---------------------------------------------------------------------------
-// getSignature
-// ---------------------------------------------------------------------------
-
-test('getSignature POSTs to v2/Payment/GetSignature', async () => {
-  await spinClient.getSignature({ promptText: 'Initial here', referenceId: 'S1' }, TENANT_CONFIG);
-  assert.match(lastRequest.url, /v2\/Payment\/GetSignature$/);
-  assert.equal(lastRequest.body.PromptText, 'Initial here');
-  assert.equal(lastRequest.body.ReferenceId, 'S1');
-});
-
-test('getSignature uses default prompt when omitted', async () => {
-  await spinClient.getSignature({ referenceId: 'S2' }, TENANT_CONFIG);
-  assert.equal(lastRequest.body.PromptText, 'Please sign');
-});
-
-// ---------------------------------------------------------------------------
-// userChoice
-// ---------------------------------------------------------------------------
-
-test('userChoice POSTs the choices array', async () => {
-  await spinClient.userChoice(
-    { prompt: 'Accept?', choices: ['Sí', 'No'], referenceId: 'UC1' },
-    TENANT_CONFIG
-  );
-  assert.match(lastRequest.url, /v2\/Payment\/UserChoice$/);
-  assert.deepEqual(lastRequest.body.Choices, ['Sí', 'No']);
-  assert.equal(lastRequest.body.PromptText, 'Accept?');
-});
-
-test('userChoice defaults choices to [Sí, No]', async () => {
-  await spinClient.userChoice({ prompt: 'x', referenceId: 'r' }, TENANT_CONFIG);
-  assert.deepEqual(lastRequest.body.Choices, ['Sí', 'No']);
-});
-
-// ---------------------------------------------------------------------------
-// userInput
-// ---------------------------------------------------------------------------
-
-test('userInput POSTs to v2/Payment/UserInput', async () => {
-  await spinClient.userInput({ prompt: 'License?', referenceId: 'UI1' }, TENANT_CONFIG);
-  assert.match(lastRequest.url, /v2\/Payment\/UserInput$/);
-  assert.equal(lastRequest.body.PromptText, 'License?');
-});
-
-// ---------------------------------------------------------------------------
-// cart
-// ---------------------------------------------------------------------------
-
-test('cart POSTs items + total', async () => {
-  await spinClient.cart(
-    {
-      items: [{ Name: 'A', Quantity: 1, UnitPrice: 10, Total: 10 }],
-      total: 10,
-      referenceId: 'C1',
-    },
-    TENANT_CONFIG
-  );
-  assert.match(lastRequest.url, /v2\/Payment\/Cart$/);
-  assert.equal(lastRequest.body.Items.length, 1);
-  assert.equal(lastRequest.body.Total, 10);
-});
 
 // ---------------------------------------------------------------------------
 // autoRentalSale / Auth / Capture

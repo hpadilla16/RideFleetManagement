@@ -327,40 +327,19 @@ export async function runCounterReturnFlow({
   // ---- 5. Resolve tenantConfig (decrypted authKey) -----------------------
   const tenantConfig = await resolveTenantConfigForTerminal(terminal, tenant, deps);
 
-  // ---- 6. (Optional) display cart on terminal screen before charging -----
+  // ---- 6. Build cart + Level3 for the settlement call --------------------
+  //
+  // Round 25 (2026-05-22): the standalone `spin.cart()` display-before-charging
+  // call was removed. The SPIn REST API doesn't expose a standalone Cart
+  // endpoint — cart items always travel inline inside the Sale / Capture /
+  // AutoRental request bodies. buildLevel3FromReservation already does this:
+  // we pass `Cart` (items + total) and `Level3` (line-item tax + product
+  // codes) directly into autoRentalCapture / autoRentalSale / saleWithToken
+  // below. The terminal displays them automatically before prompting for
+  // card entry.
   const { Cart, Level3 } = buildLevel3FromReservation(
     reservation, reservation.rentalAgreement || {}, reservation.charges || []
   );
-  if (Cart.Items.length > 0 && extrasCents > 0) {
-    const cartRef = makeRefId('CART', reservation.id);
-    const cartTx = await recordPendingTx(prisma, {
-      tenantId: tenant.id,
-      terminalId: terminal.id,
-      reservationId: reservation.id,
-      signingId: reservation.signing?.id || null,
-      type: 'CART',
-      referenceId: cartRef,
-      amountCents: extrasCents,
-      customLabel: 'Return summary (extras)',
-      requestJson: {
-        items: Cart.Items.length,
-        total: Cart.Total,
-        rentalFeePaidAtPickup: rentalFeeCollectedCents,
-        extrasCents,
-      },
-    });
-    try {
-      const raw = await spin.cart(
-        { items: Cart.Items, total: Cart.Total, referenceId: cartRef },
-        tenantConfig
-      );
-      const normalized = spin.normalizeResponse(raw);
-      await recordTxResult(prisma, cartTx.id, normalized, raw);
-    } catch (err) {
-      // Cart display is best-effort — don't block the actual settlement.
-      await recordTxError(prisma, cartTx.id, err);
-    }
-  }
 
   // ---- 7. Branch on the 3 cases — driven by EXTRAS, not finalCents ------
   if (extrasCents === 0) {
