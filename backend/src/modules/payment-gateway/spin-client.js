@@ -327,7 +327,12 @@ export const spinClient = {
       PaymentType: paymentType,
       ReferenceId: String(referenceId).slice(0, 50),
       ...(invoiceNumber ? { InvoiceNumber: String(invoiceNumber).slice(0, 50) } : {}),
-      ...(rentalData ? { RentalData: rentalData } : {}),
+      // Round 25 hotfix (2026-05-22): SPIn AutoRental endpoints require the
+      // body field be named `AutoRental` (not `RentalData`). The proxy
+      // rejected with StatusCode 2201 / ResultCode 2 because the required
+      // `AutoRental` object was missing. See docs:
+      // https://app.theneo.io/dejavoo/spin/autorental/auto-rental-auth
+      ...(rentalData ? { AutoRental: rentalData } : {}),
       ...(cart ? { Cart: cart } : {}),
       ...(level3 ? { Level3: level3 } : {}),
       ...(customFields ? { CustomFields: customFields } : {}),
@@ -352,7 +357,12 @@ export const spinClient = {
       PaymentType: paymentType,
       ReferenceId: String(referenceId).slice(0, 50),
       ...(invoiceNumber ? { InvoiceNumber: String(invoiceNumber).slice(0, 50) } : {}),
-      ...(rentalData ? { RentalData: rentalData } : {}),
+      // Round 25 hotfix (2026-05-22): SPIn AutoRental endpoints require the
+      // body field be named `AutoRental` (not `RentalData`). The proxy
+      // rejected with StatusCode 2201 / ResultCode 2 because the required
+      // `AutoRental` object was missing. See docs:
+      // https://app.theneo.io/dejavoo/spin/autorental/auto-rental-auth
+      ...(rentalData ? { AutoRental: rentalData } : {}),
       ...(customFields ? { CustomFields: customFields } : {}),
       CaptureSignature: true,
       GetExtendedData: true,
@@ -367,7 +377,12 @@ export const spinClient = {
     return spinRequest('POST', 'v2/AutoRental/Capture', {
       ReferenceId: String(referenceId).slice(0, 50),
       ...(amount ? { Amount: Number(amount) } : {}),
-      ...(rentalData ? { RentalData: rentalData } : {}),
+      // Round 25 hotfix (2026-05-22): SPIn AutoRental endpoints require the
+      // body field be named `AutoRental` (not `RentalData`). The proxy
+      // rejected with StatusCode 2201 / ResultCode 2 because the required
+      // `AutoRental` object was missing. See docs:
+      // https://app.theneo.io/dejavoo/spin/autorental/auto-rental-auth
+      ...(rentalData ? { AutoRental: rentalData } : {}),
     }, tenantConfig);
   },
 
@@ -457,7 +472,12 @@ export const spinClient = {
       CardNotPresent: true,
       CaptureSignature: false, // already signed during T&C / SALE step
       ...(invoiceNumber ? { InvoiceNumber: String(invoiceNumber).slice(0, 50) } : {}),
-      ...(rentalData ? { RentalData: rentalData } : {}),
+      // Round 25 hotfix (2026-05-22): SPIn AutoRental endpoints require the
+      // body field be named `AutoRental` (not `RentalData`). The proxy
+      // rejected with StatusCode 2201 / ResultCode 2 because the required
+      // `AutoRental` object was missing. See docs:
+      // https://app.theneo.io/dejavoo/spin/autorental/auto-rental-auth
+      ...(rentalData ? { AutoRental: rentalData } : {}),
       ...(customFields ? { CustomFields: customFields } : {}),
       GetExtendedData: true,
     }, tenantConfig);

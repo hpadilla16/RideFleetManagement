@@ -74,7 +74,8 @@ test('autoRentalSale routes to v2/AutoRental/Sale with rentalData + cart + level
   assert.match(lastRequest.url, /v2\/AutoRental\/Sale$/);
   assert.equal(lastRequest.body.Amount, 123.45);
   assert.equal(lastRequest.body.InvoiceNumber, 'INV1');
-  assert.equal(lastRequest.body.RentalData.AgreementNumber, 'A1');
+  // Round 25 hotfix: SPIn AutoRental body uses 'AutoRental' wrapper, not 'RentalData'
+  assert.equal(lastRequest.body.AutoRental.AgreementNumber, 'A1');
   assert.ok(lastRequest.body.Cart);
   assert.ok(lastRequest.body.Level3);
   assert.equal(lastRequest.body.CaptureSignature, true);
@@ -88,7 +89,8 @@ test('autoRentalAuth routes to v2/AutoRental/Auth', async () => {
   );
   assert.match(lastRequest.url, /v2\/AutoRental\/Auth$/);
   assert.equal(lastRequest.body.Amount, 250);
-  assert.equal(lastRequest.body.RentalData.x, 1);
+  // Round 25 hotfix: SPIn AutoRental body uses 'AutoRental' wrapper, not 'RentalData'
+  assert.equal(lastRequest.body.AutoRental.x, 1);
 });
 
 test('autoRentalCapture routes to v2/AutoRental/Capture (amount optional)', async () => {

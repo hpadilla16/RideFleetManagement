@@ -141,6 +141,11 @@ async function recordTxError(prisma, txId, err) {
       // never gets persisted → we lose the trail of WHY it failed.
       statusCode: String(err?.spinStatusCode || 'ERROR'),
       errorMessage: err?.message || 'unknown error',
+      // Round 25 hotfix (2026-05-22): also persist the raw SPIn response when
+      // available. Without this, when SPIn returned StatusCode 2201 we had no
+      // way to see the AutoRentalValidationError fields that pinpoint the
+      // mismatch. spin-client throws err with err.spinResponse = data.
+      rawResponse: err?.spinResponse || null,
       completedAt: new Date(),
     },
   });

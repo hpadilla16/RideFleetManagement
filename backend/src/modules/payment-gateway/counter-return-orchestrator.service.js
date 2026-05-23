@@ -151,6 +151,10 @@ async function recordTxError(prisma, txId, err) {
       // but spinStatusCode comes back as Int from SPIn — wrap so Prisma doesn't reject.
       statusCode: String(err?.spinStatusCode || 'ERROR'),
       errorMessage: err?.message || 'unknown error',
+      // Round 25 hotfix (2026-05-22): persist the raw SPIn response when
+      // available — gives us AutoRentalValidationError details when SPIn
+      // rejects a request.
+      rawResponse: err?.spinResponse || null,
       completedAt: new Date(),
     },
   });
