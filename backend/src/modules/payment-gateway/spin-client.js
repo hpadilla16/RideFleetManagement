@@ -517,14 +517,19 @@ function dollarsFromDecimal(v) {
  */
 export function buildLevel3FromReservation(reservation, agreement, charges = []) {
   const selected = (charges || []).filter((c) => c.selected !== false);
+  // Round 25 hotfix (2026-05-22): SPIn Cart.Items requires `Price` field on
+  // each item — without it: "Price field is required for Items in Cart's
+  // Items List." We also keep UnitPrice + Total for compatibility with our
+  // existing UI / chargeback layer.
   const items = selected.map((c) => ({
     Name: String(c.name || c.code || 'Charge').slice(0, 80),
+    Price: dollarsFromDecimal(c.total),
     Quantity: dollarsFromDecimal(c.quantity) || 1,
     UnitPrice: dollarsFromDecimal(c.rate),
     Total: dollarsFromDecimal(c.total),
     CommodityCode: AUTO_RENTAL_COMMODITY_CODE,
   }));
-  const cartTotal = items.reduce((acc, it) => acc + (it.Total || 0), 0);
+  const cartTotal = Number(items.reduce((acc, it) => acc + (it.Total || 0), 0).toFixed(2));
 
   const pickup = reservation?.pickupAt instanceof Date
     ? reservation.pickupAt
@@ -579,12 +584,13 @@ export function buildLevel3FromReservation(reservation, agreement, charges = [])
     },
     AutoRentalPricing: {
       RentalRate: dollarsFromDecimal(agreement?.dailyRate) || null,
-      // Round 25 hotfix (2026-05-22): SPIn requires this array to have at
-      // least one element. Empty [] returns:
-      //   StatusCode 2201 — "Invalid request data : ExtraCharges are
-      //   required or NoExtraCharge cannot be combined with other charges"
-      // Docs sample uses [""] as the placeholder for "no extras".
-      ExtraCharges: [''],
+      // Round 25 hotfix (2026-05-22): SPIn requires this array to contain a
+      // valid enum entry. [] returns "ExtraCharges are required". [""] returns
+      // "Unacceptable value for ExtraCharges[0]". Per the validation error
+      // message — "NoExtraCharge cannot be combined with other charges" — the
+      // 'NoExtraCharge' string is the explicit "no extras" marker. Valid for
+      // the SALE/AUTH/Capture endpoints alike.
+      ExtraCharges: ['NoExtraCharge'],
     },
     AutoRentalPickup: {
       DateTime: pickup ? pickup.toISOString() : '',
@@ -612,10 +618,18 @@ export function buildLevel3FromReservation(reservation, agreement, charges = [])
     },
   };
 
+  // Round 25 hotfix (2026-05-22): SPIn Cart requires an Amounts array with
+  // at least one entry — "List of Amounts required in Cart and it must
+  // contain at least one Amount". Each entry is { Name, Value }. We emit a
+  // Subtotal + Total pair so the terminal can render the totals row.
   return {
     Cart: {
       Items: items,
-      Total: Number(cartTotal.toFixed(2)),
+      Total: cartTotal,
+      Amounts: [
+        { Name: 'Subtotal', Value: cartTotal },
+        { Name: 'Total', Value: cartTotal },
+      ],
     },
     Level3: {
       RentalData: rentalData,
