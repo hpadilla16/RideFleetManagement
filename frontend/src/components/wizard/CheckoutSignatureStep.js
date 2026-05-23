@@ -65,7 +65,19 @@ export function CheckoutSignatureStep({
     let cancelled = false;
     api(`/api/payment-gateway/counter/preflight?reservationId=${encodeURIComponent(reservationId)}`, {}, token)
       .then((out) => {
-        if (!cancelled) setPreflight(out);
+        if (cancelled) return;
+        setPreflight(out);
+        // Round 25 (2026-05-22): if nothing to charge at the counter (rental
+        // fee was prepaid online), skip the Dejavoo terminal step entirely.
+        // The customer still signs the T&C via the legacy SignaturePad and
+        // then moves on to vehicle inspection. The pre-auth security deposit
+        // hold (if any) is handled by the legacy flow or deferred to a
+        // separate manual capture — the terminal only runs when there's a
+        // SALE to process.
+        const rentalFeeCents = Number(out?.rentalFeeAmountCents || 0);
+        if (rentalFeeCents <= 0) {
+          setForceLegacy(true);
+        }
       })
       .catch((err) => {
         if (!cancelled) setPreflightError(err?.message || 'Preflight failed');

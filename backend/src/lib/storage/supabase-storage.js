@@ -34,6 +34,14 @@ function _assertEnv() {
   }
 }
 
+// Round 25 (2026-05-22): STORAGE_MOCK=true short-circuits all storage
+// operations and returns fake successful responses. For LOCAL dev only —
+// never set in production. Pairs with SPIN_MOCK so the full
+// counter-orchestrator pipeline runs end-to-end without Supabase configured.
+function _isMockMode() {
+  return process.env.STORAGE_MOCK === 'true';
+}
+
 const STORAGE_BASE = () => `${SUPABASE_URL}/storage/v1`;
 
 // ---------------------------------------------------------------------------
@@ -163,7 +171,17 @@ export async function uploadObject({ bucket, path, body, contentType, upsert = f
   if (!body) throw new StorageError('uploadObject: body is required', 400);
   if (!contentType) throw new StorageError('uploadObject: contentType is required', 400);
 
-  const size = body instanceof Buffer || body instanceof Uint8Array ? body.byteLength : null;
+  const size = body instanceof Buffer || body instanceof Uint8Array ? body.byteLength : (typeof body === 'string' ? body.length : null);
+
+  // STORAGE_MOCK short-circuit — return fake response without hitting Supabase.
+  if (_isMockMode()) {
+    return {
+      path: `${bucket}/${path}`,
+      size,
+      etag: 'mock-etag',
+      contentType,
+    };
+  }
 
   const res = await _request('POST', `/object/${encodeURIComponent(bucket)}/${_encodePath(path)}`, {
     headers: {

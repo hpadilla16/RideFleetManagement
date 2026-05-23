@@ -608,11 +608,15 @@ function Step1Confirm({ reservation, agreement, vehicleId, onVehicleChange, avai
         <hr style={{ border: 'none', borderTop: '1px solid #e6dfff', margin: '12px 0' }} />
         <RowBetween k="Email" v={reservation?.customer?.email || '—'} />
         <RowBetween k="Phone" v={reservation?.customer?.phone || '—'} />
-        <RowBetween k="Card on file" v={
-          reservation?.customer?.cardLast4
-            ? `${reservation.customer.cardBrand || 'Card'} ····${reservation.customer.cardLast4}`
-            : 'None'
-        } />
+        <RowBetween k="Card on file" v={(() => {
+          // Round 25 fix (2026-05-22): prefer dejavooCardLast4 (saved at pickup
+          // via the SPIn Sale → IPosToken flow, round 20+). Fall back to the
+          // legacy AuthNet cardLast4 for tenants still on Authorize.Net.
+          const c = reservation?.customer || {};
+          const last4 = c.dejavooCardLast4 || c.cardLast4;
+          const brand = c.dejavooCardBrand || c.cardBrand;
+          return last4 ? `${brand || 'Card'} ····${last4}` : 'None';
+        })()} />
       </WizCard>
     </WizGrid>
   );

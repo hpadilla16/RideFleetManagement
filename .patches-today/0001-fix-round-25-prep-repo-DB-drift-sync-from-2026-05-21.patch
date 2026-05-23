@@ -1,0 +1,488 @@
+From 3ae4565bb41b6428e8a5ce9be8ac47729882faa7 Mon Sep 17 00:00:00 2001
+From: Hector Padilla <hpadilla160123@gmail.com>
+Date: Fri, 22 May 2026 15:36:45 +0000
+Subject: [PATCH] fix(round-25-prep): repo/DB drift sync from 2026-05-21 live
+ hotfixes
+
+Three small fixes that were applied live to production during the
+v0.9.0-beta.69 smoke test (and then rolled back to v0.9.0-beta.56)
+but never made it into the repo. Round 25 builds on top of these.
+
+- backend/prisma/schema.prisma: add Tenant.settingsJson (JSONB) for
+  per-tenant operational settings (Dejavoo preAuthAmountCents, etc.).
+- backend/src/modules/payment-gateway/counter.routes.js: preflight
+  selects ReservationCharge.name (was .label which does not exist).
+- backend/src/modules/payment-gateway/counter-return-orchestrator.service.js:
+  wrap String() around statusCode before persisting to DejavooTransaction
+  (spinStatusCode is Int from SPIn, column is String?).
+
+Also bundles the operator workflow notes:
+
+- backend/prisma/migrations/20260522_round25_prep/migration.sql:
+  idempotent migration that backfills the Tenant.settingsJson column
+  and updates FeeRate_feeType_check (add LATE_RETURN) +
+  FeeRate_unit_check (add PER_HOUR) live constraints.
+- doc/round-25-plan-2026-05-22.md: full round 25 plan + bug inventory.
+- .deploy-notes/2026-05-22-create-second-super-admin.sql: SQL we ran
+  this morning to promote jcdiaz@internationalrentalcorp.com to
+  SUPER_ADMIN (keeping tenantId=IRC to avoid empty feature-flags bug).
+
+Tests:
+- counter-checkin.worker: 4/4
+- counter-orchestrator.service: 26/26
+- counter-return-orchestrator.service: 22/22
+- counter-return.worker: 5/5
+
+Companion: doc/round-25-plan-2026-05-22.md
+---
+ .../2026-05-22-create-second-super-admin.sql  |  22 ++
+ .../20260522_round25_prep/migration.sql       |  55 ++++
+ backend/prisma/schema.prisma                  |   5 +
+ .../counter-return-orchestrator.service.js    |   4 +-
+ .../modules/payment-gateway/counter.routes.js |   2 +-
+ doc/round-25-plan-2026-05-22.md               | 298 ++++++++++++++++++
+ 6 files changed, 384 insertions(+), 2 deletions(-)
+ create mode 100644 .deploy-notes/2026-05-22-create-second-super-admin.sql
+ create mode 100644 backend/prisma/migrations/20260522_round25_prep/migration.sql
+ create mode 100644 doc/round-25-plan-2026-05-22.md
+
+diff --git a/.deploy-notes/2026-05-22-create-second-super-admin.sql b/.deploy-notes/2026-05-22-create-second-super-admin.sql
+new file mode 100644
+index 0000000..d054748
+--- /dev/null
++++ b/.deploy-notes/2026-05-22-create-second-super-admin.sql
+@@ -0,0 +1,22 @@
++-- Promote jcdiaz@internationalrentalcorp.com to SUPER_ADMIN
++-- Date: 2026-05-22
++-- IMPORTANT: copy this from VSCode (or paste from raw file), NOT from chat,
++-- to avoid smart-quote substitution.
++
++-- Step 1 verify current state
++SELECT id, email, role, "tenantId" FROM "User" WHERE email = 'jcdiaz@internationalrentalcorp.com';
++
++-- Step 2 promote
++UPDATE "User"
++SET role = 'SUPER_ADMIN',
++    "passwordHash" = '$2b$10$tZrMifQ2muVaEndguGoOyenYd4lNohQN5PQenJiAiP73ItFVy8Hgi',
++    "fullName" = 'Jose Diaz Second Super Admin',
++    "isActive" = true,
++    "updatedAt" = NOW()
++WHERE email = 'jcdiaz@internationalrentalcorp.com';
++
++-- Step 3 verify
++SELECT id, email, "fullName", role, "tenantId", "isActive" FROM "User" WHERE email = 'jcdiaz@internationalrentalcorp.com';
++
++-- Step 4 audit all super admins
++SELECT id, email, "fullName", "tenantId", "isActive" FROM "User" WHERE role = 'SUPER_ADMIN' ORDER BY "createdAt";
+diff --git a/backend/prisma/migrations/20260522_round25_prep/migration.sql b/backend/prisma/migrations/20260522_round25_prep/migration.sql
+new file mode 100644
+index 0000000..0b60e9a
+--- /dev/null
++++ b/backend/prisma/migrations/20260522_round25_prep/migration.sql
+@@ -0,0 +1,55 @@
++-- Round 25 prep — code/DB drift sync (2026-05-22)
++--
++-- Idempotent migration that backfills changes that were applied live to
++-- production on 2026-05-21 during the v0.9.0-beta.69 smoke test but never
++-- made it into the repo. Safe to re-run.
++--
++-- Changes:
++--   1. Tenant.settingsJson : JSONB column for per-tenant operational settings
++--                            (Dejavoo preAuthAmountCents, future per-tenant config).
++--   2. FeeRate_feeType_check : add 'LATE_RETURN' to the allowed-values list.
++--   3. FeeRate_unit_check    : add 'PER_HOUR'    to the allowed-values list.
++--
++-- Companion: doc/round-25-plan-2026-05-22.md
++
++-- ============================================================================
++-- 1. Tenant.settingsJson
++-- ============================================================================
++ALTER TABLE "Tenant"
++  ADD COLUMN IF NOT EXISTS "settingsJson" JSONB DEFAULT '{}'::jsonb;
++
++-- Backfill any existing NULLs so callers always get an object.
++UPDATE "Tenant"
++   SET "settingsJson" = '{}'::jsonb
++ WHERE "settingsJson" IS NULL;
++
++-- ============================================================================
++-- 2. FeeRate_feeType_check — add LATE_RETURN
++-- ============================================================================
++ALTER TABLE "FeeRate" DROP CONSTRAINT IF EXISTS "FeeRate_feeType_check";
++
++ALTER TABLE "FeeRate"
++  ADD CONSTRAINT "FeeRate_feeType_check"
++  CHECK ("feeType" IN (
++    'FUEL_REFILL',
++    'CLEANING_LIGHT',
++    'CLEANING_MEDIUM',
++    'CLEANING_HEAVY',
++    'SMOKING',
++    'EXCESS_MILEAGE',
++    'LATE_RETURN'
++  ));
++
++-- ============================================================================
++-- 3. FeeRate_unit_check — add PER_HOUR
++-- ============================================================================
++ALTER TABLE "FeeRate" DROP CONSTRAINT IF EXISTS "FeeRate_unit_check";
++
++ALTER TABLE "FeeRate"
++  ADD CONSTRAINT "FeeRate_unit_check"
++  CHECK ("unit" IN (
++    'FLAT',
++    'PER_GALLON',
++    'PER_MILE',
++    'PER_HOUR'
++  ));
+diff --git a/backend/prisma/schema.prisma b/backend/prisma/schema.prisma
+index 624fc65..38f1308 100644
+--- a/backend/prisma/schema.prisma
++++ b/backend/prisma/schema.prisma
+@@ -401,6 +401,11 @@ model Tenant {
+   // rental-agreement renderer (see getEffectiveTermsHtmlForTenant).
+   // When null/empty, the system continues to render the canonical T&C.
+   termsHtml               String?  @db.Text
++  // Per-tenant operational settings bag — Dejavoo preAuth amounts, flags,
++  // future per-tenant feature config. Free-form JSONB, schema-less so we
++  // can add knobs without migrations. Read via `tenant.settingsJson?.X.Y`.
++  // Added 2026-05-22 (round 25 prep) — was hotfixed in prod on 2026-05-21.
++  settingsJson            Json?    @db.JsonB @default("{}")
+   createdAt               DateTime @default(now())
+   updatedAt               DateTime @updatedAt
+ 
+diff --git a/backend/src/modules/payment-gateway/counter-return-orchestrator.service.js b/backend/src/modules/payment-gateway/counter-return-orchestrator.service.js
+index 1bdbace..0704f0a 100644
+--- a/backend/src/modules/payment-gateway/counter-return-orchestrator.service.js
++++ b/backend/src/modules/payment-gateway/counter-return-orchestrator.service.js
+@@ -147,7 +147,9 @@ async function recordTxError(prisma, txId, err) {
+   return prisma.dejavooTransaction.update({
+     where: { id: txId },
+     data: {
+-      statusCode: err?.spinStatusCode || 'ERROR',
++      // Round 25 prep fix (2026-05-22): DejavooTransaction.statusCode is String?,
++      // but spinStatusCode comes back as Int from SPIn — wrap so Prisma doesn't reject.
++      statusCode: String(err?.spinStatusCode || 'ERROR'),
+       errorMessage: err?.message || 'unknown error',
+       completedAt: new Date(),
+     },
+diff --git a/backend/src/modules/payment-gateway/counter.routes.js b/backend/src/modules/payment-gateway/counter.routes.js
+index 736109d..db6a61b 100644
+--- a/backend/src/modules/payment-gateway/counter.routes.js
++++ b/backend/src/modules/payment-gateway/counter.routes.js
+@@ -782,7 +782,7 @@ counterRouter.get('/preflight', requireRole('ADMIN', 'OPS', 'AGENT'), async (req
+         },
+         charges: {
+           where: { selected: true },
+-          select: { total: true, label: true },
++          select: { total: true, name: true },
+         },
+       },
+     });
+diff --git a/doc/round-25-plan-2026-05-22.md b/doc/round-25-plan-2026-05-22.md
+new file mode 100644
+index 0000000..badde1d
+--- /dev/null
++++ b/doc/round-25-plan-2026-05-22.md
+@@ -0,0 +1,298 @@
++# Round 25 Plan — fix the Dejavoo flow + ship cleanly to live
++
++**Date:** 2026-05-22 (Friday morning)
++**Author:** Cowork (overnight session 2026-05-21 → 2026-05-22)
++**Starting state:** Droplet rolled back to v0.9.0-beta.56 (legacy flow live). Tag v0.9.0-beta.69 sits on `origin/main` with the full Dejavoo pilot code — but several bugs blocked end-to-end live testing.
++
++This doc is the single source of truth for tomorrow's work. Read top to bottom.
++
++---
++
++## TL;DR
++
++What we shipped tonight (rounds 13–24, tagged `v0.9.0-beta.69`) is **architecturally correct end-to-end**, but the interactive T&C flow on the Dejavoo terminal hit a wall: the SPIn REST API doesn't expose `/v2/Payment/Disclaimer` (or the other 4 interactive endpoints) the way the code assumes. Either the URL path is different than `/v2/Payment/...`, OR — more likely — the disclaimer + signature capture are meant to flow automatically as part of the Sale request, not as standalone API calls.
++
++Plus 5 smaller bugs we found along the way (all listed below).
++
++**The path forward** is to refactor the orchestrator to use the **Sale-driven flow** that Dejavoo actually supports: configure the disclaimer on the terminal profile, let the Sale request prompt the customer + capture the signature, read the signature back from the Sale response's `SignatureData` field. The interactive `Disclaimer`/`GetSignature`/`UserChoice`/`UserInput`/`Cart` endpoints get removed.
++
++All of this gets done locally first, tested against the sandbox terminal, then redeployed as `v0.9.0-beta.70`.
++
++---
++
++## Bug inventory — confirmed, with file:line + fix sketches
++
++### 🔴 CRITICAL — blocks end-to-end
++
++**Bug #1 — SPIn interactive endpoints return 404**
++
++- Files: `spin-client.js:245, 257, 268, 280, 294` (definitions); `counter-orchestrator.service.js:171, 199, 267, 306` (usage)
++- The 5 methods `spin.disclaimer()`, `spin.getSignature()`, `spin.userChoice()`, `spin.userInput()`, `spin.cart()` all POST to paths under `/v2/Payment/<Method>` that don't exist on `api.spinpos.net`.
++- Confirmed at runtime: `POST /v2/Payment/Disclaimer → 404` from logs.
++- **Root cause likely:** these methods exist in Dejavoo's API surface but at different URL paths (e.g. `/v2/Disclaimer`, no `Payment/` prefix), OR they're handled automatically by Sale/Auth when the terminal profile is configured for it.
++- **Fix:** rip out the 5 standalone interactive calls. Replace with a single `autoRentalSale` (rental fee) → reads `SignatureData` from response. Configure T&C text on the terminal profile via Dejavoo merchant portal. (See "Round 25 design" below.)
++
++### 🟠 HIGH — would break first real customer
++
++**Bug #2 — `label` field on ReservationCharge doesn't exist**
++
++- File: `counter.routes.js:785`
++- The preflight endpoint selects `{ total: true, label: true }` on ReservationCharge — but the field is named `name`. Prisma rejects the query.
++- **Fix:** `select: { total: true, name: true }` (1-line change). Already hotfixed in production tonight via `sed` but rolled back with the deploy. Re-apply in round 25.
++
++**Bug #3 — `recordTxError` saves Int statusCode into String column**
++
++- Files: `counter-orchestrator.service.js:139`, `counter-return-orchestrator.service.js:150`
++- When SPIn returns a non-200, `err.spinStatusCode` is an integer (e.g. `404`). `DejavooTransaction.statusCode` is a String column. Prisma rejects the write.
++- **Impact:** when the SPIn flow fails, the audit row never gets persisted — so we lose the trail of WHY it failed.
++- **Fix:** `statusCode: String(err?.spinStatusCode || 'ERROR')` (1-line each).
++
++**Bug #4 — wizard-state routes return 403 to SUPER_ADMIN**
++
++- File: `wizard-state.routes.js:47-55`
++- The local `requireRole` helper doesn't have a SUPER_ADMIN bypass. The canonical one in `middleware/auth.js` does. Affects `/checkout-wizard-state`, `/checkin-wizard-state`, `/active-wizard`, `/checkout-wizard-step` PATCH, etc.
++- **Impact:** SUPER_ADMIN can't smoke-test the wizard flow at all (page can't read its state from the server, falls back to step 0 every time).
++- **Fix:** Replace local `requireRole` with `import { requireRole } from '../../middleware/auth.js'`.
++- **Adjacent (same bug):** `reports-v2.routes.js:51, 67, 100, 112` has the same custom `requireRole` definition. Fix both.
++
++### 🟡 MEDIUM — design issues to address but workaround-able
++
++**Bug #5 — `/api/me/feature-flags` short-circuits for SUPER_ADMIN**
++
++- File: `tenant-flags.routes.js:107-109`
++- SUPER_ADMIN users have `tenantId: null` in their JWT (they don't belong to a single tenant). The handler bails out with empty flags before resolving anything.
++- **Impact:** SUPER_ADMIN never sees TEST-mode features in the UI. Forced to flip flags to LIVE to test, which exposes the new flow to all real agents at once.
++- **Fix:** Accept optional `?tenantId=X` query param when `req.user.role === 'SUPER_ADMIN'`. Update `useFeatureFlags` hook in frontend to pass the focused tenant.
++
++**Bug #6 — Default pre-auth amount not in tenant settings out-of-the-box**
++
++- During smoke test we discovered IRC's `tenant.settingsJson.dejavoo` was `null`, so preflight computed `25%` of estimated total. We manually set `preAuthAmountCents: 25000` via SQL.
++- **Fix:** add a tenant settings UI section (or a one-time provisioning script step) so this isn't a guessing game per tenant.
++
++### 🟢 LOW — pre-existing drift, but worth surfacing
++
++**Bug #7 — `FeeRate` CHECK constraints out of sync with code (pre-existing)**
++
++- Production DB had `FeeRate_feeType_check` missing `LATE_RETURN` and `FeeRate_unit_check` missing `PER_HOUR`. Code added these values long ago without updating the constraints.
++- **Status:** Hotfixed in production tonight via `ALTER TABLE`. Not a round-25 concern.
++- **Followup task #6** (existing): add a constraints audit script that compares code-declared enum values against DB CHECK constraints, fail CI if drift.
++
++**Bug #8 — `Tenant.settingsJson` column was missing in production (pre-existing)**
++
++- Hotfixed tonight via `ALTER TABLE`. The field was always present in code (SMS service, tolls, payment-gateway, feature-flags all reference it), but the column was never created and was never declared in `schema.prisma`.
++- **Status:** Column now exists. `schema.prisma` declaration is in `v0.9.0-beta.69` (committed). Don't redo.
++
++**Bug #9 — `evidence-pack.service.js` top-level imports Pillar 2 inspections module**
++
++- Hotfixed tonight via lazy import. The module wasn't in this deploy bundle, so loading evidence-pack failed.
++- **Status:** Fix is in `v0.9.0-beta.69`. Pillar 2 inspections module ships in a future round.
++
++---
++
++## Round 25 design — the correct Dejavoo SPIn flow
++
++### What the SPIn REST API actually wants for interactive T&C
++
++From the SPIn research (sources at bottom of doc):
++
++1. **The disclaimer is configured at the terminal profile / iPOSpays merchant portal level** — not pushed by the orchestrator on each transaction. The terminal shows it automatically before any Sale.
++2. **The signature is captured by the Sale request itself** when `CaptureSignature: true` is set in the body. Touchscreen P1 terminals handle this natively. The signature PNG comes back in the Sale response's `SignatureData` field.
++3. **The orchestrator never needs to call `Disclaimer`, `GetSignature`, `UserChoice`, `UserInput`, or `Cart` as standalone endpoints.** Those exist in the API surface but at non-`Payment/` paths AND for use cases that don't apply to our flow.
++
++### The new orchestrator shape
++
++```
++runCounterCheckinFlow:
++  1. Load reservation + agreement + selected charges + tenant config (unchanged)
++  2. Resolve rentalFeeCents + preAuthCents (unchanged)
++  3. (NEW) Call autoRentalSale ONCE for the rental fee
++     - body includes: Amount, RentalData, Cart items, CaptureSignature: true
++     - terminal automatically: shows disclaimer (configured on profile)
++                             → prompts customer to insert/tap/swipe
++                             → captures signature on screen
++     - response includes: AuthCode, IPosToken, CardData (Last4/Brand/Entry), SignatureData (base64 PNG)
++  4. Persist SignatureData to Storage → ReservationSigning.signaturePath
++  5. Call authWithToken for the deposit (unchanged)
++  6. Promote IPosToken to Customer.dejavooIposToken (unchanged)
++  7. Mark Reservation.signingCompletedAt + ReservationSigning.completedAt
++```
++
++The TermsTemplate + TermsTemplateField + per-field signing infrastructure stays in the schema for the future when we ship a tablet-based signing flow — but the Dejavoo terminal flow doesn't use field-by-field signing. The customer accepts the entire T&C via the Sale flow + the disclaimer page on the terminal profile.
++
++### What gets deleted
++
++In `spin-client.js`:
++- `disclaimer()`, `getSignature()`, `userChoice()`, `userInput()`, `cart()` methods — remove
++- `htmlToTerminalText()`, `extractContextAroundMarker()` — no longer needed for the disclaimer text shipping
++
++In `counter-orchestrator.service.js`:
++- `captureInitialOrSignature()`, `captureChoice()`, `captureText()` — remove (they're per-field)
++- The field-by-field iteration loop in `runCounterCheckinFlow` — replace with a single `autoRentalSale` call
++
++In `counter-return-orchestrator.service.js`:
++- The `cart()` call (line 351) — remove. Pass the cart items directly inside the `autoRentalCapture` / `saleWithToken` body instead.
++
++### What stays
++
++- All AutoRental endpoints (Sale, Auth, Capture)
++- saleWithToken, authWithToken (round 22)
++- Customer card-on-file token logic (round 20)
++- Pre-auth override + audit log (round 21)
++- Wizard reorder + cross-device resume (round 23)
++- Reports module (round 24)
++- All migrations applied tonight stay in place
++- All tests still pass (just need a few new ones)
++
++---
++
++## Local dev setup — Hector's workflow
++
++1. **Pull tag locally:**
++   ```bash
++   cd ~/Code/RideFleetManagement
++   git fetch --tags
++   git checkout v0.9.0-beta.69
++   ```
++
++2. **Sync local DB with the new schema:**
++   Run the 5 migrations + the `Tenant.settingsJson` ALTER against your local Postgres:
++   ```bash
++   psql "$DATABASE_URL" -f backend/prisma/migrations/20260521_add_tenant_audit_log/migration.sql
++   psql "$DATABASE_URL" -f backend/prisma/migrations/20260521_unified_tc_dejavoo/migration.sql
++   psql "$DATABASE_URL" -f backend/prisma/migrations/20260521_dejavoo_card_on_file/migration.sql
++   psql "$DATABASE_URL" -f backend/prisma/migrations/20260521_reservation_rental_fee_collected/migration.sql
++   psql "$DATABASE_URL" -f backend/prisma/migrations/20260521_rental_agreement_wizard_progress/migration.sql
++   psql "$DATABASE_URL" -c 'ALTER TABLE "Tenant" ADD COLUMN IF NOT EXISTS "settingsJson" JSONB DEFAULT '"'"'{}'"'"'::jsonb;'
++   ```
++
++3. **Regenerate Prisma client:**
++   ```bash
++   cd backend && npx prisma generate
++   ```
++
++4. **Build a feature branch off main for round 25:**
++   ```bash
++   git checkout main
++   git pull
++   git checkout -b feature/round25-spin-fix
++   ```
++
++5. **Seed a local IRC tenant + terminal:**
++   Either point at the same Supabase prod DB read-only (risky), OR create a local IRC seed:
++   ```bash
++   node backend/scripts/seed-pilot-terms-template.mjs --tenant <LOCAL_IRC_ID> --commit --activate
++   ```
++
++6. **Make Dejavoo P1 terminal available for testing** — IRC's terminal in sandbox mode (toggle `sandbox: true` in DejavooTerminal config to point at `test.spinpos.net/spin/v2/...` instead of `api.spinpos.net/v2/...`). The sandbox terminal is virtual + safe to hit without real charges.
++
++---
++
++## Round 25 implementation plan — ordered tasks
++
++| Order | Task | File(s) | Test |
++|---|---|---|---|
++| 25a | Fix `label` → `name` on ReservationCharge select | `counter.routes.js:785` | Add preflight integration test |
++| 25b | Fix `statusCode` Int→String in `recordTxError` | counter-orchestrator + return | Add unit test for error path |
++| 25c | Replace local `requireRole` with middleware import | `wizard-state.routes.js`, `reports-v2.routes.js` | Add SUPER_ADMIN role test |
++| 25d | Add `?tenantId=` param to `/api/me/feature-flags` for SUPER_ADMIN + update useFeatureFlags hook to pass focused tenant | `tenant-flags.routes.js`, `useFeatureFlags.js` | Add SUPER_ADMIN feature flag test |
++| 25e | Refactor `runCounterCheckinFlow` to use the Sale-driven flow | counter-orchestrator.service.js (big diff) | Update existing 26 tests + add 4 for Sale signature capture |
++| 25f | Drop `cart()` call from counter-return-orchestrator + pass cart inline in capture/sale | counter-return-orchestrator.service.js | Update return tests |
++| 25g | Remove standalone interactive methods from spin-client.js | spin-client.js | Update spin-client tests |
++| 25h | Run full backend test sweep + frontend smoke build | n/a | Expect 184+ passing |
++| 25i | Local smoke test end-to-end against sandbox terminal | n/a | Manual |
++| 25j | Generate round-25 patch + APPLY.md | .patches-tonight/round25-spin-driven-flow/ | n/a |
++| 25k | Deploy as `v0.9.0-beta.70` via the same DEPLOY script flow | DEPLOY-DEJAVOO-PILOT-2026-05-22.sh (new) | n/a |
++
++**Estimated total:** 5–7 hours of focused work, half of which is the orchestrator refactor (25e).
++
++---
++
++## Pre-deploy verification checklist (when round 25 is ready)
++
++1. ✅ Schema unchanged (no new migrations needed for round 25)
++2. ✅ Backend tests passing (184+)
++3. ✅ Frontend `next build` succeeds with no errors
++4. ✅ Local smoke test: full pickup flow works against sandbox terminal
++5. ✅ Local smoke test: return flow works
++6. ✅ Local smoke test: legacy fallback still works when flags are OFF
++7. ✅ Manual API test: `/v2/Payment/Status` for the real IRC TPN still returns Online (sanity check the production terminal is reachable)
++8. ✅ Manual SQL audit: verify all bugs from hot fixes still apply (FeeRate constraints, Tenant.settingsJson column, dejavoo settings present)
++
++---
++
++## Deployment plan — round 25 to live
++
++1. **Pre-flight on Mac:**
++   ```bash
++   git checkout main
++   git merge --no-ff feature/round25-spin-fix -m "merge: round 25 SPIn-driven flow + bug fixes"
++   git tag -f v0.9.0-beta.70 -m "v0.9.0-beta.70: round 25 SPIn-driven Dejavoo flow + 5 hotfixes"
++   git push origin main --follow-tags
++   ```
++
++2. **On droplet:**
++   ```bash
++   ssh root@ridefleetmanager.com
++   cd ~/RideFleetManagement
++   git fetch --tags
++   git checkout v0.9.0-beta.70
++   docker compose -f docker-compose.prod.yml up -d --build --force-recreate
++   ```
++
++3. **Wait for healthy + smoke test:**
++   ```bash
++   docker ps | grep fleet
++   curl -fsS http://localhost:4000/health
++   ```
++
++4. **Flip IRC flag to TEST + smoke test as IRC ADMIN user**
++   ```sql
++   UPDATE "Tenant"
++   SET "settingsJson" = jsonb_set(jsonb_set(
++       "settingsJson",
++       '{featureFlags,interactiveTC}', '"TEST"'::jsonb, true),
++       '{featureFlags,dejavooCounter}', '"TEST"'::jsonb, true)
++   WHERE id = 'cmn98hc1u0085ke0i4vefujt3';
++   ```
++   Test one real checkout end-to-end with the terminal.
++
++5. **If clean, flip to LIVE:**
++   Same query, `"LIVE"` instead of `"TEST"`.
++
++6. **Monitor first 3 IRC checkins** via `docker logs fleet-backend-prod -f` and `docker logs fleet-worker-prod -f`.
++
++7. **If anything breaks at any point:** flip back to `"OFF"` (1-second rollback).
++
++---
++
++## What we did tonight that was right
++
++- The 15 patches deployed clean (rounds 13–24)
++- The DB migrations are good and stay in place
++- The wizard reorder + reports module + foundation infrastructure all work
++- Discovering the SPIn API mismatch on a real terminal call was the right way to find it — unit tests with mocks would have hidden it forever
++- We discovered + hotfixed 4 pre-existing drift bugs (FeeRate constraints, Tenant.settingsJson column, settingsJson code path, Pillar 2 evidence-pack lazy load)
++
++## What we did tonight that was wrong (for next time)
++
++- Should have done a single-call smoke test against `api.spinpos.net/v2/Payment/Disclaimer` BEFORE writing 5 methods that assumed it exists. Would have caught the SPIn API mismatch on Day 1 of round 14, not on Day 30 of the deploy.
++- Should have added a `requireRole` lint that bans local re-definitions in route files and forces import from middleware.
++- Should have a CI step that runs `prisma migrate diff` and fails on drift between schema.prisma and the actual DB.
++
++These three become followup tasks for tomorrow (after round 25 ships).
++
++---
++
++## Sources & references
++
++- [Dejavoo SPIn REST API Methods on Theneo](https://app.theneo.io/dejavoo/spin/spin-rest-api-methods) — sidebar lists all endpoints but doesn't expose exact URLs server-side
++- [iPOSpays Disclaimer Page release notes (POS Build 10111+)](https://releases.ipospays.com/disclaimer-page) — confirms disclaimer is configured at terminal profile, runs automatically pre-Sale
++- [360 Payments `getSignature` docs (SPIn-derived)](https://360payments.com/docs/api/getsignature/) — confirms signature is captured automatically by Sale on touchscreen terminals
++- [DejavooDev/spinsdk on GitHub](https://github.com/DejavooDev/spinsdk) — official C# SDK, inspect for exact URL paths
++- **If we hit any more SPIn ambiguity tomorrow:** email `devsupport@dejavoo.io` for the definitive URL prefix list.
++
++---
++
++**Wake up to this doc. Read it. Then run the local dev setup. Round 25 should land before lunch.**
++
++🛌
+-- 
+2.34.1
+

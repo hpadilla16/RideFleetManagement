@@ -11,6 +11,12 @@ services:
     volumes:
       - fleet_pg_data:/var/lib/postgresql/data
 
+  redis:
+    image: redis:7-alpine
+    container_name: fleet-redis
+    ports:
+      - "6379:6379"
+
   backend:
     build:
       context: ./backend
@@ -23,12 +29,37 @@ services:
       # Override .env's host-side DATABASE_URL so the backend container can reach the db service
       # (host uses localhost:5433 for `npm run dev` + `npx prisma`; container uses db:5432).
       - DATABASE_URL=postgresql://postgres:postgres@db:5432/fleet_management?schema=public
+      # Override .env's host-side REDIS_URL (localhost:6379) so the backend
+      # container talks to the redis service inside the compose network.
+      # Required because the BullMQ enqueueCounterCheckin call in
+      # POST /counter/start-checkin awaits the queue connection — without
+      # Redis it hangs forever.
+      - REDIS_URL=redis://redis:6379
     volumes:
       - ./backend:/app
       - /app/node_modules
     command: sh -c "npm install && npx prisma generate && npx prisma db push && npm run dev"
     depends_on:
       - db
+      - redis
+
+  worker:
+    build:
+      context: ./backend
+    container_name: fleet-worker
+    env_file:
+      - ./backend/.env
+    environment:
+      - DATABASE_URL=postgresql://postgres:postgres@db:5432/fleet_management?schema=public
+      - REDIS_URL=redis://redis:6379
+    volumes:
+      - ./backend:/app
+      - /app/node_modules
+    command: sh -c "npm install && npx prisma generate && node src/worker.js"
+    depends_on:
+      - db
+      - redis
+      - backend
 
   frontend:
     build:

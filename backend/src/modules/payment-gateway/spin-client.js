@@ -26,7 +26,54 @@ function getConfig(tenantConfig = {}) {
   };
 }
 
+// Round 25 (2026-05-22): SPIN_MOCK=true short-circuits all network calls
+// and returns fake successful responses. For LOCAL dev only — never set in
+// production. Lets us validate the orchestrator + frontend wizard flow
+// without a real Dejavoo terminal.
+function mockSpinResponse(method, path, body) {
+  const sigPng = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=';
+  const ok = (extra) => ({
+    GeneralResponse: { ResultCode: 0, StatusCode: '0000', Message: 'OK (MOCK)' },
+    ReferenceId: body?.ReferenceId || 'MOCK_REF',
+    ...extra,
+  });
+  if (path.endsWith('/AutoRental/Sale') || path.endsWith('/Payment/Sale')) {
+    return ok({
+      AuthCode: 'MOCK_SALE',
+      IPosToken: 'MOCK_TOKEN_VAULT',
+      SignatureData: sigPng,
+      CardData: { Last4: '4242', CardType: 'VISA', EntryType: 'CHIP', Name: 'TEST CUSTOMER' },
+    });
+  }
+  if (path.endsWith('/AutoRental/Auth')) {
+    return ok({
+      AuthCode: 'MOCK_AUTH',
+      IPosToken: 'MOCK_TOKEN_VAULT',
+      SignatureData: sigPng,
+      CardData: { Last4: '4242', CardType: 'VISA', EntryType: 'CHIP' },
+    });
+  }
+  if (path.endsWith('/AutoRental/Capture')) {
+    return ok({ AuthCode: 'MOCK_CAP' });
+  }
+  if (path.endsWith('/Payment/Void')) {
+    return ok({ AuthCode: 'MOCK_VOID' });
+  }
+  if (path.endsWith('/Common/TerminalStatus')) {
+    return ok({ Status: 'Online', Battery: 95 });
+  }
+  // Default — anything we didn't enumerate just gets a generic OK so the
+  // orchestrator doesn't crash on unhandled paths.
+  return ok({ MockNote: `unmocked path: ${path}` });
+}
+
 async function spinRequest(method, path, body, tenantConfig = {}) {
+  // Mock mode short-circuit — skips network entirely.
+  if (process.env.SPIN_MOCK === 'true') {
+    logger.info(`SPIn API ${method} ${path} [MOCK]`, { spinPath: path });
+    return mockSpinResponse(method, path, body);
+  }
+
   const config = getConfig(tenantConfig);
   if (!config.authKey) throw new Error('SPIn authKey is not configured');
   if (!config.tpn) throw new Error('SPIn terminal TPN is not configured');

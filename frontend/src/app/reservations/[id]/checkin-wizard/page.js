@@ -266,6 +266,18 @@ function CheckinWizard({ token, me, logout }) {
   const onNext = () => {
     if (step === 4) return submitCheckinClose();
     if (step === 5) return router.push('/reservations');
+
+    // Round 25 (2026-05-22): if the customer owes nothing at return — no
+    // computed extras AND no prior unpaid balance — skip the payment-choice
+    // step (3) and the acknowledge-fees step (4) entirely. Just close the
+    // checkin (which voids the hold and marks return complete). Saves the
+    // agent two clicks and skips a Dejavoo prompt that has nothing to charge.
+    const totalOwed =
+      Number(feePreview?.total || 0) + Number(agreement?.balance || 0);
+    if (step === 2 && totalOwed === 0) {
+      return submitCheckinClose();
+    }
+
     setStep((s) => Math.min(s + 1, steps.length - 1));
   };
 
@@ -413,11 +425,15 @@ function Step1Summary({ reservation, agreement }) {
           v={<strong>${Number(agreement?.balance || 0).toFixed(2)}</strong>}
           valueColor={Number(agreement?.balance || 0) > 0 ? '#f59e0b' : '#1fc7aa'}
         />
-        <RowBetween k="Card on file" v={
-          agreement?.reservation?.customer?.cardLast4
-            ? `${agreement.reservation.customer.cardBrand || 'Card'} ····${agreement.reservation.customer.cardLast4}`
-            : '— No card'
-        } />
+        <RowBetween k="Card on file" v={(() => {
+          // Round 25 fix (2026-05-22): prefer dejavooCardLast4 (saved at pickup
+          // via the SPIn Sale → IPosToken flow, round 20+). Fall back to the
+          // legacy AuthNet cardLast4 for tenants still on Authorize.Net.
+          const c = agreement?.reservation?.customer || {};
+          const last4 = c.dejavooCardLast4 || c.cardLast4;
+          const brand = c.dejavooCardBrand || c.cardBrand;
+          return last4 ? `${brand || 'Card'} ····${last4}` : '— No card';
+        })()} />
       </WizCard>
     </WizGrid>
   );
