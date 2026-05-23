@@ -65,25 +65,21 @@ export function CheckoutSignatureStep({
     let cancelled = false;
     api(`/api/payment-gateway/counter/preflight?reservationId=${encodeURIComponent(reservationId)}`, {}, token)
       .then((out) => {
-        if (cancelled) return;
-        setPreflight(out);
-        // Round 25 (2026-05-22): if nothing to charge at the counter (rental
-        // fee was prepaid online), skip the Dejavoo terminal step entirely.
-        // The customer still signs the T&C via the legacy SignaturePad and
-        // then moves on to vehicle inspection. The pre-auth security deposit
-        // hold (if any) is handled by the legacy flow or deferred to a
-        // separate manual capture — the terminal only runs when there's a
-        // SALE to process.
-        const rentalFeeCents = Number(out?.rentalFeeAmountCents || 0);
-        if (rentalFeeCents <= 0) {
-          setForceLegacy(true);
-        }
+        if (!cancelled) setPreflight(out);
       })
       .catch((err) => {
         if (!cancelled) setPreflightError(err?.message || 'Preflight failed');
       });
     return () => { cancelled = true; };
   }, [loading, flags.interactiveTC, flags.dejavooCounter, forceLegacy, reservationId, token]);
+
+  // Round 25 hotfix (2026-05-22): the previous "auto-force legacy when
+  // rentalFeeAmountCents=0" check was too aggressive — preflight returns 0
+  // when no charges are marked selected=true (the default state before an
+  // agent reviews the charges), not just when the rental was actually
+  // prepaid. That dropped users into the legacy SignaturePad even when
+  // there WAS a balance to collect. The agent retains the "Use legacy
+  // signature" button for manual fallback when the terminal is unavailable.
 
   if (loading) {
     return (
