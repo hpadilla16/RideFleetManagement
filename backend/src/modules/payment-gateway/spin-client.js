@@ -579,7 +579,12 @@ export function buildLevel3FromReservation(reservation, agreement, charges = [])
     },
     AutoRentalPricing: {
       RentalRate: dollarsFromDecimal(agreement?.dailyRate) || null,
-      ExtraCharges: [],
+      // Round 25 hotfix (2026-05-22): SPIn requires this array to have at
+      // least one element. Empty [] returns:
+      //   StatusCode 2201 — "Invalid request data : ExtraCharges are
+      //   required or NoExtraCharge cannot be combined with other charges"
+      // Docs sample uses [""] as the placeholder for "no extras".
+      ExtraCharges: [''],
     },
     AutoRentalPickup: {
       DateTime: pickup ? pickup.toISOString() : '',
