@@ -106,15 +106,15 @@ test('autoRentalCapture routes to v2/AutoRental/Capture (amount optional)', asyn
 // buildLevel3FromReservation
 // ---------------------------------------------------------------------------
 
-test('buildLevel3FromReservation returns Cart + Level3.RentalData', () => {
+test('buildLevel3FromReservation returns Cart + nested Level3.RentalData (AutoRental shape)', () => {
   const reservation = {
     id: 'r1',
     pickupAt: new Date('2026-05-21T14:00:00Z'),
     returnAt: new Date('2026-05-24T14:00:00Z'),
-    pickupLocation: { code: 'SJU', name: 'San Juan' },
-    returnLocation: { code: 'SJU', name: 'San Juan' },
-    vehicle: { plate: 'ABC123', classCode: 'SFAR' },
-    customer: { firstName: 'M', lastName: 'Rivera' },
+    pickupLocation: { code: 'SJU', name: 'San Juan', city: 'San Juan', state: 'PR' },
+    returnLocation: { code: 'SJU', name: 'San Juan', city: 'San Juan', state: 'PR' },
+    vehicle: { plate: 'ABC123', make: 'Toyota', model: 'Corolla', classCode: 'SFAR' },
+    customer: { firstName: 'M', lastName: 'Rivera', phone: '555-1234' },
   };
   const agreement = { agreementNumber: 'AG-001', dailyRate: 75, totalDays: 3 };
   const charges = [
@@ -126,13 +126,20 @@ test('buildLevel3FromReservation returns Cart + Level3.RentalData', () => {
   assert.equal(Cart.Items.length, 2, 'unselected charges filtered out');
   assert.equal(Cart.Total, 270);
   assert.equal(Cart.Items[0].CommodityCode, '4111');
-  assert.equal(Level3.RentalData.AgreementNumber, 'AG-001');
-  assert.equal(Level3.RentalData.PickupLocation, 'SJU');
-  assert.equal(Level3.RentalData.VehicleClass, 'SFAR');
-  assert.equal(Level3.RentalData.VehiclePlate, 'ABC123');
-  assert.equal(Level3.RentalData.DriverFirstName, 'M');
-  assert.equal(Level3.RentalData.DailyRate, 75);
-  assert.equal(Level3.RentalData.TotalDays, 3);
+  // Round 25 hotfix: AutoRental object is NESTED per SPIn docs
+  assert.equal(Level3.RentalData.AutoRentalAgreement.AgreementReferenceNumber, 'AG-001');
+  assert.equal(Level3.RentalData.AutoRentalAgreement.RentalDuration, 3);
+  assert.equal(Level3.RentalData.AutoRentalAgreement.RentalPeriod, 'Daily');
+  assert.equal(Level3.RentalData.AutoRentalPickup.LocationId, 'SJU');
+  assert.equal(Level3.RentalData.AutoRentalPickup.City, 'San Juan');
+  assert.equal(Level3.RentalData.AutoRentalReturn.LocationId, 'SJU');
+  assert.equal(Level3.RentalData.AutoRentalVehicle.VehicleMake, 'Toyota');
+  assert.equal(Level3.RentalData.AutoRentalVehicle.VehicleModel, 'Corolla');
+  assert.equal(Level3.RentalData.AutoRentalVehicle.RentalClassId, 'SFAR');
+  assert.equal(Level3.RentalData.AutoRentalRenter.RenterName, 'M Rivera');
+  assert.equal(Level3.RentalData.AutoRentalRenter.ServiceMobile, '555-1234');
+  assert.equal(Level3.RentalData.AutoRentalPricing.RentalRate, 75);
+  assert.equal(Level3.RentalData.AutoRentalDistance.AutoRentalDistanceUnitofMeasure, 'Miles');
 });
 
 test('buildLevel3FromReservation handles missing optional data', () => {
@@ -140,8 +147,10 @@ test('buildLevel3FromReservation handles missing optional data', () => {
   const { Cart, Level3 } = buildLevel3FromReservation(r, {}, []);
   assert.equal(Cart.Items.length, 0);
   assert.equal(Cart.Total, 0);
-  assert.equal(Level3.RentalData.AgreementNumber, 'r1', 'falls back to reservation.id');
-  assert.equal(Level3.RentalData.PickupDate, null);
+  // Round 25 hotfix: nested structure even with empty inputs
+  assert.equal(Level3.RentalData.AutoRentalAgreement.AgreementReferenceNumber, 'r1', 'falls back to reservation.id');
+  assert.equal(Level3.RentalData.AutoRentalPickup.DateTime, '');
+  assert.equal(Level3.RentalData.AutoRentalRenter.RenterName, 'Customer');
 });
 
 test('buildLevel3FromReservation accepts Prisma-Decimal-as-string', () => {

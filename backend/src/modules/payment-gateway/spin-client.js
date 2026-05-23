@@ -533,23 +533,78 @@ export function buildLevel3FromReservation(reservation, agreement, charges = [])
     ? reservation.returnAt
     : reservation?.returnAt ? new Date(reservation.returnAt) : null;
 
+  // Round 25 hotfix (2026-05-22): SPIn AutoRental requires a NESTED structure
+  // with these sub-objects:
+  //   AutoRentalAgreement (+ AutoRentalAdjustment nested)
+  //   AutoRentalRenter
+  //   AutoRentalVehicle
+  //   AutoRentalPricing
+  //   AutoRentalPickup
+  //   AutoRentalReturn
+  //   AutoRentalDistance
+  // Per docs: https://app.theneo.io/dejavoo/spin/autorental/auto-rental-auth
+  // Our previous flat shape ({ AgreementNumber, DailyRate, ... }) crashed
+  // SPIn's ASP.NET parser with HTTP 500 'An error has occurred'.
+  const pickupLoc = reservation?.pickupLocation || {};
+  const returnLoc = reservation?.returnLocation || {};
+  const customer = reservation?.customer || {};
+  const vehicle = reservation?.vehicle || {};
+
+  const renterName = [customer.firstName, customer.lastName]
+    .filter(Boolean)
+    .join(' ')
+    .slice(0, 80) || 'Customer';
+
   const rentalData = {
-    AgreementNumber: agreement?.agreementNumber || reservation?.id || '',
-    PickupDate: pickup ? pickup.toISOString() : null,
-    ReturnDate: ret ? ret.toISOString() : null,
-    PickupLocation:
-      reservation?.pickupLocation?.code || reservation?.pickupLocation?.name || null,
-    ReturnLocation:
-      reservation?.returnLocation?.code || reservation?.returnLocation?.name || null,
-    VehicleClass:
-      reservation?.vehicle?.classCode ||
-      reservation?.vehicle?.vehicleType?.code ||
-      null,
-    VehiclePlate: reservation?.vehicle?.plate || null,
-    DriverFirstName: reservation?.customer?.firstName || null,
-    DriverLastName: reservation?.customer?.lastName || null,
-    DailyRate: dollarsFromDecimal(agreement?.dailyRate) || null,
-    TotalDays: typeof agreement?.totalDays === 'number' ? agreement.totalDays : null,
+    AutoRentalAgreement: {
+      AgreementReferenceNumber: (agreement?.agreementNumber || reservation?.id || '').slice(0, 25),
+      PurchaseIdentifier: '',
+      RentalDuration:
+        typeof agreement?.totalDays === 'number' ? agreement.totalDays : null,
+      RentalPeriod: 'Daily',
+      AutoRentalAdjustment: {
+        AdjustmentAmount: null,
+        AdjustmentAuditIndicatorCode: 'X', // X = no adjustments (per docs)
+      },
+    },
+    AutoRentalRenter: {
+      RenterName: renterName,
+      ServiceMobile: (customer.phone || '').slice(0, 20),
+    },
+    AutoRentalVehicle: {
+      VehicleMake: (vehicle.make || '').slice(0, 20),
+      VehicleModel: (vehicle.model || '').slice(0, 20),
+      RentalClassId:
+        (vehicle.classCode || vehicle.vehicleType?.code || '').slice(0, 10),
+    },
+    AutoRentalPricing: {
+      RentalRate: dollarsFromDecimal(agreement?.dailyRate) || null,
+      ExtraCharges: [],
+    },
+    AutoRentalPickup: {
+      DateTime: pickup ? pickup.toISOString() : '',
+      Address: (pickupLoc.address || '').slice(0, 80),
+      City: (pickupLoc.city || '').slice(0, 40),
+      State: (pickupLoc.state || '').slice(0, 20),
+      Country: (pickupLoc.country || 'USA').slice(0, 20),
+      LocationId: (pickupLoc.code || '').slice(0, 20),
+      RegionCode: (pickupLoc.state || '').slice(0, 2),
+      CountryCode: 'US',
+    },
+    AutoRentalReturn: {
+      DateTime: ret ? ret.toISOString() : '',
+      Address: (returnLoc.address || '').slice(0, 80),
+      City: (returnLoc.city || '').slice(0, 40),
+      State: (returnLoc.state || '').slice(0, 20),
+      Country: (returnLoc.country || 'USA').slice(0, 20),
+      LocationId: (returnLoc.code || '').slice(0, 20),
+      RegionCode: (returnLoc.state || '').slice(0, 2),
+      CountryCode: 'US',
+    },
+    AutoRentalDistance: {
+      RentalDistance: null,
+      AutoRentalDistanceUnitofMeasure: 'Miles',
+    },
   };
 
   return {
