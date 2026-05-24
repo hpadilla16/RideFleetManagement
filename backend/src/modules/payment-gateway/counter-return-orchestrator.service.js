@@ -47,7 +47,7 @@ import {
   buildLevel3FromReservation,
 } from './spin-client.js';
 import { uploadSignatureBlob } from '../terms/signing-storage.js';
-import { CounterOrchestratorError } from './counter-orchestrator.service.js';
+import { CounterOrchestratorError, isDepositCharge } from './counter-orchestrator.service.js';
 
 // Lazy prisma + logger
 let _defaultPrisma = null;
@@ -164,9 +164,15 @@ async function recordTxError(prisma, txId, err) {
  * Sum up the final amount in cents for a reservation. Defaults to summing
  * the selected ReservationCharge rows. Caller can override with explicit
  * `finalAmountCents`.
+ *
+ * Deposit-coded rows are excluded — the deposit is held as a separate AUTH
+ * at pickup and either VOIDed or CAPTURED on return based on damage/extras,
+ * never included in the rental-fee total. (Round 26 followup #10, 2026-05-24)
  */
 function computeFinalAmountCents(reservation) {
-  const charges = (reservation?.charges || []).filter((c) => c.selected !== false);
+  const charges = (reservation?.charges || [])
+    .filter((c) => c.selected !== false)
+    .filter((c) => !isDepositCharge(c));
   let total = 0;
   for (const c of charges) {
     const n = Number(c.total);

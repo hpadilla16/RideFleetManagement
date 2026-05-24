@@ -79,6 +79,37 @@ export class CounterOrchestratorError extends Error {
 }
 
 // ---------------------------------------------------------------------------
+// Security-deposit charge detection (Round 26 followup #10, 2026-05-24)
+//
+// The booking-engine writes a Security Deposit row into ReservationCharge so
+// it appears as a line item in the wizard UI. That row should NEVER be
+// included in the rental-fee SALE — the deposit is handled by a separate AUTH
+// hold via `tenant.settings.dejavoo.preAuthAmountCents`. Including it in the
+// SALE would CAPTURE the deposit (i.e. charge it for real) on top of the AUTH
+// hold = customer pays the deposit twice.
+//
+// We check three signals because legacy reservations have `code = null` and
+// `source = null` — they were created before those columns started being
+// populated by the booking engine. Newer reservations have `code` +/- `source`
+// set. Name match is the final fallback for fully-manual rows.
+// ---------------------------------------------------------------------------
+const DEPOSIT_CODES = new Set(['SECURITY_DEPOSIT', 'DEPOSIT', 'DEPOSIT_DUE']);
+const DEPOSIT_SOURCES = new Set(['SECURITY_DEPOSIT', 'DEPOSIT']);
+
+export function isDepositCharge(c) {
+  if (!c) return false;
+  const code = typeof c.code === 'string' ? c.code.trim().toUpperCase() : '';
+  if (code && DEPOSIT_CODES.has(code)) return true;
+  const source = typeof c.source === 'string' ? c.source.trim().toUpperCase() : '';
+  if (source && DEPOSIT_SOURCES.has(source)) return true;
+  const name = typeof c.name === 'string' ? c.name.trim().toLowerCase() : '';
+  if (name && (name === 'security deposit' || name === 'deposit' || name.startsWith('security deposit'))) {
+    return true;
+  }
+  return false;
+}
+
+// ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
@@ -381,11 +412,17 @@ export async function runCounterCheckinFlow({
   // swipe), then place an AUTH hold for the security deposit using the
   // saved IPosToken (no second swipe).
   //
-  // Rental fee = sum of selected ReservationCharge.total for the reservation.
+  // Rental fee = sum of selected ReservationCharge.total for the reservation,
+  // EXCLUDING deposit-coded rows. The deposit appears as a charge line in the
+  // wizard UI for visibility, but it is handled by the separate AUTH hold
+  // below (preAuthAmountCents) — including it in the SALE would double-charge
+  // the customer (Round 26 followup #10, 2026-05-24).
+  //
   // Security deposit = tenant.settings.dejavoo.preAuthAmountCents (override
   // allowed via preAuthOverrideCents).
   const rentalFeeDollars = (reservation.charges || [])
     .filter((c) => c.selected !== false)
+    .filter((c) => !isDepositCharge(c))
     .reduce((acc, c) => {
       const n = Number(c.total);
       return acc + (Number.isFinite(n) ? n : 0);

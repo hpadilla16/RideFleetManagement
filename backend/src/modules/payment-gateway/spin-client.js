@@ -496,6 +496,25 @@ export const spinClient = {
 
 const AUTO_RENTAL_COMMODITY_CODE = '4111';
 
+// Round 26 hotfix #5 (2026-05-24): SPIn AutoRental Sale/Auth requires
+// RentalClassId to be a 4-digit numeric in the range 0001-0032 (ACRISS-style
+// vehicle class codes) or the catch-all 9999. Anything else — including the
+// ACRISS letter codes like 'SFAR' / 'ECAR', and empty strings — triggers
+// statusCode 2201 "Rental Class Id must be 4 Digit value or Rental Class Id
+// is not between 0001-0032 and 9999". The terminal never sees the request.
+//
+// Until we map our internal vehicle.classCode values to the SPIn numeric
+// range (or add a numericClassCode column), we normalize unknown / non-
+// conforming values to '9999' so the call always passes validation.
+export function normalizeRentalClassId(raw) {
+  const s = String(raw == null ? '' : raw).trim();
+  if (/^\d{4}$/.test(s)) {
+    const n = parseInt(s, 10);
+    if ((n >= 1 && n <= 32) || n === 9999) return s;
+  }
+  return '9999';
+}
+
 function dollarsFromDecimal(v) {
   if (v == null) return 0;
   if (typeof v === 'number') return v;
@@ -579,8 +598,11 @@ export function buildLevel3FromReservation(reservation, agreement, charges = [])
     AutoRentalVehicle: {
       VehicleMake: (vehicle.make || '').slice(0, 20),
       VehicleModel: (vehicle.model || '').slice(0, 20),
-      RentalClassId:
-        (vehicle.classCode || vehicle.vehicleType?.code || '').slice(0, 10),
+      // Round 26 hotfix #5 — normalize to SPIn-acceptable 4-digit code.
+      // See normalizeRentalClassId() above.
+      RentalClassId: normalizeRentalClassId(
+        vehicle.classCode || vehicle.vehicleType?.code
+      ),
     },
     AutoRentalPricing: {
       RentalRate: dollarsFromDecimal(agreement?.dailyRate) || null,

@@ -12,6 +12,7 @@ import {
   buildLevel3FromReservation,
   htmlToTerminalText,
   extractContextAroundMarker,
+  normalizeRentalClassId,
 } from './spin-client.js';
 
 // ---------------------------------------------------------------------------
@@ -135,7 +136,10 @@ test('buildLevel3FromReservation returns Cart + nested Level3.RentalData (AutoRe
   assert.equal(Level3.RentalData.AutoRentalReturn.LocationId, 'SJU');
   assert.equal(Level3.RentalData.AutoRentalVehicle.VehicleMake, 'Toyota');
   assert.equal(Level3.RentalData.AutoRentalVehicle.VehicleModel, 'Corolla');
-  assert.equal(Level3.RentalData.AutoRentalVehicle.RentalClassId, 'SFAR');
+  // Round 26 hotfix #5 (2026-05-24): SPIn requires a 4-digit numeric class
+  // ID in 0001-0032 or 9999. 'SFAR' (ACRISS letter code) is not valid and
+  // would trigger statusCode 2201, so we normalize it to the 9999 catch-all.
+  assert.equal(Level3.RentalData.AutoRentalVehicle.RentalClassId, '9999');
   assert.equal(Level3.RentalData.AutoRentalRenter.RenterName, 'M Rivera');
   assert.equal(Level3.RentalData.AutoRentalRenter.ServiceMobile, '555-1234');
   assert.equal(Level3.RentalData.AutoRentalPricing.RentalRate, 75);
@@ -201,4 +205,50 @@ test('extractContextAroundMarker returns surrounding plain text', () => {
 
 test('extractContextAroundMarker returns empty when marker absent', () => {
   assert.equal(extractContextAroundMarker('<p>no marker</p>', 'ANY'), '');
+});
+
+// =============================================================================
+// normalizeRentalClassId — Round 26 hotfix #5 (2026-05-24)
+// =============================================================================
+
+test('normalizeRentalClassId accepts 0001-0032 range', () => {
+  assert.equal(normalizeRentalClassId('0001'), '0001');
+  assert.equal(normalizeRentalClassId('0015'), '0015');
+  assert.equal(normalizeRentalClassId('0032'), '0032');
+});
+
+test('normalizeRentalClassId accepts the 9999 catch-all', () => {
+  assert.equal(normalizeRentalClassId('9999'), '9999');
+});
+
+test('normalizeRentalClassId rejects out-of-range numerics → 9999', () => {
+  assert.equal(normalizeRentalClassId('0000'), '9999'); // below range
+  assert.equal(normalizeRentalClassId('0033'), '9999'); // above range, not 9999
+  assert.equal(normalizeRentalClassId('1234'), '9999');
+  assert.equal(normalizeRentalClassId('9998'), '9999');
+});
+
+test('normalizeRentalClassId rejects non-4-digit numerics → 9999', () => {
+  assert.equal(normalizeRentalClassId('1'),     '9999');
+  assert.equal(normalizeRentalClassId('12'),    '9999');
+  assert.equal(normalizeRentalClassId('123'),   '9999');
+  assert.equal(normalizeRentalClassId('12345'), '9999');
+});
+
+test('normalizeRentalClassId rejects ACRISS letter codes → 9999', () => {
+  assert.equal(normalizeRentalClassId('SFAR'),    '9999');
+  assert.equal(normalizeRentalClassId('ECAR'),    '9999');
+  assert.equal(normalizeRentalClassId('ECONOMY'), '9999');
+});
+
+test('normalizeRentalClassId handles null/undefined/empty → 9999', () => {
+  assert.equal(normalizeRentalClassId(null),      '9999');
+  assert.equal(normalizeRentalClassId(undefined), '9999');
+  assert.equal(normalizeRentalClassId(''),        '9999');
+  assert.equal(normalizeRentalClassId('   '),     '9999');
+});
+
+test('normalizeRentalClassId trims surrounding whitespace before validating', () => {
+  assert.equal(normalizeRentalClassId('  0007  '), '0007');
+  assert.equal(normalizeRentalClassId('\t9999\n'), '9999');
 });
