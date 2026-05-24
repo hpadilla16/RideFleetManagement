@@ -115,4 +115,41 @@ describe('getEffectiveTermsHtmlForTenant', () => {
     }
     assert.ok((html.match(/\bHP\b/g) || []).length >= 5);
   });
+
+  it('accepts { html } shape and inlines it raw (used for Dejavoo signature image)', async () => {
+    const html = getCanonicalTermsHtml({
+      initials: {
+        INITIALS_S11_CARD_ON_FILE: { html: '<img src="data:image/png;base64,XYZ" alt="sig" />' },
+        INITIALS_S11_CNP: { html: '<img src="data:image/png;base64,XYZ" alt="sig" />' },
+      },
+    });
+    // <img> rendered un-escaped (proves we skipped escapeHtml)
+    assert.ok(html.includes('<img src="data:image/png;base64,XYZ"'));
+    // Other markers without a value still render as DEFAULT_BLANK
+    assert.ok(html.includes('___'));
+  });
+
+  it('text values still get HTML-escaped to prevent injection', async () => {
+    const html = getCanonicalTermsHtml({
+      initials: {
+        INITIALS_S4_DECLINE: '<script>alert(1)</script>',
+      },
+    });
+    // Literal text path goes through escapeHtml — script tag must be defanged
+    assert.ok(!html.includes('<script>alert(1)</script>'));
+    assert.ok(html.includes('&lt;script&gt;alert(1)&lt;/script&gt;'));
+  });
+
+  it('tenant override path also accepts { html } shape', async () => {
+    const prisma = makePrisma({
+      't1': { id: 't1', termsHtml: '<p>Custom · {{INITIALS_S11_CNP}}</p>' },
+    });
+    const html = await getEffectiveTermsHtmlForTenant('t1', { prisma }, {
+      initials: {
+        INITIALS_S11_CNP: { html: '<img src="data:image/png;base64,ABC" alt="sig" />' },
+      },
+    });
+    assert.ok(html.includes('<img src="data:image/png;base64,ABC"'));
+    assert.ok(!html.includes('{{INITIALS_S11_CNP}}'));
+  });
 });

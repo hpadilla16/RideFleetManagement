@@ -64,8 +64,13 @@ function escapeHtml(s) {
  * Get the bilingual T&C HTML with initials substituted.
  *
  * @param {object} [opts]
- * @param {Record<string,string>} [opts.initials] - keyed by INITIALS_KEYS;
- *     missing keys render as DEFAULT_BLANK ("___").
+ * @param {Record<string,string|{html:string}>} [opts.initials] - keyed by
+ *     INITIALS_KEYS. Each value may be:
+ *       • a plain string  — escaped and substituted as text (e.g. "MR")
+ *       • { html: '...' } — substituted as raw HTML, unescaped. Used by the
+ *                           rental-agreement renderer to drop in an <img>
+ *                           tag of the Dejavoo terminal signature.
+ *     Missing keys render as DEFAULT_BLANK ("___").
  * @returns {string} full HTML
  */
 export function getCanonicalTermsHtml(opts = {}) {
@@ -73,7 +78,15 @@ export function getCanonicalTermsHtml(opts = {}) {
   let html = loadHtml();
   for (const key of INITIALS_KEYS) {
     const raw = initials[key];
-    const replacement = raw ? escapeHtml(String(raw).trim()) : DEFAULT_BLANK;
+    let replacement;
+    if (!raw) {
+      replacement = DEFAULT_BLANK;
+    } else if (typeof raw === 'object' && typeof raw.html === 'string') {
+      // Trusted raw HTML — caller is responsible for sanitizing.
+      replacement = raw.html;
+    } else {
+      replacement = escapeHtml(String(raw).trim());
+    }
     html = html.split(`{{${key}}}`).join(replacement);
   }
   return html;
@@ -157,7 +170,14 @@ export async function getEffectiveTermsHtmlForTenant(tenantId, { prisma } = {}, 
       let html = override;
       for (const key of INITIALS_KEYS) {
         const raw = initials[key];
-        const replacement = raw ? escapeHtml(String(raw).trim()) : DEFAULT_BLANK;
+        let replacement;
+        if (!raw) {
+          replacement = DEFAULT_BLANK;
+        } else if (typeof raw === 'object' && typeof raw.html === 'string') {
+          replacement = raw.html;
+        } else {
+          replacement = escapeHtml(String(raw).trim());
+        }
         html = html.split(`{{${key}}}`).join(replacement);
       }
       return html;

@@ -2517,6 +2517,35 @@ export const rentalAgreementsService = {
       ? `<img src="${rawSigUrl}" alt="Signature" style="max-height:60px;max-width:320px;width:auto;height:auto;display:block;object-fit:contain" />`
       : '<div class="sig-meta">No signature on file</div>';
 
+    // Round 26 (2026-05-23): wire the terminal-captured signature into the
+    // four {{INITIALS_*}} markers that the rental-payment disclaimer on the
+    // iPOSpays terminal explicitly covers (Sections 11 + 13). The customer
+    // signs ONCE on the Dejavoo screen after seeing a disclaimer that
+    // enumerates these four points; that single signature is what
+    // ReservationSigningField rows already record per-field. Here we render
+    // a small inline image of that signature in each initials slot of the
+    // printed/emailed agreement so the document visibly shows the customer
+    // acknowledged each point.
+    //
+    // S4_DECLINE (optional coverage opt-out) is intentionally LEFT BLANK —
+    // the terminal disclaimer doesn't cover that decision. If we want to
+    // auto-fill it, the decline must be captured separately in the wizard
+    // before the terminal step. Renders as "___" until that flow lands.
+    const initialsImgHtml = rawSigUrl
+      ? `<img src="${rawSigUrl}" alt="Initials" style="height:22px;max-width:90px;width:auto;object-fit:contain;vertical-align:middle" />`
+      : null;
+    const initialsForTerms = initialsImgHtml
+      ? {
+          // { html: ... } shape tells getEffectiveTermsHtmlForTenant to skip
+          // HTML-escaping and inline the <img> as-is. See lib/terms/index.js.
+          INITIALS_S11_CARD_ON_FILE:  { html: initialsImgHtml },
+          INITIALS_S11_CNP:           { html: initialsImgHtml },
+          INITIALS_S11_NO_CHARGEBACK: { html: initialsImgHtml },
+          INITIALS_S13_POST_RENTAL:   { html: initialsImgHtml },
+          // INITIALS_S4_DECLINE — left blank by design; see comment above.
+        }
+      : {};
+
     // Build customer address line (read from live customer, fallback to snapshot)
     const liveCustomer = agreement.reservation?.customer;
     const customerAddress1 = liveCustomer?.address1 ?? agreement.customerAddress1;
@@ -2641,7 +2670,11 @@ export const rentalAgreementsService = {
       // The configured cfg.termsText is treated as a tenant-level
       // ADDENDUM and appended below the canonical content; we no longer
       // surface the editable text as the legal terms themselves.
-      termsText: (await getEffectiveTermsHtmlForTenant(agreement?.tenantId || null, { prisma })) + (cfg.termsText ? `<div class="tc-tenant-addendum"><h2>Tenant Addendum</h2><p>${esc(cfg.termsText)}</p></div>` : ''),
+      termsText: (await getEffectiveTermsHtmlForTenant(
+        agreement?.tenantId || null,
+        { prisma },
+        { initials: initialsForTerms },
+      )) + (cfg.termsText ? `<div class="tc-tenant-addendum"><h2>Tenant Addendum</h2><p>${esc(cfg.termsText)}</p></div>` : ''),
       signatureSignedBy: esc(agreement.reservation?.signatureSignedBy || '-'),
       signatureDateTime: esc(fmtDate(signatureTime)),
       signatureIp: esc(signatureIp),

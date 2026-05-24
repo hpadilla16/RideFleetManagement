@@ -26,6 +26,15 @@
  *   range         — { from: 'YYYY-MM-DD', to: 'YYYY-MM-DD' }
  *   onRangeChange — ({ from, to }) => void
  *   presets       — optional override (defaults to DateRangePicker defaults)
+ *   extraFilters  — optional ReactNode rendered between the date picker and
+ *                   the export buttons. Used by reports that need additional
+ *                   filters in the filter bar (e.g. location dropdown).
+ *   hideDateRange — when true, the DateRangePicker is not rendered (used by
+ *                   snapshot-style reports like rental-status that have no
+ *                   meaningful date window). The export buttons still work and
+ *                   simply pass no from/to params.
+ *   leftSlot      — optional ReactNode rendered in place of the DateRangePicker
+ *                   when hideDateRange is true. Use for "As of …" labels.
  *   children      — the report body
  */
 
@@ -35,6 +44,9 @@ import { DateRangePicker } from './DateRangePicker';
 export function ReportPageLayout({
   slug, title, description, category,
   token, range, onRangeChange, presets,
+  extraFilters,
+  hideDateRange,
+  leftSlot,
   children,
 }) {
   const exportUrl = (kind) => {
@@ -77,7 +89,7 @@ export function ReportPageLayout({
         display: 'flex', alignItems: 'center', gap: 6,
         fontSize: 13, color: '#6f668f', marginBottom: 4,
       }}>
-        <Link href="/reports" style={{ color: '#6f668f', textDecoration: 'underline', cursor: 'pointer' }}>
+        <Link href="/reports-v2" style={{ color: '#6f668f', textDecoration: 'underline', cursor: 'pointer' }}>
           ← Reports
         </Link>
         {category ? <><span>·</span><span>{category}</span></> : null}
@@ -95,7 +107,12 @@ export function ReportPageLayout({
         marginBottom: 18, display: 'flex', alignItems: 'center',
         gap: 12, flexWrap: 'wrap',
       }}>
-        <DateRangePicker value={range} onChange={onRangeChange} presets={presets} />
+        {hideDateRange
+          ? (leftSlot || null)
+          : <DateRangePicker value={range} onChange={onRangeChange} presets={presets} />}
+        {extraFilters ? (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>{extraFilters}</div>
+        ) : null}
         <div style={{ marginLeft: 'auto', display: 'flex', gap: 8 }}>
           <button
             onClick={() => handleDownload('pdf')}

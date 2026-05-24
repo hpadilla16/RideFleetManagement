@@ -499,6 +499,20 @@ export async function runCounterCheckinFlow({
           where: { id: saleTx.id },
           data: { signatureStoragePath },
         });
+        // Round 26 (2026-05-23): also persist the signature as a data URL on
+        // the Reservation so the rental-agreement PDF + email renderer can
+        // inline it without a Storage round-trip. This is what populates
+        // the four {{INITIALS_*}} markers covered by the terminal disclaimer
+        // (Sections 11 + 13). The customer-portal sign flow already sets
+        // this same field; we mirror its shape here.
+        await prisma.reservation.update({
+          where: { id: reservation.id },
+          data: {
+            signatureDataUrl: `data:image/png;base64,${String(saleSig).replace(/^data:image\/[a-z]+;base64,/, '')}`,
+            signatureSignedAt: new Date(),
+            signatureSignedBy: `${reservation.customer?.firstName || ''} ${reservation.customer?.lastName || ''}`.trim() || null,
+          },
+        });
       }
     } catch (err) {
       await recordTxError(prisma, saleTx.id, err);
@@ -599,6 +613,18 @@ export async function runCounterCheckinFlow({
         await prisma.dejavooTransaction.update({
           where: { id: authTx.id },
           data: { signatureStoragePath },
+        });
+        // Round 26 (2026-05-23): mirror to Reservation.signatureDataUrl so
+        // the PDF renderer can inline the signature in the four INITIALS_*
+        // slots covered by the terminal disclaimer. See companion code in
+        // the SALE branch above for full reasoning.
+        await prisma.reservation.update({
+          where: { id: reservation.id },
+          data: {
+            signatureDataUrl: `data:image/png;base64,${String(authSig).replace(/^data:image\/[a-z]+;base64,/, '')}`,
+            signatureSignedAt: new Date(),
+            signatureSignedBy: `${reservation.customer?.firstName || ''} ${reservation.customer?.lastName || ''}`.trim() || null,
+          },
         });
       }
     }

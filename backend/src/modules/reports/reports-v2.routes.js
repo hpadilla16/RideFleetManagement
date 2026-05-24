@@ -88,6 +88,11 @@ reportsV2Router.get(
  * @param {function} report.buildExcelSpec  — (reportData)   → renderReportExcel spec
  * @param {string} report.title             — used in PDF + Excel headers
  * @param {string[]} [report.roles]         — allowed roles (default ADMIN/OPS/SUPER_ADMIN)
+ * @param {Array<{path:string, method?:string, handler:Function}>} [report.subRoutes]
+ *   Optional extra sub-routes for the report (drill-downs, slices, etc.). Each
+ *   sub-route is mounted at /api/reports/{slug}{path}. Handler receives
+ *   (req, res, ctx) where ctx = { tenantId }. Errors bubble through sendError
+ *   for consistent JSON shape.
  */
 export function registerReport(report) {
   const slug = report.slug;
@@ -141,6 +146,25 @@ export function registerReport(report) {
       sendError(res, err);
     }
   });
+
+  // Optional sub-routes (drill-downs, slices). Each handler is wrapped in the
+  // standard sendError path so subRoute authors don't have to re-implement it.
+  if (Array.isArray(report.subRoutes)) {
+    for (const sub of report.subRoutes) {
+      const method = (sub.method || 'get').toLowerCase();
+      const subPath = sub.path.startsWith('/') ? sub.path : `/${sub.path}`;
+      const fullPath = `/${slug}${subPath}`;
+      const wrapped = async (req, res) => {
+        try {
+          await sub.handler(req, res, { tenantId: req.user.tenantId });
+        } catch (err) {
+          sendError(res, err);
+        }
+      };
+      const subRoles = Array.isArray(sub.roles) ? sub.roles : roles;
+      reportsV2Router[method](fullPath, requireRole(...subRoles), wrapped);
+    }
+  }
 }
 
 function formatRangeSubtitle(range) {

@@ -23,17 +23,80 @@
 
 const REPORT_REGISTRY = [
   // Management
-  { slug: 'reservations-by-day', title: 'Reservations by Day', category: 'MANAGEMENT', icon: 'calendar', description: 'Daily breakdown of bookings' },
-  { slug: 'payments-by-day',     title: 'Payments by Day',     category: 'MANAGEMENT', icon: 'cash',     description: 'Cash · card · OTC totals' },
-  { slug: 'rental-status',       title: 'Rental Status',       category: 'MANAGEMENT', icon: 'list-check', description: 'Open · checked out · returned' },
+  {
+    slug: 'reservations-by-day',
+    title: 'Reservations by Day',
+    category: 'MANAGEMENT',
+    icon: 'calendar',
+    description: 'Daily pickup load by status',
+    status: 'AVAILABLE',
+  },
+  {
+    slug: 'payments-by-day',
+    title: 'Payments by Day',
+    category: 'MANAGEMENT',
+    icon: 'cash',
+    description: 'Cash · card · digital totals',
+    status: 'AVAILABLE',
+  },
+  {
+    slug: 'rental-status',
+    title: 'Rental Status',
+    category: 'MANAGEMENT',
+    icon: 'list-check',
+    description: 'Right-now triage of every active rental',
+    status: 'AVAILABLE',
+  },
 
   // Fleet
-  { slug: 'fleet-status',          title: 'Fleet Status',                 category: 'FLEET', icon: 'car',           description: 'Every vehicle, current state' },
-  { slug: 'utilization',           title: 'Utilization',                  category: 'FLEET', icon: 'chart-bar',     description: '% of fleet rented over time' },
-  { slug: 'upcoming-vehicle-sales',title: 'Upcoming Vehicle Sales',       category: 'FLEET', icon: 'tag',           description: 'Cars approaching sale threshold' },
-  { slug: 'toll-per-vehicle',      title: 'Toll Report — per Vehicle',    category: 'FLEET', icon: 'road',          description: 'Tolls grouped by vehicle' },
-  { slug: 'toll-per-location',     title: 'Toll Report — per Location',   category: 'FLEET', icon: 'map-pin',       description: 'Tolls grouped by branch' },
-  { slug: 'availability',          title: 'Availability',                 category: 'FLEET', icon: 'clipboard-check', description: 'Current state by class' },
+  {
+    slug: 'fleet-status',
+    title: 'Fleet Status',
+    category: 'FLEET',
+    icon: 'car',
+    description: 'Every vehicle, current state · sortable',
+    status: 'AVAILABLE',
+  },
+  {
+    slug: 'utilization',
+    title: 'Utilization',
+    category: 'FLEET',
+    icon: 'chart-bar',
+    description: '% of fleet rented over time',
+    status: 'AVAILABLE',
+  },
+  {
+    slug: 'upcoming-vehicle-sales',
+    title: 'Upcoming Vehicle Sales',
+    category: 'FLEET',
+    icon: 'tag',
+    description: 'Cars approaching mileage/age sale threshold',
+    status: 'AVAILABLE',
+  },
+  {
+    slug: 'toll-per-vehicle',
+    title: 'Toll Report — per Vehicle',
+    category: 'FLEET',
+    icon: 'road',
+    description: 'Tolls grouped by vehicle',
+    status: 'AVAILABLE',
+  },
+  {
+    slug: 'toll-per-location',
+    title: 'Toll Report — per Location',
+    category: 'FLEET',
+    icon: 'map-pin',
+    description: 'Tolls grouped by plaza',
+    status: 'AVAILABLE',
+  },
+  {
+    slug: 'availability',
+    title: 'Availability — Right Now',
+    category: 'FLEET',
+    icon: 'clipboard-check',
+    description: 'Current state of every vehicle, by class · live snapshot',
+    status: 'AVAILABLE',
+  },
   {
     slug: 'availability-forecast',
     title: 'Availability Forecast — per Vehicle Type',
@@ -45,7 +108,14 @@ const REPORT_REGISTRY = [
   { slug: 'damage',                title: 'Damage',                       category: 'FLEET', icon: 'alert-triangle', description: 'Findings + repair cost summary' },
 
   // Operations
-  { slug: 'commission',                       title: 'Commission',                     category: 'OPERATIONS', icon: 'receipt-2', description: 'Paid out per period' },
+  {
+    slug: 'commission',
+    title: 'Commission Payouts',
+    category: 'OPERATIONS',
+    icon: 'receipt-2',
+    description: 'Commission paid + accrued per period, per employee',
+    status: 'AVAILABLE',
+  },
   {
     slug: 'commission-sales-performance',
     title: 'Commission & Sales Performance',
@@ -64,9 +134,30 @@ const REPORT_REGISTRY = [
   },
 
   // Revenue
-  { slug: 'unpaid-balance', title: 'Unpaid Balance', category: 'REVENUE', icon: 'credit-card-off', description: 'Money owed by customers' },
-  { slug: 'sales',          title: 'Sales',          category: 'REVENUE', icon: 'coin',            description: 'Revenue by category' },
-  { slug: 'taxes',          title: 'Taxes',          category: 'REVENUE', icon: 'percentage',      description: 'For your accountant' },
+  {
+    slug: 'unpaid-balance',
+    title: 'Unpaid Balance',
+    category: 'REVENUE',
+    icon: 'credit-card-off',
+    description: 'AR aging · money owed by customers',
+    status: 'AVAILABLE',
+  },
+  {
+    slug: 'sales',
+    title: 'Sales by Category',
+    category: 'REVENUE',
+    icon: 'coin',
+    description: 'Revenue by line-item category',
+    status: 'AVAILABLE',
+  },
+  {
+    slug: 'taxes',
+    title: 'Taxes',
+    category: 'REVENUE',
+    icon: 'percentage',
+    description: 'Tax collected + taxable base · for your accountant',
+    status: 'AVAILABLE',
+  },
   { slug: 'chargeback',     title: 'Chargeback',     category: 'REVENUE', icon: 'arrow-back-up',   description: 'Disputes + evidence packs' },
 ];
 
@@ -106,7 +197,7 @@ export async function listReports({ tenantId } = {}) {
     icon: r.icon,
     description: r.description,
     status: r.status || 'COMING_SOON',
-    url: `/reports/${r.slug}`,
+    // URL is constructed on the frontend via `/reports-v2/${slug}`; not duplicated here.
   }));
   return {
     reports,

@@ -86,6 +86,62 @@ const DEFAULT_PRESETS = [
   },
 ];
 
+/**
+ * BACKWARD_PRESETS — preset pack for reports that only look at past data
+ * (utilization, toll-per-vehicle, toll-per-location, etc.). Last N days
+ * ending today, plus YTD.
+ */
+export const BACKWARD_PRESETS = [
+  {
+    label: 'Last 7 days',
+    compute: () => {
+      const t = today();
+      const from = new Date(t.getTime() - 6 * 24 * 60 * 60 * 1000);
+      return { from: isoDay(from), to: isoDay(t) };
+    },
+  },
+  {
+    label: 'Last 30 days',
+    compute: () => {
+      const t = today();
+      const from = new Date(t.getTime() - 29 * 24 * 60 * 60 * 1000);
+      return { from: isoDay(from), to: isoDay(t) };
+    },
+  },
+  {
+    label: 'Last 90 days',
+    compute: () => {
+      const t = today();
+      const from = new Date(t.getTime() - 89 * 24 * 60 * 60 * 1000);
+      return { from: isoDay(from), to: isoDay(t) };
+    },
+  },
+  {
+    label: 'Last 6 months',
+    compute: () => {
+      const t = today();
+      const from = new Date(t.getTime() - 179 * 24 * 60 * 60 * 1000);
+      return { from: isoDay(from), to: isoDay(t) };
+    },
+  },
+  {
+    label: 'Last year',
+    compute: () => {
+      const t = today();
+      const from = new Date(t.getTime() - 364 * 24 * 60 * 60 * 1000);
+      return { from: isoDay(from), to: isoDay(t) };
+    },
+  },
+  {
+    label: 'YTD',
+    compute: () => {
+      const t = today();
+      const from = new Date(t.getFullYear(), 0, 1);
+      return { from: isoDay(from), to: isoDay(t) };
+    },
+  },
+];
+
 export function DateRangePicker({ value, onChange, presets = DEFAULT_PRESETS }) {
   const from = value?.from || '';
   const to = value?.to || '';

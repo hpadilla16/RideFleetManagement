@@ -63,19 +63,41 @@ test('listReports returns directory with all 17 reports', async () => {
   assert.deepEqual(out.categories, ['MANAGEMENT', 'FLEET', 'OPERATIONS', 'REVENUE']);
 });
 
-test('listReports marks the 3 round-24 reports AVAILABLE, rest COMING_SOON', async () => {
+test('listReports marks the AVAILABLE reports correctly (rest COMING_SOON)', async () => {
   const out = await listReports({ tenantId: 't1' });
   const available = out.reports.filter((r) => r.status === 'AVAILABLE').map((r) => r.slug);
+  // Round 24: 3 inaugural reports;
+  // Round 27: management trio (reservations-by-day, payments-by-day, rental-status);
+  // Round 28: sales + unpaid-balance;
+  // Round 29 (in progress): availability + fleet-status.
   assert.deepEqual(
     available.sort(),
-    ['agent-track-record', 'availability-forecast', 'commission-sales-performance'].sort(),
+    [
+      'agent-track-record',
+      'availability',
+      'availability-forecast',
+      'commission',
+      'commission-sales-performance',
+      'fleet-status',
+      'utilization',
+      'upcoming-vehicle-sales',
+      'toll-per-vehicle',
+      'toll-per-location',
+      'payments-by-day',
+      'rental-status',
+      'reservations-by-day',
+      'sales',
+      'taxes',
+      'unpaid-balance',
+    ].sort(),
   );
 });
 
-test('listReports gives every report a /reports/slug URL', async () => {
+test('listReports omits the deprecated `url` field (frontend builds URLs from slug)', async () => {
   const out = await listReports({ tenantId: 't1' });
   for (const r of out.reports) {
-    assert.match(r.url, /^\/reports\//, `${r.slug} missing url prefix`);
+    assert.equal(r.url, undefined, `${r.slug} should not return a url field`);
+    assert.ok(r.slug, `${r.slug} should have a slug`);
   }
 });
 
