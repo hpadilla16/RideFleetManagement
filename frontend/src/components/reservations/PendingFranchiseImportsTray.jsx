@@ -159,9 +159,13 @@ function EditPromoteModal({ row, token, scopedPath, onClose, onSaved }) {
   return (
     <div style={{
       position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)',
-      display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000
+      display: 'flex', alignItems: 'flex-start', justifyContent: 'center',
+      zIndex: 1000, padding: '24px 16px', overflowY: 'auto',
     }}>
-      <div className="glass card" style={{ background: 'white', padding: 20, borderRadius: 8, width: '90%', maxWidth: 640, maxHeight: '90vh', overflow: 'auto' }}>
+      <div className="glass card" style={{
+        background: 'white', padding: 20, borderRadius: 8,
+        width: '100%', maxWidth: 640, marginBottom: 24,
+      }}>
         <div className="row-between" style={{ alignItems: 'start', marginBottom: 12 }}>
           <div>
             <h3 style={{ margin: 0 }}>Edit & promote</h3>
@@ -282,12 +286,12 @@ function EditPromoteModal({ row, token, scopedPath, onClose, onSaved }) {
           </section>
 
           <section>
-            <h4 style={{ margin: '0 0 6px' }}>2. Categoria de vehiculo / Vehicle category</h4>
+            <h4 style={{ margin: '0 0 6px' }}>2. Vehicle category</h4>
             <div className="ui-muted" style={{ fontSize: 12, marginBottom: 4 }}>
               ACRISS TL: <strong>{row?.vehicleAcriss || row?.vehicleClass || '-'}</strong> - {row?.vehicleDescription || ''}
             </div>
             <select value={vehicleCategoryOverride} onChange={(e) => setVehicleCategoryOverride(e.target.value)} style={{ width: '100%' }}>
-              <option value="">Seleccionar... / Select...</option>
+              <option value="">Select…</option>
               {vehicleTypes.map((vt) => (
                 <option key={vt.id} value={vt.id}>{vt.name} ({vt.code})</option>
               ))}
@@ -295,12 +299,12 @@ function EditPromoteModal({ row, token, scopedPath, onClose, onSaved }) {
           </section>
 
           <section>
-            <h4 style={{ margin: '0 0 6px' }}>3. Sucursal / Location</h4>
+            <h4 style={{ margin: '0 0 6px' }}>3. Location</h4>
             <div className="ui-muted" style={{ fontSize: 12, marginBottom: 4 }}>
-              Codigo TL / TL code: <strong>{row?.locationCode || '-'}</strong>
+              TL code: <strong>{row?.locationCode || '-'}</strong>
             </div>
             <select value={locationIdOverride} onChange={(e) => setLocationIdOverride(e.target.value)} style={{ width: '100%' }}>
-              <option value="">Seleccionar... / Select...</option>
+              <option value="">Select…</option>
               {locations.map((l) => (
                 <option key={l.id} value={l.id}>{l.name || l.code} ({l.code})</option>
               ))}
@@ -309,19 +313,44 @@ function EditPromoteModal({ row, token, scopedPath, onClose, onSaved }) {
 
           <label className="label" style={{ textTransform: 'none', letterSpacing: 0, fontSize: 13 }}>
             <input type="checkbox" checked={saveMapping} onChange={(e) => setSaveMapping(e.target.checked)} />
-            {' '}Guardar mapeo para futuras importaciones / Save mapping for future imports
+            {' '}Save mapping for future imports
           </label>
 
+          <div style={{ fontSize: 11, color: '#6b7280', marginTop: 4 }}>
+            Vehicle category and Location are optional here — the backend auto-resolves them
+            from your TL ACRISS &amp; Location mappings when you have them set up. Override only
+            if you want to force a specific value.
+          </div>
           <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
-            <button type="button" onClick={onClose} disabled={busy}>Cancelar / Cancel</button>
-            <button type="submit" disabled={busy || !customerId || !vehicleCategoryOverride || !locationIdOverride}>
-              {busy ? 'Promoviendo... / Promoting...' : 'Promover / Promote'}
+            <button type="button" onClick={onClose} disabled={busy}>Cancel</button>
+            <button type="submit" disabled={busy || !customerId}>
+              {busy ? 'Promoting…' : 'Promote'}
             </button>
           </div>
         </form>
       </div>
     </div>
   );
+}
+
+const SORT_OPTIONS = [
+  { value: 'pickup-asc',  label: 'Pickup — oldest first' },
+  { value: 'pickup-desc', label: 'Pickup — newest first' },
+  { value: 'return-asc',  label: 'Return — oldest first' },
+  { value: 'return-desc', label: 'Return — newest first' },
+];
+
+function sortRows(rows, sort) {
+  const arr = [...rows];
+  const dir = sort.endsWith('-asc') ? 1 : -1;
+  const field = sort.startsWith('pickup') ? 'pickupAt' : 'dropoffAt';
+  arr.sort((a, b) => {
+    const av = a[field] ? new Date(a[field]).getTime() : 0;
+    const bv = b[field] ? new Date(b[field]).getTime() : 0;
+    if (av === bv) return 0;
+    return (av - bv) * dir;
+  });
+  return arr;
 }
 
 export function PendingFranchiseImportsTray({ token, me, isSuper, activeTenantId, scopedPath }) {
@@ -331,6 +360,7 @@ export function PendingFranchiseImportsTray({ token, me, isSuper, activeTenantId
   const [editRow, setEditRow] = useState(null);
   const [msg, setMsg] = useState('');
   const [autoPromotedToday, setAutoPromotedToday] = useState(0);
+  const [sort, setSort] = useState('pickup-asc');
 
   const scoped = scopedPath || ((p) => {
     if (!isSuper || !activeTenantId) return p;
@@ -425,6 +455,18 @@ export function PendingFranchiseImportsTray({ token, me, isSuper, activeTenantId
           {msg ? (
             <div style={{ padding: 8, background: '#ecfdf5', color: '#065f46', borderRadius: 4, marginBottom: 8 }}>{msg}</div>
           ) : null}
+          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, alignItems: 'center', marginBottom: 8 }}>
+            <label style={{ fontSize: 12, color: '#6b7280' }}>Sort by</label>
+            <select
+              value={sort}
+              onChange={(e) => setSort(e.target.value)}
+              style={{ fontSize: 12, padding: '4px 8px', borderRadius: 4 }}
+            >
+              {SORT_OPTIONS.map(o => (
+                <option key={o.value} value={o.value}>{o.label}</option>
+              ))}
+            </select>
+          </div>
           <div style={{ overflowX: 'auto', WebkitOverflowScrolling: 'touch', maxWidth: '100%' }}>
             <table style={{ width: '100%', minWidth: 900, borderCollapse: 'collapse', fontSize: 13 }}>
               <thead>
@@ -443,7 +485,7 @@ export function PendingFranchiseImportsTray({ token, me, isSuper, activeTenantId
               <tbody>
                 {loading ? (
                   <tr><td colSpan={9} style={{ padding: 12, color: '#6b7280' }}>Loading…</td></tr>
-                ) : rows.map((r) => {
+                ) : sortRows(rows, sort).map((r) => {
                   const canAutoPromote = r.matchedCustomerId && r.suggestedVehicleTypeId && r.suggestedLocationId;
                   return (
                     <tr key={r.id} style={{ borderBottom: '1px solid #f3f4f6' }}>

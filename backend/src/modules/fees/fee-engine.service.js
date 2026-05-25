@@ -53,7 +53,16 @@ export const HARDCODED_RATES = {
 // after the grace window count as a full hour (ceil). Kept as a separate const
 // rather than a HARDCODED_RATES field so resolveRate stays purely a {unit, amount}
 // shape — and so we don't have to teach FeeRate rows about the grace concept.
-export const LATE_RETURN_GRACE_MINUTES = 30;
+// 2026-05-25 — make grace period env-overridable so ops can tune it
+// without a code change. Default stays 30 min (matches car-sharing policy).
+// A real per-tenant setting would require a schema field on Settings or
+// FeeRate.metadataJson; that's a future migration.
+export const LATE_RETURN_GRACE_MINUTES = (() => {
+  const raw = process.env.LATE_RETURN_GRACE_MINUTES;
+  if (raw == null) return 30;
+  const n = Number(raw);
+  return Number.isFinite(n) && n >= 0 ? n : 30;
+})();
 
 // =============================================================================
 // Rate resolution

@@ -171,6 +171,12 @@ export async function closeAgreementWithCheckinFees(
   });
 
   const newBalance = Number(updated.balance || 0);
+  // Treat anything within half-a-cent as zero. Floating-point rounding from
+  // tax/fee accumulation can leave balances at 0.001 or 0.009 even when the
+  // customer is logically paid in full — these used to route to the invoice
+  // email ("we'll charge your card") instead of the paid-in-full receipt.
+  // (2026-05-25 — checkin bug 1.)
+  const BALANCE_ZERO_EPSILON = 0.01;
 
   // ─────────────────────────────────────────────────────────────────────────
   // Step 5 — Update signature if provided
@@ -199,7 +205,7 @@ export async function closeAgreementWithCheckinFees(
   let newReservationStatus;
   let autochargeJobId = null;
 
-  if (newBalance <= 0) {
+  if (newBalance <= BALANCE_ZERO_EPSILON) {
     // Paid in full — close cleanly
     newStatus = 'CLOSED';
     newReservationStatus = 'CHECKED_IN';
