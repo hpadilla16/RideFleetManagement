@@ -112,6 +112,9 @@ function ReservationsInner({ token, me, logout }) {
   // setting them equal acts as a single-day filter.
   const [dateFrom, setDateFrom] = useState('');
   const [dateTo, setDateTo] = useState('');
+  // 2026-05-25 — sort by pickup/return × asc/desc. Default 'created-desc'
+  // matches the historical behavior (newest-created first).
+  const [sort, setSort] = useState('created-desc');
   const [msg, setMsg] = useState('');
   const [createOpen, setCreateOpen] = useState(false);
   const [showImport, setShowImport] = useState(false);
@@ -144,7 +147,7 @@ function ReservationsInner({ token, me, logout }) {
     setSupportLoaded(false);
   };
 
-  const loadReservations = async ({ offset = 0, append = false, nextQuery = query, nextDateFrom = dateFrom, nextDateTo = dateTo } = {}) => {
+  const loadReservations = async ({ offset = 0, append = false, nextQuery = query, nextDateFrom = dateFrom, nextDateTo = dateTo, nextSort = sort } = {}) => {
     if (isSuper && !activeTenantId) {
       setReservations([]);
       setReservationsTotal(0);
@@ -159,6 +162,7 @@ function ReservationsInner({ token, me, logout }) {
     if (nextQuery) params.set('q', nextQuery);
     if (nextDateFrom) params.set('dateFrom', nextDateFrom);
     if (nextDateTo) params.set('dateTo', nextDateTo);
+    if (nextSort && nextSort !== 'created-desc') params.set('sort', nextSort);
     try {
       const payload = await api(scopedPath(`/api/reservations/page?${params.toString()}`), {}, token);
       const nextRows = Array.isArray(payload?.rows) ? payload.rows : [];
@@ -269,8 +273,8 @@ function ReservationsInner({ token, me, logout }) {
   }, [searchDraft]);
   useEffect(() => { clearSupportData(); }, [token, isSuper, activeTenantId, canCreateReservation]);
   useEffect(() => {
-    loadReservations({ offset: 0, append: false, nextQuery: query, nextDateFrom: dateFrom, nextDateTo: dateTo });
-  }, [token, isSuper, activeTenantId, query, dateFrom, dateTo]);
+    loadReservations({ offset: 0, append: false, nextQuery: query, nextDateFrom: dateFrom, nextDateTo: dateTo, nextSort: sort });
+  }, [token, isSuper, activeTenantId, query, dateFrom, dateTo, sort]);
   useEffect(() => { loadReservationSummary(); }, [token, isSuper, activeTenantId]);
   useEffect(() => {
     if (!createOpen && !showImport) return;
@@ -684,6 +688,21 @@ function ReservationsInner({ token, me, logout }) {
                 aria-label="Pickup to date"
               />
             </label>
+            <label style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 13 }}>
+              <span className="label" style={{ margin: 0 }}>Sort</span>
+              <select
+                value={sort}
+                onChange={(e) => setSort(e.target.value)}
+                title="Sort the list"
+                aria-label="Sort reservations"
+              >
+                <option value="created-desc">Newest created</option>
+                <option value="pickup-asc">Pickup — oldest first</option>
+                <option value="pickup-desc">Pickup — newest first</option>
+                <option value="return-asc">Return — oldest first</option>
+                <option value="return-desc">Return — newest first</option>
+              </select>
+            </label>
             {(dateFrom || dateTo) ? (
               <button
                 type="button"
@@ -721,7 +740,28 @@ function ReservationsInner({ token, me, logout }) {
             {rows.map((r) => (
               <tr key={r.id}>
                 <td><Link href={`/reservations/${r.id}`}>{r.reservationNumber}</Link></td>
-                <td><span className="badge">{r.status}</span>{hasFeeAdvisory(r.notes) ? <span title="Additional fee advisory" style={{ marginLeft: 6 }}>⚠️</span> : null}</td>
+                <td>
+                  <span className="badge">{r.status}</span>
+                  {r.bookingChannel === 'FRANCHISE_TL' ? (
+                    <span
+                      title="Imported from TL International franchise sync — pre-paid, no payment at checkout"
+                      style={{
+                        marginLeft: 6,
+                        background: '#dbeafe',
+                        color: '#1e3a8a',
+                        padding: '2px 6px',
+                        borderRadius: 999,
+                        fontSize: 10,
+                        fontWeight: 700,
+                        letterSpacing: '0.04em',
+                        textTransform: 'uppercase',
+                      }}
+                    >
+                      Franchise import
+                    </span>
+                  ) : null}
+                  {hasFeeAdvisory(r.notes) ? <span title="Additional fee advisory" style={{ marginLeft: 6 }}>⚠️</span> : null}
+                </td>
                 <td>{r.customer?.firstName} {r.customer?.lastName}</td>
                 <td>{formatReservationWallClock(r.pickupAt, reservationSummary.tenantTimeZone)}</td>
                 <td>{formatReservationWallClock(r.returnAt, reservationSummary.tenantTimeZone)}</td>

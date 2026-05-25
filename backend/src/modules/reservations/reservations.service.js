@@ -112,6 +112,11 @@ const reservationListSelect = {
   sourceRef: true,
   status: true,
   paymentStatus: true,
+  // 2026-05-25 — surface bookingChannel so the list view can badge
+  // franchise imports (FRANCHISE_TL) distinctly from staff-created
+  // reservations. Lets agents see at a glance that the row came from
+  // TL pre-paid sync and avoid trying to collect payment at checkout.
+  bookingChannel: true,
   pickupAt: true,
   returnAt: true,
   pickupLocationId: true,
@@ -1122,11 +1127,24 @@ export const reservationsService = {
         : {})
     };
 
+    // 2026-05-25 — accept a `sort` param so the UI can re-order the list by
+    // pickup or return date. Default keeps the historical "most recently
+    // created first" behavior so existing callers don't notice the change.
+    const SORT_MAP = {
+      'created-desc':  [{ createdAt: 'desc' }],
+      'created-asc':   [{ createdAt: 'asc' }],
+      'pickup-asc':    [{ pickupAt: 'asc' }, { createdAt: 'desc' }],
+      'pickup-desc':   [{ pickupAt: 'desc' }, { createdAt: 'desc' }],
+      'return-asc':    [{ returnAt: 'asc' }, { createdAt: 'desc' }],
+      'return-desc':   [{ returnAt: 'desc' }, { createdAt: 'desc' }],
+    };
+    const orderBy = SORT_MAP[options.sort] || SORT_MAP['created-desc'];
+
     const [total, rows] = await Promise.all([
       prisma.reservation.count({ where }),
       prisma.reservation.findMany({
         where,
-        orderBy: { createdAt: 'desc' },
+        orderBy,
         skip,
         take,
         select: reservationListBaseSelect

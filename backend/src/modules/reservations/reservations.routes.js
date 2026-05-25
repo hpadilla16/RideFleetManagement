@@ -163,7 +163,11 @@ reservationsRouter.get('/page', async (req, res, next) => {
       // date", not "show me anything active during this window".)
       dateOn: req.query?.dateOn,
       dateFrom: req.query?.dateFrom,
-      dateTo: req.query?.dateTo
+      dateTo: req.query?.dateTo,
+      // 2026-05-25 — sort param flows through to the cache key + service.
+      // Accepts: created-desc (default), created-asc, pickup-asc,
+      // pickup-desc, return-asc, return-desc.
+      sort: req.query?.sort
     };
     const out = await cache.getOrSet(
       reservationsListCacheKey('page', scope, params),
