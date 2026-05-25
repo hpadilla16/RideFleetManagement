@@ -53,6 +53,15 @@ function resolveTenantId(req) {
   return req.user?.tenantId;
 }
 
+// Read-endpoint tolerant variant. SUPER_ADMIN can hit /runs and /pending-imports
+// without picking a tenant (e.g. the runs/page.js in beta.56 fails to populate
+// a tenant dropdown because /api/admin/tenants 404s) — in that case we just
+// return data across all tenants instead of 500'ing. Write endpoints keep the
+// strict version that throws.
+function resolveTenantIdOrNull(req) {
+  try { return resolveTenantId(req); } catch { return null; }
+}
+
 function asyncHandler(fn) {
   return (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
 }
@@ -108,10 +117,13 @@ tlInternationalRouter.post('/run-now', asyncHandler(async (req, res) => {
 // ---------------------------------------------------------------------------
 
 tlInternationalRouter.get('/runs', asyncHandler(async (req, res) => {
-  const tenantId = resolveTenantId(req);
+  const tenantId = resolveTenantIdOrNull(req);
   const limit = Math.min(Math.max(parseInt(req.query?.limit || '50', 10), 1), 200);
+  const where = tenantId
+    ? { tenantId, sourceSystem: SOURCE_SYSTEM }
+    : { sourceSystem: SOURCE_SYSTEM };
   const runs = await prisma.externalSyncRun.findMany({
-    where: { tenantId, sourceSystem: SOURCE_SYSTEM },
+    where,
     orderBy: { startedAt: 'desc' },
     take: limit,
   });
@@ -123,13 +135,14 @@ tlInternationalRouter.get('/runs', asyncHandler(async (req, res) => {
 // ---------------------------------------------------------------------------
 
 tlInternationalRouter.get('/pending-imports', asyncHandler(async (req, res) => {
-  const tenantId = resolveTenantId(req);
+  const tenantId = resolveTenantIdOrNull(req);
+  const where = {
+    sourceSystem: SOURCE_SYSTEM,
+    promotionStatus: { in: ['PENDING', 'MANUAL_REVIEW'] },
+    ...(tenantId ? { tenantId } : {}),
+  };
   const rows = await prisma.externalReservation.findMany({
-    where: {
-      tenantId,
-      sourceSystem: SOURCE_SYSTEM,
-      promotionStatus: { in: ['PENDING', 'MANUAL_REVIEW'] },
-    },
+    where,
     orderBy: [{ pickupAt: 'asc' }, { createdAt: 'desc' }],
     take: 200,
     select: {

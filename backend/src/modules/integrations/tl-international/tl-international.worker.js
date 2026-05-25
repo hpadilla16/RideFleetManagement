@@ -56,6 +56,76 @@ export const QUEUE_NAME = 'tl-international.sync';
 const BOOKING_CHANNEL = 'FRANCHISE_TL';
 
 // ---------------------------------------------------------------------------
+// Auto-create customer (2026-05-25)
+//
+// By default, when promotion-matcher returns CUSTOMER_NOT_FOUND, the row goes
+// to MANUAL_REVIEW. With TL_AUTO_CREATE_CUSTOMERS=true the worker will create
+// a lightweight Customer from the TL data (firstName + lastName + email/phone)
+// and then re-evaluate the promotion — usually flipping it to AUTO so the
+// reservation lands in the Reservations module without manual intervention.
+//
+// Constraints to actually create:
+//   - firstName + lastName both non-empty
+//   - At least one of email OR phone non-empty
+// If both are missing or names are blank → still MANUAL_REVIEW.
+//
+// Driver's license, DOB, etc. are NOT captured here — they're filled at
+// counter check-in. The Customer record stays minimal until then.
+// ---------------------------------------------------------------------------
+function autoCreateCustomersEnabled() {
+  const raw = (process.env.TL_AUTO_CREATE_CUSTOMERS ?? 'false')
+    .toString().trim().toLowerCase();
+  return raw === 'true' || raw === '1' || raw === 'yes';
+}
+
+const CUSTOMER_PHONE_PLACEHOLDER = '0000000000';
+
+export async function maybeCreateCustomerFromTl(prisma, extRes) {
+  const firstName = (extRes.customerFirstName || '').trim();
+  const lastName  = (extRes.customerLastName  || '').trim();
+  const email     = (extRes.customerEmail     || '').trim().toLowerCase();
+  const phone     = (extRes.customerPhone     || '').trim();
+
+  if (!firstName || !lastName) return null;
+  if (!email && !phone) return null;
+
+  // Defensive double-check inside the create: another concurrent sync (or
+  // a manual creation) could have created the customer between
+  // evaluatePromotion's matchCustomer and this create.
+  if (email) {
+    const existing = await prisma.customer.findFirst({
+      where: { tenantId: extRes.tenantId, email: { equals: email, mode: 'insensitive' } },
+      select: { id: true },
+    }).catch(() => null);
+    if (existing) return existing;
+  }
+
+  const created = await prisma.customer.create({
+    data: {
+      tenantId: extRes.tenantId,
+      firstName,
+      lastName,
+      email: email || null,
+      phone: phone || CUSTOMER_PHONE_PLACEHOLDER,
+      country: extRes.customerCountry || null,
+    },
+    select: { id: true, firstName: true, lastName: true, email: true, phone: true },
+  });
+
+  logger.info('[tl-sync] auto-created Customer from TL data', {
+    tenantId: extRes.tenantId,
+    externalRef: extRes.externalRef,
+    customerId: created.id,
+    firstName: created.firstName,
+    lastName: created.lastName,
+    hasEmail: !!created.email,
+    phoneWasPlaceholder: created.phone === CUSTOMER_PHONE_PLACEHOLDER,
+  });
+
+  return created;
+}
+
+// ---------------------------------------------------------------------------
 // Stealth helpers
 // ---------------------------------------------------------------------------
 //
@@ -218,7 +288,33 @@ export async function tlSyncHandler(job) {
           continue;
         }
 
-        const decision = await evaluatePromotion(upserted, { prisma });
+        let decision = await evaluatePromotion(upserted, { prisma });
+
+        // (2026-05-25) Auto-create customer path. When the only thing
+        // blocking promotion is customer_not_found AND TL_AUTO_CREATE_CUSTOMERS
+        // is enabled, create a lightweight Customer from the TL data and
+        // re-evaluate. Usually flips the decision to AUTO.
+        if (decision.decision === 'MANUAL_REVIEW'
+            && decision.reason === 'customer_not_found'
+            && autoCreateCustomersEnabled()) {
+          try {
+            const newCust = await maybeCreateCustomerFromTl(prisma, upserted);
+            if (newCust) {
+              decision = await evaluatePromotion(upserted, { prisma });
+              logger.info('[tl-sync] re-evaluated after auto-create', {
+                tenantId, externalRef: pickup.externalRef,
+                newDecision: decision.decision, newReason: decision.reason,
+              });
+            }
+          } catch (createErr) {
+            // If auto-create fails (unique constraint race, missing data, etc.)
+            // just fall through to MANUAL_REVIEW with the original reason.
+            logger.warn('[tl-sync] auto-create customer failed; falling back to MANUAL_REVIEW', {
+              tenantId, externalRef: pickup.externalRef, message: createErr.message,
+            });
+          }
+        }
+
         if (decision.decision === 'AUTO') {
           try {
             await promoteAutomatically(upserted, decision);

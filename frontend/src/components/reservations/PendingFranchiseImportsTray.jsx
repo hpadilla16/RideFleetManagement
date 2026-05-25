@@ -24,16 +24,16 @@ import { api } from '../../lib/client';
 function ReasonBadge({ reason }) {
   const r = String(reason || '').toUpperCase();
   const map = {
-    CUSTOMER_NOT_FOUND: { bg: '#fef3c7', fg: '#92400e', es: 'Cliente sin mapear', en: 'Customer unmapped' },
-    VEHICLE_CATEGORY_UNKNOWN: { bg: '#fee2e2', fg: '#991b1b', es: 'Categoria desconocida', en: 'Unknown category' },
-    LOCATION_UNKNOWN: { bg: '#fef3c7', fg: '#92400e', es: 'Sucursal sin mapear', en: 'Location unmapped' },
-    DUPLICATE: { bg: '#e0f2fe', fg: '#075985', es: 'Duplicado', en: 'Duplicate' },
-    AUTO_PROMOTED: { bg: '#dcfce7', fg: '#166534', es: 'Auto-promovida', en: 'Auto-promoted' }
+    CUSTOMER_NOT_FOUND:       { bg: '#fef3c7', fg: '#92400e', label: 'Customer unmapped' },
+    VEHICLE_CATEGORY_UNKNOWN: { bg: '#fee2e2', fg: '#991b1b', label: 'Unknown category' },
+    LOCATION_UNKNOWN:         { bg: '#fef3c7', fg: '#92400e', label: 'Location unmapped' },
+    DUPLICATE:                { bg: '#e0f2fe', fg: '#075985', label: 'Duplicate' },
+    AUTO_PROMOTED:            { bg: '#dcfce7', fg: '#166534', label: 'Auto-promoted' },
   };
-  const cfg = map[r] || { bg: '#e5e7eb', fg: '#374151', es: r || 'Revisar', en: 'Review' };
+  const cfg = map[r] || { bg: '#e5e7eb', fg: '#374151', label: r || 'Review' };
   return (
     <span style={{ background: cfg.bg, color: cfg.fg, padding: '2px 8px', borderRadius: 999, fontSize: 11, fontWeight: 600 }}>
-      {cfg.es} / {cfg.en}
+      {cfg.label}
     </span>
   );
 }
@@ -147,10 +147,10 @@ function EditPromoteModal({ row, token, scopedPath, onClose, onSaved }) {
         if (onSaved) onSaved(res);
         onClose();
       } else {
-        setError('La promocion fallo / Promotion failed');
+        setError('Promotion failed');
       }
     } catch (err) {
-      setError(err?.message || 'Error al promover / Error promoting');
+      setError(err?.message || 'Error promoting');
     } finally {
       setBusy(false);
     }
@@ -164,12 +164,12 @@ function EditPromoteModal({ row, token, scopedPath, onClose, onSaved }) {
       <div className="glass card" style={{ background: 'white', padding: 20, borderRadius: 8, width: '90%', maxWidth: 640, maxHeight: '90vh', overflow: 'auto' }}>
         <div className="row-between" style={{ alignItems: 'start', marginBottom: 12 }}>
           <div>
-            <h3 style={{ margin: 0 }}>Editar y promover / Edit & promote</h3>
+            <h3 style={{ margin: 0 }}>Edit & promote</h3>
             <div className="ui-muted" style={{ fontSize: 13 }}>
               {row?.externalRef} - {row?.customer?.fullName || `${row?.customerFirstName || ''} ${row?.customerLastName || ''}`.trim() || '-'}
             </div>
           </div>
-          <button type="button" onClick={onClose} aria-label="Cerrar">x</button>
+          <button type="button" onClick={onClose} aria-label="Close">x</button>
         </div>
 
         {error ? (
@@ -194,10 +194,10 @@ function EditPromoteModal({ row, token, scopedPath, onClose, onSaved }) {
 
         <form onSubmit={submit} className="stack" style={{ gap: 14 }}>
           <section>
-            <h4 style={{ margin: '0 0 6px' }}>1. Cliente / Customer</h4>
+            <h4 style={{ margin: '0 0 6px' }}>1. Customer</h4>
             <input
               type="text"
-              placeholder="Buscar cliente por nombre o email / Search customer by name or email"
+              placeholder="Search customer by name or email"
               value={customerQuery}
               onChange={(e) => setCustomerQuery(e.target.value)}
               style={{ width: '100%' }}
@@ -222,7 +222,7 @@ function EditPromoteModal({ row, token, scopedPath, onClose, onSaved }) {
               </div>
             ) : null}
             <div className="ui-muted" style={{ fontSize: 12, marginTop: 4 }}>
-              Seleccionado / Selected: <strong>{customerId || 'Ninguno / None'}</strong>
+              Selected: <strong>{customerId || 'None'}</strong>
               {customerCreatedMsg ? (
                 <span style={{ marginLeft: 8, color: '#065f46' }}>{customerCreatedMsg}</span>
               ) : null}
@@ -256,7 +256,7 @@ function EditPromoteModal({ row, token, scopedPath, onClose, onSaved }) {
                       setCustomerId(newId);
                       setCustomerQuery(`${tl.firstName} ${tl.lastName} (NEW)`);
                       setCustomerResults([]);
-                      setCustomerCreatedMsg('Cliente creado / Customer created');
+                      setCustomerCreatedMsg('Customer created');
                     } else {
                       setError('Customer create returned no id');
                     }
@@ -266,14 +266,14 @@ function EditPromoteModal({ row, token, scopedPath, onClose, onSaved }) {
                     setCreatingCustomer(false);
                   }
                 }}
-                title={!tl.firstName || !tl.lastName ? 'Faltan datos TL / Missing TL data' : ''}
+                title={!tl.firstName || !tl.lastName ? 'Missing TL data' : ''}
                 style={{
                   background: (busy || creatingCustomer || !!customerId || !tl.firstName || !tl.lastName) ? '#9ca3af' : '#1fc7aa',
                   color: 'white', border: 'none', padding: '6px 10px', borderRadius: 4, fontSize: 12,
                   cursor: (busy || creatingCustomer || !!customerId || !tl.firstName || !tl.lastName) ? 'not-allowed' : 'pointer'
                 }}
               >
-                {creatingCustomer ? 'Creando... / Creating...' : 'Use TL customer data (create new)'}
+                {creatingCustomer ? 'Creating…' : 'Use TL customer data (create new)'}
               </button>
               <span style={{ fontSize: 11, color: '#6b7280' }}>
                 Creates a Customer record using the TL data above
@@ -369,16 +369,16 @@ export function PendingFranchiseImportsTray({ token, me, isSuper, activeTenantId
         token
       );
       if (res?.ok) {
-        setMsg(`Promovida / Promoted: ${r.externalRef}`);
+        setMsg(`Promoted: ${r.externalRef}`);
         await load();
       }
     } catch (err) {
-      setMsg(err?.message || 'Error al promover / Error promoting');
+      setMsg(err?.message || 'Error promoting');
     }
   };
 
   const reject = async (r) => {
-    if (typeof window !== 'undefined' && !window.confirm(`Rechazar / Reject ${r.externalRef}?`)) return;
+    if (typeof window !== 'undefined' && !window.confirm(`Reject ${r.externalRef}?`)) return;
     setMsg('');
     try {
       const res = await api(
@@ -387,16 +387,16 @@ export function PendingFranchiseImportsTray({ token, me, isSuper, activeTenantId
         token
       );
       if (res?.ok) {
-        setMsg(`Rechazada / Rejected: ${r.externalRef}`);
+        setMsg(`Rejected: ${r.externalRef}`);
         await load();
       }
     } catch (err) {
-      setMsg(err?.message || 'Error al rechazar / Error rejecting');
+      setMsg(err?.message || 'Error rejecting');
     }
   };
 
   return (
-    <section className="glass card section-card" style={{ marginBottom: 16, borderLeft: '4px solid #f59e0b' }}>
+    <section className="glass card section-card" style={{ marginBottom: 16, borderLeft: '4px solid #f59e0b', overflow: 'hidden', maxWidth: '100%' }}>
       <button
         type="button"
         onClick={() => setExpanded((v) => !v)}
@@ -406,9 +406,7 @@ export function PendingFranchiseImportsTray({ token, me, isSuper, activeTenantId
         }}
       >
         <div>
-          <strong style={{ fontSize: 15 }}>
-            Importaciones de franquicia pendientes
-          </strong>
+          <strong style={{ fontSize: 15 }}>Pending franchise imports</strong>
           <span style={{
             marginLeft: 8, background: '#f59e0b', color: 'white',
             padding: '2px 8px', borderRadius: 999, fontSize: 12, fontWeight: 700
@@ -416,35 +414,35 @@ export function PendingFranchiseImportsTray({ token, me, isSuper, activeTenantId
             {rows.length}
           </span>
           <div className="ui-muted" style={{ fontSize: 13, marginTop: 2 }}>
-            {rows.length} franchise import{rows.length === 1 ? '' : 's'} awaiting review / esperando revision
+            {rows.length} franchise import{rows.length === 1 ? '' : 's'} awaiting review
           </div>
         </div>
         <span style={{ fontSize: 18, color: '#6b7280' }}>{expanded ? 'v' : '>'}</span>
       </button>
 
       {expanded ? (
-        <div style={{ padding: '0 16px 16px' }}>
+        <div style={{ padding: '0 16px 16px', maxWidth: '100%' }}>
           {msg ? (
             <div style={{ padding: 8, background: '#ecfdf5', color: '#065f46', borderRadius: 4, marginBottom: 8 }}>{msg}</div>
           ) : null}
-          <div style={{ overflowX: 'auto', WebkitOverflowScrolling: 'touch' }}>
-            <table style={{ width: '100%', minWidth: 1200, borderCollapse: 'collapse', fontSize: 13 }}>
+          <div style={{ overflowX: 'auto', WebkitOverflowScrolling: 'touch', maxWidth: '100%' }}>
+            <table style={{ width: '100%', minWidth: 900, borderCollapse: 'collapse', fontSize: 13 }}>
               <thead>
                 <tr style={{ borderBottom: '1px solid #e5e7eb', textAlign: 'left', background: '#f9fafb' }}>
-                  <th style={{ padding: '6px 8px' }}>Ref TL / ZE#</th>
-                  <th style={{ padding: '6px 8px' }}>Cliente / Customer</th>
+                  <th style={{ padding: '6px 8px' }}>TL Ref</th>
+                  <th style={{ padding: '6px 8px' }}>Customer</th>
                   <th style={{ padding: '6px 8px' }}>Pickup</th>
                   <th style={{ padding: '6px 8px' }}>Return</th>
-                  <th style={{ padding: '6px 8px' }}>Sucursal / Location</th>
-                  <th style={{ padding: '6px 8px' }}>Vehiculo / Vehicle</th>
+                  <th style={{ padding: '6px 8px' }}>Location</th>
+                  <th style={{ padding: '6px 8px' }}>Vehicle</th>
                   <th style={{ padding: '6px 8px', textAlign: 'right' }}>Total</th>
-                  <th style={{ padding: '6px 8px' }}>Razon / Reason</th>
-                  <th style={{ padding: '6px 8px' }}>Acciones / Actions</th>
+                  <th style={{ padding: '6px 8px' }}>Reason</th>
+                  <th style={{ padding: '6px 8px' }}>Actions</th>
                 </tr>
               </thead>
               <tbody>
                 {loading ? (
-                  <tr><td colSpan={9} style={{ padding: 12, color: '#6b7280' }}>Cargando... / Loading...</td></tr>
+                  <tr><td colSpan={9} style={{ padding: 12, color: '#6b7280' }}>Loading…</td></tr>
                 ) : rows.map((r) => {
                   const canAutoPromote = r.matchedCustomerId && r.suggestedVehicleTypeId && r.suggestedLocationId;
                   return (
@@ -467,13 +465,13 @@ export function PendingFranchiseImportsTray({ token, me, isSuper, activeTenantId
                       <td style={{ padding: '6px 8px', textAlign: 'right' }}>{fmtMoney(r.totalAmount)}</td>
                       <td style={{ padding: '6px 8px' }}><ReasonBadge reason={r.needsReviewReason} /></td>
                       <td style={{ padding: '6px 8px', whiteSpace: 'nowrap' }}>
-                        <button type="button" disabled={!canAutoPromote} onClick={() => promote(r)} title={canAutoPromote ? '' : 'Mapeo incompleto / Mapping incomplete'}>
-                          Promover / Promote
+                        <button type="button" disabled={!canAutoPromote} onClick={() => promote(r)} title={canAutoPromote ? '' : 'Mapping incomplete'}>
+                          Promote
                         </button>
                         {' '}
-                        <button type="button" onClick={() => setEditRow(r)}>Editar / Edit</button>
+                        <button type="button" onClick={() => setEditRow(r)}>Edit</button>
                         {' '}
-                        <button type="button" onClick={() => reject(r)} style={{ color: '#991b1b' }}>Rechazar / Reject</button>
+                        <button type="button" onClick={() => reject(r)} style={{ color: '#991b1b' }}>Reject</button>
                       </td>
                     </tr>
                   );
@@ -482,7 +480,7 @@ export function PendingFranchiseImportsTray({ token, me, isSuper, activeTenantId
             </table>
           </div>
           <div className="ui-muted" style={{ fontSize: 12, marginTop: 10 }}>
-            Auto-promovidas hoy / Auto-promoted today: <strong>{autoPromotedToday}</strong>
+            Auto-promoted today: <strong>{autoPromotedToday}</strong>
           </div>
         </div>
       ) : null}
@@ -493,7 +491,7 @@ export function PendingFranchiseImportsTray({ token, me, isSuper, activeTenantId
           token={token}
           scopedPath={scoped}
           onClose={() => setEditRow(null)}
-          onSaved={() => { setMsg(`Promovida / Promoted: ${editRow.externalRef}`); load(); }}
+          onSaved={() => { setMsg(`Promoted: ${editRow.externalRef}`); load(); }}
         />
       ) : null}
     </section>
