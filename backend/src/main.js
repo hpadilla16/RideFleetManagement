@@ -29,6 +29,12 @@ import { prisma } from './lib/prisma.js';
 import { customerPortalRouter } from './modules/customer-portal/customer-portal.routes.js';
 import { tenantsRouter } from './modules/tenants/tenants.routes.js';
 import { reportsRouter } from './modules/reports/reports.routes.js';
+// 2026-05-25 — Reports v2 module. Mounted BEFORE legacy reportsRouter so
+// the new /api/reports/list endpoint wins; legacy paths fall through.
+// register-all-reports.js is a side-effect import that triggers each
+// individual report file's registerReport() call against reportsV2Router.
+import { reportsV2Router } from './modules/reports/reports-v2.routes.js';
+import './modules/reports/register-all-reports.js';
 import { commissionsRouter } from './modules/commissions/commissions.routes.js';
 import { carSharingRouter } from './modules/car-sharing/car-sharing.routes.js';
 import { peopleRouter } from './modules/people/people.routes.js';
@@ -131,6 +137,10 @@ app.use('/api/stop-sales', requireAuth, tenantRateLimit, requireModuleAccess('se
 app.use('/api/rates', requireAuth, tenantRateLimit, requireModuleAccess('settings'), requireRole('ADMIN', 'OPS'), ratesRouter);
 app.use('/api/market-scraper', requireAuth, tenantRateLimit, requireModuleAccess('settings'), requireRole('ADMIN', 'OPS'), marketScraperRouter);
 app.use('/api/rental-agreements', requireAuth, tenantRateLimit, requireModuleAccess('reservations'), rentalAgreementsRouter);
+// 2026-05-25 — mount Reports v2 router FIRST so the new /list and per-slug
+// data/pdf/excel endpoints win. The legacy reportsRouter stays mounted as
+// a fallthrough for any path the v2 router doesn't define.
+app.use('/api/reports', requireAuth, tenantRateLimit, requireModuleAccess('reports'), reportsV2Router);
 app.use('/api/reports', requireAuth, tenantRateLimit, requireModuleAccess('reports'), reportsRouter);
 app.use('/api/commissions', requireAuth, tenantRateLimit, requireModuleAccess('reports'), commissionsRouter);
 app.use('/api/car-sharing', requireAuth, tenantRateLimit, requireModuleAccess('carSharing'), requireRole('ADMIN', 'OPS'), carSharingRouter);

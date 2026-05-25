@@ -513,7 +513,12 @@ export async function promoteWithMappings(extRes, opts) {
         tenantId: fresh.tenantId,
         reservationNumber: `TL-${fresh.externalRef}`,
         sourceRef: fresh.externalRef,
-        status: 'PENDING_FRANCHISE_IMPORT',
+        // 2026-05-25 — promoted TL bookings are CONFIRMED reservations.
+        // The 'Franchise import' badge in the UI (driven by bookingChannel)
+        // is what distinguishes them visually. PENDING_FRANCHISE_IMPORT was
+        // confusing — it implied something was waiting on our end when in
+        // fact the franchise booking is fully paid and confirmed at TL.
+        status: 'CONFIRMED',
         bookingChannel: BOOKING_CHANNEL,
         customerId,
         vehicleTypeId: resolvedVehicleTypeId,
