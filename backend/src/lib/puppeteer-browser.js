@@ -66,3 +66,44 @@ function defaultLauncher() {
 const manager = createBrowserManager(defaultLauncher);
 export const getBrowser = manager.getBrowser;
 export const closeBrowser = manager.closeBrowser;
+
+// ---------------------------------------------------------------------------
+// TL International dedicated browser (2026-05-25)
+//
+// TL's CloudFlare binds the session cookie to BOTH the TLS fingerprint AND
+// the originating IP. Our cookies are obtained from Hector's residential IP
+// in PR; the droplet sits in NYC with a different IP, so direct requests
+// from the droplet get 302'd back to login.php even with a fresh cookie.
+//
+// Mitigation: route TL Chromium traffic through an HTTP/SOCKS proxy that
+// egresses from the same residential IP. Set TL_INTERNATIONAL_PROXY_URL in
+// the environment (e.g. `http://100.x.y.z:8888` over Tailscale to a proxy
+// running on Hector's Mac) and Chromium will use it.
+//
+// We keep this as a SEPARATE manager from the global singleton because the
+// global one is shared with PDF rendering, market-scraper, etc. — those
+// must NOT go through the residential proxy.
+// ---------------------------------------------------------------------------
+
+function tlLauncher() {
+  const proxyUrl = process.env.TL_INTERNATIONAL_PROXY_URL || null;
+  const args = ['--no-sandbox', '--disable-setuid-sandbox'];
+  if (proxyUrl) {
+    args.push(`--proxy-server=${proxyUrl}`);
+    // CloudFlare WARP / residential proxies may have older trust chains.
+    // We don't want to silently accept bad certs; instead we log loudly so
+    // the operator notices if the proxy itself is misconfigured.
+    logger.info?.('[puppeteer-browser:tl] launching Chromium via proxy', { proxyUrl });
+  } else {
+    logger.warn?.('[puppeteer-browser:tl] TL_INTERNATIONAL_PROXY_URL not set — Chromium will egress from droplet IP. TL will likely reject this.');
+  }
+  return puppeteer.launch({
+    headless: 'new',
+    executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || undefined,
+    args,
+  });
+}
+
+const tlManager = createBrowserManager(tlLauncher);
+export const getTLBrowser = tlManager.getBrowser;
+export const closeTLBrowser = tlManager.closeBrowser;

@@ -31,15 +31,38 @@
  * See doc/tl-integration-design-2026-05-19.md.
  */
 
+import { ProxyAgent } from 'undici';
 import { prisma } from '../../../lib/prisma.js';
 import logger from '../../../lib/logger.js';
 import { decrypt, encrypt } from '../../../lib/integration-crypto.js';
-import { getBrowser } from '../../../lib/puppeteer-browser.js';
+import { getTLBrowser } from '../../../lib/puppeteer-browser.js';
 
 export const SOURCE_SYSTEM = 'TL_INTERNATIONAL';
 
 const BASE_URL = process.env.TL_INTERNATIONAL_BASE_URL
   ?? 'https://newadmin.tlinternationalgroup.com';
+
+// ---------------------------------------------------------------------------
+// Residential proxy dispatcher (2026-05-25, followup to CloudFlare pivot)
+//
+// TL's CloudFlare binds the session cookie to the originating IP. The
+// droplet sits in NYC; cookies are obtained from Hector's residential PR
+// IP. Direct requests from the droplet → 302 to login.php no matter how
+// fresh the cookie is. Mitigation: route ALL TL HTTP traffic (both raw
+// fetch and Puppeteer) through an HTTP proxy that egresses from the
+// same residential IP. The proxy is reached over Tailscale.
+//
+// Set `TL_INTERNATIONAL_PROXY_URL` (e.g. `http://100.x.y.z:8888`) to
+// enable. When unset, we fall back to the droplet's egress — useful for
+// local dev / unit tests where we don't want a proxy dependency.
+// ---------------------------------------------------------------------------
+const TL_PROXY_URL = process.env.TL_INTERNATIONAL_PROXY_URL || null;
+const tlDispatcher = TL_PROXY_URL ? new ProxyAgent(TL_PROXY_URL) : null;
+if (TL_PROXY_URL) {
+  logger.info?.('[tl-international] residential proxy enabled', { proxyUrl: TL_PROXY_URL });
+} else if (process.env.NODE_ENV === 'production') {
+  logger.warn?.('[tl-international] TL_INTERNATIONAL_PROXY_URL not set; fetch() will egress from droplet IP. TL will likely reject these requests.');
+}
 
 // ---------------------------------------------------------------------------
 // Stealth / anti-detection knobs
@@ -228,6 +251,9 @@ async function tlFetch(tenantId, path, opts = {}) {
     method: opts.method ?? 'GET',
     body: opts.body,
     signal: opts.signal,
+    // 2026-05-25: route through residential proxy when configured so the
+    // egress IP matches the one bound to the cookie. See TL_PROXY_URL above.
+    ...(tlDispatcher ? { dispatcher: tlDispatcher } : {}),
   });
 
   if (res.status === 301 || res.status === 302) {
@@ -291,7 +317,10 @@ export function parseCookieString(s) {
  */
 async function tlPuppeteerLoad(tenantId, path, opts = {}) {
   const cookieString = await getCookie(tenantId);
-  const browser = await getBrowser();
+  // 2026-05-25: dedicated TL browser (separate from the global PDF/scraper
+  // singleton) — launched with --proxy-server so its egress IP matches the
+  // residential IP bound to the cookie. See TL_PROXY_URL in puppeteer-browser.js.
+  const browser = await getTLBrowser();
   const page = await browser.newPage();
 
   try {
