@@ -1,5 +1,5 @@
 /**
- * Commission & Sales Performance Report — Round 31a (2026-05-26).
+ * Commission & Sales Performance Report — Round 31b (2026-05-26).
  *
  * Single-period report: per-clerk metrics, sales attach % by service, and
  * counter revenue per service. Matches the April 2026 Commission Report
@@ -8,28 +8,34 @@
  * Data flow:
  *   1. Find RentalAgreement rows where finalizedAt OR closedAt ∈ [from, to]
  *      (status is irrelevant — we count any rental that hit the counter in
- *      the window)
- *   2. Group by **commission earner** — i.e. the AgreementCommission's
- *      employeeUserId, which is the person who performed CHECKOUT (per
- *      rental-agreements.service.js#syncAgreementCommissionSnapshot).
- *      When an agreement has no commission record yet (not closed, sync
- *      didn't run), fall back to salesOwnerUserId so the rental still
- *      appears with $0 commission and someone is credited for the activity.
- *   3. For each clerk: count rentals, sum rental days, sum paid-at-counter,
- *      sum commissions earned (commissionAmount from the snapshot row)
- *   4. For each service code in our SERVICE_CATALOG, count how many of the
- *      clerk's agreements had a selected charge whose code/name matched,
- *      and sum the $ amounts for those charges
+ *      the window).
+ *   2. Group by **checkout actor** — read from the agreement's CHECKOUT
+ *      inspection (`inspections.actorUserId` where phase=CHECKOUT), with
+ *      fallback to salesOwnerUserId when no inspection exists. This mirrors
+ *      the attribution rule in syncAgreementCommissionSnapshot.
+ *   3. For each clerk: count rentals, sum rental days, sum paid-at-counter.
+ *   4. For each service in SERVICE_CATALOG, count agreements where the
+ *      service was attached (one rental contributes at most 1 to a service's
+ *      attach count) and sum the $ from those charges.
+ *   5. **Commission** is computed inline from the attach: each attached
+ *      service contributes `commPerSale` ($1, $2, or $3 depending on
+ *      service) to that rental's commission. The clerk's total commission =
+ *      sum of (attached service × commPerSale) across all their rentals.
+ *      This deliberately does NOT use AgreementCommission.commissionAmount
+ *      — that path requires per-employee CommissionPlans to be configured
+ *      in settings, and the report is meant to be self-contained against
+ *      the SERVICE_CATALOG rates that mirror Hector's hand-built PDF.
  *
- * Service matching is by `code` first (when present) then a fuzzy match
- * on `name`. This handles both the iPOS Transact CSV import flow and the
+ * Service matching is by `code` first (when present) then a fuzzy match on
+ * `name`. This handles both the iPOS Transact CSV import flow and the
  * native RFM line items.
  *
- * Round-31a bug fix (2026-05-26): previously the loop filtered
- *   `cm.employeeUserId === clerkId` where clerkId was the salesOwnerUserId,
- * so when the sales owner and checkout actor were different people the
- * commission was dropped and every clerk row showed $0. Now we pivot by
- * the commission earner directly.
+ * Round-31b (2026-05-26): commission is now computed inline from
+ *   attach × commPerSale instead of summing AgreementCommission.commissionAmount
+ *   (which was $0 for any employee without a configured CommissionPlan, so
+ *   only Valeria had a non-zero figure in production).
+ * Round-31a (2026-05-26): pivoted bucketing from salesOwnerUserId to
+ *   the checkout actor.
  */
 
 import { registerReport } from './reports-v2.routes.js';
@@ -100,32 +106,33 @@ async function computeData({ tenantId, from, to }, deps = {}) {
       salesOwnerUser: { select: { id: true, fullName: true } },
       charges: { select: { code: true, name: true, total: true, selected: true } },
       payments: { select: { amount: true, method: true } },
-      commissions: {
+      // Pull every CHECKOUT inspection (most agreements have exactly one,
+      // but a few have a re-do). Ordered most-recent-first so the first row
+      // with an actor wins — same precedence as syncAgreementCommissionSnapshot.
+      inspections: {
+        where: { phase: 'CHECKOUT' },
+        orderBy: [{ capturedAt: 'desc' }, { updatedAt: 'desc' }],
         select: {
-          employeeUserId: true,
-          commissionAmount: true,
-          employeeUser: { select: { id: true, fullName: true } },
+          actorUserId: true,
+          actorUser: { select: { id: true, fullName: true } },
         },
       },
     },
   });
 
-  // Group by **commission earner** (the checkout actor). When an agreement has
-  // no commission record (e.g. not yet closed, snapshot sync hasn't run),
-  // fall back to salesOwnerUserId so the activity is still attributed somewhere
-  // — those rows show $0 commission until the snapshot is written.
+  // Group by **checkout actor**. The CHECKOUT inspection's actorUserId is who
+  // physically released the car and is the canonical commission earner per
+  // rental-agreements.service.js. Fall back to salesOwnerUserId when no
+  // inspection exists (rare — agreement closed without a CHECKOUT inspection).
   const byClerk = new Map();
   for (const ag of agreements) {
-    // Per the unique constraint on AgreementCommission(rentalAgreementId,
-    // employeeUserId), and the deleteMany() in syncAgreementCommissionSnapshot,
-    // there is at most ONE commission row per agreement in steady state.
-    const primaryCommission = (ag.commissions || [])[0] || null;
+    const checkoutInspection = (ag.inspections || []).find((row) => row?.actorUserId) || null;
     const clerkId =
-      primaryCommission?.employeeUserId ||
+      checkoutInspection?.actorUserId ||
       ag.salesOwnerUserId ||
       '__unassigned__';
     const clerkName =
-      primaryCommission?.employeeUser?.fullName ||
+      checkoutInspection?.actorUser?.fullName ||
       ag.salesOwnerUser?.fullName ||
       'Unassigned';
 
@@ -147,12 +154,9 @@ async function computeData({ tenantId, from, to }, deps = {}) {
     for (const p of (ag.payments || [])) {
       c.paidAtCounter += num(p.amount);
     }
-    // Sum every commission on the agreement (typically just the one). They all
-    // belong to this clerk now because we keyed the bucket by employeeUserId.
-    for (const cm of (ag.commissions || [])) {
-      c.commissions += num(cm.commissionAmount);
-    }
-    // Service attach (one rental can only contribute 1 to a service's count)
+    // Service attach + commission roll-up. Each attached service contributes
+    // commPerSale to the clerk's commission, independent of CommissionPlan
+    // setup. Mirrors the rates Hector used in the April 2026 hand-built PDF.
     for (const service of SERVICE_CATALOG) {
       let matched = false;
       let serviceDollarsThisAg = 0;
@@ -166,6 +170,7 @@ async function computeData({ tenantId, from, to }, deps = {}) {
       if (matched) {
         c.serviceCounts[service.slug] += 1;
         c.serviceDollars[service.slug] += serviceDollarsThisAg;
+        c.commissions += num(service.commPerSale);
       }
     }
   }

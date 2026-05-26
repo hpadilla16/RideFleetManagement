@@ -138,11 +138,14 @@ async function computeData({ tenantId, from, to }, deps = {}) {
       salesOwnerUser: { select: { id: true, fullName: true } },
       charges: { select: { code: true, name: true, total: true, selected: true } },
       payments: { select: { amount: true } },
-      commissions: {
+      // CHECKOUT inspections drive clerk attribution — the actor who released
+      // the car is the commission earner (mirror of syncAgreementCommissionSnapshot).
+      inspections: {
+        where: { phase: 'CHECKOUT' },
+        orderBy: [{ capturedAt: 'desc' }, { updatedAt: 'desc' }],
         select: {
-          employeeUserId: true,
-          commissionAmount: true,
-          employeeUser: { select: { id: true, fullName: true } },
+          actorUserId: true,
+          actorUser: { select: { id: true, fullName: true } },
         },
       },
     },
@@ -151,11 +154,11 @@ async function computeData({ tenantId, from, to }, deps = {}) {
   // teamByMonth: monthKey → bucket
   const teamByMonth = new Map(months.map((m) => [m, emptyBucket()]));
   // clerks: clerkId → { id, name, byMonth: Map<monthKey, bucket> }
-  // Bucketed by **commission earner** (the checkout actor in
-  // syncAgreementCommissionSnapshot), with fallback to salesOwnerUserId when
-  // no commission snapshot exists yet. Fixes the previous bug where the
-  // commission column was always $0 for shops where checkout and sales-owner
-  // were different people.
+  // Bucketed by the **checkout actor** (whoever performed the CHECKOUT
+  // inspection on the agreement), with fallback to salesOwnerUserId when
+  // no inspection record exists. Commission is computed inline from
+  // attach × commPerSale — see commission-sales-performance.report.js for
+  // the rationale (CommissionPlan setup is not required).
   const clerks = new Map();
 
   for (const ag of agreements) {
@@ -164,13 +167,13 @@ async function computeData({ tenantId, from, to }, deps = {}) {
     const mk = monthKey(bucketDate, tenantTz);
     if (!teamByMonth.has(mk)) continue; // shouldn't happen with the where clause, but guard anyway
 
-    const primaryCommission = (ag.commissions || [])[0] || null;
+    const checkoutInspection = (ag.inspections || []).find((row) => row?.actorUserId) || null;
     const clerkId =
-      primaryCommission?.employeeUserId ||
+      checkoutInspection?.actorUserId ||
       ag.salesOwnerUserId ||
       '__unassigned__';
     const clerkName =
-      primaryCommission?.employeeUser?.fullName ||
+      checkoutInspection?.actorUser?.fullName ||
       ag.salesOwnerUser?.fullName ||
       'Unassigned';
     if (!clerks.has(clerkId)) {
@@ -184,20 +187,13 @@ async function computeData({ tenantId, from, to }, deps = {}) {
     const tb = teamByMonth.get(mk);
     const cb = clerks.get(clerkId).byMonth.get(mk);
 
-    const inc = (target, days, paid, comm) => {
-      target.rentals += 1;
-      target.totalDays += days;
-      target.paidAtCounter += paid;
-      target.commissions += comm;
-    };
     const days = daysBetween(ag.pickupAt, ag.returnAt);
     const paid = (ag.payments || []).reduce((acc, p) => acc + num(p.amount), 0);
-    // Sum every commission on the agreement (typically just one). They all
-    // belong to this clerk now because we keyed the bucket by employeeUserId.
-    const comm = (ag.commissions || [])
-      .reduce((acc, c) => acc + num(c.commissionAmount), 0);
-    inc(tb, days, paid, comm);
-    inc(cb, days, paid, comm);
+    // Per-rental aggregate updates. Commission accrues inside the service
+    // loop below (attach × commPerSale), so we add 0 here and let the
+    // service-attach branch increment it.
+    tb.rentals += 1; tb.totalDays += days; tb.paidAtCounter += paid;
+    cb.rentals += 1; cb.totalDays += days; cb.paidAtCounter += paid;
 
     for (const service of SERVICE_CATALOG) {
       let matched = false;
@@ -212,8 +208,10 @@ async function computeData({ tenantId, from, to }, deps = {}) {
       if (matched) {
         tb.serviceCounts[service.slug] += 1;
         tb.serviceDollars[service.slug] += dollarsThisAg;
+        tb.commissions += num(service.commPerSale);
         cb.serviceCounts[service.slug] += 1;
         cb.serviceDollars[service.slug] += dollarsThisAg;
+        cb.commissions += num(service.commPerSale);
       }
     }
   }
