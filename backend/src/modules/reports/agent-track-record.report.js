@@ -14,7 +14,7 @@
  */
 
 import { registerReport } from './reports-v2.routes.js';
-import { DEFAULT_TENANT_TIMEZONE } from '../../lib/date-utils.js';
+import { DEFAULT_TENANT_TIMEZONE, startOfDayInTz, addDaysInTz } from '../../lib/date-utils.js';
 import { resolveTenantTimeZone } from '../../lib/tenant-tz.js';
 import { SERVICE_CATALOG, matchesService } from '../../lib/commission-catalog.js';
 
@@ -93,16 +93,21 @@ async function computeData({ tenantId, from, to }, deps = {}) {
 
   const tenantTz = deps.tenantTz || (await resolveTenantTimeZone(tenantId));
 
-  // Default: last 5 calendar months ending today
-  const toDate = to ? new Date(to) : new Date();
-  let fromDate;
-  if (from) {
-    fromDate = new Date(from);
-  } else {
-    fromDate = new Date(toDate.getFullYear(), toDate.getMonth() - 4, 1);
-  }
+  // tz-aware date parsing. Matches commission.report.js + commission-sales-
+  // performance.report.js so all three reports see the same set of rentals
+  // in a given window. Raw `new Date('2026-05-26')` parses as UTC midnight
+  // = May 25 20:00 in PR, which truncates late-night PR checkouts; using
+  // startOfDayInTz fixes that.
+  const now = (deps && deps.now) || new Date();
+  const toDateRaw = to ? startOfDayInTz(to, tenantTz) : startOfDayInTz(now, tenantTz);
+  const fromDate = from
+    ? startOfDayInTz(from, tenantTz)
+    : new Date(toDateRaw.getFullYear(), toDateRaw.getMonth() - 4, 1);
+  // Upper bound exclusive at end-of-day on `to` so late-night checkouts are
+  // included.
+  const toDateExclusive = addDaysInTz(toDateRaw, 1);
 
-  const months = rangeMonths(fromDate, toDate, tenantTz);
+  const months = rangeMonths(fromDate, toDateRaw, tenantTz);
 
   // Filter by CHECKOUT inspection date — same rule as the other commission
   // reports. Commission is earned at car release, so the month-over-month
@@ -113,7 +118,7 @@ async function computeData({ tenantId, from, to }, deps = {}) {
       inspections: {
         some: {
           phase: 'CHECKOUT',
-          capturedAt: { gte: fromDate, lte: toDate },
+          capturedAt: { gte: fromDate, lt: toDateExclusive },
           actorUserId: { not: null },
         },
       },
@@ -208,6 +213,8 @@ async function computeData({ tenantId, from, to }, deps = {}) {
       let dollarsThisAg = 0;
       for (const ch of (ag.charges || [])) {
         if (ch.selected === false) continue;
+        // Skip $0 (courtesy / waived) charges — match sync's commissionChargeRows.
+        if (!(num(ch.total) > 0)) continue;
         if (matchesService(ch, service)) {
           matched = true;
           dollarsThisAg += num(ch.total);
@@ -311,7 +318,7 @@ async function computeData({ tenantId, from, to }, deps = {}) {
   }));
 
   return {
-    range: { from: fromDate.toISOString(), to: toDate.toISOString() },
+    range: { from: fromDate.toISOString(), to: toDateRaw.toISOString() },
     tenantTimeZone: tenantTz,
     months,
     monthLabels: months.map(monthLabel),

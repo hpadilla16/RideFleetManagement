@@ -40,6 +40,8 @@
 
 import { registerReport } from './reports-v2.routes.js';
 import { SERVICE_CATALOG, matchesService } from '../../lib/commission-catalog.js';
+import { startOfDayInTz, addDaysInTz } from '../../lib/date-utils.js';
+import { resolveTenantTimeZone } from '../../lib/tenant-tz.js';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -71,8 +73,21 @@ async function resolveDefaultPrisma() {
 async function computeData({ tenantId, from, to }, deps = {}) {
   const prisma = deps.prisma || (await resolveDefaultPrisma());
   if (!tenantId) throw new Error('tenantId required');
-  const fromDate = from ? new Date(from) : new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
-  const toDate = to ? new Date(to) : new Date();
+
+  // tz-aware date parsing — matches commission.report.js (Payouts) so the
+  // two reports agree on which agreements fall into the window. Without
+  // this, raw `new Date('2026-05-01')` parses as UTC midnight (= May 1
+  // 04:00 in PR / AST), losing the late-night PR checkouts at one end and
+  // gaining nothing at the other. tz-aware startOfDay anchors both bounds
+  // in tenant-local midnight.
+  const tenantTz = deps.tenantTz || (await resolveTenantTimeZone(tenantId));
+  const now = (deps && deps.now) || new Date();
+  const fromDate = from ? startOfDayInTz(from, tenantTz) : addDaysInTz(startOfDayInTz(now, tenantTz), -29);
+  // Make `to` an exclusive upper bound at the end of the requested day:
+  // toDate = startOfDay(to) + 1 day. Lets us use `lt: toDate` in the
+  // inspections.some filter without missing late-night checkouts on the
+  // last day of the window.
+  const toDate = to ? addDaysInTz(startOfDayInTz(to, tenantTz), 1) : addDaysInTz(startOfDayInTz(now, tenantTz), 1);
 
   // Filter by **CHECKOUT inspection date**. Commission is earned when the
   // car is released, not when the agreement was finalized or closed. The
@@ -85,7 +100,7 @@ async function computeData({ tenantId, from, to }, deps = {}) {
       inspections: {
         some: {
           phase: 'CHECKOUT',
-          capturedAt: { gte: fromDate, lte: toDate },
+          capturedAt: { gte: fromDate, lt: toDate },
           actorUserId: { not: null },
         },
       },
@@ -169,11 +184,17 @@ async function computeData({ tenantId, from, to }, deps = {}) {
     // Service attach + commission roll-up. Each attached service contributes
     // commPerSale to the clerk's commission, independent of CommissionPlan
     // setup. Mirrors the rates Hector used in the April 2026 hand-built PDF.
+    //
+    // $0 charges (courtesy / comp / waived) DON'T count for commission or
+    // attach %. Matches sync's commissionChargeRows filter so Sales
+    // Performance and Commission Payouts agree on the same set of revenue-
+    // generating sales.
     for (const service of SERVICE_CATALOG) {
       let matched = false;
       let serviceDollarsThisAg = 0;
       for (const ch of (ag.charges || [])) {
         if (ch.selected === false) continue;
+        if (!(num(ch.total) > 0)) continue;
         if (matchesService(ch, service)) {
           matched = true;
           serviceDollarsThisAg += num(ch.total);
