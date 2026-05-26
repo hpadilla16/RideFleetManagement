@@ -28,6 +28,7 @@ import { api } from '../../../lib/client';
 import { ReportPageLayout } from '../../../components/reports/ReportPageLayout';
 import { ReservationListDrawer } from '../../../components/reports/ReservationListDrawer';
 import { StackedDayBarChart } from '../../../components/reports/charts/StackedDayBarChart';
+import { DEFAULT_TENANT_TIMEZONE } from '../../../lib/tenant-time';
 
 const STATUS_LABEL = { OPEN: 'Open', OUT: 'Out', RETURNED: 'Returned', LOST: 'Lost' };
 const STATUS_COLOR = {
@@ -37,12 +38,28 @@ const STATUS_COLOR = {
   LOST:     '#888780', // gray
 };
 
-function isoDay(d) { return d.toISOString().slice(0, 10); }
+// "YYYY-MM-DD" in tenant TZ. The earlier implementation used
+// d.toISOString().slice(0, 10) which leaks the UTC date — for an 11 PM AST
+// instant the UTC date is the next day, so the default range would silently
+// include / exclude one calendar day at the boundary.
+function isoDay(d, tz = DEFAULT_TENANT_TIMEZONE) {
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: tz,
+    year: 'numeric', month: '2-digit', day: '2-digit'
+  }).formatToParts(d).reduce((acc, p) => {
+    if (p.type !== 'literal') acc[p.type] = p.value;
+    return acc;
+  }, {});
+  return `${parts.year}-${parts.month}-${parts.day}`;
+}
 
 function defaultRange() {
-  const t = new Date();
-  const from = new Date(t.getFullYear(), t.getMonth(), 1);
-  return { from: isoDay(from), to: isoDay(t) };
+  const now = new Date();
+  const todayIso = isoDay(now); // "YYYY-MM-DD" in tenant TZ
+  // First of the same month in tenant TZ — derived from the formatted day
+  // rather than browser-local getMonth so the boundary matches the backend.
+  const firstOfMonth = `${todayIso.slice(0, 7)}-01`;
+  return { from: firstOfMonth, to: todayIso };
 }
 
 function buildDayEndpoint(dayIso, locationId) {

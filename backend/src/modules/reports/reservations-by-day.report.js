@@ -23,6 +23,18 @@
  */
 
 import { registerReport } from './reports-v2.routes.js';
+import { parseDateTimeInTz, DEFAULT_TENANT_TIMEZONE } from '../../lib/date-utils.js';
+import { settingsService } from '../settings/settings.service.js';
+
+async function resolveTenantTimeZone(tenantId) {
+  if (!tenantId) return DEFAULT_TENANT_TIMEZONE;
+  try {
+    const options = await settingsService.getReservationOptions({ tenantId });
+    return String(options?.tenantTimeZone || DEFAULT_TENANT_TIMEZONE);
+  } catch {
+    return DEFAULT_TENANT_TIMEZONE;
+  }
+}
 
 const STATUS_BUCKETS = {
   OPEN:     ['NEW', 'CONFIRMED', 'PENDING_FRANCHISE_IMPORT'],
@@ -46,36 +58,78 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 const MAX_DAYS = 92;
 
 // ---------------------------------------------------------------------------
-// Date helpers (parallel to availability-forecast for consistency)
+// Date helpers — tenant-TZ aware.
+//
+// The earlier version of this report used server-local helpers
+// (setHours(0,0,0,0), toISOString().slice(0,10), getDay()) which under the
+// UTC-running backend container assigned every reservation to its UTC day,
+// not the tenant's local day. A pickup at 11 PM AST May 26 stored at
+// 03:00 UTC May 27 would be bucketed into May 27 even though staff
+// scheduled it for May 26.
+//
+// All the helpers below take a `tz` argument and use Intl to read the
+// wall-clock components in that zone. PR has no DST, so adding 24h is
+// equivalent to "next day"; for tenants in DST zones the +24h jump near
+// the DST boundary can land on a sibling day — acceptable approximation
+// for now, refactor when we onboard a DST tenant.
 // ---------------------------------------------------------------------------
 
-function startOfDay(d) {
-  const x = new Date(d);
-  x.setHours(0, 0, 0, 0);
-  return x;
+function tzParts(date, tz) {
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: tz,
+    year: 'numeric', month: '2-digit', day: '2-digit'
+  }).formatToParts(date).reduce((acc, p) => {
+    if (p.type !== 'literal') acc[p.type] = p.value;
+    return acc;
+  }, {});
 }
 
-function startOfMonth(d) {
-  return new Date(d.getFullYear(), d.getMonth(), 1, 0, 0, 0, 0);
+// "Midnight of <value> in tz" as a UTC instant. Accepts a YYYY-MM-DD
+// string, a full ISO string, or a Date object.
+function startOfDayInTz(value, tz) {
+  if (value == null) return null;
+  if (typeof value === 'string') {
+    // Strip any time portion — we want midnight of the date.
+    const dayOnly = value.length >= 10 ? value.slice(0, 10) : value;
+    return parseDateTimeInTz(dayOnly, tz);
+  }
+  if (value instanceof Date) {
+    const parts = tzParts(value, tz);
+    return parseDateTimeInTz(`${parts.year}-${parts.month}-${parts.day}`, tz);
+  }
+  return null;
 }
 
-function addDays(d, n) {
-  const x = new Date(d);
-  x.setDate(x.getDate() + n);
-  return x;
+function startOfMonthInTz(date, tz) {
+  const parts = tzParts(date, tz);
+  return parseDateTimeInTz(`${parts.year}-${parts.month}-01`, tz);
 }
 
-function daysBetween(from, to) {
-  return Math.max(1, Math.round((startOfDay(to) - startOfDay(from)) / DAY_MS) + 1);
+function addDaysInTz(date, n) {
+  // 24h-arithmetic — correct for tenants without DST. PR is UTC-4 year-round.
+  return new Date(date.getTime() + n * DAY_MS);
 }
 
-function isoDay(d) { return d.toISOString().slice(0, 10); }
-
-const WD = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
-const MO = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-function dayLabel(d) {
-  return `${WD[d.getDay()]} ${MO[d.getMonth()]} ${d.getDate()}`;
+function isoDayInTz(date, tz) {
+  const parts = tzParts(date, tz);
+  return `${parts.year}-${parts.month}-${parts.day}`;
 }
+
+function dayLabelInTz(date, tz) {
+  // "Wed May 26" — comma stripped from Intl's default formatting.
+  return new Intl.DateTimeFormat('en-US', {
+    timeZone: tz,
+    weekday: 'short', month: 'short', day: 'numeric'
+  }).format(date).replace(',', '');
+}
+
+// Back-compat exports for the test file (use DEFAULT_TENANT_TIMEZONE so
+// behavior matches what the production tenant sees).
+function startOfDay(d) { return startOfDayInTz(d, DEFAULT_TENANT_TIMEZONE); }
+function startOfMonth(d) { return startOfMonthInTz(d, DEFAULT_TENANT_TIMEZONE); }
+function addDays(d, n) { return addDaysInTz(d, n); }
+function isoDay(d) { return isoDayInTz(d, DEFAULT_TENANT_TIMEZONE); }
+function dayLabel(d) { return dayLabelInTz(d, DEFAULT_TENANT_TIMEZONE); }
 
 // ---------------------------------------------------------------------------
 // Prisma resolution
@@ -97,23 +151,26 @@ async function computeData({ tenantId, from, to, query }, deps = {}) {
   const prisma = deps.prisma || (await resolveDefaultPrisma());
   if (!tenantId) throw new Error('tenantId required');
 
+  const tz = deps.tenantTz || (await resolveTenantTimeZone(tenantId));
   const locationId = (query && query.locationId) || null;
 
-  // Default window: this month (1st → today)
+  // Default window: this month (1st → today), anchored in tenant TZ so
+  // "May 2026" runs from May 1 00:00 AST → today AST midnight rather than
+  // the UTC equivalents.
   const now = new Date();
-  const fromDate = from ? startOfDay(new Date(from)) : startOfMonth(now);
-  const toDate = to ? startOfDay(new Date(to)) : startOfDay(now);
-  const numDays = daysBetween(fromDate, toDate);
+  const fromDate = from ? startOfDayInTz(from, tz) : startOfMonthInTz(now, tz);
+  const toDate = to ? startOfDayInTz(to, tz) : startOfDayInTz(now, tz);
+  const numDays = Math.max(1, Math.round((toDate - fromDate) / DAY_MS) + 1);
   const safeNumDays = Math.min(numDays, MAX_DAYS);
-  const windowEnd = addDays(fromDate, safeNumDays); // exclusive end
+  const windowEnd = addDaysInTz(fromDate, safeNumDays); // exclusive end
 
-  // Build day skeleton
+  // Build day skeleton — each cell labelled in tenant TZ.
   const days = [];
   for (let i = 0; i < safeNumDays; i++) {
-    const d = addDays(fromDate, i);
+    const d = addDaysInTz(fromDate, i);
     days.push({
-      iso: isoDay(d),
-      label: dayLabel(d),
+      iso: isoDayInTz(d, tz),
+      label: dayLabelInTz(d, tz),
       counts: { OPEN: 0, OUT: 0, RETURNED: 0, LOST: 0 },
       total: 0,
     });
@@ -132,10 +189,11 @@ async function computeData({ tenantId, from, to, query }, deps = {}) {
     select: { id: true, status: true, pickupAt: true },
   });
 
-  // Bucket each reservation into a day
+  // Bucket each reservation into the day its pickup wall-clock lands on
+  // *in tenant TZ*. A 11 PM AST pickup whose storage UTC is the next
+  // calendar day still maps to its AST day here.
   for (const r of reservations) {
-    const pickup = startOfDay(new Date(r.pickupAt));
-    const iso = isoDay(pickup);
+    const iso = isoDayInTz(new Date(r.pickupAt), tz);
     const idx = dayIdxByIso.get(iso);
     if (idx === undefined) continue;
     const bucket = STATUS_TO_BUCKET[r.status];
@@ -163,7 +221,7 @@ async function computeData({ tenantId, from, to, query }, deps = {}) {
   const cancelRate    = totals.total > 0 ? totals.LOST / totals.total : 0;
 
   return {
-    range: { from: fromDate.toISOString(), to: addDays(windowEnd, -1).toISOString() },
+    range: { from: fromDate.toISOString(), to: addDaysInTz(windowEnd, -1).toISOString() },
     days,
     totals,
     peak: { iso: peak.iso, label: peak.label, total: peak.total },
@@ -171,6 +229,7 @@ async function computeData({ tenantId, from, to, query }, deps = {}) {
     completedRate,
     cancelRate,
     bucketOrder: BUCKET_ORDER,
+    tenantTimeZone: tz,
     filters: { locationId },
     truncated: numDays > MAX_DAYS,
   };
@@ -182,15 +241,18 @@ async function computeData({ tenantId, from, to, query }, deps = {}) {
 
 async function dayDrillDownHandler(req, res, { tenantId }) {
   const prisma = await resolveDefaultPrisma();
+  const tz = await resolveTenantTimeZone(tenantId);
   const dayIso = (req.query?.day || '').toString();
   const locationId = req.query?.locationId ? String(req.query.locationId) : null;
 
   if (!dayIso) return res.status(400).json({ error: 'day query param required' });
-  const day = startOfDay(new Date(dayIso));
-  if (Number.isNaN(day.getTime())) {
+  // Interpret the requested day in tenant TZ so the [day, dayEnd) window
+  // matches the bucketing in computeData.
+  const day = startOfDayInTz(dayIso, tz);
+  if (!day || Number.isNaN(day.getTime())) {
     return res.status(400).json({ error: 'day must be an ISO date (YYYY-MM-DD)' });
   }
-  const dayEnd = addDays(day, 1);
+  const dayEnd = addDaysInTz(day, 1);
 
   const where = {
     tenantId,
@@ -215,8 +277,9 @@ async function dayDrillDownHandler(req, res, { tenantId }) {
   });
 
   return res.json({
-    day: { iso: isoDay(day), label: dayLabel(day) },
+    day: { iso: isoDayInTz(day, tz), label: dayLabelInTz(day, tz) },
     locationId,
+    tenantTimeZone: tz,
     reservations: reservations.map((r) => ({
       id: r.id,
       reservationNumber: r.reservationNumber,
