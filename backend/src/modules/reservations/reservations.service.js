@@ -4,7 +4,24 @@ import { maybeSendReviewRequestEmail } from './review-email.service.js';
 import { hostReviewsService } from '../host-reviews/host-reviews.service.js';
 import { settingsService } from '../settings/settings.service.js';
 import { parseLocationConfig } from '../../lib/location-config.js';
+import { parseDateTimeInTz, DEFAULT_TENANT_TIMEZONE } from '../../lib/date-utils.js';
 import { readFreshCounters, refreshCountersAsync } from './reservation-summary-counters.service.js';
+
+/**
+ * Resolve the tenant's configured wall-clock timezone (default
+ * America/Puerto_Rico). Used so that "naive" datetime inputs coming from
+ * <input type="datetime-local"> get interpreted as the agent's local time
+ * rather than UTC. The backend container runs at TZ=UTC, so without this
+ * helper "2026-05-26T11:19" silently stores as 11:19 UTC = 07:19 AST.
+ */
+async function resolveTenantTimeZone(scope = {}) {
+  try {
+    const options = await settingsService.getReservationOptions(scope);
+    return String(options?.tenantTimeZone || DEFAULT_TENANT_TIMEZONE);
+  } catch {
+    return DEFAULT_TENANT_TIMEZONE;
+  }
+}
 
 function ageOnDate(dob, onDate) {
   if (!dob || !onDate) return null;
@@ -1223,6 +1240,15 @@ export const reservationsService = {
   },
 
   async create(data, scope = {}) {
+    // Normalize incoming datetime inputs into Date objects, interpreting any
+    // naive (TZ-less) string as wall-clock time in the tenant's configured
+    // timezone. This protects the staff create form, which submits the raw
+    // datetime-local string without a Z suffix; without normalization the
+    // backend's UTC container clock would store the value 4h ahead of intent.
+    const tenantTz = await resolveTenantTimeZone(scope);
+    if (data.pickupAt) data = { ...data, pickupAt: parseDateTimeInTz(data.pickupAt, tenantTz) };
+    if (data.returnAt) data = { ...data, returnAt: parseDateTimeInTz(data.returnAt, tenantTz) };
+
     const customer = await prisma.customer.findFirst({
       where: { id: data.customerId, ...(scope?.tenantId ? { tenantId: scope.tenantId } : {}) },
       select: { doNotRent: true, doNotRentReason: true }
@@ -1345,6 +1371,16 @@ export const reservationsService = {
   },
 
   async update(id, patch, scope = {}, actorUserId = null) {
+    // See note in `create`: interpret naive datetime strings as tenant TZ
+    // wall-clock so edits from the staff form land on the correct UTC instant.
+    const tenantTz = await resolveTenantTimeZone(scope);
+    if (patch.pickupAt !== undefined && patch.pickupAt !== null) {
+      patch = { ...patch, pickupAt: parseDateTimeInTz(patch.pickupAt, tenantTz) };
+    }
+    if (patch.returnAt !== undefined && patch.returnAt !== null) {
+      patch = { ...patch, returnAt: parseDateTimeInTz(patch.returnAt, tenantTz) };
+    }
+
     const current = await prisma.reservation.findFirst({ where: { id, ...(scope?.tenantId ? { tenantId: scope.tenantId } : {}) } });
     if (!current) throw new Error('Reservation not found');
 
