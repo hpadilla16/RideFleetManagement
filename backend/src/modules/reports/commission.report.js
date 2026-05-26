@@ -20,6 +20,14 @@
  */
 
 import { registerReport } from './reports-v2.routes.js';
+import {
+  DEFAULT_TENANT_TIMEZONE,
+  startOfDayInTz,
+  startOfMonthInTz,
+  addDaysInTz,
+  isoDayInTz,
+  dayLabelInTz,
+} from '../../lib/date-utils.js';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const MAX_DAYS = 365;
@@ -33,31 +41,16 @@ const NON_VOID_STATUSES = STATUSES.filter((s) => s !== 'VOID');
 function num(v) { const n = Number(v); return Number.isFinite(n) ? n : 0; }
 function moneyRound(n) { return Math.round(n * 100) / 100; }
 
-function startOfDay(d) {
-  const x = new Date(d);
-  x.setHours(0, 0, 0, 0);
-  return x;
-}
-
-function startOfMonth(d) {
-  return new Date(d.getFullYear(), d.getMonth(), 1, 0, 0, 0, 0);
-}
-
-function addDays(d, n) {
-  const x = new Date(d);
-  x.setDate(x.getDate() + n);
-  return x;
-}
+// 2026-05-26: TZ-aware date helpers (see sales.report.js for the rationale).
+function startOfDay(d)   { return startOfDayInTz(d, DEFAULT_TENANT_TIMEZONE); }
+function startOfMonth(d) { return startOfMonthInTz(d, DEFAULT_TENANT_TIMEZONE); }
+function addDays(d, n)   { return addDaysInTz(d, n); }
+function isoDay(d)       { return isoDayInTz(d, DEFAULT_TENANT_TIMEZONE); }
+function dayLabel(d)     { return dayLabelInTz(d, DEFAULT_TENANT_TIMEZONE); }
 
 function daysBetween(from, to) {
   return Math.max(1, Math.round((startOfDay(to) - startOfDay(from)) / DAY_MS) + 1);
 }
-
-function isoDay(d) { return d.toISOString().slice(0, 10); }
-
-const WD = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
-const MO = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-function dayLabel(d) { return `${WD[d.getDay()]} ${MO[d.getMonth()]} ${d.getDate()}`; }
 
 // ---------------------------------------------------------------------------
 // Prisma
@@ -195,8 +188,9 @@ async function computeData({ tenantId, from, to, query }, deps = {}) {
   const status = query?.status || 'ALL';
 
   const now = (deps && deps.now) || new Date();
-  const fromDate = from ? startOfDay(new Date(from)) : startOfMonth(now);
-  const toDate   = to   ? startOfDay(new Date(to))   : startOfDay(now);
+  // Pass query strings directly so startOfDay reads them as tenant-TZ dates.
+  const fromDate = from ? startOfDay(from) : startOfMonth(now);
+  const toDate   = to   ? startOfDay(to)   : startOfDay(now);
   const numDays = daysBetween(fromDate, toDate);
   const safeNumDays = Math.min(numDays, MAX_DAYS);
   const windowEnd = addDays(fromDate, safeNumDays);

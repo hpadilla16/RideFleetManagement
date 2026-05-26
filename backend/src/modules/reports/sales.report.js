@@ -25,6 +25,14 @@
  */
 
 import { registerReport } from './reports-v2.routes.js';
+import {
+  DEFAULT_TENANT_TIMEZONE,
+  startOfDayInTz,
+  startOfMonthInTz,
+  addDaysInTz,
+  isoDayInTz,
+  dayLabelInTz,
+} from '../../lib/date-utils.js';
 
 const TAX_CHARGE_TYPE = 'TAX';
 const DEFAULT_TOP_N = 10;
@@ -34,37 +42,25 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 
 // ---------------------------------------------------------------------------
 // Helpers
+//
+// 2026-05-26: helpers were server-local (setHours / toISOString().slice /
+// getMonth) so they bucketed AST-late-night events into the next UTC day.
+// Delegated to the tz-aware versions in lib/date-utils.js, pinned to
+// DEFAULT_TENANT_TIMEZONE since the legacy export shape (used by tests via
+// `_salesInternal`) doesn't take a tz argument.
 // ---------------------------------------------------------------------------
 
 function num(v) { const n = Number(v); return Number.isFinite(n) ? n : 0; }
 function moneyRound(n) { return Math.round(n * 100) / 100; }
 
-function startOfDay(d) {
-  const x = new Date(d);
-  x.setHours(0, 0, 0, 0);
-  return x;
-}
-
-function startOfMonth(d) {
-  return new Date(d.getFullYear(), d.getMonth(), 1, 0, 0, 0, 0);
-}
-
-function addDays(d, n) {
-  const x = new Date(d);
-  x.setDate(x.getDate() + n);
-  return x;
-}
+function startOfDay(d)   { return startOfDayInTz(d, DEFAULT_TENANT_TIMEZONE); }
+function startOfMonth(d) { return startOfMonthInTz(d, DEFAULT_TENANT_TIMEZONE); }
+function addDays(d, n)   { return addDaysInTz(d, n); }
+function isoDay(d)       { return isoDayInTz(d, DEFAULT_TENANT_TIMEZONE); }
+function dayLabel(d)     { return dayLabelInTz(d, DEFAULT_TENANT_TIMEZONE); }
 
 function daysBetween(from, to) {
   return Math.max(1, Math.round((startOfDay(to) - startOfDay(from)) / DAY_MS) + 1);
-}
-
-function isoDay(d) { return d.toISOString().slice(0, 10); }
-
-const WD = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
-const MO = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-function dayLabel(d) {
-  return `${WD[d.getDay()]} ${MO[d.getMonth()]} ${d.getDate()}`;
 }
 
 // ---------------------------------------------------------------------------
@@ -208,8 +204,11 @@ async function computeData({ tenantId, from, to, query }, deps = {}) {
   const topN = Math.max(1, Math.min(MAX_TOP_N, Number(query?.topN) || DEFAULT_TOP_N));
 
   const now = new Date();
-  const fromDate = from ? startOfDay(new Date(from)) : startOfMonth(now);
-  const toDate = to ? startOfDay(new Date(to)) : startOfDay(now);
+  // Pass the raw query string into startOfDay so it's interpreted as
+  // "YYYY-MM-DD in tenant TZ" — wrapping in new Date(from) first parses
+  // it as UTC midnight and we'd lose the day to the PREVIOUS PR-TZ day.
+  const fromDate = from ? startOfDay(from) : startOfMonth(now);
+  const toDate = to ? startOfDay(to) : startOfDay(now);
   const numDays = daysBetween(fromDate, toDate);
   const safeNumDays = Math.min(numDays, MAX_DAYS);
   const windowEnd = addDays(fromDate, safeNumDays);

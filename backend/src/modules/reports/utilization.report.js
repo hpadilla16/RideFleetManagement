@@ -25,6 +25,15 @@
  */
 
 import { registerReport } from './reports-v2.routes.js';
+import {
+  DEFAULT_TENANT_TIMEZONE,
+  startOfDayInTz,
+  startOfMonthInTz,
+  addDaysInTz,
+  addMonthsInTz,
+  isoDayInTz,
+  dayLabelInTz,
+} from '../../lib/date-utils.js';
 import { cache } from '../../lib/cache.js';
 import { tenantKey } from '../../lib/cache/tenantKey.js';
 
@@ -44,46 +53,39 @@ const CACHE_TTL_MS = 5 * 60 * 1000;
 
 function num(v) { const n = Number(v); return Number.isFinite(n) ? n : 0; }
 
-function startOfDay(d) {
-  const x = new Date(d);
-  x.setHours(0, 0, 0, 0);
-  return x;
-}
+// 2026-05-26: tz-aware date helpers (see sales.report.js for rationale).
+function startOfDay(d)   { return startOfDayInTz(d, DEFAULT_TENANT_TIMEZONE); }
+function startOfMonth(d) { return startOfMonthInTz(d, DEFAULT_TENANT_TIMEZONE); }
+function addDays(d, n)   { return addDaysInTz(d, n); }
+function addMonths(d, n) { return addMonthsInTz(d, n, DEFAULT_TENANT_TIMEZONE); }
+function isoDay(d)       { return isoDayInTz(d, DEFAULT_TENANT_TIMEZONE); }
+function dayLabel(d)     { return dayLabelInTz(d, DEFAULT_TENANT_TIMEZONE); }
 
-function startOfMonth(d) {
-  return new Date(d.getFullYear(), d.getMonth(), 1, 0, 0, 0, 0);
-}
-
+// Week-start helper — anchored to PR Monday midnight. JS getUTCDay() reads
+// the day of week from the UTC components of the Date; we first floor to PR
+// midnight, then subtract enough UTC days to land on Monday. PR has no DST so
+// 24h math is correct.
 function startOfIsoWeek(d) {
-  // Week starts on Monday. Returns local-midnight Monday of that week.
-  const x = startOfDay(d);
-  const day = x.getDay(); // 0 = Sun, 1 = Mon, ...
-  const offset = (day + 6) % 7;
-  x.setDate(x.getDate() - offset);
-  return x;
-}
-
-function addDays(d, n) {
-  const x = new Date(d);
-  x.setDate(x.getDate() + n);
-  return x;
-}
-
-function addMonths(d, n) {
-  return new Date(d.getFullYear(), d.getMonth() + n, 1, 0, 0, 0, 0);
+  const dayStart = startOfDay(d);
+  // The PR-midnight Date carries the UTC weekday (e.g. PR Monday midnight =
+  // UTC 04:00 same Monday). Subtract offset days to land on Monday.
+  const wd = dayStart.getUTCDay(); // 0=Sun..6=Sat
+  const offset = (wd + 6) % 7;     // 0 if Monday
+  return addDays(dayStart, -offset);
 }
 
 function daysBetween(from, to) {
   return Math.max(1, Math.round((startOfDay(to) - startOfDay(from)) / DAY_MS) + 1);
 }
 
-function isoDay(d) { return d.toISOString().slice(0, 10); }
-
-const WD = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
-const MO = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-function dayLabel(d)   { return `${WD[d.getDay()]} ${MO[d.getMonth()]} ${d.getDate()}`; }
-function weekLabel(d)  { return `Week of ${MO[d.getMonth()]} ${d.getDate()}`; }
-function monthLabel(d) { return `${MO[d.getMonth()]} ${d.getFullYear()}`; }
+function weekLabel(d)  {
+  const parts = new Intl.DateTimeFormat('en-US', { timeZone: DEFAULT_TENANT_TIMEZONE, month: 'short', day: 'numeric' }).format(d);
+  return `Week of ${parts.replace(',', '')}`;
+}
+function monthLabel(d) {
+  const parts = new Intl.DateTimeFormat('en-US', { timeZone: DEFAULT_TENANT_TIMEZONE, month: 'short', year: 'numeric' }).format(d);
+  return parts.replace(',', '');
+}
 
 // ---------------------------------------------------------------------------
 // Granularity
@@ -209,8 +211,9 @@ async function computeDataInner({ tenantId, from, to, query }, deps = {}) {
 
   const now = (deps && deps.now) || new Date();
   // Default range: last 30 days ending today
-  const fromDate = from ? startOfDay(new Date(from)) : addDays(startOfDay(now), -29);
-  const toDate   = to   ? startOfDay(new Date(to))   : startOfDay(now);
+  // Raw query strings → tenant-TZ midnight (don't wrap in new Date first).
+  const fromDate = from ? startOfDay(from) : addDays(startOfDay(now), -29);
+  const toDate   = to   ? startOfDay(to)   : startOfDay(now);
   const rangeDays = daysBetween(fromDate, toDate);
   const safeRangeDays = Math.min(rangeDays, MAX_DAYS);
   const truncated = rangeDays > MAX_DAYS;

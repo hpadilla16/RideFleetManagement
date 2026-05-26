@@ -18,6 +18,13 @@
  */
 
 import { registerReport } from './reports-v2.routes.js';
+import {
+  DEFAULT_TENANT_TIMEZONE,
+  startOfDayInTz,
+  addDaysInTz,
+  isoDayInTz,
+  dayLabelInTz,
+} from '../../lib/date-utils.js';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const MAX_DAYS = 365;
@@ -29,27 +36,15 @@ const MAX_DAYS = 365;
 function num(v) { const n = Number(v); return Number.isFinite(n) ? n : 0; }
 function moneyRound(n) { return Math.round(n * 100) / 100; }
 
-function startOfDay(d) {
-  const x = new Date(d);
-  x.setHours(0, 0, 0, 0);
-  return x;
-}
-
-function addDays(d, n) {
-  const x = new Date(d);
-  x.setDate(x.getDate() + n);
-  return x;
-}
+// 2026-05-26: tz-aware date helpers (see sales.report.js for rationale).
+function startOfDay(d) { return startOfDayInTz(d, DEFAULT_TENANT_TIMEZONE); }
+function addDays(d, n) { return addDaysInTz(d, n); }
+function isoDay(d)     { return isoDayInTz(d, DEFAULT_TENANT_TIMEZONE); }
+function dayLabel(d)   { return dayLabelInTz(d, DEFAULT_TENANT_TIMEZONE); }
 
 function daysBetween(from, to) {
   return Math.max(1, Math.round((startOfDay(to) - startOfDay(from)) / DAY_MS) + 1);
 }
-
-function isoDay(d) { return d.toISOString().slice(0, 10); }
-
-const WD = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
-const MO = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-function dayLabel(d) { return `${WD[d.getDay()]} ${MO[d.getMonth()]} ${d.getDate()}`; }
 
 // ---------------------------------------------------------------------------
 // Prisma
@@ -167,8 +162,9 @@ async function computeData({ tenantId, from, to, query }, deps = {}) {
   const locationId = (query && query.locationId) || null;
 
   const now = (deps && deps.now) || new Date();
-  const fromDate = from ? startOfDay(new Date(from)) : addDays(startOfDay(now), -29);
-  const toDate   = to   ? startOfDay(new Date(to))   : startOfDay(now);
+  // Raw query strings → tenant-TZ midnight (don't wrap in new Date first).
+  const fromDate = from ? startOfDay(from) : addDays(startOfDay(now), -29);
+  const toDate   = to   ? startOfDay(to)   : startOfDay(now);
   const numDays = daysBetween(fromDate, toDate);
   const safeNumDays = Math.min(numDays, MAX_DAYS);
   const windowEnd = addDays(fromDate, safeNumDays);

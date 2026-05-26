@@ -14,6 +14,7 @@
  */
 
 import { registerReport } from './reports-v2.routes.js';
+import { DEFAULT_TENANT_TIMEZONE } from '../../lib/date-utils.js';
 
 const SERVICE_CATALOG = [
   { slug: 'TOLLS',             label: 'Tolls',             codes: ['TOLLS', 'TOLL'],                  namePatterns: [/tolls?/i],             commPerSale: 1, benchmark: '85%+' },
@@ -38,11 +39,20 @@ function daysBetween(a, b) {
   return Math.max(0, Math.round((new Date(b) - new Date(a)) / (24 * 60 * 60 * 1000)));
 }
 
+// 2026-05-26: tz-aware month bucketing. Server-local getMonth() / new
+// Date(y, m, 1) shifted late-evening events into the next UTC month, so a
+// PR Jan 31 11 PM rental was getting bucketed under February. Now anchored
+// in tenant TZ via Intl.
 function monthKey(d) {
-  const dt = new Date(d);
-  const y = dt.getFullYear();
-  const m = String(dt.getMonth() + 1).padStart(2, '0');
-  return `${y}-${m}`;
+  const dt = d instanceof Date ? d : new Date(d);
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: DEFAULT_TENANT_TIMEZONE,
+    year: 'numeric', month: '2-digit'
+  }).formatToParts(dt).reduce((acc, p) => {
+    if (p.type !== 'literal') acc[p.type] = p.value;
+    return acc;
+  }, {});
+  return `${parts.year}-${parts.month}`;
 }
 
 function monthLabel(key) {
@@ -53,13 +63,19 @@ function monthLabel(key) {
 
 function rangeMonths(from, to) {
   const out = [];
-  const start = new Date(from);
-  const end = new Date(to);
-  let cur = new Date(start.getFullYear(), start.getMonth(), 1);
-  const stop = new Date(end.getFullYear(), end.getMonth(), 1);
-  while (cur <= stop) {
-    out.push(monthKey(cur));
-    cur = new Date(cur.getFullYear(), cur.getMonth() + 1, 1);
+  // Walk monthKey strings rather than Date objects so the iteration is
+  // anchored in tenant TZ end-to-end. Limited to 24 iterations defensively.
+  const startKey = monthKey(from);
+  const endKey = monthKey(to);
+  let cur = startKey;
+  let safety = 0;
+  while (cur <= endKey && safety++ < 24) {
+    out.push(cur);
+    // Increment month: parse, +1, wrap to next year.
+    const [y, m] = cur.split('-').map(Number);
+    const nextMonth = m === 12 ? 1 : m + 1;
+    const nextYear = m === 12 ? y + 1 : y;
+    cur = `${nextYear}-${String(nextMonth).padStart(2, '0')}`;
   }
   return out;
 }

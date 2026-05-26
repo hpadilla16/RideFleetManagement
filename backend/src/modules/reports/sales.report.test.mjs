@@ -146,11 +146,13 @@ test('aggregate: TAX charges separated from sales', () => {
 });
 
 test('aggregate: peakDay picks the highest-sales pickup day (tax excluded)', () => {
+  // Mid-day UTC pickup times so each date lands unambiguously on the same
+  // PR-TZ day after the tz-aware bucket fix in sales.report.js.
   const out = aggregate([
-    chg({ name: 'Daily rental', total: 100, pickup: '2026-05-10' }),
-    chg({ name: 'Daily rental', total: 200, pickup: '2026-05-12' }),
-    chg({ name: 'CDW',          total: 50,  pickup: '2026-05-12' }),
-    chg({ name: 'Sales tax',    chargeType: 'TAX', total: 1000, pickup: '2026-05-15' }), // shouldn't sway peak
+    chg({ name: 'Daily rental', total: 100, pickup: '2026-05-10T14:00:00Z' }),
+    chg({ name: 'Daily rental', total: 200, pickup: '2026-05-12T14:00:00Z' }),
+    chg({ name: 'CDW',          total: 50,  pickup: '2026-05-12T14:00:00Z' }),
+    chg({ name: 'Sales tax',    chargeType: 'TAX', total: 1000, pickup: '2026-05-15T14:00:00Z' }), // shouldn't sway peak
   ]);
   assert.equal(out.peakDay.iso, '2026-05-12');
   assert.equal(out.peakDay.amount, 250);

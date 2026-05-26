@@ -156,3 +156,121 @@ export function normalizeWindowHours(value, fallback = null) {
 export function overlapsWindow(startA, endA, startB, endB) {
   return startA < endB && endA > startB;
 }
+
+// ---------------------------------------------------------------------------
+// Tenant-TZ aware helpers (2026-05-26)
+//
+// Every "by day" / "by month" report bucketed reservations against the
+// server's local timezone (= UTC inside the Docker container), which silently
+// rolled late-evening AST events into the next UTC calendar day. Each report
+// used to ship its own setHours(0,0,0,0) / toISOString().slice(0,10) /
+// new Date(y, m, 1) helpers. Consolidating here so every report shares the
+// same definition and we fix the bug in one place.
+//
+// PR has no DST. For tenants in DST zones, addDaysInTz uses a flat 24h step
+// which can land on a sibling day on the spring-forward / fall-back day.
+// Acceptable approximation until we onboard a DST tenant.
+// ---------------------------------------------------------------------------
+
+const _MS_PER_DAY_DUTL = 24 * 60 * 60 * 1000;
+
+/**
+ * Lower-level helper: pull the wall-clock year/month/day for `date` rendered
+ * in `tz` as two-digit strings. Used by every "in tz" function below.
+ */
+function tzDateParts(date, tz) {
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: tz,
+    year: 'numeric', month: '2-digit', day: '2-digit'
+  }).formatToParts(date).reduce((acc, p) => {
+    if (p.type !== 'literal') acc[p.type] = p.value;
+    return acc;
+  }, {});
+}
+
+/**
+ * Midnight of `value` interpreted in `tz`, returned as a UTC Date instant.
+ *
+ * Accepts:
+ *   - "YYYY-MM-DD" or "YYYY-MM-DDTHH:MM[:SS]" strings (any time component is
+ *     stripped — we always return midnight of the day in tz)
+ *   - Date instances (the tz-day they fall on)
+ *   - null / undefined → null
+ */
+export function startOfDayInTz(value, tz = DEFAULT_TENANT_TIMEZONE) {
+  if (value == null) return null;
+  if (typeof value === 'string') {
+    const dayOnly = value.length >= 10 ? value.slice(0, 10) : value;
+    return parseDateTimeInTz(dayOnly, tz);
+  }
+  if (value instanceof Date) {
+    const parts = tzDateParts(value, tz);
+    return parseDateTimeInTz(`${parts.year}-${parts.month}-${parts.day}`, tz);
+  }
+  return null;
+}
+
+/**
+ * First day of the month containing `date`, anchored at midnight in tz.
+ */
+export function startOfMonthInTz(date, tz = DEFAULT_TENANT_TIMEZONE) {
+  const parts = tzDateParts(date, tz);
+  return parseDateTimeInTz(`${parts.year}-${parts.month}-01`, tz);
+}
+
+/**
+ * Add `n` whole days to `date`. 24h step (no DST correction).
+ */
+export function addDaysInTz(date, n) {
+  return new Date(date.getTime() + n * _MS_PER_DAY_DUTL);
+}
+
+/**
+ * Add `n` months. Result is the 1st of the target month at midnight in tz.
+ */
+export function addMonthsInTz(date, n, tz = DEFAULT_TENANT_TIMEZONE) {
+  const parts = tzDateParts(date, tz);
+  let year = Number(parts.year);
+  let month = Number(parts.month) - 1 + n; // 0-indexed for math
+  while (month < 0)  { month += 12; year -= 1; }
+  while (month > 11) { month -= 12; year += 1; }
+  const mStr = String(month + 1).padStart(2, '0');
+  return parseDateTimeInTz(`${year}-${mStr}-01`, tz);
+}
+
+/**
+ * "YYYY-MM-DD" of `date` evaluated in tz. Use this anywhere reports were
+ * calling `d.toISOString().slice(0, 10)` and getting the UTC day instead of
+ * the tenant-local day.
+ */
+export function isoDayInTz(date, tz = DEFAULT_TENANT_TIMEZONE) {
+  const parts = tzDateParts(date, tz);
+  return `${parts.year}-${parts.month}-${parts.day}`;
+}
+
+/**
+ * Short human label like "Wed May 26" of `date` in tz. Pass
+ * `{ includeWeekday: false }` to drop the weekday prefix → "May 26".
+ */
+export function dayLabelInTz(date, tz = DEFAULT_TENANT_TIMEZONE, { includeWeekday = true } = {}) {
+  return new Intl.DateTimeFormat('en-US', {
+    timeZone: tz,
+    ...(includeWeekday ? { weekday: 'short' } : {}),
+    month: 'short', day: 'numeric'
+  }).format(date).replace(',', '');
+}
+
+/**
+ * Short month label like "May 26" (3-letter month + 2-digit year) of `date`
+ * evaluated in tz. Used by monthly aggregation reports.
+ */
+export function monthLabelInTz(date, tz = DEFAULT_TENANT_TIMEZONE) {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: tz,
+    year: 'numeric', month: 'short'
+  }).formatToParts(date).reduce((acc, p) => {
+    if (p.type !== 'literal') acc[p.type] = p.value;
+    return acc;
+  }, {});
+  return `${parts.month} ${String(parts.year).slice(2)}`;
+}

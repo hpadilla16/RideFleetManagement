@@ -167,10 +167,12 @@ test('computeData rejects without tenantId', async () => {
 });
 
 test('computeData: full hybrid shape + day skeleton + peak detection', async () => {
+  // Mid-day UTC pickup times so each lands unambiguously on the expected PR-TZ
+  // day after the tz-aware bucket fix.
   const prisma = makePrisma({ charges: [
-    chg({ name: 'Daily rental', chargeType: 'DAILY', taxable: true, total: 100, pickup: '2026-05-10', agreementId: 'a1' }),
-    chg({ name: 'Sales tax',    chargeType: 'TAX',                  total: 11.5, pickup: '2026-05-10', agreementId: 'a1' }),
-    chg({ name: 'Sales tax',    chargeType: 'TAX',                  total: 5,    pickup: '2026-05-12', agreementId: 'a2' }),
+    chg({ name: 'Daily rental', chargeType: 'DAILY', taxable: true, total: 100, pickup: '2026-05-10T14:00:00Z', agreementId: 'a1' }),
+    chg({ name: 'Sales tax',    chargeType: 'TAX',                  total: 11.5, pickup: '2026-05-10T14:00:00Z', agreementId: 'a1' }),
+    chg({ name: 'Sales tax',    chargeType: 'TAX',                  total: 5,    pickup: '2026-05-12T14:00:00Z', agreementId: 'a2' }),
   ] });
   const out = await computeData({
     tenantId: 't1', from: '2026-05-10', to: '2026-05-13', query: {},
@@ -188,9 +190,10 @@ test('computeData: full hybrid shape + day skeleton + peak detection', async () 
 });
 
 test('computeData: location filter narrows', async () => {
+  // Pin pickup to mid-day UTC so it stays on May 15 in PR-TZ.
   const prisma = makePrisma({ charges: [
-    chg({ name: 'Tax', chargeType: 'TAX', total: 10, location: 'L1', agreementId: 'a1' }),
-    chg({ name: 'Tax', chargeType: 'TAX', total: 20, location: 'L2', agreementId: 'a2' }),
+    chg({ name: 'Tax', chargeType: 'TAX', total: 10, location: 'L1', agreementId: 'a1', pickup: '2026-05-15T14:00:00Z' }),
+    chg({ name: 'Tax', chargeType: 'TAX', total: 20, location: 'L2', agreementId: 'a2', pickup: '2026-05-15T14:00:00Z' }),
   ] });
   const all = await computeData({
     tenantId: 't1', from: '2026-05-15', to: '2026-05-15', query: {},

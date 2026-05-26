@@ -171,10 +171,12 @@ test('computeData rejects without tenantId', async () => {
 });
 
 test('computeData: full hybrid shape with day skeleton + peak detection', async () => {
+  // Mid-day UTC `when` so each commission lands unambiguously on the
+  // intended PR-TZ day after the tz-aware bucket fix.
   const prisma = makePrisma({ commissions: [
-    com({ employee: 'E1', amount: 100, when: '2026-05-10', status: 'PAID' }),
-    com({ employee: 'E1', amount:  50, when: '2026-05-12', status: 'APPROVED' }),
-    com({ employee: 'E2', amount:  25, when: '2026-05-12', status: 'PENDING' }),
+    com({ employee: 'E1', amount: 100, when: '2026-05-10T14:00:00Z', status: 'PAID' }),
+    com({ employee: 'E1', amount:  50, when: '2026-05-12T14:00:00Z', status: 'APPROVED' }),
+    com({ employee: 'E2', amount:  25, when: '2026-05-12T14:00:00Z', status: 'PENDING' }),
   ] });
   const out = await computeData({
     tenantId: 't1', from: '2026-05-10', to: '2026-05-13', query: {},
