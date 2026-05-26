@@ -5,22 +5,45 @@ import { useRouter } from 'next/navigation';
 import { AuthGate } from '../components/AuthGate';
 import { AppShell } from '../components/AppShell';
 import { api } from '../lib/client';
+import { DEFAULT_TENANT_TIMEZONE } from '../lib/tenant-time';
+
+// 2026-05-26: both helpers used to read the raw "YYYY-MM-DD" / "HH:mm"
+// prefix of an ISO string as if those digits were already the wall-clock
+// value in the tenant TZ. That hack matched the pre-fix backend's
+// local-as-UTC storage; after the storage was migrated to correct UTC the
+// dashboard rendered every time in UTC (e.g. 16:00 UTC as 4 PM rather than
+// 12 PM AST) and silently dropped any return between 8 PM AST and midnight
+// from "today" because the UTC date had already rolled to tomorrow.
+// Both now do proper UTC→tenant-TZ conversion via Intl.
+const DASHBOARD_TZ = DEFAULT_TENANT_TIMEZONE;
 
 function fmtWallClockTime(value) {
   if (!value) return '-';
-  const m = String(value).match(/T(\d{2}):(\d{2})/);
-  if (!m) return '-';
-  const h24 = Number(m[1]);
-  const suffix = h24 >= 12 ? 'PM' : 'AM';
-  const h12 = ((h24 + 11) % 12) + 1;
-  return `${h12}:${m[2]} ${suffix}`;
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return '-';
+  return d.toLocaleString('en-US', {
+    timeZone: DASHBOARD_TZ,
+    hour: 'numeric',
+    minute: '2-digit',
+    hour12: true
+  });
 }
 
 function wallClockDate(value) {
   if (!value) return null;
-  const m = String(value).match(/^(\d{4})-(\d{2})-(\d{2})/);
-  if (!m) return null;
-  return `${m[1]}-${m[2]}-${m[3]}`;
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return null;
+  // Use Intl to extract the tenant-TZ date components so e.g. an 11 PM AST
+  // return whose storage UTC is 03:00 the next calendar day still maps to
+  // the AST date the agent expects.
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: DASHBOARD_TZ,
+    year: 'numeric', month: '2-digit', day: '2-digit'
+  }).formatToParts(d).reduce((acc, p) => {
+    if (p.type !== 'literal') acc[p.type] = p.value;
+    return acc;
+  }, {});
+  return `${parts.year}-${parts.month}-${parts.day}`;
 }
 
 function VehicleStatusDonut({ metrics }) {
@@ -353,10 +376,11 @@ function DashboardInner({ token, me, logout }) {
   const serviceHeld = Number(kpis.vehiclesInMaintenance || 0) + Number(kpis.vehiclesOutOfService || 0);
   const activeReservations = reservations.filter((r) => ['NEW', 'CONFIRMED', 'CHECKED_OUT'].includes(r.status)).length;
   const feeAdvisoryCount = reservations.filter((r) => /\[FEE_ADVISORY_OPEN\s+/i.test(String(r.notes || ''))).length;
-  const [boardDate, setBoardDate] = useState(() => {
-    const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-  });
-  const todayStr = useMemo(() => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; }, []);
+  // Anchor "today" in the tenant timezone — not the browser's — so the
+  // Operations Board agrees with the rest of the app for agents loading
+  // from a non-PR browser. Both functions return "YYYY-MM-DD" in DASHBOARD_TZ.
+  const [boardDate, setBoardDate] = useState(() => wallClockDate(new Date()));
+  const todayStr = useMemo(() => wallClockDate(new Date()), []);
   const isToday = boardDate === todayStr;
   const boardLabel = isToday ? 'Today' : new Date(boardDate + 'T12:00:00').toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric' });
   const pickups = reservations.filter((r) => wallClockDate(r.pickupAt) === boardDate && ['NEW', 'CONFIRMED'].includes(r.status));
@@ -369,7 +393,7 @@ function DashboardInner({ token, me, logout }) {
             id: `pickup-${pickups[0].id}`,
             title: 'Next Pickup',
             detail: `#${pickups[0].reservationNumber} - ${pickups[0].customer?.firstName || ''} ${pickups[0].customer?.lastName || ''}`.trim(),
-            note: `Pickup ${new Date(pickups[0].pickupAt).toLocaleString()}`,
+            note: `Pickup ${new Date(pickups[0].pickupAt).toLocaleString('en-US', { timeZone: DASHBOARD_TZ })}`,
             action: () => startCheckout(pickups[0].id),
             actionLabel: 'Start Check-out'
           }
@@ -379,7 +403,7 @@ function DashboardInner({ token, me, logout }) {
             id: `return-${returns[0].id}`,
             title: 'Next Return',
             detail: `#${returns[0].reservationNumber} - ${returns[0].customer?.firstName || ''} ${returns[0].customer?.lastName || ''}`.trim(),
-            note: `Return ${new Date(returns[0].returnAt).toLocaleString()}`,
+            note: `Return ${new Date(returns[0].returnAt).toLocaleString('en-US', { timeZone: DASHBOARD_TZ })}`,
             action: () => router.push(`/reservations/${returns[0].id}/checkin-wizard`),
             actionLabel: 'Open Check-in'
           }
