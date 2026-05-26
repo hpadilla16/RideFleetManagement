@@ -109,16 +109,41 @@ async function computeData({ tenantId, from, to }, deps = {}) {
       // Pull every CHECKOUT inspection (most agreements have exactly one,
       // but a few have a re-do). Ordered most-recent-first so the first row
       // with an actor wins — same precedence as syncAgreementCommissionSnapshot.
+      // RentalAgreementInspection has no User relation in the schema, so we
+      // pull just actorUserId and resolve names in a follow-up User query.
       inspections: {
         where: { phase: 'CHECKOUT' },
         orderBy: [{ capturedAt: 'desc' }, { updatedAt: 'desc' }],
-        select: {
-          actorUserId: true,
-          actorUser: { select: { id: true, fullName: true } },
-        },
+        select: { actorUserId: true },
       },
     },
   });
+
+  // Resolve checkout-actor names with a single User lookup. We seed the map
+  // with the salesOwners we already have, then add any actor IDs not already
+  // covered. This is a tight set (≤ headcount of the shop), so one query is
+  // fine and avoids N+1 work.
+  const userNamesById = new Map();
+  for (const ag of agreements) {
+    if (ag.salesOwnerUserId && ag.salesOwnerUser?.fullName) {
+      userNamesById.set(ag.salesOwnerUserId, ag.salesOwnerUser.fullName);
+    }
+  }
+  const actorIds = new Set();
+  for (const ag of agreements) {
+    for (const ins of (ag.inspections || [])) {
+      if (ins?.actorUserId && !userNamesById.has(ins.actorUserId)) {
+        actorIds.add(ins.actorUserId);
+      }
+    }
+  }
+  if (actorIds.size > 0) {
+    const users = await prisma.user.findMany({
+      where: { id: { in: Array.from(actorIds) } },
+      select: { id: true, fullName: true },
+    });
+    for (const u of users) userNamesById.set(u.id, u.fullName);
+  }
 
   // Group by **checkout actor**. The CHECKOUT inspection's actorUserId is who
   // physically released the car and is the canonical commission earner per
@@ -132,7 +157,7 @@ async function computeData({ tenantId, from, to }, deps = {}) {
       ag.salesOwnerUserId ||
       '__unassigned__';
     const clerkName =
-      checkoutInspection?.actorUser?.fullName ||
+      userNamesById.get(clerkId) ||
       ag.salesOwnerUser?.fullName ||
       'Unassigned';
 

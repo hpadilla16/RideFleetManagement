@@ -140,16 +140,38 @@ async function computeData({ tenantId, from, to }, deps = {}) {
       payments: { select: { amount: true } },
       // CHECKOUT inspections drive clerk attribution — the actor who released
       // the car is the commission earner (mirror of syncAgreementCommissionSnapshot).
+      // RentalAgreementInspection has no User relation in the schema, so we
+      // resolve names with a separate User query below.
       inspections: {
         where: { phase: 'CHECKOUT' },
         orderBy: [{ capturedAt: 'desc' }, { updatedAt: 'desc' }],
-        select: {
-          actorUserId: true,
-          actorUser: { select: { id: true, fullName: true } },
-        },
+        select: { actorUserId: true },
       },
     },
   });
+
+  // Resolve checkout-actor names with a single User lookup.
+  const userNamesById = new Map();
+  for (const ag of agreements) {
+    if (ag.salesOwnerUserId && ag.salesOwnerUser?.fullName) {
+      userNamesById.set(ag.salesOwnerUserId, ag.salesOwnerUser.fullName);
+    }
+  }
+  const actorIds = new Set();
+  for (const ag of agreements) {
+    for (const ins of (ag.inspections || [])) {
+      if (ins?.actorUserId && !userNamesById.has(ins.actorUserId)) {
+        actorIds.add(ins.actorUserId);
+      }
+    }
+  }
+  if (actorIds.size > 0) {
+    const users = await prisma.user.findMany({
+      where: { id: { in: Array.from(actorIds) } },
+      select: { id: true, fullName: true },
+    });
+    for (const u of users) userNamesById.set(u.id, u.fullName);
+  }
 
   // teamByMonth: monthKey → bucket
   const teamByMonth = new Map(months.map((m) => [m, emptyBucket()]));
@@ -173,7 +195,7 @@ async function computeData({ tenantId, from, to }, deps = {}) {
       ag.salesOwnerUserId ||
       '__unassigned__';
     const clerkName =
-      checkoutInspection?.actorUser?.fullName ||
+      userNamesById.get(clerkId) ||
       ag.salesOwnerUser?.fullName ||
       'Unassigned';
     if (!clerks.has(clerkId)) {
