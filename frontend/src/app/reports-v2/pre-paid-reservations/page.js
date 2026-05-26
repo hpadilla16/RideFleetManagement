@@ -59,10 +59,12 @@ export default function Page() {
 
 function PrePaidReservationsReport({ token }) {
   const initial = defaultYearMonth();
+  // Year/month are bound directly to the dropdowns — selecting a new value
+  // triggers the useEffect below and refetches immediately. (No draft state
+  // + Search button; that pattern hid the data behind an extra click and
+  // confused the user.)
   const [year, setYear] = useState(initial.year);
   const [month, setMonth] = useState(initial.month);
-  const [draftYear, setDraftYear] = useState(initial.year);
-  const [draftMonth, setDraftMonth] = useState(initial.month);
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -96,12 +98,6 @@ function PrePaidReservationsReport({ token }) {
     return out;
   }, []);
 
-  const onSearch = (e) => {
-    e?.preventDefault?.();
-    setYear(draftYear);
-    setMonth(draftMonth);
-  };
-
   const downloadExcel = () => {
     const url = `/api/reports/pre-paid-reservations/excel?year=${year}&month=${month}`;
     if (typeof window !== 'undefined') {
@@ -123,12 +119,12 @@ function PrePaidReservationsReport({ token }) {
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
           <span style={{ fontWeight: 600 }}>▽ Search Transactions</span>
         </div>
-        <form onSubmit={onSearch} style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
           <label style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
             <span style={{ color: '#6b7280' }}>Year</span>
             <select
-              value={draftYear}
-              onChange={(e) => setDraftYear(parseInt(e.target.value, 10))}
+              value={year}
+              onChange={(e) => setYear(parseInt(e.target.value, 10))}
               style={{ padding: '6px 10px', borderRadius: 6, minWidth: 100 }}
             >
               {yearOptions.map((y) => <option key={y} value={y}>{y}</option>)}
@@ -137,8 +133,8 @@ function PrePaidReservationsReport({ token }) {
           <label style={{ display: 'flex', alignItems: 'center', gap: 8, flex: 1, minWidth: 200 }}>
             <span style={{ color: '#6b7280' }}>Month</span>
             <select
-              value={draftMonth}
-              onChange={(e) => setDraftMonth(parseInt(e.target.value, 10))}
+              value={month}
+              onChange={(e) => setMonth(parseInt(e.target.value, 10))}
               style={{ padding: '6px 10px', borderRadius: 6, flex: 1 }}
             >
               {MONTH_LABELS.map((label, idx) => (
@@ -146,16 +142,10 @@ function PrePaidReservationsReport({ token }) {
               ))}
             </select>
           </label>
-          <button
-            type="submit"
-            style={{
-              background: '#1fc7aa', color: 'white', border: 'none', padding: '8px 16px',
-              borderRadius: 6, fontWeight: 600, cursor: 'pointer'
-            }}
-          >
-            🔍 Search
-          </button>
-        </form>
+          {loading ? (
+            <span style={{ color: '#6b7280', fontSize: 12 }}>Loading…</span>
+          ) : null}
+        </div>
       </section>
 
       <section className="glass card" style={{ padding: 0, overflow: 'hidden' }}>
