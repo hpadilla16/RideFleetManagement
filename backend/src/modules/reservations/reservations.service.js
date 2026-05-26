@@ -1212,13 +1212,60 @@ export const reservationsService = {
   },
 
   async getById(id, scope = {}) {
+    // 2026-05-26: Hector saw the reservation detail endpoint take 37–44s and
+    // return 17–20 MB. Field-size SQL pinpointed the bloat:
+    //   customer row alone = 14.7 MB
+    //   rentalAgreement+charges+payments = 7.7 MB
+    // Almost all of that lives in two columns that store base64 data:
+    //   Customer.idPhotoUrl, Customer.insuranceDocumentUrl
+    //   RentalAgreement.insuranceDocumentUrl
+    // (the columns are misnamed "Url" but in practice hold a data: URL).
+    // The detail page doesn't need them — there are dedicated endpoints for
+    // showing the ID photo / insurance doc when the agent opens those tiles —
+    // so we drop them from the default payload via `select` lists instead of
+    // bringing every scalar with `true`.
     const row = await prisma.reservation.findFirst({
       where: {
         id,
         ...(scope?.tenantId ? { tenantId: scope.tenantId } : {})
       },
       include: {
-        customer: true,
+        customer: {
+          select: {
+            id: true,
+            tenantId: true,
+            firstName: true,
+            lastName: true,
+            email: true,
+            phone: true,
+            licenseNumber: true,
+            licenseState: true,
+            dateOfBirth: true,
+            insurancePolicyNumber: true,
+            // insuranceDocumentUrl + idPhotoUrl excluded — base64 blobs,
+            // each loaded on demand by /customers/:id/id-photo and
+            // /customers/:id/insurance-doc.
+            address1: true,
+            address2: true,
+            city: true,
+            state: true,
+            zip: true,
+            country: true,
+            authnetCustomerProfileId: true,
+            authnetPaymentProfileId: true,
+            cardLast4: true,
+            cardBrand: true,
+            cardExpiresMonth: true,
+            cardExpiresYear: true,
+            cardUpdatedAt: true,
+            creditBalance: true,
+            doNotRent: true,
+            doNotRentReason: true,
+            notes: true,
+            createdAt: true,
+            updatedAt: true,
+          }
+        },
         vehicleType: true,
         vehicle: true,
         pickupLocation: true,
@@ -1228,7 +1275,65 @@ export const reservationsService = {
         customerInfoReviewedByUser: { select: { id: true, fullName: true, email: true, role: true } },
         readyForPickupByUser: { select: { id: true, fullName: true, email: true, role: true } },
         rentalAgreement: {
-          include: {
+          select: {
+            id: true,
+            tenantId: true,
+            agreementNumber: true,
+            status: true,
+            reservationId: true,
+            vehicleId: true,
+            pickupAt: true,
+            returnAt: true,
+            pickupLocationId: true,
+            returnLocationId: true,
+            customerFirstName: true,
+            customerLastName: true,
+            customerEmail: true,
+            customerPhone: true,
+            customerAddress1: true,
+            customerAddress2: true,
+            customerCity: true,
+            customerState: true,
+            customerZip: true,
+            customerCountry: true,
+            dateOfBirth: true,
+            licenseNumber: true,
+            licenseState: true,
+            licenseExpiry: true,
+            insuranceSource: true,
+            insurancePolicyNumber: true,
+            // insuranceDocumentUrl excluded — base64 blob, separate endpoint.
+            insurancePlanCode: true,
+            insurancePlanName: true,
+            insurancePlanRate: true,
+            odometerOut: true,
+            odometerIn: true,
+            fuelOut: true,
+            fuelIn: true,
+            cleanlinessOut: true,
+            cleanlinessIn: true,
+            subtotal: true,
+            taxes: true,
+            fees: true,
+            total: true,
+            deposit: true,
+            securityDepositAmount: true,
+            securityDepositCaptured: true,
+            securityDepositCapturedAt: true,
+            securityDepositReleasedAt: true,
+            securityDepositReference: true,
+            paidAmount: true,
+            balance: true,
+            paymentMethod: true,
+            paymentReference: true,
+            notes: true,
+            finalizedAt: true,
+            closedAt: true,
+            salesOwnerUserId: true,
+            closedByUserId: true,
+            locked: true,
+            createdAt: true,
+            updatedAt: true,
             charges: { orderBy: [{ sortOrder: 'asc' }, { createdAt: 'asc' }] },
             payments: { orderBy: { paidAt: 'desc' } }
           }
