@@ -60,9 +60,12 @@ test('mapDetailToRow: maps the real ZE40774901BA payload onto every column', () 
 test('mapDetailToRow: UNIX-seconds pickupdate → correct UTC Date', () => {
   const row = mapDetailToRow(REAL_TL_DETAIL, 'ZE40774901BA');
   assert.ok(row.pickupAt instanceof Date);
-  // 1800378000 sec → 2027-01-19T17:00:00Z
-  assert.equal(row.pickupAt.toISOString(), '2027-01-19T17:00:00.000Z');
-  assert.equal(row.dropoffAt.toISOString(), '2027-01-23T17:00:00.000Z');
+  // 2026-05-26: production data showed TL's UNIX seconds encode the
+  // wall-clock time in PR as if the components were UTC. So 1800378000
+  // (whose `new Date()` would naively be 2027-01-19T17:00:00Z) is
+  // re-interpreted as 17:00 in America/Puerto_Rico = 21:00 UTC.
+  assert.equal(row.pickupAt.toISOString(), '2027-01-19T21:00:00.000Z');
+  assert.equal(row.dropoffAt.toISOString(), '2027-01-23T21:00:00.000Z');
 });
 
 test('mapDetailToRow: empty-string tele falls through to mobile, then null', () => {
@@ -86,17 +89,18 @@ test('mapDetailToRow: amount decimal-string handling', () => {
 });
 
 test('mapDetailToRow: ms timestamps and ISO strings still work (defensive)', () => {
-  // Legacy ms timestamp (>= 1e12) should be used as-is.
+  // ms timestamp gets the same TL-local-as-UTC reinterpretation as seconds.
   const ms = mapDetailToRow({ pickupdate: 1800378000000 }, 'X');
-  assert.equal(ms.pickupAt.toISOString(), '2027-01-19T17:00:00.000Z');
+  assert.equal(ms.pickupAt.toISOString(), '2027-01-19T21:00:00.000Z');
 
-  // ISO string fallback.
+  // ISO strings carrying explicit Z stay as-is (passes through parseDateTimeInTz
+  // unchanged) — caller-supplied UTC means UTC.
   const iso = mapDetailToRow({ pickupdate: '2027-01-19T17:00:00Z' }, 'X');
   assert.equal(iso.pickupAt.toISOString(), '2027-01-19T17:00:00.000Z');
 
-  // Numeric-string seconds.
+  // Numeric-string seconds get the same reinterpretation as numeric seconds.
   const numStr = mapDetailToRow({ pickupdate: '1800378000' }, 'X');
-  assert.equal(numStr.pickupAt.toISOString(), '2027-01-19T17:00:00.000Z');
+  assert.equal(numStr.pickupAt.toISOString(), '2027-01-19T21:00:00.000Z');
 });
 
 test('mapDetailToRow: malformed/empty dates → null without throwing', () => {

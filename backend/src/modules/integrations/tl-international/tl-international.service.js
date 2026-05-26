@@ -36,6 +36,7 @@ import { prisma } from '../../../lib/prisma.js';
 import logger from '../../../lib/logger.js';
 import { decrypt, encrypt } from '../../../lib/integration-crypto.js';
 import { getTLBrowser } from '../../../lib/puppeteer-browser.js';
+import { parseDateTimeInTz } from '../../../lib/date-utils.js';
 
 export const SOURCE_SYSTEM = 'TL_INTERNATIONAL';
 
@@ -574,23 +575,48 @@ export function mapDetailToRow(d, externalRef) {
     return { externalRef, rawJson: d ?? { error: 'detail-null' } };
   }
 
+  // 2026-05-26: production data (TL-ZE40785540BA et al) confirmed that TL's
+  // `pickupdate` / `dropoffdate` UNIX seconds encode the **wall-clock time
+  // in Puerto Rico** as if those components were UTC — e.g. a customer's
+  // 12:00 PM AST pickup arrives as 1779724800 which `new Date(ms)` decodes
+  // as 12:00 UTC (= 8:00 AM AST), four hours behind the real instant. We
+  // reinterpret the wall-clock components against the tenant timezone via
+  // parseDateTimeInTz so the resulting Date is the correct UTC instant.
+  //
+  //   number / numeric string (UNIX seconds or ms): extract UTC wall-clock
+  //     components from the naive Date and re-interpret in tenant TZ.
+  //   other string: hand to parseDateTimeInTz directly so Z- and
+  //     offset-bearing strings keep parsing as-is and naive strings get the
+  //     same tenant-TZ interpretation.
+  const TL_TENANT_TZ = 'America/Puerto_Rico';
+  const pad2 = (n) => String(n).padStart(2, '0');
+  const reinterpretNaiveUtcAsTenantTz = (naiveUtcDate) => {
+    if (!Number.isFinite(naiveUtcDate.valueOf())) return null;
+    const Y = naiveUtcDate.getUTCFullYear();
+    const M = naiveUtcDate.getUTCMonth() + 1;
+    const D = naiveUtcDate.getUTCDate();
+    const h = naiveUtcDate.getUTCHours();
+    const mi = naiveUtcDate.getUTCMinutes();
+    const se = naiveUtcDate.getUTCSeconds();
+    const naive = `${Y}-${pad2(M)}-${pad2(D)}T${pad2(h)}:${pad2(mi)}:${pad2(se)}`;
+    return parseDateTimeInTz(naive, TL_TENANT_TZ);
+  };
+
   const toDate = (v) => {
     if (v == null || v === '') return null;
     if (typeof v === 'number') {
       // TL uses UNIX seconds. Anything < 10^12 is seconds, otherwise ms.
       const ms = v < 1e12 ? v * 1000 : v;
-      const dt = new Date(ms);
-      return Number.isFinite(dt.valueOf()) ? dt : null;
+      return reinterpretNaiveUtcAsTenantTz(new Date(ms));
     }
-    // Numeric string from TL? Coerce.
     if (typeof v === 'string' && /^\d+$/.test(v.trim())) {
       const n = Number(v.trim());
       const ms = n < 1e12 ? n * 1000 : n;
-      const dt = new Date(ms);
-      return Number.isFinite(dt.valueOf()) ? dt : null;
+      return reinterpretNaiveUtcAsTenantTz(new Date(ms));
     }
-    const dt = new Date(v);
-    return Number.isFinite(dt.valueOf()) ? dt : null;
+    // Non-numeric string — defer to parseDateTimeInTz which already handles
+    // Z, +HH:MM, and naive shapes correctly.
+    return parseDateTimeInTz(v, TL_TENANT_TZ);
   };
 
   const toDecimalString = (v) => {
