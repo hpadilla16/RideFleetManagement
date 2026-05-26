@@ -138,13 +138,24 @@ async function computeData({ tenantId, from, to }, deps = {}) {
       salesOwnerUser: { select: { id: true, fullName: true } },
       charges: { select: { code: true, name: true, total: true, selected: true } },
       payments: { select: { amount: true } },
-      commissions: { select: { employeeUserId: true, commissionAmount: true } },
+      commissions: {
+        select: {
+          employeeUserId: true,
+          commissionAmount: true,
+          employeeUser: { select: { id: true, fullName: true } },
+        },
+      },
     },
   });
 
   // teamByMonth: monthKey → bucket
   const teamByMonth = new Map(months.map((m) => [m, emptyBucket()]));
   // clerks: clerkId → { id, name, byMonth: Map<monthKey, bucket> }
+  // Bucketed by **commission earner** (the checkout actor in
+  // syncAgreementCommissionSnapshot), with fallback to salesOwnerUserId when
+  // no commission snapshot exists yet. Fixes the previous bug where the
+  // commission column was always $0 for shops where checkout and sales-owner
+  // were different people.
   const clerks = new Map();
 
   for (const ag of agreements) {
@@ -153,8 +164,15 @@ async function computeData({ tenantId, from, to }, deps = {}) {
     const mk = monthKey(bucketDate, tenantTz);
     if (!teamByMonth.has(mk)) continue; // shouldn't happen with the where clause, but guard anyway
 
-    const clerkId = ag.salesOwnerUserId || '__unassigned__';
-    const clerkName = ag.salesOwnerUser?.fullName || 'Unassigned';
+    const primaryCommission = (ag.commissions || [])[0] || null;
+    const clerkId =
+      primaryCommission?.employeeUserId ||
+      ag.salesOwnerUserId ||
+      '__unassigned__';
+    const clerkName =
+      primaryCommission?.employeeUser?.fullName ||
+      ag.salesOwnerUser?.fullName ||
+      'Unassigned';
     if (!clerks.has(clerkId)) {
       clerks.set(clerkId, {
         id: clerkId,
@@ -174,8 +192,9 @@ async function computeData({ tenantId, from, to }, deps = {}) {
     };
     const days = daysBetween(ag.pickupAt, ag.returnAt);
     const paid = (ag.payments || []).reduce((acc, p) => acc + num(p.amount), 0);
+    // Sum every commission on the agreement (typically just one). They all
+    // belong to this clerk now because we keyed the bucket by employeeUserId.
     const comm = (ag.commissions || [])
-      .filter((c) => c.employeeUserId === clerkId)
       .reduce((acc, c) => acc + num(c.commissionAmount), 0);
     inc(tb, days, paid, comm);
     inc(cb, days, paid, comm);

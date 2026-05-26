@@ -1,5 +1,5 @@
 /**
- * Commission & Sales Performance Report — Round 24b (2026-05-22).
+ * Commission & Sales Performance Report — Round 31a (2026-05-26).
  *
  * Single-period report: per-clerk metrics, sales attach % by service, and
  * counter revenue per service. Matches the April 2026 Commission Report
@@ -9,9 +9,14 @@
  *   1. Find RentalAgreement rows where finalizedAt OR closedAt ∈ [from, to]
  *      (status is irrelevant — we count any rental that hit the counter in
  *      the window)
- *   2. Group by salesOwnerUserId (the clerk)
+ *   2. Group by **commission earner** — i.e. the AgreementCommission's
+ *      employeeUserId, which is the person who performed CHECKOUT (per
+ *      rental-agreements.service.js#syncAgreementCommissionSnapshot).
+ *      When an agreement has no commission record yet (not closed, sync
+ *      didn't run), fall back to salesOwnerUserId so the rental still
+ *      appears with $0 commission and someone is credited for the activity.
  *   3. For each clerk: count rentals, sum rental days, sum paid-at-counter,
- *      sum commissions earned
+ *      sum commissions earned (commissionAmount from the snapshot row)
  *   4. For each service code in our SERVICE_CATALOG, count how many of the
  *      clerk's agreements had a selected charge whose code/name matched,
  *      and sum the $ amounts for those charges
@@ -19,6 +24,12 @@
  * Service matching is by `code` first (when present) then a fuzzy match
  * on `name`. This handles both the iPOS Transact CSV import flow and the
  * native RFM line items.
+ *
+ * Round-31a bug fix (2026-05-26): previously the loop filtered
+ *   `cm.employeeUserId === clerkId` where clerkId was the salesOwnerUserId,
+ * so when the sales owner and checkout actor were different people the
+ * commission was dropped and every clerk row showed $0. Now we pivot by
+ * the commission earner directly.
  */
 
 import { registerReport } from './reports-v2.routes.js';
@@ -89,15 +100,35 @@ async function computeData({ tenantId, from, to }, deps = {}) {
       salesOwnerUser: { select: { id: true, fullName: true } },
       charges: { select: { code: true, name: true, total: true, selected: true } },
       payments: { select: { amount: true, method: true } },
-      commissions: { select: { employeeUserId: true, commissionAmount: true } },
+      commissions: {
+        select: {
+          employeeUserId: true,
+          commissionAmount: true,
+          employeeUser: { select: { id: true, fullName: true } },
+        },
+      },
     },
   });
 
-  // Group by clerk
+  // Group by **commission earner** (the checkout actor). When an agreement has
+  // no commission record (e.g. not yet closed, snapshot sync hasn't run),
+  // fall back to salesOwnerUserId so the activity is still attributed somewhere
+  // — those rows show $0 commission until the snapshot is written.
   const byClerk = new Map();
   for (const ag of agreements) {
-    const clerkId = ag.salesOwnerUserId || '__unassigned__';
-    const clerkName = ag.salesOwnerUser?.fullName || 'Unassigned';
+    // Per the unique constraint on AgreementCommission(rentalAgreementId,
+    // employeeUserId), and the deleteMany() in syncAgreementCommissionSnapshot,
+    // there is at most ONE commission row per agreement in steady state.
+    const primaryCommission = (ag.commissions || [])[0] || null;
+    const clerkId =
+      primaryCommission?.employeeUserId ||
+      ag.salesOwnerUserId ||
+      '__unassigned__';
+    const clerkName =
+      primaryCommission?.employeeUser?.fullName ||
+      ag.salesOwnerUser?.fullName ||
+      'Unassigned';
+
     if (!byClerk.has(clerkId)) {
       byClerk.set(clerkId, {
         id: clerkId,
@@ -116,8 +147,10 @@ async function computeData({ tenantId, from, to }, deps = {}) {
     for (const p of (ag.payments || [])) {
       c.paidAtCounter += num(p.amount);
     }
+    // Sum every commission on the agreement (typically just the one). They all
+    // belong to this clerk now because we keyed the bucket by employeeUserId.
     for (const cm of (ag.commissions || [])) {
-      if (cm.employeeUserId === clerkId) c.commissions += num(cm.commissionAmount);
+      c.commissions += num(cm.commissionAmount);
     }
     // Service attach (one rental can only contribute 1 to a service's count)
     for (const service of SERVICE_CATALOG) {
