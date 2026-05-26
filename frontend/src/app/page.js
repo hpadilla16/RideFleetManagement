@@ -587,6 +587,12 @@ function DashboardInner({ token, me, logout }) {
             <div className="stack">
               {returns.sort((a, b) => String(a.returnAt).localeCompare(String(b.returnAt))).map((r) => {
                 const balance = unpaidBalance(r);
+                // Already-returned rentals (CHECKED_IN / CHECKED_IN_UNPAID)
+                // shouldn't keep prompting the agent for check-in. Show a
+                // status badge in place of the action button so the row stays
+                // visible (the count still includes them) but the actionable
+                // affordance only renders for rentals that still need work.
+                const alreadyCheckedIn = ['CHECKED_IN', 'CHECKED_IN_UNPAID'].includes(r.status);
                 return (
                   <div
                     key={`ret-${r.id}`}
@@ -605,7 +611,19 @@ function DashboardInner({ token, me, logout }) {
                       {balance > 0 ? <span className="status-chip warn" style={{ fontSize: 10, marginLeft: 6 }}>Unpaid {moneyShort(balance)}</span> : null}
                     </span>
                     <div style={{ display: 'flex', gap: 6 }} onClick={(e) => e.stopPropagation()}>
-                      <button onClick={(e) => { e.stopPropagation(); startCheckin(r.id); }}>Start Check-in</button>
+                      {alreadyCheckedIn ? (
+                        <span
+                          className="status-chip"
+                          style={{
+                            fontSize: 11, fontWeight: 700, padding: '4px 10px', borderRadius: 999,
+                            background: '#dcfce7', color: '#166534'
+                          }}
+                        >
+                          Checked in
+                        </span>
+                      ) : (
+                        <button onClick={(e) => { e.stopPropagation(); startCheckin(r.id); }}>Start Check-in</button>
+                      )}
                     </div>
                   </div>
                 );
