@@ -38,6 +38,7 @@ import { UtilizationBarChart } from '../../../components/reports/charts/Utilizat
 import { UtilizationLineChart } from '../../../components/reports/charts/UtilizationLineChart';
 import { BookingPaceChart } from '../../../components/reports/charts/BookingPaceChart';
 import { SoldOutIncidenceChart } from '../../../components/reports/charts/SoldOutIncidenceChart';
+import { DEFAULT_TENANT_TIMEZONE } from '../../../lib/tenant-time';
 
 const TABS = [
   { key: 'glance', label: 'At a glance' },
@@ -50,6 +51,22 @@ const DEFAULT_TAB = 'forecast';
 // Tab persistence (per-user, per-report) — read on mount only, ignored otherwise.
 const TAB_STORAGE_KEY = 'reports-v2:availability-forecast:tab';
 
+// "YYYY-MM-DD" in tenant TZ. Replaces toISOString().slice(0, 10) so the
+// range string matches what the backend uses for bucketing (which is now
+// tenant-TZ anchored). Without this, late-evening agents (or anyone in a
+// non-PR browser) could see a default range that's off by a day at the
+// boundary.
+function isoDayInTenantTz(d) {
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: DEFAULT_TENANT_TIMEZONE,
+    year: 'numeric', month: '2-digit', day: '2-digit'
+  }).formatToParts(d).reduce((acc, p) => {
+    if (p.type !== 'literal') acc[p.type] = p.value;
+    return acc;
+  }, {});
+  return `${parts.year}-${parts.month}-${parts.day}`;
+}
+
 // Forward-looking range presets (30-day default).
 function makePresets() {
   const mk = (n, label) => ({
@@ -57,7 +74,7 @@ function makePresets() {
     compute: () => {
       const t = new Date();
       const to = new Date(t.getTime() + (n - 1) * 86400000);
-      return { from: t.toISOString().slice(0, 10), to: to.toISOString().slice(0, 10) };
+      return { from: isoDayInTenantTz(t), to: isoDayInTenantTz(to) };
     },
   });
   return [mk(7, 'Next 7 days'), mk(14, 'Next 14 days'), mk(30, 'Next 30 days'), mk(60, 'Next 60 days')];
@@ -82,7 +99,7 @@ function ForecastReport({ token, me, logout }) {
   const [range, setRange] = useState(() => {
     const t = new Date();
     const to = new Date(t.getTime() + 29 * 86400000);
-    return { from: t.toISOString().slice(0, 10), to: to.toISOString().slice(0, 10) };
+    return { from: isoDayInTenantTz(t), to: isoDayInTenantTz(to) };
   });
   const [locationId, setLocationId] = useState('');
   const [locations, setLocations] = useState([]);

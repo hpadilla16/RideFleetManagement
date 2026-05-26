@@ -212,9 +212,12 @@ test('computeData: location filter narrows capacity AND demand', async () => {
         { id: 'v3', status: 'AVAILABLE', homeLocationId: 'L2' },
       ],
     }],
+    // Mid-day pickup/return so the wall-clock day matches the tenant-TZ
+    // bucket (computeData anchors days on PR midnight; '2026-06-01' alone
+    // parses as UTC midnight which lands at 8 PM May 31 PR).
     reservations: [
-      res({ id: 'r1', typeId: 'T1', tenantId: 't1', pickup: '2026-06-01', ret: '2026-06-02', location: 'L1' }),
-      res({ id: 'r2', typeId: 'T1', tenantId: 't1', pickup: '2026-06-01', ret: '2026-06-02', location: 'L2' }),
+      res({ id: 'r1', typeId: 'T1', tenantId: 't1', pickup: '2026-06-01T14:00:00Z', ret: '2026-06-02T14:00:00Z', location: 'L1' }),
+      res({ id: 'r2', typeId: 'T1', tenantId: 't1', pickup: '2026-06-01T14:00:00Z', ret: '2026-06-02T14:00:00Z', location: 'L2' }),
     ],
   });
 

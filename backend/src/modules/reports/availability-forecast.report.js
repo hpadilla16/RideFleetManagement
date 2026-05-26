@@ -39,14 +39,34 @@
  *                              and status ∈ confirmed-set)
  *   available[type][day]= max(0, capacity - reserved)
  *
- * Confirmed-set = NEW, CONFIRMED, CHECKED_OUT, IN_PROGRESS.
+ * Confirmed-set = NEW, CONFIRMED, CHECKED_OUT, PENDING_FRANCHISE_IMPORT.
+ *
+ * (2026-05-26: was including a bogus 'IN_PROGRESS' value that doesn't exist
+ * on the ReservationStatus enum, which made every prisma.findMany() call
+ * here throw "Invalid value for argument `in`. Expected ReservationStatus."
+ * and tank the report with a 500. Replaced with PENDING_FRANCHISE_IMPORT —
+ * a real enum value that represents a TL booking awaiting promotion, which
+ * IS real future demand and should count against capacity the same way an
+ * unconfirmed NEW reservation does.)
  */
 
 import { registerReport } from './reports-v2.routes.js';
 import { cache } from '../../lib/cache.js';
 import { tenantKey } from '../../lib/cache/tenantKey.js';
+import { parseDateTimeInTz, DEFAULT_TENANT_TIMEZONE } from '../../lib/date-utils.js';
+import { settingsService } from '../settings/settings.service.js';
 
-const CONFIRMED_STATUSES = ['NEW', 'CONFIRMED', 'CHECKED_OUT', 'IN_PROGRESS'];
+async function resolveTenantTimeZone(tenantId) {
+  if (!tenantId) return DEFAULT_TENANT_TIMEZONE;
+  try {
+    const options = await settingsService.getReservationOptions({ tenantId });
+    return String(options?.tenantTimeZone || DEFAULT_TENANT_TIMEZONE);
+  } catch {
+    return DEFAULT_TENANT_TIMEZONE;
+  }
+}
+
+const CONFIRMED_STATUSES = ['NEW', 'CONFIRMED', 'CHECKED_OUT', 'PENDING_FRANCHISE_IMPORT'];
 // The 12-month sold-out-by-month scan dominates this report's cost (one
 // findMany + a per-day per-type bucket loop across 365+ days). The window
 // is rolling-month so the result is stable for ~5 minutes between scrolls.
@@ -59,45 +79,115 @@ const PEAK_RISK_THRESHOLD = 0.20; // type below this % free counts as at-risk
 const DEFAULT_WINDOW_DAYS = 30;
 
 // ---------------------------------------------------------------------------
-// Date helpers
+// Date helpers — tenant-TZ aware. See reservations-by-day.report.js for the
+// full rationale; in short, server-local startOfDay / isoDay / dayLabel
+// silently bucket reservations against UTC day boundaries when the agent
+// scheduled them against AST boundaries.
 // ---------------------------------------------------------------------------
 
 function num(v) { const n = Number(v); return Number.isFinite(n) ? n : 0; }
 
+function tzParts(date, tz) {
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: tz,
+    year: 'numeric', month: '2-digit', day: '2-digit'
+  }).formatToParts(date).reduce((acc, p) => {
+    if (p.type !== 'literal') acc[p.type] = p.value;
+    return acc;
+  }, {});
+}
+
+function startOfDayInTz(value, tz) {
+  if (value == null) return null;
+  if (typeof value === 'string') {
+    const dayOnly = value.length >= 10 ? value.slice(0, 10) : value;
+    return parseDateTimeInTz(dayOnly, tz);
+  }
+  if (value instanceof Date) {
+    const parts = tzParts(value, tz);
+    return parseDateTimeInTz(`${parts.year}-${parts.month}-${parts.day}`, tz);
+  }
+  return null;
+}
+
+function startOfMonthInTz(date, tz) {
+  const parts = tzParts(date, tz);
+  return parseDateTimeInTz(`${parts.year}-${parts.month}-01`, tz);
+}
+
+function addDaysInTz(date, n) {
+  return new Date(date.getTime() + n * DAY_MS);
+}
+
+function addMonthsInTz(date, n, tz) {
+  const parts = tzParts(date, tz);
+  let year = Number(parts.year);
+  let month = Number(parts.month) - 1 + n; // 0-indexed for arithmetic
+  while (month < 0)  { month += 12; year -= 1; }
+  while (month > 11) { month -= 12; year += 1; }
+  const mStr = String(month + 1).padStart(2, '0');
+  return parseDateTimeInTz(`${year}-${mStr}-01`, tz);
+}
+
+function isoDayInTz(date, tz) {
+  const parts = tzParts(date, tz);
+  return `${parts.year}-${parts.month}-${parts.day}`;
+}
+
+const MO = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+function dayLabelInTz(date, tz, includeWeekday = true) {
+  const fmt = new Intl.DateTimeFormat('en-US', {
+    timeZone: tz,
+    ...(includeWeekday ? { weekday: 'short' } : {}),
+    month: 'short', day: 'numeric'
+  }).format(date);
+  return fmt.replace(',', '');
+}
+
+function monthLabelInTz(date, tz) {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: tz,
+    year: 'numeric', month: 'short'
+  }).formatToParts(date).reduce((acc, p) => {
+    if (p.type !== 'literal') acc[p.type] = p.value;
+    return acc;
+  }, {});
+  return `${parts.month} ${String(parts.year).slice(2)}`;
+}
+
+// Original UTC-based helpers — kept as the export shape that the test file
+// destructures from _availabilityInternal. The tests anchor fixtures on UTC
+// midnight dates ('2026-06-01' as new Date()), so we don't shift them into
+// AST on the test side. Production code paths (computeData /
+// computeSoldOutByMonth / cellDrillDownHandler) call the tz-aware
+// `*InTz` variants directly above instead of these wrappers.
 function startOfDay(d) {
   const x = new Date(d);
   x.setHours(0, 0, 0, 0);
   return x;
 }
-
 function startOfMonth(d) {
   return new Date(d.getFullYear(), d.getMonth(), 1, 0, 0, 0, 0);
 }
-
 function addDays(d, n) {
   const x = new Date(d);
   x.setDate(x.getDate() + n);
   return x;
 }
-
 function addMonths(d, n) {
   return new Date(d.getFullYear(), d.getMonth() + n, 1, 0, 0, 0, 0);
 }
-
 function daysBetween(from, to) {
   return Math.max(1, Math.round((startOfDay(to) - startOfDay(from)) / DAY_MS) + 1);
 }
-
 function isoDay(d) { return d.toISOString().slice(0, 10); }
-
 const WD = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
-const MO = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 function dayLabel(d, includeWeekday = true) {
   return includeWeekday
     ? `${WD[d.getDay()]} ${MO[d.getMonth()]} ${d.getDate()}`
     : `${MO[d.getMonth()]} ${d.getDate()}`;
 }
-
 function monthLabel(d) { return `${MO[d.getMonth()]} ${String(d.getFullYear()).slice(2)}`; }
 
 // ---------------------------------------------------------------------------
@@ -172,15 +262,16 @@ function computeBookingPace(reservations, days, fleetCapacity) {
 // Sold-out by month (last 12 months)
 // ---------------------------------------------------------------------------
 
-async function computeSoldOutByMonth({ prisma, tenantId, locationId, vehicleTypes, monthsBack }) {
+async function computeSoldOutByMonth({ prisma, tenantId, locationId, vehicleTypes, monthsBack, tz: tzParam }) {
   // For each month in the lookback window, count days where ANY type (with
   // capacity > 0) was sold out. Honest count — months with no reservations
   // return 0 even if some types have 0 capacity.
   if (!vehicleTypes.some((vt) => vt.vehicles.length > 0)) return [];
 
+  const tz = tzParam || DEFAULT_TENANT_TIMEZONE;
   const now = new Date();
-  const startMonth = startOfMonth(addMonths(now, -monthsBack + 1));
-  const endMonth = startOfMonth(addMonths(now, 1));
+  const startMonth = startOfMonthInTz(addMonthsInTz(now, -monthsBack + 1, tz), tz);
+  const endMonth = startOfMonthInTz(addMonthsInTz(now, 1, tz), tz);
 
   const reservations = await prisma.reservation.findMany({
     where: buildReservationWhere({
@@ -192,28 +283,29 @@ async function computeSoldOutByMonth({ prisma, tenantId, locationId, vehicleType
 
   const out = [];
   for (let m = 0; m < monthsBack; m++) {
-    const monthStart = startOfMonth(addMonths(startMonth, m));
-    const monthEnd = startOfMonth(addMonths(monthStart, 1));
+    const monthStart = startOfMonthInTz(addMonthsInTz(startMonth, m, tz), tz);
+    const monthEnd = startOfMonthInTz(addMonthsInTz(monthStart, 1, tz), tz);
     const daysInMonth = Math.round((monthEnd - monthStart) / DAY_MS);
     let soldOutDays = 0;
     for (let off = 0; off < daysInMonth; off++) {
-      const d = addDays(monthStart, off);
+      const d = addDaysInTz(monthStart, off);
       const anySoldOut = vehicleTypes.some((vt) => {
         if (vt.vehicles.length === 0) return false;
         let count = 0;
         for (const r of reservations) {
           if (r.vehicleTypeId !== vt.id) continue;
-          const p = startOfDay(new Date(r.pickupAt));
-          const rt = startOfDay(new Date(r.returnAt));
+          const p = startOfDayInTz(new Date(r.pickupAt), tz);
+          const rt = startOfDayInTz(new Date(r.returnAt), tz);
           if (p <= d && d < rt) count++;
         }
         return (vt.vehicles.length - count) <= 0;
       });
       if (anySoldOut) soldOutDays++;
     }
+    const parts = tzParts(monthStart, tz);
     out.push({
-      yearMonth: `${monthStart.getFullYear()}-${String(monthStart.getMonth() + 1).padStart(2, '0')}`,
-      label: monthLabel(monthStart),
+      yearMonth: `${parts.year}-${parts.month}`,
+      label: monthLabelInTz(monthStart, tz),
       soldOutDays,
       daysInMonth,
     });
@@ -266,19 +358,20 @@ async function computeData({ tenantId, from, to, query }, deps = {}) {
   const prisma = deps.prisma || (await resolveDefaultPrisma());
   if (!tenantId) throw new Error('tenantId required');
 
+  const tz = deps.tenantTz || (await resolveTenantTimeZone(tenantId));
   const locationId = (query && query.locationId) || null;
   const includeLastYear = query && (query.compareLastYear === 'true' || query.compareLastYear === '1');
   const includeSoldOutHistory = !query || query.includeSoldOutHistory !== 'false';
 
-  const fromDate = from ? startOfDay(new Date(from)) : startOfDay(new Date());
+  const fromDate = from ? startOfDayInTz(from, tz) : startOfDayInTz(new Date(), tz);
   const toDate = to
-    ? startOfDay(new Date(to))
-    : addDays(fromDate, DEFAULT_WINDOW_DAYS - 1);
-  const numDays = daysBetween(fromDate, toDate);
+    ? startOfDayInTz(to, tz)
+    : addDaysInTz(fromDate, DEFAULT_WINDOW_DAYS - 1);
+  const numDays = Math.max(1, Math.round((toDate - fromDate) / DAY_MS) + 1);
   const safeNumDays = Math.min(numDays, MAX_DAYS);
 
   const days = [];
-  for (let i = 0; i < safeNumDays; i++) days.push(addDays(fromDate, i));
+  for (let i = 0; i < safeNumDays; i++) days.push(addDaysInTz(fromDate, i));
 
   // 1. Vehicle types + capacity (filtered by location if specified)
   // 2026-05-25 (followup #16): VehicleStatus enum has no RETIRED member.
@@ -295,7 +388,7 @@ async function computeData({ tenantId, from, to, query }, deps = {}) {
   });
 
   // 2. Confirmed reservations overlapping the window
-  const windowEnd = addDays(toDate, 1);
+  const windowEnd = addDaysInTz(toDate, 1);
   const reservations = await prisma.reservation.findMany({
     where: buildReservationWhere({
       tenantId, locationId, statusList: CONFIRMED_STATUSES,
@@ -304,15 +397,17 @@ async function computeData({ tenantId, from, to, query }, deps = {}) {
     select: { id: true, vehicleTypeId: true, pickupAt: true, returnAt: true, createdAt: true },
   });
 
-  // 3. Per-type daily availability
+  // 3. Per-type daily availability. `days` are tenant-TZ-anchored midnight
+  // instants; each reservation's pickup/return are floored to its tenant-TZ
+  // day so the overlap math is consistent across the AST boundary.
   const typesOut = vehicleTypes.map((vt) => {
     const capacity = vt.vehicles.length;
     const reservedByDay = days.map((d) => {
       let count = 0;
       for (const r of reservations) {
         if (r.vehicleTypeId !== vt.id) continue;
-        const pickup = startOfDay(new Date(r.pickupAt));
-        const ret = startOfDay(new Date(r.returnAt));
+        const pickup = startOfDayInTz(new Date(r.pickupAt), tz);
+        const ret = startOfDayInTz(new Date(r.returnAt), tz);
         if (pickup <= d && d < ret) count += 1;
       }
       return count;
@@ -358,7 +453,7 @@ async function computeData({ tenantId, from, to, query }, deps = {}) {
       }));
     if (atRiskTypes.length === 0) return null;
     return {
-      iso: isoDay(d), label: dayLabel(d),
+      iso: isoDayInTz(d, tz), label: dayLabelInTz(d, tz),
       fleetAvailable: fleetAvailableByDay[i],
       fleetCapacity,
       pctFleetFree: fleetCapacity > 0
@@ -391,7 +486,7 @@ async function computeData({ tenantId, from, to, query }, deps = {}) {
     try {
       const bypassCache = !!deps.prisma || !!deps.bypassCache;
       const compute = () => computeSoldOutByMonth({
-        prisma, tenantId, locationId, vehicleTypes, monthsBack: SOLDOUT_LOOKBACK_MONTHS,
+        prisma, tenantId, locationId, vehicleTypes, monthsBack: SOLDOUT_LOOKBACK_MONTHS, tz,
       });
       if (bypassCache) {
         soldOutByMonth = await compute();
@@ -406,7 +501,7 @@ async function computeData({ tenantId, from, to, query }, deps = {}) {
 
   return {
     range: { from: fromDate.toISOString(), to: toDate.toISOString() },
-    days: days.map((d) => ({ iso: isoDay(d), label: dayLabel(d) })),
+    days: days.map((d) => ({ iso: isoDayInTz(d, tz), label: dayLabelInTz(d, tz) })),
     fleet: {
       capacity: fleetCapacity,
       reservedByDay: fleetReservedByDay,
@@ -414,8 +509,8 @@ async function computeData({ tenantId, from, to, query }, deps = {}) {
       utilizationByDay,
       utilizationPct,
       peakDay: {
-        iso: isoDay(peakDay),
-        label: dayLabel(peakDay),
+        iso: isoDayInTz(peakDay, tz),
+        label: dayLabelInTz(peakDay, tz),
         reserved: peakReserved,
         availableLeft: Math.max(0, fleetCapacity - peakReserved),
       },
@@ -426,6 +521,7 @@ async function computeData({ tenantId, from, to, query }, deps = {}) {
     bookingPace,
     lastYear,
     soldOutByMonth,
+    tenantTimeZone: tz,
     filters: { locationId },
     truncated: numDays > MAX_DAYS,
   };
@@ -437,6 +533,7 @@ async function computeData({ tenantId, from, to, query }, deps = {}) {
 
 async function cellDrillDownHandler(req, res, { tenantId }) {
   const prisma = await resolveDefaultPrisma();
+  const tz = await resolveTenantTimeZone(tenantId);
   const typeId = (req.query?.type || req.query?.typeId || '').toString();
   const dayIso = (req.query?.day || '').toString();
   const locationId = req.query?.locationId ? String(req.query.locationId) : null;
@@ -445,11 +542,13 @@ async function cellDrillDownHandler(req, res, { tenantId }) {
     return res.status(400).json({ error: 'type and day query params required' });
   }
 
-  const day = startOfDay(new Date(dayIso));
-  if (Number.isNaN(day.getTime())) {
+  // Day boundaries in tenant TZ so the [day, dayEnd) window matches the
+  // bucketing in computeData.
+  const day = startOfDayInTz(dayIso, tz);
+  if (!day || Number.isNaN(day.getTime())) {
     return res.status(400).json({ error: 'day must be an ISO date (YYYY-MM-DD)' });
   }
-  const dayEnd = addDays(day, 1);
+  const dayEnd = addDaysInTz(day, 1);
 
   const where = {
     tenantId,
@@ -485,8 +584,9 @@ async function cellDrillDownHandler(req, res, { tenantId }) {
 
   return res.json({
     type,
-    day: { iso: isoDay(day), label: dayLabel(day) },
+    day: { iso: isoDayInTz(day, tz), label: dayLabelInTz(day, tz) },
     locationId,
+    tenantTimeZone: tz,
     reservations: reservations.map((r) => ({
       id: r.id,
       reservationNumber: r.reservationNumber,
