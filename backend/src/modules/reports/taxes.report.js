@@ -36,6 +36,7 @@ import {
   isoDayInTz,
   dayLabelInTz,
 } from '../../lib/date-utils.js';
+import { resolveTenantTimeZone } from '../../lib/tenant-tz.js';
 
 const TAX = 'TAX';
 const NON_REVENUE_CHARGE_TYPES = new Set(['TAX', 'DEPOSIT']);
@@ -89,7 +90,10 @@ function buildChargeWhere({ tenantId, locationId, gte, lt }) {
  *   - byDay:      Map of iso → { taxCollected, taxableBase } for chart
  *   - totals:     fleet-level rollup
  */
-function aggregate(charges) {
+// `tz` (2nd arg) defaults to PR so the unit tests keep working without
+// piping a tenant lookup through them. Production callers (computeData)
+// override with the resolved tenant timezone.
+function aggregate(charges, tz = DEFAULT_TENANT_TIMEZONE) {
   const taxByName = new Map();
   const dayMap = new Map(); // iso → { taxCollected, taxableBase }
   let taxCollected = 0;
@@ -103,8 +107,8 @@ function aggregate(charges) {
     const amt = num(c.total);
     const ct = String(c.chargeType || '').toUpperCase();
     const agreementId = c.rentalAgreement?.id || null;
-    const pickup = c.rentalAgreement?.pickupAt ? startOfDay(new Date(c.rentalAgreement.pickupAt)) : null;
-    const isoKey = pickup ? isoDay(pickup) : null;
+    const pickup = c.rentalAgreement?.pickupAt ? startOfDayInTz(new Date(c.rentalAgreement.pickupAt), tz) : null;
+    const isoKey = pickup ? isoDayInTz(pickup, tz) : null;
     if (agreementId) allAgreementIds.add(agreementId);
 
     if (ct === TAX) {
@@ -172,15 +176,22 @@ async function computeData({ tenantId, from, to, query }, deps = {}) {
   const prisma = deps.prisma || (await resolveDefaultPrisma());
   if (!tenantId) throw new Error('tenantId required');
 
+  // Resolve tenant TZ once + shadow the date helpers so every bucket inside
+  // computeData (and aggregate via the `tz` arg) runs on the tenant zone.
+  const tenantTz = deps.tenantTz || (await resolveTenantTimeZone(tenantId));
+  const startOfDay   = (d)    => startOfDayInTz(d, tenantTz);
+  const startOfMonth = (d)    => startOfMonthInTz(d, tenantTz);
+  const addDays      = (d, n) => addDaysInTz(d, n);
+  const isoDay       = (d)    => isoDayInTz(d, tenantTz);
+  const dayLabel     = (d)    => dayLabelInTz(d, tenantTz);
+
   const locationId = (query && query.locationId) || null;
 
   const now = (deps && deps.now) || new Date();
-  // Pass the raw query string into startOfDay so it's interpreted as
-  // "YYYY-MM-DD in tenant TZ" — wrapping in new Date(from) first parses
-  // it as UTC midnight and we'd lose the day to the PREVIOUS PR-TZ day.
+  // Raw query string → tenant TZ midnight.
   const fromDate = from ? startOfDay(from) : startOfMonth(now);
   const toDate   = to   ? startOfDay(to)   : startOfDay(now);
-  const numDays = daysBetween(fromDate, toDate);
+  const numDays = Math.max(1, Math.round((toDate - fromDate) / DAY_MS) + 1);
   const safeNumDays = Math.min(numDays, MAX_DAYS);
   const windowEnd = addDays(fromDate, safeNumDays);
   const truncated = numDays > MAX_DAYS;
@@ -198,7 +209,7 @@ async function computeData({ tenantId, from, to, query }, deps = {}) {
     },
   });
 
-  const agg = aggregate(charges);
+  const agg = aggregate(charges, tenantTz);
 
   // Build day skeleton so empty days render as zeros
   const byDay = [];
@@ -228,6 +239,7 @@ async function computeData({ tenantId, from, to, query }, deps = {}) {
     byCategory: agg.byCategory,
     byDay,
     peakDay: peakDay && peakDay.taxCollected > 0 ? peakDay : null,
+    tenantTimeZone: tenantTz,
     filters: { locationId },
   };
 }

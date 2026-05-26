@@ -34,6 +34,7 @@ import {
   isoDayInTz,
   dayLabelInTz,
 } from '../../lib/date-utils.js';
+import { resolveTenantTimeZone } from '../../lib/tenant-tz.js';
 import { cache } from '../../lib/cache.js';
 import { tenantKey } from '../../lib/cache/tenantKey.js';
 
@@ -53,37 +54,39 @@ const CACHE_TTL_MS = 5 * 60 * 1000;
 
 function num(v) { const n = Number(v); return Number.isFinite(n) ? n : 0; }
 
-// 2026-05-26: tz-aware date helpers (see sales.report.js for rationale).
-function startOfDay(d)   { return startOfDayInTz(d, DEFAULT_TENANT_TIMEZONE); }
-function startOfMonth(d) { return startOfMonthInTz(d, DEFAULT_TENANT_TIMEZONE); }
-function addDays(d, n)   { return addDaysInTz(d, n); }
-function addMonths(d, n) { return addMonthsInTz(d, n, DEFAULT_TENANT_TIMEZONE); }
-function isoDay(d)       { return isoDayInTz(d, DEFAULT_TENANT_TIMEZONE); }
-function dayLabel(d)     { return dayLabelInTz(d, DEFAULT_TENANT_TIMEZONE); }
+// 2026-05-26: tz-aware date helpers. These default-shadow helpers exist for
+// callers that don't have a resolved tenantTz handy (e.g. tests that pass
+// no tenant). computeData shadows these inside its own closure with the
+// resolved tenantTz so per-tenant timezones are honored end-to-end.
+function startOfDay(d, tz = DEFAULT_TENANT_TIMEZONE)   { return startOfDayInTz(d, tz); }
+function startOfMonth(d, tz = DEFAULT_TENANT_TIMEZONE) { return startOfMonthInTz(d, tz); }
+function addDays(d, n)                                  { return addDaysInTz(d, n); }
+function addMonths(d, n, tz = DEFAULT_TENANT_TIMEZONE) { return addMonthsInTz(d, n, tz); }
+function isoDay(d, tz = DEFAULT_TENANT_TIMEZONE)       { return isoDayInTz(d, tz); }
+function dayLabel(d, tz = DEFAULT_TENANT_TIMEZONE)     { return dayLabelInTz(d, tz); }
 
-// Week-start helper — anchored to PR Monday midnight. JS getUTCDay() reads
-// the day of week from the UTC components of the Date; we first floor to PR
-// midnight, then subtract enough UTC days to land on Monday. PR has no DST so
-// 24h math is correct.
-function startOfIsoWeek(d) {
-  const dayStart = startOfDay(d);
-  // The PR-midnight Date carries the UTC weekday (e.g. PR Monday midnight =
-  // UTC 04:00 same Monday). Subtract offset days to land on Monday.
+// Week-start helper — anchored to tenant-TZ Monday midnight. We floor to
+// tenant-TZ midnight first; the resulting Date carries the UTC weekday for
+// that wall-clock instant. Subtract offset days to land on Monday. PR has no
+// DST so 24h math is correct; tenants in DST zones bias the offset by their
+// fixed weekday at tenant midnight.
+function startOfIsoWeek(d, tz = DEFAULT_TENANT_TIMEZONE) {
+  const dayStart = startOfDay(d, tz);
   const wd = dayStart.getUTCDay(); // 0=Sun..6=Sat
   const offset = (wd + 6) % 7;     // 0 if Monday
   return addDays(dayStart, -offset);
 }
 
-function daysBetween(from, to) {
-  return Math.max(1, Math.round((startOfDay(to) - startOfDay(from)) / DAY_MS) + 1);
+function daysBetween(from, to, tz = DEFAULT_TENANT_TIMEZONE) {
+  return Math.max(1, Math.round((startOfDay(to, tz) - startOfDay(from, tz)) / DAY_MS) + 1);
 }
 
-function weekLabel(d)  {
-  const parts = new Intl.DateTimeFormat('en-US', { timeZone: DEFAULT_TENANT_TIMEZONE, month: 'short', day: 'numeric' }).format(d);
+function weekLabel(d, tz = DEFAULT_TENANT_TIMEZONE)  {
+  const parts = new Intl.DateTimeFormat('en-US', { timeZone: tz, month: 'short', day: 'numeric' }).format(d);
   return `Week of ${parts.replace(',', '')}`;
 }
-function monthLabel(d) {
-  const parts = new Intl.DateTimeFormat('en-US', { timeZone: DEFAULT_TENANT_TIMEZONE, month: 'short', year: 'numeric' }).format(d);
+function monthLabel(d, tz = DEFAULT_TENANT_TIMEZONE) {
+  const parts = new Intl.DateTimeFormat('en-US', { timeZone: tz, month: 'short', year: 'numeric' }).format(d);
   return parts.replace(',', '');
 }
 
@@ -121,14 +124,14 @@ async function resolveDefaultPrisma() {
  *   typeIds:     string[] (vehicle type ids in order matching capacity array)
  *   reservations: [{ vehicleTypeId, pickupAt, returnAt }]
  */
-function buildDailyCounts(days, typeIds, reservations) {
+function buildDailyCounts(days, typeIds, reservations, tz = DEFAULT_TENANT_TIMEZONE) {
   const fleetReserved = new Array(days.length).fill(0);
   const typeReserved = typeIds.map(() => new Array(days.length).fill(0));
   const typeIdx = new Map(typeIds.map((id, i) => [id, i]));
 
   for (const r of reservations) {
-    const pickup = startOfDay(new Date(r.pickupAt));
-    const ret = startOfDay(new Date(r.returnAt));
+    const pickup = startOfDay(new Date(r.pickupAt), tz);
+    const ret = startOfDay(new Date(r.returnAt), tz);
     const ti = typeIdx.get(r.vehicleTypeId);
     for (let i = 0; i < days.length; i++) {
       const d = days[i];
@@ -145,11 +148,11 @@ function buildDailyCounts(days, typeIds, reservations) {
  * Bucket a day-indexed series into weekly or monthly buckets. Returns an
  * array of { iso, label, daysInBucket, sumReserved } objects.
  */
-function bucketDailySeries(days, fleetReserved, granularity) {
+function bucketDailySeries(days, fleetReserved, granularity, tz = DEFAULT_TENANT_TIMEZONE) {
   if (granularity === 'day') {
     return days.map((d, i) => ({
-      iso: isoDay(d),
-      label: dayLabel(d),
+      iso: isoDay(d, tz),
+      label: dayLabel(d, tz),
       daysInBucket: 1,
       sumReserved: fleetReserved[i],
     }));
@@ -159,12 +162,12 @@ function bucketDailySeries(days, fleetReserved, granularity) {
   let cursor = null;
   for (let i = 0; i < days.length; i++) {
     const d = days[i];
-    const key = granularity === 'week' ? startOfIsoWeek(d) : startOfMonth(d);
+    const key = granularity === 'week' ? startOfIsoWeek(d, tz) : startOfMonth(d, tz);
     if (!cursor || cursor.key.getTime() !== key.getTime()) {
       cursor = {
         key,
-        iso: isoDay(key),
-        label: granularity === 'week' ? weekLabel(key) : monthLabel(key),
+        iso: isoDay(key, tz),
+        label: granularity === 'week' ? weekLabel(key, tz) : monthLabel(key, tz),
         daysInBucket: 0,
         sumReserved: 0,
       };
@@ -206,6 +209,13 @@ async function computeData(params, deps = {}) {
 async function computeDataInner({ tenantId, from, to, query }, deps = {}) {
   const prisma = deps.prisma || (await resolveDefaultPrisma());
 
+  const tenantTz = deps.tenantTz || (await resolveTenantTimeZone(tenantId));
+  // Shadow the module-level helpers with tenantTz-bound versions so the rest
+  // of computeData and its callees naturally honor the tenant's timezone.
+  const startOfDay   = (d)    => startOfDayInTz(d, tenantTz);
+  const startOfMonth = (d)    => startOfMonthInTz(d, tenantTz);
+  const addDays      = (d, n) => addDaysInTz(d, n);
+
   const locationId = (query && query.locationId) || null;
   const includeLastYear = query && (query.compareLastYear === 'true' || query.compareLastYear === '1');
 
@@ -214,7 +224,7 @@ async function computeDataInner({ tenantId, from, to, query }, deps = {}) {
   // Raw query strings → tenant-TZ midnight (don't wrap in new Date first).
   const fromDate = from ? startOfDay(from) : addDays(startOfDay(now), -29);
   const toDate   = to   ? startOfDay(to)   : startOfDay(now);
-  const rangeDays = daysBetween(fromDate, toDate);
+  const rangeDays = daysBetween(fromDate, toDate, tenantTz);
   const safeRangeDays = Math.min(rangeDays, MAX_DAYS);
   const truncated = rangeDays > MAX_DAYS;
 
@@ -245,10 +255,10 @@ async function computeDataInner({ tenantId, from, to, query }, deps = {}) {
   });
 
   // Per-day counts (fleet + per-type)
-  const { fleetReserved, typeReserved } = buildDailyCounts(days, typeIds, reservations);
+  const { fleetReserved, typeReserved } = buildDailyCounts(days, typeIds, reservations, tenantTz);
 
   // Bucket into the chosen granularity
-  const rawBuckets = bucketDailySeries(days, fleetReserved, granularity);
+  const rawBuckets = bucketDailySeries(days, fleetReserved, granularity, tenantTz);
   const buckets = rawBuckets.map((b) => ({
     iso: b.iso,
     label: b.label,
@@ -289,7 +299,7 @@ async function computeDataInner({ tenantId, from, to, query }, deps = {}) {
   if (includeLastYear) {
     try {
       lastYear = await computeLastYear({
-        prisma, tenantId, locationId, fromDate, days, granularity, fleetCapacity, typeIds,
+        prisma, tenantId, locationId, fromDate, days, granularity, fleetCapacity, typeIds, tenantTz,
       });
     } catch (err) {
       lastYear = { buckets: null, averageUtilization: null, sampleSize: 0, hasData: false, error: String(err?.message || err) };
@@ -301,6 +311,7 @@ async function computeDataInner({ tenantId, from, to, query }, deps = {}) {
     granularity,
     rangeDays: safeRangeDays,
     truncated,
+    tenantTimeZone: tenantTz,
     fleet: {
       capacity: fleetCapacity,
       buckets,
@@ -331,7 +342,7 @@ async function loadActiveReservations({ prisma, tenantId, locationId, fromDate, 
   });
 }
 
-async function computeLastYear({ prisma, tenantId, locationId, fromDate, days, granularity, fleetCapacity, typeIds }) {
+async function computeLastYear({ prisma, tenantId, locationId, fromDate, days, granularity, fleetCapacity, typeIds, tenantTz = DEFAULT_TENANT_TIMEZONE }) {
   const lyFrom = addDays(fromDate, -365);
   const lyEnd = addDays(lyFrom, days.length);
   const lyDays = days.map((_, i) => addDays(lyFrom, i));
@@ -344,8 +355,8 @@ async function computeLastYear({ prisma, tenantId, locationId, fromDate, days, g
     return { buckets: null, averageUtilization: null, sampleSize: 0, hasData: false };
   }
 
-  const { fleetReserved } = buildDailyCounts(lyDays, typeIds, reservations);
-  const rawBuckets = bucketDailySeries(lyDays, fleetReserved, granularity);
+  const { fleetReserved } = buildDailyCounts(lyDays, typeIds, reservations, tenantTz);
+  const rawBuckets = bucketDailySeries(lyDays, fleetReserved, granularity, tenantTz);
   const buckets = rawBuckets.map((b) => ({
     iso: b.iso,
     label: b.label,

@@ -33,6 +33,7 @@ import {
   isoDayInTz,
   dayLabelInTz,
 } from '../../lib/date-utils.js';
+import { resolveTenantTimeZone } from '../../lib/tenant-tz.js';
 
 const TAX_CHARGE_TYPE = 'TAX';
 const DEFAULT_TOP_N = 10;
@@ -94,7 +95,11 @@ function buildChargeWhere({ tenantId, locationId, gte, lt }) {
  * (and optional rentalAgreement.pickupAt for peak-day), return the
  * Top-N + Other rollup, tax breakdown, and peak day.
  */
-function aggregate(charges, topN = DEFAULT_TOP_N) {
+// `tz` (3rd arg) defaults to PR so the pure-aggregation test cases keep
+// passing without piping a tenant lookup through them. Production callers
+// (computeData) override it with the resolved tenant timezone so the
+// peak-day bucketing matches the rest of the report.
+function aggregate(charges, topN = DEFAULT_TOP_N, tz = DEFAULT_TENANT_TIMEZONE) {
   const salesCharges = [];
   const taxCharges = [];
   for (const c of charges) {
@@ -157,9 +162,9 @@ function aggregate(charges, topN = DEFAULT_TOP_N) {
   const dayAmounts = new Map();
   for (const c of salesCharges) {
     if (!c.rentalAgreement?.pickupAt) continue;
-    const day = startOfDay(new Date(c.rentalAgreement.pickupAt));
-    const iso = isoDay(day);
-    if (!dayAmounts.has(iso)) dayAmounts.set(iso, { iso, label: dayLabel(day), amount: 0 });
+    const day = startOfDayInTz(new Date(c.rentalAgreement.pickupAt), tz);
+    const iso = isoDayInTz(day, tz);
+    if (!dayAmounts.has(iso)) dayAmounts.set(iso, { iso, label: dayLabelInTz(day, tz), amount: 0 });
     const entry = dayAmounts.get(iso);
     entry.amount = moneyRound(entry.amount + num(c.total));
   }
@@ -200,16 +205,25 @@ async function computeData({ tenantId, from, to, query }, deps = {}) {
   const prisma = deps.prisma || (await resolveDefaultPrisma());
   if (!tenantId) throw new Error('tenantId required');
 
+  // Resolve tenant TZ once, then shadow the file-level startOfDay etc with
+  // tenant-aware versions. The original wrappers (pinned to PR) remain in
+  // place for tests that destructure them from _salesInternal, but every
+  // path inside computeData now runs on the resolved tenant timezone.
+  const tenantTz = deps.tenantTz || (await resolveTenantTimeZone(tenantId));
+  const startOfDay   = (d)    => startOfDayInTz(d, tenantTz);
+  const startOfMonth = (d)    => startOfMonthInTz(d, tenantTz);
+  const addDays      = (d, n) => addDaysInTz(d, n);
+
   const locationId = (query && query.locationId) || null;
   const topN = Math.max(1, Math.min(MAX_TOP_N, Number(query?.topN) || DEFAULT_TOP_N));
 
   const now = new Date();
   // Pass the raw query string into startOfDay so it's interpreted as
   // "YYYY-MM-DD in tenant TZ" — wrapping in new Date(from) first parses
-  // it as UTC midnight and we'd lose the day to the PREVIOUS PR-TZ day.
+  // it as UTC midnight and we'd lose the day to the PREVIOUS tenant-TZ day.
   const fromDate = from ? startOfDay(from) : startOfMonth(now);
   const toDate = to ? startOfDay(to) : startOfDay(now);
-  const numDays = daysBetween(fromDate, toDate);
+  const numDays = Math.max(1, Math.round((toDate - fromDate) / DAY_MS) + 1);
   const safeNumDays = Math.min(numDays, MAX_DAYS);
   const windowEnd = addDays(fromDate, safeNumDays);
 
@@ -225,7 +239,7 @@ async function computeData({ tenantId, from, to, query }, deps = {}) {
     },
   });
 
-  const agg = aggregate(charges, topN);
+  const agg = aggregate(charges, topN, tenantTz);
 
   return {
     range: { from: fromDate.toISOString(), to: addDays(windowEnd, -1).toISOString() },
@@ -242,6 +256,7 @@ async function computeData({ tenantId, from, to, query }, deps = {}) {
     peakDay: agg.peakDay,
     categoryCount: agg.distinctCategoryCount,
     topN,
+    tenantTimeZone: tenantTz,
     filters: { locationId },
     truncated: numDays > MAX_DAYS,
   };
@@ -253,6 +268,11 @@ async function computeData({ tenantId, from, to, query }, deps = {}) {
 
 async function categoryDrillDownHandler(req, res, { tenantId }) {
   const prisma = await resolveDefaultPrisma();
+  const tenantTz = await resolveTenantTimeZone(tenantId);
+  const startOfDay   = (d)    => startOfDayInTz(d, tenantTz);
+  const startOfMonth = (d)    => startOfMonthInTz(d, tenantTz);
+  const addDays      = (d, n) => addDaysInTz(d, n);
+
   const namesParam = (req.query?.names || req.query?.name || '').toString();
   const names = namesParam.split(',').map((s) => s.trim()).filter(Boolean);
   if (names.length === 0) {
@@ -260,13 +280,14 @@ async function categoryDrillDownHandler(req, res, { tenantId }) {
   }
 
   const locationId = req.query?.locationId ? String(req.query.locationId) : null;
-  const from = req.query?.from ? new Date(req.query.from) : null;
-  const to = req.query?.to ? new Date(req.query.to) : null;
-  if (from && Number.isNaN(from.getTime())) return res.status(400).json({ error: 'invalid from date' });
-  if (to && Number.isNaN(to.getTime()))     return res.status(400).json({ error: 'invalid to date' });
+  // Accept raw query strings (YYYY-MM-DD) or fall back to standard validation.
+  const fromRaw = req.query?.from ? String(req.query.from) : null;
+  const toRaw   = req.query?.to   ? String(req.query.to)   : null;
+  if (fromRaw && Number.isNaN(new Date(fromRaw).getTime())) return res.status(400).json({ error: 'invalid from date' });
+  if (toRaw   && Number.isNaN(new Date(toRaw).getTime()))   return res.status(400).json({ error: 'invalid to date' });
 
-  const fromDate = from ? startOfDay(from) : startOfMonth(new Date());
-  const toDate = to ? startOfDay(to) : startOfDay(new Date());
+  const fromDate = fromRaw ? startOfDay(fromRaw) : startOfMonth(new Date());
+  const toDate   = toRaw   ? startOfDay(toRaw)   : startOfDay(new Date());
   const windowEnd = addDays(toDate, 1);
 
   const charges = await prisma.rentalAgreementCharge.findMany({

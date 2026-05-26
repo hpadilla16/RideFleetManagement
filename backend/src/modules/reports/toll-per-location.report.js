@@ -30,6 +30,7 @@ import {
   isoDayInTz,
   dayLabelInTz,
 } from '../../lib/date-utils.js';
+import { resolveTenantTimeZone } from '../../lib/tenant-tz.js';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const MAX_DAYS = 365;
@@ -43,14 +44,16 @@ const UNKNOWN_PLAZA_LABEL = 'Unknown plaza';
 function num(v) { const n = Number(v); return Number.isFinite(n) ? n : 0; }
 function moneyRound(n) { return Math.round(n * 100) / 100; }
 
-// 2026-05-26: tz-aware date helpers (see sales.report.js for rationale).
-function startOfDay(d) { return startOfDayInTz(d, DEFAULT_TENANT_TIMEZONE); }
-function addDays(d, n) { return addDaysInTz(d, n); }
-function isoDay(d)     { return isoDayInTz(d, DEFAULT_TENANT_TIMEZONE); }
-function dayLabel(d)   { return dayLabelInTz(d, DEFAULT_TENANT_TIMEZONE); }
+// 2026-05-26: tz-aware date helpers. Module-level defaults remain bound to
+// DEFAULT_TENANT_TIMEZONE for callers (tests, drill-down with no resolved
+// tenant). computeData shadows these with tenantTz-bound versions.
+function startOfDay(d, tz = DEFAULT_TENANT_TIMEZONE) { return startOfDayInTz(d, tz); }
+function addDays(d, n)                                { return addDaysInTz(d, n); }
+function isoDay(d, tz = DEFAULT_TENANT_TIMEZONE)     { return isoDayInTz(d, tz); }
+function dayLabel(d, tz = DEFAULT_TENANT_TIMEZONE)   { return dayLabelInTz(d, tz); }
 
-function daysBetween(from, to) {
-  return Math.max(1, Math.round((startOfDay(to) - startOfDay(from)) / DAY_MS) + 1);
+function daysBetween(from, to, tz = DEFAULT_TENANT_TIMEZONE) {
+  return Math.max(1, Math.round((startOfDay(to, tz) - startOfDay(from, tz)) / DAY_MS) + 1);
 }
 
 // ---------------------------------------------------------------------------
@@ -142,11 +145,11 @@ function aggregateByPlaza(transactions) {
   return plazas;
 }
 
-function formatTransaction(t) {
+function formatTransaction(t, tz = DEFAULT_TENANT_TIMEZONE) {
   return {
     id: t.id,
     transactionAt: t.transactionAt,
-    transactionLabel: t.transactionAt ? `${dayLabel(new Date(t.transactionAt))}` : null,
+    transactionLabel: t.transactionAt ? `${dayLabel(new Date(t.transactionAt), tz)}` : null,
     amount: num(t.amount),
     location: t.location || null,
     lane: t.lane || null,
@@ -168,13 +171,18 @@ async function computeData({ tenantId, from, to, query }, deps = {}) {
   const prisma = deps.prisma || (await resolveDefaultPrisma());
   if (!tenantId) throw new Error('tenantId required');
 
+  const tenantTz = deps.tenantTz || (await resolveTenantTimeZone(tenantId));
+  // Shadow date helpers with tenantTz-bound versions for the rest of compute.
+  const startOfDay = (d)    => startOfDayInTz(d, tenantTz);
+  const addDays    = (d, n) => addDaysInTz(d, n);
+
   const locationId = (query && query.locationId) || null;
 
   const now = (deps && deps.now) || new Date();
   // Raw query strings → tenant-TZ midnight (don't wrap in new Date first).
   const fromDate = from ? startOfDay(from) : addDays(startOfDay(now), -29);
   const toDate   = to   ? startOfDay(to)   : startOfDay(now);
-  const numDays = daysBetween(fromDate, toDate);
+  const numDays = daysBetween(fromDate, toDate, tenantTz);
   const safeNumDays = Math.min(numDays, MAX_DAYS);
   const windowEnd = addDays(fromDate, safeNumDays);
   const truncated = numDays > MAX_DAYS;
@@ -203,6 +211,7 @@ async function computeData({ tenantId, from, to, query }, deps = {}) {
     range: { from: fromDate.toISOString(), to: addDays(windowEnd, -1).toISOString() },
     rangeDays: safeNumDays,
     truncated,
+    tenantTimeZone: tenantTz,
     totals: {
       amount: totalAmount,
       count: totalCount,
@@ -223,6 +232,10 @@ async function computeData({ tenantId, from, to, query }, deps = {}) {
 
 async function plazaDrillDownHandler(req, res, { tenantId }) {
   const prisma = await resolveDefaultPrisma();
+  const tenantTz = await resolveTenantTimeZone(tenantId);
+  const startOfDay = (d)    => startOfDayInTz(d, tenantTz);
+  const addDays    = (d, n) => addDaysInTz(d, n);
+
   const plazaRaw = (req.query?.plaza || '').toString();
   const locationId = req.query?.locationId ? String(req.query.locationId) : null;
   const from = req.query?.from ? new Date(req.query.from) : null;
@@ -268,7 +281,8 @@ async function plazaDrillDownHandler(req, res, { tenantId }) {
     locationId,
     totalAmount,
     transactionCount: transactions.length,
-    transactions: transactions.map(formatTransaction),
+    tenantTimeZone: tenantTz,
+    transactions: transactions.map((t) => formatTransaction(t, tenantTz)),
   });
 }
 

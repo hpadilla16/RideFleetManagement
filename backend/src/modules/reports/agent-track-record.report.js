@@ -15,6 +15,7 @@
 
 import { registerReport } from './reports-v2.routes.js';
 import { DEFAULT_TENANT_TIMEZONE } from '../../lib/date-utils.js';
+import { resolveTenantTimeZone } from '../../lib/tenant-tz.js';
 
 const SERVICE_CATALOG = [
   { slug: 'TOLLS',             label: 'Tolls',             codes: ['TOLLS', 'TOLL'],                  namePatterns: [/tolls?/i],             commPerSale: 1, benchmark: '85%+' },
@@ -42,11 +43,12 @@ function daysBetween(a, b) {
 // 2026-05-26: tz-aware month bucketing. Server-local getMonth() / new
 // Date(y, m, 1) shifted late-evening events into the next UTC month, so a
 // PR Jan 31 11 PM rental was getting bucketed under February. Now anchored
-// in tenant TZ via Intl.
-function monthKey(d) {
+// in tenant TZ via Intl. tz defaults to PR for legacy callers; computeData
+// passes the resolved tenant timezone.
+function monthKey(d, tz = DEFAULT_TENANT_TIMEZONE) {
   const dt = d instanceof Date ? d : new Date(d);
   const parts = new Intl.DateTimeFormat('en-CA', {
-    timeZone: DEFAULT_TENANT_TIMEZONE,
+    timeZone: tz,
     year: 'numeric', month: '2-digit'
   }).formatToParts(dt).reduce((acc, p) => {
     if (p.type !== 'literal') acc[p.type] = p.value;
@@ -61,12 +63,12 @@ function monthLabel(key) {
   return `${names[Number(m) - 1]} ${y}`;
 }
 
-function rangeMonths(from, to) {
+function rangeMonths(from, to, tz = DEFAULT_TENANT_TIMEZONE) {
   const out = [];
   // Walk monthKey strings rather than Date objects so the iteration is
   // anchored in tenant TZ end-to-end. Limited to 24 iterations defensively.
-  const startKey = monthKey(from);
-  const endKey = monthKey(to);
+  const startKey = monthKey(from, tz);
+  const endKey = monthKey(to, tz);
   let cur = startKey;
   let safety = 0;
   while (cur <= endKey && safety++ < 24) {
@@ -105,6 +107,8 @@ async function computeData({ tenantId, from, to }, deps = {}) {
   const prisma = deps.prisma || (await resolveDefaultPrisma());
   if (!tenantId) throw new Error('tenantId required');
 
+  const tenantTz = deps.tenantTz || (await resolveTenantTimeZone(tenantId));
+
   // Default: last 5 calendar months ending today
   const toDate = to ? new Date(to) : new Date();
   let fromDate;
@@ -114,7 +118,7 @@ async function computeData({ tenantId, from, to }, deps = {}) {
     fromDate = new Date(toDate.getFullYear(), toDate.getMonth() - 4, 1);
   }
 
-  const months = rangeMonths(fromDate, toDate);
+  const months = rangeMonths(fromDate, toDate, tenantTz);
 
   const agreements = await prisma.rentalAgreement.findMany({
     where: {
@@ -146,7 +150,7 @@ async function computeData({ tenantId, from, to }, deps = {}) {
   for (const ag of agreements) {
     const bucketDate = ag.finalizedAt || ag.closedAt;
     if (!bucketDate) continue;
-    const mk = monthKey(bucketDate);
+    const mk = monthKey(bucketDate, tenantTz);
     if (!teamByMonth.has(mk)) continue; // shouldn't happen with the where clause, but guard anyway
 
     const clerkId = ag.salesOwnerUserId || '__unassigned__';
@@ -283,6 +287,7 @@ async function computeData({ tenantId, from, to }, deps = {}) {
 
   return {
     range: { from: fromDate.toISOString(), to: toDate.toISOString() },
+    tenantTimeZone: tenantTz,
     months,
     monthLabels: months.map(monthLabel),
     services: SERVICE_CATALOG.map((s) => ({ slug: s.slug, label: s.label, commPerSale: s.commPerSale, benchmark: s.benchmark })),

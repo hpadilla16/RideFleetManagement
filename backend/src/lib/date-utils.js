@@ -70,47 +70,80 @@ export function parseDateTimeInTz(value, tenantTz = DEFAULT_TENANT_TIMEZONE) {
   const se = seStr ? Number(seStr) : 0;
   const ms = msStr ? Number(String(msStr).padEnd(3, '0').slice(0, 3)) : 0;
 
-  // Step 1: build a Date treating those components as UTC.
+  // Build a Date treating the requested wall-clock components as UTC.
   const naiveUtc = new Date(Date.UTC(Y, M - 1, D, h, mi, se, ms));
   if (Number.isNaN(naiveUtc.getTime())) return null;
 
-  // Step 2: ask Intl what those same wall-clock components would look like
-  //         when rendered in tenantTz. The delta naiveUtc - tzRendered is
-  //         exactly the offset of tenantTz from UTC at that wall-clock moment.
-  //         Intl.DateTimeFormat truncates to second resolution, so we strip
-  //         milliseconds off the probe value before formatting and re-apply
-  //         them when constructing the final result.
+  // Helper: render a Date in tenantTz and read its wall-clock components.
+  // Intl truncates to second resolution; we strip milliseconds from the
+  // probe and re-apply them at the end so 11:19:30.500 ASTroundtrips clean.
+  const renderInTz = (utcDate) => {
+    try {
+      return new Intl.DateTimeFormat('en-US', {
+        timeZone: tenantTz,
+        year: 'numeric', month: '2-digit', day: '2-digit',
+        hour: '2-digit', minute: '2-digit', second: '2-digit',
+        hour12: false
+      }).formatToParts(utcDate).reduce((acc, p) => {
+        if (p.type !== 'literal') acc[p.type] = p.value;
+        return acc;
+      }, {});
+    } catch {
+      return null;
+    }
+  };
+
+  const partsToUtcMs = (parts) => {
+    if (!parts) return NaN;
+    const hh = parts.hour === '24' ? '0' : parts.hour;
+    return Date.UTC(
+      Number(parts.year),
+      Number(parts.month) - 1,
+      Number(parts.day),
+      Number(hh),
+      Number(parts.minute),
+      Number(parts.second)
+    );
+  };
+
+  // Initial guess: pretend the wall-clock components ARE UTC, read the offset
+  // of tenantTz at that moment, then shift by that offset. This is correct
+  // outside of DST transitions.
   const probeUtc = new Date(Date.UTC(Y, M - 1, D, h, mi, se, 0));
-  let parts;
-  try {
-    parts = new Intl.DateTimeFormat('en-US', {
-      timeZone: tenantTz,
-      year: 'numeric', month: '2-digit', day: '2-digit',
-      hour: '2-digit', minute: '2-digit', second: '2-digit',
-      hour12: false
-    }).formatToParts(probeUtc).reduce((acc, p) => {
-      if (p.type !== 'literal') acc[p.type] = p.value;
-      return acc;
-    }, {});
-  } catch {
-    // Unknown IANA TZ identifier — bail to naive UTC parse so we don't
-    // hide the misconfiguration behind a worse silent failure.
+  const firstParts = renderInTz(probeUtc);
+  if (!firstParts) {
+    // Unknown IANA TZ — bail to naive UTC parse so we don't silently
+    // mask a misconfiguration with a "close enough" answer.
     return naiveUtc;
   }
+  const initialOffsetMs = probeUtc.getTime() - partsToUtcMs(firstParts);
+  let guess = new Date(naiveUtc.getTime() + initialOffsetMs);
 
-  // Some locales render midnight as hour="24"; coerce to "0" for arithmetic.
-  const tzHour = parts.hour === '24' ? '0' : parts.hour;
-  const tzRendered = new Date(Date.UTC(
-    Number(parts.year),
-    Number(parts.month) - 1,
-    Number(parts.day),
-    Number(tzHour),
-    Number(parts.minute),
-    Number(parts.second)
-  ));
+  // Iterative refinement for DST boundaries. Around spring-forward / fall-
+  // back the offset at the naive instant differs from the offset that
+  // actually applies at the requested local time, so the initial guess can
+  // land an hour off. Render the guess back, compare components, and shift
+  // by the delta. Two iterations cover every real-world case (the second
+  // pass settles tz-day rollovers introduced by the first shift).
+  const target = Date.UTC(Y, M - 1, D, h, mi, se, 0);
+  for (let iter = 0; iter < 2; iter++) {
+    const guessParts = renderInTz(guess);
+    if (!guessParts) break;
+    const renderedMs = partsToUtcMs(guessParts);
+    const diff = target - renderedMs;
+    if (diff === 0) break;
+    // Cap the adjustment at ±25 hours to defend against pathological inputs
+    // (extremely fractional or non-existent month/year combos).
+    const capped = Math.max(-25 * 3600_000, Math.min(25 * 3600_000, diff));
+    guess = new Date(guess.getTime() + capped);
+  }
 
-  const offsetMs = probeUtc.getTime() - tzRendered.getTime();
-  return new Date(naiveUtc.getTime() + offsetMs);
+  // For non-existent spring-forward times (e.g. NY 2:30 AM on the DST jump
+  // day), the iteration converges to a guess whose rendered hour is one
+  // ahead — that's the "skip the gap forward" convention used by most
+  // systems, and matches what JS does internally for new Date('YYYY-MM-DDTHH:mm')
+  // in a DST-observing TZ environment. We accept that as correct.
+  return guess;
 }
 
 /**

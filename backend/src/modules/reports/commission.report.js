@@ -28,6 +28,7 @@ import {
   isoDayInTz,
   dayLabelInTz,
 } from '../../lib/date-utils.js';
+import { resolveTenantTimeZone } from '../../lib/tenant-tz.js';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const MAX_DAYS = 365;
@@ -90,7 +91,9 @@ function buildCommissionWhere({ tenantId, locationId, status, gte, lt }) {
  * { byEmployee, byDay, totals } where rows preserve status-bucketed amounts
  * so the UI can show "paid · approved · pending" splits inline.
  */
-function aggregate(commissionRows) {
+// `tz` (2nd arg) defaults to PR for the unit tests; production paths
+// (computeData) override with the resolved tenant timezone.
+function aggregate(commissionRows, tz = DEFAULT_TENANT_TIMEZONE) {
   const byEmployee = new Map();
   const byDay = new Map();
   const totals = {
@@ -136,7 +139,7 @@ function aggregate(commissionRows) {
 
     // By day (use calculatedAt)
     if (c.calculatedAt) {
-      const dKey = isoDay(startOfDay(new Date(c.calculatedAt)));
+      const dKey = isoDayInTz(startOfDayInTz(new Date(c.calculatedAt), tz), tz);
       if (!byDay.has(dKey)) byDay.set(dKey, { iso: dKey, amount: 0, count: 0 });
       const d = byDay.get(dKey);
       d.amount = moneyRound(d.amount + amt);
@@ -184,14 +187,21 @@ async function computeData({ tenantId, from, to, query }, deps = {}) {
   const prisma = deps.prisma || (await resolveDefaultPrisma());
   if (!tenantId) throw new Error('tenantId required');
 
+  // Resolve tenant TZ + shadow date helpers.
+  const tenantTz = deps.tenantTz || (await resolveTenantTimeZone(tenantId));
+  const startOfDay   = (d)    => startOfDayInTz(d, tenantTz);
+  const startOfMonth = (d)    => startOfMonthInTz(d, tenantTz);
+  const addDays      = (d, n) => addDaysInTz(d, n);
+  const isoDay       = (d)    => isoDayInTz(d, tenantTz);
+  const dayLabel     = (d)    => dayLabelInTz(d, tenantTz);
+
   const locationId = (query && query.locationId) || null;
   const status = query?.status || 'ALL';
 
   const now = (deps && deps.now) || new Date();
-  // Pass query strings directly so startOfDay reads them as tenant-TZ dates.
   const fromDate = from ? startOfDay(from) : startOfMonth(now);
   const toDate   = to   ? startOfDay(to)   : startOfDay(now);
-  const numDays = daysBetween(fromDate, toDate);
+  const numDays = Math.max(1, Math.round((toDate - fromDate) / DAY_MS) + 1);
   const safeNumDays = Math.min(numDays, MAX_DAYS);
   const windowEnd = addDays(fromDate, safeNumDays);
   const truncated = numDays > MAX_DAYS;
@@ -211,7 +221,7 @@ async function computeData({ tenantId, from, to, query }, deps = {}) {
     },
   });
 
-  const agg = aggregate(rows);
+  const agg = aggregate(rows, tenantTz);
 
   // Build a day skeleton so the chart shows zeros for empty days
   const days = [];
@@ -241,6 +251,7 @@ async function computeData({ tenantId, from, to, query }, deps = {}) {
     byEmployee: agg.byEmployee,
     byDay: days,
     peakDay: peakDay && peakDay.amount > 0 ? peakDay : null,
+    tenantTimeZone: tenantTz,
     filters: { locationId, status: status === 'ALL' ? null : status },
   };
 }
