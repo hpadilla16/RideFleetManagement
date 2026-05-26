@@ -33,6 +33,7 @@
 
 import { prisma } from '../../lib/prisma.js';
 import logger from '../../lib/logger.js';
+import { parseLocationConfig } from '../../lib/location-config.js';
 
 // =============================================================================
 // Hardcoded fallback rates — mirror seeded values in pillar2-migration-phase-a.sql
@@ -49,20 +50,49 @@ export const HARDCODED_RATES = {
   LATE_RETURN:      { unit: 'PER_HOUR',   amount: 25.00 }
 };
 
-// Grace window (in minutes) before LATE_RETURN starts billing. Partial hours
-// after the grace window count as a full hour (ceil). Kept as a separate const
-// rather than a HARDCODED_RATES field so resolveRate stays purely a {unit, amount}
-// shape — and so we don't have to teach FeeRate rows about the grace concept.
-// 2026-05-25 — make grace period env-overridable so ops can tune it
-// without a code change. Default stays 30 min (matches car-sharing policy).
-// A real per-tenant setting would require a schema field on Settings or
-// FeeRate.metadataJson; that's a future migration.
-export const LATE_RETURN_GRACE_MINUTES = (() => {
-  const raw = process.env.LATE_RETURN_GRACE_MINUTES;
-  if (raw == null) return 30;
-  const n = Number(raw);
-  return Number.isFinite(n) && n >= 0 ? n : 30;
-})();
+// Default grace window (in minutes) before LATE_RETURN starts billing. Partial
+// hours after the grace window count as a full hour (ceil). Kept as a separate
+// const rather than a HARDCODED_RATES field so resolveRate stays purely a
+// {unit, amount} shape — and so we don't have to teach FeeRate rows about the
+// grace concept.
+//
+// 2026-05-25 — was env-overridable via LATE_RETURN_GRACE_MINUTES.
+// 2026-05-26 — moved to per-location: each Location.locationConfig.gracePeriodMin
+//   now controls the grace for fees billed at that pickup location. This reuses
+//   the existing Settings UI field ("Grace Period (min)" under Validation
+//   rules in the Location editor), which was already wired to the rate-billing
+//   day-rollover logic in rates.service.js. The export name is preserved so
+//   existing callers/tests that import the default keep working.
+export const LATE_RETURN_GRACE_MINUTES = 30;
+
+/**
+ * Resolve the grace minutes for the late-return fee from the pickup location.
+ *
+ * Reads `locationConfig.gracePeriodMin` (the same field that controls billing
+ * day-rollover in rates.service.js). Falls back to LATE_RETURN_GRACE_MINUTES
+ * (30) when locationId is missing, the row is gone, the config is unparseable,
+ * or the field is unset. Negative values fall back too.
+ */
+export async function resolveLateReturnGraceMinutes({ locationId }) {
+  if (!locationId) return LATE_RETURN_GRACE_MINUTES;
+  try {
+    const location = await prisma.location.findUnique({
+      where: { id: locationId },
+      select: { locationConfig: true }
+    });
+    const cfg = parseLocationConfig(location?.locationConfig);
+    const raw = cfg?.gracePeriodMin;
+    if (raw == null) return LATE_RETURN_GRACE_MINUTES;
+    const n = Number(raw);
+    return Number.isFinite(n) && n >= 0 ? n : LATE_RETURN_GRACE_MINUTES;
+  } catch (error) {
+    logger.warn('[fee-engine] resolveLateReturnGraceMinutes failed, using default', {
+      locationId,
+      error: error?.message
+    });
+    return LATE_RETURN_GRACE_MINUTES;
+  }
+}
 
 // =============================================================================
 // Rate resolution
@@ -356,12 +386,16 @@ export async function computeCheckinFees(params) {
   }
 
   // LATE_RETURN — skips silently if dueBackAt or returnedAt is missing so
-  // existing 6-fee-type callers keep working unchanged.
+  // existing 6-fee-type callers keep working unchanged. The grace window is
+  // resolved from the pickup Location's `gracePeriodMin` (the same field that
+  // governs rate-billing day-rollover), so tenants can tune it from the
+  // existing Settings → Location editor without a code or env-var change.
   if (lateReturnRate) {
+    const lateReturnGraceMinutes = await resolveLateReturnGraceMinutes({ locationId });
     const lateReturn = computeLateReturnFee({
       dueBackAt,
       returnedAt,
-      graceMinutes: LATE_RETURN_GRACE_MINUTES,
+      graceMinutes: lateReturnGraceMinutes,
       rate: lateReturnRate
     });
     if (lateReturn) {
