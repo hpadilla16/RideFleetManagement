@@ -1087,6 +1087,36 @@ function resolveCommissionRule(charge, rules = [], servicesById = new Map(), ins
     ? String(charge.sourceRefId).trim().toUpperCase()
     : null;
 
+  // ──────────────────────────────────────────────────────────────────────────
+  // SERVICE_CATALOG is the canonical source of truth for commission. Try it
+  // FIRST so the flat-rate catalog rates ($1 Tolls, $2 Liability, $3 Insurance,
+  // etc.) always win for known services — matching what the Sales Performance
+  // and Agent Track Record reports compute inline, and what Hector's
+  // hand-built April 2026 PDF uses. The CommissionPlan/AdditionalService/
+  // InsurancePlan overrides below only apply to charges that DON'T match a
+  // catalog entry (custom services, weird one-offs, etc.).
+  //
+  // FIXED_PER_AGREEMENT (not _PER_UNIT) so we credit the flat rate once even
+  // when an agreement has multiple charge lines that map to the same service
+  // (e.g. two toll charges, multi-day insurance). The reports walk
+  // SERVICE_CATALOG and count each attached service exactly once per rental.
+  // ──────────────────────────────────────────────────────────────────────────
+  const catalogEntry = resolveCatalogEntry(charge);
+  if (catalogEntry) {
+    return {
+      id: `catalog:${catalogEntry.slug}`,
+      name: catalogEntry.label,
+      valueType: 'FIXED_PER_AGREEMENT',
+      percentValue: null,
+      fixedAmount: catalogEntry.commPerSale,
+      isActive: true,
+      source: 'CATALOG',
+    };
+  }
+
+  // Non-catalog overrides — only consulted when the charge isn't a catalog
+  // service. Kept for forward compatibility with future per-service /
+  // per-insurance / per-plan commission configurations.
   if (serviceId && servicesById.has(serviceId)) {
     const service = servicesById.get(serviceId);
     if (service?.commissionValueType) {
@@ -1118,41 +1148,13 @@ function resolveCommissionRule(charge, rules = [], servicesById = new Map(), ins
   }
 
   const list = Array.isArray(rules) ? rules : [];
-  const planRule = list.find((rule) => {
+  return list.find((rule) => {
     if (!rule?.isActive) return false;
     if (serviceId && rule.serviceId && String(rule.serviceId) === serviceId) return true;
     if (chargeCode && rule.chargeCode && String(rule.chargeCode).trim() === chargeCode) return true;
     if (chargeType && rule.chargeType && String(rule.chargeType).toUpperCase() === chargeType) return true;
     return false;
-  });
-  if (planRule) return planRule;
-
-  // ──────────────────────────────────────────────────────────────────────────
-  // SERVICE_CATALOG fallback (2026-05-26). When no per-service/insurance
-  // override matched AND the employee's CommissionPlan has no rule for this
-  // charge, fall back to the flat-rate catalog (Tolls $1, Insurance $3, etc.)
-  // that mirrors Hector's hand-built commission PDF. Without this, agents
-  // without a configured CommissionPlan got $0 commission on every snapshot,
-  // even though they earned commission on attached services.
-  // ──────────────────────────────────────────────────────────────────────────
-  const catalogEntry = resolveCatalogEntry(charge);
-  if (catalogEntry) {
-    // FIXED_PER_AGREEMENT (not _PER_UNIT) so we pay the flat rate once even
-    // if the rental has multiple charge lines that map to the same service
-    // (e.g. two toll charges, two insurance line items for a multi-day
-    // rental). The reports walk SERVICE_CATALOG and credit each attached
-    // service exactly once per rental — this matches that behavior.
-    return {
-      id: `catalog:${catalogEntry.slug}`,
-      name: catalogEntry.label,
-      valueType: 'FIXED_PER_AGREEMENT',
-      percentValue: null,
-      fixedAmount: catalogEntry.commPerSale,
-      isActive: true,
-      source: 'CATALOG_FALLBACK',
-    };
-  }
-  return null;
+  }) || null;
 }
 
 function calculateCommissionLine({ charge, rule, plan, appliedFixedAgreementRules }) {
@@ -1326,11 +1328,15 @@ export async function syncAgreementCommissionSnapshot(rentalAgreementId) {
   if (!commissionEmployeeUserId) return null;
   const checkoutCapturedAt = checkoutInspectionRow?.capturedAt || null;
 
+  // 2026-05-26: dropped the user.tenantId === agreement.tenantId scope.
+  // Multi-tenant operators (Super Admin / system owner) often have
+  // tenantId=null on their User row but still do CHECKOUT inspections on
+  // tenant-scoped agreements. The old strict scope made findFirst return
+  // null → sync bailed → the snapshot was never written, so those rentals
+  // disappeared from Commission Payouts even though Sales Performance
+  // (which doesn't go through sync) attributed them correctly.
   const commissionEmployee = await prisma.user.findFirst({
-    where: {
-      id: commissionEmployeeUserId,
-      ...(agreement.tenantId ? { tenantId: agreement.tenantId } : {})
-    },
+    where: { id: commissionEmployeeUserId },
     select: {
       id: true,
       commissionPlanId: true,
