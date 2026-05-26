@@ -104,13 +104,19 @@ async function computeData({ tenantId, from, to }, deps = {}) {
 
   const months = rangeMonths(fromDate, toDate, tenantTz);
 
+  // Filter by CHECKOUT inspection date — same rule as the other commission
+  // reports. Commission is earned at car release, so the month-over-month
+  // attribution bucket follows the checkout, not the finalize/close stamps.
   const agreements = await prisma.rentalAgreement.findMany({
     where: {
       tenantId,
-      OR: [
-        { finalizedAt: { gte: fromDate, lte: toDate } },
-        { closedAt:    { gte: fromDate, lte: toDate } },
-      ],
+      inspections: {
+        some: {
+          phase: 'CHECKOUT',
+          capturedAt: { gte: fromDate, lte: toDate },
+          actorUserId: { not: null },
+        },
+      },
     },
     select: {
       id: true,
@@ -122,14 +128,10 @@ async function computeData({ tenantId, from, to }, deps = {}) {
       salesOwnerUser: { select: { id: true, fullName: true } },
       charges: { select: { code: true, name: true, total: true, selected: true } },
       payments: { select: { amount: true } },
-      // CHECKOUT inspections drive clerk attribution — the actor who released
-      // the car is the commission earner (mirror of syncAgreementCommissionSnapshot).
-      // RentalAgreementInspection has no User relation in the schema, so we
-      // resolve names with a separate User query below.
       inspections: {
         where: { phase: 'CHECKOUT' },
         orderBy: [{ capturedAt: 'desc' }, { updatedAt: 'desc' }],
-        select: { actorUserId: true },
+        select: { actorUserId: true, capturedAt: true },
       },
     },
   });
@@ -168,12 +170,12 @@ async function computeData({ tenantId, from, to }, deps = {}) {
   const clerks = new Map();
 
   for (const ag of agreements) {
-    const bucketDate = ag.finalizedAt || ag.closedAt;
+    const checkoutInspection = (ag.inspections || []).find((row) => row?.actorUserId) || null;
+    const bucketDate = checkoutInspection?.capturedAt || ag.finalizedAt || ag.closedAt;
     if (!bucketDate) continue;
     const mk = monthKey(bucketDate, tenantTz);
     if (!teamByMonth.has(mk)) continue; // shouldn't happen with the where clause, but guard anyway
 
-    const checkoutInspection = (ag.inspections || []).find((row) => row?.actorUserId) || null;
     const clerkId =
       checkoutInspection?.actorUserId ||
       ag.salesOwnerUserId ||

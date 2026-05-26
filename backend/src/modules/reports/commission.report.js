@@ -73,12 +73,25 @@ function statusFilterToWhere(status) {
 }
 
 function buildCommissionWhere({ tenantId, locationId, status, gte, lt }) {
+  // 2026-05-26: Bucket by **CHECKOUT inspection date** (when commission was
+  // earned), not by AgreementCommission.calculatedAt (which is whatever
+  // wall-clock the sync last ran). The rentalAgreement.inspections.some
+  // predicate scopes commissions to those whose checkout happened in the
+  // window — matches the filter used by commission-sales-performance.
   const where = {
     tenantId,
-    calculatedAt: { gte, lt },
     status: statusFilterToWhere(status),
+    rentalAgreement: {
+      inspections: {
+        some: {
+          phase: 'CHECKOUT',
+          capturedAt: { gte, lt },
+          actorUserId: { not: null },
+        },
+      },
+      ...(locationId ? { pickupLocationId: locationId } : {}),
+    },
   };
-  if (locationId) where.rentalAgreement = { pickupLocationId: locationId };
   return where;
 }
 
@@ -137,9 +150,11 @@ function aggregate(commissionRows, tz = DEFAULT_TENANT_TIMEZONE) {
     if (c.status === 'APPROVED') e.approvedAmount = moneyRound(e.approvedAmount + amt);
     if (c.status === 'PENDING')  e.pendingAmount  = moneyRound(e.pendingAmount + amt);
 
-    // By day (use calculatedAt)
-    if (c.calculatedAt) {
-      const dKey = isoDayInTz(startOfDayInTz(new Date(c.calculatedAt), tz), tz);
+    // By day — bucket by CHECKOUT date (when commission was earned). Falls
+    // back to calculatedAt for very old rows (pre-2026-05-26 backfill).
+    const bucketDate = c.checkoutAt || c.calculatedAt;
+    if (bucketDate) {
+      const dKey = isoDayInTz(startOfDayInTz(new Date(bucketDate), tz), tz);
       if (!byDay.has(dKey)) byDay.set(dKey, { iso: dKey, amount: 0, count: 0 });
       const d = byDay.get(dKey);
       d.amount = moneyRound(d.amount + amt);
@@ -218,10 +233,31 @@ async function computeData({ tenantId, from, to, query }, deps = {}) {
       commissionAmount: true,
       calculatedAt: true,
       employeeUser: { select: { fullName: true, email: true } },
+      // Pull the CHECKOUT inspection for this agreement so we bucket the
+      // day-chart by checkout date (not by snapshot calculatedAt, which is
+      // wall-clock-when-sync-ran and collapses to a single day after a
+      // backfill).
+      rentalAgreement: {
+        select: {
+          inspections: {
+            where: { phase: 'CHECKOUT', actorUserId: { not: null } },
+            orderBy: [{ capturedAt: 'desc' }, { updatedAt: 'desc' }],
+            take: 1,
+            select: { capturedAt: true },
+          },
+        },
+      },
     },
   });
 
-  const agg = aggregate(rows, tenantTz);
+  // Hoist checkoutAt up onto each row so aggregate() can read it without
+  // navigating into rentalAgreement.inspections.
+  const rowsWithCheckout = rows.map((r) => ({
+    ...r,
+    checkoutAt: r.rentalAgreement?.inspections?.[0]?.capturedAt || null,
+  }));
+
+  const agg = aggregate(rowsWithCheckout, tenantTz);
 
   // Build a day skeleton so the chart shows zeros for empty days
   const days = [];
@@ -277,13 +313,23 @@ async function employeeDrillDownHandler(req, res, { tenantId }) {
   const toDate   = to   ? startOfDay(to)   : startOfDay(now);
   const windowEnd = addDays(toDate, 1);
 
+  // Same checkout-date filter as the main list. Bucket by when the car was
+  // released, not when the snapshot was calculated.
   const where = {
     tenantId,
     employeeUserId,
-    calculatedAt: { gte: fromDate, lt: windowEnd },
     status: statusFilterToWhere(status),
+    rentalAgreement: {
+      inspections: {
+        some: {
+          phase: 'CHECKOUT',
+          capturedAt: { gte: fromDate, lt: windowEnd },
+          actorUserId: { not: null },
+        },
+      },
+      ...(locationId ? { pickupLocationId: locationId } : {}),
+    },
   };
-  if (locationId) where.rentalAgreement = { pickupLocationId: locationId };
 
   const rows = await prisma.agreementCommission.findMany({
     where,

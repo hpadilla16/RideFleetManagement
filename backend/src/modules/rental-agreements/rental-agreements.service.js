@@ -1289,7 +1289,8 @@ export async function syncAgreementCommissionSnapshot(rentalAgreementId) {
         where: { phase: 'CHECKOUT' },
         orderBy: [{ capturedAt: 'desc' }, { updatedAt: 'desc' }],
         select: {
-          actorUserId: true
+          actorUserId: true,
+          capturedAt: true,
         }
       },
       charges: {
@@ -1309,14 +1310,21 @@ export async function syncAgreementCommissionSnapshot(rentalAgreementId) {
     }
   });
   if (!agreement) throw new Error('Rental agreement not found');
-  if (String(agreement.status || '').toUpperCase() !== 'CLOSED') return null;
+  // 2026-05-26: commission is earned at CHECKOUT, not at CLOSE. Skip the
+  // snapshot if no CHECKOUT inspection exists yet — there's no canonical
+  // commission earner before the car has been released. Status-based guard
+  // was removed so FINALIZED + CHECKED_OUT + CHECKED_IN + CLOSED all get a
+  // snapshot written.
+  const checkoutInspectionRow = (agreement?.inspections || []).find((row) => row?.actorUserId);
+  if (!checkoutInspectionRow) return null;
 
   const commissionEmployeeUserId = String(
-    agreement?.inspections?.find((row) => row?.actorUserId)?.actorUserId
+    checkoutInspectionRow?.actorUserId
     || agreement.salesOwnerUserId
     || ''
   ).trim();
   if (!commissionEmployeeUserId) return null;
+  const checkoutCapturedAt = checkoutInspectionRow?.capturedAt || null;
 
   const commissionEmployee = await prisma.user.findFirst({
     where: {
@@ -1427,7 +1435,7 @@ export async function syncAgreementCommissionSnapshot(rentalAgreementId) {
       // just refreshes the calculated dollar amounts.
       tenantId: agreement.tenantId || null,
       commissionPlanId: plan?.id || null,
-      monthKey: monthKey(agreement.closedAt || new Date()),
+      monthKey: monthKey(checkoutCapturedAt || agreement.closedAt || new Date()),
       grossRevenue,
       serviceRevenue,
       eligibleRevenue,
@@ -1440,7 +1448,7 @@ export async function syncAgreementCommissionSnapshot(rentalAgreementId) {
       employeeUserId: commissionEmployeeUserId,
       commissionPlanId: plan?.id || null,
       status: 'PENDING',
-      monthKey: monthKey(agreement.closedAt || new Date()),
+      monthKey: monthKey(checkoutCapturedAt || agreement.closedAt || new Date()),
       grossRevenue,
       serviceRevenue,
       eligibleRevenue,
@@ -3890,9 +3898,11 @@ export const rentalAgreementsService = {
           salesOwnerUserId: inspectionBlock.actorUserId
         }
       });
-      if (String(agreement.status || '').toUpperCase() === 'CLOSED') {
-        await syncAgreementCommissionSnapshot(id);
-      }
+      // 2026-05-26: commission is earned at CHECKOUT (not at CLOSE), so the
+      // snapshot is written here regardless of agreement status. Status of
+      // the AgreementCommission row itself starts at PENDING; the explicit
+      // approve / mark-paid endpoints walk it forward.
+      await syncAgreementCommissionSnapshot(id);
     }
 
     await prisma.auditLog.create({

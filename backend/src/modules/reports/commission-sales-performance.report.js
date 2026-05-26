@@ -74,13 +74,21 @@ async function computeData({ tenantId, from, to }, deps = {}) {
   const fromDate = from ? new Date(from) : new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
   const toDate = to ? new Date(to) : new Date();
 
+  // Filter by **CHECKOUT inspection date**. Commission is earned when the
+  // car is released, not when the agreement was finalized or closed. The
+  // some(phase=CHECKOUT, capturedAt in window) predicate scopes the rentals
+  // to those whose checkout actually happened in [from, to], regardless of
+  // current agreement status (FINALIZED, CHECKED_OUT, CHECKED_IN, CLOSED).
   const agreements = await prisma.rentalAgreement.findMany({
     where: {
       tenantId,
-      OR: [
-        { finalizedAt: { gte: fromDate, lte: toDate } },
-        { closedAt:    { gte: fromDate, lte: toDate } },
-      ],
+      inspections: {
+        some: {
+          phase: 'CHECKOUT',
+          capturedAt: { gte: fromDate, lte: toDate },
+          actorUserId: { not: null },
+        },
+      },
     },
     select: {
       id: true,
@@ -90,15 +98,10 @@ async function computeData({ tenantId, from, to }, deps = {}) {
       salesOwnerUser: { select: { id: true, fullName: true } },
       charges: { select: { code: true, name: true, total: true, selected: true } },
       payments: { select: { amount: true, method: true } },
-      // Pull every CHECKOUT inspection (most agreements have exactly one,
-      // but a few have a re-do). Ordered most-recent-first so the first row
-      // with an actor wins — same precedence as syncAgreementCommissionSnapshot.
-      // RentalAgreementInspection has no User relation in the schema, so we
-      // pull just actorUserId and resolve names in a follow-up User query.
       inspections: {
         where: { phase: 'CHECKOUT' },
         orderBy: [{ capturedAt: 'desc' }, { updatedAt: 'desc' }],
-        select: { actorUserId: true },
+        select: { actorUserId: true, capturedAt: true },
       },
     },
   });

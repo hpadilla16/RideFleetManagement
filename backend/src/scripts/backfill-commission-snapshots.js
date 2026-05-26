@@ -52,13 +52,18 @@ async function main() {
   console.log(` batch:    ${batchSize}`);
   console.log('────────────────────────────────────────────');
 
-  // Snapshot is only created for CLOSED agreements (per the guard inside
-  // syncAgreementCommissionSnapshot), so scope the backfill to those.
-  const where = { status: 'CLOSED' };
+  // 2026-05-26: snapshot is now written when CHECKOUT happens, regardless of
+  // agreement status. Backfill scope = any agreement with a CHECKOUT inspection
+  // (FINALIZED, CHECKED_OUT, CHECKED_IN, CHECKED_IN_UNPAID, CLOSED).
+  const where = {
+    inspections: {
+      some: { phase: 'CHECKOUT', actorUserId: { not: null } },
+    },
+  };
   if (tenantId) where.tenantId = tenantId;
 
   const totalCount = await prisma.rentalAgreement.count({ where });
-  console.log(`\nFound ${totalCount} CLOSED agreements to process.\n`);
+  console.log(`\nFound ${totalCount} agreements with a CHECKOUT inspection to process.\n`);
 
   if (totalCount === 0) {
     console.log('Nothing to do.');
