@@ -68,12 +68,15 @@ export default function Page() {
 
 function PrePaidReservationsReport({ token }) {
   const initial = defaultYearMonth();
-  // Year/month are bound directly to the dropdowns — selecting a new value
-  // triggers the useEffect below and refetches immediately. (No draft state
-  // + Search button; that pattern hid the data behind an extra click and
-  // confused the user.)
+  // Year/month/channel are bound directly to their controls — selecting a new
+  // value triggers the useEffect below and refetches immediately. (No draft
+  // state + Search button; that pattern hid the data behind an extra click
+  // and confused the user.) `channel` defaults to FRANCHISE_TL to preserve
+  // the report's original scope; flip to ALL to include every booking
+  // channel (staff entries, public website, customer portal, etc.).
   const [year, setYear] = useState(initial.year);
   const [month, setMonth] = useState(initial.month);
+  const [channel, setChannel] = useState('FRANCHISE_TL');
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -86,7 +89,7 @@ function PrePaidReservationsReport({ token }) {
     (async () => {
       try {
         const out = await api(
-          `/api/reports/pre-paid-reservations?year=${year}&month=${month}`,
+          `/api/reports/pre-paid-reservations?year=${year}&month=${month}&channel=${channel}`,
           { bypassCache: true },
           token
         );
@@ -98,7 +101,7 @@ function PrePaidReservationsReport({ token }) {
       }
     })();
     return () => { cancelled = true; };
-  }, [token, year, month]);
+  }, [token, year, month, channel]);
 
   const yearOptions = useMemo(() => {
     const current = new Date().getFullYear();
@@ -108,7 +111,7 @@ function PrePaidReservationsReport({ token }) {
   }, []);
 
   const downloadExcel = () => {
-    const url = `/api/reports/pre-paid-reservations/excel?year=${year}&month=${month}`;
+    const url = `/api/reports/pre-paid-reservations/excel?year=${year}&month=${month}&channel=${channel}`;
     if (typeof window !== 'undefined') {
       window.open(url + (token ? `&token=${encodeURIComponent(token)}` : ''), '_blank');
     }
@@ -139,7 +142,7 @@ function PrePaidReservationsReport({ token }) {
               {yearOptions.map((y) => <option key={y} value={y}>{y}</option>)}
             </select>
           </label>
-          <label style={{ display: 'flex', alignItems: 'center', gap: 8, flex: 1, minWidth: 200 }}>
+          <label style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 200 }}>
             <span style={{ color: '#6b7280' }}>Month</span>
             <select
               value={month}
@@ -149,6 +152,17 @@ function PrePaidReservationsReport({ token }) {
               {MONTH_LABELS.map((label, idx) => (
                 <option key={label} value={idx + 1}>{label}</option>
               ))}
+            </select>
+          </label>
+          <label style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 240 }}>
+            <span style={{ color: '#6b7280' }}>Channel</span>
+            <select
+              value={channel}
+              onChange={(e) => setChannel(e.target.value)}
+              style={{ padding: '6px 10px', borderRadius: 6, flex: 1 }}
+            >
+              <option value="FRANCHISE_TL">Franchise import (TL)</option>
+              <option value="ALL">All channels</option>
             </select>
           </label>
           {loading ? (
@@ -212,7 +226,7 @@ function PrePaidReservationsReport({ token }) {
                         <td style={{ padding: '8px 12px', color: '#6b7280' }}>{fmtDateTimeShort(r.bookingDate, data.tenantTimeZone)}</td>
                         <td style={{ padding: '8px 12px' }}>{fmtDateTimeShort(r.collectionDate, data.tenantTimeZone)}</td>
                         <td style={{ padding: '8px 12px' }}>{fmtDateTimeShort(r.returnDate, data.tenantTimeZone)}</td>
-                        <td style={{ padding: '8px 12px' }}><code>{r.externalRef}</code></td>
+                        <td style={{ padding: '8px 12px' }}><code>{r.reservationNumber || r.externalRef || '-'}</code></td>
                         <td style={{ padding: '8px 12px', textAlign: 'right' }}>{fmtMoney(r.value)}</td>
                       </tr>
                     ))}

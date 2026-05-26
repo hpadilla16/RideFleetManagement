@@ -1,43 +1,43 @@
 /**
- * Pre-Paid Reservations report — 2026-05-25
+ * Pre-Paid Reservations report — 2026-05-25 / revised 2026-05-26
  *
- * Lists all reservations imported from TL International (the franchise pre-pay
- * channel) for a given year + month, grouped by pickup location. Pre-paid
- * means TL collected the money upfront when the customer booked through the
- * affiliate / OTA. We're just executing the pickup + return at the counter.
+ * Monthly recap of COMPLETED rentals, grouped by pickup location. A rental
+ * is counted in the report month the customer actually returned the car, so
+ * a pickup on May 29 with return on June 1 lands in June's report (when
+ * staff close it out at check-in).
  *
- *   GET /api/reports/pre-paid-reservations?year=YYYY&month=MM
+ *   GET /api/reports/pre-paid-reservations?year=YYYY&month=MM&channel=FRANCHISE_TL|ALL
  *     Returns { range, groups: [{ locationCode, locationName, rows[], subtotal }],
- *               grandTotal, count, currency, filters }
+ *               grandTotal, count, currency, tenantTimeZone, filters }
  *
- * Source: ExternalReservation rows where sourceSystem = 'TL_INTERNATIONAL'.
- * We INCLUDE rows in any promotionStatus (PENDING / MANUAL_REVIEW /
- * AUTO_PROMOTED / PROMOTED) because the BOOKING exists in TL regardless of
- * whether we've imported it into our own Reservations table yet — the report
- * is about money TL has already collected, not about our internal workflow.
- *
- * We exclude REJECTED rows (those are bookings we explicitly chose not to
- * import — e.g. duplicates, cancelled, etc.).
+ * Source: Reservation rows (NOT ExternalReservation). For TL franchise rows
+ * we still join the matching ExternalReservation to surface TL's booking date
+ * and original totalAmount on the row.
  *
  * Filter semantics:
- *   - year + month gate on `pickupAt` (collection date — when the customer
- *     picks up the car). This matches the mockup label "COLLECTION" and is
- *     how rental ops typically tracks revenue: by service date, not booking
- *     date. Drop the year/month filter to see everything ever imported.
+ *   - year + month gate on Reservation.returnAt, evaluated in the tenant's
+ *     timezone window (parseDateTimeInTz). Service-date accounting: revenue
+ *     books to the month the rental closed.
+ *   - status IN ('CHECKED_IN', 'CHECKED_IN_UNPAID'). Only completed rentals
+ *     count — open reservations and cancelled / no-show rows are excluded.
+ *   - channel = 'FRANCHISE_TL' (default) → only TL franchise imports.
+ *     channel = 'ALL'                   → every bookingChannel (including
+ *                                          STAFF, WEBSITE, CAR_SHARING, …).
  *
- * Column mapping (mockup → backend field):
- *   CUSTOMER     → customerFirstName + ' ' + customerLastName
- *   BOOKING DATE → firstSeenAt (when we first saw it from TL — approximates
- *                  TL's "Date" column. TL's actual booking date lives in
- *                  rawJson and varies by channel; firstSeenAt is reliable.)
- *   COLLECTION   → pickupAt
- *   RETURN       → dropoffAt
- *   RES NO       → externalRef (ZE…)
- *   VALUE        → totalAmount
+ * Column mapping:
+ *   CUSTOMER     → customer.firstName + ' ' + customer.lastName
+ *   BOOKING DATE → ExternalReservation.firstSeenAt (TL rows) /
+ *                  Reservation.createdAt (everything else)
+ *   COLLECTION   → Reservation.pickupAt
+ *   RETURN       → Reservation.returnAt
+ *   RES NO       → Reservation.reservationNumber
+ *                  (TL rows usually carry the ZE… in sourceRef as well)
+ *   VALUE        → ExternalReservation.totalAmount when present
+ *                  (the canonical TL pre-paid amount), else
+ *                  Reservation.estimatedTotal as a best-effort fallback.
  *
- * Grouping: by pickupLocation code. "San Juan Airport (SJUA01)" → group key
- * SJUA01. Locations group label uses our LocationCodeMap → Location.name when
- * available, else falls back to the raw code.
+ * Grouping: by pickupLocation. Falls back to "Unknown" when pickupLocation
+ * is null (e.g. legacy rows or off-network bookings).
  */
 
 import { registerReport } from './reports-v2.routes.js';
@@ -65,13 +65,30 @@ function defaultYearMonth() {
   return { year: now.getFullYear(), month: now.getMonth() + 1 };
 }
 
+// registerReport passes the express query string under `params.query`, not
+// directly on `params`. The pre-revise version read params.year / params.month
+// and silently always fell through to defaultYearMonth — that's why switching
+// month in the dropdown stuck on the current month's data. Read from
+// params.query first, with params.* kept as a fallback for direct callers
+// (tests, future internal use).
 function parseYearMonth(params) {
   const fallback = defaultYearMonth();
-  const y = parseInt(params?.year, 10);
-  const m = parseInt(params?.month, 10);
+  const q = params?.query || {};
+  const y = parseInt(q.year ?? params?.year, 10);
+  const m = parseInt(q.month ?? params?.month, 10);
   const year  = Number.isFinite(y) && y >= 2020 && y <= 2100 ? y : fallback.year;
   const month = Number.isFinite(m) && m >= 1 && m <= 12 ? m : fallback.month;
   return { year, month };
+}
+
+// Channel filter: 'FRANCHISE_TL' (default — historic report scope) keeps the
+// report TL-only; 'ALL' broadens it to every bookingChannel for an
+// all-channels monthly recap.
+function parseChannel(params) {
+  const raw = String(params?.query?.channel ?? params?.channel ?? 'FRANCHISE_TL')
+    .trim()
+    .toUpperCase();
+  return raw === 'ALL' ? 'ALL' : 'FRANCHISE_TL';
 }
 
 // Build the half-open [start, end) UTC range for "month X in tenantTz" so
@@ -121,68 +138,95 @@ export async function computeData(params, deps = {}) {
   const prisma = deps.prisma || (await import('../../lib/prisma.js')).prisma;
 
   const { year, month } = parseYearMonth(params);
+  const channel = parseChannel(params);
   const tenantTz = await resolveTenantTimeZone(params.tenantId);
   const { start, end } = monthBoundsInTz(year, month, tenantTz);
 
-  const rows = await prisma.externalReservation.findMany({
-    where: {
-      tenantId: params.tenantId,
-      sourceSystem: 'TL_INTERNATIONAL',
-      promotionStatus: { not: 'REJECTED' },
-      pickupAt: { gte: start, lt: end },
-    },
-    orderBy: [{ pickupLocation: 'asc' }, { pickupAt: 'asc' }],
+  // Filter Reservations whose check-in landed inside the requested month and
+  // whose status indicates a closed-out rental. CHECKED_IN_UNPAID is included
+  // because the rental physically completed — the open balance is a separate
+  // collection workflow, not a reason to drop the row from this recap.
+  const where = {
+    tenantId: params.tenantId,
+    status: { in: ['CHECKED_IN', 'CHECKED_IN_UNPAID'] },
+    returnAt: { gte: start, lt: end },
+  };
+  if (channel === 'FRANCHISE_TL') {
+    where.bookingChannel = 'FRANCHISE_TL';
+  }
+  // channel === 'ALL' — no bookingChannel filter, every channel counts.
+
+  const reservations = await prisma.reservation.findMany({
+    where,
+    orderBy: [{ pickupLocationId: 'asc' }, { returnAt: 'asc' }],
     select: {
       id: true,
-      externalRef: true,
-      customerFirstName: true,
-      customerLastName: true,
+      reservationNumber: true,
+      sourceRef: true,
+      bookingChannel: true,
       pickupAt: true,
-      dropoffAt: true,
-      pickupLocation: true,
-      totalAmount: true,
-      currency: true,
-      firstSeenAt: true,
-      promotionStatus: true,
+      returnAt: true,
+      createdAt: true,
+      estimatedTotal: true,
+      pickupLocationId: true,
+      pickupLocation: { select: { id: true, code: true, name: true } },
+      customer: { select: { firstName: true, lastName: true } },
     },
   });
 
-  // Resolve location codes → friendly names via LocationCodeMap (best-effort).
-  const codes = Array.from(new Set(rows.map(r => extractLocationCode(r.pickupLocation))));
-  const locMaps = codes.length
-    ? await prisma.locationCodeMap.findMany({
-        where: { tenantId: params.tenantId, externalCode: { in: codes } },
-        select: { externalCode: true, location: { select: { name: true } } },
-      }).catch(() => [])
-    : [];
-  const codeToName = new Map();
-  for (const m of locMaps) {
-    if (m.location?.name) codeToName.set(m.externalCode, m.location.name);
+  // Resolve the matching ExternalReservation rows so TL franchise rows can
+  // surface TL's original booking date (firstSeenAt) and the pre-paid total
+  // TL recorded — both of which take precedence over local fallbacks for
+  // accounting purposes.
+  const tlSourceRefs = reservations
+    .filter((r) => r.bookingChannel === 'FRANCHISE_TL' && r.sourceRef)
+    .map((r) => r.sourceRef);
+  const externalByRef = new Map();
+  if (tlSourceRefs.length) {
+    const externals = await prisma.externalReservation.findMany({
+      where: {
+        tenantId: params.tenantId,
+        sourceSystem: 'TL_INTERNATIONAL',
+        externalRef: { in: tlSourceRefs },
+      },
+      select: { externalRef: true, firstSeenAt: true, totalAmount: true, currency: true },
+    });
+    for (const er of externals) externalByRef.set(er.externalRef, er);
   }
 
-  // Group rows by location code.
+  // Group by pickup location id. Falls back to a synthetic "UNKNOWN" bucket
+  // when pickupLocation is null so reps still show somewhere instead of
+  // silently disappearing from the recap.
   const groupMap = new Map();
-  for (const r of rows) {
-    const code = extractLocationCode(r.pickupLocation);
-    if (!groupMap.has(code)) {
-      groupMap.set(code, {
-        locationCode: code,
-        locationName: codeToName.get(code) || code,
+  for (const r of reservations) {
+    const groupKey = r.pickupLocation?.id || 'UNKNOWN';
+    if (!groupMap.has(groupKey)) {
+      groupMap.set(groupKey, {
+        locationCode: r.pickupLocation?.code || 'UNKNOWN',
+        locationName: r.pickupLocation?.name || 'Unknown location',
         rows: [],
         subtotal: 0,
       });
     }
-    const g = groupMap.get(code);
-    const value = num(r.totalAmount);
+    const g = groupMap.get(groupKey);
+    const external = r.sourceRef ? externalByRef.get(r.sourceRef) : null;
+    const value = num(external?.totalAmount ?? r.estimatedTotal);
+    const firstName = (r.customer?.firstName || '').trim();
+    const lastName  = (r.customer?.lastName  || '').trim();
     g.rows.push({
       id: r.id,
-      customer: customerName(r),
-      bookingDate: r.firstSeenAt,
+      customer: `${firstName} ${lastName}`.trim() || '-',
+      // Booking date: when the customer actually committed to this rental.
+      // For TL imports that's the moment we first saw the booking in their
+      // dashboard; for everything else it's when our reservation row was
+      // created (staff entered it, customer portal submitted it, etc.).
+      bookingDate: external?.firstSeenAt || r.createdAt,
       collectionDate: r.pickupAt,
-      returnDate: r.dropoffAt,
-      externalRef: r.externalRef,
+      returnDate: r.returnAt,
+      reservationNumber: r.reservationNumber,
+      externalRef: r.sourceRef || null,
+      bookingChannel: r.bookingChannel,
       value,
-      promotionStatus: r.promotionStatus,
     });
     g.subtotal += value;
   }
@@ -195,7 +239,7 @@ export async function computeData(params, deps = {}) {
   const grandTotal = Number(
     groups.reduce((acc, g) => acc + g.subtotal, 0).toFixed(2)
   );
-  const count = rows.length;
+  const count = reservations.length;
 
   return {
     range: { year, month, label: fmtRangeLabel(year, month), from: start.toISOString(), to: end.toISOString() },
@@ -204,7 +248,7 @@ export async function computeData(params, deps = {}) {
     count,
     currency: 'USD',
     tenantTimeZone: tenantTz,
-    filters: { year, month },
+    filters: { year, month, channel },
   };
 }
 
@@ -253,7 +297,7 @@ export function renderHtml(data) {
         <td>${escapeHtml(fmtDateTimeShort(r.bookingDate, tz))}</td>
         <td>${escapeHtml(fmtDateTimeShort(r.collectionDate, tz))}</td>
         <td>${escapeHtml(fmtDateTimeShort(r.returnDate, tz))}</td>
-        <td>${escapeHtml(r.externalRef)}</td>
+        <td>${escapeHtml(r.reservationNumber || r.externalRef || '-')}</td>
         <td style="text-align:right">${fmtMoney(r.value)}</td>
       </tr>
     `).join('');
@@ -308,7 +352,7 @@ export function buildExcelSpec(data) {
         fmtDateTimeShort(r.bookingDate, tz),
         fmtDateTimeShort(r.collectionDate, tz),
         fmtDateTimeShort(r.returnDate, tz),
-        r.externalRef,
+        r.reservationNumber || r.externalRef || '-',
         num(r.value),
       ]);
     }
