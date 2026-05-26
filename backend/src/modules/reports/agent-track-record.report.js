@@ -16,23 +16,7 @@
 import { registerReport } from './reports-v2.routes.js';
 import { DEFAULT_TENANT_TIMEZONE } from '../../lib/date-utils.js';
 import { resolveTenantTimeZone } from '../../lib/tenant-tz.js';
-
-const SERVICE_CATALOG = [
-  { slug: 'TOLLS',             label: 'Tolls',             codes: ['TOLLS', 'TOLL'],                  namePatterns: [/tolls?/i],             commPerSale: 1, benchmark: '85%+' },
-  { slug: 'TIRE_GLASS',        label: 'Tire & Glass',      codes: ['TIRE_GLASS', 'TG'],               namePatterns: [/tire.*glass/i],        commPerSale: 1, benchmark: '60%+' },
-  { slug: 'ROADSIDE',          label: 'Roadside',          codes: ['ROADSIDE', 'RS'],                 namePatterns: [/roadside/i],           commPerSale: 1, benchmark: '60%+' },
-  { slug: 'LIABILITY',         label: 'Liability',         codes: ['LIABILITY', 'LIAB'],              namePatterns: [/liab/i],               commPerSale: 2, benchmark: '55%+' },
-  { slug: 'INSURANCE',         label: 'Insurance',         codes: ['INSURANCE', 'INS'],               namePatterns: [/insurance/i],          commPerSale: 3, benchmark: '45–55%' },
-  { slug: 'ADDITIONAL_DRIVER', label: 'Additional Driver', codes: ['ADDITIONAL_DRIVER', 'ADD_DRIVER'],namePatterns: [/additional.*driver/i, /add.*driver/i], commPerSale: 1, benchmark: 'demand-led' },
-  { slug: 'CAR_SEAT',          label: 'Car Seat',          codes: ['CAR_SEAT', 'CARSEAT'],            namePatterns: [/car.*seat/i],          commPerSale: 1, benchmark: 'demand-led' },
-  { slug: 'PRE_PAID_GAS',      label: 'Pre-Paid Gas',      codes: ['PRE_PAID_GAS', 'GAS_PREPAY'],     namePatterns: [/pre.?paid.*gas/i, /gas.*pre.?paid/i], commPerSale: 1, benchmark: '15%+' },
-];
-
-function matchesService(charge, service) {
-  if (charge.code && service.codes.includes(String(charge.code).toUpperCase())) return true;
-  const name = String(charge.name || '');
-  return service.namePatterns.some((re) => re.test(name));
-}
+import { SERVICE_CATALOG, matchesService } from '../../lib/commission-catalog.js';
 
 function num(v) { const n = Number(v); return Number.isFinite(n) ? n : 0; }
 function daysBetween(a, b) {

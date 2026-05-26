@@ -17,6 +17,7 @@ import { parseLocationConfig } from '../../lib/location-config.js';
 import { getEffectiveTermsHtmlForTenant } from '../../lib/terms/index.js';
 import { TC_VERSION } from '../../lib/terms/version.js';
 import { refundCharge as payarcRefundCharge } from '../public-booking/payarc-hosted-fields.js';
+import { resolveCatalogEntry } from '../../lib/commission-catalog.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -1117,13 +1118,41 @@ function resolveCommissionRule(charge, rules = [], servicesById = new Map(), ins
   }
 
   const list = Array.isArray(rules) ? rules : [];
-  return list.find((rule) => {
+  const planRule = list.find((rule) => {
     if (!rule?.isActive) return false;
     if (serviceId && rule.serviceId && String(rule.serviceId) === serviceId) return true;
     if (chargeCode && rule.chargeCode && String(rule.chargeCode).trim() === chargeCode) return true;
     if (chargeType && rule.chargeType && String(rule.chargeType).toUpperCase() === chargeType) return true;
     return false;
-  }) || null;
+  });
+  if (planRule) return planRule;
+
+  // ──────────────────────────────────────────────────────────────────────────
+  // SERVICE_CATALOG fallback (2026-05-26). When no per-service/insurance
+  // override matched AND the employee's CommissionPlan has no rule for this
+  // charge, fall back to the flat-rate catalog (Tolls $1, Insurance $3, etc.)
+  // that mirrors Hector's hand-built commission PDF. Without this, agents
+  // without a configured CommissionPlan got $0 commission on every snapshot,
+  // even though they earned commission on attached services.
+  // ──────────────────────────────────────────────────────────────────────────
+  const catalogEntry = resolveCatalogEntry(charge);
+  if (catalogEntry) {
+    // FIXED_PER_AGREEMENT (not _PER_UNIT) so we pay the flat rate once even
+    // if the rental has multiple charge lines that map to the same service
+    // (e.g. two toll charges, two insurance line items for a multi-day
+    // rental). The reports walk SERVICE_CATALOG and credit each attached
+    // service exactly once per rental — this matches that behavior.
+    return {
+      id: `catalog:${catalogEntry.slug}`,
+      name: catalogEntry.label,
+      valueType: 'FIXED_PER_AGREEMENT',
+      percentValue: null,
+      fixedAmount: catalogEntry.commPerSale,
+      isActive: true,
+      source: 'CATALOG_FALLBACK',
+    };
+  }
+  return null;
 }
 
 function calculateCommissionLine({ charge, rule, plan, appliedFixedAgreementRules }) {
@@ -1246,7 +1275,7 @@ async function importStructuredReservationPaymentsToAgreement(rentalAgreementId,
   return { importedCount: pending.length, paidAmount, balance };
 }
 
-async function syncAgreementCommissionSnapshot(rentalAgreementId) {
+export async function syncAgreementCommissionSnapshot(rentalAgreementId) {
   const agreement = await prisma.rentalAgreement.findUnique({
     where: { id: rentalAgreementId },
     select: {
@@ -1393,9 +1422,11 @@ async function syncAgreementCommissionSnapshot(rentalAgreementId) {
       }
     },
     update: {
+      // Preserve workflow status (PAID/APPROVED) on re-sync. The status is
+      // only updated by the explicit approve/mark-paid endpoints — sync
+      // just refreshes the calculated dollar amounts.
       tenantId: agreement.tenantId || null,
       commissionPlanId: plan?.id || null,
-      status: 'PENDING',
       monthKey: monthKey(agreement.closedAt || new Date()),
       grossRevenue,
       serviceRevenue,
