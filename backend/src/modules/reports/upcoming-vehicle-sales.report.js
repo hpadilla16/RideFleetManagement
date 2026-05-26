@@ -23,6 +23,12 @@
  */
 
 import { registerReport } from './reports-v2.routes.js';
+import {
+  DEFAULT_TENANT_TIMEZONE,
+  startOfDayInTz,
+  dayLabelInTz,
+} from '../../lib/date-utils.js';
+import { resolveTenantTimeZone } from '../../lib/tenant-tz.js';
 
 const DEFAULT_MAX_MILEAGE = 60_000;
 const DEFAULT_MAX_AGE = 4;
@@ -44,22 +50,14 @@ const STATUS_LABEL = {
 
 function num(v) { const n = Number(v); return Number.isFinite(n) ? n : 0; }
 
-function startOfDay(d) {
-  const x = new Date(d);
-  x.setHours(0, 0, 0, 0);
-  return x;
-}
-
-const WD = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
-const MO = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-function dayLabel(d) { return `${WD[d.getDay()]} ${MO[d.getMonth()]} ${d.getDate()}`; }
-function timeLabel(d) {
-  const h = d.getHours();
-  const m = d.getMinutes();
-  const ap = h >= 12 ? 'pm' : 'am';
-  const hh = ((h + 11) % 12) + 1;
-  const mm = String(m).padStart(2, '0');
-  return `${hh}:${mm}${ap}`;
+// 2026-05-26: tz-aware helpers — asOfLabel rendered server-local TZ.
+function startOfDay(d, tz = DEFAULT_TENANT_TIMEZONE) { return startOfDayInTz(d, tz); }
+function dayLabel(d, tz = DEFAULT_TENANT_TIMEZONE) { return dayLabelInTz(d, tz); }
+function timeLabel(d, tz = DEFAULT_TENANT_TIMEZONE) {
+  const out = new Intl.DateTimeFormat('en-US', {
+    timeZone: tz, hour: 'numeric', minute: '2-digit', hour12: true,
+  }).format(d);
+  return out.replace(' AM', 'am').replace(' PM', 'pm').replace(' ', '');
 }
 
 function ageYears(vehicleYear, asOfYear) {
@@ -115,6 +113,7 @@ async function computeData({ tenantId, query }, deps = {}) {
   const prisma = deps.prisma || (await resolveDefaultPrisma());
   if (!tenantId) throw new Error('tenantId required');
 
+  const tenantTz = deps.tenantTz || (await resolveTenantTimeZone(tenantId));
   const locationId = (query && query.locationId) || null;
   const maxMileage = Math.max(0, num(query?.maxMileage) || DEFAULT_MAX_MILEAGE);
   const maxAge = Math.max(0, num(query?.maxAge) || DEFAULT_MAX_AGE);
@@ -125,7 +124,12 @@ async function computeData({ tenantId, query }, deps = {}) {
   })();
 
   const asOf = (deps && deps.now) || new Date();
-  const asOfYear = asOf.getFullYear();
+  // Use tenant TZ for the year — at year-end (e.g. PR Dec 31 11pm = UTC
+  // Jan 1 3am), getFullYear on the server in UTC would say "next year" and
+  // misclassify vehicle age by 1 year for a few hours.
+  const asOfYear = Number(
+    new Intl.DateTimeFormat('en-US', { timeZone: tenantTz, year: 'numeric' }).format(asOf)
+  );
   const approachMileage = maxMileage * (1 - approachingPct);
   const approachAge = maxAge * (1 - approachingPct);
   // Earliest model year that still qualifies as "approaching" by age
@@ -205,7 +209,8 @@ async function computeData({ tenantId, query }, deps = {}) {
 
   return {
     asOf: asOf.toISOString(),
-    asOfLabel: `${dayLabel(asOf)} · ${timeLabel(asOf)}`,
+    asOfLabel: `${dayLabel(asOf, tenantTz)} · ${timeLabel(asOf, tenantTz)}`,
+    tenantTimeZone: tenantTz,
     thresholds: { maxMileage, maxAge, approachingPct },
     totals: {
       overCount: overRows.length,

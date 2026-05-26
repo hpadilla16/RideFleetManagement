@@ -25,6 +25,12 @@
  */
 
 import { registerReport } from './reports-v2.routes.js';
+import {
+  DEFAULT_TENANT_TIMEZONE,
+  startOfDayInTz,
+  dayLabelInTz,
+} from '../../lib/date-utils.js';
+import { resolveTenantTimeZone } from '../../lib/tenant-tz.js';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -43,28 +49,25 @@ const BUCKET_ORDER = [
 // Date helpers
 // ---------------------------------------------------------------------------
 
-function startOfDay(d) {
-  const x = new Date(d);
-  x.setHours(0, 0, 0, 0);
-  return x;
-}
+// 2026-05-26: tz-aware helpers. AR aging buckets pivot on tenant-local "today";
+// previously these used server-local setHours, so a 9pm-PR snapshot run from
+// a UTC droplet computed "today" as the next-day UTC date, miscategorizing
+// borderline agreements (e.g. a returnAt = today 11pm PR could fall into B1_30
+// instead of CURRENT).
+function startOfDay(d, tz = DEFAULT_TENANT_TIMEZONE) { return startOfDayInTz(d, tz); }
 
-function diffDays(target, today) {
-  return Math.round((startOfDay(target) - today) / DAY_MS);
+function diffDays(target, today, tz = DEFAULT_TENANT_TIMEZONE) {
+  return Math.round((startOfDay(target, tz) - today) / DAY_MS);
 }
 
 function isoDay(d) { return d.toISOString().slice(0, 10); }
 
-const WD = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
-const MO = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-function dayLabel(d) { return `${WD[d.getDay()]} ${MO[d.getMonth()]} ${d.getDate()}`; }
-function timeLabel(d) {
-  const h = d.getHours();
-  const m = d.getMinutes();
-  const ap = h >= 12 ? 'pm' : 'am';
-  const hh = ((h + 11) % 12) + 1;
-  const mm = String(m).padStart(2, '0');
-  return `${hh}:${mm}${ap}`;
+function dayLabel(d, tz = DEFAULT_TENANT_TIMEZONE) { return dayLabelInTz(d, tz); }
+function timeLabel(d, tz = DEFAULT_TENANT_TIMEZONE) {
+  const out = new Intl.DateTimeFormat('en-US', {
+    timeZone: tz, hour: 'numeric', minute: '2-digit', hour12: true,
+  }).format(d);
+  return out.replace(' AM', 'am').replace(' PM', 'pm').replace(' ', '');
 }
 
 function num(v) { const n = Number(v); return Number.isFinite(n) ? n : 0; }
@@ -105,8 +108,8 @@ function buildAgreementWhere({ tenantId, locationId }) {
  *   - 61..90         → B61_90
  *   - 91+            → B90_PLUS
  */
-function bucketAgreements(agreements, asOf = new Date()) {
-  const today = startOfDay(asOf);
+function bucketAgreements(agreements, asOf = new Date(), tz = DEFAULT_TENANT_TIMEZONE) {
+  const today = startOfDay(asOf, tz);
   const buckets = {
     CURRENT:  { count: 0, amount: 0, agreements: [] },
     B1_30:    { count: 0, amount: 0, agreements: [] },
@@ -118,7 +121,7 @@ function bucketAgreements(agreements, asOf = new Date()) {
   for (const a of agreements) {
     const ret = new Date(a.returnAt);
     // daysLate > 0 means past returnAt
-    const daysLate = -diffDays(ret, today);
+    const daysLate = -diffDays(ret, today, tz);
     let key;
     if (daysLate <= 0) key = 'CURRENT';
     else if (daysLate <= 30) key = 'B1_30';
@@ -126,7 +129,7 @@ function bucketAgreements(agreements, asOf = new Date()) {
     else if (daysLate <= 90) key = 'B61_90';
     else key = 'B90_PLUS';
 
-    const row = formatRow(a, daysLate);
+    const row = formatRow(a, daysLate, tz);
     buckets[key].agreements.push(row);
     buckets[key].count += 1;
     buckets[key].amount = moneyRound(buckets[key].amount + row.balance);
@@ -145,7 +148,7 @@ function bucketAgreements(agreements, asOf = new Date()) {
   return buckets;
 }
 
-function formatRow(a, daysLate) {
+function formatRow(a, daysLate, tz = DEFAULT_TENANT_TIMEZONE) {
   const ret = new Date(a.returnAt);
   return {
     id: a.id,
@@ -163,7 +166,7 @@ function formatRow(a, daysLate) {
       : null,
     pickupLocation: a.pickupLocation?.name || null,
     returnAt: a.returnAt,
-    returnLabel: `${dayLabel(ret)} · ${timeLabel(ret)}`,
+    returnLabel: `${dayLabel(ret, tz)} · ${timeLabel(ret, tz)}`,
     returnIso: isoDay(ret),
     daysLate, // positive = past due, 0 or negative = current
     balance: moneyRound(num(a.balance)),
@@ -178,6 +181,7 @@ async function computeData({ tenantId, query }, deps = {}) {
   const prisma = deps.prisma || (await resolveDefaultPrisma());
   if (!tenantId) throw new Error('tenantId required');
 
+  const tenantTz = deps.tenantTz || (await resolveTenantTimeZone(tenantId));
   const locationId = (query && query.locationId) || null;
   const asOf = (deps && deps.now) || new Date();
 
@@ -200,7 +204,7 @@ async function computeData({ tenantId, query }, deps = {}) {
     orderBy: { returnAt: 'asc' },
   });
 
-  const bucketsMap = bucketAgreements(agreements, asOf);
+  const bucketsMap = bucketAgreements(agreements, asOf, tenantTz);
 
   // Build the ordered triage list (90+ first → Current last)
   const buckets = BUCKET_ORDER.map((b) => {
@@ -237,7 +241,8 @@ async function computeData({ tenantId, query }, deps = {}) {
 
   return {
     asOf: asOf.toISOString(),
-    asOfLabel: `${dayLabel(asOf)} · ${timeLabel(asOf)}`,
+    asOfLabel: `${dayLabel(asOf, tenantTz)} · ${timeLabel(asOf, tenantTz)}`,
+    tenantTimeZone: tenantTz,
     totals: {
       totalAmount,
       accountCount,

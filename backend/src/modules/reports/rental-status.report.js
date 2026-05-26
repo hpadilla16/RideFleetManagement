@@ -26,6 +26,13 @@
  */
 
 import { registerReport } from './reports-v2.routes.js';
+import {
+  DEFAULT_TENANT_TIMEZONE,
+  startOfDayInTz,
+  addDaysInTz,
+  dayLabelInTz,
+} from '../../lib/date-utils.js';
+import { resolveTenantTimeZone } from '../../lib/tenant-tz.js';
 
 const ACTIVE_STATUSES = ['NEW', 'CONFIRMED', 'CHECKED_OUT', 'CHECKED_IN_UNPAID'];
 
@@ -44,35 +51,31 @@ const GROUP_ORDER = [
 // Date helpers
 // ---------------------------------------------------------------------------
 
-function startOfDay(d) {
-  const x = new Date(d);
-  x.setHours(0, 0, 0, 0);
-  return x;
-}
-
-function addDays(d, n) {
-  const x = new Date(d);
-  x.setDate(x.getDate() + n);
-  return x;
-}
-
+// 2026-05-26: tz-aware helpers. Module-level defaults to PR; computeData /
+// drill-down shadow with the resolved tenant timezone. The previous helpers
+// used server-local setHours/getDate which mislabeled "today/tomorrow/
+// overdue" when the host machine wasn't in tenant TZ (e.g. UTC droplet vs
+// PR clerks at 9pm).
+function startOfDay(d, tz = DEFAULT_TENANT_TIMEZONE) { return startOfDayInTz(d, tz); }
+function addDays(d, n)                                { return addDaysInTz(d, n); }
 function isoDay(d) { return d.toISOString().slice(0, 10); }
 
-const WD = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
-const MO = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-function dayLabel(d) { return `${WD[d.getDay()]} ${MO[d.getMonth()]} ${d.getDate()}`; }
-function timeLabel(d) {
-  const h = d.getHours();
-  const m = d.getMinutes();
-  const ap = h >= 12 ? 'pm' : 'am';
-  const hh = ((h + 11) % 12) + 1;
-  const mm = String(m).padStart(2, '0');
-  return `${hh}:${mm}${ap}`;
+function dayLabel(d, tz = DEFAULT_TENANT_TIMEZONE) { return dayLabelInTz(d, tz); }
+function timeLabel(d, tz = DEFAULT_TENANT_TIMEZONE) {
+  // Format the Date in tenant TZ. Intl gives us "9:05 PM" — normalize to
+  // lower-case am/pm and strip the space to match the legacy format.
+  const out = new Intl.DateTimeFormat('en-US', {
+    timeZone: tz,
+    hour: 'numeric',
+    minute: '2-digit',
+    hour12: true,
+  }).format(d);
+  return out.replace(' AM', 'am').replace(' PM', 'pm').replace(' ', '');
 }
 
-function diffDaysFromNow(target, today) {
+function diffDaysFromNow(target, today, tz = DEFAULT_TENANT_TIMEZONE) {
   // Positive = future, negative = past, 0 = today
-  return Math.round((startOfDay(target) - today) / DAY_MS);
+  return Math.round((startOfDay(target, tz) - today) / DAY_MS);
 }
 
 function num(v) { const n = Number(v); return Number.isFinite(n) ? n : 0; }
@@ -93,11 +96,11 @@ async function resolveDefaultPrisma() {
 // Row formatter — turn a prisma Reservation into the wire-format row
 // ---------------------------------------------------------------------------
 
-function formatRow(r, today) {
+function formatRow(r, today, tz = DEFAULT_TENANT_TIMEZONE) {
   const pickup = new Date(r.pickupAt);
   const ret = new Date(r.returnAt);
-  const daysFromPickup = diffDaysFromNow(pickup, today);
-  const daysFromReturn = diffDaysFromNow(ret, today);
+  const daysFromPickup = diffDaysFromNow(pickup, today, tz);
+  const daysFromReturn = diffDaysFromNow(ret, today, tz);
 
   return {
     id: r.id,
@@ -105,8 +108,8 @@ function formatRow(r, today) {
     status: r.status,
     pickupAt: r.pickupAt,
     returnAt: r.returnAt,
-    pickupLabel: `${dayLabel(pickup)} · ${timeLabel(pickup)}`,
-    returnLabel: `${dayLabel(ret)} · ${timeLabel(ret)}`,
+    pickupLabel: `${dayLabel(pickup, tz)} · ${timeLabel(pickup, tz)}`,
+    returnLabel: `${dayLabel(ret, tz)} · ${timeLabel(ret, tz)}`,
     // Negative = days past return, positive = days until return
     daysFromPickup,
     daysFromReturn,
@@ -135,8 +138,8 @@ function formatRow(r, today) {
  * Pure function: bucket a list of prisma-shaped reservations into the 5 groups,
  * given the "now" timestamp. Exported for unit testing without prisma.
  */
-function bucketReservations(reservations, asOf = new Date()) {
-  const today = startOfDay(asOf);
+function bucketReservations(reservations, asOf = new Date(), tz = DEFAULT_TENANT_TIMEZONE) {
+  const today = startOfDay(asOf, tz);
   const tomorrow = addDays(today, 1);
 
   const buckets = {
@@ -152,14 +155,14 @@ function bucketReservations(reservations, asOf = new Date()) {
     const ret = new Date(r.returnAt);
 
     if (r.status === 'CHECKED_OUT') {
-      if (ret < today) buckets.OVERDUE.push(formatRow(r, today));
-      else if (ret < tomorrow) buckets.DUE_TODAY.push(formatRow(r, today));
-      else buckets.CURRENTLY_OUT.push(formatRow(r, today));
+      if (ret < today) buckets.OVERDUE.push(formatRow(r, today, tz));
+      else if (ret < tomorrow) buckets.DUE_TODAY.push(formatRow(r, today, tz));
+      else buckets.CURRENTLY_OUT.push(formatRow(r, today, tz));
     } else if (r.status === 'CHECKED_IN_UNPAID') {
-      buckets.UNPAID_AT_CHECKIN.push(formatRow(r, today));
+      buckets.UNPAID_AT_CHECKIN.push(formatRow(r, today, tz));
     } else if (r.status === 'NEW' || r.status === 'CONFIRMED') {
       if (pickup >= today && pickup < tomorrow) {
-        buckets.PICKING_UP_TODAY.push(formatRow(r, today));
+        buckets.PICKING_UP_TODAY.push(formatRow(r, today, tz));
       }
     }
   }
@@ -174,6 +177,7 @@ async function computeData({ tenantId, query }, deps = {}) {
   const prisma = deps.prisma || (await resolveDefaultPrisma());
   if (!tenantId) throw new Error('tenantId required');
 
+  const tenantTz = deps.tenantTz || (await resolveTenantTimeZone(tenantId));
   const locationId = (query && query.locationId) || null;
   const asOf = (deps && deps.now) || new Date();
 
@@ -197,7 +201,7 @@ async function computeData({ tenantId, query }, deps = {}) {
     orderBy: [{ returnAt: 'asc' }, { pickupAt: 'asc' }],
   });
 
-  const buckets = bucketReservations(reservations, asOf);
+  const buckets = bucketReservations(reservations, asOf, tenantTz);
 
   // Group list in triage order, surfacing empty groups via a count=0 entry that
   // the UI can choose to render or skip.
@@ -227,7 +231,8 @@ async function computeData({ tenantId, query }, deps = {}) {
 
   return {
     asOf: asOf.toISOString(),
-    asOfLabel: `${dayLabel(asOf)} · ${timeLabel(asOf)}`,
+    asOfLabel: `${dayLabel(asOf, tenantTz)} · ${timeLabel(asOf, tenantTz)}`,
+    tenantTimeZone: tenantTz,
     callouts,
     statusMix,
     groups,
