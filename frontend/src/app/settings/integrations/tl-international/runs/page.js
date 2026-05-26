@@ -3,7 +3,7 @@
 /**
  * TL International - Run history page (Surface 3, task 24 phase 1).
  *
- * Full sync run audit log. SUPER_ADMIN gated.
+ * Full sync run audit log. ADMIN + SUPER_ADMIN gated (ADMIN scoped to own tenant).
  *
  * Backend:
  *   GET /api/admin/integrations/tl-international/runs?limit=&tenantId=
@@ -103,6 +103,8 @@ export default function TLRunsPage() {
 function Inner({ token, me, logout }) {
   const role = String(me?.role || '').toUpperCase().trim();
   const isSuper = role === 'SUPER_ADMIN';
+  // 2026-05-26: ADMIN can also see TL runs (scoped to their own tenant).
+  const canAccess = isSuper || role === 'ADMIN';
 
   const [runs, setRuns] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -180,12 +182,12 @@ function Inner({ token, me, logout }) {
     };
   }, [filtered]);
 
-  if (!isSuper) {
+  if (!canAccess) {
     return (
       <AuthGate>{() => (
         <AppShell me={me} logout={logout}>
           <div style={{ padding: 20 }}>
-            <strong>Solo SUPER_ADMIN.</strong> / SUPER_ADMIN only.
+            <strong>Admin access required.</strong> Restricted to ADMIN and SUPER_ADMIN.
           </div>
         </AppShell>
       )}</AuthGate>

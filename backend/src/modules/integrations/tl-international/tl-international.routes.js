@@ -2,7 +2,9 @@
  * Admin routes for the TL International franchise integration.
  *
  * Mounted at `/api/admin/integrations/tl-international`.
- * Every route requires `requireAuth + requireRole('SUPER_ADMIN')`.
+ * Every route requires `requireAuth + requireRole('SUPER_ADMIN', 'ADMIN')`.
+ * ADMIN access is scoped to their own tenant via resolveTenantId (non-super
+ * branch returns req.user.tenantId — cannot cross-tenant query).
  *
  * Endpoint inventory:
  *   POST  /cookie                                 → rotate the session cookie
@@ -37,7 +39,9 @@ import {
 
 export const tlInternationalRouter = Router();
 
-tlInternationalRouter.use(requireAuth, requireRole('SUPER_ADMIN'));
+// 2026-05-26: opened to ADMIN in addition to SUPER_ADMIN. ADMIN is hard-scoped
+// to their own tenant via resolveTenantId; only SUPER_ADMIN can cross-tenant.
+tlInternationalRouter.use(requireAuth, requireRole('SUPER_ADMIN', 'ADMIN'));
 
 // ---------------------------------------------------------------------------
 // Helpers

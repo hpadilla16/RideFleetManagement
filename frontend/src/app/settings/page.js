@@ -2250,7 +2250,7 @@ function SettingsInner({ token, me, logout }) {
           <button onClick={() => setTab('services')}>Additional Services</button>
           <button onClick={() => setTab('commissions')}>Commissions</button>
           <button onClick={() => setTab('franchises')}>Franchises</button>
-          {isSuper && <button onClick={() => setTab('integrations')}>Integraciones / Integrations</button>}
+          {isAdmin && <button onClick={() => setTab('integrations')}>Integraciones / Integrations</button>}
         </div>
 
         {tab === 'agreement' && (
@@ -2985,6 +2985,7 @@ function SettingsInner({ token, me, logout }) {
             token={token}
             me={me}
             isSuper={isSuper}
+            isAdmin={isAdmin}
             activeSettingsTenantId={activeSettingsTenantId}
             scopedSettingsPath={scopedSettingsPath}
             onPageMsg={setMsg}

@@ -4,7 +4,7 @@
  * TL International - Monthly payout report (Surface 4, task 24 phase 1).
  *
  * Tracks expected vs. received payments from TL International per month.
- * SUPER_ADMIN gated.
+ * ADMIN + SUPER_ADMIN gated (ADMIN scoped to own tenant via backend).
  *
  * Critical business rule (also enforced in backend):
  *   An ExternalReservation counts as BILLABLE only if the promoted
@@ -121,6 +121,8 @@ export default function TLPayoutsPage() {
 function Inner({ token, me, logout }) {
   const role = String(me?.role || '').toUpperCase().trim();
   const isSuper = role === 'SUPER_ADMIN';
+  // 2026-05-26: ADMIN can also see TL payouts (scoped to their own tenant).
+  const canAccess = isSuper || role === 'ADMIN';
   const currentYear = new Date().getFullYear();
   const [year, setYear] = useState(currentYear);
   const [periods, setPeriods] = useState([]);
@@ -128,11 +130,11 @@ function Inner({ token, me, logout }) {
   const [error, setError] = useState('');
   const [drawerMonth, setDrawerMonth] = useState(null); // { year, month }
 
-  if (!isSuper) {
+  if (!canAccess) {
     return (
       <AppShell me={me} logout={logout}>
         <div style={{ padding: 20 }}>
-          <strong>Solo SUPER_ADMIN.</strong> / SUPER_ADMIN only.
+          <strong>Admin access required.</strong> Restricted to ADMIN and SUPER_ADMIN.
         </div>
       </AppShell>
     );

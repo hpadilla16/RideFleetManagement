@@ -4,9 +4,10 @@
  * TLIntegrationPanel - Settings tab for the TL International franchise
  * reservation sync (round 5 - task 24 phase 1, frontend Surface 1).
  *
- * English-only UI. SUPER_ADMIN gated by the
- * parent settings page; this component renders a friendly notice if a
- * non-super-admin slips through.
+ * English-only UI. SUPER_ADMIN + ADMIN gated by the parent settings page;
+ * this component renders a friendly notice if a lower role slips through.
+ * (Opened to ADMIN on 2026-05-26 — ADMIN is hard-scoped to their own tenant
+ * by the backend's resolveTenantId.)
  *
  * Backend contract (mounted at /api/admin/integrations/tl-international):
  *   POST /cookie            { cookie } -> { ok, lastTestedAt, lastTestStatus }
@@ -59,7 +60,7 @@ function StatusBadge({ status }) {
   return <span style={{ background: '#e5e7eb', color: '#374151', padding: '2px 8px', borderRadius: 999, fontSize: 12, fontWeight: 600 }}>{status || 'Untested'}</span>;
 }
 
-export function TLIntegrationPanel({ token, me, isSuper, activeSettingsTenantId, scopedSettingsPath, onPageMsg }) {
+export function TLIntegrationPanel({ token, me, isSuper, isAdmin, activeSettingsTenantId, scopedSettingsPath, onPageMsg }) {
   const [status, setStatus] = useState(null);
   const [runs, setRuns] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -72,10 +73,13 @@ export function TLIntegrationPanel({ token, me, isSuper, activeSettingsTenantId,
   const [runNowBusy, setRunNowBusy] = useState(false);
   const [toast, setToast] = useState('');
 
-  if (!isSuper) {
+  // Fallback for callers that haven't been updated to pass `isAdmin` yet.
+  const canAccess = isAdmin ?? (isSuper || String(me?.role || '').toUpperCase() === 'ADMIN');
+
+  if (!canAccess) {
     return (
       <div style={{ padding: 16, background: '#fef3c7', borderRadius: 8 }}>
-        <strong>SUPER_ADMIN only.</strong> This panel is restricted to platform administrators.
+        <strong>Admin access required.</strong> This panel is restricted to ADMIN and SUPER_ADMIN users.
       </div>
     );
   }
@@ -176,7 +180,7 @@ export function TLIntegrationPanel({ token, me, isSuper, activeSettingsTenantId,
       <div className="row-between" style={{ alignItems: 'start' }}>
         <div>
           <h2 style={{ marginBottom: 4 }}>TL International - Reservation sync</h2>
-          <p className="ui-muted">Imports franchise reservations from TL into RideFleet. SUPER_ADMIN only.</p>
+          <p className="ui-muted">Imports franchise reservations from TL into RideFleet.</p>
         </div>
         <span className="status-chip neutral">Integration</span>
       </div>
