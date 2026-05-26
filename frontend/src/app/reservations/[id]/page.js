@@ -7,6 +7,7 @@ import { AppShell } from '../../../components/AppShell';
 import { AgreementAddendumsCard } from '../../../components/AgreementAddendumsCard';
 import { ReservationExtendDialog } from '../../../components/ReservationExtendDialog';
 import { api, API_BASE } from '../../../lib/client';
+import { utcToTenantLocalInput } from '../../../lib/tenant-time';
 
 function stripChargePrefix(name = '', prefix) {
   return String(name || '').replace(prefix, '').trim();
@@ -377,8 +378,12 @@ function ReservationDetailInner({ token, me, logout }) {
       setForm({
         customerId: reservationResult.customerId || '',
         vehicleId: reservationResult.vehicleId || '',
-        pickupAt: reservationResult.pickupAt ? new Date(reservationResult.pickupAt).toISOString().slice(0, 16) : '',
-        returnAt: reservationResult.returnAt ? new Date(reservationResult.returnAt).toISOString().slice(0, 16) : '',
+        // datetime-local input wants wall-clock time in the agent's tenant TZ
+        // (default America/Puerto_Rico). Using .toISOString().slice(0,16) here
+        // leaked the raw UTC instant into the input (e.g. 15:19 UTC rendered
+        // as "15:19" instead of "11:19" AST).
+        pickupAt: utcToTenantLocalInput(reservationResult.pickupAt),
+        returnAt: utcToTenantLocalInput(reservationResult.returnAt),
         pickupLocationId: reservationResult.pickupLocationId || '',
         returnLocationId: reservationResult.returnLocationId || '',
         notes: reservationResult.notes || '',
@@ -423,7 +428,7 @@ function ReservationDetailInner({ token, me, logout }) {
       });
       setLoanerOpsForm({
         vehicleId: reservationResult.vehicleId || '',
-        returnAt: reservationResult.returnAt ? new Date(reservationResult.returnAt).toISOString().slice(0, 16) : '',
+        returnAt: utcToTenantLocalInput(reservationResult.returnAt),
         estimatedServiceCompletionAt: toLocalDateTime(reservationResult.estimatedServiceCompletionAt),
         loanerCloseoutNotes: reservationResult.loanerCloseoutNotes || '',
         note: ''

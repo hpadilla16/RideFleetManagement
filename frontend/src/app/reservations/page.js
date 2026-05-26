@@ -43,19 +43,20 @@ import { api } from '../../lib/client';
 const RESERVATION_PAGE_SIZE = 100;
 const CUSTOMER_PICKER_LIMIT = 100;
 
+// Format a UTC datetime as wall-clock time in the tenant's timezone.
+//
+// Historical note (2026-05-26): an earlier version of this function had a
+// short-circuit that read the raw "YYYY-MM-DDTHH:mm" prefix of an ISO
+// string and rendered those digits as if they were already the wall-clock
+// hour. That was a deliberate hack to "match" the buggy backend that
+// stored local-as-UTC. Once the backend started storing real UTC instants
+// (parseDateTimeInTz in backend/src/lib/date-utils.js), that short-circuit
+// turned every value into a 4-hour-ahead misread. The path is now strictly
+// "parse → format in tenant TZ".
 function formatReservationWallClock(value, tenantTimeZone = 'America/Puerto_Rico') {
   if (!value) return '-';
-  const raw = String(value);
-  const isoLikeMatch = raw.match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/);
-  if (isoLikeMatch) {
-    const [, year, month, day, hourRaw, minute] = isoLikeMatch;
-    const hour24 = Number(hourRaw);
-    const suffix = hour24 >= 12 ? 'PM' : 'AM';
-    const hour12 = ((hour24 + 11) % 12) + 1;
-    return `${Number(month)}/${Number(day)}/${year}, ${hour12}:${minute} ${suffix}`;
-  }
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return raw;
+  const date = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(date.getTime())) return String(value);
   return date.toLocaleString('en-US', {
     timeZone: tenantTimeZone,
     year: 'numeric',
