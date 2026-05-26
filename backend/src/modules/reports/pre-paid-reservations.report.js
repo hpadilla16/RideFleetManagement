@@ -41,6 +41,18 @@
  */
 
 import { registerReport } from './reports-v2.routes.js';
+import { parseDateTimeInTz, DEFAULT_TENANT_TIMEZONE } from '../../lib/date-utils.js';
+import { settingsService } from '../settings/settings.service.js';
+
+async function resolveTenantTimeZone(tenantId) {
+  if (!tenantId) return DEFAULT_TENANT_TIMEZONE;
+  try {
+    const options = await settingsService.getReservationOptions({ tenantId });
+    return String(options?.tenantTimeZone || DEFAULT_TENANT_TIMEZONE);
+  } catch {
+    return DEFAULT_TENANT_TIMEZONE;
+  }
+}
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -62,10 +74,15 @@ function parseYearMonth(params) {
   return { year, month };
 }
 
-function monthBounds(year, month) {
-  // month is 1-12; JS Date months are 0-11
-  const start = new Date(Date.UTC(year, month - 1, 1));
-  const end   = new Date(Date.UTC(year, month, 1)); // 1st of next month, exclusive
+// Build the half-open [start, end) UTC range for "month X in tenantTz" so
+// e.g. May 2026 in PR runs from 2026-05-01T00:00 AST (= 2026-05-01T04:00Z)
+// to 2026-06-01T00:00 AST (= 2026-06-01T04:00Z), not the UTC midnight pair.
+function monthBoundsInTz(year, month, tenantTz) {
+  const pad = (n) => String(n).padStart(2, '0');
+  const nextYear  = month === 12 ? year + 1 : year;
+  const nextMonth = month === 12 ? 1 : month + 1;
+  const start = parseDateTimeInTz(`${year}-${pad(month)}-01T00:00:00`, tenantTz);
+  const end   = parseDateTimeInTz(`${nextYear}-${pad(nextMonth)}-01T00:00:00`, tenantTz);
   return { start, end };
 }
 
@@ -104,7 +121,8 @@ export async function computeData(params, deps = {}) {
   const prisma = deps.prisma || (await import('../../lib/prisma.js')).prisma;
 
   const { year, month } = parseYearMonth(params);
-  const { start, end } = monthBounds(year, month);
+  const tenantTz = await resolveTenantTimeZone(params.tenantId);
+  const { start, end } = monthBoundsInTz(year, month, tenantTz);
 
   const rows = await prisma.externalReservation.findMany({
     where: {
@@ -185,6 +203,7 @@ export async function computeData(params, deps = {}) {
     grandTotal,
     count,
     currency: 'USD',
+    tenantTimeZone: tenantTz,
     filters: { year, month },
   };
 }
@@ -199,16 +218,25 @@ function escapeHtml(s) {
     .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
 }
 
-function fmtDateTimeShort(d) {
+// Format a UTC instant as "DD-MM-YYYY HH:mm" in the given tenant TZ. The
+// earlier version used getUTC* and silently rendered every timestamp as UTC
+// in the agreement PDF + Excel export, four hours ahead of the wall-clock
+// the staff actually scheduled.
+function fmtDateTimeShort(d, tenantTz = DEFAULT_TENANT_TIMEZONE) {
   if (!d) return '-';
   const x = d instanceof Date ? d : new Date(d);
   if (Number.isNaN(x.getTime())) return '-';
-  const dd = String(x.getUTCDate()).padStart(2, '0');
-  const mm = String(x.getUTCMonth() + 1).padStart(2, '0');
-  const yyyy = x.getUTCFullYear();
-  const hh = String(x.getUTCHours()).padStart(2, '0');
-  const mi = String(x.getUTCMinutes()).padStart(2, '0');
-  return `${dd}-${mm}-${yyyy} ${hh}:${mi}`;
+  const parts = new Intl.DateTimeFormat('en-GB', {
+    timeZone: tenantTz,
+    year: 'numeric', month: '2-digit', day: '2-digit',
+    hour: '2-digit', minute: '2-digit',
+    hour12: false
+  }).formatToParts(x).reduce((acc, p) => {
+    if (p.type !== 'literal') acc[p.type] = p.value;
+    return acc;
+  }, {});
+  const hour = parts.hour === '24' ? '00' : parts.hour;
+  return `${parts.day}-${parts.month}-${parts.year} ${hour}:${parts.minute}`;
 }
 
 function fmtMoney(n) {
@@ -217,13 +245,14 @@ function fmtMoney(n) {
 }
 
 export function renderHtml(data) {
+  const tz = data?.tenantTimeZone || DEFAULT_TENANT_TIMEZONE;
   const groupsHtml = (data.groups || []).map(g => {
     const rowsHtml = g.rows.map(r => `
       <tr>
         <td>${escapeHtml(r.customer)}</td>
-        <td>${escapeHtml(fmtDateTimeShort(r.bookingDate))}</td>
-        <td>${escapeHtml(fmtDateTimeShort(r.collectionDate))}</td>
-        <td>${escapeHtml(fmtDateTimeShort(r.returnDate))}</td>
+        <td>${escapeHtml(fmtDateTimeShort(r.bookingDate, tz))}</td>
+        <td>${escapeHtml(fmtDateTimeShort(r.collectionDate, tz))}</td>
+        <td>${escapeHtml(fmtDateTimeShort(r.returnDate, tz))}</td>
         <td>${escapeHtml(r.externalRef)}</td>
         <td style="text-align:right">${fmtMoney(r.value)}</td>
       </tr>
@@ -262,6 +291,7 @@ export function renderHtml(data) {
 // ---------------------------------------------------------------------------
 
 export function buildExcelSpec(data) {
+  const tz = data?.tenantTimeZone || DEFAULT_TENANT_TIMEZONE;
   const sheets = [];
   const rows = [];
 
@@ -275,9 +305,9 @@ export function buildExcelSpec(data) {
     for (const r of g.rows) {
       rows.push([
         r.customer,
-        fmtDateTimeShort(r.bookingDate),
-        fmtDateTimeShort(r.collectionDate),
-        fmtDateTimeShort(r.returnDate),
+        fmtDateTimeShort(r.bookingDate, tz),
+        fmtDateTimeShort(r.collectionDate, tz),
+        fmtDateTimeShort(r.returnDate, tz),
         r.externalRef,
         num(r.value),
       ]);

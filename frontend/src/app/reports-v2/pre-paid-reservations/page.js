@@ -16,6 +16,7 @@ import Link from 'next/link';
 import { AuthGate } from '../../../components/AuthGate';
 import { AppShell } from '../../../components/AppShell';
 import { api } from '../../../lib/client';
+import { DEFAULT_TENANT_TIMEZONE } from '../../../lib/tenant-time';
 
 const MONTH_LABELS = [
   'January', 'February', 'March', 'April', 'May', 'June',
@@ -27,16 +28,24 @@ function defaultYearMonth() {
   return { year: now.getFullYear(), month: now.getMonth() + 1 };
 }
 
-function fmtDateTimeShort(iso) {
+// Format as "DD-MM-YYYY HH:mm" in the tenant TZ. The original used getUTC*
+// which rendered every value as UTC — visually four hours ahead of the
+// staff's wall-clock for our PR tenant.
+function fmtDateTimeShort(iso, tenantTz = DEFAULT_TENANT_TIMEZONE) {
   if (!iso) return '-';
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return '-';
-  const dd = String(d.getUTCDate()).padStart(2, '0');
-  const mm = String(d.getUTCMonth() + 1).padStart(2, '0');
-  const yyyy = d.getUTCFullYear();
-  const hh = String(d.getUTCHours()).padStart(2, '0');
-  const mi = String(d.getUTCMinutes()).padStart(2, '0');
-  return `${dd}-${mm}-${yyyy} ${hh}:${mi}`;
+  const parts = new Intl.DateTimeFormat('en-GB', {
+    timeZone: tenantTz,
+    year: 'numeric', month: '2-digit', day: '2-digit',
+    hour: '2-digit', minute: '2-digit',
+    hour12: false
+  }).formatToParts(d).reduce((acc, p) => {
+    if (p.type !== 'literal') acc[p.type] = p.value;
+    return acc;
+  }, {});
+  const hour = parts.hour === '24' ? '00' : parts.hour;
+  return `${parts.day}-${parts.month}-${parts.year} ${hour}:${parts.minute}`;
 }
 
 function fmtMoney(n) {
@@ -200,9 +209,9 @@ function PrePaidReservationsReport({ token }) {
                     {g.rows.map((r) => (
                       <tr key={r.id} style={{ borderBottom: '1px solid #f3f4f6' }}>
                         <td style={{ padding: '8px 12px' }}>{r.customer}</td>
-                        <td style={{ padding: '8px 12px', color: '#6b7280' }}>{fmtDateTimeShort(r.bookingDate)}</td>
-                        <td style={{ padding: '8px 12px' }}>{fmtDateTimeShort(r.collectionDate)}</td>
-                        <td style={{ padding: '8px 12px' }}>{fmtDateTimeShort(r.returnDate)}</td>
+                        <td style={{ padding: '8px 12px', color: '#6b7280' }}>{fmtDateTimeShort(r.bookingDate, data.tenantTimeZone)}</td>
+                        <td style={{ padding: '8px 12px' }}>{fmtDateTimeShort(r.collectionDate, data.tenantTimeZone)}</td>
+                        <td style={{ padding: '8px 12px' }}>{fmtDateTimeShort(r.returnDate, data.tenantTimeZone)}</td>
                         <td style={{ padding: '8px 12px' }}><code>{r.externalRef}</code></td>
                         <td style={{ padding: '8px 12px', textAlign: 'right' }}>{fmtMoney(r.value)}</td>
                       </tr>
