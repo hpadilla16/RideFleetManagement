@@ -6,6 +6,7 @@ import {
   calculateShortage,
   intervalsOverlap,
   isMovablePlannerStatus,
+  isAssignableReservationStatus,
   loadPlannerReservations,
   loadPlannerVehicles,
   normalizePlannerDateRange,
@@ -451,7 +452,7 @@ export const plannerRecommendationService = {
     ]);
 
     const candidates = reservations
-      .filter((reservation) => !reservation.vehicleId && isMovablePlannerStatus(reservation.status))
+      .filter((reservation) => !reservation.vehicleId && isAssignableReservationStatus(reservation.status))
       .filter((reservation) => !requestedReservationIds.size || requestedReservationIds.has(reservation.id))
       .sort((left, right) => {
         const pickupDiff = new Date(left.pickupAt) - new Date(right.pickupAt);

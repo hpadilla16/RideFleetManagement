@@ -213,7 +213,17 @@ export function usePlannerActions({
       setPlannerScenario(null);
       setOverbookedReservationIds([]);
       reloadPlannerSnapshot();
-      setMsg(`${result?.appliedCount || plannerScenario.actions.length} planner assignment(s) applied.`);
+      const appliedCount = result?.appliedCount ?? plannerScenario.actions.length;
+      const skippedCount = result?.skippedCount || 0;
+      if (skippedCount > 0) {
+        // Surface why some actions were skipped — the scenario was generated
+        // from a snapshot and the world may have changed (e.g. someone checked
+        // out a reservation between simulate and apply).
+        const sampleReason = result?.skipped?.[0]?.reason || 'state changed since simulation';
+        setMsg(`${appliedCount} planner assignment(s) applied, ${skippedCount} skipped (${sampleReason}${skippedCount > 1 ? ', ...' : ''}). Re-run auto-acomodar to resolve the rest.`);
+      } else {
+        setMsg(`${appliedCount} planner assignment(s) applied.`);
+      }
     } catch (error) {
       setMsg(error.message || 'Unable to apply planner scenario');
     } finally {

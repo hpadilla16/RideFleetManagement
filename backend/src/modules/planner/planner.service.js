@@ -5,6 +5,11 @@ import { settingsService } from '../settings/settings.service.js';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const COMMITTED_STATUSES = new Set(['NEW', 'CONFIRMED', 'CHECKED_OUT']);
+// Reservations the planner is allowed to (re)assign a vehicle to. CHECKED_OUT
+// is intentionally excluded — once a vehicle is in the customer's hands we
+// cannot reassign it. Occupancy calculations still use COMMITTED_STATUSES
+// (a CHECKED_OUT car still occupies its vehicle's slot).
+const ASSIGNABLE_STATUSES = new Set(['NEW', 'CONFIRMED']);
 
 function tenantWhere(scope = {}) {
   if (scope?.tenantId) return { tenantId: scope.tenantId };
@@ -71,6 +76,10 @@ function intervalsOverlap(startA, endA, startB, endB) {
 
 function isMovablePlannerStatus(status) {
   return COMMITTED_STATUSES.has(String(status || '').toUpperCase());
+}
+
+function isAssignableReservationStatus(status) {
+  return ASSIGNABLE_STATUSES.has(String(status || '').toUpperCase());
 }
 
 function blockOverlapsDay(block, dayStart, dayEnd) {
@@ -586,11 +595,13 @@ export const plannerService = {
 export {
   DAY_MS,
   COMMITTED_STATUSES,
+  ASSIGNABLE_STATUSES,
   tenantWhere,
   reservationVehicleTypeId,
   reservationLocationId,
   reservationOverlapsRange,
   intervalsOverlap,
   isMovablePlannerStatus,
+  isAssignableReservationStatus,
   calculateShortage
 };

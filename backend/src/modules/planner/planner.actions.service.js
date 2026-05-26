@@ -202,9 +202,19 @@ export const plannerActionsService = {
 
     if (!scenarioActions.length) throw new Error('Planner scenario has no actions to apply');
 
+    // Errors that indicate the world changed between simulate and apply (or
+    // between scenario persistence and apply). These are recoverable per-action:
+    // we skip the stale action and keep going so the other 79 valid assignments
+    // still land. All of these are thrown BEFORE any tx.write, so the postgres
+    // transaction state stays healthy after catching.
+    const RECOVERABLE_PATTERNS = /is locked by check-out|is not available for assignment|Vehicle conflict with reservation|active .* during this reservation window|active .* during this planner block window|Reservation not found|Vehicle not found|reservationId is required for planner action|vehicleId is required for ASSIGN_VEHICLE|vehicleId is required for planner block action|must be after blockedFrom|blockedFrom is required for planner block action|availableFrom is required for planner block action/i;
+
+    const skipped = [];
+
     const applied = await prisma.$transaction(async (tx) => {
       const results = [];
       for (const action of scenarioActions.sort((left, right) => left.sortOrder - right.sortOrder)) {
+        try {
         if (!['ASSIGN_VEHICLE', 'UNASSIGN_VEHICLE', 'CREATE_MAINTENANCE_BLOCK', 'CREATE_WASH_BLOCK'].includes(action.actionType)) {
           throw new Error(`Planner action ${action.actionType || 'UNKNOWN'} is not supported yet`);
         }
@@ -361,14 +371,33 @@ export const plannerActionsService = {
           }
         });
         results.push(createdBlock);
+        } catch (error) {
+          const message = String(error?.message || '');
+          if (RECOVERABLE_PATTERNS.test(message)) {
+            skipped.push({
+              reservationId: action.reservationId || null,
+              vehicleId: action.vehicleId || null,
+              actionType: action.actionType,
+              reason: message
+            });
+            continue;
+          }
+          throw error;
+        }
       }
 
-      await tx.plannerScenario.update({
-        where: { id: scenarioId },
-        data: {
-          status: 'APPLIED'
-        }
-      });
+      // Only mark the scenario as APPLIED if we actually applied at least one
+      // action. If every action was skipped (e.g. the scenario was so stale that
+      // every reservation got checked out), leave the scenario open so the user
+      // can re-simulate and try again.
+      if (results.length > 0) {
+        await tx.plannerScenario.update({
+          where: { id: scenarioId },
+          data: {
+            status: 'APPLIED'
+          }
+        });
+      }
 
       return results;
     });
@@ -376,6 +405,8 @@ export const plannerActionsService = {
     return {
       applied: true,
       appliedCount: applied.length,
+      skippedCount: skipped.length,
+      skipped,
       scenarioId,
       reservations: applied
     };
