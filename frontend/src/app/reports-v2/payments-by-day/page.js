@@ -18,6 +18,7 @@ import { api } from '../../../lib/client';
 import { ReportPageLayout } from '../../../components/reports/ReportPageLayout';
 import { PaymentListDrawer } from '../../../components/reports/PaymentListDrawer';
 import { StackedDayBarChart } from '../../../components/reports/charts/StackedDayBarChart';
+import { DEFAULT_TENANT_TIMEZONE } from '../../../lib/tenant-time';
 
 const METHOD_LABEL = { CASH: 'Cash', CARD: 'Card', DIGITAL: 'Digital', OTHER: 'Other' };
 const METHOD_COLOR = {
@@ -27,12 +28,24 @@ const METHOD_COLOR = {
   OTHER:   '#888780', // gray
 };
 
-function isoDay(d) { return d.toISOString().slice(0, 10); }
+// "YYYY-MM-DD" in tenant TZ. Same fix as reservations-by-day —
+// toISOString().slice(0, 10) leaked the UTC date and made the default
+// "1st of month → today" range silently off-by-one at the boundary.
+function isoDay(d, tz = DEFAULT_TENANT_TIMEZONE) {
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: tz,
+    year: 'numeric', month: '2-digit', day: '2-digit'
+  }).formatToParts(d).reduce((acc, p) => {
+    if (p.type !== 'literal') acc[p.type] = p.value;
+    return acc;
+  }, {});
+  return `${parts.year}-${parts.month}-${parts.day}`;
+}
 
 function defaultRange() {
-  const t = new Date();
-  const from = new Date(t.getFullYear(), t.getMonth(), 1);
-  return { from: isoDay(from), to: isoDay(t) };
+  const todayIso = isoDay(new Date());
+  const firstOfMonth = `${todayIso.slice(0, 7)}-01`;
+  return { from: firstOfMonth, to: todayIso };
 }
 
 function buildDayEndpoint(dayIso, locationId) {

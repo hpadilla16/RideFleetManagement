@@ -27,6 +27,18 @@
  */
 
 import { registerReport } from './reports-v2.routes.js';
+import { parseDateTimeInTz, DEFAULT_TENANT_TIMEZONE } from '../../lib/date-utils.js';
+import { settingsService } from '../settings/settings.service.js';
+
+async function resolveTenantTimeZone(tenantId) {
+  if (!tenantId) return DEFAULT_TENANT_TIMEZONE;
+  try {
+    const options = await settingsService.getReservationOptions({ tenantId });
+    return String(options?.tenantTimeZone || DEFAULT_TENANT_TIMEZONE);
+  } catch {
+    return DEFAULT_TENANT_TIMEZONE;
+  }
+}
 
 const METHOD_BUCKETS = {
   CASH:    ['CASH'],
@@ -55,33 +67,61 @@ const MAX_DAYS = 92;
 
 function num(v) { const n = Number(v); return Number.isFinite(n) ? n : 0; }
 
-function startOfDay(d) {
-  const x = new Date(d);
-  x.setHours(0, 0, 0, 0);
-  return x;
+// Tenant-TZ aware day helpers — same shape as reservations-by-day. See that
+// file's comment block for the full rationale; in short, payments captured
+// at 11 PM AST get stored at 03:00 UTC the next calendar day, and the old
+// server-local helpers bucketed them into the wrong column.
+
+function tzParts(date, tz) {
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: tz,
+    year: 'numeric', month: '2-digit', day: '2-digit'
+  }).formatToParts(date).reduce((acc, p) => {
+    if (p.type !== 'literal') acc[p.type] = p.value;
+    return acc;
+  }, {});
 }
 
-function startOfMonth(d) {
-  return new Date(d.getFullYear(), d.getMonth(), 1, 0, 0, 0, 0);
+function startOfDayInTz(value, tz) {
+  if (value == null) return null;
+  if (typeof value === 'string') {
+    const dayOnly = value.length >= 10 ? value.slice(0, 10) : value;
+    return parseDateTimeInTz(dayOnly, tz);
+  }
+  if (value instanceof Date) {
+    const parts = tzParts(value, tz);
+    return parseDateTimeInTz(`${parts.year}-${parts.month}-${parts.day}`, tz);
+  }
+  return null;
 }
 
-function addDays(d, n) {
-  const x = new Date(d);
-  x.setDate(x.getDate() + n);
-  return x;
+function startOfMonthInTz(date, tz) {
+  const parts = tzParts(date, tz);
+  return parseDateTimeInTz(`${parts.year}-${parts.month}-01`, tz);
 }
 
-function daysBetween(from, to) {
-  return Math.max(1, Math.round((startOfDay(to) - startOfDay(from)) / DAY_MS) + 1);
+function addDaysInTz(date, n) {
+  return new Date(date.getTime() + n * DAY_MS);
 }
 
-function isoDay(d) { return d.toISOString().slice(0, 10); }
-
-const WD = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
-const MO = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-function dayLabel(d) {
-  return `${WD[d.getDay()]} ${MO[d.getMonth()]} ${d.getDate()}`;
+function isoDayInTz(date, tz) {
+  const parts = tzParts(date, tz);
+  return `${parts.year}-${parts.month}-${parts.day}`;
 }
+
+function dayLabelInTz(date, tz) {
+  return new Intl.DateTimeFormat('en-US', {
+    timeZone: tz,
+    weekday: 'short', month: 'short', day: 'numeric'
+  }).format(date).replace(',', '');
+}
+
+// Back-compat exports (test fixture uses business-hour times so PR and UTC
+// days line up — these wrappers preserve the helper names the tests touch).
+function startOfDay(d) { return startOfDayInTz(d, DEFAULT_TENANT_TIMEZONE); }
+function addDays(d, n) { return addDaysInTz(d, n); }
+function isoDay(d) { return isoDayInTz(d, DEFAULT_TENANT_TIMEZONE); }
+function dayLabel(d) { return dayLabelInTz(d, DEFAULT_TENANT_TIMEZONE); }
 
 function moneyRound(n) {
   // Avoid float drift like 12.300000000001
@@ -119,22 +159,24 @@ async function computeData({ tenantId, from, to, query }, deps = {}) {
   const prisma = deps.prisma || (await resolveDefaultPrisma());
   if (!tenantId) throw new Error('tenantId required');
 
+  const tz = deps.tenantTz || (await resolveTenantTimeZone(tenantId));
   const locationId = (query && query.locationId) || null;
 
   const now = new Date();
-  const fromDate = from ? startOfDay(new Date(from)) : startOfMonth(now);
-  const toDate = to ? startOfDay(new Date(to)) : startOfDay(now);
-  const numDays = daysBetween(fromDate, toDate);
+  const fromDate = from ? startOfDayInTz(from, tz) : startOfMonthInTz(now, tz);
+  const toDate = to ? startOfDayInTz(to, tz) : startOfDayInTz(now, tz);
+  const numDays = Math.max(1, Math.round((toDate - fromDate) / DAY_MS) + 1);
   const safeNumDays = Math.min(numDays, MAX_DAYS);
-  const windowEnd = addDays(fromDate, safeNumDays);
+  const windowEnd = addDaysInTz(fromDate, safeNumDays);
 
-  // Pre-populate day skeleton (so days with no payments render as 0)
+  // Pre-populate day skeleton (so days with no payments render as 0). Each
+  // cell labelled in tenant TZ so the header row matches the data column.
   const days = [];
   for (let i = 0; i < safeNumDays; i++) {
-    const d = addDays(fromDate, i);
+    const d = addDaysInTz(fromDate, i);
     days.push({
-      iso: isoDay(d),
-      label: dayLabel(d),
+      iso: isoDayInTz(d, tz),
+      label: dayLabelInTz(d, tz),
       amounts: { CASH: 0, CARD: 0, DIGITAL: 0, OTHER: 0 },
       count: 0,
       total: 0,
@@ -147,11 +189,12 @@ async function computeData({ tenantId, from, to, query }, deps = {}) {
     select: { amount: true, method: true, paidAt: true },
   });
 
-  // Aggregate
+  // Aggregate — bucket each payment by the tenant-local day it was captured
+  // on. A late-night PR collection that stores at 03:00 UTC the next
+  // calendar day still belongs to its AST day in the recap.
   const methodTotals = { CASH: 0, CARD: 0, DIGITAL: 0, OTHER: 0 };
   for (const p of payments) {
-    const day = startOfDay(new Date(p.paidAt));
-    const iso = isoDay(day);
+    const iso = isoDayInTz(new Date(p.paidAt), tz);
     const idx = dayIdxByIso.get(iso);
     if (idx === undefined) continue;
     const bucket = METHOD_TO_BUCKET[p.method] || 'OTHER';
@@ -187,7 +230,7 @@ async function computeData({ tenantId, from, to, query }, deps = {}) {
   const dailyAverage = days.length > 0 ? moneyRound(totalAmount / days.length) : 0;
 
   return {
-    range: { from: fromDate.toISOString(), to: addDays(windowEnd, -1).toISOString() },
+    range: { from: fromDate.toISOString(), to: addDaysInTz(windowEnd, -1).toISOString() },
     days,
     totals: {
       amount: totalAmount,
@@ -198,6 +241,7 @@ async function computeData({ tenantId, from, to, query }, deps = {}) {
     peak: { iso: peak.iso, label: peak.label, total: peak.total, count: peak.count },
     topMethod: { key: topMethodKey, amount: topMethodAmt, pct: topMethodPct },
     dailyAverage,
+    tenantTimeZone: tz,
     filters: { locationId },
     truncated: numDays > MAX_DAYS,
   };
@@ -209,15 +253,18 @@ async function computeData({ tenantId, from, to, query }, deps = {}) {
 
 async function dayDrillDownHandler(req, res, { tenantId }) {
   const prisma = await resolveDefaultPrisma();
+  const tz = await resolveTenantTimeZone(tenantId);
   const dayIso = (req.query?.day || '').toString();
   const locationId = req.query?.locationId ? String(req.query.locationId) : null;
 
   if (!dayIso) return res.status(400).json({ error: 'day query param required' });
-  const day = startOfDay(new Date(dayIso));
-  if (Number.isNaN(day.getTime())) {
+  // Interpret the requested day in tenant TZ so the [day, dayEnd) window
+  // agrees with the bucketing in computeData.
+  const day = startOfDayInTz(dayIso, tz);
+  if (!day || Number.isNaN(day.getTime())) {
     return res.status(400).json({ error: 'day must be an ISO date (YYYY-MM-DD)' });
   }
-  const dayEnd = addDays(day, 1);
+  const dayEnd = addDaysInTz(day, 1);
 
   const payments = await prisma.rentalAgreementPayment.findMany({
     where: buildPaymentWhere({ tenantId, locationId, gte: day, lt: dayEnd }),
@@ -246,8 +293,9 @@ async function dayDrillDownHandler(req, res, { tenantId }) {
   const totalAmount = moneyRound(payments.reduce((acc, p) => acc + num(p.amount), 0));
 
   return res.json({
-    day: { iso: isoDay(day), label: dayLabel(day) },
+    day: { iso: isoDayInTz(day, tz), label: dayLabelInTz(day, tz) },
     locationId,
+    tenantTimeZone: tz,
     totalAmount,
     paymentCount: payments.length,
     payments: payments.map((p) => ({
