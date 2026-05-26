@@ -275,7 +275,14 @@ function DashboardInner({ token, me, logout }) {
 
   const load = async () => {
     const [reservationsResult, overviewResult, vehiclesResult, summaryResult] = await Promise.allSettled([
-      api('/api/reservations', {}, token),
+      // The dashboard's Operations Board derives its visible Pickups/Returns
+      // lists from this array. The default limit is 100 ordered by most-recent
+      // created, which silently dropped today's returns whose reservations
+      // were booked weeks in advance (so the header showed "Returns: 20" while
+      // the list only rendered 3). Bump to the max page size (500) so today's
+      // window is fully covered. Long-term, this should switch to a targeted
+      // ?returnDateOn=today query plus a separate timeline fetch.
+      api('/api/reservations?limit=500', {}, token),
       canSeeOverview ? api('/api/reports/overview', {}, token) : Promise.resolve(null),
       !canSeeOverview && canSeeVehicles ? api('/api/vehicles', {}, token) : Promise.resolve([]),
       api('/api/reservations/summary', {}, token)
@@ -384,7 +391,12 @@ function DashboardInner({ token, me, logout }) {
   const isToday = boardDate === todayStr;
   const boardLabel = isToday ? 'Today' : new Date(boardDate + 'T12:00:00').toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric' });
   const pickups = reservations.filter((r) => wallClockDate(r.pickupAt) === boardDate && ['NEW', 'CONFIRMED'].includes(r.status));
-  const returns = reservations.filter((r) => wallClockDate(r.returnAt) === boardDate && ['CHECKED_OUT', 'CONFIRMED'].includes(r.status));
+  // Match what the backend `resSummary.returnsToday` counts (every status
+  // whose returnAt falls inside today's tenant-TZ window) so the header and
+  // the list agree. CANCELLED + NO_SHOW are dropped because the customer
+  // isn't returning anything in those cases — the row is informational only
+  // and would just be noise in the agent's "today's returns" panel.
+  const returns = reservations.filter((r) => wallClockDate(r.returnAt) === boardDate && !['CANCELLED', 'NO_SHOW'].includes(r.status));
   const timeline = reservations.slice().sort((a, b) => new Date(b.updatedAt) - new Date(a.updatedAt)).slice(0, 10);
   const workspaceOpsHub = useMemo(() => {
     const nextItems = [
