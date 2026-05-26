@@ -108,14 +108,12 @@ const REPORT_REGISTRY = [
   { slug: 'damage',                title: 'Damage',                       category: 'FLEET', icon: 'alert-triangle', description: 'Findings + repair cost summary' },
 
   // Operations
-  {
-    slug: 'commission',
-    title: 'Commission Payouts',
-    category: 'OPERATIONS',
-    icon: 'receipt-2',
-    description: 'Commission paid + accrued per period, per employee',
-    status: 'AVAILABLE',
-  },
+  // 2026-05-26: 'commission' (Commission Payouts) was retired — its numbers
+  // diverged from commission-sales-performance because it read from the
+  // AgreementCommission ledger (subject to per-employee CommissionPlan
+  // configuration), while sales-performance computed directly from the
+  // SERVICE_CATALOG flat rates that match Hector's hand-built April PDF.
+  // Single source of truth is now commission-sales-performance.
   {
     slug: 'commission-sales-performance',
     title: 'Commission & Sales Performance',

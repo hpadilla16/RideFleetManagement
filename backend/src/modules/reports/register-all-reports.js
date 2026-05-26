@@ -21,6 +21,10 @@ import './utilization.report.js';
 import './upcoming-vehicle-sales.report.js';
 import './toll-per-vehicle.report.js';
 import './toll-per-location.report.js';
-import './commission.report.js';
+// 2026-05-26: commission.report.js (slug 'commission' / "Commission Payouts")
+// was retired. commission-sales-performance.report.js is the single source
+// of truth for per-agent commission. The module file + sync logic + backfill
+// script remain in the repo for the eventual approve workflow on the
+// surviving report.
 import './taxes.report.js';
 import './pre-paid-reservations.report.js';
