@@ -141,7 +141,13 @@ function ForecastReport({ token, me, logout }) {
     return () => { cancelled = true; };
   }, [token]);
 
-  // Load report data on range / location / LY toggle change
+  // Load report data on range / location / LY toggle / tab change.
+  //
+  // 2026-05-26: the 12-month sold-out scan can take 30+ seconds for tenants
+  // with deep history and gateway-times out at 60s. It's only consumed by
+  // the Trends tab, so we now only ask for it when that tab is active.
+  // Switching between locations on the At-a-glance / Forecast tabs is fast
+  // because the slow scan is skipped entirely.
   useEffect(() => {
     if (!token) return;
     let cancelled = false;
@@ -152,6 +158,7 @@ function ForecastReport({ token, me, logout }) {
     params.set('to', range.to);
     if (locationId) params.set('locationId', locationId);
     if (compareLastYear) params.set('compareLastYear', 'true');
+    if (activeTab === 'trends') params.set('includeSoldOutHistory', 'true');
     (async () => {
       try {
         const out = await api(`/api/reports/availability-forecast?${params.toString()}`, { bypassCache: true }, token);
@@ -163,7 +170,7 @@ function ForecastReport({ token, me, logout }) {
       }
     })();
     return () => { cancelled = true; };
-  }, [token, range.from, range.to, locationId, compareLastYear]);
+  }, [token, range.from, range.to, locationId, compareLastYear, activeTab]);
 
   const presets = useMemo(() => makePresets(), []);
 

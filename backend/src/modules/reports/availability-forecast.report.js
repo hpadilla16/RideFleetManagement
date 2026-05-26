@@ -360,8 +360,17 @@ async function computeData({ tenantId, from, to, query }, deps = {}) {
 
   const tz = deps.tenantTz || (await resolveTenantTimeZone(tenantId));
   const locationId = (query && query.locationId) || null;
-  const includeLastYear = query && (query.compareLastYear === 'true' || query.compareLastYear === '1');
-  const includeSoldOutHistory = !query || query.includeSoldOutHistory !== 'false';
+  // 2026-05-26: exports + cold-cache page loads were timing out at nginx's
+  // 60s gateway because computeSoldOutByMonth scans a year of reservations
+  // for every requested location. The Trends tab is the only consumer of
+  // that data, so we now require an explicit opt-in. Default loads (and
+  // location switches) get the fast path; Trends fetches with
+  // includeSoldOutHistory=true. PDF/Excel exports inject _isExport=1 from
+  // registerReport so the export path skips the scan regardless of the
+  // opt-in flag.
+  const isExport = query && (query._isExport === '1' || query._isExport === 'true');
+  const includeLastYear = !isExport && query && (query.compareLastYear === 'true' || query.compareLastYear === '1');
+  const includeSoldOutHistory = !isExport && query && (query.includeSoldOutHistory === 'true' || query.includeSoldOutHistory === '1');
 
   const fromDate = from ? startOfDayInTz(from, tz) : startOfDayInTz(new Date(), tz);
   const toDate = to

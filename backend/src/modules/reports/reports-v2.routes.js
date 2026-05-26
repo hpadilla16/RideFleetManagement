@@ -110,10 +110,15 @@ export function registerReport(report) {
     }
   });
 
+  // Inject `_isExport: '1'` into the query on the PDF + Excel paths so each
+  // individual report can short-circuit slow optional sections (e.g.
+  // availability-forecast's 12-month sold-out scan) that would otherwise
+  // push us over nginx's 60s gateway timeout. Reports that don't care about
+  // the flag simply ignore it.
   reportsV2Router.get(`/${slug}/pdf`, requireRole(...roles), async (req, res) => {
     try {
       const data = await report.computeData(
-        { tenantId: req.user.tenantId, from: req.query?.from, to: req.query?.to, query: req.query || {} },
+        { tenantId: req.user.tenantId, from: req.query?.from, to: req.query?.to, query: { ...(req.query || {}), _isExport: '1' } },
         {}
       );
       const subtitle = formatRangeSubtitle(data?.range || { from: req.query?.from, to: req.query?.to });
@@ -133,7 +138,7 @@ export function registerReport(report) {
   reportsV2Router.get(`/${slug}/excel`, requireRole(...roles), async (req, res) => {
     try {
       const data = await report.computeData(
-        { tenantId: req.user.tenantId, from: req.query?.from, to: req.query?.to, query: req.query || {} },
+        { tenantId: req.user.tenantId, from: req.query?.from, to: req.query?.to, query: { ...(req.query || {}), _isExport: '1' } },
         {}
       );
       const spec = report.buildExcelSpec(data);
