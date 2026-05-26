@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { api, API_BASE, readStoredToken } from '../lib/client';
+import { utcToTenantLocalInput, formatTenantWallClock } from '../lib/tenant-time';
 
 /**
  * Admin-facing card for managing rental agreement addendums (BUG-001 / Option C).
@@ -499,26 +500,18 @@ function StatusBadge({ status }) {
   );
 }
 
+// Format an addendum/agreement timestamp in the tenant TZ rather than the
+// browser TZ. Customers signing from out-of-state or on mobile carriers may
+// have unexpected browser TZ; the addendum is a contract — render in the
+// canonical tenant zone so all parties see the same wall-clock value.
 function fmtDateTime(d) {
-  if (!d) return '-';
-  try {
-    return new Date(d).toLocaleString();
-  } catch {
-    return String(d);
-  }
+  return formatTenantWallClock(d);
 }
 
+// Same intent, but produces the "YYYY-MM-DDTHH:mm" shape that
+// <input type="datetime-local"> expects.
 function toLocalInput(d) {
-  if (!d) return '';
-  try {
-    const date = new Date(d);
-    const pad = (n) => String(n).padStart(2, '0');
-    return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(
-      date.getHours()
-    )}:${pad(date.getMinutes())}`;
-  } catch {
-    return '';
-  }
+  return utcToTenantLocalInput(d);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

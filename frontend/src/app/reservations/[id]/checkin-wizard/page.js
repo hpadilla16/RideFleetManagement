@@ -24,6 +24,7 @@ import { useParams, useRouter } from 'next/navigation';
 import { AuthGate } from '../../../../components/AuthGate';
 import { AppShell } from '../../../../components/AppShell';
 import { api } from '../../../../lib/client';
+import { formatTenantWallClock } from '../../../../lib/tenant-time';
 import { WizardShell, WizCard, WizGrid } from '../../../../components/wizard/WizardShell';
 import { useFeePreview } from '../../../../components/wizard/useFeePreview';
 import { FeePreviewPanel } from '../../../../components/wizard/FeePreviewPanel';
@@ -352,8 +353,11 @@ function CheckinWizard({ token, me, logout }) {
 function Step1Summary({ reservation, agreement }) {
   const v = reservation?.vehicle;
   const vehicleDesc = v ? [v.year, v.make, v.model].filter(Boolean).join(' ') : 'Vehicle';
-  const pickupAt = new Date(agreement?.pickupAt || reservation?.pickupAt).toLocaleString();
-  const returnAt = new Date(agreement?.returnAt || reservation?.returnAt).toLocaleString();
+  // Render the agreed pickup/return in the tenant TZ rather than the browser
+  // TZ so this matches the agreement print, the reservation list/detail, and
+  // any AST-facing staff view regardless of where the page is loaded from.
+  const pickupAt = formatTenantWallClock(agreement?.pickupAt || reservation?.pickupAt);
+  const returnAt = formatTenantWallClock(agreement?.returnAt || reservation?.returnAt);
   const isLate = new Date(agreement?.returnAt) < new Date();
   // Break out AUTH_HOLD payments from settled payments so the summary
   // shows the agent why the outstanding balance is what it is (e.g.

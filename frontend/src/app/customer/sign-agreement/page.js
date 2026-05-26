@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from 'react';
 import { API_BASE } from '../../../lib/client';
 import { PortalFrame, portalStyles } from '../_components/PortalFrame';
 import { PortalTimelineCard } from '../_components/PortalTimelineCard';
+import { formatTenantWallClock } from '../../../lib/tenant-time';
 
 const SIGNATURE_DRAFT_PREFIX = 'customer.signature.';
 
@@ -257,8 +258,10 @@ export default function SignAgreementPage() {
               </div>
             </div>
             <div style={{ marginTop: 14, color: '#55456f', lineHeight: 1.6 }}>
-              <div><strong>Pickup:</strong> {reservation?.pickupAt ? new Date(reservation.pickupAt).toLocaleString() : '-'} ({reservation?.pickupLocation || '-'})</div>
-              <div><strong>Return:</strong> {reservation?.returnAt ? new Date(reservation.returnAt).toLocaleString() : '-'} ({reservation?.returnLocation || '-'})</div>
+              {/* Render in tenant TZ — customer may be on a phone with a non-PR
+                  browser TZ; the contract should show the canonical wall-clock. */}
+              <div><strong>Pickup:</strong> {formatTenantWallClock(reservation?.pickupAt)} ({reservation?.pickupLocation || '-'})</div>
+              <div><strong>Return:</strong> {formatTenantWallClock(reservation?.returnAt)} ({reservation?.returnLocation || '-'})</div>
             </div>
           </div>
 

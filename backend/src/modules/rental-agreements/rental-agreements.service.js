@@ -680,9 +680,22 @@ function ageOnDate(dob, onDate) {
   return age;
 }
 
-function fmtDate(v) {
+// Default tenant timezone for agreement HTML / PDF rendering.
+// 2026-05-26: bare `toLocaleString()` here picked up the backend container's
+// TZ=UTC and rendered 15:19 (UTC storage) as 3:19 PM on the agreement PDF,
+// even after the reservation list/detail and check-in wizard were fixed.
+// A future multi-tenant pass should resolve this from
+// settingsService.getReservationOptions({tenantId}) per agreement, but the
+// existing fmtDate callers don't have scope threaded through them; defaulting
+// to America/Puerto_Rico matches our only production tenant today and keeps
+// the change surgical.
+const AGREEMENT_RENDER_TZ = 'America/Puerto_Rico';
+
+function fmtDate(v, tenantTz = AGREEMENT_RENDER_TZ) {
   if (!v) return '-';
-  return new Date(v).toLocaleString();
+  const d = new Date(v);
+  if (Number.isNaN(d.getTime())) return '-';
+  return d.toLocaleString('en-US', { timeZone: tenantTz });
 }
 
 function esc(s) {
