@@ -36,16 +36,54 @@ async function resolveTenantTimeZone(tenantId) {
   }
 }
 
+// Pickup-side buckets — applied to each reservation whose pickup day lands
+// in the window. CHECKED_IN / CHECKED_IN_UNPAID still count as "picked up"
+// for the pickup day (the rental did happen, the customer left the counter).
+const PICKUP_STATUS_BUCKETS = {
+  CONFIRMED:   ['NEW', 'CONFIRMED', 'PENDING_FRANCHISE_IMPORT'],
+  CHECKED_OUT: ['CHECKED_OUT', 'CHECKED_IN', 'CHECKED_IN_UNPAID'],
+  NO_SHOW:     ['CANCELLED', 'NO_SHOW'],
+};
+const PICKUP_BUCKET_ORDER = ['CONFIRMED', 'CHECKED_OUT', 'NO_SHOW'];
+const PICKUP_STATUS_TO_BUCKET = (() => {
+  const out = {};
+  for (const [bucket, statuses] of Object.entries(PICKUP_STATUS_BUCKETS)) {
+    for (const s of statuses) out[s] = bucket;
+  }
+  return out;
+})();
+
+// Return-side buckets — applied to each reservation whose return day lands
+// in the window. The "expected" total counts everyone scheduled to return
+// that day (any non-cancelled status); the sub-buckets split that into
+// finished vs still-out so ops sees outstanding returns at a glance.
+const RETURN_STATUS_BUCKETS = {
+  CHECKED_IN: ['CHECKED_IN', 'CHECKED_IN_UNPAID'],
+  STILL_OUT:  ['CHECKED_OUT'],
+  PENDING:    ['NEW', 'CONFIRMED', 'PENDING_FRANCHISE_IMPORT'],
+};
+const RETURN_BUCKET_ORDER = ['CHECKED_IN', 'STILL_OUT', 'PENDING'];
+const RETURN_STATUS_TO_BUCKET = (() => {
+  const out = {};
+  for (const [bucket, statuses] of Object.entries(RETURN_STATUS_BUCKETS)) {
+    for (const s of statuses) out[s] = bucket;
+  }
+  return out;
+})();
+
+// 2026-05-26 Hector restructure: kept the legacy STATUS_BUCKETS export shape
+// so the test file (which destructures STATUS_BUCKETS / STATUS_TO_BUCKET /
+// BUCKET_ORDER from _reservationsByDayInternal) compiles. New code uses the
+// PICKUP_/RETURN_ maps above; this legacy table is filled from the pickup
+// side so the back-compat `counts: { OPEN, OUT, RETURNED, LOST }` field on
+// each day still has data for the FE chart.
 const STATUS_BUCKETS = {
   OPEN:     ['NEW', 'CONFIRMED', 'PENDING_FRANCHISE_IMPORT'],
   OUT:      ['CHECKED_OUT'],
   RETURNED: ['CHECKED_IN', 'CHECKED_IN_UNPAID'],
   LOST:     ['CANCELLED', 'NO_SHOW'],
 };
-
 const BUCKET_ORDER = ['OPEN', 'OUT', 'RETURNED', 'LOST'];
-
-// Flat map status → bucket for O(1) lookup
 const STATUS_TO_BUCKET = (() => {
   const out = {};
   for (const [bucket, statuses] of Object.entries(STATUS_BUCKETS)) {
@@ -164,49 +202,89 @@ async function computeData({ tenantId, from, to, query }, deps = {}) {
   const safeNumDays = Math.min(numDays, MAX_DAYS);
   const windowEnd = addDaysInTz(fromDate, safeNumDays); // exclusive end
 
-  // Build day skeleton — each cell labelled in tenant TZ.
+  // Build day skeleton — each cell labelled in tenant TZ. Carries both
+  // pickup-side and return-side buckets plus the back-compat `counts`
+  // shape that the FE chart still reads (filled from pickup side).
   const days = [];
   for (let i = 0; i < safeNumDays; i++) {
     const d = addDaysInTz(fromDate, i);
     days.push({
       iso: isoDayInTz(d, tz),
       label: dayLabelInTz(d, tz),
+      pickup: { CONFIRMED: 0, CHECKED_OUT: 0, NO_SHOW: 0, total: 0 },
+      return: { CHECKED_IN: 0, STILL_OUT: 0, PENDING: 0, total: 0 },
+      // Legacy back-compat — same as pickup, mapped to old bucket names.
       counts: { OPEN: 0, OUT: 0, RETURNED: 0, LOST: 0 },
       total: 0,
     });
   }
   const dayIdxByIso = new Map(days.map((d, i) => [d.iso, i]));
 
-  // Query reservations with pickupAt in [fromDate, windowEnd)
+  // Query reservations whose pickupAt OR returnAt fall in the window. We
+  // need both ends because a rental picked up before the window can return
+  // inside it (counts on the return side only) and vice versa.
   const where = {
     tenantId,
-    pickupAt: { gte: fromDate, lt: windowEnd },
+    OR: [
+      { pickupAt: { gte: fromDate, lt: windowEnd } },
+      { returnAt: { gte: fromDate, lt: windowEnd } },
+    ],
   };
   if (locationId) where.pickupLocationId = locationId;
 
   const reservations = await prisma.reservation.findMany({
     where,
-    select: { id: true, status: true, pickupAt: true },
+    select: { id: true, status: true, pickupAt: true, returnAt: true },
   });
 
-  // Bucket each reservation into the day its pickup wall-clock lands on
-  // *in tenant TZ*. A 11 PM AST pickup whose storage UTC is the next
-  // calendar day still maps to its AST day here.
   for (const r of reservations) {
-    const iso = isoDayInTz(new Date(r.pickupAt), tz);
-    const idx = dayIdxByIso.get(iso);
-    if (idx === undefined) continue;
-    const bucket = STATUS_TO_BUCKET[r.status];
-    if (!bucket) continue;
-    days[idx].counts[bucket] += 1;
-    days[idx].total += 1;
+    // Pickup side — only if the pickup day itself is in the window.
+    const pickupIso = isoDayInTz(new Date(r.pickupAt), tz);
+    const pickupIdx = dayIdxByIso.get(pickupIso);
+    if (pickupIdx !== undefined) {
+      const pBucket = PICKUP_STATUS_TO_BUCKET[r.status];
+      if (pBucket) {
+        days[pickupIdx].pickup[pBucket] += 1;
+        days[pickupIdx].pickup.total   += 1;
+      }
+      // Legacy `counts` shape kept in sync for the chart.
+      const legacy = STATUS_TO_BUCKET[r.status];
+      if (legacy) {
+        days[pickupIdx].counts[legacy] += 1;
+        days[pickupIdx].total          += 1;
+      }
+    }
+
+    // Return side — only if the return day itself is in the window AND the
+    // reservation actually represents a return (no point counting cancelled
+    // rentals as "returning"; they never went out).
+    if (['CANCELLED', 'NO_SHOW'].includes(r.status)) continue;
+    const returnIso = isoDayInTz(new Date(r.returnAt), tz);
+    const returnIdx = dayIdxByIso.get(returnIso);
+    if (returnIdx !== undefined) {
+      const rBucket = RETURN_STATUS_TO_BUCKET[r.status];
+      if (rBucket) {
+        days[returnIdx].return[rBucket] += 1;
+        days[returnIdx].return.total    += 1;
+      }
+    }
   }
 
-  // Aggregates
-  const totals = { OPEN: 0, OUT: 0, RETURNED: 0, LOST: 0, total: 0 };
+  // Aggregates — track both sides separately so the totals row shows
+  // pickup activity AND return activity for the period.
+  const totals = {
+    pickup: { CONFIRMED: 0, CHECKED_OUT: 0, NO_SHOW: 0, total: 0 },
+    return: { CHECKED_IN: 0, STILL_OUT: 0, PENDING: 0, total: 0 },
+    // Legacy back-compat (pickup-side roll-up).
+    OPEN: 0, OUT: 0, RETURNED: 0, LOST: 0, total: 0,
+  };
   let peakIdx = 0;
   for (let i = 0; i < days.length; i++) {
     const d = days[i];
+    for (const k of PICKUP_BUCKET_ORDER) totals.pickup[k] += d.pickup[k];
+    totals.pickup.total += d.pickup.total;
+    for (const k of RETURN_BUCKET_ORDER) totals.return[k] += d.return[k];
+    totals.return.total += d.return.total;
     totals.OPEN     += d.counts.OPEN;
     totals.OUT      += d.counts.OUT;
     totals.RETURNED += d.counts.RETURNED;
@@ -215,7 +293,7 @@ async function computeData({ tenantId, from, to, query }, deps = {}) {
     if (d.total > days[peakIdx].total) peakIdx = i;
   }
 
-  const peak = days[peakIdx] || { iso: isoDay(fromDate), label: dayLabel(fromDate), total: 0 };
+  const peak = days[peakIdx] || { iso: isoDayInTz(fromDate, tz), label: dayLabelInTz(fromDate, tz), total: 0 };
   const completedPickups = totals.OUT + totals.RETURNED;
   const completedRate = totals.total > 0 ? completedPickups / totals.total : 0;
   const cancelRate    = totals.total > 0 ? totals.LOST / totals.total : 0;
@@ -228,7 +306,9 @@ async function computeData({ tenantId, from, to, query }, deps = {}) {
     completedPickups,
     completedRate,
     cancelRate,
-    bucketOrder: BUCKET_ORDER,
+    bucketOrder: BUCKET_ORDER, // legacy — for the FE chart
+    pickupBucketOrder: PICKUP_BUCKET_ORDER,
+    returnBucketOrder: RETURN_BUCKET_ORDER,
     tenantTimeZone: tz,
     filters: { locationId },
     truncated: numDays > MAX_DAYS,
@@ -254,10 +334,19 @@ async function dayDrillDownHandler(req, res, { tenantId }) {
   }
   const dayEnd = addDaysInTz(day, 1);
 
-  const where = {
-    tenantId,
-    pickupAt: { gte: day, lt: dayEnd },
-  };
+  // side=pickup (default) → reservations whose pickup lands on `day`.
+  // side=return            → reservations whose return lands on `day`.
+  // Both windows are evaluated against the same tenant-TZ [day, dayEnd).
+  const side = String(req.query?.side || 'pickup').toLowerCase() === 'return' ? 'return' : 'pickup';
+  const where = { tenantId };
+  if (side === 'return') {
+    where.returnAt = { gte: day, lt: dayEnd };
+    // Cancelled / no-show rentals never return; exclude them from the
+    // return drill-down so the count matches the totals row.
+    where.status = { notIn: ['CANCELLED', 'NO_SHOW'] };
+  } else {
+    where.pickupAt = { gte: day, lt: dayEnd };
+  }
   if (locationId) where.pickupLocationId = locationId;
 
   const reservations = await prisma.reservation.findMany({
@@ -273,11 +362,12 @@ async function dayDrillDownHandler(req, res, { tenantId }) {
       vehicleType:{ select: { id: true, name: true, code: true } },
       pickupLocation: { select: { id: true, name: true } },
     },
-    orderBy: { pickupAt: 'asc' },
+    orderBy: side === 'return' ? { returnAt: 'asc' } : { pickupAt: 'asc' },
   });
 
   return res.json({
     day: { iso: isoDayInTz(day, tz), label: dayLabelInTz(day, tz) },
+    side,
     locationId,
     tenantTimeZone: tz,
     reservations: reservations.map((r) => ({
@@ -322,32 +412,47 @@ function renderHtml(data) {
     <div class="strip-card"><div class="strip-label">Cancel + no-show</div><div class="strip-value">${fmtPct(cancelRate)}</div><div style="font-size:9px;color:#5F5E5A">${totals.LOST} of ${totals.total}</div></div>
   </div>`;
 
-  let body = `${strip}<h3>Daily pickups by status</h3>
-    <table style="font-size:10px"><thead><tr>
-      <th style="text-align:left">Day</th>
-      <th class="num">Open</th>
-      <th class="num">Out</th>
-      <th class="num">Returned</th>
-      <th class="num">Lost</th>
-      <th class="num">Total</th>
-    </tr></thead><tbody>`;
+  let body = `${strip}<h3>Daily activity — pickups + returns</h3>
+    <table style="font-size:9.5px"><thead>
+      <tr>
+        <th rowspan="2" style="text-align:left">Day</th>
+        <th colspan="4" style="text-align:center;background:#eef0ff">Pickups</th>
+        <th colspan="4" style="text-align:center;background:#eafff5">Returns</th>
+      </tr>
+      <tr>
+        <th class="num">Confirmed</th>
+        <th class="num">Checked out</th>
+        <th class="num">No-show</th>
+        <th class="num">Total</th>
+        <th class="num">Due</th>
+        <th class="num">Checked in</th>
+        <th class="num">Still out</th>
+        <th class="num">Pending</th>
+      </tr>
+    </thead><tbody>`;
   for (const d of days) {
     body += `<tr>
       <td>${escapeHtml(d.label)}</td>
-      <td class="num">${d.counts.OPEN}</td>
-      <td class="num">${d.counts.OUT}</td>
-      <td class="num">${d.counts.RETURNED}</td>
-      <td class="num">${d.counts.LOST}</td>
-      <td class="num"><strong>${d.total}</strong></td>
+      <td class="num">${d.pickup.CONFIRMED}</td>
+      <td class="num">${d.pickup.CHECKED_OUT}</td>
+      <td class="num">${d.pickup.NO_SHOW}</td>
+      <td class="num"><strong>${d.pickup.total}</strong></td>
+      <td class="num"><strong>${d.return.total}</strong></td>
+      <td class="num">${d.return.CHECKED_IN}</td>
+      <td class="num">${d.return.STILL_OUT}</td>
+      <td class="num">${d.return.PENDING}</td>
     </tr>`;
   }
   body += `<tr style="background:#f1efe8">
     <td><strong>TOTAL</strong></td>
-    <td class="num"><strong>${totals.OPEN}</strong></td>
-    <td class="num"><strong>${totals.OUT}</strong></td>
-    <td class="num"><strong>${totals.RETURNED}</strong></td>
-    <td class="num"><strong>${totals.LOST}</strong></td>
-    <td class="num"><strong>${totals.total}</strong></td>
+    <td class="num"><strong>${totals.pickup.CONFIRMED}</strong></td>
+    <td class="num"><strong>${totals.pickup.CHECKED_OUT}</strong></td>
+    <td class="num"><strong>${totals.pickup.NO_SHOW}</strong></td>
+    <td class="num"><strong>${totals.pickup.total}</strong></td>
+    <td class="num"><strong>${totals.return.total}</strong></td>
+    <td class="num"><strong>${totals.return.CHECKED_IN}</strong></td>
+    <td class="num"><strong>${totals.return.STILL_OUT}</strong></td>
+    <td class="num"><strong>${totals.return.PENDING}</strong></td>
   </tr></tbody></table>`;
 
   return body;
@@ -362,31 +467,41 @@ function buildExcelSpec(data) {
   const title = 'Reservations by Day';
   const subtitle = `${data.range.from.slice(0, 10)} → ${data.range.to.slice(0, 10)}`;
 
+  // Single flat row per day — pickups on the left, returns on the right.
   const columns = [
-    { header: 'Day',        key: 'day',      width: 18 },
-    { header: 'Open',       key: 'OPEN',     width: 10, type: 'integer' },
-    { header: 'Out',        key: 'OUT',      width: 10, type: 'integer' },
-    { header: 'Returned',   key: 'RETURNED', width: 10, type: 'integer' },
-    { header: 'Lost',       key: 'LOST',     width: 10, type: 'integer' },
-    { header: 'Total',      key: 'total',    width: 10, type: 'integer' },
+    { header: 'Day',                key: 'day',           width: 18 },
+    { header: 'Pickup Confirmed',   key: 'pickupConfirmed',   width: 14, type: 'integer' },
+    { header: 'Pickup Checked-Out', key: 'pickupCheckedOut',  width: 14, type: 'integer' },
+    { header: 'Pickup No-Show',     key: 'pickupNoShow',      width: 12, type: 'integer' },
+    { header: 'Pickup Total',       key: 'pickupTotal',       width: 12, type: 'integer' },
+    { header: 'Return Due',         key: 'returnTotal',       width: 12, type: 'integer' },
+    { header: 'Return Checked-In',  key: 'returnCheckedIn',   width: 14, type: 'integer' },
+    { header: 'Return Still-Out',   key: 'returnStillOut',    width: 13, type: 'integer' },
+    { header: 'Return Pending',     key: 'returnPending',     width: 13, type: 'integer' },
   ];
 
   const rows = days.map((d) => ({
     day: d.label,
-    OPEN: d.counts.OPEN,
-    OUT: d.counts.OUT,
-    RETURNED: d.counts.RETURNED,
-    LOST: d.counts.LOST,
-    total: d.total,
+    pickupConfirmed:  d.pickup.CONFIRMED,
+    pickupCheckedOut: d.pickup.CHECKED_OUT,
+    pickupNoShow:     d.pickup.NO_SHOW,
+    pickupTotal:      d.pickup.total,
+    returnTotal:      d.return.total,
+    returnCheckedIn:  d.return.CHECKED_IN,
+    returnStillOut:   d.return.STILL_OUT,
+    returnPending:    d.return.PENDING,
   }));
 
   const footerRow = {
     day: 'TOTAL',
-    OPEN: totals.OPEN,
-    OUT: totals.OUT,
-    RETURNED: totals.RETURNED,
-    LOST: totals.LOST,
-    total: totals.total,
+    pickupConfirmed:  totals.pickup.CONFIRMED,
+    pickupCheckedOut: totals.pickup.CHECKED_OUT,
+    pickupNoShow:     totals.pickup.NO_SHOW,
+    pickupTotal:      totals.pickup.total,
+    returnTotal:      totals.return.total,
+    returnCheckedIn:  totals.return.CHECKED_IN,
+    returnStillOut:   totals.return.STILL_OUT,
+    returnPending:    totals.return.PENDING,
   };
 
   return {

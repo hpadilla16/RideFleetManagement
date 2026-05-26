@@ -250,15 +250,27 @@ function ReportBody({ data, onDayClick }) {
       <section>
         <SectionHeader>Day-by-day breakdown</SectionHeader>
         <div style={{ border: '0.5px solid #d3d1c7', borderRadius: 8, overflowX: 'auto', background: 'white' }}>
-          <table style={{ width: '100%', fontSize: 12, borderCollapse: 'collapse', minWidth: 540 }}>
+          {/* Two grouped column sets — pickups on the left, returns on the
+              right. The two sub-totals (pickup.total / return.total) won't
+              add up to a single 'reservations today' number because a
+              single reservation can land in both groups (picked up day N,
+              returned day M); each side is independent. */}
+          <table style={{ width: '100%', fontSize: 12, borderCollapse: 'collapse', minWidth: 820 }}>
             <thead>
               <tr style={{ background: '#f1efe8' }}>
-                <Th align="left">Day</Th>
-                <Th align="right">Open</Th>
-                <Th align="right">Out</Th>
-                <Th align="right">Returned</Th>
-                <Th align="right">Lost</Th>
+                <th rowSpan={2} style={{ textAlign: 'left', padding: '8px 12px', fontWeight: 500, fontSize: 12, borderBottom: '0.5px solid #d3d1c7', whiteSpace: 'nowrap', color: '#211a38' }}>Day</th>
+                <th colSpan={4} style={{ textAlign: 'center', padding: '8px 12px', fontWeight: 500, fontSize: 12, borderBottom: '0.5px solid #d3d1c7', background: '#EEEDFE', color: '#26215C' }}>Pickups</th>
+                <th colSpan={4} style={{ textAlign: 'center', padding: '8px 12px', fontWeight: 500, fontSize: 12, borderBottom: '0.5px solid #d3d1c7', background: '#E2F7EF', color: '#0F5A48' }}>Returns</th>
+              </tr>
+              <tr style={{ background: '#f1efe8' }}>
+                <Th align="right">Confirmed</Th>
+                <Th align="right">Checked out</Th>
+                <Th align="right">No-show</Th>
                 <Th align="right" emphasis>Total</Th>
+                <Th align="right" emphasis>Due</Th>
+                <Th align="right">Checked in</Th>
+                <Th align="right">Still out</Th>
+                <Th align="right">Pending</Th>
               </tr>
             </thead>
             <tbody>
@@ -281,21 +293,27 @@ function ReportBody({ data, onDayClick }) {
                       {d.label}
                       {isPeak ? <span style={{ marginLeft: 6, fontSize: 10, fontWeight: 500, opacity: 0.8 }}>(peak)</span> : null}
                     </Td>
-                    <Td align="right">{d.counts.OPEN}</Td>
-                    <Td align="right">{d.counts.OUT}</Td>
-                    <Td align="right">{d.counts.RETURNED}</Td>
-                    <Td align="right">{d.counts.LOST}</Td>
-                    <Td align="right" emphasis>{d.total}</Td>
+                    <Td align="right">{d.pickup?.CONFIRMED ?? 0}</Td>
+                    <Td align="right">{d.pickup?.CHECKED_OUT ?? 0}</Td>
+                    <Td align="right">{d.pickup?.NO_SHOW ?? 0}</Td>
+                    <Td align="right" emphasis>{d.pickup?.total ?? 0}</Td>
+                    <Td align="right" emphasis>{d.return?.total ?? 0}</Td>
+                    <Td align="right">{d.return?.CHECKED_IN ?? 0}</Td>
+                    <Td align="right">{d.return?.STILL_OUT ?? 0}</Td>
+                    <Td align="right">{d.return?.PENDING ?? 0}</Td>
                   </tr>
                 );
               })}
               <tr style={{ background: '#EEEDFE', color: '#26215C' }}>
                 <Td emphasis>TOTAL</Td>
-                <Td align="right" emphasis>{totals.OPEN}</Td>
-                <Td align="right" emphasis>{totals.OUT}</Td>
-                <Td align="right" emphasis>{totals.RETURNED}</Td>
-                <Td align="right" emphasis>{totals.LOST}</Td>
-                <Td align="right" emphasis>{totals.total}</Td>
+                <Td align="right" emphasis>{totals.pickup?.CONFIRMED ?? 0}</Td>
+                <Td align="right" emphasis>{totals.pickup?.CHECKED_OUT ?? 0}</Td>
+                <Td align="right" emphasis>{totals.pickup?.NO_SHOW ?? 0}</Td>
+                <Td align="right" emphasis>{totals.pickup?.total ?? 0}</Td>
+                <Td align="right" emphasis>{totals.return?.total ?? 0}</Td>
+                <Td align="right" emphasis>{totals.return?.CHECKED_IN ?? 0}</Td>
+                <Td align="right" emphasis>{totals.return?.STILL_OUT ?? 0}</Td>
+                <Td align="right" emphasis>{totals.return?.PENDING ?? 0}</Td>
               </tr>
             </tbody>
           </table>
