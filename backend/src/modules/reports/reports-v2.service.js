@@ -167,6 +167,9 @@ const REPORT_REGISTRY = [
   { slug: 'chargeback',     title: 'Chargeback',     category: 'REVENUE', icon: 'arrow-back-up',   description: 'Disputes + evidence packs' },
 ];
 
+import { startOfDayInTz, startOfMonthInTz, addDaysInTz } from '../../lib/date-utils.js';
+import { resolveTenantTimeZone } from '../../lib/tenant-tz.js';
+
 let _defaultPrisma = null;
 async function resolveDefaultPrisma() {
   if (_defaultPrisma) return _defaultPrisma;
@@ -217,23 +220,42 @@ export async function listReports({ tenantId } = {}) {
 
 /**
  * Compute the three snapshot metrics shown at the top of the landing page:
- *   1. Month-to-date revenue (sum of RentalAgreementPayment.amount in window)
- *   2. Reservations checked out in window (status CHECKED_OUT / IN_PROGRESS)
- *   3. Available vehicles right now (Vehicle.status = AVAILABLE)
+ *   1. Revenue in window — sum of RentalAgreementPayment.amount where
+ *      paidAt is in the window (tenant-local day boundaries).
+ *   2. Reservations checked out in window — rentals whose pickup actually
+ *      happened during the window (pickupAt in window AND status reached
+ *      at least CHECKED_OUT). This counts both still-out rentals and ones
+ *      that have already returned — anything that "started" in the window.
+ *   3. Available vehicles right now — computed from active reservations
+ *      (not the Vehicle.status field, which can drift). Available =
+ *      totalFleet − vehicles currently on rent. Matches the methodology
+ *      of availability-forecast.report.js.
+ *
+ * 2026-05-27 rewrite of three bugs in the previous implementation:
+ *   - `status: { not: 'RETIRED' }` referenced a non-existent VehicleStatus
+ *     enum value; Prisma threw, the try/catch swallowed it, totalFleet=0.
+ *   - `status IN ['CHECKED_OUT', 'IN_PROGRESS']` — IN_PROGRESS is not a
+ *     ReservationStatus value; same silent failure → checkedOut=0.
+ *   - dates parsed raw, not tenant-TZ aware → window misaligned in PR.
  */
 export async function getSnapshot({ tenantId, from, to, deps = {} } = {}) {
   if (!tenantId) throw new ReportsServiceError('tenantId required', 403);
   const prisma = deps.prisma || (await resolveDefaultPrisma());
-  const fromDate = from ? new Date(from) : startOfMonth(new Date());
-  const toDate = to ? new Date(to) : new Date();
 
-  // 1. MTD revenue — sum of payment amounts in the window for this tenant.
+  const tenantTz = deps.tenantTz || (await resolveTenantTimeZone(tenantId));
+  const now = (deps && deps.now) || new Date();
+  // Window: [from 00:00 tenant TZ, to+1day 00:00 tenant TZ) so the entire
+  // `to` day is included.
+  const fromDate = from ? startOfDayInTz(from, tenantTz) : startOfMonthInTz(now, tenantTz);
+  const toEndExclusive = to ? addDaysInTz(startOfDayInTz(to, tenantTz), 1) : addDaysInTz(startOfDayInTz(now, tenantTz), 1);
+
+  // 1. Revenue — sum of payment amounts in the window for this tenant.
   let revenue = 0;
   try {
     const payments = await prisma.rentalAgreementPayment.findMany({
       where: {
         rentalAgreement: { tenantId },
-        paidAt: { gte: fromDate, lte: toDate },
+        paidAt: { gte: fromDate, lt: toEndExclusive },
       },
       select: { amount: true },
     });
@@ -241,61 +263,72 @@ export async function getSnapshot({ tenantId, from, to, deps = {} } = {}) {
       const n = Number(p.amount);
       if (Number.isFinite(n)) revenue += n;
     }
-  } catch { /* table or relation may not exist in older envs */ }
+  } catch { /* ignore */ }
 
-  // 2. Reservations checked out in window.
+  // 2. Reservations that picked up in the window. pickupAt is the scheduled
+  //    pickup; status filter ensures the rental actually progressed past
+  //    confirmation. We count CHECKED_OUT (still out), CHECKED_IN /
+  //    CHECKED_IN_UNPAID (already returned in or after window) — i.e.
+  //    every rental that started.
   let checkedOut = 0;
   try {
     checkedOut = await prisma.reservation.count({
       where: {
         tenantId,
-        status: { in: ['CHECKED_OUT', 'IN_PROGRESS'] },
-        OR: [
-          { signingCompletedAt: { gte: fromDate, lte: toDate } },
-          { updatedAt: { gte: fromDate, lte: toDate } },
-        ],
+        status: { in: ['CHECKED_OUT', 'CHECKED_IN', 'CHECKED_IN_UNPAID'] },
+        pickupAt: { gte: fromDate, lt: toEndExclusive },
       },
     });
   } catch { /* ignore */ }
 
-  // 3. Available vehicles right now (snapshot, not windowed).
-  let available = 0;
-  try {
-    available = await prisma.vehicle.count({
-      where: { tenantId, status: 'AVAILABLE' },
-    });
-  } catch { /* ignore */ }
-
-  // 4. Total fleet (for the utilization computation in the UI).
+  // 3. Available vehicles right now — computed from reservations, not from
+  //    Vehicle.status (which can drift). totalFleet excludes only
+  //    OUT_OF_SERVICE (totaled / sold). Currently-rented = unique
+  //    vehicleIds in CHECKED_OUT / CHECKED_IN_UNPAID reservations whose
+  //    window straddles now.
   let totalFleet = 0;
+  let currentlyRented = 0;
   try {
     totalFleet = await prisma.vehicle.count({
-      where: { tenantId, status: { not: 'RETIRED' } },
+      where: { tenantId, status: { not: 'OUT_OF_SERVICE' } },
     });
   } catch { /* ignore */ }
+  try {
+    const activeReservations = await prisma.reservation.findMany({
+      where: {
+        tenantId,
+        status: { in: ['CHECKED_OUT', 'CHECKED_IN_UNPAID'] },
+        pickupAt: { lte: now },
+        returnAt: { gt: now },
+        vehicleId: { not: null },
+      },
+      select: { vehicleId: true },
+    });
+    const uniqueVehicles = new Set(activeReservations.map((r) => r.vehicleId).filter(Boolean));
+    currentlyRented = uniqueVehicles.size;
+  } catch { /* ignore */ }
+  const available = Math.max(0, totalFleet - currentlyRented);
 
   return {
     tenantId,
-    range: { from: fromDate.toISOString(), to: toDate.toISOString() },
+    range: { from: fromDate.toISOString(), to: toEndExclusive.toISOString() },
+    tenantTimeZone: tenantTz,
     revenue: Math.round(revenue * 100) / 100,
     revenueCents: Math.round(revenue * 100),
     reservationsCheckedOut: checkedOut,
     availableVehicles: available,
+    currentlyRented,
     totalFleet,
-    utilizationPct: totalFleet > 0 ? Math.round(((totalFleet - available) / totalFleet) * 100) : 0,
+    utilizationPct: totalFleet > 0 ? Math.round((currentlyRented / totalFleet) * 100) : 0,
   };
 }
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
-
-function startOfMonth(d) {
-  const x = new Date(d.getFullYear(), d.getMonth(), 1, 0, 0, 0, 0);
-  return x;
-}
+// startOfMonth helper was removed — getSnapshot now uses tz-aware
+// startOfMonthInTz from lib/date-utils.
 
 export const _internal = {
   REPORT_REGISTRY,
-  startOfMonth,
 };
