@@ -104,6 +104,22 @@ function makeMockDb({ reservationId = 'res-1', initial = {} } = {}) {
     return { count: before - state.charges.length };
   };
 
+  // RentalAgreement mock — needed because reservation-extend.service.js
+  // now mirrors returnAt onto RentalAgreement (2026-05-27 fix for the
+  // late-fee-ignores-extensions bug). Stores a per-agreement row so we
+  // can assert returnAt landed correctly in the create/delete tests.
+  state.agreements = initial.agreements || [
+    { id: 'agree-1', tenantId: 'tenant-1', status: 'FINALIZED',
+      returnAt: new Date(state.reservation.returnAt) }
+  ];
+  prisma.rentalAgreement = prisma.rentalAgreement || {};
+  prisma.rentalAgreement.update = async ({ where, data }) => {
+    const a = state.agreements.find((x) => x.id === where.id);
+    if (!a) throw new Error('mock: agreement not found ' + where.id);
+    Object.assign(a, data);
+    return { ...a };
+  };
+
   prisma.rentalAgreementAddendum = prisma.rentalAgreementAddendum || {};
   prisma.rentalAgreementAddendum.create = async ({ data }) => {
     const row = { id: `add-${addendumIdCounter++}`, createdAt: new Date(), ...data };
@@ -143,6 +159,7 @@ describe('reservation-extend (unified flow)', () => {
     originalPrisma = {
       reservation: { ...prisma.reservation },
       reservationCharge: { ...(prisma.reservationCharge || {}) },
+      rentalAgreement: { ...(prisma.rentalAgreement || {}) },
       rentalAgreementAddendum: { ...(prisma.rentalAgreementAddendum || {}) },
       location: { ...(prisma.location || {}) },
       auditLog: { ...(prisma.auditLog || {}) }
@@ -151,6 +168,7 @@ describe('reservation-extend (unified flow)', () => {
   afterEach(() => {
     Object.assign(prisma.reservation, originalPrisma.reservation);
     if (prisma.reservationCharge) Object.assign(prisma.reservationCharge, originalPrisma.reservationCharge);
+    if (prisma.rentalAgreement) Object.assign(prisma.rentalAgreement, originalPrisma.rentalAgreement);
     if (prisma.rentalAgreementAddendum) Object.assign(prisma.rentalAgreementAddendum, originalPrisma.rentalAgreementAddendum);
     if (prisma.location) Object.assign(prisma.location, originalPrisma.location);
     if (prisma.auditLog) Object.assign(prisma.auditLog, originalPrisma.auditLog);
@@ -256,6 +274,63 @@ describe('reservation-extend (unified flow)', () => {
       assert.equal(result.extensionCharge.total, 100);
       assert.equal(result.extensionCharge.taxable, true, 'extension rate must be taxable');
       assert.equal(result.extensionCharge.source, 'EXTENSION_DEFAULT');
+    });
+
+    it('mirrors the extended returnAt onto RentalAgreement (RES-623949, 2026-05-27)', async () => {
+      // The late-fee engine in checkin-close.service.js reads dueBackAt
+      // from agreement.returnAt. Before this fix only reservation.returnAt
+      // was updated on extension, so the late-fee engine measured against
+      // the pre-extension date and produced phantom fees (RES-623949 got
+      // billed $650 for "26 hours late" on a rental returned ON TIME vs
+      // its extended dueBack). Both tables must move together.
+      const state = makeMockDb();
+      const newReturn = new Date('2026-05-17T00:00:00Z'); // +2 days
+      await reservationExtendService.extendReservation({
+        reservationId: 'res-1',
+        newReturnAt: newReturn,
+        extensionDailyRate: null, note: '', actorUserId: 'u-1',
+        tenantScope: { tenantId: 'tenant-1' }
+      });
+      const agreement = state.agreements.find((a) => a.id === 'agree-1');
+      assert.equal(
+        agreement.returnAt.toISOString(),
+        newReturn.toISOString(),
+        'agreement.returnAt must match the extended reservation.returnAt'
+      );
+      assert.equal(
+        state.reservation.returnAt.toISOString(),
+        newReturn.toISOString(),
+        'reservation.returnAt sanity check'
+      );
+    });
+
+    it('does NOT touch the agreement when the reservation has no agreement attached', async () => {
+      // Extending a pre-checkout reservation (no signed agreement yet)
+      // already skips the addendum auto-create; the agreement mirror
+      // must follow the same gate so we don't blow up when there's
+      // nothing to update.
+      const state = makeMockDb({
+        initial: {
+          reservation: {
+            // Override the default fixture's rentalAgreement to null
+            rentalAgreement: null
+          }
+        }
+      });
+      // No agreement on the reservation → the only agreement in state
+      // is the fixture's default agree-1 row, which should stay put.
+      const before = new Date(state.agreements[0].returnAt);
+      await reservationExtendService.extendReservation({
+        reservationId: 'res-1',
+        newReturnAt: new Date('2026-05-17T00:00:00Z'),
+        extensionDailyRate: null, note: '', actorUserId: 'u-1',
+        tenantScope: { tenantId: 'tenant-1' }
+      });
+      assert.equal(
+        state.agreements[0].returnAt.toISOString(),
+        before.toISOString(),
+        'agreement.returnAt untouched when reservation has no agreement'
+      );
     });
 
     it('does NOT rescale BASE_RATE row (Bug 8, 2026-05-12)', async () => {

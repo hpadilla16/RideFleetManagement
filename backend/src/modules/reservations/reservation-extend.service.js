@@ -388,6 +388,21 @@ export const reservationExtendService = {
       }
     });
 
+    // 7b. Mirror returnAt onto the RentalAgreement so downstream consumers
+    //     that read agreement.returnAt (notably checkin-close.service.js
+    //     for LATE_RETURN dueBackAt) see the extended date. Without this
+    //     the late-fee engine kept billing against the pre-extension
+    //     returnAt — RES-623949 was billed $650 for "26 hours late" even
+    //     though the customer returned on time vs. the extended dueBack
+    //     (2026-05-27 bug). The two-table mirror is required because the
+    //     agreement keeps its own copy of returnAt (schema.prisma:1263).
+    if (current.rentalAgreement?.id) {
+      await prisma.rentalAgreement.update({
+        where: { id: current.rentalAgreement.id },
+        data: { returnAt: nextReturnDate }
+      });
+    }
+
     // 8. Rescale per-day rows to the new total day count so tolls /
     //    per-day services / daily AdditionalServices keep covering the
     //    rental window after the extension. The BASE_RATE row
@@ -656,6 +671,16 @@ export const reservationExtendService = {
         ...(wasLastExtension ? { originalReturnAt: null } : {})
       }
     });
+
+    // Mirror the revert onto the RentalAgreement (counterpart to step 7b
+    // in createExtension). Keeps agreement.returnAt and reservation.returnAt
+    // in sync so the late-fee engine reads the correct dueBackAt.
+    if (reservation.rentalAgreement?.id) {
+      await prisma.rentalAgreement.update({
+        where: { id: reservation.rentalAgreement.id },
+        data: { returnAt: previousReturnAt }
+      });
+    }
 
     // Recompute estimatedTotal.
     const finalCharges = await prisma.reservationCharge.findMany({
