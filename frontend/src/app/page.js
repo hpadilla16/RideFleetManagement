@@ -382,6 +382,15 @@ function DashboardInner({ token, me, logout }) {
   const washHeld = Number(kpis.washHeld || 0);
   const serviceHeld = Number(kpis.vehiclesInMaintenance || 0) + Number(kpis.vehiclesOutOfService || 0);
   const activeReservations = reservations.filter((r) => ['NEW', 'CONFIRMED', 'CHECKED_OUT'].includes(r.status)).length;
+  // Overdue = CHECKED_OUT past planned returnAt. Backend computes the
+  // canonical count (filtered by tenant + location server-side); FE falls
+  // back to its own list filter in case the backend KPI isn't available
+  // yet (e.g. pre-deploy).
+  const overdueReservations = Number(
+    kpis.overdueReservations ?? reservations.filter((r) =>
+      r.status === 'CHECKED_OUT' && r.returnAt && new Date(r.returnAt) <= new Date()
+    ).length
+  );
   const feeAdvisoryCount = reservations.filter((r) => /\[FEE_ADVISORY_OPEN\s+/i.test(String(r.notes || ''))).length;
   // Anchor "today" in the tenant timezone — not the browser's — so the
   // Operations Board agrees with the rest of the app for agents loading
@@ -453,10 +462,11 @@ function DashboardInner({ token, me, logout }) {
       washHeld,
       serviceHeld,
       activeReservations,
+      overdueReservations,
       feeAdvisoryCount,
       nextItems
     };
-  }, [pickups, returns, feeAdvisoryCount, totalVehicles, available, migrationHeld, serviceHeld, activeReservations, router, me?.moduleAccess?.loaner]);
+  }, [pickups, returns, feeAdvisoryCount, totalVehicles, available, migrationHeld, serviceHeld, activeReservations, overdueReservations, router, me?.moduleAccess?.loaner]);
 
   return (
     <AppShell me={me} logout={logout}>
@@ -503,6 +513,24 @@ function DashboardInner({ token, me, logout }) {
               <strong>{workspaceOpsHub.activeReservations}</strong>
               <span className="ui-muted">Bookings currently in motion.</span>
             </div>
+            <button
+              type="button"
+              className="info-tile"
+              onClick={() => router.push('/reservations?filter=overdue')}
+              style={{
+                textAlign: 'left',
+                cursor: 'pointer',
+                background: workspaceOpsHub.overdueReservations > 0 ? 'rgba(239, 68, 68, 0.08)' : undefined,
+                borderColor: workspaceOpsHub.overdueReservations > 0 ? 'rgba(239, 68, 68, 0.35)' : undefined,
+              }}
+              title="Click to view overdue reservations"
+            >
+              <span className="label">Overdue Returns</span>
+              <strong style={{ color: workspaceOpsHub.overdueReservations > 0 ? '#dc2626' : undefined }}>
+                {workspaceOpsHub.overdueReservations}
+              </strong>
+              <span className="ui-muted">Checked-out past their planned return. Click to triage.</span>
+            </button>
             <div className="info-tile">
               <span className="label">Fee Advisories</span>
               <strong>{workspaceOpsHub.feeAdvisoryCount}</strong>

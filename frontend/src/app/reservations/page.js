@@ -34,7 +34,7 @@ function extractMandatoryFeeIdsFromLocationConfig(rawCfg) {
 
 import Link from 'next/link';
 import { useEffect, useMemo, useState } from 'react';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { AuthGate } from '../../components/AuthGate';
 import { AppShell } from '../../components/AppShell';
 import { PendingFranchiseImportsTray } from '../../components/reservations/PendingFranchiseImportsTray';
@@ -113,6 +113,11 @@ function ReservationsInner({ token, me, logout }) {
   // setting them equal acts as a single-day filter.
   const [dateFrom, setDateFrom] = useState('');
   const [dateTo, setDateTo] = useState('');
+  // ?filter=overdue — derived filter; backend computes the bucket.
+  // Initialized from URL so the dashboard "Overdue Returns" tile
+  // deep-links into the filtered list.
+  const searchParams = useSearchParams();
+  const [filter, setFilter] = useState(() => (searchParams?.get('filter') || ''));
   // 2026-05-25 — sort by pickup/return × asc/desc. Default 'created-desc'
   // matches the historical behavior (newest-created first).
   const [sort, setSort] = useState('created-desc');
@@ -148,7 +153,7 @@ function ReservationsInner({ token, me, logout }) {
     setSupportLoaded(false);
   };
 
-  const loadReservations = async ({ offset = 0, append = false, nextQuery = query, nextDateFrom = dateFrom, nextDateTo = dateTo, nextSort = sort } = {}) => {
+  const loadReservations = async ({ offset = 0, append = false, nextQuery = query, nextDateFrom = dateFrom, nextDateTo = dateTo, nextSort = sort, nextFilter = filter } = {}) => {
     if (isSuper && !activeTenantId) {
       setReservations([]);
       setReservationsTotal(0);
@@ -164,6 +169,7 @@ function ReservationsInner({ token, me, logout }) {
     if (nextDateFrom) params.set('dateFrom', nextDateFrom);
     if (nextDateTo) params.set('dateTo', nextDateTo);
     if (nextSort && nextSort !== 'created-desc') params.set('sort', nextSort);
+    if (nextFilter) params.set('filter', nextFilter);
     try {
       const payload = await api(scopedPath(`/api/reservations/page?${params.toString()}`), {}, token);
       const nextRows = Array.isArray(payload?.rows) ? payload.rows : [];
@@ -274,8 +280,8 @@ function ReservationsInner({ token, me, logout }) {
   }, [searchDraft]);
   useEffect(() => { clearSupportData(); }, [token, isSuper, activeTenantId, canCreateReservation]);
   useEffect(() => {
-    loadReservations({ offset: 0, append: false, nextQuery: query, nextDateFrom: dateFrom, nextDateTo: dateTo, nextSort: sort });
-  }, [token, isSuper, activeTenantId, query, dateFrom, dateTo, sort]);
+    loadReservations({ offset: 0, append: false, nextQuery: query, nextDateFrom: dateFrom, nextDateTo: dateTo, nextSort: sort, nextFilter: filter });
+  }, [token, isSuper, activeTenantId, query, dateFrom, dateTo, sort, filter]);
   useEffect(() => { loadReservationSummary(); }, [token, isSuper, activeTenantId]);
   useEffect(() => {
     if (!createOpen && !showImport) return;
@@ -713,6 +719,44 @@ function ReservationsInner({ token, me, logout }) {
               >
                 Clear dates
               </button>
+            ) : null}
+            {filter === 'overdue' ? (
+              <span
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: 6,
+                  padding: '4px 10px',
+                  borderRadius: 999,
+                  background: 'rgba(239, 68, 68, 0.12)',
+                  color: '#991b1b',
+                  fontSize: 12,
+                  fontWeight: 600,
+                  border: '1px solid rgba(239, 68, 68, 0.3)',
+                }}
+              >
+                Showing overdue only
+                <button
+                  type="button"
+                  onClick={() => {
+                    setFilter('');
+                    router.push('/reservations');
+                  }}
+                  style={{
+                    background: 'transparent',
+                    border: 'none',
+                    color: '#991b1b',
+                    cursor: 'pointer',
+                    fontSize: 14,
+                    padding: 0,
+                    lineHeight: 1,
+                  }}
+                  title="Clear overdue filter"
+                  aria-label="Clear overdue filter"
+                >
+                  ✕
+                </button>
+              </span>
             ) : null}
             {canManageReservationSetup ? <button onClick={() => setShowImport(true)}>{loadingSupport && !supportLoaded ? 'Loading...' : 'Upload Migration'}</button> : null}
             {canCreateReservation ? (

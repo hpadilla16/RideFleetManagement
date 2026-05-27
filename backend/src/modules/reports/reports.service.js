@@ -4,6 +4,8 @@ import { sendEmail } from '../../lib/mailer.js';
 import { settingsService } from '../settings/settings.service.js';
 import { isMigrationHoldType, isServiceHoldType } from '../vehicles/vehicle-blocks.js';
 import { parseLocationConfig } from '../../lib/location-config.js';
+import { startOfDayInTz } from '../../lib/date-utils.js';
+import { resolveTenantTimeZone } from '../../lib/tenant-tz.js';
 
 function toNumber(value, fallback = 0) {
   const n = Number(value);
@@ -254,6 +256,26 @@ export const reportsService = {
       vehicleId: { not: null },
     };
 
+    // "Overdue" — two operational issue types lumped into one bucket so the
+    // agent has a single triage list:
+    //   (a) CHECKED_OUT past planned returnAt EOD → customer didn't return /
+    //       system never got closed out.
+    //   (b) NEW/CONFIRMED past planned pickupAt EOD → rental agent never
+    //       did the checkout (no-show vs. data hygiene).
+    // EOD = end of the scheduled day in tenant TZ. We approximate that with
+    // `< startOfDayInTz(now, tenantTz)` — anything scheduled for a calendar
+    // day STRICTLY BEFORE today's tenant-TZ day is overdue.
+    const tenantTz = await resolveTenantTimeZone(effectiveTenantId);
+    const startOfTenantToday = startOfDayInTz(now, tenantTz);
+    const overdueWhere = {
+      ...whereScope,
+      ...(locationId ? { pickupLocationId: locationId } : {}),
+      OR: [
+        { status: 'CHECKED_OUT', returnAt: { lt: startOfTenantToday } },
+        { status: { in: ['NEW', 'CONFIRMED'] }, pickupAt: { lt: startOfTenantToday } },
+      ],
+    };
+
     const [
       reservations,
       reservationPayments,
@@ -264,7 +286,8 @@ export const reportsService = {
       tenants,
       dueTodayCount,
       maintenanceJobs,
-      currentlyOutReservations
+      currentlyOutReservations,
+      overdueReservationCount
     ] = await Promise.all([
       prisma.reservation.findMany({
         where: reservationWhere,
@@ -326,7 +349,8 @@ export const reportsService = {
       prisma.reservation.findMany({
         where: currentlyOutWhere,
         select: { vehicleId: true }
-      })
+      }),
+      prisma.reservation.count({ where: overdueWhere })
     ]);
 
     const reservationsByDayMap = new Map(buildDaySeries(start, end).map((day) => [day, 0]));
@@ -452,7 +476,8 @@ export const reportsService = {
         washHeld: washBlockIds.size,
         vehiclesInMaintenance,
         vehiclesOutOfService,
-        utilizationPct
+        utilizationPct,
+        overdueReservations: overdueReservationCount || 0
       },
       fleetHoldBreakdown: [
         { id: 'migration', label: 'Migration Held', count: migrationBlockIds.size, note: 'Legacy-contract units still committed outside the current native workflow.' },

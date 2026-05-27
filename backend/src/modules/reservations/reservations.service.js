@@ -4,7 +4,7 @@ import { maybeSendReviewRequestEmail } from './review-email.service.js';
 import { hostReviewsService } from '../host-reviews/host-reviews.service.js';
 import { settingsService } from '../settings/settings.service.js';
 import { parseLocationConfig } from '../../lib/location-config.js';
-import { parseDateTimeInTz, DEFAULT_TENANT_TIMEZONE } from '../../lib/date-utils.js';
+import { parseDateTimeInTz, startOfDayInTz, DEFAULT_TENANT_TIMEZONE } from '../../lib/date-utils.js';
 import { readFreshCounters, refreshCountersAsync } from './reservation-summary-counters.service.js';
 
 /**
@@ -1121,28 +1121,63 @@ export const reservationsService = {
         }
       : {};
 
+    // ?filter=overdue — bookings whose scheduled day already ended without
+    // the expected next step:
+    //   - CHECKED_OUT past planned returnAt EOD = customer didn't return
+    //   - NEW/CONFIRMED past planned pickupAt EOD = agent missed checkout
+    // EOD = start of TODAY (so anything scheduled for a calendar day < today
+    // in tenant TZ is overdue). Same definition the dashboard KPI uses.
+    let overdueWhere = null;
+    if (String(options.filter || '').toLowerCase() === 'overdue') {
+      const now = new Date();
+      // resolveTenantTimeZone is the local helper above — takes a scope obj,
+      // not a tenantId string. Different signature than the shared
+      // lib/tenant-tz.js export so we stick with the local one here.
+      const tenantTz = await resolveTenantTimeZone(scope);
+      const startOfTenantToday = startOfDayInTz(now, tenantTz);
+      overdueWhere = {
+        OR: [
+          { status: 'CHECKED_OUT', returnAt: { lt: startOfTenantToday } },
+          { status: { in: ['NEW', 'CONFIRMED'] }, pickupAt: { lt: startOfTenantToday } },
+        ],
+      };
+    }
+
+    const searchOrClause = query
+      ? {
+          OR: [
+            { reservationNumber: { contains: query, mode: 'insensitive' } },
+            { sourceRef: { contains: query, mode: 'insensitive' } },
+            {
+              customer: {
+                OR: [
+                  { firstName: { contains: query, mode: 'insensitive' } },
+                  { lastName: { contains: query, mode: 'insensitive' } },
+                  { email: { contains: query, mode: 'insensitive' } },
+                  { phone: { contains: query, mode: 'insensitive' } }
+                ]
+              }
+            }
+          ]
+        }
+      : null;
+
+    // Build the where clause. Keep the legacy shape (top-level OR) when only
+    // the search query is active so existing tests / cache keys / downstream
+    // consumers don't see a structural change. When the overdue filter is
+    // ALSO active, both ORs must be ANDed together to avoid Prisma's
+    // "two top-level OR keys" error.
     const where = {
       ...(scope?.tenantId ? { tenantId: scope.tenantId } : {}),
       ...dateWhere,
-      ...(query
-        ? {
-            OR: [
-              { reservationNumber: { contains: query, mode: 'insensitive' } },
-              { sourceRef: { contains: query, mode: 'insensitive' } },
-              {
-                customer: {
-                  OR: [
-                    { firstName: { contains: query, mode: 'insensitive' } },
-                    { lastName: { contains: query, mode: 'insensitive' } },
-                    { email: { contains: query, mode: 'insensitive' } },
-                    { phone: { contains: query, mode: 'insensitive' } }
-                  ]
-                }
-              }
-            ]
-          }
-        : {})
     };
+    if (overdueWhere && searchOrClause) {
+      where.AND = [overdueWhere, searchOrClause];
+    } else if (overdueWhere) {
+      Object.assign(where, overdueWhere);
+    } else if (searchOrClause) {
+      Object.assign(where, searchOrClause);
+    }
 
     // 2026-05-25 — accept a `sort` param so the UI can re-order the list by
     // pickup or return date. Default keeps the historical "most recently

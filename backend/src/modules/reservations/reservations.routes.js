@@ -167,7 +167,10 @@ reservationsRouter.get('/page', async (req, res, next) => {
       // 2026-05-25 — sort param flows through to the cache key + service.
       // Accepts: created-desc (default), created-asc, pickup-asc,
       // pickup-desc, return-asc, return-desc.
-      sort: req.query?.sort
+      sort: req.query?.sort,
+      // 2026-05-27 — derived filter. Accepts: overdue (CHECKED_OUT past
+      // returnAt EOD OR NEW/CONFIRMED past pickupAt EOD).
+      filter: req.query?.filter
     };
     const out = await cache.getOrSet(
       reservationsListCacheKey('page', scope, params),
