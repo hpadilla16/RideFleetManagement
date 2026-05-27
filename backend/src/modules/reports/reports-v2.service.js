@@ -71,7 +71,12 @@ const REPORT_REGISTRY = [
     category: 'FLEET',
     icon: 'tag',
     description: 'Cars approaching mileage/age sale threshold',
-    status: 'AVAILABLE',
+    // 2026-05-27: blocked back to COMING_SOON. Source-of-truth inputs
+    // (target sale mileage, target sale age, expected sale window, sale
+    // channel, asking price) need to live on Vehicle profile first
+    // before the report can be meaningful. Until then we'd be guessing
+    // off generic mileage/age thresholds.
+    status: 'COMING_SOON',
   },
   {
     slug: 'toll-per-vehicle',

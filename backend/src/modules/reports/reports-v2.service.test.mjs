@@ -102,7 +102,6 @@ test('listReports marks the AVAILABLE reports correctly (rest COMING_SOON)', asy
       'toll-per-location',
       'toll-per-vehicle',
       'unpaid-balance',
-      'upcoming-vehicle-sales',
       'utilization',
     ].sort(),
   );
