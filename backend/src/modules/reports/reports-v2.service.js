@@ -301,19 +301,23 @@ export async function getSnapshot({ tenantId, from, to, deps = {} } = {}) {
     });
   } catch { /* ignore */ }
   try {
-    // returnAt > now filters out stuck CHECKED_OUT rows whose planned
-    // return is in the past (those rentals usually got returned without
-    // the system getting updated — data hygiene issue). Without this we
-    // counted every "stale" overdue reservation as still-out, inflating
-    // on-rent and shrinking available. Includes real overdue customers
-    // by definition but in practice they're a tiny fraction; net signal
-    // is much cleaner.
+    // Hybrid grace period: count CHECKED_OUT rows whose returnAt is in the
+    // future OR within the last 14 days (still-within-plan + recently
+    // overdue). Past 14 days = assumed stale data (returned but never
+    // closed in the system), shown in the Overdue Returns triage list
+    // for cleanup but NOT counted as on-rent.
+    //
+    // Reconciliation against Hector's physical inventory (2026-05-27):
+    //   125 fleet = 56 lot + 42 within-plan + ~27 recent-overdue + ~0 stale
+    //   With grace=14d: on-rent = 42 + 27 ≈ 69, available = 56 (matches lot)
+    const GRACE_PERIOD_DAYS = 14;
+    const gracePeriodStart = new Date(now.getTime() - GRACE_PERIOD_DAYS * 24 * 60 * 60 * 1000);
     const activeReservations = await prisma.reservation.findMany({
       where: {
         tenantId,
         status: 'CHECKED_OUT',
         pickupAt: { lte: now },
-        returnAt: { gt: now },
+        returnAt: { gt: gracePeriodStart },
         vehicleId: { not: null },
       },
       select: { vehicleId: true },

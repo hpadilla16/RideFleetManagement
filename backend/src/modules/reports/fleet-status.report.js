@@ -150,7 +150,10 @@ async function computeData({ tenantId, query }, deps = {}) {
         // returnAt > asOf skips stale CHECKED_OUT rows whose planned return
         // is already in the past (the rental was returned without the
         // system being closed out). Same filter the Reports Snapshot uses.
-        where: { status: { in: ACTIVE_RESERVATION_STATUSES }, returnAt: { gt: asOf } },
+        // Grace period: include CHECKED_OUT whose returnAt is up to 14 days
+        // overdue. Past that = stale data, surfaced in the Overdue Returns
+        // list for cleanup but not counted as on-rent here.
+        where: { status: { in: ACTIVE_RESERVATION_STATUSES }, returnAt: { gt: new Date(asOf.getTime() - 14 * 24 * 60 * 60 * 1000) } },
         orderBy: { pickupAt: 'desc' },
         take: 1,
         select: {
@@ -181,7 +184,10 @@ async function computeData({ tenantId, query }, deps = {}) {
         select: {
           id: true, status: true,
           reservations: {
-            where: { status: { in: ACTIVE_RESERVATION_STATUSES }, returnAt: { gt: asOf } },
+            // Grace period: include CHECKED_OUT whose returnAt is up to 14 days
+        // overdue. Past that = stale data, surfaced in the Overdue Returns
+        // list for cleanup but not counted as on-rent here.
+        where: { status: { in: ACTIVE_RESERVATION_STATUSES }, returnAt: { gt: new Date(asOf.getTime() - 14 * 24 * 60 * 60 * 1000) } },
             select: { id: true }, take: 1,
           },
         },

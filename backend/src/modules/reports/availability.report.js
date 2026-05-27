@@ -127,15 +127,18 @@ async function computeData({ tenantId, query }, deps = {}) {
   // CHECKED_OUT reservation but its status row isn't flipped to ON_RENT).
   // Same fix as fleet-status: override effective status to ON_RENT when
   // an active CHECKED_OUT reservation exists for the vehicle right now.
-  // returnAt > now filters out stuck CHECKED_OUT rows past their planned
-  // return — usually stale data (returned without system update). Matches
-  // the Reports Snapshot + Fleet Status definitions.
+  // Hybrid grace period (14 days). Counts CHECKED_OUT whose returnAt is
+  // either in the future OR within the last 14 days. Older overdue rows
+  // are assumed stale data (returned without close-out). Same definition
+  // as Reports Snapshot + Fleet Status so the surfaces agree.
+  const GRACE_PERIOD_DAYS = 14;
+  const gracePeriodStart = new Date(asOf.getTime() - GRACE_PERIOD_DAYS * 24 * 60 * 60 * 1000);
   const activeReservations = await prisma.reservation.findMany({
     where: {
       tenantId,
       status: 'CHECKED_OUT',
       pickupAt: { lte: asOf },
-      returnAt: { gt: asOf },
+      returnAt: { gt: gracePeriodStart },
       vehicleId: { not: null },
       ...(locationId ? { vehicle: { homeLocationId: locationId } } : {}),
     },

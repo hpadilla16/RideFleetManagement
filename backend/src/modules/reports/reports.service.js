@@ -243,16 +243,19 @@ export const reportsService = {
 
     // "Currently rented" — reservations whose vehicle is physically out of
     // the lot right now. CHECKED_IN_UNPAID is excluded (vehicle is back,
-    // balance pending). returnAt > now skips stale CHECKED_OUT rows whose
-    // planned return is already past (rental returned without the system
-    // being closed). Same definition used by Reports Snapshot + Fleet Status
-    // + Availability so all surfaces agree on a single "available now" #.
+    // balance pending). Hybrid grace period (14d) on returnAt: count rows
+    // that are within plan OR recently overdue (real customers running
+    // late). Beyond 14 days = stale data, captured in the Overdue Returns
+    // KPI for cleanup but not in the on-rent count here. Definition shared
+    // with Reports Snapshot + Fleet Status + Availability.
+    const GRACE_PERIOD_DAYS = 14;
+    const gracePeriodStart = new Date(now.getTime() - GRACE_PERIOD_DAYS * 24 * 60 * 60 * 1000);
     const currentlyOutWhere = {
       ...whereScope,
       ...(locationId ? { pickupLocationId: locationId } : {}),
       status: 'CHECKED_OUT',
       pickupAt: { lte: now },
-      returnAt: { gt: now },
+      returnAt: { gt: gracePeriodStart },
       vehicleId: { not: null },
     };
 

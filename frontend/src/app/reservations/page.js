@@ -811,7 +811,33 @@ function ReservationsInner({ token, me, logout }) {
                 <td>{formatReservationWallClock(r.pickupAt, reservationSummary.tenantTimeZone)}</td>
                 <td>{formatReservationWallClock(r.returnAt, reservationSummary.tenantTimeZone)}</td>
                 <td>
-                  {r.status === 'CHECKED_OUT' ? null : (
+                  {/* Overdue cleanup actions — surface only when filter=overdue.
+                      CHECKED_OUT → Mark returned (vehicle came back, balance
+                      pending). NEW/CONFIRMED → No Show (agent missed the
+                      checkout window). One-click triage for stale data. */}
+                  {filter === 'overdue' && r.status === 'CHECKED_OUT' ? (
+                    <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                      <button
+                        onClick={() => setStatus(r.id, 'CHECKED_IN_UNPAID')}
+                        style={{ background: '#EAF3DE', color: '#173404', borderColor: '#639922' }}
+                      >
+                        Mark returned
+                      </button>
+                      <Link href={`/reservations/${r.id}/checkin-wizard`}>
+                        <button>Full checkin</button>
+                      </Link>
+                    </div>
+                  ) : filter === 'overdue' && (r.status === 'NEW' || r.status === 'CONFIRMED') ? (
+                    <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                      <button
+                        onClick={() => setStatus(r.id, 'NO_SHOW')}
+                        style={{ background: '#FAEEDA', color: '#412402', borderColor: '#BA7517' }}
+                      >
+                        Mark no-show
+                      </button>
+                      <button onClick={() => startRental(r.id)}>Start Check-out</button>
+                    </div>
+                  ) : r.status === 'CHECKED_OUT' ? null : (
                     <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
                       <button onClick={() => startRental(r.id)}>Start Check-out</button>
                       <button onClick={() => setStatus(r.id, 'CANCELLED')}>Cancel</button>
