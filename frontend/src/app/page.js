@@ -381,7 +381,18 @@ function DashboardInner({ token, me, logout }) {
   const migrationHeld = Number(kpis.migrationHeld || 0);
   const washHeld = Number(kpis.washHeld || 0);
   const serviceHeld = Number(kpis.vehiclesInMaintenance || 0) + Number(kpis.vehiclesOutOfService || 0);
-  const activeReservations = reservations.filter((r) => ['NEW', 'CONFIRMED', 'CHECKED_OUT'].includes(r.status)).length;
+  // Active = CHECKED_OUT with returnAt > now (still within plan). Backend
+  // computes the canonical count tenant-wide; FE falls back to its own
+  // strict filter if the KPI isn't available yet (e.g. pre-deploy).
+  // Previously this counted NEW + CONFIRMED + all CHECKED_OUT which
+  // ballooned to 298 by mixing future bookings + overdue rentals into
+  // the 'active' bucket.
+  const activeReservations = Number(
+    kpis.activeReservations ?? reservations.filter((r) =>
+      r.status === 'CHECKED_OUT' &&
+      r.returnAt && new Date(r.returnAt) > new Date()
+    ).length
+  );
   // Overdue = CHECKED_OUT past planned returnAt. Backend computes the
   // canonical count (filtered by tenant + location server-side); FE falls
   // back to its own list filter in case the backend KPI isn't available

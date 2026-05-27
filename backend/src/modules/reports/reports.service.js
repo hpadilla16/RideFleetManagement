@@ -259,6 +259,20 @@ export const reportsService = {
       vehicleId: { not: null },
     };
 
+    // "Active reservations" — strict definition per Hector: CHECKED_OUT
+    // with returnAt still in the future (planned return not yet passed).
+    // Different from currentlyOutWhere — that has a 14d overdue grace to
+    // make the available-vehicle math hold up while stale data is being
+    // cleaned. This count is the ops-level "who's actually on a current
+    // rental right now". Excludes NEW/CONFIRMED (future) and any overdue.
+    const activeReservationsWhere = {
+      ...whereScope,
+      ...(locationId ? { pickupLocationId: locationId } : {}),
+      status: 'CHECKED_OUT',
+      pickupAt: { lte: now },
+      returnAt: { gt: now },
+    };
+
     // "Overdue" — two operational issue types lumped into one bucket so the
     // agent has a single triage list:
     //   (a) CHECKED_OUT past planned returnAt EOD → customer didn't return /
@@ -290,7 +304,8 @@ export const reportsService = {
       dueTodayCount,
       maintenanceJobs,
       currentlyOutReservations,
-      overdueReservationCount
+      overdueReservationCount,
+      activeReservationsCount
     ] = await Promise.all([
       prisma.reservation.findMany({
         where: reservationWhere,
@@ -353,7 +368,8 @@ export const reportsService = {
         where: currentlyOutWhere,
         select: { vehicleId: true }
       }),
-      prisma.reservation.count({ where: overdueWhere })
+      prisma.reservation.count({ where: overdueWhere }),
+      prisma.reservation.count({ where: activeReservationsWhere })
     ]);
 
     const reservationsByDayMap = new Map(buildDaySeries(start, end).map((day) => [day, 0]));
@@ -480,7 +496,12 @@ export const reportsService = {
         vehiclesInMaintenance,
         vehiclesOutOfService,
         utilizationPct,
-        overdueReservations: overdueReservationCount || 0
+        overdueReservations: overdueReservationCount || 0,
+        // Strict: CHECKED_OUT with returnAt > now. Excludes NEW/CONFIRMED
+        // (future bookings) AND any overdue rentals (which are counted
+        // in overdueReservations above). This is the number rendered as
+        // the Active Reservations KPI on the dashboard.
+        activeReservations: activeReservationsCount || 0
       },
       fleetHoldBreakdown: [
         { id: 'migration', label: 'Migration Held', count: migrationBlockIds.size, note: 'Legacy-contract units still committed outside the current native workflow.' },
