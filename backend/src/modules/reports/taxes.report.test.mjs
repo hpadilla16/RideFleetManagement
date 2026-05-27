@@ -104,6 +104,31 @@ test('aggregate: groups TAX by name and sorts by amount desc', () => {
   assert.equal(out.byCategory[1].name, 'City tax');
 });
 
+test('aggregate: effectiveRate per category comes from embedded % in the name', () => {
+  const out = aggregate([
+    chg({ name: 'Daily rental',       chargeType: 'DAILY', total: 500, taxable: true,  agreementId: 'a1' }),
+    chg({ name: 'Sales Tax (11.50%)', chargeType: 'TAX',   total: 57.50,                agreementId: 'a1' }),
+    chg({ name: 'Tax (11.50%)',       chargeType: 'TAX',   total: 5.75,                 agreementId: 'a1' }),
+  ]);
+  for (const c of out.byCategory) {
+    assert.ok(Math.abs(c.effectiveRate - 0.115) < 1e-6,
+      `${c.name} should show 11.50% rate, got ${(c.effectiveRate * 100).toFixed(4)}%`);
+  }
+  // Blended headline rate matches when all categories share the same rate.
+  assert.ok(Math.abs(out.totals.effectiveRate - 0.115) < 1e-6,
+    `blended rate should be 11.50%, got ${(out.totals.effectiveRate * 100).toFixed(4)}%`);
+});
+
+test('aggregate: effectiveRate falls back to collected/base when name has no %', () => {
+  const out = aggregate([
+    chg({ name: 'Daily rental', chargeType: 'DAILY', total: 1000, taxable: true,  agreementId: 'a1' }),
+    chg({ name: 'Tax',          chargeType: 'TAX',   total: 100,                  agreementId: 'a1' }),
+  ]);
+  // No % in 'Tax' name → derived rate from amount / base = 100/1000 = 0.10
+  assert.equal(out.byCategory[0].name, 'Tax');
+  assert.ok(Math.abs(out.byCategory[0].effectiveRate - 0.10) < 1e-6);
+});
+
 test('aggregate: pctOfTotal sums to ~1 across categories', () => {
   const out = aggregate([
     chg({ name: 'A', chargeType: 'TAX', total: 30, agreementId: 'a' }),

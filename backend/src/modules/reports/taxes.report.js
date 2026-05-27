@@ -50,6 +50,20 @@ const MAX_DAYS = 366;
 function num(v) { const n = Number(v); return Number.isFinite(n) ? n : 0; }
 function moneyRound(n) { return Math.round(n * 100) / 100; }
 
+/**
+ * Pull the percent rate out of a tax category label like "Sales Tax (11.50%)".
+ * Returns the rate as a decimal (0.115) or null if the name has no embedded
+ * percent. Handles both "11.5%" and "11.50%" and tolerates surrounding text.
+ */
+function parseEmbeddedRate(name) {
+  if (!name) return null;
+  const match = String(name).match(/(\d+(?:\.\d+)?)\s*%/);
+  if (!match) return null;
+  const pct = Number(match[1]);
+  if (!Number.isFinite(pct)) return null;
+  return pct / 100;
+}
+
 function startOfDay(d)   { return startOfDayInTz(d, DEFAULT_TENANT_TIMEZONE); }
 function startOfMonth(d) { return startOfMonthInTz(d, DEFAULT_TENANT_TIMEZONE); }
 function addDays(d, n)   { return addDaysInTz(d, n); }
@@ -142,14 +156,28 @@ function aggregate(charges, tz = DEFAULT_TENANT_TIMEZONE) {
     }
   }
 
-  // Finalize categories
+  // Finalize categories. effectiveRate for a category is the rate that
+  // applies to charges under THAT category — not collected / global taxable
+  // base (which double-counts the base across multiple tax lines if any).
+  // The category name embeds the configured rate (e.g. "Sales Tax (11.50%)"),
+  // so we parse it from there. Fallback to a per-category derived rate if
+  // the name has no embedded percent.
   const byCategory = Array.from(taxByName.values())
     .map((t) => ({
       ...t,
       pctOfTotal: taxCollected > 0 ? t.amount / taxCollected : 0,
-      effectiveRate: taxableBase > 0 ? t.amount / taxableBase : 0,
+      effectiveRate: parseEmbeddedRate(t.name) ?? (taxableBase > 0 ? t.amount / taxableBase : 0),
     }))
     .sort((a, b) => b.amount - a.amount);
+
+  // Blended effective rate — weight each category's configured rate by the
+  // tax collected from that category. If every category has the same rate,
+  // this comes out to that rate exactly (no rounding drift from
+  // collected / global-base, which can come up short when some taxable
+  // charges didn't generate a corresponding tax line). If rates differ
+  // across categories, this is a fair weighted average.
+  const rateContribution = byCategory.reduce((acc, c) => acc + (c.effectiveRate || 0) * (c.amount || 0), 0);
+  const blendedRate = taxCollected > 0 ? rateContribution / taxCollected : 0;
 
   return {
     byCategory,
@@ -160,7 +188,7 @@ function aggregate(charges, tz = DEFAULT_TENANT_TIMEZONE) {
       nonTaxableRevenue,
       depositTotal,
       grossRevenue: moneyRound(taxCollected + taxableBase + nonTaxableRevenue),
-      effectiveRate: taxableBase > 0 ? taxCollected / taxableBase : 0,
+      effectiveRate: blendedRate,
       taxedAgreementCount: taxedAgreementIds.size,
       totalAgreementCount: allAgreementIds.size,
       categoryCount: byCategory.length,
