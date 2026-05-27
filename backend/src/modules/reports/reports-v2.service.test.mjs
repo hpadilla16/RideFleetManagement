@@ -12,7 +12,7 @@ import {
   _internal,
 } from './reports-v2.service.js';
 
-function makeFakePrisma({ payments = [], reservations = [], vehicles = [] } = {}) {
+function makeFakePrisma({ payments = [], reservations = [], vehicles = [], vehicleBlocks = [], maintenanceJobs = [] } = {}) {
   function matchReservation(r, where) {
     if (where.tenantId && r.tenantId !== where.tenantId) return false;
     if (typeof where.status === 'string' && r.status !== where.status) return false;
@@ -58,6 +58,25 @@ function makeFakePrisma({ payments = [], reservations = [], vehicles = [] } = {}
           if (typeof where.status === 'string' && v.status !== where.status) return false;
           return true;
         }).length;
+      },
+    },
+    vehicleAvailabilityBlock: {
+      async findMany({ where }) {
+        return vehicleBlocks.filter((b) => {
+          if (where.tenantId && b.tenantId !== where.tenantId) return false;
+          if (where.releasedAt === null && b.releasedAt != null) return false;
+          if (where.blockType?.in && !where.blockType.in.includes(b.blockType)) return false;
+          return true;
+        });
+      },
+    },
+    maintenanceJob: {
+      async findMany({ where }) {
+        return maintenanceJobs.filter((j) => {
+          if (where.vehicle?.tenantId && j.tenantId !== where.vehicle.tenantId) return false;
+          if (where.status?.in && !where.status.in.includes(j.status)) return false;
+          return true;
+        });
       },
     },
   };
@@ -148,12 +167,17 @@ test('getSnapshot — revenue, reservations checked out, and available count', a
       { tenantId: 't2', status: 'CHECKED_OUT',         pickupAt: new Date('2026-05-12T14:00:00Z'), returnAt: new Date('2026-05-22T14:00:00Z'), vehicleId: 'vX' },
     ],
     vehicles: [
-      { tenantId: 't1', status: 'AVAILABLE' },
-      { tenantId: 't1', status: 'AVAILABLE' },
-      { tenantId: 't1', status: 'ON_RENT' },
-      { tenantId: 't1', status: 'ON_RENT' },
-      { tenantId: 't1', status: 'OUT_OF_SERVICE' }, // retired/totaled — excluded
+      { tenantId: 't1', id: 'veh-A', status: 'AVAILABLE' },
+      { tenantId: 't1', id: 'veh-B', status: 'AVAILABLE' },
+      { tenantId: 't1', id: 'veh-C', status: 'ON_RENT' },
+      { tenantId: 't1', id: 'veh-D', status: 'ON_RENT' },
+      { tenantId: 't1', id: 'veh-E', status: 'OUT_OF_SERVICE' }, // retired/totaled — excluded
     ],
+    vehicleBlocks: [
+      // One vehicle blocked for maintenance — should drop out of available.
+      { tenantId: 't1', vehicleId: 'veh-B', blockType: 'MAINTENANCE_HOLD', releasedAt: null },
+    ],
+    maintenanceJobs: [],
   });
   const out = await getSnapshot({
     tenantId: 't1',
@@ -166,12 +190,12 @@ test('getSnapshot — revenue, reservations checked out, and available count', a
   assert.equal(out.reservationsCheckedOut, 3);
   // totalFleet excludes OUT_OF_SERVICE → 4 vehicles
   assert.equal(out.totalFleet, 4);
-  // Active reservations covering "now" (2026-05-22): v1 (out 5/10→5/30)
-  // and v2 has returnAt 5/15 < now → not active. v3 returnAt 5/8 < now →
-  // not active. So 1 vehicle currently rented.
+  // v1 (CHECKED_OUT, returnAt 5/30) is within 14d grace from now (5/22) → counts.
+  // v2/v3 returned (CHECKED_IN_UNPAID/CHECKED_IN) → don't count.
   assert.equal(out.currentlyRented, 1);
-  assert.equal(out.availableVehicles, 3);
-  assert.equal(out.utilizationPct, 25);
+  assert.equal(out.blockedForMaintenance, 1);
+  // available = totalFleet (4) − currentlyRented (1) − blocked (1) = 2
+  assert.equal(out.availableVehicles, 2);
 });
 
 test('getSnapshot survives prisma errors gracefully (returns zeros)', async () => {
@@ -182,10 +206,13 @@ test('getSnapshot survives prisma errors gracefully (returns zeros)', async () =
       findMany: async () => { throw new Error('table missing'); },
     },
     vehicle: { count: async () => { throw new Error('table missing'); } },
+    vehicleAvailabilityBlock: { findMany: async () => { throw new Error('table missing'); } },
+    maintenanceJob: { findMany: async () => { throw new Error('table missing'); } },
   };
   const out = await getSnapshot({ tenantId: 't1', deps: { prisma, tenantTz: 'America/Puerto_Rico' } });
   assert.equal(out.revenue, 0);
   assert.equal(out.reservationsCheckedOut, 0);
   assert.equal(out.availableVehicles, 0);
   assert.equal(out.totalFleet, 0);
+  assert.equal(out.blockedForMaintenance, 0);
 });

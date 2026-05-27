@@ -286,15 +286,15 @@ export async function getSnapshot({ tenantId, from, to, deps = {} } = {}) {
     });
   } catch { /* ignore */ }
 
-  // 3. Available vehicles right now — computed from reservations, not from
-  //    Vehicle.status (which can drift). totalFleet excludes only
-  //    OUT_OF_SERVICE (totaled / sold). Currently-rented = unique
-  //    vehicleIds in CHECKED_OUT reservations (i.e. physically out of the
-  //    lot right now). We deliberately don't include CHECKED_IN_UNPAID —
-  //    that's a payment-pending state where the car is already back. Must
-  //    match fleet-status.report.js so the two reports agree.
+  // 3. Available vehicles right now — computed from reservations + blocks,
+  //    not from Vehicle.status (which drifts heavily in production).
+  //    totalFleet counts every vehicle that isn't OUT_OF_SERVICE.
+  //    Available = totalFleet − (currentlyRented ∪ blocked)
+  //    where blocked = vehicles with an active maintenance job OR a
+  //    MAINTENANCE_HOLD / OUT_OF_SERVICE_HOLD / WASH_HOLD block.
   let totalFleet = 0;
-  let currentlyRented = 0;
+  const rentedVehicleIds = new Set();
+  const blockedVehicleIds = new Set();
   try {
     totalFleet = await prisma.vehicle.count({
       where: { tenantId, status: { not: 'OUT_OF_SERVICE' } },
@@ -306,10 +306,6 @@ export async function getSnapshot({ tenantId, from, to, deps = {} } = {}) {
     // overdue). Past 14 days = assumed stale data (returned but never
     // closed in the system), shown in the Overdue Returns triage list
     // for cleanup but NOT counted as on-rent.
-    //
-    // Reconciliation against Hector's physical inventory (2026-05-27):
-    //   125 fleet = 56 lot + 42 within-plan + ~27 recent-overdue + ~0 stale
-    //   With grace=14d: on-rent = 42 + 27 ≈ 69, available = 56 (matches lot)
     const GRACE_PERIOD_DAYS = 14;
     const gracePeriodStart = new Date(now.getTime() - GRACE_PERIOD_DAYS * 24 * 60 * 60 * 1000);
     const activeReservations = await prisma.reservation.findMany({
@@ -322,10 +318,42 @@ export async function getSnapshot({ tenantId, from, to, deps = {} } = {}) {
       },
       select: { vehicleId: true },
     });
-    const uniqueVehicles = new Set(activeReservations.map((r) => r.vehicleId).filter(Boolean));
-    currentlyRented = uniqueVehicles.size;
+    for (const r of activeReservations) {
+      if (r.vehicleId) rentedVehicleIds.add(r.vehicleId);
+    }
   } catch { /* ignore */ }
-  const available = Math.max(0, totalFleet - currentlyRented);
+  try {
+    // Vehicles blocked by maintenance / OOS / wash. Includes open
+    // maintenance jobs and active VehicleAvailabilityBlock rows. Hector
+    // observed a 3-car gap (57 reported vs 54 physical) where these
+    // blocked vehicles were leaking into 'available'.
+    const [activeBlocks, openMaintenanceJobs] = await Promise.all([
+      prisma.vehicleAvailabilityBlock.findMany({
+        where: {
+          tenantId,
+          releasedAt: null,
+          blockedFrom: { lte: now },
+          availableFrom: { gt: now },
+          blockType: { in: ['MAINTENANCE_HOLD', 'OUT_OF_SERVICE_HOLD', 'WASH_HOLD'] },
+        },
+        select: { vehicleId: true },
+      }),
+      prisma.maintenanceJob.findMany({
+        where: {
+          status: { in: ['OPEN', 'IN_PROGRESS'] },
+          vehicle: { tenantId },
+        },
+        select: { vehicleId: true },
+      }),
+    ]);
+    for (const b of activeBlocks)        if (b.vehicleId) blockedVehicleIds.add(b.vehicleId);
+    for (const j of openMaintenanceJobs) if (j.vehicleId) blockedVehicleIds.add(j.vehicleId);
+  } catch { /* ignore */ }
+  // Union rented + blocked, dedup, that's the not-available count.
+  const notAvailable = new Set([...rentedVehicleIds, ...blockedVehicleIds]);
+  const currentlyRented = rentedVehicleIds.size;
+  const blockedCount = blockedVehicleIds.size;
+  const available = Math.max(0, totalFleet - notAvailable.size);
 
   return {
     tenantId,
@@ -336,6 +364,7 @@ export async function getSnapshot({ tenantId, from, to, deps = {} } = {}) {
     reservationsCheckedOut: checkedOut,
     availableVehicles: available,
     currentlyRented,
+    blockedForMaintenance: blockedCount,
     totalFleet,
     utilizationPct: totalFleet > 0 ? Math.round((currentlyRented / totalFleet) * 100) : 0,
   };
