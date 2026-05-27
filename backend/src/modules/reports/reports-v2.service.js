@@ -284,8 +284,10 @@ export async function getSnapshot({ tenantId, from, to, deps = {} } = {}) {
   // 3. Available vehicles right now — computed from reservations, not from
   //    Vehicle.status (which can drift). totalFleet excludes only
   //    OUT_OF_SERVICE (totaled / sold). Currently-rented = unique
-  //    vehicleIds in CHECKED_OUT / CHECKED_IN_UNPAID reservations whose
-  //    window straddles now.
+  //    vehicleIds in CHECKED_OUT reservations (i.e. physically out of the
+  //    lot right now). We deliberately don't include CHECKED_IN_UNPAID —
+  //    that's a payment-pending state where the car is already back. Must
+  //    match fleet-status.report.js so the two reports agree.
   let totalFleet = 0;
   let currentlyRented = 0;
   try {
@@ -297,9 +299,8 @@ export async function getSnapshot({ tenantId, from, to, deps = {} } = {}) {
     const activeReservations = await prisma.reservation.findMany({
       where: {
         tenantId,
-        status: { in: ['CHECKED_OUT', 'CHECKED_IN_UNPAID'] },
+        status: 'CHECKED_OUT',
         pickupAt: { lte: now },
-        returnAt: { gt: now },
         vehicleId: { not: null },
       },
       select: { vehicleId: true },

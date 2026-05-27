@@ -29,7 +29,12 @@ const STATUS_LABEL = {
   IN_MAINTENANCE: 'Maintenance',
   OUT_OF_SERVICE: 'Out of service',
 };
-const ACTIVE_RESERVATION_STATUSES = ['CHECKED_OUT', 'CHECKED_IN_UNPAID'];
+// "Physically out of the lot right now" — CHECKED_OUT is the only status
+// where the vehicle is actually with the customer. CHECKED_IN_UNPAID means
+// the car was returned (balance pending) so it's back in the lot. NEW /
+// CONFIRMED haven't picked up. We previously included CHECKED_IN_UNPAID
+// which inflated the "On rent" count by every still-unpaid past rental.
+const ACTIVE_RESERVATION_STATUSES = ['CHECKED_OUT'];
 
 // ---------------------------------------------------------------------------
 // Helpers

@@ -15,6 +15,7 @@ import {
 function makeFakePrisma({ payments = [], reservations = [], vehicles = [] } = {}) {
   function matchReservation(r, where) {
     if (where.tenantId && r.tenantId !== where.tenantId) return false;
+    if (typeof where.status === 'string' && r.status !== where.status) return false;
     if (where.status?.in && !where.status.in.includes(r.status)) return false;
     if (where.pickupAt?.gte && new Date(r.pickupAt) < where.pickupAt.gte) return false;
     if (where.pickupAt?.lt && new Date(r.pickupAt) >= where.pickupAt.lt) return false;
