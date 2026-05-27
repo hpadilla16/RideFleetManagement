@@ -1333,6 +1333,10 @@ model RentalAgreement {
 
   @@index([status, pickupAt])
   @@index([tenantId, status])
+  // Supports buildVehicleOperationalSignalsMap's DISTINCT ON (vehicleId)
+  // ORDER BY vehicleId, createdAt DESC. Without this index, the planner
+  // snapshot query timed out at 15s on production.
+  @@index([vehicleId, createdAt])
 }
 
 // Rental agreement addendum (BUG-001 Option C). Post-signature date

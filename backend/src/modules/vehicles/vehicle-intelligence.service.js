@@ -1,3 +1,4 @@
+import { Prisma } from '@prisma/client';
 import { prisma } from '../../lib/prisma.js';
 
 const REQUIRED_INSPECTION_PHOTOS = ['front', 'rear', 'left', 'right', 'frontSeat', 'rearSeat', 'dashboard', 'trunk'];
@@ -463,36 +464,33 @@ export async function buildVehicleOperationalSignalsMap(vehicleIds = [], scope =
   const activeBlocksByVehicleId = options?.activeBlocksByVehicleId instanceof Map ? options.activeBlocksByVehicleId : new Map();
 
   const tenantFilter = scope?.tenantId ? { tenantId: scope.tenantId } : {};
-  const [agreements, devices, events] = await Promise.all([
-    prisma.rentalAgreement.findMany({
-      where: {
-        vehicleId: { in: ids },
-        ...tenantFilter
-      },
-      orderBy: [{ createdAt: 'desc' }],
-      select: {
-        vehicleId: true,
-        id: true,
-        agreementNumber: true,
-        inspections: {
-          orderBy: [{ capturedAt: 'desc' }],
-          select: {
-            phase: true,
-            capturedAt: true,
-            exterior: true,
-            interior: true,
-            tires: true,
-            lights: true,
-            windshield: true,
-            fuelLevel: true,
-            odometer: true,
-            damages: true,
-            notes: true,
-            photosJson: true
-          }
-        }
-      }
-    }),
+  // 2026-05-27: prior implementation loaded EVERY rental agreement (with all
+  // its inspections including the photosJson blob) and every telematics event
+  // for every vehicle, then picked the most recent of each in JS. With
+  // ~125 vehicles and historical agreements that's hundreds of MB of payload
+  // and easily blew past the 15s statement_timeout. We now scope to the
+  // LATEST row per vehicle inside Postgres (DISTINCT ON), then load just
+  // those rows' details.
+  const tenantSqlFilter = scope?.tenantId
+    ? Prisma.sql`AND "tenantId" = ${scope.tenantId}`
+    : Prisma.empty;
+  const idsArr = ids;
+
+  const [latestAgreementRows, latestEventRows, devices] = await Promise.all([
+    prisma.$queryRaw`
+      SELECT DISTINCT ON ("vehicleId") "id", "vehicleId"
+      FROM "RentalAgreement"
+      WHERE "vehicleId" = ANY(${idsArr}::text[])
+      ${tenantSqlFilter}
+      ORDER BY "vehicleId", "createdAt" DESC
+    `,
+    prisma.$queryRaw`
+      SELECT DISTINCT ON ("vehicleId") *
+      FROM "VehicleTelematicsEvent"
+      WHERE "vehicleId" = ANY(${idsArr}::text[])
+      ${tenantSqlFilter}
+      ORDER BY "vehicleId", "eventAt" DESC, "createdAt" DESC
+    `,
     prisma.vehicleTelematicsDevice.findMany({
       where: {
         vehicleId: { in: ids },
@@ -500,15 +498,43 @@ export async function buildVehicleOperationalSignalsMap(vehicleIds = [], scope =
         ...tenantFilter
       },
       orderBy: [{ updatedAt: 'desc' }, { createdAt: 'desc' }]
-    }),
-    prisma.vehicleTelematicsEvent.findMany({
-      where: {
-        vehicleId: { in: ids },
-        ...tenantFilter
-      },
-      orderBy: [{ eventAt: 'desc' }, { createdAt: 'desc' }]
     })
   ]);
+
+  // Hydrate the latest agreements with their CHECKOUT + CHECKIN inspections.
+  // Filtering phase at the DB layer avoids dragging in irrelevant phases and
+  // photoJson blobs we wouldn't use anyway.
+  const latestAgreementIds = latestAgreementRows.map((row) => row.id);
+  const agreements = latestAgreementIds.length
+    ? await prisma.rentalAgreement.findMany({
+        where: { id: { in: latestAgreementIds } },
+        select: {
+          vehicleId: true,
+          id: true,
+          agreementNumber: true,
+          inspections: {
+            where: { phase: { in: ['CHECKOUT', 'CHECKIN'] } },
+            orderBy: [{ capturedAt: 'desc' }],
+            select: {
+              phase: true,
+              capturedAt: true,
+              exterior: true,
+              interior: true,
+              tires: true,
+              lights: true,
+              windshield: true,
+              fuelLevel: true,
+              odometer: true,
+              damages: true,
+              notes: true,
+              photosJson: true
+            }
+          }
+        }
+      })
+    : [];
+
+  const events = latestEventRows;
 
   const agreementByVehicleId = new Map();
   for (const agreement of agreements) {
