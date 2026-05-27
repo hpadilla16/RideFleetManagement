@@ -430,14 +430,20 @@ function DashboardInner({ token, me, logout }) {
             actionLabel: 'Open Reservations'
           }
         : null,
-      {
-        id: 'loaner',
-        title: 'Loaner Lane',
-        detail: 'Service lane, billing, and alerts',
-        note: 'Jump straight into the dealership loaner workspace when service ops need attention.',
-        action: () => router.push('/loaner'),
-        actionLabel: 'Open Loaner'
-      }
+      // Loaner Lane card only renders for tenants that have the dealership
+      // loaner module enabled. moduleAccess.loaner is set by the backend in
+      // lib/module-access.js based on tenant.dealershipLoanerEnabled (it's
+      // false by default — loaner is opt-in).
+      (me?.moduleAccess?.loaner === true)
+        ? {
+            id: 'loaner',
+            title: 'Loaner Lane',
+            detail: 'Service lane, billing, and alerts',
+            note: 'Jump straight into the dealership loaner workspace when service ops need attention.',
+            action: () => router.push('/loaner'),
+            actionLabel: 'Open Loaner'
+          }
+        : null
     ].filter(Boolean);
 
     return {
@@ -450,7 +456,7 @@ function DashboardInner({ token, me, logout }) {
       feeAdvisoryCount,
       nextItems
     };
-  }, [pickups, returns, feeAdvisoryCount, totalVehicles, available, migrationHeld, serviceHeld, activeReservations, router]);
+  }, [pickups, returns, feeAdvisoryCount, totalVehicles, available, migrationHeld, serviceHeld, activeReservations, router, me?.moduleAccess?.loaner]);
 
   return (
     <AppShell me={me} logout={logout}>

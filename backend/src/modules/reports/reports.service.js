@@ -239,6 +239,19 @@ export const reportsService = {
       }
     };
 
+    // "Currently rented" — reservations whose vehicle is physically out of
+    // the lot right now. CHECKED_IN_UNPAID is excluded (vehicle is back,
+    // balance pending). Used to override the on-rent / available KPIs so they
+    // match Reports Snapshot + Fleet Status, which both stopped trusting
+    // Vehicle.status because it drifts in production.
+    const currentlyOutWhere = {
+      ...whereScope,
+      ...(locationId ? { pickupLocationId: locationId } : {}),
+      status: 'CHECKED_OUT',
+      pickupAt: { lte: now },
+      vehicleId: { not: null },
+    };
+
     const [
       reservations,
       reservationPayments,
@@ -248,7 +261,8 @@ export const reportsService = {
       locations,
       tenants,
       dueTodayCount,
-      maintenanceJobs
+      maintenanceJobs,
+      currentlyOutReservations
     ] = await Promise.all([
       prisma.reservation.findMany({
         where: reservationWhere,
@@ -306,6 +320,10 @@ export const reportsService = {
       prisma.maintenanceJob.findMany({
         where: maintenanceWhere,
         select: { vehicleId: true }
+      }),
+      prisma.reservation.findMany({
+        where: currentlyOutWhere,
+        select: { vehicleId: true }
       })
     ]);
 
@@ -351,15 +369,28 @@ export const reportsService = {
       if (serviceBlockIds.has(row.id)) return false;
       return true;
     }).length;
+    // 2026-05-27: derive on-rent from active CHECKED_OUT reservations
+    // instead of Vehicle.status (which drifts — same fix as Fleet Status
+    // and Reports Snapshot). Vehicle.status='ON_RENT' is kept as a defensive
+    // fallback so vehicles that happen to be flagged ON_RENT without a
+    // current reservation are still counted as not-available.
+    const currentlyOutIds = new Set((currentlyOutReservations || [])
+      .map((row) => row.vehicleId).filter(Boolean));
     const onRentStatusIds = new Set(vehicles.filter((row) => String(row.status || '').toUpperCase() === 'ON_RENT').map((row) => row.id));
-    const onRent = new Set([...onRentStatusIds, ...migrationBlockIds]).size;
+    const onRent = new Set([...currentlyOutIds, ...onRentStatusIds, ...migrationBlockIds]).size;
     const vehiclesInMaintenance = new Set([...maintenanceStatusIds, ...maintenanceBlockIds, ...(maintenanceJobs || []).map((row) => row.vehicleId).filter(Boolean)]).size;
     const vehiclesOutOfService = new Set([...outOfServiceStatusIds, ...outOfServiceBlockIds]).size;
+    const blockedIds = new Set([
+      ...currentlyOutIds, ...onRentStatusIds, ...migrationBlockIds,
+      ...maintenanceStatusIds, ...maintenanceBlockIds,
+      ...outOfServiceStatusIds, ...outOfServiceBlockIds,
+      ...serviceBlockIds, ...washBlockIds,
+      ...((maintenanceJobs || []).map((row) => row.vehicleId).filter(Boolean)),
+    ]);
     const availableFleet = vehicles.filter((row) => {
       const status = String(row.status || '').toUpperCase();
-      if (['ON_RENT', 'IN_MAINTENANCE', 'OUT_OF_SERVICE'].includes(status)) return false;
-      if (migrationBlockIds.has(row.id) || serviceBlockIds.has(row.id) || washBlockIds.has(row.id)) return false;
-      return true;
+      if (['IN_MAINTENANCE', 'OUT_OF_SERVICE'].includes(status)) return false;
+      return !blockedIds.has(row.id);
     }).length;
     const utilizationPct = fleetTotal > 0 ? Number(((onRent / fleetTotal) * 100).toFixed(1)) : 0;
 
