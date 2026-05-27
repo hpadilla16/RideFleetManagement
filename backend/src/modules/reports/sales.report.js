@@ -36,6 +36,10 @@ import {
 import { resolveTenantTimeZone } from '../../lib/tenant-tz.js';
 
 const TAX_CHARGE_TYPE = 'TAX';
+// Security deposits are HOLDS, not revenue — they get released or applied to
+// damages, never recognized as a sale. Excluded from the sales total just
+// like TAX is, and shown as a separate deposit-held breakdown.
+const DEPOSIT_CHARGE_TYPE = 'DEPOSIT';
 const DEFAULT_TOP_N = 10;
 const MAX_TOP_N = 25;
 const MAX_DAYS = 366;
@@ -102,8 +106,10 @@ function buildChargeWhere({ tenantId, locationId, gte, lt }) {
 function aggregate(charges, topN = DEFAULT_TOP_N, tz = DEFAULT_TENANT_TIMEZONE) {
   const salesCharges = [];
   const taxCharges = [];
+  const depositCharges = [];
   for (const c of charges) {
     if (c.chargeType === TAX_CHARGE_TYPE) taxCharges.push(c);
+    else if (c.chargeType === DEPOSIT_CHARGE_TYPE) depositCharges.push(c);
     else salesCharges.push(c);
   }
 
@@ -158,6 +164,19 @@ function aggregate(charges, topN = DEFAULT_TOP_N, tz = DEFAULT_TENANT_TIMEZONE) 
   const taxBreakdown = Array.from(taxByName.values()).sort((a, b) => b.amount - a.amount);
   const taxAmount = moneyRound(taxBreakdown.reduce((a, t) => a + t.amount, 0));
 
+  // Deposit breakdown — same shape as tax, separate from sales since these
+  // are holds (refunded on return). Useful as a side-by-side display.
+  const depositByName = new Map();
+  for (const c of depositCharges) {
+    const key = (c.name || 'Deposit').trim() || 'Deposit';
+    if (!depositByName.has(key)) depositByName.set(key, { name: key, amount: 0, count: 0 });
+    const entry = depositByName.get(key);
+    entry.amount = moneyRound(entry.amount + num(c.total));
+    entry.count += 1;
+  }
+  const depositBreakdown = Array.from(depositByName.values()).sort((a, b) => b.amount - a.amount);
+  const depositAmount = moneyRound(depositBreakdown.reduce((a, d) => a + d.amount, 0));
+
   // Peak day — by sales (pre-tax) amount
   const dayAmounts = new Map();
   for (const c of salesCharges) {
@@ -176,11 +195,14 @@ function aggregate(charges, topN = DEFAULT_TOP_N, tz = DEFAULT_TENANT_TIMEZONE) 
   return {
     topCategories,
     taxBreakdown,
+    depositBreakdown,
     peakDay,
     salesAmount,
     salesChargeCount,
     taxAmount,
     taxChargeCount: taxCharges.length,
+    depositAmount,
+    depositChargeCount: depositCharges.length,
     distinctCategoryCount: sortedSales.length,
   };
 }
@@ -246,13 +268,16 @@ async function computeData({ tenantId, from, to, query }, deps = {}) {
     totals: {
       salesAmount: agg.salesAmount,
       taxAmount: agg.taxAmount,
+      depositAmount: agg.depositAmount,
       totalAmount: moneyRound(agg.salesAmount + agg.taxAmount),
       chargeCount: charges.length,
       salesChargeCount: agg.salesChargeCount,
       taxChargeCount: agg.taxChargeCount,
+      depositChargeCount: agg.depositChargeCount,
     },
     topCategories: agg.topCategories,
     taxBreakdown: agg.taxBreakdown,
+    depositBreakdown: agg.depositBreakdown,
     peakDay: agg.peakDay,
     categoryCount: agg.distinctCategoryCount,
     topN,
@@ -361,7 +386,7 @@ function money(n) { return `$${num(n).toLocaleString(undefined, { minimumFractio
 function pct(v) { return `${(v * 100).toFixed(1)}%`; }
 
 function renderHtml(data) {
-  const { totals, topCategories, taxBreakdown, peakDay } = data;
+  const { totals, topCategories, taxBreakdown, depositBreakdown = [], peakDay } = data;
   const topCat = topCategories[0];
 
   const strip = `<div class="strip">
@@ -413,6 +438,24 @@ function renderHtml(data) {
     </tr></tbody></table>`;
   }
 
+  if (depositBreakdown.length > 0) {
+    body += `<h3>Deposits held (not revenue)</h3>
+      <p style="font-size:9px;color:#5F5E5A;margin:0 0 6px">Security deposits are temporary holds — refunded on return. Shown here for reconciliation only.</p>
+      <table style="font-size:10px"><thead><tr>
+        <th style="text-align:left">Deposit type</th>
+        <th class="num">Count</th>
+        <th class="num">Held</th>
+      </tr></thead><tbody>`;
+    for (const d of depositBreakdown) {
+      body += `<tr><td>${escapeHtml(d.name)}</td><td class="num">${d.count}</td><td class="num"><strong>${money(d.amount)}</strong></td></tr>`;
+    }
+    body += `<tr style="background:#f1efe8">
+      <td><strong>DEPOSIT TOTAL</strong></td>
+      <td class="num"><strong>${totals.depositChargeCount || 0}</strong></td>
+      <td class="num"><strong>${money(totals.depositAmount || 0)}</strong></td>
+    </tr></tbody></table>`;
+  }
+
   return body;
 }
 
@@ -421,7 +464,7 @@ function renderHtml(data) {
 // ---------------------------------------------------------------------------
 
 function buildExcelSpec(data) {
-  const { totals, topCategories, taxBreakdown } = data;
+  const { totals, topCategories, taxBreakdown, depositBreakdown = [] } = data;
   const title = 'Sales by Category';
   const subtitle = `${data.range.from.slice(0, 10)} → ${data.range.to.slice(0, 10)}`;
 
@@ -467,6 +510,20 @@ function buildExcelSpec(data) {
       ],
       rows: taxBreakdown,
       footerRow: { name: 'TAX TOTAL', count: totals.taxChargeCount, amount: totals.taxAmount },
+    });
+  }
+
+  if (depositBreakdown.length > 0) {
+    sheets.push({
+      name: 'Deposits held',
+      bannerRows: [['Deposits held (not revenue)'], [subtitle]],
+      columns: [
+        { header: 'Deposit type', key: 'name',   width: 28 },
+        { header: 'Count',        key: 'count',  width: 8,  type: 'integer' },
+        { header: 'Held',         key: 'amount', width: 14, type: 'currency' },
+      ],
+      rows: depositBreakdown,
+      footerRow: { name: 'DEPOSIT TOTAL', count: totals.depositChargeCount || 0, amount: totals.depositAmount || 0 },
     });
   }
 

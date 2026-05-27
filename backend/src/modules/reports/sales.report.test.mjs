@@ -145,6 +145,23 @@ test('aggregate: TAX charges separated from sales', () => {
   assert.equal(out.taxBreakdown[0].count, 2);
 });
 
+test('aggregate: DEPOSIT charges separated from sales (holds, not revenue)', () => {
+  const out = aggregate([
+    chg({ name: 'Daily rental',     chargeType: 'DAILY',   total: 100 }),
+    chg({ name: 'Security Deposit', chargeType: 'DEPOSIT', total: 250 }),
+    chg({ name: 'Security Deposit', chargeType: 'DEPOSIT', total: 300 }),
+  ]);
+  assert.equal(out.salesAmount, 100);
+  assert.equal(out.depositAmount, 550);
+  assert.equal(out.depositChargeCount, 2);
+  assert.equal(out.depositBreakdown.length, 1);
+  assert.equal(out.depositBreakdown[0].name, 'Security Deposit');
+  assert.equal(out.depositBreakdown[0].count, 2);
+  // Deposits should NOT appear in topCategories
+  assert.equal(out.topCategories.length, 1);
+  assert.equal(out.topCategories[0].name, 'Daily rental');
+});
+
 test('aggregate: peakDay picks the highest-sales pickup day (tax excluded)', () => {
   // Mid-day UTC pickup times so each date lands unambiguously on the same
   // PR-TZ day after the tz-aware bucket fix in sales.report.js.
