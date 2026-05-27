@@ -38,7 +38,12 @@ import { resolveTenantTimeZone } from '../../lib/tenant-tz.js';
 import { cache } from '../../lib/cache.js';
 import { tenantKey } from '../../lib/cache/tenantKey.js';
 
-const ACTIVE_STATUSES = ['NEW', 'CONFIRMED', 'CHECKED_OUT', 'CHECKED_IN', 'CHECKED_IN_UNPAID'];
+// HISTORICAL utilization — only rentals that actually happened. NEW /
+// CONFIRMED are future-planned reservations and don't represent a physical
+// rental yet; including them previously inflated past-window utilization
+// and produced impossible >100% values when CONFIRMED future reservations
+// overlapped with currently-checked-out rentals on the same vehicle type.
+const ACTIVE_STATUSES = ['CHECKED_OUT', 'CHECKED_IN', 'CHECKED_IN_UNPAID'];
 const DAY_MS = 24 * 60 * 60 * 1000;
 const MAX_DAYS = 730;
 // Utilization scans up to 2 years of reservations × current capacity grid. The
@@ -122,20 +127,37 @@ async function resolveDefaultPrisma() {
  *
  *   days:        Date[] (day-start timestamps in order)
  *   typeIds:     string[] (vehicle type ids in order matching capacity array)
- *   reservations: [{ vehicleTypeId, pickupAt, returnAt }]
+ *   reservations: [{ vehicleId, vehicleTypeId, pickupAt, returnAt }]
+ *
+ * Dedup: counts each (vehicleId, day) pair at most once. If a single
+ * vehicle has multiple overlapping reservations (back-to-back with a
+ * small overlap, data import quirks), it can't physically be rented
+ * twice on the same day. Without this dedup, overlapping reservations
+ * pushed Minivan capacity past 100% (37 rental-days for 5 cars × 7 days
+ * = 105.7%). Reservations missing vehicleId (still in NEW/CONFIRMED
+ * with no vehicle assigned) are no longer in scope per the status
+ * filter, so the dedup key is reliable.
  */
 function buildDailyCounts(days, typeIds, reservations, tz = DEFAULT_TENANT_TIMEZONE) {
   const fleetReserved = new Array(days.length).fill(0);
   const typeReserved = typeIds.map(() => new Array(days.length).fill(0));
   const typeIdx = new Map(typeIds.map((id, i) => [id, i]));
+  // Per-day set of vehicleIds already counted, indexed by day index.
+  const countedByDay = days.map(() => new Set());
 
   for (const r of reservations) {
     const pickup = startOfDay(new Date(r.pickupAt), tz);
     const ret = startOfDay(new Date(r.returnAt), tz);
     const ti = typeIdx.get(r.vehicleTypeId);
+    const vid = r.vehicleId || null;
     for (let i = 0; i < days.length; i++) {
       const d = days[i];
       if (pickup <= d && d < ret) {
+        // Skip if this vehicle was already counted for this day.
+        if (vid) {
+          if (countedByDay[i].has(vid)) continue;
+          countedByDay[i].add(vid);
+        }
         fleetReserved[i] += 1;
         if (ti !== undefined) typeReserved[ti][i] += 1;
       }
@@ -338,7 +360,7 @@ async function loadActiveReservations({ prisma, tenantId, locationId, fromDate, 
   if (locationId) where.pickupLocationId = locationId;
   return prisma.reservation.findMany({
     where,
-    select: { id: true, vehicleTypeId: true, pickupAt: true, returnAt: true },
+    select: { id: true, vehicleId: true, vehicleTypeId: true, pickupAt: true, returnAt: true },
   });
 }
 
