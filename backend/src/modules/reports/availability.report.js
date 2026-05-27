@@ -127,11 +127,15 @@ async function computeData({ tenantId, query }, deps = {}) {
   // CHECKED_OUT reservation but its status row isn't flipped to ON_RENT).
   // Same fix as fleet-status: override effective status to ON_RENT when
   // an active CHECKED_OUT reservation exists for the vehicle right now.
+  // returnAt > now filters out stuck CHECKED_OUT rows past their planned
+  // return — usually stale data (returned without system update). Matches
+  // the Reports Snapshot + Fleet Status definitions.
   const activeReservations = await prisma.reservation.findMany({
     where: {
       tenantId,
       status: 'CHECKED_OUT',
       pickupAt: { lte: asOf },
+      returnAt: { gt: asOf },
       vehicleId: { not: null },
       ...(locationId ? { vehicle: { homeLocationId: locationId } } : {}),
     },

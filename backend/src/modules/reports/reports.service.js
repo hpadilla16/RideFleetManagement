@@ -241,14 +241,16 @@ export const reportsService = {
 
     // "Currently rented" — reservations whose vehicle is physically out of
     // the lot right now. CHECKED_IN_UNPAID is excluded (vehicle is back,
-    // balance pending). Used to override the on-rent / available KPIs so they
-    // match Reports Snapshot + Fleet Status, which both stopped trusting
-    // Vehicle.status because it drifts in production.
+    // balance pending). returnAt > now skips stale CHECKED_OUT rows whose
+    // planned return is already past (rental returned without the system
+    // being closed). Same definition used by Reports Snapshot + Fleet Status
+    // + Availability so all surfaces agree on a single "available now" #.
     const currentlyOutWhere = {
       ...whereScope,
       ...(locationId ? { pickupLocationId: locationId } : {}),
       status: 'CHECKED_OUT',
       pickupAt: { lte: now },
+      returnAt: { gt: now },
       vehicleId: { not: null },
     };
 

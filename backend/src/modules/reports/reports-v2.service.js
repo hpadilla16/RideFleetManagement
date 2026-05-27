@@ -301,11 +301,19 @@ export async function getSnapshot({ tenantId, from, to, deps = {} } = {}) {
     });
   } catch { /* ignore */ }
   try {
+    // returnAt > now filters out stuck CHECKED_OUT rows whose planned
+    // return is in the past (those rentals usually got returned without
+    // the system getting updated — data hygiene issue). Without this we
+    // counted every "stale" overdue reservation as still-out, inflating
+    // on-rent and shrinking available. Includes real overdue customers
+    // by definition but in practice they're a tiny fraction; net signal
+    // is much cleaner.
     const activeReservations = await prisma.reservation.findMany({
       where: {
         tenantId,
         status: 'CHECKED_OUT',
         pickupAt: { lte: now },
+        returnAt: { gt: now },
         vehicleId: { not: null },
       },
       select: { vehicleId: true },

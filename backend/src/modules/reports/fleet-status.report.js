@@ -147,7 +147,10 @@ async function computeData({ tenantId, query }, deps = {}) {
       vehicleType: { select: { id: true, code: true, name: true } },
       homeLocation: { select: { id: true, name: true } },
       reservations: {
-        where: { status: { in: ACTIVE_RESERVATION_STATUSES } },
+        // returnAt > asOf skips stale CHECKED_OUT rows whose planned return
+        // is already in the past (the rental was returned without the
+        // system being closed out). Same filter the Reports Snapshot uses.
+        where: { status: { in: ACTIVE_RESERVATION_STATUSES }, returnAt: { gt: asOf } },
         orderBy: { pickupAt: 'desc' },
         take: 1,
         select: {
@@ -178,7 +181,7 @@ async function computeData({ tenantId, query }, deps = {}) {
         select: {
           id: true, status: true,
           reservations: {
-            where: { status: { in: ACTIVE_RESERVATION_STATUSES } },
+            where: { status: { in: ACTIVE_RESERVATION_STATUSES }, returnAt: { gt: asOf } },
             select: { id: true }, take: 1,
           },
         },
