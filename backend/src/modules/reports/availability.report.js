@@ -123,7 +123,31 @@ async function computeData({ tenantId, query }, deps = {}) {
     },
   });
 
-  const types = aggregateByType(vehicles);
+  // 2026-05-27: Vehicle.status drifts from reality (a vehicle gets a
+  // CHECKED_OUT reservation but its status row isn't flipped to ON_RENT).
+  // Same fix as fleet-status: override effective status to ON_RENT when
+  // an active CHECKED_OUT reservation exists for the vehicle right now.
+  const activeReservations = await prisma.reservation.findMany({
+    where: {
+      tenantId,
+      status: 'CHECKED_OUT',
+      pickupAt: { lte: asOf },
+      vehicleId: { not: null },
+      ...(locationId ? { vehicle: { homeLocationId: locationId } } : {}),
+    },
+    select: { vehicleId: true },
+  });
+  const onRentVehicleIds = new Set(activeReservations.map((r) => r.vehicleId).filter(Boolean));
+
+  const vehiclesWithEffectiveStatus = vehicles.map((v) => {
+    let effective = v.status;
+    if (onRentVehicleIds.has(v.id) && (effective === 'AVAILABLE' || effective === 'RESERVED')) {
+      effective = 'ON_RENT';
+    }
+    return { ...v, status: effective };
+  });
+
+  const types = aggregateByType(vehiclesWithEffectiveStatus);
 
   // Fleet totals
   const totals = { capacity: 0, ...makeEmptyCounts() };

@@ -14,7 +14,7 @@ const { computeData, typeDrillDownHandler, aggregateByType, VEHICLE_STATUSES } =
 // Fake prisma
 // ---------------------------------------------------------------------------
 
-function makePrisma({ vehicles = [] } = {}) {
+function makePrisma({ vehicles = [], activeReservations = [] } = {}) {
   return {
     vehicle: {
       async findMany({ where, orderBy }) {
@@ -28,6 +28,18 @@ function makePrisma({ vehicles = [] } = {}) {
           rows = [...rows].sort((a, b) => (a.plate || '').localeCompare(b.plate || ''));
         }
         return rows;
+      },
+    },
+    reservation: {
+      async findMany({ where, select }) {
+        const out = activeReservations.filter((r) => {
+          if (where.tenantId && r.tenantId !== where.tenantId) return false;
+          if (typeof where.status === 'string' && r.status !== where.status) return false;
+          if (where.vehicleId?.not !== undefined && r.vehicleId == null) return false;
+          return true;
+        });
+        if (!select) return out;
+        return out.map((r) => ({ vehicleId: r.vehicleId }));
       },
     },
   };
