@@ -228,9 +228,15 @@ export const customersService = {
   async list(scope = {}, options = {}) {
     const query = norm(options.query);
     const limitRaw = options.limit;
+    // 2026-05-27: default raised from 200 → 2000. The frontend does its
+    // search client-side via rows.filter(), so customers beyond the limit
+    // were invisible to the search box — newer customers added past the
+    // 200th row literally couldn't be found in the UI. The slim shape (no
+    // base64 images) keeps the payload under ~600KB for 2k rows. Hard cap
+    // at 5000 to guard against runaway queries.
     const limit = limitRaw == null || limitRaw === ''
-      ? 200
-      : Math.min(500, Math.max(1, Number.parseInt(String(limitRaw), 10) || 200));
+      ? 2000
+      : Math.min(5000, Math.max(1, Number.parseInt(String(limitRaw), 10) || 2000));
 
     const tenantId = scope?.tenantId || null;
     const searchPattern = query ? `%${query.toLowerCase()}%` : null;
