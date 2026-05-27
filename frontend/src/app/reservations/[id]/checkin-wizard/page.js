@@ -59,6 +59,12 @@ function CheckinWizard({ token, me, logout }) {
   const [fuelIn, setFuelIn] = useState(1);
   const [cleanlinessIn, setCleanlinessIn] = useState(5);
   const [smokingDetected, setSmokingDetected] = useState(false);
+  // Waive Late Return Fee — agent override. Mirrors the backend
+  // waiveLateFee flag in checkin-close.service.js. Reasons typically:
+  // courtesy / flight delay / authorized overrun. The live fee preview
+  // skips the LATE_RETURN line when this is on; the backend re-validates
+  // and audit-logs the flag on the STATUS_CHANGE row.
+  const [waiveLateFee, setWaiveLateFee] = useState(false);
   const [photos, setPhotos] = useState({});
   const [currentAngle, setCurrentAngle] = useState(0);
   const [paymentMode, setPaymentMode] = useState('autocharge');  // 'autocharge' | 'manual'
@@ -149,7 +155,10 @@ function CheckinWizard({ token, me, logout }) {
     cleanlinessOut: agreement?.cleanlinessOut,
     cleanlinessIn,
     smokingDetected,
-    dueBackAt,
+    // Waive flag: nulling dueBackAt makes the hook skip the LATE_RETURN
+    // computation (same trick as the backend uses). Other fees compute
+    // normally.
+    dueBackAt: waiveLateFee ? null : dueBackAt,
     returnedAt: returnedAtNow,
     rentalDays,
     includedMilesPerDay: 200,
@@ -215,6 +224,9 @@ function CheckinWizard({ token, me, logout }) {
         fuelIn,
         cleanlinessIn,
         smokingDetected,
+        // Agent waiver of the LATE_RETURN line item. Backend re-validates
+        // and audit-logs the flag on the STATUS_CHANGE entry.
+        waiveLateFee,
         signerName,
         signatureDataUrl,
         manualPayment: paymentMode === 'manual' && Number(manualPayment.amount) > 0
@@ -314,6 +326,7 @@ function CheckinWizard({ token, me, logout }) {
             fuelIn={fuelIn} onFuelIn={setFuelIn}
             cleanlinessIn={cleanlinessIn} onCleanlinessIn={setCleanlinessIn}
             smokingDetected={smokingDetected} onSmokingDetected={setSmokingDetected}
+            waiveLateFee={waiveLateFee} onWaiveLateFee={setWaiveLateFee}
             feePreview={feePreview}
           />
         )}
@@ -442,10 +455,16 @@ function Step3Metrics({
   fuelIn, onFuelIn,
   cleanlinessIn, onCleanlinessIn,
   smokingDetected, onSmokingDetected,
+  waiveLateFee, onWaiveLateFee,
   feePreview
 }) {
   const odoOut = Number(agreement?.odometerOut || 0);
   const driven = Number(odometerIn) - odoOut;
+  // Only show the waiver toggle when the rental is actually late — there's
+  // no fee to waive otherwise. Late = now > returnAt + the 30-min grace
+  // (mirrors LATE_RETURN_GRACE_MINUTES on the backend).
+  const dueBack = agreement?.returnAt ? new Date(agreement.returnAt) : null;
+  const isPastGrace = dueBack ? (Date.now() - dueBack.getTime()) > 30 * 60 * 1000 : false;
   return (
     <WizGrid cols={2}>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
@@ -472,6 +491,35 @@ function Step3Metrics({
           value={smokingDetected}
           onChange={onSmokingDetected}
         />
+        {isPastGrace ? (
+          <label style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 10,
+            padding: '12px 14px',
+            background: waiveLateFee ? '#FEF3C7' : '#FFFFFF',
+            border: `1px solid ${waiveLateFee ? '#F59E0B' : '#E5E7EB'}`,
+            borderRadius: 8,
+            cursor: 'pointer',
+          }}>
+            <input
+              type="checkbox"
+              checked={waiveLateFee}
+              onChange={(e) => onWaiveLateFee(e.target.checked)}
+              style={{ width: 18, height: 18, accentColor: '#F59E0B' }}
+            />
+            <div style={{ flex: 1 }}>
+              <div style={{ fontWeight: 600, fontSize: 14, color: waiveLateFee ? '#92400E' : '#1F2937' }}>
+                Waive late return fee
+              </div>
+              <div style={{ fontSize: 12, color: '#6B7280', marginTop: 2 }}>
+                {waiveLateFee
+                  ? 'Late fee removed from this checkout. Action audit-logged.'
+                  : 'Skip the LATE_RETURN fee for this rental (courtesy / flight delay / authorized overrun).'}
+              </div>
+            </div>
+          </label>
+        ) : null}
       </div>
       <div style={{ position: 'sticky', top: 80 }}>
         <FeePreviewPanel items={feePreview.items} total={feePreview.total} />

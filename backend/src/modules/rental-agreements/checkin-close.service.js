@@ -121,6 +121,13 @@ export async function closeAgreementWithCheckinFees(
   const returnedAt = payload.returnedAt ? new Date(payload.returnedAt) : new Date();
   const dueBackAt = agreement.returnAt || null;
 
+  // waiveLateFee: agent override. When true the LATE_RETURN computation is
+  // skipped entirely (we pass dueBackAt=null so the fee engine returns null
+  // for that line item). Audit-trailed via the system note on the
+  // reservation so we can answer "why didn't this rental get charged a
+  // late fee?" months later.
+  const waiveLateFee = !!payload.waiveLateFee;
+
   const feeResult = await feeEngineService.computeCheckinFees({
     reservationId: agreement.reservationId,
     rentalAgreementId: agreement.id,
@@ -133,7 +140,7 @@ export async function closeAgreementWithCheckinFees(
     cleanlinessOut: agreement.cleanlinessOut,
     cleanlinessIn: cleanlinessIn ?? agreement.cleanlinessIn,
     smokingDetected: !!payload.smokingDetected,
-    dueBackAt,
+    dueBackAt: waiveLateFee ? null : dueBackAt,
     returnedAt,
     includedMilesPerDay,
     rentalDays,
@@ -303,6 +310,7 @@ export async function closeAgreementWithCheckinFees(
         feeBreakdown: feeResult.breakdown.byType,
         newBalance,
         autochargeJobId,
+        waiveLateFee,
         ip: actorIp || null
       })
     }
