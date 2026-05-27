@@ -155,8 +155,13 @@ function bucketReservations(reservations, asOf = new Date(), tz = DEFAULT_TENANT
     const ret = new Date(r.returnAt);
 
     if (r.status === 'CHECKED_OUT') {
-      if (ret < today) buckets.OVERDUE.push(formatRow(r, today, tz));
-      else if (ret < tomorrow) buckets.DUE_TODAY.push(formatRow(r, today, tz));
+      // overdueIgnored=true rows are grandfathered stale data (2026-05-27
+      // cleanup) — they SHOULD still appear in the report (the vehicle
+      // is factually still out on rent), but they don't get the OVERDUE
+      // alarm. Route them to CURRENTLY_OUT instead. Non-ignored rows
+      // bucket normally.
+      if (ret < today && !r.overdueIgnored) buckets.OVERDUE.push(formatRow(r, today, tz));
+      else if (ret < tomorrow && !r.overdueIgnored) buckets.DUE_TODAY.push(formatRow(r, today, tz));
       else buckets.CURRENTLY_OUT.push(formatRow(r, today, tz));
     } else if (r.status === 'CHECKED_IN_UNPAID') {
       buckets.UNPAID_AT_CHECKIN.push(formatRow(r, today, tz));
@@ -192,6 +197,10 @@ async function computeData({ tenantId, query }, deps = {}) {
     select: {
       id: true, reservationNumber: true, status: true,
       pickupAt: true, returnAt: true,
+      // overdueIgnored: grandfathered pre-2026-05-27 rows — pulled into
+      // the select so the in-memory bucketing can route them away from
+      // the OVERDUE alarm bucket (see assignToBucket below).
+      overdueIgnored: true,
       customer:       { select: { firstName: true, lastName: true, phone: true } },
       vehicle:        { select: { plate: true, year: true, make: true, model: true } },
       vehicleType:    { select: { id: true, name: true, code: true } },

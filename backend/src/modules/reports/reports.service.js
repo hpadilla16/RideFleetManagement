@@ -287,6 +287,10 @@ export const reportsService = {
     const overdueWhere = {
       ...whereScope,
       ...(locationId ? { pickupLocationId: locationId } : {}),
+      // overdueIgnored=true rows are silently excluded from the Overdue
+      // Returns KPI (2026-05-27). Used to grandfather in pre-cleanup
+      // stale data so the count starts fresh.
+      overdueIgnored: false,
       OR: [
         { status: 'CHECKED_OUT', returnAt: { lt: startOfTenantToday } },
         { status: { in: ['NEW', 'CONFIRMED'] }, pickupAt: { lt: startOfTenantToday } },

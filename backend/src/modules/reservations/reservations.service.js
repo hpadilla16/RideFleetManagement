@@ -1136,6 +1136,10 @@ export const reservationsService = {
       const tenantTz = await resolveTenantTimeZone(scope);
       const startOfTenantToday = startOfDayInTz(now, tenantTz);
       overdueWhere = {
+        // Same overdueIgnored exclusion as the dashboard KPI in
+        // reports.service.js — keeps the list view consistent with the
+        // KPI count it backs.
+        overdueIgnored: false,
         OR: [
           { status: 'CHECKED_OUT', returnAt: { lt: startOfTenantToday } },
           { status: { in: ['NEW', 'CONFIRMED'] }, pickupAt: { lt: startOfTenantToday } },

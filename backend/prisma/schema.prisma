@@ -779,6 +779,16 @@ model Reservation {
   // back to NULL when the only/last extension is deleted.
   originalReturnAt DateTime?
 
+  // Overdue-tracking opt-out (2026-05-27). When true, this reservation
+  // is silently excluded from the Overdue Returns dashboard KPI, the
+  // /reservations?filter=overdue list, and the OVERDUE bucket of the
+  // Rental Status report. The row itself is otherwise unchanged — it
+  // still appears in normal status / pickup / return queries. Used to
+  // grandfather in pre-2026-05-27 stale rows so the overdue count can
+  // "start fresh" while the cleanup is done at human pace. Defaults to
+  // false for all new reservations.
+  overdueIgnored   Boolean   @default(false)
+
   // Pillar 2 (added 2026-05-17) — auto-charge state machine.
   // Set when checkin completes with balance > 0 and status transitions
   // to CHECKED_IN_UNPAID. Worker polls + charges + transitions to CHECKED_IN.
