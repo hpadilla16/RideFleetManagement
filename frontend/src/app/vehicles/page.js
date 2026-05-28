@@ -349,8 +349,17 @@ function VehiclesInner({ token, me, logout }) {
         : null
     ].filter(Boolean);
 
+    // Total = effective fleet — SOLD and OUT_OF_SERVICE are terminal
+    // statuses (not part of the live rentable fleet). 2026-05-28: was
+    // `vehicles.length` which included SOLD and OOS, inflating the
+    // count from 118 to 126 for International Rental Corp.
+    const totalEffectiveFleet = vehicles.filter((v) => {
+      const status = String(v?.status || '').toUpperCase();
+      return !['SOLD', 'OUT_OF_SERVICE'].includes(status);
+    }).length;
+
     return {
-      total: vehicles.length,
+      total: totalEffectiveFleet,
       available: available.length,
       onRent: onRent.length,
       serviceRisk: serviceRisk.length,
