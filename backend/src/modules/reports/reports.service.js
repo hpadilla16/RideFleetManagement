@@ -417,13 +417,18 @@ export const reportsService = {
     const outOfServiceBlockIds = new Set(serviceBlockRows.filter((row) => String(row.blockType || '').toUpperCase() === 'OUT_OF_SERVICE_HOLD').map((row) => row.vehicleId).filter(Boolean));
     const outOfServiceStatusIds = new Set(vehicles.filter((row) => String(row.status || '').toUpperCase() === 'OUT_OF_SERVICE').map((row) => row.id));
     const maintenanceStatusIds = new Set(vehicles.filter((row) => String(row.status || '').toUpperCase() === 'IN_MAINTENANCE').map((row) => row.id));
+    // 2026-05-28: fleetTotal is now the strict capacity definition —
+    // every vehicle that's NOT terminally out of the fleet. SOLD and
+    // OUT_OF_SERVICE are the only terminal statuses. Vehicles in the
+    // shop (maintenance job, IN_MAINTENANCE status, service/wash
+    // blocks) are still PART of the fleet — they're just temporarily
+    // unavailable. They show up correctly in the MAINTENANCE/OOS tile
+    // and in availableFleet's blocked subtraction below. This stops
+    // the double-counting that made Hector's lot math go 70+45+5=120
+    // when he expected 118 = 70 available + 45 rented + 3 OOS.
     const fleetTotal = vehicles.filter((row) => {
       const status = String(row.status || '').toUpperCase();
-      // SOLD added 2026-05-28 — vehicle was sold; permanently out of
-      // the fleet. Same treatment as OUT_OF_SERVICE for capacity math.
-      if (['IN_MAINTENANCE', 'OUT_OF_SERVICE', 'SOLD'].includes(status)) return false;
-      if (serviceBlockIds.has(row.id)) return false;
-      return true;
+      return !['SOLD', 'OUT_OF_SERVICE'].includes(status);
     }).length;
     // 2026-05-27: derive on-rent from active CHECKED_OUT reservations
     // instead of Vehicle.status (which drifts — same fix as Fleet Status
