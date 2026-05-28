@@ -21,13 +21,14 @@ import {
 } from '../../lib/date-utils.js';
 import { resolveTenantTimeZone } from '../../lib/tenant-tz.js';
 
-const VEHICLE_STATUSES = ['AVAILABLE', 'RESERVED', 'ON_RENT', 'IN_MAINTENANCE', 'OUT_OF_SERVICE'];
+const VEHICLE_STATUSES = ['AVAILABLE', 'RESERVED', 'ON_RENT', 'IN_MAINTENANCE', 'OUT_OF_SERVICE', 'SOLD'];
 const STATUS_LABEL = {
   AVAILABLE:      'Available',
   RESERVED:       'Reserved',
   ON_RENT:        'On rent',
   IN_MAINTENANCE: 'Maintenance',
   OUT_OF_SERVICE: 'Out of service',
+  SOLD:           'Sold',
 };
 // "Physically out of the lot right now" — CHECKED_OUT is the only status
 // where the vehicle is actually with the customer. CHECKED_IN_UNPAID means
@@ -83,6 +84,18 @@ function buildVehicleWhere({ tenantId, locationId, status }) {
 function projectVehicle(v) {
   const reservation = v.reservations?.[0] || null;
   const ret = reservation?.returnAt ? new Date(reservation.returnAt) : null;
+  // 2026-05-28: derive the displayed status from active reservations,
+  // not from Vehicle.status alone. In production every vehicle is
+  // stuck at AVAILABLE regardless of whether it's rented (data drift),
+  // so the list was showing "Available" badges for cars that were
+  // physically out. Override only when there IS an active reservation
+  // AND the raw status is AVAILABLE/RESERVED — never override SOLD,
+  // OUT_OF_SERVICE, IN_MAINTENANCE.
+  const hasActive = !!reservation;
+  let effective = v.status;
+  if (hasActive && (effective === 'AVAILABLE' || effective === 'RESERVED')) {
+    effective = 'ON_RENT';
+  }
   return {
     id: v.id,
     internalNumber: v.internalNumber,
@@ -93,8 +106,8 @@ function projectVehicle(v) {
     label: [v.year, v.make, v.model].filter(Boolean).join(' ') || null,
     color: v.color || null,
     mileage: num(v.mileage),
-    status: v.status,
-    statusLabel: STATUS_LABEL[v.status] || v.status,
+    status: effective,
+    statusLabel: STATUS_LABEL[effective] || effective,
     vehicleType: v.vehicleType
       ? { id: v.vehicleType.id, code: v.vehicleType.code || null, name: v.vehicleType.name || null }
       : null,
@@ -195,8 +208,8 @@ async function computeData({ tenantId, query }, deps = {}) {
     : vehicles.map((v) => ({ id: v.id, status: v.status, reservations: v.reservations }));
 
   const totals = {
-    capacity: wholeFleet.length,
-    AVAILABLE: 0, RESERVED: 0, ON_RENT: 0, IN_MAINTENANCE: 0, OUT_OF_SERVICE: 0,
+    capacity: 0,
+    AVAILABLE: 0, RESERVED: 0, ON_RENT: 0, IN_MAINTENANCE: 0, OUT_OF_SERVICE: 0, SOLD: 0,
   };
   for (const v of wholeFleet) {
     const hasActive = Array.isArray(v.reservations) && v.reservations.length > 0;
@@ -207,6 +220,11 @@ async function computeData({ tenantId, query }, deps = {}) {
     if (VEHICLE_STATUSES.includes(effective)) totals[effective] += 1;
     else totals.OUT_OF_SERVICE += 1;
   }
+  // 2026-05-28: capacity is the effective fleet (excludes SOLD = terminal
+  // and OUT_OF_SERVICE = retired). Was wholeFleet.length which counted
+  // both, inflating Fleet total above the lot reality (126 vs 118).
+  // Same definition the dashboard now uses.
+  totals.capacity = wholeFleet.length - totals.SOLD - totals.OUT_OF_SERVICE;
   totals.outOfServiceTotal = totals.IN_MAINTENANCE + totals.OUT_OF_SERVICE;
   totals.availablePct = totals.capacity > 0 ? totals.AVAILABLE / totals.capacity : 0;
   totals.onRentPct    = totals.capacity > 0 ? totals.ON_RENT / totals.capacity : 0;
