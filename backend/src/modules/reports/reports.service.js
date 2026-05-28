@@ -302,6 +302,19 @@ export const reportsService = {
       ],
     };
 
+    // Stuck checkouts: CheckoutSession rows that have been sitting in a
+    // non-terminal step for more than 4 hours, or that the agent has
+    // explicitly marked abandoned via Save & pause. Surfaced as a
+    // dashboard tile with click-through to the list. (Phase 1.8)
+    const FOUR_HOURS_AGO = new Date(Date.now() - 4 * 60 * 60 * 1000);
+    const stuckCheckoutsWhere = {
+      ...(effectiveTenantId ? { tenantId: effectiveTenantId } : {}),
+      OR: [
+        { abandonedAt: { not: null } },
+        { currentStep: { notIn: ['CLOSED', 'CANCELLED'] }, updatedAt: { lt: FOUR_HOURS_AGO } },
+      ],
+    };
+
     const [
       reservations,
       reservationPayments,
@@ -314,7 +327,8 @@ export const reportsService = {
       maintenanceJobs,
       currentlyOutReservations,
       overdueReservationCount,
-      activeReservationsCount
+      activeReservationsCount,
+      stuckCheckoutsCount,
     ] = await Promise.all([
       prisma.reservation.findMany({
         where: reservationWhere,
@@ -378,7 +392,10 @@ export const reportsService = {
         select: { vehicleId: true }
       }),
       prisma.reservation.count({ where: overdueWhere }),
-      prisma.reservation.count({ where: activeReservationsWhere })
+      prisma.reservation.count({ where: activeReservationsWhere }),
+      // Phase 1.8 — checkout sessions abandoned or stalled. Returns 0
+      // when the CheckoutSession table is empty (pre-Phase-1 deploy).
+      prisma.checkoutSession.count({ where: stuckCheckoutsWhere }).catch(() => 0),
     ]);
 
     const reservationsByDayMap = new Map(buildDaySeries(start, end).map((day) => [day, 0]));
@@ -519,6 +536,10 @@ export const reportsService = {
         // in overdueReservations above). This is the number rendered as
         // the Active Reservations KPI on the dashboard.
         activeReservations: activeReservationsCount || 0,
+        // Phase 1.8 — count of checkout sessions abandoned by the agent
+        // OR stuck in a non-terminal step for > 4 hours. Surfaced on
+        // the dashboard with click-through to the list.
+        stuckCheckouts: stuckCheckoutsCount || 0,
         // 2026-05-28: vehicleIds derived from active reservations + blocks
         // exposed so the Vehicles page can compute its Available / On Rent
         // tiles without inheriting the Vehicle.status drift (every vehicle

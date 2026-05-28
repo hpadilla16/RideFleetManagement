@@ -50,6 +50,7 @@ import { plannerRouter } from './modules/planner/planner.routes.js';
 import { paymentGatewayRouter } from './modules/payment-gateway/payment-gateway.routes.js';
 import { startTollAutoSyncScheduler, stopTollAutoSyncScheduler } from './modules/tolls/tolls.scheduler.js';
 import { startHandoffReminderScheduler, stopHandoffReminderScheduler } from './modules/car-sharing/car-sharing.scheduler.js';
+import { startCheckoutSessionCleanupScheduler, stopCheckoutSessionCleanupScheduler } from './modules/checkout-session/checkout-session.scheduler.js';
 import { buildOpenApiSpec, swaggerHtml } from './docs/openapi.js';
 import { smsRouter } from './modules/sms/sms.routes.js';
 import { knowledgeBaseRouter } from './modules/knowledge-base/knowledge-base.routes.js';
@@ -192,6 +193,7 @@ if (process.env.SKIP_LISTEN !== '1') {
     if (isFirstWorker) {
       startTollAutoSyncScheduler();
       startHandoffReminderScheduler();
+      startCheckoutSessionCleanupScheduler();
     }
   });
 }
@@ -199,6 +201,7 @@ if (process.env.SKIP_LISTEN !== '1') {
 process.on('SIGINT', async () => {
   stopTollAutoSyncScheduler();
   stopHandoffReminderScheduler();
+  stopCheckoutSessionCleanupScheduler();
   await closeBrowser();
   await flushSentry();
   await prisma.$disconnect();
@@ -208,6 +211,7 @@ process.on('SIGINT', async () => {
 process.on('SIGTERM', async () => {
   stopTollAutoSyncScheduler();
   stopHandoffReminderScheduler();
+  stopCheckoutSessionCleanupScheduler();
   await closeBrowser();
   await flushSentry();
   await prisma.$disconnect();
