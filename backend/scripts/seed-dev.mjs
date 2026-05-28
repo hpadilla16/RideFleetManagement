@@ -77,11 +77,15 @@ async function ensureLocation() {
       tenantId: IDS.tenant,
       code: 'DEV',
       name: 'Dev Lot',
-      addressLine1: '123 Test Ave',
+      address: '123 Test Ave, San Juan, PR',
       city: 'San Juan',
       state: 'PR',
       country: 'US',
-      timezone: 'America/Puerto_Rico',
+      taxRate: 11.5,
+      isActive: true,
+      // Locations carry their tz inside locationConfig (JSON), not a
+      // dedicated column. Same shape the existing settings UI writes.
+      locationConfig: JSON.stringify({ tz: 'America/Puerto_Rico', gracePeriodMin: 30 }),
     },
   });
 }
