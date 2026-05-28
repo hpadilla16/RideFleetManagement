@@ -168,6 +168,25 @@ checkoutSessionRouter.post('/:id/vehicle', async (req, res) => {
 });
 
 // ---------------------------------------------------------------------
+// POST /api/checkout-sessions/:id/declined-insurance
+//   Body: { declined: boolean }. Persists to RentalAgreement.declinedInsurance
+//   so the T&C signing flow + PDF generator know to emit the addendum.
+// ---------------------------------------------------------------------
+checkoutSessionRouter.post('/:id/declined-insurance', async (req, res) => {
+  try {
+    const { declined } = req.body || {};
+    const session = await checkoutSessionService.setDeclinedInsurance({
+      id: req.params.id,
+      declined: !!declined,
+      actorUserId: req.user?.id,
+    });
+    res.json(session);
+  } catch (err) {
+    handleError(res, err);
+  }
+});
+
+// ---------------------------------------------------------------------
 // POST /api/checkout-sessions/:id/abandon
 //   Agent's Save & pause button.
 // ---------------------------------------------------------------------

@@ -262,6 +262,37 @@ async function exchangeHandoffToken(token) {
  * Explicit abandonment — agent clicked Save & pause. NOT for the nightly
  * cleanup job; that one runs its own sweep against (currentStep, updatedAt).
  */
+/**
+ * Persist the declined-insurance flag onto the linked RentalAgreement
+ * AND record it in the session event log. Used by step 1 of the wizard.
+ * Phase 3 (T&C signing) reads agreement.declinedInsurance to decide
+ * whether to inject the addendum section into the customer's signing UI.
+ */
+async function setDeclinedInsurance({ id, declined, actorUserId }) {
+  if (!id) throw new CheckoutSessionError('sessionId required', 400);
+  const session = await prisma.checkoutSession.findUnique({ where: { id } });
+  if (!session) throw new CheckoutSessionError('Session not found', 404);
+  if (!session.agreementId) {
+    throw new CheckoutSessionError('No agreement linked to this session', 409);
+  }
+
+  await prisma.rentalAgreement.update({
+    where: { id: session.agreementId },
+    data: { declinedInsurance: !!declined },
+  });
+
+  return prisma.checkoutSession.update({
+    where: { id },
+    data: {
+      events: appendEvent(session.events, {
+        kind: 'DECLINED_INSURANCE',
+        declined: !!declined,
+        actorUserId: actorUserId || null,
+      }),
+    },
+  });
+}
+
 async function markAbandoned({ id, reason, actorUserId }) {
   const session = await prisma.checkoutSession.findUnique({ where: { id } });
   if (!session) throw new CheckoutSessionError('Session not found', 404);
@@ -290,5 +321,6 @@ export const checkoutSessionService = {
   stampSideEffect,
   mintHandoffToken,
   exchangeHandoffToken,
+  setDeclinedInsurance,
   markAbandoned,
 };

@@ -359,7 +359,7 @@ function StepTracker({ currentStep, currentNumber }) {
 function StepRenderer({ session, reservation, token, onAdvance }) {
   switch (session.currentStep) {
     case 'CONFIRMING':
-      return <Step1Confirm reservation={reservation} onNext={() => onAdvance('TC_PENDING')} />;
+      return <Step1Confirm reservation={reservation} session={session} token={token} onNext={() => onAdvance('TC_PENDING')} />;
     case 'TC_PENDING':
       return <Step2TermsPending session={session} reservation={reservation} token={token} onSigned={() => onAdvance('TC_SIGNED')} />;
     case 'TC_SIGNED':
@@ -389,7 +389,31 @@ function StepRenderer({ session, reservation, token, onAdvance }) {
 // Per-step renderers (Phase 1 stubs — real content in Phases 2-4)
 // ---------------------------------------------------------------------------
 
-function Step1Confirm({ reservation, onNext }) {
+function Step1Confirm({ reservation, session, token, onNext }) {
+  // Declined-insurance toggle. Persists to RentalAgreement.declinedInsurance
+  // via /api/checkout-sessions/:id/declined-insurance. The T&C signing
+  // flow (Phase 3) reads the flag to inject the addendum section into
+  // the customer's signing UI; the PDF generator emits the
+  // acknowledgement page.
+  const [declinedInsurance, setDeclinedInsurance] = useState(
+    !!reservation.rentalAgreement?.declinedInsurance,
+  );
+  const [savingDecline, setSavingDecline] = useState(false);
+
+  const persistDecline = async (next) => {
+    setDeclinedInsurance(next);
+    if (!session?.id) return;
+    setSavingDecline(true);
+    try {
+      await api(`/api/checkout-sessions/${session.id}/declined-insurance`, {
+        method: 'POST',
+        body: JSON.stringify({ declined: next }),
+      }, token);
+    } catch { /* non-fatal; re-toggle to retry */ } finally {
+      setSavingDecline(false);
+    }
+  };
+
   return (
     <div style={cardStyle}>
       <h3 style={h3Style}>Step 1 · Confirm customer + vehicle</h3>
@@ -399,6 +423,30 @@ function Step1Confirm({ reservation, onNext }) {
         <KV label="Vehicle" value={reservation.vehicle ? `${reservation.vehicle.year} ${reservation.vehicle.make} ${reservation.vehicle.model} · ${reservation.vehicle.plate}` : 'Not assigned'} />
         <KV label="Pickup" value={reservation.pickupAt ? new Date(reservation.pickupAt).toLocaleString() : '—'} />
         <KV label="Return" value={reservation.returnAt ? new Date(reservation.returnAt).toLocaleString() : '—'} />
+      </div>
+      <div style={{
+        padding: 12, marginBottom: 12,
+        background: declinedInsurance ? '#FEF3C7' : '#F9FAFB',
+        border: `0.5px solid ${declinedInsurance ? '#F59E0B' : '#E5E7EB'}`,
+        borderRadius: 6,
+      }}>
+        <label style={{ display: 'flex', alignItems: 'flex-start', gap: 10, cursor: 'pointer' }}>
+          <input
+            type="checkbox"
+            checked={declinedInsurance}
+            onChange={(e) => persistDecline(e.target.checked)}
+            style={{ width: 16, height: 16, marginTop: 2, accentColor: '#F59E0B' }}
+            disabled={savingDecline}
+          />
+          <div>
+            <div style={{ fontWeight: 500, color: declinedInsurance ? '#92400E' : '#374151', fontSize: 13 }}>
+              Customer declines counter insurance
+            </div>
+            <div style={{ fontSize: 11, color: '#6B7280', marginTop: 2 }}>
+              Adds a Declined Insurance acknowledgement section to T&amp;C — customer initials it on their phone in step 2.
+            </div>
+          </div>
+        </label>
       </div>
       <button style={primaryBtn} onClick={onNext}>Start checkout →</button>
     </div>
