@@ -26,7 +26,50 @@ function getConfig(tenantConfig = {}) {
   };
 }
 
+// dryRun short-circuits every Spin call to return a synthetic approved
+// response. Used during dev / when no terminal is reachable. Enable per
+// tenant via tenantConfig.spinDryRun or globally via SPIN_DRY_RUN=true.
+// The synthetic response includes a fake token, last4=4242, and brand=VISA
+// so the downstream wizard + card-on-file persistence still exercises
+// the full code path. 2026-05-28.
+function isDryRun(tenantConfig = {}) {
+  return tenantConfig.spinDryRun === true || String(process.env.SPIN_DRY_RUN || '').toLowerCase() === 'true';
+}
+
+function syntheticResponse(path, body) {
+  const refId = body?.ReferenceId || `dry-${Date.now()}`;
+  return {
+    GeneralResponse: {
+      StatusCode: '0000',
+      ResultCode: 0,
+      Message: 'DryRun OK',
+      DetailedMessage: `Synthetic ${path} response (SPIN_DRY_RUN=true)`,
+    },
+    ReferenceId: refId,
+    AuthCode: `DR${Math.floor(Math.random() * 900000 + 100000)}`,
+    Token: `dry-tok-${refId}`,
+    IPosToken: `dry-ipos-${refId}`,
+    CardData: {
+      CardType: 'VISA',
+      EntryType: 'Insert',
+      Last4: '4242',
+      First4: '4111',
+      BIN: '411111',
+      ExpirationDate: '12/29',
+      Name: 'DRY RUN',
+    },
+    BatchNumber: '0',
+    SerialNumber: '0',
+    PaymentType: body?.PaymentType || 'Credit',
+    TransactionType: path.includes('Auth') ? 'Auth' : (path.includes('Sale') ? 'Sale' : 'Other'),
+  };
+}
+
 async function spinRequest(method, path, body, tenantConfig = {}) {
+  if (isDryRun(tenantConfig)) {
+    logger.info(`SPIn DRY-RUN ${method} ${path}`, { spinPath: path });
+    return syntheticResponse(path, body || {});
+  }
   const config = getConfig(tenantConfig);
   if (!config.authKey) throw new Error('SPIn authKey is not configured');
   if (!config.tpn) throw new Error('SPIn terminal TPN is not configured');
@@ -150,6 +193,47 @@ export const spinClient = {
   },
 
   /**
+   * Security-deposit pre-authorization (2026-05-28). Semantic wrapper
+   * around auth() — the underlying Spin endpoint is the same v2/Payment/Auth,
+   * but the wizard reads this as "hold these funds for the deposit",
+   * not "preauth that we'll capture later". The hold's reference id is
+   * what we persist as RentalAgreement.depositHoldId so we can void it
+   * via the nightly cleanup job when a session is abandoned.
+   */
+  async preAuthDeposit({ amount, referenceId, paymentType = 'Credit', invoiceNumber, token }, tenantConfig) {
+    return spinRequest('POST', 'v2/Payment/Auth', {
+      Amount: Number(amount),
+      PaymentType: paymentType,
+      ReferenceId: String(referenceId).slice(0, 50),
+      ...(invoiceNumber ? { InvoiceNumber: String(invoiceNumber).slice(0, 50) } : {}),
+      // When a token is provided we're holding against a previously-
+      // tokenized card (CNP). Without it the terminal prompts for tap/
+      // insert/swipe just like a normal Auth.
+      ...(token ? { Token: String(token) } : {}),
+      GetExtendedData: true,
+    }, tenantConfig);
+  },
+
+  /**
+   * Charge a previously-tokenized card (card-not-present). Used post-
+   * checkout for autocharges (tolls, overage fuel, damage). The token
+   * comes from the initial Sale in step 3 — agreement.cardOnFileToken.
+   */
+  async chargeWithToken({ amount, referenceId, token, paymentType = 'Credit', invoiceNumber }, tenantConfig) {
+    if (!token) throw new Error('chargeWithToken requires a token');
+    return spinRequest('POST', 'v2/Payment/Sale', {
+      Amount: Number(amount),
+      PaymentType: paymentType,
+      ReferenceId: String(referenceId).slice(0, 50),
+      Token: String(token),
+      ...(invoiceNumber ? { InvoiceNumber: String(invoiceNumber).slice(0, 50) } : {}),
+      // Tells Spin to bill a stored token (no physical card present).
+      CardPresent: false,
+      GetExtendedData: true,
+    }, tenantConfig);
+  },
+
+  /**
    * Check card balance (gift/EBT).
    */
   async balance({ referenceId, paymentType = 'Gift' }, tenantConfig) {
@@ -226,5 +310,22 @@ export const spinClient = {
       paymentType: spinResponse?.PaymentType || '',
       transactionType: spinResponse?.TransactionType || '',
     };
-  }
+  },
+
+  /**
+   * Extract the card-on-file fields we persist to RentalAgreement so
+   * subsequent CNP charges (tolls / overage / damage) can run through
+   * chargeWithToken. Returns null if the response didn't include a
+   * tokenized card (e.g. cash payment, terminal misconfigured, etc).
+   */
+  extractCardOnFile(spinResponse) {
+    const norm = this.normalizeResponse(spinResponse);
+    if (!norm.token && !norm.iposToken) return null;
+    return {
+      token: norm.iposToken || norm.token,
+      brand: norm.cardData?.cardType || null,
+      last4: norm.cardData?.last4 || null,
+      capturedAt: new Date(),
+    };
+  },
 };
