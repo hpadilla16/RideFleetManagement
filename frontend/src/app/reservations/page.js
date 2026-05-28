@@ -41,7 +41,13 @@ import { PendingFranchiseImportsTray } from '../../components/reservations/Pendi
 import { api } from '../../lib/client';
 
 const RESERVATION_PAGE_SIZE = 100;
-const CUSTOMER_PICKER_LIMIT = 100;
+// CUSTOMER_PICKER_LIMIT — the new-reservation flow loads this many customers
+// up-front into the picker. Was 100 (which hid 95%+ of any tenant's customer
+// base from the dropdown). Bumped to 5000 to match the backend cap from
+// customers.service.js. Native <select> handles 5000 options without
+// breaking a sweat, and the slim payload shape (no base64 images) keeps the
+// request under ~600KB. 2026-05-28.
+const CUSTOMER_PICKER_LIMIT = 5000;
 
 // Format a UTC datetime as wall-clock time in the tenant's timezone.
 //

@@ -62,19 +62,34 @@ function CustomersInner({ token, me, logout }) {
   const [validatingImport, setValidatingImport] = useState(false);
   const [importingRows, setImportingRows] = useState(false);
 
-  const load = async () => setRows(await api('/api/customers', {}, token));
-  useEffect(() => { load(); }, [token]);
+  // Debounce the search input so we don't hammer the API on every keystroke.
+  // Then refetch from the server with `?q=...` — the backend's LIKE search
+  // covers firstName/lastName/email/phone in SQL, so a customer at row 4000
+  // is just as findable as one at row 1. Before this change the page loaded
+  // 2000 customers with no server filter and any customer beyond that
+  // simply could not be found in the UI (2026-05-28 fix).
+  const [debouncedQuery, setDebouncedQuery] = useState('');
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedQuery(query.trim()), 250);
+    return () => clearTimeout(t);
+  }, [query]);
 
+  const load = async () => {
+    const params = new URLSearchParams({ limit: '5000' });
+    if (debouncedQuery) params.set('q', debouncedQuery);
+    setRows(await api(`/api/customers?${params.toString()}`, {}, token));
+  };
+  useEffect(() => { load(); }, [token, debouncedQuery]);
+
+  // Local-only secondary filter (showOnlyHold) over whatever the server
+  // returned. The query input itself is server-side now — no need to filter
+  // by query here a second time, the rows are already pre-matched.
   const filtered = useMemo(() => {
-    const q = query.toLowerCase();
     return rows.filter((r) => {
-      const name = `${r.firstName || ''} ${r.lastName || ''}`.toLowerCase();
-      const match = !q || name.includes(q) || String(r.phone || '').toLowerCase().includes(q) || String(r.email || '').toLowerCase().includes(q);
-      if (!match) return false;
       if (showOnlyHold && !r.doNotRent) return false;
       return true;
     });
-  }, [rows, query, showOnlyHold]);
+  }, [rows, showOnlyHold]);
 
   const customerSupportHub = useMemo(() => {
     const holds = rows.filter((r) => r.doNotRent);

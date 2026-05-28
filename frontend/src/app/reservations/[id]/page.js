@@ -298,7 +298,11 @@ function ReservationDetailInner({ token, me, logout }) {
   const loadCustomers = async () => {
     if (customers.length > 0) return;
     try {
-      const out = await api('/api/customers', {}, token);
+      // limit=5000 matches the backend cap so the reservation-edit
+      // customer picker can see the full tenant customer base. Default
+      // is 2000; the explicit limit defends against future default
+      // changes too. 2026-05-28.
+      const out = await api('/api/customers?limit=5000', {}, token);
       setCustomers(Array.isArray(out) ? out : []);
     } catch {
       setCustomers([]);

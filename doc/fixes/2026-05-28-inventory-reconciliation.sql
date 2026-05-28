@@ -64,10 +64,10 @@ WITH targets AS (
 ),
 res_updated AS (
   UPDATE "Reservation" r
-  SET    status         = CASE
+  SET    status         = (CASE
                             WHEN COALESCE(t.balance, 0) <= 0.01 THEN 'CHECKED_IN'
                             ELSE 'CHECKED_IN_UNPAID'
-                          END,
+                          END)::"ReservationStatus",
          "autochargeAt" = NULL,
          "updatedAt"    = NOW()
   FROM   targets t
@@ -77,7 +77,7 @@ res_updated AS (
 ag_updated AS (
   -- For full-close (CHECKED_IN, $0 balance): also close + lock the agreement
   UPDATE "RentalAgreement" ra
-  SET    status         = 'CLOSED',
+  SET    status         = 'CLOSED'::"RentalAgreementStatus",
          locked         = TRUE,
          "closedAt"     = NOW(),
          "updatedAt"    = NOW()
@@ -98,7 +98,7 @@ INSERT INTO "AuditLog" (id, "reservationId", "actorUserId", action,
 SELECT
   'log_' || substr(md5(random()::text || r.id), 1, 24),
   r.id, NULL, 'STATUS_CHANGE',
-  'CHECKED_OUT', r.status,
+  'CHECKED_OUT'::"ReservationStatus", r.status,
   'Force check-in — physical lot walk reconciliation 2026-05-28. Vehicle returned; system was never closed out.',
   json_build_object(
     'forceCheckin', true,
@@ -121,7 +121,7 @@ WITH targets AS (
 ),
 no_show_updated AS (
   UPDATE "Reservation" r
-  SET    status      = 'NO_SHOW',
+  SET    status      = 'NO_SHOW'::"ReservationStatus",
          "updatedAt" = NOW()
   FROM   targets t
   WHERE  r.id = t.id
@@ -139,7 +139,7 @@ INSERT INTO "AuditLog" (id, "reservationId", "actorUserId", action,
 SELECT
   'log_' || substr(md5(random()::text || r.id), 1, 24),
   r.id, NULL, 'STATUS_CHANGE',
-  NULL, 'NO_SHOW',
+  NULL, 'NO_SHOW'::"ReservationStatus",
   'Bulk no-show — physical lot walk reconciliation 2026-05-28. Customer never picked up.',
   json_build_object(
     'noShowBulk', true,
