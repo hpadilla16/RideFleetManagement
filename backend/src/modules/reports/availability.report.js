@@ -111,7 +111,11 @@ async function computeData({ tenantId, query }, deps = {}) {
   const locationId = (query && query.locationId) || null;
   const asOf = (deps && deps.now) || new Date();
 
-  const where = { tenantId };
+  // 2026-05-28: drop SOLD + OUT_OF_SERVICE from the fleet base. SOLD
+  // is terminal (vehicle sold, not coming back); OUT_OF_SERVICE is the
+  // retired/totaled sink. Both already excluded by the dashboard, so
+  // this report stays consistent.
+  const where = { tenantId, status: { notIn: ['SOLD', 'OUT_OF_SERVICE'] } };
   if (locationId) where.homeLocationId = locationId;
 
   const vehicles = await prisma.vehicle.findMany({
@@ -200,7 +204,8 @@ async function typeDrillDownHandler(req, res, { tenantId }) {
     return res.status(400).json({ error: 'type query param required' });
   }
 
-  const where = { tenantId, vehicleTypeId: typeId };
+  // Same SOLD/OUT_OF_SERVICE exclusion as the top-level fleet base above.
+  const where = { tenantId, vehicleTypeId: typeId, status: { notIn: ['SOLD', 'OUT_OF_SERVICE'] } };
   if (locationId) where.homeLocationId = locationId;
 
   const vehicles = await prisma.vehicle.findMany({

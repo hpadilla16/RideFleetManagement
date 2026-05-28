@@ -255,8 +255,12 @@ async function computeDataInner({ tenantId, from, to, query }, deps = {}) {
   const windowEnd = addDays(fromDate, safeRangeDays);
   const granularity = pickGranularity(safeRangeDays);
 
-  // Vehicle types + capacity (current snapshot — approximation for the window)
-  const vehicleWhere = {};
+  // Vehicle types + capacity (current snapshot — approximation for the window).
+  // 2026-05-28: exclude SOLD + OUT_OF_SERVICE so utilization% isn't diluted
+  // by units that aren't actually rentable capacity. SOLD = terminal (vehicle
+  // is gone); OUT_OF_SERVICE = retired/totaled. Same exclusion the dashboard
+  // fleetTotal uses.
+  const vehicleWhere = { status: { notIn: ['SOLD', 'OUT_OF_SERVICE'] } };
   if (locationId) vehicleWhere.homeLocationId = locationId;
 
   const vehicleTypes = await prisma.vehicleType.findMany({

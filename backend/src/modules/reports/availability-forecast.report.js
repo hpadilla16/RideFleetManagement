@@ -204,7 +204,11 @@ async function resolveDefaultPrisma() {
 
 // Build a reservation `where` clause for queries that overlap a date window.
 function buildReservationWhere({ tenantId, locationId, statusList, pickupBefore, returnAfter }) {
-  const where = { tenantId, status: { in: statusList }, vehicleTypeId: { not: null } };
+  // 2026-05-28: drop overdueIgnored=true rows. They're grandfathered
+  // stale data — vehicle was physically returned but never closed in
+  // the system. Counting them against future availability would
+  // double-book the unit.
+  const where = { tenantId, status: { in: statusList }, vehicleTypeId: { not: null }, overdueIgnored: false };
   if (locationId) where.pickupLocationId = locationId;
   if (pickupBefore) where.pickupAt = { lt: pickupBefore };
   if (returnAfter) where.returnAt = { gt: returnAfter };
