@@ -371,9 +371,18 @@ function StepRenderer({ session, reservation, token, onAdvance }) {
     case 'INSPECTION_HANDOFF':
       return <Step4Handoff session={session} token={token} onContinue={() => onAdvance('INSPECTION_IN_PROGRESS')} />;
     case 'INSPECTION_IN_PROGRESS':
-      return <Step5Metrics reservation={reservation} onNext={() => onAdvance('CUSTOMER_SIGN_PENDING')} />;
+      return <Step5Metrics
+        session={session}
+        reservation={reservation}
+        token={token}
+        onNext={() => onAdvance('CUSTOMER_SIGN_PENDING')}
+      />;
     case 'CUSTOMER_SIGN_PENDING':
-      return <Step6CustomerSign onSigned={() => onAdvance('FINALIZING')} />;
+      return <Step6CustomerSign
+        session={session}
+        token={token}
+        onSigned={() => onAdvance('FINALIZING')}
+      />;
     case 'FINALIZING':
       return <StepBridge label="Building agreement…" onNext={() => onAdvance('CLOSED')} />;
     case 'CLOSED':
@@ -566,10 +575,28 @@ function Step4Handoff({ session, token, onContinue }) {
   );
 }
 
-function Step5Metrics({ reservation, onNext }) {
+function Step5Metrics({ session, reservation, token, onNext }) {
   const [odometer, setOdometer] = useState(reservation.vehicle?.mileage || '');
   const [fuel, setFuel] = useState(8);
   const [cleanliness, setCleanliness] = useState(5);
+  const [busy, setBusy] = useState(false);
+
+  const submit = async () => {
+    setBusy(true);
+    try {
+      // Stamp the inspection-complete side-effect so the entry guard
+      // on CUSTOMER_SIGN_PENDING passes, then advance.
+      await api(`/api/checkout-sessions/${session.id}/stamp`, {
+        method: 'POST',
+        body: JSON.stringify({ field: 'inspectionCompletedAt', value: new Date().toISOString() }),
+      }, token);
+      onNext();
+    } catch (err) {
+      // surface via the parent toast
+    } finally {
+      setBusy(false);
+    }
+  };
 
   return (
     <div style={cardStyle}>
@@ -587,19 +614,40 @@ function Step5Metrics({ reservation, onNext }) {
           <span>{cleanliness}/5</span>
         </Field>
       </div>
-      <button style={primaryBtn} onClick={onNext}>Customer signs →</button>
+      <button style={primaryBtn} onClick={submit} disabled={busy}>
+        {busy ? 'Saving…' : 'Customer signs →'}
+      </button>
     </div>
   );
 }
 
-function Step6CustomerSign({ onSigned }) {
+function Step6CustomerSign({ session, token, onSigned }) {
+  const [busy, setBusy] = useState(false);
+  const submit = async () => {
+    setBusy(true);
+    try {
+      // Stamp the customer-sign side-effect so the entry guard on
+      // CLOSED passes when FINALIZING auto-advances.
+      await api(`/api/checkout-sessions/${session.id}/stamp`, {
+        method: 'POST',
+        body: JSON.stringify({ field: 'customerSignedAt', value: new Date().toISOString() }),
+      }, token);
+      onSigned();
+    } catch (err) {
+      // parent toast
+    } finally {
+      setBusy(false);
+    }
+  };
   return (
     <div style={cardStyle}>
       <h3 style={h3Style}>Step 6 · Customer signs inspection</h3>
       <p style={{ color: '#6B7280' }}>
         Phase 1 stub. Real flow: customer signs on the agent's mobile, which posts back to the public route and stamps customerSignedAt.
       </p>
-      <button style={primaryBtn} onClick={onSigned}>Simulate signature → finalize</button>
+      <button style={primaryBtn} onClick={submit} disabled={busy}>
+        {busy ? 'Saving…' : 'Simulate signature → finalize'}
+      </button>
     </div>
   );
 }
