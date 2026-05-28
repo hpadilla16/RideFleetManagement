@@ -517,29 +517,88 @@ function Step2TermsPending({ session, reservation, token, onSigned }) {
 }
 
 function Step3PaymentPending({ session, reservation, token, onPaid }) {
+  // Wizard-side states: 'ready' → 'charging' → 'done' / 'error'
+  const [phase, setPhase] = useState('ready');
+  const [error, setError] = useState(null);
+  const [result, setResult] = useState(null);
+
+  const subtotal = Number(reservation.estimatedTotal || reservation.rentalAgreement?.total || 0);
+  const depositAmount = 500;
+
+  const charge = async () => {
+    setPhase('charging');
+    setError(null);
+    try {
+      const r = await api(`/api/checkout-sessions/${session.id}/charge`, {
+        method: 'POST',
+        body: JSON.stringify({ amount: subtotal, depositAmount }),
+      }, token);
+      setResult(r);
+      setPhase('done');
+      // Backend stamped paymentCompletedAt already; advance the wizard.
+      onPaid();
+    } catch (err) {
+      setError(err?.message || 'Charge failed');
+      setPhase('error');
+    }
+  };
+
   return (
     <div style={cardStyle}>
       <h3 style={h3Style}>Step 3 · Payment</h3>
       <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: 16 }}>
         <div>
           <div style={{ fontSize: 14, fontWeight: 500, marginBottom: 8 }}>Invoice</div>
-          <KV label="Subtotal" value={`$${Number(reservation.estimatedTotal || 0).toFixed(2)}`} />
-          <KV label="Pre-auth deposit" value="$500.00" />
+          <KV label="Subtotal" value={`$${subtotal.toFixed(2)}`} />
+          <KV label="Pre-auth deposit" value={`$${depositAmount.toFixed(2)}`} />
         </div>
         <div style={{ background: '#F9FAFB', padding: 12, borderRadius: 6 }}>
           <div style={{ fontSize: 12, fontWeight: 500, marginBottom: 4 }}>Dejavoo terminal</div>
-          <div style={{ fontSize: 11, color: '#6B7280' }}>Customer: tap, insert, or swipe</div>
-          <div style={{ fontSize: 12, color: '#10B981', marginTop: 8 }}>● Terminal ready</div>
+          {phase === 'ready' && (
+            <>
+              <div style={{ fontSize: 11, color: '#6B7280' }}>Customer: tap, insert, or swipe</div>
+              <div style={{ fontSize: 12, color: '#10B981', marginTop: 8 }}>● Terminal ready</div>
+            </>
+          )}
+          {phase === 'charging' && (
+            <>
+              <div style={{ fontSize: 11, color: '#6B7280' }}>Waiting for card…</div>
+              <div style={{ fontSize: 12, color: '#F59E0B', marginTop: 8 }}>● Processing</div>
+            </>
+          )}
+          {phase === 'done' && result && (
+            <>
+              <div style={{ fontSize: 12, color: '#10B981', marginTop: 8 }}>✓ Approved · {result.sale?.authCode}</div>
+              {result.cardOnFile && (
+                <div style={{ fontSize: 11, color: '#6B7280', marginTop: 4 }}>
+                  {result.cardOnFile.brand} ····{result.cardOnFile.last4} saved
+                </div>
+              )}
+              {result.preauth && (
+                <div style={{ fontSize: 11, color: '#6B7280', marginTop: 2 }}>
+                  Deposit hold ✓
+                </div>
+              )}
+            </>
+          )}
+          {phase === 'error' && (
+            <div style={{ fontSize: 11, color: '#B91C1C' }}>{error}</div>
+          )}
         </div>
       </div>
-      <div style={{ marginTop: 16 }}>
-        <DevSimulateButton
-          label="Simulate Spin charge complete"
-          sessionId={session.id}
-          token={token}
-          field="paymentCompletedAt"
-          onDone={onPaid}
-        />
+      <div style={{ marginTop: 16, display: 'flex', gap: 8 }}>
+        {phase === 'ready' && (
+          <button style={primaryBtn} onClick={charge}>Start charge</button>
+        )}
+        {phase === 'charging' && (
+          <button style={{ ...primaryBtn, opacity: 0.6 }} disabled>Processing…</button>
+        )}
+        {phase === 'error' && (
+          <>
+            <button style={primaryBtn} onClick={charge}>Retry charge</button>
+            <button style={ghostBtn} onClick={() => setPhase('ready')}>Reset</button>
+          </>
+        )}
       </div>
     </div>
   );

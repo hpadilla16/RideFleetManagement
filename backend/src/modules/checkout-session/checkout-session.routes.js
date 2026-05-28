@@ -1,6 +1,9 @@
 import { Router } from 'express';
 import { checkoutSessionService, CheckoutSessionError } from './checkout-session.service.js';
 import { vehicleSwapService } from './vehicle-swap.service.js';
+import { spinChargeService } from './spin-charge.service.js';
+import { spinClient } from '../payment-gateway/spin-client.js';
+import { prisma } from '../../lib/prisma.js';
 import logger from '../../lib/logger.js';
 
 export const checkoutSessionRouter = Router();
@@ -162,6 +165,52 @@ checkoutSessionRouter.post('/:id/vehicle', async (req, res) => {
       actorUserId: req.user?.id,
     });
     res.json(result);
+  } catch (err) {
+    handleError(res, err);
+  }
+});
+
+// ---------------------------------------------------------------------
+// POST /api/checkout-sessions/:id/charge
+//   Body: { amount, depositAmount? }. Kicks off the Spin sale +
+//   preauth + tokenize orchestration. Returns the normalized result;
+//   on failure responds with the CheckoutSessionError code (SALE_DECLINED
+//   / PREAUTH_FAILED) and the message the wizard surfaces as a toast.
+// ---------------------------------------------------------------------
+checkoutSessionRouter.post('/:id/charge', async (req, res) => {
+  try {
+    const { amount, depositAmount } = req.body || {};
+    const result = await spinChargeService.runChargeSequence({
+      sessionId: req.params.id,
+      amount: Number(amount),
+      depositAmount: depositAmount != null ? Number(depositAmount) : undefined,
+      actorUserId: req.user?.id,
+    });
+    res.json(result);
+  } catch (err) {
+    handleError(res, err);
+  }
+});
+
+// ---------------------------------------------------------------------
+// GET /api/checkout-sessions/:id/terminal-status
+//   Wraps Spin /TerminalStatus so the wizard can poll for terminal
+//   readiness before/during the charge. Returns a compact { online,
+//   message, raw } shape.
+// ---------------------------------------------------------------------
+checkoutSessionRouter.get('/:id/terminal-status', async (req, res) => {
+  try {
+    const session = await prisma.checkoutSession.findUnique({
+      where: { id: req.params.id },
+      include: { reservation: { select: { tenantId: true } } },
+    });
+    if (!session) return res.status(404).json({ error: 'Session not found' });
+    const raw = await spinClient.terminalStatus({}).catch((err) => ({ error: err.message }));
+    res.json({
+      online: !raw?.error && (raw?.StatusCode === '0' || raw?.StatusCode === '0000'),
+      message: raw?.Message || raw?.error || '',
+      raw,
+    });
   } catch (err) {
     handleError(res, err);
   }
