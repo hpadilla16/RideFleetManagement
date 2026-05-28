@@ -24,6 +24,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { useParams } from 'next/navigation';
+import { api } from '../../../lib/client';
 
 export default function Page() {
   const params = useParams();
@@ -38,12 +39,10 @@ export default function Page() {
     if (!token) return;
     (async () => {
       try {
-        const res = await fetch(`/api/sign/${token}`);
-        const json = await res.json();
-        if (!res.ok) throw new Error(json.error || 'Failed to load');
+        const json = await api(`/api/sign/${token}`, { bypassCache: true });
         setData(json);
       } catch (err) {
-        setError(err.message);
+        setError(err?.message || 'Failed to load');
       } finally {
         setLoading(false);
       }
@@ -80,9 +79,8 @@ function SignFlow({ token, data, onComplete, onError }) {
     // with a non-trivial drawing.
     if (!dataUrl || dataUrl.length < 200) return;
     try {
-      await fetch(`/api/sign/${token}/initials`, {
+      await api(`/api/sign/${token}/initials`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ sectionKey, initialDataUrl: dataUrl }),
       });
       setSections((curr) => curr.map((s) => (s.key === sectionKey ? { ...s, signed: true } : s)));
@@ -94,16 +92,13 @@ function SignFlow({ token, data, onComplete, onError }) {
   const submitComplete = async () => {
     setSubmitting(true);
     try {
-      const res = await fetch(`/api/sign/${token}/complete`, {
+      await api(`/api/sign/${token}/complete`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ signatureDataUrl: finalSig, signerName: signerName.trim() }),
       });
-      const json = await res.json();
-      if (!res.ok) throw new Error(json.error || 'Complete failed');
       onComplete();
     } catch (err) {
-      onError(err.message);
+      onError(err?.message || 'Complete failed');
     } finally {
       setSubmitting(false);
     }
