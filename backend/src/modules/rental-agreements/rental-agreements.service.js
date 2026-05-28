@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { getBrowser } from '../../lib/puppeteer-browser.js';
+import { sectionsForAgreement } from '../checkout-session/terms-content.js';
 import { prisma } from '../../lib/prisma.js';
 import { hostReviewsService } from '../host-reviews/host-reviews.service.js';
 import { reservationPricingService } from '../reservations/reservation-pricing.service.js';
@@ -884,6 +885,136 @@ function buildAddendumPagesHtml(addendums, ctx) {
   if (list.length === 0) return '';
   const total = list.length;
   return list.map((a, i) => buildAddendumPageHtml(a, i + 1, total, ctx)).join('\n');
+}
+
+// 2026-05-28 — Phase 3.3 + 3.4 — Append the customer's signed T&C
+// section (with each subsection's initial image embedded inline) plus
+// the optional declined-insurance addendum to the agreement PDF.
+//
+// Reads TC_SECTIONS from terms-content.js to build the section list
+// dynamically. The customer's per-section initials live on
+// agreement.sectionInitials[]; the final consolidated signature is on
+// agreement.tcSignatureDataUrl.
+function buildSignedTermsBlock(agreement, ctx) {
+  const sections = sectionsForAgreement({ declinedInsurance: !!agreement.declinedInsurance });
+  const initials = Array.isArray(agreement.sectionInitials) ? agreement.sectionInitials : [];
+  const initialsByKey = new Map(initials.map((i) => [i.sectionKey, i]));
+
+  if (!agreement.tcSignatureDataUrl && initials.length === 0) {
+    // Nothing to render — agreement was created via the legacy flow,
+    // not the new checkout-wizard-v2.
+    return '';
+  }
+
+  const tcSignedAt = agreement.tcSignedAt
+    ? new Date(agreement.tcSignedAt).toLocaleString('en-US', { timeZone: 'America/Puerto_Rico' })
+    : '—';
+  const signerName = esc(agreement.tcSignerName || `${agreement.customerFirstName || ''} ${agreement.customerLastName || ''}`.trim() || '—');
+
+  const sectionRows = sections.map((s) => {
+    const recorded = initialsByKey.get(s.key);
+    const initialImg = recorded?.initialDataUrl
+      ? `<img src="${recorded.initialDataUrl}" alt="Initial" style="max-height:40px;max-width:80px;border:0.5px solid #D1D5DB;border-radius:4px;padding:2px;background:#fff" />`
+      : '<span style="color:#9CA3AF;font-size:11px">(no initial)</span>';
+    const recordedAt = recorded?.signedAt
+      ? new Date(recorded.signedAt).toLocaleString('en-US', { timeZone: 'America/Puerto_Rico' })
+      : '';
+    return `
+      <div style="margin:0 0 18px;padding:14px;border:0.5px solid #E5E7EB;border-radius:8px;background:#FFF;page-break-inside:avoid">
+        <div style="font-size:13px;font-weight:600;color:#111827;margin:0 0 6px">${esc(s.label)}</div>
+        <div style="font-size:12px;color:#374151;line-height:1.55;margin:0 0 10px">${esc(s.body)}</div>
+        <div style="display:flex;justify-content:flex-end;align-items:center;gap:12px">
+          <span style="font-size:10.5px;color:#6B7280">${esc(recordedAt)}</span>
+          ${initialImg}
+        </div>
+      </div>`;
+  }).join('');
+
+  const finalSignatureBlock = agreement.tcSignatureDataUrl
+    ? `<img src="${agreement.tcSignatureDataUrl}" alt="Customer signature" style="max-height:80px;max-width:360px;display:block;border-bottom:1px solid #111827" />`
+    : '<div style="color:#9CA3AF;font-size:12px">(no final signature)</div>';
+
+  const logo = ctx?.companyLogoBlock || '';
+  const cfg = ctx?.cfg || {};
+  const companyName = esc(cfg.companyName || '');
+
+  return `
+    <div style="page-break-before:always;padding:40px;font-family:-apple-system,BlinkMacSystemFont,'Helvetica Neue',Arial,sans-serif;color:#111827">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin:0 0 24px;padding:0 0 16px;border-bottom:1px solid #111827">
+        <div>
+          <div style="font-size:11px;color:#6B7280;letter-spacing:.08em;text-transform:uppercase">Signed acknowledgement</div>
+          <div style="font-size:18px;font-weight:600;margin-top:4px">Terms &amp; Conditions</div>
+          <div style="font-size:11px;color:#6B7280;margin-top:2px">Agreement ${esc(agreement.agreementNumber)} · ${companyName}</div>
+        </div>
+        ${logo}
+      </div>
+      <p style="font-size:12px;color:#374151;margin:0 0 18px;line-height:1.5">
+        The renter initialed each section below and signed at the bottom on
+        ${esc(tcSignedAt)}. The full Terms &amp; Conditions document is incorporated by
+        reference and was made available at the time of signing.
+      </p>
+      ${sectionRows}
+      <div style="margin-top:28px;padding-top:18px;border-top:1px solid #111827;page-break-inside:avoid">
+        <div style="font-size:11px;color:#6B7280;letter-spacing:.06em;text-transform:uppercase;margin:0 0 8px">Renter signature</div>
+        ${finalSignatureBlock}
+        <div style="font-size:12px;margin-top:6px;color:#111827">${signerName}</div>
+        <div style="font-size:10.5px;color:#6B7280;margin-top:2px">Signed ${esc(tcSignedAt)}${agreement.tcCustomerIp ? ` · ${esc(agreement.tcCustomerIp)}` : ''}</div>
+      </div>
+    </div>`;
+}
+
+// Phase 3.4 — Declined insurance addendum page. Only emitted when the
+// agent flipped the "Customer declines counter insurance" toggle in
+// step 1 of the wizard. Reads agreement.declinedInsuranceSignatureDataUrl
+// for the customer's separate signature on the addendum.
+function buildDeclinedInsuranceBlock(agreement, ctx) {
+  if (!agreement.declinedInsurance) return '';
+  const logo = ctx?.companyLogoBlock || '';
+  const cfg = ctx?.cfg || {};
+  const companyName = esc(cfg.companyName || '');
+  const signedAt = agreement.declinedInsuranceSignedAt
+    ? new Date(agreement.declinedInsuranceSignedAt).toLocaleString('en-US', { timeZone: 'America/Puerto_Rico' })
+    : '—';
+  // The declined-insurance ACK uses the same initial captured during
+  // T&C signing (sectionKey = 'declined_insurance'). Fall back to the
+  // dedicated declinedInsuranceSignatureDataUrl column if present.
+  const initials = Array.isArray(agreement.sectionInitials) ? agreement.sectionInitials : [];
+  const ackInitial = initials.find((i) => i.sectionKey === 'declined_insurance');
+  const sigBlock = agreement.declinedInsuranceSignatureDataUrl
+    ? `<img src="${agreement.declinedInsuranceSignatureDataUrl}" alt="Declined insurance signature" style="max-height:80px;max-width:360px;display:block;border-bottom:1px solid #111827" />`
+    : ackInitial?.initialDataUrl
+      ? `<img src="${ackInitial.initialDataUrl}" alt="Declined insurance initial" style="max-height:60px;max-width:120px;display:block;border-bottom:1px solid #111827" />`
+      : '<div style="color:#9CA3AF;font-size:12px">(no signature on file)</div>';
+
+  return `
+    <div style="page-break-before:always;padding:40px;font-family:-apple-system,BlinkMacSystemFont,'Helvetica Neue',Arial,sans-serif;color:#111827">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin:0 0 24px;padding:0 0 16px;border-bottom:1px solid #111827">
+        <div>
+          <div style="font-size:11px;color:#6B7280;letter-spacing:.08em;text-transform:uppercase">Addendum</div>
+          <div style="font-size:18px;font-weight:600;margin-top:4px">Declined insurance</div>
+          <div style="font-size:11px;color:#6B7280;margin-top:2px">Agreement ${esc(agreement.agreementNumber)} · ${companyName}</div>
+        </div>
+        ${logo}
+      </div>
+      <p style="font-size:13px;line-height:1.6;color:#1F2937;margin:0 0 14px">
+        Renter acknowledges that counter insurance was offered and declined.
+        Renter agrees that all damage, theft, third-party claims, and
+        related costs arising from the rental period are renter's sole
+        responsibility under the rental agreement. Renter has confirmed
+        coverage through a personal auto policy or other source.
+      </p>
+      <p style="font-size:13px;line-height:1.6;color:#1F2937;margin:0 0 24px">
+        Renter further understands that any damage or theft will be
+        billed to the card on file in accordance with the deposit
+        authorization section of the rental agreement.
+      </p>
+      <div style="margin-top:32px;padding-top:18px;border-top:1px solid #111827">
+        <div style="font-size:11px;color:#6B7280;letter-spacing:.06em;text-transform:uppercase;margin:0 0 8px">Renter signature</div>
+        ${sigBlock}
+        <div style="font-size:12px;margin-top:6px;color:#111827">${esc(agreement.tcSignerName || `${agreement.customerFirstName || ''} ${agreement.customerLastName || ''}`.trim() || '—')}</div>
+        <div style="font-size:10.5px;color:#6B7280;margin-top:2px">Signed ${esc(signedAt)}</div>
+      </div>
+    </div>`;
 }
 
 function rentalDays(pickupAt, returnAt) {
@@ -2345,7 +2476,12 @@ export const rentalAgreementsService = {
         drivers: true,
         charges: { orderBy: [{ sortOrder: 'asc' }, { createdAt: 'asc' }] },
         payments: { orderBy: { paidAt: 'desc' } },
-        inspections: { orderBy: { createdAt: 'asc' } }
+        inspections: { orderBy: { createdAt: 'asc' } },
+        // 2026-05-28 — checkout-wizard-v2 T&C signing.
+        // tcSignature*, declinedInsurance*, sectionInitials. The print
+        // template uses these to render the signed terms acknowledgement
+        // pages + declined-insurance addendum after the standard layout.
+        sectionInitials: { orderBy: { signedAt: 'asc' } }
       }
     });
     return coerceAgreementMoney(agreement);
@@ -2412,6 +2548,16 @@ export const rentalAgreementsService = {
         securityDepositAmount: true,
         paidAmount: true,
         balance: true,
+        // 2026-05-28 — checkout-wizard-v2 T&C signing fields. Used by
+        // buildSignedTermsBlock + buildDeclinedInsuranceBlock when
+        // appending the post-baseline pages to the PDF.
+        tcSignatureDataUrl: true,
+        tcSignedAt: true,
+        tcSignerName: true,
+        tcCustomerIp: true,
+        declinedInsurance: true,
+        declinedInsuranceSignatureDataUrl: true,
+        declinedInsuranceSignedAt: true,
         charges: {
           orderBy: [{ sortOrder: 'asc' }, { createdAt: 'asc' }],
           select: {
@@ -2722,22 +2868,27 @@ export const rentalAgreementsService = {
       where: { rentalAgreementId: id },
       orderBy: { createdAt: 'asc' }
     });
-    if (!addendums.length) return baseHtml;
 
-    const addendumPages = buildAddendumPagesHtml(addendums, {
-      agreement,
-      cfg,
-      companyLogoBlock
-    });
-    if (!addendumPages) return baseHtml;
+    // Phase 3.3 + 3.4 — append the customer's signed T&C section and
+    // (when applicable) the declined-insurance addendum. These run
+    // INDEPENDENTLY of the legacy addendums system above so legacy
+    // agreements (no tcSignatureDataUrl, no sectionInitials) get the
+    // empty string back from buildSignedTermsBlock and the print stays
+    // unchanged.
+    const ctx = { agreement, cfg, companyLogoBlock };
+    const addendumPages = addendums.length ? buildAddendumPagesHtml(addendums, ctx) : '';
+    const signedTermsPages = buildSignedTermsBlock(agreement, ctx);
+    const declinedInsurancePage = buildDeclinedInsuranceBlock(agreement, ctx);
+    const extraPages = [addendumPages, signedTermsPages, declinedInsurancePage].filter(Boolean).join('\n');
+    if (!extraPages) return baseHtml;
 
     // Splice before </body>. Falls back to append if a custom tenant template
-    // happens to omit the closing tag — the addendum pages are still valid
+    // happens to omit the closing tag — the extra pages are still valid
     // standalone HTML and the browser/Puppeteer renderer is forgiving.
     if (/<\/body>/i.test(baseHtml)) {
-      return baseHtml.replace(/<\/body>/i, `${addendumPages}</body>`);
+      return baseHtml.replace(/<\/body>/i, `${extraPages}</body>`);
     }
-    return `${baseHtml}\n${addendumPages}`;
+    return `${baseHtml}\n${extraPages}`;
   },
 
   async agreementPdfBuffer(id) {
