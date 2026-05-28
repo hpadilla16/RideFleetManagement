@@ -4,7 +4,11 @@ import { useEffect, useState } from 'react';
 import { useParams } from 'next/navigation';
 import { api, readStoredToken } from '../../../../lib/client';
 
-const POLL_INTERVAL = 8000;
+// Two polling rates: slow when the wizard isn't active (just showing
+// reservation summary), fast when a CheckoutSession is in flight and
+// we need to react to step transitions in near-realtime. 2026-05-28.
+const POLL_INTERVAL_IDLE   = 8000;
+const POLL_INTERVAL_ACTIVE = 1500;
 
 function money(n) {
   return `$${Number(n || 0).toFixed(2)}`;
@@ -56,6 +60,11 @@ function ProgressStep({ label, done, active }) {
 export default function CustomerViewPage() {
   const { id } = useParams();
   const [row, setRow] = useState(null);
+  // CheckoutSession — populated only when a checkout-wizard-v2 session
+  // is in flight. When non-null, drives the wizard-step hero above the
+  // reservation summary. Polled every 1.5s while non-terminal so the
+  // customer's screen reacts to step transitions immediately.
+  const [session, setSession] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 
@@ -63,8 +72,16 @@ export default function CustomerViewPage() {
     try {
       const token = readStoredToken();
       if (!token) { setError('Session expired'); setLoading(false); return; }
-      const data = await api(`/api/reservations/${id}`, { bypassCache: true }, token);
-      setRow(data);
+      // Fetch reservation + checkout session in parallel. The session
+      // endpoint 404s when no wizard is open — that's normal and
+      // doesn't surface as an error.
+      const [data, sessionResult] = await Promise.allSettled([
+        api(`/api/reservations/${id}`, { bypassCache: true }, token),
+        api(`/api/checkout-sessions/by-reservation/${id}`, { bypassCache: true }, token),
+      ]);
+      if (data.status === 'fulfilled') setRow(data.value);
+      else throw data.reason;
+      setSession(sessionResult.status === 'fulfilled' ? sessionResult.value : null);
       setError('');
     } catch (e) {
       setError(e?.message || 'Unable to load reservation');
@@ -76,9 +93,11 @@ export default function CustomerViewPage() {
   useEffect(() => { loadData(); }, [id]);
 
   useEffect(() => {
-    const interval = setInterval(loadData, POLL_INTERVAL);
+    // Adaptive interval: 1.5s during an active checkout, 8s otherwise.
+    const isActiveSession = session && !['CLOSED', 'CANCELLED'].includes(session.currentStep);
+    const interval = setInterval(loadData, isActiveSession ? POLL_INTERVAL_ACTIVE : POLL_INTERVAL_IDLE);
     return () => clearInterval(interval);
-  }, [id]);
+  }, [id, session?.currentStep]);
 
   if (loading && !row) {
     return (
@@ -133,6 +152,13 @@ export default function CustomerViewPage() {
         <div style={{ fontWeight: 900, fontSize: '1.3rem', color: '#1a1230', letterSpacing: '-.02em' }}>Ride Fleet</div>
         <div style={{ fontSize: '0.78rem', color: '#94a3b8', fontWeight: 600, marginTop: 2 }}>Customer View</div>
       </div>
+
+      {/* Wizard-step hero — renders only when a checkout-wizard-v2
+          session is in flight. Per-step screens match the customer
+          panes from the mockup (steps 1-6). 2026-05-28. */}
+      {session && !['CLOSED', 'CANCELLED'].includes(session.currentStep) && (
+        <CheckoutStepHero session={session} customer={row?.customer} />
+      )}
 
       {/* Welcome + Status */}
       <div style={card}>
@@ -350,3 +376,155 @@ const chip = {
   fontSize: '0.78rem',
   fontWeight: 700,
 };
+
+// ===========================================================================
+// CheckoutStepHero — wizard-step screen shown to the customer during
+// an active checkout-wizard-v2 session. Mirrors the customer panes from
+// the mockup (steps 1-6).
+//
+// Important: this stays READ-ONLY. The customer never interacts with
+// the counter display. T&C signing happens on their phone, signature
+// happens on the agent's mobile during step 6. This component just
+// tells them what's happening and what to do next.
+// ===========================================================================
+function CheckoutStepHero({ session, customer }) {
+  const step = session?.currentStep;
+  const stepNumber = STEP_TO_NUMBER[step] || 1;
+  return (
+    <div style={{ ...card, background: '#FFFFFF', borderRadius: 16, padding: 24, marginBottom: 16 }}>
+      <CheckoutStepTracker currentNumber={stepNumber} />
+      <div style={{ marginTop: 20 }}>
+        {step === 'CONFIRMING'             && <HeroConfirm customer={customer} />}
+        {step === 'TC_PENDING'             && <HeroTermsPending />}
+        {step === 'TC_SIGNED'              && <HeroBridge label="Terms signed ✓" />}
+        {step === 'PAYMENT_PENDING'        && <HeroPayment />}
+        {step === 'PAID'                   && <HeroBridge label="Payment captured ✓" />}
+        {step === 'INSPECTION_HANDOFF'     && <HeroInspectionHandoff />}
+        {step === 'INSPECTION_IN_PROGRESS' && <HeroInspectionInProgress />}
+        {step === 'CUSTOMER_SIGN_PENDING'  && <HeroCustomerSign />}
+        {step === 'FINALIZING'             && <HeroBridge label="Building your agreement…" />}
+      </div>
+    </div>
+  );
+}
+
+const STEP_TO_NUMBER = {
+  CONFIRMING: 1,
+  TC_PENDING: 2,
+  TC_SIGNED: 2,
+  PAYMENT_PENDING: 3,
+  PAID: 3,
+  INSPECTION_HANDOFF: 4,
+  INSPECTION_IN_PROGRESS: 5,
+  CUSTOMER_SIGN_PENDING: 6,
+  FINALIZING: 6,
+  CLOSED: 6,
+};
+
+function CheckoutStepTracker({ currentNumber }) {
+  const steps = [1, 2, 3, 4, 5, 6];
+  return (
+    <div style={{ display: 'flex', justifyContent: 'center', gap: 8 }}>
+      {steps.map((n) => {
+        const isCurrent = n === currentNumber;
+        const isDone = n < currentNumber;
+        return (
+          <div key={n} style={{
+            width: 28, height: 28, borderRadius: '50%',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            background: isCurrent ? '#7c3aed' : isDone ? '#16a34a' : 'rgba(110,73,255,.1)',
+            color: isCurrent || isDone ? '#FFFFFF' : '#a090c8',
+            fontWeight: 700, fontSize: 12,
+            boxShadow: isCurrent ? '0 2px 8px rgba(124,58,237,.3)' : 'none',
+          }}>
+            {isDone ? '✓' : n}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function HeroConfirm({ customer }) {
+  return (
+    <div style={{ textAlign: 'center' }}>
+      <div style={{ fontSize: '1.4rem', fontWeight: 800, color: '#1a1230', marginBottom: 6 }}>
+        Welcome{customer?.firstName ? `, ${customer.firstName}` : ''}!
+      </div>
+      <div style={{ color: '#6b7a9a' }}>Let's confirm your reservation</div>
+    </div>
+  );
+}
+
+function HeroTermsPending() {
+  return (
+    <div style={{ textAlign: 'center' }}>
+      <div style={{ fontSize: '1.3rem', fontWeight: 800, color: '#1a1230', marginBottom: 6 }}>
+        Sign your rental terms
+      </div>
+      <div style={{ color: '#6b7a9a', marginBottom: 16 }}>Scan the QR with your phone</div>
+      <div style={{ display: 'inline-block', padding: 24, background: '#F3F4F6', borderRadius: 12, fontSize: 80 }}>📱</div>
+      <div style={{ color: '#94a3b8', fontSize: '0.85rem', marginTop: 12 }}>Or check your email for a signing link</div>
+    </div>
+  );
+}
+
+function HeroPayment() {
+  return (
+    <div style={{ textAlign: 'center' }}>
+      <div style={{ fontSize: '1.3rem', fontWeight: 800, color: '#1a1230', marginBottom: 6 }}>
+        Review your invoice
+      </div>
+      <div style={{ color: '#6b7a9a', marginBottom: 16 }}>Use the terminal to your right</div>
+      <div style={{
+        background: 'rgba(59,130,246,.08)', border: '1px solid rgba(59,130,246,.2)',
+        padding: 12, borderRadius: 8, color: '#1e3a8a', fontSize: '0.85rem', textAlign: 'left',
+      }}>
+        <strong>Card on file:</strong> Your card will be securely saved. Any extra charges
+        (tolls, fuel, damage) may be billed to this card after return.
+      </div>
+    </div>
+  );
+}
+
+function HeroInspectionHandoff() {
+  return (
+    <div style={{ textAlign: 'center' }}>
+      <div style={{ fontSize: '1.3rem', fontWeight: 800, color: '#1a1230', marginBottom: 6 }}>
+        Follow your agent outside
+      </div>
+      <div style={{ color: '#6b7a9a' }}>Vehicle inspection</div>
+      <div style={{ fontSize: 64, marginTop: 16 }}>🚶</div>
+    </div>
+  );
+}
+
+function HeroInspectionInProgress() {
+  return (
+    <div style={{ textAlign: 'center' }}>
+      <div style={{ fontSize: '1.3rem', fontWeight: 800, color: '#1a1230', marginBottom: 6 }}>
+        Vehicle inspection in progress
+      </div>
+      <div style={{ color: '#6b7a9a' }}>Your agent is reviewing the car with you</div>
+    </div>
+  );
+}
+
+function HeroCustomerSign() {
+  return (
+    <div style={{ textAlign: 'center' }}>
+      <div style={{ fontSize: '1.3rem', fontWeight: 800, color: '#1a1230', marginBottom: 6 }}>
+        Sign on agent's device
+      </div>
+      <div style={{ color: '#6b7a9a' }}>Almost done — your agent will hand you a tablet to sign the inspection</div>
+    </div>
+  );
+}
+
+function HeroBridge({ label }) {
+  return (
+    <div style={{ textAlign: 'center', color: '#16a34a', fontWeight: 700, fontSize: '1.1rem' }}>
+      {label}
+    </div>
+  );
+}
