@@ -376,7 +376,14 @@ function DashboardInner({ token, me, logout }) {
   const moneyShort = (n) => `$${Number(n || 0).toFixed(2)}`;
 
   const kpis = overview?.kpis || {};
-  const totalVehicles = Number(kpis.fleetTotal || 0) + Number(kpis.vehiclesInMaintenance || 0) + Number(kpis.vehiclesOutOfService || 0);
+  // Total Vehicles = effective fleet (kpis.fleetTotal excludes SOLD +
+  // OUT_OF_SERVICE + IN_MAINTENANCE on the backend as of 2026-05-28).
+  // Previously summed fleetTotal + maintenance + OOS to show "every
+  // unit on file", but Hector wants the headline number to be the
+  // live rentable fleet — SOLD and retired units shouldn't bloat
+  // capacity. Maintenance / OOS are still surfaced separately in
+  // their own tile.
+  const totalVehicles = Number(kpis.fleetTotal || 0);
   const available = Number(kpis.availableFleet || 0);
   const migrationHeld = Number(kpis.migrationHeld || 0);
   const washHeld = Number(kpis.washHeld || 0);

@@ -419,7 +419,9 @@ export const reportsService = {
     const maintenanceStatusIds = new Set(vehicles.filter((row) => String(row.status || '').toUpperCase() === 'IN_MAINTENANCE').map((row) => row.id));
     const fleetTotal = vehicles.filter((row) => {
       const status = String(row.status || '').toUpperCase();
-      if (['IN_MAINTENANCE', 'OUT_OF_SERVICE'].includes(status)) return false;
+      // SOLD added 2026-05-28 — vehicle was sold; permanently out of
+      // the fleet. Same treatment as OUT_OF_SERVICE for capacity math.
+      if (['IN_MAINTENANCE', 'OUT_OF_SERVICE', 'SOLD'].includes(status)) return false;
       if (serviceBlockIds.has(row.id)) return false;
       return true;
     }).length;
@@ -443,7 +445,8 @@ export const reportsService = {
     ]);
     const availableFleet = vehicles.filter((row) => {
       const status = String(row.status || '').toUpperCase();
-      if (['IN_MAINTENANCE', 'OUT_OF_SERVICE'].includes(status)) return false;
+      // SOLD treated same as OUT_OF_SERVICE — never available (2026-05-28).
+      if (['IN_MAINTENANCE', 'OUT_OF_SERVICE', 'SOLD'].includes(status)) return false;
       return !blockedIds.has(row.id);
     }).length;
     const utilizationPct = fleetTotal > 0 ? Number(((onRent / fleetTotal) * 100).toFixed(1)) : 0;
