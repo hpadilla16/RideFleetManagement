@@ -157,22 +157,22 @@ async function stampSideEffect({ id, field, value }) {
     throw new CheckoutSessionError(`Unknown side-effect field: ${field}`, 400);
   }
   const at = value || new Date();
-  const session = await prisma.checkoutSession.update({
+  // Read current events, append, then commit in a single update so the
+  // events log + side-effect timestamp move together. The previous
+  // version passed an empty object for events and exploded with a
+  // Prisma validation error.
+  const current = await prisma.checkoutSession.findUnique({
+    where: { id }, select: { events: true },
+  });
+  if (!current) throw new CheckoutSessionError('Session not found', 404);
+  return prisma.checkoutSession.update({
     where: { id },
     data: {
       [field]: at,
-      events: { /* append below */ },
+      events: appendEvent(current.events, {
+        kind: 'SIDE_EFFECT', field, at: at.toISOString(),
+      }),
     },
-  });
-  // Append event in a follow-up update (Prisma doesn't support nested
-  // JSON append in one mutation).
-  const eventsJson = appendEvent(session.events, {
-    kind: 'SIDE_EFFECT',
-    field,
-    at: at.toISOString(),
-  });
-  return prisma.checkoutSession.update({
-    where: { id }, data: { events: eventsJson },
   });
 }
 
