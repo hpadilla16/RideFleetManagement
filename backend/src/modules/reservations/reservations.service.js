@@ -952,7 +952,13 @@ export const reservationsService = {
         : prisma.reservation.count({
             where: {
               ...where,
-              status: 'CHECKED_OUT'
+              status: 'CHECKED_OUT',
+              // Active definition — same as the dashboard's Active
+              // Reservations KPI. Excludes stale CHECKED_OUT rows
+              // (returnAt in the past) and grandfathered overdues.
+              pickupAt: { lte: new Date() },
+              returnAt: { gt: new Date() },
+              overdueIgnored: false
             }
           }),
       cachedCounters
@@ -987,7 +993,12 @@ export const reservationsService = {
       prisma.reservation.findFirst({
         where: {
           ...where,
-          status: 'CHECKED_OUT'
+          status: 'CHECKED_OUT',
+          // Next Return = the earliest CHECKED_OUT due back at or after
+          // now. Excludes stale past-due rows (would surface 4/1/2026
+          // returns next to a 5/27 timestamp) and grandfathered overdues.
+          returnAt: { gte: new Date() },
+          overdueIgnored: false
         },
         orderBy: [{ returnAt: 'asc' }],
         select: {

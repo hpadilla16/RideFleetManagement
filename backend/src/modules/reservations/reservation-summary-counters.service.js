@@ -85,10 +85,23 @@ export async function readFreshCounters({ tenantId, day, maxAgeMs = DEFAULT_MAX_
 export async function refreshCounters({ tenantId, day, dayStart, dayEnd } = {}) {
   if (!tenantId || !day || !dayStart || !dayEnd) return null;
   try {
+    const now = new Date();
     const [pickupsToday, returnsToday, checkedOut, feeAdvisories, noShows] = await Promise.all([
       prisma.reservation.count({ where: { tenantId, pickupAt: { gte: dayStart, lte: dayEnd } } }),
       prisma.reservation.count({ where: { tenantId, returnAt: { gte: dayStart, lte: dayEnd } } }),
-      prisma.reservation.count({ where: { tenantId, status: 'CHECKED_OUT' } }),
+      // checkedOut: ACTIVE definition (matches dashboard's Active
+      // Reservations KPI). CHECKED_OUT + within window + not grandfathered.
+      // Previously counted all CHECKED_OUT regardless of staleness, which
+      // surfaced ~145 on a fleet with only ~45 vehicles actually out.
+      prisma.reservation.count({
+        where: {
+          tenantId,
+          status: 'CHECKED_OUT',
+          pickupAt: { lte: now },
+          returnAt: { gt: now },
+          overdueIgnored: false
+        }
+      }),
       prisma.reservation.count({ where: { tenantId, notes: { contains: '[FEE_ADVISORY_OPEN' } } }),
       prisma.reservation.count({ where: { tenantId, status: 'NO_SHOW' } })
     ]);

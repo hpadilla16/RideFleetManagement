@@ -153,7 +153,7 @@ async function computeData({ tenantId, query }, deps = {}) {
         // Grace period: include CHECKED_OUT whose returnAt is up to 14 days
         // overdue. Past that = stale data, surfaced in the Overdue Returns
         // list for cleanup but not counted as on-rent here.
-        where: { status: { in: ACTIVE_RESERVATION_STATUSES }, returnAt: { gt: new Date(asOf.getTime() - 14 * 24 * 60 * 60 * 1000) } },
+        where: { status: { in: ACTIVE_RESERVATION_STATUSES }, returnAt: { gt: new Date(asOf.getTime() - 14 * 24 * 60 * 60 * 1000) }, overdueIgnored: false },
         orderBy: { pickupAt: 'desc' },
         take: 1,
         select: {
@@ -187,7 +187,7 @@ async function computeData({ tenantId, query }, deps = {}) {
             // Grace period: include CHECKED_OUT whose returnAt is up to 14 days
         // overdue. Past that = stale data, surfaced in the Overdue Returns
         // list for cleanup but not counted as on-rent here.
-        where: { status: { in: ACTIVE_RESERVATION_STATUSES }, returnAt: { gt: new Date(asOf.getTime() - 14 * 24 * 60 * 60 * 1000) } },
+        where: { status: { in: ACTIVE_RESERVATION_STATUSES }, returnAt: { gt: new Date(asOf.getTime() - 14 * 24 * 60 * 60 * 1000) }, overdueIgnored: false },
             select: { id: true }, take: 1,
           },
         },

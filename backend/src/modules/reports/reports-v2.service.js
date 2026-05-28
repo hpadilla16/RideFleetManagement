@@ -315,6 +315,10 @@ export async function getSnapshot({ tenantId, from, to, deps = {} } = {}) {
         pickupAt: { lte: now },
         returnAt: { gt: gracePeriodStart },
         vehicleId: { not: null },
+        // Grandfathered (2026-05-27) — physically returned, exclude
+        // from the "currently rented" set so available-count math
+        // matches the lot.
+        overdueIgnored: false,
       },
       select: { vehicleId: true },
     });

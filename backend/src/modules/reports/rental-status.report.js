@@ -155,13 +155,13 @@ function bucketReservations(reservations, asOf = new Date(), tz = DEFAULT_TENANT
     const ret = new Date(r.returnAt);
 
     if (r.status === 'CHECKED_OUT') {
-      // overdueIgnored=true rows are grandfathered stale data (2026-05-27
-      // cleanup) — they SHOULD still appear in the report (the vehicle
-      // is factually still out on rent), but they don't get the OVERDUE
-      // alarm. Route them to CURRENTLY_OUT instead. Non-ignored rows
-      // bucket normally.
-      if (ret < today && !r.overdueIgnored) buckets.OVERDUE.push(formatRow(r, today, tz));
-      else if (ret < tomorrow && !r.overdueIgnored) buckets.DUE_TODAY.push(formatRow(r, today, tz));
+      // Grandfathered overdues are filtered out at the query level
+      // (computeData where clause), so we don't need the special
+      // routing here anymore — everything that reaches the bucketer
+      // is by definition a live row that should fall into its natural
+      // bucket by returnAt.
+      if (ret < today) buckets.OVERDUE.push(formatRow(r, today, tz));
+      else if (ret < tomorrow) buckets.DUE_TODAY.push(formatRow(r, today, tz));
       else buckets.CURRENTLY_OUT.push(formatRow(r, today, tz));
     } else if (r.status === 'CHECKED_IN_UNPAID') {
       buckets.UNPAID_AT_CHECKIN.push(formatRow(r, today, tz));
@@ -189,6 +189,11 @@ async function computeData({ tenantId, query }, deps = {}) {
   const where = {
     tenantId,
     status: { in: ACTIVE_STATUSES },
+    // Drop grandfathered rows from the report entirely. Earlier
+    // iteration routed them to CURRENTLY_OUT for visibility, but Hector
+    // wants the cleaner "stale data is invisible" semantics across all
+    // surfaces (dashboard, reservations module, this report).
+    overdueIgnored: false,
   };
   if (locationId) where.pickupLocationId = locationId;
 

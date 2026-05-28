@@ -140,6 +140,9 @@ async function computeData({ tenantId, query }, deps = {}) {
       pickupAt: { lte: asOf },
       returnAt: { gt: gracePeriodStart },
       vehicleId: { not: null },
+      // Grandfathered overdues — physically returned, exclude from
+      // "on rent" so available-count agrees with the lot (2026-05-27).
+      overdueIgnored: false,
       ...(locationId ? { vehicle: { homeLocationId: locationId } } : {}),
     },
     select: { vehicleId: true },

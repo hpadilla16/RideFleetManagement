@@ -257,6 +257,9 @@ export const reportsService = {
       pickupAt: { lte: now },
       returnAt: { gt: gracePeriodStart },
       vehicleId: { not: null },
+      // Grandfathered rows are factually CHECKED_OUT in the DB but
+      // physically returned per Hector — exclude from "currently out".
+      overdueIgnored: false,
     };
 
     // "Active reservations" — strict definition per Hector: CHECKED_OUT
@@ -271,6 +274,8 @@ export const reportsService = {
       status: 'CHECKED_OUT',
       pickupAt: { lte: now },
       returnAt: { gt: now },
+      // Same grandfather filter as currentlyOutWhere above.
+      overdueIgnored: false,
     };
 
     // "Overdue" — two operational issue types lumped into one bucket so the
