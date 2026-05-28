@@ -518,7 +518,15 @@ export const reportsService = {
         // (future bookings) AND any overdue rentals (which are counted
         // in overdueReservations above). This is the number rendered as
         // the Active Reservations KPI on the dashboard.
-        activeReservations: activeReservationsCount || 0
+        activeReservations: activeReservationsCount || 0,
+        // 2026-05-28: vehicleIds derived from active reservations + blocks
+        // exposed so the Vehicles page can compute its Available / On Rent
+        // tiles without inheriting the Vehicle.status drift (every vehicle
+        // in production is stuck at AVAILABLE regardless of reality).
+        // Arrays not Sets so JSON serialization works; consumer rebuilds
+        // the Set on the FE.
+        currentlyOutVehicleIds: Array.from(currentlyOutIds),
+        blockedVehicleIds: Array.from(blockedIds),
       },
       fleetHoldBreakdown: [
         { id: 'migration', label: 'Migration Held', count: migrationBlockIds.size, note: 'Legacy-contract units still committed outside the current native workflow.' },

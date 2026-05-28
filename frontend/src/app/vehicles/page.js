@@ -155,6 +155,11 @@ function VehiclesInner({ token, me, logout }) {
   const isSuper = role === 'SUPER_ADMIN';
   const canManageVehicleSetup = ['SUPER_ADMIN', 'ADMIN', 'OPS'].includes(role);
   const [vehicles, setVehicles] = useState([]);
+  // Overview KPIs cached so the Fleet Ops Hub tiles can use the same
+  // canonical numbers the dashboard does (currentlyOutVehicleIds +
+  // blockedVehicleIds + counts derived from active reservations rather
+  // than Vehicle.status). Set in load() below. 2026-05-28.
+  const [overviewKpis, setOverviewKpis] = useState(null);
   const [customers, setCustomers] = useState([]);
   const [locations, setLocations] = useState([]);
   const [vehicleTypes, setVehicleTypes] = useState([]);
@@ -238,10 +243,18 @@ function VehiclesInner({ token, me, logout }) {
     // Customers are intentionally NOT loaded here. With ~300+ customers per tenant
     // the response was ~48MB and added 10s to every vehicles-page load. They are now
     // loaded lazily by ensureCustomersLoaded() the first time the rental modal opens.
-    const [v, l, vt] = await Promise.allSettled([
+    //
+    // 2026-05-28: also pull /api/reports/overview so we can build the
+    // Available / On Rent / Service Risk tiles from active reservation
+    // data instead of from Vehicle.status (which is heavily drifted in
+    // production — every vehicle has status=AVAILABLE regardless of
+    // actual state). The overview endpoint returns currentlyOutVehicleIds
+    // + blockedVehicleIds as arrays for this purpose.
+    const [v, l, vt, ov] = await Promise.allSettled([
       api(scopedPath('/api/vehicles'), {}, token),
       canManageVehicleSetup ? api(scopedPath('/api/locations'), {}, token) : Promise.resolve([]),
-      canManageVehicleSetup ? api(scopedPath('/api/vehicle-types'), {}, token) : Promise.resolve([])
+      canManageVehicleSetup ? api(scopedPath('/api/vehicle-types'), {}, token) : Promise.resolve([]),
+      api(scopedPath('/api/reports/overview'), {}, token),
     ]);
     setCustomers([]);
     if (v.status === 'fulfilled') setVehicles(v.value || []);
@@ -250,6 +263,8 @@ function VehiclesInner({ token, me, logout }) {
     else setLocations([]);
     if (vt.status === 'fulfilled') setVehicleTypes(vt.value || []);
     else setVehicleTypes([]);
+    if (ov.status === 'fulfilled') setOverviewKpis(ov.value?.kpis || null);
+    else setOverviewKpis(null);
 
     if (v.status === 'rejected') setMsg(v.reason?.message || 'Unable to load vehicles');
     else if (canManageVehicleSetup && [l, vt].some((row) => row.status === 'rejected')) setMsg('Vehicles loaded with limited supporting data');
@@ -307,13 +322,40 @@ function VehiclesInner({ token, me, logout }) {
     const migrationHolds = activeBlocks.filter((row) => isMigrationHold(row.block));
     const serviceBlocks = activeBlocks.filter((row) => isServiceHold(row.block));
     const washBlocks = activeBlocks.filter((row) => isWashHold(row.block));
-    const available = vehicles.filter((v) => String(v?.status || '').toUpperCase() === 'AVAILABLE' && !activeAvailabilityBlock(v));
-    const onRentIds = new Set(vehicles.filter((v) => String(v?.status || '').toUpperCase() === 'ON_RENT').map((v) => v.id));
+
+    // 2026-05-28: derive on-rent and blocked sets from the dashboard's
+    // canonical kpis when available. This corrects the Vehicle.status
+    // drift problem — in production all vehicles are status=AVAILABLE
+    // regardless of whether they're rented, so the previous logic
+    // showed On Rent: 0 even when 45 cars were out.
+    const kpiOnRentIds = new Set(overviewKpis?.currentlyOutVehicleIds || []);
+    const kpiBlockedIds = new Set(overviewKpis?.blockedVehicleIds || []);
+
+    // On Rent: trust the kpi-derived set first, fall back to status drift.
+    const onRentIds = new Set([
+      ...kpiOnRentIds,
+      ...vehicles.filter((v) => String(v?.status || '').toUpperCase() === 'ON_RENT').map((v) => v.id),
+    ]);
     migrationHolds.forEach((row) => onRentIds.add(row.vehicle.id));
+    const onRent = vehicles.filter((v) => onRentIds.has(v.id));
+
+    // Service risk: IN_MAINTENANCE/OUT_OF_SERVICE status + service blocks.
     const serviceRiskIds = new Set(vehicles.filter((v) => ['IN_MAINTENANCE', 'OUT_OF_SERVICE'].includes(String(v?.status || '').toUpperCase())).map((v) => v.id));
     serviceBlocks.forEach((row) => serviceRiskIds.add(row.vehicle.id));
-    const onRent = vehicles.filter((v) => onRentIds.has(v.id));
     const serviceRisk = vehicles.filter((v) => serviceRiskIds.has(v.id));
+
+    // Available: status=AVAILABLE AND not on-rent (per kpis) AND not
+    // blocked AND not service-risk. The previous version only checked
+    // for an active availability block, missing the on-rent case.
+    const available = vehicles.filter((v) => {
+      const status = String(v?.status || '').toUpperCase();
+      if (status !== 'AVAILABLE') return false;
+      if (onRentIds.has(v.id)) return false;
+      if (kpiBlockedIds.has(v.id)) return false;
+      if (serviceRiskIds.has(v.id)) return false;
+      if (activeAvailabilityBlock(v)) return false;
+      return true;
+    });
     const carSharing = vehicles.filter((v) => ['CAR_SHARING_ONLY', 'BOTH'].includes(String(v?.fleetMode || '').toUpperCase()));
 
     const nextItems = [
@@ -369,7 +411,7 @@ function VehiclesInner({ token, me, logout }) {
       carSharing: carSharing.length,
       nextItems
     };
-  }, [vehicles]);
+  }, [vehicles, overviewKpis]);
 
   const openRent = (vehicle) => {
     const now = new Date();
