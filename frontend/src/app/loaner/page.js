@@ -663,18 +663,18 @@ function LoanerProgramInner({ token, me, logout }) {
       <section className="glass card-lg page-hero">
         <div className="hero-grid">
           <div className="hero-copy">
-            <span className="eyebrow">Dealership Loaner Foundation</span>
-            <h1 className="page-title" style={{ fontSize: 'clamp(30px, 5vw, 54px)', lineHeight: 1.02 }}>
-              Service-lane loaners built on the same reservation, agreement, payment, and inspection spine.
+            <span className="eyebrow">Dealership Loaner Program</span>
+            <h1 className="page-title" style={{ fontSize: 'clamp(28px, 4.5vw, 44px)', lineHeight: 1.05 }}>
+              Run the loaner lane.
             </h1>
             <p>
-              This first slice covers intake, repair-order metadata, courtesy and insurance-backed loaners, quick search,
-              and direct jump-off into the same operational workflow the rest of the platform already uses.
+              Intake, vehicle handoff, return inspection, billing, and dealer statements — all in one place.
+              Only vehicles tagged <strong>Loaner</strong> or <strong>Flex</strong> in the fleet show up here;
+              tag more in the <Link href="/vehicles">Vehicles page</Link> to grow the pool.
             </p>
             <div className="hero-meta">
               <span className="hero-pill">Courtesy + customer-pay</span>
-              <span className="hero-pill">Repair order tracking</span>
-              <span className="hero-pill">Ready for service lane ops</span>
+              <span className="hero-pill">Repair-order tracking</span>
               {(dashboard?.badges || []).map((badge) => (
                 <span key={badge.label} className={`hero-pill ${badge.tone === 'warn' ? 'hero-pill-warn' : ''}`} title={badge.detail}>
                   {badge.label}
@@ -684,17 +684,28 @@ function LoanerProgramInner({ token, me, logout }) {
           </div>
           <div className="glass card section-card">
             <div className="section-title">Loaner Snapshot</div>
+            <p className="ui-muted" style={{ marginTop: 0 }}>State of the lane right now — grouped so you scan top to bottom.</p>
+
+            <div className="label" style={{ marginTop: 14, marginBottom: 6, fontWeight: 600 }}>Today's lane</div>
+            <div className="metric-grid">
+              <div className="metric-card"><span className="label">Pickups Today</span><strong>{metrics.pickupsToday}</strong></div>
+              <div className="metric-card"><span className="label">Due Back Today</span><strong>{metrics.dueBackToday}</strong></div>
+              <div className="metric-card"><span className="label">Ready For Delivery</span><strong>{metrics.readyForDelivery}</strong></div>
+            </div>
+
+            <div className="label" style={{ marginTop: 14, marginBottom: 6, fontWeight: 600 }}>Active loaners</div>
             <div className="metric-grid">
               <div className="metric-card"><span className="label">Open Loaners</span><strong>{metrics.openLoaners}</strong></div>
               <div className="metric-card"><span className="label">Active Loaners</span><strong>{metrics.activeLoaners}</strong></div>
-              <div className="metric-card"><span className="label">Pickups Today</span><strong>{metrics.pickupsToday}</strong></div>
-              <div className="metric-card"><span className="label">Due Back Today</span><strong>{metrics.dueBackToday}</strong></div>
-              <div className="metric-card"><span className="label">Packet Pending</span><strong>{metrics.packetPending}</strong></div>
-              <div className="metric-card"><span className="label">Billing Attention</span><strong>{metrics.billingAttention}</strong></div>
-              <div className="metric-card"><span className="label">Return Exceptions</span><strong>{metrics.returnExceptions}</strong></div>
-              <div className="metric-card"><span className="label">Ready For Delivery</span><strong>{metrics.readyForDelivery}</strong></div>
+            </div>
+
+            <div className="label" style={{ marginTop: 14, marginBottom: 6, fontWeight: 600 }}>Needs attention</div>
+            <div className="metric-grid">
               <div className="metric-card"><span className="label">Overdue Returns</span><strong>{metrics.overdueReturns}</strong></div>
               <div className="metric-card"><span className="label">Service Delays</span><strong>{metrics.serviceDelays}</strong></div>
+              <div className="metric-card"><span className="label">Return Exceptions</span><strong>{metrics.returnExceptions}</strong></div>
+              <div className="metric-card"><span className="label">Packet Pending</span><strong>{metrics.packetPending}</strong></div>
+              <div className="metric-card"><span className="label">Billing Attention</span><strong>{metrics.billingAttention}</strong></div>
             </div>
           </div>
         </div>
@@ -710,15 +721,15 @@ function LoanerProgramInner({ token, me, logout }) {
         <div className="app-banner">
           <div className="row-between" style={{ alignItems: 'start', marginBottom: 0 }}>
             <div>
-              <span className="eyebrow">Loaner Shift</span>
+              <span className="eyebrow">Quick Actions</span>
               <h2 className="page-title" style={{ marginTop: 6 }}>
-                Welcome back{me?.firstName ? `, ${me.firstName}` : ''}. The lane is ready.
+                Hi{me?.firstName ? ` ${me.firstName}` : ''} — what's first?
               </h2>
               <p className="ui-muted">
-                Jump into intake, returns, billing, and statement work without hunting through the full queue.
+                Jump straight to intake, search, queues, or the monthly packet.
               </p>
             </div>
-            <span className="status-chip neutral">Service Lane Hub</span>
+            <span className="status-chip neutral">Quick Actions</span>
           </div>
           <div className="app-card-grid compact">
             <div className="info-tile">
@@ -756,10 +767,10 @@ function LoanerProgramInner({ token, me, logout }) {
       <section className="glass card-lg section-card" style={{ marginBottom: 18 }}>
         <div className="row-between">
           <div>
-            <div className="section-title">Service Lane Priority Board</div>
-            <p className="ui-muted">The first delivery, return, billing blocker, and SLA risk the lane should touch next.</p>
+            <div className="section-title">What needs attention now</div>
+            <p className="ui-muted">The single most urgent item in each lane: next delivery, next return, next billing blocker, next SLA risk. Tap any card to act.</p>
           </div>
-          <span className="status-chip neutral">Mobile Ops</span>
+          <span className="status-chip neutral">Top of queue</span>
         </div>
         {loading && !dashboard ? (
           <div className="app-card-grid compact" aria-busy="true" aria-label="Loading priority board">
@@ -797,19 +808,15 @@ function LoanerProgramInner({ token, me, logout }) {
         <section id="loaner-lookup" className="glass card-lg section-card">
           <div className="row-between">
             <div>
-              <div className="section-title">Loaner Lookup</div>
-              <p className="ui-muted">Search by reservation, RO number, claim, customer, advisor, or service vehicle.</p>
+              <div className="section-title">Find a loaner</div>
+              <p className="ui-muted">Search by reservation, RO number, claim, customer, advisor, or service vehicle. Filter the result and export when you need it.</p>
             </div>
             <div className="inline-actions">
-              <span className="status-chip neutral">Service Lane</span>
               <button type="button" className="button-subtle" onClick={exportBillingCsv} disabled={exportingBilling}>
-                {exportingBilling ? 'Exporting billing…' : 'Export Billing CSV'}
-              </button>
-              <button type="button" className="button-subtle" onClick={exportStatementCsv} disabled={exportingStatement}>
-                {exportingStatement ? 'Exporting statement…' : 'Export Statement CSV'}
+                {exportingBilling ? 'Exporting…' : 'Export to CSV'}
               </button>
               <button type="button" className="button-subtle" onClick={printStatementPacket} disabled={printing}>
-                {printing ? 'Preparing packet…' : 'Print Monthly Packet'}
+                {printing ? 'Preparing packet…' : 'Print monthly packet'}
               </button>
             </div>
           </div>
@@ -892,10 +899,14 @@ function LoanerProgramInner({ token, me, logout }) {
         <section id="loaner-intake" className="glass card-lg section-card">
           <div className="row-between">
             <div>
-              <div className="section-title">Quick Intake</div>
-              <p className="ui-muted">Create a loaner directly from the service lane and hand it off into the normal workflow.</p>
+              <div className="section-title">Start a loaner</div>
+              <p className="ui-muted">
+                Create a loaner reservation in seconds — the customer, vehicle, and service info you enter here flows into the same agreement, payment, and inspection workflow as a regular rental.
+                Set the typical window with the buttons on the right and tweak details below.
+              </p>
             </div>
             <div className="inline-actions">
+              <span className="label" style={{ alignSelf: 'center', marginRight: 4 }}>Quick window:</span>
               <button type="button" className="button-subtle" onClick={() => applyQuickWindow(2)}>2 Days</button>
               <button type="button" className="button-subtle" onClick={() => applyQuickWindow(5)}>5 Days</button>
             </div>
@@ -1088,10 +1099,10 @@ function LoanerProgramInner({ token, me, logout }) {
       <section id="loaner-queues" className="glass card-lg section-card" style={{ marginTop: 18 }}>
         <div className="row-between">
           <div>
-            <div className="section-title">Loaner Queues</div>
-            <p className="ui-muted">Driveway and service-lane visibility for outgoing, active, and returning loaners.</p>
+            <div className="section-title">All loaners by stage</div>
+            <p className="ui-muted">Every loaner currently in the lane, grouped by where it is in its lifecycle: intake → active → return → advisor follow-up → billing → alerts. Use the tabs to focus on one stage.</p>
           </div>
-          <span className="status-chip neutral">Foundation Surface</span>
+          <span className="status-chip neutral">Lifecycle view</span>
         </div>
 
         <div className="app-banner-list">
