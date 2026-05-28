@@ -938,12 +938,16 @@ function buildSignedTermsBlock(agreement, ctx) {
   const cfg = ctx?.cfg || {};
   const companyName = esc(cfg.companyName || '');
 
+  // 2026-05-28 — wrap in a light-theme container so the appended page
+  // renders white regardless of the tenant's base template colors.
+  // The outer div carries inline `all: revert` to break inheritance
+  // from the tenant CSS, then we re-establish a clean print stylesheet.
   return `
-    <div style="page-break-before:always;padding:40px;font-family:-apple-system,BlinkMacSystemFont,'Helvetica Neue',Arial,sans-serif;color:#111827">
-      <div style="display:flex;justify-content:space-between;align-items:center;margin:0 0 24px;padding:0 0 16px;border-bottom:1px solid #111827">
+    <div style="page-break-before:always;background:#FFFFFF;color:#111827;padding:40px;font-family:-apple-system,BlinkMacSystemFont,'Helvetica Neue',Arial,sans-serif;all:revert">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin:0 0 24px;padding:0 0 16px;border-bottom:1px solid #111827;background:#FFFFFF">
         <div>
           <div style="font-size:11px;color:#6B7280;letter-spacing:.08em;text-transform:uppercase">Signed acknowledgement</div>
-          <div style="font-size:18px;font-weight:600;margin-top:4px">Terms &amp; Conditions</div>
+          <div style="font-size:18px;font-weight:600;margin-top:4px;color:#111827">Terms &amp; Conditions</div>
           <div style="font-size:11px;color:#6B7280;margin-top:2px">Agreement ${esc(agreement.agreementNumber)} · ${companyName}</div>
         </div>
         ${logo}
@@ -954,7 +958,7 @@ function buildSignedTermsBlock(agreement, ctx) {
         reference and was made available at the time of signing.
       </p>
       ${sectionRows}
-      <div style="margin-top:28px;padding-top:18px;border-top:1px solid #111827;page-break-inside:avoid">
+      <div style="margin-top:28px;padding-top:18px;border-top:1px solid #111827;page-break-inside:avoid;background:#FFFFFF">
         <div style="font-size:11px;color:#6B7280;letter-spacing:.06em;text-transform:uppercase;margin:0 0 8px">Renter signature</div>
         ${finalSignatureBlock}
         <div style="font-size:12px;margin-top:6px;color:#111827">${signerName}</div>
@@ -987,11 +991,11 @@ function buildDeclinedInsuranceBlock(agreement, ctx) {
       : '<div style="color:#9CA3AF;font-size:12px">(no signature on file)</div>';
 
   return `
-    <div style="page-break-before:always;padding:40px;font-family:-apple-system,BlinkMacSystemFont,'Helvetica Neue',Arial,sans-serif;color:#111827">
-      <div style="display:flex;justify-content:space-between;align-items:center;margin:0 0 24px;padding:0 0 16px;border-bottom:1px solid #111827">
+    <div style="page-break-before:always;background:#FFFFFF;color:#111827;padding:40px;font-family:-apple-system,BlinkMacSystemFont,'Helvetica Neue',Arial,sans-serif;all:revert">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin:0 0 24px;padding:0 0 16px;border-bottom:1px solid #111827;background:#FFFFFF">
         <div>
           <div style="font-size:11px;color:#6B7280;letter-spacing:.08em;text-transform:uppercase">Addendum</div>
-          <div style="font-size:18px;font-weight:600;margin-top:4px">Declined insurance</div>
+          <div style="font-size:18px;font-weight:600;margin-top:4px;color:#111827">Declined insurance</div>
           <div style="font-size:11px;color:#6B7280;margin-top:2px">Agreement ${esc(agreement.agreementNumber)} · ${companyName}</div>
         </div>
         ${logo}
@@ -1008,7 +1012,7 @@ function buildDeclinedInsuranceBlock(agreement, ctx) {
         billed to the card on file in accordance with the deposit
         authorization section of the rental agreement.
       </p>
-      <div style="margin-top:32px;padding-top:18px;border-top:1px solid #111827">
+      <div style="margin-top:32px;padding-top:18px;border-top:1px solid #111827;background:#FFFFFF">
         <div style="font-size:11px;color:#6B7280;letter-spacing:.06em;text-transform:uppercase;margin:0 0 8px">Renter signature</div>
         ${sigBlock}
         <div style="font-size:12px;margin-top:6px;color:#111827">${esc(agreement.tcSignerName || `${agreement.customerFirstName || ''} ${agreement.customerLastName || ''}`.trim() || '—')}</div>
@@ -2716,7 +2720,16 @@ export const rentalAgreementsService = {
     const chargesRowsHtml = chargesRows || '<tr><td colspan="4">No charges recorded</td></tr>';
     const paymentsRowsHtml = paymentsForPrint.length ? paymentsRows : '<tr><td colspan="5">No payments recorded</td></tr>';
 
-    const rawSigUrl = String(agreement.reservation?.signatureDataUrl || '').trim();
+    // Fall back to the new checkout-wizard-v2 T&C signature when the
+    // legacy pre-checkin path didn't capture one. This puts the same
+    // signature image into both the legacy 'Customer Signature' block
+    // on page 2 AND the new 'Signed acknowledgement' section we
+    // append later, so neither version of the print looks blank.
+    const rawSigUrl = String(
+      agreement.reservation?.signatureDataUrl ||
+      agreement.tcSignatureDataUrl ||
+      ''
+    ).trim();
     const signatureImageBlock = rawSigUrl
       ? `<img src="${rawSigUrl}" alt="Signature" style="max-height:60px;max-width:320px;width:auto;height:auto;display:block;object-fit:contain" />`
       : '<div class="sig-meta">No signature on file</div>';
