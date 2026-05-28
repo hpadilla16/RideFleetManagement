@@ -98,12 +98,32 @@ function CheckoutWizardV2({ token, me, logout }) {
     const interval = waitingSteps.has(session.currentStep) ? 1500 : 6000;
     pollTimer.current = setInterval(async () => {
       try {
-        const fresh = await api(`/api/checkout-sessions/${session.id}`, {}, token);
+        const fresh = await api(`/api/checkout-sessions/${session.id}`, { bypassCache: true }, token);
         setSession((curr) => (curr && fresh.updatedAt !== curr.updatedAt ? fresh : curr));
       } catch { /* swallow — next tick retries */ }
     }, interval);
     return () => clearInterval(pollTimer.current);
   }, [session?.id, session?.currentStep, session?.updatedAt, token]);
+
+  // Auto-advance when a side-effect stamp arrives out-of-band. The
+  // customer signing on their phone stamps tcCompletedAt; the Spin
+  // webhook stamps paymentCompletedAt; the mobile inspection page
+  // stamps inspectionCompletedAt / customerSignedAt. The wizard
+  // observes the next poll and advances without the agent having to
+  // press anything.
+  useEffect(() => {
+    if (!session?.id) return;
+    if (session.currentStep === 'TC_PENDING' && session.tcCompletedAt) {
+      advance('TC_SIGNED');
+    } else if (session.currentStep === 'PAYMENT_PENDING' && session.paymentCompletedAt) {
+      advance('PAID');
+    } else if (session.currentStep === 'INSPECTION_IN_PROGRESS' && session.inspectionCompletedAt) {
+      advance('CUSTOMER_SIGN_PENDING');
+    } else if (session.currentStep === 'CUSTOMER_SIGN_PENDING' && session.customerSignedAt) {
+      advance('FINALIZING');
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [session?.currentStep, session?.tcCompletedAt, session?.paymentCompletedAt, session?.inspectionCompletedAt, session?.customerSignedAt]);
 
   const advance = async (toStep, metadata) => {
     try {
