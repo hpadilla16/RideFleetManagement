@@ -78,6 +78,127 @@ export default function ReservationsPage() {
   return <AuthGate>{({ token, me, logout }) => <ReservationsInner token={token} me={me} logout={logout} />}</AuthGate>;
 }
 
+// CustomerSearch — type-to-search picker for the new-reservation modal.
+// The native <select> with thousands of customers became unusable; this
+// component debounces the input (250ms) and queries the backend with
+// ?q=... so the agent can find a customer by name, phone, or email
+// without scrolling. The backend already exposes a tenant-scoped LIKE
+// search across all four fields (customers.service.js list). Picked
+// customers are cached locally so the selected-state display works even
+// for customers who weren't in the initial 5000-row picker payload.
+// 2026-05-28.
+function CustomerSearch({ value, initialCustomers, onChange, token, scopedPath }) {
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState('');
+  const [debouncedQuery, setDebouncedQuery] = useState('');
+  const [results, setResults] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [pickedCache, setPickedCache] = useState({});
+
+  // Debounce the input so we don't fire a request on every keystroke.
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedQuery(query.trim()), 250);
+    return () => clearTimeout(t);
+  }, [query]);
+
+  // Run the server-side search. Cancels in-flight requests when the
+  // query changes again so we don't race / show stale results.
+  useEffect(() => {
+    if (!debouncedQuery) { setResults([]); return; }
+    let cancelled = false;
+    setLoading(true);
+    api(scopedPath(`/api/customers?q=${encodeURIComponent(debouncedQuery)}&limit=50`), {}, token)
+      .then((rows) => { if (!cancelled) setResults(Array.isArray(rows) ? rows : []); })
+      .catch(() => { if (!cancelled) setResults([]); })
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
+  }, [debouncedQuery, token, scopedPath]);
+
+  // Look up the selected customer in: local cache (just-picked) →
+  // initialCustomers (loaded once on modal open). Either source is fine
+  // since both share the same slim shape from /api/customers.
+  const selected = value ? (pickedCache[value] || (initialCustomers || []).find((c) => c.id === value)) : null;
+
+  const pick = (c) => {
+    setPickedCache((prev) => ({ ...prev, [c.id]: c }));
+    onChange(c.id);
+    setQuery('');
+    setOpen(false);
+  };
+
+  const clear = () => {
+    onChange('');
+    setQuery('');
+    setOpen(false);
+  };
+
+  if (selected) {
+    return (
+      <div style={{
+        display: 'flex', alignItems: 'center', gap: 8,
+        padding: '8px 10px', background: '#F3F4F6',
+        border: '1px solid #D1D5DB', borderRadius: 6,
+      }}>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ fontWeight: 500, fontSize: 13 }}>{selected.firstName} {selected.lastName}</div>
+          <div style={{ fontSize: 11, color: '#6B7280', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            {selected.phone || ''}{selected.email ? ` · ${selected.email}` : ''}
+          </div>
+        </div>
+        <button type="button" onClick={clear} style={{ fontSize: 11, padding: '4px 8px' }}>Change</button>
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ position: 'relative' }}>
+      <input
+        type="text"
+        placeholder="Type name, phone, or email…"
+        value={query}
+        onChange={(e) => { setQuery(e.target.value); setOpen(true); }}
+        onFocus={() => setOpen(true)}
+        onBlur={() => setTimeout(() => setOpen(false), 150)}
+        autoComplete="off"
+      />
+      {open && (query.length > 0) && (
+        <div style={{
+          position: 'absolute', top: '100%', left: 0, right: 0, zIndex: 50,
+          background: 'white', border: '1px solid #D1D5DB',
+          borderRadius: 6, marginTop: 4, maxHeight: 260, overflowY: 'auto',
+          boxShadow: '0 4px 12px rgba(0,0,0,0.10)',
+        }}>
+          {loading && (
+            <div style={{ padding: '8px 10px', fontSize: 12, color: '#6B7280' }}>Searching…</div>
+          )}
+          {!loading && debouncedQuery && results.length === 0 && (
+            <div style={{ padding: '8px 10px', fontSize: 12, color: '#6B7280' }}>
+              No customer matches “{debouncedQuery}”.
+            </div>
+          )}
+          {results.map((c) => (
+            <div
+              key={c.id}
+              onMouseDown={(e) => { e.preventDefault(); pick(c); }}
+              style={{
+                padding: '8px 10px', cursor: 'pointer',
+                borderBottom: '1px solid #F3F4F6',
+              }}
+            >
+              <div style={{ fontSize: 13, fontWeight: 500 }}>
+                {c.firstName} {c.lastName}
+              </div>
+              <div style={{ fontSize: 11, color: '#6B7280' }}>
+                {c.phone || ''}{c.email ? ` · ${c.email}` : ''}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function ReservationsInner({ token, me, logout }) {
   const router = useRouter();
   const role = String(me?.role || '').toUpperCase().trim();
@@ -876,10 +997,13 @@ function ReservationsInner({ token, me, logout }) {
                 </div>
                 <div className="stack">
                   <label className="label">Customer*</label>
-                  <select value={createForm.customerId} onChange={(e) => setCreateForm({ ...createForm, customerId: e.target.value })}>
-                    <option value="">Select</option>
-                    {customers.map((c) => <option key={c.id} value={c.id}>{c.firstName} {c.lastName} · {c.phone}</option>)}
-                  </select>
+                  <CustomerSearch
+                    value={createForm.customerId}
+                    initialCustomers={customers}
+                    onChange={(id) => setCreateForm({ ...createForm, customerId: id })}
+                    token={token}
+                    scopedPath={scopedPath}
+                  />
                 </div>
               </div>
 
