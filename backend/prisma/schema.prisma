@@ -13,6 +13,13 @@ enum VehicleStatus {
   ON_RENT
   IN_MAINTENANCE
   OUT_OF_SERVICE
+  // SOLD (2026-05-28) — vehicle has been sold and is no longer in the
+  // rental fleet. Differs from OUT_OF_SERVICE (which is a temporary or
+  // permanent operational hold, e.g. totaled / retired). SOLD vehicles
+  // are excluded from totalFleet counts, availability searches, and
+  // the planner. Once a vehicle is SOLD it shouldn't be reactivated;
+  // sales are terminal.
+  SOLD
 }
 
 enum ReservationStatus {

@@ -297,7 +297,7 @@ export async function getSnapshot({ tenantId, from, to, deps = {} } = {}) {
   const blockedVehicleIds = new Set();
   try {
     totalFleet = await prisma.vehicle.count({
-      where: { tenantId, status: { not: 'OUT_OF_SERVICE' } },
+      where: { tenantId, status: { notIn: ['OUT_OF_SERVICE', 'SOLD'] } },
     });
   } catch { /* ignore */ }
   try {

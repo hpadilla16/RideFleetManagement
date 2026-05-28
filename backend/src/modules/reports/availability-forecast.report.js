@@ -382,11 +382,10 @@ async function computeData({ tenantId, from, to, query }, deps = {}) {
   const days = [];
   for (let i = 0; i < safeNumDays; i++) days.push(addDaysInTz(fromDate, i));
 
-  // 1. Vehicle types + capacity (filtered by location if specified)
-  // 2026-05-25 (followup #16): VehicleStatus enum has no RETIRED member.
-  // Use OUT_OF_SERVICE as the "exclude from forecast" sink for now. When
-  // we add a real RETIRED status to the enum + migration, switch this back.
-  const vehicleWhere = { status: { not: 'OUT_OF_SERVICE' } };
+  // 1. Vehicle types + capacity (filtered by location if specified).
+  // Exclude OUT_OF_SERVICE (retired/totaled holds) AND SOLD (terminal —
+  // 2026-05-28). Both fall out of fleet capacity for forecasting.
+  const vehicleWhere = { status: { notIn: ['OUT_OF_SERVICE', 'SOLD'] } };
   if (locationId) vehicleWhere.homeLocationId = locationId;
   const vehicleTypes = await prisma.vehicleType.findMany({
     where: { tenantId },
