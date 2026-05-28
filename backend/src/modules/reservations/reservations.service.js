@@ -136,6 +136,11 @@ const reservationListSelect = {
   bookingChannel: true,
   pickupAt: true,
   returnAt: true,
+  // overdueIgnored: surfaced to the FE so the dashboard's client-side
+  // overdue fallback respects the grandfather flag (2026-05-27). The
+  // dashboard tile is the canonical consumer; UI list views also use
+  // it to skip already-acknowledged stale rows.
+  overdueIgnored: true,
   pickupLocationId: true,
   returnLocationId: true,
   customerId: true,

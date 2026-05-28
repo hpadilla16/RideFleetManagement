@@ -397,9 +397,16 @@ function DashboardInner({ token, me, logout }) {
   // canonical count (filtered by tenant + location server-side); FE falls
   // back to its own list filter in case the backend KPI isn't available
   // yet (e.g. pre-deploy).
+  //
+  // 2026-05-27: client-side fallback also respects overdueIgnored=true
+  // (grandfathered stale data). Without this, the fallback over-counted
+  // by ~400 whenever the backend dropped the kpi from its response,
+  // since the FE list view doesn't filter ignored rows out of
+  // `reservations` by default.
   const overdueReservations = Number(
     kpis.overdueReservations ?? reservations.filter((r) =>
-      r.status === 'CHECKED_OUT' && r.returnAt && new Date(r.returnAt) <= new Date()
+      r.status === 'CHECKED_OUT' && r.returnAt &&
+      new Date(r.returnAt) <= new Date() && !r.overdueIgnored
     ).length
   );
   const feeAdvisoryCount = reservations.filter((r) => /\[FEE_ADVISORY_OPEN\s+/i.test(String(r.notes || ''))).length;
@@ -411,12 +418,19 @@ function DashboardInner({ token, me, logout }) {
   const isToday = boardDate === todayStr;
   const boardLabel = isToday ? 'Today' : new Date(boardDate + 'T12:00:00').toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric' });
   const pickups = reservations.filter((r) => wallClockDate(r.pickupAt) === boardDate && ['NEW', 'CONFIRMED'].includes(r.status));
-  // Match what the backend `resSummary.returnsToday` counts (every status
-  // whose returnAt falls inside today's tenant-TZ window) so the header and
-  // the list agree. CANCELLED + NO_SHOW are dropped because the customer
-  // isn't returning anything in those cases — the row is informational only
-  // and would just be noise in the agent's "today's returns" panel.
-  const returns = reservations.filter((r) => wallClockDate(r.returnAt) === boardDate && !['CANCELLED', 'NO_SHOW'].includes(r.status));
+  // Today's returns panel: vehicles still expected back. Drops:
+  //   • CANCELLED / NO_SHOW — customer never showed; nothing to return
+  //   • CHECKED_IN / CHECKED_IN_UNPAID — vehicle is already back, the
+  //     agent doesn't need to be reminded to receive it (was surfacing
+  //     already-closed rentals as "Next Return" — bug 2026-05-27)
+  // This also fixes the count/list mismatch in the Operations Board
+  // header by replacing the backend `resSummary.returnsToday` count
+  // with `returns.length` (see below) — the two queries disagreed when
+  // a return had been received earlier in the day.
+  const returns = reservations.filter((r) =>
+    wallClockDate(r.returnAt) === boardDate &&
+    !['CANCELLED', 'NO_SHOW', 'CHECKED_IN', 'CHECKED_IN_UNPAID'].includes(r.status)
+  );
   const timeline = reservations.slice().sort((a, b) => new Date(b.updatedAt) - new Date(a.updatedAt)).slice(0, 10);
   const workspaceOpsHub = useMemo(() => {
     const nextItems = [
@@ -582,7 +596,12 @@ function DashboardInner({ token, me, logout }) {
           </div>
         </div>
         <p className="label" style={{ marginTop: 6, marginBottom: 0 }}>
-          {boardLabel} — Pickups: <strong>{isToday && resSummary ? resSummary.pickupsToday : pickups.length}</strong> · Returns: <strong>{isToday && resSummary ? resSummary.returnsToday : returns.length}</strong>
+          {/* Counts mirror the filtered list shown below — using
+              resSummary.{pickups,returns}Today caused the header to
+              disagree with the list (e.g. "10 returns" but 9 cards)
+              because the backend summary doesn't drop already-received
+              returns. */}
+          {boardLabel} — Pickups: <strong>{pickups.length}</strong> · Returns: <strong>{returns.length}</strong>
         </p>
       </section>
 
