@@ -18,6 +18,7 @@ import { authRouter } from './modules/auth/auth.routes.js';
 import { rentalAgreementsRouter } from './modules/rental-agreements/rental-agreements.routes.js';
 import { addendumSignaturePublicRouter } from './modules/rental-agreements/addendum-signature-public.routes.js';
 import { checkoutSessionRouter, checkoutSessionPublicRouter } from './modules/checkout-session/checkout-session.routes.js';
+import { termsSigningPublicRouter } from './modules/checkout-session/terms-signing.routes.js';
 import { storeBoardRouter } from './modules/store-board/store-board.routes.js';
 import { storeBoardPublicRouter } from './modules/store-board/store-board-public.routes.js';
 import { assertAuthConfig } from './modules/auth/auth.config.js';
@@ -144,6 +145,10 @@ app.use('/api/rental-agreements', requireAuth, tenantRateLimit, requireModuleAcc
 // exchange from a customer's phone or the agent's mobile after a handoff.
 app.use('/api/checkout-sessions', requireAuth, tenantRateLimit, requireModuleAccess('reservations'), checkoutSessionRouter);
 app.use('/api/public/checkout-handoff', checkoutSessionPublicRouter);
+// Token-scoped T&C signing — no auth, token in URL is the auth.
+// JSON body limit raised on the parent app already; signature images
+// are ~50KB each so default Express limit (100KB) is fine for now.
+app.use('/api/sign', termsSigningPublicRouter);
 // 2026-05-25 — mount Reports v2 router FIRST so the new /list and per-slug
 // data/pdf/excel endpoints win. The legacy reportsRouter stays mounted as
 // a fallthrough for any path the v2 router doesn't define.
