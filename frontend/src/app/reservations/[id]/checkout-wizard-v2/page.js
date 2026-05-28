@@ -45,7 +45,15 @@ function CheckoutWizardV2({ token, me, logout }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [toast, setToast] = useState(null);
+  const [swapOpen, setSwapOpen] = useState(false);
   const pollTimer = useRef(null);
+
+  // Vehicle swap is locked once inspection photos are being captured.
+  // Mirrors the backend STEPS_BLOCKING_SWAP check so the button greys
+  // out instead of erroring on click.
+  const swapLocked = session && [
+    'INSPECTION_IN_PROGRESS', 'CUSTOMER_SIGN_PENDING', 'FINALIZING', 'CLOSED', 'CANCELLED',
+  ].includes(session.currentStep);
 
   // Find-or-create the session on mount. Both endpoints are idempotent.
   useEffect(() => {
@@ -134,6 +142,8 @@ function CheckoutWizardV2({ token, me, logout }) {
           reservation={reservation}
           session={session}
           onPause={pauseAndExit}
+          onSwapClick={() => setSwapOpen(true)}
+          swapLocked={swapLocked}
         />
         <StepRenderer
           session={session}
@@ -144,8 +154,124 @@ function CheckoutWizardV2({ token, me, logout }) {
         {toast && (
           <Toast kind={toast.kind} message={toast.message} onClose={() => setToast(null)} />
         )}
+        {swapOpen && (
+          <SwapVehicleModal
+            session={session}
+            reservation={reservation}
+            token={token}
+            onClose={() => setSwapOpen(false)}
+            onSwapped={(result) => {
+              setSwapOpen(false);
+              setReservation((r) => ({ ...r, vehicleId: result.toVehicleId }));
+              setToast({ kind: 'ok', message: 'Vehicle swapped' });
+            }}
+            onError={(msg) => setToast({ kind: 'error', message: msg })}
+          />
+        )}
       </div>
     </AppShell>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// SwapVehicleModal — list of eligible alternative vehicles. Backend
+// /api/checkout-sessions/:id/vehicle does the atomic swap of both
+// Reservation.vehicleId and RentalAgreement.vehicleId so they can't
+// drift apart (the bug we fixed earlier today on the extensions flow).
+// ---------------------------------------------------------------------------
+function SwapVehicleModal({ session, reservation, token, onClose, onSwapped, onError }) {
+  const [vehicles, setVehicles] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [busyId, setBusyId] = useState(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        // Pull the fleet; client-side filters out SOLD/OOS and the current
+        // assignment. Overlap check happens server-side on swap submit.
+        const list = await api('/api/vehicles?limit=500', {}, token);
+        if (!cancelled) setVehicles(Array.isArray(list) ? list : []);
+      } catch (err) {
+        if (!cancelled) onError(err?.message || 'Failed to load vehicles');
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [token]);
+
+  const eligible = useMemo(() => {
+    return vehicles.filter((v) => {
+      const status = String(v?.status || '').toUpperCase();
+      if (['SOLD', 'OUT_OF_SERVICE'].includes(status)) return false;
+      if (v.id === reservation.vehicleId) return false;
+      return true;
+    });
+  }, [vehicles, reservation.vehicleId]);
+
+  const submit = async (vehicleId) => {
+    setBusyId(vehicleId);
+    try {
+      const result = await api(`/api/checkout-sessions/${session.id}/vehicle`, {
+        method: 'POST',
+        body: JSON.stringify({ newVehicleId: vehicleId }),
+      }, token);
+      onSwapped(result);
+    } catch (err) {
+      onError(err?.message || 'Swap failed');
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  return (
+    <div onClick={onClose} style={{
+      position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', zIndex: 100,
+      display: 'flex', alignItems: 'center', justifyContent: 'center',
+    }}>
+      <div onClick={(e) => e.stopPropagation()} style={{
+        width: 'min(600px, 95vw)', maxHeight: '85vh', overflow: 'auto',
+        background: '#FFFFFF', borderRadius: 12, padding: 24,
+      }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+          <h3 style={{ margin: 0 }}>Change vehicle</h3>
+          <button onClick={onClose} style={{ background: 'none', border: 'none', fontSize: 20, cursor: 'pointer' }}>×</button>
+        </div>
+        {loading ? (
+          <div style={{ padding: 24, textAlign: 'center', color: '#6B7280' }}>Loading…</div>
+        ) : eligible.length === 0 ? (
+          <div style={{ padding: 24, textAlign: 'center', color: '#6B7280' }}>
+            No alternative vehicles available.
+          </div>
+        ) : (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+            {eligible.slice(0, 80).map((v) => (
+              <div key={v.id} style={{
+                display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                padding: '8px 12px', border: '0.5px solid #E5E7EB', borderRadius: 6,
+              }}>
+                <div>
+                  <div style={{ fontWeight: 500, fontSize: 14 }}>
+                    {v.plate} · {v.year} {v.make} {v.model}
+                  </div>
+                  <div style={{ fontSize: 11, color: '#6B7280' }}>
+                    {v.vehicleType?.name || '—'} · {v.status}
+                  </div>
+                </div>
+                <button
+                  style={{ ...ghostBtn, fontSize: 12 }}
+                  disabled={!!busyId}
+                  onClick={() => submit(v.id)}
+                >
+                  {busyId === v.id ? 'Swapping…' : 'Select'}
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
   );
 }
 
@@ -153,7 +279,7 @@ function CheckoutWizardV2({ token, me, logout }) {
 // Header — step tracker + pause button
 // ---------------------------------------------------------------------------
 
-function WizardHeader({ reservation, session, onPause }) {
+function WizardHeader({ reservation, session, onPause, onSwapClick, swapLocked }) {
   const currentNumber = stepNumber(session.currentStep);
   return (
     <div style={{ marginBottom: 24 }}>
@@ -166,7 +292,17 @@ function WizardHeader({ reservation, session, onPause }) {
             {reservation.customer?.firstName} {reservation.customer?.lastName}
           </div>
         </div>
-        <button onClick={onPause} style={pauseBtnStyle}>Save &amp; pause</button>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <button
+            onClick={onSwapClick}
+            disabled={swapLocked}
+            title={swapLocked ? 'Swap locked — inspection in progress' : 'Swap to a different vehicle'}
+            style={{ ...pauseBtnStyle, opacity: swapLocked ? 0.4 : 1 }}
+          >
+            Change vehicle
+          </button>
+          <button onClick={onPause} style={pauseBtnStyle}>Save &amp; pause</button>
+        </div>
       </div>
       <StepTracker currentStep={session.currentStep} currentNumber={currentNumber} />
     </div>

@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import { checkoutSessionService, CheckoutSessionError } from './checkout-session.service.js';
+import { vehicleSwapService } from './vehicle-swap.service.js';
 import logger from '../../lib/logger.js';
 
 export const checkoutSessionRouter = Router();
@@ -141,6 +142,26 @@ checkoutSessionRouter.post('/:id/handoff-token', async (req, res) => {
       actorUserId: req.user?.id,
     });
     res.status(201).json(token);
+  } catch (err) {
+    handleError(res, err);
+  }
+});
+
+// ---------------------------------------------------------------------
+// POST /api/checkout-sessions/:id/vehicle
+//   Body: { newVehicleId }. Atomic swap of Reservation.vehicleId AND
+//   RentalAgreement.vehicleId. Refuses when the session is past
+//   INSPECTION_IN_PROGRESS or when the new vehicle is unavailable.
+// ---------------------------------------------------------------------
+checkoutSessionRouter.post('/:id/vehicle', async (req, res) => {
+  try {
+    const { newVehicleId } = req.body || {};
+    const result = await vehicleSwapService.swapVehicle({
+      sessionId: req.params.id,
+      newVehicleId,
+      actorUserId: req.user?.id,
+    });
+    res.json(result);
   } catch (err) {
     handleError(res, err);
   }
