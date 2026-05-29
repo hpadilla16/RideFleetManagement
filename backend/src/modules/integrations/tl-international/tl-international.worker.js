@@ -458,16 +458,25 @@ export async function promoteWithMappings(extRes, opts) {
       }
     }
 
-    // Resolve vehicleTypeId if not passed and we have a category string
+    // Resolve vehicleTypeId if not passed and we have a category string.
+    //
+    // 2026-05-29 — fix: the previous query referenced `classCode` and
+    // `category` columns which do NOT exist on prod VehicleType (only
+    // `code`, `name`, `description`, `imageUrl`). The `.catch(() => null)`
+    // swallowed the Prisma validation error so every TL-promoted
+    // reservation landed with vehicleTypeId=null.
+    //
+    // AcrissCategoryMap.vehicleCategory already holds the target
+    // VehicleType.code (verified in prod: ICAR→SCAR maps to the
+    // "Standard" VehicleType with code="SCAR"; RFAR→FFAR maps to
+    // "Full Size SUV" code="FFAR"; CFAR→CFAR; MVAR→MVAR). So we
+    // match on `code` directly.
     let resolvedVehicleTypeId = vehicleTypeId;
     if (!resolvedVehicleTypeId && vehicleCategory) {
       const vt = await tx.vehicleType.findFirst({
         where: {
           tenantId: fresh.tenantId,
-          OR: [
-            { classCode: { equals: vehicleCategory, mode: 'insensitive' } },
-            { category: { equals: vehicleCategory, mode: 'insensitive' } },
-          ],
+          code: { equals: vehicleCategory, mode: 'insensitive' },
         },
         select: { id: true },
       }).catch(() => null);
