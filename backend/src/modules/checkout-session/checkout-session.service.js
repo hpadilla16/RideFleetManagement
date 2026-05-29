@@ -42,21 +42,43 @@ async function createForReservation({ reservationId, tenantId, actorUserId }) {
         'SESSION_TERMINAL',
       );
     }
+    // If a session exists but somehow has no agreement bound (legacy
+    // sessions from before this auto-create patch, or a session opened
+    // on a reservation that didn't have an agreement yet), back-fill
+    // the agreementId now so step 2 onward works.
+    if (!existing.agreementId) {
+      const agreementId = await ensureAgreementExists({ reservationId, tenantId, actorUserId });
+      if (agreementId) {
+        const updated = await prisma.checkoutSession.update({
+          where: { id: existing.id },
+          data: { agreementId },
+        });
+        logger.info('[checkout-session] backfilled agreementId on existing session', {
+          sessionId: existing.id, reservationId, agreementId,
+        });
+        return updated;
+      }
+    }
     return existing;
   }
 
-  // Bind the agreement at creation time if one already exists. (The
-  // current reservation flow auto-creates a DRAFT agreement on confirm,
-  // so most paths will have one ready.) If not, we'll link it later.
-  const agreement = await prisma.rentalAgreement.findUnique({
-    where: { reservationId },
-    select: { id: true },
-  });
+  // 2026-05-28 — auto-create the agreement if it doesn't exist.
+  //
+  // Pre-redesign, the legacy "Start Rental" button on the reservation
+  // detail page was the only path that created a RentalAgreement. The
+  // new state-machine wizard skips that button entirely, so reservations
+  // hitting the wizard fresh would have agreementId=null and step 2's
+  // terms-signing endpoint would 409 with "No agreement linked".
+  //
+  // Same fix as legacy: route through rentalAgreementsService.startFromReservation
+  // so the new agreement gets the customer snapshot, vehicle, pricing rows,
+  // and any pre-checkin charges copied over verbatim.
+  const agreementId = await ensureAgreementExists({ reservationId, tenantId, actorUserId });
 
   const session = await prisma.checkoutSession.create({
     data: {
       reservationId,
-      agreementId: agreement?.id || null,
+      agreementId: agreementId || null,
       tenantId: tenantId || null,
       currentStep: 'CONFIRMING',
       events: appendEvent('[]', {
@@ -68,10 +90,50 @@ async function createForReservation({ reservationId, tenantId, actorUserId }) {
   });
 
   logger.info('[checkout-session] created', {
-    sessionId: session.id, reservationId, agreementId: agreement?.id,
+    sessionId: session.id, reservationId, agreementId,
   });
 
   return session;
+}
+
+/**
+ * Find or create the RentalAgreement bound to this reservation. Returns
+ * the agreement id, or null when the reservation itself can't be loaded
+ * (caller decides whether to throw or proceed with agreementId=null).
+ *
+ * Dynamic-imports rental-agreements.service so the checkout module
+ * doesn't pull in Puppeteer + Sentry transitively at boot — same lazy
+ * pattern the email-on-finalize hook uses.
+ */
+async function ensureAgreementExists({ reservationId, tenantId, actorUserId }) {
+  const existing = await prisma.rentalAgreement.findUnique({
+    where: { reservationId },
+    select: { id: true },
+  });
+  if (existing) return existing.id;
+
+  try {
+    const { rentalAgreementsService } = await import('../rental-agreements/rental-agreements.service.js');
+    const scope = tenantId ? { tenantId } : null;
+    const created = await rentalAgreementsService.startFromReservation(reservationId, scope, actorUserId || null);
+    logger.info('[checkout-session] auto-created agreement', {
+      reservationId, agreementId: created?.id, actorUserId,
+    });
+    return created?.id || null;
+  } catch (err) {
+    // Surface the underlying error so the UI can show it instead of
+    // silently failing. The most likely cause is a tenant scope mismatch
+    // (reservation belongs to a different tenant than the caller) or
+    // the reservation being in CANCELLED/NO_SHOW status.
+    logger.error('[checkout-session] failed to auto-create agreement', {
+      reservationId, message: err?.message || String(err),
+    });
+    throw new CheckoutSessionError(
+      `Could not start agreement for this reservation: ${err?.message || 'unknown error'}`,
+      err?.status || 500,
+      'AGREEMENT_AUTO_CREATE_FAILED',
+    );
+  }
 }
 
 async function getById(id, { tenantId } = {}) {
