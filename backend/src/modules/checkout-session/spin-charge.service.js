@@ -56,7 +56,7 @@ function loadTenantSpinConfig(tenantId) {
 async function runChargeSequence({
   sessionId,
   amount,
-  depositAmount = DEPOSIT_HOLD_DEFAULT,
+  depositAmount: depositAmountHint,
   actorUserId,
 }) {
   if (!sessionId) throw new CheckoutSessionError('sessionId required', 400);
@@ -86,7 +86,18 @@ async function runChargeSequence({
     where: { id: sessionId },
     include: {
       reservation: { select: { id: true, reservationNumber: true, tenantId: true } },
-      agreement: { select: { id: true, agreementNumber: true, paidAmount: true } },
+      agreement: {
+        select: {
+          id: true, agreementNumber: true, paidAmount: true, securityDepositAmount: true,
+          // 2026-05-28 — Deposit can live as a SECURITY_DEPOSIT charge row
+          // OR on the securityDepositAmount column. We sum the charges as
+          // a fallback when the column is null/zero.
+          charges: {
+            where: { source: 'SECURITY_DEPOSIT', selected: true },
+            select: { total: true },
+          },
+        },
+      },
     },
   });
   if (!session) throw new CheckoutSessionError('Session not found', 404);
@@ -99,6 +110,36 @@ async function runChargeSequence({
       409, 'WRONG_STEP',
     );
   }
+
+  // 2026-05-28 — Resolve the deposit hold from the AGREEMENT, not the
+  // client request. The wizard sends an advisory hint (so its UI can
+  // preview the hold amount) but the agreement is the source of truth.
+  //
+  // Lookup order:
+  //   1. agreement.securityDepositAmount column (normalized)
+  //   2. SUM of agreement.charges where source = SECURITY_DEPOSIT (legacy
+  //      shape — most agreements live here)
+  //   3. wizard hint
+  //   4. default ($500)
+  //
+  // A zero/negative resolved amount → no hold (preauth skipped).
+  const agreementDepositCol = Number(session.agreement.securityDepositAmount);
+  const agreementDepositChargesSum = (session.agreement.charges || [])
+    .reduce((sum, c) => sum + Number(c.total || 0), 0);
+  const hintDeposit = Number(depositAmountHint);
+  let depositAmount;
+  if (Number.isFinite(agreementDepositCol) && agreementDepositCol > 0) {
+    depositAmount = agreementDepositCol;
+  } else if (Number.isFinite(agreementDepositChargesSum) && agreementDepositChargesSum > 0) {
+    depositAmount = agreementDepositChargesSum;
+  } else if (Number.isFinite(hintDeposit) && hintDeposit > 0) {
+    depositAmount = hintDeposit;
+  } else {
+    depositAmount = DEPOSIT_HOLD_DEFAULT;
+  }
+  logger.info('[spin-charge] resolved deposit amount', {
+    sessionId, agreementDepositCol, agreementDepositChargesSum, hintDeposit, depositAmount,
+  });
 
   const tenantConfig = await loadTenantSpinConfig(session.reservation.tenantId).catch(() => ({}));
   const refId = `${session.reservation.reservationNumber}-${Date.now().toString(36)}`;

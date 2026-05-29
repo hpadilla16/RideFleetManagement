@@ -616,7 +616,27 @@ function Step3PaymentPending({ session, reservation, token, onPaid }) {
   // file + the security deposit hold. The backend takes a separate
   // branch when amount === 0.
   const isPrepaid = subtotal === 0;
-  const depositAmount = 500;
+
+  // 2026-05-28 — Pull the deposit hold from the agreement. Source order:
+  //   1. agreement.securityDepositAmount (normalized column)
+  //   2. SUM of agreement.charges where source = SECURITY_DEPOSIT
+  //   3. hardcoded $500 fallback (last resort, dev-only realistically)
+  //
+  // The backend ignores this client value and re-resolves on its own, so
+  // even if the UI shows the wrong number for a split second after a
+  // stale fetch, the actual terminal hold is correct.
+  const agreementDepositCol = Number(reservation.rentalAgreement?.securityDepositAmount);
+  const agreementDepositCharges = Array.isArray(reservation.rentalAgreement?.charges)
+    ? reservation.rentalAgreement.charges.reduce((s, c) => s + Number(c.total || 0), 0)
+    : 0;
+  let depositAmount;
+  if (Number.isFinite(agreementDepositCol) && agreementDepositCol > 0) {
+    depositAmount = agreementDepositCol;
+  } else if (agreementDepositCharges > 0) {
+    depositAmount = agreementDepositCharges;
+  } else {
+    depositAmount = 500;
+  }
 
   const charge = async () => {
     setPhase('charging');

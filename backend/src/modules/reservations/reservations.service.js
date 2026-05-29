@@ -215,7 +215,18 @@ const reservationListSelect = {
       id: true,
       total: true,
       paidAmount: true,
-      balance: true
+      balance: true,
+      // 2026-05-28 — Step 3 of checkout-wizard-v2 displays this as the
+      // "Pre-auth deposit" line + the orchestrator uses it as the
+      // source of truth for the actual hold amount. We also include
+      // the SECURITY_DEPOSIT-source charges so the wizard can sum
+      // them as a fallback when the column itself is null.
+      securityDepositAmount: true,
+      declinedInsurance: true,
+      charges: {
+        where: { source: 'SECURITY_DEPOSIT', selected: true },
+        select: { id: true, total: true, name: true }
+      }
     }
   }
 };
