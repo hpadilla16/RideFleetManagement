@@ -141,7 +141,68 @@ async function transition({ id, toStep, actorUserId, metadata }) {
   logger.info('[checkout-session] transition', {
     sessionId: id, from: session.currentStep, to: toStep, actorUserId,
   });
+
+  // 2026-05-28 — Phase 3.5 — Email-on-finalize.
+  //
+  // When the wizard reaches CLOSED, the customer has a fully signed,
+  // paid, inspected rental agreement. Fire a fire-and-forget delivery
+  // so they get a PDF copy in their inbox without anyone having to
+  // remember to click "Email Agreement". The send goes through the
+  // existing scheduleEmailDelivery path which handles Puppeteer +
+  // SMTP off the request thread and writes its own audit-log line on
+  // failure.
+  //
+  // Guarded by:
+  //   - toStep === 'CLOSED' (only fire once on the actual finalize)
+  //   - session.agreementId present (no agreement, nothing to email)
+  //   - any throw is swallowed — never let an email hiccup break the
+  //     transition response that the UI is waiting on
+  if (toStep === 'CLOSED' && updated.agreementId) {
+    Promise.resolve()
+      .then(() => maybeSendFinalizeEmail(updated, actorUserId))
+      .catch((err) => {
+        logger.warn('[checkout-session] auto-email-on-finalize failed', {
+          sessionId: id, agreementId: updated.agreementId, error: err?.message || String(err),
+        });
+      });
+  }
+
   return updated;
+}
+
+/**
+ * Best-effort customer email on CheckoutSession finalize. Dynamically
+ * imports the rental-agreements service so the checkout module doesn't
+ * pull in Puppeteer at boot (it stays a heavy lazy dependency).
+ *
+ * Marks autoEmailedAt on the session so we know not to fire twice if
+ * a future code path re-runs the transition path. The session column
+ * is added in the same Phase 3.5 migration that ships this code.
+ */
+async function maybeSendFinalizeEmail(session, actorUserId) {
+  if (!session?.agreementId) return;
+  // Already sent? Don't double-fire. (Session row may have been
+  // transitioned again by an admin tool, retry queue, etc.)
+  if (session.autoEmailedAt) return;
+
+  const { rentalAgreementsService } = await import('../rental-agreements/rental-agreements.service.js');
+
+  // Stamp the marker BEFORE firing the scheduler so two near-simultaneous
+  // transitions (race condition) can't both fire. We use updateMany with
+  // a null guard so only the first one wins.
+  const stamped = await prisma.checkoutSession.updateMany({
+    where: { id: session.id, autoEmailedAt: null },
+    data: { autoEmailedAt: new Date() },
+  });
+  if (stamped.count === 0) return; // someone else already stamped — skip
+
+  rentalAgreementsService.scheduleEmailDelivery(
+    session.agreementId,
+    {}, // empty payload → default recipient = live customer email
+    actorUserId || null,
+    session.tenantId || null,
+    { logger },
+  );
 }
 
 /**
@@ -189,6 +250,34 @@ async function mintHandoffToken({ sessionId, kind, actorUserId }) {
   }
   const session = await prisma.checkoutSession.findUnique({ where: { id: sessionId } });
   if (!session) throw new CheckoutSessionError('Session not found', 404);
+
+  // 2026-05-28 — Idempotent within the TTL window.
+  //
+  // The agent's wizard mints a token on step entry, AND the customer-facing
+  // display ALSO mints one to render the same QR. We want them to share the
+  // QR, not race-create two tokens of which one is silently abandoned.
+  // Strategy: if there's an existing same-kind token for this reservation
+  // that's not consumed and has > 2 minutes left, return it as-is. Below
+  // the 2-minute floor we mint fresh so the customer never sees a QR that
+  // expires while they're scanning it.
+  const TWO_MINUTES = 2 * 60_000;
+  const existing = await prisma.handoffToken.findFirst({
+    where: {
+      reservationId: session.reservationId,
+      kind,
+      consumedAt: null,
+      expiresAt: { gt: new Date(Date.now() + TWO_MINUTES) },
+    },
+    orderBy: { expiresAt: 'desc' },
+  });
+  if (existing) {
+    return {
+      token: existing.token,
+      expiresAt: existing.expiresAt,
+      kind: existing.kind,
+      reused: true,
+    };
+  }
 
   const expiresAt = new Date(Date.now() + HANDOFF_TOKEN_TTL_MIN * 60_000);
   const token = tokenBytes();

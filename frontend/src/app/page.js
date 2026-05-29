@@ -321,7 +321,7 @@ function DashboardInner({ token, me, logout }) {
   }, [token, canSeeOverview]);
 
   const startCheckout = async (id) => {
-    router.push(`/reservations/${id}/checkout-wizard`);
+    router.push(`/reservations/${id}/checkout-wizard-v2`);
   };
 
   const markCancelled = async (id) => {

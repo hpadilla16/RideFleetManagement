@@ -19,6 +19,7 @@ import { rentalAgreementsRouter } from './modules/rental-agreements/rental-agree
 import { addendumSignaturePublicRouter } from './modules/rental-agreements/addendum-signature-public.routes.js';
 import { checkoutSessionRouter, checkoutSessionPublicRouter } from './modules/checkout-session/checkout-session.routes.js';
 import { termsSigningPublicRouter } from './modules/checkout-session/terms-signing.routes.js';
+import { mobileInspectionPublicRouter } from './modules/checkout-session/mobile-inspection.routes.js';
 import { storeBoardRouter } from './modules/store-board/store-board.routes.js';
 import { storeBoardPublicRouter } from './modules/store-board/store-board-public.routes.js';
 import { assertAuthConfig } from './modules/auth/auth.config.js';
@@ -67,6 +68,23 @@ const app = express();
 const allowedOrigins = process.env.ALLOWED_ORIGINS
   ? process.env.ALLOWED_ORIGINS.split(',').map((o) => o.trim()).filter(Boolean)
   : ['http://localhost:3000', 'http://127.0.0.1:3000'];
+
+// In production we strictly match ALLOWED_ORIGINS. In dev we additionally
+// accept any LAN IP on port 3000 so the agent's phone (scanning a QR
+// rendered on the Mac browser at http://192.168.x.x:3000) can hit the
+// backend without manually whitelisting every interface IP. The check
+// covers RFC1918 ranges + link-local + .local mDNS aliases.
+const LAN_ORIGIN_RE = /^https?:\/\/(?:localhost|127\.0\.0\.1|\[::1\]|10\.\d+\.\d+\.\d+|192\.168\.\d+\.\d+|172\.(?:1[6-9]|2\d|3[01])\.\d+\.\d+|[\w-]+\.local)(?::\d+)?$/i;
+const corsOriginFn = (origin, cb) => {
+  // Same-origin / curl / Postman send no Origin header — always allow.
+  if (!origin) return cb(null, true);
+  if (allowedOrigins.includes(origin)) return cb(null, true);
+  if (process.env.NODE_ENV !== 'production' && LAN_ORIGIN_RE.test(origin)) {
+    return cb(null, true);
+  }
+  return cb(new Error(`CORS: origin not allowed: ${origin}`));
+};
+
 app.use(compression({ threshold: 1024 }));
 app.use(requestLogger());
 // PR-5 PERF telemetry — sampled per-request load observations. Mounted
@@ -74,7 +92,7 @@ app.use(requestLogger());
 // tenantId is captured inside res.on("finish") after auth has populated
 // req.user (if any). Sample rate via ENDPOINT_LOAD_SAMPLE_RATE (default 1%).
 app.use(endpointLoadSampler());
-app.use(cors({ origin: allowedOrigins, credentials: true }));
+app.use(cors({ origin: corsOriginFn, credentials: true }));
 app.use(express.json({
   limit: '50mb',
   verify: (req, _res, buf) => {
@@ -149,6 +167,9 @@ app.use('/api/public/checkout-handoff', checkoutSessionPublicRouter);
 // JSON body limit raised on the parent app already; signature images
 // are ~50KB each so default Express limit (100KB) is fine for now.
 app.use('/api/sign', termsSigningPublicRouter);
+// Token-scoped mobile inspection — same trust model as /api/sign. Photos
+// can run 1-2MB each, so the router applies its own express.json({limit: '15mb'}).
+app.use('/api/mobile-inspection', mobileInspectionPublicRouter);
 // 2026-05-25 — mount Reports v2 router FIRST so the new /list and per-slug
 // data/pdf/excel endpoints win. The legacy reportsRouter stays mounted as
 // a fallthrough for any path the v2 router doesn't define.

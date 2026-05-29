@@ -168,36 +168,53 @@ padding:6px;display:flex;flex-direction:column;gap:2px;
 /* ── Footer ── */
 .footer{text-align:center;color:#9185af;font-size:6px;letter-spacing:.03em;padding-top:4px}
 
-/* ── Print ── */
-@media print{
+/* ── Light theme overrides (always-on, not media-gated) ────────────────
+   2026-05-28 — Hector: customers were reading the agreement on screen
+   and through email-attached PDFs and the dark-purple theme was hard
+   to read. We keep the original dark-theme rules above (in case any
+   tenant ever opts back via a custom override) but unconditionally
+   apply the light palette below by removing the @media print wrapper.
+   These rules use !important + later cascade order to win over the
+   dark literals in :root vars and the various color hex codes above. */
 body{background:#fff;color:#1a1a1a;font-size:8px}
-.page{padding:0}
-.hero,.hero-mini{background:#f8f7fc;border-color:#e2dff0}
+.page{padding:16px 24px}
+.hero,.hero-mini{background:#f8f7fc !important;border-color:#e2dff0 !important}
 .co-name{color:#1a1a1a !important;-webkit-text-fill-color:#1a1a1a;background:none}
 .co-sub,.k,.sig-meta,.footer,.vline,.sig-line-label{color:#666 !important}
-.ag-badge{background:#f0edf8;border-color:#c4bbd9;color:#4a3d6a}
+.ag-badge{background:#f0edf8 !important;border-color:#c4bbd9 !important;color:#4a3d6a !important}
 .tile,.section,table,.terms,.sig-box,.verify-box,.summary-table{
 background:#fff !important;border-color:#ddd !important;box-shadow:none !important;
 }
+.section{background:#ffffff !important}
 .tile{background:#f9f8fc !important}
-th{background:#f5f3fa !important;color:#555 !important}
-td{color:#222 !important}
-.terms{color:#444 !important;background:#fafafa !important;font-size:5.5px}
-.terms .tc-doc h1,.terms .tc-doc h2{color:#1a1a1a !important}
+.tile .v{color:#1a1a1a}
+.section h3{color:#1a1a1a !important}
+th{background:#f5f3fa !important;color:#555 !important;border-bottom-color:#ddd !important}
+td{color:#222 !important;border-bottom-color:#ddd !important}
+.terms{color:#444 !important;background:#fafafa !important;font-size:5.5px;border-color:#ddd !important}
+.terms .tc-doc{color:#444}
+.terms .tc-doc h1,.terms .tc-doc h2{color:#1a1a1a !important;border-top-color:#ddd !important}
+.terms .tc-doc h2.tc-ack-head{border-top-color:#c4bbd9 !important}
 .terms .tc-doc .tc-meta,.terms .tc-doc .tc-note{color:#555 !important}
 .terms .tc-doc .tc-initials-block{background:#f9f8fc !important;border-color:#999 !important}
-.terms .tc-doc table.tc-fees{border-color:#bbb !important}
-.terms .tc-doc table.tc-fees th{background:#f5f3fa !important;color:#444 !important}
-.terms .tc-doc table.tc-fees td{color:#222 !important;border-color:#ddd !important}
+.terms .tc-doc table.tc-fees{border-color:#bbb !important;background:#fff !important}
+.terms .tc-doc table.tc-fees th{background:#f5f3fa !important;color:#444 !important;border-bottom-color:#ddd !important}
+.terms .tc-doc table.tc-fees td{color:#222 !important;border-bottom-color:#ddd !important}
 .paid{color:#166534 !important}
 .due{color:#92400e !important}
-.logo{background:#f5f3fa;border-color:#e2dff0}
-.logo-fallback{color:#4a3d6a;font-size:14px;font-weight:900}
-.sig-box{border-color:#ccc;background:#fafafa !important}
+.logo{background:#f5f3fa !important;border-color:#e2dff0 !important}
+.logo-fallback{color:#4a3d6a !important;font-size:14px;font-weight:900}
+.sig-box{border-color:#ccc !important;background:#fafafa !important}
 .sig-img img{filter:none}
+.summary-table{background:#fff !important;border-color:#ddd !important}
 .summary-table .label{color:#666 !important}
-.summary-table td{color:#222 !important}
-}
+.summary-table td{color:#222 !important;border-bottom-color:#eee !important}
+.summary-table .total-row td{border-top-color:#c4bbd9 !important}
+.verify-box{background:#fff !important;border-color:#ddd !important}
+.verify-box h4{color:#4a3d6a !important}
+.vline{color:#444 !important;border-color:#ddd !important}
+.vline code{color:#1a1a1a !important;background:#f5f3fa !important;padding:1px 3px;border-radius:3px}
+.footer{color:#666 !important}
 
 @page{margin:0.25in 0.3in}
 </style>

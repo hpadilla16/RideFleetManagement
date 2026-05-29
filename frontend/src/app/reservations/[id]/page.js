@@ -660,6 +660,38 @@ function ReservationDetailInner({ token, me, logout }) {
     } catch (e) { setMsg(e.message); }
   };
 
+  // Phase 3.5 — one-click resend of the signed agreement to the customer's
+  // email on file. The checkout-wizard-v2 fires this automatically the
+  // moment the session reaches CLOSED; this button exists for the
+  // not-uncommon case where the customer says "I didn't get it" 10
+  // minutes later. Unlike `emailAgreementToCustomer` above it skips the
+  // window.prompt / window.confirm pair so it's a single tap from the
+  // ops console.
+  const resendSignedCopy = async () => {
+    try {
+      const s = String(row?.status || '').toUpperCase();
+      if (!(s === 'CHECKED_OUT' || s === 'CHECKED_IN' || s === 'CHECKED_IN_UNPAID')) {
+        return setMsg('Resend is enabled after check-out is complete.');
+      }
+      const to = String(row?.customer?.email || '').trim();
+      if (!to) return setMsg('No customer email on file — set one on the customer profile first.');
+
+      const agreementId = row?.rentalAgreement?.id;
+      if (!agreementId) return setMsg('No agreement available to email.');
+
+      await api(`/api/rental-agreements/${agreementId}/email-agreement`, {
+        method: 'POST',
+        body: JSON.stringify({ to }),
+      }, token);
+      setMsg(`Signed copy resent to ${to}`);
+      await refresh();
+    } catch (e) {
+      // Toast-style failure surfacing — keeps the agent on the page
+      // instead of losing context to a dialog.
+      setMsg(`Resend failed: ${e?.message || 'unknown error'}`);
+    }
+  };
+
   const waitForImages = (win) => {
     const images = win.document.querySelectorAll('img');
     if (!images.length) return Promise.resolve();
@@ -1828,7 +1860,7 @@ token
             </div>
           </div>
           <div className="app-banner-list">
-            <button type="button" className="button-subtle" onClick={() => router.push(`/reservations/${id}/checkout-wizard`)}>Start Check-out</button>
+            <button type="button" className="button-subtle" onClick={() => router.push(`/reservations/${id}/checkout-wizard-v2`)}>Start Check-out</button>
             <button type="button" className="button-subtle" onClick={() => router.push(`/reservations/${id}/checkin-wizard`)}>Start Check-in</button>
             {row?.vehicleId && row?.rentalAgreement?.id && String(row?.status || '').toUpperCase() === 'CHECKED_OUT' ? (
               <button type="button" className="button-subtle" onClick={() => router.push(`/reservations/${id}/swap`)}>Swap Vehicle</button>
@@ -2285,7 +2317,7 @@ token
               <section className="ios-action-card">
                 <div className="ios-action-head">Operations</div>
                 <div className="ios-action-list">
-                  <button className="ios-action-btn" onClick={() => router.push(`/reservations/${id}/checkout-wizard`)}>Start Check-out</button>
+                  <button className="ios-action-btn" onClick={() => router.push(`/reservations/${id}/checkout-wizard-v2`)}>Start Check-out</button>
                   <button className="ios-action-btn" onClick={() => router.push(`/reservations/${id}/checkin-wizard`)}>Start Check-in</button>
                   <button className="ios-action-btn" onClick={() => router.push(`/reservations/${id}/ops-view?section=checkout`)}>View Check-out</button>
                   <button className="ios-action-btn" onClick={() => router.push(`/reservations/${id}/ops-view?section=checkin`)}>View Check-in</button>
@@ -2310,6 +2342,7 @@ token
                   <button className="ios-action-btn" onClick={() => issueLinkAction('payment')}>Request Payment</button>
                   <button className="ios-action-btn" onClick={emailReservationDetail}>Email Reservation Detail</button>
                   <button className="ios-action-btn" onClick={emailAgreementToCustomer} disabled={!['CHECKED_OUT','CHECKED_IN','CHECKED_IN_UNPAID'].includes(String(row?.status || '').toUpperCase())}>Email Agreement</button>
+                  <button className="ios-action-btn" onClick={resendSignedCopy} disabled={!['CHECKED_OUT','CHECKED_IN','CHECKED_IN_UNPAID'].includes(String(row?.status || '').toUpperCase())} title="One-click resend to customer email on file (no prompt)">Resend Signed Copy</button>
                 </div>
               </section>
 

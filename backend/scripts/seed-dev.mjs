@@ -196,8 +196,29 @@ async function ensureAgreement() {
 
 async function resetDevFixtures() {
   console.log('[seed-dev] --reset: dropping fixtures…');
+  // Wipe child rows in FK-safe order BEFORE deleting parents. Without
+  // this Postgres rejects the parent delete (cascades aren't set on all
+  // relations) AND any orphan rows (e.g. AgreementSectionInitial from a
+  // previous test session) get re-attached to a fresh agreement with
+  // the same ID, which is why staff were seeing "step 2 already had
+  // initials" after a reset.
+  await prisma.agreementSectionInitial.deleteMany({ where: { agreementId: IDS.agreement } }).catch(() => {});
+  await prisma.rentalAgreementAddendum.deleteMany({ where: { rentalAgreementId: IDS.agreement } }).catch(() => {});
+  // VehicleInspectionAnnotation cascades from RentalAgreementInspection, but
+  // do it explicitly first to avoid relying on FK cascade settings.
+  await prisma.vehicleInspectionAnnotation.deleteMany({
+    where: { inspection: { rentalAgreementId: IDS.agreement } }
+  }).catch(() => {});
+  await prisma.rentalAgreementCharge.deleteMany({ where: { rentalAgreementId: IDS.agreement } }).catch(() => {});
+  await prisma.reservationCharge.deleteMany({ where: { reservationId: IDS.reservation } }).catch(() => {});
+  await prisma.rentalAgreementPayment.deleteMany({ where: { rentalAgreementId: IDS.agreement } }).catch(() => {});
+  await prisma.reservationPayment.deleteMany({ where: { reservationId: IDS.reservation } }).catch(() => {});
+  await prisma.rentalAgreementInspection.deleteMany({ where: { rentalAgreementId: IDS.agreement } }).catch(() => {});
+  await prisma.agreementDriver.deleteMany({ where: { rentalAgreementId: IDS.agreement } }).catch(() => {});
+  await prisma.reservationAdditionalDriver.deleteMany({ where: { reservationId: IDS.reservation } }).catch(() => {});
   await prisma.checkoutSession.deleteMany({ where: { reservationId: IDS.reservation } }).catch(() => {});
   await prisma.handoffToken.deleteMany({ where: { reservationId: IDS.reservation } }).catch(() => {});
+  await prisma.auditLog.deleteMany({ where: { reservationId: IDS.reservation } }).catch(() => {});
   await prisma.rentalAgreement.delete({ where: { id: IDS.agreement } }).catch(() => {});
   await prisma.reservation.delete({ where: { id: IDS.reservation } }).catch(() => {});
   await prisma.customer.delete({ where: { id: IDS.customer } }).catch(() => {});

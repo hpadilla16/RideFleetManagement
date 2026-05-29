@@ -3,6 +3,71 @@
 import { useEffect, useState } from 'react';
 import { useParams } from 'next/navigation';
 import { api, readStoredToken } from '../../../../lib/client';
+import QRCode from 'qrcode';
+
+/**
+ * Customer-view QR code helper.
+ *
+ * Hits the same mint endpoint the wizard uses. After 2026-05-28 the
+ * backend is idempotent within the TTL window — calls from the customer
+ * display and the agent wizard collapse onto the same token, so the QR
+ * stays valid no matter which screen the customer scans from.
+ */
+function CustomerViewQr({ sessionId, kind, urlPrefix, size = 220 }) {
+  const [tokenStr, setTokenStr] = useState(null);
+  const [dataUrl, setDataUrl] = useState(null);
+  const [err, setErr] = useState(null);
+
+  useEffect(() => {
+    if (!sessionId || !kind) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const auth = readStoredToken();
+        if (!auth) return;
+        const endpoint = kind === 'TERMS_SIGNING'
+          ? `/api/checkout-sessions/${sessionId}/terms-token`
+          : `/api/checkout-sessions/${sessionId}/handoff-token`;
+        const t = await api(endpoint, { method: 'POST' }, auth);
+        if (!cancelled) setTokenStr(t.token);
+      } catch (e) {
+        if (!cancelled) setErr(e?.message || 'Could not generate QR');
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [sessionId, kind]);
+
+  useEffect(() => {
+    if (!tokenStr) return;
+    const fullUrl = `${typeof window !== 'undefined' ? window.location.origin : ''}${urlPrefix}/${tokenStr}`;
+    QRCode.toDataURL(fullUrl, { width: size, margin: 1, errorCorrectionLevel: 'M' })
+      .then(setDataUrl)
+      .catch((e) => setErr(e?.message || 'QR render failed'));
+  }, [tokenStr, urlPrefix, size]);
+
+  if (err) {
+    return <div style={{ color: '#B91C1C', fontSize: 12 }}>{err}</div>;
+  }
+  if (!dataUrl) {
+    return (
+      <div style={{
+        width: size, height: size, margin: '0 auto',
+        background: '#F3F4F6', borderRadius: 12,
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        fontSize: 13, color: '#9CA3AF',
+      }}>Generating QR…</div>
+    );
+  }
+  return (
+    <img
+      src={dataUrl}
+      alt="QR code"
+      width={size}
+      height={size}
+      style={{ display: 'block', margin: '0 auto', borderRadius: 8 }}
+    />
+  );
+}
 
 // Two polling rates: slow when the wizard isn't active (just showing
 // reservation summary), fast when a CheckoutSession is in flight and
@@ -395,7 +460,7 @@ function CheckoutStepHero({ session, customer }) {
       <CheckoutStepTracker currentNumber={stepNumber} />
       <div style={{ marginTop: 20 }}>
         {step === 'CONFIRMING'             && <HeroConfirm customer={customer} />}
-        {step === 'TC_PENDING'             && <HeroTermsPending />}
+        {step === 'TC_PENDING'             && <HeroTermsPending sessionId={session.id} />}
         {step === 'TC_SIGNED'              && <HeroBridge label="Terms signed ✓" />}
         {step === 'PAYMENT_PENDING'        && <HeroPayment />}
         {step === 'PAID'                   && <HeroBridge label="Payment captured ✓" />}
@@ -456,15 +521,17 @@ function HeroConfirm({ customer }) {
   );
 }
 
-function HeroTermsPending() {
+function HeroTermsPending({ sessionId }) {
   return (
     <div style={{ textAlign: 'center' }}>
       <div style={{ fontSize: '1.3rem', fontWeight: 800, color: '#1a1230', marginBottom: 6 }}>
         Sign your rental terms
       </div>
       <div style={{ color: '#6b7a9a', marginBottom: 16 }}>Scan the QR with your phone</div>
-      <div style={{ display: 'inline-block', padding: 24, background: '#F3F4F6', borderRadius: 12, fontSize: 80 }}>📱</div>
-      <div style={{ color: '#94a3b8', fontSize: '0.85rem', marginTop: 12 }}>Or check your email for a signing link</div>
+      <div style={{ display: 'inline-block', padding: 16, background: '#FFFFFF', borderRadius: 12, border: '0.5px solid #E5E7EB' }}>
+        <CustomerViewQr sessionId={sessionId} kind="TERMS_SIGNING" urlPrefix="/sign" size={220} />
+      </div>
+      <div style={{ color: '#94a3b8', fontSize: '0.85rem', marginTop: 12 }}>QR expires in 15 minutes</div>
     </div>
   );
 }
@@ -488,13 +555,16 @@ function HeroPayment() {
 }
 
 function HeroInspectionHandoff() {
+  // The inspection QR is for the agent's phone, not the customer's. The
+  // customer just follows the agent to the vehicle for the walk-around.
+  // Keep this screen clean and reassuring.
   return (
     <div style={{ textAlign: 'center' }}>
       <div style={{ fontSize: '1.3rem', fontWeight: 800, color: '#1a1230', marginBottom: 6 }}>
         Follow your agent outside
       </div>
-      <div style={{ color: '#6b7a9a' }}>Vehicle inspection</div>
-      <div style={{ fontSize: 64, marginTop: 16 }}>🚶</div>
+      <div style={{ color: '#6b7a9a' }}>Your agent will walk you to your vehicle for a quick inspection.</div>
+      <div style={{ fontSize: 64, marginTop: 16 }}>🚶‍♂️🚗</div>
     </div>
   );
 }

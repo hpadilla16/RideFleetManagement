@@ -3054,6 +3054,12 @@ model CheckoutSession {
   abandonedAt     DateTime?
   abandonedReason String?
 
+  // Phase 3.5 — stamped the first (and only) time the auto-email fires
+  // after the session reaches CLOSED. Guards against double-fires on
+  // accidental re-transitions and lets the UI show "Sent {when}" /
+  // "Resend signed copy" instead of just "Email Agreement".
+  autoEmailedAt DateTime?
+
   startedByUserId String?
 
   createdAt DateTime @default(now())

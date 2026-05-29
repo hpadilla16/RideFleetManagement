@@ -887,6 +887,57 @@ function buildAddendumPagesHtml(addendums, ctx) {
   return list.map((a, i) => buildAddendumPageHtml(a, i + 1, total, ctx)).join('\n');
 }
 
+// 2026-05-28 — Strip the Section 4 "I voluntarily DECLINE all such
+// optional coverage" bilingual acknowledgement from the canonical T&C
+// body when the customer did NOT decline counter insurance.
+//
+// The canonical tc-<version>.html contains five tc-initials-block
+// divs. The FIRST one (around line 189 of tc-2026-05-19.html) is the
+// decline-coverage statement; the other four (card-on-file, CNP,
+// no-chargeback, post-rental) apply to every agreement and must stay.
+//
+// We identify the decline block by content match ("DECLINE all such
+// optional coverage" appears in the English column) and walk forward
+// using a balanced-div counter so the nested tc-bilingual + two
+// tc-col divs don't trip up a naive non-greedy regex.
+//
+// Returns the input HTML unchanged when:
+//   - the customer DID decline insurance (declined === true)
+//   - no matching block is found (legacy templates, custom T&C)
+function stripDeclineCoverageIfNotApplicable(html, declined) {
+  if (declined) return html;
+  const opener = '<div class="tc-initials-block">';
+  let start = html.indexOf(opener);
+  while (start !== -1) {
+    let depth = 1;
+    let i = start + opener.length;
+    while (i < html.length && depth > 0) {
+      const nextOpen = html.indexOf('<div', i);
+      const nextClose = html.indexOf('</div>', i);
+      if (nextClose === -1) break;
+      if (nextOpen !== -1 && nextOpen < nextClose) {
+        depth += 1;
+        i = nextOpen + 4;
+      } else {
+        depth -= 1;
+        i = nextClose + 6;
+      }
+    }
+    const end = i;
+    const block = html.slice(start, end);
+    if (/DECLINE all such optional coverage/i.test(block)) {
+      // Found the decline block. Excise it (plus any trailing whitespace
+      // up to the next non-space character so we don't leave a blank
+      // gap on the rendered page).
+      let trim = end;
+      while (trim < html.length && /\s/.test(html[trim])) trim += 1;
+      return html.slice(0, start) + html.slice(trim);
+    }
+    start = html.indexOf(opener, end);
+  }
+  return html;
+}
+
 // 2026-05-28 — Phase 3.3 + 3.4 — Append the customer's signed T&C
 // section (with each subsection's initial image embedded inline) plus
 // the optional declined-insurance addendum to the agreement PDF.
@@ -2562,6 +2613,17 @@ export const rentalAgreementsService = {
         declinedInsurance: true,
         declinedInsuranceSignatureDataUrl: true,
         declinedInsuranceSignedAt: true,
+        // 2026-05-28 — per-section initial PNGs captured by the customer
+        // on /sign/:token. buildSignedTermsBlock matches them to TC_SECTIONS
+        // by sectionKey, and the inline regex replacement in
+        // renderAgreementHtml uses the first one to fill the legacy
+        // "( ___ Initials )" placeholders. Without this select the print
+        // path quietly renders "(no initial)" for every section even when
+        // the customer signed.
+        sectionInitials: {
+          orderBy: { signedAt: 'asc' },
+          select: { sectionKey: true, initialDataUrl: true, signedAt: true, customerIp: true }
+        },
         charges: {
           orderBy: [{ sortOrder: 'asc' }, { createdAt: 'asc' }],
           select: {
@@ -2858,7 +2920,16 @@ export const rentalAgreementsService = {
       // The configured cfg.termsText is treated as a tenant-level
       // ADDENDUM and appended below the canonical content; we no longer
       // surface the editable text as the legal terms themselves.
-      termsText: (await getEffectiveTermsHtmlForTenant(agreement?.tenantId || null, { prisma })) + (cfg.termsText ? `<div class="tc-tenant-addendum"><h2>Tenant Addendum</h2><p>${esc(cfg.termsText)}</p></div>` : ''),
+      // 2026-05-28 — when the customer did NOT decline counter insurance,
+      // strip the "I voluntarily DECLINE all such optional coverage"
+      // bilingual acknowledgement (the first tc-initials-block in the
+      // canonical T&C). It only belongs on agreements where the customer
+      // actually waived coverage at the counter; otherwise it misleads
+      // the reader into thinking they did.
+      termsText: stripDeclineCoverageIfNotApplicable(
+        (await getEffectiveTermsHtmlForTenant(agreement?.tenantId || null, { prisma })),
+        !!agreement?.declinedInsurance,
+      ) + (cfg.termsText ? `<div class="tc-tenant-addendum"><h2>Tenant Addendum</h2><p>${esc(cfg.termsText)}</p></div>` : ''),
       signatureSignedBy: esc(agreement.reservation?.signatureSignedBy || '-'),
       signatureDateTime: esc(fmtDate(signatureTime)),
       signatureIp: esc(signatureIp),
@@ -2869,7 +2940,29 @@ export const rentalAgreementsService = {
     const baseTemplate = String(cfg?.agreementHtmlTemplate || '').trim()
       ? cfg.agreementHtmlTemplate
       : getModernAgreementTemplate();
-    const baseHtml = applyTemplate(baseTemplate, templateVars);
+    let baseHtml = applyTemplate(baseTemplate, templateVars);
+
+    // 2026-05-28 — Inject the customer's captured initial inline at every
+    // legacy T&C placeholder. The bundled and many tenant-customized
+    // templates contain literal strings like "( ___ Initials )" /
+    // "( ___ Iniciales )" sprinkled through the T&C body (card-on-file
+    // authorization, CNP, no-chargeback, post-rental charges, etc.).
+    // checkout-wizard-v2 captures per-section initials on the customer's
+    // phone; using the first one chronologically is the simplest way to
+    // fill every placeholder since they aren't keyed to specific TC_SECTIONS.
+    // Match permissively — underscores, dashes, dots, NBSPs and any case of
+    // "Initials" / "Iniciales" all count.
+    const _sectionInitialsForFill = Array.isArray(agreement.sectionInitials) ? agreement.sectionInitials : [];
+    const _firstInitialUrl = _sectionInitialsForFill[0]?.initialDataUrl
+      || agreement.tcSignatureDataUrl
+      || '';
+    if (_firstInitialUrl) {
+      const _initialImg = `<img src="${_firstInitialUrl}" alt="Initials" style="display:inline-block;height:22px;max-width:70px;vertical-align:middle;border-bottom:0.5px solid #6B7280;margin:0 2px;padding:0 2px" />`;
+      // Generic placeholder patterns. Allow ( ... Initials ), [ ... Initials ],
+      // various separators (underscore, dash, dot, NBSP, plain space).
+      const _placeholderRe = /[\(\[][\s_\-. ]*(Initial(?:s)?|Iniciale(?:s)?)[\s_\-. ]*[\)\]]/gi;
+      baseHtml = baseHtml.replace(_placeholderRe, _initialImg);
+    }
 
     // Pull addendums and splice their pages onto the agreement output so
     // every print/email of the agreement carries the addendums alongside
@@ -2915,6 +3008,12 @@ export const rentalAgreementsService = {
       // assets (CSS, images as data URLs, fonts). `networkidle0` adds 500ms+
       // of idle wait for nothing.
       await page.setContent(html, { waitUntil: 'domcontentloaded' });
+      // Explicitly emulate print media so the @media print rules in the
+      // canonical T&C HTML body (and any tenant-custom T&C with print-only
+      // overrides) take effect during page.pdf(). Older Puppeteer versions
+      // didn't default to print; calling this is cheap and removes the
+      // ambiguity.
+      await page.emulateMediaType('print');
       // Ensure all inline/data-URL images are decoded before PDF render
       await page.evaluate(() => Promise.all(
         Array.from(document.images)

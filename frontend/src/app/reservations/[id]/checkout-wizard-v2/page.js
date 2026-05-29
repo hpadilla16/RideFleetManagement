@@ -30,6 +30,48 @@ import {
   mintTermsToken, mintHandoffToken, abandon,
   stepNumber, isTerminal, STEP_INFO,
 } from '../../../../lib/checkout-session';
+import QRCode from 'qrcode';
+
+/**
+ * QrCode — renders a scannable QR for the given URL using the qrcode
+ * library (already in package.json). Dataurl-into-img keeps the
+ * canvas/SVG complexity out of React render and works on every
+ * device. Falls back to plain text when QRCode.toDataURL fails (e.g.
+ * URL too long, library missing).
+ */
+function QrCode({ url, size = 200 }) {
+  const [dataUrl, setDataUrl] = useState(null);
+  const [err, setErr] = useState(null);
+  useEffect(() => {
+    if (!url) return;
+    QRCode.toDataURL(url, { width: size, margin: 1, errorCorrectionLevel: 'M' })
+      .then(setDataUrl)
+      .catch((e) => setErr(e?.message || 'QR render failed'));
+  }, [url, size]);
+
+  if (err) {
+    return <div style={{ fontSize: 11, color: '#B91C1C' }}>{err}</div>;
+  }
+  if (!dataUrl) {
+    return (
+      <div style={{
+        width: size, height: size, margin: '0 auto',
+        background: '#F3F4F6', borderRadius: 4,
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        fontSize: 11, color: '#9CA3AF',
+      }}>Generating QR…</div>
+    );
+  }
+  return (
+    <img
+      src={dataUrl}
+      alt="QR code"
+      width={size}
+      height={size}
+      style={{ display: 'block', margin: '0 auto', borderRadius: 4 }}
+    />
+  );
+}
 
 export default function Page() {
   return <AuthGate>{({ token, me, logout }) => <CheckoutWizardV2 token={token} me={me} logout={logout} />}</AuthGate>;
@@ -117,10 +159,22 @@ function CheckoutWizardV2({ token, me, logout }) {
       advance('TC_SIGNED');
     } else if (session.currentStep === 'PAYMENT_PENDING' && session.paymentCompletedAt) {
       advance('PAID');
+    } else if (session.currentStep === 'INSPECTION_HANDOFF' && session.inspectionCompletedAt) {
+      // Mobile inspection finished while the desktop was still on the
+      // handoff screen — bump through INSPECTION_IN_PROGRESS so the
+      // next tick of the auto-advance cascade can land on
+      // CUSTOMER_SIGN_PENDING (and beyond, if customerSignedAt is also
+      // stamped, which the phone does when it captures the signature).
+      advance('INSPECTION_IN_PROGRESS');
     } else if (session.currentStep === 'INSPECTION_IN_PROGRESS' && session.inspectionCompletedAt) {
       advance('CUSTOMER_SIGN_PENDING');
     } else if (session.currentStep === 'CUSTOMER_SIGN_PENDING' && session.customerSignedAt) {
       advance('FINALIZING');
+    } else if (session.currentStep === 'FINALIZING' && session.customerSignedAt) {
+      // Hector wants the desktop to fully close the loop without an
+      // agent click once the phone has signed everything. CLOSED is
+      // the terminal — entry guard already verified customerSignedAt.
+      advance('CLOSED');
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [session?.currentStep, session?.tcCompletedAt, session?.paymentCompletedAt, session?.inspectionCompletedAt, session?.customerSignedAt]);
@@ -507,8 +561,12 @@ function Step2TermsPending({ session, reservation, token, onSigned }) {
       <div style={{ background: '#F9FAFB', padding: 24, borderRadius: 8, textAlign: 'center', marginBottom: 16 }}>
         {tokenInfo ? (
           <>
-            <div style={{ fontSize: 12, color: '#6B7280', marginBottom: 8 }}>QR · expires in 15 min</div>
-            <div style={{ fontFamily: 'monospace', fontSize: 11, wordBreak: 'break-all', padding: '8px 12px', background: '#FFFFFF', borderRadius: 4 }}>
+            <div style={{ fontSize: 12, color: '#6B7280', marginBottom: 12 }}>QR · expires in 15 min</div>
+            <QrCode
+              size={220}
+              url={`${typeof window !== 'undefined' ? window.location.origin : ''}/sign/${tokenInfo.token}`}
+            />
+            <div style={{ fontFamily: 'monospace', fontSize: 10, wordBreak: 'break-all', padding: '8px 12px', background: '#FFFFFF', borderRadius: 4, marginTop: 12, color: '#6B7280' }}>
               {`${typeof window !== 'undefined' ? window.location.origin : ''}/sign/${tokenInfo.token}`}
             </div>
             <div style={{ fontSize: 12, color: '#6B7280', marginTop: 12 }}>Customer scans with their phone</div>
@@ -542,7 +600,22 @@ function Step3PaymentPending({ session, reservation, token, onPaid }) {
   const [error, setError] = useState(null);
   const [result, setResult] = useState(null);
 
-  const subtotal = Number(reservation.estimatedTotal || reservation.rentalAgreement?.total || 0);
+  // Read the charge amount defensively. Prisma Decimal columns serialize
+  // as strings in JSON, so we coerce with Number(). We use the unpaid
+  // BALANCE as the source of truth — anything the customer pre-paid
+  // (OTA voucher, portal pre-charge) is already reflected in
+  // agreement.paidAmount, so balance = total - paidAmount is what's
+  // actually owed at the counter. Fall back to estimatedTotal for
+  // reservations that don't have an agreement bound yet.
+  const explicitBalance = Number(reservation.rentalAgreement?.balance);
+  const subtotal = Number.isFinite(explicitBalance) && explicitBalance >= 0
+    ? explicitBalance
+    : Number(reservation.estimatedTotal || 0);
+
+  // Phase 2.x — pre-paid customers ($0 balance) still need a card on
+  // file + the security deposit hold. The backend takes a separate
+  // branch when amount === 0.
+  const isPrepaid = subtotal === 0;
   const depositAmount = 500;
 
   const charge = async () => {
@@ -569,8 +642,26 @@ function Step3PaymentPending({ session, reservation, token, onPaid }) {
       <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: 16 }}>
         <div>
           <div style={{ fontSize: 14, fontWeight: 500, marginBottom: 8 }}>Invoice</div>
-          <KV label="Subtotal" value={`$${subtotal.toFixed(2)}`} />
-          <KV label="Pre-auth deposit" value={`$${depositAmount.toFixed(2)}`} />
+          {isPrepaid ? (
+            <>
+              <KV label="Balance due" value="$0.00 · pre-paid" />
+              <KV label="Card on file" value="Required for incidentals" />
+              <KV label="Deposit hold" value={`$${depositAmount.toFixed(2)}`} />
+              <div style={{
+                marginTop: 10, padding: 10, borderRadius: 6,
+                background: 'rgba(16,185,129,.08)', border: '1px solid rgba(16,185,129,.25)',
+                color: '#065F46', fontSize: 12,
+              }}>
+                Customer already pre-paid. Terminal will tokenize the card and place the
+                ${depositAmount.toFixed(2)} security deposit hold — no sale charged.
+              </div>
+            </>
+          ) : (
+            <>
+              <KV label="Subtotal" value={`$${subtotal.toFixed(2)}`} />
+              <KV label="Pre-auth deposit" value={`$${depositAmount.toFixed(2)}`} />
+            </>
+          )}
         </div>
         <div style={{ background: '#F9FAFB', padding: 12, borderRadius: 6 }}>
           <div style={{ fontSize: 12, fontWeight: 500, marginBottom: 4 }}>Dejavoo terminal</div>
@@ -608,14 +699,18 @@ function Step3PaymentPending({ session, reservation, token, onPaid }) {
       </div>
       <div style={{ marginTop: 16, display: 'flex', gap: 8 }}>
         {phase === 'ready' && (
-          <button style={primaryBtn} onClick={charge}>Start charge</button>
+          <button style={primaryBtn} onClick={charge}>
+            {isPrepaid ? 'Capture card + deposit hold' : 'Start charge'}
+          </button>
         )}
         {phase === 'charging' && (
           <button style={{ ...primaryBtn, opacity: 0.6 }} disabled>Processing…</button>
         )}
         {phase === 'error' && (
           <>
-            <button style={primaryBtn} onClick={charge}>Retry charge</button>
+            <button style={primaryBtn} onClick={charge}>
+              {isPrepaid ? 'Retry capture' : 'Retry charge'}
+            </button>
             <button style={ghostBtn} onClick={() => setPhase('ready')}>Reset</button>
           </>
         )}
@@ -634,12 +729,21 @@ function Step4Handoff({ session, token, onContinue }) {
 
   return (
     <div style={cardStyle}>
-      <h3 style={h3Style}>Step 4 · Continue inspection on mobile</h3>
+      <h3 style={h3Style}>Step 4 · Walk-around inspection on mobile</h3>
+      <p style={{ fontSize: 13, color: '#6B7280', margin: '0 0 16px' }}>
+        The agent's phone captures photos, odometer/fuel, and the
+        customer's signature — then this screen advances to <strong>Closed</strong>
+        on its own and the customer drives off with the keys.
+      </p>
       <div style={{ background: '#F9FAFB', padding: 24, borderRadius: 8, textAlign: 'center' }}>
         {tokenInfo ? (
           <>
-            <div style={{ fontSize: 12, color: '#6B7280', marginBottom: 8 }}>Scan with agent's phone</div>
-            <div style={{ fontFamily: 'monospace', fontSize: 11, wordBreak: 'break-all', padding: '8px 12px', background: '#FFFFFF', borderRadius: 4 }}>
+            <div style={{ fontSize: 12, color: '#6B7280', marginBottom: 12 }}>Scan with agent's phone</div>
+            <QrCode
+              size={220}
+              url={`${typeof window !== 'undefined' ? window.location.origin : ''}/checkout/mobile/${tokenInfo.token}`}
+            />
+            <div style={{ fontFamily: 'monospace', fontSize: 10, wordBreak: 'break-all', padding: '8px 12px', background: '#FFFFFF', borderRadius: 4, marginTop: 12, color: '#6B7280' }}>
               {`${typeof window !== 'undefined' ? window.location.origin : ''}/checkout/mobile/${tokenInfo.token}`}
             </div>
           </>
@@ -648,7 +752,7 @@ function Step4Handoff({ session, token, onContinue }) {
         )}
       </div>
       <div style={{ marginTop: 16 }}>
-        <button style={primaryBtn} onClick={onContinue}>Continue here (skip mobile) →</button>
+        <button style={ghostBtn} onClick={onContinue}>Continue here on desktop (fallback) →</button>
       </div>
     </div>
   );

@@ -60,7 +60,26 @@ async function runChargeSequence({
   actorUserId,
 }) {
   if (!sessionId) throw new CheckoutSessionError('sessionId required', 400);
-  if (!amount || amount <= 0) throw new CheckoutSessionError('amount required and must be > 0', 400);
+
+  // 2026-05-28 — Phase 2.x amendment.
+  //
+  // Pre-paid customers (OTA voucher, customer portal pre-charge, etc.)
+  // arrive at checkout with $0 balance owed. They STILL need:
+  //   • a card-on-file tokenized for post-rental autocharges (tolls,
+  //     overage fuel, damage),
+  //   • a security deposit pre-auth held against the same card.
+  //
+  // We model this as a "deposit-only" branch: skip /sale, run /getCard
+  // to tokenize, then run /Auth for the deposit hold. The wizard
+  // surfaces "Pre-paid · saving card + deposit hold" in this branch.
+  //
+  // Negative / NaN amounts are still rejected — those are bugs, not
+  // legitimate pre-paid scenarios.
+  const requestedAmount = Number(amount);
+  if (!Number.isFinite(requestedAmount) || requestedAmount < 0) {
+    throw new CheckoutSessionError('amount must be a non-negative number', 400);
+  }
+  const isPrepaid = requestedAmount === 0;
 
   // Load session + agreement
   const session = await prisma.checkoutSession.findUnique({
@@ -90,33 +109,58 @@ async function runChargeSequence({
   const log = (kind, payload) => events.push({ kind, ...payload, at: new Date().toISOString() });
 
   // ──────────────────────────────────────────────────────────────────
-  // 1. SALE
+  // 1. SALE — skipped for the pre-paid branch
   // ──────────────────────────────────────────────────────────────────
-  let saleResponse;
-  try {
-    log('SPIN_SALE_STARTED', { amount, referenceId: refId });
-    saleResponse = await spinClient.sale({
-      amount,
-      referenceId: refId,
-      invoiceNumber: session.agreement.agreementNumber,
-    }, tenantConfig);
-    log('SPIN_SALE_APPROVED', {
-      referenceId: refId,
-      authCode: saleResponse?.AuthCode,
-    });
-  } catch (err) {
-    log('SPIN_SALE_FAILED', { message: err.message, referenceId: refId });
-    await persistEvents(sessionId, events);
-    throw new CheckoutSessionError(
-      `Sale declined: ${err.message}`,
-      402, 'SALE_DECLINED',
-    );
+  let saleResponse = null;
+  let cardOnFile = null;
+
+  if (isPrepaid) {
+    log('SPIN_PREPAID_BRANCH', { reason: 'balance already $0 — capturing card + deposit only' });
+    try {
+      log('SPIN_GETCARD_STARTED', { referenceId: refId });
+      const tokenResponse = await spinClient.getCard({ referenceId: refId }, tenantConfig);
+      cardOnFile = spinClient.extractCardOnFile(tokenResponse);
+      if (!cardOnFile) {
+        // GetCard returned a 200 but no usable token. Without a token
+        // the deposit hold can't be billed back later either, so treat
+        // this as a hard fail. Operator can retry.
+        throw new Error('Card capture succeeded but no token was returned');
+      }
+      log('SPIN_GETCARD_APPROVED', { brand: cardOnFile.brand, last4: cardOnFile.last4 });
+    } catch (err) {
+      log('SPIN_GETCARD_FAILED', { message: err.message, referenceId: refId });
+      await persistEvents(sessionId, events);
+      throw new CheckoutSessionError(
+        `Card capture declined: ${err.message}`,
+        402, 'CARD_CAPTURE_DECLINED',
+      );
+    }
+  } else {
+    try {
+      log('SPIN_SALE_STARTED', { amount: requestedAmount, referenceId: refId });
+      saleResponse = await spinClient.sale({
+        amount: requestedAmount,
+        referenceId: refId,
+        invoiceNumber: session.agreement.agreementNumber,
+      }, tenantConfig);
+      log('SPIN_SALE_APPROVED', {
+        referenceId: refId,
+        authCode: saleResponse?.AuthCode,
+      });
+    } catch (err) {
+      log('SPIN_SALE_FAILED', { message: err.message, referenceId: refId });
+      await persistEvents(sessionId, events);
+      throw new CheckoutSessionError(
+        `Sale declined: ${err.message}`,
+        402, 'SALE_DECLINED',
+      );
+    }
+    cardOnFile = spinClient.extractCardOnFile(saleResponse);
   }
 
   // ──────────────────────────────────────────────────────────────────
-  // 2. EXTRACT CARD-ON-FILE + persist
+  // 2. PERSIST CARD-ON-FILE (sourced from /sale OR /getCard)
   // ──────────────────────────────────────────────────────────────────
-  const cardOnFile = spinClient.extractCardOnFile(saleResponse);
   if (cardOnFile) {
     await prisma.rentalAgreement.update({
       where: { id: session.agreement.id },
@@ -128,25 +172,27 @@ async function runChargeSequence({
       },
     });
     log('CARD_ON_FILE_PERSISTED', { brand: cardOnFile.brand, last4: cardOnFile.last4 });
-  } else {
+  } else if (!isPrepaid) {
     log('CARD_ON_FILE_MISSING', { note: 'Sale approved but no token in response' });
     logger.warn('[spin-charge] sale approved but no card-on-file token', {
       sessionId, referenceId: refId,
     });
   }
 
-  // Persist the sale itself as a payment row.
-  await prisma.rentalAgreementPayment.create({
-    data: {
-      rentalAgreementId: session.agreement.id,
-      method: 'CARD',
-      amount,
-      reference: saleResponse?.AuthCode || refId,
-      status: 'PAID',
-      notes: `Spin Sale · ${refId}`,
-    },
-  });
-  log('SALE_PAYMENT_RECORDED', { amount });
+  // Persist the sale itself as a payment row — only for the paying branch.
+  if (!isPrepaid) {
+    await prisma.rentalAgreementPayment.create({
+      data: {
+        rentalAgreementId: session.agreement.id,
+        method: 'CARD',
+        amount: requestedAmount,
+        reference: saleResponse?.AuthCode || refId,
+        status: 'PAID',
+        notes: `Spin Sale · ${refId}`,
+      },
+    });
+    log('SALE_PAYMENT_RECORDED', { amount: requestedAmount });
+  }
 
   // ──────────────────────────────────────────────────────────────────
   // 3. DEPOSIT PRE-AUTH
@@ -167,33 +213,39 @@ async function runChargeSequence({
     } catch (err) {
       preauthFailed = true;
       log('SPIN_PREAUTH_FAILED', { message: err.message, referenceId: depositRefId });
-      logger.error('[spin-charge] preauth failed AFTER sale captured', {
-        sessionId, saleRefId: refId, depositRefId, err: err.message,
+      logger.error('[spin-charge] preauth failed', {
+        sessionId, saleRefId: refId, depositRefId, isPrepaid, err: err.message,
       });
 
       // Roll back the sale to avoid charging the customer for a rental
-      // whose deposit we couldn't hold.
-      try {
-        log('SPIN_VOID_STARTED', { referenceId: refId });
-        await spinClient.void({ referenceId: refId }, tenantConfig);
-        log('SPIN_VOID_OK', { referenceId: refId });
-        // Mark the payment row as VOID so the agreement's paidAmount
-        // recompute drops it.
-        await prisma.rentalAgreementPayment.updateMany({
-          where: { rentalAgreementId: session.agreement.id, reference: saleResponse?.AuthCode || refId },
-          data: { status: 'VOID' },
-        });
-      } catch (voidErr) {
-        log('SPIN_VOID_FAILED', { message: voidErr.message });
-        logger.error('[spin-charge] CRITICAL: void failed after preauth failure', {
-          sessionId, refId, err: voidErr.message,
-        });
-        // Continue — the operator will need to issue a manual refund.
+      // whose deposit we couldn't hold. The pre-paid branch has no sale
+      // to void — the customer already paid through OTA / portal — so
+      // we just surface the failure and let staff retry.
+      if (!isPrepaid) {
+        try {
+          log('SPIN_VOID_STARTED', { referenceId: refId });
+          await spinClient.void({ referenceId: refId }, tenantConfig);
+          log('SPIN_VOID_OK', { referenceId: refId });
+          // Mark the payment row as VOID so the agreement's paidAmount
+          // recompute drops it.
+          await prisma.rentalAgreementPayment.updateMany({
+            where: { rentalAgreementId: session.agreement.id, reference: saleResponse?.AuthCode || refId },
+            data: { status: 'VOID' },
+          });
+        } catch (voidErr) {
+          log('SPIN_VOID_FAILED', { message: voidErr.message });
+          logger.error('[spin-charge] CRITICAL: void failed after preauth failure', {
+            sessionId, refId, err: voidErr.message,
+          });
+          // Continue — the operator will need to issue a manual refund.
+        }
       }
 
       await persistEvents(sessionId, events);
       throw new CheckoutSessionError(
-        `Preauth failed: ${err.message}. Sale was rolled back; customer can retry.`,
+        isPrepaid
+          ? `Deposit hold declined: ${err.message}. Customer can retry; no sale was charged.`
+          : `Preauth failed: ${err.message}. Sale was rolled back; customer can retry.`,
         402, 'PREAUTH_FAILED',
       );
     }
