@@ -142,10 +142,45 @@ async function getById(id, { tenantId } = {}) {
   return prisma.checkoutSession.findFirst({ where });
 }
 
-async function getByReservationId(reservationId, { tenantId } = {}) {
+async function getByReservationId(reservationId, { tenantId, actorUserId } = {}) {
   if (!reservationId) return null;
   const where = tenantId ? { reservationId, tenantId } : { reservationId };
-  return prisma.checkoutSession.findFirst({ where });
+  const session = await prisma.checkoutSession.findFirst({ where });
+  if (!session) return null;
+
+  // 2026-05-28 — Self-heal sessions created before the auto-create
+  // agreement patch landed. If a non-terminal session has no agreement
+  // bound, back-fill it now so step 2 (T&C signing) doesn't 409 with
+  // "no agreement linked".
+  if (!session.agreementId && !isTerminal(session.currentStep)) {
+    try {
+      const agreementId = await ensureAgreementExists({
+        reservationId,
+        tenantId: session.tenantId || tenantId || null,
+        actorUserId: actorUserId || null,
+      });
+      if (agreementId) {
+        const updated = await prisma.checkoutSession.update({
+          where: { id: session.id },
+          data: { agreementId },
+        });
+        logger.info('[checkout-session] self-healed missing agreementId on get', {
+          sessionId: session.id, reservationId, agreementId,
+        });
+        return updated;
+      }
+    } catch (err) {
+      // Don't fail the read just because the back-fill couldn't run —
+      // log and return the session as-is so the wizard can still display
+      // it. Step 2 will surface the underlying agreement-create error
+      // when the customer actually tries to sign.
+      logger.warn('[checkout-session] self-heal agreement back-fill failed', {
+        sessionId: session.id, reservationId, message: err?.message || String(err),
+      });
+    }
+  }
+
+  return session;
 }
 
 /**

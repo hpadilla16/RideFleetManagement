@@ -67,7 +67,8 @@ checkoutSessionRouter.get('/by-reservation/:reservationId', async (req, res) => 
   try {
     const tenantId = getTenantScope(req);
     const session = await checkoutSessionService.getByReservationId(
-      req.params.reservationId, { tenantId },
+      req.params.reservationId,
+      { tenantId, actorUserId: req.user?.id || req.user?.sub || null },
     );
     if (!session) return res.status(404).json({ error: 'Not found' });
     res.json(session);
