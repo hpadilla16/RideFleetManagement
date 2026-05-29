@@ -144,9 +144,47 @@ async function getById(id, { tenantId } = {}) {
 
 async function getByReservationId(reservationId, { tenantId, actorUserId } = {}) {
   if (!reservationId) return null;
-  const where = tenantId ? { reservationId, tenantId } : { reservationId };
-  const session = await prisma.checkoutSession.findFirst({ where });
+
+  // reservationId is UNIQUE on CheckoutSession (one session per reservation),
+  // so we can safely lookup by reservationId alone and apply the tenant scope
+  // as a SECONDARY check. This is more forgiving than `where: { reservationId, tenantId }`
+  // because it doesn't silently 404 on sessions created before tenantId was
+  // back-filled (Phase 1 sessions ran with tenantId=null while the auto-create
+  // was still routing through super-admin context).
+  let session = await prisma.checkoutSession.findUnique({ where: { reservationId } });
   if (!session) return null;
+
+  // Apply tenant scope as a soft check. If the session has a tenantId and it
+  // mismatches the caller's tenantId, we refuse. If the session has null
+  // tenantId (legacy), we accept and back-fill below.
+  if (tenantId && session.tenantId && session.tenantId !== tenantId) {
+    return null;
+  }
+
+  // 2026-05-28 — Back-fill missing tenantId from the reservation when it's
+  // null on the session. This heals Phase 1 sessions that were created
+  // before the tenantId propagation patch and lets the customer-view
+  // tenant-scoped query find them on the next poll.
+  if (!session.tenantId && !isTerminal(session.currentStep)) {
+    try {
+      const res = await prisma.reservation.findUnique({
+        where: { id: reservationId }, select: { tenantId: true },
+      });
+      if (res?.tenantId) {
+        session = await prisma.checkoutSession.update({
+          where: { id: session.id },
+          data: { tenantId: res.tenantId },
+        });
+        logger.info('[checkout-session] self-healed missing tenantId on get', {
+          sessionId: session.id, reservationId, tenantId: res.tenantId,
+        });
+      }
+    } catch (err) {
+      logger.warn('[checkout-session] tenantId back-fill failed', {
+        sessionId: session.id, message: err?.message || String(err),
+      });
+    }
+  }
 
   // 2026-05-28 — Self-heal sessions created before the auto-create
   // agreement patch landed. If a non-terminal session has no agreement
