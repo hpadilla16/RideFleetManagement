@@ -393,6 +393,61 @@ export async function tlSyncHandler(job) {
     },
   });
 
+  // 2026-05-29 — Post-run vehicleType backfill failsafe.
+  //
+  // The auto-promote path occasionally lands reservations with
+  // vehicleTypeId=null even though the AcrissCategoryMap row exists
+  // and the VehicleType lookup works in isolation (verified
+  // empirically — likely a stale-container / cached-Prisma-client
+  // race on the actual run). Until we have a confirmed root cause,
+  // sweep up any null-typed TL reservations for this tenant at the
+  // end of every sync run. Idempotent: no-ops when everything's
+  // already mapped, so it's safe to run on every run including
+  // failed ones.
+  let backfillFixed = 0, backfillSkipped = 0;
+  try {
+    const orphans = await prisma.reservation.findMany({
+      where: {
+        tenantId,
+        vehicleTypeId: null,
+        externalReservation: { is: { sourceSystem: SOURCE_SYSTEM } },
+      },
+      select: {
+        id: true, reservationNumber: true,
+        externalReservation: { select: { vehicleAcriss: true } },
+      },
+    });
+    for (const r of orphans) {
+      const acriss = r.externalReservation?.vehicleAcriss;
+      if (!acriss) { backfillSkipped++; continue; }
+      const map = await prisma.acrissCategoryMap.findUnique({
+        where: { tenantId_acrissCode: { tenantId, acrissCode: acriss } },
+      }).catch(() => null);
+      if (!map?.vehicleCategory) { backfillSkipped++; continue; }
+      const vt = await prisma.vehicleType.findFirst({
+        where: { tenantId, code: { equals: map.vehicleCategory, mode: 'insensitive' } },
+        select: { id: true },
+      }).catch(() => null);
+      if (!vt?.id) { backfillSkipped++; continue; }
+      await prisma.reservation.update({
+        where: { id: r.id },
+        data: { vehicleTypeId: vt.id },
+      }).catch(() => { backfillSkipped++; });
+      backfillFixed++;
+    }
+    if (backfillFixed > 0 || backfillSkipped > 0) {
+      logger.info('[tl-sync] post-run vehicleType backfill', {
+        tenantId, runId: runRow.id, fixed: backfillFixed, skipped: backfillSkipped,
+      });
+    }
+  } catch (err) {
+    // Backfill is a safety net, not a hard requirement — never let a
+    // backfill failure mask the underlying sync's success.
+    logger.warn('[tl-sync] post-run backfill threw', {
+      tenantId, runId: runRow.id, message: err.message,
+    });
+  }
+
   return {
     runId: runRow.id,
     status: finalStatus,
@@ -402,6 +457,8 @@ export async function tlSyncHandler(job) {
     autoPromoted,
     needsReview,
     errorsCount,
+    backfillFixed,
+    backfillSkipped,
   };
 }
 
