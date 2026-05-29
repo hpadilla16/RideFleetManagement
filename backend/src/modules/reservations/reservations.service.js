@@ -1400,7 +1400,18 @@ export const reservationsService = {
             locked: true,
             createdAt: true,
             updatedAt: true,
-            charges: { orderBy: [{ sortOrder: 'asc' }, { createdAt: 'asc' }] },
+            // 2026-05-28 — Restrict charges in the GET-by-id response to
+            // SECURITY_DEPOSIT-source rows. The wizard's Step 3 reads this
+            // array to compute the deposit hold amount and subtract it
+            // from the balance for the sale; if the array includes all
+            // charges (Daily, Tax, Security Deposit), the wizard
+            // double-counts and shows $0 / pre-paid mode incorrectly.
+            // Other consumers of this endpoint should query a dedicated
+            // /charges or /agreement endpoint if they need full breakdown.
+            charges: {
+              where: { source: 'SECURITY_DEPOSIT', selected: true },
+              orderBy: [{ sortOrder: 'asc' }, { createdAt: 'asc' }]
+            },
             payments: { orderBy: { paidAt: 'desc' } }
           }
         }
