@@ -607,10 +607,20 @@ function Step3PaymentPending({ session, reservation, token, onPaid }) {
   // agreement.paidAmount, so balance = total - paidAmount is what's
   // actually owed at the counter. Fall back to estimatedTotal for
   // reservations that don't have an agreement bound yet.
+  //
+  // 2026-05-28 — Some legacy agreements baked the SECURITY_DEPOSIT charge
+  // into total/balance (TOTAL = daily + tax + deposit). The wizard
+  // intentionally separates "amount due" (sale) from "deposit hold" so we
+  // subtract any SECURITY_DEPOSIT-source charges from the balance to
+  // get the true sale amount.
   const explicitBalance = Number(reservation.rentalAgreement?.balance);
-  const subtotal = Number.isFinite(explicitBalance) && explicitBalance >= 0
+  const securityDepositChargesSum = Array.isArray(reservation.rentalAgreement?.charges)
+    ? reservation.rentalAgreement.charges.reduce((s, c) => s + Number(c.total || 0), 0)
+    : 0;
+  const rawSubtotal = Number.isFinite(explicitBalance) && explicitBalance >= 0
     ? explicitBalance
     : Number(reservation.estimatedTotal || 0);
+  const subtotal = Math.max(0, rawSubtotal - securityDepositChargesSum);
 
   // Phase 2.x — pre-paid customers ($0 balance) still need a card on
   // file + the security deposit hold. The backend takes a separate
@@ -619,21 +629,19 @@ function Step3PaymentPending({ session, reservation, token, onPaid }) {
 
   // 2026-05-28 — Pull the deposit hold from the agreement. Source order:
   //   1. agreement.securityDepositAmount (normalized column)
-  //   2. SUM of agreement.charges where source = SECURITY_DEPOSIT
+  //   2. SUM of agreement.charges where source = SECURITY_DEPOSIT (reuses
+  //      the value we computed above for the subtotal calculation)
   //   3. hardcoded $500 fallback (last resort, dev-only realistically)
   //
   // The backend ignores this client value and re-resolves on its own, so
   // even if the UI shows the wrong number for a split second after a
   // stale fetch, the actual terminal hold is correct.
   const agreementDepositCol = Number(reservation.rentalAgreement?.securityDepositAmount);
-  const agreementDepositCharges = Array.isArray(reservation.rentalAgreement?.charges)
-    ? reservation.rentalAgreement.charges.reduce((s, c) => s + Number(c.total || 0), 0)
-    : 0;
   let depositAmount;
   if (Number.isFinite(agreementDepositCol) && agreementDepositCol > 0) {
     depositAmount = agreementDepositCol;
-  } else if (agreementDepositCharges > 0) {
-    depositAmount = agreementDepositCharges;
+  } else if (securityDepositChargesSum > 0) {
+    depositAmount = securityDepositChargesSum;
   } else {
     depositAmount = 500;
   }
