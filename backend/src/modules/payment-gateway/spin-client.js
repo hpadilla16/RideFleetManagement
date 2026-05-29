@@ -99,10 +99,40 @@ async function spinRequest(method, path, body, tenantConfig = {}) {
   let data;
   try { data = JSON.parse(text); } catch { data = { raw: text }; }
 
-  if (!res.ok || data?.GeneralResponse?.ResultCode !== 0) {
-    const code = data?.GeneralResponse?.StatusCode || res.status;
-    const msg = data?.GeneralResponse?.Message || data?.GeneralResponse?.DetailedMessage || `SPIn request failed (${code})`;
-    logger.warn(`SPIn API error: ${msg}`, { spinPath: path, statusCode: code, resultCode: data?.GeneralResponse?.ResultCode });
+  // 2026-05-28 — Dejavoo response success detection.
+  //
+  // The Spin API returns ResultCode as either a number 0 or a string
+  // "0" depending on environment + endpoint. We also need to handle
+  // the case where ResultCode might be present but the actual signal
+  // for success is Message === "Approved" or the AuthCode field is
+  // populated. Strict `!== 0` was rejecting genuine approvals
+  // (Hector's production card-tap on 2026-05-28 showed "Sale declined:
+  // Approved" — terminal physically approved, response had
+  // Message="Approved" but ResultCode was something we weren't
+  // recognizing as success).
+  const gr = data?.GeneralResponse || {};
+  const resultCodeRaw = gr.ResultCode;
+  const resultCodeNum = Number(resultCodeRaw);
+  const message = String(gr.Message || '').trim();
+  const detailedMessage = String(gr.DetailedMessage || '').trim();
+  const hasAuthCode = Boolean(data?.AuthCode || data?.Authcode || data?.authCode);
+  const looksApproved = /^approved$|^approval$|^success$/i.test(message)
+    || /^approved$|^approval$|^success$/i.test(detailedMessage);
+
+  const isSuccess = res.ok && (
+    resultCodeNum === 0
+    || (resultCodeRaw === '0')
+    || looksApproved
+    || hasAuthCode
+  );
+
+  if (!isSuccess) {
+    const code = gr.StatusCode || res.status;
+    const msg = message || detailedMessage || `SPIn request failed (${code})`;
+    logger.warn(`SPIn API error: ${msg}`, {
+      spinPath: path, statusCode: code,
+      resultCode: resultCodeRaw, resultCodeType: typeof resultCodeRaw,
+    });
     const err = new Error(msg);
     err.spinStatusCode = code;
     err.spinResponse = data;
