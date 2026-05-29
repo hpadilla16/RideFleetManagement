@@ -35,9 +35,14 @@ function resolveApiBase() {
       return normalizeBaseUrl(rebuilt.toString());
     }
     if (configuredHost && !currentIsLocal && configuredHost !== currentHost) {
-      // Different LAN hosts — caller is probably proxying through nginx
-      // or similar. Honor the configured base verbatim.
-      return configured;
+      // Different non-local hosts (e.g. user is on ridefleetmanager.com
+      // but NEXT_PUBLIC_API_BASE was baked at build time to point at
+      // beta.ridefleetmanager.com). Production runs the backend behind
+      // an nginx reverse proxy on the SAME hostname, so always trust
+      // the current origin in this case. Reverting this to `origin`
+      // restores the pre-2026-05-28 behavior — my LAN-IP rebase fix
+      // mistakenly changed it to `configured`, which broke prod CORS.
+      return origin;
     }
     return configured;
   }
