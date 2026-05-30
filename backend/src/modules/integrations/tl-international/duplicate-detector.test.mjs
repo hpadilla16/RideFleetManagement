@@ -16,11 +16,28 @@ import { findDuplicateReservation } from './duplicate-detector.service.js';
 
 const TENANT = 'tenant-1';
 
+// Hard offsets for IANA zones used in tests. Both Puerto Rico (AST)
+// and the equivalents we care about don't observe DST, so a fixed
+// hour offset is sufficient for unit-test day bucketing.
+const TZ_OFFSET_HOURS = {
+  'America/Puerto_Rico': -4,
+  'UTC': 0,
+};
+
 /**
  * Build a tiny stub of `prisma.$queryRaw`. We capture the tagged-template
  * fragments + values so each test can decide what to return based on the
  * shape of the call, and emulate the SQL semantics (LOWER+TRIM, day
- * truncation, NOT EXISTS link guard).
+ * truncation in tenant TZ, NOT EXISTS link guard).
+ *
+ * 2026-05-30 — Query shape updated. The detector now interpolates the
+ * tenant time zone before truncating, so the values array is:
+ *   [0] tenantId
+ *   [1] firstName (lower+trim)
+ *   [2] lastName  (lower+trim)
+ *   [3] tz        (first AT TIME ZONE in the comparison)
+ *   [4] pickup    (Date)
+ *   [5] tz        (second AT TIME ZONE in the comparison; same value as [3])
  */
 function makePrismaStub({ reservations = [], links = new Set() } = {}) {
   const calls = [];
@@ -28,20 +45,13 @@ function makePrismaStub({ reservations = [], links = new Set() } = {}) {
     calls,
     async $queryRaw(strings, ...values) {
       calls.push({ strings, values });
-      // values, in order from duplicate-detector.service.js:
-      //   [0] tenantId
-      //   [1] fn   (lower+trim)
-      //   [2] ln   (lower+trim)
-      //   [3] pickup (Date)
-      const [tenantId, fn, ln, pickup] = values;
-      const sameDay = (a, b) => {
-        const da = a instanceof Date ? a : new Date(a);
-        const db = b instanceof Date ? b : new Date(b);
-        return (
-          da.getUTCFullYear() === db.getUTCFullYear() &&
-          da.getUTCMonth() === db.getUTCMonth() &&
-          da.getUTCDate() === db.getUTCDate()
-        );
+      const [tenantId, fn, ln, tz, pickup] = values;
+      // Reduce a timestamp to its tenant-TZ calendar day (YYYY-MM-DD).
+      const tzDay = (value) => {
+        const d = value instanceof Date ? value : new Date(value);
+        const offset = TZ_OFFSET_HOURS[tz] ?? 0;
+        const shifted = new Date(d.getTime() + offset * 60 * 60 * 1000);
+        return `${shifted.getUTCFullYear()}-${String(shifted.getUTCMonth() + 1).padStart(2, '0')}-${String(shifted.getUTCDate()).padStart(2, '0')}`;
       };
       const norm = (s) => String(s || '').trim().toLowerCase();
       const out = reservations.filter(
@@ -49,7 +59,7 @@ function makePrismaStub({ reservations = [], links = new Set() } = {}) {
           r.tenantId === tenantId &&
           norm(r.customerFirstName) === fn &&
           norm(r.customerLastName) === ln &&
-          sameDay(r.pickupAt, pickup) &&
+          tzDay(r.pickupAt) === tzDay(pickup) &&
           !links.has(r.id),
       );
       return out
@@ -195,6 +205,62 @@ describe('findDuplicateReservation — multiple matches', () => {
     const prisma = makePrismaStub({ reservations: [newerRes, olderRes] });
     const id = await findDuplicateReservation(prisma, EXT());
     assert.equal(id, 'res-older');
+  });
+});
+
+describe('findDuplicateReservation — tenant TZ day bucketing', () => {
+  // 2026-05-30 regression — RES-986873 Willy Acosta. A manually-created
+  // reservation at 2pm AST May 29 (18:00Z) and a TL pickup at 8pm AST
+  // May 29 (00:00Z May 30) are the SAME AST calendar day, but in UTC
+  // they straddle midnight. The pre-fix detector compared UTC days and
+  // returned null, so the worker created a duplicate Reservation. The
+  // tz-aware comparison must group them on the same AST day.
+  it('matches same-AST-day pickups that span a UTC midnight (Willy Acosta regression)', async () => {
+    const prisma = makePrismaStub({
+      reservations: [RES({
+        customerFirstName: 'WILLY',
+        customerLastName: 'ACOSTA',
+        pickupAt: new Date('2026-05-29T18:00:00Z'), // 2pm AST May 29
+      })],
+    });
+    const id = await findDuplicateReservation(
+      prisma,
+      EXT({
+        customerFirstName: 'Willy',
+        customerLastName: 'Acosta',
+        pickupAt: new Date('2026-05-30T00:00:00Z'), // 8pm AST May 29
+      }),
+    );
+    assert.equal(id, 'res-1');
+  });
+
+  it('still rejects pickups on different AST days', async () => {
+    const prisma = makePrismaStub({
+      reservations: [RES({
+        pickupAt: new Date('2026-05-29T18:00:00Z'), // 2pm AST May 29
+      })],
+    });
+    // 2pm AST May 30 — clearly a different day
+    const id = await findDuplicateReservation(
+      prisma,
+      EXT({ pickupAt: new Date('2026-05-30T18:00:00Z') }),
+    );
+    assert.equal(id, null);
+  });
+
+  it('honors a non-default tz override (UTC)', async () => {
+    // With timeZone: 'UTC', the AST-day-bucketing convenience is
+    // turned off — pickups must match on UTC day to be considered
+    // duplicates. Used by tests + multi-tenant deployments.
+    const prisma = makePrismaStub({
+      reservations: [RES({ pickupAt: new Date('2026-05-29T18:00:00Z') })],
+    });
+    const id = await findDuplicateReservation(
+      prisma,
+      EXT({ pickupAt: new Date('2026-05-30T00:00:00Z') }),
+      { timeZone: 'UTC' },
+    );
+    assert.equal(id, null, 'in UTC mode the 8pm AST pickup falls on May 30');
   });
 });
 
