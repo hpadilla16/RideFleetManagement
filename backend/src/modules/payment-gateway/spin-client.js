@@ -6,24 +6,69 @@ import logger from '../../lib/logger.js';
  * Docs: https://docs.ipospays.com/spin-specification
  * REST API: https://app.theneo.io/dejavoo/spin/spin-rest-api-methods
  *
- * Production: https://api.spinpos.net
- * Sandbox:    https://test.spinpos.net/spin
+ * 2026-05-29 — PRODUCTION-ONLY. We do not run against the Dejavoo
+ * sandbox at all. Hector's TPN + AuthKey are bound to a live
+ * production terminal; the sandbox endpoint would reject them and
+ * even if it accepted them, no funds would settle. The previous
+ * sandbox URL / SPIN_SANDBOX / SPIN_ENV plumbing has been removed
+ * so there's no code path that can route to test.spinpos.net.
+ *
+ * For local development WITHOUT a terminal: use SPIN_DRY_RUN=true,
+ * which short-circuits every call to a synthetic approved response.
  */
 
 const SPIN_PRODUCTION_URL = 'https://api.spinpos.net';
-const SPIN_SANDBOX_URL = 'https://test.spinpos.net/spin';
 
 function getConfig(tenantConfig = {}) {
-  const useSandbox = tenantConfig.spinSandbox !== false && process.env.SPIN_SANDBOX !== 'false';
   return {
-    baseUrl: useSandbox ? SPIN_SANDBOX_URL : SPIN_PRODUCTION_URL,
+    // Hard-coded production endpoint. No sandbox flag. No env override.
+    baseUrl: SPIN_PRODUCTION_URL,
     authKey: tenantConfig.spinAuthKey || process.env.SPIN_AUTH_KEY || '',
     tpn: tenantConfig.spinTpn || process.env.SPIN_TPN || '',
     merchantNumber: tenantConfig.spinMerchantNumber ? Number(tenantConfig.spinMerchantNumber) : 1,
     callbackUrl: tenantConfig.spinCallbackUrl || process.env.SPIN_CALLBACK_URL || '',
+    // Server-side proxy timeout (seconds) — how long Spin waits for the
+    // terminal to respond before giving up. 120s is the Dejavoo default
+    // and matches a typical customer interaction (tap → PIN → email).
     proxyTimeout: Number(tenantConfig.spinProxyTimeout || process.env.SPIN_PROXY_TIMEOUT || 120),
-    sandbox: useSandbox,
+    // Client-side fetch timeout (ms). Slightly above the server proxy
+    // timeout so the server has time to surface its own timeout error
+    // before our fetch aborts. PRIOR BUG: no client timeout — a stuck
+    // terminal hung the wizard request forever.
+    clientTimeoutMs: Number(
+      tenantConfig.spinClientTimeoutMs || process.env.SPIN_CLIENT_TIMEOUT_MS || 130000,
+    ),
   };
+}
+
+// One-time startup audit so misconfiguration surfaces in the boot log
+// rather than at the moment a customer taps their card. Logs a warning
+// for each potential foot-gun: dry-run on, missing TPN/key.
+let auditLogged = false;
+export function auditSpinConfig() {
+  if (auditLogged) return;
+  auditLogged = true;
+  const cfg = getConfig();
+  const dry = String(process.env.SPIN_DRY_RUN || '').toLowerCase() === 'true';
+  const env = String(process.env.NODE_ENV || '').toLowerCase();
+  if (dry && env === 'production') {
+    logger.error('[spin-client] CRITICAL: SPIN_DRY_RUN=true in production — every charge will be synthetic. Unset this immediately.');
+  } else if (dry) {
+    logger.warn('[spin-client] SPIN_DRY_RUN=true — terminal calls return synthetic approvals.');
+  }
+  if (!cfg.authKey || !cfg.tpn) {
+    logger.warn('[spin-client] Spin credentials missing', {
+      hasAuthKey: !!cfg.authKey, hasTpn: !!cfg.tpn,
+      hint: 'Set SPIN_AUTH_KEY and SPIN_TPN — these are live production credentials.',
+    });
+  } else {
+    logger.info('[spin-client] Spin production credentials loaded', {
+      endpoint: cfg.baseUrl,
+      tpn: cfg.tpn.slice(0, 4) + '****' + cfg.tpn.slice(-4),
+      proxyTimeout: cfg.proxyTimeout,
+      clientTimeoutMs: cfg.clientTimeoutMs,
+    });
+  }
 }
 
 // dryRun short-circuits every Spin call to return a synthetic approved
@@ -87,13 +132,35 @@ async function spinRequest(method, path, body, tenantConfig = {}) {
     payload.CallbackInfo = { Url: config.callbackUrl };
   }
 
-  logger.info(`SPIn API ${method} ${path}`, { spinPath: path, sandbox: config.sandbox });
+  logger.info(`SPIn API ${method} ${path}`, { spinPath: path });
 
-  const res = await fetch(url, {
-    method,
-    headers: { 'Content-Type': 'application/json' },
-    body: method !== 'GET' ? JSON.stringify(payload) : undefined,
-  });
+  // Hard fetch timeout so a hung terminal doesn't lock the wizard
+  // forever. Uses AbortController instead of Promise.race so the
+  // underlying socket actually closes when we abort. PRIOR BUG: there
+  // was no client-side timeout — a customer walking away mid-transaction
+  // could leave the agent's screen spinning indefinitely.
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), config.clientTimeoutMs);
+  let res;
+  try {
+    res = await fetch(url, {
+      method,
+      headers: { 'Content-Type': 'application/json' },
+      body: method !== 'GET' ? JSON.stringify(payload) : undefined,
+      signal: controller.signal,
+    });
+  } catch (err) {
+    clearTimeout(timeout);
+    if (err?.name === 'AbortError') {
+      const msg = `SPIn request timed out after ${Math.round(config.clientTimeoutMs / 1000)}s — terminal may be offline or stuck on customer input`;
+      logger.warn(msg, { spinPath: path });
+      const e = new Error(msg);
+      e.spinTimeout = true;
+      throw e;
+    }
+    throw err;
+  }
+  clearTimeout(timeout);
 
   const text = await res.text();
   let data;
@@ -145,8 +212,24 @@ async function spinRequest(method, path, body, tenantConfig = {}) {
 export const spinClient = {
   /**
    * Process a sale (charge).
+   *
+   * 2026-05-29 hardening for launch:
+   *   - GetToken: true → request an iPOS token in the response so the
+   *     subsequent deposit hold can run CNP (no second tap). Without
+   *     this flag the terminal physically tokenizes but the response
+   *     omits IPosToken, silently breaking the saved-card hold path.
+   *   - EnableTip: false → suppress the "tip 15/20/25%" prompt that
+   *     would otherwise show for rental car charges. Caller can still
+   *     opt in by passing { enableTip: true }.
+   *   - PrintReceipt: true → terminal prints the customer copy (the
+   *     auth slip the customer signs is part of the audit trail).
+   *   - GetExtendedData: true → returns CardData (brand, last4) needed
+   *     for the agent-facing "Card on file" chip.
    */
-  async sale({ amount, referenceId, paymentType = 'Credit', tipAmount, invoiceNumber, cart, customFields }, tenantConfig) {
+  async sale({
+    amount, referenceId, paymentType = 'Credit', tipAmount, invoiceNumber,
+    cart, customFields, enableTip = false, printReceipt = true,
+  }, tenantConfig) {
     return spinRequest('POST', 'v2/Payment/Sale', {
       Amount: Number(amount),
       PaymentType: paymentType,
@@ -157,19 +240,29 @@ export const spinClient = {
       ...(customFields ? { CustomFields: customFields } : {}),
       CaptureSignature: false,
       GetExtendedData: true,
+      GetToken: true,        // request iPOS token for downstream CNP
+      EnableTip: enableTip,
+      PrintReceipt: printReceipt,
     }, tenantConfig);
   },
 
   /**
    * Authorize only (hold funds, capture later).
+   *
+   * Same iPOS-token + tip-suppression hardening as sale() so the
+   * pre-paid customer path (which routes through this for the
+   * card-present deposit hold) opportunistically captures a token
+   * for future autocharges.
    */
-  async auth({ amount, referenceId, paymentType = 'Credit', invoiceNumber }, tenantConfig) {
+  async auth({ amount, referenceId, paymentType = 'Credit', invoiceNumber, enableTip = false }, tenantConfig) {
     return spinRequest('POST', 'v2/Payment/Auth', {
       Amount: Number(amount),
       PaymentType: paymentType,
       ReferenceId: String(referenceId).slice(0, 50),
       ...(invoiceNumber ? { InvoiceNumber: String(invoiceNumber).slice(0, 50) } : {}),
       GetExtendedData: true,
+      GetToken: true,
+      EnableTip: enableTip,
     }, tenantConfig);
   },
 
@@ -184,11 +277,21 @@ export const spinClient = {
   },
 
   /**
-   * Void a transaction.
+   * Void a transaction. Used to release a pre-auth deposit hold (the
+   * release-deposit operational tool) and to roll back a sale when the
+   * deposit hold declines mid-checkout.
+   *
+   * 2026-05-29 hardening: include PaymentType per Dejavoo spec so the
+   * Void routes through the correct rail; PrintReceipt: false because
+   * voids are server-initiated (no customer interaction at the
+   * terminal). Dejavoo dedupes by ReferenceId, so passing the original
+   * sale/auth's ReferenceId triggers the void on that exact transaction.
    */
-  async void({ referenceId }, tenantConfig) {
+  async void({ referenceId, paymentType = 'Credit' }, tenantConfig) {
     return spinRequest('POST', 'v2/Payment/Void', {
       ReferenceId: String(referenceId).slice(0, 50),
+      PaymentType: paymentType,
+      PrintReceipt: false,
     }, tenantConfig);
   },
 
@@ -231,6 +334,7 @@ export const spinClient = {
    * via the nightly cleanup job when a session is abandoned.
    */
   async preAuthDeposit({ amount, referenceId, paymentType = 'Credit', invoiceNumber, token }, tenantConfig) {
+    const isCnp = Boolean(token);
     return spinRequest('POST', 'v2/Payment/Auth', {
       Amount: Number(amount),
       PaymentType: paymentType,
@@ -239,8 +343,16 @@ export const spinClient = {
       // When a token is provided we're holding against a previously-
       // tokenized card (CNP). Without it the terminal prompts for tap/
       // insert/swipe just like a normal Auth.
-      ...(token ? { Token: String(token) } : {}),
+      ...(isCnp ? { Token: String(token), CardPresent: false } : {}),
       GetExtendedData: true,
+      // Card-present fallback (pre-paid customers who skipped sale)
+      // tokenizes opportunistically so post-rental autocharges work.
+      // CNP path already has a token so we don't need to re-request one.
+      ...(isCnp ? {} : { GetToken: true }),
+      EnableTip: false,
+      // Voids and CNP auths don't print receipts. Card-present auths do
+      // so the customer can sign their auth slip.
+      PrintReceipt: !isCnp,
     }, tenantConfig);
   },
 
@@ -260,6 +372,9 @@ export const spinClient = {
       // Tells Spin to bill a stored token (no physical card present).
       CardPresent: false,
       GetExtendedData: true,
+      EnableTip: false,
+      // CNP charges don't print at the terminal — no customer there.
+      PrintReceipt: false,
     }, tenantConfig);
   },
 

@@ -1322,6 +1322,59 @@ reservationsRouter.post('/:id/agreement/security-deposit/release', async (req, r
   }
 });
 
+// ── Spin (Dejavoo) operational endpoints ────────────────────────────
+// New View Payments operational tools. These run card-not-present
+// against the saved iPOS token captured during checkout-wizard-v2's
+// Spin sale step. They surface as ReservationPayment rows in the
+// payments list so the agent can see them immediately.
+reservationsRouter.post('/:id/agreement/spin/charge-card-on-file', async (req, res, next) => {
+  try {
+    const agreementId = await ensureAgreementByReservationId(req.params.id, scopeFor(req));
+    if (!agreementId) return res.status(400).json({ error: 'No rental agreement exists for this reservation yet' });
+    const row = await rentalAgreementsService.spinChargeCardOnFile(agreementId, req.body || {}, req.user?.sub || null);
+    res.json(row);
+  } catch (e) {
+    const msg = String(e?.message || '');
+    if (/not found/i.test(msg)) return res.status(404).json({ error: e.message });
+    if (/card on file|amount|declined|Spin|missing|invalid/i.test(msg)) {
+      return res.status(400).json({ error: e.message });
+    }
+    next(e);
+  }
+});
+
+reservationsRouter.post('/:id/agreement/spin/release-deposit', async (req, res, next) => {
+  try {
+    const agreementId = await ensureAgreementByReservationId(req.params.id, scopeFor(req));
+    if (!agreementId) return res.status(400).json({ error: 'No rental agreement exists for this reservation yet' });
+    const row = await rentalAgreementsService.spinReleaseDepositHold(agreementId, req.body || {}, req.user?.sub || null);
+    res.json(row);
+  } catch (e) {
+    const msg = String(e?.message || '');
+    if (/not found/i.test(msg)) return res.status(404).json({ error: e.message });
+    if (/deposit hold|released|declined|Spin|invalid/i.test(msg)) {
+      return res.status(400).json({ error: e.message });
+    }
+    next(e);
+  }
+});
+
+reservationsRouter.post('/:id/agreement/spin/reauth-deposit', async (req, res, next) => {
+  try {
+    const agreementId = await ensureAgreementByReservationId(req.params.id, scopeFor(req));
+    if (!agreementId) return res.status(400).json({ error: 'No rental agreement exists for this reservation yet' });
+    const row = await rentalAgreementsService.spinReauthDepositHold(agreementId, req.body || {}, req.user?.sub || null);
+    res.json(row);
+  } catch (e) {
+    const msg = String(e?.message || '');
+    if (/not found/i.test(msg)) return res.status(404).json({ error: e.message });
+    if (/card on file|amount|declined|Spin|invalid|missing/i.test(msg)) {
+      return res.status(400).json({ error: e.message });
+    }
+    next(e);
+  }
+});
+
 reservationsRouter.post('/:id/agreement/customer/card-on-file', async (req, res, next) => {
   try {
     const agreementId = await ensureAgreementByReservationId(req.params.id, scopeFor(req));

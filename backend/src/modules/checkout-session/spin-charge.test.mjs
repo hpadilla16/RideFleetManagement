@@ -43,6 +43,17 @@ function setupHappyPathPrisma() {
   prisma.rentalAgreementPayment.updateMany = async ({ where, data }) => {
     return { count: 1 };
   };
+  // 2026-05-29 — mirrorToReservationPayment now writes a ReservationPayment
+  // row alongside every agreement payment so View Payments stays in sync.
+  // Capture the calls so tests can assert the mirror happened; default
+  // behaviour returns the input so the inline rentalAgreementPaymentId
+  // linkage doesn't error.
+  calls.reservationPayments = [];
+  prisma.reservationPayment.create = async ({ data }) => {
+    calls.reservationPayments.push(data);
+    return { id: `rp-${calls.reservationPayments.length}`, ...data };
+  };
+  prisma.reservationPayment.update = async ({ where, data }) => ({ id: where?.id, ...data });
   prisma.checkoutSession.update = async ({ where, data }) => {
     calls.sessionUpdates.push({ where, data });
     return {};

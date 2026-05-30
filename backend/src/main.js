@@ -220,6 +220,22 @@ if (process.env.SKIP_LISTEN !== '1') {
       startTollAutoSyncScheduler();
       startHandoffReminderScheduler();
       startCheckoutSessionCleanupScheduler();
+      // Surface Spin misconfiguration (missing TPN/key, sandbox on,
+      // dry-run on) at boot rather than at the moment a customer taps
+      // their card. Lazy-load so the unit-test harness doesn't pull
+      // logger into a side-effecting import chain.
+      import('./modules/payment-gateway/spin-client.js')
+        .then(({ auditSpinConfig }) => auditSpinConfig())
+        .catch(() => {});
+      // Same audit for the iPOSpays Transact API (CNP token operations).
+      import('./modules/payment-gateway/ipos-transact-client.js')
+        .then(({ auditIposTransactConfig }) => auditIposTransactConfig())
+        .catch(() => {});
+      // And the auth module — surfaces "auto-refresh on / off" + scope
+      // at boot rather than at first token call.
+      import('./modules/payment-gateway/ipos-auth.js')
+        .then(({ auditIposAuth }) => auditIposAuth())
+        .catch(() => {});
     }
   });
 }

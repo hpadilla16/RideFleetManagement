@@ -19,6 +19,25 @@ import { getEffectiveTermsHtmlForTenant } from '../../lib/terms/index.js';
 import { TC_VERSION } from '../../lib/terms/version.js';
 import { refundCharge as payarcRefundCharge } from '../public-booking/payarc-hosted-fields.js';
 import { resolveCatalogEntry } from '../../lib/commission-catalog.js';
+import { spinClient } from '../payment-gateway/spin-client.js';
+import { iposTransactClient } from '../payment-gateway/ipos-transact-client.js';
+
+// Tenant Spin config loader — mirrors the helper in spin-charge.service.js.
+// Tenant.spin* columns don't exist on the Tenant model today; the Spin
+// client falls back to env vars when tenantConfig is empty. Returning an
+// empty object keeps both paths working (multi-tenant + single-tenant).
+async function loadTenantSpinConfig(tenantId) {
+  if (!tenantId) return {};
+  try {
+    const row = await prisma.tenant.findUnique({
+      where: { id: tenantId },
+      select: { id: true }
+    });
+    return row ? {} : {};
+  } catch {
+    return {};
+  }
+}
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -3892,6 +3911,345 @@ export const rentalAgreementsService = {
     const refreshed = await this.getById(id);
     if (!refreshed) throw new Error('Rental agreement not found after releasing security deposit');
     return refreshed;
+  },
+
+  // ── Spin (Dejavoo) operational tools ──────────────────────────────
+  // These three methods power the View Payments operational panel.
+  // They act on the iPOS token + deposit hold captured during the new
+  // checkout-wizard-v2 sale/preauth flow. None of them touch the
+  // physical terminal — they're all card-not-present operations against
+  // the saved token / hold reference.
+  //
+  // Each posts a ReservationPayment row (with a TERMINAL gateway tag)
+  // so the View Payments list reflects the new transaction immediately.
+  // The pricing service's maybeCreateAgreementPayment mirror writes a
+  // matching RentalAgreementPayment row, keeping the two ledgers in sync.
+
+  async spinChargeCardOnFile(id, payload = {}, actorUserId = null) {
+    const amount = Number(payload.amount || 0);
+    if (!Number.isFinite(amount) || amount <= 0) {
+      throw new Error('Charge amount must be greater than 0');
+    }
+
+    const agreement = await prisma.rentalAgreement.findUnique({
+      where: { id },
+      include: {
+        reservation: {
+          select: {
+            id: true, tenantId: true, reservationNumber: true,
+            customer: { select: { firstName: true, lastName: true, email: true, phone: true } },
+          },
+        },
+      },
+    });
+    if (!agreement) throw new Error('Rental agreement not found');
+    if (!agreement.cardOnFileToken) {
+      throw new Error('No card on file — complete a Spin sale at checkout first');
+    }
+
+    // Route through the iPOSpays Transact API per the docs — this is
+    // the documented CNP path for tokenized sales (transactionType 1).
+    // Replaces the earlier SPIn-with-Token workaround.
+    const tenantConfig = await loadTenantSpinConfig(agreement.tenantId);
+    const customer = agreement.reservation?.customer || {};
+    const customerName = [
+      agreement.customerFirstName || customer.firstName,
+      agreement.customerLastName || customer.lastName,
+    ].filter(Boolean).join(' ').trim();
+    const response = await iposTransactClient.chargeWithToken({
+      amount,
+      agreementNumber: agreement.agreementNumber || agreement.id,
+      cardToken: agreement.cardOnFileToken,
+      customer: {
+        name: customerName,
+        email: agreement.customerEmail || customer.email || '',
+        phone: agreement.customerPhone || customer.phone || '',
+      },
+      description: payload.notes || 'Card on file charge',
+    }, tenantConfig);
+
+    const norm = iposTransactClient.normalizeResponse(response);
+    if (!norm.approved) {
+      throw new Error(norm.errMessage || norm.message || 'iPOSpays card-on-file charge declined');
+    }
+
+    const reference = `IPOS_COF:${norm.authCode || norm.rrn || norm.referenceId}${agreement.cardOnFileLast4 ? ` ****${agreement.cardOnFileLast4}` : ''}`;
+    const note = String(payload.notes || '').trim();
+    const finalNote = note
+      ? `Spin card-on-file charge · ${note}`
+      : 'Spin card-on-file charge (CNP)';
+
+    const created = await prisma.reservationPayment.create({
+      data: {
+        reservationId: agreement.reservationId,
+        method: 'CARD',
+        amount,
+        reference,
+        status: 'PAID',
+        paidAt: new Date(),
+        origin: 'OTC',
+        gateway: 'SPIN',
+        notes: finalNote
+      }
+    });
+
+    // Mirror into RentalAgreementPayment + update agreement balance.
+    // (Cannot reuse maybeCreateAgreementPayment — it lives in the
+    // pricing service and expects a reservation include shape we don't
+    // have here. Inline mirror is cheaper than another fetch.)
+    try {
+      const mirror = await prisma.rentalAgreementPayment.create({
+        data: {
+          rentalAgreementId: agreement.id,
+          method: 'CARD',
+          amount,
+          reference,
+          status: 'PAID',
+          notes: finalNote
+        }
+      });
+      await prisma.reservationPayment.update({
+        where: { id: created.id },
+        data: { rentalAgreementPaymentId: mirror.id }
+      });
+      const paidAmount = Number((Number(agreement.paidAmount || 0) + amount).toFixed(2));
+      const balance = Math.max(0, Number((Number(agreement.total || 0) - paidAmount).toFixed(2)));
+      await prisma.rentalAgreement.update({
+        where: { id: agreement.id },
+        data: { paidAmount, balance }
+      });
+    } catch {}
+
+    try {
+      await prisma.auditLog.create({
+        data: {
+          tenantId: agreement.tenantId || null,
+          reservationId: agreement.reservationId,
+          actorUserId: actorUserId || null,
+          action: 'UPDATE',
+          reason: `Spin card-on-file charge: $${amount.toFixed(2)}`,
+          metadata: JSON.stringify({ reference, refId, last4: agreement.cardOnFileLast4 || null })
+        }
+      });
+    } catch {}
+
+    return this.getById(id);
+  },
+
+  async spinReleaseDepositHold(id, payload = {}, actorUserId = null) {
+    const agreement = await prisma.rentalAgreement.findUnique({
+      where: { id },
+      include: { reservation: { select: { id: true, tenantId: true, reservationNumber: true } } }
+    });
+    if (!agreement) throw new Error('Rental agreement not found');
+    if (!agreement.depositHoldId) {
+      throw new Error('No active deposit hold on file');
+    }
+    if (agreement.depositHoldVoidedAt) {
+      throw new Error('Deposit hold has already been released');
+    }
+
+    const isManual = String(agreement.depositHoldId || '').startsWith('MANUAL-');
+    const tenantConfig = await loadTenantSpinConfig(agreement.tenantId);
+    let voidRef = agreement.depositHoldId;
+
+    if (!isManual) {
+      // The depositHoldId stored for Transact-issued pre-auths is the
+      // RRN (the void key per Transact docs). For older SPIn-issued
+      // holds it's the SPIn ReferenceId. We try Transact first since
+      // that's the new documented path; on a clearly-malformed RRN we
+      // could fall back to SPIn, but the typical case is one or the
+      // other and the Transact path is the documented one.
+      const response = await iposTransactClient.voidByRrn({
+        rrn: agreement.depositHoldId,
+        agreementNumber: agreement.agreementNumber || agreement.id,
+      }, tenantConfig);
+      const norm = iposTransactClient.normalizeResponse(response);
+      if (!norm.approved) {
+        throw new Error(norm.errMessage || norm.message || 'iPOSpays void declined');
+      }
+      voidRef = norm.rrn || norm.referenceId || agreement.depositHoldId;
+    }
+
+    await prisma.rentalAgreement.update({
+      where: { id: agreement.id },
+      data: {
+        depositHoldVoidedAt: new Date(),
+        securityDepositReleasedAt: new Date(),
+        securityDepositCaptured: false
+      }
+    });
+
+    const heldAmount = Number(agreement.depositHoldAmount || agreement.securityDepositAmount || 0);
+    if (heldAmount > 0) {
+      // Post a $0 informational row so the release appears in the
+      // payments list. We use a zero amount because the original
+      // pre-auth was never settled — the customer is whole.
+      try {
+        await prisma.reservationPayment.create({
+          data: {
+            reservationId: agreement.reservationId,
+            method: 'OTHER',
+            amount: 0,
+            reference: `SPIN_RELEASE:${voidRef}`,
+            status: 'PAID',
+            paidAt: new Date(),
+            origin: 'OTC',
+            gateway: 'SPIN',
+            notes: payload.reason
+              ? `Released deposit hold $${heldAmount.toFixed(2)} · ${payload.reason}`
+              : `Released deposit hold $${heldAmount.toFixed(2)}${isManual ? ' (manual entry)' : ''}`
+          }
+        });
+      } catch {}
+    }
+
+    try {
+      await prisma.auditLog.create({
+        data: {
+          tenantId: agreement.tenantId || null,
+          reservationId: agreement.reservationId,
+          actorUserId: actorUserId || null,
+          action: 'UPDATE',
+          reason: `Spin deposit hold released: $${heldAmount.toFixed(2)}`,
+          metadata: JSON.stringify({
+            originalHoldId: agreement.depositHoldId,
+            voidRef,
+            manual: isManual,
+            reason: payload.reason || null
+          })
+        }
+      });
+    } catch {}
+
+    return this.getById(id);
+  },
+
+  async spinReauthDepositHold(id, payload = {}, actorUserId = null) {
+    const amount = Number(payload.amount || 0);
+    if (!Number.isFinite(amount) || amount <= 0) {
+      throw new Error('Re-auth deposit amount must be greater than 0');
+    }
+
+    const agreement = await prisma.rentalAgreement.findUnique({
+      where: { id },
+      include: {
+        reservation: {
+          select: {
+            id: true, tenantId: true, reservationNumber: true,
+            customer: { select: { firstName: true, lastName: true, email: true, phone: true } },
+          },
+        },
+      },
+    });
+    if (!agreement) throw new Error('Rental agreement not found');
+    if (!agreement.cardOnFileToken) {
+      throw new Error('No card on file — cannot reauthorize without a saved iPOS Token');
+    }
+
+    const tenantConfig = await loadTenantSpinConfig(agreement.tenantId);
+    const customer = agreement.reservation?.customer || {};
+    const customerInfo = {
+      name: [
+        agreement.customerFirstName || customer.firstName,
+        agreement.customerLastName || customer.lastName,
+      ].filter(Boolean).join(' ').trim(),
+      email: agreement.customerEmail || customer.email || '',
+      phone: agreement.customerPhone || customer.phone || '',
+    };
+
+    // 1. If there's an active (un-voided) hold, void it via Transact
+    //    by RRN first. Doing it in two steps so a void failure doesn't
+    //    kill the new auth — the agent can release manually if needed.
+    let voidedOldRef = null;
+    if (agreement.depositHoldId && !agreement.depositHoldVoidedAt) {
+      const isManual = String(agreement.depositHoldId).startsWith('MANUAL-');
+      if (!isManual) {
+        try {
+          const voidResponse = await iposTransactClient.voidByRrn({
+            rrn: agreement.depositHoldId,
+            agreementNumber: agreement.agreementNumber || agreement.id,
+          }, tenantConfig);
+          const voidNorm = iposTransactClient.normalizeResponse(voidResponse);
+          if (voidNorm.approved) voidedOldRef = voidNorm.rrn || agreement.depositHoldId;
+        } catch {
+          // Swallow — surfaced via the new hold's audit log so the agent
+          // can chase the orphan hold via the iPOSpays portal if needed.
+        }
+      } else {
+        voidedOldRef = agreement.depositHoldId;
+      }
+    }
+
+    // 2. New pre-auth via stored iPOS Token (CNP, no customer interaction).
+    const authResponse = await iposTransactClient.preAuthDeposit({
+      amount,
+      agreementNumber: agreement.agreementNumber || agreement.id,
+      cardToken: agreement.cardOnFileToken,
+      customer: customerInfo,
+    }, tenantConfig);
+
+    const norm = iposTransactClient.normalizeResponse(authResponse);
+    if (!norm.approved) {
+      throw new Error(norm.errMessage || norm.message || 'iPOSpays re-auth declined');
+    }
+
+    // Store the RRN — Transact uses RRN as the void key.
+    const newHoldId = norm.rrn || norm.referenceId;
+    const reference = `IPOS_REAUTH:${norm.authCode || newHoldId}`;
+
+    await prisma.rentalAgreement.update({
+      where: { id: agreement.id },
+      data: {
+        depositHoldId: newHoldId,
+        depositHoldAmount: amount,
+        depositHoldVoidedAt: null,
+        depositHoldExpiresAt: null,
+        securityDepositAmount: amount,
+        securityDepositCaptured: true,
+        securityDepositCapturedAt: new Date(),
+        securityDepositReleasedAt: null,
+        securityDepositReference: reference
+      }
+    });
+
+    try {
+      await prisma.reservationPayment.create({
+        data: {
+          reservationId: agreement.reservationId,
+          method: 'AUTH_HOLD',
+          amount,
+          reference,
+          status: 'PAID',
+          paidAt: new Date(),
+          origin: 'OTC',
+          gateway: 'SPIN',
+          notes: voidedOldRef
+            ? `Spin deposit re-authorized $${amount.toFixed(2)} (replaced hold ${voidedOldRef})`
+            : `Spin deposit re-authorized $${amount.toFixed(2)}`
+        }
+      });
+    } catch {}
+
+    try {
+      await prisma.auditLog.create({
+        data: {
+          tenantId: agreement.tenantId || null,
+          reservationId: agreement.reservationId,
+          actorUserId: actorUserId || null,
+          action: 'UPDATE',
+          reason: `Spin deposit reauthorized: $${amount.toFixed(2)}`,
+          metadata: JSON.stringify({
+            newHoldId,
+            voidedOldRef,
+            reference,
+            previousHoldId: agreement.depositHoldId || null
+          })
+        }
+      });
+    } catch {}
+
+    return this.getById(id);
   },
 
   async refundPayment(id, paymentId, payload = {}, actorUserId = null) {

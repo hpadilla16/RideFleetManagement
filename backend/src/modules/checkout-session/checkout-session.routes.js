@@ -173,10 +173,11 @@ checkoutSessionRouter.post('/:id/vehicle', async (req, res) => {
 
 // ---------------------------------------------------------------------
 // POST /api/checkout-sessions/:id/charge
-//   Body: { amount, depositAmount? }. Kicks off the Spin sale +
-//   preauth + tokenize orchestration. Returns the normalized result;
-//   on failure responds with the CheckoutSessionError code (SALE_DECLINED
-//   / PREAUTH_FAILED) and the message the wizard surfaces as a toast.
+//   Legacy one-shot — runs sale + preauth back to back, rolls back the
+//   sale if preauth fails. Kept for backward compatibility with the
+//   wizard's old Step 3 flow; new wizard versions use /charge-sale +
+//   /hold-deposit (the two-tap flow below).
+//   Body: { amount, depositAmount? }.
 // ---------------------------------------------------------------------
 checkoutSessionRouter.post('/:id/charge', async (req, res) => {
   try {
@@ -185,6 +186,101 @@ checkoutSessionRouter.post('/:id/charge', async (req, res) => {
       sessionId: req.params.id,
       amount: Number(amount),
       depositAmount: depositAmount != null ? Number(depositAmount) : undefined,
+      actorUserId: req.user?.id,
+    });
+    res.json(result);
+  } catch (err) {
+    handleError(res, err);
+  }
+});
+
+// ---------------------------------------------------------------------
+// POST /api/checkout-sessions/:id/charge-sale
+//   2026-05-29 — Two-tap Step 3a. Runs the sale on the terminal (fresh
+//   tap), captures card-on-file from the response, persists a payment
+//   row. Does NOT stamp paymentCompletedAt — the wizard fires
+//   /hold-deposit next (or skips if balance was $0).
+//   Body: { amount }.
+// ---------------------------------------------------------------------
+checkoutSessionRouter.post('/:id/charge-sale', async (req, res) => {
+  try {
+    const { amount } = req.body || {};
+    const result = await spinChargeService.runSale({
+      sessionId: req.params.id,
+      amount: Number(amount),
+      actorUserId: req.user?.id,
+    });
+    res.json(result);
+  } catch (err) {
+    handleError(res, err);
+  }
+});
+
+// ---------------------------------------------------------------------
+// POST /api/checkout-sessions/:id/hold-deposit
+//   2026-05-29 — Two-tap Step 3b. Pre-auths the security deposit on a
+//   FRESH card tap (no token reuse — customer's second physical tap).
+//   On success persists depositHoldId + expiry on the agreement and
+//   stamps paymentCompletedAt so the wizard auto-advances.
+//   Body: { depositAmount? }. Server resolves the actual amount from
+//   the agreement (column → SECURITY_DEPOSIT charge sum → hint → default).
+// ---------------------------------------------------------------------
+checkoutSessionRouter.post('/:id/hold-deposit', async (req, res) => {
+  try {
+    const { depositAmount } = req.body || {};
+    const result = await spinChargeService.runDepositHold({
+      sessionId: req.params.id,
+      depositAmount: depositAmount != null ? Number(depositAmount) : undefined,
+      actorUserId: req.user?.id,
+    });
+    res.json(result);
+  } catch (err) {
+    handleError(res, err);
+  }
+});
+
+// ---------------------------------------------------------------------
+// POST /api/checkout-sessions/:id/record-manual-payment
+//   2026-05-29 — Failsafe when the Spin terminal is down or the agent
+//   collected payment another way. Writes the same payment row a real
+//   sale would but with the chosen method (CASH/CHECK/CARD/OTHER) and
+//   a clear notes audit trail.
+//   Body: { amount, method, reference?, notes? }.
+// ---------------------------------------------------------------------
+checkoutSessionRouter.post('/:id/record-manual-payment', async (req, res) => {
+  try {
+    const { amount, method, reference, notes } = req.body || {};
+    const result = await spinChargeService.recordManualSale({
+      sessionId: req.params.id,
+      amount: Number(amount),
+      method,
+      reference,
+      notes,
+      actorUserId: req.user?.id,
+    });
+    res.json(result);
+  } catch (err) {
+    handleError(res, err);
+  }
+});
+
+// ---------------------------------------------------------------------
+// POST /api/checkout-sessions/:id/record-manual-deposit
+//   2026-05-29 — Failsafe for the security deposit when the Spin pre-auth
+//   can't run (terminal down, customer paid cash, external authorization).
+//   Persists depositHoldId + amount and stamps paymentCompletedAt so the
+//   wizard advances. Reason is REQUIRED for the audit trail.
+//   Body: { amount, method, reason, reference? }.
+// ---------------------------------------------------------------------
+checkoutSessionRouter.post('/:id/record-manual-deposit', async (req, res) => {
+  try {
+    const { amount, method, reason, reference } = req.body || {};
+    const result = await spinChargeService.recordManualDeposit({
+      sessionId: req.params.id,
+      amount: Number(amount),
+      method,
+      reason,
+      reference,
       actorUserId: req.user?.id,
     });
     res.json(result);

@@ -595,24 +595,10 @@ function Step2TermsPending({ session, reservation, token, onSigned }) {
 }
 
 function Step3PaymentPending({ session, reservation, token, onPaid }) {
-  // Wizard-side states: 'ready' → 'charging' → 'done' / 'error'
-  const [phase, setPhase] = useState('ready');
-  const [error, setError] = useState(null);
-  const [result, setResult] = useState(null);
-
-  // Read the charge amount defensively. Prisma Decimal columns serialize
-  // as strings in JSON, so we coerce with Number(). We use the unpaid
-  // BALANCE as the source of truth — anything the customer pre-paid
-  // (OTA voucher, portal pre-charge) is already reflected in
-  // agreement.paidAmount, so balance = total - paidAmount is what's
-  // actually owed at the counter. Fall back to estimatedTotal for
-  // reservations that don't have an agreement bound yet.
-  //
-  // 2026-05-28 — Some legacy agreements baked the SECURITY_DEPOSIT charge
-  // into total/balance (TOTAL = daily + tax + deposit). The wizard
-  // intentionally separates "amount due" (sale) from "deposit hold" so we
-  // subtract any SECURITY_DEPOSIT-source charges from the balance to
-  // get the true sale amount.
+  // ── Source-of-truth math ─────────────────────────────────────────
+  // Subtotal = balance − SECURITY_DEPOSIT charges (Pillar 2 baked deposit
+  // into balance for the AUTH_HOLD flow; the wizard separates them so the
+  // sale is just the rental amount).
   const explicitBalance = Number(reservation.rentalAgreement?.balance);
   const securityDepositChargesSum = Array.isArray(reservation.rentalAgreement?.charges)
     ? reservation.rentalAgreement.charges.reduce((s, c) => s + Number(c.total || 0), 0)
@@ -621,21 +607,15 @@ function Step3PaymentPending({ session, reservation, token, onPaid }) {
     ? explicitBalance
     : Number(reservation.estimatedTotal || 0);
   const subtotal = Math.max(0, rawSubtotal - securityDepositChargesSum);
-
-  // Phase 2.x — pre-paid customers ($0 balance) still need a card on
-  // file + the security deposit hold. The backend takes a separate
-  // branch when amount === 0.
   const isPrepaid = subtotal === 0;
 
-  // 2026-05-28 — Pull the deposit hold from the agreement. Source order:
-  //   1. agreement.securityDepositAmount (normalized column)
-  //   2. SUM of agreement.charges where source = SECURITY_DEPOSIT (reuses
-  //      the value we computed above for the subtotal calculation)
-  //   3. hardcoded $500 fallback (last resort, dev-only realistically)
-  //
-  // The backend ignores this client value and re-resolves on its own, so
-  // even if the UI shows the wrong number for a split second after a
-  // stale fetch, the actual terminal hold is correct.
+  // 2026-05-29 — Deposit hold amount comes from the reservation's
+  // configured securityDepositAmount (or the SECURITY_DEPOSIT charges
+  // sum as a fallback). NO $500 hardcoded default — if the reservation
+  // doesn't require a deposit (vehicle class with no deposit, comped
+  // rental, etc.) the wizard treats it as $0 and the hold step
+  // becomes a no-op rather than charging the customer for something
+  // their reservation didn't price in.
   const agreementDepositCol = Number(reservation.rentalAgreement?.securityDepositAmount);
   let depositAmount;
   if (Number.isFinite(agreementDepositCol) && agreementDepositCol > 0) {
@@ -643,105 +623,539 @@ function Step3PaymentPending({ session, reservation, token, onPaid }) {
   } else if (securityDepositChargesSum > 0) {
     depositAmount = securityDepositChargesSum;
   } else {
-    depositAmount = 500;
+    depositAmount = 0;
   }
 
-  const charge = async () => {
-    setPhase('charging');
-    setError(null);
+  // ── Two-tap state machine (2026-05-29) ───────────────────────────
+  // Tap 1 (sale): saleStatus = 'idle' → 'running' → 'done' / 'error'
+  // Tap 2 (deposit hold): depositStatus = 'idle' → 'running' → 'done' / 'error'
+  //
+  // Pre-paid customers skip tap 1 — saleStatus stays 'skipped' and the
+  // deposit-hold button shows immediately. A failed deposit hold does
+  // NOT roll back a successful sale; the agent re-clicks the deposit
+  // button to try again.
+  const [saleStatus, setSaleStatus] = useState(isPrepaid ? 'skipped' : 'idle');
+  const [depositStatus, setDepositStatus] = useState('idle');
+  const [saleResult, setSaleResult] = useState(null);
+  const [depositResult, setDepositResult] = useState(null);
+  const [saleError, setSaleError] = useState(null);
+  const [depositError, setDepositError] = useState(null);
+
+  // Manual-override modals (2026-05-29 failsafe). The terminal can fail
+  // mid-checkout; the agent uses these to unblock the wizard by recording
+  // what actually happened (cash collected, external auth, waived).
+  const [showManualSale, setShowManualSale] = useState(false);
+  const [showManualDeposit, setShowManualDeposit] = useState(false);
+
+  const saleDone = saleStatus === 'done' || saleStatus === 'skipped';
+
+  // ── Tap 1 — charge the rental ────────────────────────────────────
+  const runSale = async () => {
+    setSaleStatus('running');
+    setSaleError(null);
     try {
-      const r = await api(`/api/checkout-sessions/${session.id}/charge`, {
+      const r = await api(`/api/checkout-sessions/${session.id}/charge-sale`, {
         method: 'POST',
-        body: JSON.stringify({ amount: subtotal, depositAmount }),
+        body: JSON.stringify({ amount: subtotal }),
       }, token);
-      setResult(r);
-      setPhase('done');
-      // Backend stamped paymentCompletedAt already; advance the wizard.
+      setSaleResult(r);
+      setSaleStatus('done');
+    } catch (err) {
+      setSaleError(err?.message || 'Sale failed');
+      setSaleStatus('error');
+    }
+  };
+
+  // ── Tap 2 — hold the deposit ─────────────────────────────────────
+  const runDepositHold = async () => {
+    setDepositStatus('running');
+    setDepositError(null);
+    try {
+      const r = await api(`/api/checkout-sessions/${session.id}/hold-deposit`, {
+        method: 'POST',
+        body: JSON.stringify({ depositAmount }),
+      }, token);
+      setDepositResult(r);
+      setDepositStatus('done');
+      // Backend stamped paymentCompletedAt — advance the wizard.
       onPaid();
     } catch (err) {
-      setError(err?.message || 'Charge failed');
-      setPhase('error');
+      setDepositError(err?.message || 'Deposit hold failed');
+      setDepositStatus('error');
+    }
+  };
+
+  // ── Failsafe — record a manual payment (terminal bypass) ─────────
+  const submitManualSale = async ({ amount, method, reference, notes }) => {
+    try {
+      const r = await api(`/api/checkout-sessions/${session.id}/record-manual-payment`, {
+        method: 'POST',
+        body: JSON.stringify({ amount, method, reference, notes }),
+      }, token);
+      setSaleResult({
+        sale: { authCode: r.reference, manual: true },
+        cardOnFile: null,
+      });
+      setSaleStatus('done');
+      setShowManualSale(false);
+    } catch (err) {
+      throw err; // surfaced by the modal itself
+    }
+  };
+
+  // ── Failsafe — record a manual deposit (terminal bypass) ─────────
+  const submitManualDeposit = async ({ amount, method, reason, reference }) => {
+    try {
+      const r = await api(`/api/checkout-sessions/${session.id}/record-manual-deposit`, {
+        method: 'POST',
+        body: JSON.stringify({ amount, method, reason, reference }),
+      }, token);
+      setDepositResult({
+        preauth: { authCode: r.depositRefId, manual: true },
+        cardOnFile: null,
+      });
+      setDepositStatus('done');
+      setShowManualDeposit(false);
+      onPaid();
+    } catch (err) {
+      throw err; // surfaced by the modal itself
     }
   };
 
   return (
     <div style={cardStyle}>
       <h3 style={h3Style}>Step 3 · Payment</h3>
+      <p style={{ fontSize: 13, color: '#6B7280', margin: '0 0 12px' }}>
+        {isPrepaid
+          ? `Customer already pre-paid. One card tap on the terminal will capture the card on file and place the $${depositAmount.toFixed(2)} security deposit hold.`
+          : `Customer taps card once for the $${subtotal.toFixed(2)} rental sale, then enters their phone or email at the terminal. The $${depositAmount.toFixed(2)} deposit hold runs automatically against the saved card — no second tap.`}
+      </p>
+      <div style={{
+        margin: '0 0 16px',
+        padding: '10px 12px',
+        borderRadius: 6,
+        background: 'rgba(245,158,11,.08)',
+        border: '0.5px solid rgba(245,158,11,.3)',
+        color: '#92400e',
+        fontSize: 12,
+        lineHeight: 1.45,
+      }}>
+        <strong>Required:</strong> the customer must enter their phone number or email on the
+        terminal after tapping their card. Without contact info captured, the saved-card
+        deposit hold will fail.
+      </div>
+
       <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: 16 }}>
+        {/* Invoice column */}
         <div>
           <div style={{ fontSize: 14, fontWeight: 500, marginBottom: 8 }}>Invoice</div>
           {isPrepaid ? (
-            <>
-              <KV label="Balance due" value="$0.00 · pre-paid" />
-              <KV label="Card on file" value="Required for incidentals" />
-              <KV label="Deposit hold" value={`$${depositAmount.toFixed(2)}`} />
-              <div style={{
-                marginTop: 10, padding: 10, borderRadius: 6,
-                background: 'rgba(16,185,129,.08)', border: '1px solid rgba(16,185,129,.25)',
-                color: '#065F46', fontSize: 12,
-              }}>
-                Customer already pre-paid. Terminal will tokenize the card and place the
-                ${depositAmount.toFixed(2)} security deposit hold — no sale charged.
-              </div>
-            </>
+            <KV label="Balance due" value="$0.00 · pre-paid" />
           ) : (
-            <>
-              <KV label="Subtotal" value={`$${subtotal.toFixed(2)}`} />
-              <KV label="Pre-auth deposit" value={`$${depositAmount.toFixed(2)}`} />
-            </>
+            <KV label="Subtotal" value={`$${subtotal.toFixed(2)}`} />
           )}
+          <KV label="Pre-auth deposit" value={`$${depositAmount.toFixed(2)}`} />
         </div>
+
+        {/* Terminal status column */}
         <div style={{ background: '#F9FAFB', padding: 12, borderRadius: 6 }}>
           <div style={{ fontSize: 12, fontWeight: 500, marginBottom: 4 }}>Dejavoo terminal</div>
-          {phase === 'ready' && (
-            <>
-              <div style={{ fontSize: 11, color: '#6B7280' }}>Customer: tap, insert, or swipe</div>
-              <div style={{ fontSize: 12, color: '#10B981', marginTop: 8 }}>● Terminal ready</div>
-            </>
+          {saleStatus === 'idle' && depositStatus === 'idle' && (
+            <div style={{ fontSize: 12, color: '#10B981', marginTop: 8 }}>● Ready</div>
           )}
-          {phase === 'charging' && (
-            <>
-              <div style={{ fontSize: 11, color: '#6B7280' }}>Waiting for card…</div>
-              <div style={{ fontSize: 12, color: '#F59E0B', marginTop: 8 }}>● Processing</div>
-            </>
+          {saleStatus === 'running' && (
+            <div style={{ fontSize: 12, color: '#F59E0B', marginTop: 8 }}>● Waiting for sale tap…</div>
           )}
-          {phase === 'done' && result && (
-            <>
-              <div style={{ fontSize: 12, color: '#10B981', marginTop: 8 }}>✓ Approved · {result.sale?.authCode}</div>
-              {result.cardOnFile && (
-                <div style={{ fontSize: 11, color: '#6B7280', marginTop: 4 }}>
-                  {result.cardOnFile.brand} ····{result.cardOnFile.last4} saved
-                </div>
-              )}
-              {result.preauth && (
-                <div style={{ fontSize: 11, color: '#6B7280', marginTop: 2 }}>
-                  Deposit hold ✓
-                </div>
-              )}
-            </>
-          )}
-          {phase === 'error' && (
-            <div style={{ fontSize: 11, color: '#B91C1C' }}>{error}</div>
+          {depositStatus === 'running' && (
+            <div style={{ fontSize: 12, color: '#F59E0B', marginTop: 8 }}>
+              ● {isPrepaid ? 'Waiting for card tap…' : 'Authorizing saved card…'}
+            </div>
           )}
         </div>
       </div>
-      <div style={{ marginTop: 16, display: 'flex', gap: 8 }}>
-        {phase === 'ready' && (
-          <button style={primaryBtn} onClick={charge}>
-            {isPrepaid ? 'Capture card + deposit hold' : 'Start charge'}
-          </button>
+
+      {/* ── Two-step transaction tracker ─────────────────────────── */}
+      <div style={{ marginTop: 16, border: '0.5px solid #E5E7EB', borderRadius: 6 }}>
+        {/* Step A — Rental sale */}
+        {!isPrepaid && (
+          <PaymentRow
+            label="Rental sale"
+            amount={subtotal}
+            status={saleStatus}
+            errorMsg={saleError}
+            authCode={saleResult?.sale?.authCode}
+            cardOnFile={saleResult?.cardOnFile}
+            primaryAction={
+              saleStatus === 'idle'
+                ? { label: `Charge $${subtotal.toFixed(2)}`, onClick: runSale }
+                : saleStatus === 'error'
+                  ? { label: 'Retry sale', onClick: runSale }
+                  : null
+            }
+            secondaryAction={
+              saleStatus === 'done' || saleStatus === 'skipped'
+                ? null
+                : {
+                    label: 'Record manually',
+                    title: 'Terminal bypass — record cash/check/external card payment',
+                    onClick: () => setShowManualSale(true),
+                  }
+            }
+          />
         )}
-        {phase === 'charging' && (
-          <button style={{ ...primaryBtn, opacity: 0.6 }} disabled>Processing…</button>
-        )}
-        {phase === 'error' && (
-          <>
-            <button style={primaryBtn} onClick={charge}>
-              {isPrepaid ? 'Retry capture' : 'Retry charge'}
+
+        {/* Step B — Deposit hold (only enabled after sale, or immediately if pre-paid) */}
+        <PaymentRow
+          label="Security deposit hold"
+          amount={depositAmount}
+          status={depositStatus}
+          errorMsg={depositError}
+          authCode={depositResult?.preauth?.authCode}
+          cardOnFile={depositResult?.cardOnFile}
+          disabled={!saleDone}
+          divider={!isPrepaid}
+          primaryAction={
+            !saleDone
+              ? { label: 'Charge sale first', disabled: true }
+              : depositStatus === 'idle'
+                ? {
+                    label: isPrepaid
+                      ? `Capture card + hold $${depositAmount.toFixed(2)}`
+                      : `Authorize $${depositAmount.toFixed(2)} on saved card`,
+                    onClick: runDepositHold,
+                  }
+                : depositStatus === 'error'
+                  ? { label: 'Retry deposit hold', onClick: runDepositHold }
+                  : null
+          }
+          secondaryAction={
+            depositStatus === 'done' || !saleDone
+              ? null
+              : {
+                  label: 'Record manually',
+                  title: 'Terminal bypass — record cash/check deposit, external auth, or waiver',
+                  onClick: () => setShowManualDeposit(true),
+                }
+          }
+        />
+      </div>
+
+      {showManualSale && (
+        <ManualSaleModal
+          suggestedAmount={subtotal}
+          onClose={() => setShowManualSale(false)}
+          onSubmit={submitManualSale}
+        />
+      )}
+      {showManualDeposit && (
+        <ManualDepositModal
+          suggestedAmount={depositAmount}
+          onClose={() => setShowManualDeposit(false)}
+          onSubmit={submitManualDeposit}
+        />
+      )}
+    </div>
+  );
+}
+
+/**
+ * One row in the two-step transaction tracker — shared by the Sale and
+ * Deposit Hold steps.
+ */
+function PaymentRow({ label, amount, status, errorMsg, authCode, cardOnFile, disabled, divider, primaryAction, secondaryAction }) {
+  const statusColor = {
+    idle: '#9CA3AF',
+    running: '#F59E0B',
+    done: '#10B981',
+    skipped: '#10B981',
+    error: '#B91C1C',
+  }[status];
+  const statusLabel = {
+    idle: 'Awaiting tap',
+    running: 'Processing…',
+    done: 'Approved',
+    skipped: 'Skipped',
+    error: 'Declined',
+  }[status];
+
+  return (
+    <div style={{
+      padding: 14,
+      borderTop: divider ? '0.5px solid #E5E7EB' : 'none',
+      opacity: disabled ? 0.45 : 1,
+    }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 8 }}>
+        <div>
+          <div style={{ fontWeight: 600, color: '#111827', fontSize: 14 }}>{label}</div>
+          <div style={{ fontSize: 11, color: '#6B7280', marginTop: 2 }}>${Number(amount || 0).toFixed(2)}</div>
+        </div>
+        <div style={{ textAlign: 'right' }}>
+          <div style={{ fontSize: 11, fontWeight: 600, color: statusColor }}>● {statusLabel}</div>
+          {status === 'done' && authCode && (
+            <div style={{ fontSize: 10, color: '#6B7280', marginTop: 2, fontFamily: 'monospace' }}>auth {authCode}</div>
+          )}
+          {status === 'done' && cardOnFile && (
+            <div style={{ fontSize: 10, color: '#6B7280', marginTop: 2 }}>{cardOnFile.brand} ····{cardOnFile.last4}</div>
+          )}
+        </div>
+      </div>
+      {status === 'error' && errorMsg && (
+        <div style={{
+          fontSize: 11, color: '#B91C1C',
+          background: 'rgba(220,38,38,.06)', border: '0.5px solid rgba(220,38,38,.2)',
+          padding: '6px 8px', borderRadius: 4, marginBottom: 8,
+        }}>{errorMsg}</div>
+      )}
+      {(primaryAction || secondaryAction) && (
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', marginTop: 4 }}>
+          {primaryAction && (
+            <button
+              style={{ ...primaryBtn, opacity: primaryAction.disabled ? 0.4 : 1 }}
+              disabled={primaryAction.disabled || status === 'running'}
+              onClick={primaryAction.onClick}
+            >
+              {primaryAction.label}
             </button>
-            <button style={ghostBtn} onClick={() => setPhase('ready')}>Reset</button>
-          </>
-        )}
+          )}
+          {secondaryAction && (
+            <button
+              style={{ ...ghostBtn, opacity: secondaryAction.disabled ? 0.4 : 1 }}
+              disabled={secondaryAction.disabled || status === 'running'}
+              onClick={secondaryAction.onClick}
+              title={secondaryAction.title || ''}
+            >
+              {secondaryAction.label}
+            </button>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/**
+ * Failsafe modal — record a payment manually when the Dejavoo terminal
+ * isn't available (cash collected at counter, external auth from a
+ * separate payment device, etc.). Backend writes a RentalAgreementPayment
+ * row tagged "Manual sale" and advances the wizard without touching
+ * Spin. Reason isn't required for sales — the method + reference is
+ * enough audit trail because the customer signs the agreement PDF.
+ */
+function ManualSaleModal({ suggestedAmount, onClose, onSubmit }) {
+  const [amount, setAmount] = useState(String(Number(suggestedAmount || 0).toFixed(2)));
+  const [method, setMethod] = useState('CASH');
+  const [reference, setReference] = useState('');
+  const [notes, setNotes] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState(null);
+
+  const submit = async () => {
+    const v = Number(amount);
+    if (!Number.isFinite(v) || v <= 0) {
+      setError('Enter a valid amount greater than zero');
+      return;
+    }
+    if (method === 'CARD' && !reference.trim()) {
+      setError('Reference (auth code or last 4) is required for CARD method');
+      return;
+    }
+    setBusy(true);
+    setError(null);
+    try {
+      await onSubmit({
+        amount: v,
+        method,
+        reference: reference.trim() || undefined,
+        notes: notes.trim() || undefined,
+      });
+    } catch (err) {
+      setError(err?.message || 'Manual payment failed');
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div style={modalBackdrop}>
+      <div style={modalCard}>
+        <div style={modalHeader}>
+          <h3 style={{ ...h3Style, margin: 0 }}>Record Manual Payment</h3>
+          <button style={ghostBtn} onClick={onClose} disabled={busy}>Close</button>
+        </div>
+        <p style={modalHelp}>
+          Use this when the Dejavoo terminal is unavailable. The wizard will advance
+          as if the sale completed; nothing is sent to Spin. Card-on-file features
+          (auto-charges, deposit re-auth) will not be available later.
+        </p>
+        <div style={modalField}>
+          <label style={modalLabel}>Amount</label>
+          <input
+            type="number" min="0" step="0.01"
+            value={amount}
+            onChange={(e) => setAmount(e.target.value)}
+            style={inputStyle}
+            disabled={busy}
+          />
+        </div>
+        <div style={modalField}>
+          <label style={modalLabel}>Method</label>
+          <select
+            value={method}
+            onChange={(e) => setMethod(e.target.value)}
+            style={inputStyle}
+            disabled={busy}
+          >
+            <option value="CASH">Cash</option>
+            <option value="CHECK">Check</option>
+            <option value="CARD">Card (external terminal)</option>
+            <option value="OTHER">Other</option>
+          </select>
+        </div>
+        <div style={modalField}>
+          <label style={modalLabel}>
+            Reference {method === 'CARD' ? <span style={{ color: '#B91C1C' }}>*</span> : <span style={{ color: '#9CA3AF' }}>(optional)</span>}
+          </label>
+          <input
+            value={reference}
+            onChange={(e) => setReference(e.target.value)}
+            placeholder={method === 'CARD' ? 'Auth code or last 4' : method === 'CHECK' ? 'Check #' : 'Receipt ID, etc.'}
+            style={inputStyle}
+            disabled={busy}
+          />
+        </div>
+        <div style={modalField}>
+          <label style={modalLabel}>Notes (optional)</label>
+          <textarea
+            value={notes}
+            onChange={(e) => setNotes(e.target.value)}
+            placeholder="Anything the agent should remember about this manual entry"
+            style={{ ...inputStyle, minHeight: 60, fontFamily: 'inherit' }}
+            disabled={busy}
+          />
+        </div>
+        {error && <div style={modalError}>{error}</div>}
+        <div style={modalActions}>
+          <button style={ghostBtn} onClick={onClose} disabled={busy}>Cancel</button>
+          <button style={primaryBtn} onClick={submit} disabled={busy}>
+            {busy ? 'Recording…' : 'Record Payment'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Failsafe modal — record a deposit hold manually. Reason is REQUIRED
+ * because the rental agent is overriding the standard authorization
+ * flow; the audit log captures it. WAIVED is supported with a $0 amount
+ * for legitimate waiver scenarios (loyalty customer, comped rental).
+ */
+function ManualDepositModal({ suggestedAmount, onClose, onSubmit }) {
+  const [amount, setAmount] = useState(String(Number(suggestedAmount || 0).toFixed(2)));
+  const [method, setMethod] = useState('CASH');
+  const [reason, setReason] = useState('');
+  const [reference, setReference] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState(null);
+
+  const submit = async () => {
+    const v = Number(amount);
+    if (!Number.isFinite(v) || v < 0) {
+      setError('Enter a valid amount (zero or greater)');
+      return;
+    }
+    if (method !== 'WAIVED' && v <= 0) {
+      setError('Amount must be greater than zero unless method is Waived');
+      return;
+    }
+    if (String(reason).trim().length < 3) {
+      setError('Reason is required (audit trail)');
+      return;
+    }
+    setBusy(true);
+    setError(null);
+    try {
+      await onSubmit({
+        amount: v,
+        method,
+        reason: reason.trim(),
+        reference: reference.trim() || undefined,
+      });
+    } catch (err) {
+      setError(err?.message || 'Manual deposit failed');
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div style={modalBackdrop}>
+      <div style={modalCard}>
+        <div style={modalHeader}>
+          <h3 style={{ ...h3Style, margin: 0 }}>Record Manual Deposit Hold</h3>
+          <button style={ghostBtn} onClick={onClose} disabled={busy}>Close</button>
+        </div>
+        <p style={modalHelp}>
+          Use this when the terminal can't place the hold (terminal down, customer
+          paid cash deposit at counter, deposit waived for a comped rental).
+          A reason is required for the audit log.
+        </p>
+        <div style={modalField}>
+          <label style={modalLabel}>Amount</label>
+          <input
+            type="number" min="0" step="0.01"
+            value={amount}
+            onChange={(e) => setAmount(e.target.value)}
+            style={inputStyle}
+            disabled={busy}
+          />
+          {method === 'WAIVED' && (
+            <span style={{ fontSize: 11, color: '#6B7280', marginTop: 4 }}>
+              Waived deposits can be $0.
+            </span>
+          )}
+        </div>
+        <div style={modalField}>
+          <label style={modalLabel}>Method</label>
+          <select
+            value={method}
+            onChange={(e) => setMethod(e.target.value)}
+            style={inputStyle}
+            disabled={busy}
+          >
+            <option value="CASH">Cash held at counter</option>
+            <option value="CHECK">Check held at counter</option>
+            <option value="CARD">Card (external terminal)</option>
+            <option value="WAIVED">Waived (no hold)</option>
+            <option value="OTHER">Other</option>
+          </select>
+        </div>
+        <div style={modalField}>
+          <label style={modalLabel}>Reason <span style={{ color: '#B91C1C' }}>*</span></label>
+          <input
+            value={reason}
+            onChange={(e) => setReason(e.target.value)}
+            placeholder="e.g. terminal offline, comped rental, returning loyalty customer"
+            style={inputStyle}
+            disabled={busy}
+          />
+        </div>
+        <div style={modalField}>
+          <label style={modalLabel}>Reference <span style={{ color: '#9CA3AF' }}>(optional)</span></label>
+          <input
+            value={reference}
+            onChange={(e) => setReference(e.target.value)}
+            placeholder="Receipt ID, external auth code, check #, etc."
+            style={inputStyle}
+            disabled={busy}
+          />
+        </div>
+        {error && <div style={modalError}>{error}</div>}
+        <div style={modalActions}>
+          <button style={ghostBtn} onClick={onClose} disabled={busy}>Cancel</button>
+          <button style={primaryBtn} onClick={submit} disabled={busy}>
+            {busy ? 'Recording…' : 'Record Deposit Hold'}
+          </button>
+        </div>
       </div>
     </div>
   );
@@ -961,3 +1375,28 @@ const ghostBtn = {
 };
 const pauseBtnStyle = { ...ghostBtn, fontSize: 12 };
 const inputStyle = { width: '100%', padding: '6px 8px', border: '0.5px solid #D1D5DB', borderRadius: 4, fontSize: 14 };
+
+// Manual failsafe modal styling — kept tight to match the wizard's
+// minimalist look. z-index 60 sits above all wizard content.
+const modalBackdrop = {
+  position: 'fixed', inset: 0, background: 'rgba(17,24,39,.55)',
+  display: 'flex', alignItems: 'center', justifyContent: 'center',
+  zIndex: 60, padding: 16,
+};
+const modalCard = {
+  background: '#FFFFFF', borderRadius: 10, padding: 22,
+  width: '100%', maxWidth: 460,
+  boxShadow: '0 20px 60px rgba(0,0,0,.25)',
+};
+const modalHeader = {
+  display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8,
+};
+const modalHelp = { fontSize: 12, color: '#6B7280', lineHeight: 1.45, margin: '0 0 16px' };
+const modalField = { display: 'flex', flexDirection: 'column', gap: 4, marginBottom: 12 };
+const modalLabel = { fontSize: 12, fontWeight: 500, color: '#374151' };
+const modalError = {
+  fontSize: 12, color: '#B91C1C',
+  background: 'rgba(220,38,38,.06)', border: '0.5px solid rgba(220,38,38,.2)',
+  padding: '6px 8px', borderRadius: 4, marginBottom: 12,
+};
+const modalActions = { display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 4 };

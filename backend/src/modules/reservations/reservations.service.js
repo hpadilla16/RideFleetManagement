@@ -1388,6 +1388,20 @@ export const reservationsService = {
             securityDepositCapturedAt: true,
             securityDepositReleasedAt: true,
             securityDepositReference: true,
+            // Dejavoo Spin card-on-file + deposit hold metadata. Drives
+            // the View Payments operational tools panel (Charge card on
+            // file / Release hold / Reauthorize deposit).
+            // NOTE: cardOnFileToken intentionally NOT selected — it's a
+            // sensitive iPOS token that must never leave the server.
+            // The frontend uses cardOnFileLast4 + cardOnFileCapturedAt
+            // as presence signals; the actual charge runs server-side.
+            cardOnFileBrand: true,
+            cardOnFileLast4: true,
+            cardOnFileCapturedAt: true,
+            depositHoldId: true,
+            depositHoldAmount: true,
+            depositHoldExpiresAt: true,
+            depositHoldVoidedAt: true,
             paidAmount: true,
             balance: true,
             paymentMethod: true,
