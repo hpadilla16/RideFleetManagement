@@ -12,8 +12,19 @@
  *   - same tenantId
  *   - LOWER(TRIM(customer.firstName)) == LOWER(TRIM(ext.customerFirstName))
  *   - LOWER(TRIM(customer.lastName))  == LOWER(TRIM(ext.customerLastName))
- *   - DATE_TRUNC('day', r.pickupAt)   == DATE_TRUNC('day', ext.pickupAt)
+ *   - DATE_TRUNC('day', r.pickupAt @ tenant TZ)
+ *       == DATE_TRUNC('day', ext.pickupAt @ tenant TZ)
  *   - target reservation NOT already linked from a different ExternalReservation
+ *
+ * 2026-05-30 — TZ fix. The previous version truncated to UTC days, which
+ * misclassified late-evening AST pickups (e.g. 8pm AST = midnight UTC)
+ * as the next day. A real-world example: a manual reservation at
+ * 2026-05-29 14:00 AST and a TL pickup at 2026-05-29 20:00 AST are the
+ * SAME calendar day in PR, but in UTC they straddle a day boundary
+ * (18:00Z and 00:00Z next day). The detector returned null and the
+ * worker created a duplicate Reservation. We now shift both sides
+ * into tenant-local time via `AT TIME ZONE` before DATE_TRUNC so the
+ * comparison runs against the operator's wall clock, not server UTC.
  *
  * Implementation note: uses prisma.$queryRaw with tagged-template
  * interpolation so values stay parameterized (no string concat). Prisma
@@ -33,7 +44,7 @@
  * }} externalReservation
  * @returns {Promise<string|null>}  existing Reservation.id, or null if no match.
  */
-export async function findDuplicateReservation(prisma, externalReservation) {
+export async function findDuplicateReservation(prisma, externalReservation, options = {}) {
   if (!externalReservation) return null;
   const {
     tenantId,
@@ -50,10 +61,15 @@ export async function findDuplicateReservation(prisma, externalReservation) {
   const ln = String(customerLastName).trim().toLowerCase();
   if (!fn || !ln) return null;
 
-  // Normalize pickupAt to a JS Date so the SQL ::timestamp cast is happy
+  // Normalize pickupAt to a JS Date so the SQL ::timestamptz cast is happy
   // whether the caller hands us a Date or an ISO string.
   const pickup = pickupAt instanceof Date ? pickupAt : new Date(pickupAt);
   if (Number.isNaN(pickup.getTime())) return null;
+
+  // Tenant time zone — defaults to Puerto Rico (AST, no DST). The
+  // override is here so multi-tenant deployments and tests can pass
+  // a different zone. Postgres accepts IANA names directly.
+  const tz = options.timeZone || 'America/Puerto_Rico';
 
   let rows;
   try {
@@ -64,7 +80,8 @@ export async function findDuplicateReservation(prisma, externalReservation) {
       WHERE r."tenantId" = ${tenantId}
         AND LOWER(TRIM(c."firstName")) = ${fn}
         AND LOWER(TRIM(c."lastName")) = ${ln}
-        AND DATE_TRUNC('day', r."pickupAt") = DATE_TRUNC('day', ${pickup}::timestamp)
+        AND DATE_TRUNC('day', (r."pickupAt" AT TIME ZONE ${tz}))
+          = DATE_TRUNC('day', (${pickup}::timestamptz AT TIME ZONE ${tz}))
         AND NOT EXISTS (
           SELECT 1 FROM "ExternalReservation" er2
           WHERE er2."promotedToReservationId" = r.id
