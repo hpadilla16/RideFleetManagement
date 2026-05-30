@@ -213,22 +213,20 @@ export const spinClient = {
   /**
    * Process a sale (charge).
    *
-   * 2026-05-29 hardening for launch:
-   *   - GetToken: true → request an iPOS token in the response so the
-   *     subsequent deposit hold can run CNP (no second tap). Without
-   *     this flag the terminal physically tokenizes but the response
-   *     omits IPosToken, silently breaking the saved-card hold path.
-   *   - EnableTip: false → suppress the "tip 15/20/25%" prompt that
-   *     would otherwise show for rental car charges. Caller can still
-   *     opt in by passing { enableTip: true }.
-   *   - PrintReceipt: true → terminal prints the customer copy (the
-   *     auth slip the customer signs is part of the audit trail).
-   *   - GetExtendedData: true → returns CardData (brand, last4) needed
-   *     for the agent-facing "Card on file" chip.
+   * 2026-05-30 — Reverted to the minimal field set after a live test
+   * hit StatusCode 2201 / ResultCode 2 ("Error") on the new payload.
+   * The added flags (GetToken, EnableTip, PrintReceipt) appear to be
+   * unrecognized by this merchant's Spin proxy configuration, and
+   * including them causes the gateway to reject the request before
+   * forwarding to the terminal (confirmed: nothing appeared in the
+   * Dejavoo merchant portal). GetExtendedData:true alone has
+   * historically returned the iPOS token; we keep that and let the
+   * downstream Transact CNP hold fall back to card-present if no
+   * token comes back.
    */
   async sale({
     amount, referenceId, paymentType = 'Credit', tipAmount, invoiceNumber,
-    cart, customFields, enableTip = false, printReceipt = true,
+    cart, customFields,
   }, tenantConfig) {
     return spinRequest('POST', 'v2/Payment/Sale', {
       Amount: Number(amount),
@@ -240,29 +238,21 @@ export const spinClient = {
       ...(customFields ? { CustomFields: customFields } : {}),
       CaptureSignature: false,
       GetExtendedData: true,
-      GetToken: true,        // request iPOS token for downstream CNP
-      EnableTip: enableTip,
-      PrintReceipt: printReceipt,
     }, tenantConfig);
   },
 
   /**
-   * Authorize only (hold funds, capture later).
-   *
-   * Same iPOS-token + tip-suppression hardening as sale() so the
-   * pre-paid customer path (which routes through this for the
-   * card-present deposit hold) opportunistically captures a token
-   * for future autocharges.
+   * Authorize only (hold funds, capture later). Same minimal-payload
+   * rule as sale() — added optional flags broke this merchant's Spin
+   * proxy, so we keep only the proven-working set.
    */
-  async auth({ amount, referenceId, paymentType = 'Credit', invoiceNumber, enableTip = false }, tenantConfig) {
+  async auth({ amount, referenceId, paymentType = 'Credit', invoiceNumber }, tenantConfig) {
     return spinRequest('POST', 'v2/Payment/Auth', {
       Amount: Number(amount),
       PaymentType: paymentType,
       ReferenceId: String(referenceId).slice(0, 50),
       ...(invoiceNumber ? { InvoiceNumber: String(invoiceNumber).slice(0, 50) } : {}),
       GetExtendedData: true,
-      GetToken: true,
-      EnableTip: enableTip,
     }, tenantConfig);
   },
 
@@ -281,17 +271,15 @@ export const spinClient = {
    * release-deposit operational tool) and to roll back a sale when the
    * deposit hold declines mid-checkout.
    *
-   * 2026-05-29 hardening: include PaymentType per Dejavoo spec so the
-   * Void routes through the correct rail; PrintReceipt: false because
-   * voids are server-initiated (no customer interaction at the
-   * terminal). Dejavoo dedupes by ReferenceId, so passing the original
-   * sale/auth's ReferenceId triggers the void on that exact transaction.
+   * 2026-05-30 — Reverted to minimal payload (ReferenceId only) after
+   * a Sale call with the new field set hit StatusCode 2201. Optional
+   * fields appear to be unrecognized by this merchant's Spin proxy.
+   * Dejavoo dedupes by ReferenceId, so passing the original sale/auth's
+   * ReferenceId triggers the void on that exact transaction.
    */
-  async void({ referenceId, paymentType = 'Credit' }, tenantConfig) {
+  async void({ referenceId }, tenantConfig) {
     return spinRequest('POST', 'v2/Payment/Void', {
       ReferenceId: String(referenceId).slice(0, 50),
-      PaymentType: paymentType,
-      PrintReceipt: false,
     }, tenantConfig);
   },
 
@@ -343,16 +331,14 @@ export const spinClient = {
       // When a token is provided we're holding against a previously-
       // tokenized card (CNP). Without it the terminal prompts for tap/
       // insert/swipe just like a normal Auth.
+      // 2026-05-30 — token-CNP path on SPIn is now reserved as a
+      // fallback only; the documented path for tokenized CNP is the
+      // iPOSpays Transact API (ipos-transact-client.js). Token kept
+      // here for non-Transact deployments. EnableTip/PrintReceipt
+      // dropped — caused gateway StatusCode 2201 on the configured
+      // merchant proxy.
       ...(isCnp ? { Token: String(token), CardPresent: false } : {}),
       GetExtendedData: true,
-      // Card-present fallback (pre-paid customers who skipped sale)
-      // tokenizes opportunistically so post-rental autocharges work.
-      // CNP path already has a token so we don't need to re-request one.
-      ...(isCnp ? {} : { GetToken: true }),
-      EnableTip: false,
-      // Voids and CNP auths don't print receipts. Card-present auths do
-      // so the customer can sign their auth slip.
-      PrintReceipt: !isCnp,
     }, tenantConfig);
   },
 
@@ -370,11 +356,11 @@ export const spinClient = {
       Token: String(token),
       ...(invoiceNumber ? { InvoiceNumber: String(invoiceNumber).slice(0, 50) } : {}),
       // Tells Spin to bill a stored token (no physical card present).
+      // 2026-05-30 — EnableTip/PrintReceipt removed (gateway rejected
+      // with StatusCode 2201). Primary CNP path is now iPOSpays
+      // Transact API; this Spin-with-Token method is a fallback only.
       CardPresent: false,
       GetExtendedData: true,
-      EnableTip: false,
-      // CNP charges don't print at the terminal — no customer there.
-      PrintReceipt: false,
     }, tenantConfig);
   },
 
