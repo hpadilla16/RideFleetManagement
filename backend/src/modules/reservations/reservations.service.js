@@ -1554,6 +1554,12 @@ export const reservationsService = {
       await tx.rentalAgreement.update({
         where: { id: current.rentalAgreement.id },
         data: {
+          // Bug fix (2026-05-23): swapVehicle was updating Reservation.vehicleId
+          // but NOT RentalAgreement.vehicleId. The contract PDF + UI render
+          // from agreement.vehicle, so the swap didn't visually take effect
+          // on the contract. Reported on reservation TL-ZE40785431BA
+          // (Jessica Velez Arroyo).
+          vehicle: { connect: { id: nextVehicleId } },
           odometerOut: Number.isFinite(nextInspection.odometer) ? nextInspection.odometer : undefined,
           fuelOut: nextInspection.fuelLevel == null ? undefined : Number(nextInspection.fuelLevel),
           cleanlinessOut: Number.isFinite(nextInspection.cleanliness) ? nextInspection.cleanliness : undefined
