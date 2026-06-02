@@ -41,6 +41,10 @@
 
 import { Router } from 'express';
 import { prisma } from '../../lib/prisma.js';
+import {
+  inferVehicleStatusForReservationStatus,
+  LOCKED_VEHICLE_STATUSES,
+} from '../vehicles/vehicle-status-sync.js';
 
 export const reservationOverrideRouter = Router();
 
@@ -79,22 +83,9 @@ function isRewind(from, to) {
   return tl < fl;
 }
 
-function inferVehicleStatusForReservationStatus(resStatus) {
-  switch (resStatus) {
-    case 'CHECKED_OUT':
-    case 'CHECKED_IN_UNPAID':
-      return 'ON_RENT';
-    case 'NEW':
-    case 'CONFIRMED':
-    case 'CHECKED_IN':
-    case 'CANCELLED':
-    case 'NO_SHOW':
-    case 'PENDING_FRANCHISE_IMPORT':
-      return 'AVAILABLE';
-    default:
-      return null;
-  }
-}
+// inferVehicleStatusForReservationStatus + LOCKED_VEHICLE_STATUSES are imported
+// from ../vehicles/vehicle-status-sync.js so the override route and the normal
+// checkout/checkin flows share one source of truth (bug #44).
 
 function clearedFieldsForRewind(toStatus) {
   // Only the fields that exist on Reservation in THIS branch.
@@ -133,7 +124,7 @@ async function buildPreview(id, toStatus) {
     });
     const target = inferVehicleStatusForReservationStatus(toStatus);
     if (v && target) {
-      if (['IN_MAINTENANCE', 'OUT_OF_SERVICE'].includes(v.status)) {
+      if (LOCKED_VEHICLE_STATUSES.includes(v.status)) {
         vehicleSync = { skipped: true, reason: `vehicle is ${v.status}` };
       } else if (v.status !== target) {
         vehicleSync = { from: v.status, to: target, vehicleId: v.id, internalNumber: v.internalNumber, plate: v.plate };
@@ -240,7 +231,7 @@ reservationOverrideRouter.patch('/:id/status', async (req, res) => {
           select: { id: true, status: true, internalNumber: true, plate: true },
         });
         const target = inferVehicleStatusForReservationStatus(toStatus);
-        if (v && target && v.status !== target && !['IN_MAINTENANCE', 'OUT_OF_SERVICE'].includes(v.status)) {
+        if (v && target && v.status !== target && !LOCKED_VEHICLE_STATUSES.includes(v.status)) {
           await tx.vehicle.update({
             where: { id: v.id },
             data: { status: target, updatedAt: new Date() },

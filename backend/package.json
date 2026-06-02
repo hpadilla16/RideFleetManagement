@@ -9,7 +9,7 @@
     "start:cluster": "node src/cluster.js",
     "worker": "node src/worker.js",
     "test": "npm run lint:cache-keys && npm run test:vehicles && npm run test:fees && npm run test:booking-engine && npm run test:stop-sales && npm run test:review-email && npm run test:public-booking && npm run test:planner && npm run test:rates && npm run test:portal && npm run test:carsharing && npm run test:issues && npm run test:tolls && npm run test:sms && npm run test:payments && npm run test:auth && npm run test:cache && npm run test:commissions && npm run test:puppeteer && npm run test:rental-agreements && npm run test:reservations && npm run test:market-scraper",
-    "test:vehicles": "node --test src/modules/vehicles/vehicle-intelligence.test.mjs src/modules/vehicles/telematics-zubie.test.mjs",
+    "test:vehicles": "node --test src/modules/vehicles/vehicle-intelligence.test.mjs src/modules/vehicles/telematics-zubie.test.mjs src/modules/vehicles/vehicle-status-sync.test.mjs",
     "test:fees": "node --test src/modules/fees/fees.test.mjs src/modules/fees/fee-engine.test.mjs",
     "test:booking-engine": "node --test src/modules/booking-engine/booking-engine.test.mjs",
     "test:stop-sales": "node --test src/modules/stop-sales/stop-sales.test.mjs",

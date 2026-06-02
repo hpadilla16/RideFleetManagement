@@ -26,6 +26,7 @@
 
 import { prisma } from '../../lib/prisma.js';
 import logger from '../../lib/logger.js';
+import { syncVehicleStatusForReservation } from '../vehicles/vehicle-status-sync.js';
 import { feeEngineService } from '../fees/fee-engine.service.js';
 import { sendInvoiceAfterCheckin, sendReceiptPaidInFull } from './checkin-emails.service.js';
 import { enqueueJob } from '../../lib/queue/index.js';
@@ -232,6 +233,14 @@ export async function closeAgreementWithCheckinFees(
       data: { status: 'CHECKED_IN' }
     });
 
+    // Bug #44 — car is back on the lot; release it to AVAILABLE
+    // (respects IN_MAINTENANCE/OUT_OF_SERVICE/SOLD).
+    await syncVehicleStatusForReservation(prisma, {
+      vehicleId: agreement.vehicleId,
+      reservationId: agreement.reservationId,
+      toStatus: 'CHECKED_IN'
+    });
+
     // 0-balance receipt
     try {
       await sendReceiptPaidInFull({
@@ -256,6 +265,14 @@ export async function closeAgreementWithCheckinFees(
         status: 'CHECKED_IN_UNPAID',
         autochargeAt
       }
+    });
+
+    // Bug #44 — checked in (balance pending, autocharge queued) but the car is
+    // physically returned, so free it for re-rental → AVAILABLE.
+    await syncVehicleStatusForReservation(prisma, {
+      vehicleId: agreement.vehicleId,
+      reservationId: agreement.reservationId,
+      toStatus: 'CHECKED_IN_UNPAID'
     });
 
     // Enqueue with idempotent jobId so re-runs don't double-charge

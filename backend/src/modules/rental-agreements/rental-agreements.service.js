@@ -8,6 +8,7 @@ import { hostReviewsService } from '../host-reviews/host-reviews.service.js';
 import { reservationPricingService } from '../reservations/reservation-pricing.service.js';
 import { settingsService } from '../settings/settings.service.js';
 import { buildInspectionIntelligence } from '../vehicles/vehicle-intelligence.service.js';
+import { syncVehicleStatusForReservation } from '../vehicles/vehicle-status-sync.js';
 import {
   isStorageEnabled as inspectionPhotosStorageEnabled,
   uploadInspectionPhotos,
@@ -1666,6 +1667,14 @@ export async function applyFinalizeWritesTx(tx, ctx) {
     data: { status: 'CHECKED_OUT' }
   });
 
+  // Bug #44 — keep Vehicle.status in step: checkout flips the car to ON_RENT
+  // (respects IN_MAINTENANCE/OUT_OF_SERVICE/SOLD). In the same tx for atomicity.
+  await syncVehicleStatusForReservation(tx, {
+    reservationId: updated.reservationId,
+    vehicleId: updated.vehicleId,
+    toStatus: 'CHECKED_OUT'
+  });
+
   if (ctx.hasExplicitPaidAmount && ctx.paidAmount > 0 && ctx.paymentMethod) {
     await tx.rentalAgreementPayment.create({
       data: {
@@ -3107,6 +3116,8 @@ export const rentalAgreementsService = {
     if (mode === 'VOID') {
       const row = await prisma.rentalAgreement.update({ where: { id }, data: { status: 'CANCELLED' } });
       await prisma.reservation.update({ where: { id: agreement.reservationId }, data: { status: 'CANCELLED' } });
+      // Bug #44 — release the car back to AVAILABLE when the agreement is voided.
+      await syncVehicleStatusForReservation(prisma, { vehicleId: agreement.vehicleId, reservationId: agreement.reservationId, toStatus: 'CANCELLED' });
       await prisma.auditLog.create({ data: { reservationId: agreement.reservationId, actorUserId: actorUserId || null, action: 'STATUS_CHANGE', fromStatus: 'CHECKED_OUT', toStatus: 'CANCELLED', reason: 'Agreement voided' } });
       return row;
     }
@@ -3115,6 +3126,8 @@ export const rentalAgreementsService = {
       if (agreement.status !== 'CANCELLED') throw new Error('Only cancelled/voided agreements can be reactivated');
       const row = await prisma.rentalAgreement.update({ where: { id }, data: { status: 'FINALIZED' } });
       await prisma.reservation.update({ where: { id: agreement.reservationId }, data: { status: 'CHECKED_OUT' } });
+      // Bug #44 — reactivating an agreement puts the car back ON_RENT.
+      await syncVehicleStatusForReservation(prisma, { vehicleId: agreement.vehicleId, reservationId: agreement.reservationId, toStatus: 'CHECKED_OUT' });
       await prisma.auditLog.create({ data: { reservationId: agreement.reservationId, actorUserId: actorUserId || null, action: 'STATUS_CHANGE', fromStatus: 'CANCELLED', toStatus: 'CHECKED_OUT', reason: 'Agreement reactivated' } });
       return row;
     }
@@ -3122,6 +3135,8 @@ export const rentalAgreementsService = {
     // START_CHECK_IN
     const row = await prisma.rentalAgreement.update({ where: { id }, data: { status: 'FINALIZED' } });
     await prisma.reservation.update({ where: { id: agreement.reservationId }, data: { status: 'CHECKED_IN' } });
+    // Bug #44 — starting check-in returns the car to the lot (AVAILABLE).
+    await syncVehicleStatusForReservation(prisma, { vehicleId: agreement.vehicleId, reservationId: agreement.reservationId, toStatus: 'CHECKED_IN' });
     await prisma.auditLog.create({ data: { reservationId: agreement.reservationId, actorUserId: actorUserId || null, action: 'STATUS_CHANGE', fromStatus: 'CHECKED_OUT', toStatus: 'CHECKED_IN', reason: 'Check-in started from agreement' } });
     await completeLinkedCarSharingTripForReservation(agreement.reservationId, actorUserId || null, 'Trip auto-completed from agreement check-in');
     return row;

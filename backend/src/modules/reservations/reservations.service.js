@@ -1,5 +1,6 @@
 import { prisma } from '../../lib/prisma.js';
 import { activeVehicleBlockOverlapWhere } from '../vehicles/vehicle-blocks.js';
+import { syncVehicleStatusForReservation } from '../vehicles/vehicle-status-sync.js';
 import { maybeSendReviewRequestEmail } from './review-email.service.js';
 import { hostReviewsService } from '../host-reviews/host-reviews.service.js';
 import { settingsService } from '../settings/settings.service.js';
@@ -1695,6 +1696,16 @@ export const reservationsService = {
       where: { id },
       data
     });
+
+    // Bug #44 — if this admin PATCH changed the reservation status, keep
+    // Vehicle.status in step (respects IN_MAINTENANCE/OUT_OF_SERVICE/SOLD).
+    if (patch.status !== undefined && updated.status !== current.status) {
+      await syncVehicleStatusForReservation(prisma, {
+        vehicleId: updated.vehicleId,
+        reservationId: updated.id,
+        toStatus: updated.status
+      });
+    }
 
     if (String(updated.workflowMode || '').toUpperCase() === 'CAR_SHARING' && String(updated.status || '').toUpperCase() === 'CHECKED_IN') {
       await completeLinkedCarSharingTripForReservation(

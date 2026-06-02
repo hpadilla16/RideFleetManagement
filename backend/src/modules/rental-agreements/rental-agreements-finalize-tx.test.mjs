@@ -11,12 +11,21 @@ import { applyFinalizeWritesTx, applyChargesSyncTx } from './rental-agreements.s
 function fakeTx({ failOn } = {}) {
   const calls = [];
   const make = (model) => ({
+    findUnique: async (args) => {
+      calls.push({ model, op: 'findUnique', args });
+      if (failOn === `${model}.findUnique`) throw new Error(`forced failure on ${model}.findUnique`);
+      // Stubs for the bug #44 vehicle-status sync that now runs inside the
+      // finalize tx. The vehicle starts AVAILABLE so checkout flips it ON_RENT.
+      if (model === 'vehicle') return { id: args.where?.id, status: 'AVAILABLE', internalNumber: 'UNIT-1', plate: 'AAA111' };
+      if (model === 'reservation') return { vehicleId: 'veh-1' };
+      return null;
+    },
     update: async (args) => {
       calls.push({ model, op: 'update', args });
       if (failOn === `${model}.update`) throw new Error(`forced failure on ${model}.update`);
       // Mirror what real prisma.update returns for the agreement (other tests
-      // depend on the reservationId field).
-      if (model === 'rentalAgreement') return { id: args.where?.id, reservationId: 'res-from-update' };
+      // depend on the reservationId field; the vehicleId feeds the vehicle sync).
+      if (model === 'rentalAgreement') return { id: args.where?.id, reservationId: 'res-from-update', vehicleId: 'veh-1' };
       return {};
     },
     create: async (args) => {
@@ -39,6 +48,7 @@ function fakeTx({ failOn } = {}) {
     customer: make('customer'),
     rentalAgreement: make('rentalAgreement'),
     reservation: make('reservation'),
+    vehicle: make('vehicle'),
     rentalAgreementPayment: make('rentalAgreementPayment'),
     rentalAgreementCharge: make('rentalAgreementCharge'),
     __calls: calls
@@ -73,6 +83,8 @@ describe('applyFinalizeWritesTx', () => {
     assert.deepEqual(order, [
       'rentalAgreement.update',
       'reservation.update',
+      'vehicle.findUnique',           // bug #44 vehicle-status sync (read)
+      'vehicle.update',               // AVAILABLE → ON_RENT on checkout
       'rentalAgreementPayment.create'
     ]);
     assert.equal(result.id, 'agr-1');
@@ -92,6 +104,8 @@ describe('applyFinalizeWritesTx', () => {
       'customer.update',
       'rentalAgreement.update',
       'reservation.update',
+      'vehicle.findUnique',            // bug #44 vehicle-status sync (read)
+      'vehicle.update',                // AVAILABLE → ON_RENT on checkout
       'rentalAgreementPayment.create', // explicit paid amount
       'rentalAgreementPayment.create'  // credit-applied payment record
     ]);
@@ -106,7 +120,7 @@ describe('applyFinalizeWritesTx', () => {
       paymentMethod: null
     });
     const ops = tx.__calls.map((c) => `${c.model}.${c.op}`);
-    assert.deepEqual(ops, ['rentalAgreement.update', 'reservation.update']);
+    assert.deepEqual(ops, ['rentalAgreement.update', 'reservation.update', 'vehicle.findUnique', 'vehicle.update']);
   });
 
   it('rolls back contract: throws if reservation.update fails (caller is prisma.$transaction which then aborts)', async () => {
@@ -166,6 +180,8 @@ describe('applyFinalizeWritesTx', () => {
       'customer.update',
       'rentalAgreement.update',
       'reservation.update',
+      'vehicle.findUnique',            // bug #44 vehicle-status sync (read)
+      'vehicle.update',                // AVAILABLE → ON_RENT on checkout
       'rentalAgreementPayment.create' // credit-only — one create, not two
     ]);
     const payments = tx.__calls.filter((c) => c.model === 'rentalAgreementPayment');
