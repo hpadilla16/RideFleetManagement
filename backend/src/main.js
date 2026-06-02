@@ -5,6 +5,7 @@ import compression from 'compression';
 import logger, { requestLogger } from './lib/logger.js';
 import { reservationsRouter } from './modules/reservations/reservations.routes.js';
 import { reservationExtendRouter } from './modules/reservations/reservation-extend.routes.js';
+import { reservationOverrideRouter } from './modules/admin/reservation-override.routes.js';
 import { customersRouter } from './modules/customers/customers.routes.js';
 import { publicVehicleTelematicsRouter, vehiclesRouter } from './modules/vehicles/vehicles.routes.js';
 import { locationsRouter } from './modules/locations/locations.routes.js';
@@ -123,6 +124,8 @@ app.use('/api/payment-gateway', requireAuth, tenantRateLimit, requireRole('ADMIN
 app.use('/api/sms', requireAuth, tenantRateLimit, requireRole('ADMIN', 'OPS'), smsRouter);
 app.use('/api/knowledge-base', requireAuth, tenantRateLimit, knowledgeBaseRouter);
 app.use('/api/admin/integrations/tl-international', tenantRateLimit, tlInternationalRouter);
+// Round 26 (2026-06-01) — SUPER_ADMIN reservation status override + smart rewind
+app.use('/api/admin/reservations', requireAuth, requireRole('SUPER_ADMIN'), reservationOverrideRouter);
 app.use('/api/store-board', requireAuth, tenantRateLimit, requireRole('SUPER_ADMIN', 'ADMIN', 'OPS'), storeBoardRouter);
 
 app.use('/api/reservations', requireAuth, tenantRateLimit, requireModuleAccess('reservations'), reservationsRouter);

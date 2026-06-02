@@ -6,6 +6,7 @@ import { AuthGate } from '../../../components/AuthGate';
 import { AppShell } from '../../../components/AppShell';
 import { AgreementAddendumsCard } from '../../../components/AgreementAddendumsCard';
 import { ReservationExtendDialog } from '../../../components/ReservationExtendDialog';
+import { ReservationOverridePanel } from '../../../components/admin/ReservationOverridePanel';
 import { api, API_BASE } from '../../../lib/client';
 import { utcToTenantLocalInput } from '../../../lib/tenant-time';
 
@@ -2779,6 +2780,15 @@ token
           onCancel={() => setExtendDialogOpen(false)}
         />
       )}
+
+      {/* Round 26 (2026-06-01) — SUPER_ADMIN-only manual status override.
+          Renders nothing if role !== 'SUPER_ADMIN'. */}
+      <ReservationOverridePanel
+        reservation={row}
+        token={token}
+        role={role}
+        onApplied={() => refresh()}
+      />
     </AppShell>
   );
 }
