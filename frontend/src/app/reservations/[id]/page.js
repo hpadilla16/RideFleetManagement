@@ -7,6 +7,7 @@ import { AppShell } from '../../../components/AppShell';
 import { AgreementAddendumsCard } from '../../../components/AgreementAddendumsCard';
 import { ReservationExtendDialog } from '../../../components/ReservationExtendDialog';
 import { ReservationOverridePanel } from '../../../components/admin/ReservationOverridePanel';
+import { IncidentReportsPanel } from '../../../components/incident/IncidentReportsPanel';
 import { api, API_BASE } from '../../../lib/client';
 import { utcToTenantLocalInput } from '../../../lib/tenant-time';
 
@@ -2788,6 +2789,14 @@ token
         token={token}
         role={role}
         onApplied={() => refresh()}
+      />
+
+      {/* Incident / damage report module (beta.62). ADMIN/OPS/AGENT only. */}
+      <IncidentReportsPanel
+        reservation={row}
+        token={token}
+        role={role}
+        me={me}
       />
     </AppShell>
   );

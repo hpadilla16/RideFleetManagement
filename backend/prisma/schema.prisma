@@ -419,6 +419,8 @@ model Tenant {
   customers                   Customer[]
   reservations                Reservation[]
   auditLogs                   AuditLog[]
+  reservationIncidents        ReservationIncident[]
+  agreementClauses            AgreementClause[]
   agreements                  RentalAgreement[]
   rates                       Rate[]
   fees                        Fee[]
@@ -860,6 +862,7 @@ model Reservation {
   additionalDrivers ReservationAdditionalDriver[]
   carSharingTrip    Trip?
   incidents         TripIncident[]
+  damageIncidents   ReservationIncident[]
   hostReviews       HostReview[]
   tollTransactions  TollTransaction[]
   tollAssignments   TollAssignment[]
@@ -2952,4 +2955,134 @@ model FranchisePayoutPeriod {
   updatedAt      DateTime  @updatedAt
 
   @@unique([tenantId, sourceSystem, year, month])
+}
+
+// =====================================================================
+// Incident / Damage Report module (ported from feature/incident-report
+// 2026-06-02, beta.62). Migration: 20260601_add_incident_report.
+// =====================================================================
+enum IncidentReportType {
+  DAMAGE
+  SMOKING
+  CLEANING
+  POLICY_VIOLATION
+  TOLL
+  LATE_RETURN
+  OTHER
+}
+
+enum IncidentReportStatus {
+  DRAFT
+  ISSUED
+  DISPUTED
+  RESOLVED
+  CLOSED
+  VOID
+}
+
+enum IncidentEvidenceStatus {
+  CONFIRMED
+  VIOLATION
+}
+
+enum IncidentReportSeverity {
+  MINOR
+  MODERATE
+  SEVERE
+}
+
+model ReservationIncident {
+  id            String      @id @default(cuid())
+  tenantId      String?
+  tenant        Tenant?     @relation(fields: [tenantId], references: [id])
+  reservationId String
+  reservation   Reservation @relation(fields: [reservationId], references: [id])
+
+  // Optional link to the rental agreement (when one exists for the reservation).
+  rentalAgreementId String?
+
+  reportNumber String                  @unique // INC-YYYYMMDD-PLATE
+  type         IncidentReportType
+  status       IncidentReportStatus    @default(DRAFT)
+  severity     IncidentReportSeverity?
+  title        String // banner headline
+
+  discoveryAt        DateTime
+  narrative          String? // §3 evidence narrative
+  preRentalCondition String? // §2 (defaults from CHECKOUT inspection)
+  odorNoted          String?
+  conditionAtReturn  String?
+
+  // §5 cited clauses (snapshot from the tenant clause library at issue time)
+  // and §7 auto-composed rebuttal.
+  citedClausesJson String? // [{ section, label, text, amountRange }]
+  rebuttalText     String?
+
+  // §6 charge + deposit linkage
+  chargeIdsJson  String? // RentalAgreementCharge ids included in the summary
+  depositApplied Decimal? @db.Decimal(10, 2)
+
+  // §9 certification (locks on ISSUED)
+  certifiedByName  String?
+  certifiedByTitle String?
+  signatureDataUrl String?   @db.Text
+  certifiedAt      DateTime?
+  issuedAt         DateTime?
+
+  // Revision chain — a "revise after issue" clones into a new row.
+  revisionOfId String?
+  revisionOf   ReservationIncident?  @relation("IncidentRevisions", fields: [revisionOfId], references: [id])
+  revisions    ReservationIncident[] @relation("IncidentRevisions")
+
+  createdByUserId String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  evidence IncidentEvidence[]
+
+  @@index([tenantId, status])
+  @@index([reservationId])
+}
+
+model IncidentEvidence {
+  id         String              @id @default(cuid())
+  incidentId String
+  incident   ReservationIncident @relation(fields: [incidentId], references: [id], onDelete: Cascade)
+  tenantId   String?
+
+  ordinal        Int // Fig. # / row #
+  location       String // "Cup Holders — Center Console"
+  description    String
+  evidenceStatus IncidentEvidenceStatus @default(VIOLATION)
+
+  // Photo: a new upload (Supabase Storage path) OR a reference to an existing
+  // inspection photo. sourcePhase records provenance for before/after.
+  storagePath   String?
+  contentType   String?
+  sourcePhase   String? // CHECKOUT | CHECKIN | NEW
+  takenAt       DateTime @default(now()) // chain-of-custody timestamp
+  takenByUserId String?
+
+  createdAt DateTime @default(now())
+
+  @@index([incidentId, ordinal])
+}
+
+model AgreementClause {
+  id       String  @id @default(cuid())
+  tenantId String?
+  tenant   Tenant? @relation(fields: [tenantId], references: [id])
+
+  section     String // "6"
+  label       String // "Smoking Fee"
+  text        String              @db.Text
+  amountRange String? // "$500 + tax"
+  category    IncidentReportType? // default association to a report type
+  active      Boolean             @default(true)
+  sortOrder   Int                 @default(0)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([tenantId, active])
 }
