@@ -18,7 +18,8 @@
     "settings": "Settings",
     "tenants": "Tenants",
     "security": "Security",
-    "actionBoards": "Action Boards"
+    "actionBoards": "Action Boards",
+    "agreementClauses": "Agreement clauses"
   },
   "topbar": {
     "dark": "Dark",

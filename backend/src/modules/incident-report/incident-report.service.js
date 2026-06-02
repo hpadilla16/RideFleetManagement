@@ -217,25 +217,70 @@ export const incidentReportService = {
     const insp = await prisma.rentalAgreementInspection.findFirst({
       where: { rentalAgreementId: row.rentalAgreementId, phase: String(phase).toUpperCase() }
     });
-    let refs = [];
-    try { refs = Array.isArray(insp?.photoStorageRefs) ? insp.photoStorageRefs : []; } catch {}
-    if (!refs.length) return { added: 0 };
+    if (!insp) return { added: 0 };
+
+    const PH = String(phase).toUpperCase();
+    const status = PH === 'CHECKOUT' ? 'CONFIRMED' : 'VIOLATION';
     let ordinal = (row.evidence?.reduce((m, e) => Math.max(m, e.ordinal), 0) || 0);
     let added = 0;
+
+    // 1) Modern path — photos already uploaded to Supabase Storage
+    //    (INSPECTION_PHOTOS_STORAGE_ENABLED=true). Reference them directly.
+    let refs = [];
+    try { refs = Array.isArray(insp.photoStorageRefs) ? insp.photoStorageRefs : []; } catch {}
     for (const ref of refs) {
       if (!ref?.path) continue;
       ordinal += 1; added += 1;
       await prisma.incidentEvidence.create({
         data: {
           incidentId: row.id, tenantId: row.tenantId, ordinal,
-          location: ref.key || `${phase} photo`,
-          description: `Imported from ${String(phase).toUpperCase()} inspection.`,
-          evidenceStatus: phase.toUpperCase() === 'CHECKOUT' ? 'CONFIRMED' : 'VIOLATION',
+          location: ref.key || `${PH} photo`,
+          description: `Imported from ${PH} inspection.`,
+          evidenceStatus: status,
           storagePath: ref.path, contentType: ref.contentType || null,
-          sourcePhase: String(phase).toUpperCase(), takenByUserId: user?.id || null
+          sourcePhase: PH, takenByUserId: user?.id || null
         }
       });
     }
+
+    // 2) Legacy path — when storage is off (default), inspection photos are
+    //    base64-inlined in photosJson. Decode each and upload it into the
+    //    incident bucket so it becomes a first-class evidence photo. Only used
+    //    when the modern path produced nothing, to avoid duplicates during the
+    //    storage-migration overlap window.
+    if (added === 0 && insp.photosJson) {
+      let parsed = {};
+      try { parsed = JSON.parse(insp.photosJson) || {}; } catch { parsed = {}; }
+      const items = [];
+      const walk = (val, label) => {
+        if (val == null) return;
+        if (typeof val === 'string') { items.push({ value: val, label }); return; }
+        if (Array.isArray(val)) { val.forEach((v, i) => walk(v, `${label} ${i + 1}`.trim())); return; }
+        if (typeof val === 'object') { for (const [k, v] of Object.entries(val)) walk(v, label ? `${label} · ${k}` : k); }
+      };
+      walk(parsed, '');
+      const tenantId = row.tenantId || user?.tenantId || 'no-tenant';
+      for (const it of items) {
+        const decoded = decodePhotoValue(it.value); // null for non-photo strings / already-hosted URLs
+        if (!decoded) continue;
+        const path = safePath('tenants', tenantId, 'incidents', row.id, `ev_${crypto.randomUUID()}.${decoded.ext}`);
+        try {
+          await uploadObject({ bucket: getPhotosBucket(), path, body: decoded.buffer, contentType: decoded.contentType, upsert: false });
+        } catch { continue; }
+        ordinal += 1; added += 1;
+        await prisma.incidentEvidence.create({
+          data: {
+            incidentId: row.id, tenantId: row.tenantId, ordinal,
+            location: it.label ? `${PH} · ${it.label}` : `${PH} photo`,
+            description: `Imported from ${PH} inspection.`,
+            evidenceStatus: status,
+            storagePath: path, contentType: decoded.contentType,
+            sourcePhase: PH, takenByUserId: user?.id || null
+          }
+        });
+      }
+    }
+
     return { added };
   },
 

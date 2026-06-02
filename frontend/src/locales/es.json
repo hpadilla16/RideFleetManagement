@@ -18,7 +18,8 @@
     "settings": "Configuración",
     "tenants": "Inquilinos",
     "security": "Seguridad",
-    "actionBoards": "Action Boards"
+    "actionBoards": "Action Boards",
+    "agreementClauses": "Agreement clauses"
   },
   "topbar": {
     "dark": "Oscuro",
