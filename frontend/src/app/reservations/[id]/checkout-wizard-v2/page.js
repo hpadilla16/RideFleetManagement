@@ -147,6 +147,25 @@ function CheckoutWizardV2({ token, me, logout }) {
     return () => clearInterval(pollTimer.current);
   }, [session?.id, session?.currentStep, session?.updatedAt, token]);
 
+  // Refetch the reservation when the wizard enters the PAYMENT step.
+  // 2026-06-03 — the reservation (and its rentalAgreement.charges) is fetched
+  // once on mount, but the agreement charges are created/updated server-side
+  // during steps 1–2. By step 3 the in-memory copy is stale: the wizard saw no
+  // charges, fell back to balance math, and showed sale+deposit merged
+  // ($2.12 / $0 pre-auth) until the agent manually refreshed. A fresh fetch on
+  // entering PAYMENT_PENDING keeps the sale/deposit split correct.
+  useEffect(() => {
+    if (!reservationId || session?.currentStep !== 'PAYMENT_PENDING') return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const r = await api(`/api/reservations/${reservationId}`, { bypassCache: true }, token);
+        if (!cancelled) setReservation(r);
+      } catch { /* keep the mount-time copy — agent can refresh manually */ }
+    })();
+    return () => { cancelled = true; };
+  }, [reservationId, session?.currentStep, token]);
+
   // Auto-advance when a side-effect stamp arrives out-of-band. The
   // customer signing on their phone stamps tcCompletedAt; the Spin
   // webhook stamps paymentCompletedAt; the mobile inspection page
