@@ -1,4 +1,5 @@
 import { prisma } from '../../lib/prisma.js';
+import { normalizeDob } from '../../lib/dob.js';
 
 function scopedReservationWhere(id, scope = {}) {
   return { id, ...(scope?.tenantId ? { tenantId: scope.tenantId } : {}) };
@@ -16,8 +17,7 @@ function parseDriversFromNotes(notes) {
 }
 
 function normalizeDriver(input = {}) {
-  const dobRaw = input?.dateOfBirth ? new Date(input.dateOfBirth) : null;
-  const dateOfBirth = dobRaw && !Number.isNaN(dobRaw.getTime()) ? dobRaw : null;
+  const dateOfBirth = input?.dateOfBirth ? normalizeDob(input.dateOfBirth) : null;
   return {
     firstName: String(input?.firstName || '').trim(),
     lastName: String(input?.lastName || '').trim(),

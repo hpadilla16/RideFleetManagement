@@ -9,6 +9,7 @@ import { reservationPricingService } from '../reservations/reservation-pricing.s
 import { settingsService } from '../settings/settings.service.js';
 import { buildInspectionIntelligence } from '../vehicles/vehicle-intelligence.service.js';
 import { syncVehicleStatusForReservation } from '../vehicles/vehicle-status-sync.js';
+import { normalizeDob, isImplausibleAge } from '../../lib/dob.js';
 import {
   isStorageEnabled as inspectionPhotosStorageEnabled,
   uploadInspectionPhotos,
@@ -2951,7 +2952,7 @@ export const rentalAgreementsService = {
         customerState: patch.customerState,
         customerZip: patch.customerZip,
         customerCountry: patch.customerCountry,
-        dateOfBirth: patch.dateOfBirth ? new Date(patch.dateOfBirth) : undefined,
+        dateOfBirth: patch.dateOfBirth === undefined ? undefined : normalizeDob(patch.dateOfBirth),
         licenseNumber: patch.licenseNumber,
         licenseState: patch.licenseState,
         licenseExpiry: patch.licenseExpiry ? new Date(patch.licenseExpiry) : undefined,
@@ -3191,6 +3192,18 @@ export const rentalAgreementsService = {
 
     await prisma.rentalAgreement.update({ where: { id }, data: { paidAmount: nextPaid, balance: nextBalance } });
     await prisma.auditLog.create({ data: { reservationId: agreement.reservationId, actorUserId: actorUserId || null, action: 'UPDATE', reason: `Manual ${entryType.toLowerCase()} added: ${postedAmount.toFixed(2)}` } });
+
+    // Settle-on-payment: if this clears the balance on a CHECKED_IN_UNPAID
+    // reservation, advance it to CHECKED_IN (mirrors the autocharge worker) so a
+    // manually-collected balance doesn't leave it perpetually "unpaid".
+    if (nextBalance <= 0.01) {
+      const resv = await prisma.reservation.findUnique({ where: { id: agreement.reservationId }, select: { status: true } });
+      if (String(resv?.status || '').toUpperCase() === 'CHECKED_IN_UNPAID') {
+        await prisma.reservation.update({ where: { id: agreement.reservationId }, data: { status: 'CHECKED_IN', autochargeAt: null } });
+        await syncVehicleStatusForReservation(prisma, { reservationId: agreement.reservationId, toStatus: 'CHECKED_IN' });
+        await prisma.auditLog.create({ data: { reservationId: agreement.reservationId, actorUserId: actorUserId || null, action: 'STATUS_CHANGE', fromStatus: 'CHECKED_IN_UNPAID', toStatus: 'CHECKED_IN', reason: 'Balance settled via manual payment' } }).catch(() => {});
+      }
+    }
 
     return this.getById(id);
   },
@@ -4289,6 +4302,12 @@ export const rentalAgreementsService = {
     const maxAge = Number(locationConfig?.chargeAgeMax || 0);
     const age = ageOnDate(dateOfBirth, agreement.pickupAt);
     if (age !== null) {
+      // Guard against a garbage DOB on file (e.g. an import storing year 0959 →
+      // age ~1067). Give an actionable message instead of a confusing
+      // "exceeds maximum age" so staff know to correct the date of birth.
+      if (isImplausibleAge(age)) {
+        throw new Error(`The date of birth on file is invalid (it computes to age ${age}). Please correct the customer's date of birth before checkout.`);
+      }
       if (minAge > 0 && age < minAge) throw new Error(`Driver age ${age} is below minimum age ${minAge} for this location`);
       if (maxAge > 0 && age > maxAge) throw new Error(`Driver age ${age} exceeds maximum age ${maxAge} for this location`);
     }

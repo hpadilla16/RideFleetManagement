@@ -28,6 +28,7 @@ import { prisma } from '../../lib/prisma.js';
 import logger from '../../lib/logger.js';
 import { syncVehicleStatusForReservation } from '../vehicles/vehicle-status-sync.js';
 import { feeEngineService } from '../fees/fee-engine.service.js';
+import { settingsService } from '../settings/settings.service.js';
 import { sendInvoiceAfterCheckin, sendReceiptPaidInFull } from './checkin-emails.service.js';
 import { enqueueJob } from '../../lib/queue/index.js';
 import { AUTOCHARGE_PRIORITY } from '../../lib/queue/priorities.js';
@@ -212,6 +213,7 @@ export async function closeAgreementWithCheckinFees(
   let newStatus;
   let newReservationStatus;
   let autochargeJobId = null;
+  let autochargeAt = null;
 
   if (newBalance <= BALANCE_ZERO_EPSILON) {
     // Paid in full — close cleanly
@@ -253,11 +255,28 @@ export async function closeAgreementWithCheckinFees(
       });
     }
   } else {
-    // Outstanding balance — checkin-unpaid + queue autocharge
-    newStatus = agreement.status;  // keep agreement open until autocharge resolves
+    // Outstanding balance — checkin-unpaid. Whether (and when) we auto-charge
+    // the balance is tenant-configurable in Settings → Payments.
+    newStatus = agreement.status;  // keep agreement open until charge resolves
     newReservationStatus = 'CHECKED_IN_UNPAID';
 
-    const autochargeAt = new Date(Date.now() + AUTOCHARGE_DELAY_MS);
+    // Resolve the tenant autocharge policy (AUTO + delayHours, or MANUAL).
+    // Defaults to AUTO/24h if settings can't be read.
+    let autoMode = 'AUTO';
+    let delayMs = AUTOCHARGE_DELAY_MS;
+    try {
+      const pgCfg = await settingsService.getPaymentGatewayConfig({ tenantId: agreement.tenantId });
+      const ac = pgCfg?.autocharge || {};
+      autoMode = String(ac.mode || 'AUTO').toUpperCase() === 'MANUAL' ? 'MANUAL' : 'AUTO';
+      const h = Number(ac.delayHours);
+      if (Number.isFinite(h) && h >= 0) delayMs = Math.round(h) * 60 * 60 * 1000;
+    } catch (err) {
+      logger.warn('[checkin-close] could not read autocharge config; defaulting to AUTO/24h', { agreementId, message: err.message });
+    }
+
+    // MANUAL → no background charge; staff collects in the View Payments tab.
+    // AUTO   → stamp autochargeAt and enqueue the delayed charge job.
+    autochargeAt = autoMode === 'AUTO' ? new Date(Date.now() + delayMs) : null;
 
     await prisma.reservation.update({
       where: { id: agreement.reservationId },
@@ -267,31 +286,37 @@ export async function closeAgreementWithCheckinFees(
       }
     });
 
-    // Bug #44 — checked in (balance pending, autocharge queued) but the car is
-    // physically returned, so free it for re-rental → AVAILABLE.
+    // Bug #44 — checked in (balance pending) but the car is physically
+    // returned, so free it for re-rental → AVAILABLE.
     await syncVehicleStatusForReservation(prisma, {
       vehicleId: agreement.vehicleId,
       reservationId: agreement.reservationId,
       toStatus: 'CHECKED_IN_UNPAID'
     });
 
-    // Enqueue with idempotent jobId so re-runs don't double-charge
-    autochargeJobId = `autocharge-${agreement.reservationId}-${autochargeAt.getTime()}`;
-    try {
-      await enqueueJob(
-        'reservation.autocharge-after-checkin',
-        { reservationId: agreement.reservationId },
-        {
-          delay: AUTOCHARGE_DELAY_MS,
-          jobId: autochargeJobId,
-          priority: AUTOCHARGE_PRIORITY
-        }
-      );
-    } catch (err) {
-      logger.error('[checkin-close] failed to enqueue autocharge', {
-        agreementId, message: err.message
+    if (autoMode === 'AUTO') {
+      // Enqueue with idempotent jobId so re-runs don't double-charge
+      autochargeJobId = `autocharge-${agreement.reservationId}-${autochargeAt.getTime()}`;
+      try {
+        await enqueueJob(
+          'reservation.autocharge-after-checkin',
+          { reservationId: agreement.reservationId },
+          {
+            delay: delayMs,
+            jobId: autochargeJobId,
+            priority: AUTOCHARGE_PRIORITY
+          }
+        );
+      } catch (err) {
+        logger.error('[checkin-close] failed to enqueue autocharge', {
+          agreementId, message: err.message
+        });
+        // Don't fail the close — manual workflow can still complete the charge.
+      }
+    } else {
+      logger.info('[checkin-close] autocharge MANUAL — balance left for staff to collect in View Payments', {
+        agreementId, reservationId: agreement.reservationId
       });
-      // Don't fail the close — manual workflow can still complete the charge.
     }
 
     // Invoice email with card-on-file notice
@@ -345,7 +370,7 @@ export async function closeAgreementWithCheckinFees(
     reservationStatus: newReservationStatus,
     agreementStatus: newStatus,
     autochargeJobId,
-    autochargeAt: newBalance > 0 ? new Date(Date.now() + AUTOCHARGE_DELAY_MS) : null
+    autochargeAt
   };
 }
 

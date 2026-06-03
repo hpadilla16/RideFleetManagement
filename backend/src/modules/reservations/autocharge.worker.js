@@ -151,9 +151,15 @@ export async function autochargeHandler(job) {
     data: {
       reservationId: reservation.id,
       actorUserId: null,
-      action: 'AUTOCHARGE_SUCCESS',
+      // AuditAction has no AUTOCHARGE_* value — this is a status transition
+      // (CHECKED_IN_UNPAID -> CHECKED_IN); the autocharge detail lives in
+      // metadata.event so it stays queryable.
+      action: 'STATUS_CHANGE',
+      fromStatus: 'CHECKED_IN_UNPAID',
+      toStatus: 'CHECKED_IN',
       reason: `Auto-charged $${balance.toFixed(2)} to card ending ${reservation.customer.cardLast4 || '????'}`,
       metadata: JSON.stringify({
+        event: 'AUTOCHARGE_SUCCESS',
         agreementId: agreement.id,
         amount: balance,
         cardLast4: reservation.customer.cardLast4,

@@ -6,9 +6,9 @@ When starting a new chat: **read this file first**, then read `doc/round-26-foll
 
 ## TL;DR — what's live in prod right now
 
-**Tag deployed:** `v0.9.0-beta.61`
-**Branch:** `release/v0.9.0-beta.58` (yes, named off the base; beta.59/60/61 sit on top via cherry-picks/commits)
-**Droplet:** `~/RideFleetManagement` checked out to v0.9.0-beta.61, all 4 containers healthy
+**Tag deployed:** `v0.9.0-beta.63`
+**Branch:** `release/v0.9.0-beta.58` (yes, named off the base; beta.59–63 sit on top via cherry-picks/commits)
+**Droplet:** `~/RideFleetManagement` checked out to v0.9.0-beta.63, all 4 containers healthy
 
 ---
 
@@ -36,7 +36,58 @@ Three things shipped after the original handoff below was written:
    (`doc/fixes/2026-06-02-vehicle-status-drift-sweep.sql`) that corrected 13 drifted IRC
    vehicles (3 wrongly-AVAILABLE-while-rented, 10 stuck-ON_RENT). Verify came back clean.
 
-**Next up:** Priority #2 below — the incident/damage report module.
+4. **`v0.9.0-beta.62` — Incident / Damage Report module: SHIPPED + LIVE.**
+   Ported the backend (service + routes + light-theme PDF + clause library) from
+   `feature/incident-report` onto release (deps all present, no adaptation), added
+   3 models + 4 enums + back-relations to `schema.prisma` and the additive
+   `20260601_add_incident_report` migration. **Migration was applied to prod Supabase**
+   (all 3 tables verified) before the image booted; deploy clean. New UI: reservation
+   `Incident reports` panel (DRAFT builder → evidence → clause picker → signature →
+   certify/issue → revise → print/PDF) + `Settings → Agreement clauses` page.
+   Plan: `doc/incident-report-module-plan-2026-06-02.md`. Employee how-to:
+   `doc/incident-reporting-playbook-2026-06-02.html`.
+
+5. **`v0.9.0-beta.63` — incident follow-up fixes: SHIPPED.**
+   (a) `pullInspectionEvidence` now falls back to legacy base64 `photosJson`
+   (decodes + uploads each inline inspection photo into the incident bucket) when
+   `photoStorageRefs` is empty — fixes "Pull check-in/out brought in no photos" on
+   prod (storage flag is off by default). (b) Added the `Settings → Agreement clauses`
+   nav link (AppShell + en/es), which was missing so the page was unreachable.
+
+**Still open on the incident module:** Hector must review/edit the **seeded clause
+legal text** (Settings → Agreement clauses → Seed default clauses) before it goes on
+a customer-facing report. Optional polish: incident-creation UX has no list filtering;
+evidence has no inline caption editing yet (location/description default on pull).
+
+6. **`v0.9.0-beta.65` — tenant-configurable post-check-in autocharge + settings
+   clauses chip: BUILT, ready to ship** (supersedes the unshipped beta.64).
+   Settings → Payments now has "Post-check-in autocharge": mode AUTO/MANUAL and,
+   for AUTO, "charge N hours after check-in" (default 24h), stored on the per-tenant
+   payment-gateway config. `checkin-close.service.js` honors it — MANUAL leaves the
+   unpaid balance for staff in the View Payments tab (no job enqueued); AUTO enqueues
+   at the configured delay. Also folds in the Settings Hub "Agreement Clauses" chip.
+   **Plus DOB hotfix:** an implausible date of birth (TL-ZE40789836BA stored
+   `2800-04-01` / `0959-04-01`) computed age ~1067 and blocked checkout with "age
+   exceeds maximum". New `backend/src/lib/dob.js` `normalizeDob()` sanitizes DOB at
+   every write path (garbage → null → agent re-enters); the finalize gate now says
+   "correct the date of birth". Sweep + write-up:
+   `doc/fixes/2026-06-02-implausible-dob-sweep.sql`,
+   `doc/bugs/2026-06-02-implausible-dob-blocks-checkout.md`.
+   Frontend + backend, **no migration**. Ship:
+   `.deploy-notes/2026-06-02-ship-autocharge-config-beta65.sh`.
+
+**Dejavoo prep (important reads before Priority #3):** Two reviews capture what our
+recent work changes for the Dejavoo deploy:
+- `doc/dejavoo-readiness-review-2026-06-02.md` — vehicle-sync hook the Dejavoo
+  checkout MUST call; override-rewind vs. open auth holds; cherry-pick (not merge).
+- `doc/checkin-fee-collection-dejavoo-alignment-2026-06-02.md` — fee COMPUTATION is
+  provider-neutral (safe), but fee COLLECTION (autocharge `chargeCardOnFile`) is
+  Authorize.Net-only; must become provider-aware + store the Dejavoo token at
+  checkout + add `RentalAgreementPayment.gateway` so check-in matches the Dejavoo
+  checkout format. The new AUTO/MANUAL autocharge config (beta.65) is the timing/mode
+  layer that sits on top of whichever rail.
+
+**Next up:** Priority #3 — Dejavoo IPOSpays tokenized-card preauth.
 
 **Why we're on this awkward tag tree:** v0.9.0-beta.57 was a swap-vehicle hotfix cherry-picked onto main, but main was missing the entire `proxy-on-beta56` / `dejavoo-spin-checkout-redesign` branch's TL international fixes. Beta.57 silently regressed everything below. Rebuilt from `v0.9.0-beta.56-tl-reports-v7-tz-fix` instead of main, cherry-picked the swap fix + the TL fixes that mattered.
 

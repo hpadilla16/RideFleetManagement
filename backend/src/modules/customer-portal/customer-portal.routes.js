@@ -8,6 +8,7 @@ import { reservationPricingService } from '../reservations/reservation-pricing.s
 import { settingsService } from '../settings/settings.service.js';
 import { buildSelfServiceSnapshot } from './customer-portal-self-service.js';
 import { parseLocationConfig } from '../../lib/location-config.js';
+import { normalizeDob } from '../../lib/dob.js';
 import { getCanonicalTermsHtml } from '../../lib/terms/index.js';
 import { TC_VERSION } from '../../lib/terms/version.js';
 import {
@@ -1325,7 +1326,7 @@ customerPortalRouter.post('/customer-info/:token', portalWrite, async (req, res,
         lastName,
         email,
         phone,
-        dateOfBirth: body.dateOfBirth ? new Date(body.dateOfBirth) : null,
+        dateOfBirth: body.dateOfBirth ? normalizeDob(body.dateOfBirth) : null,
         licenseNumber: body.licenseNumber ? String(body.licenseNumber).trim() : null,
         licenseState: body.licenseState ? String(body.licenseState).trim() : null,
         insurancePolicyNumber: body.insurancePolicyNumber ? String(body.insurancePolicyNumber).trim() : null,

@@ -1,0 +1,249 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Incident Reporting — Agent Playbook · Ride Fleet</title>
+<style>
+  :root{
+    --purple:#6d5ef5; --purple-dark:#4b3fc4; --ink:#1f2330; --muted:#6b7280;
+    --line:#e7e6f0; --bg:#f6f5fb; --card:#ffffff; --good:#0f6e56; --good-bg:#e1f5ee;
+    --warn:#854f0b; --warn-bg:#faeeda; --bad:#a32d2d; --bad-bg:#fcebeb; --info:#0c447c; --info-bg:#e6f1fb;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    color:var(--ink);background:var(--bg);line-height:1.6;font-size:16px}
+  .wrap{max-width:860px;margin:0 auto;padding:32px 22px 64px}
+  header.hero{background:linear-gradient(180deg,#efeeff,#f6f5fb);border:1px solid var(--line);
+    border-radius:18px;padding:28px 30px;margin-bottom:26px}
+  .eyebrow{color:var(--purple-dark);font-weight:600;font-size:13px;letter-spacing:.06em;text-transform:uppercase}
+  h1{font-size:30px;margin:6px 0 8px}
+  h2{font-size:21px;margin:34px 0 12px;display:flex;align-items:center;gap:10px}
+  h3{font-size:16px;margin:0 0 6px}
+  p{margin:0 0 12px}
+  .lede{color:var(--muted);font-size:17px;max-width:62ch}
+  .stepnum{display:inline-flex;align-items:center;justify-content:center;width:30px;height:30px;border-radius:50%;
+    background:var(--purple);color:#fff;font-weight:700;font-size:15px;flex:none}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:18px 20px;margin:12px 0}
+  .mock{background:#fbfbff;border:1px solid var(--line);border-radius:12px;padding:14px 16px;margin:14px 0}
+  .mock-cap{font-size:12px;color:var(--muted);margin-bottom:10px;text-transform:uppercase;letter-spacing:.05em}
+  .row{display:flex;align-items:center;gap:10px}
+  .between{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap}
+  .btn{display:inline-block;background:var(--purple);color:#fff;border-radius:9px;padding:7px 14px;font-size:13px;font-weight:600}
+  .btn.ghost{background:#fff;color:var(--purple-dark);border:1px solid var(--purple)}
+  .btn.soft{background:#efeeff;color:var(--purple-dark)}
+  .field{background:#fff;border:1px solid var(--line);border-radius:8px;padding:8px 10px;font-size:13px;color:#333}
+  .label{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.04em;margin-bottom:3px}
+  .grid3{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+  .pill{display:inline-block;font-size:11px;font-weight:600;padding:2px 9px;border-radius:7px}
+  .pill.draft{background:var(--warn-bg);color:var(--warn)}
+  .pill.issued{background:var(--info-bg);color:var(--info)}
+  .pill.viol{background:var(--bad-bg);color:var(--bad)}
+  .pill.conf{background:var(--good-bg);color:var(--good)}
+  table.ev{width:100%;border-collapse:collapse;font-size:13px}
+  table.ev th{text-align:left;color:var(--muted);font-weight:500;font-size:11px;padding:5px 6px;border-bottom:1px solid var(--line)}
+  table.ev td{padding:7px 6px;border-bottom:1px solid #f0eff6}
+  .note{background:#fff8ec;border:1px solid #f3e2bf;border-radius:10px;padding:12px 15px;margin:14px 0;font-size:14px}
+  .note b{color:var(--warn)}
+  .tip{background:var(--good-bg);border:1px solid #bfe6d6;border-radius:10px;padding:12px 15px;margin:14px 0;font-size:14px}
+  .checkline{display:flex;gap:8px;align-items:flex-start;font-size:13px;margin:5px 0}
+  .box{width:15px;height:15px;border:1px solid var(--purple);border-radius:4px;flex:none;margin-top:2px}
+  .box.on{background:var(--purple)}
+  .sig{height:54px;border:1px dashed #b9b6d6;border-radius:8px;display:flex;align-items:center;justify-content:center;color:#a7a3c4;font-size:12px}
+  .photos{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}
+  .ph{aspect-ratio:1;background:#efeeff;border:1px solid var(--line);border-radius:8px;display:flex;align-items:center;justify-content:center;color:#8e88c0;font-size:11px}
+  .navchip{background:#fff;border:1px solid var(--line);border-radius:9px;padding:7px 12px;font-size:13px;color:#444}
+  .navchip.here{background:var(--purple);color:#fff;border-color:var(--purple);font-weight:600}
+  .kicker{color:var(--purple-dark);font-weight:600;font-size:13px}
+  ol.clean{padding-left:18px} ol.clean li{margin:6px 0}
+  hr{border:none;border-top:1px solid var(--line);margin:34px 0}
+  .ref h3{margin-top:14px}
+  footer{color:var(--muted);font-size:13px;margin-top:30px;border-top:1px solid var(--line);padding-top:16px}
+  @media print{body{background:#fff}.wrap{max-width:none}.card,.mock,header.hero{break-inside:avoid}}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header class="hero">
+    <div class="eyebrow">Ride Fleet · Agent Playbook</div>
+    <h1>How to file an Incident / Damage Report</h1>
+    <p class="lede">When a vehicle comes back with damage, smoke, excessive dirt, or a policy violation, you build a
+      dispute-ready report — with photos, signed certification, and the agreement clauses that justify the charge.
+      This guide walks you through it, screen by screen.</p>
+  </header>
+
+  <div class="card">
+    <h3>When do I file one?</h3>
+    <p style="margin:0">File a report whenever you'd charge the customer for something beyond normal use, or want a paper
+      trail in case they dispute it: <b>smoking</b>, <b>burns/stains/tears</b>, <b>body damage</b>, <b>missing fuel</b>,
+      <b>excessive cleaning</b>, <b>tolls</b>, or a <b>late return</b>. If in doubt, file it — a DRAFT costs nothing and
+      you can delete it.</p>
+  </div>
+
+  <div class="note">
+    <b>One-time setup (manager):</b> before agents cite clauses, a manager seeds the clause library once at
+    <b>Settings → Agreement Clauses → “Seed default clauses,”</b> then reviews the wording. You only do this once per company.
+  </div>
+
+  <hr>
+
+  <!-- STEP 1 -->
+  <h2><span class="stepnum">1</span> Open the reservation and find “Incident reports”</h2>
+  <p>Go to <span class="kicker">Reservations</span>, open the rental in question, and scroll to the
+    <b>Incident reports</b> panel (blue stripe, near the bottom of the page).</p>
+  <div class="mock">
+    <div class="mock-cap">Reservation page → Incident reports panel</div>
+    <div class="between">
+      <div class="row"><b>Incident reports</b> <span class="pill soft" style="background:#efeeff;color:#4b3fc4">0</span></div>
+      <span class="btn">+ New incident report</span>
+    </div>
+    <p style="color:var(--muted);font-size:13px;margin:10px 0 0">No incident reports for this reservation yet.</p>
+  </div>
+  <div class="tip">Already have a report here? Click <b>Edit</b> (if it still says DRAFT) or <b>Open</b> (if it’s ISSUED) instead of making a new one.</div>
+
+  <!-- STEP 2 -->
+  <h2><span class="stepnum">2</span> Start the report and describe what happened</h2>
+  <p>Click <b>+ New incident report</b>. A DRAFT opens with a report number like <b>INC-20260602-KST788</b>. Fill in:</p>
+  <div class="mock">
+    <div class="mock-cap">New DRAFT — top fields</div>
+    <div class="grid3" style="margin-bottom:10px">
+      <div><div class="label">Type</div><div class="field">Smoking ▾</div></div>
+      <div><div class="label">Severity</div><div class="field">Moderate ▾</div></div>
+      <div><div class="label">Deposit applied</div><div class="field">300.00</div></div>
+    </div>
+    <div class="label">Title / banner</div>
+    <div class="field" style="margin-bottom:10px">Smoking in non-smoking vehicle — odor + ash residue</div>
+    <div class="label">Evidence narrative</div>
+    <div class="field">Strong tobacco odor on return. Ash in the center console; small burn on the driver seat.</div>
+  </div>
+  <ol class="clean">
+    <li><b>Type</b> and <b>Severity</b> — pick the closest match.</li>
+    <li><b>Title</b> — one plain sentence; this is the headline on the report.</li>
+    <li><b>Narrative</b> — what you saw, in your own words. Be factual.</li>
+  </ol>
+  <div class="tip">Your typing saves automatically when you click out of a box. No “Save” button needed for these fields.</div>
+
+  <!-- STEP 3 -->
+  <h2><span class="stepnum">3</span> Add the evidence (photos)</h2>
+  <p>This is the most important part. Two ways to add photos:</p>
+  <div class="grid2">
+    <div class="card" style="margin:0">
+      <h3><span class="btn ghost">Add photo</span></h3>
+      <p style="margin:0;font-size:14px">Upload a new photo you just took on your phone or computer.</p>
+    </div>
+    <div class="card" style="margin:0">
+      <h3><span class="btn ghost">Pull check-in / check-out</span></h3>
+      <p style="margin:0;font-size:14px">Auto-import the photos already taken during the vehicle’s inspection — the
+        check-out set proves it left clean, the check-in set shows the damage.</p>
+    </div>
+  </div>
+  <div class="mock">
+    <div class="mock-cap">Evidence &amp; violation documentation</div>
+    <table class="ev">
+      <thead><tr><th>#</th><th>Location</th><th>Description</th><th>Status</th><th>Source</th></tr></thead>
+      <tbody>
+        <tr><td>1</td><td>Cup holders — center console</td><td>Ash + burnt residue</td><td><span class="pill viol">VIOLATION</span></td><td>new</td></tr>
+        <tr><td>2</td><td>Driver seat — fabric</td><td>Burn mark, ~8mm</td><td><span class="pill viol">VIOLATION</span></td><td>new</td></tr>
+        <tr><td>3</td><td>Interior — overall</td><td>Clean at check-out (baseline)</td><td><span class="pill conf">CONFIRMED</span></td><td>checkout</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p style="font-size:14px;color:var(--muted)"><b>VIOLATION</b> = proof of the problem. <b>CONFIRMED</b> = proof the car was fine before
+    (pulled from check-out). Having both is what wins a dispute.</p>
+  <div class="tip">Best practice: <b>Pull check-out</b> first (shows the clean baseline), then <b>Add photo</b> for each
+    new problem. Aim for clear, close-up shots.</div>
+
+  <!-- STEP 4 -->
+  <h2><span class="stepnum">4</span> Cite the agreement clauses</h2>
+  <p>Tick the clauses from your rental agreement that the customer broke. These print on the report and justify the charge.</p>
+  <div class="mock">
+    <div class="mock-cap">Cited clauses</div>
+    <div class="checkline"><span class="box on"></span><span><b>§6 Smoking fee</b> — $500 + tax<br><span style="color:var(--muted)">Smoking in a non-smoking unit incurs a cleaning/deodorize fee…</span></span></div>
+    <div class="checkline"><span class="box on"></span><span><b>§4 Interior damage</b> — repair cost<br><span style="color:var(--muted)">Renter is liable for burns, tears, and stains beyond normal wear…</span></span></div>
+    <div class="checkline"><span class="box"></span><span><b>§7 Cleaning fee</b> — $75<br><span style="color:var(--muted)">Excessive dirt requiring detailing…</span></span></div>
+  </div>
+  <div class="note">No clauses showing? The manager hasn’t seeded the library yet — see the one-time setup note above.</div>
+
+  <!-- STEP 5 -->
+  <h2><span class="stepnum">5</span> Certify and issue</h2>
+  <p>When the report is complete, certify it. <b>Issuing locks the report</b> so it can’t be quietly changed — that’s what
+    makes it trustworthy in a dispute.</p>
+  <div class="mock">
+    <div class="mock-cap">Declaration &amp; certification · 🔒 locks on issue</div>
+    <div class="grid3" style="margin-bottom:10px">
+      <div><div class="label">Certified by</div><div class="field">Erick Bou</div></div>
+      <div><div class="label">Title</div><div class="field">Branch Manager, IRC</div></div>
+      <div><div class="label">Signature</div><div class="sig">sign here</div></div>
+    </div>
+    <div class="between"><span></span><span class="btn">Certify &amp; issue</span></div>
+  </div>
+  <ol class="clean">
+    <li>Type the certifier’s <b>name</b> and <b>title</b>.</li>
+    <li><b>Sign</b> in the box (mouse, trackpad, or finger on a tablet).</li>
+    <li>Click <b>Certify &amp; issue</b> and confirm. The status flips to <span class="pill issued">🔒 ISSUED</span>.</li>
+  </ol>
+  <div class="note"><b>Double-check before you issue.</b> Once ISSUED, fields are locked. To change anything you must
+    <b>Revise</b> (Step 7), which creates a fresh copy.</div>
+
+  <!-- STEP 6 -->
+  <h2><span class="stepnum">6</span> Preview &amp; share the PDF</h2>
+  <p>Click <b>Preview / PDF</b> any time to open the finished report in a new tab — then print it or save it as a PDF to
+    email the customer or attach to a dispute.</p>
+  <div class="mock">
+    <div class="mock-cap">The issued report (what the customer sees)</div>
+    <div style="text-align:center;border-bottom:2px solid var(--purple);padding-bottom:8px;margin-bottom:10px">
+      <div style="font-weight:700;color:var(--info);font-size:17px">International Rental Corp</div>
+      <div style="font-size:12px;color:var(--muted)">Vehicle Incident Report · INC-20260602-KST788</div>
+    </div>
+    <div class="photos">
+      <div class="ph">Fig 1</div><div class="ph">Fig 2</div><div class="ph">checkout</div><div class="ph">checkin</div>
+    </div>
+    <p style="text-align:right;margin:10px 0 0;font-size:13px;color:var(--muted)">Balance due: <b style="color:var(--ink)">$437.80</b> · signed &amp; certified</p>
+  </div>
+
+  <!-- STEP 7 -->
+  <h2><span class="stepnum">7</span> Need to change an issued report? Revise it</h2>
+  <p>You can’t edit a locked report — instead click <b>Revise</b>. That makes a new DRAFT copy (carrying over everything)
+    that you edit and re-issue. The original stays on file, so the history is intact.</p>
+  <div class="mock">
+    <div class="between">
+      <div class="row"><code style="font-size:13px">INC-20260602-KST788</code> <span class="pill issued">🔒 ISSUED</span></div>
+      <div class="row"><span class="btn ghost">Preview / PDF</span> <span class="btn soft">Revise</span></div>
+    </div>
+  </div>
+
+  <hr>
+
+  <!-- REFERENCE -->
+  <h2>Quick reference</h2>
+  <div class="ref card">
+    <h3>Status badges</h3>
+    <p style="margin:0 0 10px"><span class="pill draft">DRAFT</span> still editable · <span class="pill issued">🔒 ISSUED</span> locked &amp; final</p>
+    <h3>Evidence status</h3>
+    <p style="margin:0 0 10px"><span class="pill viol">VIOLATION</span> the problem · <span class="pill conf">CONFIRMED</span> clean baseline (proof it was fine before)</p>
+    <h3>Incident types</h3>
+    <p style="margin:0">Damage · Smoking · Cleaning · Policy violation · Toll · Late return · Other</p>
+  </div>
+
+  <div class="ref card">
+    <h3>Common questions</h3>
+    <p><b>Pull brought in no photos?</b> The inspection had no photos saved, or they haven’t synced — add them manually with
+      <b>Add photo</b>, or tell IT.</p>
+    <p><b>Wrong vehicle on the report?</b> The report follows the reservation’s vehicle. Fix the vehicle on the reservation
+      first (or ask a manager to correct it), then start the report.</p>
+    <p><b>Made a report by mistake?</b> If it’s still a DRAFT, just remove it. If it’s ISSUED, leave it — issued reports are
+      part of the record; use Revise if the details were wrong.</p>
+    <p style="margin:0"><b>Customer disputes the charge later?</b> Open the reservation → Incident reports → the issued
+      report → <b>Preview / PDF</b>, and send that. It already has the photos, clauses, and signature a bank needs.</p>
+  </div>
+
+  <footer>
+    Ride Fleet — Incident Reporting agent playbook · prepared 2026-06-02. Questions about a specific case go to your branch
+    manager; technical problems (photos not loading, errors) go to IT.
+  </footer>
+
+</div>
+</body>
+</html>

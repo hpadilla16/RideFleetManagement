@@ -1,6 +1,7 @@
 import crypto from 'node:crypto';
 import { prisma } from '../../lib/prisma.js';
 import { parseLocationConfig } from '../../lib/location-config.js';
+import { normalizeDob } from '../../lib/dob.js';
 
 function norm(v) {
   return String(v ?? '').trim();
@@ -150,7 +151,7 @@ async function buildCustomerImportRow(row, index, scope = {}, cache = {}) {
   const phone = norm(row.phone);
   const licenseNumber = norm(row.licenseNumber) || null;
   const licenseState = norm(row.licenseState) || null;
-  const dateOfBirth = row.dateOfBirth ? parseDateInput(row.dateOfBirth) : null;
+  const dateOfBirth = row.dateOfBirth ? normalizeDob(row.dateOfBirth) : null;
   const creditBalance = parseNumberInput(row.creditBalance);
 
   const errors = [];
@@ -307,7 +308,7 @@ export const customersService = {
         phone: data.phone,
         licenseNumber: data.licenseNumber ?? null,
         licenseState: data.licenseState ?? null,
-        dateOfBirth: data.dateOfBirth ? new Date(data.dateOfBirth) : null,
+        dateOfBirth: data.dateOfBirth ? normalizeDob(data.dateOfBirth) : null,
         insurancePolicyNumber: data.insurancePolicyNumber ?? null,
         insuranceDocumentUrl: data.insuranceDocumentUrl ?? null,
         address1: data.address1 ?? null,
@@ -401,7 +402,7 @@ export const customersService = {
     const data = { ...(patch || {}) };
     delete data.tenantId;
     if (Object.prototype.hasOwnProperty.call(data, 'dateOfBirth')) {
-      data.dateOfBirth = data.dateOfBirth ? new Date(data.dateOfBirth) : null;
+      data.dateOfBirth = data.dateOfBirth ? normalizeDob(data.dateOfBirth) : null;
     }
     if (Object.prototype.hasOwnProperty.call(data, 'creditBalance')) {
       data.creditBalance = Number(data.creditBalance || 0);

@@ -1,6 +1,7 @@
 import { prisma } from '../../lib/prisma.js';
 import { tollsService } from '../tolls/tolls.service.js';
 import { filterMandatoryFeesForChannel } from '../booking-engine/fee-channel-filter.js';
+import { syncVehicleStatusForReservation } from '../vehicles/vehicle-status-sync.js';
 import logger from '../../lib/logger.js';
 
 function toNumber(value, fallback = 0) {
@@ -515,6 +516,43 @@ export const reservationPricingService = {
           });
         }
       }
+    }
+
+    // If this payment settles a CHECKED_IN_UNPAID reservation (balance now ~0),
+    // advance it to CHECKED_IN — mirrors what the autocharge worker does so a
+    // manually-collected balance (e.g. tenant autocharge mode = MANUAL) doesn't
+    // leave the reservation perpetually "unpaid". Trusts the post-payment
+    // agreement balance, so AUTH_HOLD/deposit math is handled upstream.
+    try {
+      if (reservation.rentalAgreement?.id && String(reservation.status || '').toUpperCase() === 'CHECKED_IN_UNPAID') {
+        const settled = await prisma.rentalAgreement.findUnique({
+          where: { id: reservation.rentalAgreement.id },
+          select: { balance: true }
+        });
+        if (toNumber(settled?.balance) <= 0.01) {
+          await prisma.reservation.update({
+            where: { id: reservationId },
+            data: { status: 'CHECKED_IN', autochargeAt: null }
+          });
+          await syncVehicleStatusForReservation(prisma, { reservationId, toStatus: 'CHECKED_IN' });
+          await prisma.auditLog.create({
+            data: {
+              tenantId: reservation.tenantId || null,
+              reservationId,
+              actorUserId: actorUserId || null,
+              action: 'STATUS_CHANGE',
+              fromStatus: 'CHECKED_IN_UNPAID',
+              toStatus: 'CHECKED_IN',
+              reason: 'Balance settled via manual payment',
+              metadata: JSON.stringify({ amount, method: paymentData.method })
+            }
+          }).catch(() => {});
+        }
+      }
+    } catch (settleErr) {
+      logger.warn('reservation-pricing: settle-on-payment status advance failed', {
+        reservationId, error: String(settleErr?.message || settleErr)
+      });
     }
 
     try {

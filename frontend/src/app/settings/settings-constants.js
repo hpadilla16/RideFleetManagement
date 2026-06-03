@@ -38,6 +38,10 @@ export const DEFAULT_EMAIL_TEMPLATES = {
 export const DEFAULT_PAYMENT_GATEWAY_CONFIG = {
   gateway: 'authorizenet',
   label: 'Primary payment gateway',
+  autocharge: {
+    mode: 'AUTO',
+    delayHours: 24
+  },
   authorizenet: {
     enabled: true,
     environment: 'sandbox',

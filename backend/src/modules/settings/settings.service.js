@@ -447,6 +447,14 @@ function defaultPaymentGatewayConfig() {
   return {
     gateway: String(process.env.PAYMENT_GATEWAY || 'authorizenet').toLowerCase(),
     label: 'Default Payment Gateway',
+    // Post-check-in autocharge of any unpaid balance (gas/cleaning/late fees).
+    // mode AUTO → charge automatically `delayHours` after check-in (drop-and-go).
+    // mode MANUAL → never auto-charge; balance is collected by staff in the
+    // reservation's View Payments tab.
+    autocharge: {
+      mode: 'AUTO',        // 'AUTO' | 'MANUAL'
+      delayHours: 24       // hours after check-in to charge (AUTO only)
+    },
     authorizenet: {
       enabled: !!(process.env.AUTHNET_API_LOGIN_ID && process.env.AUTHNET_TRANSACTION_KEY),
       environment: String(process.env.AUTHNET_ENV || 'sandbox').toLowerCase(),
@@ -744,6 +752,10 @@ export const settingsService = {
         payarc: {
           ...defaults.payarc,
           ...(parsed?.payarc || {})
+        },
+        autocharge: {
+          ...defaults.autocharge,
+          ...(parsed?.autocharge || {})
         }
       };
     } catch {
@@ -758,6 +770,16 @@ export const settingsService = {
       ...(payload || {}),
       gateway: String(payload?.gateway || defaults.gateway).trim().toLowerCase(),
       label: String(payload?.label || defaults.label).trim(),
+      autocharge: {
+        mode: String(payload?.autocharge?.mode || defaults.autocharge.mode).trim().toUpperCase() === 'MANUAL' ? 'MANUAL' : 'AUTO',
+        delayHours: (() => {
+          const raw = payload?.autocharge?.delayHours;
+          if (raw === '' || raw == null) return defaults.autocharge.delayHours; // cleared → default, not 0
+          const h = Number(raw);
+          if (!Number.isFinite(h) || h < 0) return defaults.autocharge.delayHours;
+          return Math.min(Math.round(h), 720); // clamp 0–720h (30 days)
+        })()
+      },
       authorizenet: {
         ...defaults.authorizenet,
         ...(payload?.authorizenet || {}),

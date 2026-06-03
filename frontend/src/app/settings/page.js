@@ -209,6 +209,10 @@ function SettingsInner({ token, me, logout }) {
         spin: {
           ...DEFAULT_PAYMENT_GATEWAY_CONFIG.spin,
           ...(value?.spin || {})
+        },
+        autocharge: {
+          ...DEFAULT_PAYMENT_GATEWAY_CONFIG.autocharge,
+          ...(value?.autocharge || {})
         }
       });
     }
@@ -2232,6 +2236,7 @@ function SettingsInner({ token, me, logout }) {
 
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
           <button onClick={() => setTab('agreement')}>Agreement</button>
+          <button onClick={() => { window.location.href = '/settings/agreement-clauses'; }}>Agreement Clauses</button>
           <button onClick={() => setTab('locations')}>Locations</button>
           <button onClick={() => setTab('fees')}>Fees</button>
           <button onClick={() => setTab('feeRates')}>Inspection Fees</button>
@@ -2355,6 +2360,40 @@ function SettingsInner({ token, me, logout }) {
                 <input value={paymentGatewayConfig.label || ''} onChange={(e) => setPaymentGatewayConfig({ ...paymentGatewayConfig, label: e.target.value })} placeholder="Primary payment gateway" />
               </div>
             </div>
+
+            <section className="glass card section-card">
+              <h3 style={{ margin: '0 0 4px' }}>Post-check-in autocharge</h3>
+              <div className="surface-note">
+                When a vehicle is returned with an unpaid balance (gas, cleaning, late, etc.), choose whether the
+                balance is charged automatically in the background or left for staff to collect in the reservation’s
+                View Payments tab. Use Automatic for drop-and-go returns.
+              </div>
+              <div className="form-grid-2">
+                <div className="stack">
+                  <label className="label">Autocharge mode</label>
+                  <select
+                    value={paymentGatewayConfig.autocharge?.mode || 'AUTO'}
+                    onChange={(e) => setPaymentGatewayConfig({ ...paymentGatewayConfig, autocharge: { ...(paymentGatewayConfig.autocharge || {}), mode: e.target.value } })}
+                  >
+                    <option value="AUTO">Automatic — charge in the background</option>
+                    <option value="MANUAL">Manual — collect in View Payments</option>
+                  </select>
+                </div>
+                {String(paymentGatewayConfig.autocharge?.mode || 'AUTO').toUpperCase() !== 'MANUAL' && (
+                  <div className="stack">
+                    <label className="label">Charge how long after check-in?</label>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <input
+                        type="number" min="0" max="720" step="1" style={{ maxWidth: 120 }}
+                        value={paymentGatewayConfig.autocharge?.delayHours ?? 24}
+                        onChange={(e) => setPaymentGatewayConfig({ ...paymentGatewayConfig, autocharge: { ...(paymentGatewayConfig.autocharge || {}), delayHours: e.target.value === '' ? '' : Number(e.target.value) } })}
+                      />
+                      <span className="label" style={{ margin: 0 }}>hours after check-in</span>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </section>
 
             <section className="glass card section-card">
               <div className="row-between">
