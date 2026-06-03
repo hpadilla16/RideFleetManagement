@@ -460,6 +460,7 @@ async function loadSessionAndAgreement(sessionId, allowedSteps) {
       agreement: {
         select: {
           id: true, agreementNumber: true, paidAmount: true, securityDepositAmount: true,
+          total: true, balance: true,
           cardOnFileToken: true, cardOnFileBrand: true, cardOnFileLast4: true,
           depositHoldId: true, depositHoldAmount: true,
           charges: {
@@ -533,15 +534,36 @@ async function runSale({ sessionId, amount, actorUserId }) {
   const tenantConfig = await loadTenantSpinConfig(session.reservation.tenantId).catch(() => ({}));
   const refId = `${session.reservation.reservationNumber}-SALE-${Date.now().toString(36)}`;
 
+  // The SALE is the rental owed, NOT the security deposit (which is a separate
+  // pre-auth hold). The wizard's `amount` is advisory and a frontend that can't
+  // see the deposit charge sends the full balance — so resolve the true sale
+  // here from the agreement (source of truth): sale = balance − security deposit.
+  const depositCol = Number(session.agreement.securityDepositAmount) || 0;
+  const depositChargesSum = (session.agreement.charges || [])
+    .reduce((sum, c) => sum + Number(c.total || 0), 0);
+  const depositToExclude = depositCol > 0 ? depositCol : depositChargesSum;
+  const agreementBalance = Number(
+    session.agreement.balance != null ? session.agreement.balance : session.agreement.total,
+  );
+  const resolvedSale = Number.isFinite(agreementBalance)
+    ? Number(Math.max(0, agreementBalance - depositToExclude).toFixed(2))
+    : NaN;
+  // Use the agreement-resolved sale; only fall back to the wizard hint if the
+  // agreement has no usable balance (shouldn't happen for a real checkout).
+  const saleAmount = resolvedSale > 0 ? resolvedSale : requestedAmount;
+  logger.info('[spin-charge] resolved sale amount', {
+    sessionId, requestedAmount, agreementBalance, depositToExclude, saleAmount,
+  });
+
   const events = [];
   const log = (kind, payload) => events.push({ kind, ...payload, at: new Date().toISOString() });
 
   // ── 1. SALE on terminal (fresh tap) ────────────────────────────────
   let saleResponse;
   try {
-    log('SPIN_SALE_STARTED', { amount: requestedAmount, referenceId: refId });
+    log('SPIN_SALE_STARTED', { amount: saleAmount, referenceId: refId });
     saleResponse = await spinClient.sale({
-      amount: requestedAmount,
+      amount: saleAmount,
       referenceId: refId,
       invoiceNumber: session.agreement.agreementNumber,
     }, tenantConfig);
@@ -577,7 +599,7 @@ async function runSale({ sessionId, amount, actorUserId }) {
     data: {
       rentalAgreementId: session.agreement.id,
       method: 'CARD',
-      amount: requestedAmount,
+      amount: saleAmount,
       reference: saleReference,
       status: 'PAID',
       notes: saleNotes,
@@ -588,11 +610,11 @@ async function runSale({ sessionId, amount, actorUserId }) {
     reservationId: session.reservation.id,
     agreementPaymentId: payment.id,
     method: 'CARD',
-    amount: requestedAmount,
+    amount: saleAmount,
     reference: saleReference,
     notes: saleNotes,
   });
-  log('SALE_PAYMENT_RECORDED', { amount: requestedAmount, paymentId: payment.id });
+  log('SALE_PAYMENT_RECORDED', { amount: saleAmount, paymentId: payment.id });
 
   // ── 4. Append events, do NOT stamp paymentCompletedAt yet ──────────
   await persistEvents(sessionId, [...events, {

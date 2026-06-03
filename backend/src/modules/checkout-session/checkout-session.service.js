@@ -1,6 +1,7 @@
 import crypto from 'node:crypto';
 import { prisma } from '../../lib/prisma.js';
 import logger from '../../lib/logger.js';
+import { syncVehicleStatusForReservation } from '../vehicles/vehicle-status-sync.js';
 import {
   CHECKOUT_STEPS,
   canTransition,
@@ -300,6 +301,45 @@ async function transition({ id, toStep, actorUserId, metadata }) {
           sessionId: id, agreementId: updated.agreementId, error: err?.message || String(err),
         });
       });
+  }
+
+  // On finalize, advance the reservation to CHECKED_OUT, finalize the agreement,
+  // and sync the vehicle to ON_RENT. The redesign reached CLOSED but never did
+  // this, so reservations stayed CONFIRMED and cars weren't marked rented.
+  if (toStep === 'CLOSED' && updated.reservationId) {
+    try {
+      const resv = await prisma.reservation.findUnique({
+        where: { id: updated.reservationId },
+        select: { id: true, status: true, vehicleId: true, tenantId: true },
+      });
+      // Don't downgrade an already checked-in/out reservation.
+      if (resv && !['CHECKED_OUT', 'CHECKED_IN', 'CHECKED_IN_UNPAID'].includes(String(resv.status))) {
+        await prisma.reservation.update({ where: { id: resv.id }, data: { status: 'CHECKED_OUT' } });
+        if (updated.agreementId) {
+          await prisma.rentalAgreement.update({
+            where: { id: updated.agreementId },
+            data: { status: 'FINALIZED', finalizedAt: new Date() },
+          }).catch(() => {});
+        }
+        await syncVehicleStatusForReservation(prisma, {
+          reservationId: resv.id, vehicleId: resv.vehicleId, toStatus: 'CHECKED_OUT',
+        });
+        await prisma.auditLog.create({
+          data: {
+            tenantId: resv.tenantId, reservationId: resv.id, actorUserId: actorUserId || null,
+            action: 'STATUS_CHANGE', fromStatus: resv.status, toStatus: 'CHECKED_OUT',
+            reason: 'Checkout wizard finalized',
+          },
+        }).catch(() => {});
+        logger.info('[checkout-session] reservation advanced to CHECKED_OUT on finalize', {
+          sessionId: id, reservationId: resv.id,
+        });
+      }
+    } catch (err) {
+      logger.warn('[checkout-session] failed to advance reservation on finalize', {
+        sessionId: id, reservationId: updated.reservationId, error: err?.message || String(err),
+      });
+    }
   }
 
   return updated;
