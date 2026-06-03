@@ -90,6 +90,55 @@ async function mirrorToReservationPayment({
   }
 }
 
+/**
+ * Recompute agreement.paidAmount + agreement.balance from the payment ledger.
+ *
+ * 2026-06-03 — BUG: runSale / runChargeSequence / recordManualPayment created
+ * RentalAgreementPayment rows but never updated the agreement ledger, so the
+ * agreement page kept showing the pre-payment balance forever (e.g. balance
+ * $1.12 after the $1.12 sale was recorded). The void-rollback comment even
+ * referenced "the agreement's paidAmount recompute" — which didn't exist.
+ *
+ *   paidAmount = Σ RentalAgreementPayment where status=PAID   (VOID drops out)
+ *   balance    = max(0, Σ selected non-deposit charges − paidAmount)
+ *
+ * balance deliberately EXCLUDES SECURITY_DEPOSIT charges: the deposit is a
+ * hold, not money owed — this is the same formula the checkout wizard and
+ * runSale's saleAmount already use, which historically made stored `balance`
+ * inconsistent with both. Summing the ledger (instead of incrementing) makes
+ * this idempotent and self-healing after voids/retries.
+ */
+async function recomputeAgreementPaid(agreementId) {
+  if (!agreementId) return null;
+  try {
+    const [agg, charges] = await Promise.all([
+      prisma.rentalAgreementPayment.aggregate({
+        where: { rentalAgreementId: agreementId, status: 'PAID' },
+        _sum: { amount: true },
+      }),
+      prisma.rentalAgreementCharge.findMany({
+        where: { rentalAgreementId: agreementId, selected: true },
+        select: { source: true, total: true },
+      }),
+    ]);
+    const paidAmount = Number(Number(agg?._sum?.amount || 0).toFixed(2));
+    const owedSum = charges
+      .filter((c) => String(c.source || '').toUpperCase() !== 'SECURITY_DEPOSIT')
+      .reduce((sum, c) => sum + Number(c.total || 0), 0);
+    const balance = Number(Math.max(0, owedSum - paidAmount).toFixed(2));
+    await prisma.rentalAgreement.update({
+      where: { id: agreementId },
+      data: { paidAmount, balance },
+    });
+    return { paidAmount, balance };
+  } catch (err) {
+    logger.warn('[spin-charge] agreement paid/balance recompute failed', {
+      agreementId, err: String(err?.message || err),
+    });
+    return null;
+  }
+}
+
 function loadTenantSpinConfig(tenantId) {
   // We don't currently expose tenant.spin* fields via a service helper
   // so we fetch directly. Only the fields the Spin client cares about.
@@ -300,6 +349,7 @@ async function runChargeSequence({
       reference: saleReference,
       notes: saleNotes,
     });
+    await recomputeAgreementPaid(session.agreement.id);
     log('SALE_PAYMENT_RECORDED', { amount: requestedAmount });
   }
 
@@ -341,6 +391,7 @@ async function runChargeSequence({
             where: { rentalAgreementId: session.agreement.id, reference: saleResponse?.AuthCode || refId },
             data: { status: 'VOID' },
           });
+          await recomputeAgreementPaid(session.agreement.id);
         } catch (voidErr) {
           log('SPIN_VOID_FAILED', { message: voidErr.message });
           logger.error('[spin-charge] CRITICAL: void failed after preauth failure', {
@@ -619,6 +670,7 @@ async function runSale({ sessionId, amount, actorUserId }) {
     reference: saleReference,
     notes: saleNotes,
   });
+  await recomputeAgreementPaid(session.agreement.id);
   log('SALE_PAYMENT_RECORDED', { amount: saleAmount, paymentId: payment.id });
 
   // ── 4. Append events, do NOT stamp paymentCompletedAt yet ──────────
@@ -918,6 +970,7 @@ async function recordManualSale({
     reference: refId,
     notes: manualSaleNotes,
   });
+  await recomputeAgreementPaid(session.agreement.id);
 
   await persistEvents(sessionId, [
     {
