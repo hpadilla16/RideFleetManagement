@@ -222,13 +222,9 @@ const reservationListSelect = {
       // source of truth for the actual hold amount.
       securityDepositAmount: true,
       declinedInsurance: true,
-      // Return ALL selected charges with their source so the wizard can
-      // compute the rental sale (non-deposit charges) and the deposit
-      // (SECURITY_DEPOSIT charges) independently — `balance` is unreliable
-      // (sometimes includes the deposit, sometimes not).
       charges: {
-        where: { selected: true },
-        select: { id: true, total: true, name: true, source: true }
+        where: { source: 'SECURITY_DEPOSIT', selected: true },
+        select: { id: true, total: true, name: true }
       }
     }
   }
@@ -1417,16 +1413,13 @@ export const reservationsService = {
             locked: true,
             createdAt: true,
             updatedAt: true,
-            // 2026-05-28 — Restrict charges in the GET-by-id response to
-            // SECURITY_DEPOSIT-source rows. The wizard's Step 3 reads this
-            // array to compute the deposit hold amount and subtract it
-            // from the balance for the sale; if the array includes all
-            // charges (Daily, Tax, Security Deposit), the wizard
-            // double-counts and shows $0 / pre-paid mode incorrectly.
-            // Other consumers of this endpoint should query a dedicated
-            // /charges or /agreement endpoint if they need full breakdown.
+            // 2026-06-03 — Return ALL selected charges (with `source`). The
+            // wizard's Step 3 splits them: rental SALE = sum(non-deposit
+            // charges) − paid, deposit hold = sum(SECURITY_DEPOSIT charges).
+            // (Previously filtered to SECURITY_DEPOSIT only, which made the
+            // wizard see $0 rental → "pre-paid".)
             charges: {
-              where: { source: 'SECURITY_DEPOSIT', selected: true },
+              where: { selected: true },
               orderBy: [{ sortOrder: 'asc' }, { createdAt: 'asc' }]
             },
             payments: { orderBy: { paidAt: 'desc' } }
