@@ -115,9 +115,21 @@ async function fetchWithTimeout(url, init) {
 }
 
 async function callAuthApi(url, body) {
+  // iPOSpays' Authentication Token API reads apiKey / secretKey / scope /
+  // jwtTokenExpiryMinutes (and for refresh, refreshToken / token) from HTTP
+  // HEADERS — the docs label the request block a "Sample Header Request" /
+  // "Post head request". Sending them only in the JSON body returns
+  // AUTH_ERR_001 "API Key is required." We send them as headers (string
+  // values) and also keep them in the body, so it works whichever the
+  // endpoint version reads.
+  const headerFields = Object.fromEntries(
+    Object.entries(body)
+      .filter(([, v]) => v !== undefined && v !== null && v !== '')
+      .map(([k, v]) => [k, String(v)]),
+  );
   const res = await fetchWithTimeout(url, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', ...headerFields },
     body: JSON.stringify(body),
   });
   const text = await res.text();
