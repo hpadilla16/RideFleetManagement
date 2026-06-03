@@ -596,9 +596,12 @@ function Step2TermsPending({ session, reservation, token, onSigned }) {
 
 function Step3PaymentPending({ session, reservation, token, onPaid }) {
   // ── Source-of-truth math ─────────────────────────────────────────
-  // Subtotal = balance − SECURITY_DEPOSIT charges (Pillar 2 baked deposit
-  // into balance for the AUTH_HOLD flow; the wizard separates them so the
-  // sale is just the rental amount).
+  // Rental sale = balance, with the SECURITY_DEPOSIT charge excluded ONLY if
+  // it's actually baked into the balance. In practice agreement.balance is the
+  // rental owed and the deposit is tracked separately (a hold, not a charge),
+  // so subtracting it again under-displays the sale (1.12 − 1.00 = 0.12). Only
+  // subtract when the balance clearly includes the deposit (balance > deposit).
+  // This mirrors the server, which charges sum(non-deposit charges) − paid.
   const explicitBalance = Number(reservation.rentalAgreement?.balance);
   const securityDepositChargesSum = Array.isArray(reservation.rentalAgreement?.charges)
     ? reservation.rentalAgreement.charges.reduce((s, c) => s + Number(c.total || 0), 0)
@@ -606,7 +609,10 @@ function Step3PaymentPending({ session, reservation, token, onPaid }) {
   const rawSubtotal = Number.isFinite(explicitBalance) && explicitBalance >= 0
     ? explicitBalance
     : Number(reservation.estimatedTotal || 0);
-  const subtotal = Math.max(0, rawSubtotal - securityDepositChargesSum);
+  // agreement.balance is the rental owed; the security deposit is a separate
+  // hold (not folded into the balance), so the sale = the balance as-is. The
+  // server is authoritative and charges sum(non-deposit charges) − paid.
+  const subtotal = Number(Math.max(0, rawSubtotal).toFixed(2));
   const isPrepaid = subtotal === 0;
 
   // 2026-05-29 — Deposit hold amount comes from the reservation's
