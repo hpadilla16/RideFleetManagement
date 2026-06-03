@@ -8,6 +8,9 @@
 --   balance    = max(0, Σ selected non-deposit charges − paidAmount)
 -- ════════════════════════════════════════════════════════════════════
 
+-- NOTE 2026-06-03 (rev 2): AUTH_HOLD rows are EXCLUDED from paid — a deposit
+-- hold is not money received. (First revision counted them; re-run after.)
+
 -- ── 1 · PREVIEW: what would change ───────────────────────────────────
 SELECT
   ra."agreementNumber",
@@ -19,7 +22,8 @@ FROM "RentalAgreement" ra
 JOIN (
   SELECT ra2.id,
     COALESCE((SELECT SUM(p.amount) FROM "RentalAgreementPayment" p
-              WHERE p."rentalAgreementId" = ra2.id AND p.status = 'PAID'), 0) AS paid,
+              WHERE p."rentalAgreementId" = ra2.id AND p.status = 'PAID'
+                AND p.method <> 'AUTH_HOLD'), 0) AS paid,
     COALESCE((SELECT SUM(c.total) FROM "RentalAgreementCharge" c
               WHERE c."rentalAgreementId" = ra2.id AND c.selected = true
                 AND UPPER(COALESCE(c.source, '')) <> 'SECURITY_DEPOSIT'), 0) AS owed
@@ -37,7 +41,8 @@ SET "paidAmount" = sub.paid,
 FROM (
   SELECT ra2.id,
     COALESCE((SELECT SUM(p.amount) FROM "RentalAgreementPayment" p
-              WHERE p."rentalAgreementId" = ra2.id AND p.status = 'PAID'), 0) AS paid,
+              WHERE p."rentalAgreementId" = ra2.id AND p.status = 'PAID'
+                AND p.method <> 'AUTH_HOLD'), 0) AS paid,
     COALESCE((SELECT SUM(c.total) FROM "RentalAgreementCharge" c
               WHERE c."rentalAgreementId" = ra2.id AND c.selected = true
                 AND UPPER(COALESCE(c.source, '')) <> 'SECURITY_DEPOSIT'), 0) AS owed

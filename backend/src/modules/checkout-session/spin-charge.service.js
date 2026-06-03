@@ -113,7 +113,10 @@ async function recomputeAgreementPaid(agreementId) {
   try {
     const [agg, charges] = await Promise.all([
       prisma.rentalAgreementPayment.aggregate({
-        where: { rentalAgreementId: agreementId, status: 'PAID' },
+        // method AUTH_HOLD excluded: a deposit hold is not money received.
+        // (Manual deposit holds are recorded as AUTH_HOLD rows with status
+        // PAID — counting them made paidAmount read $2.12 on a $1.12 rental.)
+        where: { rentalAgreementId: agreementId, status: 'PAID', method: { not: 'AUTH_HOLD' } },
         _sum: { amount: true },
       }),
       prisma.rentalAgreementCharge.findMany({
