@@ -101,7 +101,29 @@ function getConfig(tenantConfig = {}) {
     // every sale + pre-auth. Qualifies for better interchange.
     autoRental: tenantConfig.iposTransactAutoRental !== false
       && String(process.env.IPOS_TRANSACT_AUTO_RENTAL || 'true').toLowerCase() !== 'false',
+    // 2026-06-03 — reconId is MANDATORY on Fiserv processors per the iPOSpays
+    // docs ("if you are fiserv processor need to pass this as mandatory").
+    // Hector's TPN is on Fiserv. Length is env-tunable because the docs
+    // contradict themselves: the field table says Fiserv North = 11 chars,
+    // the sample comment says 10. Default 11; set IPOS_TRANSACT_RECON_ID_LEN
+    // to adjust (0 disables sending reconId for non-Fiserv deployments).
+    reconIdLength: Number(
+      tenantConfig.iposTransactReconIdLength
+      ?? process.env.IPOS_TRANSACT_RECON_ID_LEN
+      ?? 11,
+    ),
   };
+}
+
+/**
+ * Merchant-generated reconciliation ID (exact length, uppercase alphanumeric).
+ * Links the gateway transaction to our settlement records on Fiserv/Elavon.
+ */
+function reconRef(len) {
+  if (!Number.isFinite(len) || len <= 0) return null;
+  const raw = (Date.now().toString(36) + Math.random().toString(36).slice(2))
+    .replace(/[^a-z0-9]/gi, '');
+  return raw.toUpperCase().slice(0, len).padEnd(len, '0');
 }
 
 function isDryRun(tenantConfig = {}) {
@@ -348,6 +370,7 @@ export const iposTransactClient = {
         amount: toCents(amount),
         cardToken: String(cardToken),
         applySteamSettingTipFeeTax: false,
+        ...(cfg.reconIdLength > 0 ? { reconId: reconRef(cfg.reconIdLength) } : {}),
       },
       preferences: {
         eReceipt: false,
@@ -385,6 +408,7 @@ export const iposTransactClient = {
         amount: toCents(amount),
         cardToken: String(cardToken),
         applySteamSettingTipFeeTax: false,
+        ...(cfg.reconIdLength > 0 ? { reconId: reconRef(cfg.reconIdLength) } : {}),
       },
       preferences: {
         eReceipt: false,
