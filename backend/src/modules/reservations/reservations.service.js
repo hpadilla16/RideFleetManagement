@@ -216,7 +216,18 @@ const reservationListSelect = {
       id: true,
       total: true,
       paidAmount: true,
-      balance: true
+      balance: true,
+      // 2026-05-28 — Step 3 of checkout-wizard-v2 displays this as the
+      // "Pre-auth deposit" line + the orchestrator uses it as the
+      // source of truth for the actual hold amount. We also include
+      // the SECURITY_DEPOSIT-source charges so the wizard can sum
+      // them as a fallback when the column itself is null.
+      securityDepositAmount: true,
+      declinedInsurance: true,
+      charges: {
+        where: { source: 'SECURITY_DEPOSIT', selected: true },
+        select: { id: true, total: true, name: true }
+      }
     }
   }
 };
@@ -1378,6 +1389,20 @@ export const reservationsService = {
             securityDepositCapturedAt: true,
             securityDepositReleasedAt: true,
             securityDepositReference: true,
+            // Dejavoo Spin card-on-file + deposit hold metadata. Drives
+            // the View Payments operational tools panel (Charge card on
+            // file / Release hold / Reauthorize deposit).
+            // NOTE: cardOnFileToken intentionally NOT selected — it's a
+            // sensitive iPOS token that must never leave the server.
+            // The frontend uses cardOnFileLast4 + cardOnFileCapturedAt
+            // as presence signals; the actual charge runs server-side.
+            cardOnFileBrand: true,
+            cardOnFileLast4: true,
+            cardOnFileCapturedAt: true,
+            depositHoldId: true,
+            depositHoldAmount: true,
+            depositHoldExpiresAt: true,
+            depositHoldVoidedAt: true,
             paidAmount: true,
             balance: true,
             paymentMethod: true,
@@ -1390,7 +1415,18 @@ export const reservationsService = {
             locked: true,
             createdAt: true,
             updatedAt: true,
-            charges: { orderBy: [{ sortOrder: 'asc' }, { createdAt: 'asc' }] },
+            // 2026-05-28 — Restrict charges in the GET-by-id response to
+            // SECURITY_DEPOSIT-source rows. The wizard's Step 3 reads this
+            // array to compute the deposit hold amount and subtract it
+            // from the balance for the sale; if the array includes all
+            // charges (Daily, Tax, Security Deposit), the wizard
+            // double-counts and shows $0 / pre-paid mode incorrectly.
+            // Other consumers of this endpoint should query a dedicated
+            // /charges or /agreement endpoint if they need full breakdown.
+            charges: {
+              where: { source: 'SECURITY_DEPOSIT', selected: true },
+              orderBy: [{ sortOrder: 'asc' }, { createdAt: 'asc' }]
+            },
             payments: { orderBy: { paidAt: 'desc' } }
           }
         }

@@ -321,7 +321,7 @@ function DashboardInner({ token, me, logout }) {
   }, [token, canSeeOverview]);
 
   const startCheckout = async (id) => {
-    router.push(`/reservations/${id}/checkout-wizard`);
+    router.push(`/reservations/${id}/checkout-wizard-v2`);
   };
 
   const markCancelled = async (id) => {
@@ -417,6 +417,12 @@ function DashboardInner({ token, me, logout }) {
     ).length
   );
   const feeAdvisoryCount = reservations.filter((r) => /\[FEE_ADVISORY_OPEN\s+/i.test(String(r.notes || ''))).length;
+  // Phase 1.8 — checkout sessions abandoned or stuck > 4h in a
+  // non-terminal step. Surfaced as its own tile so the night-shift
+  // can sweep them before customers return to wonder why their
+  // payment hasn't settled. Backend-canonical; no client fallback
+  // since we have no list of sessions on this page.
+  const stuckCheckouts = Number(kpis.stuckCheckouts || 0);
   // Anchor "today" in the tenant timezone — not the browser's — so the
   // Operations Board agrees with the rest of the app for agents loading
   // from a non-PR browser. Both functions return "YYYY-MM-DD" in DASHBOARD_TZ.
@@ -459,6 +465,16 @@ function DashboardInner({ token, me, logout }) {
             note: `Return ${new Date(returns[0].returnAt).toLocaleString('en-US', { timeZone: DASHBOARD_TZ })}`,
             action: () => router.push(`/reservations/${returns[0].id}/checkin-wizard`),
             actionLabel: 'Open Check-in'
+          }
+        : null,
+      stuckCheckouts > 0
+        ? {
+            id: 'stuck-checkouts',
+            title: 'Stuck Checkouts',
+            detail: `${stuckCheckouts} checkout session${stuckCheckouts === 1 ? '' : 's'}`,
+            note: 'Wizard sessions abandoned or stalled > 4 hours — review and clear.',
+            action: () => router.push('/reservations?filter=stuck-checkouts'),
+            actionLabel: 'Review'
           }
         : null,
       feeAdvisoryCount > 0

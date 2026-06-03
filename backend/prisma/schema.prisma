@@ -394,8 +394,8 @@ model Tenant {
   status                  String   @default("ACTIVE")
   plan                    String   @default("BETA")
   // Path D multi-tenancy fields (added 2026-05-17, see doc/multitenancy-hybrid-architecture.md)
-  tier                    String   @default("STANDARD")  // STANDARD | PREMIUM | ENTERPRISE
-  schemaName              String   @default("public")    // 'public' | 'tenant_<slug>'
+  tier                    String   @default("STANDARD") // STANDARD | PREMIUM | ENTERPRISE
+  schemaName              String   @default("public") // 'public' | 'tenant_<slug>'
   carSharingEnabled       Boolean  @default(false)
   dealershipLoanerEnabled Boolean  @default(false)
   tollsEnabled            Boolean  @default(false)
@@ -455,13 +455,13 @@ model Tenant {
   feeRates                    FeeRate[]
 
   // TL International franchise integration (round 5)
-  integrationConfig           Json?
-  tlExternalReservations      ExternalReservation[]
-  tlExternalSyncRuns          ExternalSyncRun[]
-  tlIntegrationCredentials    IntegrationCredential[]
-  tlAcrissCategoryMaps        AcrissCategoryMap[]
-  tlLocationCodeMaps          LocationCodeMap[]
-  franchisePayoutPeriods      FranchisePayoutPeriod[]
+  integrationConfig        Json?
+  tlExternalReservations   ExternalReservation[]
+  tlExternalSyncRuns       ExternalSyncRun[]
+  tlIntegrationCredentials IntegrationCredential[]
+  tlAcrissCategoryMaps     AcrissCategoryMap[]
+  tlLocationCodeMaps       LocationCodeMap[]
+  franchisePayoutPeriods   FranchisePayoutPeriod[]
 }
 
 model Location {
@@ -552,6 +552,13 @@ model Vehicle {
 
   homeLocationId String?
   homeLocation   Location? @relation("VehicleHomeLocation", fields: [homeLocationId], references: [id])
+
+  // "Last odometer wins" provenance (2026-05-28). When the dejavoo
+  // checkout redesign writes odometerOut or check-in writes odometerIn,
+  // we also flip Vehicle.mileage AND stamp this column with the source
+  // (e.g. "CHECKOUT_RES-742838" / "CHECKIN_RES-742838") so we can audit
+  // which workflow last touched the odometer.
+  lastOdometerSource String?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -796,7 +803,7 @@ model Reservation {
   // grandfather in pre-2026-05-27 stale rows so the overdue count can
   // "start fresh" while the cleanup is done at human pace. Defaults to
   // false for all new reservations.
-  overdueIgnored   Boolean   @default(false)
+  overdueIgnored Boolean @default(false)
 
   // Pillar 2 (added 2026-05-17) — auto-charge state machine.
   // Set when checkin completes with balance > 0 and status transitions
@@ -848,7 +855,7 @@ model Reservation {
   // auto-charged after the new card-on-file authorization landed.
   // NULL on reservations created before the field was added; those rows
   // are the 281 unblocked en masse by scripts/unblock-pre-terms-reservations.mjs.
-  termsVersion                 String?
+  termsVersion String?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -866,6 +873,10 @@ model Reservation {
   hostReviews       HostReview[]
   tollTransactions  TollTransaction[]
   tollAssignments   TollAssignment[]
+
+  // Dejavoo Spin checkout redesign (2026-05-28)
+  checkoutSessions CheckoutSession[]
+  handoffTokens    HandoffToken[]
 
   // TL International franchise integration (round 5)
   externalReservation ExternalReservation? @relation("ReservationFromExternal")
@@ -1332,6 +1343,39 @@ model RentalAgreement {
   paymentMethod    AgreementPaymentMethod?
   paymentReference String?
 
+  // Dejavoo Spin checkout redesign (2026-05-28). Card-on-file fields:
+  // the Spin sale step captures these so subsequent CNP charges (tolls,
+  // overage, damage) can run via /sale with the stored token.
+  cardOnFileToken      String?
+  cardOnFileBrand      String?
+  cardOnFileLast4      String?
+  cardOnFileCapturedAt DateTime?
+
+  // Security-deposit pre-auth fields. preAuth runs alongside the main
+  // sale in step 3 of the new wizard. Auto-voided by the nightly job
+  // after 24h on abandoned checkout sessions.
+  depositHoldId        String?
+  depositHoldAmount    Decimal?  @db.Decimal(10, 2)
+  depositHoldExpiresAt DateTime?
+  depositHoldVoidedAt  DateTime?
+
+  // Terms & Conditions multi-section signing. tcSignatureDataUrl is the
+  // final consolidated signature; per-section initials live in
+  // AgreementSectionInitial. Mirrors the existing signatureDataUrl on
+  // the Reservation row (which signs the wizard's pre-check-in) but is
+  // the checkout-time T&C acceptance.
+  tcSignatureDataUrl String?   @db.Text
+  tcSignedAt         DateTime?
+  tcSignerName       String?
+  tcCustomerIp       String?
+
+  // Declined-insurance flow. When true, the customer didn't take counter
+  // insurance and signed an acknowledgement section in T&C. The PDF
+  // emits the declined-insurance addendum page.
+  declinedInsurance                 Boolean   @default(false)
+  declinedInsuranceSignatureDataUrl String?   @db.Text
+  declinedInsuranceSignedAt         DateTime?
+
   notes            String?
   finalizedAt      DateTime?
   closedAt         DateTime?
@@ -1343,13 +1387,15 @@ model RentalAgreement {
   createdAt        DateTime  @default(now())
   updatedAt        DateTime  @updatedAt
 
-  drivers      AgreementDriver[]
-  charges      RentalAgreementCharge[]
-  payments     RentalAgreementPayment[]
-  inspections  RentalAgreementInspection[]
-  vehicleSwaps RentalAgreementVehicleSwap[]
-  commissions  AgreementCommission[]
-  addendums    RentalAgreementAddendum[]
+  drivers          AgreementDriver[]
+  charges          RentalAgreementCharge[]
+  payments         RentalAgreementPayment[]
+  inspections      RentalAgreementInspection[]
+  vehicleSwaps     RentalAgreementVehicleSwap[]
+  commissions      AgreementCommission[]
+  addendums        RentalAgreementAddendum[]
+  sectionInitials  AgreementSectionInitial[]
+  checkoutSessions CheckoutSession[]
 
   @@index([status, pickupAt])
   @@index([tenantId, status])
@@ -1806,21 +1852,25 @@ model RentalAgreementInspection {
   actorUserId String?
   actorIp     String?
 
-  exterior   String?
-  interior   String?
-  tires      String?
-  lights     String?
-  windshield String?
-  fuelLevel  String?
-  odometer   Int?
-  damages    String?
-  notes      String?
-  photosJson String?
+  exterior         String?
+  interior         String?
+  tires            String?
+  lights           String?
+  windshield       String?
+  fuelLevel        String?
+  odometer         Int?
+  damages          String?
+  notes            String?
+  photosJson       String?
   // 16l: Supabase Storage refs for inspection photos. Array of
   // { path, contentType, size, uploadedAt } entries. Coexists with
   // photosJson during migration; new writes use this field only when
   // INSPECTION_PHOTOS_STORAGE_ENABLED=true. Old rows fall back to photosJson.
   photoStorageRefs Json?
+
+  // Dejavoo checkout redesign (2026-05-28). Pin-based notes on individual
+  // photos for damage callouts during the mobile inspection step.
+  annotations VehicleInspectionAnnotation[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -2694,7 +2744,6 @@ model MarketObservation {
   @@index([pickupDate, sipp])
 }
 
-
 // Path D per-tenant volume metrics for promotion criteria automation.
 // Written by daily 02:00-ET snapshot job. Read by the promotion-flagger
 // service that surfaces candidates in SUPER_ADMIN review queue once a tenant
@@ -2702,17 +2751,17 @@ model MarketObservation {
 //
 // See doc/multitenancy-hybrid-architecture.md sections 7 + 8.
 model LoadObservation {
-  id                      String   @id @default(cuid())
-  tenantId                String
-  observedAt              DateTime @default(now())
-  windowStart             DateTime
-  windowEnd               DateTime
-  reservationsCreated     Int      @default(0)
-  concurrentStaffPeak     Int      @default(0)
-  cacheInvalidations      Int      @default(0)
-  inspectionMediaUploads  Int      @default(0)
-  voiceAgentMinutes       Int      @default(0)
-  tierAtObservation       String   @default("STANDARD")
+  id                     String   @id @default(cuid())
+  tenantId               String
+  observedAt             DateTime @default(now())
+  windowStart            DateTime
+  windowEnd              DateTime
+  reservationsCreated    Int      @default(0)
+  concurrentStaffPeak    Int      @default(0)
+  cacheInvalidations     Int      @default(0)
+  inspectionMediaUploads Int      @default(0)
+  voiceAgentMinutes      Int      @default(0)
+  tierAtObservation      String   @default("STANDARD")
 
   @@index([tenantId, observedAt(sort: Desc)])
 }
@@ -2732,23 +2781,22 @@ model LoadObservation {
 // feeType: EXCESS_MILEAGE | FUEL_REFILL | CLEANING_LIGHT | CLEANING_MEDIUM | CLEANING_HEAVY | SMOKING
 // unit:    PER_MILE | PER_GALLON | FLAT
 model FeeRate {
-  id          String   @id @default(cuid())
-  tenantId    String
-  locationId  String?
-  feeType     String
-  unit        String
-  amount      Decimal  @db.Decimal(10, 2)
-  isActive    Boolean  @default(true)
-  notes       String?
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  id         String   @id @default(cuid())
+  tenantId   String
+  locationId String?
+  feeType    String
+  unit       String
+  amount     Decimal  @db.Decimal(10, 2)
+  isActive   Boolean  @default(true)
+  notes      String?
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
 
-  tenant      Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  location    Location? @relation(fields: [locationId], references: [id], onDelete: Cascade)
+  tenant   Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  location Location? @relation(fields: [locationId], references: [id], onDelete: Cascade)
 
   @@index([tenantId, locationId])
 }
-
 
 // V2 — Audit history for per-tenant Fee Rate changes.
 // Captures every CREATE / UPDATE / TOGGLE / DELETE against the FeeRate table
@@ -2767,7 +2815,7 @@ model FeeRateAuditLog {
   actorUserId String?
   actorEmail  String?
   actorRole   String?
-  changeType  String   // CREATE | UPDATE | DELETE | TOGGLE
+  changeType  String // CREATE | UPDATE | DELETE | TOGGLE
   before      Json?
   after       Json?
   changedAt   DateTime @default(now())
@@ -2788,15 +2836,15 @@ model FeeRateAuditLog {
 // Daily rollup into `EndpointLoadObservationDaily` is done by
 // `backend/src/jobs/endpoint-load-rollup.js` (wired to cron in PR-6).
 model EndpointLoadObservation {
-  id          String   @id @default(cuid())
-  tenantId    String?  // nullable for public/anonymous endpoints
-  method      String   // GET, POST, etc.
-  route       String   // normalized route pattern, e.g. "/api/reservations/:id"
-  statusCode  Int
-  durationMs  Int      // total duration in ms
-  dbTimeMs    Int?     // db time if measurable
-  cacheHit    Boolean? // null if endpoint doesn't use cache
-  observedAt  DateTime @default(now())
+  id         String   @id @default(cuid())
+  tenantId   String? // nullable for public/anonymous endpoints
+  method     String // GET, POST, etc.
+  route      String // normalized route pattern, e.g. "/api/reservations/:id"
+  statusCode Int
+  durationMs Int // total duration in ms
+  dbTimeMs   Int? // db time if measurable
+  cacheHit   Boolean? // null if endpoint doesn't use cache
+  observedAt DateTime @default(now())
 
   @@index([tenantId, observedAt])
   @@index([route, observedAt])
@@ -2816,7 +2864,7 @@ model EndpointLoadObservationDaily {
   p95DurationMs Int
   p99DurationMs Int
   errorCount    Int
-  cacheHitRate  Float?   // 0.0-1.0, null if not cached
+  cacheHitRate  Float? // 0.0-1.0, null if not cached
 
   @@unique([tenantId, route, day])
   @@index([day])
@@ -2833,43 +2881,43 @@ model EndpointLoadObservationDaily {
 // ============================================================================
 
 model ExternalReservation {
-  id                       String                  @id @default(cuid())
-  tenantId                 String
-  tenant                   Tenant                  @relation(fields: [tenantId], references: [id])
-  sourceSystem             String                  // 'TL_INTERNATIONAL'
-  externalRef              String                  // ZE# e.g. ZE1521152BA
-  subBrand                 String?                 // 'ZEZGO'
-  channel                  String?                 // 'EXPEDIA02'
-  supplierRef              String?
-  status                   String?                 // raw TL status
-  customerFirstName        String?
-  customerLastName         String?
-  customerEmail            String?
-  customerPhone            String?
-  customerCountry          String?
-  flightNumber             String?
-  vehicleAcriss            String?                 // 'CCAR'
-  vehicleDescription       String?
-  pickupAt                 DateTime?
-  pickupLocation           String?
-  dropoffAt                DateTime?
-  dropoffLocation          String?
-  totalAmount              Decimal?                @db.Decimal(12, 2)
-  currency                 String?                 @default("USD")
-  rawJson                  Json
-  firstSeenAt              DateTime                @default(now())
-  lastSyncedAt             DateTime                @default(now())
-  syncRunCount             Int                     @default(1)
-  promotionStatus          ExternalPromotionStatus @default(PENDING)
-  needsReviewReason        String?                 // 'customer_not_found' | 'acriss_unmapped' | 'location_unmapped' | 'currency_non_usd' | 'multiple_matches'
-  promotedToReservationId  String?                 @unique
-  promotedToReservation    Reservation?            @relation("ReservationFromExternal", fields: [promotedToReservationId], references: [id])
-  promotedAt               DateTime?
-  promotedByUserId         String?
-  rejectedReason           String?
-  rejectedAt               DateTime?
-  createdAt                DateTime                @default(now())
-  updatedAt                DateTime                @updatedAt
+  id                      String                  @id @default(cuid())
+  tenantId                String
+  tenant                  Tenant                  @relation(fields: [tenantId], references: [id])
+  sourceSystem            String // 'TL_INTERNATIONAL'
+  externalRef             String // ZE# e.g. ZE1521152BA
+  subBrand                String? // 'ZEZGO'
+  channel                 String? // 'EXPEDIA02'
+  supplierRef             String?
+  status                  String? // raw TL status
+  customerFirstName       String?
+  customerLastName        String?
+  customerEmail           String?
+  customerPhone           String?
+  customerCountry         String?
+  flightNumber            String?
+  vehicleAcriss           String? // 'CCAR'
+  vehicleDescription      String?
+  pickupAt                DateTime?
+  pickupLocation          String?
+  dropoffAt               DateTime?
+  dropoffLocation         String?
+  totalAmount             Decimal?                @db.Decimal(12, 2)
+  currency                String?                 @default("USD")
+  rawJson                 Json
+  firstSeenAt             DateTime                @default(now())
+  lastSyncedAt            DateTime                @default(now())
+  syncRunCount            Int                     @default(1)
+  promotionStatus         ExternalPromotionStatus @default(PENDING)
+  needsReviewReason       String? // 'customer_not_found' | 'acriss_unmapped' | 'location_unmapped' | 'currency_non_usd' | 'multiple_matches'
+  promotedToReservationId String?                 @unique
+  promotedToReservation   Reservation?            @relation("ReservationFromExternal", fields: [promotedToReservationId], references: [id])
+  promotedAt              DateTime?
+  promotedByUserId        String?
+  rejectedReason          String?
+  rejectedAt              DateTime?
+  createdAt               DateTime                @default(now())
+  updatedAt               DateTime                @updatedAt
 
   @@unique([sourceSystem, externalRef], name: "source_ref_unique")
   @@index([tenantId, pickupAt])
@@ -2886,7 +2934,7 @@ model ExternalSyncRun {
   startedAt       DateTime  @default(now())
   finishedAt      DateTime?
   durationMs      Int?
-  status          String    // 'OK' | 'PARTIAL' | 'FAILED' | 'AUTH_EXPIRED'
+  status          String // 'OK' | 'PARTIAL' | 'FAILED' | 'AUTH_EXPIRED'
   pickupsFound    Int       @default(0)
   newlyInserted   Int       @default(0)
   updatedExisting Int       @default(0)
@@ -2902,12 +2950,12 @@ model IntegrationCredential {
   id               String    @id @default(cuid())
   tenantId         String
   tenant           Tenant    @relation(fields: [tenantId], references: [id])
-  sourceSystem     String    // 'TL_INTERNATIONAL'
-  encryptedPayload String    // base64(iv || authTag || ciphertext) — AES-256-GCM
+  sourceSystem     String // 'TL_INTERNATIONAL'
+  encryptedPayload String // base64(iv || authTag || ciphertext) — AES-256-GCM
   rotatedAt        DateTime  @default(now())
   rotatedByUserId  String?
   lastTestedAt     DateTime?
-  lastTestStatus   String?   // 'OK' | 'EXPIRED' | 'ERROR'
+  lastTestStatus   String? // 'OK' | 'EXPIRED' | 'ERROR'
   notes            String?
   createdAt        DateTime  @default(now())
   updatedAt        DateTime  @updatedAt
@@ -2917,10 +2965,10 @@ model IntegrationCredential {
 
 model AcrissCategoryMap {
   id              String   @id @default(cuid())
-  tenantId        String?  // null = global mapping
+  tenantId        String? // null = global mapping
   tenant          Tenant?  @relation(fields: [tenantId], references: [id])
-  acrissCode      String   // 'CCAR'
-  vehicleCategory String   // internal category string (matches VehicleType.classCode / category)
+  acrissCode      String // 'CCAR'
+  vehicleCategory String // internal category string (matches VehicleType.classCode / category)
   createdAt       DateTime @default(now())
 
   @@unique([tenantId, acrissCode])
@@ -2930,7 +2978,7 @@ model LocationCodeMap {
   id           String   @id @default(cuid())
   tenantId     String
   tenant       Tenant   @relation(fields: [tenantId], references: [id])
-  externalCode String   // 'SJUA01'
+  externalCode String // 'SJUA01'
   locationId   String
   location     Location @relation(fields: [locationId], references: [id])
   createdAt    DateTime @default(now())
@@ -2942,9 +2990,9 @@ model FranchisePayoutPeriod {
   id             String    @id @default(cuid())
   tenantId       String
   tenant         Tenant    @relation(fields: [tenantId], references: [id])
-  sourceSystem   String    // 'TL_INTERNATIONAL'
+  sourceSystem   String // 'TL_INTERNATIONAL'
   year           Int
-  month          Int       // 1-12
+  month          Int // 1-12
   expectedAmount Decimal   @default(0) @db.Decimal(12, 2)
   receivedAmount Decimal?  @db.Decimal(12, 2)
   receivedAt     DateTime?
@@ -2956,6 +3004,7 @@ model FranchisePayoutPeriod {
 
   @@unique([tenantId, sourceSystem, year, month])
 }
+
 
 // =====================================================================
 // Incident / Damage Report module (ported from feature/incident-report
@@ -3085,4 +3134,129 @@ model AgreementClause {
   updatedAt DateTime @updatedAt
 
   @@index([tenantId, active])
+}
+
+// ===========================================================================
+// Dejavoo Spin checkout redesign (2026-05-28)
+//
+// The CheckoutSession drives a 6-step orchestrated wizard across three
+// surfaces — agent screen, customer display, agent's mobile (during
+// inspection). Each surface subscribes to the session's currentStep and
+// renders its own per-step UI. State transitions are explicit POSTs.
+// ===========================================================================
+
+enum CheckoutStep {
+  CONFIRMING // Step 1 — agent verifies customer, vehicle, decline-insurance
+  TC_PENDING // Step 2 — customer is signing T&C on their phone
+  TC_SIGNED // intermediate before payment
+  PAYMENT_PENDING // Step 3 — terminal is waiting for tap/insert/swipe
+  PAID // sale + preauth + tokenize complete
+  INSPECTION_HANDOFF // Step 4 — agent scans QR to continue on mobile
+  INSPECTION_IN_PROGRESS // Step 5 — capturing photos / metrics on mobile
+  CUSTOMER_SIGN_PENDING // Step 6 — phone handed to customer to sign inspection
+  FINALIZING // building PDF, emailing
+  CLOSED // happy path terminal state
+  CANCELLED // explicit abort
+}
+
+model CheckoutSession {
+  id            String           @id @default(cuid())
+  reservationId String           @unique
+  reservation   Reservation      @relation(fields: [reservationId], references: [id])
+  agreementId   String?
+  agreement     RentalAgreement? @relation(fields: [agreementId], references: [id])
+  tenantId      String?
+  currentStep   CheckoutStep     @default(CONFIRMING)
+
+  // JSON array of { from, to, actorUserId, at, metadata } — full transition
+  // log. Used by the stuck-checkouts dashboard tile.
+  events String @db.Text
+
+  // Per-step completion stamps. Used both by the customer display poller
+  // (to know which screen to render) and by the nightly auto-flag job.
+  tcCompletedAt         DateTime?
+  paymentCompletedAt    DateTime?
+  inspectionCompletedAt DateTime?
+  customerSignedAt      DateTime?
+
+  startedAt  DateTime  @default(now())
+  finishedAt DateTime?
+
+  // Set by the nightly cleanup job when a session has been stuck in a
+  // non-terminal step for > 4 hours, or when an agent explicitly
+  // abandons via the wizard's Save & pause button.
+  abandonedAt     DateTime?
+  abandonedReason String?
+
+  // Phase 3.5 — stamped the first (and only) time the auto-email fires
+  // after the session reaches CLOSED. Guards against double-fires on
+  // accidental re-transitions and lets the UI show "Sent {when}" /
+  // "Resend signed copy" instead of just "Email Agreement".
+  autoEmailedAt DateTime?
+
+  startedByUserId String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([reservationId])
+  @@index([currentStep])
+  @@index([tenantId, currentStep])
+  @@index([abandonedAt])
+}
+
+enum HandoffTokenKind {
+  TERMS_SIGNING // Step 2 — opens /sign/:token on customer's phone
+  MOBILE_INSPECTION // Step 4 — opens /checkout/mobile/:token on agent's phone
+}
+
+model HandoffToken {
+  id              String           @id @default(cuid())
+  reservationId   String
+  reservation     Reservation      @relation(fields: [reservationId], references: [id])
+  kind            HandoffTokenKind
+  token           String           @unique
+  expiresAt       DateTime
+  consumedAt      DateTime?
+  createdByUserId String?
+  createdAt       DateTime         @default(now())
+
+  @@index([token, expiresAt])
+  @@index([reservationId, kind])
+}
+
+// Per-section initial captured during the customer's T&C signing flow.
+// Each T&C section (rental period, insurance, liability, etc.) gets its
+// own initial pad. The final consolidated signature lives on
+// RentalAgreement.tcSignatureDataUrl. The PDF generator embeds each
+// initial inline next to its section heading.
+model AgreementSectionInitial {
+  id             String          @id @default(cuid())
+  agreementId    String
+  agreement      RentalAgreement @relation(fields: [agreementId], references: [id])
+  sectionKey     String // 'rental_period', 'insurance', 'liability', 'declined_insurance', etc.
+  sectionLabel   String
+  initialDataUrl String          @db.Text
+  signedAt       DateTime
+  customerIp     String?
+
+  @@unique([agreementId, sectionKey])
+  @@index([agreementId])
+}
+
+// Damage / concern annotation placed on a specific inspection photo.
+// Customer points to a scratch, agent taps the photo at that location,
+// types a note. (x, y) are normalized 0-1 relative to the photo's
+// rendered size so the pin shows correctly on any device.
+model VehicleInspectionAnnotation {
+  id           String                    @id @default(cuid())
+  inspectionId String
+  inspection   RentalAgreementInspection @relation(fields: [inspectionId], references: [id])
+  photoUrl     String
+  x            Float
+  y            Float
+  note         String                    @db.Text
+  createdAt    DateTime                  @default(now())
+
+  @@index([inspectionId])
 }

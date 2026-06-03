@@ -18,10 +18,30 @@ function resolveApiBase() {
     const currentHost = String(window.location.hostname || '').trim().toLowerCase();
     const currentIsLocal = ['localhost', '127.0.0.1'].includes(currentHost);
     const configuredIsLocal = ['localhost', '127.0.0.1'].includes(configuredHost);
+
+    // 2026-05-28 — Dev LAN-IP rebase.
+    //
+    // The agent loads the desktop wizard at e.g. http://192.168.1.42:3000
+    // so the QR codes embed a phone-reachable origin. The configured API
+    // base (NEXT_PUBLIC_API_BASE) is usually http://localhost:4000, which
+    // the agent's phone can't reach. Detect this case and rewrite the
+    // hostname to the current LAN host while preserving the configured
+    // port (the backend runs on a different port from the frontend).
     if (configuredHost && configuredIsLocal && !currentIsLocal) {
-      return origin;
+      const rebuilt = new URL(configured);
+      rebuilt.hostname = window.location.hostname;
+      // Keep the configured port (e.g. 4000) — that's the backend port,
+      // distinct from the frontend port we're currently loaded from.
+      return normalizeBaseUrl(rebuilt.toString());
     }
     if (configuredHost && !currentIsLocal && configuredHost !== currentHost) {
+      // Different non-local hosts (e.g. user is on ridefleetmanager.com
+      // but NEXT_PUBLIC_API_BASE was baked at build time to point at
+      // beta.ridefleetmanager.com). Production runs the backend behind
+      // an nginx reverse proxy on the SAME hostname, so always trust
+      // the current origin in this case. Reverting this to `origin`
+      // restores the pre-2026-05-28 behavior — my LAN-IP rebase fix
+      // mistakenly changed it to `configured`, which broke prod CORS.
       return origin;
     }
     return configured;

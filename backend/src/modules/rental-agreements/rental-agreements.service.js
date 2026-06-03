@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { getBrowser } from '../../lib/puppeteer-browser.js';
+import { sectionsForAgreement } from '../checkout-session/terms-content.js';
 import { prisma } from '../../lib/prisma.js';
 import { hostReviewsService } from '../host-reviews/host-reviews.service.js';
 import { reservationPricingService } from '../reservations/reservation-pricing.service.js';
@@ -20,6 +21,25 @@ import { getEffectiveTermsHtmlForTenant } from '../../lib/terms/index.js';
 import { TC_VERSION } from '../../lib/terms/version.js';
 import { refundCharge as payarcRefundCharge } from '../public-booking/payarc-hosted-fields.js';
 import { resolveCatalogEntry } from '../../lib/commission-catalog.js';
+import { spinClient } from '../payment-gateway/spin-client.js';
+import { iposTransactClient } from '../payment-gateway/ipos-transact-client.js';
+
+// Tenant Spin config loader — mirrors the helper in spin-charge.service.js.
+// Tenant.spin* columns don't exist on the Tenant model today; the Spin
+// client falls back to env vars when tenantConfig is empty. Returning an
+// empty object keeps both paths working (multi-tenant + single-tenant).
+async function loadTenantSpinConfig(tenantId) {
+  if (!tenantId) return {};
+  try {
+    const row = await prisma.tenant.findUnique({
+      where: { id: tenantId },
+      select: { id: true }
+    });
+    return row ? {} : {};
+  } catch {
+    return {};
+  }
+}
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -886,6 +906,191 @@ function buildAddendumPagesHtml(addendums, ctx) {
   if (list.length === 0) return '';
   const total = list.length;
   return list.map((a, i) => buildAddendumPageHtml(a, i + 1, total, ctx)).join('\n');
+}
+
+// 2026-05-28 — Strip the Section 4 "I voluntarily DECLINE all such
+// optional coverage" bilingual acknowledgement from the canonical T&C
+// body when the customer did NOT decline counter insurance.
+//
+// The canonical tc-<version>.html contains five tc-initials-block
+// divs. The FIRST one (around line 189 of tc-2026-05-19.html) is the
+// decline-coverage statement; the other four (card-on-file, CNP,
+// no-chargeback, post-rental) apply to every agreement and must stay.
+//
+// We identify the decline block by content match ("DECLINE all such
+// optional coverage" appears in the English column) and walk forward
+// using a balanced-div counter so the nested tc-bilingual + two
+// tc-col divs don't trip up a naive non-greedy regex.
+//
+// Returns the input HTML unchanged when:
+//   - the customer DID decline insurance (declined === true)
+//   - no matching block is found (legacy templates, custom T&C)
+function stripDeclineCoverageIfNotApplicable(html, declined) {
+  if (declined) return html;
+  const opener = '<div class="tc-initials-block">';
+  let start = html.indexOf(opener);
+  while (start !== -1) {
+    let depth = 1;
+    let i = start + opener.length;
+    while (i < html.length && depth > 0) {
+      const nextOpen = html.indexOf('<div', i);
+      const nextClose = html.indexOf('</div>', i);
+      if (nextClose === -1) break;
+      if (nextOpen !== -1 && nextOpen < nextClose) {
+        depth += 1;
+        i = nextOpen + 4;
+      } else {
+        depth -= 1;
+        i = nextClose + 6;
+      }
+    }
+    const end = i;
+    const block = html.slice(start, end);
+    if (/DECLINE all such optional coverage/i.test(block)) {
+      // Found the decline block. Excise it (plus any trailing whitespace
+      // up to the next non-space character so we don't leave a blank
+      // gap on the rendered page).
+      let trim = end;
+      while (trim < html.length && /\s/.test(html[trim])) trim += 1;
+      return html.slice(0, start) + html.slice(trim);
+    }
+    start = html.indexOf(opener, end);
+  }
+  return html;
+}
+
+// 2026-05-28 — Phase 3.3 + 3.4 — Append the customer's signed T&C
+// section (with each subsection's initial image embedded inline) plus
+// the optional declined-insurance addendum to the agreement PDF.
+//
+// Reads TC_SECTIONS from terms-content.js to build the section list
+// dynamically. The customer's per-section initials live on
+// agreement.sectionInitials[]; the final consolidated signature is on
+// agreement.tcSignatureDataUrl.
+function buildSignedTermsBlock(agreement, ctx) {
+  const sections = sectionsForAgreement({ declinedInsurance: !!agreement.declinedInsurance });
+  const initials = Array.isArray(agreement.sectionInitials) ? agreement.sectionInitials : [];
+  const initialsByKey = new Map(initials.map((i) => [i.sectionKey, i]));
+
+  if (!agreement.tcSignatureDataUrl && initials.length === 0) {
+    // Nothing to render — agreement was created via the legacy flow,
+    // not the new checkout-wizard-v2.
+    return '';
+  }
+
+  const tcSignedAt = agreement.tcSignedAt
+    ? new Date(agreement.tcSignedAt).toLocaleString('en-US', { timeZone: 'America/Puerto_Rico' })
+    : '—';
+  const signerName = esc(agreement.tcSignerName || `${agreement.customerFirstName || ''} ${agreement.customerLastName || ''}`.trim() || '—');
+
+  const sectionRows = sections.map((s) => {
+    const recorded = initialsByKey.get(s.key);
+    const initialImg = recorded?.initialDataUrl
+      ? `<img src="${recorded.initialDataUrl}" alt="Initial" style="max-height:40px;max-width:80px;border:0.5px solid #D1D5DB;border-radius:4px;padding:2px;background:#fff" />`
+      : '<span style="color:#9CA3AF;font-size:11px">(no initial)</span>';
+    const recordedAt = recorded?.signedAt
+      ? new Date(recorded.signedAt).toLocaleString('en-US', { timeZone: 'America/Puerto_Rico' })
+      : '';
+    return `
+      <div style="margin:0 0 18px;padding:14px;border:0.5px solid #E5E7EB;border-radius:8px;background:#FFF;page-break-inside:avoid">
+        <div style="font-size:13px;font-weight:600;color:#111827;margin:0 0 6px">${esc(s.label)}</div>
+        <div style="font-size:12px;color:#374151;line-height:1.55;margin:0 0 10px">${esc(s.body)}</div>
+        <div style="display:flex;justify-content:flex-end;align-items:center;gap:12px">
+          <span style="font-size:10.5px;color:#6B7280">${esc(recordedAt)}</span>
+          ${initialImg}
+        </div>
+      </div>`;
+  }).join('');
+
+  const finalSignatureBlock = agreement.tcSignatureDataUrl
+    ? `<img src="${agreement.tcSignatureDataUrl}" alt="Customer signature" style="max-height:80px;max-width:360px;display:block;border-bottom:1px solid #111827" />`
+    : '<div style="color:#9CA3AF;font-size:12px">(no final signature)</div>';
+
+  const logo = ctx?.companyLogoBlock || '';
+  const cfg = ctx?.cfg || {};
+  const companyName = esc(cfg.companyName || '');
+
+  // 2026-05-28 — wrap in a light-theme container so the appended page
+  // renders white regardless of the tenant's base template colors.
+  // The outer div carries inline `all: revert` to break inheritance
+  // from the tenant CSS, then we re-establish a clean print stylesheet.
+  return `
+    <div style="page-break-before:always;background:#FFFFFF;color:#111827;padding:40px;font-family:-apple-system,BlinkMacSystemFont,'Helvetica Neue',Arial,sans-serif;all:revert">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin:0 0 24px;padding:0 0 16px;border-bottom:1px solid #111827;background:#FFFFFF">
+        <div>
+          <div style="font-size:11px;color:#6B7280;letter-spacing:.08em;text-transform:uppercase">Signed acknowledgement</div>
+          <div style="font-size:18px;font-weight:600;margin-top:4px;color:#111827">Terms &amp; Conditions</div>
+          <div style="font-size:11px;color:#6B7280;margin-top:2px">Agreement ${esc(agreement.agreementNumber)} · ${companyName}</div>
+        </div>
+        ${logo}
+      </div>
+      <p style="font-size:12px;color:#374151;margin:0 0 18px;line-height:1.5">
+        The renter initialed each section below and signed at the bottom on
+        ${esc(tcSignedAt)}. The full Terms &amp; Conditions document is incorporated by
+        reference and was made available at the time of signing.
+      </p>
+      ${sectionRows}
+      <div style="margin-top:28px;padding-top:18px;border-top:1px solid #111827;page-break-inside:avoid;background:#FFFFFF">
+        <div style="font-size:11px;color:#6B7280;letter-spacing:.06em;text-transform:uppercase;margin:0 0 8px">Renter signature</div>
+        ${finalSignatureBlock}
+        <div style="font-size:12px;margin-top:6px;color:#111827">${signerName}</div>
+        <div style="font-size:10.5px;color:#6B7280;margin-top:2px">Signed ${esc(tcSignedAt)}${agreement.tcCustomerIp ? ` · ${esc(agreement.tcCustomerIp)}` : ''}</div>
+      </div>
+    </div>`;
+}
+
+// Phase 3.4 — Declined insurance addendum page. Only emitted when the
+// agent flipped the "Customer declines counter insurance" toggle in
+// step 1 of the wizard. Reads agreement.declinedInsuranceSignatureDataUrl
+// for the customer's separate signature on the addendum.
+function buildDeclinedInsuranceBlock(agreement, ctx) {
+  if (!agreement.declinedInsurance) return '';
+  const logo = ctx?.companyLogoBlock || '';
+  const cfg = ctx?.cfg || {};
+  const companyName = esc(cfg.companyName || '');
+  const signedAt = agreement.declinedInsuranceSignedAt
+    ? new Date(agreement.declinedInsuranceSignedAt).toLocaleString('en-US', { timeZone: 'America/Puerto_Rico' })
+    : '—';
+  // The declined-insurance ACK uses the same initial captured during
+  // T&C signing (sectionKey = 'declined_insurance'). Fall back to the
+  // dedicated declinedInsuranceSignatureDataUrl column if present.
+  const initials = Array.isArray(agreement.sectionInitials) ? agreement.sectionInitials : [];
+  const ackInitial = initials.find((i) => i.sectionKey === 'declined_insurance');
+  const sigBlock = agreement.declinedInsuranceSignatureDataUrl
+    ? `<img src="${agreement.declinedInsuranceSignatureDataUrl}" alt="Declined insurance signature" style="max-height:80px;max-width:360px;display:block;border-bottom:1px solid #111827" />`
+    : ackInitial?.initialDataUrl
+      ? `<img src="${ackInitial.initialDataUrl}" alt="Declined insurance initial" style="max-height:60px;max-width:120px;display:block;border-bottom:1px solid #111827" />`
+      : '<div style="color:#9CA3AF;font-size:12px">(no signature on file)</div>';
+
+  return `
+    <div style="page-break-before:always;background:#FFFFFF;color:#111827;padding:40px;font-family:-apple-system,BlinkMacSystemFont,'Helvetica Neue',Arial,sans-serif;all:revert">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin:0 0 24px;padding:0 0 16px;border-bottom:1px solid #111827;background:#FFFFFF">
+        <div>
+          <div style="font-size:11px;color:#6B7280;letter-spacing:.08em;text-transform:uppercase">Addendum</div>
+          <div style="font-size:18px;font-weight:600;margin-top:4px;color:#111827">Declined insurance</div>
+          <div style="font-size:11px;color:#6B7280;margin-top:2px">Agreement ${esc(agreement.agreementNumber)} · ${companyName}</div>
+        </div>
+        ${logo}
+      </div>
+      <p style="font-size:13px;line-height:1.6;color:#1F2937;margin:0 0 14px">
+        Renter acknowledges that counter insurance was offered and declined.
+        Renter agrees that all damage, theft, third-party claims, and
+        related costs arising from the rental period are renter's sole
+        responsibility under the rental agreement. Renter has confirmed
+        coverage through a personal auto policy or other source.
+      </p>
+      <p style="font-size:13px;line-height:1.6;color:#1F2937;margin:0 0 24px">
+        Renter further understands that any damage or theft will be
+        billed to the card on file in accordance with the deposit
+        authorization section of the rental agreement.
+      </p>
+      <div style="margin-top:32px;padding-top:18px;border-top:1px solid #111827;background:#FFFFFF">
+        <div style="font-size:11px;color:#6B7280;letter-spacing:.06em;text-transform:uppercase;margin:0 0 8px">Renter signature</div>
+        ${sigBlock}
+        <div style="font-size:12px;margin-top:6px;color:#111827">${esc(agreement.tcSignerName || `${agreement.customerFirstName || ''} ${agreement.customerLastName || ''}`.trim() || '—')}</div>
+        <div style="font-size:10.5px;color:#6B7280;margin-top:2px">Signed ${esc(signedAt)}</div>
+      </div>
+    </div>`;
 }
 
 function rentalDays(pickupAt, returnAt) {
@@ -2355,7 +2560,12 @@ export const rentalAgreementsService = {
         drivers: true,
         charges: { orderBy: [{ sortOrder: 'asc' }, { createdAt: 'asc' }] },
         payments: { orderBy: { paidAt: 'desc' } },
-        inspections: { orderBy: { createdAt: 'asc' } }
+        inspections: { orderBy: { createdAt: 'asc' } },
+        // 2026-05-28 — checkout-wizard-v2 T&C signing.
+        // tcSignature*, declinedInsurance*, sectionInitials. The print
+        // template uses these to render the signed terms acknowledgement
+        // pages + declined-insurance addendum after the standard layout.
+        sectionInitials: { orderBy: { signedAt: 'asc' } }
       }
     });
     return coerceAgreementMoney(agreement);
@@ -2422,6 +2632,27 @@ export const rentalAgreementsService = {
         securityDepositAmount: true,
         paidAmount: true,
         balance: true,
+        // 2026-05-28 — checkout-wizard-v2 T&C signing fields. Used by
+        // buildSignedTermsBlock + buildDeclinedInsuranceBlock when
+        // appending the post-baseline pages to the PDF.
+        tcSignatureDataUrl: true,
+        tcSignedAt: true,
+        tcSignerName: true,
+        tcCustomerIp: true,
+        declinedInsurance: true,
+        declinedInsuranceSignatureDataUrl: true,
+        declinedInsuranceSignedAt: true,
+        // 2026-05-28 — per-section initial PNGs captured by the customer
+        // on /sign/:token. buildSignedTermsBlock matches them to TC_SECTIONS
+        // by sectionKey, and the inline regex replacement in
+        // renderAgreementHtml uses the first one to fill the legacy
+        // "( ___ Initials )" placeholders. Without this select the print
+        // path quietly renders "(no initial)" for every section even when
+        // the customer signed.
+        sectionInitials: {
+          orderBy: { signedAt: 'asc' },
+          select: { sectionKey: true, initialDataUrl: true, signedAt: true, customerIp: true }
+        },
         charges: {
           orderBy: [{ sortOrder: 'asc' }, { createdAt: 'asc' }],
           select: {
@@ -2580,7 +2811,16 @@ export const rentalAgreementsService = {
     const chargesRowsHtml = chargesRows || '<tr><td colspan="4">No charges recorded</td></tr>';
     const paymentsRowsHtml = paymentsForPrint.length ? paymentsRows : '<tr><td colspan="5">No payments recorded</td></tr>';
 
-    const rawSigUrl = String(agreement.reservation?.signatureDataUrl || '').trim();
+    // Fall back to the new checkout-wizard-v2 T&C signature when the
+    // legacy pre-checkin path didn't capture one. This puts the same
+    // signature image into both the legacy 'Customer Signature' block
+    // on page 2 AND the new 'Signed acknowledgement' section we
+    // append later, so neither version of the print looks blank.
+    const rawSigUrl = String(
+      agreement.reservation?.signatureDataUrl ||
+      agreement.tcSignatureDataUrl ||
+      ''
+    ).trim();
     const signatureImageBlock = rawSigUrl
       ? `<img src="${rawSigUrl}" alt="Signature" style="max-height:60px;max-width:320px;width:auto;height:auto;display:block;object-fit:contain" />`
       : '<div class="sig-meta">No signature on file</div>';
@@ -2709,7 +2949,16 @@ export const rentalAgreementsService = {
       // The configured cfg.termsText is treated as a tenant-level
       // ADDENDUM and appended below the canonical content; we no longer
       // surface the editable text as the legal terms themselves.
-      termsText: (await getEffectiveTermsHtmlForTenant(agreement?.tenantId || null, { prisma })) + (cfg.termsText ? `<div class="tc-tenant-addendum"><h2>Tenant Addendum</h2><p>${esc(cfg.termsText)}</p></div>` : ''),
+      // 2026-05-28 — when the customer did NOT decline counter insurance,
+      // strip the "I voluntarily DECLINE all such optional coverage"
+      // bilingual acknowledgement (the first tc-initials-block in the
+      // canonical T&C). It only belongs on agreements where the customer
+      // actually waived coverage at the counter; otherwise it misleads
+      // the reader into thinking they did.
+      termsText: stripDeclineCoverageIfNotApplicable(
+        (await getEffectiveTermsHtmlForTenant(agreement?.tenantId || null, { prisma })),
+        !!agreement?.declinedInsurance,
+      ) + (cfg.termsText ? `<div class="tc-tenant-addendum"><h2>Tenant Addendum</h2><p>${esc(cfg.termsText)}</p></div>` : ''),
       signatureSignedBy: esc(agreement.reservation?.signatureSignedBy || '-'),
       signatureDateTime: esc(fmtDate(signatureTime)),
       signatureIp: esc(signatureIp),
@@ -2720,7 +2969,29 @@ export const rentalAgreementsService = {
     const baseTemplate = String(cfg?.agreementHtmlTemplate || '').trim()
       ? cfg.agreementHtmlTemplate
       : getModernAgreementTemplate();
-    const baseHtml = applyTemplate(baseTemplate, templateVars);
+    let baseHtml = applyTemplate(baseTemplate, templateVars);
+
+    // 2026-05-28 — Inject the customer's captured initial inline at every
+    // legacy T&C placeholder. The bundled and many tenant-customized
+    // templates contain literal strings like "( ___ Initials )" /
+    // "( ___ Iniciales )" sprinkled through the T&C body (card-on-file
+    // authorization, CNP, no-chargeback, post-rental charges, etc.).
+    // checkout-wizard-v2 captures per-section initials on the customer's
+    // phone; using the first one chronologically is the simplest way to
+    // fill every placeholder since they aren't keyed to specific TC_SECTIONS.
+    // Match permissively — underscores, dashes, dots, NBSPs and any case of
+    // "Initials" / "Iniciales" all count.
+    const _sectionInitialsForFill = Array.isArray(agreement.sectionInitials) ? agreement.sectionInitials : [];
+    const _firstInitialUrl = _sectionInitialsForFill[0]?.initialDataUrl
+      || agreement.tcSignatureDataUrl
+      || '';
+    if (_firstInitialUrl) {
+      const _initialImg = `<img src="${_firstInitialUrl}" alt="Initials" style="display:inline-block;height:22px;max-width:70px;vertical-align:middle;border-bottom:0.5px solid #6B7280;margin:0 2px;padding:0 2px" />`;
+      // Generic placeholder patterns. Allow ( ... Initials ), [ ... Initials ],
+      // various separators (underscore, dash, dot, NBSP, plain space).
+      const _placeholderRe = /[\(\[][\s_\-. ]*(Initial(?:s)?|Iniciale(?:s)?)[\s_\-. ]*[\)\]]/gi;
+      baseHtml = baseHtml.replace(_placeholderRe, _initialImg);
+    }
 
     // Pull addendums and splice their pages onto the agreement output so
     // every print/email of the agreement carries the addendums alongside
@@ -2732,22 +3003,27 @@ export const rentalAgreementsService = {
       where: { rentalAgreementId: id },
       orderBy: { createdAt: 'asc' }
     });
-    if (!addendums.length) return baseHtml;
 
-    const addendumPages = buildAddendumPagesHtml(addendums, {
-      agreement,
-      cfg,
-      companyLogoBlock
-    });
-    if (!addendumPages) return baseHtml;
+    // Phase 3.3 + 3.4 — append the customer's signed T&C section and
+    // (when applicable) the declined-insurance addendum. These run
+    // INDEPENDENTLY of the legacy addendums system above so legacy
+    // agreements (no tcSignatureDataUrl, no sectionInitials) get the
+    // empty string back from buildSignedTermsBlock and the print stays
+    // unchanged.
+    const ctx = { agreement, cfg, companyLogoBlock };
+    const addendumPages = addendums.length ? buildAddendumPagesHtml(addendums, ctx) : '';
+    const signedTermsPages = buildSignedTermsBlock(agreement, ctx);
+    const declinedInsurancePage = buildDeclinedInsuranceBlock(agreement, ctx);
+    const extraPages = [addendumPages, signedTermsPages, declinedInsurancePage].filter(Boolean).join('\n');
+    if (!extraPages) return baseHtml;
 
     // Splice before </body>. Falls back to append if a custom tenant template
-    // happens to omit the closing tag — the addendum pages are still valid
+    // happens to omit the closing tag — the extra pages are still valid
     // standalone HTML and the browser/Puppeteer renderer is forgiving.
     if (/<\/body>/i.test(baseHtml)) {
-      return baseHtml.replace(/<\/body>/i, `${addendumPages}</body>`);
+      return baseHtml.replace(/<\/body>/i, `${extraPages}</body>`);
     }
-    return `${baseHtml}\n${addendumPages}`;
+    return `${baseHtml}\n${extraPages}`;
   },
 
   async agreementPdfBuffer(id) {
@@ -2761,6 +3037,12 @@ export const rentalAgreementsService = {
       // assets (CSS, images as data URLs, fonts). `networkidle0` adds 500ms+
       // of idle wait for nothing.
       await page.setContent(html, { waitUntil: 'domcontentloaded' });
+      // Explicitly emulate print media so the @media print rules in the
+      // canonical T&C HTML body (and any tenant-custom T&C with print-only
+      // overrides) take effect during page.pdf(). Older Puppeteer versions
+      // didn't default to print; calling this is cheap and removes the
+      // ambiguity.
+      await page.emulateMediaType('print');
       // Ensure all inline/data-URL images are decoded before PDF render
       await page.evaluate(() => Promise.all(
         Array.from(document.images)
@@ -3657,6 +3939,345 @@ export const rentalAgreementsService = {
     const refreshed = await this.getById(id);
     if (!refreshed) throw new Error('Rental agreement not found after releasing security deposit');
     return refreshed;
+  },
+
+  // ── Spin (Dejavoo) operational tools ──────────────────────────────
+  // These three methods power the View Payments operational panel.
+  // They act on the iPOS token + deposit hold captured during the new
+  // checkout-wizard-v2 sale/preauth flow. None of them touch the
+  // physical terminal — they're all card-not-present operations against
+  // the saved token / hold reference.
+  //
+  // Each posts a ReservationPayment row (with a TERMINAL gateway tag)
+  // so the View Payments list reflects the new transaction immediately.
+  // The pricing service's maybeCreateAgreementPayment mirror writes a
+  // matching RentalAgreementPayment row, keeping the two ledgers in sync.
+
+  async spinChargeCardOnFile(id, payload = {}, actorUserId = null) {
+    const amount = Number(payload.amount || 0);
+    if (!Number.isFinite(amount) || amount <= 0) {
+      throw new Error('Charge amount must be greater than 0');
+    }
+
+    const agreement = await prisma.rentalAgreement.findUnique({
+      where: { id },
+      include: {
+        reservation: {
+          select: {
+            id: true, tenantId: true, reservationNumber: true,
+            customer: { select: { firstName: true, lastName: true, email: true, phone: true } },
+          },
+        },
+      },
+    });
+    if (!agreement) throw new Error('Rental agreement not found');
+    if (!agreement.cardOnFileToken) {
+      throw new Error('No card on file — complete a Spin sale at checkout first');
+    }
+
+    // Route through the iPOSpays Transact API per the docs — this is
+    // the documented CNP path for tokenized sales (transactionType 1).
+    // Replaces the earlier SPIn-with-Token workaround.
+    const tenantConfig = await loadTenantSpinConfig(agreement.tenantId);
+    const customer = agreement.reservation?.customer || {};
+    const customerName = [
+      agreement.customerFirstName || customer.firstName,
+      agreement.customerLastName || customer.lastName,
+    ].filter(Boolean).join(' ').trim();
+    const response = await iposTransactClient.chargeWithToken({
+      amount,
+      agreementNumber: agreement.agreementNumber || agreement.id,
+      cardToken: agreement.cardOnFileToken,
+      customer: {
+        name: customerName,
+        email: agreement.customerEmail || customer.email || '',
+        phone: agreement.customerPhone || customer.phone || '',
+      },
+      description: payload.notes || 'Card on file charge',
+    }, tenantConfig);
+
+    const norm = iposTransactClient.normalizeResponse(response);
+    if (!norm.approved) {
+      throw new Error(norm.errMessage || norm.message || 'iPOSpays card-on-file charge declined');
+    }
+
+    const reference = `IPOS_COF:${norm.authCode || norm.rrn || norm.referenceId}${agreement.cardOnFileLast4 ? ` ****${agreement.cardOnFileLast4}` : ''}`;
+    const note = String(payload.notes || '').trim();
+    const finalNote = note
+      ? `Spin card-on-file charge · ${note}`
+      : 'Spin card-on-file charge (CNP)';
+
+    const created = await prisma.reservationPayment.create({
+      data: {
+        reservationId: agreement.reservationId,
+        method: 'CARD',
+        amount,
+        reference,
+        status: 'PAID',
+        paidAt: new Date(),
+        origin: 'OTC',
+        gateway: 'SPIN',
+        notes: finalNote
+      }
+    });
+
+    // Mirror into RentalAgreementPayment + update agreement balance.
+    // (Cannot reuse maybeCreateAgreementPayment — it lives in the
+    // pricing service and expects a reservation include shape we don't
+    // have here. Inline mirror is cheaper than another fetch.)
+    try {
+      const mirror = await prisma.rentalAgreementPayment.create({
+        data: {
+          rentalAgreementId: agreement.id,
+          method: 'CARD',
+          amount,
+          reference,
+          status: 'PAID',
+          notes: finalNote
+        }
+      });
+      await prisma.reservationPayment.update({
+        where: { id: created.id },
+        data: { rentalAgreementPaymentId: mirror.id }
+      });
+      const paidAmount = Number((Number(agreement.paidAmount || 0) + amount).toFixed(2));
+      const balance = Math.max(0, Number((Number(agreement.total || 0) - paidAmount).toFixed(2)));
+      await prisma.rentalAgreement.update({
+        where: { id: agreement.id },
+        data: { paidAmount, balance }
+      });
+    } catch {}
+
+    try {
+      await prisma.auditLog.create({
+        data: {
+          tenantId: agreement.tenantId || null,
+          reservationId: agreement.reservationId,
+          actorUserId: actorUserId || null,
+          action: 'UPDATE',
+          reason: `Spin card-on-file charge: $${amount.toFixed(2)}`,
+          metadata: JSON.stringify({ reference, refId, last4: agreement.cardOnFileLast4 || null })
+        }
+      });
+    } catch {}
+
+    return this.getById(id);
+  },
+
+  async spinReleaseDepositHold(id, payload = {}, actorUserId = null) {
+    const agreement = await prisma.rentalAgreement.findUnique({
+      where: { id },
+      include: { reservation: { select: { id: true, tenantId: true, reservationNumber: true } } }
+    });
+    if (!agreement) throw new Error('Rental agreement not found');
+    if (!agreement.depositHoldId) {
+      throw new Error('No active deposit hold on file');
+    }
+    if (agreement.depositHoldVoidedAt) {
+      throw new Error('Deposit hold has already been released');
+    }
+
+    const isManual = String(agreement.depositHoldId || '').startsWith('MANUAL-');
+    const tenantConfig = await loadTenantSpinConfig(agreement.tenantId);
+    let voidRef = agreement.depositHoldId;
+
+    if (!isManual) {
+      // The depositHoldId stored for Transact-issued pre-auths is the
+      // RRN (the void key per Transact docs). For older SPIn-issued
+      // holds it's the SPIn ReferenceId. We try Transact first since
+      // that's the new documented path; on a clearly-malformed RRN we
+      // could fall back to SPIn, but the typical case is one or the
+      // other and the Transact path is the documented one.
+      const response = await iposTransactClient.voidByRrn({
+        rrn: agreement.depositHoldId,
+        agreementNumber: agreement.agreementNumber || agreement.id,
+      }, tenantConfig);
+      const norm = iposTransactClient.normalizeResponse(response);
+      if (!norm.approved) {
+        throw new Error(norm.errMessage || norm.message || 'iPOSpays void declined');
+      }
+      voidRef = norm.rrn || norm.referenceId || agreement.depositHoldId;
+    }
+
+    await prisma.rentalAgreement.update({
+      where: { id: agreement.id },
+      data: {
+        depositHoldVoidedAt: new Date(),
+        securityDepositReleasedAt: new Date(),
+        securityDepositCaptured: false
+      }
+    });
+
+    const heldAmount = Number(agreement.depositHoldAmount || agreement.securityDepositAmount || 0);
+    if (heldAmount > 0) {
+      // Post a $0 informational row so the release appears in the
+      // payments list. We use a zero amount because the original
+      // pre-auth was never settled — the customer is whole.
+      try {
+        await prisma.reservationPayment.create({
+          data: {
+            reservationId: agreement.reservationId,
+            method: 'OTHER',
+            amount: 0,
+            reference: `SPIN_RELEASE:${voidRef}`,
+            status: 'PAID',
+            paidAt: new Date(),
+            origin: 'OTC',
+            gateway: 'SPIN',
+            notes: payload.reason
+              ? `Released deposit hold $${heldAmount.toFixed(2)} · ${payload.reason}`
+              : `Released deposit hold $${heldAmount.toFixed(2)}${isManual ? ' (manual entry)' : ''}`
+          }
+        });
+      } catch {}
+    }
+
+    try {
+      await prisma.auditLog.create({
+        data: {
+          tenantId: agreement.tenantId || null,
+          reservationId: agreement.reservationId,
+          actorUserId: actorUserId || null,
+          action: 'UPDATE',
+          reason: `Spin deposit hold released: $${heldAmount.toFixed(2)}`,
+          metadata: JSON.stringify({
+            originalHoldId: agreement.depositHoldId,
+            voidRef,
+            manual: isManual,
+            reason: payload.reason || null
+          })
+        }
+      });
+    } catch {}
+
+    return this.getById(id);
+  },
+
+  async spinReauthDepositHold(id, payload = {}, actorUserId = null) {
+    const amount = Number(payload.amount || 0);
+    if (!Number.isFinite(amount) || amount <= 0) {
+      throw new Error('Re-auth deposit amount must be greater than 0');
+    }
+
+    const agreement = await prisma.rentalAgreement.findUnique({
+      where: { id },
+      include: {
+        reservation: {
+          select: {
+            id: true, tenantId: true, reservationNumber: true,
+            customer: { select: { firstName: true, lastName: true, email: true, phone: true } },
+          },
+        },
+      },
+    });
+    if (!agreement) throw new Error('Rental agreement not found');
+    if (!agreement.cardOnFileToken) {
+      throw new Error('No card on file — cannot reauthorize without a saved iPOS Token');
+    }
+
+    const tenantConfig = await loadTenantSpinConfig(agreement.tenantId);
+    const customer = agreement.reservation?.customer || {};
+    const customerInfo = {
+      name: [
+        agreement.customerFirstName || customer.firstName,
+        agreement.customerLastName || customer.lastName,
+      ].filter(Boolean).join(' ').trim(),
+      email: agreement.customerEmail || customer.email || '',
+      phone: agreement.customerPhone || customer.phone || '',
+    };
+
+    // 1. If there's an active (un-voided) hold, void it via Transact
+    //    by RRN first. Doing it in two steps so a void failure doesn't
+    //    kill the new auth — the agent can release manually if needed.
+    let voidedOldRef = null;
+    if (agreement.depositHoldId && !agreement.depositHoldVoidedAt) {
+      const isManual = String(agreement.depositHoldId).startsWith('MANUAL-');
+      if (!isManual) {
+        try {
+          const voidResponse = await iposTransactClient.voidByRrn({
+            rrn: agreement.depositHoldId,
+            agreementNumber: agreement.agreementNumber || agreement.id,
+          }, tenantConfig);
+          const voidNorm = iposTransactClient.normalizeResponse(voidResponse);
+          if (voidNorm.approved) voidedOldRef = voidNorm.rrn || agreement.depositHoldId;
+        } catch {
+          // Swallow — surfaced via the new hold's audit log so the agent
+          // can chase the orphan hold via the iPOSpays portal if needed.
+        }
+      } else {
+        voidedOldRef = agreement.depositHoldId;
+      }
+    }
+
+    // 2. New pre-auth via stored iPOS Token (CNP, no customer interaction).
+    const authResponse = await iposTransactClient.preAuthDeposit({
+      amount,
+      agreementNumber: agreement.agreementNumber || agreement.id,
+      cardToken: agreement.cardOnFileToken,
+      customer: customerInfo,
+    }, tenantConfig);
+
+    const norm = iposTransactClient.normalizeResponse(authResponse);
+    if (!norm.approved) {
+      throw new Error(norm.errMessage || norm.message || 'iPOSpays re-auth declined');
+    }
+
+    // Store the RRN — Transact uses RRN as the void key.
+    const newHoldId = norm.rrn || norm.referenceId;
+    const reference = `IPOS_REAUTH:${norm.authCode || newHoldId}`;
+
+    await prisma.rentalAgreement.update({
+      where: { id: agreement.id },
+      data: {
+        depositHoldId: newHoldId,
+        depositHoldAmount: amount,
+        depositHoldVoidedAt: null,
+        depositHoldExpiresAt: null,
+        securityDepositAmount: amount,
+        securityDepositCaptured: true,
+        securityDepositCapturedAt: new Date(),
+        securityDepositReleasedAt: null,
+        securityDepositReference: reference
+      }
+    });
+
+    try {
+      await prisma.reservationPayment.create({
+        data: {
+          reservationId: agreement.reservationId,
+          method: 'AUTH_HOLD',
+          amount,
+          reference,
+          status: 'PAID',
+          paidAt: new Date(),
+          origin: 'OTC',
+          gateway: 'SPIN',
+          notes: voidedOldRef
+            ? `Spin deposit re-authorized $${amount.toFixed(2)} (replaced hold ${voidedOldRef})`
+            : `Spin deposit re-authorized $${amount.toFixed(2)}`
+        }
+      });
+    } catch {}
+
+    try {
+      await prisma.auditLog.create({
+        data: {
+          tenantId: agreement.tenantId || null,
+          reservationId: agreement.reservationId,
+          actorUserId: actorUserId || null,
+          action: 'UPDATE',
+          reason: `Spin deposit reauthorized: $${amount.toFixed(2)}`,
+          metadata: JSON.stringify({
+            newHoldId,
+            voidedOldRef,
+            reference,
+            previousHoldId: agreement.depositHoldId || null
+          })
+        }
+      });
+    } catch {}
+
+    return this.getById(id);
   },
 
   async refundPayment(id, paymentId, payload = {}, actorUserId = null) {

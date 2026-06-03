@@ -18,6 +18,9 @@ import { marketScraperRouter } from './modules/market-scraper/market-scraper.rou
 import { authRouter } from './modules/auth/auth.routes.js';
 import { rentalAgreementsRouter } from './modules/rental-agreements/rental-agreements.routes.js';
 import { addendumSignaturePublicRouter } from './modules/rental-agreements/addendum-signature-public.routes.js';
+import { checkoutSessionRouter, checkoutSessionPublicRouter } from './modules/checkout-session/checkout-session.routes.js';
+import { termsSigningPublicRouter } from './modules/checkout-session/terms-signing.routes.js';
+import { mobileInspectionPublicRouter } from './modules/checkout-session/mobile-inspection.routes.js';
 import { storeBoardRouter } from './modules/store-board/store-board.routes.js';
 import { storeBoardPublicRouter } from './modules/store-board/store-board-public.routes.js';
 import { assertAuthConfig } from './modules/auth/auth.config.js';
@@ -51,6 +54,7 @@ import { plannerRouter } from './modules/planner/planner.routes.js';
 import { paymentGatewayRouter } from './modules/payment-gateway/payment-gateway.routes.js';
 import { startTollAutoSyncScheduler, stopTollAutoSyncScheduler } from './modules/tolls/tolls.scheduler.js';
 import { startHandoffReminderScheduler, stopHandoffReminderScheduler } from './modules/car-sharing/car-sharing.scheduler.js';
+import { startCheckoutSessionCleanupScheduler, stopCheckoutSessionCleanupScheduler } from './modules/checkout-session/checkout-session.scheduler.js';
 import { buildOpenApiSpec, swaggerHtml } from './docs/openapi.js';
 import { smsRouter } from './modules/sms/sms.routes.js';
 import { knowledgeBaseRouter } from './modules/knowledge-base/knowledge-base.routes.js';
@@ -66,6 +70,23 @@ const app = express();
 const allowedOrigins = process.env.ALLOWED_ORIGINS
   ? process.env.ALLOWED_ORIGINS.split(',').map((o) => o.trim()).filter(Boolean)
   : ['http://localhost:3000', 'http://127.0.0.1:3000'];
+
+// In production we strictly match ALLOWED_ORIGINS. In dev we additionally
+// accept any LAN IP on port 3000 so the agent's phone (scanning a QR
+// rendered on the Mac browser at http://192.168.x.x:3000) can hit the
+// backend without manually whitelisting every interface IP. The check
+// covers RFC1918 ranges + link-local + .local mDNS aliases.
+const LAN_ORIGIN_RE = /^https?:\/\/(?:localhost|127\.0\.0\.1|\[::1\]|10\.\d+\.\d+\.\d+|192\.168\.\d+\.\d+|172\.(?:1[6-9]|2\d|3[01])\.\d+\.\d+|[\w-]+\.local)(?::\d+)?$/i;
+const corsOriginFn = (origin, cb) => {
+  // Same-origin / curl / Postman send no Origin header — always allow.
+  if (!origin) return cb(null, true);
+  if (allowedOrigins.includes(origin)) return cb(null, true);
+  if (process.env.NODE_ENV !== 'production' && LAN_ORIGIN_RE.test(origin)) {
+    return cb(null, true);
+  }
+  return cb(new Error(`CORS: origin not allowed: ${origin}`));
+};
+
 app.use(compression({ threshold: 1024 }));
 app.use(requestLogger());
 // PR-5 PERF telemetry — sampled per-request load observations. Mounted
@@ -73,7 +94,7 @@ app.use(requestLogger());
 // tenantId is captured inside res.on("finish") after auth has populated
 // req.user (if any). Sample rate via ENDPOINT_LOAD_SAMPLE_RATE (default 1%).
 app.use(endpointLoadSampler());
-app.use(cors({ origin: allowedOrigins, credentials: true }));
+app.use(cors({ origin: corsOriginFn, credentials: true }));
 app.use(express.json({
   limit: '50mb',
   verify: (req, _res, buf) => {
@@ -142,6 +163,18 @@ app.use('/api/stop-sales', requireAuth, tenantRateLimit, requireModuleAccess('se
 app.use('/api/rates', requireAuth, tenantRateLimit, requireModuleAccess('settings'), requireRole('ADMIN', 'OPS'), ratesRouter);
 app.use('/api/market-scraper', requireAuth, tenantRateLimit, requireModuleAccess('settings'), requireRole('ADMIN', 'OPS'), marketScraperRouter);
 app.use('/api/rental-agreements', requireAuth, tenantRateLimit, requireModuleAccess('reservations'), rentalAgreementsRouter);
+// Dejavoo Spin checkout redesign (Phase 1.2). The auth'd router is for
+// the agent's wizard; the public router below is for the QR token
+// exchange from a customer's phone or the agent's mobile after a handoff.
+app.use('/api/checkout-sessions', requireAuth, tenantRateLimit, requireModuleAccess('reservations'), checkoutSessionRouter);
+app.use('/api/public/checkout-handoff', checkoutSessionPublicRouter);
+// Token-scoped T&C signing — no auth, token in URL is the auth.
+// JSON body limit raised on the parent app already; signature images
+// are ~50KB each so default Express limit (100KB) is fine for now.
+app.use('/api/sign', termsSigningPublicRouter);
+// Token-scoped mobile inspection — same trust model as /api/sign. Photos
+// can run 1-2MB each, so the router applies its own express.json({limit: '15mb'}).
+app.use('/api/mobile-inspection', mobileInspectionPublicRouter);
 // 2026-05-25 — mount Reports v2 router FIRST so the new /list and per-slug
 // data/pdf/excel endpoints win. The legacy reportsRouter stays mounted as
 // a fallthrough for any path the v2 router doesn't define.
@@ -191,6 +224,23 @@ if (process.env.SKIP_LISTEN !== '1') {
     if (isFirstWorker) {
       startTollAutoSyncScheduler();
       startHandoffReminderScheduler();
+      startCheckoutSessionCleanupScheduler();
+      // Surface Spin misconfiguration (missing TPN/key, sandbox on,
+      // dry-run on) at boot rather than at the moment a customer taps
+      // their card. Lazy-load so the unit-test harness doesn't pull
+      // logger into a side-effecting import chain.
+      import('./modules/payment-gateway/spin-client.js')
+        .then(({ auditSpinConfig }) => auditSpinConfig())
+        .catch(() => {});
+      // Same audit for the iPOSpays Transact API (CNP token operations).
+      import('./modules/payment-gateway/ipos-transact-client.js')
+        .then(({ auditIposTransactConfig }) => auditIposTransactConfig())
+        .catch(() => {});
+      // And the auth module — surfaces "auto-refresh on / off" + scope
+      // at boot rather than at first token call.
+      import('./modules/payment-gateway/ipos-auth.js')
+        .then(({ auditIposAuth }) => auditIposAuth())
+        .catch(() => {});
     }
   });
 }
@@ -198,6 +248,7 @@ if (process.env.SKIP_LISTEN !== '1') {
 process.on('SIGINT', async () => {
   stopTollAutoSyncScheduler();
   stopHandoffReminderScheduler();
+  stopCheckoutSessionCleanupScheduler();
   await closeBrowser();
   await flushSentry();
   await prisma.$disconnect();
@@ -207,6 +258,7 @@ process.on('SIGINT', async () => {
 process.on('SIGTERM', async () => {
   stopTollAutoSyncScheduler();
   stopHandoffReminderScheduler();
+  stopCheckoutSessionCleanupScheduler();
   await closeBrowser();
   await flushSentry();
   await prisma.$disconnect();

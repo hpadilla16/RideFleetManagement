@@ -532,7 +532,7 @@ function ReservationsInner({ token, me, logout }) {
   const estimatedWithExtras = Number((baseEstimate + servicesTotal + feesTotal).toFixed(2));
 
   const startRental = async (id) => {
-    router.push(`/reservations/${id}/checkout-wizard`);
+    router.push(`/reservations/${id}/checkout-wizard-v2`);
   };
   const setStatus = async (id, status) => {
     try {

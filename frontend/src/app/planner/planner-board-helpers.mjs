@@ -172,7 +172,7 @@ export function buildPlannerOpsBoard({
           title: 'Next Pickup',
           detail: `${upcoming[0].reservationNumber} - ${upcoming[0].customer?.firstName || ''} ${upcoming[0].customer?.lastName || ''}`.trim(),
           note: `Pickup ${new Date(upcoming[0].pickupAt).toLocaleString()}`,
-          href: `/reservations/${upcoming[0].id}/checkout-wizard`,
+          href: `/reservations/${upcoming[0].id}/checkout-wizard-v2`,
           actionLabel: 'Open Check-out'
         }
       : null,

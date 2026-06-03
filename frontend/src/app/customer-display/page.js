@@ -2,10 +2,31 @@
 
 import { useEffect, useState, useCallback, useRef } from 'react';
 import { api, readStoredToken } from '../../lib/client';
+import QRCode from 'qrcode';
 
-const POLL_INTERVAL = 6000;
+// 2026-05-28 — adaptive polling for the kiosk display.
+// 1.5s while a CheckoutSession is active (we need to react to step
+// transitions in near-realtime), 6s otherwise.
+const POLL_INTERVAL_ACTIVE = 1500;
+const POLL_INTERVAL_IDLE   = 6000;
+const POLL_INTERVAL = POLL_INTERVAL_IDLE;
 const CHANNEL_NAME = 'customer-display';
 const FONT = "Aptos, 'Segoe UI Variable', 'Segoe UI', system-ui, sans-serif";
+
+// Map wizard CheckoutStep enum → step number for the customer-display
+// progress tracker.
+const STEP_TO_NUMBER = {
+  CONFIRMING: 1,
+  TC_PENDING: 2,
+  TC_SIGNED: 2,
+  PAYMENT_PENDING: 3,
+  PAID: 3,
+  INSPECTION_HANDOFF: 4,
+  INSPECTION_IN_PROGRESS: 5,
+  CUSTOMER_SIGN_PENDING: 6,
+  FINALIZING: 6,
+  CLOSED: 6,
+};
 
 function money(n) { return `$${Number(n || 0).toFixed(2)}`; }
 function fmtDate(v) {
@@ -222,12 +243,204 @@ function buildRecommendations({ row, charges, insurancePlans, additionalServices
 }
 
 /* ═══════════════════════════════════════════════════════════════════
+   KIOSK WIZARD HERO — drives the customer display through the
+   6-step checkout-wizard-v2 state machine. Renders the per-step
+   message + customer-facing QR codes (T&C signing in step 2 only;
+   inspection QR is agent-only and stays on the agent wizard).
+   2026-05-28.
+   ═══════════════════════════════════════════════════════════════════ */
+function KioskWizardHero({ session, customer }) {
+  const step = session?.currentStep;
+  const stepNumber = STEP_TO_NUMBER[step] || 1;
+  return (
+    <div style={{ textAlign: 'center' }}>
+      <KioskStepTracker currentNumber={stepNumber} />
+      <div style={{ marginTop: 14 }}>
+        {step === 'CONFIRMING'             && <KioskHeroConfirm customer={customer} />}
+        {step === 'TC_PENDING'             && <KioskHeroTermsPending sessionId={session.id} />}
+        {step === 'TC_SIGNED'              && <KioskHeroBridge label="Terms signed ✓" />}
+        {step === 'PAYMENT_PENDING'        && <KioskHeroPayment />}
+        {step === 'PAID'                   && <KioskHeroBridge label="Payment captured ✓" />}
+        {step === 'INSPECTION_HANDOFF'     && <KioskHeroInspectionHandoff />}
+        {step === 'INSPECTION_IN_PROGRESS' && <KioskHeroInspectionInProgress />}
+        {step === 'CUSTOMER_SIGN_PENDING'  && <KioskHeroCustomerSign />}
+        {step === 'FINALIZING'             && <KioskHeroBridge label="Building your agreement…" />}
+      </div>
+    </div>
+  );
+}
+
+function KioskStepTracker({ currentNumber }) {
+  const steps = [1, 2, 3, 4, 5, 6];
+  return (
+    <div style={{ display: 'flex', justifyContent: 'center', gap: 10 }}>
+      {steps.map((n) => {
+        const isCurrent = n === currentNumber;
+        const isDone = n < currentNumber;
+        return (
+          <div key={n} style={{
+            width: 30, height: 30, borderRadius: '50%',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            background: isCurrent ? '#7c3aed' : isDone ? '#16a34a' : 'rgba(110,73,255,.1)',
+            color: isCurrent || isDone ? '#FFFFFF' : '#a090c8',
+            fontWeight: 800, fontSize: 13,
+            boxShadow: isCurrent ? '0 2px 8px rgba(124,58,237,.3)' : 'none',
+          }}>
+            {isDone ? '✓' : n}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function KioskHeroConfirm({ customer }) {
+  return (
+    <div>
+      <div style={{ fontSize: '1.4rem', fontWeight: 800, color: '#1a1230', marginBottom: 6 }}>
+        Welcome{customer?.firstName ? `, ${customer.firstName}` : ''}!
+      </div>
+      <div style={{ color: '#6b7a9a' }}>Let's confirm your reservation</div>
+    </div>
+  );
+}
+
+function KioskHeroTermsPending({ sessionId }) {
+  return (
+    <div>
+      <div style={{ fontSize: '1.3rem', fontWeight: 800, color: '#1a1230', marginBottom: 6 }}>
+        Sign your rental terms
+      </div>
+      <div style={{ color: '#6b7a9a', marginBottom: 14 }}>Scan the QR with your phone</div>
+      <div style={{
+        display: 'inline-block', padding: 16, background: '#FFFFFF',
+        borderRadius: 12, border: '0.5px solid #E5E7EB',
+      }}>
+        <KioskQr sessionId={sessionId} kind="TERMS_SIGNING" urlPrefix="/sign" size={240} />
+      </div>
+      <div style={{ color: '#94a3b8', fontSize: '0.85rem', marginTop: 10 }}>
+        QR expires in 15 minutes
+      </div>
+    </div>
+  );
+}
+
+function KioskHeroPayment() {
+  return (
+    <div>
+      <div style={{ fontSize: '1.3rem', fontWeight: 800, color: '#1a1230', marginBottom: 6 }}>
+        Review your invoice
+      </div>
+      <div style={{ color: '#6b7a9a' }}>Use the terminal in front of you</div>
+    </div>
+  );
+}
+
+function KioskHeroInspectionHandoff() {
+  // The inspection QR is for the agent's phone, not the customer's.
+  return (
+    <div>
+      <div style={{ fontSize: '1.3rem', fontWeight: 800, color: '#1a1230', marginBottom: 6 }}>
+        Follow your agent outside
+      </div>
+      <div style={{ color: '#6b7a9a' }}>Your agent will walk you to your vehicle.</div>
+      <div style={{ fontSize: 64, marginTop: 14 }}>🚶‍♂️🚗</div>
+    </div>
+  );
+}
+
+function KioskHeroInspectionInProgress() {
+  return (
+    <div>
+      <div style={{ fontSize: '1.3rem', fontWeight: 800, color: '#1a1230', marginBottom: 6 }}>
+        Vehicle inspection in progress
+      </div>
+      <div style={{ color: '#6b7a9a' }}>Your agent is reviewing the car with you</div>
+    </div>
+  );
+}
+
+function KioskHeroCustomerSign() {
+  return (
+    <div>
+      <div style={{ fontSize: '1.3rem', fontWeight: 800, color: '#1a1230', marginBottom: 6 }}>
+        Final signature
+      </div>
+      <div style={{ color: '#6b7a9a' }}>Sign on the agent's phone to complete your rental.</div>
+    </div>
+  );
+}
+
+function KioskHeroBridge({ label }) {
+  return (
+    <div>
+      <div style={{ fontSize: '1.2rem', fontWeight: 700, color: '#166534' }}>{label}</div>
+    </div>
+  );
+}
+
+function KioskQr({ sessionId, kind, urlPrefix, size = 220 }) {
+  const [tokenStr, setTokenStr] = useState(null);
+  const [dataUrl, setDataUrl] = useState(null);
+  const [err, setErr] = useState(null);
+
+  useEffect(() => {
+    if (!sessionId || !kind) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const auth = readStoredToken();
+        if (!auth) return;
+        const endpoint = kind === 'TERMS_SIGNING'
+          ? `/api/checkout-sessions/${sessionId}/terms-token`
+          : `/api/checkout-sessions/${sessionId}/handoff-token`;
+        const t = await api(endpoint, { method: 'POST' }, auth);
+        if (!cancelled) setTokenStr(t.token);
+      } catch (e) {
+        if (!cancelled) setErr(e?.message || 'Could not generate QR');
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [sessionId, kind]);
+
+  useEffect(() => {
+    if (!tokenStr) return;
+    const fullUrl = `${typeof window !== 'undefined' ? window.location.origin : ''}${urlPrefix}/${tokenStr}`;
+    QRCode.toDataURL(fullUrl, { width: size, margin: 1, errorCorrectionLevel: 'M' })
+      .then(setDataUrl)
+      .catch((e) => setErr(e?.message || 'QR render failed'));
+  }, [tokenStr, urlPrefix, size]);
+
+  if (err) return <div style={{ color: '#B91C1C', fontSize: 13 }}>{err}</div>;
+  if (!dataUrl) {
+    return (
+      <div style={{
+        width: size, height: size,
+        background: '#F3F4F6', borderRadius: 8,
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        fontSize: 14, color: '#9CA3AF',
+      }}>Generating QR…</div>
+    );
+  }
+  return (
+    <img
+      src={dataUrl}
+      alt="QR code"
+      width={size}
+      height={size}
+      style={{ display: 'block', borderRadius: 8 }}
+    />
+  );
+}
+
+/* ═══════════════════════════════════════════════════════════════════
    ACTIVE VIEW — Premium 4-panel layout
    ═══════════════════════════════════════════════════════════════════ */
 function ActiveView({ data, branding }) {
   const row = data?.reservation;
   const insurancePlans = data?.insurancePlans || [];
   const additionalServices = data?.additionalServices || [];
+  const checkoutSession = data?.checkoutSession;
   if (!row) return null;
 
   const customer = row?.customer || {};
@@ -292,6 +505,17 @@ function ActiveView({ data, branding }) {
           <div style={{ fontSize: '0.75rem', color: '#8090a8', fontWeight: 600 }}>#{row?.reservationNumber}</div>
         </div>
       </div>
+
+      {/* ── WIZARD-V2 STEP HERO (when a checkout session is active) ────
+          2026-05-28 — Drives the kiosk display through the 6-step
+          state-machine wizard. Renders above the legacy reservation
+          progress bar; both can coexist (the legacy bar still tracks
+          status NEW → CONFIRMED → CHECKED_OUT → CHECKED_IN). */}
+      {checkoutSession && !['CLOSED', 'CANCELLED'].includes(checkoutSession.currentStep) && (
+        <div style={{ ...P, marginBottom: 12, padding: '18px 22px' }}>
+          <KioskWizardHero session={checkoutSession} customer={customer} />
+        </div>
+      )}
 
       {/* ── PROGRESS BAR (full width) ────────────────────────── */}
       <div style={{ ...P, marginBottom: 12, padding: '14px 18px' }}>
@@ -455,6 +679,24 @@ export default function CustomerDisplayPage() {
         const reservation = await api(`/api/reservations/${id}`, { bypassCache: true }, token);
         result = { reservation, insurancePlans: [], additionalServices: [] };
       }
+
+      // 2026-05-28 — Also fetch the active checkout-wizard-v2 session so
+      // the kiosk can render the wizard step hero (QR for T&C, etc.)
+      // alongside the existing reservation summary. The endpoint 404s
+      // when no session exists — that's normal, the page just falls
+      // back to the legacy reservation flow.
+      try {
+        const session = await api(`/api/checkout-sessions/by-reservation/${id}`, { bypassCache: true }, token);
+        result = { ...result, checkoutSession: session };
+      } catch (sessErr) {
+        // 404 is expected when no wizard is in flight; surface other errors
+        // as a console warning so debugging is easier.
+        if (!/404|Not found/i.test(sessErr?.message || '')) {
+          console.warn('[customer-display] session fetch failed:', sessErr?.message);
+        }
+        result = { ...result, checkoutSession: null };
+      }
+
       setData(result);
       setError('');
       if (result?.branding) setBranding(result.branding);
@@ -472,7 +714,7 @@ export default function CustomerDisplayPage() {
     setData(null);
     loadReservation(id);
     if (pollRef.current) clearInterval(pollRef.current);
-    pollRef.current = setInterval(() => loadReservation(id), POLL_INTERVAL);
+    pollRef.current = setInterval(() => loadReservation(id), POLL_INTERVAL_IDLE);
   }, [loadReservation]);
 
   const deactivate = useCallback(() => {
@@ -513,6 +755,21 @@ export default function CustomerDisplayPage() {
   }, [activateReservation]);
 
   useEffect(() => { return () => { if (pollRef.current) clearInterval(pollRef.current); }; }, []);
+
+  // 2026-05-28 — Switch to fast polling when a wizard session is in flight.
+  // Step transitions on the agent's screen should reflect on the kiosk
+  // within ~1.5s instead of ~6s.
+  useEffect(() => {
+    if (!reservationId) return;
+    const session = data?.checkoutSession;
+    const isActiveSession = session && !['CLOSED', 'CANCELLED'].includes(session.currentStep);
+    if (pollRef.current) clearInterval(pollRef.current);
+    pollRef.current = setInterval(
+      () => loadReservation(reservationId),
+      isActiveSession ? POLL_INTERVAL_ACTIVE : POLL_INTERVAL_IDLE,
+    );
+    return () => { if (pollRef.current) clearInterval(pollRef.current); };
+  }, [reservationId, data?.checkoutSession?.currentStep, loadReservation]);
 
   if (!reservationId) return <IdleScreen branding={branding} />;
 

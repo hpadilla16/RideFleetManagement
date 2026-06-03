@@ -6,27 +6,115 @@ import logger from '../../lib/logger.js';
  * Docs: https://docs.ipospays.com/spin-specification
  * REST API: https://app.theneo.io/dejavoo/spin/spin-rest-api-methods
  *
- * Production: https://api.spinpos.net
- * Sandbox:    https://test.spinpos.net/spin
+ * 2026-05-29 — PRODUCTION-ONLY. We do not run against the Dejavoo
+ * sandbox at all. Hector's TPN + AuthKey are bound to a live
+ * production terminal; the sandbox endpoint would reject them and
+ * even if it accepted them, no funds would settle. The previous
+ * sandbox URL / SPIN_SANDBOX / SPIN_ENV plumbing has been removed
+ * so there's no code path that can route to test.spinpos.net.
+ *
+ * For local development WITHOUT a terminal: use SPIN_DRY_RUN=true,
+ * which short-circuits every call to a synthetic approved response.
  */
 
 const SPIN_PRODUCTION_URL = 'https://api.spinpos.net';
-const SPIN_SANDBOX_URL = 'https://test.spinpos.net/spin';
 
 function getConfig(tenantConfig = {}) {
-  const useSandbox = tenantConfig.spinSandbox !== false && process.env.SPIN_SANDBOX !== 'false';
   return {
-    baseUrl: useSandbox ? SPIN_SANDBOX_URL : SPIN_PRODUCTION_URL,
+    // Hard-coded production endpoint. No sandbox flag. No env override.
+    baseUrl: SPIN_PRODUCTION_URL,
     authKey: tenantConfig.spinAuthKey || process.env.SPIN_AUTH_KEY || '',
     tpn: tenantConfig.spinTpn || process.env.SPIN_TPN || '',
     merchantNumber: tenantConfig.spinMerchantNumber ? Number(tenantConfig.spinMerchantNumber) : 1,
     callbackUrl: tenantConfig.spinCallbackUrl || process.env.SPIN_CALLBACK_URL || '',
+    // Server-side proxy timeout (seconds) — how long Spin waits for the
+    // terminal to respond before giving up. 120s is the Dejavoo default
+    // and matches a typical customer interaction (tap → PIN → email).
     proxyTimeout: Number(tenantConfig.spinProxyTimeout || process.env.SPIN_PROXY_TIMEOUT || 120),
-    sandbox: useSandbox,
+    // Client-side fetch timeout (ms). Slightly above the server proxy
+    // timeout so the server has time to surface its own timeout error
+    // before our fetch aborts. PRIOR BUG: no client timeout — a stuck
+    // terminal hung the wizard request forever.
+    clientTimeoutMs: Number(
+      tenantConfig.spinClientTimeoutMs || process.env.SPIN_CLIENT_TIMEOUT_MS || 130000,
+    ),
+  };
+}
+
+// One-time startup audit so misconfiguration surfaces in the boot log
+// rather than at the moment a customer taps their card. Logs a warning
+// for each potential foot-gun: dry-run on, missing TPN/key.
+let auditLogged = false;
+export function auditSpinConfig() {
+  if (auditLogged) return;
+  auditLogged = true;
+  const cfg = getConfig();
+  const dry = String(process.env.SPIN_DRY_RUN || '').toLowerCase() === 'true';
+  const env = String(process.env.NODE_ENV || '').toLowerCase();
+  if (dry && env === 'production') {
+    logger.error('[spin-client] CRITICAL: SPIN_DRY_RUN=true in production — every charge will be synthetic. Unset this immediately.');
+  } else if (dry) {
+    logger.warn('[spin-client] SPIN_DRY_RUN=true — terminal calls return synthetic approvals.');
+  }
+  if (!cfg.authKey || !cfg.tpn) {
+    logger.warn('[spin-client] Spin credentials missing', {
+      hasAuthKey: !!cfg.authKey, hasTpn: !!cfg.tpn,
+      hint: 'Set SPIN_AUTH_KEY and SPIN_TPN — these are live production credentials.',
+    });
+  } else {
+    logger.info('[spin-client] Spin production credentials loaded', {
+      endpoint: cfg.baseUrl,
+      tpn: cfg.tpn.slice(0, 4) + '****' + cfg.tpn.slice(-4),
+      proxyTimeout: cfg.proxyTimeout,
+      clientTimeoutMs: cfg.clientTimeoutMs,
+    });
+  }
+}
+
+// dryRun short-circuits every Spin call to return a synthetic approved
+// response. Used during dev / when no terminal is reachable. Enable per
+// tenant via tenantConfig.spinDryRun or globally via SPIN_DRY_RUN=true.
+// The synthetic response includes a fake token, last4=4242, and brand=VISA
+// so the downstream wizard + card-on-file persistence still exercises
+// the full code path. 2026-05-28.
+function isDryRun(tenantConfig = {}) {
+  return tenantConfig.spinDryRun === true || String(process.env.SPIN_DRY_RUN || '').toLowerCase() === 'true';
+}
+
+function syntheticResponse(path, body) {
+  const refId = body?.ReferenceId || `dry-${Date.now()}`;
+  return {
+    GeneralResponse: {
+      StatusCode: '0000',
+      ResultCode: 0,
+      Message: 'DryRun OK',
+      DetailedMessage: `Synthetic ${path} response (SPIN_DRY_RUN=true)`,
+    },
+    ReferenceId: refId,
+    AuthCode: `DR${Math.floor(Math.random() * 900000 + 100000)}`,
+    Token: `dry-tok-${refId}`,
+    IPosToken: `dry-ipos-${refId}`,
+    CardData: {
+      CardType: 'VISA',
+      EntryType: 'Insert',
+      Last4: '4242',
+      First4: '4111',
+      BIN: '411111',
+      ExpirationDate: '12/29',
+      Name: 'DRY RUN',
+    },
+    BatchNumber: '0',
+    SerialNumber: '0',
+    PaymentType: body?.PaymentType || 'Credit',
+    TransactionType: path.includes('Auth') ? 'Auth' : (path.includes('Sale') ? 'Sale' : 'Other'),
   };
 }
 
 async function spinRequest(method, path, body, tenantConfig = {}) {
+  if (isDryRun(tenantConfig)) {
+    logger.info(`SPIn DRY-RUN ${method} ${path}`, { spinPath: path });
+    return syntheticResponse(path, body || {});
+  }
   const config = getConfig(tenantConfig);
   if (!config.authKey) throw new Error('SPIn authKey is not configured');
   if (!config.tpn) throw new Error('SPIn terminal TPN is not configured');
@@ -44,22 +132,74 @@ async function spinRequest(method, path, body, tenantConfig = {}) {
     payload.CallbackInfo = { Url: config.callbackUrl };
   }
 
-  logger.info(`SPIn API ${method} ${path}`, { spinPath: path, sandbox: config.sandbox });
+  logger.info(`SPIn API ${method} ${path}`, { spinPath: path });
 
-  const res = await fetch(url, {
-    method,
-    headers: { 'Content-Type': 'application/json' },
-    body: method !== 'GET' ? JSON.stringify(payload) : undefined,
-  });
+  // Hard fetch timeout so a hung terminal doesn't lock the wizard
+  // forever. Uses AbortController instead of Promise.race so the
+  // underlying socket actually closes when we abort. PRIOR BUG: there
+  // was no client-side timeout — a customer walking away mid-transaction
+  // could leave the agent's screen spinning indefinitely.
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), config.clientTimeoutMs);
+  let res;
+  try {
+    res = await fetch(url, {
+      method,
+      headers: { 'Content-Type': 'application/json' },
+      body: method !== 'GET' ? JSON.stringify(payload) : undefined,
+      signal: controller.signal,
+    });
+  } catch (err) {
+    clearTimeout(timeout);
+    if (err?.name === 'AbortError') {
+      const msg = `SPIn request timed out after ${Math.round(config.clientTimeoutMs / 1000)}s — terminal may be offline or stuck on customer input`;
+      logger.warn(msg, { spinPath: path });
+      const e = new Error(msg);
+      e.spinTimeout = true;
+      throw e;
+    }
+    throw err;
+  }
+  clearTimeout(timeout);
 
   const text = await res.text();
   let data;
   try { data = JSON.parse(text); } catch { data = { raw: text }; }
 
-  if (!res.ok || data?.GeneralResponse?.ResultCode !== 0) {
-    const code = data?.GeneralResponse?.StatusCode || res.status;
-    const msg = data?.GeneralResponse?.Message || data?.GeneralResponse?.DetailedMessage || `SPIn request failed (${code})`;
-    logger.warn(`SPIn API error: ${msg}`, { spinPath: path, statusCode: code, resultCode: data?.GeneralResponse?.ResultCode });
+  // 2026-05-28 — Dejavoo response success detection.
+  //
+  // The Spin API returns ResultCode as either a number 0 or a string
+  // "0" depending on environment + endpoint. We also need to handle
+  // the case where ResultCode might be present but the actual signal
+  // for success is Message === "Approved" or the AuthCode field is
+  // populated. Strict `!== 0` was rejecting genuine approvals
+  // (Hector's production card-tap on 2026-05-28 showed "Sale declined:
+  // Approved" — terminal physically approved, response had
+  // Message="Approved" but ResultCode was something we weren't
+  // recognizing as success).
+  const gr = data?.GeneralResponse || {};
+  const resultCodeRaw = gr.ResultCode;
+  const resultCodeNum = Number(resultCodeRaw);
+  const message = String(gr.Message || '').trim();
+  const detailedMessage = String(gr.DetailedMessage || '').trim();
+  const hasAuthCode = Boolean(data?.AuthCode || data?.Authcode || data?.authCode);
+  const looksApproved = /^approved$|^approval$|^success$/i.test(message)
+    || /^approved$|^approval$|^success$/i.test(detailedMessage);
+
+  const isSuccess = res.ok && (
+    resultCodeNum === 0
+    || (resultCodeRaw === '0')
+    || looksApproved
+    || hasAuthCode
+  );
+
+  if (!isSuccess) {
+    const code = gr.StatusCode || res.status;
+    const msg = message || detailedMessage || `SPIn request failed (${code})`;
+    logger.warn(`SPIn API error: ${msg}`, {
+      spinPath: path, statusCode: code,
+      resultCode: resultCodeRaw, resultCodeType: typeof resultCodeRaw,
+    });
     const err = new Error(msg);
     err.spinStatusCode = code;
     err.spinResponse = data;
@@ -72,8 +212,22 @@ async function spinRequest(method, path, body, tenantConfig = {}) {
 export const spinClient = {
   /**
    * Process a sale (charge).
+   *
+   * 2026-05-30 — Reverted to the minimal field set after a live test
+   * hit StatusCode 2201 / ResultCode 2 ("Error") on the new payload.
+   * The added flags (GetToken, EnableTip, PrintReceipt) appear to be
+   * unrecognized by this merchant's Spin proxy configuration, and
+   * including them causes the gateway to reject the request before
+   * forwarding to the terminal (confirmed: nothing appeared in the
+   * Dejavoo merchant portal). GetExtendedData:true alone has
+   * historically returned the iPOS token; we keep that and let the
+   * downstream Transact CNP hold fall back to card-present if no
+   * token comes back.
    */
-  async sale({ amount, referenceId, paymentType = 'Credit', tipAmount, invoiceNumber, cart, customFields }, tenantConfig) {
+  async sale({
+    amount, referenceId, paymentType = 'Credit', tipAmount, invoiceNumber,
+    cart, customFields,
+  }, tenantConfig) {
     return spinRequest('POST', 'v2/Payment/Sale', {
       Amount: Number(amount),
       PaymentType: paymentType,
@@ -88,7 +242,9 @@ export const spinClient = {
   },
 
   /**
-   * Authorize only (hold funds, capture later).
+   * Authorize only (hold funds, capture later). Same minimal-payload
+   * rule as sale() — added optional flags broke this merchant's Spin
+   * proxy, so we keep only the proven-working set.
    */
   async auth({ amount, referenceId, paymentType = 'Credit', invoiceNumber }, tenantConfig) {
     return spinRequest('POST', 'v2/Payment/Auth', {
@@ -111,7 +267,15 @@ export const spinClient = {
   },
 
   /**
-   * Void a transaction.
+   * Void a transaction. Used to release a pre-auth deposit hold (the
+   * release-deposit operational tool) and to roll back a sale when the
+   * deposit hold declines mid-checkout.
+   *
+   * 2026-05-30 — Reverted to minimal payload (ReferenceId only) after
+   * a Sale call with the new field set hit StatusCode 2201. Optional
+   * fields appear to be unrecognized by this merchant's Spin proxy.
+   * Dejavoo dedupes by ReferenceId, so passing the original sale/auth's
+   * ReferenceId triggers the void on that exact transaction.
    */
   async void({ referenceId }, tenantConfig) {
     return spinRequest('POST', 'v2/Payment/Void', {
@@ -146,6 +310,57 @@ export const spinClient = {
   async getCard({ referenceId }, tenantConfig) {
     return spinRequest('POST', 'v2/Payment/GetCard', {
       ReferenceId: String(referenceId).slice(0, 50),
+    }, tenantConfig);
+  },
+
+  /**
+   * Security-deposit pre-authorization (2026-05-28). Semantic wrapper
+   * around auth() — the underlying Spin endpoint is the same v2/Payment/Auth,
+   * but the wizard reads this as "hold these funds for the deposit",
+   * not "preauth that we'll capture later". The hold's reference id is
+   * what we persist as RentalAgreement.depositHoldId so we can void it
+   * via the nightly cleanup job when a session is abandoned.
+   */
+  async preAuthDeposit({ amount, referenceId, paymentType = 'Credit', invoiceNumber, token }, tenantConfig) {
+    const isCnp = Boolean(token);
+    return spinRequest('POST', 'v2/Payment/Auth', {
+      Amount: Number(amount),
+      PaymentType: paymentType,
+      ReferenceId: String(referenceId).slice(0, 50),
+      ...(invoiceNumber ? { InvoiceNumber: String(invoiceNumber).slice(0, 50) } : {}),
+      // When a token is provided we're holding against a previously-
+      // tokenized card (CNP). Without it the terminal prompts for tap/
+      // insert/swipe just like a normal Auth.
+      // 2026-05-30 — token-CNP path on SPIn is now reserved as a
+      // fallback only; the documented path for tokenized CNP is the
+      // iPOSpays Transact API (ipos-transact-client.js). Token kept
+      // here for non-Transact deployments. EnableTip/PrintReceipt
+      // dropped — caused gateway StatusCode 2201 on the configured
+      // merchant proxy.
+      ...(isCnp ? { Token: String(token), CardPresent: false } : {}),
+      GetExtendedData: true,
+    }, tenantConfig);
+  },
+
+  /**
+   * Charge a previously-tokenized card (card-not-present). Used post-
+   * checkout for autocharges (tolls, overage fuel, damage). The token
+   * comes from the initial Sale in step 3 — agreement.cardOnFileToken.
+   */
+  async chargeWithToken({ amount, referenceId, token, paymentType = 'Credit', invoiceNumber }, tenantConfig) {
+    if (!token) throw new Error('chargeWithToken requires a token');
+    return spinRequest('POST', 'v2/Payment/Sale', {
+      Amount: Number(amount),
+      PaymentType: paymentType,
+      ReferenceId: String(referenceId).slice(0, 50),
+      Token: String(token),
+      ...(invoiceNumber ? { InvoiceNumber: String(invoiceNumber).slice(0, 50) } : {}),
+      // Tells Spin to bill a stored token (no physical card present).
+      // 2026-05-30 — EnableTip/PrintReceipt removed (gateway rejected
+      // with StatusCode 2201). Primary CNP path is now iPOSpays
+      // Transact API; this Spin-with-Token method is a fallback only.
+      CardPresent: false,
+      GetExtendedData: true,
     }, tenantConfig);
   },
 
@@ -226,5 +441,22 @@ export const spinClient = {
       paymentType: spinResponse?.PaymentType || '',
       transactionType: spinResponse?.TransactionType || '',
     };
-  }
+  },
+
+  /**
+   * Extract the card-on-file fields we persist to RentalAgreement so
+   * subsequent CNP charges (tolls / overage / damage) can run through
+   * chargeWithToken. Returns null if the response didn't include a
+   * tokenized card (e.g. cash payment, terminal misconfigured, etc).
+   */
+  extractCardOnFile(spinResponse) {
+    const norm = this.normalizeResponse(spinResponse);
+    if (!norm.token && !norm.iposToken) return null;
+    return {
+      token: norm.iposToken || norm.token,
+      brand: norm.cardData?.cardType || null,
+      last4: norm.cardData?.last4 || null,
+      capturedAt: new Date(),
+    };
+  },
 };

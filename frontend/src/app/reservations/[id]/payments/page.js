@@ -52,6 +52,27 @@ function deriveSecurityDepositHold(row) {
   };
 }
 
+// Derive Spin (Dejavoo) card-on-file + deposit hold state for the
+// operational tools panel. agreement.cardOnFileLast4 + cardOnFileCapturedAt
+// signal that step 3 of the new wizard captured an iPOS token. The
+// token itself is NEVER sent to the frontend — all charges run server-side.
+function deriveSpinState(row) {
+  const agreement = row?.rentalAgreement || null;
+  const hasCardOnFile = !!(agreement?.cardOnFileLast4 || agreement?.cardOnFileCapturedAt);
+  const depositHoldActive = !!(agreement?.depositHoldId && !agreement?.depositHoldVoidedAt);
+  return {
+    hasCardOnFile,
+    brand: agreement?.cardOnFileBrand || '',
+    last4: agreement?.cardOnFileLast4 || '',
+    capturedAt: agreement?.cardOnFileCapturedAt || null,
+    depositHoldActive,
+    depositHoldId: agreement?.depositHoldId || '',
+    depositHoldAmount: Number(agreement?.depositHoldAmount || agreement?.securityDepositAmount || 0),
+    depositHoldVoidedAt: agreement?.depositHoldVoidedAt || null,
+    isManualHold: String(agreement?.depositHoldId || '').startsWith('MANUAL-')
+  };
+}
+
 export default function Page() {
   return <AuthGate>{({ token, me, logout }) => <Inner token={token} me={me} logout={logout} />}</AuthGate>;
 }
@@ -140,6 +161,13 @@ function Inner({ token, me, logout }) {
   const dueNowLabel = unpaid > 0 ? 'Payment Still Needed' : 'Paid In Full';
   const securityDepositHold = useMemo(() => deriveSecurityDepositHold(row), [row]);
   const cardOnFileReady = !!(row?.customer?.authnetCustomerProfileId && row?.customer?.authnetPaymentProfileId);
+  const spinState = useMemo(() => deriveSpinState(row), [row]);
+
+  // Spin operational tools — form state for the three new actions.
+  const [spinChargeAmount, setSpinChargeAmount] = useState('');
+  const [spinChargeNotes, setSpinChargeNotes] = useState('');
+  const [spinReleaseReason, setSpinReleaseReason] = useState('');
+  const [spinReauthAmount, setSpinReauthAmount] = useState('');
 
   useEffect(() => {
     if (!cardChargeAmount && unpaid > 0) {
@@ -152,6 +180,22 @@ function Inner({ token, me, logout }) {
       setHoldAmount(securityDepositHold.amount.toFixed(2));
     }
   }, [securityDepositHold.amount, holdAmount]);
+
+  // Prefill Spin "Charge card on file" with the unpaid balance and the
+  // re-auth amount with the existing hold amount (or configured deposit
+  // amount if no hold yet). Both leave manual entries alone.
+  useEffect(() => {
+    if (!spinChargeAmount && unpaid > 0) {
+      setSpinChargeAmount(unpaid.toFixed(2));
+    }
+  }, [unpaid, spinChargeAmount]);
+
+  useEffect(() => {
+    if (!spinReauthAmount) {
+      const target = spinState.depositHoldAmount || securityDepositHold.amount;
+      if (target > 0) setSpinReauthAmount(target.toFixed(2));
+    }
+  }, [spinState.depositHoldAmount, securityDepositHold.amount, spinReauthAmount]);
 
   // When the agent flips Method to AUTH_HOLD, prefill Amount with the
   // configured security-deposit amount (typical workflow: swipe card for
@@ -265,6 +309,48 @@ function Inner({ token, me, logout }) {
       body: {},
       successMessage: 'Security deposit hold released',
       busyKey: 'release-hold'
+    });
+  };
+
+  // ── Spin (Dejavoo) operational tool handlers ──────────────────────
+  // These hit the new server-side endpoints that operate against the
+  // saved iPOS token + deposit hold reference. The token never leaves
+  // the server. The unpaid-balance auto-prefill makes the typical
+  // "settle the remaining balance" flow a single click.
+  const spinChargeOnFile = async () => {
+    const v = Number(spinChargeAmount || 0);
+    if (!(v > 0)) return setMsg('Enter a valid Spin charge amount');
+    await runPaymentAction(`/api/reservations/${id}/agreement/spin/charge-card-on-file`, {
+      body: { amount: v, notes: spinChargeNotes || undefined },
+      successMessage: `Spin card-on-file charged: $${v.toFixed(2)}`,
+      busyKey: 'spin-charge'
+    });
+    setSpinChargeAmount('');
+    setSpinChargeNotes('');
+  };
+
+  const spinReleaseDeposit = async () => {
+    const reason = String(spinReleaseReason || '').trim();
+    if (!reason) return setMsg('Enter a reason for releasing the deposit hold');
+    if (!window.confirm(`Release the Spin deposit hold? This voids the authorization on the customer's card.`)) return;
+    await runPaymentAction(`/api/reservations/${id}/agreement/spin/release-deposit`, {
+      body: { reason },
+      successMessage: 'Spin deposit hold released',
+      busyKey: 'spin-release'
+    });
+    setSpinReleaseReason('');
+  };
+
+  const spinReauthDeposit = async () => {
+    const v = Number(spinReauthAmount || 0);
+    if (!(v > 0)) return setMsg('Enter a valid re-authorization amount');
+    if (spinState.depositHoldActive) {
+      if (!window.confirm(`This will VOID the existing $${spinState.depositHoldAmount.toFixed(2)} hold and place a new $${v.toFixed(2)} hold on the same card. Proceed?`)) return;
+    }
+    await runPaymentAction(`/api/reservations/${id}/agreement/spin/reauth-deposit`, {
+      body: { amount: v },
+      successMessage: `Spin deposit re-authorized: $${v.toFixed(2)}`,
+      busyKey: 'spin-reauth'
     });
   };
 
@@ -513,6 +599,128 @@ function Inner({ token, me, logout }) {
             </div>
           </div>
         </div>
+
+        {(spinState.hasCardOnFile || spinState.depositHoldActive) ? (
+          <section
+            className="surface-note"
+            style={{ marginTop: 18, padding: 16, borderRadius: 12, background: 'rgba(13, 148, 136, 0.06)', border: '1px solid rgba(13, 148, 136, 0.25)' }}
+          >
+            <div className="row-between" style={{ marginBottom: 12 }}>
+              <div className="stack" style={{ gap: 4 }}>
+                <span className="eyebrow">Dejavoo Spin · Card on File</span>
+                <h3 style={{ margin: 0 }}>Operational Tools</h3>
+                <p className="ui-muted" style={{ margin: 0 }}>
+                  Card-not-present operations against the iPOS token captured at checkout. No second tap required.
+                </p>
+              </div>
+              {spinState.hasCardOnFile ? (
+                <span className="status-chip good">
+                  {spinState.brand ? `${spinState.brand} ` : ''}****{spinState.last4 || '----'}
+                </span>
+              ) : null}
+            </div>
+
+            {spinState.hasCardOnFile ? (
+              <div className="grid3" style={{ marginBottom: 12 }}>
+                <div className="stack">
+                  <label className="label">Charge Card on File</label>
+                  <input
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    value={spinChargeAmount}
+                    onChange={(e) => setSpinChargeAmount(e.target.value)}
+                    placeholder={unpaid > 0 ? unpaid.toFixed(2) : '0.00'}
+                  />
+                  <span className="ui-muted">Charges {spinState.brand || 'saved card'} ****{spinState.last4 || '----'} via Dejavoo CNP.</span>
+                </div>
+                <div className="stack">
+                  <label className="label">Note (optional)</label>
+                  <input
+                    value={spinChargeNotes}
+                    onChange={(e) => setSpinChargeNotes(e.target.value)}
+                    placeholder="e.g. toll reimbursement, late fee"
+                  />
+                </div>
+                <div className="stack" style={{ alignSelf: 'end' }}>
+                  <button onClick={spinChargeOnFile} disabled={!!actionBusy}>
+                    {actionBusy === 'spin-charge' ? 'Charging...' : 'Charge Spin Card on File'}
+                  </button>
+                </div>
+              </div>
+            ) : null}
+
+            {spinState.depositHoldActive ? (
+              <>
+                <div className="surface-note" style={{ marginBottom: 12, background: 'rgba(245, 158, 11, 0.08)', borderColor: 'rgba(245, 158, 11, 0.3)' }}>
+                  <strong>Active Deposit Hold:</strong> ${spinState.depositHoldAmount.toFixed(2)} · Ref {spinState.depositHoldId}
+                  {spinState.isManualHold ? <span style={{ marginLeft: 6, padding: '2px 6px', borderRadius: 4, fontSize: 10, fontWeight: 700, background: '#fef3c7', color: '#92400e' }}>MANUAL</span> : null}
+                </div>
+                <div className="grid3" style={{ marginBottom: 12 }}>
+                  <div className="stack">
+                    <label className="label">Release Hold · Reason <span style={{ color: '#ef4444' }}>*</span></label>
+                    <input
+                      value={spinReleaseReason}
+                      onChange={(e) => setSpinReleaseReason(e.target.value)}
+                      placeholder="e.g. clean return, no damages"
+                    />
+                    <span className="ui-muted">
+                      {spinState.isManualHold
+                        ? 'Manual hold — releasing only updates Ride Fleet records (no terminal void).'
+                        : 'Voids the Spin authorization on the customer’s card.'}
+                    </span>
+                  </div>
+                  <div className="stack">
+                    <label className="label">Re-Authorize Deposit · New Amount</label>
+                    <input
+                      type="number"
+                      min="0"
+                      step="0.01"
+                      value={spinReauthAmount}
+                      onChange={(e) => setSpinReauthAmount(e.target.value)}
+                    />
+                    <span className="ui-muted">Voids old hold, places new hold on saved card.</span>
+                  </div>
+                  <div className="stack" style={{ alignSelf: 'end' }}>
+                    <button onClick={spinReleaseDeposit} disabled={!!actionBusy || !spinReleaseReason.trim()}>
+                      {actionBusy === 'spin-release' ? 'Releasing...' : 'Release Deposit Hold'}
+                    </button>
+                    <div style={{ marginTop: 8 }}>
+                      <button onClick={spinReauthDeposit} disabled={!!actionBusy || !spinState.hasCardOnFile}>
+                        {actionBusy === 'spin-reauth' ? 'Re-authorizing...' : 'Re-Authorize Deposit'}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </>
+            ) : spinState.hasCardOnFile ? (
+              <div className="grid3" style={{ marginBottom: 12 }}>
+                <div className="stack">
+                  <label className="label">Place New Deposit Hold · Amount</label>
+                  <input
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    value={spinReauthAmount}
+                    onChange={(e) => setSpinReauthAmount(e.target.value)}
+                  />
+                  <span className="ui-muted">No active hold on file. Places one against the saved card.</span>
+                </div>
+                <div className="stack" style={{ alignSelf: 'end' }}>
+                  <button onClick={spinReauthDeposit} disabled={!!actionBusy}>
+                    {actionBusy === 'spin-reauth' ? 'Authorizing...' : 'Authorize Deposit Hold'}
+                  </button>
+                </div>
+              </div>
+            ) : null}
+
+            {spinState.capturedAt ? (
+              <span className="ui-muted" style={{ fontSize: 11 }}>
+                Card captured {new Date(spinState.capturedAt).toLocaleString()}
+              </span>
+            ) : null}
+          </section>
+        ) : null}
 
         <table style={{ marginTop: 12 }}>
           <thead><tr><th>Date</th><th>Method</th><th>Amount</th><th>Reference</th><th>Actions</th></tr></thead>

@@ -99,6 +99,28 @@ export async function closeAgreementWithCheckinFees(
     }
   });
 
+  // "Last odometer wins" — when a check-in records an odometer reading,
+  // also flip Vehicle.mileage so the next check-out auto-populates from
+  // the freshest known value. Stamp lastOdometerSource with the
+  // reservation number so the audit trail says which workflow last
+  // touched the row. 2026-05-28.
+  if (odometerIn != null && agreement.vehicleId) {
+    try {
+      await prisma.vehicle.update({
+        where: { id: agreement.vehicleId },
+        data: {
+          mileage: odometerIn,
+          lastOdometerSource: `CHECKIN_${agreement.reservation?.reservationNumber || agreement.reservationId}`,
+        },
+      });
+    } catch (err) {
+      logger.warn('[checkin-close] Vehicle.mileage update failed', {
+        vehicleId: agreement.vehicleId, err: err.message,
+      });
+      // Non-fatal — checkin proceeds without the mileage sync.
+    }
+  }
+
   // ─────────────────────────────────────────────────────────────────────────
   // Step 2 — Apply manual payment FIRST (so fees can be partially or fully
   // covered by a counter payment). We add the payment row, then recompute

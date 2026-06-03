@@ -477,8 +477,12 @@ function defaultPaymentGatewayConfig() {
       locationId: String(process.env.SQUARE_LOCATION_ID || '')
     },
     spin: {
+      // 2026-05-29 — Production-only deployment. The Spin client no
+      // longer has a sandbox code path (SPIN_ENV / SPIN_SANDBOX removed);
+      // exposing those fields here would be misleading. environment is
+      // pinned to 'production' for the admin panel display.
       enabled: !!process.env.SPIN_AUTH_KEY,
-      environment: String(process.env.SPIN_ENV || 'sandbox').toLowerCase(),
+      environment: 'production',
       authKey: String(process.env.SPIN_AUTH_KEY || ''),
       tpn: String(process.env.SPIN_TPN || ''),
       merchantNumber: String(process.env.SPIN_MERCHANT_NUMBER || '1'),

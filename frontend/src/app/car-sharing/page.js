@@ -1205,7 +1205,7 @@ function CarSharingInner({ token, me, logout }) {
                             <a href={`/reservations/${trip.reservation.id}`}>
                               <button type="button">Open Workflow</button>
                             </a>
-                            <a href={`/reservations/${trip.reservation.id}/checkout-wizard`}>
+                            <a href={`/reservations/${trip.reservation.id}/checkout-wizard-v2`}>
                               <button type="button" className="button-subtle">Checkout</button>
                             </a>
                             <a href={`/reservations/${trip.reservation.id}/checkin-wizard`}>
