@@ -704,7 +704,21 @@ async function runDepositHold({ sessionId, depositAmount: depositAmountHint, act
   // (b) Card-present path (pre-paid customers, no prior sale) — still
   //     goes through SPIn /v2/Payment/Auth at the physical terminal so
   //     the response can tokenize the card for post-rental incidentals.
-  const useTokenPath = Boolean(agreement.cardOnFileToken);
+  // CNP deposit hold uses the iPOSpays Transact API (tokenized PreAuth). That
+  // requires the Transact / card-on-file channel to be PROVISIONED on the
+  // merchant TPN — if it isn't, every tokenized Transact call (Sale + PreAuth)
+  // returns the generic DEJ_ERR_003 "Transaction Failed". Until Dejavoo enables
+  // that channel, set IPOS_FORCE_CARD_PRESENT_DEPOSIT=true to take the deposit
+  // as a card-present Auth at the terminal (a second tap — fine at checkout
+  // since the customer is at the counter). The card token is still captured at
+  // the sale and stored for later, so flipping this flag back off restores the
+  // no-second-tap CNP hold once the channel is live.
+  const forceCardPresentDeposit = String(
+    tenantConfig.iposForceCardPresentDeposit
+    ?? process.env.IPOS_FORCE_CARD_PRESENT_DEPOSIT
+    ?? '',
+  ).toLowerCase() === 'true';
+  const useTokenPath = Boolean(agreement.cardOnFileToken) && !forceCardPresentDeposit;
   let preauthResponse;
   let preauthNorm;
   // Where we store the hold key. For Transact, depositHoldId holds the
