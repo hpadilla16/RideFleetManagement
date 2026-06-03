@@ -534,26 +534,31 @@ async function runSale({ sessionId, amount, actorUserId }) {
   const tenantConfig = await loadTenantSpinConfig(session.reservation.tenantId).catch(() => ({}));
   const refId = `${session.reservation.reservationNumber}-SALE-${Date.now().toString(36)}`;
 
-  // The SALE is the rental owed, NOT the security deposit (which is a separate
-  // pre-auth hold). The wizard's `amount` is advisory and a frontend that can't
-  // see the deposit charge sends the full balance — so resolve the true sale
-  // here from the agreement (source of truth): sale = balance − security deposit.
-  const depositCol = Number(session.agreement.securityDepositAmount) || 0;
-  const depositChargesSum = (session.agreement.charges || [])
-    .reduce((sum, c) => sum + Number(c.total || 0), 0);
-  const depositToExclude = depositCol > 0 ? depositCol : depositChargesSum;
-  const agreementBalance = Number(
-    session.agreement.balance != null ? session.agreement.balance : session.agreement.total,
-  );
-  const resolvedSale = Number.isFinite(agreementBalance)
-    ? Number(Math.max(0, agreementBalance - depositToExclude).toFixed(2))
-    : NaN;
-  // Use the agreement-resolved sale; only fall back to the wizard hint if the
-  // agreement has no usable balance (shouldn't happen for a real checkout).
-  const saleAmount = resolvedSale > 0 ? resolvedSale : requestedAmount;
-  logger.info('[spin-charge] resolved sale amount', {
-    sessionId, requestedAmount, agreementBalance, depositToExclude, saleAmount,
+  // The SALE is the rental owed, NOT the security deposit (a separate pre-auth
+  // hold). `balance` is unreliable here — for some agreements it already excludes
+  // the deposit, for others it includes it — so compute the sale directly from
+  // the charges: sum of all SELECTED, NON-deposit charges, minus what's paid.
+  const saleCharges = await prisma.rentalAgreementCharge.findMany({
+    where: { rentalAgreementId: session.agreement.id, selected: true },
+    select: { source: true, total: true },
   });
+  const rentalChargesSum = saleCharges
+    .filter((c) => String(c.source || '').toUpperCase() !== 'SECURITY_DEPOSIT')
+    .reduce((sum, c) => sum + Number(c.total || 0), 0);
+  const paidSoFar = Number(session.agreement.paidAmount) || 0;
+  const resolvedSale = Number(Math.max(0, rentalChargesSum - paidSoFar).toFixed(2));
+  // Use the charge-derived sale; fall back to the wizard hint only if we found
+  // no non-deposit charges at all (shouldn't happen for a real checkout).
+  const saleAmount = saleCharges.length > 0 ? resolvedSale : requestedAmount;
+  logger.info('[spin-charge] resolved sale amount', {
+    sessionId, requestedAmount, rentalChargesSum, paidSoFar, saleAmount,
+  });
+  if (saleAmount <= 0) {
+    throw new CheckoutSessionError(
+      `Resolved rental sale is $${saleAmount.toFixed(2)} (rental charges $${rentalChargesSum.toFixed(2)} − paid $${paidSoFar.toFixed(2)}). Nothing to charge — use the deposit-only path for pre-paid rentals.`,
+      400, 'NOTHING_TO_CHARGE',
+    );
+  }
 
   const events = [];
   const log = (kind, payload) => events.push({ kind, ...payload, at: new Date().toISOString() });
