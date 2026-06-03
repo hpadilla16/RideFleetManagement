@@ -138,10 +138,15 @@ function toCents(amountDollars) {
 }
 
 function shortRef(prefix, agreementNumber, ts = Date.now()) {
-  // transactionReferenceId is capped at 20 chars per the spec.
-  const head = `${prefix}-${agreementNumber || 'NA'}`.slice(0, 12);
-  const tail = ts.toString(36).slice(-7);
-  return `${head}-${tail}`.slice(0, 20);
+  // transactionReferenceId: spec says ALPHANUMERIC, ≤20 chars. 2026-06-03 —
+  // we previously joined segments with hyphens ("COF-RA-20260-pydwoo3");
+  // hyphens are NOT alphanumeric and the gateway echoes this field to the
+  // processor host, which answered 904 FORMAT ERROR. Strip everything
+  // non-alphanumeric so the reference is strictly [A-Za-z0-9].
+  const headRaw = `${prefix}${agreementNumber || 'NA'}`.replace(/[^A-Za-z0-9]/g, '');
+  const head = headRaw.slice(0, 13);
+  const tail = ts.toString(36).slice(-7).replace(/[^A-Za-z0-9]/g, '');
+  return `${head}${tail}`.slice(0, 20);
 }
 
 // Errors that mean "the auth token is invalid — get a fresh one and
@@ -245,7 +250,12 @@ async function transactRequest(transactionType, payload, tenantConfig = {}) {
     }
   }
 
-  const txResp = data?.iposTransactResponse || {};
+  // 2026-06-03 — the LIVE API wraps the response in `iposhpresponse`
+  // ("iPOS-HP response"), not the `iposTransactResponse` key shown in the
+  // docs' sample. Without this fallback, even an APPROVED charge parses as
+  // {} → responseCode NaN → we'd throw "failed" on a successful charge
+  // (and an agent retry would double-charge). Accept both shapes.
+  const txResp = data?.iposTransactResponse || data?.iposhpresponse || {};
   const responseCode = Number(txResp.responseCode);
   const isApproved = responseCode === 200;
 
@@ -423,7 +433,9 @@ export const iposTransactClient = {
    * persistence stay unchanged.
    */
   normalizeResponse(transactResponse) {
-    const r = transactResponse?.iposTransactResponse || {};
+    // Live API uses `iposhpresponse`; docs sample shows `iposTransactResponse`.
+    // Accept both (see transactRequest, 2026-06-03).
+    const r = transactResponse?.iposTransactResponse || transactResponse?.iposhpresponse || {};
     return {
       approved: Number(r.responseCode) === 200,
       responseCode: Number(r.responseCode) || 0,
