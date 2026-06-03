@@ -596,23 +596,25 @@ function Step2TermsPending({ session, reservation, token, onSigned }) {
 
 function Step3PaymentPending({ session, reservation, token, onPaid }) {
   // ── Source-of-truth math ─────────────────────────────────────────
-  // Rental sale = balance, with the SECURITY_DEPOSIT charge excluded ONLY if
-  // it's actually baked into the balance. In practice agreement.balance is the
-  // rental owed and the deposit is tracked separately (a hold, not a charge),
-  // so subtracting it again under-displays the sale (1.12 − 1.00 = 0.12). Only
-  // subtract when the balance clearly includes the deposit (balance > deposit).
-  // This mirrors the server, which charges sum(non-deposit charges) − paid.
-  const explicitBalance = Number(reservation.rentalAgreement?.balance);
-  const securityDepositChargesSum = Array.isArray(reservation.rentalAgreement?.charges)
-    ? reservation.rentalAgreement.charges.reduce((s, c) => s + Number(c.total || 0), 0)
-    : 0;
-  const rawSubtotal = Number.isFinite(explicitBalance) && explicitBalance >= 0
-    ? explicitBalance
+  // Split the agreement charges: rental SALE = non-deposit charges − paid, and
+  // the deposit = SECURITY_DEPOSIT charges. This mirrors the server (which is
+  // authoritative). We do NOT use `balance` — it's inconsistent (sometimes it
+  // includes the deposit, sometimes not), which made the sale display wrong.
+  const agreementCharges = Array.isArray(reservation.rentalAgreement?.charges)
+    ? reservation.rentalAgreement.charges : [];
+  const isDepositCharge = (c) => String(c.source || '').toUpperCase() === 'SECURITY_DEPOSIT';
+  const rentalChargesSum = agreementCharges
+    .filter((c) => !isDepositCharge(c)).reduce((s, c) => s + Number(c.total || 0), 0);
+  const securityDepositChargesSum = agreementCharges
+    .filter(isDepositCharge).reduce((s, c) => s + Number(c.total || 0), 0);
+  const paidSoFar = Number(reservation.rentalAgreement?.paidAmount || 0);
+  // Fall back to balance / estimatedTotal only if no charges were loaded.
+  const rentalFallback = Number.isFinite(Number(reservation.rentalAgreement?.balance))
+    ? Number(reservation.rentalAgreement.balance)
     : Number(reservation.estimatedTotal || 0);
-  // agreement.balance is the rental owed; the security deposit is a separate
-  // hold (not folded into the balance), so the sale = the balance as-is. The
-  // server is authoritative and charges sum(non-deposit charges) − paid.
-  const subtotal = Number(Math.max(0, rawSubtotal).toFixed(2));
+  const subtotal = agreementCharges.length > 0
+    ? Number(Math.max(0, rentalChargesSum - paidSoFar).toFixed(2))
+    : Number(Math.max(0, rentalFallback).toFixed(2));
   const isPrepaid = subtotal === 0;
 
   // 2026-05-29 — Deposit hold amount comes from the reservation's
