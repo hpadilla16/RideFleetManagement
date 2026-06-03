@@ -295,7 +295,16 @@ function autoRentalL3Data({ amount, agreementNumber, description, today = new Da
         TaxRate: 0,
         DiscountAmount: 0,
         ExtLineAmount: Number(Number(amount).toFixed(2)),
-        NetGrossIndicator: 'N',
+        // 2026-06-03 — we originally sent the STRING 'N' per the iPOSpays field
+        // table (String, Optional, N/Y), but Dejavoo support flagged it as "not
+        // a valid attribute" — their validator apparently expects the BOOLEAN
+        // form shown in their sample payload ("NetGrossIndicator": false).
+        // false = amount does not include tax (the 'N' equivalent; correct for
+        // US merchants per their docs). Their L3 validation can hard-fail
+        // transactions (l2l3Flag "E"), so the string form may have contributed
+        // to DEJ_ERR_003 on tokenized PreAuth/Sale. Support is reviewing the
+        // docs discrepancy; if boolean still fails, remove the field entirely.
+        NetGrossIndicator: false,
         TaxIndicator: 0,
       }],
     },

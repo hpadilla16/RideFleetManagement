@@ -1,0 +1,253 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Checkout &amp; Check-In with the POS — Agent Playbook · Ride Fleet</title>
+<style>
+  :root{
+    --purple:#6d5ef5; --purple-dark:#4b3fc4; --ink:#1f2330; --muted:#6b7280;
+    --line:#e7e6f0; --bg:#f6f5fb; --card:#ffffff; --good:#0f6e56; --good-bg:#e1f5ee;
+    --warn:#854f0b; --warn-bg:#faeeda; --bad:#a32d2d; --bad-bg:#fcebeb; --info:#0c447c; --info-bg:#e6f1fb;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    color:var(--ink);background:var(--bg);line-height:1.6;font-size:16px}
+  .wrap{max-width:860px;margin:0 auto;padding:32px 22px 64px}
+  header.hero{background:linear-gradient(180deg,#efeeff,#f6f5fb);border:1px solid var(--line);
+    border-radius:18px;padding:28px 30px;margin-bottom:26px}
+  .eyebrow{color:var(--purple-dark);font-weight:600;font-size:13px;letter-spacing:.06em;text-transform:uppercase}
+  h1{font-size:30px;margin:6px 0 8px}
+  h2{font-size:21px;margin:34px 0 12px;display:flex;align-items:center;gap:10px}
+  h3{font-size:16px;margin:0 0 6px}
+  p{margin:0 0 12px}
+  .lede{color:var(--muted);font-size:17px;max-width:62ch}
+  .stepnum{display:inline-flex;align-items:center;justify-content:center;width:30px;height:30px;border-radius:50%;
+    background:var(--purple);color:#fff;font-weight:700;font-size:15px;flex:none}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:18px 20px;margin:12px 0}
+  .btn{display:inline-block;background:var(--purple);color:#fff;border-radius:9px;padding:7px 14px;font-size:13px;font-weight:600}
+  .btn.ghost{background:#fff;color:var(--purple-dark);border:1px solid var(--purple)}
+  .pill{display:inline-block;font-size:11px;font-weight:600;padding:2px 9px;border-radius:7px}
+  .pill.ok{background:var(--good-bg);color:var(--good)}
+  .pill.warn{background:var(--warn-bg);color:var(--warn)}
+  .pill.bad{background:var(--bad-bg);color:var(--bad)}
+  .pill.info{background:var(--info-bg);color:var(--info)}
+  .note{background:#fff8ec;border:1px solid #f3e2bf;border-radius:10px;padding:12px 15px;margin:14px 0;font-size:14px}
+  .note b{color:var(--warn)}
+  .tip{background:var(--good-bg);border:1px solid #bfe6d6;border-radius:10px;padding:12px 15px;margin:14px 0;font-size:14px}
+  .danger{background:var(--bad-bg);border:1px solid #efc6c6;border-radius:10px;padding:12px 15px;margin:14px 0;font-size:14px}
+  .danger b{color:var(--bad)}
+  table.ev{width:100%;border-collapse:collapse;font-size:13px}
+  table.ev th{text-align:left;color:var(--muted);font-weight:500;font-size:11px;padding:5px 6px;border-bottom:1px solid var(--line)}
+  table.ev td{padding:7px 6px;border-bottom:1px solid #f0eff6;vertical-align:top}
+  ol.clean{padding-left:18px} ol.clean li{margin:6px 0}
+  ul.clean{padding-left:18px} ul.clean li{margin:6px 0}
+  hr{border:none;border-top:1px solid var(--line);margin:34px 0}
+  .stepflow{display:flex;gap:6px;flex-wrap:wrap;margin:10px 0}
+  .navchip{background:#fff;border:1px solid var(--line);border-radius:9px;padding:7px 12px;font-size:13px;color:#444}
+  code{background:#efeeff;border-radius:5px;padding:1px 6px;font-size:13px;color:var(--purple-dark)}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header class="hero">
+  <div class="eyebrow">Ride Fleet · Agent Playbook</div>
+  <h1>Checkout &amp; Check-In with the POS Terminal</h1>
+  <p class="lede">The new 6-step checkout wizard, the check-in wizard with live fee preview, and how to
+  record transactions manually when the terminal or card-on-file isn't available.</p>
+  <p style="margin-top:10px">
+    <span class="pill info">Applies to the new Spin checkout (v0.9.0-beta.104)</span>
+    <span class="pill warn">Deposit = second tap on terminal (card-on-file pending Dejavoo)</span>
+  </p>
+</header>
+
+<div class="note"><b>Current mode:</b> the security deposit is taken as a <b>second tap on the terminal</b>.
+"Charge Card On File" (charging a saved card without the customer present) is <b>not available yet</b> —
+Dejavoo is enabling it on our merchant account. Until then, any post-rental charge must be taken at the
+terminal with the customer's card, or recorded manually (Part 3).</div>
+
+<!-- ════════════════════ PART 1 — CHECKOUT ════════════════════ -->
+<h2><span class="stepnum">1</span> Checkout (renting the vehicle out)</h2>
+
+<div class="stepflow">
+  <span class="navchip">1 Confirm</span><span class="navchip">2 Terms</span>
+  <span class="navchip">3 Payment</span><span class="navchip">4 Inspection</span>
+  <span class="navchip">5 Metrics</span><span class="navchip">6 Sign</span>
+</div>
+
+<div class="card">
+  <h3>Step 1 · Confirm customer + vehicle</h3>
+  <p>Open the reservation → <b>Start Checkout</b>. Verify the customer name, phone, vehicle (year/make/model/plate),
+  pickup and return times. If the customer declines rental insurance, tick the
+  <b>Declined Insurance</b> box — it adds an acknowledgement section they'll initial in Step 2.</p>
+</div>
+
+<div class="card">
+  <h3>Step 2 · Terms &amp; Conditions</h3>
+  <p>The customer signs the T&amp;C <b>on their own phone</b> — have them scan the QR code on your screen.
+  The wizard advances automatically when they finish. If their phone won't cooperate, they can sign on your screen.</p>
+</div>
+
+<div class="card">
+  <h3>Step 3 · Payment — two taps</h3>
+  <p>The wizard shows the <b>rental balance</b> (e.g. $312.40) and the <b>security deposit</b> (e.g. $250.00) separately. They are charged separately:</p>
+  <ol class="clean">
+    <li><b>Tap 1 — Sale.</b> Press <b>Charge on terminal</b>. The terminal wakes up and prompts the customer
+      to tap/insert. This charges the rental balance and saves the card on file for later.</li>
+    <li><b>Tap 2 — Deposit hold.</b> After the sale approves, press the deposit hold button. The terminal prompts
+      for a <b>second tap</b>. This places a hold (authorization) — it is NOT a charge; it falls off automatically
+      if released at check-in.</li>
+  </ol>
+  <p><b>Pre-paid customers</b> (balance $0.00): tap 1 is skipped automatically. One single tap captures the
+  card on file and places the deposit hold.</p>
+  <div class="tip"><b>Tell the customer:</b> "The first tap is your rental charge. The second tap is the deposit —
+  it's a hold, not a charge, and it's released when you bring the car back."</div>
+  <p>Terminal down or card processed another way? Use <b>Record manually</b> — see Part 3.</p>
+</div>
+
+<div class="card">
+  <h3>Step 4 · Inspection handoff</h3>
+  <p>Scan the QR with the lot phone/tablet to run the walk-around inspection (photos, damage marks) at the vehicle.
+  The wizard advances when the inspection is submitted.</p>
+</div>
+
+<div class="card">
+  <h3>Step 5 · Metrics</h3>
+  <p>Record the odometer and fuel level going out. These are what check-in fees get measured against — be accurate.</p>
+</div>
+
+<div class="card">
+  <h3>Step 6 · Customer signature → Done</h3>
+  <p>The customer signs the final agreement. The wizard closes, the reservation flips to
+  <span class="pill ok">CHECKED_OUT</span>, and the vehicle goes <span class="pill info">ON RENT</span>.
+  The agreement PDF is emailed automatically.</p>
+</div>
+
+<!-- ════════════════════ PART 2 — CHECK-IN ════════════════════ -->
+<h2><span class="stepnum">2</span> Check-In (vehicle comes back)</h2>
+
+<div class="card">
+  <h3>Step 1–2 · Open check-in + inspect</h3>
+  <p>Open the reservation → <b>Start Check-In</b>. Run the return inspection (photos, new damage). New damage →
+  also file an <b>Incident Report</b> (see the Incident Reporting playbook).</p>
+</div>
+
+<div class="card">
+  <h3>Step 3 · Metrics with live fee preview</h3>
+  <p>Enter the return odometer, fuel level, cleanliness, and smoking check. The panel on the right shows the
+  fees building <b>live</b> as you type — fuel shortage, cleaning, smoking, and late-return fees, using the rates
+  from <b>Settings → Inspection Fees</b>. What you see is exactly what the system will charge.</p>
+  <ul class="clean">
+    <li><b>Waive Late Return Fee</b> — agent override for courtesy / flight delay / authorized overrun.
+      Use judgment; it's logged.</li>
+  </ul>
+</div>
+
+<div class="card">
+  <h3>Step 4 · Balance settlement — pick one</h3>
+  <table class="ev">
+    <tr><th>Option</th><th>What happens</th><th>When to use</th></tr>
+    <tr>
+      <td><b>Autocharge</b></td>
+      <td>Fees are queued and charged to the card on file after the tenant-configured delay (e.g. 24h).
+      Reservation goes to <span class="pill warn">CHECKED_IN_UNPAID</span> until the charge lands, then
+      <span class="pill ok">CHECKED_IN</span>.</td>
+      <td>Customer is dropping off and leaving (e.g. heading to the airport). <b>NOTE: until Dejavoo enables
+      card-on-file, autocharge attempts will fail — prefer paying now or record manually.</b></td>
+    </tr>
+    <tr>
+      <td><b>Manual / pay now</b></td>
+      <td>Take payment at the terminal now (customer taps), or record an OTC payment (cash/external).
+      Reservation goes straight to <span class="pill ok">CHECKED_IN</span> once paid.</td>
+      <td>Customer is present, or any time card-on-file is unavailable.</td>
+    </tr>
+  </table>
+</div>
+
+<div class="card">
+  <h3>Step 5 · Signature + deposit release</h3>
+  <p>The customer signs acknowledging the fees. Then release the deposit hold from
+  <b>View Payments → Release Deposit Hold</b> (reason required — e.g. "vehicle returned clean, no damage").
+  Don't forget this: a forgotten hold is the #1 source of customer callbacks.</p>
+</div>
+
+<!-- ════════════════════ PART 3 — MANUAL RECORDING ════════════════════ -->
+<h2><span class="stepnum">3</span> Manual transaction recording (bypassing the terminal)</h2>
+
+<p class="lede" style="font-size:15px">Use these when the terminal is offline/frozen, the charge was taken some
+other way (cash, external machine, phone payment), or card-on-file is unavailable. Every manual entry is logged
+with your name — always fill in the reference and reason fields.</p>
+
+<div class="card">
+  <h3>A · During checkout — Step 3 failsafes</h3>
+  <ul class="clean">
+    <li><b>Record Manual Payment</b> (next to the sale button): enter <b>amount, method (cash/card/other),
+      reference</b> (receipt #, external terminal auth code), and notes. The wizard advances exactly as if the
+      terminal approved — but <b>no card is saved on file</b>, so later charges for this rental must also be manual.</li>
+    <li><b>Record Manual Deposit Hold</b> (next to the deposit button): enter <b>amount, method, reference</b>, and a
+      <b>reason (required)</b> — e.g. "terminal offline, cash deposit taken" or "hold run on standalone terminal,
+      auth #123456".</li>
+  </ul>
+  <div class="danger"><b>Important:</b> a manual deposit hold is a <b>record, not a real hold</b>. No money is
+  frozen on the customer's card unless you actually ran an authorization on the standalone terminal or took a cash
+  deposit. Never mark a manual deposit "held" if nothing was actually collected or authorized.</div>
+</div>
+
+<div class="card">
+  <h3>B · Any time — View Payments tools</h3>
+  <p>Reservation → <b>View Payments</b>:</p>
+  <ul class="clean">
+    <li><b>Record OTC Payment</b> — log an over-the-counter payment (cash, check, external card machine).
+      For card payments enter the last 4 digits. Use this to settle a <span class="pill warn">CHECKED_IN_UNPAID</span>
+      balance — recording the payment moves the reservation to <span class="pill ok">CHECKED_IN</span>.</li>
+    <li><b>Charge Card On File</b> — charges the saved card without the customer present.
+      <span class="pill bad">Unavailable until Dejavoo enables CNP</span> — if it errors ("Transaction Failed"),
+      collect the payment another way and Record OTC Payment instead.</li>
+    <li><b>Release Deposit Hold</b> — voids the hold on the customer's card; reason required. Holds tagged
+      <span class="pill warn">MANUAL</span> only update our records (there's no terminal authorization to void) —
+      if you took a cash deposit, hand the cash back and note it in the reason.</li>
+  </ul>
+</div>
+
+<div class="card">
+  <h3>C · Golden rules for manual entries</h3>
+  <ol class="clean">
+    <li><b>Money first, record second.</b> Only record what was actually collected or authorized.</li>
+    <li><b>Always attach a reference</b> — receipt number, standalone-terminal auth code, or check number.</li>
+    <li><b>Reasons are mandatory on deposits and releases.</b> Write what a manager would need to reconstruct it tomorrow.</li>
+    <li><b>Manual sale = no card on file.</b> Warn the customer that any later fees will need them to pay directly.</li>
+    <li>If you're not sure, <b>don't guess</b> — pause the wizard and call the manager.</li>
+  </ol>
+</div>
+
+<!-- ════════════════════ PART 4 — TROUBLESHOOTING ════════════════════ -->
+<h2><span class="stepnum">4</span> Troubleshooting quick reference</h2>
+
+<div class="card">
+<table class="ev">
+  <tr><th>Symptom</th><th>What it means</th><th>Do this</th></tr>
+  <tr><td>Terminal never wakes up / wizard spins</td><td>Terminal offline or stuck on a previous prompt</td>
+    <td>Cancel on the terminal, retry once. Still dead → <b>Record manually</b> and note "terminal offline".</td></tr>
+  <tr><td>"Transaction Failed" on Charge Card On File or deposit</td><td>Card-on-file (CNP) not enabled yet on our merchant account</td>
+    <td>Expected for now. Take payment at the terminal with the customer, or Record OTC Payment.</td></tr>
+  <tr><td>Customer says "I was charged twice"</td><td>Usually the deposit <i>hold</i> showing as pending</td>
+    <td>Explain it's a hold, not a charge. Verify in View Payments; release at check-in.</td></tr>
+  <tr><td>Wizard amounts look wrong</td><td>Charges changed after the session started</td>
+    <td>Hard-refresh the page (Cmd+Shift+R). Still wrong → manager / View Payments to verify the agreement charges.</td></tr>
+  <tr><td>Reservation stuck in the wrong status</td><td>A step was bypassed outside the wizard</td>
+    <td>Manager: use the <b>Super Admin Override Panel</b> to correct status — never edit by guesswork.</td></tr>
+  <tr><td>Checkout blocked on customer age/DOB</td><td>Bad date-of-birth on the customer record</td>
+    <td>Fix the DOB on the customer profile (verify the license), then resume checkout.</td></tr>
+</table>
+</div>
+
+<hr>
+<p style="color:var(--muted);font-size:13px">Ride Fleet · Agent Playbook · 2026-06-03 ·
+Covers checkout-wizard-v2 + check-in wizard as of v0.9.0-beta.104. The "second tap" deposit mode and
+card-on-file restrictions are temporary until Dejavoo enables CNP tokenization; this playbook will be updated
+when the no-second-tap deposit and autocharge go live.</p>
+
+</div>
+</body>
+</html>
