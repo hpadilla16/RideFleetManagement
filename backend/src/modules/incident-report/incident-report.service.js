@@ -60,6 +60,21 @@ function makeReportNumber(vehicle, date = new Date()) {
   return `INC-${y}${m}${d}-${plate}`;
 }
 
+/**
+ * Collision-aware report number. 2026-06-03 — reportNumber is @unique but the
+ * base format is INC-YYYYMMDD-PLATE, so a SECOND incident for the same vehicle
+ * on the same day always threw P2002 (Sentry: "Unique constraint failed on
+ * reportNumber", 500 to the agent). Second-and-later reports get a sequence
+ * suffix: INC-20260603-KST788, INC-20260603-KST788-2, -3, …
+ */
+async function nextReportNumber(vehicle, date = new Date()) {
+  const base = makeReportNumber(vehicle, date);
+  const clashes = await prisma.reservationIncident.count({
+    where: { reportNumber: { startsWith: base } },
+  });
+  return clashes === 0 ? base : `${base}-${clashes + 1}`;
+}
+
 function reportingWindowHours(tenant) {
   try {
     const s = typeof tenant?.settingsJson === 'string' ? JSON.parse(tenant.settingsJson) : (tenant?.settingsJson || {});
@@ -125,7 +140,7 @@ export const incidentReportService = {
         tenantId: reservation.tenantId ?? user?.tenantId ?? null,
         reservationId: reservation.id,
         rentalAgreementId: ag?.id ?? null,
-        reportNumber: makeReportNumber(reservation.vehicle, new Date()),
+        reportNumber: await nextReportNumber(reservation.vehicle, new Date()),
         type, status: 'DRAFT',
         title: payload.title || meta.title,
         discoveryAt: parseDate(payload.discoveryAt) ?? reservation.returnAt ?? new Date(),
