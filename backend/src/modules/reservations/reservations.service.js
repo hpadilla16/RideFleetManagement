@@ -211,6 +211,8 @@ const reservationListSelect = {
       name: true
     }
   },
+  // NOTE (2026-06-04): the longTermPlan list-select ships WITH the long-term
+  // P1 tag (schema + migration land together) — do not add it before then.
   rentalAgreement: {
     select: {
       id: true,
@@ -825,8 +827,28 @@ async function validateLocationWindow({ locationId, at, label }, scope = {}) {
   }
 }
 
-async function ensureNoVehicleConflict({ vehicleId, pickupAt, returnAt, ignoreReservationId = null }, scope = {}, db = prisma) {
+export async function ensureNoVehicleConflict({ vehicleId, pickupAt, returnAt, ignoreReservationId = null }, scope = {}, db = prisma) {
   if (!vehicleId) return;
+
+  // 2026-06-04 — a vehicle on an OPEN rental (CHECKED_OUT, not yet checked
+  // in) is physically unavailable REGARDLESS of date math. The old
+  // date-overlap-only check let an overdue rental's vehicle (scheduled
+  // return in the past) be assigned + checked out to a second reservation
+  // (Sentry: RES-819679 double-booking). Open rentals now always conflict.
+  const openRental = await db.reservation.findFirst({
+    where: {
+      ...(scope?.tenantId ? { tenantId: scope.tenantId } : {}),
+      vehicleId,
+      id: ignoreReservationId ? { not: ignoreReservationId } : undefined,
+      status: 'CHECKED_OUT'
+    },
+    select: { id: true, reservationNumber: true }
+  });
+  if (openRental) {
+    const err = new Error(`Vehicle is still out on open rental ${openRental.reservationNumber} — complete its check-in (or swap vehicles) first`);
+    err.statusCode = 409;
+    throw err;
+  }
 
   const start = new Date(pickupAt);
   const end = new Date(returnAt);
@@ -836,7 +858,7 @@ async function ensureNoVehicleConflict({ vehicleId, pickupAt, returnAt, ignoreRe
       ...(scope?.tenantId ? { tenantId: scope.tenantId } : {}),
       vehicleId,
       id: ignoreReservationId ? { not: ignoreReservationId } : undefined,
-      status: { in: ['NEW', 'CONFIRMED', 'CHECKED_OUT'] },
+      status: { in: ['NEW', 'CONFIRMED'] },
       pickupAt: { lt: end },
       returnAt: { gt: start }
     },
@@ -844,7 +866,9 @@ async function ensureNoVehicleConflict({ vehicleId, pickupAt, returnAt, ignoreRe
   });
 
   if (conflict) {
-    throw new Error(`Vehicle conflict with reservation ${conflict.reservationNumber}`);
+    const err = new Error(`Vehicle conflict with reservation ${conflict.reservationNumber}`);
+    err.statusCode = 409;
+    throw err;
   }
 }
 

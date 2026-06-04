@@ -175,8 +175,15 @@ export function computeExcessMileage({ odometerOut, odometerIn, includedMiles, r
 }
 
 export function computeFuelRefill({ fuelOut, fuelIn, tankCapacityGallons, rate }) {
-  const out = Number(fuelOut || 0);
-  const inn = Number(fuelIn || 0);
+  // 2026-06-04 — quantize BOTH readings to the nearest EIGHTH (the physical
+  // gauge resolution) before comparing. Checkout and check-in captured fuel
+  // at different precisions (3/8 = 0.375 vs "38%" = 0.38), so two readings
+  // that DISPLAY identically produced a phantom 0.005 gap → a $0.80 fee.
+  // Identical gauge readings can now never differ; real differences charge
+  // in whole eighths, matching what the needle actually shows.
+  const toEighth = (v) => Math.round(Number(v || 0) * 8) / 8;
+  const out = toEighth(fuelOut);
+  const inn = toEighth(fuelIn);
   // fuel is 0..1 fraction. gap = how much fuel customer used below their pickup level
   const gap = Math.max(0, out - inn);
   if (gap === 0) return null;

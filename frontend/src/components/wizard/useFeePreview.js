@@ -64,8 +64,12 @@ export function computeExcessMileage({ odometerOut, odometerIn, includedMiles, r
 }
 
 export function computeFuelRefill({ fuelOut, fuelIn, tankCapacityGallons, rate }) {
-  const out = Number(fuelOut || 0);
-  const inn = Number(fuelIn || 0);
+  // 2026-06-04 — mirror of the backend fix: quantize both readings to the
+  // nearest eighth (gauge resolution) so precision mismatches between
+  // checkout and check-in capture can't produce phantom fuel fees.
+  const toEighth = (v) => Math.round(Number(v || 0) * 8) / 8;
+  const out = toEighth(fuelOut);
+  const inn = toEighth(fuelIn);
   const gap = Math.max(0, out - inn);
   if (gap === 0) return null;
   const gallons = round2(gap * tankCapacityGallons);

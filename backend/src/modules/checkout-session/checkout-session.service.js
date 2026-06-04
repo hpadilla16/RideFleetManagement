@@ -2,6 +2,7 @@ import crypto from 'node:crypto';
 import { prisma } from '../../lib/prisma.js';
 import logger from '../../lib/logger.js';
 import { syncVehicleStatusForReservation } from '../vehicles/vehicle-status-sync.js';
+import { ensureNoVehicleConflict } from '../reservations/reservations.service.js';
 import {
   CHECKOUT_STEPS,
   canTransition,
@@ -33,6 +34,28 @@ function tokenBytes() {
  */
 async function createForReservation({ reservationId, tenantId, actorUserId }) {
   if (!reservationId) throw new CheckoutSessionError('reservationId required', 400);
+
+  // 2026-06-04 — vehicle-conflict gate. The wizard previously ran NO conflict
+  // check, so a vehicle still out on an open (even overdue) rental could be
+  // checked out to a second reservation (Sentry: RES-819679 double-booking).
+  // Block at session start with a clear 409 so the agent can check the other
+  // rental in (or swap vehicles) before the customer signs anything.
+  const resv = await prisma.reservation.findUnique({
+    where: { id: reservationId },
+    select: { id: true, tenantId: true, vehicleId: true, pickupAt: true, returnAt: true },
+  });
+  if (resv?.vehicleId) {
+    try {
+      await ensureNoVehicleConflict({
+        vehicleId: resv.vehicleId,
+        pickupAt: resv.pickupAt,
+        returnAt: resv.returnAt,
+        ignoreReservationId: resv.id,
+      }, { tenantId: resv.tenantId || tenantId || undefined });
+    } catch (err) {
+      throw new CheckoutSessionError(err.message, err.statusCode || 409, 'VEHICLE_CONFLICT');
+    }
+  }
 
   const existing = await prisma.checkoutSession.findUnique({ where: { reservationId } });
   if (existing) {
@@ -314,6 +337,21 @@ async function transition({ id, toStep, actorUserId, metadata }) {
       });
       // Don't downgrade an already checked-in/out reservation.
       if (resv && !['CHECKED_OUT', 'CHECKED_IN', 'CHECKED_IN_UNPAID'].includes(String(resv.status))) {
+        // 2026-06-04 — defense-in-depth: re-run the vehicle-conflict gate at
+        // finalize too. The session-start gate covers the normal flow, but a
+        // long-lived/resumed session could finalize after another rental took
+        // the vehicle. Surfaces as a clean 409, never a silent double-booking.
+        if (resv.vehicleId) {
+          const resvFull = await prisma.reservation.findUnique({
+            where: { id: resv.id }, select: { pickupAt: true, returnAt: true },
+          });
+          await ensureNoVehicleConflict({
+            vehicleId: resv.vehicleId,
+            pickupAt: resvFull?.pickupAt,
+            returnAt: resvFull?.returnAt,
+            ignoreReservationId: resv.id,
+          }, { tenantId: resv.tenantId || undefined });
+        }
         await prisma.reservation.update({ where: { id: resv.id }, data: { status: 'CHECKED_OUT' } });
         if (updated.agreementId) {
           await prisma.rentalAgreement.update({
@@ -336,6 +374,14 @@ async function transition({ id, toStep, actorUserId, metadata }) {
         });
       }
     } catch (err) {
+      // 2026-06-04 — vehicle conflicts must FAIL the finalize loudly (the
+      // agent has to see it at the counter), not be swallowed like the
+      // best-effort email/audit failures below.
+      if (err?.statusCode === 409 || err instanceof CheckoutSessionError) {
+        throw err instanceof CheckoutSessionError
+          ? err
+          : new CheckoutSessionError(err.message, 409, 'VEHICLE_CONFLICT');
+      }
       logger.warn('[checkout-session] failed to advance reservation on finalize', {
         sessionId: id, reservationId: updated.reservationId, error: err?.message || String(err),
       });
