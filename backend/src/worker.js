@@ -78,9 +78,26 @@ async function main() {
   startAutochargePoll();
 
   // Graceful shutdown
+
+  // Loaner program — return-due reminder sweep (Phase 2). Texts borrowers when
+  // an ACTIVE loaner agreement is due back soon or overdue (cache-deduped).
+  try {
+    const loanerRemMod = await import('./modules/dealership-loaner/loaner-reminders.scheduler.js');
+    loanerRemMod.startLoanerRemindersScheduler();
+    logger.info('[worker] started: loaner-reminders scheduler');
+  } catch (err) {
+    logger.warn('[worker] loaner-reminders scheduler not started', {
+      message: err.message,
+    });
+  }
+
   const shutdown = async (signal) => {
     logger.info('[worker] shutting down', { signal });
     stopAutochargePoll();
+    try {
+      const loanerRemMod = await import('./modules/dealership-loaner/loaner-reminders.scheduler.js');
+      loanerRemMod.stopLoanerRemindersScheduler();
+    } catch {}
     await shutdownQueues();
     process.exit(0);
   };

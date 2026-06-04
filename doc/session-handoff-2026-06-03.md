@@ -1,10 +1,35 @@
-# Session handoff — 2026-06-03 (late night)
+# Session handoff — 2026-06-03
 
-## TL;DR
-Production is rolled back to **v0.9.0-beta.65** (pre-Dejavoo). It keeps **all** of tonight's
-other work and the DOB/age hotfix. The full Dejavoo checkout redesign is **saved as tag
-v0.9.0-beta.104** and is ready to redeploy the moment Dejavoo enables card-not-present (CNP)
-tokenization on the merchant account.
+## DEPLOYMENT MARKED SUCCESSFUL — 2026-06-03 (Hector)
+Live tag: **v0.9.0-beta.110**. Full Dejavoo checkout verified end-to-end by Hector:
+step-3 amounts correct on first load (beta.108), agreement ledger honest —
+paid = payments, balance = non-deposit charges − paid, holds never count as
+paid (beta.109/110 + repair SQL applied). Deposit default is per-location
+config (Settings → Locations → Require Security Deposit / Mode / Amount).
+Next focus: (1) loaner program reimagine completion, (2) car-sharing app
+(separate repo). Still open: debit CNP (Dejavoo), report sweep, forecast
+cold-cache, tank capacities, overdue triage (13), TL-ZE40788406BA vehicle type.
+
+## TL;DR (earlier today — superseded by the section above)
+Production is LIVE on **v0.9.0-beta.107** with the full Dejavoo checkout (two-tap:
+sale tap + card-present deposit tap; `IPOS_FORCE_CARD_PRESENT_DEPOSIT=true`).
+**Tokenized CNP (charge card on file / autocharge) WORKS for CREDIT cards** and fails
+ONLY for DEBIT cards (Fiserv host 904 — Dejavoo gateway must route tokenized CNP debit
+as signature debit; email sent with RRNs, awaiting their fix). Once debit is fixed:
+retest everything, then flip `IPOS_FORCE_CARD_PRESENT_DEPOSIT=false` to go ONE-TAP.
+
+Fix ladder today: DEJ_ERR_003 → `NetGrossIndicator: false` (beta.105) · response shape
+`iposhpresponse` + alphanumeric referenceIds (beta.106) · reconId for Fiserv (beta.107)
+· L3 currently disabled via `IPOS_TRANSACT_AUTO_RENTAL=false` (re-enable + retest later).
+Open items: re-enable/retest L3, debit CNP (Dejavoo), forecast cold-cache 504, report
+sweep, Vehicle.tankCapacityGallons missing from schema (fuel fees assume 15 gal),
+8 overdue rentals shown available in forecast, TL import missing vehicleTypeId, dedupe
+stacked env lines in backend/.env.
+
+## Late-night state (historical)
+Production was rolled back to **v0.9.0-beta.65** (pre-Dejavoo). It keeps **all** of tonight's
+other work and the DOB/age hotfix. The full Dejavoo checkout redesign was saved as tag
+v0.9.0-beta.104 (later superseded by beta.105–107).
 
 ## What's LIVE now (beta.65)
 - Override panel (beta.60)

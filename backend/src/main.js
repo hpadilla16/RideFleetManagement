@@ -47,6 +47,7 @@ import { accountDeletionRouter } from './modules/public-booking/account-deletion
 import { hostAppRouter } from './modules/host-app/host-app.routes.js';
 import { employeeAppRouter } from './modules/employee-app/employee-app.routes.js';
 import { dealershipLoanerRouter } from './modules/dealership-loaner/dealership-loaner.routes.js';
+import { loanerAgreementRouter, loanerSignaturePublicRouter, loanerPortalPublicRouter } from './modules/dealership-loaner/loaner-agreement.routes.js';
 import { incidentReportRouter } from './modules/incident-report/incident-report.routes.js';
 import { issueCenterRouter, publicIssueCenterRouter } from './modules/issue-center/issue-center.routes.js';
 import { tollsRouter } from './modules/tolls/tolls.routes.js';
@@ -139,6 +140,11 @@ app.use('/api/public/telematics', publicVehicleTelematicsRouter);
 app.use('/api/host-app', requireAuth, tenantRateLimit, requireModuleAccess('hostApp'), hostAppRouter);
 app.use('/api/employee-app', requireAuth, tenantRateLimit, requireModuleAccess('employeeApp'), employeeAppRouter);
 app.use('/api/dealership-loaner', requireAuth, tenantRateLimit, requireModuleAccess('loaner'), dealershipLoanerRouter);
+// Loaner reimagine (2026-06-03 port) — in-bay wizard agreement API
+app.use('/api/loaner-agreements', requireAuth, tenantRateLimit, requireModuleAccess('loaner'), loanerAgreementRouter);
+// Token-scoped public routers: borrower remote signing + self-service portal
+app.use('/api/public/loaner-signature', loanerSignaturePublicRouter);
+app.use('/api/public/loaner-portal', loanerPortalPublicRouter);
 app.use('/api/incident-reports', requireAuth, tenantRateLimit, incidentReportRouter);
 app.use('/api/issue-center', requireAuth, tenantRateLimit, requireModuleAccess('issueCenter'), issueCenterRouter);
 app.use('/api/tolls', requireAuth, tenantRateLimit, requireModuleAccess('tolls'), tollsRouter);

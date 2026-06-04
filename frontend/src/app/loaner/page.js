@@ -181,6 +181,15 @@ function reservationHref(row, action = '') {
   return action ? `/reservations/${row.id}/${action}` : `/reservations/${row.id}`;
 }
 
+// Loaner reimagining: check-out / check-in route to the new LoanerAgreement
+// wizards (photo-backed, signed packet). Everything else (open, payments,
+// inspection) stays on the shared reservation routes.
+function loanerActionHref(row, action = '') {
+  if (!row?.id) return '#';
+  if (action === 'checkout' || action === 'checkin') return `/loaner/${action}/${row.id}`;
+  return reservationHref(row, action);
+}
+
 function loanerBoardNote(row) {
   if (!row) return '';
   if (row.alertReason) return row.alertReason;
@@ -196,6 +205,9 @@ export default function LoanerProgramPage() {
 
 function LoanerProgramInner({ token, me, logout }) {
   const [dashboard, setDashboard] = useState(null);
+  // Command Center: Lookup + Quick Intake collapse into a toggled panel so the
+  // page opens on the priority board + queues (action-first), not a wall.
+  const [activePanel, setActivePanel] = useState(null); // 'lookup' | 'intake' | null
   const [config, setConfig] = useState({ enabled: true });
   const [customers, setCustomers] = useState([]);
   const [locations, setLocations] = useState([]);
@@ -339,7 +351,7 @@ function LoanerProgramInner({ token, me, logout }) {
         detail: `${row.reservationNumber} - ${customerName(row)}`,
         note: config.note?.(row) || loanerBoardNote(row),
         tone: config.tone,
-        href: reservationHref(row, config.action || ''),
+        href: loanerActionHref(row, config.action || ''),
         actionLabel: config.actionLabel,
         secondaryHref: reservationHref(row),
         secondaryLabel: 'Open Workflow'
@@ -410,7 +422,7 @@ function LoanerProgramInner({ token, me, logout }) {
       actions: (row) => (
         <>
           <Link href={reservationHref(row)}><button type="button">Open</button></Link>
-          <Link href={reservationHref(row, 'checkout')}><button type="button" className="button-subtle">Check out</button></Link>
+          <Link href={loanerActionHref(row, 'checkout')}><button type="button" className="button-subtle">Check out</button></Link>
         </>
       )
     },
@@ -435,7 +447,7 @@ function LoanerProgramInner({ token, me, logout }) {
       emptyText: 'No returns waiting right now.',
       actions: (row) => (
         <>
-          <Link href={reservationHref(row, 'checkin')}><button type="button">Check in</button></Link>
+          <Link href={loanerActionHref(row, 'checkin')}><button type="button">Check in</button></Link>
           <Link href={reservationHref(row, 'inspection')}><button type="button" className="button-subtle">Inspect</button></Link>
         </>
       )
@@ -449,7 +461,7 @@ function LoanerProgramInner({ token, me, logout }) {
       actions: (row) => (
         <>
           <Link href={reservationHref(row)}><button type="button">Open</button></Link>
-          <Link href={reservationHref(row, 'checkout')}><button type="button" className="button-subtle">Check out</button></Link>
+          <Link href={loanerActionHref(row, 'checkout')}><button type="button" className="button-subtle">Check out</button></Link>
         </>
       )
     },
@@ -475,7 +487,7 @@ function LoanerProgramInner({ token, me, logout }) {
       actions: (row) => (
         <>
           <Link href={reservationHref(row)}><button type="button">Open</button></Link>
-          <Link href={reservationHref(row, row.overdueReturn ? 'checkin' : 'checkout')}><button type="button" className="button-subtle">{row.overdueReturn ? 'Check in' : 'Check out'}</button></Link>
+          <Link href={loanerActionHref(row, row.overdueReturn ? 'checkin' : 'checkout')}><button type="button" className="button-subtle">{row.overdueReturn ? 'Check in' : 'Check out'}</button></Link>
         </>
       )
     }
@@ -743,8 +755,8 @@ function LoanerProgramInner({ token, me, logout }) {
             </div>
           </div>
           <div className="app-banner-list">
-            <a href="#loaner-intake" className="app-banner-pill">Open Intake</a>
-            <a href="#loaner-lookup" className="app-banner-pill">Loaner Lookup</a>
+            <button type="button" className="app-banner-pill" onClick={() => setActivePanel((p) => (p === 'intake' ? null : 'intake'))}>＋ New Check-Out</button>
+            <button type="button" className="app-banner-pill" onClick={() => setActivePanel((p) => (p === 'lookup' ? null : 'lookup'))}>🔍 Lookup &amp; Exports</button>
             <a href="#loaner-queues" className="app-banner-pill">Jump To Queues</a>
             <button type="button" className="button-subtle" onClick={printStatementPacket} disabled={printing}>
               {printing ? 'Preparing packet…' : 'Print Monthly Packet'}
@@ -793,7 +805,9 @@ function LoanerProgramInner({ token, me, logout }) {
         )}
       </section>
 
+      {activePanel && (
       <section className="split-panel">
+        {activePanel === 'lookup' && (
         <section id="loaner-lookup" className="glass card-lg section-card">
           <div className="row-between">
             <div>
@@ -873,8 +887,8 @@ function LoanerProgramInner({ token, me, logout }) {
                         <div className="inline-actions">
                           <Link href={reservationHref(row)}><button type="button">Open</button></Link>
                           <button type="button" className="button-subtle" onClick={() => window.open(reservationHref(row), '_blank')}>Open New Tab</button>
-                          <Link href={reservationHref(row, 'checkout')}><button type="button" className="button-subtle">Checkout</button></Link>
-                          <Link href={reservationHref(row, 'checkin')}><button type="button" className="button-subtle">Check-in</button></Link>
+                          <Link href={loanerActionHref(row, 'checkout')}><button type="button" className="button-subtle">Checkout</button></Link>
+                          <Link href={loanerActionHref(row, 'checkin')}><button type="button" className="button-subtle">Check-in</button></Link>
                         </div>
                       </td>
                     </tr>
@@ -888,7 +902,9 @@ function LoanerProgramInner({ token, me, logout }) {
             </div>
           )}
         </section>
+        )}
 
+        {activePanel === 'intake' && (
         <section id="loaner-intake" className="glass card-lg section-card">
           <div className="row-between">
             <div>
@@ -1083,7 +1099,9 @@ function LoanerProgramInner({ token, me, logout }) {
             </div>
           </form>
         </section>
+        )}
       </section>
+      )}
 
       <section id="loaner-queues" className="glass card-lg section-card" style={{ marginTop: 18 }}>
         <div className="row-between">

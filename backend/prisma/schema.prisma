@@ -462,6 +462,7 @@ model Tenant {
   tlAcrissCategoryMaps     AcrissCategoryMap[]
   tlLocationCodeMaps       LocationCodeMap[]
   franchisePayoutPeriods   FranchisePayoutPeriod[]
+  loanerAgreements            LoanerAgreement[]
 }
 
 model Location {
@@ -578,6 +579,7 @@ model Vehicle {
   @@unique([tenantId, internalNumber])
   @@index([tenantId, status])
   @@index([tenantId, programCategory])
+  loanerAgreements      LoanerAgreement[]
 }
 
 model VehicleAvailabilityBlock {
@@ -896,6 +898,7 @@ model Reservation {
   // Without this, Postgres filters via [tenantId, status, pickupAt] and
   // then has to sort by updatedAt — getting slower as table grows.
   @@index([tenantId, status, updatedAt(sort: Desc)])
+  loanerAgreement   LoanerAgreement?
 }
 
 model Invoice {
@@ -3260,3 +3263,170 @@ model VehicleInspectionAnnotation {
 
   @@index([inspectionId])
 }
+
+// =====================================================================
+// Loaner Program reimagining (2026-05-31). Dedicated agreement entity
+// for the dealership service-loaner flow, mirroring RentalAgreement so
+// the in-bay wizard produces a signed, photo-backed legal packet.
+// Reservation (workflowMode = DEALERSHIP_LOANER) stays the lifecycle
+// anchor; LoanerAgreement holds the signature, capture baseline,
+// customer/license/insurance snapshot, photos, and damage map.
+// Plan: doc/loaner-reimagining-plan-2026-05-31.md
+// =====================================================================
+
+enum LoanerAgreementStatus {
+  DRAFT
+  ACTIVE // signed, keys out
+  RETURNED // checked back in, pending close
+  CLOSED // billing settled / closed out
+  VOID
+}
+
+enum LoanerPhotoKind {
+  WALKAROUND_OUT
+  WALKAROUND_IN
+  DAMAGE
+  FUEL_OUT
+  FUEL_IN
+  ODOMETER_OUT
+  ODOMETER_IN
+  LICENSE
+  INSURANCE
+}
+
+enum LoanerDamageSeverity {
+  MINOR
+  MODERATE
+  SEVERE
+}
+
+model LoanerAgreement {
+  id              String                @id @default(cuid())
+  tenantId        String?
+  tenant          Tenant?               @relation(fields: [tenantId], references: [id])
+  agreementNumber String                @unique
+  status          LoanerAgreementStatus @default(DRAFT)
+
+  reservationId String      @unique
+  reservation   Reservation @relation(fields: [reservationId], references: [id])
+
+  vehicleId String?
+  vehicle   Vehicle? @relation(fields: [vehicleId], references: [id])
+
+  pickupAt DateTime
+  returnAt DateTime
+
+  // Customer + license snapshot. DL PDF417 barcode decode (AAMVA) pre-fills
+  // these in-bay; staff confirms rather than transcribes. licenseImagePath
+  // is a Supabase Storage path (back-of-license scan).
+  customerFirstName String
+  customerLastName  String
+  customerEmail     String?
+  customerPhone     String?
+  dateOfBirth       DateTime?
+  licenseNumber     String?
+  licenseState      String?
+  licenseExpiry     DateTime?
+  licenseImagePath  String?
+
+  // Insurance capture (cloud OCR pre-fill, Phase 2). insuranceImagePath is a
+  // Supabase Storage path (front/back of insurance card).
+  insuranceCarrier      String?
+  insurancePolicyNumber String?
+  insuranceEffective    DateTime?
+  insuranceExpiry       DateTime?
+  insuranceImagePath    String?
+
+  // Fuel + odometer baseline (out) and return (in). fuel as a 0.00-1.00
+  // fraction to match RentalAgreement.fuelOut/fuelIn semantics.
+  fuelOut     Decimal? @db.Decimal(4, 2)
+  fuelIn      Decimal? @db.Decimal(4, 2)
+  odometerOut Int?
+  odometerIn  Int?
+
+  // E-signature (canvas data URL). Mirrors the rental T&C signature pattern.
+  signatureDataUrl String?   @db.Text
+  signerName       String?
+  signedAt         DateTime?
+  signerIp         String?
+  termsVersion     String?
+
+  // Public/remote signing token. Reuses the addendum-signature public-token
+  // flow: generated at agreement creation, embedded in the texted/emailed
+  // signing link, consumed (set null) after a successful signature.
+  signatureToken          String?   @unique
+  signatureTokenExpiresAt DateTime?
+
+  // Customer self-service portal. Unlike signatureToken (single-use), this
+  // token is long-lived (valid while the loaner is out) so the borrower can
+  // re-open their status page, request an extension, or schedule a return.
+  portalToken          String?   @unique
+  portalTokenExpiresAt DateTime?
+  // Customer-initiated requests captured via the portal (staff acts on them).
+  requestedReturnAt    DateTime?
+  returnScheduledAt    DateTime?
+  portalRequestNote    String?
+
+  notes          String?
+  finalizedAt    DateTime?
+  closedAt       DateTime?
+  closedByUserId String?
+  locked         Boolean   @default(false)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  photos       LoanerPhoto[]
+  damagePoints LoanerDamagePoint[]
+
+  @@index([tenantId, status])
+  @@index([vehicleId, createdAt])
+}
+
+model LoanerPhoto {
+  id                String          @id @default(cuid())
+  loanerAgreementId String
+  loanerAgreement   LoanerAgreement @relation(fields: [loanerAgreementId], references: [id], onDelete: Cascade)
+  tenantId          String?
+
+  kind          LoanerPhotoKind
+  angleLabel    String? // "Front", "Driver side", etc. for walkaround sets
+  storagePath   String // Supabase Storage object path
+  contentType   String?
+  sizeBytes     Int?
+  annotation    String?
+  takenAt       DateTime        @default(now())
+  takenByUserId String?
+
+  createdAt DateTime @default(now())
+
+  damagePoints LoanerDamagePoint[]
+
+  @@index([loanerAgreementId, kind])
+}
+
+model LoanerDamagePoint {
+  id                String          @id @default(cuid())
+  loanerAgreementId String
+  loanerAgreement   LoanerAgreement @relation(fields: [loanerAgreementId], references: [id], onDelete: Cascade)
+  tenantId          String?
+
+  // Normalized coordinates on the car diagram (0.0-1.0).
+  x        Float
+  y        Float
+  side     String? // FRONT / REAR / LEFT / RIGHT / TOP
+  severity LoanerDamageSeverity @default(MINOR)
+  note     String?
+
+  // true = documented at check-out (pre-existing), false = new at return.
+  preExisting Boolean @default(true)
+
+  photoId String?
+  photo   LoanerPhoto? @relation(fields: [photoId], references: [id])
+
+  createdAt       DateTime @default(now())
+  createdByUserId String?
+
+  @@index([loanerAgreementId])
+}
+
