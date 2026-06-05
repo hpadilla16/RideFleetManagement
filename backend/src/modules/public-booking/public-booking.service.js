@@ -1112,6 +1112,78 @@ export const publicBookingService = {
     return _formatTripDocumentsResponse(trip, docs);
   },
 
+  // Mobile car-sharing app vehicle inspection (pickup/return walkaround).
+  // Reuses TripDocument — documentType is a free string, so inspection
+  // slots are stored as INSPECTION_<PHASE>_<SLOT> with no schema change.
+  // Idempotent per (trip, type): re-submitting a slot replaces the row.
+  async submitInspectionPhotos(tripCode, payload = {}) {
+    const trip = await _findTripByCode(tripCode);
+
+    const phase =
+      String(payload.phase || 'PICKUP').toUpperCase() === 'RETURN'
+        ? 'RETURN'
+        : 'PICKUP';
+    const photos =
+      payload.photos && typeof payload.photos === 'object'
+        ? payload.photos
+        : {};
+
+    const SLOTS = [
+      'front',
+      'back',
+      'left',
+      'right',
+      'interior',
+      'dashboard',
+      'damage',
+    ];
+    const toWrite = [];
+    for (const slot of SLOTS) {
+      if (photos[slot] != null) {
+        toWrite.push({
+          type: `INSPECTION_${phase}_${slot.toUpperCase()}`,
+          dataUrl: _validateDocDataUrl(photos[slot], slot),
+        });
+      }
+    }
+    if (toWrite.length === 0) {
+      throw new Error('At least one inspection photo is required');
+    }
+
+    await prisma.$transaction(
+      toWrite.map((doc) =>
+        prisma.tripDocument.upsert({
+          where: {
+            tripId_documentType: {
+              tripId: trip.id,
+              documentType: doc.type,
+            },
+          },
+          create: {
+            tripId: trip.id,
+            documentType: doc.type,
+            dataUrl: doc.dataUrl,
+            status: 'PENDING',
+          },
+          update: {
+            dataUrl: doc.dataUrl,
+            status: 'PENDING',
+            rejectReason: null,
+            submittedAt: new Date(),
+            reviewedAt: null,
+          },
+        }),
+      ),
+    );
+
+    return {
+      ok: true,
+      tripCode: trip.tripCode,
+      phase,
+      saved: toWrite.map((d) => d.type),
+    };
+  },
+
   async getHostStatus(user) {
     if (!user?.id) throw Object.assign(new Error('Unauthorized'), { status: 401 });
 

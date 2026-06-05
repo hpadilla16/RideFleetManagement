@@ -360,6 +360,37 @@ publicBookingRouter.post(
   },
 );
 
+// POST /trips/:tripCode/inspection-photos — mobile car-sharing app
+// vehicle inspection (pickup/return walkaround). Body:
+//   { phase?: 'PICKUP' | 'RETURN',
+//     photos: { front?, back?, left?, right?, interior?, dashboard?, damage? } }
+// Each photo is a base64 data URL validated like pre-check-in docs.
+// Idempotent per (trip, phase, slot) via TripDocument upsert.
+publicBookingRouter.post(
+  '/trips/:tripCode/inspection-photos',
+  bookingWriteGuard,
+  async (req, res, next) => {
+    try {
+      assertPlainObject(req.body || {}, 'inspection payload');
+      res.json(
+        await publicBookingService.submitInspectionPhotos(
+          req.params.tripCode,
+          req.body || {},
+        ),
+      );
+    } catch (error) {
+      const msg = String(error?.message || '');
+      if (/not found/i.test(msg)) {
+        return res.status(404).json({ error: msg });
+      }
+      if (/required|invalid|too large|unsupported/i.test(msg)) {
+        return res.status(400).json({ error: msg });
+      }
+      next(error);
+    }
+  },
+);
+
 // Sprint 6 — Flutter payment WebView.
 //
 // POST /api/public/booking/trips/:tripCode/payment-session
