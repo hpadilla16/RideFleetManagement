@@ -552,19 +552,26 @@ async function exchangeHandoffToken(token) {
     },
   });
   if (!row) throw new CheckoutSessionError('Invalid token', 410, 'TOKEN_INVALID');
-  if (row.consumedAt) throw new CheckoutSessionError('Token already used', 410, 'TOKEN_CONSUMED');
   if (row.expiresAt < new Date()) {
     throw new CheckoutSessionError('Token expired', 410, 'TOKEN_EXPIRED');
   }
-
-  await prisma.handoffToken.update({
-    where: { id: row.id }, data: { consumedAt: new Date() },
-  });
+  // 2026-06-04 — RELOAD TOLERANCE. Hard single-use broke real phones:
+  // Android kills the browser tab when the customer switches to the camera
+  // mid-inspection (or the page otherwise reloads), and the re-exchange hit
+  // TOKEN_CONSUMED → "link expired" mid-flow (employees reported QR
+  // problems; logs show 410s during active sessions). The token now remains
+  // exchangeable until expiresAt — the short TTL is the security boundary,
+  // consumedAt just records first use.
+  if (!row.consumedAt) {
+    await prisma.handoffToken.update({
+      where: { id: row.id }, data: { consumedAt: new Date() },
+    }).catch(() => {});
+  }
 
   return {
     reservation: row.reservation,
     kind: row.kind,
-    consumedAt: new Date(),
+    consumedAt: row.consumedAt || new Date(),
   };
 }
 
