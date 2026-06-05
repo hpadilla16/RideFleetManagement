@@ -391,6 +391,35 @@ publicBookingRouter.post(
   },
 );
 
+// POST /trips/:tripCode/cancel — guest cancellation from the mobile app.
+// Body: { email } (must match the trip's guest). Only succeeds inside the
+// free-cancellation window (>48h before pickup); otherwise 400 directs
+// the guest to trip chat.
+publicBookingRouter.post(
+  '/trips/:tripCode/cancel',
+  bookingWriteGuard,
+  async (req, res, next) => {
+    try {
+      assertPlainObject(req.body || {}, 'cancel payload');
+      res.json(
+        await publicBookingService.cancelGuestTrip(
+          req.params.tripCode,
+          req.body || {},
+        ),
+      );
+    } catch (error) {
+      const msg = String(error?.message || '');
+      if (/not found/i.test(msg)) {
+        return res.status(404).json({ error: msg });
+      }
+      if (/required|match|window|cannot be cancelled/i.test(msg)) {
+        return res.status(400).json({ error: msg });
+      }
+      next(error);
+    }
+  },
+);
+
 // Sprint 6 — Flutter payment WebView.
 //
 // POST /api/public/booking/trips/:tripCode/payment-session
