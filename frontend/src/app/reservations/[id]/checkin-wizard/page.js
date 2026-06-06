@@ -16,7 +16,10 @@
  * routes status to CHECKED_IN or CHECKED_IN_UNPAID, enqueues autocharge,
  * and sends the appropriate email.
  *
- * Mockups reference: design/mockups/pillar2-checkin-checkout/index.html
+ * Visual system (2026-06-04): restyled to match checkout-wizard-v2 —
+ * same StepTracker pill header, cardStyle surfaces, KV rows, button and
+ * status-pill palette. Style constants are copied locally (no cross-page
+ * imports). Logic, API calls, fee preview, and submit flow are unchanged.
  */
 
 import { useEffect, useMemo, useState } from 'react';
@@ -25,7 +28,6 @@ import { AuthGate } from '../../../../components/AuthGate';
 import { AppShell } from '../../../../components/AppShell';
 import { api } from '../../../../lib/client';
 import { formatTenantWallClock } from '../../../../lib/tenant-time';
-import { WizardShell, WizCard, WizGrid } from '../../../../components/wizard/WizardShell';
 import { useFeePreview } from '../../../../components/wizard/useFeePreview';
 import { FeePreviewPanel } from '../../../../components/wizard/FeePreviewPanel';
 import {
@@ -253,10 +255,10 @@ function CheckinWizard({ token, me, logout }) {
 
   // Step navigation
   const steps = [
-    { title: 'Welcome back · return summary', body: 'Step1Summary' },
-    { title: 'Before & after photo inspection', body: 'Step2Photos' },
-    { title: 'Capture return metrics · live fee preview', body: 'Step3Metrics' },
-    { title: 'Settle balance or schedule auto-charge', body: 'Step4Payment' },
+    { title: 'Return summary', body: 'Step1Summary' },
+    { title: 'Photo inspection', body: 'Step2Photos' },
+    { title: 'Return metrics · live fee preview', body: 'Step3Metrics' },
+    { title: 'Settle balance', body: 'Step4Payment' },
     { title: 'Acknowledge fees & sign', body: 'Step5Signature' },
     { title: 'Return complete', body: 'Step6Success' }
   ];
@@ -272,91 +274,211 @@ function CheckinWizard({ token, me, logout }) {
     }
   };
 
+  // Sibling of canAdvance(): when the Continue button is disabled, returns a
+  // short, actionable string telling staff EXACTLY what's missing for the
+  // current step. Returns null whenever canAdvance() is true (button enabled,
+  // no hint to show). Keeps the same step→rule mapping as canAdvance() above
+  // so the two never drift — fixes the QA "stuck with no explanation" P2.
+  const blockedReason = () => {
+    if (canAdvance()) return null;
+    const odoOut = Number(agreement?.odometerOut || 0);
+    switch (step) {
+      case 0:
+        if (!reservation) return 'Cargando la reservación…';
+        if (!agreement) return 'No hay rental agreement vinculado a esta reservación — si es un loaner, usa el check-in del Loaner Program';
+        return 'Faltan datos de la reservación';
+      case 1:
+        return 'Captura al menos 1 foto del return';
+      case 2:
+        if (!(Number(odometerIn) > 0)) return 'Ingresa el odómetro de regreso (mayor a 0)';
+        return `El odómetro de regreso no puede ser menor al de salida (${odoOut.toLocaleString()} mi)`;
+      case 3:
+        return 'En pago manual, ingresa un monto mayor a $0.00 (o elige auto-cobro en 24h)';
+      case 4:
+        if (!signerName) return 'Ingresa el nombre de quien firma';
+        if (!signatureDataUrl) return 'Captura la firma del cliente';
+        return 'Falta firma y nombre del firmante';
+      default:
+        return null;
+    }
+  };
+
   const onNext = () => {
     if (step === 4) return submitCheckinClose();
     if (step === 5) return router.push('/reservations');
     setStep((s) => Math.min(s + 1, steps.length - 1));
   };
 
+  // Scroll to top on each step change so the user doesn't land mid-page.
+  // (Previously provided by the shared WizardShell chrome.)
+  useEffect(() => {
+    if (typeof window !== 'undefined') window.scrollTo(0, 0);
+  }, [step]);
+
   if (loading) {
     return (
       <AppShell me={me} logout={logout}>
-        <div style={{ padding: 60, textAlign: 'center', color: '#6f668f' }}>Loading reservation…</div>
+        <div style={{ padding: 24 }}>Loading reservation…</div>
       </AppShell>
     );
   }
   if (!reservation) {
     return (
       <AppShell me={me} logout={logout}>
-        <div style={{ padding: 60, textAlign: 'center', color: '#ef4444' }}>Reservation not found</div>
+        <div style={{ padding: 24, color: '#B91C1C' }}>Reservation not found</div>
       </AppShell>
     );
   }
 
+  const onBack = step > 0 && step < 5 ? () => setStep((s) => s - 1) : null;
+  const nextLabel =
+    submitting ? 'Submitting…' :
+    step === 4 ? 'Confirm & submit →' :
+    step === 5 ? 'Return to reservations' : 'Continue →';
+  const nextDisabled = !canAdvance() || submitting;
+  // When the button is disabled (and we're not mid-submit), surface WHY so
+  // staff aren't left guessing. Null while submitting or when advanceable.
+  const reason = submitting ? null : blockedReason();
+
   return (
     <AppShell me={me} logout={logout}>
-      <WizardShell
-        title="Checkin"
-        stepIndex={step}
-        totalSteps={6}
-        stepTitle={steps[step].title}
-        accent="mint"
-        onBack={step > 0 && step < 5 ? () => setStep((s) => s - 1) : null}
-        onNext={onNext}
-        nextLabel={
-          submitting ? 'Submitting…' :
-          step === 4 ? 'Confirm & submit →' :
-          step === 5 ? 'Return to reservations' : 'Continue →'
-        }
-        nextDisabled={!canAdvance() || submitting}
-      >
-        {step === 0 && <Step1Summary reservation={reservation} agreement={agreement} />}
-        {step === 1 && (
-          <Step2Photos
-            photos={photos}
-            onCapture={(k, dataUrl) => setPhotos((p) => ({ ...p, [k]: dataUrl }))}
-            currentAngle={currentAngle}
-            onAngleChange={setCurrentAngle}
-          />
-        )}
-        {step === 2 && (
-          <Step3Metrics
-            agreement={agreement}
-            odometerIn={odometerIn} onOdometerIn={setOdometerIn}
-            fuelIn={fuelIn} onFuelIn={setFuelIn}
-            cleanlinessIn={cleanlinessIn} onCleanlinessIn={setCleanlinessIn}
-            smokingDetected={smokingDetected} onSmokingDetected={setSmokingDetected}
-            waiveLateFee={waiveLateFee} onWaiveLateFee={setWaiveLateFee}
-            feePreview={feePreview}
-          />
-        )}
-        {step === 3 && (
-          <Step4Payment
-            reservation={reservation}
-            agreement={agreement}
-            feesTotal={feePreview.total}
-            paymentMode={paymentMode}
-            onPaymentMode={setPaymentMode}
-            manualPayment={manualPayment}
-            onManualPayment={setManualPayment}
-          />
-        )}
-        {step === 4 && (
-          <Step5Signature
-            feePreview={feePreview}
-            signerName={signerName}
-            onSignerName={setSignerName}
-            signatureDataUrl={signatureDataUrl}
-            onSignature={setSignatureDataUrl}
-            paymentMode={paymentMode}
-            cardLast4={reservation?.customer?.cardLast4 || agreement?.reservation?.customer?.cardLast4}
-            cardBrand={reservation?.customer?.cardBrand || agreement?.reservation?.customer?.cardBrand}
-            error={submitError}
-          />
-        )}
-        {step === 5 && <Step6Success result={result} reservation={reservation} agreement={agreement} token={token} onDone={() => router.push('/reservations')} />}
-      </WizardShell>
+      <div style={{ padding: 24, maxWidth: 1100, margin: '0 auto' }}>
+        {/* Header — title + step tracker, same visual system as checkout-wizard-v2 */}
+        <div style={{ marginBottom: 24 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+            <div>
+              <div style={{ fontWeight: 600, fontSize: 16 }}>
+                Check-in · #{reservation.reservationNumber}
+              </div>
+              <div style={{ fontSize: 13, color: '#6B7280' }}>
+                {reservation.customer?.firstName} {reservation.customer?.lastName}
+              </div>
+            </div>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <button onClick={() => router.push(`/reservations/${reservationId}`)} style={pauseBtnStyle}>
+                Back to reservation
+              </button>
+            </div>
+          </div>
+          <StepTracker currentNumber={step + 1} done={step === 5} />
+        </div>
+
+        <div style={cardStyle}>
+          <h3 style={h3Style}>Step {step + 1} · {steps[step].title}</h3>
+          {step === 0 && <Step1Summary reservation={reservation} agreement={agreement} />}
+          {step === 1 && (
+            <Step2Photos
+              photos={photos}
+              onCapture={(k, dataUrl) => setPhotos((p) => ({ ...p, [k]: dataUrl }))}
+              currentAngle={currentAngle}
+              onAngleChange={setCurrentAngle}
+            />
+          )}
+          {step === 2 && (
+            <Step3Metrics
+              agreement={agreement}
+              odometerIn={odometerIn} onOdometerIn={setOdometerIn}
+              fuelIn={fuelIn} onFuelIn={setFuelIn}
+              cleanlinessIn={cleanlinessIn} onCleanlinessIn={setCleanlinessIn}
+              smokingDetected={smokingDetected} onSmokingDetected={setSmokingDetected}
+              waiveLateFee={waiveLateFee} onWaiveLateFee={setWaiveLateFee}
+              feePreview={feePreview}
+            />
+          )}
+          {step === 3 && (
+            <Step4Payment
+              reservation={reservation}
+              agreement={agreement}
+              feesTotal={feePreview.total}
+              paymentMode={paymentMode}
+              onPaymentMode={setPaymentMode}
+              manualPayment={manualPayment}
+              onManualPayment={setManualPayment}
+            />
+          )}
+          {step === 4 && (
+            <Step5Signature
+              feePreview={feePreview}
+              signerName={signerName}
+              onSignerName={setSignerName}
+              signatureDataUrl={signatureDataUrl}
+              onSignature={setSignatureDataUrl}
+              paymentMode={paymentMode}
+              cardLast4={reservation?.customer?.cardLast4 || agreement?.reservation?.customer?.cardLast4}
+              cardBrand={reservation?.customer?.cardBrand || agreement?.reservation?.customer?.cardBrand}
+              error={submitError}
+            />
+          )}
+          {step === 5 && <Step6Success result={result} reservation={reservation} agreement={agreement} token={token} onDone={() => router.push('/reservations')} />}
+
+          {/* Step navigation — same primary/ghost button styles as checkout-wizard-v2 */}
+          <div style={{ display: 'flex', gap: 12, justifyContent: 'flex-end', alignItems: 'center', marginTop: 16 }}>
+            {/* Disabled-reason hint — tells staff exactly what's missing so they
+                aren't stuck staring at a greyed-out Continue (QA P2 fix). */}
+            {reason && (
+              <span style={{ fontSize: 12, color: '#92400E', textAlign: 'right', flex: 1 }}>
+                {reason}
+              </span>
+            )}
+            {onBack && (
+              <button type="button" style={ghostBtn} onClick={onBack}>← Back</button>
+            )}
+            <button
+              type="button"
+              style={{ ...primaryBtn, opacity: nextDisabled ? 0.4 : 1, cursor: nextDisabled ? 'not-allowed' : 'pointer' }}
+              onClick={onNext}
+              disabled={nextDisabled}
+              title={reason || undefined}
+            >
+              {nextLabel}
+            </button>
+          </div>
+        </div>
+      </div>
     </AppShell>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// StepTracker — numbered pills, same visual style as checkout-wizard-v2
+// ─────────────────────────────────────────────────────────────────────────────
+function StepTracker({ currentNumber, done }) {
+  const steps = [
+    { number: 1, label: 'Summary' },
+    { number: 2, label: 'Photos' },
+    { number: 3, label: 'Metrics' },
+    { number: 4, label: 'Settle' },
+    { number: 5, label: 'Sign' },
+    { number: 6, label: 'Done' },
+  ];
+  return (
+    <div style={{ display: 'flex', gap: 8 }}>
+      {steps.map((s) => {
+        const isCurrent = s.number === currentNumber;
+        const isDone = s.number < currentNumber || done;
+        return (
+          <div key={s.number} style={{
+            flex: 1, padding: '8px 12px', borderRadius: 6,
+            border: '0.5px solid #E5E7EB',
+            background: isCurrent ? '#1F2937' : (isDone ? '#D1FAE5' : '#FFFFFF'),
+            color: isCurrent ? '#FFFFFF' : (isDone ? '#065F46' : '#6B7280'),
+            fontSize: 12, fontWeight: isCurrent ? 600 : 500,
+            display: 'flex', alignItems: 'center', gap: 6,
+          }}>
+            <span style={{
+              width: 18, height: 18, borderRadius: '50%',
+              background: isCurrent ? 'rgba(255,255,255,0.2)' : (isDone ? '#10B981' : '#F3F4F6'),
+              color: isCurrent ? '#FFFFFF' : (isDone ? '#FFFFFF' : '#9CA3AF'),
+              display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+              fontSize: 10, fontWeight: 600,
+            }}>
+              {isDone ? '✓' : s.number}
+            </span>
+            {s.label}
+          </div>
+        );
+      })}
+    </div>
   );
 }
 
@@ -382,51 +504,49 @@ function Step1Summary({ reservation, agreement }) {
   const totalPaid = Number(agreement?.paidAmount || 0);
   const settledPaid = Math.max(0, Number((totalPaid - authHoldsTotal).toFixed(2)));
   return (
-    <WizGrid cols={2}>
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-        <WizCard accent="ink" padding={22}>
-          <div style={{ fontSize: 12, opacity: .85, fontWeight: 700, letterSpacing: '.12em' }}>RETURNING VEHICLE</div>
-          <div style={{ fontSize: 24, fontWeight: 800, marginTop: 6, letterSpacing: '-.01em' }}>{vehicleDesc}</div>
-          <div style={{ fontSize: 13, opacity: .9, marginTop: 4 }}>⬢ {v?.plate || 'No plate'} · Unit {v?.internalNumber || '—'}</div>
-          <div style={{ display: 'flex', gap: 8, marginTop: 16, flexWrap: 'wrap' }}>
-            <span style={{ background: 'rgba(255,255,255,.22)', padding: '6px 12px', borderRadius: 999, fontSize: 11, fontWeight: 700 }}>
-              {isLate ? '⚠ Late return' : '✓ On time'}
-            </span>
-            <span style={{ background: 'rgba(255,255,255,.22)', padding: '6px 12px', borderRadius: 999, fontSize: 11, fontWeight: 700 }}>
+    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+        <div style={sectionBox}>
+          <div style={sectionLabel}>Returning vehicle</div>
+          <div style={{ fontSize: 18, fontWeight: 600, marginTop: 4, color: '#111827' }}>{vehicleDesc}</div>
+          <div style={{ fontSize: 13, color: '#6B7280', marginTop: 4 }}>{v?.plate || 'No plate'} · Unit {v?.internalNumber || '—'}</div>
+          <div style={{ display: 'flex', gap: 8, marginTop: 12, flexWrap: 'wrap' }}>
+            <StatusPill ok={!isLate} label={isLate ? 'Late return' : 'On time'} />
+            <span style={{ ...pillBase, background: '#F3F4F6', color: '#6B7280' }}>
               {agreement?.inspections?.length || 0} inspection records
             </span>
           </div>
-        </WizCard>
-        <WizGrid cols={2} gap={10}>
+        </div>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
           <Tile k="Customer" v={`${reservation?.customer?.firstName || ''} ${reservation?.customer?.lastName || ''}`.trim() || '—'} />
           <Tile k="Picked up" v={pickupAt.replace(',', ' ·')} />
           <Tile k="Due back" v={returnAt.replace(',', ' ·')} />
-          <Tile k="Status" v={isLate ? 'Late' : 'On time'} valueColor={isLate ? '#f59e0b' : '#1fc7aa'} />
-        </WizGrid>
+          <Tile k="Status" v={isLate ? 'Late' : 'On time'} valueColor={isLate ? '#F59E0B' : '#10B981'} />
+        </div>
       </div>
-      <WizCard>
-        <div style={{ fontSize: 11, fontWeight: 800, color: '#6f668f', letterSpacing: '.12em', marginBottom: 10 }}>PICKUP BASELINE</div>
-        <RowBetween k="Odometer" v={`${Number(agreement?.odometerOut || 0).toLocaleString()} mi`} />
-        <RowBetween k="Fuel" v={`${Math.round(Number(agreement?.fuelOut || 0) * 100)}%`} />
-        <RowBetween k="Cleanliness" v={`${agreement?.cleanlinessOut || '—'}/5`} />
-        <hr style={{ border: 'none', borderTop: '1px solid #e6dfff', margin: '12px 0' }} />
-        <RowBetween k="Agreement total" v={`$${Number(agreement?.total || 0).toFixed(2)}`} />
-        <RowBetween k="Paid so far" v={`$${settledPaid.toFixed(2)}`} valueColor="#1fc7aa" />
+      <div style={sectionBox}>
+        <div style={sectionLabel}>Pickup baseline</div>
+        <KV label="Odometer" value={`${Number(agreement?.odometerOut || 0).toLocaleString()} mi`} />
+        <KV label="Fuel" value={`${Math.round(Number(agreement?.fuelOut || 0) * 100)}%`} />
+        <KV label="Cleanliness" value={`${agreement?.cleanlinessOut || '—'}/5`} />
+        <hr style={{ border: 'none', borderTop: '0.5px solid #E5E7EB', margin: '12px 0' }} />
+        <KV label="Agreement total" value={`$${Number(agreement?.total || 0).toFixed(2)}`} />
+        <KV label="Paid so far" value={`$${settledPaid.toFixed(2)}`} valueColor="#10B981" />
         {authHoldsTotal > 0 ? (
-          <RowBetween k="Auth holds" v={`$${authHoldsTotal.toFixed(2)}`} valueColor="#a16207" />
+          <KV label="Auth holds" value={`$${authHoldsTotal.toFixed(2)}`} valueColor="#92400E" />
         ) : null}
-        <RowBetween
-          k={<strong>Outstanding balance</strong>}
-          v={<strong>${Number(agreement?.balance || 0).toFixed(2)}</strong>}
-          valueColor={Number(agreement?.balance || 0) > 0 ? '#f59e0b' : '#1fc7aa'}
+        <KV
+          label={<strong>Outstanding balance</strong>}
+          value={<strong>${Number(agreement?.balance || 0).toFixed(2)}</strong>}
+          valueColor={Number(agreement?.balance || 0) > 0 ? '#F59E0B' : '#10B981'}
         />
-        <RowBetween k="Card on file" v={
+        <KV label="Card on file" value={
           agreement?.reservation?.customer?.cardLast4
             ? `${agreement.reservation.customer.cardBrand || 'Card'} ····${agreement.reservation.customer.cardLast4}`
             : '— No card'
         } />
-      </WizCard>
-    </WizGrid>
+      </div>
+    </div>
   );
 }
 
@@ -435,14 +555,14 @@ function Step1Summary({ reservation, agreement }) {
 // ─────────────────────────────────────────────────────────────────────────────
 function Step2Photos({ photos, onCapture, currentAngle, onAngleChange }) {
   return (
-    <WizCard padding={20}>
+    <div style={sectionBox}>
       <PhotoCapture
         capturedPhotos={photos}
         onCapture={onCapture}
         currentAngleIndex={currentAngle}
         onAngleChange={onAngleChange}
       />
-    </WizCard>
+    </div>
   );
 }
 
@@ -466,7 +586,7 @@ function Step3Metrics({
   const dueBack = agreement?.returnAt ? new Date(agreement.returnAt) : null;
   const isPastGrace = dueBack ? (Date.now() - dueBack.getTime()) > 30 * 60 * 1000 : false;
   return (
-    <WizGrid cols={2}>
+    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
         <OdometerInput
           value={odometerIn}
@@ -492,39 +612,37 @@ function Step3Metrics({
           onChange={onSmokingDetected}
         />
         {isPastGrace ? (
-          <label style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: 10,
-            padding: '12px 14px',
-            background: waiveLateFee ? '#FEF3C7' : '#FFFFFF',
-            border: `1px solid ${waiveLateFee ? '#F59E0B' : '#E5E7EB'}`,
-            borderRadius: 8,
-            cursor: 'pointer',
+          <div style={{
+            padding: 12,
+            background: waiveLateFee ? '#FEF3C7' : '#F9FAFB',
+            border: `0.5px solid ${waiveLateFee ? '#F59E0B' : '#E5E7EB'}`,
+            borderRadius: 6,
           }}>
-            <input
-              type="checkbox"
-              checked={waiveLateFee}
-              onChange={(e) => onWaiveLateFee(e.target.checked)}
-              style={{ width: 18, height: 18, accentColor: '#F59E0B' }}
-            />
-            <div style={{ flex: 1 }}>
-              <div style={{ fontWeight: 600, fontSize: 14, color: waiveLateFee ? '#92400E' : '#1F2937' }}>
-                Waive late return fee
+            <label style={{ display: 'flex', alignItems: 'flex-start', gap: 10, cursor: 'pointer' }}>
+              <input
+                type="checkbox"
+                checked={waiveLateFee}
+                onChange={(e) => onWaiveLateFee(e.target.checked)}
+                style={{ width: 16, height: 16, marginTop: 2, accentColor: '#F59E0B' }}
+              />
+              <div>
+                <div style={{ fontWeight: 500, fontSize: 13, color: waiveLateFee ? '#92400E' : '#374151' }}>
+                  Waive late return fee
+                </div>
+                <div style={{ fontSize: 11, color: '#6B7280', marginTop: 2 }}>
+                  {waiveLateFee
+                    ? 'Late fee removed from this checkout. Action audit-logged.'
+                    : 'Skip the LATE_RETURN fee for this rental (courtesy / flight delay / authorized overrun).'}
+                </div>
               </div>
-              <div style={{ fontSize: 12, color: '#6B7280', marginTop: 2 }}>
-                {waiveLateFee
-                  ? 'Late fee removed from this checkout. Action audit-logged.'
-                  : 'Skip the LATE_RETURN fee for this rental (courtesy / flight delay / authorized overrun).'}
-              </div>
-            </div>
-          </label>
+            </label>
+          </div>
         ) : null}
       </div>
       <div style={{ position: 'sticky', top: 80 }}>
         <FeePreviewPanel items={feePreview.items} total={feePreview.total} />
       </div>
-    </WizGrid>
+    </div>
   );
 }
 
@@ -539,29 +657,28 @@ function Step4Payment({ reservation, agreement, feesTotal, paymentMode, onPaymen
   const cardBrand = customer?.cardBrand || 'Card';
 
   return (
-    <WizGrid cols={2}>
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-        <WizCard accent="ink" padding={22}>
-          <div style={{ fontSize: 11, opacity: .7, fontWeight: 700, letterSpacing: '.1em' }}>OUTSTANDING</div>
-          <div style={{ fontSize: 36, fontWeight: 800, letterSpacing: '-.02em', marginTop: 4 }}>${outstandingTotal.toFixed(2)}</div>
+    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+        <div style={{ ...sectionBox, background: '#1F2937', border: 'none', color: '#FFFFFF' }}>
+          <div style={{ fontSize: 11, opacity: .7, fontWeight: 600, letterSpacing: '.06em', textTransform: 'uppercase' }}>Outstanding</div>
+          <div style={{ fontSize: 28, fontWeight: 600, marginTop: 4 }}>${outstandingTotal.toFixed(2)}</div>
           <div style={{ fontSize: 11, opacity: .65, marginTop: 4 }}>
             ${existingBalance.toFixed(2)} prior balance · ${feesTotal.toFixed(2)} return fees
           </div>
-        </WizCard>
+        </div>
 
         <PaymentOption
           selected={paymentMode === 'autocharge'}
           onSelect={() => onPaymentMode('autocharge')}
           title="Auto-charge in 24h"
           subtitle="Recommended · gives customer time to review and dispute"
-          accent="purple"
         >
           {paymentMode === 'autocharge' && (
             <>
-              <RowBetween k="Amount" v={`$${outstandingTotal.toFixed(2)}`} />
-              <RowBetween k="Charge time" v="Tomorrow, this hour" />
-              <RowBetween k="Card" v={`${cardBrand} ····${cardLast4}`} />
-              <RowBetween k="Status after" v="CHECKED_IN_UNPAID" valueColor="#f59e0b" />
+              <KV label="Amount" value={`$${outstandingTotal.toFixed(2)}`} />
+              <KV label="Charge time" value="Tomorrow, this hour" />
+              <KV label="Card" value={`${cardBrand} ····${cardLast4}`} />
+              <KV label="Status after" value="CHECKED_IN_UNPAID" valueColor="#F59E0B" />
             </>
           )}
         </PaymentOption>
@@ -582,11 +699,15 @@ function Step4Payment({ reservation, agreement, feesTotal, paymentMode, onPaymen
         </PaymentOption>
       </div>
       <div>
-        <WizCard accent={paymentMode === 'autocharge' ? 'warn' : 'mint'}>
-          <div style={{ fontSize: 11, fontWeight: 800, color: paymentMode === 'autocharge' ? '#b45309' : '#047857', letterSpacing: '.1em' }}>
-            {paymentMode === 'autocharge' ? 'WHAT HAPPENS NEXT' : 'PAID IN FULL'}
+        <div style={{
+          ...sectionBox,
+          background: paymentMode === 'autocharge' ? 'rgba(245,158,11,.08)' : '#D1FAE5',
+          border: paymentMode === 'autocharge' ? '0.5px solid rgba(245,158,11,.3)' : '0.5px solid rgba(16,185,129,.3)',
+        }}>
+          <div style={{ fontSize: 11, fontWeight: 600, color: paymentMode === 'autocharge' ? '#92400E' : '#065F46', letterSpacing: '.06em', textTransform: 'uppercase' }}>
+            {paymentMode === 'autocharge' ? 'What happens next' : 'Paid in full'}
           </div>
-          <div style={{ fontSize: 13, color: '#211a38', lineHeight: 1.6, marginTop: 8 }}>
+          <div style={{ fontSize: 13, color: '#374151', lineHeight: 1.6, marginTop: 8 }}>
             {paymentMode === 'autocharge' ? (
               <>
                 Customer will receive an itemized invoice email <strong>immediately</strong> with the
@@ -600,57 +721,55 @@ function Step4Payment({ reservation, agreement, feesTotal, paymentMode, onPaymen
               </>
             )}
           </div>
-        </WizCard>
-        <WizCard style={{ marginTop: 12 }}>
-          <div style={{ fontSize: 11, fontWeight: 800, color: '#6f668f', letterSpacing: '.1em', marginBottom: 10 }}>AGREEMENT AUTHORIZATION</div>
-          <div style={{ fontSize: 12, color: '#6f668f', lineHeight: 1.6 }}>
+        </div>
+        <div style={{ ...sectionBox, marginTop: 12 }}>
+          <div style={sectionLabel}>Agreement authorization</div>
+          <div style={{ fontSize: 12, color: '#6B7280', lineHeight: 1.6 }}>
             Customer signed the post-rental charge authorization on the original agreement. The card-on-file
             is pre-authorized for these fee categories.
           </div>
           <div style={{ display: 'flex', gap: 6, marginTop: 10, flexWrap: 'wrap' }}>
             {['Mileage', 'Fuel', 'Cleaning', 'Smoking', 'Tolls', 'Damages'].map((tag) => (
-              <span key={tag} style={{ fontSize: 10, padding: '3px 9px', background: 'rgba(31,199,170,.10)', color: '#047857', borderRadius: 999, fontWeight: 700 }}>✓ {tag}</span>
+              <span key={tag} style={{ ...pillBase, background: '#D1FAE5', color: '#065F46' }}>✓ {tag}</span>
             ))}
           </div>
-        </WizCard>
+        </div>
       </div>
-    </WizGrid>
+    </div>
   );
 }
 
-function PaymentOption({ selected, onSelect, title, subtitle, accent, children }) {
+function PaymentOption({ selected, onSelect, title, subtitle, children }) {
   return (
     <div
       onClick={onSelect}
       style={{
-        border: selected ? '2px solid #6d3df2' : '1px solid #e6dfff',
-        background: selected ? 'linear-gradient(135deg, rgba(135,82,254,.05), rgba(135,82,254,.01))' : 'white',
-        borderRadius: 16,
-        padding: 16,
+        border: selected ? '1px solid #1F2937' : '0.5px solid #E5E7EB',
+        background: selected ? '#F9FAFB' : '#FFFFFF',
+        borderRadius: 8,
+        padding: 14,
         cursor: 'pointer',
-        boxShadow: selected ? '0 8px 20px rgba(135,82,254,.18)' : '0 6px 14px rgba(35,21,80,.06)',
-        transition: 'all .2s ease'
       }}
     >
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
         <div>
-          <div style={{ fontSize: 11, fontWeight: 800, color: '#6f668f', letterSpacing: '.1em' }}>
-            {selected ? 'SELECTED' : 'OR'}
+          <div style={{ fontSize: 10, fontWeight: 600, color: '#9CA3AF', letterSpacing: '.06em', textTransform: 'uppercase' }}>
+            {selected ? 'Selected' : 'Or'}
           </div>
-          <div style={{ fontSize: 16, fontWeight: 800, color: '#211a38', marginTop: 4 }}>{title}</div>
-          <div style={{ fontSize: 12, color: '#6f668f', marginTop: 4 }}>{subtitle}</div>
+          <div style={{ fontSize: 14, fontWeight: 600, color: '#111827', marginTop: 4 }}>{title}</div>
+          <div style={{ fontSize: 12, color: '#6B7280', marginTop: 4 }}>{subtitle}</div>
         </div>
         <div style={{
-          width: 26, height: 26, borderRadius: '50%',
-          background: selected ? '#6d3df2' : 'transparent',
-          border: selected ? 'none' : '2px solid #c5b1ff',
+          width: 22, height: 22, borderRadius: '50%',
+          background: selected ? '#10B981' : 'transparent',
+          border: selected ? 'none' : '1px solid #D1D5DB',
           display: 'flex', alignItems: 'center', justifyContent: 'center',
-          color: 'white', fontWeight: 800, fontSize: 14, flexShrink: 0
+          color: '#FFFFFF', fontWeight: 600, fontSize: 12, flexShrink: 0
         }}>
           {selected && '✓'}
         </div>
       </div>
-      {children && <div style={{ marginTop: 14, borderTop: '1px solid rgba(135,82,254,.10)', paddingTop: 12 }}>{children}</div>}
+      {children && <div style={{ marginTop: 12, borderTop: '0.5px solid #E5E7EB', paddingTop: 12 }}>{children}</div>}
     </div>
   );
 }
@@ -660,27 +779,20 @@ function ManualPaymentForm({ payment, onChange, suggestedAmount }) {
     <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
       <div style={{ display: 'flex', gap: 6 }}>
         {[
-          { id: 'card', label: 'Card', icon: '💳' },
-          { id: 'cash', label: 'Cash', icon: '💵' },
-          { id: 'check', label: 'Check', icon: '📄' }
+          { id: 'card', label: 'Card' },
+          { id: 'cash', label: 'Cash' },
+          { id: 'check', label: 'Check' }
         ].map((m) => (
           <button
             key={m.id}
             type="button"
             onClick={() => onChange({ ...payment, method: m.id })}
-            style={{
-              flex: 1, padding: '12px 8px',
-              background: payment.method === m.id ? 'linear-gradient(135deg, #8752FE, #6d3df2)' : 'white',
-              color: payment.method === m.id ? 'white' : '#6f668f',
-              border: payment.method === m.id ? 'none' : '1px solid #e6dfff',
-              borderRadius: 12,
-              fontSize: 12,
-              fontWeight: 700,
-              cursor: 'pointer',
-              boxShadow: payment.method === m.id ? '0 6px 14px rgba(135,82,254,.32)' : 'none'
-            }}
+            style={
+              payment.method === m.id
+                ? { ...primaryBtn, flex: 1, padding: '8px 12px', fontSize: 13 }
+                : { ...ghostBtn, flex: 1 }
+            }
           >
-            <div style={{ fontSize: 18, marginBottom: 4 }}>{m.icon}</div>
             {m.label}
           </button>
         ))}
@@ -712,23 +824,14 @@ function ManualPaymentForm({ payment, onChange, suggestedAmount }) {
 
 function Field({ label, value, onChange, type = 'text', placeholder = '' }) {
   return (
-    <label style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-      <span style={{ fontSize: 10, fontWeight: 800, color: '#6f668f', letterSpacing: '.1em' }}>{label.toUpperCase()}</span>
+    <label style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+      <span style={{ fontSize: 12, color: '#6B7280' }}>{label}</span>
       <input
         type={type}
         value={value || ''}
         onChange={(e) => onChange(e.target.value)}
         placeholder={placeholder}
-        style={{
-          padding: '10px 14px',
-          border: '1px solid #e6dfff',
-          borderRadius: 12,
-          fontSize: 14,
-          fontWeight: 700,
-          color: '#211a38',
-          outline: 'none',
-          background: 'white'
-        }}
+        style={inputStyle}
       />
     </label>
   );
@@ -739,28 +842,28 @@ function Field({ label, value, onChange, type = 'text', placeholder = '' }) {
 // ─────────────────────────────────────────────────────────────────────────────
 function Step5Signature({ feePreview, signerName, onSignerName, signatureDataUrl, onSignature, paymentMode, cardLast4, cardBrand, error }) {
   return (
-    <WizGrid cols={2}>
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-        <WizCard accent="warn">
-          <div style={{ fontSize: 11, fontWeight: 800, color: '#b45309', letterSpacing: '.1em', marginBottom: 10 }}>FEES TO ACKNOWLEDGE</div>
+    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+        <div style={{ ...sectionBox, background: 'rgba(245,158,11,.08)', border: '0.5px solid rgba(245,158,11,.3)' }}>
+          <div style={{ fontSize: 11, fontWeight: 600, color: '#92400E', letterSpacing: '.06em', textTransform: 'uppercase', marginBottom: 10 }}>Fees to acknowledge</div>
           {feePreview.items.length === 0 ? (
-            <div style={{ fontSize: 13, color: '#211a38' }}>No additional fees · balance unchanged</div>
+            <div style={{ fontSize: 13, color: '#374151' }}>No additional fees · balance unchanged</div>
           ) : (
             feePreview.items.map((it) => (
-              <RowBetween key={it.feeType} k={readableFee(it.feeType)} v={`$${it.total.toFixed(2)}`} />
+              <KV key={it.feeType} label={readableFee(it.feeType)} value={`$${it.total.toFixed(2)}`} />
             ))
           )}
-          <hr style={{ border: 'none', borderTop: '1px solid rgba(245,158,11,.24)', margin: '10px 0' }} />
-          <RowBetween k={<strong>Total fees</strong>} v={<strong>${feePreview.total.toFixed(2)}</strong>} valueColor="#211a38" />
-        </WizCard>
+          <hr style={{ border: 'none', borderTop: '0.5px solid rgba(245,158,11,.24)', margin: '10px 0' }} />
+          <KV label={<strong>Total fees</strong>} value={<strong>${feePreview.total.toFixed(2)}</strong>} valueColor="#111827" />
+        </div>
         {paymentMode === 'autocharge' && feePreview.total > 0 && (
-          <WizCard accent="warn">
-            <div style={{ fontSize: 11, fontWeight: 800, color: '#b45309', letterSpacing: '.1em' }}>CHARGE NOTICE</div>
-            <div style={{ fontSize: 13, color: '#211a38', marginTop: 8, lineHeight: 1.5 }}>
+          <div style={{ ...sectionBox, background: 'rgba(245,158,11,.08)', border: '0.5px solid rgba(245,158,11,.3)' }}>
+            <div style={{ fontSize: 11, fontWeight: 600, color: '#92400E', letterSpacing: '.06em', textTransform: 'uppercase' }}>Charge notice</div>
+            <div style={{ fontSize: 13, color: '#374151', marginTop: 8, lineHeight: 1.5 }}>
               <strong>{cardBrand} ····{cardLast4}</strong> will be charged <strong>${feePreview.total.toFixed(2)}</strong> in
               24 hours. You can reply to the invoice email or call us before then to dispute.
             </div>
-          </WizCard>
+          </div>
         )}
       </div>
       <div>
@@ -773,12 +876,12 @@ function Step5Signature({ feePreview, signerName, onSignerName, signatureDataUrl
           helperText="By signing, the customer acknowledges the return condition and authorizes the listed charges."
         />
         {error && (
-          <div style={{ marginTop: 12, padding: '10px 14px', background: 'rgba(239,68,68,.08)', border: '1px solid rgba(239,68,68,.24)', borderRadius: 10, color: '#b91c1c', fontSize: 13, fontWeight: 700 }}>
-            ⚠ {error}
+          <div style={{ marginTop: 12, padding: '6px 8px', background: 'rgba(220,38,38,.06)', border: '0.5px solid rgba(220,38,38,.2)', borderRadius: 4, color: '#B91C1C', fontSize: 12 }}>
+            {error}
           </div>
         )}
       </div>
-    </WizGrid>
+    </div>
   );
 }
 
@@ -806,58 +909,60 @@ function Step6Success({ result, reservation, agreement, token, onDone }) {
     }
   };
   return (
-    <WizGrid cols={2}>
+    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
       <div>
         <div style={{
           minHeight: 240,
-          borderRadius: 18,
-          background: 'linear-gradient(135deg, #1fc7aa 0%, #16a589 100%)',
-          color: 'white',
-          padding: 36,
+          borderRadius: 8,
+          border: '0.5px solid rgba(16,185,129,.3)',
+          background: '#D1FAE5',
+          color: '#065F46',
+          padding: 32,
           display: 'flex',
           flexDirection: 'column',
           alignItems: 'center',
           justifyContent: 'center',
-          position: 'relative',
-          overflow: 'hidden'
         }}>
           <div style={{
-            width: 80, height: 80,
+            width: 56, height: 56,
             borderRadius: '50%',
-            background: 'rgba(255,255,255,.95)',
-            color: '#1fc7aa',
+            background: '#10B981',
+            color: '#FFFFFF',
             display: 'flex', alignItems: 'center', justifyContent: 'center',
-            fontSize: 40, fontWeight: 800,
-            boxShadow: '0 8px 24px rgba(0,0,0,.16)'
+            fontSize: 28, fontWeight: 600,
           }}>✓</div>
-          <div style={{ fontSize: 22, fontWeight: 800, marginTop: 14, letterSpacing: '-.005em' }}>
+          <div style={{ fontSize: 18, fontWeight: 600, marginTop: 14 }}>
             Thanks, {reservation?.customer?.firstName || 'Customer'}
           </div>
           <div style={{ fontSize: 12, opacity: .85, marginTop: 6 }}>
             Vehicle returned · {isUnpaid ? 'auto-charge in 24h' : 'paid in full'}
           </div>
-          <div style={{ display: 'flex', gap: 8, marginTop: 18, flexWrap: 'wrap', justifyContent: 'center' }}>
-            <span style={{ background: 'rgba(255,255,255,.22)', padding: '6px 14px', borderRadius: 999, fontSize: 11, fontWeight: 700 }}>📧 {isUnpaid ? 'Invoice' : 'Receipt'} emailed</span>
-            {isUnpaid && <span style={{ background: 'rgba(255,255,255,.22)', padding: '6px 14px', borderRadius: 999, fontSize: 11, fontWeight: 700 }}>⏰ Auto-charge in 24h</span>}
+          <div style={{ display: 'flex', gap: 8, marginTop: 16, flexWrap: 'wrap', justifyContent: 'center' }}>
+            <span style={{ ...pillBase, background: 'rgba(16,185,129,.18)', color: '#065F46' }}>{isUnpaid ? 'Invoice' : 'Receipt'} emailed</span>
+            {isUnpaid && <span style={{ ...pillBase, background: 'rgba(245,158,11,.18)', color: '#92400E' }}>Auto-charge in 24h</span>}
           </div>
         </div>
       </div>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
         {result?.feesTotal > 0 && (
-          <WizCard accent={isUnpaid ? 'warn' : 'mint'}>
-            <div style={{ fontSize: 11, fontWeight: 800, color: isUnpaid ? '#b45309' : '#047857', letterSpacing: '.1em' }}>
-              {isUnpaid ? 'PENDING CHARGE' : 'CHARGED'}
+          <div style={{
+            ...sectionBox,
+            background: isUnpaid ? 'rgba(245,158,11,.08)' : '#D1FAE5',
+            border: isUnpaid ? '0.5px solid rgba(245,158,11,.3)' : '0.5px solid rgba(16,185,129,.3)',
+          }}>
+            <div style={{ fontSize: 11, fontWeight: 600, color: isUnpaid ? '#92400E' : '#065F46', letterSpacing: '.06em', textTransform: 'uppercase' }}>
+              {isUnpaid ? 'Pending charge' : 'Charged'}
             </div>
-            <div style={{ fontSize: 28, fontWeight: 800, color: '#211a38', letterSpacing: '-.01em', marginTop: 4 }}>
+            <div style={{ fontSize: 24, fontWeight: 600, color: '#111827', marginTop: 4 }}>
               ${Number(result.feesTotal).toFixed(2)}
             </div>
-            <div style={{ fontSize: 12, color: '#6f668f', marginTop: 4 }}>
+            <div style={{ fontSize: 12, color: '#6B7280', marginTop: 4 }}>
               {result?.feesAdded?.length} fee{result?.feesAdded?.length === 1 ? '' : 's'} added · {result?.autochargeAt ? `auto-charge ${new Date(result.autochargeAt).toLocaleString()}` : 'settled at counter'}
             </div>
-          </WizCard>
+          </div>
         )}
-        <WizCard>
-          <div style={{ fontSize: 11, fontWeight: 800, color: '#6f668f', letterSpacing: '.1em', marginBottom: 10 }}>STAFF ACTIONS</div>
+        <div style={sectionBox}>
+          <div style={sectionLabel}>Staff actions</div>
           <ActionLink
             label={`View agreement ${agreement?.agreementNumber || ''}`}
             onClick={() => reservation?.id && (window.location.href = `/reservations/${reservation.id}`)}
@@ -871,9 +976,9 @@ function Step6Success({ result, reservation, agreement, token, onDone }) {
             onClick={handleResendEmail}
           />
           <ActionLink label="Return to reservations" onClick={onDone} />
-        </WizCard>
+        </div>
       </div>
-    </WizGrid>
+    </div>
   );
 }
 
@@ -883,19 +988,39 @@ function Step6Success({ result, reservation, agreement, token, onDone }) {
 
 function Tile({ k, v, valueColor }) {
   return (
-    <div style={{ background: 'white', border: '1px solid #e6dfff', borderRadius: 12, padding: '9px 12px' }}>
-      <div style={{ fontSize: 10, color: '#6f668f', textTransform: 'uppercase', letterSpacing: '.08em', fontWeight: 700 }}>{k}</div>
-      <div style={{ fontSize: 14, fontWeight: 750, color: valueColor || '#211a38', marginTop: 2 }}>{v}</div>
+    <div style={{ background: '#FFFFFF', border: '0.5px solid #E5E7EB', borderRadius: 6, padding: '8px 12px' }}>
+      <div style={{ fontSize: 10, color: '#6B7280', textTransform: 'uppercase', letterSpacing: '.06em', fontWeight: 600 }}>{k}</div>
+      <div style={{ fontSize: 13, fontWeight: 500, color: valueColor || '#111827', marginTop: 2 }}>{v}</div>
     </div>
   );
 }
 
-function RowBetween({ k, v, valueColor }) {
+// KV — same key/value row used by checkout-wizard-v2 (label muted left,
+// value medium-weight right), with an optional valueColor for status hues.
+function KV({ label, value, valueColor }) {
   return (
-    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', padding: '4px 0', fontSize: 12 }}>
-      <span style={{ color: '#6f668f' }}>{k}</span>
-      <span style={{ color: valueColor || '#211a38', fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>{v}</span>
+    <div style={{ display: 'flex', justifyContent: 'space-between', padding: '4px 0', fontSize: 13 }}>
+      <span style={{ color: '#6B7280' }}>{label}</span>
+      <span style={{ fontWeight: 500, color: valueColor || undefined }}>{value}</span>
     </div>
+  );
+}
+
+// StatusPill — same status colors as checkout-wizard-v2 (#10B981 ok /
+// #F59E0B warn) in a compact pill.
+function StatusPill({ ok, label }) {
+  return (
+    <span style={{
+      ...pillBase,
+      background: ok ? '#D1FAE5' : '#FEF3C7',
+      color: ok ? '#065F46' : '#92400E',
+    }}>
+      <span style={{
+        display: 'inline-block', width: 6, height: 6, borderRadius: '50%',
+        background: ok ? '#10B981' : '#F59E0B', marginRight: 6,
+      }} />
+      {label}
+    </span>
   );
 }
 
@@ -911,14 +1036,14 @@ function ActionLink({ label, onClick, variant }) {
         padding: '8px 0',
         background: 'transparent',
         border: 'none',
-        fontSize: 12,
-        color: '#6f668f',
+        fontSize: 13,
+        color: '#374151',
         cursor: 'pointer',
         textAlign: 'left'
       }}
     >
       <span>{label}</span>
-      <span style={{ fontWeight: 700, color: variant === 'danger' ? '#ef4444' : '#6d3df2' }}>→</span>
+      <span style={{ fontWeight: 600, color: variant === 'danger' ? '#B91C1C' : '#1F2937' }}>→</span>
     </button>
   );
 }
@@ -934,3 +1059,39 @@ function readableFee(feeType) {
     default: return feeType;
   }
 }
+
+// ---------------------------------------------------------------------------
+// Styles — copied from checkout-wizard-v2 so both wizards read as the same
+// product family. Do NOT import across page files; keep the constants local.
+// ---------------------------------------------------------------------------
+
+const cardStyle = {
+  background: '#FFFFFF', border: '0.5px solid #E5E7EB', borderRadius: 8,
+  padding: 20, marginBottom: 16,
+};
+const h3Style = { margin: '0 0 12px', fontSize: 16, fontWeight: 600 };
+const primaryBtn = {
+  padding: '10px 16px', background: '#1F2937', color: '#FFFFFF',
+  border: 'none', borderRadius: 6, fontSize: 14, fontWeight: 500, cursor: 'pointer',
+};
+const ghostBtn = {
+  padding: '8px 12px', background: '#FFFFFF', color: '#374151',
+  border: '0.5px solid #D1D5DB', borderRadius: 6, fontSize: 13, cursor: 'pointer',
+};
+const pauseBtnStyle = { ...ghostBtn, fontSize: 12 };
+const inputStyle = { width: '100%', padding: '6px 8px', border: '0.5px solid #D1D5DB', borderRadius: 4, fontSize: 14 };
+
+// Inner section panel — same surface treatment as checkout-v2's grey
+// sub-panels (e.g. the QR + terminal-status boxes) for grouping content
+// inside a step card.
+const sectionBox = {
+  background: '#F9FAFB', border: '0.5px solid #E5E7EB', borderRadius: 6, padding: 14,
+};
+const sectionLabel = {
+  fontSize: 11, fontWeight: 600, color: '#6B7280',
+  letterSpacing: '.06em', textTransform: 'uppercase', marginBottom: 10,
+};
+const pillBase = {
+  display: 'inline-flex', alignItems: 'center',
+  padding: '4px 10px', borderRadius: 999, fontSize: 11, fontWeight: 600,
+};

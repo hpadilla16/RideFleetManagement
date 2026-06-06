@@ -64,6 +64,9 @@ export function AppShell({ me, logout, children }) {
 
   const idleTimerRef = useRef(null);
   const role = String(me?.role || '').toUpperCase();
+  // 2026-06-04 — per-user exemption (ops/reporting agent accounts): never
+  // arm the idle lock and ignore any persisted locked flag for these users.
+  const screenLockExempt = !!me?.screenLockExempt;
   const isAdminNavRole = ['SUPER_ADMIN', 'ADMIN', 'OPS'].includes(role);
   const activeModule = pathnameToModule(pathname);
   const blockedModule = activeModule && !isModuleEnabled(me, activeModule) ? activeModule : null;
@@ -88,9 +91,12 @@ export function AppShell({ me, logout, children }) {
     try {
       setDarkMode(localStorage.getItem('ui.darkMode') === '1');
       const persistedLocked = localStorage.getItem('ui.screenLocked') === '1';
-      if (persistedLocked) {
+      if (persistedLocked && !me?.screenLockExempt) {
         setLocked(true);
         setNow(new Date());
+      }
+      if (me?.screenLockExempt) {
+        try { localStorage.removeItem('ui.screenLocked'); } catch {}
       }
       const hasPinHint = localStorage.getItem('ui.hasPin') === '1';
       setHasPin(hasPinHint);
@@ -142,6 +148,11 @@ export function AppShell({ me, logout, children }) {
   }, []);
 
   useEffect(() => {
+    if (screenLockExempt) {
+      if (idleTimerRef.current) clearTimeout(idleTimerRef.current);
+      if (locked) setLocked(false);
+      return;
+    }
     if (locked) {
       if (idleTimerRef.current) clearTimeout(idleTimerRef.current);
       return;
@@ -154,7 +165,7 @@ export function AppShell({ me, logout, children }) {
       events.forEach((eventName) => window.removeEventListener(eventName, onActivity));
       if (idleTimerRef.current) clearTimeout(idleTimerRef.current);
     };
-  }, [locked, armIdleLock]);
+  }, [locked, armIdleLock, screenLockExempt]);
 
   const lockNow = () => {
     setLocked(true);

@@ -142,6 +142,46 @@ async function recomputeAgreementPaid(agreementId) {
   }
 }
 
+/**
+ * 2026-06-04 — debit-aware deposits.
+ *
+ * When the checkout sale tap reveals a DEBIT card, locations can opt
+ * into a HIGHER security-deposit hold via locationConfig JSON
+ * (`securityDepositAmountDebit`). Debit pre-auths tie up the
+ * customer's real bank balance and refunds can take weeks, so some
+ * locations want extra cover instead of relying on chargeback rights
+ * that debit rails don't really give them.
+ *
+ * Returns the (possibly uplifted) deposit amount. The uplift only ever
+ * RAISES the resolved amount — a configured debit deposit lower than
+ * the standard resolved amount is ignored (never lower a configured
+ * deposit). Non-debit / unknown card types pass through untouched.
+ */
+async function applyDebitDepositUplift({ baseAmount, cardOnFileType, reservationId, sessionId }) {
+  if (String(cardOnFileType || '').toUpperCase() !== 'DEBIT') return baseAmount;
+  if (!reservationId) return baseAmount;
+  try {
+    const reservation = await prisma.reservation.findUnique({
+      where: { id: reservationId },
+      select: { pickupLocation: { select: { locationConfig: true } } },
+    });
+    const raw = reservation?.pickupLocation?.locationConfig;
+    const cfg = raw ? JSON.parse(raw) : {};
+    const debitAmount = Number(cfg?.securityDepositAmountDebit || 0);
+    if (Number.isFinite(debitAmount) && debitAmount > 0 && debitAmount > baseAmount) {
+      logger.info('[spin-charge] debit card detected — deposit uplifted to location debit amount', {
+        sessionId, reservationId, baseAmount, debitAmount,
+      });
+      return debitAmount;
+    }
+  } catch (err) {
+    logger.warn('[spin-charge] debit deposit uplift check failed — using standard amount', {
+      sessionId, reservationId, err: String(err?.message || err),
+    });
+  }
+  return baseAmount;
+}
+
 function loadTenantSpinConfig(tenantId) {
   // We don't currently expose tenant.spin* fields via a service helper
   // so we fetch directly. Only the fields the Spin client cares about.
@@ -315,11 +355,12 @@ async function runChargeSequence({
       data: {
         cardOnFileToken: cardOnFile.token,
         cardOnFileBrand: cardOnFile.brand,
+        cardOnFileType: cardOnFile.type || null,
         cardOnFileLast4: cardOnFile.last4,
         cardOnFileCapturedAt: cardOnFile.capturedAt,
       },
     });
-    log('CARD_ON_FILE_PERSISTED', { brand: cardOnFile.brand, last4: cardOnFile.last4 });
+    log('CARD_ON_FILE_PERSISTED', { brand: cardOnFile.brand, last4: cardOnFile.last4, type: cardOnFile.type || null });
   } else if (!isPrepaid) {
     log('CARD_ON_FILE_MISSING', { note: 'Sale approved but no token in response' });
     logger.warn('[spin-charge] sale approved but no card-on-file token', {
@@ -359,6 +400,22 @@ async function runChargeSequence({
   // ──────────────────────────────────────────────────────────────────
   // 3. DEPOSIT PRE-AUTH
   // ──────────────────────────────────────────────────────────────────
+  // 2026-06-04 — debit-aware deposits: if the tap revealed a DEBIT
+  // card, the per-location debit deposit (when configured AND higher)
+  // replaces the standard amount.
+  if (cardOnFile?.type === 'DEBIT' && depositAmount >= 0) {
+    const uplifted = await applyDebitDepositUplift({
+      baseAmount: depositAmount,
+      cardOnFileType: cardOnFile.type,
+      reservationId: session.reservation.id,
+      sessionId,
+    });
+    if (uplifted !== depositAmount) {
+      log('DEPOSIT_DEBIT_UPLIFT', { from: depositAmount, to: uplifted });
+      depositAmount = uplifted;
+    }
+  }
+
   let preauthResponse = null;
   let preauthFailed = false;
   if (depositAmount > 0) {
@@ -516,6 +573,7 @@ async function loadSessionAndAgreement(sessionId, allowedSteps) {
           id: true, agreementNumber: true, paidAmount: true, securityDepositAmount: true,
           total: true, balance: true,
           cardOnFileToken: true, cardOnFileBrand: true, cardOnFileLast4: true,
+          cardOnFileType: true,
           depositHoldId: true, depositHoldAmount: true,
           charges: {
             where: { source: 'SECURITY_DEPOSIT', selected: true },
@@ -641,11 +699,12 @@ async function runSale({ sessionId, amount, actorUserId }) {
       data: {
         cardOnFileToken: cardOnFile.token,
         cardOnFileBrand: cardOnFile.brand,
+        cardOnFileType: cardOnFile.type || null,
         cardOnFileLast4: cardOnFile.last4,
         cardOnFileCapturedAt: cardOnFile.capturedAt,
       },
     });
-    log('CARD_ON_FILE_PERSISTED', { brand: cardOnFile.brand, last4: cardOnFile.last4 });
+    log('CARD_ON_FILE_PERSISTED', { brand: cardOnFile.brand, last4: cardOnFile.last4, type: cardOnFile.type || null });
   } else {
     log('CARD_ON_FILE_MISSING', { note: 'Sale approved but no token in response' });
     logger.warn('[spin-charge] sale approved but no card-on-file token', { sessionId, refId });
@@ -725,7 +784,17 @@ async function runDepositHold({ sessionId, depositAmount: depositAmountHint, act
     );
   }
 
-  const depositAmount = resolveDepositAmount(agreement, depositAmountHint);
+  // 2026-06-04 — debit-aware deposits: if the sale tap (tap 1) revealed
+  // a DEBIT card, the per-location debit deposit replaces the standard
+  // amount — but only when configured AND higher. The uplift never
+  // lowers a configured deposit, and unknown card types pass through.
+  const standardDepositAmount = resolveDepositAmount(agreement, depositAmountHint);
+  const depositAmount = await applyDebitDepositUplift({
+    baseAmount: standardDepositAmount,
+    cardOnFileType: agreement.cardOnFileType,
+    reservationId: session.reservation.id,
+    sessionId,
+  });
   if (depositAmount <= 0) {
     // Zero deposit — nothing to hold, just stamp the session as paid
     // so the wizard advances.
@@ -842,7 +911,7 @@ async function runDepositHold({ sessionId, depositAmount: depositAmountHint, act
   //       have the token from runSale.
   let cardOnFile = null;
   if (useTokenPath) {
-    cardOnFile = { token: agreement.cardOnFileToken, brand: agreement.cardOnFileBrand, last4: agreement.cardOnFileLast4 };
+    cardOnFile = { token: agreement.cardOnFileToken, brand: agreement.cardOnFileBrand, type: agreement.cardOnFileType || null, last4: agreement.cardOnFileLast4 };
   } else {
     cardOnFile = spinClient.extractCardOnFile(preauthResponse);
     if (cardOnFile) {
@@ -851,11 +920,12 @@ async function runDepositHold({ sessionId, depositAmount: depositAmountHint, act
         data: {
           cardOnFileToken: cardOnFile.token,
           cardOnFileBrand: cardOnFile.brand,
+          cardOnFileType: cardOnFile.type || null,
           cardOnFileLast4: cardOnFile.last4,
           cardOnFileCapturedAt: cardOnFile.capturedAt,
         },
       });
-      log('CARD_ON_FILE_CAPTURED_FROM_DEPOSIT', { brand: cardOnFile.brand, last4: cardOnFile.last4 });
+      log('CARD_ON_FILE_CAPTURED_FROM_DEPOSIT', { brand: cardOnFile.brand, last4: cardOnFile.last4, type: cardOnFile.type || null });
     }
   }
 

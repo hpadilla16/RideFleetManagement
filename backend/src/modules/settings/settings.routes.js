@@ -129,6 +129,27 @@ settingsRouter.put('/reservation-options', requireRole('ADMIN'), async (req, res
   }
 });
 
+// Long-term (monthly) billing — email templates + dunning/billing config.
+// Stored in appSetting key 'longTermEmailTemplates' (tenant-scoped).
+// Defaults + normalization live in modules/long-term/long-term-emails.js.
+settingsRouter.get('/long-term-email-templates', async (_req, res, next) => {
+  try {
+    const { getLongTermEmailConfig } = await import('../long-term/long-term-emails.js');
+    res.json(await getLongTermEmailConfig(scopeFor(_req)));
+  } catch (e) {
+    next(e);
+  }
+});
+
+settingsRouter.put('/long-term-email-templates', requireRole('ADMIN'), async (req, res, next) => {
+  try {
+    const { updateLongTermEmailConfig } = await import('../long-term/long-term-emails.js');
+    res.json(await updateLongTermEmailConfig(req.body || {}, scopeFor(req)));
+  } catch (e) {
+    next(e);
+  }
+});
+
 settingsRouter.get('/payment-gateway', requireRole('ADMIN'), async (_req, res, next) => {
   try {
     const cfg = await settingsService.getPaymentGatewayConfig(scopeFor(_req));

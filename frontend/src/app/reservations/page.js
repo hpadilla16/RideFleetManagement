@@ -260,6 +260,13 @@ function ReservationsInner({ token, me, logout }) {
   const [addingCustomer, setAddingCustomer] = useState(false);
   const [newCustomer, setNewCustomer] = useState({ firstName: '', lastName: '', phone: '', email: '' });
   const [createForm, setCreateForm] = useState({ reservationNumber: '', customerId: '', vehicleTypeId: '', pickupAt: '', returnAt: '', pickupLocationId: '', returnLocationId: '', dailyRate: '', estimatedTotal: '', notes: '', franchiseId: '' });
+  // Long-Term (Monthly) P1 — rate-type toggle on the create form. Monthly is
+  // an EXPLICIT opt-in: it only applies when the agent picks the Monthly
+  // button, never inferred from duration. When selected, the reservation is
+  // created exactly as before, then a LongTermPlan is attached via
+  // POST /api/long-term/reservations/:id/plan. 2026-06-04.
+  const [rateType, setRateType] = useState('DAILY'); // 'DAILY' | 'MONTHLY'
+  const [monthlyForm, setMonthlyForm] = useState({ cycleLengthDays: '30', cycleRate: '', includedMilesPerCycle: '3000', autoRenew: true });
 
   const hasFeeAdvisory = (notes) => /\[FEE_ADVISORY_OPEN\s+/i.test(String(notes || ''));
 
@@ -532,6 +539,7 @@ function ReservationsInner({ token, me, logout }) {
   const estimatedWithExtras = Number((baseEstimate + servicesTotal + feesTotal).toFixed(2));
 
   const startRental = async (id) => {
+    // TODO(loaner): route by workflowMode when available in this payload
     router.push(`/reservations/${id}/checkout-wizard-v2`);
   };
   const setStatus = async (id, status) => {
@@ -597,7 +605,7 @@ function ReservationsInner({ token, me, logout }) {
       const addOnsTotal = 0;
       const addonSummary = ''; // moved to Charges edit flow
 
-      await api(scopedPath('/api/reservations'), {
+      const created = await api(scopedPath('/api/reservations'), {
         method: 'POST',
         body: JSON.stringify({
           reservationNumber,
@@ -616,12 +624,35 @@ function ReservationsInner({ token, me, logout }) {
           notes: createForm.notes || null
         })
       }, token);
-      setMsg('Reservation created');
+      // Long-Term P1 — Monthly is explicit opt-in only. Attach the plan AFTER
+      // the reservation exists; if the plan call fails we keep the reservation
+      // (no rollback) and tell the agent to attach it from the detail page.
+      let createdMsg = 'Reservation created';
+      if (rateType === 'MONTHLY' && created?.id) {
+        try {
+          const planBody = {
+            cycleLengthDays: Number(monthlyForm.cycleLengthDays || 30),
+            includedMilesPerCycle: Number(monthlyForm.includedMilesPerCycle || 3000),
+            autoRenew: !!monthlyForm.autoRenew
+          };
+          if (String(monthlyForm.cycleRate || '').trim()) planBody.cycleRate = Number(monthlyForm.cycleRate);
+          await api(scopedPath(`/api/long-term/reservations/${created.id}/plan`), {
+            method: 'POST',
+            body: JSON.stringify(planBody)
+          }, token);
+          createdMsg = 'Reservation created with monthly plan';
+        } catch (planErr) {
+          createdMsg = `Reservation created but monthly plan failed: ${planErr?.message || 'unknown error'} — attach it from the reservation page`;
+        }
+      }
+      setMsg(createdMsg);
       setCreateOpen(false);
       setRateError('');
       setSelectedServiceIds([]);
       setSelectedFeeIds([]);
       setSelectedInsuranceCode('');
+      setRateType('DAILY');
+      setMonthlyForm({ cycleLengthDays: '30', cycleRate: '', includedMilesPerCycle: '3000', autoRenew: true });
       setCreateForm({ reservationNumber: '', customerId: '', vehicleTypeId: '', pickupAt: '', returnAt: '', pickupLocationId: '', returnLocationId: '', dailyRate: '', estimatedTotal: '', notes: '', franchiseId: '' });
       await loadReservations({ offset: 0, nextQuery: query });
       await loadReservationSummary();
@@ -895,6 +926,8 @@ function ReservationsInner({ token, me, logout }) {
                 setRateError('');
                 setAddingCustomer(false);
                 setNewCustomer({ firstName: '', lastName: '', phone: '', email: '' });
+                setRateType('DAILY');
+                setMonthlyForm({ cycleLengthDays: '30', cycleRate: '', includedMilesPerCycle: '3000', autoRenew: true });
               }}
               >
                 {loadingSupport && !supportLoaded ? 'Loading...' : 'New Reservation'}
@@ -907,11 +940,25 @@ function ReservationsInner({ token, me, logout }) {
           Showing {rows.length} of {reservationsTotal} reservations{loadingReservations ? ' - loading...' : ''}.
         </p>
         <table>
-          <thead><tr><th>#</th><th>Status</th><th>Customer</th><th>Pickup</th><th>Return</th><th>Actions</th></tr></thead>
+          <thead><tr><th>#</th><th>Status</th><th>Customer</th><th>Vehicle</th><th>Pickup</th><th>Return</th><th>Next Cycle</th><th>Balance</th><th>Actions</th></tr></thead>
           <tbody>
             {rows.map((r) => (
               <tr key={r.id}>
-                <td><Link href={`/reservations/${r.id}`}>{r.reservationNumber}</Link></td>
+                <td>
+                  <Link href={`/reservations/${r.id}`}>{r.reservationNumber}</Link>
+                  {r.longTermPlan ? (
+                    <span
+                      title={`Long-term plan · $${Number(r.longTermPlan.cycleRate || 0).toFixed(2)} per cycle${r.longTermPlan.autoRenew ? ' · auto-renews' : ''}`}
+                      style={{
+                        marginLeft: 6, background: '#3b2fa3', color: '#fff', padding: '2px 6px',
+                        borderRadius: 999, fontSize: 10, fontWeight: 700, letterSpacing: '0.04em',
+                        textTransform: 'uppercase',
+                      }}
+                    >
+                      Long-Term
+                    </span>
+                  ) : null}
+                </td>
                 <td>
                   <span className="badge">{r.status}</span>
                   {r.bookingChannel === 'FRANCHISE_TL' ? (
@@ -935,8 +982,25 @@ function ReservationsInner({ token, me, logout }) {
                   {hasFeeAdvisory(r.notes) ? <span title="Additional fee advisory" style={{ marginLeft: 6 }}>⚠️</span> : null}
                 </td>
                 <td>{r.customer?.firstName} {r.customer?.lastName}</td>
+                <td>
+                  {r.vehicle
+                    ? <span title={`#${r.vehicle.internalNumber || ''}`}>{[r.vehicle.year, r.vehicle.make, r.vehicle.model].filter(Boolean).join(' ')}{r.vehicle.plate ? ` · ${r.vehicle.plate}` : ''}</span>
+                    : <span style={{ color: '#9ca3af' }}>{r.vehicleType?.name || 'Unassigned'}</span>}
+                </td>
                 <td>{formatReservationWallClock(r.pickupAt, reservationSummary.tenantTimeZone)}</td>
                 <td>{formatReservationWallClock(r.returnAt, reservationSummary.tenantTimeZone)}</td>
+                <td>
+                  {r.longTermPlan
+                    ? (r.longTermPlan.status === 'ACTIVE'
+                        ? <span>{formatReservationWallClock(r.longTermPlan.nextCycleStartsAt, reservationSummary.tenantTimeZone)}{r.longTermPlan.autoRenew ? <span style={{ color: '#6b7280', fontSize: 11 }}> · auto</span> : <span style={{ color: '#854f0b', fontSize: 11 }}> · manual</span>}</span>
+                        : <span style={{ color: '#9ca3af' }}>{r.longTermPlan.status.toLowerCase()}</span>)
+                    : <span style={{ color: '#d1d5db' }}>—</span>}
+                </td>
+                <td>
+                  {r.rentalAgreement
+                    ? <span style={{ fontWeight: Number(r.rentalAgreement.balance || 0) > 0 ? 700 : 400, color: Number(r.rentalAgreement.balance || 0) > 0 ? '#a32d2d' : '#0f6e56' }}>${Number(r.rentalAgreement.balance || 0).toFixed(2)}</span>
+                    : <span style={{ color: '#d1d5db' }}>—</span>}
+                </td>
                 <td>
                   {/* Overdue cleanup actions — surface only when filter=overdue.
                       CHECKED_OUT → Mark returned (vehicle came back, balance
@@ -950,6 +1014,7 @@ function ReservationsInner({ token, me, logout }) {
                       >
                         Mark returned
                       </button>
+                      {/* TODO(loaner): route by workflowMode when available in this payload */}
                       <Link href={`/reservations/${r.id}/checkin-wizard`}>
                         <button>Full checkin</button>
                       </Link>
@@ -964,7 +1029,14 @@ function ReservationsInner({ token, me, logout }) {
                       </button>
                       <button onClick={() => startRental(r.id)}>Start Check-out</button>
                     </div>
-                  ) : r.status === 'CHECKED_OUT' ? null : (
+                  ) : r.status === 'CHECKED_OUT' ? (
+                    <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                      {/* TODO(loaner): route by workflowMode when available in this payload */}
+                      <Link href={`/reservations/${r.id}/checkin-wizard`}>
+                        <button style={{ background: '#EAF3DE', color: '#173404', borderColor: '#639922' }}>Check In</button>
+                      </Link>
+                    </div>
+                  ) : (
                     <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
                       <button onClick={() => startRental(r.id)}>Start Check-out</button>
                       <button onClick={() => setStatus(r.id, 'CANCELLED')}>Cancel</button>
@@ -1043,6 +1115,63 @@ function ReservationsInner({ token, me, logout }) {
               <div className="grid2">
                 <div className="stack"><label className="label">Franchise</label><select value={createForm.franchiseId} onChange={(e) => setCreateForm({ ...createForm, franchiseId: e.target.value })}><option value="">— No franchise —</option>{franchises.map((f) => <option key={f.id} value={f.id}>{f.name}{f.code ? ` (${f.code})` : ''}</option>)}</select></div>
               </div>
+              {/* Long-Term P1 — explicit rate-type toggle. Monthly NEVER auto-applies
+                  from duration; the agent must pick it here. Daily keeps the existing
+                  behavior untouched. */}
+              <div className="stack">
+                <label className="label">Rate type</label>
+                <div style={{ display: 'flex', gap: 8 }}>
+                  <button
+                    type="button"
+                    onClick={() => setRateType('DAILY')}
+                    style={rateType === 'DAILY'
+                      ? { background: '#6d5ef5', color: '#fff', borderColor: '#6d5ef5', fontWeight: 700 }
+                      : { background: '#fff', color: '#4b3fc4', borderColor: '#6d5ef5' }}
+                  >
+                    Daily
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setRateType('MONTHLY')}
+                    style={rateType === 'MONTHLY'
+                      ? { background: '#6d5ef5', color: '#fff', borderColor: '#6d5ef5', fontWeight: 700 }
+                      : { background: '#fff', color: '#4b3fc4', borderColor: '#6d5ef5' }}
+                  >
+                    Monthly
+                  </button>
+                </div>
+              </div>
+              {rateType === 'MONTHLY' ? (
+                <div className="glass card" style={{ padding: 10, border: '1px solid #6d5ef5', background: '#fbfaff' }}>
+                  <div className="label" style={{ marginBottom: 8 }}>
+                    Monthly Plan
+                    <span style={{ marginLeft: 6, background: '#3b2fa3', color: '#fff', padding: '2px 6px', borderRadius: 999, fontSize: 10, fontWeight: 700, letterSpacing: '0.04em', textTransform: 'uppercase' }}>Long-Term</span>
+                  </div>
+                  <div className="grid2">
+                    <div className="stack">
+                      <label className="label">Cycle length (days)</label>
+                      <input type="number" min="1" value={monthlyForm.cycleLengthDays} onChange={(e) => setMonthlyForm({ ...monthlyForm, cycleLengthDays: e.target.value })} />
+                    </div>
+                    <div className="stack">
+                      <label className="label">Cycle rate override ($, optional)</label>
+                      <input type="number" min="0" step="0.01" placeholder="auto from monthly rate settings" value={monthlyForm.cycleRate} onChange={(e) => setMonthlyForm({ ...monthlyForm, cycleRate: e.target.value })} />
+                    </div>
+                    <div className="stack">
+                      <label className="label">Included miles per cycle</label>
+                      <input type="number" min="0" value={monthlyForm.includedMilesPerCycle} onChange={(e) => setMonthlyForm({ ...monthlyForm, includedMilesPerCycle: e.target.value })} />
+                    </div>
+                    <div className="stack">
+                      <label className="label">Auto-renew</label>
+                      <label className="label" style={{ textTransform: 'none', letterSpacing: 0 }}>
+                        <input type="checkbox" checked={monthlyForm.autoRenew} onChange={(e) => setMonthlyForm({ ...monthlyForm, autoRenew: e.target.checked })} /> Renew every cycle automatically
+                      </label>
+                    </div>
+                  </div>
+                  <div className="label" style={{ marginTop: 8, textTransform: 'none', letterSpacing: 0, color: '#6b7280' }}>
+                    Monthly rate comes from Settings → Rates → Monthly for the vehicle type unless overridden
+                  </div>
+                </div>
+              ) : null}
               <div className="grid2">
                 <div className="stack"><label className="label">Daily Rate (auto from rate table)</label><input value={createForm.dailyRate} readOnly /></div>
                 <div className="stack"><label className="label">Base Estimate (auto)</label><input value={createForm.estimatedTotal} readOnly /></div>

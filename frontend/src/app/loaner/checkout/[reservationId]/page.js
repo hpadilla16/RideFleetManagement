@@ -160,6 +160,31 @@ function LoanerCheckoutWizard({ token, me, logout }) {
     return true;
   }
 
+  // Sibling of canAdvance(): when the Continue button is disabled, return a
+  // short, actionable string telling staff EXACTLY what the current step needs.
+  // Mirrors canAdvance()'s rules one-for-one (no new gating) so the two never
+  // drift. Returns null when advanceable (button enabled — no hint to show).
+  function blockedReason() {
+    if (canAdvance()) return null;
+    if (step === 0) {
+      if (!form.customerFirstName.trim()) return 'Ingresa el nombre del cliente';
+      if (!form.customerLastName.trim()) return 'Ingresa el apellido del cliente';
+      return 'Faltan el nombre y apellido del cliente';
+    }
+    if (step === 1) return 'Selecciona un vehículo loaner';
+    if (step === 2) return `Captura al menos ${REQUIRED_WALKAROUND} fotos del walkaround (vas ${walkaroundCount})`;
+    if (step === 3) {
+      if (String(odometerOut).trim() === '') return 'Ingresa el odómetro de salida';
+      return 'Ingresa un nivel de combustible válido';
+    }
+    if (step === 5) {
+      if (!signerName.trim()) return 'Ingresa el nombre de quien firma';
+      if (!signatureDataUrl) return 'Captura la firma del cliente';
+      return 'Falta la firma y el nombre del firmante';
+    }
+    return null;
+  }
+
   async function handleNext() {
     if (!canAdvance() || busy) return;
     setBusy(true);
@@ -273,6 +298,7 @@ function LoanerCheckoutWizard({ token, me, logout }) {
           onBack={step > 0 ? handleBack : null}
           onNext={handleNext}
           nextDisabled={!canAdvance() || busy}
+          nextHint={busy ? null : blockedReason()}
           nextLabel={step === 5 ? '✓ Complete · keys out' : 'Continue →'}
           accent={step === 5 ? 'mint' : 'purple'}
           ghostAction={step === 5 ? { label: '✉ Text signing link', onClick: textRemoteLink } : null}
@@ -281,6 +307,15 @@ function LoanerCheckoutWizard({ token, me, logout }) {
             <WizCard accent="warn" style={{ marginBottom: 14 }}>
               <span style={{ color: '#b9791e', fontWeight: 700 }}>{submitError}</span>
             </WizCard>
+          )}
+
+          {/* Disabled-reason hint — tells staff exactly what this step still
+              needs so they aren't stuck staring at a greyed-out Continue.
+              Hidden while busy (the button reads its own busy state then). */}
+          {!busy && blockedReason() && (
+            <div style={{ fontSize: 12, color: '#6f668f', marginBottom: 14 }}>
+              {blockedReason()}
+            </div>
           )}
 
           {step === 0 && (

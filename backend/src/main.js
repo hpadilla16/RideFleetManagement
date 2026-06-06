@@ -15,6 +15,12 @@ import { feesRouter } from './modules/fees/fees.routes.js';
 import { stopSalesRouter } from './modules/stop-sales/stop-sales.routes.js';
 import { ratesRouter } from './modules/rates/rates.routes.js';
 import { marketScraperRouter } from './modules/market-scraper/market-scraper.routes.js';
+import { marketObservationsRouter } from './modules/market-observations/market-observations.routes.js';
+import {
+  pricingRulesRouter,
+  pricingSuggestionsRouter,
+  pricingEngineInternalRouter,
+} from './modules/pricing-suggestions/pricing-suggestions.routes.js';
 import { authRouter } from './modules/auth/auth.routes.js';
 import { rentalAgreementsRouter } from './modules/rental-agreements/rental-agreements.routes.js';
 import { addendumSignaturePublicRouter } from './modules/rental-agreements/addendum-signature-public.routes.js';
@@ -48,6 +54,7 @@ import { hostAppRouter } from './modules/host-app/host-app.routes.js';
 import { employeeAppRouter } from './modules/employee-app/employee-app.routes.js';
 import { dealershipLoanerRouter } from './modules/dealership-loaner/dealership-loaner.routes.js';
 import { loanerAgreementRouter, loanerSignaturePublicRouter, loanerPortalPublicRouter } from './modules/dealership-loaner/loaner-agreement.routes.js';
+import { longTermRouter } from './modules/long-term/long-term.routes.js';
 import { incidentReportRouter } from './modules/incident-report/incident-report.routes.js';
 import { issueCenterRouter, publicIssueCenterRouter } from './modules/issue-center/issue-center.routes.js';
 import { tollsRouter } from './modules/tolls/tolls.routes.js';
@@ -142,6 +149,8 @@ app.use('/api/employee-app', requireAuth, tenantRateLimit, requireModuleAccess('
 app.use('/api/dealership-loaner', requireAuth, tenantRateLimit, requireModuleAccess('loaner'), dealershipLoanerRouter);
 // Loaner reimagine (2026-06-03 port) — in-bay wizard agreement API
 app.use('/api/loaner-agreements', requireAuth, tenantRateLimit, requireModuleAccess('loaner'), loanerAgreementRouter);
+// Long-Term (Monthly) reservations — P1 (2026-06-03)
+app.use('/api/long-term', requireAuth, tenantRateLimit, requireModuleAccess('reservations'), longTermRouter);
 // Token-scoped public routers: borrower remote signing + self-service portal
 app.use('/api/public/loaner-signature', loanerSignaturePublicRouter);
 app.use('/api/public/loaner-portal', loanerPortalPublicRouter);
@@ -168,6 +177,12 @@ app.use('/api/fees', requireAuth, tenantRateLimit, requireModuleAccess('settings
 app.use('/api/stop-sales', requireAuth, tenantRateLimit, requireModuleAccess('settings'), requireRole('ADMIN', 'OPS'), stopSalesRouter);
 app.use('/api/rates', requireAuth, tenantRateLimit, requireModuleAccess('settings'), requireRole('ADMIN', 'OPS'), ratesRouter);
 app.use('/api/market-scraper', requireAuth, tenantRateLimit, requireModuleAccess('settings'), requireRole('ADMIN', 'OPS'), marketScraperRouter);
+app.use('/api/market', requireAuth, tenantRateLimit, requireModuleAccess('settings'), requireRole('ADMIN', 'OPS'), marketObservationsRouter);
+app.use('/api/pricing-rules', requireAuth, tenantRateLimit, requireModuleAccess('settings'), requireRole('ADMIN', 'OPS'), pricingRulesRouter);
+app.use('/api/pricing-suggestions', requireAuth, tenantRateLimit, requireModuleAccess('settings'), requireRole('ADMIN', 'OPS'), pricingSuggestionsRouter);
+// Internal endpoint hit by the droplet cron after every successful scrape.
+// Auth is via BACKEND_INTERNAL_TOKEN shared secret, not user session.
+app.use('/api/internal/pricing-engine', pricingEngineInternalRouter);
 app.use('/api/rental-agreements', requireAuth, tenantRateLimit, requireModuleAccess('reservations'), rentalAgreementsRouter);
 // Dejavoo Spin checkout redesign (Phase 1.2). The auth'd router is for
 // the agent's wizard; the public router below is for the QR token

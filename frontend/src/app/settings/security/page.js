@@ -42,6 +42,26 @@ function Inner({ token, me, logout }) {
     }
   };
 
+  // 2026-06-04 — per-user idle screen-lock exemption (for ops/reporting
+  // agent accounts that drive automated read-only sessions).
+  const toggleLockExempt = async (u) => {
+    const next = !u.screenLockExempt;
+    const who = u.fullName || u.name || u.email;
+    if (!window.confirm(next
+      ? `Exempt ${who} from the idle screen lock? Use only for trusted automation/reporting accounts.`
+      : `Re-enable the idle screen lock for ${who}?`)) return;
+    try {
+      await api(`/api/auth/users/${u.id}/screen-lock-exempt`, {
+        method: 'POST',
+        body: JSON.stringify({ exempt: next })
+      }, token);
+      setMsg(`Screen lock ${next ? 'exemption enabled' : 're-enabled'} for ${who}`);
+      await load();
+    } catch (e) {
+      setMsg(e.message);
+    }
+  };
+
   return (
     <AppShell me={me} logout={logout}>
       <section className="glass card-lg stack">
@@ -79,7 +99,7 @@ function Inner({ token, me, logout }) {
         <div className="label" style={{ marginBottom: 10 }}>Reset screen-lock PIN for any user</div>
         {msg ? <div className="label" style={{ marginBottom: 8 }}>{msg}</div> : null}
         <table>
-          <thead><tr><th>User</th><th>Email</th><th>Role</th><th>Has PIN</th><th>PIN Updated</th><th>Action</th></tr></thead>
+          <thead><tr><th>User</th><th>Email</th><th>Role</th><th>Has PIN</th><th>PIN Updated</th><th>Lock Exempt</th><th>Action</th></tr></thead>
           <tbody>
             {users.map((u) => (
               <tr key={u.id}>
@@ -88,7 +108,13 @@ function Inner({ token, me, logout }) {
                 <td>{u.role}</td>
                 <td>{u.hasLockPin ? 'Yes' : 'No'}</td>
                 <td>{u.lockPinUpdatedAt ? new Date(u.lockPinUpdatedAt).toLocaleString() : '-'}</td>
-                <td><button onClick={() => resetPin(u)}>Reset PIN</button></td>
+                <td>{u.screenLockExempt ? 'Yes' : 'No'}</td>
+                <td className="row" style={{ gap: 6 }}>
+                  <button onClick={() => resetPin(u)}>Reset PIN</button>
+                  <button className="button-subtle" onClick={() => toggleLockExempt(u)}>
+                    {u.screenLockExempt ? 'Enable Lock' : 'Exempt Lock'}
+                  </button>
+                </td>
               </tr>
             ))}
           </tbody>

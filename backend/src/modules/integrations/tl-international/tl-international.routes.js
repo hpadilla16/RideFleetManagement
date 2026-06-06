@@ -75,6 +75,51 @@ function send400(res, message) {
 }
 
 // ---------------------------------------------------------------------------
+// GET /status — integration health summary for the settings panel
+// (beta.116: TLIntegrationPanel.jsx has called this since the panel shipped,
+// but the route never existed — every settings visit logged a 404 that the
+// droplet log monitor kept flagging. Read-only; never returns the cookie.)
+// ---------------------------------------------------------------------------
+
+tlInternationalRouter.get('/status', asyncHandler(async (req, res) => {
+  const tenantId = resolveTenantIdOrNull(req);
+  if (!tenantId) {
+    // SUPER_ADMIN without a tenant selected — nothing meaningful to report.
+    return res.json({ configured: false, tenantId: null });
+  }
+
+  const [credential, lastRun] = await Promise.all([
+    prisma.integrationCredential.findUnique({
+      where: { tenantId_sourceSystem: { tenantId, sourceSystem: SOURCE_SYSTEM } },
+      select: {
+        id: true,
+        rotatedAt: true,
+        lastTestedAt: true,
+        lastTestStatus: true,
+        // encryptedPayload intentionally NOT selected — presence only.
+      },
+    }),
+    prisma.externalSyncRun.findFirst({
+      where: { tenantId, sourceSystem: SOURCE_SYSTEM },
+      orderBy: { startedAt: 'desc' },
+      select: { id: true, status: true, startedAt: true, finishedAt: true, triggeredBy: true },
+    }),
+  ]);
+
+  res.json({
+    configured: !!credential,
+    tenantId,
+    rotatedAt: credential?.rotatedAt || null,
+    lastTestedAt: credential?.lastTestedAt || null,
+    lastTestStatus: credential?.lastTestStatus || null,
+    lastRun: lastRun || null,
+    // Cron cadence is BullMQ every-15-min with jitter + quiet hours; we don't
+    // inspect the queue here, so the panel renders '-' for nextRunAt.
+    nextRunAt: null,
+  });
+}));
+
+// ---------------------------------------------------------------------------
 // POST /cookie — rotate the session cookie
 // ---------------------------------------------------------------------------
 

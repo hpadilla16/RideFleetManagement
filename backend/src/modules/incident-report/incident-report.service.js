@@ -125,7 +125,14 @@ export const incidentReportService = {
       include: {
         customer: true,
         vehicle: true,
-        rentalAgreement: { include: { charges: true, inspections: true } }
+        // Perf (2026-06-05): only checkoutInsp.notes is read from inspections
+        // here — never pull photosJson base64 blobs into a create flow.
+        rentalAgreement: {
+          include: {
+            charges: true,
+            inspections: { select: { id: true, phase: true, capturedAt: true, notes: true } }
+          }
+        }
       }
     });
     if (!reservation) throw err('Reservation not found', 404);

@@ -1,0 +1,286 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Long-Term Reservations — UI Mockups · Ride Fleet</title>
+<style>
+  :root{
+    --purple:#6d5ef5; --purple-dark:#4b3fc4; --ink:#1f2330; --muted:#6b7280;
+    --line:#e7e6f0; --bg:#f6f5fb; --card:#ffffff; --good:#0f6e56; --good-bg:#e1f5ee;
+    --warn:#854f0b; --warn-bg:#faeeda; --bad:#a32d2d; --bad-bg:#fcebeb; --info:#0c447c; --info-bg:#e6f1fb;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    color:var(--ink);background:var(--bg);line-height:1.55;font-size:15px}
+  .wrap{max-width:920px;margin:0 auto;padding:30px 20px 60px}
+  header.hero{background:linear-gradient(180deg,#efeeff,#f6f5fb);border:1px solid var(--line);border-radius:18px;padding:24px 28px;margin-bottom:24px}
+  .eyebrow{color:var(--purple-dark);font-weight:600;font-size:12px;letter-spacing:.06em;text-transform:uppercase}
+  h1{font-size:26px;margin:6px 0 6px}
+  h2{font-size:19px;margin:38px 0 4px}
+  .sub{color:var(--muted);font-size:14px;margin:0 0 14px}
+  .mock{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:18px 20px;margin:10px 0;box-shadow:0 1px 3px rgba(40,35,90,.05)}
+  .mock-cap{font-size:11px;color:var(--muted);margin-bottom:12px;text-transform:uppercase;letter-spacing:.05em}
+  .btn{display:inline-block;background:var(--purple);color:#fff;border-radius:8px;padding:7px 14px;font-size:13px;font-weight:600}
+  .btn.ghost{background:#fff;color:var(--purple-dark);border:1px solid var(--purple)}
+  .btn.soft{background:#efeeff;color:var(--purple-dark)}
+  .btn.danger{background:#fff;color:var(--bad);border:1px solid #e7b9b9}
+  .pill{display:inline-block;font-size:11px;font-weight:700;padding:2px 9px;border-radius:7px;vertical-align:middle}
+  .pill.lt{background:#3b2fa3;color:#fff}
+  .pill.ok{background:var(--good-bg);color:var(--good)}
+  .pill.warn{background:var(--warn-bg);color:var(--warn)}
+  .pill.bad{background:var(--bad-bg);color:var(--bad)}
+  .pill.info{background:var(--info-bg);color:var(--info)}
+  .field{background:#fff;border:1px solid var(--line);border-radius:8px;padding:8px 10px;font-size:13px;color:#333}
+  .field.sel{border-color:var(--purple);box-shadow:0 0 0 2px #e3e0ff}
+  .label{font-size:10.5px;color:var(--muted);text-transform:uppercase;letter-spacing:.04em;margin-bottom:3px}
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+  .grid3{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}
+  .grid4{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}
+  .row{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+  .between{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap}
+  table.t{width:100%;border-collapse:collapse;font-size:13px}
+  table.t th{text-align:left;color:var(--muted);font-weight:500;font-size:11px;padding:6px;border-bottom:1px solid var(--line)}
+  table.t td{padding:8px 6px;border-bottom:1px solid #f0eff6}
+  .ratecard{border:1px solid var(--line);border-radius:12px;padding:14px;cursor:pointer}
+  .ratecard.sel{border-color:var(--purple);background:#fbfaff;box-shadow:0 0 0 2px #e3e0ff}
+  .ratecard .price{font-size:22px;font-weight:800;color:var(--ink)}
+  .ratecard .per{font-size:12px;color:var(--muted)}
+  .note{background:#fff8ec;border:1px solid #f3e2bf;border-radius:10px;padding:10px 14px;margin:12px 0;font-size:13px}
+  .tl{border-left:3px solid var(--line);margin-left:8px;padding-left:16px}
+  .tl .ev{margin:10px 0;font-size:13px}
+  .tl .ev b{display:block;font-size:12.5px}
+  .annot{color:var(--purple-dark);font-size:12.5px;background:#f1efff;border-radius:8px;padding:8px 12px;margin-top:10px}
+  .emailbox{border:1px solid var(--line);border-radius:10px;padding:14px;background:#fbfbfd;font-size:13px}
+  hr{border:none;border-top:1px solid var(--line);margin:30px 0}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header class="hero">
+  <div class="eyebrow">Ride Fleet · Mockups for approval</div>
+  <h1>Long-Term (Monthly) Reservations</h1>
+  <p class="sub">Monthly lives inside the existing reservation module — a <span class="pill lt">LONG-TERM</span> badge plus a plan panel.
+  Locked decisions: 30-day cycles (tenant setting) · 3,000 mi included @ $0.00 overage (per-rate) · charged refundable deposit ·
+  no early-return refund · dunning emails 48h/24h before + every 24h overdue, auto-clear on payment.</p>
+</header>
+
+<!-- ════════ 1 · CREATE RESERVATION ════════ -->
+<h2>1 · Creating a monthly reservation</h2>
+<p class="sub">One new control on the existing create form: a rate-type toggle. Picking "Monthly" swaps the daily rate picker for monthly plan cards.</p>
+
+<div class="mock">
+  <div class="mock-cap">New Reservation — rate step (existing form, new toggle)</div>
+  <div class="row" style="margin-bottom:14px">
+    <span class="label" style="margin:0">Rate type</span>
+    <span class="btn ghost">Daily</span>
+    <span class="btn">Monthly</span>
+  </div>
+  <div class="grid3">
+    <div class="ratecard">
+      <div class="label">Economic</div>
+      <div class="price">$899<span class="per"> /30 days</span></div>
+      <div class="per">3,000 mi included · $0.00/mi over</div>
+    </div>
+    <div class="ratecard sel">
+      <div class="label">Compact SUV ✓</div>
+      <div class="price">$1,150<span class="per"> /30 days</span></div>
+      <div class="per">3,000 mi included · $0.00/mi over</div>
+    </div>
+    <div class="ratecard">
+      <div class="label">Minivan</div>
+      <div class="price">$1,400<span class="per"> /30 days</span></div>
+      <div class="per">3,000 mi included · $0.00/mi over</div>
+    </div>
+  </div>
+  <div class="grid4" style="margin-top:14px">
+    <div><div class="label">Start</div><div class="field">Jun 10, 2026 · 10:00 AM</div></div>
+    <div><div class="label">Initial term</div><div class="field sel">2 cycles (60 days) ▾</div></div>
+    <div><div class="label">Auto-renew</div><div class="field sel">Yes — renew every 30 days ▾</div></div>
+    <div><div class="label">Security deposit</div><div class="field">$250.00 (charged, refundable)</div></div>
+  </div>
+  <div class="between" style="margin-top:14px">
+    <div style="font-size:13px;color:var(--muted)">Due at checkout: <b style="color:var(--ink)">$1,150.00</b> first cycle + <b style="color:var(--ink)">$250.00</b> deposit · next cycle bills <b style="color:var(--ink)">Jul 10</b> to card on file</div>
+    <span class="btn">Create Reservation</span>
+  </div>
+  <div class="annot">⚙ Behind the scenes: creates the Reservation + a LongTermPlan (cycleRate 1150, cycleLengthDays 30, includedMiles 3000, overage 0.00, autoRenew true). Checkout wizard is 100% unchanged — first cycle is the sale tap, deposit is charged (not held).</div>
+</div>
+
+<!-- ════════ 2 · LIST BADGE ════════ -->
+<h2>2 · Reservations list — the badge + filter</h2>
+<div class="mock">
+  <div class="mock-cap">Reservations list (existing page; new badge + filter chip)</div>
+  <div class="row" style="margin-bottom:10px">
+    <span class="btn soft">All</span><span class="btn ghost">Daily</span><span class="btn">Long-Term (12)</span><span class="btn ghost">Cycles due this week (3)</span>
+  </div>
+  <table class="t">
+    <tr><th>Reservation</th><th>Customer</th><th>Vehicle</th><th>Status</th><th>Next cycle</th><th>Balance</th></tr>
+    <tr><td>RES-882190 <span class="pill lt">LONG-TERM</span></td><td>M. Rivera</td><td>Compact SUV · KST788</td><td><span class="pill ok">CHECKED_OUT</span></td><td>Jul 10 · auto</td><td>$0.00</td></tr>
+    <tr><td>RES-867114 <span class="pill lt">LONG-TERM</span></td><td>J. Colón</td><td>Economic · KST241</td><td><span class="pill bad">PAYMENT OVERDUE</span></td><td>was Jun 02 · attempt 3</td><td>$899.00</td></tr>
+    <tr><td>RES-889045</td><td>A. Torres</td><td>Minivan · KST512</td><td><span class="pill ok">CONFIRMED</span></td><td>—</td><td>$0.00</td></tr>
+  </table>
+</div>
+
+<!-- ════════ 3 · RESERVATION DETAIL PANEL ════════ -->
+<h2>3 · Reservation detail — the Long-Term Plan panel</h2>
+<div class="mock">
+  <div class="mock-cap">Reservation detail (existing page; one new panel below the rental agreement section)</div>
+  <div class="between">
+    <div style="font-weight:800;font-size:16px">Long-Term Plan <span class="pill lt">LONG-TERM</span> <span class="pill ok">CURRENT</span></div>
+    <div class="row"><span class="btn ghost">Edit plan</span><span class="btn soft">Pause auto-renew</span><span class="btn danger">End at cycle close</span></div>
+  </div>
+  <div class="grid4" style="margin-top:12px">
+    <div><div class="label">Cycle</div><div class="field">30 days · $1,150.00</div></div>
+    <div><div class="label">Next bill</div><div class="field">Jul 10, 2026 (in 9 days)</div></div>
+    <div><div class="label">Miles this cycle</div><div class="field">1,240 / 3,000</div></div>
+    <div><div class="label">Deposit</div><div class="field">$250.00 charged · refunds at return</div></div>
+  </div>
+  <div style="margin-top:14px">
+    <div class="label">Billing cycles</div>
+    <table class="t">
+      <tr><th>#</th><th>Period</th><th>Amount</th><th>Miles</th><th>Status</th><th></th></tr>
+      <tr><td>2</td><td>Jul 10 – Aug 8</td><td>$1,150.00</td><td>—</td><td><span class="pill info">UPCOMING</span></td><td><span class="btn ghost" style="padding:4px 10px;font-size:12px">Charge early</span></td></tr>
+      <tr><td>1</td><td>Jun 10 – Jul 9</td><td>$1,150.00</td><td>1,240</td><td><span class="pill ok">PAID · Visa •7458</span></td><td><span class="btn ghost" style="padding:4px 10px;font-size:12px">Receipt</span></td></tr>
+    </table>
+  </div>
+  <div class="annot">⚙ Each cycle = a MONTHLY_CYCLE charge + BillingCycle row. Paying it flows through the normal ledger (paid = payments, balance = non-deposit charges − paid). “End at cycle close” stops auto-renew; early return keeps the current cycle (no refund) and triggers the deposit refund at check-in.</div>
+</div>
+
+<!-- ════════ 4 · DUNNING ════════ -->
+<h2>4 · Dunning — reminders, overdue, auto-clear</h2>
+<div class="mock">
+  <div class="mock-cap">Timeline for one cycle (tenant-configurable; defaults shown)</div>
+  <div class="tl">
+    <div class="ev"><b>Jul 8 · 10:00 AM (48h before)</b>“Your next 30-day rental payment of $1,150.00 bills Jul 10” → email to customer</div>
+    <div class="ev"><b>Jul 9 · 10:00 AM (24h before)</b>Second reminder email</div>
+    <div class="ev"><b>Jul 10 · 10:00 AM (due)</b>Auto-charge card on file → <span class="pill ok">PAID</span> → receipt email. Done.</div>
+    <div class="ev"><b>If the charge fails:</b> grace 1 day → reservation flags <span class="pill bad">PAYMENT OVERDUE</span>, staff alerted, customer emailed every 24h with a pay-by-phone/counter note</div>
+    <div class="ev"><b>The moment payment lands</b> (auto-retry, card-on-file via staff, or OTC at counter) → status auto-clears to <span class="pill ok">CURRENT</span>, overdue emails stop immediately</div>
+  </div>
+  <div style="margin-top:10px" class="emailbox">
+    <b>Subject: Payment reminder — your rental renews Jul 10</b><br>
+    Hi Manuel — your 30-day rental of the Compact SUV (KST788) renews on <b>Jul 10</b>.
+    We'll charge <b>$1,150.00</b> to your Visa ending <b>7458</b> automatically — no action needed.
+    Want to return the vehicle instead? Reply or call us before Jul 10.
+  </div>
+</div>
+
+<!-- ════════ 5 · SETTINGS ════════ -->
+<h2>5 · Settings — tenant defaults</h2>
+<div class="mock">
+  <div class="mock-cap">Settings → Payments → Long-Term Rentals (new card, sits next to the Autocharge controls)</div>
+  <div class="grid3">
+    <div><div class="label">Cycle length</div><div class="field sel">30 days ▾ <span style="color:var(--muted)">(or 28)</span></div></div>
+    <div><div class="label">Default included miles / cycle</div><div class="field">3,000</div></div>
+    <div><div class="label">Default overage $/mi</div><div class="field">0.00</div></div>
+  </div>
+  <div class="grid3" style="margin-top:10px">
+    <div><div class="label">Deposit mode (long-term)</div><div class="field sel">Charged · refundable ▾</div></div>
+    <div><div class="label">Grace after failed charge</div><div class="field">1 day</div></div>
+    <div><div class="label">Early return</div><div class="field sel">No refund (cycle is earned) ▾</div></div>
+  </div>
+  <div class="grid3" style="margin-top:10px">
+    <div><div class="label">Reminders before due</div><div class="field">48h, 24h</div></div>
+    <div><div class="label">Overdue reminder every</div><div class="field">24h</div></div>
+    <div><div class="label">Billing mode</div><div class="field sel">AUTO (card on file) ▾ <span style="color:var(--muted)">/ MANUAL</span></div></div>
+  </div>
+  <div class="annot">⚙ Per-rate overrides live on the monthly rate itself (each vehicle type's plan card can set its own miles/overage). Tenant settings are the defaults + the dunning schedule.</div>
+</div>
+
+<!-- ════════ 6 · EMAIL TEMPLATES ════════ -->
+<h2>6 · Customer emails — all four templates</h2>
+<p class="sub">Every template is tenant-configurable (section 7). Merge tags fill from the plan + reservation.</p>
+
+<div class="mock">
+  <div class="mock-cap">Email A — upcoming renewal reminder (sent 48h and again 24h before due)</div>
+  <div class="emailbox">
+    <b>Subject: Payment reminder — your rental renews {{dueDate}}</b><br><br>
+    Hi {{customerFirstName}},<br><br>
+    Your 30-day rental of the <b>{{vehicle}}</b> renews on <b>{{dueDate}}</b>.
+    We'll automatically charge <b>{{amount}}</b> to your {{cardBrand}} ending <b>{{cardLast4}}</b> — no action needed.<br><br>
+    Planning to return the vehicle instead? Just reply to this email or call us at {{locationPhone}} before {{dueDate}}.<br><br>
+    Thank you,<br>{{companyName}}
+  </div>
+</div>
+
+<div class="mock">
+  <div class="mock-cap">Email B — payment receipt (sent after each successful cycle charge)</div>
+  <div class="emailbox">
+    <b>Subject: Receipt — {{amount}} · rental renewed through {{periodEnd}}</b><br><br>
+    Hi {{customerFirstName}},<br><br>
+    We received <b>{{amount}}</b> on your {{cardBrand}} ending {{cardLast4}}. Your rental of the
+    <b>{{vehicle}}</b> is paid through <b>{{periodEnd}}</b>.<br><br>
+    Cycle {{cycleNumber}} · {{periodStart}} – {{periodEnd}} · {{milesIncluded}} miles included<br><br>
+    Thank you,<br>{{companyName}}
+  </div>
+</div>
+
+<div class="mock">
+  <div class="mock-cap">Email C — payment failed / overdue (sent after grace period, repeats every 24h until paid)</div>
+  <div class="emailbox">
+    <b>Subject: Action needed — payment for your rental could not be processed</b><br><br>
+    Hi {{customerFirstName}},<br><br>
+    We were unable to charge <b>{{amount}}</b> for your rental of the <b>{{vehicle}}</b>, due {{dueDate}}.<br><br>
+    <span class="btn" style="display:inline-block">Pay {{amount}} now →</span>
+    <span style="color:var(--muted);font-size:12px"> {{payLink}}</span><br><br>
+    Paying online takes 2 minutes and the card you use becomes your new card on file for future renewals.
+    You can also call us at <b>{{locationPhone}}</b> or stop by the counter — we'll keep retrying your
+    current card automatically as well.<br><br>
+    <span style="color:var(--bad)">If payment isn't received, your rental cannot be renewed past {{periodEnd}}.</span><br><br>
+    {{companyName}}
+  </div>
+  <div class="annot">⚙ The moment ANY payment lands (auto-retry, card-on-file, or counter), the overdue flag clears and these stop immediately — per Hector's spec.</div>
+</div>
+
+<div class="mock">
+  <div class="mock-cap">Email D — plan ended / final return confirmation</div>
+  <div class="emailbox">
+    <b>Subject: Your rental is closed — deposit refund on the way</b><br><br>
+    Hi {{customerFirstName}},<br><br>
+    Your long-term rental of the <b>{{vehicle}}</b> is closed as of {{returnDate}}.
+    Your refundable deposit of <b>{{depositAmount}}</b> is being returned to your {{cardBrand}} ending {{cardLast4}}
+    (3–5 business days).<br><br>
+    Thank you for renting with us!<br>{{companyName}}
+  </div>
+</div>
+
+<!-- ════════ 7 · EMAIL SETTINGS ════════ -->
+<h2>7 · Settings — configurable email templates</h2>
+<div class="mock">
+  <div class="mock-cap">Settings → Notifications → Long-Term Emails (new card)</div>
+  <div class="between" style="margin-bottom:10px">
+    <div class="row">
+      <span class="btn">Renewal reminder</span><span class="btn ghost">Receipt</span>
+      <span class="btn ghost">Overdue</span><span class="btn ghost">Plan ended</span>
+    </div>
+    <span class="pill ok">ENABLED</span>
+  </div>
+  <div class="grid3" style="margin-bottom:10px">
+    <div><div class="label">Send before due</div><div class="field">48h, 24h</div></div>
+    <div><div class="label">Overdue repeat</div><div class="field">every 24h</div></div>
+    <div><div class="label">Reply-to</div><div class="field">rentals@yourcompany.com</div></div>
+  </div>
+  <div><div class="label">Subject</div><div class="field">Payment reminder — your rental renews {{dueDate}}</div></div>
+  <div style="margin-top:8px"><div class="label">Body (merge tags below)</div>
+    <div class="field" style="min-height:90px">Hi {{customerFirstName}}, Your 30-day rental of the {{vehicle}} renews on {{dueDate}}. We'll automatically charge {{amount}} to your {{cardBrand}} ending {{cardLast4}} — no action needed. …</div>
+  </div>
+  <div style="margin-top:8px;font-size:12px;color:var(--muted)">
+    Tags: <code>{{customerFirstName}}</code> <code>{{vehicle}}</code> <code>{{amount}}</code> <code>{{dueDate}}</code>
+    <code>{{periodStart}}</code> <code>{{periodEnd}}</code> <code>{{cycleNumber}}</code> <code>{{cardBrand}}</code>
+    <code>{{cardLast4}}</code> <code>{{depositAmount}}</code> <code>{{milesIncluded}}</code> <code>{{locationPhone}}</code> <code>{{companyName}}</code> <code>{{payLink}}</code>
+  </div>
+  <div class="between" style="margin-top:12px">
+    <span class="btn ghost">Send test email to me</span>
+    <span class="btn">Save template</span>
+  </div>
+  <div class="annot">⚙ Stored per tenant (same settings JSON pattern as the autocharge config). Defaults ship built-in — a tenant who never opens this still gets sensible emails. "Send test" renders with sample data. P2 wires these to the dunning scheduler; {{payLink}} activates in P3 with the customer portal.</div>
+</div>
+
+<hr>
+<p style="color:var(--muted);font-size:12.5px">Ride Fleet · Long-Term Reservations mockups · 2026-06-03 ·
+P1 = schema + monthly rates + manual cycle billing · P2 = cycle worker + autocharge + dunning · P3 = portal pay-links, telematics miles, MRR reports.</p>
+
+</div>
+</body>
+</html>

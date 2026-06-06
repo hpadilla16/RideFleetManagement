@@ -97,6 +97,15 @@ authRouter.post('/users/:id/reset-lock-pin', requireAuth, requireRole('ADMIN'), 
   }
 });
 
+authRouter.post('/users/:id/screen-lock-exempt', requireAuth, requireRole('ADMIN'), async (req, res, next) => {
+  try {
+    res.json(await authService.setScreenLockExempt(req.params.id, !!req.body?.exempt, scopeFor(req)));
+  } catch (e) {
+    if (/not found/i.test(String(e?.message || ''))) return res.status(404).json({ error: e.message });
+    next(e);
+  }
+});
+
 authRouter.get('/lock-pin/status', requireAuth, async (req, res, next) => {
   try {
     res.json(await authService.lockPinStatus(req.user?.id, scopeFor(req)));

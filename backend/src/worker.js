@@ -13,6 +13,7 @@
 import logger from './lib/logger.js';
 import { registerWorker, startWorkers, shutdownQueues, queueEnabled } from './lib/queue/index.js';
 import { startAutochargePoll, stopAutochargePoll } from './modules/reservations/autocharge.poll.js';
+import { startVehicleDriftSweep, stopVehicleDriftSweep } from './modules/vehicles/vehicle-status-sweep.poll.js';
 
 // =============================================================================
 // Bootstrap
@@ -77,6 +78,10 @@ async function main() {
   // Runs every 5min by default, checks DB directly, calls the same handler.
   startAutochargePoll();
 
+  // beta.116 — hourly Vehicle.status drift sweep (KII873 incident): repairs
+  // ON_RENT/AVAILABLE drift against reservation truth and WARNs when it does.
+  startVehicleDriftSweep();
+
   // Graceful shutdown
 
   // Loaner program — return-due reminder sweep (Phase 2). Texts borrowers when
@@ -91,12 +96,30 @@ async function main() {
     });
   }
 
+  // Long-term (monthly) plans — P2 cycle-billing sweep. Hourly: renewal
+  // reminders (48h/24h), cycle close + card-on-file auto-charge, retry +
+  // overdue dunning, auto-clear on payment (cache-deduped sends).
+  try {
+    const ltBillingMod = await import('./modules/long-term/long-term-billing.scheduler.js');
+    ltBillingMod.startLongTermBillingScheduler();
+    logger.info('[worker] started: long-term-billing scheduler');
+  } catch (err) {
+    logger.warn('[worker] long-term-billing scheduler not started', {
+      message: err.message,
+    });
+  }
+
   const shutdown = async (signal) => {
     logger.info('[worker] shutting down', { signal });
     stopAutochargePoll();
+    stopVehicleDriftSweep();
     try {
       const loanerRemMod = await import('./modules/dealership-loaner/loaner-reminders.scheduler.js');
       loanerRemMod.stopLoanerRemindersScheduler();
+    } catch {}
+    try {
+      const ltBillingMod = await import('./modules/long-term/long-term-billing.scheduler.js');
+      ltBillingMod.stopLongTermBillingScheduler();
     } catch {}
     await shutdownQueues();
     process.exit(0);

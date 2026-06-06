@@ -58,6 +58,7 @@ async function buildSessionUser(user) {
     tenantId: user.tenantId || null,
     createdByUserId: user.createdByUserId || null,
     hostProfileId: user.hostProfileId || user.hostProfile?.id || null,
+    screenLockExempt: !!user.screenLockExempt,
     moduleAccess: moduleAccess.effective,
     tenantModuleAccess: moduleAccess.tenantConfig,
     userModuleAccess: moduleAccess.userConfig
@@ -91,6 +92,7 @@ export const authService = {
           tenantId: true,
           createdByUserId: true,
           isActive: true,
+          screenLockExempt: true,
           hostProfile: { select: { id: true } }
         }
       });
@@ -162,7 +164,8 @@ export const authService = {
         tenantId: true,
         createdByUserId: true,
         lockPinHash: true,
-        lockPinUpdatedAt: true
+        lockPinUpdatedAt: true,
+        screenLockExempt: true
       }
     });
 
@@ -176,8 +179,23 @@ export const authService = {
       tenantId: row.tenantId || null,
       createdByUserId: row.createdByUserId || null,
       hasLockPin: !!row.lockPinHash,
-      lockPinUpdatedAt: row.lockPinUpdatedAt || null
+      lockPinUpdatedAt: row.lockPinUpdatedAt || null,
+      screenLockExempt: !!row.screenLockExempt
     }));
+  },
+
+  // 2026-06-04 — per-user idle screen-lock exemption (ops/reporting agent
+  // accounts). ADMIN-gated at the route; additive, default remains false.
+  async setScreenLockExempt(userId, exempt, scope = {}) {
+    const where = { id: userId, ...(scope?.tenantId ? { tenantId: scope.tenantId } : {}) };
+    const user = await prisma.user.findFirst({ where, select: { id: true } });
+    if (!user) throw new Error('User not found');
+    await prisma.user.update({
+      where: { id: user.id },
+      data: { screenLockExempt: !!exempt }
+    });
+    cache.del(globalKey('session', user.id));
+    return { ok: true, screenLockExempt: !!exempt };
   },
 
   async setLockPin(userId, pin, scope = {}) {

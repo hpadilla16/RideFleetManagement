@@ -74,7 +74,12 @@ async function ensureRedis() {
     try {
       const mod = await import('redis');
       const { createClient } = mod;
-      redisPub = createClient({ url: REDIS_URL });
+      // 2026-06-04 — pingInterval keeps the socket alive: Upstash closes idle
+      // connections, which surfaced as a constant "[cache] redis pub/sub error
+      // Socket closed unexpectedly" loop in prod logs (reconnects worked, but
+      // each idle-drop logged the pair and briefly gapped cross-process
+      // invalidation). A 4-min ping is well under Upstash's idle timeout.
+      redisPub = createClient({ url: REDIS_URL, pingInterval: 4 * 60 * 1000 });
       redisSub = redisPub.duplicate();
       redisPub.on('error', (err) => {
         // Avoid log spam — Redis client retries internally.

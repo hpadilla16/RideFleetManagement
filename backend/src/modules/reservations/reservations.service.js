@@ -211,8 +211,10 @@ const reservationListSelect = {
       name: true
     }
   },
-  // NOTE (2026-06-04): the longTermPlan list-select ships WITH the long-term
-  // P1 tag (schema + migration land together) — do not add it before then.
+  // Long-Term P1 — list view LONG-TERM badge + "Next cycle" column.
+  longTermPlan: {
+    select: { id: true, status: true, autoRenew: true, nextCycleStartsAt: true, cycleRate: true }
+  },
   rentalAgreement: {
     select: {
       id: true,

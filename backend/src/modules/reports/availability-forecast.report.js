@@ -87,11 +87,25 @@ const DEFAULT_WINDOW_DAYS = 30;
 
 function num(v) { const n = Number(v); return Number.isFinite(n) ? n : 0; }
 
+// Intl.DateTimeFormat construction is expensive (~0.1ms each). The per-day ×
+// per-type × per-reservation loops below used to construct one (or more) per
+// iteration, which alone accounted for multi-second cold-cache renders.
+// Memoize one formatter per timezone — formatToParts itself is cheap.
+const _tzFormatterCache = new Map();
+function tzFormatter(tz) {
+  let fmt = _tzFormatterCache.get(tz);
+  if (!fmt) {
+    fmt = new Intl.DateTimeFormat('en-CA', {
+      timeZone: tz,
+      year: 'numeric', month: '2-digit', day: '2-digit'
+    });
+    _tzFormatterCache.set(tz, fmt);
+  }
+  return fmt;
+}
+
 function tzParts(date, tz) {
-  return new Intl.DateTimeFormat('en-CA', {
-    timeZone: tz,
-    year: 'numeric', month: '2-digit', day: '2-digit'
-  }).formatToParts(date).reduce((acc, p) => {
+  return tzFormatter(tz).formatToParts(date).reduce((acc, p) => {
     if (p.type !== 'literal') acc[p.type] = p.value;
     return acc;
   }, {});
@@ -263,6 +277,40 @@ function computeBookingPace(reservations, days, fleetCapacity) {
 }
 
 // ---------------------------------------------------------------------------
+// Per-reservation tenant-TZ day flooring — done ONCE per reservation.
+//
+// Perf (2026-06-05): the daily-availability and sold-out loops previously
+// called startOfDayInTz(pickupAt/returnAt) inside O(types × days) iterations,
+// i.e. millions of Intl round-trips for a 12-month scan. Pre-flooring each
+// reservation to epoch-ms day boundaries up front turns the inner comparison
+// into plain number math with identical results.
+// ---------------------------------------------------------------------------
+
+function flooredReservations(reservations, tz) {
+  const out = [];
+  for (const r of reservations) {
+    const p = startOfDayInTz(new Date(r.pickupAt), tz);
+    const rt = startOfDayInTz(new Date(r.returnAt), tz);
+    out.push({
+      vehicleTypeId: r.vehicleTypeId,
+      pickupDayMs: p ? p.getTime() : NaN,
+      returnDayMs: rt ? rt.getTime() : NaN,
+    });
+  }
+  return out;
+}
+
+function groupFlooredByType(floored) {
+  const byType = new Map();
+  for (const r of floored) {
+    let list = byType.get(r.vehicleTypeId);
+    if (!list) { list = []; byType.set(r.vehicleTypeId, list); }
+    list.push(r);
+  }
+  return byType;
+}
+
+// ---------------------------------------------------------------------------
 // Sold-out by month (last 12 months)
 // ---------------------------------------------------------------------------
 
@@ -285,6 +333,12 @@ async function computeSoldOutByMonth({ prisma, tenantId, locationId, vehicleType
     select: { id: true, vehicleTypeId: true, pickupAt: true, returnAt: true },
   });
 
+  // Perf (2026-06-05): floor each reservation's pickup/return to its
+  // tenant-TZ day ONCE, and bucket by vehicle type, instead of re-flooring
+  // inside the (months × days × types × reservations) loop. Same math,
+  // same results — just no Intl churn in the hot path.
+  const flooredByType = groupFlooredByType(flooredReservations(reservations, tz));
+
   const out = [];
   for (let m = 0; m < monthsBack; m++) {
     const monthStart = startOfMonthInTz(addMonthsInTz(startMonth, m, tz), tz);
@@ -292,15 +346,13 @@ async function computeSoldOutByMonth({ prisma, tenantId, locationId, vehicleType
     const daysInMonth = Math.round((monthEnd - monthStart) / DAY_MS);
     let soldOutDays = 0;
     for (let off = 0; off < daysInMonth; off++) {
-      const d = addDaysInTz(monthStart, off);
+      const dMs = addDaysInTz(monthStart, off).getTime();
       const anySoldOut = vehicleTypes.some((vt) => {
         if (vt.vehicles.length === 0) return false;
         let count = 0;
-        for (const r of reservations) {
-          if (r.vehicleTypeId !== vt.id) continue;
-          const p = startOfDayInTz(new Date(r.pickupAt), tz);
-          const rt = startOfDayInTz(new Date(r.returnAt), tz);
-          if (p <= d && d < rt) count++;
+        const typeReservations = flooredByType.get(vt.id) || [];
+        for (const r of typeReservations) {
+          if (r.pickupDayMs <= dMs && dMs < r.returnDayMs) count++;
         }
         return (vt.vehicles.length - count) <= 0;
       });
@@ -412,15 +464,17 @@ async function computeData({ tenantId, from, to, query }, deps = {}) {
   // 3. Per-type daily availability. `days` are tenant-TZ-anchored midnight
   // instants; each reservation's pickup/return are floored to its tenant-TZ
   // day so the overlap math is consistent across the AST boundary.
+  // Perf (2026-06-05): flooring happens once per reservation (not once per
+  // type×day×reservation) — see flooredReservations above.
+  const flooredByType = groupFlooredByType(flooredReservations(reservations, tz));
+  const dayMsList = days.map((d) => d.getTime());
   const typesOut = vehicleTypes.map((vt) => {
     const capacity = vt.vehicles.length;
-    const reservedByDay = days.map((d) => {
+    const typeReservations = flooredByType.get(vt.id) || [];
+    const reservedByDay = dayMsList.map((dMs) => {
       let count = 0;
-      for (const r of reservations) {
-        if (r.vehicleTypeId !== vt.id) continue;
-        const pickup = startOfDayInTz(new Date(r.pickupAt), tz);
-        const ret = startOfDayInTz(new Date(r.returnAt), tz);
-        if (pickup <= d && d < ret) count += 1;
+      for (const r of typeReservations) {
+        if (r.pickupDayMs <= dMs && dMs < r.returnDayMs) count += 1;
       }
       return count;
     });

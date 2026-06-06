@@ -89,6 +89,13 @@ function CheckoutWizardV2({ token, me, logout }) {
   const [toast, setToast] = useState(null);
   const [swapOpen, setSwapOpen] = useState(false);
   const pollTimer = useRef(null);
+  // In-flight guard for the transition POST. Multiple triggers can race
+  // (double-clicked Continue button, the auto-advance effect re-running on
+  // a stale poll snapshot, StepBridge's 500ms timer remounting) — without
+  // the guard the second POST hits the backend after the first already
+  // moved the state and 409s (ILLEGAL_TRANSITION). A ref (not state) so
+  // the check-and-set is synchronous within a single render/tick.
+  const transitionInFlightRef = useRef(false);
 
   // Vehicle swap is locked once inspection photos are being captured.
   // Mirrors the backend STEPS_BLOCKING_SWAP check so the button greys
@@ -198,12 +205,38 @@ function CheckoutWizardV2({ token, me, logout }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [session?.currentStep, session?.tcCompletedAt, session?.paymentCompletedAt, session?.inspectionCompletedAt, session?.customerSignedAt]);
 
+  // Forward order of CheckoutStep — used only to decide whether a 409 means
+  // "already there / already past it" (benign, swallow) vs a real error.
+  const STEP_ORDER = [
+    'CONFIRMING', 'TC_PENDING', 'TC_SIGNED', 'PAYMENT_PENDING', 'PAID',
+    'INSPECTION_HANDOFF', 'INSPECTION_IN_PROGRESS', 'CUSTOMER_SIGN_PENDING',
+    'FINALIZING', 'CLOSED',
+  ];
+
   const advance = async (toStep, metadata) => {
+    if (transitionInFlightRef.current) return; // drop concurrent/double fires
+    transitionInFlightRef.current = true;
     try {
       const next = await transition({ id: session.id, toStep, metadata, token });
       setSession(next);
     } catch (err) {
+      // 409 = state conflict. If the session is already in (or past) the
+      // requested step — the classic double-fire — refetch and treat as a
+      // success-noop instead of toasting an error at the agent.
+      if (err?.status === 409) {
+        try {
+          const fresh = await api(`/api/checkout-sessions/${session.id}`, { bypassCache: true }, token);
+          const at = STEP_ORDER.indexOf(fresh?.currentStep);
+          const want = STEP_ORDER.indexOf(toStep);
+          if (at !== -1 && want !== -1 && at >= want) {
+            setSession(fresh);
+            return;
+          }
+        } catch { /* fall through to the toast */ }
+      }
       setToast({ kind: 'error', message: err?.message || 'Cannot advance' });
+    } finally {
+      transitionInFlightRef.current = false;
     }
   };
 
@@ -516,6 +549,12 @@ function Step1Confirm({ reservation, session, token, onNext }) {
     }
   };
 
+  // beta.116 — NO-CAR-NO-CHECKOUT: a reservation with no vehicle can't pass
+  // step 1. The backend rejects session-start with 422 NO_VEHICLE_ASSIGNED,
+  // but disable the button here too so the agent gets an immediate, clear
+  // reason instead of a failed call.
+  const hasVehicle = !!(reservation.vehicleId || reservation.vehicle?.id);
+
   return (
     <div style={cardStyle}>
       <h3 style={h3Style}>Step 1 · Confirm customer + vehicle</h3>
@@ -526,6 +565,17 @@ function Step1Confirm({ reservation, session, token, onNext }) {
         <KV label="Pickup" value={reservation.pickupAt ? new Date(reservation.pickupAt).toLocaleString() : '—'} />
         <KV label="Return" value={reservation.returnAt ? new Date(reservation.returnAt).toLocaleString() : '—'} />
       </div>
+      {!hasVehicle && (
+        <div style={{
+          padding: 12, marginBottom: 12,
+          background: '#FEF2F2', border: '0.5px solid #EF4444', borderRadius: 6,
+          color: '#991B1B', fontSize: 13,
+        }}>
+          No hay vehículo asignado a esta reservación. Asigna un carro desde la
+          reservación antes de iniciar el checkout — el contrato no puede
+          generarse sin vehículo.
+        </div>
+      )}
       <div style={{
         padding: 12, marginBottom: 12,
         background: declinedInsurance ? '#FEF3C7' : '#F9FAFB',
@@ -550,7 +600,14 @@ function Step1Confirm({ reservation, session, token, onNext }) {
           </div>
         </label>
       </div>
-      <button style={primaryBtn} onClick={onNext}>Start checkout →</button>
+      <button
+        style={{ ...primaryBtn, opacity: hasVehicle ? 1 : 0.4, cursor: hasVehicle ? 'pointer' : 'not-allowed' }}
+        onClick={hasVehicle ? onNext : undefined}
+        disabled={!hasVehicle}
+        title={hasVehicle ? undefined : 'Asigna un vehículo a la reservación primero'}
+      >
+        Start checkout →
+      </button>
     </div>
   );
 }
@@ -801,6 +858,32 @@ function Step3PaymentPending({ session, reservation, token, onPaid }) {
         </div>
       </div>
 
+      {/* ── Debit-card advisory (2026-06-04) ─────────────────────── */}
+      {/* Shown once the sale tap reveals a DEBIT card. The deposit hold
+          amount itself is resolved SERVER-SIDE at hold time (per-location
+          securityDepositAmountDebit uplift) — we never duplicate that
+          logic here. After the hold completes, depositResult.amount is
+          the authoritative held amount and we surface it when it differs
+          from the standard amount previewed above. */}
+      {saleStatus === 'done' && saleResult?.cardOnFile?.type === 'DEBIT' && (
+        <div style={{
+          marginTop: 16,
+          padding: '10px 12px',
+          borderRadius: 6,
+          background: 'rgba(245,158,11,.08)',
+          border: '0.5px solid rgba(245,158,11,.3)',
+          color: '#92400e',
+          fontSize: 12,
+          lineHeight: 1.45,
+        }}>
+          <strong>Debit card detected</strong> — the deposit hold uses the debit amount
+          {depositStatus === 'done' && Number(depositResult?.amount) > 0 && Number(depositResult.amount) !== depositAmount
+            ? ` ($${Number(depositResult.amount).toFixed(2)})`
+            : ''}.
+          {' '}Refunds to debit cards can take up to 30 days.
+        </div>
+      )}
+
       {/* ── Two-step transaction tracker ─────────────────────────── */}
       <div style={{ marginTop: 16, border: '0.5px solid #E5E7EB', borderRadius: 6 }}>
         {/* Step A — Rental sale */}
@@ -834,7 +917,7 @@ function Step3PaymentPending({ session, reservation, token, onPaid }) {
         {/* Step B — Deposit hold (only enabled after sale, or immediately if pre-paid) */}
         <PaymentRow
           label="Security deposit hold"
-          amount={depositAmount}
+          amount={depositStatus === 'done' && Number(depositResult?.amount) > 0 ? Number(depositResult.amount) : depositAmount}
           status={depositStatus}
           errorMsg={depositError}
           authCode={depositResult?.preauth?.authCode}

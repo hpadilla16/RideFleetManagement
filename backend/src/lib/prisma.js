@@ -27,13 +27,23 @@ export const prisma = new PrismaClient({
   }
 });
 
+// beta.116 PII-log hardening: Prisma slow-query lines used to dump full
+// query PARAMS (customer name, phone, DOB, driver license, etc.) into the
+// production logs. We keep the timing/duration + (parameterized) SQL text for
+// slow-query visibility, but the bound param VALUES are only emitted outside
+// production where logs are local and short-lived.
+const LOG_QUERY_PARAMS = process.env.NODE_ENV !== 'production';
+
 if (SLOW_QUERY_MS > 0) {
   prisma.$on('query', (event) => {
     if (typeof event?.duration === 'number' && event.duration > SLOW_QUERY_MS) {
       logger.warn(`prisma slow query ${event.duration}ms`, {
         durationMs: event.duration,
         query: typeof event?.query === 'string' ? event.query.slice(0, 500) : undefined,
-        params: typeof event?.params === 'string' ? event.params.slice(0, 500) : undefined,
+        // PII guard: never emit bound param values in production.
+        params: LOG_QUERY_PARAMS && typeof event?.params === 'string'
+          ? event.params.slice(0, 500)
+          : undefined,
         target: event?.target
       });
     }

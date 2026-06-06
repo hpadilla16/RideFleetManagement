@@ -2114,8 +2114,19 @@ export const rentalAgreementsService = {
         }
 
         const chargeRows = [];
-        const base = dailyRate * days;
-        chargeRows.push({ rentalAgreementId: existing.id, name: 'Daily', chargeType: 'DAILY', quantity: days, rate: dailyRate, total: base, taxable: true, selected: true, sortOrder: 0 });
+        // Long-Term P1 (2026-06-03): when the reservation has an EXPLICIT
+        // monthly plan, the base charge is one locked cycle, not days x rate.
+        // Daily reservations NEVER auto-convert (plan only exists via opt-in).
+        const ltPlan = await prisma.longTermPlan.findUnique({
+          where: { reservationId: reservation.id },
+          select: { cycleRate: true },
+        }).catch(() => null);
+        const base = ltPlan ? Number(ltPlan.cycleRate) : dailyRate * days;
+        if (ltPlan) {
+          chargeRows.push({ rentalAgreementId: existing.id, name: 'Monthly Cycle 1', chargeType: 'MONTHLY', quantity: 1, rate: base, total: base, taxable: true, selected: true, sortOrder: 0, source: 'MONTHLY_CYCLE' });
+        } else {
+          chargeRows.push({ rentalAgreementId: existing.id, name: 'Daily', chargeType: 'DAILY', quantity: days, rate: dailyRate, total: base, taxable: true, selected: true, sortOrder: 0 });
+        }
 
         let servicesTotal = 0;
         services.forEach((s) => {
@@ -4441,9 +4452,18 @@ export const rentalAgreementsService = {
   },
 
   async saveInspection(id, payload = {}, actorUserId = null, actorIp = null, actorRole = 'AGENT') {
+    // Perf (2026-06-05): saveInspection only needs to know WHICH phases
+    // already exist (existence check) plus the agreement's scalar fields.
+    // `inspections: true` was pulling the full photosJson base64 blobs for
+    // every inspection on the agreement (multi-MB, multi-second query) just
+    // to do that existence check. Slim select keeps behavior identical.
     const agreement = await prisma.rentalAgreement.findUnique({
       where: { id },
-      include: { inspections: true }
+      include: {
+        inspections: {
+          select: { id: true, phase: true, capturedAt: true, actorUserId: true }
+        }
+      }
     });
     if (!agreement) throw new Error('Rental agreement not found');
 

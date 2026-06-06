@@ -44,6 +44,21 @@ async function createForReservation({ reservationId, tenantId, actorUserId }) {
     where: { id: reservationId },
     select: { id: true, tenantId: true, vehicleId: true, pickupAt: true, returnAt: true },
   });
+
+  // beta.116 — NO-CAR-NO-CHECKOUT guard. A reservation without a vehicle must
+  // never enter the checkout wizard: it was producing CHECKED_OUT reservations
+  // and FINALIZED agreements with no car on the contract (reported 2026-06-05).
+  // Block at session start with a clear 422 so step 1 can't be passed until a
+  // vehicle is assigned. (Finalize has a matching guard as defense-in-depth.)
+  if (!resv) throw new CheckoutSessionError('Reservation not found', 404);
+  if (!resv.vehicleId) {
+    throw new CheckoutSessionError(
+      'Assign a vehicle to this reservation before starting checkout.',
+      422,
+      'NO_VEHICLE_ASSIGNED',
+    );
+  }
+
   if (resv?.vehicleId) {
     try {
       await ensureNoVehicleConflict({
@@ -265,6 +280,11 @@ async function transition({ id, toStep, actorUserId, metadata }) {
   if (!session) throw new CheckoutSessionError('Session not found', 404);
 
   if (!canTransition(session.currentStep, toStep)) {
+    // NOTE (2026-06-05): the wizard used to double-fire this transition on
+    // rapid double-click / auto-advance races, producing benign 409s here.
+    // The frontend now carries an in-flight guard and treats "already at or
+    // past toStep" 409s as a no-op. Intentionally NOT made idempotent
+    // server-side — a hard 409 stays the safety net on this payment path.
     throw new CheckoutSessionError(
       `Illegal transition ${session.currentStep} → ${toStep}`,
       409,
@@ -337,11 +357,23 @@ async function transition({ id, toStep, actorUserId, metadata }) {
       });
       // Don't downgrade an already checked-in/out reservation.
       if (resv && !['CHECKED_OUT', 'CHECKED_IN', 'CHECKED_IN_UNPAID'].includes(String(resv.status))) {
+        // beta.116 — NO-CAR-NO-CHECKOUT guard (defense-in-depth). Never finalize
+        // a checkout onto a reservation with no vehicle: that produced FINALIZED
+        // agreements with no car on the contract. The session-start gate blocks
+        // the normal path; this catches resumed/legacy sessions that lost their
+        // vehicle. Fail the finalize loudly so the agent assigns a car.
+        if (!resv.vehicleId) {
+          throw new CheckoutSessionError(
+            'Cannot finalize checkout: no vehicle is assigned to this reservation.',
+            422,
+            'NO_VEHICLE_ASSIGNED',
+          );
+        }
         // 2026-06-04 — defense-in-depth: re-run the vehicle-conflict gate at
         // finalize too. The session-start gate covers the normal flow, but a
         // long-lived/resumed session could finalize after another rental took
         // the vehicle. Surfaces as a clean 409, never a silent double-booking.
-        if (resv.vehicleId) {
+        {
           const resvFull = await prisma.reservation.findUnique({
             where: { id: resv.id }, select: { pickupAt: true, returnAt: true },
           });

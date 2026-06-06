@@ -68,15 +68,51 @@ export async function syncVehicleStatusForReservation(client, { reservationId, v
   const target = inferVehicleStatusForReservationStatus(toStatus);
   if (!target) return null;
 
+  // beta.116 hardening (KII873 incident, 2026-06-05): when a reservationId is
+  // available, the reservation's CURRENT vehicleId is the source of truth —
+  // a caller-supplied vehicleId can be stale (e.g. RentalAgreement.vehicleId
+  // written before the 2026-05-23 swap fix shipped). RES-961024 checked in
+  // and the sync freed the agreement's old vehicle (KST795) while the real
+  // car (KII873) stayed ON_RENT for two days. If both ids are present and
+  // they disagree, sync the reservation's vehicle as primary AND release the
+  // stale one (it is no longer on this rental) unless it's locked or still
+  // out on another open rental.
   let vid = vehicleId || null;
-  if (!vid && reservationId) {
+  let staleVid = null;
+  if (reservationId) {
     const reservation = await client.reservation.findUnique({
       where: { id: reservationId },
       select: { vehicleId: true },
     });
-    vid = reservation?.vehicleId || null;
+    const resVid = reservation?.vehicleId || null;
+    if (resVid) {
+      if (vid && vid !== resVid) staleVid = vid;
+      vid = resVid;
+    }
   }
   if (!vid) return null;
+
+  if (staleVid) {
+    try {
+      const stale = await client.vehicle.findUnique({
+        where: { id: staleVid },
+        select: { id: true, status: true },
+      });
+      if (stale && !LOCKED_VEHICLE_STATUSES.includes(stale.status) && stale.status === 'ON_RENT') {
+        const stillOut = await client.reservation.count({
+          where: { vehicleId: staleVid, status: 'CHECKED_OUT' },
+        });
+        if (stillOut === 0) {
+          await client.vehicle.update({
+            where: { id: staleVid },
+            data: { status: 'AVAILABLE', updatedAt: new Date() },
+          });
+        }
+      }
+    } catch {
+      // Best-effort: never let stale-vehicle cleanup break the main sync.
+    }
+  }
 
   const vehicle = await client.vehicle.findUnique({
     where: { id: vid },
@@ -103,4 +139,52 @@ export async function syncVehicleStatusForReservation(client, { reservationId, v
     internalNumber: vehicle.internalNumber,
     plate: vehicle.plate,
   };
+}
+
+/**
+ * Drift sweep (beta.116, KII873 incident) — self-healing safety net.
+ *
+ * Invariant: a vehicle is ON_RENT iff it has a CHECKED_OUT reservation.
+ * Historical bad data (pre-fix swaps), crashed transactions, or future
+ * code paths that forget to sync can all break it; this sweep repairs both
+ * directions and reports what it fixed. Locked statuses are never touched.
+ *
+ *   ON_RENT  + no CHECKED_OUT reservation -> AVAILABLE  (car is on the lot)
+ *   AVAILABLE + a CHECKED_OUT reservation -> ON_RENT    (car is on the road)
+ */
+export async function sweepVehicleStatusDrift(client) {
+  const freed = [];
+  const rented = [];
+
+  const stuckOnRent = await client.vehicle.findMany({
+    where: {
+      status: 'ON_RENT',
+      reservations: { none: { status: 'CHECKED_OUT' } },
+    },
+    select: { id: true, internalNumber: true, plate: true },
+  });
+  for (const v of stuckOnRent) {
+    await client.vehicle.update({
+      where: { id: v.id },
+      data: { status: 'AVAILABLE', updatedAt: new Date() },
+    });
+    freed.push({ vehicleId: v.id, internalNumber: v.internalNumber, plate: v.plate });
+  }
+
+  const stuckAvailable = await client.vehicle.findMany({
+    where: {
+      status: 'AVAILABLE',
+      reservations: { some: { status: 'CHECKED_OUT' } },
+    },
+    select: { id: true, internalNumber: true, plate: true },
+  });
+  for (const v of stuckAvailable) {
+    await client.vehicle.update({
+      where: { id: v.id },
+      data: { status: 'ON_RENT', updatedAt: new Date() },
+    });
+    rented.push({ vehicleId: v.id, internalNumber: v.internalNumber, plate: v.plate });
+  }
+
+  return { freed, rented };
 }

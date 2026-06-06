@@ -452,6 +452,8 @@ model Tenant {
   agreementAddendums          RentalAgreementAddendum[]
   vehicleClassStopSales       VehicleClassStopSale[]
   marketScrapeProfiles        MarketScrapeProfile[]
+  pricingRules                PricingRule[]
+  pricingSuggestions          PricingSuggestion[]
   feeRates                    FeeRate[]
 
   // TL International franchise integration (round 5)
@@ -462,7 +464,8 @@ model Tenant {
   tlAcrissCategoryMaps     AcrissCategoryMap[]
   tlLocationCodeMaps       LocationCodeMap[]
   franchisePayoutPeriods   FranchisePayoutPeriod[]
-  loanerAgreements            LoanerAgreement[]
+  loanerAgreements         LoanerAgreement[]
+  longTermPlans            LongTermPlan[]
 }
 
 model Location {
@@ -574,12 +577,12 @@ model Vehicle {
   availabilityBlocks    VehicleAvailabilityBlock[]
   telematicsDevices     VehicleTelematicsDevice[]
   telematicsEvents      VehicleTelematicsEvent[]
+  loanerAgreements      LoanerAgreement[]
 
   @@unique([tenantId, plate])
   @@unique([tenantId, internalNumber])
   @@index([tenantId, status])
   @@index([tenantId, programCategory])
-  loanerAgreements      LoanerAgreement[]
 }
 
 model VehicleAvailabilityBlock {
@@ -670,6 +673,12 @@ model VehicleTelematicsEvent {
 
   @@index([tenantId, vehicleId, eventAt])
   @@index([deviceId, eventAt])
+  // Perf 2026-06-05 — vehicle-intelligence latest-event lookup runs
+  //   SELECT DISTINCT ON ("vehicleId") * ... WHERE "vehicleId" = ANY(...)
+  //   ORDER BY "vehicleId", "eventAt" DESC
+  // with NO tenant filter when called by super-admin scope, so the
+  // (tenantId, vehicleId, eventAt) index can't serve it. This one can.
+  @@index([vehicleId, eventAt(sort: Desc)])
 }
 
 model Customer {
@@ -882,6 +891,8 @@ model Reservation {
 
   // TL International franchise integration (round 5)
   externalReservation ExternalReservation? @relation("ReservationFromExternal")
+  loanerAgreement     LoanerAgreement?
+  longTermPlan        LongTermPlan?
 
   @@index([status, pickupAt])
   @@index([workflowMode, status, pickupAt])
@@ -898,7 +909,16 @@ model Reservation {
   // Without this, Postgres filters via [tenantId, status, pickupAt] and
   // then has to sort by updatedAt — getting slower as table grows.
   @@index([tenantId, status, updatedAt(sort: Desc)])
-  loanerAgreement   LoanerAgreement?
+  // Perf 2026-06-05 — date-window overlap queries (availability-forecast,
+  // planner snapshot, booking engine) all filter
+  //   `tenantId = ? AND pickupAt < end AND returnAt > start`
+  // with NO status predicate (planner) or a multi-status IN (forecast).
+  // None of the existing indexes lead with (tenantId, returnAt), so Postgres
+  // fell back to scanning [tenantId, createdAt] / seq scans. returnAt > start
+  // is the selective condition for forward-looking windows (it excludes all
+  // historical, already-returned rows); pickupAt rides along for an
+  // index-level filter.
+  @@index([tenantId, returnAt, pickupAt])
 }
 
 model Invoice {
@@ -1096,6 +1116,7 @@ model User {
   passwordHash     String
   lockPinHash      String?
   lockPinUpdatedAt DateTime?
+  screenLockExempt Boolean         @default(false)
   fullName         String
   role             UserRole        @default(AGENT)
   isActive         Boolean         @default(true)
@@ -1351,6 +1372,11 @@ model RentalAgreement {
   // overage, damage) can run via /sale with the stored token.
   cardOnFileToken      String?
   cardOnFileBrand      String?
+  // 2026-06-04 — debit-aware deposits. Best-effort 'DEBIT' | 'CREDIT'
+  // derived from the SPIn/Transact response at capture time; null when
+  // the gateway didn't disclose it. Drives the per-location debit
+  // security-deposit uplift in runDepositHold.
+  cardOnFileType       String?
   cardOnFileLast4      String?
   cardOnFileCapturedAt DateTime?
 
@@ -2040,6 +2066,8 @@ model Rate {
   rateItems            RateItem[]
   dailyPrices          RateDailyPrice[]
   marketScrapeProfiles MarketScrapeProfile[] @relation("MarketScrapeProfileTargetRate")
+  pricingRule          PricingRule?
+  pricingSuggestions   PricingSuggestion[]
 
   @@unique([tenantId, rateCode])
   @@index([locationId, isActive])
@@ -2569,6 +2597,10 @@ enum MarketScrapeFrequency {
   // Run every Monday at scheduleHour:scheduleMinute. Lower-volume use case
   // for tenants who don't want daily noise.
   WEEKLY
+  // Run every `frequencyDays` days (e.g. 3 or 4). Used for the far-term
+  // (days 29-60) outlook profile where daily refreshes are wasteful — prices
+  // out there move slowly. Cadence is tenant-configurable per profile.
+  EVERY_N_DAYS
 }
 
 enum MarketScrapeRunStatus {
@@ -2631,6 +2663,9 @@ model MarketScrapeProfile {
 
   // When + how often the scheduler kicks this profile off.
   frequency      MarketScrapeFrequency @default(DAILY)
+  // Cadence in days when frequency=EVERY_N_DAYS. Ignored for DAILY/WEEKLY.
+  // Defaults to 1; the standard "far-term outlook" profile (days 29-60) uses 4.
+  frequencyDays  Int                   @default(1)
   scheduleHour   Int                   @default(4)
   scheduleMinute Int                   @default(1)
   runTimezone    String                @default("America/Puerto_Rico")
@@ -2745,6 +2780,138 @@ model MarketObservation {
   @@index([profileId, pickupDate, sipp])
   @@index([runId])
   @@index([pickupDate, sipp])
+}
+
+// =============================================================================
+// PRICING INTELLIGENCE — per-Rate rules + suggestion queue
+// =============================================================================
+//
+// PricingRule lives on a Rate. The pricing-suggestion-engine worker runs after
+// every successful MarketScrapeRun, evaluates each active rule against the
+// freshest observations for the rule's Rate (matched by Rate→Location and
+// Rate's SIPP class), and produces a PricingSuggestion.
+//
+// If rule.mode = AUTO and |delta| <= rule.autoMaxDeltaPct → suggestion is
+// written AUTO_APPLIED and Rate.daily is updated in the same transaction.
+// Otherwise → suggestion is PENDING and surfaced in the Suggestions Inbox
+// for human approval (48h expiration default).
+//
+// Spec: doc/market-intelligence-plan-2026-06-05.md
+//
+// =============================================================================
+
+enum PricingRuleMode {
+  // Worker writes the new price directly to Rate.daily when within guardrails.
+  AUTO
+  // Worker writes a PENDING PricingSuggestion; user approves manually.
+  SUGGEST
+}
+
+enum PricingRuleStrategy {
+  // Position N-th cheapest in the observed market. targetN required.
+  NTH_CHEAPEST
+  // Track a single named competitor. targetVendor required.
+  CHASE_VENDOR
+  // Compute nothing; rule is informational. Useful when tenant wants the
+  // market dashboard without auto-pricing.
+  MANUAL
+}
+
+enum PricingSuggestionStatus {
+  PENDING // Awaiting human review (SUGGEST mode or AUTO over delta cap).
+  APPLIED // User clicked Approve; Rate.daily updated.
+  AUTO_APPLIED // Worker wrote directly without human review.
+  REJECTED // User clicked Reject; reason captured.
+  EXPIRED // 48h elapsed without action; rule re-evaluates next cycle.
+}
+
+model PricingRule {
+  id String @id @default(cuid())
+
+  // Each Rate owns 0..1 PricingRule. Unique so we can upsert by rateId.
+  rateId String @unique
+  rate   Rate   @relation(fields: [rateId], references: [id], onDelete: Cascade)
+
+  // Denormalized for cheap tenant-scoped queries.
+  tenantId String
+  tenant   Tenant @relation(fields: [tenantId], references: [id])
+
+  mode     PricingRuleMode     @default(SUGGEST)
+  strategy PricingRuleStrategy @default(NTH_CHEAPEST)
+
+  // For NTH_CHEAPEST: 1 = cheapest, 2 = 2nd cheapest, ... up to 10.
+  targetN Int?
+
+  // For CHASE_VENDOR: vendor name to match against MarketObservation.vendor.
+  // Match is case-insensitive contains (so "Hertz" matches "Hertz Local Edition").
+  targetVendor String?
+
+  // Padding applied to the computed target price. Negative = undercut.
+  // Example: targetN=2 + paddingPct=-2 → "2% cheaper than the 2nd cheapest".
+  paddingPct Decimal @default(0) @db.Decimal(5, 2)
+
+  // Safety guardrails — clamped after strategy + padding.
+  floorPrice   Decimal @db.Decimal(10, 2)
+  ceilingPrice Decimal @db.Decimal(10, 2)
+
+  // For AUTO mode only: if |computed delta| exceeds this %, fall through to
+  // PENDING instead of auto-applying. Protects against bad scraper data.
+  // Null = no cap (always auto-apply). Recommended: 15.
+  autoMaxDeltaPct Decimal? @db.Decimal(5, 2)
+
+  active Boolean @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  createdBy String? // userId
+  updatedBy String?
+
+  suggestions PricingSuggestion[]
+
+  @@index([tenantId, active])
+}
+
+model PricingSuggestion {
+  id String @id @default(cuid())
+
+  ruleId String
+  rule   PricingRule @relation(fields: [ruleId], references: [id], onDelete: Cascade)
+
+  // Denormalized for inbox queries without join.
+  tenantId String
+  tenant   Tenant @relation(fields: [tenantId], references: [id])
+  rateId   String
+  rate     Rate   @relation(fields: [rateId], references: [id], onDelete: Cascade)
+
+  // What the rate.daily was when the engine ran.
+  currentPrice   Decimal @db.Decimal(10, 2)
+  // What the engine would set it to.
+  suggestedPrice Decimal @db.Decimal(10, 2)
+  // Cached deltas so the inbox doesn't recompute.
+  deltaAmount    Decimal @db.Decimal(10, 2)
+  deltaPct       Decimal @db.Decimal(6, 2)
+
+  // Structured explanation: { strategy, targetVendor, targetN, marketMin,
+  // marketMedian, yourRank, observationIds: [...], guardrailsHit: ['floor'|'ceiling'|'autoMaxDelta'] }
+  reason Json
+
+  status PricingSuggestionStatus @default(PENDING)
+
+  appliedAt      DateTime?
+  appliedBy      String?
+  rejectedReason String?
+
+  // PENDING entries auto-expire after 48h so old suggestions don't pile up.
+  // The expire check runs as part of the daily engine pass.
+  expiresAt DateTime
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([tenantId, status])
+  @@index([ruleId])
+  @@index([rateId, status])
+  @@index([expiresAt])
 }
 
 // Path D per-tenant volume metrics for promotion criteria automation.
@@ -3007,7 +3174,6 @@ model FranchisePayoutPeriod {
 
   @@unique([tenantId, sourceSystem, year, month])
 }
-
 
 // =====================================================================
 // Incident / Damage Report module (ported from feature/incident-report
@@ -3430,3 +3596,71 @@ model LoanerDamagePoint {
   @@index([loanerAgreementId])
 }
 
+// =====================================================================
+// Long-Term (Monthly) Reservations — P1 (2026-06-03).
+// A LongTermPlan attaches to a Reservation when the agent EXPLICITLY
+// selects the Monthly rate type at creation (rate read from
+// RateItem.monthly and LOCKED into cycleRate — renewals never float
+// with the daily calendar, and daily reservations NEVER auto-convert
+// at 28+ days). Each billing period is a BillingCycle row backed by a
+// MONTHLY_CYCLE charge on the agreement, so the existing ledger,
+// receipts, and PDFs work unchanged.
+// Plan: doc/long-term-reservations-plan-2026-06-03.md
+// =====================================================================
+
+enum BillingCycleStatus {
+  DUE
+  PAID
+  FAILED
+  WAIVED
+}
+
+model LongTermPlan {
+  id                    String      @id @default(cuid())
+  tenantId              String?
+  tenant                Tenant?     @relation(fields: [tenantId], references: [id])
+  reservationId         String      @unique
+  reservation           Reservation @relation(fields: [reservationId], references: [id], onDelete: Cascade)
+  rateId                String?
+  cycleLengthDays       Int         @default(30)
+  cycleRate             Decimal     @db.Decimal(10, 2)
+  includedMilesPerCycle Int?        @default(3000)
+  overagePerMile        Decimal?    @default(0) @db.Decimal(10, 2)
+  milesRollOver         Boolean     @default(false)
+  autoRenew             Boolean     @default(true)
+  swapsPerCycle         Int         @default(1)
+  nextCycleStartsAt     DateTime
+  status                String      @default("ACTIVE") // ACTIVE | PAUSED | ENDED
+  endedAt               DateTime?
+  createdAt             DateTime    @default(now())
+  updatedAt             DateTime    @updatedAt
+
+  billingCycles BillingCycle[]
+
+  @@index([tenantId, status])
+  @@index([status, nextCycleStartsAt])
+}
+
+model BillingCycle {
+  id             String             @id @default(cuid())
+  longTermPlanId String
+  longTermPlan   LongTermPlan       @relation(fields: [longTermPlanId], references: [id], onDelete: Cascade)
+  cycleNumber    Int
+  periodStart    DateTime
+  periodEnd      DateTime
+  amount         Decimal            @db.Decimal(10, 2)
+  milesStart     Int?
+  milesEnd       Int?
+  overageMiles   Int                @default(0)
+  status         BillingCycleStatus @default(DUE)
+  chargeId       String?
+  paymentId      String?
+  attempts       Int                @default(0)
+  lastError      String?
+  paidAt         DateTime?
+  createdAt      DateTime           @default(now())
+  updatedAt      DateTime           @updatedAt
+
+  @@unique([longTermPlanId, cycleNumber])
+  @@index([status, periodEnd])
+}

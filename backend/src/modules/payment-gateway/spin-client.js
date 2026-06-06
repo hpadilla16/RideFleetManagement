@@ -444,6 +444,40 @@ export const spinClient = {
   },
 
   /**
+   * Best-effort card funding type from a SPIn response — 'DEBIT',
+   * 'CREDIT', or null when the response doesn't say (we never guess).
+   *
+   * 2026-06-04 — debit-aware deposits. Where the signal can live:
+   *   • PaymentType — we SEND 'Credit' on every request, but the
+   *     terminal response echoes what actually ran ('Debit' when the
+   *     customer's tap routed as debit / they chose debit on the PIN
+   *     pad). The iPOSpays Transact API equivalently reports cardType
+   *     'DEBIT' / 'CREDIT'.
+   *   • CardData.CardType — usually the brand (VISA/MC), but some
+   *     Dejavoo proxy configs return 'DEBIT' / 'VISA DEBIT' here.
+   *   • CardData.PaymentType / ExtData.PaymentType — extended-data
+   *     variants seen across SPIn proxy versions.
+   * We scan all candidates for an explicit DEBIT or CREDIT token.
+   */
+  extractCardType(spinResponse) {
+    const candidates = [
+      spinResponse?.PaymentType,
+      spinResponse?.CardData?.PaymentType,
+      spinResponse?.CardData?.CardType,
+      spinResponse?.ExtData?.PaymentType,
+      spinResponse?.ExtData?.CardType,
+      spinResponse?.cardType, // Transact-style lowercase field
+    ];
+    for (const raw of candidates) {
+      const v = String(raw || '').toUpperCase();
+      if (!v) continue;
+      if (v.includes('DEBIT')) return 'DEBIT';
+      if (v.includes('CREDIT')) return 'CREDIT';
+    }
+    return null;
+  },
+
+  /**
    * Extract the card-on-file fields we persist to RentalAgreement so
    * subsequent CNP charges (tolls / overage / damage) can run through
    * chargeWithToken. Returns null if the response didn't include a
@@ -455,6 +489,8 @@ export const spinClient = {
     return {
       token: norm.iposToken || norm.token,
       brand: norm.cardData?.cardType || null,
+      // 'DEBIT' | 'CREDIT' | null — null means the gateway didn't say.
+      type: this.extractCardType(spinResponse),
       last4: norm.cardData?.last4 || null,
       capturedAt: new Date(),
     };

@@ -173,6 +173,185 @@ function formatLoanerTimelineDetail(meta = {}, fallback = '') {
   return fallback || 'Reservation workflow updated';
 }
 
+// Long-Term (Monthly) Reservations — P1 plan panel (2026-06-04).
+// Self-contained: fetches GET /api/long-term/reservations/:id/plan on mount
+// and renders NOTHING when the reservation has no plan (the backend returns
+// {} in that case). Monthly is explicit opt-in at creation — this panel only
+// manages an already-attached plan: status, auto-renew, staff-triggered cycle
+// billing (P1; the P2 worker automates it), and mark-paid bookkeeping. The
+// MONTHLY_CYCLE charge created by "Bill next cycle" flows through the normal
+// agreement ledger, so payment collection stays in View Payments.
+const longTermPillStyles = {
+  lt: { background: '#3b2fa3', color: '#fff' },
+  ACTIVE: { background: '#e1f5ee', color: '#0f6e56' },
+  PAUSED: { background: '#faeeda', color: '#854f0b' },
+  ENDED: { background: '#fcebeb', color: '#a32d2d' },
+  DUE: { background: '#e6f1fb', color: '#0c447c' },
+  PAID: { background: '#e1f5ee', color: '#0f6e56' },
+  FAILED: { background: '#fcebeb', color: '#a32d2d' },
+  WAIVED: { background: '#f3f4f6', color: '#6b7280' }
+};
+
+function LongTermPill({ kind, children }) {
+  const style = longTermPillStyles[kind] || longTermPillStyles.WAIVED;
+  return (
+    <span style={{
+      ...style,
+      display: 'inline-block', padding: '2px 9px', borderRadius: 999,
+      fontSize: 10, fontWeight: 700, letterSpacing: '0.04em', textTransform: 'uppercase'
+    }}>
+      {children}
+    </span>
+  );
+}
+
+function LongTermPlanPanel({ reservationId, token }) {
+  const [plan, setPlan] = useState(null);
+  const [planMsg, setPlanMsg] = useState('');
+  const [planBusy, setPlanBusy] = useState(false);
+
+  const loadPlan = async () => {
+    try {
+      const out = await api(`/api/long-term/reservations/${reservationId}/plan`, { bypassCache: true }, token);
+      // Backend returns {} when the reservation has no plan — render nothing.
+      setPlan(out && out.id ? out : null);
+    } catch {
+      setPlan(null);
+    }
+  };
+
+  useEffect(() => { if (reservationId) loadPlan(); }, [reservationId, token]);
+
+  if (!plan) return null;
+
+  const cycles = Array.isArray(plan.billingCycles) ? plan.billingCycles : [];
+
+  const patchPlan = async (body, okMsg) => {
+    try {
+      setPlanBusy(true);
+      setPlanMsg('');
+      const out = await api(`/api/long-term/plans/${plan.id}`, { method: 'PATCH', body: JSON.stringify(body) }, token);
+      setPlan(out && out.id ? out : plan);
+      setPlanMsg(okMsg);
+    } catch (e) {
+      setPlanMsg(e?.message || 'Unable to update plan');
+    } finally {
+      setPlanBusy(false);
+    }
+  };
+
+  const billNextCycle = async () => {
+    const nextStart = plan.nextCycleStartsAt ? new Date(plan.nextCycleStartsAt).toLocaleDateString() : 'next period';
+    const confirmed = window.confirm(
+      `Bill the next cycle now? This posts a Monthly Cycle charge of $${Number(plan.cycleRate || 0).toFixed(2)} (plus any overage) to the agreement, extends the return date by ${plan.cycleLengthDays} days, and advances the next bill date from ${nextStart}. Payment is then collected via View Payments.`
+    );
+    if (!confirmed) return;
+    try {
+      setPlanBusy(true);
+      setPlanMsg('');
+      const out = await api(`/api/long-term/plans/${plan.id}/close-cycle`, { method: 'POST', body: JSON.stringify({}) }, token);
+      const totals = out?.agreementTotals;
+      setPlanMsg(
+        `Cycle ${out?.cycle?.cycleNumber || ''} billed: $${Number(out?.cycle?.amount || 0).toFixed(2)}${totals ? ` · agreement now $${Number(totals.total || 0).toFixed(2)} (subtotal $${Number(totals.subtotal || 0).toFixed(2)} + taxes $${Number(totals.taxes || 0).toFixed(2)})` : ''}`
+      );
+      await loadPlan();
+    } catch (e) {
+      setPlanMsg(e?.message || 'Unable to bill next cycle');
+    } finally {
+      setPlanBusy(false);
+    }
+  };
+
+  const markCyclePaid = async (cycleId) => {
+    try {
+      setPlanBusy(true);
+      setPlanMsg('');
+      await api(`/api/long-term/cycles/${cycleId}/mark-paid`, { method: 'POST', body: JSON.stringify({}) }, token);
+      setPlanMsg('Cycle marked paid');
+      await loadPlan();
+    } catch (e) {
+      setPlanMsg(e?.message || 'Unable to mark cycle paid');
+    } finally {
+      setPlanBusy(false);
+    }
+  };
+
+  const endAtCycleClose = () => {
+    const confirmed = window.confirm('End this plan at cycle close? Auto-renew stops and no further cycles will be billed. The current cycle stays as billed.');
+    if (!confirmed) return;
+    patchPlan({ status: 'ENDED' }, 'Plan ended — no further cycles will bill');
+  };
+
+  return (
+    <div className="glass card" style={{ marginTop: 12, padding: 10 }}>
+      <div className="row-between" style={{ marginBottom: 8 }}>
+        <div style={{ fontWeight: 700, display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+          Long-Term Plan
+          <LongTermPill kind="lt">Long-Term</LongTermPill>
+          <LongTermPill kind={String(plan.status || 'ACTIVE')}>{plan.status || 'ACTIVE'}</LongTermPill>
+        </div>
+        <div className="label" style={{ textTransform: 'none', letterSpacing: 0 }}>
+          {plan.cycleLengthDays} days · {money(plan.cycleRate)}
+        </div>
+      </div>
+      {planMsg ? <p className="label" style={{ textTransform: 'none', letterSpacing: 0 }}>{planMsg}</p> : null}
+      <div className="grid2" style={{ marginBottom: 10 }}>
+        <div><span className="label">Cycle Terms</span><div>{plan.cycleLengthDays} days · {money(plan.cycleRate)}</div></div>
+        <div><span className="label">Next Bill</span><div>{plan.nextCycleStartsAt ? new Date(plan.nextCycleStartsAt).toLocaleString() : '-'}</div></div>
+        <div><span className="label">Included Miles / Cycle</span><div>{plan.includedMilesPerCycle != null ? Number(plan.includedMilesPerCycle).toLocaleString() : 'Unlimited'}{plan.overagePerMile != null && Number(plan.overagePerMile) > 0 ? ` · $${Number(plan.overagePerMile).toFixed(2)}/mi over` : ''}</div></div>
+        <div><span className="label">Auto-Renew</span><div>{plan.autoRenew ? 'On — renews every cycle' : 'Off — manual renewal'}</div></div>
+      </div>
+      <div className="inline-actions" style={{ marginBottom: 10 }}>
+        <button type="button" onClick={billNextCycle} disabled={planBusy || plan.status !== 'ACTIVE'} title={plan.status !== 'ACTIVE' ? `Plan is ${plan.status} — reactivate before billing` : 'Post the next Monthly Cycle charge to the agreement'}>
+          {planBusy ? 'Working…' : 'Bill Next Cycle'}
+        </button>
+        <button type="button" className="button-subtle" onClick={() => patchPlan({ autoRenew: !plan.autoRenew }, plan.autoRenew ? 'Auto-renew paused' : 'Auto-renew resumed')} disabled={planBusy || plan.status === 'ENDED'}>
+          {plan.autoRenew ? 'Pause Auto-Renew' : 'Resume Auto-Renew'}
+        </button>
+        {plan.status !== 'ENDED' ? (
+          <button type="button" className="button-subtle" style={{ color: '#a32d2d', borderColor: 'rgba(163,45,45,.3)' }} onClick={endAtCycleClose} disabled={planBusy}>
+            End At Cycle Close
+          </button>
+        ) : null}
+        {plan.status === 'PAUSED' ? (
+          <button type="button" className="button-subtle" onClick={() => patchPlan({ status: 'ACTIVE' }, 'Plan reactivated')} disabled={planBusy}>
+            Reactivate Plan
+          </button>
+        ) : null}
+      </div>
+      <div className="label" style={{ marginBottom: 4 }}>Billing Cycles</div>
+      {cycles.length ? (
+        <table>
+          <thead><tr><th>#</th><th>Period</th><th>Amount</th><th>Status</th><th></th></tr></thead>
+          <tbody>
+            {cycles.map((c) => (
+              <tr key={c.id}>
+                <td>{c.cycleNumber}</td>
+                <td>
+                  {c.periodStart ? new Date(c.periodStart).toLocaleDateString() : '-'}
+                  {' – '}
+                  {c.periodEnd ? new Date(c.periodEnd).toLocaleDateString() : '-'}
+                </td>
+                <td>{money(c.amount)}</td>
+                <td><LongTermPill kind={String(c.status || 'DUE')}>{c.status || 'DUE'}</LongTermPill></td>
+                <td>
+                  {c.status === 'DUE' ? (
+                    <button type="button" className="button-subtle" onClick={() => markCyclePaid(c.id)} disabled={planBusy} title="Bookkeeping flag — record the actual payment via View Payments">
+                      Mark Paid
+                    </button>
+                  ) : null}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      ) : (
+        <div className="surface-note">No billing cycles yet — cycle 1 is created when the plan is attached.</div>
+      )}
+    </div>
+  );
+}
+
 function ReservationDetailInner({ token, me, logout }) {
   const { id } = useParams();
   const router = useRouter();
@@ -1026,6 +1205,10 @@ function ReservationDetailInner({ token, me, logout }) {
   const canMarkDocsReviewed = precheckinStatus.hasSubmitted || precheckinStatus.isChecklistComplete;
   const readyNeedsOverride = !precheckinStatus.isChecklistComplete;
   const isLoanerWorkflow = String(row?.workflowMode || '').toUpperCase() === 'DEALERSHIP_LOANER';
+  // Loaner reservations have a null rentalAgreement (they use loaner-agreements),
+  // so the generic rentals wizard dead-ends. Route them to the dedicated loaner flow.
+  const checkinHref = isLoanerWorkflow ? `/loaner/checkin/${id}` : `/reservations/${id}/checkin-wizard`;
+  const checkoutHref = isLoanerWorkflow ? `/loaner/checkout/${id}` : `/reservations/${id}/checkout-wizard-v2`;
   const loanerPacketComplete = useMemo(() => {
     return !!(
       loanerPacketForm.driverLicenseChecked &&
@@ -1862,8 +2045,8 @@ token
             </div>
           </div>
           <div className="app-banner-list">
-            <button type="button" className="button-subtle" onClick={() => router.push(`/reservations/${id}/checkout-wizard-v2`)}>Start Check-out</button>
-            <button type="button" className="button-subtle" onClick={() => router.push(`/reservations/${id}/checkin-wizard`)}>Start Check-in</button>
+            <button type="button" className="button-subtle" onClick={() => router.push(checkoutHref)}>Start Check-out</button>
+            <button type="button" className="button-subtle" onClick={() => router.push(checkinHref)}>Start Check-in</button>
             {row?.vehicleId && row?.rentalAgreement?.id && String(row?.status || '').toUpperCase() === 'CHECKED_OUT' ? (
               <button type="button" className="button-subtle" onClick={() => router.push(`/reservations/${id}/swap`)}>Swap Vehicle</button>
             ) : null}
@@ -2132,6 +2315,10 @@ token
             </div>
           ) : null}
 
+          {/* Long-Term Plan — renders nothing unless a LongTermPlan is attached
+              (explicit Monthly opt-in at creation). */}
+          <LongTermPlanPanel reservationId={id} token={token} />
+
           <div className="glass card" style={{ marginTop: 12, padding: 10 }}>
             <div className="row-between" style={{ marginBottom: 8 }}>
               <div style={{ fontWeight: 700 }}>Pre-check-in Status</div>
@@ -2319,8 +2506,8 @@ token
               <section className="ios-action-card">
                 <div className="ios-action-head">Operations</div>
                 <div className="ios-action-list">
-                  <button className="ios-action-btn" onClick={() => router.push(`/reservations/${id}/checkout-wizard-v2`)}>Start Check-out</button>
-                  <button className="ios-action-btn" onClick={() => router.push(`/reservations/${id}/checkin-wizard`)}>Start Check-in</button>
+                  <button className="ios-action-btn" onClick={() => router.push(checkoutHref)}>Start Check-out</button>
+                  <button className="ios-action-btn" onClick={() => router.push(checkinHref)}>Start Check-in</button>
                   <button className="ios-action-btn" onClick={() => router.push(`/reservations/${id}/ops-view?section=checkout`)}>View Check-out</button>
                   <button className="ios-action-btn" onClick={() => router.push(`/reservations/${id}/ops-view?section=checkin`)}>View Check-in</button>
                   <button className="ios-action-btn" onClick={() => setStatus('NO_SHOW')}>Mark No Show</button>

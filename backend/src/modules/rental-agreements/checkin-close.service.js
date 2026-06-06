@@ -73,7 +73,14 @@ export async function closeAgreementWithCheckinFees(
           }
         }
       },
-      inspections: true
+      // Perf (2026-06-05): this function never reads agreement.inspections,
+      // but `inspections: true` was dragging every inspection row INCLUDING
+      // the multi-MB base64 photosJson blobs into memory on every checkin
+      // close. Keep the relation shape (in case of future use) but select
+      // only slim identity fields — never photosJson / photoStorageRefs.
+      inspections: {
+        select: { id: true, phase: true, capturedAt: true, actorUserId: true }
+      }
     }
   });
 

@@ -421,25 +421,41 @@ function Inner({ token, me, logout }) {
     }
   }, [id, paymentCount, unpaid]);
 
+  // beta.116: el auto-reconcile contra Authorize.Net queda LIMITADO.
+  // Antes: hasta 12 intentos cada 15s para CUALQUIER reserva con balance,
+  // reseteado en cada visita a la página -> loops de 400 en los logs de prod
+  // (12x en 3 min reportado por el log-monitor). Ahora:
+  //  - Solo reservas de website (WEB-...), que es donde el pago llega async.
+  //  - Backoff exponencial 15s -> 30s -> 60s -> 120s (cap), max 6 intentos.
+  //  - El boton manual "Reconcile" sigue disponible para todos los canales.
+  const AUTO_RECONCILE_MAX_ATTEMPTS = 6;
+  const isWebReservation = String(row?.reservationNumber || '').toUpperCase().startsWith('WEB-');
+
   useEffect(() => {
     if (!id || unpaid <= 0 || actionBusy) return undefined;
-    if (autoReconcileAttemptsRef.current >= 12) return undefined;
+    if (!isWebReservation) return undefined;
+    if (autoReconcileAttemptsRef.current >= AUTO_RECONCILE_MAX_ATTEMPTS) return undefined;
 
     const runAutoReconcile = async () => {
       autoReconcileAttemptsRef.current += 1;
       const reconciled = await silentReconcileAuthNetPayment();
       if (reconciled) {
-        autoReconcileAttemptsRef.current = 12;
+        autoReconcileAttemptsRef.current = AUTO_RECONCILE_MAX_ATTEMPTS;
       }
     };
+
+    const attempt = autoReconcileAttemptsRef.current;
+    const delayMs = attempt === 0
+      ? 1200
+      : Math.min(15000 * Math.pow(2, attempt - 1), 120000);
 
     const timer = window.setTimeout(() => {
       if (document.visibilityState === 'hidden') return;
       runAutoReconcile().catch(() => {});
-    }, autoReconcileAttemptsRef.current === 0 ? 1200 : 15000);
+    }, delayMs);
 
     return () => window.clearTimeout(timer);
-  }, [id, unpaid, actionBusy, paymentCount]);
+  }, [id, unpaid, actionBusy, paymentCount, isWebReservation]);
 
   return (
     <AppShell me={me} logout={logout}>
