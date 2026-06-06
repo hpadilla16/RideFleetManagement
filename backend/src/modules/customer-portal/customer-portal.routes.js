@@ -952,7 +952,11 @@ function serializeCustomerInfoReservation(reservation) {
 function paidFromStructuredPayments(payments) {
   const rows = Array.isArray(payments) ? payments : [];
   return Number(rows
+    // 2026-06-06: count REAL captured money only. Exclude VOID, and exclude
+    // AUTH_HOLD (security-deposit authorizations are not settled funds) so the
+    // portal balance / pay-link reflect the true amount owed.
     .filter((p) => String(p?.status || '').toUpperCase() !== 'VOID')
+    .filter((p) => String(p?.method || '').toUpperCase() !== 'AUTH_HOLD')
     .reduce((sum, p) => sum + Number(p?.amount || 0), 0)
     .toFixed(2));
 }

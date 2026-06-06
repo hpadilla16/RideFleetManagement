@@ -155,7 +155,13 @@ function Inner({ token, me, logout }) {
     const fromRow = Number(deriveTotalFromReservationRow(row).toFixed(2));
     return Number(Math.max(totalFromQuery, fromPricing, fromRow).toFixed(2));
   }, [row, pricing?.totals?.total, totalFromQuery]);
-  const paid = useMemo(() => Number(payments.reduce((s, p) => s + Number(p.amount || 0), 0).toFixed(2)), [payments]);
+  // 2026-06-06: "Collected" counts REAL captured money only. AUTH_HOLD is a
+  // security-deposit authorization (not settled funds) — excluded from paid so
+  // the snapshot/"Paid In Full" badge doesn't mask a real unpaid balance. Holds
+  // are still listed separately in the payments table below.
+  const paid = useMemo(() => Number(payments
+    .filter((p) => String(p.method || '').toUpperCase() !== 'AUTH_HOLD')
+    .reduce((s, p) => s + Number(p.amount || 0), 0).toFixed(2)), [payments]);
   const unpaid = useMemo(() => Math.max(0, Number((total - paid).toFixed(2))), [total, paid]);
   const paymentCount = payments.length;
   const dueNowLabel = unpaid > 0 ? 'Payment Still Needed' : 'Paid In Full';

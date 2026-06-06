@@ -2309,8 +2309,11 @@ export const rentalAgreementsService = {
     await syncAgreementAdditionalDrivers(agreement.id, reservation);
 
     // Import any customer payments made before agreement creation
+    // 2026-06-06 Option B: exclude AUTH_HOLD deposit authorizations from paid.
     const prePayments = structuredReservationPayments(reservation);
-    const prePaidTotal = prePayments.reduce((sum, p) => sum + Number(p.amount || 0), 0);
+    const prePaidTotal = prePayments
+      .filter((p) => String(p.method || '').toUpperCase() !== 'AUTH_HOLD')
+      .reduce((sum, p) => sum + Number(p.amount || 0), 0);
 
     const days = rentalDays(reservation.pickupAt, reservation.returnAt);
     const dailyRate = Number(reservation?.pricingSnapshot?.dailyRate ?? reservation.dailyRate ?? 0);

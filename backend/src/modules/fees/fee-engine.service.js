@@ -511,8 +511,10 @@ async function recomputeAgreementTotals(rentalAgreementId) {
   const total = round2(subtotal + taxes + fees);
 
   // Get currently paid amount
+  // 2026-06-06 Option B: real captured money only — AUTH_HOLD deposit
+  // authorizations are not settled funds, excluded from paidAmount/balance.
   const payments = await prisma.rentalAgreementPayment.findMany({
-    where: { rentalAgreementId, status: 'PAID' },
+    where: { rentalAgreementId, status: 'PAID', method: { not: 'AUTH_HOLD' } },
     select: { amount: true }
   });
   const paidAmount = round2(payments.reduce((s, p) => s + Number(p.amount || 0), 0));

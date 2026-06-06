@@ -453,7 +453,16 @@ function ActiveView({ data, branding }) {
   const returnLocation = row?.returnLocation;
   const status = String(row?.status || 'NEW').toUpperCase();
   const agreementTotal = Number(row?.rentalAgreement?.total || row?.estimatedTotal || 0);
-  const paidTotal = (row?.payments || []).concat(row?.rentalAgreement?.payments || []).reduce((sum, p) => sum + Number(p?.amount || 0), 0);
+  // 2026-06-06: dedupe the two payment ledgers (a mirrored payment lives in
+  // BOTH reservation.payments and rentalAgreement.payments — concat double-
+  // counted it), and exclude AUTH_HOLD deposit authorizations (not settled).
+  const resPays = (row?.payments || []);
+  const agrPays = (row?.rentalAgreement?.payments || []);
+  const linkedIds = new Set(resPays.map((p) => p?.rentalAgreementPaymentId).filter(Boolean));
+  const paidTotal = resPays
+    .concat(agrPays.filter((p) => !linkedIds.has(p?.id)))
+    .filter((p) => String(p?.method || '').toUpperCase() !== 'AUTH_HOLD')
+    .reduce((sum, p) => sum + Number(p?.amount || 0), 0);
   const balance = Number((agreementTotal - paidTotal).toFixed(2));
 
   const precheckinDone = !!row?.customerInfoCompletedAt;

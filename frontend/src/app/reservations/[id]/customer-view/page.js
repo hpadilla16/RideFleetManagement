@@ -195,7 +195,10 @@ export default function CustomerViewPage() {
   const status = String(row?.status || 'NEW').toUpperCase();
   const hasAgreement = !!row?.rentalAgreement?.id;
   const agreementTotal = Number(row?.rentalAgreement?.total || row?.estimatedTotal || 0);
-  const paidTotal = (row?.payments || []).reduce((sum, p) => sum + Number(p?.amount || 0), 0);
+  // 2026-06-06: exclude AUTH_HOLD deposit authorizations from paid (not settled).
+  const paidTotal = (row?.payments || [])
+    .filter((p) => String(p?.method || '').toUpperCase() !== 'AUTH_HOLD')
+    .reduce((sum, p) => sum + Number(p?.amount || 0), 0);
   const balance = Number((agreementTotal - paidTotal).toFixed(2));
 
   const precheckinDone = !!row?.customerInfoCompletedAt;
