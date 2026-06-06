@@ -451,7 +451,7 @@ export function PendingFranchiseImportsTray({ token, me, isSuper, activeTenantId
       </button>
 
       {expanded ? (
-        <div style={{ padding: '0 16px 16px', maxWidth: '100%' }}>
+        <div style={{ padding: '0 16px 16px', maxWidth: '100%', minWidth: 0 }}>
           {msg ? (
             <div style={{ padding: 8, background: '#ecfdf5', color: '#065f46', borderRadius: 4, marginBottom: 8 }}>{msg}</div>
           ) : null}

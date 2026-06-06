@@ -1215,10 +1215,48 @@ function isSecurityDepositCharge(row = {}) {
   return source === 'SECURITY_DEPOSIT' || name === 'SECURITY DEPOSIT';
 }
 
+// 2026-06-06 deposit-balance fix: ALL deposit charges (Deposit Due + Security
+// Deposit, both chargeType DEPOSIT) are excluded from agreement
+// subtotal/total/balance. The prior helper only caught SECURITY_DEPOSIT, so
+// "Deposit Due" leaked into total and inflated balance on 100+ agreements.
+function isDepositCharge(row = {}) {
+  const type = String(row?.chargeType || '').trim().toUpperCase();
+  const source = String(row?.source || '').trim().toUpperCase();
+  const name = String(row?.name || '').trim().toUpperCase();
+  return type === 'DEPOSIT'
+    || source === 'DEPOSIT_DUE'
+    || source === 'SECURITY_DEPOSIT'
+    || name === 'SECURITY DEPOSIT'
+    || name === 'DEPOSIT (DUE NOW)';
+}
+
+// 2026-06-06 Option B: agreement paidAmount counts REAL captured money only
+// (AUTH_HOLD deposit authorizations excluded), and balance = max(0, total -
+// paid) never goes negative. Canonical recompute used after payment mutations
+// and on re-sync, so paidAmount/balance self-heal regardless of the path.
+async function recomputeAgreementPaidAndBalance(client, agreementId) {
+  const agr = await client.rentalAgreement.findUnique({
+    where: { id: agreementId },
+    select: { total: true }
+  });
+  if (!agr) return null;
+  const rows = await client.rentalAgreementPayment.findMany({
+    where: { rentalAgreementId: agreementId, status: 'PAID', method: { not: 'AUTH_HOLD' } },
+    select: { amount: true }
+  });
+  const paidAmount = Number(rows.reduce((s, p) => s + Number(p.amount || 0), 0).toFixed(2));
+  const balance = Math.max(0, Number((Number(agr.total || 0) - paidAmount).toFixed(2)));
+  await client.rentalAgreement.update({
+    where: { id: agreementId },
+    data: { paidAmount, balance }
+  });
+  return { paidAmount, balance };
+}
+
 function structuredReservationTotals(rows = []) {
   const normalized = Array.isArray(rows) ? rows : [];
   const subtotal = Number(normalized
-    .filter((row) => String(row?.chargeType || '').toUpperCase() !== 'TAX' && !isSecurityDepositCharge(row))
+    .filter((row) => String(row?.chargeType || '').toUpperCase() !== 'TAX' && !isDepositCharge(row))
     .reduce((sum, row) => sum + Number(row?.total || 0), 0)
     .toFixed(2));
   const taxes = Number(normalized
@@ -1470,17 +1508,9 @@ async function importStructuredReservationPaymentsToAgreement(rentalAgreementId,
     }
   }
 
-  const agreement = await prisma.rentalAgreement.findUnique({
-    where: { id: rentalAgreementId },
-    select: { total: true, paidAmount: true }
-  });
-  const paidAmount = Number((Number(agreement?.paidAmount || 0) + importedPaid).toFixed(2));
-  const balance = Number((Number(agreement?.total || 0) - paidAmount).toFixed(2));
-  await prisma.rentalAgreement.update({
-    where: { id: rentalAgreementId },
-    data: { paidAmount, balance }
-  });
-
+  // 2026-06-06 Option B: recompute from real (non-AUTH_HOLD) payments so an
+  // imported deposit hold never inflates paidAmount / understates balance.
+  const { paidAmount, balance } = await recomputeAgreementPaidAndBalance(prisma, rentalAgreementId);
   return { importedCount: pending.length, paidAmount, balance };
 }
 
@@ -2162,7 +2192,8 @@ export const rentalAgreementsService = {
         const depositMeta = reservationDepositMeta(reservation);
         const depositAmount = depositMeta.requireDeposit ? Number(depositMeta.depositAmountDue || 0) : 0;
         if (depositAmount > 0) {
-          feesTotal += depositAmount;
+          // 2026-06-06 deposit-balance fix: push the row for the record but do
+          // NOT add it to feesTotal — deposits are excluded from total/balance.
           chargeRows.push({ rentalAgreementId: existing.id, name: 'Deposit Due', chargeType: 'DEPOSIT', quantity: 1, rate: depositAmount, total: depositAmount, taxable: false, selected: true, sortOrder: chargeRows.length, source: 'DEPOSIT_DUE' });
         }
 
@@ -2432,7 +2463,8 @@ export const rentalAgreementsService = {
     const depositMeta = reservationDepositMeta(reservation);
     const depositAmount = depositMeta.requireDeposit ? Number(depositMeta.depositAmountDue || 0) : 0;
     if (depositAmount > 0) {
-      feesTotal += depositAmount;
+      // 2026-06-06 deposit-balance fix: push the row for the record but do NOT
+      // add it to feesTotal — deposits are excluded from total/balance.
       chargeRows.push({
         rentalAgreementId: agreement.id,
         name: 'Deposit Due',
@@ -2806,8 +2838,14 @@ export const rentalAgreementsService = {
       return true;
     }).sort((a, b) => Number(new Date(b.paidAt || b.createdAt || 0)) - Number(new Date(a.paidAt || a.createdAt || 0)));
 
-    const paidAmountForPrint = Number(paymentsForPrint.reduce((s, p) => s + Number(p.amount || 0), 0).toFixed(2));
-    const amountDueForPrint = Number((Number(agreement?.total || 0) - paidAmountForPrint).toFixed(2));
+    // 2026-06-06 Option B: the printed "Amount Paid" counts REAL captured money
+    // only (AUTH_HOLD deposit authorizations excluded — they still appear as
+    // rows in the payments table for the record), and "Amount Due" never prints
+    // negative. Matches agreement.balance and the reservation page.
+    const paidAmountForPrint = Number(paymentsForPrint
+      .filter((p) => String(p.method || '').toUpperCase() !== 'AUTH_HOLD')
+      .reduce((s, p) => s + Number(p.amount || 0), 0).toFixed(2));
+    const amountDueForPrint = Math.max(0, Number((Number(agreement?.total || 0) - paidAmountForPrint).toFixed(2)));
 
     return { agreement, cfg, signatureIp, signatureTime, paymentsForPrint, paidAmountForPrint, amountDueForPrint };
   },
@@ -3319,7 +3357,7 @@ export const rentalAgreementsService = {
     const charges = await prisma.rentalAgreementCharge.findMany({ where: { rentalAgreementId: id, selected: true } });
 
     const subtotal = charges
-      .filter((c) => c.chargeType !== 'TAX' && !isSecurityDepositCharge(c))
+      .filter((c) => c.chargeType !== 'TAX' && !isDepositCharge(c))
       .reduce((sum, c) => sum + Number(c.total), 0);
     const taxes = charges
       .filter((c) => c.chargeType === 'TAX')
@@ -3468,10 +3506,6 @@ export const rentalAgreementsService = {
     const sign = entryType === 'REFUND' ? -1 : 1;
     const postedAmount = Number((amount * sign).toFixed(2));
 
-    const nextPaidRaw = Number(agreement.paidAmount || 0) + postedAmount;
-    const nextPaid = Math.max(0, Number(nextPaidRaw.toFixed(2)));
-    const nextBalance = Math.max(0, Number((Number(agreement.balance || 0) - postedAmount).toFixed(2)));
-
     await prisma.rentalAgreementPayment.create({
       data: {
         rentalAgreementId: id,
@@ -3483,7 +3517,10 @@ export const rentalAgreementsService = {
       }
     });
 
-    await prisma.rentalAgreement.update({ where: { id }, data: { paidAmount: nextPaid, balance: nextBalance } });
+    // 2026-06-06 Option B: recompute paidAmount/balance from REAL payments.
+    // An AUTH_HOLD manual entry (deposit hold) is recorded as a row but does
+    // NOT change paidAmount/balance; a REFUND posts as a negative-amount row.
+    const { balance: nextBalance } = await recomputeAgreementPaidAndBalance(prisma, id);
     await prisma.auditLog.create({ data: { reservationId: agreement.reservationId, actorUserId: actorUserId || null, action: 'UPDATE', reason: `Manual ${entryType.toLowerCase()} added: ${postedAmount.toFixed(2)}` } });
 
     // Settle-on-payment: if this clears the balance on a CHECKED_IN_UNPAID
@@ -4051,12 +4088,9 @@ export const rentalAgreementsService = {
         where: { id: created.id },
         data: { rentalAgreementPaymentId: mirror.id }
       });
-      const paidAmount = Number((Number(agreement.paidAmount || 0) + amount).toFixed(2));
-      const balance = Math.max(0, Number((Number(agreement.total || 0) - paidAmount).toFixed(2)));
-      await prisma.rentalAgreement.update({
-        where: { id: agreement.id },
-        data: { paidAmount, balance }
-      });
+      // 2026-06-06 Option B: recompute paidAmount/balance from real (non-
+      // AUTH_HOLD) payment rows instead of incrementing the stored field.
+      await recomputeAgreementPaidAndBalance(prisma, agreement.id);
     } catch {}
 
     try {
@@ -4425,15 +4459,9 @@ export const rentalAgreementsService = {
       data: { rentalAgreementPaymentId: agreementRefund.id }
     });
 
-    const nextPaidAmount = Math.max(0, Number((Number(agreement.paidAmount || 0) - refundAmount).toFixed(2)));
-    const nextBalance = Math.max(0, Number((Number(agreement.total || 0) - nextPaidAmount).toFixed(2)));
-    await prisma.rentalAgreement.update({
-      where: { id: agreement.id },
-      data: {
-        paidAmount: nextPaidAmount,
-        balance: nextBalance
-      }
-    });
+    // 2026-06-06 Option B: recompute from real (non-AUTH_HOLD) payment rows;
+    // the negative refund row created above is included in the sum.
+    const { balance: nextBalance } = await recomputeAgreementPaidAndBalance(prisma, agreement.id);
 
     await prisma.auditLog.create({
       data: {

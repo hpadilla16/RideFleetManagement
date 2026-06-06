@@ -457,7 +457,7 @@ async function applyManualPayment({ rentalAgreementId, payment, actorUserId }) {
     ? `Receipt: ${payment.receiptUrl}`
     : null;
 
-  await prisma.rentalAgreementPayment.create({
+  const agreementPayment = await prisma.rentalAgreementPayment.create({
     data: {
       rentalAgreementId,
       method,
@@ -468,9 +468,43 @@ async function applyManualPayment({ rentalAgreementId, payment, actorUserId }) {
     }
   });
 
+  // 2026-06-06: mirror the manual check-in charge into ReservationPayment so it
+  // shows in the View Payments panel (which reads reservation.payments). Without
+  // this, a payment collected during check-in posted to the agreement ledger
+  // only and was invisible in View Payments (and missing from the reservation
+  // page's paid total). Linked via rentalAgreementPaymentId so the two ledgers
+  // stay deduped/consistent. Non-fatal: a mirror failure must not break check-in.
+  try {
+    const agr = await prisma.rentalAgreement.findUnique({
+      where: { id: rentalAgreementId },
+      select: { reservationId: true }
+    });
+    if (agr?.reservationId) {
+      await prisma.reservationPayment.create({
+        data: {
+          reservationId: agr.reservationId,
+          method,
+          amount,
+          reference,
+          status: 'PAID',
+          paidAt: new Date(),
+          origin: 'OTC',
+          notes,
+          rentalAgreementPaymentId: agreementPayment.id
+        }
+      });
+    }
+  } catch (e) {
+    logger.warn('[checkin-close] failed to mirror manual payment to ReservationPayment', {
+      rentalAgreementId, message: e?.message || String(e)
+    });
+  }
+
   // Recompute paid amount + balance on the agreement
+  // 2026-06-06 Option B: count REAL captured money only — AUTH_HOLD deposit
+  // authorizations are excluded from paidAmount / balance.
   const allPayments = await prisma.rentalAgreementPayment.findMany({
-    where: { rentalAgreementId, status: 'PAID' },
+    where: { rentalAgreementId, status: 'PAID', method: { not: 'AUTH_HOLD' } },
     select: { amount: true }
   });
   const totalPaid = allPayments.reduce((s, p) => s + Number(p.amount || 0), 0);

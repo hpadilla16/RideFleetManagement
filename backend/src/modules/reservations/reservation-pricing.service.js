@@ -115,19 +115,54 @@ function isSecurityDepositCharge(row = {}) {
   return source === 'SECURITY_DEPOSIT' || name === 'SECURITY DEPOSIT';
 }
 
+// 2026-06-06 deposit-balance fix: ALL deposit charges (Deposit Due +
+// Security Deposit — both chargeType DEPOSIT) must be EXCLUDED from agreement
+// subtotal/total/balance, matching the reservation page's "Unpaid Balance".
+// Deposits are held/collected separately; they are not part of the rental
+// amount owed. The earlier assumption (below) that an AUTH_HOLD payment would
+// offset the deposit in paidAmount did NOT hold in practice — holds are not
+// captured as agreement payments — which inflated balance on 100+ agreements.
+function isDepositCharge(row = {}) {
+  const type = String(row?.chargeType || '').trim().toUpperCase();
+  const source = String(row?.source || '').trim().toUpperCase();
+  const name = String(row?.name || '').trim().toUpperCase();
+  return type === 'DEPOSIT'
+    || source === 'DEPOSIT_DUE'
+    || source === 'SECURITY_DEPOSIT'
+    || name === 'SECURITY DEPOSIT'
+    || name === 'DEPOSIT (DUE NOW)';
+}
+
+// 2026-06-06 Option B: agreement paidAmount counts REAL captured money only
+// (AUTH_HOLD deposit authorizations excluded); balance = max(0, total - paid),
+// never negative. Canonical recompute used after payment mutations / re-sync.
+async function recomputeAgreementPaidAndBalance(client, agreementId) {
+  const agr = await client.rentalAgreement.findUnique({
+    where: { id: agreementId },
+    select: { total: true }
+  });
+  if (!agr) return null;
+  const rows = await client.rentalAgreementPayment.findMany({
+    where: { rentalAgreementId: agreementId, status: 'PAID', method: { not: 'AUTH_HOLD' } },
+    select: { amount: true }
+  });
+  const paidAmount = Number(rows.reduce((s, p) => s + toNumber(p?.amount), 0).toFixed(2));
+  const balance = Math.max(0, Number((toNumber(agr.total) - paidAmount).toFixed(2)));
+  await client.rentalAgreement.update({
+    where: { id: agreementId },
+    data: { paidAmount, balance }
+  });
+  return { paidAmount, balance };
+}
+
 function summarizeChargeTotals(charges = []) {
   const rows = Array.isArray(charges) ? charges : [];
-  // BUG-FIX 2026-05-19 late night (Pillar 2 AUTH_HOLD): include security
-  // deposit in subtotal/total so agreement.total reflects the full charge
-  // (rental + deposit). AUTH_HOLD payments count against paidAmount, so
-  // agreement.balance = total - paidAmount correctly excludes the held
-  // amount. Previously this function excluded deposit and broke the print
-  // template after a sync ran post-AUTH_HOLD (total dropped to $39 while
-  // paidAmount stayed $250 → balance went negative).
-  // The reservation page UI excludes deposit from its own "Unpaid Balance"
-  // display via displayChargeRows filtering — that path is independent.
+  // 2026-06-06: subtotal/total EXCLUDE deposit charges (see isDepositCharge).
+  // balance = total - paidAmount is then rental-only and matches the UI.
+  // (Superseded the 2026-05-19 "include deposit so AUTH_HOLD offsets it"
+  // approach, which left deposits stuck in balance when no hold was captured.)
   const subtotal = Number(rows
-    .filter((r) => String(r?.chargeType || '').toUpperCase() !== 'TAX')
+    .filter((r) => String(r?.chargeType || '').toUpperCase() !== 'TAX' && !isDepositCharge(r))
     .reduce((sum, r) => sum + toNumber(r?.total), 0)
     .toFixed(2));
   const taxes = Number(rows
@@ -202,6 +237,11 @@ async function syncAgreementCharges(reservationId, scope = {}) {
     const src = String(c.source || '').toUpperCase();
     if (type === 'TAX') {
       recTaxes += t;
+    } else if (isDepositCharge(c)) {
+      // 2026-06-06 deposit-balance fix: deposits are NOT part of the rental
+      // total/balance (held/collected separately). Keep the charge row for
+      // the record but exclude it from subtotal so balance = total - paid.
+      continue;
     } else if (src.startsWith('FEE_ENGINE')) {
       recFees += t;
     } else {
@@ -212,12 +252,19 @@ async function syncAgreementCharges(reservationId, scope = {}) {
   const taxes = Number(recTaxes.toFixed(2));
   const fees = Number(recFees.toFixed(2));
   const total = Number((subtotal + taxes + fees).toFixed(2));
-  const paidAmount = toNumber(agreement.paidAmount);
-  const balance = Number((total - paidAmount).toFixed(2));
+  // 2026-06-06 Option B: paidAmount = real (non-AUTH_HOLD) payments only, and
+  // balance is clamped to >= 0. Deposit holds no longer offset the (now
+  // deposit-free) total, so they must be excluded from paidAmount too.
+  const paidRows = await prisma.rentalAgreementPayment.findMany({
+    where: { rentalAgreementId: agreement.id, status: 'PAID', method: { not: 'AUTH_HOLD' } },
+    select: { amount: true }
+  });
+  const paidAmount = Number(paidRows.reduce((s, p) => s + toNumber(p?.amount), 0).toFixed(2));
+  const balance = Math.max(0, Number((total - paidAmount).toFixed(2)));
 
   await prisma.rentalAgreement.update({
     where: { id: agreement.id },
-    data: { subtotal, taxes, fees, total, balance }
+    data: { subtotal, taxes, fees, total, paidAmount, balance }
   });
 
   return { agreementId: agreement.id, subtotal, taxes, fees, total, balance };
@@ -240,12 +287,9 @@ async function maybeCreateAgreementPayment({ reservation, payment }) {
     }
   });
 
-  const paidAmount = Number((toNumber(agreement.paidAmount) + toNumber(payment.amount)).toFixed(2));
-  const balance = Number((toNumber(agreement.total) - paidAmount).toFixed(2));
-  await prisma.rentalAgreement.update({
-    where: { id: agreement.id },
-    data: { paidAmount, balance }
-  });
+  // 2026-06-06 Option B: recompute from real payments so an AUTH_HOLD deposit
+  // authorization is recorded but never counts toward paidAmount / balance.
+  await recomputeAgreementPaidAndBalance(prisma, agreement.id);
 
   return created;
 }
@@ -501,13 +545,9 @@ export const reservationPricingService = {
       }
     } catch {
       if (reservation?.rentalAgreement?.id) {
-        const paidAmount = Number((toNumber(reservation.rentalAgreement.paidAmount) + amount).toFixed(2));
-        const balance = Number((toNumber(reservation.rentalAgreement.total) - paidAmount).toFixed(2));
         try {
-          await prisma.rentalAgreement.update({
-            where: { id: reservation.rentalAgreement.id },
-            data: { paidAmount, balance }
-          });
+          // 2026-06-06 Option B: recompute from real (non-AUTH_HOLD) payments.
+          await recomputeAgreementPaidAndBalance(prisma, reservation.rentalAgreement.id);
         } catch (agreementErr) {
           logger.warn('reservation-pricing: rentalAgreement balance fallback update failed', {
             reservationId,

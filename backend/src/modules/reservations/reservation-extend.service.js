@@ -85,6 +85,19 @@ function isSecurityDepositCharge(row = {}) {
   return source === 'SECURITY_DEPOSIT' || name === 'SECURITY DEPOSIT';
 }
 
+// 2026-06-06 deposit-balance fix: ALL deposit charges (Deposit Due + Security
+// Deposit, both chargeType DEPOSIT) are excluded from agreement total/balance.
+function isDepositCharge(row = {}) {
+  const type = String(row?.chargeType || '').trim().toUpperCase();
+  const source = String(row?.source || '').trim().toUpperCase();
+  const name = String(row?.name || '').trim().toUpperCase();
+  return type === 'DEPOSIT'
+    || source === 'DEPOSIT_DUE'
+    || source === 'SECURITY_DEPOSIT'
+    || name === 'SECURITY DEPOSIT'
+    || name === 'DEPOSIT (DUE NOW)';
+}
+
 function isExtensionCharge(row = {}) {
   return String(row?.code || '').trim().toUpperCase() === 'EXTENSION_RATE';
 }
@@ -207,7 +220,7 @@ function snapshotCharge(row = {}) {
 function summarizeChargeTotals(charges = []) {
   const rows = Array.isArray(charges) ? charges : [];
   const subtotal = Number(rows
-    .filter((r) => !isTaxCharge(r) && !isSecurityDepositCharge(r))
+    .filter((r) => !isTaxCharge(r) && !isDepositCharge(r))
     .reduce((sum, r) => sum + toNumber(r?.total), 0)
     .toFixed(2));
   const taxes = Number(rows
