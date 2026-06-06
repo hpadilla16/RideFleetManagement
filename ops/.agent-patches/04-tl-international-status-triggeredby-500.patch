@@ -1,0 +1,13 @@
+diff --git a/backend/src/modules/integrations/tl-international/tl-international.routes.js b/backend/src/modules/integrations/tl-international/tl-international.routes.js
+index 30ad134..6deb85d 100644
+--- a/backend/src/modules/integrations/tl-international/tl-international.routes.js
++++ b/backend/src/modules/integrations/tl-international/tl-international.routes.js
+@@ -102,7 +102,7 @@ tlInternationalRouter.get('/status', asyncHandler(async (req, res) => {
+     prisma.externalSyncRun.findFirst({
+       where: { tenantId, sourceSystem: SOURCE_SYSTEM },
+       orderBy: { startedAt: 'desc' },
+-      select: { id: true, status: true, startedAt: true, finishedAt: true, triggeredBy: true },
++      select: { id: true, status: true, startedAt: true, finishedAt: true },
+     }),
+   ]);
+ 
