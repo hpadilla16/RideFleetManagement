@@ -102,7 +102,7 @@ tlInternationalRouter.get('/status', asyncHandler(async (req, res) => {
     prisma.externalSyncRun.findFirst({
       where: { tenantId, sourceSystem: SOURCE_SYSTEM },
       orderBy: { startedAt: 'desc' },
-      select: { id: true, status: true, startedAt: true, finishedAt: true, triggeredBy: true },
+      select: { id: true, status: true, startedAt: true, finishedAt: true },
     }),
   ]);
 

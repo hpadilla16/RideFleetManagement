@@ -571,7 +571,7 @@ function Step4ReviewCharges({ pricing, reservation, paymentRows, reservationId }
   const total = chargesSum > 0 ? chargesSum : (persistedTotal > 0 ? persistedTotal : fallbackTotal);
   const usingFallback = chargesSum === 0 && persistedTotal === 0 && total > 0;
 
-  const paid = (paymentRows || []).reduce((s, p) => s + Number(p?.amount || 0), 0);
+  const paid = (paymentRows || []).filter((p) => String(p?.method || '').toUpperCase() !== 'AUTH_HOLD').reduce((s, p) => s + Number(p?.amount || 0), 0);
   const balance = Math.max(0, Number((total - paid).toFixed(2)));
 
   return (

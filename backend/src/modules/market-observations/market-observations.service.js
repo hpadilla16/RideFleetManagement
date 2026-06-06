@@ -95,13 +95,23 @@ export async function getMarketSummary({ airport, scope }) {
   }
 
   // Build a map: sipp -> sorted vendor-min prices.
+  //
+  // PRICE FIELD: we use `effectiveDailyPrice` (= totalPrice / lorDays) as the
+  // primary number throughout. That's the apples-to-apples "real" daily cost
+  // including taxes + fees — which is what Rate Highway tracks and what
+  // pricing decisions should be made against. `dailyPrice` is the Expedia
+  // teaser ($11/day) which can be 50%+ below the real all-in cost.
+  // Fallback to dailyPrice if effectiveDailyPrice is null (legacy rows).
+  const priceOf = (o) =>
+    o.effectiveDailyPrice != null ? Number(o.effectiveDailyPrice) : Number(o.dailyPrice);
+
   const bySipp = new Map();
   for (const o of obs) {
     if (!bySipp.has(o.sipp)) bySipp.set(o.sipp, []);
     bySipp.get(o.sipp).push({
       vendor: o.vendor,
-      price: Number(o.dailyPrice),
-      effectivePrice: NUM(o.effectiveDailyPrice),
+      price: priceOf(o),
+      teaserPrice: NUM(o.dailyPrice),
       observedAt: o.observedAt,
     });
   }
@@ -209,17 +219,24 @@ export async function getMarketHistory({ airport, sipp, days = 14, scope }) {
     select: {
       vendor: true,
       dailyPrice: true,
+      effectiveDailyPrice: true,
       pickupDate: true,
       observedAt: true,
     },
   });
+
+  // See note in getMarketSummary — we use effectiveDailyPrice as the primary
+  // number (total / lor = real all-in daily cost), falling back to dailyPrice
+  // for legacy rows that didn't capture it.
+  const priceOf = (o) =>
+    o.effectiveDailyPrice != null ? Number(o.effectiveDailyPrice) : Number(o.dailyPrice);
 
   // Group by date (YYYY-MM-DD using observedAt) → array of {vendor, price}
   const byDate = new Map();
   for (const o of obs) {
     const day = o.observedAt.toISOString().slice(0, 10);
     if (!byDate.has(day)) byDate.set(day, []);
-    byDate.get(day).push({ vendor: o.vendor || '?', price: Number(o.dailyPrice) });
+    byDate.get(day).push({ vendor: o.vendor || '?', price: priceOf(o) });
   }
 
   // Compute median + percentiles per day.

@@ -116,6 +116,7 @@ export async function evaluateRule(rule) {
       id: true,
       vendor: true,
       dailyPrice: true,
+      effectiveDailyPrice: true,
       observedAt: true,
     },
   });
@@ -123,11 +124,18 @@ export async function evaluateRule(rule) {
     return { skipped: true, reason: 'no_recent_observations' };
   }
 
+  // Pricing computation uses effectiveDailyPrice (= totalPrice / lorDays) —
+  // the apples-to-apples all-in daily cost vs Rate Highway's model. The
+  // dailyPrice teaser is misleading because Expedia layers ~30-50% in taxes
+  // and fees on top. Falls back to dailyPrice for legacy rows.
+  const priceOf = (o) =>
+    o.effectiveDailyPrice != null ? Number(o.effectiveDailyPrice) : Number(o.dailyPrice);
+
   // Compute per-vendor min (one vendor may have multiple pickup-date rows).
   const perVendor = new Map();
   for (const o of obs) {
     const v = (o.vendor || '?').trim();
-    const price = Number(o.dailyPrice);
+    const price = priceOf(o);
     const prev = perVendor.get(v);
     if (prev == null || price < prev.price) perVendor.set(v, { vendor: v, price, observationId: o.id });
   }
