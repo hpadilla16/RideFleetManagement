@@ -1,0 +1,58 @@
+diff --git a/backend/src/lib/mailer.js b/backend/src/lib/mailer.js
+index 039e2d9..e48713e 100644
+--- a/backend/src/lib/mailer.js
++++ b/backend/src/lib/mailer.js
+@@ -55,6 +55,35 @@ function toBase64(content) {
+   return Buffer.from(String(content)).toString('base64');
+ }
+ 
++const _sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
++
++// Retry transient upstream failures (gateway 5xx / rate-limit / network) when
++// talking to an email provider. A single MailerSend edge 502 was surfacing as
++// a guest-signin 500 (Sentry JAVASCRIPT-NEXTJSBACKEND-1K); a couple of short
++// backoff retries absorb those without changing the success path.
++async function fetchWithRetry(url, options, attempts = 3) {
++  const transient = new Set([429, 502, 503, 504]);
++  let lastRes = null;
++  for (let i = 0; i < attempts; i += 1) {
++    try {
++      const res = await fetch(url, options);
++      if (transient.has(res.status) && i < attempts - 1) {
++        lastRes = res;
++        await _sleep(300 * (i + 1));
++        continue;
++      }
++      return res;
++    } catch (err) {
++      if (i < attempts - 1) {
++        await _sleep(300 * (i + 1));
++        continue;
++      }
++      throw err;
++    }
++  }
++  return lastRes;
++}
++
+ async function sendViaResend({ to, subject, text, html, attachments }) {
+   const apiKey = getEnvOrDotenv('RESEND_API_KEY');
+   const from = getEnvOrDotenv('RESEND_FROM') || getEnvOrDotenv('SMTP_FROM') || getEnvOrDotenv('SMTP_USER');
+@@ -85,7 +114,7 @@ async function sendViaResend({ to, subject, text, html, attachments }) {
+     }));
+   }
+ 
+-  const res = await fetch('https://api.resend.com/emails', {
++  const res = await fetchWithRetry('https://api.resend.com/emails', {
+     method: 'POST',
+     headers: {
+       Authorization: `Bearer ${apiKey}`,
+@@ -136,7 +165,7 @@ async function sendViaMailersend({ to, subject, text, html, attachments }) {
+     }));
+   }
+ 
+-  const res = await fetch('https://api.mailersend.com/v1/email', {
++  const res = await fetchWithRetry('https://api.mailersend.com/v1/email', {
+     method: 'POST',
+     headers: {
+       Authorization: `Bearer ${apiKey}`,

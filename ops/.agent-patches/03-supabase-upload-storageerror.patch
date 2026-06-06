@@ -1,0 +1,30 @@
+diff --git a/backend/src/modules/dealership-loaner/loaner-agreement.routes.js b/backend/src/modules/dealership-loaner/loaner-agreement.routes.js
+index b4eac69..b3a8ccc 100644
+--- a/backend/src/modules/dealership-loaner/loaner-agreement.routes.js
++++ b/backend/src/modules/dealership-loaner/loaner-agreement.routes.js
+@@ -6,6 +6,7 @@ import {
+   createPublicRateLimitGuard
+ } from '../../middleware/public-endpoint-guards.js';
+ import { loanerAgreementService } from './loaner-agreement.service.js';
++import { StorageError } from '../../lib/storage/index.js';
+ 
+ // ---------------------------------------------------------------------
+ // Loaner Agreement routes — the in-bay check-out / check-in wizard.
+@@ -44,6 +45,17 @@ function wrap(handler) {
+       if (e && Number.isInteger(e.statusCode)) {
+         return res.status(e.statusCode).json({ error: e.message });
+       }
++      // Storage misconfiguration / outage (e.g. SUPABASE_URL unset on the
++      // droplet) was bubbling to a raw 500 on photo upload
++      // (Sentry JAVASCRIPT-NEXTJSBACKEND-1J). Surface an actionable status.
++      if (e instanceof StorageError) {
++        const configIssue = /is not set/i.test(String(e.message || ''));
++        const status = configIssue ? 503 : (Number.isInteger(e.status) ? e.status : 500);
++        const message = configIssue
++          ? 'Photo storage is temporarily unavailable. Please try again shortly.'
++          : e.message;
++        return res.status(status).json({ error: message });
++      }
+       next(e);
+     }
+   };

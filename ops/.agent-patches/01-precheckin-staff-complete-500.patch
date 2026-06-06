@@ -1,0 +1,22 @@
+diff --git a/backend/src/modules/reservations/reservations.routes.js b/backend/src/modules/reservations/reservations.routes.js
+index 6f16da9..c42a93f 100644
+--- a/backend/src/modules/reservations/reservations.routes.js
++++ b/backend/src/modules/reservations/reservations.routes.js
+@@ -1223,7 +1223,16 @@ reservationsRouter.post('/:id/precheckin/staff-complete', async (req, res, next)
+     for (const key of fields) {
+       if (body[key] !== undefined) {
+         if (key === 'dateOfBirth' && body[key]) {
+-          customerUpdate[key] = new Date(body[key]);
++          const dob = new Date(body[key]);
++          // Guard against unparseable / out-of-range dates (e.g. a mistyped
++          // year like 41959) that JS Date accepts but Postgres/Prisma reject:
++          // those bubbled up as an unhandled PrismaClientUnknownRequestError 500
++          // (Sentry JAVASCRIPT-NEXTJSBACKEND-1M). Reject with a clean 400 instead.
++          const dobYear = dob.getUTCFullYear();
++          if (Number.isNaN(dob.getTime()) || dobYear < 1900 || dobYear > new Date().getUTCFullYear()) {
++            return res.status(400).json({ error: 'Invalid date of birth' });
++          }
++          customerUpdate[key] = dob;
+         } else {
+           customerUpdate[key] = body[key] || null;
+         }
