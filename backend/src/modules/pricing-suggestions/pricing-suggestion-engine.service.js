@@ -25,7 +25,15 @@ const SUGGESTION_TTL_MS = 48 * 60 * 60 * 1000; // 48h
  * Returns { rulesEvaluated, suggestionsPending, suggestionsAutoApplied, errors[] }.
  */
 export async function runPricingEngine({ rateIds = null, tenantId = null } = {}) {
-  const where = { active: true };
+  // Defense in depth: a tenant whose super-admin disabled marketIntelligence
+  // should NOT produce new suggestions, even if their PricingRule rows were
+  // left active=true by mistake. The cascade in tenants.service.js handles
+  // the normal path; this filter catches drift (e.g. flag was disabled
+  // before the cascade existed, or the cascade failed mid-transaction).
+  const where = {
+    active: true,
+    tenant: { marketIntelligenceEnabled: true }
+  };
   if (rateIds) where.rateId = { in: rateIds };
   if (tenantId) where.tenantId = tenantId;
 

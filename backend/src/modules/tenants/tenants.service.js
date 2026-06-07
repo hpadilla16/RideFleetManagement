@@ -140,7 +140,42 @@ export const tenantsService = {
     }
 
     try {
-      return await prisma.tenant.update({ where: { id }, data });
+      // Cascade-disable Market Intelligence when the super-admin flips the
+      // flag from on → off. Otherwise: (a) the droplet keeps scraping for
+      // active profiles and burns Browserbase minutes ($20/mo cap shared
+      // across the whole fleet), and (b) the suggestion engine keeps
+      // evaluating active PricingRule rows and writes orphan suggestions
+      // that nobody can see (the API is module-gated, but the worker isn't
+      // — that defensive gate is the second piece of beta.125 below).
+      //
+      // We do NOT auto-reactivate on the reverse transition (off → on).
+      // The tenant has to flip each MarketScrapeProfile / PricingRule back
+      // on themselves so they don't get surprised by old profiles waking up.
+      let shouldCascadeDisable = false;
+      if (patch.marketIntelligenceEnabled === false) {
+        const prior = await prisma.tenant.findUnique({
+          where: { id },
+          select: { marketIntelligenceEnabled: true }
+        });
+        if (prior?.marketIntelligenceEnabled === true) shouldCascadeDisable = true;
+      }
+
+      const updated = await prisma.tenant.update({ where: { id }, data });
+
+      if (shouldCascadeDisable) {
+        await prisma.$transaction([
+          prisma.marketScrapeProfile.updateMany({
+            where: { tenantId: id, active: true },
+            data: { active: false }
+          }),
+          prisma.pricingRule.updateMany({
+            where: { tenantId: id, active: true },
+            data: { active: false }
+          })
+        ]);
+      }
+
+      return updated;
     } catch (error) {
       mapTenantWriteError(error, 'Unable to update tenant');
     }
