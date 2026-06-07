@@ -12,6 +12,7 @@ export const MODULE_DEFINITIONS = [
   { key: 'issueCenter', label: 'Issue Center' },
   { key: 'loaner', label: 'Loaner Program' },
   { key: 'tolls', label: 'Tolls' },
+  { key: 'marketIntelligence', label: 'Market Intelligence' },
   { key: 'settings', label: 'Settings' },
   { key: 'security', label: 'Security' },
   { key: 'tenants', label: 'Tenants' }
