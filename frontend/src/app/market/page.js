@@ -101,6 +101,27 @@ function Dashboard({ token, me, logout }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [sortBy, setSortBy] = useState('biggest_move');
+  // Lightweight count of PENDING pricing suggestions for the topbar badge. We
+  // poll every 60s — the inbox itself polls at the same cadence, so the badge
+  // stays roughly in sync without an additional websocket.
+  const [pendingCount, setPendingCount] = useState(0);
+
+  useEffect(() => {
+    if (!token) return undefined;
+    let cancelled = false;
+    const refreshCount = async () => {
+      try {
+        const items = await api('/api/pricing-suggestions?status=PENDING', { bypassCache: true }, token);
+        if (cancelled) return;
+        setPendingCount(Array.isArray(items) ? items.length : 0);
+      } catch {
+        /* silent — badge degrades to 0 */
+      }
+    };
+    refreshCount();
+    const id = setInterval(refreshCount, 60_000);
+    return () => { cancelled = true; clearInterval(id); };
+  }, [token]);
 
   useEffect(() => {
     if (!token) return;
@@ -170,6 +191,8 @@ function Dashboard({ token, me, logout }) {
           updatedAt={summary?.updatedAt}
           rangeDays={rangeDays}
           onRangeChange={setRangeDays}
+          router={router}
+          pendingCount={pendingCount}
         />
         <Legend sortBy={sortBy} onSortChange={setSortBy} />
 
@@ -221,7 +244,7 @@ function Dashboard({ token, me, logout }) {
 // Top bar
 // ---------------------------------------------------------------------------
 
-function TopBar({ airport, updatedAt, rangeDays, onRangeChange }) {
+function TopBar({ airport, updatedAt, rangeDays, onRangeChange, router, pendingCount }) {
   return (
     <div style={{
       display: 'flex',
@@ -240,6 +263,22 @@ function TopBar({ airport, updatedAt, rangeDays, onRangeChange }) {
         </div>
       </div>
       <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+        {/* Quick links to the two sibling pages — scrape profile CRUD + suggestions
+            inbox — so the dashboard is the single entry point for the whole MI surface. */}
+        <button
+          type="button"
+          onClick={() => router.push('/suggestions')}
+          style={pendingCount > 0 ? topbarBtnActiveStyle : topbarBtnStyle}
+          title="Open the Pricing Suggestions inbox"
+        >
+          📬 Suggestions{pendingCount > 0 ? <span style={badgeStyle}>{pendingCount}</span> : null}
+        </button>
+        <button
+          type="button"
+          onClick={() => router.push('/market-intelligence')}
+          style={topbarBtnStyle}
+          title="Configure MarketScrapeProfiles + targetRate mappings"
+        >⚙️ Profiles</button>
         <select
           value={airport}
           // V1: only SJU is active. Selecting placeholder is a no-op.
@@ -268,6 +307,37 @@ function TopBar({ airport, updatedAt, rangeDays, onRangeChange }) {
     </div>
   );
 }
+
+// Style for the two new topbar action buttons (Profiles + Suggestions). Mirrors
+// the existing pill aesthetic but with a slightly heavier weight to read as
+// "quick action" rather than "filter".
+const topbarBtnStyle = {
+  background: '#1b1f29',
+  border: '1px solid #2a2f3d',
+  color: '#c8cfe0',
+  padding: '8px 14px',
+  borderRadius: 8,
+  fontSize: 13,
+  fontWeight: 600,
+  cursor: 'pointer',
+  display: 'inline-flex',
+  alignItems: 'center',
+  gap: 6
+};
+const topbarBtnActiveStyle = {
+  ...topbarBtnStyle,
+  background: '#1d4ed8',
+  borderColor: '#2563eb',
+  color: '#fff'
+};
+const badgeStyle = {
+  background: 'rgba(255,255,255,0.22)',
+  borderRadius: 10,
+  padding: '1px 7px',
+  fontSize: 11,
+  fontWeight: 700,
+  marginLeft: 6
+};
 
 function Legend({ sortBy, onSortChange }) {
   return (

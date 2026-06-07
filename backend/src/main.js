@@ -176,10 +176,10 @@ app.use('/api/additional-services', requireAuth, tenantRateLimit, requireModuleA
 app.use('/api/fees', requireAuth, tenantRateLimit, requireModuleAccess('settings'), requireRole('ADMIN', 'OPS'), feesRouter);
 app.use('/api/stop-sales', requireAuth, tenantRateLimit, requireModuleAccess('settings'), requireRole('ADMIN', 'OPS'), stopSalesRouter);
 app.use('/api/rates', requireAuth, tenantRateLimit, requireModuleAccess('settings'), requireRole('ADMIN', 'OPS'), ratesRouter);
-app.use('/api/market-scraper', requireAuth, tenantRateLimit, requireModuleAccess('settings'), requireRole('ADMIN', 'OPS'), marketScraperRouter);
-app.use('/api/market', requireAuth, tenantRateLimit, requireModuleAccess('settings'), requireRole('ADMIN', 'OPS'), marketObservationsRouter);
-app.use('/api/pricing-rules', requireAuth, tenantRateLimit, requireModuleAccess('settings'), requireRole('ADMIN', 'OPS'), pricingRulesRouter);
-app.use('/api/pricing-suggestions', requireAuth, tenantRateLimit, requireModuleAccess('settings'), requireRole('ADMIN', 'OPS'), pricingSuggestionsRouter);
+app.use('/api/market-scraper', requireAuth, tenantRateLimit, requireModuleAccess('marketIntelligence'), requireRole('ADMIN', 'OPS'), marketScraperRouter);
+app.use('/api/market', requireAuth, tenantRateLimit, requireModuleAccess('marketIntelligence'), requireRole('ADMIN', 'OPS'), marketObservationsRouter);
+app.use('/api/pricing-rules', requireAuth, tenantRateLimit, requireModuleAccess('marketIntelligence'), requireRole('ADMIN', 'OPS'), pricingRulesRouter);
+app.use('/api/pricing-suggestions', requireAuth, tenantRateLimit, requireModuleAccess('marketIntelligence'), requireRole('ADMIN', 'OPS'), pricingSuggestionsRouter);
 // Internal endpoint hit by the droplet cron after every successful scrape.
 // Auth is via BACKEND_INTERNAL_TOKEN shared secret, not user session.
 app.use('/api/internal/pricing-engine', pricingEngineInternalRouter);

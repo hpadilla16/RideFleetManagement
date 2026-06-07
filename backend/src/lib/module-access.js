@@ -16,6 +16,7 @@ export const MODULE_KEYS = [
   'issueCenter',
   'loaner',
   'tolls',
+  'marketIntelligence',
   'settings',
   'security',
   'tenants'
@@ -35,6 +36,7 @@ export const MODULE_LABELS = {
   issueCenter: 'Issue Center',
   loaner: 'Loaner Program',
   tolls: 'Tolls',
+  marketIntelligence: 'Market Intelligence',
   settings: 'Settings',
   security: 'Security',
   tenants: 'Tenants'
@@ -55,6 +57,7 @@ function hostRoleModuleMap() {
     issueCenter: false,
     loaner: false,
     tolls: false,
+    marketIntelligence: false,
     settings: false,
     security: false,
     tenants: false
