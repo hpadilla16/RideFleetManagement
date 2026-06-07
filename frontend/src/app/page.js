@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { AuthGate } from '../components/AuthGate';
 import { AppShell } from '../components/AppShell';
+import MarketIntelligenceCard from '../components/MarketIntelligenceCard';
 import { api } from '../lib/client';
 import { DEFAULT_TENANT_TIMEZONE } from '../lib/tenant-time';
 
@@ -720,10 +721,12 @@ function DashboardInner({ token, me, logout }) {
         </div>
       </section>
 
-      <section className="glass card-lg">
-        <h3>Sales Status</h3>
-        <SalesRevenueChart reservations={reservations} />
-      </section>
+      {/* Market Intelligence — between Pickups/Returns and Operations
+          Timeline. Per-tenant gated: hidden if the role doesn't have
+          marketIntelligence access OR the tenant flag is off. The component
+          itself returns null in those cases. Sales Status section was
+          removed 2026-06-07 — same data lives in the Reports module now. */}
+      <MarketIntelligenceCard me={me} token={token} />
 
       <section className="glass card-lg">
         <h3>Operations Timeline</h3>
