@@ -210,6 +210,14 @@ pricingSuggestionsRouter.post('/:id/apply', async (req, res, next) => {
         where: { id: item.rateId },
         data: { daily: item.suggestedPrice },
       }),
+      // Mirror Rate.daily into RateItem.daily — resolveForRental
+      // (rates.service.js:817) reads `item?.daily ?? chosen.daily`, so
+      // without this the manual approve would update a field the booking
+      // engine ignores. Same pattern as the engine service AUTO_APPLY tx.
+      prisma.rateItem.updateMany({
+        where: { rateId: item.rateId },
+        data: { daily: item.suggestedPrice },
+      }),
     ]);
     // Mirror of the engine cache-invalidation: clear the tenant's quote
     // caches so the new Rate.daily flows through to fresh search results.

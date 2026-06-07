@@ -264,6 +264,18 @@ export async function evaluateRule(rule) {
         where: { id: rule.rateId },
         data: { daily: suggestedPrice },
       }),
+      // RateItem.daily mirror — resolveForRental (rates.service.js:817)
+      // reads `item?.daily ?? chosen.daily`, so RateItem wins over Rate.
+      // After the 2026-06-07 switchover, every engine-controlled rate has
+      // exactly one RateItem (Rate↔VehicleType 1:1 in the engine path),
+      // so updateMany on rateId rewrites the operative price the booking
+      // engine actually quotes. Without this, AUTO_APPLY would silently
+      // no-op for booking quotes — see session-handoff 2026-06-07 for
+      // the bug that caused this code to be added.
+      prisma.rateItem.updateMany({
+        where: { rateId: rule.rateId },
+        data: { daily: suggestedPrice },
+      }),
     ]);
 
     // After Rate.daily changes, the booking-engine's quote caches
