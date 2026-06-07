@@ -173,6 +173,7 @@ export function defaultTenantModuleConfig(tenant = null) {
     issueCenter: true,
     loaner: !!tenant?.dealershipLoanerEnabled,
     tolls: !!tenant?.tollsEnabled,
+    marketIntelligence: !!tenant?.marketIntelligenceEnabled,
     settings: true,
     security: true,
     tenants: false
@@ -189,6 +190,7 @@ function normalizeTenantModuleConfig(raw = {}, tenant = null) {
     hostApp: !!parsed.hostApp && !!parsed.carSharing && !!tenant?.carSharingEnabled,
     loaner: !!parsed.loaner && !!tenant?.dealershipLoanerEnabled,
     tolls: !!parsed.tolls && !!tenant?.tollsEnabled,
+    marketIntelligence: !!parsed.marketIntelligence && !!tenant?.marketIntelligenceEnabled,
     tenants: false
   };
   return next;
@@ -204,11 +206,22 @@ function normalizeUserModuleConfig(raw = {}) {
 
 export async function getTenantModuleConfig(tenantId) {
   if (!tenantId) {
-    return normalizeTenantModuleConfig(normalizeBooleanMap(), { carSharingEnabled: true, dealershipLoanerEnabled: true, tollsEnabled: true });
+    return normalizeTenantModuleConfig(normalizeBooleanMap(), {
+      carSharingEnabled: true,
+      dealershipLoanerEnabled: true,
+      tollsEnabled: true,
+      marketIntelligenceEnabled: true
+    });
   }
   const tenant = await prisma.tenant.findUnique({
     where: { id: tenantId },
-    select: { id: true, carSharingEnabled: true, dealershipLoanerEnabled: true, tollsEnabled: true }
+    select: {
+      id: true,
+      carSharingEnabled: true,
+      dealershipLoanerEnabled: true,
+      tollsEnabled: true,
+      marketIntelligenceEnabled: true
+    }
   });
   if (!tenant) return defaultTenantModuleConfig(null);
   const row = await prisma.appSetting.findUnique({ where: { key: scopedSettingKey('moduleAccess', { tenantId }) } });

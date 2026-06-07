@@ -396,9 +396,15 @@ model Tenant {
   // Path D multi-tenancy fields (added 2026-05-17, see doc/multitenancy-hybrid-architecture.md)
   tier                    String   @default("STANDARD") // STANDARD | PREMIUM | ENTERPRISE
   schemaName              String   @default("public") // 'public' | 'tenant_<slug>'
-  carSharingEnabled       Boolean  @default(false)
-  dealershipLoanerEnabled Boolean  @default(false)
-  tollsEnabled            Boolean  @default(false)
+  carSharingEnabled         Boolean  @default(false)
+  dealershipLoanerEnabled   Boolean  @default(false)
+  tollsEnabled              Boolean  @default(false)
+  // Per-tenant entitlement for the Market Intelligence module
+  // (Expedia scraper + pricing rules + suggestions inbox). Opt-in,
+  // gated by super-admin from the /tenants page. When false the module
+  // is hidden from the nav and all /api/market* + /api/pricing-* routes
+  // 403 — see lib/module-access.js normalizeTenantModuleConfig.
+  marketIntelligenceEnabled Boolean  @default(false)
   platformFeeEnabled      Boolean  @default(true)
   platformFeePct          Decimal  @default(10) @db.Decimal(6, 3)
   platformFeeMin          Decimal  @default(7) @db.Decimal(10, 2)
