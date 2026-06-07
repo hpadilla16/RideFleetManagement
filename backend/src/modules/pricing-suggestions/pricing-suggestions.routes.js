@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import { prisma } from '../../lib/prisma.js';
+import { cache } from '../../lib/cache.js';
 import { scopeFor } from '../../lib/tenant-scope.js';
 import { pricingSuggestionEngine } from './pricing-suggestion-engine.service.js';
 
@@ -210,6 +211,11 @@ pricingSuggestionsRouter.post('/:id/apply', async (req, res, next) => {
         data: { daily: item.suggestedPrice },
       }),
     ]);
+    // Mirror of the engine cache-invalidation: clear the tenant's quote
+    // caches so the new Rate.daily flows through to fresh search results.
+    // See pricing-suggestion-engine.service.js for the same pattern.
+    cache.invalidate(`t:${item.tenantId}:booking:`);
+    cache.invalidate(`t:${item.tenantId}:public:`);
     res.json(updated);
   } catch (e) { handle(e, res, next); }
 });

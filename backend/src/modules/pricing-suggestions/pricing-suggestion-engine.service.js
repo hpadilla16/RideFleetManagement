@@ -1,4 +1,5 @@
 import { prisma } from '../../lib/prisma.js';
+import { cache } from '../../lib/cache.js';
 
 /**
  * Pricing Suggestion Engine
@@ -264,6 +265,23 @@ export async function evaluateRule(rule) {
         data: { daily: suggestedPrice },
       }),
     ]);
+
+    // After Rate.daily changes, the booking-engine's quote caches
+    // (`t:${tenantId}:booking:bootstrap:...` and
+    //  `t:${tenantId}:public:searchRental:...` — see
+    // booking-engine.service.js lines 1055 + 1266) hold stale prices for
+    // up to 5 minutes. Blanket-invalidate the tenant's cached namespaces
+    // so new quote requests hit Prisma fresh. Existing reservations are
+    // unaffected because their prices were snapshotted to
+    // `Reservation.dailyRate` + `ReservationPricingSnapshot` at booking
+    // and never re-read from `Rate.daily` (see audit 2026-06-07).
+    //
+    // PricingSuggestion is the audit trail for the change itself — no
+    // separate AuditLog needed (AuditLog requires reservationId which
+    // doesn't apply here).
+    cache.invalidate(`t:${rule.tenantId}:booking:`);
+    cache.invalidate(`t:${rule.tenantId}:public:`);
+
     return { skipped: false, autoApplied: true, suggestionId: suggestion.id, suggestedPrice, deltaPct };
   }
 
