@@ -64,7 +64,6 @@ export async function getMarketSummary({ airport, scope }) {
   }
 
   const profileIds = profiles.map((p) => p.id);
-  const targetRateIds = profiles.map((p) => p.targetRateId).filter(Boolean);
 
   // Last-24h observations for these profiles, only FOUND rows (drop UNMAPPED).
   const since = new Date(Date.now() - 24 * 60 * 60 * 1000);
@@ -85,13 +84,38 @@ export async function getMarketSummary({ airport, scope }) {
     },
   });
 
-  // Tenant's own Rate.daily values for the Y-O-U row, keyed by Rate.id.
-  let ownRates = [];
-  if (targetRateIds.length > 0) {
-    ownRates = await prisma.rate.findMany({
-      where: { id: { in: targetRateIds } },
-      select: { id: true, rateCode: true, daily: true, name: true },
+  // Build a SIPP → tenant's own Rate mapping.
+  //
+  // Multi-SIPP world: a tenant has one Rate per SIPP class, each with a
+  // PricingRule that carries `rule.sipp` (added in beta.127). The summary
+  // endpoint correlates "your price" for each SIPP through that link, NOT
+  // through the legacy `MarketScrapeProfile.targetRateId` which is null
+  // for tenants who scrape all SIPPs in a single profile.
+  //
+  // Filter Rates by (a) the active PricingRule's sipp + (b) the Rate's
+  // location matching the airport code. That way a tenant with rates in
+  // SJU + MCO returns the SJU rate when the dashboard asks for SJU.
+  const ownRatesBySipp = new Map();
+  if (scope.tenantId && scope.tenantId !== '__no_tenant__') {
+    const rules = await prisma.pricingRule.findMany({
+      where: {
+        tenantId: scope.tenantId,
+        sipp: { not: null },
+        active: true,
+        rate: {
+          location: { code: airport.toUpperCase() },
+        },
+      },
+      select: {
+        sipp: true,
+        rate: { select: { id: true, rateCode: true, daily: true, name: true } },
+      },
     });
+    for (const r of rules) {
+      if (r.sipp && r.rate && !ownRatesBySipp.has(r.sipp)) {
+        ownRatesBySipp.set(r.sipp, r.rate);
+      }
+    }
   }
 
   // Build a map: sipp -> sorted vendor-min prices.
@@ -136,14 +160,14 @@ export async function getMarketSummary({ airport, scope }) {
     const min = prices[0];
     const max = prices[prices.length - 1];
 
-    // We don't yet know which specific Rate to attribute this SIPP to. The
-    // first profile with a targetRate that covers this airport+sipp wins. If
-    // multiple profiles target the same Rate, they all point to the same row,
-    // so picking the first is fine for V1.
-    const yourRow =
-      ownRates.length > 0
-        ? { id: ownRates[0].id, code: ownRates[0].rateCode, daily: Number(ownRates[0].daily) }
-        : null;
+    // Look up the tenant's Rate for THIS specific SIPP via the
+    // PricingRule.sipp map built above. If none exists yet (tenant hasn't
+    // configured a rule for this class), `yourRate` is null and the
+    // dashboard shows "—" for that card.
+    const ownRate = ownRatesBySipp.get(sipp);
+    const yourRow = ownRate
+      ? { id: ownRate.id, code: ownRate.rateCode, daily: Number(ownRate.daily) }
+      : null;
 
     let yourRank = null;
     if (yourRow) {
