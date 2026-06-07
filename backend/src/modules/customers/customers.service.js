@@ -259,6 +259,10 @@ export const customersService = {
           ${searchPattern}::text IS NULL
           OR LOWER("firstName") LIKE ${searchPattern}
           OR LOWER("lastName") LIKE ${searchPattern}
+          -- 2026-06-06 (Ola 2.7): match the full "First Last" (and "Last First")
+          -- so "Hector Padilla" finds the customer, not just "Padilla".
+          OR LOWER(CONCAT(COALESCE("firstName", ''), ' ', COALESCE("lastName", ''))) LIKE ${searchPattern}
+          OR LOWER(CONCAT(COALESCE("lastName", ''), ' ', COALESCE("firstName", ''))) LIKE ${searchPattern}
           OR LOWER(COALESCE(email, '')) LIKE ${searchPattern}
           OR LOWER(phone) LIKE ${searchPattern}
         )

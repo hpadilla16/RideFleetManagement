@@ -2,6 +2,7 @@
 
 import Link from 'next/link';
 import { useEffect, useMemo, useState } from 'react';
+import { useRouter } from 'next/navigation';
 import { AuthGate } from '../../components/AuthGate';
 import { AppShell } from '../../components/AppShell';
 import { api, API_BASE } from '../../lib/client';
@@ -231,6 +232,7 @@ function LoanerProgramInner({ token, me, logout }) {
   const [exportingBilling, setExportingBilling] = useState(false);
   const [exportingStatement, setExportingStatement] = useState(false);
   const [printing, setPrinting] = useState(false);
+  const router = useRouter();
 
   const metrics = dashboard?.metrics || {
     openLoaners: 0,
@@ -530,9 +532,19 @@ function LoanerProgramInner({ token, me, logout }) {
           serviceVehicleYear: form.serviceVehicleYear ? Number(form.serviceVehicleYear) : null
         })
       }, token);
-      setMsg(`Loaner reservation ${payload?.reservationNumber || ''} created`);
       setForm(EMPTY_FORM);
       try { localStorage.removeItem(LOANER_INTAKE_FORM_KEY); } catch {}
+      // 2026-06-06 (loaner Ola 2.3): clear feedback + leave the form so the
+      // advisor knows it was created. Before, the form just blanked and looked
+      // like a failure → re-submits → duplicate loaners. Redirect straight into
+      // the check-out wizard for the new reservation; fall back to the dashboard
+      // card if the id is missing.
+      if (payload?.id) {
+        setMsg(`Loaner reservation ${payload?.reservationNumber || ''} created — opening check-out…`);
+        router.push(`/loaner/checkout/${payload.id}`);
+        return;
+      }
+      setMsg(`Loaner reservation ${payload?.reservationNumber || ''} created`);
       setSearch(payload?.reservationNumber || '');
       await load(payload?.reservationNumber || '');
     } catch (error) {

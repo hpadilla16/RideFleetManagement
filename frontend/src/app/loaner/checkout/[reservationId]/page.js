@@ -59,10 +59,26 @@ function LoanerCheckoutWizard({ token, me, logout }) {
   const [reservation, setReservation] = useState(null);
   const [agreement, setAgreement] = useState(null);
   const [vehicles, setVehicles] = useState([]);
-  const [step, setStep] = useState(0);
+  const [step, setStep] = useState(() => {
+    if (typeof window === 'undefined') return 0;
+    try {
+      const s = parseInt(window.localStorage.getItem(`loaner.checkout.step.${reservationId}`), 10);
+      return Number.isInteger(s) && s >= 0 && s <= 5 ? s : 0;
+    } catch { return 0; }
+  });
   const [done, setDone] = useState(false);
   const [remoteLink, setRemoteLink] = useState('');
   const [smsTo, setSmsTo] = useState('');
+  // 2026-06-06 (loaner Ola 2.1): persist the wizard step so a tablet reload
+  // resumes where the advisor left off (the field data already persisted; only
+  // the step pointer reset to 0). Cleared once the agreement is signed/done.
+  useEffect(() => {
+    if (!reservationId) return;
+    try {
+      if (done) window.localStorage.removeItem(`loaner.checkout.step.${reservationId}`);
+      else window.localStorage.setItem(`loaner.checkout.step.${reservationId}`, String(step));
+    } catch {}
+  }, [step, done, reservationId]);
 
   // Step 0 — customer & license
   const [form, setForm] = useState({

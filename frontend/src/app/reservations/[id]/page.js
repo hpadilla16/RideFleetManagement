@@ -677,6 +677,13 @@ function ReservationDetailInner({ token, me, logout }) {
     try {
       const body = { status };
       if (status === 'CANCELLED') {
+        // 2026-06-06 (Ola 2.8): block cancelling an active rental, and confirm
+        // first — before, a single click silently cancelled the reservation.
+        const current = String(row?.status || '').toUpperCase();
+        if (['CHECKED_OUT', 'CHECKED_IN', 'CHECKED_IN_UNPAID'].includes(current)) {
+          return setMsg('Cannot cancel a reservation that is already checked out / in — close it through check-in instead.');
+        }
+        if (!window.confirm('Cancel this reservation? This cannot be undone.')) return;
         const reason = window.prompt('Enter a reason for cancellation (required):');
         if (!reason || !reason.trim()) return setMsg('Cancellation requires a reason');
         body.cancellationReason = reason.trim();
@@ -2511,7 +2518,12 @@ token
                   <button className="ios-action-btn" onClick={() => router.push(`/reservations/${id}/ops-view?section=checkout`)}>View Check-out</button>
                   <button className="ios-action-btn" onClick={() => router.push(`/reservations/${id}/ops-view?section=checkin`)}>View Check-in</button>
                   <button className="ios-action-btn" onClick={() => setStatus('NO_SHOW')}>Mark No Show</button>
-                  <button className="ios-action-btn" onClick={() => setStatus('CANCELLED')}>Cancel Reservation</button>
+                  <button
+                    className="ios-action-btn"
+                    onClick={() => setStatus('CANCELLED')}
+                    disabled={['CHECKED_OUT', 'CHECKED_IN', 'CHECKED_IN_UNPAID'].includes(String(row?.status || '').toUpperCase())}
+                    title={['CHECKED_OUT', 'CHECKED_IN', 'CHECKED_IN_UNPAID'].includes(String(row?.status || '').toUpperCase()) ? 'Already checked out / in — close via check-in instead' : ''}
+                  >Cancel Reservation</button>
                 </div>
               </section>
 

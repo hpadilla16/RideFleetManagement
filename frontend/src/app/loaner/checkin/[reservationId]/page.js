@@ -37,9 +37,24 @@ function LoanerCheckinWizard({ token, me, logout }) {
   const [busy, setBusy] = useState(false);
 
   const [agreement, setAgreement] = useState(null);
-  const [step, setStep] = useState(0);
+  const [step, setStep] = useState(() => {
+    if (typeof window === 'undefined') return 0;
+    try {
+      const s = parseInt(window.localStorage.getItem(`loaner.checkin.step.${reservationId}`), 10);
+      return Number.isInteger(s) && s >= 0 && s <= 2 ? s : 0;
+    } catch { return 0; }
+  });
   const [done, setDone] = useState(false);
   const [closing, setClosing] = useState(false);
+  // 2026-06-06 (loaner Ola 2.1): persist the step so a tablet reload resumes
+  // where the advisor left off. Cleared once the return is closed/done.
+  useEffect(() => {
+    if (!reservationId) return;
+    try {
+      if (done) window.localStorage.removeItem(`loaner.checkin.step.${reservationId}`);
+      else window.localStorage.setItem(`loaner.checkin.step.${reservationId}`, String(step));
+    } catch {}
+  }, [step, done, reservationId]);
 
   const [odometerIn, setOdometerIn] = useState('');
   const [fuelIn, setFuelIn] = useState(1);
