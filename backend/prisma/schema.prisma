@@ -2842,6 +2842,13 @@ model PricingRule {
   tenantId String
   tenant   Tenant @relation(fields: [tenantId], references: [id])
 
+  // SIPP class this rule defends (e.g. "IFAR" = mid-size SUV). Required for
+  // multi-SIPP tenants where one MarketScrapeProfile observes many SIPPs in
+  // one session — the engine reads rule.sipp directly so it knows which
+  // SIPP's observations to compute against. Nullable so legacy rows (pre
+  // multi-SIPP) fall back to resolveSippForRate's profile-based heuristic.
+  sipp String?
+
   mode     PricingRuleMode     @default(SUGGEST)
   strategy PricingRuleStrategy @default(NTH_CHEAPEST)
 

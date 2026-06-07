@@ -98,13 +98,22 @@ export async function evaluateRule(rule) {
     return { skipped: true, reason: 'rate_has_no_location_code' };
   }
 
-  // Resolve which SIPP class this Rate competes in. Best signal we have is
-  // the MarketScrapeProfile that points at this rate via targetRateId. If
-  // multiple SIPPs map to one Rate (rare), we evaluate against the closest
-  // SIPP by name — but realistically the per-rate model means one SIPP per
-  // rate. For V1 we look at the most recent observation's SIPP for the
-  // profile that targets this rate.
-  const sippInfo = await resolveSippForRate(rule.rate);
+  // Resolve which SIPP class this Rate competes in.
+  //
+  // Preferred path: rule.sipp is set explicitly (multi-SIPP tenants where
+  // one scrape profile covers many SIPP classes). The engine just reads
+  // the column and uses the Rate's location for the airport code.
+  //
+  // Fallback path: rule.sipp is null (legacy / single-SIPP tenants) — we
+  // ask resolveSippForRate to pick the most-observed SIPP from the profile
+  // that targets this Rate via targetRateId. That keeps backward compat
+  // with rows created before this column existed.
+  let sippInfo;
+  if (rule.sipp && rule.rate?.location?.code) {
+    sippInfo = { sipp: rule.sipp, locationCode: rule.rate.location.code };
+  } else {
+    sippInfo = await resolveSippForRate(rule.rate);
+  }
   if (!sippInfo) {
     return { skipped: true, reason: 'no_observed_sipp_for_rate' };
   }

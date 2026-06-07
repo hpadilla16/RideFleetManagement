@@ -70,6 +70,7 @@ pricingRulesRouter.post('/', async (req, res, next) => {
       tenantId: rate.tenantId,
       mode: body.mode || 'SUGGEST',
       strategy: body.strategy || 'NTH_CHEAPEST',
+      sipp: body.sipp ?? null,
       targetN: body.targetN ?? null,
       targetVendor: body.targetVendor ?? null,
       paddingPct: body.paddingPct ?? 0,
@@ -98,7 +99,7 @@ pricingRulesRouter.patch('/:id', async (req, res, next) => {
     if (!existing) return res.status(404).json({ error: 'Rule not found' });
     const body = req.body || {};
     const data = { updatedBy: req.user?.id ?? null };
-    for (const k of ['mode', 'strategy', 'targetN', 'targetVendor', 'paddingPct', 'floorPrice', 'ceilingPrice', 'autoMaxDeltaPct', 'active']) {
+    for (const k of ['sipp', 'mode', 'strategy', 'targetN', 'targetVendor', 'paddingPct', 'floorPrice', 'ceilingPrice', 'autoMaxDeltaPct', 'active']) {
       if (k in body) data[k] = body[k];
     }
     const rule = await prisma.pricingRule.update({ where: { id: existing.id }, data });
