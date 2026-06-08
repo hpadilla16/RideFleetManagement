@@ -218,7 +218,11 @@ function bookingSummaryFromReservation(reservation) {
           guestToken: conv.guestToken,
           guestTokenExpiresAt: conv.guestTokenExpiresAt
         }
-      : null
+      : null,
+    // Rental agreement signature state — lets the mobile app surface a
+    // "sign agreement" action instead of relying on the email link only.
+    agreementToken: reservation.signatureToken || null,
+    agreementSignedAt: reservation.signatureSignedAt || null
   };
 }
 
@@ -1110,6 +1114,151 @@ export const publicBookingService = {
       orderBy: { submittedAt: 'asc' },
     });
     return _formatTripDocumentsResponse(trip, docs);
+  },
+
+  // Mobile car-sharing app vehicle inspection (pickup/return walkaround).
+  // Reuses TripDocument — documentType is a free string, so inspection
+  // slots are stored as INSPECTION_<PHASE>_<SLOT> with no schema change.
+  // Idempotent per (trip, type): re-submitting a slot replaces the row.
+  async submitInspectionPhotos(tripCode, payload = {}) {
+    const trip = await _findTripByCode(tripCode);
+
+    const phase =
+      String(payload.phase || 'PICKUP').toUpperCase() === 'RETURN'
+        ? 'RETURN'
+        : 'PICKUP';
+    const photos =
+      payload.photos && typeof payload.photos === 'object'
+        ? payload.photos
+        : {};
+
+    const SLOTS = [
+      'front',
+      'back',
+      'left',
+      'right',
+      'interior',
+      'dashboard',
+      'damage',
+    ];
+    const toWrite = [];
+    for (const slot of SLOTS) {
+      if (photos[slot] != null) {
+        toWrite.push({
+          type: `INSPECTION_${phase}_${slot.toUpperCase()}`,
+          dataUrl: _validateDocDataUrl(photos[slot], slot),
+        });
+      }
+    }
+    if (toWrite.length === 0) {
+      throw new Error('At least one inspection photo is required');
+    }
+
+    await prisma.$transaction(
+      toWrite.map((doc) =>
+        prisma.tripDocument.upsert({
+          where: {
+            tripId_documentType: {
+              tripId: trip.id,
+              documentType: doc.type,
+            },
+          },
+          create: {
+            tripId: trip.id,
+            documentType: doc.type,
+            dataUrl: doc.dataUrl,
+            status: 'PENDING',
+          },
+          update: {
+            dataUrl: doc.dataUrl,
+            status: 'PENDING',
+            rejectReason: null,
+            submittedAt: new Date(),
+            reviewedAt: null,
+          },
+        }),
+      ),
+    );
+
+    return {
+      ok: true,
+      tripCode: trip.tripCode,
+      phase,
+      saved: toWrite.map((d) => d.type),
+    };
+  },
+
+  // Guest-initiated cancellation from the mobile app. Only within the
+  // free-cancellation window (>48h before pickup, mirroring the policy
+  // copy served by /policies). Inside the window the guest is directed
+  // to trip chat — fee-bearing cancellations stay a host/admin action.
+  async cancelGuestTrip(tripCode, payload = {}) {
+    const email = normalizeEmail(payload?.email);
+    if (!email) throw new Error('email is required');
+
+    const clean = String(tripCode || '').trim();
+    if (!clean) throw new Error('tripCode is required');
+
+    const trip = await prisma.trip.findUnique({
+      where: { tripCode: clean },
+      select: {
+        id: true,
+        tripCode: true,
+        status: true,
+        reservationId: true,
+        guestCustomer: { select: { email: true, firstName: true } },
+        hostProfile: { select: { email: true, displayName: true } },
+        reservation: { select: { id: true, pickupAt: true, status: true } },
+        listing: { select: { title: true } }
+      }
+    });
+    if (!trip) throw new Error('Trip not found');
+
+    const guestEmail = String(trip.guestCustomer?.email || '').toLowerCase();
+    if (!guestEmail || guestEmail !== email) {
+      throw new Error('email does not match this trip');
+    }
+
+    const blocked = ['CANCELLED', 'IN_PROGRESS', 'COMPLETED', 'DISPUTED'];
+    if (blocked.includes(String(trip.status || '').toUpperCase())) {
+      throw new Error(`Trip cannot be cancelled in status ${trip.status}`);
+    }
+
+    const pickupAt = trip.reservation?.pickupAt;
+    const hoursToPickup = pickupAt
+      ? (new Date(pickupAt).getTime() - Date.now()) / 3600000
+      : null;
+    if (hoursToPickup == null || hoursToPickup <= 48) {
+      throw new Error(
+        'Free cancellation window has passed. Please message your host in trip chat to arrange cancellation.'
+      );
+    }
+
+    await prisma.$transaction([
+      prisma.trip.update({ where: { id: trip.id }, data: { status: 'CANCELLED' } }),
+      ...(trip.reservationId
+        ? [prisma.reservation.update({ where: { id: trip.reservationId }, data: { status: 'CANCELLED' } })]
+        : [])
+    ]);
+
+    // Best-effort host notification — never fail the cancel on email.
+    try {
+      if (trip.hostProfile?.email) {
+        await sendEmail({
+          to: trip.hostProfile.email,
+          subject: `Trip ${trip.tripCode} cancelled by guest`,
+          text: [
+            `Trip ${trip.tripCode} (${trip.listing?.title || 'listing'})`,
+            `Guest: ${trip.guestCustomer?.firstName || guestEmail}`,
+            'Cancelled within the free-cancellation window (more than 48h before pickup).'
+          ].join('\n')
+        });
+      }
+    } catch (err) {
+      console.warn('[cancel] failed to notify host', err);
+    }
+
+    return { ok: true, tripCode: trip.tripCode, status: 'CANCELLED' };
   },
 
   async getHostStatus(user) {
