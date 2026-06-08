@@ -523,7 +523,10 @@ export const issueCenterClaimsService = {
       });
     });
 
-    await reservationPricingService.getPricing(reservation.id, tenantWhereFor(user));
+    // A claim charge is added AFTER the rental (post check-in), so the
+    // agreement is typically CLOSED. allowClosed lets the new charge mirror
+    // into the agreement and update the unpaid balance. (2026-06-08 fix.)
+    await reservationPricingService.getPricing(reservation.id, tenantWhereFor(user), { allowClosed: true });
 
     const refreshedIncident = await prisma.tripIncident.findFirst({
       where: { id: incident.id, ...incidentTenantWhere(user) },

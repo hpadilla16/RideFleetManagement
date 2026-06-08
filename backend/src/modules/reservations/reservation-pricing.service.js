@@ -173,7 +173,7 @@ function summarizeChargeTotals(charges = []) {
   return { subtotal, taxes, total };
 }
 
-async function syncAgreementCharges(reservationId, scope = {}) {
+async function syncAgreementCharges(reservationId, scope = {}, opts = {}) {
   const reservation = await prisma.reservation.findFirst({
     where: scopedReservationWhere(reservationId, scope),
     include: {
@@ -190,7 +190,16 @@ async function syncAgreementCharges(reservationId, scope = {}) {
   if (!reservation?.rentalAgreement?.id) return null;
 
   const agreement = reservation.rentalAgreement;
-  if (['CLOSED', 'CANCELLED'].includes(String(agreement.status || '').toUpperCase())) return null;
+  const agreementStatus = String(agreement.status || '').toUpperCase();
+  // 2026-06-08 (post check-in fee fix): routine pricing READS never mutate a
+  // closed/cancelled agreement (the original guard). But when a fee is added
+  // EXPLICITLY after check-in (issue-center claim, manual "Edit pricing", etc.)
+  // the caller passes { allowClosed: true } so the new charge is mirrored into
+  // RentalAgreementCharge and the binding total/balance is recomputed.
+  // CANCELLED is never reopened. See TL-ZE40787112BA.
+  const allowClosed = opts.allowClosed === true;
+  if (agreementStatus === 'CANCELLED') return null;
+  if (agreementStatus === 'CLOSED' && !allowClosed) return null;
 
   const chargeRows = (reservation.charges || []).map((row, idx) => ({
     rentalAgreementId: agreement.id,
@@ -395,11 +404,11 @@ async function syncMandatoryLocationFees(reservationId, scope = {}) {
 }
 
 export const reservationPricingService = {
-  async getPricing(reservationId, scope = {}) {
+  async getPricing(reservationId, scope = {}, opts = {}) {
     await Promise.all([
       syncMandatoryLocationFees(reservationId, scope),
       tollsService.syncReservationCharges(reservationId, scope),
-      syncAgreementCharges(reservationId, scope)
+      syncAgreementCharges(reservationId, scope, opts)
     ]);
     const row = await getReservationOrThrow(reservationId, scope);
     const charges = Array.isArray(row.charges) ? row.charges : [];
@@ -481,8 +490,11 @@ export const reservationPricingService = {
 
     await syncMandatoryLocationFees(reservationId, scope);
     await tollsService.syncReservationCharges(reservationId, scope);
-    await syncAgreementCharges(reservationId, scope);
-    return this.getPricing(reservationId, scope);
+    // "Edit pricing" is always an explicit operator mutation. Allow it to
+    // recompute the agreement total/balance even after check-in (CLOSED) so a
+    // post check-in fee reaches the unpaid balance. (2026-06-08 fix.)
+    await syncAgreementCharges(reservationId, scope, { allowClosed: true });
+    return this.getPricing(reservationId, scope, { allowClosed: true });
   },
 
   async listPayments(reservationId, scope = {}) {
