@@ -150,19 +150,36 @@ function Inner({ token, me, logout }) {
 
   const payments = useMemo(() => paymentRows, [paymentRows]);
   const totalFromQuery = useMemo(() => Number(searchParams?.get('total') || 0), [searchParams]);
+  // 2026-06-08: when a rental agreement exists, RentalAgreement.total/paidAmount/
+  // balance are the source of truth — the agreement total already includes
+  // post-check-in fees (fuel/cleaning/late) that the rental-only estimatedTotal/
+  // pricing total (and the ?total= query param) miss, and paidAmount includes
+  // agreement-level payments (e.g. franchise-prepaid rentals) that aren't in the
+  // reservation payments table. This keeps Total/Collected/Unpaid here aligned
+  // with the reservation detail's agreement balance. Falls back to the
+  // rental-only computation before an agreement exists.
+  const agreementTotals = row?.rentalAgreement || null;
+  const hasAgreementTotals = !!(agreementTotals?.id) && agreementTotals?.total != null;
   const total = useMemo(() => {
+    if (hasAgreementTotals) return Number(Number(agreementTotals.total || 0).toFixed(2));
     const fromPricing = Number(pricing?.totals?.total || 0);
     const fromRow = Number(deriveTotalFromReservationRow(row).toFixed(2));
     return Number(Math.max(totalFromQuery, fromPricing, fromRow).toFixed(2));
-  }, [row, pricing?.totals?.total, totalFromQuery]);
+  }, [row, pricing?.totals?.total, totalFromQuery, hasAgreementTotals, agreementTotals]);
   // 2026-06-06: "Collected" counts REAL captured money only. AUTH_HOLD is a
   // security-deposit authorization (not settled funds) — excluded from paid so
   // the snapshot/"Paid In Full" badge doesn't mask a real unpaid balance. Holds
   // are still listed separately in the payments table below.
-  const paid = useMemo(() => Number(payments
-    .filter((p) => String(p.method || '').toUpperCase() !== 'AUTH_HOLD')
-    .reduce((s, p) => s + Number(p.amount || 0), 0).toFixed(2)), [payments]);
-  const unpaid = useMemo(() => Math.max(0, Number((total - paid).toFixed(2))), [total, paid]);
+  const paid = useMemo(() => {
+    if (hasAgreementTotals) return Number(Number(agreementTotals.paidAmount || 0).toFixed(2));
+    return Number(payments
+      .filter((p) => String(p.method || '').toUpperCase() !== 'AUTH_HOLD')
+      .reduce((s, p) => s + Number(p.amount || 0), 0).toFixed(2));
+  }, [payments, hasAgreementTotals, agreementTotals]);
+  const unpaid = useMemo(() => {
+    if (hasAgreementTotals) return Math.max(0, Number(Number(agreementTotals.balance || 0).toFixed(2)));
+    return Math.max(0, Number((total - paid).toFixed(2)));
+  }, [total, paid, hasAgreementTotals, agreementTotals]);
   const paymentCount = payments.length;
   const dueNowLabel = unpaid > 0 ? 'Payment Still Needed' : 'Paid In Full';
   const securityDepositHold = useMemo(() => deriveSecurityDepositHold(row), [row]);

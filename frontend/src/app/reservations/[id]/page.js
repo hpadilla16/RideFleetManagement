@@ -1967,6 +1967,19 @@ token
     () => Number((Math.max(0, toMoneyNum(displayTotal) - toMoneyNum(paidTotal))).toFixed(2)),
     [displayTotal, paidTotal]
   );
+  // Canonical unpaid shown to staff. When a rental agreement exists,
+  // RentalAgreement.balance is the source of truth — it already includes
+  // post-check-in fees (fuel/cleaning/smoking/late) that live on the agreement
+  // only and are NOT line items in the reservation Charges table, so the
+  // rental-only `unpaidBalance` above misses them. Before the agreement is
+  // created/loaded, fall back to the rental-only figure. Keeps the Charges card,
+  // the Payment Snapshot and the View Payments page aligned to one number.
+  const displayUnpaidBalance = useMemo(() => {
+    if (agreementFull && row?.rentalAgreement?.id) {
+      return Number(Math.max(0, Number(agreementFull.balance || 0)).toFixed(2));
+    }
+    return unpaidBalance;
+  }, [agreementFull, row, unpaidBalance]);
   const reservationOpsSnapshot = useMemo(() => {
     const status = String(row?.status || '').toUpperCase();
     let nextAction = 'Review reservation workflow';
@@ -1984,9 +1997,9 @@ token
     } else if (!row?.signatureSignedAt) {
       nextAction = 'Collect signature';
       nextActionDetail = 'Agreement still needs to be signed before the booking can be handed off cleanly.';
-    } else if (unpaidBalance > 0) {
+    } else if (displayUnpaidBalance > 0) {
       nextAction = 'Resolve payment due';
-      nextActionDetail = `There is still ${money(unpaidBalance)} left to collect on this booking.`;
+      nextActionDetail = `There is still ${money(displayUnpaidBalance)} left to collect on this booking.`;
     } else if (status === 'CONFIRMED') {
       nextAction = 'Start check-out';
       nextActionDetail = 'Booking is ready to move into vehicle handoff and agreement execution.';
@@ -2004,7 +2017,7 @@ token
       nextAction,
       nextActionDetail
     };
-  }, [precheckinStatus, row, unpaidBalance]);
+  }, [precheckinStatus, row, unpaidBalance, displayUnpaidBalance]);
 
 
 	if (loading || !row) {
@@ -2047,8 +2060,8 @@ token
             </div>
             <div className="info-tile">
               <span className="label">Payment Snapshot</span>
-              <strong>{money(unpaidBalance)}</strong>
-              <span className="ui-muted">{unpaidBalance > 0 ? 'Remaining balance' : 'Balance cleared'}</span>
+              <strong>{money(displayUnpaidBalance)}</strong>
+              <span className="ui-muted">{displayUnpaidBalance > 0 ? 'Remaining balance' : 'Balance cleared'}</span>
             </div>
           </div>
           <div className="app-banner-list">
@@ -2845,8 +2858,15 @@ token
                       </tr>
                     ) : null}
                     <tr>
-                      <td colSpan={3}><strong>Unpaid Balance</strong></td>
-                      <td style={{ whiteSpace: 'nowrap', textAlign: 'right' }}><strong>{money(unpaidBalance)}</strong></td>
+                      <td colSpan={3}>
+                        <strong>Unpaid Balance</strong>
+                        {displayUnpaidBalance > unpaidBalance && agreementFull ? (
+                          <div className="label" style={{ textTransform: 'none', letterSpacing: 0 }}>
+                            Incl. post-check-in fees · agreement total {money(agreementFull?.total || 0)}
+                          </div>
+                        ) : null}
+                      </td>
+                      <td style={{ whiteSpace: 'nowrap', textAlign: 'right' }}><strong>{money(displayUnpaidBalance)}</strong></td>
                     </tr>
                     {authHoldsTotal > 0 ? (
                       <tr>
