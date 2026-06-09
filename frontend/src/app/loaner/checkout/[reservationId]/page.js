@@ -456,11 +456,12 @@ function Step1Vehicles({ vehicles, vehicleId, setVehicleId }) {
               textAlign: 'left', cursor: 'pointer', borderRadius: 16, padding: 14,
               border: selected ? '2px solid #8752FE' : '1px solid #e6dfff',
               background: selected ? 'rgba(135,82,254,.06)' : 'white',
+              color: '#211a38',
               boxShadow: '0 8px 22px rgba(35,21,80,.06)'
             }}
           >
             <div style={{ height: 48, borderRadius: 9, background: 'linear-gradient(135deg,#e6dffb,#cdbff5)', marginBottom: 9 }} />
-            <div style={{ fontWeight: 800, fontSize: 14 }}>{vehicleLabel(v)}</div>
+            <div style={{ fontWeight: 800, fontSize: 14, color: '#211a38' }}>{vehicleLabel(v)}</div>
             <div style={{ fontSize: 12, color: '#6f668f', marginTop: 2 }}>
               {(v.licensePlate || v.plate || '—')}{v.vehicleType?.name ? ` · ${v.vehicleType.name}` : ''}
             </div>
