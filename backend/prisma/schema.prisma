@@ -428,6 +428,9 @@ model Tenant {
   vehicles                    Vehicle[]
   vehicleAvailabilityBlocks   VehicleAvailabilityBlock[]
   vehicleMileageEntries       VehicleMileageEntry[]
+  inventorySessions           InventorySession[]
+  inventoryReports            InventoryReport[]
+  fleetReconciliationFlags    FleetReconciliationFlag[]
   customers                   Customer[]
   reservations                Reservation[]
   auditLogs                   AuditLog[]
@@ -591,6 +594,8 @@ model Vehicle {
   telematicsEvents      VehicleTelematicsEvent[]
   loanerAgreements      LoanerAgreement[]
   mileageEntries        VehicleMileageEntry[]
+  inventoryItems        InventoryItem[]
+  reconciliationFlags   FleetReconciliationFlag[]
 
   @@unique([tenantId, plate])
   @@unique([tenantId, internalNumber])
@@ -636,6 +641,175 @@ enum MileageEntrySource {
   MANUAL
   TELEMATICS
   IMPORT
+}
+
+// Inventory Helper (2026-06-09). A guided fleet-inventory wizard: one resumable
+// session per tenant snapshots the whole fleet into items, agents confirm each
+// vehicle (scan + photos + checklist for at-lot, status note for maintenance),
+// status mismatches are flagged, and completion produces a saved PDF report.
+// See doc/inventory-helper-plan-2026-06-09.md.
+model InventorySession {
+  id                String                 @id @default(cuid())
+  tenantId          String
+  tenant            Tenant                 @relation(fields: [tenantId], references: [id])
+  status            InventorySessionStatus @default(IN_PROGRESS)
+  startedByUserId   String?
+  startedAt         DateTime               @default(now())
+  lastActivityAt    DateTime               @default(now())
+  completedByUserId String?
+  completedAt       DateTime?
+  abandonedAt       DateTime?
+  abandonedReason   String?
+  // Denormalized counts (total / confirmed / exception / mismatch) so the
+  // launch + progress UI can render without re-aggregating every item.
+  totalsJson        Json?
+  createdAt         DateTime               @default(now())
+  updatedAt         DateTime               @updatedAt
+
+  items  InventoryItem[]
+  report InventoryReport?
+
+  @@index([tenantId, status])
+}
+
+// One row per vehicle in a session. State is persisted as agents confirm, so
+// leaving (e.g. to fix a mismatch via check-in) and returning resumes exactly.
+model InventoryItem {
+  id        String           @id @default(cuid())
+  sessionId String
+  session   InventorySession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  tenantId  String?
+  vehicleId String
+  vehicle   Vehicle          @relation(fields: [vehicleId], references: [id], onDelete: Cascade)
+
+  // Snapshot at session start — what the system believed when inventory began.
+  expectedStatus  VehicleStatus
+  expectedMileage Int?
+
+  state         InventoryItemState      @default(PENDING)
+  locatedStatus InventoryLocatedStatus?
+  confirmMethod InventoryConfirmMethod?
+  confirmReason String?
+
+  // At-lot verification checklist.
+  tiresOk          Boolean?
+  brakesOk         Boolean?
+  lightsOk         Boolean?
+  fluidsOk         Boolean?
+  cleanOk          Boolean?
+  mileageConfirmed Boolean?
+  reportedMileage  Int?
+
+  photosJson      Json?
+  note            String?
+  maintenanceNote String?
+
+  mismatchType           InventoryMismatchType?
+  mismatchResolved       Boolean                @default(false)
+  mismatchResolutionNote String?
+
+  reservationId     String?
+  confirmedByUserId String?
+  confirmedAt       DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([sessionId, vehicleId])
+  @@index([sessionId, state])
+  @@index([tenantId, vehicleId])
+}
+
+// Saved PDF report (persisted artifact, unlike the on-the-fly reports module).
+// Listed under Reports → Inventory reports, downloaded via a signed URL.
+model InventoryReport {
+  id                String           @id @default(cuid())
+  tenantId          String
+  tenant            Tenant           @relation(fields: [tenantId], references: [id])
+  sessionId         String           @unique
+  session           InventorySession @relation(fields: [sessionId], references: [id])
+  title             String
+  generatedByUserId String?
+  generatedAt       DateTime         @default(now())
+  storageBucket     String?
+  storagePath       String?
+  summaryJson       Json?
+  createdAt         DateTime         @default(now())
+
+  @@index([tenantId, generatedAt])
+}
+
+// Persisted record of a status mismatch that was DEFERRED ("resolved with
+// note") during inventory so the agent could finish. Surfaces on the dashboard
+// (Status mismatches tile) until truly fixed — auto-resolved on check-in or by
+// the hourly vehicle-status drift sweep. One OPEN flag per vehicle+type
+// (enforced in the service, since Prisma can't express a partial unique index).
+model FleetReconciliationFlag {
+  id                         String                        @id @default(cuid())
+  tenantId                   String
+  tenant                     Tenant                        @relation(fields: [tenantId], references: [id])
+  vehicleId                  String
+  vehicle                    Vehicle                       @relation(fields: [vehicleId], references: [id], onDelete: Cascade)
+  reservationId              String?
+  type                       InventoryMismatchType
+  status                     ReconciliationFlagStatus      @default(OPEN)
+  note                       String?
+  raisedByInventorySessionId String?
+  raisedByUserId             String?
+  raisedAt                   DateTime                      @default(now())
+  lastSeenAt                 DateTime                      @default(now())
+  resolvedAt                 DateTime?
+  resolvedByUserId           String?
+  resolvedReason             ReconciliationResolvedReason?
+  createdAt                  DateTime                      @default(now())
+  updatedAt                  DateTime                      @updatedAt
+
+  @@index([tenantId, status])
+  @@index([vehicleId, status])
+}
+
+enum InventorySessionStatus {
+  IN_PROGRESS
+  COMPLETED
+  ABANDONED
+  CANCELLED
+}
+
+enum InventoryItemState {
+  PENDING
+  CONFIRMED
+  EXCEPTION
+}
+
+enum InventoryLocatedStatus {
+  AT_LOT
+  IN_MAINTENANCE
+  OUT_OF_SERVICE
+  ON_RENT
+  NOT_FOUND
+}
+
+enum InventoryConfirmMethod {
+  QR
+  PLATE
+  VIN
+  MANUAL
+}
+
+enum InventoryMismatchType {
+  ON_RENT_OVERDUE
+  SHOULD_BE_ON_RENT
+}
+
+enum ReconciliationFlagStatus {
+  OPEN
+  RESOLVED
+}
+
+enum ReconciliationResolvedReason {
+  CHECKED_IN
+  SWEEP
+  MANUAL
 }
 
 model VehicleAvailabilityBlock {

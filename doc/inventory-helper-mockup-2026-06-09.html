@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Inventory Helper — mockup</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/tabler-icons/3.31.0/iconfont/tabler-icons.min.css" />
+<style>
+  :root{
+    --bg:#faf9f5; --surface:#f1efe8; --card:#ffffff;
+    --text:#2c2c2a; --muted:#5f5e5a; --hint:#888780;
+    --bt:rgba(0,0,0,0.12); --bs:rgba(0,0,0,0.22);
+    --info-bg:#e6f1fb; --info:#185fa5; --info-bd:#85b7eb;
+    --ok-bg:#eaf3de; --ok:#3b6d11; --ok-bd:#97c459;
+    --warn-bg:#faeeda; --warn:#854f0b;
+    --danger-bg:#fcebeb; --danger:#a32d2d; --danger-bd:#f09595;
+    --radmd:8px; --radlg:12px; --radxl:16px;
+    --font:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+  }
+  *{box-sizing:border-box;}
+  body{margin:0;background:var(--bg);color:var(--text);font-family:var(--font);line-height:1.6;padding:24px;}
+  h1{font-size:22px;font-weight:500;margin:0 0 4px;}
+  .sub{color:var(--muted);font-size:14px;margin:0 0 18px;}
+  button{font-family:var(--font);font-size:13px;background:transparent;border:0.5px solid var(--bs);border-radius:var(--radmd);padding:7px 12px;color:var(--text);cursor:pointer;display:inline-flex;align-items:center;}
+  button:hover{background:var(--surface);}
+  button:disabled{opacity:0.55;cursor:not-allowed;}
+  input,textarea{font-family:var(--font);font-size:14px;border:0.5px solid var(--bs);border-radius:var(--radmd);padding:8px 10px;background:var(--card);color:var(--text);}
+  #nav{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:14px;}
+  #nav button{font-size:12px;padding:5px 10px;}
+  #nav button.active{background:var(--info-bg);color:var(--info);border-color:var(--info-bd);}
+  .frameWrap{background:var(--surface);border-radius:var(--radlg);padding:18px;display:flex;justify-content:center;}
+  .phone{width:390px;max-width:100%;background:var(--card);border:0.5px solid var(--bs);border-radius:var(--radxl);overflow:hidden;}
+  .bar{display:flex;align-items:center;gap:8px;padding:12px 16px;border-bottom:0.5px solid var(--bt);}
+  .row{display:flex;align-items:center;gap:10px;padding:10px 0;border-bottom:0.5px solid var(--bt);}
+  .ic{width:34px;height:34px;border-radius:8px;background:var(--surface);display:flex;align-items:center;justify-content:center;}
+</style>
+</head>
+<body>
+<h1>Inventory helper — mockup</h1>
+<p class="sub">Clickable prototype of the inventory wizard. Use the buttons to step through the 6 screens. (Visual mockup only — not wired to data.)</p>
+<div id="nav"></div>
+<div class="frameWrap">
+  <div class="phone">
+    <div class="bar">
+      <i class="ti ti-clipboard-check" style="font-size:20px;color:var(--info);"></i>
+      <div style="font-weight:500;">Inventory helper</div>
+      <div style="margin-left:auto;font-size:12px;color:var(--hint);" id="crumb">Step 1 of 6</div>
+    </div>
+    <div id="stage" style="padding:16px;"></div>
+  </div>
+</div>
+
+<script>
+(function(){
+  const row=(unit,plate,statusHtml,right)=>
+    `<div class="row"><div class="ic"><i class="ti ti-car" style="font-size:18px;color:var(--muted)"></i></div>
+     <div style="min-width:0;"><div style="font-weight:500;font-size:14px;">${unit}</div><div style="font-size:12px;color:var(--hint);">${plate}</div></div>
+     <div style="margin-left:auto;display:flex;align-items:center;gap:8px;">${statusHtml}${right||''}</div></div>`;
+  const sChip=(t,fg,bg)=>`<span style="font-size:11px;padding:2px 8px;border-radius:999px;color:${fg};background:${bg};white-space:nowrap;">${t}</span>`;
+  const ok=`<i class="ti ti-circle-check" style="font-size:20px;color:var(--ok)"></i>`;
+  const chev=`<i class="ti ti-chevron-right" style="font-size:18px;color:var(--hint)"></i>`;
+
+  const screens=[
+  {name:'Launch',html:`
+    <div style="min-height:360px;background:rgba(0,0,0,0.35);border-radius:12px;display:flex;align-items:center;justify-content:center;padding:14px;">
+      <div style="background:var(--card);border-radius:12px;border:0.5px solid var(--bs);padding:18px;width:300px;">
+        <div style="font-weight:500;font-size:16px;margin-bottom:6px;">Session in progress</div>
+        <p style="font-size:13px;color:var(--muted);margin:0 0 14px;">International Rental Corp has an inventory started <b>2h ago by María</b> — 12 of 47 vehicles confirmed.</p>
+        <button style="width:100%;margin-bottom:8px;justify-content:center;" onclick="__inv(1)"><i class="ti ti-player-play"></i>&nbsp; Continue where you left off</button>
+        <button style="width:100%;justify-content:center;color:var(--danger);" onclick="__inv(1)"><i class="ti ti-trash"></i>&nbsp; Wipe & start new</button>
+      </div>
+    </div>`},
+  {name:'Fleet overview',html:`
+    <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;"><div style="font-weight:500;font-size:16px;">Fleet inventory</div><div style="margin-left:auto;font-size:12px;color:var(--muted);">12 / 47 confirmed</div></div>
+    <div style="height:6px;background:var(--surface);border-radius:999px;margin-bottom:12px;"><div style="width:26%;height:6px;background:var(--ok);border-radius:999px;"></div></div>
+    <div style="display:flex;align-items:center;gap:8px;background:var(--danger-bg);border-radius:8px;padding:8px 10px;margin-bottom:14px;"><i class="ti ti-alert-triangle" style="font-size:18px;color:var(--danger)"></i><div style="font-size:12px;color:var(--danger);">2 vehicles need fixing before you can complete</div></div>
+    <div style="font-size:12px;color:var(--hint);margin-bottom:2px;"><i class="ti ti-map-pin"></i> Main lot — Orlando (31)</div>
+    ${row('Unit 214','ABC-1234',sChip('At lot','var(--ok)','var(--ok-bg)'),ok)}
+    ${row('Unit 218','DEF-5678',sChip('At lot','var(--ok)','var(--ok-bg)'),chev)}
+    ${row('Unit 102','GHI-9012',sChip('On rent · overdue','var(--danger)','var(--danger-bg)'),chev)}
+    ${row('Unit 308','JKL-3456',sChip('Maintenance','var(--info)','var(--info-bg)'),chev)}
+    <div style="font-size:12px;color:var(--hint);margin:12px 0 2px;"><i class="ti ti-map-pin"></i> Airport lot — MCO (16)</div>
+    ${row('Unit 421','MNO-7788',sChip('On rent','var(--warn)','var(--warn-bg)'),chev)}
+    ${row('Unit 430','PQR-2211',sChip('At lot','var(--ok)','var(--ok-bg)'),chev)}
+    <button style="width:100%;justify-content:center;margin-top:14px;" onclick="__inv(2)">Confirm next vehicle&nbsp;<i class="ti ti-arrow-right"></i></button>`},
+  {name:'Confirm at lot',html:`
+    <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px;"><button style="padding:4px 8px;" onclick="__inv(1)"><i class="ti ti-arrow-left"></i></button><div><div style="font-weight:500;">Unit 214</div><div style="font-size:12px;color:var(--hint);">ABC-1234 · at lot</div></div></div>
+    <div style="font-size:12px;color:var(--muted);margin-bottom:6px;">1 · Identify the vehicle (scan required)</div>
+    <div style="display:flex;gap:6px;margin-bottom:6px;"><button style="flex:1;justify-content:center;font-size:12px;"><i class="ti ti-qrcode"></i>&nbsp;QR</button><button style="flex:1;justify-content:center;font-size:12px;"><i class="ti ti-scan"></i>&nbsp;Plate</button><button style="flex:1;justify-content:center;font-size:12px;"><i class="ti ti-barcode"></i>&nbsp;VIN</button></div>
+    <div style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--ok);margin-bottom:14px;"><i class="ti ti-circle-check"></i> Matched by VIN barcode · <a href="#" style="color:var(--muted);">can't scan?</a></div>
+    <div style="font-size:12px;color:var(--muted);margin-bottom:6px;">2 · Photos (4 corners + odometer)</div>
+    <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:6px;margin-bottom:14px;">
+      ${['Front','Rear','Left','Right','Odo'].map((l,i)=>`<div style="aspect-ratio:1;border-radius:8px;border:0.5px solid var(--bs);background:var(--surface);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;"><i class="ti ti-${i<4?'camera-check':'gauge'}" style="font-size:16px;color:${i<4?'var(--ok)':'var(--hint)'}"></i><span style="font-size:9px;color:var(--hint);">${l}</span></div>`).join('')}
+    </div>
+    <div style="font-size:12px;color:var(--muted);margin-bottom:6px;">3 · Verify condition</div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:14px;">
+      ${['Tires','Brakes','Lights','Fluids','Cleaning'].map(l=>`<label style="display:flex;align-items:center;gap:8px;font-size:13px;border:0.5px solid var(--bt);border-radius:8px;padding:7px 10px;"><i class="ti ti-square-check" style="font-size:18px;color:var(--ok)"></i>${l}</label>`).join('')}
+    </div>
+    <div style="display:flex;align-items:center;gap:8px;border:0.5px solid var(--bt);border-radius:8px;padding:8px 10px;margin-bottom:10px;"><i class="ti ti-gauge" style="font-size:18px;color:var(--muted)"></i><div style="font-size:13px;">Mileage on file: <b>45,120 mi</b></div><span style="margin-left:auto;font-size:11px;color:var(--ok);">Matches</span></div>
+    <input type="text" placeholder="Add a note (optional)" style="width:100%;margin-bottom:14px;" />
+    <button style="width:100%;justify-content:center;background:var(--ok-bg);color:var(--ok);border-color:var(--ok-bd);" onclick="__inv(1)"><i class="ti ti-circle-check"></i>&nbsp; Confirm vehicle</button>`},
+  {name:'Maintenance',html:`
+    <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px;"><button style="padding:4px 8px;" onclick="__inv(1)"><i class="ti ti-arrow-left"></i></button><div><div style="font-weight:500;">Unit 308</div><div style="font-size:12px;color:var(--hint);">JKL-3456 · in maintenance</div></div></div>
+    <div style="display:flex;align-items:center;gap:8px;background:var(--info-bg);border-radius:8px;padding:8px 10px;margin-bottom:14px;"><i class="ti ti-tools" style="font-size:18px;color:var(--info)"></i><div style="font-size:12px;color:var(--info);">Locked in maintenance — no photos or checklist needed.</div></div>
+    <div style="font-size:12px;color:var(--muted);margin-bottom:6px;">Current status note (required)</div>
+    <textarea placeholder="e.g. Transmission in shop, ETA Friday. Keys with service desk." style="width:100%;min-height:90px;margin-bottom:14px;"></textarea>
+    <button style="width:100%;justify-content:center;background:var(--ok-bg);color:var(--ok);border-color:var(--ok-bd);" onclick="__inv(1)"><i class="ti ti-circle-check"></i>&nbsp; Confirm status</button>`},
+  {name:'Fix mismatches',html:`
+    <div style="font-weight:500;font-size:16px;margin-bottom:6px;">Fix before completing</div>
+    <p style="font-size:13px;color:var(--muted);margin:0 0 8px;">Marked checked-out but look like they should be in. Resolve each — your confirmed vehicles are saved.</p>
+    <p style="font-size:12px;color:var(--muted);margin:0 0 14px;background:var(--info-bg);color:var(--info);border-radius:8px;padding:7px 10px;"><i class="ti ti-flag"></i> "Resolve with note" lets you finish now but keeps the mismatch open on the dashboard until it's truly fixed.</p>
+    <div style="border:0.5px solid var(--bs);border-radius:10px;padding:12px;margin-bottom:10px;">
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;"><i class="ti ti-alert-triangle" style="color:var(--danger)"></i><div style="font-weight:500;font-size:14px;">Unit 102 · GHI-9012</div></div>
+      <div style="font-size:12px;color:var(--muted);margin-bottom:10px;">On rent for RES-742838 · return was due 3 days ago</div>
+      <div style="display:flex;gap:6px;"><button style="flex:1;justify-content:center;font-size:12px;"><i class="ti ti-login-2"></i>&nbsp;Go to check-in</button><button style="flex:1;justify-content:center;font-size:12px;">Resolve with note</button></div>
+    </div>
+    <div style="border:0.5px solid var(--bt);border-radius:10px;padding:12px;opacity:0.7;"><div style="display:flex;align-items:center;gap:8px;"><i class="ti ti-circle-check" style="color:var(--ok)"></i><div style="font-weight:500;font-size:14px;">Unit 555 · resolved</div></div></div>
+    <button style="width:100%;justify-content:center;margin-top:14px;" disabled>1 mismatch left to resolve</button>`},
+  {name:'Complete',html:`
+    <div style="text-align:center;padding:6px 0 12px;"><i class="ti ti-circle-check" style="font-size:40px;color:var(--ok)"></i><div style="font-weight:500;font-size:17px;margin-top:6px;">Inventory complete</div><div style="font-size:12px;color:var(--hint);">International Rental Corp · Jun 9, 2026 · by María</div></div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:14px;">
+      ${[['47','Vehicles'],['41','At lot'],['4','Maintenance'],['2','Mismatches fixed']].map(([n,l])=>`<div style="background:var(--surface);border-radius:8px;padding:10px;"><div style="font-size:22px;font-weight:500;">${n}</div><div style="font-size:12px;color:var(--muted);">${l}</div></div>`).join('')}
+    </div>
+    <button style="width:100%;justify-content:center;margin-bottom:8px;"><i class="ti ti-download"></i>&nbsp; Download PDF report</button>
+    <div style="font-size:12px;color:var(--hint);text-align:center;margin-bottom:12px;">Saved to Reports → Inventory reports</div>
+    <div style="border-top:0.5px solid var(--bt);padding-top:10px;"><div style="font-size:12px;color:var(--muted);margin-bottom:6px;">Inventory reports</div>
+      ${[['Jun 9, 2026','47 vehicles · María'],['May 12, 2026','46 vehicles · Luis']].map(([d,m])=>`<div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:0.5px solid var(--bt);"><i class="ti ti-file-text" style="font-size:18px;color:var(--danger)"></i><div><div style="font-size:13px;font-weight:500;">${d}</div><div style="font-size:11px;color:var(--hint);">${m}</div></div><i class="ti ti-download" style="margin-left:auto;font-size:16px;color:var(--muted)"></i></div>`).join('')}
+    </div>`}
+  ];
+
+  const nav=document.getElementById('nav');
+  screens.forEach((s,i)=>{const b=document.createElement('button');b.textContent=(i+1)+'. '+s.name;b.onclick=()=>__inv(i);nav.appendChild(b);});
+  window.__inv=function(i){
+    document.getElementById('stage').innerHTML=screens[i].html;
+    document.getElementById('crumb').textContent='Step '+(i+1)+' of 6';
+    [...nav.children].forEach((b,bi)=>b.className=bi===i?'active':'');
+  };
+  __inv(0);
+})();
+</script>
+</body>
+</html>

@@ -8,6 +8,7 @@ import { reservationExtendRouter } from './modules/reservations/reservation-exte
 import { reservationOverrideRouter } from './modules/admin/reservation-override.routes.js';
 import { customersRouter } from './modules/customers/customers.routes.js';
 import { publicVehicleTelematicsRouter, vehiclesRouter } from './modules/vehicles/vehicles.routes.js';
+import { inventoryRouter } from './modules/inventory/inventory.routes.js';
 import { locationsRouter } from './modules/locations/locations.routes.js';
 import { vehicleTypesRouter } from './modules/vehicle-types/vehicle-types.routes.js';
 import { additionalServicesRouter } from './modules/additional-services/additional-services.routes.js';
@@ -166,6 +167,7 @@ app.use('/api/admin/integrations/tl-international', tenantRateLimit, tlInternati
 // Round 26 (2026-06-01) — SUPER_ADMIN reservation status override + smart rewind
 app.use('/api/admin/reservations', requireAuth, requireRole('SUPER_ADMIN'), reservationOverrideRouter);
 app.use('/api/store-board', requireAuth, tenantRateLimit, requireRole('SUPER_ADMIN', 'ADMIN', 'OPS'), storeBoardRouter);
+app.use('/api/inventory', requireAuth, tenantRateLimit, requireModuleAccess('vehicles'), inventoryRouter);
 
 app.use('/api/reservations', requireAuth, tenantRateLimit, requireModuleAccess('reservations'), reservationsRouter);
 app.use('/api/reservations', requireAuth, tenantRateLimit, requireModuleAccess('reservations'), reservationExtendRouter);
