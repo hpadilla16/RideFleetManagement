@@ -75,6 +75,17 @@ function inspectionSnapshot(agreement) {
   };
 }
 
+function mileageSourceLabel(source) {
+  switch (String(source || '').toUpperCase()) {
+    case 'CHECKOUT': return 'Check-out';
+    case 'CHECKIN': return 'Check-in';
+    case 'MANUAL': return 'Ajuste manual';
+    case 'TELEMATICS': return 'Telemática';
+    case 'IMPORT': return 'Importado';
+    default: return source || '-';
+  }
+}
+
 function vehicleDisplayName(row) {
   return [row?.year, row?.make, row?.model].filter(Boolean).join(' ') || row?.plate || row?.internalNumber || 'Vehicle';
 }
@@ -109,6 +120,7 @@ function VehicleProfileInner({ token, me, logout }) {
   const [telematicsConfig, setTelematicsConfig] = useState(null);
   const [deviceForm, setDeviceForm] = useState({ provider: 'ZUBIE', externalDeviceId: '', label: '', serialNumber: '' });
   const [eventForm, setEventForm] = useState({ eventType: 'PING', odometer: '', fuelPct: '', speedMph: '', latitude: '', longitude: '', engineOn: false });
+  const [mileageForm, setMileageForm] = useState({ open: false, mileage: '', note: '', saving: false });
 
   const loadVehicle = async () => {
     const out = await api(`/api/vehicles/${id}`, {}, token);
@@ -170,6 +182,8 @@ function VehicleProfileInner({ token, me, logout }) {
   const operationalSignals = row?.operationalSignals || null;
   const telematicsDevices = Array.isArray(row?.telematicsDevices) ? row.telematicsDevices : [];
   const latestTelematicsEvent = row?.latestTelematicsEvent || null;
+  const mileageHistory = Array.isArray(row?.mileageHistory) ? row.mileageHistory : [];
+  const lastMileageEntry = row?.lastMileageEntry || null;
   const canManageTelematics = ['SUPER_ADMIN', 'ADMIN', 'OPS'].includes(String(me?.role || '').toUpperCase());
   const selectedTelematicsProvider = telematicsProviders.find((provider) => provider.code === String(deviceForm.provider || '').toUpperCase()) || null;
   const telematicsFeatureReady = telematicsConfig?.ready !== false;
@@ -202,6 +216,28 @@ function VehicleProfileInner({ token, me, logout }) {
       detail: 'No active return workflow right now'
     };
   }, [activeReservation, currentBlock, nextReservation, row?.status]);
+
+  const saveManualMileage = async () => {
+    const value = Number(mileageForm.mileage);
+    if (!Number.isFinite(value) || value < 0) {
+      setMsg('Ingresa un millaje válido (0 o mayor)');
+      return;
+    }
+    try {
+      setMileageForm((current) => ({ ...current, saving: true }));
+      setMsg('');
+      await api(`/api/vehicles/${id}/mileage`, {
+        method: 'POST',
+        body: JSON.stringify({ mileage: value, note: mileageForm.note || null })
+      }, token);
+      await loadVehicle();
+      setMileageForm({ open: false, mileage: '', note: '', saving: false });
+      setMsg('Millaje ajustado');
+    } catch (error) {
+      setMileageForm((current) => ({ ...current, saving: false }));
+      setMsg(error.message);
+    }
+  };
 
   const printQr = () => {
     if (typeof window === 'undefined' || !row?.id) return;
@@ -281,6 +317,49 @@ function VehicleProfileInner({ token, me, logout }) {
 
         {msg ? <div className="glass card error">{msg}</div> : null}
 
+        {mileageForm.open ? (
+          <div
+            role="dialog"
+            aria-modal="true"
+            style={{ position: 'fixed', inset: 0, zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(0,0,0,0.45)', padding: 16 }}
+            onClick={() => { if (!mileageForm.saving) setMileageForm({ open: false, mileage: '', note: '', saving: false }); }}
+          >
+            <div className="glass card-lg" style={{ maxWidth: 420, width: '100%' }} onClick={(e) => e.stopPropagation()}>
+              <h2 style={{ marginTop: 0 }}>Ajustar millaje</h2>
+              <p className="ui-muted" style={{ marginTop: 0 }}>
+                Esto registra una entrada manual en el historial y pasa a ser el millaje actual del vehículo. No borra las entradas anteriores.
+              </p>
+              <div className="stack" style={{ marginBottom: 10 }}>
+                <label className="label">Millaje</label>
+                <input
+                  type="number"
+                  min="0"
+                  value={mileageForm.mileage}
+                  onChange={(e) => setMileageForm((current) => ({ ...current, mileage: e.target.value }))}
+                  autoFocus
+                />
+              </div>
+              <div className="stack" style={{ marginBottom: 14 }}>
+                <label className="label">Nota (opcional)</label>
+                <input
+                  type="text"
+                  placeholder="Ej: corrección de typo en check-in"
+                  value={mileageForm.note}
+                  onChange={(e) => setMileageForm((current) => ({ ...current, note: e.target.value }))}
+                />
+              </div>
+              <div className="inline-actions" style={{ justifyContent: 'flex-end' }}>
+                <button type="button" className="btn-ghost" disabled={mileageForm.saving} onClick={() => setMileageForm({ open: false, mileage: '', note: '', saving: false })}>
+                  Cancelar
+                </button>
+                <button type="button" className="button-primary" disabled={mileageForm.saving} onClick={saveManualMileage}>
+                  {mileageForm.saving ? 'Guardando…' : 'Guardar'}
+                </button>
+              </div>
+            </div>
+          </div>
+        ) : null}
+
         {!row ? null : (
           <div className="vehicle-profile-grid">
             <div className="vehicle-profile-main">
@@ -356,7 +435,18 @@ function VehicleProfileInner({ token, me, logout }) {
                   <div className="info-tile"><span className="label">Home Location</span><strong>{row.homeLocation?.name || '-'}</strong></div>
                   <div className="info-tile"><span className="label">Status</span><strong>{row.status || '-'}</strong></div>
                   <div className="info-tile"><span className="label">Fleet Mode</span><strong>{row.fleetMode || '-'}</strong></div>
-                  <div className="info-tile"><span className="label">Mileage</span><strong>{row.mileage ?? 0}</strong></div>
+                  <div className="info-tile">
+                    <span className="label">Mileage</span>
+                    <strong>{(row.mileage ?? 0).toLocaleString()} mi</strong>
+                    <span className="ui-muted">
+                      {lastMileageEntry
+                        ? `${mileageSourceLabel(lastMileageEntry.source)}${lastMileageEntry.reservationNumber ? ` · ${lastMileageEntry.reservationNumber}` : ''} · ${formatDateTime(lastMileageEntry.recordedAt)}`
+                        : 'Sin entradas de millaje todavía.'}
+                    </span>
+                    <button type="button" className="btn-ghost btn-sm" style={{ marginTop: 6 }} onClick={() => setMileageForm({ open: true, mileage: String(row.mileage ?? ''), note: '', saving: false })}>
+                      Ajustar millaje
+                    </button>
+                  </div>
                   <div className="info-tile"><span className="label">Color</span><strong>{row.color || '-'}</strong></div>
                 </div>
                 {currentBlock ? (
@@ -365,6 +455,47 @@ function VehicleProfileInner({ token, me, logout }) {
                     {currentBlock.reason ? ` | ${currentBlock.reason}` : ''}
                   </div>
                 ) : null}
+              </section>
+
+              <section className="glass card-lg section-card">
+                <div className="row-between">
+                  <h2>Historial de Millaje</h2>
+                  <span className="status-chip neutral">{mileageHistory.length} entradas</span>
+                </div>
+                <p className="ui-muted" style={{ marginTop: 0 }}>
+                  El millaje actual del vehículo es siempre la última entrada registrada. Cada check-out, check-in y ajuste manual aparece aquí.
+                </p>
+                {mileageHistory.length ? (
+                  <div className="table-shell">
+                    <table>
+                      <thead>
+                        <tr>
+                          <th>Fecha</th>
+                          <th>Millaje</th>
+                          <th>Fuente</th>
+                          <th>Reserva</th>
+                          <th>Nota</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {mileageHistory.map((entry, index) => (
+                          <tr key={entry.id}>
+                            <td>
+                              {formatDateTime(entry.recordedAt)}
+                              {index === 0 && entry.mileage === row.mileage ? <span className="status-chip good" style={{ marginLeft: 6 }}>Actual</span> : null}
+                            </td>
+                            <td><strong>{(entry.mileage ?? 0).toLocaleString()} mi</strong></td>
+                            <td><span className="status-chip neutral">{mileageSourceLabel(entry.source)}</span></td>
+                            <td>{entry.reservationNumber || '-'}</td>
+                            <td>{entry.note || '-'}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                ) : (
+                  <div className="surface-note">Este vehículo no tiene entradas de millaje todavía. Se registrarán automáticamente en el próximo check-out o check-in, o puedes ajustarlo manualmente.</div>
+                )}
               </section>
 
               <section className="glass card-lg section-card">

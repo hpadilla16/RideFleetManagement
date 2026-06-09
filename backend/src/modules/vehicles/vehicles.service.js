@@ -2,6 +2,7 @@ import { prisma } from '../../lib/prisma.js';
 import { normalizeVehicleBlockType } from './vehicle-blocks.js';
 import { assertTenantVehicleCapacity } from '../../lib/tenant-plan-limits.js';
 import { buildVehicleOperationalSignalsMap } from './vehicle-intelligence.service.js';
+import { recordMileageEntry } from './mileage-history.service.js';
 import { settingsService } from '../settings/settings.service.js';
 import { normalizeZubieWebhookPayload } from './telematics-zubie.js';
 import { authenticate as voltswitchAuth, clearSession as voltswitchClearSession, getAllDevices as voltswitchGetAllDevices, getDeviceLocation as voltswitchGetLocation, normalizeDevice as voltswitchNormalizeDevice } from './telematics-voltswitch.js';
@@ -279,6 +280,10 @@ export const vehiclesService = {
           where: { isActive: true },
           orderBy: [{ updatedAt: 'desc' }, { createdAt: 'desc' }]
         },
+        mileageEntries: {
+          orderBy: { recordedAt: 'desc' },
+          take: 25
+        },
         rentalAgreements: {
           orderBy: { createdAt: 'desc' },
           take: 50,
@@ -345,6 +350,11 @@ export const vehiclesService = {
       telematicsDevices: (vehicle.telematicsDevices || []).map(normalizeTelematicsDeviceRow),
       latestTelematicsEvent: recentTelematicsEvent ? normalizeTelematicsEventRow(recentTelematicsEvent) : null,
       operationalSignals: effectiveSignalsMap.get(vehicle.id) || null,
+      // Mileage history (2026-06-09): latest 25 odometer entries (desc) + the
+      // single most recent, so the profile can show the timeline and label the
+      // current number with where it came from.
+      mileageHistory: vehicle.mileageEntries || [],
+      lastMileageEntry: vehicle.mileageEntries?.[0] || null,
       activeReservation,
       nextReservation,
       recentReservations
@@ -382,6 +392,35 @@ export const vehiclesService = {
     const data = { ...(patch || {}) };
     if (!scope?.allowCrossTenant) delete data.tenantId;
     return prisma.vehicle.update({ where: { id }, data });
+  },
+
+  // Manual odometer correction by an agent (2026-06-09). Appends a MANUAL row to
+  // the vehicle's mileage history and mirrors it onto Vehicle.mileage
+  // ("last entry wins"). Tenant-scoped like every other vehicle mutation. The
+  // history row is the audit trail — we never edit an existing reading, a
+  // correction is always a new entry. Returns the refreshed vehicle detail.
+  async recordManualMileage(id, { mileage, note = null } = {}, scope = {}, actorUserId = null) {
+    const vehicle = await prisma.vehicle.findFirst({
+      where: { id, ...(byTenantWhere(scope) || {}) },
+      select: { id: true, tenantId: true }
+    });
+    if (!vehicle) throw new Error('Vehicle not found');
+
+    const miles = Number(mileage);
+    if (!Number.isFinite(miles) || miles < 0) {
+      throw new Error('A valid mileage (0 or greater) is required');
+    }
+
+    await recordMileageEntry(prisma, {
+      vehicleId: vehicle.id,
+      tenantId: vehicle.tenantId ?? null,
+      mileage: miles,
+      source: 'MANUAL',
+      note: note ? String(note).slice(0, 500) : null,
+      actorUserId: actorUserId || null
+    });
+
+    return this.getById(id, scope);
   },
 
   // Bulk-set programCategory in a single updateMany. Tenant scope is

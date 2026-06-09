@@ -51,6 +51,7 @@ function fakeTx({ failOn } = {}) {
     vehicle: make('vehicle'),
     rentalAgreementPayment: make('rentalAgreementPayment'),
     rentalAgreementCharge: make('rentalAgreementCharge'),
+    vehicleMileageEntry: make('vehicleMileageEntry'),
     __calls: calls
   };
 }
@@ -72,7 +73,13 @@ const baseFinalizeCtx = {
   creditApplied: 0,
   customerIdForCredit: null,
   nextCustomerCredit: null,
-  creditNoteForCustomer: null
+  creditNoteForCustomer: null,
+  // Mileage-history provenance (2026-06-09). tenantId is non-undefined so the
+  // helper skips its tenant lookup — mirrors production passing agreement.tenantId.
+  vehicleId: 'veh-1',
+  tenantId: null,
+  reservationNumber: 'RES-1',
+  actorUserId: null
 };
 
 describe('applyFinalizeWritesTx', () => {
@@ -83,8 +90,11 @@ describe('applyFinalizeWritesTx', () => {
     assert.deepEqual(order, [
       'rentalAgreement.update',
       'reservation.update',
+      'reservation.findUnique',        // bug #44 vehicle-status sync (reads reservation)
       'vehicle.findUnique',           // bug #44 vehicle-status sync (read)
       'vehicle.update',               // AVAILABLE → ON_RENT on checkout
+      'vehicleMileageEntry.create',   // CHECKOUT mileage history entry (2026-06-09)
+      'vehicle.update',               // "last entry wins" mirror onto Vehicle.mileage
       'rentalAgreementPayment.create'
     ]);
     assert.equal(result.id, 'agr-1');
@@ -104,8 +114,11 @@ describe('applyFinalizeWritesTx', () => {
       'customer.update',
       'rentalAgreement.update',
       'reservation.update',
+      'reservation.findUnique',        // bug #44 vehicle-status sync (reads reservation)
       'vehicle.findUnique',            // bug #44 vehicle-status sync (read)
       'vehicle.update',                // AVAILABLE → ON_RENT on checkout
+      'vehicleMileageEntry.create',    // CHECKOUT mileage history entry (2026-06-09)
+      'vehicle.update',                // "last entry wins" mirror onto Vehicle.mileage
       'rentalAgreementPayment.create', // explicit paid amount
       'rentalAgreementPayment.create'  // credit-applied payment record
     ]);
@@ -120,7 +133,7 @@ describe('applyFinalizeWritesTx', () => {
       paymentMethod: null
     });
     const ops = tx.__calls.map((c) => `${c.model}.${c.op}`);
-    assert.deepEqual(ops, ['rentalAgreement.update', 'reservation.update', 'vehicle.findUnique', 'vehicle.update']);
+    assert.deepEqual(ops, ['rentalAgreement.update', 'reservation.update', 'reservation.findUnique', 'vehicle.findUnique', 'vehicle.update', 'vehicleMileageEntry.create', 'vehicle.update']);
   });
 
   it('rolls back contract: throws if reservation.update fails (caller is prisma.$transaction which then aborts)', async () => {
@@ -180,8 +193,11 @@ describe('applyFinalizeWritesTx', () => {
       'customer.update',
       'rentalAgreement.update',
       'reservation.update',
+      'reservation.findUnique',        // bug #44 vehicle-status sync (reads reservation)
       'vehicle.findUnique',            // bug #44 vehicle-status sync (read)
       'vehicle.update',                // AVAILABLE → ON_RENT on checkout
+      'vehicleMileageEntry.create',    // CHECKOUT mileage history entry (2026-06-09)
+      'vehicle.update',                // "last entry wins" mirror onto Vehicle.mileage
       'rentalAgreementPayment.create' // credit-only — one create, not two
     ]);
     const payments = tx.__calls.filter((c) => c.model === 'rentalAgreementPayment');

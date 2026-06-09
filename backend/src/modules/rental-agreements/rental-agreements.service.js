@@ -10,6 +10,7 @@ import { reservationPricingService } from '../reservations/reservation-pricing.s
 import { settingsService } from '../settings/settings.service.js';
 import { buildInspectionIntelligence } from '../vehicles/vehicle-intelligence.service.js';
 import { syncVehicleStatusForReservation } from '../vehicles/vehicle-status-sync.js';
+import { recordMileageEntry } from '../vehicles/mileage-history.service.js';
 import { normalizeDob, isImplausibleAge } from '../../lib/dob.js';
 import {
   isStorageEnabled as inspectionPhotosStorageEnabled,
@@ -1910,6 +1911,24 @@ export async function applyFinalizeWritesTx(tx, ctx) {
     vehicleId: updated.vehicleId,
     toStatus: 'CHECKED_OUT'
   });
+
+  // Mileage history (2026-06-09). Until now check-out wrote odometerOut on the
+  // agreement but NEVER touched Vehicle.mileage — only check-in did — so a car's
+  // profile showed a stale number with no hint of where it came from. Append a
+  // CHECKOUT entry and mirror it onto the vehicle ("last entry wins"), in this
+  // same tx so the timeline and the agreement commit atomically.
+  if (updated.vehicleId && ctx.odometerOut != null) {
+    await recordMileageEntry(tx, {
+      vehicleId: updated.vehicleId,
+      tenantId: ctx.tenantId,
+      mileage: ctx.odometerOut,
+      source: 'CHECKOUT',
+      reservationId: updated.reservationId,
+      rentalAgreementId: ctx.id,
+      reservationNumber: ctx.reservationNumber,
+      actorUserId: ctx.actorUserId
+    });
+  }
 
   if (ctx.hasExplicitPaidAmount && ctx.paidAmount > 0 && ctx.paymentMethod) {
     await tx.rentalAgreementPayment.create({
@@ -5038,7 +5057,12 @@ export const rentalAgreementsService = {
       creditApplied,
       customerIdForCredit,
       nextCustomerCredit,
-      creditNoteForCustomer
+      creditNoteForCustomer,
+      // Mileage history (2026-06-09): provenance for the CHECKOUT odometer entry.
+      vehicleId: agreement.vehicleId,
+      tenantId: agreement.tenantId ?? null,
+      reservationNumber: agreement.reservation?.reservationNumber || null,
+      actorUserId: payload.actorUserId || null
     };
     let updated;
     await prisma.$transaction(async (tx) => {

@@ -327,6 +327,29 @@ vehiclesRouter.patch('/:id', async (req, res, next) => {
   }
 });
 
+// Manual odometer correction (2026-06-09). Agents adjust a vehicle's mileage
+// from its profile; the change is logged as a MANUAL entry in the mileage
+// history and mirrored onto Vehicle.mileage. Body: { mileage, note? }.
+vehiclesRouter.post('/:id/mileage', async (req, res, next) => {
+  try {
+    const body = assertPlainObject(req.body, 'body');
+    if (body.mileage === undefined || body.mileage === null || `${body.mileage}`.trim() === '') {
+      return res.status(400).json({ error: 'mileage is required' });
+    }
+    const row = await vehiclesService.recordManualMileage(
+      req.params.id,
+      { mileage: body.mileage, note: body.note ?? null },
+      scopeFor(req),
+      req.user?.sub || null
+    );
+    res.json(row);
+  } catch (e) {
+    if (/not found/i.test(String(e?.message || ''))) return res.status(404).json({ error: 'Vehicle not found' });
+    if (/valid mileage/i.test(String(e?.message || ''))) return res.status(400).json({ error: e.message });
+    next(e);
+  }
+});
+
 vehiclesRouter.delete('/:id', async (req, res) => {
   try {
     await vehiclesService.remove(req.params.id, scopeFor(req));

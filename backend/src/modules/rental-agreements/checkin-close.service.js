@@ -26,6 +26,7 @@
 
 import { prisma } from '../../lib/prisma.js';
 import logger from '../../lib/logger.js';
+import { recordMileageEntrySafe } from '../vehicles/mileage-history.service.js';
 import { syncVehicleStatusForReservation } from '../vehicles/vehicle-status-sync.js';
 import { feeEngineService } from '../fees/fee-engine.service.js';
 import { settingsService } from '../settings/settings.service.js';
@@ -106,26 +107,23 @@ export async function closeAgreementWithCheckinFees(
     }
   });
 
-  // "Last odometer wins" — when a check-in records an odometer reading,
-  // also flip Vehicle.mileage so the next check-out auto-populates from
-  // the freshest known value. Stamp lastOdometerSource with the
-  // reservation number so the audit trail says which workflow last
-  // touched the row. 2026-05-28.
+  // "Last entry wins" — when a check-in records an odometer reading, append a
+  // CHECKIN row to the vehicle's mileage history AND mirror it onto
+  // Vehicle.mileage + lastOdometerSource (so the next check-out auto-populates
+  // from the freshest value and the profile shows where the number came from).
+  // recordMileageEntrySafe swallows its own errors → non-fatal, check-in still
+  // proceeds if the history write fails. (2026-05-28 mirror → 2026-06-09 history.)
   if (odometerIn != null && agreement.vehicleId) {
-    try {
-      await prisma.vehicle.update({
-        where: { id: agreement.vehicleId },
-        data: {
-          mileage: odometerIn,
-          lastOdometerSource: `CHECKIN_${agreement.reservation?.reservationNumber || agreement.reservationId}`,
-        },
-      });
-    } catch (err) {
-      logger.warn('[checkin-close] Vehicle.mileage update failed', {
-        vehicleId: agreement.vehicleId, err: err.message,
-      });
-      // Non-fatal — checkin proceeds without the mileage sync.
-    }
+    await recordMileageEntrySafe(prisma, {
+      vehicleId: agreement.vehicleId,
+      tenantId: agreement.tenantId ?? null,
+      mileage: odometerIn,
+      source: 'CHECKIN',
+      reservationId: agreement.reservationId,
+      rentalAgreementId: agreement.id,
+      reservationNumber: agreement.reservation?.reservationNumber || null,
+      actorUserId: actorUserId || null,
+    });
   }
 
   // ─────────────────────────────────────────────────────────────────────────
