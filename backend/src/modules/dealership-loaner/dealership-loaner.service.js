@@ -822,7 +822,11 @@ export const dealershipLoanerService = {
           make: true,
           model: true,
           internalNumber: true,
-          status: true
+          plate: true,
+          status: true,
+          // So the loaner check-out vehicle cards can show class + plate, not just
+          // the make/model name. (loaner picker UX)
+          vehicleType: { select: { id: true, name: true, code: true } }
         }
       })
     ]);
