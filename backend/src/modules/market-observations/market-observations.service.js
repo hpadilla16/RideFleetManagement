@@ -43,6 +43,21 @@ export async function getMarketSummary({ airport, scope }) {
     throw err;
   }
 
+  // Dashboard SIPP picker (beta.134): the tenant may pin up to 6 SIPP codes to
+  // their MI dashboard card. Returned as `preferredSipps` so the card can show
+  // those (in the tenant's order) instead of the default top-6-by-volume. Empty
+  // array → frontend keeps the top-6 fallback.
+  let preferredSipps = [];
+  if (scope.tenantId && scope.tenantId !== '__no_tenant__') {
+    const tenant = await prisma.tenant.findUnique({
+      where: { id: scope.tenantId },
+      select: { dashboardSipps: true },
+    });
+    preferredSipps = Array.isArray(tenant?.dashboardSipps)
+      ? tenant.dashboardSipps.map((s) => String(s || '').trim().toUpperCase()).filter(Boolean)
+      : [];
+  }
+
   const profileWhere = {
     locationCode: airport.toUpperCase(),
     active: true,
@@ -60,7 +75,7 @@ export async function getMarketSummary({ airport, scope }) {
     select: { id: true, tenantId: true, targetRateId: true },
   });
   if (profiles.length === 0) {
-    return { airport: airport.toUpperCase(), sipps: [], updatedAt: null };
+    return { airport: airport.toUpperCase(), sipps: [], updatedAt: null, preferredSipps };
   }
 
   const profileIds = profiles.map((p) => p.id);
@@ -192,7 +207,7 @@ export async function getMarketSummary({ airport, scope }) {
   const updatedAt =
     obs.length === 0 ? null : new Date(Math.max(...obs.map((o) => o.observedAt.getTime())));
 
-  return { airport: airport.toUpperCase(), sipps, updatedAt };
+  return { airport: airport.toUpperCase(), sipps, updatedAt, preferredSipps };
 }
 
 /**

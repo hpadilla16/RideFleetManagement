@@ -28,6 +28,16 @@ const DEFAULTS = {
 
 const ALLOWED_KEYS = Object.keys(DEFAULTS);
 
+// Market Intelligence dashboard SIPP picker (beta.134). A tenant pins up to 6 of
+// these to their MI dashboard card. Keep in sync with SIPP_NAMES in the frontend
+// MarketIntelligenceCard.jsx. Unknown codes are rejected on save.
+const DASHBOARD_SIPP_CODES = [
+  'ECAR', 'CCAR', 'ICAR', 'SCAR', 'FCAR', 'PCAR', 'LCAR',
+  'CFAR', 'IFAR', 'SFAR', 'FFAR', 'PFAR', 'LFAR', 'RFAR', 'XFAR', 'FJAR', 'FVAR',
+  'MVAR', 'SPAR', 'STAR', 'PUAR'
+];
+const DASHBOARD_SIPP_MAX = 6;
+
 const DEFAULT_EMAIL_TEMPLATES = {
   requestSignatureSubject: 'Signature Request - Reservation {{reservationNumber}}',
   requestSignatureBody: 'Hello {{customerName}},\n\nPlease sign your rental documents using this secure link:\n{{link}}\n\nThank you.',
@@ -925,6 +935,42 @@ export const settingsService = {
     } catch {
       return normalizeSelfServiceConfig(DEFAULT_SELF_SERVICE_CONFIG, { ...options, tenantPlan: tenant?.plan || 'BETA' });
     }
+  },
+
+  // --- Market Intelligence dashboard SIPP picker (beta.134) -----------------
+  // Up to 6 SIPP codes the tenant pins to the MI dashboard card, stored on
+  // Tenant.dashboardSipps (JSON array). Empty → card falls back to the top 6 by
+  // market volume. getDashboardSipps also returns the valid option list + max so
+  // the Settings UI can render the picker without hardcoding the SIPP catalog.
+  async getDashboardSipps(scope = {}) {
+    if (!scope?.tenantId) throw new Error('tenantId is required');
+    const tenant = await prisma.tenant.findUnique({
+      where: { id: scope.tenantId },
+      select: { dashboardSipps: true }
+    });
+    const raw = Array.isArray(tenant?.dashboardSipps) ? tenant.dashboardSipps : [];
+    const sipps = Array.from(new Set(
+      raw
+        .map((s) => String(s || '').trim().toUpperCase())
+        .filter((s) => DASHBOARD_SIPP_CODES.includes(s))
+    )).slice(0, DASHBOARD_SIPP_MAX);
+    return { sipps, options: DASHBOARD_SIPP_CODES, max: DASHBOARD_SIPP_MAX };
+  },
+
+  async updateDashboardSipps(payload = {}, scope = {}) {
+    if (!scope?.tenantId) throw new Error('tenantId is required');
+    const input = Array.isArray(payload?.sipps) ? payload.sipps : [];
+    const cleaned = Array.from(new Set(
+      input
+        .map((s) => String(s || '').trim().toUpperCase())
+        .filter((s) => DASHBOARD_SIPP_CODES.includes(s))
+    )).slice(0, DASHBOARD_SIPP_MAX);
+    await prisma.tenant.update({
+      where: { id: scope.tenantId },
+      // null (not []) when empty so the card cleanly falls back to top-6-by-volume.
+      data: { dashboardSipps: cleaned.length ? cleaned : null }
+    });
+    return { sipps: cleaned, options: DASHBOARD_SIPP_CODES, max: DASHBOARD_SIPP_MAX };
   },
 
   async updateTelematicsConfig(payload = {}, scope = {}) {

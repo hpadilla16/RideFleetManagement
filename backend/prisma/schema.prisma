@@ -405,6 +405,11 @@ model Tenant {
   // is hidden from the nav and all /api/market* + /api/pricing-* routes
   // 403 — see lib/module-access.js normalizeTenantModuleConfig.
   marketIntelligenceEnabled Boolean  @default(false)
+  // Up to 6 SIPP codes the tenant pins to the Market Intelligence dashboard
+  // card (e.g. ["CCAR","CFAR",...]). null/empty → card falls back to the top 6
+  // by market volume. Set from Settings → Market Intelligence. See
+  // settings.service.js getDashboardSipps/updateDashboardSipps (beta.134).
+  dashboardSipps          Json?
   platformFeeEnabled      Boolean  @default(true)
   platformFeePct          Decimal  @default(10) @db.Decimal(6, 3)
   platformFeeMin          Decimal  @default(7) @db.Decimal(10, 2)

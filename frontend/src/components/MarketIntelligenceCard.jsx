@@ -43,6 +43,23 @@ const SIPP_NAMES = {
   PUAR: 'Pickup', XFAR: 'Open-Air All-Terrain', RFAR: 'Recreational',
 };
 
+// Dashboard SIPP picker (beta.134): when the tenant has pinned SIPP codes
+// (summary.preferredSipps from Settings → Market Intelligence), show those in
+// the tenant's order. Otherwise fall back to the top 6 by market volume. If the
+// pinned codes have no market data yet, fall back too so the card isn't empty.
+function selectDashboardSipps(summary) {
+  const all = Array.isArray(summary?.sipps) ? summary.sipps : [];
+  const preferred = Array.isArray(summary?.preferredSipps)
+    ? summary.preferredSipps.map((s) => String(s || '').trim().toUpperCase()).filter(Boolean)
+    : [];
+  if (preferred.length) {
+    const byCode = new Map(all.map((s) => [String(s.sipp || '').toUpperCase(), s]));
+    const picked = preferred.map((code) => byCode.get(code)).filter(Boolean);
+    if (picked.length) return picked.slice(0, 6);
+  }
+  return all.slice(0, 6);
+}
+
 function rankClass(rank, total) {
   if (rank == null) return { className: 'rank-mid', bg: '#fef9c3', color: '#854d0e' };
   if (rank <= 3) return { className: 'rank-good', bg: '#ecfdf5', color: '#166534' };
@@ -154,8 +171,8 @@ export default function MarketIntelligenceCard({ me, token }) {
           (s) => String(s.createdAt || '').slice(0, 10) === today
         ).length;
         setAutoAppliedTodayCount(todayAuto);
-        // Fetch sparkline history for the top 6 SIPPs by observation count.
-        const top6 = (sum?.sipps || []).slice(0, 6).map((s) => s.sipp).filter(Boolean);
+        // Fetch sparkline history for the dashboard SIPPs (tenant-pinned or top 6).
+        const top6 = selectDashboardSipps(sum).map((s) => s.sipp).filter(Boolean);
         return Promise.all(
           top6.map((sipp) =>
             api(`/api/market/history?airport=${encodeURIComponent(airport)}&sipp=${encodeURIComponent(sipp)}&days=7`,
@@ -186,7 +203,7 @@ export default function MarketIntelligenceCard({ me, token }) {
     return () => clearInterval(id);
   }, [enabled, token, hidden]);
 
-  const top6 = useMemo(() => (summary?.sipps || []).slice(0, 6), [summary]);
+  const top6 = useMemo(() => selectDashboardSipps(summary), [summary]);
 
   if (!enabled || hidden) return null;
   if (locations.length === 0 && !loading) return null;

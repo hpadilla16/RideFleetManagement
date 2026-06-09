@@ -41,6 +41,23 @@ settingsRouter.put('/tenant-modules', requireRole('ADMIN'), async (req, res, nex
   }
 });
 
+// Market Intelligence dashboard SIPP picker (beta.134). ADMIN-scoped per tenant.
+settingsRouter.get('/dashboard-sipps', requireRole('ADMIN'), async (req, res, next) => {
+  try {
+    res.json(await settingsService.getDashboardSipps(scopeFor(req)));
+  } catch (e) {
+    next(e);
+  }
+});
+
+settingsRouter.put('/dashboard-sipps', requireRole('ADMIN'), async (req, res, next) => {
+  try {
+    res.json(await settingsService.updateDashboardSipps(req.body || {}, scopeFor(req)));
+  } catch (e) {
+    next(e);
+  }
+});
+
 settingsRouter.get('/users/:userId/module-access', requireRole('ADMIN'), enforceUserModuleScope, async (req, res, next) => {
   try {
     res.json(await settingsService.getUserModuleAccess(req.targetUser.id));

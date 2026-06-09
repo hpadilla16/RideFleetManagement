@@ -59,6 +59,7 @@ const SETTINGS_TAB_SECTIONS = {
   payments: [],
   ai: ['plannerCopilot', 'plannerCopilotUsage'],
   telematics: ['telematics'],
+  marketIntel: ['dashboardSipps'],
   access: [],
   emails: ['emailTemplates', 'reviewEmail'],
   services: ['services', 'fees'],
@@ -66,6 +67,19 @@ const SETTINGS_TAB_SECTIONS = {
   commissions: [],
   franchises: [],
   integrations: []
+};
+
+// Market Intelligence dashboard SIPP picker (beta.134). Friendly labels for the
+// SIPP codes the backend returns in `options`. Keep in sync with SIPP_NAMES in
+// components/MarketIntelligenceCard.jsx + DASHBOARD_SIPP_CODES in settings.service.js.
+const SIPP_LABELS = {
+  ECAR: 'Economy', CCAR: 'Compact', ICAR: 'Mid-size', SCAR: 'Standard',
+  FCAR: 'Fullsize', PCAR: 'Premium', LCAR: 'Luxury',
+  CFAR: 'Compact SUV', IFAR: 'Mid-size SUV', SFAR: 'Standard SUV',
+  FFAR: 'Fullsize SUV', PFAR: 'Premium SUV', LFAR: 'Luxury SUV',
+  RFAR: 'Recreational', XFAR: 'Open-Air All-Terrain', FJAR: 'SUV (FJAR)',
+  FVAR: 'Passenger Van', MVAR: 'Minivan', SPAR: 'Special',
+  STAR: 'Sports/Convertible', PUAR: 'Pickup'
 };
 
 export default function SettingsPage() {
@@ -110,6 +124,8 @@ function SettingsInner({ token, me, logout }) {
   const [plannerCopilotConfig, setPlannerCopilotConfig] = useState(DEFAULT_PLANNER_COPILOT_CONFIG);
   const [plannerCopilotUsage, setPlannerCopilotUsage] = useState(DEFAULT_PLANNER_COPILOT_USAGE);
   const [telematicsConfig, setTelematicsConfig] = useState(DEFAULT_TELEMATICS_CONFIG);
+  // Market Intelligence dashboard SIPP picker (beta.134)
+  const [dashboardSipps, setDashboardSipps] = useState({ sipps: [], options: [], max: 6 });
   const [revenuePricingConfig, setRevenuePricingConfig] = useState(DEFAULT_REVENUE_PRICING_CONFIG);
   const [revenuePricingPreview, setRevenuePricingPreview] = useState(DEFAULT_REVENUE_PRICING_PREVIEW);
   const [revenuePricingPreviewResult, setRevenuePricingPreviewResult] = useState(null);
@@ -258,6 +274,13 @@ function SettingsInner({ token, me, logout }) {
         }
       });
     }
+    if (key === 'dashboardSipps') {
+      setDashboardSipps({
+        sipps: Array.isArray(value?.sipps) ? value.sipps : [],
+        options: Array.isArray(value?.options) ? value.options : [],
+        max: Number(value?.max) || 6
+      });
+    }
     if (key === 'revenuePricing') {
       setRevenuePricingConfig({
         ...DEFAULT_REVENUE_PRICING_CONFIG,
@@ -295,6 +318,7 @@ function SettingsInner({ token, me, logout }) {
     plannerCopilot: (forceLoad = false) => api(scopedSettingsPath('/api/settings/planner-copilot'), forceLoad ? { bypassCache: true } : {}, token),
     plannerCopilotUsage: (forceLoad = false) => api(scopedSettingsPath('/api/settings/planner-copilot/usage'), forceLoad ? { bypassCache: true } : {}, token),
     telematics: (forceLoad = false) => api(scopedSettingsPath('/api/settings/telematics'), forceLoad ? { bypassCache: true } : {}, token),
+    dashboardSipps: (forceLoad = false) => api(scopedSettingsPath('/api/settings/dashboard-sipps'), forceLoad ? { bypassCache: true } : {}, token),
     revenuePricing: (forceLoad = false) => api(scopedSettingsPath('/api/settings/revenue-pricing'), forceLoad ? { bypassCache: true } : {}, token),
     carSharingSearchPlaces: (forceLoad = false) => api(scopedSettingsPath('/api/settings/car-sharing-search-places'), forceLoad ? { bypassCache: true } : {}, token),
     precheckinDiscount: (forceLoad = false) => api(scopedSettingsPath('/api/settings/precheckin-discount'), forceLoad ? { bypassCache: true } : {}, token),
@@ -688,6 +712,29 @@ function SettingsInner({ token, me, logout }) {
       clearZubieWebhookSecret: false
     });
     setMsg('Telematics settings saved');
+  };
+
+  // Market Intelligence dashboard SIPP picker (beta.134)
+  const toggleDashboardSipp = (code) => {
+    setDashboardSipps((current) => {
+      const has = current.sipps.includes(code);
+      if (has) return { ...current, sipps: current.sipps.filter((c) => c !== code) };
+      if (current.sipps.length >= (current.max || 6)) return current; // cap reached
+      return { ...current, sipps: [...current.sipps, code] };
+    });
+  };
+
+  const saveDashboardSipps = async () => {
+    const out = await api(scopedSettingsPath('/api/settings/dashboard-sipps'), {
+      method: 'PUT',
+      body: JSON.stringify({ sipps: dashboardSipps.sipps })
+    }, token);
+    setDashboardSipps({
+      sipps: Array.isArray(out?.sipps) ? out.sipps : [],
+      options: Array.isArray(out?.options) ? out.options : dashboardSipps.options,
+      max: Number(out?.max) || dashboardSipps.max || 6
+    });
+    setMsg('Dashboard SIPPs saved');
   };
 
   const saveRevenuePricingConfig = async () => {
@@ -2139,6 +2186,7 @@ function SettingsInner({ token, me, logout }) {
     payments: 'Payments',
     ai: 'AI Copilot',
     telematics: 'Telematics',
+    marketIntel: 'Market Intelligence',
     emails: 'Emails',
     services: 'Additional Services',
     commissions: 'Commissions',
@@ -2250,6 +2298,7 @@ function SettingsInner({ token, me, logout }) {
           <button onClick={() => setTab('payments')}>Payments</button>
           <button onClick={() => setTab('ai')}>AI Copilot</button>
           <button onClick={() => setTab('telematics')}>Telematics</button>
+          <button onClick={() => setTab('marketIntel')}>Market Intelligence</button>
           <button onClick={() => setTab('access')}>Access Control</button>
           <button onClick={() => setTab('emails')}>Emails</button>
           <button onClick={() => setTab('services')}>Additional Services</button>
@@ -4749,6 +4798,63 @@ function SettingsInner({ token, me, logout }) {
                       : 'No secret header required'}
                   </strong>
                 </div>
+              </div>
+            </section>
+          </div>
+        )}
+
+        {tab === 'marketIntel' && (
+          <div className="stack">
+            <h2>Market Intelligence</h2>
+            <section className="glass card section-card">
+              <div className="row-between" style={{ alignItems: 'flex-start', gap: 12 }}>
+                <div className="stack" style={{ gap: 6 }}>
+                  <h3 style={{ margin: 0 }}>Onboarding wizard</h3>
+                  <div className="ui-muted">Stand up market-based pricing in 4 steps (airports → discovery → SIPP mapping → guardrails). Creates rules in SUGGEST mode — nothing auto-applies.</div>
+                </div>
+                <button type="button" onClick={() => { window.location.href = '/market/onboarding'; }}>Open wizard</button>
+              </div>
+            </section>
+            <section className="glass card section-card">
+              <div className="stack" style={{ gap: 6 }}>
+                <h3 style={{ margin: 0 }}>Dashboard SIPP picker</h3>
+                <div className="ui-muted">
+                  Pick up to {dashboardSipps.max || 6} vehicle classes (SIPP codes) to pin to the
+                  Market Intelligence dashboard card, in the order you tap them. Leave empty to show
+                  the top {dashboardSipps.max || 6} by market volume.
+                </div>
+              </div>
+              <div className="ui-muted" style={{ marginTop: 8 }}>
+                Selected: {dashboardSipps.sipps.length}/{dashboardSipps.max || 6}
+              </div>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 10 }}>
+                {(dashboardSipps.options || []).map((code) => {
+                  const selected = dashboardSipps.sipps.includes(code);
+                  const atCap = !selected && dashboardSipps.sipps.length >= (dashboardSipps.max || 6);
+                  return (
+                    <button
+                      key={code}
+                      type="button"
+                      onClick={() => toggleDashboardSipp(code)}
+                      disabled={atCap}
+                      className={selected ? '' : 'button-subtle'}
+                      title={atCap ? `Limit of ${dashboardSipps.max || 6} reached` : ''}
+                      style={{ opacity: atCap ? 0.5 : 1 }}
+                    >
+                      {selected ? '✓ ' : ''}{code} · {SIPP_LABELS[code] || code}
+                    </button>
+                  );
+                })}
+              </div>
+              <div className="inline-actions" style={{ marginTop: 14 }}>
+                <button type="button" onClick={saveDashboardSipps}>Save Dashboard SIPPs</button>
+                <button
+                  type="button"
+                  className="button-subtle"
+                  onClick={() => setDashboardSipps((current) => ({ ...current, sipps: [] }))}
+                >
+                  Clear (use top 6)
+                </button>
               </div>
             </section>
           </div>
