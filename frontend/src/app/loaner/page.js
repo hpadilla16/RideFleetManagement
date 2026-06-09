@@ -158,11 +158,11 @@ function restoreLoanerForm() {
 
 function formatDateTime(value) {
   if (!value) return '-';
-  try {
-    return new Date(value).toLocaleString();
-  } catch {
-    return String(value);
-  }
+  // new Date(bad).toLocaleString() returns the literal "Invalid Date" (it does
+  // not throw), which leaked into the Operations Timeline. Guard with isNaN.
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return '-';
+  return d.toLocaleString();
 }
 
 function formatMoney(value) {
@@ -1266,15 +1266,20 @@ function LoanerQueueCard({ title, subtitle, rows, emptyText, actions, loading })
                 </div>
               ) : null}
               <div className="inline-actions" style={{ gap: 8 }}>
-                <span className={`status-chip ${row.loanerBorrowerPacketCompletedAt ? 'good' : 'warn'}`}>
-                  {row.loanerBorrowerPacketCompletedAt ? 'Agreement complete' : 'Agreement pending'}
+                <span className={`status-chip ${(row.agreementSigned || row.loanerBorrowerPacketCompletedAt) ? 'good' : 'warn'}`}>
+                  {row.agreementSigned ? 'Agreement signed' : (row.loanerBorrowerPacketCompletedAt ? 'Packet complete' : 'Agreement pending')}
                 </span>
                 {row.loanerReturnExceptionFlag ? <span className="status-chip warn">Return issue flagged</span> : null}
                 {row.alertReason ? <span className={`status-chip ${row.alertSeverity === 'warn' ? 'warn' : 'neutral'}`}>{row.alertReason}</span> : null}
               </div>
-              <div className="label" style={{ textTransform: 'none', letterSpacing: 0, fontSize: 12 }}>
-                Advisor: {row.serviceAdvisorName || '-'} · Location: {row.pickupLocation?.name || '-'}
-              </div>
+              {(row.serviceAdvisorName || row.pickupLocation?.name) ? (
+                <div className="label" style={{ textTransform: 'none', letterSpacing: 0, fontSize: 12 }}>
+                  {[
+                    row.serviceAdvisorName ? `Advisor: ${row.serviceAdvisorName}` : null,
+                    row.pickupLocation?.name ? `Location: ${row.pickupLocation.name}` : null
+                  ].filter(Boolean).join(' · ')}
+                </div>
+              ) : null}
               <div className="inline-actions">{actions(row)}</div>
             </div>
           ))}

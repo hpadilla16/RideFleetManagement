@@ -14,6 +14,35 @@
 import { useEffect, useRef, useState } from 'react';
 import { parseAamva } from '../../lib/aamva';
 
+// PDF417 on the back of a license is dense — it needs a high-res REAR camera to
+// decode. zxing's default decodeFromVideoDevice(undefined) picks the default
+// camera (often the FRONT cam on phones/tablets) at ~640x480, which is why the
+// webcam scan failed. Request environment-facing 1080p with continuous focus.
+const CAMERA_CONSTRAINTS = {
+  audio: false,
+  video: {
+    facingMode: { ideal: 'environment' },
+    width: { ideal: 1920 },
+    height: { ideal: 1080 },
+    advanced: [{ focusMode: 'continuous' }] // honored on Android/Chrome; ignored elsewhere
+  }
+};
+
+// Shared reader with TRY_HARDER so partially-skewed / lower-contrast barcodes
+// still decode (matters for webcams and phone shots taken at an angle).
+async function makePdf417Reader() {
+  const [{ BrowserPDF417Reader }, lib] = await Promise.all([
+    import('@zxing/browser'),
+    import('@zxing/library')
+  ]);
+  let hints;
+  try {
+    hints = new Map();
+    hints.set(lib.DecodeHintType.TRY_HARDER, true);
+  } catch { hints = undefined; }
+  return new BrowserPDF417Reader(hints);
+}
+
 export function LicenseScanner({ onDecode, onPhoto }) {
   const videoRef = useRef(null);
   const controlsRef = useRef(null);
@@ -44,17 +73,21 @@ export function LicenseScanner({ onDecode, onPhoto }) {
 
   async function startCamera() {
     setError('');
-    setStatus('Hold the barcode (back of the license) steady in the frame…');
+    setStatus('Hold the BACK of the license steady — fill the frame with the barcode…');
     setScanning(true);
     try {
-      const { BrowserPDF417Reader } = await import('@zxing/browser');
-      const reader = new BrowserPDF417Reader();
-      controlsRef.current = await reader.decodeFromVideoDevice(undefined, videoRef.current, (result, _err, controls) => {
-        if (result) {
-          controls.stop();
-          handleText(result.getText());
-        }
-      });
+      const reader = await makePdf417Reader();
+      const onResult = (result, _err, controls) => {
+        if (result) { controls.stop(); handleText(result.getText()); }
+      };
+      try {
+        // Preferred: high-res rear camera.
+        controlsRef.current = await reader.decodeFromConstraints(CAMERA_CONSTRAINTS, videoRef.current, onResult);
+      } catch {
+        // Fallback for single-camera desktops/webcams where the environment
+        // constraint can't be satisfied — let zxing use the default device.
+        controlsRef.current = await reader.decodeFromVideoDevice(undefined, videoRef.current, onResult);
+      }
     } catch {
       setError('Camera unavailable — use “Upload barcode photo” instead.');
       setScanning(false);
@@ -68,10 +101,11 @@ export function LicenseScanner({ onDecode, onPhoto }) {
     setStatus('Reading barcode…');
     try {
       const { compressToDataUrl } = await import('../../lib/image-compressor');
-      const dataUrl = await compressToDataUrl(file, { maxWidth: 1600, quality: 0.85 });
+      // PDF417 lines are fine-grained — keep more pixels + higher quality than a
+      // normal photo so the bars survive compression (1600/0.85 was too lossy).
+      const dataUrl = await compressToDataUrl(file, { maxWidth: 2400, quality: 0.92 });
       onPhoto?.(dataUrl);
-      const { BrowserPDF417Reader } = await import('@zxing/browser');
-      const reader = new BrowserPDF417Reader();
+      const reader = await makePdf417Reader();
       const result = await reader.decodeFromImageUrl(dataUrl);
       handleText(result.getText());
     } catch {

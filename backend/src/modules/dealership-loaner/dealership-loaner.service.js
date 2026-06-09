@@ -15,7 +15,11 @@ function includeReservation() {
     vehicleType: true,
     pickupLocation: true,
     returnLocation: true,
-    rentalAgreement: true
+    rentalAgreement: true,
+    // Loaner reimagining: the signed packet lives on LoanerAgreement (status
+    // ACTIVE once signed). Needed so the board badge reflects the SIGNATURE, not
+    // just the borrower-checklist completion. (Ola2 2.4)
+    loanerAgreement: { select: { status: true } }
   };
 }
 
@@ -459,6 +463,10 @@ function reservationCard(row) {
     estimatedServiceCompletionAt: row.estimatedServiceCompletionAt,
     loanerBorrowerPacketCompletedAt: row.loanerBorrowerPacketCompletedAt,
     loanerBorrowerPacketCompletedBy: row.loanerBorrowerPacketCompletedBy,
+    // (Ola2 2.4) Agreement SIGNED state from LoanerAgreement.status. ACTIVE means
+    // signed + keys out; RETURNED/CLOSED are past that. Drives the board badge.
+    loanerAgreementStatus: row.loanerAgreement?.status || null,
+    agreementSigned: ['ACTIVE', 'RETURNED', 'CLOSED'].includes(String(row.loanerAgreement?.status || '').toUpperCase()),
     loanerBorrowerPacket: packet,
     loanerBillingContactName: row.loanerBillingContactName,
     loanerBillingContactEmail: row.loanerBillingContactEmail,
@@ -715,7 +723,10 @@ export const dealershipLoanerService = {
         prisma.reservation.count({ where: { ...loanerWhere, readyForPickupAt: { not: null }, status: { in: ['NEW', 'CONFIRMED'] } } }),
         prisma.reservation.count({ where: { ...loanerWhere, status: { in: ['NEW', 'CONFIRMED'] }, loanerBorrowerPacketCompletedAt: null } }),
         prisma.reservation.count({ where: { ...loanerWhere, status: { not: 'CANCELLED' }, loanerBillingMode: { in: ['CUSTOMER_PAY', 'WARRANTY', 'INSURANCE'] }, loanerBillingStatus: { not: 'SETTLED' } } }),
-        prisma.reservation.count({ where: { ...loanerWhere, loanerReturnExceptionFlag: true, status: { not: 'CANCELLED' } } }),
+        // (Ola2 2.5) Only OPEN return exceptions — exclude loaners already closed
+        // out (accounting closed) or billing-settled, otherwise the counter stays
+        // stale forever after the issue was handled at closeout.
+        prisma.reservation.count({ where: { ...loanerWhere, loanerReturnExceptionFlag: true, status: { not: 'CANCELLED' }, loanerAccountingClosedAt: null, NOT: { loanerBillingStatus: 'SETTLED' } } }),
         prisma.reservation.count({ where: { ...loanerWhere, status: 'CHECKED_OUT', returnAt: { lt: now } } }),
         prisma.reservation.count({ where: { ...loanerWhere, status: { in: ['NEW', 'CONFIRMED'] }, estimatedServiceCompletionAt: { lt: now }, readyForPickupAt: null } })
       ])
@@ -767,25 +778,36 @@ export const dealershipLoanerService = {
 
   async getIntakeOptions(user) {
     const scope = tenantScope(user);
+    const role = String(user?.role || '').toUpperCase();
+    // Tenant isolation (3.3): the previous `scope?.tenantId ? {tenantId} : undefined`
+    // IGNORED the `{id:'__never__'}` sentinel that tenantScope() returns for a
+    // non-super-admin without a tenantId — so such a user got an unfiltered query
+    // that leaked EVERY tenant's customers/locations/vehicles into the intake
+    // picker (e.g. "Beta B Tenant Location A"). Now: SUPER_ADMIN (scope {}) is
+    // cross-tenant by design; everyone else is hard-scoped to their tenant, and a
+    // user with no resolvable tenant matches nothing instead of everything.
+    const tenantWhere = role === 'SUPER_ADMIN'
+      ? undefined
+      : { tenantId: scope?.tenantId || '__never__' };
     const [customers, locations, vehicleTypes, vehicles] = await Promise.all([
       prisma.customer.findMany({
-        where: scope?.tenantId ? { tenantId: scope.tenantId } : undefined,
+        where: tenantWhere,
         orderBy: [{ lastName: 'asc' }, { firstName: 'asc' }],
         select: { id: true, firstName: true, lastName: true, email: true, phone: true }
       }),
       prisma.location.findMany({
-        where: scope?.tenantId ? { tenantId: scope.tenantId } : undefined,
+        where: tenantWhere,
         orderBy: { name: 'asc' },
         select: { id: true, name: true }
       }),
       prisma.vehicleType.findMany({
-        where: scope?.tenantId ? { tenantId: scope.tenantId } : undefined,
+        where: tenantWhere,
         orderBy: { name: 'asc' },
         select: { id: true, name: true }
       }),
       prisma.vehicle.findMany({
         where: {
-          ...(scope?.tenantId ? { tenantId: scope.tenantId } : {}),
+          ...(tenantWhere || {}),
           status: { notIn: ['IN_MAINTENANCE', 'OUT_OF_SERVICE'] },
           // Only show vehicles eligible for loaner program (LOANER_ONLY or BOTH).
           // Hides RENTAL_ONLY vehicles from the loaner intake picker so the

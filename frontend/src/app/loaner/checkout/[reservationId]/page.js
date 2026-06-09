@@ -43,8 +43,14 @@ function fullName(c) {
 
 function vehicleLabel(v) {
   if (!v) return '';
+  // (Ola2 2.2) Some loaner fleet rows have no year/make/model — never fall back
+  // to the raw cuid (looked like a blank/garbage card). Use unit #, plate, or a
+  // generic label so every card reads cleanly.
   const core = [v.year, v.make, v.model].filter(Boolean).join(' ');
-  return core || v.name || v.id;
+  if (core) return core;
+  if (v.internalNumber) return `Unit #${v.internalNumber}`;
+  if (v.licensePlate || v.plate) return `Plate ${v.licensePlate || v.plate}`;
+  return v.name || v.vehicleType?.name || 'Loaner vehicle';
 }
 
 function LoanerCheckoutWizard({ token, me, logout }) {
@@ -585,7 +591,7 @@ function SuccessScreen({ agreement, reservation, onRemote, remoteLink, smsTo, ro
           {agreement?.agreementNumber} · {fullName(agreement?.customer)} · keys out
         </div>
         <div style={{ marginTop: 8, fontSize: 13, color: '#6f668f' }}>
-          A signed packet is on file. {agreement?.signature?.signed ? 'Signed in person.' : 'Awaiting remote signature.'}
+          {agreement?.signature?.signed ? 'Signed packet on file — signed in person.' : 'Packet captured — awaiting remote signature.'}
         </div>
       </WizCard>
       <div style={{ display: 'flex', gap: 10, marginTop: 16, justifyContent: 'center', flexWrap: 'wrap' }}>

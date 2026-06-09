@@ -1199,6 +1199,22 @@ export const reservationsService = {
       };
     }
 
+    // ?filter=stuck-checkouts — reservations whose checkout wizard was started
+    // but never finished and has been idle > 4h (the dashboard "Stuck Checkouts"
+    // tile). Previously the tile linked here but the list ignored the param, so
+    // staff had to ask for a SQL query. (Ola2 2.9)
+    let stuckWhere = null;
+    if (String(options.filter || '').toLowerCase() === 'stuck-checkouts') {
+      const fourHoursAgo = new Date(Date.now() - 4 * 60 * 60 * 1000);
+      stuckWhere = {
+        status: { notIn: ['CHECKED_OUT', 'CHECKED_IN', 'CHECKED_IN_UNPAID', 'CANCELLED'] },
+        checkoutSessions: { some: { finishedAt: null, startedAt: { lt: fourHoursAgo } } },
+      };
+    }
+
+    // Only one derived filter is active at a time.
+    const filterWhere = overdueWhere || stuckWhere;
+
     const searchOrClause = query
       ? {
           OR: [
@@ -1227,10 +1243,10 @@ export const reservationsService = {
       ...(scope?.tenantId ? { tenantId: scope.tenantId } : {}),
       ...dateWhere,
     };
-    if (overdueWhere && searchOrClause) {
-      where.AND = [overdueWhere, searchOrClause];
-    } else if (overdueWhere) {
-      Object.assign(where, overdueWhere);
+    if (filterWhere && searchOrClause) {
+      where.AND = [filterWhere, searchOrClause];
+    } else if (filterWhere) {
+      Object.assign(where, filterWhere);
     } else if (searchOrClause) {
       Object.assign(where, searchOrClause);
     }
