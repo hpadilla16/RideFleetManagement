@@ -4,48 +4,58 @@
  * Driver's-license barcode scanner for the loaner check-out wizard.
  *
  * Decodes the PDF417 barcode on the back of US/Canada licenses (AAMVA) and
- * pre-fills the customer + license fields — far more reliable than OCR of the
- * printed front. Live-camera scan with a still-photo upload fallback.
+ * pre-fills the customer + license fields.
  *
- * @zxing/browser is loaded via dynamic import so it never runs during SSR and
- * stays out of the initial bundle.
+ * 2026-06-08 (3.4 rev 2): zxing-js decodes real-license PDF417 poorly (failed on
+ * both webcam AND phone). We now prefer the NATIVE `BarcodeDetector` API
+ * (Chrome desktop + Android Chrome support `pdf417`, hardware-accelerated and far
+ * more reliable). zxing-js is kept only as a fallback for browsers without
+ * BarcodeDetector (e.g. iOS Safari). We own the camera stream so we can request a
+ * high-res rear camera and run a tight detect loop on the live <video>.
  */
 
 import { useEffect, useRef, useState } from 'react';
 import { parseAamva } from '../../lib/aamva';
 
-// PDF417 on the back of a license is dense — it needs a high-res REAR camera to
-// decode. zxing's default decodeFromVideoDevice(undefined) picks the default
-// camera (often the FRONT cam on phones/tablets) at ~640x480, which is why the
-// webcam scan failed. Request environment-facing 1080p with continuous focus.
+// High-res REAR camera with continuous focus. PDF417 is dense — low-res / front
+// cam was a big part of the earlier failures.
 const CAMERA_CONSTRAINTS = {
   audio: false,
   video: {
     facingMode: { ideal: 'environment' },
     width: { ideal: 1920 },
     height: { ideal: 1080 },
-    advanced: [{ focusMode: 'continuous' }] // honored on Android/Chrome; ignored elsewhere
+    advanced: [{ focusMode: 'continuous' }]
   }
 };
 
-// Shared reader with TRY_HARDER so partially-skewed / lower-contrast barcodes
-// still decode (matters for webcams and phone shots taken at an angle).
-async function makePdf417Reader() {
+async function getNativeDetector() {
+  if (typeof window === 'undefined' || !('BarcodeDetector' in window)) return null;
+  try {
+    const formats = await window.BarcodeDetector.getSupportedFormats();
+    if (!formats.includes('pdf417')) return null;
+    return new window.BarcodeDetector({ formats: ['pdf417'] });
+  } catch {
+    return null;
+  }
+}
+
+async function makeZxingReader() {
   const [{ BrowserPDF417Reader }, lib] = await Promise.all([
     import('@zxing/browser'),
     import('@zxing/library')
   ]);
   let hints;
-  try {
-    hints = new Map();
-    hints.set(lib.DecodeHintType.TRY_HARDER, true);
-  } catch { hints = undefined; }
+  try { hints = new Map(); hints.set(lib.DecodeHintType.TRY_HARDER, true); } catch { hints = undefined; }
   return new BrowserPDF417Reader(hints);
 }
 
 export function LicenseScanner({ onDecode, onPhoto }) {
   const videoRef = useRef(null);
-  const controlsRef = useRef(null);
+  const streamRef = useRef(null);
+  const rafRef = useRef(null);
+  const zxingControlsRef = useRef(null);
+  const scanningRef = useRef(false);
   const [scanning, setScanning] = useState(false);
   const [status, setStatus] = useState('');
   const [error, setError] = useState('');
@@ -53,44 +63,75 @@ export function LicenseScanner({ onDecode, onPhoto }) {
   useEffect(() => () => stop(), []);
 
   function stop() {
-    try { controlsRef.current?.stop(); } catch {}
-    controlsRef.current = null;
+    scanningRef.current = false;
+    if (rafRef.current) { cancelAnimationFrame(rafRef.current); rafRef.current = null; }
+    try { zxingControlsRef.current?.stop(); } catch {}
+    zxingControlsRef.current = null;
+    try {
+      streamRef.current?.getTracks?.().forEach((t) => t.stop());
+    } catch {}
+    streamRef.current = null;
+    if (videoRef.current) { try { videoRef.current.srcObject = null; } catch {} }
     setScanning(false);
   }
 
   function handleText(text) {
-    stop();
     const fields = parseAamva(text);
     if (!fields) {
-      setError('That barcode isn’t a recognizable license. Enter the fields manually below.');
-      setStatus('');
-      return;
+      // Not a license barcode — keep scanning rather than aborting.
+      return false;
     }
+    stop();
     setError('');
     setStatus(`Scanned ${[fields.firstName, fields.lastName].filter(Boolean).join(' ')}`.trim() || 'License scanned');
     onDecode?.(fields);
+    return true;
   }
 
   async function startCamera() {
     setError('');
     setStatus('Hold the BACK of the license steady — fill the frame with the barcode…');
     setScanning(true);
+    scanningRef.current = true;
+
+    // 1) Acquire a high-res rear camera (fall back to any camera).
+    let stream;
     try {
-      const reader = await makePdf417Reader();
-      const onResult = (result, _err, controls) => {
-        if (result) { controls.stop(); handleText(result.getText()); }
-      };
-      try {
-        // Preferred: high-res rear camera.
-        controlsRef.current = await reader.decodeFromConstraints(CAMERA_CONSTRAINTS, videoRef.current, onResult);
-      } catch {
-        // Fallback for single-camera desktops/webcams where the environment
-        // constraint can't be satisfied — let zxing use the default device.
-        controlsRef.current = await reader.decodeFromVideoDevice(undefined, videoRef.current, onResult);
-      }
+      stream = await navigator.mediaDevices.getUserMedia(CAMERA_CONSTRAINTS);
     } catch {
-      setError('Camera unavailable — use “Upload barcode photo” instead.');
-      setScanning(false);
+      try { stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false }); }
+      catch { setError('Camera unavailable — use “Upload barcode photo” instead.'); stop(); return; }
+    }
+    streamRef.current = stream;
+    const video = videoRef.current;
+    if (!video) { stop(); return; }
+    video.srcObject = stream;
+    try { await video.play(); } catch {}
+
+    // 2) Prefer the native BarcodeDetector (Chrome/Android) — much more reliable.
+    const detector = await getNativeDetector();
+    if (detector) {
+      const tick = async () => {
+        if (!scanningRef.current) return;
+        try {
+          const codes = await detector.detect(video);
+          if (codes && codes.length && handleText(codes[0].rawValue)) return;
+        } catch { /* transient — keep going */ }
+        rafRef.current = requestAnimationFrame(tick);
+      };
+      rafRef.current = requestAnimationFrame(tick);
+      return;
+    }
+
+    // 3) Fallback: zxing on the same stream (iOS Safari etc.).
+    try {
+      const reader = await makeZxingReader();
+      zxingControlsRef.current = await reader.decodeFromStream(stream, video, (result, _err, controls) => {
+        if (result) { controls.stop(); handleText(result.getText()); }
+      });
+    } catch {
+      setError('Live scan unavailable on this browser — use “Upload barcode photo” instead.');
+      stop();
     }
   }
 
@@ -101,13 +142,25 @@ export function LicenseScanner({ onDecode, onPhoto }) {
     setStatus('Reading barcode…');
     try {
       const { compressToDataUrl } = await import('../../lib/image-compressor');
-      // PDF417 lines are fine-grained — keep more pixels + higher quality than a
-      // normal photo so the bars survive compression (1600/0.85 was too lossy).
+      // Keep PDF417 lines crisp through compression.
       const dataUrl = await compressToDataUrl(file, { maxWidth: 2400, quality: 0.92 });
       onPhoto?.(dataUrl);
-      const reader = await makePdf417Reader();
+
+      // Try native BarcodeDetector on the still first (best), then zxing.
+      const detector = await getNativeDetector();
+      if (detector) {
+        try {
+          const img = await loadImage(dataUrl);
+          const codes = await detector.detect(img);
+          if (codes && codes.length && handleText(codes[0].rawValue)) return;
+        } catch { /* fall through to zxing */ }
+      }
+      const reader = await makeZxingReader();
       const result = await reader.decodeFromImageUrl(dataUrl);
-      handleText(result.getText());
+      if (!handleText(result.getText())) {
+        setError('That photo didn’t contain a readable license barcode. Try a sharper, well-lit shot of the BACK of the license.');
+        setStatus('');
+      }
     } catch {
       setError('Couldn’t read the barcode from that photo. Try a sharper shot of the back of the license, or enter fields manually.');
       setStatus('');
@@ -146,4 +199,13 @@ export function LicenseScanner({ onDecode, onPhoto }) {
       </div>
     </div>
   );
+}
+
+function loadImage(src) {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => resolve(img);
+    img.onerror = reject;
+    img.src = src;
+  });
 }
