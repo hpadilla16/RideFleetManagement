@@ -28,9 +28,12 @@ const ELEMENT_CODES = {
 };
 
 function extract(text, code) {
-  // Anchor on start-of-record or a line break; tolerate the leading "DL"
-  // subfile designator that precedes the very first element (e.g. "DLDAQ...").
-  const re = new RegExp(`(?:^|[\\r\\n])(?:DL)?${code}([^\\r\\n]*)`);
+  // Elements are LF/CR-separated, BUT the first element of a subfile follows the
+  // "DL"/"ID" designator with NO leading line break (e.g. "...0015DLDAQ1234567"),
+  // so a newline-only anchor missed it — commonly DAQ, the license number (state
+  // + expiry parsed fine because they come later, each line-break-prefixed).
+  // Anchor on start-of-string, a CR/LF, OR the DL/ID subfile designator.
+  const re = new RegExp(`(?:^|[\\r\\n]|DL|ID)${code}([^\\r\\n]*)`);
   const m = text.match(re);
   return m ? m[1].trim() : '';
 }

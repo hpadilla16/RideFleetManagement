@@ -15,6 +15,12 @@
 # as a fallback for browsers without BarcodeDetector (e.g. iOS Safari). The
 # upload-photo path also tries BarcodeDetector first, then zxing.
 #
+# ALSO (frontend/src/lib/aamva.js): the parser missed the LICENSE NUMBER (DAQ) —
+# once a phone decoded the barcode only state + expiry came through. DAQ is the
+# FIRST subfile element and follows the "DL" designator with NO leading line
+# break, so the newline-only anchor skipped it. Fixed extract() to also anchor on
+# the DL/ID designator (state/expiry/name still parse correctly).
+#
 # NOTE (related Sentry JAVASCRIPT-NEXTJSFRONTEND-Q "setPhotoOptions failed"): that
 # was the OLD April bundle (frontend-2026-04-17-hotfix.1) cached on the tablet —
 # an old PhotoCapture that used ImageCapture. Current code captures via canvas and
@@ -29,6 +35,7 @@ echo "Shipping $TAG from branch: $BRANCH (ship after beta.137)"
 
 FILES=(
   "frontend/src/components/loaner/LicenseScanner.jsx"
+  "frontend/src/lib/aamva.js"
   ".deploy-notes/2026-06-08-ship-license-scanner-barcodedetector-beta138.sh"
 )
 
