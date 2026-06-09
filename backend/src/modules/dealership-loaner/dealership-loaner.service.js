@@ -848,9 +848,21 @@ export const dealershipLoanerService = {
     if (!payload.pickupAt || !payload.returnAt) throw new Error('pickupAt and returnAt are required');
     if (!payload.loanerLiabilityAccepted) throw new Error('Customer liability acknowledgement is required');
 
+    // Derive the reservation tenant. intake() never passed scope to
+    // reservationsService.create, so EVERY loaner was created with tenantId=null
+    // (orphaned) — it showed on the cross-tenant loaner board but vanished from
+    // the tenant-scoped /reservations list (esp. visible after check-in). Resolve
+    // from the user's scope, else the pickup location's tenant.
+    const pickupLoc = await prisma.location.findUnique({
+      where: { id: String(payload.pickupLocationId) },
+      select: { tenantId: true }
+    });
+    const resolvedTenantId = scope?.tenantId || pickupLoc?.tenantId || null;
+
     const billingMode = String(payload.loanerBillingMode || 'COURTESY').toUpperCase();
     const loanerBillingStatus = ['COURTESY', 'INTERNAL'].includes(billingMode) ? 'APPROVED' : 'PENDING_APPROVAL';
     const reservation = await reservationsService.create({
+      tenantId: resolvedTenantId,
       reservationNumber: String(payload.reservationNumber || '').trim() || makeReservationNumber(),
       sourceRef: String(payload.sourceRef || '').trim() || `LOANER:${String(payload.repairOrderNumber || 'NA')}:${Date.now()}`,
       customerId: customer.id,
