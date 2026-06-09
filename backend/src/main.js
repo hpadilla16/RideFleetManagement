@@ -16,6 +16,7 @@ import { stopSalesRouter } from './modules/stop-sales/stop-sales.routes.js';
 import { ratesRouter } from './modules/rates/rates.routes.js';
 import { marketScraperRouter } from './modules/market-scraper/market-scraper.routes.js';
 import { marketObservationsRouter } from './modules/market-observations/market-observations.routes.js';
+import { marketOnboardingRouter } from './modules/market-onboarding/market-onboarding.routes.js';
 import {
   pricingRulesRouter,
   pricingSuggestionsRouter,
@@ -180,6 +181,7 @@ app.use('/api/market-scraper', requireAuth, tenantRateLimit, requireModuleAccess
 app.use('/api/market', requireAuth, tenantRateLimit, requireModuleAccess('marketIntelligence'), requireRole('ADMIN', 'OPS'), marketObservationsRouter);
 app.use('/api/pricing-rules', requireAuth, tenantRateLimit, requireModuleAccess('marketIntelligence'), requireRole('ADMIN', 'OPS'), pricingRulesRouter);
 app.use('/api/pricing-suggestions', requireAuth, tenantRateLimit, requireModuleAccess('marketIntelligence'), requireRole('ADMIN', 'OPS'), pricingSuggestionsRouter);
+app.use('/api/market-onboarding', requireAuth, tenantRateLimit, requireModuleAccess('marketIntelligence'), requireRole('ADMIN', 'OPS'), marketOnboardingRouter);
 // Internal endpoint hit by the droplet cron after every successful scrape.
 // Auth is via BACKEND_INTERNAL_TOKEN shared secret, not user session.
 app.use('/api/internal/pricing-engine', pricingEngineInternalRouter);

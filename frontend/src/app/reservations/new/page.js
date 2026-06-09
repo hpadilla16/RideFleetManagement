@@ -1,0 +1,365 @@
+/**
+ * New Reservation UI v2 (beta.136).
+ *
+ * 4-step wizard with a sticky live-summary pane, replacing the cramped single
+ * modal on /reservations. Reuses the existing backend exactly:
+ *   GET  /api/locations, /api/vehicle-types
+ *   GET  /api/customers?q=         POST /api/customers
+ *   GET  /api/reservations/resolve-rate   (live quote)
+ *   GET  /api/market/summary?airport=<code>  (vehicle-class market context)
+ *   POST /api/reservations         (same payload as the legacy form)
+ *
+ * No new backend. Nothing here changes money logic — it just gathers the same
+ * inputs and posts the same body. Mockup: doc/mockup-new-reservation-v2.
+ */
+'use client';
+
+import { useEffect, useMemo, useState } from 'react';
+import { useRouter } from 'next/navigation';
+import { AuthGate } from '../../../components/AuthGate';
+import { AppShell } from '../../../components/AppShell';
+import { api } from '../../../lib/client';
+
+const SIPP_LABELS = {
+  ECAR: 'Economy', CCAR: 'Compact', ICAR: 'Mid-size', SCAR: 'Standard',
+  FCAR: 'Fullsize', PCAR: 'Premium', LCAR: 'Luxury', CFAR: 'Compact SUV',
+  IFAR: 'Mid-size SUV', SFAR: 'Standard SUV', FFAR: 'Fullsize SUV',
+  PFAR: 'Premium SUV', LFAR: 'Luxury SUV', RFAR: 'Recreational',
+  XFAR: 'Open-Air All-Terrain', FJAR: 'SUV', FVAR: 'Passenger Van',
+  MVAR: 'Minivan', SPAR: 'Special', STAR: 'Sports/Convertible', PUAR: 'Pickup'
+};
+
+const money = (n) => `$${Number(n || 0).toFixed(2)}`;
+
+export default function NewReservationV2Page() {
+  return <AuthGate>{({ token, me, logout }) => <Wizard token={token} me={me} logout={logout} />}</AuthGate>;
+}
+
+function Wizard({ token, me, logout }) {
+  const router = useRouter();
+  const [step, setStep] = useState(1);
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState('');
+  const [err, setErr] = useState('');
+
+  const [locations, setLocations] = useState([]);
+  const [vehicleTypes, setVehicleTypes] = useState([]);
+  const [marketBySipp, setMarketBySipp] = useState({});
+
+  // Form state
+  const [form, setForm] = useState({
+    pickupAt: '', returnAt: '', pickupLocationId: '', returnLocationId: '',
+    vehicleTypeId: '', customerId: '', reservationNumber: '', notes: ''
+  });
+  const [quote, setQuote] = useState(null);
+  const [rateError, setRateError] = useState('');
+
+  // Customer step
+  const [custQuery, setCustQuery] = useState('');
+  const [custResults, setCustResults] = useState([]);
+  const [selectedCustomer, setSelectedCustomer] = useState(null);
+  const [newCust, setNewCust] = useState(null); // inline-create form when non-null
+
+  useEffect(() => {
+    if (!token) return;
+    Promise.all([
+      api('/api/locations', {}, token).catch(() => []),
+      api('/api/vehicle-types', {}, token).catch(() => [])
+    ]).then(([locs, vts]) => {
+      setLocations(Array.isArray(locs) ? locs : []);
+      setVehicleTypes(Array.isArray(vts) ? vts : []);
+    });
+  }, [token]);
+
+  const set = (patch) => setForm((f) => ({ ...f, ...patch }));
+
+  const rentalDays = useMemo(() => {
+    if (!form.pickupAt || !form.returnAt) return 0;
+    const ms = new Date(form.returnAt) - new Date(form.pickupAt);
+    if (!Number.isFinite(ms) || ms <= 0) return 0;
+    return Math.max(1, Math.ceil(ms / (1000 * 60 * 60 * 24)));
+  }, [form.pickupAt, form.returnAt]);
+
+  const pickupLocation = useMemo(() => locations.find((l) => l.id === form.pickupLocationId) || null, [locations, form.pickupLocationId]);
+
+  // Live quote whenever vehicle type + locations + dates are set.
+  useEffect(() => {
+    const ready = form.vehicleTypeId && form.pickupLocationId && form.pickupAt && form.returnAt && rentalDays > 0;
+    if (!ready) { setQuote(null); setRateError(''); return undefined; }
+    let cancelled = false;
+    (async () => {
+      try {
+        const q = new URLSearchParams({ vehicleTypeId: form.vehicleTypeId, pickupLocationId: form.pickupLocationId, pickupAt: form.pickupAt, returnAt: form.returnAt });
+        const out = await api(`/api/reservations/resolve-rate?${q.toString()}`, {}, token);
+        if (cancelled) return;
+        setRateError(''); setQuote(out);
+      } catch {
+        if (cancelled) return;
+        setQuote(null); setRateError('No rate tables found for this vehicle type, location and dates.');
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [form.vehicleTypeId, form.pickupLocationId, form.pickupAt, form.returnAt, rentalDays, token]);
+
+  // Market context for the vehicle-class cards, keyed by the pickup airport code.
+  useEffect(() => {
+    const code = pickupLocation?.code;
+    if (!code) { setMarketBySipp({}); return; }
+    api(`/api/market/summary?airport=${encodeURIComponent(code)}`, {}, token)
+      .then((s) => {
+        const map = {};
+        for (const row of (s?.sipps || [])) map[String(row.sipp || '').toUpperCase()] = row;
+        setMarketBySipp(map);
+      })
+      .catch(() => setMarketBySipp({}));
+  }, [pickupLocation?.code, token]);
+
+  const searchCustomers = async (q) => {
+    setCustQuery(q);
+    if (!q || q.trim().length < 2) { setCustResults([]); return; }
+    try {
+      const out = await api(`/api/customers?q=${encodeURIComponent(q.trim())}&limit=20`, {}, token);
+      setCustResults(Array.isArray(out) ? out : (out?.rows || []));
+    } catch { setCustResults([]); }
+  };
+
+  const chooseCustomer = (c) => { setSelectedCustomer(c); set({ customerId: c.id }); setNewCust(null); };
+
+  const createCustomer = async () => {
+    setBusy(true); setErr('');
+    try {
+      const created = await api('/api/customers', { method: 'POST', body: JSON.stringify(newCust) }, token);
+      chooseCustomer(created);
+      setMsg(`Customer ${created.firstName || ''} ${created.lastName || ''} created.`);
+    } catch (e) { setErr(e?.message || 'Failed to create customer'); } finally { setBusy(false); }
+  };
+
+  const stepValid = (n) => {
+    if (n === 1) return form.pickupAt && form.returnAt && form.pickupLocationId && form.returnLocationId && rentalDays > 0;
+    if (n === 2) return !!form.vehicleTypeId && !!quote && !rateError;
+    if (n === 3) return !!form.customerId;
+    return true;
+  };
+
+  const submit = async () => {
+    if (!stepValid(1) || !stepValid(2) || !stepValid(3)) { setErr('Complete all steps first.'); return; }
+    setBusy(true); setErr('');
+    try {
+      const reservationNumber = form.reservationNumber || `RES-${Date.now().toString().slice(-6)}`;
+      const created = await api('/api/reservations', {
+        method: 'POST',
+        body: JSON.stringify({
+          reservationNumber,
+          customerId: form.customerId,
+          vehicleTypeId: form.vehicleTypeId,
+          pickupAt: form.pickupAt,
+          returnAt: form.returnAt,
+          pickupLocationId: form.pickupLocationId,
+          returnLocationId: form.returnLocationId,
+          dailyRate: quote?.dailyRate != null ? Number(quote.dailyRate) : null,
+          estimatedTotal: quote?.baseTotal != null ? Number(quote.baseTotal) : null,
+          addOnsTotal: 0,
+          status: 'CONFIRMED',
+          sendConfirmationEmail: false,
+          notes: form.notes || null
+        })
+      }, token);
+      router.push(`/reservations/${created.id}`);
+    } catch (e) { setErr(e?.message || 'Failed to create reservation'); setBusy(false); }
+  };
+
+  const returnMin = useMemo(() => {
+    if (!form.pickupAt) return '';
+    const d = new Date(form.pickupAt);
+    if (!Number.isFinite(d.getTime())) return '';
+    d.setDate(d.getDate() + 1);
+    const pad = (x) => String(x).padStart(2, '0');
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  }, [form.pickupAt]);
+
+  const Stepper = () => (
+    <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 16 }}>
+      {['Dates & locations', 'Vehicle class', 'Customer', 'Review'].map((label, i) => {
+        const n = i + 1; const active = step === n; const done = step > n;
+        return (
+          <button key={label} type="button" onClick={() => (done || stepValid(n - 1) || n === 1) && setStep(n)}
+            style={{ padding: '6px 12px', borderRadius: 999, fontSize: 13, fontWeight: 600, border: 'none', cursor: 'pointer',
+              background: active ? '#6d28d9' : done ? '#ecfdf5' : '#f3f0ff', color: active ? '#fff' : done ? '#166534' : '#6f668f' }}>
+            {done ? '✓ ' : `${n}. `}{label}
+          </button>
+        );
+      })}
+    </div>
+  );
+
+  const SummaryPane = () => (
+    <aside className="glass card section-card" style={{ position: 'sticky', top: 16, alignSelf: 'start' }}>
+      <h3 style={{ marginTop: 0 }}>Live summary</h3>
+      <div className="stack" style={{ gap: 8, fontSize: 14 }}>
+        <Row label="Pickup" value={form.pickupAt ? new Date(form.pickupAt).toLocaleString() : '—'} />
+        <Row label="Return" value={form.returnAt ? new Date(form.returnAt).toLocaleString() : '—'} />
+        <Row label="Days" value={rentalDays || '—'} />
+        <Row label="Pickup loc" value={pickupLocation?.name || '—'} />
+        <Row label="Vehicle class" value={selectedVtLabel(vehicleTypes, form.vehicleTypeId)} />
+        <Row label="Customer" value={selectedCustomer ? `${selectedCustomer.firstName || ''} ${selectedCustomer.lastName || ''}`.trim() || selectedCustomer.email : '—'} />
+        <div style={{ borderTop: '1px solid #e6dfff', margin: '6px 0' }} />
+        <Row label="Daily rate" value={quote?.dailyRate != null ? money(quote.dailyRate) : '—'} />
+        <Row label="Base total" value={quote?.baseTotal != null ? money(quote.baseTotal) : '—'} strong />
+        {rateError ? <div className="error" style={{ fontSize: 12 }}>{rateError}</div> : null}
+      </div>
+      <div className="surface-note" style={{ marginTop: 12, fontSize: 12 }}>
+        A refundable pre-authorization (security deposit hold) is placed on the customer&rsquo;s card at check-out — it is not charged now.
+      </div>
+    </aside>
+  );
+
+  const dnr = selectedCustomer?.doNotRent;
+
+  return (
+    <AppShell me={me} logout={logout}>
+      <section className="glass card-lg section-card" style={{ marginBottom: 16 }}>
+        <div className="row-between" style={{ alignItems: 'start' }}>
+          <div>
+            <span className="eyebrow">Reservations</span>
+            <h2 className="page-title" style={{ marginTop: 6 }}>New reservation</h2>
+            <p className="ui-muted">Guided booking — dates, class, customer, review.</p>
+          </div>
+          <button type="button" className="button-subtle" onClick={() => router.push('/reservations')}>Cancel</button>
+        </div>
+      </section>
+
+      <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0,1fr) 320px', gap: 16, alignItems: 'start' }}>
+        <section className="glass card-lg section-card">
+          <Stepper />
+          {msg ? <p className="label" style={{ color: '#166534' }}>{msg}</p> : null}
+          {err ? <p className="error">{err}</p> : null}
+
+          {step === 1 && (
+            <div className="stack">
+              <h3 style={{ margin: 0 }}>1. Dates & locations</h3>
+              <div className="app-card-grid compact">
+                <div className="stack" style={{ gap: 4 }}><label className="label">Pickup</label><input type="datetime-local" value={form.pickupAt} onChange={(e) => set({ pickupAt: e.target.value })} /></div>
+                <div className="stack" style={{ gap: 4 }}><label className="label">Return</label><input type="datetime-local" min={returnMin} value={form.returnAt} onChange={(e) => set({ returnAt: e.target.value })} /></div>
+                <div className="stack" style={{ gap: 4 }}><label className="label">Pickup location</label>
+                  <select value={form.pickupLocationId} onChange={(e) => set({ pickupLocationId: e.target.value, returnLocationId: form.returnLocationId || e.target.value })}>
+                    <option value="">— select —</option>
+                    {locations.map((l) => <option key={l.id} value={l.id}>{l.code} · {l.name}</option>)}
+                  </select>
+                </div>
+                <div className="stack" style={{ gap: 4 }}><label className="label">Return location</label>
+                  <select value={form.returnLocationId} onChange={(e) => set({ returnLocationId: e.target.value })}>
+                    <option value="">— select —</option>
+                    {locations.map((l) => <option key={l.id} value={l.id}>{l.code} · {l.name}</option>)}
+                  </select>
+                </div>
+              </div>
+              {form.pickupAt && form.returnAt && rentalDays <= 0 ? <p className="error">Return must be after pickup.</p> : null}
+              <div className="inline-actions" style={{ marginTop: 14 }}>
+                <button type="button" onClick={() => setStep(2)} disabled={!stepValid(1)}>Continue</button>
+              </div>
+            </div>
+          )}
+
+          {step === 2 && (
+            <div className="stack">
+              <h3 style={{ margin: 0 }}>2. Vehicle class</h3>
+              <div className="ui-muted">Market median (where available) is shown per class for the pickup airport.</div>
+              <div className="app-card-grid" style={{ marginTop: 8 }}>
+                {vehicleTypes.map((vt) => {
+                  const code = String(vt.code || '').toUpperCase();
+                  const mkt = marketBySipp[code];
+                  const sel = form.vehicleTypeId === vt.id;
+                  return (
+                    <button key={vt.id} type="button" onClick={() => set({ vehicleTypeId: vt.id })}
+                      className={sel ? '' : 'button-subtle'} style={{ textAlign: 'left', padding: 12, borderRadius: 12, border: sel ? '2px solid #6d28d9' : '1px solid #e6dfff' }}>
+                      <div style={{ fontWeight: 700 }}>{vt.code} · {vt.name}</div>
+                      <div className="ui-muted" style={{ fontSize: 12 }}>{SIPP_LABELS[code] || ''}</div>
+                      <div style={{ marginTop: 6, fontSize: 13 }}>
+                        {mkt ? <>Market median <strong>{money(mkt.median)}</strong>{mkt.yourRate != null ? ` · yours ${money(mkt.yourRate)}` : ''}</> : <span className="ui-muted">No market data</span>}
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+              {rateError ? <p className="error">{rateError}</p> : null}
+              <div className="inline-actions" style={{ marginTop: 14 }}>
+                <button type="button" className="button-subtle" onClick={() => setStep(1)}>Back</button>
+                <button type="button" onClick={() => setStep(3)} disabled={!stepValid(2)}>Continue</button>
+              </div>
+            </div>
+          )}
+
+          {step === 3 && (
+            <div className="stack">
+              <h3 style={{ margin: 0 }}>3. Customer</h3>
+              {!newCust ? (
+                <>
+                  <input placeholder="Search by name, email or phone…" value={custQuery} onChange={(e) => searchCustomers(e.target.value)} />
+                  <div className="stack" style={{ gap: 6, marginTop: 6 }}>
+                    {custResults.map((c) => (
+                      <button key={c.id} type="button" className={form.customerId === c.id ? '' : 'button-subtle'} style={{ textAlign: 'left' }} onClick={() => chooseCustomer(c)}>
+                        {(c.firstName || '') + ' ' + (c.lastName || '')} · {c.email || c.phone || c.id}{c.doNotRent ? ' · ⚠ DO NOT RENT' : ''}
+                      </button>
+                    ))}
+                  </div>
+                  <button type="button" className="link" style={{ marginTop: 8 }} onClick={() => setNewCust({ firstName: '', lastName: '', email: '', phone: '' })}>+ Create new customer</button>
+                </>
+              ) : (
+                <div className="app-card-grid compact">
+                  <div className="stack" style={{ gap: 4 }}><label className="label">First name</label><input value={newCust.firstName} onChange={(e) => setNewCust({ ...newCust, firstName: e.target.value })} /></div>
+                  <div className="stack" style={{ gap: 4 }}><label className="label">Last name</label><input value={newCust.lastName} onChange={(e) => setNewCust({ ...newCust, lastName: e.target.value })} /></div>
+                  <div className="stack" style={{ gap: 4 }}><label className="label">Email</label><input type="email" value={newCust.email} onChange={(e) => setNewCust({ ...newCust, email: e.target.value })} /></div>
+                  <div className="stack" style={{ gap: 4 }}><label className="label">Phone</label><input value={newCust.phone} onChange={(e) => setNewCust({ ...newCust, phone: e.target.value })} /></div>
+                  <div className="inline-actions" style={{ gridColumn: '1 / -1' }}>
+                    <button type="button" onClick={createCustomer} disabled={busy || !newCust.firstName || !newCust.lastName}>Create & select</button>
+                    <button type="button" className="button-subtle" onClick={() => setNewCust(null)}>Cancel</button>
+                  </div>
+                </div>
+              )}
+              {dnr ? <p className="error" style={{ marginTop: 10 }}>⚠ This customer is flagged DO NOT RENT{selectedCustomer?.doNotRentReason ? `: ${selectedCustomer.doNotRentReason}` : ''}.</p> : null}
+              <div className="inline-actions" style={{ marginTop: 14 }}>
+                <button type="button" className="button-subtle" onClick={() => setStep(2)}>Back</button>
+                <button type="button" onClick={() => setStep(4)} disabled={!stepValid(3)}>Continue</button>
+              </div>
+            </div>
+          )}
+
+          {step === 4 && (
+            <div className="stack">
+              <h3 style={{ margin: 0 }}>4. Review & confirm</h3>
+              {dnr ? <p className="error">⚠ Customer is flagged DO NOT RENT. Confirm with a manager before booking.</p> : null}
+              <div className="stack" style={{ gap: 4 }}>
+                <label className="label">Reservation # (optional — auto if blank)</label>
+                <input placeholder="Leave blank for auto-number" value={form.reservationNumber} onChange={(e) => set({ reservationNumber: e.target.value })} />
+              </div>
+              <div className="stack" style={{ gap: 4 }}>
+                <label className="label">Notes</label>
+                <textarea rows={3} value={form.notes} onChange={(e) => set({ notes: e.target.value })} />
+              </div>
+              <div className="inline-actions" style={{ marginTop: 14 }}>
+                <button type="button" className="button-subtle" onClick={() => setStep(3)}>Back</button>
+                <button type="button" onClick={submit} disabled={busy || !!rateError}>{busy ? 'Creating…' : 'Create reservation'}</button>
+              </div>
+            </div>
+          )}
+        </section>
+
+        <SummaryPane />
+      </div>
+    </AppShell>
+  );
+}
+
+function Row({ label, value, strong }) {
+  return (
+    <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12 }}>
+      <span className="ui-muted">{label}</span>
+      <span style={{ fontWeight: strong ? 700 : 500, textAlign: 'right' }}>{value}</span>
+    </div>
+  );
+}
+
+function selectedVtLabel(vehicleTypes, id) {
+  const vt = vehicleTypes.find((v) => v.id === id);
+  return vt ? `${vt.code} · ${vt.name}` : '—';
+}
