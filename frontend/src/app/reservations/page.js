@@ -916,6 +916,12 @@ function ReservationsInner({ token, me, logout }) {
                 </button>
               </span>
             ) : null}
+            {filter === 'stuck-checkouts' ? (
+              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '4px 10px', borderRadius: 999, background: 'rgba(245, 158, 11, 0.14)', color: '#92400e', fontSize: 12, fontWeight: 600, border: '1px solid rgba(245, 158, 11, 0.35)' }}>
+                Showing stuck checkouts (idle &gt; 4h)
+                <button type="button" onClick={() => { setFilter(''); router.push('/reservations'); }} style={{ background: 'transparent', border: 'none', color: '#92400e', cursor: 'pointer', fontSize: 14, padding: 0, lineHeight: 1 }} title="Clear filter" aria-label="Clear stuck-checkouts filter">✕</button>
+              </span>
+            ) : null}
             {canManageReservationSetup ? <button onClick={() => setShowImport(true)}>{loadingSupport && !supportLoaded ? 'Loading...' : 'Upload Migration'}</button> : null}
             {canCreateReservation ? (
               <button onClick={() => {
@@ -932,6 +938,9 @@ function ReservationsInner({ token, me, logout }) {
               >
                 {loadingSupport && !supportLoaded ? 'Loading...' : 'New Reservation'}
               </button>
+            ) : null}
+            {canCreateReservation ? (
+              <button onClick={() => { window.location.href = '/reservations/new'; }}>New Reservation (v2)</button>
             ) : null}
           </div>
         </div>
