@@ -30,6 +30,18 @@ function fmtWallClockTime(value) {
   });
 }
 
+// Operations Timeline timestamp: the list response doesn't always include
+// updatedAt, which rendered "Invalid Date". Fall back to createdAt / pickupAt
+// and format defensively.
+function timelineTs(r) {
+  return r?.updatedAt || r?.createdAt || r?.pickupAt || null;
+}
+function fmtTimeline(value) {
+  if (!value) return '—';
+  const d = new Date(value);
+  return Number.isNaN(d.getTime()) ? '—' : d.toLocaleString();
+}
+
 function wallClockDate(value) {
   if (!value) return null;
   const d = new Date(value);
@@ -449,7 +461,11 @@ function DashboardInner({ token, me, logout }) {
     wallClockDate(r.returnAt) === boardDate &&
     !['CANCELLED', 'NO_SHOW', 'CHECKED_IN', 'CHECKED_IN_UNPAID'].includes(r.status)
   );
-  const timeline = reservations.slice().sort((a, b) => new Date(b.updatedAt) - new Date(a.updatedAt)).slice(0, 10);
+  const timeline = reservations.slice().sort((a, b) => {
+    const ta = new Date(timelineTs(a) || 0).getTime() || 0;
+    const tb = new Date(timelineTs(b) || 0).getTime() || 0;
+    return tb - ta;
+  }).slice(0, 10);
   const workspaceOpsHub = useMemo(() => {
     const nextItems = [
       pickups[0]
@@ -536,26 +552,26 @@ function DashboardInner({ token, me, logout }) {
             <span className="status-chip neutral">Workspace</span>
           </div>
           <div className="app-card-grid compact">
-            <div className="info-tile">
+            <button type="button" className="info-tile" style={{ textAlign: 'left', cursor: 'pointer' }} onClick={() => router.push('/vehicles')} title="Open the full vehicle list">
               <span className="label">Vehicles</span>
               <strong>{workspaceOpsHub.totalVehicles}</strong>
               <span className="ui-muted">Total units across the workspace.</span>
-            </div>
-            <div className="info-tile">
+            </button>
+            <button type="button" className="info-tile" style={{ textAlign: 'left', cursor: 'pointer' }} onClick={() => router.push('/vehicles?status=available')} title="Open available vehicles">
               <span className="label">Available</span>
               <strong>{workspaceOpsHub.available}</strong>
               <span className="ui-muted">Units ready to move today.</span>
-            </div>
-            <div className="info-tile">
+            </button>
+            <button type="button" className="info-tile" style={{ textAlign: 'left', cursor: 'pointer' }} onClick={() => router.push('/vehicles?status=migration')} title="Open units on migration hold">
               <span className="label">Migration Holds</span>
               <strong>{workspaceOpsHub.migrationHeld}</strong>
               <span className="ui-muted">Legacy-contract units still committed to fleet usage.</span>
-            </div>
-            <div className="info-tile">
+            </button>
+            <button type="button" className="info-tile" style={{ textAlign: 'left', cursor: 'pointer' }} onClick={() => router.push('/vehicles?status=maintenance')} title="Open maintenance / out-of-service units">
               <span className="label">Maintenance / OOS</span>
               <strong>{workspaceOpsHub.serviceHeld}</strong>
               <span className="ui-muted">Units blocked for maintenance or out-of-service work.</span>
-            </div>
+            </button>
             <button
               type="button"
               className="info-tile"
@@ -572,11 +588,11 @@ function DashboardInner({ token, me, logout }) {
               <strong style={{ color: mismatchCount > 0 ? '#dc2626' : undefined }}>{mismatchCount}</strong>
               <span className="ui-muted">Deferred during inventory. Click to reconcile.</span>
             </button>
-            <div className="info-tile">
+            <button type="button" className="info-tile" style={{ textAlign: 'left', cursor: 'pointer' }} onClick={() => router.push('/reservations?filter=active')} title="Open active (currently-out) reservations">
               <span className="label">Active Reservations</span>
               <strong>{workspaceOpsHub.activeReservations}</strong>
               <span className="ui-muted">Bookings currently in motion.</span>
-            </div>
+            </button>
             <button
               type="button"
               className="info-tile"
@@ -618,7 +634,7 @@ function DashboardInner({ token, me, logout }) {
       <section className="grid4">
         <div className="glass card"><div className="label">Total Vehicles</div><div className="value">{totalVehicles}</div></div>
         <div className="glass card"><div className="label">Available Vehicles</div><div className="value">{available}</div></div>
-        <div className="glass card"><div className="label">Reservations</div><div className="value">{reservations.length}</div></div>
+        <div className="glass card"><div className="label">Reservations</div><div className="value">{Number.isFinite(Number(resSummary?.totalReservations)) ? Number(resSummary.totalReservations).toLocaleString() : reservations.length}</div></div>
         <div className="glass card"><div className="label">Active</div><div className="value">{activeReservations}</div></div>
         <div className="glass card"><div className="label">Fee Advisories</div><div className="value">{feeAdvisoryCount}</div></div>
       </section>
@@ -746,7 +762,7 @@ function DashboardInner({ token, me, logout }) {
       <section className="glass card-lg">
         <h3>Operations Timeline</h3>
         <div className="stack">
-          {timeline.map((r) => <div key={r.id} className="row"><span>{new Date(r.updatedAt).toLocaleString()}</span><span>Reservation #{r.reservationNumber} · {r.status}</span></div>)}
+          {timeline.map((r) => <div key={r.id} className="row"><span>{fmtTimeline(timelineTs(r))}</span><span>Reservation #{r.reservationNumber} · {r.status}</span></div>)}
         </div>
       </section>
     </AppShell>

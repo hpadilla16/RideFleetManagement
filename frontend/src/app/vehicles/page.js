@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import JSZip from 'jszip';
 import QRCode from 'qrcode';
 import { AuthGate } from '../../components/AuthGate';
@@ -151,6 +151,9 @@ async function buildVehicleQrLabelBlob(vehicle, qrUrl) {
 
 function VehiclesInner({ token, me, logout }) {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  // Dashboard deep-link: /vehicles?status=available|maintenance|migration
+  const statusFilter = String(searchParams?.get('status') || '').toLowerCase();
   const role = String(me?.role || '').toUpperCase().trim();
   const isSuper = role === 'SUPER_ADMIN';
   const canManageVehicleSetup = ['SUPER_ADMIN', 'ADMIN', 'OPS'].includes(role);
@@ -300,11 +303,43 @@ function VehiclesInner({ token, me, logout }) {
 
   useEffect(() => { load(); }, [token, activeTenantId, isSuper, canManageVehicleSetup]);
 
+  // ID sets for the dashboard status deep-link. Mirrors fleetOpsHub: maintenance
+  // trusts the locked status + service blocks; migration = active migration hold;
+  // available = AVAILABLE and not on-rent/blocked/service (kpi-corrected for the
+  // Vehicle.status drift in prod).
+  const statusSets = useMemo(() => {
+    const kpiOnRentIds = new Set(overviewKpis?.currentlyOutVehicleIds || []);
+    const kpiBlockedIds = new Set(overviewKpis?.blockedVehicleIds || []);
+    const onRentIds = new Set([
+      ...kpiOnRentIds,
+      ...vehicles.filter((v) => String(v?.status || '').toUpperCase() === 'ON_RENT').map((v) => v.id),
+    ]);
+    const migration = new Set();
+    const maintenance = new Set();
+    for (const v of vehicles) {
+      const block = activeAvailabilityBlock(v);
+      const status = String(v?.status || '').toUpperCase();
+      if (block && isMigrationHold(block)) { migration.add(v.id); onRentIds.add(v.id); }
+      if (['IN_MAINTENANCE', 'OUT_OF_SERVICE'].includes(status) || (block && isServiceHold(block))) maintenance.add(v.id);
+    }
+    const available = new Set();
+    for (const v of vehicles) {
+      const status = String(v?.status || '').toUpperCase();
+      if (status === 'AVAILABLE' && !onRentIds.has(v.id) && !kpiBlockedIds.has(v.id) && !maintenance.has(v.id) && !activeAvailabilityBlock(v)) {
+        available.add(v.id);
+      }
+    }
+    return { available, maintenance, migration };
+  }, [vehicles, overviewKpis]);
+
   const rows = useMemo(() => {
     const q = query.trim().toLowerCase();
     let filtered = vehicles;
     if (programCategoryFilter !== 'ALL') {
       filtered = filtered.filter((v) => (v.programCategory || 'BOTH') === programCategoryFilter);
+    }
+    if (statusFilter && statusSets[statusFilter]) {
+      filtered = filtered.filter((v) => statusSets[statusFilter].has(v.id));
     }
     if (!q) return filtered;
     return filtered.filter((v) =>
@@ -315,7 +350,7 @@ function VehiclesInner({ token, me, logout }) {
       (v.vin || '').toLowerCase().includes(q) ||
       `${v.make || ''} ${v.model || ''}`.toLowerCase().includes(q)
     );
-  }, [vehicles, query, programCategoryFilter]);
+  }, [vehicles, query, programCategoryFilter, statusFilter, statusSets]);
 
   const fleetOpsHub = useMemo(() => {
     const activeBlocks = vehicles.map((vehicle) => ({ vehicle, block: activeAvailabilityBlock(vehicle) })).filter((row) => !!row.block);
@@ -944,6 +979,12 @@ function VehiclesInner({ token, me, logout }) {
                 {bulkApplying ? 'Applying…' : `Apply to ${selectedVehicleIds.size}`}
               </button>
             </div>
+          </div>
+        ) : null}
+        {statusFilter && statusSets[statusFilter] ? (
+          <div className="surface-note" style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8 }}>
+            <span>Showing <strong>{statusFilter === 'maintenance' ? 'maintenance / out-of-service' : statusFilter}</strong> units ({rows.length}).</span>
+            <button type="button" className="btn-ghost btn-sm" onClick={() => router.push('/vehicles')}>Clear filter</button>
           </div>
         ) : null}
         <table>

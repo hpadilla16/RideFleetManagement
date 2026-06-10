@@ -922,6 +922,12 @@ function ReservationsInner({ token, me, logout }) {
                 <button type="button" onClick={() => { setFilter(''); router.push('/reservations'); }} style={{ background: 'transparent', border: 'none', color: '#92400e', cursor: 'pointer', fontSize: 14, padding: 0, lineHeight: 1 }} title="Clear filter" aria-label="Clear stuck-checkouts filter">✕</button>
               </span>
             ) : null}
+            {filter === 'active' ? (
+              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '4px 10px', borderRadius: 999, background: 'rgba(16, 185, 129, 0.14)', color: '#065f46', fontSize: 12, fontWeight: 600, border: '1px solid rgba(16, 185, 129, 0.35)' }}>
+                Showing active (currently out) only
+                <button type="button" onClick={() => { setFilter(''); router.push('/reservations'); }} style={{ background: 'transparent', border: 'none', color: '#065f46', cursor: 'pointer', fontSize: 14, padding: 0, lineHeight: 1 }} title="Clear filter" aria-label="Clear active filter">✕</button>
+              </span>
+            ) : null}
             {canManageReservationSetup ? <button onClick={() => setShowImport(true)}>{loadingSupport && !supportLoaded ? 'Loading...' : 'Upload Migration'}</button> : null}
             {canCreateReservation ? (
               <button onClick={() => {

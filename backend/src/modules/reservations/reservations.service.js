@@ -1134,12 +1134,18 @@ export const reservationsService = {
       });
     }
 
+    // Accurate total reservations for the tenant (the dashboard "Reservations"
+    // card used to show the limit-500 page length, which capped/under-counted).
+    // One indexed count; the counter table doesn't track this yet.
+    const totalReservations = await prisma.reservation.count({ where });
+
     return {
       pickupsToday,
       returnsToday,
       checkedOut,
       feeAdvisories,
       noShows,
+      totalReservations,
       nextItems,
       tenantTimeZone
     };
@@ -1212,8 +1218,23 @@ export const reservationsService = {
       };
     }
 
+    // ?filter=active — currently-out rentals (the dashboard "Active
+    // Reservations" tile/KPI): CHECKED_OUT, pickup already happened, return
+    // still in the future, not a grandfathered overdue. Same definition as the
+    // summary `checkedOut` count.
+    let activeWhere = null;
+    if (String(options.filter || '').toLowerCase() === 'active') {
+      const now = new Date();
+      activeWhere = {
+        status: 'CHECKED_OUT',
+        pickupAt: { lte: now },
+        returnAt: { gt: now },
+        overdueIgnored: false,
+      };
+    }
+
     // Only one derived filter is active at a time.
-    const filterWhere = overdueWhere || stuckWhere;
+    const filterWhere = overdueWhere || stuckWhere || activeWhere;
 
     const searchOrClause = query
       ? {
