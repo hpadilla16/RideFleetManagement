@@ -62,7 +62,10 @@ import { issueCenterRouter, publicIssueCenterRouter } from './modules/issue-cent
 import { tollsRouter } from './modules/tolls/tolls.routes.js';
 import { plannerRouter } from './modules/planner/planner.routes.js';
 import { paymentGatewayRouter } from './modules/payment-gateway/payment-gateway.routes.js';
-import { startTollAutoSyncScheduler, stopTollAutoSyncScheduler } from './modules/tolls/tolls.scheduler.js';
+// Phase 0 (2026-06-09): the toll auto-sync scheduler MOVED to the worker
+// process (src/worker.js) — its sweeps spawn headless Chromium pages and that
+// RAM/CPU no longer belongs in the API container. Manual per-tenant syncs
+// triggered from the API still run here, under the global page cap.
 import { startHandoffReminderScheduler, stopHandoffReminderScheduler } from './modules/car-sharing/car-sharing.scheduler.js';
 import { startCheckoutSessionCleanupScheduler, stopCheckoutSessionCleanupScheduler } from './modules/checkout-session/checkout-session.scheduler.js';
 import { buildOpenApiSpec, swaggerHtml } from './docs/openapi.js';
@@ -247,7 +250,6 @@ if (process.env.SKIP_LISTEN !== '1') {
     console.log(`Fleet backend listening on http://localhost:${port} (pid=${process.pid})`);
     // Only start schedulers in the first worker to avoid duplicate runs
     if (isFirstWorker) {
-      startTollAutoSyncScheduler();
       startHandoffReminderScheduler();
       startCheckoutSessionCleanupScheduler();
       // Surface Spin misconfiguration (missing TPN/key, sandbox on,
@@ -271,7 +273,6 @@ if (process.env.SKIP_LISTEN !== '1') {
 }
 
 process.on('SIGINT', async () => {
-  stopTollAutoSyncScheduler();
   stopHandoffReminderScheduler();
   stopCheckoutSessionCleanupScheduler();
   await closeBrowser();
@@ -281,7 +282,6 @@ process.on('SIGINT', async () => {
 });
 
 process.on('SIGTERM', async () => {
-  stopTollAutoSyncScheduler();
   stopHandoffReminderScheduler();
   stopCheckoutSessionCleanupScheduler();
   await closeBrowser();

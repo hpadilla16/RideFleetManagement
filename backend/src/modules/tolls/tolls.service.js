@@ -23,6 +23,23 @@ const AUTOEXPRESO_PASSWORD_SELECTOR = "input[formcontrolname='password'], input[
 const AUTOEXPRESO_ACTIVITY_SELECTOR = 'div.az-media-list-activity';
 const tollSyncLocks = new Set();
 
+// Phase 0 (2026-06-09): toll scrapers no longer launch their own throwaway
+// Chromium per run. They go through the shared singleton browser + the
+// process-wide concurrent-page cap in lib/puppeteer-browser.js (see
+// PUPPETEER_MAX_CONCURRENT_PAGES). Lazy import preserves the old friendly
+// error on environments without puppeteer installed.
+let _tollWithPage = null;
+async function resolveTollWithPage() {
+  if (_tollWithPage) return _tollWithPage;
+  try {
+    const mod = await import('../../lib/puppeteer-browser.js');
+    _tollWithPage = mod.withPage;
+  } catch {
+    throw new Error('Puppeteer is not installed on backend for live toll sync');
+  }
+  return _tollWithPage;
+}
+
 async function resolveActiveProvider(tenantId) {
   if (!tenantId) return 'AUTOEXPRESO';
   const accounts = await prisma.tollProviderAccount.findMany({
@@ -1718,36 +1735,27 @@ export const tollsService = {
   },
 
   async _runSunPassSync(providerAccount, scope, actorUserId, syncLockKey) {
-    let puppeteer;
-    try {
-      puppeteer = await import('puppeteer');
-    } catch {
-      throw new Error('Puppeteer is not installed on backend for live toll sync');
-    }
+    const withPage = await resolveTollWithPage();
 
     const username = String(providerAccount.username || '').trim();
     const password = decodeSecret(providerAccount.passwordEncrypted);
     const today = new Date();
     const dateStr = `${String(today.getMonth() + 1).padStart(2, '0')}/${String(today.getDate()).padStart(2, '0')}/${today.getFullYear()}`;
 
-    const browser = await puppeteer.default.launch({
-      headless: true,
-      executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || undefined,
-      args: ['--no-sandbox', '--disable-setuid-sandbox']
-    });
-    const page = await browser.newPage();
-
     try {
-      // Login
-      await sunpassLogin(page, username, password);
-      // Navigate to activity
-      await sunpassNavigateToActivity(page);
-      // Filter and search for today
-      await sunpassFilterAndSearch(page, dateStr);
-
-      // Scrape rows
-      const pageRows = await scrapeSunPassRows(page);
-      await browser.close();
+      // Scrape under the shared singleton browser + global page cap. Only the
+      // scrape holds the semaphore — the Prisma writes below run after the
+      // page is closed and the permit released.
+      const pageRows = await withPage(async (page) => {
+        // Login
+        await sunpassLogin(page, username, password);
+        // Navigate to activity
+        await sunpassNavigateToActivity(page);
+        // Filter and search for today
+        await sunpassFilterAndSearch(page, dateStr);
+        // Scrape rows
+        return scrapeSunPassRows(page);
+      });
 
       const rows = [];
       const seenExternalIds = new Set();
@@ -1841,7 +1849,6 @@ export const tollsService = {
         importRun: created?.importRun || null
       };
     } catch (error) {
-      await browser.close().catch(() => null);
       await prisma.tollProviderAccount.update({
         where: { id: providerAccount.id },
         data: {
@@ -1933,12 +1940,7 @@ export const tollsService = {
       return this._runSunPassSync(row, scope, actorUserId, syncLockKey);
     }
 
-    let puppeteer;
-    try {
-      puppeteer = await import('puppeteer');
-    } catch {
-      throw new Error('Puppeteer is not installed on backend for live toll sync');
-    }
+    const withPage = await resolveTollWithPage();
 
     const settings = safeJsonParse(row.settingsJson, {});
     const loginUrl = String(settings.loginUrl || AUTOEXPRESO_LOGIN_URL).trim() || AUTOEXPRESO_LOGIN_URL;
@@ -1947,83 +1949,81 @@ export const tollsService = {
     const username = String(row.username || '').trim();
     const password = decodeSecret(row.passwordEncrypted);
 
-    const browser = await puppeteer.default.launch({
-      headless: true,
-      executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || undefined,
-      args: ['--no-sandbox', '--disable-setuid-sandbox']
-    });
-    const page = await browser.newPage();
-
     try {
-      await page.goto(loginUrl, { waitUntil: 'networkidle2', timeout: 45000 });
-      await page.waitForSelector(AUTOEXPRESO_USERNAME_SELECTOR, { timeout: 30000 });
-      await page.waitForSelector(AUTOEXPRESO_PASSWORD_SELECTOR, { timeout: 30000 });
-      await page.click(AUTOEXPRESO_USERNAME_SELECTOR, { clickCount: 3 }).catch(() => null);
-      await page.type(AUTOEXPRESO_USERNAME_SELECTOR, username);
-      await page.click(AUTOEXPRESO_PASSWORD_SELECTOR, { clickCount: 3 }).catch(() => null);
-      await page.type(AUTOEXPRESO_PASSWORD_SELECTOR, password);
+      // Scrape (login + pagination) under the shared singleton browser and
+      // the global page cap. Only the scrape holds the semaphore — the Prisma
+      // writes below run after the page is closed and the permit released.
+      const { rows, dedupedInRunCount } = await withPage(async (page) => {
+        await page.goto(loginUrl, { waitUntil: 'networkidle2', timeout: 45000 });
+        await page.waitForSelector(AUTOEXPRESO_USERNAME_SELECTOR, { timeout: 30000 });
+        await page.waitForSelector(AUTOEXPRESO_PASSWORD_SELECTOR, { timeout: 30000 });
+        await page.click(AUTOEXPRESO_USERNAME_SELECTOR, { clickCount: 3 }).catch(() => null);
+        await page.type(AUTOEXPRESO_USERNAME_SELECTOR, username);
+        await page.click(AUTOEXPRESO_PASSWORD_SELECTOR, { clickCount: 3 }).catch(() => null);
+        await page.type(AUTOEXPRESO_PASSWORD_SELECTOR, password);
 
-      await Promise.all([
-        page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 45000 }).catch(() => null),
-        clickAutoExpresoLoginButton(page)
-      ]);
+        await Promise.all([
+          page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 45000 }).catch(() => null),
+          clickAutoExpresoLoginButton(page)
+        ]);
 
-      await page.goto(transactionUrl, { waitUntil: 'networkidle2', timeout: 45000 });
-      const transactionState = await waitForAutoExpresoTransactionState(page, 30000);
-      if (transactionState !== 'transactions') {
-        const pageState = await captureAutoExpresoPageState(page);
-        const accountStatementHint = transactionState === 'account-statements'
-          ? ' | This AutoExpreso account is landing on monthly account statements instead of the legacy live transaction feed. Use manual/CSV import for now or add monthly statement ingestion for this tenant.'
-          : '';
-        throw new Error(`AutoExpreso sync could not open transactions (${transactionState}). URL: ${pageState.url || 'unknown'} | Title: ${pageState.title || 'unknown'}${pageState.hint ? ` | Hint: ${pageState.hint}` : ''}${accountStatementHint}`);
-      }
-      await waitForAutoExpresoRows(page, 20000);
+        await page.goto(transactionUrl, { waitUntil: 'networkidle2', timeout: 45000 });
+        const transactionState = await waitForAutoExpresoTransactionState(page, 30000);
+        if (transactionState !== 'transactions') {
+          const pageState = await captureAutoExpresoPageState(page);
+          const accountStatementHint = transactionState === 'account-statements'
+            ? ' | This AutoExpreso account is landing on monthly account statements instead of the legacy live transaction feed. Use manual/CSV import for now or add monthly statement ingestion for this tenant.'
+            : '';
+          throw new Error(`AutoExpreso sync could not open transactions (${transactionState}). URL: ${pageState.url || 'unknown'} | Title: ${pageState.title || 'unknown'}${pageState.hint ? ` | Hint: ${pageState.hint}` : ''}${accountStatementHint}`);
+        }
+        await waitForAutoExpresoRows(page, 20000);
 
-      const rows = [];
-      const seenExternalIds = new Set();
-      let dedupedInRunCount = 0;
-      let pageNumber = 0;
-      while (pageNumber < maxPages) {
-        const pageRows = await scrapeAutoExpresoBalanceRows(page);
-        for (const raw of pageRows) {
-          try {
-            const transactionAt = parseAutoExpresoDateTime(raw.datetimeFull);
-            const amount = Number(raw.amount);
-            if (!Number.isFinite(amount) || amount <= 0 || amount > 100) continue;
-            const externalId = normalizeToken(`${raw.plateRaw}|${raw.selloRaw}|${transactionAt.toISOString()}|${amount}|${raw.location}`);
-            if (!externalId) continue;
-            if (seenExternalIds.has(externalId)) {
-              dedupedInRunCount += 1;
-              continue;
+        const rows = [];
+        const seenExternalIds = new Set();
+        let dedupedInRunCount = 0;
+        let pageNumber = 0;
+        while (pageNumber < maxPages) {
+          const pageRows = await scrapeAutoExpresoBalanceRows(page);
+          for (const raw of pageRows) {
+            try {
+              const transactionAt = parseAutoExpresoDateTime(raw.datetimeFull);
+              const amount = Number(raw.amount);
+              if (!Number.isFinite(amount) || amount <= 0 || amount > 100) continue;
+              const externalId = normalizeToken(`${raw.plateRaw}|${raw.selloRaw}|${transactionAt.toISOString()}|${amount}|${raw.location}`);
+              if (!externalId) continue;
+              if (seenExternalIds.has(externalId)) {
+                dedupedInRunCount += 1;
+                continue;
+              }
+              seenExternalIds.add(externalId);
+              rows.push({
+                transactionAt: transactionAt.toISOString(),
+                amount,
+                location: String(raw.location || '').trim(),
+                lane: '',
+                direction: '',
+                plate: String(raw.plateRaw || '').trim(),
+                tag: '',
+                sello: String(raw.selloRaw || '').trim(),
+                transactionTimeRaw: String(raw.datetimeFull || '').split(/\s+/).slice(1).join(' '),
+                externalId
+              });
+            } catch {
+              // Skip malformed rows but continue sync.
             }
-            seenExternalIds.add(externalId);
-            rows.push({
-              transactionAt: transactionAt.toISOString(),
-              amount,
-              location: String(raw.location || '').trim(),
-              lane: '',
-              direction: '',
-              plate: String(raw.plateRaw || '').trim(),
-              tag: '',
-              sello: String(raw.selloRaw || '').trim(),
-              transactionTimeRaw: String(raw.datetimeFull || '').split(/\s+/).slice(1).join(' '),
-              externalId
-            });
-          } catch {
-            // Skip malformed rows but continue sync.
           }
+
+          const beforeSnapshot = await page.evaluate(() => String(document.body?.innerText || '').slice(0, 2000)).catch(() => '');
+          const moved = await clickAutoExpresoNextPage(page);
+          if (!moved) break;
+          await page.waitForFunction((previous) => String(document.body?.innerText || '').slice(0, 2000) !== previous, { timeout: 15000 }, beforeSnapshot).catch(() => null);
+          await waitForAutoExpresoRows(page, 10000);
+          await new Promise((resolve) => setTimeout(resolve, 1000));
+          pageNumber += 1;
         }
 
-        const beforeSnapshot = await page.evaluate(() => String(document.body?.innerText || '').slice(0, 2000)).catch(() => '');
-        const moved = await clickAutoExpresoNextPage(page);
-        if (!moved) break;
-        await page.waitForFunction((previous) => String(document.body?.innerText || '').slice(0, 2000) !== previous, { timeout: 15000 }, beforeSnapshot).catch(() => null);
-        await waitForAutoExpresoRows(page, 10000);
-        await new Promise((resolve) => setTimeout(resolve, 1000));
-        pageNumber += 1;
-      }
-
-      await browser.close();
+        return { rows, dedupedInRunCount };
+      });
 
       if (!rows.length) {
         const startedAt = new Date();
@@ -2102,7 +2102,6 @@ export const tollsService = {
         importRun: created?.importRun || null
       };
     } catch (error) {
-      await browser.close().catch(() => null);
       await prisma.tollProviderAccount.update({
         where: { id: row.id },
         data: {

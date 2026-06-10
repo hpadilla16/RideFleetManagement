@@ -25,12 +25,12 @@
 
 import ExcelJS from 'exceljs';
 
-let _getBrowser = null;
-async function resolveBrowser() {
-  if (_getBrowser) return _getBrowser;
+let _withPage = null;
+async function resolveWithPage() {
+  if (_withPage) return _withPage;
   const mod = await import('../../lib/puppeteer-browser.js');
-  _getBrowser = mod.getBrowser;
-  return _getBrowser;
+  _withPage = mod.withPage;
+  return _withPage;
 }
 
 let _logger = null;
@@ -66,10 +66,10 @@ export async function renderReportPdf(html, opts = {}) {
   if (!html || typeof html !== 'string') {
     throw new Error('renderReportPdf: html string required');
   }
-  const getBrowser = await resolveBrowser();
-  const browser = await getBrowser();
-  const page = await browser.newPage();
-  try {
+  // withPage() reuses the singleton browser, opens/closes the page, and
+  // enforces the process-wide concurrent-page cap (Phase 0 2026-06-09).
+  const withPage = await resolveWithPage();
+  return withPage(async (page) => {
     await page.setContent(html, { waitUntil: 'domcontentloaded' });
     await page.evaluate(() => Promise.all(
       Array.from(document.images)
@@ -91,9 +91,7 @@ export async function renderReportPdf(html, opts = {}) {
       },
     });
     return pdfBuffer;
-  } finally {
-    await page.close().catch(() => {});
-  }
+  });
 }
 
 // ---------------------------------------------------------------------------

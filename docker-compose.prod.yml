@@ -1,20 +1,12 @@
 services:
-  db:
-    image: postgres:16-alpine
-    container_name: fleet-db-prod
-    restart: unless-stopped
-    environment:
-      POSTGRES_DB: ${POSTGRES_DB:-fleet_management}
-      POSTGRES_USER: ${POSTGRES_USER:-postgres}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
-    command: ["postgres", "-c", "max_connections=100", "-c", "shared_buffers=256MB", "-c", "work_mem=4MB"]
-    volumes:
-      - fleet_pg_data_prod:/var/lib/postgresql/data
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
-      interval: 10s
-      timeout: 5s
-      retries: 10
+  # NOTE (2026-06-09, Phase 0 hardening): the local `db` Postgres container
+  # (fleet-db-prod) was REMOVED. Prod has run on Supabase Postgres (pgbouncer
+  # :6543) since the LARGE upgrade — DATABASE_URL in backend/.env points there,
+  # so the local container was dead weight (~300+ MB RAM on an 8 GB box).
+  # The old named volume `fleet_pg_data_prod` is intentionally NOT deleted from
+  # disk; remove it manually (`docker volume rm`) only after confirming nothing
+  # historical is needed. Bring-up: use `--remove-orphans` once so the old
+  # container is cleaned up.
 
   backend:
     build:
@@ -28,6 +20,11 @@ services:
       NODE_ENV: production
       PORT: 4000
       PUPPETEER_EXECUTABLE_PATH: /usr/local/bin/chrome
+      # Phase 0 (2026-06-09): cap concurrent Chromium pages per process —
+      # covers PDF rendering (agreements/reports/inventory) and any manual
+      # toll sync triggered from the API. Scheduled toll scraping moved to
+      # the worker container.
+      PUPPETEER_MAX_CONCURRENT_PAGES: "2"
       CLUSTER_WORKERS: "4"
       # Pool sizing math: pool × workers must stay under Supabase pooler cap.
       # 2026-05-18: upgraded compute MICRO (max_connections=60) → LARGE
@@ -43,9 +40,6 @@ services:
       DATABASE_POOL_SIZE: "24"
     ports:
       - "4000:4000"
-    depends_on:
-      db:
-        condition: service_healthy
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- http://localhost:4000/health || exit 1"]
       interval: 15s
@@ -81,10 +75,16 @@ services:
       # that legitimately exceed 15s. Hot API endpoints stay capped at 15s
       # so a runaway query never holds a request thread.
       DATABASE_STATEMENT_TIMEOUT_MS: "60000"
+      # Phase 0 (2026-06-09): toll auto-sync scraping (headless Chromium) now
+      # runs in THIS container instead of the API container. Same image as the
+      # backend, so the Chrome binary is present — but the env var must be set
+      # here too or puppeteer can't find it.
+      PUPPETEER_EXECUTABLE_PATH: /usr/local/bin/chrome
+      # Global cap on concurrent Chromium pages per process (see
+      # backend/src/lib/puppeteer-browser.js). Scrapers are sequential per
+      # sweep; 2 leaves headroom without letting RAM spike.
+      PUPPETEER_MAX_CONCURRENT_PAGES: "2"
     command: ["node", "src/worker.js"]
-    depends_on:
-      db:
-        condition: service_healthy
     # No port mapping — internal-only process
 
   frontend:
@@ -117,6 +117,3 @@ services:
       interval: 15s
       timeout: 5s
       retries: 15
-
-volumes:
-  fleet_pg_data_prod:

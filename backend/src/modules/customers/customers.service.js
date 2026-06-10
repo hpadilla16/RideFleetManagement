@@ -257,14 +257,20 @@ export const customersService = {
         (${tenantId}::text IS NULL OR "tenantId" = ${tenantId})
         AND (
           ${searchPattern}::text IS NULL
-          OR LOWER("firstName") LIKE ${searchPattern}
-          OR LOWER("lastName") LIKE ${searchPattern}
+          -- Phase 0 (2026-06-09): rewritten from LOWER(col) LIKE → col ILIKE
+          -- and CONCAT() → || so the pg_trgm GIN indexes (migration
+          -- 20260610_pg_trgm_search) can serve every arm of this OR. ILIKE is
+          -- semantically identical to LOWER LIKE; CONCAT() is only STABLE so
+          -- Postgres can't index it, while || is IMMUTABLE and matches the
+          -- expression indexes exactly.
+          OR "firstName" ILIKE ${searchPattern}
+          OR "lastName" ILIKE ${searchPattern}
           -- 2026-06-06 (Ola 2.7): match the full "First Last" (and "Last First")
           -- so "Hector Padilla" finds the customer, not just "Padilla".
-          OR LOWER(CONCAT(COALESCE("firstName", ''), ' ', COALESCE("lastName", ''))) LIKE ${searchPattern}
-          OR LOWER(CONCAT(COALESCE("lastName", ''), ' ', COALESCE("firstName", ''))) LIKE ${searchPattern}
-          OR LOWER(COALESCE(email, '')) LIKE ${searchPattern}
-          OR LOWER(phone) LIKE ${searchPattern}
+          OR (COALESCE("firstName", '') || ' ' || COALESCE("lastName", '')) ILIKE ${searchPattern}
+          OR (COALESCE("lastName", '') || ' ' || COALESCE("firstName", '')) ILIKE ${searchPattern}
+          OR email ILIKE ${searchPattern}
+          OR phone ILIKE ${searchPattern}
         )
       ORDER BY "createdAt" DESC
       LIMIT ${limit}

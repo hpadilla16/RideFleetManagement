@@ -2,7 +2,7 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { getBrowser } from '../../lib/puppeteer-browser.js';
+import { withPage } from '../../lib/puppeteer-browser.js';
 import { sectionsForAgreement } from '../checkout-session/terms-content.js';
 import { prisma } from '../../lib/prisma.js';
 import { hostReviewsService } from '../host-reviews/host-reviews.service.js';
@@ -3100,10 +3100,10 @@ export const rentalAgreementsService = {
   async agreementPdfBuffer(id) {
     const html = await this.renderAgreementHtml(id);
     // Reuse the singleton Chromium — avoid paying launch cost per request.
-    // We only open/close a Page, never the Browser (closed on SIGTERM).
-    const browser = await getBrowser();
-    const page = await browser.newPage();
-    try {
+    // withPage() opens/closes a Page (never the Browser) AND enforces the
+    // process-wide concurrent-page cap (PUPPETEER_MAX_CONCURRENT_PAGES) so a
+    // burst of agreement prints can't stack Chromium RAM. (Phase 0 2026-06-09)
+    return withPage(async (page) => {
       // `domcontentloaded` is sufficient — the agreement HTML inlines all
       // assets (CSS, images as data URLs, fonts). `networkidle0` adds 500ms+
       // of idle wait for nothing.
@@ -3128,9 +3128,7 @@ export const rentalAgreementsService = {
         printBackground: true
       });
       return pdfBuffer;
-    } finally {
-      await page.close().catch(() => {});
-    }
+    });
   },
 
   async emailAgreement(id, payload = {}, actorUserId = null) {

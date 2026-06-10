@@ -109,6 +109,21 @@ async function main() {
     });
   }
 
+  // Phase 0 (2026-06-09) — toll auto-sync sweep MOVED here from the API
+  // container (main.js). Each sweep scrapes SunPass/AutoExpreso with headless
+  // Chromium; that RAM/CPU spike now lives in this container, under the
+  // global page cap (PUPPETEER_MAX_CONCURRENT_PAGES, see compose). Dynamic
+  // import so a broken tolls import chain can't kill the worker boot.
+  try {
+    const tollsMod = await import('./modules/tolls/tolls.scheduler.js');
+    tollsMod.startTollAutoSyncScheduler();
+    logger.info('[worker] started: toll-auto-sync scheduler');
+  } catch (err) {
+    logger.warn('[worker] toll-auto-sync scheduler not started', {
+      message: err.message,
+    });
+  }
+
   const shutdown = async (signal) => {
     logger.info('[worker] shutting down', { signal });
     stopAutochargePoll();
@@ -120,6 +135,16 @@ async function main() {
     try {
       const ltBillingMod = await import('./modules/long-term/long-term-billing.scheduler.js');
       ltBillingMod.stopLongTermBillingScheduler();
+    } catch {}
+    try {
+      const tollsMod = await import('./modules/tolls/tolls.scheduler.js');
+      tollsMod.stopTollAutoSyncScheduler();
+    } catch {}
+    // Close the Chromium singleton if a toll sweep ever launched it here.
+    // Lazy import keeps puppeteer out of the boot graph.
+    try {
+      const pb = await import('./lib/puppeteer-browser.js');
+      await pb.closeBrowser();
     } catch {}
     await shutdownQueues();
     process.exit(0);

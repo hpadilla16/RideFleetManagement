@@ -9,6 +9,46 @@ import logger from './logger.js';
 // call relaunches. This keeps the hot path simple — callers never need to
 // branch on "is the singleton alive".
 
+// ---------------------------------------------------------------------------
+// Global page semaphore (Phase 0, 2026-06-09)
+//
+// Chromium RAM usage is driven by concurrent PAGES, not by the singleton
+// browser itself. This caps concurrent pages PER PROCESS across BOTH managers
+// (default + TL) so a burst of PDF renders + a toll scrape can never stack
+// unbounded Chromium memory on the box. Excess callers queue (FIFO) instead
+// of failing — renders are 1-3s, scrapes are bounded by their own timeouts.
+//
+// Tune via PUPPETEER_MAX_CONCURRENT_PAGES (default 2).
+// ---------------------------------------------------------------------------
+
+function maxConcurrentPages() {
+  const n = Number(process.env.PUPPETEER_MAX_CONCURRENT_PAGES || 2);
+  return Number.isFinite(n) && n >= 1 ? Math.floor(n) : 2;
+}
+
+function createSemaphore() {
+  let inUse = 0;
+  const waiters = [];
+  async function acquire() {
+    if (inUse < maxConcurrentPages()) {
+      inUse += 1;
+      return;
+    }
+    await new Promise((resolve) => waiters.push(resolve));
+    inUse += 1;
+  }
+  function release() {
+    inUse = Math.max(0, inUse - 1);
+    const next = waiters.shift();
+    if (next) next();
+  }
+  return { acquire, release, stats: () => ({ inUse, waiting: waiters.length }) };
+}
+
+// Single process-wide semaphore shared by every manager in this process.
+const pageSemaphore = createSemaphore();
+export const _pageSemaphoreStats = pageSemaphore.stats; // exposed for tests
+
 // Factory lets tests inject a fake launcher. Production uses puppeteer.launch.
 // The returned object implements the same `getBrowser`/`closeBrowser` contract.
 export function createBrowserManager(launcher) {
@@ -52,7 +92,25 @@ export function createBrowserManager(launcher) {
     }
   }
 
-  return { getBrowser, closeBrowser };
+  /**
+   * Run `fn(page)` on a fresh page under the global concurrency cap.
+   * Always closes the page, always releases the semaphore — callers can't
+   * leak pages or permits even on throw. Returns fn's return value.
+   */
+  async function withPage(fn) {
+    await pageSemaphore.acquire();
+    let page = null;
+    try {
+      const browser = await getBrowser();
+      page = await browser.newPage();
+      return await fn(page);
+    } finally {
+      if (page) await page.close().catch(() => {});
+      pageSemaphore.release();
+    }
+  }
+
+  return { getBrowser, closeBrowser, withPage };
 }
 
 function defaultLauncher() {
@@ -66,6 +124,7 @@ function defaultLauncher() {
 const manager = createBrowserManager(defaultLauncher);
 export const getBrowser = manager.getBrowser;
 export const closeBrowser = manager.closeBrowser;
+export const withPage = manager.withPage;
 
 // ---------------------------------------------------------------------------
 // TL International dedicated browser (2026-05-25)
@@ -107,3 +166,4 @@ function tlLauncher() {
 const tlManager = createBrowserManager(tlLauncher);
 export const getTLBrowser = tlManager.getBrowser;
 export const closeTLBrowser = tlManager.closeBrowser;
+export const withTLPage = tlManager.withPage;
