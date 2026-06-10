@@ -270,12 +270,13 @@ function DashboardInner({ token, me, logout }) {
   const [reservations, setReservations] = useState([]);
   const [overview, setOverview] = useState(null);
   const [resSummary, setResSummary] = useState(null);
+  const [mismatchCount, setMismatchCount] = useState(0);
   const [msg, setMsg] = useState('');
   const canSeeOverview = me?.moduleAccess?.reports !== false;
   const canSeeVehicles = me?.moduleAccess?.vehicles !== false;
 
   const load = async () => {
-    const [reservationsResult, overviewResult, vehiclesResult, summaryResult] = await Promise.allSettled([
+    const [reservationsResult, overviewResult, vehiclesResult, summaryResult, reconResult] = await Promise.allSettled([
       // The dashboard's Operations Board derives its visible Pickups/Returns
       // lists from this array. The default limit is 100 ordered by most-recent
       // created, which silently dropped today's returns whose reservations
@@ -286,8 +287,11 @@ function DashboardInner({ token, me, logout }) {
       api('/api/reservations?limit=500', {}, token),
       canSeeOverview ? api('/api/reports/overview', {}, token) : Promise.resolve(null),
       !canSeeOverview && canSeeVehicles ? api('/api/vehicles', {}, token) : Promise.resolve([]),
-      api('/api/reservations/summary', {}, token)
+      api('/api/reservations/summary', {}, token),
+      canSeeVehicles ? api('/api/inventory/reconciliation/open', { bypassCache: true }, token) : Promise.resolve(null)
     ]);
+
+    setMismatchCount(reconResult.status === 'fulfilled' && reconResult.value ? Number(reconResult.value.count || 0) : 0);
 
     if (reservationsResult.status === 'fulfilled') {
       const val = reservationsResult.value;
@@ -552,11 +556,22 @@ function DashboardInner({ token, me, logout }) {
               <strong>{workspaceOpsHub.serviceHeld}</strong>
               <span className="ui-muted">Units blocked for maintenance or out-of-service work.</span>
             </div>
-            <div className="info-tile">
-              <span className="label">Wash Holds</span>
-              <strong>{workspaceOpsHub.washHeld}</strong>
-              <span className="ui-muted">Units temporarily blocked for wash and turnaround prep.</span>
-            </div>
+            <button
+              type="button"
+              className="info-tile"
+              onClick={() => router.push('/vehicles/reconciliation')}
+              style={{
+                textAlign: 'left',
+                cursor: 'pointer',
+                background: mismatchCount > 0 ? 'rgba(239, 68, 68, 0.08)' : undefined,
+                borderColor: mismatchCount > 0 ? 'rgba(239, 68, 68, 0.35)' : undefined,
+              }}
+              title="Vehicles flagged during inventory that still need fixing"
+            >
+              <span className="label">Status Mismatches</span>
+              <strong style={{ color: mismatchCount > 0 ? '#dc2626' : undefined }}>{mismatchCount}</strong>
+              <span className="ui-muted">Deferred during inventory. Click to reconcile.</span>
+            </button>
             <div className="info-tile">
               <span className="label">Active Reservations</span>
               <strong>{workspaceOpsHub.activeReservations}</strong>

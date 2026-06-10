@@ -12,6 +12,7 @@
 import { prisma } from '../../lib/prisma.js';
 import logger from '../../lib/logger.js';
 import { detectMismatch, canCompleteSession, computeTotals } from './inventory-logic.js';
+import { reEvaluateOpenFlags } from './inventory-reconciliation.js';
 import { uploadInspectionPhotos, isStorageEnabled } from '../rental-agreements/inspection-photos.js';
 import { uploadObject, downloadObject, safePath } from '../../lib/storage/supabase-storage.js';
 import { renderReportPdf } from '../reports/reports-export.js';
@@ -428,5 +429,43 @@ export const inventoryService = {
     if (!session) throw err('Inventory session not found', 'NOT_FOUND', 404);
     const buffer = await renderSessionPdf(session);
     return { buffer, filename: `${report.title || 'inventory'}.pdf`.replace(/[^\w.-]+/g, '_') };
+  },
+
+  /**
+   * Open reconciliation flags (deferred mismatches) for the dashboard tile +
+   * list. Lazily auto-resolves any whose condition has cleared first, so the
+   * list is always accurate right after a check-in. No tenant → empty (the
+   * super-admin global dashboard has no single-tenant reconciliation view).
+   */
+  async listOpenReconciliation(scope = {}) {
+    const tenantId = scope?.tenantId;
+    if (!tenantId || tenantId === '__no_tenant__') return { count: 0, flags: [] };
+
+    await reEvaluateOpenFlags(prisma, { tenantId }).catch(() => null);
+
+    const flags = await prisma.fleetReconciliationFlag.findMany({
+      where: { tenantId, status: 'OPEN' },
+      orderBy: { raisedAt: 'desc' },
+      include: {
+        vehicle: { select: { id: true, internalNumber: true, plate: true, homeLocation: { select: { name: true } } } },
+      },
+    });
+    return { count: flags.length, flags };
+  },
+
+  /** Manually resolve an open reconciliation flag (reason MANUAL). */
+  async resolveReconciliationFlag(flagId, payload = {}, actorUserId = null, scope = {}) {
+    const tenantId = requireTenant(scope);
+    const flag = await prisma.fleetReconciliationFlag.findFirst({ where: { id: flagId, tenantId } });
+    if (!flag) throw err('Reconciliation flag not found', 'NOT_FOUND', 404);
+    if (flag.status !== 'OPEN') return { ok: true, alreadyResolved: true };
+
+    const note = payload.note ? String(payload.note).slice(0, 1000) : flag.note;
+    await prisma.fleetReconciliationFlag.update({
+      where: { id: flagId },
+      data: { status: 'RESOLVED', resolvedAt: new Date(), resolvedByUserId: actorUserId, resolvedReason: 'MANUAL', note },
+    });
+    logger.info('[inventory] reconciliation flag manually resolved', { tenantId, flagId, vehicleId: flag.vehicleId });
+    return { ok: true };
   },
 };

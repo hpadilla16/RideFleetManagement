@@ -18,6 +18,7 @@
 import { prisma } from '../../lib/prisma.js';
 import logger from '../../lib/logger.js';
 import { sweepVehicleStatusDrift } from './vehicle-status-sync.js';
+import { reEvaluateOpenFlags } from '../inventory/inventory-reconciliation.js';
 
 const SWEEP_INTERVAL_MS = Math.max(
   5 * 60 * 1000,
@@ -43,6 +44,14 @@ async function runOnce() {
       });
     } else {
       logger.debug?.('[vehicle-drift-sweep] clean — no drift');
+    }
+    // Phase D (2026-06-09): auto-resolve deferred inventory mismatches whose
+    // underlying condition has cleared (e.g. the rental got checked in).
+    try {
+      const { resolved } = await reEvaluateOpenFlags(prisma, {});
+      if (resolved) logger.info('[reconciliation-sweep] auto-resolved cleared mismatches', { resolved });
+    } catch (e) {
+      logger.warn('[reconciliation-sweep] failed', { message: e.message });
     }
   } catch (err) {
     logger.warn('[vehicle-drift-sweep] sweep failed', { message: err.message });

@@ -82,3 +82,15 @@ inventoryRouter.get('/reports/:id/download', async (req, res, next) => {
     res.send(buffer);
   } catch (e) { handle(res, next, e); }
 });
+
+inventoryRouter.get('/reconciliation/open', async (req, res, next) => {
+  try {
+    res.json(await inventoryService.listOpenReconciliation(scopeFor(req)));
+  } catch (e) { handle(res, next, e); }
+});
+
+inventoryRouter.post('/reconciliation/:flagId/resolve', async (req, res, next) => {
+  try {
+    res.json(await inventoryService.resolveReconciliationFlag(req.params.flagId, req.body || {}, actor(req), scopeFor(req)));
+  } catch (e) { handle(res, next, e); }
+});
