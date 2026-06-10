@@ -20,9 +20,25 @@ const isProduction = process.env.NODE_ENV === 'production';
 
 // Case-insensitive set of meta keys whose VALUES must never be logged in clear.
 const REDACT_KEYS = new Set([
-  'firstname', 'lastname', 'name', 'phone', 'email', 'dob', 'dateofbirth',
+  'firstname', 'lastname', 'phone', 'email', 'dob', 'dateofbirth',
   'licensenumber', 'license', 'cardonfiletoken', 'ssn', 'password'
 ]);
+
+// 2026-06-10 — `name` used to live in REDACT_KEYS unconditionally, which
+// over-redacted non-PII names (vehicle { name: "Toyota Corolla" }, tenant
+// { name: "International" }, location names...) and made prod logs harder to
+// read. A bare `name`/`fullname` key is only PII when the surrounding object
+// looks like a PERSON — i.e. it carries another person-identifying key. So we
+// redact name/fullname conditionally on that context instead.
+const NAME_KEYS = new Set(['name', 'fullname']);
+const PERSON_CONTEXT_KEYS = new Set([
+  'firstname', 'lastname', 'phone', 'email', 'dob', 'dateofbirth',
+  'licensenumber', 'license', 'driverlicense', 'ssn', 'customerid', 'guestid'
+]);
+
+function hasPersonContext(keys) {
+  return keys.some((k) => PERSON_CONTEXT_KEYS.has(k.toLowerCase()));
+}
 
 const REDACTED = '[redacted]';
 // Matches a data: URL (e.g. "data:image/jpeg;base64,...") or a long bare
@@ -55,8 +71,10 @@ export function redactSensitive(value, depth = 0, seen = new WeakSet()) {
   }
 
   const out = {};
+  const personContext = hasPersonContext(Object.keys(value));
   for (const [key, val] of Object.entries(value)) {
-    if (REDACT_KEYS.has(key.toLowerCase())) {
+    const keyLower = key.toLowerCase();
+    if (REDACT_KEYS.has(keyLower) || (personContext && NAME_KEYS.has(keyLower))) {
       out[key] = val == null ? val : REDACTED;
     } else {
       out[key] = redactSensitive(val, depth + 1, seen);
@@ -69,12 +87,14 @@ export function redactSensitive(value, depth = 0, seen = new WeakSet()) {
 // NOTE: winston.format IS the factory function itself (combine/json/etc. are
 // properties hanging off it) — destructuring `format` from it yields undefined.
 const redactFormat = winston.format((info) => {
+  const topLevelPersonContext = hasPersonContext(Object.keys(info));
   for (const key of Object.keys(info)) {
     // Leave winston's own structural fields untouched; sanitize the rest.
     if (key === 'level' || key === 'message' || key === 'timestamp') continue;
     // Key-based redaction must apply at the TOP level of the meta too, not
     // only to nested objects inside redactSensitive.
-    if (REDACT_KEYS.has(key.toLowerCase())) {
+    const keyLower = key.toLowerCase();
+    if (REDACT_KEYS.has(keyLower) || (topLevelPersonContext && NAME_KEYS.has(keyLower))) {
       info[key] = info[key] == null ? info[key] : REDACTED;
       continue;
     }

@@ -65,6 +65,10 @@ function CaptureFlow({ token, data, onComplete, onError }) {
   const [angles, setAngles] = useState(data.angles);
   const [odometer, setOdometer] = useState('');
   const [fuelLevel, setFuelLevel] = useState('FULL');
+  // 2026-06-10 — mobile checkouts left cleanlinessOut blank on the contract
+  // ("-") because this page never captured it. Mirrors the desktop wizard's
+  // 1..5 scale (5 = clean); written through to the agreement on complete.
+  const [cleanliness, setCleanliness] = useState(5);
   const [notes, setNotes] = useState('');
   const [signerName, setSignerName] = useState('');
   const [signatureDataUrl, setSignatureDataUrl] = useState('');
@@ -93,6 +97,7 @@ function CaptureFlow({ token, data, onComplete, onError }) {
         body: JSON.stringify({
           odometer: odometer ? Number(odometer) : undefined,
           fuelLevel,
+          cleanliness,
           notes: notes.trim() || undefined,
           signatureDataUrl,
           signerName: signerName.trim(),
@@ -141,6 +146,17 @@ function CaptureFlow({ token, data, onComplete, onError }) {
           <option value="HALF">1/2</option>
           <option value="QUARTER">1/4</option>
           <option value="EMPTY">Empty</option>
+        </select>
+      </div>
+
+      <div style={{ marginBottom: 12 }}>
+        <label style={labelStyle}>Cleanliness</label>
+        <select value={cleanliness} onChange={(e) => setCleanliness(Number(e.target.value))} style={inputStyle}>
+          <option value={5}>5 — Very clean</option>
+          <option value={4}>4 — Clean</option>
+          <option value={3}>3 — Average</option>
+          <option value={2}>2 — Dirty</option>
+          <option value={1}>1 — Very dirty</option>
         </select>
       </div>
 

@@ -62,16 +62,17 @@ mobileInspectionPublicRouter.post('/:token/photo', async (req, res) => {
 });
 
 // POST /api/mobile-inspection/:token/complete
-// body: { signatureDataUrl?, signerName?, odometer?, fuelLevel?, notes? }
+// body: { signatureDataUrl?, signerName?, odometer?, fuelLevel?, cleanliness?, notes? }
 mobileInspectionPublicRouter.post('/:token/complete', async (req, res) => {
   try {
-    const { signatureDataUrl, signerName, odometer, fuelLevel, notes } = req.body || {};
+    const { signatureDataUrl, signerName, odometer, fuelLevel, cleanliness, notes } = req.body || {};
     const result = await mobileInspectionService.complete({
       token: req.params.token,
       signatureDataUrl,
       signerName,
       odometer,
       fuelLevel,
+      cleanliness,
       notes,
       customerIp: clientIp(req),
     });

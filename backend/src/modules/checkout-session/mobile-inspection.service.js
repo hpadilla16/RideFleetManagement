@@ -160,7 +160,7 @@ async function savePhoto({ token, angleKey, photoDataUrl, notes, customerIp }) {
   return { angleKey, captured: true };
 }
 
-async function complete({ token, signatureDataUrl, signerName, odometer, fuelLevel, notes, customerIp }) {
+async function complete({ token, signatureDataUrl, signerName, odometer, fuelLevel, cleanliness, notes, customerIp }) {
   const row = await loadToken(token);
   const ag = row.reservation.rentalAgreement;
 
@@ -211,6 +211,25 @@ async function complete({ token, signatureDataUrl, signerName, odometer, fuelLev
   const hasSignature = signatureDataUrl && signatureDataUrl.length > 200;
   const now = new Date();
 
+  // 2026-06-10 — mobile checkouts never captured cleanliness, so contracts
+  // printed "-" for Cleanliness Out (known limitation of beta.152). The page
+  // now sends a 1..5 value (desktop wizard scale; feeds computeCleaningFee at
+  // check-in). Write-through to the agreement column, but ONLY if it's still
+  // null — an agent-set value from the desktop wizard always wins.
+  const cleanlinessNum = Number(cleanliness);
+  const cleanlinessVal =
+    Number.isInteger(cleanlinessNum) && cleanlinessNum >= 1 && cleanlinessNum <= 5
+      ? cleanlinessNum
+      : null;
+  let writeCleanliness = false;
+  if (cleanlinessVal != null) {
+    const agClean = await prisma.rentalAgreement.findUnique({
+      where: { id: ag.id },
+      select: { cleanlinessOut: true },
+    });
+    writeCleanliness = agClean != null && agClean.cleanlinessOut == null;
+  }
+
   const txOps = [
     prisma.rentalAgreementInspection.update({
       where: { id: inspection.id },
@@ -258,6 +277,14 @@ async function complete({ token, signatureDataUrl, signerName, odometer, fuelLev
         tcSignerName: signerName || ag.tcSignerName || null,
         tcCustomerIp: customerIp || null,
       },
+    }));
+  }
+
+  // Cleanliness write-through (see note above — only when column is null).
+  if (writeCleanliness) {
+    txOps.push(prisma.rentalAgreement.update({
+      where: { id: ag.id },
+      data: { cleanlinessOut: cleanlinessVal },
     }));
   }
 
