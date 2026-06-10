@@ -508,7 +508,11 @@ async function applyManualPayment({ rentalAgreementId, payment, actorUserId }) {
   const totalPaid = allPayments.reduce((s, p) => s + Number(p.amount || 0), 0);
   const agreement = await prisma.rentalAgreement.findUnique({
     where: { id: rentalAgreementId },
-    select: { total: true }
+    // 2026-06-10: reservationId added for the audit-log write below.
+    // AuditLog.reservationId is REQUIRED in the schema, so the old
+    // `reservationId: null` create always threw — and the `.catch(() => {})`
+    // swallowed it, so manual check-in payments never produced an audit row.
+    select: { total: true, reservationId: true }
   });
   const newBalance = Math.max(0, Number((Number(agreement.total || 0) - totalPaid).toFixed(2)));
 
@@ -520,16 +524,22 @@ async function applyManualPayment({ rentalAgreementId, payment, actorUserId }) {
     }
   });
 
-  if (actorUserId) {
+  if (actorUserId && agreement?.reservationId) {
     await prisma.auditLog.create({
       data: {
-        reservationId: null,  // we don't have it directly here without another query
+        reservationId: agreement.reservationId,
         actorUserId,
         action: 'UPDATE',
         reason: `Manual payment applied via checkin wizard: ${method} $${amount.toFixed(2)}${reference ? ` (${reference})` : ''}`,
         metadata: JSON.stringify({ rentalAgreementId, amount, method, reference, receiptUrl: payment.receiptUrl || null })
       }
-    }).catch(() => {});
+    }).catch((e) => {
+      // Audit is best-effort (must never break the payment), but DON'T be
+      // silent about it — silence is exactly how this bug went unnoticed.
+      logger.warn('[checkin-close] manual-payment audit log failed', {
+        rentalAgreementId, message: e?.message || String(e)
+      });
+    });
   }
 
   return { totalPaid, newBalance };
