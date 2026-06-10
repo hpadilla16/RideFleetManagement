@@ -12,6 +12,25 @@
 import { prisma } from '../../lib/prisma.js';
 import logger from '../../lib/logger.js';
 import { detectMismatch, canCompleteSession, computeTotals } from './inventory-logic.js';
+import { uploadInspectionPhotos, isStorageEnabled } from '../rental-agreements/inspection-photos.js';
+
+const INVENTORY_PHOTOS_BUCKET = process.env.SUPABASE_STORAGE_INVENTORY_BUCKET || 'inventory-photos';
+
+// Persist the at-lot photo set. Prefer Supabase storage (returns refs); fall
+// back to inline base64 in photosJson if storage is off or the upload fails —
+// so a missing bucket never blocks an agent mid-inventory.
+async function persistInventoryPhotos(tenantId, itemId, photos) {
+  if (!photos || typeof photos !== 'object' || !Object.keys(photos).length) return undefined;
+  if (isStorageEnabled()) {
+    try {
+      const refs = await uploadInspectionPhotos({ photos, tenantId, inspectionId: itemId, bucket: INVENTORY_PHOTOS_BUCKET });
+      return { storage: true, bucket: INVENTORY_PHOTOS_BUCKET, refs };
+    } catch (e) {
+      logger.warn('[inventory] photo upload failed, storing inline', { itemId, err: e.message });
+    }
+  }
+  return { storage: false, photos };
+}
 
 function err(message, code, status) {
   return Object.assign(new Error(message), { code, status });
@@ -193,6 +212,10 @@ export const inventoryService = {
       if (method === 'MANUAL' && !String(payload.confirmReason || '').trim()) {
         throw err('A reason is required to confirm manually', 'MANUAL_REASON_REQUIRED', 400);
       }
+      // Upload photos (Supabase, with base64 fallback) BEFORE the tx so the
+      // transaction stays short. payload.photos = { front, rear, left, right, odometer }.
+      const photosJson = await persistInventoryPhotos(tenantId, itemId, payload.photos);
+
       Object.assign(data, {
         confirmMethod: method,
         confirmReason: payload.confirmReason ? String(payload.confirmReason).slice(0, 500) : null,
@@ -203,7 +226,7 @@ export const inventoryService = {
         cleanOk: payload.cleanOk ?? null,
         mileageConfirmed: payload.mileageConfirmed ?? null,
         reportedMileage: Number.isFinite(Number(payload.reportedMileage)) ? Math.round(Number(payload.reportedMileage)) : null,
-        photosJson: payload.photosJson ?? undefined,
+        ...(photosJson !== undefined ? { photosJson } : {}),
       });
     }
 

@@ -5,6 +5,16 @@ import { useEffect, useMemo, useState } from 'react';
 import { AuthGate } from '../../../components/AuthGate';
 import { AppShell } from '../../../components/AppShell';
 import { api } from '../../../lib/client';
+import { VehicleScanner } from '../../../components/inventory/VehicleScanner';
+import { compressToDataUrl } from '../../../lib/image-compressor';
+
+const PHOTO_SLOTS = [
+  { key: 'front', label: 'Front' },
+  { key: 'rear', label: 'Rear' },
+  { key: 'left', label: 'Left' },
+  { key: 'right', label: 'Right' },
+  { key: 'odometer', label: 'Odometer' },
+];
 
 function vehicleLabel(v) {
   if (!v) return 'Vehicle';
@@ -30,7 +40,7 @@ function isMaintenance(status) {
 const blankForm = {
   tiresOk: true, brakesOk: true, lightsOk: true, fluidsOk: true, cleanOk: true,
   mileageConfirmed: true, reportedMileage: '',
-  confirmReason: 'Confirmed at lot',
+  scanMethod: null, manualReason: '', photos: {},
   note: '', maintenanceNote: '', reason: '', resolveNote: '',
 };
 
@@ -100,11 +110,17 @@ function InventoryHelperInner({ token, me, logout }) {
 
   async function confirmAtLot() {
     if (!selected) return;
+    const method = form.scanMethod;
+    if (!method) { setMsg('Scan the vehicle (QR / VIN / plate) or use the manual fallback first.'); return; }
+    if (method === 'MANUAL' && !form.manualReason.trim()) { setMsg('A reason is required to confirm manually.'); return; }
+    const missingPhotos = PHOTO_SLOTS.filter((s) => !form.photos[s.key]);
+    if (missingPhotos.length) { setMsg(`Take all ${PHOTO_SLOTS.length} photos (${missingPhotos.map((s) => s.label).join(', ')} missing).`); return; }
     try {
       await post(`/api/inventory/session/${session.id}/items/${selected.id}/confirm`, {
         locatedStatus: 'AT_LOT',
-        confirmMethod: 'MANUAL',
-        confirmReason: form.confirmReason || 'Confirmed at lot',
+        confirmMethod: method,
+        confirmReason: method === 'MANUAL' ? form.manualReason : null,
+        photos: form.photos,
         tiresOk: form.tiresOk, brakesOk: form.brakesOk, lightsOk: form.lightsOk,
         fluidsOk: form.fluidsOk, cleanOk: form.cleanOk,
         mileageConfirmed: form.mileageConfirmed,
@@ -158,6 +174,7 @@ function InventoryHelperInner({ token, me, logout }) {
   }
 
   const set = (patch) => setForm((f) => ({ ...f, ...patch }));
+  const mergePhoto = (key, dataUrl) => setForm((f) => ({ ...f, photos: { ...f.photos, [key]: dataUrl } }));
 
   function itemStateIcon(it) {
     if (it.mismatchType && !it.mismatchResolved) return <span className="status-chip warn">Needs fixing</span>;
@@ -267,6 +284,7 @@ function InventoryHelperInner({ token, me, logout }) {
           item={selected}
           form={form}
           set={set}
+          mergePhoto={mergePhoto}
           busy={busy}
           onBack={() => { setPhase('overview'); setMsg(''); }}
           onConfirmAtLot={confirmAtLot}
@@ -289,7 +307,7 @@ function Check({ label, value, onChange }) {
   );
 }
 
-function ItemPanel({ item, form, set, busy, onBack, onConfirmAtLot, onConfirmOnRent, onSaveMaintenance, onMarkException, onResolveMismatch }) {
+function ItemPanel({ item, form, set, mergePhoto, busy, onBack, onConfirmAtLot, onConfirmOnRent, onSaveMaintenance, onMarkException, onResolveMismatch }) {
   const v = item.vehicle || {};
   const chip = expectedStatusChip(item.expectedStatus);
   const isMismatch = item.mismatchType && !item.mismatchResolved;
@@ -347,9 +365,53 @@ function ItemPanel({ item, form, set, busy, onBack, onConfirmAtLot, onConfirmOnR
 
       {!isMismatch && !maintenance && !onRent ? (
         <div>
-          <div className="surface-note" style={{ marginBottom: 12 }}>Scanning (QR / plate / VIN) is coming in the next update. For now, confirm manually.</div>
+          <label className="label">1 · Identify the vehicle (scan required)</label>
+          {form.scanMethod ? (
+            <div className="surface-note" style={{ marginBottom: 12 }}>
+              {form.scanMethod === 'MANUAL' ? 'Confirming manually.' : `Matched by ${form.scanMethod}.`}{' '}
+              <button type="button" className="btn-ghost btn-sm" onClick={() => set({ scanMethod: null, manualReason: '' })}>Re-scan</button>
+              {form.scanMethod === 'MANUAL' ? (
+                <input type="text" value={form.manualReason} onChange={(e) => set({ manualReason: e.target.value })} placeholder="Why are you confirming without a scan?" style={{ width: '100%', marginTop: 8 }} />
+              ) : null}
+            </div>
+          ) : (
+            <div style={{ marginBottom: 12 }}>
+              <VehicleScanner
+                expected={v}
+                onMatched={(m) => { set({ scanMethod: m }); }}
+                onManual={() => set({ scanMethod: 'MANUAL' })}
+              />
+            </div>
+          )}
 
-          <label className="label">Verify condition</label>
+          <label className="label">2 · Photos (4 corners + odometer)</label>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: 6, marginBottom: 12 }}>
+            {PHOTO_SLOTS.map((slot) => {
+              const has = !!form.photos[slot.key];
+              return (
+                <label key={slot.key} style={{ aspectRatio: '1', borderRadius: 8, border: '0.5px solid rgba(0,0,0,0.15)', background: has ? 'rgba(22,163,74,0.08)' : 'rgba(0,0,0,0.03)', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', fontSize: 11 }}>
+                  <span style={{ fontWeight: 600, color: has ? 'var(--ok, #16a34a)' : 'inherit' }}>{has ? '✓' : '+'}</span>
+                  <span className="ui-muted" style={{ fontSize: 10 }}>{slot.label}</span>
+                  <input
+                    type="file"
+                    accept="image/*"
+                    capture="environment"
+                    style={{ display: 'none' }}
+                    onChange={async (e) => {
+                      const file = e.target.files?.[0];
+                      if (!file) return;
+                      try {
+                        const dataUrl = await compressToDataUrl(file, { maxWidth: 1600, quality: 0.8 });
+                        mergePhoto(slot.key, dataUrl);
+                      } catch { /* ignore bad image */ }
+                    }}
+                  />
+                </label>
+              );
+            })}
+          </div>
+
+          <label className="label">3 · Verify condition</label>
           <div className="app-card-grid compact" style={{ marginBottom: 12 }}>
             <Check label="Tires" value={form.tiresOk} onChange={(x) => set({ tiresOk: x })} />
             <Check label="Brakes" value={form.brakesOk} onChange={(x) => set({ brakesOk: x })} />
