@@ -26,7 +26,27 @@ function requireTenant(scope) {
 }
 
 const SESSION_INCLUDE = {
-  items: { orderBy: [{ state: 'asc' }, { createdAt: 'asc' }] },
+  items: {
+    orderBy: [{ state: 'asc' }, { createdAt: 'asc' }],
+    // Vehicle display fields the wizard needs to render the fleet list grouped
+    // by lot (internal #, plate, VIN, current mileage, home location name).
+    include: {
+      vehicle: {
+        select: {
+          id: true,
+          internalNumber: true,
+          plate: true,
+          vin: true,
+          make: true,
+          model: true,
+          year: true,
+          mileage: true,
+          status: true,
+          homeLocation: { select: { id: true, name: true } },
+        },
+      },
+    },
+  },
   report: true,
 };
 
@@ -142,38 +162,50 @@ export const inventoryService = {
   },
 
   /**
-   * Confirm a vehicle that is at the lot. Scan is required (QR/PLATE/VIN); a
-   * MANUAL confirm needs a reason (fallback when the scanner fails).
+   * Confirm a vehicle.
+   *   - locatedStatus AT_LOT (default): scan required (QR/PLATE/VIN; MANUAL needs
+   *     a reason — the fallback when the scanner fails) + condition checklist.
+   *   - locatedStatus ON_RENT: the car is legitimately out on the road, so no
+   *     scan and no checklist — just record that it was accounted for.
    */
   async confirmItem(sessionId, itemId, payload = {}, actorUserId = null, scope = {}) {
     const tenantId = requireTenant(scope);
     await this._loadItem(sessionId, itemId, tenantId);
 
-    const method = String(payload.confirmMethod || '').toUpperCase();
-    if (!['QR', 'PLATE', 'VIN', 'MANUAL'].includes(method)) {
-      throw err('A scan method is required (QR, PLATE, VIN, or MANUAL with a reason)', 'SCAN_REQUIRED', 400);
-    }
-    if (method === 'MANUAL' && !String(payload.confirmReason || '').trim()) {
-      throw err('A reason is required to confirm manually', 'MANUAL_REASON_REQUIRED', 400);
+    const located = String(payload.locatedStatus || 'AT_LOT').toUpperCase();
+    if (!['AT_LOT', 'ON_RENT'].includes(located)) {
+      throw err('locatedStatus must be AT_LOT or ON_RENT', 'BAD_LOCATED_STATUS', 400);
     }
 
     const data = {
       state: 'CONFIRMED',
-      locatedStatus: 'AT_LOT',
-      confirmMethod: method,
-      confirmReason: payload.confirmReason ? String(payload.confirmReason).slice(0, 500) : null,
-      tiresOk: payload.tiresOk ?? null,
-      brakesOk: payload.brakesOk ?? null,
-      lightsOk: payload.lightsOk ?? null,
-      fluidsOk: payload.fluidsOk ?? null,
-      cleanOk: payload.cleanOk ?? null,
-      mileageConfirmed: payload.mileageConfirmed ?? null,
-      reportedMileage: Number.isFinite(Number(payload.reportedMileage)) ? Math.round(Number(payload.reportedMileage)) : null,
-      photosJson: payload.photosJson ?? undefined,
+      locatedStatus: located,
       note: payload.note ? String(payload.note).slice(0, 1000) : null,
       confirmedByUserId: actorUserId,
       confirmedAt: new Date(),
     };
+
+    if (located === 'AT_LOT') {
+      const method = String(payload.confirmMethod || '').toUpperCase();
+      if (!['QR', 'PLATE', 'VIN', 'MANUAL'].includes(method)) {
+        throw err('A scan method is required (QR, PLATE, VIN, or MANUAL with a reason)', 'SCAN_REQUIRED', 400);
+      }
+      if (method === 'MANUAL' && !String(payload.confirmReason || '').trim()) {
+        throw err('A reason is required to confirm manually', 'MANUAL_REASON_REQUIRED', 400);
+      }
+      Object.assign(data, {
+        confirmMethod: method,
+        confirmReason: payload.confirmReason ? String(payload.confirmReason).slice(0, 500) : null,
+        tiresOk: payload.tiresOk ?? null,
+        brakesOk: payload.brakesOk ?? null,
+        lightsOk: payload.lightsOk ?? null,
+        fluidsOk: payload.fluidsOk ?? null,
+        cleanOk: payload.cleanOk ?? null,
+        mileageConfirmed: payload.mileageConfirmed ?? null,
+        reportedMileage: Number.isFinite(Number(payload.reportedMileage)) ? Math.round(Number(payload.reportedMileage)) : null,
+        photosJson: payload.photosJson ?? undefined,
+      });
+    }
 
     await prisma.$transaction(async (tx) => {
       await tx.inventoryItem.update({ where: { id: itemId }, data });

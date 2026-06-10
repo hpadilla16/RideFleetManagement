@@ -12,6 +12,7 @@ const NAV_ITEMS = [
   { href: '/dashboard', labelKey: 'nav.dashboard', moduleKey: 'dashboard' },
   { href: '/reservations', labelKey: 'nav.reservations', moduleKey: 'reservations' },
   { href: '/vehicles', labelKey: 'nav.vehicles', moduleKey: 'vehicles' },
+  { href: '/vehicles/inventory-helper', labelKey: 'nav.inventoryHelper', moduleKey: 'vehicles' },
   { href: '/customers', labelKey: 'nav.customers', moduleKey: 'customers' },
   { href: '/people', labelKey: 'nav.people', adminOnly: true, moduleKey: 'people' },
   { href: '/planner', labelKey: 'nav.planner', moduleKey: 'planner' },
