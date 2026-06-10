@@ -4434,34 +4434,47 @@ export const rentalAgreementsService = {
       const tx = details?.transaction || {};
       const txStatus = String(tx?.transactionStatus || '').trim();
       const cfg = await authNetConfig(scope);
+
+      // 2026-06-10 — Authorize.Net's JSON API converts to XML and the XSD is
+      // ORDER-SENSITIVE: transactionRequest children must follow the schema
+      // sequence (transactionType, amount, payment, ..., refTransId, ...).
+      // The old code seeded { transactionType, refTransId } and then appended
+      // amount/payment AFTER refTransId (JS key-insertion order), so every
+      // settled-transaction refund failed with E00003 ("invalid child element
+      // 'amount'"). Voids never carried amount, which is why only refunds
+      // broke. Build each request in schema order instead.
+      let transactionRequest;
+      if (txStatus === 'capturedPendingSettlement') {
+        if (Math.abs(refundAmount - Number(payment.amount || 0)) > 0.009) {
+          throw new Error('Pending Authorize.Net transactions can only be voided for the full amount');
+        }
+        transactionRequest = {
+          transactionType: 'voidTransaction',
+          refTransId: transId
+        };
+      } else {
+        transactionRequest = {
+          transactionType: 'refundTransaction',
+          amount: refundAmount.toFixed(2),
+          payment: {
+            creditCard: {
+              cardNumber: String(tx?.payment?.creditCard?.cardNumber || '').trim(),
+              expirationDate: 'XXXX'
+            }
+          },
+          refTransId: transId
+        };
+      }
+
       const gatewayPayload = {
         createTransactionRequest: {
           merchantAuthentication: {
             name: cfg.loginId,
             transactionKey: cfg.transactionKey
           },
-          transactionRequest: {
-            transactionType: '',
-            refTransId: transId
-          }
+          transactionRequest
         }
       };
-
-      if (txStatus === 'capturedPendingSettlement') {
-        if (Math.abs(refundAmount - Number(payment.amount || 0)) > 0.009) {
-          throw new Error('Pending Authorize.Net transactions can only be voided for the full amount');
-        }
-        gatewayPayload.createTransactionRequest.transactionRequest.transactionType = 'voidTransaction';
-      } else {
-        gatewayPayload.createTransactionRequest.transactionRequest.transactionType = 'refundTransaction';
-        gatewayPayload.createTransactionRequest.transactionRequest.amount = refundAmount.toFixed(2);
-        gatewayPayload.createTransactionRequest.transactionRequest.payment = {
-          creditCard: {
-            cardNumber: String(tx?.payment?.creditCard?.cardNumber || '').trim(),
-            expirationDate: 'XXXX'
-          }
-        };
-      }
 
       const authnet = await authNetRequest(gatewayPayload, scope);
       const txResp = authnet?.transactionResponse || {};
