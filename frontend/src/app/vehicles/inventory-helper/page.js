@@ -23,9 +23,9 @@ function vehicleLabel(v) {
 
 function expectedStatusChip(status) {
   switch (String(status || '').toUpperCase()) {
-    case 'AVAILABLE': return { label: 'At lot', tone: 'good' };
+    case 'AVAILABLE': return { label: 'Available', tone: 'good' };
     case 'RESERVED': return { label: 'Reserved', tone: 'neutral' };
-    case 'ON_RENT': return { label: 'On rent', tone: 'warn' };
+    case 'ON_RENT': return { label: 'Checked out', tone: 'warn' };
     case 'IN_MAINTENANCE': return { label: 'Maintenance', tone: 'neutral' };
     case 'OUT_OF_SERVICE': return { label: 'Out of service', tone: 'neutral' };
     default: return { label: status || '-', tone: 'neutral' };
@@ -354,11 +354,11 @@ function ItemPanel({ item, form, set, mergePhoto, busy, onBack, onConfirmAtLot, 
 
       {!isMismatch && onRent ? (
         <div>
-          <p className="ui-muted" style={{ marginTop: 0 }}>This vehicle is out on rent. Confirm it's accounted for (no photos or checklist needed).</p>
+          <p className="ui-muted" style={{ marginTop: 0 }}>This vehicle is checked out (on rent). Confirm it's accounted for (no photos or checklist needed).</p>
           <label className="label">Note (optional)</label>
           <input type="text" value={form.note} onChange={(e) => set({ note: e.target.value })} style={{ width: '100%' }} />
           <div className="inline-actions" style={{ marginTop: 10 }}>
-            <button type="button" className="button-primary" disabled={busy} onClick={onConfirmOnRent}>Confirm on rent</button>
+            <button type="button" className="button-primary" disabled={busy} onClick={onConfirmOnRent}>Confirm checked out</button>
           </div>
         </div>
       ) : null}
