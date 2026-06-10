@@ -17,7 +17,7 @@ import {
   uploadInspectionPhotos,
   materializeStorageRefs as materializeInspectionStorageRefs
 } from './inspection-photos.js';
-import { normalizeInspectionPhotos, canonicalPhotoKey } from './inspection-photos-normalize.js';
+import { normalizeInspectionPhotos, canonicalPhotoKey, fuelLevelToFraction } from './inspection-photos-normalize.js';
 import { parseLocationConfig } from '../../lib/location-config.js';
 import { getEffectiveTermsHtmlForTenant } from '../../lib/terms/index.js';
 import { TC_VERSION } from '../../lib/terms/version.js';
@@ -2695,6 +2695,13 @@ export const rentalAgreementsService = {
         fuelIn: true,
         cleanlinessOut: true,
         cleanlinessIn: true,
+        // 2026-06-10 — the wizard-v2/mobile flow saves odometer+fuel on the
+        // inspection rows and (until beta.152) never wrote the agreement
+        // columns. Pull the SLIM inspection fields (never photosJson — that
+        // can be MBs of base64) so the contract can fall back to them.
+        inspections: {
+          select: { phase: true, odometer: true, fuelLevel: true }
+        },
         subtotal: true,
         taxes: true,
         fees: true,
@@ -2923,11 +2930,23 @@ export const rentalAgreementsService = {
     const vehicleInternal = v?.internalNumber || '-';
     const vehicleMileage = v?.mileage != null ? Number(v.mileage).toLocaleString() : '-';
 
-    // Inspection data
-    const odometerOut = agreement.odometerOut != null ? Number(agreement.odometerOut).toLocaleString() : '-';
-    const odometerIn = agreement.odometerIn != null ? Number(agreement.odometerIn).toLocaleString() : '-';
-    const fuelOutVal = agreement.fuelOut != null ? `${Math.round(Number(agreement.fuelOut) * 100)}%` : '-';
-    const fuelInVal = agreement.fuelIn != null ? `${Math.round(Number(agreement.fuelIn) * 100)}%` : '-';
+    // Inspection data. 2026-06-10: the wizard-v2/mobile flow saves odometer +
+    // fuel on the RentalAgreementInspection rows; until beta.152 the cascade
+    // finalize never copied them onto the agreement columns, so contracts
+    // printed "-". Coalesce: agreement column (canonical when present) ??
+    // inspection row. Retroactive — fixes contracts already finalized.
+    const inspRows = Array.isArray(agreement.inspections) ? agreement.inspections : [];
+    const checkoutInsp = inspRows.find((r) => String(r.phase || '').toUpperCase() === 'CHECKOUT') || null;
+    const checkinInsp = inspRows.find((r) => String(r.phase || '').toUpperCase() === 'CHECKIN') || null;
+    const odoOutNum = agreement.odometerOut ?? checkoutInsp?.odometer ?? null;
+    const odoInNum = agreement.odometerIn ?? checkinInsp?.odometer ?? null;
+    const fuelOutNum = agreement.fuelOut ?? fuelLevelToFraction(checkoutInsp?.fuelLevel);
+    const fuelInNum = agreement.fuelIn ?? fuelLevelToFraction(checkinInsp?.fuelLevel);
+
+    const odometerOut = odoOutNum != null ? Number(odoOutNum).toLocaleString() : '-';
+    const odometerIn = odoInNum != null ? Number(odoInNum).toLocaleString() : '-';
+    const fuelOutVal = fuelOutNum != null ? `${Math.round(Number(fuelOutNum) * 100)}%` : '-';
+    const fuelInVal = fuelInNum != null ? `${Math.round(Number(fuelInNum) * 100)}%` : '-';
     const cleanlinessOutVal = agreement.cleanlinessOut != null ? `${agreement.cleanlinessOut}/5` : '-';
     const cleanlinessInVal = agreement.cleanlinessIn != null ? `${agreement.cleanlinessIn}/5` : '-';
 

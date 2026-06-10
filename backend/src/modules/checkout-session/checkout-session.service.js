@@ -3,6 +3,8 @@ import { prisma } from '../../lib/prisma.js';
 import logger from '../../lib/logger.js';
 import { syncVehicleStatusForReservation } from '../vehicles/vehicle-status-sync.js';
 import { ensureNoVehicleConflict } from '../reservations/reservations.service.js';
+import { recordMileageEntrySafe } from '../vehicles/mileage-history.service.js';
+import { fuelLevelToFraction } from '../rental-agreements/inspection-photos-normalize.js';
 import {
   CHECKOUT_STEPS,
   canTransition,
@@ -386,10 +388,55 @@ async function transition({ id, toStep, actorUserId, metadata }) {
         }
         await prisma.reservation.update({ where: { id: resv.id }, data: { status: 'CHECKED_OUT' } });
         if (updated.agreementId) {
+          // 2026-06-10 (beta.152) — this cascade finalize never copied the
+          // mobile-captured odometer/fuel from the CHECKOUT inspection row
+          // onto the agreement columns, so contracts printed "-" and the
+          // beta.143 mileage-history CHECKOUT entry was silently skipped.
+          // Copy them here (agreement column wins if already set) and record
+          // the mileage entry. All best-effort: metric/mileage failures must
+          // never break the finalize itself.
+          let metricsPatch = {};
+          let checkoutOdometer = null;
+          try {
+            const [agRow, inspRow] = await Promise.all([
+              prisma.rentalAgreement.findUnique({
+                where: { id: updated.agreementId },
+                select: { odometerOut: true, fuelOut: true, agreementNumber: true },
+              }),
+              prisma.rentalAgreementInspection.findFirst({
+                where: { rentalAgreementId: updated.agreementId, phase: 'CHECKOUT' },
+                select: { odometer: true, fuelLevel: true },
+              }),
+            ]);
+            if (agRow && inspRow) {
+              if (agRow.odometerOut == null && inspRow.odometer != null) {
+                metricsPatch.odometerOut = inspRow.odometer;
+              }
+              const fuelFraction = fuelLevelToFraction(inspRow.fuelLevel);
+              if (agRow.fuelOut == null && fuelFraction != null) {
+                metricsPatch.fuelOut = fuelFraction;
+              }
+            }
+            checkoutOdometer = agRow?.odometerOut ?? inspRow?.odometer ?? null;
+          } catch { metricsPatch = {}; }
+
           await prisma.rentalAgreement.update({
             where: { id: updated.agreementId },
-            data: { status: 'FINALIZED', finalizedAt: new Date() },
+            data: { status: 'FINALIZED', finalizedAt: new Date(), ...metricsPatch },
           }).catch(() => {});
+
+          // Mileage history ("last entry wins" — same as the legacy finalize).
+          if (checkoutOdometer != null && resv.vehicleId) {
+            await recordMileageEntrySafe(prisma, {
+              vehicleId: resv.vehicleId,
+              tenantId: resv.tenantId || undefined,
+              mileage: checkoutOdometer,
+              source: 'CHECKOUT',
+              reservationId: resv.id,
+              rentalAgreementId: updated.agreementId,
+              actorUserId: actorUserId || null,
+            });
+          }
         }
         await syncVehicleStatusForReservation(prisma, {
           reservationId: resv.id, vehicleId: resv.vehicleId, toStatus: 'CHECKED_OUT',

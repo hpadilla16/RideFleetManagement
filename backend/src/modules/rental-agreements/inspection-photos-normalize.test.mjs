@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { normalizeInspectionPhotos, canonicalPhotoKey } from './inspection-photos-normalize.js';
+import { normalizeInspectionPhotos, canonicalPhotoKey, fuelLevelToFraction } from './inspection-photos-normalize.js';
 
 test('canonicalPhotoKey maps mobile snake_case to desktop camelCase', () => {
   assert.equal(canonicalPhotoKey('front_seat'), 'frontSeat');
@@ -60,6 +60,35 @@ test('legacy desktop MAP shape passes through, with snake_case keys re-aliased',
     rear: 'data:img/rear',
     dashboard: 'data:img/dash'
   });
+});
+
+test('fuelLevelToFraction: mobile enum strings -> fraction', () => {
+  assert.equal(fuelLevelToFraction('FULL'), 1);
+  assert.equal(fuelLevelToFraction('THREE_QUARTERS'), 0.75);
+  assert.equal(fuelLevelToFraction('HALF'), 0.5);
+  assert.equal(fuelLevelToFraction('QUARTER'), 0.25);
+  assert.equal(fuelLevelToFraction('EMPTY'), 0);
+  // Case/spacing tolerant
+  assert.equal(fuelLevelToFraction('three quarters'), 0.75);
+});
+
+test('fuelLevelToFraction: numeric and human-fraction inputs', () => {
+  assert.equal(fuelLevelToFraction(0.75), 0.75);
+  assert.equal(fuelLevelToFraction('0.5'), 0.5);
+  assert.equal(fuelLevelToFraction(1), 1);
+  assert.equal(fuelLevelToFraction(0), 0);
+  assert.equal(fuelLevelToFraction(75), 0.75);   // percent-style tolerated
+  assert.equal(fuelLevelToFraction('3/4'), 0.75);
+  assert.equal(fuelLevelToFraction('1/2'), 0.5);
+});
+
+test('fuelLevelToFraction: junk returns null', () => {
+  assert.equal(fuelLevelToFraction(null), null);
+  assert.equal(fuelLevelToFraction(undefined), null);
+  assert.equal(fuelLevelToFraction(''), null);
+  assert.equal(fuelLevelToFraction('whatever'), null);
+  assert.equal(fuelLevelToFraction(-5), null);
+  assert.equal(fuelLevelToFraction(500), null);
 });
 
 test('garbage / empty inputs return empty object', () => {
