@@ -140,7 +140,7 @@ export async function closeAgreementWithCheckinFees(
   // ─────────────────────────────────────────────────────────────────────────
 
   const rentalDays = computeRentalDays(agreement.pickupAt, agreement.returnAt);
-  const tankCapacity = await resolveTankCapacity(agreement);
+  const { gallons: tankCapacity, isFallback: tankCapacityIsFallback } = await resolveTankCapacity(agreement);
   const includedMilesPerDay = await resolveIncludedMilesPerDay(agreement);
 
   // LATE_RETURN inputs. Caller can pass `returnedAt` to backdate a checkin;
@@ -174,6 +174,7 @@ export async function closeAgreementWithCheckinFees(
     includedMilesPerDay,
     rentalDays,
     tankCapacityGallons: tankCapacity,
+    tankCapacityIsFallback,
     persist: true,
     actorUserId
   });
@@ -415,15 +416,26 @@ function computeRentalDays(pickupAt, returnAt) {
 }
 
 async function resolveTankCapacity(agreement) {
-  // Pull from vehicle metadata. Falls back to 15 (a generic mid-size sedan).
+  // 2026-06-10 (#51): this used to select Vehicle columns that never existed
+  // (tankCapacityGallons/fuelTankSize) — Prisma threw, the .catch swallowed
+  // it, and EVERY vehicle billed fuel as a 15-gal tank. It now reads the real
+  // fuelTankCapacityGallons column (additive migration 20260610) and only
+  // falls back to 15 (with a visible warn + a note on the fee line) when the
+  // vehicle has no capacity configured.
   const vehicleId = agreement.vehicleId;
-  if (!vehicleId) return 15;
+  if (!vehicleId) return { gallons: 15, isFallback: true };
   const vehicle = await prisma.vehicle.findUnique({
     where: { id: vehicleId },
-    select: { tankCapacityGallons: true, fuelTankSize: true }
+    select: { fuelTankCapacityGallons: true, internalNumber: true }
   }).catch(() => null);
-  const cap = Number(vehicle?.tankCapacityGallons || vehicle?.fuelTankSize || 0);
-  return cap > 0 ? cap : 15;
+  const cap = Number(vehicle?.fuelTankCapacityGallons || 0);
+  if (cap > 0) return { gallons: cap, isFallback: false };
+  logger.warn('[checkin-close] vehicle has no fuelTankCapacityGallons — billing fuel against 15 gal fallback', {
+    vehicleId,
+    internalNumber: vehicle?.internalNumber || null,
+    rentalAgreementId: agreement.id
+  });
+  return { gallons: 15, isFallback: true };
 }
 
 async function resolveIncludedMilesPerDay(agreement) {

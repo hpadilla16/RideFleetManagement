@@ -436,6 +436,11 @@ function VehicleProfileInner({ token, me, logout }) {
                   <div className="info-tile"><span className="label">Status</span><strong>{row.status || '-'}</strong></div>
                   <div className="info-tile"><span className="label">Fleet Mode</span><strong>{row.fleetMode || '-'}</strong></div>
                   <div className="info-tile">
+                    <span className="label">Fuel Tank</span>
+                    <strong>{row.fuelTankCapacityGallons ? `${Number(row.fuelTankCapacityGallons)} gal` : 'Not set'}</strong>
+                    {!row.fuelTankCapacityGallons && <span className="ui-muted">Fuel fees assume 15 gal until set</span>}
+                  </div>
+                  <div className="info-tile">
                     <span className="label">Mileage</span>
                     <strong>{(row.mileage ?? 0).toLocaleString()} mi</strong>
                     <span className="ui-muted">

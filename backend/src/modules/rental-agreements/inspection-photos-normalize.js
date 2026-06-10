@@ -27,15 +27,21 @@ export function canonicalPhotoKey(key) {
   return INSPECTION_PHOTO_KEY_ALIASES[k] || k;
 }
 
-// Fuel level: the mobile inspection page captures an enum string
-// (FULL/THREE_QUARTERS/HALF/QUARTER/EMPTY); the desktop wizard and the
-// agreement columns use a 0..1 fraction; the contract template formats
-// `Math.round(fuel*100)%`. Collapse every shape to a fraction (or null).
+// Fuel level: the mobile inspection page captures an enum string; the desktop
+// wizard and the agreement columns use a 0..1 fraction; the contract template
+// formats `Math.round(fuel*100)%`. Collapse every shape to a fraction (or null).
+// 2026-06-10: the mobile select moved from quarters to EIGHTHS (the physical
+// gauge resolution the fee engine bills in) — the four *_EIGHTH(S) keys are
+// new; the original five stay for every row captured before the change.
 const FUEL_ENUM_TO_FRACTION = Object.freeze({
   FULL: 1,
+  SEVEN_EIGHTHS: 0.875,
   THREE_QUARTERS: 0.75,
+  FIVE_EIGHTHS: 0.625,
   HALF: 0.5,
+  THREE_EIGHTHS: 0.375,
   QUARTER: 0.25,
+  ONE_EIGHTH: 0.125,
   EMPTY: 0
 });
 

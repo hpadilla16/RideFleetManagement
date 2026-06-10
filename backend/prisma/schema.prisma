@@ -556,6 +556,10 @@ model Vehicle {
   year              Int?
   color             String?
   mileage           Int                    @default(0)
+  // Fuel tank capacity in gallons (2026-06-10, fixes backlog #51). Drives the
+  // FUEL_REFILL fee: gallons = (fuelOut - fuelIn, quantized to 1/8) × capacity.
+  // Nullable — resolveTankCapacity() falls back to 15 gal (+ warn) when unset.
+  fuelTankCapacityGallons Decimal?         @db.Decimal(4, 1)
   status            VehicleStatus          @default(AVAILABLE)
   fleetMode         VehicleFleetMode       @default(RENTAL_ONLY)
   // Program partition — see VehicleProgramCategory enum docs.

@@ -180,10 +180,10 @@ function VehiclesInner({ token, me, logout }) {
   const [msg, setMsg] = useState('');
 
   const [newVehicle, setNewVehicle] = useState({
-    internalNumber: '', plate: '', tollTagNumber: '', tollStickerNumber: '', vin: '', make: '', model: '', color: '', year: '', mileage: '', vehicleTypeId: '', homeLocationId: '', fleetMode: 'RENTAL_ONLY', programCategory: 'BOTH'
+    internalNumber: '', plate: '', tollTagNumber: '', tollStickerNumber: '', vin: '', make: '', model: '', color: '', year: '', mileage: '', fuelTankCapacityGallons: '', vehicleTypeId: '', homeLocationId: '', fleetMode: 'RENTAL_ONLY', programCategory: 'BOTH'
   });
   const [editVehicleForm, setEditVehicleForm] = useState({
-    internalNumber: '', plate: '', tollTagNumber: '', tollStickerNumber: '', vin: '', make: '', model: '', color: '', year: '', mileage: '', status: 'AVAILABLE', vehicleTypeId: '', homeLocationId: '', fleetMode: 'RENTAL_ONLY', programCategory: 'BOTH'
+    internalNumber: '', plate: '', tollTagNumber: '', tollStickerNumber: '', vin: '', make: '', model: '', color: '', year: '', mileage: '', fuelTankCapacityGallons: '', status: 'AVAILABLE', vehicleTypeId: '', homeLocationId: '', fleetMode: 'RENTAL_ONLY', programCategory: 'BOTH'
   });
   const [programCategoryFilter, setProgramCategoryFilter] = useState('ALL');
   // Multi-select state for the bulk programCategory action. Stores Vehicle.id
@@ -509,12 +509,13 @@ function VehiclesInner({ token, me, logout }) {
           tenantId: isSuper ? (activeTenantId || null) : undefined,
           year: newVehicle.year ? Number(newVehicle.year) : null,
           mileage: newVehicle.mileage ? Number(newVehicle.mileage) : 0,
+          fuelTankCapacityGallons: newVehicle.fuelTankCapacityGallons ? Number(newVehicle.fuelTankCapacityGallons) : null,
           homeLocationId: newVehicle.homeLocationId || null,
           status: 'AVAILABLE'
         })
       }, token);
       setShowAddVehicle(false);
-      setNewVehicle({ internalNumber: '', plate: '', tollTagNumber: '', tollStickerNumber: '', vin: '', make: '', model: '', color: '', year: '', mileage: '', vehicleTypeId: '', homeLocationId: '', fleetMode: 'RENTAL_ONLY' });
+      setNewVehicle({ internalNumber: '', plate: '', tollTagNumber: '', tollStickerNumber: '', vin: '', make: '', model: '', color: '', year: '', mileage: '', fuelTankCapacityGallons: '', vehicleTypeId: '', homeLocationId: '', fleetMode: 'RENTAL_ONLY' });
       setMsg('Vehicle added successfully');
       await load();
     } catch (e2) {
@@ -535,6 +536,7 @@ function VehiclesInner({ token, me, logout }) {
       color: vehicle.color || '',
       year: vehicle.year || '',
       mileage: vehicle.mileage ?? '',
+      fuelTankCapacityGallons: vehicle.fuelTankCapacityGallons ?? '',
       status: vehicle.status || 'AVAILABLE',
       vehicleTypeId: vehicle.vehicleTypeId || '',
       homeLocationId: vehicle.homeLocationId || '',
@@ -614,6 +616,7 @@ function VehiclesInner({ token, me, logout }) {
           ...editVehicleForm,
           year: editVehicleForm.year ? Number(editVehicleForm.year) : null,
           mileage: editVehicleForm.mileage ? Number(editVehicleForm.mileage) : 0,
+          fuelTankCapacityGallons: editVehicleForm.fuelTankCapacityGallons ? Number(editVehicleForm.fuelTankCapacityGallons) : null,
           homeLocationId: editVehicleForm.homeLocationId || null
         })
       }, token);
@@ -1171,6 +1174,10 @@ function VehiclesInner({ token, me, logout }) {
                 <input placeholder="Mileage" value={newVehicle.mileage} onChange={(e) => setNewVehicle({ ...newVehicle, mileage: e.target.value })} />
               </div>
               <div className="grid2">
+                <input type="number" step="0.1" min="5" max="60" placeholder="Fuel tank capacity (gal)" value={newVehicle.fuelTankCapacityGallons} onChange={(e) => setNewVehicle({ ...newVehicle, fuelTankCapacityGallons: e.target.value })} />
+                <span />
+              </div>
+              <div className="grid2">
                 <select required value={newVehicle.vehicleTypeId} onChange={(e) => setNewVehicle({ ...newVehicle, vehicleTypeId: e.target.value })}>
                   <option value="">Vehicle type</option>
                   {vehicleTypes.map((vt) => <option key={vt.id} value={vt.id}>{vt.name}</option>)}
@@ -1221,6 +1228,10 @@ function VehiclesInner({ token, me, logout }) {
               <div className="grid2">
                 <input placeholder="Year" value={editVehicleForm.year} onChange={(e) => setEditVehicleForm({ ...editVehicleForm, year: e.target.value })} />
                 <input placeholder="Mileage" value={editVehicleForm.mileage} onChange={(e) => setEditVehicleForm({ ...editVehicleForm, mileage: e.target.value })} />
+              </div>
+              <div className="grid2">
+                <input type="number" step="0.1" min="5" max="60" placeholder="Fuel tank capacity (gal)" value={editVehicleForm.fuelTankCapacityGallons} onChange={(e) => setEditVehicleForm({ ...editVehicleForm, fuelTankCapacityGallons: e.target.value })} />
+                <span />
               </div>
               <div className="grid2">
                 <select required value={editVehicleForm.vehicleTypeId} onChange={(e) => setEditVehicleForm({ ...editVehicleForm, vehicleTypeId: e.target.value })}>

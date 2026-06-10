@@ -72,6 +72,17 @@ test('fuelLevelToFraction: mobile enum strings -> fraction', () => {
   assert.equal(fuelLevelToFraction('three quarters'), 0.75);
 });
 
+test('fuelLevelToFraction: eighth enums (2026-06-10 mobile select)', () => {
+  assert.equal(fuelLevelToFraction('SEVEN_EIGHTHS'), 0.875);
+  assert.equal(fuelLevelToFraction('FIVE_EIGHTHS'), 0.625);
+  assert.equal(fuelLevelToFraction('THREE_EIGHTHS'), 0.375);
+  assert.equal(fuelLevelToFraction('ONE_EIGHTH'), 0.125);
+  // Tolerant variants + human fractions keep resolving
+  assert.equal(fuelLevelToFraction('seven eighths'), 0.875);
+  assert.equal(fuelLevelToFraction('7/8'), 0.875);
+  assert.equal(fuelLevelToFraction('3/8'), 0.375);
+});
+
 test('fuelLevelToFraction: numeric and human-fraction inputs', () => {
   assert.equal(fuelLevelToFraction(0.75), 0.75);
   assert.equal(fuelLevelToFraction('0.5'), 0.5);

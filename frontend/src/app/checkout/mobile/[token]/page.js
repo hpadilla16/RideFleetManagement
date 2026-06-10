@@ -142,9 +142,13 @@ function CaptureFlow({ token, data, onComplete, onError }) {
         <label style={labelStyle}>Fuel level</label>
         <select value={fuelLevel} onChange={(e) => setFuelLevel(e.target.value)} style={inputStyle}>
           <option value="FULL">Full</option>
+          <option value="SEVEN_EIGHTHS">7/8</option>
           <option value="THREE_QUARTERS">3/4</option>
+          <option value="FIVE_EIGHTHS">5/8</option>
           <option value="HALF">1/2</option>
+          <option value="THREE_EIGHTHS">3/8</option>
           <option value="QUARTER">1/4</option>
+          <option value="ONE_EIGHTH">1/8</option>
           <option value="EMPTY">Empty</option>
         </select>
       </div>

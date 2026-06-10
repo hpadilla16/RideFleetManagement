@@ -174,7 +174,7 @@ export function computeExcessMileage({ odometerOut, odometerIn, includedMiles, r
   };
 }
 
-export function computeFuelRefill({ fuelOut, fuelIn, tankCapacityGallons, rate }) {
+export function computeFuelRefill({ fuelOut, fuelIn, tankCapacityGallons, tankCapacityIsFallback = false, rate }) {
   // 2026-06-04 — quantize BOTH readings to the nearest EIGHTH (the physical
   // gauge resolution) before comparing. Checkout and check-in captured fuel
   // at different precisions (3/8 = 0.375 vs "38%" = 0.38), so two readings
@@ -189,11 +189,15 @@ export function computeFuelRefill({ fuelOut, fuelIn, tankCapacityGallons, rate }
   if (gap === 0) return null;
   const gallons = round2(gap * tankCapacityGallons);
   if (gallons === 0) return null;
+  // 2026-06-10 (#51): when the vehicle has no fuelTankCapacityGallons set we
+  // bill against the 15-gal fallback — say so on the line item so the agent
+  // can see the charge is an estimate and fix the vehicle profile.
+  const capNote = tankCapacityIsFallback ? ' · assumed 15 gal tank — set vehicle fuel capacity' : '';
   return {
     quantity: gallons,
     rate: rate.amount,
     total: round2(gallons * rate.amount),
-    description: `Fuel refill (${gallons.toFixed(2)} gal — returned at ${pct(inn)} vs ${pct(out)} at pickup)`
+    description: `Fuel refill (${gallons.toFixed(2)} gal — returned at ${pct(inn)} vs ${pct(out)} at pickup${capNote})`
   };
 }
 
@@ -314,6 +318,7 @@ export async function computeCheckinFees(params) {
     includedMilesPerDay = 200,
     rentalDays = 1,
     tankCapacityGallons = 15,
+    tankCapacityIsFallback = false,
     persist = false,
     actorUserId = null
   } = params;
@@ -367,7 +372,7 @@ export async function computeCheckinFees(params) {
   }
 
   if (fuelRate) {
-    const fuel = computeFuelRefill({ fuelOut, fuelIn, tankCapacityGallons, rate: fuelRate });
+    const fuel = computeFuelRefill({ fuelOut, fuelIn, tankCapacityGallons, tankCapacityIsFallback, rate: fuelRate });
     if (fuel) {
       items.push({ feeType: 'FUEL_REFILL', ...fuel });
       rateSources.FUEL_REFILL = fuelRate.source;

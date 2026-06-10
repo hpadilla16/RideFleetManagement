@@ -95,12 +95,15 @@ describe('computeFuelRefill', () => {
     assert.equal(result.total, 21);
   });
 
-  it('rounds to 2 decimal places', () => {
+  it('quantizes both readings to eighths and rounds gallons to 2 decimals', () => {
+    // STALE-TEST REPAIR (2026-06-10): this expected pre-quantization math
+    // (gap 0.53 → 7.26 gal) but computeFuelRefill quantizes BOTH readings to
+    // the nearest eighth since 2026-06-04. 0.95 → 8/8, 0.42 → 3/8, gap 5/8.
     const result = computeFuelRefill({
       fuelOut: 0.95, fuelIn: 0.42, tankCapacityGallons: 13.7, rate
     });
-    // gap = 0.53, gallons = 0.53 * 13.7 = 7.261, rounded to 7.26
-    assert.equal(result.quantity, 7.26);
+    // gap = 0.625, gallons = 0.625 * 13.7 = 8.5625, rounded to 8.56
+    assert.equal(result.quantity, 8.56);
   });
 
   it('description shows return fuel as percent', () => {
@@ -109,6 +112,35 @@ describe('computeFuelRefill', () => {
     });
     assert.match(result.description, /25%/);
     assert.match(result.description, /100%/);
+  });
+
+  // 2026-06-10 (#51) — real per-vehicle capacity + fallback note
+  it("bills Hector's canonical example: 22 gal, full -> half @ $9.99 = $109.89", () => {
+    const result = computeFuelRefill({
+      fuelOut: 1.00, fuelIn: 0.5, tankCapacityGallons: 22, rate: { amount: 9.99 }
+    });
+    // 22/8 = 2.75 gal per eighth × 4 eighths = 11 gal × 9.99 = 109.89
+    assert.equal(result.quantity, 11);
+    assert.equal(result.total, 109.89);
+  });
+
+  it('supports decimal capacities (16.9 gal)', () => {
+    const result = computeFuelRefill({
+      fuelOut: 1.00, fuelIn: 0.875, tankCapacityGallons: 16.9, rate: { amount: 9.99 }
+    });
+    // gap 1/8 = 0.125 × 16.9 = 2.11 gal
+    assert.equal(result.quantity, 2.11);
+  });
+
+  it('flags the 15-gal fallback on the description, and only then', () => {
+    const fallback = computeFuelRefill({
+      fuelOut: 1.00, fuelIn: 0.5, tankCapacityGallons: 15, tankCapacityIsFallback: true, rate
+    });
+    assert.match(fallback.description, /assumed 15 gal tank/);
+    const real = computeFuelRefill({
+      fuelOut: 1.00, fuelIn: 0.5, tankCapacityGallons: 22, tankCapacityIsFallback: false, rate
+    });
+    assert.doesNotMatch(real.description, /assumed 15 gal tank/);
   });
 });
 
@@ -336,14 +368,16 @@ describe('realistic scenarios', () => {
     const smoking = computeSmokingFee({ smokingDetected: true, rate: smokingRate });
     // 600 excess miles * 0.50 = 300
     assert.equal(mileage.total, 300);
-    // 0.9 * 15 = 13.5 gal * 7 = 94.5
-    assert.equal(fuel.total, 94.5);
+    // STALE-TEST REPAIR (2026-06-10): readings quantize to eighths since
+    // 2026-06-04 — 0.1 → 1/8 (0.125), gap 7/8 = 0.875.
+    // 0.875 * 15 = 13.13 gal (round2) * 7 = 91.91
+    assert.equal(fuel.total, 91.91);
     // cleanliness 5 → 1 = 4-tier drop = HEAVY = 200
     assert.equal(cleaning.total, 200);
     // smoking = 250
     assert.equal(smoking.total, 250);
-    // grand total = 844.5
-    assert.equal(mileage.total + fuel.total + cleaning.total + smoking.total, 844.5);
+    // grand total = 841.91
+    assert.equal(mileage.total + fuel.total + cleaning.total + smoking.total, 841.91);
   });
 });
 
