@@ -13,8 +13,35 @@ import { prisma } from '../../lib/prisma.js';
 import logger from '../../lib/logger.js';
 import { detectMismatch, canCompleteSession, computeTotals } from './inventory-logic.js';
 import { uploadInspectionPhotos, isStorageEnabled } from '../rental-agreements/inspection-photos.js';
+import { uploadObject, downloadObject, safePath } from '../../lib/storage/supabase-storage.js';
+import { renderReportPdf } from '../reports/reports-export.js';
+import { buildInventoryReportHtml } from './inventory-pdf.js';
 
 const INVENTORY_PHOTOS_BUCKET = process.env.SUPABASE_STORAGE_INVENTORY_BUCKET || 'inventory-photos';
+
+// Assemble the view-model the PDF builder needs from a session loaded with
+// items+vehicle (SESSION_INCLUDE).
+async function assembleReportData(session) {
+  const [tenant, actor] = await Promise.all([
+    prisma.tenant.findUnique({ where: { id: session.tenantId }, select: { name: true } }).catch(() => null),
+    session.completedByUserId
+      ? prisma.user.findUnique({ where: { id: session.completedByUserId }, select: { fullName: true, email: true } }).catch(() => null)
+      : null,
+  ]);
+  const generatedBy = actor ? (actor.fullName || actor.email || null) : null;
+  return {
+    tenantName: tenant?.name || 'Ride Fleet',
+    generatedAt: session.completedAt || new Date(),
+    generatedBy,
+    totals: session.totalsJson || computeTotals(session.items || []),
+    items: session.items || [],
+  };
+}
+
+async function renderSessionPdf(session) {
+  const html = buildInventoryReportHtml(await assembleReportData(session));
+  return renderReportPdf(html, { landscape: false });
+}
 
 // Persist the at-lot photo set. Prefer Supabase storage (returns refs); fall
 // back to inline base64 in photosJson if storage is off or the upload fails —
@@ -321,25 +348,53 @@ export const inventoryService = {
 
   /**
    * Complete the session. Gated: every item CONFIRMED/EXCEPTION and every
-   * mismatch resolved. (PDF + InventoryReport land in Phase C.)
+   * mismatch resolved. Then generate the PDF report, archive it to Supabase
+   * (best-effort), and create the InventoryReport row.
    */
   async completeSession(sessionId, actorUserId = null, scope = {}) {
     const tenantId = requireTenant(scope);
-    const session = await prisma.inventorySession.findFirst({ where: { id: sessionId, tenantId }, include: { items: true } });
-    if (!session) throw err('Inventory session not found', 'NOT_FOUND', 404);
-    if (session.status !== 'IN_PROGRESS') throw err(`Session is ${session.status}, not in progress`, 'SESSION_NOT_ACTIVE', 409);
+    const pre = await prisma.inventorySession.findFirst({ where: { id: sessionId, tenantId }, include: { items: true } });
+    if (!pre) throw err('Inventory session not found', 'NOT_FOUND', 404);
+    if (pre.status !== 'IN_PROGRESS') throw err(`Session is ${pre.status}, not in progress`, 'SESSION_NOT_ACTIVE', 409);
 
-    const gate = canCompleteSession(session.items);
+    const gate = canCompleteSession(pre.items);
     if (!gate.ok) {
       throw err(`Cannot complete inventory: ${gate.reasons.join('; ')}`, 'INCOMPLETE', 409);
     }
 
-    const totals = computeTotals(session.items);
+    const totals = computeTotals(pre.items);
+    const completedAt = new Date();
     await prisma.inventorySession.update({
       where: { id: sessionId },
-      data: { status: 'COMPLETED', completedAt: new Date(), completedByUserId: actorUserId, totalsJson: totals, lastActivityAt: new Date() },
+      data: { status: 'COMPLETED', completedAt, completedByUserId: actorUserId, totalsJson: totals, lastActivityAt: completedAt },
     });
-    logger.info('[inventory] session completed', { tenantId, sessionId, totals });
+
+    // Build + archive the PDF (best-effort: a render/upload failure must NOT
+    // un-complete the inventory — the report row is created either way and the
+    // download path can regenerate from the completed session).
+    const full = await prisma.inventorySession.findUnique({ where: { id: sessionId }, include: SESSION_INCLUDE });
+    let storageBucket = null;
+    let storagePath = null;
+    if (isStorageEnabled()) {
+      try {
+        const pdf = await renderSessionPdf(full);
+        const path = safePath('tenants', tenantId, 'inventory-reports', `${sessionId}.pdf`);
+        await uploadObject({ bucket: INVENTORY_PHOTOS_BUCKET, path, body: pdf, contentType: 'application/pdf', upsert: true });
+        storageBucket = INVENTORY_PHOTOS_BUCKET;
+        storagePath = path;
+      } catch (e) {
+        logger.warn('[inventory] report PDF archive failed (will regenerate on download)', { sessionId, err: e.message });
+      }
+    }
+
+    const title = `Fleet inventory — ${completedAt.toISOString().slice(0, 10)}`;
+    await prisma.inventoryReport.upsert({
+      where: { sessionId },
+      create: { tenantId, sessionId, title, generatedByUserId: actorUserId, generatedAt: completedAt, summaryJson: totals, storageBucket, storagePath },
+      update: { title, generatedByUserId: actorUserId, generatedAt: completedAt, summaryJson: totals, storageBucket, storagePath },
+    });
+
+    logger.info('[inventory] session completed', { tenantId, sessionId, totals, archived: !!storagePath });
     return this.getSession(sessionId, scope);
   },
 
@@ -350,5 +405,28 @@ export const inventoryService = {
       orderBy: { generatedAt: 'desc' },
       take: 100,
     });
+  },
+
+  /**
+   * Return the report PDF bytes: from Supabase if archived, else regenerated
+   * from the completed session (deterministic from immutable data).
+   */
+  async getReportPdf(reportId, scope = {}) {
+    const tenantId = requireTenant(scope);
+    const report = await prisma.inventoryReport.findFirst({ where: { id: reportId, tenantId } });
+    if (!report) throw err('Inventory report not found', 'NOT_FOUND', 404);
+
+    if (report.storageBucket && report.storagePath && isStorageEnabled()) {
+      try {
+        const { body } = await downloadObject({ bucket: report.storageBucket, path: report.storagePath });
+        return { buffer: body, filename: `${report.title || 'inventory'}.pdf`.replace(/[^\w.-]+/g, '_') };
+      } catch (e) {
+        logger.warn('[inventory] report download from storage failed, regenerating', { reportId, err: e.message });
+      }
+    }
+    const session = await prisma.inventorySession.findFirst({ where: { id: report.sessionId, tenantId }, include: SESSION_INCLUDE });
+    if (!session) throw err('Inventory session not found', 'NOT_FOUND', 404);
+    const buffer = await renderSessionPdf(session);
+    return { buffer, filename: `${report.title || 'inventory'}.pdf`.replace(/[^\w.-]+/g, '_') };
   },
 };

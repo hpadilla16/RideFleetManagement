@@ -17,6 +17,7 @@ const NAV_ITEMS = [
   { href: '/people', labelKey: 'nav.people', adminOnly: true, moduleKey: 'people' },
   { href: '/planner', labelKey: 'nav.planner', moduleKey: 'planner' },
   { href: '/reports-v2', labelKey: 'nav.reports', moduleKey: 'reports' },
+  { href: '/reports-v2/inventory-reports', labelKey: 'nav.inventoryReports', moduleKey: 'reports' },
   { href: '/car-sharing', labelKey: 'nav.carSharing', feature: 'carSharing', moduleKey: 'carSharing' },
   { href: '/host', labelKey: 'nav.hostApp', feature: 'carSharing', moduleKey: 'hostApp' },
   { href: '/employee', labelKey: 'nav.employeeApp', moduleKey: 'employeeApp' },

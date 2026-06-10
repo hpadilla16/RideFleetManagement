@@ -4,7 +4,7 @@ import Link from 'next/link';
 import { useEffect, useMemo, useState } from 'react';
 import { AuthGate } from '../../../components/AuthGate';
 import { AppShell } from '../../../components/AppShell';
-import { api } from '../../../lib/client';
+import { api, API_BASE } from '../../../lib/client';
 import { VehicleScanner } from '../../../components/inventory/VehicleScanner';
 import { compressToDataUrl } from '../../../lib/image-compressor';
 
@@ -169,8 +169,22 @@ function InventoryHelperInner({ token, me, logout }) {
   async function complete() {
     try {
       await post(`/api/inventory/session/${session.id}/complete`, {});
-      setMsg('Inventory completed.');
+      setPhase('done');
     } catch { /* msg set (e.g. gating) */ }
+  }
+
+  async function downloadReport(reportId) {
+    try {
+      setMsg('');
+      const res = await fetch(`${API_BASE}/api/inventory/reports/${reportId}/download`, { headers: { Authorization: `Bearer ${token}` } });
+      if (!res.ok) throw new Error('Download failed');
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url; a.download = 'fleet-inventory.pdf';
+      document.body.appendChild(a); a.click(); a.remove();
+      URL.revokeObjectURL(url);
+    } catch (e) { setMsg(e.message); }
   }
 
   const set = (patch) => setForm((f) => ({ ...f, ...patch }));
@@ -293,6 +307,20 @@ function InventoryHelperInner({ token, me, logout }) {
           onMarkException={markException}
           onResolveMismatch={resolveMismatch}
         />
+      ) : null}
+
+      {phase === 'done' && session ? (
+        <section className="glass card-lg section-card" style={{ textAlign: 'center' }}>
+          <h3 style={{ marginTop: 0 }}>Inventory complete</h3>
+          <p className="ui-muted">{session.totalsJson?.total ?? items.length} vehicles · {session.totalsJson?.confirmed ?? 0} confirmed · {session.totalsJson?.exception ?? 0} exceptions</p>
+          <div className="inline-actions" style={{ justifyContent: 'center', marginTop: 12 }}>
+            {session.report?.id ? (
+              <button type="button" className="button-primary" onClick={() => downloadReport(session.report.id)}>Download PDF report</button>
+            ) : null}
+            <Link href="/reports-v2/inventory-reports" className="legal-link-pill">View in Reports</Link>
+          </div>
+          <p className="ui-muted" style={{ fontSize: 12, marginTop: 12 }}>Saved to Reports → Inventory Reports.</p>
+        </section>
       ) : null}
     </AppShell>
   );

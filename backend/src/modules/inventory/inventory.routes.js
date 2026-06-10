@@ -73,3 +73,12 @@ inventoryRouter.get('/reports', async (req, res, next) => {
     res.json(await inventoryService.listReports(scopeFor(req)));
   } catch (e) { handle(res, next, e); }
 });
+
+inventoryRouter.get('/reports/:id/download', async (req, res, next) => {
+  try {
+    const { buffer, filename } = await inventoryService.getReportPdf(req.params.id, scopeFor(req));
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    res.send(buffer);
+  } catch (e) { handle(res, next, e); }
+});
