@@ -17,6 +17,7 @@ import {
   uploadInspectionPhotos,
   materializeStorageRefs as materializeInspectionStorageRefs
 } from './inspection-photos.js';
+import { normalizeInspectionPhotos, canonicalPhotoKey } from './inspection-photos-normalize.js';
 import { parseLocationConfig } from '../../lib/location-config.js';
 import { getEffectiveTermsHtmlForTenant } from '../../lib/terms/index.js';
 import { TC_VERSION } from '../../lib/terms/version.js';
@@ -1756,7 +1757,7 @@ function normalizeInspectionRow(row) {
   if (!row) return null;
   let photos = {};
   try {
-    photos = row.photosJson ? JSON.parse(row.photosJson) : {};
+    photos = row.photosJson ? normalizeInspectionPhotos(JSON.parse(row.photosJson)) : {};
   } catch {
     photos = {};
   }
@@ -1790,8 +1791,13 @@ async function normalizeInspectionRowAsync(row) {
       const resolved = await materializeInspectionStorageRefs(base.photoStorageRefs);
       // Overlay any resolved URLs on top of the legacy photos map. Legacy
       // entries (still in photosJson) survive — useful during the migration
-      // window when a single row could have both.
-      base.photos = { ...(base.photos || {}), ...resolved };
+      // window when a single row could have both. Canonicalize the resolved
+      // keys through the same aliases so storage-backed mobile photos align.
+      const resolvedAligned = {};
+      for (const [k, v] of Object.entries(resolved || {})) {
+        resolvedAligned[canonicalPhotoKey(k)] = v;
+      }
+      base.photos = { ...(base.photos || {}), ...resolvedAligned };
     } catch {
       // Best effort — leave legacy photos in place if signing fails.
     }

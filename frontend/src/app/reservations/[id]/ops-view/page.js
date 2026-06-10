@@ -30,17 +30,60 @@ function Inner({ token, me, logout }) {
   const router = useRouter();
   const sp = useSearchParams();
   const [row, setRow] = useState(null);
+  const [report, setReport] = useState(null);
   const [msg, setMsg] = useState('');
 
   useEffect(() => {
     (async () => {
-      try { setRow(await api(`/api/reservations/${id}`, {}, token)); }
-      catch (e) { setMsg(e.message); }
+      try {
+        const reservation = await api(`/api/reservations/${id}`, {}, token);
+        setRow(reservation);
+        // Prefer the structured inspection report — the mobile inspection flow
+        // (and the current desktop wizard) write check-out/check-in into the
+        // RentalAgreementInspection + agreement metrics, NOT the legacy
+        // RES_CHECKOUT/RES_CHECKIN lines in reservation.notes. Fall back to
+        // those legacy note lines for older reservations.
+        const agreementId = reservation?.rentalAgreement?.id || null;
+        if (agreementId) {
+          try {
+            setReport(await api(`/api/rental-agreements/${agreementId}/inspection-report`, {}, token));
+          } catch { /* fall back to notes below */ }
+        }
+      } catch (e) { setMsg(e.message); }
     })();
   }, [id, token]);
 
-  const checkout = useMemo(() => findLine(row?.notes, 'RES_CHECKOUT'), [row?.notes]);
-  const checkin = useMemo(() => findLine(row?.notes, 'RES_CHECKIN'), [row?.notes]);
+  // Structured first, legacy notes as fallback. Each view shows "Captured"
+  // when EITHER source has data.
+  const checkout = useMemo(() => {
+    const legacy = findLine(row?.notes, 'RES_CHECKOUT');
+    const insp = report?.checkoutInspection;
+    const m = report?.checkoutMetrics;
+    if (!insp && !legacy && !(m && (m.mileage != null || m.fuelLevel != null))) return null;
+    return {
+      odometerOut: insp?.odometer ?? m?.mileage ?? legacy?.odometerOut ?? null,
+      fuelOut: insp?.fuelLevel ?? m?.fuelLevel ?? legacy?.fuelOut ?? null,
+      cleanlinessOut: m?.cleanliness ?? legacy?.cleanlinessOut ?? null,
+      paymentMethod: legacy?.paymentMethod ?? null,
+      notes: insp?.notes ?? null,
+      at: insp?.at ?? null
+    };
+  }, [report, row?.notes]);
+
+  const checkin = useMemo(() => {
+    const legacy = findLine(row?.notes, 'RES_CHECKIN');
+    const insp = report?.checkinInspection;
+    const m = report?.checkinMetrics;
+    if (!insp && !legacy && !(m && (m.mileage != null || m.fuelLevel != null))) return null;
+    return {
+      odometerIn: insp?.odometer ?? m?.mileage ?? legacy?.odometerIn ?? null,
+      fuelIn: insp?.fuelLevel ?? m?.fuelLevel ?? legacy?.fuelIn ?? null,
+      cleanlinessIn: m?.cleanliness ?? legacy?.cleanlinessIn ?? null,
+      notes: insp?.notes ?? legacy?.notes ?? null,
+      at: insp?.at ?? null
+    };
+  }, [report, row?.notes]);
+
   const section = String(sp.get('section') || '').toLowerCase();
 
   return (
