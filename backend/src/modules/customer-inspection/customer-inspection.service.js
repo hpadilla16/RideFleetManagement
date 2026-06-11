@@ -443,6 +443,76 @@ async function reviewReport({ inspectionId, reportId, action, actorUserId, scope
   return { ok: true, status: act === 'hard' ? 'HARD_APPROVED' : 'SOFT_APPROVED', pendingLeft: pending, inspectionReviewed: pending === 0 };
 }
 
+// ---------------------------------------------------------------------------
+// Fase C — vehicle damage history + fix workflow
+// ---------------------------------------------------------------------------
+
+/**
+ * Damage history for one vehicle: HARD_APPROVED (active — must be fixed to
+ * clear) + FIXED (kept forever). Soft-approved reports never show here by
+ * design (Hector: "we are not passing it on to be permanently recorded").
+ */
+async function getVehicleDamageHistory(vehicleId, scope = {}) {
+  const vehicle = await prisma.vehicle.findFirst({
+    where: { id: vehicleId, ...tenantWhere(scope) },
+    select: VEHICLE_SELECT.select,
+  });
+  if (!vehicle) throw new CheckoutSessionError('Vehicle not found', 404);
+  const rows = await prisma.vehicleDamageReport.findMany({
+    where: { vehicleId, status: { in: ['HARD_APPROVED', 'FIXED'] } },
+    orderBy: { reviewedAt: 'desc' },
+    take: 200,
+  });
+  const project = async (d) => ({
+    id: d.id,
+    view: d.view,
+    xPct: Number(d.xPct),
+    yPct: Number(d.yPct),
+    description: d.description,
+    status: d.status,
+    phase: d.phase,
+    reservationNumber: d.reservationNumber,
+    reportedAt: d.createdAt,
+    approvedAt: d.reviewedAt,
+    fixedAt: d.fixedAt,
+    photoUrl: await reportPhotoUrl(d.photoJson),
+    fixedPhotoUrl: await reportPhotoUrl(d.fixedPhotoJson),
+  });
+  const active = [];
+  const fixed = [];
+  for (const d of rows) {
+    const row = await project(d);
+    if (d.status === 'HARD_APPROVED') active.push(row);
+    else fixed.push(row);
+  }
+  return { vehicle: vehicleSummary(vehicle), active, fixed };
+}
+
+/**
+ * Mark a HARD_APPROVED damage as FIXED. Repair photo is REQUIRED (Hector's
+ * spec: "all they need to do is take a picture that it was fixed"). The
+ * report stays in history with status FIXED; the dot leaves the diagram.
+ */
+async function fixDamageReport({ reportId, photoDataUrl, actorUserId, scope = {} }) {
+  const report = await prisma.vehicleDamageReport.findFirst({
+    where: { id: reportId, ...tenantWhere(scope) },
+    select: { id: true, status: true, tenantId: true },
+  });
+  if (!report) throw new CheckoutSessionError('Damage report not found', 404);
+  if (report.status !== 'HARD_APPROVED') {
+    throw new CheckoutSessionError(`Only hard-approved damages can be fixed (is ${report.status})`, 409);
+  }
+  if (!photoDataUrl) throw new CheckoutSessionError('A photo of the repair is required', 400, 'PHOTO_REQUIRED');
+  const fixedPhotoJson = await persistDamagePhoto(report.tenantId, `${report.id}-fixed`, photoDataUrl);
+  const now = new Date();
+  await prisma.vehicleDamageReport.update({
+    where: { id: reportId },
+    data: { status: 'FIXED', fixedAt: now, fixedByUserId: actorUserId || null, fixedPhotoJson },
+  });
+  logger.info('[customer-inspection] damage marked fixed', { reportId });
+  return { ok: true, status: 'FIXED' };
+}
+
 export const customerInspectionService = {
   sendCustomerInspection,
   loadByToken,
@@ -451,4 +521,6 @@ export const customerInspectionService = {
   listInspections,
   getInspection,
   reviewReport,
+  getVehicleDamageHistory,
+  fixDamageReport,
 };

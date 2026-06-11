@@ -7,6 +7,9 @@ import QRCode from 'qrcode';
 import { AuthGate } from '../../../components/AuthGate';
 import { AppShell } from '../../../components/AppShell';
 import { api } from '../../../lib/client';
+import { diagramFor, DIAGRAM_VIEWBOX, DIAGRAM_W, DIAGRAM_H, VIEW_LABELS } from '../../../components/vehicleDiagrams';
+
+const DAMAGE_VIEWS = ['LEFT', 'RIGHT', 'FRONT', 'REAR', 'INTERIOR'];
 
 function formatDateTime(value) {
   if (!value) return '-';
@@ -132,6 +135,43 @@ function VehicleProfileInner({ token, me, logout }) {
   // /vehicles?edit= y el agente quedaba varado en la lista.
   const [editModal, setEditModal] = useState({ open: false, saving: false, form: null });
   const [editLists, setEditLists] = useState({ vehicleTypes: [], locations: [] });
+  // Fase C (2026-06-11) — damage history (hard-approved customer reports).
+  const [damage, setDamage] = useState({ active: [], fixed: [], diagramType: 'sedan', loading: true });
+  const [damageView, setDamageView] = useState('LEFT');
+  const [fixModal, setFixModal] = useState(null); // { report, photo, saving }
+  const fixFileRef = useRef(null);
+
+  const loadDamage = async () => {
+    try {
+      const out = await api(`/api/customer-inspections/vehicle/${id}`, { bypassCache: true }, token);
+      setDamage({
+        active: out?.active || [],
+        fixed: out?.fixed || [],
+        diagramType: out?.vehicle?.diagramType || 'sedan',
+        loading: false,
+      });
+    } catch {
+      setDamage((c) => ({ ...c, loading: false }));
+    }
+  };
+  useEffect(() => { if (id) loadDamage(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [id, token]);
+
+  const markFixed = async () => {
+    if (!fixModal?.report || !fixModal.photo) return;
+    setFixModal((c) => ({ ...c, saving: true }));
+    try {
+      await api(`/api/customer-inspections/reports/${fixModal.report.id}/fix`, {
+        method: 'POST',
+        body: JSON.stringify({ photoDataUrl: fixModal.photo }),
+      }, token);
+      setFixModal(null);
+      setMsg('Damage marked as fixed');
+      await loadDamage();
+    } catch (e2) {
+      setFixModal((c) => ({ ...c, saving: false }));
+      setMsg(e2?.message || 'Failed to mark fixed');
+    }
+  };
 
   const openEditModal = async () => {
     if (!row) return;
@@ -495,6 +535,43 @@ function VehicleProfileInner({ token, me, logout }) {
           </div>
         ) : null}
 
+        {fixModal?.report ? (
+          <div className="modal-backdrop" onClick={() => { if (!fixModal.saving) setFixModal(null); }}>
+            <div className="rent-modal glass" onClick={(e) => e.stopPropagation()}>
+              <h3>Damage · {fixModal.report.description || 'No description'}</h3>
+              <p className="ui-muted" style={{ fontSize: 13, marginTop: 0 }}>
+                {VIEW_LABELS[fixModal.report.view]} view · hard approved {formatDateTime(fixModal.report.approvedAt)}
+                {fixModal.report.reservationNumber ? ` · from #${fixModal.report.reservationNumber}` : ''}
+              </p>
+              {fixModal.report.photoUrl ? (
+                <a href={fixModal.report.photoUrl} target="_blank" rel="noreferrer">
+                  <img src={fixModal.report.photoUrl} alt="damage" style={{ width: '100%', maxHeight: 220, objectFit: 'cover', borderRadius: 10, marginBottom: 12 }} />
+                </a>
+              ) : null}
+              <p style={{ fontWeight: 600, fontSize: 14, margin: '0 0 8px' }}>Was this fixed?</p>
+              <input ref={fixFileRef} type="file" accept="image/*" capture="environment" style={{ display: 'none' }}
+                onChange={(e) => {
+                  const file = e.target.files?.[0];
+                  e.target.value = '';
+                  if (!file) return;
+                  const reader = new FileReader();
+                  reader.onload = () => setFixModal((c) => (c ? { ...c, photo: reader.result } : c));
+                  reader.readAsDataURL(file);
+                }} />
+              <button type="button" className="btn-sm" style={{ width: '100%', marginBottom: 8 }} disabled={fixModal.saving} onClick={() => fixFileRef.current?.click()}>
+                {fixModal.photo ? '✓ Repair photo attached — retake' : 'Take photo of the repair (required)'}
+              </button>
+              {fixModal.photo ? <img src={fixModal.photo} alt="repair" style={{ width: '100%', maxHeight: 160, objectFit: 'cover', borderRadius: 8, marginBottom: 8 }} /> : null}
+              <div className="row-between">
+                <button type="button" disabled={fixModal.saving} onClick={() => setFixModal(null)}>Cancel</button>
+                <button type="button" className="button-primary" disabled={!fixModal.photo || fixModal.saving} onClick={markFixed}>
+                  {fixModal.saving ? 'Saving…' : 'Yes — mark as fixed'}
+                </button>
+              </div>
+            </div>
+          </div>
+        ) : null}
+
         {editModal.open && editModal.form ? (
           <div className="modal-backdrop" onClick={() => { if (!editModal.saving) setEditModal({ open: false, saving: false, form: null }); }}>
             <div className="rent-modal glass" onClick={(e) => e.stopPropagation()} style={{ maxHeight: '85vh', overflowY: 'auto' }}>
@@ -766,6 +843,84 @@ function VehicleProfileInner({ token, me, logout }) {
                   </div>
                 ) : (
                   <div className="surface-note">No inventory photos for this vehicle yet — they appear after its first Inventory Helper session.</div>
+                )}
+              </section>
+
+              <section className="glass card-lg section-card">
+                <div className="row-between">
+                  <h2>Damage History</h2>
+                  <span className="status-chip neutral">{damage.active.length} active · {damage.fixed.length} fixed</span>
+                </div>
+                <p className="ui-muted" style={{ marginTop: 0 }}>
+                  Hard-approved customer damage reports. Active dots must be repaired (photo required) to leave the diagram — fixed ones stay in the history below.
+                </p>
+                {damage.loading ? (
+                  <div className="surface-note">Loading damage history…</div>
+                ) : damage.active.length === 0 && damage.fixed.length === 0 ? (
+                  <div className="surface-note">No hard-approved damages on this vehicle.</div>
+                ) : (
+                  <>
+                    <div style={{ display: 'flex', border: '1px solid #E5E7EB', borderRadius: 999, overflow: 'hidden', marginBottom: 10, maxWidth: 480 }}>
+                      {DAMAGE_VIEWS.map((v) => {
+                        const n = damage.active.filter((r) => r.view === v).length;
+                        return (
+                          <button key={v} type="button" onClick={() => setDamageView(v)} style={{
+                            flex: 1, fontSize: 12, padding: '7px 2px', border: 'none', borderRadius: 0,
+                            background: v === damageView ? '#5b3df5' : 'transparent',
+                            color: v === damageView ? '#FFFFFF' : '#6B7280', cursor: 'pointer',
+                          }}>
+                            {VIEW_LABELS[v]}{n ? ` · ${n}` : ''}
+                          </button>
+                        );
+                      })}
+                    </div>
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 14, alignItems: 'start' }}>
+                      <svg viewBox={DIAGRAM_VIEWBOX} style={{ width: '100%', background: '#F6F4FE', borderRadius: 14 }} xmlns="http://www.w3.org/2000/svg">
+                        <g dangerouslySetInnerHTML={{ __html: diagramFor(damage.diagramType, damageView) }} />
+                        <g>
+                          {damage.active.filter((r) => r.view === damageView).map((r, i) => (
+                            <g key={r.id} style={{ cursor: 'pointer' }} onClick={() => setFixModal({ report: r, photo: null, saving: false })}>
+                              <circle cx={(r.xPct / 100) * DIAGRAM_W} cy={(r.yPct / 100) * DIAGRAM_H} r="10" fill="#E24B4A" stroke="#FFFFFF" strokeWidth="2" />
+                              <text x={(r.xPct / 100) * DIAGRAM_W} y={(r.yPct / 100) * DIAGRAM_H + 3.5} textAnchor="middle" fill="#FFFFFF" fontSize="11" fontWeight="600">{i + 1}</text>
+                            </g>
+                          ))}
+                        </g>
+                      </svg>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                        {damage.active.length === 0 ? (
+                          <div className="surface-note">No active damages — all repaired.</div>
+                        ) : (
+                          <>
+                            <span className="ui-muted" style={{ fontSize: 12 }}>Tap a red dot (or a row) to see the damage and mark it fixed.</span>
+                            {damage.active.map((r) => (
+                              <button key={r.id} type="button" className="btn-ghost" style={{ textAlign: 'left', padding: 10, border: '1px solid #E5E7EB', borderRadius: 8 }} onClick={() => setFixModal({ report: r, photo: null, saving: false })}>
+                                <strong style={{ fontSize: 13 }}>{r.description || 'Damage'}</strong>
+                                <span className="ui-muted" style={{ display: 'block', fontSize: 12 }}>
+                                  {VIEW_LABELS[r.view]} view · approved {formatDateTime(r.approvedAt)}{r.reservationNumber ? ` · #${r.reservationNumber}` : ''}
+                                </span>
+                              </button>
+                            ))}
+                          </>
+                        )}
+                        {damage.fixed.length ? (
+                          <details style={{ marginTop: 4 }}>
+                            <summary className="ui-muted" style={{ cursor: 'pointer', fontSize: 13 }}>Fixed history ({damage.fixed.length})</summary>
+                            {damage.fixed.map((r) => (
+                              <div key={r.id} style={{ padding: '8px 0', borderBottom: '0.5px solid #E5E7EB', fontSize: 12 }}>
+                                <strong>{r.description || 'Damage'}</strong> · {VIEW_LABELS[r.view]} view
+                                <span className="ui-muted"> · fixed {formatDateTime(r.fixedAt)}</span>
+                                <span style={{ marginLeft: 6 }}>
+                                  {r.photoUrl ? <a href={r.photoUrl} target="_blank" rel="noreferrer">damage photo</a> : null}
+                                  {r.photoUrl && r.fixedPhotoUrl ? ' · ' : ''}
+                                  {r.fixedPhotoUrl ? <a href={r.fixedPhotoUrl} target="_blank" rel="noreferrer">repair photo</a> : null}
+                                </span>
+                              </div>
+                            ))}
+                          </details>
+                        ) : null}
+                      </div>
+                    </div>
+                  </>
                 )}
               </section>
 

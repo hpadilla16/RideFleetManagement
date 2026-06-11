@@ -72,6 +72,30 @@ customerInspectionPublicRouter.post('/:token/complete', async (req, res) => {
 
 export const customerInspectionRouter = Router();
 
+// Fase C — vehicle damage history (defined BEFORE /:id so the static
+// segment wins). GET /api/customer-inspections/vehicle/:vehicleId
+customerInspectionRouter.get('/vehicle/:vehicleId', async (req, res) => {
+  try {
+    res.json(await customerInspectionService.getVehicleDamageHistory(req.params.vehicleId, scopeFor(req)));
+  } catch (err) {
+    handleError(res, err);
+  }
+});
+
+// POST /api/customer-inspections/reports/:reportId/fix — body: { photoDataUrl }
+customerInspectionRouter.post('/reports/:reportId/fix', express.json({ limit: '15mb' }), async (req, res) => {
+  try {
+    res.json(await customerInspectionService.fixDamageReport({
+      reportId: req.params.reportId,
+      photoDataUrl: req.body?.photoDataUrl,
+      actorUserId: req.user?.id || req.user?.sub || null,
+      scope: scopeFor(req),
+    }));
+  } catch (err) {
+    handleError(res, err);
+  }
+});
+
 // GET /api/customer-inspections?status=SUBMITTED | ?reservationId=...
 customerInspectionRouter.get('/', async (req, res) => {
   try {
