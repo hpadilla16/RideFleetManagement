@@ -545,7 +545,7 @@ async function stampSideEffect({ id, field, value }) {
  */
 async function mintHandoffToken({ sessionId, kind, actorUserId }) {
   if (!sessionId) throw new CheckoutSessionError('sessionId required', 400);
-  if (!['TERMS_SIGNING', 'MOBILE_INSPECTION'].includes(kind)) {
+  if (!['TERMS_SIGNING', 'MOBILE_INSPECTION', 'CUSTOMER_INSPECTION'].includes(kind)) {
     throw new CheckoutSessionError(`Unknown handoff kind: ${kind}`, 400);
   }
   const session = await prisma.checkoutSession.findUnique({ where: { id: sessionId } });
@@ -579,7 +579,11 @@ async function mintHandoffToken({ sessionId, kind, actorUserId }) {
     };
   }
 
-  const expiresAt = new Date(Date.now() + HANDOFF_TOKEN_TTL_MIN * 60_000);
+  // CUSTOMER_INSPECTION links travel by email and the customer may inspect
+  // hours later (decision 2026-06-11: 24h TTL, re-sendable). QR handoffs
+  // stay short-lived.
+  const ttlMin = kind === 'CUSTOMER_INSPECTION' ? 24 * 60 : HANDOFF_TOKEN_TTL_MIN;
+  const expiresAt = new Date(Date.now() + ttlMin * 60_000);
   const token = tokenBytes();
 
   const row = await prisma.handoffToken.create({

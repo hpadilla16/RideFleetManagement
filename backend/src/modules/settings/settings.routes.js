@@ -146,6 +146,25 @@ settingsRouter.put('/reservation-options', requireRole('ADMIN'), async (req, res
   }
 });
 
+// Customer-led inspection (2026-06-11): enable/disable per tenant.
+settingsRouter.get('/customer-inspection', async (_req, res, next) => {
+  try {
+    const cfg = await settingsService.getCustomerInspectionConfig(scopeFor(_req));
+    res.json(cfg);
+  } catch (e) {
+    next(e);
+  }
+});
+
+settingsRouter.put('/customer-inspection', requireRole('ADMIN'), async (req, res, next) => {
+  try {
+    const cfg = await settingsService.updateCustomerInspectionConfig(req.body || {}, scopeFor(req));
+    res.json(cfg);
+  } catch (e) {
+    next(e);
+  }
+});
+
 // Vehicle Profile pack (2026-06-10): fleet rotation rule (TIME | MILEAGE).
 settingsRouter.get('/fleet-rotation', async (_req, res, next) => {
   try {

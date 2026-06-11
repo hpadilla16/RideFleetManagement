@@ -611,6 +611,8 @@ model Vehicle {
   mileageEntries        VehicleMileageEntry[]
   inventoryItems        InventoryItem[]
   reconciliationFlags   FleetReconciliationFlag[]
+  customerInspections   CustomerInspection[]
+  damageReports         VehicleDamageReport[]
 
   @@unique([tenantId, plate])
   @@unique([tenantId, internalNumber])
@@ -3626,6 +3628,110 @@ model CheckoutSession {
 enum HandoffTokenKind {
   TERMS_SIGNING // Step 2 — opens /sign/:token on customer's phone
   MOBILE_INSPECTION // Step 4 — opens /checkout/mobile/:token on agent's phone
+  CUSTOMER_INSPECTION // 2026-06-11 — opens /inspect/:token on the CUSTOMER's phone (24h TTL)
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Customer-led inspection + damage approval (2026-06-11).
+// Plan: doc/customer-inspection-plan-2026-06-11.md. When the tenant setting is
+// on, checkout step 4 can delegate the walkthrough to the customer: they get
+// an email link, annotate damages as dots on per-view vehicle diagrams, and
+// every report lands in the agent's approval queue (soft/hard). Hard-approved
+// damages live on the vehicle until marked FIXED (repair photo required).
+// ─────────────────────────────────────────────────────────────────────────────
+
+enum VehicleView {
+  FRONT
+  REAR
+  LEFT
+  RIGHT
+  INTERIOR
+}
+
+enum CustomerInspectionStatus {
+  SENT // email sent; customer hasn't submitted
+  SUBMITTED // customer finished (0+ damage reports) — needs agent review
+  REVIEWED // agent finished reviewing every report
+}
+
+enum DamageReportStatus {
+  REPORTED // customer submitted, pending agent action
+  SOFT_APPROVED // acknowledged only — never hits the vehicle record
+  HARD_APPROVED // on the vehicle's damage history until repaired
+  FIXED // repaired (photo on file); off the diagram, kept in history
+}
+
+model CustomerInspection {
+  id        String  @id @default(cuid())
+  tenantId  String?
+  vehicleId String
+  vehicle   Vehicle @relation(fields: [vehicleId], references: [id], onDelete: Cascade)
+
+  // Denormalized like VehicleMileageEntry so the queue reads cleanly even if
+  // the reservation is archived. IDs kept for joins.
+  reservationId     String?
+  rentalAgreementId String?
+  reservationNumber String?
+
+  phase   InspectionPhase
+  status  CustomerInspectionStatus @default(SENT)
+  emailTo String?
+
+  sentAt           DateTime  @default(now())
+  sentByUserId     String?
+  openedAt         DateTime?
+  submittedAt      DateTime?
+  reviewedAt       DateTime?
+  reviewedByUserId String?
+
+  damageReports VehicleDamageReport[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([tenantId, status])
+  @@index([vehicleId])
+  @@index([reservationId])
+}
+
+model VehicleDamageReport {
+  id        String  @id @default(cuid())
+  tenantId  String?
+  vehicleId String
+  vehicle   Vehicle @relation(fields: [vehicleId], references: [id], onDelete: Cascade)
+
+  customerInspectionId String?
+  customerInspection   CustomerInspection? @relation(fields: [customerInspectionId], references: [id], onDelete: SetNull)
+
+  reservationId     String?
+  reservationNumber String?
+
+  phase InspectionPhase
+  view  VehicleView
+  // Dot position as percentages of the diagram canvas (view-relative).
+  xPct  Decimal @db.Decimal(5, 2)
+  yPct  Decimal @db.Decimal(5, 2)
+
+  description String?
+  // { storage: true, bucket, refs } | { storage: false, photos } — same shape
+  // as InventoryItem.photosJson so the read path is shared.
+  photoJson   Json?
+
+  status DamageReportStatus @default(REPORTED)
+  source String             @default("CUSTOMER")
+
+  reviewedByUserId String?
+  reviewedAt       DateTime?
+  fixedByUserId    String?
+  fixedAt          DateTime?
+  fixedPhotoJson   Json?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([vehicleId, status])
+  @@index([customerInspectionId])
+  @@index([tenantId, status])
 }
 
 model HandoffToken {

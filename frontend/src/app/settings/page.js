@@ -121,9 +121,14 @@ function SettingsInner({ token, me, logout }) {
   const [reservationOptions, setReservationOptions] = useState({ autoAssignVehicleFromType: false, requireFranchiseSelection: false, tenantTimeZone: 'America/Puerto_Rico' });
   // Vehicle Profile pack (2026-06-10): tenant rule for "ready to rotate".
   const [fleetRotationRule, setFleetRotationRule] = useState('TIME');
+  // Customer-led inspection (2026-06-11).
+  const [customerInspectionEnabled, setCustomerInspectionEnabled] = useState(false);
   useEffect(() => {
     api(scopedSettingsPath('/api/settings/fleet-rotation'), {}, token)
       .then((out) => setFleetRotationRule(out?.rule === 'MILEAGE' ? 'MILEAGE' : 'TIME'))
+      .catch(() => {});
+    api(scopedSettingsPath('/api/settings/customer-inspection'), {}, token)
+      .then((out) => setCustomerInspectionEnabled(!!out?.enabled))
       .catch(() => {});
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [token]);
@@ -2391,6 +2396,34 @@ function SettingsInner({ token, me, logout }) {
               </label>
               <div style={{ marginTop: 10 }}>
                 <button onClick={saveReservationOptions}>Save Reservation Options</button>
+              </div>
+            </div>
+
+            <div className="glass card" style={{ padding: 12 }}>
+              <h3 style={{ marginBottom: 8 }}>Customer-led Inspection</h3>
+              <div className="form-grid-2">
+                <label className="label" style={{ display: 'inline-flex', alignItems: 'center', gap: 8, textTransform: 'none', letterSpacing: 0, fontSize: 13 }}>
+                  <input
+                    type="checkbox"
+                    checked={customerInspectionEnabled}
+                    onChange={async (e) => {
+                      const enabled = e.target.checked;
+                      setCustomerInspectionEnabled(enabled);
+                      try {
+                        await api(scopedSettingsPath('/api/settings/customer-inspection'), { method: 'PUT', body: JSON.stringify({ enabled }) }, token);
+                        setMsg(`Customer-led inspection ${enabled ? 'enabled' : 'disabled'}`);
+                      } catch (err) {
+                        setMsg(err?.message || 'Failed to save customer inspection setting');
+                      }
+                    }}
+                  />
+                  Let customers do the checkout inspection from their phone
+                </label>
+                <div className="surface-note">
+                  Checkout step 4 gains a &quot;Send inspection link to customer&quot; option (24h link,
+                  disclosures included; the QR agent flow stays as fail-safe). Customer damage
+                  reports land in the review queue for soft/hard approval.
+                </div>
               </div>
             </div>
 

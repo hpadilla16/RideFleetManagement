@@ -152,6 +152,27 @@ checkoutSessionRouter.post('/:id/handoff-token', async (req, res) => {
 });
 
 // ---------------------------------------------------------------------
+// POST /api/checkout-sessions/:id/send-customer-inspection
+//   2026-06-11 — step 4 "Send inspection link to customer". Requires the
+//   tenant setting ON. Emails the 24h link + disclosures and walks the
+//   session through the normal state machine to CLOSED (finalize cascade
+//   + agreement email run untouched). Plan:
+//   doc/customer-inspection-plan-2026-06-11.md
+// ---------------------------------------------------------------------
+checkoutSessionRouter.post('/:id/send-customer-inspection', async (req, res) => {
+  try {
+    const { customerInspectionService } = await import('../customer-inspection/customer-inspection.service.js');
+    const out = await customerInspectionService.sendCustomerInspection({
+      sessionId: req.params.id,
+      actorUserId: req.user?.id,
+    });
+    res.status(201).json(out);
+  } catch (err) {
+    handleError(res, err);
+  }
+});
+
+// ---------------------------------------------------------------------
 // POST /api/checkout-sessions/:id/vehicle
 //   Body: { newVehicleId }. Atomic swap of Reservation.vehicleId AND
 //   RentalAgreement.vehicleId. Refuses when the session is past

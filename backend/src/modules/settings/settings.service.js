@@ -738,6 +738,31 @@ export const settingsService = {
     return next;
   },
 
+  // Customer-led inspection (2026-06-11): when enabled, checkout step 4 can
+  // delegate the walkthrough to the customer (email link + damage dots).
+  async getCustomerInspectionConfig(scope = {}) {
+    const row = await prisma.appSetting.findUnique({ where: { key: scopedKey('customerInspectionConfig', scope) } });
+    const fallback = { enabled: false };
+    if (!row?.value) return fallback;
+    try {
+      const parsed = JSON.parse(row.value);
+      return { enabled: !!parsed?.enabled };
+    } catch {
+      return fallback;
+    }
+  },
+
+  async updateCustomerInspectionConfig(payload = {}, scope = {}) {
+    const next = { enabled: !!payload?.enabled };
+    const key = scopedKey('customerInspectionConfig', scope);
+    await prisma.appSetting.upsert({
+      where: { key },
+      create: { key, value: JSON.stringify(next) },
+      update: { value: JSON.stringify(next) }
+    });
+    return next;
+  },
+
   // Vehicle Profile pack (2026-06-10): per-tenant fleet-rotation rule.
   // rule = 'TIME' (months in fleet vs Vehicle.targetFleetMonths) or
   //        'MILEAGE' (Vehicle.mileage vs Vehicle.targetFleetMiles).

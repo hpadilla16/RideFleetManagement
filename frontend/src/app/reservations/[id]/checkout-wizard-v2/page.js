@@ -1273,11 +1273,88 @@ function ManualDepositModal({ suggestedAmount, onClose, onSubmit }) {
 
 function Step4Handoff({ session, token, onContinue }) {
   const [tokenInfo, setTokenInfo] = useState(null);
+  // 2026-06-11 — customer-led inspection (plan: doc/customer-inspection-plan).
+  // When the tenant setting is ON, step 4 offers TWO exits: delegate the
+  // walkthrough to the customer (email link, checkout finishes now) or the
+  // QR fail-safe (today's flow, untouched). Setting OFF → exactly the old UI.
+  const [customerLed, setCustomerLed] = useState(false);
+  const [mode, setMode] = useState('choose'); // choose | qr
+  const [sending, setSending] = useState(false);
+  const [sendResult, setSendResult] = useState(null);
+  const [sendError, setSendError] = useState('');
+
   useEffect(() => {
+    (async () => {
+      try {
+        const cfg = await api('/api/settings/customer-inspection', {}, token);
+        if (cfg?.enabled) setCustomerLed(true);
+      } catch { /* setting unreadable → default to old flow */ }
+    })();
+  }, [token]);
+
+  const wantQr = !customerLed || mode === 'qr';
+  useEffect(() => {
+    if (!wantQr || tokenInfo) return;
     (async () => {
       try { setTokenInfo(await mintHandoffToken({ id: session.id, token })); } catch {}
     })();
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [wantQr]);
+
+  const sendToCustomer = async () => {
+    setSending(true);
+    setSendError('');
+    try {
+      const out = await api(`/api/checkout-sessions/${session.id}/send-customer-inspection`, { method: 'POST' }, token);
+      setSendResult(out);
+      // The backend walks the session to CLOSED; the poll picks it up within
+      // ~1.5s and this screen swaps to the Closed step on its own.
+    } catch (err) {
+      setSendError(err?.message || 'Failed to send the inspection link');
+    } finally {
+      setSending(false);
+    }
+  };
+
+  if (customerLed && mode === 'choose') {
+    return (
+      <div style={cardStyle}>
+        <h3 style={h3Style}>Step 4 · Vehicle inspection</h3>
+        <p style={{ fontSize: 13, color: '#6B7280', margin: '0 0 16px' }}>
+          Who will do the walkthrough?
+        </p>
+        {sendResult ? (
+          <div style={{ background: '#ECFDF5', color: '#065F46', padding: 16, borderRadius: 8, fontSize: 13 }}>
+            ✓ Inspection link sent to <strong>{sendResult.emailTo}</strong>. The checkout is
+            finishing now and the agreement will be emailed as usual. Damage reports the
+            customer submits will appear in your review queue.
+          </div>
+        ) : (
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: 12 }}>
+            <div style={{ border: '2px solid #5b3df5', borderRadius: 10, padding: 16 }}>
+              <div style={{ fontWeight: 600, fontSize: 14, marginBottom: 4 }}>Send inspection link to customer</div>
+              <p style={{ fontSize: 12, color: '#6B7280', margin: '0 0 12px' }}>
+                Emails the link + disclosures. The checkout finishes now and the
+                agreement is emailed. Their damage reports land in your review queue.
+              </p>
+              <button style={{ width: '100%' }} disabled={sending} onClick={sendToCustomer}>
+                {sending ? 'Sending…' : 'Send link & finish checkout'}
+              </button>
+            </div>
+            <div style={{ border: '1px solid #E5E7EB', borderRadius: 10, padding: 16 }}>
+              <div style={{ fontWeight: 600, fontSize: 14, marginBottom: 4 }}>Do inspection for customer</div>
+              <p style={{ fontSize: 12, color: '#6B7280', margin: '0 0 12px' }}>
+                Fail-safe: shows the QR code, you scan with the tablet and do the
+                walkthrough with the customer — today&apos;s flow.
+              </p>
+              <button style={{ width: '100%' }} onClick={() => setMode('qr')}>Show QR code</button>
+            </div>
+          </div>
+        )}
+        {sendError ? <div style={{ marginTop: 12, color: '#B91C1C', fontSize: 13 }}>{sendError}</div> : null}
+      </div>
+    );
+  }
 
   return (
     <div style={cardStyle}>
@@ -1303,7 +1380,10 @@ function Step4Handoff({ session, token, onContinue }) {
           <div style={{ color: '#6B7280' }}>Minting handoff token…</div>
         )}
       </div>
-      <div style={{ marginTop: 16 }}>
+      <div style={{ marginTop: 16, display: 'flex', gap: 12 }}>
+        {customerLed ? (
+          <button style={ghostBtn} onClick={() => setMode('choose')}>← Back to options</button>
+        ) : null}
         <button style={ghostBtn} onClick={onContinue}>Continue here on desktop (fallback) →</button>
       </div>
     </div>
