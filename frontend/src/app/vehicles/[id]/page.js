@@ -127,6 +127,88 @@ function VehicleProfileInner({ token, me, logout }) {
   const [regDoc, setRegDoc] = useState({ url: null, uploading: false });
   const [rotationRule, setRotationRule] = useState('TIME');
   const regFileInputRef = useRef(null);
+  // 2026-06-11 (pedido de Hector): Edit Vehicle vive EN el perfil — modal
+  // local, save → PATCH → cierra → loadVehicle() refresca. Antes navegaba a
+  // /vehicles?edit= y el agente quedaba varado en la lista.
+  const [editModal, setEditModal] = useState({ open: false, saving: false, form: null });
+  const [editLists, setEditLists] = useState({ vehicleTypes: [], locations: [] });
+
+  const openEditModal = async () => {
+    if (!row) return;
+    setEditModal({
+      open: true,
+      saving: false,
+      form: {
+        internalNumber: row.internalNumber || '',
+        plate: row.plate || '',
+        tollTagNumber: row.tollTagNumber || '',
+        tollStickerNumber: row.tollStickerNumber || '',
+        vin: row.vin || '',
+        make: row.make || '',
+        model: row.model || '',
+        color: row.color || '',
+        year: row.year || '',
+        mileage: row.mileage ?? '',
+        fuelTankCapacityGallons: row.fuelTankCapacityGallons ?? '',
+        registrationExpiresAt: row.registrationExpiresAt ? String(row.registrationExpiresAt).slice(0, 10) : '',
+        acquisitionCost: row.acquisitionCost ?? '',
+        acquisitionDate: row.acquisitionDate ? String(row.acquisitionDate).slice(0, 10) : '',
+        depreciationAnnualPct: row.depreciationAnnualPct ?? '',
+        targetFleetMonths: row.targetFleetMonths ?? '',
+        targetFleetMiles: row.targetFleetMiles ?? '',
+        status: row.status || 'AVAILABLE',
+        vehicleTypeId: row.vehicleTypeId || '',
+        homeLocationId: row.homeLocationId || '',
+        fleetMode: row.fleetMode || 'RENTAL_ONLY',
+        programCategory: row.programCategory || 'BOTH',
+      },
+    });
+    if (!editLists.vehicleTypes.length) {
+      try {
+        const [types, locs] = await Promise.all([
+          api('/api/vehicle-types', {}, token).catch(() => []),
+          api('/api/locations', {}, token).catch(() => []),
+        ]);
+        setEditLists({
+          vehicleTypes: Array.isArray(types) ? types : (types?.vehicleTypes || []),
+          locations: Array.isArray(locs) ? locs : (locs?.locations || []),
+        });
+      } catch { /* selects degrade to current values */ }
+    }
+  };
+
+  const setEditField = (key, value) => setEditModal((c) => ({ ...c, form: { ...c.form, [key]: value } }));
+
+  const saveEditModal = async (e) => {
+    e.preventDefault();
+    const f = editModal.form;
+    if (!f) return;
+    try {
+      setEditModal((c) => ({ ...c, saving: true }));
+      await api(`/api/vehicles/${id}`, {
+        method: 'PATCH',
+        body: JSON.stringify({
+          ...f,
+          year: f.year ? Number(f.year) : null,
+          mileage: f.mileage ? Number(f.mileage) : 0,
+          fuelTankCapacityGallons: f.fuelTankCapacityGallons ? Number(f.fuelTankCapacityGallons) : null,
+          registrationExpiresAt: f.registrationExpiresAt || null,
+          acquisitionCost: f.acquisitionCost ? Number(f.acquisitionCost) : null,
+          acquisitionDate: f.acquisitionDate || null,
+          depreciationAnnualPct: f.depreciationAnnualPct ? Number(f.depreciationAnnualPct) : null,
+          targetFleetMonths: f.targetFleetMonths ? Number(f.targetFleetMonths) : null,
+          targetFleetMiles: f.targetFleetMiles ? Number(f.targetFleetMiles) : null,
+          homeLocationId: f.homeLocationId || null,
+        }),
+      }, token);
+      setEditModal({ open: false, saving: false, form: null });
+      setMsg('Vehicle updated');
+      await loadVehicle();
+    } catch (err) {
+      setEditModal((c) => ({ ...c, saving: false }));
+      setMsg(err?.message || 'Update failed');
+    }
+  };
 
   const loadVehicle = async () => {
     const out = await api(`/api/vehicles/${id}`, {}, token);
@@ -413,6 +495,83 @@ function VehicleProfileInner({ token, me, logout }) {
           </div>
         ) : null}
 
+        {editModal.open && editModal.form ? (
+          <div className="modal-backdrop" onClick={() => { if (!editModal.saving) setEditModal({ open: false, saving: false, form: null }); }}>
+            <div className="rent-modal glass" onClick={(e) => e.stopPropagation()} style={{ maxHeight: '85vh', overflowY: 'auto' }}>
+              <h3>Edit Vehicle | {row?.internalNumber}</h3>
+              <form className="stack" onSubmit={saveEditModal}>
+                <div className="grid2">
+                  <input required placeholder="Unit ID" value={editModal.form.internalNumber} onChange={(e) => setEditField('internalNumber', e.target.value)} />
+                  <input placeholder="License Plate" value={editModal.form.plate} onChange={(e) => setEditField('plate', e.target.value)} />
+                </div>
+                <div className="grid2">
+                  <input placeholder="Toll Tag Number" value={editModal.form.tollTagNumber} onChange={(e) => setEditField('tollTagNumber', e.target.value)} />
+                  <input placeholder="Toll Sticker Number" value={editModal.form.tollStickerNumber} onChange={(e) => setEditField('tollStickerNumber', e.target.value)} />
+                </div>
+                <div className="grid2">
+                  <input placeholder="VIN" value={editModal.form.vin} onChange={(e) => setEditField('vin', e.target.value)} />
+                  <input placeholder="Make" value={editModal.form.make} onChange={(e) => setEditField('make', e.target.value)} />
+                </div>
+                <div className="grid2">
+                  <input placeholder="Model" value={editModal.form.model} onChange={(e) => setEditField('model', e.target.value)} />
+                  <input placeholder="Color" value={editModal.form.color} onChange={(e) => setEditField('color', e.target.value)} />
+                </div>
+                <div className="grid2">
+                  <input placeholder="Year" value={editModal.form.year} onChange={(e) => setEditField('year', e.target.value)} />
+                  <input placeholder="Mileage" value={editModal.form.mileage} onChange={(e) => setEditField('mileage', e.target.value)} />
+                </div>
+                <div className="grid2">
+                  <input type="number" step="0.1" min="5" max="60" placeholder="Fuel tank capacity (gal)" value={editModal.form.fuelTankCapacityGallons} onChange={(e) => setEditField('fuelTankCapacityGallons', e.target.value)} />
+                  <select value={editModal.form.status} onChange={(e) => setEditField('status', e.target.value)}>
+                    {['AVAILABLE', 'RESERVED', 'ON_RENT', 'IN_MAINTENANCE', 'OUT_OF_SERVICE', 'SOLD'].map((s) => <option key={s} value={s}>{s}</option>)}
+                  </select>
+                </div>
+                <label className="label" style={{ marginBottom: 0 }}>Registration expires</label>
+                <input type="date" value={editModal.form.registrationExpiresAt} onChange={(e) => setEditField('registrationExpiresAt', e.target.value)} />
+                <label className="label" style={{ marginBottom: 0 }}>Value tracker (optional)</label>
+                <div className="grid2">
+                  <input type="number" min="0" step="0.01" placeholder="Acquisition cost ($)" value={editModal.form.acquisitionCost} onChange={(e) => setEditField('acquisitionCost', e.target.value)} />
+                  <input type="date" title="Acquisition date" value={editModal.form.acquisitionDate} onChange={(e) => setEditField('acquisitionDate', e.target.value)} />
+                </div>
+                <div className="grid2">
+                  <input type="number" min="0" max="99" step="0.5" placeholder="Depreciation %/yr" value={editModal.form.depreciationAnnualPct} onChange={(e) => setEditField('depreciationAnnualPct', e.target.value)} />
+                  <input type="number" min="1" placeholder="Target months in fleet" value={editModal.form.targetFleetMonths} onChange={(e) => setEditField('targetFleetMonths', e.target.value)} />
+                </div>
+                <input type="number" min="1" placeholder="Target miles (rotation by mileage)" value={editModal.form.targetFleetMiles} onChange={(e) => setEditField('targetFleetMiles', e.target.value)} />
+                <div className="grid2">
+                  <select value={editModal.form.vehicleTypeId} onChange={(e) => setEditField('vehicleTypeId', e.target.value)}>
+                    <option value={editModal.form.vehicleTypeId}>{row?.vehicleType?.name || 'Vehicle type'}</option>
+                    {editLists.vehicleTypes.filter((vt) => vt.id !== editModal.form.vehicleTypeId).map((vt) => <option key={vt.id} value={vt.id}>{vt.name}</option>)}
+                  </select>
+                  <select value={editModal.form.homeLocationId} onChange={(e) => setEditField('homeLocationId', e.target.value)}>
+                    <option value="">Home location</option>
+                    {editLists.locations.map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}
+                    {editModal.form.homeLocationId && !editLists.locations.some((l) => l.id === editModal.form.homeLocationId)
+                      ? <option value={editModal.form.homeLocationId}>{row?.homeLocation?.name || 'Current location'}</option>
+                      : null}
+                  </select>
+                </div>
+                <div className="grid2">
+                  <select value={editModal.form.fleetMode} onChange={(e) => setEditField('fleetMode', e.target.value)}>
+                    <option value="RENTAL_ONLY">RENTAL_ONLY</option>
+                    <option value="CAR_SHARING_ONLY">CAR_SHARING_ONLY</option>
+                    <option value="BOTH">BOTH</option>
+                  </select>
+                  <select value={editModal.form.programCategory} onChange={(e) => setEditField('programCategory', e.target.value)}>
+                    <option value="BOTH">Flexible (rental and loaner)</option>
+                    <option value="RENTAL_ONLY">Rental only</option>
+                    <option value="LOANER_ONLY">Loaner only</option>
+                  </select>
+                </div>
+                <div className="row-between">
+                  <button type="button" disabled={editModal.saving} onClick={() => setEditModal({ open: false, saving: false, form: null })}>Cancel</button>
+                  <button type="submit" disabled={editModal.saving}>{editModal.saving ? 'Saving…' : 'Save Vehicle'}</button>
+                </div>
+              </form>
+            </div>
+          </div>
+        ) : null}
+
         {!row ? null : (
           <div className="vehicle-profile-grid">
             <div className="vehicle-profile-main">
@@ -479,7 +638,7 @@ function VehicleProfileInner({ token, me, logout }) {
                   <h2>Vehicle Details</h2>
                   <span style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
                     <span className="status-chip neutral">{row.vehicleType?.name || row.vehicleType?.code || 'No type'}</span>
-                    <button type="button" className="btn-sm" onClick={() => router.push(`/vehicles?edit=${row.id}`)}>
+                    <button type="button" className="btn-sm" onClick={openEditModal}>
                       Edit vehicle
                     </button>
                   </span>
