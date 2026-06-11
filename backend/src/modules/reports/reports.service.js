@@ -333,6 +333,7 @@ export const reportsService = {
       registrationsExpiringCount,
       rotationVehicles,
       fleetRotationCfg,
+      inspectionsToReviewCount,
     ] = await Promise.all([
       prisma.reservation.findMany({
         where: reservationWhere,
@@ -418,6 +419,11 @@ export const reportsService = {
         select: { mileage: true, acquisitionDate: true, targetFleetMonths: true, targetFleetMiles: true },
       }).catch(() => []),
       settingsService.getFleetRotationConfig(scope).catch(() => ({ rule: 'TIME' })),
+      // Customer-led inspection Fase B (2026-06-11): submitted inspections
+      // with damage reports awaiting soft/hard approval.
+      prisma.customerInspection.count({
+        where: { ...(effectiveTenantId ? { tenantId: effectiveTenantId } : {}), status: 'SUBMITTED' },
+      }).catch(() => 0),
     ]);
 
     const readyToRotateCount = rotationVehicles.reduce((count, v) => (
@@ -578,6 +584,8 @@ export const reportsService = {
         registrationsExpiring30d: registrationsExpiringCount || 0,
         readyToRotate: readyToRotateCount || 0,
         fleetRotationRule: fleetRotationCfg?.rule || 'TIME',
+        // Fase B: customer inspections waiting for damage approval.
+        inspectionsToReview: inspectionsToReviewCount || 0,
         // 2026-05-28: vehicleIds derived from active reservations + blocks
         // exposed so the Vehicles page can compute its Available / On Rent
         // tiles without inheriting the Vehicle.status drift (every vehicle

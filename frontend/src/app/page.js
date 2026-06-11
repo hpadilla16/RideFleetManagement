@@ -445,6 +445,9 @@ function DashboardInner({ token, me, logout }) {
   const registrationsExpiring30d = Number(kpis.registrationsExpiring30d || 0);
   const readyToRotate = Number(kpis.readyToRotate || 0);
   const rotationRuleLabel = kpis.fleetRotationRule === 'MILEAGE' ? 'mileage' : 'time-in-fleet';
+  // Customer-led inspection Fase B (2026-06-11): submitted customer
+  // inspections with damage reports awaiting soft/hard approval.
+  const inspectionsToReview = Number(kpis.inspectionsToReview || 0);
   // Anchor "today" in the tenant timezone — not the browser's — so the
   // Operations Board agrees with the rest of the app for agents loading
   // from a non-PR browser. Both functions return "YYYY-MM-DD" in DASHBOARD_TZ.
@@ -496,6 +499,16 @@ function DashboardInner({ token, me, logout }) {
       // Vehicle Profile pack (2026-06-10): these two cards REPLACE the old
       // "Stuck Checkouts" and "Fee Advisory Watch" cards (Hector's call).
       // Stuck checkouts remain reachable via /reservations?filter=stuck-checkouts.
+      inspectionsToReview > 0
+        ? {
+            id: 'inspections-to-review',
+            title: 'Inspections to Review',
+            detail: `${inspectionsToReview} customer inspection${inspectionsToReview === 1 ? '' : 's'}`,
+            note: 'Customers reported damages that need your soft/hard approval.',
+            action: () => router.push('/inspections/review'),
+            actionLabel: 'Review Now'
+          }
+        : null,
       registrationsExpiring30d > 0
         ? {
             id: 'registrations-expiring',
@@ -543,7 +556,7 @@ function DashboardInner({ token, me, logout }) {
       feeAdvisoryCount,
       nextItems
     };
-  }, [pickups, returns, feeAdvisoryCount, registrationsExpiring30d, readyToRotate, rotationRuleLabel, totalVehicles, available, migrationHeld, serviceHeld, activeReservations, overdueReservations, router, me?.moduleAccess?.loaner]);
+  }, [pickups, returns, feeAdvisoryCount, registrationsExpiring30d, readyToRotate, rotationRuleLabel, inspectionsToReview, totalVehicles, available, migrationHeld, serviceHeld, activeReservations, overdueReservations, router, me?.moduleAccess?.loaner]);
 
   return (
     <AppShell me={me} logout={logout}>

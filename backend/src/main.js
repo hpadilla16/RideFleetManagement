@@ -29,7 +29,7 @@ import { addendumSignaturePublicRouter } from './modules/rental-agreements/adden
 import { checkoutSessionRouter, checkoutSessionPublicRouter } from './modules/checkout-session/checkout-session.routes.js';
 import { termsSigningPublicRouter } from './modules/checkout-session/terms-signing.routes.js';
 import { mobileInspectionPublicRouter } from './modules/checkout-session/mobile-inspection.routes.js';
-import { customerInspectionPublicRouter } from './modules/customer-inspection/customer-inspection.routes.js';
+import { customerInspectionPublicRouter, customerInspectionRouter } from './modules/customer-inspection/customer-inspection.routes.js';
 import { storeBoardRouter } from './modules/store-board/store-board.routes.js';
 import { storeBoardPublicRouter } from './modules/store-board/store-board-public.routes.js';
 import { assertAuthConfig } from './modules/auth/auth.config.js';
@@ -207,6 +207,8 @@ app.use('/api/mobile-inspection', mobileInspectionPublicRouter);
 // 2026-06-11 — customer-led inspection (token = auth, 24h TTL). Same trust
 // model and body-limit strategy as /api/mobile-inspection.
 app.use('/api/customer-inspection', customerInspectionPublicRouter);
+// Fase B (2026-06-11) — agent review queue for customer damage reports.
+app.use('/api/customer-inspections', requireAuth, tenantRateLimit, customerInspectionRouter);
 // 2026-05-25 — mount Reports v2 router FIRST so the new /list and per-slug
 // data/pdf/excel endpoints win. The legacy reportsRouter stays mounted as
 // a fallthrough for any path the v2 router doesn't define.

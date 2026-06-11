@@ -275,7 +275,11 @@ async function completeInspection({ token }) {
   await prisma.$transaction([
     prisma.customerInspection.update({
       where: { id: inspection.id },
-      data: { status: 'SUBMITTED', submittedAt: now },
+      // 0 reports → nothing for the agent to approve: auto-REVIEWED so the
+      // dashboard queue only counts inspections that actually need eyes.
+      data: reportCount === 0
+        ? { status: 'REVIEWED', submittedAt: now, reviewedAt: now }
+        : { status: 'SUBMITTED', submittedAt: now },
     }),
     prisma.handoffToken.update({ where: { id: row.id }, data: { consumedAt: now } }),
   ]);
@@ -283,9 +287,168 @@ async function completeInspection({ token }) {
   return { ok: true, reportCount };
 }
 
+// ---------------------------------------------------------------------------
+// Fase B — agent review queue (soft/hard approval)
+// ---------------------------------------------------------------------------
+
+function tenantWhere(scope) {
+  return scope?.tenantId ? { tenantId: scope.tenantId } : {};
+}
+
+const VEHICLE_SELECT = {
+  select: {
+    id: true, internalNumber: true, plate: true, year: true, make: true, model: true,
+    vehicleType: { select: { name: true, code: true } },
+  },
+};
+
+function vehicleSummary(v) {
+  if (!v) return null;
+  return {
+    id: v.id,
+    internalNumber: v.internalNumber,
+    plate: v.plate || null,
+    label: [v.year, v.make, v.model].filter(Boolean).join(' ') || null,
+    diagramType: diagramTypeFor(`${v.vehicleType?.name || ''} ${v.vehicleType?.code || ''}`),
+  };
+}
+
+/** Photo URL for a damage report (signed Supabase URL or inline data URL). */
+async function reportPhotoUrl(photoJson) {
+  const pj = photoJson || null;
+  if (!pj || typeof pj !== 'object') return null;
+  if (pj.storage && Array.isArray(pj.refs)) {
+    try {
+      const { materializeStorageRefs } = await import('../rental-agreements/inspection-photos.js');
+      const map = await materializeStorageRefs(pj.refs, { bucket: pj.bucket || PHOTOS_BUCKET });
+      const first = map?.photo;
+      return Array.isArray(first) ? first[0] || null : first || null;
+    } catch {
+      return null;
+    }
+  }
+  if (pj.photos && typeof pj.photos === 'object') return pj.photos.photo || null;
+  return null;
+}
+
+async function listInspections(scope = {}, { status, reservationId } = {}) {
+  const where = {
+    ...tenantWhere(scope),
+    ...(reservationId ? { reservationId } : {}),
+    ...(status ? { status: String(status).toUpperCase() } : {}),
+  };
+  const rows = await prisma.customerInspection.findMany({
+    where,
+    orderBy: { submittedAt: 'desc' },
+    take: 100,
+    include: {
+      vehicle: VEHICLE_SELECT,
+      damageReports: { select: { id: true, status: true, view: true } },
+    },
+  });
+  return rows.map((r) => ({
+    id: r.id,
+    status: r.status,
+    phase: r.phase,
+    reservationId: r.reservationId,
+    reservationNumber: r.reservationNumber,
+    emailTo: r.emailTo,
+    sentAt: r.sentAt,
+    submittedAt: r.submittedAt,
+    reviewedAt: r.reviewedAt,
+    vehicle: vehicleSummary(r.vehicle),
+    reportCount: r.damageReports.length,
+    pendingCount: r.damageReports.filter((d) => d.status === 'REPORTED').length,
+  }));
+}
+
+async function getInspection(id, scope = {}) {
+  const r = await prisma.customerInspection.findFirst({
+    where: { id, ...tenantWhere(scope) },
+    include: {
+      vehicle: VEHICLE_SELECT,
+      damageReports: { orderBy: { createdAt: 'asc' } },
+    },
+  });
+  if (!r) throw new CheckoutSessionError('Inspection not found', 404);
+  const reports = [];
+  for (const d of r.damageReports) {
+    reports.push({
+      id: d.id,
+      view: d.view,
+      xPct: Number(d.xPct),
+      yPct: Number(d.yPct),
+      description: d.description,
+      status: d.status,
+      reviewedAt: d.reviewedAt,
+      photoUrl: await reportPhotoUrl(d.photoJson),
+      createdAt: d.createdAt,
+    });
+  }
+  return {
+    id: r.id,
+    status: r.status,
+    phase: r.phase,
+    reservationId: r.reservationId,
+    reservationNumber: r.reservationNumber,
+    emailTo: r.emailTo,
+    sentAt: r.sentAt,
+    submittedAt: r.submittedAt,
+    reviewedAt: r.reviewedAt,
+    vehicle: vehicleSummary(r.vehicle),
+    reports,
+  };
+}
+
+/**
+ * Soft = acknowledged only (never hits the vehicle record).
+ * Hard = goes to the vehicle's damage history (Fase C diagram) until FIXED.
+ * When the last REPORTED item is decided, the inspection flips to REVIEWED.
+ */
+async function reviewReport({ inspectionId, reportId, action, actorUserId, scope = {} }) {
+  const act = String(action || '').toLowerCase();
+  if (!['soft', 'hard'].includes(act)) throw new CheckoutSessionError(`Unknown action: ${action}`, 400);
+  const inspection = await prisma.customerInspection.findFirst({
+    where: { id: inspectionId, ...tenantWhere(scope) },
+    select: { id: true },
+  });
+  if (!inspection) throw new CheckoutSessionError('Inspection not found', 404);
+  const report = await prisma.vehicleDamageReport.findFirst({
+    where: { id: reportId, customerInspectionId: inspectionId },
+    select: { id: true, status: true },
+  });
+  if (!report) throw new CheckoutSessionError('Report not found', 404);
+  if (report.status !== 'REPORTED') throw new CheckoutSessionError(`Report already ${report.status}`, 409);
+
+  const now = new Date();
+  await prisma.vehicleDamageReport.update({
+    where: { id: reportId },
+    data: {
+      status: act === 'hard' ? 'HARD_APPROVED' : 'SOFT_APPROVED',
+      reviewedByUserId: actorUserId || null,
+      reviewedAt: now,
+    },
+  });
+
+  const pending = await prisma.vehicleDamageReport.count({
+    where: { customerInspectionId: inspectionId, status: 'REPORTED' },
+  });
+  if (pending === 0) {
+    await prisma.customerInspection.update({
+      where: { id: inspectionId },
+      data: { status: 'REVIEWED', reviewedAt: now, reviewedByUserId: actorUserId || null },
+    });
+  }
+  logger.info('[customer-inspection] report reviewed', { inspectionId, reportId, action: act, pendingLeft: pending });
+  return { ok: true, status: act === 'hard' ? 'HARD_APPROVED' : 'SOFT_APPROVED', pendingLeft: pending, inspectionReviewed: pending === 0 };
+}
+
 export const customerInspectionService = {
   sendCustomerInspection,
   loadByToken,
   reportDamage,
   completeInspection,
+  listInspections,
+  getInspection,
+  reviewReport,
 };

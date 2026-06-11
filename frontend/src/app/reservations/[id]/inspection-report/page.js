@@ -56,21 +56,33 @@ function Inner({ token }) {
   const [report, setReport] = useState(null);
   const [msg, setMsg] = useState('');
   const [selected, setSelected] = useState([]);
+  // 2026-06-11 — customer-led inspections (Fase B): they live in their own
+  // tables, so View Inspections fetches them separately and renders a
+  // dedicated section per inspection (status + damage reports + photos).
+  const [customerInspections, setCustomerInspections] = useState([]);
 
   useEffect(() => {
     (async () => {
       try {
         const reservation = await api(`/api/reservations/${id}`, {}, token);
         const agreementId = reservation?.rentalAgreement?.id || null;
-        if (!agreementId) {
+        if (agreementId) {
+          const inspectionReport = await api(`/api/rental-agreements/${agreementId}/inspection-report`, {}, token);
+          setReport(inspectionReport);
+        } else {
           setReport(null);
-          return;
         }
-        const inspectionReport = await api(`/api/rental-agreements/${agreementId}/inspection-report`, {}, token);
-        setReport(inspectionReport);
       } catch (e) {
         setMsg(e.message);
       }
+      try {
+        const list = await api(`/api/customer-inspections?reservationId=${id}`, { bypassCache: true }, token);
+        const detailed = [];
+        for (const row of (Array.isArray(list) ? list : [])) {
+          try { detailed.push(await api(`/api/customer-inspections/${row.id}`, {}, token)); } catch { /* skip */ }
+        }
+        setCustomerInspections(detailed);
+      } catch { /* section simply doesn't render */ }
     })();
   }, [id, token]);
 
@@ -211,6 +223,36 @@ function Inner({ token }) {
 
       {msg ? <div className="print-card" style={{ color: '#b91c1c' }}>{msg}</div> : null}
       {!report?.checkoutInspection && !report?.checkinInspection && !(Array.isArray(report?.vehicleSwaps) && report.vehicleSwaps.length) ? <div className="print-card"><div className="muted">No inspection data found.</div></div> : null}
+      {customerInspections.map((ci) => (
+        <section key={ci.id} className="print-card">
+          <h3>Customer Inspection · {ci.phase === 'CHECKIN' ? 'Check-in' : 'Checkout'}</h3>
+          <p>
+            <b>Status:</b> {ci.status === 'SENT' ? 'Link sent — waiting on customer' : ci.status === 'SUBMITTED' ? 'Submitted — pending damage review' : 'Reviewed'}
+            {' '}| <b>Sent to:</b> {ci.emailTo || '-'} | <b>Submitted:</b> {fmt(ci.submittedAt)}
+          </p>
+          <p><b>Damage reports:</b> {ci.reports.length === 0 ? 'None — customer reported no damages' : `${ci.reports.length}`}</p>
+          {ci.reports.length ? (
+            <div className="photos-grid">
+              {ci.reports.map((r, i) => (
+                <div key={r.id} className="photo-card">
+                  <div className="photo-cap">#{i + 1} · {String(r.view || '').toLowerCase()} · {
+                    r.status === 'HARD_APPROVED' ? 'HARD APPROVED' : r.status === 'SOFT_APPROVED' ? 'SOFT APPROVED' : r.status === 'FIXED' ? 'FIXED' : 'PENDING REVIEW'
+                  }</div>
+                  {r.photoUrl ? (
+                    <img src={r.photoUrl} alt={r.description || 'damage'} onClick={() => openPhoto(r.photoUrl, `Customer damage #${i + 1}`)} style={{ cursor: 'zoom-in' }} />
+                  ) : null}
+                  <div style={{ fontSize: 12, marginTop: 6 }}>{r.description || 'No description'}</div>
+                </div>
+              ))}
+            </div>
+          ) : null}
+          {ci.status === 'SUBMITTED' ? (
+            <p className="muted" style={{ marginTop: 8 }}>
+              Pending soft/hard approval — review from the dashboard card or <a href="/inspections/review" style={{ color: '#c8a8ff' }}>Inspections to Review</a>.
+            </p>
+          ) : null}
+        </section>
+      ))}
       <Block title="Checkout Inspection" data={report?.checkoutInspection} selected={selected} toggleSelect={toggleSelect} openPhoto={openPhoto} />
       <Block title="Check-in Inspection" data={report?.checkinInspection} selected={selected} toggleSelect={toggleSelect} openPhoto={openPhoto} />
       {(Array.isArray(report?.vehicleSwaps) ? report.vehicleSwaps : []).map((swap, index) => (

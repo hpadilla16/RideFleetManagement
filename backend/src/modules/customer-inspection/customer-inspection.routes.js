@@ -10,6 +10,7 @@ import { Router } from 'express';
 import express from 'express';
 import { customerInspectionService } from './customer-inspection.service.js';
 import { CheckoutSessionError } from '../checkout-session/checkout-session.service.js';
+import { crossTenantScopeFor as scopeFor } from '../../lib/tenant-scope.js';
 import logger from '../../lib/logger.js';
 
 export const customerInspectionPublicRouter = Router();
@@ -59,6 +60,50 @@ customerInspectionPublicRouter.post('/:token/damage', async (req, res) => {
 customerInspectionPublicRouter.post('/:token/complete', async (req, res) => {
   try {
     res.json(await customerInspectionService.completeInspection({ token: req.params.token }));
+  } catch (err) {
+    handleError(res, err);
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Fase B — AUTHED review queue (mounted at /api/customer-inspections with
+// requireAuth in main.js). Tenant-scoped via scopeFor.
+// ---------------------------------------------------------------------------
+
+export const customerInspectionRouter = Router();
+
+// GET /api/customer-inspections?status=SUBMITTED | ?reservationId=...
+customerInspectionRouter.get('/', async (req, res) => {
+  try {
+    res.json(await customerInspectionService.listInspections(scopeFor(req), {
+      status: req.query?.status ? String(req.query.status) : undefined,
+      reservationId: req.query?.reservationId ? String(req.query.reservationId) : undefined,
+    }));
+  } catch (err) {
+    handleError(res, err);
+  }
+});
+
+// GET /api/customer-inspections/:id — detail with damage reports + photo URLs.
+customerInspectionRouter.get('/:id', async (req, res) => {
+  try {
+    res.json(await customerInspectionService.getInspection(req.params.id, scopeFor(req)));
+  } catch (err) {
+    handleError(res, err);
+  }
+});
+
+// POST /api/customer-inspections/:id/reports/:reportId/review
+// body: { action: 'soft' | 'hard' }
+customerInspectionRouter.post('/:id/reports/:reportId/review', async (req, res) => {
+  try {
+    res.json(await customerInspectionService.reviewReport({
+      inspectionId: req.params.id,
+      reportId: req.params.reportId,
+      action: req.body?.action,
+      actorUserId: req.user?.id || req.user?.sub || null,
+      scope: scopeFor(req),
+    }));
   } catch (err) {
     handleError(res, err);
   }
