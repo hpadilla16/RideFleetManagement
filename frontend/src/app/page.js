@@ -440,6 +440,11 @@ function DashboardInner({ token, me, logout }) {
   // payment hasn't settled. Backend-canonical; no client fallback
   // since we have no list of sessions on this page.
   const stuckCheckouts = Number(kpis.stuckCheckouts || 0);
+  // Vehicle Profile pack (2026-06-10): counts for the two cards that replace
+  // Stuck Checkouts + Fee Advisory Watch on the Ops Hub.
+  const registrationsExpiring30d = Number(kpis.registrationsExpiring30d || 0);
+  const readyToRotate = Number(kpis.readyToRotate || 0);
+  const rotationRuleLabel = kpis.fleetRotationRule === 'MILEAGE' ? 'mileage' : 'time-in-fleet';
   // Anchor "today" in the tenant timezone — not the browser's — so the
   // Operations Board agrees with the rest of the app for agents loading
   // from a non-PR browser. Both functions return "YYYY-MM-DD" in DASHBOARD_TZ.
@@ -488,24 +493,27 @@ function DashboardInner({ token, me, logout }) {
             actionLabel: 'Open Check-in'
           }
         : null,
-      stuckCheckouts > 0
+      // Vehicle Profile pack (2026-06-10): these two cards REPLACE the old
+      // "Stuck Checkouts" and "Fee Advisory Watch" cards (Hector's call).
+      // Stuck checkouts remain reachable via /reservations?filter=stuck-checkouts.
+      registrationsExpiring30d > 0
         ? {
-            id: 'stuck-checkouts',
-            title: 'Stuck Checkouts',
-            detail: `${stuckCheckouts} checkout session${stuckCheckouts === 1 ? '' : 's'}`,
-            note: 'Wizard sessions abandoned or stalled > 4 hours — review and clear.',
-            action: () => router.push('/reservations?filter=stuck-checkouts'),
-            actionLabel: 'Review'
+            id: 'registrations-expiring',
+            title: 'Registrations ≤30d',
+            detail: `${registrationsExpiring30d} vehicle${registrationsExpiring30d === 1 ? '' : 's'}`,
+            note: 'Registration expired or expiring within 30 days — renew before they hit the road.',
+            action: () => router.push('/vehicles?registration=expiring'),
+            actionLabel: 'Review Vehicles'
           }
         : null,
-      feeAdvisoryCount > 0
+      readyToRotate > 0
         ? {
-            id: 'fee-advisory',
-            title: 'Fee Advisory Watch',
-            detail: `${feeAdvisoryCount} booking${feeAdvisoryCount === 1 ? '' : 's'}`,
-            note: 'Additional fee advisories are still open and may need team review.',
-            action: () => router.push('/reservations'),
-            actionLabel: 'Open Reservations'
+            id: 'ready-to-rotate',
+            title: 'Ready to Rotate',
+            detail: `${readyToRotate} vehicle${readyToRotate === 1 ? '' : 's'}`,
+            note: `Past the fleet ${rotationRuleLabel} target — candidates to sell per your rotation rules.`,
+            action: () => router.push('/vehicles?rotation=ready'),
+            actionLabel: 'View Batch'
           }
         : null,
       // Loaner Lane card only renders for tenants that have the dealership
@@ -535,7 +543,7 @@ function DashboardInner({ token, me, logout }) {
       feeAdvisoryCount,
       nextItems
     };
-  }, [pickups, returns, feeAdvisoryCount, totalVehicles, available, migrationHeld, serviceHeld, activeReservations, overdueReservations, router, me?.moduleAccess?.loaner]);
+  }, [pickups, returns, feeAdvisoryCount, registrationsExpiring30d, readyToRotate, rotationRuleLabel, totalVehicles, available, migrationHeld, serviceHeld, activeReservations, overdueReservations, router, me?.moduleAccess?.loaner]);
 
   return (
     <AppShell me={me} logout={logout}>

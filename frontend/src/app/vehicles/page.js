@@ -154,6 +154,17 @@ function VehiclesInner({ token, me, logout }) {
   const searchParams = useSearchParams();
   // Dashboard deep-link: /vehicles?status=available|maintenance|migration
   const statusFilter = String(searchParams?.get('status') || '').toLowerCase();
+  // Vehicle Profile pack (2026-06-10) deep-links:
+  //   /vehicles?registration=expiring  → registración ≤30d o vencida
+  //   /vehicles?rotation=ready         → listos para rotar según la regla del tenant
+  const registrationFilter = String(searchParams?.get('registration') || '').toLowerCase();
+  const rotationFilter = String(searchParams?.get('rotation') || '').toLowerCase();
+  const [rotationRule, setRotationRule] = useState('TIME');
+  useEffect(() => {
+    api('/api/settings/fleet-rotation', {}, token)
+      .then((out) => setRotationRule(out?.rule === 'MILEAGE' ? 'MILEAGE' : 'TIME'))
+      .catch(() => {});
+  }, [token]);
   const role = String(me?.role || '').toUpperCase().trim();
   const isSuper = role === 'SUPER_ADMIN';
   const canManageVehicleSetup = ['SUPER_ADMIN', 'ADMIN', 'OPS'].includes(role);
@@ -180,10 +191,10 @@ function VehiclesInner({ token, me, logout }) {
   const [msg, setMsg] = useState('');
 
   const [newVehicle, setNewVehicle] = useState({
-    internalNumber: '', plate: '', tollTagNumber: '', tollStickerNumber: '', vin: '', make: '', model: '', color: '', year: '', mileage: '', fuelTankCapacityGallons: '', vehicleTypeId: '', homeLocationId: '', fleetMode: 'RENTAL_ONLY', programCategory: 'BOTH'
+    internalNumber: '', plate: '', tollTagNumber: '', tollStickerNumber: '', vin: '', make: '', model: '', color: '', year: '', mileage: '', fuelTankCapacityGallons: '', registrationExpiresAt: '', acquisitionCost: '', acquisitionDate: '', depreciationAnnualPct: '', targetFleetMonths: '', targetFleetMiles: '', vehicleTypeId: '', homeLocationId: '', fleetMode: 'RENTAL_ONLY', programCategory: 'BOTH'
   });
   const [editVehicleForm, setEditVehicleForm] = useState({
-    internalNumber: '', plate: '', tollTagNumber: '', tollStickerNumber: '', vin: '', make: '', model: '', color: '', year: '', mileage: '', fuelTankCapacityGallons: '', status: 'AVAILABLE', vehicleTypeId: '', homeLocationId: '', fleetMode: 'RENTAL_ONLY', programCategory: 'BOTH'
+    internalNumber: '', plate: '', tollTagNumber: '', tollStickerNumber: '', vin: '', make: '', model: '', color: '', year: '', mileage: '', fuelTankCapacityGallons: '', registrationExpiresAt: '', acquisitionCost: '', acquisitionDate: '', depreciationAnnualPct: '', targetFleetMonths: '', targetFleetMiles: '', status: 'AVAILABLE', vehicleTypeId: '', homeLocationId: '', fleetMode: 'RENTAL_ONLY', programCategory: 'BOTH'
   });
   const [programCategoryFilter, setProgramCategoryFilter] = useState('ALL');
   // Multi-select state for the bulk programCategory action. Stores Vehicle.id
@@ -341,6 +352,20 @@ function VehiclesInner({ token, me, logout }) {
     if (statusFilter && statusSets[statusFilter]) {
       filtered = filtered.filter((v) => statusSets[statusFilter].has(v.id));
     }
+    if (registrationFilter === 'expiring') {
+      const cutoff = Date.now() + 30 * 24 * 60 * 60 * 1000;
+      filtered = filtered.filter((v) => v.registrationExpiresAt && new Date(v.registrationExpiresAt).getTime() <= cutoff);
+    }
+    if (rotationFilter === 'ready') {
+      filtered = filtered.filter((v) => {
+        if (rotationRule === 'MILEAGE') {
+          return v.targetFleetMiles ? (v.mileage ?? 0) >= v.targetFleetMiles : false;
+        }
+        if (!v.targetFleetMonths || !v.acquisitionDate) return false;
+        const months = (Date.now() - new Date(v.acquisitionDate).getTime()) / (86400000 * 30.4375);
+        return months >= v.targetFleetMonths;
+      });
+    }
     if (!q) return filtered;
     return filtered.filter((v) =>
       (v.internalNumber || '').toLowerCase().includes(q) ||
@@ -350,7 +375,7 @@ function VehiclesInner({ token, me, logout }) {
       (v.vin || '').toLowerCase().includes(q) ||
       `${v.make || ''} ${v.model || ''}`.toLowerCase().includes(q)
     );
-  }, [vehicles, query, programCategoryFilter, statusFilter, statusSets]);
+  }, [vehicles, query, programCategoryFilter, statusFilter, statusSets, registrationFilter, rotationFilter, rotationRule]);
 
   const fleetOpsHub = useMemo(() => {
     const activeBlocks = vehicles.map((vehicle) => ({ vehicle, block: activeAvailabilityBlock(vehicle) })).filter((row) => !!row.block);
@@ -510,12 +535,18 @@ function VehiclesInner({ token, me, logout }) {
           year: newVehicle.year ? Number(newVehicle.year) : null,
           mileage: newVehicle.mileage ? Number(newVehicle.mileage) : 0,
           fuelTankCapacityGallons: newVehicle.fuelTankCapacityGallons ? Number(newVehicle.fuelTankCapacityGallons) : null,
+          registrationExpiresAt: newVehicle.registrationExpiresAt || null,
+          acquisitionCost: newVehicle.acquisitionCost ? Number(newVehicle.acquisitionCost) : null,
+          acquisitionDate: newVehicle.acquisitionDate || null,
+          depreciationAnnualPct: newVehicle.depreciationAnnualPct ? Number(newVehicle.depreciationAnnualPct) : null,
+          targetFleetMonths: newVehicle.targetFleetMonths ? Number(newVehicle.targetFleetMonths) : null,
+          targetFleetMiles: newVehicle.targetFleetMiles ? Number(newVehicle.targetFleetMiles) : null,
           homeLocationId: newVehicle.homeLocationId || null,
           status: 'AVAILABLE'
         })
       }, token);
       setShowAddVehicle(false);
-      setNewVehicle({ internalNumber: '', plate: '', tollTagNumber: '', tollStickerNumber: '', vin: '', make: '', model: '', color: '', year: '', mileage: '', fuelTankCapacityGallons: '', vehicleTypeId: '', homeLocationId: '', fleetMode: 'RENTAL_ONLY' });
+      setNewVehicle({ internalNumber: '', plate: '', tollTagNumber: '', tollStickerNumber: '', vin: '', make: '', model: '', color: '', year: '', mileage: '', fuelTankCapacityGallons: '', registrationExpiresAt: '', acquisitionCost: '', acquisitionDate: '', depreciationAnnualPct: '', targetFleetMonths: '', targetFleetMiles: '', vehicleTypeId: '', homeLocationId: '', fleetMode: 'RENTAL_ONLY' });
       setMsg('Vehicle added successfully');
       await load();
     } catch (e2) {
@@ -537,6 +568,12 @@ function VehiclesInner({ token, me, logout }) {
       year: vehicle.year || '',
       mileage: vehicle.mileage ?? '',
       fuelTankCapacityGallons: vehicle.fuelTankCapacityGallons ?? '',
+      registrationExpiresAt: vehicle.registrationExpiresAt ? String(vehicle.registrationExpiresAt).slice(0, 10) : '',
+      acquisitionCost: vehicle.acquisitionCost ?? '',
+      acquisitionDate: vehicle.acquisitionDate ? String(vehicle.acquisitionDate).slice(0, 10) : '',
+      depreciationAnnualPct: vehicle.depreciationAnnualPct ?? '',
+      targetFleetMonths: vehicle.targetFleetMonths ?? '',
+      targetFleetMiles: vehicle.targetFleetMiles ?? '',
       status: vehicle.status || 'AVAILABLE',
       vehicleTypeId: vehicle.vehicleTypeId || '',
       homeLocationId: vehicle.homeLocationId || '',
@@ -617,6 +654,12 @@ function VehiclesInner({ token, me, logout }) {
           year: editVehicleForm.year ? Number(editVehicleForm.year) : null,
           mileage: editVehicleForm.mileage ? Number(editVehicleForm.mileage) : 0,
           fuelTankCapacityGallons: editVehicleForm.fuelTankCapacityGallons ? Number(editVehicleForm.fuelTankCapacityGallons) : null,
+          registrationExpiresAt: editVehicleForm.registrationExpiresAt || null,
+          acquisitionCost: editVehicleForm.acquisitionCost ? Number(editVehicleForm.acquisitionCost) : null,
+          acquisitionDate: editVehicleForm.acquisitionDate || null,
+          depreciationAnnualPct: editVehicleForm.depreciationAnnualPct ? Number(editVehicleForm.depreciationAnnualPct) : null,
+          targetFleetMonths: editVehicleForm.targetFleetMonths ? Number(editVehicleForm.targetFleetMonths) : null,
+          targetFleetMiles: editVehicleForm.targetFleetMiles ? Number(editVehicleForm.targetFleetMiles) : null,
           homeLocationId: editVehicleForm.homeLocationId || null
         })
       }, token);
@@ -1177,6 +1220,18 @@ function VehiclesInner({ token, me, logout }) {
                 <input type="number" step="0.1" min="5" max="60" placeholder="Fuel tank capacity (gal)" value={newVehicle.fuelTankCapacityGallons} onChange={(e) => setNewVehicle({ ...newVehicle, fuelTankCapacityGallons: e.target.value })} />
                 <span />
               </div>
+              <label className="label" style={{ marginBottom: 0 }}>Registration expires</label>
+              <input type="date" value={newVehicle.registrationExpiresAt} onChange={(e) => setNewVehicle({ ...newVehicle, registrationExpiresAt: e.target.value })} />
+              <label className="label" style={{ marginBottom: 0 }}>Value tracker (optional)</label>
+              <div className="grid2">
+                <input type="number" min="0" step="0.01" placeholder="Acquisition cost ($)" value={newVehicle.acquisitionCost} onChange={(e) => setNewVehicle({ ...newVehicle, acquisitionCost: e.target.value })} />
+                <input type="date" title="Acquisition date" value={newVehicle.acquisitionDate} onChange={(e) => setNewVehicle({ ...newVehicle, acquisitionDate: e.target.value })} />
+              </div>
+              <div className="grid2">
+                <input type="number" min="0" max="99" step="0.5" placeholder="Depreciation %/yr" value={newVehicle.depreciationAnnualPct} onChange={(e) => setNewVehicle({ ...newVehicle, depreciationAnnualPct: e.target.value })} />
+                <input type="number" min="1" placeholder="Target months in fleet" value={newVehicle.targetFleetMonths} onChange={(e) => setNewVehicle({ ...newVehicle, targetFleetMonths: e.target.value })} />
+              </div>
+              <input type="number" min="1" placeholder="Target miles (rotation by mileage)" value={newVehicle.targetFleetMiles} onChange={(e) => setNewVehicle({ ...newVehicle, targetFleetMiles: e.target.value })} />
               <div className="grid2">
                 <select required value={newVehicle.vehicleTypeId} onChange={(e) => setNewVehicle({ ...newVehicle, vehicleTypeId: e.target.value })}>
                   <option value="">Vehicle type</option>
@@ -1233,6 +1288,18 @@ function VehiclesInner({ token, me, logout }) {
                 <input type="number" step="0.1" min="5" max="60" placeholder="Fuel tank capacity (gal)" value={editVehicleForm.fuelTankCapacityGallons} onChange={(e) => setEditVehicleForm({ ...editVehicleForm, fuelTankCapacityGallons: e.target.value })} />
                 <span />
               </div>
+              <label className="label" style={{ marginBottom: 0 }}>Registration expires</label>
+              <input type="date" value={editVehicleForm.registrationExpiresAt} onChange={(e) => setEditVehicleForm({ ...editVehicleForm, registrationExpiresAt: e.target.value })} />
+              <label className="label" style={{ marginBottom: 0 }}>Value tracker (optional)</label>
+              <div className="grid2">
+                <input type="number" min="0" step="0.01" placeholder="Acquisition cost ($)" value={editVehicleForm.acquisitionCost} onChange={(e) => setEditVehicleForm({ ...editVehicleForm, acquisitionCost: e.target.value })} />
+                <input type="date" title="Acquisition date" value={editVehicleForm.acquisitionDate} onChange={(e) => setEditVehicleForm({ ...editVehicleForm, acquisitionDate: e.target.value })} />
+              </div>
+              <div className="grid2">
+                <input type="number" min="0" max="99" step="0.5" placeholder="Depreciation %/yr" value={editVehicleForm.depreciationAnnualPct} onChange={(e) => setEditVehicleForm({ ...editVehicleForm, depreciationAnnualPct: e.target.value })} />
+                <input type="number" min="1" placeholder="Target months in fleet" value={editVehicleForm.targetFleetMonths} onChange={(e) => setEditVehicleForm({ ...editVehicleForm, targetFleetMonths: e.target.value })} />
+              </div>
+              <input type="number" min="1" placeholder="Target miles (rotation by mileage)" value={editVehicleForm.targetFleetMiles} onChange={(e) => setEditVehicleForm({ ...editVehicleForm, targetFleetMiles: e.target.value })} />
               <div className="grid2">
                 <select required value={editVehicleForm.vehicleTypeId} onChange={(e) => setEditVehicleForm({ ...editVehicleForm, vehicleTypeId: e.target.value })}>
                   <option value="">Vehicle type</option>

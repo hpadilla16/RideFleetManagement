@@ -738,6 +738,34 @@ export const settingsService = {
     return next;
   },
 
+  // Vehicle Profile pack (2026-06-10): per-tenant fleet-rotation rule.
+  // rule = 'TIME' (months in fleet vs Vehicle.targetFleetMonths) or
+  //        'MILEAGE' (Vehicle.mileage vs Vehicle.targetFleetMiles).
+  async getFleetRotationConfig(scope = {}) {
+    const row = await prisma.appSetting.findUnique({ where: { key: scopedKey('fleetRotationConfig', scope) } });
+    const fallback = { rule: 'TIME' };
+    if (!row?.value) return fallback;
+    try {
+      const parsed = JSON.parse(row.value);
+      const rule = String(parsed?.rule || 'TIME').toUpperCase();
+      return { rule: rule === 'MILEAGE' ? 'MILEAGE' : 'TIME' };
+    } catch {
+      return fallback;
+    }
+  },
+
+  async updateFleetRotationConfig(payload = {}, scope = {}) {
+    const rule = String(payload?.rule || 'TIME').toUpperCase();
+    const next = { rule: rule === 'MILEAGE' ? 'MILEAGE' : 'TIME' };
+    const key = scopedKey('fleetRotationConfig', scope);
+    await prisma.appSetting.upsert({
+      where: { key },
+      create: { key, value: JSON.stringify(next) },
+      update: { value: JSON.stringify(next) }
+    });
+    return next;
+  },
+
   async getPaymentGatewayConfig(scope = {}) {
     const defaults = defaultPaymentGatewayConfig();
     const row = await prisma.appSetting.findUnique({ where: { key: scopedKey('paymentGatewayConfig', scope) } });

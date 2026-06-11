@@ -3,6 +3,7 @@ import { prisma } from '../../lib/prisma.js';
 import { sendEmail } from '../../lib/mailer.js';
 import { settingsService } from '../settings/settings.service.js';
 import { isMigrationHoldType, isServiceHoldType } from '../vehicles/vehicle-blocks.js';
+import { rotationStatus } from '../vehicles/vehicle-value.js';
 import { parseLocationConfig } from '../../lib/location-config.js';
 import { startOfDayInTz } from '../../lib/date-utils.js';
 import { resolveTenantTimeZone } from '../../lib/tenant-tz.js';
@@ -329,6 +330,9 @@ export const reportsService = {
       overdueReservationCount,
       activeReservationsCount,
       stuckCheckoutsCount,
+      registrationsExpiringCount,
+      rotationVehicles,
+      fleetRotationCfg,
     ] = await Promise.all([
       prisma.reservation.findMany({
         where: reservationWhere,
@@ -396,7 +400,35 @@ export const reportsService = {
       // Phase 1.8 — checkout sessions abandoned or stalled. Returns 0
       // when the CheckoutSession table is empty (pre-Phase-1 deploy).
       prisma.checkoutSession.count({ where: stuckCheckoutsWhere }).catch(() => 0),
+      // Vehicle Profile pack (2026-06-10) — registrations expiring within 30
+      // days (or already expired). Replaces the Fee Advisories tile.
+      prisma.vehicle.count({
+        where: {
+          ...vehicleWhere,
+          registrationExpiresAt: { not: null, lte: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000) },
+        },
+      }).catch(() => 0),
+      // Rotation candidates: minimal fields, classified in JS (date math per
+      // row isn't expressible in a Prisma count). Fleet-sized — cheap.
+      prisma.vehicle.findMany({
+        where: {
+          ...vehicleWhere,
+          OR: [{ targetFleetMonths: { not: null } }, { targetFleetMiles: { not: null } }],
+        },
+        select: { mileage: true, acquisitionDate: true, targetFleetMonths: true, targetFleetMiles: true },
+      }).catch(() => []),
+      settingsService.getFleetRotationConfig(scope).catch(() => ({ rule: 'TIME' })),
     ]);
+
+    const readyToRotateCount = rotationVehicles.reduce((count, v) => (
+      rotationStatus({
+        rule: fleetRotationCfg?.rule || 'TIME',
+        acquisitionDate: v.acquisitionDate,
+        targetFleetMonths: v.targetFleetMonths,
+        mileage: v.mileage,
+        targetFleetMiles: v.targetFleetMiles,
+      }) === 'ready' ? count + 1 : count
+    ), 0);
 
     const reservationsByDayMap = new Map(buildDaySeries(start, end).map((day) => [day, 0]));
     for (const row of reservations) {
@@ -540,6 +572,12 @@ export const reportsService = {
         // OR stuck in a non-terminal step for > 4 hours. Surfaced on
         // the dashboard with click-through to the list.
         stuckCheckouts: stuckCheckoutsCount || 0,
+        // Vehicle Profile pack (2026-06-10): dashboard tiles that replace
+        // Fee Advisories + Stuck Checkouts on the Ops Hub (counts above stay
+        // for the reservations page filters).
+        registrationsExpiring30d: registrationsExpiringCount || 0,
+        readyToRotate: readyToRotateCount || 0,
+        fleetRotationRule: fleetRotationCfg?.rule || 'TIME',
         // 2026-05-28: vehicleIds derived from active reservations + blocks
         // exposed so the Vehicles page can compute its Available / On Rent
         // tiles without inheriting the Vehicle.status drift (every vehicle

@@ -327,6 +327,44 @@ vehiclesRouter.patch('/:id', async (req, res, next) => {
   }
 });
 
+// Vehicle Profile pack (2026-06-10) — inventory-photo history for the profile.
+// ?sessionId= picks an older session; defaults to the latest one with photos.
+vehiclesRouter.get('/:id/inventory-photos', async (req, res, next) => {
+  try {
+    const data = await vehiclesService.getInventoryPhotos(req.params.id, scopeFor(req), {
+      sessionId: req.query?.sessionId ? String(req.query.sessionId) : null
+    });
+    res.json(data);
+  } catch (e) {
+    if (/not found/i.test(String(e?.message || ''))) return res.status(404).json({ error: 'Vehicle not found' });
+    next(e);
+  }
+});
+
+// Registration document (image/PDF as data URL) — stored in Supabase Storage,
+// Vehicle.registrationDocumentUrl keeps "<bucket>:<path>"; GET signs for 1h.
+vehiclesRouter.post('/:id/registration-document', async (req, res, next) => {
+  try {
+    const body = assertPlainObject(req.body, 'body');
+    const result = await vehiclesService.saveRegistrationDocument(req.params.id, body.dataUrl, scopeFor(req));
+    res.json(result);
+  } catch (e) {
+    if (/not found/i.test(String(e?.message || ''))) return res.status(404).json({ error: 'Vehicle not found' });
+    if (/data URL|empty|exceeds|not enabled/i.test(String(e?.message || ''))) return res.status(400).json({ error: e.message });
+    next(e);
+  }
+});
+
+vehiclesRouter.get('/:id/registration-document', async (req, res, next) => {
+  try {
+    const result = await vehiclesService.getRegistrationDocumentUrl(req.params.id, scopeFor(req));
+    res.json(result);
+  } catch (e) {
+    if (/not found/i.test(String(e?.message || ''))) return res.status(404).json({ error: 'Vehicle not found' });
+    next(e);
+  }
+});
+
 // Manual odometer correction (2026-06-09). Agents adjust a vehicle's mileage
 // from its profile; the change is logged as a MANUAL entry in the mileage
 // history and mirrored onto Vehicle.mileage. Body: { mileage, note? }.

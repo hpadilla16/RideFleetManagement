@@ -1,5 +1,8 @@
+import { Prisma } from '@prisma/client';
 import { prisma } from '../../lib/prisma.js';
 import { normalizeVehicleBlockType } from './vehicle-blocks.js';
+import { materializeStorageRefs, isStorageEnabled } from '../rental-agreements/inspection-photos.js';
+import { uploadObject, getSignedUrl, safePath } from '../../lib/storage/supabase-storage.js';
 import { assertTenantVehicleCapacity } from '../../lib/tenant-plan-limits.js';
 import { buildVehicleOperationalSignalsMap } from './vehicle-intelligence.service.js';
 import { recordMileageEntry } from './mileage-history.service.js';
@@ -240,6 +243,13 @@ export const vehiclesService = {
         color: true,
         mileage: true,
         fuelTankCapacityGallons: true,
+        registrationExpiresAt: true,
+        registrationDocumentUrl: true,
+        acquisitionCost: true,
+        acquisitionDate: true,
+        depreciationAnnualPct: true,
+        targetFleetMonths: true,
+        targetFleetMiles: true,
         status: true,
         fleetMode: true,
         programCategory: true,
@@ -379,6 +389,12 @@ export const vehiclesService = {
         color: data.color ?? null,
         mileage: data.mileage ?? 0,
         fuelTankCapacityGallons: data.fuelTankCapacityGallons ?? null,
+        registrationExpiresAt: data.registrationExpiresAt ? new Date(data.registrationExpiresAt) : null,
+        acquisitionCost: data.acquisitionCost ?? null,
+        acquisitionDate: data.acquisitionDate ? new Date(data.acquisitionDate) : null,
+        depreciationAnnualPct: data.depreciationAnnualPct ?? null,
+        targetFleetMonths: data.targetFleetMonths ?? null,
+        targetFleetMiles: data.targetFleetMiles ?? null,
         status: data.status ?? 'AVAILABLE',
         fleetMode: data.fleetMode ?? 'RENTAL_ONLY',
         programCategory: data.programCategory ?? 'BOTH',
@@ -1009,5 +1025,106 @@ export const vehiclesService = {
     }
 
     return results;
+  },
+
+  // ──────────────────────────────────────────────────────────────────────────
+  // Vehicle Profile pack (2026-06-10) — inventory photos + registration doc.
+  // ──────────────────────────────────────────────────────────────────────────
+
+  /**
+   * Inventory-photo history for one vehicle. Lists the vehicle's InventoryItem
+   * rows that carry photos (one per inventory session) and returns the photo
+   * set of ONE session (latest by default). photosJson of the non-selected
+   * sessions is never loaded (it can be MBs of base64 — planner lesson).
+   */
+  async getInventoryPhotos(vehicleId, scope = {}, { sessionId = null } = {}) {
+    const vehicle = await prisma.vehicle.findFirst({
+      where: { id: vehicleId, ...(byTenantWhere(scope) || {}) },
+      select: { id: true }
+    });
+    if (!vehicle) throw new Error('Vehicle not found');
+
+    const items = await prisma.inventoryItem.findMany({
+      where: { vehicleId, NOT: { photosJson: { equals: Prisma.DbNull } } },
+      orderBy: { createdAt: 'desc' },
+      take: 24,
+      select: {
+        id: true,
+        sessionId: true,
+        createdAt: true,
+        confirmedAt: true,
+        session: { select: { startedAt: true, completedAt: true } }
+      }
+    });
+    const sessions = items.map((it) => ({
+      sessionId: it.sessionId,
+      itemId: it.id,
+      capturedAt: it.confirmedAt || it.session?.completedAt || it.session?.startedAt || it.createdAt
+    }));
+    if (!sessions.length) return { sessions: [], sessionId: null, photos: {} };
+
+    const chosen = (sessionId && sessions.find((s) => s.sessionId === sessionId)) || sessions[0];
+    const row = await prisma.inventoryItem.findUnique({
+      where: { id: chosen.itemId },
+      select: { photosJson: true }
+    });
+    const pj = row?.photosJson || null;
+    let photos = {};
+    if (pj && typeof pj === 'object') {
+      if (pj.storage && Array.isArray(pj.refs)) {
+        photos = await materializeStorageRefs(pj.refs, {
+          bucket: pj.bucket || process.env.SUPABASE_STORAGE_INVENTORY_BUCKET || 'inventory-photos'
+        });
+      } else if (pj.photos && typeof pj.photos === 'object') {
+        photos = pj.photos; // inline base64 fallback rows
+      }
+    }
+    return { sessions, sessionId: chosen.sessionId, photos };
+  },
+
+  /**
+   * Upload the registration document (image/PDF data URL) to Supabase Storage
+   * and stamp Vehicle.registrationDocumentUrl with "<bucket>:<path>". Read via
+   * getRegistrationDocumentUrl (signed, 1h). Requires storage enabled.
+   */
+  async saveRegistrationDocument(vehicleId, dataUrl, scope = {}) {
+    const vehicle = await prisma.vehicle.findFirst({
+      where: { id: vehicleId, ...(byTenantWhere(scope) || {}) },
+      select: { id: true, tenantId: true }
+    });
+    if (!vehicle) throw new Error('Vehicle not found');
+    if (!isStorageEnabled()) throw new Error('Document storage is not enabled');
+    const match = /^data:([\w/.+-]+);base64,(.+)$/s.exec(String(dataUrl || ''));
+    if (!match) throw new Error('registration document must be a base64 data URL');
+    const contentType = match[1];
+    const body = Buffer.from(match[2], 'base64');
+    if (!body.length) throw new Error('registration document is empty');
+    if (body.length > 10 * 1024 * 1024) throw new Error('registration document exceeds 10MB');
+    const ext = contentType.includes('pdf') ? 'pdf' : contentType.includes('png') ? 'png' : 'jpg';
+    const bucket = process.env.SUPABASE_STORAGE_INVENTORY_BUCKET || 'inventory-photos';
+    const path = safePath('vehicle-docs', vehicle.tenantId || 'global', vehicleId, `registration-${Date.now()}.${ext}`);
+    await uploadObject({ bucket, path, body, contentType, upsert: false });
+    await prisma.vehicle.update({
+      where: { id: vehicleId },
+      data: { registrationDocumentUrl: `${bucket}:${path}` }
+    });
+    return { stored: true };
+  },
+
+  /** Signed (1h) URL for the stored registration document, or null. */
+  async getRegistrationDocumentUrl(vehicleId, scope = {}) {
+    const vehicle = await prisma.vehicle.findFirst({
+      where: { id: vehicleId, ...(byTenantWhere(scope) || {}) },
+      select: { registrationDocumentUrl: true }
+    });
+    if (!vehicle) throw new Error('Vehicle not found');
+    const ref = String(vehicle.registrationDocumentUrl || '');
+    if (!ref) return { url: null };
+    const idx = ref.indexOf(':');
+    // Legacy/external absolute URLs pass through untouched.
+    if (ref.startsWith('http')) return { url: ref };
+    if (idx <= 0) return { url: null };
+    const url = await getSignedUrl({ bucket: ref.slice(0, idx), path: ref.slice(idx + 1), expiresIn: 3600 });
+    return { url };
   }
 };

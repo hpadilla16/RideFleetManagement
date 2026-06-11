@@ -146,6 +146,25 @@ settingsRouter.put('/reservation-options', requireRole('ADMIN'), async (req, res
   }
 });
 
+// Vehicle Profile pack (2026-06-10): fleet rotation rule (TIME | MILEAGE).
+settingsRouter.get('/fleet-rotation', async (_req, res, next) => {
+  try {
+    const cfg = await settingsService.getFleetRotationConfig(scopeFor(_req));
+    res.json(cfg);
+  } catch (e) {
+    next(e);
+  }
+});
+
+settingsRouter.put('/fleet-rotation', requireRole('ADMIN'), async (req, res, next) => {
+  try {
+    const cfg = await settingsService.updateFleetRotationConfig(req.body || {}, scopeFor(req));
+    res.json(cfg);
+  } catch (e) {
+    next(e);
+  }
+});
+
 // Long-term (monthly) billing — email templates + dunning/billing config.
 // Stored in appSetting key 'longTermEmailTemplates' (tenant-scoped).
 // Defaults + normalization live in modules/long-term/long-term-emails.js.

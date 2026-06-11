@@ -121,10 +121,47 @@ function VehicleProfileInner({ token, me, logout }) {
   const [deviceForm, setDeviceForm] = useState({ provider: 'ZUBIE', externalDeviceId: '', label: '', serialNumber: '' });
   const [eventForm, setEventForm] = useState({ eventType: 'PING', odometer: '', fuelPct: '', speedMph: '', latitude: '', longitude: '', engineOn: false });
   const [mileageForm, setMileageForm] = useState({ open: false, mileage: '', note: '', saving: false });
+  // Vehicle Profile pack (2026-06-10): inventory-photo history + registration
+  // document + tenant rotation rule for the Value tile.
+  const [invPhotos, setInvPhotos] = useState({ sessions: [], sessionId: null, photos: {}, loading: true });
+  const [regDoc, setRegDoc] = useState({ url: null, uploading: false });
+  const [rotationRule, setRotationRule] = useState('TIME');
 
   const loadVehicle = async () => {
     const out = await api(`/api/vehicles/${id}`, {}, token);
     setRow(out);
+  };
+
+  const loadInventoryPhotos = async (sessionId = null) => {
+    setInvPhotos((c) => ({ ...c, loading: true }));
+    try {
+      const q = sessionId ? `?sessionId=${encodeURIComponent(sessionId)}` : '';
+      const out = await api(`/api/vehicles/${id}/inventory-photos${q}`, {}, token);
+      setInvPhotos({ sessions: out?.sessions || [], sessionId: out?.sessionId || null, photos: out?.photos || {}, loading: false });
+    } catch {
+      setInvPhotos({ sessions: [], sessionId: null, photos: {}, loading: false });
+    }
+  };
+
+  const uploadRegistrationDoc = (file) => {
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = async () => {
+      try {
+        setRegDoc((c) => ({ ...c, uploading: true }));
+        await api(`/api/vehicles/${id}/registration-document`, {
+          method: 'POST',
+          body: JSON.stringify({ dataUrl: reader.result })
+        }, token);
+        const out = await api(`/api/vehicles/${id}/registration-document`, {}, token).catch(() => null);
+        setRegDoc({ url: out?.url || null, uploading: false });
+        setMsg('Registration document uploaded');
+      } catch (e2) {
+        setRegDoc((c) => ({ ...c, uploading: false }));
+        setMsg(e2?.message || 'Upload failed');
+      }
+    };
+    reader.readAsDataURL(file);
   };
 
   useEffect(() => {
@@ -132,6 +169,21 @@ function VehicleProfileInner({ token, me, logout }) {
     loadVehicle()
       .catch((error) => setMsg(error.message));
   }, [id, token]);
+
+  useEffect(() => {
+    if (!id) return;
+    loadInventoryPhotos();
+    api('/api/settings/fleet-rotation', {}, token)
+      .then((out) => setRotationRule(out?.rule === 'MILEAGE' ? 'MILEAGE' : 'TIME'))
+      .catch(() => {});
+  }, [id, token]);
+
+  useEffect(() => {
+    if (!id || !row?.registrationDocumentUrl) return;
+    api(`/api/vehicles/${id}/registration-document`, {}, token)
+      .then((out) => setRegDoc((c) => ({ ...c, url: out?.url || null })))
+      .catch(() => {});
+  }, [id, token, row?.registrationDocumentUrl]);
 
   useEffect(() => {
     api('/api/vehicles/telematics/providers', {}, token)
@@ -453,6 +505,54 @@ function VehicleProfileInner({ token, me, logout }) {
                     </button>
                   </div>
                   <div className="info-tile"><span className="label">Color</span><strong>{row.color || '-'}</strong></div>
+                  <div className="info-tile">
+                    <span className="label">Registration</span>
+                    {(() => {
+                      if (!row.registrationExpiresAt) return <strong>Not set</strong>;
+                      const exp = new Date(row.registrationExpiresAt);
+                      const days = Math.ceil((exp.getTime() - Date.now()) / 86400000);
+                      const text = exp.toLocaleDateString();
+                      if (days < 0) return <><strong style={{ color: '#DC2626' }}>{text}</strong><span className="ui-muted">Expired {Math.abs(days)} day{Math.abs(days) === 1 ? '' : 's'} ago</span></>;
+                      if (days <= 30) return <><strong style={{ color: '#D97706' }}>{text}</strong><span className="ui-muted">Expires in {days} day{days === 1 ? '' : 's'}</span></>;
+                      return <><strong>{text}</strong><span className="ui-muted">{days} days left</span></>;
+                    })()}
+                    <span style={{ display: 'flex', gap: 8, marginTop: 6, alignItems: 'center' }}>
+                      {regDoc.url ? <a href={regDoc.url} target="_blank" rel="noreferrer" className="btn-ghost btn-sm">View document</a> : null}
+                      <label className="btn-ghost btn-sm" style={{ cursor: 'pointer', marginBottom: 0 }}>
+                        {regDoc.uploading ? 'Uploading…' : (regDoc.url ? 'Replace' : 'Upload document')}
+                        <input type="file" accept="image/*,application/pdf" style={{ display: 'none' }} disabled={regDoc.uploading} onChange={(e) => { uploadRegistrationDoc(e.target.files?.[0]); e.target.value = ''; }} />
+                      </label>
+                    </span>
+                  </div>
+                  <div className="info-tile">
+                    <span className="label">Value</span>
+                    {(() => {
+                      const cost = Number(row.acquisitionCost || 0);
+                      const pct = row.depreciationAnnualPct == null ? null : Number(row.depreciationAnnualPct);
+                      if (!cost || pct == null || !row.acquisitionDate) {
+                        return <><strong>Not set</strong><span className="ui-muted">Set cost, % and date in Edit vehicle</span></>;
+                      }
+                      const months = Math.max(0, (Date.now() - new Date(row.acquisitionDate).getTime()) / (86400000 * 30.4375));
+                      const value = cost * Math.pow(1 - pct / 100, months / 12);
+                      const ready = rotationRule === 'MILEAGE'
+                        ? (row.targetFleetMiles ? (row.mileage ?? 0) >= row.targetFleetMiles : null)
+                        : (row.targetFleetMonths ? months >= row.targetFleetMonths : null);
+                      const target = rotationRule === 'MILEAGE'
+                        ? (row.targetFleetMiles ? `${(row.mileage ?? 0).toLocaleString()} / ${Number(row.targetFleetMiles).toLocaleString()} mi` : null)
+                        : (row.targetFleetMonths ? `${Math.round(months)} / ${row.targetFleetMonths} months in fleet` : null);
+                      return (
+                        <>
+                          <strong>${Math.round(value).toLocaleString()}</strong>
+                          <span className="ui-muted">−{Math.round((1 - value / cost) * 100)}% of ${Math.round(cost).toLocaleString()} · {pct}%/yr</span>
+                          {target ? (
+                            <span className="ui-muted" style={ready ? { color: '#D97706', fontWeight: 600 } : undefined}>
+                              {target}{ready ? ' · READY TO ROTATE' : ''}
+                            </span>
+                          ) : null}
+                        </>
+                      );
+                    })()}
+                  </div>
                 </div>
                 {currentBlock ? (
                   <div className="surface-note">
@@ -460,6 +560,48 @@ function VehicleProfileInner({ token, me, logout }) {
                     {currentBlock.reason ? ` | ${currentBlock.reason}` : ''}
                   </div>
                 ) : null}
+              </section>
+
+              <section className="glass card-lg section-card">
+                <div className="row-between">
+                  <h2>Inventory Photos</h2>
+                  {invPhotos.sessions.length > 1 ? (
+                    <select
+                      value={invPhotos.sessionId || ''}
+                      onChange={(e) => loadInventoryPhotos(e.target.value)}
+                      style={{ maxWidth: 240 }}
+                    >
+                      {invPhotos.sessions.map((s, idx) => (
+                        <option key={s.sessionId} value={s.sessionId}>
+                          {new Date(s.capturedAt).toLocaleDateString()}{idx === 0 ? ' (latest)' : ''}
+                        </option>
+                      ))}
+                    </select>
+                  ) : (
+                    <span className="status-chip neutral">{invPhotos.sessions.length} session{invPhotos.sessions.length === 1 ? '' : 's'}</span>
+                  )}
+                </div>
+                <p className="ui-muted" style={{ marginTop: 0 }}>
+                  Photos captured during fleet inventories (Inventory Helper). Separate from rental check-out/check-in inspections.
+                </p>
+                {invPhotos.loading ? (
+                  <div className="surface-note">Loading inventory photos…</div>
+                ) : Object.keys(invPhotos.photos).length ? (
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(140px, 1fr))', gap: 10 }}>
+                    {Object.entries(invPhotos.photos).map(([key, url]) => {
+                      const first = Array.isArray(url) ? url[0] : url;
+                      if (!first || typeof first !== 'string') return null;
+                      return (
+                        <a key={key} href={first} target="_blank" rel="noreferrer" style={{ display: 'block' }}>
+                          <img src={first} alt={key} style={{ width: '100%', aspectRatio: '4 / 3', objectFit: 'cover', borderRadius: 8 }} />
+                          <span className="ui-muted" style={{ fontSize: 12, textTransform: 'capitalize' }}>{key.replace(/_/g, ' ')}</span>
+                        </a>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  <div className="surface-note">No inventory photos for this vehicle yet — they appear after its first Inventory Helper session.</div>
+                )}
               </section>
 
               <section className="glass card-lg section-card">

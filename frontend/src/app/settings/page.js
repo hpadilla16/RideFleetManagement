@@ -119,6 +119,14 @@ function SettingsInner({ token, me, logout }) {
   const [emailTemplates, setEmailTemplates] = useState(DEFAULT_EMAIL_TEMPLATES);
   const [reviewEmailConfig, setReviewEmailConfig] = useState(DEFAULT_REVIEW_EMAIL_CONFIG);
   const [reservationOptions, setReservationOptions] = useState({ autoAssignVehicleFromType: false, requireFranchiseSelection: false, tenantTimeZone: 'America/Puerto_Rico' });
+  // Vehicle Profile pack (2026-06-10): tenant rule for "ready to rotate".
+  const [fleetRotationRule, setFleetRotationRule] = useState('TIME');
+  useEffect(() => {
+    api(scopedSettingsPath('/api/settings/fleet-rotation'), {}, token)
+      .then((out) => setFleetRotationRule(out?.rule === 'MILEAGE' ? 'MILEAGE' : 'TIME'))
+      .catch(() => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [token]);
   const [paymentGatewayConfig, setPaymentGatewayConfig] = useState(DEFAULT_PAYMENT_GATEWAY_CONFIG);
   const [paymentGatewayHealth, setPaymentGatewayHealth] = useState(null);
   const [plannerCopilotConfig, setPlannerCopilotConfig] = useState(DEFAULT_PLANNER_COPILOT_CONFIG);
@@ -2383,6 +2391,34 @@ function SettingsInner({ token, me, logout }) {
               </label>
               <div style={{ marginTop: 10 }}>
                 <button onClick={saveReservationOptions}>Save Reservation Options</button>
+              </div>
+            </div>
+
+            <div className="glass card" style={{ padding: 12 }}>
+              <h3 style={{ marginBottom: 8 }}>Fleet Rotation Rule</h3>
+              <div className="form-grid-2">
+                <div className="stack">
+                  <label className="label">When is a vehicle "ready to rotate"?</label>
+                  <select
+                    value={fleetRotationRule}
+                    onChange={async (e) => {
+                      const rule = e.target.value;
+                      setFleetRotationRule(rule);
+                      try {
+                        await api(scopedSettingsPath('/api/settings/fleet-rotation'), { method: 'PUT', body: JSON.stringify({ rule }) }, token);
+                        setMsg('Fleet rotation rule saved');
+                      } catch (err) {
+                        setMsg(err?.message || 'Failed to save rotation rule');
+                      }
+                    }}
+                  >
+                    <option value="TIME">Time in fleet (vs target months per vehicle)</option>
+                    <option value="MILEAGE">Mileage (vs target miles per vehicle)</option>
+                  </select>
+                </div>
+                <div className="surface-note">
+                  Drives the "Ready to Rotate" dashboard tile and the /vehicles?rotation=ready batch. Per-vehicle targets (months / miles) are set in each vehicle's Edit form.
+                </div>
               </div>
             </div>
           </div>

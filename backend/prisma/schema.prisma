@@ -560,6 +560,17 @@ model Vehicle {
   // FUEL_REFILL fee: gallons = (fuelOut - fuelIn, quantized to 1/8) × capacity.
   // Nullable — resolveTankCapacity() falls back to 15 gal (+ warn) when unset.
   fuelTankCapacityGallons Decimal?         @db.Decimal(4, 1)
+  // Vehicle Profile pack (2026-06-10, plan doc/vehicle-profile-pack-plan):
+  // registration tracking + acquisition/value/rotation. All informational —
+  // none of these feed billing. currentValue is COMPUTED (declining balance),
+  // never stored. Rotation rule (TIME|MILEAGE) lives in AppSetting per tenant.
+  registrationExpiresAt   DateTime?
+  registrationDocumentUrl String?
+  acquisitionCost         Decimal?         @db.Decimal(12, 2)
+  acquisitionDate         DateTime?
+  depreciationAnnualPct   Decimal?         @db.Decimal(5, 2)
+  targetFleetMonths       Int?
+  targetFleetMiles        Int?
   status            VehicleStatus          @default(AVAILABLE)
   fleetMode         VehicleFleetMode       @default(RENTAL_ONLY)
   // Program partition — see VehicleProgramCategory enum docs.
