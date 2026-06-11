@@ -409,6 +409,13 @@ export const vehiclesService = {
     if (!current) throw new Error('Vehicle not found');
     const data = { ...(patch || {}) };
     if (!scope?.allowCrossTenant) delete data.tenantId;
+    // 2026-06-10 hotfix: the Edit Vehicle form sends date-only strings
+    // ("2026-07-08") for the Profile-pack date columns; Prisma requires a
+    // Date/full ISO and threw P2007 → PATCH 500. Normalize here (null/empty
+    // clears the column; create() already did this).
+    for (const key of ['registrationExpiresAt', 'acquisitionDate']) {
+      if (key in data) data[key] = data[key] ? new Date(data[key]) : null;
+    }
     return prisma.vehicle.update({ where: { id }, data });
   },
 

@@ -76,7 +76,18 @@ const REPORT_REGISTRY = [
     // channel, asking price) need to live on Vehicle profile first
     // before the report can be meaningful. Until then we'd be guessing
     // off generic mileage/age thresholds.
+    // 2026-06-10: those inputs now EXIST (Vehicle Profile pack, beta.157) and
+    // the new 'fleet-value' report uses them — this one stays parked until we
+    // decide whether to fold it in or retire it.
     status: 'COMING_SOON',
+  },
+  {
+    slug: 'fleet-value',
+    title: 'Fleet Value & Rotation',
+    category: 'FLEET',
+    icon: 'coin',
+    description: 'Invested vs current value · depreciation · sale due',
+    status: 'AVAILABLE',
   },
   {
     slug: 'toll-per-vehicle',

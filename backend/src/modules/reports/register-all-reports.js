@@ -19,6 +19,7 @@ import './availability.report.js';
 import './fleet-status.report.js';
 import './utilization.report.js';
 import './upcoming-vehicle-sales.report.js';
+import './fleet-value.report.js';
 import './toll-per-vehicle.report.js';
 import './toll-per-location.report.js';
 // 2026-05-26: commission.report.js (slug 'commission' / "Commission Payouts")

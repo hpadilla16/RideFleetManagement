@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import JSZip from 'jszip';
 import QRCode from 'qrcode';
@@ -553,6 +553,20 @@ function VehiclesInner({ token, me, logout }) {
       setMsg(e2.message);
     }
   };
+
+  // Deep-link from the vehicle profile (2026-06-10): /vehicles?edit=<id>
+  // opens the Edit Vehicle modal directly so agents don't have to find the
+  // unit in the list again. Runs once per id after the list loads.
+  const editDeepLinkRef = useRef('');
+  useEffect(() => {
+    const editId = String(searchParams?.get('edit') || '');
+    if (!editId || editDeepLinkRef.current === editId || !vehicles.length) return;
+    const target = vehicles.find((v) => v.id === editId);
+    if (!target) return;
+    editDeepLinkRef.current = editId;
+    openEditVehicle(target);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [vehicles, searchParams]);
 
   const openEditVehicle = (vehicle) => {
     setSelected(vehicle);

@@ -126,6 +126,7 @@ function VehicleProfileInner({ token, me, logout }) {
   const [invPhotos, setInvPhotos] = useState({ sessions: [], sessionId: null, photos: {}, loading: true });
   const [regDoc, setRegDoc] = useState({ url: null, uploading: false });
   const [rotationRule, setRotationRule] = useState('TIME');
+  const regFileInputRef = useRef(null);
 
   const loadVehicle = async () => {
     const out = await api(`/api/vehicles/${id}`, {}, token);
@@ -476,7 +477,12 @@ function VehicleProfileInner({ token, me, logout }) {
               <section className="glass card-lg section-card">
                 <div className="row-between">
                   <h2>Vehicle Details</h2>
-                  <span className="status-chip neutral">{row.vehicleType?.name || row.vehicleType?.code || 'No type'}</span>
+                  <span style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                    <span className="status-chip neutral">{row.vehicleType?.name || row.vehicleType?.code || 'No type'}</span>
+                    <button type="button" className="btn-sm" onClick={() => router.push(`/vehicles?edit=${row.id}`)}>
+                      Edit vehicle
+                    </button>
+                  </span>
                 </div>
                 <div className="app-card-grid compact">
                   <div className="info-tile"><span className="label">Unit ID</span><strong>{row.internalNumber || '-'}</strong></div>
@@ -516,12 +522,12 @@ function VehicleProfileInner({ token, me, logout }) {
                       if (days <= 30) return <><strong style={{ color: '#D97706' }}>{text}</strong><span className="ui-muted">Expires in {days} day{days === 1 ? '' : 's'}</span></>;
                       return <><strong>{text}</strong><span className="ui-muted">{days} days left</span></>;
                     })()}
-                    <span style={{ display: 'flex', gap: 8, marginTop: 6, alignItems: 'center' }}>
+                    <span style={{ display: 'flex', gap: 8, marginTop: 6, alignItems: 'center', flexWrap: 'wrap' }}>
                       {regDoc.url ? <a href={regDoc.url} target="_blank" rel="noreferrer" className="btn-ghost btn-sm">View document</a> : null}
-                      <label className="btn-ghost btn-sm" style={{ cursor: 'pointer', marginBottom: 0 }}>
-                        {regDoc.uploading ? 'Uploading…' : (regDoc.url ? 'Replace' : 'Upload document')}
-                        <input type="file" accept="image/*,application/pdf" style={{ display: 'none' }} disabled={regDoc.uploading} onChange={(e) => { uploadRegistrationDoc(e.target.files?.[0]); e.target.value = ''; }} />
-                      </label>
+                      <button type="button" className="btn-sm" disabled={regDoc.uploading} onClick={() => regFileInputRef.current?.click()}>
+                        {regDoc.uploading ? 'Uploading…' : (regDoc.url ? 'Replace document' : 'Upload document')}
+                      </button>
+                      <input ref={regFileInputRef} type="file" accept="image/*,application/pdf" style={{ display: 'none' }} onChange={(e) => { uploadRegistrationDoc(e.target.files?.[0]); e.target.value = ''; }} />
                     </span>
                   </div>
                   <div className="info-tile">
