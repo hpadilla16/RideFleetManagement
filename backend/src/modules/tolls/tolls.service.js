@@ -1447,6 +1447,13 @@ function getAutoSyncIntervalMinutes() {
   return Number.isFinite(raw) && raw > 0 ? raw : DEFAULT_AUTO_SYNC_INTERVAL_MINUTES;
 }
 
+// SunPass runs on its OWN cadence, independent of AutoExpreso (Florida tolls post
+// daily-ish, no need for 15-min polling). Default 12h.
+function getSunPassSyncIntervalMinutes() {
+  const raw = Number(process.env.TOLLS_SUNPASS_SYNC_INTERVAL_MINUTES || 720);
+  return Number.isFinite(raw) && raw > 0 ? raw : 720;
+}
+
 function getAutoSyncStatus(providerAccount, latestAutoSyncRun = null, pendingReviewCount = 0) {
   const enabled = String(process.env.TOLLS_AUTO_SYNC_ENABLED || 'true').toLowerCase() !== 'false';
   const intervalMinutes = getAutoSyncIntervalMinutes();
@@ -1914,16 +1921,22 @@ export const tollsService = {
     };
   },
 
-  async runLiveSync(scope = {}, actorUserId = null) {
+  async runLiveSync(scope = {}, actorUserId = null, options = {}) {
     await ensureTenantAllowsTolls(scope);
     if (!scope?.tenantId) throw new Error('tenantId is required for toll provider setup');
-    const syncLockKey = String(scope.tenantId);
+    // Provider can be pinned by the caller (the decoupled per-provider sweep passes it
+    // explicitly) so a tenant with BOTH a SunPass and an AutoExpreso account syncs the
+    // intended one — otherwise fall back to the tenant's active provider.
+    const provider = options.provider
+      ? String(options.provider).toUpperCase()
+      : await resolveActiveProvider(scope.tenantId);
+    // Lock per (tenant, provider) so SunPass and AutoExpreso never block one another.
+    const syncLockKey = `${scope.tenantId}:${provider}`;
     if (tollSyncLocks.has(syncLockKey)) {
       throw new Error('Toll sync already running for this tenant');
     }
 
     tollSyncLocks.add(syncLockKey);
-    const provider = await resolveActiveProvider(scope.tenantId);
     const row = await prisma.tollProviderAccount.findFirst({
       where: {
         tenantId: scope.tenantId,
@@ -2186,10 +2199,25 @@ export const tollsService = {
     };
   },
 
+  // AutoExpreso (PR) sweep — kept as a thin wrapper for backward-compat. The worker
+  // calls this on its own timer.
   async runAutomaticSyncSweep() {
+    return this._runSyncSweepForProvider('AUTOEXPRESO', getAutoSyncIntervalMinutes());
+  },
+
+  // SunPass (FL) sweep — runs on a SEPARATE worker timer with its OWN interval gate, so
+  // SunPass and AutoExpreso never share a cycle: a slow/failed run of one cannot delay
+  // or block the other (they only share the capped Chromium singleton at the page level).
+  async runSunPassSyncSweep() {
+    return this._runSyncSweepForProvider('SUNPASS', getSunPassSyncIntervalMinutes());
+  },
+
+  // Provider-parametric sweep core. Iterates every ACTIVE TollProviderAccount of the
+  // given provider whose tenant has tolls enabled, gated by per-account lastSyncAt.
+  async _runSyncSweepForProvider(provider, intervalMinutes) {
     const providerAccounts = await prisma.tollProviderAccount.findMany({
       where: {
-        provider: 'AUTOEXPRESO',
+        provider,
         isActive: true,
         tenant: {
           tollsEnabled: true
@@ -2206,7 +2234,6 @@ export const tollsService = {
       orderBy: [{ updatedAt: 'asc' }]
     });
 
-    const intervalMinutes = getAutoSyncIntervalMinutes();
     const now = Date.now();
     const results = [];
 
@@ -2225,7 +2252,7 @@ export const tollsService = {
       }
 
       try {
-        const liveSync = await this.runLiveSync({ tenantId }, null);
+        const liveSync = await this.runLiveSync({ tenantId }, null, { provider });
         const autoMatch = await this.autoMatchPendingTransactions({ tenantId }, null);
         const importedCount = Number(liveSync?.createdCount || 0);
         const autoMatchedCount = Number(autoMatch?.autoConfirmed || 0);
@@ -2261,7 +2288,7 @@ export const tollsService = {
         }
 
         const providerAccount = await prisma.tollProviderAccount.findFirst({
-          where: { tenantId, isActive: true },
+          where: { tenantId, provider, isActive: true },
           orderBy: [{ isActive: 'desc' }, { updatedAt: 'desc' }]
         });
         if (providerAccount) {
