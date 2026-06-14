@@ -2747,7 +2747,11 @@ model Citation {
   plateRaw          String?
   plateNormalized   String?
   plateState        String?
-  issuedAt          DateTime
+  // Optional (2026-06-14): some sources (e.g. CPC list view) expose the citation
+  // without a date — those bind to the VEHICLE by plate (NEEDS_REVIEW) and the
+  // date is enriched later (detail fetch). Reservation matching needs issuedAt;
+  // when null it simply stays vehicle-only.
+  issuedAt          DateTime?
   amount            Decimal                @db.Decimal(10, 2)
   fee               Decimal                @default(0) @db.Decimal(10, 2)
   dueAt             DateTime?
