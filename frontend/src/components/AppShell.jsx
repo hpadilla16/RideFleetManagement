@@ -24,6 +24,7 @@ const NAV_ITEMS = [
   { href: '/issues', labelKey: 'nav.issueCenter', moduleKey: 'issueCenter' },
   { href: '/loaner', labelKey: 'nav.loaner', feature: 'dealershipLoaner', moduleKey: 'loaner' },
   { href: '/tolls', labelKey: 'nav.tolls', moduleKey: 'tolls' },
+  { href: '/citations', labelKey: 'nav.citations', adminOnly: true },
   { href: '/market', labelKey: 'nav.marketIntelligence', adminOnly: true, moduleKey: 'marketIntelligence' },
   { href: '/suggestions', labelKey: 'nav.pricingSuggestions', adminOnly: true, moduleKey: 'marketIntelligence' },
   { href: '/knowledge-base', labelKey: 'nav.knowledgeBase' },
