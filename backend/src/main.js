@@ -61,7 +61,7 @@ import { loanerAgreementRouter, loanerSignaturePublicRouter, loanerPortalPublicR
 import { longTermRouter } from './modules/long-term/long-term.routes.js';
 import { incidentReportRouter } from './modules/incident-report/incident-report.routes.js';
 import { issueCenterRouter, publicIssueCenterRouter } from './modules/issue-center/issue-center.routes.js';
-import { tollsRouter } from './modules/tolls/tolls.routes.js';
+import { tollsRouter, tollsInternalRouter } from './modules/tolls/tolls.routes.js';
 import { plannerRouter } from './modules/planner/planner.routes.js';
 import { paymentGatewayRouter } from './modules/payment-gateway/payment-gateway.routes.js';
 // Phase 0 (2026-06-09): the toll auto-sync scheduler MOVED to the worker
@@ -195,6 +195,9 @@ app.use('/api/market-onboarding', requireAuth, tenantRateLimit, requireModuleAcc
 app.use('/api/internal/pricing-engine', pricingEngineInternalRouter);
 // Internal endpoint hit by the citations scraper droplet to push ingested rows.
 app.use('/api/internal/citations', citationsInternalRouter);
+// Internal endpoint for the tolls scraper droplet (SunPass/E-PASS, etc.) — keeps
+// heavy headless scraping OFF the worker so connectors don't block each other.
+app.use('/api/internal/tolls', tollsInternalRouter);
 app.use('/api/rental-agreements', requireAuth, tenantRateLimit, requireModuleAccess('reservations'), rentalAgreementsRouter);
 // Dejavoo Spin checkout redesign (Phase 1.2). The auth'd router is for
 // the agent's wizard; the public router below is for the QR token

@@ -5,6 +5,42 @@ import { scopeFor } from '../../lib/tenant-scope.js';
 import { tollsService } from './tolls.service.js';
 
 export const tollsRouter = Router();
+export const tollsInternalRouter = Router();
+
+// Internal ingest (droplet scraper push, shared secret). Decouples heavy headless
+// scraping (SunPass/E-PASS, etc.) from the in-worker AutoExpreso sweep: the droplet
+// logs in + scrapes + normalizes, then PUSHES raw rows here. Reuses the SAME import
+// pipeline as the staff manual-import (dedup by externalId + plate/tag/sello+timestamp
+// match + assignment + reservation charge sync). One connector never blocks another.
+function requireInternalToken(req, res, next) {
+  const expected = process.env.BACKEND_INTERNAL_TOKEN;
+  if (!expected) return res.status(503).json({ error: 'Internal endpoints disabled (no BACKEND_INTERNAL_TOKEN)' });
+  const got = (req.headers.authorization || '').replace(/^Bearer\s+/i, '');
+  if (got !== expected) return res.status(401).json({ error: 'Invalid internal token' });
+  next();
+}
+
+// Body: { tenantId, rows:[{transactionAt, plate?, tag?, sello?, amount, location?,
+//   lane?, direction?, externalId, transactionTimeRaw?}], sourceType?, importMeta? }
+// tenant must have tollsEnabled (enforced inside createManualTransactions).
+tollsInternalRouter.post('/ingest', requireInternalToken, async (req, res, next) => {
+  try {
+    const { tenantId, rows, sourceType, importMeta } = req.body || {};
+    if (!tenantId) return res.status(400).json({ error: 'tenantId required' });
+    const out = await tollsService.createManualTransactions(
+      Array.isArray(rows) ? rows : [],
+      { tenantId },
+      null,
+      { sourceType: sourceType || 'SUNPASS_SYNC', importMeta: importMeta || null }
+    );
+    res.status(201).json(out);
+  } catch (error) {
+    if (/required|invalid|amount|enabled|rows/i.test(String(error?.message || ''))) {
+      return res.status(400).json({ error: error.message });
+    }
+    next(error);
+  }
+});
 
 async function ensureTollsEnabled(req, res, next) {
   try {
