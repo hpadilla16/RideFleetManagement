@@ -10,6 +10,7 @@
 //
 //   Internal (droplet scraper push, shared secret):
 //     POST   /api/internal/citations/ingest
+//     GET    /api/internal/citations/plates?tenantId=   (active plate list)
 //
 // Billing/charge posting is NOT here — that is Phase E (money-gated).
 
@@ -85,6 +86,32 @@ function requireInternalToken(req, res, next) {
   if (got !== expected) return res.status(401).json({ error: 'Invalid internal token' });
   next();
 }
+
+// Active plate list for the droplet adapters — keeps the scraper's search set in
+// sync with the live fleet (no hand-seeded file). Two modes:
+//   ?source=CITATION_PROCESSING_CENTER  → ALL tenants that have an active source
+//        account for that source (plug-and-play across tenants/locations). Returns
+//        { source, tenantCount, tenants:[{tenantId,count,plates:[{plate,state}]}] }.
+//   ?tenantId=<id>                      → single tenant (pilot / manual).
+//        Returns { tenantId, count, plates:[{plate,state}] }.
+// State per plate comes from the vehicle's home location (not hardcoded).
+citationsInternalRouter.get('/plates', requireInternalToken, async (req, res) => {
+  try {
+    const source = String(req.query?.source || '').trim();
+    const tenantId = String(req.query?.tenantId || '').trim();
+    if (source) {
+      return res.json(await citationsService.listPlatesForSource(source));
+    }
+    if (tenantId) {
+      // Single-tenant path respects the settings toggle (citationsEnabled).
+      const plates = await citationsService.listActivePlates(tenantId, { requireEnabled: true });
+      return res.json({ tenantId, count: plates.length, plates });
+    }
+    return res.status(400).json({ error: 'source or tenantId required' });
+  } catch (err) {
+    handle(err, res);
+  }
+});
 
 // Body: { tenantId, source, sourceAccountId?, sourceType?, rows: [...] }
 citationsInternalRouter.post('/ingest', requireInternalToken, async (req, res) => {

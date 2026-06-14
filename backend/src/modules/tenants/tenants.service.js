@@ -100,6 +100,7 @@ export const tenantsService = {
           carSharingEnabled: !!data.carSharingEnabled,
           dealershipLoanerEnabled: !!data.dealershipLoanerEnabled,
           tollsEnabled: !!data.tollsEnabled,
+          citationsEnabled: !!data.citationsEnabled,
           marketIntelligenceEnabled: !!data.marketIntelligenceEnabled,
           platformFeeEnabled: data.platformFeeEnabled !== false,
           platformFeePct: pct,
@@ -121,6 +122,7 @@ export const tenantsService = {
     if (patch.carSharingEnabled !== undefined) data.carSharingEnabled = !!patch.carSharingEnabled;
     if (patch.dealershipLoanerEnabled !== undefined) data.dealershipLoanerEnabled = !!patch.dealershipLoanerEnabled;
     if (patch.tollsEnabled !== undefined) data.tollsEnabled = !!patch.tollsEnabled;
+    if (patch.citationsEnabled !== undefined) data.citationsEnabled = !!patch.citationsEnabled;
     if (patch.marketIntelligenceEnabled !== undefined) data.marketIntelligenceEnabled = !!patch.marketIntelligenceEnabled;
     if (patch.platformFeeEnabled !== undefined) data.platformFeeEnabled = !!patch.platformFeeEnabled;
     if (patch.platformFeePct !== undefined) {

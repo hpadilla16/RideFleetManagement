@@ -5,7 +5,7 @@ import { AuthGate } from '../../components/AuthGate';
 import { AppShell } from '../../components/AppShell';
 import { api, TOKEN_KEY, USER_KEY } from '../../lib/client';
 
-const EMPTY_TENANT = { name: '', slug: '', status: 'ACTIVE', plan: 'BETA', carSharingEnabled: false, dealershipLoanerEnabled: false, tollsEnabled: false, marketIntelligenceEnabled: false };
+const EMPTY_TENANT = { name: '', slug: '', status: 'ACTIVE', plan: 'BETA', carSharingEnabled: false, dealershipLoanerEnabled: false, tollsEnabled: false, citationsEnabled: false, marketIntelligenceEnabled: false };
 const EMPTY_ADMIN = { email: '', fullName: '', password: 'TempPass123!' };
 const EMPTY_PLAN = {
   code: '',
@@ -132,6 +132,7 @@ function Inner({ token, me, logout }) {
           carSharingEnabled: !!row.carSharingEnabled,
           dealershipLoanerEnabled: !!row.dealershipLoanerEnabled,
           tollsEnabled: !!row.tollsEnabled,
+          citationsEnabled: !!row.citationsEnabled,
           marketIntelligenceEnabled: !!row.marketIntelligenceEnabled
         })
       }, token);
@@ -315,6 +316,7 @@ function Inner({ token, me, logout }) {
             <label className="label"><input type="checkbox" checked={tenantForm.carSharingEnabled} onChange={(e) => setTenantForm((f) => ({ ...f, carSharingEnabled: e.target.checked }))} /> Car Sharing Enabled</label>
             <label className="label"><input type="checkbox" checked={tenantForm.dealershipLoanerEnabled} onChange={(e) => setTenantForm((f) => ({ ...f, dealershipLoanerEnabled: e.target.checked }))} /> Dealership Loaner Enabled</label>
             <label className="label"><input type="checkbox" checked={tenantForm.tollsEnabled} onChange={(e) => setTenantForm((f) => ({ ...f, tollsEnabled: e.target.checked }))} /> Tolls Enabled</label>
+            <label className="label"><input type="checkbox" checked={tenantForm.citationsEnabled} onChange={(e) => setTenantForm((f) => ({ ...f, citationsEnabled: e.target.checked }))} /> Citations Enabled</label>
             <label className="label"><input type="checkbox" checked={tenantForm.marketIntelligenceEnabled} onChange={(e) => setTenantForm((f) => ({ ...f, marketIntelligenceEnabled: e.target.checked }))} /> Market Intelligence Enabled</label>
           </div>
           <button style={{ marginTop: 8 }} onClick={createTenant}>Create Tenant</button>
@@ -323,7 +325,7 @@ function Inner({ token, me, logout }) {
         <div id="tenant-edit-card" className="glass card" style={{ padding: 12 }}>
           <h3 className="section-title">Edit / Suspend Tenants</h3>
           <table>
-            <thead><tr><th>Name</th><th>Slug</th><th>Status</th><th>Plan</th><th>Car Sharing</th><th>Loaner</th><th>Tolls</th><th>Market Int.</th><th>Counts</th><th>Actions</th></tr></thead>
+            <thead><tr><th>Name</th><th>Slug</th><th>Status</th><th>Plan</th><th>Car Sharing</th><th>Loaner</th><th>Tolls</th><th>Citations</th><th>Market Int.</th><th>Counts</th><th>Actions</th></tr></thead>
             <tbody>
               {(rows || []).map((r) => (
                 <tr key={r.id}>
@@ -358,6 +360,11 @@ function Inner({ token, me, logout }) {
                   <td>
                     <label className="label">
                       <input type="checkbox" checked={!!r.tollsEnabled} onChange={(e) => setRows((prev) => prev.map((x) => x.id === r.id ? { ...x, tollsEnabled: e.target.checked } : x))} /> Enabled
+                    </label>
+                  </td>
+                  <td>
+                    <label className="label">
+                      <input type="checkbox" checked={!!r.citationsEnabled} onChange={(e) => setRows((prev) => prev.map((x) => x.id === r.id ? { ...x, citationsEnabled: e.target.checked } : x))} /> Enabled
                     </label>
                   </td>
                   <td>

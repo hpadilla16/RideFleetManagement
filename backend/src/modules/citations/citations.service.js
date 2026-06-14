@@ -94,9 +94,12 @@ export const citationsService = {
     for (const row of rows) {
       try {
         const citationNo = String(row.citationNo || '').trim();
+        // issuedAt is OPTIONAL (2026-06-14): list-only sources have no date yet.
+        // Null → the citation binds to the vehicle (by plate) and stays
+        // NEEDS_REVIEW since reservation matching needs the timestamp.
         const issuedAt = toDate(row.issuedAt);
-        if (!citationNo || !issuedAt) {
-          errors.push({ citationNo: citationNo || null, error: 'citationNo and issuedAt required' });
+        if (!citationNo) {
+          errors.push({ citationNo: citationNo || null, error: 'citationNo required' });
           continue;
         }
         const plateNormalized = normalizePlate(row.plateNormalized || row.plate);
@@ -252,6 +255,74 @@ export const citationsService = {
       orderBy: { issuedAt: 'desc' },
       include: { reservation: { select: { id: true, reservationNumber: true } } },
     });
+  },
+
+  /**
+   * Active plates for a tenant — the search list the droplet CPC/T2 adapters
+   * poll. Returned to the internal /plates endpoint so the scraper never holds
+   * a stale hand-seeded file: new vehicles are picked up automatically, SOLD
+   * units drop out. Sitting / Hold-for-Sale (OUT_OF_SERVICE) units stay IN —
+   * a parked car can still draw a citation we're liable for.
+   *
+   * State is NOT hardcoded: it comes from each vehicle's HOME LOCATION
+   * (`Location.state`), so an Orlando/Ft-Lauderdale/Miami vehicle reports FL and
+   * a future CA market reports CA with zero code changes. `defaultState` is only
+   * the fallback for vehicles whose home location has no state set (or none).
+   */
+  async listActivePlates(tenantId, { defaultState = 'FL', requireEnabled = false } = {}) {
+    if (!tenantId) throw new Error('tenantId required');
+    // Settings gate: when asked directly (single-tenant endpoint), only return
+    // plates if the tenant has Citations turned ON in settings. The source-based
+    // discovery already filters by citationsEnabled at the account query, so it
+    // skips this per-tenant recheck.
+    if (requireEnabled) {
+      const t = await prisma.tenant.findUnique({ where: { id: tenantId }, select: { citationsEnabled: true } });
+      if (!t?.citationsEnabled) return [];
+    }
+    const vehicles = await prisma.vehicle.findMany({
+      where: { tenantId, plate: { not: null }, status: { not: 'SOLD' } },
+      select: { plate: true, homeLocation: { select: { state: true } } },
+      orderBy: { plate: 'asc' },
+    });
+    const seen = new Set();
+    const plates = [];
+    for (const v of vehicles) {
+      const plate = String(v.plate || '').trim();
+      if (!plate) continue;
+      const key = plate.toUpperCase();
+      if (seen.has(key)) continue; // de-dupe; ambiguous plates rare
+      seen.add(key);
+      const state = String(v.homeLocation?.state || defaultState || 'FL').toUpperCase();
+      plates.push({ plate, state });
+    }
+    return plates;
+  },
+
+  /**
+   * Plug-and-play discovery for the droplet adapters. Given a citation SOURCE
+   * (e.g. CITATION_PROCESSING_CENTER, T2), return the active plates for EVERY
+   * tenant that has an active CitationSourceAccount for that source — i.e. every
+   * tenant we actually have that service for. Grouped by tenant because ingest
+   * is per-tenant. Onboard a new tenant/location + give it a source account and
+   * it joins the nightly run automatically — no per-tenant config in the scraper.
+   */
+  async listPlatesForSource(source) {
+    if (!VALID_SOURCES.has(source)) throw new Error(`invalid source: ${source}`);
+    // Two gates, both required: the tenant has Citations ON in settings
+    // (citationsEnabled) AND an active source account for this source (= we have
+    // the service for that jurisdiction). Either off → tenant is skipped.
+    const accounts = await prisma.citationSourceAccount.findMany({
+      where: { source, isActive: true, tenant: { citationsEnabled: true } },
+      select: { tenantId: true },
+    });
+    const tenantIds = [...new Set(accounts.map((a) => a.tenantId))];
+    const tenants = [];
+    for (const tenantId of tenantIds) {
+      // eslint-disable-next-line no-await-in-loop
+      const plates = await this.listActivePlates(tenantId);
+      tenants.push({ tenantId, count: plates.length, plates });
+    }
+    return { source, tenantCount: tenants.length, tenants };
   },
 
   /**
