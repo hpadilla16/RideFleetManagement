@@ -30,6 +30,7 @@ import { checkoutSessionRouter, checkoutSessionPublicRouter } from './modules/ch
 import { termsSigningPublicRouter } from './modules/checkout-session/terms-signing.routes.js';
 import { mobileInspectionPublicRouter } from './modules/checkout-session/mobile-inspection.routes.js';
 import { customerInspectionPublicRouter, customerInspectionRouter } from './modules/customer-inspection/customer-inspection.routes.js';
+import { citationsRouter, citationsInternalRouter } from './modules/citations/citations.routes.js';
 import { storeBoardRouter } from './modules/store-board/store-board.routes.js';
 import { storeBoardPublicRouter } from './modules/store-board/store-board-public.routes.js';
 import { assertAuthConfig } from './modules/auth/auth.config.js';
@@ -163,6 +164,7 @@ app.use('/api/public/loaner-portal', loanerPortalPublicRouter);
 app.use('/api/incident-reports', requireAuth, tenantRateLimit, incidentReportRouter);
 app.use('/api/issue-center', requireAuth, tenantRateLimit, requireModuleAccess('issueCenter'), issueCenterRouter);
 app.use('/api/tolls', requireAuth, tenantRateLimit, requireModuleAccess('tolls'), tollsRouter);
+app.use('/api/citations', requireAuth, tenantRateLimit, requireRole('ADMIN', 'OPS'), citationsRouter);
 app.use('/api/planner', requireAuth, tenantRateLimit, requireModuleAccess('planner'), plannerRouter);
 app.use('/api/payment-gateway', requireAuth, tenantRateLimit, requireRole('ADMIN', 'OPS'), paymentGatewayRouter);
 app.use('/api/sms', requireAuth, tenantRateLimit, requireRole('ADMIN', 'OPS'), smsRouter);
@@ -191,6 +193,8 @@ app.use('/api/market-onboarding', requireAuth, tenantRateLimit, requireModuleAcc
 // Internal endpoint hit by the droplet cron after every successful scrape.
 // Auth is via BACKEND_INTERNAL_TOKEN shared secret, not user session.
 app.use('/api/internal/pricing-engine', pricingEngineInternalRouter);
+// Internal endpoint hit by the citations scraper droplet to push ingested rows.
+app.use('/api/internal/citations', citationsInternalRouter);
 app.use('/api/rental-agreements', requireAuth, tenantRateLimit, requireModuleAccess('reservations'), rentalAgreementsRouter);
 // Dejavoo Spin checkout redesign (Phase 1.2). The auth'd router is for
 // the agent's wizard; the public router below is for the QR token

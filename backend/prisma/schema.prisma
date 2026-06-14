@@ -357,6 +357,39 @@ enum TollBillingStatus {
   DISPUTED
 }
 
+// ─── Citations / traffic-ticket ingestion (Manuel Shop P1, plan
+//     doc/citations-tolls-fase-a-spec-2026-06-12.md). Mirrors the Toll* models. ───
+enum CitationSource {
+  CITATION_PROCESSING_CENTER
+  T2
+  OCSO_COMPTROLLER
+  VIOLATIONINFO
+  MANUAL
+}
+
+enum CitationStatus {
+  IMPORTED
+  MATCHED
+  NEEDS_REVIEW
+  BILLED
+  DISPUTED
+  VOID
+}
+
+enum CitationBillingStatus {
+  PENDING
+  POSTED_TO_AGREEMENT
+  WAIVED
+  DISPUTED
+}
+
+enum CitationMatchStatus {
+  SUGGESTED
+  CONFIRMED
+  REJECTED
+  AUTO_CONFIRMED
+}
+
 enum HostVehicleSubmissionStatus {
   PENDING_REVIEW
   PENDING_INFO
@@ -388,17 +421,18 @@ enum PlannerRuleMode {
 }
 
 model Tenant {
-  id                      String   @id @default(cuid())
-  name                    String
-  slug                    String   @unique
-  status                  String   @default("ACTIVE")
-  plan                    String   @default("BETA")
+  id                        String   @id @default(cuid())
+  name                      String
+  slug                      String   @unique
+  status                    String   @default("ACTIVE")
+  plan                      String   @default("BETA")
   // Path D multi-tenancy fields (added 2026-05-17, see doc/multitenancy-hybrid-architecture.md)
-  tier                    String   @default("STANDARD") // STANDARD | PREMIUM | ENTERPRISE
-  schemaName              String   @default("public") // 'public' | 'tenant_<slug>'
+  tier                      String   @default("STANDARD") // STANDARD | PREMIUM | ENTERPRISE
+  schemaName                String   @default("public") // 'public' | 'tenant_<slug>'
   carSharingEnabled         Boolean  @default(false)
   dealershipLoanerEnabled   Boolean  @default(false)
   tollsEnabled              Boolean  @default(false)
+  citationsEnabled          Boolean  @default(false)
   // Per-tenant entitlement for the Market Intelligence module
   // (Expedia scraper + pricing rules + suggestions inbox). Opt-in,
   // gated by super-admin from the /tenants page. When false the module
@@ -409,18 +443,18 @@ model Tenant {
   // card (e.g. ["CCAR","CFAR",...]). null/empty → card falls back to the top 6
   // by market volume. Set from Settings → Market Intelligence. See
   // settings.service.js getDashboardSipps/updateDashboardSipps (beta.134).
-  dashboardSipps          Json?
-  platformFeeEnabled      Boolean  @default(true)
-  platformFeePct          Decimal  @default(10) @db.Decimal(6, 3)
-  platformFeeMin          Decimal  @default(7) @db.Decimal(10, 2)
-  platformFeeMax          Decimal  @default(35) @db.Decimal(10, 2)
+  dashboardSipps            Json?
+  platformFeeEnabled        Boolean  @default(true)
+  platformFeePct            Decimal  @default(10) @db.Decimal(6, 3)
+  platformFeeMin            Decimal  @default(7) @db.Decimal(10, 2)
+  platformFeeMax            Decimal  @default(35) @db.Decimal(10, 2)
   // Per-tenant override for the canonical Terms & Conditions HTML.
   // When non-empty, supersedes lib/terms/tc-<TC_VERSION>.html in the
   // rental-agreement renderer (see getEffectiveTermsHtmlForTenant).
   // When null/empty, the system continues to render the canonical T&C.
-  termsHtml               String?  @db.Text
-  createdAt               DateTime @default(now())
-  updatedAt               DateTime @updatedAt
+  termsHtml                 String?  @db.Text
+  createdAt                 DateTime @default(now())
+  updatedAt                 DateTime @updatedAt
 
   users                       User[]
   locations                   Location[]
@@ -456,6 +490,10 @@ model Tenant {
   tollTransactions            TollTransaction[]
   tollAssignments             TollAssignment[]
   tollImportRuns              TollImportRun[]
+  citationSourceAccounts      CitationSourceAccount[]
+  citations                   Citation[]
+  citationAssignments         CitationAssignment[]
+  citationImportRuns          CitationImportRun[]
   telematicsDevices           VehicleTelematicsDevice[]
   telematicsEvents            VehicleTelematicsEvent[]
   plannerRuleSet              PlannerRuleSet?
@@ -543,43 +581,43 @@ model VehicleType {
 }
 
 model Vehicle {
-  id                String                 @id @default(cuid())
-  tenantId          String?
-  tenant            Tenant?                @relation(fields: [tenantId], references: [id])
-  internalNumber    String
-  vin               String?                @unique
-  plate             String?
-  tollTagNumber     String?
-  tollStickerNumber String?
-  make              String?
-  model             String?
-  year              Int?
-  color             String?
-  mileage           Int                    @default(0)
+  id                      String                 @id @default(cuid())
+  tenantId                String?
+  tenant                  Tenant?                @relation(fields: [tenantId], references: [id])
+  internalNumber          String
+  vin                     String?                @unique
+  plate                   String?
+  tollTagNumber           String?
+  tollStickerNumber       String?
+  make                    String?
+  model                   String?
+  year                    Int?
+  color                   String?
+  mileage                 Int                    @default(0)
   // Fuel tank capacity in gallons (2026-06-10, fixes backlog #51). Drives the
   // FUEL_REFILL fee: gallons = (fuelOut - fuelIn, quantized to 1/8) × capacity.
   // Nullable — resolveTankCapacity() falls back to 15 gal (+ warn) when unset.
-  fuelTankCapacityGallons Decimal?         @db.Decimal(4, 1)
+  fuelTankCapacityGallons Decimal?               @db.Decimal(4, 1)
   // Vehicle Profile pack (2026-06-10, plan doc/vehicle-profile-pack-plan):
   // registration tracking + acquisition/value/rotation. All informational —
   // none of these feed billing. currentValue is COMPUTED (declining balance),
   // never stored. Rotation rule (TIME|MILEAGE) lives in AppSetting per tenant.
   registrationExpiresAt   DateTime?
   registrationDocumentUrl String?
-  acquisitionCost         Decimal?         @db.Decimal(12, 2)
+  acquisitionCost         Decimal?               @db.Decimal(12, 2)
   acquisitionDate         DateTime?
-  depreciationAnnualPct   Decimal?         @db.Decimal(5, 2)
+  depreciationAnnualPct   Decimal?               @db.Decimal(5, 2)
   targetFleetMonths       Int?
   targetFleetMiles        Int?
-  status            VehicleStatus          @default(AVAILABLE)
-  fleetMode         VehicleFleetMode       @default(RENTAL_ONLY)
+  status                  VehicleStatus          @default(AVAILABLE)
+  fleetMode               VehicleFleetMode       @default(RENTAL_ONLY)
   // Program partition — see VehicleProgramCategory enum docs.
   // Existing vehicles default to BOTH (no behavior change at write time);
   // tenants with a loaner program (e.g. Triangle) tag their loaner units
   // as LOANER_ONLY so the public rental search hides them. Filter rule:
   //   public rental search       → programCategory IN (RENTAL_ONLY, BOTH)
   //   dealership-loaner intake  → programCategory IN (LOANER_ONLY, BOTH)
-  programCategory   VehicleProgramCategory @default(BOTH)
+  programCategory         VehicleProgramCategory @default(BOTH)
 
   vehicleTypeId String
   vehicleType   VehicleType @relation(fields: [vehicleTypeId], references: [id])
@@ -604,6 +642,8 @@ model Vehicle {
   hostVehicleSubmission HostVehicleSubmission?
   tollTransactions      TollTransaction[]
   tollAssignments       TollAssignment[]
+  citations             Citation[]
+  citationAssignments   CitationAssignment[]
   availabilityBlocks    VehicleAvailabilityBlock[]
   telematicsDevices     VehicleTelematicsDevice[]
   telematicsEvents      VehicleTelematicsEvent[]
@@ -1115,19 +1155,21 @@ model Reservation {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  invoices          Invoice[]
-  auditLogs         AuditLog[]
-  rentalAgreement   RentalAgreement?
-  pricingSnapshot   ReservationPricingSnapshot?
-  charges           ReservationCharge[]
-  payments          ReservationPayment[]
-  additionalDrivers ReservationAdditionalDriver[]
-  carSharingTrip    Trip?
-  incidents         TripIncident[]
-  damageIncidents   ReservationIncident[]
-  hostReviews       HostReview[]
-  tollTransactions  TollTransaction[]
-  tollAssignments   TollAssignment[]
+  invoices            Invoice[]
+  auditLogs           AuditLog[]
+  rentalAgreement     RentalAgreement?
+  pricingSnapshot     ReservationPricingSnapshot?
+  charges             ReservationCharge[]
+  payments            ReservationPayment[]
+  additionalDrivers   ReservationAdditionalDriver[]
+  carSharingTrip      Trip?
+  incidents           TripIncident[]
+  damageIncidents     ReservationIncident[]
+  hostReviews         HostReview[]
+  tollTransactions    TollTransaction[]
+  tollAssignments     TollAssignment[]
+  citations           Citation[]
+  citationAssignments CitationAssignment[]
 
   // Dejavoo Spin checkout redesign (2026-05-28)
   checkoutSessions CheckoutSession[]
@@ -1374,6 +1416,7 @@ model User {
   closedAgreements                 RentalAgreement[]       @relation("AgreementClosedBy")
   agreementCommissions             AgreementCommission[]   @relation("AgreementCommissionEmployee")
   matchedTollAssignments           TollAssignment[]        @relation("TollAssignmentMatchedByUser")
+  matchedCitationAssignments       CitationAssignment[]    @relation("CitationAssignmentMatchedByUser")
   customerInfoReviewedReservations Reservation[]           @relation("ReservationCustomerInfoReviewedBy")
   readyForPickupReservations       Reservation[]           @relation("ReservationReadyForPickupBy")
   hostProfile                      HostProfile?
@@ -2640,6 +2683,120 @@ model TollAssignment {
   @@index([tollTransactionId, status])
 }
 
+// ─── Citations (mirror of Toll* models) — plan doc/citations-tolls-fase-a-spec-2026-06-12.md ───
+model CitationSourceAccount {
+  id                String         @id @default(cuid())
+  tenantId          String
+  tenant            Tenant         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  source            CitationSource
+  isActive          Boolean        @default(true)
+  authMode          String         @default("GUEST")
+  username          String?
+  passwordEncrypted String?
+  slug              String?
+  settingsJson      String?
+  lastSyncAt        DateTime?
+  lastSyncStatus    String?
+  lastSyncMessage   String?
+  createdAt         DateTime       @default(now())
+  updatedAt         DateTime       @updatedAt
+
+  importRuns CitationImportRun[]
+  citations  Citation[]
+
+  @@unique([tenantId, source, slug])
+  @@index([tenantId, source, isActive])
+}
+
+model CitationImportRun {
+  id              String                 @id @default(cuid())
+  tenantId        String
+  tenant          Tenant                 @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  sourceAccountId String?
+  sourceAccount   CitationSourceAccount? @relation(fields: [sourceAccountId], references: [id])
+  source          CitationSource
+  startedAt       DateTime               @default(now())
+  completedAt     DateTime?
+  sourceType      String
+  status          String
+  importedCount   Int                    @default(0)
+  matchedCount    Int                    @default(0)
+  reviewCount     Int                    @default(0)
+  errorMessage    String?
+  metadataJson    String?
+  createdAt       DateTime               @default(now())
+  updatedAt       DateTime               @updatedAt
+
+  citations Citation[]
+
+  @@index([tenantId, startedAt])
+}
+
+model Citation {
+  id                String                 @id @default(cuid())
+  tenantId          String
+  tenant            Tenant                 @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  sourceAccountId   String?
+  sourceAccount     CitationSourceAccount? @relation(fields: [sourceAccountId], references: [id])
+  importRunId       String?
+  importRun         CitationImportRun?     @relation(fields: [importRunId], references: [id])
+  source            CitationSource
+  citationNo        String
+  agency            String
+  violationType     String?
+  plateRaw          String?
+  plateNormalized   String?
+  plateState        String?
+  issuedAt          DateTime
+  amount            Decimal                @db.Decimal(10, 2)
+  fee               Decimal                @default(0) @db.Decimal(10, 2)
+  dueAt             DateTime?
+  location          String?
+  externalUrl       String?
+  documentPath      String?
+  vehicleId         String?
+  vehicle           Vehicle?               @relation(fields: [vehicleId], references: [id])
+  reservationId     String?
+  reservation       Reservation?           @relation(fields: [reservationId], references: [id])
+  status            CitationStatus         @default(IMPORTED)
+  billingStatus     CitationBillingStatus  @default(PENDING)
+  matchConfidence   Decimal?               @db.Decimal(5, 2)
+  needsReview       Boolean                @default(false)
+  sourcePayloadJson String?
+  reviewNotes       String?
+  createdAt         DateTime               @default(now())
+  updatedAt         DateTime               @updatedAt
+
+  assignments CitationAssignment[]
+
+  @@unique([tenantId, source, citationNo])
+  @@index([tenantId, plateNormalized, plateState, issuedAt])
+  @@index([tenantId, status, issuedAt])
+  @@index([tenantId, vehicleId, issuedAt])
+}
+
+model CitationAssignment {
+  id              String              @id @default(cuid())
+  tenantId        String
+  tenant          Tenant              @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  citationId      String
+  citation        Citation            @relation(fields: [citationId], references: [id], onDelete: Cascade)
+  reservationId   String
+  reservation     Reservation         @relation(fields: [reservationId], references: [id], onDelete: Cascade)
+  vehicleId       String?
+  vehicle         Vehicle?            @relation(fields: [vehicleId], references: [id])
+  status          CitationMatchStatus
+  confidence      Decimal?            @db.Decimal(5, 2)
+  matchedByUserId String?
+  matchedByUser   User?               @relation("CitationAssignmentMatchedByUser", fields: [matchedByUserId], references: [id])
+  matchReason     String?
+  createdAt       DateTime            @default(now())
+  updatedAt       DateTime            @updatedAt
+
+  @@index([tenantId, reservationId, status])
+  @@index([citationId, status])
+}
+
 model Conversation {
   id                  String      @id @default(cuid())
   tenantId            String?
@@ -3709,8 +3866,8 @@ model VehicleDamageReport {
   phase InspectionPhase
   view  VehicleView
   // Dot position as percentages of the diagram canvas (view-relative).
-  xPct  Decimal @db.Decimal(5, 2)
-  yPct  Decimal @db.Decimal(5, 2)
+  xPct  Decimal         @db.Decimal(5, 2)
+  yPct  Decimal         @db.Decimal(5, 2)
 
   description String?
   // { storage: true, bucket, refs } | { storage: false, photos } — same shape

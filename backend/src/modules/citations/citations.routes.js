@@ -1,0 +1,104 @@
+// Citations module — routes.
+// Plan: doc/citations-tolls-fase-a-spec-2026-06-12.md
+//
+//   Authed (ADMIN/OPS, tenant-scoped):
+//     GET    /api/citations                 (list + filters)
+//     GET    /api/citations/:id             (detail)
+//     POST   /api/citations/:id/review      (CONFIRM|REJECT|DISPUTE|VOID)
+//     POST   /api/citations/manual-import   (staff manual rows)
+//     GET    /api/citations/vehicle/:vehicleId
+//
+//   Internal (droplet scraper push, shared secret):
+//     POST   /api/internal/citations/ingest
+//
+// Billing/charge posting is NOT here — that is Phase E (money-gated).
+
+import { Router } from 'express';
+import { scopeFor } from '../../lib/tenant-scope.js';
+import { citationsService } from './citations.service.js';
+
+export const citationsRouter = Router();
+export const citationsInternalRouter = Router();
+
+function handle(err, res) {
+  const status = err?.status || (/required|invalid|must be/i.test(String(err?.message || '')) ? 400 : 500);
+  if (status >= 500) return res.status(500).json({ error: 'Internal error' });
+  return res.status(status).json({ error: err.message });
+}
+
+// ── Authed routes ──────────────────────────────────────────────────────────
+citationsRouter.get('/', async (req, res) => {
+  try {
+    res.json(await citationsService.list(req.query || {}, scopeFor(req)));
+  } catch (err) {
+    handle(err, res);
+  }
+});
+
+citationsRouter.get('/vehicle/:vehicleId', async (req, res) => {
+  try {
+    res.json(await citationsService.getVehicleHistory(req.params.vehicleId, scopeFor(req)));
+  } catch (err) {
+    handle(err, res);
+  }
+});
+
+citationsRouter.get('/:id', async (req, res) => {
+  try {
+    res.json(await citationsService.getDetail(req.params.id, scopeFor(req)));
+  } catch (err) {
+    handle(err, res);
+  }
+});
+
+citationsRouter.post('/:id/review', async (req, res) => {
+  try {
+    const { decision, note } = req.body || {};
+    res.json(await citationsService.review(req.params.id, { decision, note, userId: req.user?.id }, scopeFor(req)));
+  } catch (err) {
+    handle(err, res);
+  }
+});
+
+// Staff manual entry / OCR upload result — scoped to the caller's tenant.
+citationsRouter.post('/manual-import', async (req, res) => {
+  try {
+    const scope = scopeFor(req);
+    const rows = Array.isArray(req.body?.rows) ? req.body.rows : [];
+    const result = await citationsService.ingestBatch({
+      tenantId: scope.tenantId,
+      source: req.body?.source || 'MANUAL',
+      sourceType: 'MANUAL_IMPORT',
+      rows,
+    });
+    res.status(201).json(result);
+  } catch (err) {
+    handle(err, res);
+  }
+});
+
+// ── Internal ingest (droplet) ────────────────────────────────────────────────
+function requireInternalToken(req, res, next) {
+  const expected = process.env.BACKEND_INTERNAL_TOKEN;
+  if (!expected) return res.status(503).json({ error: 'Internal endpoints disabled (no BACKEND_INTERNAL_TOKEN)' });
+  const got = (req.headers.authorization || '').replace(/^Bearer\s+/i, '');
+  if (got !== expected) return res.status(401).json({ error: 'Invalid internal token' });
+  next();
+}
+
+// Body: { tenantId, source, sourceAccountId?, sourceType?, rows: [...] }
+citationsInternalRouter.post('/ingest', requireInternalToken, async (req, res) => {
+  try {
+    const { tenantId, source, sourceAccountId, sourceType, rows } = req.body || {};
+    const result = await citationsService.ingestBatch({
+      tenantId,
+      source,
+      sourceAccountId: sourceAccountId || null,
+      sourceType: sourceType || 'DROPLET_SCRAPE',
+      rows: Array.isArray(rows) ? rows : [],
+    });
+    res.json(result);
+  } catch (err) {
+    handle(err, res);
+  }
+});
