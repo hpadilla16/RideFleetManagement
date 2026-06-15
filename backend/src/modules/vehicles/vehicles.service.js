@@ -207,7 +207,12 @@ export const vehiclesService = {
   },
 
   list(scope = {}, { limit, offset, search } = {}) {
-    const take = Math.min(Number(limit) || 200, 500);
+    // 2026-06-15: cap subido 500→2000. Corpus (y pronto Manuel) tiene flotas
+    // de varios cientos de unidades; el tope de 500 truncaba la lista de
+    // /vehicles silenciosamente mientras el dashboard (findMany sin take)
+    // mostraba el total real. Mismo patrón que el fix de reservations en
+    // beta.149. Follow-up: paginación real { rows, total } (item en Monday).
+    const take = Math.min(Number(limit) || 200, 2000);
     const skip = Math.max(Number(offset) || 0, 0);
     const where = byTenantWhere(scope);
     const searchTrim = String(search || '').trim();

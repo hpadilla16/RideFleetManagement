@@ -123,7 +123,7 @@ function CheckoutWizard({ token, me, logout }) {
     (async () => {
       setLoadingVehicles(true);
       try {
-        const res = await api('/api/vehicles?status=AVAILABLE', {}, token);
+        const res = await api('/api/vehicles?status=AVAILABLE&limit=2000', {}, token);
         const list = Array.isArray(res?.data) ? res.data : (Array.isArray(res) ? res : []);
         if (!cancelled) setAvailableVehicles(list);
       } catch (err) {

@@ -265,7 +265,10 @@ function VehiclesInner({ token, me, logout }) {
     // actual state). The overview endpoint returns currentlyOutVehicleIds
     // + blockedVehicleIds as arrays for this purpose.
     const [v, l, vt, ov] = await Promise.allSettled([
-      api(scopedPath('/api/vehicles'), {}, token),
+      // 2026-06-15: limit explícito para que la lista traiga TODA la flota del
+      // tenant (corpus > 200). Sin esto el backend topaba en 200 y la página
+      // mostraba ~181 mientras el dashboard mostraba el total real.
+      api(scopedPath('/api/vehicles?limit=2000'), {}, token),
       canManageVehicleSetup ? api(scopedPath('/api/locations'), {}, token) : Promise.resolve([]),
       canManageVehicleSetup ? api(scopedPath('/api/vehicle-types'), {}, token) : Promise.resolve([]),
       api(scopedPath('/api/reports/overview'), {}, token),

@@ -298,7 +298,7 @@ function DashboardInner({ token, me, logout }) {
       // ?returnDateOn=today query plus a separate timeline fetch.
       api('/api/reservations?limit=500', {}, token),
       canSeeOverview ? api('/api/reports/overview', {}, token) : Promise.resolve(null),
-      !canSeeOverview && canSeeVehicles ? api('/api/vehicles', {}, token) : Promise.resolve([]),
+      !canSeeOverview && canSeeVehicles ? api('/api/vehicles?limit=2000', {}, token) : Promise.resolve([]),
       api('/api/reservations/summary', {}, token),
       canSeeVehicles ? api('/api/inventory/reconciliation/open', { bypassCache: true }, token) : Promise.resolve(null)
     ]);
