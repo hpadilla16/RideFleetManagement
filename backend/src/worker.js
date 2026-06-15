@@ -14,6 +14,7 @@ import logger from './lib/logger.js';
 import { registerWorker, startWorkers, shutdownQueues, queueEnabled } from './lib/queue/index.js';
 import { startAutochargePoll, stopAutochargePoll } from './modules/reservations/autocharge.poll.js';
 import { startVehicleDriftSweep, stopVehicleDriftSweep } from './modules/vehicles/vehicle-status-sweep.poll.js';
+import { startCommissionResyncSweep, stopCommissionResyncSweep } from './modules/commissions/commission-resync.poll.js';
 
 // =============================================================================
 // Bootstrap
@@ -82,6 +83,12 @@ async function main() {
   // ON_RENT/AVAILABLE drift against reservation truth and WARNs when it does.
   startVehicleDriftSweep();
 
+  // 2026-06-15 — daily commission-snapshot self-heal sweep. Re-runs
+  // syncAgreementCommissionSnapshot for every agreement with a CHECKOUT
+  // inspection (all tenants), so commission $ never silently freezes at a
+  // stale value again. Idempotent + preserves PAID/APPROVED; WARNs on drift.
+  startCommissionResyncSweep();
+
   // Graceful shutdown
 
   // Loaner program — return-due reminder sweep (Phase 2). Texts borrowers when
@@ -142,6 +149,7 @@ async function main() {
     logger.info('[worker] shutting down', { signal });
     stopAutochargePoll();
     stopVehicleDriftSweep();
+    stopCommissionResyncSweep();
     try {
       const loanerRemMod = await import('./modules/dealership-loaner/loaner-reminders.scheduler.js');
       loanerRemMod.stopLoanerRemindersScheduler();
