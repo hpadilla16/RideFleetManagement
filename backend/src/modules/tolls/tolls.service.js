@@ -428,26 +428,53 @@ function parseAutoExpresoDateTime(raw) {
 
 async function sunpassLogin(page, username, password) {
   await page.goto(SUNPASS_LOGIN_URL, { waitUntil: 'networkidle2', timeout: 45000 });
-  await page.waitForSelector('input[name="loginUsername"], input#loginUsername, input[type="text"]', { timeout: 20000 });
-  const usernameSelector = await page.$('input[name="loginUsername"]') ? 'input[name="loginUsername"]' : 'input#loginUsername';
-  const passwordSelector = await page.$('input[name="loginPassword"]') ? 'input[name="loginPassword"]' : 'input#loginPassword';
-  await page.click(usernameSelector, { clickCount: 3 }).catch(() => null);
-  await page.type(usernameSelector, username);
-  await page.click(passwordSelector, { clickCount: 3 }).catch(() => null);
-  await page.type(passwordSelector, password);
+  // The SunPass (Conduent "vector") portal was redesigned: the old ids
+  // loginUsername/loginPassword are gone. The page now renders TWO responsive copies
+  // of the login form (desktop ids tt_username/tt_loginPassword, mobile ids
+  // tt_username1/tt_loginPassword1, names loginName/password and login/loginPassword),
+  // plus an unrelated FAQ search box (name="sy"). Resolve robustly by visibility +
+  // context so a future id rename can't break us again: pick the VISIBLE password
+  // input, then the username text input in its form (by acct/user placeholder/name,
+  // never the FAQ search), then the "Login" submit in that same form.
+  await page.waitForSelector('input[type="password"]', { timeout: 25000 });
+  const resolved = await page.evaluate(() => {
+    const isVisible = (el) => !!el && el.offsetParent !== null && el.getBoundingClientRect().height > 0;
+    const pw = Array.from(document.querySelectorAll('input[type="password"]')).find(isVisible)
+      || document.querySelector('input[type="password"]');
+    if (!pw) return null;
+    const form = pw.closest('form');
+    const scope = form || document;
+    const texts = Array.from(scope.querySelectorAll('input[type="text"], input:not([type])'))
+      .filter((i) => (i.name || '') !== 'sy' && !/search/i.test(i.placeholder || ''));
+    let user = texts.filter(isVisible).find((i) => /acct|user|login/i.test(`${i.placeholder || ''} ${i.name || ''}`))
+      || texts.find(isVisible) || texts[0];
+    const btn = Array.from(scope.querySelectorAll('button[type="submit"], input[type="submit"], button'))
+      .find((b) => /log\s*in/i.test(b.textContent || b.value || ''));
+    if (btn) btn.setAttribute('data-rf-login', '1');
+    const sel = (el) => (el ? (el.id ? `#${el.id}` : (el.name ? `[name="${el.name}"]` : null)) : null);
+    return { user: sel(user), pass: sel(pw), userName: user && user.name, passName: pw && pw.name, hasBtn: !!btn };
+  });
+  if (!resolved || !resolved.user || !resolved.pass) {
+    throw new Error('SunPass login fields not found (login page layout changed)');
+  }
+  await page.click(resolved.user, { clickCount: 3 }).catch(() => null);
+  await page.type(resolved.user, username);
+  await page.click(resolved.pass, { clickCount: 3 }).catch(() => null);
+  await page.type(resolved.pass, password);
   await Promise.all([
     page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 45000 }).catch(() => null),
     page.evaluate(() => {
-      const btns = Array.from(document.querySelectorAll('input[type="submit"], button[type="submit"], button'));
-      const login = btns.find((b) => /log\s*in|sign\s*in|submit/i.test(b.textContent || b.value || ''));
-      if (login) login.click();
+      const btn = document.querySelector('[data-rf-login="1"]')
+        || Array.from(document.querySelectorAll('button[type="submit"], input[type="submit"], button'))
+          .find((b) => /log\s*in/i.test(b.textContent || b.value || ''));
+      if (btn) btn.click();
     })
   ]);
 }
 
 async function sunpassNavigateToActivity(page) {
   await page.goto(SUNPASS_ACTIVITY_URL, { waitUntil: 'networkidle2', timeout: 45000 });
-  await page.waitForTimeout(2000);
+  await new Promise((resolve) => setTimeout(resolve, 2000));
 }
 
 async function sunpassFilterAndSearch(page, dateStr) {
@@ -505,7 +532,7 @@ async function sunpassFilterAndSearch(page, dateStr) {
     })
   ]);
 
-  await page.waitForTimeout(3000);
+  await new Promise((resolve) => setTimeout(resolve, 3000));
 }
 
 async function scrapeSunPassRows(page) {
