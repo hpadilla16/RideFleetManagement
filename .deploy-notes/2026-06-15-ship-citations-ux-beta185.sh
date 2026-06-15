@@ -41,7 +41,6 @@ FILES=(
   "backend/src/modules/citations/citation-ocr.scheduler.js"
   "backend/src/modules/settings/settings.service.js"
   "frontend/src/app/citations/page.js"
-  "frontend/src/app/citations/[id]/page.js"
   "frontend/src/app/settings/page.js"
   "frontend/src/app/page.js"
   ".deploy-notes/2026-06-15-ship-citations-ux-beta185.sh"
@@ -59,7 +58,9 @@ grep -nq "citationsRouter.get('/summary'" backend/src/modules/citations/citation
 grep -nq "confidenceMin" backend/src/modules/settings/settings.service.js || { echo "ABORT: confidenceMin falta en settings." >&2; exit 1; }
 grep -nq "cfg.confidenceMin" backend/src/modules/citations/citation-ocr.scheduler.js || { echo "ABORT: umbral por-tenant falta en scheduler." >&2; exit 1; }
 grep -nq "overflowX: 'auto'" frontend/src/app/citations/page.js || { echo "ABORT: overflow falta." >&2; exit 1; }
+# (el detalle [id]/page.js ya se commiteó en 184; su redseño va en 186)
 grep -nq "Incoming docs" frontend/src/app/citations/page.js || { echo "ABORT: Incoming docs falta." >&2; exit 1; }
+grep -nq "review('REJECT')" "frontend/src/app/citations/[id]/page.js" || { echo "ABORT: Undo detalle falta (de 184)." >&2; exit 1; }
 grep -nq "Min OCR confidence" frontend/src/app/settings/page.js || { echo "ABORT: campo confianza falta en Settings." >&2; exit 1; }
 grep -nq "citations/summary" frontend/src/app/page.js || { echo "ABORT: tile Citations falta en el dashboard." >&2; exit 1; }
 echo "Guards OK."
