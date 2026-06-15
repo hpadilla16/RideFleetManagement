@@ -82,18 +82,35 @@ function parsePhotos(jsonStr) {
   }
 }
 
-async function ensureCheckoutInspection(agreementId) {
+async function ensureCheckoutInspection(agreementId, actorUserId = null) {
   // One CHECKOUT-phase inspection per agreement. The schema has a
   // unique([rentalAgreementId, phase]) constraint so upsert is safe.
+  //
+  // 2026-06-15 — actorUserId is the commission earner (syncAgreementCommission
+  // Snapshot attributes the rental to the CHECKOUT inspection's actorUserId).
+  // The mobile flow used to create this row WITHOUT an actor, so counter
+  // checkouts done on the tablet lost their clerk and earned $0 commission.
+  // We now stamp the staff user who minted the mobile token (passed in by the
+  // caller from the token's createdByUserId), and backfill it if an earlier
+  // photo save created the row before we knew the actor.
   const existing = await prisma.rentalAgreementInspection.findFirst({
     where: { rentalAgreementId: agreementId, phase: 'CHECKOUT' },
   });
-  if (existing) return existing;
+  if (existing) {
+    if (!existing.actorUserId && actorUserId) {
+      return prisma.rentalAgreementInspection.update({
+        where: { id: existing.id },
+        data: { actorUserId },
+      });
+    }
+    return existing;
+  }
   return prisma.rentalAgreementInspection.create({
     data: {
       rentalAgreementId: agreementId,
       phase: 'CHECKOUT',
       photosJson: '[]',
+      actorUserId: actorUserId || null,
     },
   });
 }
@@ -137,7 +154,8 @@ async function savePhoto({ token, angleKey, photoDataUrl, notes, customerIp }) {
 
   const row = await loadToken(token);
   const ag = row.reservation.rentalAgreement;
-  const inspection = await ensureCheckoutInspection(ag.id);
+  // Stamp the commission earner = the staff user who minted this mobile token.
+  const inspection = await ensureCheckoutInspection(ag.id, row.createdByUserId || null);
   const photos = parsePhotos(inspection.photosJson);
 
   // Upsert by key — replace existing or push new.
@@ -238,6 +256,10 @@ async function complete({ token, signatureDataUrl, signerName, odometer, fuelLev
         fuelLevel: fuelLevel != null ? String(fuelLevel) : inspection.fuelLevel,
         notes: notes ? String(notes).slice(0, 2000) : inspection.notes,
         actorIp: customerIp || inspection.actorIp,
+        // Commission earner: never leave the CHECKOUT inspection without an
+        // actor when we know who ran the checkout. Token's createdByUserId
+        // first, then the session starter. (2026-06-15 commission-attribution fix.)
+        actorUserId: inspection.actorUserId || row.createdByUserId || session.startedByUserId || null,
       },
     }),
     prisma.checkoutSession.update({
