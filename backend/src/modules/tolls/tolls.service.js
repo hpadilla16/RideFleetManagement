@@ -1770,7 +1770,7 @@ export const tollsService = {
       // Scrape under the shared singleton browser + global page cap. Only the
       // scrape holds the semaphore — the Prisma writes below run after the
       // page is closed and the permit released.
-      const pageRows = await withPage(async (page) => {
+      const { pageRows, debug } = await withPage(async (page) => {
         // Login
         await sunpassLogin(page, username, password);
         // Navigate to activity
@@ -1778,7 +1778,21 @@ export const tollsService = {
         // Filter + search over the rolling lookback window
         await sunpassFilterAndSearch(page, startStr, endStr);
         // Scrape rows
-        return scrapeSunPassRows(page);
+        const pageRows = await scrapeSunPassRows(page);
+        // Diagnostic snapshot of what the headless page actually shows at scrape time
+        // (debugging blind: surfaces URL, tables, filter state, body text into the run).
+        const debug = await page.evaluate(() => ({
+          url: location.href,
+          title: document.title,
+          tableCount: document.querySelectorAll('table').length,
+          trCount: document.querySelectorAll('table tr').length,
+          tableHeaders: Array.from(document.querySelectorAll('table')).slice(0, 6).map((t) =>
+            Array.from(t.querySelectorAll('tr:first-child th, tr:first-child td')).map((c) => String(c.textContent || '').replace(/\s+/g, ' ').trim()).slice(0, 10)),
+          selects: Array.from(document.querySelectorAll('select')).map((s) => ({ name: s.name, value: s.value, text: s.options[s.selectedIndex] && s.options[s.selectedIndex].text })),
+          dates: Array.from(document.querySelectorAll('input[name="startDateAll"], input[name="endDateAll"]')).map((i) => ({ name: i.name, value: i.value })),
+          bodySnippet: String(document.body && document.body.innerText || '').replace(/\s+/g, ' ').slice(0, 700)
+        })).catch((e) => ({ error: String(e && e.message || e) }));
+        return { pageRows, debug };
       });
 
       const rows = [];
@@ -1848,7 +1862,8 @@ export const tollsService = {
               provider: 'SUNPASS',
               actorUserId: actorUserId || null,
               note: 'SunPass sync completed with no new rows',
-              autoSync: { scrapedCount: 0, dedupedInRunCount, duplicateExistingCount: 0, importedCount: 0 }
+              autoSync: { scrapedCount: 0, dedupedInRunCount, duplicateExistingCount: 0, importedCount: 0 },
+              debug
             })
           }
         });
@@ -1868,7 +1883,7 @@ export const tollsService = {
       const created = await this.createManualTransactions(rows, scope, actorUserId, {
         sourceType: 'SUNPASS_SYNC',
         providerAccountId: providerAccount.id,
-        importMeta: { scrapedCount: rows.length, dedupedInRunCount }
+        importMeta: { scrapedCount: rows.length, dedupedInRunCount, debug }
       });
 
       await prisma.tollProviderAccount.update({
