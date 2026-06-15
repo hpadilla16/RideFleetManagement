@@ -30,6 +30,7 @@ const PROMPT = [
   'amount = the fine/violation amount (number, no $). fee = any separate admin/late fee, else 0.',
   'plateState = 2-letter US state if shown. confidence = your overall 0-100 confidence in the extraction.',
   'If a field is not clearly present, use null (or 0 for amount/fee). Do not invent values.',
+  'Output ONLY compact minified JSON (no markdown, no pretty-printing, no commentary).',
 ].join(' ');
 
 function contentBlockFor(buffer, contentType) {
@@ -81,7 +82,7 @@ async function extractAnthropic({ buffer, contentType, apiKey, model }) {
     },
     body: JSON.stringify({
       model: model || DEFAULT_MODEL,
-      max_tokens: 1500,
+      max_tokens: 8000,
       messages: [{
         role: 'user',
         content: [contentBlockFor(buffer, contentType), { type: 'text', text: PROMPT }],
