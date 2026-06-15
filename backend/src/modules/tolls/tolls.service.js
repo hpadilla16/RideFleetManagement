@@ -477,7 +477,7 @@ async function sunpassNavigateToActivity(page) {
   await new Promise((resolve) => setTimeout(resolve, 2000));
 }
 
-async function sunpassFilterAndSearch(page, dateStr) {
+async function sunpassFilterAndSearch(page, startStr, endStr) {
   // Select "Toll Transaction" type
   await page.evaluate(() => {
     const selects = Array.from(document.querySelectorAll('select'));
@@ -504,23 +504,24 @@ async function sunpassFilterAndSearch(page, dateStr) {
     }
   });
 
-  // Set start and end date to today
-  await page.evaluate((date) => {
+  // Set start and end date to the rolling window [startStr, endStr]
+  await page.evaluate(({ startStr, endStr }) => {
     const inputs = Array.from(document.querySelectorAll('input'));
     for (const input of inputs) {
       const label = String(input.previousElementSibling?.textContent || input.closest('label')?.textContent || input.name || input.id || input.placeholder || '').toLowerCase();
-      if (label.includes('start') || label.includes('from') || input.name?.includes('tart') || input.id?.includes('tart')) {
-        input.value = date;
+      const isStart = label.includes('start') || label.includes('from') || input.name?.includes('tart') || input.id?.includes('tart');
+      const isEnd = label.includes('end') || label.includes('to') || input.name?.includes('nd') || input.id?.includes('nd');
+      if (isStart) {
+        input.value = startStr;
         input.dispatchEvent(new Event('input', { bubbles: true }));
         input.dispatchEvent(new Event('change', { bubbles: true }));
-      }
-      if (label.includes('end') || label.includes('to') || input.name?.includes('nd') || input.id?.includes('nd')) {
-        input.value = date;
+      } else if (isEnd) {
+        input.value = endStr;
         input.dispatchEvent(new Event('input', { bubbles: true }));
         input.dispatchEvent(new Event('change', { bubbles: true }));
       }
     }
-  }, dateStr);
+  }, { startStr, endStr });
 
   // Click View button
   await Promise.all([
@@ -1773,8 +1774,16 @@ export const tollsService = {
 
     const username = String(providerAccount.username || '').trim();
     const password = decodeSecret(providerAccount.passwordEncrypted);
-    const today = new Date();
-    const dateStr = `${String(today.getMonth() + 1).padStart(2, '0')}/${String(today.getDate()).padStart(2, '0')}/${today.getFullYear()}`;
+    // Pull a ROLLING WINDOW, not just today: SunPass posts transactions with a multi-day
+    // lag (posted date trails transaction date), so a today-only filter almost always
+    // returns nothing. A lookback window catches late-posting tolls; dedup by externalId
+    // makes re-importing the overlap a no-op. Default 14 days (env-tunable).
+    const fmt = (d) => `${String(d.getMonth() + 1).padStart(2, '0')}/${String(d.getDate()).padStart(2, '0')}/${d.getFullYear()}`;
+    const lookbackDays = Number(process.env.TOLLS_SUNPASS_LOOKBACK_DAYS || 14) > 0 ? Number(process.env.TOLLS_SUNPASS_LOOKBACK_DAYS || 14) : 14;
+    const endDate = new Date();
+    const startDate = new Date(endDate.getTime() - lookbackDays * 24 * 60 * 60 * 1000);
+    const startStr = fmt(startDate);
+    const endStr = fmt(endDate);
 
     try {
       // Scrape under the shared singleton browser + global page cap. Only the
@@ -1785,8 +1794,8 @@ export const tollsService = {
         await sunpassLogin(page, username, password);
         // Navigate to activity
         await sunpassNavigateToActivity(page);
-        // Filter and search for today
-        await sunpassFilterAndSearch(page, dateStr);
+        // Filter + search over the rolling lookback window
+        await sunpassFilterAndSearch(page, startStr, endStr);
         // Scrape rows
         return scrapeSunPassRows(page);
       });
