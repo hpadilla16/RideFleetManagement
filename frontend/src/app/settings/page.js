@@ -123,6 +123,10 @@ function SettingsInner({ token, me, logout }) {
   const [fleetRotationRule, setFleetRotationRule] = useState('TIME');
   // Customer-led inspection (2026-06-11).
   const [customerInspectionEnabled, setCustomerInspectionEnabled] = useState(false);
+  // Citations OCR (2026-06-15): per-tenant vision-LLM credentials for mail intake.
+  const [ocrCfg, setOcrCfg] = useState({ provider: 'anthropic', model: '', hasKey: false });
+  const [ocrKeyInput, setOcrKeyInput] = useState('');
+  const [ocrSaving, setOcrSaving] = useState(false);
   useEffect(() => {
     api(scopedSettingsPath('/api/settings/fleet-rotation'), {}, token)
       .then((out) => setFleetRotationRule(out?.rule === 'MILEAGE' ? 'MILEAGE' : 'TIME'))
@@ -130,8 +134,28 @@ function SettingsInner({ token, me, logout }) {
     api(scopedSettingsPath('/api/settings/customer-inspection'), {}, token)
       .then((out) => setCustomerInspectionEnabled(!!out?.enabled))
       .catch(() => {});
+    api(scopedSettingsPath('/api/settings/citation-ocr'), {}, token)
+      .then((out) => out && setOcrCfg(out))
+      .catch(() => {});
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [token]);
+
+  const saveOcrConfig = async (patch) => {
+    setOcrSaving(true);
+    try {
+      const out = await api(scopedSettingsPath('/api/settings/citation-ocr'), {
+        method: 'PUT',
+        body: JSON.stringify(patch)
+      }, token);
+      if (out) setOcrCfg(out);
+      setOcrKeyInput('');
+      setMsg('Citations OCR settings saved');
+    } catch (err) {
+      setMsg(err?.message || 'Failed to save OCR settings');
+    } finally {
+      setOcrSaving(false);
+    }
+  };
   const [paymentGatewayConfig, setPaymentGatewayConfig] = useState(DEFAULT_PAYMENT_GATEWAY_CONFIG);
   const [paymentGatewayHealth, setPaymentGatewayHealth] = useState(null);
   const [plannerCopilotConfig, setPlannerCopilotConfig] = useState(DEFAULT_PLANNER_COPILOT_CONFIG);
@@ -2451,6 +2475,51 @@ function SettingsInner({ token, me, logout }) {
                 </div>
                 <div className="surface-note">
                   Drives the "Ready to Rotate" dashboard tile and the /vehicles?rotation=ready batch. Per-vehicle targets (months / miles) are set in each vehicle's Edit form.
+                </div>
+              </div>
+            </div>
+
+            <div className="glass card" style={{ padding: 12 }}>
+              <h3 style={{ marginBottom: 8 }}>Citations OCR (AI)</h3>
+              <div className="form-grid-2">
+                <div className="stack">
+                  <label className="label">AI provider</label>
+                  <select value={ocrCfg.provider} onChange={(e) => setOcrCfg((p) => ({ ...p, provider: e.target.value }))}>
+                    <option value="anthropic">Anthropic (Claude)</option>
+                  </select>
+                  <label className="label">Model (optional)</label>
+                  <input
+                    placeholder="claude-haiku-4-5-20251001"
+                    value={ocrCfg.model || ''}
+                    onChange={(e) => setOcrCfg((p) => ({ ...p, model: e.target.value }))}
+                  />
+                  <label className="label">API key {ocrCfg.hasKey ? '(saved — leave blank to keep)' : '(not set)'}</label>
+                  <input
+                    type="password"
+                    autoComplete="off"
+                    placeholder={ocrCfg.hasKey ? '•••••••••• (key on file)' : 'sk-ant-...'}
+                    value={ocrKeyInput}
+                    onChange={(e) => setOcrKeyInput(e.target.value)}
+                  />
+                  <div className="inline-actions" style={{ gap: 6 }}>
+                    <button
+                      type="button"
+                      disabled={ocrSaving}
+                      onClick={() => saveOcrConfig({
+                        provider: ocrCfg.provider,
+                        model: ocrCfg.model,
+                        ...(ocrKeyInput.trim() ? { apiKey: ocrKeyInput.trim() } : {})
+                      })}
+                    >
+                      {ocrSaving ? 'Saving...' : 'Save'}
+                    </button>
+                    {ocrCfg.hasKey ? (
+                      <button type="button" className="button-subtle" disabled={ocrSaving} onClick={() => saveOcrConfig({ clearKey: true })}>Remove key</button>
+                    ) : null}
+                  </div>
+                </div>
+                <div className="surface-note">
+                  Your AI key powers the OCR that reads mailed citation notices uploaded in Citations. Stored encrypted; used only to extract fields from your own notices. Leave the key field blank to keep the existing one.
                 </div>
               </div>
             </div>

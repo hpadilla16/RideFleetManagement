@@ -124,6 +124,20 @@ async function main() {
     });
   }
 
+  // Citations OCR mail intake (2026-06-15, Fase B) — processes uploaded/emailed
+  // citation-notice scans (CitationDocument PENDING) via vision-LLM → ingestBatch.
+  // No-ops unless CITATION_OCR_ENABLED + provider key are set. Dynamic import so a
+  // broken import chain can't kill the worker boot.
+  try {
+    const ocrMod = await import('./modules/citations/citation-ocr.scheduler.js');
+    ocrMod.startCitationOcrScheduler();
+    logger.info('[worker] started: citation-ocr scheduler');
+  } catch (err) {
+    logger.warn('[worker] citation-ocr scheduler not started', {
+      message: err.message,
+    });
+  }
+
   const shutdown = async (signal) => {
     logger.info('[worker] shutting down', { signal });
     stopAutochargePoll();
@@ -139,6 +153,10 @@ async function main() {
     try {
       const tollsMod = await import('./modules/tolls/tolls.scheduler.js');
       tollsMod.stopTollAutoSyncScheduler();
+    } catch {}
+    try {
+      const ocrMod = await import('./modules/citations/citation-ocr.scheduler.js');
+      ocrMod.stopCitationOcrScheduler();
     } catch {}
     // Close the Chromium singleton if a toll sweep ever launched it here.
     // Lazy import keeps puppeteer out of the boot graph.

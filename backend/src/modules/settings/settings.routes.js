@@ -184,6 +184,25 @@ settingsRouter.put('/fleet-rotation', requireRole('ADMIN'), async (req, res, nex
   }
 });
 
+// Citations OCR — per-tenant vision-LLM credentials. GET returns masked config
+// (provider/model/hasKey, never the key). PUT (ADMIN) sets provider/model/apiKey
+// (key stored encrypted). { clearKey:true } removes the stored key.
+settingsRouter.get('/citation-ocr', async (_req, res, next) => {
+  try {
+    res.json(await settingsService.getCitationOcrConfig(scopeFor(_req)));
+  } catch (e) {
+    next(e);
+  }
+});
+
+settingsRouter.put('/citation-ocr', requireRole('ADMIN'), async (req, res, next) => {
+  try {
+    res.json(await settingsService.updateCitationOcrConfig(req.body || {}, scopeFor(req)));
+  } catch (e) {
+    next(e);
+  }
+});
+
 // Long-term (monthly) billing — email templates + dunning/billing config.
 // Stored in appSetting key 'longTermEmailTemplates' (tenant-scoped).
 // Defaults + normalization live in modules/long-term/long-term-emails.js.

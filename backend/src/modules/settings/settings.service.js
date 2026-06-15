@@ -9,6 +9,7 @@ import {
   updateStoredUserModuleConfig
 } from '../../lib/module-access.js';
 import { getTenantPlanCatalog, resolveTenantPlanConfig } from '../../lib/tenant-plan-limits.js';
+import { encrypt, decrypt, isEncryptionConfigured } from '../../lib/integration-crypto.js';
 
 const DEFAULTS = {
   companyName: 'Ride Fleet',
@@ -789,6 +790,49 @@ export const settingsService = {
       update: { value: JSON.stringify(next) }
     });
     return next;
+  },
+
+  // Citations OCR (2026-06-15): per-tenant vision-LLM credentials for the mail
+  // intake. The API key is stored ENCRYPTED (integration-crypto, same as TL).
+  // getCitationOcrConfig is the safe/masked read for the UI (NEVER returns the
+  // key); getCitationOcrResolved is the internal read the worker uses (decrypts).
+  async getCitationOcrConfig(scope = {}) {
+    const cfg = await readJsonSetting(scopedKey('citationOcrConfig', scope), null);
+    return {
+      provider: String(cfg?.provider || 'anthropic').toLowerCase(),
+      model: cfg?.model || '',
+      hasKey: !!cfg?.apiKeyEncrypted,
+    };
+  },
+
+  async updateCitationOcrConfig(payload = {}, scope = {}) {
+    const key = scopedKey('citationOcrConfig', scope);
+    const current = await readJsonSetting(key, {});
+    const provider = String(payload?.provider || current.provider || 'anthropic').toLowerCase();
+    const model = payload?.model !== undefined ? String(payload.model || '') : (current.model || '');
+    let apiKeyEncrypted = current.apiKeyEncrypted || null;
+    if (payload?.clearKey === true) {
+      apiKeyEncrypted = null;
+    } else if (typeof payload?.apiKey === 'string' && payload.apiKey.trim()) {
+      if (!isEncryptionConfigured()) throw new Error('Encryption key (INTEGRATION_ENC_KEY) is not configured');
+      apiKeyEncrypted = encrypt(payload.apiKey.trim());
+    }
+    await writeJsonSetting(key, { provider, model, apiKeyEncrypted });
+    return { provider, model, hasKey: !!apiKeyEncrypted };
+  },
+
+  // Internal — decrypts the key for the OCR worker. Returns { provider, model, apiKey|null }.
+  async getCitationOcrResolved(scope = {}) {
+    const cfg = await readJsonSetting(scopedKey('citationOcrConfig', scope), null);
+    let apiKey = null;
+    if (cfg?.apiKeyEncrypted) {
+      try { apiKey = decrypt(cfg.apiKeyEncrypted); } catch { apiKey = null; }
+    }
+    return {
+      provider: String(cfg?.provider || 'anthropic').toLowerCase(),
+      model: cfg?.model || '',
+      apiKey,
+    };
   },
 
   async getPaymentGatewayConfig(scope = {}) {
