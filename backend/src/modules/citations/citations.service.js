@@ -6,6 +6,14 @@
 
 import { prisma } from '../../lib/prisma.js';
 import logger from '../../lib/logger.js';
+import { uploadObject, getSignedUrl, safePath } from '../../lib/storage/index.js';
+import { isStorageEnabled } from '../rental-agreements/inspection-photos.js';
+
+// OCR mail intake (Fase A): notice documents reuse the existing Supabase bucket
+// (same pattern as vehicle registration docs) — no new bucket/env needed. The
+// shared INSPECTION_PHOTOS_STORAGE_ENABLED flag gates it via isStorageEnabled().
+const CITATION_DOC_BUCKET = process.env.SUPABASE_STORAGE_INVENTORY_BUCKET || 'inventory-photos';
+const CITATION_DOC_MAX_BYTES = 15 * 1024 * 1024;
 
 const VALID_SOURCES = new Set([
   'CITATION_PROCESSING_CENTER',
@@ -13,6 +21,7 @@ const VALID_SOURCES = new Set([
   'OCSO_COMPTROLLER',
   'VIOLATIONINFO',
   'MANUAL',
+  'MAIL_OCR',
 ]);
 
 // Same normalization the toll matcher uses (tolls.service.js).
@@ -347,6 +356,81 @@ export const citationsService = {
         reviewNotes: note ? String(note).slice(0, 2000) : undefined,
       },
     });
+  },
+
+  // ── OCR mail intake — Fase A (document plumbing) ──────────────────────────
+  // A scanned/emailed citation notice lands here as a CitationDocument (PENDING)
+  // with the file in Supabase Storage. The Fase B worker extracts fields and
+  // calls ingestBatch. No money, no matching here — just intake + storage.
+
+  /** Upload a notice (base64 data URL) → Supabase + CitationDocument(PENDING). */
+  async saveDocument({ tenantId, dataUrl, sourceChannel = 'UPLOAD', uploadedByUserId = null }) {
+    if (!tenantId) throw new Error('tenantId required');
+    if (!isStorageEnabled()) throw new Error('Document storage is not enabled');
+    const match = /^data:([\w/.+-]+);base64,(.+)$/s.exec(String(dataUrl || ''));
+    if (!match) throw new Error('document must be a base64 data URL');
+    const contentType = match[1];
+    const body = Buffer.from(match[2], 'base64');
+    if (!body.length) throw new Error('document is empty');
+    if (body.length > CITATION_DOC_MAX_BYTES) throw new Error('document exceeds 15MB');
+    const ext = contentType.includes('pdf') ? 'pdf' : contentType.includes('png') ? 'png' : 'jpg';
+    const channel = ['UPLOAD', 'EMAIL', 'MAILBOX'].includes(String(sourceChannel).toUpperCase())
+      ? String(sourceChannel).toUpperCase() : 'UPLOAD';
+    const path = safePath('citation-docs', tenantId, `${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`);
+    await uploadObject({ bucket: CITATION_DOC_BUCKET, path, body, contentType, upsert: false });
+    const doc = await prisma.citationDocument.create({
+      data: {
+        tenantId,
+        bucketPath: `${CITATION_DOC_BUCKET}:${path}`,
+        contentType,
+        sourceChannel: channel,
+        status: 'PENDING',
+        uploadedByUserId: uploadedByUserId || null,
+      },
+      select: { id: true, status: true, sourceChannel: true, createdAt: true },
+    });
+    return doc;
+  },
+
+  /** List notice documents for the tenant (newest first). */
+  async listDocuments(scope = {}, filters = {}) {
+    const where = { tenantId: scope.tenantId };
+    if (filters.status) where.status = String(filters.status).toUpperCase();
+    const take = Math.min(Number(filters.pageSize) || 50, 200);
+    const skip = ((Math.max(Number(filters.page) || 1, 1)) - 1) * take;
+    const [rows, total] = await Promise.all([
+      prisma.citationDocument.findMany({
+        where,
+        orderBy: { createdAt: 'desc' },
+        take,
+        skip,
+        select: {
+          id: true, sourceChannel: true, status: true, confidence: true,
+          citationId: true, error: true, createdAt: true, contentType: true,
+        },
+      }),
+      prisma.citationDocument.count({ where }),
+    ]);
+    return { rows, total, page: Math.max(Number(filters.page) || 1, 1), pageSize: take };
+  },
+
+  /** Signed (1h) URL for a stored notice document. */
+  async getDocumentSignedUrl(id, scope = {}) {
+    const doc = await prisma.citationDocument.findFirst({
+      where: { id, tenantId: scope.tenantId },
+      select: { bucketPath: true },
+    });
+    if (!doc) {
+      const err = new Error('Document not found');
+      err.status = 404;
+      throw err;
+    }
+    const ref = String(doc.bucketPath || '');
+    const idx = ref.indexOf(':');
+    if (ref.startsWith('http')) return { url: ref };
+    if (idx <= 0) return { url: null };
+    const url = await getSignedUrl({ bucket: ref.slice(0, idx), path: ref.slice(idx + 1), expiresIn: 3600 });
+    return { url };
   },
 };
 

@@ -44,6 +44,41 @@ citationsRouter.get('/vehicle/:vehicleId', async (req, res) => {
   }
 });
 
+// ── OCR mail intake — Fase A document plumbing (authed, tenant-scoped) ──────
+// Registered BEFORE GET /:id so "/documents" isn't captured as an :id. Upload a
+// scanned/emailed notice (base64 data URL) → Supabase + CitationDocument(PENDING)
+// for the Fase B OCR worker. No money, no matching here.
+citationsRouter.post('/documents', async (req, res) => {
+  try {
+    const scope = scopeFor(req);
+    const doc = await citationsService.saveDocument({
+      tenantId: scope.tenantId,
+      dataUrl: req.body?.dataUrl,
+      sourceChannel: req.body?.sourceChannel,
+      uploadedByUserId: req.user?.sub || null,
+    });
+    res.status(201).json(doc);
+  } catch (err) {
+    handle(err, res);
+  }
+});
+
+citationsRouter.get('/documents', async (req, res) => {
+  try {
+    res.json(await citationsService.listDocuments(scopeFor(req), req.query || {}));
+  } catch (err) {
+    handle(err, res);
+  }
+});
+
+citationsRouter.get('/documents/:id/download', async (req, res) => {
+  try {
+    res.json(await citationsService.getDocumentSignedUrl(req.params.id, scopeFor(req)));
+  } catch (err) {
+    handle(err, res);
+  }
+});
+
 citationsRouter.get('/:id', async (req, res) => {
   try {
     res.json(await citationsService.getDetail(req.params.id, scopeFor(req)));

@@ -365,6 +365,7 @@ enum CitationSource {
   OCSO_COMPTROLLER
   VIOLATIONINFO
   MANUAL
+  MAIL_OCR
 }
 
 enum CitationStatus {
@@ -2799,6 +2800,28 @@ model CitationAssignment {
 
   @@index([tenantId, reservationId, status])
   @@index([citationId, status])
+}
+
+// OCR mail intake (2026-06-15) — a scanned/emailed citation notice before it
+// becomes a Citation. The worker (Fase B) extracts fields → ingestBatch.
+// Scalar-only by design (FKs live in the migration, not the Prisma client) to
+// keep the change minimal. Plan: doc/citations-ocr-mail-intake-plan-2026-06-15.md
+model CitationDocument {
+  id               String   @id @default(cuid())
+  tenantId         String
+  bucketPath       String // "<bucket>:<path>" in Supabase Storage
+  contentType      String?
+  sourceChannel    String   @default("UPLOAD") // UPLOAD | EMAIL | MAILBOX
+  status           String   @default("PENDING") // PENDING | EXTRACTED | INGESTED | REVIEW | FAILED
+  ocrJson          String?
+  confidence       Decimal? @db.Decimal(5, 2)
+  citationId       String? // set once a Citation is created from this doc
+  error            String?
+  uploadedByUserId String?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  @@index([tenantId, status, createdAt])
 }
 
 model Conversation {

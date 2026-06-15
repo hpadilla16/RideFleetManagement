@@ -167,6 +167,32 @@ function CitationsInner({ token, me, logout }) {
     }
   };
 
+  // OCR mail intake (Fase A): upload a scanned/emailed notice (image/PDF). It's
+  // stored as a CitationDocument(PENDING); the Fase B worker extracts the fields.
+  const uploadNotice = async (file) => {
+    if (!file) return;
+    if (file.size > 15 * 1024 * 1024) { setMsg('Notice file exceeds 15MB'); return; }
+    try {
+      setBusyId('upload');
+      const dataUrl = await new Promise((resolve, reject) => {
+        const fr = new FileReader();
+        fr.onload = () => resolve(fr.result);
+        fr.onerror = () => reject(new Error('Could not read file'));
+        fr.readAsDataURL(file);
+      });
+      await api(scoped('/api/citations/documents'), {
+        method: 'POST',
+        body: JSON.stringify({ dataUrl, sourceChannel: 'UPLOAD' })
+      }, token);
+      setMsg('Notice uploaded — queued for OCR.');
+      await load();
+    } catch (error) {
+      setMsg(error.message);
+    } finally {
+      setBusyId('');
+    }
+  };
+
   return (
     <AppShell me={me} logout={logout}>
       <section className="glass card-lg stack">
@@ -227,6 +253,16 @@ function CitationsInner({ token, me, logout }) {
               <label className="label"><input type="checkbox" checked={reviewOnly} onChange={(e) => setReviewOnly(e.target.checked)} /> Review only</label>
               <button type="button" onClick={load}>Refresh</button>
               <button type="button" className="button-subtle" onClick={() => setShowImport((v) => !v)}>{showImport ? 'Close' : 'Add citation'}</button>
+              <label className="button-subtle" style={{ cursor: 'pointer' }} title="Upload a scanned/emailed citation notice (image or PDF) for OCR">
+                {busyId === 'upload' ? 'Uploading...' : 'Upload notice'}
+                <input
+                  type="file"
+                  accept="image/*,application/pdf"
+                  hidden
+                  disabled={busyId === 'upload'}
+                  onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ''; uploadNotice(f); }}
+                />
+              </label>
             </div>
           </div>
 
