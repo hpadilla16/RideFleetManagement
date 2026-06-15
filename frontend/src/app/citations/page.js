@@ -257,7 +257,7 @@ function CitationsInner({ token, me, logout }) {
                 {busyId === 'upload' ? 'Uploading...' : 'Upload notice'}
                 <input
                   type="file"
-                  accept="image/*,application/pdf"
+                  accept=".pdf,.png,.jpg,.jpeg,.webp,application/pdf,image/*"
                   hidden
                   disabled={busyId === 'upload'}
                   onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ''; uploadNotice(f); }}
