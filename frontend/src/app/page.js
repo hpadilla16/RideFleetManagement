@@ -308,8 +308,10 @@ function DashboardInner({ token, me, logout }) {
       api('/api/reservations/summary', {}, token),
       canSeeVehicles ? api('/api/inventory/reconciliation/open', { bypassCache: true }, token) : Promise.resolve(null),
       // Date-scoped (tenant TZ) so the count/list aren't capped by the 500 limit.
-      api('/api/reservations?filter=pickups-today&limit=500', {}, token),
-      api('/api/reservations?filter=returns-today&limit=500', {}, token)
+      // NOTE: the /page endpoint honors ?filter=; the plain /api/reservations list
+      // ignores it (only page+limit) — using it returned an unfiltered 500.
+      api('/api/reservations/page?filter=pickups-today&limit=500', {}, token),
+      api('/api/reservations/page?filter=returns-today&limit=500', {}, token)
     ]);
 
     setMismatchCount(reconResult.status === 'fulfilled' && reconResult.value ? Number(reconResult.value.count || 0) : 0);
