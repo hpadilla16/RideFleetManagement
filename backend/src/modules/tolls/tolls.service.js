@@ -478,57 +478,56 @@ async function sunpassNavigateToActivity(page) {
 }
 
 async function sunpassFilterAndSearch(page, startStr, endStr) {
-  // Select "Toll Transaction" type
-  await page.evaluate(() => {
-    const selects = Array.from(document.querySelectorAll('select'));
-    for (const sel of selects) {
-      const label = String(sel.previousElementSibling?.textContent || sel.closest('label')?.textContent || sel.name || sel.id || '').toLowerCase();
-      if (label.includes('transaction') || label.includes('type') || sel.name?.includes('ransaction') || sel.id?.includes('ransaction')) {
-        const tollOpt = Array.from(sel.options).find((o) => /toll/i.test(o.text));
-        if (tollOpt) { sel.value = tollOpt.value; sel.dispatchEvent(new Event('change', { bubbles: true })); }
-        break;
-      }
-    }
-  });
-
-  // Select "Transaction Date" as date type
-  await page.evaluate(() => {
-    const selects = Array.from(document.querySelectorAll('select'));
-    for (const sel of selects) {
-      const label = String(sel.previousElementSibling?.textContent || sel.closest('label')?.textContent || sel.name || sel.id || '').toLowerCase();
-      if (label.includes('date') && !label.includes('start') && !label.includes('end')) {
-        const txnOpt = Array.from(sel.options).find((o) => /transaction\s*date/i.test(o.text));
-        if (txnOpt) { sel.value = txnOpt.value; sel.dispatchEvent(new Event('change', { bubbles: true })); }
-        break;
-      }
-    }
-  });
-
-  // Set start and end date to the rolling window [startStr, endStr]
+  // Set the filter controls by their REAL names (confirmed from the redesigned page):
+  //   select[name=filterBy]   → "Toll Transaction"
+  //   select[name=dateType]   → "Posted Date" (catches late-posting tolls in the window)
+  //   input[name=startDateAll] / input[name=endDateAll] → MM/DD/YYYY range
+  // Generic label-based fallbacks are kept in case of another rename.
   await page.evaluate(({ startStr, endStr }) => {
-    const inputs = Array.from(document.querySelectorAll('input'));
-    for (const input of inputs) {
-      const label = String(input.previousElementSibling?.textContent || input.closest('label')?.textContent || input.name || input.id || input.placeholder || '').toLowerCase();
-      const isStart = label.includes('start') || label.includes('from') || input.name?.includes('tart') || input.id?.includes('tart');
-      const isEnd = label.includes('end') || label.includes('to') || input.name?.includes('nd') || input.id?.includes('nd');
-      if (isStart) {
-        input.value = startStr;
-        input.dispatchEvent(new Event('input', { bubbles: true }));
-        input.dispatchEvent(new Event('change', { bubbles: true }));
-      } else if (isEnd) {
-        input.value = endStr;
-        input.dispatchEvent(new Event('input', { bubbles: true }));
-        input.dispatchEvent(new Event('change', { bubbles: true }));
-      }
+    const fire = (el) => {
+      el.dispatchEvent(new Event('input', { bubbles: true }));
+      el.dispatchEvent(new Event('change', { bubbles: true }));
+    };
+    const pickOption = (sel, rx) => {
+      if (!sel) return;
+      const opt = Array.from(sel.options).find((o) => rx.test(o.text));
+      if (opt) { sel.value = opt.value; fire(sel); }
+    };
+    const setInput = (el, val) => { if (el) { el.value = val; fire(el); } };
+
+    // Filter By → Toll Transaction
+    let filterBy = document.querySelector('select[name="filterBy"]');
+    if (!filterBy) {
+      filterBy = Array.from(document.querySelectorAll('select')).find((s) => /filter/i.test(`${s.name} ${s.id} ${s.previousElementSibling?.textContent || ''}`));
     }
+    pickOption(filterBy, /toll\s*transaction/i);
+
+    // Date Type → Posted Date
+    let dateType = document.querySelector('select[name="dateType"]');
+    if (!dateType) {
+      dateType = Array.from(document.querySelectorAll('select')).find((s) => /date\s*type/i.test(`${s.name} ${s.id} ${s.previousElementSibling?.textContent || ''}`));
+    }
+    pickOption(dateType, /posted\s*date/i);
+
+    // Date range
+    let start = document.querySelector('input[name="startDateAll"]');
+    let end = document.querySelector('input[name="endDateAll"]');
+    if (!start || !end) {
+      const inputs = Array.from(document.querySelectorAll('input[type="text"], input:not([type])'));
+      start = start || inputs.find((i) => /start|from/i.test(`${i.name} ${i.id} ${i.placeholder || ''}`));
+      end = end || inputs.find((i) => /end|to\b/i.test(`${i.name} ${i.id} ${i.placeholder || ''}`));
+    }
+    setInput(start, startStr);
+    setInput(end, endStr);
   }, { startStr, endStr });
 
-  // Click View button
+  // Click the VIEW (search) button
   await Promise.all([
     page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 45000 }).catch(() => null),
     page.evaluate(() => {
-      const btns = Array.from(document.querySelectorAll('input[type="submit"], button[type="submit"], button, input[type="button"]'));
-      const viewBtn = btns.find((b) => /^view$/i.test(String(b.textContent || b.value || '').trim()));
+      const btns = Array.from(document.querySelectorAll('button[type="submit"], input[type="submit"], button, input[type="button"]'));
+      const viewBtn = btns.find((b) => /^\s*view\s*$/i.test(String(b.textContent || b.value || '').trim()))
+        || btns.find((b) => /view|search|submit/i.test(String(b.textContent || b.value || '')));
       if (viewBtn) viewBtn.click();
     })
   ]);
@@ -549,73 +548,55 @@ async function scrapeSunPassRows(page) {
     const rows = [];
     const seen = new Set();
 
-    // Try to scrape from HTML table
+    // Redesigned SunPass activity table columns:
+    //   PostedDate | TransactionDate | Transaction Details | TransactionTime |
+    //   Transponder/License Plate | Description | Debit(-) | Credit(+) | Balance
+    // The "Transaction Details" cell carries "Transaction Number: <id> ... Location:
+    // ... Transaction Type: Transponder Toll". Detect by transponder/debit/details
+    // headers (NOT the old plaza/amount), take the toll charge from Debit(-), the toll
+    // id from the details blob, and skip credit/payment rows (blank debit).
     const tables = Array.from(document.querySelectorAll('table'));
     for (const table of tables) {
       const headerCells = Array.from(table.querySelectorAll('thead th, thead td, tr:first-child th, tr:first-child td'));
       const headers = headerCells.map((cell) => normalize(cell.textContent).toLowerCase());
-      // Look for toll-related headers
-      const hasPlaza = headers.some((h) => h.includes('plaza') || h.includes('location'));
-      const hasAmount = headers.some((h) => h.includes('amount') || h.includes('charge'));
-      if (!hasPlaza && !hasAmount) continue;
+      const isTollTable = headers.some((h) => h.includes('transponder') || h.includes('debit') || h.includes('detail'));
+      if (!isTollTable) continue;
 
       const colIdx = {
-        postedDate: headers.findIndex((h) => h.includes('posted')),
         transactionDate: headers.findIndex((h) => h.includes('transaction') && h.includes('date')),
-        transponder: headers.findIndex((h) => h.includes('transponder')),
-        plate: headers.findIndex((h) => h.includes('plate') || h.includes('license')),
-        plaza: headers.findIndex((h) => h.includes('plaza') || h.includes('location')),
-        amount: headers.findIndex((h) => h.includes('amount') || h.includes('charge'))
+        postedDate: headers.findIndex((h) => h.includes('posted')),
+        details: headers.findIndex((h) => h.includes('detail')),
+        time: headers.findIndex((h) => h.includes('time')),
+        transponderPlate: headers.findIndex((h) => h.includes('transponder') || h.includes('license') || h.includes('plate')),
+        location: headers.findIndex((h) => h.includes('description') || h.includes('location') || h.includes('plaza')),
+        debit: headers.findIndex((h) => h.includes('debit') || h.includes('amount') || h.includes('charge'))
       };
 
-      const bodyRows = Array.from(table.querySelectorAll('tbody tr, tr')).filter((tr) => {
-        const cells = tr.querySelectorAll('td');
-        return cells.length >= 3;
-      });
-
+      const bodyRows = Array.from(table.querySelectorAll('tbody tr, tr')).filter((tr) => tr.querySelectorAll('td').length >= 3);
       for (const tr of bodyRows) {
         const cells = Array.from(tr.querySelectorAll('td'));
         if (!cells.length) continue;
-        const getText = (idx) => idx >= 0 && idx < cells.length ? normalize(cells[idx].textContent) : '';
+        const getText = (idx) => (idx >= 0 && idx < cells.length ? normalize(cells[idx].textContent) : '');
+
+        const amount = amountFromText(getText(colIdx.debit));
+        if (amount === null || amount <= 0) continue; // credit/payment/blank debit → not a toll charge
 
         const transactionDate = getText(colIdx.transactionDate) || getText(colIdx.postedDate);
-        const transponder = getText(colIdx.transponder);
-        const plate = getText(colIdx.plate);
-        const plaza = getText(colIdx.plaza);
-        const amountText = getText(colIdx.amount);
-        const amount = amountFromText(amountText);
+        if (!transactionDate) continue;
+        const transactionTime = getText(colIdx.time);
+        const transponderPlate = getText(colIdx.transponderPlate);
+        const location = getText(colIdx.location);
+        const details = getText(colIdx.details);
+        // Only real toll transactions (filter is a safety net if "Filter By" let others through).
+        if (details && !/toll/i.test(details)) continue;
+        const tnMatch = details.match(/transaction\s*number:?\s*(\w+)/i);
+        const transactionNumber = tnMatch ? tnMatch[1] : '';
 
-        if (!transactionDate || amount === null || amount <= 0) continue;
-        const key = `${plate}|${transponder}|${transactionDate}|${amount}|${plaza}`;
+        const key = transactionNumber || `${transponderPlate}|${transactionDate}|${transactionTime}|${amount}|${location}`;
         if (seen.has(key)) continue;
         seen.add(key);
 
-        rows.push({
-          transactionDate,
-          transponder,
-          plate,
-          plaza,
-          amount,
-          amountRaw: amountText
-        });
-      }
-    }
-
-    // Fallback: regex on body text if no table rows found
-    if (!rows.length) {
-      const bodyText = String(document.body?.innerText || '');
-      const regex = /(\d{1,2}\/\d{1,2}\/\d{4})\s+(\d{1,2}:\d{2}:\d{2}\s*[AP]M)\s+(\w+[-\s]?\w*)\s+([A-Z0-9-]+)\s+(.+?)\s+\$?\s*(\d+\.?\d*)/gi;
-      for (const match of bodyText.matchAll(regex)) {
-        const transactionDate = `${match[1]} ${match[2]}`;
-        const transponder = match[3] || '';
-        const plate = match[4] || '';
-        const plaza = match[5] || '';
-        const amount = Number(match[6]);
-        if (!Number.isFinite(amount) || amount <= 0) continue;
-        const key = `${plate}|${transponder}|${transactionDate}|${amount}|${plaza}`;
-        if (seen.has(key)) continue;
-        seen.add(key);
-        rows.push({ transactionDate, transponder, plate, plaza, amount, amountRaw: `$${match[6]}` });
+        rows.push({ transactionDate, transactionTime, transponderPlate, location, amount, transactionNumber, details: details.slice(0, 300) });
       }
     }
 
@@ -1806,12 +1787,26 @@ export const tollsService = {
 
       for (const raw of pageRows) {
         try {
-          const transactionAt = parseSunPassDateTime(raw.transactionDate);
+          const dateTimeStr = `${raw.transactionDate || ''} ${raw.transactionTime || ''}`.trim();
+          const transactionAt = parseSunPassDateTime(dateTimeStr || raw.transactionDate);
           const amount = Number(raw.amount);
           if (!Number.isFinite(amount) || amount <= 0 || amount > 500) continue;
-          const plate = String(raw.plate || '').trim();
-          const tag = String(raw.transponder || '').trim();
-          const externalId = normalizeToken(`${plate}|${tag}|${transactionAt.toISOString()}|${amount}|${raw.plaza}`);
+          // "Transponder/License Plate" column holds EITHER a transponder number (all
+          // digits) OR a license plate (e.g. "ABC123" / "ABC123-FL"). Vehicles carry the
+          // transponder in Vehicle.tollTagNumber (loaded for the fleet), so transponder
+          // rows match by tag and video/plate rows match by plate.
+          const tpClean = String(raw.transponderPlate || '').trim().toUpperCase().replace(/\s+/g, '');
+          let plate = '';
+          let tag = '';
+          if (/^\d{6,}$/.test(tpClean)) {
+            tag = tpClean;
+          } else {
+            plate = tpClean.replace(/[-\s]?FL$/, '').replace(/[^A-Z0-9]/g, '');
+          }
+          // The SunPass transaction number is the stable id and MUST match the manual
+          // backfill's externalId so re-scrapes dedup instead of duplicating.
+          const externalId = String(raw.transactionNumber || '').trim()
+            || normalizeToken(`${plate}|${tag}|${transactionAt.toISOString()}|${amount}|${raw.location}`);
           if (!externalId) continue;
           if (seenExternalIds.has(externalId)) {
             dedupedInRunCount += 1;
@@ -1821,13 +1816,13 @@ export const tollsService = {
           rows.push({
             transactionAt: transactionAt.toISOString(),
             amount,
-            location: String(raw.plaza || '').trim(),
+            location: String(raw.location || '').trim(),
             lane: '',
             direction: '',
             plate,
             tag,
             sello: '',
-            transactionTimeRaw: String(raw.transactionDate || '').split(/\s+/).slice(1).join(' '),
+            transactionTimeRaw: String(raw.transactionTime || '').trim(),
             externalId
           });
         } catch {
