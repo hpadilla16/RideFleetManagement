@@ -23,7 +23,8 @@ const PROMPT = [
   'You are extracting fields from a US parking/traffic/camera CITATION notice (mailed to a vehicle owner).',
   'Return ONLY a JSON object, no prose, with this exact shape:',
   '{"citations":[{"citationNo":string,"plate":string|null,"plateState":string|null,"agency":string|null,',
-  '"violationType":string|null,"issuedAt":string|null,"dueAt":string|null,"amount":number,"fee":number,"location":string|null}],',
+  '"violationType":string|null,"issuedAt":string|null,"dueAt":string|null,"amount":number,"fee":number,',
+  '"location":string|null,"paymentUrl":string|null}],',
   '"confidence":number}',
   'Rules: a single notice may list multiple citations → one array entry each.',
   'Dates as ISO 8601 (YYYY-MM-DD or full) or null if not clearly printed.',
@@ -66,6 +67,7 @@ function normalizeResult(obj) {
     amount: Number.isFinite(Number(c.amount)) ? Number(c.amount) : 0,
     fee: Number.isFinite(Number(c.fee)) ? Number(c.fee) : 0,
     location: c.location ? String(c.location).trim() : null,
+    paymentUrl: c.paymentUrl ? String(c.paymentUrl).trim() : null,
   })).filter((c) => c.citationNo);
   const confidence = Number.isFinite(Number(obj?.confidence)) ? Number(obj.confidence) : null;
   return { citations, confidence };

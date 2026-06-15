@@ -87,6 +87,15 @@ citationsRouter.get('/:id', async (req, res) => {
   }
 });
 
+// Signed URL to view the scanned notice behind a citation (from its documentPath).
+citationsRouter.get('/:id/document', async (req, res) => {
+  try {
+    res.json(await citationsService.getDocumentUrl(req.params.id, scopeFor(req)));
+  } catch (err) {
+    handle(err, res);
+  }
+});
+
 citationsRouter.post('/:id/review', async (req, res) => {
   try {
     const { decision, note } = req.body || {};

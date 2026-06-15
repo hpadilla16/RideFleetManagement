@@ -245,8 +245,13 @@ export const citationsService = {
     const citation = await prisma.citation.findFirst({
       where: { id, tenantId: scope.tenantId },
       include: {
-        vehicle: { select: { id: true, plate: true } },
-        reservation: { select: { id: true, reservationNumber: true, pickupAt: true, returnAt: true } },
+        vehicle: { select: { id: true, plate: true, year: true, make: true, model: true } },
+        reservation: {
+          select: {
+            id: true, reservationNumber: true, pickupAt: true, returnAt: true,
+            customer: { select: { id: true, firstName: true, lastName: true } },
+          },
+        },
         assignments: true,
       },
     });
@@ -256,6 +261,26 @@ export const citationsService = {
       throw err;
     }
     return citation;
+  },
+
+  // Signed (1h) URL for the scanned notice behind a citation (its documentPath).
+  async getDocumentUrl(id, scope = {}) {
+    const citation = await prisma.citation.findFirst({
+      where: { id, tenantId: scope.tenantId },
+      select: { documentPath: true },
+    });
+    if (!citation) {
+      const err = new Error('Citation not found');
+      err.status = 404;
+      throw err;
+    }
+    const ref = String(citation.documentPath || '');
+    if (!ref) return { url: null };
+    if (ref.startsWith('http')) return { url: ref };
+    const idx = ref.indexOf(':');
+    if (idx <= 0) return { url: null };
+    const url = await getSignedUrl({ bucket: ref.slice(0, idx), path: ref.slice(idx + 1), expiresIn: 3600 });
+    return { url };
   },
 
   async getVehicleHistory(vehicleId, scope = {}) {

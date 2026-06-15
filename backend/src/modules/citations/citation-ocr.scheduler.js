@@ -72,6 +72,7 @@ async function processDoc(doc, cfg) {
       amount: c.amount,
       fee: c.fee,
       location: c.location,
+      externalUrl: c.paymentUrl || null,
       documentPath: doc.bucketPath,
       raw: { source: 'MAIL_OCR', docId: doc.id },
     }));

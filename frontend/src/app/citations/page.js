@@ -1,9 +1,26 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
+import { useRouter } from 'next/navigation';
 import { AuthGate } from '../../components/AuthGate';
 import { AppShell } from '../../components/AppShell';
 import { api } from '../../lib/client';
+
+// Pay-link fallback: if the OCR didn't capture the printed payment URL, derive a
+// sensible portal from the agency/violation text. citation.externalUrl wins.
+const PAY_FALLBACK = [
+  [/metropolis/i, 'https://payments.metropolis.io'],
+  [/professional parking|paymyviolations|oxygen/i, 'https://paymyviolations.com'],
+  [/vanguard|payparkingnotice/i, 'https://payparkingnotice.com'],
+  [/citation processing|(^|\W)cpc(\W|$)/i, 'https://www.citationprocessingcenter.com'],
+  [/violationinfo|red light|red traffic|automated enforcement|stops|camera|speed/i, 'https://www.violationinfo.com'],
+];
+function payUrlFor(c) {
+  if (c?.externalUrl && /^https?:\/\//i.test(c.externalUrl)) return c.externalUrl;
+  const hay = `${c?.agency || ''} ${c?.violationType || ''}`;
+  for (const [re, url] of PAY_FALLBACK) { if (re.test(hay)) return url; }
+  return null;
+}
 
 const EMPTY_IMPORT = {
   citationNo: '',
@@ -50,6 +67,7 @@ function dateLabel(value) {
 }
 
 function CitationsInner({ token, me, logout }) {
+  const router = useRouter();
   const role = String(me?.role || '').toUpperCase();
   const isSuper = role === 'SUPER_ADMIN';
   const [msg, setMsg] = useState('');
@@ -288,39 +306,55 @@ function CitationsInner({ token, me, logout }) {
           <table style={{ fontSize: '0.88rem', marginTop: 10 }}>
             <thead>
               <tr>
-                <th style={{ width: '16%' }}>Citation #</th>
-                <th style={{ width: '13%' }}>Vehicle</th>
-                <th style={{ width: '11%' }}>Issued</th>
-                <th style={{ width: '20%' }}>Agency / Violation</th>
-                <th style={{ width: '8%' }}>Source</th>
-                <th style={{ width: '9%' }} className="right">Amount</th>
-                <th style={{ width: '23%' }}>Status / Actions</th>
+                <th style={{ width: '13%' }}>Citation #</th>
+                <th style={{ width: '8%' }}>Uploaded</th>
+                <th style={{ width: '8%' }}>Citation date</th>
+                <th style={{ width: '10%' }}>Vehicle</th>
+                <th style={{ width: '11%' }}>Reservation</th>
+                <th style={{ width: '18%' }}>Agency / Violation</th>
+                <th style={{ width: '7%' }}>Source</th>
+                <th style={{ width: '8%' }} className="right">Amount</th>
+                <th style={{ width: '6%' }}>Pay</th>
+                <th style={{ width: '21%' }}>Status / Actions</th>
               </tr>
             </thead>
             <tbody>
               {rows.map((r) => {
                 const status = String(r.status || '').toUpperCase();
+                const payUrl = payUrlFor(r);
+                const go = () => router.push(`/citations/${r.id}`);
+                const stop = (e) => e.stopPropagation();
                 return (
-                  <tr key={r.id}>
+                  <tr key={r.id} onClick={go} style={{ cursor: 'pointer' }}>
                     <td style={{ fontWeight: 600, fontVariantNumeric: 'tabular-nums' }}>{r.citationNo}</td>
+                    <td style={{ fontSize: '0.8rem' }}>{dateLabel(r.createdAt)}</td>
+                    <td style={{ fontSize: '0.8rem' }}>{dateLabel(r.issuedAt)}</td>
                     <td style={{ fontSize: '0.82rem' }}>
-                      {r.vehicle ? (
-                        <div>
-                          <div style={{ fontWeight: 600 }}>{r.vehicle.plate || r.plateNormalized}</div>
-                          {r.reservation ? <div style={{ color: '#6b7a9a', fontSize: '0.72rem' }}>{r.reservation.reservationNumber}</div> : null}
-                        </div>
+                      {r.vehicle || r.vehicleId ? (
+                        <span style={{ fontWeight: 600 }}>{r.vehicle?.plate || r.plateNormalized}</span>
                       ) : (
                         <span style={{ color: '#b91c1c', fontSize: '0.78rem' }}>{r.plateNormalized || 'Unmatched'}</span>
                       )}
                     </td>
-                    <td style={{ fontSize: '0.82rem' }}>{dateLabel(r.issuedAt)}</td>
+                    <td style={{ fontSize: '0.8rem' }}>
+                      {r.reservation ? (
+                        <span style={{ color: '#1a7f4b', fontWeight: 600 }}>{r.reservation.reservationNumber}</span>
+                      ) : (
+                        <span style={{ color: '#6b7a9a' }}>{r.vehicleId ? 'No active rental' : '—'}</span>
+                      )}
+                    </td>
                     <td style={{ fontSize: '0.82rem' }}>
                       <div>{r.agency || '—'}</div>
                       {r.violationType ? <div style={{ color: '#6b7a9a', fontSize: '0.74rem' }}>{r.violationType}</div> : null}
                     </td>
                     <td><span style={{ fontSize: '0.72rem', padding: '2px 8px', borderRadius: 6, background: 'rgba(0,0,0,0.05)', color: '#5f5e5a', whiteSpace: 'nowrap' }}>{SOURCE_LABELS[r.source] || r.source}</span></td>
                     <td className="right" style={{ fontWeight: 700 }}>{money(r.amount)}</td>
-                    <td>
+                    <td onClick={stop}>
+                      {payUrl ? (
+                        <a href={payUrl} target="_blank" rel="noreferrer" style={{ fontSize: '0.74rem', color: '#1a7f4b', fontWeight: 600, whiteSpace: 'nowrap' }}>Pay ↗</a>
+                      ) : <span style={{ color: '#b9bcc4' }}>—</span>}
+                    </td>
+                    <td onClick={stop}>
                       <span className={`status-chip ${STATUS_TONE[status] || 'neutral'}`}>{status.replace('_', ' ')}</span>
                       <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', marginTop: 6 }}>
                         {status !== 'MATCHED' ? (
@@ -329,19 +363,14 @@ function CitationsInner({ token, me, logout }) {
                         {status !== 'DISPUTED' ? (
                           <button type="button" className="button-subtle" style={{ fontSize: '0.74rem', padding: '3px 8px' }} onClick={() => review(r, 'DISPUTE')} disabled={busyId === `DISPUTE-${r.id}`}>Dispute</button>
                         ) : null}
-                        {status !== 'VOID' ? (
-                          <button type="button" className="button-subtle" style={{ fontSize: '0.74rem', padding: '3px 8px' }} onClick={() => review(r, 'VOID')} disabled={busyId === `VOID-${r.id}`}>Void</button>
-                        ) : null}
-                        {r.vehicleId ? (
-                          <a href={`/vehicles?focus=${r.vehicleId}`} style={{ fontSize: '0.72rem', color: '#6e49ff', alignSelf: 'center' }}>Vehicle</a>
-                        ) : null}
+                        <a href={`/citations/${r.id}`} style={{ fontSize: '0.72rem', color: '#6e49ff', alignSelf: 'center' }}>View</a>
                       </div>
                     </td>
                   </tr>
                 );
               })}
               {!rows.length ? (
-                <tr><td colSpan={7} className="label">{isSuper && !activeTenantId ? 'Select a tenant to view citations.' : 'No citations yet. The CPC connector imports them automatically; new cars are included once Citations is enabled for the tenant.'}</td></tr>
+                <tr><td colSpan={10} className="label">{isSuper && !activeTenantId ? 'Select a tenant to view citations.' : 'No citations yet. Upload a mailed notice or let the connectors import them automatically.'}</td></tr>
               ) : null}
             </tbody>
           </table>
