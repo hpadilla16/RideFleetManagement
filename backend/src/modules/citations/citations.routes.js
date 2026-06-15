@@ -79,6 +79,15 @@ citationsRouter.get('/documents/:id/download', async (req, res) => {
   }
 });
 
+// Retry a FAILED/REVIEW notice document — resets it to PENDING for the OCR worker.
+citationsRouter.post('/documents/:id/retry', async (req, res) => {
+  try {
+    res.json(await citationsService.retryDocument(req.params.id, scopeFor(req)));
+  } catch (err) {
+    handle(err, res);
+  }
+});
+
 citationsRouter.get('/:id', async (req, res) => {
   try {
     res.json(await citationsService.getDetail(req.params.id, scopeFor(req)));

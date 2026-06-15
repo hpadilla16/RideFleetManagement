@@ -439,6 +439,27 @@ export const citationsService = {
     return { rows, total, page: Math.max(Number(filters.page) || 1, 1), pageSize: take };
   },
 
+  /** Reset a FAILED/REVIEW notice document back to PENDING so the OCR worker retries it. */
+  async retryDocument(id, scope = {}) {
+    const doc = await prisma.citationDocument.findFirst({
+      where: { id, tenantId: scope.tenantId },
+      select: { id: true, status: true },
+    });
+    if (!doc) {
+      const err = new Error('Document not found');
+      err.status = 404;
+      throw err;
+    }
+    if (!['FAILED', 'REVIEW'].includes(String(doc.status).toUpperCase())) {
+      throw new Error('Only FAILED or REVIEW documents can be retried');
+    }
+    await prisma.citationDocument.update({
+      where: { id: doc.id },
+      data: { status: 'PENDING', error: null },
+    });
+    return { id: doc.id, status: 'PENDING' };
+  },
+
   /** Signed (1h) URL for a stored notice document. */
   async getDocumentSignedUrl(id, scope = {}) {
     const doc = await prisma.citationDocument.findFirst({

@@ -81,6 +81,8 @@ function CitationsInner({ token, me, logout }) {
   const [importForm, setImportForm] = useState(EMPTY_IMPORT);
   const [showImport, setShowImport] = useState(false);
   const [busyId, setBusyId] = useState('');
+  const [docs, setDocs] = useState(null);
+  const [showDocs, setShowDocs] = useState(false);
 
   const scoped = (path) => {
     if (!isSuper || !activeTenantId) return path;
@@ -211,6 +213,34 @@ function CitationsInner({ token, me, logout }) {
     }
   };
 
+  // Incoming documents — uploaded/emailed notice scans and their OCR status.
+  const loadDocs = async () => {
+    try {
+      const out = await api(scoped('/api/citations/documents?pageSize=50'), { bypassCache: true }, token);
+      setDocs(Array.isArray(out?.rows) ? out.rows : []);
+    } catch (error) { setMsg(error.message); }
+  };
+  const toggleDocs = () => {
+    const next = !showDocs;
+    setShowDocs(next);
+    if (next) loadDocs();
+  };
+  const retryDoc = async (id) => {
+    try {
+      setBusyId(`retry-${id}`);
+      await api(scoped(`/api/citations/documents/${id}/retry`), { method: 'POST' }, token);
+      setMsg('Document re-queued for OCR');
+      await loadDocs();
+    } catch (error) { setMsg(error.message); }
+    finally { setBusyId(''); }
+  };
+  const viewDoc = async (id) => {
+    try {
+      const out = await api(scoped(`/api/citations/documents/${id}/download`), {}, token);
+      if (out?.url) window.open(out.url, '_blank', 'noopener'); else setMsg('No file on this document');
+    } catch (error) { setMsg(error.message); }
+  };
+
   return (
     <AppShell me={me} logout={logout}>
       <section className="glass card-lg stack">
@@ -281,6 +311,7 @@ function CitationsInner({ token, me, logout }) {
                   onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ''; uploadNotice(f); }}
                 />
               </label>
+              <button type="button" className="button-subtle" onClick={toggleDocs}>{showDocs ? 'Hide incoming' : 'Incoming docs'}</button>
             </div>
           </div>
 
@@ -303,7 +334,44 @@ function CitationsInner({ token, me, logout }) {
             </form>
           ) : null}
 
-          <table style={{ fontSize: '0.88rem', marginTop: 10 }}>
+          {showDocs ? (
+            <div className="stack" style={{ marginTop: 10, paddingTop: 10, borderTop: '0.5px solid rgba(0,0,0,0.08)' }}>
+              <div className="section-title" style={{ fontSize: '0.9rem' }}>Incoming documents (uploaded notices → OCR)</div>
+              {!docs ? <div className="label">Loading…</div> : !docs.length ? <div className="ui-muted">No uploaded documents yet.</div> : (
+                <div style={{ overflowX: 'auto' }}>
+                  <table style={{ fontSize: '0.82rem', minWidth: 640 }}>
+                    <thead><tr><th>Uploaded</th><th>Channel</th><th>Status</th><th>Confidence</th><th>Note</th><th>Actions</th></tr></thead>
+                    <tbody>
+                      {docs.map((d) => {
+                        const st = String(d.status || '').toUpperCase();
+                        const tone = st === 'INGESTED' ? 'good' : st === 'FAILED' ? 'danger' : st === 'REVIEW' ? 'warn' : 'neutral';
+                        return (
+                          <tr key={d.id}>
+                            <td>{dateLabel(d.createdAt)}</td>
+                            <td>{d.sourceChannel || 'UPLOAD'}</td>
+                            <td><span className={`status-chip ${tone}`}>{st}</span></td>
+                            <td>{d.confidence != null ? `${Number(d.confidence)}%` : '—'}</td>
+                            <td style={{ color: '#b91c1c', maxWidth: 220, whiteSpace: 'normal' }}>{d.error || ''}</td>
+                            <td>
+                              <div style={{ display: 'flex', gap: 6 }}>
+                                <button type="button" className="button-subtle" style={{ fontSize: '0.74rem', padding: '3px 8px' }} onClick={() => viewDoc(d.id)}>View scan</button>
+                                {['FAILED', 'REVIEW'].includes(st) ? (
+                                  <button type="button" style={{ fontSize: '0.74rem', padding: '3px 8px' }} disabled={busyId === `retry-${d.id}`} onClick={() => retryDoc(d.id)}>{busyId === `retry-${d.id}` ? '…' : 'Retry'}</button>
+                                ) : null}
+                              </div>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          ) : null}
+
+          <div style={{ overflowX: 'auto', width: '100%' }}>
+          <table style={{ fontSize: '0.88rem', marginTop: 10, minWidth: 920 }}>
             <thead>
               <tr>
                 <th style={{ width: '13%' }}>Citation #</th>
@@ -363,6 +431,9 @@ function CitationsInner({ token, me, logout }) {
                         {status !== 'DISPUTED' ? (
                           <button type="button" className="button-subtle" style={{ fontSize: '0.74rem', padding: '3px 8px' }} onClick={() => review(r, 'DISPUTE')} disabled={busyId === `DISPUTE-${r.id}`}>Dispute</button>
                         ) : null}
+                        {status !== 'NEEDS_REVIEW' ? (
+                          <button type="button" className="button-subtle" style={{ fontSize: '0.74rem', padding: '3px 8px' }} onClick={() => review(r, 'REJECT')} disabled={busyId === `REJECT-${r.id}`} title="Undo — back to Needs Review">Undo</button>
+                        ) : null}
                         <a href={`/citations/${r.id}`} style={{ fontSize: '0.72rem', color: '#6e49ff', alignSelf: 'center' }}>View</a>
                       </div>
                     </td>
@@ -374,6 +445,7 @@ function CitationsInner({ token, me, logout }) {
               ) : null}
             </tbody>
           </table>
+          </div>
         </div>
       </section>
     </AppShell>

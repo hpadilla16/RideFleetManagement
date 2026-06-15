@@ -179,6 +179,9 @@ function Inner({ token, me, logout }) {
             <button type="button" disabled={busy === 'CONFIRM'} onClick={() => review('CONFIRM')}>Confirm match</button>
             <button type="button" className="button-subtle" disabled={busy === 'DISPUTE'} onClick={() => review('DISPUTE')}>Dispute</button>
             <button type="button" className="button-subtle" disabled={busy === 'VOID'} onClick={() => review('VOID')}>Void</button>
+            {status !== 'NEEDS_REVIEW' ? (
+              <button type="button" className="button-subtle" disabled={busy === 'REJECT'} onClick={() => review('REJECT')} title="Undo — back to Needs Review">Undo</button>
+            ) : null}
           </div>
         </div>
 
