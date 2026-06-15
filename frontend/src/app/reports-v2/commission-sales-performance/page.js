@@ -254,10 +254,13 @@ function SectionHeader({ children }) {
 function Table({ children }) {
   return (
     <div style={{
-      border: '0.5px solid #d3d1c7', borderRadius: 8, overflow: 'hidden',
-      background: 'white',
+      border: '0.5px solid #d3d1c7', borderRadius: 8, overflowX: 'auto',
+      WebkitOverflowScrolling: 'touch', background: 'white',
     }}>
-      <table style={{ width: '100%', fontSize: 13, borderCollapse: 'collapse' }}>{children}</table>
+      {/* minWidth: max-content keeps columns at their natural width so wide
+          tables (many clerks / services) scroll horizontally instead of
+          squishing and cutting off info. width:100% still fills when narrow. */}
+      <table style={{ width: '100%', minWidth: 'max-content', fontSize: 13, borderCollapse: 'collapse' }}>{children}</table>
     </div>
   );
 }
