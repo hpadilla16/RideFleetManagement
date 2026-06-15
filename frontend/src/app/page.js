@@ -289,6 +289,7 @@ function DashboardInner({ token, me, logout }) {
   const [overview, setOverview] = useState(null);
   const [resSummary, setResSummary] = useState(null);
   const [mismatchCount, setMismatchCount] = useState(0);
+  const [citSummary, setCitSummary] = useState(null);
   const [msg, setMsg] = useState('');
   const canSeeOverview = me?.moduleAccess?.reports !== false;
   const canSeeVehicles = me?.moduleAccess?.vehicles !== false;
@@ -315,6 +316,11 @@ function DashboardInner({ token, me, logout }) {
     ]);
 
     setMismatchCount(reconResult.status === 'fulfilled' && reconResult.value ? Number(reconResult.value.count || 0) : 0);
+
+    // Citations tile (module-gated; soft-fail so a 403/off-module never breaks the dashboard).
+    if (me?.moduleAccess?.citations !== false) {
+      api('/api/citations/summary', {}, token).then((s) => setCitSummary(s || null)).catch(() => setCitSummary(null));
+    }
 
     if (reservationsResult.status === 'fulfilled') {
       const val = reservationsResult.value;
@@ -659,6 +665,13 @@ function DashboardInner({ token, me, logout }) {
               <strong>{workspaceOpsHub.feeAdvisoryCount}</strong>
               <span className="ui-muted">Bookings still carrying advisory follow-up.</span>
             </div>
+            {citSummary ? (
+              <button type="button" className="info-tile" style={{ textAlign: 'left', cursor: 'pointer' }} onClick={() => router.push('/citations')} title="Open citations">
+                <span className="label">Citations</span>
+                <strong>{citSummary.needsReview}</strong>
+                <span className="ui-muted">Need review · ${Number(citSummary.outstanding || 0).toFixed(2)} outstanding</span>
+              </button>
+            ) : null}
           </div>
           <div className="app-card-grid compact">
             {workspaceOpsHub.nextItems.map((item) => (

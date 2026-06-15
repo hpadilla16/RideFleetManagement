@@ -801,6 +801,7 @@ export const settingsService = {
     return {
       provider: String(cfg?.provider || 'anthropic').toLowerCase(),
       model: cfg?.model || '',
+      confidenceMin: Number.isFinite(Number(cfg?.confidenceMin)) ? Number(cfg.confidenceMin) : 70,
       hasKey: !!cfg?.apiKeyEncrypted,
     };
   },
@@ -810,6 +811,11 @@ export const settingsService = {
     const current = await readJsonSetting(key, {});
     const provider = String(payload?.provider || current.provider || 'anthropic').toLowerCase();
     const model = payload?.model !== undefined ? String(payload.model || '') : (current.model || '');
+    let confidenceMin = Number.isFinite(Number(current?.confidenceMin)) ? Number(current.confidenceMin) : 70;
+    if (payload?.confidenceMin !== undefined && payload.confidenceMin !== null && `${payload.confidenceMin}`.trim() !== '') {
+      const n = Number(payload.confidenceMin);
+      if (Number.isFinite(n)) confidenceMin = Math.max(0, Math.min(100, n));
+    }
     let apiKeyEncrypted = current.apiKeyEncrypted || null;
     if (payload?.clearKey === true) {
       apiKeyEncrypted = null;
@@ -817,11 +823,11 @@ export const settingsService = {
       if (!isEncryptionConfigured()) throw new Error('Encryption key (INTEGRATION_ENC_KEY) is not configured');
       apiKeyEncrypted = encrypt(payload.apiKey.trim());
     }
-    await writeJsonSetting(key, { provider, model, apiKeyEncrypted });
-    return { provider, model, hasKey: !!apiKeyEncrypted };
+    await writeJsonSetting(key, { provider, model, confidenceMin, apiKeyEncrypted });
+    return { provider, model, confidenceMin, hasKey: !!apiKeyEncrypted };
   },
 
-  // Internal — decrypts the key for the OCR worker. Returns { provider, model, apiKey|null }.
+  // Internal — decrypts the key for the OCR worker. Returns { provider, model, confidenceMin, apiKey|null }.
   async getCitationOcrResolved(scope = {}) {
     const cfg = await readJsonSetting(scopedKey('citationOcrConfig', scope), null);
     let apiKey = null;
@@ -831,6 +837,7 @@ export const settingsService = {
     return {
       provider: String(cfg?.provider || 'anthropic').toLowerCase(),
       model: cfg?.model || '',
+      confidenceMin: Number.isFinite(Number(cfg?.confidenceMin)) ? Number(cfg.confidenceMin) : null,
       apiKey,
     };
   },

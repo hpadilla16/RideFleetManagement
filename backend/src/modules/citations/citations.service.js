@@ -283,6 +283,20 @@ export const citationsService = {
     return { url };
   },
 
+  // Lightweight summary for the dashboard Citations tile.
+  async dashboardSummary(scope = {}) {
+    const where = { tenantId: scope.tenantId };
+    const [needsReview, open] = await Promise.all([
+      prisma.citation.count({ where: { ...where, status: 'NEEDS_REVIEW' } }),
+      prisma.citation.findMany({
+        where: { ...where, status: { notIn: ['VOID', 'PAID', 'CLOSED'] } },
+        select: { amount: true, fee: true },
+      }),
+    ]);
+    const outstanding = open.reduce((s, c) => s + Number(c.amount || 0) + Number(c.fee || 0), 0);
+    return { needsReview, openCount: open.length, outstanding: Math.round(outstanding * 100) / 100 };
+  },
+
   async getVehicleHistory(vehicleId, scope = {}) {
     return prisma.citation.findMany({
       where: { tenantId: scope.tenantId, vehicleId },

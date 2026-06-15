@@ -2493,6 +2493,13 @@ function SettingsInner({ token, me, logout }) {
                     value={ocrCfg.model || ''}
                     onChange={(e) => setOcrCfg((p) => ({ ...p, model: e.target.value }))}
                   />
+                  <label className="label">Min OCR confidence ({ocrCfg.confidenceMin ?? 70})</label>
+                  <input
+                    type="number" min="0" max="100"
+                    placeholder="70"
+                    value={ocrCfg.confidenceMin ?? 70}
+                    onChange={(e) => setOcrCfg((p) => ({ ...p, confidenceMin: e.target.value }))}
+                  />
                   <label className="label">API key {ocrCfg.hasKey ? '(saved — leave blank to keep)' : '(not set)'}</label>
                   <input
                     type="password"
@@ -2508,6 +2515,7 @@ function SettingsInner({ token, me, logout }) {
                       onClick={() => saveOcrConfig({
                         provider: ocrCfg.provider,
                         model: ocrCfg.model,
+                        confidenceMin: ocrCfg.confidenceMin,
                         ...(ocrKeyInput.trim() ? { apiKey: ocrKeyInput.trim() } : {})
                       })}
                     >

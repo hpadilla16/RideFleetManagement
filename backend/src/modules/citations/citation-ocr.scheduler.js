@@ -84,7 +84,8 @@ async function processDoc(doc, cfg) {
       rows,
     });
 
-    const lowConfidence = confidence != null && confidence < CONF_THRESHOLD;
+    const threshold = Number.isFinite(cfg?.threshold) ? cfg.threshold : CONF_THRESHOLD;
+    const lowConfidence = confidence != null && confidence < threshold;
     const created = await prisma.citation.findMany({
       where: { tenantId: doc.tenantId, source: 'MAIL_OCR', citationNo: { in: rows.map((r) => r.citationNo) } },
       select: { id: true },
@@ -139,7 +140,7 @@ async function runOnce() {
       for (const doc of docs) {
         processed += 1;
         // eslint-disable-next-line no-await-in-loop
-        const r = await processDoc(doc, { apiKey, provider: cfg.provider, model: cfg.model });
+        const r = await processDoc(doc, { apiKey, provider: cfg.provider, model: cfg.model, threshold: cfg.confidenceMin });
         if (!r) continue;
         if (r.failed) failed += 1;
         else if (r.lowConfidence || r.extracted === 0) review += 1;

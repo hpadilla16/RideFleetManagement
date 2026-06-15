@@ -44,6 +44,15 @@ citationsRouter.get('/vehicle/:vehicleId', async (req, res) => {
   }
 });
 
+// Dashboard tile summary — registered before GET /:id so "summary" isn't an :id.
+citationsRouter.get('/summary', async (req, res) => {
+  try {
+    res.json(await citationsService.dashboardSummary(scopeFor(req)));
+  } catch (err) {
+    handle(err, res);
+  }
+});
+
 // ── OCR mail intake — Fase A document plumbing (authed, tenant-scoped) ──────
 // Registered BEFORE GET /:id so "/documents" isn't captured as an :id. Upload a
 // scanned/emailed notice (base64 data URL) → Supabase + CitationDocument(PENDING)
