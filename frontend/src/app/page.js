@@ -280,6 +280,12 @@ export default function DashboardPage() {
 function DashboardInner({ token, me, logout }) {
   const router = useRouter();
   const [reservations, setReservations] = useState([]);
+  // Today's pickups/returns come from dedicated tenant-TZ date-scoped queries so
+  // the Operations Board count+list match the Reservations page (the old
+  // client-side filter over a capped /api/reservations?limit=500 dropped today's
+  // pickups when a tenant had >500 reservations → showed 0).
+  const [pickupsTodayRows, setPickupsTodayRows] = useState([]);
+  const [returnsTodayRows, setReturnsTodayRows] = useState([]);
   const [overview, setOverview] = useState(null);
   const [resSummary, setResSummary] = useState(null);
   const [mismatchCount, setMismatchCount] = useState(0);
@@ -288,7 +294,7 @@ function DashboardInner({ token, me, logout }) {
   const canSeeVehicles = me?.moduleAccess?.vehicles !== false;
 
   const load = async () => {
-    const [reservationsResult, overviewResult, vehiclesResult, summaryResult, reconResult] = await Promise.allSettled([
+    const [reservationsResult, overviewResult, vehiclesResult, summaryResult, reconResult, pickupsTodayResult, returnsTodayResult] = await Promise.allSettled([
       // The dashboard's Operations Board derives its visible Pickups/Returns
       // lists from this array. The default limit is 100 ordered by most-recent
       // created, which silently dropped today's returns whose reservations
@@ -300,7 +306,10 @@ function DashboardInner({ token, me, logout }) {
       canSeeOverview ? api('/api/reports/overview', {}, token) : Promise.resolve(null),
       !canSeeOverview && canSeeVehicles ? api('/api/vehicles?limit=2000', {}, token) : Promise.resolve([]),
       api('/api/reservations/summary', {}, token),
-      canSeeVehicles ? api('/api/inventory/reconciliation/open', { bypassCache: true }, token) : Promise.resolve(null)
+      canSeeVehicles ? api('/api/inventory/reconciliation/open', { bypassCache: true }, token) : Promise.resolve(null),
+      // Date-scoped (tenant TZ) so the count/list aren't capped by the 500 limit.
+      api('/api/reservations?filter=pickups-today&limit=500', {}, token),
+      api('/api/reservations?filter=returns-today&limit=500', {}, token)
     ]);
 
     setMismatchCount(reconResult.status === 'fulfilled' && reconResult.value ? Number(reconResult.value.count || 0) : 0);
@@ -309,6 +318,14 @@ function DashboardInner({ token, me, logout }) {
       const val = reservationsResult.value;
       setReservations(Array.isArray(val) ? val : (Array.isArray(val?.items) ? val.items : []));
     } else setReservations([]);
+
+    const asRows = (res) => {
+      if (res.status !== 'fulfilled') return [];
+      const v = res.value;
+      return Array.isArray(v) ? v : (Array.isArray(v?.items) ? v.items : (Array.isArray(v?.rows) ? v.rows : []));
+    };
+    setPickupsTodayRows(asRows(pickupsTodayResult));
+    setReturnsTodayRows(asRows(returnsTodayResult));
 
     if (overviewResult.status === 'fulfilled' && overviewResult.value) {
       setOverview(overviewResult.value || null);
@@ -455,7 +472,10 @@ function DashboardInner({ token, me, logout }) {
   const todayStr = useMemo(() => wallClockDate(new Date()), []);
   const isToday = boardDate === todayStr;
   const boardLabel = isToday ? 'Today' : new Date(boardDate + 'T12:00:00').toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric' });
-  const pickups = reservations.filter((r) => wallClockDate(r.pickupAt) === boardDate && ['NEW', 'CONFIRMED'].includes(r.status));
+  // For TODAY, use the date-scoped fetch (uncapped); other days fall back to the
+  // capped reservations array (date selector still works for browsing).
+  const pickupsSource = isToday ? pickupsTodayRows : reservations.filter((r) => wallClockDate(r.pickupAt) === boardDate);
+  const pickups = pickupsSource.filter((r) => ['NEW', 'CONFIRMED'].includes(r.status));
   // Today's returns panel: vehicles still expected back. Drops:
   //   • CANCELLED / NO_SHOW — customer never showed; nothing to return
   //   • CHECKED_IN / CHECKED_IN_UNPAID — vehicle is already back, the
@@ -465,8 +485,8 @@ function DashboardInner({ token, me, logout }) {
   // header by replacing the backend `resSummary.returnsToday` count
   // with `returns.length` (see below) — the two queries disagreed when
   // a return had been received earlier in the day.
-  const returns = reservations.filter((r) =>
-    wallClockDate(r.returnAt) === boardDate &&
+  const returnsSource = isToday ? returnsTodayRows : reservations.filter((r) => wallClockDate(r.returnAt) === boardDate);
+  const returns = returnsSource.filter((r) =>
     !['CANCELLED', 'NO_SHOW', 'CHECKED_IN', 'CHECKED_IN_UNPAID'].includes(r.status)
   );
   const timeline = reservations.slice().sort((a, b) => {

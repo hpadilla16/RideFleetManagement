@@ -1233,8 +1233,27 @@ export const reservationsService = {
       };
     }
 
+    // ?filter=pickups-today / returns-today — the dashboard Operations Board.
+    // Uses the SAME tenant-TZ "today" window as summary() so the board count
+    // matches the Reservations page "Pickups/Returns Today" tiles exactly
+    // (the old dashboard derived these client-side from a capped list, so with
+    // >500 reservations today's pickups fell out of the window and showed 0).
+    let pickupsTodayWhere = null;
+    let returnsTodayWhere = null;
+    const filterName = String(options.filter || '').toLowerCase();
+    if (filterName === 'pickups-today' || filterName === 'returns-today') {
+      const ro = await settingsService.getReservationOptions(scope);
+      const tz = String(ro?.tenantTimeZone || 'America/Puerto_Rico');
+      const nowTz = new Date(new Date().toLocaleString('en-US', { timeZone: tz }));
+      const todayStr = `${nowTz.getFullYear()}-${String(nowTz.getMonth() + 1).padStart(2, '0')}-${String(nowTz.getDate()).padStart(2, '0')}`;
+      const ds = new Date(`${todayStr}T00:00:00`);
+      const de = new Date(`${todayStr}T23:59:59.999`);
+      if (filterName === 'pickups-today') pickupsTodayWhere = { pickupAt: { gte: ds, lte: de } };
+      else returnsTodayWhere = { returnAt: { gte: ds, lte: de } };
+    }
+
     // Only one derived filter is active at a time.
-    const filterWhere = overdueWhere || stuckWhere || activeWhere;
+    const filterWhere = overdueWhere || stuckWhere || activeWhere || pickupsTodayWhere || returnsTodayWhere;
 
     const searchOrClause = query
       ? {
