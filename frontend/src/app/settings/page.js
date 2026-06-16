@@ -2354,6 +2354,15 @@ function SettingsInner({ token, me, logout }) {
             <input placeholder="Company Address" value={cfg.companyAddress || ''} onChange={(e) => setCfg({ ...cfg, companyAddress: e.target.value })} />
             <input placeholder="Logo URL" value={cfg.companyLogoUrl || ''} onChange={(e) => setCfg({ ...cfg, companyLogoUrl: e.target.value })} />
             <input type="file" accept="image/*" onChange={(e) => uploadLogo(e.target.files?.[0])} />
+            <div className="stack" style={{ marginTop: 6 }}>
+              <label className="label">Affidavit owner (transfer-of-liability)</label>
+              <div className="hint" style={{ fontSize: 12, color: '#6b7a9a' }}>
+                The registered legal entity that submits citation affidavits — may differ from the rental brand above. Leave blank to use the company name / address / phone above.
+              </div>
+              <input placeholder="Affidavit owner legal name (e.g., ZEZGO ORLANDO LLC)" value={cfg.affidavitOwnerName || ''} onChange={(e) => setCfg({ ...cfg, affidavitOwnerName: e.target.value })} />
+              <input placeholder="Affidavit owner address" value={cfg.affidavitOwnerAddress || ''} onChange={(e) => setCfg({ ...cfg, affidavitOwnerAddress: e.target.value })} />
+              <input placeholder="Affidavit owner phone" value={cfg.affidavitOwnerPhone || ''} onChange={(e) => setCfg({ ...cfg, affidavitOwnerPhone: e.target.value })} />
+            </div>
             <textarea rows={6} placeholder="Terms and Conditions" value={cfg.termsText || ''} onChange={(e) => setCfg({ ...cfg, termsText: e.target.value })} />
             <div className="stack">
               <label className="label">Terms &amp; Conditions HTML</label>

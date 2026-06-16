@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { AuthGate } from '../../../components/AuthGate';
 import { AppShell } from '../../../components/AppShell';
-import { api } from '../../../lib/client';
+import { api, API_BASE } from '../../../lib/client';
 
 const SOURCE_LABELS = {
   CITATION_PROCESSING_CENTER: 'CPC', T2: 'T2', OCSO_COMPTROLLER: 'OCSO',
@@ -103,6 +103,26 @@ function Inner({ token, me, logout }) {
     } catch (e) { setMsg(e?.message || 'Could not open scan'); }
   };
   const copy = (t) => { try { navigator.clipboard?.writeText(String(t)); setMsg('Copied to clipboard'); } catch { /* ignore */ } };
+  const affidavit = async () => {
+    try {
+      setBusy('AFFIDAVIT'); setMsg('Generating affidavit…');
+      const res = await fetch(`${API_BASE}/api/citations/${id}/affidavit/pdf`, { headers: { Authorization: `Bearer ${token}` } });
+      if (!res.ok) {
+        let m = `Affidavit failed (${res.status})`;
+        try { const j = await res.json(); if (j?.error) m = j.error; } catch { /* ignore */ }
+        setMsg(m); return;
+      }
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `Affidavit-${String(c.citationNo || 'citation').replace(/[^A-Za-z0-9_-]+/g, '-')}.pdf`;
+      document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 4000);
+      setMsg('Affidavit downloaded.');
+    } catch (e) { setMsg(e?.message || 'Affidavit failed'); }
+    finally { setBusy(''); }
+  };
   const review = async (decision) => {
     try {
       setBusy(decision);
@@ -228,6 +248,13 @@ function Inner({ token, me, logout }) {
                   </>
                 ) : <div style={{ fontSize: 12, color: 'var(--hint)', textAlign: 'center' }}>No payment link captured.</div>}
                 <button type="button" className="cd-ghost" onClick={viewScan}>View scanned notice</button>
+                {c.reservation?.customer ? (
+                  <button type="button" className="cd-ghost" disabled={busy === 'AFFIDAVIT'} onClick={affidavit}>
+                    {busy === 'AFFIDAVIT' ? 'Generating…' : 'Download affidavit (transfer of liability)'}
+                  </button>
+                ) : (
+                  <div style={{ fontSize: 11, color: 'var(--hint)', textAlign: 'center' }}>Affidavit available once matched to a renter.</div>
+                )}
               </div>
             </div>
 

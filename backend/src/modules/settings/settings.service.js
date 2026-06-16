@@ -24,7 +24,14 @@ const DEFAULTS = {
   // Per-tenant override for the canonical T&C HTML. Empty string means
   // "use the canonical lib/terms/tc-<TC_VERSION>.html"; any non-empty
   // value supersedes it via getEffectiveTermsHtmlForTenant().
-  termsHtml: ''
+  termsHtml: '',
+  // Affidavit of Transfer of Liability (citations, Fase D #4) — the registered
+  // OWNER / legal entity that submits the affidavit. May differ from the rental
+  // brand (companyName). When blank, the affidavit falls back to companyName /
+  // companyAddress / companyPhone.
+  affidavitOwnerName: '',
+  affidavitOwnerAddress: '',
+  affidavitOwnerPhone: ''
 };
 
 const ALLOWED_KEYS = Object.keys(DEFAULTS);

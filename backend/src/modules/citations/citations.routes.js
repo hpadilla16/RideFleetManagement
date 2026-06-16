@@ -17,6 +17,7 @@
 import { Router } from 'express';
 import { scopeFor } from '../../lib/tenant-scope.js';
 import { citationsService } from './citations.service.js';
+import { affidavitPdfBuffer } from './citations-affidavit.service.js';
 
 export const citationsRouter = Router();
 export const citationsInternalRouter = Router();
@@ -109,6 +110,23 @@ citationsRouter.get('/:id', async (req, res) => {
 citationsRouter.get('/:id/document', async (req, res) => {
   try {
     res.json(await citationsService.getDocumentUrl(req.params.id, scopeFor(req)));
+  } catch (err) {
+    handle(err, res);
+  }
+});
+
+// Affidavit of Transfer of Liability (PDF) — Fase D #4. NOT money. Streams a printable,
+// notarizable affidavit with the renter's identifying info (name/address/DOB/DL#) for the
+// owner to submit to the issuing authority. 400 if the citation has no matched renter.
+citationsRouter.get('/:id/affidavit/pdf', async (req, res) => {
+  try {
+    const { buffer, citationNo } = await affidavitPdfBuffer(req.params.id, scopeFor(req));
+    const safeNo = String(citationNo || 'citation').replace(/[^A-Za-z0-9_-]+/g, '-');
+    const filename = `Affidavit-${safeNo}.pdf`;
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    res.setHeader('Content-Length', buffer.byteLength);
+    res.end(buffer);
   } catch (err) {
     handle(err, res);
   }
