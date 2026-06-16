@@ -47,7 +47,8 @@ export const HARDCODED_RATES = {
   CLEANING_MEDIUM:  { unit: 'FLAT',       amount: 100.00 },
   CLEANING_HEAVY:   { unit: 'FLAT',       amount: 200.00 },
   SMOKING:          { unit: 'FLAT',       amount: 250.00 },
-  LATE_RETURN:      { unit: 'PER_HOUR',   amount: 25.00 }
+  LATE_RETURN:      { unit: 'PER_HOUR',   amount: 25.00 },
+  CITATION_ADMIN:   { unit: 'FLAT',       amount: 35.00 }
 };
 
 // Default grace window (in minutes) before LATE_RETURN starts billing. Partial

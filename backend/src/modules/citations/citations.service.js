@@ -8,6 +8,90 @@ import { prisma } from '../../lib/prisma.js';
 import logger from '../../lib/logger.js';
 import { uploadObject, getSignedUrl, safePath } from '../../lib/storage/index.js';
 import { isStorageEnabled } from '../rental-agreements/inspection-photos.js';
+import { resolveRate } from '../fees/fee-engine.service.js';
+import { reservationPricingService } from '../reservations/reservation-pricing.service.js';
+
+// ── Fase D (MONEY) — bill a matched citation to the renter's agreement ────────
+// Mirrors the issue-center claim-charge path: create reservationCharge rows
+// (source CITATION_MODULE = the fine, CITATION_ADMIN = the admin fee) then
+// recompute pricing with { allowClosed: true } so the charge mirrors into the
+// agreement and updates the unpaid balance even though citations arrive AFTER
+// the rental closed. Idempotent (upsert by source+sourceRefId, prune stale).
+// Only posts citations MATCHED to a reservation; NEVER charges a card — the
+// renter pays via the normal contract/balance flow.
+async function syncCitationCharges(reservationId, scope = {}) {
+  if (!reservationId) return;
+  const reservation = await prisma.reservation.findFirst({
+    where: { id: reservationId, ...(scope?.tenantId ? { tenantId: scope.tenantId } : {}) },
+    select: { id: true, tenantId: true, pickupLocationId: true },
+  });
+  if (!reservation) return;
+  const tenantId = reservation.tenantId || scope?.tenantId || null;
+  if (!tenantId) return;
+
+  const citations = await prisma.citation.findMany({
+    where: { reservationId, tenantId, status: { notIn: ['VOID', 'DISPUTED', 'NEEDS_REVIEW'] } },
+    select: { id: true, citationNo: true, agency: true, amount: true },
+  });
+
+  // null adminRate = the tenant turned the fee OFF → post the fine only.
+  let adminAmount = 0;
+  try {
+    const r = await resolveRate({ tenantId, locationId: reservation.pickupLocationId || null, feeType: 'CITATION_ADMIN' });
+    adminAmount = r ? Math.round(Number(r.amount || 0) * 100) / 100 : 0;
+  } catch { adminAmount = 0; }
+
+  await prisma.$transaction(async (tx) => {
+    const existing = await tx.reservationCharge.findMany({
+      where: { reservationId, source: { in: ['CITATION_MODULE', 'CITATION_ADMIN'] } },
+    });
+    const byKey = new Map(existing.map((r) => [`${r.source}|${r.sourceRefId}`, r]));
+    const agg = await tx.reservationCharge.aggregate({ where: { reservationId }, _max: { sortOrder: true } });
+    let sort = Number(agg?._max?.sortOrder ?? -1) + 1;
+    const keep = new Set();
+
+    for (const c of citations) {
+      const fineKey = `CITATION_MODULE|${c.id}`;
+      keep.add(fineKey);
+      const fineData = {
+        code: 'CITATION',
+        name: `Citation ${c.citationNo}${c.agency ? ` — ${c.agency}` : ''}`,
+        chargeType: 'UNIT', quantity: 1,
+        rate: Math.round(Number(c.amount || 0) * 100) / 100,
+        total: Math.round(Number(c.amount || 0) * 100) / 100,
+        taxable: false, selected: true,
+      };
+      const exF = byKey.get(fineKey);
+      if (exF) await tx.reservationCharge.update({ where: { id: exF.id }, data: fineData });
+      else await tx.reservationCharge.create({ data: { reservationId, ...fineData, source: 'CITATION_MODULE', sourceRefId: c.id, sortOrder: sort++ } });
+
+      if (adminAmount > 0) {
+        const feeKey = `CITATION_ADMIN|${c.id}`;
+        keep.add(feeKey);
+        const feeData = {
+          code: 'CITATION_ADMIN', name: `Citation admin fee — ${c.citationNo}`,
+          chargeType: 'UNIT', quantity: 1, rate: adminAmount, total: adminAmount, taxable: false, selected: true,
+        };
+        const exA = byKey.get(feeKey);
+        if (exA) await tx.reservationCharge.update({ where: { id: exA.id }, data: feeData });
+        else await tx.reservationCharge.create({ data: { reservationId, ...feeData, source: 'CITATION_ADMIN', sourceRefId: c.id, sortOrder: sort++ } });
+      }
+    }
+
+    const staleIds = existing.filter((r) => !keep.has(`${r.source}|${r.sourceRefId}`)).map((r) => r.id);
+    if (staleIds.length) await tx.reservationCharge.deleteMany({ where: { id: { in: staleIds } } });
+
+    if (citations.length) {
+      await tx.citation.updateMany({ where: { id: { in: citations.map((c) => c.id) } }, data: { billingStatus: 'POSTED_TO_AGREEMENT' } });
+    }
+  });
+
+  try {
+    await reservationPricingService.getPricing(reservationId, { tenantId }, { allowClosed: true });
+  } catch (e) {
+    logger.warn('[citations] balance recompute failed', { reservationId, message: String(e?.message || e) });
+  }
+}
 
 // OCR mail intake (Fase A): notice documents reuse the existing Supabase bucket
 // (same pattern as vehicle registration docs) — no new bucket/env needed. The
@@ -99,6 +183,7 @@ export const citationsService = {
     let matched = 0;
     let review = 0;
     const errors = [];
+    const billReservationIds = new Set(); // Fase D: auto-post charges for newly matched citations
 
     for (const row of rows) {
       try {
@@ -182,6 +267,7 @@ export const citationsService = {
             });
           }
           matched += 1;
+          billReservationIds.add(reservation.id);
         } else {
           await prisma.citation.update({
             where: { id: citation.id },
@@ -194,6 +280,13 @@ export const citationsService = {
         errors.push({ citationNo: row?.citationNo || null, error: String(err?.message || err) });
         logger.warn('[citations] ingest row failed', { error: String(err?.message || err) });
       }
+    }
+
+    // Fase D (MONEY): auto-post citation + admin-fee charges for the reservations
+    // that got a matched citation in this batch (idempotent; balance-only).
+    for (const rid of billReservationIds) {
+      try { await syncCitationCharges(rid, { tenantId }); }
+      catch (e) { logger.warn('[citations] auto-bill failed', { reservationId: rid, message: String(e?.message || e) }); }
     }
 
     await prisma.citationImportRun.update({
@@ -394,7 +487,7 @@ export const citationsService = {
    * Does NOT post charges (that is Phase E, money-gated).
    */
   async review(id, { decision, note, userId } = {}, scope = {}) {
-    const citation = await prisma.citation.findFirst({ where: { id, tenantId: scope.tenantId }, select: { id: true } });
+    const citation = await prisma.citation.findFirst({ where: { id, tenantId: scope.tenantId }, select: { id: true, reservationId: true } });
     if (!citation) {
       const err = new Error('Citation not found');
       err.status = 404;
@@ -403,7 +496,7 @@ export const citationsService = {
     const map = { CONFIRM: 'MATCHED', REJECT: 'NEEDS_REVIEW', DISPUTE: 'DISPUTED', VOID: 'VOID' };
     const next = map[decision];
     if (!next) throw new Error('invalid decision');
-    return prisma.citation.update({
+    const updated = await prisma.citation.update({
       where: { id },
       data: {
         status: next,
@@ -411,6 +504,13 @@ export const citationsService = {
         reviewNotes: note ? String(note).slice(0, 2000) : undefined,
       },
     });
+    // Fase D (MONEY): recompute this reservation's citation charges so the balance
+    // reflects the decision (CONFIRM posts; VOID/DISPUTE/REJECT prune). Idempotent.
+    if (citation.reservationId) {
+      try { await syncCitationCharges(citation.reservationId, { tenantId: scope.tenantId }); }
+      catch (e) { logger.warn('[citations] review re-bill failed', { reservationId: citation.reservationId, message: String(e?.message || e) }); }
+    }
+    return updated;
   },
 
   // ── OCR mail intake — Fase A (document plumbing) ──────────────────────────
