@@ -24,13 +24,18 @@ const PROMPT = [
   'Return ONLY a JSON object, no prose, with this exact shape:',
   '{"citations":[{"citationNo":string,"plate":string|null,"plateState":string|null,"agency":string|null,',
   '"violationType":string|null,"issuedAt":string|null,"dueAt":string|null,"amount":number,"fee":number,',
-  '"location":string|null,"paymentUrl":string|null}],',
+  '"location":string|null,"paymentUrl":string|null,',
+  '"paymentFields":[{"label":string,"value":string}],"paymentPhone":string|null}],',
   '"confidence":number}',
   'Rules: a single notice may list multiple citations → one array entry each.',
   'Dates as ISO 8601 (YYYY-MM-DD or full) or null if not clearly printed.',
   'amount = the fine/violation amount (number, no $). fee = any separate admin/late fee, else 0.',
   'plateState = 2-letter US state if shown. confidence = your overall 0-100 confidence in the extraction.',
   'If a field is not clearly present, use null (or 0 for amount/fee). Do not invent values.',
+  'paymentUrl = the website printed on the notice to pay/dispute, or null.',
+  'paymentFields = the EXACT pieces of info the notice says you need to PAY this citation online,',
+  'as label/value pairs copied verbatim (e.g. {"label":"Notice #","value":"877998253"}, {"label":"PIN","value":"4821"},',
+  'Account #, Reference #, Web ID, ZIP). Empty array [] if none are printed. paymentPhone = the phone to pay/call, or null.',
   'Output ONLY compact minified JSON (no markdown, no pretty-printing, no commentary).',
 ].join(' ');
 
@@ -68,6 +73,13 @@ function normalizeResult(obj) {
     fee: Number.isFinite(Number(c.fee)) ? Number(c.fee) : 0,
     location: c.location ? String(c.location).trim() : null,
     paymentUrl: c.paymentUrl ? String(c.paymentUrl).trim() : null,
+    paymentFields: Array.isArray(c.paymentFields)
+      ? c.paymentFields
+          .filter((x) => x && x.value)
+          .map((x) => ({ label: String(x.label || '').trim().slice(0, 48), value: String(x.value || '').trim().slice(0, 96) }))
+          .slice(0, 8)
+      : [],
+    paymentPhone: c.paymentPhone ? String(c.paymentPhone).trim().slice(0, 48) : null,
   })).filter((c) => c.citationNo);
   const confidence = Number.isFinite(Number(obj?.confidence)) ? Number(obj.confidence) : null;
   return { citations, confidence };

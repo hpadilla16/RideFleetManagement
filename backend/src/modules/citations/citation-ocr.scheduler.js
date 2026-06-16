@@ -74,7 +74,7 @@ async function processDoc(doc, cfg) {
       location: c.location,
       externalUrl: c.paymentUrl || null,
       documentPath: doc.bucketPath,
-      raw: { source: 'MAIL_OCR', docId: doc.id },
+      raw: { source: 'MAIL_OCR', docId: doc.id, paymentFields: c.paymentFields || [], paymentPhone: c.paymentPhone || null },
     }));
 
     await citationsService.ingestBatch({

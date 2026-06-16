@@ -260,7 +260,23 @@ export const citationsService = {
       err.status = 404;
       throw err;
     }
-    return citation;
+    // Surface OCR-extracted "how to pay" info (Notice #, PIN, phone) from the
+    // stored payload so the UI can show it without re-opening the document.
+    let paymentFields = [];
+    let paymentPhone = null;
+    if (citation.sourcePayloadJson) {
+      try {
+        const raw = JSON.parse(citation.sourcePayloadJson);
+        if (Array.isArray(raw?.paymentFields)) {
+          paymentFields = raw.paymentFields
+            .filter((x) => x && x.value)
+            .map((x) => ({ label: String(x.label || '').slice(0, 48), value: String(x.value || '').slice(0, 96) }))
+            .slice(0, 8);
+        }
+        if (raw?.paymentPhone) paymentPhone = String(raw.paymentPhone).slice(0, 48);
+      } catch { /* ignore malformed payload */ }
+    }
+    return { ...citation, paymentFields, paymentPhone };
   },
 
   // Signed (1h) URL for the scanned notice behind a citation (its documentPath).

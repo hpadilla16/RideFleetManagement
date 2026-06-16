@@ -102,6 +102,7 @@ function Inner({ token, me, logout }) {
       if (out?.url) window.open(out.url, '_blank', 'noopener'); else setMsg('No scanned notice on file.');
     } catch (e) { setMsg(e?.message || 'Could not open scan'); }
   };
+  const copy = (t) => { try { navigator.clipboard?.writeText(String(t)); setMsg('Copied to clipboard'); } catch { /* ignore */ } };
   const review = async (decision) => {
     try {
       setBusy(decision);
@@ -200,6 +201,26 @@ function Inner({ token, me, logout }) {
             <div className="cd-panel">
               <div className="cd-ph">Pay &amp; documents</div>
               <div style={{ padding: '13px 15px', display: 'flex', flexDirection: 'column', gap: 9 }}>
+                {Array.isArray(c.paymentFields) && c.paymentFields.length ? (
+                  <div style={{ border: '0.5px dashed var(--ok-bd)', borderRadius: 8, padding: '9px 11px', background: 'var(--ok-bg)' }}>
+                    <div style={{ fontSize: 11, color: 'var(--hint)', textTransform: 'uppercase', letterSpacing: '.4px', marginBottom: 6 }}>What you need to pay</div>
+                    {c.paymentFields.map((f, i) => (
+                      <div key={i} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, padding: '3px 0' }}>
+                        <span style={{ fontSize: 12, color: 'var(--muted)' }}>{f.label || 'Field'}</span>
+                        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                          <span className="mono" style={{ fontSize: 13, fontWeight: 600 }}>{f.value}</span>
+                          <button type="button" className="cd-ghost" style={{ width: 'auto', padding: '2px 8px', fontSize: 11 }} onClick={() => copy(f.value)}>Copy</button>
+                        </span>
+                      </div>
+                    ))}
+                    {c.paymentPhone ? (
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, padding: '3px 0' }}>
+                        <span style={{ fontSize: 12, color: 'var(--muted)' }}>Phone</span>
+                        <span className="mono" style={{ fontSize: 13 }}>{c.paymentPhone}</span>
+                      </div>
+                    ) : null}
+                  </div>
+                ) : null}
                 {payUrl ? (
                   <>
                     <a className="cd-bigpay" href={payUrl} target="_blank" rel="noreferrer">Pay now — {money(total)} ↗</a>
@@ -220,7 +241,7 @@ function Inner({ token, me, logout }) {
                       <div style={{ fontWeight: 500, fontSize: 14 }} className="mono">{c.vehicle.plate}</div>
                       <div style={{ fontSize: 12, color: 'var(--hint)' }}>{vehLine || '—'}</div>
                     </div>
-                    <a className="cd-lnk" href={`/vehicles?focus=${c.vehicle.id}`}>Profile ›</a>
+                    <a className="cd-lnk" href={`/vehicles/${c.vehicle.id}`}>Profile ›</a>
                   </>
                 ) : (
                   <div style={{ flex: 1, fontSize: 13, color: 'var(--hint)' }}>Not matched to a vehicle{c.plateNormalized ? ` (${c.plateNormalized} not in fleet)` : ''}.</div>
