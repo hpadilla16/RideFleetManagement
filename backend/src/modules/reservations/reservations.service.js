@@ -1179,6 +1179,14 @@ export const reservationsService = {
         }
       : {};
 
+    // 2026-06-16 — return-date filter (mirror of dateOn but on returnAt) so the
+    // dashboard Operations Board can fetch a given day's RETURNS regardless of
+    // total volume (the old capped client-side filter showed 0 for non-today).
+    const returnRange = parseListDateRange({ dateOn: options.returnDateOn, dateFrom: options.returnDateFrom, dateTo: options.returnDateTo });
+    const returnWhere = returnRange
+      ? { returnAt: { gte: returnRange.start, lte: returnRange.end } }
+      : {};
+
     // ?filter=overdue — bookings whose scheduled day already ended without
     // the expected next step:
     //   - CHECKED_OUT past planned returnAt EOD = customer didn't return
@@ -1282,6 +1290,7 @@ export const reservationsService = {
     const where = {
       ...(scope?.tenantId ? { tenantId: scope.tenantId } : {}),
       ...dateWhere,
+      ...returnWhere,
     };
     if (filterWhere && searchOrClause) {
       where.AND = [filterWhere, searchOrClause];

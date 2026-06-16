@@ -398,7 +398,7 @@ export const citationsService = {
     const [needsReview, open] = await Promise.all([
       prisma.citation.count({ where: { ...where, status: 'NEEDS_REVIEW' } }),
       prisma.citation.findMany({
-        where: { ...where, status: { notIn: ['VOID', 'PAID', 'CLOSED'] } },
+        where: { ...where, status: { notIn: ['VOID', 'DISPUTED'] } },
         select: { amount: true, fee: true },
       }),
     ]);

@@ -164,6 +164,8 @@ reservationsRouter.get('/page', async (req, res, next) => {
       dateOn: req.query?.dateOn,
       dateFrom: req.query?.dateFrom,
       dateTo: req.query?.dateTo,
+      // 2026-06-16 — return-date filter (dashboard Operations Board returns).
+      returnDateOn: req.query?.returnDateOn,
       // 2026-05-25 — sort param flows through to the cache key + service.
       // Accepts: created-desc (default), created-asc, pickup-asc,
       // pickup-desc, return-asc, return-desc.
