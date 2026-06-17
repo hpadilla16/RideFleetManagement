@@ -222,14 +222,14 @@ export async function getMarketSummary({ airport, scope }) {
  * Used by the SIPP Detail drill-down chart (stock-market style) and the
  * sparkline mini-charts on the dashboard.
  */
-export async function getMarketHistory({ airport, sipp, days = 14, scope }) {
+export async function getMarketHistory({ airport, sipp, days = 14, mode = 'history', scope }) {
   if (!airport || !sipp) {
     const err = new Error('airport and sipp query params are required');
     err.httpStatus = 400;
     throw err;
   }
   const lookbackDays = Math.max(1, Math.min(120, Number(days) || 14));
-  const since = new Date(Date.now() - lookbackDays * 24 * 60 * 60 * 1000);
+  const isForward = String(mode) === 'forward';
 
   const profileWhere = {
     locationCode: airport.toUpperCase(),
@@ -248,35 +248,48 @@ export async function getMarketHistory({ airport, sipp, days = 14, scope }) {
 
   const profileIds = profiles.map((p) => p.id);
 
-  const obs = await prisma.marketObservation.findMany({
-    where: {
-      profileId: { in: profileIds },
-      sipp,
-      observedAt: { gte: since },
-      status: 'FOUND',
-      dailyPrice: { not: null },
-    },
-    select: {
-      vendor: true,
-      dailyPrice: true,
-      effectiveDailyPrice: true,
-      pickupDate: true,
-      observedAt: true,
-    },
-  });
-
-  // See note in getMarketSummary — we use effectiveDailyPrice as the primary
-  // number (total / lor = real all-in daily cost), falling back to dailyPrice
-  // for legacy rows that didn't capture it.
+  // See note in getMarketSummary — effectiveDailyPrice is the primary number
+  // (total / lor = real all-in daily cost), falling back to dailyPrice.
   const priceOf = (o) =>
     o.effectiveDailyPrice != null ? Number(o.effectiveDailyPrice) : Number(o.dailyPrice);
+  const sel = { vendor: true, dailyPrice: true, effectiveDailyPrice: true, pickupDate: true, observedAt: true };
 
-  // Group by date (YYYY-MM-DD using observedAt) → array of {vendor, price}
+  // byDate: array of {vendor, price} per chart day.
+  //   - history mode : day = observedAt — how the market moved while we watched.
+  //   - forward mode : day = FUTURE pickupDate, using the LATEST quote per
+  //     (pickupDate, vendor) — the forward booking curve for the next N days
+  //     (this is the forecasting view; works even if we've only scraped a few days).
   const byDate = new Map();
-  for (const o of obs) {
-    const day = o.observedAt.toISOString().slice(0, 10);
-    if (!byDate.has(day)) byDate.set(day, []);
-    byDate.get(day).push({ vendor: o.vendor || '?', price: priceOf(o) });
+  if (isForward) {
+    const start = new Date(); start.setUTCHours(0, 0, 0, 0);
+    const end = new Date(start.getTime() + lookbackDays * 24 * 60 * 60 * 1000);
+    const obs = await prisma.marketObservation.findMany({
+      where: { profileId: { in: profileIds }, sipp, status: 'FOUND', dailyPrice: { not: null }, pickupDate: { gte: start, lte: end } },
+      select: sel,
+    });
+    // Keep only the most recent observation per (pickupDate, vendor).
+    const latest = new Map();
+    for (const o of obs) {
+      const day = o.pickupDate.toISOString().slice(0, 10);
+      const key = `${day}|${o.vendor || '?'}`;
+      const prev = latest.get(key);
+      if (!prev || o.observedAt > prev.o.observedAt) latest.set(key, { day, o });
+    }
+    for (const { day, o } of latest.values()) {
+      if (!byDate.has(day)) byDate.set(day, []);
+      byDate.get(day).push({ vendor: o.vendor || '?', price: priceOf(o) });
+    }
+  } else {
+    const since = new Date(Date.now() - lookbackDays * 24 * 60 * 60 * 1000);
+    const obs = await prisma.marketObservation.findMany({
+      where: { profileId: { in: profileIds }, sipp, observedAt: { gte: since }, status: 'FOUND', dailyPrice: { not: null } },
+      select: sel,
+    });
+    for (const o of obs) {
+      const day = o.observedAt.toISOString().slice(0, 10);
+      if (!byDate.has(day)) byDate.set(day, []);
+      byDate.get(day).push({ vendor: o.vendor || '?', price: priceOf(o) });
+    }
   }
 
   // Compute median + percentiles per day.
@@ -299,9 +312,11 @@ export async function getMarketHistory({ airport, sipp, days = 14, scope }) {
   // Pick top vendors by total appearance count across the window for the
   // per-vendor lines. Then emit per-vendor min price per day.
   const vendorCounts = new Map();
-  for (const o of obs) {
-    const v = (o.vendor || '?').trim();
-    vendorCounts.set(v, (vendorCounts.get(v) || 0) + 1);
+  for (const rows of byDate.values()) {
+    for (const r of rows) {
+      const v = (r.vendor || '?').trim();
+      vendorCounts.set(v, (vendorCounts.get(v) || 0) + 1);
+    }
   }
   const topVendors = Array.from(vendorCounts.entries())
     .sort((a, b) => b[1] - a[1])
@@ -323,6 +338,7 @@ export async function getMarketHistory({ airport, sipp, days = 14, scope }) {
     airport: airport.toUpperCase(),
     sipp,
     days: lookbackDays,
+    mode: isForward ? 'forward' : 'history',
     series,
     vendors: vendorSeries,
   };

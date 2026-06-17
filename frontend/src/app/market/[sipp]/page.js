@@ -46,7 +46,7 @@ const TIME_PILLS = [
   { value: 7, label: '7d' },
   { value: 14, label: '14d' },
   { value: 30, label: '30d' },
-  { value: 90, label: '90d' }
+  { value: 60, label: '60d' }
 ];
 
 function fmtMoney(value) {
@@ -105,7 +105,7 @@ function SippDetail({ token, me, logout }) {
       try {
         const [sum, hist] = await Promise.all([
           api(`/api/market/summary?airport=${encodeURIComponent(airport)}`, { bypassCache: true }, token),
-          api(`/api/market/history?airport=${encodeURIComponent(airport)}&sipp=${encodeURIComponent(sipp)}&days=${days}`, { bypassCache: true }, token)
+          api(`/api/market/history?airport=${encodeURIComponent(airport)}&sipp=${encodeURIComponent(sipp)}&days=${days}&mode=forward`, { bypassCache: true }, token)
         ]);
         if (cancelled) return;
         const row = (sum?.sipps || []).find((s) => s.sipp === sipp) || null;
@@ -262,7 +262,7 @@ function Header({ sipp, label, airport, vendorCount, onConfigureRule }) {
           {sipp} — {label}
         </h1>
         <div style={{ color: '#8a93a6', fontSize: 14, marginTop: 4 }}>
-          {airport === 'SJU' ? `San Juan (${airport})` : airport} · 14-day window · {vendorCount != null ? `${vendorCount} competing vendors observed` : 'vendor count loading…'}
+          {airport === 'SJU' ? `San Juan (${airport})` : airport} · forward booking curve · {vendorCount != null ? `${vendorCount} competing vendors observed` : 'vendor count loading…'}
         </div>
       </div>
       <button
@@ -499,7 +499,7 @@ function ChartCard({ history, summaryRow, days, onDaysChange, loading }) {
     }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14, flexWrap: 'wrap', gap: 8 }}>
         <div style={{ fontSize: 16, fontWeight: 600, color: '#e7ebf2' }}>
-          Price history — last {days} days
+          Market forecast — next {days} days
         </div>
         <div style={{ display: 'flex', gap: 8 }}>
           {TIME_PILLS.map((p) => (
@@ -576,7 +576,11 @@ function Leaderboard({ summaryRow, history, onChase, days = 14 }) {
       const prices = pricePoints
         .filter((p) => p?.price != null && Number.isFinite(Number(p.price)))
         .map((p) => Number(p.price));
-      const current = prices.length ? prices[prices.length - 1] : null;
+      // Forward curve: "current" = the nearest pickup date (first point), not the
+      // farthest. History mode: "current" = the most recent observation (last point).
+      const current = prices.length
+        ? (history?.mode === 'forward' ? prices[0] : prices[prices.length - 1])
+        : null;
       const avgPrice = avg(prices);
       const delta = deltaPct(prices);
       return {

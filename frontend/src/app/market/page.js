@@ -141,7 +141,7 @@ function Dashboard({ token, me, logout }) {
         } else {
           const results = await Promise.all(
             sipps.map((sipp) =>
-              api(`/api/market/history?airport=${encodeURIComponent(airport)}&sipp=${encodeURIComponent(sipp)}&days=${rangeDays}`, { bypassCache: true }, token)
+              api(`/api/market/history?airport=${encodeURIComponent(airport)}&sipp=${encodeURIComponent(sipp)}&days=${rangeDays}&mode=forward`, { bypassCache: true }, token)
                 .then((data) => [sipp, data])
                 .catch(() => [sipp, null])
             )

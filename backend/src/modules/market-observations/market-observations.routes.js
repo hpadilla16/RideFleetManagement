@@ -54,6 +54,7 @@ marketObservationsRouter.get('/history', async (req, res, next) => {
       airport: req.query.airport,
       sipp: req.query.sipp,
       days: req.query.days,
+      mode: req.query.mode,
       scope: scopeFor(req),
     });
     res.json(out);
