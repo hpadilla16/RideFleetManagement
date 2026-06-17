@@ -17,10 +17,11 @@ const NAV_ITEMS = [
   { href: '/people', labelKey: 'nav.people', adminOnly: true, moduleKey: 'people' },
   { href: '/planner', labelKey: 'nav.planner', moduleKey: 'planner' },
   { href: '/reports-v2', labelKey: 'nav.reports', moduleKey: 'reports' },
-  { href: '/reports-v2/inventory-reports', labelKey: 'nav.inventoryReports', moduleKey: 'reports' },
+  // Inventory Reports now lives INSIDE Reports (tile on the /reports-v2 landing).
   { href: '/car-sharing', labelKey: 'nav.carSharing', feature: 'carSharing', moduleKey: 'carSharing' },
   { href: '/host', labelKey: 'nav.hostApp', feature: 'carSharing', moduleKey: 'hostApp' },
-  { href: '/employee', labelKey: 'nav.employeeApp', moduleKey: 'employeeApp' },
+  // Employee App hidden 2026-06-16 — not in use right now (route still works at /employee).
+  // { href: '/employee', labelKey: 'nav.employeeApp', moduleKey: 'employeeApp' },
   { href: '/issues', labelKey: 'nav.issueCenter', moduleKey: 'issueCenter' },
   { href: '/loaner', labelKey: 'nav.loaner', feature: 'dealershipLoaner', moduleKey: 'loaner' },
   { href: '/tolls', labelKey: 'nav.tolls', moduleKey: 'tolls' },
@@ -31,8 +32,8 @@ const NAV_ITEMS = [
   { href: '/settings', labelKey: 'nav.settings', moduleKey: 'settings' },
   { href: '/tenants', labelKey: 'nav.tenants', superOnly: true, moduleKey: 'tenants' },
   { href: '/settings/security', labelKey: 'nav.security', adminOnly: true, moduleKey: 'security' },
-  { href: '/settings/store-boards', labelKey: 'nav.actionBoards', adminOnly: true, moduleKey: 'settings' },
-  { href: '/settings/agreement-clauses', labelKey: 'nav.agreementClauses', adminOnly: true, moduleKey: 'settings' }
+  { href: '/settings/store-boards', labelKey: 'nav.actionBoards', adminOnly: true, moduleKey: 'settings' }
+  // Agreement clauses removed from the sidebar — it already lives inside Settings.
 ];
 
 const IDLE_LOCK_MS = 2 * 60 * 1000;

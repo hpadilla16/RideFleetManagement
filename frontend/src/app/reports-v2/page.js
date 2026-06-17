@@ -75,6 +75,18 @@ function ReportsLanding({ token, me, logout }) {
       if (!out[key]) out[key] = [];
       out[key].push(r);
     }
+    // Inventory Reports is a saved-report archive page (/reports-v2/inventory-reports),
+    // not a registry slug — surface it as a Fleet tile so it stays reachable now that
+    // it's no longer in the sidebar. The tile's slug routes there via the existing onClick.
+    if (!reports.some((r) => r.slug === 'inventory-reports')) {
+      if (!out.FLEET) out.FLEET = [];
+      out.FLEET.push({
+        slug: 'inventory-reports',
+        title: 'Inventory Reports',
+        description: 'Saved fleet inventory session reports (PDF archive).',
+        status: 'AVAILABLE',
+      });
+    }
     return out;
   }, [reports]);
 
