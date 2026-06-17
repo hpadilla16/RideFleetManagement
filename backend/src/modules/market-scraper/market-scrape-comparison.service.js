@@ -15,6 +15,7 @@
  * RateDailyPrice lives in market-scrape-correction.service.js.
  */
 import { prisma } from '../../lib/prisma.js';
+import { renderReportExcel } from '../reports/reports-export.js';
 
 function notFound(msg) {
   const e = new Error(msg);
@@ -245,8 +246,73 @@ export async function computeRunComparison(runId, { scope = {} } = {}) {
   };
 }
 
+/**
+ * RateHighway-style Excel export for a run: prices + suggested amount BY vehicle
+ * class (SIPP) and BY day. Reuses computeRunComparison + the shared exceljs helper.
+ * Returns { buffer, filename }.
+ */
+export async function buildRunComparisonWorkbook(runId, { scope = {} } = {}) {
+  const cmp = await computeRunComparison(runId, { scope });
+  const rows = Array.isArray(cmp.rows) ? cmp.rows : [];
+
+  let profileName = 'Market';
+  try {
+    const run = await prisma.marketScrapeRun.findFirst({ where: { id: runId }, include: { profile: { select: { name: true } } } });
+    if (run?.profile?.name) profileName = run.profile.name;
+  } catch { /* generic title */ }
+
+  const dates = [...new Set(rows.map((r) => r.date))].sort();
+  const sipps = [...new Set(rows.map((r) => r.sipp))].sort();
+  const byCell = new Map();
+  for (const r of rows) byCell.set(`${r.sipp}|${r.date}`, r);
+  const fmtDay = (d) => { const p = String(d).split('-'); return p.length === 3 ? `${p[1]}/${p[2]}` : String(d); };
+
+  // Pivot: rows = vehicle class (SIPP), columns = each pickup day.
+  const pivotCols = [
+    { header: 'Vehicle class (SIPP)', key: 'sipp', width: 18 },
+    ...dates.map((d) => ({ header: fmtDay(d), key: d, type: 'currency', width: 10 })),
+  ];
+  const pivot = (valueOf) => sipps.map((sipp) => {
+    const out = { sipp };
+    for (const d of dates) { const c = byCell.get(`${sipp}|${d}`); out[d] = c ? valueOf(c) : null; }
+    return out;
+  });
+  const suggestedRows = pivot((c) => c.suggestedPrice ?? c.marketCheapest ?? null);
+  const marketRows = pivot((c) => c.marketCheapest ?? null);
+
+  const detailCols = [
+    { header: 'Date', key: 'date', width: 12 },
+    { header: 'Class (SIPP)', key: 'sipp', width: 12 },
+    { header: 'Cheapest competitor', key: 'marketVendor', width: 22 },
+    { header: 'Market cheapest', key: 'marketCheapest', type: 'currency', width: 15 },
+    { header: 'Your current', key: 'currentPrice', type: 'currency', width: 13 },
+    { header: 'Suggested', key: 'suggestedPrice', type: 'currency', width: 12 },
+    { header: 'Delta $', key: 'deltaAbs', type: 'currency', width: 10 },
+    { header: 'Delta %', key: 'deltaPct', width: 9 },
+    { header: 'Samples', key: 'marketSampled', type: 'integer', width: 9 },
+  ];
+  const detailRows = rows.map((r) => ({
+    date: r.date, sipp: r.sipp, marketVendor: r.marketVendor || '',
+    marketCheapest: r.marketCheapest ?? null, currentPrice: r.currentPrice ?? null,
+    suggestedPrice: r.suggestedPrice ?? null, deltaAbs: r.deltaAbs ?? null,
+    deltaPct: r.deltaPct ?? null, marketSampled: r.marketSampled ?? null,
+  }));
+
+  const range = dates.length ? `${dates[0]} - ${dates[dates.length - 1]}` : 'no dates';
+  return renderReportExcel({
+    title: `Market pricing - ${profileName}`,
+    subtitle: `Strategy ${cmp.strategy || '-'} | ${range} | generated ${new Date().toISOString().slice(0, 10)}`,
+    sheets: [
+      { name: 'Suggested by class & day', columns: pivotCols, rows: suggestedRows },
+      { name: 'Market cheapest', columns: pivotCols, rows: marketRows },
+      { name: 'Detail', columns: detailCols, rows: detailRows },
+    ],
+  });
+}
+
 export const marketScrapeComparisonService = {
   applyStrategy,
   aggregateCheapestBySippDate,
-  computeRunComparison
+  computeRunComparison,
+  buildRunComparisonWorkbook
 };

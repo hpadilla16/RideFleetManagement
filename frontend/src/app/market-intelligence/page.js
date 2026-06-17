@@ -27,7 +27,7 @@
 import { useEffect, useState } from 'react';
 import { AuthGate } from '../../components/AuthGate';
 import { AppShell } from '../../components/AppShell';
-import { api } from '../../lib/client';
+import { api, API_BASE } from '../../lib/client';
 
 const STRATEGIES = [
   { value: 'CHEAPEST_MINUS_AMOUNT', label: 'Cheapest minus amount' },
@@ -218,6 +218,24 @@ function Inner({ token, me, logout }) {
     }
   }
 
+  async function downloadExcel() {
+    if (!selectedRunId) return;
+    try {
+      const res = await fetch(`${API_BASE}/api/market-scraper/runs/${selectedRunId}/export.xlsx`, { headers: { Authorization: `Bearer ${token}` } });
+      if (!res.ok) {
+        let m = `Export failed (${res.status})`;
+        try { const j = await res.json(); if (j?.error) m = j.error; } catch { /* ignore */ }
+        setMsg(m); return;
+      }
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url; a.download = `market-pricing-${selectedRunId}.xlsx`;
+      document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 4000);
+    } catch (e) { setMsg(`Export failed: ${e.message}`); }
+  }
+
   function selectProfile(id) {
     setSelectedProfileId(id);
     loadRuns(id);
@@ -360,6 +378,7 @@ function Inner({ token, me, logout }) {
                   comparison={comparison}
                   onApply={applySuggestions}
                   applying={applying}
+                  onExport={downloadExcel}
                 />
               )}
             </div>
@@ -379,7 +398,7 @@ function Inner({ token, me, logout }) {
   );
 }
 
-function ComparisonView({ comparison, onApply, applying }) {
+function ComparisonView({ comparison, onApply, applying, onExport }) {
   const writableRows = comparison.rows.filter((r) => r.willUpdate && r.vehicleTypeId);
 
   return (
@@ -388,6 +407,13 @@ function ComparisonView({ comparison, onApply, applying }) {
         <h4 style={{ margin: 0, fontSize: 14, fontWeight: 600 }}>
           Comparison — {comparison.strategy} ({comparison.summary.sampled} cells sampled)
         </h4>
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+        <button
+          type="button"
+          onClick={onExport}
+          style={{ padding: '6px 14px', borderRadius: 6, border: '1px solid #cbd5e1', background: '#fff', color: '#0f172a', cursor: 'pointer', fontSize: 13 }}>
+          ⬇ Export Excel
+        </button>
         <button
           onClick={onApply}
           disabled={applying || comparison.targetRateMissing || writableRows.length === 0}
@@ -403,6 +429,7 @@ function ComparisonView({ comparison, onApply, applying }) {
         >
           {applying ? 'Applying...' : `Apply ${writableRows.length} suggestion${writableRows.length === 1 ? '' : 's'}`}
         </button>
+        </div>
       </div>
       {comparison.targetRateMissing && (
         <div style={{ padding: 8, background: '#fef3c7', borderRadius: 6, fontSize: 13, marginBottom: 12, color: '#92400e' }}>

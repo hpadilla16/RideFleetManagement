@@ -141,7 +141,7 @@ function Dashboard({ token, me, logout }) {
         } else {
           const results = await Promise.all(
             sipps.map((sipp) =>
-              api(`/api/market/history?airport=${encodeURIComponent(airport)}&sipp=${encodeURIComponent(sipp)}&days=14`, { bypassCache: true }, token)
+              api(`/api/market/history?airport=${encodeURIComponent(airport)}&sipp=${encodeURIComponent(sipp)}&days=${rangeDays}`, { bypassCache: true }, token)
                 .then((data) => [sipp, data])
                 .catch(() => [sipp, null])
             )
@@ -158,7 +158,7 @@ function Dashboard({ token, me, logout }) {
       }
     })();
     return () => { cancelled = true; };
-  }, [token, airport]);
+  }, [token, airport, rangeDays]);
 
   // Build the display list: union of standard order + any unknowns from API,
   // each entry either has summary data or is an empty-state placeholder.
@@ -230,6 +230,7 @@ function Dashboard({ token, me, logout }) {
                 label={card.label}
                 data={card.data}
                 history={historiesBySipp[card.code]}
+                rangeDays={rangeDays}
                 onClick={() => router.push(`/market/${encodeURIComponent(card.code)}`)}
               />
             ))}
@@ -389,7 +390,7 @@ function LegendDot({ color, label }) {
 // SIPP card
 // ---------------------------------------------------------------------------
 
-function SippCard({ code, label, data, history, onClick }) {
+function SippCard({ code, label, data, history, rangeDays = 14, onClick }) {
   // Empty state when summary has no entry for this SIPP.
   if (!data) {
     return (
@@ -411,25 +412,19 @@ function SippCard({ code, label, data, history, onClick }) {
   const yourRank = data.yourRank;
   const vendorCount = data.vendorCount || 0;
 
-  // Compute 7d delta from yourRate series across the last 7 history points.
-  // We have to derive this from the history endpoint since summary only
-  // gives a snapshot. If yourRate isn't attached, leave the delta blank.
+  // Delta + sparkline span the selected range (the history is fetched with days=rangeDays).
   const yourSeries = useMemo(() => {
     if (!history?.series) return [];
-    return history.series
-      .slice(-7)
-      .map((row) => ({ date: row.date, price: yourPrice })); // flat if no per-day source
+    return history.series.map((row) => ({ date: row.date, price: yourPrice })); // flat if no per-day source
   }, [history, yourPrice]);
 
-  // Real 7d delta: prefer the cheapest series since "your price" rarely
-  // changes day-over-day in V1. Comment notes this caveat.
-  // TODO: when PricingRule/AUTO writes start touching yourRate daily, switch
-  // to a per-day "your historical price" series.
-  const cheapest7d = useMemo(() => {
+  // Range delta: prefer the cheapest series since "your price" rarely changes
+  // day-over-day in V1.
+  const cheapestSeries = useMemo(() => {
     if (!history?.series) return [];
-    return history.series.slice(-7).map((row) => ({ date: row.date, price: row.min }));
+    return history.series.map((row) => ({ date: row.date, price: row.min }));
   }, [history]);
-  const cheapestDeltaPct = computeDeltaPct(cheapest7d);
+  const cheapestDeltaPct = computeDeltaPct(cheapestSeries);
 
   const rankClass = (() => {
     if (yourRank == null) return 'rank-unknown';
@@ -459,7 +454,7 @@ function SippCard({ code, label, data, history, onClick }) {
         </div>
         <div style={{ textAlign: 'right' }}>
           <div style={priceStyle}>{fmtMoney(yourPrice)}</div>
-          {cheapestDeltaPct != null && <DeltaBadge pct={cheapestDeltaPct} />}
+          {cheapestDeltaPct != null && <DeltaBadge pct={cheapestDeltaPct} days={rangeDays} />}
         </div>
       </div>
 
@@ -487,13 +482,13 @@ function SippCard({ code, label, data, history, onClick }) {
   );
 }
 
-function DeltaBadge({ pct }) {
+function DeltaBadge({ pct, days = 7 }) {
   const cls = pct > 1 ? 'up' : pct < -1 ? 'down' : 'flat';
   const bg = cls === 'up' ? 'rgba(239,68,68,0.15)'
     : cls === 'down' ? 'rgba(34,197,94,0.15)'
     : 'rgba(148,163,184,0.15)';
   const fg = cls === 'up' ? '#f87171' : cls === 'down' ? '#4ade80' : '#94a3b8';
-  const txt = `${pct > 0 ? '+' : ''}${pct.toFixed(1)}% 7d`;
+  const txt = `${pct > 0 ? '+' : ''}${pct.toFixed(1)}% ${days}d`;
   return (
     <span style={{
       fontSize: 12,

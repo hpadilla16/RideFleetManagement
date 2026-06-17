@@ -123,11 +123,8 @@ function SippDetail({ token, me, logout }) {
   function configureRule() {
     const rateId = summaryRow?.yourRate?.id;
     if (rateId) {
-      // TODO: confirm the actual rate-edit route once Pricing Intelligence
-      // panel (task #61) ships. /rates/:id/edit is the convention used by
-      // market-intelligence today; we may need /rates/[id]/pricing if the
-      // panel lives on a sub-route.
-      router.push(`/rates/${encodeURIComponent(rateId)}/edit`);
+      // The rate pricing panel lives at /rates/[id]/pricing (there is no /edit route).
+      router.push(`/rates/${encodeURIComponent(rateId)}/pricing`);
     } else {
       setModal('attach-rate');
     }
@@ -136,7 +133,7 @@ function SippDetail({ token, me, logout }) {
   function chaseVendor(vendorName) {
     const rateId = summaryRow?.yourRate?.id;
     if (rateId) {
-      router.push(`/rates/${encodeURIComponent(rateId)}/edit?chase=${encodeURIComponent(vendorName)}`);
+      router.push(`/rates/${encodeURIComponent(rateId)}/pricing?chase=${encodeURIComponent(vendorName)}`);
     } else {
       setModal('attach-rate');
     }

@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { marketScrapeProfileService } from './market-scrape-profile.service.js';
-import { computeRunComparison } from './market-scrape-comparison.service.js';
+import { computeRunComparison, buildRunComparisonWorkbook } from './market-scrape-comparison.service.js';
 import { applyRunSuggestions } from './market-scrape-correction.service.js';
 import { scopeFor } from '../../lib/tenant-scope.js';
 
@@ -111,6 +111,18 @@ marketScraperRouter.get('/runs/:runId/comparison', async (req, res, next) => {
   try {
     const out = await computeRunComparison(req.params.runId, { scope: scopeFor(req) });
     res.json(out);
+  } catch (e) { handle(e, res, next); }
+});
+
+// RateHighway-style Excel: prices + suggested by vehicle class (SIPP) and by day.
+marketScraperRouter.get('/runs/:runId/export.xlsx', async (req, res, next) => {
+  try {
+    const { buffer, filename } = await buildRunComparisonWorkbook(req.params.runId, { scope: scopeFor(req) });
+    const body = Buffer.isBuffer(buffer) ? buffer : Buffer.from(buffer);
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    res.setHeader('Content-Length', body.byteLength);
+    res.end(body);
   } catch (e) { handle(e, res, next); }
 });
 
