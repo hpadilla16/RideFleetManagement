@@ -33,6 +33,13 @@ const STATUS_STYLE = {
   VOID: { bg: '#F1EFE8', fg: '#5F5E5A', label: 'VOID' },
 };
 
+// Post-issuance transitions (mirrors the backend STATUS_FLOW).
+const STATUS_NEXT = {
+  ISSUED: ['DISPUTED', 'RESOLVED', 'CLOSED', 'VOID'],
+  DISPUTED: ['RESOLVED', 'CLOSED', 'VOID'],
+  RESOLVED: ['CLOSED', 'VOID'],
+};
+
 function fmtMoney(n) {
   if (n == null || n === '') return '—';
   return `$${Number(n).toFixed(2)}`;
@@ -100,6 +107,7 @@ export function IncidentReportsPanel({ reservation, token, role, me }) {
   const [loading, setLoading] = useState(false);
   const [open, setOpen] = useState(null);      // currently-open incident (full serialized)
   const [clauses, setClauses] = useState([]);  // clause library
+  const [agCharges, setAgCharges] = useState([]); // rental-agreement charges for the §6 picker
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
 
@@ -127,6 +135,12 @@ export function IncidentReportsPanel({ reservation, token, role, me }) {
     try { const rows = await api('/api/incident-reports/clauses', {}, token); setClauses(Array.isArray(rows) ? rows : []); }
     catch { /* clause library optional */ }
   }
+  async function loadCharges() {
+    const agId = reservation?.rentalAgreement?.id;
+    if (!agId) { setAgCharges([]); return; }
+    try { const ag = await api(`/api/rental-agreements/${agId}`, {}, token); setAgCharges(Array.isArray(ag?.charges) ? ag.charges : []); }
+    catch { setAgCharges([]); }
+  }
   async function openIncident(id) {
     setError('');
     try {
@@ -136,7 +150,31 @@ export function IncidentReportsPanel({ reservation, token, role, me }) {
       setCertTitle(inc.certifiedByTitle || '');
       setSig('');
       loadClauses();
+      loadCharges();
     } catch (e) { setError(e?.message || 'Failed to open incident'); }
+  }
+  async function changeStatus(status) {
+    if (!open) return;
+    if (!window.confirm(`Move report ${open.reportNumber} to ${status}?`)) return;
+    setBusy(true); setError('');
+    try {
+      const inc = await api(`/api/incident-reports/${open.id}/status`, { method: 'POST', body: JSON.stringify({ status }) }, token);
+      setOpen(inc); await refreshList();
+    } catch (e) { setError(e?.message || 'Status change failed'); }
+    finally { setBusy(false); }
+  }
+  async function saveEvidence(evId, patch) {
+    setBusy(true); setError('');
+    try { await api(`/api/incident-reports/${open.id}/evidence/${evId}`, { method: 'PATCH', body: JSON.stringify(patch) }, token); await openIncident(open.id); }
+    catch (e) { setError(e?.message || 'Evidence update failed'); }
+    finally { setBusy(false); }
+  }
+  async function toggleCharge(chargeId, checked) {
+    const base = (open.chargeIds && open.chargeIds.length)
+      ? new Set(open.chargeIds.map(String))
+      : new Set(agCharges.filter((c) => c.selected !== false).map((c) => String(c.id)));
+    if (checked) base.add(String(chargeId)); else base.delete(String(chargeId));
+    patchOpen({ chargeIds: Array.from(base) });
   }
   async function createIncident() {
     setBusy(true); setError('');
@@ -278,9 +316,13 @@ export function IncidentReportsPanel({ reservation, token, role, me }) {
               <code style={{ fontSize: 13 }}>{open.reportNumber}</code>{' '}
               <StatusBadge status={open.status} />
             </div>
-            <div style={{ display: 'flex', gap: 8 }}>
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
               <button className="btn ghost" type="button" onClick={printReport} style={{ fontSize: 13 }}>Preview / PDF</button>
               {locked && <button className="btn ghost" type="button" onClick={revise} disabled={busy} style={{ fontSize: 13 }}>Revise</button>}
+              {locked && (STATUS_NEXT[open.status] || []).map((s) => (
+                <button key={s} className="btn ghost" type="button" onClick={() => changeStatus(s)} disabled={busy}
+                  style={{ fontSize: 13, color: STATUS_STYLE[s]?.fg }}>{s.charAt(0) + s.slice(1).toLowerCase()}</button>
+              ))}
             </div>
           </div>
 
@@ -314,6 +356,18 @@ export function IncidentReportsPanel({ reservation, token, role, me }) {
             <textarea rows={2} defaultValue={open.narrative || ''} disabled={locked} style={{ width: '100%', resize: 'vertical' }}
               onBlur={(e) => patchOpen({ narrative: e.target.value })} />
           </div>
+          <div style={{ marginBottom: 12 }}>
+            <label className="label">Pre-rental condition (§2)</label>
+            <textarea rows={2} defaultValue={open.preRentalCondition || ''} disabled={locked} style={{ width: '100%', resize: 'vertical' }}
+              placeholder="Documented condition at check-out (inspection notes or staff entry). Leave blank if not on record — do not assert facts that aren't documented."
+              onBlur={(e) => patchOpen({ preRentalCondition: e.target.value })} />
+          </div>
+          <div style={{ marginBottom: 12 }}>
+            <label className="label">Chargeback rebuttal (§7) <span className="ui-muted" style={{ fontWeight: 400 }}>— one point per line; overrides the auto-generated points</span></label>
+            <textarea rows={3} defaultValue={open.rebuttalText || ''} disabled={locked} style={{ width: '100%', resize: 'vertical' }}
+              placeholder="Leave blank to auto-generate neutral, evidence-backed points."
+              onBlur={(e) => patchOpen({ rebuttalText: e.target.value })} />
+          </div>
 
           {/* Evidence */}
           <div style={{ border: '1px solid rgba(0,0,0,0.08)', borderRadius: 12, padding: '12px 14px', marginBottom: 12 }}>
@@ -332,12 +386,27 @@ export function IncidentReportsPanel({ reservation, token, role, me }) {
             </div>
             {(open.evidence || []).length === 0 && <p className="ui-muted" style={{ fontSize: 12, margin: 0 }}>No evidence yet.</p>}
             {(open.evidence || []).map((ev) => (
-              <div key={ev.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '6px 0', borderTop: '1px solid rgba(0,0,0,0.05)', fontSize: 13 }}>
+              <div key={ev.id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 0', borderTop: '1px solid rgba(0,0,0,0.05)', fontSize: 13 }}>
                 <span style={{ width: 22, color: '#888' }}>{ev.ordinal}</span>
-                <span style={{ flex: 1, minWidth: 0 }}><strong>{ev.location}</strong>{ev.description ? ` — ${ev.description}` : ''}</span>
-                <span style={{ fontSize: 11, color: ev.evidenceStatus === 'VIOLATION' ? '#A32D2D' : '#0F6E56' }}>{ev.evidenceStatus}</span>
-                <span style={{ fontSize: 11, color: '#999' }}>{ev.sourcePhase}</span>
-                {!locked && <button className="btn ghost" style={{ fontSize: 12, padding: '2px 8px' }} onClick={() => removeEvidence(ev.id)}>✕</button>}
+                {locked ? (
+                  <>
+                    <span style={{ flex: 1, minWidth: 0 }}><strong>{ev.location}</strong>{ev.description ? ` — ${ev.description}` : ''}</span>
+                    <span style={{ fontSize: 11, color: ev.evidenceStatus === 'VIOLATION' ? '#A32D2D' : '#0F6E56' }}>{ev.evidenceStatus}</span>
+                    <span style={{ fontSize: 11, color: '#999' }}>{ev.sourcePhase}</span>
+                  </>
+                ) : (
+                  <>
+                    <input type="text" defaultValue={ev.location} placeholder="Location" style={{ flex: '1 1 110px', minWidth: 0, fontSize: 12 }}
+                      onBlur={(e) => { if (e.target.value !== ev.location) saveEvidence(ev.id, { location: e.target.value }); }} />
+                    <input type="text" defaultValue={ev.description || ''} placeholder="Description" style={{ flex: '2 1 150px', minWidth: 0, fontSize: 12 }}
+                      onBlur={(e) => { if (e.target.value !== (ev.description || '')) saveEvidence(ev.id, { description: e.target.value }); }} />
+                    <select value={ev.evidenceStatus} style={{ fontSize: 11 }} onChange={(e) => saveEvidence(ev.id, { evidenceStatus: e.target.value })}>
+                      <option value="VIOLATION">VIOLATION</option>
+                      <option value="CONFIRMED">CONFIRMED</option>
+                    </select>
+                    <button className="btn ghost" style={{ fontSize: 12, padding: '2px 8px' }} onClick={() => removeEvidence(ev.id)}>✕</button>
+                  </>
+                )}
               </div>
             ))}
           </div>
@@ -355,6 +424,30 @@ export function IncidentReportsPanel({ reservation, token, role, me }) {
               ))}
             </div>
           </div>
+
+          {/* Charges to include (§6) */}
+          {agCharges.length > 0 && (
+            <div style={{ border: '1px solid rgba(0,0,0,0.08)', borderRadius: 12, padding: '12px 14px', marginBottom: 12 }}>
+              <strong style={{ fontSize: 14 }}>Charges to include (§6)</strong>
+              <p className="ui-muted" style={{ fontSize: 12, marginTop: 4, marginBottom: 8 }}>
+                {open.chargeIds && open.chargeIds.length
+                  ? 'Showing this report’s selected charges.'
+                  : 'No explicit selection — using all selected agreement charges. Tick boxes to pick specific ones.'}
+              </p>
+              {agCharges.map((c) => {
+                const checked = (open.chargeIds && open.chargeIds.length)
+                  ? open.chargeIds.map(String).includes(String(c.id))
+                  : c.selected !== false;
+                return (
+                  <label key={c.id} style={{ display: 'flex', gap: 8, alignItems: 'center', fontSize: 13, marginBottom: 5, opacity: locked ? 0.7 : 1 }}>
+                    <input type="checkbox" disabled={locked} checked={checked} onChange={(e) => toggleCharge(c.id, e.target.checked)} />
+                    <span style={{ flex: 1 }}>{c.name}</span>
+                    <span style={{ fontVariantNumeric: 'tabular-nums' }}>{fmtMoney(c.total)}</span>
+                  </label>
+                );
+              })}
+            </div>
+          )}
 
           {/* Certification */}
           {!locked ? (

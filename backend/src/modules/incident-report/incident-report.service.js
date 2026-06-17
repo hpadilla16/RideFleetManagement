@@ -32,6 +32,18 @@ const DEFAULT_CLAUSES = [
   { section: '15', label: 'Breach of Contract', amountRange: 'up to $2,500', category: 'POLICY_VIOLATION', text: 'Any violation of the agreement may result in a breach-of-contract penalty of up to $2,500, plus all actual damages, cleaning costs, and administrative fees.' }
 ];
 
+const VALID_TYPES = Object.keys(TYPE_META);
+const VALID_SEVERITIES = ['MINOR', 'MODERATE', 'SEVERE'];
+// Post-issuance lifecycle. DRAFT only moves to ISSUED via certify; VOID/CLOSED are terminal.
+const STATUS_FLOW = {
+  DRAFT: [],
+  ISSUED: ['DISPUTED', 'RESOLVED', 'CLOSED', 'VOID'],
+  DISPUTED: ['RESOLVED', 'CLOSED', 'VOID'],
+  RESOLVED: ['CLOSED', 'VOID'],
+  CLOSED: [],
+  VOID: []
+};
+
 function tenantScope(user) {
   const role = String(user?.role || '').toUpperCase();
   if (role === 'SUPER_ADMIN') return {};
@@ -69,8 +81,10 @@ function makeReportNumber(vehicle, date = new Date()) {
  */
 async function nextReportNumber(vehicle, date = new Date()) {
   const base = makeReportNumber(vehicle, date);
+  // Exact base OR a `base-N` suffix only — NOT a greedy startsWith (which would let
+  // INC-…-KST78 match INC-…-KST788 and inflate the count for similar plates).
   const clashes = await prisma.reservationIncident.count({
-    where: { reportNumber: { startsWith: base } },
+    where: { OR: [{ reportNumber: base }, { reportNumber: { startsWith: `${base}-` } }] },
   });
   return clashes === 0 ? base : `${base}-${clashes + 1}`;
 }
@@ -89,12 +103,14 @@ function serialize(row) {
   if (!row) return null;
   let citedClauses = [];
   try { citedClauses = row.citedClausesJson ? JSON.parse(row.citedClausesJson) : []; } catch {}
+  let chargeIds = [];
+  try { chargeIds = row.chargeIdsJson ? JSON.parse(row.chargeIdsJson) : []; } catch {}
   return {
     id: row.id, tenantId: row.tenantId, reservationId: row.reservationId,
     reportNumber: row.reportNumber, type: row.type, status: row.status, severity: row.severity,
     title: row.title, discoveryAt: row.discoveryAt, narrative: row.narrative,
     preRentalCondition: row.preRentalCondition, odorNoted: row.odorNoted, conditionAtReturn: row.conditionAtReturn,
-    citedClauses, rebuttalText: row.rebuttalText,
+    citedClauses, chargeIds, rebuttalText: row.rebuttalText,
     depositApplied: row.depositApplied == null ? null : Number(row.depositApplied),
     certifiedByName: row.certifiedByName, certifiedByTitle: row.certifiedByTitle,
     certifiedAt: row.certifiedAt, issuedAt: row.issuedAt, revisionOfId: row.revisionOfId,
@@ -142,24 +158,37 @@ export const incidentReportService = {
     const ag = reservation.rentalAgreement;
     const checkoutInsp = (ag?.inspections || []).find((i) => i.phase === 'CHECKOUT');
 
-    const created = await prisma.reservationIncident.create({
-      data: {
-        tenantId: reservation.tenantId ?? user?.tenantId ?? null,
-        reservationId: reservation.id,
-        rentalAgreementId: ag?.id ?? null,
-        reportNumber: await nextReportNumber(reservation.vehicle, new Date()),
-        type, status: 'DRAFT',
-        title: payload.title || meta.title,
-        discoveryAt: parseDate(payload.discoveryAt) ?? reservation.returnAt ?? new Date(),
-        narrative: payload.narrative || null,
-        preRentalCondition: payload.preRentalCondition || checkoutInsp?.notes || 'Vehicle delivered clean — no pre-existing damage, smoke, or residue recorded at check-out.',
-        odorNoted: payload.odorNoted || null,
-        conditionAtReturn: payload.conditionAtReturn || null,
-        depositApplied: ag?.securityDepositAmount ?? null,
-        createdByUserId: user?.id || null
-      },
-      include: includeEvidence
-    });
+    const baseData = {
+      tenantId: reservation.tenantId ?? user?.tenantId ?? null,
+      reservationId: reservation.id,
+      rentalAgreementId: ag?.id ?? null,
+      type, status: 'DRAFT',
+      title: payload.title || meta.title,
+      discoveryAt: parseDate(payload.discoveryAt) ?? reservation.returnAt ?? new Date(),
+      narrative: payload.narrative || null,
+      // Don't auto-assert a clean pre-rental condition on a dispute document. Use the
+      // real check-out inspection notes if any; otherwise leave blank for staff to fill.
+      preRentalCondition: payload.preRentalCondition || checkoutInsp?.notes || null,
+      odorNoted: payload.odorNoted || null,
+      conditionAtReturn: payload.conditionAtReturn || null,
+      depositApplied: ag?.securityDepositAmount ?? null,
+      createdByUserId: user?.id || null
+    };
+    // Retry on the @unique reportNumber collision — concurrent creates for the same
+    // vehicle/day both compute the same suffix and one throws P2002.
+    let created = null;
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      try {
+        created = await prisma.reservationIncident.create({
+          data: { ...baseData, reportNumber: await nextReportNumber(reservation.vehicle, new Date()) },
+          include: includeEvidence
+        });
+        break;
+      } catch (e) {
+        if (e?.code === 'P2002' && attempt < 4) continue;
+        throw e;
+      }
+    }
     return serialize(created);
   },
 
@@ -180,8 +209,19 @@ export const incidentReportService = {
     for (const k of ['title', 'narrative', 'preRentalCondition', 'odorNoted', 'conditionAtReturn', 'rebuttalText']) {
       if (k in payload) data[k] = payload[k] || null;
     }
-    if ('type' in payload) data.type = String(payload.type).toUpperCase();
-    if ('severity' in payload) data.severity = payload.severity ? String(payload.severity).toUpperCase() : null;
+    if ('type' in payload) {
+      const t = String(payload.type).toUpperCase();
+      if (!VALID_TYPES.includes(t)) throw err(`Invalid incident type: ${t}`, 400);
+      data.type = t;
+    }
+    if ('severity' in payload) {
+      if (!payload.severity) data.severity = null;
+      else {
+        const s = String(payload.severity).toUpperCase();
+        if (!VALID_SEVERITIES.includes(s)) throw err(`Invalid severity: ${s}`, 400);
+        data.severity = s;
+      }
+    }
     if ('discoveryAt' in payload) data.discoveryAt = parseDate(payload.discoveryAt) ?? row.discoveryAt;
     if ('depositApplied' in payload) data.depositApplied = payload.depositApplied == null ? null : Number(payload.depositApplied);
     if ('chargeIds' in payload) data.chargeIdsJson = JSON.stringify(payload.chargeIds || []);
@@ -237,7 +277,12 @@ export const incidentReportService = {
     assertDraft(row);
     if (!row.rentalAgreementId) throw err('No rental agreement on this reservation to pull inspections from', 400);
     const insp = await prisma.rentalAgreementInspection.findFirst({
-      where: { rentalAgreementId: row.rentalAgreementId, phase: String(phase).toUpperCase() }
+      where: {
+        rentalAgreementId: row.rentalAgreementId, phase: String(phase).toUpperCase(),
+        // Defense-in-depth: the row is already tenant-scoped, but also constrain the
+        // inspection's agreement to the same tenant when we have one.
+        ...(row.tenantId ? { rentalAgreement: { tenantId: row.tenantId } } : {})
+      }
     });
     if (!insp) return { added: 0 };
 
@@ -251,7 +296,10 @@ export const incidentReportService = {
     let refs = [];
     try { refs = Array.isArray(insp.photoStorageRefs) ? insp.photoStorageRefs : []; } catch {}
     for (const ref of refs) {
-      if (!ref?.path) continue;
+      // Accept storage-path refs AND externally-hosted URL refs — don't silently drop
+      // hosted inspection photos (signedUrlSafe passes full URLs through unchanged).
+      const stored = ref?.path || ref?.url || null;
+      if (!stored) continue;
       ordinal += 1; added += 1;
       await prisma.incidentEvidence.create({
         data: {
@@ -259,7 +307,7 @@ export const incidentReportService = {
           location: ref.key || `${PH} photo`,
           description: `Imported from ${PH} inspection.`,
           evidenceStatus: status,
-          storagePath: ref.path, contentType: ref.contentType || null,
+          storagePath: stored, contentType: ref.contentType || null,
           sourcePhase: PH, takenByUserId: user?.id || null
         }
       });
@@ -304,6 +352,20 @@ export const incidentReportService = {
     }
 
     return { added };
+  },
+
+  async updateEvidence(user, id, evidenceId, payload = {}) {
+    const row = await findScoped(user, id);
+    assertDraft(row);
+    const data = {};
+    if ('location' in payload) data.location = String(payload.location || '');
+    if ('description' in payload) data.description = String(payload.description || '');
+    if ('evidenceStatus' in payload) {
+      data.evidenceStatus = String(payload.evidenceStatus || '').toUpperCase() === 'CONFIRMED' ? 'CONFIRMED' : 'VIOLATION';
+    }
+    const res = await prisma.incidentEvidence.updateMany({ where: { id: String(evidenceId), incidentId: row.id }, data });
+    if (!res.count) throw err('Evidence not found', 404);
+    return { ok: true };
   },
 
   async removeEvidence(user, id, evidenceId) {
@@ -351,13 +413,26 @@ export const incidentReportService = {
           create: (row.evidence || []).map((e) => ({
             tenantId: e.tenantId, ordinal: e.ordinal, location: e.location, description: e.description,
             evidenceStatus: e.evidenceStatus, storagePath: e.storagePath, contentType: e.contentType,
-            sourcePhase: e.sourcePhase, takenByUserId: e.takenByUserId
+            // Preserve the original capture time — chain of custody must not reset to now().
+            sourcePhase: e.sourcePhase, takenAt: e.takenAt, takenByUserId: e.takenByUserId
           }))
         }
       },
       include: includeEvidence
     });
     return serialize(clone);
+  },
+
+  /** Post-issuance lifecycle transition: ISSUED → DISPUTED/RESOLVED/CLOSED/VOID (and onward). */
+  async setStatus(user, id, status) {
+    const row = await findScoped(user, id);
+    const to = String(status || '').toUpperCase();
+    const allowed = STATUS_FLOW[row.status] || [];
+    if (!allowed.includes(to)) throw err(`Cannot move report from ${row.status} to ${to || '(none)'}`, 409);
+    const updated = await prisma.reservationIncident.update({
+      where: { id: row.id }, data: { status: to }, include: includeEvidence
+    });
+    return serialize(updated);
   },
 
   /** Assemble the report object + render the print HTML. */
@@ -419,6 +494,8 @@ export const incidentReportService = {
 
 async function signedUrlSafe(path) {
   if (!path) return '';
+  // Evidence pulled from an externally-hosted inspection photo stores a full URL — pass through.
+  if (/^https?:\/\//i.test(path)) return path;
   try { return await getSignedUrl({ bucket: getPhotosBucket(), path, expiresIn: 3600 }); } catch { return ''; }
 }
 
@@ -430,8 +507,15 @@ async function assembleReport(row, reservation) {
     ? [ag.customerFirstName, ag.customerLastName].filter(Boolean).join(' ')
     : [cust?.firstName, cust?.lastName].filter(Boolean).join(' ');
 
-  // §6 charges: selected agreement charges
-  const charges = (ag?.charges || []).filter((c) => c.selected !== false).map((c) => ({ name: c.name, total: Number(c.total) }));
+  // §6 charges: the per-report selection (chargeIdsJson) if set, else all selected charges.
+  let pickedIds = null;
+  try {
+    const ids = row.chargeIdsJson ? JSON.parse(row.chargeIdsJson) : null;
+    if (Array.isArray(ids) && ids.length) pickedIds = new Set(ids.map(String));
+  } catch {}
+  const charges = (ag?.charges || [])
+    .filter((c) => (pickedIds ? pickedIds.has(String(c.id)) : c.selected !== false))
+    .map((c) => ({ name: c.name, total: Number(c.total) }));
   const chargeTotal = charges.reduce((s, c) => s + (Number.isFinite(c.total) ? c.total : 0), 0);
   const depositApplied = row.depositApplied == null ? null : Number(row.depositApplied);
   const balanceDue = charges.length ? Math.max(0, chargeTotal - (depositApplied || 0)) : null;
@@ -445,12 +529,23 @@ async function assembleReport(row, reservation) {
   let citedClauses = [];
   try { citedClauses = row.citedClausesJson ? JSON.parse(row.citedClausesJson) : []; } catch {}
 
-  const rebuttalPoints = [
-    'The signed rental agreement expressly authorizes the assessed fee upon evidence of the violation.',
-    `The vehicle was delivered in clean, documented condition at check-out${reservation?.pickupAt ? ` on ${fmtDate(reservation.pickupAt)}` : ''} — no pre-existing issue recorded.`,
-    `${(row.evidence || []).filter((e) => e.storagePath).length} timestamped photographs document the evidence across multiple locations.`,
-    'The deposit was lawfully collected and applied per the signed agreement; the renter authorized post-rental charges.'
-  ];
+  // Author-provided rebuttal wins (one point per line). Otherwise build neutral,
+  // evidence-backed points — never auto-assert "delivered clean / no pre-existing damage"
+  // on a dispute document regardless of the actual facts (legal accuracy).
+  const photoCount = (row.evidence || []).filter((e) => e.storagePath).length;
+  let rebuttalPoints;
+  if (row.rebuttalText && String(row.rebuttalText).trim()) {
+    rebuttalPoints = String(row.rebuttalText).split(/\r?\n/).map((s) => s.trim()).filter(Boolean);
+  } else {
+    rebuttalPoints = [
+      'The signed rental agreement expressly authorizes the assessed fee upon documented evidence of the violation.',
+      row.preRentalCondition
+        ? `Pre-rental condition on record: ${row.preRentalCondition}`
+        : `The pre-rental condition is documented in the check-out inspection on file${reservation?.pickupAt ? ` (${fmtDate(reservation.pickupAt)})` : ''}.`,
+      `${photoCount} timestamped photograph${photoCount === 1 ? '' : 's'} document the evidence supporting this report.`,
+      'The deposit was collected and applied per the signed agreement, which authorizes post-rental charges.'
+    ];
+  }
 
   const meta = TYPE_META[row.type] || TYPE_META.OTHER;
   return {

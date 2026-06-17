@@ -42,8 +42,10 @@ incidentReportRouter.patch('/:id', wrap(async (req, res) => res.json(await svc.u
 incidentReportRouter.post('/:id/clauses', wrap(async (req, res) => res.json(await svc.setClauses(req.user, req.params.id, (req.body || {}).clauseIds || []))));
 incidentReportRouter.post('/:id/evidence', wrap(async (req, res) => res.status(201).json(await svc.addEvidence(req.user, req.params.id, req.body || {}))));
 incidentReportRouter.post('/:id/evidence/pull', wrap(async (req, res) => res.json(await svc.pullInspectionEvidence(req.user, req.params.id, (req.body || {}).phase || 'CHECKIN'))));
+incidentReportRouter.patch('/:id/evidence/:evidenceId', wrap(async (req, res) => res.json(await svc.updateEvidence(req.user, req.params.id, req.params.evidenceId, req.body || {}))));
 incidentReportRouter.delete('/:id/evidence/:evidenceId', wrap(async (req, res) => res.json(await svc.removeEvidence(req.user, req.params.id, req.params.evidenceId))));
 incidentReportRouter.post('/:id/certify', wrap(async (req, res) => res.json(await svc.certifyAndIssue(req.user, req.params.id, req.body || {}))));
+incidentReportRouter.post('/:id/status', wrap(async (req, res) => res.json(await svc.setStatus(req.user, req.params.id, (req.body || {}).status))));
 incidentReportRouter.post('/:id/revise', wrap(async (req, res) => res.status(201).json(await svc.revise(req.user, req.params.id))));
 
 incidentReportRouter.get('/:id/print', wrap(async (req, res) => {
