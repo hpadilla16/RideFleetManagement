@@ -180,6 +180,7 @@ function SippDetail({ token, me, logout }) {
               summaryRow={summaryRow}
               history={history}
               onChase={chaseVendor}
+              days={days}
             />
           </>
         )}
@@ -558,7 +559,7 @@ function LegendDot({ color, label }) {
 // Vendor leaderboard
 // ---------------------------------------------------------------------------
 
-function Leaderboard({ summaryRow, history, onChase }) {
+function Leaderboard({ summaryRow, history, onChase, days = 14 }) {
   const yourPrice = summaryRow?.yourRate?.daily != null ? Number(summaryRow.yourRate.daily) : null;
   const yourRank = summaryRow?.yourRank;
   const vendors = history?.vendors || {};
@@ -570,7 +571,11 @@ function Leaderboard({ summaryRow, history, onChase }) {
   const rows = useMemo(() => {
     const items = Object.entries(vendors).map(([name, points]) => {
       const pricePoints = Array.isArray(points) ? points : [];
-      const prices = pricePoints.map((p) => Number(p.price)).filter((n) => Number.isFinite(n));
+      // IMPORTANT: filter nulls BEFORE Number() — Number(null) === 0 (finite) would
+      // otherwise inject a phantom $0 "current" and rank an unobserved vendor #1.
+      const prices = pricePoints
+        .filter((p) => p?.price != null && Number.isFinite(Number(p.price)))
+        .map((p) => Number(p.price));
       const current = prices.length ? prices[prices.length - 1] : null;
       const avgPrice = avg(prices);
       const delta = deltaPct(prices);
@@ -644,8 +649,8 @@ function Leaderboard({ summaryRow, history, onChase }) {
                 <Th>#</Th>
                 <Th>Vendor</Th>
                 <Th>Current</Th>
-                <Th>14d avg</Th>
-                <Th>14d Δ</Th>
+                <Th>{days}d avg</Th>
+                <Th>{days}d Δ</Th>
                 <Th>Coverage</Th>
                 <Th>Action</Th>
               </tr>

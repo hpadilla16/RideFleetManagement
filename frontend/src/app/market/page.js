@@ -41,7 +41,7 @@ import { useRouter } from 'next/navigation';
 import { Line } from 'react-chartjs-2';
 import { AuthGate } from '../../components/AuthGate';
 import { AppShell } from '../../components/AppShell';
-import { api } from '../../lib/client';
+import { api, API_BASE } from '../../lib/client';
 import { ensureChartsRegistered } from '../../components/reports/charts/chartjs-setup';
 
 ensureChartsRegistered();
@@ -183,6 +183,23 @@ function Dashboard({ token, me, logout }) {
     return [...standard, ...extras];
   }, [summary]);
 
+  async function downloadExcel() {
+    try {
+      const res = await fetch(`${API_BASE}/api/market/export.xlsx?airport=${encodeURIComponent(airport)}`, { headers: { Authorization: `Bearer ${token}` } });
+      if (!res.ok) {
+        let m = `Export failed (${res.status})`;
+        try { const j = await res.json(); if (j?.error) m = j.error; } catch { /* ignore */ }
+        setError(m); return;
+      }
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url; a.download = `market-pricing-${airport}.xlsx`;
+      document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 4000);
+    } catch (e) { setError(e?.message || 'Export failed'); }
+  }
+
   return (
     <AppShell me={me} logout={logout}>
       <DarkPanel>
@@ -193,6 +210,7 @@ function Dashboard({ token, me, logout }) {
           onRangeChange={setRangeDays}
           router={router}
           pendingCount={pendingCount}
+          onExport={downloadExcel}
         />
         <Legend sortBy={sortBy} onSortChange={setSortBy} />
 
@@ -245,7 +263,7 @@ function Dashboard({ token, me, logout }) {
 // Top bar
 // ---------------------------------------------------------------------------
 
-function TopBar({ airport, updatedAt, rangeDays, onRangeChange, router, pendingCount }) {
+function TopBar({ airport, updatedAt, rangeDays, onRangeChange, router, pendingCount, onExport }) {
   return (
     <div style={{
       display: 'flex',
@@ -280,6 +298,12 @@ function TopBar({ airport, updatedAt, rangeDays, onRangeChange, router, pendingC
           style={topbarBtnStyle}
           title="Configure MarketScrapeProfiles + targetRate mappings"
         >⚙️ Profiles</button>
+        <button
+          type="button"
+          onClick={onExport}
+          style={topbarBtnStyle}
+          title="Download prices + suggested by vehicle class and day (Excel)"
+        >⬇ Export Excel</button>
         <select
           value={airport}
           // V1: only SJU is active. Selecting placeholder is a no-op.

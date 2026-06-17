@@ -30,6 +30,24 @@ marketObservationsRouter.get('/summary', async (req, res, next) => {
   }
 });
 
+// RateHighway-style Excel for the whole airport (latest run): prices + suggested by
+// vehicle class (SIPP) and by day. Discoverable from the /market dashboard.
+marketObservationsRouter.get('/export.xlsx', async (req, res, next) => {
+  try {
+    const { buffer, filename } = await marketObservationsService.buildAirportExportWorkbook({
+      airport: req.query.airport,
+      scope: scopeFor(req),
+    });
+    const body = Buffer.isBuffer(buffer) ? buffer : Buffer.from(buffer);
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    res.setHeader('Content-Length', body.byteLength);
+    res.end(body);
+  } catch (e) {
+    handle(e, res, next);
+  }
+});
+
 marketObservationsRouter.get('/history', async (req, res, next) => {
   try {
     const out = await marketObservationsService.getMarketHistory({

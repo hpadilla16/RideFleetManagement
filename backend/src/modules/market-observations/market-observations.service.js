@@ -1,4 +1,5 @@
 import { prisma } from '../../lib/prisma.js';
+import { buildRunComparisonWorkbook } from '../market-scraper/market-scrape-comparison.service.js';
 
 /**
  * Query services backing the Market Intelligence Dashboard, SIPP detail view,
@@ -333,7 +334,41 @@ function percentile(sortedAsc, p) {
   return sortedAsc[idx];
 }
 
+/**
+ * Dashboard-level Excel export (discoverable from /market): resolves the latest scrape
+ * run for the airport's active profiles and reuses the per-run comparison workbook
+ * (prices + suggested by vehicle class & day). Returns { buffer, filename }.
+ */
+export async function buildAirportExportWorkbook({ airport, scope = {} }) {
+  if (!airport) {
+    const err = new Error('airport query param is required'); err.httpStatus = 400; throw err;
+  }
+  const profileWhere = {
+    locationCode: String(airport).toUpperCase(),
+    active: true,
+    ...(scope.tenantId === '__no_tenant__'
+      ? { tenantId: '__no_tenant__' }
+      : scope.tenantId ? { tenantId: scope.tenantId } : {}),
+  };
+  const profiles = await prisma.marketScrapeProfile.findMany({ where: profileWhere, select: { id: true } });
+  if (profiles.length === 0) {
+    const err = new Error('No market profile for this airport yet'); err.httpStatus = 404; throw err;
+  }
+  const profileIds = profiles.map((p) => p.id);
+  // The run of the most recent FOUND observation across these profiles = latest run with data.
+  const latest = await prisma.marketObservation.findFirst({
+    where: { profileId: { in: profileIds }, status: 'FOUND', runId: { not: null } },
+    orderBy: { observedAt: 'desc' },
+    select: { runId: true },
+  });
+  if (!latest?.runId) {
+    const err = new Error('No scrape run with data for this airport yet'); err.httpStatus = 404; throw err;
+  }
+  return buildRunComparisonWorkbook(latest.runId, { scope });
+}
+
 export const marketObservationsService = {
   getMarketSummary,
   getMarketHistory,
+  buildAirportExportWorkbook,
 };
