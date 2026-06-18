@@ -134,12 +134,41 @@ app.get('/health', async (_req, res) => {
   });
 });
 
-app.get('/api/docs/openapi.json', (req, res) => {
+// API docs are password-protected via HTTP Basic Auth (DOCS_USER / DOCS_PASS in the env).
+// Constant-time credential compare; if the creds aren't configured the docs are disabled (503)
+// rather than left open.
+function docsSafeEqual(a, b) {
+  if (typeof a !== 'string' || typeof b !== 'string' || a.length !== b.length) return false;
+  let out = 0;
+  for (let i = 0; i < a.length; i += 1) out |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  return out === 0;
+}
+function requireDocsAuth(req, res, next) {
+  const user = process.env.DOCS_USER;
+  const pass = process.env.DOCS_PASS;
+  if (!user || !pass) {
+    return res.status(503).type('text').send('API docs are not configured (set DOCS_USER and DOCS_PASS).');
+  }
+  const m = (req.headers.authorization || '').match(/^Basic\s+(.+)$/i);
+  if (m) {
+    const idx = Buffer.from(m[1], 'base64').toString('utf8').indexOf(':');
+    const u = idx >= 0 ? Buffer.from(m[1], 'base64').toString('utf8').slice(0, idx) : '';
+    const p = idx >= 0 ? Buffer.from(m[1], 'base64').toString('utf8').slice(idx + 1) : '';
+    // Compare both so a wrong username can't short-circuit the timing of the password check.
+    const okUser = docsSafeEqual(u, user);
+    const okPass = docsSafeEqual(p, pass);
+    if (okUser && okPass) return next();
+  }
+  res.set('WWW-Authenticate', 'Basic realm="Ride Fleet API Docs", charset="UTF-8"');
+  return res.status(401).type('text').send('Authentication required.');
+}
+
+app.get('/api/docs/openapi.json', requireDocsAuth, (req, res) => {
   const serverUrl = `${req.protocol}://${req.get('host')}`;
   res.json(buildOpenApiSpec(serverUrl));
 });
 
-app.get(['/api/docs', '/api/docs/'], (_req, res) => {
+app.get(['/api/docs', '/api/docs/'], requireDocsAuth, (_req, res) => {
   res.type('html').send(swaggerHtml('/api/docs/openapi.json'));
 });
 

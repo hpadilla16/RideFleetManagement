@@ -1,3 +1,5 @@
+import { EXTRA_ROUTES } from './extra-routes.generated.js';
+
 function ok(description, schemaRef) {
   return {
     description,
@@ -34,6 +36,70 @@ function bearerSecurity(required = true) {
   return required ? [{ BearerAuth: [] }] : [];
 }
 
+// ── Bulk route documentation ────────────────────────────────────────────────
+// The hand-written `paths` object below was the first Swagger pass. The rest of the live API
+// (citations, inspections, incidents, inventory, planner, car-sharing, loaner, checkout, payment
+// gateway, market intelligence, settings, catalog, etc.) is documented from a compact table so
+// every endpoint shows up without 200+ nested literals. Each descriptor is:
+//   [method, path, tag, summary, opts?]
+//   opts: { auth=true, download='<content-type>' }   // path params are auto-detected from {braces}
+function expandRoutes(routes) {
+  const out = {};
+  for (const [method, path, tag, summary, opts = {}] of routes) {
+    const m = String(method).toLowerCase();
+    const params = (path.match(/\{([^}]+)\}/g) || []).map((s) => pathId(s.slice(1, -1), s.slice(1, -1)));
+    const op = { tags: [tag], summary, security: bearerSecurity(opts.auth !== false) };
+    if (params.length) op.parameters = params;
+    if (['post', 'patch', 'put'].includes(m)) op.requestBody = body(false);
+    op.responses = opts.download
+      ? { 200: { description: summary, content: { [opts.download]: { schema: { type: 'string', format: 'binary' } } } } }
+      : { 200: ok(summary), 401: ok('Unauthorized', '#/components/schemas/ErrorResponse') };
+    if (!out[path]) out[path] = {};
+    out[path][m] = op;
+  }
+  return out;
+}
+
+// Merge the generated paths under the hand-written ones. Hand-written method entries WIN on any
+// path+method conflict (they're richer); generated entries only add new paths/methods.
+function mergePaths(base, extra) {
+  const out = { ...base };
+  for (const [p, methods] of Object.entries(extra)) {
+    out[p] = { ...methods, ...(out[p] || {}) };
+  }
+  return out;
+}
+
+// New tags for the modules added in this pass.
+const EXTRA_TAGS = [
+  { name: 'Citations', description: 'Traffic citation intake, review, and affidavits' },
+  { name: 'Inspections', description: 'Customer-led vehicle inspections and damage reports' },
+  { name: 'Incidents', description: 'Dispute-ready incident/damage reports and clause library' },
+  { name: 'Inventory', description: 'Guided fleet inventory sessions and reconciliation' },
+  { name: 'Market Intelligence', description: 'Competitor scraping, observations, and pricing suggestions' },
+  { name: 'Long-Term Rentals', description: 'Long-term rental plans and billing cycles' },
+  { name: 'Payment Gateway', description: 'Low-level payment gateway operations (charge/auth/capture/refund)' },
+  { name: 'Planner', description: 'Fleet planner snapshot, simulations, and copilot' },
+  { name: 'Car Sharing', description: 'Car-sharing hosts, listings, trips, and availability' },
+  { name: 'Host App', description: 'Host-facing app: dashboard, listings, trips, submissions' },
+  { name: 'Employee App', description: 'Employee-facing app endpoints' },
+  { name: 'Dealership Loaner', description: 'Dealership loaner program and loaner agreements' },
+  { name: 'Messaging', description: 'Guest/host messaging, trip chat, and AI search' },
+  { name: 'Checkout', description: 'Checkout sessions, terms signing, and mobile inspection' },
+  { name: 'Knowledge Base', description: 'Help-center categories and articles' },
+  { name: 'SMS', description: 'SMS configuration, templates, and sending' },
+  { name: 'Commissions', description: 'Commission plans, rules, ledger, and policies' },
+  { name: 'People', description: 'Staff/people management' },
+  { name: 'TL International', description: 'TL International integration: imports and payouts' },
+  { name: 'Admin', description: 'Administrative overrides' },
+  { name: 'Catalog', description: 'Locations, vehicle types, services, stop-sales, and rates' },
+  { name: 'Fees & Rates', description: 'Fee definitions and fee-rate configuration' },
+  { name: 'Store Board', description: 'Store-board display tokens' },
+];
+
+// EXTRA_ROUTES (compact descriptors for every otherwise-undocumented endpoint) is imported from
+// ./extra-routes.generated.js — see expandRoutes() above for the descriptor shape.
+
 export function buildOpenApiSpec(serverUrl) {
   return {
     openapi: '3.0.3',
@@ -57,7 +123,8 @@ export function buildOpenApiSpec(serverUrl) {
       { name: 'Tolls', description: 'Puerto Rico toll sync, review, and reservation posting' },
       { name: 'Reports', description: 'Operational dashboards and exports' },
       { name: 'Settings', description: 'Tenant/location business settings' },
-      { name: 'Tenants', description: 'Super-admin tenant management' }
+      { name: 'Tenants', description: 'Super-admin tenant management' },
+      ...EXTRA_TAGS
     ],
     components: {
       securitySchemes: {
@@ -671,7 +738,7 @@ export function buildOpenApiSpec(serverUrl) {
         }
       }
     },
-    paths: {
+    paths: mergePaths({
       '/health': {
         get: {
           tags: ['Health'],
@@ -2163,7 +2230,7 @@ export function buildOpenApiSpec(serverUrl) {
           }
         }
       }
-    }
+    }, expandRoutes(EXTRA_ROUTES))
   };
 }
 
