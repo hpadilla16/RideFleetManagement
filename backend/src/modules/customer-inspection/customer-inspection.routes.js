@@ -31,6 +31,17 @@ function clientIp(req) {
   return (req.headers['x-forwarded-for']?.split(',')[0] || req.ip || '').trim();
 }
 
+// GET /api/customer-inspection/v/:payload — resolve a scanned printed per-vehicle QR
+// (payload = "vehicleId.sig") to a CHECK-IN inspection token for the active rental.
+// Defined BEFORE /:token so the two-segment static route wins.
+customerInspectionPublicRouter.get('/v/:payload', async (req, res) => {
+  try {
+    res.json(await customerInspectionService.startCheckinByVehicleQr({ payload: req.params.payload }));
+  } catch (err) {
+    handleError(res, err);
+  }
+});
+
 // GET /api/customer-inspection/:token — step 1 context (identity + vehicle +
 // diagram type + views).
 customerInspectionPublicRouter.get('/:token', async (req, res) => {
@@ -77,6 +88,31 @@ export const customerInspectionRouter = Router();
 customerInspectionRouter.get('/vehicle/:vehicleId', async (req, res) => {
   try {
     res.json(await customerInspectionService.getVehicleDamageHistory(req.params.vehicleId, scopeFor(req)));
+  } catch (err) {
+    handleError(res, err);
+  }
+});
+
+// GET /api/customer-inspections/vehicle/:vehicleId/checkin-qr — the printable per-vehicle QR URL
+// (agent prints it and places it inside the car as a check-in fail-safe).
+customerInspectionRouter.get('/vehicle/:vehicleId/checkin-qr', async (req, res) => {
+  try {
+    res.json({ url: customerInspectionService.checkinQrUrlForVehicle(req.params.vehicleId) });
+  } catch (err) {
+    handleError(res, err);
+  }
+});
+
+// POST /api/customer-inspections/checkin/:reservationId — manually send (or resend with ?force=1)
+// the CHECK-IN (return) inspection link. The D-1 scheduler calls the service directly.
+customerInspectionRouter.post('/checkin/:reservationId', async (req, res) => {
+  try {
+    const force = String(req.query?.force || '') === '1' || req.body?.force === true;
+    res.json(await customerInspectionService.sendCheckinInspection({
+      reservationId: req.params.reservationId,
+      actorUserId: req.user?.id || req.user?.sub || null,
+      force,
+    }));
   } catch (err) {
     handleError(res, err);
   }

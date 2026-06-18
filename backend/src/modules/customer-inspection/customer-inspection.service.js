@@ -25,6 +25,7 @@
  * ZERO money code.
  */
 
+import { randomBytes, createHmac, timingSafeEqual } from 'node:crypto';
 import { prisma } from '../../lib/prisma.js';
 import logger from '../../lib/logger.js';
 import { sendEmail } from '../../lib/mailer.js';
@@ -148,6 +149,172 @@ async function sendCustomerInspection({ sessionId, actorUserId }) {
     sessionId, inspectionId: inspection.id, reservationId: resv.id,
   });
   return { ok: true, inspectionId: inspection.id, emailTo, expiresAt: minted.expiresAt };
+}
+
+// ---------------------------------------------------------------------------
+// Fase D — CHECK-IN (return) inspection. Unlike checkout, there is NO active
+// checkout-session at return time, so we bind the token directly to the
+// reservation and do NOT walk any state machine. Triggered by the D-1
+// scheduler (the day before return) or manually ("resend"). The customer
+// reports return-time damage through the SAME public /inspect/:token flow;
+// the reports land in the agent's approval queue tagged CHECKIN.
+// ---------------------------------------------------------------------------
+async function sendCheckinInspection({ reservationId, actorUserId = null, force = false }) {
+  if (!reservationId) throw new CheckoutSessionError('reservationId required', 400);
+  const resv = await prisma.reservation.findUnique({
+    where: { id: reservationId },
+    include: {
+      customer: { select: { id: true, firstName: true, lastName: true, email: true } },
+      vehicle: { select: { id: true, year: true, make: true, model: true, plate: true } },
+      rentalAgreement: { select: { id: true } },
+    },
+  });
+  if (!resv) throw new CheckoutSessionError('Reservation not found', 404);
+
+  const cfg = await settingsService.getCustomerInspectionConfig({ tenantId: resv.tenantId || undefined });
+  if (!cfg?.enabled) {
+    throw new CheckoutSessionError('Customer-led inspection is not enabled for this tenant', 403, 'CUSTOMER_INSPECTION_DISABLED');
+  }
+  if (!resv.vehicle?.id) throw new CheckoutSessionError('No vehicle assigned to this reservation', 422, 'NO_VEHICLE_ASSIGNED');
+  const emailTo = String(resv.customer?.email || '').trim();
+  if (!emailTo) throw new CheckoutSessionError('Customer has no email on file — use the printed QR fail-safe instead', 422, 'NO_CUSTOMER_EMAIL');
+
+  // Dedupe: one CHECK-IN inspection per reservation unless forced (manual resend).
+  if (!force) {
+    const existing = await prisma.customerInspection.findFirst({
+      where: { reservationId, phase: 'CHECKIN' },
+      orderBy: { sentAt: 'desc' },
+    });
+    if (existing) {
+      return { ok: true, inspectionId: existing.id, emailTo: existing.emailTo, alreadySent: true };
+    }
+  }
+
+  const inspection = await prisma.customerInspection.create({
+    data: {
+      tenantId: resv.tenantId || null,
+      vehicleId: resv.vehicle.id,
+      reservationId: resv.id,
+      rentalAgreementId: resv.rentalAgreement?.id || null,
+      reservationNumber: resv.reservationNumber || null,
+      phase: 'CHECKIN',
+      status: 'SENT',
+      emailTo,
+      sentByUserId: actorUserId,
+    },
+  });
+
+  // Mint the token directly on the reservation (no checkout-session at return time). 24h TTL,
+  // same as the checkout link (decision 2026-06-11).
+  const token = randomBytes(24).toString('hex');
+  const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000);
+  await prisma.handoffToken.create({
+    data: { reservationId: resv.id, kind: 'CUSTOMER_INSPECTION', token, expiresAt, createdByUserId: actorUserId },
+  });
+
+  const link = `${customerBaseUrl()}/inspect/${token}`;
+  const vehicleLabel = [resv.vehicle.year, resv.vehicle.make, resv.vehicle.model].filter(Boolean).join(' ');
+  const customerName = [resv.customer?.firstName, resv.customer?.lastName].filter(Boolean).join(' ') || 'Customer';
+
+  await sendEmail({
+    to: emailTo,
+    subject: `Before you return your rental ${resv.reservationNumber ? `#${resv.reservationNumber}` : ''} — quick inspection`.trim(),
+    text: `Hi ${customerName},\n\nYour rental (${vehicleLabel}${resv.vehicle.plate ? ` · ${resv.vehicle.plate}` : ''}) is due back soon. Before you return it, please do a quick self-inspection so check-in is fast and there are no surprises.\n\nOpen this link on your phone: ${link}\n\nThe link expires in 24 hours. Walk around the vehicle and report any damage (photo + short note).\n`,
+    html: `
+      <div style="font-family:Arial,Helvetica,sans-serif;max-width:560px;margin:0 auto;color:#1d1d2c">
+        <h2 style="color:#5b3df5">Returning soon? Quick inspection</h2>
+        <p>Hi ${customerName},</p>
+        <p>Your rental is due back soon. Do a quick self-inspection before you return it — it makes check-in faster:</p>
+        <p style="background:#f4f2fd;border-radius:8px;padding:12px"><strong>${vehicleLabel}</strong>${resv.vehicle.plate ? ` · Plate ${resv.vehicle.plate}` : ''}${resv.reservationNumber ? `<br/>Reservation #${resv.reservationNumber}` : ''}</p>
+        <p style="text-align:center;margin:24px 0">
+          <a href="${link}" style="background:#5b3df5;color:#ffffff;text-decoration:none;padding:12px 28px;border-radius:8px;display:inline-block">Start inspection</a>
+        </p>
+        <p style="font-size:12px;color:#666">The link expires in 24 hours. It takes about 2 minutes: confirm your vehicle, then tap the diagram wherever you see damage and add a photo.</p>
+        <p style="font-size:12px;color:#666"><strong>Important:</strong> reporting existing damage protects you. Any new damage found at return that pertains to your rental period may be your responsibility.</p>
+      </div>`,
+  });
+
+  logger.info('[customer-inspection] check-in (D-1) link sent', {
+    inspectionId: inspection.id, reservationId: resv.id, emailTo,
+  });
+  return { ok: true, inspectionId: inspection.id, emailTo, expiresAt };
+}
+
+// ---------------------------------------------------------------------------
+// Fase D — PRINTED PER-VEHICLE QR (fail-safe placed inside the car). The QR is
+// static and encodes a signed `vehicleId.sig` payload (HMAC over JWT_SECRET, no
+// schema column needed). Scanning it resolves the vehicle's ACTIVE rental and
+// mints a CHECK-IN inspection token on the spot — no email required. Bounded:
+// only resolves when the vehicle has a CHECKED_OUT reservation.
+// ---------------------------------------------------------------------------
+function vehicleSigSecret() {
+  return process.env.JWT_SECRET || process.env.BACKEND_INTERNAL_TOKEN || 'ride-fleet-qr';
+}
+function signVehicle(vehicleId) {
+  return createHmac('sha256', vehicleSigSecret()).update(`checkin-qr:${vehicleId}`).digest('hex').slice(0, 24);
+}
+function verifyVehicleSig(vehicleId, sig) {
+  const expected = signVehicle(vehicleId);
+  const a = Buffer.from(String(sig || ''));
+  const b = Buffer.from(expected);
+  return a.length === b.length && timingSafeEqual(a, b);
+}
+
+// Authed: the agent prints this for the vehicle. Returns the customer-facing URL the QR encodes.
+function checkinQrUrlForVehicle(vehicleId) {
+  return `${customerBaseUrl()}/inspect/v/${vehicleId}.${signVehicle(vehicleId)}`;
+}
+
+// Public: resolve a scanned `vehicleId.sig` → a CHECK-IN inspection token for the active rental.
+// Reuses an existing CHECK-IN inspection + live token when present (so repeat scans don't pile up).
+async function startCheckinByVehicleQr({ payload }) {
+  const raw = String(payload || '');
+  const dot = raw.lastIndexOf('.');
+  if (dot < 0) throw new CheckoutSessionError('Invalid code', 400, 'BAD_QR');
+  const vehicleId = raw.slice(0, dot);
+  const sig = raw.slice(dot + 1);
+  if (!vehicleId || !verifyVehicleSig(vehicleId, sig)) throw new CheckoutSessionError('Invalid code', 410, 'BAD_QR');
+
+  const resv = await prisma.reservation.findFirst({
+    where: { vehicleId, status: 'CHECKED_OUT' },
+    orderBy: { returnAt: 'asc' },
+    select: { id: true, tenantId: true, rentalAgreement: { select: { id: true } }, reservationNumber: true },
+  });
+  if (!resv) throw new CheckoutSessionError('No active rental on this vehicle right now', 409, 'NO_ACTIVE_RENTAL');
+
+  const cfg = await settingsService.getCustomerInspectionConfig({ tenantId: resv.tenantId || undefined });
+  if (!cfg?.enabled) throw new CheckoutSessionError('Customer-led inspection is not enabled', 403, 'CUSTOMER_INSPECTION_DISABLED');
+
+  // Reuse a live token if this rental already has a CHECK-IN inspection in flight.
+  const existingTok = await prisma.handoffToken.findFirst({
+    where: { reservationId: resv.id, kind: 'CUSTOMER_INSPECTION', consumedAt: null, expiresAt: { gt: new Date(Date.now() + 60_000) } },
+    orderBy: { expiresAt: 'desc' },
+  });
+  const existingInsp = await prisma.customerInspection.findFirst({
+    where: { reservationId: resv.id, phase: 'CHECKIN' },
+    orderBy: { sentAt: 'desc' },
+  });
+  if (existingTok && existingInsp) return { token: existingTok.token };
+
+  const inspection = existingInsp || await prisma.customerInspection.create({
+    data: {
+      tenantId: resv.tenantId || null,
+      vehicleId,
+      reservationId: resv.id,
+      rentalAgreementId: resv.rentalAgreement?.id || null,
+      reservationNumber: resv.reservationNumber || null,
+      phase: 'CHECKIN',
+      status: 'SENT',
+      emailTo: null,
+    },
+  });
+  const token = randomBytes(24).toString('hex');
+  const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000);
+  await prisma.handoffToken.create({
+    data: { reservationId: resv.id, kind: 'CUSTOMER_INSPECTION', token, expiresAt },
+  });
+  logger.info('[customer-inspection] check-in started via printed QR', { reservationId: resv.id, inspectionId: inspection.id });
+  return { token };
 }
 
 // ---------------------------------------------------------------------------
@@ -515,6 +682,9 @@ async function fixDamageReport({ reportId, photoDataUrl, actorUserId, scope = {}
 
 export const customerInspectionService = {
   sendCustomerInspection,
+  sendCheckinInspection,
+  checkinQrUrlForVehicle,
+  startCheckinByVehicleQr,
   loadByToken,
   reportDamage,
   completeInspection,

@@ -69,6 +69,11 @@ function CheckinWizard({ token, me, logout }) {
   const [waiveLateFee, setWaiveLateFee] = useState(false);
   const [photos, setPhotos] = useState({});
   const [currentAngle, setCurrentAngle] = useState(0);
+  // Fase D (2026-06-18): when the tenant uses the CUSTOMER inspection model AND the customer
+  // already submitted a CHECK-IN inspection, the agent's photo step becomes optional (they can
+  // skip and close, or still add their own). Pure gating — no change to the close/money logic.
+  const [checkinModel, setCheckinModel] = useState('AGENT');
+  const [customerCheckinInspection, setCustomerCheckinInspection] = useState(null);
   const [paymentMode, setPaymentMode] = useState('autocharge');  // 'autocharge' | 'manual'
   const [manualPayment, setManualPayment] = useState({ amount: '', method: 'card', last4: '', reference: '' });
   const [signerName, setSignerName] = useState('');
@@ -170,6 +175,26 @@ function CheckinWizard({ token, me, logout }) {
   const photosCaptured = Object.keys(photos).length;
   const photosRequired = STANDARD_ANGLES.length;
 
+  // Load the tenant's check-in inspection model + whether the customer already self-inspected
+  // at return. When both say "customer", the agent photo step is optional.
+  useEffect(() => {
+    if (!reservation?.id) return;
+    let on = true;
+    api('/api/settings/customer-inspection', {}, token)
+      .then((cfg) => { if (on) setCheckinModel(cfg?.enabled && String(cfg?.checkinModel || 'AGENT').toUpperCase() === 'CUSTOMER' ? 'CUSTOMER' : 'AGENT'); })
+      .catch(() => {});
+    api(`/api/customer-inspections?reservationId=${encodeURIComponent(reservation.id)}`, {}, token)
+      .then((list) => {
+        if (!on) return;
+        const arr = Array.isArray(list) ? list : (list?.rows || list?.inspections || []);
+        setCustomerCheckinInspection(arr.find((i) => String(i?.phase || '').toUpperCase() === 'CHECKIN') || null);
+      })
+      .catch(() => {});
+    return () => { on = false; };
+  }, [reservation?.id, token]);
+
+  const agentInspectionOptional = checkinModel === 'CUSTOMER' && !!customerCheckinInspection;
+
   // Pillar 2 wizards (2026-05-19) — checkin submit sequence:
   // 1. POST /inspection (CHECKIN phase, photos + metrics)
   // 2. POST /signature  (writes signature to the reservation row)
@@ -266,7 +291,7 @@ function CheckinWizard({ token, me, logout }) {
   const canAdvance = () => {
     switch (step) {
       case 0: return !!reservation && !!agreement;
-      case 1: return photosCaptured >= 1;  // staff can override and continue with at least 1
+      case 1: return photosCaptured >= 1 || agentInspectionOptional;  // staff override (≥1 photo) OR customer already self-inspected
       case 2: return Number(odometerIn) > 0 && Number(odometerIn) >= Number(agreement?.odometerOut || 0);
       case 3: return paymentMode === 'autocharge' || (paymentMode === 'manual' && Number(manualPayment.amount) > 0);
       case 4: return !!signerName && !!signatureDataUrl;
@@ -367,12 +392,21 @@ function CheckinWizard({ token, me, logout }) {
           <h3 style={h3Style}>Step {step + 1} · {steps[step].title}</h3>
           {step === 0 && <Step1Summary reservation={reservation} agreement={agreement} />}
           {step === 1 && (
-            <Step2Photos
-              photos={photos}
-              onCapture={(k, dataUrl) => setPhotos((p) => ({ ...p, [k]: dataUrl }))}
-              currentAngle={currentAngle}
-              onAngleChange={setCurrentAngle}
-            />
+            <>
+              {agentInspectionOptional && (
+                <div style={{ background: '#eef0ff', border: '1px solid #c9cdf7', borderRadius: 10, padding: '12px 14px', marginBottom: 14, color: '#2c2a5a', fontSize: 14 }}>
+                  <strong>The customer already inspected this vehicle at return.</strong> Their damage reports
+                  {String(customerCheckinInspection?.status || '').toUpperCase() === 'SUBMITTED' ? ' are waiting in the approval queue.' : ' are in the review queue.'} You can
+                  <strong> skip the photos and continue</strong>, or still add your own below.
+                </div>
+              )}
+              <Step2Photos
+                photos={photos}
+                onCapture={(k, dataUrl) => setPhotos((p) => ({ ...p, [k]: dataUrl }))}
+                currentAngle={currentAngle}
+                onAngleChange={setCurrentAngle}
+              />
+            </>
           )}
           {step === 2 && (
             <Step3Metrics

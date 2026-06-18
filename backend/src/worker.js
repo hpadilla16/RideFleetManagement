@@ -103,6 +103,18 @@ async function main() {
     });
   }
 
+  // Customer CHECK-IN inspection — D-1 reminder sweep (Fase D). The day before
+  // a rental's return, emails the customer a self-inspection link (DB-deduped).
+  try {
+    const checkinRemMod = await import('./modules/customer-inspection/checkin-reminders.scheduler.js');
+    checkinRemMod.startCheckinReminders();
+    logger.info('[worker] started: checkin-inspection reminders scheduler');
+  } catch (err) {
+    logger.warn('[worker] checkin-inspection reminders scheduler not started', {
+      message: err.message,
+    });
+  }
+
   // Long-term (monthly) plans — P2 cycle-billing sweep. Hourly: renewal
   // reminders (48h/24h), cycle close + card-on-file auto-charge, retry +
   // overdue dunning, auto-clear on payment (cache-deduped sends).

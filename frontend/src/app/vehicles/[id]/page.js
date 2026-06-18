@@ -419,6 +419,36 @@ function VehicleProfileInner({ token, me, logout }) {
     window.open(`/vehicles/${row.id}?print=1`, '_blank', 'noopener,noreferrer');
   };
 
+  // Fase D — printable per-vehicle CHECK-IN inspection QR (place it inside the car).
+  const printCheckinQr = async () => {
+    if (typeof window === 'undefined' || !row?.id) return;
+    try {
+      const out = await api(`/api/customer-inspections/vehicle/${row.id}/checkin-qr`, {}, token);
+      const url = out?.url;
+      if (!url) { setMsg('Could not build the check-in QR.'); return; }
+      const dataUrl = await QRCode.toDataURL(url, { errorCorrectionLevel: 'M', margin: 1, width: 512, color: { dark: '#211a38', light: '#ffffff' } });
+      const label = [row.year, row.make, row.model].filter(Boolean).join(' ');
+      const plate = row.plate || '';
+      const w = window.open('', '_blank', 'noopener,noreferrer,width=420,height=640');
+      if (!w) return;
+      w.document.write(`<!doctype html><html><head><title>Check-in QR — ${plate || label}</title><style>
+        body{font-family:Arial,Helvetica,sans-serif;text-align:center;color:#211a38;margin:0;padding:28px}
+        img{width:300px;height:300px}
+        h1{font-size:18px;margin:12px 0 2px}.sub{color:#555;font-size:13px;margin:0 0 14px}
+        .ins{font-size:13px;color:#333;max-width:320px;margin:14px auto 0;line-height:1.4}
+      </style></head><body>
+        <h1>Returning the car? Scan to inspect</h1>
+        <div class="sub">${label}${plate ? ' · ' + plate : ''}</div>
+        <img src="${dataUrl}" alt="Check-in inspection QR" />
+        <div class="ins">Scan with your phone camera before returning the vehicle. Walk around the car and report any damage you see — it takes about 2 minutes.</div>
+        <script>window.onload=function(){setTimeout(function(){window.print();},250);};<\/script>
+      </body></html>`);
+      w.document.close();
+    } catch (e) {
+      setMsg(e?.message || 'Could not build the check-in QR.');
+    }
+  };
+
   const saveTelematicsDevice = async () => {
     try {
       setSavingTelematics('device');
@@ -487,6 +517,7 @@ function VehicleProfileInner({ token, me, logout }) {
               <Link href={`/reservations/${nextReservation.id}`} className="legal-link-pill">Open Next Reservation</Link>
             ) : null}
             <button type="button" className="button-subtle" onClick={printQr} disabled={!qrDataUrl}>Print QR Label</button>
+            <button type="button" className="button-subtle" onClick={printCheckinQr}>Print Check-in QR</button>
           </div>
         </div>
 

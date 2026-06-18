@@ -123,6 +123,8 @@ function SettingsInner({ token, me, logout }) {
   const [fleetRotationRule, setFleetRotationRule] = useState('TIME');
   // Customer-led inspection (2026-06-11).
   const [customerInspectionEnabled, setCustomerInspectionEnabled] = useState(false);
+  // Check-in inspection model (Fase D, 2026-06-18): 'AGENT' (current) vs 'CUSTOMER' (agent-less).
+  const [customerInspectionCheckinModel, setCustomerInspectionCheckinModel] = useState('AGENT');
   // Citations OCR (2026-06-15): per-tenant vision-LLM credentials for mail intake.
   const [ocrCfg, setOcrCfg] = useState({ provider: 'anthropic', model: '', hasKey: false });
   const [ocrKeyInput, setOcrKeyInput] = useState('');
@@ -132,7 +134,10 @@ function SettingsInner({ token, me, logout }) {
       .then((out) => setFleetRotationRule(out?.rule === 'MILEAGE' ? 'MILEAGE' : 'TIME'))
       .catch(() => {});
     api(scopedSettingsPath('/api/settings/customer-inspection'), {}, token)
-      .then((out) => setCustomerInspectionEnabled(!!out?.enabled))
+      .then((out) => {
+        setCustomerInspectionEnabled(!!out?.enabled);
+        setCustomerInspectionCheckinModel(String(out?.checkinModel || 'AGENT').toUpperCase() === 'CUSTOMER' ? 'CUSTOMER' : 'AGENT');
+      })
       .catch(() => {});
     api(scopedSettingsPath('/api/settings/citation-ocr'), {}, token)
       .then((out) => out && setOcrCfg(out))
@@ -2443,7 +2448,7 @@ function SettingsInner({ token, me, logout }) {
                       const enabled = e.target.checked;
                       setCustomerInspectionEnabled(enabled);
                       try {
-                        await api(scopedSettingsPath('/api/settings/customer-inspection'), { method: 'PUT', body: JSON.stringify({ enabled }) }, token);
+                        await api(scopedSettingsPath('/api/settings/customer-inspection'), { method: 'PUT', body: JSON.stringify({ enabled, checkinModel: customerInspectionCheckinModel }) }, token);
                         setMsg(`Customer-led inspection ${enabled ? 'enabled' : 'disabled'}`);
                       } catch (err) {
                         setMsg(err?.message || 'Failed to save customer inspection setting');
@@ -2458,6 +2463,35 @@ function SettingsInner({ token, me, logout }) {
                   reports land in the review queue for soft/hard approval.
                 </div>
               </div>
+              {customerInspectionEnabled ? (
+                <div className="form-grid-2" style={{ marginTop: 10 }}>
+                  <div className="stack">
+                    <label className="label">Check-in (return) inspection model</label>
+                    <select
+                      value={customerInspectionCheckinModel}
+                      onChange={async (e) => {
+                        const checkinModel = e.target.value === 'CUSTOMER' ? 'CUSTOMER' : 'AGENT';
+                        setCustomerInspectionCheckinModel(checkinModel);
+                        try {
+                          await api(scopedSettingsPath('/api/settings/customer-inspection'), { method: 'PUT', body: JSON.stringify({ enabled: customerInspectionEnabled, checkinModel }) }, token);
+                          setMsg(`Check-in model: ${checkinModel === 'CUSTOMER' ? 'customer self-inspection' : 'agent inspection'}`);
+                        } catch (err) {
+                          setMsg(err?.message || 'Failed to save check-in model');
+                        }
+                      }}
+                    >
+                      <option value="AGENT">Agent inspection (agent inspects at return)</option>
+                      <option value="CUSTOMER">Customer inspection (customer self-inspects; agent can skip)</option>
+                    </select>
+                  </div>
+                  <div className="surface-note">
+                    With <strong>Customer inspection</strong>, the customer gets a D-1 email and a printed
+                    in-car QR to self-inspect at return; the agent&apos;s check-in can skip the inspection
+                    step (agent can still view/add damage before closing). <strong>Agent inspection</strong>
+                    keeps today&apos;s flow where the agent always inspects.
+                  </div>
+                </div>
+              ) : null}
             </div>
 
             <div className="glass card" style={{ padding: 12 }}>

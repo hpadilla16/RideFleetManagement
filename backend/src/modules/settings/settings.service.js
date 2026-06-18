@@ -748,20 +748,25 @@ export const settingsService = {
 
   // Customer-led inspection (2026-06-11): when enabled, checkout step 4 can
   // delegate the walkthrough to the customer (email link + damage dots).
+  // checkinModel (Fase D, 2026-06-18): 'AGENT' = the agent does the return inspection (today's
+  // behavior) · 'CUSTOMER' = the customer self-inspects at return, so the agent can skip the
+  // inspection step and close (agent can still view/add). Only takes effect when enabled=true.
   async getCustomerInspectionConfig(scope = {}) {
     const row = await prisma.appSetting.findUnique({ where: { key: scopedKey('customerInspectionConfig', scope) } });
-    const fallback = { enabled: false };
+    const fallback = { enabled: false, checkinModel: 'AGENT' };
     if (!row?.value) return fallback;
     try {
       const parsed = JSON.parse(row.value);
-      return { enabled: !!parsed?.enabled };
+      const checkinModel = String(parsed?.checkinModel || 'AGENT').toUpperCase() === 'CUSTOMER' ? 'CUSTOMER' : 'AGENT';
+      return { enabled: !!parsed?.enabled, checkinModel };
     } catch {
       return fallback;
     }
   },
 
   async updateCustomerInspectionConfig(payload = {}, scope = {}) {
-    const next = { enabled: !!payload?.enabled };
+    const checkinModel = String(payload?.checkinModel || 'AGENT').toUpperCase() === 'CUSTOMER' ? 'CUSTOMER' : 'AGENT';
+    const next = { enabled: !!payload?.enabled, checkinModel };
     const key = scopedKey('customerInspectionConfig', scope);
     await prisma.appSetting.upsert({
       where: { key },
