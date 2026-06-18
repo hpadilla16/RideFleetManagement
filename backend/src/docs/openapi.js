@@ -2234,7 +2234,13 @@ export function buildOpenApiSpec(serverUrl) {
   };
 }
 
-export function swaggerHtml(specPath = '/api/docs/openapi.json') {
+// Accepts either a spec OBJECT (preferred — embedded inline so there's no second, Basic-Auth-gated
+// fetch) or a URL string (legacy). Inlining is what makes Swagger UI render behind the docs
+// password: the page is already authenticated, so the embedded spec needs no extra credentials.
+export function swaggerHtml(specOrPath = '/api/docs/openapi.json') {
+  const specInit = typeof specOrPath === 'string'
+    ? `url: ${JSON.stringify(specOrPath)},`
+    : `spec: ${JSON.stringify(specOrPath).replace(/</g, '\\u003c')},`;
   return `<!doctype html>
 <html lang="en">
   <head>
@@ -2254,7 +2260,7 @@ export function swaggerHtml(specPath = '/api/docs/openapi.json') {
     <script>
       window.onload = () => {
         window.ui = SwaggerUIBundle({
-          url: '${specPath}',
+          ${specInit}
           dom_id: '#swagger-ui',
           deepLinking: true,
           persistAuthorization: true,

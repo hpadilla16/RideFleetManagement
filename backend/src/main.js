@@ -168,8 +168,11 @@ app.get('/api/docs/openapi.json', requireDocsAuth, (req, res) => {
   res.json(buildOpenApiSpec(serverUrl));
 });
 
-app.get(['/api/docs', '/api/docs/'], requireDocsAuth, (_req, res) => {
-  res.type('html').send(swaggerHtml('/api/docs/openapi.json'));
+app.get(['/api/docs', '/api/docs/'], requireDocsAuth, (req, res) => {
+  // Embed the spec inline (instead of a url:) so Swagger UI doesn't make a second fetch that the
+  // Basic-Auth gate would block. The page itself is already authenticated.
+  const serverUrl = `${req.protocol}://${req.get('host')}`;
+  res.type('html').send(swaggerHtml(buildOpenApiSpec(serverUrl)));
 });
 
 app.use('/api/auth', authRouter);
