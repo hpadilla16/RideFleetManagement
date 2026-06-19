@@ -172,7 +172,7 @@ function SettingsInner({ token, me, logout }) {
   const [excludedVendorsText, setExcludedVendorsText] = useState('');
   // Tax-aware pricing config per location (Amadeus/Titanium, taxes, brokerage, floor)
   const [pricingConfigs, setPricingConfigs] = useState({ configs: [], connectionTypes: ['TITANIUM', 'AMADEUS'] });
-  const [pcDraft, setPcDraft] = useState({ locationCode: '', connectionType: 'TITANIUM', taxesText: '', brokeragePct: '', floorBase: '' });
+  const [pcDraft, setPcDraft] = useState({ locationCode: '', connectionType: 'TITANIUM', taxesText: '', brokeragePct: '', floorBase: '', utilTiersText: '' });
   const [revenuePricingConfig, setRevenuePricingConfig] = useState(DEFAULT_REVENUE_PRICING_CONFIG);
   const [revenuePricingPreview, setRevenuePricingPreview] = useState(DEFAULT_REVENUE_PRICING_PREVIEW);
   const [revenuePricingPreviewResult, setRevenuePricingPreviewResult] = useState(null);
@@ -824,6 +824,27 @@ function SettingsInner({ token, me, logout }) {
       return { name, pct };
     });
 
+  // Utilization tiers round-trip as "maxPct: adjust" per line. adjust ending in % = adjustPct,
+  // else adjustAmount. e.g. "40: -3", "100: +5%".
+  const tiersToText = (rules) => (Array.isArray(rules) ? rules : [])
+    .map((t) => {
+      const adj = t.adjustPct != null
+        ? `${t.adjustPct >= 0 ? '+' : ''}${t.adjustPct}%`
+        : `${(t.adjustAmount ?? 0) >= 0 ? '+' : ''}${t.adjustAmount ?? 0}`;
+      return `${t.maxPct}: ${adj}`;
+    }).join('\n');
+  const parseTiersText = (text) => String(text || '')
+    .split('\n')
+    .map((s) => s.trim())
+    .filter(Boolean)
+    .map((s) => {
+      const i = s.indexOf(':');
+      const maxPct = Number((i >= 0 ? s.slice(0, i) : s).trim()) || 0;
+      const v = (i >= 0 ? s.slice(i + 1) : '').trim();
+      if (v.endsWith('%')) return { maxPct, adjustPct: Number(v.slice(0, -1)) || 0 };
+      return { maxPct, adjustAmount: Number(v) || 0 };
+    });
+
   const savePricingConfig = async () => {
     if (!pcDraft.locationCode.trim()) { setMsg('Location code is required'); return; }
     const body = {
@@ -832,11 +853,12 @@ function SettingsInner({ token, me, logout }) {
       taxes: parseTaxesText(pcDraft.taxesText),
       brokeragePct: Number(pcDraft.brokeragePct) || 0,
       floorBase: pcDraft.floorBase === '' ? null : Number(pcDraft.floorBase),
+      utilizationRules: parseTiersText(pcDraft.utilTiersText),
     };
     await api(scopedSettingsPath('/api/settings/market-pricing-config'), { method: 'PUT', body: JSON.stringify(body) }, token);
     const out = await api(scopedSettingsPath('/api/settings/market-pricing-config'), { bypassCache: true }, token);
     setPricingConfigs({ configs: out?.configs || [], connectionTypes: out?.connectionTypes || ['TITANIUM', 'AMADEUS'] });
-    setPcDraft({ locationCode: '', connectionType: 'TITANIUM', taxesText: '', brokeragePct: '', floorBase: '' });
+    setPcDraft({ locationCode: '', connectionType: 'TITANIUM', taxesText: '', brokeragePct: '', floorBase: '', utilTiersText: '' });
     setMsg('Pricing config saved');
   };
 
@@ -846,6 +868,7 @@ function SettingsInner({ token, me, logout }) {
     taxesText: taxesToText(c.taxes),
     brokeragePct: String(c.brokeragePct ?? ''),
     floorBase: c.floorBase == null ? '' : String(c.floorBase),
+    utilTiersText: tiersToText(c.utilizationRules),
   });
 
   const deletePricingConfig = async (code) => {
@@ -5166,7 +5189,7 @@ function SettingsInner({ token, me, logout }) {
                   {pricingConfigs.configs.map((c) => (
                     <div key={c.locationCode} className="row-between" style={{ alignItems: 'center', gap: 10, padding: '6px 0', borderBottom: '1px solid rgba(0,0,0,0.06)' }}>
                       <div className="ui-muted" style={{ fontSize: 13 }}>
-                        <strong>{c.locationCode}</strong> · {c.connectionType} · taxes {taxesToText(c.taxes) || '—'} · brokerage {c.brokeragePct}% · floor {c.floorBase == null ? '—' : `$${c.floorBase}`}
+                        <strong>{c.locationCode}</strong> · {c.connectionType} · taxes {taxesToText(c.taxes) || '—'} · brokerage {c.brokeragePct}% · floor {c.floorBase == null ? '—' : `$${c.floorBase}`} · tiers {Array.isArray(c.utilizationRules) && c.utilizationRules.length ? c.utilizationRules.length : '—'}
                       </div>
                       <div className="inline-actions">
                         <button type="button" className="button-subtle" onClick={() => editPricingConfig(c)}>Edit</button>
@@ -5200,6 +5223,19 @@ function SettingsInner({ token, me, logout }) {
                   <input type="number" step="0.01" value={pcDraft.floorBase} onChange={(e) => setPcDraft({ ...pcDraft, floorBase: e.target.value })} placeholder="optional" />
                 </label>
               </div>
+              <label className="stack" style={{ gap: 4, marginTop: 10 }}>
+                <span className="ui-muted">Utilization tiers (one per line, &quot;maxPct: adjust&quot;) — applied on top of the base margin, by projected utilization at pickup</span>
+                <textarea
+                  value={pcDraft.utilTiersText}
+                  onChange={(e) => setPcDraft({ ...pcDraft, utilTiersText: e.target.value })}
+                  rows={4}
+                  placeholder={'40: -3\n70: -1\n90: 0\n100: +5%'}
+                  style={{ width: '100%', fontFamily: 'inherit' }}
+                />
+                <span className="ui-muted" style={{ fontSize: 11 }}>
+                  e.g. up to 40% util → −$3, 40–70% → −$1, 70–90% → match, &gt;90% → +5%. A plain number is a $ amount; add % for a percent. Leave empty for no utilization adjustment.
+                </span>
+              </label>
               <div className="inline-actions" style={{ marginTop: 12 }}>
                 <button type="button" onClick={savePricingConfig}>Save location config</button>
               </div>

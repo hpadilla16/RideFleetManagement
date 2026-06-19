@@ -1144,6 +1144,7 @@ export const settingsService = {
         taxes: Array.isArray(r.taxes) ? r.taxes : [],
         brokeragePct: Number(r.brokeragePct),
         floorBase: r.floorBase != null ? Number(r.floorBase) : null,
+        utilizationRules: Array.isArray(r.utilizationRules) ? r.utilizationRules : [],
         currency: r.currency,
       })),
       connectionTypes: ['TITANIUM', 'AMADEUS'],
@@ -1164,7 +1165,18 @@ export const settingsService = {
     const brokeragePct = Number(payload?.brokeragePct) || 0;
     const floorBase = (payload?.floorBase === '' || payload?.floorBase == null) ? null : Number(payload.floorBase);
     const currency = String(payload?.currency || 'USD').trim().toUpperCase() || 'USD';
-    const data = { connectionType, taxes, brokeragePct, floorBase, currency };
+    // Utilization tiers: sanitize to { maxPct, adjustAmount?|adjustPct? }, sorted ascending.
+    const utilizationRules = (Array.isArray(payload?.utilizationRules) ? payload.utilizationRules : [])
+      .map((t) => {
+        const maxPct = Math.max(0, Math.min(100, Number(t?.maxPct) || 0));
+        const out = { maxPct };
+        if (t?.adjustAmount != null && t.adjustAmount !== '') out.adjustAmount = Number(t.adjustAmount) || 0;
+        if (t?.adjustPct != null && t.adjustPct !== '') out.adjustPct = Number(t.adjustPct) || 0;
+        return out;
+      })
+      .filter((t) => Number.isFinite(t.maxPct))
+      .sort((a, b) => a.maxPct - b.maxPct);
+    const data = { connectionType, taxes, brokeragePct, floorBase, utilizationRules, currency };
     const row = await prisma.marketPricingConfig.upsert({
       where: { tenantId_locationCode: { tenantId: scope.tenantId, locationCode } },
       create: { tenantId: scope.tenantId, locationCode, ...data },
@@ -1173,7 +1185,9 @@ export const settingsService = {
     return {
       id: row.id, locationCode: row.locationCode, connectionType: row.connectionType,
       taxes: Array.isArray(row.taxes) ? row.taxes : [], brokeragePct: Number(row.brokeragePct),
-      floorBase: row.floorBase != null ? Number(row.floorBase) : null, currency: row.currency,
+      floorBase: row.floorBase != null ? Number(row.floorBase) : null,
+      utilizationRules: Array.isArray(row.utilizationRules) ? row.utilizationRules : [],
+      currency: row.currency,
     };
   },
 

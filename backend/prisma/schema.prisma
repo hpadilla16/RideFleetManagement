@@ -3162,6 +3162,9 @@ model MarketPricingConfig {
   taxes          Json     @default("[]")             // [{ name: "PR tax", pct: 11.5 }, ...]
   brokeragePct   Decimal  @default(0) @db.Decimal(6, 3)
   floorBase      Decimal? @db.Decimal(10, 2)         // per-location floor (BASE rate); null = none
+  // Utilization-based dynamic tiers (Fase 2): [{ maxPct, adjustAmount?, adjustPct? }] applied
+  // ON TOP of the base margin, using projected utilization from the Availability Forecast.
+  utilizationRules Json   @default("[]")
   currency       String   @default("USD")
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt

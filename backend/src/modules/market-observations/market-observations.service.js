@@ -2,6 +2,7 @@ import { prisma } from '../../lib/prisma.js';
 import { applyStrategy, ruleLabelFor, getCompetitorExcludeSet, getMarketPricingConfig } from '../market-scraper/market-scrape-comparison.service.js';
 import { isExcludedVendor, normalizeVendorName } from '../market-scraper/market-vendor.js';
 import { baseFromCustomerAllIn, customerAllInFromBase } from '../market-scraper/pricing-grossup.js';
+import { buildUtilizationLookup, applyUtilizationAdjustment } from '../market-scraper/pricing-utilization.js';
 import { renderReportExcel } from '../reports/reports-export.js';
 
 /**
@@ -486,9 +487,23 @@ export async function buildAirportExportWorkbook({ airport, days, scope = {} }) 
 
   // Flatten to rows: one per (pickup day × class), sorted by day then class.
   const cells = [...byCell.values()].sort((a, b) => (a.date === b.date ? a.sipp.localeCompare(b.sipp) : a.date.localeCompare(b.date)));
+
+  // Utilization tiers (Fase 2): only when tax-aware AND this location has rules.
+  const utilRules = Array.isArray(pricingConfig?.utilizationRules) ? pricingConfig.utilizationRules : [];
+  let utilLookup = { utilOf: () => null };
+  if (taxAware && utilRules.length > 0 && cells.length) {
+    const ds = [...new Set(cells.map((c) => c.date))].sort();
+    utilLookup = await buildUtilizationLookup({ tenantId: scope.tenantId, locationCode: A, fromISO: ds[0], toISO: ds[ds.length - 1] });
+  }
+
   const rhRows = cells.map((c) => {
     const profile = profById.get(c.profileId) || null;
-    const target = applyStrategy(c.cheapest, profile); // all-in target (margin on the competitor all-in)
+    let target = applyStrategy(c.cheapest, profile); // all-in target (margin on the competitor all-in)
+    let utilization = null;
+    if (taxAware && target != null && utilRules.length > 0) {
+      utilization = utilLookup.utilOf(c.sipp, c.date);
+      target = applyUtilizationAdjustment(target, utilization, utilRules);
+    }
     let suggestedAllIn = null;
     let uploaded = target; // legacy: upload the target as-is
     if (taxAware && target != null) {
@@ -502,7 +517,7 @@ export async function buildAirportExportWorkbook({ airport, days, scope = {} }) 
     return {
       date: c.date, location: A, sipp: c.sipp, rateCode: 'Daily', rule: ruleLabelFor(profile, '-'),
       marketVendor: c.vendor || '', marketCheapest: Number(c.cheapest.toFixed(2)),
-      suggested: (taxAware ? suggestedAllIn : uploaded), uploadedBase: uploaded,
+      suggested: (taxAware ? suggestedAllIn : uploaded), uploadedBase: uploaded, utilization,
       currentPrice: current, deltaAbs: diff, marketSampled: c.sampled,
     };
   });
@@ -517,6 +532,7 @@ export async function buildAirportExportWorkbook({ airport, days, scope = {} }) 
     { header: taxAware ? 'Comp. Rate (all-in)' : 'Comp. Rate', key: 'marketCheapest', type: 'currency', width: 14 },
     { header: taxAware ? 'Suggested (all-in)' : 'Suggested', key: 'suggested', type: 'currency', width: 14 },
     ...(taxAware ? [{ header: 'Uploaded Rate (base)', key: 'uploadedBase', type: 'currency', width: 16 }] : []),
+    ...(taxAware ? [{ header: 'Util %', key: 'utilization', type: 'percent', width: 9 }] : []),
     { header: 'Current Rate', key: 'currentPrice', type: 'currency', width: 12 },
     { header: 'Difference', key: 'deltaAbs', type: 'currency', width: 11 },
     { header: 'Samples', key: 'marketSampled', type: 'integer', width: 9 },

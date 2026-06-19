@@ -18,6 +18,7 @@ import { prisma } from '../../lib/prisma.js';
 import { renderReportExcel } from '../reports/reports-export.js';
 import { excludeSetFor, isExcludedVendor, normalizeVendorName } from './market-vendor.js';
 import { baseFromCustomerAllIn } from './pricing-grossup.js';
+import { buildUtilizationLookup, applyUtilizationAdjustment } from './pricing-utilization.js';
 
 /**
  * Tax-aware pricing config for a (tenant, location). Returns the row or null.
@@ -99,6 +100,7 @@ export function ruleLabelFor(profile, fallback = '-') {
  * Returns null when `cheapest` is not a usable number.
  */
 export function applyStrategy(cheapest, profile) {
+  if (!profile) return null; // orphan observation (no owning profile) → no suggestion
   if (cheapest == null || !Number.isFinite(Number(cheapest))) return null;
   const c = Number(cheapest);
   const amount = profile.strategyAmount != null ? Number(profile.strategyAmount) : 0;
@@ -219,6 +221,21 @@ export async function computeRunComparison(runId, { scope = {} } = {}) {
   const taxAware = !!pricingConfig;
   const byKey = aggregateCheapestBySippDate(observations, { excludeSet, useEffective: taxAware });
 
+  // Utilization-based dynamic tiers (Fase 2): only when tax-aware AND the location has rules.
+  const utilRules = Array.isArray(pricingConfig?.utilizationRules) ? pricingConfig.utilizationRules : [];
+  let utilLookup = { utilOf: () => null };
+  if (taxAware && utilRules.length > 0) {
+    const allDates = [...new Set([...byKey.values()].map((r) => r.date))].sort();
+    if (allDates.length) {
+      utilLookup = await buildUtilizationLookup({
+        tenantId: profile.tenantId,
+        locationCode: profile.locationCode,
+        fromISO: allDates[0],
+        toISO: allDates[allDates.length - 1],
+      });
+    }
+  }
+
   // Without a targetRate, we still compute the suggestedPrice column so the
   // UI can show "this is what we'd charge", but currentPrice + delta are
   // blank. Callers see targetRateMissing=true so they can prompt for setup.
@@ -262,7 +279,15 @@ export async function computeRunComparison(runId, { scope = {} } = {}) {
     const vt = vehicleTypeBySipp.get(r.sipp) || null;
     // Apply the margin strategy to the cheapest competitor. In tax-aware mode
     // r.cheapest is the competitor ALL-IN, so this target is also an all-in.
-    const target = applyStrategy(r.cheapest, profile);
+    let target = applyStrategy(r.cheapest, profile);
+
+    // Utilization tier (Fase 2): nudge the target all-in ON TOP of the base margin,
+    // using projected utilization for this (SIPP, pickup day).
+    let utilization = null;
+    if (taxAware && target != null && utilRules.length > 0) {
+      utilization = utilLookup.utilOf(r.sipp, r.date);
+      target = applyUtilizationAdjustment(target, utilization, utilRules);
+    }
 
     // suggested = the number we ACTUALLY upload (the base rate). In tax-aware mode
     // we back-solve the base from the target all-in via the location's gross-up,
@@ -308,6 +333,7 @@ export async function computeRunComparison(runId, { scope = {} } = {}) {
       currentPrice,
       suggestedPrice: suggested,   // the BASE rate to upload (tax-aware) or the legacy suggestion
       suggestedAllIn,              // tax-aware: the target all-in the customer would see (else null)
+      utilization,                 // 0..1 projected utilization that drove the tier (else null)
       deltaAbs,
       deltaPct,
       willUpdate: shouldUpdate
@@ -399,6 +425,7 @@ export async function buildRunComparisonWorkbook(runId, { scope = {} } = {}) {
     { header: taxAware ? 'Comp. Rate (all-in)' : 'Comp. Rate', key: 'marketCheapest', type: 'currency', width: 14 },
     { header: taxAware ? 'Suggested (all-in)' : 'Suggested', key: 'suggested', type: 'currency', width: 14 },
     ...(taxAware ? [{ header: 'Uploaded Rate (base)', key: 'uploadedBase', type: 'currency', width: 16 }] : []),
+    ...(taxAware ? [{ header: 'Util %', key: 'utilization', type: 'percent', width: 9 }] : []),
     { header: 'Current Rate', key: 'currentPrice', type: 'currency', width: 12 },
     { header: 'Difference', key: 'deltaAbs', type: 'currency', width: 11 },
     { header: 'Samples', key: 'marketSampled', type: 'integer', width: 9 },
@@ -409,6 +436,7 @@ export async function buildRunComparisonWorkbook(runId, { scope = {} } = {}) {
     // Suggested column = all-in when tax-aware (suggestedAllIn), else the uploaded number.
     suggested: (taxAware ? r.suggestedAllIn : r.suggestedPrice) ?? null,
     uploadedBase: r.suggestedPrice ?? null,
+    utilization: r.utilization ?? null,
     currentPrice: r.currentPrice ?? null,
     deltaAbs: r.deltaAbs ?? null, marketSampled: r.marketSampled ?? null,
   }));
