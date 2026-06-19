@@ -1089,6 +1089,44 @@ export const settingsService = {
     return { sipps: cleaned, options: DASHBOARD_SIPP_CODES, max: DASHBOARD_SIPP_MAX };
   },
 
+  // --- Market Intelligence excluded competitors (per-tenant pool hygiene) ----
+  // Tenant.marketExcludedVendors (JSON array of vendor names). The tenant lists
+  // their own brand(s) + any vendors to drop from the competitor pool so the
+  // pricing engine never compares against itself. Empty → no filtering.
+  async getMarketExcludedVendors(scope = {}) {
+    if (!scope?.tenantId) throw new Error('tenantId is required');
+    const tenant = await prisma.tenant.findUnique({
+      where: { id: scope.tenantId },
+      select: { marketExcludedVendors: true }
+    });
+    const vendors = Array.isArray(tenant?.marketExcludedVendors)
+      ? tenant.marketExcludedVendors.map((v) => String(v || '').trim()).filter(Boolean)
+      : [];
+    return { vendors };
+  },
+
+  async updateMarketExcludedVendors(payload = {}, scope = {}) {
+    if (!scope?.tenantId) throw new Error('tenantId is required');
+    const input = Array.isArray(payload?.vendors) ? payload.vendors : [];
+    // Trim, drop blanks, de-dupe case-insensitively, cap at 50.
+    const seen = new Set();
+    const cleaned = [];
+    for (const raw of input) {
+      const name = String(raw || '').trim();
+      if (!name) continue;
+      const k = name.toLowerCase();
+      if (seen.has(k)) continue;
+      seen.add(k);
+      cleaned.push(name);
+      if (cleaned.length >= 50) break;
+    }
+    await prisma.tenant.update({
+      where: { id: scope.tenantId },
+      data: { marketExcludedVendors: cleaned.length ? cleaned : null }
+    });
+    return { vendors: cleaned };
+  },
+
   async updateTelematicsConfig(payload = {}, scope = {}) {
     if (!scope?.tenantId) throw new Error('tenantId is required');
     const existing = await this.getTelematicsConfig(scope, { includeSecret: true });

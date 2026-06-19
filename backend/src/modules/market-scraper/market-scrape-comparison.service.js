@@ -16,6 +16,27 @@
  */
 import { prisma } from '../../lib/prisma.js';
 import { renderReportExcel } from '../reports/reports-export.js';
+import { excludeSetFor, isExcludedVendor, normalizeVendorName } from './market-vendor.js';
+
+/**
+ * Build the competitor-exclusion Set for a tenant from its UI-configured list
+ * (Tenant.marketExcludedVendors — the tenant's own brand(s) + any vendors they
+ * don't want in the competitor pool, set from Settings → Market Intelligence).
+ * Returns a Set<vendorKey>. Never throws — empty config → empty set (no filtering).
+ */
+export async function getCompetitorExcludeSet(tenantId) {
+  let names = [];
+  if (tenantId) {
+    try {
+      const t = await prisma.tenant.findUnique({
+        where: { id: tenantId },
+        select: { marketExcludedVendors: true },
+      });
+      if (Array.isArray(t?.marketExcludedVendors)) names = t.marketExcludedVendors;
+    } catch { /* no filtering */ }
+  }
+  return excludeSetFor(names);
+}
 
 function notFound(msg) {
   const e = new Error(msg);
@@ -98,16 +119,20 @@ export function applyStrategy(cheapest, profile) {
  *   - dailyPrice is null
  * Returns Map<"YYYY-MM-DD|SIPP", {date, sipp, cheapest, vendor, sampled}>.
  */
-export function aggregateCheapestBySippDate(observations) {
+export function aggregateCheapestBySippDate(observations, { excludeSet } = {}) {
   const byKey = new Map();
   for (const obs of observations) {
     if (obs.status !== 'FOUND') continue;
     if (obs.dailyPrice == null) continue;
+    // Drop the tenant's own brand / configured exclusions from the pool so we
+    // never pick "ourselves" as the cheapest competitor.
+    if (excludeSet && isExcludedVendor(obs.vendor, excludeSet)) continue;
     const price = Number(obs.dailyPrice);
     if (!Number.isFinite(price) || price <= 0) continue;
     const dateISO = obs.pickupDate instanceof Date
       ? obs.pickupDate.toISOString().slice(0, 10)
       : String(obs.pickupDate).slice(0, 10);
+    const vendor = normalizeVendorName(obs.vendor) || null;
     const key = `${dateISO}|${obs.sipp}`;
     const existing = byKey.get(key);
     if (!existing) {
@@ -115,14 +140,14 @@ export function aggregateCheapestBySippDate(observations) {
         date: dateISO,
         sipp: obs.sipp,
         cheapest: price,
-        vendor: obs.vendor || null,
+        vendor,
         sampled: 1
       });
     } else {
       existing.sampled += 1;
       if (price < existing.cheapest) {
         existing.cheapest = price;
-        existing.vendor = obs.vendor || null;
+        existing.vendor = vendor;
       }
     }
   }
@@ -169,7 +194,8 @@ export async function computeRunComparison(runId, { scope = {} } = {}) {
     orderBy: [{ pickupDate: 'asc' }, { sipp: 'asc' }]
   });
 
-  const byKey = aggregateCheapestBySippDate(observations);
+  const excludeSet = await getCompetitorExcludeSet(profile.tenantId);
+  const byKey = aggregateCheapestBySippDate(observations, { excludeSet });
 
   // Without a targetRate, we still compute the suggestedPrice column so the
   // UI can show "this is what we'd charge", but currentPrice + delta are

@@ -445,6 +445,12 @@ model Tenant {
   // by market volume. Set from Settings → Market Intelligence. See
   // settings.service.js getDashboardSipps/updateDashboardSipps (beta.134).
   dashboardSipps            Json?
+  // Competitors to drop from the Market Intelligence pool for this tenant: their
+  // own brand(s) + any vendors they don't want compared against. JSON array of
+  // vendor names; null/empty → no filtering. Set from Settings → Market
+  // Intelligence → "Excluded competitors". Matched via market-vendor.js vendorKey
+  // so spelling variants ("U-Save Car Rental" ≈ "U-Save") all collapse.
+  marketExcludedVendors     Json?
   platformFeeEnabled        Boolean  @default(true)
   platformFeePct            Decimal  @default(10) @db.Decimal(6, 3)
   platformFeeMin            Decimal  @default(7) @db.Decimal(10, 2)

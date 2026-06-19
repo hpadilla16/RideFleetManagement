@@ -58,6 +58,23 @@ settingsRouter.put('/dashboard-sipps', requireRole('ADMIN'), async (req, res, ne
   }
 });
 
+// Market Intelligence excluded competitors (per-tenant pool hygiene). ADMIN-scoped.
+settingsRouter.get('/market-excluded-vendors', requireRole('ADMIN'), async (req, res, next) => {
+  try {
+    res.json(await settingsService.getMarketExcludedVendors(scopeFor(req)));
+  } catch (e) {
+    next(e);
+  }
+});
+
+settingsRouter.put('/market-excluded-vendors', requireRole('ADMIN'), async (req, res, next) => {
+  try {
+    res.json(await settingsService.updateMarketExcludedVendors(req.body || {}, scopeFor(req)));
+  } catch (e) {
+    next(e);
+  }
+});
+
 settingsRouter.get('/users/:userId/module-access', requireRole('ADMIN'), enforceUserModuleScope, async (req, res, next) => {
   try {
     res.json(await settingsService.getUserModuleAccess(req.targetUser.id));

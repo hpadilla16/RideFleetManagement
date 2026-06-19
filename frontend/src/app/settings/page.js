@@ -59,7 +59,7 @@ const SETTINGS_TAB_SECTIONS = {
   payments: [],
   ai: ['plannerCopilot', 'plannerCopilotUsage'],
   telematics: ['telematics'],
-  marketIntel: ['dashboardSipps'],
+  marketIntel: ['dashboardSipps', 'marketExcludedVendors'],
   access: [],
   emails: ['emailTemplates', 'reviewEmail'],
   services: ['services', 'fees'],
@@ -168,6 +168,8 @@ function SettingsInner({ token, me, logout }) {
   const [telematicsConfig, setTelematicsConfig] = useState(DEFAULT_TELEMATICS_CONFIG);
   // Market Intelligence dashboard SIPP picker (beta.134)
   const [dashboardSipps, setDashboardSipps] = useState({ sipps: [], options: [], max: 6 });
+  // Market Intelligence excluded competitors (per-tenant; one vendor per line in the textarea)
+  const [excludedVendorsText, setExcludedVendorsText] = useState('');
   const [revenuePricingConfig, setRevenuePricingConfig] = useState(DEFAULT_REVENUE_PRICING_CONFIG);
   const [revenuePricingPreview, setRevenuePricingPreview] = useState(DEFAULT_REVENUE_PRICING_PREVIEW);
   const [revenuePricingPreviewResult, setRevenuePricingPreviewResult] = useState(null);
@@ -323,6 +325,9 @@ function SettingsInner({ token, me, logout }) {
         max: Number(value?.max) || 6
       });
     }
+    if (key === 'marketExcludedVendors') {
+      setExcludedVendorsText((Array.isArray(value?.vendors) ? value.vendors : []).join('\n'));
+    }
     if (key === 'revenuePricing') {
       setRevenuePricingConfig({
         ...DEFAULT_REVENUE_PRICING_CONFIG,
@@ -361,6 +366,7 @@ function SettingsInner({ token, me, logout }) {
     plannerCopilotUsage: (forceLoad = false) => api(scopedSettingsPath('/api/settings/planner-copilot/usage'), forceLoad ? { bypassCache: true } : {}, token),
     telematics: (forceLoad = false) => api(scopedSettingsPath('/api/settings/telematics'), forceLoad ? { bypassCache: true } : {}, token),
     dashboardSipps: (forceLoad = false) => api(scopedSettingsPath('/api/settings/dashboard-sipps'), forceLoad ? { bypassCache: true } : {}, token),
+    marketExcludedVendors: (forceLoad = false) => api(scopedSettingsPath('/api/settings/market-excluded-vendors'), forceLoad ? { bypassCache: true } : {}, token),
     revenuePricing: (forceLoad = false) => api(scopedSettingsPath('/api/settings/revenue-pricing'), forceLoad ? { bypassCache: true } : {}, token),
     carSharingSearchPlaces: (forceLoad = false) => api(scopedSettingsPath('/api/settings/car-sharing-search-places'), forceLoad ? { bypassCache: true } : {}, token),
     precheckinDiscount: (forceLoad = false) => api(scopedSettingsPath('/api/settings/precheckin-discount'), forceLoad ? { bypassCache: true } : {}, token),
@@ -777,6 +783,20 @@ function SettingsInner({ token, me, logout }) {
       max: Number(out?.max) || dashboardSipps.max || 6
     });
     setMsg('Dashboard SIPPs saved');
+  };
+
+  // Market Intelligence excluded competitors (per-tenant pool hygiene)
+  const saveMarketExcludedVendors = async () => {
+    const vendors = excludedVendorsText
+      .split(/[\n,]/)
+      .map((s) => s.trim())
+      .filter(Boolean);
+    const out = await api(scopedSettingsPath('/api/settings/market-excluded-vendors'), {
+      method: 'PUT',
+      body: JSON.stringify({ vendors })
+    }, token);
+    setExcludedVendorsText((Array.isArray(out?.vendors) ? out.vendors : []).join('\n'));
+    setMsg('Excluded competitors saved');
   };
 
   const saveRevenuePricingConfig = async () => {
@@ -5043,6 +5063,34 @@ function SettingsInner({ token, me, logout }) {
                   onClick={() => setDashboardSipps((current) => ({ ...current, sipps: [] }))}
                 >
                   Clear (use top 6)
+                </button>
+              </div>
+            </section>
+            <section className="glass card section-card">
+              <div className="stack" style={{ gap: 6 }}>
+                <h3 style={{ margin: 0 }}>Excluded competitors</h3>
+                <div className="ui-muted">
+                  Vendors to drop from the competitor pool for this tenant — list your own
+                  brand(s) here so the pricing engine never compares against yourself, plus any
+                  brokers/vendors you don&apos;t want counted. One per line. Spelling variants are
+                  matched automatically (e.g. &quot;U-Save Car Rental&quot; = &quot;U-Save&quot;).
+                </div>
+              </div>
+              <textarea
+                value={excludedVendorsText}
+                onChange={(e) => setExcludedVendorsText(e.target.value)}
+                rows={5}
+                placeholder={'ZezGo\nRoutes\nCarwiz'}
+                style={{ width: '100%', marginTop: 10, fontFamily: 'inherit' }}
+              />
+              <div className="inline-actions" style={{ marginTop: 12 }}>
+                <button type="button" onClick={saveMarketExcludedVendors}>Save excluded competitors</button>
+                <button
+                  type="button"
+                  className="button-subtle"
+                  onClick={() => setExcludedVendorsText('')}
+                >
+                  Clear
                 </button>
               </div>
             </section>

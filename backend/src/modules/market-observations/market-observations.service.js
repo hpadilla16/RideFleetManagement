@@ -1,5 +1,6 @@
 import { prisma } from '../../lib/prisma.js';
-import { applyStrategy, ruleLabelFor } from '../market-scraper/market-scrape-comparison.service.js';
+import { applyStrategy, ruleLabelFor, getCompetitorExcludeSet } from '../market-scraper/market-scrape-comparison.service.js';
+import { isExcludedVendor, normalizeVendorName } from '../market-scraper/market-vendor.js';
 import { renderReportExcel } from '../reports/reports-export.js';
 
 /**
@@ -146,11 +147,15 @@ export async function getMarketSummary({ airport, scope }) {
   const priceOf = (o) =>
     o.effectiveDailyPrice != null ? Number(o.effectiveDailyPrice) : Number(o.dailyPrice);
 
+  // Competitor-pool hygiene: drop the tenant's own brand / configured exclusions
+  // and normalize vendor spellings so one brand isn't double-counted.
+  const excludeSet = await getCompetitorExcludeSet(scope.tenantId);
   const bySipp = new Map();
   for (const o of obs) {
+    if (isExcludedVendor(o.vendor, excludeSet)) continue;
     if (!bySipp.has(o.sipp)) bySipp.set(o.sipp, []);
     bySipp.get(o.sipp).push({
-      vendor: o.vendor,
+      vendor: normalizeVendorName(o.vendor),
       price: priceOf(o),
       teaserPrice: NUM(o.dailyPrice),
       observedAt: o.observedAt,
@@ -255,6 +260,9 @@ export async function getMarketHistory({ airport, sipp, days = 14, mode = 'histo
     o.effectiveDailyPrice != null ? Number(o.effectiveDailyPrice) : Number(o.dailyPrice);
   const sel = { vendor: true, dailyPrice: true, effectiveDailyPrice: true, pickupDate: true, observedAt: true };
 
+  // Competitor-pool hygiene (own brand out, vendor names normalized).
+  const excludeSet = await getCompetitorExcludeSet(scope.tenantId);
+
   // byDate: array of {vendor, price} per chart day.
   //   - history mode : day = observedAt — how the market moved while we watched.
   //   - forward mode : day = FUTURE pickupDate, using the LATEST quote per
@@ -271,14 +279,15 @@ export async function getMarketHistory({ airport, sipp, days = 14, mode = 'histo
     // Keep only the most recent observation per (pickupDate, vendor).
     const latest = new Map();
     for (const o of obs) {
+      if (isExcludedVendor(o.vendor, excludeSet)) continue;
       const day = o.pickupDate.toISOString().slice(0, 10);
-      const key = `${day}|${o.vendor || '?'}`;
+      const key = `${day}|${normalizeVendorName(o.vendor) || '?'}`;
       const prev = latest.get(key);
       if (!prev || o.observedAt > prev.o.observedAt) latest.set(key, { day, o });
     }
     for (const { day, o } of latest.values()) {
       if (!byDate.has(day)) byDate.set(day, []);
-      byDate.get(day).push({ vendor: o.vendor || '?', price: priceOf(o) });
+      byDate.get(day).push({ vendor: normalizeVendorName(o.vendor) || '?', price: priceOf(o) });
     }
   } else {
     const since = new Date(Date.now() - lookbackDays * 24 * 60 * 60 * 1000);
@@ -287,9 +296,10 @@ export async function getMarketHistory({ airport, sipp, days = 14, mode = 'histo
       select: sel,
     });
     for (const o of obs) {
+      if (isExcludedVendor(o.vendor, excludeSet)) continue;
       const day = o.observedAt.toISOString().slice(0, 10);
       if (!byDate.has(day)) byDate.set(day, []);
-      byDate.get(day).push({ vendor: o.vendor || '?', price: priceOf(o) });
+      byDate.get(day).push({ vendor: normalizeVendorName(o.vendor) || '?', price: priceOf(o) });
     }
   }
 
@@ -408,12 +418,16 @@ export async function buildAirportExportWorkbook({ airport, days, scope = {} }) 
   // daily cost) with a fallback to the teaser dailyPrice for legacy rows.
   const priceOf = (o) => (o.effectiveDailyPrice != null ? Number(o.effectiveDailyPrice) : Number(o.dailyPrice));
 
-  // Keep only the LATEST quote per (pickupDate, sipp, vendor) — older quotes for a future
-  // date are stale.
+  // Competitor-pool hygiene (own brand out, vendor names normalized).
+  const excludeSet = await getCompetitorExcludeSet(scope.tenantId);
+
+  // Keep only the LATEST quote per (pickupDate, sipp, normalized vendor) — older quotes for a
+  // future date are stale.
   const latest = new Map();
   for (const o of obs) {
+    if (isExcludedVendor(o.vendor, excludeSet)) continue;
     const dISO = o.pickupDate.toISOString().slice(0, 10);
-    const key = `${dISO}|${o.sipp}|${(o.vendor || '?').trim()}`;
+    const key = `${dISO}|${o.sipp}|${normalizeVendorName(o.vendor) || '?'}`;
     const prev = latest.get(key);
     if (!prev || o.observedAt > prev.observedAt) latest.set(key, o);
   }
@@ -423,13 +437,14 @@ export async function buildAirportExportWorkbook({ airport, days, scope = {} }) 
     const price = priceOf(o);
     if (!Number.isFinite(price) || price <= 0) continue;
     const dISO = o.pickupDate.toISOString().slice(0, 10);
+    const vendor = normalizeVendorName(o.vendor) || null;
     const key = `${dISO}|${o.sipp}`;
     const ex = byCell.get(key);
     if (!ex) {
-      byCell.set(key, { date: dISO, sipp: o.sipp, cheapest: price, vendor: o.vendor || null, sampled: 1, profileId: o.profileId });
+      byCell.set(key, { date: dISO, sipp: o.sipp, cheapest: price, vendor, sampled: 1, profileId: o.profileId });
     } else {
       ex.sampled += 1;
-      if (price < ex.cheapest) { ex.cheapest = price; ex.vendor = o.vendor || null; ex.profileId = o.profileId; }
+      if (price < ex.cheapest) { ex.cheapest = price; ex.vendor = vendor; ex.profileId = o.profileId; }
     }
   }
 

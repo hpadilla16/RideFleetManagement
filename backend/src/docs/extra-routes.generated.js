@@ -478,6 +478,8 @@ export const EXTRA_ROUTES = [
   ['PUT', '/api/settings/tenant-modules', 'Settings', 'Update tenant module access'],
   ['GET', '/api/settings/dashboard-sipps', 'Settings', 'Get dashboard SIPP picker'],
   ['PUT', '/api/settings/dashboard-sipps', 'Settings', 'Update dashboard SIPP picker'],
+  ['GET', '/api/settings/market-excluded-vendors', 'Settings', 'Get excluded competitors'],
+  ['PUT', '/api/settings/market-excluded-vendors', 'Settings', 'Update excluded competitors'],
   ['GET', '/api/settings/users/{userId}/module-access', 'Settings', 'Get user module access'],
   ['PUT', '/api/settings/users/{userId}/module-access', 'Settings', 'Update user module access'],
   ['GET', '/api/settings/review-email', 'Settings', 'Get review email config'],
