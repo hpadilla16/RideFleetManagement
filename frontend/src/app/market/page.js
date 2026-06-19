@@ -185,7 +185,7 @@ function Dashboard({ token, me, logout }) {
 
   async function downloadExcel() {
     try {
-      const res = await fetch(`${API_BASE}/api/market/export.xlsx?airport=${encodeURIComponent(airport)}`, { headers: { Authorization: `Bearer ${token}` } });
+      const res = await fetch(`${API_BASE}/api/market/export.xlsx?airport=${encodeURIComponent(airport)}&days=${rangeDays}`, { headers: { Authorization: `Bearer ${token}` } });
       if (!res.ok) {
         let m = `Export failed (${res.status})`;
         try { const j = await res.json(); if (j?.error) m = j.error; } catch { /* ignore */ }
@@ -194,7 +194,7 @@ function Dashboard({ token, me, logout }) {
       const blob = await res.blob();
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
-      a.href = url; a.download = `market-pricing-${airport}.xlsx`;
+      a.href = url; a.download = `market-pricing-${airport}-${rangeDays}d.xlsx`;
       document.body.appendChild(a); a.click(); a.remove();
       setTimeout(() => URL.revokeObjectURL(url), 4000);
     } catch (e) { setError(e?.message || 'Export failed'); }

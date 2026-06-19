@@ -30,6 +30,25 @@ function badRequest(msg) {
 }
 
 /**
+ * Humanize a profile's pricing strategy into a RateHighway-style "Rule" label
+ * (e.g. "Lowest - $1", "Match lowest", "Lowest + 5%", "Floor $25"). Used by the
+ * Excel exports. `fallback` is shown when the profile/strategy is unknown.
+ */
+export function ruleLabelFor(profile, fallback = '-') {
+  if (!profile) return fallback;
+  const a = profile.strategyAmount != null ? Number(profile.strategyAmount) : 0;
+  const p = profile.strategyPct != null ? Number(profile.strategyPct) : 0;
+  const f = profile.strategyFloor != null ? Number(profile.strategyFloor) : 0;
+  switch (profile.strategy) {
+    case 'CHEAPEST_MINUS_AMOUNT': return `Lowest - $${a}`;
+    case 'MATCH_CHEAPEST': return 'Match lowest';
+    case 'CHEAPEST_PLUS_PCT': return `Lowest + ${p}%`;
+    case 'STATIC_FLOOR': return `Floor $${f}`;
+    default: return String(profile.strategy || fallback);
+  }
+}
+
+/**
  * Apply the profile's pricing strategy to the cheapest competitor price.
  *   CHEAPEST_MINUS_AMOUNT -> cheapest - strategyAmount
  *   MATCH_CHEAPEST        -> cheapest (no discount)
@@ -271,21 +290,8 @@ export async function buildRunComparisonWorkbook(runId, { scope = {} } = {}) {
     if (run?.profile) strategyMeta = run.profile;
   } catch { /* generic title */ }
 
-  // Humanize the pricing strategy into a RateHighway-style "Rule" label
-  // (e.g. "Lowest - $1", "Match lowest", "Lowest + 5%", "Floor $25").
-  const ruleLabel = (() => {
-    if (!strategyMeta) return cmp.strategy || '-';
-    const a = strategyMeta.strategyAmount != null ? Number(strategyMeta.strategyAmount) : 0;
-    const p = strategyMeta.strategyPct != null ? Number(strategyMeta.strategyPct) : 0;
-    const f = strategyMeta.strategyFloor != null ? Number(strategyMeta.strategyFloor) : 0;
-    switch (strategyMeta.strategy) {
-      case 'CHEAPEST_MINUS_AMOUNT': return `Lowest - $${a}`;
-      case 'MATCH_CHEAPEST': return 'Match lowest';
-      case 'CHEAPEST_PLUS_PCT': return `Lowest + ${p}%`;
-      case 'STATIC_FLOOR': return `Floor $${f}`;
-      default: return String(strategyMeta.strategy || cmp.strategy || '-');
-    }
-  })();
+  // RateHighway-style "Rule" label (e.g. "Lowest - $1").
+  const ruleLabel = ruleLabelFor(strategyMeta, cmp.strategy || '-');
 
   const dates = [...new Set(rows.map((r) => r.date))].sort();
   const sipps = [...new Set(rows.map((r) => r.sipp))].sort();

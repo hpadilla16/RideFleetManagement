@@ -1,5 +1,6 @@
 import { prisma } from '../../lib/prisma.js';
-import { buildRunComparisonWorkbook } from '../market-scraper/market-scrape-comparison.service.js';
+import { applyStrategy, ruleLabelFor } from '../market-scraper/market-scrape-comparison.service.js';
+import { renderReportExcel } from '../reports/reports-export.js';
 
 /**
  * Query services backing the Market Intelligence Dashboard, SIPP detail view,
@@ -351,40 +352,152 @@ function percentile(sortedAsc, p) {
 }
 
 /**
- * Dashboard-level Excel export (discoverable from /market): resolves the latest scrape
- * run for the airport's active profiles and reuses the per-run comparison workbook
- * (prices + suggested by vehicle class & day). Returns { buffer, filename }.
+ * Dashboard-level Excel export (discoverable from /market), RateHighway-style.
+ *
+ * Unlike a single-run snapshot, this covers the FORWARD BOOKING WINDOW the dashboard's
+ * 7d / 14d / 30d selector is showing: for every pickup day in [today, today+days] and
+ * every SIPP class, it takes the LATEST quote per competitor, picks the cheapest, applies
+ * the owning profile's pricing strategy to get a suggested price, and compares it to the
+ * tenant's current rate for that class. One row per (pickup day × class), exactly like the
+ * RateHighway export. Returns { buffer, filename }.
  */
-export async function buildAirportExportWorkbook({ airport, scope = {} }) {
+export async function buildAirportExportWorkbook({ airport, days, scope = {} }) {
   if (!airport) {
     const err = new Error('airport query param is required'); err.httpStatus = 400; throw err;
   }
+  const A = String(airport).toUpperCase();
+  const windowDays = Math.max(1, Math.min(60, Number(days) || 14));
+
   const profileWhere = {
-    locationCode: String(airport).toUpperCase(),
+    locationCode: A,
     active: true,
     ...(scope.tenantId === '__no_tenant__'
       ? { tenantId: '__no_tenant__' }
       : scope.tenantId ? { tenantId: scope.tenantId } : {}),
   };
-  const profiles = await prisma.marketScrapeProfile.findMany({ where: profileWhere, select: { id: true } });
+  const profiles = await prisma.marketScrapeProfile.findMany({
+    where: profileWhere,
+    select: {
+      id: true, tenantId: true,
+      strategy: true, strategyAmount: true, strategyPct: true, strategyFloor: true,
+    },
+  });
   if (profiles.length === 0) {
     const err = new Error('No market profile for this airport yet'); err.httpStatus = 404; throw err;
   }
+  const profById = new Map(profiles.map((p) => [p.id, p]));
   const profileIds = profiles.map((p) => p.id);
-  // The run of the most recent FOUND observation across these profiles = latest run with data.
-  // NOTE: filter "runId is set" with the top-level `NOT: { runId: null }` form. The inline
-  // field-condition form was rejected by the prod Prisma client on a nullable String field
-  // ("Argument `not` must not be null"), which 500'd this export. The top-level NOT is valid
-  // across versions. (Sentry JAVASCRIPT-NEXTJSBACKEND-22, 2026-06-19.)
-  const latest = await prisma.marketObservation.findFirst({
-    where: { profileId: { in: profileIds }, status: 'FOUND', NOT: { runId: null } },
-    orderBy: { observedAt: 'desc' },
-    select: { runId: true },
+
+  // Forward window: FUTURE pickup dates in [today, today+windowDays].
+  const start = new Date(); start.setUTCHours(0, 0, 0, 0);
+  const end = new Date(start.getTime() + windowDays * 24 * 60 * 60 * 1000);
+  const obs = await prisma.marketObservation.findMany({
+    where: {
+      profileId: { in: profileIds },
+      status: 'FOUND',
+      dailyPrice: { not: null },
+      pickupDate: { gte: start, lte: end },
+    },
+    select: {
+      sipp: true, vendor: true, dailyPrice: true, effectiveDailyPrice: true,
+      pickupDate: true, observedAt: true, profileId: true,
+    },
   });
-  if (!latest?.runId) {
-    const err = new Error('No scrape run with data for this airport yet'); err.httpStatus = 404; throw err;
+
+  // Same price basis as the dashboard cards: effectiveDailyPrice (total / LOR = real all-in
+  // daily cost) with a fallback to the teaser dailyPrice for legacy rows.
+  const priceOf = (o) => (o.effectiveDailyPrice != null ? Number(o.effectiveDailyPrice) : Number(o.dailyPrice));
+
+  // Keep only the LATEST quote per (pickupDate, sipp, vendor) — older quotes for a future
+  // date are stale.
+  const latest = new Map();
+  for (const o of obs) {
+    const dISO = o.pickupDate.toISOString().slice(0, 10);
+    const key = `${dISO}|${o.sipp}|${(o.vendor || '?').trim()}`;
+    const prev = latest.get(key);
+    if (!prev || o.observedAt > prev.observedAt) latest.set(key, o);
   }
-  return buildRunComparisonWorkbook(latest.runId, { scope });
+  // Cheapest competitor per (pickupDate, sipp).
+  const byCell = new Map(); // `${dISO}|${sipp}` -> { date, sipp, cheapest, vendor, sampled, profileId }
+  for (const o of latest.values()) {
+    const price = priceOf(o);
+    if (!Number.isFinite(price) || price <= 0) continue;
+    const dISO = o.pickupDate.toISOString().slice(0, 10);
+    const key = `${dISO}|${o.sipp}`;
+    const ex = byCell.get(key);
+    if (!ex) {
+      byCell.set(key, { date: dISO, sipp: o.sipp, cheapest: price, vendor: o.vendor || null, sampled: 1, profileId: o.profileId });
+    } else {
+      ex.sampled += 1;
+      if (price < ex.cheapest) { ex.cheapest = price; ex.vendor = o.vendor || null; ex.profileId = o.profileId; }
+    }
+  }
+
+  // Tenant's current rate per SIPP (same mapping as getMarketSummary: active PricingRule
+  // carrying the sipp, whose Rate is at this airport). One "your price" number per class.
+  const ownDailyBySipp = new Map();
+  if (scope.tenantId && scope.tenantId !== '__no_tenant__') {
+    const rules = await prisma.pricingRule.findMany({
+      where: { tenantId: scope.tenantId, sipp: { not: null }, active: true, rate: { location: { code: A } } },
+      select: { sipp: true, rate: { select: { daily: true } } },
+    });
+    for (const r of rules) {
+      if (r.sipp && r.rate && !ownDailyBySipp.has(r.sipp)) ownDailyBySipp.set(r.sipp, Number(r.rate.daily));
+    }
+  }
+
+  // Flatten to rows: one per (pickup day × class), sorted by day then class.
+  const cells = [...byCell.values()].sort((a, b) => (a.date === b.date ? a.sipp.localeCompare(b.sipp) : a.date.localeCompare(b.date)));
+  const rhRows = cells.map((c) => {
+    const profile = profById.get(c.profileId) || null;
+    const suggested = applyStrategy(c.cheapest, profile);
+    const current = ownDailyBySipp.has(c.sipp) ? ownDailyBySipp.get(c.sipp) : null;
+    const diff = (suggested != null && current != null) ? Number((suggested - current).toFixed(2)) : null;
+    return {
+      date: c.date, location: A, sipp: c.sipp, rateCode: 'Daily', rule: ruleLabelFor(profile, '-'),
+      marketVendor: c.vendor || '', marketCheapest: Number(c.cheapest.toFixed(2)),
+      suggestedPrice: suggested, currentPrice: current, deltaAbs: diff, marketSampled: c.sampled,
+    };
+  });
+
+  const rhCols = [
+    { header: 'Pick-up', key: 'date', width: 12 },
+    { header: 'Location', key: 'location', width: 10 },
+    { header: 'Car Type', key: 'sipp', width: 10 },
+    { header: 'Rate Code', key: 'rateCode', width: 10 },
+    { header: 'Rule', key: 'rule', width: 14 },
+    { header: 'Comp. Vendor', key: 'marketVendor', width: 18 },
+    { header: 'Comp. Rate', key: 'marketCheapest', type: 'currency', width: 12 },
+    { header: 'Suggested', key: 'suggestedPrice', type: 'currency', width: 12 },
+    { header: 'Current Rate', key: 'currentPrice', type: 'currency', width: 12 },
+    { header: 'Difference', key: 'deltaAbs', type: 'currency', width: 11 },
+    { header: 'Samples', key: 'marketSampled', type: 'integer', width: 9 },
+  ];
+
+  // Supporting pivot: cheapest competitor by class (rows) × pickup day (cols).
+  const dates = [...new Set(cells.map((c) => c.date))].sort();
+  const sipps = [...new Set(cells.map((c) => c.sipp))].sort();
+  const cheapestByCell = new Map(cells.map((c) => [`${c.sipp}|${c.date}`, c.cheapest]));
+  const fmtDay = (d) => { const p = String(d).split('-'); return p.length === 3 ? `${p[1]}/${p[2]}` : String(d); };
+  const pivotCols = [
+    { header: 'Vehicle class (SIPP)', key: 'sipp', width: 18 },
+    ...dates.map((d) => ({ header: fmtDay(d), key: d, type: 'currency', width: 10 })),
+  ];
+  const pivotRows = sipps.map((sipp) => {
+    const out = { sipp };
+    for (const d of dates) { const v = cheapestByCell.get(`${sipp}|${d}`); out[d] = v != null ? Number(v.toFixed(2)) : null; }
+    return out;
+  });
+
+  const range = dates.length ? `${dates[0]} → ${dates[dates.length - 1]}` : 'no upcoming pickups';
+  return renderReportExcel({
+    title: `Market pricing - ${A}`,
+    subtitle: `${A} | next ${windowDays} days (${range}) | generated ${new Date().toISOString().slice(0, 10)}`,
+    sheets: [
+      { name: 'Pricing recommendations', columns: rhCols, rows: rhRows },
+      { name: 'Cheapest by class & day', columns: pivotCols, rows: pivotRows },
+    ],
+  });
 }
 
 export const marketObservationsService = {

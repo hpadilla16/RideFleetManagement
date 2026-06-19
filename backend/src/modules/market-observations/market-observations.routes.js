@@ -30,12 +30,14 @@ marketObservationsRouter.get('/summary', async (req, res, next) => {
   }
 });
 
-// RateHighway-style Excel for the whole airport (latest run): prices + suggested by
-// vehicle class (SIPP) and by day. Discoverable from the /market dashboard.
+// RateHighway-style Excel for the whole airport, covering the forward booking window
+// (?days=7|14|30 from the dashboard's range selector): cheapest competitor + suggested +
+// current rate per (pickup day × SIPP). Discoverable from the /market dashboard.
 marketObservationsRouter.get('/export.xlsx', async (req, res, next) => {
   try {
     const { buffer, filename } = await marketObservationsService.buildAirportExportWorkbook({
       airport: req.query.airport,
+      days: req.query.days,
       scope: scopeFor(req),
     });
     const body = Buffer.isBuffer(buffer) ? buffer : Buffer.from(buffer);
