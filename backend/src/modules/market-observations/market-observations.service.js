@@ -372,8 +372,12 @@ export async function buildAirportExportWorkbook({ airport, scope = {} }) {
   }
   const profileIds = profiles.map((p) => p.id);
   // The run of the most recent FOUND observation across these profiles = latest run with data.
+  // NOTE: filter "runId is set" with the top-level `NOT: { runId: null }` form. The inline
+  // field-condition form was rejected by the prod Prisma client on a nullable String field
+  // ("Argument `not` must not be null"), which 500'd this export. The top-level NOT is valid
+  // across versions. (Sentry JAVASCRIPT-NEXTJSBACKEND-22, 2026-06-19.)
   const latest = await prisma.marketObservation.findFirst({
-    where: { profileId: { in: profileIds }, status: 'FOUND', runId: { not: null } },
+    where: { profileId: { in: profileIds }, status: 'FOUND', NOT: { runId: null } },
     orderBy: { observedAt: 'desc' },
     select: { runId: true },
   });

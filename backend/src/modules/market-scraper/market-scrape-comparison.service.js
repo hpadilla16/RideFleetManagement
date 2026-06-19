@@ -256,10 +256,36 @@ export async function buildRunComparisonWorkbook(runId, { scope = {} } = {}) {
   const rows = Array.isArray(cmp.rows) ? cmp.rows : [];
 
   let profileName = 'Market';
+  let location = '';
+  let strategyMeta = null;
   try {
-    const run = await prisma.marketScrapeRun.findFirst({ where: { id: runId }, include: { profile: { select: { name: true } } } });
+    const run = await prisma.marketScrapeRun.findFirst({
+      where: { id: runId },
+      include: { profile: { select: {
+        name: true, locationCode: true,
+        strategy: true, strategyAmount: true, strategyPct: true, strategyFloor: true,
+      } } },
+    });
     if (run?.profile?.name) profileName = run.profile.name;
+    if (run?.profile?.locationCode) location = String(run.profile.locationCode).toUpperCase();
+    if (run?.profile) strategyMeta = run.profile;
   } catch { /* generic title */ }
+
+  // Humanize the pricing strategy into a RateHighway-style "Rule" label
+  // (e.g. "Lowest - $1", "Match lowest", "Lowest + 5%", "Floor $25").
+  const ruleLabel = (() => {
+    if (!strategyMeta) return cmp.strategy || '-';
+    const a = strategyMeta.strategyAmount != null ? Number(strategyMeta.strategyAmount) : 0;
+    const p = strategyMeta.strategyPct != null ? Number(strategyMeta.strategyPct) : 0;
+    const f = strategyMeta.strategyFloor != null ? Number(strategyMeta.strategyFloor) : 0;
+    switch (strategyMeta.strategy) {
+      case 'CHEAPEST_MINUS_AMOUNT': return `Lowest - $${a}`;
+      case 'MATCH_CHEAPEST': return 'Match lowest';
+      case 'CHEAPEST_PLUS_PCT': return `Lowest + ${p}%`;
+      case 'STATIC_FLOOR': return `Floor $${f}`;
+      default: return String(strategyMeta.strategy || cmp.strategy || '-');
+    }
+  })();
 
   const dates = [...new Set(rows.map((r) => r.date))].sort();
   const sipps = [...new Set(rows.map((r) => r.sipp))].sort();
@@ -280,32 +306,38 @@ export async function buildRunComparisonWorkbook(runId, { scope = {} } = {}) {
   const suggestedRows = pivot((c) => c.suggestedPrice ?? c.marketCheapest ?? null);
   const marketRows = pivot((c) => c.marketCheapest ?? null);
 
-  const detailCols = [
-    { header: 'Date', key: 'date', width: 12 },
-    { header: 'Class (SIPP)', key: 'sipp', width: 12 },
-    { header: 'Cheapest competitor', key: 'marketVendor', width: 22 },
-    { header: 'Market cheapest', key: 'marketCheapest', type: 'currency', width: 15 },
-    { header: 'Your current', key: 'currentPrice', type: 'currency', width: 13 },
+  // RateHighway-style flat sheet: one row per (pickup day × vehicle class), with the
+  // cheapest competitor, our suggested price, current price and the difference. This is
+  // the primary view (mirrors the RateHighway export Hector works from); the pivot sheets
+  // below are supporting summaries.
+  const rhCols = [
+    { header: 'Pick-up', key: 'date', width: 12 },
+    { header: 'Location', key: 'location', width: 10 },
+    { header: 'Car Type', key: 'sipp', width: 10 },
+    { header: 'Rate Code', key: 'rateCode', width: 10 },
+    { header: 'Rule', key: 'rule', width: 14 },
+    { header: 'Comp. Vendor', key: 'marketVendor', width: 18 },
+    { header: 'Comp. Rate', key: 'marketCheapest', type: 'currency', width: 12 },
     { header: 'Suggested', key: 'suggestedPrice', type: 'currency', width: 12 },
-    { header: 'Delta $', key: 'deltaAbs', type: 'currency', width: 10 },
-    { header: 'Delta %', key: 'deltaPct', width: 9 },
+    { header: 'Current Rate', key: 'currentPrice', type: 'currency', width: 12 },
+    { header: 'Difference', key: 'deltaAbs', type: 'currency', width: 11 },
     { header: 'Samples', key: 'marketSampled', type: 'integer', width: 9 },
   ];
-  const detailRows = rows.map((r) => ({
-    date: r.date, sipp: r.sipp, marketVendor: r.marketVendor || '',
-    marketCheapest: r.marketCheapest ?? null, currentPrice: r.currentPrice ?? null,
-    suggestedPrice: r.suggestedPrice ?? null, deltaAbs: r.deltaAbs ?? null,
-    deltaPct: r.deltaPct ?? null, marketSampled: r.marketSampled ?? null,
+  const rhRows = rows.map((r) => ({
+    date: r.date, location, sipp: r.sipp, rateCode: 'Daily', rule: ruleLabel,
+    marketVendor: r.marketVendor || '', marketCheapest: r.marketCheapest ?? null,
+    suggestedPrice: r.suggestedPrice ?? null, currentPrice: r.currentPrice ?? null,
+    deltaAbs: r.deltaAbs ?? null, marketSampled: r.marketSampled ?? null,
   }));
 
   const range = dates.length ? `${dates[0]} - ${dates[dates.length - 1]}` : 'no dates';
   return renderReportExcel({
     title: `Market pricing - ${profileName}`,
-    subtitle: `Strategy ${cmp.strategy || '-'} | ${range} | generated ${new Date().toISOString().slice(0, 10)}`,
+    subtitle: `${location ? location + ' | ' : ''}Rule: ${ruleLabel} | ${range} | generated ${new Date().toISOString().slice(0, 10)}`,
     sheets: [
+      { name: 'Pricing recommendations', columns: rhCols, rows: rhRows },
       { name: 'Suggested by class & day', columns: pivotCols, rows: suggestedRows },
       { name: 'Market cheapest', columns: pivotCols, rows: marketRows },
-      { name: 'Detail', columns: detailCols, rows: detailRows },
     ],
   });
 }
