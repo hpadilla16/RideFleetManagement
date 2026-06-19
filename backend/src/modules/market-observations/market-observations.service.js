@@ -1,7 +1,7 @@
 import { prisma } from '../../lib/prisma.js';
 import { applyStrategy, ruleLabelFor, getCompetitorExcludeSet, getMarketPricingConfig } from '../market-scraper/market-scrape-comparison.service.js';
 import { isExcludedVendor, normalizeVendorName } from '../market-scraper/market-vendor.js';
-import { baseFromCustomerAllIn } from '../market-scraper/pricing-grossup.js';
+import { baseFromCustomerAllIn, customerAllInFromBase } from '../market-scraper/pricing-grossup.js';
 import { renderReportExcel } from '../reports/reports-export.js';
 
 /**
@@ -114,6 +114,11 @@ export async function getMarketSummary({ airport, scope }) {
   // Filter Rates by (a) the active PricingRule's sipp + (b) the Rate's
   // location matching the airport code. That way a tenant with rates in
   // SJU + MCO returns the SJU rate when the dashboard asks for SJU.
+  // Tax-aware config for this airport (opt-in): when present, your own rate is shown
+  // as ALL-IN (base × grossup) so it's comparable to the competitor all-in prices the
+  // charts plot — otherwise the card would compare your BASE against their all-in.
+  const pricingConfig = await getMarketPricingConfig(scope.tenantId, airport.toUpperCase());
+
   const ownRatesBySipp = new Map();
   if (scope.tenantId && scope.tenantId !== '__no_tenant__') {
     const rules = await prisma.pricingRule.findMany({
@@ -188,9 +193,20 @@ export async function getMarketSummary({ airport, scope }) {
     // configured a rule for this class), `yourRate` is null and the
     // dashboard shows "—" for that card.
     const ownRate = ownRatesBySipp.get(sipp);
-    const yourRow = ownRate
-      ? { id: ownRate.id, code: ownRate.rateCode, daily: Number(ownRate.daily) }
-      : null;
+    let yourRow = null;
+    if (ownRate) {
+      const base = Number(ownRate.daily);
+      // With a tax-aware config, `daily` becomes your ALL-IN (base × grossup) so the card
+      // ranks you against the competitor all-in. `base` keeps the uploaded number.
+      const allIn = pricingConfig ? customerAllInFromBase(base, pricingConfig) : null;
+      yourRow = {
+        id: ownRate.id,
+        code: ownRate.rateCode,
+        daily: allIn != null ? allIn : base, // comparable number shown on the card
+        base,
+        allIn: allIn != null,
+      };
+    }
 
     let yourRank = null;
     if (yourRow) {

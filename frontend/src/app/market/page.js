@@ -478,6 +478,9 @@ function SippCard({ code, label, data, history, rangeDays = 14, onClick }) {
         </div>
         <div style={{ textAlign: 'right' }}>
           <div style={priceStyle}>{fmtMoney(yourPrice)}</div>
+          {data.yourRate?.allIn && data.yourRate?.base != null && (
+            <div style={{ fontSize: 10, color: '#6e7587' }}>all-in · base {fmtMoney(Number(data.yourRate.base))}</div>
+          )}
           {cheapestDeltaPct != null && <DeltaBadge pct={cheapestDeltaPct} days={rangeDays} />}
         </div>
       </div>
