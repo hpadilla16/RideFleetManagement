@@ -17,6 +17,21 @@
 import { prisma } from '../../lib/prisma.js';
 import { renderReportExcel } from '../reports/reports-export.js';
 import { excludeSetFor, isExcludedVendor, normalizeVendorName } from './market-vendor.js';
+import { baseFromCustomerAllIn } from './pricing-grossup.js';
+
+/**
+ * Tax-aware pricing config for a (tenant, location). Returns the row or null.
+ * A location WITHOUT a config keeps the legacy behavior (no gross-up) — the
+ * tax-aware path is strictly opt-in per location.
+ */
+export async function getMarketPricingConfig(tenantId, locationCode) {
+  if (!tenantId || !locationCode) return null;
+  try {
+    return await prisma.marketPricingConfig.findUnique({
+      where: { tenantId_locationCode: { tenantId, locationCode: String(locationCode).toUpperCase() } },
+    });
+  } catch { return null; }
+}
 
 /**
  * Build the competitor-exclusion Set for a tenant from its UI-configured list
@@ -119,7 +134,7 @@ export function applyStrategy(cheapest, profile) {
  *   - dailyPrice is null
  * Returns Map<"YYYY-MM-DD|SIPP", {date, sipp, cheapest, vendor, sampled}>.
  */
-export function aggregateCheapestBySippDate(observations, { excludeSet } = {}) {
+export function aggregateCheapestBySippDate(observations, { excludeSet, useEffective = false } = {}) {
   const byKey = new Map();
   for (const obs of observations) {
     if (obs.status !== 'FOUND') continue;
@@ -127,7 +142,10 @@ export function aggregateCheapestBySippDate(observations, { excludeSet } = {}) {
     // Drop the tenant's own brand / configured exclusions from the pool so we
     // never pick "ourselves" as the cheapest competitor.
     if (excludeSet && isExcludedVendor(obs.vendor, excludeSet)) continue;
-    const price = Number(obs.dailyPrice);
+    // Tax-aware path compares on the ALL-IN price (effectiveDailyPrice = total / LOR);
+    // legacy path uses the teaser dailyPrice. Fallback keeps it safe for legacy rows.
+    const raw = useEffective && obs.effectiveDailyPrice != null ? obs.effectiveDailyPrice : obs.dailyPrice;
+    const price = Number(raw);
     if (!Number.isFinite(price) || price <= 0) continue;
     const dateISO = obs.pickupDate instanceof Date
       ? obs.pickupDate.toISOString().slice(0, 10)
@@ -195,7 +213,11 @@ export async function computeRunComparison(runId, { scope = {} } = {}) {
   });
 
   const excludeSet = await getCompetitorExcludeSet(profile.tenantId);
-  const byKey = aggregateCheapestBySippDate(observations, { excludeSet });
+  // Tax-aware pricing config (opt-in per location). When present, we compare on the
+  // competitor ALL-IN price and back-solve the BASE rate to upload.
+  const pricingConfig = await getMarketPricingConfig(profile.tenantId, profile.locationCode);
+  const taxAware = !!pricingConfig;
+  const byKey = aggregateCheapestBySippDate(observations, { excludeSet, useEffective: taxAware });
 
   // Without a targetRate, we still compute the suggestedPrice column so the
   // UI can show "this is what we'd charge", but currentPrice + delta are
@@ -233,10 +255,26 @@ export async function computeRunComparison(runId, { scope = {} } = {}) {
 
   // Stable output order: by date asc, then by SIPP asc.
   const sortedKeys = [...byKey.keys()].sort();
+  const floorBase = pricingConfig?.floorBase != null ? Number(pricingConfig.floorBase) : null;
+
   for (const key of sortedKeys) {
     const r = byKey.get(key);
     const vt = vehicleTypeBySipp.get(r.sipp) || null;
-    const suggested = applyStrategy(r.cheapest, profile);
+    // Apply the margin strategy to the cheapest competitor. In tax-aware mode
+    // r.cheapest is the competitor ALL-IN, so this target is also an all-in.
+    const target = applyStrategy(r.cheapest, profile);
+
+    // suggested = the number we ACTUALLY upload (the base rate). In tax-aware mode
+    // we back-solve the base from the target all-in via the location's gross-up,
+    // then clamp to the per-location floor. Legacy mode uploads `target` as-is.
+    let suggestedAllIn = null;
+    let suggested = target;
+    if (taxAware && target != null) {
+      suggestedAllIn = target;
+      let base = baseFromCustomerAllIn(target, pricingConfig);
+      if (base != null && floorBase != null && base < floorBase) base = floorBase;
+      suggested = base;
+    }
 
     let currentPrice = null;
     if (vt && profile.targetRateId) {
@@ -268,7 +306,8 @@ export async function computeRunComparison(runId, { scope = {} } = {}) {
       marketVendor: r.vendor,
       marketSampled: r.sampled,
       currentPrice,
-      suggestedPrice: suggested,
+      suggestedPrice: suggested,   // the BASE rate to upload (tax-aware) or the legacy suggestion
+      suggestedAllIn,              // tax-aware: the target all-in the customer would see (else null)
       deltaAbs,
       deltaPct,
       willUpdate: shouldUpdate
@@ -281,6 +320,10 @@ export async function computeRunComparison(runId, { scope = {} } = {}) {
     strategy: profile.strategy,
     targetRateId: profile.targetRateId || null,
     targetRateMissing: !profile.targetRateId,
+    taxAware,
+    pricingConfig: taxAware
+      ? { connectionType: pricingConfig.connectionType, floorBase: floorBase ?? null }
+      : null,
     rows,
     summary: {
       sampled: rows.length,
@@ -342,6 +385,10 @@ export async function buildRunComparisonWorkbook(runId, { scope = {} } = {}) {
   // cheapest competitor, our suggested price, current price and the difference. This is
   // the primary view (mirrors the RateHighway export Hector works from); the pivot sheets
   // below are supporting summaries.
+  // In tax-aware mode "Comp. Rate" and "Suggested" are ALL-IN prices and we add an
+  // "Uploaded Rate" column with the BASE rate that actually gets uploaded (RateHighway
+  // shows both). Legacy mode keeps a single "Suggested" (= the uploaded number).
+  const taxAware = !!cmp.taxAware;
   const rhCols = [
     { header: 'Pick-up', key: 'date', width: 12 },
     { header: 'Location', key: 'location', width: 10 },
@@ -349,8 +396,9 @@ export async function buildRunComparisonWorkbook(runId, { scope = {} } = {}) {
     { header: 'Rate Code', key: 'rateCode', width: 10 },
     { header: 'Rule', key: 'rule', width: 14 },
     { header: 'Comp. Vendor', key: 'marketVendor', width: 18 },
-    { header: 'Comp. Rate', key: 'marketCheapest', type: 'currency', width: 12 },
-    { header: 'Suggested', key: 'suggestedPrice', type: 'currency', width: 12 },
+    { header: taxAware ? 'Comp. Rate (all-in)' : 'Comp. Rate', key: 'marketCheapest', type: 'currency', width: 14 },
+    { header: taxAware ? 'Suggested (all-in)' : 'Suggested', key: 'suggested', type: 'currency', width: 14 },
+    ...(taxAware ? [{ header: 'Uploaded Rate (base)', key: 'uploadedBase', type: 'currency', width: 16 }] : []),
     { header: 'Current Rate', key: 'currentPrice', type: 'currency', width: 12 },
     { header: 'Difference', key: 'deltaAbs', type: 'currency', width: 11 },
     { header: 'Samples', key: 'marketSampled', type: 'integer', width: 9 },
@@ -358,7 +406,10 @@ export async function buildRunComparisonWorkbook(runId, { scope = {} } = {}) {
   const rhRows = rows.map((r) => ({
     date: r.date, location, sipp: r.sipp, rateCode: 'Daily', rule: ruleLabel,
     marketVendor: r.marketVendor || '', marketCheapest: r.marketCheapest ?? null,
-    suggestedPrice: r.suggestedPrice ?? null, currentPrice: r.currentPrice ?? null,
+    // Suggested column = all-in when tax-aware (suggestedAllIn), else the uploaded number.
+    suggested: (taxAware ? r.suggestedAllIn : r.suggestedPrice) ?? null,
+    uploadedBase: r.suggestedPrice ?? null,
+    currentPrice: r.currentPrice ?? null,
     deltaAbs: r.deltaAbs ?? null, marketSampled: r.marketSampled ?? null,
   }));
 

@@ -75,6 +75,31 @@ settingsRouter.put('/market-excluded-vendors', requireRole('ADMIN'), async (req,
   }
 });
 
+// Tax-aware Market pricing config per location (Amadeus/Titanium, taxes, brokerage, floor).
+settingsRouter.get('/market-pricing-config', requireRole('ADMIN'), async (req, res, next) => {
+  try {
+    res.json(await settingsService.listMarketPricingConfigs(scopeFor(req)));
+  } catch (e) {
+    next(e);
+  }
+});
+
+settingsRouter.put('/market-pricing-config', requireRole('ADMIN'), async (req, res, next) => {
+  try {
+    res.json(await settingsService.upsertMarketPricingConfig(req.body || {}, scopeFor(req)));
+  } catch (e) {
+    next(e);
+  }
+});
+
+settingsRouter.delete('/market-pricing-config/:locationCode', requireRole('ADMIN'), async (req, res, next) => {
+  try {
+    res.json(await settingsService.deleteMarketPricingConfig(req.params.locationCode, scopeFor(req)));
+  } catch (e) {
+    next(e);
+  }
+});
+
 settingsRouter.get('/users/:userId/module-access', requireRole('ADMIN'), enforceUserModuleScope, async (req, res, next) => {
   try {
     res.json(await settingsService.getUserModuleAccess(req.targetUser.id));

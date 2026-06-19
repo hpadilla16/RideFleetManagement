@@ -1127,6 +1127,63 @@ export const settingsService = {
     return { vendors: cleaned };
   },
 
+  // --- Tax-aware Market pricing config per location -------------------------
+  // MarketPricingConfig rows let the engine back-solve the BASE rate from a target
+  // ALL-IN price (undoing taxes + fees + brokerage). Per (tenant, location).
+  async listMarketPricingConfigs(scope = {}) {
+    if (!scope?.tenantId) throw new Error('tenantId is required');
+    const rows = await prisma.marketPricingConfig.findMany({
+      where: { tenantId: scope.tenantId },
+      orderBy: { locationCode: 'asc' },
+    });
+    return {
+      configs: rows.map((r) => ({
+        id: r.id,
+        locationCode: r.locationCode,
+        connectionType: r.connectionType,
+        taxes: Array.isArray(r.taxes) ? r.taxes : [],
+        brokeragePct: Number(r.brokeragePct),
+        floorBase: r.floorBase != null ? Number(r.floorBase) : null,
+        currency: r.currency,
+      })),
+      connectionTypes: ['TITANIUM', 'AMADEUS'],
+    };
+  },
+
+  async upsertMarketPricingConfig(payload = {}, scope = {}) {
+    if (!scope?.tenantId) throw new Error('tenantId is required');
+    const locationCode = String(payload?.locationCode || '').trim().toUpperCase();
+    if (!locationCode) { const e = new Error('locationCode is required'); e.httpStatus = 400; throw e; }
+    const connectionType = String(payload?.connectionType || 'TITANIUM').trim().toUpperCase();
+    if (!['TITANIUM', 'AMADEUS'].includes(connectionType)) {
+      const e = new Error('connectionType must be TITANIUM or AMADEUS'); e.httpStatus = 400; throw e;
+    }
+    const taxes = (Array.isArray(payload?.taxes) ? payload.taxes : [])
+      .map((t) => ({ name: String(t?.name || '').trim() || 'Tax', pct: Number(t?.pct) || 0 }))
+      .filter((t) => t.pct !== 0 || t.name !== 'Tax');
+    const brokeragePct = Number(payload?.brokeragePct) || 0;
+    const floorBase = (payload?.floorBase === '' || payload?.floorBase == null) ? null : Number(payload.floorBase);
+    const currency = String(payload?.currency || 'USD').trim().toUpperCase() || 'USD';
+    const data = { connectionType, taxes, brokeragePct, floorBase, currency };
+    const row = await prisma.marketPricingConfig.upsert({
+      where: { tenantId_locationCode: { tenantId: scope.tenantId, locationCode } },
+      create: { tenantId: scope.tenantId, locationCode, ...data },
+      update: data,
+    });
+    return {
+      id: row.id, locationCode: row.locationCode, connectionType: row.connectionType,
+      taxes: Array.isArray(row.taxes) ? row.taxes : [], brokeragePct: Number(row.brokeragePct),
+      floorBase: row.floorBase != null ? Number(row.floorBase) : null, currency: row.currency,
+    };
+  },
+
+  async deleteMarketPricingConfig(locationCode, scope = {}) {
+    if (!scope?.tenantId) throw new Error('tenantId is required');
+    const code = String(locationCode || '').trim().toUpperCase();
+    await prisma.marketPricingConfig.deleteMany({ where: { tenantId: scope.tenantId, locationCode: code } });
+    return { ok: true };
+  },
+
   async updateTelematicsConfig(payload = {}, scope = {}) {
     if (!scope?.tenantId) throw new Error('tenantId is required');
     const existing = await this.getTelematicsConfig(scope, { includeSecret: true });

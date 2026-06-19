@@ -512,6 +512,7 @@ model Tenant {
   agreementAddendums          RentalAgreementAddendum[]
   vehicleClassStopSales       VehicleClassStopSale[]
   marketScrapeProfiles        MarketScrapeProfile[]
+  marketPricingConfigs        MarketPricingConfig[]
   pricingRules                PricingRule[]
   pricingSuggestions          PricingSuggestion[]
   feeRates                    FeeRate[]
@@ -3144,6 +3145,29 @@ model MarketScrapeProfile {
   @@unique([tenantId, name])
   @@index([tenantId, active])
   @@index([targetRateId])
+}
+
+// Tax-aware pricing config per (tenant, location). Lets the engine back-solve the
+// BASE rate to upload from a target ALL-IN price, undoing Expedia's taxes + fees +
+// brokerage. connectionType chooses the formula (see pricing-grossup.js):
+//   TITANIUM: all_in = base × (1 + taxes) × (1 + brokerage)
+//   AMADEUS : all_in = base × (1 + brokerage) + base × taxes
+// Opt-in: a location WITHOUT a config keeps the legacy behavior (no gross-up).
+model MarketPricingConfig {
+  id             String   @id @default(cuid())
+  tenantId       String
+  tenant         Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  locationCode   String                              // "SJU", "MCO", ...
+  connectionType String   @default("TITANIUM")       // TITANIUM | AMADEUS
+  taxes          Json     @default("[]")             // [{ name: "PR tax", pct: 11.5 }, ...]
+  brokeragePct   Decimal  @default(0) @db.Decimal(6, 3)
+  floorBase      Decimal? @db.Decimal(10, 2)         // per-location floor (BASE rate); null = none
+  currency       String   @default("USD")
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@unique([tenantId, locationCode])
+  @@index([tenantId])
 }
 
 model MarketScrapeRun {

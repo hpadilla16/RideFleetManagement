@@ -59,7 +59,7 @@ const SETTINGS_TAB_SECTIONS = {
   payments: [],
   ai: ['plannerCopilot', 'plannerCopilotUsage'],
   telematics: ['telematics'],
-  marketIntel: ['dashboardSipps', 'marketExcludedVendors'],
+  marketIntel: ['dashboardSipps', 'marketExcludedVendors', 'marketPricingConfig'],
   access: [],
   emails: ['emailTemplates', 'reviewEmail'],
   services: ['services', 'fees'],
@@ -170,6 +170,9 @@ function SettingsInner({ token, me, logout }) {
   const [dashboardSipps, setDashboardSipps] = useState({ sipps: [], options: [], max: 6 });
   // Market Intelligence excluded competitors (per-tenant; one vendor per line in the textarea)
   const [excludedVendorsText, setExcludedVendorsText] = useState('');
+  // Tax-aware pricing config per location (Amadeus/Titanium, taxes, brokerage, floor)
+  const [pricingConfigs, setPricingConfigs] = useState({ configs: [], connectionTypes: ['TITANIUM', 'AMADEUS'] });
+  const [pcDraft, setPcDraft] = useState({ locationCode: '', connectionType: 'TITANIUM', taxesText: '', brokeragePct: '', floorBase: '' });
   const [revenuePricingConfig, setRevenuePricingConfig] = useState(DEFAULT_REVENUE_PRICING_CONFIG);
   const [revenuePricingPreview, setRevenuePricingPreview] = useState(DEFAULT_REVENUE_PRICING_PREVIEW);
   const [revenuePricingPreviewResult, setRevenuePricingPreviewResult] = useState(null);
@@ -328,6 +331,12 @@ function SettingsInner({ token, me, logout }) {
     if (key === 'marketExcludedVendors') {
       setExcludedVendorsText((Array.isArray(value?.vendors) ? value.vendors : []).join('\n'));
     }
+    if (key === 'marketPricingConfig') {
+      setPricingConfigs({
+        configs: Array.isArray(value?.configs) ? value.configs : [],
+        connectionTypes: Array.isArray(value?.connectionTypes) ? value.connectionTypes : ['TITANIUM', 'AMADEUS'],
+      });
+    }
     if (key === 'revenuePricing') {
       setRevenuePricingConfig({
         ...DEFAULT_REVENUE_PRICING_CONFIG,
@@ -367,6 +376,7 @@ function SettingsInner({ token, me, logout }) {
     telematics: (forceLoad = false) => api(scopedSettingsPath('/api/settings/telematics'), forceLoad ? { bypassCache: true } : {}, token),
     dashboardSipps: (forceLoad = false) => api(scopedSettingsPath('/api/settings/dashboard-sipps'), forceLoad ? { bypassCache: true } : {}, token),
     marketExcludedVendors: (forceLoad = false) => api(scopedSettingsPath('/api/settings/market-excluded-vendors'), forceLoad ? { bypassCache: true } : {}, token),
+    marketPricingConfig: (forceLoad = false) => api(scopedSettingsPath('/api/settings/market-pricing-config'), forceLoad ? { bypassCache: true } : {}, token),
     revenuePricing: (forceLoad = false) => api(scopedSettingsPath('/api/settings/revenue-pricing'), forceLoad ? { bypassCache: true } : {}, token),
     carSharingSearchPlaces: (forceLoad = false) => api(scopedSettingsPath('/api/settings/car-sharing-search-places'), forceLoad ? { bypassCache: true } : {}, token),
     precheckinDiscount: (forceLoad = false) => api(scopedSettingsPath('/api/settings/precheckin-discount'), forceLoad ? { bypassCache: true } : {}, token),
@@ -797,6 +807,52 @@ function SettingsInner({ token, me, logout }) {
     }, token);
     setExcludedVendorsText((Array.isArray(out?.vendors) ? out.vendors : []).join('\n'));
     setMsg('Excluded competitors saved');
+  };
+
+  // Tax-aware pricing config per location ------------------------------------
+  // taxes round-trip as "name:pct, name:pct" text (e.g. "PR tax:11.5, Airport fee:10.5").
+  const taxesToText = (taxes) => (Array.isArray(taxes) ? taxes : [])
+    .map((t) => `${t.name || 'Tax'}:${t.pct}`).join(', ');
+  const parseTaxesText = (text) => String(text || '')
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean)
+    .map((s) => {
+      const i = s.lastIndexOf(':');
+      const name = (i >= 0 ? s.slice(0, i) : s).trim() || 'Tax';
+      const pct = Number((i >= 0 ? s.slice(i + 1) : '').trim()) || 0;
+      return { name, pct };
+    });
+
+  const savePricingConfig = async () => {
+    if (!pcDraft.locationCode.trim()) { setMsg('Location code is required'); return; }
+    const body = {
+      locationCode: pcDraft.locationCode.trim().toUpperCase(),
+      connectionType: pcDraft.connectionType,
+      taxes: parseTaxesText(pcDraft.taxesText),
+      brokeragePct: Number(pcDraft.brokeragePct) || 0,
+      floorBase: pcDraft.floorBase === '' ? null : Number(pcDraft.floorBase),
+    };
+    await api(scopedSettingsPath('/api/settings/market-pricing-config'), { method: 'PUT', body: JSON.stringify(body) }, token);
+    const out = await api(scopedSettingsPath('/api/settings/market-pricing-config'), { bypassCache: true }, token);
+    setPricingConfigs({ configs: out?.configs || [], connectionTypes: out?.connectionTypes || ['TITANIUM', 'AMADEUS'] });
+    setPcDraft({ locationCode: '', connectionType: 'TITANIUM', taxesText: '', brokeragePct: '', floorBase: '' });
+    setMsg('Pricing config saved');
+  };
+
+  const editPricingConfig = (c) => setPcDraft({
+    locationCode: c.locationCode,
+    connectionType: c.connectionType,
+    taxesText: taxesToText(c.taxes),
+    brokeragePct: String(c.brokeragePct ?? ''),
+    floorBase: c.floorBase == null ? '' : String(c.floorBase),
+  });
+
+  const deletePricingConfig = async (code) => {
+    await api(scopedSettingsPath(`/api/settings/market-pricing-config/${encodeURIComponent(code)}`), { method: 'DELETE' }, token);
+    const out = await api(scopedSettingsPath('/api/settings/market-pricing-config'), { bypassCache: true }, token);
+    setPricingConfigs({ configs: out?.configs || [], connectionTypes: out?.connectionTypes || ['TITANIUM', 'AMADEUS'] });
+    setMsg('Pricing config removed');
   };
 
   const saveRevenuePricingConfig = async () => {
@@ -5092,6 +5148,60 @@ function SettingsInner({ token, me, logout }) {
                 >
                   Clear
                 </button>
+              </div>
+            </section>
+            <section className="glass card section-card">
+              <div className="stack" style={{ gap: 6 }}>
+                <h3 style={{ margin: 0 }}>Tax-aware pricing config (per location)</h3>
+                <div className="ui-muted">
+                  Lets the engine back-solve the BASE rate to upload from a target all-in price,
+                  undoing Expedia&apos;s taxes + fees + brokerage. A location WITHOUT a config keeps the
+                  old behavior (no gross-up). <strong>Titanium:</strong> all-in = base × (1 + taxes) ×
+                  (1 + brokerage). <strong>Amadeus:</strong> all-in = base × (1 + brokerage) + base ×
+                  taxes.
+                </div>
+              </div>
+              {(pricingConfigs.configs || []).length > 0 && (
+                <div className="stack" style={{ gap: 6, marginTop: 10 }}>
+                  {pricingConfigs.configs.map((c) => (
+                    <div key={c.locationCode} className="row-between" style={{ alignItems: 'center', gap: 10, padding: '6px 0', borderBottom: '1px solid rgba(0,0,0,0.06)' }}>
+                      <div className="ui-muted" style={{ fontSize: 13 }}>
+                        <strong>{c.locationCode}</strong> · {c.connectionType} · taxes {taxesToText(c.taxes) || '—'} · brokerage {c.brokeragePct}% · floor {c.floorBase == null ? '—' : `$${c.floorBase}`}
+                      </div>
+                      <div className="inline-actions">
+                        <button type="button" className="button-subtle" onClick={() => editPricingConfig(c)}>Edit</button>
+                        <button type="button" className="button-subtle" onClick={() => deletePricingConfig(c.locationCode)}>Delete</button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 10, marginTop: 12 }}>
+                <label className="stack" style={{ gap: 4 }}>
+                  <span className="ui-muted">Location code</span>
+                  <input value={pcDraft.locationCode} onChange={(e) => setPcDraft({ ...pcDraft, locationCode: e.target.value })} placeholder="SJU" />
+                </label>
+                <label className="stack" style={{ gap: 4 }}>
+                  <span className="ui-muted">Connection</span>
+                  <select value={pcDraft.connectionType} onChange={(e) => setPcDraft({ ...pcDraft, connectionType: e.target.value })}>
+                    {(pricingConfigs.connectionTypes || ['TITANIUM', 'AMADEUS']).map((t) => <option key={t} value={t}>{t}</option>)}
+                  </select>
+                </label>
+                <label className="stack" style={{ gap: 4 }}>
+                  <span className="ui-muted">Taxes (name:pct, …)</span>
+                  <input value={pcDraft.taxesText} onChange={(e) => setPcDraft({ ...pcDraft, taxesText: e.target.value })} placeholder="PR tax:11.5, Airport fee:10.5" />
+                </label>
+                <label className="stack" style={{ gap: 4 }}>
+                  <span className="ui-muted">Brokerage %</span>
+                  <input type="number" step="0.001" value={pcDraft.brokeragePct} onChange={(e) => setPcDraft({ ...pcDraft, brokeragePct: e.target.value })} placeholder="20.1" />
+                </label>
+                <label className="stack" style={{ gap: 4 }}>
+                  <span className="ui-muted">Floor (base $)</span>
+                  <input type="number" step="0.01" value={pcDraft.floorBase} onChange={(e) => setPcDraft({ ...pcDraft, floorBase: e.target.value })} placeholder="optional" />
+                </label>
+              </div>
+              <div className="inline-actions" style={{ marginTop: 12 }}>
+                <button type="button" onClick={savePricingConfig}>Save location config</button>
               </div>
             </section>
           </div>
