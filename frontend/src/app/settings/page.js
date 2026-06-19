@@ -824,26 +824,46 @@ function SettingsInner({ token, me, logout }) {
       return { name, pct };
     });
 
-  // Utilization tiers round-trip as "maxPct: adjust" per line. adjust ending in % = adjustPct,
-  // else adjustAmount. e.g. "40: -3", "100: +5%".
+  // Positional utilization tiers round-trip as "fromPct => target" per line, e.g.
+  //   50 => 3 cheapest · 70 => 5 cheapest · 85 => market · 90 => market +15%
+  const tierTargetToText = (t) => {
+    switch (t.type) {
+      case 'NTH_CHEAPEST': return (t.n || 1) === 1 ? 'cheapest' : `${t.n} cheapest`;
+      case 'NTH_EXPENSIVE': return `${t.n} expensive`;
+      case 'MARKET': return 'market';
+      case 'MARKET_PCT': return `market ${(t.pct ?? 0) >= 0 ? '+' : ''}${t.pct ?? 0}%`;
+      case 'CHEAPEST_MINUS': return `cheapest -${t.amount ?? 0}`;
+      default: return '';
+    }
+  };
   const tiersToText = (rules) => (Array.isArray(rules) ? rules : [])
-    .map((t) => {
-      const adj = t.adjustPct != null
-        ? `${t.adjustPct >= 0 ? '+' : ''}${t.adjustPct}%`
-        : `${(t.adjustAmount ?? 0) >= 0 ? '+' : ''}${t.adjustAmount ?? 0}`;
-      return `${t.maxPct}: ${adj}`;
-    }).join('\n');
+    .map((t) => `${t.fromPct} => ${tierTargetToText(t)}`).join('\n');
+  const parseTierTarget = (raw, fromPct) => {
+    const r = String(raw || '').trim().toLowerCase();
+    if (r.includes('market')) {
+      const m = r.match(/([+-]?\d+(?:\.\d+)?)\s*%/);
+      return m ? { fromPct, type: 'MARKET_PCT', pct: Number(m[1]) } : { fromPct, type: 'MARKET' };
+    }
+    let m = r.match(/(\d+)\s*(?:st|nd|rd|th)?\s*(?:cheap|barat)/);
+    if (m) return { fromPct, type: 'NTH_CHEAPEST', n: Number(m[1]) };
+    m = r.match(/(\d+)\s*(?:st|nd|rd|th)?\s*(?:expens|caro)/);
+    if (m) return { fromPct, type: 'NTH_EXPENSIVE', n: Number(m[1]) };
+    m = r.match(/cheapest\s*-\s*\$?(\d+(?:\.\d+)?)/);
+    if (m) return { fromPct, type: 'CHEAPEST_MINUS', amount: Number(m[1]) };
+    if (/cheap|barat/.test(r)) return { fromPct, type: 'NTH_CHEAPEST', n: 1 };
+    return null;
+  };
   const parseTiersText = (text) => String(text || '')
     .split('\n')
     .map((s) => s.trim())
     .filter(Boolean)
     .map((s) => {
-      const i = s.indexOf(':');
-      const maxPct = Number((i >= 0 ? s.slice(0, i) : s).trim()) || 0;
-      const v = (i >= 0 ? s.slice(i + 1) : '').trim();
-      if (v.endsWith('%')) return { maxPct, adjustPct: Number(v.slice(0, -1)) || 0 };
-      return { maxPct, adjustAmount: Number(v) || 0 };
-    });
+      const sep = s.includes('=>') ? '=>' : ':';
+      const i = s.indexOf(sep);
+      const fromPct = Number((i >= 0 ? s.slice(0, i) : s).trim()) || 0;
+      return parseTierTarget(i >= 0 ? s.slice(i + sep.length) : '', fromPct);
+    })
+    .filter(Boolean);
 
   const savePricingConfig = async () => {
     if (!pcDraft.locationCode.trim()) { setMsg('Location code is required'); return; }
@@ -5224,16 +5244,16 @@ function SettingsInner({ token, me, logout }) {
                 </label>
               </div>
               <label className="stack" style={{ gap: 4, marginTop: 10 }}>
-                <span className="ui-muted">Utilization tiers (one per line, &quot;maxPct: adjust&quot;) — applied on top of the base margin, by projected utilization at pickup</span>
+                <span className="ui-muted">Utilization tiers (one per line, &quot;fromPct =&gt; target&quot;) — when projected utilization at pickup reaches fromPct, target this position on the competitive ladder</span>
                 <textarea
                   value={pcDraft.utilTiersText}
                   onChange={(e) => setPcDraft({ ...pcDraft, utilTiersText: e.target.value })}
-                  rows={4}
-                  placeholder={'40: -3\n70: -1\n90: 0\n100: +5%'}
+                  rows={5}
+                  placeholder={'50 => 3 cheapest\n70 => 5 cheapest\n85 => market\n90 => market +15%'}
                   style={{ width: '100%', fontFamily: 'inherit' }}
                 />
                 <span className="ui-muted" style={{ fontSize: 11 }}>
-                  e.g. up to 40% util → −$3, 40–70% → −$1, 70–90% → match, &gt;90% → +5%. A plain number is a $ amount; add % for a percent. Leave empty for no utilization adjustment.
+                  Targets: &quot;N cheapest&quot;, &quot;N expensive&quot;, &quot;market&quot; (median of competitors), &quot;market +15%&quot; / &quot;-10%&quot;, or &quot;cheapest -2&quot;. Below the lowest fromPct the base margin applies. Empty = no utilization tiers.
                 </span>
               </label>
               <div className="inline-actions" style={{ marginTop: 12 }}>

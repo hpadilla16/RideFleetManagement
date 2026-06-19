@@ -2,7 +2,8 @@ import { prisma } from '../../lib/prisma.js';
 import { applyStrategy, ruleLabelFor, getCompetitorExcludeSet, getMarketPricingConfig } from '../market-scraper/market-scrape-comparison.service.js';
 import { isExcludedVendor, normalizeVendorName } from '../market-scraper/market-vendor.js';
 import { baseFromCustomerAllIn, customerAllInFromBase } from '../market-scraper/pricing-grossup.js';
-import { buildUtilizationLookup, applyUtilizationAdjustment } from '../market-scraper/pricing-utilization.js';
+import { buildUtilizationLookup } from '../market-scraper/pricing-utilization.js';
+import { pickUtilizationTier, resolveTierTarget } from '../market-scraper/pricing-tiers.js';
 import { renderReportExcel } from '../reports/reports-export.js';
 
 /**
@@ -449,8 +450,8 @@ export async function buildAirportExportWorkbook({ airport, days, scope = {} }) 
     const prev = latest.get(key);
     if (!prev || o.observedAt > prev.observedAt) latest.set(key, o);
   }
-  // Cheapest competitor per (pickupDate, sipp).
-  const byCell = new Map(); // `${dISO}|${sipp}` -> { date, sipp, cheapest, vendor, sampled, profileId }
+  // Cheapest competitor per (pickupDate, sipp) + the per-vendor price ladder (for tiers).
+  const byCell = new Map(); // `${dISO}|${sipp}` -> { date, sipp, cheapest, vendor, sampled, profileId, prices[] }
   for (const o of latest.values()) {
     const price = priceOf(o);
     if (!Number.isFinite(price) || price <= 0) continue;
@@ -459,9 +460,10 @@ export async function buildAirportExportWorkbook({ airport, days, scope = {} }) 
     const key = `${dISO}|${o.sipp}`;
     const ex = byCell.get(key);
     if (!ex) {
-      byCell.set(key, { date: dISO, sipp: o.sipp, cheapest: price, vendor, sampled: 1, profileId: o.profileId });
+      byCell.set(key, { date: dISO, sipp: o.sipp, cheapest: price, vendor, sampled: 1, profileId: o.profileId, prices: [price] });
     } else {
       ex.sampled += 1;
+      ex.prices.push(price);
       if (price < ex.cheapest) { ex.cheapest = price; ex.vendor = vendor; ex.profileId = o.profileId; }
     }
   }
@@ -498,11 +500,19 @@ export async function buildAirportExportWorkbook({ airport, days, scope = {} }) 
 
   const rhRows = cells.map((c) => {
     const profile = profById.get(c.profileId) || null;
-    let target = applyStrategy(c.cheapest, profile); // all-in target (margin on the competitor all-in)
+    // When utilization has reached a tier, position on the competitive ladder; else base margin.
     let utilization = null;
-    if (taxAware && target != null && utilRules.length > 0) {
+    let tier = null;
+    if (taxAware && utilRules.length > 0) {
       utilization = utilLookup.utilOf(c.sipp, c.date);
-      target = applyUtilizationAdjustment(target, utilization, utilRules);
+      tier = pickUtilizationTier(utilization, utilRules);
+    }
+    let target;
+    if (tier) {
+      target = resolveTierTarget(tier, c.prices);
+      if (target == null) target = applyStrategy(c.cheapest, profile);
+    } else {
+      target = applyStrategy(c.cheapest, profile);
     }
     let suggestedAllIn = null;
     let uploaded = target; // legacy: upload the target as-is

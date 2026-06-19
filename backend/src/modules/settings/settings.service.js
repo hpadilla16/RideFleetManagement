@@ -1165,17 +1165,21 @@ export const settingsService = {
     const brokeragePct = Number(payload?.brokeragePct) || 0;
     const floorBase = (payload?.floorBase === '' || payload?.floorBase == null) ? null : Number(payload.floorBase);
     const currency = String(payload?.currency || 'USD').trim().toUpperCase() || 'USD';
-    // Utilization tiers: sanitize to { maxPct, adjustAmount?|adjustPct? }, sorted ascending.
+    // Utilization tiers (positional): { fromPct, type, n?|pct?|amount? }, sorted by fromPct.
+    // type ∈ NTH_CHEAPEST | NTH_EXPENSIVE | MARKET | MARKET_PCT | CHEAPEST_MINUS.
+    const TIER_TYPES = ['NTH_CHEAPEST', 'NTH_EXPENSIVE', 'MARKET', 'MARKET_PCT', 'CHEAPEST_MINUS'];
     const utilizationRules = (Array.isArray(payload?.utilizationRules) ? payload.utilizationRules : [])
       .map((t) => {
-        const maxPct = Math.max(0, Math.min(100, Number(t?.maxPct) || 0));
-        const out = { maxPct };
-        if (t?.adjustAmount != null && t.adjustAmount !== '') out.adjustAmount = Number(t.adjustAmount) || 0;
-        if (t?.adjustPct != null && t.adjustPct !== '') out.adjustPct = Number(t.adjustPct) || 0;
+        const fromPct = Math.max(0, Math.min(100, Number(t?.fromPct) || 0));
+        const type = String(t?.type || '').toUpperCase();
+        const out = { fromPct, type };
+        if (type === 'NTH_CHEAPEST' || type === 'NTH_EXPENSIVE') out.n = Math.max(1, Math.round(Number(t?.n) || 1));
+        if (type === 'MARKET_PCT') out.pct = Number(t?.pct) || 0;
+        if (type === 'CHEAPEST_MINUS') out.amount = Number(t?.amount) || 0;
         return out;
       })
-      .filter((t) => Number.isFinite(t.maxPct))
-      .sort((a, b) => a.maxPct - b.maxPct);
+      .filter((t) => TIER_TYPES.includes(t.type))
+      .sort((a, b) => a.fromPct - b.fromPct);
     const data = { connectionType, taxes, brokeragePct, floorBase, utilizationRules, currency };
     const row = await prisma.marketPricingConfig.upsert({
       where: { tenantId_locationCode: { tenantId: scope.tenantId, locationCode } },

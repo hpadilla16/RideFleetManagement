@@ -64,26 +64,5 @@ export async function buildUtilizationLookup({ tenantId, locationCode, fromISO, 
   } catch { return empty; }
 }
 
-/** Pick the tier whose maxPct covers this utilization (0..1). Above all → top tier. */
-export function pickUtilizationTier(util, rules) {
-  if (util == null || !Array.isArray(rules) || rules.length === 0) return null;
-  const pct = util * 100;
-  const sorted = [...rules].sort((a, b) => (Number(a.maxPct) || 0) - (Number(b.maxPct) || 0));
-  for (const t of sorted) { if (pct <= (Number(t.maxPct) || 0)) return t; }
-  return sorted[sorted.length - 1];
-}
-
-/**
- * Nudge a target ALL-IN price by the utilization tier (adjustAmount then adjustPct).
- * Returns the (rounded) adjusted all-in, or the input unchanged when no tier applies.
- */
-export function applyUtilizationAdjustment(targetAllIn, util, rules) {
-  if (targetAllIn == null) return targetAllIn;
-  const tier = pickUtilizationTier(util, rules);
-  if (!tier) return targetAllIn;
-  let v = Number(targetAllIn);
-  if (tier.adjustAmount != null) v += Number(tier.adjustAmount) || 0;
-  if (tier.adjustPct != null) v *= 1 + (Number(tier.adjustPct) || 0) / 100;
-  if (!(v > 0)) v = 0;
-  return Math.round((v + Number.EPSILON) * 100) / 100;
-}
+// Positional tier logic (pickUtilizationTier / resolveTierTarget) lives in the pure
+// module ./pricing-tiers.js so it can be unit-tested without the prisma/report import.

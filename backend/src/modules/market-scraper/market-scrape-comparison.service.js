@@ -18,7 +18,8 @@ import { prisma } from '../../lib/prisma.js';
 import { renderReportExcel } from '../reports/reports-export.js';
 import { excludeSetFor, isExcludedVendor, normalizeVendorName } from './market-vendor.js';
 import { baseFromCustomerAllIn } from './pricing-grossup.js';
-import { buildUtilizationLookup, applyUtilizationAdjustment } from './pricing-utilization.js';
+import { buildUtilizationLookup } from './pricing-utilization.js';
+import { pickUtilizationTier, resolveTierTarget } from './pricing-tiers.js';
 
 /**
  * Tax-aware pricing config for a (tenant, location). Returns the row or null.
@@ -137,7 +138,8 @@ export function applyStrategy(cheapest, profile) {
  * Returns Map<"YYYY-MM-DD|SIPP", {date, sipp, cheapest, vendor, sampled}>.
  */
 export function aggregateCheapestBySippDate(observations, { excludeSet, useEffective = false } = {}) {
-  const byKey = new Map();
+  // First pass: per-cell, the cheapest price per (normalized) vendor + total sampled.
+  const cells = new Map(); // key -> { date, sipp, byVendor: Map<vendor, price>, sampled }
   for (const obs of observations) {
     if (obs.status !== 'FOUND') continue;
     if (obs.dailyPrice == null) continue;
@@ -152,24 +154,27 @@ export function aggregateCheapestBySippDate(observations, { excludeSet, useEffec
     const dateISO = obs.pickupDate instanceof Date
       ? obs.pickupDate.toISOString().slice(0, 10)
       : String(obs.pickupDate).slice(0, 10);
-    const vendor = normalizeVendorName(obs.vendor) || null;
+    const vendor = normalizeVendorName(obs.vendor) || '?';
     const key = `${dateISO}|${obs.sipp}`;
-    const existing = byKey.get(key);
-    if (!existing) {
-      byKey.set(key, {
-        date: dateISO,
-        sipp: obs.sipp,
-        cheapest: price,
-        vendor,
-        sampled: 1
-      });
-    } else {
-      existing.sampled += 1;
-      if (price < existing.cheapest) {
-        existing.cheapest = price;
-        existing.vendor = vendor;
-      }
-    }
+    let cell = cells.get(key);
+    if (!cell) { cell = { date: dateISO, sipp: obs.sipp, byVendor: new Map(), sampled: 0 }; cells.set(key, cell); }
+    cell.sampled += 1;
+    const prev = cell.byVendor.get(vendor);
+    if (prev == null || price < prev) cell.byVendor.set(vendor, price);
+  }
+  // Finalize: cheapest + its vendor + the ascending per-vendor price ladder (for tiers).
+  const byKey = new Map();
+  for (const [key, cell] of cells) {
+    const entries = [...cell.byVendor.entries()].sort((a, b) => a[1] - b[1]);
+    const prices = entries.map((e) => e[1]);
+    byKey.set(key, {
+      date: cell.date,
+      sipp: cell.sipp,
+      cheapest: prices.length ? prices[0] : null,
+      vendor: entries.length ? entries[0][0] : null,
+      sampled: cell.sampled,
+      prices, // per-vendor cheapest, ascending — drives positional utilization tiers
+    });
   }
   return byKey;
 }
@@ -277,16 +282,21 @@ export async function computeRunComparison(runId, { scope = {} } = {}) {
   for (const key of sortedKeys) {
     const r = byKey.get(key);
     const vt = vehicleTypeBySipp.get(r.sipp) || null;
-    // Apply the margin strategy to the cheapest competitor. In tax-aware mode
-    // r.cheapest is the competitor ALL-IN, so this target is also an all-in.
-    let target = applyStrategy(r.cheapest, profile);
-
-    // Utilization tier (Fase 2): nudge the target all-in ON TOP of the base margin,
-    // using projected utilization for this (SIPP, pickup day).
+    // Pricing target (an ALL-IN price in tax-aware mode). When utilization has reached a
+    // tier, the tier defines the position on the competitive ladder (e.g. 3rd cheapest,
+    // market, market+15%); otherwise we use the base margin (cheapest − $X).
     let utilization = null;
-    if (taxAware && target != null && utilRules.length > 0) {
+    let tier = null;
+    if (taxAware && utilRules.length > 0) {
       utilization = utilLookup.utilOf(r.sipp, r.date);
-      target = applyUtilizationAdjustment(target, utilization, utilRules);
+      tier = pickUtilizationTier(utilization, utilRules);
+    }
+    let target;
+    if (tier) {
+      target = resolveTierTarget(tier, r.prices);
+      if (target == null) target = applyStrategy(r.cheapest, profile); // empty pool → base margin
+    } else {
+      target = applyStrategy(r.cheapest, profile); // below the first tier / no rules
     }
 
     // suggested = the number we ACTUALLY upload (the base rate). In tax-aware mode
