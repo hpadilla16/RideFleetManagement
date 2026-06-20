@@ -56,6 +56,36 @@ enum MaintenanceStatus {
   CANCELLED
 }
 
+// Maintenance Module (2026-06-19) — Repair Orders, lines, service intervals.
+enum RepairOrderStatus {
+  OPEN
+  IN_PROGRESS
+  COMPLETED
+  CANCELLED
+}
+
+enum RepairOrderSource {
+  SCHEDULED // from a service interval coming due
+  DAMAGE    // rolled up from VehicleDamageReport(s)
+  INCIDENT  // from a ReservationIncident
+  MANUAL    // ad-hoc
+}
+
+enum RepairOrderLineType {
+  PART
+  LABOR
+  OTHER
+  TAX
+}
+
+enum ServiceType {
+  LOF // oil + filter
+  TIRE_ROTATION
+  BRAKES
+  INSPECTION
+  OTHER
+}
+
 enum UserRole {
   SUPER_ADMIN
   ADMIN
@@ -514,6 +544,8 @@ model Tenant {
   marketScrapeProfiles        MarketScrapeProfile[]
   marketPricingConfigs        MarketPricingConfig[]
   pricingRules                PricingRule[]
+  repairOrders                RepairOrder[]
+  serviceSchedules            ServiceSchedule[]
   pricingSuggestions          PricingSuggestion[]
   feeRates                    FeeRate[]
 
@@ -559,6 +591,7 @@ model Location {
   carSharingSearchPlacesAnchor   CarSharingSearchPlace[] @relation("CarSharingSearchPlaceAnchorLocation")
   carSharingPickupTrips          Trip[]                  @relation("TripPickupLocation")
   carSharingReturnTrips          Trip[]                  @relation("TripReturnLocation")
+  repairOrders                   RepairOrder[]
   feeRates                       FeeRate[]
   locationCodeMaps               LocationCodeMap[]
 
@@ -661,6 +694,8 @@ model Vehicle {
   reconciliationFlags   FleetReconciliationFlag[]
   customerInspections   CustomerInspection[]
   damageReports         VehicleDamageReport[]
+  repairOrders          RepairOrder[]
+  serviceSchedules      ServiceSchedule[]
 
   @@unique([tenantId, plate])
   @@unique([tenantId, internalNumber])
@@ -1253,6 +1288,90 @@ model MaintenanceJob {
   updatedAt DateTime @updatedAt
 
   @@index([vehicleId, status])
+}
+
+// ── Maintenance Module (2026-06-19, plan doc/maintenance-module-plan-2026-06-18.md) ──
+// RepairOrder is the central fleet-care record: reparaciones (estilo TSD), damages rolled
+// up from inspections, incidents, and scheduled/interval maintenance — divided by location.
+// Replaces MaintenanceJob (rows migrated later). Numbered PER UNIT (roNumber per vehicle).
+// Money rule: costs are an INTERNAL record only; no auto-charge to agreements/claims.
+model RepairOrder {
+  id        String @id @default(cuid())
+  tenantId  String
+  tenant    Tenant @relation(fields: [tenantId], references: [id])
+  vehicleId String
+  vehicle   Vehicle @relation(fields: [vehicleId], references: [id])
+  // Per-unit sequence (RO-0001 for that vehicle), assigned at create time.
+  roNumber  Int
+
+  locationId String?
+  location   Location? @relation(fields: [locationId], references: [id])
+
+  status RepairOrderStatus @default(OPEN)
+  source RepairOrderSource @default(MANUAL)
+
+  odometerAtOpen  Int?
+  openedAt        DateTime  @default(now())
+  completedAt     DateTime?
+  enteredByUserId String?
+
+  vendor   String? // shop / mechanic
+  poNumber String?
+  notes    String?
+
+  // Optional incident that spawned this RO.
+  incidentId String?
+  incident   ReservationIncident? @relation(fields: [incidentId], references: [id], onDelete: SetNull)
+
+  lines        RepairOrderLine[]
+  damageReports VehicleDamageReport[] // damages grouped into this RO; FIXED on complete
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([vehicleId, roNumber])
+  @@index([tenantId, status])
+  @@index([locationId, status])
+  @@index([vehicleId])
+}
+
+model RepairOrderLine {
+  id            String              @id @default(cuid())
+  repairOrderId String
+  repairOrder   RepairOrder         @relation(fields: [repairOrderId], references: [id], onDelete: Cascade)
+  type          RepairOrderLineType @default(PART)
+  description   String
+  qty           Decimal             @default(1) @db.Decimal(10, 2)
+  unitCost      Decimal             @default(0) @db.Decimal(10, 2)
+  amount        Decimal             @default(0) @db.Decimal(10, 2) // qty × unitCost (or flat)
+  createdAt     DateTime            @default(now())
+
+  @@index([repairOrderId])
+}
+
+// Per-unit service interval (LOF, tire rotation, …) with make/model defaults overridable
+// per vehicle. nextDue* are derived from the live odometer (VehicleMileageEntry) + lastService.
+model ServiceSchedule {
+  id        String @id @default(cuid())
+  tenantId  String
+  tenant    Tenant @relation(fields: [tenantId], references: [id])
+  vehicleId String
+  vehicle   Vehicle @relation(fields: [vehicleId], references: [id])
+
+  serviceType      ServiceType
+  intervalMiles    Int?
+  intervalDays     Int?
+  lastServiceMiles Int?
+  lastServiceAt    DateTime?
+  nextDueMiles     Int?
+  nextDueAt        DateTime?
+  active           Boolean   @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([vehicleId, serviceType])
+  @@index([tenantId, active])
 }
 
 model HostVehicleListing {
@@ -3724,7 +3843,8 @@ model ReservationIncident {
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
 
-  evidence IncidentEvidence[]
+  evidence     IncidentEvidence[]
+  repairOrders RepairOrder[]
 
   @@index([tenantId, status])
   @@index([reservationId])
@@ -3919,6 +4039,10 @@ model VehicleDamageReport {
 
   customerInspectionId String?
   customerInspection   CustomerInspection? @relation(fields: [customerInspectionId], references: [id], onDelete: SetNull)
+
+  // Maintenance Module: the RepairOrder this damage was rolled into (FIXED on RO complete).
+  repairOrderId String?
+  repairOrder   RepairOrder? @relation(fields: [repairOrderId], references: [id], onDelete: SetNull)
 
   reservationId     String?
   reservationNumber String?

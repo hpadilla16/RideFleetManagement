@@ -31,6 +31,7 @@ import { termsSigningPublicRouter } from './modules/checkout-session/terms-signi
 import { mobileInspectionPublicRouter } from './modules/checkout-session/mobile-inspection.routes.js';
 import { customerInspectionPublicRouter, customerInspectionRouter } from './modules/customer-inspection/customer-inspection.routes.js';
 import { citationsRouter, citationsInternalRouter } from './modules/citations/citations.routes.js';
+import { repairOrdersRouter, maintenanceRouter } from './modules/maintenance/maintenance.routes.js';
 import { storeBoardRouter } from './modules/store-board/store-board.routes.js';
 import { storeBoardPublicRouter } from './modules/store-board/store-board-public.routes.js';
 import { assertAuthConfig } from './modules/auth/auth.config.js';
@@ -206,6 +207,8 @@ app.use('/api/admin/integrations/tl-international', tenantRateLimit, tlInternati
 app.use('/api/admin/reservations', requireAuth, requireRole('SUPER_ADMIN'), reservationOverrideRouter);
 app.use('/api/store-board', requireAuth, tenantRateLimit, requireRole('SUPER_ADMIN', 'ADMIN', 'OPS'), storeBoardRouter);
 app.use('/api/inventory', requireAuth, tenantRateLimit, requireModuleAccess('vehicles'), inventoryRouter);
+app.use('/api/repair-orders', requireAuth, tenantRateLimit, requireModuleAccess('vehicles'), repairOrdersRouter);
+app.use('/api/maintenance', requireAuth, tenantRateLimit, requireModuleAccess('vehicles'), maintenanceRouter);
 
 app.use('/api/reservations', requireAuth, tenantRateLimit, requireModuleAccess('reservations'), reservationsRouter);
 app.use('/api/reservations', requireAuth, tenantRateLimit, requireModuleAccess('reservations'), reservationExtendRouter);
