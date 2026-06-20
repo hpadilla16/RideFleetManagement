@@ -10,6 +10,24 @@ import { prisma } from '../../lib/prisma.js';
 function badRequest(msg) { const e = new Error(msg); e.status = 400; throw e; }
 function notFound(msg) { const e = new Error(msg || 'Not found'); e.status = 404; throw e; }
 
+// On RO open: move the vehicle to IN_MAINTENANCE, but only from a non-locked, non-rented
+// state (never yank a car off an active rental; never stomp SOLD/OUT_OF_SERVICE). On the
+// last RO closing: drop IN_MAINTENANCE → AVAILABLE and let the hourly sweep reconcile.
+async function setVehicleInMaintenance(vehicleId) {
+  const v = await prisma.vehicle.findUnique({ where: { id: vehicleId }, select: { status: true } });
+  if (v && ['AVAILABLE', 'RESERVED'].includes(v.status)) {
+    await prisma.vehicle.update({ where: { id: vehicleId }, data: { status: 'IN_MAINTENANCE' } });
+  }
+}
+async function clearVehicleMaintenanceIfDone(vehicleId) {
+  const stillOpen = await prisma.repairOrder.count({ where: { vehicleId, status: { in: ['OPEN', 'IN_PROGRESS'] } } });
+  if (stillOpen > 0) return;
+  const v = await prisma.vehicle.findUnique({ where: { id: vehicleId }, select: { status: true } });
+  if (v?.status === 'IN_MAINTENANCE') {
+    await prisma.vehicle.update({ where: { id: vehicleId }, data: { status: 'AVAILABLE' } });
+  }
+}
+
 // Tenant filter from scope (super-admin with no tenant → no filter).
 function tenantWhere(scope) {
   if (scope?.tenantId && scope.tenantId !== '__no_tenant__') return { tenantId: scope.tenantId };
@@ -135,6 +153,8 @@ export const repairOrdersService = {
       const roNumber = (last?.roNumber || 0) + 1 + attempt;
       try {
         const created = await prisma.repairOrder.create({ data: { ...data, roNumber }, include: DETAIL_INCLUDE });
+        // Opening an RO takes the car into maintenance (Fase 4 wire-up).
+        await setVehicleInMaintenance(vehicleId);
         // Optionally attach damages passed at create (roll-up).
         if (Array.isArray(body.damageReportIds) && body.damageReportIds.length) {
           await prisma.vehicleDamageReport.updateMany({
@@ -143,7 +163,7 @@ export const repairOrdersService = {
           });
           return this.get(created.id, scope);
         }
-        return shape(created);
+        return this.get(created.id, scope);
       } catch (e) {
         if (String(e?.code) === 'P2002' && attempt < 2) continue; // roNumber race → retry
         throw e;
@@ -200,16 +220,18 @@ export const repairOrdersService = {
           })]
         : []),
     ]);
+    await clearVehicleMaintenanceIfDone(ro.vehicleId);
     return this.get(ro.id, scope);
   },
 
   async cancel(id, scope = {}) {
-    const ro = await prisma.repairOrder.findFirst({ where: { id: String(id), ...tenantWhere(scope) }, select: { id: true, status: true } });
+    const ro = await prisma.repairOrder.findFirst({ where: { id: String(id), ...tenantWhere(scope) }, select: { id: true, status: true, vehicleId: true } });
     if (!ro) notFound('Repair order not found');
     if (ro.status !== 'COMPLETED') {
       await prisma.repairOrder.update({ where: { id: ro.id }, data: { status: 'CANCELLED' } });
       // Un-link any grouped damages so they can be rolled into a new RO.
       await prisma.vehicleDamageReport.updateMany({ where: { repairOrderId: ro.id }, data: { repairOrderId: null } });
+      await clearVehicleMaintenanceIfDone(ro.vehicleId);
     }
     return this.get(ro.id, scope);
   },
