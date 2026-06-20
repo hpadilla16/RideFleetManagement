@@ -38,7 +38,7 @@ import { UtilizationBarChart } from '../../../components/reports/charts/Utilizat
 import { UtilizationLineChart } from '../../../components/reports/charts/UtilizationLineChart';
 import { BookingPaceChart } from '../../../components/reports/charts/BookingPaceChart';
 import { SoldOutIncidenceChart } from '../../../components/reports/charts/SoldOutIncidenceChart';
-import { DEFAULT_TENANT_TIMEZONE } from '../../../lib/tenant-time';
+import { DEFAULT_TENANT_TIMEZONE, tenantDayKey } from '../../../lib/tenant-time';
 
 const TABS = [
   { key: 'glance', label: 'At a glance' },
@@ -57,14 +57,7 @@ const TAB_STORAGE_KEY = 'reports-v2:availability-forecast:tab';
 // non-PR browser) could see a default range that's off by a day at the
 // boundary.
 function isoDayInTenantTz(d) {
-  const parts = new Intl.DateTimeFormat('en-CA', {
-    timeZone: DEFAULT_TENANT_TIMEZONE,
-    year: 'numeric', month: '2-digit', day: '2-digit'
-  }).formatToParts(d).reduce((acc, p) => {
-    if (p.type !== 'literal') acc[p.type] = p.value;
-    return acc;
-  }, {});
-  return `${parts.year}-${parts.month}-${parts.day}`;
+  return tenantDayKey(d, DEFAULT_TENANT_TIMEZONE);
 }
 
 // Forward-looking range presets (30-day default).

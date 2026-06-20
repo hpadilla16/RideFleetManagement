@@ -28,7 +28,7 @@ import { api } from '../../../lib/client';
 import { ReportPageLayout } from '../../../components/reports/ReportPageLayout';
 import { ReservationListDrawer } from '../../../components/reports/ReservationListDrawer';
 import { StackedDayBarChart } from '../../../components/reports/charts/StackedDayBarChart';
-import { DEFAULT_TENANT_TIMEZONE } from '../../../lib/tenant-time';
+import { DEFAULT_TENANT_TIMEZONE, tenantDayKey } from '../../../lib/tenant-time';
 
 const STATUS_LABEL = { OPEN: 'Open', OUT: 'Out', RETURNED: 'Returned', LOST: 'Lost' };
 const STATUS_COLOR = {
@@ -43,14 +43,7 @@ const STATUS_COLOR = {
 // instant the UTC date is the next day, so the default range would silently
 // include / exclude one calendar day at the boundary.
 function isoDay(d, tz = DEFAULT_TENANT_TIMEZONE) {
-  const parts = new Intl.DateTimeFormat('en-CA', {
-    timeZone: tz,
-    year: 'numeric', month: '2-digit', day: '2-digit'
-  }).formatToParts(d).reduce((acc, p) => {
-    if (p.type !== 'literal') acc[p.type] = p.value;
-    return acc;
-  }, {});
-  return `${parts.year}-${parts.month}-${parts.day}`;
+  return tenantDayKey(d, tz);
 }
 
 function defaultRange() {

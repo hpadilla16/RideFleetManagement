@@ -6,7 +6,7 @@ import { AuthGate } from '../components/AuthGate';
 import { AppShell } from '../components/AppShell';
 import MarketIntelligenceCard from '../components/MarketIntelligenceCard';
 import { api } from '../lib/client';
-import { DEFAULT_TENANT_TIMEZONE } from '../lib/tenant-time';
+import { DEFAULT_TENANT_TIMEZONE, tenantDayKey } from '../lib/tenant-time';
 
 // 2026-05-26: both helpers used to read the raw "YYYY-MM-DD" / "HH:mm"
 // prefix of an ISO string as if those digits were already the wall-clock
@@ -42,21 +42,11 @@ function fmtTimeline(value) {
   return Number.isNaN(d.getTime()) ? '—' : d.toLocaleString();
 }
 
+// Tenant-TZ "YYYY-MM-DD" so e.g. an 11 PM AST return whose storage UTC is 03:00
+// the next calendar day still maps to the AST date the agent expects. Delegates
+// to the shared, Intl-crash-resilient helper (Sentry NEXTJSFRONTEND-T).
 function wallClockDate(value) {
-  if (!value) return null;
-  const d = new Date(value);
-  if (Number.isNaN(d.getTime())) return null;
-  // Use Intl to extract the tenant-TZ date components so e.g. an 11 PM AST
-  // return whose storage UTC is 03:00 the next calendar day still maps to
-  // the AST date the agent expects.
-  const parts = new Intl.DateTimeFormat('en-CA', {
-    timeZone: DASHBOARD_TZ,
-    year: 'numeric', month: '2-digit', day: '2-digit'
-  }).formatToParts(d).reduce((acc, p) => {
-    if (p.type !== 'literal') acc[p.type] = p.value;
-    return acc;
-  }, {});
-  return `${parts.year}-${parts.month}-${parts.day}`;
+  return tenantDayKey(value, DASHBOARD_TZ);
 }
 
 function VehicleStatusDonut({ metrics }) {

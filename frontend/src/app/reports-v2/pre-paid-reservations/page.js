@@ -35,15 +35,22 @@ function fmtDateTimeShort(iso, tenantTz = DEFAULT_TENANT_TIMEZONE) {
   if (!iso) return '-';
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return '-';
-  const parts = new Intl.DateTimeFormat('en-GB', {
-    timeZone: tenantTz,
-    year: 'numeric', month: '2-digit', day: '2-digit',
-    hour: '2-digit', minute: '2-digit',
-    hour12: false
-  }).formatToParts(d).reduce((acc, p) => {
-    if (p.type !== 'literal') acc[p.type] = p.value;
-    return acc;
-  }, {});
+  // try/catch: some browsers/extensions break Intl.formatToParts ("incompatible
+  // receiver"); don't let that crash the page (Sentry NEXTJSFRONTEND-T).
+  let parts;
+  try {
+    parts = new Intl.DateTimeFormat('en-GB', {
+      timeZone: tenantTz,
+      year: 'numeric', month: '2-digit', day: '2-digit',
+      hour: '2-digit', minute: '2-digit',
+      hour12: false
+    }).formatToParts(d).reduce((acc, p) => {
+      if (p.type !== 'literal') acc[p.type] = p.value;
+      return acc;
+    }, {});
+  } catch {
+    return '-';
+  }
   const hour = parts.hour === '24' ? '00' : parts.hour;
   return `${parts.day}-${parts.month}-${parts.year} ${hour}:${parts.minute}`;
 }

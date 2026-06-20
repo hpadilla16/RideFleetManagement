@@ -18,7 +18,7 @@ import { api } from '../../../lib/client';
 import { ReportPageLayout } from '../../../components/reports/ReportPageLayout';
 import { PaymentListDrawer } from '../../../components/reports/PaymentListDrawer';
 import { StackedDayBarChart } from '../../../components/reports/charts/StackedDayBarChart';
-import { DEFAULT_TENANT_TIMEZONE } from '../../../lib/tenant-time';
+import { DEFAULT_TENANT_TIMEZONE, tenantDayKey } from '../../../lib/tenant-time';
 
 const METHOD_LABEL = { CASH: 'Cash', CARD: 'Card', DIGITAL: 'Digital', OTHER: 'Other' };
 const METHOD_COLOR = {
@@ -32,14 +32,7 @@ const METHOD_COLOR = {
 // toISOString().slice(0, 10) leaked the UTC date and made the default
 // "1st of month → today" range silently off-by-one at the boundary.
 function isoDay(d, tz = DEFAULT_TENANT_TIMEZONE) {
-  const parts = new Intl.DateTimeFormat('en-CA', {
-    timeZone: tz,
-    year: 'numeric', month: '2-digit', day: '2-digit'
-  }).formatToParts(d).reduce((acc, p) => {
-    if (p.type !== 'literal') acc[p.type] = p.value;
-    return acc;
-  }, {});
-  return `${parts.year}-${parts.month}-${parts.day}`;
+  return tenantDayKey(d, tz);
 }
 
 function defaultRange() {

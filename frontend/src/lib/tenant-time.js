@@ -21,6 +21,35 @@
 export const DEFAULT_TENANT_TIMEZONE = 'America/Puerto_Rico';
 
 /**
+ * "YYYY-MM-DD" for a date in the tenant timezone, RESILIENT to a broken
+ * Intl.DateTimeFormat. Some browsers / extensions monkeypatch Intl and break
+ * `formatToParts` ("called on incompatible receiver"), which — when this runs
+ * during render — used to crash the whole page (Sentry NEXTJSFRONTEND-T,
+ * 2026-06-20). On any failure we fall back to the UTC date so one bad browser
+ * can't take down the dashboard. Returns null for an invalid/empty value.
+ */
+export function tenantDayKey(value, tenantTz = DEFAULT_TENANT_TIMEZONE) {
+  if (value == null || value === '') return null;
+  const d = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(d.getTime())) return null;
+  try {
+    const parts = new Intl.DateTimeFormat('en-CA', {
+      timeZone: tenantTz,
+      year: 'numeric', month: '2-digit', day: '2-digit'
+    }).formatToParts(d).reduce((acc, p) => {
+      if (p.type !== 'literal') acc[p.type] = p.value;
+      return acc;
+    }, {});
+    if (parts.year && parts.month && parts.day) {
+      return `${parts.year}-${parts.month}-${parts.day}`;
+    }
+  } catch {
+    /* broken Intl — fall through to the UTC fallback below */
+  }
+  return d.toISOString().slice(0, 10);
+}
+
+/**
  * Format a UTC datetime (Date, ISO string, etc.) as the
  * "YYYY-MM-DDTHH:mm" wall-clock string a `<input type="datetime-local">`
  * expects, interpreted in the tenant's timezone.
