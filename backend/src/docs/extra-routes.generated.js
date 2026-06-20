@@ -143,6 +143,7 @@ export const EXTRA_ROUTES = [
   ['POST', '/api/customer-inspection/{token}/damage', 'Inspections', 'Report customer damage point', { auth: false }],
   ['POST', '/api/customer-inspection/{token}/complete', 'Inspections', 'Complete customer inspection', { auth: false }],
   ['GET', '/api/customer-inspections/vehicle/{vehicleId}', 'Inspections', 'Vehicle damage history'],
+  ['POST', '/api/customer-inspections/vehicle/{vehicleId}/manual-damage', 'Inspections', 'Manually record an existing damage'],
   ['POST', '/api/customer-inspections/reports/{reportId}/fix', 'Inspections', 'Mark damage report fixed'],
   ['GET', '/api/customer-inspections', 'Inspections', 'List customer inspections'],
   ['GET', '/api/customer-inspections/{id}', 'Inspections', 'Get customer inspection detail'],

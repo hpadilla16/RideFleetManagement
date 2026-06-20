@@ -434,6 +434,47 @@ async function reportDamage({ token, view, xPct, yPct, description, photoDataUrl
   return { id: report.id, view: viewKey };
 }
 
+/**
+ * Manually record an EXISTING damage from the vehicle profile (agent-entered, no
+ * inspection/customer involved). Goes straight to HARD_APPROVED so it shows on the
+ * vehicle's damage history (and can later be Fixed or rolled into a Repair Order).
+ * Photo is required, same as a customer report. source = 'MANUAL'.
+ */
+async function addManualDamage(vehicleId, body = {}, scope = {}) {
+  const tenantId = scope?.tenantId;
+  if (!tenantId || tenantId === '__no_tenant__') throw new CheckoutSessionError('tenantId required', 400);
+  const vehicle = await prisma.vehicle.findFirst({ where: { id: String(vehicleId), tenantId }, select: { id: true } });
+  if (!vehicle) throw new CheckoutSessionError('Vehicle not found', 404);
+
+  const viewKey = String(body?.view || '').toUpperCase();
+  if (!['FRONT', 'REAR', 'LEFT', 'RIGHT', 'INTERIOR'].includes(viewKey)) throw new CheckoutSessionError('Invalid view', 400);
+  const x = Number(body?.xPct); const y = Number(body?.yPct);
+  if (!Number.isFinite(x) || !Number.isFinite(y) || x < 0 || x > 100 || y < 0 || y > 100) {
+    throw new CheckoutSessionError('xPct/yPct must be 0..100', 400);
+  }
+  if (!body?.photoDataUrl) throw new CheckoutSessionError('A photo of the damage is required', 400, 'PHOTO_REQUIRED');
+
+  const report = await prisma.vehicleDamageReport.create({
+    data: {
+      tenantId,
+      vehicleId: String(vehicleId),
+      phase: 'CHECKIN', // neutral; manual damages aren't tied to a checkout/checkin
+      view: viewKey,
+      xPct: x,
+      yPct: y,
+      description: body.description ? String(body.description).slice(0, 500) : null,
+      status: 'HARD_APPROVED',
+      source: 'MANUAL',
+      reviewedByUserId: scope.userId || null,
+      reviewedAt: new Date(),
+    },
+  });
+  const photoJson = await persistDamagePhoto(tenantId, report.id, body.photoDataUrl);
+  await prisma.vehicleDamageReport.update({ where: { id: report.id }, data: { photoJson } });
+  logger.info('[customer-inspection] manual damage added', { vehicleId, reportId: report.id, view: viewKey });
+  return { id: report.id, view: viewKey };
+}
+
 async function completeInspection({ token }) {
   const row = await loadToken(token);
   const inspection = await findInspection(row.reservationId);
@@ -692,5 +733,6 @@ export const customerInspectionService = {
   getInspection,
   reviewReport,
   getVehicleDamageHistory,
+  addManualDamage,
   fixDamageReport,
 };

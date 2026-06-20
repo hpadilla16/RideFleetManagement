@@ -93,6 +93,16 @@ customerInspectionRouter.get('/vehicle/:vehicleId', async (req, res) => {
   }
 });
 
+// POST /api/customer-inspections/vehicle/:vehicleId/manual-damage — agent records an EXISTING
+// damage from the vehicle profile (diagram dot + photo). body: { view, xPct, yPct, description?, photoDataUrl }
+customerInspectionRouter.post('/vehicle/:vehicleId/manual-damage', express.json({ limit: '15mb' }), async (req, res) => {
+  try {
+    res.json(await customerInspectionService.addManualDamage(req.params.vehicleId, req.body || {}, scopeFor(req)));
+  } catch (err) {
+    handleError(res, err);
+  }
+});
+
 // GET /api/customer-inspections/vehicle/:vehicleId/checkin-qr — the printable per-vehicle QR URL
 // (agent prints it and places it inside the car as a check-in fail-safe).
 customerInspectionRouter.get('/vehicle/:vehicleId/checkin-qr', async (req, res) => {

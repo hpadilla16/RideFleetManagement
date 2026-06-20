@@ -140,6 +140,28 @@ function VehicleProfileInner({ token, me, logout }) {
   const [damageView, setDamageView] = useState('LEFT');
   const [fixModal, setFixModal] = useState(null); // { report, photo, saving }
   const fixFileRef = useRef(null);
+  // Manually record an existing damage from the profile (diagram dot + photo).
+  const [addDmg, setAddDmg] = useState(null); // { view, xPct, yPct, photo, description, saving }
+  const addDmgFileRef = useRef(null);
+
+  const saveManualDamage = async () => {
+    if (!addDmg) return;
+    if (addDmg.xPct == null || addDmg.yPct == null) { setMsg('Tap the diagram to mark where the damage is'); return; }
+    if (!addDmg.photo) { setMsg('A photo of the damage is required'); return; }
+    setAddDmg((c) => ({ ...c, saving: true }));
+    try {
+      await api(`/api/customer-inspections/vehicle/${id}/manual-damage`, {
+        method: 'POST',
+        body: JSON.stringify({ view: addDmg.view, xPct: addDmg.xPct, yPct: addDmg.yPct, description: addDmg.description || '', photoDataUrl: addDmg.photo }),
+      }, token);
+      setAddDmg(null);
+      setMsg('Damage recorded');
+      await loadDamage();
+    } catch (e2) {
+      setAddDmg((c) => ({ ...c, saving: false }));
+      setMsg(e2?.message || 'Failed to record damage');
+    }
+  };
 
   const loadDamage = async () => {
     try {
@@ -603,6 +625,46 @@ function VehicleProfileInner({ token, me, logout }) {
           </div>
         ) : null}
 
+        {addDmg ? (
+          <div className="modal-backdrop" onClick={() => { if (!addDmg.saving) setAddDmg(null); }}>
+            <div className="rent-modal glass" onClick={(e) => e.stopPropagation()}>
+              <h3>Record an existing damage</h3>
+              <p className="ui-muted" style={{ fontSize: 13, marginTop: 0 }}>Pick the view, tap the diagram where the damage is, and attach a photo.</p>
+              <div style={{ display: 'flex', border: '1px solid #E5E7EB', borderRadius: 999, overflow: 'hidden', marginBottom: 10 }}>
+                {DAMAGE_VIEWS.map((v) => (
+                  <button key={v} type="button" onClick={() => setAddDmg((c) => ({ ...c, view: v, xPct: null, yPct: null }))} style={{
+                    flex: 1, fontSize: 12, padding: '7px 2px', border: 'none', borderRadius: 0,
+                    background: v === addDmg.view ? '#5b3df5' : 'transparent', color: v === addDmg.view ? '#FFFFFF' : '#6B7280', cursor: 'pointer',
+                  }}>{VIEW_LABELS[v]}</button>
+                ))}
+              </div>
+              <svg viewBox={DIAGRAM_VIEWBOX} style={{ width: '100%', background: '#F6F4FE', borderRadius: 14, cursor: 'crosshair' }} xmlns="http://www.w3.org/2000/svg"
+                onClick={(e) => {
+                  const r = e.currentTarget.getBoundingClientRect();
+                  const xPct = Math.max(0, Math.min(100, ((e.clientX - r.left) / r.width) * 100));
+                  const yPct = Math.max(0, Math.min(100, ((e.clientY - r.top) / r.height) * 100));
+                  setAddDmg((c) => ({ ...c, xPct: Number(xPct.toFixed(2)), yPct: Number(yPct.toFixed(2)) }));
+                }}>
+                <g dangerouslySetInnerHTML={{ __html: diagramFor(damage.diagramType, addDmg.view) }} />
+                {addDmg.xPct != null ? <circle cx={(addDmg.xPct / 100) * DIAGRAM_W} cy={(addDmg.yPct / 100) * DIAGRAM_H} r="10" fill="#E24B4A" stroke="#FFFFFF" strokeWidth="2" /> : null}
+              </svg>
+              <input ref={addDmgFileRef} type="file" accept="image/*" capture="environment" style={{ display: 'none' }}
+                onChange={(e) => { const file = e.target.files?.[0]; e.target.value = ''; if (!file) return; const reader = new FileReader(); reader.onload = () => setAddDmg((c) => (c ? { ...c, photo: reader.result } : c)); reader.readAsDataURL(file); }} />
+              <button type="button" className="btn-sm" style={{ width: '100%', margin: '10px 0 8px' }} disabled={addDmg.saving} onClick={() => addDmgFileRef.current?.click()}>
+                {addDmg.photo ? '✓ Photo attached — retake' : 'Take photo of the damage (required)'}
+              </button>
+              {addDmg.photo ? <img src={addDmg.photo} alt="damage" style={{ width: '100%', maxHeight: 160, objectFit: 'cover', borderRadius: 8, marginBottom: 8 }} /> : null}
+              <textarea placeholder="Description (e.g. scratch on rear bumper)" value={addDmg.description} onChange={(e) => setAddDmg((c) => ({ ...c, description: e.target.value }))} rows={2} style={{ width: '100%', marginBottom: 8 }} />
+              <div className="row-between">
+                <button type="button" disabled={addDmg.saving} onClick={() => setAddDmg(null)}>Cancel</button>
+                <button type="button" className="button-primary" disabled={addDmg.saving || addDmg.xPct == null || !addDmg.photo} onClick={saveManualDamage}>
+                  {addDmg.saving ? 'Saving…' : 'Record damage'}
+                </button>
+              </div>
+            </div>
+          </div>
+        ) : null}
+
         {editModal.open && editModal.form ? (
           <div className="modal-backdrop" onClick={() => { if (!editModal.saving) setEditModal({ open: false, saving: false, form: null }); }}>
             <div className="rent-modal glass" onClick={(e) => e.stopPropagation()} style={{ maxHeight: '85vh', overflowY: 'auto' }}>
@@ -880,7 +942,12 @@ function VehicleProfileInner({ token, me, logout }) {
               <section className="glass card-lg section-card">
                 <div className="row-between">
                   <h2>Damage History</h2>
-                  <span className="status-chip neutral">{damage.active.length} active · {damage.fixed.length} fixed</span>
+                  <div className="row" style={{ gap: 8, alignItems: 'center' }}>
+                    <span className="status-chip neutral">{damage.active.length} active · {damage.fixed.length} fixed</span>
+                    <button type="button" className="btn-sm" onClick={() => setAddDmg({ view: damageView, xPct: null, yPct: null, photo: null, description: '', saving: false })}>
+                      + Add damage
+                    </button>
+                  </div>
                 </div>
                 <p className="ui-muted" style={{ marginTop: 0 }}>
                   Hard-approved customer damage reports. Active dots must be repaired (photo required) to leave the diagram — fixed ones stay in the history below.
