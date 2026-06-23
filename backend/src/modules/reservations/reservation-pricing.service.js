@@ -421,6 +421,98 @@ export const reservationPricingService = {
     };
   },
 
+  // ── Admin Corrections (Fase 1) — ADMIN-only (gated at the route). Every mutation
+  // recomputes the agreement via syncAgreementCharges({ allowClosed:true }) — the
+  // engine's own formula — so fees/total/balance never drift, and writes an
+  // AuditLog(ADMIN_OVERRIDE) with before/after balance + the required reason.
+  async voidAgreementCharge(reservationId, chargeId, opts = {}, scope = {}) {
+    const { reason = null, actorUserId = null } = opts;
+    await getReservationOrThrow(reservationId, scope); // validates existence + tenant scope
+    const agreement = await prisma.rentalAgreement.findFirst({
+      where: { reservationId, ...(scope?.tenantId ? { tenantId: scope.tenantId } : {}) },
+      orderBy: { createdAt: 'desc' },
+      select: { id: true, tenantId: true, balance: true }
+    });
+    if (!agreement) { const e = new Error('No agreement for reservation'); e.status = 404; throw e; }
+    const charge = await prisma.rentalAgreementCharge.findFirst({
+      where: { id: String(chargeId), rentalAgreementId: agreement.id },
+      select: { id: true, name: true, total: true, source: true, selected: true }
+    });
+    if (!charge) { const e = new Error('Charge not found on this reservation'); e.status = 404; throw e; }
+    if (charge.selected === false) { const e = new Error('Charge is already voided'); e.status = 409; throw e; }
+    const balanceBefore = Number(agreement.balance || 0);
+    // Soft-void: selected=false keeps the row for history but excludes it from totals
+    // (syncAgreementCharges only sums selected=true rows).
+    await prisma.rentalAgreementCharge.update({ where: { id: charge.id }, data: { selected: false } });
+    await syncAgreementCharges(reservationId, scope, { allowClosed: true });
+    const after = await prisma.rentalAgreement.findUnique({ where: { id: agreement.id }, select: { balance: true } });
+    await prisma.auditLog.create({ data: {
+      tenantId: agreement.tenantId || null,
+      reservationId,
+      action: 'ADMIN_OVERRIDE',
+      actorUserId: actorUserId || null,
+      reason: reason ? String(reason).slice(0, 500) : null,
+      metadata: JSON.stringify({
+        kind: 'void_charge',
+        chargeId: charge.id,
+        chargeName: charge.name,
+        chargeTotal: Number(charge.total || 0),
+        chargeSource: charge.source || null,
+        balanceBefore,
+        balanceAfter: Number(after?.balance || 0)
+      })
+    }});
+    return this.getPricing(reservationId, scope, { allowClosed: true });
+  },
+
+  async addManualCharge(reservationId, body = {}, opts = {}, scope = {}) {
+    const { reason = null, actorUserId = null } = opts;
+    const name = String(body?.name || '').trim();
+    const amount = Number(body?.amount);
+    if (!name) { const e = new Error('name is required'); e.status = 400; throw e; }
+    if (!Number.isFinite(amount) || amount === 0) { const e = new Error('amount must be a non-zero number'); e.status = 400; throw e; }
+    await getReservationOrThrow(reservationId, scope);
+    const agreement = await prisma.rentalAgreement.findFirst({
+      where: { reservationId, ...(scope?.tenantId ? { tenantId: scope.tenantId } : {}) },
+      orderBy: { createdAt: 'desc' },
+      select: { id: true, tenantId: true, balance: true }
+    });
+    if (!agreement) { const e = new Error('No agreement for reservation'); e.status = 404; throw e; }
+    const rounded = Math.round(amount * 100) / 100; // negative = credit
+    const balanceBefore = Number(agreement.balance || 0);
+    // source ADMIN_CORRECTION (not FEE_ENGINE*, not TAX, not deposit) → lands in
+    // subtotal in the recompute, so it moves total/balance by exactly its amount.
+    const created = await prisma.rentalAgreementCharge.create({ data: {
+      rentalAgreementId: agreement.id,
+      name: name.slice(0, 200),
+      chargeType: 'UNIT',
+      quantity: 1,
+      rate: rounded,
+      total: rounded,
+      taxable: false,
+      selected: true,
+      source: 'ADMIN_CORRECTION'
+    }, select: { id: true } });
+    await syncAgreementCharges(reservationId, scope, { allowClosed: true });
+    const after = await prisma.rentalAgreement.findUnique({ where: { id: agreement.id }, select: { balance: true } });
+    await prisma.auditLog.create({ data: {
+      tenantId: agreement.tenantId || null,
+      reservationId,
+      action: 'ADMIN_OVERRIDE',
+      actorUserId: actorUserId || null,
+      reason: reason ? String(reason).slice(0, 500) : null,
+      metadata: JSON.stringify({
+        kind: rounded < 0 ? 'add_credit' : 'add_charge',
+        chargeId: created.id,
+        name: name.slice(0, 200),
+        amount: rounded,
+        balanceBefore,
+        balanceAfter: Number(after?.balance || 0)
+      })
+    }});
+    return this.getPricing(reservationId, scope, { allowClosed: true });
+  },
+
   async replacePricing(reservationId, payload = {}, scope = {}) {
     await getReservationOrThrow(reservationId, scope);
 

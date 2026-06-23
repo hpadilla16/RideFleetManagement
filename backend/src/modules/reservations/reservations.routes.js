@@ -80,6 +80,12 @@ function canManagePricingOverrides(req) {
   return ['SUPER_ADMIN', 'ADMIN', 'OPS', 'AGENT'].includes(role);
 }
 
+// Admin Corrections (Fase 1) — money-affecting fixes are ADMIN-only.
+function canDoAdminCorrections(req) {
+  const role = String(req.user?.role || '').toUpperCase();
+  return role === 'SUPER_ADMIN' || role === 'ADMIN';
+}
+
 function buildPrecheckinChecklist(reservation) {
   const customer = reservation?.customer || {};
   const items = [
@@ -441,6 +447,51 @@ reservationsRouter.put('/:id/pricing', async (req, res, next) => {
   } catch (e) {
     if (/not found/i.test(String(e?.message || ''))) return res.status(404).json({ error: e.message });
     if (/role not allowed/i.test(String(e?.message || ''))) return res.status(403).json({ error: e.message });
+    next(e);
+  }
+});
+
+// ── Admin Corrections (Fase 1) — ADMIN only. Void a charge (incl. post-check-in
+// fees) or add a manual charge/credit. Both recompute the balance via the engine
+// and write an AuditLog. Replaces the manual SQL fixes for floor mistakes.
+reservationsRouter.post('/:id/charges/:chargeId/void', async (req, res, next) => {
+  try {
+    if (!canDoAdminCorrections(req)) {
+      return res.status(403).json({ error: 'Admin role required for corrections' });
+    }
+    const reason = String(req.body?.reason || '').trim();
+    if (!reason) return res.status(400).json({ error: 'reason is required' });
+    const out = await reservationPricingService.voidAgreementCharge(
+      req.params.id,
+      req.params.chargeId,
+      { reason, actorUserId: req.user?.sub || null },
+      scopeFor(req)
+    );
+    res.json(out);
+  } catch (e) {
+    if (e?.status) return res.status(e.status).json({ error: e.message });
+    if (/not found/i.test(String(e?.message || ''))) return res.status(404).json({ error: e.message });
+    next(e);
+  }
+});
+
+reservationsRouter.post('/:id/charges', async (req, res, next) => {
+  try {
+    if (!canDoAdminCorrections(req)) {
+      return res.status(403).json({ error: 'Admin role required for corrections' });
+    }
+    const reason = String(req.body?.reason || '').trim();
+    if (!reason) return res.status(400).json({ error: 'reason is required' });
+    const out = await reservationPricingService.addManualCharge(
+      req.params.id,
+      { name: req.body?.name, amount: req.body?.amount },
+      { reason, actorUserId: req.user?.sub || null },
+      scopeFor(req)
+    );
+    res.status(201).json(out);
+  } catch (e) {
+    if (e?.status) return res.status(e.status).json({ error: e.message });
+    if (/not found/i.test(String(e?.message || ''))) return res.status(404).json({ error: e.message });
     next(e);
   }
 });

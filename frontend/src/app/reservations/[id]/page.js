@@ -352,6 +352,121 @@ function LongTermPlanPanel({ reservationId, token }) {
   );
 }
 
+// Admin Corrections (Fase 1) — ADMIN-only panel to void a charge (incl. post-check-in
+// fuel/cleaning/smoking/late fees) or add a manual charge/credit, without SQL. Every
+// change recomputes the balance server-side and is logged with a required reason.
+function AdminCorrectionsPanel({ reservationId, token, me, onChanged }) {
+  const role = String(me?.role || '').toUpperCase();
+  const isAdmin = role === 'ADMIN' || role === 'SUPER_ADMIN';
+  const [pricing, setPricing] = useState(null);
+  const [msg, setMsg] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [open, setOpen] = useState(false);
+  const [addName, setAddName] = useState('');
+  const [addAmount, setAddAmount] = useState('');
+
+  const loadPricing = async () => {
+    try {
+      const out = await api(`/api/reservations/${reservationId}/pricing`, { bypassCache: true }, token);
+      setPricing(out);
+    } catch (e) { setMsg(e?.message || 'Failed to load charges'); }
+  };
+  useEffect(() => { if (isAdmin && open && reservationId) loadPricing(); }, [isAdmin, open, reservationId, token]);
+
+  if (!isAdmin) return null;
+
+  const charges = Array.isArray(pricing?.charges) ? pricing.charges.filter((c) => c?.selected !== false) : [];
+
+  const voidCharge = async (charge) => {
+    const reason = (typeof window !== 'undefined')
+      ? window.prompt(`Void "${charge.name}" (${money(charge.total)})?\n\nReason (required):`) : '';
+    if (reason == null) return;
+    if (!String(reason).trim()) { setMsg('Reason is required.'); return; }
+    setBusy(true); setMsg('');
+    try {
+      await api(`/api/reservations/${reservationId}/charges/${charge.id}/void`,
+        { method: 'POST', body: JSON.stringify({ reason: String(reason).trim() }) }, token);
+      setMsg(`Voided "${charge.name}".`);
+      await loadPricing();
+      if (onChanged) await onChanged();
+    } catch (e) { setMsg(e?.message || 'Void failed'); }
+    finally { setBusy(false); }
+  };
+
+  const addCharge = async () => {
+    const name = addName.trim();
+    const amount = Number(addAmount);
+    if (!name) { setMsg('Name is required.'); return; }
+    if (!Number.isFinite(amount) || amount === 0) { setMsg('Amount must be a non-zero number (negative = credit).'); return; }
+    const reason = (typeof window !== 'undefined') ? window.prompt('Reason (required):') : '';
+    if (reason == null) return;
+    if (!String(reason).trim()) { setMsg('Reason is required.'); return; }
+    setBusy(true); setMsg('');
+    try {
+      await api(`/api/reservations/${reservationId}/charges`,
+        { method: 'POST', body: JSON.stringify({ name, amount, reason: String(reason).trim() }) }, token);
+      setMsg(`${amount < 0 ? 'Credit' : 'Charge'} added: ${name} (${money(amount)}).`);
+      setAddName(''); setAddAmount('');
+      await loadPricing();
+      if (onChanged) await onChanged();
+    } catch (e) { setMsg(e?.message || 'Add failed'); }
+    finally { setBusy(false); }
+  };
+
+  return (
+    <div className="glass card" style={{ marginTop: 12, padding: 10, borderColor: 'rgba(163,45,45,.25)' }}>
+      <div className="row-between" style={{ marginBottom: 8 }}>
+        <h3 style={{ margin: 0 }}>⚙️ Admin Corrections</h3>
+        <button type="button" className="button-subtle" onClick={() => setOpen((v) => !v)}>{open ? 'Hide' : 'Show'}</button>
+      </div>
+      {open ? (
+        <>
+          <p className="label" style={{ textTransform: 'none', letterSpacing: 0 }}>
+            Fix floor mistakes — void a charge (incl. fuel/cleaning/smoking/late fees) or add a manual
+            charge/credit. Every change recomputes the balance and is logged with your reason.
+          </p>
+          {msg ? <p className="label" style={{ textTransform: 'none', letterSpacing: 0, color: '#a32d2d' }}>{msg}</p> : null}
+          <div style={{ marginBottom: 10 }}>
+            <span className="label">Current charges</span>
+            {charges.length === 0 ? (
+              <div className="label" style={{ textTransform: 'none' }}>No charges loaded.</div>
+            ) : (
+              <table style={{ width: '100%', fontSize: 13, borderCollapse: 'collapse' }}>
+                <tbody>
+                  {charges.map((c) => (
+                    <tr key={c.id} style={{ borderBottom: '1px solid rgba(0,0,0,.06)' }}>
+                      <td style={{ padding: '4px 6px' }}>{c.name}</td>
+                      <td style={{ padding: '4px 6px', textAlign: 'right' }}>{money(c.total)}</td>
+                      <td style={{ padding: '4px 6px', textAlign: 'right' }}>
+                        <button type="button" className="button-subtle"
+                          style={{ color: '#a32d2d', borderColor: 'rgba(163,45,45,.3)' }}
+                          disabled={busy} onClick={() => voidCharge(c)}>Void</button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </div>
+          <div className="grid2" style={{ gap: 8, alignItems: 'end' }}>
+            <div>
+              <span className="label">Charge / credit name</span>
+              <input value={addName} onChange={(e) => setAddName(e.target.value)} placeholder="e.g. Goodwill credit" />
+            </div>
+            <div>
+              <span className="label">Amount (negative = credit)</span>
+              <input value={addAmount} onChange={(e) => setAddAmount(e.target.value)} placeholder="e.g. -25.00" inputMode="decimal" />
+            </div>
+          </div>
+          <div className="inline-actions" style={{ marginTop: 8 }}>
+            <button type="button" disabled={busy} onClick={addCharge}>Add charge / credit</button>
+          </div>
+        </>
+      ) : null}
+    </div>
+  );
+}
+
 function ReservationDetailInner({ token, me, logout }) {
   const { id } = useParams();
   const router = useRouter();
@@ -2338,6 +2453,7 @@ token
           {/* Long-Term Plan — renders nothing unless a LongTermPlan is attached
               (explicit Monthly opt-in at creation). */}
           <LongTermPlanPanel reservationId={id} token={token} />
+          <AdminCorrectionsPanel reservationId={id} token={token} me={me} onChanged={load} />
 
           <div className="glass card" style={{ marginTop: 12, padding: 10 }}>
             <div className="row-between" style={{ marginBottom: 8 }}>
