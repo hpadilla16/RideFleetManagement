@@ -2,6 +2,7 @@ export const MODULE_DEFINITIONS = [
   { key: 'dashboard', label: 'Dashboard' },
   { key: 'reservations', label: 'Reservations' },
   { key: 'vehicles', label: 'Vehicles' },
+  { key: 'maintenance', label: 'Maintenance' },
   { key: 'customers', label: 'Customers' },
   { key: 'people', label: 'People' },
   { key: 'planner', label: 'Planner' },
@@ -12,6 +13,7 @@ export const MODULE_DEFINITIONS = [
   { key: 'issueCenter', label: 'Issue Center' },
   { key: 'loaner', label: 'Loaner Program' },
   { key: 'tolls', label: 'Tolls' },
+  { key: 'citations', label: 'Citations' },
   { key: 'marketIntelligence', label: 'Market Intelligence' },
   { key: 'settings', label: 'Settings' },
   { key: 'security', label: 'Security' },
@@ -30,6 +32,7 @@ export function pathnameToModule(pathname = '') {
   const path = String(pathname || '').toLowerCase();
   if (path.startsWith('/dashboard') || path === '/') return 'dashboard';
   if (path.startsWith('/reservations')) return 'reservations';
+  if (path.startsWith('/maintenance')) return 'maintenance';
   if (path.startsWith('/vehicles')) return 'vehicles';
   if (path.startsWith('/customers')) return 'customers';
   if (path.startsWith('/people')) return 'people';
@@ -41,6 +44,7 @@ export function pathnameToModule(pathname = '') {
   if (path.startsWith('/issues') || path.startsWith('/issue-response')) return 'issueCenter';
   if (path.startsWith('/loaner')) return 'loaner';
   if (path.startsWith('/tolls')) return 'tolls';
+  if (path.startsWith('/citations')) return 'citations';
   if (path.startsWith('/settings/security')) return 'security';
   if (path.startsWith('/settings')) return 'settings';
   if (path.startsWith('/tenants')) return 'tenants';

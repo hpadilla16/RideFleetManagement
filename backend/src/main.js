@@ -197,7 +197,7 @@ app.use('/api/public/loaner-portal', loanerPortalPublicRouter);
 app.use('/api/incident-reports', requireAuth, tenantRateLimit, incidentReportRouter);
 app.use('/api/issue-center', requireAuth, tenantRateLimit, requireModuleAccess('issueCenter'), issueCenterRouter);
 app.use('/api/tolls', requireAuth, tenantRateLimit, requireModuleAccess('tolls'), tollsRouter);
-app.use('/api/citations', requireAuth, tenantRateLimit, requireRole('ADMIN', 'OPS'), citationsRouter);
+app.use('/api/citations', requireAuth, tenantRateLimit, requireModuleAccess('citations'), citationsRouter);
 app.use('/api/planner', requireAuth, tenantRateLimit, requireModuleAccess('planner'), plannerRouter);
 app.use('/api/payment-gateway', requireAuth, tenantRateLimit, requireRole('ADMIN', 'OPS'), paymentGatewayRouter);
 app.use('/api/sms', requireAuth, tenantRateLimit, requireRole('ADMIN', 'OPS'), smsRouter);
@@ -207,8 +207,8 @@ app.use('/api/admin/integrations/tl-international', tenantRateLimit, tlInternati
 app.use('/api/admin/reservations', requireAuth, requireRole('SUPER_ADMIN'), reservationOverrideRouter);
 app.use('/api/store-board', requireAuth, tenantRateLimit, requireRole('SUPER_ADMIN', 'ADMIN', 'OPS'), storeBoardRouter);
 app.use('/api/inventory', requireAuth, tenantRateLimit, requireModuleAccess('vehicles'), inventoryRouter);
-app.use('/api/repair-orders', requireAuth, tenantRateLimit, requireModuleAccess('vehicles'), repairOrdersRouter);
-app.use('/api/maintenance', requireAuth, tenantRateLimit, requireModuleAccess('vehicles'), maintenanceRouter);
+app.use('/api/repair-orders', requireAuth, tenantRateLimit, requireModuleAccess('maintenance'), repairOrdersRouter);
+app.use('/api/maintenance', requireAuth, tenantRateLimit, requireModuleAccess('maintenance'), maintenanceRouter);
 
 app.use('/api/reservations', requireAuth, tenantRateLimit, requireModuleAccess('reservations'), reservationsRouter);
 app.use('/api/reservations', requireAuth, tenantRateLimit, requireModuleAccess('reservations'), reservationExtendRouter);
