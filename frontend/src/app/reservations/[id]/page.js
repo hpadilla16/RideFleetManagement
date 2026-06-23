@@ -431,21 +431,16 @@ function AdminCorrectionsPanel({ reservationId, token, me, onChanged }) {
             {charges.length === 0 ? (
               <div className="label" style={{ textTransform: 'none' }}>No charges loaded.</div>
             ) : (
-              <table style={{ width: '100%', fontSize: 13, borderCollapse: 'collapse' }}>
-                <tbody>
-                  {charges.map((c) => (
-                    <tr key={c.id} style={{ borderBottom: '1px solid rgba(0,0,0,.06)' }}>
-                      <td style={{ padding: '4px 6px' }}>{c.name}</td>
-                      <td style={{ padding: '4px 6px', textAlign: 'right' }}>{money(c.total)}</td>
-                      <td style={{ padding: '4px 6px', textAlign: 'right' }}>
-                        <button type="button" className="button-subtle"
-                          style={{ color: '#a32d2d', borderColor: 'rgba(163,45,45,.3)' }}
-                          disabled={busy} onClick={() => voidCharge(c)}>Void</button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 4, marginTop: 4, fontSize: 13 }}>
+                {charges.map((c) => (
+                  <div key={c.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, padding: '4px 0', borderBottom: '1px solid rgba(0,0,0,.06)' }}>
+                    <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis' }}>{c.name}</span>
+                    <span style={{ width: 90, textAlign: 'right', flexShrink: 0 }}>{money(c.total)}</span>
+                    <button type="button" className="button-subtle" style={{ color: '#a32d2d', borderColor: 'rgba(163,45,45,.3)', flexShrink: 0 }}
+                      disabled={busy} onClick={() => voidCharge(c)}>Void</button>
+                  </div>
+                ))}
+              </div>
             )}
           </div>
           <div className="grid2" style={{ gap: 8, alignItems: 'end' }}>
