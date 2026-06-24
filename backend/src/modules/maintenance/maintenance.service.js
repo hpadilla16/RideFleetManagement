@@ -69,7 +69,14 @@ export const maintenanceService = {
   async summary(query = {}, scope = {}) {
     const where = { ...tenantWhere(scope) };
     const locationId = query.locationId ? String(query.locationId) : null;
-    const roWhere = { ...where, ...(locationId ? { locationId } : {}) };
+    // Location scoping (Fase 2c): limit to the user's allowed locations (∩ selection).
+    const _allowedLoc = Array.isArray(scope?.allowedLocationIds) && scope.allowedLocationIds.length
+      ? scope.allowedLocationIds : null;
+    const _effLocIds = _allowedLoc
+      ? (locationId && _allowedLoc.includes(locationId) ? [locationId] : _allowedLoc)
+      : (locationId ? [locationId] : null);
+    const roWhere = { ...where, ...(_effLocIds ? { locationId: { in: _effLocIds } } : {}) };
+    const fleetLoc = _effLocIds ? { homeLocationId: { in: _effLocIds } } : {};
 
     const [openCount, inProgressCount, due, monthStart] = await Promise.all([
       prisma.repairOrder.count({ where: { ...roWhere, status: 'OPEN' } }),
@@ -89,7 +96,7 @@ export const maintenanceService = {
     const downVehicleRows = await prisma.repairOrder.findMany({
       where: { ...roWhere, status: { in: OPEN_STATUSES } }, select: { vehicleId: true }, distinct: ['vehicleId'],
     });
-    const fleetWhere = { ...where, status: { notIn: ['SOLD'] }, ...(locationId ? { homeLocationId: locationId } : {}) };
+    const fleetWhere = { ...where, status: { notIn: ['SOLD'] }, ...fleetLoc };
     const fleetTotal = await prisma.vehicle.count({ where: fleetWhere });
     const down = downVehicleRows.length;
 

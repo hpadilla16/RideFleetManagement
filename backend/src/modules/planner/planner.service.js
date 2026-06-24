@@ -232,6 +232,19 @@ export async function loadPlannerReservations({ start, end, locationId = null, v
       ]
     });
   }
+  // Location scoping (Fase 2c): a scoped user only sees reservations touching their
+  // allowed locations. ANDed on top of any selection. Admins/unrestricted → skip.
+  const _allowedLoc = Array.isArray(scope?.allowedLocationIds) && scope.allowedLocationIds.length
+    ? scope.allowedLocationIds : null;
+  if (_allowedLoc) {
+    and.push({
+      OR: [
+        { pickupLocationId: { in: _allowedLoc } },
+        { returnLocationId: { in: _allowedLoc } },
+        { vehicle: { is: { homeLocationId: { in: _allowedLoc } } } }
+      ]
+    });
+  }
   if (vehicleTypeId) {
     and.push({
       OR: [
@@ -301,10 +314,16 @@ export async function loadPlannerReservations({ start, end, locationId = null, v
 }
 
 export async function loadPlannerVehicles({ start, end, locationId = null, vehicleTypeId = null, scope = {} }) {
+  // Location scoping (Fase 2c): effective home-location set = scope.allowedLocationIds ∩ selection.
+  const _allowedLoc = Array.isArray(scope?.allowedLocationIds) && scope.allowedLocationIds.length
+    ? scope.allowedLocationIds : null;
+  const _effLocIds = _allowedLoc
+    ? (locationId && _allowedLoc.includes(locationId) ? [locationId] : _allowedLoc)
+    : (locationId ? [locationId] : null);
   const rows = await prisma.vehicle.findMany({
     where: {
       ...(tenantWhere(scope) || {}),
-      ...(locationId ? { homeLocationId: locationId } : {}),
+      ...(_effLocIds ? { homeLocationId: { in: _effLocIds } } : {}),
       ...(vehicleTypeId ? { vehicleTypeId } : {})
     },
     orderBy: [{ make: 'asc' }, { model: 'asc' }, { internalNumber: 'asc' }],

@@ -195,32 +195,41 @@ export const reportsService = {
     const effectiveTenantId = scope?.tenantId || normalizeTenantId(query);
     const whereScope = scopeWhere({ tenantId: effectiveTenantId });
     const locationId = normalizeLocationId(query);
+    // Location scoping (Fase 2c): a scoped user is limited to their allowed locations
+    // (intersected with any selected locationId). Admins/unrestricted → use the selection.
+    const _allowedLoc = Array.isArray(scope?.allowedLocationIds) && scope.allowedLocationIds.length
+      ? scope.allowedLocationIds : null;
+    const _effLocIds = _allowedLoc
+      ? (locationId && _allowedLoc.includes(locationId) ? [locationId] : _allowedLoc)
+      : (locationId ? [locationId] : null);
+    const pickupLoc = _effLocIds ? { pickupLocationId: { in: _effLocIds } } : {};
+    const homeLoc = _effLocIds ? { homeLocationId: { in: _effLocIds } } : {};
     const todayStart = startOfDay(now);
     const todayEnd = endOfDay(now);
     const reservationWhere = {
       ...whereScope,
-      ...(locationId ? { pickupLocationId: locationId } : {}),
+      ...pickupLoc,
       createdAt: { gte: start, lte: end }
     };
     const agreementWhere = {
       ...whereScope,
-      ...(locationId ? { pickupLocationId: locationId } : {})
+      ...pickupLoc
     };
     const vehicleWhere = {
       ...whereScope,
-      ...(locationId ? { homeLocationId: locationId } : {})
+      ...homeLoc
     };
     const paymentWhere = {
       reservation: {
         ...whereScope,
-        ...(locationId ? { pickupLocationId: locationId } : {})
+        ...pickupLoc
       },
       status: 'PAID',
       paidAt: { gte: start, lte: end }
     };
     const dueTodayWhere = {
       ...whereScope,
-      ...(locationId ? { pickupLocationId: locationId } : {}),
+      ...pickupLoc,
       status: { notIn: ['CLOSED', 'CANCELLED'] },
       returnAt: { gte: todayStart, lte: todayEnd }
     };
@@ -228,7 +237,7 @@ export const reportsService = {
       status: { in: ['OPEN', 'IN_PROGRESS'] },
       vehicle: {
         ...whereScope,
-        ...(locationId ? { homeLocationId: locationId } : {})
+        ...homeLoc
       }
     };
     const activeVehicleBlockWhere = {
@@ -238,7 +247,7 @@ export const reportsService = {
       availableFrom: { gt: now },
       vehicle: {
         ...(whereScope || {}),
-        ...(locationId ? { homeLocationId: locationId } : {})
+        ...homeLoc
       }
     };
 
@@ -253,7 +262,7 @@ export const reportsService = {
     const gracePeriodStart = new Date(now.getTime() - GRACE_PERIOD_DAYS * 24 * 60 * 60 * 1000);
     const currentlyOutWhere = {
       ...whereScope,
-      ...(locationId ? { pickupLocationId: locationId } : {}),
+      ...pickupLoc,
       status: 'CHECKED_OUT',
       pickupAt: { lte: now },
       returnAt: { gt: gracePeriodStart },
@@ -271,7 +280,7 @@ export const reportsService = {
     // rental right now". Excludes NEW/CONFIRMED (future) and any overdue.
     const activeReservationsWhere = {
       ...whereScope,
-      ...(locationId ? { pickupLocationId: locationId } : {}),
+      ...pickupLoc,
       status: 'CHECKED_OUT',
       pickupAt: { lte: now },
       returnAt: { gt: now },
@@ -292,7 +301,7 @@ export const reportsService = {
     const startOfTenantToday = startOfDayInTz(now, tenantTz);
     const overdueWhere = {
       ...whereScope,
-      ...(locationId ? { pickupLocationId: locationId } : {}),
+      ...pickupLoc,
       // overdueIgnored=true rows are silently excluded from the Overdue
       // Returns KPI (2026-05-27). Used to grandfather in pre-cleanup
       // stale data so the count starts fresh.
@@ -706,6 +715,13 @@ export const reportsService = {
     const whereScope = scopeWhere({ tenantId: effectiveTenantId });
     const locationId = normalizeLocationId(query);
     const employeeUserId = normalizeEmployeeUserId(query);
+    // Location scoping (Fase 2c): limit to the user's allowed locations (∩ selection).
+    const _allowedLoc = Array.isArray(scope?.allowedLocationIds) && scope.allowedLocationIds.length
+      ? scope.allowedLocationIds : null;
+    const _effLocIds = _allowedLoc
+      ? (locationId && _allowedLoc.includes(locationId) ? [locationId] : _allowedLoc)
+      : (locationId ? [locationId] : null);
+    const pickupLoc = _effLocIds ? { pickupLocationId: { in: _effLocIds } } : {};
 
     const lineWhere = {
       agreementCommission: {
@@ -713,7 +729,7 @@ export const reportsService = {
         ...(employeeUserId ? { employeeUserId } : {}),
         calculatedAt: { gte: start, lte: end },
         rentalAgreement: {
-          ...(locationId ? { pickupLocationId: locationId } : {})
+          ...pickupLoc
         }
       },
       serviceId: { not: null }
