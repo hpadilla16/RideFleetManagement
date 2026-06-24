@@ -367,7 +367,9 @@ function AdminCorrectionsPanel({ reservationId, token, me, onChanged }) {
 
   const loadPricing = async () => {
     try {
-      const out = await api(`/api/reservations/${reservationId}/pricing`, { bypassCache: true }, token);
+      // MUST use agreement-charges (RentalAgreementCharge — the ids void operates on,
+      // and where post-check-in fees live), NOT /pricing (ReservationCharge, diff ids).
+      const out = await api(`/api/reservations/${reservationId}/agreement-charges`, { bypassCache: true }, token);
       setPricing(out);
     } catch (e) { setMsg(e?.message || 'Failed to load charges'); }
   };
@@ -426,6 +428,11 @@ function AdminCorrectionsPanel({ reservationId, token, me, onChanged }) {
             charge/credit. Every change recomputes the balance and is logged with your reason.
           </p>
           {msg ? <p className="label" style={{ textTransform: 'none', letterSpacing: 0, color: '#a32d2d' }}>{msg}</p> : null}
+          {pricing ? (
+            <div style={{ marginBottom: 8, fontSize: 13 }}>
+              <strong>Agreement balance:</strong> {money(pricing.balance)}
+            </div>
+          ) : null}
           <div style={{ marginBottom: 10 }}>
             <span className="label">Current charges</span>
             {charges.length === 0 ? (

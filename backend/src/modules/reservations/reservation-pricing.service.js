@@ -513,6 +513,30 @@ export const reservationPricingService = {
     return this.getPricing(reservationId, scope, { allowClosed: true });
   },
 
+  // Admin Corrections — the agreement-level charge rows (RentalAgreementCharge),
+  // which is what void/add operate on AND where post-check-in fee-engine fees live.
+  // NOTE: getPricing().charges are ReservationCharge (the estimate) with DIFFERENT ids,
+  // so the corrections panel MUST use this, not getPricing.
+  async listAgreementCharges(reservationId, scope = {}) {
+    await getReservationOrThrow(reservationId, scope);
+    const agreement = await prisma.rentalAgreement.findFirst({
+      where: { reservationId, ...(scope?.tenantId ? { tenantId: scope.tenantId } : {}) },
+      orderBy: { createdAt: 'desc' },
+      select: { id: true, balance: true, total: true }
+    });
+    if (!agreement) return { charges: [], balance: 0, total: 0 };
+    const rows = await prisma.rentalAgreementCharge.findMany({
+      where: { rentalAgreementId: agreement.id, selected: true },
+      orderBy: [{ sortOrder: 'asc' }, { createdAt: 'asc' }],
+      select: { id: true, name: true, total: true, source: true, chargeType: true, taxable: true }
+    });
+    return {
+      charges: rows.map((c) => ({ ...c, total: Number(c.total || 0) })),
+      balance: Number(agreement.balance || 0),
+      total: Number(agreement.total || 0)
+    };
+  },
+
   async replacePricing(reservationId, payload = {}, scope = {}) {
     await getReservationOrThrow(reservationId, scope);
 

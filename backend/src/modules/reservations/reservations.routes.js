@@ -454,6 +454,22 @@ reservationsRouter.put('/:id/pricing', async (req, res, next) => {
 // ── Admin Corrections (Fase 1) — ADMIN only. Void a charge (incl. post-check-in
 // fees) or add a manual charge/credit. Both recompute the balance via the engine
 // and write an AuditLog. Replaces the manual SQL fixes for floor mistakes.
+// The panel MUST list these (RentalAgreementCharge) — NOT /pricing (ReservationCharge,
+// different ids) — so the charge ids match what void operates on.
+reservationsRouter.get('/:id/agreement-charges', async (req, res, next) => {
+  try {
+    if (!canDoAdminCorrections(req)) {
+      return res.status(403).json({ error: 'Admin role required for corrections' });
+    }
+    const out = await reservationPricingService.listAgreementCharges(req.params.id, scopeFor(req));
+    res.json(out);
+  } catch (e) {
+    if (e?.status) return res.status(e.status).json({ error: e.message });
+    if (/not found/i.test(String(e?.message || ''))) return res.status(404).json({ error: e.message });
+    next(e);
+  }
+});
+
 reservationsRouter.post('/:id/charges/:chargeId/void', async (req, res, next) => {
   try {
     if (!canDoAdminCorrections(req)) {
