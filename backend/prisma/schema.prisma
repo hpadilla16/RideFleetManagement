@@ -1533,6 +1533,10 @@ model User {
   fullName         String
   role             UserRole        @default(AGENT)
   isActive         Boolean         @default(true)
+  // Location scoping (2026-06-23): JSON array of Location ids this user may see.
+  // null/absent or empty = ALL locations (no restriction). ADMIN/SUPER_ADMIN
+  // always bypass (see locationScopeFor). Enforced in Fase 2.
+  locationIds      String?
   commissionPlanId String?
   commissionPlan   CommissionPlan? @relation("UserCommissionPlan", fields: [commissionPlanId], references: [id])
   createdAt        DateTime        @default(now())

@@ -47,6 +47,16 @@ function signGuestToken(customer) {
   );
 }
 
+// Parse User.locationIds (JSON array string) → array of ids, or null = ALL locations.
+function parseLocationIds(raw) {
+  if (!raw) return null;
+  try {
+    const arr = JSON.parse(raw);
+    if (Array.isArray(arr) && arr.length) return arr.map((x) => String(x));
+  } catch { /* malformed → treat as all */ }
+  return null;
+}
+
 async function buildSessionUser(user) {
   if (!user) return null;
   const moduleAccess = await getEffectiveModuleAccessForUser(user);
@@ -59,6 +69,7 @@ async function buildSessionUser(user) {
     createdByUserId: user.createdByUserId || null,
     hostProfileId: user.hostProfileId || user.hostProfile?.id || null,
     screenLockExempt: !!user.screenLockExempt,
+    locationIds: parseLocationIds(user.locationIds),
     moduleAccess: moduleAccess.effective,
     tenantModuleAccess: moduleAccess.tenantConfig,
     userModuleAccess: moduleAccess.userConfig
@@ -93,6 +104,7 @@ export const authService = {
           createdByUserId: true,
           isActive: true,
           screenLockExempt: true,
+          locationIds: true,
           hostProfile: { select: { id: true } }
         }
       });

@@ -2,6 +2,32 @@ import bcrypt from 'bcryptjs';
 import { prisma } from '../../lib/prisma.js';
 import { sendEmail } from '../../lib/mailer.js';
 import { assertTenantUserCapacity } from '../../lib/tenant-plan-limits.js';
+import { cache } from '../../lib/cache.js';
+import { globalKey } from '../../lib/cache/tenantKey.js';
+
+// Validate + normalize a user's location scope (Fase 1). Returns:
+//   undefined → not provided (don't change on update)
+//   null      → empty = ALL locations (no restriction)
+//   JSON string of validated Location ids (only ids that belong to the tenant)
+async function normalizeLocationIds(raw, tenantId) {
+  if (raw === undefined) return undefined;
+  if (raw === null) return null;
+  const arr = (Array.isArray(raw) ? raw : []).map((x) => String(x || '').trim()).filter(Boolean);
+  if (!arr.length) return null;
+  const rows = await prisma.location.findMany({
+    where: { id: { in: arr }, ...(tenantId ? { tenantId } : {}) },
+    select: { id: true }
+  });
+  const valid = rows.map((r) => r.id);
+  return valid.length ? JSON.stringify(valid) : null;
+}
+
+// JSON string → array of ids for the API ([] = all locations).
+function parseLocationIdsArray(raw) {
+  if (!raw) return [];
+  try { const a = JSON.parse(raw); return Array.isArray(a) ? a.map((x) => String(x)) : []; }
+  catch { return []; }
+}
 
 const SALT_ROUNDS = 10;
 
@@ -96,6 +122,8 @@ function mapUserPerson(user) {
     payoutAccountRef: user.hostProfile?.payoutAccountRef || null,
     payoutEnabled: !!user.hostProfile?.payoutEnabled,
     notes: user.hostProfile?.notes || null,
+    // [] = ALL locations (no restriction). Only meaningful for ADMIN/EMPLOYEE.
+    locationIds: parseLocationIdsArray(user.locationIds),
     createdAt: user.createdAt
   };
 }
@@ -220,6 +248,7 @@ export const peopleService = {
     }
 
     if (enableLogin) {
+      const locationIdsValue = await normalizeLocationIds(payload.locationIds, tenantId);
       tempPassword = String(payload.password || randomTempPassword());
       const passwordHash = await bcrypt.hash(tempPassword, SALT_ROUNDS);
       user = await prisma.user.create({
@@ -230,7 +259,8 @@ export const peopleService = {
           fullName,
           role: allowedRoleForPayload(personType, payload.role),
           passwordHash,
-          isActive: true
+          isActive: true,
+          ...(locationIdsValue !== undefined ? { locationIds: locationIdsValue } : {})
         }
       });
     }
@@ -357,6 +387,9 @@ export const peopleService = {
         userPatch.role = allowedRoleForPayload('HOST', payload.role);
       }
 
+      const locationIdsValue = await normalizeLocationIds(payload.locationIds, nextTenantId);
+      if (locationIdsValue !== undefined) userPatch.locationIds = locationIdsValue;
+
       const currentUsageShape = {
         hostProfile: user.hostProfile,
         isActive: user.isActive,
@@ -417,6 +450,10 @@ export const peopleService = {
           }
         });
       });
+
+      // Location scope (or role/tenant) changed → drop the cached session so the
+      // new locationIds take effect on the user's next request (Fase 2 enforcement).
+      cache.del(globalKey('session', user.id));
 
       return {
         ok: true,

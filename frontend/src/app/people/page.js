@@ -22,7 +22,8 @@ const EMPTY_PERSON = {
   payoutAccountRef: '',
   payoutEnabled: false,
   notes: '',
-  status: 'ACTIVE'
+  status: 'ACTIVE',
+  locationIds: [] // [] = all locations (no restriction)
 };
 
 function buildDefaultUserModuleAccess(personType = 'EMPLOYEE', role = 'AGENT') {
@@ -143,6 +144,7 @@ function Inner({ token, me, logout }) {
   const [activeTenantId, setActiveTenantId] = useState('');
   const [search, setSearch] = useState('');
   const [form, setForm] = useState(EMPTY_PERSON);
+  const [locations, setLocations] = useState([]);
   const [editingPersonId, setEditingPersonId] = useState('');
   const [userModuleAccess, setUserModuleAccess] = useState(() =>
     buildDefaultUserModuleAccess(EMPTY_PERSON.personType, EMPTY_PERSON.role)
@@ -166,6 +168,10 @@ function Inner({ token, me, logout }) {
       if (isSuper) requests.push(api('/api/tenants', {}, token));
       const [peopleOut, tenantsOut] = await Promise.all(requests);
       setPeople(Array.isArray(peopleOut) ? peopleOut : []);
+      try {
+        const locs = await api(`/api/locations${scopedQuery}`, {}, token);
+        setLocations(Array.isArray(locs) ? locs : (locs?.locations || []));
+      } catch { /* locations optional for the scope picker */ }
       if (isSuper) {
         const rows = Array.isArray(tenantsOut) ? tenantsOut : [];
         setTenants(rows);
@@ -236,7 +242,8 @@ function Inner({ token, me, logout }) {
       payoutAccountRef: person.payoutAccountRef || '',
       payoutEnabled: !!person.payoutEnabled,
       notes: person.notes || '',
-      status: person.status || 'ACTIVE'
+      status: person.status || 'ACTIVE',
+      locationIds: Array.isArray(person.locationIds) ? person.locationIds : []
     });
     if (canManageModuleAccess && person.userId && person.hasLogin) {
       api(`/api/settings/users/${person.userId}/module-access`, {}, token)
@@ -665,6 +672,38 @@ function Inner({ token, me, logout }) {
                       onChange={(e) => setForm({ ...form, sendInvite: e.target.checked })}
                     /> Send invite email
                   </label>
+                </div>
+              </div>
+            ) : null}
+
+            {!hostMode && locations.length ? (
+              <div className="stack">
+                <div className="section-title">Locations</div>
+                <div className="surface-note">
+                  Which locations this user can see. Leave all unchecked = sees ALL locations.
+                </div>
+                <div className="service-checks-grid">
+                  {locations.map((loc) => {
+                    const checked = (form.locationIds || []).includes(loc.id);
+                    return (
+                      <label key={loc.id} className="label" style={{ textTransform: 'none', letterSpacing: 0 }}>
+                        <input
+                          type="checkbox"
+                          checked={checked}
+                          onChange={(e) => setForm((current) => {
+                            const set = new Set(current.locationIds || []);
+                            if (e.target.checked) set.add(loc.id); else set.delete(loc.id);
+                            return { ...current, locationIds: Array.from(set) };
+                          })}
+                        /> {loc.name}{loc.code ? ` (${loc.code})` : ''}
+                      </label>
+                    );
+                  })}
+                </div>
+                <div className="ui-muted" style={{ fontSize: 12 }}>
+                  {(form.locationIds || []).length === 0
+                    ? 'All locations (no restriction)'
+                    : `${form.locationIds.length} location(s) selected`}
                 </div>
               </div>
             ) : null}
