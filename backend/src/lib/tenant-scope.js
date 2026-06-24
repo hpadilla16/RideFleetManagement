@@ -7,10 +7,23 @@ import { isSuperAdmin } from '../middleware/auth.js';
  */
 const DENY_ALL_SCOPE = { tenantId: '__no_tenant__' };
 
+/**
+ * Location scoping (Fase 2). Returns the array of Location ids a user is
+ * restricted to, or null = ALL locations (no restriction).
+ * SUPER_ADMIN/ADMIN always bypass (null). Empty/absent locationIds = null.
+ */
+export function userAllowedLocationIds(user) {
+  const role = String(user?.role || '').toUpperCase();
+  if (role === 'SUPER_ADMIN' || role === 'ADMIN') return null;
+  const ids = Array.isArray(user?.locationIds) ? user.locationIds.filter(Boolean) : null;
+  return ids && ids.length ? ids : null;
+}
+
 function resolveTenantScopedUser(user, extras = {}) {
   const tenantId = user?.tenantId;
-  if (!tenantId) return { ...DENY_ALL_SCOPE, ...extras };
-  return { tenantId, ...extras };
+  const allowedLocationIds = userAllowedLocationIds(user);
+  if (!tenantId) return { ...DENY_ALL_SCOPE, allowedLocationIds, ...extras };
+  return { tenantId, allowedLocationIds, ...extras };
 }
 
 /**

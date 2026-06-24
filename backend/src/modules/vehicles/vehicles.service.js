@@ -214,7 +214,12 @@ export const vehiclesService = {
     // beta.149. Follow-up: paginación real { rows, total } (item en Monday).
     const take = Math.min(Number(limit) || 200, 2000);
     const skip = Math.max(Number(offset) || 0, 0);
-    const where = byTenantWhere(scope);
+    // Location scoping (Fase 2): a user restricted to certain locations only sees
+    // vehicles whose homeLocationId is in their allowed set. Admins → no filter.
+    const where = { ...(byTenantWhere(scope) || {}) };
+    if (Array.isArray(scope?.allowedLocationIds) && scope.allowedLocationIds.length) {
+      where.homeLocationId = { in: scope.allowedLocationIds };
+    }
     const searchTrim = String(search || '').trim();
     const searchWhere = searchTrim
       ? {
@@ -282,8 +287,13 @@ export const vehiclesService = {
   },
 
   async getById(id, scope = {}) {
+    // Location guard (Fase 2b): a scoped user can't open a vehicle outside their
+    // locations (returns null → route 404). Admins/unrestricted → no filter.
+    const locWhere = Array.isArray(scope?.allowedLocationIds) && scope.allowedLocationIds.length
+      ? { homeLocationId: { in: scope.allowedLocationIds } }
+      : {};
     const vehicle = await prisma.vehicle.findFirst({
-      where: { id, ...(byTenantWhere(scope) || {}) },
+      where: { id, ...(byTenantWhere(scope) || {}), ...locWhere },
       include: {
         tenant: true,
         vehicleType: true,

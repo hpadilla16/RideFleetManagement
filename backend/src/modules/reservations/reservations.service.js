@@ -1300,6 +1300,16 @@ export const reservationsService = {
       Object.assign(where, searchOrClause);
     }
 
+    // Location scoping (Fase 2): restrict to reservations whose pickup OR return
+    // location is in the user's allowed set. Admins/unrestricted → no filter.
+    if (Array.isArray(scope?.allowedLocationIds) && scope.allowedLocationIds.length) {
+      const locOr = { OR: [
+        { pickupLocationId: { in: scope.allowedLocationIds } },
+        { returnLocationId: { in: scope.allowedLocationIds } }
+      ] };
+      where.AND = Array.isArray(where.AND) ? [...where.AND, locOr] : (where.AND ? [where.AND, locOr] : [locOr]);
+    }
+
     // 2026-05-25 — accept a `sort` param so the UI can re-order the list by
     // pickup or return date. Default keeps the historical "most recently
     // created first" behavior so existing callers don't notice the change.
@@ -1352,7 +1362,14 @@ export const reservationsService = {
   async list(scope = {}, { page = 1, limit = 100 } = {}) {
     const take = Math.min(Math.max(1, Number(limit) || 100), 500);
     const skip = (Math.max(1, Number(page) || 1) - 1) * take;
-    const where = scope?.tenantId ? { tenantId: scope.tenantId } : undefined;
+    const where = scope?.tenantId ? { tenantId: scope.tenantId } : {};
+    // Location scoping (Fase 2): pickup OR return in the user's allowed set.
+    if (Array.isArray(scope?.allowedLocationIds) && scope.allowedLocationIds.length) {
+      where.AND = [{ OR: [
+        { pickupLocationId: { in: scope.allowedLocationIds } },
+        { returnLocationId: { in: scope.allowedLocationIds } }
+      ] }];
+    }
     const [rows, total] = await Promise.all([
       prisma.reservation.findMany({ where, orderBy: { createdAt: 'desc' }, skip, take, select: reservationListSelect }),
       prisma.reservation.count({ where })
@@ -1383,7 +1400,15 @@ export const reservationsService = {
     const row = await prisma.reservation.findFirst({
       where: {
         id,
-        ...(scope?.tenantId ? { tenantId: scope.tenantId } : {})
+        ...(scope?.tenantId ? { tenantId: scope.tenantId } : {}),
+        // Location guard (Fase 2b): scoped user can't open a reservation outside
+        // their locations (pickup OR return). Admins/unrestricted → no filter.
+        ...(Array.isArray(scope?.allowedLocationIds) && scope.allowedLocationIds.length
+          ? { OR: [
+              { pickupLocationId: { in: scope.allowedLocationIds } },
+              { returnLocationId: { in: scope.allowedLocationIds } }
+            ] }
+          : {})
       },
       include: {
         customer: {
