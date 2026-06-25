@@ -2178,7 +2178,9 @@ export const rentalAgreementsService = {
         }).catch(() => null);
         const base = ltPlan ? Number(ltPlan.cycleRate) : dailyRate * days;
         if (ltPlan) {
-          chargeRows.push({ rentalAgreementId: existing.id, name: 'Monthly Cycle 1', chargeType: 'MONTHLY', quantity: 1, rate: base, total: base, taxable: true, selected: true, sortOrder: 0, source: 'MONTHLY_CYCLE' });
+          // chargeType MUST be a valid ChargeType enum — there is NO 'MONTHLY' (would throw at
+          // finalize). Monthly meaning is carried by source MONTHLY_CYCLE + the name.
+          chargeRows.push({ rentalAgreementId: existing.id, name: 'Monthly Cycle 1', chargeType: 'UNIT', quantity: 1, rate: base, total: base, taxable: true, selected: true, sortOrder: 0, source: 'MONTHLY_CYCLE' });
         } else {
           chargeRows.push({ rentalAgreementId: existing.id, name: 'Daily', chargeType: 'DAILY', quantity: days, rate: dailyRate, total: base, taxable: true, selected: true, sortOrder: 0 });
         }

@@ -83,7 +83,9 @@ async function applyMonthlyPricing(reservationId, cycleRate, scope = {}) {
   });
   await prisma.reservationCharge.create({
     data: {
-      reservationId, code: 'MONTHLY', name: 'Monthly Cycle 1', chargeType: 'MONTHLY',
+      // chargeType MUST be a valid ChargeType enum (UNIT/DAILY/TAX/PERCENT/DEPOSIT) — there is
+      // NO 'MONTHLY'. The monthly meaning is carried by source MONTHLY_CYCLE + the name.
+      reservationId, code: 'MONTHLY', name: 'Monthly Cycle 1', chargeType: 'UNIT',
       quantity: 1, rate, total: rate, taxable: true, selected: true, sortOrder: 0,
       source: 'MONTHLY_CYCLE',
     },
@@ -259,7 +261,8 @@ export const longTermService = {
       data: {
         rentalAgreementId: agreement.id,
         name: `Monthly Cycle ${cycleNumber}`,
-        chargeType: 'MONTHLY',
+        // chargeType MUST be a valid ChargeType enum (no 'MONTHLY'); source MONTHLY_CYCLE carries it.
+        chargeType: 'UNIT',
         quantity: 1,
         rate: amount,
         total: amount,
