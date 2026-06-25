@@ -283,7 +283,7 @@ function LongTermPlanPanel({ reservationId, token }) {
   };
 
   return (
-    <div className="glass card" style={{ marginTop: 12, padding: 10 }}>
+    <div className="glass card" style={{ marginTop: 12, padding: 10, minWidth: 0, overflowWrap: 'anywhere' }}>
       <div className="row-between" style={{ marginBottom: 8 }}>
         <div style={{ fontWeight: 700, display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
           Long-Term Plan
@@ -321,7 +321,8 @@ function LongTermPlanPanel({ reservationId, token }) {
       </div>
       <div className="label" style={{ marginBottom: 4 }}>Billing Cycles</div>
       {cycles.length ? (
-        <table>
+        <div style={{ overflowX: 'auto', maxWidth: '100%' }}>
+        <table style={{ width: '100%' }}>
           <thead><tr><th>#</th><th>Period</th><th>Amount</th><th>Status</th><th></th></tr></thead>
           <tbody>
             {cycles.map((c) => (
@@ -345,6 +346,7 @@ function LongTermPlanPanel({ reservationId, token }) {
             ))}
           </tbody>
         </table>
+        </div>
       ) : (
         <div className="surface-note">No billing cycles yet — cycle 1 is created when the plan is attached.</div>
       )}
