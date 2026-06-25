@@ -52,6 +52,83 @@ async function resolveMonthlyRate({ tenantId, rateId, vehicleTypeId }) {
   return null;
 }
 
+/**
+ * Apply monthly pricing to the RESERVATION (2026-06-25). When a plan is attached or its
+ * cycleRate changes, the rental base on the reservation becomes ONE locked "Monthly Cycle 1"
+ * line = cycleRate (Option B — exact monthly rate, not days x dailyRate), and the Sales Tax is
+ * recomputed on the new taxable base. This mirrors the finalize hook in rental-agreements
+ * (Monthly Cycle 1 / source MONTHLY_CYCLE, line ~2181) so the reservation pricing, the agreement
+ * balance and the checkout all agree — fixing the case where the panel showed days x dailyRate
+ * ($1,624.20) while the plan was $950. getPricing/syncAgreementCharges rebuild the agreement from
+ * these ReservationCharge rows, so the unpaid balance follows automatically.
+ */
+async function applyMonthlyPricing(reservationId, cycleRate, scope = {}) {
+  const reservation = await prisma.reservation.findUnique({
+    where: { id: String(reservationId) },
+    select: { id: true, pickupLocation: { select: { taxRate: true } } },
+  });
+  if (!reservation) return;
+  const rate = round2(cycleRate);
+
+  // Replace the rental base line (Daily / BASE_RATE) — and any prior monthly line — with a
+  // single locked Monthly Cycle 1 charge. Other lines (services, fees, insurance) are untouched.
+  // Match the rental base line across all creation flows (public booking sets source
+  // BASE_RATE/code DAILY; staff flows label it "Daily"). We do NOT match by chargeType
+  // alone (a per-day SERVICE is chargeType DAILY) to avoid nuking add-ons.
+  await prisma.reservationCharge.deleteMany({
+    where: {
+      reservationId,
+      OR: [{ source: 'BASE_RATE' }, { source: 'MONTHLY_CYCLE' }, { code: 'DAILY' }, { name: 'Daily' }],
+    },
+  });
+  await prisma.reservationCharge.create({
+    data: {
+      reservationId, code: 'MONTHLY', name: 'Monthly Cycle 1', chargeType: 'MONTHLY',
+      quantity: 1, rate, total: rate, taxable: true, selected: true, sortOrder: 0,
+      source: 'MONTHLY_CYCLE',
+    },
+  });
+
+  // Recompute Sales Tax on the new taxable base (all selected, taxable, non-TAX charges).
+  const taxRate = Number(reservation.pickupLocation?.taxRate || 0);
+  const charges = await prisma.reservationCharge.findMany({ where: { reservationId, selected: true } });
+  const taxableBase = charges
+    .filter((c) => c.taxable && String(c.chargeType || '').toUpperCase() !== 'TAX' && String(c.source || '').toUpperCase() !== 'TAX')
+    .reduce((s, c) => s + Number(c.total || 0), 0);
+  const taxTotal = round2(taxableBase * (taxRate / 100));
+  const existingTax = charges.find((c) => String(c.source || '').toUpperCase() === 'TAX' || String(c.code || '').toUpperCase() === 'TAX');
+  if (existingTax) {
+    if (taxTotal > 0) {
+      await prisma.reservationCharge.update({ where: { id: existingTax.id }, data: { rate: taxTotal, total: taxTotal, name: `Sales Tax (${taxRate.toFixed(2)}%)` } });
+    } else {
+      await prisma.reservationCharge.delete({ where: { id: existingTax.id } });
+    }
+  } else if (taxTotal > 0) {
+    const maxSort = charges.reduce((m, c) => Math.max(m, Number(c.sortOrder || 0)), 0);
+    await prisma.reservationCharge.create({
+      data: { reservationId, code: 'TAX', name: `Sales Tax (${taxRate.toFixed(2)}%)`, chargeType: 'TAX', quantity: 1, rate: taxTotal, total: taxTotal, taxable: false, selected: true, sortOrder: maxSort + 1, source: 'TAX' },
+    });
+  }
+
+  // estimatedTotal = selected non-deposit charges (incl. tax). Deposits are held separately.
+  const refreshed = await prisma.reservationCharge.findMany({ where: { reservationId, selected: true } });
+  const estimatedTotal = round2(
+    refreshed
+      .filter((c) => String(c.source || '').toUpperCase() !== 'DEPOSIT' && String(c.chargeType || '').toUpperCase() !== 'DEPOSIT')
+      .reduce((s, c) => s + Number(c.total || 0), 0)
+  );
+  await prisma.reservation.update({ where: { id: reservationId }, data: { estimatedTotal } });
+
+  // Propagate to the agreement (if one exists) so the unpaid balance matches immediately.
+  // Dynamic import avoids a load-time circular dependency with the pricing service.
+  try {
+    const { reservationPricingService } = await import('../reservations/reservation-pricing.service.js');
+    await reservationPricingService.getPricing(reservationId, scope, { allowClosed: true });
+  } catch (e) {
+    logger.warn(`applyMonthlyPricing: agreement recompute skipped: ${String(e?.message || e)}`);
+  }
+}
+
 export const longTermService = {
   /** Attach a monthly plan to a reservation (the explicit opt-in). */
   async attachPlan(user, reservationId, payload = {}) {
@@ -108,6 +185,9 @@ export const longTermService = {
         metadata: JSON.stringify({ longTermPlanId: plan.id, cycleRate: String(plan.cycleRate), cycleLengthDays }),
       },
     }).catch(() => {});
+    // Reprice the reservation NOW so the panel + unpaid balance show the locked monthly rate
+    // (one "Monthly Cycle 1" line + recomputed tax) instead of days x dailyRate.
+    await applyMonthlyPricing(reservation.id, plan.cycleRate, { tenantId: reservation.tenantId });
     return plan;
   },
 
@@ -131,7 +211,12 @@ export const longTermService = {
       data.status = String(payload.status);
       if (data.status === 'ENDED') { data.endedAt = new Date(); data.autoRenew = false; }
     }
-    return prisma.longTermPlan.update({ where: { id: plan.id }, data, include: { billingCycles: { orderBy: { cycleNumber: 'desc' } } } });
+    const updated = await prisma.longTermPlan.update({ where: { id: plan.id }, data, include: { billingCycles: { orderBy: { cycleNumber: 'desc' } } } });
+    // If the locked monthly rate changed, re-apply the single Monthly Cycle 1 line + tax.
+    if ('cycleRate' in data) {
+      await applyMonthlyPricing(plan.reservationId, data.cycleRate, { tenantId: plan.tenantId });
+    }
+    return updated;
   },
 
   /**
