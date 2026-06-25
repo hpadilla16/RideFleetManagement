@@ -122,6 +122,25 @@ enum Transmission {
   MANUAL
 }
 
+// Public loaner self-service "request a courtesy car" lead (2026-06-25). Filled by the public
+// website form (POST /api/public/loaner/request); the advisor works it from the dashboard.
+model LoanerRequest {
+  id                String    @id @default(cuid())
+  tenantId          String?
+  tenant            Tenant?   @relation(fields: [tenantId], references: [id])
+  name              String
+  phone             String
+  email             String?
+  repairOrderNumber String?
+  preferredDate     DateTime?
+  notes             String?
+  status            String    @default("RECEIVED") // RECEIVED | CONTACTED | CONVERTED | CLOSED
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  @@index([tenantId, status])
+}
+
 enum AgreementPaymentMethod {
   CASH
   CARD
@@ -514,6 +533,7 @@ model Tenant {
   fleetReconciliationFlags    FleetReconciliationFlag[]
   customers                   Customer[]
   reservations                Reservation[]
+  loanerRequests              LoanerRequest[]
   auditLogs                   AuditLog[]
   reservationIncidents        ReservationIncident[]
   agreementClauses            AgreementClause[]
@@ -1126,6 +1146,9 @@ model Reservation {
   loanerServiceCompletedAt        DateTime?
   loanerServiceCompletedBy        String?
   loanerCloseoutNotes             String?
+  // Public loaner self-service (2026-06-25): set when a customer picked a loaner + signed on the
+  // website (POST /api/public/loaner/reserve). Flags the appointment as PENDING advisor approval.
+  loanerSelfServiceSubmittedAt    DateTime?
   loanerPurchaseOrderNumber       String?
   loanerDealerInvoiceNumber       String?
   loanerAccountingNotes           String?
