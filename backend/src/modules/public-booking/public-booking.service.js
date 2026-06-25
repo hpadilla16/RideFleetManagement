@@ -8,6 +8,7 @@ import { cache } from '../../lib/cache.js';
 import { tenantKey, globalKey } from '../../lib/cache/tenantKey.js';
 import { sendEmail } from '../../lib/mailer.js';
 import { money } from '../../lib/money.js';
+import { publicVehicleProfile } from './vehicle-feature-catalog.js';
 import crypto from 'node:crypto';
 
 function baseUrl() {
@@ -234,7 +235,16 @@ export const publicBookingService = {
       selectedTenant: payload.tenant || null,
       locations: payload.locations || [],
       carSharingSearchPlaces: payload.carSharingSearchPlaces || [],
-      vehicleTypes: payload.vehicleTypes || [],
+      // Public Vehicle Profile fields (imageUrl, passengers, bags, transmission, doors,
+      // features, included) — same vehicleType shape as /vehicle-classes.
+      vehicleTypes: (payload.vehicleTypes || []).map((vt) => ({
+        id: vt.id,
+        tenantId: vt.tenantId,
+        code: vt.code,
+        name: vt.name,
+        description: vt.description || '',
+        ...publicVehicleProfile(vt)
+      })),
       featuredCarSharingListings: (payload.featuredListings || []).map((listing) => ({
         id: listing.id,
         slug: listing.slug,
@@ -319,7 +329,9 @@ export const publicBookingService = {
             code: vehicleType.code || '',
             name: vehicleType.name || 'Vehicle Class',
             description: vehicleType.description || '',
-            imageUrl: vehicleType.imageUrl || ''
+            // Public Vehicle Profile (imageUrl, passengers, bags, transmission, doors, features,
+            // included) — same shape as bootstrap.vehicleTypes so the site reads one object.
+            ...publicVehicleProfile(vehicleType)
           },
           advertisedDailyRate: dailyRate,
           availableUnits: availabilityCount,

@@ -1081,12 +1081,14 @@ export const bookingEngineService = {
       }),
       prisma.vehicleType.findMany({
         where: { tenantId: tenant.id },
-        // imageUrl deliberately excluded — see same select in the no-tenant
-        // branch above. R23 follow-up: the previous commit's `replace_all`
-        // only matched one of the two select clauses because the surrounding
-        // indentation differed; this completes the fix for the tenant branch
-        // (the path triggered when tenantSlug is provided in the URL).
-        select: { id: true, tenantId: true, code: true, name: true, description: true },
+        // Public Vehicle Profile (2026-06-25): the scoped bootstrap now exposes imageUrl +
+        // specs for the public website. imageUrl is OK here because the bootstrap is per-tenant
+        // (fail-closed) — keep imageUrl small (CDN URL, not base64) to avoid the R23 bloat.
+        select: {
+          id: true, tenantId: true, code: true, name: true, description: true,
+          imageUrl: true, passengers: true, bags: true, doors: true, transmission: true,
+          features: true, unlimitedMileage: true, freeMilesPerDay: true, insuranceIncluded: true,
+        },
         orderBy: [{ name: 'asc' }]
       }),
       prisma.hostVehicleListing.findMany({
@@ -1308,7 +1310,17 @@ export const bookingEngineService = {
             code: vehicleType.code,
             name: vehicleType.name,
             description: vehicleType.description,
-            imageUrl: vehicleType.imageUrl || ''
+            imageUrl: vehicleType.imageUrl || '',
+            // Raw Public Vehicle Profile fields — shaped by publicVehicleProfile() in
+            // public-booking.service.getVehicleClasses (same vehicleType shape as bootstrap).
+            passengers: vehicleType.passengers ?? null,
+            bags: vehicleType.bags ?? null,
+            doors: vehicleType.doors ?? null,
+            transmission: vehicleType.transmission || null,
+            features: vehicleType.features || [],
+            unlimitedMileage: !!vehicleType.unlimitedMileage,
+            freeMilesPerDay: vehicleType.freeMilesPerDay ?? null,
+            insuranceIncluded: !!vehicleType.insuranceIncluded
           },
           availability: {
             availableUnits,

@@ -117,6 +117,11 @@ enum ChargeType {
   DEPOSIT
 }
 
+enum Transmission {
+  AUTOMATIC
+  MANUAL
+}
+
 enum AgreementPaymentMethod {
   CASH
   CARD
@@ -612,6 +617,17 @@ model VehicleType {
   name        String
   description String?
   imageUrl    String?
+  // Public Vehicle Profile (2026-06-25) — read-only specs exposed on the public booking API
+  // (bootstrap + vehicle-classes). All optional/additive; generic for every tenant.
+  passengers        Int?          // # seats / passengers
+  bags              Int?          // # luggage
+  doors             Int?
+  transmission      Transmission? // AUTOMATIC | MANUAL
+  features          String[]      @default([]) // controlled catalog codes (see vehicle-feature-catalog.js)
+  // "What's included" policy (configurable per type — NOT hardcoded):
+  unlimitedMileage  Boolean       @default(false)
+  freeMilesPerDay   Int?          // used only when unlimitedMileage = false
+  insuranceIncluded Boolean       @default(false)
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
