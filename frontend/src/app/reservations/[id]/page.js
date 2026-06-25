@@ -633,6 +633,16 @@ function ReservationDetailInner({ token, me, logout }) {
       if (resResult.status === 'fulfilled') setRow(resResult.value);
       if (pricingResult.status === 'fulfilled') setPricing(pricingResult.value);
       if (paymentsResult.status === 'fulfilled') setPaymentRows(Array.isArray(paymentsResult.value) ? paymentsResult.value : []);
+      // Re-fetch the agreement too — the "Unpaid Balance" reads RentalAgreement.balance
+      // (the source of truth, recomputed server-side on every pricing mutation). Without this
+      // the balance showed STALE after Save Override / extension until a full page reload.
+      const agId = resResult.status === 'fulfilled' ? resResult.value?.rentalAgreement?.id : null;
+      if (agId) {
+        try {
+          const ag = await api(`/api/rental-agreements/${agId}`, { bypassCache: true }, token);
+          setAgreementFull(ag || null);
+        } catch { /* keep the prior agreement on a transient failure */ }
+      }
     } catch {}
   };
 
