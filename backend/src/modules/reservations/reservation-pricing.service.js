@@ -221,10 +221,20 @@ async function syncAgreementCharges(reservationId, scope = {}, opts = {}) {
   // wiped fuel/cleaning/smoking/late fees that the fee engine persisted
   // during /checkin-close, because those fees live on the agreement only
   // (no corresponding ReservationCharge row to re-sync from).
+  // 2026-06-25 (Admin Corrections Option B): ALSO preserve ADMIN_CORRECTION rows
+  // (manual charges/credits added by an admin) — they live only on the agreement,
+  // like fee-engine fees, and have no ReservationCharge to re-sync from. Without
+  // this, a manual charge was deleted by the very recompute that addManualCharge
+  // triggers ("add doesn't add"). Voided rows (selected=false) are kept here too
+  // (the delete is source-based, not selected-based) so the recompute's
+  // selected:true filter excludes them from totals while keeping them for history.
   await prisma.rentalAgreementCharge.deleteMany({
     where: {
       rentalAgreementId: agreement.id,
-      NOT: { source: { startsWith: 'FEE_ENGINE_' } }
+      AND: [
+        { NOT: { source: { startsWith: 'FEE_ENGINE_' } } },
+        { NOT: { source: 'ADMIN_CORRECTION' } }
+      ]
     }
   });
   if (chargeRows.length) {
@@ -362,9 +372,12 @@ async function syncMandatoryLocationFees(reservationId, scope = {}) {
       };
 
       if (existing?.id) {
+        // 2026-06-25 (Admin Corrections Option B): if an admin explicitly voided this
+        // mandatory fee (selected=false), DON'T re-select it here — otherwise the void
+        // would rebound on the next pricing recompute. Normal flow keeps selected=true.
         await tx.reservationCharge.update({
           where: { id: existing.id },
-          data
+          data: existing.selected === false ? { ...data, selected: false } : data
         });
       } else {
         await tx.reservationCharge.create({
@@ -434,16 +447,38 @@ export const reservationPricingService = {
       select: { id: true, tenantId: true, balance: true }
     });
     if (!agreement) { const e = new Error('No agreement for reservation'); e.status = 404; throw e; }
-    const charge = await prisma.rentalAgreementCharge.findFirst({
+    const balanceBefore = Number(agreement.balance || 0);
+
+    // Void at the correct SOURCE. Fee-engine fees and admin manual charges live only on the
+    // agreement (RentalAgreementCharge) and are preserved across recomputes, so soft-voiding
+    // the agreement row sticks. Everything else (daily, insurance/CDW, mandatory, tolls, taxes)
+    // is a ReservationCharge that syncAgreementCharges REBUILDS from — voiding the agreement
+    // row there would just be regenerated, so we void the ReservationCharge. We detect the
+    // space by looking the id up in each table (the panel sends the row's real id + scope).
+    let voided = null; // { id, name, total, source, space }
+    const agreementCharge = await prisma.rentalAgreementCharge.findFirst({
       where: { id: String(chargeId), rentalAgreementId: agreement.id },
       select: { id: true, name: true, total: true, source: true, selected: true }
     });
-    if (!charge) { const e = new Error('Charge not found on this reservation'); e.status = 404; throw e; }
-    if (charge.selected === false) { const e = new Error('Charge is already voided'); e.status = 409; throw e; }
-    const balanceBefore = Number(agreement.balance || 0);
-    // Soft-void: selected=false keeps the row for history but excludes it from totals
-    // (syncAgreementCharges only sums selected=true rows).
-    await prisma.rentalAgreementCharge.update({ where: { id: charge.id }, data: { selected: false } });
+    if (agreementCharge) {
+      if (agreementCharge.selected === false) { const e = new Error('Charge is already voided'); e.status = 409; throw e; }
+      // selected=false keeps the row for history; syncAgreementCharges preserves FEE_ENGINE_
+      // and ADMIN_CORRECTION rows and only sums selected:true, so the void sticks.
+      await prisma.rentalAgreementCharge.update({ where: { id: agreementCharge.id }, data: { selected: false } });
+      voided = { id: agreementCharge.id, name: agreementCharge.name, total: Number(agreementCharge.total || 0), source: agreementCharge.source || null, space: 'agreement' };
+    } else {
+      const reservationCharge = await prisma.reservationCharge.findFirst({
+        where: { id: String(chargeId), reservationId },
+        select: { id: true, name: true, total: true, source: true, selected: true }
+      });
+      if (!reservationCharge) { const e = new Error('Charge not found on this reservation'); e.status = 404; throw e; }
+      if (reservationCharge.selected === false) { const e = new Error('Charge is already voided'); e.status = 409; throw e; }
+      // syncAgreementCharges rebuilds the agreement rows from selected:true ReservationCharges,
+      // so selected=false removes it from the balance and keeps the row for history.
+      await prisma.reservationCharge.update({ where: { id: reservationCharge.id }, data: { selected: false } });
+      voided = { id: reservationCharge.id, name: reservationCharge.name, total: Number(reservationCharge.total || 0), source: reservationCharge.source || null, space: 'reservation' };
+    }
+
     await syncAgreementCharges(reservationId, scope, { allowClosed: true });
     const after = await prisma.rentalAgreement.findUnique({ where: { id: agreement.id }, select: { balance: true } });
     await prisma.auditLog.create({ data: {
@@ -454,10 +489,11 @@ export const reservationPricingService = {
       reason: reason ? String(reason).slice(0, 500) : null,
       metadata: JSON.stringify({
         kind: 'void_charge',
-        chargeId: charge.id,
-        chargeName: charge.name,
-        chargeTotal: Number(charge.total || 0),
-        chargeSource: charge.source || null,
+        space: voided.space,
+        chargeId: voided.id,
+        chargeName: voided.name,
+        chargeTotal: voided.total,
+        chargeSource: voided.source,
         balanceBefore,
         balanceAfter: Number(after?.balance || 0)
       })
@@ -525,13 +561,34 @@ export const reservationPricingService = {
       select: { id: true, balance: true, total: true }
     });
     if (!agreement) return { charges: [], balance: 0, total: 0 };
-    const rows = await prisma.rentalAgreementCharge.findMany({
-      where: { rentalAgreementId: agreement.id, selected: true },
-      orderBy: [{ sortOrder: 'asc' }, { createdAt: 'asc' }],
-      select: { id: true, name: true, total: true, source: true, chargeType: true, taxable: true }
-    });
+    // The balance is driven by charges in TWO spaces (see voidAgreementCharge):
+    //   - reservation-sourced charges (daily, insurance/CDW, mandatory, tolls, taxes) are
+    //     ReservationCharge rows — voiding happens there (scope:'reservation').
+    //   - agreement-only charges (post-check-in fee-engine fees + admin manual charges) are
+    //     RentalAgreementCharge rows — voiding happens there (scope:'agreement').
+    // List each with its REAL id + scope so the void targets the right table.
+    const [resRows, agreementRows] = await Promise.all([
+      prisma.reservationCharge.findMany({
+        where: { reservationId, selected: true },
+        orderBy: [{ sortOrder: 'asc' }, { createdAt: 'asc' }],
+        select: { id: true, name: true, total: true, source: true, chargeType: true, taxable: true }
+      }),
+      prisma.rentalAgreementCharge.findMany({
+        where: {
+          rentalAgreementId: agreement.id,
+          selected: true,
+          OR: [{ source: { startsWith: 'FEE_ENGINE_' } }, { source: 'ADMIN_CORRECTION' }]
+        },
+        orderBy: [{ sortOrder: 'asc' }, { createdAt: 'asc' }],
+        select: { id: true, name: true, total: true, source: true, chargeType: true, taxable: true }
+      })
+    ]);
+    const charges = [
+      ...resRows.map((c) => ({ ...c, total: Number(c.total || 0), scope: 'reservation' })),
+      ...agreementRows.map((c) => ({ ...c, total: Number(c.total || 0), scope: 'agreement' }))
+    ];
     return {
-      charges: rows.map((c) => ({ ...c, total: Number(c.total || 0) })),
+      charges,
       balance: Number(agreement.balance || 0),
       total: Number(agreement.total || 0)
     };
