@@ -125,6 +125,38 @@ publicBookingRouter.get('/website-fees', bookingReadGuard, async (req, res, next
   }
 });
 
+// Public add-ons for the website "Add extras" on a vehicle page (online + tenant-scoped).
+publicBookingRouter.get('/additional-services', bookingReadGuard, async (req, res, next) => {
+  try {
+    const payload = await publicBookingService.getAdditionalServices({
+      ...publicTenantArgs(req),
+      vehicleTypeId: optionalString(req.query?.vehicleTypeId, { fallback: undefined })
+    });
+    res.json(payload);
+  } catch (error) {
+    if (/required|not found/i.test(String(error?.message || ''))) {
+      return res.status(400).json({ error: error.message });
+    }
+    next(error);
+  }
+});
+
+// Public insurance/protection plans for the website "Protection" on a vehicle page.
+publicBookingRouter.get('/insurance-plans', bookingReadGuard, async (req, res, next) => {
+  try {
+    const payload = await publicBookingService.getInsurancePlans({
+      ...publicTenantArgs(req),
+      vehicleTypeId: optionalString(req.query?.vehicleTypeId, { fallback: undefined })
+    });
+    res.json(payload);
+  } catch (error) {
+    if (/required|not found/i.test(String(error?.message || ''))) {
+      return res.status(400).json({ error: error.message });
+    }
+    next(error);
+  }
+});
+
 publicBookingRouter.post('/rental-search', bookingWriteGuard, async (req, res, next) => {
   try {
     assertPlainObject(req.body || {}, 'booking search payload');

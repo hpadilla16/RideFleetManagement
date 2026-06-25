@@ -1331,6 +1331,41 @@ export const publicBookingService = {
     };
   },
 
+  // Public add-ons for the website "Add extras" on a vehicle page. Tenant-scoped + online-only.
+  async getAdditionalServices({ tenantId, tenantSlug, vehicleTypeId } = {}) {
+    const rows = await bookingEngineService.getPublicAdditionalServices({ tenantId, tenantSlug, vehicleTypeId });
+    return {
+      services: (rows || []).map((s) => ({
+        id: s.serviceId,
+        code: s.code || null,
+        name: s.name,
+        description: s.displayDescription || s.description || '',
+        rate: money(s.rate),
+        dailyRate: s.pricingMode === 'PER_DAY' ? money(s.rate) : null,
+        chargeType: s.pricingMode === 'PER_DAY' ? 'PER_DAY' : 'PER_RENTAL',
+        unitLabel: s.unitLabel || (s.pricingMode === 'PER_DAY' ? 'day' : 'rental'),
+        mandatory: !!s.mandatory,
+        taxable: !!s.taxable
+      }))
+    };
+  },
+
+  // Public insurance/protection plans for the website "Protection" on a vehicle page.
+  async getInsurancePlans({ tenantId, tenantSlug, vehicleTypeId } = {}) {
+    const rows = await bookingEngineService.getPublicInsurancePlans({ tenantId, tenantSlug, vehicleTypeId });
+    return {
+      plans: (rows || []).map((p) => ({
+        code: p.code || null,
+        name: p.name,
+        description: p.displayDescription || p.description || '',
+        amount: money(p.amount),
+        rate: money(p.rate),
+        chargeBy: p.chargeBy || 'FIXED',
+        taxable: !!p.taxable
+      }))
+    };
+  },
+
   async getWebsiteMandatoryFees({ tenantId, tenantSlug }) {
     // Resolve tenant from ID or slug (same pattern as resolvePublicCarSharingTenant)
     const scopedTenantId = tenantId ? String(tenantId).trim() : '';

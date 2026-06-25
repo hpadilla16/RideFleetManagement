@@ -347,6 +347,7 @@ function computeAdditionalServiceLine(service, days, quantityOverride) {
     code: service.code || null,
     name: service.name,
     description: service.description || '',
+    displayDescription: service.displayDescription || '',
     chargeType: service.chargeType || 'UNIT',
     unitLabel: service.unitLabel || 'Unit',
     pricingMode: perDay > 0 ? 'PER_DAY' : 'FLAT',
@@ -1035,6 +1036,28 @@ async function rentalAvailabilityCount({ tenantId, vehicleTypeId, pickupAt, retu
 }
 
 export const bookingEngineService = {
+  // Public add-ons for a vehicle type (website "Add extras"). Tenant-scoped; only
+  // isActive + displayOnline. days=1 so per-day lines report the per-day rate (the site
+  // multiplies by days). locationId null → global (non-location-specific) add-ons.
+  async getPublicAdditionalServices({ tenantSlug, tenantId, vehicleTypeId } = {}) {
+    const tenant = await resolvePublicTenant({ tenantSlug, tenantId });
+    if (!tenant) return [];
+    return listPublicAdditionalServices({
+      tenantId: tenant.id, locationId: null, vehicleTypeId: vehicleTypeId || null, days: 1
+    });
+  },
+
+  // Public insurance/protection plans for a vehicle type (website "Protection"). Tenant-scoped.
+  // baseAmount=0 (percentage plans surface their % via `amount`; the real total is computed at
+  // checkout); days=1 so per-day plans report the per-day amount.
+  async getPublicInsurancePlans({ tenantSlug, tenantId, vehicleTypeId } = {}) {
+    const tenant = await resolvePublicTenant({ tenantSlug, tenantId });
+    if (!tenant) return [];
+    return listPublicInsurancePlans({
+      tenantId: tenant.id, locationId: null, vehicleTypeId: vehicleTypeId || null, baseAmount: 0, days: 1
+    });
+  },
+
   async getBootstrap({ tenantSlug, tenantId } = {}) {
     // Cache the bootstrap response. This endpoint is hit on every load of
     // the public booking site and fans out 5 parallel prisma queries per
