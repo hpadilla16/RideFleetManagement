@@ -424,7 +424,11 @@ export const reservationPricingService = {
       syncAgreementCharges(reservationId, scope, opts)
     ]);
     const row = await getReservationOrThrow(reservationId, scope);
-    const charges = Array.isArray(row.charges) ? row.charges : [];
+    // 2026-06-25: exclude voided charges (selected=false, e.g. an Admin Corrections void)
+    // from the displayed pricing AND its totals, so a voided charge disappears from the
+    // breakdown everywhere — matching the recomputed agreement balance. The row stays in
+    // the DB (selected=false) for history + AuditLog.
+    const charges = (Array.isArray(row.charges) ? row.charges : []).filter((c) => c?.selected !== false);
     const snapshot = row.pricingSnapshot || null;
     return {
       reservationId: row.id,
