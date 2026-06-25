@@ -1056,94 +1056,20 @@ export const bookingEngineService = {
       const tenant = await resolvePublicTenant({ tenantSlug, tenantId });
 
     if (!tenant) {
-      const [tenants, locations, vehicleTypes, featuredListings, carSharingSearchPlaces] = await Promise.all([
-        prisma.tenant.findMany({
-          where: { status: 'ACTIVE' },
-          select: {
-            id: true,
-            name: true,
-            slug: true,
-            carSharingEnabled: true
-          },
-          orderBy: [{ name: 'asc' }]
-        }),
-        prisma.location.findMany({
-          where: {
-            isActive: true,
-            tenant: { status: 'ACTIVE' }
-          },
-          select: { id: true, tenantId: true, name: true, city: true, state: true, taxRate: true },
-          orderBy: [{ name: 'asc' }]
-        }),
-        prisma.vehicleType.findMany({
-          where: {
-            tenant: { status: 'ACTIVE' }
-          },
-          // imageUrl deliberately excluded: vehicle-type imageUrls are stored as
-          // base64 data URIs (~620KB each) and the public booking page does NOT
-          // render images from bootstrap.vehicleTypes — it only uses tenantId
-          // for filtering. Including imageUrl here was inflating bootstrap to
-          // ~5.5MB per response. See R23 in pool-resilience-plan-2026-05-05.md.
-          // Once images are migrated to CDN URLs (sprint 11) we can re-add.
-          select: { id: true, tenantId: true, code: true, name: true, description: true },
-          orderBy: [{ name: 'asc' }]
-        }),
-        prisma.hostVehicleListing.findMany({
-          where: {
-            status: 'PUBLISHED',
-            tenant: { status: 'ACTIVE' }
-          },
-          include: {
-            hostProfile: { select: publicHostSelect() },
-            vehicle: { select: { id: true, make: true, model: true, year: true, color: true, plate: true, vehicleType: { select: { imageUrl: true } } } },
-            location: { select: { id: true, name: true, city: true, state: true } },
-            pickupSpot: {
-              include: {
-                anchorLocation: { select: { id: true, name: true, city: true, state: true } },
-                searchPlace: { include: { anchorLocation: { select: { id: true, name: true, city: true, state: true } } } }
-              }
-            }
-          },
-          orderBy: [{ publishedAt: 'desc' }, { createdAt: 'desc' }],
-          take: 8
-        }),
-        listPublicCarSharingSearchPlaces({ directTenant: null, take: 120 })
-      ]);
-
+      // Fail-closed (§5 tenant isolation, 2026-06-25): no tenant context — no X-Tenant-Token
+      // AND no ?tenantSlug/tenantId — must NOT expose the cross-tenant roster, locations, or
+      // vehicleTypes. The per-tenant public site sends the token (→ scoped); any legacy client
+      // sends ?tenantSlug (→ scoped). The old multi-tenant landing (/book, /become-a-host) is
+      // deprecated, so an unscoped bootstrap now returns an empty payload instead of every
+      // active tenant's catalog. (Also drops the heavy 5-query fan-out for unscoped hits.)
       return {
         tenant: null,
-        tenants,
-        locations,
-        carSharingSearchPlaces,
-        vehicleTypes,
-        featuredListings: featuredListings.map((listing) => ({
-          id: listing.id,
-          slug: listing.slug,
-          title: listing.title,
-          shortDescription: listing.shortDescription,
-          baseDailyRate: money(listing.baseDailyRate),
-          cleaningFee: money(listing.cleaningFee),
-          pickupFee: money(listing.pickupFee),
-          deliveryFee: money(listing.deliveryFee),
-          fulfillmentMode: listing.fulfillmentMode,
-          deliveryRadiusMiles: listing.deliveryRadiusMiles,
-          deliveryAreas: normalizeDeliveryAreas(listing.deliveryAreasJson),
-          deliveryNotes: listing.deliveryNotes,
-          instantBook: !!listing.instantBook,
-          host: publicHostSummary(listing.hostProfile),
-          vehicle: listing.vehicle,
-          location: listing.location,
-          pickupSpot: serializePublicPickupSpot(listing.pickupSpot),
-          searchPlace: serializeCarSharingSearchPlace(listing.pickupSpot?.searchPlace),
-          ...bookingImageSet({
-            vehicleTypeImageUrl: listing.vehicle?.vehicleType?.imageUrl,
-            listingPhotos: listing.photosJson
-          })
-        })),
-        bookingModes: {
-          rental: true,
-          carSharing: tenants.some((row) => !!row.carSharingEnabled)
-        }
+        tenants: [],
+        locations: [],
+        carSharingSearchPlaces: [],
+        vehicleTypes: [],
+        featuredListings: [],
+        bookingModes: { rental: false, carSharing: false }
       };
     }
 

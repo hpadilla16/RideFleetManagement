@@ -35,8 +35,11 @@ async function main() {
     const tokenSlugB  = await getPublic('/public/booking/website-fees', { token: tokenA, slug: 'beta-b' });
     const badToken    = await getPublic('/public/booking/website-fees', { token: 'wrong-token-v9' });
     const noTokenSlug = await getPublic('/public/booking/website-fees', {});
+    const bootstrapNoCtx = await getPublic('/public/booking/bootstrap', {});
 
     results = [
+      { test: 'bootstrap with no token/slug -> fail-closed (empty roster + locations, never cross-tenant)',
+        pass: (bootstrapNoCtx.data?.tenants?.length || 0) === 0 && (bootstrapNoCtx.data?.locations?.length || 0) === 0 },
       { test: 'valid token (no slug) -> scoped to tenant A',
         pass: tokenNoSlug.ok && tokenNoSlug.data?.tenantId === a.id },
       { test: 'valid token + ?tenantSlug=beta-b -> STILL tenant A (override), never B',
