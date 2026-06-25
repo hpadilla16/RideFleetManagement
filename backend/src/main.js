@@ -60,6 +60,7 @@ import { hostAppRouter } from './modules/host-app/host-app.routes.js';
 import { employeeAppRouter } from './modules/employee-app/employee-app.routes.js';
 import { dealershipLoanerRouter } from './modules/dealership-loaner/dealership-loaner.routes.js';
 import { loanerAgreementRouter, loanerSignaturePublicRouter, loanerPortalPublicRouter } from './modules/dealership-loaner/loaner-agreement.routes.js';
+import { publicLoanerRouter } from './modules/dealership-loaner/public-loaner.routes.js';
 import { longTermRouter } from './modules/long-term/long-term.routes.js';
 import { incidentReportRouter } from './modules/incident-report/incident-report.routes.js';
 import { issueCenterRouter, publicIssueCenterRouter } from './modules/issue-center/issue-center.routes.js';
@@ -185,6 +186,9 @@ app.use('/api/public', customerPortalRouter);
 app.use('/api/public/booking', resolvePublicTenantToken);
 app.use('/api/public/booking', publicBookingRouter);
 app.use('/api/public/booking', accountDeletionRouter);
+// Public loaner self-service (2026-06-25) — same X-Tenant-Token scoping as booking, fail-closed.
+app.use('/api/public/loaner', resolvePublicTenantToken);
+app.use('/api/public/loaner', publicLoanerRouter);
 app.use('/api/public/addendum-signature', addendumSignaturePublicRouter);
 app.use('/api/public/store-board', storeBoardPublicRouter);
 app.use('/api/public/issues', publicIssueCenterRouter);
