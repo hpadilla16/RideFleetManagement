@@ -39,6 +39,7 @@ import { settingsRouter } from './modules/settings/settings.routes.js';
 import { feeRatesRouter } from './modules/fees/fee-rates.routes.js';
 import { requireAuth, requireRole, requireModuleAccess } from './middleware/auth.js';
 import { tenantRateLimit } from './middleware/tenant-rate-limit.js';
+import { resolvePublicTenantToken } from './middleware/public-tenant-token.js';
 import { endpointLoadSampler } from './middleware/endpoint-load-sampler.js';
 import { prisma } from './lib/prisma.js';
 import { customerPortalRouter } from './modules/customer-portal/customer-portal.routes.js';
@@ -178,6 +179,10 @@ app.get(['/api/docs', '/api/docs/'], requireDocsAuth, (req, res) => {
 
 app.use('/api/auth', authRouter);
 app.use('/api/public', customerPortalRouter);
+// X-Tenant-Token scoping for the public booking website (2026-06-24). Absent header →
+// no-op (legacy ?tenantSlug clients unaffected); present+valid → forces this tenant;
+// present+invalid → 401. See middleware/public-tenant-token.js.
+app.use('/api/public/booking', resolvePublicTenantToken);
 app.use('/api/public/booking', publicBookingRouter);
 app.use('/api/public/booking', accountDeletionRouter);
 app.use('/api/public/addendum-signature', addendumSignaturePublicRouter);

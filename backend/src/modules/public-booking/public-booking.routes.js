@@ -74,6 +74,36 @@ publicBookingRouter.get('/vehicle-classes', bookingReadGuard, async (req, res, n
   }
 });
 
+// Detail of a single vehicle class (the site's `rent/:id`). Reuses getVehicleClasses
+// (so it honors Stop Sale + the token-forced tenant scope) and returns just that class.
+publicBookingRouter.get('/vehicle-classes/:vehicleTypeId', bookingReadGuard, async (req, res, next) => {
+  try {
+    const payload = await publicBookingService.getVehicleClasses({
+      tenantId: optionalString(req.query?.tenantId, { fallback: undefined }),
+      tenantSlug: optionalString(req.query?.tenantSlug, { fallback: undefined }),
+      pickupLocationId: optionalString(req.query?.pickupLocationId, { fallback: undefined }),
+      pickupAt: optionalString(req.query?.pickupAt, { fallback: undefined }),
+      returnAt: optionalString(req.query?.returnAt, { fallback: undefined })
+    });
+    const wanted = String(req.params.vehicleTypeId || '');
+    const cls = (payload?.classes || []).find(
+      (c) => String(c?.vehicleType?.id || c?.id || '') === wanted
+    );
+    if (!cls) return res.status(404).json({ error: 'Vehicle class not found' });
+    res.json({
+      tenant: payload.tenant || null,
+      pickupAt: payload.pickupAt || null,
+      returnAt: payload.returnAt || null,
+      class: cls
+    });
+  } catch (error) {
+    if (/required|not found|not enabled|after/i.test(String(error?.message || ''))) {
+      return res.status(400).json({ error: error.message });
+    }
+    next(error);
+  }
+});
+
 publicBookingRouter.get('/website-fees', bookingReadGuard, async (req, res, next) => {
   try {
     const payload = await publicBookingService.getWebsiteMandatoryFees({

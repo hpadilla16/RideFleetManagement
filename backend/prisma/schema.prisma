@@ -456,6 +456,11 @@ model Tenant {
   name                      String
   slug                      String   @unique
   status                    String   @default("ACTIVE")
+  // Public booking website (2026-06-24): the site sends X-Tenant-Token on every
+  // /api/public/booking request. We store ONLY the sha256 hash; the plaintext is
+  // generated once via scripts/gen-website-token.mjs and never persisted.
+  websiteTokenHash          String?  @unique
+  companyLogoUrl            String?
   plan                      String   @default("BETA")
   // Path D multi-tenancy fields (added 2026-05-17, see doc/multitenancy-hybrid-architecture.md)
   tier                      String   @default("STANDARD") // STANDARD | PREMIUM | ENTERPRISE

@@ -1197,6 +1197,7 @@ export const bookingEngineService = {
         id: tenant.id,
         name: tenant.name,
         slug: tenant.slug,
+        companyLogoUrl: tenant.companyLogoUrl ?? null,
         carSharingEnabled: !!tenant.carSharingEnabled
       },
       tenants,

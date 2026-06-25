@@ -7,7 +7,8 @@ const files = [
   'v6-lifecycle.mjs',
   'v7-website-fees.mjs',
   'v8-addendum-isolation.mjs',
-  'v8-stop-sale-isolation.mjs'
+  'v8-stop-sale-isolation.mjs',
+  'v9-website-token-isolation.mjs'
 ];
 
 const results = [];
