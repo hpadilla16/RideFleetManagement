@@ -38,10 +38,20 @@ export async function resolvePublicTenantToken(req, res, next) {
 
     req.publicTokenTenantId = tenant.id;
     req.publicTokenTenant = tenant;
-    // Force downstream tenant resolution to this tenant (Express 4 query/body are mutable).
-    if (req.query && typeof req.query === 'object') {
-      req.query.tenantId = tenant.id;
-      delete req.query.tenantSlug;
+    // Force downstream tenant resolution to this tenant. In prod Express `req.query` is a
+    // GETTER that re-parses the URL on each access, so mutating its properties does NOT
+    // persist to the route handler (the URL carries no tenantId). Install an OWN data
+    // property that shadows the getter so the forced value sticks. req.body is a plain own
+    // property (body-parser), so mutating it persists. The public-booking routes ALSO read
+    // req.publicTokenTenantId directly (publicTenantArgs) as a guaranteed fallback.
+    try {
+      const forcedQuery = { ...(req.query || {}), tenantId: tenant.id };
+      delete forcedQuery.tenantSlug;
+      Object.defineProperty(req, 'query', {
+        value: forcedQuery, writable: true, configurable: true, enumerable: true
+      });
+    } catch {
+      // If req.query can't be redefined, the routes still scope via req.publicTokenTenantId.
     }
     if (req.body && typeof req.body === 'object' && !Array.isArray(req.body)) {
       req.body.tenantId = tenant.id;

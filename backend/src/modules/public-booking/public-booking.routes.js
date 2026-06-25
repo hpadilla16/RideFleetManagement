@@ -32,6 +32,20 @@ const bookingWriteGuard = [
   createOptionalIdempotencyGuard({ name: 'public-booking-write', windowMs: 15 * 60 * 1000 })
 ];
 
+// Resolve the tenant args for public read endpoints. When the X-Tenant-Token middleware
+// resolved a tenant it sets req.publicTokenTenantId — prefer it (immune to the Express
+// req.query getter that re-parses the URL and drops middleware mutations) and ignore any
+// caller-supplied slug. Otherwise fall back to the legacy ?tenantId/?tenantSlug params.
+function publicTenantArgs(req) {
+  if (req.publicTokenTenantId) {
+    return { tenantId: req.publicTokenTenantId, tenantSlug: undefined };
+  }
+  return {
+    tenantId: optionalString(req.query?.tenantId, { fallback: undefined }),
+    tenantSlug: optionalString(req.query?.tenantSlug, { fallback: undefined })
+  };
+}
+
 // Public: get all policies, add-ons, protection tiers for checkout display
 publicBookingRouter.get('/policies', bookingReadGuard, async (req, res) => {
   const { getAllPolicies } = await import('../commissions/car-sharing-policies.js');
@@ -45,10 +59,7 @@ publicBookingRouter.get('/policies', bookingReadGuard, async (req, res) => {
 
 publicBookingRouter.get('/bootstrap', bookingReadGuard, async (req, res, next) => {
   try {
-    const payload = await publicBookingService.getBootstrap({
-      tenantId: optionalString(req.query?.tenantId, { fallback: undefined }),
-      tenantSlug: optionalString(req.query?.tenantSlug, { fallback: undefined })
-    });
+    const payload = await publicBookingService.getBootstrap(publicTenantArgs(req));
     res.json(payload);
   } catch (error) {
     next(error);
@@ -58,8 +69,7 @@ publicBookingRouter.get('/bootstrap', bookingReadGuard, async (req, res, next) =
 publicBookingRouter.get('/vehicle-classes', bookingReadGuard, async (req, res, next) => {
   try {
     const payload = await publicBookingService.getVehicleClasses({
-      tenantId: optionalString(req.query?.tenantId, { fallback: undefined }),
-      tenantSlug: optionalString(req.query?.tenantSlug, { fallback: undefined }),
+      ...publicTenantArgs(req),
       pickupLocationId: optionalString(req.query?.pickupLocationId, { fallback: undefined }),
       pickupAt: optionalString(req.query?.pickupAt, { fallback: undefined }),
       returnAt: optionalString(req.query?.returnAt, { fallback: undefined }),
@@ -79,8 +89,7 @@ publicBookingRouter.get('/vehicle-classes', bookingReadGuard, async (req, res, n
 publicBookingRouter.get('/vehicle-classes/:vehicleTypeId', bookingReadGuard, async (req, res, next) => {
   try {
     const payload = await publicBookingService.getVehicleClasses({
-      tenantId: optionalString(req.query?.tenantId, { fallback: undefined }),
-      tenantSlug: optionalString(req.query?.tenantSlug, { fallback: undefined }),
+      ...publicTenantArgs(req),
       pickupLocationId: optionalString(req.query?.pickupLocationId, { fallback: undefined }),
       pickupAt: optionalString(req.query?.pickupAt, { fallback: undefined }),
       returnAt: optionalString(req.query?.returnAt, { fallback: undefined })
@@ -106,10 +115,7 @@ publicBookingRouter.get('/vehicle-classes/:vehicleTypeId', bookingReadGuard, asy
 
 publicBookingRouter.get('/website-fees', bookingReadGuard, async (req, res, next) => {
   try {
-    const payload = await publicBookingService.getWebsiteMandatoryFees({
-      tenantId: optionalString(req.query?.tenantId, { fallback: undefined }),
-      tenantSlug: optionalString(req.query?.tenantSlug, { fallback: undefined })
-    });
+    const payload = await publicBookingService.getWebsiteMandatoryFees(publicTenantArgs(req));
     res.json(payload);
   } catch (error) {
     if (/required|not found/i.test(String(error?.message || ''))) {
