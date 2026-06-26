@@ -579,7 +579,7 @@ export const loanerAgreementService = {
     const row = await prisma.loanerAgreement.findFirst({
       where: { portalToken: clean },
       include: {
-        vehicle: { select: { year: true, make: true, model: true, licensePlate: true } },
+        vehicle: { select: { year: true, make: true, model: true, plate: true } },
         reservation: {
           select: {
             reservationNumber: true, status: true, repairOrderNumber: true,
@@ -605,7 +605,7 @@ export const loanerAgreementService = {
       pickupAt: row.pickupAt,
       returnAt: row.returnAt,
       customer: { firstName: row.customerFirstName, lastName: row.customerLastName },
-      vehicle: v ? { label: [v.year, v.make, v.model].filter(Boolean).join(' '), plate: v.licensePlate } : null,
+      vehicle: v ? { label: [v.year, v.make, v.model].filter(Boolean).join(' '), plate: v.plate } : null,
       service: {
         repairOrderNumber: row.reservation?.repairOrderNumber || null,
         advisorName: row.reservation?.serviceAdvisorName || null,

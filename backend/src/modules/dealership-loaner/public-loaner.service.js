@@ -118,7 +118,10 @@ export const publicLoanerService = {
         entitledRate = res.serviceVehicleTypeId ? money(rateMap[res.serviceVehicleTypeId] ?? 0) : null;
 
         const agr = res.loanerAgreement;
-        const agreementAvailable = !!(agr && agr.portalToken && agr.status !== 'VOID');
+        // Don't offer the agreement portal for terminal reservations (no active loaner to view).
+        const TERMINAL_STATUSES = ['CANCELLED', 'NO_SHOW'];
+        const agreementAvailable = !!(agr && agr.portalToken && agr.status !== 'VOID')
+          && !TERMINAL_STATUSES.includes(String(res.status));
 
         appointment = {
           id: res.id,
