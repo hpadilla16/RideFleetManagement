@@ -6,6 +6,7 @@ import { useRouter } from 'next/navigation';
 import { AuthGate } from '../../components/AuthGate';
 import { AppShell } from '../../components/AppShell';
 import { api, API_BASE } from '../../lib/client';
+import { LoanerRequestsPanel } from './LoanerRequestsPanel';
 
 const EMPTY_FORM = {
   customerId: '',
@@ -1132,6 +1133,8 @@ function LoanerProgramInner({ token, me, logout }) {
           <button type="button" className={queueFocus === 'BILLING' ? '' : 'button-subtle'} onClick={() => setQueueFocus('BILLING')}>Billing</button>
           <button type="button" className={queueFocus === 'ALERTS' ? '' : 'button-subtle'} onClick={() => setQueueFocus('ALERTS')}>Alerts</button>
         </div>
+
+        <LoanerRequestsPanel token={token} />
 
         {queueFocus === 'ALL' ? (
           <>

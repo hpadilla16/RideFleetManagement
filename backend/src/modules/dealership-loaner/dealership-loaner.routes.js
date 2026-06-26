@@ -214,3 +214,23 @@ dealershipLoanerRouter.post('/intake', async (req, res, next) => {
     res.status(400).json({ error: error.message });
   }
 });
+
+// Courtesy-car requests (public "request a loaner" leads) — list + status update for the advisor queue.
+dealershipLoanerRouter.get('/requests', async (req, res, next) => {
+  try {
+    res.json(await dealershipLoanerService.listLoanerRequests(req.user, {
+      status: req.query?.status ? String(req.query.status) : '',
+      query: req.query?.q ? String(req.query.q) : ''
+    }));
+  } catch (error) {
+    next(error);
+  }
+});
+
+dealershipLoanerRouter.patch('/requests/:id', async (req, res, next) => {
+  try {
+    res.json(await dealershipLoanerService.updateLoanerRequest(req.user, req.params.id, req.body || {}));
+  } catch (error) {
+    res.status(error.statusCode || 400).json({ error: error.message });
+  }
+});

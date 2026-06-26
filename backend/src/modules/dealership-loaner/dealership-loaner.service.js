@@ -904,6 +904,35 @@ export const dealershipLoanerService = {
     return reservationsService.getById(reservation.id, scope);
   },
 
+  // Courtesy-car requests (LoanerRequest) — the public website "request a loaner" leads (2026-06-26).
+  async listLoanerRequests(user, { status = '', query = '' } = {}) {
+    const scope = tenantScope(user);
+    const where = { ...scope };
+    const st = String(status || '').trim().toUpperCase();
+    if (st) where.status = st;
+    const q = String(query || '').trim();
+    if (q) {
+      where.OR = [
+        { name: { contains: q, mode: 'insensitive' } },
+        { phone: { contains: q } },
+        { email: { contains: q, mode: 'insensitive' } },
+        { repairOrderNumber: { contains: q, mode: 'insensitive' } },
+      ];
+    }
+    const requests = await prisma.loanerRequest.findMany({ where, orderBy: [{ createdAt: 'desc' }], take: 200 });
+    return { requests };
+  },
+
+  async updateLoanerRequest(user, id, body = {}) {
+    const scope = tenantScope(user);
+    const VALID = ['RECEIVED', 'CONTACTED', 'CONVERTED', 'CLOSED'];
+    const status = String(body?.status || '').trim().toUpperCase();
+    if (!VALID.includes(status)) { const e = new Error(`status must be one of ${VALID.join(', ')}`); e.statusCode = 400; throw e; }
+    const existing = await prisma.loanerRequest.findFirst({ where: { id: String(id), ...scope } });
+    if (!existing) { const e = new Error('Loaner request not found'); e.statusCode = 404; throw e; }
+    return prisma.loanerRequest.update({ where: { id: existing.id }, data: { status } });
+  },
+
   async getReservation(user, reservationId) {
     const scope = tenantScope(user);
     const row = await getLoanerReservationOrThrow(reservationId, scope);
