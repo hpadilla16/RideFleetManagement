@@ -8,6 +8,16 @@ function tenantScope(user) {
   return user?.tenantId ? { tenantId: user.tenantId } : { id: '__never__' };
 }
 
+// One customer-facing stage derived from reservation.status (hides the 4 internal state dimensions).
+function loanerStage(status) {
+  const s = String(status || '').toUpperCase();
+  if (s === 'CHECKED_OUT') return 'Out';
+  if (s === 'CHECKED_IN' || s === 'CHECKED_IN_UNPAID') return 'Returned';
+  if (s === 'CANCELLED') return 'Cancelled';
+  if (s === 'NO_SHOW') return 'No-show';
+  return 'Reserved';
+}
+
 function includeReservation() {
   return {
     customer: true,
@@ -526,6 +536,8 @@ function reservationCard(row) {
           total: row.rentalAgreement.total
         }
       : null,
+    selfService: !!row.loanerSelfServiceSubmittedAt,
+    stage: loanerStage(row.status),
     overdueReturn: row.status === 'CHECKED_OUT' && row.returnAt ? new Date(row.returnAt).getTime() < Date.now() : false,
     serviceEtaAtRisk: row.status !== 'CANCELLED' && !row.loanerServiceCompletedAt && row.estimatedServiceCompletionAt
       ? new Date(row.estimatedServiceCompletionAt).getTime() < Date.now()

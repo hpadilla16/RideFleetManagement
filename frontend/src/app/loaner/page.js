@@ -196,11 +196,14 @@ function loanerActionHref(row, action = '') {
 
 function loanerBoardNote(row) {
   if (!row) return '';
-  if (row.alertReason) return row.alertReason;
-  if (row.loanerReturnExceptionFlag) return 'Return exception flagged';
-  if (!row.loanerBorrowerPacketCompletedAt) return 'Borrower packet still pending';
-  if (String(row.loanerBillingStatus || 'DRAFT').toUpperCase() !== 'SETTLED') return `${row.loanerBillingStatus || 'Draft'} billing status`;
-  return 'Service lane follow-up needed';
+  const prefix = row.selfService ? 'Web self-serve · ' : '';
+  let note;
+  if (row.alertReason) note = row.alertReason;
+  else if (row.loanerReturnExceptionFlag) note = 'Return exception flagged';
+  else if (!row.loanerBorrowerPacketCompletedAt) note = 'Borrower packet still pending';
+  else if (String(row.loanerBillingStatus || 'DRAFT').toUpperCase() !== 'SETTLED') note = `${row.loanerBillingStatus || 'Draft'} billing status`;
+  else note = 'Service lane follow-up needed';
+  return prefix + note;
 }
 
 export default function LoanerProgramPage() {
