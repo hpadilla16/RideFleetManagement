@@ -39,7 +39,7 @@ export function LoanerRatesTab({ token, tenantName, scopedSettingsPath, onPageMs
         vehicleTypeId: r.vehicleTypeId,
         dailyRate: r.dailyRate === '' || r.dailyRate === null || r.dailyRate === undefined ? 0 : Number(r.dailyRate),
       }));
-      const out = await api(scopedSettingsPath('/api/settings/loaner-rates'), { method: 'PUT', body: { rates: payload } }, token);
+      const out = await api(scopedSettingsPath('/api/settings/loaner-rates'), { method: 'PUT', body: JSON.stringify({ rates: payload }) }, token);
       setRows(Array.isArray(out?.rates) ? out.rates : rows);
       onPageMsg?.('Loaner rates saved.');
     } catch (e) {
