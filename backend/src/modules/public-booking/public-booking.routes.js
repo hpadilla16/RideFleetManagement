@@ -189,7 +189,13 @@ publicBookingRouter.post('/checkout', bookingWriteGuard, async (req, res, next) 
     const payload = await publicBookingService.createBooking(req.body || {});
     res.status(201).json(payload);
   } catch (error) {
-    if (/required|available|sold out|not found|not enabled|after/i.test(String(error?.message || ''))) {
+    // Expected, user-driven failures (closed date, outside hours, sold out, validation) -> clean 4xx.
+    // Honor an explicit status code first, then a message safety-net; otherwise let it 500 (logged to Sentry).
+    const code = Number(error?.statusCode || error?.status);
+    if (code >= 400 && code < 500) {
+      return res.status(code).json({ error: error.message });
+    }
+    if (/required|available|sold out|not found|not enabled|after|closed|outside|operating hours|must be/i.test(String(error?.message || ''))) {
       return res.status(400).json({ error: error.message });
     }
     next(error);

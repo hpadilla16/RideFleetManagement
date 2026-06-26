@@ -820,12 +820,13 @@ async function validateLocationWindow({ locationId, at, label }, scope = {}) {
   const dayHours = resolveHoursForDate(cfg, date);
 
   if ((cfg.closedWeekdays || []).includes(weekday) || (cfg.closedDates || []).includes(ymd) || dayHours.closed) {
-    throw new Error(`${label} location is closed for ${ymd}`);
+    // Expected, user-driven condition (selected date the location is closed) -> 400, not 500.
+    const e = new Error(`${label} location is closed for ${ymd}`); e.statusCode = 400; e.expected = true; throw e;
   }
 
   const allowOutside = !!cfg.allowOutsideHours;
   if (!allowOutside && isOutsideHours(date, dayHours.openTime, dayHours.closeTime)) {
-    throw new Error(`${label} time is outside operating hours for ${location.name || 'selected location'}`);
+    const e = new Error(`${label} time is outside operating hours for ${location.name || 'selected location'}`); e.statusCode = 400; e.expected = true; throw e;
   }
 }
 
