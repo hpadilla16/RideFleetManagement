@@ -2,6 +2,7 @@ import crypto from 'node:crypto';
 import { prisma } from '../../lib/prisma.js';
 import { LOANER_PROGRAM_FILTER } from '../../lib/program-category.js';
 import { loanerRateService } from './loaner-rate.service.js';
+import { issuePreArrivalPrecheckin } from './dealership-loaner.service.js';
 import { RESERVABLE_STATUSES, money, daysBetween, priceUpgrade } from './loaner-pricing.js';
 
 /**
@@ -265,6 +266,10 @@ export const publicLoanerService = {
         },
       });
     }
+
+    // Pre-arrival package (web self-service): email the customer a pre-check-in link to upload
+    // license/insurance before pickup (best-effort; never blocks the reserve response).
+    issuePreArrivalPrecheckin(reservation).catch(() => {});
 
     return {
       confirmationNumber: reservation.reservationNumber,

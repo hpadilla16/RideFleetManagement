@@ -198,6 +198,14 @@ dealershipLoanerRouter.post('/reservations/:id/swap-vehicle', async (req, res, n
   }
 });
 
+dealershipLoanerRouter.post('/reservations/:id/send-prearrival', async (req, res, next) => {
+  try {
+    res.json(await dealershipLoanerService.sendPreArrivalLink(req.user, req.params.id));
+  } catch (error) {
+    res.status(error.statusCode || 400).json({ error: error.message });
+  }
+});
+
 dealershipLoanerRouter.post('/reservations/:id/complete-service', async (req, res, next) => {
   try {
     res.json(await dealershipLoanerService.completeService(req.user, req.params.id, req.body || {}));

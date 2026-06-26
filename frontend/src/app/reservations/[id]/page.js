@@ -2196,6 +2196,14 @@ token
           <div className="app-banner-list">
             <button type="button" className="button-subtle" onClick={() => router.push(checkoutHref)}>Start Check-out</button>
             <button type="button" className="button-subtle" onClick={() => router.push(checkinHref)}>Start Check-in</button>
+            {isLoanerWorkflow ? (
+              <button type="button" className="button-subtle" onClick={async () => {
+                try {
+                  const out = await api(`/api/dealership-loaner/reservations/${id}/send-prearrival`, { method: 'POST', body: JSON.stringify({}) }, token);
+                  setMsg(out?.emailed ? 'Pre-arrival check-in link emailed to the customer.' : `Pre-arrival link issued: ${out?.link || ''}`);
+                } catch (e) { setMsg(e?.message || 'Failed to send pre-arrival link'); }
+              }}>Send pre-arrival link</button>
+            ) : null}
             {row?.vehicleId && row?.rentalAgreement?.id && String(row?.status || '').toUpperCase() === 'CHECKED_OUT' ? (
               <button type="button" className="button-subtle" onClick={() => router.push(`/reservations/${id}/swap`)}>Swap Vehicle</button>
             ) : null}

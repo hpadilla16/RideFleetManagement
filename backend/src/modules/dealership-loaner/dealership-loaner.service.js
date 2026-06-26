@@ -1,3 +1,4 @@
+import crypto from 'node:crypto';
 import { prisma } from '../../lib/prisma.js';
 import { reservationsService } from '../reservations/reservations.service.js';
 import { LOANER_PROGRAM_FILTER } from '../../lib/program-category.js';
@@ -16,6 +17,36 @@ function loanerStage(status) {
   if (s === 'CANCELLED') return 'Cancelled';
   if (s === 'NO_SHOW') return 'No-show';
   return 'Reserved';
+}
+
+function preArrivalBaseUrl() {
+  return (process.env.CUSTOMER_PORTAL_BASE_URL || process.env.APP_BASE_URL || process.env.FRONTEND_BASE_URL || 'http://localhost:3000').replace(/\/+$/, '');
+}
+
+/**
+ * Pre-arrival digital package (2026-06-26): issue a pre-check-in token on the reservation and EMAIL
+ * the customer a link to upload license/insurance + confirm details BEFORE arrival, so the unified
+ * loaner checkout is just odometer/fuel/photos/keys. Reuses the rental pre-check-in page
+ * (/customer/precheckin). Best-effort email. Returns { ok, link }.
+ */
+export async function issuePreArrivalPrecheckin(reservation) {
+  const email = reservation?.customer?.email || reservation?.customerEmail || null;
+  const token = crypto.randomBytes(24).toString('hex');
+  const expiresAt = new Date(Date.now() + 1000 * 60 * 60 * 24 * 2);
+  await prisma.reservation.update({ where: { id: reservation.id }, data: { customerInfoToken: token, customerInfoTokenExpiresAt: expiresAt } });
+  const link = `${preArrivalBaseUrl()}/customer/precheckin?token=${token}`;
+  if (email) {
+    try {
+      const { sendEmail } = await import('../../lib/mailer.js');
+      const name = reservation?.customer?.firstName || '';
+      await sendEmail({
+        to: email,
+        subject: 'Complete your loaner check-in before you arrive',
+        text: `${name ? 'Hi ' + name + ',\n\n' : ''}Save time at the counter — please upload your driver's license and insurance and confirm your details here before pickup:\n\n${link}\n\n(This link expires in 48 hours.)`,
+      });
+    } catch { /* best-effort */ }
+  }
+  return { ok: true, link, emailed: !!email };
 }
 
 function includeReservation() {
@@ -986,6 +1017,14 @@ export const dealershipLoanerService = {
     }
     await prisma.loanerAgreement.update({ where: { id: a.id }, data: { portalRequestHandledAt: new Date() } });
     return { ok: true, agreementId: a.id, applied: payload.apply === true };
+  },
+
+  /** Advisor: (re)send the pre-arrival pre-check-in link to the loaner customer. */
+  async sendPreArrivalLink(user, reservationId) {
+    const scope = tenantScope(user);
+    const row = await getLoanerReservationOrThrow(reservationId, scope);
+    const out = await issuePreArrivalPrecheckin(row);
+    return out;
   },
 
   async getReservation(user, reservationId) {
