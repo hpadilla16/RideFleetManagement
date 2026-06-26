@@ -2008,6 +2008,70 @@ export const rentalAgreementsService = {
     });
   },
 
+  // Loaner companion agreement (2026-06-26): a DEALERSHIP_LOANER reservation runs through the SAME
+  // checkout-session + QR inspection flow as a rental. It needs a RentalAgreement for the session,
+  // but with NO rental rates / mandatory fees / deposit (loaner billing lives on the reservation).
+  // This creates a minimal $0 agreement (customer + vehicle + locations + dates) so the unified
+  // wizard, QR inspection, and finalize cascade all work unchanged.
+  async startLoanerAgreementForCheckout(reservationId, scope = null) {
+    const reservation = await prisma.reservation.findFirst({
+      where: { id: reservationId, ...(scope?.tenantId ? { tenantId: scope.tenantId } : {}) },
+      include: { customer: true }
+    });
+    if (!reservation) throw new Error('Reservation not found');
+    if (reservation.status === 'CANCELLED' || reservation.status === 'NO_SHOW') {
+      throw new Error('Cannot start checkout for cancelled/no-show reservation');
+    }
+    const existing = await prisma.rentalAgreement.findUnique({ where: { reservationId } });
+    if (existing) return this.getById(existing.id);
+
+    let agreement;
+    try {
+      agreement = await prisma.rentalAgreement.create({
+        data: {
+          tenantId: reservation.tenantId || null,
+          agreementNumber: agreementNumber(),
+          reservationId,
+          vehicleId: reservation.vehicleId ?? null,
+          pickupAt: reservation.pickupAt,
+          returnAt: reservation.returnAt,
+          pickupLocationId: reservation.pickupLocationId,
+          returnLocationId: reservation.returnLocationId,
+          customerFirstName: reservation.customer?.firstName ?? 'Customer',
+          customerLastName: reservation.customer?.lastName ?? '-',
+          customerEmail: reservation.customer?.email ?? null,
+          customerPhone: reservation.customer?.phone ?? null,
+          dateOfBirth: reservation.customer?.dateOfBirth ?? null,
+          licenseNumber: reservation.customer?.licenseNumber ?? null,
+          licenseState: reservation.customer?.licenseState ?? null,
+          notes: reservation.notes
+          // No charges, fees, deposit, or rate: loaner billing is tracked on the reservation
+          // (loanerBillingMode + estimatedTotal). subtotal/taxes/total/balance default to 0.
+        }
+      });
+    } catch (e) {
+      if (String(e?.code || '') === 'P2002') {
+        const after = await prisma.rentalAgreement.findUnique({ where: { reservationId } });
+        if (after) return this.getById(after.id);
+      }
+      throw e;
+    }
+    await prisma.agreementDriver.create({
+      data: {
+        rentalAgreementId: agreement.id,
+        firstName: reservation.customer?.firstName ?? 'Customer',
+        lastName: reservation.customer?.lastName ?? '-',
+        email: reservation.customer?.email ?? null,
+        phone: reservation.customer?.phone ?? null,
+        licenseNumber: reservation.customer?.licenseNumber ?? null,
+        licenseState: reservation.customer?.licenseState ?? null,
+        dateOfBirth: reservation.customer?.dateOfBirth ?? null,
+        isPrimary: true
+      }
+    }).catch(() => {});
+    return this.getById(agreement.id);
+  },
+
   async startFromReservation(reservationId, scope = null) {
     const reservation = await prisma.reservation.findFirst({
       where: { id: reservationId, ...(scope?.tenantId ? { tenantId: scope.tenantId } : {}) },

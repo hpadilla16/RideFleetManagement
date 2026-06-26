@@ -44,7 +44,7 @@ async function createForReservation({ reservationId, tenantId, actorUserId }) {
   // rental in (or swap vehicles) before the customer signs anything.
   const resv = await prisma.reservation.findUnique({
     where: { id: reservationId },
-    select: { id: true, tenantId: true, vehicleId: true, pickupAt: true, returnAt: true },
+    select: { id: true, tenantId: true, vehicleId: true, pickupAt: true, returnAt: true, workflowMode: true },
   });
 
   // beta.116 — NO-CAR-NO-CHECKOUT guard. A reservation without a vehicle must
@@ -130,11 +130,22 @@ async function createForReservation({ reservationId, tenantId, actorUserId }) {
     },
   });
 
+  // Loaner checkout has no online payment (billing is COURTESY/WARRANTY/etc. on the reservation,
+  // or the CUSTOMER_PAY upgrade differential the advisor collects). Pre-stamp paymentCompletedAt
+  // so the PAID entry guard passes and the wizard skips the Spin payment step.
+  let finalSession = session;
+  if (String(resv?.workflowMode) === 'DEALERSHIP_LOANER') {
+    finalSession = await prisma.checkoutSession.update({
+      where: { id: session.id },
+      data: { paymentCompletedAt: new Date() },
+    });
+  }
+
   logger.info('[checkout-session] created', {
     sessionId: session.id, reservationId, agreementId,
   });
 
-  return session;
+  return finalSession;
 }
 
 /**
@@ -153,10 +164,17 @@ async function ensureAgreementExists({ reservationId, tenantId, actorUserId }) {
   });
   if (existing) return existing.id;
 
+  // Loaner reservations get a minimal $0 companion agreement (no rental rates/fees/deposit);
+  // rentals go through the full startFromReservation pricing path.
+  const wfRow = await prisma.reservation.findUnique({ where: { id: reservationId }, select: { workflowMode: true } });
+  const isLoaner = String(wfRow?.workflowMode) === 'DEALERSHIP_LOANER';
+
   try {
     const { rentalAgreementsService } = await import('../rental-agreements/rental-agreements.service.js');
     const scope = tenantId ? { tenantId } : null;
-    const created = await rentalAgreementsService.startFromReservation(reservationId, scope, actorUserId || null);
+    const created = isLoaner
+      ? await rentalAgreementsService.startLoanerAgreementForCheckout(reservationId, scope)
+      : await rentalAgreementsService.startFromReservation(reservationId, scope, actorUserId || null);
     logger.info('[checkout-session] auto-created agreement', {
       reservationId, agreementId: created?.id, actorUserId,
     });
