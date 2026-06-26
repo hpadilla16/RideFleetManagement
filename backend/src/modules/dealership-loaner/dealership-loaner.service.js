@@ -60,7 +60,7 @@ function includeReservation() {
     // Loaner reimagining: the signed packet lives on LoanerAgreement (status
     // ACTIVE once signed). Needed so the board badge reflects the SIGNATURE, not
     // just the borrower-checklist completion. (Ola2 2.4)
-    loanerAgreement: { select: { status: true } }
+    loanerAgreement: { select: { status: true, signedAt: true } }
   };
 }
 
@@ -507,7 +507,7 @@ function reservationCard(row) {
     // (Ola2 2.4) Agreement SIGNED state from LoanerAgreement.status. ACTIVE means
     // signed + keys out; RETURNED/CLOSED are past that. Drives the board badge.
     loanerAgreementStatus: row.loanerAgreement?.status || null,
-    agreementSigned: ['ACTIVE', 'RETURNED', 'CLOSED'].includes(String(row.loanerAgreement?.status || '').toUpperCase()),
+    agreementSigned: !!row.loanerAgreement?.signedAt || ['ACTIVE', 'RETURNED', 'CLOSED'].includes(String(row.loanerAgreement?.status || '').toUpperCase()),
     loanerBorrowerPacket: packet,
     loanerBillingContactName: row.loanerBillingContactName,
     loanerBillingContactEmail: row.loanerBillingContactEmail,

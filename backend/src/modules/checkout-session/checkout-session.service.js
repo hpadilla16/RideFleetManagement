@@ -442,6 +442,13 @@ async function transition({ id, toStep, actorUserId, metadata }) {
             where: { id: updated.agreementId },
             data: { status: 'FINALIZED', finalizedAt: new Date(), ...metricsPatch },
           }).catch(() => {});
+          // Loaner companion: advance the borrower's LoanerAgreement to ACTIVE so the portal,
+          // due-soon/overdue reminders (status:ACTIVE), and the dashboard badge reflect the
+          // checked-out loaner. Harmless for rentals (no LoanerAgreement). (best-effort)
+          await prisma.loanerAgreement.updateMany({
+            where: { reservationId: resv.id, status: 'DRAFT' },
+            data: { status: 'ACTIVE' },
+          }).catch(() => {});
 
           // Mileage history ("last entry wins" — same as the legacy finalize).
           if (checkoutOdometer != null && resv.vehicleId) {

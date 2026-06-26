@@ -310,7 +310,7 @@ function CheckinWizard({ token, me, logout }) {
     switch (step) {
       case 0:
         if (!reservation) return 'Cargando la reservación…';
-        if (!agreement) return 'No hay rental agreement vinculado a esta reservación — si es un loaner, usa el check-in del Loaner Program';
+        if (!agreement) return 'No hay un acuerdo vinculado a esta reservación todavía — completa primero el check-out (Start Check-out) para generarlo.';
         return 'Faltan datos de la reservación';
       case 1:
         return 'Captura al menos 1 foto del return';

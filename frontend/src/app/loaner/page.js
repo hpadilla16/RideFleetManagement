@@ -687,18 +687,25 @@ function LoanerProgramInner({ token, me, logout }) {
     );
   }
 
+  const focusQueue = (f) => {
+    setQueueFocus(f);
+    if (typeof document !== 'undefined') {
+      document.getElementById('loaner-queues')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+  };
+
   return (
     <AppShell me={me} logout={logout}>
       <section className="glass card-lg page-hero">
         <div className="hero-grid">
           <div className="hero-copy">
-            <span className="eyebrow">Dealership Loaner Foundation</span>
+            <span className="eyebrow">Dealership Loaner Program</span>
             <h1 className="page-title" style={{ fontSize: 'clamp(30px, 5vw, 54px)', lineHeight: 1.02 }}>
-              Service-lane loaners built on the same reservation, agreement, payment, and inspection spine.
+              Service-lane loaners on the same checkout, agreement, and inspection workflow as your rentals.
             </h1>
             <p>
-              This first slice covers intake, repair-order metadata, courtesy and insurance-backed loaners, quick search,
-              and direct jump-off into the same operational workflow the rest of the platform already uses.
+              Intake, repair-order tracking, courtesy and customer-pay loaners, customer self-service, and the same
+              checkout / check-in wizard your rentals use — all in one place.
             </p>
             <div className="hero-meta">
               <span className="hero-pill">Courtesy + customer-pay</span>
@@ -714,16 +721,16 @@ function LoanerProgramInner({ token, me, logout }) {
           <div className="glass card section-card">
             <div className="section-title">Loaner Snapshot</div>
             <div className="metric-grid">
-              <div className="metric-card"><span className="label">Open Loaners</span><strong>{metrics.openLoaners}</strong></div>
-              <div className="metric-card"><span className="label">Active Loaners</span><strong>{metrics.activeLoaners}</strong></div>
-              <div className="metric-card"><span className="label">Pickups Today</span><strong>{metrics.pickupsToday}</strong></div>
-              <div className="metric-card"><span className="label">Due Back Today</span><strong>{metrics.dueBackToday}</strong></div>
-              <div className="metric-card"><span className="label">Packet Pending</span><strong>{metrics.packetPending}</strong></div>
-              <div className="metric-card"><span className="label">Billing Attention</span><strong>{metrics.billingAttention}</strong></div>
-              <div className="metric-card"><span className="label">Return Exceptions</span><strong>{metrics.returnExceptions}</strong></div>
-              <div className="metric-card"><span className="label">Ready For Delivery</span><strong>{metrics.readyForDelivery}</strong></div>
-              <div className="metric-card"><span className="label">Overdue Returns</span><strong>{metrics.overdueReturns}</strong></div>
-              <div className="metric-card"><span className="label">Service Delays</span><strong>{metrics.serviceDelays}</strong></div>
+              <div className="metric-card" role="button" tabIndex={0} style={{ cursor: 'pointer' }} onClick={() => focusQueue('ALL')} onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') focusQueue('ALL'); }}><span className="label">Open Loaners</span><strong>{metrics.openLoaners}</strong></div>
+              <div className="metric-card" role="button" tabIndex={0} style={{ cursor: 'pointer' }} onClick={() => focusQueue('ALL')} onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') focusQueue('ALL'); }}><span className="label">Active Loaners</span><strong>{metrics.activeLoaners}</strong></div>
+              <div className="metric-card" role="button" tabIndex={0} style={{ cursor: 'pointer' }} onClick={() => focusQueue('INTAKE')} onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') focusQueue('INTAKE'); }}><span className="label">Pickups Today</span><strong>{metrics.pickupsToday}</strong></div>
+              <div className="metric-card" role="button" tabIndex={0} style={{ cursor: 'pointer' }} onClick={() => focusQueue('RETURNS')} onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') focusQueue('RETURNS'); }}><span className="label">Due Back Today</span><strong>{metrics.dueBackToday}</strong></div>
+              <div className="metric-card" role="button" tabIndex={0} style={{ cursor: 'pointer' }} onClick={() => focusQueue('INTAKE')} onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') focusQueue('INTAKE'); }}><span className="label">Packet Pending</span><strong>{metrics.packetPending}</strong></div>
+              <div className="metric-card" role="button" tabIndex={0} style={{ cursor: 'pointer' }} onClick={() => focusQueue('BILLING')} onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') focusQueue('BILLING'); }}><span className="label">Billing Attention</span><strong>{metrics.billingAttention}</strong></div>
+              <div className="metric-card" role="button" tabIndex={0} style={{ cursor: 'pointer' }} onClick={() => focusQueue('ALERTS')} onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') focusQueue('ALERTS'); }}><span className="label">Return Exceptions</span><strong>{metrics.returnExceptions}</strong></div>
+              <div className="metric-card" role="button" tabIndex={0} style={{ cursor: 'pointer' }} onClick={() => focusQueue('INTAKE')} onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') focusQueue('INTAKE'); }}><span className="label">Ready For Delivery</span><strong>{metrics.readyForDelivery}</strong></div>
+              <div className="metric-card" role="button" tabIndex={0} style={{ cursor: 'pointer' }} onClick={() => focusQueue('ALERTS')} onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') focusQueue('ALERTS'); }}><span className="label">Overdue Returns</span><strong>{metrics.overdueReturns}</strong></div>
+              <div className="metric-card" role="button" tabIndex={0} style={{ cursor: 'pointer' }} onClick={() => focusQueue('ADVISOR')} onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') focusQueue('ADVISOR'); }}><span className="label">Service Delays</span><strong>{metrics.serviceDelays}</strong></div>
             </div>
           </div>
         </div>
@@ -1126,7 +1133,6 @@ function LoanerProgramInner({ token, me, logout }) {
             <div className="section-title">Loaner Queues</div>
             <p className="ui-muted">Driveway and service-lane visibility for outgoing, active, and returning loaners.</p>
           </div>
-          <span className="status-chip neutral">Foundation Surface</span>
         </div>
 
         <div className="app-banner-list">

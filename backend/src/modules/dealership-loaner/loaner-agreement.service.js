@@ -619,9 +619,16 @@ export const loanerAgreementService = {
   },
 
   async _findPortalRowOrThrow(clean) {
-    const row = await prisma.loanerAgreement.findFirst({ where: { portalToken: clean } });
+    const row = await prisma.loanerAgreement.findFirst({ where: { portalToken: clean }, include: { reservation: { select: { status: true } } } });
     if (!row || row.status === 'VOID' || row.status === 'CLOSED') {
       const err = new Error('Portal link is invalid or no longer active');
+      err.statusCode = 404;
+      throw err;
+    }
+    // Reject portal actions once the loaner reservation is terminal (returned/cancelled) so a stale
+    // tab can't submit an extension/return after the fact.
+    if (['CHECKED_IN', 'CHECKED_IN_UNPAID', 'CANCELLED', 'NO_SHOW'].includes(String(row.reservation?.status || '').toUpperCase())) {
+      const err = new Error('This loaner is no longer active');
       err.statusCode = 404;
       throw err;
     }

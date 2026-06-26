@@ -263,6 +263,13 @@ export async function closeAgreementWithCheckinFees(
       data: { status: 'CHECKED_IN' }
     });
 
+    // Loaner companion: close the borrower's LoanerAgreement on return so the portal shows
+    // returned, reminders stop, and post-return portal requests are rejected. (best-effort)
+    await prisma.loanerAgreement.updateMany({
+      where: { reservationId: agreement.reservationId, status: { in: ['DRAFT', 'ACTIVE'] } },
+      data: { status: 'CLOSED' },
+    }).catch(() => {});
+
     // Bug #44 — car is back on the lot; release it to AVAILABLE
     // (respects IN_MAINTENANCE/OUT_OF_SERVICE/SOLD).
     await syncVehicleStatusForReservation(prisma, {
