@@ -141,7 +141,7 @@ export const publicLoanerService = {
             : null,
           agreement: {
             available: agreementAvailable,
-            url: agreementAvailable ? `${loanerPortalBaseUrl()}/customer/loaner-portal?token=${encodeURIComponent(agr.portalToken)}` : null,
+            url: agreementAvailable ? `${loanerPortalBaseUrl()}/customer/loaner-status?token=${encodeURIComponent(agr.portalToken)}` : null,
           },
         };
       }
