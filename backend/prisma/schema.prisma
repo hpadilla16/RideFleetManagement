@@ -652,7 +652,8 @@ model VehicleType {
   updatedAt   DateTime @updatedAt
 
   vehicles               Vehicle[]
-  reservations           Reservation[]
+  reservations           Reservation[]          @relation("ReservationVehicleType")
+  serviceReservations    Reservation[]          @relation("ReservationServiceVehicleType")
   rateItems              RateItem[]
   rateDailyPrices        RateDailyPrice[]
   hostVehicleSubmissions HostVehicleSubmission[]
@@ -1166,7 +1167,12 @@ model Reservation {
   vehicle   Vehicle? @relation(fields: [vehicleId], references: [id])
 
   vehicleTypeId String?
-  vehicleType   VehicleType? @relation(fields: [vehicleTypeId], references: [id])
+  vehicleType   VehicleType? @relation("ReservationVehicleType", fields: [vehicleTypeId], references: [id])
+
+  // Service vehicle's class (2026-06-25) = the customer's loaner ENTITLEMENT anchor. Null on
+  // legacy / non-loaner rows -> entitlement falls back to the assigned loaner's own class (delta $0).
+  serviceVehicleTypeId String?
+  serviceVehicleType   VehicleType? @relation("ReservationServiceVehicleType", fields: [serviceVehicleTypeId], references: [id])
 
   pickupAt DateTime
   returnAt DateTime
@@ -2487,16 +2493,25 @@ model ReservationAdditionalDriver {
   @@index([reservationId, createdAt])
 }
 
+// Distinguishes a rental price book from the loaner program's price book (2026-06-25). LOANER rates
+// are read ONLY by the loaner module and MUST be excluded from rental quoting (ratesService
+// .resolveForRental filters purpose != LOANER) so the two pricing systems never conflate.
+enum RatePurpose {
+  RENTAL
+  LOANER
+}
+
 model Rate {
-  id                  String    @id @default(cuid())
+  id                  String      @id @default(cuid())
   tenantId            String?
-  tenant              Tenant?   @relation(fields: [tenantId], references: [id])
+  tenant              Tenant?     @relation(fields: [tenantId], references: [id])
   rateCode            String
   name                String?
   locationId          String?
-  location            Location? @relation(fields: [locationId], references: [id])
+  location            Location?   @relation(fields: [locationId], references: [id])
   locationIds         String?
-  rateType            RateType  @default(MULTIPLE_CLASSES)
+  purpose             RatePurpose @default(RENTAL)
+  rateType            RateType    @default(MULTIPLE_CLASSES)
   calculationBy       String    @default("24_HOUR_TIME")
   averageBy           String?   @default("DATE_RANGE")
   daily               Decimal   @default(0) @db.Decimal(10, 2)

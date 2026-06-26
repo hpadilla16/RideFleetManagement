@@ -892,6 +892,7 @@ export const dealershipLoanerService = {
       serviceVehicleModel: payload.serviceVehicleModel || null,
       serviceVehiclePlate: payload.serviceVehiclePlate || null,
       serviceVehicleVin: payload.serviceVehicleVin || null,
+      serviceVehicleTypeId: payload.serviceVehicleTypeId ? String(payload.serviceVehicleTypeId) : null,
       loanerLiabilityAccepted: true,
       loanerProgramNotes: payload.loanerProgramNotes || null,
       loanerBillingStatus,

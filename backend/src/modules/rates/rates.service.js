@@ -633,6 +633,7 @@ export const ratesService = {
     const rates = await prisma.rate.findMany({
       where: {
         ...(scope?.tenantId ? { tenantId: scope.tenantId } : {}),
+        purpose: { not: 'LOANER' }, // rental lookup never returns loaner price book
         // Match by primary locationId OR by the multi-location string field
         // (locationIds is a comma-separated string of location IDs). This mirrors
         // how resolveForRental looks up rates that span locations.
@@ -654,6 +655,7 @@ export const ratesService = {
     return prisma.rate.findMany({
       where: {
         ...(scope?.tenantId ? { tenantId: scope.tenantId } : {}),
+        purpose: { not: 'LOANER' }, // rental rates admin never lists loaner price book
         ...(query
           ? {
               OR: [
@@ -751,6 +753,7 @@ export const ratesService = {
       where: {
         ...(scope?.tenantId ? { tenantId: scope.tenantId } : {}),
         ...(options?.displayOnline ? { displayOnline: true } : {}),
+        purpose: { not: 'LOANER' }, // isolation: loaner price book never quotes a rental
         isActive: true,
         active: true,
         [dayFlag]: true,

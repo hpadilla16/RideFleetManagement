@@ -27,6 +27,7 @@ import { useEffect, useState } from 'react';
 import { AuthGate } from '../../components/AuthGate';
 import { AppShell } from '../../components/AppShell';
 import { TLIntegrationPanel } from '../../components/settings/TLIntegrationPanel';
+import { LoanerRatesTab } from './LoanerRatesTab';
 import { API_BASE, api } from '../../lib/client';
 import { MODULE_DEFINITIONS } from '../../lib/moduleAccess';
 
@@ -50,6 +51,7 @@ const SETTINGS_TAB_SECTIONS = {
   locations: ['fees'],
   fees: ['fees'],
   feeRates: [],
+  loanerRates: [],
   rates: ['rates'],
   revenue: ['revenuePricing'],
   carSharing: ['carSharingSearchPlaces'],
@@ -2449,6 +2451,7 @@ function SettingsInner({ token, me, logout }) {
           <button onClick={() => setTab('locations')}>Locations</button>
           <button onClick={() => setTab('fees')}>Fees</button>
           <button onClick={() => setTab('feeRates')}>Inspection Fees</button>
+          <button onClick={() => setTab('loanerRates')}>Loaner Rates</button>
           <button onClick={() => setTab('stopSales')}>Stop Sales</button>
           <button onClick={() => setTab('rates')}>Rates</button>
           <button onClick={() => setTab('revenue')}>Revenue</button>
@@ -3372,6 +3375,15 @@ function SettingsInner({ token, me, logout }) {
             scopedSettingsPath={scopedSettingsPath}
             activeSettingsTenantId={activeSettingsTenantId}
             locations={locations}
+            onPageMsg={setMsg}
+          />
+        )}
+
+        {tab === 'loanerRates' && (
+          <LoanerRatesTab
+            token={token}
+            tenantName={isSuper ? (activeSettingsTenant?.name || 'Tenant') : (me?.tenant?.name || 'Current tenant')}
+            scopedSettingsPath={scopedSettingsPath}
             onPageMsg={setMsg}
           />
         )}

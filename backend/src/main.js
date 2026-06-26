@@ -61,6 +61,7 @@ import { employeeAppRouter } from './modules/employee-app/employee-app.routes.js
 import { dealershipLoanerRouter } from './modules/dealership-loaner/dealership-loaner.routes.js';
 import { loanerAgreementRouter, loanerSignaturePublicRouter, loanerPortalPublicRouter } from './modules/dealership-loaner/loaner-agreement.routes.js';
 import { publicLoanerRouter } from './modules/dealership-loaner/public-loaner.routes.js';
+import { loanerRateRouter } from './modules/dealership-loaner/loaner-rate.routes.js';
 import { longTermRouter } from './modules/long-term/long-term.routes.js';
 import { incidentReportRouter } from './modules/incident-report/incident-report.routes.js';
 import { issueCenterRouter, publicIssueCenterRouter } from './modules/issue-center/issue-center.routes.js';
@@ -274,6 +275,7 @@ app.use('/api/people', requireAuth, tenantRateLimit, requireModuleAccess('people
 // inside the router file. DO NOT add requireModuleAccess here — would
 // break the preview hook in /reservations/:id/checkin-wizard.
 app.use('/api/settings/fee-rates', requireAuth, tenantRateLimit, feeRatesRouter);
+app.use('/api/settings/loaner-rates', requireAuth, tenantRateLimit, requireModuleAccess('settings'), requireRole('ADMIN', 'OPS'), loanerRateRouter);
 app.use('/api/settings', requireAuth, tenantRateLimit, requireModuleAccess('settings'), settingsRouter);
 app.use('/api/tenants', requireAuth, tenantRateLimit, requireModuleAccess('tenants'), tenantsRouter);
 

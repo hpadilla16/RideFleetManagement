@@ -1630,6 +1630,7 @@ export const reservationsService = {
         serviceVehicleModel: data.serviceVehicleModel ?? null,
         serviceVehiclePlate: data.serviceVehiclePlate ?? null,
         serviceVehicleVin: data.serviceVehicleVin ?? null,
+        serviceVehicleTypeId: data.serviceVehicleTypeId ?? null,
         loanerLiabilityAccepted: !!data.loanerLiabilityAccepted,
         loanerLiabilityAcceptedAt: data.loanerLiabilityAcceptedAt
           ? new Date(data.loanerLiabilityAcceptedAt)
