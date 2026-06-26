@@ -1011,6 +1011,13 @@ export const dealershipLoanerService = {
     if (payload.apply === true) {
       const newReturn = a.portalRequestKind === 'EXTENSION' ? a.requestedReturnAt : a.returnScheduledAt;
       if (newReturn) {
+        // Validate before pushing the date onto the reservation: must be a
+        // real date, in the future, and after pickup (M1).
+        const nr = new Date(newReturn);
+        const resv = await prisma.reservation.findUnique({ where: { id: a.reservationId }, select: { pickupAt: true } });
+        if (Number.isNaN(nr.getTime())) { const e = new Error('Requested date is invalid'); e.statusCode = 400; throw e; }
+        if (nr.getTime() <= Date.now()) { const e = new Error('Requested return date must be in the future'); e.statusCode = 400; throw e; }
+        if (resv?.pickupAt && nr.getTime() <= new Date(resv.pickupAt).getTime()) { const e = new Error('Requested return date must be after pickup'); e.statusCode = 400; throw e; }
         await prisma.reservation.update({ where: { id: a.reservationId }, data: { returnAt: newReturn } });
         await prisma.loanerAgreement.update({ where: { id: a.id }, data: { returnAt: newReturn } });
       }

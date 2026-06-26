@@ -89,21 +89,22 @@ loanerAgreementRouter.post('/:id/damage-points', wrap(async (req, res) => {
   res.status(201).json(await loanerAgreementService.addDamagePoint(req.user, req.params.id, req.body || {}));
 }));
 
-loanerAgreementRouter.post('/:id/sign', wrap(async (req, res) => {
-  res.json(await loanerAgreementService.sign(req.user, req.params.id, { ...(req.body || {}), ip: req.ip }));
-}));
+const LOANER_ROUTE_RETIRED = 'Retired: loaners now use the unified checkout/check-in wizard (/reservations/:id/checkout-wizard-v2 + /checkin-wizard).';
+loanerAgreementRouter.post('/:id/sign', (req, res) => {
+  res.status(410).json({ error: LOANER_ROUTE_RETIRED });
+});
 
-loanerAgreementRouter.post('/:id/signature-token', wrap(async (req, res) => {
-  res.json(await loanerAgreementService.issueSignatureToken(req.user, req.params.id));
-}));
+loanerAgreementRouter.post('/:id/signature-token', (req, res) => {
+  res.status(410).json({ error: LOANER_ROUTE_RETIRED });
+});
 
-loanerAgreementRouter.post('/:id/check-in', wrap(async (req, res) => {
-  res.json(await loanerAgreementService.checkIn(req.user, req.params.id, req.body || {}));
-}));
+loanerAgreementRouter.post('/:id/check-in', (req, res) => {
+  res.status(410).json({ error: LOANER_ROUTE_RETIRED });
+});
 
-loanerAgreementRouter.post('/:id/close', wrap(async (req, res) => {
-  res.json(await loanerAgreementService.close(req.user, req.params.id, req.body || {}));
-}));
+loanerAgreementRouter.post('/:id/close', (req, res) => {
+  res.status(410).json({ error: LOANER_ROUTE_RETIRED });
+});
 
 // --------------------- Public token-based signing ---------------------
 export const loanerSignaturePublicRouter = Router();

@@ -494,7 +494,7 @@ function StepRenderer({ session, reservation, token, onAdvance }) {
       // Loaners have no online payment (billing is on the reservation; backend pre-stamps
       // paymentCompletedAt). Skip the Spin payment step entirely.
       return reservation.workflowMode === 'DEALERSHIP_LOANER'
-        ? <StepBridge label="No payment required (loaner)" onNext={() => onAdvance('PAID')} />
+        ? <LoanerPaymentBridge reservation={reservation} onNext={() => onAdvance('PAID')} />
         : <Step3PaymentPending session={session} reservation={reservation} token={token} onPaid={() => onAdvance('PAID')} />;
     case 'PAID':
       return <StepBridge label="Payment captured" onNext={() => onAdvance('INSPECTION_HANDOFF')} />;
@@ -1444,31 +1444,116 @@ function Step5Metrics({ session, reservation, token, onNext }) {
 
 function Step6CustomerSign({ session, token, onSigned }) {
   const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState('');
+  const [signerName, setSignerName] = useState('');
+  const [drawing, setDrawing] = useState(false);
+  const [hasInk, setHasInk] = useState(false);
+  const canvasRef = useRef(null);
+
+  const pos = (e) => {
+    const c = canvasRef.current;
+    if (!c) return null;
+    const r = c.getBoundingClientRect();
+    const p = e.touches?.[0] || e;
+    return { x: p.clientX - r.left, y: p.clientY - r.top };
+  };
+  const start = (e) => {
+    e.preventDefault?.();
+    const c = canvasRef.current;
+    if (!c) return;
+    const ctx = c.getContext('2d');
+    const p = pos(e);
+    if (!p) return;
+    ctx.beginPath();
+    ctx.moveTo(p.x, p.y);
+    setDrawing(true);
+  };
+  const move = (e) => {
+    if (!drawing) return;
+    e.preventDefault?.();
+    const c = canvasRef.current;
+    if (!c) return;
+    const ctx = c.getContext('2d');
+    const p = pos(e);
+    if (!p) return;
+    ctx.lineWidth = 2;
+    ctx.lineCap = 'round';
+    ctx.strokeStyle = '#111827';
+    ctx.lineTo(p.x, p.y);
+    ctx.stroke();
+    setHasInk(true);
+  };
+  const end = () => setDrawing(false);
+  const clearSig = () => {
+    const c = canvasRef.current;
+    if (!c) return;
+    c.getContext('2d').clearRect(0, 0, c.width, c.height);
+    setHasInk(false);
+  };
+
   const submit = async () => {
+    setErr('');
+    const c = canvasRef.current;
+    if (!c) return setErr('Signature pad unavailable');
+    const signatureDataUrl = c.toDataURL('image/png');
+    if (!hasInk || !signatureDataUrl || signatureDataUrl.length < 2000) {
+      return setErr('Please have the customer sign before finalizing.');
+    }
     setBusy(true);
     try {
-      // Stamp the customer-sign side-effect so the entry guard on
-      // CLOSED passes when FINALIZING auto-advances.
-      await api(`/api/checkout-sessions/${session.id}/stamp`, {
+      // Persist the in-person signature to the agreement AND stamp
+      // customerSignedAt so the wizard advances CUSTOMER_SIGN_PENDING →
+      // FINALIZING → CLOSED. (Replaces the old simulate stub.)
+      await api(`/api/checkout-sessions/${session.id}/customer-signature`, {
         method: 'POST',
-        body: JSON.stringify({ field: 'customerSignedAt', value: new Date().toISOString() }),
+        body: JSON.stringify({ signatureDataUrl, signerName: signerName.trim() || undefined }),
       }, token);
       onSigned();
-    } catch (err) {
-      // parent toast
+    } catch (e) {
+      setErr(e?.message || 'Could not save signature. Please try again.');
     } finally {
       setBusy(false);
     }
   };
+
   return (
     <div style={cardStyle}>
       <h3 style={h3Style}>Step 6 · Customer signs inspection</h3>
-      <p style={{ color: '#6B7280' }}>
-        Phase 1 stub. Real flow: customer signs on the agent's mobile, which posts back to the public route and stamps customerSignedAt.
+      <p style={{ color: '#6B7280', marginTop: 0 }}>
+        Have the customer sign below to acknowledge the vehicle condition and finalize the agreement.
+        (If the inspection was pushed to the customer's phone, they sign there instead and this step completes automatically.)
       </p>
-      <button style={primaryBtn} onClick={submit} disabled={busy}>
-        {busy ? 'Saving…' : 'Simulate signature → finalize'}
-      </button>
+      <label style={{ display: 'block', fontSize: 13, color: '#374151', marginBottom: 6 }}>Signer name (optional)</label>
+      <input
+        value={signerName}
+        onChange={(e) => setSignerName(e.target.value)}
+        placeholder="Customer name"
+        style={{ width: '100%', maxWidth: 360, padding: '8px 10px', border: '1px solid #D1D5DB', borderRadius: 8, marginBottom: 12, fontSize: 14 }}
+      />
+      <div style={{ border: '1px solid #D1D5DB', borderRadius: 8, background: '#fff', display: 'inline-block', touchAction: 'none' }}>
+        <canvas
+          ref={canvasRef}
+          width={520}
+          height={180}
+          style={{ display: 'block', borderRadius: 8, cursor: 'crosshair', maxWidth: '100%' }}
+          onMouseDown={start}
+          onMouseMove={move}
+          onMouseUp={end}
+          onMouseLeave={end}
+          onTouchStart={start}
+          onTouchMove={move}
+          onTouchEnd={end}
+        />
+      </div>
+      {err ? <p style={{ color: '#B91C1C', fontSize: 13 }}>{err}</p> : null}
+      <div style={{ display: 'flex', gap: 10, marginTop: 12 }}>
+        <button style={{ ...primaryBtn, background: '#fff', color: '#374151', border: '1px solid #D1D5DB' }} onClick={clearSig} disabled={busy} type="button">
+          Clear
+        </button>
+        <button style={primaryBtn} onClick={submit} disabled={busy} type="button">
+          {busy ? 'Saving…' : 'Sign → finalize'}
+        </button>
+      </div>
     </div>
   );
 }
@@ -1481,6 +1566,44 @@ function StepBridge({ label, onNext }) {
     return () => clearTimeout(t);
   }, []);
   return <div style={cardStyle}><h3 style={h3Style}>{label} ✓</h3></div>;
+}
+
+// Loaner "payment" step. No gateway charge ever runs for a loaner. When the
+// billing mode is CUSTOMER_PAY and there's a class-upgrade differential, we
+// surface the amount to the advisor (instead of silently auto-advancing) so
+// it gets collected and settled in the Billing tab. Courtesy / warranty /
+// internal / $0 loaners just confirm and move on.
+function LoanerPaymentBridge({ reservation, onNext }) {
+  const amount = Number(reservation?.estimatedTotal || 0);
+  const mode = String(reservation?.loanerBillingMode || '').toUpperCase();
+  const status = String(reservation?.loanerBillingStatus || '').toUpperCase();
+  const needsCollection = mode === 'CUSTOMER_PAY' && amount > 0 && status !== 'SETTLED';
+
+  useEffect(() => {
+    if (!needsCollection) {
+      const t = setTimeout(onNext, 500);
+      return () => clearTimeout(t);
+    }
+  }, [needsCollection]);
+
+  if (!needsCollection) {
+    return <div style={cardStyle}><h3 style={h3Style}>No payment required (loaner) ✓</h3></div>;
+  }
+
+  return (
+    <div style={cardStyle}>
+      <h3 style={h3Style}>Loaner — collect upgrade differential</h3>
+      <div style={{ background: '#FEF3C7', border: '1px solid #FCD34D', borderRadius: 8, padding: '12px 14px', margin: '8px 0 12px' }}>
+        <div style={{ fontSize: 22, fontWeight: 700, color: '#92400E' }}>${amount.toFixed(2)}</div>
+        <div style={{ fontSize: 13, color: '#92400E' }}>Class-upgrade differential · Bill mode: Customer pays</div>
+      </div>
+      <p style={{ color: '#6B7280', marginTop: 0, fontSize: 14 }}>
+        No online charge is taken here. Collect this from the customer and mark it settled in the
+        reservation's <strong>Billing</strong> tab. Continue to finish checkout.
+      </p>
+      <button style={primaryBtn} onClick={onNext} type="button">Acknowledged — continue</button>
+    </div>
+  );
 }
 
 function StepClosed({ reservation }) {

@@ -118,6 +118,26 @@ checkoutSessionRouter.post('/:id/stamp', async (req, res) => {
 });
 
 // ---------------------------------------------------------------------
+// POST /api/checkout-sessions/:id/customer-signature
+//   body: { signatureDataUrl, signerName? } — persists the customer's
+//   in-person Step 6 signature to the agreement and stamps customerSignedAt.
+// ---------------------------------------------------------------------
+checkoutSessionRouter.post('/:id/customer-signature', async (req, res) => {
+  try {
+    const { signatureDataUrl, signerName } = req.body || {};
+    const session = await checkoutSessionService.saveCustomerSignature({
+      id: req.params.id,
+      signatureDataUrl,
+      signerName,
+      customerIp: req.ip,
+    });
+    res.json(session);
+  } catch (err) {
+    handleError(res, err);
+  }
+});
+
+// ---------------------------------------------------------------------
 // POST /api/checkout-sessions/:id/terms-token
 //   Mint a TERMS_SIGNING QR token (15-min TTL).
 // ---------------------------------------------------------------------

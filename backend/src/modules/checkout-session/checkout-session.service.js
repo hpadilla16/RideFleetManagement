@@ -563,6 +563,53 @@ async function stampSideEffect({ id, field, value }) {
 }
 
 /**
+ * Persist the customer's final signature captured on the AGENT'S desktop
+ * (Step 6 of the wizard) — the in-person counterpart to the mobile
+ * inspection's signature submit. Writes the image to the agreement's
+ * tcSignature* columns (same fields the PDF builder reads) and stamps
+ * customerSignedAt so the wizard can advance CUSTOMER_SIGN_PENDING ->
+ * FINALIZING -> CLOSED. Replaces the old "Simulate signature" stub.
+ */
+async function saveCustomerSignature({ id, signatureDataUrl, signerName, customerIp }) {
+  if (!id) throw new CheckoutSessionError('session id required', 400);
+  if (!signatureDataUrl || String(signatureDataUrl).length < 200) {
+    throw new CheckoutSessionError('A signature is required before finalizing.', 400, 'SIGNATURE_REQUIRED');
+  }
+  const session = await prisma.checkoutSession.findUnique({
+    where: { id },
+    select: { id: true, events: true, agreementId: true, reservationId: true },
+  });
+  if (!session) throw new CheckoutSessionError('Session not found', 404);
+  if (!session.agreementId) throw new CheckoutSessionError('No agreement linked to this session', 409);
+
+  const now = new Date();
+  const [, updated] = await prisma.$transaction([
+    prisma.rentalAgreement.update({
+      where: { id: session.agreementId },
+      data: {
+        tcSignatureDataUrl: signatureDataUrl,
+        tcSignedAt: now,
+        ...(signerName ? { tcSignerName: String(signerName).slice(0, 200) } : {}),
+        ...(customerIp ? { tcCustomerIp: customerIp } : {}),
+      },
+    }),
+    prisma.checkoutSession.update({
+      where: { id },
+      data: {
+        customerSignedAt: now,
+        events: appendEvent(session.events, {
+          kind: 'CUSTOMER_SIGNED_ON_DESKTOP',
+          at: now.toISOString(),
+          signerName: signerName || null,
+          customerIp: customerIp || null,
+        }),
+      },
+    }),
+  ]);
+  return updated;
+}
+
+/**
  * Mint a single-use QR token bound to this session's reservation. The
  * customer's phone (TERMS_SIGNING) or the agent's mobile (MOBILE_INSPECTION)
  * exchanges this token at a public route to assert their session without
@@ -744,6 +791,7 @@ export const checkoutSessionService = {
   getByReservationId,
   transition,
   stampSideEffect,
+  saveCustomerSignature,
   mintHandoffToken,
   exchangeHandoffToken,
   setDeclinedInsurance,
