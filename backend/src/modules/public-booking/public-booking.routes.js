@@ -494,6 +494,61 @@ publicBookingRouter.post(
   },
 );
 
+// POST /api/public/booking/cancel — self-serve cancellation for a website
+// RENTAL reservation. Body: { reservationNumber, email }. Honors the 24h
+// free-cancellation window. (/trips/:tripCode/cancel above is the car-sharing
+// equivalent, keyed by tripCode.)
+publicBookingRouter.post(
+  '/cancel',
+  bookingWriteGuard,
+  async (req, res, next) => {
+    try {
+      assertPlainObject(req.body || {}, 'cancel payload');
+      res.json(
+        await publicBookingService.cancelGuestBooking({
+          ...(req.body || {}),
+          tenantId: req.publicTokenTenantId || null,
+        }),
+      );
+    } catch (error) {
+      const msg = String(error?.message || '');
+      if (/not found/i.test(msg)) return res.status(404).json({ error: msg });
+      if (/required|match|window|cannot be cancelled/i.test(msg)) {
+        return res.status(400).json({ error: msg });
+      }
+      next(error);
+    }
+  },
+);
+
+// POST /api/public/booking/:reservationRef/documents — license / insurance
+// upload for a website RENTAL reservation. Body: { email, license?, insurance? }
+// as base64 data URLs (jpeg/png/heic/pdf, max 8 MB). Email must match the
+// reservation's customer. Stored on Customer.idPhotoUrl / insuranceDocumentUrl
+// for admin pre-check-in review.
+publicBookingRouter.post(
+  '/:reservationRef/documents',
+  bookingWriteGuard,
+  async (req, res, next) => {
+    try {
+      assertPlainObject(req.body || {}, 'documents payload');
+      res.json(
+        await publicBookingService.submitBookingDocuments(
+          req.params.reservationRef,
+          { ...(req.body || {}), tenantId: req.publicTokenTenantId || null },
+        ),
+      );
+    } catch (error) {
+      const msg = String(error?.message || '');
+      if (/not found/i.test(msg)) return res.status(404).json({ error: msg });
+      if (/required|match|invalid|too large|unsupported|base64/i.test(msg)) {
+        return res.status(400).json({ error: msg });
+      }
+      next(error);
+    }
+  },
+);
+
 // Sprint 6 — Flutter payment WebView.
 //
 // POST /api/public/booking/trips/:tripCode/payment-session

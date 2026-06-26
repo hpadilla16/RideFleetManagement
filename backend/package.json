@@ -15,7 +15,7 @@
     "test:stop-sales": "node --test src/modules/stop-sales/stop-sales.test.mjs",
     "test:review-email": "node --test src/modules/reservations/review-email.test.mjs",
     "test:reservations": "node --test src/modules/reservations/reservation-extend.test.mjs",
-    "test:public-booking": "node --test src/modules/public-booking/public-booking.test.mjs src/modules/public-booking/payment-session.test.mjs src/modules/public-booking/payarc-hosted-fields.test.mjs src/modules/public-booking/account-deletion.test.mjs",
+    "test:public-booking": "node --test src/modules/public-booking/public-booking.test.mjs src/modules/public-booking/payment-session.test.mjs src/modules/public-booking/payarc-hosted-fields.test.mjs src/modules/public-booking/account-deletion.test.mjs src/modules/public-booking/public-booking-rental-self-serve.test.mjs",
     "test:planner": "node --test src/modules/planner/planner.service.test.mjs",
     "test:rates": "node --test src/modules/rates/revenue-pricing.test.mjs",
     "test:market-scraper": "node --test src/modules/market-scraper/market-scrape-profile.test.mjs src/modules/market-scraper/market-scrape-runner.test.mjs src/modules/market-scraper/market-scrape-comparison.test.mjs src/modules/market-scraper/market-scrape-correction.test.mjs",

@@ -1273,6 +1273,111 @@ export const publicBookingService = {
     return { ok: true, tripCode: trip.tripCode, status: 'CANCELLED' };
   },
 
+  // Public self-serve cancellation for a website RENTAL reservation, keyed by
+  // reservationNumber + email (the rental analog of cancelGuestTrip, which only
+  // works for car-sharing Trips). Honors the advertised 24h free-cancellation window.
+  async cancelGuestBooking(payload = {}) {
+    const email = normalizeEmail(payload?.email);
+    const reservationNumber = String(payload?.reservationNumber || '').trim();
+    const tenantId = payload?.tenantId || null;
+    if (!email) throw new Error('email is required');
+    if (!reservationNumber) throw new Error('reservationNumber is required');
+
+    const reservation = await prisma.reservation.findFirst({
+      where: { reservationNumber, ...(tenantId ? { tenantId } : {}) },
+      select: {
+        id: true, reservationNumber: true, status: true, pickupAt: true, tenantId: true,
+        customer: { select: { email: true, firstName: true } },
+        pickupLocation: { select: { name: true } },
+      },
+    });
+    if (!reservation) throw new Error('Reservation not found');
+
+    const custEmail = normalizeEmail(reservation.customer?.email);
+    if (!custEmail || custEmail !== email) {
+      throw new Error('email does not match this reservation');
+    }
+
+    const status = String(reservation.status || '').toUpperCase();
+    const CANCELLABLE = ['NEW', 'CONFIRMED'];
+    if (!CANCELLABLE.includes(status)) {
+      throw new Error(`Reservation cannot be cancelled in status ${reservation.status}`);
+    }
+
+    const pickupAt = reservation.pickupAt;
+    const hoursToPickup = pickupAt ? (new Date(pickupAt).getTime() - Date.now()) / 3600000 : null;
+    if (hoursToPickup == null || hoursToPickup <= 24) {
+      throw new Error('Free cancellation window has passed (cancellations are free up to 24 hours before pickup). Please contact us to cancel this reservation.');
+    }
+
+    await prisma.$transaction([
+      prisma.reservation.update({ where: { id: reservation.id }, data: { status: 'CANCELLED' } }),
+      // Keep any backing car-sharing Trip in sync (no-op for plain website rentals).
+      prisma.trip.updateMany({ where: { reservationId: reservation.id }, data: { status: 'CANCELLED' } }),
+    ]);
+
+    // Best-effort guest confirmation — never fail the cancel on email.
+    try {
+      await sendEmail({
+        to: custEmail,
+        subject: `Reservation ${reservation.reservationNumber} cancelled`,
+        text: [
+          `Your reservation ${reservation.reservationNumber} has been cancelled.`,
+          reservation.pickupLocation?.name ? `Location: ${reservation.pickupLocation.name}` : '',
+          'If this was a mistake, please contact us to rebook.',
+        ].filter(Boolean).join('\n'),
+      });
+    } catch (err) {
+      console.warn('[booking-cancel] failed to send guest confirmation', err);
+    }
+
+    return { ok: true, reservationNumber: reservation.reservationNumber, status: 'CANCELLED' };
+  },
+
+  // Public license / insurance upload for a website RENTAL reservation, keyed by
+  // reservationNumber + email. Stores base64 images on the Customer record
+  // (idPhotoUrl / insuranceDocumentUrl) — the same fields the admin pre-check-in
+  // checklist + pickup flow already read.
+  async submitBookingDocuments(reservationRef, payload = {}) {
+    const reservationNumber = String(reservationRef || '').trim();
+    const email = normalizeEmail(payload?.email);
+    const tenantId = payload?.tenantId || null;
+    if (!reservationNumber) throw new Error('reservationNumber is required');
+    if (!email) throw new Error('email is required');
+
+    const reservation = await prisma.reservation.findFirst({
+      where: { reservationNumber, ...(tenantId ? { tenantId } : {}) },
+      select: {
+        id: true, reservationNumber: true, status: true, customerId: true,
+        customer: { select: { email: true } },
+      },
+    });
+    if (!reservation) throw new Error('Reservation not found');
+    const custEmail = normalizeEmail(reservation.customer?.email);
+    if (!custEmail || custEmail !== email) {
+      throw new Error('email does not match this reservation');
+    }
+    if (!reservation.customerId) throw new Error('Reservation has no customer on file');
+
+    const data = {};
+    const submitted = [];
+    if (payload.license != null) {
+      data.idPhotoUrl = _validateDocDataUrl(payload.license, 'license');
+      submitted.push('LICENSE');
+    }
+    if (payload.insurance != null) {
+      data.insuranceDocumentUrl = _validateDocDataUrl(payload.insurance, 'insurance');
+      submitted.push('INSURANCE');
+    }
+    if (submitted.length === 0) {
+      throw new Error('At least one of license or insurance is required');
+    }
+
+    await prisma.customer.update({ where: { id: reservation.customerId }, data });
+
+    return { ok: true, reservationNumber: reservation.reservationNumber, submitted, reservationStatus: reservation.status };
+  },
+
   async getHostStatus(user) {
     if (!user?.id) throw Object.assign(new Error('Unauthorized'), { status: 401 });
 
