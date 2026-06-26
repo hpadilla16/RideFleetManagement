@@ -7,6 +7,7 @@ import { AuthGate } from '../../components/AuthGate';
 import { AppShell } from '../../components/AppShell';
 import { api, API_BASE } from '../../lib/client';
 import { LoanerRequestsPanel } from './LoanerRequestsPanel';
+import { CustomerRequestsPanel } from './CustomerRequestsPanel';
 
 const EMPTY_FORM = {
   customerId: '',
@@ -536,14 +537,13 @@ function LoanerProgramInner({ token, me, logout }) {
       }, token);
       setForm(EMPTY_FORM);
       try { localStorage.removeItem(LOANER_INTAKE_FORM_KEY); } catch {}
-      // 2026-06-06 (loaner Ola 2.3): clear feedback + leave the form so the
-      // advisor knows it was created. Before, the form just blanked and looked
-      // like a failure → re-submits → duplicate loaners. Redirect straight into
-      // the check-out wizard for the new reservation; fall back to the dashboard
-      // card if the id is missing.
+      // 2026-06-26 (loaner redesign P3): land on the reservation detail HUB after intake — the
+      // advisor reviews the loaner, then clicks "Check out" when the customer is present (matches the
+      // rental flow). Previously it jumped straight into the wizard, confusing when the customer
+      // wasn't there yet. Falls back to the dashboard card if the id is missing.
       if (payload?.id) {
-        setMsg(`Loaner reservation ${payload?.reservationNumber || ''} created — opening check-out…`);
-        router.push(`/reservations/${payload.id}/checkout-wizard-v2`);
+        setMsg(`Loaner reservation ${payload?.reservationNumber || ''} created — opening reservation…`);
+        router.push(`/reservations/${payload.id}`);
         return;
       }
       setMsg(`Loaner reservation ${payload?.reservationNumber || ''} created`);
@@ -1135,6 +1135,7 @@ function LoanerProgramInner({ token, me, logout }) {
           <button type="button" className={queueFocus === 'ALERTS' ? '' : 'button-subtle'} onClick={() => setQueueFocus('ALERTS')}>Alerts</button>
         </div>
 
+        <CustomerRequestsPanel token={token} />
         <LoanerRequestsPanel token={token} />
 
         {queueFocus === 'ALL' ? (

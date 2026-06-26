@@ -1341,10 +1341,10 @@ function ReservationDetailInner({ token, me, logout }) {
   const canMarkDocsReviewed = precheckinStatus.hasSubmitted || precheckinStatus.isChecklistComplete;
   const readyNeedsOverride = !precheckinStatus.isChecklistComplete;
   const isLoanerWorkflow = String(row?.workflowMode || '').toUpperCase() === 'DEALERSHIP_LOANER';
-  // Loaner reservations have a null rentalAgreement (they use loaner-agreements),
-  // so the generic rentals wizard dead-ends. Route them to the dedicated loaner flow.
-  const checkinHref = isLoanerWorkflow ? `/loaner/checkin/${id}` : `/reservations/${id}/checkin-wizard`;
-  const checkoutHref = isLoanerWorkflow ? `/loaner/checkout/${id}` : `/reservations/${id}/checkout-wizard-v2`;
+  // Unified checkout (2026-06-26): loaners now run the SAME checkout-session + QR wizard as rentals
+  // (a $0 companion RentalAgreement backs the loaner checkout), so both modes use the shared routes.
+  const checkinHref = `/reservations/${id}/checkin-wizard`;
+  const checkoutHref = `/reservations/${id}/checkout-wizard-v2`;
   const loanerPacketComplete = useMemo(() => {
     return !!(
       loanerPacketForm.driverLicenseChecked &&
