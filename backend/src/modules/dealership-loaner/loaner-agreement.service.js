@@ -636,26 +636,30 @@ export const loanerAgreementService = {
   /** Best-effort fan-out when a borrower submits a portal request (no throw). */
   async _notifyPortalRequest(row, kind, whenISO, note) {
     try {
+      const { parseLocationConfig } = await import('../../lib/location-config.js');
+      const { sendEmail } = await import('../../lib/mailer.js');
       const resv = await prisma.reservation.findUnique({
         where: { id: row.reservationId },
-        select: { reservationNumber: true, serviceAdvisorName: true, serviceAdvisorPhone: true, serviceAdvisorEmail: true, repairOrderNumber: true }
+        select: {
+          reservationNumber: true, repairOrderNumber: true, serviceAdvisorName: true, serviceAdvisorEmail: true,
+          pickupLocation: { select: { name: true, locationConfig: true } }
+        }
       });
       const label = kind === 'EXTENSION' ? 'extension' : 'return';
       const who = [row.customerFirstName, row.customerLastName].filter(Boolean).join(' ') || 'A loaner customer';
       const when = whenISO ? new Date(whenISO).toLocaleString('en-US', { timeZone: 'America/Puerto_Rico' }) : '';
       const ro = resv?.repairOrderNumber ? ` (RO ${resv.repairOrderNumber})` : '';
-      const advisorMsg = `Loaner ${label} request${ro}: ${who} requested ${when}.${note ? ' Note: ' + note : ''}`;
-      // Advisor SMS (best-effort)
-      if (resv?.serviceAdvisorPhone && row.tenantId) {
-        try { const { smsService } = await import('../sms/sms.service.js'); await smsService.sendCustom({ to: resv.serviceAdvisorPhone, body: advisorMsg, tenantId: row.tenantId }); } catch {}
+      const locEmail = parseLocationConfig(resv?.pickupLocation?.locationConfig)?.locationEmail || '';
+      const body = `Loaner ${label} request${ro}: ${who} requested ${when || '(no date provided)'}.`
+        + (note ? ` Note: ${note}` : '') + (resv?.reservationNumber ? ` [${resv.reservationNumber}]` : '');
+      // Tenant notification -> the LOCATION email (primary); advisor email as an additional recipient. Email only (no SMS).
+      const recipients = [...new Set([locEmail, resv?.serviceAdvisorEmail].filter(Boolean))];
+      for (const to of recipients) {
+        try { await sendEmail({ to, subject: `Loaner ${label} request${ro}`, text: body }); } catch {}
       }
-      // Advisor email (best-effort)
-      if (resv?.serviceAdvisorEmail) {
-        try { const { sendEmail } = await import('../../lib/mailer.js'); await sendEmail({ to: resv.serviceAdvisorEmail, subject: `Loaner ${label} request${ro}`, text: advisorMsg }); } catch {}
-      }
-      // Customer confirmation SMS — make the "we'll confirm" promise real (best-effort)
-      if (row.customerPhone && row.tenantId) {
-        try { const { smsService } = await import('../sms/sms.service.js'); await smsService.sendCustom({ to: row.customerPhone, body: `We received your loaner ${label} request${when ? ' for ' + when : ''}. Our team will confirm shortly.`, tenantId: row.tenantId }); } catch {}
+      // Customer confirmation by email (texting not enabled yet).
+      if (row.customerEmail) {
+        try { await sendEmail({ to: row.customerEmail, subject: `Your loaner ${label} request`, text: `We received your loaner ${label} request${when ? ' for ' + when : ''}. Our team will confirm shortly.` }); } catch {}
       }
     } catch (e) {
       try { logger.warn('[loaner] portal request notify failed: ' + (e?.message || e)); } catch {}
@@ -678,7 +682,7 @@ export const loanerAgreementService = {
         portalRequestAt: new Date(), portalRequestKind: 'EXTENSION', portalRequestHandledAt: null }
     });
     this._notifyPortalRequest(row, 'EXTENSION', requested, note).catch(() => {}); // fire-and-forget
-    return { ok: true, message: 'Extension requested. The service team will confirm by text.' };
+    return { ok: true, message: 'Extension requested. The service team will confirm by email.' };
   },
 
   /** Public: borrower schedules a return time. */
