@@ -3117,10 +3117,12 @@ export const rentalAgreementsService = {
       // canonical T&C). It only belongs on agreements where the customer
       // actually waived coverage at the counter; otherwise it misleads
       // the reader into thinking they did.
-      termsText: stripDeclineCoverageIfNotApplicable(
-        (await getEffectiveTermsHtmlForTenant(agreement?.tenantId || null, { prisma })),
-        !!agreement?.declinedInsurance,
-      ) + (cfg.termsText ? `<div class="tc-tenant-addendum"><h2>Tenant Addendum</h2><p>${esc(cfg.termsText)}</p></div>` : ''),
+      termsText: (String(agreement.reservation?.workflowMode || '').toUpperCase() === 'DEALERSHIP_LOANER' && String(cfg.loanerTermsHtml || '').trim())
+        ? cfg.loanerTermsHtml
+        : stripDeclineCoverageIfNotApplicable(
+            (await getEffectiveTermsHtmlForTenant(agreement?.tenantId || null, { prisma })),
+            !!agreement?.declinedInsurance,
+          ) + (cfg.termsText ? `<div class="tc-tenant-addendum"><h2>Tenant Addendum</h2><p>${esc(cfg.termsText)}</p></div>` : ''),
       signatureSignedBy: esc(agreement.reservation?.signatureSignedBy || '-'),
       signatureDateTime: esc(fmtDate(signatureTime)),
       signatureIp: esc(signatureIp),

@@ -1,22 +1,19 @@
 /**
- * Loaner return-due reminder scheduler (Phase 2, 2026-06-01).
+ * Loaner return-due reminder scheduler.
  *
- * Periodic sweep that texts the borrower when an ACTIVE loaner agreement is
- * due back soon or already overdue. Mirrors the interval-timer + overlap-guard
- * + startup-delay pattern of payment-gateway/pre-auth-release.scheduler.js.
+ * Periodic sweep that EMAILS the borrower (and the pickup location) when an ACTIVE loaner agreement
+ * is due back soon or already overdue. (2026-06-26: switched from SMS to email — texting isn't
+ * enabled; the tenant notification goes to the location email, like the portal-request notifications.)
  *
- * Dedupe is cache-based (Redis/in-memory) keyed by agreement + reminder kind,
- * so each borrower gets at most one DUE_SOON text and one OVERDUE text per day
- * — no schema column needed, and the sweep stays idempotent across restarts.
- *
- * Started from worker.js. Plan: doc/loaner-reimagining-plan-2026-05-31.md
+ * Dedupe is cache-based keyed by agreement + reminder kind, so each loaner gets at most one DUE_SOON
+ * and one OVERDUE reminder per window. Started from worker.js.
  */
 
 const DEFAULT_INTERVAL_HOURS = 6;
 const DEFAULT_STARTUP_DELAY_SECONDS = 120;
 const DEFAULT_DUE_SOON_HOURS = 24;
-const DUE_SOON_TTL_MS = 36 * 60 * 60 * 1000; // suppress repeat due-soon for 36h
-const OVERDUE_TTL_MS = 24 * 60 * 60 * 1000;  // re-remind overdue once per day
+const DUE_SOON_TTL_MS = 36 * 60 * 60 * 1000;
+const OVERDUE_TTL_MS = 24 * 60 * 60 * 1000;
 
 let timer = null;
 let startupTimer = null;
@@ -30,12 +27,12 @@ async function resolveDefaultPrisma() {
   return _defaultPrisma;
 }
 
-let _sms = null;
-async function resolveDefaultSms() {
-  if (_sms) return _sms;
-  const mod = await import('../sms/sms.service.js');
-  _sms = mod.smsService;
-  return _sms;
+let _mailer = null;
+async function resolveDefaultMailer() {
+  if (_mailer) return _mailer;
+  const mod = await import('../../lib/mailer.js');
+  _mailer = { sendEmail: mod.sendEmail };
+  return _mailer;
 }
 
 let _cache = null;
@@ -58,6 +55,14 @@ async function getLogger() {
   return _logger;
 }
 
+let _parseLocationConfig = null;
+async function resolveParseLocationConfig() {
+  if (_parseLocationConfig) return _parseLocationConfig;
+  const mod = await import('../../lib/location-config.js');
+  _parseLocationConfig = mod.parseLocationConfig;
+  return _parseLocationConfig;
+}
+
 function autoEnabled() {
   return String(process.env.LOANER_REMINDERS_ENABLED || 'true').toLowerCase() !== 'false';
 }
@@ -76,7 +81,7 @@ function dueSoonWindowMs() {
 
 function fmtDue(d) {
   try {
-    return new Date(d).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+    return new Date(d).toLocaleString('en-US', { timeZone: 'America/Puerto_Rico', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
   } catch {
     return '';
   }
@@ -86,40 +91,50 @@ function portalBaseUrl() {
   return (process.env.CUSTOMER_PORTAL_BASE_URL || process.env.APP_BASE_URL || process.env.FRONTEND_BASE_URL || 'http://localhost:3000').replace(/\/$/, '');
 }
 
-function buildBody(kind, agreement) {
+function buildEmail(kind, agreement) {
   const due = fmtDue(agreement.returnAt);
   const link = agreement.portalToken
-    ? ` Manage your loaner: ${portalBaseUrl()}/customer/loaner-status?token=${encodeURIComponent(agreement.portalToken)}`
+    ? `\n\nManage your loaner: ${portalBaseUrl()}/customer/loaner-status?token=${encodeURIComponent(agreement.portalToken)}`
     : '';
+  const num = agreement.agreementNumber ? ` (${agreement.agreementNumber})` : '';
   if (kind === 'OVERDUE') {
-    return `Your loaner is past due (was due ${due}). Please return it or contact us to extend.${link}`;
+    return {
+      subject: `Loaner past due${num}`,
+      text: `Your loaner is past due (was due back ${due}). Please return it or contact us to extend.${link}`,
+    };
   }
-  return `Reminder: your loaner is due back ${due}.${link}`;
+  return {
+    subject: `Loaner due back soon${num}`,
+    text: `Reminder: your loaner is due back ${due}.${link}`,
+  };
 }
 
-/**
- * Run one reminder sweep. Deps are injectable for tests:
- *   { prisma, sms, cache, now }
- */
+/** Run one reminder sweep. Deps injectable for tests: { prisma, mailer, cache, now }. */
 export async function runLoanerRemindersSweep(deps = {}) {
   const prisma = deps.prisma || (await resolveDefaultPrisma());
-  const sms = deps.sms || (await resolveDefaultSms());
+  const mailer = deps.mailer || (await resolveDefaultMailer());
   const store = deps.cache || (await resolveDefaultCache());
+  const parseLocationConfig = deps.parseLocationConfig || (await resolveParseLocationConfig());
   const now = deps.now ? deps.now() : new Date();
   const logger = await getLogger();
 
   const soonCutoff = new Date(now.getTime() + dueSoonWindowMs());
   const rows = await prisma.loanerAgreement.findMany({
     where: { status: 'ACTIVE', returnAt: { lte: soonCutoff } },
-    select: { id: true, tenantId: true, customerPhone: true, returnAt: true, agreementNumber: true, portalToken: true },
-    take: 200
+    select: {
+      id: true, tenantId: true, customerEmail: true, returnAt: true, agreementNumber: true, portalToken: true,
+      reservation: { select: { pickupLocation: { select: { name: true, locationConfig: true } } } },
+    },
+    take: 200,
   });
 
-  const counts = { candidates: rows.length, sent: 0, skippedNoPhone: 0, deduped: 0, failed: 0 };
+  const counts = { candidates: rows.length, sent: 0, skippedNoEmail: 0, deduped: 0, failed: 0 };
 
   for (const row of rows) {
-    if (!row.customerPhone || !row.tenantId) {
-      counts.skippedNoPhone += 1;
+    const locEmail = parseLocationConfig(row.reservation?.pickupLocation?.locationConfig)?.locationEmail || '';
+    const recipients = [...new Set([row.customerEmail, locEmail].filter(Boolean))];
+    if (!recipients.length || !row.tenantId) {
+      counts.skippedNoEmail += 1;
       continue;
     }
     const overdue = new Date(row.returnAt) < now;
@@ -129,8 +144,11 @@ export async function runLoanerRemindersSweep(deps = {}) {
       counts.deduped += 1;
       continue;
     }
+    const { subject, text } = buildEmail(kind, row);
     try {
-      await sms.sendCustom({ to: row.customerPhone, body: buildBody(kind, row), tenantId: row.tenantId });
+      for (const to of recipients) {
+        await mailer.sendEmail({ to, subject, text });
+      }
       await store.set(dedupeKey, '1', overdue ? OVERDUE_TTL_MS : DUE_SOON_TTL_MS);
       counts.sent += 1;
     } catch (err) {
@@ -171,4 +189,4 @@ export function stopLoanerRemindersScheduler() {
   if (timer) { clearInterval(timer); timer = null; }
 }
 
-export const _internal = { intervalMs, dueSoonWindowMs, buildBody, autoEnabled };
+export const _internal = { intervalMs, dueSoonWindowMs, buildEmail, autoEnabled };

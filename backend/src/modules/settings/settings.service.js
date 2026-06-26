@@ -25,6 +25,9 @@ const DEFAULTS = {
   // "use the canonical lib/terms/tc-<TC_VERSION>.html"; any non-empty
   // value supersedes it via getEffectiveTermsHtmlForTenant().
   termsHtml: '',
+  // Per-tenant loaner T&C override (2026-06-26). Used on loaner (DEALERSHIP_LOANER) agreements
+  // instead of the rental T&C when set; empty = fall back to the rental T&C.
+  loanerTermsHtml: '',
   // Affidavit of Transfer of Liability (citations, Fase D #4) — the registered
   // OWNER / legal entity that submits the affidavit. May differ from the rental
   // brand (companyName). When blank, the affidavit falls back to companyName /

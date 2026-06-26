@@ -1312,6 +1312,29 @@ export const dealershipLoanerService = {
       }
     });
 
+    // RO-complete -> email the location (+ advisor) that the loaner should come back now (best-effort,
+    // email only; texting not enabled). Only when the loaner is still out (CHECKED_OUT).
+    try {
+      if (String(current.status) === 'CHECKED_OUT') {
+        const { sendEmail } = await import('../../lib/mailer.js');
+        const { parseLocationConfig } = await import('../../lib/location-config.js');
+        let locEmail = '';
+        if (current.pickupLocationId) {
+          const loc = await prisma.location.findUnique({ where: { id: current.pickupLocationId }, select: { locationConfig: true } }).catch(() => null);
+          locEmail = parseLocationConfig(loc?.locationConfig)?.locationEmail || '';
+        }
+        const recipients = [...new Set([locEmail, current.serviceAdvisorEmail].filter(Boolean))];
+        if (recipients.length) {
+          const who = [current.customer?.firstName, current.customer?.lastName].filter(Boolean).join(' ') || 'The customer';
+          const veh = current.vehicle ? [current.vehicle.year, current.vehicle.make, current.vehicle.model].filter(Boolean).join(' ') : 'the loaner';
+          const ro = current.repairOrderNumber ? `RO ${current.repairOrderNumber}` : 'Service';
+          const due = current.returnAt ? new Date(current.returnAt).toLocaleString('en-US', { timeZone: 'America/Puerto_Rico' }) : '';
+          const body = `${ro} is complete. ${who} still has the loaner (${veh}). Time to coordinate the return${due ? ` (expected ${due})` : ''}.`;
+          for (const to of recipients) { try { await sendEmail({ to, subject: `${ro} complete — loaner still out`, text: body }); } catch {} }
+        }
+      }
+    } catch { /* notification is best-effort */ }
+
     return reservationCard(updated);
   }
 };
