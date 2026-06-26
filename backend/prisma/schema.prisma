@@ -4291,6 +4291,9 @@ model LoanerAgreement {
   requestedReturnAt    DateTime?
   returnScheduledAt    DateTime?
   portalRequestNote    String?
+  portalRequestAt        DateTime?
+  portalRequestKind      String?
+  portalRequestHandledAt DateTime?
 
   notes          String?
   finalizedAt    DateTime?

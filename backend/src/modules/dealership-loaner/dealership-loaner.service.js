@@ -933,6 +933,49 @@ export const dealershipLoanerService = {
     return prisma.loanerRequest.update({ where: { id: existing.id }, data: { status } });
   },
 
+  // Customer Requests queue (2026-06-26): borrower-initiated extension / scheduled-return
+  // requests captured from the portal. Pending = portalRequestAt set AND not yet handled.
+  async listCustomerRequests(user) {
+    const scope = tenantScope(user);
+    const rows = await prisma.loanerAgreement.findMany({
+      where: { ...scope, portalRequestAt: { not: null }, portalRequestHandledAt: null },
+      orderBy: [{ portalRequestAt: 'desc' }],
+      take: 200,
+      include: { reservation: { select: { id: true, reservationNumber: true, repairOrderNumber: true, status: true, returnAt: true, serviceAdvisorName: true } } }
+    });
+    return {
+      requests: rows.map((a) => ({
+        agreementId: a.id,
+        reservationId: a.reservationId,
+        reservationNumber: a.reservation?.reservationNumber || null,
+        repairOrderNumber: a.reservation?.repairOrderNumber || null,
+        reservationStatus: a.reservation?.status || null,
+        customerName: [a.customerFirstName, a.customerLastName].filter(Boolean).join(' ') || null,
+        kind: a.portalRequestKind,
+        requestedAt: a.portalRequestAt,
+        requestedReturnAt: a.requestedReturnAt,
+        returnScheduledAt: a.returnScheduledAt,
+        note: a.portalRequestNote,
+      }))
+    };
+  },
+
+  /** Advisor resolves a portal request. payload.apply=true pushes the requested date onto the reservation/agreement. */
+  async resolveCustomerRequest(user, agreementId, payload = {}) {
+    const scope = tenantScope(user);
+    const a = await prisma.loanerAgreement.findFirst({ where: { id: String(agreementId), ...scope } });
+    if (!a) { const e = new Error('Loaner request not found'); e.statusCode = 404; throw e; }
+    if (payload.apply === true) {
+      const newReturn = a.portalRequestKind === 'EXTENSION' ? a.requestedReturnAt : a.returnScheduledAt;
+      if (newReturn) {
+        await prisma.reservation.update({ where: { id: a.reservationId }, data: { returnAt: newReturn } });
+        await prisma.loanerAgreement.update({ where: { id: a.id }, data: { returnAt: newReturn } });
+      }
+    }
+    await prisma.loanerAgreement.update({ where: { id: a.id }, data: { portalRequestHandledAt: new Date() } });
+    return { ok: true, agreementId: a.id, applied: payload.apply === true };
+  },
+
   async getReservation(user, reservationId) {
     const scope = tenantScope(user);
     const row = await getLoanerReservationOrThrow(reservationId, scope);

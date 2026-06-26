@@ -234,3 +234,14 @@ dealershipLoanerRouter.patch('/requests/:id', async (req, res, next) => {
     res.status(error.statusCode || 400).json({ error: error.message });
   }
 });
+
+// Customer Requests queue (portal-initiated extension / scheduled-return).
+dealershipLoanerRouter.get('/customer-requests', async (req, res, next) => {
+  try { res.json(await dealershipLoanerService.listCustomerRequests(req.user)); }
+  catch (error) { next(error); }
+});
+
+dealershipLoanerRouter.post('/customer-requests/:id/resolve', async (req, res, next) => {
+  try { res.json(await dealershipLoanerService.resolveCustomerRequest(req.user, req.params.id, req.body || {})); }
+  catch (error) { res.status(error.statusCode || 400).json({ error: error.message }); }
+});

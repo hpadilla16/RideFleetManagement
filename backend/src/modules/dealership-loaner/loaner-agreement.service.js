@@ -633,6 +633,35 @@ export const loanerAgreementService = {
     return row;
   },
 
+  /** Best-effort fan-out when a borrower submits a portal request (no throw). */
+  async _notifyPortalRequest(row, kind, whenISO, note) {
+    try {
+      const resv = await prisma.reservation.findUnique({
+        where: { id: row.reservationId },
+        select: { reservationNumber: true, serviceAdvisorName: true, serviceAdvisorPhone: true, serviceAdvisorEmail: true, repairOrderNumber: true }
+      });
+      const label = kind === 'EXTENSION' ? 'extension' : 'return';
+      const who = [row.customerFirstName, row.customerLastName].filter(Boolean).join(' ') || 'A loaner customer';
+      const when = whenISO ? new Date(whenISO).toLocaleString('en-US', { timeZone: 'America/Puerto_Rico' }) : '';
+      const ro = resv?.repairOrderNumber ? ` (RO ${resv.repairOrderNumber})` : '';
+      const advisorMsg = `Loaner ${label} request${ro}: ${who} requested ${when}.${note ? ' Note: ' + note : ''}`;
+      // Advisor SMS (best-effort)
+      if (resv?.serviceAdvisorPhone && row.tenantId) {
+        try { const { smsService } = await import('../sms/sms.service.js'); await smsService.sendCustom({ to: resv.serviceAdvisorPhone, body: advisorMsg, tenantId: row.tenantId }); } catch {}
+      }
+      // Advisor email (best-effort)
+      if (resv?.serviceAdvisorEmail) {
+        try { const { sendEmail } = await import('../../lib/mailer.js'); await sendEmail({ to: resv.serviceAdvisorEmail, subject: `Loaner ${label} request${ro}`, text: advisorMsg }); } catch {}
+      }
+      // Customer confirmation SMS — make the "we'll confirm" promise real (best-effort)
+      if (row.customerPhone && row.tenantId) {
+        try { const { smsService } = await import('../sms/sms.service.js'); await smsService.sendCustom({ to: row.customerPhone, body: `We received your loaner ${label} request${when ? ' for ' + when : ''}. Our team will confirm shortly.`, tenantId: row.tenantId }); } catch {}
+      }
+    } catch (e) {
+      try { logger.warn('[loaner] portal request notify failed: ' + (e?.message || e)); } catch {}
+    }
+  },
+
   /** Public: borrower requests an extension (staff approves later). */
   async requestExtensionByToken(token, payload = {}) {
     const row = await this._findPortalRowOrThrow(String(token || '').trim());
@@ -642,10 +671,13 @@ export const loanerAgreementService = {
       err.statusCode = 400;
       throw err;
     }
+    const note = payload.note ? String(payload.note).slice(0, 500) : row.portalRequestNote;
     await prisma.loanerAgreement.update({
       where: { id: row.id },
-      data: { requestedReturnAt: requested, portalRequestNote: payload.note ? String(payload.note).slice(0, 500) : row.portalRequestNote }
+      data: { requestedReturnAt: requested, portalRequestNote: note,
+        portalRequestAt: new Date(), portalRequestKind: 'EXTENSION', portalRequestHandledAt: null }
     });
+    this._notifyPortalRequest(row, 'EXTENSION', requested, note).catch(() => {}); // fire-and-forget
     return { ok: true, message: 'Extension requested. The service team will confirm by text.' };
   },
 
@@ -658,10 +690,13 @@ export const loanerAgreementService = {
       err.statusCode = 400;
       throw err;
     }
+    const note2 = payload.note ? String(payload.note).slice(0, 500) : row.portalRequestNote;
     await prisma.loanerAgreement.update({
       where: { id: row.id },
-      data: { returnScheduledAt: scheduled, portalRequestNote: payload.note ? String(payload.note).slice(0, 500) : row.portalRequestNote }
+      data: { returnScheduledAt: scheduled, portalRequestNote: note2,
+        portalRequestAt: new Date(), portalRequestKind: 'RETURN', portalRequestHandledAt: null }
     });
+    this._notifyPortalRequest(row, 'RETURN', scheduled, note2).catch(() => {}); // fire-and-forget
     return { ok: true, message: 'Return scheduled. See you then!' };
   }
 };
