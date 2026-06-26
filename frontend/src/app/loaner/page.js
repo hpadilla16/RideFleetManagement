@@ -188,7 +188,8 @@ function reservationHref(row, action = '') {
 // inspection) stays on the shared reservation routes.
 function loanerActionHref(row, action = '') {
   if (!row?.id) return '#';
-  if (action === 'checkout' || action === 'checkin') return `/loaner/${action}/${row.id}`;
+  if (action === 'checkout') return `/reservations/${row.id}/checkout-wizard-v2`;
+  if (action === 'checkin') return `/reservations/${row.id}/checkin-wizard`;
   return reservationHref(row, action);
 }
 
@@ -542,7 +543,7 @@ function LoanerProgramInner({ token, me, logout }) {
       // card if the id is missing.
       if (payload?.id) {
         setMsg(`Loaner reservation ${payload?.reservationNumber || ''} created — opening check-out…`);
-        router.push(`/loaner/checkout/${payload.id}`);
+        router.push(`/reservations/${payload.id}/checkout-wizard-v2`);
         return;
       }
       setMsg(`Loaner reservation ${payload?.reservationNumber || ''} created`);

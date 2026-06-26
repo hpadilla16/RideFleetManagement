@@ -491,7 +491,11 @@ function StepRenderer({ session, reservation, token, onAdvance }) {
     case 'TC_SIGNED':
       return <StepBridge label="Terms signed" onNext={() => onAdvance('PAYMENT_PENDING')} />;
     case 'PAYMENT_PENDING':
-      return <Step3PaymentPending session={session} reservation={reservation} token={token} onPaid={() => onAdvance('PAID')} />;
+      // Loaners have no online payment (billing is on the reservation; backend pre-stamps
+      // paymentCompletedAt). Skip the Spin payment step entirely.
+      return reservation.workflowMode === 'DEALERSHIP_LOANER'
+        ? <StepBridge label="No payment required (loaner)" onNext={() => onAdvance('PAID')} />
+        : <Step3PaymentPending session={session} reservation={reservation} token={token} onPaid={() => onAdvance('PAID')} />;
     case 'PAID':
       return <StepBridge label="Payment captured" onNext={() => onAdvance('INSPECTION_HANDOFF')} />;
     case 'INSPECTION_HANDOFF':
@@ -576,6 +580,7 @@ function Step1Confirm({ reservation, session, token, onNext }) {
           generarse sin vehículo.
         </div>
       )}
+      {reservation.workflowMode !== 'DEALERSHIP_LOANER' && (
       <div style={{
         padding: 12, marginBottom: 12,
         background: declinedInsurance ? '#FEF3C7' : '#F9FAFB',
@@ -600,6 +605,7 @@ function Step1Confirm({ reservation, session, token, onNext }) {
           </div>
         </label>
       </div>
+      )}
       <button
         style={{ ...primaryBtn, opacity: hasVehicle ? 1 : 0.4, cursor: hasVehicle ? 'pointer' : 'not-allowed' }}
         onClick={hasVehicle ? onNext : undefined}
