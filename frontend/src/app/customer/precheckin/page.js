@@ -349,6 +349,8 @@ export default function PrecheckinPage() {
   const customerSelectedOurInsurance = !!insuranceSelection.selectedPlanCode && !insuranceSelection.declinedCoverage;
   const availablePlans = (insurancePlans || []).filter((p) => !p.alreadyOnReservation);
   const availableServices = (additionalServices || []).filter((s) => !s.alreadyOnReservation);
+  const STEP_LABELS = ['Your details', 'Documents', 'Protection & extras', 'Review & submit'];
+  const [step, setStep] = useState(0);
   const uploadedDocs = [form.idPhotoUrl, ...(customerSelectedOurInsurance ? [] : [form.insuranceDocumentUrl])].filter(Boolean).length;
   const totalDocsNeeded = customerSelectedOurInsurance ? 1 : 2;
   const precheckinRequiredFields = [
@@ -400,7 +402,13 @@ export default function PrecheckinPage() {
 
       {!loading && reservation ? (
         <>
-          <div style={{ ...portalStyles.card, border: thirdPartyBooking.isThirdParty === null ? '2px solid rgba(245,158,11,0.4)' : '1px solid rgba(110,73,255,0.12)' }}>
+          <div style={{ marginBottom: 16 }}>
+            <div style={{ fontSize: '0.82rem', color: '#6f668f', marginBottom: 6, fontWeight: 700 }}>Step {step + 1} of {STEP_LABELS.length} — {STEP_LABELS[step]}</div>
+            <div style={{ display: 'flex', gap: 4 }}>
+              {STEP_LABELS.map((_, i) => (<span key={i} style={{ flex: 1, height: 4, borderRadius: 2, background: i <= step ? '#6e49ff' : '#e6dfff' }} />))}
+            </div>
+          </div>
+          <div style={{ ...portalStyles.card, border: thirdPartyBooking.isThirdParty === null ? '2px solid rgba(245,158,11,0.4)' : '1px solid rgba(110,73,255,0.12)', display: step === 0 ? undefined : 'none' }}>
             <h2 style={portalStyles.cardTitle}>Booking Source</h2>
             <p style={{ color: '#55456f', lineHeight: 1.6, marginBottom: 16 }}>
               Did you book this reservation through a third-party website (e.g. Expedia, Priceline, AutoSlash, or another travel agency)?
@@ -501,7 +509,7 @@ export default function PrecheckinPage() {
             </div>
           </div>
 
-          <div style={portalStyles.card}>
+          <div style={{ ...portalStyles.card, display: step === 3 ? undefined : 'none' }}>
             <h2 style={portalStyles.cardTitle}>Before You Submit</h2>
             <div style={portalStyles.statGrid}>
               <div style={portalStyles.statTile}>
@@ -523,7 +531,7 @@ export default function PrecheckinPage() {
             ) : null}
           </div>
 
-          <div style={portalStyles.card}>
+          <div style={{ ...portalStyles.card, display: step === 3 ? undefined : 'none' }}>
             <h2 style={portalStyles.cardTitle}>Reservation Summary</h2>
             <div style={portalStyles.statGrid}>
               <div style={portalStyles.statTile}>
@@ -550,7 +558,7 @@ export default function PrecheckinPage() {
             </div>
           </div>
 
-          <div style={portalStyles.card}>
+          <div style={{ ...portalStyles.card, display: step === 0 ? undefined : 'none' }}>
             <h2 style={portalStyles.cardTitle}>Contact Information</h2>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 12 }}>
               <div>
@@ -580,7 +588,7 @@ export default function PrecheckinPage() {
             </div>
           </div>
 
-          <div style={portalStyles.card}>
+          <div style={{ ...portalStyles.card, display: step === 0 ? undefined : 'none' }}>
             <h2 style={portalStyles.cardTitle}>Driver Information</h2>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 12 }}>
               <div>
@@ -594,7 +602,7 @@ export default function PrecheckinPage() {
             </div>
           </div>
 
-          <div style={portalStyles.card}>
+          <div style={{ ...portalStyles.card, display: step === 0 ? undefined : 'none' }}>
             <h2 style={portalStyles.cardTitle}>Home Address</h2>
             <div style={portalStyles.stack}>
               <div>
@@ -626,7 +634,7 @@ export default function PrecheckinPage() {
             </div>
           </div>
 
-          <div style={portalStyles.card}>
+          <div style={{ ...portalStyles.card, display: step === 1 ? undefined : 'none' }}>
             <h2 style={portalStyles.cardTitle}>Upload Documents</h2>
             <div style={portalStyles.statGrid}>
               <div style={portalStyles.statTile}>
@@ -657,7 +665,7 @@ export default function PrecheckinPage() {
 
           {/* Trip Protection */}
           {availablePlans.length > 0 && (
-            <div style={portalStyles.card}>
+            <div style={{ ...portalStyles.card, display: step === 2 ? undefined : 'none' }}>
               <h2 style={portalStyles.cardTitle}>Trip Protection</h2>
               <p style={{ color: '#55456f', lineHeight: 1.6, marginBottom: 16 }}>
                 Choose a protection plan for your trip, or use your own insurance.
@@ -813,7 +821,7 @@ export default function PrecheckinPage() {
 
           {/* Trip Add-ons */}
           {availableServices.length > 0 && (
-            <div style={portalStyles.card}>
+            <div style={{ ...portalStyles.card, display: step === 2 ? undefined : 'none' }}>
               <h2 style={portalStyles.cardTitle}>Trip Add-ons</h2>
               <p style={{ color: '#55456f', lineHeight: 1.6, marginBottom: 16 }}>
                 Enhance your trip with these optional services.
@@ -878,7 +886,13 @@ export default function PrecheckinPage() {
             </div>
           )}
 
-          <div style={portalStyles.card}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, margin: '4px 0 20px' }}>
+            <button type="button" onClick={() => setStep((sv) => Math.max(0, sv - 1))} disabled={step === 0} style={{ ...portalStyles.button, opacity: step === 0 ? 0.5 : 1 }}>← Back</button>
+            {step < STEP_LABELS.length - 1
+              ? <button type="button" onClick={() => setStep((sv) => Math.min(STEP_LABELS.length - 1, sv + 1))} style={portalStyles.button}>Next →</button>
+              : <span />}
+          </div>
+          <div style={{ ...portalStyles.card, display: step === 3 ? undefined : 'none' }}>
             <h2 style={portalStyles.cardTitle}>Submit for Review</h2>
             <div style={{ display: 'grid', gap: 12 }}>
               <div style={{ color: '#55456f', lineHeight: 1.6 }}>
