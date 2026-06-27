@@ -79,11 +79,12 @@ test('cancelGuestBooking: refuses non-cancellable statuses (already checked out)
 test('submitBookingDocuments: stores license + insurance on the customer record', async () => {
   const seed = { cust: { id: ids.customer }, loc: { id: ids.location } };
   const r = await mkReservation(seed, `RES-${TAG}-DOC`, { hoursOut: 72 });
-  const out = await publicBookingService.submitBookingDocuments(r.reservationNumber, { email: EMAIL, license: PNG, insurance: PNG });
+  const out = await publicBookingService.submitBookingDocuments(r.reservationNumber, { email: EMAIL, license: PNG, licenseBack: PNG, insurance: PNG });
   assert.equal(out.ok, true);
-  assert.deepEqual(out.submitted.sort(), ['INSURANCE', 'LICENSE']);
+  assert.deepEqual(out.submitted.sort(), ['INSURANCE', 'LICENSE', 'LICENSE_BACK']);
   const cust = await prisma.customer.findUnique({ where: { id: ids.customer } });
-  assert.equal(cust.idPhotoUrl, PNG, 'license stored on idPhotoUrl');
+  assert.equal(cust.idPhotoUrl, PNG, 'license front stored on idPhotoUrl');
+  assert.equal(cust.licenseBackUrl, PNG, 'license back stored on licenseBackUrl');
   assert.equal(cust.insuranceDocumentUrl, PNG, 'insurance stored on insuranceDocumentUrl');
 });
 

@@ -1365,6 +1365,10 @@ export const publicBookingService = {
       data.idPhotoUrl = _validateDocDataUrl(payload.license, 'license');
       submitted.push('LICENSE');
     }
+    if (payload.licenseBack != null) {
+      data.licenseBackUrl = _validateDocDataUrl(payload.licenseBack, 'licenseBack');
+      submitted.push('LICENSE_BACK');
+    }
     if (payload.insurance != null) {
       data.insuranceDocumentUrl = _validateDocDataUrl(payload.insurance, 'insurance');
       submitted.push('INSURANCE');

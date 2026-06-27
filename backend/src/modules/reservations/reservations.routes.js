@@ -94,6 +94,7 @@ function buildPrecheckinChecklist(reservation) {
     { key: 'license', label: 'Driver License', done: !!(customer.licenseNumber && customer.licenseState) },
     { key: 'address', label: 'Address', done: !!(customer.address1 && customer.city && customer.state && customer.zip) },
     { key: 'idPhoto', label: 'ID / License Photo', done: !!customer.idPhotoUrl },
+    { key: 'licenseBack', label: 'License (back)', done: !!customer.licenseBackUrl },
     { key: 'insuranceDoc', label: 'Insurance Document', done: !!customer.insuranceDocumentUrl }
   ];
   return {
@@ -1287,7 +1288,7 @@ reservationsRouter.post('/:id/precheckin/staff-complete', async (req, res, next)
       'firstName', 'lastName', 'email', 'phone', 'dateOfBirth',
       'licenseNumber', 'licenseState', 'address1', 'address2',
       'city', 'state', 'zip', 'country',
-      'idPhotoUrl', 'insuranceDocumentUrl', 'insurancePolicyNumber'
+      'idPhotoUrl', 'licenseBackUrl', 'insuranceDocumentUrl', 'insurancePolicyNumber'
     ];
     for (const key of fields) {
       if (body[key] !== undefined) {
