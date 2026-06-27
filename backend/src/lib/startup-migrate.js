@@ -42,9 +42,9 @@ export async function runStartupMigrations(opts = {}) {
     .filter((n) => fs.existsSync(path.join(dir, n, 'migration.sql')))
     .sort();
 
-  const client = new pg.Client({ connectionString: databaseUrl });
-  await client.connect();
+  const client = new pg.Client({ connectionString: databaseUrl, connectionTimeoutMillis: 10000 });
   try {
+    await client.connect();
     await client.query('CREATE TABLE IF NOT EXISTS "_app_migrations" (name text PRIMARY KEY, applied_at timestamptz NOT NULL DEFAULT now(), baseline boolean NOT NULL DEFAULT false)');
     const { rows } = await client.query('SELECT name FROM "_app_migrations"');
     const applied = new Set(rows.map((r) => r.name));
@@ -71,6 +71,10 @@ export async function runStartupMigrations(opts = {}) {
         (log.error || console.error)('[startup-migrate] migration FAILED (continuing boot)', { name: n, error: e.message });
       }
     }
+    return result;
+  } catch (e) {
+    (log.error || console.error)('[startup-migrate] runner error (continuing boot)', e && e.message);
+    result.error = e && e.message;
     return result;
   } finally {
     await client.end().catch(() => {});

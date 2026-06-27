@@ -1071,6 +1071,7 @@ model Customer {
   country                  String?
   idPhotoUrl               String?
   licenseBackUrl           String?
+  locale                   String?
   authnetCustomerProfileId String?
   authnetPaymentProfileId  String?
   // Pillar 2 (added 2026-05-17) — denormalized card metadata for invoice notice

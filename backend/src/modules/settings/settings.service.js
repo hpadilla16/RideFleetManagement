@@ -34,7 +34,11 @@ const DEFAULTS = {
   // companyAddress / companyPhone.
   affidavitOwnerName: '',
   affidavitOwnerAddress: '',
-  affidavitOwnerPhone: ''
+  affidavitOwnerPhone: '',
+  // Email branding (2026-06-27): brand color + support link for the unified
+  // transactional email template. Empty brand color => RFM default (#8752FE).
+  emailBrandColor: '',
+  emailSupportUrl: ''
 };
 
 const ALLOWED_KEYS = Object.keys(DEFAULTS);

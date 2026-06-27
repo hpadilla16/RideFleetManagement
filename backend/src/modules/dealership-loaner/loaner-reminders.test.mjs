@@ -15,6 +15,7 @@ function deps(rows, sent) {
     mailer: { sendEmail: async (args) => { sent.push(args); } },
     parseLocationConfig: (raw) => { try { return raw ? JSON.parse(raw) : {}; } catch { return {}; } },
     cache: makeCache(),
+    resolveBrand: async () => ({ companyName: 'Test Co', brandColor: '#8752FE' }),
   };
 }
 

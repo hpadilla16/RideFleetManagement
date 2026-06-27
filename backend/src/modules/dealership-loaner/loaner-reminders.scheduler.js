@@ -9,6 +9,8 @@
  * and one OVERDUE reminder per window. Started from worker.js.
  */
 
+import { renderBrandedEmail, resolveEmailBrand } from '../../lib/email-template.js';
+
 const DEFAULT_INTERVAL_HOURS = 6;
 const DEFAULT_STARTUP_DELAY_SECONDS = 120;
 const DEFAULT_DUE_SOON_HOURS = 24;
@@ -91,22 +93,26 @@ function portalBaseUrl() {
   return (process.env.CUSTOMER_PORTAL_BASE_URL || process.env.APP_BASE_URL || process.env.FRONTEND_BASE_URL || 'http://localhost:3000').replace(/\/$/, '');
 }
 
-function buildEmail(kind, agreement) {
+function buildEmail(kind, agreement, brand) {
   const due = fmtDue(agreement.returnAt);
-  const link = agreement.portalToken
-    ? `\n\nManage your loaner: ${portalBaseUrl()}/customer/loaner-status?token=${encodeURIComponent(agreement.portalToken)}`
+  const portalUrl = agreement.portalToken
+    ? `${portalBaseUrl()}/customer/loaner-status?token=${encodeURIComponent(agreement.portalToken)}`
     : '';
+  const link = portalUrl ? `\n\nManage your loaner: ${portalUrl}` : '';
   const num = agreement.agreementNumber ? ` (${agreement.agreementNumber})` : '';
-  if (kind === 'OVERDUE') {
-    return {
-      subject: `Loaner past due${num}`,
-      text: `Your loaner is past due (was due back ${due}). Please return it or contact us to extend.${link}`,
-    };
-  }
-  return {
-    subject: `Loaner due back soon${num}`,
-    text: `Reminder: your loaner is due back ${due}.${link}`,
-  };
+  const overdue = kind === 'OVERDUE';
+  const subject = overdue ? `Loaner past due${num}` : `Loaner due back soon${num}`;
+  const bodyLine = overdue
+    ? `Your loaner is past due (was due back ${due}). Please return it or contact us to extend.`
+    : `Reminder: your loaner is due back ${due}.`;
+  const text = `${bodyLine}${link}`;
+  const { html } = renderBrandedEmail({
+    brand,
+    heading: subject,
+    bodyHtml: bodyLine,
+    cta: portalUrl ? { label: 'Manage your loaner', url: portalUrl } : null,
+  });
+  return { subject, text, html };
 }
 
 /** Run one reminder sweep. Deps injectable for tests: { prisma, mailer, cache, now }. */
@@ -117,6 +123,15 @@ export async function runLoanerRemindersSweep(deps = {}) {
   const parseLocationConfig = deps.parseLocationConfig || (await resolveParseLocationConfig());
   const now = deps.now ? deps.now() : new Date();
   const logger = await getLogger();
+  const resolveBrand = deps.resolveBrand || resolveEmailBrand;
+  const brandCache = new Map();
+  const brandFor = async (tenantId) => {
+    if (brandCache.has(tenantId)) return brandCache.get(tenantId);
+    let b;
+    try { b = await resolveBrand({ tenantId }); } catch { b = undefined; }
+    brandCache.set(tenantId, b);
+    return b;
+  };
 
   const soonCutoff = new Date(now.getTime() + dueSoonWindowMs());
   const rows = await prisma.loanerAgreement.findMany({
@@ -144,10 +159,11 @@ export async function runLoanerRemindersSweep(deps = {}) {
       counts.deduped += 1;
       continue;
     }
-    const { subject, text } = buildEmail(kind, row);
+    const brand = await brandFor(row.tenantId);
+    const { subject, text, html } = buildEmail(kind, row, brand);
     try {
       for (const to of recipients) {
-        await mailer.sendEmail({ to, subject, text });
+        await mailer.sendEmail({ to, subject, text, html });
       }
       await store.set(dedupeKey, '1', overdue ? OVERDUE_TTL_MS : DUE_SOON_TTL_MS);
       counts.sent += 1;

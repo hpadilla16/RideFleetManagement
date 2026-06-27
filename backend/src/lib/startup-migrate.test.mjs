@@ -3,29 +3,24 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import EmbeddedPostgres from 'embedded-postgres';
+import pg from 'pg';
 import { runStartupMigrations } from './startup-migrate.js';
 
-const DATA = path.join(os.tmpdir(), 'pg-startup-mig');
-fs.rmSync(DATA, { recursive: true, force: true });
-const pg = new EmbeddedPostgres({ databaseDir: DATA, user: 'postgres', password: 'postgres', port: 55480, persistent: false });
-await pg.initialise(); await pg.start(); await pg.createDatabase('rfm');
-const URL = 'postgresql://postgres:postgres@localhost:55480/rfm?schema=public';
-
+const URL = process.env.DATABASE_URL;
 const MIG = fs.mkdtempSync(path.join(os.tmpdir(), 'migs-'));
 function addMig(name, sql) { const d = path.join(MIG, name); fs.mkdirSync(d, { recursive: true }); fs.writeFileSync(path.join(d, 'migration.sql'), sql); }
 const silent = { info() {}, warn() {}, error() {} };
 async function run() { return runStartupMigrations({ databaseUrl: URL, migrationsDir: MIG, logger: silent }); }
+async function q(sql, params) { const c = new pg.Client({ connectionString: URL }); await c.connect(); try { return (await c.query(sql, params)).rows; } finally { await c.end(); } }
+async function tableExists(t) { return (await q('SELECT to_regclass($1) AS r', [t]))[0].r !== null; }
 
-// pg helper to assert table existence
-const { default: pglib } = await import('pg');
-async function tableExists(t) {
-  const c = new pglib.Client({ connectionString: URL }); await c.connect();
-  const { rows } = await c.query("SELECT to_regclass($1) AS r", [t]); await c.end();
-  return rows[0].r !== null;
-}
-
-test.after(async () => { await pg.stop(); fs.rmSync(MIG, { recursive: true, force: true }); });
+test.before(async () => {
+  // Clean slate so the baseline-first-run assertion is deterministic.
+  await q('DROP TABLE IF EXISTS "_app_migrations"').catch(() => {});
+  await q('DROP TABLE IF EXISTS should_not_exist_on_baseline').catch(() => {});
+  await q('DROP TABLE IF EXISTS app_mig_foo').catch(() => {});
+});
+test.after(() => { fs.rmSync(MIG, { recursive: true, force: true }); });
 
 test('first run baselines existing migrations WITHOUT executing their SQL', async () => {
   addMig('20260101_legacy', 'CREATE TABLE should_not_exist_on_baseline (id int);');
@@ -53,7 +48,6 @@ test('a failing migration is fail-open: logged, not recorded, never throws', asy
   const r = await run();
   assert.equal(r.failed.length, 1);
   assert.equal(r.failed[0].name, '20260303_bad');
-  // retried next run (still not recorded) — proves not persisted
   const r2 = await run();
   assert.equal(r2.failed.length, 1);
 });
