@@ -2348,6 +2348,7 @@ export const bookingEngineService = {
         returnLocation: true,
         vehicle: true,
         vehicleType: true,
+        payments: { select: { amount: true, status: true } },
         incidents: {
           orderBy: [{ createdAt: 'desc' }],
           take: 10
@@ -2495,6 +2496,24 @@ export const bookingEngineService = {
     });
 
     const customer = reservation?.customer || trip?.guestCustomer || null;
+    // Payment status for the storefront "Payment complete ✓" badge. Prefer the
+    // latest agreement balance (authoritative post-checkout); else estimatedTotal − payments.
+    let paymentInfo = { balanceDue: null, paid: false, paymentStatus: 'unknown' };
+    if (reservation) {
+      const latestAgreement = await prisma.rentalAgreement.findFirst({
+        where: { reservationId: reservation.id }, orderBy: { createdAt: 'desc' },
+        select: { balance: true, total: true, closedAt: true },
+      });
+      const paidAmount = (reservation.payments || [])
+        .filter((pmt) => String(pmt.status || '').toUpperCase() === 'PAID')
+        .reduce((sum, pmt) => sum + Number(pmt.amount || 0), 0);
+      const est = Number(reservation.estimatedTotal || 0);
+      const bal = (latestAgreement && Number(latestAgreement.balance) > 0)
+        ? Number(latestAgreement.balance)
+        : Math.max(0, Number((est - paidAmount).toFixed(2)));
+      const isPaid = bal <= 0 && (paidAmount > 0 || !!latestAgreement?.closedAt);
+      paymentInfo = { balanceDue: bal, paid: isPaid, paymentStatus: isPaid ? 'completed' : (paidAmount > 0 ? 'partial' : 'pending') };
+    }
     const nextActions = reservation
       ? {
           customerInfo: await ensurePortalRequest('customer-info', reservation),
@@ -2542,6 +2561,9 @@ export const bookingEngineService = {
             returnAt: reservation.returnAt,
             agreementSigned: !!reservation.signatureSignedAt,
             agreementSignedAt: reservation.signatureSignedAt || null,
+            balanceDue: paymentInfo.balanceDue,
+            paid: paymentInfo.paid,
+            paymentStatus: paymentInfo.paymentStatus,
             incidents: (reservation.incidents || []).map((incident) => ({
               id: incident.id,
               type: incident.type,
