@@ -6,6 +6,7 @@ import { sendEmail } from '../../lib/mailer.js';
 import { rentalAgreementsService } from '../rental-agreements/rental-agreements.service.js';
 import { reservationPricingService } from '../reservations/reservation-pricing.service.js';
 import { settingsService } from '../settings/settings.service.js';
+import { enrichPrecheckinCatalog } from '../../lib/precheckin-catalog.js';
 import { buildSelfServiceSnapshot } from './customer-portal-self-service.js';
 import { parseLocationConfig } from '../../lib/location-config.js';
 import { normalizeDob } from '../../lib/dob.js';
@@ -1273,12 +1274,13 @@ customerPortalRouter.get('/customer-info/:token', portalRead, async (req, res, n
       select: { id: true, source: true, sourceRefId: true, name: true, rate: true, total: true, quantity: true, selected: true }
     });
 
+    const catalog = enrichPrecheckinCatalog({ insurancePlans, additionalServices, existingCharges, precheckinDiscount });
     res.json({
       reservation: serializeCustomerInfoReservation(reservation),
       expiresAt: reservation.customerInfoTokenExpiresAt,
       portal: await buildPortalSummary(reservation, 'customer-info', token),
-      insurancePlans: (insurancePlans || []).filter(p => p.isActive !== false),
-      additionalServices,
+      insurancePlans: catalog.insurancePlans,
+      additionalServices: catalog.additionalServices,
       existingCharges,
       precheckinDiscount: precheckinDiscount?.enabled ? precheckinDiscount : null
     });
@@ -1430,6 +1432,23 @@ customerPortalRouter.post('/customer-info/:token', portalWrite, async (req, res,
               sortOrder: 0,
               notes: discounted ? `${counterNote}, pre-checkin discount applied` : null
             }
+          });
+        }
+      } else if (insuranceSelection.declinedCoverage) {
+        // Persist the decline signature (captured on the pre-check-in page) onto
+        // the agreement if one exists; initials + signature also live in the
+        // AuditLog insuranceSelection blob the admin slot reads.
+        const declineSig = insuranceSelection.signatureDataUrl;
+        const declAg = await prisma.rentalAgreement.findUnique({ where: { reservationId: reservation.id }, select: { id: true } });
+        if (declAg) {
+          await prisma.rentalAgreement.update({
+            where: { id: declAg.id },
+            data: {
+              declinedInsurance: true,
+              ...(declineSig && String(declineSig).length > 200
+                ? { declinedInsuranceSignatureDataUrl: declineSig, declinedInsuranceSignedAt: new Date() }
+                : {}),
+            },
           });
         }
       }
