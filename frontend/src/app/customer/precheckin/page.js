@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { API_BASE } from '../../../lib/client';
 import { PortalFrame, portalStyles } from '../_components/PortalFrame';
 import { PortalTimelineCard } from '../_components/PortalTimelineCard';
@@ -148,6 +148,30 @@ function restorePrecheckinDraft(token) {
   }
 }
 
+function InsuranceDeclineSignature({ value, onChange }) {
+  const canvasRef = useRef(null);
+  const drawing = useRef(false);
+  const pos = (e) => { const c = canvasRef.current; const r = c.getBoundingClientRect(); const pt = e.touches?.[0] || e; return { x: pt.clientX - r.left, y: pt.clientY - r.top }; };
+  const start = (e) => { e.preventDefault?.(); const ctx = canvasRef.current.getContext('2d'); const pt = pos(e); ctx.beginPath(); ctx.moveTo(pt.x, pt.y); drawing.current = true; };
+  const move = (e) => { if (!drawing.current) return; e.preventDefault?.(); const ctx = canvasRef.current.getContext('2d'); const pt = pos(e); ctx.lineWidth = 2; ctx.lineCap = 'round'; ctx.strokeStyle = '#111827'; ctx.lineTo(pt.x, pt.y); ctx.stroke(); };
+  const end = () => { if (!drawing.current) return; drawing.current = false; onChange(canvasRef.current.toDataURL('image/png')); };
+  const clear = () => { const c = canvasRef.current; c.getContext('2d').clearRect(0, 0, c.width, c.height); onChange(''); };
+  return (
+    <div>
+      <label style={portalStyles.sectionTitle}>Sign to acknowledge</label>
+      <div style={{ border: '1px solid rgba(220,38,38,.3)', borderRadius: 10, background: '#fff', touchAction: 'none', display: 'inline-block' }}>
+        <canvas ref={canvasRef} width={320} height={120} style={{ display: 'block', borderRadius: 10, cursor: 'crosshair', maxWidth: '100%' }}
+          onMouseDown={start} onMouseMove={move} onMouseUp={end} onMouseLeave={end}
+          onTouchStart={start} onTouchMove={move} onTouchEnd={end} />
+      </div>
+      <div style={{ marginTop: 6 }}>
+        <button type="button" onClick={clear} style={{ fontSize: '0.8rem', color: '#6b7a9a', background: 'none', border: 'none', cursor: 'pointer', textDecoration: 'underline' }}>Clear signature</button>
+        {value ? <span style={{ fontSize: '0.8rem', color: '#166534', marginLeft: 10, fontWeight: 700 }}>Signed ✓</span> : null}
+      </div>
+    </div>
+  );
+}
+
 export default function PrecheckinPage() {
   const [token, setToken] = useState('');
   const [loading, setLoading] = useState(true);
@@ -165,7 +189,8 @@ export default function PrecheckinPage() {
     denyInitials: '',
     responsibilityInitials: '',
     chargeInitials: '',
-    ownPolicyNumber: ''
+    ownPolicyNumber: '',
+    signatureDataUrl: ''
   });
   const [selectedServices, setSelectedServices] = useState({});
   const [thirdPartyBooking, setThirdPartyBooking] = useState({ isThirdParty: null, voucherUrl: '' });
@@ -322,6 +347,8 @@ export default function PrecheckinPage() {
     form.country
   ].filter(Boolean).length;
   const customerSelectedOurInsurance = !!insuranceSelection.selectedPlanCode && !insuranceSelection.declinedCoverage;
+  const availablePlans = (insurancePlans || []).filter((p) => !p.alreadyOnReservation);
+  const availableServices = (additionalServices || []).filter((s) => !s.alreadyOnReservation);
   const uploadedDocs = [form.idPhotoUrl, ...(customerSelectedOurInsurance ? [] : [form.insuranceDocumentUrl])].filter(Boolean).length;
   const totalDocsNeeded = customerSelectedOurInsurance ? 1 : 2;
   const precheckinRequiredFields = [
@@ -629,7 +656,7 @@ export default function PrecheckinPage() {
           </div>
 
           {/* Trip Protection */}
-          {insurancePlans.length > 0 && (
+          {availablePlans.length > 0 && (
             <div style={portalStyles.card}>
               <h2 style={portalStyles.cardTitle}>Trip Protection</h2>
               <p style={{ color: '#55456f', lineHeight: 1.6, marginBottom: 16 }}>
@@ -648,7 +675,7 @@ export default function PrecheckinPage() {
               )}
 
               <div style={{ display: 'grid', gap: 12 }}>
-                {insurancePlans.map((plan) => {
+                {availablePlans.map((plan) => {
                   const isSelected = insuranceSelection.selectedPlanCode === plan.code && !insuranceSelection.declinedCoverage;
                   const counterPrice = Number(plan.total || plan.amount || plan.rate || 0);
                   const discountedPrice = precheckinDiscount
@@ -667,7 +694,7 @@ export default function PrecheckinPage() {
                       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                           <input type="radio" name="insurancePlan" checked={isSelected}
-                            onChange={() => setInsuranceSelection({ selectedPlanCode: plan.code, declinedCoverage: false, denyInitials: '', responsibilityInitials: '', chargeInitials: '', ownPolicyNumber: '' })}
+                            onChange={() => setInsuranceSelection({ selectedPlanCode: plan.code, declinedCoverage: false, denyInitials: '', responsibilityInitials: '', chargeInitials: '', ownPolicyNumber: '', signatureDataUrl: '' })}
                             style={{ accentColor: '#6e49ff', width: 18, height: 18 }} />
                           <strong style={{ color: '#1e2847' }}>{plan.name}</strong>
                         </div>
@@ -698,7 +725,7 @@ export default function PrecheckinPage() {
                   <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                     <input type="radio" name="insurancePlan"
                       checked={insuranceSelection.declinedCoverage}
-                      onChange={() => setInsuranceSelection({ selectedPlanCode: '', declinedCoverage: true, denyInitials: '', responsibilityInitials: '', chargeInitials: '', ownPolicyNumber: '' })}
+                      onChange={() => setInsuranceSelection({ selectedPlanCode: '', declinedCoverage: true, denyInitials: '', responsibilityInitials: '', chargeInitials: '', ownPolicyNumber: '', signatureDataUrl: '' })}
                       style={{ accentColor: '#dc2626', width: 18, height: 18 }} />
                     <strong style={{ color: '#991b1b' }}>I will use my own insurance</strong>
                   </div>
@@ -774,13 +801,18 @@ export default function PrecheckinPage() {
                       {form.insuranceDocumentUrl ? 'Document attached' : 'Required -- upload a photo or PDF of your insurance card/policy'}
                     </div>
                   </div>
+
+                  <InsuranceDeclineSignature
+                    value={insuranceSelection.signatureDataUrl}
+                    onChange={(d) => setInsuranceSelection(prev => ({ ...prev, signatureDataUrl: d }))}
+                  />
                 </div>
               )}
             </div>
           )}
 
           {/* Trip Add-ons */}
-          {additionalServices.length > 0 && (
+          {availableServices.length > 0 && (
             <div style={portalStyles.card}>
               <h2 style={portalStyles.cardTitle}>Trip Add-ons</h2>
               <p style={{ color: '#55456f', lineHeight: 1.6, marginBottom: 16 }}>
@@ -792,7 +824,7 @@ export default function PrecheckinPage() {
                 </div>
               )}
               <div style={{ display: 'grid', gap: 10 }}>
-                {additionalServices.map((svc) => {
+                {availableServices.map((svc) => {
                   const state = selectedServices[svc.id] || { selected: !!svc.mandatory, quantity: svc.defaultQty || 1 };
                   const counterRate = Number(svc.rate || 0);
                   const discountedRate = precheckinDiscount

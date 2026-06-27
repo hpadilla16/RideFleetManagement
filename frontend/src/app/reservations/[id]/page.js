@@ -2637,6 +2637,14 @@ token
                   <div><span className="label">Charge Authorization Initials</span><div style={{ fontWeight: 800, fontSize: '1.1rem', letterSpacing: '.04em' }}>{precheckinInsuranceInfo.chargeInitials || '—'}</div></div>
                   <div><span className="label">Own Policy Number</span><div>{precheckinInsuranceInfo.ownPolicyNumber || row?.customer?.insurancePolicyNumber || '—'}</div></div>
                 </div>
+                {precheckinInsuranceInfo.signatureDataUrl ? (
+                  <div style={{ marginTop: 10 }}>
+                    <span className="label">Customer Signature</span>
+                    <div style={{ marginTop: 4, padding: 6, background: '#fff', border: '1px solid rgba(220,38,38,0.18)', borderRadius: 8, display: 'inline-block' }}>
+                      <img src={precheckinInsuranceInfo.signatureDataUrl} alt="Customer decline signature" style={{ maxHeight: 90, maxWidth: '100%', display: 'block' }} />
+                    </div>
+                  </div>
+                ) : null}
                 <div style={{ marginTop: 8, fontSize: '0.85rem', color: '#7f1d1d', lineHeight: 1.5 }}>
                   Customer acknowledged: (1) declining company coverage, (2) accepting 100% financial responsibility, (3) authorizing card-on-file charges for any damage.
                   {canManagePrecheckin && (
