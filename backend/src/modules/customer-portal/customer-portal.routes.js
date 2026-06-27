@@ -3,6 +3,7 @@ import { Router } from 'express';
 import Stripe from 'stripe';
 import { prisma } from '../../lib/prisma.js';
 import { sendEmail } from '../../lib/mailer.js';
+import { renderBrandedEmail, resolveEmailBrand } from '../../lib/email-template.js';
 import { rentalAgreementsService } from '../rental-agreements/rental-agreements.service.js';
 import { reservationPricingService } from '../reservations/reservation-pricing.service.js';
 import { settingsService } from '../settings/settings.service.js';
@@ -1147,20 +1148,27 @@ async function postPayment({ reservation, paidAmount, reference, gateway }) {
   try {
     const to = String(reservation.customer?.email || '').trim();
     if (to) {
+      const _brand = await resolveEmailBrand(reservation.tenantId ? { tenantId: reservation.tenantId } : {});
+      const _rows = [
+        ['Reservation', reservation.reservationNumber],
+        ['Amount paid', `$${Number(paidAmount || 0).toFixed(2)}`],
+        ['Reference', String(reference || '')],
+        ['Date', new Date().toLocaleString()],
+      ];
+      const _bodyHtml = `<p style="margin:0 0 12px">Hello ${reservation.customer?.firstName || 'Customer'}, thank you — we received your payment.</p>`
+        + '<table style="width:100%;font-size:14px;border-collapse:collapse">'
+        + _rows.map(([k, v]) => `<tr><td style="padding:4px 0;color:#6f668f">${k}</td><td style="padding:4px 0;text-align:right;font-weight:600">${v}</td></tr>`).join('')
+        + '</table>';
+      const _bodyText = [
+        `Hello ${reservation.customer?.firstName || 'Customer'},`, '', 'Thank you. We received your payment.',
+        ..._rows.map(([k, v]) => `${k}: ${v}`), '', 'This is your payment receipt.',
+      ].join('\n');
+      const _email = renderBrandedEmail({ brand: _brand, heading: 'Payment received', bodyHtml: _bodyHtml, bodyText: _bodyText });
       await sendEmail({
         to,
         subject: `Payment Receipt - ${reservation.reservationNumber}`,
-        text: [
-          `Hello ${reservation.customer?.firstName || 'Customer'},`,
-          '',
-          `Thank you. We received your payment.`,
-          `Reservation: ${reservation.reservationNumber}`,
-          `Amount Paid: $${Number(paidAmount || 0).toFixed(2)}`,
-          `Reference: ${reference}`,
-          `Date: ${new Date().toLocaleString()}`,
-          '',
-          `This is your payment receipt.`
-        ].join('\n')
+        html: _email.html,
+        text: _email.text,
       });
     }
   } catch {}

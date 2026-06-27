@@ -7,6 +7,7 @@ import { prisma } from '../../lib/prisma.js';
 import { cache } from '../../lib/cache.js';
 import { tenantKey, globalKey } from '../../lib/cache/tenantKey.js';
 import { sendEmail } from '../../lib/mailer.js';
+import { renderBrandedEmail, resolveEmailBrand } from '../../lib/email-template.js';
 import { money } from '../../lib/money.js';
 import { publicVehicleProfile } from './vehicle-feature-catalog.js';
 import crypto from 'node:crypto';
@@ -1318,14 +1319,23 @@ export const publicBookingService = {
 
     // Best-effort guest confirmation — never fail the cancel on email.
     try {
+      const _brand = await resolveEmailBrand(reservation.tenantId ? { tenantId: reservation.tenantId } : {});
+      const _lines = [
+        `Your reservation ${reservation.reservationNumber} has been cancelled.`,
+        reservation.pickupLocation?.name ? `Location: ${reservation.pickupLocation.name}` : '',
+        'If this was a mistake, please contact us to rebook.',
+      ].filter(Boolean);
+      const _email = renderBrandedEmail({
+        brand: _brand,
+        heading: 'Reservation cancelled',
+        bodyHtml: _lines.map((l) => `<p style="margin:0 0 10px">${l}</p>`).join(''),
+        bodyText: _lines.join('\n'),
+      });
       await sendEmail({
         to: custEmail,
         subject: `Reservation ${reservation.reservationNumber} cancelled`,
-        text: [
-          `Your reservation ${reservation.reservationNumber} has been cancelled.`,
-          reservation.pickupLocation?.name ? `Location: ${reservation.pickupLocation.name}` : '',
-          'If this was a mistake, please contact us to rebook.',
-        ].filter(Boolean).join('\n'),
+        html: _email.html,
+        text: _email.text,
       });
     } catch (err) {
       console.warn('[booking-cancel] failed to send guest confirmation', err);
