@@ -305,6 +305,18 @@ const isFirstWorker = !cluster.isWorker || cluster.worker.id === 1;
 // or starting schedulers. Production / dev / docker-compose all leave it
 // unset, so the listener starts as before.
 if (process.env.SKIP_LISTEN !== '1') {
+  // Apply pending DB migrations before accepting traffic, so a release that adds
+  // a column can't go live against a DB missing it (2026-06-27 outage fix).
+  // Fail-open + disable via AUTO_MIGRATE_ON_BOOT=false.
+  if (String(process.env.AUTO_MIGRATE_ON_BOOT || 'true').toLowerCase() !== 'false') {
+    try {
+      const { runStartupMigrations } = await import('./lib/startup-migrate.js');
+      const r = await runStartupMigrations();
+      console.log('[startup-migrate] done', { baselined: r.baselined, applied: r.applied?.length || 0, failed: r.failed?.length || 0 });
+    } catch (e) {
+      console.error('[startup-migrate] runner error (continuing to boot):', e?.message);
+    }
+  }
   app.listen(port, () => {
     console.log(`Fleet backend listening on http://localhost:${port} (pid=${process.pid})`);
     // Only start schedulers in the first worker to avoid duplicate runs
