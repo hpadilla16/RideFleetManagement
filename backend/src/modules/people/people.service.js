@@ -95,7 +95,11 @@ function allowedRoleForPayload(personType, requestedRole) {
   const role = String(requestedRole || '').toUpperCase();
   if (type === 'ADMIN') return 'ADMIN';
   if (type === 'HOST') return role === 'OPS' ? 'OPS' : 'AGENT';
-  if (['OPS', 'AGENT'].includes(role)) return role;
+  // Internal (employee) users: honor an explicitly requested ADMIN/OPS/AGENT.
+  // Previously ADMIN fell through to AGENT here, so promoting a staff member to
+  // ADMIN via the People module silently downgraded to AGENT. SUPER_ADMIN is
+  // intentionally NOT assignable through this tenant-scoped module.
+  if (['ADMIN', 'OPS', 'AGENT'].includes(role)) return role;
   return 'AGENT';
 }
 
@@ -511,3 +515,5 @@ export const peopleService = {
     throw new Error('Unsupported person type');
   }
 };
+
+export const _internal = { allowedRoleForPayload };
