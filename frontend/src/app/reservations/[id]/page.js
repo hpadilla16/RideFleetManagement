@@ -1310,9 +1310,11 @@ function ReservationDetailInner({ token, me, logout }) {
       { label: 'Date of Birth', done: !!customer.dateOfBirth },
       { label: 'Driver License', done: !!(customer.licenseNumber && customer.licenseState) },
       { label: 'Address', done: !!(customer.address1 && customer.city && customer.state && customer.zip) },
-      { label: 'ID / License Photo', done: !!customer.idPhotoUrl },
-      ...(insuranceDocRequired ? [{ label: 'Insurance Document', done: !!customer.insuranceDocumentUrl }] : []),
-      { label: 'Trip Protection', done: hasCompanyInsurance || !!customer.insuranceDocumentUrl }
+      { label: 'ID / License Photo', done: !!(customer.hasIdPhoto || customer.idPhotoUrl) },
+      ...(insuranceDocRequired ? [{ label: 'Insurance Document', done: !!(customer.hasInsuranceDoc || customer.insuranceDocumentUrl) }] : []),
+      { label: 'Trip Protection',
+        done: hasCompanyInsurance || !!precheckinInsuranceInfo?.declinedCoverage || !!(customer.hasInsuranceDoc || customer.insuranceDocumentUrl),
+        status: hasCompanyInsurance ? 'Purchased' : (precheckinInsuranceInfo?.declinedCoverage ? 'Declined' : ((customer.hasInsuranceDoc || customer.insuranceDocumentUrl) ? 'Own insurance' : null)) }
     ];
     const completed = items.filter((item) => item.done).length;
     const missingItems = items.filter((item) => !item.done);
@@ -1338,7 +1340,7 @@ function ReservationDetailInner({ token, me, logout }) {
       hasActiveToken: !!row?.customerInfoToken,
       statusLabel
     };
-  }, [row]);
+  }, [row, hasCompanyInsurance, precheckinInsuranceInfo]);
   const canMarkDocsReviewed = precheckinStatus.hasSubmitted || precheckinStatus.isChecklistComplete;
   const readyNeedsOverride = !precheckinStatus.isChecklistComplete;
   const isLoanerWorkflow = String(row?.workflowMode || '').toUpperCase() === 'DEALERSHIP_LOANER';
@@ -2493,8 +2495,8 @@ token
               <div><span className="label">Ready For Pickup</span><div>{precheckinStatus.isReadyForPickup ? 'Yes' : (precheckinStatus.hasSubmitted ? (precheckinStatus.isChecklistComplete ? 'Awaiting staff review' : 'Missing requirements') : 'Pending customer info')}</div></div>
               <div><span className="label">Staff Review</span><div>{precheckinStatus.isStaffReviewed ? 'Reviewed' : 'Pending review'}</div></div>
               <div><span className="label">Reviewed By</span><div>{row?.customerInfoReviewedByUser?.fullName || row?.customerInfoReviewedByUser?.email || '-'}</div></div>
-              <div><span className="label">ID / License Photo</span><div>{row?.customer?.idPhotoUrl ? 'Uploaded' : 'Missing'}</div></div>
-              <div><span className="label">Insurance Doc</span><div>{row?.customer?.insuranceDocumentUrl ? 'Uploaded' : (hasCompanyInsurance ? 'N/A (Company plan)' : 'Missing')}</div></div>
+              <div><span className="label">ID / License Photo</span><div>{(row?.customer?.hasIdPhoto || row?.customer?.idPhotoUrl) ? 'Uploaded' : 'Missing'}</div></div>
+              <div><span className="label">Insurance Doc</span><div>{(row?.customer?.hasInsuranceDoc || row?.customer?.insuranceDocumentUrl) ? 'Uploaded' : (hasCompanyInsurance ? 'N/A (Company plan)' : 'Missing')}</div></div>
               <div><span className="label">Trip Protection</span><div>{hasCompanyInsurance ? 'Company Plan' : precheckinInsuranceInfo?.declinedCoverage ? 'Declined — Own Insurance' : 'Not Selected'}</div></div>
               <div><span className="label">Ready By</span><div>{row?.readyForPickupByUser?.fullName || row?.readyForPickupByUser?.email || '-'}</div></div>
               <div><span className="label">Override Note</span><div>{row?.readyForPickupOverrideNote || '-'}</div></div>
@@ -2602,7 +2604,7 @@ token
                 {precheckinStatus.items.map((item) => (
                   <tr key={item.label}>
                     <td>{item.label}</td>
-                    <td>{item.done ? 'Done' : 'Missing'}</td>
+                    <td>{item.status ? item.status : (item.done ? 'Done' : 'Missing')}</td>
                   </tr>
                 ))}
               </tbody>

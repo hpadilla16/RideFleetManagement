@@ -1,0 +1,12 @@
+import { prisma } from './src/lib/prisma.js';
+import { issuePreArrivalPrecheckin } from './src/modules/dealership-loaner/dealership-loaner.service.js';
+let pass=0,fail=0;const ok=(c,m)=>{c?(pass++,console.log('  PASS',m)):(fail++,console.log('  FAIL',m));};
+const t=await prisma.tenant.create({data:{name:'T',slug:'t-'+Date.now(),status:'ACTIVE'}});
+const cust=await prisma.customer.create({data:{tenantId:t.id,firstName:'Ana',lastName:'D',email:'ana@x.com',phone:'7875550101'}});
+const loc=await prisma.location.create({data:{tenantId:t.id,code:'K',name:'K'}});
+const resv=await prisma.reservation.create({data:{tenant:{connect:{id:t.id}},reservationNumber:'R-'+Date.now(),customer:{connect:{id:cust.id}},status:'CONFIRMED',workflowMode:'DEALERSHIP_LOANER',pickupAt:new Date(),returnAt:new Date(Date.now()+3*86400e3),pickupLocation:{connect:{id:loc.id}},returnLocation:{connect:{id:loc.id}}},include:{customer:true}});
+const out=await issuePreArrivalPrecheckin(resv);
+ok(out.ok && /\/customer\/precheckin\?token=/.test(out.link),'returns a precheckin link: '+out.link);
+const r2=await prisma.reservation.findUnique({where:{id:resv.id}});
+ok(!!r2.customerInfoToken && !!r2.customerInfoTokenExpiresAt,'customerInfoToken + expiry stamped on reservation');
+console.log(`pre-arrival: ${pass} passed, ${fail} failed`);await prisma.$disconnect();process.exit(fail?1:0);

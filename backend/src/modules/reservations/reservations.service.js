@@ -1545,6 +1545,22 @@ export const reservationsService = {
       }
     });
     if (!row) return null;
+    // Pre-check-in checklist needs to know whether the ID photo / insurance doc
+    // exist, but those base64 blobs are deliberately excluded from the customer
+    // select above (perf). Fetch presence-only booleans (no blob transfer) so the
+    // admin checklist can show Done instead of a false Missing after upload.
+    if (row.customer?.id) {
+      try {
+        const flags = await prisma.$queryRaw`
+          SELECT
+            (("idPhotoUrl" IS NOT NULL) AND length("idPhotoUrl") > 0) AS "hasIdPhoto",
+            (("insuranceDocumentUrl" IS NOT NULL) AND length("insuranceDocumentUrl") > 0) AS "hasInsuranceDoc"
+          FROM "Customer" WHERE id = ${row.customer.id} LIMIT 1`;
+        const f = Array.isArray(flags) ? flags[0] : null;
+        row.customer.hasIdPhoto = !!f?.hasIdPhoto;
+        row.customer.hasInsuranceDoc = !!f?.hasInsuranceDoc;
+      } catch { /* fail-open: leave flags undefined, checklist falls back to blob check */ }
+    }
     return { ...row, ...deriveUnderageAlertForReservation(row) };
   },
 

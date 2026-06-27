@@ -314,6 +314,7 @@ export default function PrecheckinPage() {
       if (!res.ok) throw new Error(json?.error || 'Unable to submit pre-check-in');
       setOk(json?.message || 'Pre-check-in completed.');
       try { localStorage.removeItem(precheckinDraftKey(token)); } catch {}
+      try { window.scrollTo({ top: 0, behavior: 'smooth' }); } catch {}
       setModel((prev) => ({
         ...(prev || {}),
         portal: json?.portal || prev?.portal || null,
@@ -377,7 +378,31 @@ export default function PrecheckinPage() {
     <div style={portalStyles.stack}>
       {loading ? <div style={{ ...portalStyles.notice, background: 'rgba(79, 70, 229, 0.08)', color: '#4338ca' }}>Loading your pre-check-in checklist...</div> : null}
       {error ? <div style={{ ...portalStyles.notice, background: 'rgba(220, 38, 38, 0.12)', color: '#991b1b' }}>{error}</div> : null}
-      {ok ? <div style={{ ...portalStyles.notice, background: 'rgba(22, 163, 74, 0.12)', color: '#166534' }}>{ok}</div> : null}
+      {ok ? (
+        <div style={{
+          display: 'flex', alignItems: 'center', gap: 14, padding: '16px 18px', marginBottom: 14,
+          borderRadius: 16, border: '1px solid rgba(22,163,74,0.28)',
+          background: 'linear-gradient(135deg, rgba(22,163,74,0.14), rgba(110,73,255,0.10))',
+          color: '#166534', boxShadow: '0 10px 30px rgba(22,163,74,0.18)',
+          animation: 'rfmBannerIn .45s cubic-bezier(.2,.9,.3,1.2) both'
+        }}>
+          <span style={{
+            flex: '0 0 auto', width: 40, height: 40, borderRadius: '50%',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            background: '#16a34a', color: '#fff', fontSize: 22, fontWeight: 800,
+            boxShadow: '0 0 0 0 rgba(22,163,74,0.45)', animation: 'rfmCheckPop .5s .1s both, rfmPulse 1.6s 0.6s ease-out 2'
+          }}>✓</span>
+          <div style={{ lineHeight: 1.4 }}>
+            <div style={{ fontWeight: 800, fontSize: '1.02rem' }}>Submitted successfully!</div>
+            <div style={{ fontSize: '0.9rem', opacity: 0.9 }}>{ok}</div>
+          </div>
+          <style>{`
+            @keyframes rfmBannerIn { from { opacity: 0; transform: translateY(-10px) scale(.98); } to { opacity: 1; transform: none; } }
+            @keyframes rfmCheckPop { 0% { transform: scale(0) rotate(-25deg); } 60% { transform: scale(1.18) rotate(0deg); } 100% { transform: scale(1); } }
+            @keyframes rfmPulse { 0% { box-shadow: 0 0 0 0 rgba(22,163,74,0.45); } 100% { box-shadow: 0 0 0 16px rgba(22,163,74,0); } }
+          `}</style>
+        </div>
+      ) : null}
     </div>
   );
 
