@@ -1993,7 +1993,7 @@ export const bookingEngineService = {
 
       const customerInfoRequest = await issueCustomerInfoRequest(reservation);
       const [signatureRequest, paymentRequest] = await Promise.all([
-        issuePortalRequest('signature', reservation),
+        issuePortalRequest('signature', reservation, { sendEmailToCustomer: true }),
         issuePortalRequest('payment', reservation)
       ]);
       const nextActions = {
@@ -2540,6 +2540,8 @@ export const bookingEngineService = {
             estimatedTotal: money(reservation.estimatedTotal),
             pickupAt: reservation.pickupAt,
             returnAt: reservation.returnAt,
+            agreementSigned: !!reservation.signatureSignedAt,
+            agreementSignedAt: reservation.signatureSignedAt || null,
             incidents: (reservation.incidents || []).map((incident) => ({
               id: incident.id,
               type: incident.type,

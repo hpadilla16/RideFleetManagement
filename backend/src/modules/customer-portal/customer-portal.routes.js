@@ -734,7 +734,7 @@ async function buildPortalSummary(reservation, kind, token) {
     .sort((a, b) => new Date(b).getTime() - new Date(a).getTime())[0] || null;
   const customerInfoComplete = !!reservation.customerInfoCompletedAt;
   const signatureComplete = !!reservation.signatureSignedAt;
-  const paymentComplete = balanceDue <= 0 && paidAmount > 0;
+  const paymentComplete = balanceDue <= 0; // $0 / hold-only bookings complete after signing without a gateway charge
   const paymentPartial = paidAmount > 0 && balanceDue > 0;
   const paymentRequested = !!reservation.paymentRequestToken;
   const agreementActive = !!agreement;
