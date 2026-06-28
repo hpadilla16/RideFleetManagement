@@ -115,6 +115,19 @@ async function main() {
     });
   }
 
+  // Pre-check-in auto-invite sweep (2026-06-28). Opt-in per tenant: emails the
+  // customer the pre-check-in link N hours before pickup (+ optional reminder),
+  // column-deduped. Dynamic import so a broken import chain can't kill worker boot.
+  try {
+    const precheckinInviteMod = await import('./modules/reservations/precheckin-invite.scheduler.js');
+    precheckinInviteMod.startPrecheckinInviteScheduler();
+    logger.info('[worker] started: precheckin-invite scheduler');
+  } catch (err) {
+    logger.warn('[worker] precheckin-invite scheduler not started', {
+      message: err.message,
+    });
+  }
+
   // Long-term (monthly) plans — P2 cycle-billing sweep. Hourly: renewal
   // reminders (48h/24h), cycle close + card-on-file auto-charge, retry +
   // overdue dunning, auto-clear on payment (cache-deduped sends).

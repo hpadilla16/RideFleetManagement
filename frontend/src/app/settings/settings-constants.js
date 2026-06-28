@@ -174,6 +174,8 @@ export const DEFAULT_REVENUE_PRICING_PREVIEW = {
 
 export const DEFAULT_PRECHECKIN_DISCOUNT = { enabled: false, type: 'PERCENTAGE', value: 0 };
 
+export const DEFAULT_PRECHECKIN_AUTO_EMAIL = { enabled: false, leadHours: 48, reminderEnabled: true, reminderLeadHours: 24 };
+
 export const DEFAULT_SELF_SERVICE_CONFIG = {
   enabled: false,
   allowPickup: true,

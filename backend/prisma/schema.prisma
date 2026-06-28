@@ -1223,6 +1223,8 @@ model Reservation {
   customerInfoToken            String?
   customerInfoTokenExpiresAt   DateTime?
   customerInfoCompletedAt      DateTime?
+  precheckinAutoInviteSentAt   DateTime?
+  precheckinAutoReminderSentAt DateTime?
   customerInfoReviewedAt       DateTime?
   customerInfoReviewedByUserId String?
   customerInfoReviewedByUser   User?     @relation("ReservationCustomerInfoReviewedBy", fields: [customerInfoReviewedByUserId], references: [id])

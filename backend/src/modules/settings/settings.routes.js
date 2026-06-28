@@ -486,6 +486,22 @@ settingsRouter.put('/precheckin-discount', requireRole('ADMIN'), async (req, res
   }
 });
 
+settingsRouter.get('/precheckin-auto-email', requireRole('ADMIN'), async (req, res, next) => {
+  try {
+    res.json(await settingsService.getPrecheckinAutoEmail(scopeFor(req)));
+  } catch (e) {
+    next(e);
+  }
+});
+
+settingsRouter.put('/precheckin-auto-email', requireRole('ADMIN'), async (req, res, next) => {
+  try {
+    res.json(await settingsService.updatePrecheckinAutoEmail(req.body || {}, scopeFor(req)));
+  } catch (e) {
+    next(e);
+  }
+});
+
 settingsRouter.get('/self-service', requireRole('ADMIN'), async (req, res, next) => {
   try {
     const cfg = await settingsService.getSelfServiceConfig(scopeFor(req));

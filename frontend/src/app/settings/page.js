@@ -36,7 +36,7 @@ import {
   DEFAULTS, DEFAULT_EMAIL_TEMPLATES, DEFAULT_PAYMENT_GATEWAY_CONFIG,
   DEFAULT_PLANNER_COPILOT_CONFIG, DEFAULT_PLANNER_COPILOT_USAGE,
   DEFAULT_TELEMATICS_CONFIG, DEFAULT_REVENUE_PRICING_CONFIG,
-  DEFAULT_REVENUE_PRICING_PREVIEW, DEFAULT_PRECHECKIN_DISCOUNT,
+  DEFAULT_REVENUE_PRICING_PREVIEW, DEFAULT_PRECHECKIN_DISCOUNT, DEFAULT_PRECHECKIN_AUTO_EMAIL,
   DEFAULT_SELF_SERVICE_CONFIG, DEFAULT_CAR_SHARING_PRESET,
   EMPTY_LOCATION, LOCATION_CONFIG_DEFAULT, EMPTY_FEE, EMPTY_STOP_SALE, DEFAULT_REVIEW_EMAIL_CONFIG,
   EMPTY_VEHICLE_TYPE, EMPTY_RATE, EMPTY_SERVICE,
@@ -55,7 +55,7 @@ const SETTINGS_TAB_SECTIONS = {
   rates: ['rates'],
   revenue: ['revenuePricing'],
   carSharing: ['carSharingSearchPlaces'],
-  selfService: ['selfService'],
+  selfService: ['selfService', 'precheckinDiscount', 'precheckinAutoEmail'],
   vehicleTypes: [],
   insurance: ['insurancePlans'],
   payments: [],
@@ -180,6 +180,7 @@ function SettingsInner({ token, me, logout }) {
   const [revenuePricingPreviewResult, setRevenuePricingPreviewResult] = useState(null);
   const [selfServiceConfig, setSelfServiceConfig] = useState(DEFAULT_SELF_SERVICE_CONFIG);
   const [precheckinDiscount, setPrecheckinDiscount] = useState(DEFAULT_PRECHECKIN_DISCOUNT);
+  const [precheckinAutoEmail, setPrecheckinAutoEmail] = useState(DEFAULT_PRECHECKIN_AUTO_EMAIL);
   const [carSharingSearchPlaces, setCarSharingSearchPlaces] = useState([]);
   const [tenantModuleAccess, setTenantModuleAccess] = useState({});
   const [loadedSettingsSections, setLoadedSettingsSections] = useState({});
@@ -351,6 +352,9 @@ function SettingsInner({ token, me, logout }) {
     if (key === 'precheckinDiscount') {
       setPrecheckinDiscount({ ...DEFAULT_PRECHECKIN_DISCOUNT, ...(value || {}) });
     }
+    if (key === 'precheckinAutoEmail') {
+      setPrecheckinAutoEmail({ ...DEFAULT_PRECHECKIN_AUTO_EMAIL, ...(value || {}) });
+    }
     if (key === 'selfService') {
       setSelfServiceConfig({
         ...DEFAULT_SELF_SERVICE_CONFIG,
@@ -382,6 +386,7 @@ function SettingsInner({ token, me, logout }) {
     revenuePricing: (forceLoad = false) => api(scopedSettingsPath('/api/settings/revenue-pricing'), forceLoad ? { bypassCache: true } : {}, token),
     carSharingSearchPlaces: (forceLoad = false) => api(scopedSettingsPath('/api/settings/car-sharing-search-places'), forceLoad ? { bypassCache: true } : {}, token),
     precheckinDiscount: (forceLoad = false) => api(scopedSettingsPath('/api/settings/precheckin-discount'), forceLoad ? { bypassCache: true } : {}, token),
+    precheckinAutoEmail: (forceLoad = false) => api(scopedSettingsPath('/api/settings/precheckin-auto-email'), forceLoad ? { bypassCache: true } : {}, token),
     selfService: (forceLoad = false) => api(scopedSettingsPath('/api/settings/self-service'), forceLoad ? { bypassCache: true } : {}, token),
     tenantModules: (forceLoad = false) => api(scopedSettingsPath('/api/settings/tenant-modules'), forceLoad ? { bypassCache: true } : {}, token)
   };
@@ -940,6 +945,20 @@ function SettingsInner({ token, me, logout }) {
     }, token);
     setPrecheckinDiscount({ ...DEFAULT_PRECHECKIN_DISCOUNT, ...(out || {}) });
     setMsg('Pre-check-in discount settings saved');
+  };
+
+  const savePrecheckinAutoEmail = async () => {
+    const out = await api(scopedSettingsPath('/api/settings/precheckin-auto-email'), {
+      method: 'PUT',
+      body: JSON.stringify({
+        enabled: !!precheckinAutoEmail.enabled,
+        leadHours: Number(precheckinAutoEmail.leadHours) || 48,
+        reminderEnabled: !!precheckinAutoEmail.reminderEnabled,
+        reminderLeadHours: Number(precheckinAutoEmail.reminderLeadHours) || 24
+      })
+    }, token);
+    setPrecheckinAutoEmail({ ...DEFAULT_PRECHECKIN_AUTO_EMAIL, ...(out || {}) });
+    setMsg('Pre-check-in auto-email settings saved');
   };
 
   const saveSelfServiceConfig = async () => {
@@ -4465,6 +4484,107 @@ function SettingsInner({ token, me, logout }) {
               <div className="inline-actions" style={{ marginTop: 12 }}>
                 <button type="button" onClick={savePrecheckinDiscount}>Save Discount Settings</button>
                 <button type="button" className="button-subtle" onClick={() => setPrecheckinDiscount(DEFAULT_PRECHECKIN_DISCOUNT)}>Reset</button>
+              </div>
+            </section>
+
+            <section className="glass card section-card">
+              <div className="row-between" style={{ alignItems: 'flex-start', gap: 12 }}>
+                <div className="stack" style={{ gap: 6 }}>
+                  <h3 style={{ margin: 0 }}>Auto-Send Pre-Check-in Invite</h3>
+                  <div className="ui-muted">
+                    Email the customer their pre-check-in link automatically before pickup, so more guests arrive checked in.
+                    Manual sends are respected (no duplicates), and emails go out branded in the customer&apos;s language.
+                  </div>
+                </div>
+                <span className={`status-chip ${precheckinAutoEmail.enabled ? 'good' : 'neutral'}`}>
+                  {precheckinAutoEmail.enabled ? 'On' : 'Off'}
+                </span>
+              </div>
+
+              <div className="form-grid-2" style={{ marginTop: 14 }}>
+                <label className="label" style={{ textTransform: 'none', letterSpacing: 0, fontSize: 13 }}>
+                  <input
+                    type="checkbox"
+                    checked={!!precheckinAutoEmail.enabled}
+                    onChange={(e) => setPrecheckinAutoEmail((c) => ({ ...c, enabled: e.target.checked }))}
+                  /> Enable automatic pre-check-in invite
+                </label>
+                <div className="surface-note">
+                  Off by default. When enabled, a sweep runs hourly and sends the invite to reservations whose pickup is within the window below.
+                </div>
+              </div>
+
+              {precheckinAutoEmail.enabled && (
+                <>
+                  <div className="form-grid-2" style={{ marginTop: 12 }}>
+                    <div>
+                      <label className="label">Send how early</label>
+                      <select
+                        value={Number(precheckinAutoEmail.leadHours) || 48}
+                        onChange={(e) => {
+                          const leadHours = Number(e.target.value);
+                          setPrecheckinAutoEmail((c) => {
+                            const opts = [24, 48].filter((h) => h < leadHours);
+                            const reminderLeadHours = opts.includes(Number(c.reminderLeadHours)) ? Number(c.reminderLeadHours) : (opts.length ? opts[opts.length - 1] : 24);
+                            return { ...c, leadHours, reminderLeadHours };
+                          });
+                        }}
+                      >
+                        <option value={24}>24 hours before pickup</option>
+                        <option value={48}>48 hours before pickup</option>
+                        <option value={72}>72 hours before pickup</option>
+                      </select>
+                    </div>
+                    <div className="surface-note">
+                      The invite goes out once, this many hours before the pickup time.
+                    </div>
+                  </div>
+
+                  <div className="form-grid-2" style={{ marginTop: 12 }}>
+                    <label className="label" style={{ textTransform: 'none', letterSpacing: 0, fontSize: 13 }}>
+                      <input
+                        type="checkbox"
+                        checked={!!precheckinAutoEmail.reminderEnabled}
+                        onChange={(e) => setPrecheckinAutoEmail((c) => ({ ...c, reminderEnabled: e.target.checked }))}
+                      /> Send a reminder if not completed
+                    </label>
+                    <div className="surface-note">
+                      A single nudge closer to pickup if the customer hasn&apos;t finished their pre-check-in.
+                    </div>
+                  </div>
+
+                  {precheckinAutoEmail.reminderEnabled && (
+                    <div className="form-grid-2" style={{ marginTop: 12 }}>
+                      <div>
+                        <label className="label">Reminder timing</label>
+                        {[24, 48].filter((h) => h < (Number(precheckinAutoEmail.leadHours) || 48)).length ? (
+                          <select
+                            value={Number(precheckinAutoEmail.reminderLeadHours) || 24}
+                            onChange={(e) => setPrecheckinAutoEmail((c) => ({ ...c, reminderLeadHours: Number(e.target.value) }))}
+                          >
+                            {[24, 48].filter((h) => h < (Number(precheckinAutoEmail.leadHours) || 48)).map((h) => (
+                              <option key={h} value={h}>{h} hours before pickup</option>
+                            ))}
+                          </select>
+                        ) : (
+                          <div className="surface-note">Set &quot;Send how early&quot; to 48 or 72 hours to enable a separate reminder.</div>
+                        )}
+                      </div>
+                      <div className="surface-note">
+                        Must be closer to pickup than the invite. Reminders only go to customers who still haven&apos;t completed pre-check-in.
+                      </div>
+                    </div>
+                  )}
+
+                  <div className="surface-note" style={{ marginTop: 12 }}>
+                    Summary: invite sent {Number(precheckinAutoEmail.leadHours) || 48}h before pickup{precheckinAutoEmail.reminderEnabled && [24, 48].filter((h) => h < (Number(precheckinAutoEmail.leadHours) || 48)).length ? `, reminder ${Number(precheckinAutoEmail.reminderLeadHours) || 24}h before` : ''}.
+                  </div>
+                </>
+              )}
+
+              <div className="inline-actions" style={{ marginTop: 12 }}>
+                <button type="button" onClick={savePrecheckinAutoEmail}>Save Auto-Email Settings</button>
+                <button type="button" className="button-subtle" onClick={() => setPrecheckinAutoEmail(DEFAULT_PRECHECKIN_AUTO_EMAIL)}>Reset</button>
               </div>
             </section>
           </div>

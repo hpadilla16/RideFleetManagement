@@ -43,6 +43,28 @@ const DEFAULTS = {
 
 const ALLOWED_KEYS = Object.keys(DEFAULTS);
 
+// Pre-check-in auto-email (2026-06-28). Tenants opt in to automatically emailing
+// the pre-check-in invite N hours before pickup, plus an optional reminder closer
+// to pickup if the customer hasn't completed it. Lead-time presets: 24/48/72h.
+const PRECHECKIN_LEAD_PRESETS = [24, 48, 72];
+function clampLead(v, fallback) {
+  const n = Number(v);
+  return PRECHECKIN_LEAD_PRESETS.includes(n) ? n : fallback;
+}
+function normalizePrecheckinAutoEmail(p = {}) {
+  const leadHours = clampLead(p?.leadHours, 48);
+  let reminderLeadHours = clampLead(p?.reminderLeadHours, 24);
+  // Reminder must fire AFTER the invite (i.e. closer to pickup => fewer hours out).
+  if (reminderLeadHours >= leadHours) reminderLeadHours = Math.min(...PRECHECKIN_LEAD_PRESETS.filter((h) => h < leadHours), 24);
+  if (!Number.isFinite(reminderLeadHours)) reminderLeadHours = 24;
+  return {
+    enabled: !!p?.enabled,
+    leadHours,
+    reminderEnabled: p?.reminderEnabled === undefined ? true : !!p?.reminderEnabled,
+    reminderLeadHours
+  };
+}
+
 // Market Intelligence dashboard SIPP picker (beta.134). A tenant pins up to 6 of
 // these to their MI dashboard card. Keep in sync with SIPP_NAMES in the frontend
 // MarketIntelligenceCard.jsx. Unknown codes are rejected on save.
@@ -717,6 +739,29 @@ export const settingsService = {
       value: Math.max(0, Number(payload?.value || 0))
     };
     const key = scopedKey('precheckinDiscount', scope);
+    await prisma.appSetting.upsert({
+      where: { key },
+      create: { key, value: JSON.stringify(next) },
+      update: { value: JSON.stringify(next) }
+    });
+    return next;
+  },
+
+  async getPrecheckinAutoEmail(scope = {}) {
+    const row = await prisma.appSetting.findUnique({ where: { key: scopedKey('precheckinAutoEmail', scope) } });
+    const DEF = { enabled: false, leadHours: 48, reminderEnabled: true, reminderLeadHours: 24 };
+    if (!row?.value) return { ...DEF };
+    try {
+      const p = JSON.parse(row.value);
+      return normalizePrecheckinAutoEmail(p);
+    } catch {
+      return { ...DEF };
+    }
+  },
+
+  async updatePrecheckinAutoEmail(payload = {}, scope = {}) {
+    const next = normalizePrecheckinAutoEmail(payload);
+    const key = scopedKey('precheckinAutoEmail', scope);
     await prisma.appSetting.upsert({
       where: { key },
       create: { key, value: JSON.stringify(next) },
