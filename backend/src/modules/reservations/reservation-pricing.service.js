@@ -300,7 +300,10 @@ async function syncAgreementCharges(reservationId, scope = {}, opts = {}) {
 async function maybeCreateAgreementPayment({ reservation, payment }) {
   const agreement = reservation?.rentalAgreement;
   if (!agreement?.id) return null;
-  if (['CLOSED', 'CANCELLED'].includes(String(agreement.status || '').toUpperCase())) return null;
+  // Only CANCELLED is hard-blocked. A CLOSED agreement is still adjustable by admins
+  // (mirrors the allowClosed pattern in void/correction paths) — recording a payment
+  // on it must create the agreement-ledger row and recompute, or the balance goes stale.
+  if (String(agreement.status || '').toUpperCase() === 'CANCELLED') return null;
 
   const created = await prisma.rentalAgreementPayment.create({
     data: {
