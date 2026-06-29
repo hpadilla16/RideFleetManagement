@@ -544,10 +544,16 @@ export const reservationPricingService = {
     // Guard: if this payment was already refunded (a REFUND counter-row exists),
     // voiding it would double-subtract from collected. Refuse.
     const priorRefund = await prisma.reservationPayment.findFirst({
-      where: { reservationId, OR: [
-        { reference: { contains: `REFUND:${payment.id}` } },
-        { notes: { contains: `Refund for payment ${payment.id}` } }
-      ] },
+      where: {
+        reservationId,
+        // Only NON-voided refunds block: if the admin already voided the refund
+        // counter-row, the original no longer nets out and must be voidable.
+        status: { not: 'VOID' },
+        OR: [
+          { reference: { contains: `REFUND:${payment.id}` } },
+          { notes: { contains: `Refund for payment ${payment.id}` } }
+        ]
+      },
       select: { id: true }
     });
     if (priorRefund) {

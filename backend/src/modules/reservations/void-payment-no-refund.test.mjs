@@ -79,3 +79,18 @@ test('voids the payment on BOTH ledgers, no money moved, balance recomputes', as
 test('idempotent — second void is rejected', async () => {
   await assert.rejects(() => reservationPricingService.voidPaymentNoRefund(ids.reservation, ids.payCard, { reason:'again' }, { tenantId: ids.tenant }), /already/i);
 });
+
+test('does NOT block when the prior refund is itself VOID (Hector voided it)', async () => {
+  const p = await prisma.reservationPayment.create({ data:{ reservationId: ids.reservation, method:'CARD', amount:9, status:'PAID', reference:'****1234' } });
+  await prisma.reservationPayment.create({ data:{ reservationId: ids.reservation, method:'CARD', amount:-9, status:'VOID', reference:`REFUND:${p.id}`, notes:`Refund for payment ${p.id}` } });
+  const out = await reservationPricingService.voidPaymentNoRefund(ids.reservation, p.id, { reason:'cobro erroneo, refund ya anulado' }, { tenantId: ids.tenant });
+  assert.equal(out.ok, true);
+  const after = await prisma.reservationPayment.findUnique({ where:{ id: p.id } });
+  assert.equal(after.status, 'VOID', 'original voids even though a VOID refund row exists');
+});
+
+test('DOES block when an ACTIVE (non-void) refund exists', async () => {
+  const p = await prisma.reservationPayment.create({ data:{ reservationId: ids.reservation, method:'CARD', amount:9, status:'PAID', reference:'****1234' } });
+  await prisma.reservationPayment.create({ data:{ reservationId: ids.reservation, method:'CARD', amount:-9, status:'PAID', reference:`REFUND:${p.id}`, notes:`Refund for payment ${p.id}` } });
+  await assert.rejects(() => reservationPricingService.voidPaymentNoRefund(ids.reservation, p.id, { reason:'x' }, { tenantId: ids.tenant }), /already refunded/i);
+});
