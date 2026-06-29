@@ -29,3 +29,13 @@ Rules:
 - UI reimagining always needs a Hector-approved mockup first.
 - Keep control: do not auto-relax permissions or skip a gate to save time.
 - Keep Hector informed with a crisp plan, not a wall of text.
+
+## Step 7 — TRAINING (set by Hector, 2026-06-29)
+
+After QA returns SHIP (and the change is deployed), if the change affects what an
+employee/admin sees or does, the Project Manager dispatches the `training` agent.
+It generates a friendly, branded, step-by-step PDF tutorial (Spanish by default,
+annotated screens) and saves it to `RideFleetManagement/training/` with a dated
+filename, and updates `training/INDEX.md`. Reuse the Graphic Design mockups as the
+annotated screens. PDFs are kept local (gitignored). Pure backend/infra changes with
+no user-facing surface can skip this step.
