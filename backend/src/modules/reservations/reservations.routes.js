@@ -514,6 +514,45 @@ reservationsRouter.post('/:id/charges', async (req, res, next) => {
   }
 });
 
+// ── Admin Corrections — correct checkout/check-in fuel + odometer (+ cleanliness)
+// and RE-RUN the check-in fee engine. ADMIN-only. dryRun:true returns a live
+// recompute PREVIEW without writing anything. Real save soft-voids the old
+// fee-engine rows, persists the corrected readings, recomputes balance, appends
+// vehicle fuel/odometer history, and writes an AuditLog(ADMIN_OVERRIDE).
+// Returns: { ok, preview:{ before:{fuelRefill,mileageFee,balance},
+//   after:{fuelRefill,mileageFee,balance}, balanceDelta } }.
+reservationsRouter.post('/:id/correct-readings', async (req, res, next) => {
+  try {
+    if (!canDoAdminCorrections(req)) {
+      return res.status(403).json({ error: 'Admin role required for corrections' });
+    }
+    const dryRun = req.body?.dryRun === true;
+    const reason = String(req.body?.reason || '').trim();
+    if (!dryRun && !reason) return res.status(400).json({ error: 'reason is required' });
+    const out = await reservationPricingService.correctInspectionValues(
+      req.params.id,
+      {
+        fuelOut: req.body?.fuelOut,
+        odometerOut: req.body?.odometerOut,
+        fuelIn: req.body?.fuelIn,
+        odometerIn: req.body?.odometerIn,
+        cleanlinessOut: req.body?.cleanlinessOut,
+        cleanlinessIn: req.body?.cleanlinessIn,
+        reason,
+        dryRun,
+        actorUserId: req.user?.sub || null
+      },
+      scopeFor(req)
+    );
+    res.json(out);
+  } catch (e) {
+    if (e?.status) return res.status(e.status).json({ error: e.message });
+    if (/cancelled|refuse/i.test(String(e?.message || ''))) return res.status(400).json({ error: e.message });
+    if (/not found/i.test(String(e?.message || ''))) return res.status(404).json({ error: e.message });
+    next(e);
+  }
+});
+
 reservationsRouter.get('/:id/payments', async (req, res, next) => {
   try {
     const out = await reservationPricingService.listPayments(req.params.id, scopeFor(req));

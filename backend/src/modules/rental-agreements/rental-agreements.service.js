@@ -11,6 +11,7 @@ import { settingsService } from '../settings/settings.service.js';
 import { buildInspectionIntelligence } from '../vehicles/vehicle-intelligence.service.js';
 import { syncVehicleStatusForReservation } from '../vehicles/vehicle-status-sync.js';
 import { recordMileageEntry } from '../vehicles/mileage-history.service.js';
+import { recordFuelReadingSafe } from '../vehicles/fuel-history.service.js';
 import { normalizeDob, isImplausibleAge } from '../../lib/dob.js';
 import {
   isStorageEnabled as inspectionPhotosStorageEnabled,
@@ -1928,6 +1929,23 @@ export async function applyFinalizeWritesTx(tx, ctx) {
       vehicleId: updated.vehicleId,
       tenantId: ctx.tenantId,
       mileage: ctx.odometerOut,
+      source: 'CHECKOUT',
+      reservationId: updated.reservationId,
+      rentalAgreementId: ctx.id,
+      reservationNumber: ctx.reservationNumber,
+      actorUserId: ctx.actorUserId
+    });
+  }
+
+  // Fuel history (2026-06-29): mirror the CHECKOUT odometer entry above for the
+  // fuel level captured at checkout, so the vehicle profile shows the fuel
+  // out->in timeline paired by reservation. Fail-open (recordFuelReadingSafe
+  // swallows its own errors) so a fuel-logging hiccup never breaks checkout.
+  if (updated.vehicleId && ctx.fuelOut != null) {
+    await recordFuelReadingSafe(tx, {
+      vehicleId: updated.vehicleId,
+      tenantId: ctx.tenantId,
+      fuelFraction: ctx.fuelOut,
       source: 'CHECKOUT',
       reservationId: updated.reservationId,
       rentalAgreementId: ctx.id,

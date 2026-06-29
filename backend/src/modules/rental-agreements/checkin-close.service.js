@@ -27,6 +27,7 @@
 import { prisma } from '../../lib/prisma.js';
 import logger from '../../lib/logger.js';
 import { recordMileageEntrySafe } from '../vehicles/mileage-history.service.js';
+import { recordFuelReadingSafe } from '../vehicles/fuel-history.service.js';
 import { syncVehicleStatusForReservation } from '../vehicles/vehicle-status-sync.js';
 import { feeEngineService } from '../fees/fee-engine.service.js';
 import { settingsService } from '../settings/settings.service.js';
@@ -118,6 +119,22 @@ export async function closeAgreementWithCheckinFees(
       vehicleId: agreement.vehicleId,
       tenantId: agreement.tenantId ?? null,
       mileage: odometerIn,
+      source: 'CHECKIN',
+      reservationId: agreement.reservationId,
+      rentalAgreementId: agreement.id,
+      reservationNumber: agreement.reservation?.reservationNumber || null,
+      actorUserId: actorUserId || null,
+    });
+  }
+
+  // Fuel history (2026-06-29): mirror the CHECKIN odometer entry above for the
+  // fuel level captured at check-in, so the vehicle profile shows the fuel
+  // out->in timeline paired by reservation. Fail-open — non-fatal if it fails.
+  if (fuelIn != null && agreement.vehicleId) {
+    await recordFuelReadingSafe(prisma, {
+      vehicleId: agreement.vehicleId,
+      tenantId: agreement.tenantId ?? null,
+      fuelFraction: fuelIn,
       source: 'CHECKIN',
       reservationId: agreement.reservationId,
       rentalAgreementId: agreement.id,
@@ -413,7 +430,7 @@ export async function closeAgreementWithCheckinFees(
 // Helpers
 // =============================================================================
 
-function computeRentalDays(pickupAt, returnAt) {
+export function computeRentalDays(pickupAt, returnAt) {
   if (!pickupAt || !returnAt) return 1;
   const p = new Date(pickupAt).getTime();
   const r = new Date(returnAt).getTime();
@@ -422,7 +439,7 @@ function computeRentalDays(pickupAt, returnAt) {
   return Math.max(1, days);
 }
 
-async function resolveTankCapacity(agreement) {
+export async function resolveTankCapacity(agreement) {
   // 2026-06-10 (#51): this used to select Vehicle columns that never existed
   // (tankCapacityGallons/fuelTankSize) — Prisma threw, the .catch swallowed
   // it, and EVERY vehicle billed fuel as a 15-gal tank. It now reads the real
@@ -445,7 +462,7 @@ async function resolveTankCapacity(agreement) {
   return { gallons: 15, isFallback: true };
 }
 
-async function resolveIncludedMilesPerDay(agreement) {
+export async function resolveIncludedMilesPerDay(agreement) {
   // Could come from the rate plan or pricing snapshot. For now, fall back to
   // 200 miles/day (industry standard for U.S. rentals). Future: read from
   // ReservationPricingSnapshot or rate plan config.

@@ -310,6 +310,10 @@ export const vehiclesService = {
           orderBy: { recordedAt: 'desc' },
           take: 25
         },
+        fuelReadings: {
+          orderBy: { recordedAt: 'desc' },
+          take: 50
+        },
         rentalAgreements: {
           orderBy: { createdAt: 'desc' },
           take: 50,
@@ -381,6 +385,10 @@ export const vehiclesService = {
       // current number with where it came from.
       mileageHistory: vehicle.mileageEntries || [],
       lastMileageEntry: vehicle.mileageEntries?.[0] || null,
+      // Fuel history (2026-06-29): latest 50 fuel readings (desc). The vehicle
+      // profile pairs these with mileageHistory by reservationId to show the
+      // fuel + odometer out->in history per rental.
+      fuelReadings: vehicle.fuelReadings || [],
       activeReservation,
       nextReservation,
       recentReservations

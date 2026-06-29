@@ -89,6 +89,77 @@ function mileageSourceLabel(source) {
   }
 }
 
+// Fuel + odometer history (2026-06-29). Pair the vehicle's fuelReadings with its
+// mileageHistory by reservationId so each rental shows as one out->in row.
+function fuelPct(fraction) {
+  if (fraction == null) return null;
+  return Math.round(Number(fraction) * 100);
+}
+
+function fuelSourceLabel(source) {
+  switch (String(source || '').toUpperCase()) {
+    case 'CHECKOUT': return 'Check-out';
+    case 'CHECKIN': return 'Check-in';
+    case 'MANUAL': return 'Manual';
+    case 'CORRECTION': return 'Corrected';
+    case 'REFUEL': return 'Refuel';
+    case 'IMPORT': return 'Imported';
+    default: return source || '-';
+  }
+}
+
+function buildFuelOdometerRows(fuelReadings = [], mileageHistory = []) {
+  // Group fuel + mileage entries by reservationId. Entries with no reservation
+  // (manual standalone reads) get their own single-entry "row" keyed by entry id.
+  const rows = new Map();
+  const keyFor = (e, prefix) => (e?.reservationId ? `r:${e.reservationId}` : `${prefix}:${e.id}`);
+
+  const ensure = (key, seed) => {
+    if (!rows.has(key)) {
+      rows.set(key, {
+        key,
+        reservationId: null,
+        reservationNumber: null,
+        fuelOut: null, fuelIn: null,
+        odoOut: null, odoIn: null,
+        corrected: false, correctedAt: null, correctedBy: null,
+        recordedAt: null
+      });
+    }
+    const row = rows.get(key);
+    if (seed.reservationId && !row.reservationId) row.reservationId = seed.reservationId;
+    if (seed.reservationNumber && !row.reservationNumber) row.reservationNumber = seed.reservationNumber;
+    const t = seed.recordedAt ? new Date(seed.recordedAt).getTime() : 0;
+    if (!row.recordedAt || t > new Date(row.recordedAt).getTime()) row.recordedAt = seed.recordedAt;
+    return row;
+  };
+
+  for (const f of (Array.isArray(fuelReadings) ? fuelReadings : [])) {
+    const src = String(f.source || '').toUpperCase();
+    const row = ensure(keyFor(f, 'f'), f);
+    if (src === 'CHECKIN' || src === 'CORRECTION') row.fuelIn = Number(f.fuelFraction);
+    else if (src === 'CHECKOUT') row.fuelOut = Number(f.fuelFraction);
+    else row.fuelIn = Number(f.fuelFraction);
+    if (src === 'CORRECTION') {
+      row.corrected = true;
+      row.correctedAt = f.recordedAt;
+      row.correctedBy = f.actorUserId || null;
+    }
+  }
+
+  for (const m of (Array.isArray(mileageHistory) ? mileageHistory : [])) {
+    const src = String(m.source || '').toUpperCase();
+    const row = ensure(keyFor(m, 'm'), m);
+    if (src === 'CHECKIN') row.odoIn = Number(m.mileage);
+    else if (src === 'CHECKOUT') row.odoOut = Number(m.mileage);
+    else if (src === 'MANUAL') { row.odoIn = Number(m.mileage); }
+    else row.odoIn = Number(m.mileage);
+  }
+
+  return Array.from(rows.values())
+    .sort((a, b) => new Date(b.recordedAt || 0).getTime() - new Date(a.recordedAt || 0).getTime());
+}
+
 function vehicleDisplayName(row) {
   return [row?.year, row?.make, row?.model].filter(Boolean).join(' ') || row?.plate || row?.internalNumber || 'Vehicle';
 }
@@ -380,6 +451,8 @@ function VehicleProfileInner({ token, me, logout }) {
   const telematicsDevices = Array.isArray(row?.telematicsDevices) ? row.telematicsDevices : [];
   const latestTelematicsEvent = row?.latestTelematicsEvent || null;
   const mileageHistory = Array.isArray(row?.mileageHistory) ? row.mileageHistory : [];
+  const fuelReadings = Array.isArray(row?.fuelReadings) ? row.fuelReadings : [];
+  const fuelOdoRows = buildFuelOdometerRows(fuelReadings, mileageHistory);
   const lastMileageEntry = row?.lastMileageEntry || null;
   const canManageTelematics = ['SUPER_ADMIN', 'ADMIN', 'OPS'].includes(String(me?.role || '').toUpperCase());
   const selectedTelematicsProvider = telematicsProviders.find((provider) => provider.code === String(deviceForm.provider || '').toUpperCase()) || null;
@@ -1060,6 +1133,73 @@ function VehicleProfileInner({ token, me, logout }) {
                   </div>
                 ) : (
                   <div className="surface-note">This vehicle has no mileage entries yet. They'll be recorded automatically on the next check-out or check-in, or you can adjust it manually.</div>
+                )}
+              </section>
+
+              <section className="glass card-lg section-card">
+                <div className="row-between">
+                  <h2>Fuel &amp; Odometer History</h2>
+                  <span className="status-chip neutral">{fuelOdoRows.length} {fuelOdoRows.length === 1 ? 'rental' : 'rentals'}</span>
+                </div>
+                <p className="ui-muted" style={{ marginTop: 0 }}>
+                  Fuel and odometer readings captured at check-out and check-in, paired per rental. Admin corrections are flagged.
+                </p>
+                {fuelOdoRows.length ? (
+                  <div className="table-shell">
+                    <table>
+                      <thead>
+                        <tr>
+                          <th>Date</th>
+                          <th>Reservation</th>
+                          <th>Out (fuel / odo)</th>
+                          <th>In (fuel / odo)</th>
+                          <th>Miles</th>
+                          <th>Corrected</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {fuelOdoRows.map((r) => {
+                          const miles = (r.odoIn != null && r.odoOut != null) ? (r.odoIn - r.odoOut) : null;
+                          const isCurrent = activeReservation && r.reservationId && activeReservation.id === r.reservationId;
+                          const outFuel = fuelPct(r.fuelOut);
+                          const inFuel = fuelPct(r.fuelIn);
+                          return (
+                            <tr key={r.key}>
+                              <td>
+                                {formatDateTime(r.recordedAt)}
+                                {isCurrent ? <span className="status-chip good" style={{ marginLeft: 6 }}>Current</span> : null}
+                              </td>
+                              <td>
+                                {r.reservationId ? (
+                                  <Link href={`/reservations/${r.reservationId}`} className="legal-link-pill">{r.reservationNumber || 'Open'}</Link>
+                                ) : '-'}
+                              </td>
+                              <td>
+                                {outFuel != null ? `${outFuel}%` : '-'}
+                                {' / '}
+                                {r.odoOut != null ? `${r.odoOut.toLocaleString()} mi` : '-'}
+                              </td>
+                              <td>
+                                {inFuel != null ? `${inFuel}%` : '-'}
+                                {' / '}
+                                {r.odoIn != null ? `${r.odoIn.toLocaleString()} mi` : '-'}
+                              </td>
+                              <td>{miles != null ? <strong>{miles.toLocaleString()} mi</strong> : '-'}</td>
+                              <td>
+                                {r.corrected ? (
+                                  <span className="status-chip warn" title={`${fuelSourceLabel('CORRECTION')}${r.correctedAt ? ` on ${formatDateTime(r.correctedAt)}` : ''}`}>
+                                    Corrected
+                                  </span>
+                                ) : '—'}
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                ) : (
+                  <div className="surface-note">No fuel or odometer readings yet. They're recorded automatically on the next check-out and check-in.</div>
                 )}
               </section>
 

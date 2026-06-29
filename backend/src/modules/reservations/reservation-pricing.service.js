@@ -3,6 +3,14 @@ import { tollsService } from '../tolls/tolls.service.js';
 import { filterMandatoryFeesForChannel } from '../booking-engine/fee-channel-filter.js';
 import { syncVehicleStatusForReservation } from '../vehicles/vehicle-status-sync.js';
 import logger from '../../lib/logger.js';
+import { computeCheckinFees } from '../fees/fee-engine.service.js';
+import {
+  computeRentalDays,
+  resolveTankCapacity,
+  resolveIncludedMilesPerDay
+} from '../rental-agreements/checkin-close.service.js';
+import { recordMileageEntrySafe } from '../vehicles/mileage-history.service.js';
+import { recordFuelReadingSafe } from '../vehicles/fuel-history.service.js';
 
 function toNumber(value, fallback = 0) {
   const n = Number(value);
@@ -596,6 +604,242 @@ export const reservationPricingService = {
       balance: Number(agreement.balance || 0),
       total: Number(agreement.total || 0)
     };
+  },
+
+  // ── Admin Corrections: correct checkout/check-in fuel + odometer + cleanliness
+  // and RE-RUN the check-in fee engine (2026-06-29). ADMIN-only (gated at route).
+  // Fixes "the agent fat-fingered the odometer/fuel at checkout or check-in and the
+  // wrong excess-mileage / fuel-refill fee posted". We soft-void the old fee-engine
+  // rows (kept for history), persist the corrected inspection columns, and let
+  // computeCheckinFees recompute fees + agreement total/balance with the SAME input
+  // resolvers the first-run check-in used (computeRentalDays / resolveTankCapacity /
+  // resolveIncludedMilesPerDay, exported from checkin-close.service.js) so corrected
+  // fees match first-run fees exactly. Allows CLOSED/locked agreements (the whole
+  // point — fixing a finalized rental); refuses CANCELLED. Writes an
+  // AuditLog(ADMIN_OVERRIDE) with old/new readings, fee breakdown before/after,
+  // balanceBefore/After + the required reason. Supports dryRun for a live preview.
+  async correctInspectionValues(reservationId, payload = {}, scope = {}) {
+    const { reason = null, actorUserId = null, dryRun = false } = payload;
+    const reasonStr = String(reason || '').trim();
+    if (!dryRun && !reasonStr) { const e = new Error('reason is required'); e.status = 400; throw e; }
+
+    await getReservationOrThrow(reservationId, scope); // validates existence + tenant scope
+
+    const agreement = await prisma.rentalAgreement.findFirst({
+      where: { reservationId, ...(scope?.tenantId ? { tenantId: scope.tenantId } : {}) },
+      orderBy: { createdAt: 'desc' }
+    });
+    if (!agreement) { const e = new Error('No agreement for reservation'); e.status = 404; throw e; }
+    if (String(agreement.status || '').toUpperCase() === 'CANCELLED') {
+      const e = new Error('Cannot correct readings on a cancelled agreement'); e.status = 400; throw e;
+    }
+
+    const balanceBefore = Number(agreement.balance || 0);
+
+    // Resolve the NEW values: take the supplied ones, fall back to the agreement's
+    // current value for the rest (so a partial correction only moves what changed).
+    const fuelToFrac = (v) => (v == null ? null : Number(v));
+    const odoToInt = (v) => (v == null ? null : Math.round(Number(v)));
+    const has = (k) => payload[k] !== undefined && payload[k] !== null && String(payload[k]).trim?.() !== '';
+
+    const newFuelOut       = has('fuelOut')        ? fuelToFrac(payload.fuelOut)        : (agreement.fuelOut == null ? null : Number(agreement.fuelOut));
+    const newFuelIn        = has('fuelIn')         ? fuelToFrac(payload.fuelIn)         : (agreement.fuelIn == null ? null : Number(agreement.fuelIn));
+    const newOdometerOut   = has('odometerOut')    ? odoToInt(payload.odometerOut)      : (agreement.odometerOut ?? null);
+    const newOdometerIn    = has('odometerIn')     ? odoToInt(payload.odometerIn)       : (agreement.odometerIn ?? null);
+    const newCleanlinessOut = has('cleanlinessOut') ? odoToInt(payload.cleanlinessOut)  : (agreement.cleanlinessOut ?? null);
+    const newCleanlinessIn  = has('cleanlinessIn')  ? odoToInt(payload.cleanlinessIn)   : (agreement.cleanlinessIn ?? null);
+
+    // Shared fee-engine inputs (same resolvers as first-run check-in close).
+    const rentalDays = computeRentalDays(agreement.pickupAt, agreement.returnAt);
+    const { gallons: tankCapacityGallons, isFallback: tankCapacityIsFallback } = await resolveTankCapacity(agreement);
+    const includedMilesPerDay = await resolveIncludedMilesPerDay(agreement);
+    const locationId = agreement.pickupLocationId || agreement.returnLocationId;
+
+    const feeInputs = {
+      reservationId,
+      rentalAgreementId: agreement.id,
+      tenantId: agreement.tenantId,
+      locationId,
+      odometerOut: newOdometerOut,
+      odometerIn: newOdometerIn,
+      fuelOut: newFuelOut,
+      fuelIn: newFuelIn,
+      // Scope of this correction = fuel + odometer ONLY. Pass cleanliness as null and
+      // smokingDetected false + no late-return inputs so computeCheckinFees re-emits ONLY
+      // FUEL_REFILL / EXCESS_MILEAGE. Any existing CLEANING_*/SMOKING/LATE_RETURN rows are
+      // deliberately left untouched below, so they survive the recompute (financial safety).
+      cleanlinessOut: null,
+      cleanlinessIn: null,
+      smokingDetected: false,
+      includedMilesPerDay,
+      rentalDays,
+      tankCapacityGallons,
+      tankCapacityIsFallback
+    };
+
+    // Pull the current fee-engine breakdown (the "before") from the live charges.
+    const beforeFeeRows = await prisma.rentalAgreementCharge.findMany({
+      where: { rentalAgreementId: agreement.id, source: 'FEE_ENGINE_CHECKIN', selected: true },
+      select: { total: true, sourceRefId: true }
+    });
+    const beforeFee = (type) => Number((beforeFeeRows
+      .filter((r) => String(r.sourceRefId || '').toUpperCase() === type)
+      .reduce((s, r) => s + Number(r.total || 0), 0)).toFixed(2));
+    const before = {
+      fuelRefill: beforeFee('FUEL_REFILL'),
+      mileageFee: beforeFee('EXCESS_MILEAGE'),
+      balance: balanceBefore
+    };
+
+    // Helper: derive the preview "after" fees from a computeCheckinFees result.
+    const feeFromItems = (items, type) => Number((Array.isArray(items) ? items : [])
+      .filter((i) => String(i.feeType || '').toUpperCase() === type)
+      .reduce((s, i) => s + Number(i.total || 0), 0).toFixed(2));
+
+    // ── dryRun: compute fees WITHOUT persisting, return a preview only. ──
+    if (dryRun) {
+      const dry = await computeCheckinFees({ ...feeInputs, persist: false });
+      const afterFuel = feeFromItems(dry.items, 'FUEL_REFILL');
+      const afterMileage = feeFromItems(dry.items, 'EXCESS_MILEAGE');
+      // Project the balance: replace the old fee-engine fuel+mileage portion with
+      // the new one. (Other fee-engine fees — cleaning/smoking/late — are untouched
+      // by a fuel/odometer correction here since smokingDetected:false and we only
+      // change fuel/odo, but we keep the projection scoped to the two corrected
+      // line items, which is what the panel shows.)
+      const afterBalance = Number(Math.max(0,
+        balanceBefore - before.fuelRefill - before.mileageFee + afterFuel + afterMileage
+      ).toFixed(2));
+      const after = { fuelRefill: afterFuel, mileageFee: afterMileage, balance: afterBalance };
+      return { ok: true, preview: { before, after, balanceDelta: Number((after.balance - before.balance).toFixed(2)) } };
+    }
+
+    // ── Real save: persist inside a transaction. ──
+    await prisma.$transaction(async (tx) => {
+      // c. Persist only the supplied inspection columns on the agreement.
+      const data = {};
+      if (has('fuelOut')) data.fuelOut = newFuelOut;
+      if (has('fuelIn')) data.fuelIn = newFuelIn;
+      if (has('odometerOut')) data.odometerOut = newOdometerOut;
+      if (has('odometerIn')) data.odometerIn = newOdometerIn;
+      if (has('cleanlinessOut')) data.cleanlinessOut = newCleanlinessOut;
+      if (has('cleanlinessIn')) data.cleanlinessIn = newCleanlinessIn;
+      if (Object.keys(data).length) {
+        await tx.rentalAgreement.update({ where: { id: agreement.id }, data });
+      }
+
+      // d. Soft-void ONLY the fee-engine rows this correction recomputes (fuel + mileage).
+      // CLEANING_*/SMOKING/LATE_RETURN rows are NOT touched, so correcting fuel/odometer
+      // never silently erases an unrelated fee. Voided rows are kept for audit history.
+      await tx.rentalAgreementCharge.updateMany({
+        where: {
+          rentalAgreementId: agreement.id,
+          source: 'FEE_ENGINE_CHECKIN',
+          selected: true,
+          sourceRefId: { in: ['FUEL_REFILL', 'EXCESS_MILEAGE'] }
+        },
+        data: { selected: false }
+      });
+    });
+
+    // e. Re-run the fee engine with persist:true — it recreates FEE_ENGINE_CHECKIN
+    // rows and recomputes agreement subtotal/fees/total/balance internally. Run
+    // OUTSIDE the tx above to match how checkin-close calls it (it uses its own
+    // $transaction for the charge inserts).
+    const feeResult = await computeCheckinFees({ ...feeInputs, persist: true, actorUserId });
+
+    // B1 fix: computeCheckinFees only recomputes agreement totals when it persists at
+    // least one fee (items.length > 0). When a correction zeroes BOTH fuel and mileage
+    // (the headline "remove the stuck fuel charge" case) no row is written, so the
+    // denormalized balance would stay stale. Recompute unconditionally here — the same
+    // canonical recompute void/addManualCharge use; it preserves FEE_ENGINE_/ADMIN rows.
+    await syncAgreementCharges(reservationId, scope, { allowClosed: true });
+
+    // f. Append vehicle history rows for the corrected readings (fail-open).
+    const reservationNumber = (await prisma.reservation.findUnique({
+      where: { id: reservationId }, select: { reservationNumber: true }
+    }).catch(() => null))?.reservationNumber || null;
+
+    const odoChanged = (has('odometerOut') || has('odometerIn'));
+    if (agreement.vehicleId && odoChanged) {
+      // The "latest" odometer for the vehicle profile is the check-in reading if
+      // present, else the checkout reading.
+      const latestOdo = newOdometerIn != null ? newOdometerIn : newOdometerOut;
+      if (latestOdo != null) {
+        await recordMileageEntrySafe(prisma, {
+          vehicleId: agreement.vehicleId,
+          tenantId: agreement.tenantId ?? null,
+          mileage: latestOdo,
+          source: 'MANUAL',
+          reservationId,
+          rentalAgreementId: agreement.id,
+          reservationNumber,
+          note: `Admin correction: ${reasonStr}`.slice(0, 500),
+          actorUserId: actorUserId || null
+        });
+      }
+    }
+    const fuelChanged = (has('fuelOut') || has('fuelIn'));
+    if (agreement.vehicleId && fuelChanged) {
+      const latestFuel = newFuelIn != null ? newFuelIn : newFuelOut;
+      if (latestFuel != null) {
+        await recordFuelReadingSafe(prisma, {
+          vehicleId: agreement.vehicleId,
+          tenantId: agreement.tenantId ?? null,
+          fuelFraction: latestFuel,
+          source: 'CORRECTION',
+          reservationId,
+          rentalAgreementId: agreement.id,
+          reservationNumber,
+          note: `Admin correction: ${reasonStr}`.slice(0, 500),
+          actorUserId: actorUserId || null
+        });
+      }
+    }
+
+    // Re-read the post-recompute balance.
+    const afterAgreement = await prisma.rentalAgreement.findUnique({
+      where: { id: agreement.id }, select: { balance: true }
+    });
+    const balanceAfter = Number(afterAgreement?.balance || 0);
+    const after = {
+      fuelRefill: feeFromItems(feeResult.items, 'FUEL_REFILL'),
+      mileageFee: feeFromItems(feeResult.items, 'EXCESS_MILEAGE'),
+      balance: balanceAfter
+    };
+    const balanceDelta = Number((balanceAfter - balanceBefore).toFixed(2));
+
+    // g. AuditLog(ADMIN_OVERRIDE) with old/new readings + fee breakdown before/after.
+    await prisma.auditLog.create({ data: {
+      tenantId: agreement.tenantId || null,
+      reservationId,
+      action: 'ADMIN_OVERRIDE',
+      actorUserId: actorUserId || null,
+      reason: reasonStr.slice(0, 500),
+      metadata: JSON.stringify({
+        kind: 'correct_readings',
+        old: {
+          fuelOut: agreement.fuelOut == null ? null : Number(agreement.fuelOut),
+          fuelIn: agreement.fuelIn == null ? null : Number(agreement.fuelIn),
+          odometerOut: agreement.odometerOut ?? null,
+          odometerIn: agreement.odometerIn ?? null,
+          cleanlinessOut: agreement.cleanlinessOut ?? null,
+          cleanlinessIn: agreement.cleanlinessIn ?? null
+        },
+        new: {
+          fuelOut: newFuelOut, fuelIn: newFuelIn,
+          odometerOut: newOdometerOut, odometerIn: newOdometerIn,
+          cleanlinessOut: newCleanlinessOut, cleanlinessIn: newCleanlinessIn
+        },
+        fees: { before, after },
+        balanceBefore, balanceAfter
+      })
+    }}).catch((e) => {
+      logger.warn('[reservation-pricing] correctInspectionValues audit log failed', {
+        reservationId, message: e?.message || String(e)
+      });
+    });
+
+    return { ok: true, preview: { before, after, balanceDelta } };
   },
 
   async replacePricing(reservationId, payload = {}, scope = {}) {

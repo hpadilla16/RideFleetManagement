@@ -10,6 +10,7 @@ import { ReservationOverridePanel } from '../../../components/admin/ReservationO
 import { IncidentReportsPanel } from '../../../components/incident/IncidentReportsPanel';
 import { api, API_BASE } from '../../../lib/client';
 import { utcToTenantLocalInput } from '../../../lib/tenant-time';
+import { FuelLevelInput, OdometerInput } from '../../../components/wizard/MetricInputs';
 
 function stripChargePrefix(name = '', prefix) {
   return String(name || '').replace(prefix, '').trim();
@@ -357,6 +358,231 @@ function LongTermPlanPanel({ reservationId, token }) {
 // Admin Corrections (Fase 1) — ADMIN-only panel to void a charge (incl. post-check-in
 // fuel/cleaning/smoking/late fees) or add a manual charge/credit, without SQL. Every
 // change recomputes the balance server-side and is logged with a required reason.
+// ── Correct readings (2026-06-29) — ADMIN-only. Fix a fat-fingered checkout /
+// check-in fuel or odometer reading and RE-RUN the check-in fee engine so the
+// excess-mileage / fuel-refill fees and the balance are corrected. A debounced
+// dryRun POST drives the live recompute preview; Save (after a confirm echoing
+// the delta) posts for real and reloads the page. Mirrors AdminCorrectionsPanel's
+// glass-card + Show/Hide pattern and reuses FuelLevelInput / OdometerInput.
+function CorrectReadingsPanel({ reservationId, token, me, agreement, onChanged }) {
+  const role = String(me?.role || '').toUpperCase();
+  const isAdmin = role === 'ADMIN' || role === 'SUPER_ADMIN';
+
+  const [open, setOpen] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState('');
+  const [preview, setPreview] = useState(null);
+  const [previewing, setPreviewing] = useState(false);
+
+  // Seed from the agreement's current readings. Fuel is a 0..1 fraction;
+  // odometer is a string (OdometerInput is text-based).
+  const fuelInit = (v) => (v == null ? 0 : Number(v));
+  const odoInit = (v) => (v == null ? '' : String(v));
+  const [fuelOut, setFuelOut] = useState(fuelInit(agreement?.fuelOut));
+  const [odometerOut, setOdometerOut] = useState(odoInit(agreement?.odometerOut));
+  const [fuelIn, setFuelIn] = useState(fuelInit(agreement?.fuelIn));
+  const [odometerIn, setOdometerIn] = useState(odoInit(agreement?.odometerIn));
+  const [reason, setReason] = useState('');
+
+  // Re-seed when the agreement reloads (e.g. after a save / page refresh).
+  useEffect(() => {
+    setFuelOut(fuelInit(agreement?.fuelOut));
+    setOdometerOut(odoInit(agreement?.odometerOut));
+    setFuelIn(fuelInit(agreement?.fuelIn));
+    setOdometerIn(odoInit(agreement?.odometerIn));
+  }, [agreement?.id, agreement?.fuelOut, agreement?.fuelIn, agreement?.odometerOut, agreement?.odometerIn]);
+
+  if (!isAdmin) return null;
+
+  const hasReadings = agreement && (
+    agreement.fuelOut != null || agreement.odometerOut != null ||
+    agreement.fuelIn != null || agreement.odometerIn != null
+  );
+  const onlyCheckout = hasReadings && agreement.odometerIn == null && agreement.fuelIn == null;
+
+  // Build the payload of CHANGED values only (so a partial correction only
+  // moves what the admin actually touched).
+  const buildPayload = () => {
+    const p = {};
+    const curFuelOut = fuelInit(agreement?.fuelOut);
+    const curFuelIn = fuelInit(agreement?.fuelIn);
+    if (Number(fuelOut) !== curFuelOut) p.fuelOut = Number(fuelOut);
+    if (Number(fuelIn) !== curFuelIn) p.fuelIn = Number(fuelIn);
+    if (String(odometerOut) !== odoInit(agreement?.odometerOut) && String(odometerOut).trim() !== '') p.odometerOut = Number(odometerOut);
+    if (String(odometerIn) !== odoInit(agreement?.odometerIn) && String(odometerIn).trim() !== '') p.odometerIn = Number(odometerIn);
+    return p;
+  };
+
+  // Debounced live preview via dryRun.
+  useEffect(() => {
+    if (!open) return;
+    const payload = buildPayload();
+    if (Object.keys(payload).length === 0) { setPreview(null); return; }
+    let cancelled = false;
+    setPreviewing(true);
+    const t = setTimeout(async () => {
+      try {
+        const out = await api(`/api/reservations/${reservationId}/correct-readings`,
+          { method: 'POST', body: JSON.stringify({ ...payload, dryRun: true }) }, token);
+        if (!cancelled) { setPreview(out?.preview || null); setErr(''); }
+      } catch (e) {
+        if (!cancelled) { setPreview(null); setErr(e?.message || 'Preview failed'); }
+      } finally {
+        if (!cancelled) setPreviewing(false);
+      }
+    }, 450);
+    return () => { cancelled = true; clearTimeout(t); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, fuelOut, fuelIn, odometerOut, odometerIn]);
+
+  const save = async () => {
+    setErr('');
+    const payload = buildPayload();
+    if (Object.keys(payload).length === 0) { setErr('Nothing changed.'); return; }
+    if (!reason.trim()) { setErr('Reason is required.'); return; }
+    const delta = preview ? preview.balanceDelta : null;
+    const deltaTxt = delta == null ? 'the balance' : `the balance by ${money(delta)}`;
+    if (typeof window !== 'undefined') {
+      const ok = window.confirm(`Re-run the check-in fee engine with the corrected readings?\n\nThis will change ${deltaTxt} and is logged as an ADMIN OVERRIDE.`);
+      if (!ok) return;
+    }
+    setBusy(true);
+    try {
+      await api(`/api/reservations/${reservationId}/correct-readings`,
+        { method: 'POST', body: JSON.stringify({ ...payload, reason: reason.trim() }) }, token);
+      setReason('');
+      setPreview(null);
+      if (onChanged) await onChanged();
+      setOpen(false);
+    } catch (e) {
+      setErr(e?.message || 'Save failed');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const cancel = () => {
+    setFuelOut(fuelInit(agreement?.fuelOut));
+    setOdometerOut(odoInit(agreement?.odometerOut));
+    setFuelIn(fuelInit(agreement?.fuelIn));
+    setOdometerIn(odoInit(agreement?.odometerIn));
+    setReason('');
+    setPreview(null);
+    setErr('');
+    setOpen(false);
+  };
+
+  const baselineOdoOut = agreement?.odometerOut != null ? Number(agreement.odometerOut) : null;
+
+  return (
+    <div className="glass card" style={{ marginTop: 12, padding: 10, borderColor: 'rgba(163,45,45,.28)' }}>
+      <div className="row-between" style={{ marginBottom: 8 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <h3 style={{ margin: 0 }}>Correct readings</h3>
+          <span style={{
+            fontSize: 10, fontWeight: 800, letterSpacing: '.04em', textTransform: 'uppercase',
+            color: '#a32d2d', background: 'rgba(163,45,45,.10)', border: '1px solid rgba(163,45,45,.28)',
+            borderRadius: 999, padding: '2px 8px'
+          }}>Admin override</span>
+        </div>
+        <button type="button" className="button-subtle" onClick={() => setOpen((v) => !v)}>{open ? 'Hide' : 'Show'}</button>
+      </div>
+      {open ? (
+        <>
+          <p className="label" style={{ textTransform: 'none', letterSpacing: 0 }}>
+            Fix a mistyped checkout or check-in fuel/odometer reading. Saving re-runs the
+            check-in fee engine, so the excess-mileage and fuel-refill fees and the balance
+            are recomputed. Logged as an admin override with your reason.
+          </p>
+
+          {!hasReadings ? (
+            <div className="surface-note" style={{ marginTop: 6, fontSize: 13 }}>
+              No readings captured yet — there is nothing to correct until this rental has a
+              checkout (and ideally a check-in) on file.
+            </div>
+          ) : (
+            <>
+              {onlyCheckout ? (
+                <div className="surface-note" style={{ marginTop: 6, marginBottom: 6, fontSize: 12 }}>
+                  Only checkout is captured so far. Correcting check-in values is available once
+                  this rental is checked in.
+                </div>
+              ) : null}
+
+              <div className="grid2" style={{ gap: 12, marginTop: 8 }}>
+                <div>
+                  <div className="label" style={{ marginBottom: 4 }}>Checkout</div>
+                  <FuelLevelInput value={fuelOut} onChange={setFuelOut} label="Fuel out" />
+                  <div style={{ height: 8 }} />
+                  <OdometerInput value={odometerOut} onChange={setOdometerOut} label="Odometer out" />
+                </div>
+                <div>
+                  <div className="label" style={{ marginBottom: 4 }}>Check-in</div>
+                  <FuelLevelInput value={fuelIn} onChange={setFuelIn} label="Fuel in" />
+                  <div style={{ height: 8 }} />
+                  <OdometerInput value={odometerIn} onChange={setOdometerIn} label="Odometer in" baseline={baselineOdoOut} />
+                </div>
+              </div>
+
+              <div style={{ marginTop: 10 }}>
+                <span className="label">Reason (required)</span>
+                <textarea
+                  value={reason}
+                  onChange={(e) => setReason(e.target.value)}
+                  rows={2}
+                  placeholder="e.g. Agent entered 12000 instead of 21000 at checkout"
+                  style={{ width: '100%', resize: 'vertical' }}
+                />
+              </div>
+
+              {(preview || previewing) ? (
+                <div style={{
+                  marginTop: 10, padding: '8px 12px', borderLeft: '3px solid #f59e0b',
+                  background: 'rgba(245,158,11,.06)', borderRadius: 4, fontSize: 13
+                }}>
+                  <div className="label" style={{ marginBottom: 4 }}>Recompute preview</div>
+                  {previewing && !preview ? (
+                    <div className="label" style={{ textTransform: 'none' }}>Calculating…</div>
+                  ) : preview ? (
+                    <>
+                      <PreviewRow label="Fuel refill" before={preview.before.fuelRefill} after={preview.after.fuelRefill} />
+                      <PreviewRow label="Excess mileage" before={preview.before.mileageFee} after={preview.after.mileageFee} />
+                      <PreviewRow label="Balance" before={preview.before.balance} after={preview.after.balance} strong />
+                      <div style={{ marginTop: 4, fontWeight: 700, color: preview.balanceDelta > 0 ? '#a32d2d' : (preview.balanceDelta < 0 ? '#1fa37a' : '#211a38') }}>
+                        Balance change: {preview.balanceDelta > 0 ? '+' : ''}{money(preview.balanceDelta)}
+                      </div>
+                    </>
+                  ) : null}
+                </div>
+              ) : null}
+
+              {err ? <p className="label" style={{ textTransform: 'none', letterSpacing: 0, color: '#a32d2d', marginTop: 8 }}>{err}</p> : null}
+
+              <div className="inline-actions" style={{ marginTop: 10 }}>
+                <button type="button" className="button-subtle" disabled={busy} onClick={cancel}>Cancel</button>
+                <button type="button" disabled={busy} onClick={save}>{busy ? 'Saving…' : 'Save'}</button>
+              </div>
+            </>
+          )}
+        </>
+      ) : null}
+    </div>
+  );
+}
+
+function PreviewRow({ label, before, after, strong }) {
+  const changed = Number(before) !== Number(after);
+  return (
+    <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, padding: '1px 0', fontWeight: strong ? 700 : 400 }}>
+      <span>{label}</span>
+      <span style={{ color: changed ? '#211a38' : '#6f668f' }}>
+        {money(before)} <span style={{ color: '#6f668f' }}>→</span> <strong>{money(after)}</strong>
+      </span>
+    </div>
+  );
+}
+
+
 function AdminCorrectionsPanel({ reservationId, token, me, onChanged }) {
   const role = String(me?.role || '').toUpperCase();
   const isAdmin = role === 'ADMIN' || role === 'SUPER_ADMIN';
@@ -2482,6 +2708,7 @@ token
               (explicit Monthly opt-in at creation). */}
           <LongTermPlanPanel reservationId={id} token={token} />
           <AdminCorrectionsPanel reservationId={id} token={token} me={me} onChanged={load} />
+          <CorrectReadingsPanel reservationId={id} token={token} me={me} agreement={agreementFull} onChanged={load} />
 
           <div className="glass card" style={{ marginTop: 12, padding: 10 }}>
             <div className="row-between" style={{ marginBottom: 8 }}>
