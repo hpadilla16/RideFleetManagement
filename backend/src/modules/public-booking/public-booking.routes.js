@@ -521,6 +521,31 @@ publicBookingRouter.post(
   },
 );
 
+// POST /api/public/booking/contact — website contact form. Body:
+// { name, email, message, phone?, subject? }. Emails the tenant's admins/ops.
+publicBookingRouter.post(
+  '/contact',
+  bookingWriteGuard,
+  async (req, res, next) => {
+    try {
+      assertPlainObject(req.body || {}, 'contact payload');
+      res.json(
+        await publicBookingService.submitContactMessage({
+          ...(req.body || {}),
+          tenantId: req.publicTokenTenantId || null,
+        }),
+      );
+    } catch (error) {
+      const msg = String(error?.message || '');
+      if (/not found/i.test(msg)) return res.status(404).json({ error: msg });
+      if (/required|valid email|destination email|Unable to send/i.test(msg)) {
+        return res.status(400).json({ error: msg });
+      }
+      next(error);
+    }
+  },
+);
+
 // POST /api/public/booking/:reservationRef/documents — license / insurance
 // upload for a website RENTAL reservation. Body: { email, license?, insurance? }
 // as base64 data URLs (jpeg/png/heic/pdf, max 8 MB). Email must match the

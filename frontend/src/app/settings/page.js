@@ -2501,6 +2501,19 @@ function SettingsInner({ token, me, logout }) {
             <input placeholder="Logo URL" value={cfg.companyLogoUrl || ''} onChange={(e) => setCfg({ ...cfg, companyLogoUrl: e.target.value })} />
             <input type="file" accept="image/*" onChange={(e) => uploadLogo(e.target.files?.[0])} />
             <div className="stack" style={{ marginTop: 6 }}>
+              <label className="label">Email branding</label>
+              <div className="hint" style={{ fontSize: 12, color: '#6b7a9a' }}>
+                Accent color and support link used in customer emails. Leave the color blank to use the Ride default (#8752FE).
+              </div>
+              <div className="grid2">
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <input type="color" aria-label="Email brand color" value={cfg.emailBrandColor || '#8752FE'} onChange={(e) => setCfg({ ...cfg, emailBrandColor: e.target.value })} style={{ width: 48, height: 36, padding: 0 }} />
+                  <input placeholder="#8752FE" value={cfg.emailBrandColor || ''} onChange={(e) => setCfg({ ...cfg, emailBrandColor: e.target.value })} />
+                </div>
+                <input placeholder="Support URL (https://...)" value={cfg.emailSupportUrl || ''} onChange={(e) => setCfg({ ...cfg, emailSupportUrl: e.target.value })} />
+              </div>
+            </div>
+            <div className="stack" style={{ marginTop: 6 }}>
               <label className="label">Affidavit owner (transfer-of-liability)</label>
               <div className="hint" style={{ fontSize: 12, color: '#6b7a9a' }}>
                 The registered legal entity that submits citation affidavits — may differ from the rental brand above. Leave blank to use the company name / address / phone above.

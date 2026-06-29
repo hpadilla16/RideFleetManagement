@@ -1344,6 +1344,65 @@ export const publicBookingService = {
     return { ok: true, reservationNumber: reservation.reservationNumber, status: 'CANCELLED' };
   },
 
+  // POST /api/public/booking/contact — website contact form. Emails the tenant's
+  // admins/ops (super-admins as fallback) the visitor's message, branded per tenant.
+  async submitContactMessage(payload = {}) {
+    const tenantId = payload.tenantId || null;
+    const name = String(payload.name || '').trim().slice(0, 200);
+    const email = String(payload.email || '').trim().slice(0, 200);
+    const phone = String(payload.phone || '').trim().slice(0, 60);
+    const subjectIn = String(payload.subject || '').trim().slice(0, 200);
+    const message = String(payload.message || '').trim().slice(0, 5000);
+    if (!name) throw new Error('name is required');
+    if (!email || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) throw new Error('a valid email is required');
+    if (!message) throw new Error('message is required');
+    if (!tenantId) throw new Error('tenant is required');
+
+    const tenant = await prisma.tenant.findFirst({ where: { id: tenantId, status: 'ACTIVE' }, select: { id: true, name: true } });
+    if (!tenant) throw new Error('Tenant not found');
+
+    const [tenantAdmins, superAdmins] = await Promise.all([
+      prisma.user.findMany({ where: { tenantId, role: { in: ['ADMIN', 'OPS'] }, isActive: true }, select: { email: true } }),
+      prisma.user.findMany({ where: { role: 'SUPER_ADMIN', isActive: true }, select: { email: true } }),
+    ]);
+    let recipients = [...new Set(tenantAdmins.map((a) => a.email).filter(Boolean))];
+    if (!recipients.length) recipients = [...new Set(superAdmins.map((a) => a.email).filter(Boolean))];
+    if (!recipients.length) throw new Error('No destination email configured for this tenant');
+
+    const esc = (v) => String(v || '').replace(/[<>&]/g, (c) => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;' }[c]));
+    const textLines = [
+      `Name: ${name}`,
+      `Email: ${email}`,
+      phone ? `Phone: ${phone}` : '',
+      subjectIn ? `Subject: ${subjectIn}` : '',
+      '',
+      message,
+    ].filter((l, i) => l !== '' || i === 4);
+    const bodyHtml = [
+      `<p style="margin:0 0 6px"><strong>Name:</strong> ${esc(name)}</p>`,
+      `<p style="margin:0 0 6px"><strong>Email:</strong> ${esc(email)}</p>`,
+      phone ? `<p style="margin:0 0 6px"><strong>Phone:</strong> ${esc(phone)}</p>` : '',
+      subjectIn ? `<p style="margin:0 0 6px"><strong>Subject:</strong> ${esc(subjectIn)}</p>` : '',
+      `<div style="margin-top:12px;padding:12px 14px;border-radius:10px;background:#f6f6f9;white-space:pre-wrap">${esc(message)}</div>`,
+    ].filter(Boolean).join('');
+
+    let brand;
+    try { brand = await resolveEmailBrand({ tenantId }); } catch { brand = undefined; }
+    const rendered = renderBrandedEmail({ brand, heading: 'New website contact message', bodyHtml, bodyText: textLines.join('\n') });
+    try {
+      await sendEmail({
+        to: recipients.join(','),
+        subject: `Website contact${subjectIn ? `: ${subjectIn}` : ''} - ${name}`,
+        html: rendered.html,
+        text: textLines.join('\n'),
+      });
+    } catch (err) {
+      console.warn('[public-contact] failed to send', err);
+      throw new Error('Unable to send your message right now. Please try again later.');
+    }
+    return { ok: true };
+  },
+
   // Public license / insurance upload for a website RENTAL reservation, keyed by
   // reservationNumber + email. Stores base64 images on the Customer record
   // (idPhotoUrl / insuranceDocumentUrl) — the same fields the admin pre-check-in
