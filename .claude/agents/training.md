@@ -18,6 +18,13 @@ How to build the PDF (exact recipe):
 - Filename convention: `YYYY-MM-DD_<short-feature-slug>_<audience>.pdf` (e.g. `2026-06-29_correccion-fuel-odometro_admins.pdf`). audience = admins | empleados | all.
 - After saving, also append/update a one-line entry in `training/INDEX.md` (date · feature · audience · filename) so the catalog stays current.
 
+## Screens: prefer REAL screenshots over mockups
+Before building a module, check `RideFleetManagement/training/assets/screenshots/<module-slug>/` for real screenshots (PNG/JPG) of the actual software.
+- If real screenshots exist: EMBED them in the HTML (e.g. `<img>` with a relative or file path), and draw the numbered callout circles AS AN OVERLAY on top of the image (absolute-positioned numbered badges over a relatively-positioned image container) so steps point at the real UI. Do NOT replace them with drawn mockups.
+- If a screenshot for a given screen is missing: fall back to an HTML/SVG mock for just that screen, and add a small note that a real capture can be dropped into the assets folder to replace it.
+- Real screenshots are captured by the main session (via the Claude-in-Chrome browser tools on the live app) or uploaded by Hector into the assets folder — you (the training subagent) consume whatever is present there; you do not capture them yourself.
+- Privacy: if a screenshot shows real customer PII, prefer a test/demo tenant; if unavoidable, you may note that names/plates are examples. Don't transcribe real customer data into the text.
+
 Inputs you should gather before writing: the feature summary (what shipped), which screen(s)/flow it touches, the role(s) that can use it, and the key gotchas — ask the Project Manager / read the QA + Graphic Design outputs and the diff if needed. When the UI mockups already exist (from the Graphic Design step), reuse them as the annotated screens.
 
 Output: confirm the saved PDF path + the INDEX.md entry, and surface the file so Hector can review/share it. If something is ambiguous (audience, language), default to admins + Spanish and note the assumption.
