@@ -2,6 +2,7 @@ import crypto from 'node:crypto';
 import jwt from 'jsonwebtoken';
 import { prisma } from '../../lib/prisma.js';
 import { sendEmail } from '../../lib/mailer.js';
+import { renderBrandedEmail, resolveEmailBrand } from '../../lib/email-template.js';
 import logger from '../../lib/logger.js';
 import { getJwtSecret } from '../auth/auth.config.js';
 
@@ -123,14 +124,22 @@ export const accountDeletionService = {
     const link = deletionConfirmUrl(token);
     const subject = 'Confirm your RideFleet account deletion';
     const text = `Hi ${customer.firstName || 'there'},\n\nWe received a request to delete your RideFleet account.\n\nClick the link below within 24 hours to confirm. After confirmation, your account and personal data will be permanently removed.\n\n${link}\n\nIf you did NOT request this, ignore this email — your account is safe.`;
-    const html = `<!doctype html>
-<html><body style="font-family:-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,sans-serif;color:#211a38;line-height:1.5;">
-  <h1 style="font-size:20px;margin:0 0 12px;">Confirm your account deletion</h1>
-  <p>Hi ${escapeHtml(customer.firstName || 'there')},</p>
-  <p>We received a request to delete your RideFleet account. Click the button below within 24 hours to confirm. After confirmation, your account and personal data will be permanently removed.</p>
-  <p style="margin:24px 0;"><a href="${link}" style="background:#8752fe;color:#fff;text-decoration:none;padding:14px 24px;border-radius:16px;font-weight:600;display:inline-block;">Confirm deletion</a></p>
-  <p style="color:#5a5370;font-size:13px;">If you did NOT request this, ignore this email — your account is safe.</p>
-</body></html>`;
+
+    // Fail-open brand resolution — theming must never block the deletion email.
+    let brand;
+    try { brand = await resolveEmailBrand({ tenantId }); } catch { brand = undefined; }
+    const bodyHtml = `
+      <p>Hi ${escapeHtml(customer.firstName || 'there')},</p>
+      <p>We received a request to delete your RideFleet account. Click the button below within 24 hours to confirm. After confirmation, your account and personal data will be permanently removed.</p>
+      <p style="color:#5a5370;font-size:13px;">If you did NOT request this, ignore this email — your account is safe.</p>`;
+    const { html } = renderBrandedEmail({
+      brand,
+      heading: 'Confirm your account deletion',
+      bodyHtml,
+      bodyText: text,
+      cta: { label: 'Confirm deletion', url: link },
+      preheader: 'Confirm your account deletion within 24 hours',
+    });
 
     try {
       await sendEmail({ to: customer.email, subject, text, html });

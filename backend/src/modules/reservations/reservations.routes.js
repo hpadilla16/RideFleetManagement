@@ -5,6 +5,7 @@ import { validateReservationCreate, validateReservationPatch } from './reservati
 import { prisma } from '../../lib/prisma.js';
 import { withTenantSchema } from '../../lib/tenant-routing.js';
 import { sendEmail } from '../../lib/mailer.js';
+import { renderBrandedEmail, resolveEmailBrand } from '../../lib/email-template.js';
 import { rentalAgreementsService } from '../rental-agreements/rental-agreements.service.js';
 import { reservationPricingService } from './reservation-pricing.service.js';
 import { reservationAdditionalDriversService } from './reservation-additional-drivers.service.js';
@@ -1077,11 +1078,24 @@ reservationsRouter.post('/:id/send-request-email', async (req, res, next) => {
 
     const htmlTpl = kind === 'signature' ? tpl.requestSignatureHtml : kind === 'customer-info' ? tpl.requestCustomerInfoHtml : tpl.requestPaymentHtml;
     try {
+      const reqInnerText = render(bodyTpl);
+      const reqInnerHtml = render(htmlTpl || String(bodyTpl || '').replaceAll('\n', '<br/>'));
+      let reqBrand;
+      try { reqBrand = await resolveEmailBrand({ tenantId: current.tenantId || null }); } catch { reqBrand = undefined; }
+      const reqHeadings = { signature: 'Please sign your agreement', payment: 'Payment requested', 'customer-info': 'Complete your information' };
+      const { html: reqHtml, text: reqText } = renderBrandedEmail({
+        brand: reqBrand,
+        heading: reqHeadings[kind] || actionLabel,
+        bodyHtml: reqInnerHtml,
+        bodyText: reqInnerText,
+        cta: link ? { label: kind === 'payment' ? 'Pay now' : kind === 'signature' ? 'Review & sign' : 'Complete now', url: link } : undefined,
+        preheader: render(subjectTpl) || `${actionLabel} - Reservation ${current.reservationNumber}`,
+      });
       await sendEmail({
         to: recipients.join(','),
         subject: render(subjectTpl) || `${actionLabel} - Reservation ${current.reservationNumber}`,
-        text: render(bodyTpl),
-        html: render(htmlTpl || String(bodyTpl || '').replaceAll('\n', '<br/>'))
+        text: reqText,
+        html: reqHtml
       });
       const note = `[${notePrefix} ${new Date().toISOString()}] emailed to ${recipients.join(', ')}`;
       await reservationsService.update(req.params.id, { notes: appendSystemNote(current.notes, note) }, scopeFor(req));
@@ -1152,8 +1166,18 @@ reservationsRouter.post('/:id/send-detail-email', async (req, res, next) => {
     const render = (s = '') => Object.entries(vars).reduce((out, [k, v]) => out.replaceAll(`{{${k}}}`, String(v ?? '')), String(s || ''));
 
     const subject = render(tpl.reservationDetailSubject || 'Reservation Details - {{reservationNumber}}');
-    const text = render(tpl.reservationDetailBody || 'Hello {{customerName}},\n\nReservation #: {{reservationNumber}}');
-    const html = render(tpl.reservationDetailHtml || String(text).replaceAll('\n', '<br/>'));
+    const detailInnerText = render(tpl.reservationDetailBody || 'Hello {{customerName}},\n\nReservation #: {{reservationNumber}}');
+    const detailInnerHtml = render(tpl.reservationDetailHtml || String(detailInnerText).replaceAll('\n', '<br/>'));
+
+    let detailBrand;
+    try { detailBrand = await resolveEmailBrand({ tenantId: current.tenantId || null }); } catch { detailBrand = undefined; }
+    const { html, text } = renderBrandedEmail({
+      brand: detailBrand,
+      heading: 'Your reservation details',
+      bodyHtml: detailInnerHtml,
+      bodyText: detailInnerText,
+      preheader: subject,
+    });
 
     await sendEmail({
       to: recipients.join(','),

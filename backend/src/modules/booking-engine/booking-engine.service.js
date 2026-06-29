@@ -6,6 +6,7 @@ import { ratesService } from '../rates/rates.service.js';
 import { reservationsService } from '../reservations/reservations.service.js';
 import { carSharingService } from '../car-sharing/car-sharing.service.js';
 import { sendEmail } from '../../lib/mailer.js';
+import { renderBrandedEmail, resolveEmailBrand } from '../../lib/email-template.js';
 import { settingsService } from '../settings/settings.service.js';
 import { computeMarketplaceTripPricing, tenantPlatformFeeConfig } from '../car-sharing/car-sharing-pricing.js';
 import { serializePublicTripFulfillmentPlan } from '../car-sharing/car-sharing-handoff.js';
@@ -543,11 +544,24 @@ async function issuePortalRequest(kind, reservation, { sendEmailToCustomer = fal
         ? tpl.requestPaymentHtml
         : tpl.requestCustomerInfoHtml;
     try {
+      const portalInnerText = render(bodyTpl);
+      const portalInnerHtml = render(htmlTpl || String(bodyTpl || '').replaceAll('\n', '<br/>'));
+      let portalBrand;
+      try { portalBrand = await resolveEmailBrand({ tenantId: fullReservation.tenantId || null }); } catch { portalBrand = undefined; }
+      const portalHeadings = { signature: 'Please sign your agreement', payment: 'Payment requested', 'customer-info': 'Complete your information' };
+      const { html: portalHtml, text: portalText } = renderBrandedEmail({
+        brand: portalBrand,
+        heading: portalHeadings[kind] || render(subjectTpl),
+        bodyHtml: portalInnerHtml,
+        bodyText: portalInnerText,
+        cta: link ? { label: kind === 'payment' ? 'Pay now' : kind === 'signature' ? 'Review & sign' : 'Complete now', url: link } : undefined,
+        preheader: render(subjectTpl),
+      });
       await sendEmail({
         to: fullReservation.customer.email,
         subject: render(subjectTpl),
-        text: render(bodyTpl),
-        html: render(htmlTpl || String(bodyTpl || '').replaceAll('\n', '<br/>'))
+        text: portalText,
+        html: portalHtml
       });
       emailSent = true;
     } catch (mailError) {
@@ -696,11 +710,28 @@ async function sendPublicBookingConfirmationEmail({
   `;
 
   try {
+    let confirmBrand;
+    try { confirmBrand = await resolveEmailBrand({ tenantId: fullReservation.tenantId || null }); } catch { confirmBrand = undefined; }
+    const confirmInnerText = [baseText, ...nextStepLines].join('\n');
+    const { html: confirmHtml, text: confirmText } = renderBrandedEmail({
+      brand: confirmBrand,
+      heading: 'Your reservation is confirmed',
+      bodyHtml: `${baseHtml}${nextStepHtml}`,
+      bodyText: confirmInnerText,
+      cta: nextActions?.payment?.link
+        ? { label: 'Pay now', url: nextActions.payment.link }
+        : nextActions?.signature?.link
+          ? { label: 'Open agreement signature', url: nextActions.signature.link }
+          : nextActions?.customerInfo?.link
+            ? { label: 'Complete customer info', url: nextActions.customerInfo.link }
+            : undefined,
+      preheader: subject,
+    });
     await sendEmail({
       to: customer.email,
       subject,
-      text: [baseText, ...nextStepLines].join('\n'),
-      html: `${baseHtml}${nextStepHtml}`
+      text: confirmText,
+      html: confirmHtml
     });
     const note = `[PUBLIC BOOKING CONFIRMATION EMAIL ${new Date().toISOString()}] emailed to ${customer.email}`;
     await prisma.reservation.update({

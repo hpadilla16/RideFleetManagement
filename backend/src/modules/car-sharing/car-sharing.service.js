@@ -4,6 +4,7 @@ import { hostReviewsService } from '../host-reviews/host-reviews.service.js';
 import { tripChatService } from '../messaging/trip-chat.service.js';
 import { computeMarketplaceTripPricing, computeCancellationRefund } from './car-sharing-pricing.js';
 import { sendEmail } from '../../lib/mailer.js';
+import { renderBrandedEmail, resolveEmailBrand } from '../../lib/email-template.js';
 import { buildTripFulfillmentPlanData, resolveDeliveryFeeOverride } from './car-sharing-fulfillment.js';
 import { resolveHandoffConfirmationAlerts } from './car-sharing-handoff.js';
 import { startOfUtcDay, addUtcDays, ceilTripDays, overlapsWindow } from '../../lib/date-utils.js';
@@ -1113,23 +1114,42 @@ export const carSharingService = {
         const hostName = trip.hostProfile.displayName || 'Host';
         const listingTitle = trip.listing?.title || 'your listing';
         const pickupStr = trip.scheduledPickupAt ? new Date(trip.scheduledPickupAt).toLocaleString() : 'your scheduled time';
+        const handoffText = [
+          `Hi ${hostName},`,
+          '',
+          `Your guest has ${alert.hoursUntilPickup} hour(s) until they pick up "${listingTitle}".`,
+          '',
+          `Please confirm the exact handoff details (address, instructions) so your guest knows where to go.`,
+          '',
+          `Trip: ${trip.tripCode}`,
+          `Pickup: ${pickupStr}`,
+          '',
+          `Log into your host dashboard to confirm handoff details.`,
+          '',
+          'Ride Fleet Marketplace'
+        ].join('\n');
+        const escH = (v) => String(v == null ? '' : v).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+        let handoffBrand;
+        try { handoffBrand = await resolveEmailBrand({ tenantId: trip.tenantId || null }); } catch { handoffBrand = undefined; }
+        const { html: handoffHtml, text: handoffRenderedText } = renderBrandedEmail({
+          brand: handoffBrand,
+          heading: 'Action needed: confirm your handoff',
+          bodyHtml: `
+            <p>Hi ${escH(hostName)},</p>
+            <p>Your guest has <strong>${escH(alert.hoursUntilPickup)} hour(s)</strong> until they pick up "${escH(listingTitle)}".</p>
+            <p>Please confirm the exact handoff details (address, instructions) so your guest knows where to go.</p>
+            <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:8px 0;background:#faf8ff;border-radius:8px;">
+              <tr><td style="padding:10px 12px;"><strong>Trip:</strong> ${escH(trip.tripCode)}<br/><strong>Pickup:</strong> ${escH(pickupStr)}</td></tr>
+            </table>
+            <p style="font-size:12px;color:#666">Log into your host dashboard to confirm handoff details.</p>`,
+          bodyText: handoffText,
+          preheader: 'Confirm your trip handoff details',
+        });
         await sendEmail({
           to: trip.hostProfile.email,
           subject: `Action needed: Confirm handoff for trip ${trip.tripCode}`,
-          text: [
-            `Hi ${hostName},`,
-            '',
-            `Your guest has ${alert.hoursUntilPickup} hour(s) until they pick up "${listingTitle}".`,
-            '',
-            `Please confirm the exact handoff details (address, instructions) so your guest knows where to go.`,
-            '',
-            `Trip: ${trip.tripCode}`,
-            `Pickup: ${pickupStr}`,
-            '',
-            `Log into your host dashboard to confirm handoff details.`,
-            '',
-            'Ride Fleet Marketplace'
-          ].join('\n')
+          text: handoffRenderedText,
+          html: handoffHtml,
         });
 
         await prisma.tripTimelineEvent.create({

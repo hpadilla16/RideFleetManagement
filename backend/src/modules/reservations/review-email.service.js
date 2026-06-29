@@ -1,5 +1,6 @@
 import { prisma } from '../../lib/prisma.js';
 import { sendEmail } from '../../lib/mailer.js';
+import { renderBrandedEmail, resolveEmailBrand } from '../../lib/email-template.js';
 import { settingsService } from '../settings/settings.service.js';
 import logger from '../../lib/logger.js';
 import { renderTemplate } from './review-email-template.js';
@@ -59,8 +60,21 @@ export async function maybeSendReviewRequestEmail({ reservation, previousStatus 
     };
 
     const subject = renderTemplate(templates.rentalReviewRequestSubject, vars);
-    const text = renderTemplate(templates.rentalReviewRequestBody, vars);
-    const html = renderTemplate(templates.rentalReviewRequestHtml, vars);
+    const innerText = renderTemplate(templates.rentalReviewRequestBody, vars);
+    const innerHtml = renderTemplate(templates.rentalReviewRequestHtml, vars);
+
+    // Brand resolution is fail-open: never let theming throw out of the email path.
+    let brand;
+    try { brand = await resolveEmailBrand({ tenantId: reservation.tenantId }); } catch { brand = undefined; }
+    const bodyHtml = innerHtml || String(innerText || '').replace(/\n/g, '<br/>');
+    const { html, text } = renderBrandedEmail({
+      brand,
+      heading: 'How was your rental?',
+      bodyHtml,
+      bodyText: innerText || undefined,
+      cta: vars.reviewLink ? { label: 'Leave a review', url: vars.reviewLink } : undefined,
+      preheader: 'We would love your feedback',
+    });
 
     await sendEmail({ to: customerRow.email, subject, text, html });
     logger?.info?.('review-email sent', {

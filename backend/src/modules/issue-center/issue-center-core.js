@@ -1,6 +1,7 @@
 import crypto from 'node:crypto';
 import { prisma } from '../../lib/prisma.js';
 import { sendEmail } from '../../lib/mailer.js';
+import { renderBrandedEmail, resolveEmailBrand } from '../../lib/email-template.js';
 import { money } from '../../lib/money.js';
 export { money };
 
@@ -455,16 +456,26 @@ export async function createCommunication(incidentId, payload = {}) {
   });
 }
 
-export async function sendIssueEmail({ to, subject, lines = [], htmlExtra = '' }) {
+export async function sendIssueEmail({ to, subject, lines = [], htmlExtra = '', tenantId = null, heading = null, cta = null, locale = 'en' }) {
   const safeLines = lines.filter(Boolean).map((line) => String(line));
   const text = safeLines.join('\n');
-  const html = `
-    <div style="font-family:Arial,sans-serif;font-size:14px;line-height:1.6;color:#111">
+  const innerHtml = `
       ${safeLines.map((line) => `<div>${line.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;')}</div>`).join('')}
       ${htmlExtra}
-    </div>
   `;
-  return sendEmail({ to, subject, text, html });
+  // Fail-open brand resolution — issue-center comms reach guests AND hosts;
+  // brand from the incident's tenant when known, RFM default otherwise.
+  let brand;
+  try { brand = await resolveEmailBrand({ tenantId }); } catch { brand = undefined; }
+  const { html, text: brandedText } = renderBrandedEmail({
+    brand,
+    heading: heading || subject,
+    bodyHtml: innerHtml,
+    bodyText: text,
+    cta: cta && cta.url && cta.label ? cta : undefined,
+    locale,
+  });
+  return sendEmail({ to, subject, text: brandedText, html });
 }
 
 export function recipientForVehicleSubmission(submission) {
@@ -517,7 +528,7 @@ export async function notifyIncidentStatusChange(incident, previousStatus, nextS
     ].filter(Boolean);
 
     try {
-      await sendIssueEmail({ to: recipient.email, subject, lines: message });
+      await sendIssueEmail({ to: recipient.email, subject, lines: message, tenantId: incident?.trip?.tenantId || incident?.reservation?.tenantId || null });
       await createCommunication(incident.id, {
         direction: 'OUTBOUND',
         channel: 'EMAIL',
@@ -879,7 +890,7 @@ export async function notifyVehicleSubmissionApproved(submission) {
   ].filter(Boolean);
 
   try {
-    await sendIssueEmail({ to: recipient.email, subject, lines });
+    await sendIssueEmail({ to: recipient.email, subject, lines, tenantId: submission?.tenantId || null });
     await createVehicleSubmissionCommunication(submission.id, {
       direction: 'OUTBOUND',
       channel: 'EMAIL',

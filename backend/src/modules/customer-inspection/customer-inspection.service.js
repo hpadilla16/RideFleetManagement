@@ -29,10 +29,15 @@ import { randomBytes, createHmac, timingSafeEqual } from 'node:crypto';
 import { prisma } from '../../lib/prisma.js';
 import logger from '../../lib/logger.js';
 import { sendEmail } from '../../lib/mailer.js';
+import { renderBrandedEmail, resolveEmailBrand } from '../../lib/email-template.js';
 import { settingsService } from '../settings/settings.service.js';
 import { checkoutSessionService, CheckoutSessionError } from '../checkout-session/checkout-session.service.js';
 import { uploadObject, safePath } from '../../lib/storage/supabase-storage.js';
 import { isStorageEnabled } from '../rental-agreements/inspection-photos.js';
+
+function escHtml(v) {
+  return String(v == null ? '' : v).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
 
 const PHOTOS_BUCKET = process.env.SUPABASE_STORAGE_INVENTORY_BUCKET || 'inventory-photos';
 export const VEHICLE_VIEWS = Object.freeze(['FRONT', 'REAR', 'LEFT', 'RIGHT', 'INTERIOR']);
@@ -109,22 +114,28 @@ async function sendCustomerInspection({ sessionId, actorUserId }) {
   const vehicleLabel = [resv.vehicle.year, resv.vehicle.make, resv.vehicle.model].filter(Boolean).join(' ');
   const customerName = [resv.customer?.firstName, resv.customer?.lastName].filter(Boolean).join(' ') || 'Customer';
 
+  const inspectText1 = `Hi ${customerName},\n\nPlease complete the vehicle inspection for your rental (${vehicleLabel}${resv.vehicle.plate ? ` · ${resv.vehicle.plate}` : ''}).\n\nOpen this link on your phone: ${link}\n\nThe link expires in 24 hours.\n\nIMPORTANT: the inspection is your responsibility. Walk around the vehicle and report any damage you see (photo + short note). Any damage we detect upon return that was not reported and pertains to your rental period will be your responsibility.\n`;
+  let inspectBrand1;
+  try { inspectBrand1 = await resolveEmailBrand({ tenantId: session.tenantId || resv.tenantId || null }); } catch { inspectBrand1 = undefined; }
+  const inspectBodyHtml1 = `
+        <p>Hi ${escHtml(customerName)},</p>
+        <p>Please complete the vehicle inspection for your rental:</p>
+        <p style="background:#f4f2fd;border-radius:8px;padding:12px"><strong>${escHtml(vehicleLabel)}</strong>${resv.vehicle.plate ? ` · Plate ${escHtml(resv.vehicle.plate)}` : ''}${resv.reservationNumber ? `<br/>Reservation #${escHtml(resv.reservationNumber)}` : ''}</p>
+        <p style="font-size:12px;color:#666">The link expires in 24 hours. It takes about 2 minutes: confirm your vehicle, then tap the diagram wherever you see damage and add a photo.</p>
+        <p style="font-size:12px;color:#666"><strong>Important:</strong> the inspection is your responsibility. Any damage we detect upon return that was not reported and pertains to your rental period will be your responsibility.</p>`;
+  const inspectRendered1 = renderBrandedEmail({
+    brand: inspectBrand1,
+    heading: 'Vehicle inspection — action needed',
+    bodyHtml: inspectBodyHtml1,
+    bodyText: inspectText1,
+    cta: { label: 'Start inspection', url: link },
+    preheader: 'Complete your vehicle inspection',
+  });
   await sendEmail({
     to: emailTo,
     subject: `Vehicle inspection for your rental ${resv.reservationNumber ? `#${resv.reservationNumber}` : ''}`.trim(),
-    text: `Hi ${customerName},\n\nPlease complete the vehicle inspection for your rental (${vehicleLabel}${resv.vehicle.plate ? ` · ${resv.vehicle.plate}` : ''}).\n\nOpen this link on your phone: ${link}\n\nThe link expires in 24 hours.\n\nIMPORTANT: the inspection is your responsibility. Walk around the vehicle and report any damage you see (photo + short note). Any damage we detect upon return that was not reported and pertains to your rental period will be your responsibility.\n`,
-    html: `
-      <div style="font-family:Arial,Helvetica,sans-serif;max-width:560px;margin:0 auto;color:#1d1d2c">
-        <h2 style="color:#5b3df5">Vehicle inspection — action needed</h2>
-        <p>Hi ${customerName},</p>
-        <p>Please complete the vehicle inspection for your rental:</p>
-        <p style="background:#f4f2fd;border-radius:8px;padding:12px"><strong>${vehicleLabel}</strong>${resv.vehicle.plate ? ` · Plate ${resv.vehicle.plate}` : ''}${resv.reservationNumber ? `<br/>Reservation #${resv.reservationNumber}` : ''}</p>
-        <p style="text-align:center;margin:24px 0">
-          <a href="${link}" style="background:#5b3df5;color:#ffffff;text-decoration:none;padding:12px 28px;border-radius:8px;display:inline-block">Start inspection</a>
-        </p>
-        <p style="font-size:12px;color:#666">The link expires in 24 hours. It takes about 2 minutes: confirm your vehicle, then tap the diagram wherever you see damage and add a photo.</p>
-        <p style="font-size:12px;color:#666"><strong>Important:</strong> the inspection is your responsibility. Any damage we detect upon return that was not reported and pertains to your rental period will be your responsibility.</p>
-      </div>`,
+    text: inspectRendered1.text,
+    html: inspectRendered1.html,
   });
 
   // Delegated flow: the walkthrough responsibility moved to the customer, so
@@ -216,22 +227,28 @@ async function sendCheckinInspection({ reservationId, actorUserId = null, force 
   const vehicleLabel = [resv.vehicle.year, resv.vehicle.make, resv.vehicle.model].filter(Boolean).join(' ');
   const customerName = [resv.customer?.firstName, resv.customer?.lastName].filter(Boolean).join(' ') || 'Customer';
 
+  const inspectText2 = `Hi ${customerName},\n\nYour rental (${vehicleLabel}${resv.vehicle.plate ? ` · ${resv.vehicle.plate}` : ''}) is due back soon. Before you return it, please do a quick self-inspection so check-in is fast and there are no surprises.\n\nOpen this link on your phone: ${link}\n\nThe link expires in 24 hours. Walk around the vehicle and report any damage (photo + short note).\n`;
+  let inspectBrand2;
+  try { inspectBrand2 = await resolveEmailBrand({ tenantId: resv.tenantId || null }); } catch { inspectBrand2 = undefined; }
+  const inspectBodyHtml2 = `
+        <p>Hi ${escHtml(customerName)},</p>
+        <p>Your rental is due back soon. Do a quick self-inspection before you return it — it makes check-in faster:</p>
+        <p style="background:#f4f2fd;border-radius:8px;padding:12px"><strong>${escHtml(vehicleLabel)}</strong>${resv.vehicle.plate ? ` · Plate ${escHtml(resv.vehicle.plate)}` : ''}${resv.reservationNumber ? `<br/>Reservation #${escHtml(resv.reservationNumber)}` : ''}</p>
+        <p style="font-size:12px;color:#666">The link expires in 24 hours. It takes about 2 minutes: confirm your vehicle, then tap the diagram wherever you see damage and add a photo.</p>
+        <p style="font-size:12px;color:#666"><strong>Important:</strong> reporting existing damage protects you. Any new damage found at return that pertains to your rental period may be your responsibility.</p>`;
+  const inspectRendered2 = renderBrandedEmail({
+    brand: inspectBrand2,
+    heading: 'Returning soon? Quick inspection',
+    bodyHtml: inspectBodyHtml2,
+    bodyText: inspectText2,
+    cta: { label: 'Start inspection', url: link },
+    preheader: 'Quick self-inspection before you return',
+  });
   await sendEmail({
     to: emailTo,
     subject: `Before you return your rental ${resv.reservationNumber ? `#${resv.reservationNumber}` : ''} — quick inspection`.trim(),
-    text: `Hi ${customerName},\n\nYour rental (${vehicleLabel}${resv.vehicle.plate ? ` · ${resv.vehicle.plate}` : ''}) is due back soon. Before you return it, please do a quick self-inspection so check-in is fast and there are no surprises.\n\nOpen this link on your phone: ${link}\n\nThe link expires in 24 hours. Walk around the vehicle and report any damage (photo + short note).\n`,
-    html: `
-      <div style="font-family:Arial,Helvetica,sans-serif;max-width:560px;margin:0 auto;color:#1d1d2c">
-        <h2 style="color:#5b3df5">Returning soon? Quick inspection</h2>
-        <p>Hi ${customerName},</p>
-        <p>Your rental is due back soon. Do a quick self-inspection before you return it — it makes check-in faster:</p>
-        <p style="background:#f4f2fd;border-radius:8px;padding:12px"><strong>${vehicleLabel}</strong>${resv.vehicle.plate ? ` · Plate ${resv.vehicle.plate}` : ''}${resv.reservationNumber ? `<br/>Reservation #${resv.reservationNumber}` : ''}</p>
-        <p style="text-align:center;margin:24px 0">
-          <a href="${link}" style="background:#5b3df5;color:#ffffff;text-decoration:none;padding:12px 28px;border-radius:8px;display:inline-block">Start inspection</a>
-        </p>
-        <p style="font-size:12px;color:#666">The link expires in 24 hours. It takes about 2 minutes: confirm your vehicle, then tap the diagram wherever you see damage and add a photo.</p>
-        <p style="font-size:12px;color:#666"><strong>Important:</strong> reporting existing damage protects you. Any new damage found at return that pertains to your rental period may be your responsibility.</p>
-      </div>`,
+    text: inspectRendered2.text,
+    html: inspectRendered2.html,
   });
 
   logger.info('[customer-inspection] check-in (D-1) link sent', {

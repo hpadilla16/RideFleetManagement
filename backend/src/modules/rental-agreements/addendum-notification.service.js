@@ -1,5 +1,6 @@
 import { prisma } from '../../lib/prisma.js';
 import { sendEmail } from '../../lib/mailer.js';
+import { renderBrandedEmail, resolveEmailBrand } from '../../lib/email-template.js';
 import logger from '../../lib/logger.js';
 
 // Mirrors the helper used by public-booking.service.js so the addendum
@@ -152,7 +153,27 @@ async function _notifyAddendumCustomer({ agreement, addendum }) {
       `Thank you.`
     ].join('\n');
 
-    await sendEmail({ to: agreement.customerEmail, subject, text });
+    const esc = (v) => String(v == null ? '' : v).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+    let brand;
+    try { brand = await resolveEmailBrand({ tenantId: agreement.tenant?.id || null }); } catch { brand = undefined; }
+    const bodyHtml = `
+      <p>Hi ${esc(customerName)},</p>
+      <p>An addendum has been added to your rental agreement <strong>${esc(agreement.agreementNumber || agreement.id)}</strong>.</p>
+      <p><strong>Reason:</strong> ${esc(addendum.reason)}</p>
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:8px 0;background:#faf8ff;border-radius:8px;">
+        <tr><td style="padding:10px 12px;"><strong>Updated pickup:</strong> ${esc(fmt(addendum.pickupAt))}<br/><strong>Updated return:</strong> ${esc(fmt(addendum.returnAt))}</td></tr>
+      </table>
+      <p>Please review and sign the addendum.</p>`;
+    const { html, text: brandedText } = renderBrandedEmail({
+      brand,
+      heading: 'Please sign your agreement addendum',
+      bodyHtml,
+      bodyText: text,
+      cta: { label: 'Review & sign addendum', url: portalLink },
+      preheader: 'Action required: sign your agreement addendum',
+    });
+
+    await sendEmail({ to: agreement.customerEmail, subject, text: brandedText, html });
 
     logger?.info?.('addendum-notification customer sent', {
       rentalAgreementId: agreement.id,

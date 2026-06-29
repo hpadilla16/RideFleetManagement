@@ -3240,6 +3240,7 @@ export const rentalAgreementsService = {
 
     const pdf = await this.agreementPdfBuffer(latestId);
     const { sendEmail } = await import('../../lib/mailer.js');
+    const { renderBrandedEmail, resolveEmailBrand } = await import('../../lib/email-template.js');
     const { settingsService } = await import('../settings/settings.service.js');
     const tpl = await settingsService.getEmailTemplates();
 
@@ -3260,8 +3261,19 @@ export const rentalAgreementsService = {
     };
 
     const subject = applyTemplate(String(payload.subject || tpl?.agreementEmailSubject || 'Your Rental Agreement {{agreementNumber}}'), vars);
-    const html = applyTemplate(String(payload.html || tpl?.agreementEmailHtml || ''), vars);
-    const text = String(payload.text || `Attached is your rental agreement ${agreement.agreementNumber}.`);
+    const innerHtml = applyTemplate(String(payload.html || tpl?.agreementEmailHtml || ''), vars);
+    const innerText = String(payload.text || `Attached is your rental agreement ${agreement.agreementNumber}.`);
+
+    let agBrand;
+    try { agBrand = await resolveEmailBrand({ tenantId: agreement.tenantId || agreement.reservation?.tenantId || null }); } catch { agBrand = undefined; }
+    const { html, text } = renderBrandedEmail({
+      brand: agBrand,
+      heading: `Your rental agreement ${agreement.agreementNumber}`,
+      bodyHtml: innerHtml || `<p>Attached is your rental agreement ${agreement.agreementNumber}.</p>`,
+      bodyText: innerText,
+      cta: vars.portalLink ? { label: 'View reservation', url: vars.portalLink } : undefined,
+      preheader: subject,
+    });
 
     await sendEmail({
       to,
@@ -4881,6 +4893,7 @@ export const rentalAgreementsService = {
     try {
       const { settingsService } = await import('../settings/settings.service.js');
       const { sendEmail } = await import('../../lib/mailer.js');
+      const { renderBrandedEmail, resolveEmailBrand } = await import('../../lib/email-template.js');
       const tpl = await settingsService.getEmailTemplates({ tenantId: agreement.tenantId || null });
       const rentalCfg = await settingsService.getRentalAgreementConfig({ tenantId: agreement.tenantId || null });
       // Read from live customer, fallback to snapshot
@@ -4900,11 +4913,24 @@ export const rentalAgreementsService = {
           .replaceAll('{{companyPhone}}', String(rentalCfg?.companyPhone || ''))
           .replaceAll('{{paidAmount}}', Number(agreement.paidAmount || 0).toFixed(2))
           .replaceAll('{{balance}}', Number(agreement.balance || 0).toFixed(2));
+        let closeBrand;
+        try { closeBrand = await resolveEmailBrand({ tenantId: agreement.tenantId || null }); } catch { closeBrand = undefined; }
+
+        const receiptSubject = render(tpl.returnReceiptSubject || 'Return Receipt - Reservation {{reservationNumber}}');
+        const receiptInnerText = render(tpl.returnReceiptBody || 'Your agreement is now closed.');
+        const receiptInnerHtml = render(tpl.returnReceiptHtml || String(tpl.returnReceiptBody || 'Your agreement is now closed.').replaceAll('\n', '<br/>'));
+        const receiptRendered = renderBrandedEmail({
+          brand: closeBrand,
+          heading: 'Return receipt',
+          bodyHtml: receiptInnerHtml,
+          bodyText: receiptInnerText,
+          preheader: receiptSubject,
+        });
         await sendEmail({
           to,
-          subject: render(tpl.returnReceiptSubject || 'Return Receipt - Reservation {{reservationNumber}}'),
-          text: render(tpl.returnReceiptBody || 'Your agreement is now closed.'),
-          html: render(tpl.returnReceiptHtml || String(tpl.returnReceiptBody || 'Your agreement is now closed.').replaceAll('\n', '<br/>'))
+          subject: receiptSubject,
+          text: receiptRendered.text,
+          html: receiptRendered.html
         });
 
         if (String(agreement.reservation?.workflowMode || '').toUpperCase() !== 'CAR_SHARING') {
@@ -4912,11 +4938,18 @@ export const rentalAgreementsService = {
           const reviewText = render(tpl.rentalReviewRequestBody || 'Thank you for renting with us.');
           const reviewHtml = render(tpl.rentalReviewRequestHtml || reviewText.replaceAll('\n', '<br/>'));
           if (String(reviewSubject || '').trim() || String(reviewText || '').trim() || String(reviewHtml || '').trim()) {
+            const reviewRendered = renderBrandedEmail({
+              brand: closeBrand,
+              heading: 'How was your rental?',
+              bodyHtml: reviewHtml,
+              bodyText: reviewText,
+              preheader: reviewSubject,
+            });
             await sendEmail({
               to,
               subject: reviewSubject,
-              text: reviewText,
-              html: reviewHtml
+              text: reviewRendered.text,
+              html: reviewRendered.html
             });
           }
         }

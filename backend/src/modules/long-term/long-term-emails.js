@@ -1,5 +1,6 @@
 import { prisma } from '../../lib/prisma.js';
 import { sendEmail } from '../../lib/mailer.js';
+import { renderBrandedEmail, resolveEmailBrand } from '../../lib/email-template.js';
 import logger from '../../lib/logger.js';
 
 /**
@@ -284,8 +285,24 @@ export async function sendLongTermEmail(kind, { plan, cycle, config = null }) {
     if (!ctx.toEmail) return { sent: false, reason: 'customer has no email' };
 
     const subject = renderTemplate(tpl.subject, ctx.vars);
-    const text = renderTemplate(tpl.body, ctx.vars);
-    await sendEmail({ to: ctx.toEmail, subject, text, html: textToHtml(text) });
+    const innerText = renderTemplate(tpl.body, ctx.vars);
+
+    const headings = {
+      reminder: 'Upcoming monthly renewal',
+      receipt: 'Payment received',
+      overdue: 'Payment past due',
+      ended: 'Your monthly plan has ended',
+    };
+    let brand;
+    try { brand = await resolveEmailBrand({ tenantId: plan.tenantId || null }); } catch { brand = undefined; }
+    const { html, text } = renderBrandedEmail({
+      brand,
+      heading: headings[kind] || subject,
+      bodyHtml: textToHtml(innerText),
+      bodyText: innerText,
+      preheader: subject,
+    });
+    await sendEmail({ to: ctx.toEmail, subject, text, html });
 
     logger.info('[long-term-emails] sent', {
       kind, planId: plan.id, cycleId: cycle?.id || null, to: ctx.toEmail,

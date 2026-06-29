@@ -1,6 +1,7 @@
 import bcrypt from 'bcryptjs';
 import { prisma } from '../../lib/prisma.js';
 import { sendEmail } from '../../lib/mailer.js';
+import { renderBrandedEmail, resolveEmailBrand } from '../../lib/email-template.js';
 import { assertTenantUserCapacity } from '../../lib/tenant-plan-limits.js';
 import { cache } from '../../lib/cache.js';
 import { globalKey } from '../../lib/cache/tenantKey.js';
@@ -52,7 +53,7 @@ function roleLabel(role) {
   return normalized || 'User';
 }
 
-async function sendInviteEmail({ email, fullName, tempPassword, tenantName, role }) {
+async function sendInviteEmail({ email, fullName, tempPassword, tenantName, role, tenantId = null }) {
   if (!email || !tempPassword) return;
   const loginUrl = `${appBaseUrl()}`;
   const displayName = fullName || email;
@@ -67,16 +68,24 @@ async function sendInviteEmail({ email, fullName, tempPassword, tenantName, role
     '',
     'Please sign in and change your password after your first login.'
   ].join('\n');
-  const html = `
-    <div style="font-family:Arial,sans-serif;line-height:1.6">
-      <h2>Ride Fleet Access</h2>
-      <p>Hello ${displayName},</p>
-      <p>You now have <strong>${roleLabel(role)}</strong> access in <strong>${tenantName || 'Ride Fleet'}</strong>.</p>
-      <p><strong>Login URL:</strong> <a href="${loginUrl}">${loginUrl}</a></p>
-      <p><strong>Email:</strong> ${email}<br /><strong>Temporary password:</strong> ${tempPassword}</p>
-      <p>Please sign in and change your password after your first login.</p>
-    </div>
-  `;
+
+  // Fail-open brand resolution — never let theming block the invite.
+  let brand;
+  try { brand = await resolveEmailBrand({ tenantId }); } catch { brand = undefined; }
+  const esc = (v) => String(v == null ? '' : v).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  const bodyHtml = `
+    <p>Hello ${esc(displayName)},</p>
+    <p>You now have <strong>${esc(roleLabel(role))}</strong> access in <strong>${esc(tenantName || 'Ride Fleet')}</strong>.</p>
+    <p><strong>Email:</strong> ${esc(email)}<br /><strong>Temporary password:</strong> ${esc(tempPassword)}</p>
+    <p>Please sign in and change your password after your first login.</p>`;
+  const { html } = renderBrandedEmail({
+    brand,
+    heading: 'Your access invitation',
+    bodyHtml,
+    bodyText: text,
+    cta: { label: 'Sign in', url: loginUrl },
+    preheader: 'Your account is ready',
+  });
   await sendEmail({ to: email, subject, text, html });
 }
 
@@ -295,7 +304,8 @@ export const peopleService = {
         fullName: user.fullName,
         tempPassword,
         tenantName: tenant.name,
-        role: user.role
+        role: user.role,
+        tenantId: tenant.id
       });
     }
 
@@ -336,7 +346,8 @@ export const peopleService = {
         fullName: user.fullName,
         tempPassword,
         tenantName: user.tenant?.name,
-        role: user.role
+        role: user.role,
+        tenantId: user.tenant?.id || user.tenantId || null
       });
     }
 

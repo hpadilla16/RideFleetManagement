@@ -1,6 +1,7 @@
 import crypto from 'node:crypto';
 import { prisma } from '../../lib/prisma.js';
 import { sendEmail } from '../../lib/mailer.js';
+import { renderBrandedEmail, resolveEmailBrand } from '../../lib/email-template.js';
 import { money } from '../../lib/money.js';
 
 function reviewBaseUrl() {
@@ -203,17 +204,26 @@ export const hostReviewsService = {
         '',
         'Thanks for helping us improve the marketplace.'
       ].join('\n');
-      const html = [
+      const innerHtml = [
         `<p>Hi ${guestName},</p>`,
         `<p>Your trip <strong>${trip.tripCode}</strong> has been completed.</p>`,
         `<p>Please rate your host <strong>${hostName}</strong> and share a short comment about your experience.</p>`,
-        `<p><a href="${link}">Leave your host review</a></p>`,
         `<p>Thanks for helping us improve the marketplace.</p>`
       ].join('');
+      let reviewBrand;
+      try { reviewBrand = await resolveEmailBrand({ tenantId: trip.tenantId || null }); } catch { reviewBrand = undefined; }
+      const { html, text: brandedText } = renderBrandedEmail({
+        brand: reviewBrand,
+        heading: `How was your trip with ${hostName}?`,
+        bodyHtml: innerHtml,
+        bodyText: text,
+        cta: { label: 'Leave your host review', url: link },
+        preheader: 'Share a quick review of your trip',
+      });
       await sendEmail({
         to: trip.guestCustomer.email,
         subject,
-        text,
+        text: brandedText,
         html
       });
       emailSent = true;

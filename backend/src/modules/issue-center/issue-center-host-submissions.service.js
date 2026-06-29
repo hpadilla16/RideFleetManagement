@@ -94,7 +94,8 @@ export const issueCenterHostSubmissionsService = {
       to: recipient.email,
       subject,
       lines: message,
-      htmlExtra: `<div style="margin-top:16px"><a href="${link}" style="display:inline-block;padding:10px 16px;border-radius:999px;background:#7c3aed;color:#fff;text-decoration:none;font-weight:700">Reply To Vehicle Review</a></div>`
+      tenantId: submission?.tenantId || null,
+      cta: { label: 'Reply To Vehicle Review', url: link }
     });
 
     await prisma.hostVehicleSubmission.update({

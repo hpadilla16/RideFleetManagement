@@ -666,7 +666,20 @@ export const loanerAgreementService = {
       }
       // Customer confirmation by email (texting not enabled yet).
       if (row.customerEmail) {
-        try { await sendEmail({ to: row.customerEmail, subject: `Your loaner ${label} request`, text: `We received your loaner ${label} request${when ? ' for ' + when : ''}. Our team will confirm shortly.` }); } catch {}
+        try {
+          const { renderBrandedEmail, resolveEmailBrand } = await import('../../lib/email-template.js');
+          const confirmText = `We received your loaner ${label} request${when ? ' for ' + when : ''}. Our team will confirm shortly.`;
+          let confirmBrand;
+          try { confirmBrand = await resolveEmailBrand({ tenantId: row.tenantId || null }); } catch { confirmBrand = undefined; }
+          const { html: confirmHtml, text: confirmRenderedText } = renderBrandedEmail({
+            brand: confirmBrand,
+            heading: `Your loaner ${label} request`,
+            bodyHtml: `<p>${confirmText}</p>`,
+            bodyText: confirmText,
+            preheader: `We received your loaner ${label} request`,
+          });
+          await sendEmail({ to: row.customerEmail, subject: `Your loaner ${label} request`, text: confirmRenderedText, html: confirmHtml });
+        } catch {}
       }
     } catch (e) {
       try { logger.warn('[loaner] portal request notify failed: ' + (e?.message || e)); } catch {}

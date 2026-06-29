@@ -38,11 +38,25 @@ export async function issuePreArrivalPrecheckin(reservation) {
   if (email) {
     try {
       const { sendEmail } = await import('../../lib/mailer.js');
+      const { renderBrandedEmail, resolveEmailBrand } = await import('../../lib/email-template.js');
       const name = reservation?.customer?.firstName || '';
+      const preArrivalText = `${name ? 'Hi ' + name + ',\n\n' : ''}Save time at the counter — please upload your driver's license and insurance and confirm your details here before pickup:\n\n${link}\n\n(This link expires in 48 hours.)`;
+      let preArrivalBrand;
+      try { preArrivalBrand = await resolveEmailBrand({ tenantId: reservation?.tenantId || null }); } catch { preArrivalBrand = undefined; }
+      const escA = (v) => String(v == null ? '' : v).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+      const { html: preArrivalHtml, text: preArrivalRenderedText } = renderBrandedEmail({
+        brand: preArrivalBrand,
+        heading: 'Complete your loaner check-in before you arrive',
+        bodyHtml: `${name ? `<p>Hi ${escA(name)},</p>` : ''}<p>Save time at the counter — please upload your driver's license and insurance and confirm your details before pickup.</p><p style="font-size:12px;color:#666">This link expires in 48 hours.</p>`,
+        bodyText: preArrivalText,
+        cta: { label: 'Complete check-in', url: link },
+        preheader: 'Complete your loaner check-in before pickup',
+      });
       await sendEmail({
         to: email,
         subject: 'Complete your loaner check-in before you arrive',
-        text: `${name ? 'Hi ' + name + ',\n\n' : ''}Save time at the counter — please upload your driver's license and insurance and confirm your details here before pickup:\n\n${link}\n\n(This link expires in 48 hours.)`,
+        text: preArrivalRenderedText,
+        html: preArrivalHtml,
       });
     } catch { /* best-effort */ }
   }
