@@ -3041,7 +3041,7 @@ token
                 // table above — surface them in their own panel so staff can
                 // see what got added at return.
                 const feeEngineCharges = (agreementFull?.charges || []).filter((c) =>
-                  String(c?.source || '').toUpperCase().startsWith('FEE_ENGINE_')
+                  String(c?.source || '').toUpperCase().startsWith('FEE_ENGINE_') && c?.selected !== false
                 );
                 if (feeEngineCharges.length === 0) return null;
                 const feesSubtotal = feeEngineCharges.reduce((s, c) => s + Number(c?.total || 0), 0);
