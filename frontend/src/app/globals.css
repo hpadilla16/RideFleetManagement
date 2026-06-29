@@ -1213,3 +1213,9 @@ label input[type="checkbox"],
 :root[data-theme='dark'] td {
   border-bottom-color: #2a3140;
 }
+
+/* Void · no refund — danger outline button (bookkeeping void, not a money refund). Theme-aware. */
+.btn-void { background: #fff5f5; color: #b91c1c; border: 1px solid #b91c1c; }
+.btn-void:hover:not(:disabled) { background: #fee2e2; }
+:root[data-theme='dark'] .btn-void { background: #2a1416; color: #fca5a5; border-color: #fca5a5; }
+:root[data-theme='dark'] .btn-void:hover:not(:disabled) { background: #3a1a1d; }

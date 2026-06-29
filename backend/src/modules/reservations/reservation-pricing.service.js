@@ -513,6 +513,96 @@ export const reservationPricingService = {
     return this.getPricing(reservationId, scope, { allowClosed: true });
   },
 
+  // ── Admin Corrections — VOID a payment with NO refund (bookkeeping only).
+  // Use when a payment was recorded in error: it marks the ReservationPayment
+  // (and its linked RentalAgreementPayment, if any) status=VOID so it drops out
+  // of the collected/balance math (recompute sums only PAID non-AUTH_HOLD rows).
+  // This performs NO gateway call and moves NO money — for a real card refund use
+  // the "Refund" action instead. AUTH_HOLD rows are refused (use Release Deposit
+  // Hold for the security deposit). ADMIN-only (gated at the route). Recomputes the
+  // agreement balance via syncAgreementCharges({ allowClosed:true }) and writes an
+  // AuditLog(ADMIN_OVERRIDE) with before/after balance + the required reason.
+  async voidPaymentNoRefund(reservationId, paymentId, opts = {}, scope = {}) {
+    const { reason = null, actorUserId = null } = opts;
+    const cleanReason = reason ? String(reason).trim() : '';
+    if (!cleanReason) { const e = new Error('reason is required'); e.status = 400; throw e; }
+    await getReservationOrThrow(reservationId, scope); // validates existence + tenant scope
+
+    // ReservationPayment has no tenantId column — tenant isolation is enforced by
+    // getReservationOrThrow above (tenant-scoped) + the reservationId constraint here.
+    const payment = await prisma.reservationPayment.findFirst({
+      where: { id: String(paymentId), reservationId },
+      select: { id: true, method: true, amount: true, status: true, reference: true, rentalAgreementPaymentId: true }
+    });
+    if (!payment) { const e = new Error('Payment not found on this reservation'); e.status = 404; throw e; }
+    if (String(payment.method || '').toUpperCase() === 'AUTH_HOLD') {
+      const e = new Error('Use Release Deposit Hold for the security deposit, not void.'); e.status = 400; throw e;
+    }
+    if (String(payment.status || '').toUpperCase() === 'VOID') {
+      const e = new Error('Payment already voided'); e.status = 409; throw e;
+    }
+    // Guard: if this payment was already refunded (a REFUND counter-row exists),
+    // voiding it would double-subtract from collected. Refuse.
+    const priorRefund = await prisma.reservationPayment.findFirst({
+      where: { reservationId, OR: [
+        { reference: { contains: `REFUND:${payment.id}` } },
+        { notes: { contains: `Refund for payment ${payment.id}` } }
+      ] },
+      select: { id: true }
+    });
+    if (priorRefund) {
+      const e = new Error('This payment was already refunded; voiding it would double-count. Handle the refund record instead.');
+      e.status = 409; throw e;
+    }
+
+    const agreement = await prisma.rentalAgreement.findFirst({
+      where: { reservationId, ...(scope?.tenantId ? { tenantId: scope.tenantId } : {}) },
+      orderBy: { createdAt: 'desc' },
+      select: { id: true, tenantId: true, balance: true }
+    });
+    const balanceBefore = Number(agreement?.balance || 0);
+
+    // Bookkeeping only: flip BOTH ledgers to VOID in one tx so they stay consistent.
+    // NO gateway / Authorize.Net / SPIn call — this does not touch the card.
+    await prisma.$transaction(async (tx) => {
+      await tx.reservationPayment.update({ where: { id: payment.id }, data: { status: 'VOID' } });
+      if (payment.rentalAgreementPaymentId) {
+        await tx.rentalAgreementPayment.update({
+          where: { id: payment.rentalAgreementPaymentId },
+          data: { status: 'VOID' }
+        });
+      }
+    });
+
+    // Recompute balance — the engine sums only PAID non-AUTH_HOLD rows, so the
+    // voided payment now correctly drops out of collected/balance.
+    await syncAgreementCharges(reservationId, scope, { allowClosed: true });
+    const after = agreement
+      ? await prisma.rentalAgreement.findUnique({ where: { id: agreement.id }, select: { balance: true } })
+      : null;
+    const balanceAfter = Number(after?.balance ?? balanceBefore);
+
+    await prisma.auditLog.create({ data: {
+      tenantId: agreement?.tenantId || scope?.tenantId || null,
+      reservationId,
+      action: 'ADMIN_OVERRIDE',
+      actorUserId: actorUserId || null,
+      reason: cleanReason.slice(0, 500),
+      metadata: JSON.stringify({
+        kind: 'void_payment_no_refund',
+        paymentId: payment.id,
+        amount: Number(payment.amount || 0),
+        method: payment.method || null,
+        reference: payment.reference || null,
+        balanceBefore,
+        balanceAfter,
+        reason: cleanReason.slice(0, 500)
+      })
+    }});
+
+    return { ok: true, balanceBefore, balanceAfter };
+  },
+
   async addManualCharge(reservationId, body = {}, opts = {}, scope = {}) {
     const { reason = null, actorUserId = null } = opts;
     const name = String(body?.name || '').trim();

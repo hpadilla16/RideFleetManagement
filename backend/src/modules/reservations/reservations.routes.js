@@ -1639,6 +1639,32 @@ reservationsRouter.post('/:id/payments/:paymentId/refund', async (req, res, next
   }
 });
 
+// ── Admin Corrections — VOID a payment with NO refund (bookkeeping only). ADMIN-only.
+// Marks an erroneous payment (+ its linked agreement payment) status=VOID so it drops
+// out of collected/balance math. NO gateway call, NO money movement — for a real card
+// refund use POST /:id/payments/:paymentId/refund instead. Body: { reason } (required).
+// 400 reason missing / AUTH_HOLD; 404 payment not found; 409 already voided.
+reservationsRouter.post('/:id/payments/:paymentId/void-no-refund', async (req, res, next) => {
+  try {
+    if (!canDoAdminCorrections(req)) {
+      return res.status(403).json({ error: 'Admin role required for corrections' });
+    }
+    const reason = String(req.body?.reason || '').trim();
+    if (!reason) return res.status(400).json({ error: 'reason is required' });
+    const out = await reservationPricingService.voidPaymentNoRefund(
+      req.params.id,
+      req.params.paymentId,
+      { reason, actorUserId: req.user?.sub || null },
+      scopeFor(req)
+    );
+    res.json(out);
+  } catch (e) {
+    if (e?.status) return res.status(e.status).json({ error: e.message });
+    if (/not found/i.test(String(e?.message || ''))) return res.status(404).json({ error: e.message });
+    next(e);
+  }
+});
+
 reservationsRouter.post('/:id/payments/:paymentId/save-card-on-file', async (req, res, next) => {
   try {
     const agreementId = await ensureAgreementByReservationId(req.params.id, scopeFor(req));

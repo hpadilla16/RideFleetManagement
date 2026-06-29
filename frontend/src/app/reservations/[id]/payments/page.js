@@ -13,6 +13,7 @@ function normalizePaymentRows(rows = []) {
     method: p.method,
     amount: Number(p.amount || 0),
     reference: p.reference || '',
+    status: String(p.status || '').toUpperCase(),
     source: 'db'
   }));
 }
@@ -173,7 +174,7 @@ function Inner({ token, me, logout }) {
   const paid = useMemo(() => {
     if (hasAgreementTotals) return Number(Number(agreementTotals.paidAmount || 0).toFixed(2));
     return Number(payments
-      .filter((p) => String(p.method || '').toUpperCase() !== 'AUTH_HOLD')
+      .filter((p) => String(p.method || '').toUpperCase() !== 'AUTH_HOLD' && String(p.status || '').toUpperCase() !== 'VOID')
       .reduce((s, p) => s + Number(p.amount || 0), 0).toFixed(2));
   }, [payments, hasAgreementTotals, agreementTotals]);
   const unpaid = useMemo(() => {
@@ -432,6 +433,30 @@ function Inner({ token, me, logout }) {
       body: { amount: amountToRefund },
       successMessage: `Refund posted: $${amountToRefund.toFixed(2)}`,
       busyKey: `refund-${payment.id}`
+    });
+  };
+
+  // ADMIN-only. Bookkeeping void: marks an erroneous payment VOID so it drops out
+  // of the collected/balance math. This does NOT move money — no refund to the card.
+  // For a real card refund use the "Refund" action instead.
+  const isAdmin = ['SUPER_ADMIN', 'ADMIN'].includes(String(me?.role || '').toUpperCase());
+  const voidPaymentNoRefund = async (payment) => {
+    if (!isAdmin) return setMsg('Admin role required to void a payment');
+    const amt = Number(payment?.amount || 0);
+    const confirmed = window.confirm(
+      `Void this $${amt.toFixed(2)} ${payment?.method || ''} payment?\n\n` +
+      'This is a BOOKKEEPING correction only. It does NOT move money and does NOT ' +
+      'refund the customer\u2019s card \u2014 use "Refund" for a real refund. ' +
+      'The payment will be marked VOID and removed from the collected/balance totals.'
+    );
+    if (!confirmed) return;
+    const reason = window.prompt('Reason for voiding this payment (required):', '');
+    if (reason == null) return;
+    if (!String(reason).trim()) return setMsg('A reason is required to void a payment');
+    await runPaymentAction(`/api/reservations/${id}/payments/${payment.id}/void-no-refund`, {
+      body: { reason: String(reason).trim() },
+      successMessage: 'Payment voided (no refund) \u2014 balance updated',
+      busyKey: `void-${payment.id}`
     });
   };
 
@@ -772,17 +797,30 @@ function Inner({ token, me, logout }) {
                   {p.method === 'AUTH_HOLD' ? (
                     <span style={{ marginLeft: 6, padding: '2px 6px', borderRadius: 4, fontSize: 10, fontWeight: 700, background: '#fef3c7', color: '#92400e' }}>HOLD</span>
                   ) : null}
+                  {p.status === 'VOID' ? (
+                    <span style={{ marginLeft: 6, padding: '2px 6px', borderRadius: 4, fontSize: 10, fontWeight: 700, background: '#fee2e2', color: '#991b1b' }}>VOID</span>
+                  ) : null}
                 </td>
                 <td>${Number(p.amount || 0).toFixed(2)}</td>
                 <td>{p.reference}</td>
                 <td>
                   <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                    {Number(p.amount || 0) > 0 ? (
+                    {Number(p.amount || 0) > 0 && p.status !== 'VOID' ? (
                       <button onClick={() => refundPayment(p)} disabled={!!actionBusy}>
                         {actionBusy === `refund-${p.id}` ? 'Refunding...' : 'Refund'}
                       </button>
                     ) : null}
-                    {String(p.reference || '').toUpperCase().startsWith('AUTHNET:') ? (
+                    {isAdmin && p.method !== 'AUTH_HOLD' && p.status !== 'VOID' ? (
+                      <button
+                        onClick={() => voidPaymentNoRefund(p)}
+                        disabled={!!actionBusy}
+                        title="Bookkeeping void — does NOT refund the card"
+                        className="btn-void"
+                      >
+                        {actionBusy === `void-${p.id}` ? 'Voiding...' : 'Void · no refund'}
+                      </button>
+                    ) : null}
+                    {String(p.reference || '').toUpperCase().startsWith('AUTHNET:') && p.status !== 'VOID' ? (
                       <button onClick={() => saveCardOnFile(p.id)} disabled={cardOnFileReady || !!actionBusy}>
                         {cardOnFileReady ? 'Card Saved' : actionBusy === `save-card-${p.id}` ? 'Saving Card...' : 'Save Card To File'}
                       </button>
