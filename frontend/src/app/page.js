@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
+import { useTranslation } from 'react-i18next';
 import { AuthGate } from '../components/AuthGate';
 import { AppShell } from '../components/AppShell';
 import MarketIntelligenceCard from '../components/MarketIntelligenceCard';
@@ -50,6 +51,7 @@ function wallClockDate(value) {
 }
 
 function VehicleStatusDonut({ metrics }) {
+  const { t } = useTranslation();
   const counts = useMemo(() => {
     const available = Number(metrics?.availableFleet || 0);
     const onRent = Number(metrics?.onRent || 0);
@@ -95,12 +97,12 @@ function VehicleStatusDonut({ metrics }) {
       </svg>
       <div className="donut-center">
         <div className="value" style={{ fontSize: 28 }}>{counts.onRent}</div>
-        <div className="label">On Rent</div>
+        <div className="label">{t('dashboard.onRent')}</div>
       </div>
       <div className="stack" style={{ minWidth: 150 }}>
-        <div className="row"><span className="label">● Available</span><strong>{counts.available}</strong></div>
-        <div className="row"><span className="label">● On Rent</span><strong>{counts.onRent}</strong></div>
-        <div className="row"><span className="label">● Out Of Service</span><strong>{counts.out}</strong></div>
+        <div className="row"><span className="label">● {t('dashboard.available')}</span><strong>{counts.available}</strong></div>
+        <div className="row"><span className="label">● {t('dashboard.onRent')}</span><strong>{counts.onRent}</strong></div>
+        <div className="row"><span className="label">● {t('dashboard.outOfService')}</span><strong>{counts.out}</strong></div>
       </div>
     </div>
   );
@@ -136,6 +138,7 @@ function deriveKpisFromVehicles(vehicles = []) {
 }
 
 function SalesRevenueChart({ reservations }) {
+  const { t } = useTranslation();
   const svgRef = useRef(null);
   const [activeIdx, setActiveIdx] = useState(11);
 
@@ -222,8 +225,8 @@ function SalesRevenueChart({ reservations }) {
   return (
     <div>
       <div className="row-between" style={{ marginBottom: 4 }}>
-        <div className="label">Sales Revenue</div>
-        <div className="label"><strong>{active.label}</strong> · Total ${active.rawCurrent.toFixed(2)} · Previous ${active.rawPrevious.toFixed(2)}</div>
+        <div className="label">{t('dashboard.salesRevenue')}</div>
+        <div className="label"><strong>{active.label}</strong> · {t('dashboard.salesRevenueSummary', { current: active.rawCurrent.toFixed(2), previous: active.rawPrevious.toFixed(2) })}</div>
       </div>
       <svg
         ref={svgRef}
@@ -268,6 +271,7 @@ export default function DashboardPage() {
 }
 
 function DashboardInner({ token, me, logout }) {
+  const { t } = useTranslation();
   const router = useRouter();
   const [reservations, setReservations] = useState([]);
   // Today's pickups/returns come from dedicated tenant-TZ date-scoped queries so
@@ -320,13 +324,13 @@ function DashboardInner({ token, me, logout }) {
     if (summaryResult.status === 'fulfilled') setResSummary(summaryResult.value || null);
 
     if (reservationsResult.status === 'rejected' && overviewResult.status === 'rejected' && vehiclesResult.status === 'rejected') {
-      setMsg(reservationsResult.reason?.message || overviewResult.reason?.message || vehiclesResult.reason?.message || 'Unable to load dashboard');
+      setMsg(reservationsResult.reason?.message || overviewResult.reason?.message || vehiclesResult.reason?.message || t('dashboard.msgUnableToLoad'));
     } else if (reservationsResult.status === 'rejected') {
-      setMsg('Dashboard loaded with limited reservation data');
+      setMsg(t('dashboard.msgLimitedReservation'));
     } else if (canSeeOverview && overviewResult.status === 'rejected') {
-      setMsg('Dashboard loaded with limited KPI data');
+      setMsg(t('dashboard.msgLimitedKpi'));
     } else if (!canSeeOverview && canSeeVehicles && vehiclesResult.status === 'rejected') {
-      setMsg('Dashboard loaded with limited fleet metrics');
+      setMsg(t('dashboard.msgLimitedFleet'));
     } else {
       setMsg('');
     }
@@ -341,11 +345,11 @@ function DashboardInner({ token, me, logout }) {
   };
 
   const markCancelled = async (id) => {
-    const reason = window.prompt('Enter a reason for cancellation (required):');
-    if (!reason || !reason.trim()) { if (reason !== null) setMsg('Cancellation requires a reason'); return; }
+    const reason = window.prompt(t('dashboard.cancellationReasonPrompt'));
+    if (!reason || !reason.trim()) { if (reason !== null) setMsg(t('dashboard.cancellationRequiresReason')); return; }
     try {
       await api(`/api/reservations/${id}`, { method: 'PATCH', body: JSON.stringify({ status: 'CANCELLED', cancellationReason: reason.trim() }) }, token);
-      setMsg('Reservation cancelled');
+      setMsg(t('dashboard.reservationCancelled'));
       await load();
     } catch (e) {
       setMsg(e.message);
@@ -353,10 +357,10 @@ function DashboardInner({ token, me, logout }) {
   };
 
   const markNoShow = async (id) => {
-    if (!window.confirm('Mark this reservation as no-show? The guest will be charged the full amount.')) return;
+    if (!window.confirm(t('dashboard.confirmNoShow'))) return;
     try {
       await api(`/api/reservations/${id}`, { method: 'PATCH', body: JSON.stringify({ status: 'NO_SHOW' }) }, token);
-      setMsg('Reservation marked as no show');
+      setMsg(t('dashboard.reservationNoShow'));
       await load();
     } catch (e) {
       setMsg(e.message);
@@ -370,7 +374,7 @@ function DashboardInner({ token, me, logout }) {
       if (link && navigator?.clipboard) {
         try { await navigator.clipboard.writeText(link); } catch {}
       }
-      setMsg(link ? `Customer info link copied to clipboard: ${link}` : 'Customer info link issued');
+      setMsg(link ? t('dashboard.customerInfoCopied', { link }) : t('dashboard.customerInfoIssued'));
     } catch (e) {
       setMsg(e.message);
     }
@@ -443,7 +447,7 @@ function DashboardInner({ token, me, logout }) {
   // Stuck Checkouts + Fee Advisory Watch on the Ops Hub.
   const registrationsExpiring30d = Number(kpis.registrationsExpiring30d || 0);
   const readyToRotate = Number(kpis.readyToRotate || 0);
-  const rotationRuleLabel = kpis.fleetRotationRule === 'MILEAGE' ? 'mileage' : 'time-in-fleet';
+  const rotationRuleLabel = kpis.fleetRotationRule === 'MILEAGE' ? t('dashboard.rotationRuleMileage') : t('dashboard.rotationRuleTime');
   // Customer-led inspection Fase B (2026-06-11): submitted customer
   // inspections with damage reports awaiting soft/hard approval.
   const inspectionsToReview = Number(kpis.inspectionsToReview || 0);
@@ -453,7 +457,7 @@ function DashboardInner({ token, me, logout }) {
   const [boardDate, setBoardDate] = useState(() => wallClockDate(new Date()));
   const todayStr = useMemo(() => wallClockDate(new Date()), []);
   const isToday = boardDate === todayStr;
-  const boardLabel = isToday ? 'Today' : new Date(boardDate + 'T12:00:00').toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric' });
+  const boardLabel = isToday ? t('dashboard.today') : new Date(boardDate + 'T12:00:00').toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric' });
   // Date-scoped fetch keyed to the SELECTED board date (pickups by dateOn, returns
   // by returnDateOn). Works for ANY day regardless of total reservation volume —
   // the old capped client-side filter showed 0 for non-today dates.
@@ -500,21 +504,21 @@ function DashboardInner({ token, me, logout }) {
       pickups[0]
         ? {
             id: `pickup-${pickups[0].id}`,
-            title: 'Next Pickup',
+            title: t('dashboard.nextPickup'),
             detail: `#${pickups[0].reservationNumber} - ${pickups[0].customer?.firstName || ''} ${pickups[0].customer?.lastName || ''}`.trim(),
-            note: `Pickup ${new Date(pickups[0].pickupAt).toLocaleString('en-US', { timeZone: DASHBOARD_TZ })}`,
+            note: t('dashboard.pickupAt', { time: new Date(pickups[0].pickupAt).toLocaleString('en-US', { timeZone: DASHBOARD_TZ }) }),
             action: () => startCheckout(pickups[0].id),
-            actionLabel: 'Start Check-out'
+            actionLabel: t('dashboard.startCheckout')
           }
         : null,
       returns[0]
         ? {
             id: `return-${returns[0].id}`,
-            title: 'Next Return',
+            title: t('dashboard.nextReturn'),
             detail: `#${returns[0].reservationNumber} - ${returns[0].customer?.firstName || ''} ${returns[0].customer?.lastName || ''}`.trim(),
-            note: `Return ${new Date(returns[0].returnAt).toLocaleString('en-US', { timeZone: DASHBOARD_TZ })}`,
+            note: t('dashboard.returnAt', { time: new Date(returns[0].returnAt).toLocaleString('en-US', { timeZone: DASHBOARD_TZ }) }),
             action: () => router.push(`/reservations/${returns[0].id}/checkin-wizard`),
-            actionLabel: 'Open Check-in'
+            actionLabel: t('dashboard.openCheckin')
           }
         : null,
       // Vehicle Profile pack (2026-06-10): these two cards REPLACE the old
@@ -523,31 +527,31 @@ function DashboardInner({ token, me, logout }) {
       inspectionsToReview > 0
         ? {
             id: 'inspections-to-review',
-            title: 'Inspections to Review',
-            detail: `${inspectionsToReview} customer inspection${inspectionsToReview === 1 ? '' : 's'}`,
-            note: 'Customers reported damages that need your soft/hard approval.',
+            title: t('dashboard.inspectionsToReview'),
+            detail: t('dashboard.inspectionsToReviewDetail', { count: inspectionsToReview }),
+            note: t('dashboard.inspectionsToReviewNote'),
             action: () => router.push('/inspections/review'),
-            actionLabel: 'Review Now'
+            actionLabel: t('dashboard.reviewNow')
           }
         : null,
       registrationsExpiring30d > 0
         ? {
             id: 'registrations-expiring',
-            title: 'Registrations ≤30d',
-            detail: `${registrationsExpiring30d} vehicle${registrationsExpiring30d === 1 ? '' : 's'}`,
-            note: 'Registration expired or expiring within 30 days — renew before they hit the road.',
+            title: t('dashboard.registrationsExpiring'),
+            detail: t('dashboard.vehicleCount', { count: registrationsExpiring30d }),
+            note: t('dashboard.registrationsExpiringNote'),
             action: () => router.push('/vehicles?registration=expiring'),
-            actionLabel: 'Review Vehicles'
+            actionLabel: t('dashboard.reviewVehicles')
           }
         : null,
       readyToRotate > 0
         ? {
             id: 'ready-to-rotate',
-            title: 'Ready to Rotate',
-            detail: `${readyToRotate} vehicle${readyToRotate === 1 ? '' : 's'}`,
-            note: `Past the fleet ${rotationRuleLabel} target — candidates to sell per your rotation rules.`,
+            title: t('dashboard.readyToRotate'),
+            detail: t('dashboard.vehicleCount', { count: readyToRotate }),
+            note: t('dashboard.readyToRotateNote', { rule: rotationRuleLabel }),
             action: () => router.push('/vehicles?rotation=ready'),
-            actionLabel: 'View Batch'
+            actionLabel: t('dashboard.viewBatch')
           }
         : null,
       // Loaner Lane card only renders for tenants that have the dealership
@@ -557,11 +561,11 @@ function DashboardInner({ token, me, logout }) {
       (me?.moduleAccess?.loaner === true)
         ? {
             id: 'loaner',
-            title: 'Loaner Lane',
-            detail: 'Service lane, billing, and alerts',
-            note: 'Jump straight into the dealership loaner workspace when service ops need attention.',
+            title: t('dashboard.loanerLane'),
+            detail: t('dashboard.loanerLaneDetail'),
+            note: t('dashboard.loanerLaneNote'),
             action: () => router.push('/loaner'),
-            actionLabel: 'Open Loaner'
+            actionLabel: t('dashboard.openLoaner')
           }
         : null
     ].filter(Boolean);
@@ -577,7 +581,7 @@ function DashboardInner({ token, me, logout }) {
       feeAdvisoryCount,
       nextItems
     };
-  }, [pickups, returns, feeAdvisoryCount, registrationsExpiring30d, readyToRotate, rotationRuleLabel, inspectionsToReview, totalVehicles, available, migrationHeld, serviceHeld, activeReservations, overdueReservations, router, me?.moduleAccess?.loaner]);
+  }, [pickups, returns, feeAdvisoryCount, registrationsExpiring30d, readyToRotate, rotationRuleLabel, inspectionsToReview, totalVehicles, available, migrationHeld, serviceHeld, activeReservations, overdueReservations, router, me?.moduleAccess?.loaner, t]);
 
   return (
     <AppShell me={me} logout={logout}>
@@ -585,34 +589,34 @@ function DashboardInner({ token, me, logout }) {
         <div className="app-banner">
           <div className="row-between" style={{ alignItems: 'start', marginBottom: 0 }}>
             <div>
-              <span className="eyebrow">Workspace Ops Hub</span>
+              <span className="eyebrow">{t('dashboard.opsHubEyebrow')}</span>
               <h2 className="page-title" style={{ marginTop: 6 }}>
-                Keep today&apos;s pickups, returns, and service-lane work in view.
+                {t('dashboard.opsHubTitle')}
               </h2>
-              <p className="ui-muted">A mobile-first launch point before you scroll into the full dashboard cards and charts.</p>
+              <p className="ui-muted">{t('dashboard.opsHubSubtitle')}</p>
             </div>
-            <span className="status-chip neutral">Workspace</span>
+            <span className="status-chip neutral">{t('dashboard.workspaceChip')}</span>
           </div>
           <div className="app-card-grid compact">
-            <button type="button" className="info-tile" style={{ textAlign: 'left', cursor: 'pointer' }} onClick={() => router.push('/vehicles')} title="Open the full vehicle list">
-              <span className="label">Vehicles</span>
+            <button type="button" className="info-tile" style={{ textAlign: 'left', cursor: 'pointer' }} onClick={() => router.push('/vehicles')} title={t('dashboard.tileVehiclesTitle')}>
+              <span className="label">{t('dashboard.tileVehicles')}</span>
               <strong>{workspaceOpsHub.totalVehicles}</strong>
-              <span className="ui-muted">Total units across the workspace.</span>
+              <span className="ui-muted">{t('dashboard.tileVehiclesDesc')}</span>
             </button>
-            <button type="button" className="info-tile" style={{ textAlign: 'left', cursor: 'pointer' }} onClick={() => router.push('/vehicles?status=available')} title="Open available vehicles">
-              <span className="label">Available</span>
+            <button type="button" className="info-tile" style={{ textAlign: 'left', cursor: 'pointer' }} onClick={() => router.push('/vehicles?status=available')} title={t('dashboard.tileAvailableTitle')}>
+              <span className="label">{t('dashboard.tileAvailable')}</span>
               <strong>{workspaceOpsHub.available}</strong>
-              <span className="ui-muted">Units ready to move today.</span>
+              <span className="ui-muted">{t('dashboard.tileAvailableDesc')}</span>
             </button>
-            <button type="button" className="info-tile" style={{ textAlign: 'left', cursor: 'pointer' }} onClick={() => router.push('/vehicles?status=migration')} title="Open units on migration hold">
-              <span className="label">Migration Holds</span>
+            <button type="button" className="info-tile" style={{ textAlign: 'left', cursor: 'pointer' }} onClick={() => router.push('/vehicles?status=migration')} title={t('dashboard.tileMigrationHoldsTitle')}>
+              <span className="label">{t('dashboard.tileMigrationHolds')}</span>
               <strong>{workspaceOpsHub.migrationHeld}</strong>
-              <span className="ui-muted">Legacy-contract units still committed to fleet usage.</span>
+              <span className="ui-muted">{t('dashboard.tileMigrationHoldsDesc')}</span>
             </button>
-            <button type="button" className="info-tile" style={{ textAlign: 'left', cursor: 'pointer' }} onClick={() => router.push('/vehicles?status=maintenance')} title="Open maintenance / out-of-service units">
-              <span className="label">Maintenance / OOS</span>
+            <button type="button" className="info-tile" style={{ textAlign: 'left', cursor: 'pointer' }} onClick={() => router.push('/vehicles?status=maintenance')} title={t('dashboard.tileMaintenanceOosTitle')}>
+              <span className="label">{t('dashboard.tileMaintenanceOos')}</span>
               <strong>{workspaceOpsHub.serviceHeld}</strong>
-              <span className="ui-muted">Units blocked for maintenance or out-of-service work.</span>
+              <span className="ui-muted">{t('dashboard.tileMaintenanceOosDesc')}</span>
             </button>
             <button
               type="button"
@@ -624,16 +628,16 @@ function DashboardInner({ token, me, logout }) {
                 background: mismatchCount > 0 ? 'rgba(239, 68, 68, 0.08)' : undefined,
                 borderColor: mismatchCount > 0 ? 'rgba(239, 68, 68, 0.35)' : undefined,
               }}
-              title="Vehicles flagged during inventory that still need fixing"
+              title={t('dashboard.tileStatusMismatchesTitle')}
             >
-              <span className="label">Status Mismatches</span>
+              <span className="label">{t('dashboard.tileStatusMismatches')}</span>
               <strong style={{ color: mismatchCount > 0 ? '#dc2626' : undefined }}>{mismatchCount}</strong>
-              <span className="ui-muted">Deferred during inventory. Click to reconcile.</span>
+              <span className="ui-muted">{t('dashboard.tileStatusMismatchesDesc')}</span>
             </button>
-            <button type="button" className="info-tile" style={{ textAlign: 'left', cursor: 'pointer' }} onClick={() => router.push('/reservations?filter=active')} title="Open active (currently-out) reservations">
-              <span className="label">Active Reservations</span>
+            <button type="button" className="info-tile" style={{ textAlign: 'left', cursor: 'pointer' }} onClick={() => router.push('/reservations?filter=active')} title={t('dashboard.tileActiveReservationsTitle')}>
+              <span className="label">{t('dashboard.tileActiveReservations')}</span>
               <strong>{workspaceOpsHub.activeReservations}</strong>
-              <span className="ui-muted">Bookings currently in motion.</span>
+              <span className="ui-muted">{t('dashboard.tileActiveReservationsDesc')}</span>
             </button>
             <button
               type="button"
@@ -645,24 +649,24 @@ function DashboardInner({ token, me, logout }) {
                 background: workspaceOpsHub.overdueReservations > 0 ? 'rgba(239, 68, 68, 0.08)' : undefined,
                 borderColor: workspaceOpsHub.overdueReservations > 0 ? 'rgba(239, 68, 68, 0.35)' : undefined,
               }}
-              title="Click to view overdue reservations"
+              title={t('dashboard.tileOverdueReturnsTitle')}
             >
-              <span className="label">Overdue Returns</span>
+              <span className="label">{t('dashboard.tileOverdueReturns')}</span>
               <strong style={{ color: workspaceOpsHub.overdueReservations > 0 ? '#dc2626' : undefined }}>
                 {workspaceOpsHub.overdueReservations}
               </strong>
-              <span className="ui-muted">Checked-out past their planned return. Click to triage.</span>
+              <span className="ui-muted">{t('dashboard.tileOverdueReturnsDesc')}</span>
             </button>
             <div className="info-tile">
-              <span className="label">Fee Advisories</span>
+              <span className="label">{t('dashboard.tileFeeAdvisories')}</span>
               <strong>{workspaceOpsHub.feeAdvisoryCount}</strong>
-              <span className="ui-muted">Bookings still carrying advisory follow-up.</span>
+              <span className="ui-muted">{t('dashboard.tileFeeAdvisoriesDesc')}</span>
             </div>
             {citSummary ? (
-              <button type="button" className="info-tile" style={{ textAlign: 'left', cursor: 'pointer' }} onClick={() => router.push('/citations')} title="Open citations">
-                <span className="label">Citations</span>
+              <button type="button" className="info-tile" style={{ textAlign: 'left', cursor: 'pointer' }} onClick={() => router.push('/citations')} title={t('dashboard.tileCitationsTitle')}>
+                <span className="label">{t('dashboard.tileCitations')}</span>
                 <strong>{citSummary.needsReview}</strong>
-                <span className="ui-muted">Need review · ${Number(citSummary.outstanding || 0).toFixed(2)} outstanding</span>
+                <span className="ui-muted">{t('dashboard.tileCitationsDesc', { outstanding: Number(citSummary.outstanding || 0).toFixed(2) })}</span>
               </button>
             ) : null}
           </div>
@@ -681,22 +685,22 @@ function DashboardInner({ token, me, logout }) {
         </div>
       </section>
       <section className="grid4">
-        <div className="glass card"><div className="label">Total Vehicles</div><div className="value">{totalVehicles}</div></div>
-        <div className="glass card"><div className="label">Available Vehicles</div><div className="value">{available}</div></div>
-        <div className="glass card"><div className="label">Reservations</div><div className="value">{Number.isFinite(Number(resSummary?.totalReservations)) ? Number(resSummary.totalReservations).toLocaleString() : reservations.length}</div></div>
-        <div className="glass card"><div className="label">Active</div><div className="value">{activeReservations}</div></div>
-        <div className="glass card"><div className="label">Fee Advisories</div><div className="value">{feeAdvisoryCount}</div></div>
+        <div className="glass card"><div className="label">{t('dashboard.totalVehicles')}</div><div className="value">{totalVehicles}</div></div>
+        <div className="glass card"><div className="label">{t('dashboard.availableVehicles')}</div><div className="value">{available}</div></div>
+        <div className="glass card"><div className="label">{t('dashboard.reservations')}</div><div className="value">{Number.isFinite(Number(resSummary?.totalReservations)) ? Number(resSummary.totalReservations).toLocaleString() : reservations.length}</div></div>
+        <div className="glass card"><div className="label">{t('dashboard.active')}</div><div className="value">{activeReservations}</div></div>
+        <div className="glass card"><div className="label">{t('dashboard.tileFeeAdvisories')}</div><div className="value">{feeAdvisoryCount}</div></div>
       </section>
       {msg ? <p className="label" style={{ margin: '4px 0 10px 2px' }}>{msg}</p> : null}
 
       <section className="glass card-lg" style={{ marginBottom: 12 }}>
         <div className="row-between" style={{ alignItems: 'center' }}>
-          <h3 style={{ margin: 0 }}>Operations Board</h3>
+          <h3 style={{ margin: 0 }}>{t('dashboard.opsBoard')}</h3>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
             <button onClick={() => { const d = new Date(boardDate + 'T00:00:00'); d.setDate(d.getDate() - 1); setBoardDate(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`); }} style={{ padding: '4px 8px', minWidth: 0 }}>&larr;</button>
             <input type="date" value={boardDate} onChange={(e) => setBoardDate(e.target.value)} style={{ padding: '4px 8px', borderRadius: 8, border: '1px solid var(--border-soft)', background: 'var(--bg-soft)', color: 'var(--charcoal)', fontSize: 13, fontWeight: 600 }} />
             <button onClick={() => { const d = new Date(boardDate + 'T00:00:00'); d.setDate(d.getDate() + 1); setBoardDate(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`); }} style={{ padding: '4px 8px', minWidth: 0 }}>&rarr;</button>
-            {!isToday && <button onClick={() => { const d = new Date(); setBoardDate(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`); }} style={{ padding: '4px 10px', fontSize: 12 }}>Today</button>}
+            {!isToday && <button onClick={() => { const d = new Date(); setBoardDate(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`); }} style={{ padding: '4px 10px', fontSize: 12 }}>{t('dashboard.today')}</button>}
           </div>
         </div>
         <p className="label" style={{ marginTop: 6, marginBottom: 0 }}>
@@ -705,15 +709,15 @@ function DashboardInner({ token, me, logout }) {
               disagree with the list (e.g. "10 returns" but 9 cards)
               because the backend summary doesn't drop already-received
               returns. */}
-          {boardLabel} — Pickups: <strong>{pickups.length}</strong> · Returns: <strong>{returns.length}</strong>
+          {boardLabel} — {t('dashboard.pickupsLabel')}: <strong>{pickups.length}</strong> · {t('dashboard.returnsLabel')}: <strong>{returns.length}</strong>
         </p>
       </section>
 
       <section className="grid2">
         <div className="glass card-lg">
-          <div className="label" style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.05em', color: 'var(--brand)', marginBottom: 8 }}>Pickups ({pickups.length})</div>
+          <div className="label" style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.05em', color: 'var(--brand)', marginBottom: 8 }}>{t('dashboard.pickupsCount', { count: pickups.length })}</div>
           {pickups.length === 0 ? (
-            <p className="ui-muted" style={{ textAlign: 'center', padding: 20, margin: 0 }}>No pickups scheduled.</p>
+            <p className="ui-muted" style={{ textAlign: 'center', padding: 20, margin: 0 }}>{t('dashboard.noPickups')}</p>
           ) : (
             <div className="stack">
               {pickups.sort((a, b) => String(a.pickupAt).localeCompare(String(b.pickupAt))).map((r) => {
@@ -733,12 +737,12 @@ function DashboardInner({ token, me, logout }) {
                     <span style={{ minWidth: 70, fontWeight: 600, fontSize: 13, color: 'var(--charcoal)' }}>{fmtWallClockTime(r.pickupAt)}</span>
                     <span style={{ flex: 1 }}>
                       #{r.reservationNumber} · {r.customer?.firstName} {r.customer?.lastName}{r.vehicle ? ` · ${r.vehicle.year || ''} ${r.vehicle.make || ''} ${r.vehicle.model || ''}`.trim() : ''}
-                      {balance > 0 ? <span className="status-chip warn" style={{ fontSize: 10, marginLeft: 6 }}>Unpaid {moneyShort(balance)}</span> : null}
+                      {balance > 0 ? <span className="status-chip warn" style={{ fontSize: 10, marginLeft: 6 }}>{t('dashboard.unpaid', { amount: moneyShort(balance) })}</span> : null}
                     </span>
                     <div style={{ display: 'flex', gap: 6 }} onClick={(e) => e.stopPropagation()}>
-                      <button onClick={(e) => { e.stopPropagation(); startCheckout(r.id); }}>Start Check-out</button>
-                      <button onClick={(e) => { e.stopPropagation(); requestCustomerInfo(r.id); }}>Request Info</button>
-                      <button onClick={(e) => { e.stopPropagation(); markNoShow(r.id); }}>No Show</button>
+                      <button onClick={(e) => { e.stopPropagation(); startCheckout(r.id); }}>{t('dashboard.startCheckout')}</button>
+                      <button onClick={(e) => { e.stopPropagation(); requestCustomerInfo(r.id); }}>{t('dashboard.requestInfo')}</button>
+                      <button onClick={(e) => { e.stopPropagation(); markNoShow(r.id); }}>{t('dashboard.noShow')}</button>
                     </div>
                   </div>
                 );
@@ -748,9 +752,9 @@ function DashboardInner({ token, me, logout }) {
         </div>
 
         <div className="glass card-lg">
-          <div className="label" style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.05em', color: '#30D5C8', marginBottom: 8 }}>Returns ({returns.length})</div>
+          <div className="label" style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.05em', color: '#30D5C8', marginBottom: 8 }}>{t('dashboard.returnsCount', { count: returns.length })}</div>
           {returns.length === 0 ? (
-            <p className="ui-muted" style={{ textAlign: 'center', padding: 20, margin: 0 }}>No returns scheduled.</p>
+            <p className="ui-muted" style={{ textAlign: 'center', padding: 20, margin: 0 }}>{t('dashboard.noReturns')}</p>
           ) : (
             <div className="stack">
               {returns.sort((a, b) => String(a.returnAt).localeCompare(String(b.returnAt))).map((r) => {
@@ -776,7 +780,7 @@ function DashboardInner({ token, me, logout }) {
                     <span style={{ minWidth: 70, fontWeight: 600, fontSize: 13, color: 'var(--charcoal)' }}>{fmtWallClockTime(r.returnAt)}</span>
                     <span style={{ flex: 1 }}>
                       #{r.reservationNumber} · {r.customer?.firstName} {r.customer?.lastName}{r.vehicle ? ` · ${r.vehicle.year || ''} ${r.vehicle.make || ''} ${r.vehicle.model || ''}`.trim() : ''}
-                      {balance > 0 ? <span className="status-chip warn" style={{ fontSize: 10, marginLeft: 6 }}>Unpaid {moneyShort(balance)}</span> : null}
+                      {balance > 0 ? <span className="status-chip warn" style={{ fontSize: 10, marginLeft: 6 }}>{t('dashboard.unpaid', { amount: moneyShort(balance) })}</span> : null}
                     </span>
                     <div style={{ display: 'flex', gap: 6 }} onClick={(e) => e.stopPropagation()}>
                       {alreadyCheckedIn ? (
@@ -787,10 +791,10 @@ function DashboardInner({ token, me, logout }) {
                             background: '#dcfce7', color: '#166534'
                           }}
                         >
-                          Checked in
+                          {t('dashboard.checkedIn')}
                         </span>
                       ) : (
-                        <button onClick={(e) => { e.stopPropagation(); startCheckin(r.id); }}>Start Check-in</button>
+                        <button onClick={(e) => { e.stopPropagation(); startCheckin(r.id); }}>{t('dashboard.startCheckin')}</button>
                       )}
                     </div>
                   </div>
@@ -809,9 +813,9 @@ function DashboardInner({ token, me, logout }) {
       <MarketIntelligenceCard me={me} token={token} />
 
       <section className="glass card-lg">
-        <h3>Operations Timeline</h3>
+        <h3>{t('dashboard.operationsTimeline')}</h3>
         <div className="stack">
-          {timeline.map((r) => <div key={r.id} className="row"><span>{fmtTimeline(timelineTs(r))}</span><span>Reservation #{r.reservationNumber} · {r.status}</span></div>)}
+          {timeline.map((r) => <div key={r.id} className="row"><span>{fmtTimeline(timelineTs(r))}</span><span>{t('dashboard.reservationLine', { number: r.reservationNumber, status: r.status })}</span></div>)}
         </div>
       </section>
     </AppShell>

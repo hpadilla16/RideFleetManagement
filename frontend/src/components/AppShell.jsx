@@ -198,8 +198,8 @@ export function AppShell({ me, logout, children }) {
   const unlock = async () => {
     try {
       if (!hasPin) {
-        if (!newPin || newPin.length < 4) return setLockMsg('Set a PIN with at least 4 digits');
-        if (newPin !== newPin2) return setLockMsg('PIN confirmation does not match');
+        if (!newPin || newPin.length < 4) return setLockMsg(t('lockScreen.pinTooShort'));
+        if (newPin !== newPin2) return setLockMsg(t('lockScreen.pinMismatch'));
         await authApi('/lock-pin/set', { method: 'POST', body: JSON.stringify({ pin: newPin }) });
         try { localStorage.setItem('ui.hasPin', '1'); } catch {}
         setHasPin(true);
@@ -222,11 +222,11 @@ export function AppShell({ me, logout, children }) {
       const nextFails = failedUnlockAttempts + 1;
       setFailedUnlockAttempts(nextFails);
       if (nextFails >= 3) {
-        setLockMsg('Too many failed attempts. Logging out...');
+        setLockMsg(t('lockScreen.tooManyAttempts'));
         setTimeout(() => logout(), 500);
         return;
       }
-      setLockMsg(`${e.message || 'Invalid PIN'} (${nextFails}/3)`);
+      setLockMsg(`${e.message || t('lockScreen.invalidPin')} ${t('lockScreen.attemptsSuffix', { count: nextFails })}`);
     }
   };
 
@@ -238,9 +238,9 @@ export function AppShell({ me, logout, children }) {
       setPinInput('');
       setNewPin('');
       setNewPin2('');
-      setLockMsg('PIN reset. Set a new PIN to unlock.');
+      setLockMsg(t('lockScreen.pinReset'));
     } catch (e) {
-      setLockMsg(e.message || 'Unable to reset PIN');
+      setLockMsg(e.message || t('lockScreen.unableToReset'));
     }
   };
 
@@ -249,10 +249,10 @@ export function AppShell({ me, logout, children }) {
       <aside className={`sidebar glass ${mobileOpen ? 'open' : ''}`}>
         <div className="brand-block">
           <div className="brand">Ride Fleet</div>
-          <div className="brand-subtitle">Rental ops, guest journeys, reporting, and car sharing in one workspace.</div>
+          <div className="brand-subtitle">{t('appShell.brandSubtitle')}</div>
         </div>
 
-        <div className="nav-section-label">Workspace</div>
+        <div className="nav-section-label">{t('appShell.workspace')}</div>
         <div className="stack nav-stack">
           {NAV_ITEMS
             .filter((item) => !item.superOnly || role === 'SUPER_ADMIN')
@@ -286,23 +286,23 @@ export function AppShell({ me, logout, children }) {
           <div className="topbar-primary">
             <button
               className="mobile-menu-btn topbar-action-btn"
-              aria-label="Open navigation menu"
-              title="Open menu"
+              aria-label={t('appShell.openNavMenu')}
+              title={t('appShell.openMenu')}
               onClick={() => setMobileOpen((v) => !v)}
             >
               ☰
             </button>
             <div className="topbar-identity">
-              <div className="topbar-name">{me?.fullName || me?.name || me?.email || 'User'}</div>
+              <div className="topbar-name">{me?.fullName || me?.name || me?.email || t('appShell.userFallback')}</div>
               <div className="topbar-role">{me?.role || 'ADMIN'}</div>
             </div>
           </div>
 
           <div className="topbar-actions">
-            {canReturnSuper ? <button className="button-subtle topbar-action-btn topbar-action-wide" title={t('topbar.returnToSuperAdmin')} onClick={returnToSuperAdmin}>Return</button> : null}
-            <button className="button-subtle topbar-action-btn" title="Open Customer Display on second screen" style={{ background: 'rgba(22,163,74,.1)', borderColor: 'rgba(22,163,74,.2)', color: '#166534' }} onClick={() => window.open('/customer-display', 'customer-display', 'width=600,height=900,scrollbars=yes,resizable=yes')}>Display</button>
+            {canReturnSuper ? <button className="button-subtle topbar-action-btn topbar-action-wide" title={t('topbar.returnToSuperAdmin')} onClick={returnToSuperAdmin}>{t('appShell.return')}</button> : null}
+            <button className="button-subtle topbar-action-btn" title={t('appShell.openCustomerDisplay')} style={{ background: 'rgba(22,163,74,.1)', borderColor: 'rgba(22,163,74,.2)', color: '#166534' }} onClick={() => window.open('/customer-display', 'customer-display', 'width=600,height=900,scrollbars=yes,resizable=yes')}>{t('appShell.display')}</button>
             <button className="button-subtle topbar-action-btn" onClick={() => setLanguage(i18n.language === 'es' ? 'en' : 'es')} style={{ fontWeight: 700, letterSpacing: '.03em' }}>{i18n.language === 'es' ? 'EN' : 'ES'}</button>
-            <button className="button-subtle topbar-action-btn" title="Toggle dark mode" onClick={() => setDarkMode((v) => !v)}>{darkMode ? t('topbar.light') : t('topbar.dark')}</button>
+            <button className="button-subtle topbar-action-btn" title={t('appShell.toggleDarkMode')} onClick={() => setDarkMode((v) => !v)}>{darkMode ? t('topbar.light') : t('topbar.dark')}</button>
             <button className="button-subtle topbar-action-btn" title={t('topbar.lock')} onClick={lockNow}>{t('topbar.lock')}</button>
             <button className="topbar-action-btn" onClick={logout}>{t('topbar.logout')}</button>
           </div>
@@ -310,10 +310,10 @@ export function AppShell({ me, logout, children }) {
 
         {blockedModule ? (
           <section className="glass card-lg stack">
-            <div className="eyebrow">Access Controlled</div>
-            <h2>Module not enabled for this user</h2>
+            <div className="eyebrow">{t('blockedModule.eyebrow')}</div>
+            <h2>{t('blockedModule.title')}</h2>
             <p className="ui-muted">
-              This account does not currently have access to this workspace module. A super admin or tenant admin can enable it from tenant module access or user module permissions.
+              {t('blockedModule.body')}
             </p>
           </section>
         ) : children}
@@ -337,7 +337,7 @@ export function AppShell({ me, logout, children }) {
             </div>
             <div className="screenlock-time">{formatTime(now)}</div>
             <div className="screenlock-date">{formatDate(now)}</div>
-            <div className="screenlock-user">{me?.fullName || me?.name || me?.email || 'User'}</div>
+            <div className="screenlock-user">{me?.fullName || me?.name || me?.email || t('appShell.userFallback')}</div>
 
             <div className="screenlock-card glass card">
               <h3 style={{ marginBottom: 8 }}>{t('lockScreen.screenLocked')}</h3>
@@ -361,7 +361,7 @@ export function AppShell({ me, logout, children }) {
 
               <div style={{ display: 'flex', gap: 8, marginTop: 10, flexWrap: 'wrap' }}>
                 <button onClick={unlock}>{t('lockScreen.unlock')}</button>
-                <button className="button-subtle" onClick={resetMyPin}>Reset PIN</button>
+                <button className="button-subtle" onClick={resetMyPin}>{t('appShell.resetPin')}</button>
                 <button className="button-subtle" onClick={logout}>{t('topbar.logout')}</button>
               </div>
             </div>

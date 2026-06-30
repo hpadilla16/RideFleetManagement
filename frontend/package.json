@@ -16,7 +16,8 @@
     "mobile:copy": "npx cap copy",
     "mobile:sync": "npx cap sync",
     "mobile:open:android": "npx cap open android",
-    "mobile:open:ios": "npx cap open ios"
+    "mobile:open:ios": "npx cap open ios",
+    "lint:i18n": "next lint --config .eslintrc.i18n.cjs || eslint 'src/**/*.{js,jsx}' -c .eslintrc.i18n.cjs"
   },
   "dependencies": {
     "@capacitor/android": "^8.2.0",
@@ -40,6 +41,7 @@
     "@testing-library/jest-dom": "^6.9.1",
     "@testing-library/react": "^16.3.2",
     "jsdom": "^29.0.2",
-    "vitest": "^4.1.4"
+    "vitest": "^4.1.4",
+    "eslint-plugin-i18next": "^6.1.3"
   }
 }
