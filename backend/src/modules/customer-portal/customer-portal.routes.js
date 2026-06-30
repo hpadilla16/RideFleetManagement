@@ -17,6 +17,10 @@ import {
   attachPublicRequestMeta,
   createPublicRateLimitGuard
 } from '../../middleware/public-endpoint-guards.js';
+import {
+  materializeDocumentRef,
+  maybeUploadCustomerDocument
+} from '../customers/customer-documents.js';
 
 export const customerPortalRouter = Router();
 
@@ -918,7 +922,15 @@ function paymentReceiptText({ reservation, agreement, payments }) {
   return lines.join('\n');
 }
 
-function serializeCustomerInfoReservation(reservation) {
+async function serializeCustomerInfoReservation(reservation) {
+  // Blob -> Storage (Phase 1): sign Storage paths for client rendering.
+  // Legacy inline base64 / external http URLs pass through unchanged; signing
+  // failures collapse to '' (best-effort).
+  const [insuranceDocumentUrl, idPhotoUrl, licenseBackUrl] = await Promise.all([
+    materializeDocumentRef(reservation.customer?.insuranceDocumentUrl || ''),
+    materializeDocumentRef(reservation.customer?.idPhotoUrl || ''),
+    materializeDocumentRef(reservation.customer?.licenseBackUrl || '')
+  ]);
   return {
     id: reservation.id,
     reservationNumber: reservation.reservationNumber,
@@ -939,14 +951,15 @@ function serializeCustomerInfoReservation(reservation) {
       licenseNumber: reservation.customer?.licenseNumber || '',
       licenseState: reservation.customer?.licenseState || '',
       insurancePolicyNumber: reservation.customer?.insurancePolicyNumber || '',
-      insuranceDocumentUrl: reservation.customer?.insuranceDocumentUrl || '',
+      insuranceDocumentUrl,
       address1: reservation.customer?.address1 || '',
       address2: reservation.customer?.address2 || '',
       city: reservation.customer?.city || '',
       state: reservation.customer?.state || '',
       zip: reservation.customer?.zip || '',
       country: reservation.customer?.country || '',
-      idPhotoUrl: reservation.customer?.idPhotoUrl || ''
+      idPhotoUrl,
+      licenseBackUrl
     }
   };
 }
@@ -1284,7 +1297,7 @@ customerPortalRouter.get('/customer-info/:token', portalRead, async (req, res, n
 
     const catalog = enrichPrecheckinCatalog({ insurancePlans, additionalServices, existingCharges, precheckinDiscount });
     res.json({
-      reservation: serializeCustomerInfoReservation(reservation),
+      reservation: await serializeCustomerInfoReservation(reservation),
       expiresAt: reservation.customerInfoTokenExpiresAt,
       portal: await buildPortalSummary(reservation, 'customer-info', token),
       insurancePlans: catalog.insurancePlans,
@@ -1333,6 +1346,18 @@ customerPortalRouter.post('/customer-info/:token', portalWrite, async (req, res,
       return res.status(400).json({ error: `Complete the required pre-check-in items first: ${missing.join(', ')}` });
     }
 
+    // Blob -> Storage (Phase 1): when the flag is ON, route inline base64 doc
+    // values to Storage and persist the returned PATH. Fail-safe -- on any
+    // upload error the original base64 is kept (KYC docs are never lost). Flag
+    // OFF -> byte-identical to before.
+    const _insuranceDocValue = body.insuranceDocumentUrl ? String(body.insuranceDocumentUrl).trim() : null;
+    const _idPhotoValue = body.idPhotoUrl ? String(body.idPhotoUrl).trim() : null;
+    const _docCtx = { tenantId: reservation.tenantId || null, customerId: reservation.customerId };
+    const [_insuranceDocStored, _idPhotoStored] = await Promise.all([
+      maybeUploadCustomerDocument(_insuranceDocValue, { ..._docCtx, kind: 'insurance' }),
+      maybeUploadCustomerDocument(_idPhotoValue, { ..._docCtx, kind: 'id-photo' })
+    ]);
+
     await prisma.customer.update({
       where: { id: reservation.customerId },
       data: {
@@ -1344,14 +1369,14 @@ customerPortalRouter.post('/customer-info/:token', portalWrite, async (req, res,
         licenseNumber: body.licenseNumber ? String(body.licenseNumber).trim() : null,
         licenseState: body.licenseState ? String(body.licenseState).trim() : null,
         insurancePolicyNumber: body.insurancePolicyNumber ? String(body.insurancePolicyNumber).trim() : null,
-        insuranceDocumentUrl: body.insuranceDocumentUrl ? String(body.insuranceDocumentUrl).trim() : null,
+        insuranceDocumentUrl: _insuranceDocStored,
         address1: body.address1 ? String(body.address1).trim() : null,
         address2: body.address2 ? String(body.address2).trim() : null,
         city: body.city ? String(body.city).trim() : null,
         state: body.state ? String(body.state).trim() : null,
         zip: body.zip ? String(body.zip).trim() : null,
         country: body.country ? String(body.country).trim() : null,
-        idPhotoUrl: body.idPhotoUrl ? String(body.idPhotoUrl).trim() : null
+        idPhotoUrl: _idPhotoStored
       }
     });
 

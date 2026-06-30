@@ -23,6 +23,7 @@ import { parseLocationConfig } from '../../lib/location-config.js';
 import { cache } from '../../lib/cache.js';
 import { globalKey } from '../../lib/cache/tenantKey.js';
 import { compactStartRentalResponse } from './start-rental-compact.js';
+import { maybeUploadCustomerDocument } from '../customers/customer-documents.js';
 
 export const reservationsRouter = Router();
 
@@ -1369,6 +1370,17 @@ reservationsRouter.post('/:id/precheckin/staff-complete', async (req, res, next)
         } else {
           customerUpdate[key] = body[key] || null;
         }
+      }
+    }
+
+    // Blob -> Storage (Phase 1): route inline base64 doc fields to Storage when
+    // the flag is ON; fail-safe fall back to inline on any error. Flag OFF ->
+    // unchanged. Only fields present in customerUpdate are considered.
+    const _docCtx = { tenantId: req.user.tenantId || null, customerId };
+    const _docKindByField = { idPhotoUrl: 'id-photo', licenseBackUrl: 'license-back', insuranceDocumentUrl: 'insurance' };
+    for (const [field, kind] of Object.entries(_docKindByField)) {
+      if (Object.prototype.hasOwnProperty.call(customerUpdate, field)) {
+        customerUpdate[field] = await maybeUploadCustomerDocument(customerUpdate[field], { ..._docCtx, kind });
       }
     }
 

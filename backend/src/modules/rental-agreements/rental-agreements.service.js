@@ -23,6 +23,10 @@ import { parseLocationConfig } from '../../lib/location-config.js';
 import { getEffectiveTermsHtmlForTenant } from '../../lib/terms/index.js';
 import { TC_VERSION } from '../../lib/terms/version.js';
 import { refundCharge as payarcRefundCharge } from '../public-booking/payarc-hosted-fields.js';
+import {
+  materializeDocumentRef,
+  maybeUploadCustomerDocument
+} from '../customers/customer-documents.js';
 import { resolveCatalogEntry } from '../../lib/commission-catalog.js';
 import { spinClient } from '../payment-gateway/spin-client.js';
 import { iposTransactClient } from '../payment-gateway/ipos-transact-client.js';
@@ -2386,7 +2390,13 @@ export const rentalAgreementsService = {
           licenseState: reservation.customer.licenseState,
           insuranceSource: resolveInsuranceSource(reservation),
           insurancePolicyNumber: reservation.customer.insurancePolicyNumber,
-          insuranceDocumentUrl: reservation.customer.insuranceDocumentUrl,
+          // Blob -> Storage (Phase 1): when the flag is ON and the snapshotted
+          // value is inline base64, upload to Storage and persist the PATH.
+          // Fail-safe: any error keeps the inline value. Flag OFF -> unchanged.
+          insuranceDocumentUrl: await maybeUploadCustomerDocument(
+            reservation.customer.insuranceDocumentUrl,
+            { tenantId: reservation.tenantId || null, customerId: reservation.customerId, kind: 'insurance' }
+          ),
           insurancePlanCode: resolveInsurancePlanField(reservation, 'code'),
           insurancePlanName: resolveInsurancePlanField(reservation, 'name'),
           insurancePlanRate: resolveInsurancePlanField(reservation, 'rate'),
@@ -2723,6 +2733,20 @@ export const rentalAgreementsService = {
         sectionInitials: { orderBy: { signedAt: 'asc' } }
       }
     });
+    // Blob -> Storage (Phase 1): sign Storage-path doc refs for client render.
+    // Per-field, best-effort. Legacy inline base64 / http URLs pass through.
+    if (agreement) {
+      agreement.insuranceDocumentUrl = await materializeDocumentRef(agreement.insuranceDocumentUrl);
+      if (agreement.reservation?.customer) {
+        const cust = agreement.reservation.customer;
+        const [idPhotoUrl, custInsuranceUrl] = await Promise.all([
+          materializeDocumentRef(cust.idPhotoUrl),
+          materializeDocumentRef(cust.insuranceDocumentUrl)
+        ]);
+        cust.idPhotoUrl = idPhotoUrl;
+        cust.insuranceDocumentUrl = custInsuranceUrl;
+      }
+    }
     return coerceAgreementMoney(agreement);
   },
 

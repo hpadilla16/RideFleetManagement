@@ -2,6 +2,10 @@ import crypto from 'node:crypto';
 import { prisma } from '../../lib/prisma.js';
 import { parseLocationConfig } from '../../lib/location-config.js';
 import { normalizeDob } from '../../lib/dob.js';
+import {
+  materializeDocumentRef,
+  maybeUploadCustomerDocument
+} from './customer-documents.js';
 
 function norm(v) {
   return String(v ?? '').trim();
@@ -186,6 +190,47 @@ async function buildCustomerImportRow(row, index, scope = {}, cache = {}) {
   };
 }
 
+/**
+ * Build a partial { idPhotoUrl?, licenseBackUrl?, insuranceDocumentUrl? } patch
+ * that replaces inline base64 doc values with Storage paths -- but only for
+ * fields actually provided AND only when CUSTOMER_DOCS_STORAGE_ENABLED is on.
+ * Returns null when there is nothing to rewrite. Upload is fail-safe (the
+ * original value is kept on any error), so a Storage hiccup never loses a KYC
+ * doc. `undefined` field values are ignored (PATCH semantics).
+ */
+async function _buildDocStoragePatch(fields, ctx) {
+  const patch = {};
+  const map = [
+    ['idPhotoUrl', 'id-photo'],
+    ['licenseBackUrl', 'license-back'],
+    ['insuranceDocumentUrl', 'insurance']
+  ];
+  for (const [field, kind] of map) {
+    const value = fields?.[field];
+    if (value === undefined) continue;
+    const next = await maybeUploadCustomerDocument(value, { ...ctx, kind });
+    if (next !== value) patch[field] = next;
+  }
+  return Object.keys(patch).length ? patch : null;
+}
+
+/**
+ * Materialize the three Customer KYC doc fields (idPhotoUrl, licenseBackUrl,
+ * insuranceDocumentUrl) on a customer record: Storage paths -> short-lived
+ * signed URLs; legacy inline base64 and external http(s) URLs pass through;
+ * signing errors collapse to ''. Returns a NEW object. Best-effort -- never
+ * throws. Shared by getById and update.
+ */
+async function _materializeCustomerDocs(customer) {
+  if (!customer) return customer;
+  const [idPhotoUrl, licenseBackUrl, insuranceDocumentUrl] = await Promise.all([
+    materializeDocumentRef(customer.idPhotoUrl),
+    materializeDocumentRef(customer.licenseBackUrl),
+    materializeDocumentRef(customer.insuranceDocumentUrl)
+  ]);
+  return { ...customer, idPhotoUrl, licenseBackUrl, insuranceDocumentUrl };
+}
+
 export const customersService = {
   // Returns a slim shape via raw SQL so the heavy idPhotoUrl/insuranceDocumentUrl fields
   // (which can each hold ~1-3 MB of base64 image data) never leave Postgres. The list endpoint
@@ -272,11 +317,37 @@ export const customersService = {
     });
 
     const unpaidBalance = agreements.reduce((s, a) => s + Number(a.balance || 0), 0);
-    return { ...customer, reservations, agreements, unpaidBalance };
+
+    // Blob -> Storage migration (Phase 1): sign Storage-path doc refs for the
+    // client. Legacy inline base64 / external http URLs pass through; signing
+    // errors collapse to '' (best-effort). Covers the three Customer KYC docs
+    // and the nested agreement.insuranceDocumentUrl.
+    const { idPhotoUrl, licenseBackUrl, insuranceDocumentUrl } =
+      await _materializeCustomerDocs(customer);
+    const signedAgreements = await Promise.all(
+      agreements.map(async (a) => ({
+        ...a,
+        insuranceDocumentUrl: await materializeDocumentRef(a.insuranceDocumentUrl)
+      }))
+    );
+
+    return {
+      ...customer,
+      idPhotoUrl,
+      licenseBackUrl,
+      insuranceDocumentUrl,
+      reservations,
+      agreements: signedAgreements,
+      unpaidBalance
+    };
   },
 
-  create(data, scope = {}) {
-    return prisma.customer.create({
+  async create(data, scope = {}) {
+    // Create first so we have a stable customerId for the Storage key, then --
+    // when CUSTOMER_DOCS_STORAGE_ENABLED is on -- upload inline doc blobs and
+    // rewrite them to Storage paths. Flag OFF: the second step is a no-op, so
+    // behavior is byte-identical to before.
+    const created = await prisma.customer.create({
       data: {
         // SECURITY (P0): tenant comes ONLY from the authenticated scope, never
         // from the request body. Dropped the `|| data.tenantId` fallback.
@@ -304,6 +375,14 @@ export const customersService = {
         notes: data.notes ?? null
       }
     });
+    const storagePatch = await _buildDocStoragePatch(
+      { idPhotoUrl: created.idPhotoUrl, licenseBackUrl: created.licenseBackUrl, insuranceDocumentUrl: created.insuranceDocumentUrl },
+      { tenantId: created.tenantId, customerId: created.id }
+    );
+    const stored = storagePatch
+      ? await prisma.customer.update({ where: { id: created.id }, data: storagePatch })
+      : created;
+    return _materializeCustomerDocs(stored);
   },
 
   async validateBulk(rows = [], scope = {}) {
@@ -387,9 +466,26 @@ export const customersService = {
     if (Object.prototype.hasOwnProperty.call(data, 'creditBalance')) {
       data.creditBalance = Number(data.creditBalance || 0);
     }
+    // Blob -> Storage (Phase 1): when the flag is ON and an incoming doc field
+    // holds inline base64/data-url, upload it and persist the Storage path
+    // instead. Flag OFF (or non-inline value) -> the field is written unchanged.
+    const docStoragePatch = await _buildDocStoragePatch(
+      {
+        idPhotoUrl: Object.prototype.hasOwnProperty.call(data, 'idPhotoUrl') ? data.idPhotoUrl : undefined,
+        licenseBackUrl: Object.prototype.hasOwnProperty.call(data, 'licenseBackUrl') ? data.licenseBackUrl : undefined,
+        insuranceDocumentUrl: Object.prototype.hasOwnProperty.call(data, 'insuranceDocumentUrl') ? data.insuranceDocumentUrl : undefined
+      },
+      { tenantId: current.tenantId, customerId: id }
+    );
+    if (docStoragePatch) Object.assign(data, docStoragePatch);
+
     const row = await prisma.customer.update({ where: { id }, data });
     await applyCreditToUnpaidAgreements(id, scope);
-    return prisma.customer.findFirst({ where: { id, ...(scope?.tenantId ? { tenantId: scope.tenantId } : {}) } });
+    const fresh = await prisma.customer.findFirst({ where: { id, ...(scope?.tenantId ? { tenantId: scope.tenantId } : {}) } });
+    // The returned record is sent straight to the client; after a backfill (or
+    // with the flag on) the doc columns hold bare Storage paths -- sign them
+    // here, exactly like getById, via the shared helper.
+    return _materializeCustomerDocs(fresh);
   },
 
   async issuePasswordReset(id, baseUrl = 'http://localhost:3000', scope = {}) {

@@ -10,6 +10,7 @@ import { sendEmail } from '../../lib/mailer.js';
 import { renderBrandedEmail, resolveEmailBrand } from '../../lib/email-template.js';
 import { money } from '../../lib/money.js';
 import { publicVehicleProfile } from './vehicle-feature-catalog.js';
+import { maybeUploadCustomerDocument } from '../customers/customer-documents.js';
 import crypto from 'node:crypto';
 
 function baseUrl() {
@@ -1417,7 +1418,7 @@ export const publicBookingService = {
     const reservation = await prisma.reservation.findFirst({
       where: { reservationNumber, ...(tenantId ? { tenantId } : {}) },
       select: {
-        id: true, reservationNumber: true, status: true, customerId: true,
+        id: true, reservationNumber: true, status: true, customerId: true, tenantId: true,
         customer: { select: { email: true } },
       },
     });
@@ -1444,6 +1445,24 @@ export const publicBookingService = {
     }
     if (submitted.length === 0) {
       throw new Error('At least one of license or insurance is required');
+    }
+
+    // Blob -> Storage migration (Phase 1): route the storefront-uploaded Customer
+    // KYC docs through Storage when CUSTOMER_DOCS_STORAGE_ENABLED is on. Each
+    // field maps to its kind; the upload is FAIL-SAFE -- on any error the
+    // original base64 is kept (see maybeUploadCustomerDocument), so a Storage
+    // hiccup never loses a doc and never 500s the request. Flag OFF -> no-op,
+    // byte-identical to before.
+    const _docCtx = { tenantId: reservation.tenantId || tenantId || null, customerId: reservation.customerId };
+    const _docKindByField = {
+      idPhotoUrl: 'id-photo',
+      licenseBackUrl: 'license-back',
+      insuranceDocumentUrl: 'insurance'
+    };
+    for (const [field, kind] of Object.entries(_docKindByField)) {
+      if (data[field] != null) {
+        data[field] = await maybeUploadCustomerDocument(data[field], { ..._docCtx, kind });
+      }
     }
 
     await prisma.customer.update({ where: { id: reservation.customerId }, data });
