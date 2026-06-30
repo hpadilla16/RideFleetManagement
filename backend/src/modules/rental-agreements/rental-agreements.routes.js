@@ -132,17 +132,19 @@ rentalAgreementsRouter.post('/:id/charges', async (req, res, next) => {
   }
 });
 
-rentalAgreementsRouter.post('/:id/credit', async (req, res, next) => {
-  try {
-    if (req.user?.role !== 'ADMIN') return res.status(403).json({ error: 'Admin approval required' });
-    const amount = Number(req.body?.amount || 0);
-    if (!Number.isFinite(amount) || amount === 0) return res.status(400).json({ error: 'amount must be a non-zero number' });
-    const out = await rentalAgreementsService.adjustCustomerCreditFromAgreement(req.params.id, amount, req.body?.reason || null);
-    res.json(out);
-  } catch (e) {
-    if (/not found/i.test(e.message)) return res.status(404).json({ error: e.message });
-    next(e);
-  }
+// RES-849093 FIX 3b: this route wrote ONLY Customer.creditBalance — an account-level
+// balance that is INVISIBLE on the rental's charges/contract and CANNOT be voided.
+// Used as a per-rental "credit" it produced exactly the incident: a credit nobody
+// could see or reverse. It was ALSO the P0 #4 unscoped-tenant bug
+// (adjustCustomerCreditFromAgreement took no tenant scope). Neutralized: per-rental
+// credits MUST go through the visible/voidable Admin Corrections charge ledger
+//   POST /api/reservations/:id/charges  { name, amount: -X, reason }  (addManualCharge).
+// True account-level credit adjustments live on the customer record
+//   PATCH /api/customers/:id { creditBalance }  (tenant-scoped, ADMIN-gated).
+rentalAgreementsRouter.post('/:id/credit', async (req, res) => {
+  res.status(410).json({
+    error: 'Endpoint removed. For a per-rental credit use POST /api/reservations/:id/charges with a negative amount (visible + voidable). For account-level credit use PATCH /api/customers/:id.'
+  });
 });
 
 rentalAgreementsRouter.get('/:id/print', async (req, res, next) => {

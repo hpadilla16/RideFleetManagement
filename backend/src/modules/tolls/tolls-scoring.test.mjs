@@ -157,3 +157,58 @@ test('scoreCandidate without dispatch-confirmation-needed reservation behaves id
   assert.equal(result.dispatchConfirmationRequired, false, 'no dispatch gate when reservation is checked out');
   assert.ok(result.score >= 85, 'should auto-confirm for a normal checked-out match');
 });
+
+// ── RES-849093 FIX 1b: a toll with NO strong identifier (empty plate/tag/sello)
+// must NEVER reach the AUTO_CONFIRMED threshold (>=85), even on a perfect
+// time-window match against a normally-checked-out reservation. It must be capped
+// into the SUGGESTED / needs-review band so a human attributes it.
+function checkedOutReservation(overrides = {}) {
+  return {
+    status: 'CHECKED_OUT',
+    pickupAt: new Date('2026-04-07T10:00:00.000Z'),
+    returnAt: new Date('2026-04-09T10:00:00.000Z'),
+    vehicleId: 'veh-1',
+    rentalAgreement: {
+      vehicleId: 'veh-1',
+      finalizedAt: new Date('2026-04-07T10:05:00.000Z'),
+      inspections: [{ kind: 'CHECKOUT' }],
+      vehicleSwaps: []
+    },
+    ...overrides
+  };
+}
+
+test('FIX 1b: zero-identifier toll inside the trip window is capped below AUTO_CONFIRMED', () => {
+  const reservation = checkedOutReservation();
+  const transaction = {
+    transactionAt: new Date('2026-04-07T12:00:00.000Z'), // squarely inside the trip window
+    plateRaw: '',
+    tagRaw: '',
+    selloRaw: ''
+  };
+
+  const result = scoreCandidate({
+    transaction,
+    vehicle: VEH_BASE,
+    reservation,
+    siblingCandidates: 1
+  });
+
+  assert.equal(result.strongIdentifierMatches, 0, 'no plate/tag/sello matched');
+  assert.ok(result.score <= 79, `expected score capped <=79 with no identifier, got ${result.score}`);
+  assert.ok(result.score < 85, 'must NOT reach the AUTO_CONFIRMED threshold');
+  assert.ok(result.matchReason.includes('noStrongIdentifier'), 'reason should flag missing identifier');
+});
+
+test('FIX 1b: a single plate match on a checked-out reservation still AUTO_CONFIRMS', () => {
+  const reservation = checkedOutReservation();
+  const transaction = {
+    transactionAt: new Date('2026-04-07T12:00:00.000Z'),
+    plateRaw: 'ABC123',
+    tagRaw: '',
+    selloRaw: ''
+  };
+  const result = scoreCandidate({ transaction, vehicle: VEH_BASE, reservation, siblingCandidates: 1 });
+  assert.equal(result.strongIdentifierMatches, 1, 'plate matched');
+  assert.ok(result.score >= 85, `expected AUTO_CONFIRMED with a plate match, got ${result.score}`);
+});

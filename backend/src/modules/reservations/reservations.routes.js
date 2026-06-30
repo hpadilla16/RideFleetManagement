@@ -1547,15 +1547,16 @@ reservationsRouter.post('/:id/swap-vehicle', async (req, res, next) => {
   }
 });
 
-reservationsRouter.post('/:id/agreement/credit', async (req, res, next) => {
-  try {
-    const amount = Number(req.body?.amount || 0);
-    if (!Number.isFinite(amount) || amount <= 0) return res.status(400).json({ error: 'amount must be > 0' });
-    const out = await reservationsService.adjustCustomerCredit(req.params.id, { amount, reason: req.body?.reason || 'Manual credit from reservation detail' }, req.user?.sub || null);
-    res.json(out);
-  } catch (e) {
-    next(e);
-  }
+// RES-849093 FIX 3c: this route called reservationsService.adjustCustomerCredit,
+// which DOES NOT EXIST — every call 500'd. It was also a second, invisible credit
+// path that bypassed the visible/voidable Admin Corrections charge ledger. Removed.
+// The ONE correct way to add a per-rental credit is a NEGATIVE-amount manual charge:
+//   POST /api/reservations/:id/charges  { name, amount: -X, reason }  (addManualCharge)
+// which creates a visible, voidable RentalAgreementCharge(source='ADMIN_CORRECTION').
+reservationsRouter.post('/:id/agreement/credit', async (req, res) => {
+  res.status(410).json({
+    error: 'Endpoint removed. Use POST /api/reservations/:id/charges with a negative amount to add a credit (visible on the contract and voidable).'
+  });
 });
 
 reservationsRouter.delete('/:id', async (req, res) => {

@@ -484,14 +484,34 @@ export const reservationPricingService = {
     } else {
       const reservationCharge = await prisma.reservationCharge.findFirst({
         where: { id: String(chargeId), reservationId },
-        select: { id: true, name: true, total: true, source: true, selected: true }
+        select: { id: true, name: true, total: true, source: true, sourceRefId: true, selected: true }
       });
       if (!reservationCharge) { const e = new Error('Charge not found on this reservation'); e.status = 404; throw e; }
       if (reservationCharge.selected === false) { const e = new Error('Charge is already voided'); e.status = 409; throw e; }
       // syncAgreementCharges rebuilds the agreement rows from selected:true ReservationCharges,
       // so selected=false removes it from the balance and keeps the row for history.
       await prisma.reservationCharge.update({ where: { id: reservationCharge.id }, data: { selected: false } });
-      voided = { id: reservationCharge.id, name: reservationCharge.name, total: Number(reservationCharge.total || 0), source: reservationCharge.source || null, space: 'reservation' };
+      voided = { id: reservationCharge.id, name: reservationCharge.name, total: Number(reservationCharge.total || 0), source: reservationCharge.source || null, sourceRefId: reservationCharge.sourceRefId || null, space: 'reservation' };
+    }
+
+    // RES-849093 FIX 2a: when the voided charge is a TOLL charge, ALSO void the
+    // underlying tollTransaction so syncReservationTollCharges does not re-create
+    // it from the still-MATCHED transaction (which made tolls impossible to void).
+    // TOLL_MODULE charges carry the transaction id in sourceRefId; void it directly.
+    // TOLL_POLICY is the per-reservation policy fee (sourceRefId `reservation:<id>`,
+    // not a single transaction) — re-running the toll sync below recomputes it from
+    // whatever transactions remain, so no per-transaction void is needed there.
+    const voidedSource = String(voided.source || '').toUpperCase();
+    let tollSyncErr = null;
+    if (voidedSource === 'TOLL_MODULE' && voided.sourceRefId) {
+      try {
+        await tollsService.voidTollTransaction(voided.sourceRefId, scope, { note: reason || null });
+        await tollsService.syncReservationCharges(reservationId, scope);
+      } catch (e) { tollSyncErr = e?.message || String(e); }
+    } else if (voidedSource === 'TOLL_POLICY') {
+      try {
+        await tollsService.syncReservationCharges(reservationId, scope);
+      } catch (e) { tollSyncErr = e?.message || String(e); }
     }
 
     await syncAgreementCharges(reservationId, scope, { allowClosed: true });
@@ -504,6 +524,8 @@ export const reservationPricingService = {
       reason: reason ? String(reason).slice(0, 500) : null,
       metadata: JSON.stringify({
         kind: 'void_charge',
+        tollTransactionVoided: voidedSource === 'TOLL_MODULE' ? (voided.sourceRefId || null) : null,
+        tollSyncError: tollSyncErr,
         space: voided.space,
         chargeId: voided.id,
         chargeName: voided.name,

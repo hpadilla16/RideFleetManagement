@@ -804,7 +804,11 @@ async function listTenantVehiclesForMatch(scope = {}, transaction = null) {
   const plate = normalizeNullableToken(transaction.plateRaw || transaction.plateNormalized);
   const tag = normalizeNullableToken(transaction.tagRaw || transaction.tagNormalized);
   const sello = normalizeNullableToken(transaction.selloRaw || transaction.selloNormalized);
-  if (!plate && !tag && !sello) return normalizedRows;
+  // RES-849093 FIX 1a: a transaction with NO usable identifier (no plate, no tag,
+  // no sello) must NOT fall back to "all tenant vehicles" — that let a toll be
+  // auto-attributed to a random car on a pure time-window match. Return [] so the
+  // toll has zero candidates and lands in needs-review instead.
+  if (!plate && !tag && !sello) return [];
 
   return normalizedRows.filter((row) => (
     (plate && row.plateNormalized && row.plateNormalized === plate)
@@ -974,6 +978,18 @@ export function scoreCandidate({ transaction, vehicle, reservation, siblingCandi
     }
   }
 
+  // RES-849093 FIX 1b: a pure time-window match (+70 responsibilityWindow / +25
+  // tripWindow) must NEVER be enough to AUTO_CONFIRM. Auto-confirmation requires
+  // at least ONE strong identifier (plate/tag/sello) tying the toll to THIS
+  // vehicle. With zero identifier matches, cap the score below the 85
+  // AUTO_CONFIRMED threshold (mirrors the existing Math.min(score, 79) cap) so
+  // the toll lands as SUGGESTED / needs-review for a human to attribute. When an
+  // identifier DOES match, behavior is unchanged.
+  if (strongIdentifierMatches === 0) {
+    score = Math.min(score, 79);
+    reasons.push('noStrongIdentifier');
+  }
+
   if (siblingCandidates > 1) {
     score -= withinTripWindow ? 10 : 30;
     reasons.push('multipleCandidates');
@@ -990,7 +1006,8 @@ export function scoreCandidate({ transaction, vehicle, reservation, siblingCandi
     // being held in review. See doc/toll-matching-design-review-2026-05-08.md.
     reviewCategory: multiSignalOverride ? null : responsibility.reviewCategory,
     dispatchConfirmationRequired: responsibility.dispatchConfirmationRequired && !multiSignalOverride,
-    multiSignalOverride
+    multiSignalOverride,
+    strongIdentifierMatches
   };
 }
 
@@ -1267,6 +1284,10 @@ async function syncReservationTollCharges(reservationId, scope = {}, options = {
     where: {
       reservationId,
       ...tenantWhereForScope(effectiveScope),
+      // RES-849093 FIX 2a: status VOID is intentionally NOT in this list, so a
+      // toll voided via Admin Corrections (tollsService.voidTollTransaction sets
+      // status=VOID, billingStatus=WAIVED) is permanently excluded from the
+      // rebuild — the voided charge stays voided and never regenerates.
       status: { in: ['MATCHED', 'BILLED'] },
       billingStatus: { in: ['PENDING', 'POSTED_TO_RESERVATION', 'POSTED_TO_AGREEMENT'] }
     },
@@ -3067,6 +3088,34 @@ export const tollsService = {
 
   async syncReservationCharges(reservationId, scope = {}, options = {}) {
     return syncReservationTollCharges(reservationId, scope, options);
+  },
+
+  // RES-849093 FIX 2a: void the underlying TollTransaction when its TOLL_MODULE /
+  // TOLL_POLICY agreement/reservation charge is voided via Admin Corrections.
+  // Without this, the next syncReservationTollCharges would re-create the charge
+  // from the still-MATCHED transaction and the void would silently "un-stick".
+  // Setting status=VOID drops it from the sync's transaction query
+  // (status in [MATCHED, BILLED]) AND billingStatus=WAIVED keeps the ledger honest.
+  // `transactionId` is the TOLL_MODULE charge's sourceRefId; the TOLL_POLICY charge
+  // (sourceRefId `reservation:<id>`) has no single transaction, so callers void by
+  // reservation instead (handled in voidAgreementCharge by re-syncing).
+  async voidTollTransaction(transactionId, scope = {}, options = {}) {
+    if (!transactionId) return { voided: 0 };
+    const note = String(options?.note || '').trim();
+    const res = await prisma.tollTransaction.updateMany({
+      where: {
+        id: String(transactionId),
+        ...tenantWhereForScope(scope),
+        status: { in: ['IMPORTED', 'MATCHED', 'NEEDS_REVIEW', 'BILLED', 'DISPUTED'] }
+      },
+      data: {
+        status: 'VOID',
+        billingStatus: 'WAIVED',
+        needsReview: false,
+        reviewNotes: note ? `VOIDED via Admin Corrections: ${note}`.slice(0, 500) : 'VOIDED via Admin Corrections'
+      }
+    });
+    return { voided: res.count };
   },
 
   async listReservationTolls(reservationId, scope = {}) {
