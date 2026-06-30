@@ -1,13 +1,15 @@
-﻿import { Router } from 'express';
+import { Router } from 'express';
 import { customersService } from './customers.service.js';
-import { isSuperAdmin } from '../../middleware/auth.js';
+// SECURITY (P0): use the shared FAIL-CLOSED tenant scope helper instead of a
+// local one. The previous local scopeFor returned { tenantId: null } for any
+// non-super-admin without a tenant claim, which made every downstream
+// `...(scope?.tenantId ? { tenantId } : {})` guard vanish — i.e. global
+// cross-tenant read/write. The shared helper returns a deny-all sentinel
+// ({ tenantId: '__no_tenant__' }) for that case, and gives super-admins {}
+// or the explicit ?tenantId narrowing.
+import { scopeFor } from '../../lib/tenant-scope.js';
 
 export const customersRouter = Router();
-
-function scopeFor(req) {
-  if (isSuperAdmin(req.user)) return { allowCrossTenant: true };
-  return { tenantId: req.user?.tenantId || null, allowCrossTenant: false };
-}
 
 customersRouter.get('/', async (_req, res) => {
   res.json(await customersService.list(scopeFor(_req), {

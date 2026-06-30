@@ -72,6 +72,10 @@ export function appendPoolParams(url, env = process.env) {
 
   const separator = url.includes('?') ? '&' : '?';
   const appended = `${url}${separator}${additions.join('&')}`;
-  console.log(`[prisma] appending ${additions.join('&')} to DATABASE_URL`);
+  // SECURITY (P0): never log the DATABASE_URL or its values — the connection
+  // string carries the DB password. Log ONLY the non-sensitive parameter NAMES
+  // we appended, so boot diagnostics stay useful without leaking credentials.
+  const appendedNames = additions.map((a) => a.split('=')[0]).join(', ');
+  console.log(`[prisma] appended pool params to DATABASE_URL: ${appendedNames}`);
   return appended;
 }

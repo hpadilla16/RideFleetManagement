@@ -86,6 +86,17 @@ assertAuthConfig();
 initSentry();
 
 const app = express();
+
+// SECURITY (P0): trust exactly ONE proxy hop. In production the droplet runs
+// nginx (and/or the docker bridge) in front of this process, so the real client
+// IP arrives in X-Forwarded-For. With `trust proxy` set, Express derives req.ip
+// from the RIGHTMOST untrusted XFF entry rather than the attacker-controllable
+// leftmost value — which is what our rate-limit / idempotency keys rely on.
+// One hop matches our single-nginx topology; raising this would re-trust
+// client-supplied XFF. In local/dev (no proxy) req.ip simply falls back to the
+// socket address, so this is a safe no-op there.
+app.set('trust proxy', 1);
+
 const allowedOrigins = process.env.ALLOWED_ORIGINS
   ? process.env.ALLOWED_ORIGINS.split(',').map((o) => o.trim()).filter(Boolean)
   : ['http://localhost:3000', 'http://127.0.0.1:3000'];

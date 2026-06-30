@@ -88,62 +88,28 @@ async function applyCreditToUnpaidAgreements(customerId, scope = {}) {
 }
 
 async function resolveImportTenant(row, scope = {}, cache) {
-  if (scope?.tenantId) {
-    if (!cache.tenantById.has(scope.tenantId)) {
-      const tenant = await prisma.tenant.findUnique({
-        where: { id: scope.tenantId },
-        select: { id: true, slug: true, name: true }
-      });
-      cache.tenantById.set(scope.tenantId, tenant || null);
-    }
-    return cache.tenantById.get(scope.tenantId);
+  // SECURITY (P0): tenancy comes ONLY from the authenticated scope, never from
+  // the uploaded rows. Previously a row could carry tenantId/tenantSlug/
+  // tenantName and steer the import into another tenant (or, for a tenant-less
+  // request, anywhere). A non-super-admin gets scope.tenantId (or the deny-all
+  // sentinel from tenant-scope.js); a super-admin must narrow with ?tenantId so
+  // scope.tenantId is set. If there is no scoped tenant we resolve to null and
+  // the per-row validator rejects the row ("tenant scope required").
+  if (!scope?.tenantId) return null;
+  if (!cache.tenantById.has(scope.tenantId)) {
+    const tenant = await prisma.tenant.findUnique({
+      where: { id: scope.tenantId },
+      select: { id: true, slug: true, name: true }
+    });
+    cache.tenantById.set(scope.tenantId, tenant || null);
   }
-
-  const tenantId = norm(row.tenantId);
-  const tenantSlug = norm(row.tenantSlug);
-  const tenantName = norm(row.tenantName);
-
-  if (tenantId) {
-    if (!cache.tenantById.has(tenantId)) {
-      const tenant = await prisma.tenant.findUnique({
-        where: { id: tenantId },
-        select: { id: true, slug: true, name: true }
-      });
-      cache.tenantById.set(tenantId, tenant || null);
-    }
-    return cache.tenantById.get(tenantId);
-  }
-
-  if (tenantSlug) {
-    const key = tenantSlug.toLowerCase();
-    if (!cache.tenantBySlug.has(key)) {
-      const tenant = await prisma.tenant.findUnique({
-        where: { slug: tenantSlug },
-        select: { id: true, slug: true, name: true }
-      });
-      cache.tenantBySlug.set(key, tenant || null);
-    }
-    return cache.tenantBySlug.get(key);
-  }
-
-  if (tenantName) {
-    const key = tenantName.toLowerCase();
-    if (!cache.tenantByName.has(key)) {
-      const tenant = await prisma.tenant.findFirst({
-        where: { name: tenantName },
-        select: { id: true, slug: true, name: true }
-      });
-      cache.tenantByName.set(key, tenant || null);
-    }
-    return cache.tenantByName.get(key);
-  }
-
-  return null;
+  return cache.tenantById.get(scope.tenantId);
 }
 
 async function buildCustomerImportRow(row, index, scope = {}, cache = {}) {
   const tenant = await resolveImportTenant(row || {}, scope, cache);
-  const tenantId = tenant?.id || scope?.tenantId || null;
+  // tenantId comes ONLY from the authenticated scope (never row-derived).
+  const tenantId = tenant?.id || null;
 
   const firstName = norm(row.firstName);
   const lastName = norm(row.lastName);
@@ -157,7 +123,7 @@ async function buildCustomerImportRow(row, index, scope = {}, cache = {}) {
   const errors = [];
   const duplicateReasons = [];
 
-  if (!tenantId) errors.push('tenantId/tenantSlug required');
+  if (!tenantId) errors.push('tenant scope required');
   if (!firstName) errors.push('firstName required');
   if (!lastName) errors.push('lastName required');
   if (!phone) errors.push('phone required');
@@ -312,7 +278,9 @@ export const customersService = {
   create(data, scope = {}) {
     return prisma.customer.create({
       data: {
-        tenantId: scope?.tenantId || data.tenantId || null,
+        // SECURITY (P0): tenant comes ONLY from the authenticated scope, never
+        // from the request body. Dropped the `|| data.tenantId` fallback.
+        tenantId: scope?.tenantId || null,
         firstName: data.firstName,
         lastName: data.lastName,
         email: data.email ?? null,

@@ -6,8 +6,13 @@ function nowMs() {
 }
 
 function requestIp(req) {
-  const forwarded = String(req.headers['x-forwarded-for'] || '').split(',')[0].trim();
-  return forwarded || req.ip || req.socket?.remoteAddress || 'unknown';
+  // SECURITY (P0): never read X-Forwarded-For directly — its leftmost value is
+  // attacker-controlled, so a client could rotate it to dodge the rate limit /
+  // forge idempotency keys. With `app.set('trust proxy', 1)` in main.js,
+  // Express computes req.ip as the real client IP (rightmost untrusted XFF
+  // entry behind our single nginx hop). Without a proxy (local/dev) req.ip is
+  // the socket address, so this still works.
+  return req.ip || req.socket?.remoteAddress || 'unknown';
 }
 
 function cleanupExpired(map, currentTime) {
