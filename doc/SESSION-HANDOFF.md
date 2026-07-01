@@ -6,7 +6,7 @@ Este documento le da contexto completo a una sesión nueva de Claude/Cowork para
 - **RFM (Ride Fleet Manager):** SaaS multi-tenant de renta de autos. Stack: **Node 22 + Express + Prisma 6 + Postgres** (Supabase pooler), **Next.js 14** (frontend), **docker-compose.prod.yml** en un droplet.
 - **Repo:** `github.com/hpadilla16/RideFleetManagement`
 - **Rama de trabajo:** `release/deposit-balance-fix-beta119` (TODO se commitea aquí, no a main).
-- **Esquema de tags:** `v0.9.0-beta.N`. **Último desplegado: `v0.9.0-beta.272`** (incluye todo lo de las sesiones recientes).
+- **Esquema de tags:** `v0.9.0-beta.N`. **Último desplegado: `v0.9.0-beta.276`** (ver sección ACTUALIZACIÓN 2026-07-01 al final).
 - **Sub-tenant principal en prod:** `rent-by-vphmotors` (Zezgo). App admin en `https://ridefleetmanager.com`.
 
 ## 2. Cómo ponerse al día en la Mac (setup)
@@ -77,3 +77,44 @@ Reconstruir `worker` cuando haya schedulers; migraciones aditivas/idempotentes s
 
 ## 7. Primer paso sugerido para la sesión en la Mac
 Saludar a Hector, confirmar acceso (pedir el PAT), `git pull` de la rama, leer este doc + `CLAUDE.md` + el roadmap, y preguntar si retoma por el **batch 2 de P0 seguridad (pagos/checkout tenant-binding)** o por otra prioridad del plan. Seguir SIEMPRE el flujo multi-agente con QA antes de cualquier deploy.
+
+---
+
+## ACTUALIZACIÓN 2026-07-01 — Migración de blobs a Supabase Storage (+ incidente y endurecimiento)
+
+**Último tag desplegado: `v0.9.0-beta.276`.** Rama sigue siendo `release/deposit-balance-fix-beta119`.
+
+### Qué se hizo (por qué el disco estaba al 84%)
+La DB estaba ~6.1 GB, ~94% eran blobs base64 en columnas Postgres. Se migraron a **Supabase Storage** (buckets privados) y se recuperó el disco con `VACUUM FULL`. Resultado: **DB 6.1 GB → ~312 MB**.
+
+- **Customer/agreement docs** (`Customer.idPhotoUrl`, `licenseBackUrl`, `insuranceDocumentUrl`, `RentalAgreement.insuranceDocumentUrl`) → bucket **`customer-documents`**. Migrados con verificación byte-a-byte. **Intactos y verificados.**
+- **Fotos de inspección** (`RentalAgreementInspection.photosJson`) → bucket **`inspection-photos`** (`photoStorageRefs`).
+
+### Betas de esta tanda
+- **beta.273** — migración customer-docs (helper `customer-documents.js`, serve con signed URL, write flag `CUSTOMER_DOCS_STORAGE_ENABLED`, backfill con read-back verify). Ships dark.
+- **beta.274** — backfills a escala de producción (descubrimiento por SQL solo-IDs, fila por fila, resumible) — arregla timeout 57014; + fix Prisma `DbNull` en backfill de inspección.
+- **beta.275** — ENDURECIMIENTO post-incidente: `decodePhotoValue` rechaza no-strings + valida magic header; maneja los 3 formatos reales de `photosJson`; **verificación byte-a-byte OBLIGATORIA** en backfill y en writes vivos (customer + inspección) con fallback a base64; `clear` nunca borra sin read-back en vivo.
+- **beta.276** — UI: ver documentos KYC en la página de reserva (endpoints on-demand `GET /customers/:id/{id-photo,insurance-doc,license-back}`, auth + tenant-scoped, signed URL, nunca devuelven el path crudo) + fix de CSS (fotos de inspección se salían de la tarjeta por `styled-jsx` scoped).
+
+### INCIDENTE (importante — lección aprendida)
+El primer backfill de inspección subió **basura de 9 bytes** para el formato `photosJson` de **array-de-objetos** `[{key,dataUrl}]` (el helper hacía `String(objeto)` → `"[object Object]"` → base64 basura) y, como NO verificaba byte-a-byte, el paso `clear` + `VACUUM FULL` borró los originales. **Se perdieron 13 fotos de inspección creadas ese día** (no estaban en el backup de 12:02 UTC y PITR no estaba activo). Hector decidió que las fotos no importaban (solo los agreements, que quedaron 100% intactos).
+**Reglas permanentes que salieron de esto (ya implementadas en beta.275):** (1) nunca borrar/sobreescribir el original hasta confirmar el objeto en Storage con verificación byte-a-byte; (2) validar magic header de imagen en origen; (3) probar contra formatos REALES, no sintéticos; (4) **PITR debe estar activo** antes de cualquier migración destructiva.
+
+### Estado actual de producción (verificar en el droplet)
+- **PITR: ACTIVADO** (se activó durante el incidente). Mantener activo.
+- **Disco:** ~312 MB de 12 GB (Supabase auto-escaló a 12 GB durante el incidente; no baja solo).
+- **Buckets privados:** `customer-documents`, `inspection-photos` (+ customer-signatures, payment-receipts, inventory-photos ya existían).
+- **Flags en `.env` del droplet:**
+  - `SUPABASE_STORAGE_CUSTOMER_DOCS_BUCKET=customer-documents`
+  - `INSPECTION_PHOTOS_STORAGE_ENABLED` — **ON** (confirmado: inspección nueva RES-183691 subió a Storage con objetos reales ~82 KB).
+  - `CUSTOMER_DOCS_STORAGE_ENABLED` — **VERIFICAR**: si subidas nuevas de docs de cliente siguen guardándose como base64 en la DB, ponerlo en `true` (ya es seguro: el write vivo verifica y cae a base64 si falla).
+- **Supabase MCP** conectado (proyecto `mmrkgjavuofgkdvlkfgg`, "ridefleetmanager"). Agente nuevo **`supabase-dba`** (`.claude/agents/supabase-dba.md`) para análisis de DB read-only.
+
+### Pendientes OPCIONALES (sin urgencia; disco ya mínimo)
+- Re-migrar fotos de inspección viejas con el backfill endurecido (seguro, por lotes) — solo si se quieren en Storage.
+- Limpieza cosmética: 316 inspecciones tienen refs a objetos basura de 9 bytes (miniaturas rotas/vacías) → anular esos `photoStorageRefs` y borrar los objetos.
+- Reintentar ~8 campos de customer + 1 inspección que fallaron verificación (siguen en base64, intactos; re-correr backfill es idempotente).
+- CI no corre `npm test` (los `*.embedded.test.mjs` son la suite autoritativa de los backfills) — agregar un job.
+
+### Nota para la Mac
+El working tree de `C:\Projects\RideFleetManagement` en la PC estaba **45 commits atrás** del remoto (se le copiaban archivos sin hacer pull/commit). En la Mac: **clona fresco** o haz `git pull --ff-only` de `release/deposit-balance-fix-beta119` para arrancar al día (HEAD debe ser beta.276).
