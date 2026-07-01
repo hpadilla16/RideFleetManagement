@@ -36,6 +36,29 @@ customersRouter.get('/:id', async (req, res) => {
   res.json(row);
 });
 
+// On-demand KYC document fetch (perf-safe). These load ONE doc column, sign it
+// if it's a Storage path, and return { url, contentType? }. Tenant-scoped via
+// the shared fail-closed scopeFor — a user of tenant A can never fetch tenant
+// B's document (findFirst is filtered by scope.tenantId; a miss -> 404). The
+// raw storage path is NEVER returned; only a signed URL / passthrough URL is.
+async function serveCustomerDocument(kind, req, res) {
+  const doc = await customersService.getDocument(req.params.id, kind, scopeFor(req));
+  if (!doc) return res.status(404).json({ error: 'Document not found' });
+  res.json(doc);
+}
+
+customersRouter.get('/:id/id-photo', async (req, res) => {
+  await serveCustomerDocument('id-photo', req, res);
+});
+
+customersRouter.get('/:id/insurance-doc', async (req, res) => {
+  await serveCustomerDocument('insurance', req, res);
+});
+
+customersRouter.get('/:id/license-back', async (req, res) => {
+  await serveCustomerDocument('license-back', req, res);
+});
+
 customersRouter.post('/', async (req, res) => {
   const required = ['firstName', 'lastName', 'phone'];
   const missing = required.filter((k) => !req.body?.[k]);

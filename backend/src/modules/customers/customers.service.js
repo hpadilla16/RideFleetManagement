@@ -4,7 +4,8 @@ import { parseLocationConfig } from '../../lib/location-config.js';
 import { normalizeDob } from '../../lib/dob.js';
 import {
   materializeDocumentRef,
-  maybeUploadCustomerDocument
+  maybeUploadCustomerDocument,
+  isStoragePath
 } from './customer-documents.js';
 
 function norm(v) {
@@ -221,6 +222,30 @@ async function _buildDocStoragePatch(fields, ctx) {
  * signing errors collapse to ''. Returns a NEW object. Best-effort -- never
  * throws. Shared by getById and update.
  */
+/**
+ * Best-effort contentType for a stored document reference, derived WITHOUT
+ * fetching the bytes:
+ *   - data: URL   -> parse the declared mime (e.g. data:application/pdf;base64,)
+ *   - http/storage path -> infer from the file extension
+ *   - unknown     -> undefined (caller omits contentType)
+ * Used by the on-demand doc endpoints so the client can decide image vs PDF.
+ */
+function _deriveDocContentType(raw) {
+  const s = String(raw ?? '').trim();
+  if (!s) return undefined;
+  const dataMatch = s.match(/^data:([^;,]+)[;,]/i);
+  if (dataMatch) return String(dataMatch[1] || '').toLowerCase() || undefined;
+  // Strip any query string (signed URLs carry ?token=...) before reading ext.
+  const noQuery = s.split('?')[0];
+  const m = noQuery.match(/\.([a-z0-9]{2,5})$/i);
+  const ext = m ? m[1].toLowerCase() : '';
+  const BY_EXT = {
+    jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png', webp: 'image/webp',
+    heic: 'image/heic', heif: 'image/heif', gif: 'image/gif', pdf: 'application/pdf'
+  };
+  return BY_EXT[ext];
+}
+
 async function _materializeCustomerDocs(customer) {
   if (!customer) return customer;
   const [idPhotoUrl, licenseBackUrl, insuranceDocumentUrl] = await Promise.all([
@@ -340,6 +365,56 @@ export const customersService = {
       agreements: signedAgreements,
       unpaidBalance
     };
+  },
+
+
+  // ------------------------------------------------------------------
+  // On-demand KYC document fetch (perf-safe blob delivery).
+  //
+  // The reservation detail page and other admin surfaces deliberately do NOT
+  // ship the (potentially multi-MB) base64 doc columns in their list/detail
+  // payloads. Instead they render presence booleans and call these endpoints
+  // on click to materialize ONE document at a time.
+  //
+  // Loads ONLY the requested column (never the sibling blobs), runs it through
+  // materializeDocumentRef so Storage paths become short-lived signed URLs,
+  // http(s) URLs pass through, and legacy inline base64/data: URLs are returned
+  // as-is. Returns { url, contentType } or null when the field is empty.
+  // Tenant-scoped via the same fail-closed scope the routes pass in — a raw
+  // Storage path is NEVER returned to the client.
+  //
+  // kind: 'id-photo' | 'insurance' | 'license-back'
+  async getDocument(id, kind, scope = {}, opts = {}) {
+    const FIELD_BY_KIND = {
+      'id-photo': 'idPhotoUrl',
+      'insurance': 'insuranceDocumentUrl',
+      'license-back': 'licenseBackUrl'
+    };
+    const field = FIELD_BY_KIND[kind];
+    if (!field) return null;
+
+    const customer = await prisma.customer.findFirst({
+      where: { id, ...(scope?.tenantId ? { tenantId: scope.tenantId } : {}) },
+      select: { [field]: true }
+    });
+    // Not found OR cross-tenant (fail-closed): treat identically as "no doc".
+    if (!customer) return null;
+
+    const raw = customer[field];
+    if (raw == null || String(raw).trim() === '') return null;
+
+    // Derive contentType BEFORE materializing (materialize replaces a storage
+    // path with an opaque signed URL from which we can't infer the extension).
+    const contentType = _deriveDocContentType(raw);
+
+    // Storage path -> signed URL; http passthrough; inline base64 unchanged.
+    // Never leak the raw storage path: if signing fails materializeDocumentRef
+    // returns '' for a storage path, which we surface as "no doc" (null).
+    const url = await materializeDocumentRef(raw, opts?.signer ? { signer: opts.signer } : {});
+    if (isStoragePath(String(raw)) && (!url || url === '')) return null;
+    if (url == null || url === '') return null;
+
+    return contentType ? { url, contentType } : { url };
   },
 
   async create(data, scope = {}) {

@@ -1554,11 +1554,13 @@ export const reservationsService = {
         const flags = await prisma.$queryRaw`
           SELECT
             (("idPhotoUrl" IS NOT NULL) AND length("idPhotoUrl") > 0) AS "hasIdPhoto",
-            (("insuranceDocumentUrl" IS NOT NULL) AND length("insuranceDocumentUrl") > 0) AS "hasInsuranceDoc"
+            (("insuranceDocumentUrl" IS NOT NULL) AND length("insuranceDocumentUrl") > 0) AS "hasInsuranceDoc",
+            (("licenseBackUrl" IS NOT NULL) AND length("licenseBackUrl") > 0) AS "hasLicenseBack"
           FROM "Customer" WHERE id = ${row.customer.id} LIMIT 1`;
         const f = Array.isArray(flags) ? flags[0] : null;
         row.customer.hasIdPhoto = !!f?.hasIdPhoto;
         row.customer.hasInsuranceDoc = !!f?.hasInsuranceDoc;
+        row.customer.hasLicenseBack = !!f?.hasLicenseBack;
       } catch { /* fail-open: leave flags undefined, checklist falls back to blob check */ }
     }
     return { ...row, ...deriveUnderageAlertForReservation(row) };

@@ -124,13 +124,20 @@ function Inner({ token }) {
         .print-card{background:#171327;border:1px solid #322652;border-radius:14px;padding:14px;margin-top:10px}
         .print-card h3{margin:0 0 8px;color:#e8ddff}
         .print-card p{margin:6px 0;font-size:13px}
-        .photos-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin-top:10px}
-        .photo-card{border:1px solid #3a2d5f;border-radius:10px;padding:8px;background:#120f21}
-        .photo-card.selected{border-color:#9f79ff;box-shadow:0 0 0 2px rgba(159,121,255,.28)}
-        .photo-card img{width:100%;height:110px;object-fit:cover;border-radius:8px;border:1px solid #43336b}
-        .photo-cap{font-size:10px;text-transform:uppercase;color:#b9abd8;margin-bottom:6px}
         .actions{display:flex;gap:8px;margin-bottom:8px;flex-wrap:wrap}
         @media print{ .actions{display:none !important} }
+      `}</style>
+      {/* Photo styles must reach the Photos/Block CHILD components, which a
+          component-scoped <style jsx> cannot. Use <style jsx global> prefixed
+          with the page wrapper so the rules apply to the children without
+          leaking site-wide. Fixes photos overflowing the card at intrinsic
+          size and enforces the 4-column thumbnail grid. */}
+      <style jsx global>{`
+        .inspection-print-page .photos-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin-top:10px}
+        .inspection-print-page .photo-card{border:1px solid #3a2d5f;border-radius:10px;padding:8px;background:#120f21}
+        .inspection-print-page .photo-card.selected{border-color:#9f79ff;box-shadow:0 0 0 2px rgba(159,121,255,.28)}
+        .inspection-print-page .photo-card img{display:block;width:100%;height:110px;object-fit:cover;border-radius:8px;border:1px solid #43336b}
+        .inspection-print-page .photo-cap{font-size:10px;text-transform:uppercase;color:#b9abd8;margin-bottom:6px}
       `}</style>
 
       <div className="actions">

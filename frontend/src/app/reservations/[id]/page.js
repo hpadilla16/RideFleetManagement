@@ -721,6 +721,23 @@ function ReservationDetailInner({ token, me, logout }) {
   const [insurancePlans, setInsurancePlans] = useState([]);
   const [tollSummary, setTollSummary] = useState(null);
   const [docViewer, setDocViewer] = useState(null);
+  // On-demand KYC doc opener. The reservation payload ships only presence
+  // booleans (hasIdPhoto/hasInsuranceDoc/hasLicenseBack) — the blob columns are
+  // excluded for perf. On click we fetch the one-shot endpoint which returns a
+  // signed URL (Storage) / passthrough URL / inline data URL, then open it in
+  // the existing docViewer modal (image => <img>, PDF => <iframe>).
+  const openCustomerDoc = async (kind, title) => {
+    const custId = row?.customer?.id;
+    if (!custId) return;
+    setDocViewer({ title, url: '', loading: true });
+    try {
+      const doc = await api(`/api/customers/${custId}/${kind}`, { bypassCache: true }, token);
+      if (!doc?.url) throw new Error('Document not available');
+      setDocViewer({ title, url: doc.url, contentType: doc.contentType || '' });
+    } catch (e) {
+      setDocViewer({ title, url: '', error: e?.message || 'Could not load document' });
+    }
+  };
   const [servicePick, setServicePick] = useState('');
   const [feePick, setFeePick] = useState('');
   const [msg, setMsg] = useState('');
@@ -2804,15 +2821,20 @@ token
             <div style={{ marginBottom: 12, padding: '14px 16px', borderRadius: 14, background: 'rgba(110,73,255,.03)', border: '1px solid rgba(110,73,255,.1)' }}>
               <div style={{ fontWeight: 700, fontSize: '0.88rem', color: '#1a1230', marginBottom: 10 }}>Customer Documents</div>
               <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                {row?.customer?.idPhotoUrl ? (
-                  <button type="button" className="button-subtle" style={{ fontSize: '0.85rem' }} onClick={() => setDocViewer({ title: 'ID / License Photo', url: row.customer.idPhotoUrl })}>
+                {row?.customer?.hasIdPhoto ? (
+                  <button type="button" className="button-subtle" style={{ fontSize: '0.85rem' }} onClick={() => openCustomerDoc('id-photo', 'ID / License Photo')}>
                     ID / License Photo
                   </button>
                 ) : (
                   <span className="label" style={{ textTransform: 'none', letterSpacing: 0, color: '#b91c1c', fontSize: '0.82rem' }}>ID / License Photo — Not uploaded</span>
                 )}
-                {row?.customer?.insuranceDocumentUrl ? (
-                  <button type="button" className="button-subtle" style={{ fontSize: '0.85rem' }} onClick={() => setDocViewer({ title: 'Insurance Document', url: row.customer.insuranceDocumentUrl })}>
+                {row?.customer?.hasLicenseBack ? (
+                  <button type="button" className="button-subtle" style={{ fontSize: '0.85rem' }} onClick={() => openCustomerDoc('license-back', 'License (Back)')}>
+                    License (Back)
+                  </button>
+                ) : null}
+                {row?.customer?.hasInsuranceDoc ? (
+                  <button type="button" className="button-subtle" style={{ fontSize: '0.85rem' }} onClick={() => openCustomerDoc('insurance-doc', 'Insurance Document')}>
                     Insurance Document
                   </button>
                 ) : (
@@ -3379,9 +3401,11 @@ token
               <button type="button" onClick={() => setDocViewer(null)} style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '1.3rem', color: '#6b7a9a', padding: '4px 8px' }}>&times;</button>
             </div>
             <div style={{ padding: 20, overflow: 'auto', maxHeight: 'calc(90vh - 60px)', textAlign: 'center' }}>
-              {String(docViewer.url || '').match(/^data:image\/|\.(?:jpg|jpeg|png|gif|webp|svg)/i) ? (
-                <img src={docViewer.url} alt={docViewer.title} style={{ maxWidth: '100%', maxHeight: '70vh', objectFit: 'contain', borderRadius: 8 }} />
-              ) : String(docViewer.url || '').match(/^data:application\/pdf|\.pdf/i) ? (
+              {docViewer.loading ? (
+                <div style={{ color: '#6b7a9a', fontSize: '0.9rem', padding: '30px 0' }}>Loading document…</div>
+              ) : docViewer.error ? (
+                <div style={{ color: '#b91c1c', fontSize: '0.9rem', padding: '30px 0' }}>{docViewer.error}</div>
+              ) : (String(docViewer.contentType || '').includes('pdf') || String(docViewer.url || '').match(/^data:application\/pdf|\.pdf(?:$|\?)/i)) ? (
                 <iframe src={docViewer.url} title={docViewer.title} style={{ width: '100%', height: '70vh', border: 'none', borderRadius: 8 }} />
               ) : (
                 <img src={docViewer.url} alt={docViewer.title} style={{ maxWidth: '100%', maxHeight: '70vh', objectFit: 'contain', borderRadius: 8 }} />
