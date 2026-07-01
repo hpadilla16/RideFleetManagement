@@ -47,7 +47,11 @@ import { fileURLToPath } from 'node:url';
 // per-row fallback Json-null filter (importing the namespace has no DB side
 // effects). Primary discovery is raw SQL.
 import { Prisma } from '@prisma/client';
-import { uploadInspectionPhotos } from '../src/modules/rental-agreements/inspection-photos.js';
+import {
+  uploadInspectionPhotosDetailed,
+  getPhotosBucket
+} from '../src/modules/rental-agreements/inspection-photos.js';
+import { downloadObject as realDownloadObject } from '../src/lib/storage/supabase-storage.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -95,6 +99,7 @@ export async function runBackfill({
   args = parseArgs(process.argv),
   prismaClient = null,
   uploader = null,
+  downloader = null,
   logger = console
 } = {}) {
   let prisma = prismaClient;
@@ -103,7 +108,16 @@ export async function runBackfill({
     prisma = new mod.PrismaClient();
   }
   const ownsPrisma = !prismaClient;
-  const stats = { total: 0, migrated: 0, skipped: 0, failed: 0, noTenant: 0, empty: 0 };
+  const download = typeof downloader === 'function' ? downloader : realDownloadObject;
+  const stats = {
+    total: 0,
+    migrated: 0,
+    skipped: 0,
+    failed: 0,
+    noTenant: 0,
+    empty: 0,
+    verifyFailed: 0
+  };
 
   const totalLimit = args.limit && args.limit > 0 ? args.limit : null;
   const batchSize = args.batch;
@@ -222,17 +236,40 @@ export async function runBackfill({
         }
 
         try {
-          const refs = await uploadInspectionPhotos({
+          // HARDENED (prod incident 2026-06): upload AND read-back byte-verify
+          // every photo. A row's photoStorageRefs is set ONLY if EVERY input
+          // photo uploaded AND verified. If ANY photo fails verify, we do NOT
+          // set refs (leave it a candidate, count verifyFailed) so the clear
+          // step can NEVER null an unverified row.
+          const result = await uploadInspectionPhotosDetailed({
             photos,
             tenantId,
             inspectionId: id,
-            uploader: uploader || undefined
+            uploader: uploader || undefined,
+            downloader: download, // <- mandatory read-back verify
+            logger
           });
-          if (!refs || refs.length === 0) {
+          const { refs, inputCount, uploadedCount, verifyFailed } = result;
+
+          // Empty row (format #2 nulls, or nothing decodable) -> no refs, skip.
+          if (inputCount === 0) {
             stats.empty++;
             stats.skipped++;
             continue;
           }
+
+          // ANY shortfall (verify fail, decode/skip, partial upload) means the
+          // row is NOT fully migrated. Leave photosJson intact, set no refs.
+          if (verifyFailed > 0 || uploadedCount < inputCount || refs.length < inputCount) {
+            stats.verifyFailed++;
+            logger.error(
+              `[16l-backfill] VERIFY-FAILED inspection=${id} tenant=${tenantId}: ` +
+                `input=${inputCount} uploaded=${uploadedCount} verified=${refs.length} ` +
+                `verifyFailed=${verifyFailed}; leaving photosJson intact (no refs set)`
+            );
+            continue;
+          }
+
           await prisma.rentalAgreementInspection.update({
             where: { id },
             data: { photoStorageRefs: refs }
@@ -251,7 +288,7 @@ export async function runBackfill({
     }
 
     logger.log(
-      `[16l-backfill] done. candidates=${candidates} total=${stats.total} migrated=${stats.migrated} skipped=${stats.skipped} failed=${stats.failed} noTenant=${stats.noTenant} empty=${stats.empty}`
+      `[16l-backfill] done. candidates=${candidates} total=${stats.total} migrated=${stats.migrated} skipped=${stats.skipped} failed=${stats.failed} verifyFailed=${stats.verifyFailed} noTenant=${stats.noTenant} empty=${stats.empty}`
     );
     return { ...stats, candidates };
   } finally {

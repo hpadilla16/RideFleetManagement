@@ -26,6 +26,16 @@ const JPEG_B64 = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10, 0x4a]).toStrin
 const PDF_BYTES = Buffer.from('%PDF-1.4\n1 0 obj\n<<>>\nendobj\n', 'utf8');
 const PDF_B64 = PDF_BYTES.toString('base64');
 
+// A read-back downloader that returns the EXACT bytes recorded by a paired
+// uploader, so the hardened read-back verify passes. Use mkVerifyPair() to get
+// a matched { uploader, downloader }.
+function mkVerifyPair() {
+  const store = new Map();
+  const uploader = async (a) => { store.set(a.path, a.body); return { path: a.path }; };
+  const downloader = async ({ path }) => ({ body: store.get(path) || Buffer.alloc(0) });
+  return { uploader, downloader, store };
+}
+
 describe('decodeDocumentValue', () => {
   it('decodes a data:image/png base64 value → png', () => {
     const out = decodeDocumentValue(`data:image/png;base64,${PNG_B64}`);
@@ -104,13 +114,16 @@ describe('isStoragePath', () => {
 describe('uploadCustomerDocument', () => {
   it('uploads and returns the storage path', async () => {
     const calls = [];
-    const uploader = async (a) => { calls.push(a); return { path: a.path }; };
+    const store = new Map();
+    const uploader = async (a) => { calls.push(a); store.set(a.path, a.body); return { path: a.path }; };
+    const downloader = async ({ path }) => ({ body: store.get(path) });
     const path = await uploadCustomerDocument({
       raw: `data:image/png;base64,${PNG_B64}`,
       tenantId: 't1',
       customerId: 'c1',
       kind: 'id-photo',
-      uploader
+      uploader,
+      downloader
     });
     assert.equal(calls.length, 1);
     assert.equal(calls[0].bucket, CUSTOMER_DOCS_BUCKET);
@@ -137,7 +150,7 @@ describe('uploadCustomerDocument', () => {
     const uploader = async (a) => ({ path: a.path });
     const path = await uploadCustomerDocument({
       raw: `data:application/pdf;base64,${PDF_B64}`,
-      tenantId: 't1', customerId: 'c1', kind: 'insurance', uploader
+      tenantId: 't1', customerId: 'c1', kind: 'insurance', uploader, downloader: false
     });
     assert.match(path, /insurance_[0-9a-f-]+\.pdf$/);
   });
@@ -215,9 +228,11 @@ describe('customerDocsStorageEnabled / maybeUploadCustomerDocument flag gating',
     process.env.CUSTOMER_DOCS_STORAGE_ENABLED = 'true';
     try {
       assert.equal(customerDocsStorageEnabled(), true);
-      const uploader = async (a) => ({ path: a.path });
+      const store = new Map();
+      const uploader = async (a) => { store.set(a.path, a.body); return { path: a.path }; };
+      const downloader = async ({ path }) => ({ body: store.get(path) });
       const out = await maybeUploadCustomerDocument(`data:image/png;base64,${PNG_B64}`, {
-        tenantId: 't1', customerId: 'c1', kind: 'id-photo', uploader
+        tenantId: 't1', customerId: 'c1', kind: 'id-photo', uploader, downloader
       });
       assert.match(out, /^tenants\/t1\/customers\/c1\/id-photo_/);
     } finally {
@@ -274,6 +289,62 @@ describe('customerDocsStorageEnabled / maybeUploadCustomerDocument flag gating',
       });
       assert.equal(out, 'https://cdn.example.com/a.pdf');
       assert.equal(n, 0);
+    } finally {
+      if (prev === undefined) delete process.env.CUSTOMER_DOCS_STORAGE_ENABLED;
+      else process.env.CUSTOMER_DOCS_STORAGE_ENABLED = prev;
+    }
+  });
+});
+
+describe('maybeUploadCustomerDocument — read-back verify fallback (HARDENED)', () => {
+  it('flag ON + verify byte-mismatch → FALLS BACK to original base64 (no path stored)', async () => {
+    const prev = process.env.CUSTOMER_DOCS_STORAGE_ENABLED;
+    process.env.CUSTOMER_DOCS_STORAGE_ENABLED = 'true';
+    try {
+      const v = `data:image/png;base64,${PNG_B64}`;
+      const uploader = async (a) => ({ path: a.path }); // "succeeds"
+      // Downloader returns the WRONG length -> verify fails inside upload.
+      const downloader = async () => ({ body: Buffer.alloc(3) });
+      let warned = 0;
+      const out = await maybeUploadCustomerDocument(v, {
+        tenantId: 't1', customerId: 'c1', kind: 'id-photo', uploader, downloader,
+        logger: { warn: () => { warned++; } }
+      });
+      assert.equal(out, v, 'fell back to inline base64, no storage path stored');
+      assert.equal(warned, 1, 'fallback was logged');
+    } finally {
+      if (prev === undefined) delete process.env.CUSTOMER_DOCS_STORAGE_ENABLED;
+      else process.env.CUSTOMER_DOCS_STORAGE_ENABLED = prev;
+    }
+  });
+
+  it('flag ON + read-back throws → FALLS BACK to original base64', async () => {
+    const prev = process.env.CUSTOMER_DOCS_STORAGE_ENABLED;
+    process.env.CUSTOMER_DOCS_STORAGE_ENABLED = 'true';
+    try {
+      const v = `data:image/png;base64,${PNG_B64}`;
+      const uploader = async (a) => ({ path: a.path });
+      const downloader = async () => { throw new Error('storage read 500'); };
+      const out = await maybeUploadCustomerDocument(v, {
+        tenantId: 't1', customerId: 'c1', kind: 'id-photo', uploader, downloader,
+        logger: { warn: () => {} }
+      });
+      assert.equal(out, v);
+    } finally {
+      if (prev === undefined) delete process.env.CUSTOMER_DOCS_STORAGE_ENABLED;
+      else process.env.CUSTOMER_DOCS_STORAGE_ENABLED = prev;
+    }
+  });
+
+  it('flag ON + verify OK → stores the storage path', async () => {
+    const prev = process.env.CUSTOMER_DOCS_STORAGE_ENABLED;
+    process.env.CUSTOMER_DOCS_STORAGE_ENABLED = 'true';
+    try {
+      const { uploader, downloader } = mkVerifyPair();
+      const out = await maybeUploadCustomerDocument(`data:image/png;base64,${PNG_B64}`, {
+        tenantId: 't1', customerId: 'c1', kind: 'id-photo', uploader, downloader
+      });
+      assert.match(out, /^tenants\/t1\/customers\/c1\/id-photo_/);
     } finally {
       if (prev === undefined) delete process.env.CUSTOMER_DOCS_STORAGE_ENABLED;
       else process.env.CUSTOMER_DOCS_STORAGE_ENABLED = prev;

@@ -216,9 +216,13 @@ describe('customer-documents backfill (embedded-postgres)', () => {
       downloader: storage.downloader,
       logger: silentLogger()
     });
-    assert.equal(storage.uploadCalls.length, 0);
+    assert.equal(storage.uploadCalls.length, 0, 'dry-run uploads nothing');
     const after = await prisma.customer.findUnique({ where: { id: cust.id } });
     assert.equal(after.idPhotoUrl, PNG_DATA_URL, 'unchanged on dry-run');
-    assert.ok(stats.fieldsSkipped >= 1);
+    // Dry-run is COUNT-only: it returns after the lightweight candidate count and
+    // never per-row scans, so `fieldsSkipped` can never advance. Assert the REAL
+    // intent instead — nothing migrated, and the cheap count found this row.
+    assert.equal(stats.fieldsMigrated, 0, 'dry-run migrates nothing');
+    assert.ok(stats.customerCandidates >= 1, 'dry-run counted at least one candidate row');
   });
 });

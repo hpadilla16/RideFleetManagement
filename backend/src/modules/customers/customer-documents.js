@@ -31,6 +31,7 @@
 import crypto from 'node:crypto';
 import {
   uploadObject,
+  downloadObject,
   getSignedUrl,
   safePath,
   StorageError
@@ -218,7 +219,7 @@ export function isStoragePath(value) {
  *   - injection seam for tests; defaults to real uploadObject
  * @returns {Promise<string>} storage path (or the original http URL when passthrough)
  */
-export async function uploadCustomerDocument({ raw, tenantId, customerId, kind, uploader } = {}) {
+export async function uploadCustomerDocument({ raw, tenantId, customerId, kind, uploader, downloader } = {}) {
   if (!tenantId) throw new StorageError('uploadCustomerDocument: tenantId is required', 400);
   if (!customerId) throw new StorageError('uploadCustomerDocument: customerId is required', 400);
 
@@ -240,6 +241,33 @@ export async function uploadCustomerDocument({ raw, tenantId, customerId, kind, 
     contentType: decoded.contentType,
     upsert: true
   });
+
+  // HARDENED (prod incident 2026-06): read-back byte-verify before we trust the
+  // path. A write that didn't actually land (or stored the wrong bytes) must
+  // never be returned as a "stored" path — the caller would then drop the
+  // base64 and the doc would be lost. A verify failure throws so the caller's
+  // fail-safe path keeps the original base64. `downloadObject` is the default;
+  // tests inject a `downloader`. (Passing downloader=false skips verify, used by
+  // the backfill which does its own read-back to track verifyFailed separately.)
+  if (downloader !== false) {
+    const download = typeof downloader === 'function' ? downloader : downloadObject;
+    let back;
+    try {
+      back = await download({ bucket: CUSTOMER_DOCS_BUCKET, path });
+    } catch (err) {
+      throw new StorageError(
+        `uploadCustomerDocument: read-back verify failed for ${path}: ${err?.message || err}`,
+        502
+      );
+    }
+    const backLen = back?.body?.byteLength ?? back?.size ?? null;
+    if (backLen == null || backLen !== decoded.buffer.byteLength) {
+      throw new StorageError(
+        `uploadCustomerDocument: read-back byte mismatch for ${path} (src=${decoded.buffer.byteLength} back=${backLen})`,
+        502
+      );
+    }
+  }
 
   return path;
 }
@@ -307,7 +335,7 @@ export function customerDocsStorageEnabled() {
  * @param {{warn:Function}} [ctx.logger]
  * @returns {Promise<string>} the storage path (uploaded) OR the original value
  */
-export async function maybeUploadCustomerDocument(value, { tenantId, customerId, kind, uploader, logger = console } = {}) {
+export async function maybeUploadCustomerDocument(value, { tenantId, customerId, kind, uploader, downloader, logger = console } = {}) {
   if (!customerDocsStorageEnabled()) return value;
   if (value == null || value === '') return value;
   const s = String(value);
@@ -319,7 +347,7 @@ export async function maybeUploadCustomerDocument(value, { tenantId, customerId,
   if (!tenantId || !customerId) return value;
 
   try {
-    return await uploadCustomerDocument({ raw: s, tenantId, customerId, kind, uploader });
+    return await uploadCustomerDocument({ raw: s, tenantId, customerId, kind, uploader, downloader });
   } catch (err) {
     // FAIL-SAFE: keep the base64 exactly as today. Never lose a doc, never 500.
     try {

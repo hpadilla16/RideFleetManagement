@@ -171,7 +171,11 @@ export async function runBackfill({
       tenantId,
       customerId,
       kind,
-      uploader: uploader || undefined
+      uploader: uploader || undefined,
+      // This backfill does its OWN read-back verify below (tracked as
+      // verifyFailed); skip the helper's internal verify to avoid a redundant
+      // double-download and keep verify-failures counted (not thrown) here.
+      downloader: false
     });
     // Read it back and verify byte length BEFORE we trust the path.
     let back;

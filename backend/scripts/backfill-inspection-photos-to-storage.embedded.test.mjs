@@ -27,12 +27,21 @@ import assert from 'node:assert/strict';
 import { bootEmbeddedPg } from './embedded-pg-boot.mjs';
 import { runBackfill } from './backfill-inspection-photos-to-storage.mjs';
 
-// A few-KB base64 blob (non-trivial — the point is many rows + real bytes).
-const BIG_B64 = Buffer.alloc(3000, 7).toString('base64');
+// A few-KB base64 blob carrying a VALID PNG magic header (89 50 4E 47 0D 0A 1A 0A)
+// + IHDR-ish bytes, padded to a non-trivial size. The hardened decoder now
+// validates the image magic header, so filler-only buffers (the old test data)
+// would be correctly REJECTED — we must seed real-looking image bytes.
+const PNG_SIG = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+const BIG_IMAGE_BUF = Buffer.concat([PNG_SIG, Buffer.alloc(3000, 7)]);
+const BIG_IMAGE_LEN = BIG_IMAGE_BUF.byteLength;
+const BIG_B64 = BIG_IMAGE_BUF.toString('base64');
 const DATA_URL = `data:image/png;base64,${BIG_B64}`;
+// Verifying downloader: returns the exact source length for any stored path.
+// The backfill compares back length to the decoded source length.
+const okDownloader = async () => ({ body: Buffer.alloc(BIG_IMAGE_LEN) });
 
 function silentLogger() {
-  return { log: () => {}, error: () => {} };
+  return { log: () => {}, error: () => {}, warn: () => {} };
 }
 
 let pgHandle;
@@ -193,6 +202,7 @@ describe('inspection-photos backfill — at scale (embedded-postgres)', () => {
       args: { commit: true, limit: null, tenant: tenantId, batch: 7 }, // small batch ⇒ multiple loops
       prismaClient: prisma,
       uploader,
+      downloader: okDownloader,
       logger: silentLogger()
     });
 
@@ -222,13 +232,13 @@ describe('inspection-photos backfill — at scale (embedded-postgres)', () => {
 
     const first = await runBackfill({
       args: { commit: true, limit: null, tenant: tenantId, batch: 100 },
-      prismaClient: prisma, uploader, logger: silentLogger()
+      prismaClient: prisma, uploader, downloader: okDownloader, logger: silentLogger()
     });
     assert.equal(first.migrated, 30);
 
     const second = await runBackfill({
       args: { commit: true, limit: null, tenant: tenantId, batch: 100 },
-      prismaClient: prisma, uploader, logger: silentLogger()
+      prismaClient: prisma, uploader, downloader: okDownloader, logger: silentLogger()
     });
     assert.equal(second.candidates, 0, 'nothing left to migrate');
     assert.equal(second.total, 0);
@@ -243,9 +253,117 @@ describe('inspection-photos backfill — at scale (embedded-postgres)', () => {
     const uploader = async (args) => ({ path: args.path });
     const stats = await runBackfill({
       args: { commit: true, limit: 12, tenant: tenantId, batch: 5 },
-      prismaClient: prisma, uploader, logger: silentLogger()
+      prismaClient: prisma, uploader, downloader: okDownloader, logger: silentLogger()
     });
     assert.equal(stats.total, 12, 'processed exactly the limit');
     assert.equal(stats.migrated, 12);
+  });
+});
+
+// A tiny VALID JPEG (FF D8 FF ...).
+const TINY_JPEG_BUF = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10, 0x4a, 0x46, 0x49, 0x46, 0x00, 0x01, 0xff, 0xd9]);
+const JPEG_DATA_URL = `data:image/jpeg;base64,${TINY_JPEG_BUF.toString('base64')}`;
+// Downloader that returns the byte length for whatever was stored — but we keep
+// a registry so it can verify per-path. Simpler: track uploaded bytes per path.
+
+describe('inspection-photos backfill — HARDENED (three formats + read-back verify)', () => {
+  it('migrates all THREE real formats; array-of-objects yields real-sized refs (NOT 9 bytes)', async () => {
+    const tenantId = await freshTenant();
+
+    // Track exact bytes uploaded per path so the downloader can return the
+    // correct length and read-back verify passes for good rows.
+    const storeByPath = new Map();
+    const uploader = async (args) => { storeByPath.set(args.path, args.body); return { path: args.path }; };
+    const downloader = async ({ path }) => {
+      const buf = storeByPath.get(path);
+      return { body: buf || Buffer.alloc(0) };
+    };
+
+    // Format #1: object of strings.
+    const f1 = await seedInspection({ tenantId, photosJson: JSON.stringify({ front: DATA_URL, rear: JPEG_DATA_URL }) });
+    // Format #2: object of nulls (empty).
+    const f2 = await seedInspection({ tenantId, photosJson: JSON.stringify({ front: null, rear: null }) });
+    // Format #3: ARRAY of objects [{key,dataUrl,...}] — the bug case.
+    const f3 = await seedInspection({
+      tenantId,
+      photosJson: JSON.stringify([
+        { key: 'front', dataUrl: DATA_URL, notes: '', capturedAt: '2026-01-01', customerIp: '1.2.3.4' },
+        { key: 'rear', dataUrl: JPEG_DATA_URL, notes: '' }
+      ])
+    });
+
+    const stats = await runBackfill({
+      args: { commit: true, limit: null, tenant: tenantId, batch: 100 },
+      prismaClient: prisma, uploader, downloader, logger: silentLogger()
+    });
+
+    // f1 + f3 migrate; f2 is empty (no refs) and is skipped/empty.
+    assert.equal(stats.migrated, 2, 'format #1 and #3 both migrate');
+    assert.ok(stats.empty >= 1, 'format #2 (object-of-nulls) counted empty');
+    assert.equal(stats.verifyFailed, 0);
+    assert.equal(stats.failed, 0);
+
+    // Format #3 row: refs are REAL with correct slot keys + real byte sizes.
+    const r3 = await prisma.rentalAgreementInspection.findUnique({
+      where: { id: f3.id }, select: { photoStorageRefs: true, photosJson: true }
+    });
+    const refs3 = r3.photoStorageRefs;
+    assert.ok(Array.isArray(refs3) && refs3.length === 2, 'array-of-objects produced 2 refs');
+    const front3 = refs3.find((r) => r.key === 'front');
+    const rear3 = refs3.find((r) => r.key === 'rear');
+    assert.ok(front3 && rear3, 'slot keys preserved from element.key');
+    assert.equal(front3.size, BIG_IMAGE_LEN, 'front ref byte size == decoded PNG (NOT 9 bytes)');
+    assert.equal(rear3.size, TINY_JPEG_BUF.byteLength, 'rear ref byte size == decoded JPEG');
+    assert.notEqual(front3.size, 9);
+    // The backfill deliberately does NOT null photosJson (that is the clear
+    // script\'s job — one-release safety net). It only SETS verified refs.
+    assert.ok(r3.photosJson, 'backfill leaves photosJson intact as safety net');
+
+    // Format #2 row: NO refs, photosJson intact (still the {nulls} map).
+    const r2 = await prisma.rentalAgreementInspection.findUnique({
+      where: { id: f2.id }, select: { photoStorageRefs: true, photosJson: true }
+    });
+    assert.equal(r2.photoStorageRefs, null, 'empty row gets no refs');
+    assert.ok(r2.photosJson, 'empty row photosJson intact (skipped, not failed)');
+  });
+
+  it('read-back MISMATCH leaves the row WITHOUT refs and photosJson INTACT (verifyFailed)', async () => {
+    const tenantId = await freshTenant();
+    const uploader = async (args) => ({ path: args.path });
+    // Downloader returns the WRONG byte length for everything -> verify fails.
+    const badDownloader = async () => ({ body: Buffer.alloc(3) });
+
+    const row = await seedInspection({ tenantId, photosJson: JSON.stringify({ front: DATA_URL }) });
+
+    const stats = await runBackfill({
+      args: { commit: true, limit: null, tenant: tenantId, batch: 100 },
+      prismaClient: prisma, uploader, downloader: badDownloader, logger: silentLogger()
+    });
+
+    assert.equal(stats.migrated, 0, 'nothing migrated on verify failure');
+    assert.equal(stats.verifyFailed, 1, 'counted as verifyFailed');
+
+    const after = await prisma.rentalAgreementInspection.findUnique({
+      where: { id: row.id }, select: { photoStorageRefs: true, photosJson: true }
+    });
+    assert.equal(after.photoStorageRefs, null, 'NO refs set on verify failure');
+    assert.ok(after.photosJson, 'photosJson INTACT — clear step can never null it');
+  });
+
+  it('at scale (45 valid rows) all migrate + verify', async () => {
+    const tenantId = await freshTenant();
+    const storeByPath = new Map();
+    const uploader = async (args) => { storeByPath.set(args.path, args.body); return { path: args.path }; };
+    const downloader = async ({ path }) => ({ body: storeByPath.get(path) || Buffer.alloc(0) });
+    for (let i = 0; i < 45; i++) {
+      await seedInspection({ tenantId, photosJson: JSON.stringify({ front: DATA_URL }) });
+    }
+    const stats = await runBackfill({
+      args: { commit: true, limit: null, tenant: tenantId, batch: 10 },
+      prismaClient: prisma, uploader, downloader, logger: silentLogger()
+    });
+    assert.equal(stats.migrated, 45);
+    assert.equal(stats.verifyFailed, 0);
+    assert.equal(stats.failed, 0);
   });
 });

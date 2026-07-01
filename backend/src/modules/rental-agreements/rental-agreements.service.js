@@ -15,9 +15,10 @@ import { recordFuelReadingSafe } from '../vehicles/fuel-history.service.js';
 import { normalizeDob, isImplausibleAge } from '../../lib/dob.js';
 import {
   isStorageEnabled as inspectionPhotosStorageEnabled,
-  uploadInspectionPhotos,
+  uploadInspectionPhotosDetailed,
   materializeStorageRefs as materializeInspectionStorageRefs
 } from './inspection-photos.js';
+import { downloadObject as inspectionDownloadObject } from '../../lib/storage/supabase-storage.js';
 import { normalizeInspectionPhotos, canonicalPhotoKey, fuelLevelToFraction } from './inspection-photos-normalize.js';
 import { parseLocationConfig } from '../../lib/location-config.js';
 import { getEffectiveTermsHtmlForTenant } from '../../lib/terms/index.js';
@@ -4719,14 +4720,51 @@ export const rentalAgreementsService = {
         update: { capturedAt: inspectionBlock.at }
       });
       try {
-        photoStorageRefs = await uploadInspectionPhotos({
+        // HARDENED (prod incident 2026-06): upload AND read-back byte-verify
+        // every photo. We accept the storage path ONLY when EVERY input photo
+        // uploaded AND verified. If ANY photo fails (decode/upload/verify), we
+        // fall back to writing photosJson (base64) below — never lose, never
+        // 500. This is the fail-safe that the lost-13-inspections incident
+        // lacked.
+        const result = await uploadInspectionPhotosDetailed({
           photos: inspectionBlock.photos,
           tenantId: agreement.tenantId,
-          inspectionId: existingRow.id
+          inspectionId: existingRow.id,
+          downloader: inspectionDownloadObject, // mandatory read-back verify
+          logger: console
         });
+        const { refs, inputCount, uploadedCount, verifyFailed } = result;
+        if (
+          inputCount > 0 &&
+          verifyFailed === 0 &&
+          uploadedCount >= inputCount &&
+          refs.length >= inputCount
+        ) {
+          // Fully migrated + verified — safe to store refs and null photosJson.
+          photoStorageRefs = refs;
+        } else {
+          // Empty (no real photos) OR a shortfall — keep photosJson (base64).
+          if (inputCount > 0) {
+            try {
+              console.warn(
+                `[16l-live] inspection=${existingRow.id} tenant=${agreement.tenantId}: ` +
+                  `not fully verified (input=${inputCount} uploaded=${uploadedCount} ` +
+                  `verified=${refs.length} verifyFailed=${verifyFailed}); ` +
+                  `falling back to photosJson (base64) — no data loss`
+              );
+            } catch { /* logging never throws */ }
+          }
+          photoStorageRefs = null;
+        }
       } catch (err) {
-        // If upload fails, fall back to legacy behavior for this save so the
+        // If upload throws, fall back to legacy behavior for this save so the
         // user doesn't lose data. The next attempt will retry.
+        try {
+          console.warn(
+            `[16l-live] inspection=${existingRow.id} upload threw: ${err?.message || err}; ` +
+              `falling back to photosJson (base64)`
+          );
+        } catch { /* ignore */ }
         photoStorageRefs = null;
       }
     }

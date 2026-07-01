@@ -20,6 +20,8 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { downloadObject as realDownloadObject } from '../src/lib/storage/supabase-storage.js';
+import { getPhotosBucket } from '../src/modules/rental-agreements/inspection-photos.js';
 // Prisma is loaded lazily via dynamic import so tests can inject a stub
 // without pulling in @prisma/client at module-eval time.
 
@@ -59,9 +61,61 @@ function parseArgs(argv) {
   return out;
 }
 
+// HARDENED (prod incident 2026-06): a ref whose stored object is smaller than
+// this is almost certainly NOT a real photo (the incident produced ~9-byte
+// "[object Object]" objects). If a row carries such a ref we must NEVER null its
+// photosJson — that would destroy the only surviving copy of the real photo.
+const MIN_REF_BYTES = 100;
+
+function hasSuspiciousRef(refs) {
+  for (const ref of refs) {
+    if (!ref || typeof ref !== 'object') return true; // malformed ref
+    if (ref.external && ref.url) continue; // external URL ref — size N/A, OK
+    const size = Number(ref.size);
+    if (!Number.isFinite(size) || size < MIN_REF_BYTES) return true;
+  }
+  return false;
+}
+
+/**
+ * HARDENED (Innovation review 2026-06): the recorded `ref.size` is only as
+ * trustworthy as whatever wrote it. Before we DESTROY the last surviving copy of
+ * a photo (photosJson), do a LIVE read-back of at least one referenced object
+ * and confirm it truly exists and is a plausible size. We download the FIRST
+ * non-external ref (external refs live elsewhere — size N/A) and require:
+ *   - the download succeeds, and
+ *   - its byte length is >= MIN_REF_BYTES, and
+ *   - if the ref carries a `size`, the live length matches it.
+ * On any failure (missing / tiny / empty / mismatch) we return false so the
+ * caller LEAVES the row intact. A row with only external refs has nothing to
+ * read back and passes (its bytes are not ours to lose).
+ *
+ * @returns {Promise<{ok:boolean, reason?:string}>}
+ */
+async function liveReadBackOk({ refs, download, bucket }) {
+  const target = refs.find((r) => r && typeof r === 'object' && !r.external && r.path);
+  if (!target) return { ok: true }; // nothing local to verify (external-only)
+  let back;
+  try {
+    back = await download({ bucket, path: target.path });
+  } catch (err) {
+    return { ok: false, reason: `read-back failed: ${err?.message || err}` };
+  }
+  const backLen = back?.body?.byteLength ?? back?.size ?? null;
+  if (backLen == null || backLen < MIN_REF_BYTES) {
+    return { ok: false, reason: `live object missing/tiny (len=${backLen})` };
+  }
+  const recorded = Number(target.size);
+  if (Number.isFinite(recorded) && recorded > 0 && backLen !== recorded) {
+    return { ok: false, reason: `live len ${backLen} != recorded size ${recorded}` };
+  }
+  return { ok: true };
+}
+
 export async function runCleanup({
   args = parseArgs(process.argv),
   prismaClient = null,
+  downloader = null,
   logger = console
 } = {}) {
   let prisma = prismaClient;
@@ -70,7 +124,9 @@ export async function runCleanup({
     prisma = new mod.PrismaClient();
   }
   const ownsPrisma = !prismaClient;
-  const stats = { eligible: 0, cleared: 0, skipped: 0 };
+  const download = typeof downloader === 'function' ? downloader : realDownloadObject;
+  const bucket = getPhotosBucket();
+  const stats = { eligible: 0, cleared: 0, skipped: 0, skippedSuspicious: 0 };
   try {
     const where = {
       photosJson: { not: null },
@@ -103,8 +159,33 @@ export async function runCleanup({
         stats.skipped++;
         continue;
       }
-      if (!args.commit) {
+      // HARDENED: never clear a row whose refs contain a suspiciously small
+      // object — a bad ref must never let us destroy the original photosJson.
+      if (hasSuspiciousRef(refs)) {
         stats.skipped++;
+        stats.skippedSuspicious++;
+        logger.log(
+          `[16l-cleanup] SKIP suspicious refs on inspection=${row.id} ` +
+            `(a ref < ${MIN_REF_BYTES} bytes or malformed); photosJson left intact`
+        );
+        continue;
+      }
+      if (!args.commit) {
+        // Dry-run: never read Storage, never write. (Count-safe + idempotent.)
+        stats.skipped++;
+        continue;
+      }
+      // HARDENED: live read-back BEFORE we destroy the original. Trust the bytes
+      // in Storage, not the recorded ref.size. If the live object is missing or
+      // suspiciously tiny, LEAVE photosJson intact.
+      const live = await liveReadBackOk({ refs, download, bucket });
+      if (!live.ok) {
+        stats.skipped++;
+        stats.skippedSuspicious++;
+        logger.log(
+          `[16l-cleanup] SKIP live read-back on inspection=${row.id} ` +
+            `(${live.reason}); photosJson left intact`
+        );
         continue;
       }
       await prisma.rentalAgreementInspection.update({
@@ -114,7 +195,7 @@ export async function runCleanup({
       stats.cleared++;
     }
     logger.log(
-      `[16l-cleanup] done. eligible=${stats.eligible} cleared=${stats.cleared} skipped=${stats.skipped}`
+      `[16l-cleanup] done. eligible=${stats.eligible} cleared=${stats.cleared} skipped=${stats.skipped} skippedSuspicious=${stats.skippedSuspicious}`
     );
     return stats;
   } finally {
