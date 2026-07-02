@@ -7,6 +7,7 @@ import { rotationStatus } from '../vehicles/vehicle-value.js';
 import { parseLocationConfig } from '../../lib/location-config.js';
 import { startOfDayInTz } from '../../lib/date-utils.js';
 import { resolveTenantTimeZone } from '../../lib/tenant-tz.js';
+import { reservationProgramWhereForScope, vehicleProgramWhereForScope } from '../../lib/program-category.js';
 
 function toNumber(value, fallback = 0) {
   const n = Number(value);
@@ -204,25 +205,38 @@ export const reportsService = {
       : (locationId ? [locationId] : null);
     const pickupLoc = _effLocIds ? { pickupLocationId: { in: _effLocIds } } : {};
     const homeLoc = _effLocIds ? { homeLocationId: { in: _effLocIds } } : {};
+    // Program scoping (2026-07-02): compose the employee's program fragment
+    // into every overview KPI where — reservation-shaped queries get the
+    // workflowMode fragment, vehicle-shaped ones the programCategory fragment.
+    // Admins/BOTH → empty fragments, zero change. Composes with location scope.
+    const progRes = reservationProgramWhereForScope(scope);
+    const progVeh = vehicleProgramWhereForScope(scope);
+    // RentalAgreement rows partition through their reservation (loaner
+    // companion agreements hang off DEALERSHIP_LOANER reservations).
+    const progAgreement = Object.keys(progRes).length ? { reservation: progRes } : {};
     const todayStart = startOfDay(now);
     const todayEnd = endOfDay(now);
     const reservationWhere = {
       ...whereScope,
       ...pickupLoc,
+      ...progRes,
       createdAt: { gte: start, lte: end }
     };
     const agreementWhere = {
       ...whereScope,
-      ...pickupLoc
+      ...pickupLoc,
+      ...progAgreement
     };
     const vehicleWhere = {
       ...whereScope,
-      ...homeLoc
+      ...homeLoc,
+      ...progVeh
     };
     const paymentWhere = {
       reservation: {
         ...whereScope,
-        ...pickupLoc
+        ...pickupLoc,
+        ...progRes
       },
       status: 'PAID',
       paidAt: { gte: start, lte: end }
@@ -230,6 +244,7 @@ export const reportsService = {
     const dueTodayWhere = {
       ...whereScope,
       ...pickupLoc,
+      ...progAgreement,
       status: { notIn: ['CLOSED', 'CANCELLED'] },
       returnAt: { gte: todayStart, lte: todayEnd }
     };
@@ -237,7 +252,8 @@ export const reportsService = {
       status: { in: ['OPEN', 'IN_PROGRESS'] },
       vehicle: {
         ...whereScope,
-        ...homeLoc
+        ...homeLoc,
+        ...progVeh
       }
     };
     const activeVehicleBlockWhere = {
@@ -247,7 +263,8 @@ export const reportsService = {
       availableFrom: { gt: now },
       vehicle: {
         ...(whereScope || {}),
-        ...homeLoc
+        ...homeLoc,
+        ...progVeh
       }
     };
 
@@ -263,6 +280,7 @@ export const reportsService = {
     const currentlyOutWhere = {
       ...whereScope,
       ...pickupLoc,
+      ...progRes,
       status: 'CHECKED_OUT',
       pickupAt: { lte: now },
       returnAt: { gt: gracePeriodStart },
@@ -281,6 +299,7 @@ export const reportsService = {
     const activeReservationsWhere = {
       ...whereScope,
       ...pickupLoc,
+      ...progRes,
       status: 'CHECKED_OUT',
       pickupAt: { lte: now },
       returnAt: { gt: now },
@@ -302,6 +321,7 @@ export const reportsService = {
     const overdueWhere = {
       ...whereScope,
       ...pickupLoc,
+      ...progRes,
       // overdueIgnored=true rows are silently excluded from the Overdue
       // Returns KPI (2026-05-27). Used to grandfather in pre-cleanup
       // stale data so the count starts fresh.
@@ -722,6 +742,10 @@ export const reportsService = {
       ? (locationId && _allowedLoc.includes(locationId) ? [locationId] : _allowedLoc)
       : (locationId ? [locationId] : null);
     const pickupLoc = _effLocIds ? { pickupLocationId: { in: _effLocIds } } : {};
+    // Program scoping (2026-07-02): commission lines partition through their
+    // agreement's reservation (workflowMode), same fragment as overview().
+    const progRes = reservationProgramWhereForScope(scope);
+    const progAgreement = Object.keys(progRes).length ? { reservation: progRes } : {};
 
     const lineWhere = {
       agreementCommission: {
@@ -729,7 +753,8 @@ export const reportsService = {
         ...(employeeUserId ? { employeeUserId } : {}),
         calculatedAt: { gte: start, lte: end },
         rentalAgreement: {
-          ...pickupLoc
+          ...pickupLoc,
+          ...progAgreement
         }
       },
       serviceId: { not: null }
@@ -913,6 +938,9 @@ export const reportsService = {
     const reservations = await prisma.reservation.findMany({
       where: {
         ...whereScope,
+        // Program scoping (2026-07-02): exports must honor the requesting
+        // employee's program restriction, same fragment as overview().
+        ...reservationProgramWhereForScope(scope),
         pickupAt: { gte: start, lte: end }
       },
       select: {
@@ -1160,11 +1188,17 @@ export const reportsService = {
     const programCategoryFilter = query.programCategory && ['RENTAL_ONLY', 'LOANER_ONLY', 'BOTH'].includes(String(query.programCategory))
       ? { programCategory: String(query.programCategory) }
       : {};
+    // Program scoping (2026-07-02): the employee's restriction ANDs on top of
+    // the user-selected programCategory filter (vehicles) and constrains the
+    // revenue reservations by workflowMode. Admin/BOTH → {} (no-op).
+    const progVeh = vehicleProgramWhereForScope(scope);
+    const progRes = reservationProgramWhereForScope(scope);
 
     const vehicles = await prisma.vehicle.findMany({
       where: {
         ...whereScope,
-        ...programCategoryFilter
+        ...programCategoryFilter,
+        ...progVeh
       },
       select: {
         id: true,
@@ -1194,6 +1228,7 @@ export const reportsService = {
     const reservations = await prisma.reservation.findMany({
       where: {
         ...whereScope,
+        ...progRes,
         vehicleId: { in: vehicleIds },
         pickupAt: { gte: start, lte: end }
       },
@@ -1274,8 +1309,13 @@ export const reportsService = {
       ? { vehicle: { programCategory: String(query.programCategory) } }
       : {};
 
-    const workflowModeFilter = query.workflowMode && ['STANDARD_RENTAL', 'DEALERSHIP_LOANER'].includes(String(query.workflowMode))
-      ? { workflowMode: String(query.workflowMode) }
+    // 2026-07-02 fix: the UI sends workflowMode=STANDARD_RENTAL but the enum
+    // value is RENTAL — the old passthrough sent an invalid enum to Prisma so
+    // the "Standard rental" filter never worked. Map the UI alias to RENTAL
+    // (accepting RENTAL too) instead of changing the frontend contract.
+    const workflowModeParam = String(query.workflowMode || '');
+    const workflowModeFilter = ['STANDARD_RENTAL', 'RENTAL', 'DEALERSHIP_LOANER'].includes(workflowModeParam)
+      ? { workflowMode: workflowModeParam === 'STANDARD_RENTAL' ? 'RENTAL' : workflowModeParam }
       : {};
 
     const statusFilter = query.status && ['NEW', 'CONFIRMED', 'CHECKED_OUT', 'CANCELLED'].includes(String(query.status))
@@ -1285,10 +1325,14 @@ export const reportsService = {
     const reservations = await prisma.reservation.findMany({
       where: {
         ...whereScope,
+        // Program scoping (2026-07-02): the employee's program fragment ANDs
+        // with (and, for the workflowMode key, takes precedence over) the
+        // optional query filters below. Admins/BOTH → empty fragment.
         pickupAt: { gte: start, lte: end },
         ...workflowModeFilter,
         ...statusFilter,
-        ...programCategoryFilter
+        ...programCategoryFilter,
+        ...reservationProgramWhereForScope(scope)
       },
       select: {
         id: true,
@@ -1454,9 +1498,15 @@ export const reportsService = {
     const programCategoryFilter = query.programCategory && ['RENTAL_ONLY', 'LOANER_ONLY', 'BOTH'].includes(String(query.programCategory))
       ? { programCategory: String(query.programCategory) }
       : {};
+    // Program scoping (2026-07-02): ANDs on top of the user-selected
+    // programCategory filter; utilization/last-reservation queries below get
+    // the workflowMode fragment so a BOTH vehicle's other-program activity
+    // doesn't leak into a restricted employee's numbers.
+    const progVeh = vehicleProgramWhereForScope(scope);
+    const progRes = reservationProgramWhereForScope(scope);
 
     const vehicles = await prisma.vehicle.findMany({
-      where: { ...whereScope, ...programCategoryFilter },
+      where: { ...whereScope, ...programCategoryFilter, ...progVeh },
       select: {
         id: true,
         internalNumber: true,
@@ -1489,6 +1539,7 @@ export const reportsService = {
     const reservations = await prisma.reservation.findMany({
       where: {
         ...whereScope,
+        ...progRes,
         vehicleId: { in: vehicleIds },
         // Any reservation that overlaps the window — pickupAt before window end
         // AND returnAt after window start — counts toward utilization.
@@ -1514,6 +1565,7 @@ export const reportsService = {
       by: ['vehicleId'],
       where: {
         ...whereScope,
+        ...progRes,
         vehicleId: { in: vehicleIds }
       },
       _max: { pickupAt: true }
@@ -1593,6 +1645,7 @@ export const reportsService = {
   },
 
   async inventoryReportExcel(query = {}, scope = {}) {
+    // Program + location scoping ride along via inventoryReport(query, scope).
     const data = await this.inventoryReport(query, scope);
     const workbook = new ExcelJS.Workbook();
     const sheet = workbook.addWorksheet('Inventory');
@@ -1641,6 +1694,7 @@ export const reportsService = {
 
   // Excel export of the per-vehicle revenue report.
   async vehicleRevenueExcel(query = {}, scope = {}) {
+    // Program + location scoping ride along via vehicleRevenue(query, scope).
     const data = await this.vehicleRevenue(query, scope);
     const workbook = new ExcelJS.Workbook();
     const sheet = workbook.addWorksheet('Vehicle Revenue');

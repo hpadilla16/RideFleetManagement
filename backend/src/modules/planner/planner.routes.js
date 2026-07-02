@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import { isSuperAdmin } from '../../middleware/auth.js';
+import { userProgramScope, userAllowedLocationIds } from '../../lib/tenant-scope.js';
 import { plannerRulesService } from './planner.rules.service.js';
 import { plannerService } from './planner.service.js';
 import { plannerRecommendationService } from './planner.recommendation.service.js';
@@ -22,7 +23,15 @@ function scopeFor(req) {
     allowCrossTenant: false,
     actorUserId: req.user?.sub || null,
     actorName,
-    actorEmail
+    actorEmail,
+    // 2026-07-02: inject programScope + allowedLocationIds like lib/
+    // tenant-scope's resolveTenantScopedUser does, so the planner respects
+    // per-employee program visibility AND location access. The location
+    // injection re-activates the Fase 2c planner filters that were dormant
+    // (planner's local scopeFor never supplied the ids) — activation
+    // explicitly approved by Hector 2026-07-02.
+    programScope: userProgramScope(req.user),
+    allowedLocationIds: userAllowedLocationIds(req.user)
   };
 }
 

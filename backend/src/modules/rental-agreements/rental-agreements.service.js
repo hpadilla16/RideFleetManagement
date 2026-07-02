@@ -28,6 +28,8 @@ import {
   materializeDocumentRef,
   maybeUploadCustomerDocument
 } from '../customers/customer-documents.js';
+import { userProgramScope } from '../../lib/tenant-scope.js';
+import { reservationProgramWhereForScope } from '../../lib/program-category.js';
 import { resolveCatalogEntry } from '../../lib/commission-catalog.js';
 import { spinClient } from '../payment-gateway/spin-client.js';
 import { iposTransactClient } from '../payment-gateway/ipos-transact-client.js';
@@ -1998,10 +2000,23 @@ export async function applyChargesSyncTx(tx, { agreementId, normalizedRows, agre
   return tx.rentalAgreement.update({ where: { id: agreementId }, data: agreementUpdate });
 }
 
+// Program scoping (2026-07-02): agreements partition through their (required)
+// reservation's workflowMode — rental contracts hang off RENTAL/CAR_SHARING
+// reservations, loaner companion agreements off DEALERSHIP_LOANER ones. The
+// routes here pass req.user (session user) as `scope`, so resolve the ADMIN/
+// SUPER_ADMIN bypass via userProgramScope (it accepts both a session user and
+// an already-resolved scope). RENTAL_ONLY employees lose loaner companion
+// agreements; LOANER_ONLY employees keep ONLY those (their loaner check-out
+// wizard runs through these same routes), so rental contracts 404 for them.
+function agreementProgramWhere(scope) {
+  const fragment = reservationProgramWhereForScope({ programScope: userProgramScope(scope) });
+  return Object.keys(fragment).length ? { reservation: fragment } : {};
+}
+
 export const rentalAgreementsService = {
   getAccessibleAgreement(id, scope = null) {
     return prisma.rentalAgreement.findFirst({
-      where: { id, ...(scope?.tenantId ? { tenantId: scope.tenantId } : {}) },
+      where: { id, ...(scope?.tenantId ? { tenantId: scope.tenantId } : {}), ...agreementProgramWhere(scope) },
       select: {
         id: true,
         tenantId: true,
@@ -2020,7 +2035,7 @@ export const rentalAgreementsService = {
 
   list(scope = null) {
     return prisma.rentalAgreement.findMany({
-    where: scope?.tenantId ? { tenantId: scope.tenantId } : undefined,
+    where: { ...(scope?.tenantId ? { tenantId: scope.tenantId } : {}), ...agreementProgramWhere(scope) },
       orderBy: { createdAt: 'desc' },
       include: {
         reservation: { include: { customer: true, vehicle: true, vehicleType: true } },
@@ -2709,7 +2724,9 @@ export const rentalAgreementsService = {
 
   async getById(id, scope = null) {
     const agreement = await prisma.rentalAgreement.findFirst({
-      where: { id, ...(scope?.tenantId ? { tenantId: scope.tenantId } : {}) },
+      // Program guard (2026-07-02): scoped user can't open an agreement from
+      // the other program (null → route 404). Admins/BOTH → no filter.
+      where: { id, ...(scope?.tenantId ? { tenantId: scope.tenantId } : {}), ...agreementProgramWhere(scope) },
       include: {
         reservation: {
           include: {

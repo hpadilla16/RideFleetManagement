@@ -17,6 +17,7 @@
 
 import { Router } from 'express';
 import { requireRole } from '../../middleware/auth.js';
+import { userProgramScope } from '../../lib/tenant-scope.js';
 import {
   listReports,
   getSnapshot,
@@ -28,6 +29,22 @@ import { renderReportPdf, renderReportExcel, wrapReportHtml } from './reports-ex
 // middleware/auth.js which adds the SUPER_ADMIN bypass. Without the bypass,
 // SUPER_ADMIN users got 403s on per-report endpoints that didn't list
 // SUPER_ADMIN explicitly in their allowed roles.
+
+// Program scoping (2026-07-02) — pragmatic fail-closed guard. Every reports-v2
+// data path (getSnapshot + each report's computeData) receives only
+// { tenantId }, so results are tenant-wide: serving them to a program-
+// restricted employee would leak the other program's data. Until the scope is
+// threaded through, block those accounts outright with a clear message.
+// TODO(2026-07-02, Fase C): thread the full resolved scope (programScope +
+// allowedLocationIds) into computeData/getSnapshot and delete this guard.
+function rejectProgramScopedUsers(req, res, next) {
+  if (userProgramScope(req.user)) {
+    return res.status(403).json({
+      error: 'This report set is not yet available for program-restricted accounts',
+    });
+  }
+  next();
+}
 
 function sendError(res, err) {
   if (err instanceof ReportsServiceError) {
@@ -61,6 +78,7 @@ reportsV2Router.get(
 reportsV2Router.get(
   '/snapshot',
   requireRole('ADMIN', 'OPS', 'SUPER_ADMIN'),
+  rejectProgramScopedUsers,
   async (req, res) => {
     try {
       const out = await getSnapshot({
@@ -98,7 +116,7 @@ export function registerReport(report) {
   const slug = report.slug;
   const roles = report.roles || ['ADMIN', 'OPS', 'SUPER_ADMIN'];
 
-  reportsV2Router.get(`/${slug}`, requireRole(...roles), async (req, res) => {
+  reportsV2Router.get(`/${slug}`, requireRole(...roles), rejectProgramScopedUsers, async (req, res) => {
     try {
       const data = await report.computeData(
         { tenantId: req.user.tenantId, from: req.query?.from, to: req.query?.to, query: req.query || {} },
@@ -115,7 +133,7 @@ export function registerReport(report) {
   // availability-forecast's 12-month sold-out scan) that would otherwise
   // push us over nginx's 60s gateway timeout. Reports that don't care about
   // the flag simply ignore it.
-  reportsV2Router.get(`/${slug}/pdf`, requireRole(...roles), async (req, res) => {
+  reportsV2Router.get(`/${slug}/pdf`, requireRole(...roles), rejectProgramScopedUsers, async (req, res) => {
     try {
       const data = await report.computeData(
         { tenantId: req.user.tenantId, from: req.query?.from, to: req.query?.to, query: { ...(req.query || {}), _isExport: '1' } },
@@ -135,7 +153,7 @@ export function registerReport(report) {
     }
   });
 
-  reportsV2Router.get(`/${slug}/excel`, requireRole(...roles), async (req, res) => {
+  reportsV2Router.get(`/${slug}/excel`, requireRole(...roles), rejectProgramScopedUsers, async (req, res) => {
     try {
       const data = await report.computeData(
         { tenantId: req.user.tenantId, from: req.query?.from, to: req.query?.to, query: { ...(req.query || {}), _isExport: '1' } },
@@ -167,7 +185,8 @@ export function registerReport(report) {
         }
       };
       const subRoles = Array.isArray(sub.roles) ? sub.roles : roles;
-      reportsV2Router[method](fullPath, requireRole(...subRoles), wrapped);
+      // Sub-routes get ctx = { tenantId } only — same leak class, same guard.
+      reportsV2Router[method](fullPath, requireRole(...subRoles), rejectProgramScopedUsers, wrapped);
     }
   }
 }

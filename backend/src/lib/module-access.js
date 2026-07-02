@@ -321,6 +321,20 @@ export async function getEffectiveModuleAccessForUser(user) {
   }
 
   const { tenantConfig, storedConfig, config } = await getEditableModuleAccessForUser(user);
+
+  // Program scoping (2026-07-02): a RENTAL_ONLY employee loses the loaner
+  // module entirely (nav + requireModuleAccess('loaner') routes → 403).
+  // LOANER_ONLY is intentionally NOT clamped — Hector's decision: those
+  // employees keep all their modules, data-filtered to loaner rows instead.
+  // ADMIN is never program-scoped (mirrors the location-scoping bypass in
+  // lib/tenant-scope.js userProgramScope — inlined here rather than imported
+  // to keep module-access free of the auth-middleware import cycle).
+  // SUPER_ADMIN already returned all-enabled above.
+  const role = String(user?.role || '').toUpperCase();
+  if (role !== 'ADMIN' && String(user?.programScope || '').toUpperCase() === 'RENTAL_ONLY') {
+    config.loaner = false;
+  }
+
   return {
     tenantConfig,
     userConfig: storedConfig,

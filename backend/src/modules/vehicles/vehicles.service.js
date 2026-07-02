@@ -1,5 +1,6 @@
 import { Prisma } from '@prisma/client';
 import { prisma } from '../../lib/prisma.js';
+import { vehicleProgramWhereForScope } from '../../lib/program-category.js';
 import { normalizeVehicleBlockType } from './vehicle-blocks.js';
 import { materializeStorageRefs, isStorageEnabled } from '../rental-agreements/inspection-photos.js';
 import { uploadObject, getSignedUrl, safePath } from '../../lib/storage/supabase-storage.js';
@@ -220,6 +221,9 @@ export const vehiclesService = {
     if (Array.isArray(scope?.allowedLocationIds) && scope.allowedLocationIds.length) {
       where.homeLocationId = { in: scope.allowedLocationIds };
     }
+    // Program scoping (2026-07-02): a program-scoped employee only sees vehicles
+    // of their side (RENTAL_ONLY/BOTH or LOANER_ONLY/BOTH). Admins/BOTH → no-op.
+    Object.assign(where, vehicleProgramWhereForScope(scope));
     const searchTrim = String(search || '').trim();
     const searchWhere = searchTrim
       ? {
@@ -293,7 +297,9 @@ export const vehiclesService = {
       ? { homeLocationId: { in: scope.allowedLocationIds } }
       : {};
     const vehicle = await prisma.vehicle.findFirst({
-      where: { id, ...(byTenantWhere(scope) || {}), ...locWhere },
+      // Program guard (2026-07-02): same 404 semantics as the location guard —
+      // a program-scoped employee can't open a vehicle from the other program.
+      where: { id, ...(byTenantWhere(scope) || {}), ...locWhere, ...vehicleProgramWhereForScope(scope) },
       include: {
         tenant: true,
         vehicleType: true,

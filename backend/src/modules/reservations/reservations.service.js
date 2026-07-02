@@ -7,6 +7,7 @@ import { settingsService } from '../settings/settings.service.js';
 import { parseLocationConfig } from '../../lib/location-config.js';
 import { parseDateTimeInTz, startOfDayInTz, DEFAULT_TENANT_TIMEZONE } from '../../lib/date-utils.js';
 import { readFreshCounters, refreshCountersAsync } from './reservation-summary-counters.service.js';
+import { reservationProgramWhereForScope } from '../../lib/program-category.js';
 
 /**
  * Resolve the tenant's configured wall-clock timezone (default
@@ -939,6 +940,9 @@ export const reservationsService = {
     const dayStart = new Date(`${todayStr}T00:00:00`);
     const dayEnd = new Date(`${todayStr}T23:59:59.999`);
     const where = scope?.tenantId ? { tenantId: scope.tenantId } : {};
+    // Program scoping (2026-07-02): KPIs for a program-scoped employee count
+    // only their side's reservations. Admins/BOTH → no-op (empty fragment).
+    Object.assign(where, reservationProgramWhereForScope(scope));
 
     // Phase 3 L-2: try the daily counter table first. On hit, we skip the
     // 5 expensive count() queries below and only run the 4 "next item"
@@ -952,9 +956,13 @@ export const reservationsService = {
     // one. SUPER_ADMIN cross-tenant view (no scope.tenantId) falls through
     // to the live aggregation path, which is already cached at 30s by the
     // route layer (Phase 1).
+    // Program-scoped employees also skip the counter table: it stores whole-
+    // tenant counts, which would leak the other program's numbers into their
+    // KPIs (and their filtered counts must never be written back to it —
+    // readFreshCounters/refreshCounters double-guard on programScope too).
     const counterTenantId = scope?.tenantId || null;
-    const cachedCounters = counterTenantId
-      ? await readFreshCounters({ tenantId: counterTenantId, day: dayStart })
+    const cachedCounters = counterTenantId && !scope?.programScope
+      ? await readFreshCounters({ tenantId: counterTenantId, day: dayStart, programScope: scope?.programScope })
       : null;
 
     const [
@@ -1126,7 +1134,9 @@ export const reservationsService = {
     // Skip the refresh entirely when there's no tenantId (SUPER_ADMIN
     // cross-tenant view) — see comment above. The Postgres unique index
     // can't dedupe NULL tenantId rows, so we must not write them.
-    if (!cachedCounters && counterTenantId) {
+    // Program-scoped requests never refresh the table either — their counts
+    // are filtered, and the table must only ever hold whole-tenant numbers.
+    if (!cachedCounters && counterTenantId && !scope?.programScope) {
       refreshCountersAsync({
         tenantId: counterTenantId,
         day: dayStart,
@@ -1290,6 +1300,10 @@ export const reservationsService = {
     // "two top-level OR keys" error.
     const where = {
       ...(scope?.tenantId ? { tenantId: scope.tenantId } : {}),
+      // Program scoping (2026-07-02): a program-scoped employee only sees their
+      // side's reservations (loaner = workflowMode DEALERSHIP_LOANER, rental =
+      // everything else). Admins/BOTH → no-op. Composes with location scoping.
+      ...reservationProgramWhereForScope(scope),
       ...dateWhere,
       ...returnWhere,
     };
@@ -1364,6 +1378,9 @@ export const reservationsService = {
     const take = Math.min(Math.max(1, Number(limit) || 100), 500);
     const skip = (Math.max(1, Number(page) || 1) - 1) * take;
     const where = scope?.tenantId ? { tenantId: scope.tenantId } : {};
+    // Program scoping (2026-07-02): filter to the employee's program side.
+    // Admins/BOTH → no-op.
+    Object.assign(where, reservationProgramWhereForScope(scope));
     // Location scoping (Fase 2): pickup OR return in the user's allowed set.
     if (Array.isArray(scope?.allowedLocationIds) && scope.allowedLocationIds.length) {
       where.AND = [{ OR: [
@@ -1402,6 +1419,9 @@ export const reservationsService = {
       where: {
         id,
         ...(scope?.tenantId ? { tenantId: scope.tenantId } : {}),
+        // Program guard (2026-07-02): scoped user can't open a reservation from
+        // the other program (returns null → route 404). Admins/BOTH → no filter.
+        ...reservationProgramWhereForScope(scope),
         // Location guard (Fase 2b): scoped user can't open a reservation outside
         // their locations (pickup OR return). Admins/unrestricted → no filter.
         ...(Array.isArray(scope?.allowedLocationIds) && scope.allowedLocationIds.length

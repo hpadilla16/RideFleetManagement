@@ -1,4 +1,5 @@
 import { prisma } from '../../lib/prisma.js';
+import { vehicleProgramWhereForScope, reservationProgramWhereForScope } from '../../lib/program-category.js';
 import { plannerRulesService } from './planner.rules.service.js';
 import { buildVehicleOperationalSignalsMap } from '../vehicles/vehicle-intelligence.service.js';
 import { settingsService } from '../settings/settings.service.js';
@@ -253,6 +254,13 @@ export async function loadPlannerReservations({ start, end, locationId = null, v
       ]
     });
   }
+  // Program scoping (2026-07-02, re-applied after being reverted to unblock an
+  // unrelated ship): a program-restricted employee only sees their program's
+  // reservations on the planner (workflowMode fragment). Admin/BOTH → {}.
+  const progRes = reservationProgramWhereForScope(scope);
+  if (Object.keys(progRes).length) {
+    and.push(progRes);
+  }
   return prisma.reservation.findMany({
     where: {
       ...(tenantWhere(scope) || {}),
@@ -325,6 +333,10 @@ export async function loadPlannerVehicles({ start, end, locationId = null, vehic
       ...(tenantWhere(scope) || {}),
       ...(_effLocIds ? { homeLocationId: { in: _effLocIds } } : {}),
       ...(vehicleTypeId ? { vehicleTypeId } : {}),
+      // Program scoping (2026-07-02, re-applied after being reverted to
+      // unblock an unrelated ship): restricted employees only get their
+      // program's vehicle rows. Admin/BOTH → {} (spread no-op).
+      ...vehicleProgramWhereForScope(scope),
       // SOLD is terminal — sold units must not occupy planner rows
       // (schema.prisma VehicleStatus comment; added 2026-07-02 with the
       // Edit-Vehicle SOLD option rollout).

@@ -70,6 +70,10 @@ async function buildSessionUser(user) {
     hostProfileId: user.hostProfileId || user.hostProfile?.id || null,
     screenLockExempt: !!user.screenLockExempt,
     locationIds: parseLocationIds(user.locationIds),
+    // Program scoping (2026-07-02): raw enum value (RENTAL_ONLY | LOANER_ONLY
+    // | BOTH). Consumers resolve the ADMIN/SUPER_ADMIN bypass via
+    // userProgramScope() in lib/tenant-scope.js — same split as locationIds.
+    programScope: user.programScope || 'BOTH',
     moduleAccess: moduleAccess.effective,
     tenantModuleAccess: moduleAccess.tenantConfig,
     userModuleAccess: moduleAccess.userConfig
@@ -105,6 +109,7 @@ export const authService = {
           isActive: true,
           screenLockExempt: true,
           locationIds: true,
+          programScope: true,
           hostProfile: { select: { id: true } }
         }
       });

@@ -38,3 +38,31 @@ export function rentalProgramWhere() {
 export function loanerProgramWhere() {
   return { programCategory: LOANER_PROGRAM_FILTER };
 }
+
+/**
+ * Per-employee program visibility (2026-07-02). These map a resolved
+ * scope.programScope (see userProgramScope in lib/tenant-scope.js —
+ * 'RENTAL_ONLY' | 'LOANER_ONLY' | null) to Prisma `where` fragments, so
+ * services can compose them exactly like the allowedLocationIds blocks:
+ *
+ *   where: { ...baseWhere, ...vehicleProgramWhereForScope(scope) }
+ *
+ * null / unknown scope → {} (spread no-op), so BOTH/admin users see zero
+ * behavior change. Pure functions — unit-tested in program-category.test.mjs.
+ */
+export function vehicleProgramWhereForScope(scope) {
+  const programScope = scope?.programScope;
+  if (programScope === 'RENTAL_ONLY') return { programCategory: RENTAL_PROGRAM_FILTER };
+  if (programScope === 'LOANER_ONLY') return { programCategory: LOANER_PROGRAM_FILTER };
+  return {};
+}
+
+export function reservationProgramWhereForScope(scope) {
+  const programScope = scope?.programScope;
+  // Reservations partition on workflowMode. Rental side = everything that is
+  // NOT a dealership loaner (RENTAL + CAR_SHARING + legacy null); loaner side
+  // = DEALERSHIP_LOANER only.
+  if (programScope === 'RENTAL_ONLY') return { NOT: { workflowMode: 'DEALERSHIP_LOANER' } };
+  if (programScope === 'LOANER_ONLY') return { workflowMode: 'DEALERSHIP_LOANER' };
+  return {};
+}

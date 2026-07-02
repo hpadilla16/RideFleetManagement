@@ -1,6 +1,7 @@
 import crypto from 'node:crypto';
 import { prisma } from '../../lib/prisma.js';
 import { parseLocationConfig } from '../../lib/location-config.js';
+import { reservationProgramWhereForScope } from '../../lib/program-category.js';
 import { normalizeDob } from '../../lib/dob.js';
 import {
   materializeDocumentRef,
@@ -315,10 +316,17 @@ export const customersService = {
   },
 
   async getById(id, scope = {}) {
+    // Program scoping (2026-07-02): a program-restricted employee must not see
+    // this customer's other-program history. Reservations filter directly on
+    // workflowMode; agreements partition through their (required) reservation —
+    // same relation pattern as agreementProgramWhere() in
+    // rental-agreements.service.js. Admin/BOTH scopes → {} (no-op).
+    const progRes = reservationProgramWhereForScope(scope);
     const customer = await prisma.customer.findFirst({
       where: { id, ...(scope?.tenantId ? { tenantId: scope.tenantId } : {}) },
       include: {
         reservations: {
+          where: progRes,
           orderBy: { createdAt: 'desc' },
           include: { vehicle: true, pickupLocation: true, returnLocation: true }
         }
@@ -327,7 +335,7 @@ export const customersService = {
     if (!customer) return null;
 
     const agreements = await prisma.rentalAgreement.findMany({
-      where: { ...(scope?.tenantId ? { tenantId: scope.tenantId } : {}), reservation: { customerId: id } },
+      where: { ...(scope?.tenantId ? { tenantId: scope.tenantId } : {}), reservation: { customerId: id, ...progRes } },
       orderBy: { createdAt: 'desc' },
       include: { reservation: true }
     });

@@ -787,9 +787,13 @@ tr:hover td { background: rgba(135,82,254,.05); }
   padding: 6px 2px;
 }
 
-/* Checkbox alignment cleanup (applies across UI) */
+/* Checkbox + radio alignment cleanup (applies across UI).
+   2026-07-02: radios added so the Program Visibility pills (and any other
+   radio input) pick up the same Ride purple accent as checkboxes. */
 label input[type="checkbox"],
-.label input[type="checkbox"] {
+.label input[type="checkbox"],
+label input[type="radio"],
+.label input[type="radio"] {
   margin: 0;
   width: 16px;
   height: 16px;

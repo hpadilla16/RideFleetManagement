@@ -23,8 +23,17 @@ const EMPTY_PERSON = {
   payoutEnabled: false,
   notes: '',
   status: 'ACTIVE',
-  locationIds: [] // [] = all locations (no restriction)
+  locationIds: [], // [] = all locations (no restriction)
+  programScope: 'BOTH' // Program visibility (2026-07-02): RENTAL_ONLY | LOANER_ONLY | BOTH
 };
+
+// Program visibility options — mirrors backend EmployeeProgramScope enum.
+// BOTH is the default (no restriction); ADMIN accounts bypass regardless.
+const PROGRAM_SCOPE_OPTIONS = [
+  { value: 'RENTAL_ONLY', label: 'Rental only' },
+  { value: 'LOANER_ONLY', label: 'Loaner only' },
+  { value: 'BOTH', label: 'Both', hint: '(default)' }
+];
 
 function buildDefaultUserModuleAccess(personType = 'EMPLOYEE', role = 'AGENT') {
   const type = String(personType || 'EMPLOYEE').toUpperCase();
@@ -243,7 +252,8 @@ function Inner({ token, me, logout }) {
       payoutEnabled: !!person.payoutEnabled,
       notes: person.notes || '',
       status: person.status || 'ACTIVE',
-      locationIds: Array.isArray(person.locationIds) ? person.locationIds : []
+      locationIds: Array.isArray(person.locationIds) ? person.locationIds : [],
+      programScope: person.programScope || 'BOTH'
     });
     if (canManageModuleAccess && person.userId && person.hasLogin) {
       api(`/api/settings/users/${person.userId}/module-access`, {}, token)
@@ -308,6 +318,10 @@ function Inner({ token, me, logout }) {
 
   const metrics = useMemo(() => metricSummary(visiblePeople), [visiblePeople]);
   const hostMode = form.personType === 'HOST';
+  // Program visibility never applies to admin accounts (backend
+  // userProgramScope bypasses ADMIN/SUPER_ADMIN), so the pills render
+  // dimmed + disabled for them. (2026-07-02, Graphic Design review)
+  const programScopeLocked = form.personType === 'ADMIN' || form.role === 'ADMIN';
   const loginRequired = !editingPersonId && (form.personType !== 'HOST' || form.enableLogin);
   const editingPerson = useMemo(() => visiblePeople.find((row) => row.id === editingPersonId) || null, [visiblePeople, editingPersonId]);
   const peopleOpsHub = useMemo(() => {
@@ -673,6 +687,57 @@ function Inner({ token, me, logout }) {
                     /> Send invite email
                   </label>
                 </div>
+              </div>
+            ) : null}
+
+            {!hostMode ? (
+              <div className="stack">
+                <div className="section-title">Program Visibility</div>
+                <div className="surface-note">
+                  Program visibility filters what this employee sees in every module (dashboard, reservations, vehicles).
+                  It combines with Location access. Admin accounts are never restricted.
+                </div>
+                <div role="radiogroup" aria-label="Program visibility" style={{ display: 'flex', gap: 8, flexWrap: 'wrap', opacity: programScopeLocked ? 0.5 : 1 }}>
+                  {PROGRAM_SCOPE_OPTIONS.map((option) => {
+                    const selected = (form.programScope || 'BOTH') === option.value;
+                    return (
+                      <label
+                        key={option.value}
+                        className="label"
+                        style={{
+                          textTransform: 'none',
+                          letterSpacing: 0,
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: 8,
+                          padding: '9px 14px',
+                          borderRadius: 999,
+                          cursor: programScopeLocked ? 'not-allowed' : 'pointer',
+                          // Approved mockup (doc/program-scope-mockups-2026-07-02.html):
+                          // pill segments, Ride purple #8752FE on the selected state.
+                          border: selected ? '1px solid #8752FE' : '1px solid #ded6ff',
+                          background: selected ? 'rgba(135,82,254,.10)' : 'rgba(255,255,255,.9)',
+                          color: selected ? '#4c1d95' : undefined,
+                          boxShadow: selected ? '0 0 0 3px rgba(135,82,254,.10)' : 'none'
+                        }}
+                      >
+                        <input
+                          type="radio"
+                          name="programScope"
+                          value={option.value}
+                          checked={selected}
+                          disabled={programScopeLocked}
+                          onChange={() => setForm((current) => ({ ...current, programScope: option.value }))}
+                        /> {option.label}{option.hint ? <span className="ui-muted" style={{ fontWeight: 500 }}> {option.hint}</span> : null}
+                      </label>
+                    );
+                  })}
+                </div>
+                {programScopeLocked ? (
+                  <div className="ui-muted" style={{ fontSize: 12, fontWeight: 600 }}>
+                    Not applied to admin accounts
+                  </div>
+                ) : null}
               </div>
             ) : null}
 

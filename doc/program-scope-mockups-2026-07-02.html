@@ -1,0 +1,219 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Ride Fleet — Program Visibility mockups · 2026-07-02</title>
+<style>
+  :root{
+    --purple:#8752FE; --teal:#1FC7AA; --ink:#231a3f; --charcoal:#2b2440;
+    --muted:#6f668f; --border:rgba(135,82,254,.12); --border-strong:rgba(135,82,254,.22);
+  }
+  *{box-sizing:border-box}
+  body{
+    margin:0; padding:28px 20px 60px; color:var(--ink);
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    background:linear-gradient(180deg,#faf8ff 0%,#f4f0ff 45%,#f0fbf8 100%);
+    -webkit-font-smoothing:antialiased;
+  }
+  .wrap{max-width:920px;margin:0 auto;display:grid;gap:34px}
+  header.masthead{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+  .logo-dot{width:34px;height:34px;border-radius:11px;background:linear-gradient(135deg,var(--purple),#a37dff);box-shadow:0 6px 18px rgba(135,82,254,.35);display:inline-flex;align-items:center;justify-content:center;color:#fff;font-weight:800;font-size:15px}
+  header.masthead h1{font-size:18px;font-weight:800;margin:0;letter-spacing:.01em}
+  header.masthead .sub{color:var(--muted);font-size:13px}
+  .caption{color:#433b63;font-size:13.5px;line-height:1.6;max-width:760px}
+  .eyebrow{color:var(--purple);font-size:11px;font-weight:800;letter-spacing:.08em;text-transform:uppercase}
+  section.mock{display:grid;gap:12px}
+  .card{
+    background:linear-gradient(180deg,rgba(255,255,255,.92),rgba(250,247,255,.88));
+    border:1px solid var(--border); border-radius:14px; padding:18px;
+    box-shadow:0 10px 30px rgba(76,29,149,.06); backdrop-filter:blur(6px);
+  }
+  .label{color:var(--muted);font-size:11px;font-weight:600;letter-spacing:.05em;text-transform:uppercase}
+  .section-title{font-size:14px;font-weight:750;color:var(--charcoal)}
+  .surface-note{
+    padding:12px 14px;border-radius:14px;color:#433b63;line-height:1.6;font-size:13px;
+    background:linear-gradient(180deg,rgba(135,82,254,.08),rgba(31,199,170,.06));
+    border:1px solid var(--border);
+  }
+  .stack{display:grid;gap:12px}
+  /* segmented radio */
+  .segmented{display:flex;gap:8px;flex-wrap:wrap}
+  .seg{
+    display:inline-flex;align-items:center;gap:8px;padding:9px 14px;border-radius:999px;
+    border:1px solid #ded6ff;background:#fff;font-size:13px;font-weight:600;color:#4b5563;cursor:pointer;
+  }
+  .seg .dot{width:14px;height:14px;border-radius:50%;border:2px solid #c9b8ff;background:#fff;flex:0 0 auto}
+  .seg.selected{background:rgba(135,82,254,.10);border-color:var(--purple);color:#4c1d95;box-shadow:0 0 0 3px rgba(135,82,254,.10)}
+  .seg.selected .dot{border-color:var(--purple);background:radial-gradient(circle at center,var(--purple) 0 55%,#fff 60%)}
+  /* checkboxes */
+  .checks{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:8px}
+  .check{display:inline-flex;align-items:center;gap:8px;font-size:13px;font-weight:500;color:#4b5563}
+  .box{width:16px;height:16px;border-radius:5px;border:1.5px solid #c9b8ff;background:#fff;flex:0 0 auto;display:inline-flex;align-items:center;justify-content:center}
+  .box.on{background:var(--purple);border-color:var(--purple)}
+  .box.on::after{content:"";width:8px;height:5px;border-left:2px solid #fff;border-bottom:2px solid #fff;transform:rotate(-45deg) translate(0,-1px)}
+  .ui-muted{color:var(--muted);font-size:12px}
+  /* KPI tiles */
+  .kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px}
+  .kpi{display:grid;gap:6px;padding:14px;border-radius:14px;border:1px solid var(--border);background:linear-gradient(180deg,rgba(255,255,255,.9),rgba(247,243,255,.9))}
+  .kpi strong{font-size:26px;font-weight:730;color:var(--charcoal)}
+  /* chips */
+  .chip{display:inline-flex;align-items:center;gap:6px;padding:4px 10px;border-radius:999px;border:1px solid var(--border-strong);background:rgba(135,82,254,.09);color:#4c1d95;font-size:10.5px;font-weight:700;letter-spacing:.03em;text-transform:uppercase;white-space:nowrap}
+  .chip.teal{background:rgba(31,199,170,.12);border-color:rgba(31,199,170,.25);color:#0b7a68}
+  .chip.warn{background:rgba(245,158,11,.12);border-color:rgba(245,158,11,.22);color:#b45309}
+  .chip.neutral{background:rgba(148,163,184,.14);border-color:rgba(148,163,184,.2);color:#475569}
+  /* mini tables */
+  table{width:100%;border-collapse:collapse;font-size:13px}
+  th{text-align:left;color:var(--muted);font-size:10.5px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;padding:8px 10px;border-bottom:1px solid #eee8ff}
+  td{padding:9px 10px;border-bottom:1px solid #f2edff;color:#3d3560}
+  tr:last-child td{border-bottom:none}
+  .table-shell{border:1px solid #eee8ff;border-radius:14px;overflow:hidden;background:rgba(255,255,255,.85)}
+  /* nav mock */
+  .navbar{display:flex;align-items:center;gap:6px;flex-wrap:wrap;padding:10px 14px;border-radius:14px;border:1px solid var(--border);background:linear-gradient(180deg,rgba(255,255,255,.95),rgba(249,246,255,.9))}
+  .nav-item{padding:7px 13px;border-radius:999px;font-size:13px;font-weight:600;color:#564d78}
+  .nav-item.active{background:rgba(135,82,254,.12);color:#4c1d95}
+  .nav-item.ghost{border:1.5px dashed rgba(185,28,28,.35);color:rgba(185,28,28,.55);text-decoration:line-through;background:rgba(254,242,242,.6)}
+  .flag{font-size:11px;color:#b45309;font-weight:700}
+  .row-between{display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap}
+  .divider{height:1px;background:linear-gradient(90deg,transparent,rgba(135,82,254,.2),transparent);margin:2px 0}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header class="masthead">
+    <span class="logo-dot">R</span>
+    <div>
+      <h1>Ride Fleet — Program Visibility <span style="font-weight:600;color:var(--muted)">(mockup for approval)</span></h1>
+      <div class="sub">Per-employee program scope: Rental / Loaner / Both · 2026-07-02</div>
+    </div>
+  </header>
+
+  <!-- ============ SECTION 1 : People page control ============ -->
+  <section class="mock">
+    <div class="eyebrow">Section 1 · People page</div>
+    <p class="caption">The employee editor gains one new control, <strong>Program visibility</strong>, placed directly above the existing Locations block so it reads as a sibling scope. Same label / pill / surface-note language as the rest of the form.</p>
+    <div class="card stack">
+      <div class="row-between">
+        <div class="section-title">Edit Person — María González</div>
+        <span class="chip">Employee</span>
+      </div>
+
+      <div class="stack" style="gap:8px">
+        <div class="section-title" style="font-size:13px">Program visibility <span class="chip teal" style="margin-left:6px">New</span></div>
+        <div class="segmented" role="radiogroup" aria-label="Program visibility">
+          <span class="seg"><span class="dot"></span>Rental only</span>
+          <span class="seg selected"><span class="dot"></span>Loaner only</span>
+          <span class="seg"><span class="dot"></span>Both <span class="ui-muted" style="font-weight:500">(default)</span></span>
+        </div>
+        <div class="surface-note">
+          Program visibility filters what this employee sees in every module (dashboard, reservations, vehicles). It combines with Location access.
+        </div>
+      </div>
+
+      <div class="divider"></div>
+
+      <div class="stack" style="gap:8px">
+        <div class="section-title" style="font-size:13px">Locations</div>
+        <div class="surface-note" style="background:rgba(135,82,254,.05)">Which locations this user can see. Leave all unchecked = sees ALL locations.</div>
+        <div class="checks">
+          <label class="check"><span class="box on"></span>Downtown (DTX)</label>
+          <label class="check"><span class="box on"></span>Airport (APT)</label>
+          <label class="check"><span class="box"></span>Northside (NRT)</label>
+          <label class="check"><span class="box"></span>Service Center (SVC)</label>
+        </div>
+        <div class="ui-muted">2 location(s) selected — both scopes compose: María sees <strong>loaner data at Downtown & Airport only</strong>.</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ SECTION 2 : Loaner-only view ============ -->
+  <section class="mock">
+    <div class="eyebrow">Section 2 · What a loaner-only employee sees</div>
+    <p class="caption">Same pages, same layout — rental data is simply <strong>absent</strong>. The dashboard, reservations and vehicles pages keep their skeletons; every query is filtered to the loaner program, and the normal location rules still apply on top.</p>
+    <div class="card stack">
+      <div class="row-between">
+        <div class="section-title">Dashboard <span class="ui-muted" style="font-weight:500">· María (loaner only · DTX, APT)</span></div>
+        <span class="chip teal">Loaner scope</span>
+      </div>
+
+      <div class="kpis">
+        <div class="kpi"><span class="label">Loaner vehicles</span><strong>18</strong><span class="ui-muted">DTX 11 · APT 7</span></div>
+        <div class="kpi"><span class="label">Active loaners</span><strong>9</strong><span class="ui-muted">out with customers</span></div>
+        <div class="kpi"><span class="label">Pending returns</span><strong>4</strong><span class="ui-muted">due today</span></div>
+        <div class="kpi"><span class="label">Inspections to review</span><strong>3</strong><span class="ui-muted">awaiting sign-off</span></div>
+      </div>
+
+      <div class="stack" style="gap:8px">
+        <div class="label">Reservations — today</div>
+        <div class="table-shell">
+          <table>
+            <tr><th>Ref</th><th>Customer</th><th>Program</th><th>Vehicle</th><th>Status</th></tr>
+            <tr><td>LNR-2214</td><td>J. Rivera</td><td><span class="chip teal">Dealership_Loaner</span></td><td>Corolla · 7GHK221</td><td><span class="chip">Active</span></td></tr>
+            <tr><td>LNR-2217</td><td>P. Osei</td><td><span class="chip teal">Dealership_Loaner</span></td><td>RAV4 · 4TRE908</td><td><span class="chip warn">Return due</span></td></tr>
+            <tr><td>LNR-2220</td><td>K. Tanaka</td><td><span class="chip teal">Dealership_Loaner</span></td><td>Camry · 9QWL547</td><td><span class="chip neutral">Scheduled</span></td></tr>
+          </table>
+        </div>
+        <div class="ui-muted">No RENTAL rows are returned — not hidden client-side, filtered at the API.</div>
+      </div>
+
+      <div class="stack" style="gap:8px">
+        <div class="label">Vehicles</div>
+        <div class="table-shell">
+          <table>
+            <tr><th>Unit</th><th>Plate</th><th>Program pool</th><th>Location</th><th>State</th></tr>
+            <tr><td>Corolla LE ’24</td><td>7GHK221</td><td><span class="chip teal">Loaner_Only</span></td><td>DTX</td><td><span class="chip">On loan</span></td></tr>
+            <tr><td>RAV4 XLE ’23</td><td>4TRE908</td><td><span class="chip">Both</span></td><td>APT</td><td><span class="chip warn">Due back</span></td></tr>
+            <tr><td>Camry SE ’25</td><td>9QWL547</td><td><span class="chip teal">Loaner_Only</span></td><td>DTX</td><td><span class="chip neutral">Available</span></td></tr>
+          </table>
+        </div>
+        <div class="ui-muted">Only LOANER_ONLY and BOTH units appear; RENTAL_ONLY units are absent.</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ SECTION 3 : Rental-only view ============ -->
+  <section class="mock">
+    <div class="eyebrow">Section 3 · What a rental-only employee sees</div>
+    <p class="caption">Rental-only is the stricter mirror: besides data filtering, the <strong>Loaner module disappears from the nav entirely</strong> (the loaner operation only makes sense inside the loaner program). Loaner-only employees keep their normal modules — just with filtered data — but rental-only additionally loses the Loaner surface.</p>
+    <div class="card stack">
+      <div class="row-between">
+        <div class="section-title">Navigation <span class="ui-muted" style="font-weight:500">· Diego (rental only)</span></div>
+        <span class="chip">Rental scope</span>
+      </div>
+
+      <div class="navbar">
+        <span class="nav-item active">Dashboard</span>
+        <span class="nav-item">Reservations</span>
+        <span class="nav-item">Vehicles</span>
+        <span class="nav-item">Customers</span>
+        <span class="nav-item ghost" title="Hidden for rental-only">Loaner</span>
+        <span class="nav-item">Billing</span>
+        <span class="nav-item">People</span>
+        <span class="flag">← Loaner item removed for rental-only users (shown struck-through here for illustration only)</span>
+      </div>
+
+      <div class="stack" style="gap:8px">
+        <div class="label">Reservations — today</div>
+        <div class="table-shell">
+          <table>
+            <tr><th>Ref</th><th>Customer</th><th>Program</th><th>Vehicle</th><th>Status</th></tr>
+            <tr><td>RNT-8841</td><td>S. Ahmed</td><td><span class="chip">Rental</span></td><td>Model 3 · 2ZXC114</td><td><span class="chip">Active</span></td></tr>
+            <tr><td>RNT-8845</td><td>L. Moreau</td><td><span class="chip">Rental</span></td><td>Sienna · 5PLM330</td><td><span class="chip neutral">Scheduled</span></td></tr>
+            <tr><td>RNT-8846</td><td>D. Brooks</td><td><span class="chip">Rental</span></td><td>Escape · 8HYU662</td><td><span class="chip warn">Late pickup</span></td></tr>
+            <tr><td>RNT-8850</td><td>A. Novak</td><td><span class="chip">Rental</span></td><td>Model Y · 3KJD905</td><td><span class="chip">Active</span></td></tr>
+          </table>
+        </div>
+        <div class="ui-muted">Zero DEALERSHIP_LOANER rows — and no Loaner module to visit. Location rules unchanged.</div>
+      </div>
+
+      <div class="surface-note">
+        Summary of the asymmetry: <strong>loaner-only</strong> = normal modules, loaner-filtered data. <strong>Rental-only</strong> = rental-filtered data <em>plus</em> the Loaner module hidden from navigation.
+      </div>
+    </div>
+  </section>
+
+  <footer class="ui-muted" style="text-align:center">Ride Fleet Management · Program Visibility mockup · for Hector’s sign-off · not production UI</footer>
+</div>
+</body>
+</html>

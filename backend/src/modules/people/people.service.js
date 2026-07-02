@@ -23,6 +23,20 @@ async function normalizeLocationIds(raw, tenantId) {
   return valid.length ? JSON.stringify(valid) : null;
 }
 
+// Validate + normalize a user's program scope (2026-07-02). Mirrors
+// normalizeLocationIds' undefined contract:
+//   undefined  → not provided (don't change on update)
+//   null/''    → 'BOTH' (explicit clear = no restriction, the default)
+//   valid enum → normalized value
+//   anything else → error (don't silently store a value the enum rejects)
+function normalizeProgramScope(raw) {
+  if (raw === undefined) return undefined;
+  if (raw === null || raw === '') return 'BOTH';
+  const value = String(raw).trim().toUpperCase();
+  if (['RENTAL_ONLY', 'LOANER_ONLY', 'BOTH'].includes(value)) return value;
+  throw new Error('programScope must be RENTAL_ONLY, LOANER_ONLY, or BOTH');
+}
+
 // JSON string → array of ids for the API ([] = all locations).
 function parseLocationIdsArray(raw) {
   if (!raw) return [];
@@ -137,6 +151,9 @@ function mapUserPerson(user) {
     notes: user.hostProfile?.notes || null,
     // [] = ALL locations (no restriction). Only meaningful for ADMIN/EMPLOYEE.
     locationIds: parseLocationIdsArray(user.locationIds),
+    // Program visibility (2026-07-02). BOTH = no restriction (default);
+    // ADMIN accounts bypass regardless (see lib/tenant-scope userProgramScope).
+    programScope: user.programScope || 'BOTH',
     createdAt: user.createdAt
   };
 }
@@ -262,6 +279,7 @@ export const peopleService = {
 
     if (enableLogin) {
       const locationIdsValue = await normalizeLocationIds(payload.locationIds, tenantId);
+      const programScopeValue = normalizeProgramScope(payload.programScope);
       tempPassword = String(payload.password || randomTempPassword());
       const passwordHash = await bcrypt.hash(tempPassword, SALT_ROUNDS);
       user = await prisma.user.create({
@@ -273,7 +291,8 @@ export const peopleService = {
           role: allowedRoleForPayload(personType, payload.role),
           passwordHash,
           isActive: true,
-          ...(locationIdsValue !== undefined ? { locationIds: locationIdsValue } : {})
+          ...(locationIdsValue !== undefined ? { locationIds: locationIdsValue } : {}),
+          ...(programScopeValue !== undefined ? { programScope: programScopeValue } : {})
         }
       });
     }
@@ -405,6 +424,10 @@ export const peopleService = {
       const locationIdsValue = await normalizeLocationIds(payload.locationIds, nextTenantId);
       if (locationIdsValue !== undefined) userPatch.locationIds = locationIdsValue;
 
+      // Program visibility (2026-07-02): same undefined = "don't change" contract.
+      const programScopeValue = normalizeProgramScope(payload.programScope);
+      if (programScopeValue !== undefined) userPatch.programScope = programScopeValue;
+
       const currentUsageShape = {
         hostProfile: user.hostProfile,
         isActive: user.isActive,
@@ -466,8 +489,9 @@ export const peopleService = {
         });
       });
 
-      // Location scope (or role/tenant) changed → drop the cached session so the
-      // new locationIds take effect on the user's next request (Fase 2 enforcement).
+      // Location/program scope (or role/tenant) changed → drop the cached session
+      // so the new locationIds/programScope take effect on the user's next
+      // request (Fase 2 enforcement; program scoping 2026-07-02).
       cache.del(globalKey('session', user.id));
 
       return {

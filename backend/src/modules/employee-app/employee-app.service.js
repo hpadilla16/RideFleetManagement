@@ -1,4 +1,6 @@
 import { prisma } from '../../lib/prisma.js';
+import { userProgramScope } from '../../lib/tenant-scope.js';
+import { reservationProgramWhereForScope } from '../../lib/program-category.js';
 
 function tenantScope(user) {
   const role = String(user?.role || '').toUpperCase();
@@ -189,12 +191,22 @@ export const employeeAppService = {
     const endOfToday = new Date(startOfToday);
     endOfToday.setDate(endOfToday.getDate() + 1);
 
-    const searchWhere = {
+    // Program scoping (2026-07-02): reservation queues/KPIs filtered to the
+    // employee's program. `reservationScope` is for Reservation queries ONLY —
+    // the raw `scope` stays on tripIncident/user/commission queries (those
+    // models have no workflowMode). For RENTAL_ONLY users the loaner queues
+    // compose to a contradiction (workflowMode = AND != DEALERSHIP_LOANER)
+    // and correctly return empty. Admins/BOTH → empty fragment, no change.
+    const reservationScope = {
       ...scope,
+      ...reservationProgramWhereForScope({ programScope: userProgramScope(user) })
+    };
+    const searchWhere = {
+      ...reservationScope,
       ...(matchesQuery(query) || {})
     };
     const loanerWhere = {
-      ...scope,
+      ...reservationScope,
       workflowMode: 'DEALERSHIP_LOANER'
     };
     const incidentTenantWhere = {
@@ -222,7 +234,7 @@ export const employeeAppService = {
     ] = await Promise.all([
       prisma.reservation.findMany({
         where: {
-          ...scope,
+          ...reservationScope,
           OR: [
             { customerInfoCompletedAt: { not: null } },
             { customerInfoToken: { not: null } }
@@ -235,7 +247,7 @@ export const employeeAppService = {
       }),
       prisma.reservation.findMany({
         where: {
-          ...scope,
+          ...reservationScope,
           status: { in: ['NEW', 'CONFIRMED'] },
           pickupAt: { gte: startOfToday, lte: next72h }
         },
@@ -245,7 +257,7 @@ export const employeeAppService = {
       }),
       prisma.reservation.findMany({
         where: {
-          ...scope,
+          ...reservationScope,
           status: 'CHECKED_OUT',
           returnAt: { gte: startOfToday, lte: next72h }
         },
@@ -255,7 +267,7 @@ export const employeeAppService = {
       }),
       prisma.reservation.findMany({
         where: {
-          ...scope,
+          ...reservationScope,
           status: 'CHECKED_OUT'
         },
         include: includeReservationLight(),
@@ -328,11 +340,11 @@ export const employeeAppService = {
           })
         : Promise.resolve([]),
       Promise.all([
-        prisma.reservation.count({ where: { ...scope, status: { in: ['NEW', 'CONFIRMED'] } } }),
-        prisma.reservation.count({ where: { ...scope, status: 'CHECKED_OUT' } }),
+        prisma.reservation.count({ where: { ...reservationScope, status: { in: ['NEW', 'CONFIRMED'] } } }),
+        prisma.reservation.count({ where: { ...reservationScope, status: 'CHECKED_OUT' } }),
         prisma.reservation.count({
           where: {
-            ...scope,
+            ...reservationScope,
             OR: [
               { customerInfoCompletedAt: { not: null } },
               { customerInfoToken: { not: null } }
@@ -342,14 +354,14 @@ export const employeeAppService = {
         }),
         prisma.reservation.count({
           where: {
-            ...scope,
+            ...reservationScope,
             readyForPickupAt: { not: null },
             status: { in: ['NEW', 'CONFIRMED'] }
           }
         }),
         prisma.reservation.count({
           where: {
-            ...scope,
+            ...reservationScope,
             status: 'CHECKED_OUT',
             returnAt: { gte: startOfToday, lt: endOfToday }
           }

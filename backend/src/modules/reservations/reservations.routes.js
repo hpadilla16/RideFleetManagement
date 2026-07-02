@@ -18,7 +18,8 @@ import { vehicleTypesService } from '../vehicle-types/vehicle-types.service.js';
 import { activeVehicleBlockOverlapWhere } from '../vehicles/vehicle-blocks.js';
 import { isSuperAdmin } from '../../middleware/auth.js';
 import { franchiseService } from '../settings/franchise.service.js';
-import { crossTenantScopeFor as scopeFor } from '../../lib/tenant-scope.js';
+import { crossTenantScopeFor as scopeFor, scopeVisibilityCacheSegment } from '../../lib/tenant-scope.js';
+import { vehicleProgramWhereForScope } from '../../lib/program-category.js';
 import { parseLocationConfig } from '../../lib/location-config.js';
 import { cache } from '../../lib/cache.js';
 import { globalKey } from '../../lib/cache/tenantKey.js';
@@ -130,16 +131,22 @@ const RESERVATIONS_PAGE_TTL_MS = 15 * 1000;
 // Sorts keys so different param-orderings on the URL hash to the same key.
 // Coerces every value to string and skips empty/null/undefined so '?q='
 // vs no q at all collapse to the same cache entry.
+//
+// 2026-07-02: list()/listPage() results are now shaped by the requesting
+// user's programScope + allowedLocationIds, so the key carries a visibility
+// segment (scopeVisibilityCacheSegment) — without it a program/location-
+// scoped employee and an admin would poison each other's entries.
 function reservationsListCacheKey(prefix, scope, params = {}) {
   const tenant = scope?.tenantId || 'global';
   const sup = scope?.includeAllTenants ? '1' : '0';
   const userKey = scope?.userId || scope?.actorId || '';
+  const visibility = scopeVisibilityCacheSegment(scope);
   const entries = Object.entries(params)
     .filter(([, v]) => v !== undefined && v !== null && String(v).length > 0)
     .map(([k, v]) => [k, String(v)])
     .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
   const qs = entries.map(([k, v]) => `${k}=${encodeURIComponent(v)}`).join('&');
-  return `reservations:${prefix}:${tenant}:${sup}:${userKey}:${qs}`;
+  return `reservations:${prefix}:${tenant}:${sup}:${userKey}:${visibility}:${qs}`;
 }
 
 reservationsRouter.get('/', async (req, res, next) => {
@@ -205,8 +212,12 @@ reservationsRouter.get('/page', async (req, res, next) => {
 // and the partial+composite indexes in schema.prisma + the matching SQL
 // migration for the missing index coverage they need).
 const RESERVATIONS_SUMMARY_TTL_MS = 60 * 1000;
+// 2026-07-02: summary() is scoped per user (programScope + allowedLocationIds),
+// so the key carries the same visibility segment as the list keys above —
+// tenant alone would let a scoped employee's numbers get served to an admin
+// (and vice versa) inside the 60s TTL window.
 function reservationsSummaryCacheKey(scope) {
-  return `reservations:summary:${scope?.tenantId || 'global'}`;
+  return `reservations:summary:${scope?.tenantId || 'global'}:${scopeVisibilityCacheSegment(scope)}`;
 }
 
 reservationsRouter.get('/summary', async (req, res, next) => {
@@ -622,9 +633,10 @@ reservationsRouter.put('/:id/additional-drivers', async (req, res, next) => {
 
 reservationsRouter.get('/:id/available-vehicles', async (req, res, next) => {
   try {
-    const reservation = await reservationsService.getById(req.params.id, scopeFor(req));
+    const requestScope = scopeFor(req);
+    const reservation = await reservationsService.getById(req.params.id, requestScope);
     if (!reservation) return res.status(404).json({ error: 'Reservation not found' });
-    const tenantScope = reservation?.tenantId ? { tenantId: reservation.tenantId } : scopeFor(req);
+    const tenantScope = reservation?.tenantId ? { tenantId: reservation.tenantId } : requestScope;
     const tenantWhere = tenantScope.tenantId ? { tenantId: tenantScope.tenantId } : {};
 
     const pickupAt = req.query?.pickupAt ? new Date(String(req.query.pickupAt)) : reservation.pickupAt;
@@ -664,6 +676,10 @@ reservationsRouter.get('/:id/available-vehicles', async (req, res, next) => {
       withTenantSchema(req.user.tenantId, (db) => db.vehicle.findMany({
         where: {
           ...tenantWhere,
+          // Program scoping (2026-07-02): a program-restricted employee only
+          // gets candidates from their program's pool (ANDs with the OR below,
+          // so even the already-assigned vehicle is hidden if out-of-program).
+          ...vehicleProgramWhereForScope(requestScope),
           OR: [
             reservation.vehicleId ? { id: reservation.vehicleId } : undefined,
             { status: { notIn: ['IN_MAINTENANCE', 'OUT_OF_SERVICE', 'SOLD'] } }

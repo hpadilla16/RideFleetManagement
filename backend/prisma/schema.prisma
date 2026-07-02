@@ -223,6 +223,19 @@ enum VehicleProgramCategory {
   BOTH
 }
 
+// EmployeeProgramScope (2026-07-02): per-employee program visibility. Mirrors
+// VehicleProgramCategory but applies to User accounts — a LOANER_ONLY employee
+// keeps every module they normally have but only sees loaner-side data
+// (vehicles LOANER_ONLY/BOTH, reservations DEALERSHIP_LOANER); a RENTAL_ONLY
+// employee sees only rental-side data AND loses the loaner module entirely.
+// BOTH (default) = no filtering. ADMIN/SUPER_ADMIN always bypass, mirroring
+// location scoping (see userProgramScope in lib/tenant-scope.js).
+enum EmployeeProgramScope {
+  RENTAL_ONLY
+  LOANER_ONLY
+  BOTH
+}
+
 enum ListingStatus {
   DRAFT
   PUBLISHED
@@ -1635,6 +1648,10 @@ model User {
   // null/absent or empty = ALL locations (no restriction). ADMIN/SUPER_ADMIN
   // always bypass (see locationScopeFor). Enforced in Fase 2.
   locationIds      String?
+  // Program scoping (2026-07-02): which program's data this employee sees.
+  // BOTH = no restriction (default, zero behavior change). ADMIN/SUPER_ADMIN
+  // always bypass (see userProgramScope). Composes with locationIds.
+  programScope     EmployeeProgramScope @default(BOTH)
   commissionPlanId String?
   commissionPlan   CommissionPlan? @relation("UserCommissionPlan", fields: [commissionPlanId], references: [id])
   createdAt        DateTime        @default(now())

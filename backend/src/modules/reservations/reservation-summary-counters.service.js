@@ -40,8 +40,12 @@ const DEFAULT_MAX_AGE_MS = 5 * 60 * 1000;
  * absent because Postgres unique indexes don't treat NULL values as
  * equal — see the comment in refreshCounters() below for details.
  */
-export async function readFreshCounters({ tenantId, day, maxAgeMs = DEFAULT_MAX_AGE_MS } = {}) {
+export async function readFreshCounters({ tenantId, day, maxAgeMs = DEFAULT_MAX_AGE_MS, programScope = null } = {}) {
   if (!tenantId || !day) return null;
+  // Program scoping (2026-07-02): the table holds whole-tenant counts, so a
+  // program-scoped employee must not read it (their KPIs are filtered).
+  // Miss → caller falls back to the live, scope-filtered aggregation.
+  if (programScope) return null;
   try {
     const row = await prisma.reservationDailyCounter.findUnique({
       where: { tenantId_day: { tenantId, day } }
@@ -82,8 +86,11 @@ export async function readFreshCounters({ tenantId, day, maxAgeMs = DEFAULT_MAX_
  * through to the live aggregation path (already 30s-cached at the
  * route layer in Phase 1).
  */
-export async function refreshCounters({ tenantId, day, dayStart, dayEnd } = {}) {
+export async function refreshCounters({ tenantId, day, dayStart, dayEnd, programScope = null } = {}) {
   if (!tenantId || !day || !dayStart || !dayEnd) return null;
+  // Program scoping (2026-07-02): never write program-filtered counts into
+  // the shared per-tenant row — it must only ever hold whole-tenant numbers.
+  if (programScope) return null;
   try {
     const now = new Date();
     const [pickupsToday, returnsToday, checkedOut, feeAdvisories, noShows] = await Promise.all([
