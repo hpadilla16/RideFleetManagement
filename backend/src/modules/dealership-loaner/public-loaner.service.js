@@ -30,7 +30,7 @@ function loanerPortalBaseUrl() {
 function loanerVehicleWhere(tenantId) {
   return {
     tenantId: tenantId || '__never__',
-    status: { notIn: ['IN_MAINTENANCE', 'OUT_OF_SERVICE'] },
+    status: { notIn: ['IN_MAINTENANCE', 'OUT_OF_SERVICE', 'SOLD'] },
     programCategory: LOANER_PROGRAM_FILTER, // LOANER_ONLY or BOTH
   };
 }

@@ -1032,7 +1032,7 @@ async function rentalAvailabilityCount({ tenantId, vehicleTypeId, pickupAt, retu
       // Vehicles with programCategory=BOTH still surface here. See
       // doc/triangle-inventory-separation-2026-05-08.md.
       programCategory: RENTAL_PROGRAM_FILTER,
-      status: { notIn: ['IN_MAINTENANCE', 'OUT_OF_SERVICE'] }
+      status: { notIn: ['IN_MAINTENANCE', 'OUT_OF_SERVICE', 'SOLD'] }
     },
     select: { id: true }
   });

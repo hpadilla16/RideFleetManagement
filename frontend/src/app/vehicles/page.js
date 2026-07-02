@@ -1338,9 +1338,16 @@ function VehiclesInner({ token, me, logout }) {
                 <option value="RENTAL_ONLY">Rental only</option>
                 <option value="LOANER_ONLY">Loaner only</option>
               </select>
+              <label className="label" style={{ marginBottom: 0 }}>Status</label>
               <select value={editVehicleForm.status} onChange={(e) => setEditVehicleForm({ ...editVehicleForm, status: e.target.value })}>
-                {['AVAILABLE', 'RESERVED', 'ON_RENT', 'IN_MAINTENANCE', 'OUT_OF_SERVICE'].map((s) => <option key={s} value={s}>{s}</option>)}
+                {/* Parity with the vehicle-profile Edit modal ([id]/page.js) — SOLD is a
+                    terminal, locked status (vehicle-status-sync never reactivates it and
+                    the effective-fleet KPI already excludes it). Added 2026-07-02. */}
+                {['AVAILABLE', 'RESERVED', 'ON_RENT', 'IN_MAINTENANCE', 'OUT_OF_SERVICE', 'SOLD'].map((s) => <option key={s} value={s}>{s}</option>)}
               </select>
+              {editVehicleForm.status === 'SOLD' && (
+                <div className="surface-note">SOLD removes the unit from the effective fleet, the planner and the booking engine, and it won&rsquo;t be reactivated automatically.</div>
+              )}
               <div className="row-between"><button type="button" onClick={() => setShowEditVehicle(false)}>Cancel</button><button type="submit">Save Changes</button></div>
             </form>
           </div>

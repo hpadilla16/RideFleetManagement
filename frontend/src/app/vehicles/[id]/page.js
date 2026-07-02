@@ -765,10 +765,13 @@ function VehicleProfileInner({ token, me, logout }) {
                 </div>
                 <div className="grid2">
                   <input type="number" step="0.1" min="5" max="60" placeholder="Fuel tank capacity (gal)" value={editModal.form.fuelTankCapacityGallons} onChange={(e) => setEditField('fuelTankCapacityGallons', e.target.value)} />
-                  <select value={editModal.form.status} onChange={(e) => setEditField('status', e.target.value)}>
+                  <select title="Status" value={editModal.form.status} onChange={(e) => setEditField('status', e.target.value)}>
                     {['AVAILABLE', 'RESERVED', 'ON_RENT', 'IN_MAINTENANCE', 'OUT_OF_SERVICE', 'SOLD'].map((s) => <option key={s} value={s}>{s}</option>)}
                   </select>
                 </div>
+                {editModal.form.status === 'SOLD' && (
+                  <div className="surface-note">SOLD removes the unit from the effective fleet, the planner and the booking engine, and it won&rsquo;t be reactivated automatically.</div>
+                )}
                 <label className="label" style={{ marginBottom: 0 }}>Registration expires</label>
                 <input type="date" value={editModal.form.registrationExpiresAt} onChange={(e) => setEditField('registrationExpiresAt', e.target.value)} />
                 <label className="label" style={{ marginBottom: 0 }}>Value tracker (optional)</label>

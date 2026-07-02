@@ -324,7 +324,11 @@ export async function loadPlannerVehicles({ start, end, locationId = null, vehic
     where: {
       ...(tenantWhere(scope) || {}),
       ...(_effLocIds ? { homeLocationId: { in: _effLocIds } } : {}),
-      ...(vehicleTypeId ? { vehicleTypeId } : {})
+      ...(vehicleTypeId ? { vehicleTypeId } : {}),
+      // SOLD is terminal — sold units must not occupy planner rows
+      // (schema.prisma VehicleStatus comment; added 2026-07-02 with the
+      // Edit-Vehicle SOLD option rollout).
+      status: { not: 'SOLD' }
     },
     orderBy: [{ make: 'asc' }, { model: 'asc' }, { internalNumber: 'asc' }],
     select: {

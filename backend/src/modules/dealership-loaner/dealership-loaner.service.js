@@ -865,7 +865,7 @@ export const dealershipLoanerService = {
       prisma.vehicle.findMany({
         where: {
           ...(tenantWhere || {}),
-          status: { notIn: ['IN_MAINTENANCE', 'OUT_OF_SERVICE'] },
+          status: { notIn: ['IN_MAINTENANCE', 'OUT_OF_SERVICE', 'SOLD'] },
           // Only show vehicles eligible for loaner program (LOANER_ONLY or BOTH).
           // Hides RENTAL_ONLY vehicles from the loaner intake picker so the
           // dealership can't accidentally hand out a service rental as a loaner.

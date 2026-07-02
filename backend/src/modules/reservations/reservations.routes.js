@@ -666,7 +666,7 @@ reservationsRouter.get('/:id/available-vehicles', async (req, res, next) => {
           ...tenantWhere,
           OR: [
             reservation.vehicleId ? { id: reservation.vehicleId } : undefined,
-            { status: { notIn: ['IN_MAINTENANCE', 'OUT_OF_SERVICE'] } }
+            { status: { notIn: ['IN_MAINTENANCE', 'OUT_OF_SERVICE', 'SOLD'] } }
           ].filter(Boolean)
         },
         select: vehicleSelect,
