@@ -3003,8 +3003,16 @@ export const rentalAgreementsService = {
     // only (AUTH_HOLD deposit authorizations excluded — they still appear as
     // rows in the payments table for the record), and "Amount Due" never prints
     // negative. Matches agreement.balance and the reservation page.
+    // 2026-07-02 (RES-756256): VOIDED payments must not count either — the
+    // rollup (recomputeAgreementPaidAndBalance) and the fee engine both query
+    // status: 'PAID', but this print-side sum only excluded AUTH_HOLD, so a
+    // voided sale printed as money collected while the same document showed
+    // the balance still due. Mirror the authoritative filter exactly: only
+    // status PAID rows count (VOID rows still print in the table with their
+    // status, for the record — same treatment as AUTH_HOLD).
     const paidAmountForPrint = Number(paymentsForPrint
-      .filter((p) => String(p.method || '').toUpperCase() !== 'AUTH_HOLD')
+      .filter((p) => String(p.method || '').toUpperCase() !== 'AUTH_HOLD'
+        && String(p.status || 'PAID').toUpperCase() === 'PAID')
       .reduce((s, p) => s + Number(p.amount || 0), 0).toFixed(2));
     const amountDueForPrint = Math.max(0, Number((Number(agreement?.total || 0) - paidAmountForPrint).toFixed(2)));
 
