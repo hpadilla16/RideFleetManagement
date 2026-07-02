@@ -3,6 +3,7 @@ import { prisma } from '../../lib/prisma.js';
 import { uploadObject, safePath, getSignedUrl } from '../../lib/storage/supabase-storage.js';
 import { decodePhotoValue, getPhotosBucket } from '../rental-agreements/inspection-photos.js';
 import { buildIncidentReportHtml } from './incident-report-pdf.js';
+import { computeChargeSection } from './incident-report-charges.js';
 
 // =====================================================================
 // Damage / Incident Report service. Builds a reservation-anchored,
@@ -507,18 +508,19 @@ async function assembleReport(row, reservation) {
     ? [ag.customerFirstName, ag.customerLastName].filter(Boolean).join(' ')
     : [cust?.firstName, cust?.lastName].filter(Boolean).join(' ');
 
-  // §6 charges: the per-report selection (chargeIdsJson) if set, else all selected charges.
+  // §6 charges: the per-report selection (chargeIdsJson) if set, else all
+  // selected charges. Tax is recomputed per the picked lines — see
+  // incident-report-charges.js (TL-ZE40809640BA fix, 2026-07-02).
   let pickedIds = null;
   try {
     const ids = row.chargeIdsJson ? JSON.parse(row.chargeIdsJson) : null;
     if (Array.isArray(ids) && ids.length) pickedIds = new Set(ids.map(String));
   } catch {}
-  const charges = (ag?.charges || [])
-    .filter((c) => (pickedIds ? pickedIds.has(String(c.id)) : c.selected !== false))
-    .map((c) => ({ name: c.name, total: Number(c.total) }));
-  const chargeTotal = charges.reduce((s, c) => s + (Number.isFinite(c.total) ? c.total : 0), 0);
-  const depositApplied = row.depositApplied == null ? null : Number(row.depositApplied);
-  const balanceDue = charges.length ? Math.max(0, chargeTotal - (depositApplied || 0)) : null;
+  const chargeSection = computeChargeSection({
+    rows: ag?.charges || [],
+    pickedIds,
+    depositApplied: row.depositApplied
+  });
 
   // §8 photos: signed URLs for evidence with a photo
   const photos = [];
@@ -572,15 +574,17 @@ async function assembleReport(row, reservation) {
       violationType: row.narrative || row.title,
       odorNoted: row.odorNoted,
       conditionAtReturn: row.conditionAtReturn,
-      chargeApplied: charges.length ? `${charges.map((c) => c.name).join(', ')} — deposit applied toward total` : null
+      chargeApplied: chargeSection.feeNames.length ? `${chargeSection.feeNames.join(', ')} — deposit applied toward total` : null
     },
     evidence: (row.evidence || []).map((e) => ({ ordinal: e.ordinal, location: e.location, description: e.description, status: e.evidenceStatus })),
     clauses: citedClauses,
-    charges: charges.length ? { lines: charges, total: chargeTotal, depositApplied, balanceDue } : { lines: [] },
+    charges: chargeSection.lines.length
+      ? { lines: chargeSection.lines, total: chargeSection.total, depositApplied: chargeSection.depositApplied, balanceDue: chargeSection.balanceDue }
+      : { lines: [] },
     rebuttalPoints,
     photos,
     certification: { name: row.certifiedByName, title: row.certifiedByTitle, signatureDataUrl: row.signatureDataUrl, date: fmtDate(row.certifiedAt) }
   };
 }
 
-export const __test = { makeReportNumber, reportingWindowHours, serialize, daysBetween, DEFAULT_CLAUSES, TYPE_META };
+export const __test = { makeReportNumber, reportingWindowHours, serialize, daysBetween, DEFAULT_CLAUSES, TYPE_META, computeChargeSection };

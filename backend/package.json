@@ -19,7 +19,7 @@
     "test:planner": "node --test src/modules/planner/planner.service.test.mjs",
     "test:rates": "node --test src/modules/rates/revenue-pricing.test.mjs",
     "test:market-scraper": "node --test src/modules/market-scraper/market-scrape-profile.test.mjs src/modules/market-scraper/market-scrape-runner.test.mjs src/modules/market-scraper/market-scrape-comparison.test.mjs src/modules/market-scraper/market-scrape-correction.test.mjs",
-    "test:incident": "node --test src/modules/incident-report/incident-report-pdf.test.mjs src/modules/incident-report/incident-report.service.test.mjs",
+    "test:incident": "node --test src/modules/incident-report/incident-report-pdf.test.mjs src/modules/incident-report/incident-report.service.test.mjs src/modules/incident-report/incident-report-charges.test.mjs",
     "test:dob": "node --test src/lib/dob.test.mjs",
     "test:portal": "node --test src/modules/customer-portal/customer-portal-self-service.test.mjs",
     "test:carsharing": "node --test src/modules/car-sharing/car-sharing-smoke.test.mjs src/modules/car-sharing/car-sharing-fulfillment.test.mjs src/modules/car-sharing/car-sharing-handoff.test.mjs",
