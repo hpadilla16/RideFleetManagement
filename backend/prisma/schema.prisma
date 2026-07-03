@@ -3388,6 +3388,7 @@ model MarketScrapeProfile {
 
   runs         MarketScrapeRun[]
   observations MarketObservation[]
+  rateOffers   RateOffer[]
 
   @@unique([tenantId, name])
   @@index([tenantId, active])
@@ -3446,6 +3447,7 @@ model MarketScrapeRun {
   errorMessage String?
 
   observations MarketObservation[]
+  rateOffers   RateOffer[]
 
   @@index([profileId, startedAt])
 }
@@ -3488,6 +3490,79 @@ model MarketObservation {
   @@index([profileId, pickupDate, sipp])
   @@index([runId])
   @@index([pickupDate, sipp])
+}
+
+// Where a RateOffer was scraped FROM (2026-07-02). The direct-Expedia scraper
+// has been down (blocked) since Jul 1, so ingest pivots to the Kayak
+// metasearch engine, which returns offers from many OTAs in one query.
+enum RateSource {
+  // Kayak metasearch — primary source. One search yields offers quoted by
+  // multiple OTAs (Expedia, Priceline, EconomyBookings, Kayak itself...).
+  KAYAK
+  // Legacy direct-Expedia scraper (down since 2026-07-01). Kept so historic
+  // rows and any future revival remain representable.
+  EXPEDIA_DIRECT
+  // CarRentals.com direct.
+  CARRENTALS
+}
+
+// Market-intelligence rate offers (2026-07-02) — the new Kayak-based ingest
+// table, replacing the direct-Expedia MarketObservation pipeline that went
+// down Jul 1. Each row is one offer identified by the canonical triple:
+//   source   — where we scraped (KAYAK metasearch, direct OTA...)
+//   provider — the OTA quoting the price (Expedia, Priceline, ...)
+//   supplier — the rental agency behind the car (Hertz, Zezgo, Dollar...)
+// The scraper upserts on rateoffer_identity_key; `id` is DB-generated and
+// never supplied by the scraper.
+model RateOffer {
+  // DB-side default (not client cuid()) — the droplet scraper writes raw SQL
+  // and must be able to omit id entirely (Innovation review 2026-07-02).
+  id    String          @id @default(dbgenerated("(gen_random_uuid())::text"))
+  runId String
+  run   MarketScrapeRun @relation(fields: [runId], references: [id], onDelete: Cascade)
+
+  // Denormalized profileId so we can query offers across runs of the same
+  // profile (e.g. "30-day price history for Compact SUV at SJU"). Always
+  // equal to run.profileId.
+  profileId String
+  profile   MarketScrapeProfile @relation(fields: [profileId], references: [id], onDelete: Cascade)
+
+  observedAt DateTime @default(now())
+
+  // Where we scraped: KAYAK metasearch, direct OTA...
+  source   RateSource
+  // OTA quoting the price: Expedia, Priceline, EconomyBookings, KAYAK...
+  provider String
+  // Rental agency: Hertz, Zezgo, Dollar... "" when unknown — NOT NULL so the
+  // dedup unique works (Postgres treats NULLs as distinct in unique indexes).
+  supplier String
+
+  pickupDate DateTime @db.Date
+  returnDate DateTime @db.Date
+  lorDays    Int
+
+  // ACRISS code, best-effort mapping (lossy — secondary to rawCategory).
+  sipp        String
+  // Raw source label ("Compact SUV"...). Part of the identity key because the
+  // SIPP mapping is lossy.
+  rawCategory String
+  // "Nissan Kicks or similar".
+  carExample  String?
+
+  dailyPrice          Decimal? @db.Decimal(10, 2)
+  totalPrice          Decimal? @db.Decimal(10, 2)
+  // Total / LOR — the "real" all-in per-day cost including fees & taxes, vs.
+  // the pre-tax teaser dailyPrice sources show prominently.
+  effectiveDailyPrice Decimal? @db.Decimal(10, 2)
+  currency            String   @default("USD")
+
+  // Reuses the existing MarketObservationStatus enum on purpose — same
+  // FOUND/CLOSED/UNMAPPED/ERROR lifecycle applies to offers.
+  status MarketObservationStatus @default(FOUND)
+
+  @@unique([runId, source, provider, supplier, rawCategory, sipp, pickupDate, returnDate], name: "rateoffer_identity_key", map: "rateoffer_identity_key")
+  @@index([source, provider, pickupDate, sipp])
+  @@index([profileId, observedAt])
 }
 
 // =============================================================================
