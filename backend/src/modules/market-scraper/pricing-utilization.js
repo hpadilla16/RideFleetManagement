@@ -6,7 +6,8 @@
  * reuse its `computeData` so the two can never disagree:
  *
  *   utilization[type][day] = reserved / capacity
- *     capacity = vehicles of the type, status NOT IN (OUT_OF_SERVICE, SOLD), at the location
+ *     capacity = vehicles of the type, status NOT IN (OUT_OF_SERVICE, SOLD, IN_MAINTENANCE), at the location
+ *                (IN_MAINTENANCE excluded since 2026-07-02 — cars in the shop are not sellable capacity)
  *     reserved = confirmed-set reservations (NEW/CONFIRMED/CHECKED_OUT/PENDING_FRANCHISE_IMPORT)
  *                whose pickup ≤ day < return, at the location (pickupLocationId)
  *

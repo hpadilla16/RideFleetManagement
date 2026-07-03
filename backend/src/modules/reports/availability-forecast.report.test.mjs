@@ -34,6 +34,7 @@ function makePrisma({ vehicleTypes = [], reservations = [], throwOn = {} } = {})
           id: vt.id, code: vt.code, name: vt.name,
           vehicles: (vt.vehicles || []).filter((v) => {
             if (vehicleWhere.status?.not && v.status === vehicleWhere.status.not) return false;
+            if (vehicleWhere.status?.notIn && vehicleWhere.status.notIn.includes(v.status)) return false;
             if (vehicleWhere.homeLocationId && v.homeLocationId !== vehicleWhere.homeLocationId) return false;
             return true;
           }).map((v) => ({ id: v.id })),
@@ -52,6 +53,15 @@ function makePrisma({ vehicleTypes = [], reservations = [], throwOn = {} } = {})
           if (where.pickupLocationId && r.pickupLocationId !== where.pickupLocationId) return false;
           if (where.vehicleTypeId?.not !== undefined && r.vehicleTypeId === where.vehicleTypeId.not) return false;
           if (typeof where.vehicleTypeId === 'string' && r.vehicleTypeId !== where.vehicleTypeId) return false;
+          // Widened attribution clause: booked class OR assigned vehicle.
+          if (Array.isArray(where.OR)) {
+            const ok = where.OR.some((cond) => {
+              if (cond.vehicleTypeId?.not === null) return r.vehicleTypeId != null;
+              if (cond.vehicleId?.not === null) return r.vehicleId != null;
+              return false;
+            });
+            if (!ok) return false;
+          }
           if (where.pickupAt?.lt && new Date(r.pickupAt) >= where.pickupAt.lt) return false;
           if (where.returnAt?.gt && new Date(r.returnAt) <= where.returnAt.gt) return false;
           return true;
@@ -63,6 +73,7 @@ function makePrisma({ vehicleTypes = [], reservations = [], throwOn = {} } = {})
           returnAt: r.returnAt,
           createdAt: r.createdAt,
           vehicleTypeId: r.vehicleTypeId,
+          vehicleId: r.vehicleId || null,
           customer: r.customer || null,
           vehicle: r.vehicle || null,
           pickupLocation: r.pickupLocation || null,
@@ -81,15 +92,19 @@ function vt({ id, code, name, tenantId, capacity, location = null }) {
   return { id, code, name, tenantId, vehicles };
 }
 
-// Build a confirmed reservation
-function res({ id, typeId, tenantId, pickup, ret, location = null, status = 'CONFIRMED', created = null }) {
+// Build a confirmed reservation. `typeId` is the BOOKED class; pass
+// `vehicleId` (+ `assignedTypeId`, defaults to typeId) to simulate an
+// assigned unit — that's what drives the assigned-vehicle type attribution.
+function res({ id, typeId, tenantId, pickup, ret, location = null, status = 'CONFIRMED', created = null, vehicleId = null, assignedTypeId = null }) {
   return {
-    id, tenantId, vehicleTypeId: typeId,
+    id, tenantId, vehicleTypeId: typeId ?? null,
     status,
     pickupAt: new Date(pickup),
     returnAt: new Date(ret),
     createdAt: created ? new Date(created) : new Date(new Date(pickup).getTime() - 7 * 86400000),
     pickupLocationId: location,
+    vehicleId,
+    vehicle: vehicleId ? { vehicleTypeId: assignedTypeId ?? typeId ?? null } : null,
   };
 }
 
@@ -233,6 +248,110 @@ test('computeData: location filter narrows capacity AND demand', async () => {
   assert.equal(locL1.fleet.capacity, 2); // only L1 vehicles
   assert.equal(locL1.fleet.reservedByDay[0], 1); // only L1 reservation
   assert.equal(locL1.filters.locationId, 'L1');
+});
+
+// ---------------------------------------------------------------------------
+// 2026-07-02 regression — FJAR Wrangler bug (prod case)
+//
+// Reality: Wrangler capacity 3 = UNIT-025 IN_MAINTENANCE + UNIT-032
+// CHECKED_OUT + UNIT-054 CHECKED_OUT → 0 available. The report said 2 because
+// (a) capacity counted the unit in the shop and (b) TL-ZE40790963BA was
+// booked under a different class but ASSIGNED Wrangler UNIT-032, and the
+// grid grouped by booked class.
+// ---------------------------------------------------------------------------
+
+// Wrangler type with prod-like statuses; CAR is the booked class of the
+// cross-class reservation. Mid-day pickup/return like the location test so
+// wall-clock days match the tenant-TZ buckets.
+function fjarFixture() {
+  return {
+    vehicleTypes: [
+      {
+        id: 'TW', code: 'WRANGLER', name: 'Jeep Wrangler', tenantId: 't1',
+        vehicles: [
+          { id: 'UNIT-025', status: 'IN_MAINTENANCE', homeLocationId: null },
+          { id: 'UNIT-032', status: 'CHECKED_OUT',    homeLocationId: null },
+          { id: 'UNIT-054', status: 'CHECKED_OUT',    homeLocationId: null },
+        ],
+      },
+      vt({ id: 'TC', code: 'CAR', name: 'Compact Car', tenantId: 't1', capacity: 2 }),
+    ],
+    reservations: [
+      // Booked under CAR class, but assigned Wrangler UNIT-032 → must count as Wrangler.
+      res({ id: 'tl-963', typeId: 'TC', assignedTypeId: 'TW', vehicleId: 'UNIT-032', tenantId: 't1', status: 'CHECKED_OUT', pickup: '2026-07-01T14:00:00Z', ret: '2026-07-05T14:00:00Z' }),
+      // Booked AND assigned Wrangler.
+      res({ id: 'r-054', typeId: 'TW', vehicleId: 'UNIT-054', tenantId: 't1', status: 'CHECKED_OUT', pickup: '2026-07-01T14:00:00Z', ret: '2026-07-05T14:00:00Z' }),
+    ],
+  };
+}
+
+test('FJAR case: maintenance unit out of capacity + assigned-vehicle attribution → Wrangler 0 available', async () => {
+  const prisma = makePrisma(fjarFixture());
+  const out = await computeData({
+    tenantId: 't1', from: '2026-07-02', to: '2026-07-02', query: {},
+  }, { prisma });
+
+  const wrangler = out.types.find((t) => t.id === 'TW');
+  const car = out.types.find((t) => t.id === 'TC');
+
+  // Root cause B: UNIT-025 (IN_MAINTENANCE) is not rentable capacity.
+  assert.equal(wrangler.capacity, 2);
+  // Root cause A: both checked-out units count as Wrangler demand, even the
+  // one booked under the CAR class.
+  assert.equal(wrangler.reservedByDay[0], 2);
+  assert.equal(wrangler.availableByDay[0], 0);
+  // The cross-class reservation must NOT also sit under its booked class.
+  assert.equal(car.capacity, 2);
+  assert.equal(car.reservedByDay[0], 0);
+  assert.equal(car.availableByDay[0], 2);
+  // Fleet totals line up: capacity 4 (2 Wrangler + 2 Car), 2 reserved.
+  assert.equal(out.fleet.capacity, 4);
+  assert.equal(out.fleet.reservedByDay[0], 2);
+});
+
+test('unassigned reservation still counts under its booked class', async () => {
+  const fixture = fjarFixture();
+  fixture.reservations = [
+    res({ id: 'u1', typeId: 'TW', tenantId: 't1', pickup: '2026-07-02T14:00:00Z', ret: '2026-07-03T14:00:00Z' }),
+  ];
+  const prisma = makePrisma(fixture);
+  const out = await computeData({
+    tenantId: 't1', from: '2026-07-02', to: '2026-07-02', query: {},
+  }, { prisma });
+  const wrangler = out.types.find((t) => t.id === 'TW');
+  const car = out.types.find((t) => t.id === 'TC');
+  assert.equal(wrangler.reservedByDay[0], 1);
+  assert.equal(car.reservedByDay[0], 0);
+});
+
+test('a single cross-class assigned reservation is never double-counted', async () => {
+  const fixture = fjarFixture();
+  fixture.reservations = [
+    res({ id: 'x1', typeId: 'TC', assignedTypeId: 'TW', vehicleId: 'UNIT-032', tenantId: 't1', status: 'CHECKED_OUT', pickup: '2026-07-02T14:00:00Z', ret: '2026-07-03T14:00:00Z' }),
+  ];
+  const prisma = makePrisma(fixture);
+  const out = await computeData({
+    tenantId: 't1', from: '2026-07-02', to: '2026-07-02', query: {},
+  }, { prisma });
+  const wrangler = out.types.find((t) => t.id === 'TW');
+  const car = out.types.find((t) => t.id === 'TC');
+  // Attribution REPLACES the booked class: 1 total, under Wrangler only.
+  assert.equal(wrangler.reservedByDay[0], 1);
+  assert.equal(car.reservedByDay[0], 0);
+  assert.equal(out.fleet.reservedByDay[0], 1);
+});
+
+test('assigned reservation with NULL booked class still counts (widened where)', async () => {
+  const fixture = fjarFixture();
+  fixture.reservations = [
+    res({ id: 'n1', typeId: null, assignedTypeId: 'TW', vehicleId: 'UNIT-054', tenantId: 't1', status: 'CHECKED_OUT', pickup: '2026-07-02T14:00:00Z', ret: '2026-07-03T14:00:00Z' }),
+  ];
+  const prisma = makePrisma(fixture);
+  const out = await computeData({
+    tenantId: 't1', from: '2026-07-02', to: '2026-07-02', query: {},
+  }, { prisma });
+  const wrangler = out.types.find((t) => t.id === 'TW');
+  assert.equal(wrangler.reservedByDay[0], 1);
 });
 
 test('computeData: lastYear is null unless compareLastYear=true', async () => {

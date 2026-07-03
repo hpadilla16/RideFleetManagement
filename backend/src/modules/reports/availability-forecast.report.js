@@ -33,10 +33,15 @@
  *   GET /api/reports/availability-forecast/cell?type=<id>&day=<iso>&locationId=<?>
  *     Returns the specific reservations driving demand for that type×day.
  *
- * Math (unchanged from Round 24d for the core grid):
- *   capacity[type]      = count(Vehicle where vehicleType=type, status!=RETIRED)
+ * Math for the core grid (2026-07-02 revision — FJAR Wrangler bug):
+ *   capacity[type]      = count(Vehicle where vehicleType=type,
+ *                              status NOT IN (OUT_OF_SERVICE, SOLD, IN_MAINTENANCE))
  *   reserved[type][day] = count(Reservation where pickupAt<=day<returnAt
- *                              and status ∈ confirmed-set)
+ *                              and status ∈ confirmed-set),
+ *                         attributed to the ASSIGNED vehicle's type when a
+ *                         vehicle is assigned, else the booked class
+ *                         (reservation.vehicleTypeId). One bucket per
+ *                         reservation — attribution REPLACES, never adds.
  *   available[type][day]= max(0, capacity - reserved)
  *
  * Confirmed-set = NEW, CONFIRMED, CHECKED_OUT, PENDING_FRANCHISE_IMPORT.
@@ -222,7 +227,20 @@ function buildReservationWhere({ tenantId, locationId, statusList, pickupBefore,
   // stale data — vehicle was physically returned but never closed in
   // the system. Counting them against future availability would
   // double-book the unit.
-  const where = { tenantId, status: { in: statusList }, vehicleTypeId: { not: null }, overdueIgnored: false };
+  //
+  // 2026-07-02: was `vehicleTypeId: { not: null }`, which silently dropped
+  // reservations that have an ASSIGNED vehicle but a null booked class. An
+  // assigned unit is real demand regardless of how the booking was classed,
+  // so require booked class OR assigned vehicle.
+  const where = {
+    tenantId,
+    status: { in: statusList },
+    OR: [
+      { vehicleTypeId: { not: null } },
+      { vehicleId: { not: null } },
+    ],
+    overdueIgnored: false,
+  };
   if (locationId) where.pickupLocationId = locationId;
   if (pickupBefore) where.pickupAt = { lt: pickupBefore };
   if (returnAfter) where.returnAt = { gt: returnAfter };
@@ -292,7 +310,13 @@ function flooredReservations(reservations, tz) {
     const p = startOfDayInTz(new Date(r.pickupAt), tz);
     const rt = startOfDayInTz(new Date(r.returnAt), tz);
     out.push({
-      vehicleTypeId: r.vehicleTypeId,
+      // 2026-07-02 (FJAR Wrangler bug): when a vehicle is ASSIGNED, the unit
+      // that is actually out belongs to the assigned vehicle's type, not the
+      // booked class — a Wrangler on the road under a compact booking must
+      // consume Wrangler availability. Attribution REPLACES the booked class
+      // (one bucket per reservation — never double-counted). Unassigned
+      // reservations fall back to the booked class as before.
+      vehicleTypeId: r.vehicle?.vehicleTypeId || r.vehicleTypeId,
       pickupDayMs: p ? p.getTime() : NaN,
       returnDayMs: rt ? rt.getTime() : NaN,
     });
@@ -330,7 +354,13 @@ async function computeSoldOutByMonth({ prisma, tenantId, locationId, vehicleType
       tenantId, locationId, statusList: CONFIRMED_STATUSES,
       pickupBefore: endMonth, returnAfter: startMonth,
     }),
-    select: { id: true, vehicleTypeId: true, pickupAt: true, returnAt: true },
+    // vehicle.vehicleTypeId: sold-out history is a supply-side availability
+    // metric, so it uses the same assigned-vehicle type attribution as the
+    // main grid (see flooredReservations).
+    select: {
+      id: true, vehicleTypeId: true, pickupAt: true, returnAt: true,
+      vehicle: { select: { vehicleTypeId: true } },
+    },
   });
 
   // Perf (2026-06-05): floor each reservation's pickup/return to its
@@ -378,6 +408,15 @@ async function computeLastYearOverlay({ prisma, tenantId, locationId, fromDate, 
   const lyToDate = addDays(toDate, -365);
   const lyWindowEnd = addDays(lyToDate, 1);
 
+  // 2026-07-02: NO assigned-vehicle type regrouping here (unlike the main
+  // grid). Both outputs of this overlay — utilizationByDay and bookingPace —
+  // are FLEET-level (reserved / fleetCapacity), never grouped by type, so
+  // which type a reservation is attributed to cannot change the numbers.
+  // Conceptually the pace/lead-time curves measure DEMAND as booked at
+  // booking time anyway, so the booked class would be the right lens if
+  // per-type grouping were ever added. The widened buildReservationWhere
+  // (booked class OR assigned vehicle) DOES apply: an assigned reservation
+  // with a null booked class is still real demand.
   const lyReservations = await prisma.reservation.findMany({
     where: buildReservationWhere({
       tenantId, locationId, statusList: CONFIRMED_STATUSES,
@@ -439,9 +478,12 @@ async function computeData({ tenantId, from, to, query }, deps = {}) {
   for (let i = 0; i < safeNumDays; i++) days.push(addDaysInTz(fromDate, i));
 
   // 1. Vehicle types + capacity (filtered by location if specified).
-  // Exclude OUT_OF_SERVICE (retired/totaled holds) AND SOLD (terminal —
-  // 2026-05-28). Both fall out of fleet capacity for forecasting.
-  const vehicleWhere = { status: { notIn: ['OUT_OF_SERVICE', 'SOLD'] } };
+  // Exclude OUT_OF_SERVICE (retired/totaled holds), SOLD (terminal —
+  // 2026-05-28), AND IN_MAINTENANCE (2026-07-02: a car in the shop is not
+  // rentable, so it must not count as forecast capacity — fleet-status
+  // precedent: the OOS KPI already rolls IN_MAINTENANCE + OUT_OF_SERVICE
+  // together). All fall out of fleet capacity for forecasting.
+  const vehicleWhere = { status: { notIn: ['OUT_OF_SERVICE', 'SOLD', 'IN_MAINTENANCE'] } };
   if (locationId) vehicleWhere.homeLocationId = locationId;
   const vehicleTypes = await prisma.vehicleType.findMany({
     where: { tenantId },
@@ -458,7 +500,12 @@ async function computeData({ tenantId, from, to, query }, deps = {}) {
       tenantId, locationId, statusList: CONFIRMED_STATUSES,
       pickupBefore: windowEnd, returnAfter: fromDate,
     }),
-    select: { id: true, vehicleTypeId: true, pickupAt: true, returnAt: true, createdAt: true },
+    // vehicle.vehicleTypeId (slim relation select) powers the assigned-vehicle
+    // type attribution in flooredReservations.
+    select: {
+      id: true, vehicleTypeId: true, pickupAt: true, returnAt: true, createdAt: true,
+      vehicle: { select: { vehicleTypeId: true } },
+    },
   });
 
   // 3. Per-type daily availability. `days` are tenant-TZ-anchored midnight
@@ -619,7 +666,14 @@ async function cellDrillDownHandler(req, res, { tenantId }) {
   const where = {
     tenantId,
     status: { in: CONFIRMED_STATUSES },
-    vehicleTypeId: typeId,
+    // 2026-07-02: match the grid's type attribution (see flooredReservations):
+    // an ASSIGNED reservation belongs to the assigned vehicle's type; only
+    // unassigned reservations fall back to the booked class. Otherwise the
+    // drill panel would disagree with the cell count it explains.
+    OR: [
+      { vehicleId: null, vehicleTypeId: typeId },
+      { vehicle: { vehicleTypeId: typeId } },
+    ],
     pickupAt: { lt: dayEnd },
     returnAt: { gt: day },
   };
