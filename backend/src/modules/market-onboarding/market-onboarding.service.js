@@ -155,6 +155,11 @@ export const marketOnboardingService = {
       const profileIds = profiles.map((p) => p.id);
       if (profileIds.length) {
         const since = new Date(Date.now() - DISCOVERY_LOOKBACK_DAYS * 24 * 60 * 60 * 1000);
+        // NOTE (2026-07-02, RateOffer cutover): this discovery read is legacy-
+        // table-only ON PURPOSE for now (fails safe: Kayak-only airports just
+        // fall back to the manual SIPP catalog). When switching it to the
+        // rate-offer-source adapter, use purpose 'pricing' — medianDaily seeds
+        // a live Rate via applyMapping, NOT a display surface.
         const obs = await prisma.marketObservation.findMany({
           where: { profileId: { in: profileIds }, observedAt: { gte: since }, status: 'FOUND', dailyPrice: { not: null } },
           select: { sipp: true, dailyPrice: true }

@@ -100,12 +100,14 @@ describe('aggregateCheapestBySippDate', () => {
 function installPrismaMock() {
   if (!prisma.marketScrapeRun) prisma.marketScrapeRun = {};
   if (!prisma.marketObservation) prisma.marketObservation = {};
+  if (!prisma.rateOffer) prisma.rateOffer = {};
   if (!prisma.rateDailyPrice) prisma.rateDailyPrice = {};
   if (!prisma.vehicleType) prisma.vehicleType = {};
 
   const state = {
     run: null,           // findFirst returns this
     observations: [],    // findMany returns this
+    offers: [],          // rateOffer.findMany returns this (2026-07 dual-read)
     dailyPrices: [],     // findMany returns this
     vehicleTypes: []     // findMany returns this
   };
@@ -113,12 +115,14 @@ function installPrismaMock() {
   const orig = {
     runFindFirst: prisma.marketScrapeRun.findFirst,
     obsFindMany: prisma.marketObservation.findMany,
+    offerFindMany: prisma.rateOffer.findMany,
     rdpFindMany: prisma.rateDailyPrice.findMany,
     vtFindMany: prisma.vehicleType.findMany
   };
 
   prisma.marketScrapeRun.findFirst = async () => state.run;
   prisma.marketObservation.findMany = async () => state.observations;
+  prisma.rateOffer.findMany = async () => state.offers;
   prisma.rateDailyPrice.findMany = async () => state.dailyPrices;
   prisma.vehicleType.findMany = async () => state.vehicleTypes;
 
@@ -127,6 +131,7 @@ function installPrismaMock() {
     restore() {
       prisma.marketScrapeRun.findFirst = orig.runFindFirst;
       prisma.marketObservation.findMany = orig.obsFindMany;
+      prisma.rateOffer.findMany = orig.offerFindMany;
       prisma.rateDailyPrice.findMany = orig.rdpFindMany;
       prisma.vehicleType.findMany = orig.vtFindMany;
     }
@@ -245,5 +250,100 @@ describe('computeRunComparison', () => {
       computeRunComparison('run-missing', { scope: { tenantId: 'tenant-1' } }),
       (err) => err.httpStatus === 404
     );
+  });
+
+  // ----- 2026-07 RateOffer cutover: dual-read through rate-offer-source ----
+
+  function makeOffer(over = {}) {
+    return {
+      id: 'offer-1',
+      runId: 'run-1',
+      profileId: 'profile-1',
+      observedAt: new Date('2026-07-02T08:00:00Z'),
+      source: 'EXPEDIA_DIRECT',
+      provider: 'Expedia',
+      supplier: 'Hertz',
+      pickupDate: new Date('2026-07-10'),
+      returnDate: new Date('2026-07-13'),
+      lorDays: 3,
+      sipp: 'ECAR',
+      rawCategory: 'Economy',
+      dailyPrice: 25,
+      totalPrice: 75,
+      effectiveDailyPrice: 25,
+      status: 'FOUND',
+      ...over
+    };
+  }
+
+  it('produces comparison rows from a run whose children are RateOffer rows (no legacy observations)', async () => {
+    mock.state.run = { id: 'run-1', profile: makeProfile() };
+    mock.state.observations = []; // Kayak-era runs write RateOffer only
+    mock.state.offers = [
+      makeOffer({ id: 'o1', supplier: 'Hertz', dailyPrice: 25 }),
+      makeOffer({ id: 'o2', supplier: 'Payless', provider: 'CarRentals', source: 'CARRENTALS', dailyPrice: 22, totalPrice: 66, effectiveDailyPrice: 22 })
+    ];
+    mock.state.vehicleTypes = [{ id: 'vt-ecar', tenantId: 'tenant-1', code: 'ECAR', name: 'Economy' }];
+    mock.state.dailyPrices = [
+      { rateId: 'rate-1', vehicleTypeId: 'vt-ecar', date: new Date('2026-07-10'), daily: 26 }
+    ];
+
+    const r = await computeRunComparison('run-1', { scope: { tenantId: 'tenant-1' } });
+    assert.equal(r.rows.length, 1);
+    const row = r.rows[0];
+    assert.equal(row.date, '2026-07-10');
+    assert.equal(row.marketCheapest, 22);
+    assert.equal(row.marketVendor, 'Payless');
+    assert.equal(row.marketSampled, 2);
+    assert.equal(row.suggestedPrice, 21); // 22 - $1
+    assert.equal(row.currentPrice, 26);
+    assert.equal(row.willUpdate, true);
+  });
+
+  it('collapses multi-provider quotes for the same supplier into one ladder entry (agency min across OTAs)', async () => {
+    mock.state.run = { id: 'run-1', profile: makeProfile({ targetRateId: null }) };
+    mock.state.offers = [
+      makeOffer({ id: 'o1', supplier: 'Sixt', provider: 'Priceline', source: 'CARRENTALS', dailyPrice: 30 }),
+      makeOffer({ id: 'o2', supplier: 'Sixt', provider: 'EconomyBookings', source: 'CARRENTALS', dailyPrice: 27 }),
+      makeOffer({ id: 'o3', supplier: 'Avis', provider: 'Expedia', source: 'EXPEDIA_DIRECT', dailyPrice: 35 })
+    ];
+
+    const r = await computeRunComparison('run-1', { scope: { tenantId: 'tenant-1' } });
+    assert.equal(r.rows.length, 1);
+    const row = r.rows[0];
+    // Sixt collapses to its cheapest quote across providers → ladder is
+    // [Sixt 27, Avis 35]: two agencies, not three OTA listings.
+    assert.equal(row.marketCheapest, 27);
+    assert.equal(row.marketVendor, 'Sixt');
+    assert.equal(row.marketSampled, 3); // raw quotes sampled stays 3
+  });
+
+  it('excludes offers with an empty supplier from the competitive rows', async () => {
+    mock.state.run = { id: 'run-1', profile: makeProfile({ targetRateId: null }) };
+    mock.state.offers = [
+      makeOffer({ id: 'anon', supplier: '', dailyPrice: 5 }), // anonymous lowball must not win
+      makeOffer({ id: 'named', supplier: 'Dollar', dailyPrice: 28 })
+    ];
+
+    const r = await computeRunComparison('run-1', { scope: { tenantId: 'tenant-1' } });
+    assert.equal(r.rows.length, 1);
+    assert.equal(r.rows[0].marketCheapest, 28);
+    assert.equal(r.rows[0].marketVendor, 'Dollar');
+    assert.equal(r.rows[0].marketSampled, 1);
+  });
+
+  it('gates KAYAK-source offers out of the comparison while KAYAK_EFFECTIVE_IS_ALL_IN is unset (purpose=pricing)', async () => {
+    delete process.env.KAYAK_EFFECTIVE_IS_ALL_IN;
+    mock.state.run = { id: 'run-1', profile: makeProfile({ targetRateId: null }) };
+    mock.state.offers = [
+      makeOffer({ id: 'kayak', source: 'KAYAK', provider: 'Priceline', supplier: 'Sixt', dailyPrice: 10 }), // teaser
+      makeOffer({ id: 'direct', source: 'EXPEDIA_DIRECT', provider: 'Expedia', supplier: 'Hertz', dailyPrice: 25 })
+    ];
+
+    const r = await computeRunComparison('run-1', { scope: { tenantId: 'tenant-1' } });
+    assert.equal(r.rows.length, 1);
+    // The $10 Kayak teaser must NOT drive the suggestion — only the direct row.
+    assert.equal(r.rows[0].marketCheapest, 25);
+    assert.equal(r.rows[0].marketVendor, 'Hertz');
   });
 });

@@ -12,12 +12,14 @@ import { applyRunSuggestions } from './market-scrape-correction.service.js';
 function installMock() {
   if (!prisma.marketScrapeRun) prisma.marketScrapeRun = {};
   if (!prisma.marketObservation) prisma.marketObservation = {};
+  if (!prisma.rateOffer) prisma.rateOffer = {};
   if (!prisma.vehicleType) prisma.vehicleType = {};
   if (!prisma.rateDailyPrice) prisma.rateDailyPrice = {};
 
   const state = {
     run: null,
     observations: [],
+    offers: [], // RateOffer children (2026-07 dual-read via rate-offer-source)
     vehicleTypes: [],
     dailyPrices: [],
     runUpdateArgs: null,
@@ -29,6 +31,7 @@ function installMock() {
     runFindFirst: prisma.marketScrapeRun.findFirst,
     runUpdate: prisma.marketScrapeRun.update,
     obsFindMany: prisma.marketObservation.findMany,
+    offerFindMany: prisma.rateOffer.findMany,
     vtFindMany: prisma.vehicleType.findMany,
     rdpFindMany: prisma.rateDailyPrice.findMany,
     importDailyPrices: ratesService.importDailyPrices
@@ -40,6 +43,7 @@ function installMock() {
     return { ...(state.run || {}), ...(args.data || {}) };
   };
   prisma.marketObservation.findMany = async () => state.observations;
+  prisma.rateOffer.findMany = async () => state.offers;
   prisma.vehicleType.findMany = async () => state.vehicleTypes;
   prisma.rateDailyPrice.findMany = async () => state.dailyPrices;
   ratesService.importDailyPrices = async (rateId, rows, scope, options) => {
@@ -66,6 +70,7 @@ function installMock() {
       prisma.marketScrapeRun.findFirst = orig.runFindFirst;
       prisma.marketScrapeRun.update = orig.runUpdate;
       prisma.marketObservation.findMany = orig.obsFindMany;
+      prisma.rateOffer.findMany = orig.offerFindMany;
       prisma.vehicleType.findMany = orig.vtFindMany;
       prisma.rateDailyPrice.findMany = orig.rdpFindMany;
       ratesService.importDailyPrices = orig.importDailyPrices;

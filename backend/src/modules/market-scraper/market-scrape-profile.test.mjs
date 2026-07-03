@@ -325,12 +325,16 @@ describe('marketScrapeProfileService.update — merged-state revalidation (Codex
 });
 
 describe('marketScrapeProfileService.getRunCheapestPerSipp — aggregation', () => {
-  let origGetRun, origObsFindMany;
+  let origGetRun, origObsFindMany, origOfferFindMany;
 
   beforeEach(() => {
     origGetRun = marketScrapeProfileService.getRun;
     if (!prisma.marketObservation) prisma.marketObservation = {};
+    if (!prisma.rateOffer) prisma.rateOffer = {};
     origObsFindMany = prisma.marketObservation.findMany;
+    origOfferFindMany = prisma.rateOffer.findMany;
+    // Dual-read (2026-07): getRunCheapestPerSipp also queries RateOffer now.
+    prisma.rateOffer.findMany = async () => [];
 
     marketScrapeProfileService.getRun = async () => ({ id: 'run-1', profile: { tenantId: 'tenant-1' } });
   });
@@ -338,6 +342,7 @@ describe('marketScrapeProfileService.getRunCheapestPerSipp — aggregation', () 
   afterEach(() => {
     marketScrapeProfileService.getRun = origGetRun;
     if (origObsFindMany) prisma.marketObservation.findMany = origObsFindMany;
+    if (origOfferFindMany) prisma.rateOffer.findMany = origOfferFindMany;
   });
 
   it('returns cheapest per (date, sipp) across multiple vendors', async () => {

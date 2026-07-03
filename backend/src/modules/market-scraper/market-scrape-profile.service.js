@@ -1,4 +1,5 @@
 import { prisma } from '../../lib/prisma.js';
+import { loadCompetitorRows } from './rate-offer-source.js';
 
 /**
  * MarketScrapeProfile CRUD + nested run/observation queries.
@@ -331,28 +332,35 @@ export const marketScrapeProfileService = {
     const run = await this.getRun(runId, scope);
     if (!run) throw Object.assign(new Error('Run not found'), { httpStatus: 404 });
 
-    const observations = await prisma.marketObservation.findMany({
-      where: { runId, status: 'FOUND', dailyPrice: { not: null } },
-      orderBy: [{ pickupDate: 'asc' }, { sipp: 'asc' }, { dailyPrice: 'asc' }]
-    });
+    // Dual-read via the adapter (RateOffer + legacy MarketObservation) so
+    // Kayak-source runs — which write RateOffer children only — stop
+    // returning an empty array here. Display purpose: this feeds the run
+    // detail table, not price computation (2026-07-03 cutover).
+    const { rows: observations } = await loadCompetitorRows(prisma, { runId }, { purpose: 'display' });
 
     const byKey = new Map();
     for (const o of observations) {
+      // Kayak offers may carry only effectiveDailyPrice — fall back so those
+      // rows rank instead of degenerating to Number(null) = 0.
+      const daily = o.dailyPrice != null
+        ? Number(o.dailyPrice)
+        : (o.effectiveDailyPrice != null ? Number(o.effectiveDailyPrice) : null);
+      if (daily == null) continue;
       const key = `${o.pickupDate.toISOString().slice(0, 10)}|${o.sipp}`;
       const prev = byKey.get(key);
       if (!prev) {
         byKey.set(key, {
           pickupDate: o.pickupDate,
           sipp: o.sipp,
-          cheapest: Number(o.dailyPrice),
+          cheapest: daily,
           cheapestTotal: o.totalPrice != null ? Number(o.totalPrice) : null,
           cheapestEffective: o.effectiveDailyPrice != null ? Number(o.effectiveDailyPrice) : null,
           cheapestVendor: o.vendor,
           sampled: 1
         });
       } else {
-        if (Number(o.dailyPrice) < prev.cheapest) {
-          prev.cheapest = Number(o.dailyPrice);
+        if (daily < prev.cheapest) {
+          prev.cheapest = daily;
           prev.cheapestTotal = o.totalPrice != null ? Number(o.totalPrice) : null;
           prev.cheapestEffective = o.effectiveDailyPrice != null ? Number(o.effectiveDailyPrice) : null;
           prev.cheapestVendor = o.vendor;

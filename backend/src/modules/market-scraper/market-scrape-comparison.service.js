@@ -17,6 +17,7 @@
 import { prisma } from '../../lib/prisma.js';
 import { renderReportExcel } from '../reports/reports-export.js';
 import { excludeSetFor, isExcludedVendor, normalizeVendorName } from './market-vendor.js';
+import { loadCompetitorRows } from './rate-offer-source.js';
 import { baseFromCustomerAllIn } from './pricing-grossup.js';
 import { buildUtilizationLookup } from './pricing-utilization.js';
 import { pickUtilizationTier, resolveTierTarget } from './pricing-tiers.js';
@@ -131,18 +132,27 @@ export function applyStrategy(cheapest, profile) {
 }
 
 /**
- * Group MarketObservation rows by (pickupDateISO, sipp) and pick the cheapest
- * dailyPrice in each bucket. Skips rows where:
+ * Group observation-shaped rows (legacy MarketObservation and/or RateOffer
+ * rows mapped through rate-offer-source.js) by (pickupDateISO, sipp) and pick
+ * the cheapest price in each bucket. Skips rows where:
  *   - status !== 'FOUND' (UNMAPPED / ERROR / CLOSED have no usable price)
- *   - dailyPrice is null
- * Returns Map<"YYYY-MM-DD|SIPP", {date, sipp, cheapest, vendor, sampled}>.
+ *   - no usable price (dailyPrice null, and effectiveDailyPrice null too)
+ *
+ * Multi-provider semantics (2026-07-03 RateOffer cutover): vendor = the rental
+ * AGENCY (offer.supplier). When the same agency is quoted by several OTAs
+ * (providers), the per-vendor min below collapses them into ONE entry — each
+ * cell keeps the AGENCY's cheapest price across ALL providers, and `prices` is
+ * the ascending per-AGENCY ladder (the competitive ladder is a ladder of
+ * agencies, not of OTA listings).
+ *
+ * Returns Map<"YYYY-MM-DD|SIPP", {date, sipp, cheapest, vendor, sampled, prices}>.
  */
 export function aggregateCheapestBySippDate(observations, { excludeSet, useEffective = false } = {}) {
   // First pass: per-cell, the cheapest price per (normalized) vendor + total sampled.
   const cells = new Map(); // key -> { date, sipp, byVendor: Map<vendor, price>, sampled }
   for (const obs of observations) {
     if (obs.status !== 'FOUND') continue;
-    if (obs.dailyPrice == null) continue;
+    if (obs.dailyPrice == null && obs.effectiveDailyPrice == null) continue;
     // Drop the tenant's own brand / configured exclusions from the pool so we
     // never pick "ourselves" as the cheapest competitor.
     if (excludeSet && isExcludedVendor(obs.vendor, excludeSet)) continue;
@@ -213,11 +223,12 @@ export async function computeRunComparison(runId, { scope = {} } = {}) {
   }
   const profile = run.profile;
 
-  // Load observations for the run.
-  const observations = await prisma.marketObservation.findMany({
-    where: { runId },
-    orderBy: [{ pickupDate: 'asc' }, { sipp: 'asc' }]
-  });
+  // Load competitor rows for the run — dual-read (RateOffer + legacy
+  // MarketObservation) through the adapter. purpose:'pricing' → Kayak teaser
+  // rows are gated out until KAYAK_EFFECTIVE_IS_ALL_IN=true (see
+  // rate-offer-source.js) so the suggestions/AUTO path never back-solves from
+  // a fee-less teaser.
+  const { rows: observations } = await loadCompetitorRows(prisma, { runId }, { purpose: 'pricing' });
 
   const excludeSet = await getCompetitorExcludeSet(profile.tenantId);
   // Tax-aware pricing config (opt-in per location). When present, we compare on the

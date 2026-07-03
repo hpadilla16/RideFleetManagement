@@ -1,6 +1,7 @@
 import { prisma } from '../../lib/prisma.js';
 import { applyStrategy, ruleLabelFor, getCompetitorExcludeSet, getMarketPricingConfig } from '../market-scraper/market-scrape-comparison.service.js';
-import { isExcludedVendor, normalizeVendorName } from '../market-scraper/market-vendor.js';
+import { isExcludedVendor, normalizeVendorName, vendorKey } from '../market-scraper/market-vendor.js';
+import { loadCompetitorRows, kayakAllInConfirmed } from '../market-scraper/rate-offer-source.js';
 import { baseFromCustomerAllIn, customerAllInFromBase } from '../market-scraper/pricing-grossup.js';
 import { buildUtilizationLookup } from '../market-scraper/pricing-utilization.js';
 import { pickUtilizationTier, resolveTierTarget } from '../market-scraper/pricing-tiers.js';
@@ -86,24 +87,16 @@ export async function getMarketSummary({ airport, scope }) {
 
   const profileIds = profiles.map((p) => p.id);
 
-  // Last-24h observations for these profiles, only FOUND rows (drop UNMAPPED).
+  // Last-24h competitor rows for these profiles, only FOUND rows (drop
+  // UNMAPPED). Dual-read (RateOffer + legacy MarketObservation) through the
+  // adapter — purpose:'display' includes Kayak-sourced quotes (2026-07-03
+  // cutover; dashboards can show teasers, the pricing path cannot).
   const since = new Date(Date.now() - 24 * 60 * 60 * 1000);
-  const obs = await prisma.marketObservation.findMany({
-    where: {
-      profileId: { in: profileIds },
-      observedAt: { gte: since },
-      status: 'FOUND',
-      dailyPrice: { not: null },
-    },
-    select: {
-      sipp: true,
-      vendor: true,
-      dailyPrice: true,
-      effectiveDailyPrice: true,
-      pickupDate: true,
-      observedAt: true,
-    },
-  });
+  const { rows: obs } = await loadCompetitorRows(
+    prisma,
+    { profileIds, observedSince: since },
+    { purpose: 'display' }
+  );
 
   // Build a SIPP → tenant's own Rate mapping.
   //
@@ -277,7 +270,6 @@ export async function getMarketHistory({ airport, sipp, days = 14, mode = 'histo
   // (total / lor = real all-in daily cost), falling back to dailyPrice.
   const priceOf = (o) =>
     o.effectiveDailyPrice != null ? Number(o.effectiveDailyPrice) : Number(o.dailyPrice);
-  const sel = { vendor: true, dailyPrice: true, effectiveDailyPrice: true, pickupDate: true, observedAt: true };
 
   // Competitor-pool hygiene (own brand out, vendor names normalized).
   const excludeSet = await getCompetitorExcludeSet(scope.tenantId);
@@ -291,10 +283,12 @@ export async function getMarketHistory({ airport, sipp, days = 14, mode = 'histo
   if (isForward) {
     const start = new Date(); start.setUTCHours(0, 0, 0, 0);
     const end = new Date(start.getTime() + lookbackDays * 24 * 60 * 60 * 1000);
-    const obs = await prisma.marketObservation.findMany({
-      where: { profileId: { in: profileIds }, sipp, status: 'FOUND', dailyPrice: { not: null }, pickupDate: { gte: start, lte: end } },
-      select: sel,
-    });
+    // Dual-read via the adapter (RateOffer + legacy observations) — display purpose.
+    const { rows: obs } = await loadCompetitorRows(
+      prisma,
+      { profileIds, sipp, pickupFrom: start, pickupTo: end },
+      { purpose: 'display' }
+    );
     // Keep only the most recent observation per (pickupDate, vendor).
     const latest = new Map();
     for (const o of obs) {
@@ -310,10 +304,14 @@ export async function getMarketHistory({ airport, sipp, days = 14, mode = 'histo
     }
   } else {
     const since = new Date(Date.now() - lookbackDays * 24 * 60 * 60 * 1000);
-    const obs = await prisma.marketObservation.findMany({
-      where: { profileId: { in: profileIds }, sipp, observedAt: { gte: since }, status: 'FOUND', dailyPrice: { not: null } },
-      select: sel,
-    });
+    // Dual-read keeps the history chart CONTINUOUS across the Jul-1 source
+    // switch: pre-Jul-1 days come from MarketObservation, later days from
+    // RateOffer — one series, no gap.
+    const { rows: obs } = await loadCompetitorRows(
+      prisma,
+      { profileIds, sipp, observedSince: since },
+      { purpose: 'display' }
+    );
     for (const o of obs) {
       if (isExcludedVendor(o.vendor, excludeSet)) continue;
       const day = o.observedAt.toISOString().slice(0, 10);
@@ -420,18 +418,13 @@ export async function buildAirportExportWorkbook({ airport, days, scope = {} }) 
   // Forward window: FUTURE pickup dates in [today, today+windowDays].
   const start = new Date(); start.setUTCHours(0, 0, 0, 0);
   const end = new Date(start.getTime() + windowDays * 24 * 60 * 60 * 1000);
-  const obs = await prisma.marketObservation.findMany({
-    where: {
-      profileId: { in: profileIds },
-      status: 'FOUND',
-      dailyPrice: { not: null },
-      pickupDate: { gte: start, lte: end },
-    },
-    select: {
-      sipp: true, vendor: true, dailyPrice: true, effectiveDailyPrice: true,
-      pickupDate: true, observedAt: true, profileId: true,
-    },
-  });
+  // Dual-read via the adapter (RateOffer + legacy observations) — display
+  // purpose: the export mirrors what the dashboard shows, Kayak included.
+  const { rows: obs } = await loadCompetitorRows(
+    prisma,
+    { profileIds, pickupFrom: start, pickupTo: end },
+    { purpose: 'display' }
+  );
 
   // Same price basis as the dashboard cards: effectiveDailyPrice (total / LOR = real all-in
   // daily cost) with a fallback to the teaser dailyPrice for legacy rows.
@@ -440,32 +433,57 @@ export async function buildAirportExportWorkbook({ airport, days, scope = {} }) 
   // Competitor-pool hygiene (own brand out, vendor names normalized).
   const excludeSet = await getCompetitorExcludeSet(scope.tenantId);
 
-  // Keep only the LATEST quote per (pickupDate, sipp, normalized vendor) — older quotes for a
-  // future date are stale.
-  const latest = new Map();
+  // Staleness dedup (2026-07-03 RateOffer cutover): keep only the LATEST quote
+  // per (pickupDate, sipp, supplier, PROVIDER) — the same agency quoted by two
+  // OTAs is two distinct quotes, each with its own freshness — then collapse to
+  // the MIN across providers per supplier so the ladder stays a ladder of
+  // AGENCIES (one row per supplier per cell, like before the cutover).
+  const latest = new Map(); // date|sipp|supplierKey|provider -> latest row
   for (const o of obs) {
     if (isExcludedVendor(o.vendor, excludeSet)) continue;
     const dISO = o.pickupDate.toISOString().slice(0, 10);
-    const key = `${dISO}|${o.sipp}|${normalizeVendorName(o.vendor) || '?'}`;
+    const key = `${dISO}|${o.sipp}|${vendorKey(o.vendor) || '?'}|${o.provider || '?'}`;
     const prev = latest.get(key);
     if (!prev || o.observedAt > prev.observedAt) latest.set(key, o);
   }
-  // Cheapest competitor per (pickupDate, sipp) + the per-vendor price ladder (for tiers).
-  const byCell = new Map(); // `${dISO}|${sipp}` -> { date, sipp, cheapest, vendor, sampled, profileId, prices[] }
+  const perSupplier = new Map(); // date|sipp|supplierKey -> cheapest row across providers
   for (const o of latest.values()) {
+    const dISO = o.pickupDate.toISOString().slice(0, 10);
+    const key = `${dISO}|${o.sipp}|${vendorKey(o.vendor) || '?'}`;
+    const prev = perSupplier.get(key);
+    if (!prev || priceOf(o) < priceOf(prev)) perSupplier.set(key, o);
+  }
+  // Cheapest competitor per (pickupDate, sipp) + the per-vendor price ladder (for tiers).
+  // TWO cell maps (QA finding 2026-07-02): the export's OBSERVED-market columns
+  // (Market cheapest / vendor / sampled) mirror the dashboard — Kayak included.
+  // But the SUGGESTED / "Uploaded Rate (base)" columns run the same pricing
+  // math as the AUTO rules, and someone uploads that sheet by hand — so those
+  // columns must compute from the PRICING-eligible pool only (Kayak teaser rows
+  // excluded until KAYAK_EFFECTIVE_IS_ALL_IN is confirmed; same gate as the
+  // engine). Otherwise the manual upload loop undercuts exactly like the AUTO
+  // path the gate protects.
+  const kayakOk = kayakAllInConfirmed();
+  const pricingEligible = (o) => o.source !== 'KAYAK' || kayakOk;
+  const byCell = new Map(); // display cells: `${dISO}|${sipp}` -> { date, sipp, cheapest, vendor, sampled, profileId, prices[] }
+  const byCellPricing = new Map(); // pricing cells: same shape, gate-filtered rows only
+  const addToCellMap = (map, o) => {
     const price = priceOf(o);
-    if (!Number.isFinite(price) || price <= 0) continue;
+    if (!Number.isFinite(price) || price <= 0) return;
     const dISO = o.pickupDate.toISOString().slice(0, 10);
     const vendor = normalizeVendorName(o.vendor) || null;
     const key = `${dISO}|${o.sipp}`;
-    const ex = byCell.get(key);
+    const ex = map.get(key);
     if (!ex) {
-      byCell.set(key, { date: dISO, sipp: o.sipp, cheapest: price, vendor, sampled: 1, profileId: o.profileId, prices: [price] });
+      map.set(key, { date: dISO, sipp: o.sipp, cheapest: price, vendor, sampled: 1, profileId: o.profileId, prices: [price] });
     } else {
       ex.sampled += 1;
       ex.prices.push(price);
       if (price < ex.cheapest) { ex.cheapest = price; ex.vendor = vendor; ex.profileId = o.profileId; }
     }
+  };
+  for (const o of perSupplier.values()) {
+    addToCellMap(byCell, o);
+    if (pricingEligible(o)) addToCellMap(byCellPricing, o);
   }
 
   // Tenant's current rate per SIPP (same mapping as getMarketSummary: active PricingRule
@@ -500,6 +518,10 @@ export async function buildAirportExportWorkbook({ airport, days, scope = {} }) 
 
   const rhRows = cells.map((c) => {
     const profile = profById.get(c.profileId) || null;
+    // Pricing math runs on the GATE-FILTERED cell (see byCellPricing above).
+    // No pricing-eligible competitor for this cell → suggested/uploaded stay
+    // null (the observed-market columns still show the Kayak view).
+    const p = byCellPricing.get(`${c.date}|${c.sipp}`) || null;
     // When utilization has reached a tier, position on the competitive ladder; else base margin.
     let utilization = null;
     let tier = null;
@@ -507,12 +529,14 @@ export async function buildAirportExportWorkbook({ airport, days, scope = {} }) 
       utilization = utilLookup.utilOf(c.sipp, c.date);
       tier = pickUtilizationTier(utilization, utilRules);
     }
-    let target;
-    if (tier) {
-      target = resolveTierTarget(tier, c.prices);
-      if (target == null) target = applyStrategy(c.cheapest, profile);
-    } else {
-      target = applyStrategy(c.cheapest, profile);
+    let target = null;
+    if (p) {
+      if (tier) {
+        target = resolveTierTarget(tier, p.prices);
+        if (target == null) target = applyStrategy(p.cheapest, profile);
+      } else {
+        target = applyStrategy(p.cheapest, profile);
+      }
     }
     let suggestedAllIn = null;
     let uploaded = target; // legacy: upload the target as-is

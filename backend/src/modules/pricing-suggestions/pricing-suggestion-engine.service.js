@@ -1,5 +1,6 @@
 import { prisma } from '../../lib/prisma.js';
 import { cache } from '../../lib/cache.js';
+import { loadCompetitorRows } from '../market-scraper/rate-offer-source.js';
 
 /**
  * Pricing Suggestion Engine
@@ -120,24 +121,18 @@ export async function evaluateRule(rule) {
   }
   const { sipp, locationCode } = sippInfo;
 
-  // Fetch latest 24h observations for that SIPP+location.
+  // Fetch latest 24h competitor rows for that SIPP+location. Dual-read
+  // (RateOffer + legacy MarketObservation) through the adapter with
+  // purpose:'pricing': KAYAK-source rows are EXCLUDED until
+  // KAYAK_EFFECTIVE_IS_ALL_IN=true, because Kayak's effectiveDailyPrice is a
+  // fee-less teaser and this engine writes REAL prices (15 AUTO rules live) —
+  // see rate-offer-source.js for the full rationale (2026-07-03).
   const since = new Date(Date.now() - 24 * 60 * 60 * 1000);
-  const obs = await prisma.marketObservation.findMany({
-    where: {
-      sipp,
-      status: 'FOUND',
-      dailyPrice: { not: null },
-      observedAt: { gte: since },
-      profile: { locationCode, tenantId: rule.tenantId },
-    },
-    select: {
-      id: true,
-      vendor: true,
-      dailyPrice: true,
-      effectiveDailyPrice: true,
-      observedAt: true,
-    },
-  });
+  const { rows: obs } = await loadCompetitorRows(
+    prisma,
+    { sipp, observedSince: since, profile: { locationCode, tenantId: rule.tenantId } },
+    { purpose: 'pricing' }
+  );
   if (obs.length === 0) {
     return { skipped: true, reason: 'no_recent_observations' };
   }
@@ -334,12 +329,16 @@ async function resolveSippForRate(rate) {
   });
   if (!profile) return null;
 
+  // Dual-read via the adapter (purpose:'pricing' — same gate as evaluateRule,
+  // so SIPP resolution can't be driven by rows the pricing math won't see).
+  // Note: the old query capped at 200 raw rows; the adapter returns the full
+  // recent set, which only makes the most-observed-SIPP vote more accurate.
   const since = new Date(Date.now() - 24 * 60 * 60 * 1000);
-  const recent = await prisma.marketObservation.findMany({
-    where: { profileId: profile.id, observedAt: { gte: since }, status: 'FOUND' },
-    select: { sipp: true },
-    take: 200,
-  });
+  const { rows: recent } = await loadCompetitorRows(
+    prisma,
+    { profileId: profile.id, observedSince: since },
+    { purpose: 'pricing' }
+  );
   if (recent.length === 0) return null;
 
   const counts = new Map();
