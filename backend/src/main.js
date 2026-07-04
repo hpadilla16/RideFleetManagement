@@ -10,6 +10,7 @@ import { customersRouter } from './modules/customers/customers.routes.js';
 import { publicVehicleTelematicsRouter, vehiclesRouter } from './modules/vehicles/vehicles.routes.js';
 import { inventoryRouter } from './modules/inventory/inventory.routes.js';
 import { locationsRouter } from './modules/locations/locations.routes.js';
+import { locationHoursRouter } from './modules/locations/location-hours.routes.js';
 import { vehicleTypesRouter } from './modules/vehicle-types/vehicle-types.routes.js';
 import { additionalServicesRouter } from './modules/additional-services/additional-services.routes.js';
 import { feesRouter } from './modules/fees/fees.routes.js';
@@ -235,6 +236,13 @@ app.use('/api/reservations', requireAuth, tenantRateLimit, requireModuleAccess('
 app.use('/api/reservations', requireAuth, tenantRateLimit, requireModuleAccess('reservations'), reservationExtendRouter);
 app.use('/api/customers', requireAuth, tenantRateLimit, requireModuleAccess('customers'), customersRouter);
 app.use('/api/vehicles', requireAuth, tenantRateLimit, requireModuleAccess('vehicles'), vehiclesRouter);
+// VozIA Fase 2 (2026-07-03): GET /:id/hours mounted BEFORE the gated locations
+// router, DELIBERATELY without requireModuleAccess('settings')/requireRole —
+// the VozIA AGENT service account has no settings module, and operating hours
+// + pickup instructions are operational info any authenticated user may read.
+// The hours router only defines GET /:id/hours; every other /api/locations
+// path falls through (Express router next()) to the gated router below.
+app.use('/api/locations', requireAuth, tenantRateLimit, locationHoursRouter);
 app.use('/api/locations', requireAuth, tenantRateLimit, requireModuleAccess('settings'), requireRole('ADMIN', 'OPS'), locationsRouter);
 app.use('/api/vehicle-types', requireAuth, tenantRateLimit, requireModuleAccess('settings'), requireRole('ADMIN', 'OPS'), vehicleTypesRouter);
 app.use('/api/additional-services', requireAuth, tenantRateLimit, requireModuleAccess('settings'), requireRole('ADMIN', 'OPS'), additionalServicesRouter);

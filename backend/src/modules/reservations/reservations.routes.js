@@ -25,6 +25,8 @@ import { cache } from '../../lib/cache.js';
 import { globalKey } from '../../lib/cache/tenantKey.js';
 import { compactStartRentalResponse } from './start-rental-compact.js';
 import { maybeUploadCustomerDocument } from '../customers/customer-documents.js';
+import { idempotency } from '../../middleware/idempotency.js';
+import { validateVoziaNotePayload, buildVoziaNoteLine } from './vozia-note.js';
 
 export const reservationsRouter = Router();
 
@@ -327,6 +329,48 @@ reservationsRouter.get('/:id', async (req, res, next) => {
     if (!row) return res.status(404).json({ error: 'Reservation not found' });
     res.json(row);
   } catch (e) {
+    next(e);
+  }
+});
+
+// VozIA Fase 4 (2026-07-03) — W2: append a call-transcript note to a
+// reservation. requireAuth already runs at the app mount (main.js); the
+// idempotency middleware makes retried VozIA calls replay instead of
+// double-appending (service accounts MUST send Idempotency-Key — 400 without
+// it; humans pass through). :id accepts a cuid OR a reservation number
+// (reservationIdWhere via getById). Marker format:
+//   [VOZIA <ticketId> <author> @<ISO>] <text>
+reservationsRouter.post('/:id/notes', idempotency({ kind: 'note' }), async (req, res, next) => {
+  try {
+    const { errors, value } = validateVoziaNotePayload(req.body || {});
+    if (errors.length) return res.status(400).json({ error: 'Validation failed', details: errors });
+
+    const current = await reservationsService.getById(req.params.id, scopeFor(req));
+    if (!current) return res.status(404).json({ error: 'Reservation not found' });
+
+    const line = buildVoziaNoteLine(value);
+    const nextNotes = appendSystemNote(current.notes, line);
+    const row = await reservationsService.update(current.id, { notes: nextNotes }, scopeFor(req), req.user?.sub || null);
+
+    await withTenantSchema(req.user.tenantId, (db) => db.auditLog.create({
+      data: {
+        tenantId: row.tenantId || req.user?.tenantId || null,
+        reservationId: current.id,
+        action: 'UPDATE',
+        actorUserId: req.user?.sub || null,
+        reason: `VozIA note appended (${value.ticketId})`,
+        metadata: JSON.stringify({
+          source: 'vozia',
+          ticketId: value.ticketId,
+          author: value.author,
+          textLength: value.text.length
+        })
+      }
+    }));
+
+    res.status(201).json({ ok: true, reservationId: current.id, notes: row.notes });
+  } catch (e) {
+    if (/not found/i.test(String(e?.message || ''))) return res.status(404).json({ error: e.message });
     next(e);
   }
 });

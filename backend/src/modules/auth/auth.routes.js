@@ -3,6 +3,7 @@ import { authService } from './auth.service.js';
 import { isPublicRegisterEnabled } from './auth.config.js';
 import { isSuperAdmin, requireAuth, requireRole } from '../../middleware/auth.js';
 import { createPublicRateLimitGuard, attachPublicRequestMeta } from '../../middleware/public-endpoint-guards.js';
+import logger from '../../lib/logger.js';
 
 export const authRouter = Router();
 
@@ -77,6 +78,45 @@ authRouter.post('/refresh', requireAuth, async (req, res, next) => {
     res.json(await authService.refreshToken(userId));
   } catch (e) {
     res.status(401).json({ error: e.message });
+  }
+});
+
+// VozIA Fase 3 (2026-07-03) — mint / revoke long-lived tokens for service
+// accounts (User.isServiceAccount). SUPER_ADMIN only. Mint/revoke events go
+// to the app logger — AuditLog requires a reservationId, so it doesn't fit
+// here. A service account itself can never reach these paths: the
+// requireAuth allowlist gate 403s anything not explicitly allowed.
+authRouter.post('/service-token', requireAuth, requireRole('SUPER_ADMIN'), async (req, res) => {
+  try {
+    const { userId, expiresIn } = req.body || {};
+    if (!userId) return res.status(400).json({ error: 'userId is required' });
+    const out = await authService.issueServiceToken({ userId, expiresIn });
+    logger.info('[auth] service token minted', {
+      targetUserId: out.userId,
+      targetEmail: out.email,
+      expiresIn: out.expiresIn,
+      tokenVersion: out.tokenVersion,
+      actorUserId: req.user?.id || req.user?.sub || null
+    });
+    res.status(201).json(out);
+  } catch (e) {
+    res.status(400).json({ error: e.message });
+  }
+});
+
+authRouter.post('/service-token/revoke', requireAuth, requireRole('SUPER_ADMIN'), async (req, res) => {
+  try {
+    const { userId } = req.body || {};
+    if (!userId) return res.status(400).json({ error: 'userId is required' });
+    const out = await authService.revokeServiceTokens(userId);
+    logger.info('[auth] service tokens revoked', {
+      targetUserId: out.userId,
+      tokenVersion: out.tokenVersion,
+      actorUserId: req.user?.id || req.user?.sub || null
+    });
+    res.json(out);
+  } catch (e) {
+    res.status(400).json({ error: e.message });
   }
 });
 

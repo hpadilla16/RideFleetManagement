@@ -8,6 +8,12 @@ import { parseLocationConfig } from '../../lib/location-config.js';
 import { parseDateTimeInTz, startOfDayInTz, DEFAULT_TENANT_TIMEZONE } from '../../lib/date-utils.js';
 import { readFreshCounters, refreshCountersAsync } from './reservation-summary-counters.service.js';
 import { reservationProgramWhereForScope } from '../../lib/program-category.js';
+// VozIA Fase 1 (2026-07-03): getById accepts a reservationNumber
+// ("RES-…"/"TL-…") or a cuid — pure resolver, unit-tested in
+// reservation-id-resolver.test.mjs. Re-exported for route-side callers.
+import { reservationIdWhere } from './reservation-id.js';
+
+export { reservationIdWhere };
 
 /**
  * Resolve the tenant's configured wall-clock timezone (default
@@ -1417,7 +1423,9 @@ export const reservationsService = {
     // bringing every scalar with `true`.
     const row = await prisma.reservation.findFirst({
       where: {
-        id,
+        // VozIA Fase 1 (2026-07-03): accept reservationNumber ("RES-…"/"TL-…")
+        // or cuid — see reservationIdWhere above.
+        ...reservationIdWhere(id),
         ...(scope?.tenantId ? { tenantId: scope.tenantId } : {}),
         // Program guard (2026-07-02): scoped user can't open a reservation from
         // the other program (returns null → route 404). Admins/BOTH → no filter.

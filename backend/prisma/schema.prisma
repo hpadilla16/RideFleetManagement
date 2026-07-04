@@ -1652,6 +1652,13 @@ model User {
   // BOTH = no restriction (default, zero behavior change). ADMIN/SUPER_ADMIN
   // always bypass (see userProgramScope). Composes with locationIds.
   programScope     EmployeeProgramScope @default(BOTH)
+  // VozIA service integration (2026-07-03): machine identity + token
+  // versioning. isServiceAccount gates the default-deny endpoint allowlist
+  // (lib/service-account-allowlist.js) and the tv-claim check in requireAuth;
+  // bumping tokenVersion revokes every outstanding service token at once.
+  // Human JWTs never carry the tv/svc claims — zero behavior change for staff.
+  isServiceAccount Boolean         @default(false)
+  tokenVersion     Int             @default(0)
   commissionPlanId String?
   commissionPlan   CommissionPlan? @relation("UserCommissionPlan", fields: [commissionPlanId], references: [id])
   createdAt        DateTime        @default(now())
@@ -1810,6 +1817,29 @@ model HostServiceArea {
   @@index([tenantId, hostProfileId, isActive])
   @@index([listingId, serviceType, isActive])
   @@index([searchPlaceId, serviceType, isActive])
+}
+
+// VozIA Fase 4 (2026-07-03): per-user idempotency ledger for write endpoints
+// consumed by the VozIA voice agent (POST /reservations/:id/notes today;
+// payment endpoints arrive in Fase 6). One row per (userId, key); replay
+// returns the stored response instead of re-running the handler. Rows expire
+// after 24h and are opportunistically cleaned on insert. userId is a plain
+// scalar (no FK) — the ledger must survive user deletion for audit purposes.
+model IdempotencyKey {
+  id           String   @id @default(cuid())
+  tenantId     String?
+  userId       String
+  key          String
+  kind         String
+  requestHash  String
+  statusCode   Int?
+  responseBody String?
+  status       String   @default("IN_PROGRESS")
+  createdAt    DateTime @default(now())
+  expiresAt    DateTime
+
+  @@unique([userId, key])
+  @@index([userId, kind, createdAt])
 }
 
 model AuditLog {

@@ -1,6 +1,7 @@
 import jwt from 'jsonwebtoken';
 import { getJwtSecret } from '../modules/auth/auth.config.js';
 import { authService } from '../modules/auth/auth.service.js';
+import { isAllowedForServiceAccount } from '../lib/service-account-allowlist.js';
 
 export async function requireAuth(req, res, next) {
   const auth = req.headers.authorization || '';
@@ -11,6 +12,25 @@ export async function requireAuth(req, res, next) {
     const payload = jwt.verify(token, getJwtSecret());
     const hydrated = await authService.getSessionUser(payload?.sub || null);
     if (!hydrated) return res.status(401).json({ error: 'Invalid token' });
+
+    // VozIA Fase 3 (2026-07-03): service accounts get two extra gates.
+    // Humans (no isServiceAccount, no tv claim) are completely unaffected.
+    if (hydrated.isServiceAccount) {
+      // 1) Token-version check — revokeServiceTokens bumps User.tokenVersion,
+      //    invalidating every token minted with an older tv claim.
+      if (payload?.tv !== (hydrated.tokenVersion ?? 0)) {
+        return res.status(401).json({ error: 'Token revoked' });
+      }
+      // 2) Default-deny allowlist — only the endpoints enumerated in
+      //    lib/service-account-allowlist.js are reachable. This is what
+      //    guarantees no refunds/voids/deposits/status-changes and blocks
+      //    the payment ALIAS routes for the VozIA account.
+      const path = String(req.originalUrl || req.url || '').split('?')[0];
+      if (!isAllowedForServiceAccount(req.method, path)) {
+        return res.status(403).json({ error: 'Endpoint not available for service accounts' });
+      }
+    }
+
     req.user = { ...payload, ...hydrated, sub: hydrated.id, id: hydrated.id };
     next();
   } catch (e) {

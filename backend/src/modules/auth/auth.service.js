@@ -15,12 +15,39 @@ const SESSION_CACHE_TTL_MS = 30 * 1000;
 
 const LOCK_PIN_SALT_ROUNDS = 10;
 
-function signToken(user) {
-  return jwt.sign(
-    { sub: user.id, email: user.email, role: user.role, tenantId: user.tenantId || null },
-    getJwtSecret(),
-    { expiresIn: getJwtExpiresIn() }
-  );
+function signToken(user, options = {}) {
+  const claims = { sub: user.id, email: user.email, role: user.role, tenantId: user.tenantId || null };
+  // VozIA Fase 3 (2026-07-03): service accounts carry svc + tv (tokenVersion)
+  // claims so requireAuth can enforce the allowlist + one-shot revocation.
+  // Only added for service accounts — human JWTs stay byte-compatible.
+  if (user.isServiceAccount) {
+    claims.svc = true;
+    claims.tv = user.tokenVersion ?? 0;
+  }
+  return jwt.sign(claims, getJwtSecret(), { expiresIn: options.expiresIn || getJwtExpiresIn() });
+}
+
+// VozIA Fase 3 (2026-07-03) — service-token expiry policy. Default 90d,
+// hard cap 365d. Pure + exported for unit tests. Accepts vercel/ms-style
+// "<n>s|m|h|d" strings or bare digits (seconds, per jsonwebtoken).
+export const SERVICE_TOKEN_DEFAULT_EXPIRES_IN = '90d';
+export const SERVICE_TOKEN_MAX_EXPIRES_IN = '365d';
+const SERVICE_TOKEN_MAX_MS = 365 * 24 * 60 * 60 * 1000;
+const EXPIRES_IN_UNIT_MS = { s: 1000, m: 60 * 1000, h: 60 * 60 * 1000, d: 24 * 60 * 60 * 1000 };
+
+export function clampServiceTokenExpiresIn(expiresIn) {
+  if (expiresIn === undefined || expiresIn === null || String(expiresIn).trim() === '') {
+    return SERVICE_TOKEN_DEFAULT_EXPIRES_IN;
+  }
+  const raw = String(expiresIn).trim();
+  const match = raw.match(/^(\d+)\s*(s|m|h|d)?$/i);
+  if (!match) throw new Error('Invalid expiresIn — use e.g. "30d", "12h", "90d"');
+  const amount = Number(match[1]);
+  const unit = (match[2] || 's').toLowerCase();
+  const ms = amount * EXPIRES_IN_UNIT_MS[unit];
+  if (!Number.isFinite(ms) || ms <= 0) throw new Error('Invalid expiresIn — must be a positive duration');
+  if (ms > SERVICE_TOKEN_MAX_MS) return SERVICE_TOKEN_MAX_EXPIRES_IN;
+  return `${amount}${match[2] ? unit : 's'}`;
 }
 
 // Guest JWTs are issued at magic-link redeem time so native mobile clients
@@ -74,6 +101,10 @@ async function buildSessionUser(user) {
     // | BOTH). Consumers resolve the ADMIN/SUPER_ADMIN bypass via
     // userProgramScope() in lib/tenant-scope.js — same split as locationIds.
     programScope: user.programScope || 'BOTH',
+    // VozIA Fase 3 (2026-07-03): exposed so requireAuth can enforce the
+    // service-account allowlist + tv revocation check on hydrated sessions.
+    isServiceAccount: !!user.isServiceAccount,
+    tokenVersion: user.tokenVersion ?? 0,
     moduleAccess: moduleAccess.effective,
     tenantModuleAccess: moduleAccess.tenantConfig,
     userModuleAccess: moduleAccess.userConfig
@@ -110,6 +141,8 @@ export const authService = {
           screenLockExempt: true,
           locationIds: true,
           programScope: true,
+          isServiceAccount: true,
+          tokenVersion: true,
           hostProfile: { select: { id: true } }
         }
       });
@@ -120,6 +153,53 @@ export const authService = {
 
   invalidateSessionCache(userId) {
     if (userId) cache.del(globalKey('session', userId));
+  },
+
+  // VozIA Fase 3 (2026-07-03) — mint a long-lived token for a service account
+  // (SUPER_ADMIN-gated at the route). Target must be an ACTIVE service
+  // account; expiry defaults to 90d and is clamped at 365d. `deps.prisma` is
+  // injectable for unit tests (same pattern as createTenantRateLimit).
+  async issueServiceToken({ userId, expiresIn } = {}, deps = {}) {
+    const db = deps.prisma || prisma;
+    const user = await db.user.findUnique({
+      where: { id: String(userId || '') },
+      select: {
+        id: true, email: true, role: true, tenantId: true,
+        isActive: true, isServiceAccount: true, tokenVersion: true
+      }
+    });
+    if (!user || !user.isServiceAccount) throw new Error('Target user is not a service account');
+    if (!user.isActive) throw new Error('Target service account is not active');
+    const effectiveExpiresIn = clampServiceTokenExpiresIn(expiresIn);
+    const token = signToken(user, { expiresIn: effectiveExpiresIn });
+    return {
+      token,
+      expiresIn: effectiveExpiresIn,
+      userId: user.id,
+      email: user.email,
+      tokenVersion: user.tokenVersion ?? 0
+    };
+  },
+
+  // VozIA Fase 3 (2026-07-03) — revoke ALL outstanding tokens for a service
+  // account by bumping tokenVersion; requireAuth rejects any token whose tv
+  // claim no longer matches. Session cache invalidation mirrors
+  // invalidateSessionCache above (per-worker; siblings converge within the
+  // 30s SESSION_CACHE_TTL_MS — see header comment).
+  async revokeServiceTokens(userId, deps = {}) {
+    const db = deps.prisma || prisma;
+    const user = await db.user.findUnique({
+      where: { id: String(userId || '') },
+      select: { id: true, isServiceAccount: true }
+    });
+    if (!user || !user.isServiceAccount) throw new Error('Target user is not a service account');
+    const updated = await db.user.update({
+      where: { id: user.id },
+      data: { tokenVersion: { increment: 1 } },
+      select: { tokenVersion: true }
+    });
+    cache.del(globalKey('session', user.id));
+    return { ok: true, userId: user.id, tokenVersion: updated.tokenVersion };
   },
 
   async refreshToken(userId) {
