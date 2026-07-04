@@ -31,6 +31,20 @@ import logger from '../lib/logger.js';
 export const IDEMPOTENCY_KEY_RE = /^[A-Za-z0-9._:-]{8,128}$/;
 export const IDEMPOTENCY_TTL_MS = 24 * 60 * 60 * 1000;
 
+// NON-RECYCLE kinds — a stuck IN_PROGRESS key past its TTL must NOT be
+// auto-recycled; it surfaces a 409 reconcile so a human resolves it (via the
+// SUPER_ADMIN idempotency-resolve endpoint) instead of the op silently re-running.
+//   - 'payment' / 'refund': a died-mid-flight op may have moved money at the
+//     gateway while the ledger row never reached COMPLETED — recycling risks a
+//     double-charge / double-refund.
+//   - 'charge': a credit/service line is a CUMULATIVE balance mutation. Unlike a
+//     'note' (re-appending the same line is cosmetic), re-applying a −$500 credit
+//     moves the balance again = a $500 giveaway. The idempotency key only de-dupes
+//     WITHIN the TTL; a same-key retry >24h later (agent restart, queue replay)
+//     would double-apply. So 'charge' is NON-recyclable too (Innovation review
+//     2026-07-04). Only truly benign, content-idempotent kinds ('note') recycle.
+const NO_RECYCLE_KINDS = new Set(['payment', 'refund', 'charge']);
+
 async function defaultGetPrisma() {
   const mod = await import('../lib/prisma.js');
   return mod.prisma;
@@ -65,10 +79,21 @@ export function idempotency({ kind }, deps = {}) {
         .update(JSON.stringify(req.body ?? {}))
         .digest('hex');
 
-      // Opportunistic cleanup — also frees a key that expired IN_PROGRESS
-      // (e.g. worker died mid-request) so it can be retried after the TTL.
+      // Opportunistic cleanup — frees keys past their TTL so they can be reused.
+      //
+      // MONEY-SAFETY (VozIA Fase 6, 2026-07-04): for MONEY kinds (payment/refund)
+      // we MUST NOT auto-recycle a key that is still IN_PROGRESS past the TTL. If a
+      // process died mid-op, the gateway may have moved funds while the ledger row
+      // never reached COMPLETED — silently freeing that key would let a post-TTL
+      // retry DOUBLE-charge / DOUBLE-refund the customer. So for money kinds we only
+      // reap COMPLETED expired rows here and surface any stuck IN_PROGRESS row as a
+      // 409 reconcile (below). Notes and charges (pure balance mutations, no gateway)
+      // keep the original blanket cleanup.
       try {
-        await prisma.idempotencyKey.deleteMany({ where: { expiresAt: { lt: now } } });
+        const where = NO_RECYCLE_KINDS.has(kind)
+          ? { expiresAt: { lt: now }, status: 'COMPLETED' }
+          : { expiresAt: { lt: now } };
+        await prisma.idempotencyKey.deleteMany({ where });
       } catch (err) {
         logger.warn('[idempotency] expired-row cleanup failed (continuing)', { message: err?.message, kind });
       }
@@ -111,6 +136,14 @@ export function idempotency({ kind }, deps = {}) {
             body = null;
           }
           return res.status(existing.statusCode || 200).json(body);
+        }
+        // MONEY-SAFETY (VozIA Fase 6, 2026-07-04): a MONEY key (payment/refund)
+        // still IN_PROGRESS PAST its TTL was never freed by the cleanup above (we
+        // only reap COMPLETED money rows). It means a prior op crashed mid-flight
+        // and its true outcome is unknown — return an explicit reconcile signal so
+        // support can check the gateway rather than the client re-submitting.
+        if (NO_RECYCLE_KINDS.has(kind) && existing.expiresAt && new Date(existing.expiresAt) < now) {
+          return res.status(409).json({ error: 'Payment is being reconciled, contact support', reconcile: true });
         }
         return res.status(409).json({ error: 'Request with this Idempotency-Key is already in flight' });
       }

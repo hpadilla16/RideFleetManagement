@@ -18,6 +18,28 @@ test('every allowlist entry matches with realistic params', () => {
   allowed('GET', '/api/rental-agreements/cmck11111111111111111111');
   allowed('GET', '/api/locations/loc123/hours');
   allowed('POST', '/api/reservations/RES-00123/notes');
+  // Fase 6 RE-SCOPE (2026-07-04): the three link/adjust-only routes are allowed.
+  allowed('POST', '/api/reservations/RES-00123/send-request-email');
+  allowed('POST', '/api/rental-agreements/cmck11111111111111111111/payments/pay1/refund');
+  allowed('POST', '/api/reservations/RES-00123/charges');
+});
+
+test('Fase 6 re-scope: link/refund/charge routes open — DIRECT-charge routes now DENIED again', () => {
+  // The three benign capabilities VozIA now gets.
+  allowed('POST', '/api/reservations/abc123/send-request-email');
+  allowed('POST', '/api/rental-agreements/abc123/payments/pay1/refund');
+  allowed('POST', '/api/reservations/abc123/charges');
+  // The two DIRECT card-charge routes were REMOVED — DENIED again after re-scope.
+  denied('POST', '/api/rental-agreements/abc123/payments/manual');
+  denied('POST', '/api/rental-agreements/abc123/payments/charge-card-on-file');
+  // The bare /:id/charge-card-on-file ALIAS is NOT allowlisted.
+  denied('POST', '/api/rental-agreements/abc123/charge-card-on-file');
+  denied('POST', '/api/rental-agreements/abc123/payments/pay1/void');
+  denied('POST', '/api/rental-agreements/abc123/payments/pay1/delete');
+  denied('POST', '/api/rental-agreements/abc123/security-deposit/capture');
+  denied('POST', '/api/rental-agreements/abc123/security-deposit/release');
+  // Fase 5 PATCH still reserved/denied.
+  denied('PATCH', '/api/reservations/abc123');
 });
 
 test('method casing and trailing slash / query string are tolerated', () => {
@@ -27,8 +49,11 @@ test('method casing and trailing slash / query string are tolerated', () => {
   allowed('GET', '/api/reservations/RES-00123/payments/');
 });
 
-test('payment writes are denied (manual + card-on-file + alias routes)', () => {
+test('direct-charge + payment-write routes stay denied after the Fase 6 re-scope', () => {
+  // Both direct card-charge routes are REMOVED — VozIA never captures a card.
   denied('POST', '/api/rental-agreements/abc123/payments/manual');
+  denied('POST', '/api/rental-agreements/abc123/payments/charge-card-on-file');
+  // The bare /:id/charge-card-on-file ALIAS on rental-agreements is NOT opened.
   denied('POST', '/api/rental-agreements/abc123/charge-card-on-file');
   denied('POST', '/api/reservations/abc123/payments'); // GET is allowed, POST is not
   denied('POST', '/api/reservations/abc123/charge-card-on-file');

@@ -27,8 +27,45 @@ import { compactStartRentalResponse } from './start-rental-compact.js';
 import { maybeUploadCustomerDocument } from '../customers/customer-documents.js';
 import { idempotency } from '../../middleware/idempotency.js';
 import { validateVoziaNotePayload, buildVoziaNoteLine } from './vozia-note.js';
+// VozIA Fase 6 re-scope (2026-07-04) — CAP 3+4 charge/credit guard + ceiling.
+import {
+  assertServiceAccountChargeAllowed,
+  resolveVoziaCeiling
+} from '../rental-agreements/service-payment-guards.js';
 
 export const reservationsRouter = Router();
+
+// VozIA Fase 6 re-scope — CAP 3+4 uses kind:'charge' idempotency. A charge/credit
+// is a balance mutation (no gateway money), so a stuck key past its TTL may be
+// safely recycled like a note — only 'payment'/'refund' get the no-recycle 409.
+// A retried key within the TTL is still a no-op, so a double-submit can't
+// double-apply. requireAuth runs at the mount; humans w/o a key pass through.
+const chargeIdempotency = idempotency({ kind: 'charge' });
+
+// VozIA — best-effort AuditLog for a service-account reservation money op. Never
+// throws; ADDITIONAL context alongside the service's own ADMIN_OVERRIDE row so
+// the VozIA action is tagged with source+ticket. (source:'vozia')
+async function writeVoziaReservationAudit(reservation, req, meta = {}, kind = 'charge') {
+  try {
+    await prisma.auditLog.create({
+      data: {
+        tenantId: reservation?.tenantId || req.user?.tenantId || null,
+        reservationId: reservation?.id || null,
+        actorUserId: req.user?.sub || null,
+        action: 'UPDATE',
+        metadata: JSON.stringify({
+          source: 'vozia',
+          kind,
+          ticketId: req.body?.ticketId || null,
+          author: req.body?.author || null,
+          ...meta
+        })
+      }
+    });
+  } catch {
+    // audit is best-effort — never block or roll back the operation.
+  }
+}
 
 // Short cooldown (30s) between customer-facing token issuances for the same reservation/kind.
 // Prevents accidental double-clicks and abuse where a staff user could spam a customer's
@@ -549,19 +586,86 @@ reservationsRouter.post('/:id/charges/:chargeId/void', async (req, res, next) =>
   }
 });
 
-reservationsRouter.post('/:id/charges', async (req, res, next) => {
+// CAP 3+4 (VozIA Fase 6 re-scope, 2026-07-04) — add a service/fee (positive
+// amount) OR a credit (negative amount). Recomputes the balance via the pricing
+// engine; NO gateway money moves.
+//
+// ACCESS CONTROL (do NOT widen the human role check): this route stays ADMIN /
+// SUPER_ADMIN-only for HUMANS. The service account (VozIA) gets its OWN path
+// through its OWN guard. A human AGENT still gets 403 — only the service account
+// is admitted, and only after author+ticketId + the per-line ceiling pass:
+//   canDoAdminCorrections(req)  OR  (req.user.isServiceAccount && guard OK)
+//
+// chargeIdempotency (kind:'charge') is REQUIRED for service accounts so a retry
+// can't double-apply a balance mutation; it recycles like a note post-TTL (no
+// gateway money moved).
+reservationsRouter.post('/:id/charges', chargeIdempotency, async (req, res, next) => {
   try {
-    if (!canDoAdminCorrections(req)) {
+    const isAdmin = canDoAdminCorrections(req);
+    const isService = !!req.user?.isServiceAccount;
+    if (!isAdmin && !isService) {
       return res.status(403).json({ error: 'Admin role required for corrections' });
     }
-    const reason = String(req.body?.reason || '').trim();
-    if (!reason) return res.status(400).json({ error: 'reason is required' });
+
+    let current = null;
+    if (isService && !isAdmin) {
+      // Service-account-only guard: author+ticketId + name + non-zero amount
+      // within the tenant's voziaMaxChargeLineAmount ceiling (default 2000).
+      const maxLine = await resolveVoziaCeiling(
+        req.user?.tenantId || null,
+        'voziaMaxChargeLineAmount',
+        2000 // fail-safe LOW default
+      );
+      try {
+        assertServiceAccountChargeAllowed({ user: req.user, body: req.body || {}, maxLine });
+      } catch (guardErr) {
+        return res.status(guardErr.statusCode || 400).json(
+          guardErr.details ? { error: guardErr.message, details: guardErr.details } : { error: guardErr.message }
+        );
+      }
+      current = await reservationsService.getById(req.params.id, scopeFor(req));
+      if (!current) return res.status(404).json({ error: 'Reservation not found' });
+      // Reject a CANCELLED reservation for the autonomous service account:
+      // addManualCharge writes the charge row but syncAgreementCharges no-ops on
+      // a cancelled agreement, so the balance never recomputes → a silent orphan
+      // row. A human admin has context to handle that; VozIA gets a clean 400
+      // (Innovation review 2026-07-04).
+      if (String(current.status || '').toUpperCase() === 'CANCELLED') {
+        return res.status(400).json({ error: 'Cannot adjust charges on a cancelled reservation' });
+      }
+    }
+
+    // `reason` stays required for HUMAN admin corrections. For the service account
+    // we synthesize a reason from the VozIA ticket so the ADMIN_OVERRIDE row is
+    // still populated without demanding a redundant field from the agent.
+    let reason = String(req.body?.reason || '').trim();
+    if (!reason) {
+      if (isService && !isAdmin) {
+        reason = `VozIA ticket ${String(req.body?.ticketId || '').trim()} (${String(req.body?.author || '').trim()})`;
+      } else {
+        return res.status(400).json({ error: 'reason is required' });
+      }
+    }
+
     const out = await reservationPricingService.addManualCharge(
       req.params.id,
       { name: req.body?.name, amount: req.body?.amount },
       { reason, actorUserId: req.user?.sub || null },
       scopeFor(req)
     );
+
+    // VozIA audit — ADDITIONAL context tagged source:'vozia'. addManualCharge
+    // already wrote its own ADMIN_OVERRIDE row; this ties the op to the ticket.
+    if (isService && !isAdmin) {
+      const amt = Number(req.body?.amount);
+      await writeVoziaReservationAudit(
+        current,
+        req,
+        { name: String(req.body?.name || '').slice(0, 120), amount: Number.isFinite(amt) ? amt : null },
+        amt >= 0 ? 'add_service' : 'add_credit'
+      );
+    }
+
     res.status(201).json(out);
   } catch (e) {
     if (e?.status) return res.status(e.status).json({ error: e.message });
@@ -1135,12 +1239,35 @@ reservationsRouter.post('/:id/send-request-email', async (req, res, next) => {
     if (!['signature', 'customer-info', 'payment'].includes(kind)) {
       return res.status(400).json({ error: 'kind must be signature|customer-info|payment' });
     }
+
+    // CAP 1 (VozIA Fase 6 re-scope, 2026-07-04) — payment LINK. VozIA never
+    // captures a card; it emails the customer a self-pay link. No money moves, so
+    // NO amount cap and NO idempotency requirement (a benign re-send). We only
+    // require author+ticketId for the service account (400 if missing) and record
+    // them on an AuditLog. Human path is UNCHANGED (guard runs only for VozIA).
+    if (req.user?.isServiceAccount) {
+      const author = String(req.body?.author || '').trim();
+      const ticketId = String(req.body?.ticketId || '').trim();
+      if (!author || author.length > 120) {
+        return res.status(400).json({ error: 'author is required (<=120 chars)' });
+      }
+      if (!/^[A-Za-z0-9._-]{1,64}$/.test(ticketId)) {
+        return res.status(400).json({ error: 'ticketId is required (^[A-Za-z0-9._-]{1,64}$)' });
+      }
+      await writeVoziaReservationAudit(current, req, { requestKind: kind }, 'payment_link');
+    }
     if (!checkTokenIssuanceCooldown(current.id, `email:${kind}`)) {
       return res.status(429).json({ error: `A ${kind} email was just sent for this reservation. Please wait a moment before resending.` });
     }
 
     const primary = String(current.customer?.email || '').trim();
-    const extras = Array.isArray(req.body?.extraEmails) ? req.body.extraEmails : [];
+    // Service account: IGNORE extraEmails — the link (payable/signable, token-gated)
+    // may only go to the reservation's own customer. An autonomous agent emailing a
+    // pay link to an arbitrary caller-supplied address is a phishing/redirection
+    // surface human staff have context to avoid (Innovation review 2026-07-04).
+    const extras = req.user?.isServiceAccount
+      ? []
+      : (Array.isArray(req.body?.extraEmails) ? req.body.extraEmails : []);
     const recipients = [primary, ...extras].map((x) => String(x || '').trim()).filter(Boolean);
     if (!recipients.length) return res.status(400).json({ error: 'No recipient email found' });
 

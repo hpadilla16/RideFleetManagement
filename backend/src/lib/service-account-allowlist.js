@@ -37,14 +37,27 @@ const ALLOWED = [
   ['GET', '/api/rental-agreements/:id'],
   ['GET', '/api/locations/:id/hours'],
   ['POST', '/api/reservations/:id/notes'],
+  // Fase 6 RE-SCOPE (Hector, 2026-07-04): VozIA NEVER captures a card directly.
+  // It adjusts the balance and sends the customer a link to pay themselves. So
+  // the two direct-charge routes (payments/manual + payments/charge-card-on-file)
+  // are REMOVED from this allowlist — a service account can no longer reach them
+  // (requireAuth 403s anything not listed here). Instead VozIA gets four benign,
+  // link/adjust-only capabilities, each gated by service-payment-guards.js
+  // (author+ticketId required + a per-transaction ceiling) and, where money-state
+  // changes, the idempotency middleware:
+  //   1. send-request-email  → emails the customer a self-pay link (no money moves)
+  //   2. refund              → refunds an existing payment (native refund<=original cap)
+  //   3. charges             → add service/fee (positive) OR credit (negative); no gateway
+  ['POST', '/api/reservations/:id/send-request-email'],
+  ['POST', '/api/rental-agreements/:id/payments/:paymentId/refund'],
+  ['POST', '/api/reservations/:id/charges'],
 ];
 
 // -----------------------------------------------------------------------------
-// RESERVED — Fase 6 (payments, VozIA-only balance cap). Do NOT enable before
-// that build ships with its own review + QA gate (Hector, 2026-07-03):
-//   ['POST', '/api/rental-agreements/:id/payments/manual'],
-//   ['POST', '/api/rental-agreements/:id/charge-card-on-file'],
-//   ['PATCH', '/api/reservations/:id'],            // field whitelist (Fase 5)
+// RESERVED — still DENIED after the Fase 6 re-scope (Hector, 2026-07-04):
+//   ['PATCH', '/api/reservations/:id'],                              // field whitelist (Fase 5)
+//   ['POST', '/api/rental-agreements/:id/payments/manual'],          // direct charge — removed
+//   ['POST', '/api/rental-agreements/:id/payments/charge-card-on-file'], // direct charge — removed
 // -----------------------------------------------------------------------------
 
 const TABLE = new Map();

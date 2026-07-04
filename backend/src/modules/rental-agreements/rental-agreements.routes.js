@@ -4,8 +4,51 @@ import { compactAgreementResponse } from './rental-agreements-compact.js';
 import { scheduleAddendumNotification } from './addendum-notification.service.js';
 import { closeAgreementWithCheckinFees } from './checkin-close.service.js';
 import logger from '../../lib/logger.js';
+// VozIA Fase 6 RE-SCOPE (2026-07-04) — service-account REFUND guard + idempotency.
+import { prisma } from '../../lib/prisma.js';
+import { idempotency } from '../../middleware/idempotency.js';
+import {
+  assertServiceAccountRefundAllowed,
+  resolveVoziaCeiling
+} from './service-payment-guards.js';
 
 export const rentalAgreementsRouter = Router();
+
+// VozIA Fase 6 RE-SCOPE — the REFUND route (below) reuses this payment-kind
+// idempotency instance. kind:'payment' means a stuck IN_PROGRESS key past its TTL
+// is NOT auto-recycled (it surfaces a 409 reconcile) — the same no-double-money
+// protection now guards refunds. requireAuth already runs at the mount (main.js),
+// so req.user is populated. Humans w/o an Idempotency-Key pass through untouched;
+// a service account w/o a key is 400, a retried key is a no-op.
+const paymentIdempotency = idempotency({ kind: 'payment' });
+
+// VozIA — best-effort AuditLog for a service-account money operation. Written on
+// BOTH success and failure so every VozIA action (or attempt) is traceable to its
+// ticket. Never throws: an audit write must not roll back or mask the operation.
+// `kind` distinguishes the operation ('refund' here); extra context goes in meta.
+async function writeVoziaPaymentAudit(agreement, req, meta = {}, kind = 'refund') {
+  try {
+    await prisma.auditLog.create({
+      data: {
+        tenantId: agreement?.tenantId || req.user?.tenantId || null,
+        reservationId: agreement.reservationId,
+        actorUserId: req.user?.sub || null,
+        action: 'UPDATE',
+        metadata: JSON.stringify({
+          source: 'vozia',
+          kind,
+          ticketId: req.body?.ticketId || null,
+          author: req.body?.author || null,
+          amount: req.body?.amount ?? null,
+          idempotencyKey: req.get('Idempotency-Key') || null,
+          ...meta
+        })
+      }
+    });
+  } catch (err) {
+    logger.warn('[vozia] payment audit write failed (continuing)', { message: err?.message });
+  }
+}
 
 function isAdminRole(user) {
   const role = String(user?.role || '').toUpperCase();
@@ -223,6 +266,12 @@ rentalAgreementsRouter.post('/:id/close', async (req, res, next) => {
   }
 });
 
+// RE-SCOPE (Hector, 2026-07-04): reverted to HUMAN-ONLY. The service account
+// (VozIA) can no longer reach this route — it is REMOVED from the allowlist
+// (service-account-allowlist.js), so requireAuth 403s it before any handler
+// runs. VozIA now adjusts the balance + sends a self-pay link instead of
+// capturing a card directly. This handler is byte-identical to its pre-Fase-6
+// form (no isServiceAccount branch, no paymentIdempotency in the chain).
 rentalAgreementsRouter.post('/:id/payments/manual', async (req, res, next) => {
   try {
     await ensureEditable(req.params.id, req.user);
@@ -247,6 +296,9 @@ rentalAgreementsRouter.post('/:id/customer/card-on-file', async (req, res, next)
   }
 });
 
+// RE-SCOPE (Hector, 2026-07-04): reverted to HUMAN-ONLY. Direct card capture by
+// VozIA is removed — this route is off the allowlist, so a service account is
+// 403'd upstream. Byte-identical to its pre-Fase-6 form.
 rentalAgreementsRouter.post('/:id/payments/charge-card-on-file', async (req, res, next) => {
   try {
     await ensureEditable(req.params.id, req.user);
@@ -407,9 +459,38 @@ rentalAgreementsRouter.post('/:id/payments/:paymentId/void', async (req, res, ne
   }
 });
 
-rentalAgreementsRouter.post('/:id/payments/:paymentId/refund', async (req, res, next) => {
+// CAP 2 (VozIA Fase 6 re-scope, 2026-07-04) — REFUND an existing payment.
+// paymentIdempotency (kind:'payment') is REQUIRED for service accounts: it 400s a
+// missing key, no-ops a retry, and holds a stuck-in-flight key as a 409 reconcile
+// — the double-refund defense. Humans are byte-identical (no key → passthrough).
+// The native refund<=original & cumulative<=original caps stay in refundPayment;
+// the VozIA guard adds author+ticketId + an absolute ceiling on top.
+rentalAgreementsRouter.post('/:id/payments/:paymentId/refund', paymentIdempotency, async (req, res, next) => {
   try {
-    await ensureEditable(req.params.id, req.user);
+    const agreement = await ensureEditable(req.params.id, req.user);
+
+    if (req.user?.isServiceAccount) {
+      const maxRefund = await resolveVoziaCeiling(
+        agreement?.tenantId || req.user?.tenantId || null,
+        'voziaMaxRefundAmount',
+        2000 // fail-safe LOW default
+      );
+      try {
+        // Guard: author+ticket required; amount (if given) >0 and <= ceiling.
+        assertServiceAccountRefundAllowed({ user: req.user, body: req.body || {}, maxRefund });
+        const row = await rentalAgreementsService.refundPayment(req.params.id, req.params.paymentId, req.body || {}, req.user?.sub || null);
+        // AuditLog on SUCCESS — record paymentId + the gateway ref for reconciliation.
+        await writeVoziaPaymentAudit(agreement, req, { paymentId: req.params.paymentId, gatewayRef: row?.reference || null }, 'refund');
+        return res.json(row);
+      } catch (inner) {
+        // AuditLog on FAILURE (guard rejection OR gateway error) so every VozIA
+        // refund attempt stays tied to its ticket.
+        await writeVoziaPaymentAudit(agreement, req, { paymentId: req.params.paymentId, error: inner?.message || 'error' }, 'refund');
+        if (inner?.statusCode) return res.status(inner.statusCode).json(inner.details ? { error: inner.message, details: inner.details } : { error: inner.message });
+        throw inner;
+      }
+    }
+
     const row = await rentalAgreementsService.refundPayment(req.params.id, req.params.paymentId, req.body || {}, req.user?.sub || null);
     res.json(row);
   } catch (e) {
