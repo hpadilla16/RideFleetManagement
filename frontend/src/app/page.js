@@ -451,6 +451,8 @@ function DashboardInner({ token, me, logout }) {
   // Customer-led inspection Fase B (2026-06-11): submitted customer
   // inspections with damage reports awaiting soft/hard approval.
   const inspectionsToReview = Number(kpis.inspectionsToReview || 0);
+  // 2026-07-05: storefront loaner requests waiting for advisor contact.
+  const loanerRequestsPending = Number(kpis.loanerRequestsPending || 0);
   // Anchor "today" in the tenant timezone — not the browser's — so the
   // Operations Board agrees with the rest of the app for agents loading
   // from a non-PR browser. Both functions return "YYYY-MM-DD" in DASHBOARD_TZ.
@@ -554,6 +556,22 @@ function DashboardInner({ token, me, logout }) {
             actionLabel: t('dashboard.viewBatch')
           }
         : null,
+      // 2026-07-05: NEW courtesy-car requests from the public storefront
+      // waiting for an advisor. Same self-clearing pattern as Inspections
+      // to Review — appears only when the queue is non-empty, click-through
+      // to /loaner, disappears once requests move past RECEIVED.
+      (me?.moduleAccess?.loaner === true && loanerRequestsPending > 0)
+        ? {
+            id: 'loaner-requests-pending',
+            title: t('dashboard.loanerRequests'),
+            detail: t('dashboard.loanerRequestsDetail', { count: loanerRequestsPending }),
+            note: t('dashboard.loanerRequestsNote'),
+            // Anchor to the queues section — the requests panel lives BELOW the
+            // (long) intake wizard on /loaner; landing at the top defeats the card.
+            action: () => router.push('/loaner#loaner-queues'),
+            actionLabel: t('dashboard.reviewRequests')
+          }
+        : null,
       // Loaner Lane card only renders for tenants that have the dealership
       // loaner module enabled. moduleAccess.loaner is set by the backend in
       // lib/module-access.js based on tenant.dealershipLoanerEnabled (it's
@@ -581,7 +599,7 @@ function DashboardInner({ token, me, logout }) {
       feeAdvisoryCount,
       nextItems
     };
-  }, [pickups, returns, feeAdvisoryCount, registrationsExpiring30d, readyToRotate, rotationRuleLabel, inspectionsToReview, totalVehicles, available, migrationHeld, serviceHeld, activeReservations, overdueReservations, router, me?.moduleAccess?.loaner, t]);
+  }, [pickups, returns, feeAdvisoryCount, registrationsExpiring30d, readyToRotate, rotationRuleLabel, inspectionsToReview, loanerRequestsPending, totalVehicles, available, migrationHeld, serviceHeld, activeReservations, overdueReservations, router, me?.moduleAccess?.loaner, t]);
 
   return (
     <AppShell me={me} logout={logout}>

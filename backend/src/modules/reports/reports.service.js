@@ -363,6 +363,7 @@ export const reportsService = {
       rotationVehicles,
       fleetRotationCfg,
       inspectionsToReviewCount,
+      loanerRequestsPendingCount,
     ] = await Promise.all([
       prisma.reservation.findMany({
         where: reservationWhere,
@@ -452,6 +453,12 @@ export const reportsService = {
       // with damage reports awaiting soft/hard approval.
       prisma.customerInspection.count({
         where: { ...(effectiveTenantId ? { tenantId: effectiveTenantId } : {}), status: 'SUBMITTED' },
+      }).catch(() => 0),
+      // Loaner requests (2026-07-05): courtesy-car requests submitted from the
+      // public storefront still waiting for an advisor to make contact.
+      // Cheap: covered by @@index([tenantId, status]) on LoanerRequest.
+      prisma.loanerRequest.count({
+        where: { ...(effectiveTenantId ? { tenantId: effectiveTenantId } : {}), status: 'RECEIVED' },
       }).catch(() => 0),
     ]);
 
@@ -615,6 +622,10 @@ export const reportsService = {
         fleetRotationRule: fleetRotationCfg?.rule || 'TIME',
         // Fase B: customer inspections waiting for damage approval.
         inspectionsToReview: inspectionsToReviewCount || 0,
+        // 2026-07-05: storefront loaner requests awaiting advisor contact
+        // (LoanerRequest.status = RECEIVED). Dashboard card + click-through
+        // to /loaner; clears itself as advisors work the queue.
+        loanerRequestsPending: loanerRequestsPendingCount || 0,
         // 2026-05-28: vehicleIds derived from active reservations + blocks
         // exposed so the Vehicles page can compute its Available / On Rent
         // tiles without inheriting the Vehicle.status drift (every vehicle
