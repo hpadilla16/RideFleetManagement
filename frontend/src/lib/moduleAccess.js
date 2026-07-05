@@ -14,6 +14,7 @@ export const MODULE_DEFINITIONS = [
   { key: 'loaner', label: 'Loaner Program' },
   { key: 'tolls', label: 'Tolls' },
   { key: 'citations', label: 'Citations' },
+  { key: 'kiosk', label: 'Kiosk' },
   { key: 'marketIntelligence', label: 'Market Intelligence' },
   { key: 'settings', label: 'Settings' },
   { key: 'security', label: 'Security' },
@@ -45,6 +46,9 @@ export function pathnameToModule(pathname = '') {
   if (path.startsWith('/loaner')) return 'loaner';
   if (path.startsWith('/tolls')) return 'tolls';
   if (path.startsWith('/citations')) return 'citations';
+  // Admin pages only (/kiosks) — the public kiosk app (/kiosk) is device-token
+  // authed and is NOT gated by user module access.
+  if (path.startsWith('/kiosks')) return 'kiosk';
   if (path.startsWith('/settings/security')) return 'security';
   if (path.startsWith('/settings')) return 'settings';
   if (path.startsWith('/tenants')) return 'tenants';

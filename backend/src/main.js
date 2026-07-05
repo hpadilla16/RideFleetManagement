@@ -34,6 +34,8 @@ import { mobileInspectionPublicRouter } from './modules/checkout-session/mobile-
 import { customerInspectionPublicRouter, customerInspectionRouter } from './modules/customer-inspection/customer-inspection.routes.js';
 import { citationsRouter, citationsInternalRouter } from './modules/citations/citations.routes.js';
 import { repairOrdersRouter, maintenanceRouter } from './modules/maintenance/maintenance.routes.js';
+import { kioskRouter } from './modules/kiosk/kiosk.routes.js';
+import { kioskAdminRouter } from './modules/kiosk/kiosk-admin.routes.js';
 import { storeBoardRouter } from './modules/store-board/store-board.routes.js';
 import { storeBoardPublicRouter } from './modules/store-board/store-board-public.routes.js';
 import { assertAuthConfig } from './modules/auth/auth.config.js';
@@ -234,6 +236,13 @@ app.use('/api/store-board', requireAuth, tenantRateLimit, requireRole('SUPER_ADM
 app.use('/api/inventory', requireAuth, tenantRateLimit, requireModuleAccess('vehicles'), inventoryRouter);
 app.use('/api/repair-orders', requireAuth, tenantRateLimit, requireModuleAccess('maintenance'), repairOrdersRouter);
 app.use('/api/maintenance', requireAuth, tenantRateLimit, requireModuleAccess('maintenance'), maintenanceRouter);
+// Ride Kiosk Fase B1+B2 (2026-07-05). Device router FIRST: X-Kiosk-Token auth
+// + per-IP public guards (tenant-rate-limit runs after requireAuth and never
+// covers it). Its paths (/pair, POST /sessions, /sessions/:id/*) never match
+// the admin ones (/devices*, /upsell-rules, /packages, GET /sessions exact),
+// so admin requests fall through to the authed router mounted right below.
+app.use('/api/kiosk', kioskRouter);
+app.use('/api/kiosk', requireAuth, tenantRateLimit, requireModuleAccess('kiosk'), kioskAdminRouter);
 
 app.use('/api/reservations', requireAuth, tenantRateLimit, requireModuleAccess('reservations'), reservationsRouter);
 app.use('/api/reservations', requireAuth, tenantRateLimit, requireModuleAccess('reservations'), reservationExtendRouter);

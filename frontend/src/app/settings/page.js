@@ -27,6 +27,7 @@ import { useEffect, useState } from 'react';
 import { AuthGate } from '../../components/AuthGate';
 import { AppShell } from '../../components/AppShell';
 import { TLIntegrationPanel } from '../../components/settings/TLIntegrationPanel';
+import { KioskUpsellSettings } from '../../components/settings/KioskUpsellSettings';
 import { LoanerRatesTab } from './LoanerRatesTab';
 import { API_BASE, api } from '../../lib/client';
 import { MODULE_DEFINITIONS } from '../../lib/moduleAccess';
@@ -2369,6 +2370,7 @@ function SettingsInner({ token, me, logout }) {
     ai: 'AI Copilot',
     telematics: 'Telematics',
     marketIntel: 'Market Intelligence',
+    kioskUpsell: 'Kiosk Upsell',
     emails: 'Emails',
     services: 'Additional Services',
     commissions: 'Commissions',
@@ -2482,6 +2484,7 @@ function SettingsInner({ token, me, logout }) {
           <button onClick={() => setTab('ai')}>AI Copilot</button>
           <button onClick={() => setTab('telematics')}>Telematics</button>
           <button onClick={() => setTab('marketIntel')}>Market Intelligence</button>
+          <button onClick={() => setTab('kioskUpsell')}>Kiosk Upsell</button>
           <button onClick={() => setTab('access')}>Access Control</button>
           <button onClick={() => setTab('emails')}>Emails</button>
           <button onClick={() => setTab('services')}>Additional Services</button>
@@ -5406,6 +5409,10 @@ function SettingsInner({ token, me, logout }) {
               </div>
             </section>
           </div>
+        )}
+
+        {tab === 'kioskUpsell' && (
+          <KioskUpsellSettings token={token} scopedPath={scopedSettingsPath} />
         )}
 
         {tab === 'emails' && (

@@ -63,7 +63,14 @@ export function diagramTypeFor(vehicleTypeNameOrCode) {
 // Agent side
 // ---------------------------------------------------------------------------
 
-async function sendCustomerInspection({ sessionId, actorUserId }) {
+// closedSession (kiosk B3a, 2026-07-05): the kiosk walks the checkout state
+// machine to CLOSED itself, so its inspection link is minted AFTER the close
+// instead of delegating the wizard. With { closedSession: true } the step
+// guard accepts CLOSED, the delegation stamps + transition walk are skipped,
+// and a per-reservation dedupe (mirror of the CHECKIN-path dedupe) makes a
+// retried /complete idempotent. Default (false) behavior is byte-identical
+// for the existing wizard caller.
+async function sendCustomerInspection({ sessionId, actorUserId, closedSession = false }) {
   if (!sessionId) throw new CheckoutSessionError('sessionId required', 400);
   const session = await prisma.checkoutSession.findUnique({
     where: { id: sessionId },
@@ -83,13 +90,29 @@ async function sendCustomerInspection({ sessionId, actorUserId }) {
   if (!cfg?.enabled) {
     throw new CheckoutSessionError('Customer-led inspection is not enabled for this tenant', 403, 'CUSTOMER_INSPECTION_DISABLED');
   }
-  if (session.currentStep !== 'INSPECTION_HANDOFF') {
+  if (closedSession) {
+    if (session.currentStep !== 'CLOSED') {
+      throw new CheckoutSessionError(`Session must be CLOSED (is ${session.currentStep})`, 409);
+    }
+  } else if (session.currentStep !== 'INSPECTION_HANDOFF') {
     throw new CheckoutSessionError(`Session must be at INSPECTION_HANDOFF (is ${session.currentStep})`, 409);
   }
   const resv = session.reservation;
   if (!resv?.vehicle?.id) throw new CheckoutSessionError('No vehicle assigned to this reservation', 422, 'NO_VEHICLE_ASSIGNED');
   const emailTo = String(resv?.customer?.email || '').trim();
   if (!emailTo) throw new CheckoutSessionError('Customer has no email on file — use the QR fail-safe instead', 422, 'NO_CUSTOMER_EMAIL');
+
+  // Dedupe (closedSession only): one CHECKOUT inspection per reservation —
+  // a retried kiosk /complete must never re-create rows or re-email.
+  if (closedSession) {
+    const existing = await prisma.customerInspection.findFirst({
+      where: { reservationId: resv.id, phase: 'CHECKOUT' },
+      orderBy: { sentAt: 'desc' },
+    });
+    if (existing) {
+      return { ok: true, inspectionId: existing.id, emailTo: existing.emailTo, alreadySent: true };
+    }
+  }
 
   const inspection = await prisma.customerInspection.create({
     data: {
@@ -137,6 +160,17 @@ async function sendCustomerInspection({ sessionId, actorUserId }) {
     text: inspectRendered1.text,
     html: inspectRendered1.html,
   });
+
+  // closedSession (kiosk): the machine already reached CLOSED — nothing to
+  // delegate, no stamps, no transitions. Just the link + email above. The
+  // link (same 24h token the email carries) is returned so the kiosk DONE
+  // screen can render it as an on-screen QR (mockup K8).
+  if (closedSession) {
+    logger.info('[customer-inspection] link sent for closed kiosk checkout', {
+      sessionId, inspectionId: inspection.id, reservationId: resv.id,
+    });
+    return { ok: true, inspectionId: inspection.id, emailTo, expiresAt: minted.expiresAt, link };
+  }
 
   // Delegated flow: the walkthrough responsibility moved to the customer, so
   // the wizard finishes now (Hector's spec). inspectionCompletedAt and

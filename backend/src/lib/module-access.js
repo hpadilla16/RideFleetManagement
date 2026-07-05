@@ -18,6 +18,7 @@ export const MODULE_KEYS = [
   'loaner',
   'tolls',
   'citations',
+  'kiosk',
   'marketIntelligence',
   'settings',
   'security',
@@ -40,6 +41,7 @@ export const MODULE_LABELS = {
   loaner: 'Loaner Program',
   tolls: 'Tolls',
   citations: 'Citations',
+  kiosk: 'Kiosk',
   marketIntelligence: 'Market Intelligence',
   settings: 'Settings',
   security: 'Security',
@@ -63,6 +65,7 @@ function hostRoleModuleMap() {
     loaner: false,
     tolls: false,
     citations: false,
+    kiosk: false,
     marketIntelligence: false,
     settings: false,
     security: false,
@@ -117,6 +120,7 @@ export function roleAllowedModuleMap(roleOrUser) {
       loaner: true,
       tolls: true,
       citations: true,
+      kiosk: true,
       settings: true,
       security: true,
       tenants: false
@@ -141,6 +145,7 @@ export function roleAllowedModuleMap(roleOrUser) {
       loaner: true,
       tolls: true,
       citations: true,
+      kiosk: true,
       settings: false,
       security: false,
       tenants: false
@@ -164,6 +169,7 @@ export function roleAllowedModuleMap(roleOrUser) {
     loaner: true,
     tolls: false,
     citations: true,
+    kiosk: false,
     settings: false,
     security: false,
     tenants: false
@@ -187,6 +193,10 @@ export function defaultTenantModuleConfig(tenant = null) {
     loaner: !!tenant?.dealershipLoanerEnabled,
     tolls: !!tenant?.tollsEnabled,
     citations: true,
+    // Kiosk is OPT-IN per tenant (Hector, 2026-07-04 — unlike beta.212's
+    // default-ON maintenance/citations). Enforced fail-closed in
+    // normalizeTenantModuleConfig below.
+    kiosk: false,
     marketIntelligence: !!tenant?.marketIntelligenceEnabled,
     settings: true,
     security: true,
@@ -204,6 +214,10 @@ function normalizeTenantModuleConfig(raw = {}, tenant = null) {
     hostApp: !!parsed.hostApp && !!parsed.carSharing && !!tenant?.carSharingEnabled,
     loaner: !!parsed.loaner && !!tenant?.dealershipLoanerEnabled,
     tolls: !!parsed.tolls && !!tenant?.tollsEnabled,
+    // normalizeBooleanMap treats MISSING keys as true, which would silently
+    // flip kiosk ON for every tenant whose stored config predates the module.
+    // Kiosk is default-OFF: only an EXPLICIT true in the stored config enables it.
+    kiosk: (raw || {})?.kiosk === true,
     marketIntelligence: !!parsed.marketIntelligence && !!tenant?.marketIntelligenceEnabled,
     tenants: false
   };
@@ -220,7 +234,9 @@ function normalizeUserModuleConfig(raw = {}) {
 
 export async function getTenantModuleConfig(tenantId) {
   if (!tenantId) {
-    return normalizeTenantModuleConfig(normalizeBooleanMap(), {
+    // Kiosk stays default-OFF even in this tenantless fallback —
+    // normalizeBooleanMap() alone would report it as true.
+    return normalizeTenantModuleConfig({ ...normalizeBooleanMap(), kiosk: false }, {
       carSharingEnabled: true,
       dealershipLoanerEnabled: true,
       tollsEnabled: true,

@@ -27,6 +27,9 @@ const NAV_ITEMS = [
   { href: '/tolls', labelKey: 'nav.tolls', moduleKey: 'tolls' },
   { href: '/maintenance', labelKey: 'nav.maintenance', moduleKey: 'maintenance' },
   { href: '/citations', labelKey: 'nav.citations', moduleKey: 'citations' },
+  // Self service (kiosk B3b): ops surface with live devices/sessions —
+  // top-level like Maintenance, gated by the opt-in 'kiosk' module.
+  { href: '/kiosks', labelKey: 'nav.kiosks', moduleKey: 'kiosk' },
   { href: '/market', labelKey: 'nav.marketIntelligence', adminOnly: true, moduleKey: 'marketIntelligence' },
   { href: '/suggestions', labelKey: 'nav.pricingSuggestions', adminOnly: true, moduleKey: 'marketIntelligence' },
   { href: '/knowledge-base', labelKey: 'nav.knowledgeBase' },

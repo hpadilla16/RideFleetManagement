@@ -1,0 +1,678 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Ride Kiosk — Mockups v1 (self checkout + walk-up rent now)</title>
+<style>
+  :root{
+    --brand-purple:#8752FE; --brand-violet:#6d3df2; --brand-mint:#1fc7aa;
+    --brand-ink:#211a38; --brand-charcoal:#3F3F3F;
+    --bg-soft:#f4f1ff; --bg-soft-2:#fcfbff; --border-soft:#e6dfff; --border-strong:#d7cbff;
+    --ios-text:#1f1f28; --ios-muted:#6f668f; --ios-shadow:0 14px 32px rgba(35,21,80,.08);
+    --ios-shadow-hover:0 18px 36px rgba(35,21,80,.14); --ios-radius:16px;
+  }
+  *{box-sizing:border-box;}
+  body{margin:0;color:#1f1f1f;font-family:Aptos,'Segoe UI Variable','Segoe UI',system-ui,sans-serif;font-size:14px;line-height:1.5;
+    background:linear-gradient(180deg,#faf7ff 0%,var(--bg-soft) 100%);min-height:100vh;}
+  .wrap{max-width:1280px;margin:0 auto;padding:28px 20px 80px;}
+  h2.title{font-size:24px;font-weight:850;margin:0 0 4px;color:#29223f;letter-spacing:.005em;}
+  .legend{color:var(--ios-muted);font-size:13px;margin:0 0 22px;line-height:1.6;}
+  .legend code{background:rgba(135,82,254,.08);border:1px solid rgba(135,82,254,.16);border-radius:6px;padding:1px 6px;color:#4c1d95;}
+  .screen-tag{font-size:12px;letter-spacing:.07em;text-transform:uppercase;color:var(--brand-violet);font-weight:800;margin:34px 0 10px;}
+  .section{font-size:17px;font-weight:850;color:#29223f;margin:44px 0 6px;padding-top:18px;border-top:2px solid var(--border-strong);}
+
+  /* ============ TABLET FRAME (kiosk, landscape) ============ */
+  .tablet{border:10px solid #2a2440;border-radius:28px;overflow:hidden;margin-bottom:14px;box-shadow:0 22px 48px rgba(35,21,80,.18);background:#fff;max-width:1080px;}
+  .kbody{min-height:600px;display:flex;flex-direction:column;background:linear-gradient(180deg,#fdfcff 0%,#f6f2ff 100%);}
+  .kbar{display:flex;align-items:center;justify-content:space-between;padding:16px 26px;border-bottom:1px solid var(--border-soft);background:rgba(255,255,255,.85);}
+  .kbrand{display:flex;align-items:center;gap:11px;}
+  .kbrand .logo{width:38px;height:38px;border-radius:12px;background:linear-gradient(135deg,#8752FE,#6d3df2);display:flex;align-items:center;justify-content:center;color:#fff;font-weight:850;font-size:18px;box-shadow:0 6px 14px rgba(135,82,254,.35);}
+  .kbrand b{font-size:19px;font-weight:850;color:var(--brand-ink);}
+  .kbrand small{display:block;color:var(--ios-muted);font-size:11px;}
+  .kright{display:flex;align-items:center;gap:10px;}
+  .lang{display:inline-flex;border:1px solid var(--border-soft);border-radius:12px;overflow:hidden;font-size:13px;font-weight:750;}
+  .lang span{padding:12px 18px;color:#6f668f;background:#fff;cursor:pointer;font-size:14px;}
+  .lang span.on{background:var(--brand-purple);color:#fff;}
+  .help{background:rgba(135,82,254,.09);border:1px solid rgba(135,82,254,.18);color:#4c1d95;border-radius:12px;padding:12px 20px;font-weight:750;font-size:14px;cursor:pointer;}
+  .kmain{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:34px 44px;text-align:center;}
+  .kmain.left{align-items:stretch;text-align:left;justify-content:flex-start;}
+  .kh1{font-size:38px;font-weight:850;color:#29223f;margin:0 0 8px;letter-spacing:-.01em;line-height:1.15;}
+  .kh2{font-size:24px;font-weight:850;color:#29223f;margin:0 0 6px;}
+  .ksub{font-size:17px;color:var(--ios-muted);margin:0 0 26px;max-width:640px;}
+  .kbtn{display:inline-flex;align-items:center;justify-content:center;gap:12px;background:linear-gradient(180deg,#9460ff,#8752FE);color:#fff;border:none;border-radius:20px;padding:22px 34px;font-weight:800;font-size:20px;cursor:pointer;box-shadow:0 12px 26px rgba(135,82,254,.32);min-width:300px;}
+  .kbtn.ghost{background:#fff;color:#4c1d95;border:2px solid rgba(135,82,254,.28);box-shadow:var(--ios-shadow);}
+  .kbtn.mint{background:linear-gradient(180deg,#2ad6b6,#1fc7aa);box-shadow:0 12px 26px rgba(31,199,170,.3);}
+  .kbtn.sm{padding:14px 24px;font-size:16px;border-radius:16px;min-width:0;}
+  .kbtn.back{background:#fff;color:#6f668f;border:1.5px solid var(--border-soft);box-shadow:none;font-size:15px;padding:12px 22px;min-width:0;}
+  .choice2{display:grid;grid-template-columns:1fr 1fr;gap:20px;width:100%;max-width:820px;}
+  .bigcard{background:rgba(255,255,255,.94);border:2px solid var(--border-soft);border-radius:22px;padding:30px 26px;box-shadow:var(--ios-shadow);cursor:pointer;text-align:center;}
+  .bigcard.hot{border-color:var(--brand-purple);box-shadow:0 16px 34px rgba(135,82,254,.22);}
+  .bigcard .ic{font-size:44px;margin-bottom:12px;}
+  .bigcard b{display:block;font-size:21px;color:#29223f;font-weight:850;margin-bottom:6px;}
+  .bigcard span{color:var(--ios-muted);font-size:14px;}
+  .steps{display:flex;gap:8px;align-items:center;justify-content:center;padding:12px 0 4px;}
+  .stp{display:flex;align-items:center;gap:7px;font-size:13px;font-weight:750;color:#6f668f;}
+  .stp .dot{width:24px;height:24px;border-radius:999px;background:#ece6ff;color:#7c6bb0;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:850;}
+  .stp.on{color:#4c1d95;} .stp.on .dot{background:var(--brand-purple);color:#fff;box-shadow:0 4px 10px rgba(135,82,254,.35);}
+  .stp.done .dot{background:var(--brand-mint);color:#fff;}
+  .stp .ln{width:26px;height:2px;background:#ece6ff;border-radius:2px;}
+  .kfoot{display:flex;justify-content:space-between;align-items:center;padding:14px 26px;border-top:1px solid var(--border-soft);background:rgba(255,255,255,.7);font-size:13px;color:var(--ios-muted);}
+  .tablet.mini .kbody{min-height:360px;}
+  .minigrid{display:grid;grid-template-columns:1fr 1fr;gap:18px;max-width:1080px;}
+  .minigrid .tablet{margin-bottom:0;}
+  .kpanel{background:rgba(255,255,255,.94);border:1px solid var(--border-soft);border-radius:20px;box-shadow:var(--ios-shadow);padding:22px 26px;width:100%;max-width:760px;text-align:left;}
+  .kv{display:flex;justify-content:space-between;padding:9px 0;border-bottom:1px solid #f3efff;font-size:15px;}
+  .kv:last-child{border-bottom:none;} .kv .l{color:var(--ios-muted);}
+  .kv b{color:#29223f;font-weight:800;}
+  .keypad{display:grid;grid-template-columns:repeat(3,86px);gap:10px;justify-content:center;margin-top:18px;}
+  .key{height:64px;border-radius:16px;background:#fff;border:1.5px solid var(--border-soft);font-size:22px;font-weight:800;color:#29223f;display:flex;align-items:center;justify-content:center;box-shadow:var(--ios-shadow);cursor:pointer;}
+  .field{background:#fff;border:2px solid var(--border-strong);border-radius:16px;padding:16px 20px;font-size:22px;font-weight:800;color:#29223f;letter-spacing:.12em;min-width:340px;text-align:center;}
+  .field.ph{color:#c6bce4;}
+  .pkgs{display:grid;grid-template-columns:1fr 1.15fr 1fr;gap:16px;width:100%;max-width:980px;align-items:stretch;}
+  .pkg{background:rgba(255,255,255,.95);border:2px solid var(--border-soft);border-radius:22px;padding:22px;box-shadow:var(--ios-shadow);text-align:left;display:flex;flex-direction:column;}
+  .pkg.reco{border-color:var(--brand-purple);box-shadow:0 18px 38px rgba(135,82,254,.24);position:relative;transform:scale(1.02);}
+  .pkg .ribbon{position:absolute;top:-13px;left:50%;transform:translateX(-50%);background:linear-gradient(135deg,#8752FE,#6d3df2);color:#fff;font-size:11px;font-weight:850;letter-spacing:.06em;text-transform:uppercase;border-radius:999px;padding:5px 16px;box-shadow:0 6px 14px rgba(135,82,254,.4);}
+  .pkg h4{margin:2px 0 2px;font-size:18px;color:#29223f;font-weight:850;}
+  .pkg .pp{font-size:30px;font-weight:850;color:var(--brand-ink);margin:6px 0 2px;}
+  .pkg .pp small{font-size:13px;color:var(--ios-muted);font-weight:700;}
+  .pkg ul{list-style:none;margin:12px 0 16px;padding:0;flex:1;}
+  .pkg li{padding:7px 0;font-size:13.5px;color:#33304a;border-bottom:1px solid #f3efff;display:flex;gap:9px;align-items:flex-start;}
+  .pkg li:last-child{border-bottom:none;}
+  .pkg li .ck{color:var(--brand-mint);font-weight:900;} .pkg li .no{color:#d9d2ef;font-weight:900;}
+  .pkg .cta{width:100%;border-radius:14px;padding:13px;font-weight:800;font-size:15px;cursor:pointer;border:none;}
+  .pkg .cta.buy{background:linear-gradient(180deg,#9460ff,#8752FE);color:#fff;box-shadow:0 8px 18px rgba(135,82,254,.3);}
+  .pkg .cta.ghostc{background:rgba(135,82,254,.07);color:#4c1d95;border:1.5px solid rgba(135,82,254,.18);}
+  .scarce{display:inline-flex;align-items:center;gap:6px;background:rgba(245,158,11,.12);border:1px solid rgba(245,158,11,.25);color:#b45309;font-size:11.5px;font-weight:800;border-radius:999px;padding:4px 11px;margin-top:8px;}
+  .qr{width:190px;height:190px;border-radius:18px;background:
+      repeating-linear-gradient(0deg,#29223f 0 8px,transparent 8px 16px),
+      repeating-linear-gradient(90deg,#29223f 0 8px,#fff 8px 16px);
+      border:8px solid #fff;box-shadow:var(--ios-shadow);margin:6px auto 12px;}
+  .paystate{display:inline-flex;align-items:center;gap:9px;background:rgba(245,158,11,.1);border:1px solid rgba(245,158,11,.22);color:#b45309;font-weight:800;font-size:14px;border-radius:999px;padding:9px 18px;}
+  .paystate.ok{background:rgba(16,185,129,.12);border-color:rgba(16,185,129,.22);color:#047857;}
+  .sig{border:2px dashed var(--border-strong);border-radius:18px;background:#fff;height:150px;display:flex;align-items:center;justify-content:center;color:#c6bce4;font-size:15px;font-weight:700;width:100%;max-width:680px;}
+  .sig svg{opacity:.85;}
+  .carcard{display:flex;align-items:center;gap:18px;background:rgba(255,255,255,.95);border:2px solid var(--border-soft);border-radius:20px;padding:18px 22px;box-shadow:var(--ios-shadow);max-width:720px;width:100%;text-align:left;}
+  .carimg{width:120px;height:76px;border-radius:14px;background:linear-gradient(135deg,#efe7ff,#dff7f1);display:flex;align-items:center;justify-content:center;font-size:38px;}
+  .classgrid{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;width:100%;max-width:920px;}
+  .classcard{background:rgba(255,255,255,.95);border:2px solid var(--border-soft);border-radius:18px;padding:16px;box-shadow:var(--ios-shadow);text-align:center;cursor:pointer;}
+  .classcard.sel{border-color:var(--brand-purple);box-shadow:0 14px 30px rgba(135,82,254,.22);}
+  .classcard .em{font-size:34px;} .classcard b{display:block;font-size:15.5px;color:#29223f;margin:4px 0 2px;}
+  .classcard .pr{font-size:19px;font-weight:850;color:var(--brand-ink);} .classcard .pr small{font-size:11px;color:var(--ios-muted);font-weight:700;}
+  .classcard .av{font-size:11px;color:var(--brand-mint);font-weight:800;}
+  .escalate{display:flex;gap:18px;align-items:center;background:rgba(255,255,255,.95);border:2px solid var(--border-soft);border-radius:22px;padding:22px 26px;box-shadow:var(--ios-shadow);max-width:760px;width:100%;text-align:left;}
+  .vid{width:220px;height:150px;border-radius:16px;background:linear-gradient(135deg,#2a2440,#4c1d95);display:flex;align-items:center;justify-content:center;color:#fff;font-size:40px;position:relative;flex:none;}
+  .vid .live{position:absolute;top:10px;left:10px;background:#ef4444;color:#fff;font-size:10px;font-weight:850;border-radius:6px;padding:2px 8px;letter-spacing:.05em;}
+  .aibar{display:flex;align-items:center;gap:12px;background:rgba(135,82,254,.07);border:1.5px solid rgba(135,82,254,.16);border-radius:999px;padding:10px 18px;max-width:640px;width:100%;margin-top:22px;color:#4c1d95;font-weight:700;font-size:14px;}
+  .aibar .mic{width:34px;height:34px;border-radius:999px;background:linear-gradient(135deg,#8752FE,#6d3df2);color:#fff;display:flex;align-items:center;justify-content:center;flex:none;}
+  .note{background:linear-gradient(180deg,rgba(135,82,254,.08),rgba(31,199,170,.06));border:1px solid rgba(135,82,254,.12);border-radius:14px;padding:11px 13px;color:#433b63;font-size:12px;margin:8px 0 16px;line-height:1.55;max-width:1080px;}
+  .scanbox{width:420px;height:220px;border-radius:20px;border:3px dashed var(--brand-purple);background:rgba(135,82,254,.05);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;color:#4c1d95;font-weight:750;margin-bottom:14px;}
+  .scanbox .cam{font-size:44px;}
+
+  /* ============ ADMIN APP FRAME (desktop) ============ */
+  .screen{border:1px solid var(--border-soft);border-radius:24px;overflow:hidden;margin-bottom:14px;box-shadow:var(--ios-shadow);background:var(--bg-soft-2);}
+  .app{display:grid;grid-template-columns:248px 1fr;min-height:560px;gap:0;}
+  .side{padding:18px 16px;background:linear-gradient(180deg,rgba(255,255,255,.96),rgba(247,243,255,.93));border-right:1px solid var(--border-soft);}
+  .brand{display:flex;align-items:center;gap:10px;margin-bottom:20px;}
+  .brand .logo{width:34px;height:34px;border-radius:11px;background:linear-gradient(135deg,#8752FE,#6d3df2);display:flex;align-items:center;justify-content:center;color:#fff;font-weight:850;font-size:16px;box-shadow:0 6px 14px rgba(135,82,254,.35);}
+  .brand b{font-size:18px;font-weight:850;color:var(--brand-ink);}
+  .brand small{display:block;color:var(--ios-muted);font-size:11px;}
+  .nav a{display:flex;align-items:center;gap:11px;padding:10px 12px;border-radius:13px;color:#56526b;text-decoration:none;font-size:13.5px;font-weight:600;margin-bottom:2px;border:1px solid transparent;}
+  .nav a.on{background:rgba(135,82,254,.13);color:#2d244d;box-shadow:inset 0 0 0 1px rgba(135,82,254,.18);}
+  .nav a .i{width:18px;text-align:center;}
+  .nav .sep{color:var(--ios-muted);font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.08em;margin:16px 8px 7px;}
+  .main{padding:22px 26px;}
+  .top{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:18px;flex-wrap:wrap;gap:12px;}
+  .h1{font-size:26px;font-weight:850;margin:0;color:#29223f;letter-spacing:.005em;}
+  .sub{color:var(--ios-muted);font-size:13px;margin-top:3px;}
+  .btn{background:linear-gradient(180deg,#9460ff,#8752FE);color:#fff;border:none;border-radius:13px;padding:9px 16px;font-weight:750;font-size:13px;cursor:pointer;box-shadow:0 8px 18px rgba(135,82,254,.28);}
+  .btn.ghost{background:rgba(135,82,254,.08);color:#4c1d95;border:1px solid rgba(135,82,254,.16);box-shadow:none;}
+  .row{display:flex;gap:8px;flex-wrap:wrap;align-items:center;}
+  .sel{background:#fff;border:1px solid var(--border-soft);color:#29223f;border-radius:12px;padding:8px 13px;font-size:13px;font-weight:600;box-shadow:var(--ios-shadow);}
+  .cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:13px;margin-bottom:20px;}
+  .kpi{background:linear-gradient(180deg,rgba(255,255,255,.92),rgba(247,243,255,.9));border:1px solid var(--border-soft);border-radius:16px;padding:15px 17px;box-shadow:var(--ios-shadow);}
+  .kpi .k{font-size:11px;color:var(--ios-muted);text-transform:uppercase;letter-spacing:.05em;font-weight:700;}
+  .kpi .v{font-size:27px;font-weight:800;margin-top:5px;color:var(--brand-ink);}
+  .kpi .d{font-size:11.5px;margin-top:4px;color:var(--ios-muted);}
+  .panel{background:rgba(255,255,255,.9);border:1px solid var(--border-soft);border-radius:18px;margin-bottom:16px;box-shadow:var(--ios-shadow);overflow:hidden;}
+  .ph{padding:14px 18px;border-bottom:1px solid #efeaff;font-weight:800;font-size:14px;color:#29223f;display:flex;justify-content:space-between;align-items:center;gap:10px;}
+  .pb{padding:8px 18px 16px;}
+  table{width:100%;border-collapse:collapse;font-size:13px;}
+  th{text-align:left;color:var(--ios-muted);font-weight:700;font-size:11px;text-transform:uppercase;letter-spacing:.04em;padding:11px 18px;border-bottom:1px solid #efeaff;}
+  td{padding:12px 18px;border-bottom:1px solid #f3efff;color:#33304a;vertical-align:middle;}
+  tr:last-child td{border-bottom:none;}
+  .mono{font-variant-numeric:tabular-nums;}
+  .unit{font-weight:750;color:#29223f;} .dim{color:var(--ios-muted);} .hint{color:var(--ios-muted);font-size:11px;}
+  .chip{display:inline-flex;align-items:center;gap:6px;padding:4px 11px;border-radius:999px;font-size:11px;font-weight:750;letter-spacing:.02em;border:1px solid rgba(135,82,254,.16);background:rgba(135,82,254,.09);color:#4c1d95;white-space:nowrap;}
+  .chip.ok{background:rgba(16,185,129,.12);border-color:rgba(16,185,129,.2);color:#047857;}
+  .chip.warn{background:rgba(245,158,11,.12);border-color:rgba(245,158,11,.22);color:#b45309;}
+  .chip.bad{background:rgba(244,63,94,.12);border-color:rgba(244,63,94,.22);color:#be123c;}
+  .lnk{color:var(--brand-violet);font-weight:750;font-size:12.5px;cursor:pointer;}
+  .tog{width:38px;height:22px;border-radius:999px;background:var(--brand-purple);position:relative;display:inline-block;vertical-align:middle;}
+  .tog::after{content:"";position:absolute;right:3px;top:3px;width:16px;height:16px;border-radius:999px;background:#fff;}
+  .tog.off{background:#d9d2ef;} .tog.off::after{right:auto;left:3px;}
+</style></head>
+<body><div class="wrap">
+  <h2 class="title">Ride Kiosk — mockups v1</h2>
+  <p class="legend">Self-checkout de pickup + <b>walk-up "Rent a car now"</b> (nuevo en scope 2026-07-04) en tablet kiosk-mode, touch-first ES/EN. Tema Ride Fleet Manager. Plan base: <code>doc/kiosk-autonomo-plan-2026-06-11.md</code> · spec técnico: <code>doc/kiosk-e2e-spec-2026-07-04.md</code>. El flujo de PAGO (iPOS payment link) es mock visual — la implementación real la revisa Hector línea a línea. Rev 2 tras design review: decline honesto en K5, hold separado del total en K6, consent de privacidad (K1/K4/K4b), selfie K4b, estados de error K-E1..E4, touch targets ≥48px en rutas críticas, nav: Kiosks top-level / Upsell en Settings. <b>ADA (para Fase C):</b> acciones primarias en la mitad inferior de la pantalla (reach 15–48"), spec de altura del mount, y toggle "larger text" junto a EN/ES.</p>
+
+  <div class="section">A · Kiosk (cliente, tablet fullscreen)</div>
+
+  <!-- ============ K1 — WELCOME ============ -->
+  <div class="screen-tag">K1 · Welcome / attract — dos caminos: pickup con reserva o walk-up rent-now</div>
+  <div class="tablet"><div class="kbody">
+    <div class="kbar">
+      <div class="kbrand"><div class="logo">R</div><div><b>International Rental</b><small>Orlando — MCO · Kiosk 1</small></div></div>
+      <div class="kright"><span class="lang"><span class="on">EN</span><span>ES</span></span><button class="help">🎧 Help</button></div>
+    </div>
+    <div class="kmain">
+      <div class="kh1">Welcome! Skip the line.</div>
+      <p class="ksub">Pick up your reserved car in under 5 minutes — or rent one right now.</p>
+      <div class="choice2">
+        <div class="bigcard hot"><div class="ic">🔑</div><b>I have a reservation</b><span>Pick up your car — scan your confirmation or type it in</span></div>
+        <div class="bigcard"><div class="ic">🚗</div><b>Rent a car now</b><span>See today's cars and prices, drive out in minutes</span></div>
+      </div>
+      <div class="aibar"><div class="mic">🎙</div> Ask me anything — "How much is the deposit?" · "¿Aceptan débito?"</div>
+    </div>
+    <div class="kfoot"><span>Español disponible · Touch 🎧 Help anytime to talk to a live agent · This kiosk's camera is used only to assist your check-in — <span class="lnk">Privacy</span></span><span>Ride Kiosk · online ●</span></div>
+  </div></div>
+
+  <!-- ============ K2 — FIND RESERVATION ============ -->
+  <div class="screen-tag">K2 · Find my reservation — QR del email de confirmación o confirmación + apellido</div>
+  <div class="tablet"><div class="kbody">
+    <div class="kbar">
+      <div class="kbrand"><div class="logo">R</div><div><b>International Rental</b><small>Orlando — MCO · Kiosk 1</small></div></div>
+      <div class="kright"><span class="lang"><span class="on">EN</span><span>ES</span></span><button class="help">🎧 Help</button></div>
+    </div>
+    <div class="steps">
+      <span class="stp on"><span class="dot">1</span> Reservation</span><span class="stp"><span class="ln"></span></span>
+      <span class="stp"><span class="dot">2</span> ID</span><span class="stp"><span class="ln"></span></span>
+      <span class="stp"><span class="dot">3</span> Protection &amp; extras</span><span class="stp"><span class="ln"></span></span>
+      <span class="stp"><span class="dot">4</span> Payment</span><span class="stp"><span class="ln"></span></span>
+      <span class="stp"><span class="dot">5</span> Sign &amp; keys</span>
+    </div>
+    <div class="kmain">
+      <div class="kh2">Find your reservation</div>
+      <p class="ksub">Scan the QR code from your confirmation email, or enter your confirmation number.</p>
+      <div class="choice2" style="max-width:860px">
+        <div class="bigcard"><div class="ic">📱</div><b>Scan QR code</b><span>From your confirmation email</span></div>
+        <div class="bigcard hot" style="cursor:default">
+          <div class="field">ZE4-8213<span style="opacity:.35">▏</span></div>
+          <div class="keypad">
+            <div class="key">1</div><div class="key">2</div><div class="key">3</div>
+            <div class="key">4</div><div class="key">5</div><div class="key">6</div>
+            <div class="key">7</div><div class="key">8</div><div class="key">9</div>
+            <div class="key">ABC</div><div class="key">0</div><div class="key">⌫</div>
+          </div>
+        </div>
+      </div>
+      <div style="margin-top:18px"><button class="kbtn ghost sm">Can't find it? Look me up by last name + phone ›</button></div>
+    </div>
+    <div class="kfoot"><button class="kbtn back">‹ Back</button><span class="dim">Stuck? Touch 🎧 Help — a live agent can take over</span></div>
+  </div></div>
+
+  <!-- ============ K3 — RESERVATION SUMMARY ============ -->
+  <div class="screen-tag">K3 · Reservation found — resumen + lo que el broker YA cobró (canal Priceline en el ejemplo)</div>
+  <div class="tablet"><div class="kbody">
+    <div class="kbar">
+      <div class="kbrand"><div class="logo">R</div><div><b>International Rental</b><small>Orlando — MCO · Kiosk 1</small></div></div>
+      <div class="kright"><span class="lang"><span class="on">EN</span><span>ES</span></span><button class="help">🎧 Help</button></div>
+    </div>
+    <div class="steps">
+      <span class="stp done"><span class="dot">✓</span> Reservation</span><span class="stp"><span class="ln"></span></span>
+      <span class="stp on"><span class="dot">2</span> ID</span><span class="stp"><span class="ln"></span></span>
+      <span class="stp"><span class="dot">3</span> Protection &amp; extras</span><span class="stp"><span class="ln"></span></span>
+      <span class="stp"><span class="dot">4</span> Payment</span><span class="stp"><span class="ln"></span></span>
+      <span class="stp"><span class="dot">5</span> Sign &amp; keys</span>
+    </div>
+    <div class="kmain">
+      <div class="kh2">Hi Maria! We found your reservation 🎉</div>
+      <div class="kpanel">
+        <div class="kv"><span class="l">Confirmation</span><b>ZE4-8213 · Priceline</b></div>
+        <div class="kv"><span class="l">Driver</span><b>Maria González</b></div>
+        <div class="kv"><span class="l">Dates</span><b>Jul 4, 10:30 AM → Jul 13, 10:00 AM (9 days)</b></div>
+        <div class="kv"><span class="l">Vehicle class</span><b>Midsize SUV (CFAR)</b></div>
+        <div class="kv"><span class="l">Prepaid with your booking</span><b style="color:#047857">Base rate · Collision protection ✓</b></div>
+        <div class="kv"><span class="l">Due at pickup</span><b>$250.00 refundable deposit + any extras you add</b></div>
+      </div>
+      <div class="row" style="margin-top:22px;justify-content:center"><button class="kbtn">That's me — continue ›</button> <button class="kbtn ghost sm" style="margin-left:12px">This isn't my reservation</button></div>
+    </div>
+    <div class="kfoot"><button class="kbtn back">‹ Back</button><span class="dim">Need help? Touch 🎧 Help</span></div>
+  </div></div>
+
+  <!-- ============ K4 — LICENSE SCAN ============ -->
+  <div class="screen-tag">K4 · Verify ID — pdf417 scanner (beta.138-139 reusado) + selfie</div>
+  <div class="tablet"><div class="kbody">
+    <div class="kbar">
+      <div class="kbrand"><div class="logo">R</div><div><b>International Rental</b><small>Orlando — MCO · Kiosk 1</small></div></div>
+      <div class="kright"><span class="lang"><span class="on">EN</span><span>ES</span></span><button class="help">🎧 Help</button></div>
+    </div>
+    <div class="steps">
+      <span class="stp done"><span class="dot">✓</span> Reservation</span><span class="stp"><span class="ln"></span></span>
+      <span class="stp on"><span class="dot">2</span> ID</span><span class="stp"><span class="ln"></span></span>
+      <span class="stp"><span class="dot">3</span> Protection &amp; extras</span><span class="stp"><span class="ln"></span></span>
+      <span class="stp"><span class="dot">4</span> Payment</span><span class="stp"><span class="ln"></span></span>
+      <span class="stp"><span class="dot">5</span> Sign &amp; keys</span>
+    </div>
+    <div class="kmain">
+      <div class="kh2">Scan your driver's license</div>
+      <p class="ksub">Hold the <b>back of your license</b> (barcode side) up to the camera below the screen.</p>
+      <div class="note" style="max-width:560px;text-align:left">🔒 Your license and selfie are used <b>only to verify your identity for this rental</b> and are stored securely with your agreement. <span class="lnk">Privacy policy</span></div>
+      <div class="scanbox"><div class="cam">📷</div> Looking for barcode…</div>
+      <div class="kpanel" style="max-width:560px">
+        <div class="kv"><span class="l">Name matches reservation</span><b style="color:#047857">✓ MARIA GONZALEZ</b></div>
+        <div class="kv"><span class="l">License valid</span><b style="color:#047857">✓ Expires 2028</b></div>
+        <div class="kv"><span class="l">Age requirement (21+)</span><b style="color:#047857">✓</b></div>
+        <div class="kv"><span class="l">Next</span><b>Quick selfie to confirm it's you</b></div>
+      </div>
+    </div>
+    <div class="kfoot"><button class="kbtn back">‹ Back</button><span class="dim">Scanner not reading? Touch 🎧 Help — an agent can verify by video</span></div>
+  </div></div>
+
+  <!-- ============ K4b — SELFIE ============ -->
+  <div class="screen-tag">K4b · Quick selfie — guía de encuadre + retake; si no matchea 2 veces → escalación (K10)</div>
+  <div class="tablet"><div class="kbody">
+    <div class="kbar">
+      <div class="kbrand"><div class="logo">R</div><div><b>International Rental</b><small>Orlando — MCO · Kiosk 1</small></div></div>
+      <div class="kright"><span class="lang"><span class="on">EN</span><span>ES</span></span><button class="help">🎧 Help</button></div>
+    </div>
+    <div class="steps">
+      <span class="stp done"><span class="dot">✓</span> Reservation</span><span class="stp"><span class="ln"></span></span>
+      <span class="stp on"><span class="dot">2</span> ID</span><span class="stp"><span class="ln"></span></span>
+      <span class="stp"><span class="dot">3</span> Protection &amp; extras</span><span class="stp"><span class="ln"></span></span>
+      <span class="stp"><span class="dot">4</span> Payment</span><span class="stp"><span class="ln"></span></span>
+      <span class="stp"><span class="dot">5</span> Sign &amp; keys</span>
+    </div>
+    <div class="kmain">
+      <div class="kh2">Quick selfie to confirm it's you</div>
+      <p class="ksub">Center your face in the circle and look at the camera. Take off sunglasses and hats.</p>
+      <div style="width:240px;height:240px;border-radius:999px;border:4px dashed var(--brand-purple);background:rgba(135,82,254,.05);display:flex;align-items:center;justify-content:center;font-size:70px;margin-bottom:16px">🙂</div>
+      <div class="row" style="justify-content:center"><button class="kbtn sm">📸 Take photo</button><button class="kbtn ghost sm">Retake</button></div>
+      <div class="note" style="max-width:560px;text-align:left;margin-top:18px">🔒 Used only to verify your identity for this rental. If we can't verify automatically, a live agent will help by video — you won't start over.</div>
+    </div>
+    <div class="kfoot"><button class="kbtn back">‹ Back</button><span class="dim">Prefer a person? Touch 🎧 Help anytime</span></div>
+  </div></div>
+
+  <!-- ============ K5 — UPSELL ============ -->
+  <div class="screen-tag">K5 · Protection &amp; extras — anchor+decoy 3 paquetes, ajustado POR BROKER (aquí Expedia: nada prepagado). El corazón del revenue. Basic = el decline honesto (sin dark patterns). REGLA: scarcity ("only 2 left") y social proof ("most drivers") SOLO con data real del planner/attach stats.</div>
+  <div class="tablet"><div class="kbody">
+    <div class="kbar">
+      <div class="kbrand"><div class="logo">R</div><div><b>International Rental</b><small>Orlando — MCO · Kiosk 1</small></div></div>
+      <div class="kright"><span class="lang"><span class="on">EN</span><span>ES</span></span><button class="help">🎧 Help</button></div>
+    </div>
+    <div class="steps">
+      <span class="stp done"><span class="dot">✓</span> Reservation</span><span class="stp"><span class="ln"></span></span>
+      <span class="stp done"><span class="dot">✓</span> ID</span><span class="stp"><span class="ln"></span></span>
+      <span class="stp on"><span class="dot">3</span> Protection &amp; extras</span><span class="stp"><span class="ln"></span></span>
+      <span class="stp"><span class="dot">4</span> Payment</span><span class="stp"><span class="ln"></span></span>
+      <span class="stp"><span class="dot">5</span> Sign &amp; keys</span>
+    </div>
+    <div class="kmain">
+      <div class="kh2">Protect your trip, Maria</div>
+      <p class="ksub" style="margin-bottom:30px">Orlando has toll roads everywhere — most drivers add tolls. Prices are per day for your 9-day rental.</p>
+      <div class="pkgs">
+        <div class="pkg">
+          <h4>Basic</h4>
+          <div class="pp">$0<small>/day</small></div>
+          <ul>
+            <li><span class="no">✕</span> No collision protection — you pay up to full vehicle value</li>
+            <li><span class="no">✕</span> Tolls billed later + $15 admin fee per toll</li>
+            <li><span class="ck">✓</span> No extra cost</li>
+          </ul>
+          <button class="cta ghostc">Continue with Basic — no extras ›</button>
+        </div>
+        <div class="pkg reco">
+          <div class="ribbon">Most popular</div>
+          <h4>Recommended</h4>
+          <div class="pp">$37<small>/day · $333 total</small></div>
+          <ul>
+            <li><span class="ck">✓</span> Collision protection (CDW, $1,000 deductible)</li>
+            <li><span class="ck">✓</span> Unlimited tolls — SunPass included</li>
+            <li><span class="ck">✓</span> Drive worry-free on 408 / 417 / 528</li>
+          </ul>
+          <button class="cta buy">Add Recommended ›</button>
+        </div>
+        <div class="pkg">
+          <h4>Premium</h4>
+          <div class="pp">$53<small>/day · $477 total</small></div>
+          <ul>
+            <li><span class="ck">✓</span> Everything in Recommended</li>
+            <li><span class="ck">✓</span> $0 deductible</li>
+            <li><span class="ck">✓</span> Roadside assistance + extra driver</li>
+          </ul>
+          <button class="cta ghostc">Add Premium</button>
+        </div>
+      </div>
+      <p class="ksub" style="margin:16px 0 0;font-size:14px">All options include the <b>$250 refundable deposit</b> at payment — released after return.</p>
+      <div style="margin-top:14px" class="row">
+        <span class="scarce">⬆ Upgrade to Full-size SUV — only 2 left today · +$14/day</span>
+      </div>
+      <div class="aibar"><div class="mic">🎙</div> "What does the deductible mean?" — Ask me anything</div>
+    </div>
+    <div class="kfoot"><button class="kbtn back">‹ Back</button><span class="dim">Questions about coverage? Touch 🎧 Help</span></div>
+  </div></div>
+
+  <!-- ============ K6 — PAYMENT ============ -->
+  <div class="screen-tag">K6 · Payment — iPOS payment link (QR en pantalla o SMS); el cliente paga EN SU teléfono. Deposit auth $250 + extras.</div>
+  <div class="tablet"><div class="kbody">
+    <div class="kbar">
+      <div class="kbrand"><div class="logo">R</div><div><b>International Rental</b><small>Orlando — MCO · Kiosk 1</small></div></div>
+      <div class="kright"><span class="lang"><span class="on">EN</span><span>ES</span></span><button class="help">🎧 Help</button></div>
+    </div>
+    <div class="steps">
+      <span class="stp done"><span class="dot">✓</span> Reservation</span><span class="stp"><span class="ln"></span></span>
+      <span class="stp done"><span class="dot">✓</span> ID</span><span class="stp"><span class="ln"></span></span>
+      <span class="stp done"><span class="dot">✓</span> Protection &amp; extras</span><span class="stp"><span class="ln"></span></span>
+      <span class="stp on"><span class="dot">4</span> Payment</span><span class="stp"><span class="ln"></span></span>
+      <span class="stp"><span class="dot">5</span> Sign &amp; keys</span>
+    </div>
+    <div class="kmain">
+      <div class="kh2">Pay securely on your phone</div>
+      <div style="display:flex;gap:26px;align-items:flex-start;max-width:900px;width:100%;justify-content:center">
+        <div class="kpanel" style="max-width:400px">
+          <div class="kv"><span class="l">Recommended package · 9 days</span><b>$333.00</b></div>
+          <div class="kv"><span class="l">Taxes &amp; fees</span><b>$41.63</b></div>
+          <div class="kv" style="border-top:2px solid #efeaff"><span class="l"><b>You pay today</b></span><b style="font-size:21px">$374.63</b></div>
+          <div class="kv" style="background:rgba(31,199,170,.07);border-radius:12px;padding:10px 12px;border-bottom:none;margin-top:6px"><span class="l">Refundable hold on your card</span><b style="color:#0f766e">$250.00</b></div>
+          <div class="hint" style="padding:6px 2px 0">The hold is <b>not a charge</b> — it's released after you return the car (typically 5–7 business days).</div>
+        </div>
+        <div style="text-align:center">
+          <div class="qr"></div>
+          <div class="paystate">⏳ Waiting for payment…</div>
+          <div style="margin-top:14px"><button class="kbtn ghost sm">📱 Text the payment link to my phone ›</button></div>
+        </div>
+      </div>
+      <div class="kpanel" style="max-width:640px;margin-top:18px;font-size:15px">
+        <b>1.</b> Open your phone camera &nbsp;→&nbsp; <b>2.</b> Point it at this code &nbsp;→&nbsp; <b>3.</b> Pay with card, Apple&nbsp;Pay or Google&nbsp;Pay. <span class="dim">You never type card numbers on this kiosk.</span>
+      </div>
+    </div>
+    <div class="kfoot"><button class="kbtn back">‹ Back</button><span class="dim">Payment trouble? Touch 🎧 Help</span></div>
+  </div></div>
+
+  <!-- ============ K7 — SIGN & KEYS ============ -->
+  <div class="screen-tag">K7 · Car asignado + firma táctil + instrucciones de llaves — la sesión termina en CONTRATO</div>
+  <div class="tablet"><div class="kbody">
+    <div class="kbar">
+      <div class="kbrand"><div class="logo">R</div><div><b>International Rental</b><small>Orlando — MCO · Kiosk 1</small></div></div>
+      <div class="kright"><span class="lang"><span class="on">EN</span><span>ES</span></span><button class="help">🎧 Help</button></div>
+    </div>
+    <div class="steps">
+      <span class="stp done"><span class="dot">✓</span> Reservation</span><span class="stp"><span class="ln"></span></span>
+      <span class="stp done"><span class="dot">✓</span> ID</span><span class="stp"><span class="ln"></span></span>
+      <span class="stp done"><span class="dot">✓</span> Protection &amp; extras</span><span class="stp"><span class="ln"></span></span>
+      <span class="stp done"><span class="dot">✓</span> Payment</span><span class="stp"><span class="ln"></span></span>
+      <span class="stp on"><span class="dot">5</span> Sign &amp; keys</span>
+    </div>
+    <div class="kmain">
+      <div class="kh2">Your car is ready! 🚙</div>
+      <div class="carcard">
+        <div class="carimg">🚙</div>
+        <div style="flex:1">
+          <b style="font-size:18px;color:#29223f">2024 Toyota RAV4 · White</b>
+          <div class="dim" style="font-size:14px">Plate <b>KDR-4821</b> · Spot <b>A-07</b> · Full tank (14.5 gal)</div>
+          <div class="dim" style="font-size:13px;margin-top:4px">Review the key terms below, then sign with your finger.</div>
+        </div>
+      </div>
+      <div class="kpanel" style="max-width:680px;margin-top:14px">
+        <div class="kv"><span class="l">Return</span><b>Jul 13, 10:00 AM · Orlando — MCO · full tank</b></div>
+        <div class="kv"><span class="l">Protection</span><b>CDW — $1,000 deductible</b></div>
+        <div class="kv"><span class="l">Tolls</span><b>Unlimited (SunPass included)</b></div>
+        <div class="kv"><span class="l">Deposit</span><b>$250 hold — released after return</b></div>
+      </div>
+      <div class="sig" style="margin-top:14px">
+        <svg width="220" height="60" viewBox="0 0 220 60"><path d="M10 45 C 40 5, 60 55, 90 30 S 150 10, 210 40" stroke="#6d3df2" stroke-width="3" fill="none" stroke-linecap="round"/></svg>
+      </div>
+      <div style="margin-top:20px" class="row">
+        <button class="kbtn mint sm">Sign &amp; finish ›</button>
+        <button class="kbtn ghost sm">Read full agreement</button>
+      </div>
+    </div>
+    <div class="kfoot"><button class="kbtn back">‹ Back</button><span class="dim">Contract + receipt go to maria•••@gmail.com</span></div>
+  </div></div>
+
+  <!-- ============ K8 — DONE ============ -->
+  <div class="screen-tag">K8 · Done — llaves + inspección opcional en el teléfono (beta.160 reusado, cierra el loop de daños)</div>
+  <div class="tablet"><div class="kbody">
+    <div class="kbar">
+      <div class="kbrand"><div class="logo">R</div><div><b>International Rental</b><small>Orlando — MCO · Kiosk 1</small></div></div>
+      <div class="kright"><span class="lang"><span class="on">EN</span><span>ES</span></span><button class="help">🎧 Help</button></div>
+    </div>
+    <div class="kmain">
+      <div class="kh1">You're all set, Maria! 🎉</div>
+      <div class="kpanel" style="max-width:640px">
+        <div class="kv"><span class="l">🔑 Keys</span><b>Lockbox A-07 by the exit door · code <span style="font-size:20px;letter-spacing:.15em">4 8 2 1</span></b></div>
+        <div class="kv"><span class="l">🚙 Your car</span><b>White RAV4 · plate KDR-4821 · spot A-07</b></div>
+        <div class="kv"><span class="l">📄 Contract &amp; receipt</span><b>Sent to maria•••@gmail.com</b></div>
+        <div class="kv"><span class="l">📱 Before you drive off</span><b>Scan to photo-document the car's condition (2 min, protects you)</b></div>
+      </div>
+      <div class="qr" style="width:150px;height:150px"></div>
+      <div style="font-weight:750;color:#4c1d95;font-size:14px;margin-top:2px">📱 Scan to photo-document the car's condition</div>
+      <p class="ksub" style="font-size:13px;margin-top:8px">Total time: 4m 32s · Have a great trip!</p>
+    </div>
+    <div class="kfoot"><span></span><span class="dim">Screen resets in 30s</span></div>
+  </div></div>
+
+  <!-- ============ K9 — WALK-UP RENT NOW ============ -->
+  <div class="screen-tag">K9 · Walk-up "Rent a car now" (NUEVO en scope) — clases disponibles HOY con precio all-in → crea la reserva on the spot y entra al MISMO wizard en paso 2</div>
+  <div class="tablet"><div class="kbody">
+    <div class="kbar">
+      <div class="kbrand"><div class="logo">R</div><div><b>International Rental</b><small>Orlando — MCO · Kiosk 1</small></div></div>
+      <div class="kright"><span class="lang"><span class="on">EN</span><span>ES</span></span><button class="help">🎧 Help</button></div>
+    </div>
+    <div class="steps">
+      <span class="stp on"><span class="dot">1</span> Choose car &amp; dates</span><span class="stp"><span class="ln"></span></span>
+      <span class="stp"><span class="dot">2</span> ID</span><span class="stp"><span class="ln"></span></span>
+      <span class="stp"><span class="dot">3</span> Protection &amp; extras</span><span class="stp"><span class="ln"></span></span>
+      <span class="stp"><span class="dot">4</span> Payment</span><span class="stp"><span class="ln"></span></span>
+      <span class="stp"><span class="dot">5</span> Sign &amp; keys</span>
+    </div>
+    <div class="kmain">
+      <div class="kh2">Rent a car right now</div>
+      <div class="row" style="justify-content:center;margin-bottom:20px">
+        <div class="sel" style="font-size:15px;padding:12px 18px">Pickup: <b>Today, now</b></div>
+        <div class="sel" style="font-size:15px;padding:12px 18px">Return: <b>Jul 8, 10:00 AM (4 days) ▾</b></div>
+      </div>
+      <div class="classgrid">
+        <div class="classcard"><div class="em">🚗</div><b>Economy</b><div class="pr">$39<small>/day</small></div><div class="av">6 available now</div></div>
+        <div class="classcard sel"><div class="em">🚙</div><b>Midsize SUV</b><div class="pr">$54<small>/day</small></div><div class="av">4 available now</div></div>
+        <div class="classcard"><div class="em">🚐</div><b>Minivan</b><div class="pr">$72<small>/day</small></div><div class="av">Only 1 left</div></div>
+      </div>
+      <div class="kpanel" style="max-width:640px;margin-top:18px">
+        <div class="kv"><span class="l">Midsize SUV · 4 days × $54</span><b>$216.00</b></div>
+        <div class="kv"><span class="l">Taxes &amp; fees (est.)</span><b>$47.52</b></div>
+        <div class="kv"><span class="l"><b>Estimated total</b> (extras optional, added later)</span><b style="font-size:18px">$263.52</b></div>
+        <div class="kv"><span class="l">Refundable deposit at payment</span><b>$250.00 hold</b></div>
+      </div>
+      <p class="ksub" style="font-size:13.5px;margin-top:12px">You'll need: driver's license · 21 or older · credit or debit card on your phone.</p>
+      <div style="margin-top:10px"><button class="kbtn">Continue — verify my ID ›</button></div>
+    </div>
+    <div class="kfoot"><button class="kbtn back">‹ Back</button><span class="dim">Prices include today's rates for this location</span></div>
+  </div></div>
+
+  <!-- ============ K10 — ESCALATION ============ -->
+  <div class="screen-tag">K10 · Escalación — video en vivo con agente (Remote Agent, Fase F) con contexto completo de la sesión</div>
+  <div class="tablet"><div class="kbody">
+    <div class="kbar">
+      <div class="kbrand"><div class="logo">R</div><div><b>International Rental</b><small>Orlando — MCO · Kiosk 1</small></div></div>
+      <div class="kright"><span class="lang"><span class="on">EN</span><span>ES</span></span><button class="help">🎧 Help</button></div>
+    </div>
+    <div class="kmain">
+      <div class="kh2">Connecting you with Carlos…</div>
+      <p class="ksub">A live agent will finish your check-in. They can already see your reservation and where you got stuck — no need to start over.</p>
+      <div class="escalate">
+        <div class="vid"><span class="live">● LIVE</span>🧑‍💼</div>
+        <div style="flex:1">
+          <b style="font-size:17px;color:#29223f">Carlos — Guest Support</b>
+          <div class="dim" style="font-size:13px;margin:6px 0 10px">Sees: reservation ZE4-8213 · stuck at ID scan (2 attempts) · license photo attached</div>
+          <div class="row"><button class="kbtn sm">🔊 Speaker on</button><button class="kbtn ghost sm">End call</button></div>
+        </div>
+      </div>
+      <p class="ksub" style="font-size:12.5px;margin-top:18px">This call is recorded for quality and security.</p>
+    </div>
+    <div class="kfoot"><span></span><span class="dim">Avg. wait right now: under 1 min</span></div>
+  </div></div>
+
+  <!-- ============ K-E — ERROR / TIMEOUT STATES ============ -->
+  <div class="screen-tag">K-E1..E4 · Estados de error y timeout — diarios en un kiosk sin atender, no edge cases</div>
+  <div class="minigrid">
+    <div class="tablet mini"><div class="kbody">
+      <div class="kmain">
+        <div class="kh2">Are you still there?</div>
+        <p class="ksub">For your privacy, this session will reset in <b style="color:#b45309;font-size:22px">20s</b> and clear everything you entered.</p>
+        <div class="row" style="justify-content:center"><button class="kbtn sm">I'm still here — continue</button><button class="kbtn ghost sm">Start over</button></div>
+      </div>
+      <div class="kfoot"><span></span><span class="dim">E1 · 2 min sin actividad → aviso 30s → wipe + WELCOME</span></div>
+    </div></div>
+    <div class="tablet mini"><div class="kbody">
+      <div class="kmain">
+        <div class="kh2">Payment didn't go through</div>
+        <div class="paystate" style="background:rgba(244,63,94,.1);border-color:rgba(244,63,94,.22);color:#be123c">✕ Payment failed or link expired</div>
+        <p class="ksub" style="margin-top:14px">No charge was made. You can try again with a new secure link, or a live agent can help.</p>
+        <div class="row" style="justify-content:center"><button class="kbtn sm">Try again — new QR code</button><button class="kbtn ghost sm">🎧 Get help</button></div>
+      </div>
+      <div class="kfoot"><span></span><span class="dim">E2 · retry genera payment-link NUEVO; nunca se re-cobra</span></div>
+    </div></div>
+    <div class="tablet mini"><div class="kbody">
+      <div class="kmain">
+        <div class="kh2">We couldn't read your license</div>
+        <p class="ksub">That's okay — it happens. Let's connect you with a live agent who can verify your ID by video in about a minute. You won't lose your progress.</p>
+        <div class="row" style="justify-content:center"><button class="kbtn sm">🎧 Connect me to an agent</button><button class="kbtn ghost sm">Try scanning once more</button></div>
+      </div>
+      <div class="kfoot"><span></span><span class="dim">E3 · tras 2 intentos fallidos de scan/selfie → oferta de agente (K10)</span></div>
+    </div></div>
+    <div class="tablet mini"><div class="kbody">
+      <div class="kmain">
+        <div class="kh1" style="font-size:30px">😴 Kiosk temporarily unavailable</div>
+        <p class="ksub">Please see a team member at the counter — we'll get you on the road.</p>
+      </div>
+      <div class="kfoot"><span></span><span class="dim">E4 · offline/heartbeat perdido o REVOKED → cara pública out-of-service</span></div>
+    </div></div>
+  </div>
+
+  <div class="section">B · Admin (Ride Fleet Manager)</div>
+
+  <!-- ============ A1 — KIOSK DEVICES ============ -->
+  <div class="screen-tag">A1 · Kiosks — NAV TOP-LEVEL (grupo "Self service", es superficie de ops con sesiones vivas, patrón Maintenance). Dispositivos por location, pairing por código, heartbeat. Módulo 'kiosk' gatea esto (patrón beta.212)</div>
+  <div class="screen"><div class="app">
+    <div class="side">
+      <div class="brand"><div class="logo">R</div><div><b>Ride Fleet</b><small>International Rental</small></div></div>
+      <div class="nav">
+        <a><span class="i">▦</span> Dashboard</a>
+        <a><span class="i">🚗</span> Vehicles</a>
+        <a><span class="i">📄</span> Reservations</a>
+        <a><span class="i">🧾</span> Agreements</a>
+        <div class="sep">Self service</div>
+        <a class="on"><span class="i">🖥️</span> Kiosks</a>
+        <div class="sep">Ops</div>
+        <a><span class="i">📊</span> Reports</a>
+        <a><span class="i">⚙️</span> Settings</a>
+      </div>
+    </div>
+    <div class="main">
+      <div class="top">
+        <div><h1 class="h1">Kiosks</h1><div class="sub">Self-service devices at your locations</div></div>
+        <div class="row"><select class="sel"><option>All locations</option><option>Orlando — MCO</option></select><button class="btn">+ Pair new kiosk</button></div>
+      </div>
+      <div class="cards">
+        <div class="kpi"><div class="k">Devices online</div><div class="v">3<span style="font-size:15px;color:var(--ios-muted)">/4</span></div><div class="d">1 offline &gt; 15 min</div></div>
+        <div class="kpi"><div class="k">Sessions today</div><div class="v">41</div><div class="d">32 completed · 5 escalated · 4 abandoned</div></div>
+        <div class="kpi"><div class="k">Solved without staff</div><div class="v" style="color:#047857">78%</div><div class="d">target ≥ 70%</div></div>
+        <div class="kpi"><div class="k">Extras attach rate</div><div class="v">61%</div><div class="d">vs counter baseline 44%</div></div>
+        <div class="kpi"><div class="k">Extras revenue today</div><div class="v">$2,410</div><div class="d">avg $75 / completed session</div></div>
+      </div>
+      <div class="panel">
+        <div class="ph">Devices</div>
+        <table>
+          <thead><tr><th>Kiosk</th><th>Location</th><th>Status</th><th>Last heartbeat</th><th>Today</th><th>App</th><th></th></tr></thead>
+          <tbody>
+            <tr><td><span class="unit">Kiosk 1 — Counter left</span></td><td>Orlando — MCO</td><td><span class="chip ok">● Online</span></td><td class="dim">12s ago</td><td class="mono">18 sessions</td><td class="dim">v1.0.3</td><td><span class="lnk">Manage ›</span></td></tr>
+            <tr><td><span class="unit">Kiosk 2 — Counter right</span></td><td>Orlando — MCO</td><td><span class="chip ok">● Online</span></td><td class="dim">4s ago</td><td class="mono">15 sessions</td><td class="dim">v1.0.3</td><td><span class="lnk">Manage ›</span></td></tr>
+            <tr><td><span class="unit">Kiosk 3 — Lobby</span></td><td>Orlando — MCO</td><td><span class="chip bad">● Offline 22 min</span></td><td class="dim">10:41 AM</td><td class="mono">8 sessions</td><td class="dim">v1.0.3</td><td><span class="lnk">Manage ›</span></td></tr>
+            <tr><td><span class="unit">Kiosk 1 — Front desk</span></td><td>Kissimmee</td><td><span class="chip ok">● Online</span></td><td class="dim">30s ago</td><td class="mono">0 sessions</td><td class="dim">v1.0.3</td><td><span class="lnk">Manage ›</span></td></tr>
+          </tbody>
+        </table>
+        <div class="note">Pairing: <b>+ Pair new kiosk</b> genera un código de 6 dígitos que se teclea una vez en la tablet → el device recibe su token rotable (kind <code>KIOSK_DEVICE</code>). "Revoke" mata el token al instante. Walk-up "Rent now" se puede apagar por kiosk (toggle en Manage) — <span class="tog" style="transform:scale(.8)"></span> Walk-up rentals.</div>
+      </div>
+    </div>
+  </div></div>
+
+  <!-- ============ A2 — UPSELL RULES ============ -->
+  <div class="screen-tag">A2 · Settings → Upsell catalog — es CONFIG (vive dentro de Settings, patrón Market Intelligence settings): catálogo de ancillaries (daily/one-time) + reglas por canal/broker + paquetes</div>
+  <div class="screen"><div class="app">
+    <div class="side">
+      <div class="brand"><div class="logo">R</div><div><b>Ride Fleet</b><small>International Rental</small></div></div>
+      <div class="nav">
+        <a><span class="i">▦</span> Dashboard</a>
+        <a><span class="i">🚗</span> Vehicles</a>
+        <a><span class="i">📄</span> Reservations</a>
+        <div class="sep">Self service</div>
+        <a><span class="i">🖥️</span> Kiosks</a>
+        <div class="sep">Ops</div>
+        <a class="on"><span class="i">⚙️</span> Settings</a>
+      </div>
+    </div>
+    <div class="main">
+      <div class="top">
+        <div><h1 class="h1">Upsell catalog &amp; rules</h1><div class="sub">Settings → Upsell catalog · What the kiosk (and soon the counter) offers, per booking channel</div></div>
+        <div class="row"><button class="btn ghost">Edit packages</button><button class="btn">+ Add product</button></div>
+      </div>
+      <div class="panel">
+        <div class="ph">Products (ancillaries)</div>
+        <table>
+          <thead><tr><th>Code</th><th>Product</th><th>Charge</th><th>Price</th><th>Taxable</th><th>Active</th></tr></thead>
+          <tbody>
+            <tr><td class="mono">CDW</td><td><span class="unit">Collision protection</span> <span class="dim">· $1,000 deductible</span></td><td>Daily</td><td class="mono">$24.04/day</td><td>Yes</td><td><span class="tog"></span></td></tr>
+            <tr><td class="mono">CDW0</td><td><span class="unit">Premium protection</span> <span class="dim">· $0 deductible</span></td><td>Daily</td><td class="mono">$36.99/day</td><td>Yes</td><td><span class="tog"></span></td></tr>
+            <tr><td class="mono">SUNPASS</td><td><span class="unit">Unlimited tolls (SunPass)</span></td><td>Daily</td><td class="mono">$12.99/day</td><td>Yes</td><td><span class="tog"></span></td></tr>
+            <tr><td class="mono">DCF</td><td><span class="unit">Debit card fee</span></td><td>Daily</td><td class="mono">$16.00/day</td><td>Yes</td><td><span class="tog"></span></td></tr>
+            <tr><td class="mono">FUEL</td><td><span class="unit">Prepaid fuel</span> <span class="dim">· skip the gas station</span></td><td>One-time</td><td class="mono">tank × rate</td><td>Yes</td><td><span class="tog"></span></td></tr>
+            <tr><td class="mono">SEAT</td><td><span class="unit">Child seat</span></td><td>Daily</td><td class="mono">$9.99/day</td><td>Yes</td><td><span class="tog off"></span></td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="panel">
+        <div class="ph">Channel rules — what to offer per broker</div>
+        <table>
+          <thead><tr><th>Channel / broker</th><th>Prepaid by broker</th><th>Offer</th><th>Don't offer</th><th>Strategy</th></tr></thead>
+          <tbody>
+            <tr><td><span class="unit">Expedia</span></td><td class="dim">nothing</td><td>CDW · SUNPASS · DCF · upgrade</td><td class="dim">—</td><td><span class="chip">3 packages + decline flow</span></td></tr>
+            <tr><td><span class="unit">Priceline</span></td><td class="dim">add-ons collected by broker</td><td>Upgrade · FUEL · SEAT</td><td class="dim">CDW · SUNPASS <span class="hint">(already paid)</span></td><td><span class="chip">Upgrade-first</span></td></tr>
+            <tr><td><span class="unit">Direct / walk-up</span></td><td class="dim">nothing</td><td>All products</td><td class="dim">—</td><td><span class="chip">3 packages + bundle discount</span></td></tr>
+          </tbody>
+        </table>
+        <div class="note">El kiosk NUNCA ofrece lo que el broker ya cobró (regla de la auditoría: "BROKER HAS ALREADY COLLECTED THE ADD-ONS"). El AI conversacional solo explica y aplica precios de ESTE catálogo — floor/ceiling por tenant; nunca inventa precios. Telemetría por oferta (shown/accepted/declined) alimenta el attach-rate del dashboard de Kiosks.</div>
+      </div>
+    </div>
+  </div></div>
+
+  <!-- ============ A3 — SESSIONS ============ -->
+  <div class="screen-tag">A3 · Kiosks → Sessions — cada sesión con outcome, paso de abandono, extras vendidos; base de la telemetría del piloto</div>
+  <div class="screen"><div class="app">
+    <div class="side">
+      <div class="brand"><div class="logo">R</div><div><b>Ride Fleet</b><small>International Rental</small></div></div>
+      <div class="nav">
+        <a><span class="i">▦</span> Dashboard</a>
+        <a><span class="i">📄</span> Reservations</a>
+        <div class="sep">Self service</div>
+        <a class="on"><span class="i">🖥️</span> Kiosks</a>
+        <div class="sep">Ops</div>
+        <a><span class="i">📊</span> Reports</a>
+      </div>
+    </div>
+    <div class="main">
+      <div class="top">
+        <div><h1 class="h1">Kiosk sessions — today</h1><div class="sub">Orlando — MCO · Jul 4</div></div>
+        <div class="row"><select class="sel"><option>All outcomes</option><option>Completed</option><option>Escalated</option><option>Abandoned</option></select></div>
+      </div>
+      <div class="panel">
+        <table>
+          <thead><tr><th>Time</th><th>Guest</th><th>Type</th><th>Reservation</th><th>Extras sold</th><th>Duration</th><th>Outcome</th><th></th></tr></thead>
+          <tbody>
+            <tr><td class="dim">11:42 AM</td><td><span class="unit">Maria González</span></td><td>Pickup</td><td class="mono">ZE4-8213</td><td class="mono">$333.00 <span class="hint">Recommended</span></td><td class="mono">4m 32s</td><td><span class="chip ok">Completed</span></td><td><span class="lnk">Open ›</span></td></tr>
+            <tr><td class="dim">11:18 AM</td><td><span class="unit">James Ryan</span></td><td><span class="chip">Walk-up</span></td><td class="mono">ZE4-8230 <span class="hint">created at kiosk</span></td><td class="mono">$104.00</td><td class="mono">6m 10s</td><td><span class="chip ok">Completed</span></td><td><span class="lnk">Open ›</span></td></tr>
+            <tr><td class="dim">10:56 AM</td><td><span class="unit">Ana Pérez</span></td><td>Pickup</td><td class="mono">WXX-90412</td><td class="mono">—</td><td class="mono">7m 44s</td><td><span class="chip warn">Escalated · ID scan</span></td><td><span class="lnk">Open ›</span></td></tr>
+            <tr><td class="dim">10:31 AM</td><td class="dim">(anonymous)</td><td>Walk-up</td><td class="dim">—</td><td class="mono">—</td><td class="mono">1m 02s</td><td><span class="chip bad">Abandoned · at prices</span></td><td><span class="lnk">Open ›</span></td></tr>
+          </tbody>
+        </table>
+        <div class="note">Cada sesión guarda el funnel completo (paso a paso, ofertas shown/accepted/declined, intentos de scan, outcome) → esto ES el baseline del piloto: % resuelto sin humano, attach rate vs counter, abandono por paso.</div>
+      </div>
+    </div>
+  </div></div>
+
+</div></body></html>

@@ -1247,6 +1247,21 @@ async function getReservationForTollChargeSync(reservationId, scope = {}) {
   });
 }
 
+// Charge sources that can carry a prepaid toll package (an AdditionalService
+// referenced via sourceRefId). 'KIOSK_UPSELL' added 2026-07-05 (kiosk B2
+// review): kiosk-sold coversTolls services were invisible here, so the
+// customer paid per-toll ON TOP of the package they bought at the kiosk.
+const TOLL_PACKAGE_CHARGE_SOURCES = ['ADDITIONAL_SERVICE', 'SERVICE', 'KIOSK_UPSELL'];
+
+/** Pure: the AdditionalService ids referenced by selected package-capable charges. */
+export function tollPackageCandidateServiceIds(charges = []) {
+  return Array.from(new Set(
+    (Array.isArray(charges) ? charges : [])
+      .filter((row) => row.selected && TOLL_PACKAGE_CHARGE_SOURCES.includes(String(row.source || '').toUpperCase()) && row.sourceRefId)
+      .map((row) => String(row.sourceRefId))
+  ));
+}
+
 async function syncReservationTollCharges(reservationId, scope = {}, options = {}) {
   if (!reservationId) return null;
 
@@ -1265,11 +1280,7 @@ async function syncReservationTollCharges(reservationId, scope = {}, options = {
 
   const effectiveScope = { tenantId };
   const policy = resolveReservationTollPolicy(reservation);
-  const selectedServiceIds = Array.from(new Set(
-    (reservation.charges || [])
-      .filter((row) => row.selected && ['ADDITIONAL_SERVICE', 'SERVICE'].includes(String(row.source || '').toUpperCase()) && row.sourceRefId)
-      .map((row) => String(row.sourceRefId))
-  ));
+  const selectedServiceIds = tollPackageCandidateServiceIds(reservation.charges);
   const prepaidTollServiceCount = selectedServiceIds.length
     ? await prisma.additionalService.count({
         where: {

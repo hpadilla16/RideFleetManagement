@@ -50,7 +50,25 @@ async function makeZxingReader() {
   return new BrowserPDF417Reader(hints);
 }
 
-export function LicenseScanner({ onDecode, onPhoto }) {
+// Default UI strings — the loaner wizard keeps these untouched. Callers that
+// need localization (e.g. the ES kiosk flow) pass a partial `labels` override.
+const DEFAULT_LABELS = {
+  scanButton: '📷 Scan license barcode',
+  stopButton: '■ Stop scan',
+  uploadButton: '⬆ Upload barcode photo',
+  holdSteady: 'Hold the BACK of the license steady — fill the frame with the barcode…',
+  scannedPrefix: 'Scanned',
+  scannedFallback: 'License scanned',
+  cameraUnavailable: 'Camera unavailable — use “Upload barcode photo” instead.',
+  liveScanUnavailable: 'Live scan unavailable on this browser — use “Upload barcode photo” instead.',
+  readingBarcode: 'Reading barcode…',
+  photoNoBarcode: 'That photo didn’t contain a readable license barcode. Try a sharper, well-lit shot of the BACK of the license.',
+  photoReadFailed: 'Couldn’t read the barcode from that photo. Try a sharper shot of the back of the license, or enter fields manually.',
+  helperNote: 'Scanning the PDF417 barcode auto-fills name, license #, state, and expiry. Confirm the fields below.',
+};
+
+export function LicenseScanner({ onDecode, onPhoto, labels: labelOverrides }) {
+  const labels = { ...DEFAULT_LABELS, ...(labelOverrides || {}) };
   const videoRef = useRef(null);
   const streamRef = useRef(null);
   const rafRef = useRef(null);
@@ -81,16 +99,31 @@ export function LicenseScanner({ onDecode, onPhoto }) {
       // Not a license barcode — keep scanning rather than aborting.
       return false;
     }
+    // Live-decode evidence capture: the upload branch already emits onPhoto,
+    // but a live pdf417 decode used to send no photo at all. Grab the current
+    // video frame BEFORE stop() tears the stream down. Best-effort — a failed
+    // capture must never block the decode.
+    if (scanningRef.current && onPhoto && videoRef.current?.videoWidth) {
+      try {
+        const video = videoRef.current;
+        const canvas = document.createElement('canvas');
+        canvas.width = video.videoWidth;
+        canvas.height = video.videoHeight;
+        canvas.getContext('2d').drawImage(video, 0, 0);
+        onPhoto(canvas.toDataURL('image/jpeg', 0.85));
+      } catch {}
+    }
     stop();
     setError('');
-    setStatus(`Scanned ${[fields.firstName, fields.lastName].filter(Boolean).join(' ')}`.trim() || 'License scanned');
+    const scannedName = [fields.firstName, fields.lastName].filter(Boolean).join(' ');
+    setStatus(scannedName ? `${labels.scannedPrefix} ${scannedName}`.trim() : labels.scannedFallback);
     onDecode?.(fields);
     return true;
   }
 
   async function startCamera() {
     setError('');
-    setStatus('Hold the BACK of the license steady — fill the frame with the barcode…');
+    setStatus(labels.holdSteady);
     setScanning(true);
     scanningRef.current = true;
 
@@ -100,7 +133,7 @@ export function LicenseScanner({ onDecode, onPhoto }) {
       stream = await navigator.mediaDevices.getUserMedia(CAMERA_CONSTRAINTS);
     } catch {
       try { stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false }); }
-      catch { setError('Camera unavailable — use “Upload barcode photo” instead.'); stop(); return; }
+      catch { setError(labels.cameraUnavailable); stop(); return; }
     }
     streamRef.current = stream;
     const video = videoRef.current;
@@ -130,7 +163,7 @@ export function LicenseScanner({ onDecode, onPhoto }) {
         if (result) { controls.stop(); handleText(result.getText()); }
       });
     } catch {
-      setError('Live scan unavailable on this browser — use “Upload barcode photo” instead.');
+      setError(labels.liveScanUnavailable);
       stop();
     }
   }
@@ -139,7 +172,7 @@ export function LicenseScanner({ onDecode, onPhoto }) {
     const file = e.target.files?.[0];
     if (!file) return;
     setError('');
-    setStatus('Reading barcode…');
+    setStatus(labels.readingBarcode);
     try {
       const { compressToDataUrl } = await import('../../lib/image-compressor');
       // Keep PDF417 lines crisp through compression.
@@ -158,11 +191,11 @@ export function LicenseScanner({ onDecode, onPhoto }) {
       const reader = await makeZxingReader();
       const result = await reader.decodeFromImageUrl(dataUrl);
       if (!handleText(result.getText())) {
-        setError('That photo didn’t contain a readable license barcode. Try a sharper, well-lit shot of the BACK of the license.');
+        setError(labels.photoNoBarcode);
         setStatus('');
       }
     } catch {
-      setError('Couldn’t read the barcode from that photo. Try a sharper shot of the back of the license, or enter fields manually.');
+      setError(labels.photoReadFailed);
       setStatus('');
     }
   }
@@ -171,12 +204,12 @@ export function LicenseScanner({ onDecode, onPhoto }) {
     <div>
       <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
         {!scanning ? (
-          <button type="button" className="hero-pill" onClick={startCamera}>📷 Scan license barcode</button>
+          <button type="button" className="hero-pill" onClick={startCamera}>{labels.scanButton}</button>
         ) : (
-          <button type="button" className="hero-pill" onClick={stop}>■ Stop scan</button>
+          <button type="button" className="hero-pill" onClick={stop}>{labels.stopButton}</button>
         )}
         <label className="hero-pill" style={{ cursor: 'pointer' }}>
-          ⬆ Upload barcode photo
+          {labels.uploadButton}
           <input type="file" accept="image/*" capture="environment" onChange={onFile} style={{ display: 'none' }} />
         </label>
       </div>
@@ -195,7 +228,7 @@ export function LicenseScanner({ onDecode, onPhoto }) {
       {status && <div style={{ marginTop: 10, fontSize: 12.5, color: '#0f9b82', fontWeight: 700 }}>{status}</div>}
       {error && <div style={{ marginTop: 10, fontSize: 12.5, color: '#b9791e', fontWeight: 700 }}>{error}</div>}
       <div style={{ marginTop: 8, fontSize: 12, color: '#6f668f' }}>
-        Scanning the PDF417 barcode auto-fills name, license #, state, and expiry. Confirm the fields below.
+        {labels.helperNote}
       </div>
     </div>
   );

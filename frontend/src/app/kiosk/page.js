@@ -1,0 +1,1465 @@
+'use client';
+
+/**
+ * Ride Kiosk — customer wizard (Fase B3b, 2026-07-05).
+ * Mockup: doc/kiosk-mockups-2026-07-04.html (Rev 2, Hector-approved) — screens
+ * K1-K10, K4b selfie, K-E1..E4. Spec: doc/kiosk-e2e-spec-2026-07-04.md.
+ *
+ * PUBLIC page (device-token auth via lib/kioskClient.js — the single seam for
+ * every kiosk API call). Client state machine:
+ *   PAIRING → WELCOME → LOOKUP → SUMMARY → ID → SELFIE → OFFERS → PAYMENT →
+ *   SIGN → DONE, plus WALKUP_SOON (K9 is Fase B4), ESCALATED (K10 v1, no
+ *   video) and OUT_OF_SERVICE (K-E4). Business truth always lives server-side
+ *   (checkout-session state machine); this page only renders and calls.
+ *
+ * MONEY: the payment step is the B3 SANDBOX stamp only (clearly badged). The
+ * QR/SMS payment-link UI is a visual placeholder until Fase B5.
+ */
+
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
+import {
+  KIOSK_ERR_NETWORK,
+  KIOSK_ERR_UNPAIRED,
+  acceptOffers,
+  assignVehicle,
+  attachReservation,
+  completeSession,
+  createSession,
+  escalateSession,
+  getAgreement,
+  getOffers,
+  lookupReservation,
+  pairDevice,
+  readDeviceToken,
+  sandboxPayment,
+  sendEvents,
+  signAgreement,
+  verifyId,
+} from '../../lib/kioskClient';
+import { LicenseScanner } from '../../components/loaner/LicenseScanner';
+import { SignaturePad } from '../../components/kiosk/SignaturePad';
+import { KIOSK_UNPAIRED_EVENT, useKioskUi } from '../../components/kiosk/KioskUiContext';
+
+const DONE_RESET_S = 30;
+
+// screen → backend funnel step (KioskSession.step telemetry vocabulary).
+const FUNNEL_STEP = {
+  WELCOME: 'WELCOME',
+  LOOKUP: 'LOOKUP',
+  SUMMARY: 'LOOKUP',
+  ID: 'ID',
+  SELFIE: 'ID',
+  OFFERS: 'UPSELL',
+  PAYMENT: 'PAYMENT',
+  SIGN: 'SIGN',
+  DONE: 'DONE',
+};
+
+const PROGRESS_OF = {
+  LOOKUP: 1, SUMMARY: 1, ID: 2, SELFIE: 2, OFFERS: 3, PAYMENT: 4, SIGN: 5,
+};
+
+const money = (v) => `$${Number(v || 0).toFixed(2)}`;
+
+export default function KioskPage() {
+  const { t, i18n } = useTranslation();
+  const ui = useKioskUi();
+  const locale = i18n.language === 'es' ? 'es-PR' : 'en-US';
+
+  const [screen, setScreen] = useState('BOOT');
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState('');
+  const [session, setSession] = useState(null);
+  const [stub, setStub] = useState(null); // masked reservation stub
+  const [aamva, setAamva] = useState(null);
+  const [licensePhoto, setLicensePhoto] = useState(null);
+  const [selfie, setSelfie] = useState(null);
+  const [verifyResult, setVerifyResult] = useState(null);
+  const [vehicle, setVehicle] = useState(null);
+  const [offers, setOffers] = useState(null);
+  const [agreement, setAgreement] = useState(null);
+  const [payState, setPayState] = useState('IDLE'); // IDLE | PAID | FAILED | DISABLED
+  const [doneData, setDoneData] = useState(null);
+  const [doneCountdown, setDoneCountdown] = useState(DONE_RESET_S);
+  const [lookupLocked, setLookupLocked] = useState(false);
+  const [escalatedInfo, setEscalatedInfo] = useState(null);
+  const [helpOpen, setHelpOpen] = useState(false);
+
+  const sessionRef = useRef(null);
+  useEffect(() => { sessionRef.current = session; }, [session]);
+  const screenRef = useRef('BOOT');
+  useEffect(() => { screenRef.current = screen; }, [screen]);
+  // Stale-response guard: bumped on every wipe. Async handlers capture the
+  // generation before awaiting and drop responses that land after a reset —
+  // otherwise a slow lookup/verify could repopulate a wiped session right on
+  // the WELCOME screen.
+  const genRef = useRef(0);
+
+  const fmtDateTime = useCallback((value) => {
+    if (!value) return '—';
+    const d = new Date(value);
+    if (Number.isNaN(d.getTime())) return '—';
+    return d.toLocaleString(locale, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+  }, [locale]);
+
+  const resetAll = useCallback(() => {
+    // Honest abandonment breadcrumb until the B5 server sweep sets
+    // authoritative outcomes: every client-side wipe (idle expiry, "Start
+    // over", DONE auto-reset) records SESSION_WIPED. Fire-and-forget.
+    if (sessionRef.current?.id) {
+      sendEvents(sessionRef.current.id, { step: null, event: 'SESSION_WIPED' });
+    }
+    genRef.current += 1;
+    setSession(null);
+    setStub(null);
+    setAamva(null);
+    setLicensePhoto(null);
+    setSelfie(null);
+    setVerifyResult(null);
+    setVehicle(null);
+    setOffers(null);
+    setAgreement(null);
+    setPayState('IDLE');
+    setDoneData(null);
+    setDoneCountdown(DONE_RESET_S);
+    setLookupLocked(false);
+    setEscalatedInfo(null);
+    setHelpOpen(false);
+    setErr('');
+    setBusy(false);
+    ui.setSessionActive(false);
+    setScreen(readDeviceToken() ? 'WELCOME' : 'PAIRING');
+  }, [ui]);
+
+  // Boot: paired → WELCOME, otherwise pairing screen. Also listen for the
+  // shell's boot refresh discovering a rotated/revoked token (401) so the
+  // attract screen doesn't sit on WELCOME with a dead token.
+  useEffect(() => {
+    setScreen(readDeviceToken() ? 'WELCOME' : 'PAIRING');
+    const onUnpaired = () => {
+      if (screenRef.current === 'WELCOME' || screenRef.current === 'BOOT') setScreen('PAIRING');
+    };
+    window.addEventListener(KIOSK_UNPAIRED_EVENT, onUnpaired);
+    return () => window.removeEventListener(KIOSK_UNPAIRED_EVENT, onUnpaired);
+  }, []);
+
+  // Shell integration: idle-reset handler + Help button.
+  useEffect(() => { ui.onIdleReset(resetAll); }, [ui, resetAll]);
+  useEffect(() => {
+    if (ui.helpTick > 0) setHelpOpen(true);
+  }, [ui.helpTick]);
+
+  // Step-transition telemetry (fire-and-forget; offer shown/accept/decline
+  // events are recorded server-side by the offers endpoints).
+  useEffect(() => {
+    const funnel = FUNNEL_STEP[screen];
+    if (funnel && sessionRef.current?.id) {
+      sendEvents(sessionRef.current.id, { step: funnel, event: 'STEP' });
+    }
+  }, [screen]);
+
+  // DONE auto-reset (30s, per mockup K8).
+  useEffect(() => {
+    if (screen !== 'DONE') return undefined;
+    if (doneCountdown <= 0) { resetAll(); return undefined; }
+    const timer = setTimeout(() => setDoneCountdown((v) => v - 1), 1000);
+    return () => clearTimeout(timer);
+  }, [screen, doneCountdown, resetAll]);
+
+  /** Shared error routing: unpaired → PAIRING, network → K-E4; else false. */
+  const routeFatal = useCallback((e) => {
+    if (e?.code === KIOSK_ERR_UNPAIRED) {
+      ui.setDevice(null);
+      ui.setSessionActive(false);
+      setScreen('PAIRING');
+      return true;
+    }
+    if (e?.code === KIOSK_ERR_NETWORK) {
+      ui.setOnline?.(false);
+      ui.setSessionActive(false);
+      setScreen('OUT_OF_SERVICE');
+      return true;
+    }
+    return false;
+  }, [ui]);
+
+  const escalate = useCallback(async (reason) => {
+    setHelpOpen(false);
+    setErr('');
+    const current = sessionRef.current;
+    if (current?.id) {
+      try { await escalateSession(current.id, reason); } catch (e) { if (routeFatal(e)) return; }
+    }
+    setEscalatedInfo({ reason });
+    ui.setSessionActive(false);
+    setScreen('ESCALATED');
+  }, [routeFatal, ui]);
+
+  // ── Flow actions ───────────────────────────────────────────────────────────
+
+  const startPickup = async () => {
+    const gen = genRef.current;
+    setBusy(true); setErr('');
+    try {
+      const s = await createSession('PICKUP');
+      if (gen !== genRef.current) return;
+      ui.setOnline?.(true);
+      setSession({ ...s, startedAtMs: Date.now() });
+      ui.setSessionActive(true);
+      setScreen('LOOKUP');
+    } catch (e) {
+      if (!routeFatal(e)) setErr(e.message || t('kiosk.genericError'));
+    } finally { setBusy(false); }
+  };
+
+  const doLookup = async (payload) => {
+    const gen = genRef.current;
+    setBusy(true); setErr('');
+    try {
+      const out = await lookupReservation(session.id, payload);
+      if (gen !== genRef.current) return;
+      setStub(out);
+      setScreen('SUMMARY');
+    } catch (e) {
+      if (gen !== genRef.current) return;
+      if (routeFatal(e)) return;
+      if (e.status === 429 || e.code === 'LOOKUP_LOCKED') {
+        setLookupLocked(true);
+      } else if (e.code === 'RESERVATION_NOT_FOUND') {
+        const left = e.data?.attemptsRemaining;
+        setErr(Number.isFinite(Number(left))
+          ? t('kiosk.lookupNotFoundAttempts', { count: Number(left) })
+          : t('kiosk.lookupNotFound'));
+      } else {
+        setErr(e.message || t('kiosk.genericError'));
+      }
+    } finally { setBusy(false); }
+  };
+
+  const confirmSummary = async () => {
+    const gen = genRef.current;
+    setBusy(true); setErr('');
+    try {
+      const out = await attachReservation(session.id, stub.reservationId);
+      if (gen !== genRef.current) return;
+      setStub((prev) => ({ ...prev, ...out }));
+      setScreen('ID');
+    } catch (e) {
+      if (gen !== genRef.current) return;
+      if (!routeFatal(e)) setErr(e.message || t('kiosk.genericError'));
+    } finally { setBusy(false); }
+  };
+
+  const submitVerify = async (selfieDataUrl) => {
+    const gen = genRef.current;
+    setBusy(true); setErr('');
+    try {
+      const out = await verifyId(session.id, {
+        aamvaFields: aamva,
+        licensePhoto: licensePhoto || undefined,
+        selfiePhoto: selfieDataUrl || undefined,
+      });
+      if (gen !== genRef.current) return null;
+      setVerifyResult(out);
+      return out;
+    } catch (e) {
+      if (gen !== genRef.current) return null;
+      if (routeFatal(e)) return null;
+      // 422 INVALID_PHOTO: junk/oversized image — retake, don't burn a verify
+      // attempt on it.
+      setErr(e.code === 'INVALID_PHOTO' ? t('kiosk.invalidPhoto') : (e.message || t('kiosk.genericError')));
+      return null;
+    } finally { setBusy(false); }
+  };
+
+  const proceedAssign = async () => {
+    const gen = genRef.current;
+    setBusy(true); setErr('');
+    try {
+      const out = await assignVehicle(session.id);
+      if (gen !== genRef.current) return;
+      setVehicle(out?.vehicle || null);
+      // Offers + deposit line load on OFFERS entry.
+      setScreen('OFFERS');
+      loadOffers();
+    } catch (e) {
+      if (gen !== genRef.current) return;
+      if (routeFatal(e)) return;
+      if (e.code === 'NO_VEHICLE_AVAILABLE' || e.code === 'RESERVATION_NOT_OPEN' || e.code === 'NO_VEHICLE_CLASS') {
+        setErr(t('kiosk.noVehicleAvailable'));
+        await escalate('OTHER');
+      } else {
+        setErr(e.message || t('kiosk.genericError'));
+      }
+    } finally { setBusy(false); }
+  };
+
+  const loadOffers = async () => {
+    const gen = genRef.current;
+    try {
+      const [offersOut, agreementOut] = await Promise.all([
+        getOffers(sessionRef.current.id),
+        getAgreement(sessionRef.current.id).catch(() => null),
+      ]);
+      if (gen !== genRef.current) return;
+      setOffers(offersOut);
+      if (agreementOut) setAgreement(agreementOut);
+    } catch (e) {
+      if (gen !== genRef.current) return;
+      if (!routeFatal(e)) setErr(e.message || t('kiosk.genericError'));
+    }
+  };
+
+  const chooseOffer = async (serviceIds) => {
+    const gen = genRef.current;
+    setBusy(true); setErr('');
+    try {
+      await acceptOffers(session.id, serviceIds);
+      const agreementOut = await getAgreement(session.id).catch(() => null);
+      if (gen !== genRef.current) return;
+      if (agreementOut) setAgreement(agreementOut);
+      setPayState('IDLE');
+      setScreen('PAYMENT');
+    } catch (e) {
+      if (gen !== genRef.current) return;
+      if (!routeFatal(e)) setErr(e.message || t('kiosk.genericError'));
+    } finally { setBusy(false); }
+  };
+
+  const simulatePayment = async () => {
+    const gen = genRef.current;
+    setBusy(true); setErr('');
+    try {
+      await sandboxPayment(session.id);
+      if (gen !== genRef.current) return;
+      setPayState('PAID');
+      const agreementOut = await getAgreement(session.id).catch(() => null);
+      if (gen !== genRef.current) return;
+      if (agreementOut) setAgreement(agreementOut);
+      setScreen('SIGN');
+    } catch (e) {
+      if (gen !== genRef.current) return;
+      if (routeFatal(e)) return;
+      if (e.code === 'SANDBOX_DISABLED') setPayState('DISABLED');
+      else { setPayState('FAILED'); setErr(e.message || t('kiosk.genericError')); }
+    } finally { setBusy(false); }
+  };
+
+  const finishComplete = async () => {
+    const gen = genRef.current;
+    const out = await completeSession(session.id);
+    if (gen !== genRef.current) return;
+    setDoneData(out);
+    setDoneCountdown(DONE_RESET_S);
+    ui.setSessionActive(false);
+    setScreen('DONE');
+  };
+
+  const submitSign = async ({ sectionInitials, signature }) => {
+    const gen = genRef.current;
+    setBusy(true); setErr('');
+    try {
+      await signAgreement(session.id, { sectionInitials, signature, signerName: null });
+      await finishComplete();
+    } catch (e) {
+      if (gen !== genRef.current) return;
+      if (routeFatal(e)) return;
+      if (e.code === 'CHECKOUT_TERMINAL') {
+        // Already closed (retried sign) — advance to keys, same convention as
+        // the counter wizard.
+        try { await finishComplete(); } catch (e2) { if (!routeFatal(e2)) setErr(e2.message || t('kiosk.genericError')); }
+      } else if (e.code === 'PAYMENT_REQUIRED') {
+        setErr(t('kiosk.signPaymentRequired'));
+        setPayState('IDLE');
+        setScreen('PAYMENT');
+      } else if (e.code === 'ID_VERIFY_REQUIRED') {
+        setErr(t('kiosk.signIdVerifyRequired'));
+        setScreen('ID');
+      } else {
+        setErr(e.message || t('kiosk.genericError'));
+      }
+    } finally { setBusy(false); }
+  };
+
+  // ── Render ─────────────────────────────────────────────────────────────────
+
+  const progress = PROGRESS_OF[screen] || 0;
+
+  return (
+    <>
+      {progress > 0 ? <ProgressSteps t={t} current={progress} /> : null}
+
+      {screen === 'BOOT' ? <div className="kio-main center" /> : null}
+      {screen === 'PAIRING' ? (
+        <PairingScreen t={t} busy={busy} setBusy={setBusy} onPaired={(device) => { ui.setDevice(device); setScreen('WELCOME'); }} routeFatal={routeFatal} />
+      ) : null}
+      {screen === 'WELCOME' ? (
+        <WelcomeScreen
+          t={t}
+          busy={busy}
+          walkupEnabled={ui.device?.walkupEnabled !== false}
+          onPickup={startPickup}
+          onWalkup={() => {
+            setScreen('WALKUP_SOON');
+            if (sessionRef.current?.id) sendEvents(sessionRef.current.id, { step: 'WELCOME', event: 'WALKUP_COMING_SOON_SHOWN' });
+          }}
+          err={err}
+        />
+      ) : null}
+      {screen === 'WALKUP_SOON' ? (
+        <div className="kio-main center">
+          <div className="kio-h2">🚗 {t('kiosk.walkupSoonTitle')}</div>
+          <p className="kio-sub">{t('kiosk.walkupSoonBody')}</p>
+          <button type="button" className="kio-btn ghost" onClick={resetAll}>‹ {t('kiosk.back')}</button>
+        </div>
+      ) : null}
+      {screen === 'LOOKUP' ? (
+        lookupLocked ? (
+          <div className="kio-main center">
+            <div className="kio-h2">{t('kiosk.lookupLockedTitle')}</div>
+            <p className="kio-sub">{t('kiosk.lookupLockedBody')}</p>
+            <div className="kio-row">
+              <button type="button" className="kio-btn sm" onClick={() => escalate('LOOKUP_FAILED')}>🎧 {t('kiosk.getHelp')}</button>
+              <button type="button" className="kio-btn ghost sm" onClick={resetAll}>{t('kiosk.startOver')}</button>
+            </div>
+          </div>
+        ) : (
+          <LookupScreen t={t} busy={busy} err={err} onSubmit={doLookup} onBack={resetAll} />
+        )
+      ) : null}
+      {screen === 'SUMMARY' && stub ? (
+        <div className="kio-main">
+          <div className="kio-h2">{t('kiosk.summaryTitle', { name: stub.maskedName || '' })}</div>
+          <div className="kio-panel" style={{ maxWidth: 640 }}>
+            <div className="kio-kv"><span className="kio-l">{t('kiosk.summaryDriver')}</span><b>{stub.maskedName || '—'}</b></div>
+            <div className="kio-kv">
+              <span className="kio-l">{t('kiosk.summaryDates')}</span>
+              <b>{fmtDateTime(stub.pickupWindow?.pickupAt)} → {fmtDateTime(stub.pickupWindow?.returnAt)}</b>
+            </div>
+            <div className="kio-kv"><span className="kio-l">{t('kiosk.summaryClass')}</span><b>{stub.vehicleClassName || '—'}</b></div>
+            {stub.channel ? (
+              <div className="kio-kv"><span className="kio-l">{t('kiosk.summaryChannel')}</span><b>{stub.channel}</b></div>
+            ) : null}
+          </div>
+          {err ? <div className="kio-error">{err}</div> : null}
+          <div className="kio-row" style={{ marginTop: 22 }}>
+            <button type="button" className="kio-btn" disabled={busy} onClick={confirmSummary}>{t('kiosk.summaryThatsMe')} ›</button>
+            <button
+              type="button"
+              className="kio-btn ghost sm"
+              disabled={busy}
+              onClick={() => { setStub(null); setErr(''); setScreen('LOOKUP'); }}
+            >
+              {t('kiosk.summaryNotMine')}
+            </button>
+          </div>
+        </div>
+      ) : null}
+      {screen === 'ID' ? (
+        <IdScreen
+          t={t}
+          err={err}
+          verifyResult={verifyResult}
+          onScanned={(fields) => { setAamva(fields); setVerifyResult(null); setErr(''); setSelfie(null); setScreen('SELFIE'); }}
+          onPhoto={(dataUrl) => setLicensePhoto(dataUrl)}
+          onEscalate={() => escalate(verifyResult?.failureReasons?.includes('NAME_MISMATCH') ? 'ID_MISMATCH' : 'ID_SCAN_FAILED')}
+          onBack={() => setScreen('SUMMARY')}
+        />
+      ) : null}
+      {screen === 'SELFIE' ? (
+        <SelfieScreen
+          t={t}
+          busy={busy}
+          err={err}
+          selfie={selfie}
+          setSelfie={setSelfie}
+          verifyResult={verifyResult}
+          onSubmit={async (dataUrl) => {
+            const out = await submitVerify(dataUrl);
+            if (out?.verified) return; // result panel + continue button render from verifyResult
+            if (out && out.escalateSuggested) { /* K-E3 renders from verifyResult */ }
+          }}
+          onContinue={proceedAssign}
+          onRetryScan={() => { setVerifyResult(null); setErr(''); setScreen('ID'); }}
+          onEscalate={() => escalate(verifyResult?.failureReasons?.includes('NAME_MISMATCH') ? 'ID_MISMATCH' : 'ID_SCAN_FAILED')}
+        />
+      ) : null}
+      {screen === 'OFFERS' ? (
+        <OffersScreen
+          t={t}
+          busy={busy}
+          err={err}
+          offers={offers}
+          agreement={agreement}
+          maskedName={stub?.maskedName}
+          onChoose={chooseOffer}
+        />
+      ) : null}
+      {screen === 'PAYMENT' ? (
+        <PaymentScreen
+          t={t}
+          busy={busy}
+          err={err}
+          agreement={agreement}
+          payState={payState}
+          onSimulate={simulatePayment}
+          onHelp={() => escalate('PAYMENT_TROUBLE')}
+          onBack={() => { setErr(''); setScreen('OFFERS'); loadOffers(); }}
+        />
+      ) : null}
+      {screen === 'SIGN' ? (
+        <SignScreen
+          t={t}
+          busy={busy}
+          err={err}
+          sessionId={session?.id}
+          agreement={agreement}
+          setAgreement={setAgreement}
+          vehicle={vehicle}
+          stub={stub}
+          fmtDateTime={fmtDateTime}
+          onSubmit={submitSign}
+          routeFatal={routeFatal}
+        />
+      ) : null}
+      {screen === 'DONE' ? (
+        <DoneScreen
+          t={t}
+          doneData={doneData}
+          vehicle={vehicle}
+          maskedName={stub?.maskedName}
+          startedAtMs={session?.startedAtMs}
+          countdown={doneCountdown}
+        />
+      ) : null}
+      {screen === 'ESCALATED' ? (
+        <div className="kio-main center">
+          <div className="kio-h2">🎧 {t('kiosk.escalatedTitle')}</div>
+          <p className="kio-sub">{t('kiosk.escalatedBody')}</p>
+          <button type="button" className="kio-btn ghost" onClick={resetAll}>{t('kiosk.startOver')}</button>
+        </div>
+      ) : null}
+      {screen === 'OUT_OF_SERVICE' ? (
+        <div className="kio-main center">
+          <div className="kio-h1" style={{ fontSize: 30 }}>😴 {t('kiosk.outOfServiceTitle')}</div>
+          <p className="kio-sub">{t('kiosk.outOfServiceBody')}</p>
+          <button type="button" className="kio-btn back" onClick={resetAll}>{t('kiosk.tryAgain')}</button>
+        </div>
+      ) : null}
+
+      {helpOpen ? (
+        <div className="kio-overlay">
+          <div className="kio-overlay-card">
+            <div className="kio-h2">🎧 {t('kiosk.helpTitle')}</div>
+            <p className="kio-sub" style={{ margin: '0 auto 20px' }}>
+              {session && screen !== 'DONE' && screen !== 'ESCALATED'
+                ? t('kiosk.helpBodySession')
+                : t('kiosk.helpBodyNoSession')}
+            </p>
+            <div className="kio-row">
+              {session && screen !== 'DONE' && screen !== 'ESCALATED' ? (
+                <button type="button" className="kio-btn sm" onClick={() => escalate('CUSTOMER_REQUEST')}>
+                  {t('kiosk.helpCallStaff')}
+                </button>
+              ) : null}
+              <button type="button" className="kio-btn ghost sm" onClick={() => setHelpOpen(false)}>
+                {t('kiosk.helpKeepGoing')}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+    </>
+  );
+}
+
+// ── Screen components ─────────────────────────────────────────────────────────
+
+function ProgressSteps({ t, current }) {
+  const labels = [
+    t('kiosk.stepReservation'),
+    t('kiosk.stepId'),
+    t('kiosk.stepExtras'),
+    t('kiosk.stepPayment'),
+    t('kiosk.stepSign'),
+  ];
+  return (
+    <div className="kio-steps">
+      {labels.map((label, idx) => {
+        const n = idx + 1;
+        const cls = n < current ? 'done' : n === current ? 'on' : '';
+        return (
+          <span key={label} style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+            {idx > 0 ? <span className="kio-ln" /> : null}
+            <span className={`kio-stp ${cls}`}>
+              <span className="kio-dot">{n < current ? '✓' : n}</span> {label}
+            </span>
+          </span>
+        );
+      })}
+    </div>
+  );
+}
+
+function PairingScreen({ t, busy, setBusy, onPaired, routeFatal }) {
+  const [code, setCode] = useState('');
+  const [msg, setMsg] = useState('');
+
+  const press = (k) => {
+    setMsg('');
+    if (k === 'back') setCode((c) => c.slice(0, -1));
+    else if (code.length < 6) setCode((c) => c + k);
+  };
+
+  const submit = async () => {
+    if (code.length !== 6 || busy) return;
+    setBusy(true); setMsg('');
+    try {
+      const out = await pairDevice(code);
+      onPaired(out.device);
+    } catch (e) {
+      if (e?.code === KIOSK_ERR_NETWORK) { routeFatal(e); return; }
+      setCode('');
+      setMsg(e?.code === 'PAIRING_LOCKED' ? t('kiosk.pairLocked') : t('kiosk.pairInvalid'));
+    } finally { setBusy(false); }
+  };
+
+  return (
+    <div className="kio-main center">
+      <div className="kio-h2">{t('kiosk.pairTitle')}</div>
+      <p className="kio-sub">{t('kiosk.pairBody')}</p>
+      <div className={`kio-field ${code ? '' : 'ph'}`}>
+        {code ? code.replace(/./g, '● ').trim() : t('kiosk.pairPlaceholder')}
+      </div>
+      <div className="kio-keypad">
+        {['1', '2', '3', '4', '5', '6', '7', '8', '9'].map((k) => (
+          <button key={k} type="button" className="kio-key" onClick={() => press(k)}>{k}</button>
+        ))}
+        <span />
+        <button type="button" className="kio-key" onClick={() => press('0')}>0</button>
+        <button type="button" className="kio-key" onClick={() => press('back')}>⌫</button>
+      </div>
+      {msg ? <div className="kio-error">{msg}</div> : null}
+      <button
+        type="button"
+        className="kio-btn"
+        style={{ marginTop: 18 }}
+        disabled={code.length !== 6 || busy}
+        onClick={submit}
+      >
+        {t('kiosk.pairSubmit')}
+      </button>
+    </div>
+  );
+}
+
+function WelcomeScreen({ t, busy, walkupEnabled, onPickup, onWalkup, err }) {
+  return (
+    <div className="kio-main center">
+      <div className="kio-h1">{t('kiosk.welcomeTitle')}</div>
+      <p className="kio-sub">{t('kiosk.welcomeSub')}</p>
+      <div className="kio-choice2" style={!walkupEnabled ? { gridTemplateColumns: '1fr', maxWidth: 460 } : undefined}>
+        <button type="button" className="kio-bigcard hot" disabled={busy} onClick={onPickup}>
+          <div className="kio-ic">🔑</div>
+          <b>{t('kiosk.welcomePickupTitle')}</b>
+          <span>{t('kiosk.welcomePickupSub')}</span>
+        </button>
+        {walkupEnabled ? (
+          <button type="button" className="kio-bigcard" disabled={busy} onClick={onWalkup}>
+            <div className="kio-ic">🚗</div>
+            <b>{t('kiosk.welcomeWalkupTitle')}</b>
+            <span>{t('kiosk.welcomeWalkupSub')}</span>
+          </button>
+        ) : null}
+      </div>
+      {err ? <div className="kio-error">{err}</div> : null}
+    </div>
+  );
+}
+
+// Alphanumeric confirmation keypad (mockup K2: digits + ABC toggle + ⌫).
+function LookupScreen({ t, busy, err, onSubmit, onBack }) {
+  const [mode, setMode] = useState('confirmation'); // confirmation | name
+  const [alpha, setAlpha] = useState(false);
+  const [value, setValue] = useState('');
+  const [lastName, setLastName] = useState('');
+  const [phone, setPhone] = useState('');
+  const [qrNote, setQrNote] = useState(false);
+
+  const press = (k) => {
+    if (k === 'back') setValue((v) => v.slice(0, -1));
+    else if (value.length < 24) setValue((v) => v + k);
+  };
+
+  const digitKeys = ['1', '2', '3', '4', '5', '6', '7', '8', '9'];
+  const letterKeys = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ-'.split('');
+
+  return (
+    <div className="kio-main">
+      <div className="kio-h2">{t('kiosk.lookupTitle')}</div>
+      <p className="kio-sub">{t('kiosk.lookupSub')}</p>
+
+      {mode === 'confirmation' ? (
+        <>
+          <div className="kio-choice2" style={{ maxWidth: 860, alignItems: 'start' }}>
+            <button type="button" className="kio-bigcard" onClick={() => setQrNote(true)}>
+              <div className="kio-ic">📱</div>
+              <b>{t('kiosk.lookupScanQr')}</b>
+              <span>{qrNote ? t('kiosk.lookupScanQrSoon') : t('kiosk.lookupScanQrSub')}</span>
+            </button>
+            <div className="kio-bigcard hot" style={{ cursor: 'default' }}>
+              <div className={`kio-field ${value ? '' : 'ph'}`} style={{ minWidth: 0 }}>
+                {value || t('kiosk.lookupPlaceholder')}
+              </div>
+              <div className={`kio-keypad ${alpha ? 'wide' : ''}`}>
+                {(alpha ? letterKeys : digitKeys).map((k) => (
+                  <button key={k} type="button" className="kio-key" onClick={() => press(k)}>{k}</button>
+                ))}
+                <button type="button" className="kio-key" style={{ fontSize: 14 }} onClick={() => setAlpha((a) => !a)}>
+                  {alpha ? '123' : 'ABC'}
+                </button>
+                {!alpha ? <button type="button" className="kio-key" onClick={() => press('0')}>0</button> : null}
+                <button type="button" className="kio-key" onClick={() => press('back')}>⌫</button>
+              </div>
+            </div>
+          </div>
+          {err ? <div className="kio-error">{err}</div> : null}
+          <div className="kio-row" style={{ marginTop: 16 }}>
+            <button
+              type="button"
+              className="kio-btn"
+              disabled={!value.trim() || busy}
+              onClick={() => onSubmit({ confirmationNumber: value.trim() })}
+            >
+              {t('kiosk.lookupFind')} ›
+            </button>
+          </div>
+          <div style={{ marginTop: 12 }}>
+            <button type="button" className="kio-btn ghost sm" onClick={() => setMode('name')}>
+              {t('kiosk.lookupByName')} ›
+            </button>
+          </div>
+        </>
+      ) : (
+        <>
+          <div className="kio-panel" style={{ maxWidth: 520 }}>
+            <div style={{ display: 'grid', gap: 12 }}>
+              <input
+                className="kio-input"
+                placeholder={t('kiosk.lookupLastName')}
+                value={lastName}
+                autoComplete="off"
+                onChange={(e) => setLastName(e.target.value)}
+              />
+              <input
+                className="kio-input"
+                placeholder={t('kiosk.lookupPhone')}
+                value={phone}
+                inputMode="tel"
+                autoComplete="off"
+                onChange={(e) => setPhone(e.target.value)}
+              />
+            </div>
+          </div>
+          {err ? <div className="kio-error">{err}</div> : null}
+          <div className="kio-row" style={{ marginTop: 16 }}>
+            <button
+              type="button"
+              className="kio-btn"
+              disabled={!lastName.trim() || !phone.trim() || busy}
+              onClick={() => onSubmit({ lastName: lastName.trim(), phone: phone.trim() })}
+            >
+              {t('kiosk.lookupFind')} ›
+            </button>
+            <button type="button" className="kio-btn ghost sm" onClick={() => setMode('confirmation')}>
+              {t('kiosk.lookupUseConfirmation')}
+            </button>
+          </div>
+        </>
+      )}
+
+      <div style={{ marginTop: 18 }}>
+        <button type="button" className="kio-btn back" onClick={onBack}>‹ {t('kiosk.back')}</button>
+      </div>
+    </div>
+  );
+}
+
+function IdScreen({ t, err, verifyResult, onScanned, onPhoto, onEscalate, onBack }) {
+  const failed = verifyResult && !verifyResult.verified;
+  return (
+    <div className="kio-main">
+      <div className="kio-h2">{t('kiosk.idTitle')}</div>
+      <p className="kio-sub">{t('kiosk.idSub')}</p>
+      <div className="kio-note">🔒 {t('kiosk.idPrivacy')}</div>
+      <div className="kio-panel" style={{ maxWidth: 560, textAlign: 'center' }}>
+        <LicenseScanner
+          onDecode={onScanned}
+          onPhoto={onPhoto}
+          labels={{
+            scanButton: `📷 ${t('kiosk.scanLicenseBtn')}`,
+            stopButton: `■ ${t('kiosk.scanStopBtn')}`,
+            uploadButton: `⬆ ${t('kiosk.scanUploadBtn')}`,
+            holdSteady: t('kiosk.scanHoldSteady'),
+            scannedPrefix: t('kiosk.scanScannedPrefix'),
+            scannedFallback: t('kiosk.scanScannedFallback'),
+            cameraUnavailable: t('kiosk.scanCameraUnavailable'),
+            liveScanUnavailable: t('kiosk.scanLiveUnavailable'),
+            readingBarcode: t('kiosk.scanReading'),
+            photoNoBarcode: t('kiosk.scanPhotoNoBarcode'),
+            photoReadFailed: t('kiosk.scanPhotoReadFailed'),
+            helperNote: t('kiosk.scanHelperNote'),
+          }}
+        />
+      </div>
+      {failed ? (
+        <div className="kio-panel" style={{ maxWidth: 560, marginTop: 14 }}>
+          <VerifyChecks t={t} result={verifyResult} />
+        </div>
+      ) : null}
+      {err ? <div className="kio-error">{err}</div> : null}
+      <div className="kio-row" style={{ marginTop: 16 }}>
+        <button type="button" className="kio-btn ghost sm" onClick={onEscalate}>
+          🎧 {t('kiosk.idCantScan')}
+        </button>
+      </div>
+      <div style={{ marginTop: 14 }}>
+        <button type="button" className="kio-btn back" onClick={onBack}>‹ {t('kiosk.back')}</button>
+      </div>
+    </div>
+  );
+}
+
+const FAILURE_REASON_KEYS = {
+  NAME_MISMATCH: 'kiosk.reasonNameMismatch',
+  UNDERAGE: 'kiosk.reasonUnderage',
+  AGE_ABOVE_MAX: 'kiosk.reasonAgeAboveMax',
+  DOB_UNREADABLE: 'kiosk.reasonDobUnreadable',
+  DOB_IMPLAUSIBLE: 'kiosk.reasonDobImplausible',
+  LICENSE_EXPIRY_UNREADABLE: 'kiosk.reasonExpiryUnreadable',
+  LICENSE_EXPIRES_BEFORE_RETURN: 'kiosk.reasonExpiresBeforeReturn',
+};
+
+function VerifyChecks({ t, result }) {
+  const checks = result?.checks || {};
+  const rows = [
+    { ok: checks.nameMatches, label: t('kiosk.checkName') },
+    { ok: checks.ageOk, label: t('kiosk.checkAge', { age: result?.minimumAge || 21 }) },
+    { ok: checks.licenseNotExpired, label: t('kiosk.checkExpiry') },
+  ];
+  const reasons = Array.isArray(result?.failureReasons) ? result.failureReasons : [];
+  return (
+    <>
+      {rows.map((row) => (
+        <div key={row.label} className="kio-kv">
+          <span className="kio-l">{row.label}</span>
+          <b style={{ color: row.ok ? '#047857' : '#be123c' }}>{row.ok ? '✓' : '✕'}</b>
+        </div>
+      ))}
+      {reasons.length ? (
+        <div style={{ marginTop: 8, fontSize: 13.5, color: '#be123c', fontWeight: 700 }}>
+          {reasons.map((code) => (
+            <div key={code}>
+              {t(FAILURE_REASON_KEYS[code] || 'kiosk.reasonGeneric', {
+                age: code === 'AGE_ABOVE_MAX' ? (result?.maximumAge ?? '') : (result?.minimumAge ?? ''),
+              })}
+            </div>
+          ))}
+        </div>
+      ) : null}
+    </>
+  );
+}
+
+function SelfieScreen({ t, busy, err, selfie, setSelfie, verifyResult, onSubmit, onContinue, onRetryScan, onEscalate }) {
+  const videoRef = useRef(null);
+  const streamRef = useRef(null);
+  const fileRef = useRef(null);
+  const [cameraOn, setCameraOn] = useState(false);
+  const [cameraFailed, setCameraFailed] = useState(false);
+
+  const stopCamera = useCallback(() => {
+    try { streamRef.current?.getTracks?.().forEach((track) => track.stop()); } catch {}
+    streamRef.current = null;
+    setCameraOn(false);
+  }, []);
+
+  const startCamera = useCallback(async () => {
+    setCameraFailed(false);
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: 'user', width: { ideal: 1280 }, height: { ideal: 1280 } },
+        audio: false,
+      });
+      streamRef.current = stream;
+      setCameraOn(true);
+      // Wait a tick for the <video> to render.
+      setTimeout(() => {
+        if (videoRef.current && streamRef.current) {
+          videoRef.current.srcObject = streamRef.current;
+          videoRef.current.play().catch(() => {});
+        }
+      }, 0);
+    } catch {
+      setCameraFailed(true);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!selfie && !verifyResult) startCamera();
+    return () => stopCamera();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const takePhoto = () => {
+    const video = videoRef.current;
+    if (!video || !video.videoWidth) return;
+    const side = Math.min(video.videoWidth, video.videoHeight);
+    const canvas = document.createElement('canvas');
+    canvas.width = 640; canvas.height = 640;
+    const ctx = canvas.getContext('2d');
+    ctx.drawImage(
+      video,
+      (video.videoWidth - side) / 2, (video.videoHeight - side) / 2, side, side,
+      0, 0, 640, 640,
+    );
+    setSelfie(canvas.toDataURL('image/jpeg', 0.85));
+    stopCamera();
+  };
+
+  const onFile = (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => { setSelfie(String(reader.result)); stopCamera(); };
+    reader.readAsDataURL(file);
+    e.target.value = '';
+  };
+
+  const retake = () => { setSelfie(null); startCamera(); };
+
+  // Verified → success checklist + continue (K4 checks panel).
+  if (verifyResult?.verified) {
+    return (
+      <div className="kio-main center">
+        <div className="kio-h2">✓ {t('kiosk.verifyOkTitle')}</div>
+        <div className="kio-panel" style={{ maxWidth: 560 }}>
+          <VerifyChecks t={t} result={verifyResult} />
+        </div>
+        {err ? <div className="kio-error">{err}</div> : null}
+        <button type="button" className="kio-btn" style={{ marginTop: 20 }} disabled={busy} onClick={onContinue}>
+          {t('kiosk.continue')} ›
+        </button>
+      </div>
+    );
+  }
+
+  // Failed + escalate suggested → K-E3.
+  if (verifyResult && !verifyResult.verified && verifyResult.escalateSuggested) {
+    return (
+      <div className="kio-main center">
+        <div className="kio-h2">{t('kiosk.verifyStuckTitle')}</div>
+        <p className="kio-sub">{t('kiosk.verifyStuckBody')}</p>
+        <div className="kio-panel" style={{ maxWidth: 560 }}>
+          <VerifyChecks t={t} result={verifyResult} />
+        </div>
+        <div className="kio-row" style={{ marginTop: 18 }}>
+          <button type="button" className="kio-btn sm" onClick={onEscalate}>🎧 {t('kiosk.connectAgent')}</button>
+          <button type="button" className="kio-btn ghost sm" onClick={onRetryScan}>{t('kiosk.tryScanAgain')}</button>
+        </div>
+      </div>
+    );
+  }
+
+  // Failed (first miss) → reasons + retry.
+  if (verifyResult && !verifyResult.verified) {
+    return (
+      <div className="kio-main center">
+        <div className="kio-h2">{t('kiosk.verifyFailedTitle')}</div>
+        <div className="kio-panel" style={{ maxWidth: 560 }}>
+          <VerifyChecks t={t} result={verifyResult} />
+        </div>
+        <div className="kio-row" style={{ marginTop: 18 }}>
+          <button type="button" className="kio-btn sm" onClick={onRetryScan}>{t('kiosk.tryScanAgain')}</button>
+          <button type="button" className="kio-btn ghost sm" onClick={onEscalate}>🎧 {t('kiosk.getHelp')}</button>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="kio-main">
+      <div className="kio-h2">{t('kiosk.selfieTitle')}</div>
+      <p className="kio-sub">{t('kiosk.selfieSub')}</p>
+      <div className="kio-selfie-frame">
+        {selfie ? (
+          <img src={selfie} alt="" />
+        ) : cameraOn ? (
+          // eslint-disable-next-line jsx-a11y/media-has-caption
+          <video ref={videoRef} muted playsInline />
+        ) : (
+          <span style={{ fontSize: 64 }}>🙂</span>
+        )}
+      </div>
+      <input ref={fileRef} type="file" accept="image/*" capture="user" style={{ display: 'none' }} onChange={onFile} />
+      <div className="kio-row">
+        {!selfie ? (
+          cameraOn ? (
+            <button type="button" className="kio-btn sm" onClick={takePhoto}>📸 {t('kiosk.selfieTake')}</button>
+          ) : (
+            <>
+              <button type="button" className="kio-btn sm" onClick={startCamera}>📷 {t('kiosk.selfieStartCamera')}</button>
+              {cameraFailed ? (
+                <button type="button" className="kio-btn ghost sm" onClick={() => fileRef.current?.click()}>
+                  ⬆ {t('kiosk.selfieUpload')}
+                </button>
+              ) : null}
+            </>
+          )
+        ) : (
+          <>
+            <button type="button" className="kio-btn sm" disabled={busy} onClick={() => onSubmit(selfie)}>
+              {t('kiosk.continue')} ›
+            </button>
+            <button type="button" className="kio-btn ghost sm" disabled={busy} onClick={retake}>{t('kiosk.selfieRetake')}</button>
+          </>
+        )}
+      </div>
+      {cameraFailed && !selfie ? <div className="kio-error">{t('kiosk.selfieCameraFailed')}</div> : null}
+      {err ? <div className="kio-error">{err}</div> : null}
+      <div className="kio-note" style={{ marginTop: 18 }}>🔒 {t('kiosk.selfiePrivacy')}</div>
+    </div>
+  );
+}
+
+function OffersScreen({ t, busy, err, offers, agreement, maskedName, onChoose }) {
+  const [selectedAddons, setSelectedAddons] = useState([]);
+
+  if (!offers) {
+    return <div className="kio-main center"><p className="kio-sub">{t('kiosk.loading')}</p>{err ? <div className="kio-error">{err}</div> : null}</div>;
+  }
+
+  const packages = Array.isArray(offers.packages) ? offers.packages : [];
+  const addons = Array.isArray(offers.addons) ? offers.addons : [];
+  const deposit = Number(agreement?.agreement?.securityDepositAmount || 0);
+
+  // Neither packages nor addons configured/offerable → nothing to sell:
+  // continue straight to payment with an honest note.
+  if (!packages.length && !addons.length) {
+    return (
+      <div className="kio-main center">
+        <div className="kio-h2">{t('kiosk.offersTitle', { name: maskedName || '' })}</div>
+        <p className="kio-sub">{t('kiosk.offersNoneBody')}</p>
+        {err ? <div className="kio-error">{err}</div> : null}
+        <button type="button" className="kio-btn" disabled={busy} onClick={() => onChoose([])}>
+          {t('kiosk.continue')} ›
+        </button>
+      </div>
+    );
+  }
+
+  const toggleAddon = (id) => {
+    setSelectedAddons((current) => (current.includes(id) ? current.filter((x) => x !== id) : [...current, id]));
+  };
+
+  const orderKey = { BASIC: 0, RECOMMENDED: 1, PREMIUM: 2 };
+  const sortedPackages = [...packages].sort(
+    (a, b) => (orderKey[a.key] ?? 9) - (orderKey[b.key] ?? 9),
+  );
+
+  return (
+    <div className="kio-main">
+      <div className="kio-h2">{t('kiosk.offersTitle', { name: maskedName || '' })}</div>
+      <p className="kio-sub" style={{ marginBottom: 26 }}>{t('kiosk.offersSub', { days: offers.days })}</p>
+
+      {packages.length ? (
+        <div className="kio-pkgs">
+          {/* Honest decline — no dark patterns (mockup K5 "Basic"). */}
+          <div className="kio-pkg">
+            <h4>{t('kiosk.pkgBasicTitle')}</h4>
+            <div className="kio-pp">$0<small>{t('kiosk.perDay')}</small></div>
+            <ul>
+              <li><span className="kio-no">✕</span> {t('kiosk.pkgBasicNoExtras')}</li>
+              <li><span className="kio-ck">✓</span> {t('kiosk.pkgBasicNoCost')}</li>
+            </ul>
+            <button type="button" className="kio-cta ghostc" disabled={busy} onClick={() => onChoose([])}>
+              {t('kiosk.pkgBasicCta')} ›
+            </button>
+          </div>
+          {sortedPackages.map((pkg) => {
+            const reco = pkg.key === 'RECOMMENDED';
+            return (
+              <div key={pkg.key} className={`kio-pkg ${reco ? 'reco' : ''}`}>
+                {/* GD review 2026-07-05: copy is "Our recommendation" — restore
+                    "Most popular" ONLY when B6 telemetry can back the claim
+                    with real attach data (no fabricated social proof). */}
+                {reco ? <div className="kio-ribbon">{t('kiosk.pkgMostPopular')}</div> : null}
+                <h4>{pkg.name}</h4>
+                <div className="kio-pp">
+                  {money(pkg.perDay)}
+                  <small>{t('kiosk.perDay')} · {money(pkg.total)} {t('kiosk.total')}</small>
+                </div>
+                <ul>
+                  {(pkg.services || []).map((line) => (
+                    <li key={line.serviceId}>
+                      <span className="kio-ck">✓</span>
+                      <span>
+                        {line.name}
+                        {line.pricingMode === 'PER_DAY'
+                          ? ` — ${money(line.rate)}${t('kiosk.perDay')}`
+                          : ` — ${money(line.total)}`}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+                <button
+                  type="button"
+                  className={`kio-cta ${reco ? 'buy' : 'ghostc'}`}
+                  disabled={busy}
+                  onClick={() => onChoose(pkg.serviceIds)}
+                >
+                  {t('kiosk.pkgAdd', { name: pkg.name })} ›
+                </button>
+              </div>
+            );
+          })}
+        </div>
+      ) : (
+        <>
+          <div className="kio-panel" style={{ maxWidth: 640 }}>
+            {addons.map((line) => {
+              const on = selectedAddons.includes(line.serviceId);
+              return (
+                <button
+                  key={line.serviceId}
+                  type="button"
+                  onClick={() => toggleAddon(line.serviceId)}
+                  className="kio-kv"
+                  style={{
+                    width: '100%', border: 'none', cursor: 'pointer', minHeight: 52,
+                    background: on ? 'rgba(135,82,254,.07)' : 'transparent',
+                    borderRadius: 12, padding: '10px 12px', fontFamily: 'inherit', fontSize: 15,
+                  }}
+                >
+                  <span className="kio-l" style={{ textAlign: 'left' }}>
+                    <b style={{ color: on ? '#4c1d95' : undefined }}>{on ? '✓ ' : ''}{line.name}</b>
+                    {line.description ? <span style={{ display: 'block', fontSize: 12.5 }}>{line.description}</span> : null}
+                  </span>
+                  <b>
+                    {line.pricingMode === 'PER_DAY'
+                      ? `${money(line.rate)}${t('kiosk.perDay')}`
+                      : money(line.total)}
+                  </b>
+                </button>
+              );
+            })}
+          </div>
+          <div className="kio-row" style={{ marginTop: 18 }}>
+            <button type="button" className="kio-btn" disabled={busy} onClick={() => onChoose(selectedAddons)}>
+              {selectedAddons.length ? t('kiosk.offersAddSelected', { count: selectedAddons.length }) : t('kiosk.pkgBasicCta')} ›
+            </button>
+          </div>
+        </>
+      )}
+
+      {deposit > 0 ? (
+        <p className="kio-sub" style={{ margin: '18px 0 0', fontSize: 14 }}>
+          {t('kiosk.offersDepositLine', { amount: money(deposit) })}
+        </p>
+      ) : null}
+      {err ? <div className="kio-error">{err}</div> : null}
+    </div>
+  );
+}
+
+function PaymentScreen({ t, busy, err, agreement, payState, onSimulate, onHelp, onBack }) {
+  const totals = agreement?.agreement || {};
+  const deposit = Number(totals.securityDepositAmount || 0);
+
+  if (payState === 'FAILED') {
+    // K-E2 — payment failed / link expired.
+    return (
+      <div className="kio-main center">
+        <div className="kio-h2">{t('kiosk.payFailedTitle')}</div>
+        <div className="kio-paystate bad">✕ {t('kiosk.payFailedChip')}</div>
+        <p className="kio-sub" style={{ marginTop: 14 }}>{t('kiosk.payFailedBody')}</p>
+        {err ? <div className="kio-error">{err}</div> : null}
+        <div className="kio-row">
+          <button type="button" className="kio-btn sm" disabled={busy} onClick={onSimulate}>{t('kiosk.payRetry')}</button>
+          <button type="button" className="kio-btn ghost sm" onClick={onHelp}>🎧 {t('kiosk.getHelp')}</button>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="kio-main">
+      <div className="kio-h2">{t('kiosk.payTitle')}</div>
+      <div style={{ display: 'flex', gap: 26, alignItems: 'flex-start', maxWidth: 900, width: '100%', justifyContent: 'center', flexWrap: 'wrap' }}>
+        <div className="kio-panel" style={{ maxWidth: 400 }}>
+          <div className="kio-kv"><span className="kio-l">{t('kiosk.paySubtotal')}</span><b>{money(totals.subtotal)}</b></div>
+          <div className="kio-kv"><span className="kio-l">{t('kiosk.payTaxesFees')}</span><b>{money(Number(totals.taxes || 0) + Number(totals.fees || 0))}</b></div>
+          <div className="kio-kv" style={{ borderTop: '2px solid #efeaff' }}>
+            <span className="kio-l"><b>{t('kiosk.payToday')}</b></span>
+            <b style={{ fontSize: 21 }}>{money(totals.total)}</b>
+          </div>
+          {deposit > 0 ? (
+            <>
+              <div className="kio-kv" style={{ background: 'rgba(31,199,170,.07)', borderRadius: 12, padding: '10px 12px', borderBottom: 'none', marginTop: 6 }}>
+                <span className="kio-l">{t('kiosk.payHold')}</span>
+                <b style={{ color: '#0f766e' }}>{money(deposit)}</b>
+              </div>
+              <div style={{ fontSize: 12, color: '#6f668f', padding: '6px 2px 0' }}>{t('kiosk.payHoldHint')}</div>
+            </>
+          ) : null}
+        </div>
+        <div style={{ textAlign: 'center' }}>
+          {/* Visual placeholder — the real QR/SMS payment link ships in Fase B5. */}
+          <div className="kio-qrph"><span style={{ fontSize: 12, color: '#6f668f', fontWeight: 700 }}>{t('kiosk.payQrSoon')}</span></div>
+          <div className="kio-paystate">⏳ {t('kiosk.payWaiting')}</div>
+          <div style={{ marginTop: 14 }}>
+            <button type="button" className="kio-btn ghost sm" disabled>📱 {t('kiosk.payTextLink')}</button>
+          </div>
+          <div style={{ marginTop: 22 }}>
+            <div className="kio-badge-sandbox" style={{ marginBottom: 8 }}>SANDBOX</div>
+            <div>
+              <button type="button" className="kio-btn mint sm" disabled={busy || payState === 'DISABLED'} onClick={onSimulate}>
+                {t('kiosk.paySimulate')}
+              </button>
+            </div>
+            {payState === 'DISABLED' ? (
+              <div className="kio-error" style={{ marginTop: 10 }}>{t('kiosk.paySandboxDisabled')}</div>
+            ) : null}
+          </div>
+        </div>
+      </div>
+      <div className="kio-panel" style={{ maxWidth: 640, marginTop: 18, fontSize: 14, textAlign: 'center' }}>
+        {t('kiosk.payHowTo')}
+      </div>
+      {err && payState !== 'FAILED' ? <div className="kio-error">{err}</div> : null}
+      {/* Going back is safe pre-payment: POST offers is an idempotent REPLACE
+          (wipes prior KIOSK_UPSELL rows, recreates, recomputes tax/totals) —
+          confirmed by the backend owner. Hidden once payment is stamped. */}
+      {payState !== 'PAID' ? (
+        <div style={{ marginTop: 16 }}>
+          <button type="button" className="kio-btn ghost sm" disabled={busy} onClick={onBack}>
+            ‹ {t('kiosk.payChangeExtras')}
+          </button>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function SignScreen({ t, busy, err, sessionId, agreement, setAgreement, vehicle, stub, fmtDateTime, onSubmit, routeFatal }) {
+  const [initials, setInitials] = useState(null);
+  const [applied, setApplied] = useState({}); // sectionKey → initialDataUrl
+  const [signature, setSignature] = useState(null);
+  const [readOpen, setReadOpen] = useState(false);
+
+  // Make sure we have the freshest sections/totals (payment may have re-synced).
+  useEffect(() => {
+    if (!sessionId) return;
+    getAgreement(sessionId).then((out) => setAgreement(out)).catch((e) => { routeFatal(e); });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sessionId]);
+
+  const sections = Array.isArray(agreement?.sections) ? agreement.sections : [];
+  const totals = agreement?.agreement || {};
+  const summary = agreement?.summary || {};
+  const car = summary.vehicle || vehicle || null;
+  const allInitialed = sections.length > 0 && sections.every((s) => applied[s.key]);
+
+  const applyAll = () => {
+    if (!initials) return;
+    setApplied(Object.fromEntries(sections.map((s) => [s.key, initials])));
+  };
+
+  const carLabel = car
+    ? [car.year, car.make, car.model].filter(Boolean).join(' ') + (car.color ? ` · ${car.color}` : '')
+    : summary.vehicleClassName || '—';
+
+  return (
+    <div className="kio-main">
+      <div className="kio-h2">{t('kiosk.signTitle')} 🚙</div>
+      <div className="kio-carcard">
+        <div className="kio-carimg">🚙</div>
+        <div style={{ flex: 1 }}>
+          <b style={{ fontSize: 18, color: '#29223f' }}>{carLabel}</b>
+          <div style={{ fontSize: 14, color: '#6f668f' }}>
+            {car?.plate ? <>{t('kiosk.signPlate')} <b>{car.plate}</b></> : null}
+            {car?.internalNumber ? <> · #{car.internalNumber}</> : null}
+          </div>
+          <div style={{ fontSize: 13, color: '#6f668f', marginTop: 4 }}>{t('kiosk.signReviewHint')}</div>
+        </div>
+      </div>
+
+      <div className="kio-panel" style={{ maxWidth: 680, marginTop: 14 }}>
+        <div className="kio-kv">
+          <span className="kio-l">{t('kiosk.signReturn')}</span>
+          <b>{fmtDateTime(summary.pickupWindow?.returnAt || stub?.pickupWindow?.returnAt)}</b>
+        </div>
+        <div className="kio-kv"><span className="kio-l">{t('kiosk.payToday')}</span><b>{money(totals.total)}</b></div>
+        {Number(totals.securityDepositAmount || 0) > 0 ? (
+          <div className="kio-kv">
+            <span className="kio-l">{t('kiosk.signDeposit')}</span>
+            <b>{t('kiosk.signDepositValue', { amount: money(totals.securityDepositAmount) })}</b>
+          </div>
+        ) : null}
+        {agreement?.agreement?.agreementNumber ? (
+          <div className="kio-kv"><span className="kio-l">{t('kiosk.signAgreementNo')}</span><b>{agreement.agreement.agreementNumber}</b></div>
+        ) : null}
+      </div>
+
+      {/* Per-section initials: draw once, then apply to each section (or all). */}
+      <div className="kio-panel" style={{ maxWidth: 680, marginTop: 14 }}>
+        <b style={{ fontSize: 15 }}>{t('kiosk.signInitialsTitle')}</b>
+        <p style={{ fontSize: 13, color: '#6f668f', margin: '4px 0 10px' }}>{t('kiosk.signInitialsHint')}</p>
+        <SignaturePad height={90} placeholder={t('kiosk.signInitialsPlaceholder')} onChange={setInitials} />
+        <div className="kio-row" style={{ marginTop: 10, justifyContent: 'flex-start' }}>
+          <button type="button" className="kio-btn ghost sm" disabled={!initials} onClick={applyAll}>
+            {t('kiosk.signInitialAll')}
+          </button>
+          <button type="button" className="kio-btn back" onClick={() => setReadOpen((v) => !v)}>
+            {readOpen ? t('kiosk.signHideAgreement') : t('kiosk.signReadAgreement')}
+          </button>
+        </div>
+        <div style={{ display: 'grid', gap: 10, marginTop: 12 }}>
+          {sections.map((section) => (
+            <div key={section.key} className="kio-section-initial">
+              <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, alignItems: 'center' }}>
+                <b style={{ fontSize: 14 }}>{section.label}</b>
+                {applied[section.key] ? (
+                  <span style={{ color: '#047857', fontWeight: 800, fontSize: 13, display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                    ✓ {t('kiosk.signInitialed')}
+                    <img src={applied[section.key]} alt="" style={{ height: 26, borderRadius: 4, border: '1px solid #e6dfff', background: '#fff' }} />
+                  </span>
+                ) : (
+                  <button
+                    type="button"
+                    className="kio-btn ghost sm"
+                    style={{ minHeight: 48, padding: '8px 16px', fontSize: 14 }}
+                    disabled={!initials}
+                    onClick={() => setApplied((cur) => ({ ...cur, [section.key]: initials }))}
+                  >
+                    {t('kiosk.signInitialHere')}
+                  </button>
+                )}
+              </div>
+              {readOpen ? <div className="kio-body">{section.body}</div> : null}
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <div className="kio-panel" style={{ maxWidth: 680, marginTop: 14 }}>
+        <b style={{ fontSize: 15 }}>{t('kiosk.signSignatureTitle')}</b>
+        <div style={{ marginTop: 10 }}>
+          <SignaturePad height={150} placeholder={t('kiosk.signSignaturePlaceholder')} onChange={setSignature} />
+        </div>
+      </div>
+
+      {err ? <div className="kio-error">{err}</div> : null}
+      <div className="kio-row" style={{ marginTop: 18 }}>
+        <button
+          type="button"
+          className="kio-btn mint"
+          disabled={busy || !allInitialed || !signature}
+          onClick={() => onSubmit({
+            sectionInitials: sections.map((s) => ({ sectionKey: s.key, initialDataUrl: applied[s.key] })),
+            signature,
+          })}
+        >
+          {t('kiosk.signFinish')} ›
+        </button>
+      </div>
+      {!allInitialed && sections.length ? (
+        <p className="kio-sub" style={{ fontSize: 13, marginTop: 10 }}>{t('kiosk.signMissingInitials')}</p>
+      ) : null}
+    </div>
+  );
+}
+
+/**
+ * Scannable QR for the beta.160 customer-inspection link (K8). Uses the
+ * repo's existing `qrcode` dependency, dynamically imported so the encoder
+ * stays out of the kiosk's initial bundle.
+ */
+function InspectionQr({ link, alt }) {
+  const [src, setSrc] = useState(null);
+  useEffect(() => {
+    let cancelled = false;
+    import('qrcode')
+      .then((QRCode) => (QRCode.toDataURL || QRCode.default?.toDataURL)?.(link, { width: 320, margin: 1 }))
+      .then((dataUrl) => { if (!cancelled && dataUrl) setSrc(dataUrl); })
+      .catch(() => {}); // QR is a bonus — the email line stays either way.
+    return () => { cancelled = true; };
+  }, [link]);
+  if (!src) return null;
+  return (
+    <img
+      src={src}
+      alt={alt || ''}
+      style={{ width: 160, height: 160, borderRadius: 18, border: '8px solid #fff', boxShadow: '0 14px 32px rgba(35,21,80,.08)', background: '#fff' }}
+    />
+  );
+}
+
+function DoneScreen({ t, doneData, vehicle, maskedName, startedAtMs, countdown }) {
+  const keyHandoff = doneData?.keyHandoff || { mode: 'STAFF' };
+  const totalTime = startedAtMs
+    ? (() => {
+      const secs = Math.max(0, Math.round((Date.now() - startedAtMs) / 1000));
+      return `${Math.floor(secs / 60)}m ${String(secs % 60).padStart(2, '0')}s`;
+    })()
+    : null;
+  const carLabel = vehicle
+    ? [vehicle.color, vehicle.make, vehicle.model].filter(Boolean).join(' ') + (vehicle.plate ? ` · ${vehicle.plate}` : '')
+    : '—';
+
+  return (
+    <div className="kio-main center">
+      <div className="kio-h1">{t('kiosk.doneTitle', { name: maskedName || '' })} 🎉</div>
+      <div className="kio-panel" style={{ maxWidth: 640 }}>
+        <div className="kio-kv">
+          <span className="kio-l">🔑 {t('kiosk.doneKeys')}</span>
+          <b>
+            {keyHandoff.mode === 'LOCKBOX'
+              ? (keyHandoff.lockboxNote || t('kiosk.doneKeysLockbox'))
+              : t('kiosk.doneKeysStaff')}
+          </b>
+        </div>
+        <div className="kio-kv"><span className="kio-l">🚙 {t('kiosk.doneCar')}</span><b>{carLabel}</b></div>
+        <div className="kio-kv">
+          <span className="kio-l">📄 {t('kiosk.doneContract')}</span>
+          <b>{doneData?.contractEmail?.sent ? t('kiosk.doneContractSent') : t('kiosk.doneContractAskStaff')}</b>
+        </div>
+        {doneData?.customerInspection?.sent ? (
+          <div className="kio-kv">
+            <span className="kio-l">📱 {t('kiosk.doneInspection')}</span>
+            <b>{t('kiosk.doneInspectionSent')}</b>
+          </div>
+        ) : null}
+      </div>
+      {/* On-screen inspection QR (mockup K8) — the link only comes back on the
+          FIRST completion; retries return sent:false and keep the email line. */}
+      {doneData?.customerInspection?.link ? (
+        <div style={{ marginTop: 14 }}>
+          <InspectionQr link={doneData.customerInspection.link} alt={t('kiosk.doneInspectionScan')} />
+          <div style={{ fontWeight: 750, color: '#4c1d95', fontSize: 14, marginTop: 4 }}>
+            📱 {t('kiosk.doneInspectionScan')}
+          </div>
+        </div>
+      ) : null}
+      {totalTime ? (
+        <p className="kio-sub" style={{ fontSize: 13, marginTop: 14 }}>
+          {t('kiosk.doneTotalTime', { time: totalTime })} · {t('kiosk.doneEnjoy')}
+        </p>
+      ) : (
+        <p className="kio-sub" style={{ fontSize: 13, marginTop: 14 }}>{t('kiosk.doneEnjoy')}</p>
+      )}
+      <p className="kio-sub" style={{ fontSize: 12.5, margin: 0 }}>{t('kiosk.doneReset', { count: countdown })}</p>
+    </div>
+  );
+}

@@ -453,6 +453,11 @@ function DashboardInner({ token, me, logout }) {
   const inspectionsToReview = Number(kpis.inspectionsToReview || 0);
   // 2026-07-05: storefront loaner requests waiting for advisor contact.
   const loanerRequestsPending = Number(kpis.loanerRequestsPending || 0);
+  // Kiosk B3b (2026-07-05): escalated kiosk sessions waiting for a staff
+  // member (backend KPI kioskEscalations, reports.service overview). Card
+  // only renders when count > 0 AND the tenant has the kiosk module on
+  // (module is opt-in / default OFF).
+  const kioskEscalations = Number(kpis.kioskEscalations || 0);
   // Anchor "today" in the tenant timezone — not the browser's — so the
   // Operations Board agrees with the rest of the app for agents loading
   // from a non-PR browser. Both functions return "YYYY-MM-DD" in DASHBOARD_TZ.
@@ -526,6 +531,18 @@ function DashboardInner({ token, me, logout }) {
       // Vehicle Profile pack (2026-06-10): these two cards REPLACE the old
       // "Stuck Checkouts" and "Fee Advisory Watch" cards (Hector's call).
       // Stuck checkouts remain reachable via /reservations?filter=stuck-checkouts.
+      // Kiosk escalations banner (B3b): a guest is physically waiting at a
+      // kiosk — highest-urgency card, deep-links to the filtered sessions list.
+      (kioskEscalations > 0 && me?.moduleAccess?.kiosk !== false)
+        ? {
+            id: 'kiosk-escalations',
+            title: t('dashboard.kioskEscalations'),
+            detail: t('dashboard.kioskEscalationsDetail', { count: kioskEscalations }),
+            note: t('dashboard.kioskEscalationsNote'),
+            action: () => router.push('/kiosks?outcome=ESCALATED'),
+            actionLabel: t('dashboard.openKiosks')
+          }
+        : null,
       inspectionsToReview > 0
         ? {
             id: 'inspections-to-review',
@@ -599,7 +616,7 @@ function DashboardInner({ token, me, logout }) {
       feeAdvisoryCount,
       nextItems
     };
-  }, [pickups, returns, feeAdvisoryCount, registrationsExpiring30d, readyToRotate, rotationRuleLabel, inspectionsToReview, loanerRequestsPending, totalVehicles, available, migrationHeld, serviceHeld, activeReservations, overdueReservations, router, me?.moduleAccess?.loaner, t]);
+  }, [pickups, returns, feeAdvisoryCount, registrationsExpiring30d, readyToRotate, rotationRuleLabel, inspectionsToReview, loanerRequestsPending, kioskEscalations, totalVehicles, available, migrationHeld, serviceHeld, activeReservations, overdueReservations, router, me?.moduleAccess?.loaner, me?.moduleAccess?.kiosk, t]);
 
   return (
     <AppShell me={me} logout={logout}>

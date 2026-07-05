@@ -364,6 +364,7 @@ export const reportsService = {
       fleetRotationCfg,
       inspectionsToReviewCount,
       loanerRequestsPendingCount,
+      kioskEscalationsCount,
     ] = await Promise.all([
       prisma.reservation.findMany({
         where: reservationWhere,
@@ -459,6 +460,11 @@ export const reportsService = {
       // Cheap: covered by @@index([tenantId, status]) on LoanerRequest.
       prisma.loanerRequest.count({
         where: { ...(effectiveTenantId ? { tenantId: effectiveTenantId } : {}), status: 'RECEIVED' },
+      }).catch(() => 0),
+      // Kiosk Fase B3a (2026-07-05): escalated kiosk sessions waiting for a
+      // staff member. Same defensive .catch as the other post-B1 tables.
+      prisma.kioskSession.count({
+        where: { ...(effectiveTenantId ? { tenantId: effectiveTenantId } : {}), outcome: 'ESCALATED' },
       }).catch(() => 0),
     ]);
 
@@ -626,6 +632,8 @@ export const reportsService = {
         // (LoanerRequest.status = RECEIVED). Dashboard card + click-through
         // to /loaner; clears itself as advisors work the queue.
         loanerRequestsPending: loanerRequestsPendingCount || 0,
+        // Kiosk B3a: escalated kiosk sessions awaiting staff (banner in B3b).
+        kioskEscalations: kioskEscalationsCount || 0,
         // 2026-05-28: vehicleIds derived from active reservations + blocks
         // exposed so the Vehicles page can compute its Available / On Rent
         // tiles without inheriting the Vehicle.status drift (every vehicle

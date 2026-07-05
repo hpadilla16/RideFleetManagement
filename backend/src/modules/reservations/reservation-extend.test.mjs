@@ -593,6 +593,82 @@ describe('reservation-extend (unified flow)', () => {
       assert.equal(svc.total, Number((7 * 7).toFixed(2)), 'daily service total = newDays x rate');
     });
 
+    it('DOES rescale KIOSK_UPSELL per-day rows exactly like counter-sold SERVICE rows (kiosk B2 QA, 2026-07-05)', async () => {
+      // Kiosk upsell accept writes per-day add-ons as chargeType=DAILY,
+      // quantity=days, rate=dailyRate, source='KIOSK_UPSELL' (see
+      // kiosk-offers.service.js acceptOffers). Without KIOSK_UPSELL in
+      // PER_DAY_LIKE_SOURCES the extra days rode uncharged — and a
+      // coversTolls package would cover days the customer never paid for.
+      // 3-day rental with CDW 12.99×3, extend +2 days → 5 total.
+      const state = makeMockDb({
+        initial: {
+          reservation: {
+            pickupAt: new Date('2026-05-10T00:00:00Z'),
+            returnAt: new Date('2026-05-13T00:00:00Z'), // 3 days
+            estimatedTotal: 188.97
+          },
+          charges: [
+            { id: 'c-base', reservationId: 'res-1', name: 'Base rental',
+              chargeType: 'DAILY', quantity: 3, rate: 50, total: 150,
+              taxable: true, selected: true, sortOrder: 0, source: 'BASE_RATE',
+              createdAt: new Date('2026-05-01T10:00:00Z') },
+            { id: 'c-kiosk-cdw', reservationId: 'res-1', name: 'Collision Damage Waiver',
+              chargeType: 'DAILY', quantity: 3, rate: 12.99, total: 38.97,
+              taxable: true, selected: true, sortOrder: 1000, source: 'KIOSK_UPSELL',
+              sourceRefId: 'svc-cdw', notes: 'Kiosk upsell',
+              createdAt: new Date('2026-05-01T10:00:00Z') }
+          ]
+        }
+      });
+      await reservationExtendService.extendReservation({
+        reservationId: 'res-1',
+        newReturnAt: new Date('2026-05-15T00:00:00Z'), // +2 days, 5 total
+        extensionDailyRate: null, note: '', actorUserId: 'u-1',
+        tenantScope: { tenantId: 'tenant-1' }
+      });
+      const cdw = state.charges.find((c) => c.id === 'c-kiosk-cdw');
+      assert.equal(cdw.quantity, 5, 'kiosk per-day add-on rescales to new total days');
+      assert.equal(cdw.total, Number((5 * 12.99).toFixed(2)), 'kiosk add-on total = newDays × rate (64.95)');
+      const base = state.charges.find((c) => c.id === 'c-base');
+      assert.equal(base.quantity, 3, 'BASE_RATE still untouched');
+      assert.equal(base.total, 150);
+    });
+
+    it('does NOT rescale one-time (UNIT, qty=1) KIOSK_UPSELL rows on extension (kiosk B2 QA, 2026-07-05)', async () => {
+      // FIXED kiosk add-ons (booster seat: chargeType=UNIT, quantity=1,
+      // rate=total) are one-time — the qty<=1 guard in shouldRescaleDailyRow
+      // must leave them alone even though KIOSK_UPSELL is whitelisted.
+      const state = makeMockDb({
+        initial: {
+          reservation: {
+            pickupAt: new Date('2026-05-10T00:00:00Z'),
+            returnAt: new Date('2026-05-13T00:00:00Z'), // 3 days
+            estimatedTotal: 175
+          },
+          charges: [
+            { id: 'c-base', reservationId: 'res-1', name: 'Base rental',
+              chargeType: 'DAILY', quantity: 3, rate: 50, total: 150,
+              taxable: true, selected: true, sortOrder: 0, source: 'BASE_RATE',
+              createdAt: new Date('2026-05-01T10:00:00Z') },
+            { id: 'c-kiosk-booster', reservationId: 'res-1', name: 'Booster Seat',
+              chargeType: 'UNIT', quantity: 1, rate: 25, total: 25,
+              taxable: false, selected: true, sortOrder: 1000, source: 'KIOSK_UPSELL',
+              sourceRefId: 'svc-booster', notes: 'Kiosk upsell',
+              createdAt: new Date('2026-05-01T10:00:00Z') }
+          ]
+        }
+      });
+      await reservationExtendService.extendReservation({
+        reservationId: 'res-1',
+        newReturnAt: new Date('2026-05-15T00:00:00Z'), // +2 days, 5 total
+        extensionDailyRate: null, note: '', actorUserId: 'u-1',
+        tenantScope: { tenantId: 'tenant-1' }
+      });
+      const booster = state.charges.find((c) => c.id === 'c-kiosk-booster');
+      assert.equal(booster.quantity, 1, 'one-time kiosk add-on quantity unchanged');
+      assert.equal(booster.total, 25, 'one-time kiosk add-on total unchanged');
+    });
+
     it('rescales per-day SERVICE rows stored as UNIT with quantity=oldDays (Bug 7a)', async () => {
       // Pre-Paid Tolls service provisioned by booking-engine as
       // chargeType=UNIT, quantity=days, rate=dailyRate (booking-engine.service.js:1822).

@@ -112,12 +112,18 @@ function isTaxCharge(row = {}) {
 // must rescale alongside daily-priced AdditionalServices.
 // INSURANCE was added 2026-05-12 per Hector — insurance coverage should
 // extend with the rental window the same way per-day services do.
+// KIOSK_UPSELL was added 2026-07-05 (kiosk B2 QA): kiosk-sold per-day
+// add-ons (chargeType DAILY, quantity=days, rate=dailyRate — see
+// kiosk-offers.service.js acceptOffers) must rescale on extension exactly
+// like counter-sold SERVICE rows, or the extra days ride uncharged (and a
+// coversTolls package would cover days the customer never paid for).
 const PER_DAY_LIKE_SOURCES = new Set([
   'SERVICE',
   'ADDITIONAL_SERVICE',
   'FEE',
   'SERVICE_LINKED_FEE',
-  'INSURANCE'
+  'INSURANCE',
+  'KIOSK_UPSELL'
 ]);
 
 // Returns true if this row is a per-day charge whose quantity should
@@ -271,7 +277,10 @@ function buildExtensionChargeData({
 // using pricingSnapshot.taxRate (falling back to pickup location's
 // taxRate). Returns the resulting TAX charge row, or null if there's no
 // tax to apply (no taxable charges, or no tax rate available).
-async function recomputeTaxRow({ reservationId, pricingSnapshot, pickupLocationId }) {
+// Exported (2026-07-05, kiosk B2 review): the kiosk upsell accept path
+// reuses this exact recompute so taxable kiosk add-ons are never sold
+// tax-free. Behavior is unchanged for the extension path.
+export async function recomputeTaxRow({ reservationId, pricingSnapshot, pickupLocationId }) {
   const remaining = await prisma.reservationCharge.findMany({
     where: { reservationId, selected: true }
   });

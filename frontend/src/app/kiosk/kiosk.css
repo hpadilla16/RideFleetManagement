@@ -1,0 +1,266 @@
+/* Ride Kiosk — fullscreen tablet theme (Fase B3b).
+   Derived from the Hector-approved mockup doc/kiosk-mockups-2026-07-04.html
+   (Rev 2). Touch-first: every interactive control on the critical path is
+   ≥48px tall. Scoped under .kio-root so nothing leaks into the admin app. */
+
+.kio-root {
+  --kio-purple: #8752FE;
+  --kio-violet: #6d3df2;
+  --kio-mint: #1fc7aa;
+  --kio-ink: #211a38;
+  --kio-title: #29223f;
+  --kio-muted: #6f668f;
+  --kio-border: #e6dfff;
+  --kio-border-strong: #d7cbff;
+  --kio-shadow: 0 14px 32px rgba(35, 21, 80, .08);
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: flex;
+  flex-direction: column;
+  background: linear-gradient(180deg, #fdfcff 0%, #f6f2ff 100%);
+  color: #1f1f28;
+  font-family: Aptos, 'Segoe UI Variable', 'Segoe UI', system-ui, sans-serif;
+  font-size: 15px;
+  line-height: 1.5;
+  overflow: hidden;
+  -webkit-tap-highlight-color: transparent;
+  user-select: none;
+}
+
+.kio-bar {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 14px 26px; border-bottom: 1px solid var(--kio-border);
+  background: rgba(255, 255, 255, .85); flex: none;
+}
+.kio-brand { display: flex; align-items: center; gap: 11px; text-align: left; }
+.kio-brand .kio-logo {
+  width: 42px; height: 42px; border-radius: 12px;
+  background: linear-gradient(135deg, #8752FE, #6d3df2);
+  display: flex; align-items: center; justify-content: center;
+  color: #fff; font-weight: 850; font-size: 19px;
+  box-shadow: 0 6px 14px rgba(135, 82, 254, .35);
+}
+.kio-brand b { font-size: 19px; font-weight: 850; color: var(--kio-ink); display: block; line-height: 1.2; }
+.kio-brand small { display: block; color: var(--kio-muted); font-size: 12px; }
+.kio-right { display: flex; align-items: center; gap: 10px; }
+
+.kio-lang { display: inline-flex; border: 1px solid var(--kio-border); border-radius: 12px; overflow: hidden; }
+.kio-lang button {
+  min-height: 48px; padding: 10px 20px; border: none; background: #fff;
+  color: #6f668f; font-size: 15px; font-weight: 750; cursor: pointer;
+}
+.kio-lang button.on { background: var(--kio-purple); color: #fff; }
+
+.kio-help {
+  min-height: 48px; background: rgba(135, 82, 254, .09);
+  border: 1px solid rgba(135, 82, 254, .18); color: #4c1d95;
+  border-radius: 12px; padding: 10px 20px; font-weight: 750; font-size: 15px; cursor: pointer;
+}
+
+.kio-main {
+  flex: 1; display: flex; flex-direction: column; align-items: center;
+  justify-content: flex-start; padding: 26px 40px 34px; text-align: center;
+  overflow-y: auto; width: 100%;
+}
+.kio-main.center { justify-content: center; }
+
+.kio-h1 { font-size: 36px; font-weight: 850; color: var(--kio-title); margin: 0 0 8px; letter-spacing: -.01em; line-height: 1.15; }
+.kio-h2 { font-size: 26px; font-weight: 850; color: var(--kio-title); margin: 0 0 6px; }
+.kio-sub { font-size: 17px; color: var(--kio-muted); margin: 0 0 22px; max-width: 680px; }
+
+.kio-btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: 12px;
+  background: linear-gradient(180deg, #9460ff, #8752FE); color: #fff;
+  border: none; border-radius: 20px; padding: 18px 32px; min-height: 60px;
+  font-weight: 800; font-size: 19px; cursor: pointer;
+  box-shadow: 0 12px 26px rgba(135, 82, 254, .32); min-width: 260px;
+  font-family: inherit;
+}
+.kio-btn:disabled { opacity: .55; cursor: default; }
+.kio-btn.ghost { background: #fff; color: #4c1d95; border: 2px solid rgba(135, 82, 254, .28); box-shadow: var(--kio-shadow); }
+.kio-btn.mint { background: linear-gradient(180deg, #2ad6b6, #1fc7aa); box-shadow: 0 12px 26px rgba(31, 199, 170, .3); }
+.kio-btn.sm { padding: 12px 22px; font-size: 16px; border-radius: 16px; min-width: 0; min-height: 48px; }
+.kio-btn.back { background: #fff; color: #6f668f; border: 1.5px solid var(--kio-border); box-shadow: none; font-size: 15px; padding: 10px 22px; min-width: 0; min-height: 48px; }
+
+.kio-steps { display: flex; gap: 8px; align-items: center; justify-content: center; padding: 12px 8px 4px; flex-wrap: wrap; flex: none; }
+.kio-stp { display: flex; align-items: center; gap: 7px; font-size: 13px; font-weight: 750; color: #6f668f; }
+.kio-stp .kio-dot {
+  width: 26px; height: 26px; border-radius: 999px; background: #ece6ff; color: #7c6bb0;
+  display: flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 850;
+}
+.kio-stp.on { color: #4c1d95; }
+.kio-stp.on .kio-dot { background: var(--kio-purple); color: #fff; box-shadow: 0 4px 10px rgba(135, 82, 254, .35); }
+.kio-stp.done .kio-dot { background: var(--kio-mint); color: #fff; }
+.kio-stp .kio-ln { width: 22px; height: 2px; background: #ece6ff; border-radius: 2px; }
+
+.kio-foot {
+  display: flex; justify-content: space-between; align-items: center; gap: 12px;
+  padding: 12px 26px; border-top: 1px solid var(--kio-border);
+  background: rgba(255, 255, 255, .7); font-size: 13px; color: var(--kio-muted); flex: none;
+}
+.kio-foot .kio-dim { color: var(--kio-muted); }
+
+.kio-choice2 { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; width: 100%; max-width: 840px; }
+.kio-bigcard {
+  background: rgba(255, 255, 255, .94); border: 2px solid var(--kio-border);
+  border-radius: 22px; padding: 30px 26px; box-shadow: var(--kio-shadow);
+  cursor: pointer; text-align: center; font-family: inherit; min-height: 48px;
+}
+.kio-bigcard.hot { border-color: var(--kio-purple); box-shadow: 0 16px 34px rgba(135, 82, 254, .22); }
+.kio-bigcard .kio-ic { font-size: 44px; margin-bottom: 12px; }
+.kio-bigcard b { display: block; font-size: 21px; color: var(--kio-title); font-weight: 850; margin-bottom: 6px; }
+.kio-bigcard span { color: var(--kio-muted); font-size: 14.5px; }
+
+.kio-panel {
+  background: rgba(255, 255, 255, .94); border: 1px solid var(--kio-border);
+  border-radius: 20px; box-shadow: var(--kio-shadow); padding: 20px 24px;
+  width: 100%; max-width: 760px; text-align: left;
+}
+.kio-kv { display: flex; justify-content: space-between; gap: 14px; padding: 9px 0; border-bottom: 1px solid #f3efff; font-size: 15px; align-items: baseline; }
+.kio-kv:last-child { border-bottom: none; }
+.kio-kv .kio-l { color: var(--kio-muted); }
+.kio-kv b { color: var(--kio-title); font-weight: 800; text-align: right; }
+
+.kio-field {
+  background: #fff; border: 2px solid var(--kio-border-strong); border-radius: 16px;
+  padding: 14px 20px; font-size: 24px; font-weight: 800; color: var(--kio-title);
+  letter-spacing: .12em; min-width: 300px; min-height: 58px; text-align: center;
+}
+.kio-field.ph { color: #c6bce4; letter-spacing: .06em; font-size: 18px; }
+
+.kio-keypad { display: grid; grid-template-columns: repeat(3, 84px); gap: 10px; justify-content: center; margin-top: 16px; }
+.kio-keypad.wide { grid-template-columns: repeat(6, 64px); }
+.kio-key {
+  height: 60px; border-radius: 16px; background: #fff; border: 1.5px solid var(--kio-border);
+  font-size: 21px; font-weight: 800; color: var(--kio-title);
+  display: flex; align-items: center; justify-content: center;
+  box-shadow: var(--kio-shadow); cursor: pointer; font-family: inherit;
+}
+.kio-key:active { background: rgba(135, 82, 254, .1); }
+
+.kio-input {
+  background: #fff; border: 2px solid var(--kio-border-strong); border-radius: 14px;
+  padding: 12px 16px; font-size: 18px; font-weight: 700; color: var(--kio-title);
+  min-height: 52px; width: 100%; font-family: inherit;
+}
+
+.kio-pkgs { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 16px; width: 100%; max-width: 980px; align-items: stretch; }
+.kio-pkg {
+  background: rgba(255, 255, 255, .95); border: 2px solid var(--kio-border); border-radius: 22px;
+  padding: 22px; box-shadow: var(--kio-shadow); text-align: left; display: flex; flex-direction: column;
+}
+.kio-pkg.reco { border-color: var(--kio-purple); box-shadow: 0 18px 38px rgba(135, 82, 254, .24); position: relative; }
+.kio-pkg .kio-ribbon {
+  position: absolute; top: -13px; left: 50%; transform: translateX(-50%);
+  background: linear-gradient(135deg, #8752FE, #6d3df2); color: #fff; font-size: 11px;
+  font-weight: 850; letter-spacing: .06em; text-transform: uppercase; border-radius: 999px;
+  padding: 5px 16px; box-shadow: 0 6px 14px rgba(135, 82, 254, .4); white-space: nowrap;
+}
+.kio-pkg h4 { margin: 2px 0; font-size: 18px; color: var(--kio-title); font-weight: 850; }
+.kio-pkg .kio-pp { font-size: 30px; font-weight: 850; color: var(--kio-ink); margin: 6px 0 2px; }
+.kio-pkg .kio-pp small { font-size: 13px; color: var(--kio-muted); font-weight: 700; }
+.kio-pkg ul { list-style: none; margin: 12px 0 16px; padding: 0; flex: 1; }
+.kio-pkg li { padding: 7px 0; font-size: 13.5px; color: #33304a; border-bottom: 1px solid #f3efff; display: flex; gap: 9px; align-items: flex-start; text-align: left; }
+.kio-pkg li:last-child { border-bottom: none; }
+.kio-pkg li .kio-ck { color: var(--kio-mint); font-weight: 900; }
+.kio-pkg li .kio-no { color: #d9d2ef; font-weight: 900; }
+.kio-pkg .kio-cta {
+  width: 100%; border-radius: 14px; padding: 13px; min-height: 52px;
+  font-weight: 800; font-size: 15px; cursor: pointer; border: none; font-family: inherit;
+}
+.kio-pkg .kio-cta.buy { background: linear-gradient(180deg, #9460ff, #8752FE); color: #fff; box-shadow: 0 8px 18px rgba(135, 82, 254, .3); }
+.kio-pkg .kio-cta.ghostc { background: rgba(135, 82, 254, .07); color: #4c1d95; border: 1.5px solid rgba(135, 82, 254, .18); }
+
+.kio-note {
+  background: linear-gradient(180deg, rgba(135, 82, 254, .08), rgba(31, 199, 170, .06));
+  border: 1px solid rgba(135, 82, 254, .12); border-radius: 14px; padding: 11px 13px;
+  color: #433b63; font-size: 12.5px; margin: 8px 0 14px; line-height: 1.55;
+  max-width: 680px; text-align: left;
+}
+
+.kio-scanbox {
+  width: min(440px, 90vw); min-height: 200px; border-radius: 20px;
+  border: 3px dashed var(--kio-purple); background: rgba(135, 82, 254, .05);
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 8px; color: #4c1d95; font-weight: 750; margin-bottom: 14px; padding: 14px; overflow: hidden;
+}
+
+.kio-paystate {
+  display: inline-flex; align-items: center; gap: 9px; background: rgba(245, 158, 11, .1);
+  border: 1px solid rgba(245, 158, 11, .22); color: #b45309; font-weight: 800;
+  font-size: 14px; border-radius: 999px; padding: 9px 18px;
+}
+.kio-paystate.ok { background: rgba(16, 185, 129, .12); border-color: rgba(16, 185, 129, .22); color: #047857; }
+.kio-paystate.bad { background: rgba(244, 63, 94, .1); border-color: rgba(244, 63, 94, .22); color: #be123c; }
+
+.kio-badge-sandbox {
+  display: inline-flex; align-items: center; gap: 6px; background: rgba(245, 158, 11, .14);
+  border: 1px solid rgba(245, 158, 11, .3); color: #92400e; font-size: 11px;
+  font-weight: 850; letter-spacing: .08em; text-transform: uppercase;
+  border-radius: 999px; padding: 4px 12px;
+}
+
+.kio-qrph {
+  width: 180px; height: 180px; border-radius: 18px;
+  background:
+    repeating-linear-gradient(0deg, #d9d2ef 0 8px, transparent 8px 16px),
+    repeating-linear-gradient(90deg, #d9d2ef 0 8px, #fff 8px 16px);
+  border: 8px solid #fff; box-shadow: var(--kio-shadow); margin: 6px auto 10px;
+  display: flex; align-items: center; justify-content: center;
+}
+
+.kio-carcard {
+  display: flex; align-items: center; gap: 18px; background: rgba(255, 255, 255, .95);
+  border: 2px solid var(--kio-border); border-radius: 20px; padding: 16px 20px;
+  box-shadow: var(--kio-shadow); max-width: 720px; width: 100%; text-align: left;
+}
+.kio-carimg {
+  width: 110px; height: 72px; border-radius: 14px; flex: none;
+  background: linear-gradient(135deg, #efe7ff, #dff7f1);
+  display: flex; align-items: center; justify-content: center; font-size: 36px;
+}
+
+.kio-sig {
+  border: 2px dashed var(--kio-border-strong); border-radius: 18px; background: #fff;
+  display: flex; align-items: center; justify-content: center; color: #c6bce4;
+  font-size: 15px; font-weight: 700; width: 100%; position: relative; touch-action: none;
+}
+.kio-sig canvas { width: 100%; height: 100%; border-radius: 16px; touch-action: none; }
+.kio-sig .kio-sig-hint { position: absolute; pointer-events: none; }
+
+.kio-error { color: #be123c; font-size: 14.5px; font-weight: 700; margin: 10px 0; max-width: 640px; }
+
+.kio-overlay {
+  position: absolute; inset: 0; z-index: 60; background: rgba(33, 26, 56, .55);
+  display: flex; align-items: center; justify-content: center; padding: 24px;
+}
+.kio-overlay-card {
+  background: #fff; border-radius: 24px; box-shadow: 0 22px 48px rgba(35, 21, 80, .3);
+  padding: 32px 34px; max-width: 560px; width: 100%; text-align: center;
+}
+
+.kio-selfie-frame {
+  width: 260px; height: 260px; border-radius: 999px; border: 4px dashed var(--kio-purple);
+  background: rgba(135, 82, 254, .05); display: flex; align-items: center; justify-content: center;
+  overflow: hidden; margin: 0 auto 16px;
+}
+.kio-selfie-frame video, .kio-selfie-frame img { width: 100%; height: 100%; object-fit: cover; }
+
+.kio-row { display: flex; gap: 12px; flex-wrap: wrap; align-items: center; justify-content: center; }
+
+.kio-section-initial {
+  border: 1.5px solid var(--kio-border); border-radius: 16px; background: #fff;
+  padding: 14px 16px; text-align: left; width: 100%;
+}
+.kio-section-initial .kio-body {
+  font-size: 13px; color: #433b63; max-height: 110px; overflow-y: auto;
+  white-space: pre-wrap; margin: 8px 0 10px; line-height: 1.55;
+}
+
+@media (max-width: 760px) {
+  .kio-choice2 { grid-template-columns: 1fr; }
+  .kio-h1 { font-size: 28px; }
+  .kio-h2 { font-size: 22px; }
+  .kio-main { padding: 18px 16px 24px; }
+}

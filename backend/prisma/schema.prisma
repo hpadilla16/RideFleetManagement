@@ -592,6 +592,9 @@ model Tenant {
   serviceSchedules            ServiceSchedule[]
   pricingSuggestions          PricingSuggestion[]
   feeRates                    FeeRate[]
+  kioskDevices                KioskDevice[]
+  kioskSessions               KioskSession[]
+  upsellRules                 UpsellRule[]
 
   // TL International franchise integration (round 5)
   integrationConfig        Json?
@@ -638,6 +641,7 @@ model Location {
   repairOrders                   RepairOrder[]
   feeRates                       FeeRate[]
   locationCodeMaps               LocationCodeMap[]
+  kioskDevices                   KioskDevice[]
 
   @@unique([tenantId, code])
   @@index([tenantId])
@@ -1328,6 +1332,9 @@ model Reservation {
   // Dejavoo Spin checkout redesign (2026-05-28)
   checkoutSessions CheckoutSession[]
   handoffTokens    HandoffToken[]
+
+  // Ride Kiosk Fase B1 (2026-07-05)
+  kioskSessions KioskSession[]
 
   // TL International franchise integration (round 5)
   externalReservation ExternalReservation? @relation("ReservationFromExternal")
@@ -4595,4 +4602,131 @@ model BillingCycle {
 
   @@unique([longTermPlanId, cycleNumber])
   @@index([status, periodEnd])
+}
+
+// =====================================================================
+// Ride Kiosk — Fase B1 (2026-07-05). Spec: doc/kiosk-e2e-spec-2026-07-04.md
+// KioskDevice = a paired lobby tablet (rotatable device token, hash-only at
+// rest; plaintext shown once at pair/rotate). KioskSession = one customer
+// interaction — funnel TELEMETRY only, business state always lives on the
+// checkout-session. UpsellRule = per-channel offer config (consumed by B2).
+// =====================================================================
+
+enum KioskDeviceStatus {
+  ACTIVE
+  REVOKED
+}
+
+enum KioskSessionKind {
+  PICKUP
+  WALKUP
+}
+
+enum KioskSessionOutcome {
+  IN_PROGRESS
+  COMPLETED
+  ESCALATED
+  ABANDONED
+}
+
+model KioskDevice {
+  id         String   @id @default(cuid())
+  tenantId   String
+  tenant     Tenant   @relation(fields: [tenantId], references: [id])
+  locationId String
+  location   Location @relation(fields: [locationId], references: [id])
+  name       String
+
+  // SHA-256 hex of the device token (crypto.randomBytes(32) base64url).
+  // Constant-time compare in requireKioskDevice; never store plaintext.
+  tokenHash    String @unique
+  tokenVersion Int    @default(1) // bumped on rotate (service-account tokenVersion semantics)
+
+  // 6-digit pairing code — hashed, single-use, 10-min TTL, brute-force lockout.
+  pairingCodeHash      String?
+  pairingCodeExpiresAt DateTime?
+  pairingAttempts      Int       @default(0)
+
+  // Reservation-lookup brute-force lockout — PER DEVICE, not per session
+  // (kiosks mint a fresh session after every idle-wipe, so a session-level
+  // counter would allow unlimited enumeration). 5 misses → locked 15 min;
+  // a successful lookup or an admin pairing-code reissue resets it.
+  lookupMisses      Int       @default(0)
+  lookupLockedUntil DateTime?
+
+  status    KioskDeviceStatus @default(ACTIVE)
+  revokedAt DateTime?
+  rotatedAt DateTime?
+
+  walkupEnabled Boolean   @default(true)
+  lastSeenAt    DateTime?
+  appVersion    String?
+  createdAt     DateTime  @default(now())
+
+  sessions KioskSession[]
+
+  @@index([tenantId, locationId])
+}
+
+model KioskSession {
+  id       String      @id @default(cuid())
+  tenantId String
+  tenant   Tenant      @relation(fields: [tenantId], references: [id])
+  deviceId String
+  device   KioskDevice @relation(fields: [deviceId], references: [id])
+
+  kind KioskSessionKind
+
+  reservationId     String?
+  reservation       Reservation? @relation(fields: [reservationId], references: [id])
+  checkoutSessionId String?
+
+  // Funnel step (WELCOME/LOOKUP/ID/UPSELL/PAYMENT/SIGN/DONE) — telemetry
+  // ONLY. Resume derives truth from the checkout-session, never from step.
+  step            String              @default("WELCOME")
+  outcome         KioskSessionOutcome @default(IN_PROGRESS)
+  escalatedReason String?
+
+  // Funnel events: [{at, step, event, data}] — offers shown/accepted/
+  // declined, scan attempts, lookup misses. Capped server-side (~500).
+  eventsJson Json
+
+  // Server-recorded ID verification stamp (B3a review M2). /sign gates on
+  // THIS column — eventsJson is client-fed telemetry and must never be
+  // consulted for authorization. Cleared when a different reservation is
+  // attached to the session.
+  idVerifiedAt DateTime?
+
+  // Bumped by the events endpoint — clean staleness signal for the B5
+  // orphaned-money / abandoned-session sweep.
+  lastActivityAt DateTime  @default(now())
+  startedAt      DateTime  @default(now())
+  endedAt        DateTime?
+
+  @@index([tenantId, deviceId, startedAt])
+  @@index([tenantId, outcome, lastActivityAt])
+  @@index([reservationId])
+}
+
+// Per-channel/broker upsell rules (v1 approximation: prepaid is per-channel;
+// per-reservation flag hook comes later). Referenced by AdditionalService
+// IDs, never codes (code is nullable/non-unique).
+model UpsellRule {
+  id       String @id @default(cuid())
+  tenantId String
+  tenant   Tenant @relation(fields: [tenantId], references: [id])
+
+  // Normalized from Reservation.bookingChannel; '*' = tenant default.
+  channel String
+
+  prepaidServiceIds String[] // broker already charged these — NEVER offer
+  offerServiceIds   String[] // offer order, validated against the tenant catalog on save
+
+  strategy String // 'PACKAGES_3' | 'UPGRADE_FIRST'
+  isActive Boolean @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([tenantId, channel])
 }
