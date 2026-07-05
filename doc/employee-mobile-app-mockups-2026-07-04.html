@@ -1,0 +1,437 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Ride Fleet — Employee App (iOS/Android) Mockups v2</title>
+<style>
+  :root{
+    --brand-purple:#8752FE; --brand-violet:#6d3df2; --brand-mint:#1fc7aa;
+    --brand-ink:#211a38; --bg-soft:#f4f1ff; --border-soft:#e6dfff; --border-strong:#d7cbff;
+    --ios-text:#1f1f28; --ios-muted:#6f668f; --ios-shadow:0 14px 32px rgba(35,21,80,.08);
+  }
+  *{box-sizing:border-box;}
+  body{margin:0;color:#1f1f1f;font-family:Aptos,'Segoe UI Variable','Segoe UI',system-ui,sans-serif;font-size:14px;line-height:1.5;
+    background:linear-gradient(180deg,#faf7ff 0%,var(--bg-soft) 100%);min-height:100vh;}
+  .wrap{max-width:1380px;margin:0 auto;padding:28px 20px 80px;}
+  h2.title{font-size:24px;font-weight:850;margin:0 0 4px;color:#29223f;}
+  .legend{color:var(--ios-muted);font-size:13px;margin:0 0 22px;line-height:1.6;max-width:900px;}
+  .legend code{background:rgba(135,82,254,.08);border:1px solid rgba(135,82,254,.16);border-radius:6px;padding:1px 6px;color:#4c1d95;}
+  .section{font-size:17px;font-weight:850;color:#29223f;margin:44px 0 10px;padding-top:18px;border-top:2px solid var(--border-strong);}
+  .grid{display:flex;flex-wrap:wrap;gap:26px;align-items:flex-start;}
+  .shot{width:320px;}
+  .shot .cap{font-size:12.5px;color:var(--ios-muted);margin:10px 4px 0;line-height:1.55;}
+  .shot .cap b{color:#4c1d95;}
+
+  /* ============ PHONE FRAME ============ */
+  .phone{border:9px solid #2a2440;border-radius:36px;overflow:hidden;box-shadow:0 22px 48px rgba(35,21,80,.18);background:#fff;}
+  .pbody{height:640px;display:flex;flex-direction:column;background:linear-gradient(180deg,#fdfcff 0%,#f6f2ff 100%);position:relative;}
+  .status{display:flex;justify-content:space-between;padding:8px 18px 2px;font-size:11px;font-weight:750;color:#29223f;}
+  .pbar{display:flex;align-items:center;justify-content:space-between;padding:8px 16px 10px;}
+  .pbrand{display:flex;align-items:center;gap:9px;}
+  .pbrand .logo{width:30px;height:30px;border-radius:10px;background:linear-gradient(135deg,#8752FE,#6d3df2);display:flex;align-items:center;justify-content:center;color:#fff;font-weight:850;font-size:14px;}
+  .pbrand b{font-size:15px;font-weight:850;color:var(--brand-ink);}
+  .pbrand small{display:block;color:var(--ios-muted);font-size:10px;line-height:1.2;}
+  .bell{position:relative;width:44px;height:44px;border-radius:14px;background:#fff;border:1px solid var(--border-soft);display:flex;align-items:center;justify-content:center;font-size:18px;}
+  .bell i{position:absolute;top:-4px;right:-4px;background:#ef4444;color:#fff;font-style:normal;font-size:9.5px;font-weight:850;border-radius:999px;padding:1px 5px;}
+  .pmain{flex:1;overflow:hidden;padding:4px 14px 10px;display:flex;flex-direction:column;gap:10px;}
+  .pmain.center{align-items:center;justify-content:center;text-align:center;padding:20px;}
+
+  /* bottom nav */
+  .pnav{display:flex;align-items:flex-end;justify-content:space-around;border-top:1px solid var(--border-soft);background:rgba(255,255,255,.92);padding:7px 6px 12px;position:relative;}
+  .pnav .tab{display:flex;flex-direction:column;align-items:center;gap:2px;font-size:11px;font-weight:800;color:#5f5680;width:60px;padding:4px 0;}
+  .pnav .tab .ic{font-size:18px;}
+  .pnav .tab.on{color:var(--brand-violet);}
+  .pnav .scan{width:52px;height:52px;border-radius:999px;background:linear-gradient(180deg,#9460ff,#8752FE);color:#fff;display:flex;align-items:center;justify-content:center;font-size:22px;box-shadow:0 10px 22px rgba(135,82,254,.4);margin-top:-24px;border:4px solid #fff;}
+
+  /* generic bits */
+  .h1{font-size:19px;font-weight:850;color:#29223f;margin:2px 2px 0;}
+  .sub{font-size:12px;color:var(--ios-muted);margin:0 2px;}
+  .card{background:rgba(255,255,255,.95);border:1.5px solid var(--border-soft);border-radius:16px;padding:12px 14px;box-shadow:var(--ios-shadow);}
+  .kpis{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;}
+  .kpi{background:rgba(255,255,255,.95);border:1.5px solid var(--border-soft);border-radius:14px;padding:9px 10px;text-align:center;}
+  .kpi b{display:block;font-size:19px;font-weight:850;color:var(--brand-ink);}
+  .kpi span{font-size:11px;color:#5f5680;font-weight:800;text-transform:uppercase;letter-spacing:.03em;}
+  .kpi.hot{border-color:var(--brand-purple);background:linear-gradient(180deg,#f6f0ff,#fff);}
+  .rowline{display:flex;align-items:center;gap:10px;}
+  .chip{display:inline-flex;align-items:center;gap:5px;border-radius:999px;padding:3px 10px;font-size:10px;font-weight:800;}
+  .chip.p{background:rgba(135,82,254,.1);color:#4c1d95;border:1px solid rgba(135,82,254,.2);}
+  .chip.g{background:rgba(16,185,129,.12);color:#047857;border:1px solid rgba(16,185,129,.22);}
+  .chip.a{background:rgba(245,158,11,.12);color:#b45309;border:1px solid rgba(245,158,11,.25);}
+  .chip.r{background:rgba(239,68,68,.1);color:#b91c1c;border:1px solid rgba(239,68,68,.22);}
+  .btn{display:flex;align-items:center;justify-content:center;gap:8px;background:linear-gradient(180deg,#9460ff,#8752FE);color:#fff;border:none;border-radius:14px;padding:13px;font-weight:800;font-size:14px;box-shadow:0 8px 18px rgba(135,82,254,.3);width:100%;}
+  .btn.ghost{background:#fff;color:#4c1d95;border:1.5px solid rgba(135,82,254,.25);box-shadow:none;}
+  .btn.mint{background:linear-gradient(180deg,#2ad6b6,#1fc7aa);box-shadow:0 8px 18px rgba(31,199,170,.28);}
+  .btn.sm{padding:9px;font-size:12.5px;border-radius:12px;}
+  .seg{display:flex;background:#ece6ff;border-radius:12px;padding:3px;font-size:12px;font-weight:800;}
+  .seg span{flex:1;text-align:center;padding:7px 0;border-radius:10px;color:#7c6bb0;}
+  .seg span.on{background:#fff;color:#4c1d95;box-shadow:0 3px 8px rgba(35,21,80,.12);}
+  .resv{display:flex;gap:10px;align-items:center;background:rgba(255,255,255,.95);border:1.5px solid var(--border-soft);border-radius:16px;padding:11px 12px;box-shadow:var(--ios-shadow);}
+  .resv .em{width:44px;height:44px;border-radius:12px;background:linear-gradient(135deg,#efe7ff,#dff7f1);display:flex;align-items:center;justify-content:center;font-size:22px;flex:none;}
+  .resv b{display:block;font-size:13.5px;color:#29223f;}
+  .resv small{color:var(--ios-muted);font-size:11px;display:block;}
+  .resv .r{margin-left:auto;text-align:right;flex:none;}
+  .qact{display:grid;grid-template-columns:1fr 1fr;gap:8px;}
+  .qbtn{background:rgba(255,255,255,.95);border:1.5px solid var(--border-soft);border-radius:14px;padding:11px 8px;text-align:center;box-shadow:var(--ios-shadow);}
+  .qbtn .ic{font-size:20px;} .qbtn b{display:block;font-size:11.5px;color:#29223f;margin-top:2px;}
+  .alertc{display:flex;gap:9px;align-items:center;background:rgba(245,158,11,.09);border:1.5px solid rgba(245,158,11,.25);border-radius:14px;padding:10px 12px;font-size:12px;font-weight:700;color:#92400e;}
+
+  /* login */
+  .fld{background:#fff;border:1.5px solid var(--border-strong);border-radius:14px;padding:12px 14px;font-size:13.5px;color:#29223f;font-weight:600;width:100%;text-align:left;}
+  .fld.ph{color:#c6bce4;}
+
+  /* scanner */
+  .camview{flex:1;border-radius:20px;background:linear-gradient(160deg,#241d3d,#3b2f63 60%,#241d3d);position:relative;display:flex;align-items:center;justify-content:center;overflow:hidden;}
+  .reticle{width:210px;height:130px;border-radius:16px;border:3px solid rgba(255,255,255,.85);box-shadow:0 0 0 2000px rgba(20,14,40,.45);position:relative;}
+  .reticle:after{content:"";position:absolute;left:8%;right:8%;top:50%;height:2px;background:var(--brand-mint);box-shadow:0 0 12px var(--brand-mint);}
+  .scanmode{display:flex;gap:6px;justify-content:center;position:absolute;bottom:16px;left:0;right:0;}
+  .scanmode span{background:rgba(255,255,255,.14);color:#fff;border:1px solid rgba(255,255,255,.25);border-radius:999px;padding:6px 14px;font-size:11px;font-weight:800;}
+  .scanmode span.on{background:var(--brand-purple);border-color:transparent;}
+
+  /* wizard */
+  .wsteps{display:flex;gap:5px;align-items:center;justify-content:center;padding:2px 0;}
+  .wstp{width:22px;height:22px;border-radius:999px;background:#ece6ff;color:#7c6bb0;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:850;}
+  .wstp.on{background:var(--brand-purple);color:#fff;box-shadow:0 4px 10px rgba(135,82,254,.35);}
+  .wstp.done{background:var(--brand-mint);color:#fff;}
+  .wln{width:14px;height:2px;background:#ece6ff;}
+  .photogrid{display:grid;grid-template-columns:1fr 1fr 1fr;gap:7px;}
+  .ph1{aspect-ratio:1;border-radius:12px;background:linear-gradient(135deg,#efe7ff,#e2d8ff);display:flex;flex-direction:column;align-items:center;justify-content:center;font-size:17px;border:1.5px dashed var(--border-strong);}
+  .ph1 small{font-size:11px;color:#5f5680;font-weight:800;}
+  .ph1.ok{border-style:solid;border-color:var(--brand-mint);background:linear-gradient(135deg,#e2f9f3,#d4f5ec);}
+  .fuel8{display:grid;grid-template-columns:repeat(8,1fr);gap:4px;}
+  .fuel8 span{height:44px;border-radius:8px;background:#ece6ff;display:flex;align-items:flex-end;justify-content:center;font-size:11px;color:#5f5680;font-weight:800;padding-bottom:4px;}
+  .fuel8 span.on{background:linear-gradient(180deg,#9460ff,#8752FE);color:#fff;}
+
+  /* diagram */
+  .cartop{position:relative;margin:4px auto;width:150px;height:270px;border-radius:60px 60px 50px 50px/90px 90px 60px 60px;background:linear-gradient(180deg,#f3edff,#e9e0ff);border:2.5px solid var(--brand-violet);}
+  .cartop:before{content:"";position:absolute;left:18px;right:18px;top:52px;height:70px;border-radius:22px;background:rgba(109,61,242,.14);border:2px solid rgba(109,61,242,.3);}
+  .cartop:after{content:"";position:absolute;left:18px;right:18px;bottom:38px;height:52px;border-radius:18px;background:rgba(109,61,242,.14);border:2px solid rgba(109,61,242,.3);}
+  .dot{position:absolute;width:34px;height:34px;border-radius:999px;background:#ef4444;color:#fff;font-size:13px;font-weight:850;display:flex;align-items:center;justify-content:center;box-shadow:0 5px 12px rgba(239,68,68,.45);border:2.5px solid #fff;z-index:2;}
+  .backx{width:44px;height:44px;border-radius:14px;background:#fff;border:1.5px solid var(--border-soft);display:flex;align-items:center;justify-content:center;font-size:16px;color:#4c1d95;font-weight:850;flex:none;}
+  .offline{display:flex;align-items:center;gap:8px;background:#3b2f63;color:#fff;border-radius:12px;padding:9px 12px;font-size:12px;font-weight:750;}
+  .offline .pill{margin-left:auto;background:rgba(255,255,255,.16);border-radius:999px;padding:3px 10px;font-size:10.5px;font-weight:800;}
+  .srch{display:flex;align-items:center;gap:8px;background:#fff;border:1.5px solid var(--border-soft);border-radius:12px;padding:9px 12px;font-size:12.5px;color:#8d84ad;font-weight:650;}
+
+  /* notifications */
+  .notif{display:flex;gap:10px;background:rgba(255,255,255,.95);border:1.5px solid var(--border-soft);border-radius:14px;padding:11px 12px;box-shadow:var(--ios-shadow);}
+  .notif .nic{width:36px;height:36px;border-radius:11px;display:flex;align-items:center;justify-content:center;font-size:17px;flex:none;background:rgba(135,82,254,.1);}
+  .notif b{display:block;font-size:12.5px;color:#29223f;} .notif small{color:var(--ios-muted);font-size:10.5px;display:block;line-height:1.4;}
+  .notif .t{margin-left:auto;font-size:11px;color:#6f668f;flex:none;font-weight:750;}
+  .notif.unread{border-color:rgba(135,82,254,.4);background:linear-gradient(180deg,#f9f5ff,#fff);}
+</style></head><body><div class="wrap">
+
+<h2 class="title">Ride Fleet — Employee App (iOS + Android) · Mockups v2</h2>
+<p class="legend">App nativa (wrapper Capacitor sobre el frontend existente) para <b>empleados de los tenants</b> — operaciones de piso:
+pickups/returns del día, checkout/check-in con fotos, scan de vehículo (QR/VIN/placa), inspecciones, maintenance y notificaciones push.
+Navegación inferior de 5 tabs con el <b>Scan</b> como acción central. Respeta module-access por persona (beta.212) — si a un empleado le falta un módulo,
+su tab se reemplaza promoviendo un item de "More" (la barra nunca queda con hueco).
+Tema <code>#8752FE</code>, mismo lenguaje visual del kiosk y del web app.
+<br><b>Specs de build (v2, post-review de Graphic Design):</b> todo elemento interactivo con hit-area ≥ <code>44×44pt</code> (el visual puede ser menor, el área de toque no);
+texto funcional mínimo <code>11px</code> con contraste ≥ 4.5:1; emojis solo en mockup — el build usa icon set real (Lucide/SF Symbols) tintado al morado de marca;
+el diagrama de daños del build es el <code>vehicleDiagrams.js</code> aprobado (line-art violeta por vehicle type), no el blob ilustrativo de abajo.</p>
+
+<div class="section">A · Entrada y Home</div>
+<div class="grid">
+
+  <!-- A1 LOGIN -->
+  <div class="shot"><div class="phone"><div class="pbody">
+    <div class="status"><span>9:41</span><span>📶 🔋</span></div>
+    <div class="pmain center">
+      <div class="pbrand" style="flex-direction:column;gap:8px;">
+        <div class="logo" style="width:56px;height:56px;border-radius:18px;font-size:26px;">R</div>
+        <b style="font-size:20px;">Ride Fleet</b>
+        <small style="font-size:12px;">Employee app</small>
+      </div>
+      <div style="height:14px;"></div>
+      <div class="fld ph">Work email</div>
+      <div class="fld ph">Password</div>
+      <button class="btn">Sign in</button>
+      <button class="btn ghost sm">🔒 Face ID &nbsp;·&nbsp; 🔢 PIN</button>
+      <p class="sub" style="margin-top:6px;">Session persists — biometric re-entry after first login.</p>
+    </div>
+  </div></div><div class="cap"><b>A1 · Login.</b> Mismo login del web (JWT). La sesión persiste en el dispositivo; re-entrada con Face ID / huella, o <b>PIN</b> en dispositivos compartidos/viejos. Sin passwords tecleados a diario.</div></div>
+
+  <!-- A2 HOME -->
+  <div class="shot"><div class="phone"><div class="pbody">
+    <div class="status"><span>9:41</span><span>📶 🔋</span></div>
+    <div class="pbar">
+      <div class="pbrand"><div class="logo">R</div><div><b>Hoy · SJU Airport</b><small>Jueves 4 jul · Carlos M.</small></div></div>
+      <div class="bell">🔔<i>3</i></div>
+    </div>
+    <div class="pmain">
+      <div class="kpis">
+        <div class="kpi hot"><b>6</b><span>Pickups</span></div>
+        <div class="kpi"><b>4</b><span>Returns</span></div>
+        <div class="kpi"><b>2</b><span>To review</span></div>
+      </div>
+      <div class="alertc">⚠️ 2 inspections to review · 1 vehicle overdue return</div>
+      <div class="sub" style="font-weight:800;color:#4c1d95;">Next up</div>
+      <div class="resv"><div class="em">🚙</div><div><b>RES-721893 · J. Rivera</b><small>Kia Sportage · ABC-123 · 10:30a</small></div><div class="r"><span class="chip p">PICKUP</span></div></div>
+      <div class="resv"><div class="em">🚗</div><div><b>RES-721901 · M. Torres</b><small>Corolla · XYZ-987 · 11:00a</small></div><div class="r"><span class="chip a">RETURN</span></div></div>
+      <div class="qact">
+        <div class="qbtn"><span class="ic">📷</span><b>Scan vehicle</b></div>
+        <div class="qbtn"><span class="ic">➕</span><b>New reservation</b></div>
+        <div class="qbtn"><span class="ic">📋</span><b>Inventory count</b></div>
+        <div class="qbtn"><span class="ic">🔧</span><b>Report damage</b></div>
+      </div>
+    </div>
+    <div class="pnav">
+      <div class="tab on"><span class="ic">🏠</span>Today</div>
+      <div class="tab"><span class="ic">🗓️</span>Rentals</div>
+      <div class="scan">📷</div>
+      <div class="tab"><span class="ic">🔧</span>Maint.</div>
+      <div class="tab"><span class="ic">☰</span>More</div>
+    </div>
+  </div></div><div class="cap"><b>A2 · Home "Today".</b> KPIs del día por location, próximas acciones y quick actions. KPIs y la alerta ámbar son <b>deep-links</b> a su lista filtrada (patrón de los tiles del dashboard beta.149). El botón central <b>Scan</b> es la entrada más rápida: escaneas el carro y la app te lleva a lo que toque (return, inspección, RO).</div></div>
+
+  <!-- A3 NOTIFICATIONS -->
+  <div class="shot"><div class="phone"><div class="pbody">
+    <div class="status"><span>9:41</span><span>📶 🔋</span></div>
+    <div class="pbar"><div class="pbrand"><div class="logo">R</div><div><b>Notifications</b><small>Push + in-app</small></div></div><div class="backx">✕</div></div>
+    <div class="pmain">
+      <div class="notif unread"><div class="nic">🆕</div><div><b>New reservation assigned</b><small>RES-721920 · pickup today 2:00p · SJU</small></div><span class="t">2m</span></div>
+      <div class="notif unread"><div class="nic">🧐</div><div><b>Inspection to review</b><small>Customer reported 2 damages · Sportage ABC-123</small></div><span class="t">18m</span></div>
+      <div class="notif unread"><div class="nic">⏰</div><div><b>Overdue return</b><small>RES-721877 · due 9:00a · call guest</small></div><span class="t">41m</span></div>
+      <div class="notif"><div class="nic">🔧</div><div><b>Repair order assigned</b><small>RO-118 · brake pads · Corolla XYZ-987</small></div><span class="t">2h</span></div>
+      <div class="notif"><div class="nic">✅</div><div><b>Checkout completed</b><small>RES-721850 closed by A. Vega</small></div><span class="t">3h</span></div>
+    </div>
+    <div class="pnav">
+      <div class="tab"><span class="ic">🏠</span>Today</div>
+      <div class="tab"><span class="ic">🗓️</span>Rentals</div>
+      <div class="scan">📷</div>
+      <div class="tab"><span class="ic">🔧</span>Maint.</div>
+      <div class="tab"><span class="ic">☰</span>More</div>
+    </div>
+  </div></div><div class="cap"><b>A3 · Push notifications</b> (FCM/APNs — nuevo backend). Es un <b>overlay</b> abierto por la campanita (✕ para cerrar), no un tab — ningún tab queda activo. Eventos: reserva nueva/asignada, inspección por revisar, return overdue, RO asignado. Tap → deep-link a la pantalla exacta.</div></div>
+</div>
+
+<div class="section">B · Rentals del día y Scan</div>
+<div class="grid">
+
+  <!-- B1 QUEUE -->
+  <div class="shot"><div class="phone"><div class="pbody">
+    <div class="status"><span>9:41</span><span>📶 🔋</span></div>
+    <div class="pbar"><div class="pbrand"><div class="logo">R</div><div><b>Rentals</b><small>SJU Airport · today</small></div></div><div class="bell">🔔<i>3</i></div></div>
+    <div class="pmain">
+      <div class="srch">🔍 Search reservation, guest, plate…</div>
+      <div class="seg"><span class="on">Pickups (6)</span><span>Returns (4)</span><span>All</span></div>
+      <div class="resv"><div class="em">🚙</div><div><b>10:30a · J. Rivera</b><small>Sportage · ABC-123 · paid ✓</small></div><div class="r"><span class="chip g">READY</span></div></div>
+      <div class="resv"><div class="em">🚗</div><div><b>11:15a · L. Santos</b><small>Corolla · no vehicle assigned</small></div><div class="r"><span class="chip r">ASSIGN CAR</span></div></div>
+      <div class="resv"><div class="em">🚐</div><div><b>12:00p · K. Pérez</b><small>Sienna · JKL-456 · deposit due</small></div><div class="r"><span class="chip a">PAYMENT</span></div></div>
+      <div class="resv"><div class="em">🚙</div><div><b>1:30p · R. Gómez</b><small>Tucson · MNO-222 · docs ✓</small></div><div class="r"><span class="chip g">READY</span></div></div>
+      <button class="btn ghost sm">＋ Walk-up reservation</button>
+    </div>
+    <div class="pnav">
+      <div class="tab"><span class="ic">🏠</span>Today</div>
+      <div class="tab on"><span class="ic">🗓️</span>Rentals</div>
+      <div class="scan">📷</div>
+      <div class="tab"><span class="ic">🔧</span>Maint.</div>
+      <div class="tab"><span class="ic">☰</span>More</div>
+    </div>
+  </div></div><div class="cap"><b>B1 · Cola del día.</b> Pickups/returns con el estado accionable al frente (assign car, payment, ready). Regla <b>no-car-no-checkout</b> visible desde la lista. <b>Search</b> arriba para reservas fuera de la cola (llegada temprana, otra location). Tap → detalle con botón de wizard.</div></div>
+
+  <!-- B2 SCAN -->
+  <div class="shot"><div class="phone"><div class="pbody" style="background:#1c1631;">
+    <div class="status" style="color:#fff;"><span>9:41</span><span>📶 🔋</span></div>
+    <div class="pbar"><div class="pbrand"><div class="logo">R</div><div><b style="color:#fff;">Scan vehicle</b><small style="color:#b9aee0;">QR · VIN · plate</small></div></div><div style="display:flex;gap:8px;"><div class="backx">🔦</div><div class="backx">✕</div></div></div>
+    <div class="pmain">
+      <div class="camview">
+        <div class="reticle"></div>
+        <div class="scanmode"><span class="on">QR</span><span>VIN</span><span>Plate</span></div>
+      </div>
+      <button class="btn ghost sm">⌨️ Enter plate manually</button>
+    </div>
+    <div class="pnav">
+      <div class="tab"><span class="ic">🏠</span>Today</div>
+      <div class="tab"><span class="ic">🗓️</span>Rentals</div>
+      <div class="scan" style="outline:3px solid rgba(135,82,254,.4);">📷</div>
+      <div class="tab"><span class="ic">🔧</span>Maint.</div>
+      <div class="tab"><span class="ic">☰</span>More</div>
+    </div>
+  </div></div><div class="cap"><b>B2 · Scan central.</b> Reusa el <code>VehicleScanner</code> existente (BarcodeDetector). Escanear identifica el vehículo y ofrece la acción según contexto (B3).</div></div>
+
+  <!-- B3 SCAN RESULT -->
+  <div class="shot"><div class="phone"><div class="pbody">
+    <div class="status"><span>9:41</span><span>📶 🔋</span></div>
+    <div class="pbar"><div class="pbrand"><div class="logo">R</div><div><b>Sportage · ABC-123</b><small>Scanned just now</small></div></div></div>
+    <div class="pmain">
+      <div class="card rowline"><div style="font-size:34px;">🚙</div><div><b style="font-size:14px;color:#29223f;">Kia Sportage 2024</b><br><span class="sub">ON_RENT · RES-721877 · J. Ortiz</span></div><span class="chip a" style="margin-left:auto;">DUE 9:00A</span></div>
+      <button class="btn">▶ Start check-in (return)</button>
+      <button class="btn ghost">🧐 View reservation</button>
+      <button class="btn ghost">🔧 Report damage / open RO</button>
+      <button class="btn ghost">📋 Vehicle profile &amp; history</button>
+      <p class="sub">Actions are context-aware: an AVAILABLE car offers checkout &amp; inventory; an ON_RENT car offers check-in.</p>
+    </div>
+    <div class="pnav">
+      <div class="tab"><span class="ic">🏠</span>Today</div>
+      <div class="tab"><span class="ic">🗓️</span>Rentals</div>
+      <div class="scan">📷</div>
+      <div class="tab"><span class="ic">🔧</span>Maint.</div>
+      <div class="tab"><span class="ic">☰</span>More</div>
+    </div>
+  </div></div><div class="cap"><b>B3 · Resultado del scan.</b> Acciones contextuales según <code>Vehicle.status</code> + reserva activa. Un solo gesto físico (escanear el carro en el piso) resuelve la navegación.</div></div>
+</div>
+
+<div class="section">C · Checkout / Check-in y Inspección</div>
+<div class="grid">
+
+  <!-- C1 WIZARD -->
+  <div class="shot"><div class="phone"><div class="pbody">
+    <div class="status"><span>9:41</span><span>📶 🔋</span></div>
+    <div class="pbar"><div class="pbrand"><div class="logo">R</div><div><b>Check-in · RES-721877</b><small>Sportage ABC-123 · progress saved</small></div></div><div class="backx">✕</div></div>
+    <div class="pmain">
+      <div class="wsteps">
+        <div class="wstp done">✓</div><div class="wln"></div>
+        <div class="wstp on">2</div><div class="wln"></div>
+        <div class="wstp">3</div><div class="wln"></div>
+        <div class="wstp">4</div>
+      </div>
+      <div class="sub" style="text-align:center;font-weight:800;color:#4c1d95;">Photos · Fuel · Odometer</div>
+      <div class="photogrid">
+        <div class="ph1 ok">✓<small>FRONT</small></div><div class="ph1 ok">✓<small>REAR</small></div><div class="ph1">📷<small>LEFT</small></div>
+        <div class="ph1">📷<small>RIGHT</small></div><div class="ph1">📷<small>DASH</small></div><div class="ph1">📷<small>SEATS</small></div>
+      </div>
+      <div class="card">
+        <div class="sub" style="font-weight:800;">Fuel level (eighths)</div>
+        <div class="fuel8"><span class="on">E</span><span class="on">⅛</span><span class="on">¼</span><span class="on">⅜</span><span class="on">½</span><span>⅝</span><span>¾</span><span>F</span></div>
+      </div>
+      <div class="fld">Odometer &nbsp;·&nbsp; <b>34,218 mi</b></div>
+      <button class="btn">Continue</button>
+    </div>
+  </div></div><div class="cap"><b>C1 · Wizard móvil.</b> El mismo checkout/check-in wizard v2 (state machine intacta) con UI phone-first: fotos obligatorias, fuel en octavos, odómetro, cleanliness. <b>✕ siempre visible</b> — el progreso queda guardado en la session y se puede retomar (D3). Nada de lógica nueva de dinero.</div></div>
+
+  <!-- C2 INSPECTION -->
+  <div class="shot"><div class="phone"><div class="pbody">
+    <div class="status"><span>9:41</span><span>📶 🔋</span></div>
+    <div class="pbar"><div class="pbrand"><div class="logo">R</div><div><b>Damage check</b><small>Sportage ABC-123</small></div></div><div class="backx">✕</div></div>
+    <div class="pmain" style="align-items:center;">
+      <div class="sub" style="text-align:center;">Tap where you see damage. Photo required per dot.</div>
+      <div class="cartop">
+        <div class="dot" style="top:34px;left:14px;">1</div>
+        <div class="dot" style="bottom:60px;right:10px;">2</div>
+      </div>
+      <div class="card" style="width:100%;">
+        <div class="rowline"><b style="color:#29223f;font-size:12.5px;">#2 · Rear-right scratch</b><span class="chip r" style="margin-left:auto;">PHOTO NEEDED</span></div>
+      </div>
+      <button class="btn sm">📷 Take photo of #2</button>
+      <button class="btn mint sm">Done — no more damage</button>
+    </div>
+  </div></div><div class="cap"><b>C2 · Inspección con diagrama.</b> El build usa los diagramas reales de <code>vehicleDiagrams.js</code> (line-art violeta aprobado, por vehicle type — el blob de arriba es solo ilustrativo) y <code>VehicleDamageReport</code> del flujo del cliente (beta.160-162), ahora en manos del empleado. Dots con hit-area 44pt. Alimenta la cola de review y el Damage History.</div></div>
+
+  <!-- C3 MAINTENANCE -->
+  <div class="shot"><div class="phone"><div class="pbody">
+    <div class="status"><span>9:41</span><span>📶 🔋</span></div>
+    <div class="pbar"><div class="pbrand"><div class="logo">R</div><div><b>Maintenance</b><small>SJU Airport</small></div></div><div class="bell">🔔<i>1</i></div></div>
+    <div class="pmain">
+      <div class="kpis">
+        <div class="kpi"><b>3</b><span>Open ROs</span></div>
+        <div class="kpi hot"><b>2</b><span>Due soon</span></div>
+        <div class="kpi"><b>1</b><span>Fleet down</span></div>
+      </div>
+      <div class="seg"><span class="on">Repair orders</span><span>Due</span></div>
+      <div class="resv"><div class="em">🔧</div><div><b>RO-118 · Brake pads</b><small>Corolla XYZ-987 · in progress</small></div><div class="r"><span class="chip a">OPEN</span></div></div>
+      <div class="resv"><div class="em">🛞</div><div><b>RO-121 · Tire replace</b><small>Sienna JKL-456 · waiting parts</small></div><div class="r"><span class="chip a">OPEN</span></div></div>
+      <div class="resv"><div class="em">🛢️</div><div><b>Oil change due</b><small>Tucson MNO-222 · 512 mi left</small></div><div class="r"><span class="chip p">DUE</span></div></div>
+      <button class="btn ghost sm">＋ New repair order</button>
+    </div>
+    <div class="pnav">
+      <div class="tab"><span class="ic">🏠</span>Today</div>
+      <div class="tab"><span class="ic">🗓️</span>Rentals</div>
+      <div class="scan">📷</div>
+      <div class="tab on"><span class="ic">🔧</span>Maint.</div>
+      <div class="tab"><span class="ic">☰</span>More</div>
+    </div>
+  </div></div><div class="cap"><b>C3 · Maintenance móvil.</b> Cards en vez de tablas: ROs abiertos, due por odómetro, fleet down. Visible solo si el empleado tiene el módulo <code>maintenance</code> (beta.212).</div></div>
+
+  <!-- C4 MORE -->
+  <div class="shot"><div class="phone"><div class="pbody">
+    <div class="status"><span>9:41</span><span>📶 🔋</span></div>
+    <div class="pbar"><div class="pbrand"><div class="logo">R</div><div><b>More</b><small>Carlos M. · Ops · SJU</small></div></div></div>
+    <div class="pmain">
+      <div class="qact">
+        <div class="qbtn"><span class="ic">📋</span><b>Inventory helper</b></div>
+        <div class="qbtn"><span class="ic">🎫</span><b>Citations</b></div>
+        <div class="qbtn"><span class="ic">🚘</span><b>Loaner lane</b></div>
+        <div class="qbtn"><span class="ic">⚠️</span><b>Issues</b></div>
+        <div class="qbtn"><span class="ic">🧾</span><b>My commissions</b></div>
+        <div class="qbtn"><span class="ic">🌐</span><b>Language EN/ES</b></div>
+      </div>
+      <div class="card"><div class="rowline"><span style="font-size:18px;">📍</span><div><b style="font-size:12.5px;color:#29223f;">Location</b><br><span class="sub">SJU Airport (switch)</span></div></div></div>
+      <div class="card"><div class="rowline"><span style="font-size:18px;">🚪</span><div><b style="font-size:12.5px;color:#29223f;">Sign out</b><br><span class="sub">Session on this device</span></div></div></div>
+    </div>
+    <div class="pnav">
+      <div class="tab"><span class="ic">🏠</span>Today</div>
+      <div class="tab"><span class="ic">🗓️</span>Rentals</div>
+      <div class="scan">📷</div>
+      <div class="tab"><span class="ic">🔧</span>Maint.</div>
+      <div class="tab on"><span class="ic">☰</span>More</div>
+    </div>
+  </div></div><div class="cap"><b>C4 · More.</b> Módulos secundarios gateados por module-access: inventory helper, citations, loaner, issues, comisiones, idioma, location switch.</div></div>
+</div>
+
+<div class="section">D · Estados no-felices (offline · empty · resume)</div>
+<div class="grid">
+
+  <!-- D1 OFFLINE WIZARD -->
+  <div class="shot"><div class="phone"><div class="pbody">
+    <div class="status"><span>9:41</span><span>✈️ 🔋</span></div>
+    <div class="pbar"><div class="pbrand"><div class="logo">R</div><div><b>Check-in · RES-721877</b><small>Sportage ABC-123 · progress saved</small></div></div><div class="backx">✕</div></div>
+    <div class="pmain">
+      <div class="offline">📡 You're offline — photos will upload when back online<span class="pill">3 queued</span></div>
+      <div class="photogrid">
+        <div class="ph1 ok">✓<small>FRONT</small></div><div class="ph1 ok">⏳<small>QUEUED</small></div><div class="ph1 ok">⏳<small>QUEUED</small></div>
+        <div class="ph1 ok">⏳<small>QUEUED</small></div><div class="ph1">📷<small>DASH</small></div><div class="ph1">📷<small>SEATS</small></div>
+      </div>
+      <div class="card"><div class="sub" style="font-weight:800;">You can keep taking photos and filling fuel/odometer.</div><div class="sub">Submitting the step needs connection — the app retries automatically and notifies you.</div></div>
+      <button class="btn ghost">Retry connection</button>
+    </div>
+  </div></div><div class="cap"><b>D1 · Wizard offline.</b> WiFi de lote se cae: banner persistente (mismo patrón Online/Offline del <code>MobileAppShell</code>), fotos quedan en cola local y suben al reconectar. El paso no se pierde.</div></div>
+
+  <!-- D2 EMPTY TODAY -->
+  <div class="shot"><div class="phone"><div class="pbody">
+    <div class="status"><span>9:41</span><span>📶 🔋</span></div>
+    <div class="pbar"><div class="pbrand"><div class="logo">R</div><div><b>Hoy · SJU Airport</b><small>Jueves 4 jul · Carlos M.</small></div></div><div class="bell">🔔</div></div>
+    <div class="pmain center">
+      <div style="font-size:44px;">🌤️</div>
+      <b style="font-size:16px;color:#29223f;">All clear for now</b>
+      <p class="sub" style="max-width:220px;">No pickups or returns scheduled. You'll get a push if anything lands.</p>
+      <button class="btn ghost sm" style="max-width:220px;">📋 Start inventory count</button>
+      <button class="btn ghost sm" style="max-width:220px;">🔧 See maintenance due</button>
+    </div>
+    <div class="pnav">
+      <div class="tab on"><span class="ic">🏠</span>Today</div>
+      <div class="tab"><span class="ic">🗓️</span>Rentals</div>
+      <div class="scan">📷</div>
+      <div class="tab"><span class="ic">🔧</span>Maint.</div>
+      <div class="tab"><span class="ic">☰</span>More</div>
+    </div>
+  </div></div><div class="cap"><b>D2 · "Today" vacío.</b> Sin cola no significa sin trabajo: el empty state sugiere tareas productivas (inventario, maintenance due) en vez de una pantalla muerta.</div></div>
+
+  <!-- D3 RESUME -->
+  <div class="shot"><div class="phone"><div class="pbody">
+    <div class="status"><span>9:41</span><span>📶 🔋</span></div>
+    <div class="pbar"><div class="pbrand"><div class="logo">R</div><div><b>Hoy · SJU Airport</b><small>Jueves 4 jul · Carlos M.</small></div></div><div class="bell">🔔<i>1</i></div></div>
+    <div class="pmain">
+      <div class="card" style="border-color:var(--brand-purple);background:linear-gradient(180deg,#f6f0ff,#fff);">
+        <div class="rowline"><span style="font-size:22px;">⏸️</span><div><b style="font-size:13px;color:#29223f;">Check-in in progress</b><br><span class="sub">RES-721877 · Sportage ABC-123 · step 2 of 4 · 12 min ago</span></div></div>
+        <div style="height:8px;"></div>
+        <button class="btn sm">▶ Resume where I left off</button>
+      </div>
+      <div class="kpis">
+        <div class="kpi hot"><b>6</b><span>Pickups</span></div>
+        <div class="kpi"><b>4</b><span>Returns</span></div>
+        <div class="kpi"><b>2</b><span>To review</span></div>
+      </div>
+      <div class="resv"><div class="em">🚙</div><div><b>RES-721893 · J. Rivera</b><small>Sportage · ABC-123 · 10:30a</small></div><div class="r"><span class="chip p">PICKUP</span></div></div>
+    </div>
+    <div class="pnav">
+      <div class="tab on"><span class="ic">🏠</span>Today</div>
+      <div class="tab"><span class="ic">🗓️</span>Rentals</div>
+      <div class="scan">📷</div>
+      <div class="tab"><span class="ic">🔧</span>Maint.</div>
+      <div class="tab"><span class="ic">☰</span>More</div>
+    </div>
+  </div></div><div class="cap"><b>D3 · Resume.</b> La state machine del checkout-session ya soporta retomar: si cerraste el wizard (✕, llamada, app en background), el Home muestra la tarjeta de "in progress" hasta cerrarlo o cancelarlo.</div></div>
+</div>
+
+<p class="legend" style="margin-top:40px;">Nota técnica: todo esto es el frontend Next.js existente servido dentro del wrapper Capacitor ya presente en el repo
+(<code>frontend/capacitor.config.js</code>, proyectos <code>android/</code> + <code>ios/</code>) — una sola base de código. Lo nuevo: modo "app shell" para empleados
+(bottom nav + pantallas phone-first de arriba), push notifications (FCM/APNs) y el flujo scan-céntrico. Distribución: Google Play internal→closed testing y TestFlight→App Store (o unlisted).</p>
+
+</div></body></html>

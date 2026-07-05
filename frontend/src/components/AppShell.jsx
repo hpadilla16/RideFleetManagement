@@ -5,6 +5,7 @@ import { usePathname } from 'next/navigation';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { API_BASE, TOKEN_KEY, USER_KEY, readStoredToken } from '../lib/client';
 import { isModuleEnabled, pathnameToModule } from '../lib/moduleAccess';
+import { EmployeeMobileNav } from './EmployeeMobileNav';
 import { useTranslation } from 'react-i18next';
 import { setLanguage } from '../lib/i18n';
 
@@ -318,6 +319,10 @@ export function AppShell({ me, logout, children }) {
           </section>
         ) : children}
       </main>
+
+      {/* Employee app shell (native wrapper / ?shell=employee): bottom tab bar.
+          "More" opens the existing drawer — full nav, already module-gated. */}
+      <EmployeeMobileNav me={me} onMore={() => setMobileOpen(true)} />
 
       {locked ? (
         <div className="screenlock-overlay">

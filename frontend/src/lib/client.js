@@ -1,3 +1,5 @@
+import { clearNativeAuth } from './nativeShell';
+
 function normalizeBaseUrl(value) {
   return String(value || '').trim().replace(/\/$/, '');
 }
@@ -116,6 +118,8 @@ export function clearStoredAuth() {
     localStorage.removeItem(TOKEN_KEY);
     localStorage.removeItem(USER_KEY);
   } catch {}
+  // Also drop the native-storage mirror (Capacitor shell); no-op on the web.
+  clearNativeAuth();
 }
 
 export function readStoredToken() {

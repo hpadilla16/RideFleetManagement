@@ -11,6 +11,9 @@ const config = {
     url: appUrl,
     cleartext,
     allowNavigation: ['ridefleetmanager.com', '*.ridefleetmanager.com'],
+    // Local branded page with auto-retry when the hosted app can't load
+    // (lot wifi drop, backend restart). Lives in mobile-shell/.
+    errorPath: 'error.html',
   },
 };
 

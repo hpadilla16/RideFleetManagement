@@ -1223,3 +1223,33 @@ label input[type="radio"],
 .btn-void:hover:not(:disabled) { background: #fee2e2; }
 :root[data-theme='dark'] .btn-void { background: #2a1416; color: #fca5a5; border-color: #fca5a5; }
 :root[data-theme='dark'] .btn-void:hover:not(:disabled) { background: #3a1a1d; }
+
+/* ===== Employee app shell — bottom tab bar (Capacitor wrapper, 2026-07-05).
+   Active only when <body> has .employee-shell (native app or ?shell=employee).
+   Spec (mockups v2, GD sign-off): labels >=11px at >=4.5:1 contrast, hit areas
+   >=44pt, safe-area aware for iOS home indicator. ===== */
+.emp-nav {
+  position: fixed; left: 0; right: 0; bottom: 0; z-index: 60;
+  display: flex; align-items: flex-end; justify-content: space-around;
+  padding: 6px 6px calc(10px + env(safe-area-inset-bottom, 0px));
+  background: rgba(255, 255, 255, 0.94); backdrop-filter: blur(14px);
+  border-top: 1px solid rgba(135, 82, 254, 0.14);
+}
+.emp-nav-tab {
+  display: flex; flex-direction: column; align-items: center; gap: 3px;
+  min-width: 60px; min-height: 44px; padding: 4px 6px;
+  font-size: 11px; font-weight: 800; color: #5f5680;
+  background: none; border: none; cursor: pointer; text-decoration: none;
+}
+.emp-nav-tab.active { color: var(--brand-violet); }
+.emp-nav-scan {
+  display: flex; align-items: center; justify-content: center;
+  width: 54px; height: 54px; margin-top: -26px; border-radius: 999px;
+  background: linear-gradient(180deg, #9460ff, var(--brand-purple)); color: #fff;
+  border: 4px solid #fff; box-shadow: 0 10px 22px rgba(135, 82, 254, 0.4);
+}
+/* Keep page content clear of the fixed bar. */
+body.employee-shell .content { padding-bottom: 96px; }
+:root[data-theme='dark'] .emp-nav { background: rgba(21, 25, 34, 0.94); border-top-color: rgba(135, 82, 254, 0.25); }
+:root[data-theme='dark'] .emp-nav-tab { color: #a9a1c6; }
+:root[data-theme='dark'] .emp-nav-scan { border-color: #151922; }
