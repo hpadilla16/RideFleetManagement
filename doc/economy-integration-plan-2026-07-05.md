@@ -22,7 +22,9 @@ CloudFlare, ni proxy residencial, ni cookie que expira cada hora.
   → formato DataTables `{ draw, recordsTotal, recordsFiltered, data:[...] }`, cada fila:
   `rgConfirmation, rgDateBooked, rgClass (ACRISS), rgLocPickup, rgLocDropOff, rgDatePickup,
   rgDateDropOff, rgRate, rgLastName, rgName, rgEmail, rgIata, rgStatus`.
-  Request form-encoded con `__RequestVerificationToken` + `jsonPaginationParameters`.
+  Request form-encoded con **TRES** params (capturado 2026-07-05):
+  `__RequestVerificationToken` + `jsonPaginationParameters` (DataTables con las 13 columnas rg*)
+  + **`pFilter={"docType":"R"}`** (R=Reservation). ⚠️ Sin `pFilter` el endpoint devuelve 0 filas.
 - **Endpoint de DETALLE**: `POST /Production/RezAlliance/Reservations` (command-based)
   → objeto completo: `resCustomerFullName, resReqFlight (flight#), resProvider,
   resPickupLocation/Desc/Date/Time/RealTime, resDropOff*, resVehClass/Description/Luggage/
@@ -97,6 +99,21 @@ El scheduler enumera pares activos `(tenant, área)` = tenants con credencial EC
 ## Fases
 
 ### Fase 0 — PoC de login autónomo (GATE de decisión) ⚠️ primero
+**RESULTADO 2026-07-05: PASS en autonomía.** Corrido desde el droplet (IP NYC):
+- Login server-side funcionó → apareció `.AspNet.ApplicationCookie` (cookie de auth de ASP.NET
+  Identity, solo aparece si el login pasó). Campos del form: `username`, `password`,
+  `__RequestVerificationToken`. Sin 2FA/captcha.
+- Página autenticada `/RezAlliance/Reservations` cargó 200 SIN rebotar al login → sesión válida.
+- `GetReservationLookupRecords` respondió 200 JSON desde el droplet → **NO hay IP-binding** (a
+  diferencia de TL). Economy corre autónomo desde el droplet.
+- Único pendiente de afinamiento (no bloqueador): el payload `jsonPaginationParameters` genérico
+  del PoC devolvió `recordsTotal:0`; hay que usar el formato EXACTO que manda el portal (capturar
+  de la red) — se clava en la Fase 2. Auth/IP/autonomía ya confirmados; el 0 es solo formato de
+  payload, no de sesión.
+- Ajuste menor del PoC: el veredicto esperaba un 302 post-login, pero RezLight responde 200 (la
+  auth se confirma por la cookie + la página autenticada), así que el "REVISAR" fue falso negativo.
+
+
 Script desechable corrido **desde el droplet** (IP de NYC, no tu Mac de PR):
 1. GET del login → capturar cookie + scrapear `__RequestVerificationToken`.
 2. POST de credenciales → confirmar 302 a dashboard (no de vuelta a /Login) + cookie autenticada.

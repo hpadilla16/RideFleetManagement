@@ -115,11 +115,18 @@ async function main() {
   const bouncedToLogin = r3.status >= 300 && /login/i.test(r3.headers.get('location') || '');
   report.steps.authedPage = { status: r3.status, bouncedToLogin, foundTokenForDataPost: !!token2 };
 
-  // 4) POST al endpoint de lista (DataTables) — payload mínimo
-  const dtParams = JSON.stringify({ draw: 1, start: 0, length: 10, search: { value: '', regex: false }, order: [], columns: [] });
+  // 4) POST al endpoint de lista (DataTables). Payload EXACTO capturado del portal
+  // (2026-07-05): 3 params — el token, jsonPaginationParameters con las 13 columnas
+  // rg*, y el CLAVE pFilter={"docType":"R"} (R=Reservation). Sin pFilter el endpoint
+  // devuelve 0 filas — por eso el primer PoC dio recordsTotal:0.
+  const COLS = ['rgConfirmation','rgDateBooked','rgClass','rgLocPickup','rgLocDropOff',
+    'rgDatePickup','rgDateDropOff','rgRate','rgLastName','rgName','rgEmail','rgIata','rgStatus']
+    .map((data) => ({ data, name: '', searchable: true, orderable: false, search: { value: '', regex: false } }));
+  const dtParams = JSON.stringify({ draw: 1, columns: COLS, order: [], start: 0, length: 10, search: { value: '', regex: false } });
   const lbody = new URLSearchParams();
   if (token2) lbody.set('__RequestVerificationToken', token2);
   lbody.set('jsonPaginationParameters', dtParams);
+  lbody.set('pFilter', JSON.stringify({ docType: 'R' }));
   const r4 = await fetch(BASE + '/RezAlliance/Reservations/GetReservationLookupRecords', {
     method: 'POST',
     headers: { 'User-Agent': UA, cookie: cookieHeader(), 'content-type': 'application/x-www-form-urlencoded', 'X-Requested-With': 'XMLHttpRequest' },
