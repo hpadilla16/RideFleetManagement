@@ -159,7 +159,10 @@ async function main() {
   report.steps.listFetch = listShape;
 
   // ---- veredicto ----
-  const ok = loggedIn && !bouncedToLogin && listShape.status === 200 && (listShape.rowCount ?? 0) >= 0 && listShape.rowFieldNames;
+  // La auth se confirma por la cookie .AspNet.ApplicationCookie (RezLight NO hace 302
+  // post-login, responde 200) + la página autenticada que no rebota + el endpoint con datos.
+  const authOk = jar.has('.AspNet.ApplicationCookie') && !bouncedToLogin && report.steps.authedPage.status === 200;
+  const ok = authOk && listShape.status === 200 && listShape.rowFieldNames && (listShape.recordsTotal ?? 0) > 0;
   report.VERDICT = ok
     ? 'PASS — login server-side autónomo funciona desde este IP; la sesión lee el endpoint de reservas.'
     : 'REVISAR — algún paso no cerró; ver los detalles arriba (posible IP-binding, campos de login distintos, o token).';

@@ -21,6 +21,17 @@
 import { useEffect, useState } from 'react';
 import { api } from '../../lib/client';
 
+// Map the booking-source key to a human label used across the tray + modal copy.
+// Defaults to TL International so TL's appearance is byte-identical when no
+// source (or 'tl-international') is passed.
+function sourceLabelFor(source) {
+  switch (String(source || 'tl-international')) {
+    case 'economy': return 'Economy (RezLight)';
+    case 'tl-international':
+    default: return 'TL International';
+  }
+}
+
 function ReasonBadge({ reason }) {
   const r = String(reason || '').toUpperCase();
   const map = {
@@ -70,7 +81,13 @@ function CopyButton({ value, label }) {
   );
 }
 
-function EditPromoteModal({ row, token, scopedPath, onClose, onSaved }) {
+function EditPromoteModal({ row, token, scopedPath, onClose, onSaved, basePath = '/api/admin/integrations/tl-international', sourceLabel = 'TL International', source = 'tl-international' }) {
+  // Phone placeholder stamped when the source sent no phone. Kept source-specific
+  // so TL rows stay 'TL-IMPORT-NO-PHONE' (byte-identical) while Economy gets its
+  // own token. New sources fall through to a generic token.
+  const noPhonePlaceholder = source === 'economy'
+    ? 'ECON-IMPORT-NO-PHONE'
+    : (source === 'tl-international' ? 'TL-IMPORT-NO-PHONE' : 'IMPORT-NO-PHONE');
   // TL ships customer fields either flat on the row (customerFirstName, ...)
   // or nested under row.customer depending on which sync version produced the
   // record. Normalize once so the rest of the modal can read from `tl`.
@@ -139,7 +156,7 @@ function EditPromoteModal({ row, token, scopedPath, onClose, onSaved }) {
         saveMapping: !!saveMapping
       };
       const res = await api(
-        scopedPath(`/api/admin/integrations/tl-international/pending-imports/${row.id}/promote`),
+        scopedPath(`${basePath}/pending-imports/${row.id}/promote`),
         { method: 'POST', body: JSON.stringify(body) },
         token
       );
@@ -182,7 +199,7 @@ function EditPromoteModal({ row, token, scopedPath, onClose, onSaved }) {
 
         <section style={{ background: '#f0f9ff', border: '1px solid #bae6fd', padding: 10, borderRadius: 6, marginBottom: 12 }}>
           <div style={{ fontSize: 12, fontWeight: 600, color: '#0369a1', marginBottom: 6 }}>
-            TL data for this booking
+            {sourceLabel} data for this booking
           </div>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '4px 12px', fontSize: 13 }}>
             <div><strong>Name:</strong> {tlFullName || '-'}</div>
@@ -245,9 +262,9 @@ function EditPromoteModal({ row, token, scopedPath, onClose, onSaved }) {
                       lastName: tl.lastName,
                       email: tl.email || undefined,
                       // Backend requires `phone`; fall back to a clear placeholder so
-                      // the create succeeds even when TL did not send a phone. The
-                      // agent can edit the customer later.
-                      phone: tl.phone || 'TL-IMPORT-NO-PHONE',
+                      // the create succeeds even when the source did not send a phone.
+                      // The agent can edit the customer later.
+                      phone: tl.phone || noPhonePlaceholder,
                       country: tl.country || undefined
                     };
                     const res = await api(
@@ -353,7 +370,7 @@ function sortRows(rows, sort) {
   return arr;
 }
 
-export function PendingFranchiseImportsTray({ token, me, isSuper, activeTenantId, scopedPath }) {
+export function PendingFranchiseImportsTray({ token, me, isSuper, activeTenantId, scopedPath, source = 'tl-international' }) {
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(false);
   const [expanded, setExpanded] = useState(false);
@@ -361,6 +378,12 @@ export function PendingFranchiseImportsTray({ token, me, isSuper, activeTenantId
   const [msg, setMsg] = useState('');
   const [autoPromotedToday, setAutoPromotedToday] = useState(0);
   const [sort, setSort] = useState('pickup-asc');
+
+  // Source-aware base path + label — the same tray serves any booking-source
+  // integration (TL International or Economy). Defaults to TL for backward
+  // compatibility, so TL's tray appearance/behavior is byte-identical.
+  const basePath = `/api/admin/integrations/${source}`;
+  const sourceLabel = sourceLabelFor(source);
 
   const scoped = scopedPath || ((p) => {
     if (!isSuper || !activeTenantId) return p;
@@ -373,8 +396,8 @@ export function PendingFranchiseImportsTray({ token, me, isSuper, activeTenantId
     setLoading(true);
     try {
       const [pending, status] = await Promise.all([
-        api(scoped('/api/admin/integrations/tl-international/pending-imports'), { bypassCache: true }, token).catch(() => ({ rows: [] })),
-        api(scoped('/api/admin/integrations/tl-international/status'), { bypassCache: true }, token).catch(() => null)
+        api(scoped(`${basePath}/pending-imports`), { bypassCache: true }, token).catch(() => ({ rows: [] })),
+        api(scoped(`${basePath}/status`), { bypassCache: true }, token).catch(() => null)
       ]);
       setRows(Array.isArray(pending?.rows) ? pending.rows : []);
       setAutoPromotedToday(Number(status?.lastRun?.autoPromotedToday || status?.autoPromotedToday || 0));
@@ -394,7 +417,7 @@ export function PendingFranchiseImportsTray({ token, me, isSuper, activeTenantId
     setMsg('');
     try {
       const res = await api(
-        scoped(`/api/admin/integrations/tl-international/pending-imports/${r.id}/promote`),
+        scoped(`${basePath}/pending-imports/${r.id}/promote`),
         { method: 'POST', body: JSON.stringify({}) },
         token
       );
@@ -412,7 +435,7 @@ export function PendingFranchiseImportsTray({ token, me, isSuper, activeTenantId
     setMsg('');
     try {
       const res = await api(
-        scoped(`/api/admin/integrations/tl-international/pending-imports/${r.id}/reject`),
+        scoped(`${basePath}/pending-imports/${r.id}/reject`),
         { method: 'POST' },
         token
       );
@@ -436,7 +459,7 @@ export function PendingFranchiseImportsTray({ token, me, isSuper, activeTenantId
         }}
       >
         <div>
-          <strong style={{ fontSize: 15 }}>Pending franchise imports</strong>
+          <strong style={{ fontSize: 15 }}>Pending franchise imports — {sourceLabel}</strong>
           <span style={{
             marginLeft: 8, background: '#f59e0b', color: 'white',
             padding: '2px 8px', borderRadius: 999, fontSize: 12, fontWeight: 700
@@ -471,7 +494,7 @@ export function PendingFranchiseImportsTray({ token, me, isSuper, activeTenantId
             <table style={{ width: '100%', minWidth: 900, borderCollapse: 'collapse', fontSize: 13 }}>
               <thead>
                 <tr style={{ borderBottom: '1px solid #e5e7eb', textAlign: 'left', background: '#f9fafb' }}>
-                  <th style={{ padding: '6px 8px' }}>TL Ref</th>
+                  <th style={{ padding: '6px 8px' }}>{sourceLabel} Ref</th>
                   <th style={{ padding: '6px 8px' }}>Customer</th>
                   <th style={{ padding: '6px 8px' }}>Pickup</th>
                   <th style={{ padding: '6px 8px' }}>Return</th>
@@ -532,6 +555,9 @@ export function PendingFranchiseImportsTray({ token, me, isSuper, activeTenantId
           row={editRow}
           token={token}
           scopedPath={scoped}
+          basePath={basePath}
+          sourceLabel={sourceLabel}
+          source={source}
           onClose={() => setEditRow(null)}
           onSaved={() => { setMsg(`Promoted: ${editRow.externalRef}`); load(); }}
         />

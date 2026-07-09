@@ -756,6 +756,15 @@ function ReservationsInner({ token, me, logout }) {
         isSuper={isSuper}
         activeTenantId={activeTenantId}
         scopedPath={scopedPath}
+        source="tl-international"
+      />
+      <PendingFranchiseImportsTray
+        token={token}
+        me={me}
+        isSuper={isSuper}
+        activeTenantId={activeTenantId}
+        scopedPath={scopedPath}
+        source="economy"
       />
       <section className="glass card-lg section-card" style={{ marginBottom: 16 }}>
         <div className="app-banner">
@@ -976,9 +985,9 @@ function ReservationsInner({ token, me, logout }) {
                 </td>
                 <td>
                   <span className="badge">{r.status}</span>
-                  {r.bookingChannel === 'FRANCHISE_TL' ? (
+                  {String(r.bookingChannel || '').startsWith('FRANCHISE_') ? (
                     <span
-                      title="Imported from TL International franchise sync — pre-paid, no payment at checkout"
+                      title="Imported from a franchise sync (TL International / Economy) — pre-paid, no payment at checkout"
                       style={{
                         marginLeft: 6,
                         background: '#dbeafe',

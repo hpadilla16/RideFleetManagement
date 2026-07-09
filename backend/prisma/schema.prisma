@@ -604,6 +604,7 @@ model Tenant {
   tlAcrissCategoryMaps     AcrissCategoryMap[]
   tlLocationCodeMaps       LocationCodeMap[]
   franchisePayoutPeriods   FranchisePayoutPeriod[]
+  economyLocationConfigs   EconomyLocationConfig[]
   loanerAgreements         LoanerAgreement[]
   longTermPlans            LongTermPlan[]
 }
@@ -4000,6 +4001,42 @@ model FranchisePayoutPeriod {
   updatedAt      DateTime  @updatedAt
 
   @@unique([tenantId, sourceSystem, year, month])
+}
+
+// ============================================================================
+// Economy (RezLight) franchise integration (2026-07-05)
+//
+// Clones the TL International integration but for the Economy Rent A Car
+// RezLight portal. Reuses ExternalReservation / ExternalSyncRun /
+// IntegrationCredential / AcrissCategoryMap / LocationCodeMap as-is (their
+// sourceSystem is a free string → 'ECONOMY'). The ONLY new table is
+// EconomyLocationConfig: the generic per-(tenant, external area) enable
+// switch that says "which reservations to look at" — kept generic (not
+// hardcoded MIA/LAX) so ANY future booking-source connection can reuse the
+// same shape. `externalArea` is the first 3 chars of rgLocPickup (MIAO01→MIA).
+// One Economy credential per tenant (IntegrationCredential unique
+// (tenantId, sourceSystem)) covers every enabled area.
+//
+// See doc/economy-integration-plan-2026-07-05.md
+// ============================================================================
+model EconomyLocationConfig {
+  id           String   @id @default(cuid())
+  tenantId     String
+  tenant       Tenant   @relation(fields: [tenantId], references: [id])
+  locationId   String // Ride location (Miami / FLL / MCO / LAX)
+  externalArea String // 'MIA' | 'LAX' — first 3 chars of rgLocPickup
+  enabled      Boolean  @default(true)
+  // Per-area import window override (2026-07-09, Fase 5). NULL → fall back to the
+  // env defaults ECONOMY_DATE_WINDOW_LOOKBACK_DAYS / ECONOMY_DATE_WINDOW_LOOKAHEAD_DAYS.
+  // The worker fetches the UNION window (max lookback + max lookahead across the
+  // tenant's ENABLED configs) in one list call, then applies each area's own
+  // [lookback, lookahead] as a precision filter per row.
+  lookbackDays  Int?
+  lookaheadDays Int?
+  createdAt    DateTime @default(now())
+
+  @@unique([tenantId, externalArea])
+  @@index([tenantId, enabled])
 }
 
 // =====================================================================

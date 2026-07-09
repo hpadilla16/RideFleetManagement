@@ -419,6 +419,22 @@ export const EXTRA_ROUTES = [
   ['GET', '/api/admin/integrations/tl-international/payout-periods/{year}/{month}/reservations', 'TL International', 'Payout period reservations'],
   ['PUT', '/api/admin/integrations/tl-international/payout-periods/{year}/{month}', 'TL International', 'Record payout period payment'],
 
+  // ── Economy (RezLight) ────────────────────────────────────────────────────
+  ['GET', '/api/admin/integrations/economy/status', 'Economy (RezLight)', 'Integration health summary'],
+  ['PUT', '/api/admin/integrations/economy/enabled', 'Economy (RezLight)', 'Master enable/disable for tenant'],
+  ['POST', '/api/admin/integrations/economy/credentials', 'Economy (RezLight)', 'Set/rotate username+password (encrypted; password never returned)'],
+  ['POST', '/api/admin/integrations/economy/test-auth', 'Economy (RezLight)', 'Live auth probe'],
+  ['POST', '/api/admin/integrations/economy/run-now', 'Economy (RezLight)', 'Enqueue one-off sync job'],
+  ['GET', '/api/admin/integrations/economy/runs', 'Economy (RezLight)', 'List recent sync runs'],
+  ['GET', '/api/admin/integrations/economy/locations', 'Economy (RezLight)', 'List EconomyLocationConfig rows'],
+  ['POST', '/api/admin/integrations/economy/locations', 'Economy (RezLight)', 'Create an area config'],
+  ['PUT', '/api/admin/integrations/economy/locations/{id}', 'Economy (RezLight)', 'Update an area config (mapping/window/enabled)'],
+  ['POST', '/api/admin/integrations/economy/locations/{id}/toggle', 'Economy (RezLight)', 'Toggle an area on/off'],
+  ['DELETE', '/api/admin/integrations/economy/locations/{id}', 'Economy (RezLight)', 'Delete an area config'],
+  ['GET', '/api/admin/integrations/economy/pending-imports', 'Economy (RezLight)', 'List pending imports'],
+  ['POST', '/api/admin/integrations/economy/pending-imports/{id}/promote', 'Economy (RezLight)', 'Promote pending import'],
+  ['POST', '/api/admin/integrations/economy/pending-imports/{id}/reject', 'Economy (RezLight)', 'Reject pending import'],
+
   // ── Admin (reservation override) ──────────────────────────────────────────
   ['GET', '/api/admin/reservations/{id}/override-preview', 'Admin', 'Preview reservation status override'],
   ['PATCH', '/api/admin/reservations/{id}/status', 'Admin', 'Apply reservation status override'],

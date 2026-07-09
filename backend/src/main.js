@@ -82,6 +82,7 @@ import { buildOpenApiSpec, swaggerHtml } from './docs/openapi.js';
 import { smsRouter } from './modules/sms/sms.routes.js';
 import { knowledgeBaseRouter } from './modules/knowledge-base/knowledge-base.routes.js';
 import { tlInternationalRouter } from './modules/integrations/tl-international/tl-international.routes.js';
+import { economyRouter } from './modules/integrations/economy/economy.routes.js';
 import { captureBackendException, flushSentry, initSentry, isSentryEnabled } from './lib/sentry.js';
 import { appErrorHandler } from './lib/errors.js';
 import { closeBrowser } from './lib/puppeteer-browser.js';
@@ -228,6 +229,11 @@ app.use('/api/payment-gateway', requireAuth, tenantRateLimit, requireRole('ADMIN
 app.use('/api/sms', requireAuth, tenantRateLimit, requireRole('ADMIN', 'OPS'), smsRouter);
 app.use('/api/knowledge-base', requireAuth, tenantRateLimit, knowledgeBaseRouter);
 app.use('/api/admin/integrations/tl-international', tenantRateLimit, tlInternationalRouter);
+// Economy (RezLight) booking-source integration (Fase 5, 2026-07-09) — mounted
+// identically to TL. Routes/config always available; ECONOMY_INTEGRATION_ENABLED
+// gates only the autonomous scheduler (economy.scheduler.js), which stays dark
+// until the flag is flipped.
+app.use('/api/admin/integrations/economy', tenantRateLimit, economyRouter);
 // Round 26 (2026-06-01) — SUPER_ADMIN reservation status override + smart rewind
 app.use('/api/admin/reservations', requireAuth, requireRole('SUPER_ADMIN'), reservationOverrideRouter);
 // VozIA Fase 6 re-scope (2026-07-04) — SUPER_ADMIN ops: free a wedged idempotency key.

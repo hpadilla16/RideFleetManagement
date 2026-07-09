@@ -111,8 +111,18 @@ export function jaroWinkler(a, b) {
 
 /**
  * Main entry point.
+ *
+ * @param {object}   extRes
+ * @param {object}   opts
+ * @param {object}   opts.prisma            Prisma client (required).
+ * @param {string=}  opts.overrideLocationId  OPTIONAL. When supplied, the caller
+ *   has ALREADY authoritatively resolved the Ride location (e.g. the Economy
+ *   worker via EconomyLocationConfig) — the LocationCodeMap gate is skipped and
+ *   mappedLocation.id is set to this value. Defaults to undefined, so every
+ *   existing (TL) caller — which never passes it — behaves EXACTLY as before:
+ *   the LocationCodeMap gate runs unchanged. Purely additive, no-op for TL.
  */
-export async function evaluatePromotion(extRes, { prisma } = {}) {
+export async function evaluatePromotion(extRes, { prisma, overrideLocationId = undefined } = {}) {
   if (!extRes) throw new Error('evaluatePromotion: externalReservation required');
   if (!prisma) throw new Error('evaluatePromotion: prisma client required');
 
@@ -133,16 +143,29 @@ export async function evaluatePromotion(extRes, { prisma } = {}) {
   }
 
   // ---- 3. Location map gate -------------------------------------------------
-  const extCode = extractLocationCode(extRes.pickupLocation) || extractLocationCode(extRes.dropoffLocation);
-  if (!extCode) {
-    return { decision: 'MANUAL_REVIEW', reason: REVIEW_REASONS.LOCATION_UNMAPPED };
-  }
-  const locMap = await prisma.locationCodeMap.findUnique({
-    where: { tenantId_externalCode: { tenantId: extRes.tenantId, externalCode: extCode } },
-    include: { location: true },
-  });
-  if (!locMap || !locMap.location) {
-    return { decision: 'MANUAL_REVIEW', reason: REVIEW_REASONS.LOCATION_UNMAPPED };
+  // When the caller passed an authoritative overrideLocationId (Economy path,
+  // resolved from EconomyLocationConfig), skip the LocationCodeMap lookup and
+  // treat the location as resolved. TL callers never pass it → gate unchanged.
+  let resolvedLocation = null;
+  if (overrideLocationId) {
+    resolvedLocation = { id: overrideLocationId, code: null, name: null };
+  } else {
+    const extCode = extractLocationCode(extRes.pickupLocation) || extractLocationCode(extRes.dropoffLocation);
+    if (!extCode) {
+      return { decision: 'MANUAL_REVIEW', reason: REVIEW_REASONS.LOCATION_UNMAPPED };
+    }
+    const locMap = await prisma.locationCodeMap.findUnique({
+      where: { tenantId_externalCode: { tenantId: extRes.tenantId, externalCode: extCode } },
+      include: { location: true },
+    });
+    if (!locMap || !locMap.location) {
+      return { decision: 'MANUAL_REVIEW', reason: REVIEW_REASONS.LOCATION_UNMAPPED };
+    }
+    resolvedLocation = {
+      id: locMap.location.id,
+      code: locMap.location.code,
+      name: locMap.location.name,
+    };
   }
 
   // ---- 4. Customer match ----------------------------------------------------
@@ -159,11 +182,7 @@ export async function evaluatePromotion(extRes, { prisma } = {}) {
     decision: 'AUTO',
     mappedCustomer: matched.customer,
     mappedVehicleCategory: acrissMap.vehicleCategory,
-    mappedLocation: {
-      id: locMap.location.id,
-      code: locMap.location.code,
-      name: locMap.location.name,
-    },
+    mappedLocation: resolvedLocation,
   };
 }
 

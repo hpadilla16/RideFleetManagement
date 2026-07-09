@@ -27,6 +27,7 @@ import { useEffect, useState } from 'react';
 import { AuthGate } from '../../components/AuthGate';
 import { AppShell } from '../../components/AppShell';
 import { TLIntegrationPanel } from '../../components/settings/TLIntegrationPanel';
+import { EconomyIntegrationPanel } from '../../components/settings/EconomyIntegrationPanel';
 import { KioskUpsellSettings } from '../../components/settings/KioskUpsellSettings';
 import { LoanerRatesTab } from './LoanerRatesTab';
 import { API_BASE, api } from '../../lib/client';
@@ -223,6 +224,8 @@ function SettingsInner({ token, me, logout }) {
   const [stopSales, setStopSales] = useState([]);
   const [stopSaleForm, setStopSaleForm] = useState(EMPTY_STOP_SALE);
   const [stopSaleEditId, setStopSaleEditId] = useState(null);
+  // Integrations tab: which booking-source panel is active (TL vs Economy).
+  const [activeIntegration, setActiveIntegration] = useState('tl');
 
   const role = String(me?.role || '').toUpperCase().trim();
   const isAdmin = role === 'ADMIN' || role === 'SUPER_ADMIN';
@@ -3424,15 +3427,47 @@ function SettingsInner({ token, me, logout }) {
         )}
 
         {tab === 'integrations' && (
-          <TLIntegrationPanel
-            token={token}
-            me={me}
-            isSuper={isSuper}
-            isAdmin={isAdmin}
-            activeSettingsTenantId={activeSettingsTenantId}
-            scopedSettingsPath={scopedSettingsPath}
-            onPageMsg={setMsg}
-          />
+          <div className="stack" style={{ gap: 20 }}>
+            {/* Booking-source switcher (TL vs Economy) — mirrors the mockup */}
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+              <button
+                type="button"
+                className={activeIntegration === 'tl' ? '' : 'subtle'}
+                onClick={() => setActiveIntegration('tl')}
+              >
+                TL International
+              </button>
+              <button
+                type="button"
+                className={activeIntegration === 'economy' ? '' : 'subtle'}
+                onClick={() => setActiveIntegration('economy')}
+              >
+                Economy (RezLight)
+              </button>
+            </div>
+
+            {activeIntegration === 'tl' ? (
+              <TLIntegrationPanel
+                token={token}
+                me={me}
+                isSuper={isSuper}
+                isAdmin={isAdmin}
+                activeSettingsTenantId={activeSettingsTenantId}
+                scopedSettingsPath={scopedSettingsPath}
+                onPageMsg={setMsg}
+              />
+            ) : (
+              <EconomyIntegrationPanel
+                token={token}
+                me={me}
+                isSuper={isSuper}
+                isAdmin={isAdmin}
+                activeSettingsTenantId={activeSettingsTenantId}
+                scopedSettingsPath={scopedSettingsPath}
+                onPageMsg={setMsg}
+              />
+            )}
+          </div>
         )}
 
         {tab === 'stopSales' && (

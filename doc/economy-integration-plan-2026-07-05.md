@@ -106,12 +106,15 @@ El scheduler enumera pares activos `(tenant, área)` = tenants con credencial EC
 - Página autenticada `/RezAlliance/Reservations` cargó 200 SIN rebotar al login → sesión válida.
 - `GetReservationLookupRecords` respondió 200 JSON desde el droplet → **NO hay IP-binding** (a
   diferencia de TL). Economy corre autónomo desde el droplet.
-- Único pendiente de afinamiento (no bloqueador): el payload `jsonPaginationParameters` genérico
-  del PoC devolvió `recordsTotal:0`; hay que usar el formato EXACTO que manda el portal (capturar
-  de la red) — se clava en la Fase 2. Auth/IP/autonomía ya confirmados; el 0 es solo formato de
-  payload, no de sesión.
-- Ajuste menor del PoC: el veredicto esperaba un 302 post-login, pero RezLight responde 200 (la
-  auth se confirma por la cookie + la página autenticada), así que el "REVISAR" fue falso negativo.
+- **Payload confirmado (re-run 2026-07-05)**: con los 3 params correctos (token +
+  `jsonPaginationParameters` de 13 columnas + `pFilter={"docType":"R"}`) el endpoint devolvió
+  **`recordsTotal: 92093`**, `rowCount: 10`, y **`pickupAreasSeen: ["MIA","LAX"]`** → gate CERRADO:
+  autonomía + payload + filtro por área de 3 letras confirmados.
+- ⚠️ **Diseño**: la cuenta ve el HISTÓRICO COMPLETO (92k reservas). El worker DEBE filtrar por
+  rango de fecha (solo pickups próximos / recientes), nunca barrer las 92k. Añadir un filtro de
+  fecha al payload del lookup o filtrar client-side por `rgDatePickup` en una ventana (ej. hoy → +30d).
+- Login: RezLight responde 200 (no 302) post-login; la auth se confirma por `.AspNet.ApplicationCookie`.
+- ⚠️ **Seguridad**: las credenciales de prueba pasaron por el chat — rotar el password de esa cuenta.
 
 
 Script desechable corrido **desde el droplet** (IP de NYC, no tu Mac de PR):

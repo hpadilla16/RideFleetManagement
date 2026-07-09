@@ -57,6 +57,22 @@ async function registerAllHandlers() {
     }
   }
 
+  // Economy (RezLight) franchise sync (2026-07-05).
+  // Feature-flagged — registers only if ECONOMY_INTEGRATION_ENABLED=true.
+  // Same posture as TL: keep the flag guard so a failed import can't break
+  // the whole worker.
+  if (String(process.env.ECONOMY_INTEGRATION_ENABLED || 'false').toLowerCase() === 'true') {
+    try {
+      const econMod = await import('./modules/integrations/economy/economy.worker.js');
+      econMod.registerEconomySyncWorker();
+      logger.info('[worker] registered handler: economy.sync');
+    } catch (err) {
+      logger.warn('[worker] economy sync worker not registered', {
+        message: err.message, stack: err.stack
+      });
+    }
+  }
+
   // Future handlers go here. Each in its own try/catch so a broken one
   // doesn't poison the others.
 }
@@ -170,6 +186,19 @@ async function main() {
     });
   }
 
+  // Economy (RezLight) autonomous sync scheduler (2026-07-05). Gated by the
+  // same ECONOMY_INTEGRATION_ENABLED flag (checked inside start...). Dynamic
+  // import so a broken import chain can't kill the worker boot.
+  try {
+    const econSchedMod = await import('./modules/integrations/economy/economy.scheduler.js');
+    econSchedMod.startEconomySyncScheduler();
+    logger.info('[worker] started: economy sync scheduler (if enabled)');
+  } catch (err) {
+    logger.warn('[worker] economy sync scheduler not started', {
+      message: err.message,
+    });
+  }
+
   const shutdown = async (signal) => {
     logger.info('[worker] shutting down', { signal });
     stopAutochargePoll();
@@ -190,6 +219,10 @@ async function main() {
     try {
       const ocrMod = await import('./modules/citations/citation-ocr.scheduler.js');
       ocrMod.stopCitationOcrScheduler();
+    } catch {}
+    try {
+      const econSchedMod = await import('./modules/integrations/economy/economy.scheduler.js');
+      econSchedMod.stopEconomySyncScheduler();
     } catch {}
     // Close the Chromium singleton if a toll sweep ever launched it here.
     // Lazy import keeps puppeteer out of the boot graph.
