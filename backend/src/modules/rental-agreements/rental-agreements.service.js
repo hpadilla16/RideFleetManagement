@@ -2184,8 +2184,28 @@ export const rentalAgreementsService = {
           // commit together. Without the transaction, a failure between
           // deleteMany and createMany would leave the agreement with no
           // line items, a state the UI doesn't handle gracefully.
+          //
+          // MONEY-FIX 2026-07-09 (Print Agreement wiped misc/damage charges):
+          // the delete MUST preserve the agreement-only rows. FEE_ENGINE_* fees,
+          // ADMIN_CORRECTION manual charges, and DAMAGE_CHARGE damage charges live
+          // ONLY on the agreement (no ReservationCharge to re-sync from), so an
+          // UNCONDITIONAL deleteMany erased them here — Print Agreement on a
+          // CHECKED_OUT rental (handlePrintAgreement → /start-rental) deleted the
+          // just-added misc/damage charge and reverted total/balance, and the void
+          // then couldn't find the chargeId. Mirror the EXACT carve-out predicate
+          // reservation-pricing.service.js#syncAgreementCharges uses so the two
+          // writers stay consistent.
           await prisma.$transaction([
-            prisma.rentalAgreementCharge.deleteMany({ where: { rentalAgreementId: existing.id } }),
+            prisma.rentalAgreementCharge.deleteMany({
+              where: {
+                rentalAgreementId: existing.id,
+                AND: [
+                  { NOT: { source: { startsWith: 'FEE_ENGINE_' } } },
+                  { NOT: { source: 'ADMIN_CORRECTION' } },
+                  { NOT: { source: 'DAMAGE_CHARGE' } }
+                ]
+              }
+            }),
             prisma.rentalAgreementCharge.createMany({ data: normalizedRows }),
             prisma.rentalAgreement.update({
               where: { id: existing.id },
@@ -2198,6 +2218,15 @@ export const rentalAgreementsService = {
               }
             })
           ], { timeout: 10000 });
+          // The inline totals above sum ONLY the recreated reservation rows, so
+          // they exclude the preserved carve-out rows. Delegate the authoritative
+          // subtotal/taxes/fees/total/balance recompute to the proven reconciler:
+          // it re-mirrors the reservation rows (net exactly one row per charge — its
+          // own carve-out deleteMany drops the rows we just recreated and rebuilds
+          // them from the reservation, so no duplication) AND folds the preserved
+          // agreement-only rows back into the totals. Consistent with every other
+          // money mutation, which recomputes through this same function.
+          await reservationPricingService.syncAgreementCharges(reservationId, scope || {}, { allowClosed: true });
           return this.getById(existing.id);
         }
 
@@ -2244,8 +2273,21 @@ export const rentalAgreementsService = {
           const { subtotal, taxes, total } = structuredReservationTotals(normalizedRows);
 
           // Atomic re-sync (incomingRows path).
+          // MONEY-FIX 2026-07-09: same carve-out as the structuredRows path above —
+          // never delete the agreement-only FEE_ENGINE_/ADMIN_CORRECTION/DAMAGE_CHARGE
+          // rows, then delegate the total/balance recompute to syncAgreementCharges so
+          // the preserved rows are folded back in exactly once.
           await prisma.$transaction([
-            prisma.rentalAgreementCharge.deleteMany({ where: { rentalAgreementId: existing.id } }),
+            prisma.rentalAgreementCharge.deleteMany({
+              where: {
+                rentalAgreementId: existing.id,
+                AND: [
+                  { NOT: { source: { startsWith: 'FEE_ENGINE_' } } },
+                  { NOT: { source: 'ADMIN_CORRECTION' } },
+                  { NOT: { source: 'DAMAGE_CHARGE' } }
+                ]
+              }
+            }),
             prisma.rentalAgreementCharge.createMany({
               data: normalizedRows.map((r, idx) => ({
                 rentalAgreementId: existing.id,
@@ -2267,6 +2309,7 @@ export const rentalAgreementsService = {
               data: { notes: reservation.notes, subtotal, taxes, total, balance: Number((total - paid).toFixed(2)) }
             })
           ], { timeout: 10000 });
+          await reservationPricingService.syncAgreementCharges(reservationId, scope || {}, { allowClosed: true });
           return this.getById(existing.id);
         }
 

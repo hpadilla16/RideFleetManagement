@@ -1195,5 +1195,17 @@ export const reservationPricingService = {
     }
 
     return prisma.reservationPayment.findUnique({ where: { id: created.id } });
+  },
+
+  // 2026-07-09 (Print Agreement money-fix): exposed so cross-module callers —
+  // specifically rental-agreements.service.js#startFromReservation (the Print /
+  // Email Agreement path) — can delegate the authoritative agreement recompute
+  // to the SAME reconciler every pricing mutation uses. It re-mirrors the
+  // reservation charge rows, PRESERVES the FEE_ENGINE_/ADMIN_CORRECTION/
+  // DAMAGE_CHARGE carve-out rows, and recomputes subtotal/taxes/fees/total/
+  // paidAmount/balance. Keeping money math single-sourced avoids the exact drift
+  // this fix removes.
+  async syncAgreementCharges(reservationId, scope = {}, opts = {}) {
+    return syncAgreementCharges(reservationId, scope, opts);
   }
 };
