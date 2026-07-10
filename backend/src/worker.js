@@ -73,6 +73,22 @@ async function registerAllHandlers() {
     }
   }
 
+  // NU Car Rentals (affiliates portal) franchise sync (2026-07-09).
+  // Feature-flagged — registers only if NU_INTEGRATION_ENABLED=true.
+  // Same posture as Economy: keep the flag guard so a failed import can't break
+  // the whole worker.
+  if (String(process.env.NU_INTEGRATION_ENABLED || 'false').toLowerCase() === 'true') {
+    try {
+      const nuMod = await import('./modules/integrations/nu/nu.worker.js');
+      nuMod.registerNuSyncWorker();
+      logger.info('[worker] registered handler: nu.sync');
+    } catch (err) {
+      logger.warn('[worker] nu sync worker not registered', {
+        message: err.message, stack: err.stack
+      });
+    }
+  }
+
   // Future handlers go here. Each in its own try/catch so a broken one
   // doesn't poison the others.
 }
@@ -199,6 +215,19 @@ async function main() {
     });
   }
 
+  // NU Car Rentals (affiliates portal) autonomous sync scheduler (2026-07-09).
+  // Gated by the same NU_INTEGRATION_ENABLED flag (checked inside start...).
+  // Dynamic import so a broken import chain can't kill the worker boot.
+  try {
+    const nuSchedMod = await import('./modules/integrations/nu/nu.scheduler.js');
+    nuSchedMod.startNuSyncScheduler();
+    logger.info('[worker] started: nu sync scheduler (if enabled)');
+  } catch (err) {
+    logger.warn('[worker] nu sync scheduler not started', {
+      message: err.message,
+    });
+  }
+
   const shutdown = async (signal) => {
     logger.info('[worker] shutting down', { signal });
     stopAutochargePoll();
@@ -223,6 +252,10 @@ async function main() {
     try {
       const econSchedMod = await import('./modules/integrations/economy/economy.scheduler.js');
       econSchedMod.stopEconomySyncScheduler();
+    } catch {}
+    try {
+      const nuSchedMod = await import('./modules/integrations/nu/nu.scheduler.js');
+      nuSchedMod.stopNuSyncScheduler();
     } catch {}
     // Close the Chromium singleton if a toll sweep ever launched it here.
     // Lazy import keeps puppeteer out of the boot graph.

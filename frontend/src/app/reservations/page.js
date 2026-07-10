@@ -766,6 +766,14 @@ function ReservationsInner({ token, me, logout }) {
         scopedPath={scopedPath}
         source="economy"
       />
+      <PendingFranchiseImportsTray
+        token={token}
+        me={me}
+        isSuper={isSuper}
+        activeTenantId={activeTenantId}
+        scopedPath={scopedPath}
+        source="nu"
+      />
       <section className="glass card-lg section-card" style={{ marginBottom: 16 }}>
         <div className="app-banner">
           <div className="row-between" style={{ alignItems: 'start', marginBottom: 0 }}>
@@ -987,7 +995,7 @@ function ReservationsInner({ token, me, logout }) {
                   <span className="badge">{r.status}</span>
                   {String(r.bookingChannel || '').startsWith('FRANCHISE_') ? (
                     <span
-                      title="Imported from a franchise sync (TL International / Economy) — pre-paid, no payment at checkout"
+                      title="Imported from a franchise sync (TL International / Economy / NU) — Ride records the estimated total only, no card charged on import"
                       style={{
                         marginLeft: 6,
                         background: '#dbeafe',
@@ -1001,6 +1009,48 @@ function ReservationsInner({ token, me, logout }) {
                       }}
                     >
                       Franchise import
+                    </span>
+                  ) : null}
+                  {/* NU has a prepaid MIX. The promoted Reservation now carries a
+                      structured isPrepaid boolean (stamped at promotion from the
+                      ExternalReservation) so the badge is read from the field, NOT
+                      from a notes-string marker agents could edit away.
+                      isPrepaid===false → amber "Pay at destination" (counter collects);
+                      isPrepaid===true  → subtle purple "Prepaid" chip (do not charge);
+                      null (TL/Economy/staff) → no extra chip, generic badge only. */}
+                  {r.isPrepaid === false ? (
+                    <span
+                      title="Pay at destination — not prepaid, the counter collects at pickup"
+                      style={{
+                        marginLeft: 6,
+                        background: '#fef3c7',
+                        color: '#92400e',
+                        padding: '2px 6px',
+                        borderRadius: 999,
+                        fontSize: 10,
+                        fontWeight: 700,
+                        letterSpacing: '0.04em',
+                        textTransform: 'uppercase',
+                      }}
+                    >
+                      Pay at destination
+                    </span>
+                  ) : r.isPrepaid === true ? (
+                    <span
+                      title="Prepaid through the franchise — do not charge at the counter"
+                      style={{
+                        marginLeft: 6,
+                        background: 'rgba(135,82,254,.12)',
+                        color: '#5a2fca',
+                        padding: '2px 6px',
+                        borderRadius: 999,
+                        fontSize: 10,
+                        fontWeight: 700,
+                        letterSpacing: '0.04em',
+                        textTransform: 'uppercase',
+                      }}
+                    >
+                      Prepaid
                     </span>
                   ) : null}
                   {hasFeeAdvisory(r.notes) ? <span title="Additional fee advisory" style={{ marginLeft: 6 }}>⚠️</span> : null}

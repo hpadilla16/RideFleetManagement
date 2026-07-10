@@ -142,6 +142,10 @@ const reservationListSelect = {
   // reservations. Lets agents see at a glance that the row came from
   // TL pre-paid sync and avoid trying to collect payment at checkout.
   bookingChannel: true,
+  // 2026-07-09 — structured prepaid signal for franchise imports with a prepaid
+  // MIX (NU: PP/OP=prepaid, blank=pay-at-destination). Lets the list badge read a
+  // boolean instead of a brittle notes-string marker. null for all other sources.
+  isPrepaid: true,
   pickupAt: true,
   returnAt: true,
   // overdueIgnored: surfaced to the FE so the dashboard's client-side

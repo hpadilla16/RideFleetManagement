@@ -27,9 +27,30 @@ import { api } from '../../lib/client';
 function sourceLabelFor(source) {
   switch (String(source || 'tl-international')) {
     case 'economy': return 'Economy (RezLight)';
+    case 'nu': return 'NU Car Rentals';
     case 'tl-international':
     default: return 'TL International';
   }
+}
+
+// NU is the only source with a prepaid MIX (PP/OP prepaid vs blank pay-at-
+// destination). Its pending-imports rows carry `isPrepaid`; TL/Economy rows do
+// not (all prepaid) so this badge renders ONLY when the field is present, keeping
+// the TL/Economy tray byte-identical.
+function PrepaidBadge({ row }) {
+  if (row?.isPrepaid === undefined || row?.isPrepaid === null) return null;
+  const prepaid = row.isPrepaid === true;
+  const style = prepaid
+    ? { background: 'rgba(135,82,254,.15)', color: '#5a2fca', border: '1px solid rgba(135,82,254,.22)' }
+    : { background: '#fef3c7', color: '#92400e', border: '1px solid #fde68a' };
+  return (
+    <span
+      title={prepaid ? 'Prepaid through NU — do not charge at the counter' : 'Pay at destination — the counter collects at pickup'}
+      style={{ ...style, padding: '2px 8px', borderRadius: 999, fontSize: 11, fontWeight: 600, display: 'inline-block' }}
+    >
+      {prepaid ? 'Prepaid' : 'Pay at destination'}
+    </span>
+  );
 }
 
 function ReasonBadge({ reason }) {
@@ -87,7 +108,9 @@ function EditPromoteModal({ row, token, scopedPath, onClose, onSaved, basePath =
   // own token. New sources fall through to a generic token.
   const noPhonePlaceholder = source === 'economy'
     ? 'ECON-IMPORT-NO-PHONE'
-    : (source === 'tl-international' ? 'TL-IMPORT-NO-PHONE' : 'IMPORT-NO-PHONE');
+    : (source === 'nu'
+      ? 'NU-IMPORT-NO-PHONE'
+      : (source === 'tl-international' ? 'TL-IMPORT-NO-PHONE' : 'IMPORT-NO-PHONE'));
   // TL ships customer fields either flat on the row (customerFirstName, ...)
   // or nested under row.customer depending on which sync version produced the
   // record. Normalize once so the rest of the modal can read from `tl`.
@@ -528,7 +551,12 @@ export function PendingFranchiseImportsTray({ token, me, isSuper, activeTenantId
                         <div className="ui-muted" style={{ fontSize: 11 }}>{r.vehicleDescription || ''}</div>
                       </td>
                       <td style={{ padding: '6px 8px', textAlign: 'right' }}>{fmtMoney(r.totalAmount)}</td>
-                      <td style={{ padding: '6px 8px' }}><ReasonBadge reason={r.needsReviewReason} /></td>
+                      <td style={{ padding: '6px 8px' }}>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: 4, alignItems: 'flex-start' }}>
+                          <ReasonBadge reason={r.needsReviewReason} />
+                          <PrepaidBadge row={r} />
+                        </div>
+                      </td>
                       <td style={{ padding: '6px 8px', whiteSpace: 'nowrap' }}>
                         <button type="button" disabled={!canAutoPromote} onClick={() => promote(r)} title={canAutoPromote ? '' : 'Mapping incomplete'}>
                           Promote

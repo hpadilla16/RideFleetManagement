@@ -605,6 +605,7 @@ model Tenant {
   tlLocationCodeMaps       LocationCodeMap[]
   franchisePayoutPeriods   FranchisePayoutPeriod[]
   economyLocationConfigs   EconomyLocationConfig[]
+  nuLocationConfigs        NuLocationConfig[]
   loanerAgreements         LoanerAgreement[]
   longTermPlans            LongTermPlan[]
 }
@@ -1223,6 +1224,13 @@ model Reservation {
   loanerLastVehicleSwapAt         DateTime?
 
   bookingChannel String @default("STAFF")
+
+  // Structured prepaid signal for franchise imports that carry a prepaid MIX
+  // (NU Car Rentals: PP/OP = prepaid, blank Code = pay-at-destination). Stamped
+  // at promotion from ExternalReservation.isPrepaid. NULL for every other source
+  // (TL/Economy = all-prepaid, staff-created = n/a) → zero behavior change.
+  // MONEY: informational only — Ride still records estimatedTotal, never charges.
+  isPrepaid Boolean?
 
   customerId String
   customer   Customer @relation(fields: [customerId], references: [id])
@@ -3902,6 +3910,12 @@ model ExternalReservation {
   dropoffLocation         String?
   totalAmount             Decimal?                @db.Decimal(12, 2)
   currency                String?                 @default("USD")
+  // Prepaid flag (2026-07-09, NU integration). Nullable + additive so it stays
+  // meaningless for sources that don't carry a prepaid signal (TL/Economy leave
+  // it null). NU derives it from the grid Code column: PP/OP → true (prepaid,
+  // do NOT collect at counter), blank → false (pay-at-destination, counter
+  // collects manually). Never affects the money posture — estimatedTotal only.
+  isPrepaid               Boolean?
   rawJson                 Json
   firstSeenAt             DateTime                @default(now())
   lastSyncedAt            DateTime                @default(now())
@@ -4036,6 +4050,48 @@ model EconomyLocationConfig {
   createdAt    DateTime @default(now())
 
   @@unique([tenantId, externalArea])
+  @@index([tenantId, enabled])
+}
+
+// ============================================================================
+// NU Car Rentals (affiliates portal) franchise integration (2026-07-09)
+//
+// Clones the Economy integration but for the NU Car Rentals ASP.NET WebForms +
+// Telerik affiliates portal. Reuses ExternalReservation / ExternalSyncRun /
+// IntegrationCredential / AcrissCategoryMap as-is (their sourceSystem is a free
+// string → 'NU'). The ONLY new table is NuLocationConfig: the per-tenant enable
+// switch that maps the NU credential to a Ride location.
+//
+// NU → FLL is 1:1 (one credential = one location, center "100"/FLL). Unlike
+// Economy (per-area prefix filter), there is NO area filter — the target Ride
+// locationId is resolved from the single enabled NuLocationConfig row. The
+// nullable `externalCenter` (e.g. "100") is carried so multi-center NU accounts
+// can be supported later by mapping rows to a specific center.
+//
+// One NU credential per tenant (IntegrationCredential unique
+// (tenantId, sourceSystem)) covers the account.
+//
+// See doc/nu-integration-plan-2026-07-09.md
+// ============================================================================
+model NuLocationConfig {
+  id           String   @id @default(cuid())
+  tenantId     String
+  tenant       Tenant   @relation(fields: [tenantId], references: [id])
+  locationId   String // Ride location (FLL)
+  // NU portal center code (e.g. "100" = FT. LAUDERDALE). Nullable — NU accounts
+  // CAN be multi-center later; for the 1:1 FLL case it is optional metadata.
+  externalCenter String?
+  enabled      Boolean  @default(true)
+  // Per-config import window override (mirrors Economy). NULL → fall back to the
+  // env defaults NU_DATE_WINDOW_LOOKBACK_DAYS / NU_DATE_WINDOW_LOOKAHEAD_DAYS.
+  lookbackDays  Int?
+  lookaheadDays Int?
+  createdAt    DateTime @default(now())
+
+  // 1:1 FLL: one enabled config row per tenant is expected. The unique is on
+  // (tenantId, locationId) — the sane key for the 1:1 shape (one Ride location
+  // mapped once per tenant). externalCenter stays free for future multi-center.
+  @@unique([tenantId, locationId])
   @@index([tenantId, enabled])
 }
 

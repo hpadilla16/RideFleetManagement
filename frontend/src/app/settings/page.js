@@ -28,6 +28,7 @@ import { AuthGate } from '../../components/AuthGate';
 import { AppShell } from '../../components/AppShell';
 import { TLIntegrationPanel } from '../../components/settings/TLIntegrationPanel';
 import { EconomyIntegrationPanel } from '../../components/settings/EconomyIntegrationPanel';
+import { NuIntegrationPanel } from '../../components/settings/NuIntegrationPanel';
 import { KioskUpsellSettings } from '../../components/settings/KioskUpsellSettings';
 import { LoanerRatesTab } from './LoanerRatesTab';
 import { API_BASE, api } from '../../lib/client';
@@ -224,7 +225,7 @@ function SettingsInner({ token, me, logout }) {
   const [stopSales, setStopSales] = useState([]);
   const [stopSaleForm, setStopSaleForm] = useState(EMPTY_STOP_SALE);
   const [stopSaleEditId, setStopSaleEditId] = useState(null);
-  // Integrations tab: which booking-source panel is active (TL vs Economy).
+  // Integrations tab: which booking-source panel is active (TL / Economy / NU).
   const [activeIntegration, setActiveIntegration] = useState('tl');
 
   const role = String(me?.role || '').toUpperCase().trim();
@@ -3428,7 +3429,7 @@ function SettingsInner({ token, me, logout }) {
 
         {tab === 'integrations' && (
           <div className="stack" style={{ gap: 20 }}>
-            {/* Booking-source switcher (TL vs Economy) — mirrors the mockup */}
+            {/* Booking-source switcher (TL / Economy / NU) — mirrors the mockup */}
             <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
               <button
                 type="button"
@@ -3444,6 +3445,13 @@ function SettingsInner({ token, me, logout }) {
               >
                 Economy (RezLight)
               </button>
+              <button
+                type="button"
+                className={activeIntegration === 'nu' ? '' : 'subtle'}
+                onClick={() => setActiveIntegration('nu')}
+              >
+                NU Car Rentals
+              </button>
             </div>
 
             {activeIntegration === 'tl' ? (
@@ -3456,12 +3464,23 @@ function SettingsInner({ token, me, logout }) {
                 scopedSettingsPath={scopedSettingsPath}
                 onPageMsg={setMsg}
               />
-            ) : (
+            ) : activeIntegration === 'economy' ? (
               <EconomyIntegrationPanel
                 token={token}
                 me={me}
                 isSuper={isSuper}
                 isAdmin={isAdmin}
+                activeSettingsTenantId={activeSettingsTenantId}
+                scopedSettingsPath={scopedSettingsPath}
+                onPageMsg={setMsg}
+              />
+            ) : (
+              <NuIntegrationPanel
+                token={token}
+                me={me}
+                isSuper={isSuper}
+                isAdmin={isAdmin}
+                tenantName={isSuper ? (activeSettingsTenant?.name || 'Tenant') : (me?.tenant?.name || 'Current tenant')}
                 activeSettingsTenantId={activeSettingsTenantId}
                 scopedSettingsPath={scopedSettingsPath}
                 onPageMsg={setMsg}

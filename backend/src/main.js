@@ -83,6 +83,7 @@ import { smsRouter } from './modules/sms/sms.routes.js';
 import { knowledgeBaseRouter } from './modules/knowledge-base/knowledge-base.routes.js';
 import { tlInternationalRouter } from './modules/integrations/tl-international/tl-international.routes.js';
 import { economyRouter } from './modules/integrations/economy/economy.routes.js';
+import { nuRouter } from './modules/integrations/nu/nu.routes.js';
 import { captureBackendException, flushSentry, initSentry, isSentryEnabled } from './lib/sentry.js';
 import { appErrorHandler } from './lib/errors.js';
 import { closeBrowser } from './lib/puppeteer-browser.js';
@@ -234,6 +235,11 @@ app.use('/api/admin/integrations/tl-international', tenantRateLimit, tlInternati
 // gates only the autonomous scheduler (economy.scheduler.js), which stays dark
 // until the flag is flipped.
 app.use('/api/admin/integrations/economy', tenantRateLimit, economyRouter);
+// NU Car Rentals booking-source integration (Fase 5, 2026-07-09) — mounted
+// identically to TL/Economy. Routes/config always available; NU_INTEGRATION_ENABLED
+// gates only the autonomous scheduler (nu.scheduler.js), which stays dark until
+// the flag is flipped. NU is location 1:1 (single NuLocationConfig mapping).
+app.use('/api/admin/integrations/nu', tenantRateLimit, nuRouter);
 // Round 26 (2026-06-01) — SUPER_ADMIN reservation status override + smart rewind
 app.use('/api/admin/reservations', requireAuth, requireRole('SUPER_ADMIN'), reservationOverrideRouter);
 // VozIA Fase 6 re-scope (2026-07-04) — SUPER_ADMIN ops: free a wedged idempotency key.
