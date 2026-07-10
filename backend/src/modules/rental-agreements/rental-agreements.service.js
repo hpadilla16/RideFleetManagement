@@ -2400,7 +2400,9 @@ export const rentalAgreementsService = {
         const subtotal = roundMoney(Math.max(0, base + servicesTotal + feesTotal - discountTotal));
         const taxRate = Number(reservation?.pricingSnapshot?.taxRate ?? reservation.pickupLocation?.taxRate ?? 0);
         const taxes = roundMoney(subtotal * (taxRate / 100));
-        const total = roundMoney(subtotal + taxes);
+        // NOTE: subtotal/taxes here only shape the SYNTHESIZED chargeRows (daily/tax);
+        // the authoritative agreement subtotal/taxes/fees/total/balance are recomputed
+        // below from the FULL persisted set (synthesized + preserved carve-out rows).
 
         if (discountTotal > 0) {
           const discountRounded = roundMoney(discountTotal);
@@ -2409,21 +2411,108 @@ export const rentalAgreementsService = {
         chargeRows.push({ rentalAgreementId: existing.id, name: `Tax (${taxRate.toFixed(2)}%)`, chargeType: 'TAX', quantity: 1, rate: taxes, total: taxes, taxable: false, selected: true, sortOrder: chargeRows.length });
 
         // Atomic re-sync (default chargeRows path — auto-fees + services + tax).
-        await prisma.$transaction([
-          prisma.rentalAgreementCharge.deleteMany({ where: { rentalAgreementId: existing.id } }),
-          prisma.rentalAgreementCharge.createMany({ data: chargeRows }),
-          prisma.rentalAgreement.update({
+        //
+        // MONEY-FIX 2026-07-09 (branch 3 — synthesized charges, no ReservationCharge
+        // rows): this is the ONLY startFromReservation branch reached when the
+        // reservation has NO selected ReservationCharge rows (staff/imported/
+        // snapshot-priced), so structuredReservationChargeRows returns null and we
+        // synthesize daily/service/fee/tax rows above. The prior deleteMany here was
+        // UNCONDITIONAL and wiped the agreement-only rows — ADMIN_CORRECTION misc
+        // charges, DAMAGE_CHARGE damage charges, FEE_ENGINE_ fees — that have no
+        // ReservationCharge to re-sync from, so Print/GET agreement made them vanish
+        // and the later void 404'd. We CANNOT delegate to syncAgreementCharges here
+        // (branches 1/2 do): it re-mirrors from reservation.charges which is EMPTY on
+        // this path, so it would delete the synthesized daily/tax rows and never
+        // recreate them, zeroing the agreement. Instead we apply the SAME carve-out
+        // (preserve FEE_ENGINE_/ADMIN_CORRECTION/DAMAGE_CHARGE) and recompute totals by
+        // reading back the FULL persisted set (synthesized rows just created + preserved
+        // carve-out rows) and re-bucketing them EXACTLY the way syncAgreementCharges does
+        // (TAX -> taxes, deposits excluded, FEE_ENGINE_* -> fees, everything else ->
+        // subtotal; total = subtotal+taxes+fees; paidAmount = real PAID non-AUTH_HOLD
+        // payments; balance = max(0, total - paid)). Each row is counted exactly once.
+        //
+        // NULL-SAFE DELETE (branch 3 only): unlike branches 1/2 (whose re-synced rows
+        // all carry a TYPED source: DAILY/SERVICE/TAX/…), branch 3 SYNTHESIZES several
+        // rows with a NULL source (Daily, plain Fees, Discount, Tax above). Postgres
+        // evaluates `NULL NOT LIKE 'FEE_ENGINE_%'` (and `NULL <> 'ADMIN_CORRECTION'`) to
+        // NULL, so the plain triple-NOT predicate branches 1/2 use would NOT match those
+        // null-source rows and would leave them behind — every startFromReservation would
+        // then ADD a second Daily/Tax, doubling the total. So here we explicitly ALSO
+        // delete null-source rows (`{ source: null }`) alongside the non-preserved typed
+        // rows. Net effect matches the intended carve-out: keep ONLY the agreement-only
+        // FEE_ENGINE_/ADMIN_CORRECTION/DAMAGE_CHARGE rows, delete everything else.
+        await prisma.$transaction(async (tx) => {
+          await tx.rentalAgreementCharge.deleteMany({
+            where: {
+              rentalAgreementId: existing.id,
+              OR: [
+                { source: null },
+                {
+                  AND: [
+                    { NOT: { source: { startsWith: 'FEE_ENGINE_' } } },
+                    { NOT: { source: 'ADMIN_CORRECTION' } },
+                    { NOT: { source: 'DAMAGE_CHARGE' } }
+                  ]
+                }
+              ]
+            }
+          });
+          await tx.rentalAgreementCharge.createMany({ data: chargeRows });
+
+          // Recompute from the FULL persisted set so the preserved agreement-only
+          // rows are folded into the totals exactly once (chargeRows alone would
+          // omit them and understate the total). Bucketing mirrors
+          // reservation-pricing.service.js#syncAgreementCharges (~259-300).
+          const allCharges = await tx.rentalAgreementCharge.findMany({
+            where: { rentalAgreementId: existing.id, selected: true },
+            select: { chargeType: true, total: true, source: true, name: true }
+          });
+          let recSubtotal = 0;
+          let recTaxes = 0;
+          let recFees = 0;
+          for (const c of allCharges) {
+            const t = Number(c.total || 0);
+            const type = String(c.chargeType || '').toUpperCase();
+            const src = String(c.source || '').toUpperCase();
+            if (type === 'TAX') {
+              recTaxes += t;
+            } else if (isDepositCharge(c)) {
+              // Deposits (Deposit Due + Security Deposit) are held/collected
+              // separately and excluded from total/balance.
+              continue;
+            } else if (src.startsWith('FEE_ENGINE')) {
+              recFees += t;
+            } else {
+              recSubtotal += t;
+            }
+          }
+          const recSubtotalR = roundMoney(recSubtotal);
+          const recTaxesR = roundMoney(recTaxes);
+          const recFeesR = roundMoney(recFees);
+          const recTotal = roundMoney(recSubtotalR + recTaxesR + recFeesR);
+          // paidAmount = REAL captured money only (AUTH_HOLD authorizations excluded),
+          // balance clamped to >= 0 — same as syncAgreementCharges / recomputeAgreementPaidAndBalance.
+          const paidRows = await tx.rentalAgreementPayment.findMany({
+            where: { rentalAgreementId: existing.id, status: 'PAID', method: { not: 'AUTH_HOLD' } },
+            select: { amount: true }
+          });
+          const recPaid = roundMoney(paidRows.reduce((s, p) => s + Number(p.amount || 0), 0));
+          const recBalance = Math.max(0, roundMoney(recTotal - recPaid));
+
+          await tx.rentalAgreement.update({
             where: { id: existing.id },
             data: {
               tenantId: existing.tenantId || reservation.tenantId || null,
               notes: reservation.notes,
-              subtotal,
-              taxes,
-              total,
-              balance: roundMoney(total - paid)
+              subtotal: recSubtotalR,
+              taxes: recTaxesR,
+              fees: recFeesR,
+              total: recTotal,
+              paidAmount: recPaid,
+              balance: recBalance
             }
-          })
-        ], { timeout: 10000 });
+          });
+        }, { timeout: 10000 });
       }
       return this.getById(existing.id);
     }

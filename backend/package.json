@@ -38,7 +38,7 @@
     "test:auth": "node --test --test-force-exit src/modules/auth/auth-validation.test.mjs",
     "test:cache": "node --test src/lib/cache.test.mjs src/lib/cache/tenantKey.test.mjs",
     "test:puppeteer": "node --test src/lib/puppeteer-browser.test.mjs",
-    "test:rental-agreements": "node --test --test-force-exit src/modules/rental-agreements/rental-agreements-email-async.test.mjs src/modules/rental-agreements/rental-agreements-finalize-tx.test.mjs src/modules/rental-agreements/start-from-reservation-preserves-manual-charges.test.mjs",
+    "test:rental-agreements": "node --test --test-force-exit src/modules/rental-agreements/rental-agreements-email-async.test.mjs src/modules/rental-agreements/rental-agreements-finalize-tx.test.mjs src/modules/rental-agreements/start-from-reservation-preserves-manual-charges.test.mjs src/modules/rental-agreements/start-from-reservation-branch3-preserves-manual-charges.test.mjs",
     "test:logger": "node --test src/lib/logger-redact.test.mjs",
     "test:customer-inspection": "node --test --test-force-exit src/modules/customer-inspection/customer-inspection.test.mjs",
     "test:kiosk": "node --test --test-force-exit src/modules/kiosk/kiosk.test.mjs src/modules/kiosk/kiosk-offers.test.mjs src/modules/kiosk/kiosk-checkout.test.mjs src/lib/module-access-kiosk.test.mjs",
