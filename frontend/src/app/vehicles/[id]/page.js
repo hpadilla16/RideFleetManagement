@@ -249,6 +249,32 @@ function VehicleProfileInner({ token, me, logout }) {
   };
   useEffect(() => { if (id) loadDamage(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [id, token]);
 
+  // Admin failsafe (Feature 3) — edit or delete a damage record. Delete also
+  // VOIDS the linked contract charge (server-side). ADMIN/SUPER_ADMIN only.
+  const editDamageRecord = async (report) => {
+    const description = window.prompt('Edit damage description', report.description || '');
+    if (description === null) return;
+    try {
+      await api(`/api/report-damage/reports/${report.id}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ description, reason: 'Admin failsafe edit from vehicle profile' }),
+      }, token);
+      setMsg('Damage record updated');
+      await loadDamage();
+    } catch (e2) { setMsg(e2?.message || 'Failed to update damage record'); }
+  };
+  const deleteDamageRecord = async (report) => {
+    if (!window.confirm('Delete this damage record? If a charge was added to the contract it will be VOIDED. This is written to the audit log.')) return;
+    try {
+      const out = await api(`/api/report-damage/reports/${report.id}`, {
+        method: 'DELETE',
+        body: JSON.stringify({ reason: 'Admin failsafe delete from vehicle profile' }),
+      }, token);
+      setMsg(out?.chargeVoided ? 'Damage record deleted · linked charge voided' : 'Damage record deleted');
+      await loadDamage();
+    } catch (e2) { setMsg(e2?.message || 'Failed to delete damage record'); }
+  };
+
   const markFixed = async () => {
     if (!fixModal?.report || !fixModal.photo) return;
     setFixModal((c) => ({ ...c, saving: true }));
@@ -455,6 +481,8 @@ function VehicleProfileInner({ token, me, logout }) {
   const fuelOdoRows = buildFuelOdometerRows(fuelReadings, mileageHistory);
   const lastMileageEntry = row?.lastMileageEntry || null;
   const canManageTelematics = ['SUPER_ADMIN', 'ADMIN', 'OPS'].includes(String(me?.role || '').toUpperCase());
+  // Report Damage failsafe (Feature 3) — edit/delete a damage record is admin-only.
+  const canAdminDamage = ['SUPER_ADMIN', 'ADMIN'].includes(String(me?.role || '').toUpperCase());
   const selectedTelematicsProvider = telematicsProviders.find((provider) => provider.code === String(deviceForm.provider || '').toUpperCase()) || null;
   const telematicsFeatureReady = telematicsConfig?.ready !== false;
 
@@ -1067,12 +1095,20 @@ function VehicleProfileInner({ token, me, logout }) {
                           <>
                             <span className="ui-muted" style={{ fontSize: 12 }}>Tap a red dot (or a row) to see the damage and mark it fixed.</span>
                             {damage.active.map((r) => (
-                              <button key={r.id} type="button" className="btn-ghost" style={{ textAlign: 'left', padding: 10, border: '1px solid #E5E7EB', borderRadius: 8 }} onClick={() => setFixModal({ report: r, photo: null, saving: false })}>
-                                <strong style={{ fontSize: 13 }}>{r.description || 'Damage'}</strong>
-                                <span className="ui-muted" style={{ display: 'block', fontSize: 12 }}>
-                                  {VIEW_LABELS[r.view]} view · approved {formatDateTime(r.approvedAt)}{r.reservationNumber ? ` · #${r.reservationNumber}` : ''}
-                                </span>
-                              </button>
+                              <div key={r.id} style={{ border: '1px solid #E5E7EB', borderRadius: 8, overflow: 'hidden' }}>
+                                <button type="button" className="btn-ghost" style={{ textAlign: 'left', padding: 10, width: '100%', border: 'none' }} onClick={() => setFixModal({ report: r, photo: null, saving: false })}>
+                                  <strong style={{ fontSize: 13 }}>{r.description || 'Damage'}</strong>
+                                  <span className="ui-muted" style={{ display: 'block', fontSize: 12 }}>
+                                    {VIEW_LABELS[r.view]} view · approved {formatDateTime(r.approvedAt)}{r.reservationNumber ? ` · #${r.reservationNumber}` : ''}
+                                  </span>
+                                </button>
+                                {canAdminDamage ? (
+                                  <div style={{ display: 'flex', gap: 8, padding: '6px 10px', borderTop: '1px solid #F1EFE8', background: 'rgba(0,0,0,0.02)' }}>
+                                    <button type="button" onClick={() => editDamageRecord(r)} style={{ background: 'rgba(135,82,254,.08)', color: '#4c1d95', border: '1px solid rgba(135,82,254,.16)', borderRadius: 8, padding: '4px 10px', fontSize: 12, fontWeight: 700, cursor: 'pointer' }}>Edit</button>
+                                    <button type="button" onClick={() => deleteDamageRecord(r)} style={{ background: '#fff5f5', color: '#b91c1c', border: '1px solid #b91c1c', borderRadius: 8, padding: '4px 10px', fontSize: 12, fontWeight: 700, cursor: 'pointer' }}>Delete · void charge</button>
+                                  </div>
+                                ) : null}
+                              </div>
                             ))}
                           </>
                         )}
@@ -1088,6 +1124,14 @@ function VehicleProfileInner({ token, me, logout }) {
                                   {r.photoUrl && r.fixedPhotoUrl ? ' · ' : ''}
                                   {r.fixedPhotoUrl ? <a href={r.fixedPhotoUrl} target="_blank" rel="noreferrer">repair photo</a> : null}
                                 </span>
+                                {/* Admin failsafe extends to FIXED records too — a mistaken
+                                    record that was marked fixed can still be corrected / voided. */}
+                                {canAdminDamage ? (
+                                  <div style={{ display: 'flex', gap: 8, marginTop: 6 }}>
+                                    <button type="button" onClick={() => editDamageRecord(r)} style={{ background: 'rgba(135,82,254,.08)', color: '#4c1d95', border: '1px solid rgba(135,82,254,.16)', borderRadius: 8, padding: '3px 9px', fontSize: 11, fontWeight: 700, cursor: 'pointer' }}>Edit</button>
+                                    <button type="button" onClick={() => deleteDamageRecord(r)} style={{ background: '#fff5f5', color: '#b91c1c', border: '1px solid #b91c1c', borderRadius: 8, padding: '3px 9px', fontSize: 11, fontWeight: 700, cursor: 'pointer' }}>Delete · void charge</button>
+                                  </div>
+                                ) : null}
                               </div>
                             ))}
                           </details>

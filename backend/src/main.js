@@ -68,6 +68,7 @@ import { publicLoanerRouter } from './modules/dealership-loaner/public-loaner.ro
 import { loanerRateRouter } from './modules/dealership-loaner/loaner-rate.routes.js';
 import { longTermRouter } from './modules/long-term/long-term.routes.js';
 import { incidentReportRouter } from './modules/incident-report/incident-report.routes.js';
+import { reportDamageRouter } from './modules/report-damage/report-damage.routes.js';
 import { issueCenterRouter, publicIssueCenterRouter } from './modules/issue-center/issue-center.routes.js';
 import { tollsRouter, tollsInternalRouter } from './modules/tolls/tolls.routes.js';
 import { plannerRouter } from './modules/planner/planner.routes.js';
@@ -222,6 +223,11 @@ app.use('/api/long-term', requireAuth, tenantRateLimit, requireModuleAccess('res
 app.use('/api/public/loaner-signature', loanerSignaturePublicRouter);
 app.use('/api/public/loaner-portal', loanerPortalPublicRouter);
 app.use('/api/incident-reports', requireAuth, tenantRateLimit, incidentReportRouter);
+// Report Damage flow (Feature 3, 2026-07-10) — a reservation-launched wizard that
+// orchestrates the existing vehicle-damage + contract-charge + incident modules.
+// Per-route role gates live INSIDE the router (POST = AGENT/OPS/ADMIN/SUPER_ADMIN
+// with the scoped charge exception; PATCH/DELETE failsafe = ADMIN/SUPER_ADMIN).
+app.use('/api/report-damage', requireAuth, tenantRateLimit, requireModuleAccess('reservations'), reportDamageRouter);
 app.use('/api/issue-center', requireAuth, tenantRateLimit, requireModuleAccess('issueCenter'), issueCenterRouter);
 app.use('/api/tolls', requireAuth, tenantRateLimit, requireModuleAccess('tolls'), tollsRouter);
 app.use('/api/citations', requireAuth, tenantRateLimit, requireModuleAccess('citations'), citationsRouter);
@@ -240,8 +246,11 @@ app.use('/api/admin/integrations/economy', tenantRateLimit, economyRouter);
 // gates only the autonomous scheduler (nu.scheduler.js), which stays dark until
 // the flag is flipped. NU is location 1:1 (single NuLocationConfig mapping).
 app.use('/api/admin/integrations/nu', tenantRateLimit, nuRouter);
-// Round 26 (2026-06-01) — SUPER_ADMIN reservation status override + smart rewind
-app.use('/api/admin/reservations', requireAuth, requireRole('SUPER_ADMIN'), reservationOverrideRouter);
+// Round 26 (2026-06-01) — reservation status override + smart rewind.
+// 2026-07-10: widened from SUPER_ADMIN-only to ADMIN + SUPER_ADMIN (Hector). ADMIN
+// gets the same power (all target statuses + the smart rewind); SUPER_ADMIN still
+// auto-passes via requireRole's isSuperAdmin bypass, so ADMIN is the only addition.
+app.use('/api/admin/reservations', requireAuth, requireRole('ADMIN', 'SUPER_ADMIN'), reservationOverrideRouter);
 // VozIA Fase 6 re-scope (2026-07-04) — SUPER_ADMIN ops: free a wedged idempotency key.
 app.use('/api/admin/idempotency', requireAuth, requireRole('SUPER_ADMIN'), idempotencyAdminRouter);
 app.use('/api/store-board', requireAuth, tenantRateLimit, requireRole('SUPER_ADMIN', 'ADMIN', 'OPS'), storeBoardRouter);

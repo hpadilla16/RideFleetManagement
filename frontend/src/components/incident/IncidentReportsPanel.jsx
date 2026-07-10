@@ -101,7 +101,7 @@ function SignaturePad({ onChange }) {
   );
 }
 
-export function IncidentReportsPanel({ reservation, token, role, me }) {
+export function IncidentReportsPanel({ reservation, token, role, me, focusIncidentId }) {
   const allowed = ALLOWED_ROLES.includes(String(role || '').toUpperCase());
   const [incidents, setIncidents] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -120,6 +120,18 @@ export function IncidentReportsPanel({ reservation, token, role, me }) {
     if (allowed && reservation?.id) refreshList();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [reservation?.id]);
+
+  // Report Damage "Complete now" nudge (Feature 3): when a caller points us at the
+  // freshly-created DRAFT, refresh the list, open that incident, and scroll to it.
+  useEffect(() => {
+    if (!allowed || !focusIncidentId) return;
+    (async () => {
+      await refreshList();
+      await openIncident(focusIncidentId);
+      try { document.getElementById('incident-reports')?.scrollIntoView({ behavior: 'smooth', block: 'start' }); } catch { /* noop */ }
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [focusIncidentId]);
 
   if (!allowed || !reservation?.id) return null;
 
@@ -271,7 +283,7 @@ export function IncidentReportsPanel({ reservation, token, role, me }) {
   );
 
   return (
-    <section className="glass card-lg section-card" style={{ marginTop: 24, marginBottom: 24, borderLeft: '4px solid #185FA5' }}>
+    <section id="incident-reports" className="glass card-lg section-card" style={{ marginTop: 24, marginBottom: 24, borderLeft: '4px solid #185FA5' }}>
       <div className="row-between" style={{ alignItems: 'center' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
           <strong style={{ fontSize: 15 }}>Incident reports</strong>
@@ -434,6 +446,9 @@ export function IncidentReportsPanel({ reservation, token, role, me }) {
                   ? 'Showing this report’s selected charges.'
                   : 'No explicit selection — using all selected agreement charges. Tick boxes to pick specific ones.'}
               </p>
+              <div style={{ fontSize: 12, lineHeight: 1.5, color: '#0C447C', background: '#EAF2FB', border: '1px solid rgba(12,68,124,.22)', borderRadius: 8, padding: '8px 10px', marginBottom: 8 }}>
+                These charges are <strong>already on the contract</strong>. Ticking them here only <strong>documents</strong> them on this report — it does <strong>not</strong> bill the customer again.
+              </div>
               {agCharges.map((c) => {
                 const checked = (open.chargeIds && open.chargeIds.length)
                   ? open.chargeIds.map(String).includes(String(c.id))

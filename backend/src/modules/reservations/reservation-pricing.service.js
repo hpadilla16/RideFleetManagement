@@ -236,12 +236,17 @@ async function syncAgreementCharges(reservationId, scope = {}, opts = {}) {
   // triggers ("add doesn't add"). Voided rows (selected=false) are kept here too
   // (the delete is source-based, not selected-based) so the recompute's
   // selected:true filter excludes them from totals while keeping them for history.
+  // 2026-07-10 (Report Damage, Feature 3): ALSO preserve DAMAGE_CHARGE rows — the
+  // damage charge added inside the Report Damage flow lives only on the agreement
+  // (no ReservationCharge to re-sync from), exactly like FEE_ENGINE_ / ADMIN_CORRECTION
+  // rows. Without this carve-out the very recompute the charge triggers would wipe it.
   await prisma.rentalAgreementCharge.deleteMany({
     where: {
       rentalAgreementId: agreement.id,
       AND: [
         { NOT: { source: { startsWith: 'FEE_ENGINE_' } } },
-        { NOT: { source: 'ADMIN_CORRECTION' } }
+        { NOT: { source: 'ADMIN_CORRECTION' } },
+        { NOT: { source: 'DAMAGE_CHARGE' } }
       ]
     }
   });
@@ -635,9 +640,18 @@ export const reservationPricingService = {
   },
 
   async addManualCharge(reservationId, body = {}, opts = {}, scope = {}) {
-    const { reason = null, actorUserId = null } = opts;
+    const { reason = null, actorUserId = null, returnMeta = false } = opts;
     const name = String(body?.name || '').trim();
     const amount = Number(body?.amount);
+    // Optional source tag. Defaults to ADMIN_CORRECTION so every EXISTING caller
+    // (Admin Corrections panel, VozIA service account) is byte-for-byte unchanged.
+    // The Report Damage flow (Feature 3) passes 'DAMAGE_CHARGE' — which is carved
+    // out of the recompute deleteMany in syncAgreementCharges and surfaced by
+    // listAgreementCharges exactly like ADMIN_CORRECTION, so the charge sticks and
+    // is voidable from Admin Corrections. Any other value falls back to the default.
+    const source = ['ADMIN_CORRECTION', 'DAMAGE_CHARGE'].includes(String(body?.source || '').toUpperCase())
+      ? String(body.source).toUpperCase()
+      : 'ADMIN_CORRECTION';
     if (!name) { const e = new Error('name is required'); e.status = 400; throw e; }
     if (!Number.isFinite(amount) || amount === 0) { const e = new Error('amount must be a non-zero number'); e.status = 400; throw e; }
     await getReservationOrThrow(reservationId, scope);
@@ -660,7 +674,7 @@ export const reservationPricingService = {
       total: rounded,
       taxable: false,
       selected: true,
-      source: 'ADMIN_CORRECTION'
+      source
     }, select: { id: true } });
     await syncAgreementCharges(reservationId, scope, { allowClosed: true });
     const after = await prisma.rentalAgreement.findUnique({ where: { id: agreement.id }, select: { balance: true } });
@@ -673,13 +687,21 @@ export const reservationPricingService = {
       metadata: JSON.stringify({
         kind: rounded < 0 ? 'add_credit' : 'add_charge',
         chargeId: created.id,
+        source,
         name: name.slice(0, 200),
         amount: rounded,
         balanceBefore,
         balanceAfter: Number(after?.balance || 0)
       })
     }});
-    return this.getPricing(reservationId, scope, { allowClosed: true });
+    const pricing = await this.getPricing(reservationId, scope, { allowClosed: true });
+    // Default return is the pricing object (unchanged for every existing caller).
+    // The Report Damage orchestrator passes opts.returnMeta to also get the new
+    // chargeId (to cross-link it onto the VehicleDamageReport) + before/after balance.
+    if (returnMeta) {
+      return { pricing, chargeId: created.id, source, balanceBefore, balanceAfter: Number(after?.balance || 0) };
+    }
+    return pricing;
   },
 
   // Admin Corrections — the agreement-level charge rows (RentalAgreementCharge),
@@ -710,7 +732,7 @@ export const reservationPricingService = {
         where: {
           rentalAgreementId: agreement.id,
           selected: true,
-          OR: [{ source: { startsWith: 'FEE_ENGINE_' } }, { source: 'ADMIN_CORRECTION' }]
+          OR: [{ source: { startsWith: 'FEE_ENGINE_' } }, { source: 'ADMIN_CORRECTION' }, { source: 'DAMAGE_CHARGE' }]
         },
         orderBy: [{ sortOrder: 'asc' }, { createdAt: 'asc' }],
         select: { id: true, name: true, total: true, source: true, chargeType: true, taxable: true }

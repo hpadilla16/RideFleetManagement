@@ -8,6 +8,7 @@ import { AgreementAddendumsCard } from '../../../components/AgreementAddendumsCa
 import { ReservationExtendDialog } from '../../../components/ReservationExtendDialog';
 import { ReservationOverridePanel } from '../../../components/admin/ReservationOverridePanel';
 import { IncidentReportsPanel } from '../../../components/incident/IncidentReportsPanel';
+import { ReportDamageWizard } from '../../../components/reservations/ReportDamageWizard';
 import { api, API_BASE } from '../../../lib/client';
 import { utcToTenantLocalInput } from '../../../lib/tenant-time';
 import { FuelLevelInput, OdometerInput } from '../../../components/wizard/MetricInputs';
@@ -646,14 +647,15 @@ function AdminCorrectionsPanel({ reservationId, token, me, onChanged }) {
   return (
     <div className="glass card" style={{ marginTop: 12, padding: 10, borderColor: 'rgba(163,45,45,.25)' }}>
       <div className="row-between" style={{ marginBottom: 8 }}>
-        <h3 style={{ margin: 0 }}>⚙️ Admin Corrections</h3>
+        <h3 style={{ margin: 0 }}>⚙️ Add charge / misc item</h3>
         <button type="button" className="button-subtle" onClick={() => setOpen((v) => !v)}>{open ? 'Hide' : 'Show'}</button>
       </div>
       {open ? (
         <>
           <p className="label" style={{ textTransform: 'none', letterSpacing: 0 }}>
-            Fix floor mistakes — void a charge (incl. fuel/cleaning/smoking/late fees) or add a manual
-            charge/credit. Every change recomputes the balance and is logged with your reason.
+            For damage charges, citations/tickets, or one-off adjustments (variable amounts). Admin only.
+            You can also void an existing charge (incl. fuel/cleaning/smoking/late fees) or add a credit
+            (negative amount). Every change recomputes the balance and is logged with your reason.
           </p>
           {msg ? <p className="label" style={{ textTransform: 'none', letterSpacing: 0, color: '#a32d2d' }}>{msg}</p> : null}
           {pricing ? (
@@ -689,7 +691,7 @@ function AdminCorrectionsPanel({ reservationId, token, me, onChanged }) {
             </div>
           </div>
           <div className="inline-actions" style={{ marginTop: 8 }}>
-            <button type="button" disabled={busy} onClick={addCharge}>Add charge / credit</button>
+            <button type="button" disabled={busy} onClick={addCharge}>Add charge / misc item</button>
           </div>
         </>
       ) : null}
@@ -721,6 +723,10 @@ function ReservationDetailInner({ token, me, logout }) {
   const [insurancePlans, setInsurancePlans] = useState([]);
   const [tollSummary, setTollSummary] = useState(null);
   const [docViewer, setDocViewer] = useState(null);
+  // Report Damage flow (Feature 3): wizard open state + the incident DRAFT the
+  // "Complete now" nudge points the IncidentReportsPanel at after a submit.
+  const [reportDamageOpen, setReportDamageOpen] = useState(false);
+  const [focusIncidentId, setFocusIncidentId] = useState(null);
   // On-demand KYC doc opener. The reservation payload ships only presence
   // booleans (hasIdPhoto/hasInsuranceDoc/hasLicenseBack) — the blob columns are
   // excluded for perf. On click we fetch the one-shot endpoint which returns a
@@ -805,6 +811,8 @@ function ReservationDetailInner({ token, me, logout }) {
   const canManagePricingOverrides = ['SUPER_ADMIN', 'ADMIN', 'OPS', 'AGENT'].includes(role);
   const canManageCommissionOwner = ['SUPER_ADMIN', 'ADMIN'].includes(role);
   const canManageExtensions = ['SUPER_ADMIN', 'ADMIN', 'OPS'].includes(role);
+  // Report Damage (Feature 3) — same roster as the incident-report router.
+  const canReportDamage = ['SUPER_ADMIN', 'ADMIN', 'OPS', 'AGENT'].includes(role);
   const canLoadSupportingCatalogs = ['SUPER_ADMIN', 'ADMIN', 'OPS'].includes(role);
 
   // Revert a previously-applied extension. Backend (PR #34) is LIFO and
@@ -3437,8 +3445,8 @@ token
         />
       )}
 
-      {/* Round 26 (2026-06-01) — SUPER_ADMIN-only manual status override.
-          Renders nothing if role !== 'SUPER_ADMIN'. */}
+      {/* Round 26 (2026-06-01) — manual status override. Widened 2026-07-10 to
+          ADMIN + SUPER_ADMIN. Renders nothing for other roles. */}
       <ReservationOverridePanel
         reservation={row}
         token={token}
@@ -3446,12 +3454,55 @@ token
         onApplied={() => refresh()}
       />
 
+      {/* Report Damage (Feature 3, 2026-07-10) — a red-accent action that opens a
+          guided wizard which records the damage, puts the correct charge on the
+          contract, sets the vehicle status, and auto-creates an incident DRAFT.
+          AGENT/OPS/ADMIN/SUPER_ADMIN; the charge is agent-scoped to THIS flow. */}
+      {canReportDamage && row?.id ? (
+        <section className="glass card-lg section-card" style={{ marginTop: 24, borderLeft: '4px solid #ef4444' }}>
+          <div className="row-between">
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+              <strong style={{ fontSize: 15 }}>⚠ Damage on this rental?</strong>
+            </div>
+            <button
+              type="button"
+              onClick={() => setReportDamageOpen(true)}
+              style={{ background: 'linear-gradient(180deg,#ff8a8a,#ef4444)', border: '1px solid #dc2626', color: '#fff', borderRadius: 12, padding: '10px 15px', fontWeight: 700, cursor: 'pointer', boxShadow: '0 8px 18px rgba(239,68,68,.28)' }}
+            >
+              ⚠ Report Damage
+            </button>
+          </div>
+          <p className="ui-muted" style={{ fontSize: 13, margin: 0 }}>
+            Records the damage on the vehicle (hard approval), adds the repair cost or deductible to the contract, sets the vehicle status, and starts an incident report DRAFT for you to complete.
+          </p>
+        </section>
+      ) : null}
+
+      {reportDamageOpen && row?.id ? (
+        <ReportDamageWizard
+          reservation={row}
+          token={token}
+          onClose={() => setReportDamageOpen(false)}
+          onDone={() => {
+            // refresh pricing/agreement so the new charge + status show. Do NOT open
+            // the DRAFT here — that happens ONLY on the "Complete now" click below, so
+            // "Later" simply closes the modal without jumping into the incident.
+            if (typeof load === 'function') load();
+          }}
+          onComplete={(result) => {
+            // "Complete now" — point the incident panel at the freshly-created DRAFT.
+            if (result?.incidentId) setFocusIncidentId(result.incidentId);
+          }}
+        />
+      ) : null}
+
       {/* Incident / damage report module (beta.62). ADMIN/OPS/AGENT only. */}
       <IncidentReportsPanel
         reservation={row}
         token={token}
         role={role}
         me={me}
+        focusIncidentId={focusIncidentId}
       />
     </AppShell>
   );

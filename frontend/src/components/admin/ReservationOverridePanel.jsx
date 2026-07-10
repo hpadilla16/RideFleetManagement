@@ -1,9 +1,10 @@
 'use client';
 
 /**
- * ReservationOverridePanel — SUPER_ADMIN-only manual status override (round 26).
+ * ReservationOverridePanel — admin manual status override (round 26).
  *
- * Renders at the bottom of /reservations/[id] for users with role=SUPER_ADMIN.
+ * Renders at the bottom of /reservations/[id] for users with role=ADMIN or
+ * SUPER_ADMIN (widened 2026-07-10; was SUPER_ADMIN-only).
  * Lets the admin force a Reservation.status to any value (e.g. when an agent
  * accidentally checked-in a reservation the customer never picked up).
  *
@@ -19,7 +20,7 @@
  * Props:
  *   reservation — the reservation row
  *   token       — auth token from AuthGate
- *   role        — current user role (renders nothing unless SUPER_ADMIN)
+ *   role        — current user role (renders nothing unless ADMIN/SUPER_ADMIN)
  *   onApplied   — callback (result) => void  fired after successful override
  *                 (parent should refetch reservation row)
  */
@@ -53,7 +54,10 @@ function fmtDate(iso) {
 }
 
 export function ReservationOverridePanel({ reservation, token, role, onApplied }) {
-  const isSuper = String(role || '').toUpperCase() === 'SUPER_ADMIN';
+  // 2026-07-10 (Hector): widened from SUPER_ADMIN-only to ADMIN + SUPER_ADMIN.
+  // Both roles get the same power (all target statuses + smart rewind); the backend
+  // mount gate (requireRole('ADMIN','SUPER_ADMIN')) is the real enforcement.
+  const canOverride = ['SUPER_ADMIN', 'ADMIN'].includes(String(role || '').toUpperCase());
   const [expanded, setExpanded] = useState(false);
   const [toStatus, setToStatus] = useState('');
   const [reason, setReason] = useState('');
@@ -63,7 +67,7 @@ export function ReservationOverridePanel({ reservation, token, role, onApplied }
   const [error, setError] = useState('');
   const [result, setResult] = useState(null);
 
-  if (!isSuper || !reservation?.id) return null;
+  if (!canOverride || !reservation?.id) return null;
 
   const currentStatus = reservation.status;
 
@@ -152,7 +156,7 @@ export function ReservationOverridePanel({ reservation, token, role, onApplied }
         onClick={() => setExpanded((v) => !v)}
       >
         <div>
-          <span className="eyebrow" style={{ color: '#b91c1c' }}>SUPER_ADMIN tools</span>
+          <span className="eyebrow" style={{ color: '#b91c1c' }}>Admin tools</span>
           <h3 style={{ margin: '4px 0 0 0' }}>Reservation status override</h3>
           <p className="ui-muted" style={{ margin: '4px 0 0 0', fontSize: 13 }}>
             Force-change reservation status with smart rewind (vehicle sync, RA cleanup, payment refund list).

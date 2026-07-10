@@ -4380,6 +4380,17 @@ model VehicleDamageReport {
   reservationId     String?
   reservationNumber String?
 
+  // Report Damage flow (Feature 3, 2026-07-10) — a reservation-launched damage
+  // that stitches this permanent vehicle record to a contract charge + an
+  // incident-report DRAFT. All additive/nullable: plain vehicle-profile manual
+  // damages and customer-inspection reports leave every column NULL.
+  reservationChargeId String? // the RentalAgreementCharge (source DAMAGE_CHARGE) put on the contract
+  incidentId          String? // the ReservationIncident DRAFT auto-created for this damage
+  estimatePhotoJson   Json?   // uploaded repair estimate (same {storage,refs}|{photos} shape as photoJson)
+  damageCostCents     Int?    // full repair cost (CUSTOMER / CUSTOMER_INSURANCE)
+  ourDeductibleCents  Int?    // our deductible (OUR_INSURANCE) — the amount billed to the renter
+  responsibleParty    String? // CUSTOMER | CUSTOMER_INSURANCE | OUR_INSURANCE
+
   phase InspectionPhase
   view  VehicleView
   // Dot position as percentages of the diagram canvas (view-relative).

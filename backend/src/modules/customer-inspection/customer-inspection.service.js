@@ -505,6 +505,13 @@ async function addManualDamage(vehicleId, body = {}, scope = {}) {
   }
   if (!body?.photoDataUrl) throw new CheckoutSessionError('A photo of the damage is required', 400, 'PHOTO_REQUIRED');
 
+  // Report Damage flow (Feature 3) context — all optional. Plain vehicle-profile
+  // manual damages omit these and every column stays NULL (unchanged behavior).
+  const toCents = (v) => (v == null || v === '' || !Number.isFinite(Number(v)) ? null : Math.round(Number(v)));
+  const rp = body.responsibleParty
+    ? String(body.responsibleParty).toUpperCase()
+    : null;
+
   const report = await prisma.vehicleDamageReport.create({
     data: {
       tenantId,
@@ -518,10 +525,19 @@ async function addManualDamage(vehicleId, body = {}, scope = {}) {
       source: 'MANUAL',
       reviewedByUserId: scope.userId || null,
       reviewedAt: new Date(),
+      reservationId: body.reservationId ? String(body.reservationId) : null,
+      reservationNumber: body.reservationNumber ? String(body.reservationNumber).slice(0, 60) : null,
+      damageCostCents: toCents(body.damageCostCents),
+      ourDeductibleCents: toCents(body.ourDeductibleCents),
+      responsibleParty: rp,
     },
   });
   const photoJson = await persistDamagePhoto(tenantId, report.id, body.photoDataUrl);
-  await prisma.vehicleDamageReport.update({ where: { id: report.id }, data: { photoJson } });
+  const patch = { photoJson };
+  if (body.estimatePhotoDataUrl) {
+    patch.estimatePhotoJson = await persistDamagePhoto(tenantId, `${report.id}-estimate`, body.estimatePhotoDataUrl);
+  }
+  await prisma.vehicleDamageReport.update({ where: { id: report.id }, data: patch });
   logger.info('[customer-inspection] manual damage added', { vehicleId, reportId: report.id, view: viewKey });
   return { id: report.id, view: viewKey };
 }
