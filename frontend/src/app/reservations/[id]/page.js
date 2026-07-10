@@ -3292,36 +3292,57 @@ token
                 </table>
               </div>
               {(() => {
-                // Pillar 2: render fee-engine charges (fuel/cleaning/smoking/late)
-                // that the checkin wizard posts onto the agreement. These don't
-                // live in ReservationCharge so they're invisible to the Charges
-                // table above — surface them in their own panel so staff can
-                // see what got added at return.
-                const feeEngineCharges = (agreementFull?.charges || []).filter((c) =>
-                  String(c?.source || '').toUpperCase().startsWith('FEE_ENGINE_') && c?.selected !== false
-                );
-                if (feeEngineCharges.length === 0) return null;
-                const feesSubtotal = feeEngineCharges.reduce((s, c) => s + Number(c?.total || 0), 0);
+                // Pillar 2: render agreement-only charges that don't live in
+                // ReservationCharge and are therefore invisible to the Charges
+                // table above — surface them in their own panel so staff can see
+                // what got added after check-in. This covers:
+                //  - fee-engine fees (fuel/cleaning/smoking/late) posted by the checkin wizard
+                //  - ADMIN_CORRECTION (manual "Miscellaneous charge" adjustments)
+                //  - DAMAGE_CHARGE (Report Damage flow)
+                // These are the exact sources RentalAgreement.balance/total already
+                // include once (the syncAgreementCharges preserve carve-out), so we
+                // only DISPLAY them here — no figure is added on top of the balance.
+                const extraCharges = (agreementFull?.charges || []).filter((c) => {
+                  if (c?.selected === false) return false;
+                  const src = String(c?.source || '').toUpperCase();
+                  return src.startsWith('FEE_ENGINE_') || src === 'ADMIN_CORRECTION' || src === 'DAMAGE_CHARGE';
+                });
+                if (extraCharges.length === 0) return null;
+                const chargeTag = (src) => {
+                  const s = String(src || '').toUpperCase();
+                  if (s === 'DAMAGE_CHARGE') return { text: 'DAMAGE', bg: '#fee2e2', color: '#b91c1c' };
+                  if (s === 'ADMIN_CORRECTION') return { text: 'MISC / ADJUSTMENT', bg: '#ede5ff', color: '#6e49ff' };
+                  return null;
+                };
+                const feesSubtotal = extraCharges.reduce((s, c) => s + Number(c?.total || 0), 0);
                 const agreementBalance = Number(agreementFull?.balance || 0);
                 const agreementTotal = Number(agreementFull?.total || 0);
                 const agreementPaid = Number(agreementFull?.paidAmount || 0);
                 return (
                   <div className="card" style={{ marginTop: 14, borderLeft: '3px solid #f59e0b', maxWidth: '100%', overflow: 'hidden' }}>
                     <div className="row-between" style={{ marginBottom: 12 }}>
-                      <h3 style={{ margin: 0 }}>Post-Check-in Fees</h3>
+                      <h3 style={{ margin: 0 }}>Post-Check-in Fees &amp; Adjustments</h3>
                       <span className="label" style={{ color: '#b45309' }}>Posted to agreement</span>
                     </div>
                     <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                      {feeEngineCharges.map((c) => (
-                        <div key={c.id || c.sourceRefId} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12, padding: '6px 0', borderBottom: '1px solid #f1edff' }}>
-                          <div style={{ flex: 1, minWidth: 0, fontSize: 13, color: '#211a38', wordBreak: 'break-word' }}>{c.name}</div>
-                          <div style={{ whiteSpace: 'nowrap', fontWeight: 700, fontVariantNumeric: 'tabular-nums', color: '#211a38' }}>{money(Number(c.total || 0))}</div>
-                        </div>
-                      ))}
+                      {extraCharges.map((c) => {
+                        const tag = chargeTag(c?.source);
+                        return (
+                          <div key={c.id || c.sourceRefId} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12, padding: '6px 0', borderBottom: '1px solid #f1edff' }}>
+                            <div style={{ flex: 1, minWidth: 0, fontSize: 13, color: '#211a38', wordBreak: 'break-word', display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                              <span>{c.name}</span>
+                              {tag ? (
+                                <span style={{ padding: '1px 7px', borderRadius: 6, background: tag.bg, color: tag.color, fontSize: 10, fontWeight: 700, letterSpacing: '.05em' }}>{tag.text}</span>
+                              ) : null}
+                            </div>
+                            <div style={{ whiteSpace: 'nowrap', fontWeight: 700, fontVariantNumeric: 'tabular-nums', color: '#211a38' }}>{money(Number(c.total || 0))}</div>
+                          </div>
+                        );
+                      })}
                     </div>
                     <div style={{ marginTop: 12, paddingTop: 10, borderTop: '1px solid #e6dfff', display: 'flex', flexDirection: 'column', gap: 6 }}>
                       <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13 }}>
-                        <span><strong>Fees subtotal</strong></span>
+                        <span><strong>Charges subtotal</strong></span>
                         <span style={{ whiteSpace: 'nowrap', fontVariantNumeric: 'tabular-nums' }}><strong>{money(feesSubtotal)}</strong></span>
                       </div>
                       <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, color: '#6f668f' }}>
@@ -3338,7 +3359,7 @@ token
                       </div>
                     </div>
                     <div className="label" style={{ marginTop: 12, textTransform: 'none', letterSpacing: 0, lineHeight: 1.5 }}>
-                      Calculated at check-in (fuel, cleaning, smoking, late return) and posted to the agreement. Use Print Agreement above for the full invoice.
+                      Fees calculated at check-in (fuel, cleaning, smoking, late return) plus any miscellaneous adjustments and damage charges, all posted to the agreement. Already included in the Unpaid Balance above. Use Print Agreement for the full invoice; a previously-printed PDF is a snapshot — reprint to reflect new charges.
                     </div>
                   </div>
                 );
