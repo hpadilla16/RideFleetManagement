@@ -1,6 +1,7 @@
 import { describe, it, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { reservationExtendService } from './reservation-extend.service.js';
+import { reservationPricingService } from './reservation-pricing.service.js';
 import { prisma } from '../../lib/prisma.js';
 
 // =============================================================================
@@ -12,6 +13,11 @@ import { prisma } from '../../lib/prisma.js';
 // can exercise the full DAILY-rescale + tax-recompute + addendum
 // auto-create pipeline.
 // =============================================================================
+
+// Captured ONCE at module load — the real reservationPricingService
+// .syncAgreementCharges. makeMockDb wraps the public method with a
+// call-recording spy that still delegates here, and afterEach restores it.
+const originalSyncAgreementCharges = reservationPricingService.syncAgreementCharges;
 
 function makeMockDb({ reservationId = 'res-1', initial = {} } = {}) {
   const state = {
@@ -50,6 +56,7 @@ function makeMockDb({ reservationId = 'res-1', initial = {} } = {}) {
   let chargeIdCounter = 100;
   let addendumIdCounter = 1;
   let auditIdCounter = 1;
+  let agreementChargeIdCounter = 1;
 
   prisma.reservation.findFirst = async () => ({
     ...state.reservation,
@@ -120,6 +127,63 @@ function makeMockDb({ reservationId = 'res-1', initial = {} } = {}) {
     return { ...a };
   };
 
+  // RentalAgreementCharge + payment mocks (MONEY-FIX, 2026-07-12) — needed
+  // because reservation-extend now calls reservationPricingService
+  // .syncAgreementCharges after recomputeTaxRow so the extension rate + its
+  // tax are mirrored onto the binding agreement's subtotal/taxes/total/balance.
+  // The gap that let the bug ship: the old mock had NO agreement-charge table,
+  // so nothing exercised the reconciler. These mocks replay the reconciler's
+  // real behavior (carve-out preserve on delete, recompute from selected rows)
+  // so tests can assert agreement money actually moves.
+  state.agreementCharges = initial.agreementCharges || [];
+  state.agreementPayments = initial.agreementPayments || [];
+  prisma.rentalAgreementCharge = prisma.rentalAgreementCharge || {};
+  prisma.rentalAgreementCharge.deleteMany = async ({ where = {} } = {}) => {
+    const before = state.agreementCharges.length;
+    state.agreementCharges = state.agreementCharges.filter((c) => {
+      if (where.rentalAgreementId && c.rentalAgreementId !== where.rentalAgreementId) return true;
+      // Mirror the carve-out in syncAgreementCharges: FEE_ENGINE_*,
+      // ADMIN_CORRECTION and DAMAGE_CHARGE rows survive the recompute.
+      const src = String(c.source || '').toUpperCase();
+      if (src.startsWith('FEE_ENGINE_') || src === 'ADMIN_CORRECTION' || src === 'DAMAGE_CHARGE') return true;
+      return false;
+    });
+    return { count: before - state.agreementCharges.length };
+  };
+  prisma.rentalAgreementCharge.createMany = async ({ data }) => {
+    const rows = Array.isArray(data) ? data : [data];
+    for (const d of rows) {
+      state.agreementCharges.push({ id: `ac-${agreementChargeIdCounter++}`, ...d });
+    }
+    return { count: rows.length };
+  };
+  prisma.rentalAgreementCharge.findMany = async ({ where = {} } = {}) => {
+    return state.agreementCharges.filter((c) => {
+      if (where.rentalAgreementId && c.rentalAgreementId !== where.rentalAgreementId) return false;
+      if (where.selected !== undefined && c.selected !== where.selected) return false;
+      return true;
+    });
+  };
+  prisma.rentalAgreementPayment = prisma.rentalAgreementPayment || {};
+  prisma.rentalAgreementPayment.findMany = async ({ where = {} } = {}) => {
+    return state.agreementPayments.filter((p) => {
+      if (where.rentalAgreementId && p.rentalAgreementId !== where.rentalAgreementId) return false;
+      if (where.status && p.status !== where.status) return false;
+      if (where.method?.not && p.method === where.method.not) return false;
+      return true;
+    });
+  };
+
+  // Spy that records every syncAgreementCharges invocation (reservationId,
+  // scope, opts) and still delegates to the REAL reconciler above so the
+  // agreement money is actually recomputed against the mock tables. Restored
+  // in afterEach via originalSyncAgreementCharges.
+  state.syncCalls = [];
+  reservationPricingService.syncAgreementCharges = async (...args) => {
+    state.syncCalls.push(args);
+    return originalSyncAgreementCharges.apply(reservationPricingService, args);
+  };
+
   prisma.rentalAgreementAddendum = prisma.rentalAgreementAddendum || {};
   prisma.rentalAgreementAddendum.create = async ({ data }) => {
     const row = { id: `add-${addendumIdCounter++}`, createdAt: new Date(), ...data };
@@ -160,6 +224,8 @@ describe('reservation-extend (unified flow)', () => {
       reservation: { ...prisma.reservation },
       reservationCharge: { ...(prisma.reservationCharge || {}) },
       rentalAgreement: { ...(prisma.rentalAgreement || {}) },
+      rentalAgreementCharge: { ...(prisma.rentalAgreementCharge || {}) },
+      rentalAgreementPayment: { ...(prisma.rentalAgreementPayment || {}) },
       rentalAgreementAddendum: { ...(prisma.rentalAgreementAddendum || {}) },
       location: { ...(prisma.location || {}) },
       auditLog: { ...(prisma.auditLog || {}) }
@@ -169,9 +235,13 @@ describe('reservation-extend (unified flow)', () => {
     Object.assign(prisma.reservation, originalPrisma.reservation);
     if (prisma.reservationCharge) Object.assign(prisma.reservationCharge, originalPrisma.reservationCharge);
     if (prisma.rentalAgreement) Object.assign(prisma.rentalAgreement, originalPrisma.rentalAgreement);
+    if (prisma.rentalAgreementCharge) Object.assign(prisma.rentalAgreementCharge, originalPrisma.rentalAgreementCharge);
+    if (prisma.rentalAgreementPayment) Object.assign(prisma.rentalAgreementPayment, originalPrisma.rentalAgreementPayment);
     if (prisma.rentalAgreementAddendum) Object.assign(prisma.rentalAgreementAddendum, originalPrisma.rentalAgreementAddendum);
     if (prisma.location) Object.assign(prisma.location, originalPrisma.location);
     if (prisma.auditLog) Object.assign(prisma.auditLog, originalPrisma.auditLog);
+    // Restore the real reconciler after each spy-wrapped test.
+    reservationPricingService.syncAgreementCharges = originalSyncAgreementCharges;
   });
 
   // ===========================================================================
@@ -1002,6 +1072,115 @@ describe('reservation-extend (unified flow)', () => {
         }),
         /Extension charge not found/
       );
+    });
+  });
+
+  // ===========================================================================
+  // Agreement reconciliation (MONEY-FIX, 2026-07-12)
+  //
+  // The bug: extendReservation created the taxable EXTENSION_RATE charge and
+  // recomputed the reservation-side TAX row, but NEVER mirrored either onto the
+  // binding RentalAgreement — so RentalAgreement.taxes/total/balance (what the
+  // customer owes) missed the extension's rate AND its tax. The fix adds the
+  // canonical reconciler (reservationPricingService.syncAgreementCharges,
+  // { allowClosed: true }) after the tax recompute in BOTH extend and delete.
+  // These tests exercise the reconciler against the mock agreement tables so
+  // we prove the money actually lands on the agreement (the old mock had no
+  // agreement-charge table, which is why the gap shipped).
+  // ===========================================================================
+  describe('agreement reconciliation (money-fix)', () => {
+    it('extension rate + its tax reach the agreement total/balance exactly once', async () => {
+      // 5d × $50 = $250 base, extend +2d at $50 → EXTENSION_RATE $100.
+      // Taxable subtotal $350; tax @ 11.5% = $40.25. Agreement must show
+      // subtotal 350, taxes 40.25, total 390.25, balance 390.25 (paid $0).
+      const state = makeMockDb();
+      await reservationExtendService.extendReservation({
+        reservationId: 'res-1',
+        newReturnAt: new Date('2026-05-17T00:00:00Z'),
+        extensionDailyRate: null, note: '', actorUserId: 'u-1',
+        tenantScope: { tenantId: 'tenant-1' }
+      });
+
+      // syncAgreementCharges was invoked for this reservation with allowClosed.
+      assert.equal(state.syncCalls.length, 1, 'reconciler called exactly once');
+      const [rid, scope, opts] = state.syncCalls[0];
+      assert.equal(rid, 'res-1');
+      assert.deepEqual(scope, { tenantId: 'tenant-1' });
+      assert.equal(opts.allowClosed, true, 'must pass allowClosed:true');
+
+      const agreement = state.agreements.find((a) => a.id === 'agree-1');
+      assert.equal(agreement.subtotal, 350, 'agreement subtotal = base 250 + extension 100');
+      assert.equal(agreement.taxes, 40.25, 'agreement taxes include the extension tax ($40.25)');
+      assert.equal(agreement.total, 390.25, 'agreement total = 350 + 40.25');
+      assert.equal(agreement.balance, 390.25, 'agreement balance moved by the extension + its tax');
+
+      // No double-tax: exactly ONE TAX row mirrored onto the agreement.
+      const agreementTaxRows = state.agreementCharges.filter((c) => c.chargeType === 'TAX');
+      assert.equal(agreementTaxRows.length, 1, 'exactly one TAX row on the agreement');
+      assert.equal(agreementTaxRows[0].total, 40.25);
+      const agreementExtRows = state.agreementCharges.filter((c) => c.code === 'EXTENSION_RATE');
+      assert.equal(agreementExtRows.length, 1, 'extension rate mirrored onto the agreement once');
+    });
+
+    it('reconciles a CLOSED agreement via allowClosed (late-return / post-checkout extension)', async () => {
+      // A late-return extension can land on a CLOSED agreement. allowClosed:true
+      // lets syncAgreementCharges reopen the money math for it (mirrors every
+      // other post-checkout money mutation). Without allowClosed the reconciler
+      // no-ops on CLOSED and the extension tax would never reach the balance.
+      const state = makeMockDb({
+        initial: {
+          reservation: {
+            rentalAgreement: { id: 'agree-1', status: 'CLOSED', tenantId: 'tenant-1' }
+          },
+          agreements: [
+            { id: 'agree-1', tenantId: 'tenant-1', status: 'CLOSED',
+              returnAt: new Date('2026-05-15T00:00:00Z') }
+          ]
+        }
+      });
+      await reservationExtendService.extendReservation({
+        reservationId: 'res-1',
+        newReturnAt: new Date('2026-05-17T00:00:00Z'),
+        extensionDailyRate: null, note: '', actorUserId: 'u-1',
+        tenantScope: { tenantId: 'tenant-1' }
+      });
+      const agreement = state.agreements.find((a) => a.id === 'agree-1');
+      assert.equal(agreement.total, 390.25, 'CLOSED agreement total still reconciled (allowClosed)');
+      assert.equal(agreement.taxes, 40.25, 'CLOSED agreement taxes include the extension tax');
+      assert.equal(agreement.balance, 390.25, 'CLOSED agreement balance reconciled');
+    });
+
+    it('deleteExtension reconciles the agreement back down (removes extension rate + its tax)', async () => {
+      const state = makeMockDb();
+      const ext = await reservationExtendService.extendReservation({
+        reservationId: 'res-1',
+        newReturnAt: new Date('2026-05-17T00:00:00Z'),
+        extensionDailyRate: null, note: '', actorUserId: 'u-1',
+        tenantScope: { tenantId: 'tenant-1' }
+      });
+      // After extend the agreement carries the extension + $40.25 tax.
+      assert.equal(state.agreements[0].total, 390.25);
+
+      await reservationExtendService.deleteExtension({
+        reservationId: 'res-1',
+        extensionChargeId: ext.extensionCharge.id,
+        actorUserId: 'u-1',
+        tenantScope: { tenantId: 'tenant-1' }
+      });
+
+      // Reconciler ran on BOTH paths, always with allowClosed:true.
+      assert.equal(state.syncCalls.length, 2, 'reconciler called on extend AND delete');
+      assert.ok(state.syncCalls.every(([, , o]) => o?.allowClosed === true),
+        'both invocations pass allowClosed:true');
+
+      // Agreement back to base-only: 5d × $50 = $250, tax @ 11.5% = $28.75.
+      const agreement = state.agreements.find((a) => a.id === 'agree-1');
+      assert.equal(agreement.subtotal, 250, 'extension rate removed from agreement subtotal');
+      assert.equal(agreement.taxes, 28.75, 'agreement tax recomputed off the base-only subtotal');
+      assert.equal(agreement.total, 278.75);
+      assert.equal(agreement.balance, 278.75, 'agreement balance reverted');
+      const agreementExtRows = state.agreementCharges.filter((c) => c.code === 'EXTENSION_RATE');
+      assert.equal(agreementExtRows.length, 0, 'no EXTENSION_RATE row left on the agreement');
     });
   });
 

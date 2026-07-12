@@ -1,5 +1,6 @@
 import crypto from 'node:crypto';
 import { prisma } from '../../lib/prisma.js';
+import { reservationPricingService } from './reservation-pricing.service.js';
 
 // =============================================================================
 // Reservation Extension Service
@@ -465,6 +466,26 @@ export const reservationExtendService = {
       pickupLocationId: current.pickupLocationId
     });
 
+    // 10b. MONEY-FIX (2026-07-12): mirror the new EXTENSION_RATE row + the
+    //      rebuilt TAX row onto the binding RentalAgreement via the canonical
+    //      reconciler, so RentalAgreement.subtotal/taxes/total/balance (what
+    //      the customer actually owes) pick up the extension's rate AND its
+    //      tax. Steps 7-10 above only wrote the RESERVATION side; without this
+    //      call the extension charge + its tax never reached the agreement
+    //      total/balance. Mirrors the kiosk upsell flow (kiosk-offers.service.js
+    //      recomputeTaxRow → getPricing → syncAgreementCharges) and every other
+    //      money mutation (addManualCharge/void). { allowClosed: true } so a
+    //      late-return / post-checkout extension on a CLOSED agreement also
+    //      reconciles. Called AFTER the ReservationCharge writes above commit
+    //      (this function runs no $transaction) so syncAgreementCharges — which
+    //      re-mirrors from the reservation's selected charges — sees them.
+    //      syncAgreementCharges no-ops when the reservation has no agreement.
+    await reservationPricingService.syncAgreementCharges(
+      reservationId,
+      tenantScope || {},
+      { allowClosed: true }
+    );
+
     // 11. Recompute estimatedTotal across all selected charges
     const finalCharges = await prisma.reservationCharge.findMany({
       where: { reservationId, selected: true },
@@ -681,6 +702,19 @@ export const reservationExtendService = {
       pricingSnapshot: reservation.pricingSnapshot,
       pickupLocationId: reservation.pickupLocationId
     });
+
+    // MONEY-FIX (2026-07-12): removing an extension must ALSO reconcile the
+    // agreement — the reverted per-day rows, the deleted EXTENSION_RATE line,
+    // and the rebuilt TAX row have to come back off RentalAgreement.subtotal/
+    // taxes/total/balance. Same canonical reconciler as extendReservation, run
+    // AFTER the ReservationCharge delete + tax recompute above commit so it
+    // re-mirrors the now-smaller selected charge set. { allowClosed: true }
+    // mirrors the extend path for CLOSED-agreement reversals.
+    await reservationPricingService.syncAgreementCharges(
+      reservationId,
+      tenantScope || {},
+      { allowClosed: true }
+    );
 
     // Set returnAt back to its pre-extension value. If this was the last
     // remaining extension, ALSO clear originalReturnAt so the UI stops
