@@ -886,9 +886,15 @@ export function FlexwaysIntegrationPanel({ token, me, isSuper, isAdmin, tenantNa
               Imported reservations are matched to Ride vehicle classes through the <strong>ACRISS category map</strong>. If the map is empty, every reservation lands in manual review. Seed it once per tenant before enabling sedes.
             </p>
           </div>
-          <Link href={acrissHref} style={{ whiteSpace: 'nowrap', color: '#6d3df2', fontWeight: 700, fontSize: 13 }}>
-            Open category map →
-          </Link>
+          {/* Only render the Link when we have a REAL destination. next/link's
+              formatUrl destructures the href — <Link href={null}> throws
+              "Cannot destructure property 'auth' from null" and crashes the
+              whole /settings page (there's no ACRISS-map route yet). */}
+          {acrissHref ? (
+            <Link href={acrissHref} style={{ whiteSpace: 'nowrap', color: '#6d3df2', fontWeight: 700, fontSize: 13 }}>
+              Open category map →
+            </Link>
+          ) : null}
         </div>
         <div className="surface-note" style={NOTE_STYLE}>
           🗺️ <strong>{acrissMapped == null ? '—' : acrissMapped} of {acrissTotal == null ? '—' : acrissTotal}</strong> Flexways class codes mapped for this tenant. The panel shows mapped / total so you can see coverage at a glance{acrissZero ? ' — seed the map before the first run to avoid a review backlog.' : '.'}
