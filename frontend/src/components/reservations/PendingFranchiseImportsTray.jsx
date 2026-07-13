@@ -408,6 +408,12 @@ export function PendingFranchiseImportsTray({ token, me, isSuper, activeTenantId
   const basePath = `/api/admin/integrations/${source}`;
   const sourceLabel = sourceLabelFor(source);
 
+  // 2026-07-13 (Hector): tenant ADMINs work their own pending imports too.
+  // The backend routes were always SUPER_ADMIN + ADMIN (ADMIN hard-scoped to
+  // its tenant via resolveTenantId) — only this tray hid itself from admins.
+  // ADMIN requests don't append ?tenantId; the backend resolves their tenant.
+  const canSeeTray = isSuper || String(me?.role || '').toUpperCase() === 'ADMIN';
+
   const scoped = scopedPath || ((p) => {
     if (!isSuper || !activeTenantId) return p;
     const sep = p.includes('?') ? '&' : '?';
@@ -415,7 +421,7 @@ export function PendingFranchiseImportsTray({ token, me, isSuper, activeTenantId
   });
 
   const load = async () => {
-    if (!isSuper) return;
+    if (!canSeeTray) return;
     setLoading(true);
     try {
       const [pending, status] = await Promise.all([
@@ -431,9 +437,9 @@ export function PendingFranchiseImportsTray({ token, me, isSuper, activeTenantId
     }
   };
 
-  useEffect(() => { load(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [token, activeTenantId, isSuper]);
+  useEffect(() => { load(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [token, activeTenantId, isSuper, canSeeTray]);
 
-  if (!isSuper) return null;
+  if (!canSeeTray) return null;
   if (!loading && rows.length === 0) return null;
 
   const promote = async (r) => {

@@ -240,14 +240,32 @@ async function syncAgreementCharges(reservationId, scope = {}, opts = {}) {
   // damage charge added inside the Report Damage flow lives only on the agreement
   // (no ReservationCharge to re-sync from), exactly like FEE_ENGINE_ / ADMIN_CORRECTION
   // rows. Without this carve-out the very recompute the charge triggers would wipe it.
+  // 2026-07-13 (RES-213665): NULL-SAFE delete. Prisma/Postgres string filters
+  // (negated or not) never match NULL — so legacy mirror rows written with
+  // source:null survived every resync and DUPLICATED the agreement (23
+  // agreements found in prod with doubled DAILY/TAX rows).
+  //
+  // QA B1 guard: the { source: null } arm applies ONLY when we have a fresh
+  // mirror set to write (chargeRows.length > 0). Branch-3 agreements
+  // (startFromReservation synthesizes Daily/fees/Tax with source:null for
+  // reservations that have NO ReservationCharge rows) would otherwise be
+  // wiped by any pricing read — deleted with nothing to recreate them from.
+  // Duplication can only happen when a new mirror set lands next to the old
+  // null rows, so gating the null-purge on a non-empty rebuild keeps the
+  // RES-213665 fix intact.
+  const preservedCarveOut = {
+    AND: [
+      { NOT: { source: { startsWith: 'FEE_ENGINE_' } } },
+      { NOT: { source: 'ADMIN_CORRECTION' } },
+      { NOT: { source: 'DAMAGE_CHARGE' } }
+    ]
+  };
   await prisma.rentalAgreementCharge.deleteMany({
     where: {
       rentalAgreementId: agreement.id,
-      AND: [
-        { NOT: { source: { startsWith: 'FEE_ENGINE_' } } },
-        { NOT: { source: 'ADMIN_CORRECTION' } },
-        { NOT: { source: 'DAMAGE_CHARGE' } }
-      ]
+      ...(chargeRows.length
+        ? { OR: [{ source: null }, preservedCarveOut] }
+        : preservedCarveOut)
     }
   });
   if (chargeRows.length) {

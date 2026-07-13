@@ -2199,10 +2199,21 @@ export const rentalAgreementsService = {
             prisma.rentalAgreementCharge.deleteMany({
               where: {
                 rentalAgreementId: existing.id,
-                AND: [
-                  { NOT: { source: { startsWith: 'FEE_ENGINE_' } } },
-                  { NOT: { source: 'ADMIN_CORRECTION' } },
-                  { NOT: { source: 'DAMAGE_CHARGE' } }
+                // 2026-07-13 (RES-213665): NULL-SAFE — negated string filters
+                // never match source:null in Prisma/Postgres, so legacy
+                // null-source mirror rows survived this delete and duplicated
+                // the agreement on every re-sync. Same fix in ALL writers
+                // (syncAgreementCharges + both start-rental branches) — the
+                // predicates MUST stay identical.
+                OR: [
+                  { source: null },
+                  {
+                    AND: [
+                      { NOT: { source: { startsWith: 'FEE_ENGINE_' } } },
+                      { NOT: { source: 'ADMIN_CORRECTION' } },
+                      { NOT: { source: 'DAMAGE_CHARGE' } }
+                    ]
+                  }
                 ]
               }
             }),
@@ -2281,10 +2292,21 @@ export const rentalAgreementsService = {
             prisma.rentalAgreementCharge.deleteMany({
               where: {
                 rentalAgreementId: existing.id,
-                AND: [
-                  { NOT: { source: { startsWith: 'FEE_ENGINE_' } } },
-                  { NOT: { source: 'ADMIN_CORRECTION' } },
-                  { NOT: { source: 'DAMAGE_CHARGE' } }
+                // 2026-07-13 (RES-213665): NULL-SAFE — negated string filters
+                // never match source:null in Prisma/Postgres, so legacy
+                // null-source mirror rows survived this delete and duplicated
+                // the agreement on every re-sync. Same fix in ALL writers
+                // (syncAgreementCharges + both start-rental branches) — the
+                // predicates MUST stay identical.
+                OR: [
+                  { source: null },
+                  {
+                    AND: [
+                      { NOT: { source: { startsWith: 'FEE_ENGINE_' } } },
+                      { NOT: { source: 'ADMIN_CORRECTION' } },
+                      { NOT: { source: 'DAMAGE_CHARGE' } }
+                    ]
+                  }
                 ]
               }
             }),
