@@ -45,9 +45,20 @@ const {
   parseReservationGrid,
   latamToUtc,
   filterByPickupWindow,
+  extractAcriss,
+  parseContractList,
+  filterByChannel,
+  parseReservationDetailHtml,
+  extractInputValue,
+  extractSelectedOptionText,
+  parseAmount,
 } = await import('./flexways.service.js');
 
-const { mapRowToExternalReservation, promoteAutomatically } = await import('./flexways.worker.js');
+const {
+  mapRowToExternalReservation,
+  mapContractToExternalReservation,
+  promoteAutomatically,
+} = await import('./flexways.worker.js');
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -230,6 +241,242 @@ test('mapRowToExternalReservation: grid → ExternalReservation, class/total/ema
   assert.equal(ext.dropoffAt, null);
   // raw preserved for the eventual detail merge
   assert.equal(ext.rawJson.list.externalRef, 'QSRC58');
+});
+
+// ===========================================================================
+// Fase 3.5 — detail-fetch: contract list + detail HTML → AUTO-promotable row
+// ===========================================================================
+
+// ---------------------------------------------------------------------------
+// extractAcriss — the ACRISS code lives in the category label's parenthetical
+// ---------------------------------------------------------------------------
+
+test('extractAcriss pulls the 4-letter code from "Nombre (ACRISS)"', () => {
+  assert.equal(extractAcriss('SUV Compact AT (CFAR)'), 'CFAR');
+  assert.equal(extractAcriss('Grande Automatico (FDAR)'), 'FDAR');
+  assert.equal(extractAcriss('Sedan Mediano (IDMR)'), 'IDMR');
+  assert.equal(extractAcriss('Minivan 7 pax (FVMR)'), 'FVMR');
+  // lower-case in the parenthetical is normalized up
+  assert.equal(extractAcriss('Whatever (cfar)'), 'CFAR');
+  // no parenthetical code → null (fail-safe → MANUAL_REVIEW)
+  assert.equal(extractAcriss('Sin ACRISS'), null);
+  assert.equal(extractAcriss(''), null);
+  assert.equal(extractAcriss(null), null);
+  // a non-4-letter parenthetical is ignored
+  assert.equal(extractAcriss('Van (7 pax)'), null);
+});
+
+// ---------------------------------------------------------------------------
+// parseContractList — DataTables ARRAY-OF-OBJECTS carrying idAlquiler
+// ---------------------------------------------------------------------------
+
+function contractPayload() {
+  // Shape from the 2026-07-13 recon (funcionesAjaxContratos.php, idAlquiler=485160).
+  // data is an ARRAY-OF-OBJECTS with numeric-string keys "0".."11".
+  return {
+    draw: 1,
+    recordsTotal: 3,
+    recordsFiltered: 3,
+    data: [
+      {
+        0: '485160',
+        1: 'AR',
+        2: 'Flexways Orlando - Vista East',
+        3: '19/07/2026 15:00:00',   // pickup (recon "fecha booking")
+        4: '21/07/2026 10:00:00',   // fecha devolución (dropoff)
+        5: 'Aeropuerto Internacional de Orlando',
+        6: 'Aeropuerto Internacional de Orlando',
+        7: 'API',
+        8: 'Alfredo Reyes',
+        9: '',
+        10: 'QJDK07',
+        11: '<a class="btn" href="#">Ver</a>',
+      },
+      // no idAlquiler → skipped (unusable, no detail key)
+      {
+        0: '   ', 1: 'NR', 2: 'Flexways Miami', 3: '20/07/2026 09:00:00',
+        4: '22/07/2026 09:00:00', 5: 'MIA', 6: 'MIA', 7: 'API', 8: 'No Id Person',
+        9: '', 10: 'NOID11', 11: '',
+      },
+      // second good row (Web channel — used by the channel-filter test)
+      {
+        0: '485161', 1: 'AZ', 2: 'Flexways Miami', 3: '21/07/2026 12:30:00',
+        4: '24/07/2026 12:30:00', 5: 'MIA', 6: 'MIA', 7: 'Web', 8: 'Ana Ruiz',
+        9: '', 10: 'ANARZ9', 11: '',
+      },
+    ],
+  };
+}
+
+test('parseContractList: maps object-keyed columns, keeps idAlquiler, skips id-less rows', () => {
+  const rows = parseContractList(contractPayload());
+  assert.equal(rows.length, 2); // 3 rows, 1 has no idAlquiler
+  const [a, b] = rows;
+  assert.equal(a.idAlquiler, '485160');
+  assert.equal(a.externalRef, 'QJDK07');
+  assert.equal(a.ref, 'QJDK07');
+  assert.equal(a.sede, 'Flexways Orlando - Vista East');
+  assert.equal(a.channel, 'API');
+  assert.equal(a.customerName, 'Alfredo Reyes');
+  assert.equal(a.customerFirstName, 'Alfredo');
+  assert.equal(a.customerLastName, 'Reyes');
+  assert.equal(a.pickupLocation, 'Aeropuerto Internacional de Orlando');
+  assert.equal(a.pickupAt.toISOString(), '2026-07-19T19:00:00.000Z'); // 15:00 EDT → 19:00 UTC
+  assert.equal(a.dropoffAt.toISOString(), '2026-07-21T14:00:00.000Z');
+  assert.equal(b.idAlquiler, '485161');
+  assert.equal(b.externalRef, 'ANARZ9');
+  assert.equal(b.channel, 'Web');
+  // diagnostics
+  assert.equal(rows.diagnostics.recordsTotal, 3);
+  assert.equal(rows.diagnostics.parsedRows, 2);
+  assert.equal(rows.diagnostics.missingId, 1);
+  assert.equal(rows.diagnostics.emptyGridAnomaly, false);
+});
+
+test('parseContractList: accepts a JSON string + flags truncation when page < recordsTotal', () => {
+  const rows = parseContractList(JSON.stringify(contractPayload()));
+  assert.equal(rows.length, 2);
+  const p = contractPayload();
+  p.recordsTotal = 200; // server paginated → we'd under-import
+  assert.equal(parseContractList(p).diagnostics.truncated, true);
+  assert.equal(parseContractList(contractPayload()).diagnostics.truncated, false);
+});
+
+test('filterByChannel: empty list = import all; a set restricts (case-insensitive)', () => {
+  const rows = parseContractList(contractPayload());
+  assert.equal(filterByChannel(rows, []).length, 2);            // all
+  assert.equal(filterByChannel(rows, ['API']).length, 1);       // only Alfredo (API)
+  assert.equal(filterByChannel(rows, ['api', 'web']).length, 2);
+  assert.equal(filterByChannel(rows, ['GDS']).length, 0);
+});
+
+// ---------------------------------------------------------------------------
+// detail HTML parsing — input values + selected <option> text, by name
+// ---------------------------------------------------------------------------
+
+function detailHtml({ email = 'freakin_rider@gmail.com', fallbackEmail = 'test@test.com',
+  total = '32.50', currency = 'USD', category = 'SUV Compact AT (CFAR)' } = {}) {
+  return `
+    <form id="reservaForm" method="post">
+      <input type="hidden" name="idAlquiler" value="485160">
+      <input type="text" name="idCliente" value="308707" />
+      <input name="emailCustomer" value="${email}" class="form-control" />
+      <input class="form-control" value="${fallbackEmail}" name="email" />
+      <input name="total" value="${total}" type="text">
+      <input type="text" value="${total}" name="totalfin">
+      <select name="cbMoneda" class="sel">
+        <option value="1">EUR</option>
+        <option value="2" selected="selected">${currency}</option>
+      </select>
+      <select name="cbCategoria">
+        <option value="10">Economico Base (EBMN)</option>
+        <option value="42" selected>${category}</option>
+        <option value="55">Grande Automatico (FDAR)</option>
+      </select>
+    </form>`;
+}
+
+test('extractInputValue: reads a value regardless of attribute order; null when absent', () => {
+  const html = detailHtml();
+  assert.equal(extractInputValue(html, 'emailCustomer'), 'freakin_rider@gmail.com');
+  assert.equal(extractInputValue(html, 'total'), '32.50');
+  assert.equal(extractInputValue(html, 'totalfin'), '32.50'); // value-before-name order
+  assert.equal(extractInputValue(html, 'idCliente'), '308707');
+  assert.equal(extractInputValue(html, 'doesNotExist'), null);
+});
+
+test('extractSelectedOptionText: returns the SELECTED option text (selected="selected" or bare)', () => {
+  const html = detailHtml();
+  assert.equal(extractSelectedOptionText(html, 'cbMoneda'), 'USD');
+  assert.equal(extractSelectedOptionText(html, 'cbCategoria'), 'SUV Compact AT (CFAR)');
+  assert.equal(extractSelectedOptionText(html, 'nope'), null);
+});
+
+test('extractSelectedOptionText: ignores data-selected / class="selected" false positives (Innovation fix)', () => {
+  // Only <option ... selected>Real</option> is the choice — the decoys must NOT match.
+  const html = '<select name="cbX">'
+    + '<option value="1" data-selected="0">Decoy A</option>'
+    + '<option value="2" class="selected-row">Decoy B</option>'
+    + '<option value="3" selected>Real</option>'
+    + '</select>';
+  assert.equal(extractSelectedOptionText(html, 'cbX'), 'Real');
+});
+
+test('CONTRACT_CHANNEL_FILTER defaults FAIL-CLOSED to [API] (Innovation fix)', async () => {
+  // Fresh import with no env → must be ['API'], not import-all.
+  const mod = await import('./flexways.constants.js');
+  assert.deepEqual(mod.CONTRACT_CHANNEL_FILTER, ['API']);
+});
+
+test('parseAmount: dot/comma decimals + thousands separators', () => {
+  assert.equal(parseAmount('32.50'), 32.5);
+  assert.equal(parseAmount('1,234.50'), 1234.5);   // US grouping
+  assert.equal(parseAmount('1.234,50'), 1234.5);   // LATAM/EU grouping
+  assert.equal(parseAmount('USD 32.50'), 32.5);
+  assert.equal(parseAmount('45'), 45);
+  assert.equal(parseAmount(''), null);
+  assert.equal(parseAmount(null), null);
+});
+
+test('parseReservationDetailHtml: extracts email/total/currency/ACRISS (real recon shape)', () => {
+  const d = parseReservationDetailHtml(detailHtml());
+  assert.equal(d.customerEmail, 'freakin_rider@gmail.com');
+  assert.equal(d.customerIdExternal, '308707');
+  assert.equal(d.totalAmount, 32.5);
+  assert.equal(d.currency, 'USD');
+  assert.equal(d.vehicleAcriss, 'CFAR');
+  assert.equal(d.vehicleCategoryLabel, 'SUV Compact AT (CFAR)');
+});
+
+test('parseReservationDetailHtml: ignores the test@test.com placeholder in the `email` fallback', () => {
+  // emailCustomer empty → fallback `email` holds the placeholder → must be ignored.
+  const html = detailHtml({ email: '', fallbackEmail: 'test@test.com' });
+  const d = parseReservationDetailHtml(html);
+  assert.equal(d.customerEmail, null);
+  // But a real fallback email is used when emailCustomer is empty.
+  const d2 = parseReservationDetailHtml(detailHtml({ email: '', fallbackEmail: 'real@person.com' }));
+  assert.equal(d2.customerEmail, 'real@person.com');
+});
+
+test('parseReservationDetailHtml: category with no ACRISS parenthetical → vehicleAcriss null', () => {
+  const d = parseReservationDetailHtml(detailHtml({ category: 'Categoria Sin Codigo' }));
+  assert.equal(d.vehicleCategoryLabel, 'Categoria Sin Codigo');
+  assert.equal(d.vehicleAcriss, null); // → MANUAL_REVIEW downstream
+});
+
+// ---------------------------------------------------------------------------
+// contract row + detail → ExternalReservation (email + ACRISS + total populated)
+// ---------------------------------------------------------------------------
+
+test('mapContractToExternalReservation: merges contract row + detail into a promotable row', () => {
+  const row = parseContractList(contractPayload())[0];
+  const detail = parseReservationDetailHtml(detailHtml());
+  const ext = mapContractToExternalReservation(row, detail);
+  assert.equal(ext.externalRef, 'QJDK07');
+  assert.equal(ext.status, 'CONFIRMED');
+  assert.equal(ext.customerFirstName, 'Alfredo');
+  assert.equal(ext.customerLastName, 'Reyes');
+  // Enrichment from the detail page — these are what let evaluatePromotion go AUTO.
+  assert.equal(ext.customerEmail, 'freakin_rider@gmail.com');
+  assert.equal(ext.vehicleAcriss, 'CFAR');
+  assert.equal(ext.totalAmount, 32.5);
+  assert.equal(ext.currency, 'USD');
+  assert.equal(ext.vehicleDescription, 'SUV Compact AT (CFAR)');
+  assert.ok(ext.pickupAt instanceof Date);
+  assert.ok(ext.dropoffAt instanceof Date);
+  // external customer id preserved for the tray/audit (not a top-level column)
+  assert.equal(ext.rawJson.customerIdExternal, '308707');
+  assert.equal(ext.rawJson.contract.idAlquiler, '485160');
+});
+
+test('mapContractToExternalReservation: null detail → enrichment fields null (MANUAL_REVIEW fail-safe)', () => {
+  const row = parseContractList(contractPayload())[0];
+  const ext = mapContractToExternalReservation(row, null);
+  assert.equal(ext.externalRef, 'QJDK07');
+  assert.equal(ext.customerEmail, null);
+  assert.equal(ext.vehicleAcriss, null);   // → acriss_unmapped → MANUAL_REVIEW
+  assert.equal(ext.totalAmount, null);
+  assert.equal(ext.currency, null);        // honest null on missing detail (not fabricated USD)
 });
 
 // ---------------------------------------------------------------------------

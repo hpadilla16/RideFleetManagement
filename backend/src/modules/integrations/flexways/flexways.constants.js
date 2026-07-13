@@ -47,7 +47,27 @@ export const LOGIN_PATH = process.env.FLEXWAYS_LOGIN_PATH || '/login.php';
 
 // Reservations grid — DataTables JSON. The worker GETs this with the session
 // cookie (per-sede via idSede) and JSON.parses the { data:[[...]] } payload.
+// NOTE: this grid does NOT carry idAlquiler (the detail-page key). Fase 3.5
+// switched the worker's list source to CONTRACT_LIST_PATH (below); LIST_PATH +
+// its parser are kept for the auth probe + backward compat.
 export const LIST_PATH = process.env.FLEXWAYS_LIST_PATH || '/Helpers/funcionesAjaxReservas.php';
+
+// ---------------------------------------------------------------------------
+// Fase 3.5 detail-fetch endpoints (recon 2026-07-13, idAlquiler=485160).
+//
+// CONTRACT_LIST_PATH — DataTables list that DOES carry idAlquiler (the key the
+// detail page needs). Unlike LIST_PATH, its `data` is an ARRAY-OF-OBJECTS whose
+// keys are "0".."11" (NOT array-of-arrays like the reservations grid).
+//
+// DETAIL_PATH — per-reservation HTML form (~1MB) keyed by ?idAlquiler=<id>. It
+// carries the fields the grid/contract-list lack: real customer email, external
+// customer id, total + currency, and the vehicle category label whose trailing
+// parenthetical is the ACRISS code. Parsed by parseReservationDetailHtml().
+// ---------------------------------------------------------------------------
+export const CONTRACT_LIST_PATH =
+  process.env.FLEXWAYS_CONTRACT_LIST_PATH || '/Helpers/funcionesAjaxContratos.php';
+export const DETAIL_PATH =
+  process.env.FLEXWAYS_DETAIL_PATH || '/Comercial/Reservas/modificarReserva.php';
 
 // ---------------------------------------------------------------------------
 // Login form field names (recon 2026-07-13). The POST is usuario/clave plus two
@@ -90,6 +110,86 @@ export const COL = Object.freeze({
   REF: 8,
 });
 export const EXPECTED_COLUMN_COUNT = 9;
+
+// ---------------------------------------------------------------------------
+// Contract-list column map (recon 2026-07-13, funcionesAjaxContratos.php). The
+// DataTables `data` is an ARRAY-OF-OBJECTS with numeric-string keys ("0".."11"),
+// not an array-of-arrays. 12 columns:
+//   0  = idAlquiler   (numeric rental id, e.g. "485160" — the DETAIL-page key)
+//   1  = iniciales
+//   2  = sede
+//   3  = fecha booking     (⚠ ASSUMED pickup/rental-start — see PICKUP_AT below)
+//   4  = fecha devolución  (return / dropoff date)
+//   5  = pickup location
+//   6  = dropoff location
+//   7  = canal        ("API" = afiliado)
+//   8  = nombre cliente
+//   9  = (unlabeled in the recon)
+//   10 = ref          (booking ref, e.g. "QJDK07" → externalRef)
+//   11 = acciones     (HTML action buttons)
+//
+// ⚠ PICKUP_AT ASSUMPTION: the recon labeled col 3 "fecha booking". For a rental
+// contract the meaningful window key is the pickup/rental-start date, and col 4
+// is explicitly the return date, so col 3 is mapped to pickupAt (the natural
+// recogida↔devolución pairing). A live PoC MUST confirm whether col 3 is the
+// pickup date or the booking-creation date — if the latter, the pickup-window
+// filter is wrong and this index needs to move. Overridable via env for safety.
+// ---------------------------------------------------------------------------
+export const CONTRACT_COL = Object.freeze({
+  ID_ALQUILER: Number(process.env.FLEXWAYS_CONTRACT_COL_ID ?? 0),
+  INITIALS: 1,
+  SEDE: Number(process.env.FLEXWAYS_CONTRACT_COL_SEDE ?? 2),
+  PICKUP_AT: Number(process.env.FLEXWAYS_CONTRACT_COL_PICKUP ?? 3),
+  DROPOFF_AT: Number(process.env.FLEXWAYS_CONTRACT_COL_DROPOFF ?? 4),
+  PICKUP_LOCATION: Number(process.env.FLEXWAYS_CONTRACT_COL_PICKUP_LOC ?? 5),
+  DROPOFF_LOCATION: Number(process.env.FLEXWAYS_CONTRACT_COL_DROPOFF_LOC ?? 6),
+  CHANNEL: Number(process.env.FLEXWAYS_CONTRACT_COL_CHANNEL ?? 7),
+  CUSTOMER: Number(process.env.FLEXWAYS_CONTRACT_COL_CUSTOMER ?? 8),
+  REF: Number(process.env.FLEXWAYS_CONTRACT_COL_REF ?? 10),
+  ACTIONS: 11,
+});
+export const EXPECTED_CONTRACT_COLUMN_COUNT = 12;
+
+// Which contract-list channels to import. FAIL-CLOSED default = ['API'] (only
+// affiliate bookings) — funcionesAjaxContratos carries a `canal` column BECAUSE
+// it also holds walk-in/counter/Web contracts, and this integration only wants
+// affiliate rows. Importing a tenant's own counter rentals back in would create
+// spurious reservations the dedup can't always catch (Innovation 2026-07-13).
+// Override with FLEXWAYS_CONTRACT_CHANNELS (comma list); set to "ALL" to import
+// every channel deliberately.
+export const CONTRACT_CHANNEL_FILTER = (() => {
+  const raw = process.env.FLEXWAYS_CONTRACT_CHANNELS;
+  if (raw === undefined || raw === null || raw.trim() === '') return ['API'];
+  if (raw.trim().toUpperCase() === 'ALL') return []; // [] = no filter = import all
+  return raw.split(',').map((s) => s.trim().toUpperCase()).filter(Boolean);
+})();
+
+// ---------------------------------------------------------------------------
+// Detail-page (modificarReserva.php) form field names + parsing knobs (recon
+// idAlquiler=485160). All overridable — the exact form markup was captured but
+// field names are the piece most likely to shift, so keep them in env-swap reach.
+// ---------------------------------------------------------------------------
+export const DETAIL_FIELD = Object.freeze({
+  EMAIL: process.env.FLEXWAYS_DETAIL_EMAIL_FIELD || 'emailCustomer',
+  EMAIL_FALLBACK: process.env.FLEXWAYS_DETAIL_EMAIL_FALLBACK_FIELD || 'email',
+  CUSTOMER_ID: process.env.FLEXWAYS_DETAIL_CUSTOMER_ID_FIELD || 'idCliente',
+  CUSTOMER_ID_FALLBACK: process.env.FLEXWAYS_DETAIL_CUSTOMER_ID_FALLBACK_FIELD || 'cbCliente',
+  TOTAL: process.env.FLEXWAYS_DETAIL_TOTAL_FIELD || 'total',
+  TOTAL_FALLBACK: process.env.FLEXWAYS_DETAIL_TOTAL_FALLBACK_FIELD || 'totalfin',
+  CURRENCY_SELECT: process.env.FLEXWAYS_DETAIL_CURRENCY_FIELD || 'cbMoneda',
+  CATEGORY_SELECT: process.env.FLEXWAYS_DETAIL_CATEGORY_FIELD || 'cbCategoria',
+});
+
+// The `email` fallback input can carry a "test@test.com" placeholder → never
+// treat it as the real customer email (would poison customer matching).
+export const DETAIL_EMAIL_PLACEHOLDER = (
+  process.env.FLEXWAYS_DETAIL_EMAIL_PLACEHOLDER || 'test@test.com'
+).toLowerCase();
+
+// Politeness delay between per-reservation DETAIL fetches (mirror Economy's
+// 500–1500ms). The portal is hit once per contract row, so we never hammer it.
+export const DETAIL_DELAY_MIN_MS = Number(process.env.FLEXWAYS_DETAIL_DELAY_MIN_MS ?? 500);
+export const DETAIL_DELAY_MAX_MS = Number(process.env.FLEXWAYS_DETAIL_DELAY_MAX_MS ?? 1500);
 
 // ---------------------------------------------------------------------------
 // Timezone. The active account is Flexways ORLANDO → US Eastern. Recon flagged TZ

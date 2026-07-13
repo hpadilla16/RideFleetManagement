@@ -49,16 +49,24 @@ import {
   BASE_URL,
   LOGIN_PATH,
   LIST_PATH,
+  CONTRACT_LIST_PATH,
+  DETAIL_PATH,
   LOGIN_USER_FIELD,
   LOGIN_PASS_FIELD,
   LOGIN_SUBMIT_SELECTOR,
   TIME_ZONE,
   COL,
+  CONTRACT_COL,
   EXPECTED_COLUMN_COUNT,
+  CONTRACT_CHANNEL_FILTER,
+  DETAIL_FIELD,
+  DETAIL_EMAIL_PLACEHOLDER,
+  DETAIL_DELAY_MIN_MS,
+  DETAIL_DELAY_MAX_MS,
   toIsoFromLatam,
 } from './flexways.constants.js';
 
-export { SOURCE_SYSTEM, BASE_URL, randomDelay, sleep };
+export { SOURCE_SYSTEM, BASE_URL, randomDelay, sleep, DETAIL_DELAY_MIN_MS, DETAIL_DELAY_MAX_MS };
 
 // ---------------------------------------------------------------------------
 // Source-specific auth-expired signal (keeps its own name for instanceof /
@@ -238,19 +246,33 @@ function isLoginBounce(res, bodyText = '') {
   return false;
 }
 
-async function rawGridFetch(tenantId, url, userAgent) {
+async function rawHttpFetch(tenantId, url, userAgent, { accept, xhr = true } = {}) {
   const res = await _fetch(url, {
     method: 'GET',
     redirect: 'manual',
     headers: {
       'User-Agent': userAgent,
-      Accept: 'application/json,text/javascript,*/*',
-      'X-Requested-With': 'XMLHttpRequest',
+      Accept: accept || 'application/json,text/javascript,*/*',
+      ...(xhr ? { 'X-Requested-With': 'XMLHttpRequest' } : {}),
       ...(jarFor(tenantId) ? { Cookie: jarFor(tenantId) } : {}),
     },
     ...(flexwaysDispatcher ? { dispatcher: flexwaysDispatcher } : {}),
   });
   return res;
+}
+
+// The reservations/contracts DataTables endpoints expect an XHR JSON request.
+function rawGridFetch(tenantId, url, userAgent) {
+  return rawHttpFetch(tenantId, url, userAgent, {
+    accept: 'application/json,text/javascript,*/*', xhr: true,
+  });
+}
+
+// The detail page is a plain HTML document (not XHR); ask for text/html.
+function rawDetailFetch(tenantId, url, userAgent) {
+  return rawHttpFetch(tenantId, url, userAgent, {
+    accept: 'text/html,application/xhtml+xml,*/*', xhr: false,
+  });
 }
 
 /**
@@ -267,6 +289,26 @@ function buildListUrl(idSede) {
   // DataTables server-side pagination guard (Innovation 2026-07-13): -1 = "all".
   u.searchParams.set('length', '-1');
   u.searchParams.set('start', '0');
+  return u.toString();
+}
+
+/**
+ * Build the contract-list URL for one sede. Same idSede + DataTables
+ * `length=-1&start=0` pagination guard as the reservations grid — a sede with
+ * >10 contracts in the window must not silently import only page 1.
+ */
+function buildContractListUrl(idSede) {
+  const u = new URL(absUrl(CONTRACT_LIST_PATH));
+  if (idSede != null && String(idSede).trim() !== '') u.searchParams.set('idSede', String(idSede).trim());
+  u.searchParams.set('length', '-1');
+  u.searchParams.set('start', '0');
+  return u.toString();
+}
+
+/** Build the per-reservation detail URL keyed by idAlquiler. */
+function buildDetailUrl(idAlquiler) {
+  const u = new URL(absUrl(DETAIL_PATH));
+  u.searchParams.set('idAlquiler', String(idAlquiler).trim());
   return u.toString();
 }
 
@@ -410,6 +452,322 @@ export function filterByPickupWindow(rows, from, to) {
     if (toMs != null && t > toMs) return false;
     return true;
   });
+}
+
+// ===========================================================================
+// Fase 3.5 — contract list (carries idAlquiler) + per-reservation detail parse.
+// ===========================================================================
+
+/** Read cell `i` off a DataTables array-of-objects row (numeric-string keys). */
+function contractCell(rowObj, i) {
+  if (rowObj == null) return '';
+  if (Array.isArray(rowObj)) return rowObj[i];
+  // funcionesAjaxContratos rows are objects keyed "0".."11".
+  return rowObj[i] ?? rowObj[String(i)] ?? '';
+}
+
+/**
+ * Pull the ACRISS code out of a Flexways category label. Categories render as
+ * "Nombre (ACRISS)" — e.g. "SUV Compact AT (CFAR)" → "CFAR". No 4-letter
+ * parenthetical (e.g. a bare name) → null, so the row fails the ACRISS gate and
+ * routes to MANUAL_REVIEW (fail-safe). Pure. Exported for tests.
+ */
+export function extractAcriss(categoryLabel) {
+  const m = String(categoryLabel == null ? '' : categoryLabel).match(/\(([A-Za-z]{4})\)/);
+  return m ? m[1].toUpperCase() : null;
+}
+
+/**
+ * Parse a funcionesAjaxContratos.php DataTables payload (ARRAY-OF-OBJECTS) into
+ * normalized contract rows carrying idAlquiler (the detail-page key). Tolerates
+ * a JSON string or an already-parsed object. Rows missing idAlquiler OR ref are
+ * skipped (both are required — idAlquiler to fetch the detail, ref as the
+ * ExternalReservation key). Dates are interpreted in `timeZone`. Pure. Exported.
+ *
+ * @returns {Array<object>} normalized rows (+ non-enumerable `diagnostics`)
+ */
+export function parseContractList(payload, { timeZone = TIME_ZONE } = {}) {
+  let json = payload;
+  if (typeof payload === 'string') {
+    try { json = JSON.parse(payload); } catch { json = null; }
+  }
+  const data = json && Array.isArray(json.data) ? json.data
+    : (Array.isArray(json?.aaData) ? json.aaData : (Array.isArray(json) ? json : []));
+  const recordsTotal = Number.isFinite(Number(json?.recordsTotal)) ? Number(json.recordsTotal) : null;
+
+  const rows = [];
+  let shortRows = 0;
+  let missingId = 0;
+  for (const rowObj of data) {
+    if (rowObj == null || typeof rowObj !== 'object') { shortRows++; continue; }
+
+    const idAlquiler = cellText(contractCell(rowObj, CONTRACT_COL.ID_ALQUILER));
+    const externalRef = cellText(contractCell(rowObj, CONTRACT_COL.REF));
+    if (!idAlquiler) { missingId++; continue; } // no detail key → unusable
+    if (!externalRef) continue;                 // a real row must carry a ref
+
+    const name = cellText(contractCell(rowObj, CONTRACT_COL.CUSTOMER)) || null;
+    const { firstName, lastName } = splitName(name);
+
+    rows.push({
+      idAlquiler,
+      externalRef,
+      ref: externalRef,
+      sede: cellText(contractCell(rowObj, CONTRACT_COL.SEDE)) || null,
+      // ⚠ pickupAt is col 3 ("fecha booking" in the recon) — see CONTRACT_COL.
+      pickupAt: latamToUtc(contractCell(rowObj, CONTRACT_COL.PICKUP_AT), timeZone),
+      dropoffAt: latamToUtc(contractCell(rowObj, CONTRACT_COL.DROPOFF_AT), timeZone),
+      pickupLocation: cellText(contractCell(rowObj, CONTRACT_COL.PICKUP_LOCATION)) || null,
+      dropoffLocation: cellText(contractCell(rowObj, CONTRACT_COL.DROPOFF_LOCATION)) || null,
+      channel: cellText(contractCell(rowObj, CONTRACT_COL.CHANNEL)) || null,
+      customerName: name,
+      customerFirstName: firstName,
+      customerLastName: lastName,
+    });
+  }
+
+  const diagnostics = {
+    recordsTotal,
+    parsedRows: rows.length,
+    shortRows,
+    missingId,
+    emptyGridAnomaly: Array.isArray(data) && data.length > 0 && rows.length === 0,
+    // We ask for length=-1; if the portal still paginated server-side, the page
+    // count would be < recordsTotal → under-import silently (mirror of the grid).
+    truncated: recordsTotal != null && Array.isArray(data) && data.length < recordsTotal,
+  };
+  Object.defineProperty(rows, 'diagnostics', {
+    value: diagnostics, enumerable: false, configurable: true, writable: true,
+  });
+  return rows;
+}
+
+/** Restrict contract rows to an allow-list of channels (case-insensitive). */
+export function filterByChannel(rows, channels = CONTRACT_CHANNEL_FILTER) {
+  if (!Array.isArray(rows)) return [];
+  if (!Array.isArray(channels) || channels.length === 0) return rows; // empty = all
+  const allow = new Set(channels.map((c) => String(c).trim().toUpperCase()).filter(Boolean));
+  if (allow.size === 0) return rows;
+  return rows.filter((r) => allow.has(String(r?.channel || '').trim().toUpperCase()));
+}
+
+// ---------------------------------------------------------------------------
+// Detail HTML parsing. The detail page is a ~1MB HTML <form>; we only need a
+// handful of fields by `name`. Rather than load the whole DOM, a targeted
+// attribute-aware scan pulls each <input value> and each <select>'s SELECTED
+// <option> text. Robust to attribute order (name/value can appear in any order).
+// Pure. Exported for tests.
+// ---------------------------------------------------------------------------
+
+/** Parse the attributes of a single start-tag into a lowercased-key map. */
+function parseTagAttributes(tag) {
+  const attrs = {};
+  const re = /([a-zA-Z_:][-\w:.]*)\s*=\s*("([^"]*)"|'([^']*)'|([^\s"'>]+))/g;
+  let m;
+  while ((m = re.exec(tag))) {
+    attrs[m[1].toLowerCase()] = m[3] ?? m[4] ?? m[5] ?? '';
+  }
+  return attrs;
+}
+
+/** Value of the first <input name="X"> (attribute order agnostic). null if none. */
+export function extractInputValue(html, name) {
+  const target = String(name || '');
+  if (!target) return null;
+  const re = /<input\b[^>]*>/gi;
+  let m;
+  while ((m = re.exec(String(html || '')))) {
+    const attrs = parseTagAttributes(m[0]);
+    if (attrs.name === target) return cellText(attrs.value ?? '') || null;
+  }
+  return null;
+}
+
+/**
+ * Text of the SELECTED <option> inside <select name="X"> … </select>. When no
+ * option is explicitly marked selected, returns null (the portal always marks
+ * the current value). null if the select is absent. Pure. Exported for tests.
+ */
+export function extractSelectedOptionText(html, name) {
+  const target = String(name || '');
+  if (!target) return null;
+  const source = String(html || '');
+  const selRe = new RegExp(
+    `<select\\b[^>]*\\bname\\s*=\\s*["']?${escapeRegExp(target)}["']?[^>]*>([\\s\\S]*?)</select>`,
+    'i'
+  );
+  const sm = selRe.exec(source);
+  if (!sm) return null;
+  const body = sm[1];
+  const optRe = /<option\b([^>]*)>([\s\S]*?)<\/option>/gi;
+  let om;
+  while ((om = optRe.exec(body))) {
+    // Match the `selected` boolean attr (bare or selected="selected") but NOT a
+    // `data-selected="0"`/`class="selected"` false positive — the `\b` in a
+    // plain \bselected\b would match those (Innovation 2026-07-13).
+    if (/(^|\s)selected(\s|=|\/|>|$)/i.test(om[1])) return cellText(om[2]) || null;
+  }
+  return null;
+}
+
+function escapeRegExp(s) {
+  return String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+/** "32.50" / "1,234.50" / "1.234,50" → Number. null when not a number. */
+export function parseAmount(raw) {
+  const s = cellText(raw);
+  if (!s) return null;
+  const cleaned = s.replace(/[^\d.,-]/g, '');
+  if (!cleaned) return null;
+  let normalized = cleaned;
+  const hasDot = cleaned.includes('.');
+  const hasComma = cleaned.includes(',');
+  if (hasDot && hasComma) {
+    // The rightmost separator is the decimal; strip the other as a grouping sep.
+    if (cleaned.lastIndexOf(',') > cleaned.lastIndexOf('.')) {
+      normalized = cleaned.replace(/\./g, '').replace(',', '.'); // 1.234,50 → 1234.50
+    } else {
+      normalized = cleaned.replace(/,/g, ''); // 1,234.50 → 1234.50
+    }
+  } else if (hasComma) {
+    // Comma-only: treat as decimal when it looks like one (1–2 trailing digits).
+    normalized = /,\d{1,2}$/.test(cleaned) ? cleaned.replace(',', '.') : cleaned.replace(/,/g, '');
+  }
+  const n = Number(normalized);
+  return Number.isFinite(n) ? n : null;
+}
+
+/** Reject the "test@test.com" placeholder; return a trimmed real email or null. */
+function cleanCustomerEmail(value) {
+  const e = String(value == null ? '' : value).trim();
+  if (!e) return null;
+  if (e.toLowerCase() === DETAIL_EMAIL_PLACEHOLDER) return null;
+  return e;
+}
+
+/**
+ * Parse a modificarReserva.php detail HTML document into the enrichment fields
+ * the promotion matcher needs. Pure. Exported for tests.
+ *
+ * @returns {{
+ *   customerEmail: string|null,
+ *   customerIdExternal: string|null,
+ *   totalAmount: number|null,
+ *   currency: string|null,
+ *   vehicleAcriss: string|null,
+ *   vehicleCategoryLabel: string|null,
+ * }}
+ */
+export function parseReservationDetailHtml(html) {
+  const source = String(html || '');
+
+  // Email: prefer emailCustomer (the real one); fall back to `email`, but the
+  // fallback input can hold a "test@test.com" placeholder → never accept it.
+  const customerEmail =
+    cleanCustomerEmail(extractInputValue(source, DETAIL_FIELD.EMAIL)) ||
+    cleanCustomerEmail(extractInputValue(source, DETAIL_FIELD.EMAIL_FALLBACK));
+
+  const customerIdExternal =
+    extractInputValue(source, DETAIL_FIELD.CUSTOMER_ID) ||
+    extractSelectedOptionText(source, DETAIL_FIELD.CUSTOMER_ID_FALLBACK) ||
+    null;
+
+  const totalAmount =
+    parseAmount(extractInputValue(source, DETAIL_FIELD.TOTAL)) ??
+    parseAmount(extractInputValue(source, DETAIL_FIELD.TOTAL_FALLBACK));
+
+  const currency = extractSelectedOptionText(source, DETAIL_FIELD.CURRENCY_SELECT) || null;
+
+  const vehicleCategoryLabel = extractSelectedOptionText(source, DETAIL_FIELD.CATEGORY_SELECT) || null;
+  const vehicleAcriss = extractAcriss(vehicleCategoryLabel);
+
+  return {
+    customerEmail: customerEmail || null,
+    customerIdExternal,
+    totalAmount: totalAmount ?? null,
+    currency,
+    vehicleAcriss,
+    vehicleCategoryLabel,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Contract-list fetch — one sede, windowed. GET the DataTables JSON with the
+// session cookie, re-login-once on a bounce, parse + channel + window filter.
+// This is the list source the worker uses (it carries idAlquiler); the grid
+// (fetchReservationList) is retained for the auth probe.
+// ---------------------------------------------------------------------------
+export async function fetchContractList(
+  tenantId,
+  { idSede = null, from = null, to = null, channels = CONTRACT_CHANNEL_FILTER, userAgent } = {}
+) {
+  const ua = userAgent || pickUserAgent();
+  await ensureSession(tenantId, { userAgent: ua });
+
+  const url = buildContractListUrl(idSede);
+  let res = await rawGridFetch(tenantId, url, ua);
+  let text = await res.text().catch(() => '');
+
+  if (isLoginBounce(res, text)) {
+    logger.info('[flexways] contract list bounced to login, re-login once', { tenantId, idSede });
+    cookieJars.delete(tenantId);
+    await doLogin(tenantId, { userAgent: ua });
+    res = await rawGridFetch(tenantId, url, ua);
+    text = await res.text().catch(() => '');
+    if (isLoginBounce(res, text)) {
+      throw new FlexwaysAuthExpiredError(`Re-login did not restore the Flexways session for tenant ${tenantId}`);
+    }
+  }
+
+  const parsed = parseContractList(text, { timeZone: TIME_ZONE });
+  const diag = parsed.diagnostics || null;
+  if (diag?.emptyGridAnomaly) {
+    logger.warn('[flexways] contract list returned rows but none usable — possible format break', { tenantId, idSede });
+  }
+
+  const byChannel = filterByChannel(parsed, channels);
+  const filtered = filterByPickupWindow(byChannel, from, to);
+  if (diag) {
+    Object.defineProperty(filtered, 'diagnostics', {
+      value: diag, enumerable: false, configurable: true, writable: true,
+    });
+  }
+  logger.info('[flexways] contract list fetched', {
+    tenantId, idSede, parsed: parsed.length, afterChannel: byChannel.length,
+    afterWindow: filtered.length, recordsTotal: diag?.recordsTotal ?? null,
+  });
+  return filtered;
+}
+
+// ---------------------------------------------------------------------------
+// Detail fetch — one reservation's HTML form, parsed for the enrichment fields
+// (email / total / currency / ACRISS). Re-login-once on a bounce; on any other
+// error returns null so the caller falls back to MANUAL_REVIEW (fail-safe).
+// AuthExpired propagates so the worker can fail the whole run.
+// ---------------------------------------------------------------------------
+export async function fetchReservationDetail(tenantId, idAlquiler, { userAgent } = {}) {
+  const id = String(idAlquiler == null ? '' : idAlquiler).trim();
+  if (!id) return null;
+  const ua = userAgent || pickUserAgent();
+  await ensureSession(tenantId, { userAgent: ua });
+
+  const url = buildDetailUrl(id);
+  let res = await rawDetailFetch(tenantId, url, ua);
+  let text = await res.text().catch(() => '');
+
+  if (isLoginBounce(res, text)) {
+    logger.info('[flexways] detail bounced to login, re-login once', { tenantId, idAlquiler: id });
+    cookieJars.delete(tenantId);
+    await doLogin(tenantId, { userAgent: ua });
+    res = await rawDetailFetch(tenantId, url, ua);
+    text = await res.text().catch(() => '');
+    if (isLoginBounce(res, text)) {
+      throw new FlexwaysAuthExpiredError(`Re-login did not restore the Flexways session for tenant ${tenantId}`);
+    }
+  }
+
+  return parseReservationDetailHtml(text);
 }
 
 // ---------------------------------------------------------------------------

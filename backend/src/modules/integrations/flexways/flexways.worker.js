@@ -17,12 +17,14 @@
  * MONEY: writes ONLY estimatedTotal on the Reservation. No charge, no card, no
  * autocharge — same posture as TL/Economy/NU.
  *
- * NOTE (recon gap): the grid carries no ACRISS/class, total, or customer
- * email/phone — those live in the per-reservation DETAIL page, which the recon did
- * NOT capture. Until the detail fetch lands, mapped rows have vehicleAcriss/total/
- * email = null, so promotion typically routes to MANUAL_REVIEW (acriss_unmapped).
- * That is the SAFE default for a dark ship — nothing is money-charged and the tray
- * lets staff finish the import by hand.
+ * FASE 3.5 (detail-fetch): the list source is now funcionesAjaxContratos.php
+ * (which carries idAlquiler); for each contract row the worker fetches the
+ * per-reservation DETAIL page (modificarReserva.php) and merges the real
+ * customer email + total + currency + ACRISS (from the category label's
+ * parenthetical). With email + ACRISS present, evaluatePromotion can AUTO-promote
+ * instead of always falling to MANUAL_REVIEW. A missing/failed detail leaves
+ * vehicleAcriss null → MANUAL_REVIEW (fail-safe). Detail fetches are politeness-
+ * rate-limited (DETAIL_DELAY_*). MONEY: still estimatedTotal only, never a charge.
  *
  * See doc/flexways-integration-plan-2026-07-13.md
  */
@@ -33,8 +35,11 @@ import { captureBackendException } from '../../../lib/sentry.js';
 import { registerWorker, enqueueJob } from '../../../lib/queue/index.js';
 import { SCRAPER_PRIORITY } from '../../../lib/queue/priorities.js';
 import {
-  fetchReservationList,
+  fetchContractList,
+  fetchReservationDetail,
   pickUserAgent,
+  sleep,
+  randomDelay,
   FlexwaysAuthExpiredError,
 } from './flexways.service.js';
 import {
@@ -43,6 +48,8 @@ import {
   QUEUE_NAME,
   RESERVATION_PREFIX,
   TIME_ZONE,
+  DETAIL_DELAY_MIN_MS,
+  DETAIL_DELAY_MAX_MS,
   windowBoundsForConfig,
 } from './flexways.constants.js';
 import { createPromoter } from '../booking-source/promote.js';
@@ -106,6 +113,48 @@ export function mapRowToExternalReservation(row) {
 }
 
 /**
+ * Field mapper — normalized CONTRACT row + parsed DETAIL → ExternalReservation.
+ * The contract row (parseContractList) supplies identity/dates/locations; the
+ * detail object (parseReservationDetailHtml) supplies the enrichment fields the
+ * promotion matcher needs (email + ACRISS + total + currency). A null/failed
+ * detail leaves those fields null → the row routes to MANUAL_REVIEW (fail-safe).
+ * Pure. Exported for tests. MONEY: totalAmount → estimatedTotal only, no charge.
+ */
+export function mapContractToExternalReservation(row, detail) {
+  const r = row && typeof row === 'object' ? row : {};
+  const d = detail && typeof detail === 'object' ? detail : {};
+  return {
+    externalRef: String(r.externalRef || r.ref || '').trim(),
+    channel: r.channel || null,
+    supplierRef: null,                    // contract list has no separate booking code
+    status: 'CONFIRMED',                  // contract rows are confirmed reservations
+    customerFirstName: r.customerFirstName || null,
+    customerLastName: r.customerLastName || null,
+    customerEmail: d.customerEmail || null,
+    customerPhone: null,                  // not present in the detail sample
+    customerCountry: null,
+    flightNumber: null,
+    vehicleAcriss: d.vehicleAcriss || null,           // ACRISS from cbCategoria "(XXXX)"
+    vehicleDescription: d.vehicleCategoryLabel || null,
+    pickupAt: r.pickupAt instanceof Date ? r.pickupAt : null,
+    pickupLocation: r.pickupLocation || null,
+    dropoffAt: r.dropoffAt instanceof Date ? r.dropoffAt : null,
+    dropoffLocation: r.dropoffLocation || null,
+    totalAmount: d.totalAmount ?? null,               // MONEY: estimatedTotal source only
+    // Store the parsed currency honestly (null on a parse miss) rather than
+    // fabricating 'USD' into the row. NOTE: the shared promotion matcher still
+    // defaults null→USD for the promotion decision (booking-source/promotion-
+    // matcher.service.js), so a parse-miss currently auto-promotes as USD — the
+    // active Flexways account is USD-Orlando so this is moot today. True
+    // fail-closed (null→MANUAL_REVIEW) would be a cross-source matcher change
+    // (affects NU/Economy/TL) — deferred; flagged in the plan.
+    currency: d.currency || null,
+    // Keep the external customer id + both raw halves for the review tray / audit.
+    rawJson: { contract: r, detail: d, customerIdExternal: d.customerIdExternal ?? null },
+  };
+}
+
+/**
  * The job handler. Exported for direct invocation from tests + a bootstrap CLI.
  * Job payload: { tenantId, triggeredBy }.
  */
@@ -153,7 +202,7 @@ export async function flexwaysSyncHandler(job) {
 
       let rows = [];
       try {
-        rows = await fetchReservationList(tenantId, {
+        rows = await fetchContractList(tenantId, {
           idSede: config.idSede, from: dateFrom, to: dateTo, userAgent,
         });
       } catch (err) {
@@ -175,12 +224,25 @@ export async function flexwaysSyncHandler(job) {
       const existingRows = refs.length
         ? await prisma.externalReservation.findMany({
           where: { sourceSystem: SOURCE_SYSTEM, externalRef: { in: refs } },
-          select: { externalRef: true, tenantId: true },
+          select: { externalRef: true, tenantId: true, promotionStatus: true },
         })
         : [];
       const existingByRef = new Map(existingRows.map((r) => [r.externalRef, r.tenantId]));
       const knownSet = new Set(
         existingRows.filter((r) => r.tenantId === tenantId).map((r) => r.externalRef)
+      );
+      // Already-promoted refs for THIS tenant. We skip the per-row detail fetch
+      // (N × ~1MB modificarReserva.php page) for these — a promoted row's later
+      // detail has no consumer (the promoted Reservation is never re-synced), so
+      // re-fetching it every 15 min is pure waste AND the main portal bot-score
+      // risk. Collapses N from ~all-contracts-in-window to just new + still-in-
+      // review rows (Innovation 2026-07-13). Rows still in MANUAL_REVIEW are NOT
+      // skipped — they may become promotable once mappings/customers land.
+      const promotedSet = new Set(
+        existingRows
+          .filter((r) => r.tenantId === tenantId
+            && (r.promotionStatus === 'AUTO_PROMOTED' || r.promotionStatus === 'PROMOTED'))
+          .map((r) => r.externalRef)
       );
 
       for (const row of rows) {
@@ -197,7 +259,34 @@ export async function flexwaysSyncHandler(job) {
           }
 
           const wasKnown = knownSet.has(externalRef);
-          const mapped = mapRowToExternalReservation(row);
+
+          // Already promoted → nothing to do. Skip BEFORE the detail fetch + the
+          // no-op upsert (Innovation 2026-07-13): re-enriching a promoted row is
+          // pure waste and the main portal-hammering risk.
+          if (promotedSet.has(externalRef)) {
+            updatedExisting++;
+            continue;
+          }
+
+          // DETAIL fetch — enrich with email + total + currency + ACRISS so the
+          // row can AUTO-promote. A failed detail returns null → the fields stay
+          // null → MANUAL_REVIEW (fail-safe). AuthExpired propagates (throw).
+          // Only runs for NEW or still-in-MANUAL_REVIEW rows now.
+          let detail = null;
+          try {
+            detail = await fetchReservationDetail(tenantId, row.idAlquiler, { userAgent });
+          } catch (detailErr) {
+            if (detailErr instanceof FlexwaysAuthExpiredError) throw detailErr;
+            logger.warn('[flexways-sync] detail fetch failed; row routes to MANUAL_REVIEW', {
+              tenantId, externalRef, idAlquiler: row.idAlquiler, message: detailErr.message,
+            });
+          } finally {
+            // Politeness rate-limit between per-reservation detail fetches so we
+            // never hammer the portal (mirror Economy's DETAIL_DELAY_*).
+            await sleep(randomDelay(DETAIL_DELAY_MIN_MS, DETAIL_DELAY_MAX_MS));
+          }
+
+          const mapped = mapContractToExternalReservation(row, detail);
 
           const upserted = await prisma.externalReservation.upsert({
             where: { source_ref_unique: { sourceSystem: SOURCE_SYSTEM, externalRef } },
@@ -208,7 +297,7 @@ export async function flexwaysSyncHandler(job) {
           if (wasKnown) updatedExisting++; else newlyInserted++;
 
           if (upserted.promotionStatus === 'AUTO_PROMOTED' || upserted.promotionStatus === 'PROMOTED') {
-            continue; // idempotent — already promoted
+            continue; // idempotent — already promoted (e.g. promoted mid-run)
           }
 
           // The sede's mapped locationId is authoritative → overrideLocationId

@@ -666,6 +666,25 @@ function Inner({ token, me, logout }) {
               </>
             ) : null}
 
+            {/* Account status for EMPLOYEES (non-host), edit-only. INACTIVE sets
+                User.isActive=false → blocks login AND drops their live session
+                within ~30s (getSessionUser rejects inactive users). This is how
+                you disable a departed/terminated employee. (2026-07-13) */}
+            {!hostMode && editingPersonId ? (
+              <div className="stack">
+                <label className="label">Account Status</label>
+                <select value={form.status === 'INACTIVE' ? 'INACTIVE' : 'ACTIVE'} onChange={(e) => setForm({ ...form, status: e.target.value })}>
+                  <option value="ACTIVE">ACTIVE — can log in</option>
+                  <option value="INACTIVE">INACTIVE — login disabled</option>
+                </select>
+                {form.status === 'INACTIVE' ? (
+                  <div className="surface-note" style={{ background: 'rgba(239,68,68,0.08)', borderColor: 'rgba(239,68,68,0.35)', color: '#b91c1c' }}>
+                    🔒 This user will be unable to log in, and any active session ends within ~30 seconds after you save.
+                  </div>
+                ) : null}
+              </div>
+            ) : null}
+
             {loginRequired ? (
               <div className="form-grid-2">
                 <div className="stack">
