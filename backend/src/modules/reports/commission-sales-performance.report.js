@@ -39,7 +39,8 @@
  */
 
 import { registerReport } from './reports-v2.routes.js';
-import { SERVICE_CATALOG, matchesService } from '../../lib/commission-catalog.js';
+import { SERVICE_CATALOG, resolveCatalogEntry } from '../../lib/commission-catalog.js';
+import { COLLECTED_PAYMENT_WHERE } from './collected-payments.js';
 import { startOfDayInTz, addDaysInTz } from '../../lib/date-utils.js';
 import { resolveTenantTimeZone } from '../../lib/tenant-tz.js';
 
@@ -112,7 +113,10 @@ async function computeData({ tenantId, from, to }, deps = {}) {
       salesOwnerUserId: true,
       salesOwnerUser: { select: { id: true, fullName: true } },
       charges: { select: { code: true, name: true, total: true, selected: true } },
-      payments: { select: { amount: true, method: true } },
+      // COLLECTED money only — status='PAID', deposit AUTH_HOLDs excluded.
+      // Raw rows inflated "Paid at counter" with every security-deposit hold
+      // and voided attempt (same class as the 2026-07-13 snapshot bug).
+      payments: { where: { ...COLLECTED_PAYMENT_WHERE }, select: { amount: true } },
       inspections: {
         where: { phase: 'CHECKOUT' },
         orderBy: [{ capturedAt: 'desc' }, { updatedAt: 'desc' }],
@@ -189,22 +193,24 @@ async function computeData({ tenantId, from, to }, deps = {}) {
     // attach %. Matches sync's commissionChargeRows filter so Sales
     // Performance and Commission Payouts agree on the same set of revenue-
     // generating sales.
+    //
+    // First-match-wins per CHARGE (resolveCatalogEntry — same precedence as
+    // the ledger sync): a "Liability Insurance" line attaches to ONE service.
+    // The old service-outer loop matched it against BOTH /liab/ and
+    // /insurance/ → double commission + its dollars counted in two rows.
+    const dollarsByService = new Map();
+    for (const ch of (ag.charges || [])) {
+      if (ch.selected === false) continue;
+      if (!(num(ch.total) > 0)) continue;
+      const service = resolveCatalogEntry(ch);
+      if (!service) continue;
+      dollarsByService.set(service.slug, (dollarsByService.get(service.slug) || 0) + num(ch.total));
+    }
     for (const service of SERVICE_CATALOG) {
-      let matched = false;
-      let serviceDollarsThisAg = 0;
-      for (const ch of (ag.charges || [])) {
-        if (ch.selected === false) continue;
-        if (!(num(ch.total) > 0)) continue;
-        if (matchesService(ch, service)) {
-          matched = true;
-          serviceDollarsThisAg += num(ch.total);
-        }
-      }
-      if (matched) {
-        c.serviceCounts[service.slug] += 1;
-        c.serviceDollars[service.slug] += serviceDollarsThisAg;
-        c.commissions += num(service.commPerSale);
-      }
+      if (!dollarsByService.has(service.slug)) continue;
+      c.serviceCounts[service.slug] += 1;
+      c.serviceDollars[service.slug] += dollarsByService.get(service.slug);
+      c.commissions += num(service.commPerSale);
     }
   }
 
@@ -446,4 +452,4 @@ registerReport({
   buildExcelSpec,
 });
 
-export const _commissionInternal = { computeData, SERVICE_CATALOG, matchesService };
+export const _commissionInternal = { computeData, SERVICE_CATALOG, resolveCatalogEntry };

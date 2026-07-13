@@ -69,7 +69,10 @@ async function resolveDefaultPrisma() {
 }
 
 function buildTransactionWhere({ tenantId, locationId, gte, lt }) {
-  const where = { tenantId, transactionAt: { gte, lt } };
+  // VOID tolls (Admin Corrections / not-billable) are cancelled by status —
+  // no negative credit row exists — so counting them overstates toll cost
+  // (audit 2026-07-13). Same filter in toll-per-vehicle.
+  const where = { tenantId, status: { notIn: ['VOID'] }, transactionAt: { gte, lt } };
   if (locationId) {
     // When narrowing by tenant location, we can only attribute matched (has-vehicle)
     // transactions. Unmatched rows have no home location to filter by.
@@ -238,20 +241,25 @@ async function plazaDrillDownHandler(req, res, { tenantId }) {
 
   const plazaRaw = (req.query?.plaza || '').toString();
   const locationId = req.query?.locationId ? String(req.query.locationId) : null;
-  const from = req.query?.from ? new Date(req.query.from) : null;
-  const to = req.query?.to ? new Date(req.query.to) : null;
+  // RAW strings into the tz-aware helper — `new Date('2026-07-01')` parses as
+  // UTC midnight (= Jun 30 in PR) and shifted this window one day early vs the
+  // aggregate (QA 2026-07-13; same class as the commission drill-down fix).
+  const fromRaw = req.query?.from ? String(req.query.from) : null;
+  const toRaw   = req.query?.to   ? String(req.query.to)   : null;
 
   if (!plazaRaw) return res.status(400).json({ error: 'plaza query param required' });
-  if (from && Number.isNaN(from.getTime())) return res.status(400).json({ error: 'invalid from' });
-  if (to && Number.isNaN(to.getTime()))     return res.status(400).json({ error: 'invalid to' });
+  if (fromRaw && Number.isNaN(new Date(fromRaw).getTime())) return res.status(400).json({ error: 'invalid from' });
+  if (toRaw && Number.isNaN(new Date(toRaw).getTime()))     return res.status(400).json({ error: 'invalid to' });
 
   const now = new Date();
-  const fromDate = from ? startOfDay(from) : addDays(startOfDay(now), -29);
-  const toDate   = to   ? startOfDay(to)   : startOfDay(now);
+  const fromDate = fromRaw ? startOfDay(fromRaw) : addDays(startOfDay(now), -29);
+  const toDate   = toRaw   ? startOfDay(toRaw)   : startOfDay(now);
   const windowEnd = addDays(toDate, 1);
 
   const where = {
     tenantId,
+    // Same population as the aggregate — VOID stays out of the drill-down too.
+    status: { notIn: ['VOID'] },
     transactionAt: { gte: fromDate, lt: windowEnd },
   };
   if (plazaRaw === UNKNOWN_PLAZA_KEY) {
@@ -393,6 +401,7 @@ registerReport({
 
 export const _tollPerLocationInternal = {
   computeData,
+  buildTransactionWhere,
   aggregateByPlaza,
   plazaDrillDownHandler,
   formatTransaction,

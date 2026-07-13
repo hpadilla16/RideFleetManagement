@@ -16,7 +16,8 @@
 import { registerReport } from './reports-v2.routes.js';
 import { DEFAULT_TENANT_TIMEZONE, startOfDayInTz, addDaysInTz } from '../../lib/date-utils.js';
 import { resolveTenantTimeZone } from '../../lib/tenant-tz.js';
-import { SERVICE_CATALOG, matchesService } from '../../lib/commission-catalog.js';
+import { SERVICE_CATALOG, resolveCatalogEntry } from '../../lib/commission-catalog.js';
+import { COLLECTED_PAYMENT_WHERE } from './collected-payments.js';
 
 function num(v) { const n = Number(v); return Number.isFinite(n) ? n : 0; }
 function daysBetween(a, b) {
@@ -132,7 +133,9 @@ async function computeData({ tenantId, from, to }, deps = {}) {
       salesOwnerUserId: true,
       salesOwnerUser: { select: { id: true, fullName: true } },
       charges: { select: { code: true, name: true, total: true, selected: true } },
-      payments: { select: { amount: true } },
+      // COLLECTED money only — status='PAID', deposit AUTH_HOLDs excluded
+      // (same fix as commission-sales-performance / the snapshot, 2026-07-13).
+      payments: { where: { ...COLLECTED_PAYMENT_WHERE }, select: { amount: true } },
       inspections: {
         where: { phase: 'CHECKOUT' },
         orderBy: [{ capturedAt: 'desc' }, { updatedAt: 'desc' }],
@@ -208,26 +211,27 @@ async function computeData({ tenantId, from, to }, deps = {}) {
     tb.rentals += 1; tb.totalDays += days; tb.paidAtCounter += paid;
     cb.rentals += 1; cb.totalDays += days; cb.paidAtCounter += paid;
 
+    // First-match-wins per CHARGE (resolveCatalogEntry — same precedence as
+    // the ledger sync): a "Liability Insurance" line attaches to ONE service,
+    // not two (the old service-outer loop double-counted commission + dollars).
+    // $0 (courtesy / waived) charges skipped — match sync's commissionChargeRows.
+    const dollarsByService = new Map();
+    for (const ch of (ag.charges || [])) {
+      if (ch.selected === false) continue;
+      if (!(num(ch.total) > 0)) continue;
+      const service = resolveCatalogEntry(ch);
+      if (!service) continue;
+      dollarsByService.set(service.slug, (dollarsByService.get(service.slug) || 0) + num(ch.total));
+    }
     for (const service of SERVICE_CATALOG) {
-      let matched = false;
-      let dollarsThisAg = 0;
-      for (const ch of (ag.charges || [])) {
-        if (ch.selected === false) continue;
-        // Skip $0 (courtesy / waived) charges — match sync's commissionChargeRows.
-        if (!(num(ch.total) > 0)) continue;
-        if (matchesService(ch, service)) {
-          matched = true;
-          dollarsThisAg += num(ch.total);
-        }
-      }
-      if (matched) {
-        tb.serviceCounts[service.slug] += 1;
-        tb.serviceDollars[service.slug] += dollarsThisAg;
-        tb.commissions += num(service.commPerSale);
-        cb.serviceCounts[service.slug] += 1;
-        cb.serviceDollars[service.slug] += dollarsThisAg;
-        cb.commissions += num(service.commPerSale);
-      }
+      if (!dollarsByService.has(service.slug)) continue;
+      const dollarsThisAg = dollarsByService.get(service.slug);
+      tb.serviceCounts[service.slug] += 1;
+      tb.serviceDollars[service.slug] += dollarsThisAg;
+      tb.commissions += num(service.commPerSale);
+      cb.serviceCounts[service.slug] += 1;
+      cb.serviceDollars[service.slug] += dollarsThisAg;
+      cb.commissions += num(service.commPerSale);
     }
   }
 

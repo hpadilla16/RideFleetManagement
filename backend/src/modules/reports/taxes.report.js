@@ -90,6 +90,9 @@ function buildChargeWhere({ tenantId, locationId, gte, lt }) {
   const rentalAgreement = { tenantId };
   if (locationId) rentalAgreement.pickupLocationId = locationId;
   rentalAgreement.pickupAt = { gte, lt };
+  // No tax was collected on a voided agreement or an abandoned draft —
+  // same population rule as sales.report.js (keep the pair in sync).
+  rentalAgreement.status = { notIn: ['CANCELLED', 'DRAFT'] };
   return { selected: true, rentalAgreement };
 }
 
@@ -285,15 +288,20 @@ async function categoryDrillDownHandler(req, res, { tenantId }) {
   }
 
   const locationId = req.query?.locationId ? String(req.query.locationId) : null;
-  const from = req.query?.from ? new Date(req.query.from) : null;
-  const to   = req.query?.to   ? new Date(req.query.to)   : null;
-  if (from && Number.isNaN(from.getTime())) return res.status(400).json({ error: 'invalid from date' });
-  if (to && Number.isNaN(to.getTime()))     return res.status(400).json({ error: 'invalid to date' });
+  // RAW strings into tz-aware helpers with the TENANT's tz — exactly like
+  // computeData. `new Date('2026-07-01')` parses as UTC midnight (= Jun 30 in
+  // PR) and the module-level helpers are pinned to PR, so this drill-down ran
+  // one day early vs the aggregate (QA 2026-07-13; same class as commission).
+  const fromRaw = req.query?.from ? String(req.query.from) : null;
+  const toRaw   = req.query?.to   ? String(req.query.to)   : null;
+  if (fromRaw && Number.isNaN(new Date(fromRaw).getTime())) return res.status(400).json({ error: 'invalid from date' });
+  if (toRaw && Number.isNaN(new Date(toRaw).getTime()))     return res.status(400).json({ error: 'invalid to date' });
 
+  const tenantTz = await resolveTenantTimeZone(tenantId);
   const now = new Date();
-  const fromDate = from ? startOfDay(from) : startOfMonth(now);
-  const toDate   = to   ? startOfDay(to)   : startOfDay(now);
-  const windowEnd = addDays(toDate, 1);
+  const fromDate = fromRaw ? startOfDayInTz(fromRaw, tenantTz) : startOfMonthInTz(now, tenantTz);
+  const toDate   = toRaw   ? startOfDayInTz(toRaw, tenantTz)   : startOfDayInTz(now, tenantTz);
+  const windowEnd = addDaysInTz(toDate, 1);
 
   const charges = await prisma.rentalAgreementCharge.findMany({
     where: {
@@ -303,6 +311,8 @@ async function categoryDrillDownHandler(req, res, { tenantId }) {
       rentalAgreement: {
         tenantId,
         pickupAt: { gte: fromDate, lt: windowEnd },
+        // Same population as the aggregate (buildChargeWhere) — no cancelled/draft.
+        status: { notIn: ['CANCELLED', 'DRAFT'] },
         ...(locationId ? { pickupLocationId: locationId } : {}),
       },
     },
@@ -470,6 +480,7 @@ registerReport({
 export const _taxesInternal = {
   computeData,
   aggregate,
+  buildChargeWhere,
   categoryDrillDownHandler,
   TAX,
   NON_REVENUE_CHARGE_TYPES,

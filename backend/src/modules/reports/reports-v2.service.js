@@ -185,6 +185,8 @@ const REPORT_REGISTRY = [
 
 import { startOfDayInTz, startOfMonthInTz, addDaysInTz } from '../../lib/date-utils.js';
 import { resolveTenantTimeZone } from '../../lib/tenant-tz.js';
+import { COLLECTED_PAYMENT_WHERE } from './collected-payments.js';
+import logger from '../../lib/logger.js';
 
 let _defaultPrisma = null;
 async function resolveDefaultPrisma() {
@@ -237,7 +239,11 @@ export async function listReports({ tenantId } = {}) {
 /**
  * Compute the three snapshot metrics shown at the top of the landing page:
  *   1. Revenue in window — sum of RentalAgreementPayment.amount where
- *      paidAt is in the window (tenant-local day boundaries).
+ *      paidAt is in the window (tenant-local day boundaries), COLLECTED
+ *      money only: status='PAID' and method != AUTH_HOLD (deposit holds are
+ *      never captured). Same rule as payments-by-day via COLLECTED_PAYMENT_WHERE
+ *      — 2026-07-13 fix: the raw sum showed $336k vs $47.5k real for
+ *      International because every security-deposit hold (+ a VOID) counted.
  *   2. Reservations checked out in window — rentals whose pickup actually
  *      happened during the window (pickupAt in window AND status reached
  *      at least CHECKED_OUT). This counts both still-out rentals and ones
@@ -265,13 +271,15 @@ export async function getSnapshot({ tenantId, from, to, deps = {} } = {}) {
   const fromDate = from ? startOfDayInTz(from, tenantTz) : startOfMonthInTz(now, tenantTz);
   const toEndExclusive = to ? addDaysInTz(startOfDayInTz(to, tenantTz), 1) : addDaysInTz(startOfDayInTz(now, tenantTz), 1);
 
-  // 1. Revenue — sum of payment amounts in the window for this tenant.
+  // 1. Revenue — COLLECTED payment amounts in the window for this tenant
+  //    (PAID only, deposit auth-holds excluded — see collected-payments.js).
   let revenue = 0;
   try {
     const payments = await prisma.rentalAgreementPayment.findMany({
       where: {
         rentalAgreement: { tenantId },
         paidAt: { gte: fromDate, lt: toEndExclusive },
+        ...COLLECTED_PAYMENT_WHERE,
       },
       select: { amount: true },
     });
@@ -279,7 +287,11 @@ export async function getSnapshot({ tenantId, from, to, deps = {} } = {}) {
       const n = Number(p.amount);
       if (Number.isFinite(n)) revenue += n;
     }
-  } catch { /* ignore */ }
+  } catch (err) {
+    // Degrade to 0 rather than 500 the landing page, but never silently:
+    // a swallowed schema error here is how revenue=0 hid for weeks before.
+    logger.warn('[reports-v2] snapshot revenue query failed', { tenantId, error: String(err?.message || err) });
+  }
 
   // 2. Reservations that picked up in the window. pickupAt is the scheduled
   //    pickup; status filter ensures the rental actually progressed past

@@ -301,17 +301,23 @@ async function employeeDrillDownHandler(req, res, { tenantId }) {
   const employeeUserId = req.query?.employeeUserId ? String(req.query.employeeUserId) : null;
   const locationId = req.query?.locationId ? String(req.query.locationId) : null;
   const status = req.query?.status || 'ALL';
-  const from = req.query?.from ? new Date(req.query.from) : null;
-  const to   = req.query?.to   ? new Date(req.query.to)   : null;
+  // Pass the RAW query strings to the tz-aware helpers with the TENANT's tz —
+  // exactly like computeData. The old `new Date(raw)` wrap parsed '2026-07-01'
+  // as UTC midnight (= Jun 30 in PR) and the module-level helpers were pinned
+  // to PR, so the drill-down window ran one day early and never matched the
+  // employee's row in the main report (audit 2026-07-13).
+  const fromRaw = req.query?.from ? String(req.query.from) : null;
+  const toRaw   = req.query?.to   ? String(req.query.to)   : null;
 
   if (!employeeUserId) return res.status(400).json({ error: 'employeeUserId query param required' });
-  if (from && Number.isNaN(from.getTime())) return res.status(400).json({ error: 'invalid from' });
-  if (to && Number.isNaN(to.getTime()))     return res.status(400).json({ error: 'invalid to' });
+  if (fromRaw && Number.isNaN(new Date(fromRaw).getTime())) return res.status(400).json({ error: 'invalid from' });
+  if (toRaw && Number.isNaN(new Date(toRaw).getTime()))     return res.status(400).json({ error: 'invalid to' });
 
+  const tenantTz = await resolveTenantTimeZone(tenantId);
   const now = new Date();
-  const fromDate = from ? startOfDay(from) : startOfMonth(now);
-  const toDate   = to   ? startOfDay(to)   : startOfDay(now);
-  const windowEnd = addDays(toDate, 1);
+  const fromDate = fromRaw ? startOfDayInTz(fromRaw, tenantTz) : startOfMonthInTz(now, tenantTz);
+  const toDate   = toRaw   ? startOfDayInTz(toRaw, tenantTz)   : startOfDayInTz(now, tenantTz);
+  const windowEnd = addDaysInTz(toDate, 1);
 
   // Same checkout-date filter as the main list. Bucket by when the car was
   // released, not when the snapshot was calculated.

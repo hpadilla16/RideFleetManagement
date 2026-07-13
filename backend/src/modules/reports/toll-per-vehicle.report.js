@@ -64,6 +64,9 @@ async function resolveDefaultPrisma() {
 function buildTransactionWhere({ tenantId, locationId, gte, lt, vehicleScope }) {
   const where = {
     tenantId,
+    // VOID tolls are cancelled by status (no credit row) — counting them
+    // overstates toll cost (audit 2026-07-13). Same filter in toll-per-location.
+    status: { notIn: ['VOID'] },
     transactionAt: { gte, lt },
   };
   // vehicleScope = 'matched' (vehicleId set), 'unmatched' (null), or undefined (both)
@@ -249,22 +252,27 @@ async function transactionsDrillDownHandler(req, res, { tenantId }) {
   const vehicleId = req.query?.vehicleId ? String(req.query.vehicleId) : null;
   const unmatched = req.query?.unmatched === 'true' || req.query?.unmatched === '1';
   const locationId = req.query?.locationId ? String(req.query.locationId) : null;
-  const from = req.query?.from ? new Date(req.query.from) : null;
-  const to = req.query?.to ? new Date(req.query.to) : null;
+  // RAW strings into the tz-aware helper — `new Date('2026-07-01')` parses as
+  // UTC midnight (= Jun 30 in PR) and shifted this window one day early vs the
+  // aggregate (QA 2026-07-13; same class as the commission drill-down fix).
+  const fromRaw = req.query?.from ? String(req.query.from) : null;
+  const toRaw   = req.query?.to   ? String(req.query.to)   : null;
 
   if (!vehicleId && !unmatched) {
     return res.status(400).json({ error: 'vehicleId or unmatched=true required' });
   }
-  if (from && Number.isNaN(from.getTime())) return res.status(400).json({ error: 'invalid from' });
-  if (to && Number.isNaN(to.getTime()))     return res.status(400).json({ error: 'invalid to' });
+  if (fromRaw && Number.isNaN(new Date(fromRaw).getTime())) return res.status(400).json({ error: 'invalid from' });
+  if (toRaw && Number.isNaN(new Date(toRaw).getTime()))     return res.status(400).json({ error: 'invalid to' });
 
   const now = new Date();
-  const fromDate = from ? startOfDay(from) : addDays(startOfDay(now), -29);
-  const toDate   = to   ? startOfDay(to)   : startOfDay(now);
+  const fromDate = fromRaw ? startOfDay(fromRaw) : addDays(startOfDay(now), -29);
+  const toDate   = toRaw   ? startOfDay(toRaw)   : startOfDay(now);
   const windowEnd = addDays(toDate, 1);
 
   const where = {
     tenantId,
+    // Same population as the aggregate — VOID stays out of the drill-down too.
+    status: { notIn: ['VOID'] },
     transactionAt: { gte: fromDate, lt: windowEnd },
   };
   if (unmatched) where.vehicleId = null;
@@ -435,6 +443,7 @@ registerReport({
 
 export const _tollPerVehicleInternal = {
   computeData,
+  buildTransactionWhere,
   transactionsDrillDownHandler,
   aggregateByVehicle,
   formatTransaction,

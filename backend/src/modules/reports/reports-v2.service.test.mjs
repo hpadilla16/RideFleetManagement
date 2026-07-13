@@ -33,6 +33,8 @@ function makeFakePrisma({ payments = [], reservations = [], vehicles = [], vehic
           if (where.paidAt?.gte && p.paidAt < where.paidAt.gte) return false;
           if (where.paidAt?.lt && p.paidAt >= where.paidAt.lt) return false;
           if (where.paidAt?.lte && p.paidAt > where.paidAt.lte) return false;
+          if (typeof where.status === 'string' && p.status !== where.status) return false;
+          if (where.method?.notIn && where.method.notIn.includes(p.method)) return false;
           return true;
         });
       },
@@ -55,6 +57,7 @@ function makeFakePrisma({ payments = [], reservations = [], vehicles = [], vehic
         return vehicles.filter((v) => {
           if (where.tenantId && v.tenantId !== where.tenantId) return false;
           if (where.status?.not && v.status === where.status.not) return false;
+          if (where.status?.notIn && where.status.notIn.includes(v.status)) return false;
           if (typeof where.status === 'string' && v.status !== where.status) return false;
           return true;
         }).length;
@@ -95,9 +98,10 @@ test('listReports refuses without tenantId', async () => {
 
 test('listReports returns directory with the current registry length', async () => {
   const out = await listReports({ tenantId: 't1' });
-  // Includes 2 coming-soon slugs (damage, chargeback) on top of the 16
-  // AVAILABLE reports.
-  assert.equal(out.reports.length, 18);
+  // 16 AVAILABLE + 3 coming-soon slugs (upcoming-vehicle-sales, damage,
+  // chargeback). Stale-check note: this test rotted at 18 while unwired from
+  // package.json (fleet-value shipped in beta.158) — wired + fixed 2026-07-13.
+  assert.equal(out.reports.length, 19);
   assert.deepEqual(out.categories, ['MANAGEMENT', 'FLEET', 'OPERATIONS', 'REVENUE']);
 });
 
@@ -112,6 +116,7 @@ test('listReports marks the AVAILABLE reports correctly (rest COMING_SOON)', asy
       'availability-forecast',
       'commission-sales-performance',
       'fleet-status',
+      'fleet-value',
       'payments-by-day',
       'pre-paid-reservations',
       'rental-status',
@@ -150,10 +155,10 @@ test('getSnapshot — revenue, reservations checked out, and available count', a
   const now = new Date('2026-05-22T16:00:00Z');
   const prisma = makeFakePrisma({
     payments: [
-      { tenantId: 't1', amount: 100, paidAt: new Date('2026-05-10T15:00:00Z') },
-      { tenantId: 't1', amount: 250.50, paidAt: new Date('2026-05-15T18:00:00Z') },
-      { tenantId: 't1', amount: 999, paidAt: new Date('2026-04-30T10:00:00Z') }, // outside
-      { tenantId: 't2', amount: 500, paidAt: new Date('2026-05-12T10:00:00Z') }, // wrong tenant
+      { tenantId: 't1', amount: 100, method: 'CARD', status: 'PAID', paidAt: new Date('2026-05-10T15:00:00Z') },
+      { tenantId: 't1', amount: 250.50, method: 'CASH', status: 'PAID', paidAt: new Date('2026-05-15T18:00:00Z') },
+      { tenantId: 't1', amount: 999, method: 'CARD', status: 'PAID', paidAt: new Date('2026-04-30T10:00:00Z') }, // outside
+      { tenantId: 't2', amount: 500, method: 'CARD', status: 'PAID', paidAt: new Date('2026-05-12T10:00:00Z') }, // wrong tenant
     ],
     reservations: [
       // Picked up in window — count
@@ -196,6 +201,32 @@ test('getSnapshot — revenue, reservations checked out, and available count', a
   assert.equal(out.blockedForMaintenance, 1);
   // available = totalFleet (4) − currentlyRented (1) − blocked (1) = 2
   assert.equal(out.availableVehicles, 2);
+});
+
+test('getSnapshot revenue counts COLLECTED money only — deposit auth-holds and non-PAID excluded', async () => {
+  // Regression for the 2026-07-13 bug: International showed $336k "Revenue in
+  // period" when real collected was $47.5k — the raw sum included every
+  // security-deposit AUTH_HOLD (never captured) and a VOID payment.
+  const now = new Date('2026-05-22T16:00:00Z');
+  const prisma = makeFakePrisma({
+    payments: [
+      { tenantId: 't1', amount: 300,    method: 'CARD',      status: 'PAID',     paidAt: new Date('2026-05-10T15:00:00Z') },
+      { tenantId: 't1', amount: 38.87,  method: 'CASH',      status: 'PAID',     paidAt: new Date('2026-05-11T15:00:00Z') },
+      // Deposit authorization holds — funds never captured, NOT revenue.
+      { tenantId: 't1', amount: 250,    method: 'AUTH_HOLD', status: 'PAID',     paidAt: new Date('2026-05-10T15:05:00Z') },
+      { tenantId: 't1', amount: 250000, method: 'AUTH_HOLD', status: 'PAID',     paidAt: new Date('2026-05-12T15:00:00Z') }, // the fat-finger
+      // Non-PAID statuses — not collected money.
+      { tenantId: 't1', amount: 646.69, method: 'OTHER',     status: 'VOID',     paidAt: new Date('2026-05-13T15:00:00Z') },
+      { tenantId: 't1', amount: 75,     method: 'CARD',      status: 'REFUNDED', paidAt: new Date('2026-05-14T15:00:00Z') },
+      { tenantId: 't1', amount: 50,     method: 'CARD',      status: 'PENDING',  paidAt: new Date('2026-05-15T15:00:00Z') },
+    ],
+  });
+  const out = await getSnapshot({
+    tenantId: 't1', from: '2026-05-01', to: '2026-05-22',
+    deps: { prisma, now, tenantTz: 'America/Puerto_Rico' },
+  });
+  assert.equal(out.revenue, 338.87);
+  assert.equal(out.revenueCents, 33887);
 });
 
 test('getSnapshot survives prisma errors gracefully (returns zeros)', async () => {

@@ -8,6 +8,7 @@ import { parseLocationConfig } from '../../lib/location-config.js';
 import { startOfDayInTz } from '../../lib/date-utils.js';
 import { resolveTenantTimeZone } from '../../lib/tenant-tz.js';
 import { reservationProgramWhereForScope, vehicleProgramWhereForScope } from '../../lib/program-category.js';
+import { EXCLUDED_PAYMENT_METHODS } from './collected-payments.js';
 
 function toNumber(value, fallback = 0) {
   const n = Number(value);
@@ -239,6 +240,11 @@ export const reportsService = {
         ...progRes
       },
       status: 'PAID',
+      // Deposit AUTH_HOLDs are mirrored into ReservationPayment as PAID rows
+      // (spin-charge mirrorToReservationPayment) but the funds are never
+      // captured — without this exclusion "Collected Payments" ran 7× real
+      // (2026-07-13, same class as the reports-v2 snapshot bug).
+      method: { notIn: Array.from(EXCLUDED_PAYMENT_METHODS) },
       paidAt: { gte: start, lte: end }
     };
     const dueTodayWhere = {
@@ -599,7 +605,9 @@ export const reportsService = {
         activeAgreements: activeAgreements.length,
         agreementsClosed: closedInRange.length,
         agreementsDueToday: dueTodayCount,
-        projectedRevenue: sumMoney(reservations, 'estimatedTotal'),
+        // CANCELLED/NO_SHOW estimates aren't a projection of anything —
+        // a 20%-cancellation month inflated this KPI 20%+ (audit 2026-07-13).
+        projectedRevenue: sumMoney(reservations.filter((r) => !['CANCELLED', 'NO_SHOW'].includes(r.status)), 'estimatedTotal'),
         collectedPayments: sumMoney(reservationPayments, 'amount'),
         openBalance,
         fleetTotal,
@@ -1249,6 +1257,8 @@ export const reportsService = {
         ...whereScope,
         ...progRes,
         vehicleId: { in: vehicleIds },
+        // Cancelled/no-show reservations never generated revenue for the car.
+        status: { notIn: ['CANCELLED', 'NO_SHOW'] },
         pickupAt: { gte: start, lte: end }
       },
       select: {
@@ -1258,7 +1268,10 @@ export const reportsService = {
         pickupAt: true,
         returnAt: true,
         charges: {
-          where: { selected: true },
+          // "Revenue" = merchandise only: TAX isn't ours and DEPOSIT is a hold
+          // that gets released — both inflated the per-vehicle number (audit
+          // 2026-07-13).
+          where: { selected: true, chargeType: { notIn: ['TAX', 'DEPOSIT'] } },
           select: { total: true }
         },
         rentalAgreement: {
@@ -1562,6 +1575,8 @@ export const reportsService = {
         vehicleId: { in: vehicleIds },
         // Any reservation that overlaps the window — pickupAt before window end
         // AND returnAt after window start — counts toward utilization.
+        // Cancelled/no-show rows never occupied the car nor made money.
+        status: { notIn: ['CANCELLED', 'NO_SHOW'] },
         pickupAt: { lt: end },
         returnAt: { gt: start }
       },
@@ -1572,7 +1587,8 @@ export const reportsService = {
         pickupAt: true,
         returnAt: true,
         charges: {
-          where: { selected: true },
+          // Revenue = merchandise only (no TAX, no DEPOSIT holds) — audit 2026-07-13.
+          where: { selected: true, chargeType: { notIn: ['TAX', 'DEPOSIT'] } },
           select: { total: true }
         }
       },

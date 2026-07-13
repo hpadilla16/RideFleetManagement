@@ -29,6 +29,7 @@
 import { registerReport } from './reports-v2.routes.js';
 import { parseDateTimeInTz, DEFAULT_TENANT_TIMEZONE } from '../../lib/date-utils.js';
 import { settingsService } from '../settings/settings.service.js';
+import { EXCLUDED_PAYMENT_METHODS } from './collected-payments.js';
 
 async function resolveTenantTimeZone(tenantId) {
   if (!tenantId) return DEFAULT_TENANT_TIMEZONE;
@@ -57,7 +58,9 @@ const METHOD_TO_BUCKET = (() => {
   return out;
 })();
 
-const EXCLUDED_METHODS = new Set(['AUTH_HOLD']);
+// Shared with the landing snapshot (collected-payments.js) so the two
+// "collected revenue" definitions can never diverge again (2026-07-13).
+const EXCLUDED_METHODS = new Set(EXCLUDED_PAYMENT_METHODS);
 const DAY_MS = 24 * 60 * 60 * 1000;
 const MAX_DAYS = 92;
 

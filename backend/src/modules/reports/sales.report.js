@@ -84,6 +84,11 @@ function buildChargeWhere({ tenantId, locationId, gte, lt }) {
   const rentalAgreement = { tenantId };
   if (locationId) rentalAgreement.pickupLocationId = locationId;
   rentalAgreement.pickupAt = { gte, lt };
+  // A sale is a rental that at least reached the counter. Voiding an
+  // agreement only flips status to CANCELLED (charges stay selected=true),
+  // and DRAFT rows exist the moment the wizard opens — neither is a sale
+  // (Hector, 2026-07-13; same rule in taxes.report.js — keep in sync).
+  rentalAgreement.status = { notIn: ['CANCELLED', 'DRAFT'] };
   return {
     selected: true,
     rentalAgreement,
@@ -322,6 +327,8 @@ async function categoryDrillDownHandler(req, res, { tenantId }) {
       rentalAgreement: {
         tenantId,
         pickupAt: { gte: fromDate, lt: windowEnd },
+        // Same population as the aggregate (buildChargeWhere) — no cancelled/draft.
+        status: { notIn: ['CANCELLED', 'DRAFT'] },
         ...(locationId ? { pickupLocationId: locationId } : {}),
       },
     },
@@ -549,6 +556,7 @@ export const _salesInternal = {
   computeData,
   categoryDrillDownHandler,
   aggregate,
+  buildChargeWhere,
   startOfDay,
   startOfMonth,
   addDays,
