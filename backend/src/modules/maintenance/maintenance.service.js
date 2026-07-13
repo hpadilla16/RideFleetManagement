@@ -3,10 +3,12 @@
 // service). Plan: doc/maintenance-module-plan-2026-06-18.md.
 
 import { prisma } from '../../lib/prisma.js';
+import logger from '../../lib/logger.js';
 import { repairOrdersService } from './repair-orders.service.js';
 
 const MILE_SOON = 500;   // within 500 mi of the interval → "due soon"
 const DAY_SOON = 14;     // within 14 days → "due soon"
+const SERVICE_TYPES = ['LOF', 'TIRE_ROTATION', 'BRAKES', 'INSPECTION', 'OTHER'];
 const num = (v) => (v == null ? 0 : Number(v) || 0);
 const round2 = (n) => Math.round((Number(n) + Number.EPSILON) * 100) / 100;
 
@@ -19,7 +21,16 @@ function tenantWhere(scope) {
 const OPEN_STATUSES = ['OPEN', 'IN_PROGRESS'];
 
 // Compute due/soon for one service schedule against the vehicle's live mileage + today.
-function evalSchedule(s, vehicleMileage, now) {
+// Exported for unit tests.
+//
+// Status is MILEAGE-DRIVEN (Hector, 2026-07-13): when the schedule tracks miles,
+// only the odometer decides ok/soon/overdue — the day-based next-due is still
+// computed and returned as informational, but a calendar lapse never flags a
+// low-use car whose odometer says it's fine. Days decide the status only when
+// the schedule has no mileage basis at all (no intervalMiles, or no odometer/
+// mileage baseline to measure against). A schedule with neither basis is
+// INACTIVE: no due until someone records the last service.
+export function evalSchedule(s, vehicleMileage, now) {
   let dueByMiles = null; let nextDueMiles = null;
   if (s.intervalMiles && s.lastServiceMiles != null) {
     nextDueMiles = s.lastServiceMiles + s.intervalMiles;
@@ -30,9 +41,16 @@ function evalSchedule(s, vehicleMileage, now) {
     nextDueAt = new Date(new Date(s.lastServiceAt).getTime() + s.intervalDays * 86400000);
     dueByDays = Math.round((now - nextDueAt) / 86400000); // ≥0 overdue, [-SOON,0) soon
   }
-  const overdue = (dueByMiles != null && dueByMiles >= 0) || (dueByDays != null && dueByDays >= 0);
-  const soon = !overdue && ((dueByMiles != null && dueByMiles >= -MILE_SOON) || (dueByDays != null && dueByDays >= -DAY_SOON));
-  return { nextDueMiles, nextDueAt, dueByMiles, dueByDays, overdue, soon };
+  const basis = dueByMiles != null ? 'MILES' : (dueByDays != null ? 'DAYS' : null);
+  let overdue = false; let soon = false;
+  if (basis === 'MILES') {
+    overdue = dueByMiles >= 0;
+    soon = !overdue && dueByMiles >= -MILE_SOON;
+  } else if (basis === 'DAYS') {
+    overdue = dueByDays >= 0;
+    soon = !overdue && dueByDays >= -DAY_SOON;
+  }
+  return { basis, nextDueMiles, nextDueAt, dueByMiles, dueByDays, overdue, soon };
 }
 
 export const maintenanceService = {
@@ -104,7 +122,11 @@ export const maintenanceService = {
       openRepairOrders: openCount + inProgressCount,
       open: openCount,
       inProgress: inProgressCount,
+      // dueSoon = TOTAL actionable (overdue + soon) — /maintenance displays it
+      // as-is; dueSoonOnly = the "soon, not yet overdue" slice for consumers
+      // that break the two out (dashboard tile). Don't repurpose dueSoon.
       dueSoon: due.count,
+      dueSoonOnly: due.count - due.items.filter((i) => i.overdue).length,
       overdue: due.items.filter((i) => i.overdue).length,
       vehiclesDown: down,
       fleetTotal,
@@ -120,13 +142,16 @@ export const maintenanceService = {
 
   // ── Service schedules (per-unit intervals) ──
   async listSchedules(vehicleId, scope = {}) {
-    const rows = await prisma.serviceSchedule.findMany({
-      where: { vehicleId: String(vehicleId), ...tenantWhere(scope) },
-      orderBy: { serviceType: 'asc' },
-    });
-    const veh = await prisma.vehicle.findFirst({ where: { id: String(vehicleId), ...tenantWhere(scope) }, select: { mileage: true } });
+    const [rows, veh] = await Promise.all([
+      prisma.serviceSchedule.findMany({
+        where: { vehicleId: String(vehicleId), ...tenantWhere(scope) },
+        orderBy: { serviceType: 'asc' },
+      }),
+      prisma.vehicle.findFirst({ where: { id: String(vehicleId), ...tenantWhere(scope) }, select: { mileage: true } }),
+    ]);
     const now = Date.now();
     return {
+      vehicleMileage: veh?.mileage ?? null,
       schedules: rows.map((s) => ({
         id: s.id, serviceType: s.serviceType, intervalMiles: s.intervalMiles, intervalDays: s.intervalDays,
         lastServiceMiles: s.lastServiceMiles, lastServiceAt: s.lastServiceAt, active: s.active,
@@ -136,19 +161,34 @@ export const maintenanceService = {
   },
 
   async upsertSchedule(vehicleId, body = {}, scope = {}) {
-    const tenantId = scope?.tenantId;
-    if (!tenantId || tenantId === '__no_tenant__') { const e = new Error('tenantId required'); e.status = 400; throw e; }
-    const veh = await prisma.vehicle.findFirst({ where: { id: String(vehicleId), tenantId }, select: { id: true } });
+    // Super admins reach this without a tenant in scope (the profile UI doesn't
+    // pass ?tenantId) — the vehicle row itself is the tenant source of truth.
+    if (scope?.tenantId === '__no_tenant__') { const e = new Error('tenantId required'); e.status = 400; throw e; }
+    const veh = await prisma.vehicle.findFirst({
+      where: { id: String(vehicleId), ...(scope?.tenantId ? { tenantId: scope.tenantId } : {}) },
+      select: { id: true, tenantId: true },
+    });
     if (!veh) { const e = new Error('Vehicle not found'); e.status = 404; throw e; }
+    const tenantId = scope?.tenantId || veh.tenantId;
     const serviceType = String(body.serviceType || '').toUpperCase();
-    if (!['LOF', 'TIRE_ROTATION', 'BRAKES', 'INSPECTION', 'OTHER'].includes(serviceType)) { const e = new Error('Invalid serviceType'); e.status = 400; throw e; }
+    if (!SERVICE_TYPES.includes(serviceType)) { const e = new Error('Invalid serviceType'); e.status = 400; throw e; }
+    // Clean 400 for junk numbers — NaN would surface as a Prisma 500, and a
+    // negative interval is an instantly-overdue schedule (QA hardening).
+    const toInt = (v, label, min) => {
+      if (v == null || v === '') return null;
+      const n = Math.round(Number(v));
+      if (!Number.isFinite(n) || n < min) { const e = new Error(`Invalid ${label}`); e.status = 400; throw e; }
+      return n;
+    };
     const data = {
-      intervalMiles: body.intervalMiles != null && body.intervalMiles !== '' ? Math.round(Number(body.intervalMiles)) : null,
-      intervalDays: body.intervalDays != null && body.intervalDays !== '' ? Math.round(Number(body.intervalDays)) : null,
-      lastServiceMiles: body.lastServiceMiles != null && body.lastServiceMiles !== '' ? Math.round(Number(body.lastServiceMiles)) : null,
+      intervalMiles: toInt(body.intervalMiles, 'intervalMiles', 1),
+      intervalDays: toInt(body.intervalDays, 'intervalDays', 1),
+      // (validated below — a schedule with no interval at all can never be due)
+      lastServiceMiles: toInt(body.lastServiceMiles, 'lastServiceMiles', 0),
       lastServiceAt: body.lastServiceAt ? new Date(body.lastServiceAt) : null,
       active: body.active === undefined ? true : !!body.active,
     };
+    if (data.intervalMiles == null && data.intervalDays == null) { const e = new Error('At least one interval (miles or days) is required'); e.status = 400; throw e; }
     const row = await prisma.serviceSchedule.upsert({
       where: { vehicleId_serviceType: { vehicleId: String(vehicleId), serviceType } },
       create: { tenantId, vehicleId: String(vehicleId), serviceType, ...data },
@@ -157,8 +197,56 @@ export const maintenanceService = {
     return { id: row.id };
   },
 
+  // "Log service" (Hector, 2026-07-13): a service was just DONE — roll the
+  // baseline to the vehicle's CURRENT odometer (read server-side, never from
+  // the client) + now, so the next due recomputes from the real event. The
+  // schedule row must already exist (create it from the vehicle profile first).
+  // AuditLog can't hold this (reservationId is required there), so the audit
+  // trail is a structured log line with actor + before/after.
+  // TODO(hook): accept an optional repairOrderId to tie the RO that did the work.
+  // opts.db is injectable for tests; opts.now for determinism.
+  async logService(vehicleId, serviceType, scope = {}, opts = {}) {
+    const db = opts.db || prisma;
+    // Same super-admin rule as upsertSchedule: no tenant in scope → the vehicle
+    // row is the tenant source of truth.
+    if (scope?.tenantId === '__no_tenant__') { const e = new Error('tenantId required'); e.status = 400; throw e; }
+    const type = String(serviceType || '').toUpperCase();
+    if (!SERVICE_TYPES.includes(type)) { const e = new Error('Invalid serviceType'); e.status = 400; throw e; }
+    const veh = await db.vehicle.findFirst({
+      where: { id: String(vehicleId), ...(scope?.tenantId ? { tenantId: scope.tenantId } : {}) },
+      select: { id: true, mileage: true, tenantId: true },
+    });
+    if (!veh) { const e = new Error('Vehicle not found'); e.status = 404; throw e; }
+    const tenantId = scope?.tenantId || veh.tenantId;
+    const existing = await db.serviceSchedule.findFirst({ where: { vehicleId: String(vehicleId), serviceType: type, tenantId } });
+    if (!existing) { const e = new Error('Schedule not found'); e.status = 404; throw e; }
+    // Never fabricate a baseline: without a real odometer reading, rolling to 0
+    // would silently activate the miles basis with invented data (and read as
+    // thousands of miles overdue the moment a real reading lands).
+    if (veh.mileage == null) { const e = new Error('Vehicle has no odometer reading — record its mileage first'); e.status = 400; throw e; }
+    const now = opts.now ? new Date(opts.now) : new Date();
+    const lastServiceMiles = veh.mileage;
+    const row = await db.serviceSchedule.update({
+      where: { id: existing.id },
+      data: { lastServiceMiles, lastServiceAt: now },
+    });
+    logger.info('[maintenance] log-service: baseline rolled to current odometer', {
+      tenantId, vehicleId: String(vehicleId), serviceType: type,
+      actorUserId: opts.actorUserId || null,
+      before: { lastServiceMiles: existing.lastServiceMiles, lastServiceAt: existing.lastServiceAt },
+      after: { lastServiceMiles, lastServiceAt: now },
+    });
+    return {
+      id: row.id, serviceType: type, intervalMiles: row.intervalMiles, intervalDays: row.intervalDays,
+      lastServiceMiles: row.lastServiceMiles, lastServiceAt: row.lastServiceAt, active: row.active,
+      ...evalSchedule(row, veh.mileage ?? null, now.getTime()),
+    };
+  },
+
   async deleteSchedule(vehicleId, serviceType, scope = {}) {
-    await prisma.serviceSchedule.deleteMany({ where: { vehicleId: String(vehicleId), serviceType: String(serviceType).toUpperCase(), ...tenantWhere(scope) } });
+    const type = String(serviceType || '').toUpperCase();
+    if (!SERVICE_TYPES.includes(type)) { const e = new Error('Invalid serviceType'); e.status = 400; throw e; }
+    await prisma.serviceSchedule.deleteMany({ where: { vehicleId: String(vehicleId), serviceType: type, ...tenantWhere(scope) } });
     return { ok: true };
   },
 };

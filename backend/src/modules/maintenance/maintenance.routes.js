@@ -37,4 +37,6 @@ maintenanceRouter.get('/board', ok((req) => maintenanceService.board(req.query |
 maintenanceRouter.get('/due', ok((req) => maintenanceService.due(req.query || {}, scopeFor(req))));
 maintenanceRouter.get('/vehicles/:vehicleId/schedules', ok((req) => maintenanceService.listSchedules(req.params.vehicleId, scopeFor(req))));
 maintenanceRouter.put('/vehicles/:vehicleId/schedules', ok((req) => maintenanceService.upsertSchedule(req.params.vehicleId, req.body || {}, scopeFor(req))));
+// "Log service": rolls the baseline to the vehicle's current odometer + now (server-side read).
+maintenanceRouter.post('/vehicles/:vehicleId/schedules/:serviceType/log-service', ok((req) => maintenanceService.logService(req.params.vehicleId, req.params.serviceType, scopeFor(req), { actorUserId: req.user?.id || null })));
 maintenanceRouter.delete('/vehicles/:vehicleId/schedules/:serviceType', ok((req) => maintenanceService.deleteSchedule(req.params.vehicleId, req.params.serviceType, scopeFor(req))));

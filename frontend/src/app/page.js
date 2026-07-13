@@ -284,6 +284,7 @@ function DashboardInner({ token, me, logout }) {
   const [resSummary, setResSummary] = useState(null);
   const [mismatchCount, setMismatchCount] = useState(0);
   const [citSummary, setCitSummary] = useState(null);
+  const [maintSummary, setMaintSummary] = useState(null);
   const [msg, setMsg] = useState('');
   const canSeeOverview = me?.moduleAccess?.reports !== false;
   const canSeeVehicles = me?.moduleAccess?.vehicles !== false;
@@ -306,6 +307,12 @@ function DashboardInner({ token, me, logout }) {
     // Citations tile (module-gated; soft-fail so a 403/off-module never breaks the dashboard).
     if (me?.moduleAccess?.citations !== false) {
       api('/api/citations/summary', {}, token).then((s) => setCitSummary(s || null)).catch(() => setCitSummary(null));
+    }
+
+    // Maintenance Due tile (2026-07-13) — service intervals overdue / due soon,
+    // miles-driven, counts only (no money). Same module-gated soft-fail pattern.
+    if (me?.moduleAccess?.maintenance !== false) {
+      api('/api/maintenance/summary', { bypassCache: true }, token).then((s) => setMaintSummary(s || null)).catch(() => setMaintSummary(null));
     }
 
     if (reservationsResult.status === 'fulfilled') {
@@ -653,6 +660,39 @@ function DashboardInner({ token, me, logout }) {
               <strong>{workspaceOpsHub.serviceHeld}</strong>
               <span className="ui-muted">{t('dashboard.tileMaintenanceOosDesc')}</span>
             </button>
+            {/* Maintenance Due (2026-07-13): service intervals from ServiceSchedule,
+                miles-driven. Big number = OVERDUE (the alarm), due-soon in the desc.
+                Red tint mirrors the overdue-returns tile. Renders only when the
+                module is on AND /api/maintenance/summary answered (soft-fail). */}
+            {maintSummary ? (
+              <button
+                type="button"
+                className="info-tile"
+                onClick={() => router.push('/maintenance')}
+                style={{
+                  textAlign: 'left',
+                  cursor: 'pointer',
+                  background: Number(maintSummary.overdue || 0) > 0 ? 'rgba(239, 68, 68, 0.08)' : undefined,
+                  borderColor: Number(maintSummary.overdue || 0) > 0 ? 'rgba(239, 68, 68, 0.35)' : undefined,
+                }}
+                title={t('dashboard.tileMaintenanceDueTitle')}
+              >
+                <span className="label">{t('dashboard.tileMaintenanceDue')}</span>
+                <strong style={{ color: Number(maintSummary.overdue || 0) > 0 ? '#dc2626' : (Number(maintSummary.dueSoon || 0) === 0 ? '#15803d' : undefined) }}>
+                  {Number(maintSummary.overdue || 0)}
+                </strong>
+                <span className="ui-muted">
+                  {(() => {
+                    const overdueN = Number(maintSummary.overdue || 0);
+                    // dueSoonOnly is server-computed (soon, not yet overdue); fall back for a pre-deploy backend.
+                    const soonN = Number(maintSummary.dueSoonOnly ?? Math.max(0, Number(maintSummary.dueSoon || 0) - overdueN));
+                    if (overdueN > 0) return t('dashboard.tileMaintenanceDueDesc', { soon: soonN });
+                    if (soonN > 0) return t('dashboard.tileMaintenanceDueSoonDesc', { soon: soonN });
+                    return t('dashboard.tileMaintenanceDueOk');
+                  })()}
+                </span>
+              </button>
+            ) : null}
             <button
               type="button"
               className="info-tile"

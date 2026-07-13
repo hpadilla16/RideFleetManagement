@@ -11,6 +11,26 @@ import { diagramFor, DIAGRAM_VIEWBOX, DIAGRAM_W, DIAGRAM_H, VIEW_LABELS } from '
 
 const DAMAGE_VIEWS = ['LEFT', 'RIGHT', 'FRONT', 'REAR', 'INTERIOR'];
 
+// Service Schedules — mirrors SERVICE_LABEL on /maintenance.
+const SERVICE_TYPES = ['LOF', 'TIRE_ROTATION', 'BRAKES', 'INSPECTION', 'OTHER'];
+const SERVICE_TYPE_LABELS = { LOF: 'Oil + filter', TIRE_ROTATION: 'Tire rotation', BRAKES: 'Brakes', INSPECTION: 'Inspection', OTHER: 'Other' };
+
+// Status pill for a schedule row. Miles drive the status (basis MILES); days
+// only when the schedule has no mileage basis. No basis at all = inactive.
+function scheduleStatus(s) {
+  if (!s.basis) return { label: 'Inactive — set last service', bg: 'rgba(107,114,128,0.12)', color: '#6B7280', border: 'rgba(107,114,128,0.35)' };
+  if (s.overdue) return { label: 'Overdue', bg: 'rgba(239,68,68,0.10)', color: '#dc2626', border: 'rgba(239,68,68,0.4)' };
+  if (s.soon) return { label: 'Due soon', bg: 'rgba(245,158,11,0.12)', color: '#b45309', border: 'rgba(245,158,11,0.4)' };
+  return { label: 'OK', bg: 'rgba(34,197,94,0.12)', color: '#15803d', border: 'rgba(34,197,94,0.4)' };
+}
+
+function intervalLabel(s) {
+  const parts = [];
+  if (s.intervalMiles) parts.push(`every ${Number(s.intervalMiles).toLocaleString()} mi`);
+  if (s.intervalDays) parts.push(`${Number(s.intervalDays)} days`);
+  return parts.join(' / ') || '—';
+}
+
 function formatDateTime(value) {
   if (!value) return '-';
   const date = new Date(value);
@@ -214,6 +234,91 @@ function VehicleProfileInner({ token, me, logout }) {
   // Manually record an existing damage from the profile (diagram dot + photo).
   const [addDmg, setAddDmg] = useState(null); // { view, xPct, yPct, photo, description, saving }
   const addDmgFileRef = useRef(null);
+  // Service Schedules (2026-07-13) — per-serviceType maintenance intervals.
+  // Status is miles-driven; a blank baseline = INACTIVE (no due) until the
+  // last service is recorded. Section is gated on the maintenance module.
+  const canSeeMaintenance = me?.moduleAccess?.maintenance !== false;
+  const [schedules, setSchedules] = useState({ items: [], vehicleMileage: null, loading: true });
+  const [schedModal, setSchedModal] = useState(null); // { isNew, saving, form: { serviceType, intervalMiles, intervalDays, lastServiceMiles, lastServiceAt } }
+  const [logServiceBusy, setLogServiceBusy] = useState('');
+
+  const loadSchedules = async () => {
+    try {
+      const out = await api(`/api/maintenance/vehicles/${id}/schedules`, { bypassCache: true }, token);
+      setSchedules({ items: Array.isArray(out?.schedules) ? out.schedules : [], vehicleMileage: out?.vehicleMileage ?? null, loading: false });
+    } catch {
+      setSchedules((c) => ({ ...c, loading: false }));
+    }
+  };
+  useEffect(() => { if (id && canSeeMaintenance) loadSchedules(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [id, token, canSeeMaintenance]);
+
+  const saveSchedule = async (e) => {
+    e.preventDefault();
+    const f = schedModal?.form;
+    if (!f?.serviceType) return;
+    // Errors render INSIDE the modal — the page-level {msg} banner sits under
+    // the modal-backdrop overlay and is invisible while the modal is open.
+    if (f.intervalMiles === '' && f.intervalDays === '') {
+      setSchedModal((c) => ({ ...c, error: 'Set at least one interval — miles (recommended) or days.' }));
+      return;
+    }
+    // Half-set baseline is the confusing middle ground — require both or neither.
+    if ((f.lastServiceMiles !== '' && f.lastServiceAt === '') || (f.lastServiceMiles === '' && f.lastServiceAt !== '')) {
+      setSchedModal((c) => ({ ...c, error: 'Set BOTH last-service mileage and date, or leave both blank (inactive).' }));
+      return;
+    }
+    try {
+      setSchedModal((c) => ({ ...c, saving: true, error: '' }));
+      await api(`/api/maintenance/vehicles/${id}/schedules`, {
+        method: 'PUT',
+        body: JSON.stringify({
+          serviceType: f.serviceType,
+          intervalMiles: f.intervalMiles === '' ? null : Number(f.intervalMiles),
+          intervalDays: f.intervalDays === '' ? null : Number(f.intervalDays),
+          lastServiceMiles: f.lastServiceMiles === '' ? null : Number(f.lastServiceMiles),
+          lastServiceAt: f.lastServiceAt || null,
+        }),
+      }, token);
+      setSchedModal(null);
+      setMsg('Service schedule saved');
+      await loadSchedules();
+    } catch (err) {
+      setSchedModal((c) => ({ ...c, saving: false, error: err?.message || 'Failed to save schedule' }));
+    }
+  };
+
+  const removeSchedule = async () => {
+    const f = schedModal?.form;
+    if (!f?.serviceType) return;
+    const label = SERVICE_TYPE_LABELS[f.serviceType] || f.serviceType;
+    if (!window.confirm(`Remove the "${label}" schedule from this vehicle? Its baseline and interval are deleted (no repair-order history is touched).`)) return;
+    try {
+      setSchedModal((c) => ({ ...c, saving: true, error: '' }));
+      await api(`/api/maintenance/vehicles/${id}/schedules/${f.serviceType}`, { method: 'DELETE' }, token);
+      setSchedModal(null);
+      setMsg('Service schedule removed');
+      await loadSchedules();
+    } catch (err) {
+      setSchedModal((c) => ({ ...c, saving: false, error: err?.message || 'Failed to remove schedule' }));
+    }
+  };
+
+  const logService = async (s) => {
+    const odo = schedules.vehicleMileage ?? row?.mileage;
+    const label = SERVICE_TYPE_LABELS[s.serviceType] || s.serviceType;
+    if (odo == null) { setMsg('This vehicle has no odometer reading yet — record its mileage first, then log the service.'); return; }
+    if (!window.confirm(`Log a completed "${label}" service now?\n\nThe baseline rolls to the vehicle's current odometer (${Number(odo).toLocaleString()} mi) and today's date, and the next due is recomputed from there.`)) return;
+    try {
+      setLogServiceBusy(s.serviceType);
+      await api(`/api/maintenance/vehicles/${id}/schedules/${s.serviceType}/log-service`, { method: 'POST' }, token);
+      setMsg(`${label} service logged — next due recomputed`);
+      await loadSchedules();
+    } catch (err) {
+      setMsg(err?.message || 'Failed to log service');
+    } finally {
+      setLogServiceBusy('');
+    }
+  };
 
   const saveManualDamage = async () => {
     if (!addDmg) return;
@@ -846,6 +951,73 @@ function VehicleProfileInner({ token, me, logout }) {
           </div>
         ) : null}
 
+        {schedModal?.form ? (
+          <div className="modal-backdrop" onClick={() => { if (!schedModal.saving) setSchedModal(null); }}>
+            <div className="rent-modal glass" onClick={(e) => e.stopPropagation()} style={{ maxHeight: '85vh', overflowY: 'auto' }}>
+              <h3>{schedModal.isNew ? 'Add service schedule' : `Edit schedule · ${SERVICE_TYPE_LABELS[schedModal.form.serviceType] || schedModal.form.serviceType}`}</h3>
+              <form className="stack" onSubmit={saveSchedule}>
+                <label className="label" style={{ marginBottom: 0 }}>Service type</label>
+                <select
+                  value={schedModal.form.serviceType}
+                  disabled={!schedModal.isNew}
+                  onChange={(e) => setSchedModal((c) => ({ ...c, error: '', form: { ...c.form, serviceType: e.target.value } }))}
+                >
+                  {SERVICE_TYPES.map((tp) => (
+                    <option key={tp} value={tp} disabled={schedModal.isNew && schedules.items.some((s) => s.serviceType === tp)}>
+                      {SERVICE_TYPE_LABELS[tp]}{schedModal.isNew && schedules.items.some((s) => s.serviceType === tp) ? ' (already scheduled)' : ''}
+                    </option>
+                  ))}
+                </select>
+                <label className="label" style={{ marginBottom: 0 }}>Interval</label>
+                <div className="grid2">
+                  <input type="number" min="1" title="Every X miles (drives the status)" placeholder="Every X miles (drives the status)" value={schedModal.form.intervalMiles} onChange={(e) => setSchedModal((c) => ({ ...c, error: '', form: { ...c.form, intervalMiles: e.target.value } }))} />
+                  <input type="number" min="1" title="Every X days (informational)" placeholder="Every X days (informational)" value={schedModal.form.intervalDays} onChange={(e) => setSchedModal((c) => ({ ...c, error: '', form: { ...c.form, intervalDays: e.target.value } }))} />
+                </div>
+                <label className="label" style={{ marginBottom: 0 }}>Last service (baseline)</label>
+                <div className="grid2">
+                  <input type="number" min="0" title="Odometer at last service (mi)" placeholder="Odometer at last service (mi)" value={schedModal.form.lastServiceMiles} onChange={(e) => setSchedModal((c) => ({ ...c, error: '', form: { ...c.form, lastServiceMiles: e.target.value } }))} />
+                  <input type="date" title="Date of last service" value={schedModal.form.lastServiceAt} onChange={(e) => setSchedModal((c) => ({ ...c, error: '', form: { ...c.form, lastServiceAt: e.target.value } }))} />
+                </div>
+                <div className="surface-note">
+                  The baseline anchors tracking to the last REAL service. Leave it blank and the schedule stays <strong>inactive</strong> (never flags due) until you fill it in — or press &quot;Log service&quot; after the next service to set it automatically.
+                </div>
+                {(() => {
+                  const im = Number(schedModal.form.intervalMiles);
+                  const lm = Number(schedModal.form.lastServiceMiles);
+                  const idn = Number(schedModal.form.intervalDays);
+                  const hasMiles = schedModal.form.intervalMiles !== '' && schedModal.form.lastServiceMiles !== '' && Number.isFinite(im) && Number.isFinite(lm);
+                  const hasDays = schedModal.form.intervalDays !== '' && schedModal.form.lastServiceAt && Number.isFinite(idn);
+                  if (!hasMiles && !hasDays) return null;
+                  const nextAt = hasDays ? new Date(new Date(schedModal.form.lastServiceAt + 'T12:00:00').getTime() + idn * 86400000) : null;
+                  const odo = schedules.vehicleMileage ?? row?.mileage ?? null;
+                  return (
+                    <div className="surface-note" style={{ background: 'rgba(135,82,254,0.07)', borderColor: 'rgba(135,82,254,0.25)' }}>
+                      <strong>Next due:</strong>
+                      {hasMiles ? ` ${(lm + im).toLocaleString()} mi${odo != null ? ` (odometer now ${Number(odo).toLocaleString()} mi → ${lm + im - odo >= 0 ? `${(lm + im - odo).toLocaleString()} mi to go` : `${Math.abs(lm + im - odo).toLocaleString()} mi OVERDUE`})` : ''}` : ''}
+                      {hasMiles && hasDays ? ' · ' : ' '}
+                      {hasDays ? `${nextAt.toLocaleDateString()}${hasMiles ? ' (informational)' : ''}` : ''}
+                    </div>
+                  );
+                })()}
+                {schedModal.error ? (
+                  <div className="surface-note" style={{ background: 'rgba(239,68,68,0.08)', borderColor: 'rgba(239,68,68,0.35)', color: '#b91c1c' }}>
+                    {schedModal.error}
+                  </div>
+                ) : null}
+                <div className="row-between">
+                  <div className="row" style={{ gap: 8 }}>
+                    <button type="button" disabled={schedModal.saving} onClick={() => setSchedModal(null)}>Cancel</button>
+                    {!schedModal.isNew ? (
+                      <button type="button" disabled={schedModal.saving} onClick={removeSchedule} style={{ background: '#fff5f5', color: '#b91c1c', border: '1px solid #b91c1c' }}>Remove schedule</button>
+                    ) : null}
+                  </div>
+                  <button type="submit" disabled={schedModal.saving}>{schedModal.saving ? 'Saving…' : 'Save schedule'}</button>
+                </div>
+              </form>
+            </div>
+          </div>
+        ) : null}
+
         {!row ? null : (
           <div className="vehicle-profile-grid">
             <div className="vehicle-profile-main">
@@ -1141,6 +1313,83 @@ function VehicleProfileInner({ token, me, logout }) {
                   </>
                 )}
               </section>
+
+              {canSeeMaintenance ? (
+                <section className="glass card-lg section-card">
+                  <div className="row-between">
+                    <h2>Service Schedules</h2>
+                    <div className="row" style={{ gap: 8, alignItems: 'center' }}>
+                      <span className="status-chip neutral">{schedules.items.length} {schedules.items.length === 1 ? 'schedule' : 'schedules'}</span>
+                      <button type="button" className="btn-sm" onClick={() => setSchedModal({ isNew: true, saving: false, form: { serviceType: SERVICE_TYPES.find((t) => !schedules.items.some((s) => s.serviceType === t)) || 'OTHER', intervalMiles: '', intervalDays: '', lastServiceMiles: '', lastServiceAt: '' } })}>
+                        + Add schedule
+                      </button>
+                    </div>
+                  </div>
+                  <p className="ui-muted" style={{ marginTop: 0 }}>
+                    Recurring maintenance per service type. <strong>Mileage drives the due status</strong> — days are informational. A schedule with no last-service baseline is inactive until you record one.
+                  </p>
+                  {schedules.loading ? (
+                    <div className="surface-note">Loading service schedules…</div>
+                  ) : schedules.items.length === 0 ? (
+                    <div className="surface-note">No service schedules yet. Add one (e.g. Oil + filter every 5,000 mi) to start tracking maintenance for this vehicle.</div>
+                  ) : (
+                    <div className="table-shell">
+                      <table>
+                        <thead>
+                          <tr>
+                            <th>Service</th>
+                            <th>Interval</th>
+                            <th>Last service</th>
+                            <th>Next due</th>
+                            <th>Odometer</th>
+                            <th>Remaining</th>
+                            <th>Status</th>
+                            <th></th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {schedules.items.map((s) => {
+                            const st = scheduleStatus(s);
+                            const odo = schedules.vehicleMileage ?? row?.mileage ?? null;
+                            const remaining = s.dueByMiles != null ? -s.dueByMiles : null;
+                            return (
+                              <tr key={s.id}>
+                                <td><strong>{SERVICE_TYPE_LABELS[s.serviceType] || s.serviceType}</strong></td>
+                                <td>{intervalLabel(s)}</td>
+                                <td>
+                                  {s.lastServiceMiles != null || s.lastServiceAt ? (
+                                    <>
+                                      {s.lastServiceMiles != null ? `${Number(s.lastServiceMiles).toLocaleString()} mi` : '—'}
+                                      {/* date-only value stored at UTC midnight — parse at noon so FL doesn't show the previous day */}
+                                      <span className="ui-muted"> · {s.lastServiceAt ? new Date(String(s.lastServiceAt).slice(0, 10) + 'T12:00:00').toLocaleDateString() : '—'}</span>
+                                    </>
+                                  ) : <span className="ui-muted">not recorded</span>}
+                                </td>
+                                <td>
+                                  {s.nextDueMiles != null ? <strong>{Number(s.nextDueMiles).toLocaleString()} mi</strong> : '—'}
+                                  {/* nextDueAt inherits the UTC-midnight anchor of a date-only baseline — parse at noon so FL doesn't show the previous day */}
+                                  {s.nextDueAt ? <span className="ui-muted"> {s.nextDueMiles != null ? '· ' : ''}{new Date(String(s.nextDueAt).slice(0, 10) + 'T12:00:00').toLocaleDateString()}{s.basis === 'MILES' ? ' (info)' : ''}</span> : null}
+                                </td>
+                                <td>{odo != null ? `${Number(odo).toLocaleString()} mi` : '—'}</td>
+                                <td>{remaining != null ? (remaining >= 0 ? `${remaining.toLocaleString()} mi` : <span style={{ color: '#dc2626', fontWeight: 700 }}>{Math.abs(remaining).toLocaleString()} mi over</span>) : '—'}</td>
+                                <td>
+                                  <span style={{ background: st.bg, color: st.color, border: `1px solid ${st.border}`, borderRadius: 20, padding: '2px 9px', fontSize: 11, fontWeight: 700, whiteSpace: 'nowrap' }}>{st.label}</span>
+                                </td>
+                                <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
+                                  <button type="button" className="btn-sm" style={{ marginRight: 6 }} onClick={() => setSchedModal({ isNew: false, saving: false, form: { serviceType: s.serviceType, intervalMiles: s.intervalMiles ?? '', intervalDays: s.intervalDays ?? '', lastServiceMiles: s.lastServiceMiles ?? '', lastServiceAt: s.lastServiceAt ? String(s.lastServiceAt).slice(0, 10) : '' } })}>Edit</button>
+                                  <button type="button" className="btn-sm" disabled={logServiceBusy === s.serviceType} onClick={() => logService(s)} title="A service was just completed — roll the baseline to the current odometer + today">
+                                    {logServiceBusy === s.serviceType ? 'Logging…' : 'Log service'}
+                                  </button>
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </section>
+              ) : null}
 
               <section className="glass card-lg section-card">
                 <div className="row-between">
