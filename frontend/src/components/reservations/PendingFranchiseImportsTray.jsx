@@ -28,6 +28,7 @@ function sourceLabelFor(source) {
   switch (String(source || 'tl-international')) {
     case 'economy': return 'Economy (RezLight)';
     case 'nu': return 'NU Car Rentals';
+    case 'flexways': return 'Flexways';
     case 'tl-international':
     default: return 'TL International';
   }
@@ -110,7 +111,9 @@ function EditPromoteModal({ row, token, scopedPath, onClose, onSaved, basePath =
     ? 'ECON-IMPORT-NO-PHONE'
     : (source === 'nu'
       ? 'NU-IMPORT-NO-PHONE'
-      : (source === 'tl-international' ? 'TL-IMPORT-NO-PHONE' : 'IMPORT-NO-PHONE'));
+      : (source === 'flexways'
+        ? 'FW-IMPORT-NO-PHONE'
+        : (source === 'tl-international' ? 'TL-IMPORT-NO-PHONE' : 'IMPORT-NO-PHONE')));
   // TL ships customer fields either flat on the row (customerFirstName, ...)
   // or nested under row.customer depending on which sync version produced the
   // record. Normalize once so the rest of the modal can read from `tl`.

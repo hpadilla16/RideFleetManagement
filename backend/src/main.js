@@ -85,6 +85,7 @@ import { knowledgeBaseRouter } from './modules/knowledge-base/knowledge-base.rou
 import { tlInternationalRouter } from './modules/integrations/tl-international/tl-international.routes.js';
 import { economyRouter } from './modules/integrations/economy/economy.routes.js';
 import { nuRouter } from './modules/integrations/nu/nu.routes.js';
+import { flexwaysRouter } from './modules/integrations/flexways/flexways.routes.js';
 import { captureBackendException, flushSentry, initSentry, isSentryEnabled } from './lib/sentry.js';
 import { appErrorHandler } from './lib/errors.js';
 import { closeBrowser } from './lib/puppeteer-browser.js';
@@ -246,6 +247,12 @@ app.use('/api/admin/integrations/economy', tenantRateLimit, economyRouter);
 // gates only the autonomous scheduler (nu.scheduler.js), which stays dark until
 // the flag is flipped. NU is location 1:1 (single NuLocationConfig mapping).
 app.use('/api/admin/integrations/nu', tenantRateLimit, nuRouter);
+// Flexways (MobilityPS) booking-source integration (Fase 5, 2026-07-13) — mounted
+// identically to TL/Economy/NU. Routes/config always available;
+// FLEXWAYS_INTEGRATION_ENABLED gates only the autonomous scheduler
+// (flexways.scheduler.js), which stays dark until the flag is flipped. Flexways is
+// MULTI-SEDE (per-idSede FlexwaysLocationConfig rows).
+app.use('/api/admin/integrations/flexways', tenantRateLimit, flexwaysRouter);
 // Round 26 (2026-06-01) — reservation status override + smart rewind.
 // 2026-07-10: widened from SUPER_ADMIN-only to ADMIN + SUPER_ADMIN (Hector). ADMIN
 // gets the same power (all target statuses + the smart rewind); SUPER_ADMIN still

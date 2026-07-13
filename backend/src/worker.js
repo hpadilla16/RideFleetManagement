@@ -89,6 +89,22 @@ async function registerAllHandlers() {
     }
   }
 
+  // Flexways (MobilityPS) franchise sync (2026-07-13).
+  // Feature-flagged — registers only if FLEXWAYS_INTEGRATION_ENABLED=true.
+  // Same posture as NU: keep the flag guard so a failed import can't break
+  // the whole worker.
+  if (String(process.env.FLEXWAYS_INTEGRATION_ENABLED || 'false').toLowerCase() === 'true') {
+    try {
+      const flexMod = await import('./modules/integrations/flexways/flexways.worker.js');
+      flexMod.registerFlexwaysSyncWorker();
+      logger.info('[worker] registered handler: flexways.sync');
+    } catch (err) {
+      logger.warn('[worker] flexways sync worker not registered', {
+        message: err.message, stack: err.stack
+      });
+    }
+  }
+
   // Future handlers go here. Each in its own try/catch so a broken one
   // doesn't poison the others.
 }
@@ -228,6 +244,19 @@ async function main() {
     });
   }
 
+  // Flexways (MobilityPS) autonomous sync scheduler (2026-07-13).
+  // Gated by the same FLEXWAYS_INTEGRATION_ENABLED flag (checked inside start...).
+  // Dynamic import so a broken import chain can't kill the worker boot.
+  try {
+    const flexSchedMod = await import('./modules/integrations/flexways/flexways.scheduler.js');
+    flexSchedMod.startFlexwaysSyncScheduler();
+    logger.info('[worker] started: flexways sync scheduler (if enabled)');
+  } catch (err) {
+    logger.warn('[worker] flexways sync scheduler not started', {
+      message: err.message,
+    });
+  }
+
   const shutdown = async (signal) => {
     logger.info('[worker] shutting down', { signal });
     stopAutochargePoll();
@@ -256,6 +285,10 @@ async function main() {
     try {
       const nuSchedMod = await import('./modules/integrations/nu/nu.scheduler.js');
       nuSchedMod.stopNuSyncScheduler();
+    } catch {}
+    try {
+      const flexSchedMod = await import('./modules/integrations/flexways/flexways.scheduler.js');
+      flexSchedMod.stopFlexwaysSyncScheduler();
     } catch {}
     // Close the Chromium singleton if a toll sweep ever launched it here.
     // Lazy import keeps puppeteer out of the boot graph.

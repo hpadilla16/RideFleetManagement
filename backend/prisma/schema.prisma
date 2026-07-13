@@ -606,6 +606,7 @@ model Tenant {
   franchisePayoutPeriods   FranchisePayoutPeriod[]
   economyLocationConfigs   EconomyLocationConfig[]
   nuLocationConfigs        NuLocationConfig[]
+  flexwaysLocationConfigs  FlexwaysLocationConfig[]
   loanerAgreements         LoanerAgreement[]
   longTermPlans            LongTermPlan[]
 }
@@ -4092,6 +4093,45 @@ model NuLocationConfig {
   // (tenantId, locationId) — the sane key for the 1:1 shape (one Ride location
   // mapped once per tenant). externalCenter stays free for future multi-center.
   @@unique([tenantId, locationId])
+  @@index([tenantId, enabled])
+}
+
+// ============================================================================
+// Flexways (MobilityPS) franchise integration (2026-07-13)
+//
+// Third autonomous booking-source (after TL → Economy → NU). Reuses
+// ExternalReservation / ExternalSyncRun / IntegrationCredential / AcrissCategoryMap
+// as-is (their sourceSystem is a free string → 'FLEXWAYS'). The ONLY new table is
+// FlexwaysLocationConfig.
+//
+// Unlike NU (1:1 FLL), Flexways is MULTI-SEDE: inventory in the MobilityPS portal
+// is keyed by `idSede` (branch — e.g. idSede=383). A tenant maps N portal sedes to
+// N Ride locations, so this is a per-sede table (Economy's multi-row shape). The
+// worker fetches each enabled sede's grid on its own date window and pins its rows
+// to that sede's Ride location.
+//
+// One Flexways credential per tenant (IntegrationCredential unique
+// (tenantId, sourceSystem)) covers the whole account.
+//
+// See doc/flexways-integration-plan-2026-07-13.md
+// ============================================================================
+model FlexwaysLocationConfig {
+  id           String   @id @default(cuid())
+  tenantId     String
+  tenant       Tenant   @relation(fields: [tenantId], references: [id])
+  // Portal branch id (e.g. "383"), from the MobilityPS URLs (idSede=...). The
+  // identity of a Flexways config row within a tenant.
+  idSede       String
+  locationId   String // Ride location this sede maps to
+  enabled      Boolean  @default(true)
+  // Per-sede import window override (mirrors Economy/NU). NULL → fall back to the
+  // env defaults FLEXWAYS_DATE_WINDOW_LOOKBACK_DAYS / FLEXWAYS_DATE_WINDOW_LOOKAHEAD_DAYS.
+  lookbackDays  Int?
+  lookaheadDays Int?
+  createdAt    DateTime @default(now())
+
+  // One config row per (tenant, portal sede).
+  @@unique([tenantId, idSede])
   @@index([tenantId, enabled])
 }
 
