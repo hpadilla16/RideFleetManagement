@@ -123,6 +123,7 @@ export function roleAllowedModuleMap(roleOrUser) {
       kiosk: true,
       settings: true,
       security: true,
+      marketIntelligence: true,
       tenants: false
     };
   }
@@ -148,6 +149,7 @@ export function roleAllowedModuleMap(roleOrUser) {
       kiosk: true,
       settings: false,
       security: false,
+      marketIntelligence: true,
       tenants: false
     };
   }
@@ -172,6 +174,7 @@ export function roleAllowedModuleMap(roleOrUser) {
     kiosk: false,
     settings: false,
     security: false,
+    marketIntelligence: true,
     tenants: false
   };
 }

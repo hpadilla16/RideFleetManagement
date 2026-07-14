@@ -82,3 +82,14 @@ test('role maps: kiosk ON for ADMIN/OPS/SUPER_ADMIN, OFF for staff + hosts; neig
   assert.equal(roleAllowedModuleMap('AGENT').reports, false);
   assert.equal(roleAllowedModuleMap('AGENT').reservations, true);
 });
+
+test('role maps: marketIntelligence allowed for ADMIN/OPS/AGENT + SUPER_ADMIN, OFF for hosts', () => {
+  // Regression for the bug where marketIntelligence was in MODULE_KEYS but omitted
+  // from every non-super-admin role map, so an ADMIN could never enable it even
+  // when the tenant had marketIntelligenceEnabled=true (2026-07-14).
+  assert.equal(roleAllowedModuleMap('SUPER_ADMIN').marketIntelligence, true);
+  assert.equal(roleAllowedModuleMap('ADMIN').marketIntelligence, true);
+  assert.equal(roleAllowedModuleMap('OPS').marketIntelligence, true);
+  assert.equal(roleAllowedModuleMap('AGENT').marketIntelligence, true);
+  assert.equal(roleAllowedModuleMap({ role: 'ADMIN', hostProfileId: 'h1' }).marketIntelligence, false);
+});
