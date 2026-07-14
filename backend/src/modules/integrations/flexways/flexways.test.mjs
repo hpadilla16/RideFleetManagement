@@ -271,8 +271,9 @@ test('extractAcriss pulls the 4-letter code from "Nombre (ACRISS)"', () => {
 // ---------------------------------------------------------------------------
 
 function contractPayload() {
-  // Shape from the 2026-07-13 recon (funcionesAjaxContratos.php, idAlquiler=485160).
-  // data is an ARRAY-OF-OBJECTS with numeric-string keys "0".."11".
+  // Shape CONFIRMED LIVE 2026-07-14 (funcionesAjaxContratos.php, sede 383).
+  // ARRAY-OF-OBJECTS keyed "0".."11": col 0 = idAlquiler, col 3 = pickup (Desde),
+  // col 4 = return (Hasta) — cross-checked against the detail fechaHoraDesde/Hasta.
   return {
     draw: 1,
     recordsTotal: 3,
@@ -280,10 +281,10 @@ function contractPayload() {
     data: [
       {
         0: '485160',
-        1: 'AR',
+        1: 'P D',
         2: 'Flexways Orlando - Vista East',
-        3: '19/07/2026 15:00:00',   // pickup (recon "fecha booking")
-        4: '21/07/2026 10:00:00',   // fecha devolución (dropoff)
+        3: '19/07/2026 15:00:00',   // fecha PICKUP (Desde)
+        4: '21/07/2026 10:00:00',   // fecha devolución (Hasta)
         5: 'Aeropuerto Internacional de Orlando',
         6: 'Aeropuerto Internacional de Orlando',
         7: 'API',
@@ -294,13 +295,13 @@ function contractPayload() {
       },
       // no idAlquiler → skipped (unusable, no detail key)
       {
-        0: '   ', 1: 'NR', 2: 'Flexways Miami', 3: '20/07/2026 09:00:00',
+        0: '   ', 1: 'P D', 2: 'Flexways Miami', 3: '20/07/2026 09:00:00',
         4: '22/07/2026 09:00:00', 5: 'MIA', 6: 'MIA', 7: 'API', 8: 'No Id Person',
         9: '', 10: 'NOID11', 11: '',
       },
       // second good row (Web channel — used by the channel-filter test)
       {
-        0: '485161', 1: 'AZ', 2: 'Flexways Miami', 3: '21/07/2026 12:30:00',
+        0: '485161', 1: 'P D', 2: 'Flexways Miami', 3: '21/07/2026 12:30:00',
         4: '24/07/2026 12:30:00', 5: 'MIA', 6: 'MIA', 7: 'Web', 8: 'Ana Ruiz',
         9: '', 10: 'ANARZ9', 11: '',
       },
@@ -321,8 +322,8 @@ test('parseContractList: maps object-keyed columns, keeps idAlquiler, skips id-l
   assert.equal(a.customerFirstName, 'Alfredo');
   assert.equal(a.customerLastName, 'Reyes');
   assert.equal(a.pickupLocation, 'Aeropuerto Internacional de Orlando');
-  assert.equal(a.pickupAt.toISOString(), '2026-07-19T19:00:00.000Z'); // 15:00 EDT → 19:00 UTC
-  assert.equal(a.dropoffAt.toISOString(), '2026-07-21T14:00:00.000Z');
+  assert.equal(a.pickupAt.toISOString(), '2026-07-19T19:00:00.000Z'); // col 3 pickup, 15:00 EDT → 19:00 UTC
+  assert.equal(a.dropoffAt.toISOString(), '2026-07-21T14:00:00.000Z'); // col 4 return
   assert.equal(b.idAlquiler, '485161');
   assert.equal(b.externalRef, 'ANARZ9');
   assert.equal(b.channel, 'Web');

@@ -50,6 +50,8 @@ import {
   LOGIN_PATH,
   LIST_PATH,
   CONTRACT_LIST_PATH,
+  CONTRACT_LIST_TABLA_ACTUAL,
+  CONTRACT_LIST_CONTRATOS_ABIERTOS,
   DETAIL_PATH,
   LOGIN_USER_FIELD,
   LOGIN_PASS_FIELD,
@@ -300,6 +302,10 @@ function buildListUrl(idSede) {
 function buildContractListUrl(idSede) {
   const u = new URL(absUrl(CONTRACT_LIST_PATH));
   if (idSede != null && String(idSede).trim() !== '') u.searchParams.set('idSede', String(idSede).trim());
+  // Select the open-contracts table — REQUIRED, else the endpoint returns an
+  // empty payload (recordsTotal:null). Verified live 2026-07-14.
+  u.searchParams.set('tablaActual', CONTRACT_LIST_TABLA_ACTUAL);
+  u.searchParams.set('contratosAbiertos', CONTRACT_LIST_CONTRATOS_ABIERTOS);
   u.searchParams.set('length', '-1');
   u.searchParams.set('start', '0');
   return u.toString();

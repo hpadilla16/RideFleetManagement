@@ -69,6 +69,18 @@ export const CONTRACT_LIST_PATH =
 export const DETAIL_PATH =
   process.env.FLEXWAYS_DETAIL_PATH || '/Comercial/Reservas/modificarReserva.php';
 
+// Required query params for the contract-list DataTables endpoint. VERIFIED LIVE
+// 2026-07-14: without these the endpoint returns `recordsTotal:null` (empty);
+// WITH them the same idSede returns the real open-contracts table (recordsTotal
+// 200 for sede 383). Taken verbatim from the portal page URL
+//   listadoCotizaciones.php?tablaActual=3&contratosAbiertos=1&idSede=<sede>
+// whose DataTables source is funcionesAjaxContratos.php. Overridable via env in
+// case Flexways changes the tab id.
+export const CONTRACT_LIST_TABLA_ACTUAL =
+  process.env.FLEXWAYS_CONTRACT_TABLA_ACTUAL || '3';
+export const CONTRACT_LIST_CONTRATOS_ABIERTOS =
+  process.env.FLEXWAYS_CONTRACT_CONTRATOS_ABIERTOS || '1';
+
 // ---------------------------------------------------------------------------
 // Login form field names (recon 2026-07-13). The POST is usuario/clave plus two
 // hidden fields (URI + userData, probable CSRF/state) that we re-send verbatim.
@@ -118,27 +130,29 @@ export const EXPECTED_COLUMN_COUNT = 9;
 //   0  = idAlquiler   (numeric rental id, e.g. "485160" — the DETAIL-page key)
 //   1  = iniciales
 //   2  = sede
-//   3  = fecha booking     (⚠ ASSUMED pickup/rental-start — see PICKUP_AT below)
-//   4  = fecha devolución  (return / dropoff date)
+//   3  = fecha PICKUP   (rental-start / recogida — "Desde", the window key)
+//   4  = fecha devolución (return / dropoff — "Hasta")
 //   5  = pickup location
 //   6  = dropoff location
 //   7  = canal        ("API" = afiliado)
 //   8  = nombre cliente
-//   9  = (unlabeled in the recon)
-//   10 = ref          (booking ref, e.g. "QJDK07" → externalRef)
+//   9  = (empty)
+//   10 = ref          (booking ref, e.g. "49AGTH" → externalRef)
 //   11 = acciones     (HTML action buttons)
 //
-// ⚠ PICKUP_AT ASSUMPTION: the recon labeled col 3 "fecha booking". For a rental
-// contract the meaningful window key is the pickup/rental-start date, and col 4
-// is explicitly the return date, so col 3 is mapped to pickupAt (the natural
-// recogida↔devolución pairing). A live PoC MUST confirm whether col 3 is the
-// pickup date or the booking-creation date — if the latter, the pickup-window
-// filter is wrong and this index needs to move. Overridable via env for safety.
+// PICKUP/DROPOFF RESOLVED (live 2026-07-14, sede 383): col 3 and col 4 match the
+// detail page's fechaHoraDesde / fechaHoraHasta exactly, so col 3 = pickup
+// (Desde) and col 4 = return (Hasta). The recon's original mapping was correct;
+// the "open contracts" tab shows rentals whose pickup already happened, which is
+// why col 3 reads as a recent date. Both remain env-overridable.
 // ---------------------------------------------------------------------------
 export const CONTRACT_COL = Object.freeze({
   ID_ALQUILER: Number(process.env.FLEXWAYS_CONTRACT_COL_ID ?? 0),
   INITIALS: 1,
   SEDE: Number(process.env.FLEXWAYS_CONTRACT_COL_SEDE ?? 2),
+  // CONFIRMED LIVE 2026-07-14 (sede 383, cross-checked against the detail page's
+  // fechaHoraDesde/fechaHoraHasta): col 3 = pickup/rental-start (Desde),
+  // col 4 = return/dropoff (Hasta). The recon's original mapping was correct.
   PICKUP_AT: Number(process.env.FLEXWAYS_CONTRACT_COL_PICKUP ?? 3),
   DROPOFF_AT: Number(process.env.FLEXWAYS_CONTRACT_COL_DROPOFF ?? 4),
   PICKUP_LOCATION: Number(process.env.FLEXWAYS_CONTRACT_COL_PICKUP_LOC ?? 5),
