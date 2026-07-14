@@ -5,7 +5,8 @@ import {
   buildDamageTriage,
   buildInspectionIntelligence,
   buildTelematicsSummary,
-  buildTurnReadyScore
+  buildTurnReadyScore,
+  slimInspectionPhotoMap
 } from './vehicle-intelligence.service.js';
 
 test('buildDamageTriage marks high-risk inspection damage when safety keywords are present', () => {
@@ -127,4 +128,47 @@ test('buildTelematicsSummary stays neutral when telematics feature is disabled',
 
   assert.equal(telematics.status, 'DISABLED');
   assert.equal(telematics.summary, 'Telematics is disabled for this tenant.');
+});
+
+test('slimInspectionPhotoMap builds exact coverage from storage refs with key canonicalization', () => {
+  const photos = slimInspectionPhotoMap([
+    { key: 'front', path: 't1/i1/front-0.jpg' },
+    { key: 'front_seat', path: 't1/i1/front_seat-0.jpg' },
+    { key: 'rear_seat', url: 'https://cdn.example/rear.jpg' },
+    { key: 'dash', path: 't1/i1/dash-0.jpg' },
+    { key: '', path: 'ignored.jpg' },
+    null
+  ], true);
+
+  assert.equal(photos.front, 't1/i1/front-0.jpg');
+  assert.equal(photos.frontSeat, 't1/i1/front_seat-0.jpg');
+  assert.equal(photos.rearSeat, 'https://cdn.example/rear.jpg');
+  assert.equal(photos.dashboard, 't1/i1/dash-0.jpg');
+  assert.equal(Object.keys(photos).length, 4);
+
+  const coverage = buildInspectionIntelligence({
+    checkout: { phase: 'CHECKOUT', at: new Date().toISOString(), photos }
+  }).photoCoverage;
+  assert.equal(coverage.captured, 4);
+  assert.ok(coverage.missingKeys.includes('rear'));
+});
+
+test('slimInspectionPhotoMap treats legacy inline photosJson rows as complete (no blob fetched)', () => {
+  const photos = slimInspectionPhotoMap(null, true);
+  const intelligence = buildInspectionIntelligence({
+    checkout: { phase: 'CHECKOUT', at: new Date().toISOString(), photos }
+  });
+  assert.equal(intelligence.photoCoverage.captured, intelligence.photoCoverage.required);
+  assert.deepEqual(intelligence.photoCoverage.missingKeys, []);
+  assert.equal(intelligence.status, 'READY');
+});
+
+test('slimInspectionPhotoMap reports zero coverage when there are no refs and no legacy blob', () => {
+  const photos = slimInspectionPhotoMap([], false);
+  assert.deepEqual(photos, {});
+  const intelligence = buildInspectionIntelligence({
+    checkout: { phase: 'CHECKOUT', at: new Date().toISOString(), photos }
+  });
+  assert.equal(intelligence.photoCoverage.captured, 0);
+  assert.equal(intelligence.status, 'ATTENTION');
 });

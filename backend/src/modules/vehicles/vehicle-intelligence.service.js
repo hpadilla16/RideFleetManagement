@@ -1,5 +1,6 @@
 import { Prisma } from '@prisma/client';
 import { prisma } from '../../lib/prisma.js';
+import { canonicalPhotoKey } from '../rental-agreements/inspection-photos-normalize.js';
 
 const REQUIRED_INSPECTION_PHOTOS = ['front', 'rear', 'left', 'right', 'frontSeat', 'rearSeat', 'dashboard', 'trunk'];
 const INSPECTION_CONDITION_KEYS = ['exterior', 'interior', 'tires', 'lights', 'windshield'];
@@ -51,6 +52,35 @@ function inspectionPhotoCoverage(photos = {}) {
     captured: filled.length,
     missingKeys: REQUIRED_INSPECTION_PHOTOS.filter((key) => !filled.includes(key))
   };
+}
+
+// 2026-06-10 (planner-snapshot 57014 fix): build the photo-coverage map for
+// BULK signal hydration WITHOUT loading the legacy `photosJson` blob (multi-MB
+// base64 per inspection row; selecting it for ~125 latest agreements is what
+// blew past statement_timeout on GET /api/planner/snapshot — prisma slow query
+// 140939ms then 57014 cancel). Coverage only needs KEY PRESENCE:
+//   - rows written with INSPECTION_PHOTOS_STORAGE_ENABLED carry the slot keys
+//     in the slim `photoStorageRefs` Json -> exact per-key coverage (keys are
+//     canonicalized: mobile writes snake_case front_seat/rear_seat/dash).
+//   - legacy rows keep photos inline in `photosJson`; we probe only
+//     pg_column_size(photosJson) (no detoast of the blob content) and, when a
+//     non-trivial blob exists, treat the photo set as complete instead of
+//     flagging false "missing photo" attention. Exact per-key coverage for
+//     those rows resumes as they are rewritten with storage refs.
+export function slimInspectionPhotoMap(storageRefs, hasLegacyInlinePhotos) {
+  if (Array.isArray(storageRefs) && storageRefs.length > 0) {
+    const photos = {};
+    for (const ref of storageRefs) {
+      const key = canonicalPhotoKey(ref?.key);
+      if (!key) continue;
+      photos[key] = ref?.path || ref?.url || true;
+    }
+    return photos;
+  }
+  if (hasLegacyInlinePhotos) {
+    return Object.fromEntries(REQUIRED_INSPECTION_PHOTOS.map((key) => [key, 'legacy-inline-photo']));
+  }
+  return {};
 }
 
 function conditionAttentionCount(inspection = {}) {
@@ -502,37 +532,61 @@ export async function buildVehicleOperationalSignalsMap(vehicleIds = [], scope =
   ]);
 
   // Hydrate the latest agreements with their CHECKOUT + CHECKIN inspections.
-  // Filtering phase at the DB layer avoids dragging in irrelevant phases and
-  // photoJson blobs we wouldn't use anyway.
+  // Filtering phase at the DB layer avoids dragging in irrelevant phases.
+  // IMPORTANT (2026-06-10, planner 57014/504 fix): never select `photosJson`
+  // here — it holds multi-MB base64 blobs and pulling it for every latest
+  // agreement blew past the 15s statement_timeout (prisma slow query 140939ms
+  // on this RentalAgreementInspection SELECT, then 57014 cancel -> /planner/
+  // snapshot 504). Coverage is derived from the slim `photoStorageRefs` Json
+  // plus a pg_column_size() presence probe (see slimInspectionPhotoMap).
   const latestAgreementIds = latestAgreementRows.map((row) => row.id);
-  const agreements = latestAgreementIds.length
-    ? await prisma.rentalAgreement.findMany({
-        where: { id: { in: latestAgreementIds } },
-        select: {
-          vehicleId: true,
-          id: true,
-          agreementNumber: true,
-          inspections: {
-            where: { phase: { in: ['CHECKOUT', 'CHECKIN'] } },
-            orderBy: [{ capturedAt: 'desc' }],
-            select: {
-              phase: true,
-              capturedAt: true,
-              exterior: true,
-              interior: true,
-              tires: true,
-              lights: true,
-              windshield: true,
-              fuelLevel: true,
-              odometer: true,
-              damages: true,
-              notes: true,
-              photosJson: true
+  const [agreements, legacyPhotoPresenceRows] = latestAgreementIds.length
+    ? await Promise.all([
+        prisma.rentalAgreement.findMany({
+          where: { id: { in: latestAgreementIds } },
+          select: {
+            vehicleId: true,
+            id: true,
+            agreementNumber: true,
+            inspections: {
+              where: { phase: { in: ['CHECKOUT', 'CHECKIN'] } },
+              orderBy: [{ capturedAt: 'desc' }],
+              select: {
+                phase: true,
+                capturedAt: true,
+                exterior: true,
+                interior: true,
+                tires: true,
+                lights: true,
+                windshield: true,
+                fuelLevel: true,
+                odometer: true,
+                damages: true,
+                notes: true,
+                photoStorageRefs: true
+              }
             }
           }
-        }
-      })
-    : [];
+        }),
+        // pg_column_size reads the stored (TOAST) size without detoasting the
+        // blob, so this stays cheap no matter how large photosJson is. > 64
+        // bytes filters out null / '{}' / '[]' placeholder rows.
+        prisma.$queryRaw`
+          SELECT "rentalAgreementId", "phase"::text AS "phase",
+                 (pg_column_size("photosJson") > 64) AS "hasLegacyPhotos"
+          FROM "RentalAgreementInspection"
+          WHERE "rentalAgreementId" = ANY(${latestAgreementIds}::text[])
+            AND "phase" IN ('CHECKOUT', 'CHECKIN')
+        `
+      ])
+    : [[], []];
+
+  const legacyPhotoPresence = new Map(
+    (legacyPhotoPresenceRows || []).map((row) => [
+      `${row.rentalAgreementId}|${String(row.phase || '').toUpperCase()}`,
+      row.hasLegacyPhotos === true
+    ])
+  );
 
   const events = latestEventRows;
 
@@ -556,7 +610,10 @@ export async function buildVehicleOperationalSignalsMap(vehicleIds = [], scope =
         odometer: checkout.odometer,
         damages: checkout.damages,
         notes: checkout.notes,
-        photos: safeJsonParse(checkout.photosJson, {})
+        photos: slimInspectionPhotoMap(
+          checkout.photoStorageRefs,
+          legacyPhotoPresence.get(`${agreement.id}|CHECKOUT`)
+        )
       } : null,
       checkinInspection: checkin ? {
         phase: checkin.phase,
@@ -570,7 +627,10 @@ export async function buildVehicleOperationalSignalsMap(vehicleIds = [], scope =
         odometer: checkin.odometer,
         damages: checkin.damages,
         notes: checkin.notes,
-        photos: safeJsonParse(checkin.photosJson, {})
+        photos: slimInspectionPhotoMap(
+          checkin.photoStorageRefs,
+          legacyPhotoPresence.get(`${agreement.id}|CHECKIN`)
+        )
       } : null
     });
   }
