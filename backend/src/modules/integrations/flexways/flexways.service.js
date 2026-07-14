@@ -846,7 +846,21 @@ export async function fetchReservationDetail(tenantId, idAlquiler, { userAgent }
     }
   }
 
-  return parseReservationDetailHtml(text);
+  const parsed = parseReservationDetailHtml(text);
+  // DIAGNOSTIC (2026-07-14): all imported rows came back vehicleAcriss=null even
+  // though a primed browser session GETs modificarReserva.php WITH the reserved
+  // <option ... selected> (ACRISS in its text). Log what the WORKER actually got
+  // so we can tell a missing-selected-option (session/priming) from a parse miss.
+  if (!parsed.vehicleAcriss) {
+    const hasSelect = /name\s*=\s*["']?cbCategoria/i.test(text);
+    const catBlock = (text.match(/<select[^>]*name=["']?cbCategoria[\s\S]*?<\/select>/i) || [''])[0];
+    const selOpt = catBlock.match(/<option[^>]*\bselected\b[^>]*>([^<]{0,40})/i);
+    logger.warn('[flexways] detail: vehicleAcriss null', {
+      tenantId, idAlquiler: id, htmlLen: text.length, hasCbCategoria: hasSelect,
+      catBlockLen: catBlock.length, selectedOptionText: selOpt ? selOpt[1].trim() : null,
+    });
+  }
+  return parsed;
 }
 
 // ---------------------------------------------------------------------------
