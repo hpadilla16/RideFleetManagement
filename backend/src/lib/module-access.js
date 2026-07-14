@@ -271,7 +271,16 @@ export async function updateTenantModuleConfig(tenantId, payload = {}) {
   if (!tenantId) throw new Error('tenantId is required');
   const tenant = await prisma.tenant.findUnique({
     where: { id: tenantId },
-    select: { id: true, carSharingEnabled: true, dealershipLoanerEnabled: true, tollsEnabled: true }
+    // marketIntelligenceEnabled MUST be selected: normalizeTenantModuleConfig
+    // gates marketIntelligence on it, so omitting it forced the module OFF on
+    // every save (the tenant-modules toggle would never stick). 2026-07-14.
+    select: {
+      id: true,
+      carSharingEnabled: true,
+      dealershipLoanerEnabled: true,
+      tollsEnabled: true,
+      marketIntelligenceEnabled: true
+    }
   });
   if (!tenant) throw new Error('Tenant not found');
   const next = normalizeTenantModuleConfig(payload, tenant);
