@@ -300,6 +300,7 @@
     "idPrivacy": "Tu licencia y selfie se usan solo para verificar tu identidad para esta renta y se guardan de forma segura con tu récord de renta.",
     "idCantScan": "No puedo escanear — pedir ayuda",
     "scanLicenseBtn": "Escanear el código de barras de la licencia",
+    "scanSlowHint": "¿Problemas escaneando? Intenta subir una foto del código de barras.",
     "scanStopBtn": "Detener escaneo",
     "scanUploadBtn": "Subir foto del código de barras",
     "scanHoldSteady": "Mantén firme la parte de ATRÁS de la licencia — llena el recuadro con el código de barras…",

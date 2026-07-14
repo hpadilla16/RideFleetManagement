@@ -17,17 +17,27 @@
 import { useEffect, useRef, useState } from 'react';
 import { parseAamva } from '../../lib/aamva';
 
-// High-res REAR camera with continuous focus. PDF417 is dense — low-res / front
-// cam was a big part of the earlier failures.
-const CAMERA_CONSTRAINTS = {
-  audio: false,
-  video: {
-    facingMode: { ideal: 'environment' },
-    width: { ideal: 1920 },
-    height: { ideal: 1080 },
-    advanced: [{ focusMode: 'continuous' }]
-  }
-};
+// Camera constraints per facing mode. PDF417 is dense — low-res was a big part
+// of the earlier failures, so the REAR camera (loaner: staff phone pointed at
+// a license) stays 1920×1080. The FRONT camera (kiosk: guest holds the license
+// up to a mounted tablet) uses 1280×720 — 1080p front streams on iPads are
+// slow to start and slow to decode (Hector's iPad smoke test, 2026-07-05).
+function cameraConstraints(facingMode) {
+  const front = facingMode === 'user';
+  return {
+    audio: false,
+    video: {
+      facingMode: { ideal: front ? 'user' : 'environment' },
+      width: { ideal: front ? 1280 : 1920 },
+      height: { ideal: front ? 720 : 1080 },
+      advanced: [{ focusMode: 'continuous' }]
+    }
+  };
+}
+
+// Show the "try uploading a photo instead" hint after this long without a
+// successful decode (WebKit has no native BarcodeDetector → zxing is slow).
+const SLOW_SCAN_HINT_MS = 12 * 1000;
 
 async function getNativeDetector() {
   if (typeof window === 'undefined' || !('BarcodeDetector' in window)) return null;
@@ -47,7 +57,10 @@ async function makeZxingReader() {
   ]);
   let hints;
   try { hints = new Map(); hints.set(lib.DecodeHintType.TRY_HARDER, true); } catch { hints = undefined; }
-  return new BrowserPDF417Reader(hints);
+  // ONE reader instance drives decodeFromStream's internal setTimeout loop —
+  // nothing is re-instantiated per frame. Explicit attempt interval (default
+  // is 500ms) keeps iPad/WebKit throughput sane without melting the CPU.
+  return new BrowserPDF417Reader(hints, { delayBetweenScanAttempts: 350 });
 }
 
 // Default UI strings — the loaner wizard keeps these untouched. Callers that
@@ -65,31 +78,55 @@ const DEFAULT_LABELS = {
   photoNoBarcode: 'That photo didn’t contain a readable license barcode. Try a sharper, well-lit shot of the BACK of the license.',
   photoReadFailed: 'Couldn’t read the barcode from that photo. Try a sharper shot of the back of the license, or enter fields manually.',
   helperNote: 'Scanning the PDF417 barcode auto-fills name, license #, state, and expiry. Confirm the fields below.',
+  slowScanHint: 'Trouble scanning? Try uploading a photo of the barcode instead.',
 };
 
-export function LicenseScanner({ onDecode, onPhoto, labels: labelOverrides }) {
+/**
+ * facingMode: 'environment' (default — loaner: staff phone pointed at a
+ * license, byte-identical behavior) or 'user' (kiosk: guest faces a mounted
+ * tablet). When user-facing, ONLY the preview is mirrored via CSS
+ * (transform: scaleX(-1)) so aiming feels natural — BarcodeDetector reads the
+ * <video> element's raw frames and canvas drawImage grabs raw frames too, so
+ * decoding and the evidence capture are unaffected by the CSS mirror.
+ */
+export function LicenseScanner({ onDecode, onPhoto, labels: labelOverrides, facingMode = 'environment' }) {
   const labels = { ...DEFAULT_LABELS, ...(labelOverrides || {}) };
   const videoRef = useRef(null);
   const streamRef = useRef(null);
   const rafRef = useRef(null);
+  const vfcRef = useRef(null);
+  const hintTimerRef = useRef(null);
   const zxingControlsRef = useRef(null);
   const scanningRef = useRef(false);
   const [scanning, setScanning] = useState(false);
   const [status, setStatus] = useState('');
   const [error, setError] = useState('');
+  const [slowHint, setSlowHint] = useState(false);
 
   useEffect(() => () => stop(), []);
 
+  // FULL teardown — iOS/WebKit allows only ONE live camera stream, so a
+  // half-released stream here blocks the next getUserMedia (the kiosk selfie
+  // step). Stop every track, pause the element AND null srcObject.
   function stop() {
     scanningRef.current = false;
     if (rafRef.current) { cancelAnimationFrame(rafRef.current); rafRef.current = null; }
+    if (vfcRef.current && videoRef.current?.cancelVideoFrameCallback) {
+      try { videoRef.current.cancelVideoFrameCallback(vfcRef.current); } catch {}
+      vfcRef.current = null;
+    }
+    if (hintTimerRef.current) { clearTimeout(hintTimerRef.current); hintTimerRef.current = null; }
+    setSlowHint(false);
     try { zxingControlsRef.current?.stop(); } catch {}
     zxingControlsRef.current = null;
     try {
       streamRef.current?.getTracks?.().forEach((t) => t.stop());
     } catch {}
     streamRef.current = null;
-    if (videoRef.current) { try { videoRef.current.srcObject = null; } catch {} }
+    if (videoRef.current) {
+      try { videoRef.current.pause(); } catch {}
+      try { videoRef.current.srcObject = null; } catch {}
+    }
     setScanning(false);
   }
 
@@ -126,11 +163,19 @@ export function LicenseScanner({ onDecode, onPhoto, labels: labelOverrides }) {
     setStatus(labels.holdSteady);
     setScanning(true);
     scanningRef.current = true;
+    setSlowHint(false);
+    // No decode after SLOW_SCAN_HINT_MS → surface the upload fallback
+    // (WebKit has no native BarcodeDetector, zxing on an iPad can be slow).
+    // Scanning keeps running in the background.
+    if (hintTimerRef.current) clearTimeout(hintTimerRef.current);
+    hintTimerRef.current = setTimeout(() => {
+      if (scanningRef.current) setSlowHint(true);
+    }, SLOW_SCAN_HINT_MS);
 
-    // 1) Acquire a high-res rear camera (fall back to any camera).
+    // 1) Acquire the camera for the requested facing (fall back to any camera).
     let stream;
     try {
-      stream = await navigator.mediaDevices.getUserMedia(CAMERA_CONSTRAINTS);
+      stream = await navigator.mediaDevices.getUserMedia(cameraConstraints(facingMode));
     } catch {
       try { stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false }); }
       catch { setError(labels.cameraUnavailable); stop(); return; }
@@ -141,18 +186,27 @@ export function LicenseScanner({ onDecode, onPhoto, labels: labelOverrides }) {
     video.srcObject = stream;
     try { await video.play(); } catch {}
 
-    // 2) Prefer the native BarcodeDetector (Chrome/Android) — much more reliable.
+    // 2) Prefer the native BarcodeDetector (Chrome/Android) — much more
+    // reliable. Pace the loop with requestVideoFrameCallback when available
+    // (fires once per NEW camera frame instead of per display refresh).
     const detector = await getNativeDetector();
     if (detector) {
+      const schedule = (fn) => {
+        if (typeof video.requestVideoFrameCallback === 'function') {
+          vfcRef.current = video.requestVideoFrameCallback(() => fn());
+        } else {
+          rafRef.current = requestAnimationFrame(fn);
+        }
+      };
       const tick = async () => {
         if (!scanningRef.current) return;
         try {
           const codes = await detector.detect(video);
           if (codes && codes.length && handleText(codes[0].rawValue)) return;
         } catch { /* transient — keep going */ }
-        rafRef.current = requestAnimationFrame(tick);
+        if (scanningRef.current) schedule(tick);
       };
-      rafRef.current = requestAnimationFrame(tick);
+      schedule(tick);
       return;
     }
 
@@ -208,9 +262,16 @@ export function LicenseScanner({ onDecode, onPhoto, labels: labelOverrides }) {
         ) : (
           <button type="button" className="hero-pill" onClick={stop}>{labels.stopButton}</button>
         )}
-        <label className="hero-pill" style={{ cursor: 'pointer' }}>
+        <label
+          className="hero-pill"
+          style={{
+            cursor: 'pointer',
+            // Slow-scan hint also spotlights this fallback (kiosk/iPad path).
+            ...(slowHint ? { outline: '2px solid #8752FE', outlineOffset: 2 } : {}),
+          }}
+        >
           {labels.uploadButton}
-          <input type="file" accept="image/*" capture="environment" onChange={onFile} style={{ display: 'none' }} />
+          <input type="file" accept="image/*" capture={facingMode === 'user' ? 'user' : 'environment'} onChange={onFile} style={{ display: 'none' }} />
         </label>
       </div>
 
@@ -219,11 +280,23 @@ export function LicenseScanner({ onDecode, onPhoto, labels: labelOverrides }) {
         style={{
           display: scanning ? 'block' : 'none',
           width: '100%', maxWidth: 420, marginTop: 12,
-          borderRadius: 12, border: '1px solid #e6dfff', background: '#000'
+          borderRadius: 12, border: '1px solid #e6dfff', background: '#000',
+          // Mirror ONLY the preview for a user-facing camera — decode +
+          // evidence capture read raw (unmirrored) frames.
+          ...(facingMode === 'user' ? { transform: 'scaleX(-1)' } : {}),
         }}
         muted
         playsInline
       />
+
+      {scanning && slowHint ? (
+        <div style={{
+          marginTop: 10, padding: '10px 12px', borderRadius: 12, fontSize: 13, fontWeight: 700,
+          background: 'rgba(245,158,11,.12)', border: '1px solid rgba(245,158,11,.25)', color: '#b45309',
+        }}>
+          {labels.slowScanHint}
+        </div>
+      ) : null}
 
       {status && <div style={{ marginTop: 10, fontSize: 12.5, color: '#0f9b82', fontWeight: 700 }}>{status}</div>}
       {error && <div style={{ marginTop: 10, fontSize: 12.5, color: '#b9791e', fontWeight: 700 }}>{error}</div>}

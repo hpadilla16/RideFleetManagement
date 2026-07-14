@@ -797,7 +797,12 @@ function IdScreen({ t, err, verifyResult, onScanned, onPhoto, onEscalate, onBack
         <LicenseScanner
           onDecode={onScanned}
           onPhoto={onPhoto}
+          // Mounted kiosk tablet: the guest FACES the screen → FRONT camera
+          // (loaner keeps its 'environment' default). The component mirrors
+          // only the preview; decode + evidence capture use raw frames.
+          facingMode="user"
           labels={{
+            slowScanHint: t('kiosk.scanSlowHint'),
             scanButton: `📷 ${t('kiosk.scanLicenseBtn')}`,
             stopButton: `■ ${t('kiosk.scanStopBtn')}`,
             uploadButton: `⬆ ${t('kiosk.scanUploadBtn')}`,
@@ -882,33 +887,56 @@ function SelfieScreen({ t, busy, err, selfie, setSelfie, verifyResult, onSubmit,
   const stopCamera = useCallback(() => {
     try { streamRef.current?.getTracks?.().forEach((track) => track.stop()); } catch {}
     streamRef.current = null;
+    if (videoRef.current) {
+      try { videoRef.current.pause(); } catch {}
+      try { videoRef.current.srcObject = null; } catch {}
+    }
     setCameraOn(false);
   }, []);
 
+  const requestStream = () => navigator.mediaDevices.getUserMedia({
+    // 1280×720 front stream — 1080p+ front streams on iPads are slow/flaky.
+    video: { facingMode: 'user', width: { ideal: 1280 }, height: { ideal: 720 } },
+    audio: false,
+  });
+
   const startCamera = useCallback(async () => {
     setCameraFailed(false);
+    let stream = null;
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: 'user', width: { ideal: 1280 }, height: { ideal: 1280 } },
-        audio: false,
-      });
-      streamRef.current = stream;
-      setCameraOn(true);
-      // Wait a tick for the <video> to render.
-      setTimeout(() => {
-        if (videoRef.current && streamRef.current) {
-          videoRef.current.srcObject = streamRef.current;
-          videoRef.current.play().catch(() => {});
-        }
-      }, 0);
+      stream = await requestStream();
     } catch {
-      setCameraFailed(true);
+      // iOS/WebKit single-active-stream rule: if the license scanner's stream
+      // is still winding down, getUserMedia throws NotReadableError. Give the
+      // OS 500ms to release the camera and retry ONCE before giving up.
+      await new Promise((resolve) => setTimeout(resolve, 500));
+      try { stream = await requestStream(); } catch { stream = null; }
     }
+    if (!stream) { setCameraFailed(true); return; }
+    streamRef.current = stream;
+    setCameraOn(true);
+    // Wait a tick for the <video> to render.
+    setTimeout(() => {
+      if (videoRef.current && streamRef.current) {
+        videoRef.current.srcObject = streamRef.current;
+        videoRef.current.play().catch(() => {});
+      }
+    }, 0);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
-    if (!selfie && !verifyResult) startCamera();
-    return () => stopCamera();
+    // ~300ms grace AFTER the ID step unmounts the license scanner: WebKit
+    // allows one live camera stream, and the scanner's tracks need a moment
+    // to fully release before the selfie stream can start.
+    let graceTimer = null;
+    if (!selfie && !verifyResult) {
+      graceTimer = setTimeout(() => { startCamera(); }, 350);
+    }
+    return () => {
+      if (graceTimer) clearTimeout(graceTimer);
+      stopCamera();
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -996,8 +1024,10 @@ function SelfieScreen({ t, busy, err, selfie, setSelfie, verifyResult, onSubmit,
         {selfie ? (
           <img src={selfie} alt="" />
         ) : cameraOn ? (
+          // Preview mirrored (front camera, natural aiming) — the captured
+          // canvas frame stays raw/unmirrored.
           // eslint-disable-next-line jsx-a11y/media-has-caption
-          <video ref={videoRef} muted playsInline />
+          <video ref={videoRef} muted playsInline style={{ transform: 'scaleX(-1)' }} />
         ) : (
           <span style={{ fontSize: 64 }}>🙂</span>
         )}
@@ -1005,18 +1035,18 @@ function SelfieScreen({ t, busy, err, selfie, setSelfie, verifyResult, onSubmit,
       <input ref={fileRef} type="file" accept="image/*" capture="user" style={{ display: 'none' }} onChange={onFile} />
       <div className="kio-row">
         {!selfie ? (
-          cameraOn ? (
-            <button type="button" className="kio-btn sm" onClick={takePhoto}>📸 {t('kiosk.selfieTake')}</button>
-          ) : (
-            <>
+          <>
+            {cameraOn ? (
+              <button type="button" className="kio-btn sm" onClick={takePhoto}>📸 {t('kiosk.selfieTake')}</button>
+            ) : (
               <button type="button" className="kio-btn sm" onClick={startCamera}>📷 {t('kiosk.selfieStartCamera')}</button>
-              {cameraFailed ? (
-                <button type="button" className="kio-btn ghost sm" onClick={() => fileRef.current?.click()}>
-                  ⬆ {t('kiosk.selfieUpload')}
-                </button>
-              ) : null}
-            </>
-          )
+            )}
+            {/* Upload fallback ALWAYS visible — on kiosk tablets it's the
+                resilient path, not an error-only afterthought. */}
+            <button type="button" className="kio-btn ghost sm" onClick={() => fileRef.current?.click()}>
+              ⬆ {t('kiosk.selfieUpload')}
+            </button>
+          </>
         ) : (
           <>
             <button type="button" className="kio-btn sm" disabled={busy} onClick={() => onSubmit(selfie)}>

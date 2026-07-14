@@ -300,6 +300,7 @@
     "idPrivacy": "Your license and selfie are used only to verify your identity for this rental and are stored securely with your rental record.",
     "idCantScan": "I can't scan — get help",
     "scanLicenseBtn": "Scan license barcode",
+    "scanSlowHint": "Trouble scanning? Try uploading a photo of the barcode instead.",
     "scanStopBtn": "Stop scan",
     "scanUploadBtn": "Upload barcode photo",
     "scanHoldSteady": "Hold the BACK of the license steady — fill the frame with the barcode…",
