@@ -50,6 +50,7 @@ import {
   LOGIN_PATH,
   LIST_PATH,
   CONTRACT_LIST_PATH,
+  CONTRACT_LIST_PAGE_PATH,
   CONTRACT_LIST_TABLA_ACTUAL,
   CONTRACT_LIST_CONTRATOS_ABIERTOS,
   DETAIL_PATH,
@@ -310,6 +311,20 @@ function buildContractListUrl(idSede) {
   u.searchParams.set('contratosAbiertos', CONTRACT_LIST_CONTRATOS_ABIERTOS);
   u.searchParams.set('length', '-1');
   u.searchParams.set('start', '0');
+  return u.toString();
+}
+
+/**
+ * Build the contract-list PAGE url. GETting this first stores the
+ * tablaActual/contratosAbiertos/idSede filter in the server-side session, which
+ * the AJAX endpoint then reads — without it a fresh worker session gets an empty
+ * payload (recordsTotal:null). Verified live 2026-07-14.
+ */
+function buildContractListPageUrl(idSede) {
+  const u = new URL(absUrl(CONTRACT_LIST_PAGE_PATH));
+  u.searchParams.set('tablaActual', CONTRACT_LIST_TABLA_ACTUAL);
+  u.searchParams.set('contratosAbiertos', CONTRACT_LIST_CONTRATOS_ABIERTOS);
+  if (idSede != null && String(idSede).trim() !== '') u.searchParams.set('idSede', String(idSede).trim());
   return u.toString();
 }
 
@@ -755,6 +770,19 @@ export async function fetchContractList(
 ) {
   const ua = userAgent || pickUserAgent();
   await ensureSession(tenantId, { userAgent: ua });
+
+  // PRIME the session: GET the list PAGE so the portal stores this sede's
+  // tablaActual/contratosAbiertos/idSede filter server-side. The AJAX endpoint
+  // reads the filter from that session state; without this a fresh worker
+  // session gets recordsTotal:null (verified live 2026-07-14). Best-effort — the
+  // AJAX below still re-sends the params, and a login bounce is handled there.
+  try {
+    await rawGridFetch(tenantId, buildContractListPageUrl(idSede), ua);
+  } catch (err) {
+    logger.warn('[flexways] contract list page prime failed (continuing)', {
+      tenantId, idSede, message: err?.message,
+    });
+  }
 
   const url = buildContractListUrl(idSede);
   let res = await rawGridFetch(tenantId, url, ua);

@@ -23,7 +23,7 @@ process.env.FLEXWAYS_INTEGRATION_ENABLED = 'true'; // let the handler run in-tes
 
 const svc = await import('./flexways.service.js');
 const { flexwaysSyncHandler } = await import('./flexways.worker.js');
-const { CONTRACT_LIST_PATH, DETAIL_PATH } = await import('./flexways.constants.js');
+const { CONTRACT_LIST_PATH, CONTRACT_LIST_PAGE_PATH, DETAIL_PATH } = await import('./flexways.constants.js');
 
 const prisma = new PrismaClient();
 const TAG = `FWW-${Date.now()}`;
@@ -88,7 +88,7 @@ test('setup: seed tenant + enabled sede config + an AUTO_PROMOTED Flexways reser
 });
 
 test('handler SKIPS the detail fetch for an already-promoted row (no modificarReserva.php hit)', async () => {
-  const hits = { contract: 0, detail: 0, detailUrls: [] };
+  const hits = { page: 0, pageBeforeContract: false, contract: 0, detail: 0, detailUrls: [] };
 
   // Stub auth so ensureSession succeeds without a real encrypted credential row.
   svc.__test.setCredentialsResolver(() => ({ username: 'u', password: 'p' }));
@@ -97,7 +97,13 @@ test('handler SKIPS the detail fetch for an already-promoted row (no modificarRe
   // Stub the HTTP layer: serve the contract list, and RECORD any detail hit.
   svc.__test.setFetch(async (url) => {
     const u = String(url);
-    if (u.includes(CONTRACT_LIST_PATH)) { hits.contract += 1; return stubResponse(JSON.stringify(contractPayload())); }
+    // The list PAGE must be primed BEFORE the AJAX (sets the session filter).
+    if (u.includes(CONTRACT_LIST_PAGE_PATH)) { hits.page += 1; return stubResponse('<html>ok</html>'); }
+    if (u.includes(CONTRACT_LIST_PATH)) {
+      if (hits.page > 0) hits.pageBeforeContract = true;
+      hits.contract += 1;
+      return stubResponse(JSON.stringify(contractPayload()));
+    }
     if (u.includes(DETAIL_PATH)) { hits.detail += 1; hits.detailUrls.push(u); return stubResponse('<html></html>'); }
     return stubResponse('', 200);
   });
@@ -105,5 +111,7 @@ test('handler SKIPS the detail fetch for an already-promoted row (no modificarRe
   await flexwaysSyncHandler({ data: { tenantId: ids.tenant, triggeredBy: 'test' } });
 
   assert.ok(hits.contract >= 1, 'contract list should have been fetched');
+  assert.ok(hits.page >= 1, 'the list page must be primed before the AJAX (session filter state)');
+  assert.ok(hits.pageBeforeContract, 'the page prime must happen BEFORE the contract AJAX');
   assert.equal(hits.detail, 0, `detail fetch must be SKIPPED for the promoted row (got ${hits.detail}: ${hits.detailUrls.join(', ')})`);
 });

@@ -66,6 +66,13 @@ export const LIST_PATH = process.env.FLEXWAYS_LIST_PATH || '/Helpers/funcionesAj
 // ---------------------------------------------------------------------------
 export const CONTRACT_LIST_PATH =
   process.env.FLEXWAYS_CONTRACT_LIST_PATH || '/Helpers/funcionesAjaxContratos.php';
+// The AJAX endpoint above reads its tablaActual/contratosAbiertos/idSede filter
+// from SERVER-SIDE SESSION STATE, which is set by first loading the list PAGE
+// (listadoCotizaciones.php) with those params in the URL. A fresh worker session
+// that hits the AJAX directly gets recordsTotal:null — so we GET this page first
+// to prime the session (verified live 2026-07-14). Env-overridable.
+export const CONTRACT_LIST_PAGE_PATH =
+  process.env.FLEXWAYS_CONTRACT_LIST_PAGE_PATH || '/Comercial/Reservas/listadoCotizaciones.php';
 export const DETAIL_PATH =
   process.env.FLEXWAYS_DETAIL_PATH || '/Comercial/Reservas/modificarReserva.php';
 
