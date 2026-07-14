@@ -436,6 +436,20 @@ test('extractSelectedOptionText: ignores data-selected / class="selected" false 
   assert.equal(extractSelectedOptionText(html, 'cbX'), 'Real');
 });
 
+test('extractSelectedOptionText: handles UNCLOSED <option> tags (Flexways cbCategoria — 2026-07-14)', () => {
+  // Flexways renders the category <select> WITHOUT </option> closing tags. The
+  // old regex required </option> and returned null for every real reservation
+  // (→ vehicleAcriss null → everything to MANUAL_REVIEW). Real shape:
+  const html = '<select name="cbCategoria" id="cbCategoria" class="form-control">'
+    + '<option value="-1"> Mostrar todo '
+    + '<option value="1" >Economico Base (EBMN)'
+    + '<option value="296"  selected>Intermediate US (ICAR)'
+    + '<option value="61" >Mini Van Auto (MVAR)'
+    + '</select>';
+  assert.equal(extractSelectedOptionText(html, 'cbCategoria'), 'Intermediate US (ICAR)');
+  assert.equal(extractAcriss(extractSelectedOptionText(html, 'cbCategoria')), 'ICAR');
+});
+
 test('CONTRACT_CHANNEL_FILTER defaults FAIL-CLOSED to [API] (Innovation fix)', async () => {
   // Fresh import with no env → must be ['API'], not import-all.
   const mod = await import('./flexways.constants.js');

@@ -665,7 +665,12 @@ export function extractSelectedOptionText(html, name) {
   const sm = selRe.exec(source);
   if (!sm) return null;
   const body = sm[1];
-  const optRe = /<option\b([^>]*)>([\s\S]*?)<\/option>/gi;
+  // Options may be UNCLOSED — Flexways' cbCategoria renders
+  // `<option value="1">Economico Base (EBMN)<option value="3">...` with NO
+  // </option> tag. Match the label as text up to the next tag, NOT up to a
+  // </option> that isn't there (that made this return null for every real
+  // reservation → vehicleAcriss null → everything to MANUAL_REVIEW). 2026-07-14.
+  const optRe = /<option\b([^>]*)>([^<]*)/gi;
   let om;
   while ((om = optRe.exec(body))) {
     // Match the `selected` boolean attr (bare or selected="selected") but NOT a
