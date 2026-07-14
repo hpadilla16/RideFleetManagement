@@ -59,6 +59,8 @@ import {
   TIME_ZONE,
   COL,
   CONTRACT_COL,
+  CONTRACT_COL_FROM_END,
+  ID_ALQUILER_RE,
   EXPECTED_COLUMN_COUNT,
   CONTRACT_CHANNEL_FILTER,
   DETAIL_FIELD,
@@ -472,6 +474,48 @@ function contractCell(rowObj, i) {
   return rowObj[i] ?? rowObj[String(i)] ?? '';
 }
 
+/** Count the numeric-keyed columns of a DataTables row (object or array). */
+function contractColCount(rowObj) {
+  if (rowObj == null) return 0;
+  if (Array.isArray(rowObj)) return rowObj.length;
+  let n = 0;
+  for (const k of Object.keys(rowObj)) { if (/^\d+$/.test(k)) n += 1; }
+  return n;
+}
+
+/**
+ * Read a cell by distance from the LAST column (1 = last). The contract list's
+ * leading columns shift by one depending on whether the portal includes the
+ * hidden idAlquiler column, but the trailing columns are stable — so we anchor
+ * from the end. See CONTRACT_COL_FROM_END.
+ */
+function contractCellFromEnd(rowObj, fromEnd) {
+  const n = contractColCount(rowObj);
+  const idx = n - fromEnd;
+  if (idx < 0) return '';
+  return contractCell(rowObj, idx);
+}
+
+/** Pull idAlquiler out of the actions column's hidden input. Stable across the
+ * 11/12-column shift (the numeric idAlquiler column itself is not). */
+function extractIdAlquilerFromRow(rowObj) {
+  const actions = String(contractCellFromEnd(rowObj, CONTRACT_COL_FROM_END.ACTIONS) ?? '');
+  const m = actions.match(ID_ALQUILER_RE);
+  return m ? m[1] : '';
+}
+
+/**
+ * Parse the first LATAM datetime found ANYWHERE in a cell (not anchored to the
+ * start). The pickup/Desde cell is compound — it leads with an ISO date label
+ * ("2026-07-13") before the real "DD/MM/YYYY HH:mm" value, which an anchored
+ * parser would miss.
+ */
+function latamAnywhereToUtc(cell, timeZone = TIME_ZONE) {
+  const txt = cellText(cell);
+  const m = txt.match(/\d{1,2}\/\d{1,2}\/\d{2,4}(?:[ T]\d{1,2}:\d{2}(?::\d{2})?)?/);
+  return m ? latamToUtc(m[0], timeZone) : null;
+}
+
 /**
  * Pull the ACRISS code out of a Flexways category label. Categories render as
  * "Nombre (ACRISS)" — e.g. "SUV Compact AT (CFAR)" → "CFAR". No 4-letter
@@ -507,25 +551,26 @@ export function parseContractList(payload, { timeZone = TIME_ZONE } = {}) {
   for (const rowObj of data) {
     if (rowObj == null || typeof rowObj !== 'object') { shortRows++; continue; }
 
-    const idAlquiler = cellText(contractCell(rowObj, CONTRACT_COL.ID_ALQUILER));
-    const externalRef = cellText(contractCell(rowObj, CONTRACT_COL.REF));
+    // Anchor from the END (stable) — idAlquiler comes from the actions HTML.
+    const idAlquiler = extractIdAlquilerFromRow(rowObj);
+    const externalRef = cellText(contractCellFromEnd(rowObj, CONTRACT_COL_FROM_END.REF));
     if (!idAlquiler) { missingId++; continue; } // no detail key → unusable
     if (!externalRef) continue;                 // a real row must carry a ref
 
-    const name = cellText(contractCell(rowObj, CONTRACT_COL.CUSTOMER)) || null;
+    const name = cellText(contractCellFromEnd(rowObj, CONTRACT_COL_FROM_END.CUSTOMER)) || null;
     const { firstName, lastName } = splitName(name);
 
     rows.push({
       idAlquiler,
       externalRef,
       ref: externalRef,
-      sede: cellText(contractCell(rowObj, CONTRACT_COL.SEDE)) || null,
-      // ⚠ pickupAt is col 3 ("fecha booking" in the recon) — see CONTRACT_COL.
-      pickupAt: latamToUtc(contractCell(rowObj, CONTRACT_COL.PICKUP_AT), timeZone),
-      dropoffAt: latamToUtc(contractCell(rowObj, CONTRACT_COL.DROPOFF_AT), timeZone),
-      pickupLocation: cellText(contractCell(rowObj, CONTRACT_COL.PICKUP_LOCATION)) || null,
-      dropoffLocation: cellText(contractCell(rowObj, CONTRACT_COL.DROPOFF_LOCATION)) || null,
-      channel: cellText(contractCell(rowObj, CONTRACT_COL.CHANNEL)) || null,
+      sede: cellText(contractCellFromEnd(rowObj, CONTRACT_COL_FROM_END.SEDE)) || null,
+      // pickup = Desde (compound cell, ISO label + LATAM datetime); return = Hasta.
+      pickupAt: latamAnywhereToUtc(contractCellFromEnd(rowObj, CONTRACT_COL_FROM_END.PICKUP_AT), timeZone),
+      dropoffAt: latamAnywhereToUtc(contractCellFromEnd(rowObj, CONTRACT_COL_FROM_END.DROPOFF_AT), timeZone),
+      pickupLocation: cellText(contractCellFromEnd(rowObj, CONTRACT_COL_FROM_END.PICKUP_LOCATION)) || null,
+      dropoffLocation: cellText(contractCellFromEnd(rowObj, CONTRACT_COL_FROM_END.DROPOFF_LOCATION)) || null,
+      channel: cellText(contractCellFromEnd(rowObj, CONTRACT_COL_FROM_END.CHANNEL)) || null,
       customerName: name,
       customerFirstName: firstName,
       customerLastName: lastName,

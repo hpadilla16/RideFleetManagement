@@ -270,46 +270,64 @@ test('extractAcriss pulls the 4-letter code from "Nombre (ACRISS)"', () => {
 // parseContractList — DataTables ARRAY-OF-OBJECTS carrying idAlquiler
 // ---------------------------------------------------------------------------
 
-function contractPayload() {
-  // Shape CONFIRMED LIVE 2026-07-14 (funcionesAjaxContratos.php, sede 383).
-  // ARRAY-OF-OBJECTS keyed "0".."11": col 0 = idAlquiler, col 3 = pickup (Desde),
-  // col 4 = return (Hasta) — cross-checked against the detail fechaHoraDesde/Hasta.
+// Build a contract row the way funcionesAjaxContratos.php actually returns it
+// (verified live 2026-07-14). idAlquiler lives ONLY in the actions HTML (hidden
+// input); the leading columns shift by one between the 11-col and 12-col
+// layouts, so `withIdCol` models either. Everything from sede → last is stable.
+function actionsCell(idAlquiler) {
+  return idAlquiler
+    ? `<div class="list-icons"><input type="hidden" name="idAlquiler" value="${idAlquiler}"><a href="#">Modificar</a></div>`
+    : '<div class="list-icons"><a href="#">Modificar</a></div>'; // no id → unusable
+}
+function contractRow(f, withIdCol) {
+  // stable tail, sede → last: [sede, pickup(Desde), return(Hasta), pickupLoc,
+  // dropoffLoc, channel, customer, (empty), ref, actions]
+  const tail = [
+    f.sede ?? 'Flexways Orlando - Vista East',
+    f.pickup,                                                   // compound Desde cell
+    f.dropoff,                                                  // single Hasta cell
+    f.pickupLoc ?? 'Aeropuerto Internacional de Orlando',
+    f.dropoffLoc ?? 'Aeropuerto Internacional de Orlando',
+    f.channel ?? 'API',
+    f.customer ?? '',
+    '',
+    f.ref ?? '',
+    actionsCell(f.idAlquiler),
+  ];
+  const cells = withIdCol ? [f.idAlquiler ?? '', 'P D', ...tail] : ['P D', ...tail];
+  const o = {};
+  cells.forEach((v, i) => { o[i] = v; });
+  return o;
+}
+function contractPayload(withIdCol = false) {
   return {
     draw: 1,
     recordsTotal: 3,
     recordsFiltered: 3,
     data: [
-      {
-        0: '485160',
-        1: 'P D',
-        2: 'Flexways Orlando - Vista East',
-        3: '19/07/2026 15:00:00',   // fecha PICKUP (Desde)
-        4: '21/07/2026 10:00:00',   // fecha devolución (Hasta)
-        5: 'Aeropuerto Internacional de Orlando',
-        6: 'Aeropuerto Internacional de Orlando',
-        7: 'API',
-        8: 'Alfredo Reyes',
-        9: '',
-        10: 'QJDK07',
-        11: '<a class="btn" href="#">Ver</a>',
-      },
-      // no idAlquiler → skipped (unusable, no detail key)
-      {
-        0: '   ', 1: 'P D', 2: 'Flexways Miami', 3: '20/07/2026 09:00:00',
-        4: '22/07/2026 09:00:00', 5: 'MIA', 6: 'MIA', 7: 'API', 8: 'No Id Person',
-        9: '', 10: 'NOID11', 11: '',
-      },
+      contractRow({
+        idAlquiler: '485160', ref: 'QJDK07', sede: 'Flexways Orlando - Vista East',
+        pickup: '2026-07-19</label> 19/07/2026 15:00:00',   // Desde (compound, ISO label + LATAM)
+        dropoff: '21/07/2026 10:00:00',                      // Hasta (single)
+        channel: 'API', customer: 'Alfredo Reyes',
+      }, withIdCol),
+      // actions HTML carries NO idAlquiler input → skipped (unusable)
+      contractRow({
+        idAlquiler: '', ref: 'NOID11', sede: 'Flexways Miami',
+        pickup: '2026-07-20</label> 20/07/2026 09:00:00', dropoff: '22/07/2026 09:00:00',
+        pickupLoc: 'MIA', dropoffLoc: 'MIA', channel: 'API', customer: 'No Id Person',
+      }, withIdCol),
       // second good row (Web channel — used by the channel-filter test)
-      {
-        0: '485161', 1: 'P D', 2: 'Flexways Miami', 3: '21/07/2026 12:30:00',
-        4: '24/07/2026 12:30:00', 5: 'MIA', 6: 'MIA', 7: 'Web', 8: 'Ana Ruiz',
-        9: '', 10: 'ANARZ9', 11: '',
-      },
+      contractRow({
+        idAlquiler: '485161', ref: 'ANARZ9', sede: 'Flexways Miami',
+        pickup: '2026-07-21</label> 21/07/2026 12:30:00', dropoff: '24/07/2026 12:30:00',
+        pickupLoc: 'MIA', dropoffLoc: 'MIA', channel: 'Web', customer: 'Ana Ruiz',
+      }, withIdCol),
     ],
   };
 }
 
-test('parseContractList: maps object-keyed columns, keeps idAlquiler, skips id-less rows', () => {
+test('parseContractList: anchors from the end, pulls idAlquiler from actions HTML, skips id-less rows', () => {
   const rows = parseContractList(contractPayload());
   assert.equal(rows.length, 2); // 3 rows, 1 has no idAlquiler
   const [a, b] = rows;
@@ -332,6 +350,21 @@ test('parseContractList: maps object-keyed columns, keeps idAlquiler, skips id-l
   assert.equal(rows.diagnostics.parsedRows, 2);
   assert.equal(rows.diagnostics.missingId, 1);
   assert.equal(rows.diagnostics.emptyGridAnomaly, false);
+});
+
+test('parseContractList: identical result whether the portal ships 11 or 12 columns (idAlquiler col present or not)', () => {
+  const eleven = parseContractList(contractPayload(false)); // no leading idAlquiler column
+  const twelve = parseContractList(contractPayload(true));  // leading idAlquiler column present
+  assert.equal(eleven.length, 2);
+  assert.equal(twelve.length, 2);
+  for (const key of ['idAlquiler', 'externalRef', 'sede', 'channel', 'customerName', 'pickupLocation']) {
+    assert.equal(eleven[0][key], twelve[0][key], `mismatch on ${key} across layouts`);
+  }
+  assert.equal(eleven[0].pickupAt.toISOString(), twelve[0].pickupAt.toISOString());
+  assert.equal(eleven[0].dropoffAt.toISOString(), twelve[0].dropoffAt.toISOString());
+  // idAlquiler resolved from the actions HTML in BOTH layouts (not a fixed column)
+  assert.equal(twelve[0].idAlquiler, '485160');
+  assert.equal(eleven[0].idAlquiler, '485160');
 });
 
 test('parseContractList: accepts a JSON string + flags truncation when page < recordsTotal', () => {

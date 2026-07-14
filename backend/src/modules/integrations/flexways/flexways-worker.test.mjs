@@ -55,7 +55,9 @@ function contractPayload() {
       0: '485160', 1: 'AR', 2: 'Flexways Orlando - Vista East',
       3: '19/07/2026 15:00:00', 4: '21/07/2026 10:00:00',
       5: 'Aeropuerto Internacional de Orlando', 6: 'Aeropuerto Internacional de Orlando',
-      7: 'API', 8: 'Alfredo Reyes', 9: '', 10: REF, 11: '',
+      7: 'API', 8: 'Alfredo Reyes', 9: '', 10: REF,
+      // idAlquiler is delivered inside the actions HTML (parser anchors from the end)
+      11: '<div class="list-icons"><input type="hidden" name="idAlquiler" value="485160"><a href="#">Modificar</a></div>',
     }],
   };
 }

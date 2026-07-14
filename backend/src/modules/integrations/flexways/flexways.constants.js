@@ -164,6 +164,42 @@ export const CONTRACT_COL = Object.freeze({
 });
 export const EXPECTED_CONTRACT_COLUMN_COUNT = 12;
 
+// ---------------------------------------------------------------------------
+// The LEFT-anchored CONTRACT_COL indices above are NOT stable: the portal's
+// DataTables sometimes prepends a hidden idAlquiler column (12 cols) and
+// sometimes omits it (11 cols), shifting every left index by one — so the
+// worker's fresh session and the browser can see different layouts for the same
+// request (verified live 2026-07-14). The TRAILING columns are stable, so the
+// parser anchors from the END. Offsets are distance-from-last (1 = last column).
+//   last(1)   = actions (HTML dropdown; carries the idAlquiler hidden input)
+//   last-1(2) = ref (e.g. 49AGTH)
+//   last-2(3) = (empty)
+//   last-3(4) = customer name
+//   last-4(5) = channel ("API")
+//   last-5(6) = dropoff location
+//   last-6(7) = pickup location
+//   last-7(8) = return / Hasta  (single LATAM datetime)
+//   last-8(9) = pickup / Desde  (compound cell: ISO date label + LATAM datetime)
+//   last-9(10)= sede
+// ---------------------------------------------------------------------------
+export const CONTRACT_COL_FROM_END = Object.freeze({
+  ACTIONS: 1,
+  REF: 2,
+  CUSTOMER: 4,
+  CHANNEL: 5,
+  DROPOFF_LOCATION: 6,
+  PICKUP_LOCATION: 7,
+  DROPOFF_AT: 8,
+  PICKUP_AT: 9,
+  SEDE: 10,
+});
+
+// idAlquiler (the detail-page key) is delivered ONLY inside the actions column,
+// as a hidden input `<input ... name="idAlquiler" value="485556">`. This is the
+// single positionally-stable place it appears regardless of the 11/12-col shift.
+// Verified live 2026-07-14. Exported for the parser + tests.
+export const ID_ALQUILER_RE = /idAlquiler["']\s+value=["'](\d+)["']/i;
+
 // Which contract-list channels to import. FAIL-CLOSED default = ['API'] (only
 // affiliate bookings) — funcionesAjaxContratos carries a `canal` column BECAUSE
 // it also holds walk-in/counter/Web contracts, and this integration only wants
