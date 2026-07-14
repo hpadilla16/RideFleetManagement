@@ -45,8 +45,8 @@
  *                                              needsReview, failureReason? }
  *   GET   /locations                       -> { rows: [{ id, externalSede, locationId, enabled,
  *                                              lookbackDays, lookaheadDays, effectiveWindow, location }] }
- *   POST  /locations     { externalSede, locationId, enabled?, lookbackDays?, lookaheadDays? }
- *   PUT   /locations/:id { locationId?, externalSede?, enabled?, lookbackDays?, lookaheadDays? }
+ *   POST  /locations     { idSede, locationId, enabled?, lookbackDays?, lookaheadDays? }
+ *   PUT   /locations/:id { locationId?, idSede?, enabled?, lookbackDays?, lookaheadDays? }
  *   POST  /locations/:id/toggle { enabled }
  *   DELETE /locations/:id
  */
@@ -336,7 +336,7 @@ export function FlexwaysIntegrationPanel({ token, me, isSuper, isAdmin, tenantNa
     try {
       const res = await api(
         scoped('/api/admin/integrations/flexways/locations'),
-        { method: 'POST', body: JSON.stringify({ externalSede: sede, locationId: newLocationId, enabled: true }) },
+        { method: 'POST', body: JSON.stringify({ idSede: sede, locationId: newLocationId, enabled: true }) },
         token
       );
       if (res?.ok) {
