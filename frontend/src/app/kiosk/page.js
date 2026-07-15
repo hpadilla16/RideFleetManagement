@@ -1003,12 +1003,26 @@ function IdScreen({ t, busy, err, verifyResult, clearVerify, track, onExtract, o
     }
     streamRef.current = out.stream;
     setCameraOn(true);
+    // Best-effort immediate attach (video may already be mounted on retakes).
     setTimeout(() => {
-      if (videoRef.current && streamRef.current) {
+      if (videoRef.current && streamRef.current && videoRef.current.srcObject !== streamRef.current) {
         videoRef.current.srcObject = streamRef.current;
         videoRef.current.play().catch(() => {});
       }
     }, 0);
+  }, []);
+
+  // iPad black-video fix: the <video> renders conditionally on cameraOn, and
+  // the setTimeout(0) above can fire BEFORE React commits it on slow WebKit —
+  // videoRef.current is null, the attach silently skips, and the guest sees a
+  // live track feeding nothing (black box). A callback ref attaches the stream
+  // at the exact moment the node mounts — no race possible.
+  const attachVideo = useCallback((node) => {
+    videoRef.current = node;
+    if (node && streamRef.current && node.srcObject !== streamRef.current) {
+      node.srcObject = streamRef.current;
+      node.play().catch(() => {});
+    }
   }, []);
 
   // Camera lifecycle: FULL teardown outside camera/countdown and on unmount
@@ -1168,7 +1182,7 @@ function IdScreen({ t, busy, err, verifyResult, clearVerify, track, onExtract, o
                 // black box, never a 0-height invisible element (iPad debug).
                 // eslint-disable-next-line jsx-a11y/media-has-caption
                 <video
-                  ref={videoRef}
+                  ref={attachVideo}
                   muted
                   playsInline
                   style={{ width: '100%', minHeight: 240, background: '#000', transform: 'scaleX(-1)' }}
@@ -1411,13 +1425,23 @@ function SelfieScreen({ t, busy, err, selfie, setSelfie, verifyResult, onSubmit,
     }
     streamRef.current = out.stream;
     setCameraOn(true);
-    // Wait a tick for the <video> to render.
+    // Best-effort immediate attach (element may already be mounted).
     setTimeout(() => {
-      if (videoRef.current && streamRef.current) {
+      if (videoRef.current && streamRef.current && videoRef.current.srcObject !== streamRef.current) {
         videoRef.current.srcObject = streamRef.current;
         videoRef.current.play().catch(() => {});
       }
     }, 0);
+  }, []);
+
+  // iPad black-video fix — same callback-ref attach as the ID step: the
+  // conditional <video> can mount AFTER the setTimeout(0) on slow WebKit.
+  const attachVideo = useCallback((node) => {
+    videoRef.current = node;
+    if (node && streamRef.current && node.srcObject !== streamRef.current) {
+      node.srcObject = streamRef.current;
+      node.play().catch(() => {});
+    }
   }, []);
 
   useEffect(() => {
@@ -1531,7 +1555,7 @@ function SelfieScreen({ t, busy, err, selfie, setSelfie, verifyResult, onSubmit,
           // a visible black circle, never an empty frame (iPad debug).
           // eslint-disable-next-line jsx-a11y/media-has-caption
           <video
-            ref={videoRef}
+            ref={attachVideo}
             muted
             playsInline
             style={{ transform: 'scaleX(-1)', background: '#000' }}

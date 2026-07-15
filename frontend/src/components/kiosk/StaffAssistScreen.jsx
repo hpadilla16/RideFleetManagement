@@ -362,12 +362,24 @@ function PhotoBox({ t, label, value, active, onOpen, onCaptured, onCancel }) {
     }
     streamRef.current = out.stream;
     setCameraOn(true);
+    // Best-effort immediate attach (element may already be mounted).
     setTimeout(() => {
-      if (videoRef.current && streamRef.current) {
+      if (videoRef.current && streamRef.current && videoRef.current.srcObject !== streamRef.current) {
         videoRef.current.srcObject = streamRef.current;
         videoRef.current.play().catch(() => {});
       }
     }, 0);
+  }, []);
+
+  // iPad black-video fix (same as the guest screens): the conditional <video>
+  // can mount AFTER the setTimeout(0) on slow WebKit — the callback ref
+  // attaches the stream at mount time, race-free.
+  const attachVideo = useCallback((node) => {
+    videoRef.current = node;
+    if (node && streamRef.current && node.srcObject !== streamRef.current) {
+      node.srcObject = streamRef.current;
+      node.play().catch(() => {});
+    }
   }, []);
 
   // Opening the box is itself a tap — the tap handler below calls startCam
@@ -411,7 +423,7 @@ function PhotoBox({ t, label, value, active, onOpen, onCaptured, onCancel }) {
             // never a 0-height invisible element (iPad debug).
             // eslint-disable-next-line jsx-a11y/media-has-caption
             <video
-              ref={videoRef}
+              ref={attachVideo}
               muted
               playsInline
               style={{ width: '100%', minHeight: 140, background: '#000', transform: 'scaleX(-1)' }}
