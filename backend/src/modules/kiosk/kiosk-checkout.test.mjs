@@ -16,7 +16,11 @@ import {
   kioskCheckoutService,
   namesMatch,
   KIOSK_DEFAULT_MIN_RENTAL_AGE,
+  MAX_ID_EXTRACTS_PER_SESSION,
+  MAX_ID_EXTRACTS_PER_DEVICE_PER_HOUR,
+  resetExtractRateTracking,
 } from './kiosk-checkout.service.js';
+import { MAX_SESSION_EVENTS } from './kiosk-session.service.js';
 import { kioskSessionService, ESCALATE_REASONS } from './kiosk-session.service.js';
 import { sectionsForAgreement } from '../checkout-session/terms-content.js';
 import { customerInspectionService } from '../customer-inspection/customer-inspection.service.js';
@@ -244,6 +248,7 @@ async function rejects(promise, { status, code } = {}) {
 
 beforeEach(() => {
   installStubs();
+  resetExtractRateTracking();
   delete process.env.KIOSK_PAYMENT_SANDBOX;
   delete process.env.INSPECTION_PHOTOS_STORAGE_ENABLED;
 });
@@ -879,4 +884,237 @@ test('sign resumes after a mid-cascade failure with zero double side-effects; po
     kioskCheckoutService.sign('ks1', DEVICE, { sectionInitials: allInitials(), signature: SIGNATURE }),
     { status: 409, code: 'CHECKOUT_TERMINAL' },
   );
+});
+
+// ---------------------------------------------------------------------------
+// B3d: id-photo-extract (advisory OCR — primary ID path)
+// ---------------------------------------------------------------------------
+
+function jpegPhoto(bytes = 4096) {
+  const buf = Buffer.alloc(bytes, 0x33);
+  buf[0] = 0xff; buf[1] = 0xd8; buf[2] = 0xff;
+  return `data:image/jpeg;base64,${buf.toString('base64')}`;
+}
+
+function stubAnthropic(t, payload) {
+  const prevFetch = globalThis.fetch;
+  const prevKey = process.env.ANTHROPIC_API_KEY;
+  const calls = [];
+  process.env.ANTHROPIC_API_KEY = 'env-test-key';
+  globalThis.fetch = async (url, options) => {
+    calls.push({ url, options });
+    return {
+      ok: true,
+      status: 200,
+      json: async () => ({ content: [{ type: 'text', text: JSON.stringify(payload) }] }),
+      text: async () => '',
+    };
+  };
+  t.after(() => {
+    globalThis.fetch = prevFetch;
+    if (prevKey === undefined) delete process.env.ANTHROPIC_API_KEY;
+    else process.env.ANTHROPIC_API_KEY = prevKey;
+  });
+  return calls;
+}
+
+test('id-photo-extract happy path: advisory fields returned, telemetry PII-free, nothing stamped', async (t) => {
+  seedKioskSession();
+  seedWorld();
+  const calls = stubAnthropic(t, {
+    fields: {
+      firstName: 'Maria', lastName: 'Gonzalez', dateOfBirth: '1990-03-15',
+      licenseNumber: 'D123-456-78-901', licenseState: 'fl', licenseExpiry: '2030-01-01',
+    },
+    confidence: 92,
+    notes: null,
+  });
+
+  const result = await kioskCheckoutService.idPhotoExtract('ks1', DEVICE, { photo: jpegPhoto() });
+
+  assert.deepEqual(result.fields, {
+    firstName: 'Maria', lastName: 'Gonzalez', dateOfBirth: '1990-03-15',
+    licenseNumber: 'D123-456-78-901', licenseState: 'FL', licenseExpiry: '2030-01-01',
+  });
+  assert.equal(result.confidence, 92);
+  assert.deepEqual(result.warnings, []);
+  assert.equal(result.attemptsRemaining, 4);
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].url, 'https://api.anthropic.com/v1/messages');
+  assert.equal(JSON.parse(calls[0].options.body).model, 'claude-haiku-4-5-20251001');
+
+  // ADVISORY: nothing stamped, nothing written to the customer
+  const session = db.sessions[0];
+  assert.equal(session.idVerifiedAt, null);
+  assert.equal(db.customers[0].licenseNumber, null);
+
+  // telemetry counts only — never the extracted PII
+  const event = session.eventsJson.find((e) => e.event === 'ID_PHOTO_EXTRACT');
+  assert.deepEqual(event.data, { ok: true, nullFields: 0, confidence: 92 });
+  assert.ok(!JSON.stringify(session.eventsJson).includes('Gonzalez'));
+});
+
+test('id-photo-extract: unreadable fields pass through as nulls with warnings', async (t) => {
+  seedKioskSession();
+  seedWorld();
+  stubAnthropic(t, {
+    fields: {
+      firstName: 'Maria', lastName: null, dateOfBirth: null,
+      licenseNumber: null, licenseState: null, licenseExpiry: null,
+    },
+    confidence: 35,
+    notes: 'photo is blurry; only the given name is legible',
+  });
+
+  const result = await kioskCheckoutService.idPhotoExtract('ks1', DEVICE, { photo: jpegPhoto() });
+  assert.equal(result.fields.firstName, 'Maria');
+  assert.equal(result.fields.lastName, null);
+  assert.equal(result.fields.licenseExpiry, null);
+  assert.ok(result.warnings.includes('UNREADABLE_FIELDS'));
+  assert.ok(result.warnings.includes('LOW_CONFIDENCE'));
+  assert.equal(db.sessions[0].eventsJson.at(-1).data.nullFields, 5);
+});
+
+test('id-photo-extract: cost cap at 5 → 429 EXTRACT_LIMIT + escalateSuggested, provider never called', async (t) => {
+  seedKioskSession({
+    eventsJson: Array.from({ length: 5 }, () => ({ at: 'x', step: 'ID', event: 'ID_PHOTO_EXTRACT', data: { ok: true } })),
+  });
+  seedWorld();
+  const calls = stubAnthropic(t, {});
+
+  const err = await rejects(
+    kioskCheckoutService.idPhotoExtract('ks1', DEVICE, { photo: jpegPhoto() }),
+    { status: 429, code: 'EXTRACT_LIMIT' },
+  );
+  assert.equal(err.details.escalateSuggested, true);
+  assert.equal(calls.length, 0, 'no provider call past the cap');
+});
+
+test('id-photo-extract: no tenant key + no env key → 503 OCR_UNAVAILABLE; junk photo → 422; binding 404', async (t) => {
+  const prevKey = process.env.ANTHROPIC_API_KEY;
+  delete process.env.ANTHROPIC_API_KEY;
+  const prevFetch = globalThis.fetch;
+  let called = 0;
+  globalThis.fetch = async () => { called += 1; throw new Error('must not be called'); };
+  t.after(() => {
+    globalThis.fetch = prevFetch;
+    if (prevKey !== undefined) process.env.ANTHROPIC_API_KEY = prevKey;
+  });
+
+  seedKioskSession();
+  seedWorld();
+
+  await rejects(
+    kioskCheckoutService.idPhotoExtract('ks1', DEVICE, { photo: jpegPhoto() }),
+    { status: 503, code: 'OCR_UNAVAILABLE' },
+  );
+
+  // junk photo rejected BEFORE any key/provider logic
+  await rejects(
+    kioskCheckoutService.idPhotoExtract('ks1', DEVICE, {
+      photo: `data:image/png;base64,${Buffer.from('not an image').toString('base64')}`,
+    }),
+    { status: 422, code: 'INVALID_PHOTO' },
+  );
+  await rejects(
+    kioskCheckoutService.idPhotoExtract('ks1', DEVICE, {}),
+    { status: 422, code: 'MISSING_PHOTO' },
+  );
+
+  // session-device binding like every other endpoint
+  await rejects(
+    kioskCheckoutService.idPhotoExtract('ks1', { ...DEVICE, id: 'dev2' }, { photo: jpegPhoto() }),
+    { status: 404, code: 'SESSION_NOT_FOUND' },
+  );
+  assert.equal(called, 0);
+});
+
+test('id-photo-extract: provider failure burns an attempt and returns 502 with attemptsRemaining', async (t) => {
+  seedKioskSession();
+  seedWorld();
+  const prevFetch = globalThis.fetch;
+  const prevKey = process.env.ANTHROPIC_API_KEY;
+  process.env.ANTHROPIC_API_KEY = 'env-test-key';
+  globalThis.fetch = async () => ({ ok: false, status: 529, json: async () => ({}), text: async () => 'overloaded' });
+  t.after(() => {
+    globalThis.fetch = prevFetch;
+    if (prevKey === undefined) delete process.env.ANTHROPIC_API_KEY;
+    else process.env.ANTHROPIC_API_KEY = prevKey;
+  });
+
+  const err = await rejects(
+    kioskCheckoutService.idPhotoExtract('ks1', DEVICE, { photo: jpegPhoto() }),
+    { status: 502, code: 'EXTRACT_FAILED' },
+  );
+  assert.equal(err.details.attemptsRemaining, 4);
+  assert.deepEqual(db.sessions[0].eventsJson.at(-1).data, { ok: false }, 'failed attempt still counted');
+});
+
+// ---------------------------------------------------------------------------
+// B3c/B3d review M1: the OCR cap cannot be evaded
+// ---------------------------------------------------------------------------
+
+test('id-photo-extract M1: a full eventsJson (frozen counter) fails CLOSED — 429, provider never called', async (t) => {
+  seedKioskSession({
+    // filling the event log via POST /events used to freeze the extract
+    // count below 5 → unlimited provider calls
+    eventsJson: Array.from({ length: MAX_SESSION_EVENTS }, (_, i) => ({ at: 'x', step: 'ID', event: `SPAM_${i}`, data: null })),
+  });
+  seedWorld();
+  const calls = stubAnthropic(t, {});
+
+  const err = await rejects(
+    kioskCheckoutService.idPhotoExtract('ks1', DEVICE, { photo: jpegPhoto() }),
+    { status: 429, code: 'EXTRACT_LIMIT' },
+  );
+  assert.equal(err.details.escalateSuggested, true);
+  assert.equal(calls.length, 0, 'provider never called with a frozen counter');
+});
+
+test('id-photo-extract M1: extraction requires an attached reservation (kills mint-and-extract)', async (t) => {
+  seedKioskSession({ reservationId: null });
+  seedWorld();
+  const calls = stubAnthropic(t, {});
+
+  await rejects(
+    kioskCheckoutService.idPhotoExtract('ks1', DEVICE, { photo: jpegPhoto() }),
+    { status: 422, code: 'NO_RESERVATION_ATTACHED' },
+  );
+  assert.equal(calls.length, 0);
+});
+
+test('id-photo-extract M1: per-DEVICE hourly bucket caps across sessions; fresh device unaffected', async (t) => {
+  seedWorld();
+  const payload = {
+    fields: { firstName: 'M', lastName: 'G', dateOfBirth: '1990-03-15', licenseNumber: 'D1', licenseState: 'FL', licenseExpiry: '2030-01-01' },
+    confidence: 90,
+    notes: null,
+  };
+  const calls = stubAnthropic(t, payload);
+
+  // burn the device budget across fresh sessions (mint-burn-repeat)
+  const sessionsNeeded = Math.ceil(MAX_ID_EXTRACTS_PER_DEVICE_PER_HOUR / MAX_ID_EXTRACTS_PER_SESSION);
+  for (let s = 0; s < sessionsNeeded; s += 1) {
+    seedKioskSession({ id: `ksA${s}` });
+    for (let i = 0; i < MAX_ID_EXTRACTS_PER_SESSION; i += 1) {
+      // eslint-disable-next-line no-await-in-loop
+      await kioskCheckoutService.idPhotoExtract(`ksA${s}`, DEVICE, { photo: jpegPhoto() });
+    }
+  }
+  assert.equal(calls.length, MAX_ID_EXTRACTS_PER_DEVICE_PER_HOUR);
+
+  // a brand-new session on the SAME device is now capped — per-session slots don't help
+  seedKioskSession({ id: 'ksFresh' });
+  const err = await rejects(
+    kioskCheckoutService.idPhotoExtract('ksFresh', DEVICE, { photo: jpegPhoto() }),
+    { status: 429, code: 'EXTRACT_LIMIT' },
+  );
+  assert.equal(err.details.escalateSuggested, true);
+  assert.equal(calls.length, MAX_ID_EXTRACTS_PER_DEVICE_PER_HOUR, 'no provider call past the device budget');
+
+  // a DIFFERENT device at the counter still works
+  seedKioskSession({ id: 'ksDev2', deviceId: 'dev2' });
+  const result = await kioskCheckoutService.idPhotoExtract('ksDev2', { ...DEVICE, id: 'dev2' }, { photo: jpegPhoto() });
+  assert.equal(result.fields.firstName, 'M');
+  assert.equal(calls.length, MAX_ID_EXTRACTS_PER_DEVICE_PER_HOUR + 1);
 });

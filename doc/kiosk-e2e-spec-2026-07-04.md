@@ -230,6 +230,33 @@ Admin (auth normal + `requireModuleAccess('kiosk')`):
   (selfie se guarda con retención/disclosure definidos; face-match = v2). Tablet
   hardening: kiosk mode pinned/Guided Access. GATE: el downsell (estrategia #4) NO se
   construye sin su propio mockup aprobado por Hector — fuera de B3.
+- **B3c — Staff Assist en el kiosk** (pedido de Hector 2026-07-06, smoke iPad; mockup
+  K-S1..S3): guest trancado en ID scan → staff se autentica EN el kiosk → teclea el ID a
+  mano + foto FRENTE y ATRÁS de la licencia (ambas obligatorias) → bypass auditado del
+  scan → la sesión continúa. Diseño: auth staff reusa el **lock-PIN existente**
+  (`/lock-pin/verify`) — el kiosk lista staff del tenant (nombres solamente) → pick +
+  PIN → endpoint device-authed verifica contra el hash del user (rate-limit 5/min +
+  lockout por device, mismo patrón del lookup). El override: guarda campos + fotos
+  (patrón de ID photos existente), stampa `idVerifiedAt` con `method: 'STAFF_OVERRIDE'`
+  + `staffUserId`, AuditLog, telemetría STAFF_ASSIST, saca la sesión de ESCALATED →
+  IN_PROGRESS. **Las reglas NO se relajan**: edad/expiry se validan server-side igual
+  (underage = hard stop aunque sea staff). El grant de staff es single-session y expira
+  al continuar. Camera fixes iPad/WebKit (beta.288): facingMode frontal en kiosk,
+  teardown de stream antes del selfie, upload siempre visible, hint de upload a los 12s.
+- **B3d — ID por FOTO + OCR (decisión Hector 2026-07-15, tras re-test iPad: el scan
+  pdf417 sigue problemático en tablet)**: el path PRIMARIO de ID pasa a foto del FRENTE
+  de la licencia. Flujo: instrucción "aguanta tu ID frente a la cámara" → botón "estoy
+  listo" → countdown de 5 segundos (dígitos grandes) → captura del frame crudo → POST
+  `/api/kiosk/sessions/:id/id-photo-extract` {photo} → extracción de texto con el patrón
+  de **citation-ocr.extract.js** (Claude vision, API key del tenant en Settings + fallback
+  ANTHROPIC_API_KEY, modelo haiku default) → pantalla de confirmación al cliente con los
+  campos extraídos ("¿Está correcto?") → Confirmar llama al verify-id EXISTENTE con
+  fields + licensePhoto (misma validación server-side: name-match vs reserva, edad,
+  expiry, DOB plausible; la foto va al profile del cliente vía el write-through existente
+  y los datos llenan la reserva) → selfie como hoy. Retake ilimitado visual, extracción
+  capeada por sesión (~5 intentos, costo de API) con fallback a staff-assist. El scan de
+  barcode queda como opción secundaria (Android kiosks). La extracción es ADVISORY —
+  nunca stampa nada; solo verify-id stampa tras confirmar.
 - **B4 — Walk-up**: availability + walkup-reservation + quote (K9). Tests: no crea
   reserva sin clase disponible; precios = pricing service.
 - **B5 — Pago real (MONEY, gate Hector doble)**: (pre-código) resolver contra docs iPOS
@@ -291,6 +318,16 @@ integrar**. Al mergear (DESPUÉS de que Hector apruebe aquel fix):
    (kiosk-offers.service.js:319) — compatible con el count del policy.
 Regla dura: toll billing = código de dinero → diff mínimo + aprobación explícita de
 Hector antes de deploy.
+
+## Acks de producto B3c/B3d (Hector, 2026-07-15)
+- **A1**: staff-verify SIN name-match automático (paridad counter + más controles: PIN
+  bcrypt, 2 fotos obligatorias, doble AuditLog, STAFF_OVERRIDE persistido; edad/expiry
+  siguen hard-stop).
+- **A2**: selfie se SALTA en sesiones STAFF_OVERRIDE (empleado presente autenticado >
+  liveness de selfie); el disclosure no promete selfie en ese path.
+- **A3**: foto de licencia → API de Anthropic para extracción APROBADO (precedente
+  citation-OCR, misma key del tenant; cero PII en telemetría/logs; disclosure del paso
+  de ID menciona procesamiento automático del documento).
 
 ## Decisiones (Hector, 2026-07-04; sign-offs: Graphic Design OK + Innovation OK)
 1. **Mockup Rev 2 APROBADO** — gate de build cumplido; arranca B1. (Downsell K5b tendrá

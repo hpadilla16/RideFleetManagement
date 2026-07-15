@@ -55,14 +55,20 @@ CREATE TABLE IF NOT EXISTS "KioskSession" (
   "escalatedReason"   TEXT,
   "eventsJson"        JSONB NOT NULL,
   "idVerifiedAt"      TIMESTAMP(3),
+  "idVerifyMethod"    TEXT,
+  "assistUserId"      TEXT,
+  "assistGrantedAt"   TIMESTAMP(3),
   "lastActivityAt"    TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
   "startedAt"         TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
   "endedAt"           TIMESTAMP(3),
   CONSTRAINT "KioskSession_pkey" PRIMARY KEY ("id")
 );
--- Server-recorded ID-verify stamp (B3a review M2). Guarded ADD so a DB that
--- ran an earlier paste of this migration converges on re-run.
+-- Server-recorded ID-verify stamp (B3a review M2) + Staff Assist grant (B3c).
+-- Guarded ADDs so a DB that ran an earlier paste of this migration converges.
 ALTER TABLE "KioskSession" ADD COLUMN IF NOT EXISTS "idVerifiedAt" TIMESTAMP(3);
+ALTER TABLE "KioskSession" ADD COLUMN IF NOT EXISTS "idVerifyMethod" TEXT;
+ALTER TABLE "KioskSession" ADD COLUMN IF NOT EXISTS "assistUserId" TEXT;
+ALTER TABLE "KioskSession" ADD COLUMN IF NOT EXISTS "assistGrantedAt" TIMESTAMP(3);
 CREATE INDEX IF NOT EXISTS "KioskSession_tenantId_deviceId_startedAt_idx" ON "KioskSession" ("tenantId","deviceId","startedAt");
 CREATE INDEX IF NOT EXISTS "KioskSession_tenantId_outcome_lastActivityAt_idx" ON "KioskSession" ("tenantId","outcome","lastActivityAt");
 CREATE INDEX IF NOT EXISTS "KioskSession_reservationId_idx" ON "KioskSession" ("reservationId");

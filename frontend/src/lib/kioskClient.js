@@ -89,7 +89,14 @@ async function kioskFetch(path, { method = 'GET', body, tokenless = false } = {}
   try { data = await res.json(); } catch { data = null; }
 
   if (!res.ok) {
-    if (res.status === 401 && !tokenless) {
+    // 401 handling is an explicit ALLOWLIST: only the codes below are
+    // application-level 401s that surface as normal errors (a wrong staff
+    // PIN in B3c must never wipe the pairing). Everything else — including
+    // the device-auth middleware's code-less 401 AND any future middleware
+    // 401 that grows a code — still unpairs, because only allowlisted codes
+    // pass through. Fail-closed by design.
+    const APP_LEVEL_401 = ['INVALID_PIN'];
+    if (res.status === 401 && !tokenless && !APP_LEVEL_401.includes(data?.code)) {
       // Rotated / revoked / never-paired token → wipe and force re-pairing.
       clearDevice();
       throw new KioskClientError(data?.error || 'Device token rejected', {
@@ -167,9 +174,53 @@ export function assignVehicle(sessionId) {
   });
 }
 
+/**
+ * B3d primary ID path: POST /api/kiosk/sessions/:id/id-photo-extract {photo}
+ * → { fields: {firstName,lastName,dateOfBirth,licenseNumber,licenseState,
+ * licenseExpiry}, warnings } — server-side OCR of the ID FRONT photo.
+ * Errors: 429 EXTRACT_LIMIT (+escalateSuggested), 503 OCR_UNAVAILABLE
+ * (→ barcode fallback), 422 INVALID_PHOTO (→ retake). NOTE: endpoint is being
+ * built in parallel — a 404 from an older backend is treated by the caller
+ * exactly like OCR_UNAVAILABLE (scanner fallback), so the UI degrades safely.
+ */
+export function idPhotoExtract(sessionId, photo) {
+  return kioskFetch(`/api/kiosk/sessions/${encodeURIComponent(sessionId)}/id-photo-extract`, {
+    method: 'POST', body: { photo },
+  });
+}
+
 export function verifyId(sessionId, { aamvaFields, licensePhoto, selfiePhoto }) {
   return kioskFetch(`/api/kiosk/sessions/${encodeURIComponent(sessionId)}/verify-id`, {
     method: 'POST', body: { aamvaFields, licensePhoto, selfiePhoto },
+  });
+}
+
+// ── B3c Staff Assist (K-S1..S3) ──────────────────────────────────────────────
+// Staff authenticates AT the kiosk with their existing lock-PIN → audited
+// bypass of the ID SCAN only (age/expiry rules still run server-side).
+
+// GET → { staff: [{id, name, hasPin}] }; 409 NOT_ASSISTABLE unless the
+// session is ESCALATED or carries ≥2 verify failures.
+export function staffAssistList(sessionId) {
+  return kioskFetch(`/api/kiosk/sessions/${encodeURIComponent(sessionId)}/staff-assist/staff`);
+}
+
+// POST {userId, pin} → { ok, grant: {userId, name, expiresAt} } (10-min TTL).
+// Errors: 401 INVALID_PIN (+attemptsRemaining), 429 STAFF_ASSIST_LOCKED
+// (shared with the lookup lockout), 409 NO_PIN_SET, 404 STAFF_NOT_FOUND.
+export function staffAssistUnlock(sessionId, { userId, pin }) {
+  return kioskFetch(`/api/kiosk/sessions/${encodeURIComponent(sessionId)}/staff-assist/unlock`, {
+    method: 'POST', body: { userId, pin },
+  });
+}
+
+// POST {fields, licenseFrontPhoto, licenseBackPhoto} (BOTH photos mandatory)
+// → { verified, checks, failureReasons, minimumAge, maximumAge, session }.
+// Errors: 403 ASSIST_GRANT_REQUIRED (grant absent/expired), 422
+// MISSING_PHOTO / INVALID_PHOTO. Failures mirror the guest verify shape.
+export function staffAssistVerifyId(sessionId, { fields, licenseFrontPhoto, licenseBackPhoto }) {
+  return kioskFetch(`/api/kiosk/sessions/${encodeURIComponent(sessionId)}/staff-assist/verify-id`, {
+    method: 'POST', body: { fields, licenseFrontPhoto, licenseBackPhoto },
   });
 }
 

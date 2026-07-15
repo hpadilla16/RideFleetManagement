@@ -239,8 +239,12 @@ async function recordLookupMissEvent(session) {
  * on every idle-wipe → unlimited enumeration). MAX_LOOKUP_MISSES misses →
  * device locked for LOOKUP_LOCKOUT_MIN and the counter rearms. Returns
  * attemptsRemaining for the kiosk UI.
+ *
+ * Exported (B3c): the staff-assist PIN unlock SHARES this counter/lock —
+ * lookup misses and PIN misses are both brute-force signals from the same
+ * physical tablet, and the admin pairing-code reissue clears both at once.
  */
-async function registerDeviceLookupMiss(device) {
+export async function registerDeviceLookupMiss(device) {
   const bumped = await prisma.kioskDevice.update({
     where: { id: device.id },
     data: { lookupMisses: { increment: 1 } },

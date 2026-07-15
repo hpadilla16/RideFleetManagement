@@ -24,13 +24,15 @@
 import { prisma } from '../../lib/prisma.js';
 import logger from '../../lib/logger.js';
 import { KioskError } from './kiosk-device.service.js';
-import { getSessionForDevice, requireInProgress, recordSessionTelemetry, maskCustomerName } from './kiosk-session.service.js';
+import { getSessionForDevice, requireInProgress, recordSessionTelemetry, maskCustomerName, MAX_SESSION_EVENTS } from './kiosk-session.service.js';
 import { checkoutSessionService, CheckoutSessionError } from '../checkout-session/checkout-session.service.js';
 import { sectionsForAgreement } from '../checkout-session/terms-content.js';
 import { CHECKOUT_STEPS, isTerminal } from '../checkout-session/state-machine.js';
 import { looksLikeImage, MAX_PHOTO_BYTES, isStorageEnabled } from '../rental-agreements/inspection-photos.js';
 import { uploadObject, safePath } from '../../lib/storage/supabase-storage.js';
 import { customerInspectionService } from '../customer-inspection/customer-inspection.service.js';
+import { settingsService } from '../settings/settings.service.js';
+import { extractLicenseFront } from './kiosk-id-ocr.extract.js';
 import { scopedSettingKey } from '../../lib/module-access.js';
 
 // Default minimum rental age when the pickup location's config doesn't set
@@ -38,6 +40,42 @@ import { scopedSettingKey } from '../../lib/module-access.js';
 export const KIOSK_DEFAULT_MIN_RENTAL_AGE = Number(process.env.KIOSK_MIN_RENTAL_AGE || 21);
 export const VERIFY_FAILS_BEFORE_ESCALATE = 2;
 export const KEY_HANDOFF_MODES = ['LOCKBOX', 'STAFF'];
+// B3d cost/abuse cap: max OCR extraction calls per kiosk session. Counted in
+// eventsJson telemetry — this is a COST cap, not a security gate (contrast
+// with idVerifiedAt/M2, which must never trust eventsJson).
+export const MAX_ID_EXTRACTS_PER_SESSION = 5;
+// B3c/B3d review M1: the per-session count alone is evadable (mint a fresh
+// session, or freeze the event count by filling eventsJson). A per-DEVICE
+// in-memory hourly bucket (same pattern as the pairing-miss buckets in
+// kiosk-device.service.js) is the backstop that actually caps Anthropic
+// spend per physical tablet.
+export const MAX_ID_EXTRACTS_PER_DEVICE_PER_HOUR = 15;
+export const EXTRACT_BUCKET_WINDOW_MS = 60 * 60 * 1000;
+
+const extractBuckets = new Map();
+
+function pruneExtractBuckets(nowMs) {
+  for (const [key, bucket] of extractBuckets.entries()) {
+    if (!bucket || bucket.expiresAt <= nowMs) extractBuckets.delete(key);
+  }
+}
+
+function deviceExtractCount(deviceId, nowMs) {
+  pruneExtractBuckets(nowMs);
+  const bucket = extractBuckets.get(deviceId);
+  return bucket && bucket.expiresAt > nowMs ? bucket.count : 0;
+}
+
+function registerDeviceExtract(deviceId, nowMs) {
+  const bucket = extractBuckets.get(deviceId);
+  if (bucket && bucket.expiresAt > nowMs) bucket.count += 1;
+  else extractBuckets.set(deviceId, { count: 1, expiresAt: nowMs + EXTRACT_BUCKET_WINDOW_MS });
+}
+
+/** Test hook — clears the in-memory per-device extract buckets. */
+export function resetExtractRateTracking() {
+  extractBuckets.clear();
+}
 // Ages beyond this are a garbage DOB (scan glitch / year-0959 imports), not
 // a very old renter — mirrors the isImplausibleAge guard in the counter
 // finalize (rental-agreements.service.js).
@@ -94,7 +132,7 @@ export function ageOnDate(dob, onDate) {
   return age;
 }
 
-function parseLocationConfigSafe(raw) {
+export function parseLocationConfigSafe(raw) {
   if (!raw) return {};
   try {
     return typeof raw === 'string' ? JSON.parse(raw) : raw;
@@ -137,13 +175,55 @@ const CONTENT_TYPE_EXT = {
  * payload before anything is written — parity with the storage-path guards.
  * Returns the decoded buffer, throws 422 INVALID_PHOTO on junk/oversized.
  */
-function validateIdPhotoOrThrow(dataUrl, kind) {
+export function validateIdPhotoOrThrow(dataUrl, kind) {
   if (!dataUrl) return null;
   const buffer = dataUrlToBuffer(dataUrl);
   if (!buffer || !looksLikeImage(buffer) || buffer.length > MAX_PHOTO_BYTES) {
     throw new KioskError(`${kind} photo must be a valid image under ${Math.round(MAX_PHOTO_BYTES / (1024 * 1024))}MB`, 422, 'INVALID_PHOTO');
   }
   return buffer;
+}
+
+/**
+ * The rule set an ID must pass REGARDLESS of how it was captured (guest scan
+ * or B3c staff override — the override bypasses the SCAN, never the rules):
+ * age vs location chargeAgeMin (default KIOSK_DEFAULT_MIN_RENTAL_AGE),
+ * chargeAgeMax when configured, DOB plausibility, expiry vs scheduled return.
+ */
+export function evaluateIdRules({ fields = {}, pickupAt, returnAt, locationConfig = {} }) {
+  const failureReasons = [];
+
+  const minimumAge = Number(locationConfig?.chargeAgeMin || 0) > 0
+    ? Number(locationConfig.chargeAgeMin)
+    : KIOSK_DEFAULT_MIN_RENTAL_AGE;
+  const maximumAge = Number(locationConfig?.chargeAgeMax || 0) > 0
+    ? Number(locationConfig.chargeAgeMax)
+    : null;
+  const age = ageOnDate(fields.dateOfBirth, pickupAt);
+  let ageOk = false;
+  if (age === null) {
+    failureReasons.push('DOB_UNREADABLE');
+  } else if (age < 0 || age > IMPLAUSIBLE_AGE) {
+    failureReasons.push('DOB_IMPLAUSIBLE');
+  } else if (age < minimumAge) {
+    failureReasons.push('UNDERAGE');
+  } else if (maximumAge && age > maximumAge) {
+    failureReasons.push('AGE_ABOVE_MAX');
+  } else {
+    ageOk = true;
+  }
+
+  const expiry = fields.licenseExpiry ? new Date(fields.licenseExpiry) : null;
+  let licenseNotExpired = false;
+  if (!expiry || Number.isNaN(expiry.getTime())) {
+    failureReasons.push('LICENSE_EXPIRY_UNREADABLE');
+  } else if (expiry <= new Date(returnAt)) {
+    failureReasons.push('LICENSE_EXPIRES_BEFORE_RETURN');
+  } else {
+    licenseNotExpired = true;
+  }
+
+  return { ageOk, licenseNotExpired, failureReasons, minimumAge, maximumAge };
 }
 
 /**
@@ -155,22 +235,32 @@ function validateIdPhotoOrThrow(dataUrl, kind) {
  * rides with the B5+ compliance pass — until then these live alongside the
  * agreement's inspection photos in the same bucket.
  * Best-effort by design: photo persistence must never fail the verify.
+ *
+ * Each photo entry: { kind, dataUrl, buffer, customerField? } — when
+ * customerField names an EMPTY Customer column (idPhotoUrl / licenseBackUrl),
+ * the stored ref ("bucket:path" convention) or the validated data URL
+ * (fallback mode) is written through to it.
  */
-async function persistIdPhotos({ session, device, customer, photos }) {
+export async function persistIdPhotos({ session, device, customer, photos }) {
   try {
     const provided = photos.filter((p) => p.dataUrl && p.buffer);
     if (!provided.length) return;
 
     if (!isStorageEnabled()) {
-      // base64 fallback (legacy in-DB pattern): the VALIDATED license goes to
-      // the customer's idPhotoUrl slot only when empty (counter/precheckin
-      // wins). The selfie has no legacy column — skipped in fallback mode.
-      const license = provided.find((p) => p.kind === 'license');
-      if (license && customer && !customer.idPhotoUrl) {
-        await prisma.customer.update({ where: { id: customer.id }, data: { idPhotoUrl: String(license.dataUrl) } }).catch(() => {});
+      // base64 fallback (legacy in-DB pattern): VALIDATED photos land in
+      // their empty Customer columns (counter/precheckin wins). Photos with
+      // no legacy column (selfie) are skipped in fallback mode.
+      const patch = {};
+      for (const photo of provided) {
+        if (photo.customerField && customer && !customer[photo.customerField]) {
+          patch[photo.customerField] = String(photo.dataUrl);
+        }
       }
-      logger.warn('[kiosk-checkout] photo storage disabled — license kept as base64 fallback, selfie not persisted', {
-        sessionId: session.id, tenantId: device.tenantId,
+      if (Object.keys(patch).length && customer) {
+        await prisma.customer.update({ where: { id: customer.id }, data: patch }).catch(() => {});
+      }
+      logger.warn('[kiosk-checkout] photo storage disabled — base64 fallback used where a legacy column exists', {
+        sessionId: session.id, tenantId: device.tenantId, kinds: provided.map((p) => p.kind),
       });
       await recordSessionTelemetry(session, {
         step: 'ID', event: 'ID_PHOTOS_STORED', data: { storage: false, kinds: provided.map((p) => p.kind) },
@@ -179,21 +269,21 @@ async function persistIdPhotos({ session, device, customer, photos }) {
     }
 
     const refs = [];
+    const patch = {};
     for (const photo of provided) {
       const contentType = sniffImageContentType(photo.buffer) || 'image/jpeg';
       const ext = CONTENT_TYPE_EXT[contentType] || 'jpg';
       const path = safePath('kiosk-id', session.id, `${photo.kind}.${ext}`);
       await uploadObject({ bucket: PHOTOS_BUCKET, path, body: photo.buffer, contentType, upsert: true });
       refs.push({ kind: photo.kind, bucket: PHOTOS_BUCKET, path });
+      if (photo.customerField && customer && !customer[photo.customerField]) {
+        // "bucket:path" convention (same as registration documents).
+        patch[photo.customerField] = `${PHOTOS_BUCKET}:${path}`;
+      }
     }
     if (refs.length) {
-      const licenseRef = refs.find((r) => r.kind === 'license');
-      if (licenseRef && customer && !customer.idPhotoUrl) {
-        // "bucket:path" convention (same as registration documents).
-        await prisma.customer.update({
-          where: { id: customer.id },
-          data: { idPhotoUrl: `${licenseRef.bucket}:${licenseRef.path}` },
-        }).catch(() => {});
+      if (Object.keys(patch).length && customer) {
+        await prisma.customer.update({ where: { id: customer.id }, data: patch }).catch(() => {});
       }
       await recordSessionTelemetry(session, {
         step: 'ID', event: 'ID_PHOTOS_STORED', data: { storage: true, refs },
@@ -221,7 +311,7 @@ async function verifyId(sessionId, device, { aamvaFields, licensePhoto, selfiePh
 
   // M4: reject junk/oversized photos up front — nothing is written on 422.
   const photos = [
-    { kind: 'license', dataUrl: licensePhoto, buffer: validateIdPhotoOrThrow(licensePhoto, 'license') },
+    { kind: 'license', dataUrl: licensePhoto, buffer: validateIdPhotoOrThrow(licensePhoto, 'license'), customerField: 'idPhotoUrl' },
     { kind: 'selfie', dataUrl: selfiePhoto, buffer: validateIdPhotoOrThrow(selfiePhoto, 'selfie') },
   ];
 
@@ -240,7 +330,6 @@ async function verifyId(sessionId, device, { aamvaFields, licensePhoto, selfiePh
   if (!resv) throw new KioskError('Reservation not found', 404, 'RESERVATION_NOT_FOUND');
 
   const fields = aamvaFields && typeof aamvaFields === 'object' ? aamvaFields : {};
-  const failureReasons = [];
 
   // 1) Name — scanned license vs the reservation's customer.
   const nameMatches = namesMatch({
@@ -249,41 +338,17 @@ async function verifyId(sessionId, device, { aamvaFields, licensePhoto, selfiePh
     storedFirst: resv.customer?.firstName,
     storedLast: resv.customer?.lastName,
   });
-  if (!nameMatches) failureReasons.push('NAME_MISMATCH');
 
-  // 2) Age — same config source as the counter finalize (location
-  // chargeAgeMin/chargeAgeMax), defaulting to KIOSK_DEFAULT_MIN_RENTAL_AGE.
-  const locationConfig = parseLocationConfigSafe(resv.pickupLocation?.locationConfig);
-  const minimumAge = Number(locationConfig?.chargeAgeMin || 0) > 0
-    ? Number(locationConfig.chargeAgeMin)
-    : KIOSK_DEFAULT_MIN_RENTAL_AGE;
-  const maximumAge = Number(locationConfig?.chargeAgeMax || 0) > 0
-    ? Number(locationConfig.chargeAgeMax)
-    : null;
-  const age = ageOnDate(fields.dateOfBirth, resv.pickupAt);
-  let ageOk = false;
-  if (age === null) {
-    failureReasons.push('DOB_UNREADABLE');
-  } else if (age < 0 || age > IMPLAUSIBLE_AGE) {
-    failureReasons.push('DOB_IMPLAUSIBLE');
-  } else if (age < minimumAge) {
-    failureReasons.push('UNDERAGE');
-  } else if (maximumAge && age > maximumAge) {
-    failureReasons.push('AGE_ABOVE_MAX');
-  } else {
-    ageOk = true;
-  }
-
-  // 3) License must not expire before the scheduled return.
-  const expiry = fields.licenseExpiry ? new Date(fields.licenseExpiry) : null;
-  let licenseNotExpired = false;
-  if (!expiry || Number.isNaN(expiry.getTime())) {
-    failureReasons.push('LICENSE_EXPIRY_UNREADABLE');
-  } else if (expiry <= new Date(resv.returnAt)) {
-    failureReasons.push('LICENSE_EXPIRES_BEFORE_RETURN');
-  } else {
-    licenseNotExpired = true;
-  }
+  // 2+3) Age + expiry rules — shared with the B3c staff override
+  // (evaluateIdRules): same config source as the counter finalize.
+  const rules = evaluateIdRules({
+    fields,
+    pickupAt: resv.pickupAt,
+    returnAt: resv.returnAt,
+    locationConfig: parseLocationConfigSafe(resv.pickupLocation?.locationConfig),
+  });
+  const { ageOk, licenseNotExpired, minimumAge, maximumAge } = rules;
+  const failureReasons = [...(nameMatches ? [] : ['NAME_MISMATCH']), ...rules.failureReasons];
 
   const verified = nameMatches && ageOk && licenseNotExpired;
   // Count PRIOR failures before recording this one (the telemetry write
@@ -294,7 +359,7 @@ async function verifyId(sessionId, device, { aamvaFields, licensePhoto, selfiePh
     // M2: the SERVER-side stamp /sign gates on (eventsJson is forgeable).
     await prisma.kioskSession.update({
       where: { id: session.id },
-      data: { idVerifiedAt: new Date(), lastActivityAt: new Date() },
+      data: { idVerifiedAt: new Date(), idVerifyMethod: 'SCAN', lastActivityAt: new Date() },
     });
     // Write-through like the counter flows: fill EMPTY customer columns from
     // the scan, never clobber staff-entered data.
@@ -322,6 +387,100 @@ async function verifyId(sessionId, device, { aamvaFields, licensePhoto, selfiePh
     minimumAge,
     maximumAge,
     escalateSuggested: !verified && failedCount >= VERIFY_FAILS_BEFORE_ESCALATE,
+  };
+}
+
+// ── B3d: license-photo OCR extract (ADVISORY — stamps NOTHING) ──────────────
+
+/**
+ * POST /sessions/:id/id-photo-extract { photo } — the PRIMARY ID path after
+ * the iPad pdf417 re-test. Extracts license fields from a FRONT photo via
+ * the citation-OCR Claude-vision pattern and returns them for the customer
+ * confirm screen (K-ID). ADVISORY ONLY: nothing is stamped or written here —
+ * verify-id (called after the customer confirms, with fields + licensePhoto)
+ * remains the only stamper and runs every validation unchanged.
+ *
+ * Key resolution mirrors the citation OCR worker: tenant Settings key
+ * (getCitationOcrResolved) → ANTHROPIC_API_KEY env → 503 OCR_UNAVAILABLE.
+ * Model: KIOSK_ID_OCR_MODEL → tenant model → CITATION_OCR_MODEL → haiku.
+ */
+async function idPhotoExtract(sessionId, device, { photo } = {}) {
+  const session = await getSessionForDevice(sessionId, device);
+  requireInProgress(session);
+  // M1(3): extraction only makes sense post-attach (the UI never calls it
+  // earlier) — and requiring it kills the mint-session-and-extract loop.
+  if (!session.reservationId) throw new KioskError('Attach a reservation first', 422, 'NO_RESERVATION_ATTACHED');
+
+  if (!photo) throw new KioskError('photo is required', 422, 'MISSING_PHOTO');
+  const buffer = validateIdPhotoOrThrow(photo, 'license'); // 422 INVALID_PHOTO — nothing called
+
+  const cappedError = () => new KioskError(
+    'Too many photo attempts — please ask a staff member for help',
+    429,
+    'EXTRACT_LIMIT',
+    { escalateSuggested: true },
+  );
+
+  // Cost cap: every attempt (success or provider failure) burns one slot.
+  // M1(2) fail-closed: a session whose event log hit the cap can no longer
+  // COUNT its extracts — so it no longer gets any (filling eventsJson via
+  // /events must never freeze this counter below the limit).
+  const events = Array.isArray(session.eventsJson) ? session.eventsJson : [];
+  if (events.length >= MAX_SESSION_EVENTS) throw cappedError();
+  const attempts = countEvents(session, 'ID_PHOTO_EXTRACT');
+  if (attempts >= MAX_ID_EXTRACTS_PER_SESSION) throw cappedError();
+  // M1(1): per-DEVICE hourly bucket — the backstop the per-session count
+  // can't provide (createSession is free; the tablet is not).
+  const nowMs = Date.now();
+  if (deviceExtractCount(device.id, nowMs) >= MAX_ID_EXTRACTS_PER_DEVICE_PER_HOUR) throw cappedError();
+
+  const cfg = await settingsService.getCitationOcrResolved({ tenantId: device.tenantId })
+    .catch(() => ({ apiKey: null, model: '' }));
+  const apiKey = cfg.apiKey || process.env.ANTHROPIC_API_KEY || null;
+  if (!apiKey) {
+    throw new KioskError('ID photo reading is not configured for this tenant', 503, 'OCR_UNAVAILABLE');
+  }
+  const model = process.env.KIOSK_ID_OCR_MODEL || cfg.model || undefined;
+
+  // Burn the device slot BEFORE the provider call — failures count too.
+  registerDeviceExtract(device.id, nowMs);
+
+  let extraction;
+  try {
+    extraction = await extractLicenseFront({
+      buffer,
+      contentType: sniffImageContentType(buffer) || 'image/jpeg',
+      apiKey,
+      model,
+    });
+  } catch (err) {
+    await recordSessionTelemetry(session, {
+      step: 'ID', event: 'ID_PHOTO_EXTRACT', data: { ok: false },
+    });
+    logger.warn('[kiosk-checkout] id photo extract failed', {
+      sessionId: session.id, tenantId: device.tenantId, message: err?.message,
+    });
+    throw new KioskError('Could not read the license photo — try again', 502, 'EXTRACT_FAILED', {
+      attemptsRemaining: Math.max(0, MAX_ID_EXTRACTS_PER_SESSION - attempts - 1),
+    });
+  }
+
+  const nullFields = Object.values(extraction.fields).filter((v) => v === null).length;
+  const warnings = [];
+  if (nullFields > 0) warnings.push('UNREADABLE_FIELDS');
+  if (extraction.confidence !== null && extraction.confidence < 70) warnings.push('LOW_CONFIDENCE');
+
+  // Telemetry only counts + confidence — never the extracted PII.
+  await recordSessionTelemetry(session, {
+    step: 'ID', event: 'ID_PHOTO_EXTRACT', data: { ok: true, nullFields, confidence: extraction.confidence },
+  });
+
+  return {
+    fields: extraction.fields,
+    confidence: extraction.confidence,
+    notes: extraction.notes,
+    warnings,
+    attemptsRemaining: Math.max(0, MAX_ID_EXTRACTS_PER_SESSION - attempts - 1),
   };
 }
 
@@ -750,7 +909,9 @@ async function complete(sessionId, device) {
     customerInspection = await maybeSendKioskCustomerInspection({ session, device, cs });
     updated = await prisma.kioskSession.update({
       where: { id: session.id },
-      data: { outcome: 'COMPLETED', step: 'DONE', endedAt: new Date(), lastActivityAt: new Date() },
+      // assistGrantedAt: null — a staff-assist grant (B3c) dies with the
+      // session; assistUserId stays as the audit trail.
+      data: { outcome: 'COMPLETED', step: 'DONE', endedAt: new Date(), lastActivityAt: new Date(), assistGrantedAt: null },
     });
   }
 
@@ -772,6 +933,7 @@ async function complete(sessionId, device) {
 
 export const kioskCheckoutService = {
   verifyId,
+  idPhotoExtract,
   getAgreement,
   sign,
   sandboxPayment,

@@ -18,6 +18,7 @@ import { kioskDeviceService, KioskError } from './kiosk-device.service.js';
 import { kioskSessionService } from './kiosk-session.service.js';
 import { kioskOffersService } from './kiosk-offers.service.js';
 import { kioskCheckoutService } from './kiosk-checkout.service.js';
+import { kioskStaffAssistService } from './kiosk-staff-assist.service.js';
 
 export const kioskRouter = Router();
 
@@ -107,6 +108,13 @@ kioskRouter.post('/sessions/:id/offers', deviceGuards, ok(
   (req) => kioskOffersService.acceptOffers(req.params.id, req.kioskDevice, req.body || {}),
 ));
 
+// POST /api/kiosk/sessions/:id/id-photo-extract — { photo } → ADVISORY OCR
+// of the license FRONT (B3d primary path). Returns fields for the customer
+// confirm screen; stamps NOTHING (verify-id stays the only stamper).
+kioskRouter.post('/sessions/:id/id-photo-extract', deviceGuards, ok(
+  (req) => kioskCheckoutService.idPhotoExtract(req.params.id, req.kioskDevice, req.body || {}),
+));
+
 // POST /api/kiosk/sessions/:id/verify-id — { aamvaFields, licensePhoto?,
 // selfiePhoto? } → booleans + failure reason codes ONLY (never echoes the
 // stored DOB/license to the lobby screen).
@@ -140,6 +148,27 @@ kioskRouter.post('/sessions/:id/sandbox-payment', deviceGuards, ok(
 // only released once the checkout session is CLOSED.
 kioskRouter.post('/sessions/:id/complete', deviceGuards, ok(
   (req) => kioskCheckoutService.complete(req.params.id, req.kioskDevice),
+));
+
+// ── B3c Staff Assist (K-S1..S3) — device-authed, session-bound like every
+// /sessions/:id/* route; PIN misses feed the shared per-device lockout. ─────
+
+// GET /api/kiosk/sessions/:id/staff-assist/staff — names-only picker.
+kioskRouter.get('/sessions/:id/staff-assist/staff', deviceGuards, ok(
+  (req) => kioskStaffAssistService.listAssistStaff(req.params.id, req.kioskDevice),
+));
+
+// POST /api/kiosk/sessions/:id/staff-assist/unlock — { userId, pin } →
+// verifies the EXISTING lock-PIN and mints a 10-min session-bound grant.
+kioskRouter.post('/sessions/:id/staff-assist/unlock', deviceGuards, ok(
+  (req) => kioskStaffAssistService.unlock(req.params.id, req.kioskDevice, req.body || {}),
+));
+
+// POST /api/kiosk/sessions/:id/staff-assist/verify-id — { fields,
+// licenseFrontPhoto, licenseBackPhoto } → audited scan bypass (age/expiry
+// rules still enforced server-side; underage stays a hard stop).
+kioskRouter.post('/sessions/:id/staff-assist/verify-id', deviceGuards, ok(
+  (req) => kioskStaffAssistService.staffVerifyId(req.params.id, req.kioskDevice, req.body || {}),
 ));
 
 // POST /api/kiosk/sessions/:id/escalate — { reason: ESCALATE_REASONS enum }

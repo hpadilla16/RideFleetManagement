@@ -4840,6 +4840,15 @@ model KioskSession {
   // consulted for authorization. Cleared when a different reservation is
   // attached to the session.
   idVerifiedAt DateTime?
+  // How the ID was verified: 'SCAN' (guest AAMVA scan) | 'STAFF_OVERRIDE'
+  // (B3c staff assist — manual entry after PIN unlock).
+  idVerifyMethod String?
+
+  // B3c Staff Assist: short-lived grant bound to THIS session. assistUserId
+  // persists as the audit trail of who assisted; assistGrantedAt is the live
+  // grant window (10 min TTL, consumed on staff verify, cleared on complete).
+  assistUserId    String?
+  assistGrantedAt DateTime?
 
   // Bumped by the events endpoint — clean staleness signal for the B5
   // orphaned-money / abandoned-session sweep.

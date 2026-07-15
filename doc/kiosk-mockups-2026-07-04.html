@@ -545,6 +545,44 @@
     </div></div>
   </div>
 
+  <!-- ============ K-S — STAFF ASSIST (pedido de Hector 2026-07-06, smoke iPad) ============ -->
+  <div class="screen-tag">K-S1..S3 · Staff Assist — el guest se tranca en el ID scan → staff entra con su PIN EN el kiosk, teclea el ID a mano + foto frente/atrás de la licencia → bypass auditado del paso de ID. Reusa el lock-PIN existente por usuario. Edad/expiry se validan igual server-side (el override NO salta las reglas, solo el scan).</div>
+  <div class="minigrid">
+    <div class="tablet mini"><div class="kbody">
+      <div class="kmain">
+        <div class="kh2">Staff assist</div>
+        <p class="ksub">Select your name and enter your PIN to help this guest.</p>
+        <div class="row" style="justify-content:center;margin-bottom:10px"><select class="sel" style="font-size:15px;padding:12px 18px"><option>Carlos Rivera</option><option>María Soto</option></select></div>
+        <div class="field ph" style="min-width:220px;letter-spacing:.4em">• • • •</div>
+        <div class="row" style="justify-content:center;margin-top:12px"><button class="kbtn sm">Unlock ›</button><button class="kbtn ghost sm">Cancel — back to guest</button></div>
+      </div>
+      <div class="kfoot"><span></span><span class="dim">S1 · lock-PIN existente · 5 intentos/min + lockout · AuditLog con staffUserId</span></div>
+    </div></div>
+    <div class="tablet mini"><div class="kbody">
+      <div class="kmain left" style="padding:20px 30px">
+        <div class="kh2" style="font-size:20px">Enter guest ID manually</div>
+        <div class="kpanel" style="max-width:100%;padding:14px 18px">
+          <div class="kv"><span class="l">Name</span><b>MARIA GONZALEZ</b></div>
+          <div class="kv"><span class="l">DOB · License # · State · Expiry</span><b>••/••/•••• · G642-... · FL · 2028</b></div>
+        </div>
+        <div class="row" style="margin-top:12px">
+          <div class="scanbox" style="width:200px;height:110px;font-size:13px"><div class="cam" style="font-size:24px">📷</div> License FRONT</div>
+          <div class="scanbox" style="width:200px;height:110px;font-size:13px"><div class="cam" style="font-size:24px">📷</div> License BACK</div>
+        </div>
+        <div class="row" style="margin-top:12px"><button class="kbtn sm">Verify &amp; continue ›</button></div>
+      </div>
+      <div class="kfoot"><span></span><span class="dim">S2 · ambas fotos OBLIGATORIAS · edad/expiry se validan server-side igual (underage = hard stop)</span></div>
+    </div></div>
+    <div class="tablet mini"><div class="kbody">
+      <div class="kmain">
+        <div class="kh2">✓ ID verified by staff</div>
+        <p class="ksub">Verified by <b>Carlos Rivera</b>. Handing back to the guest — the session continues at Protection &amp; extras.</p>
+        <div class="row" style="justify-content:center"><button class="kbtn sm">Continue as guest ›</button></div>
+      </div>
+      <div class="kfoot"><span></span><span class="dim">S3 · sesión sale de ESCALATED → IN_PROGRESS · telemetría STAFF_ASSIST · sesión staff expira al continuar</span></div>
+    </div></div>
+  </div>
+
   <div class="section">B · Admin (Ride Fleet Manager)</div>
 
   <!-- ============ A1 — KIOSK DEVICES ============ -->

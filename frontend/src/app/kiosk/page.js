@@ -29,16 +29,21 @@ import {
   escalateSession,
   getAgreement,
   getOffers,
+  idPhotoExtract,
   lookupReservation,
   pairDevice,
   readDeviceToken,
   sandboxPayment,
   sendEvents,
   signAgreement,
+  staffAssistList,
+  staffAssistUnlock,
+  staffAssistVerifyId,
   verifyId,
 } from '../../lib/kioskClient';
 import { LicenseScanner } from '../../components/loaner/LicenseScanner';
 import { SignaturePad } from '../../components/kiosk/SignaturePad';
+import { StaffAssistScreen } from '../../components/kiosk/StaffAssistScreen';
 import { KIOSK_UNPAIRED_EVENT, useKioskUi } from '../../components/kiosk/KioskUiContext';
 
 const DONE_RESET_S = 30;
@@ -85,6 +90,9 @@ export default function KioskPage() {
   const [lookupLocked, setLookupLocked] = useState(false);
   const [escalatedInfo, setEscalatedInfo] = useState(null);
   const [helpOpen, setHelpOpen] = useState(false);
+  // B3c Staff Assist: which screen to return to when the assist flow exits
+  // (cancel / grant expiry) — 'ESCALATED' or the escalateSuggested origin.
+  const [staffAssistFrom, setStaffAssistFrom] = useState('ESCALATED');
 
   const sessionRef = useRef(null);
   useEffect(() => { sessionRef.current = session; }, [session]);
@@ -126,6 +134,7 @@ export default function KioskPage() {
     setLookupLocked(false);
     setEscalatedInfo(null);
     setHelpOpen(false);
+    setStaffAssistFrom('ESCALATED');
     setErr('');
     setBusy(false);
     ui.setSessionActive(false);
@@ -271,6 +280,131 @@ export default function KioskPage() {
       setErr(e.code === 'INVALID_PHOTO' ? t('kiosk.invalidPhoto') : (e.message || t('kiosk.genericError')));
       return null;
     } finally { setBusy(false); }
+  };
+
+  /**
+   * B3d — primary ID path: server-side OCR of the ID-front photo. Returns a
+   * discriminated result so the ID screen can route each outcome (confirm /
+   * retake / staff-assist / barcode fallback) without touching fetch.
+   */
+  const extractIdPhoto = async (photo) => {
+    const gen = genRef.current;
+    setBusy(true); setErr('');
+    try {
+      const out = await idPhotoExtract(session.id, photo);
+      if (gen !== genRef.current) return { ok: false, code: 'STALE' };
+      return { ok: true, fields: out?.fields || {}, warnings: Array.isArray(out?.warnings) ? out.warnings : [] };
+    } catch (e) {
+      if (gen !== genRef.current) return { ok: false, code: 'STALE' };
+      if (routeFatal(e)) return { ok: false, code: 'FATAL' };
+      if (e.status === 429 || e.code === 'EXTRACT_LIMIT') return { ok: false, code: 'EXTRACT_LIMIT' };
+      // 503 = OCR down. 404 = backend without the endpoint yet (built in
+      // parallel) — degrade the same way: barcode-scanner fallback.
+      if (e.status === 503 || e.status === 404 || e.code === 'OCR_UNAVAILABLE') return { ok: false, code: 'OCR_UNAVAILABLE' };
+      if (e.status === 422 || e.code === 'INVALID_PHOTO') return { ok: false, code: 'INVALID_PHOTO' };
+      return { ok: false, code: 'ERROR', message: e.message };
+    } finally { setBusy(false); }
+  };
+
+  /**
+   * B3d — guest confirmed the extracted fields: run the EXISTING verify-id
+   * NOW (fields + captured photo as licensePhoto — the backend persists the
+   * photo and fills empty customer columns). Verified → SELFIE (which
+   * re-submits verify-id with the selfie attached, as today). Failures keep
+   * their existing handling (VerifyChecks + escalateSuggested).
+   */
+  const confirmIdFields = async (fields, photo) => {
+    setAamva(fields);
+    setLicensePhoto(photo || null);
+    const gen = genRef.current;
+    setBusy(true); setErr('');
+    try {
+      const out = await verifyId(session.id, { aamvaFields: fields, licensePhoto: photo || undefined });
+      if (gen !== genRef.current) return null;
+      setVerifyResult(out);
+      if (out?.verified) {
+        setVerifyResult(null); // the selfie step starts fresh and re-verifies
+        setSelfie(null);
+        setScreen('SELFIE');
+      }
+      return out;
+    } catch (e) {
+      if (gen !== genRef.current) return null;
+      if (routeFatal(e)) return null;
+      setErr(e.code === 'INVALID_PHOTO' ? t('kiosk.invalidPhoto') : (e.message || t('kiosk.genericError')));
+      return null;
+    } finally { setBusy(false); }
+  };
+
+  // ── B3c Staff Assist handlers (K-S1..S3) ───────────────────────────────────
+  // The wizard never blocks on assist state: everything lives behind the
+  // STAFF_ASSIST screen; exiting always lands back on staffAssistFrom.
+
+  const openStaffAssist = (from) => {
+    setStaffAssistFrom(from);
+    setErr('');
+    if (sessionRef.current?.id) sendEvents(sessionRef.current.id, { step: 'ID', event: 'STAFF_ASSIST_OPENED' });
+    setScreen('STAFF_ASSIST');
+  };
+
+  const exitStaffAssist = (message) => {
+    setErr(message || '');
+    setScreen(staffAssistFrom);
+  };
+
+  const assistList = async () => {
+    const gen = genRef.current;
+    try {
+      const out = await staffAssistList(session.id);
+      if (gen !== genRef.current) return { ok: false, code: 'FATAL' };
+      return { ok: true, staff: Array.isArray(out?.staff) ? out.staff : [] };
+    } catch (e) {
+      if (gen !== genRef.current || routeFatal(e)) return { ok: false, code: 'FATAL' };
+      return { ok: false, code: e.code || 'ERROR', message: e.message };
+    }
+  };
+
+  const assistUnlock = async (userId, pin) => {
+    const gen = genRef.current;
+    try {
+      const out = await staffAssistUnlock(session.id, { userId, pin });
+      if (gen !== genRef.current) return { ok: false, code: 'FATAL' };
+      // The server records the canonical STAFF_ASSIST_UNLOCKED telemetry —
+      // no client duplicate (funnel counts stay honest).
+      return { ok: true, grant: out?.grant || null };
+    } catch (e) {
+      if (gen !== genRef.current || routeFatal(e)) return { ok: false, code: 'FATAL' };
+      return {
+        ok: false,
+        code: e.code || (e.status === 429 ? 'STAFF_ASSIST_LOCKED' : 'ERROR'),
+        attemptsRemaining: e.data?.attemptsRemaining,
+        message: e.message,
+      };
+    }
+  };
+
+  const assistVerify = async (payload) => {
+    const gen = genRef.current;
+    try {
+      const out = await staffAssistVerifyId(session.id, payload);
+      if (gen !== genRef.current) return { ok: false, code: 'FATAL' };
+      return { ok: true, ...out };
+    } catch (e) {
+      if (gen !== genRef.current || routeFatal(e)) return { ok: false, code: 'FATAL' };
+      return { ok: false, code: e.code || 'ERROR', message: e.message };
+    }
+  };
+
+  // K-S3 "Continue as guest": the session is IN_PROGRESS again with the ID
+  // verified via STAFF_OVERRIDE — skip selfie and rejoin the wizard at the
+  // next step (vehicle assign → OFFERS), exactly like a passed guest verify.
+  const completeStaffAssist = async () => {
+    if (sessionRef.current?.id) sendEvents(sessionRef.current.id, { step: 'ID', event: 'STAFF_ASSIST_COMPLETED' });
+    setEscalatedInfo(null);
+    setVerifyResult(null);
+    setErr('');
+    ui.setSessionActive(true);
+    await proceedAssign();
   };
 
   const proceedAssign = async () => {
@@ -459,11 +593,17 @@ export default function KioskPage() {
       {screen === 'ID' ? (
         <IdScreen
           t={t}
+          busy={busy}
           err={err}
           verifyResult={verifyResult}
+          clearVerify={() => { setVerifyResult(null); setErr(''); }}
+          track={(event) => { if (sessionRef.current?.id) sendEvents(sessionRef.current.id, { step: 'ID', event }); }}
+          onExtract={extractIdPhoto}
+          onConfirm={confirmIdFields}
           onScanned={(fields) => { setAamva(fields); setVerifyResult(null); setErr(''); setSelfie(null); setScreen('SELFIE'); }}
-          onPhoto={(dataUrl) => setLicensePhoto(dataUrl)}
+          onScannerPhoto={(dataUrl) => setLicensePhoto(dataUrl)}
           onEscalate={() => escalate(verifyResult?.failureReasons?.includes('NAME_MISMATCH') ? 'ID_MISMATCH' : 'ID_SCAN_FAILED')}
+          onStaffAssist={() => openStaffAssist('ID')}
           onBack={() => setScreen('SUMMARY')}
         />
       ) : null}
@@ -483,6 +623,7 @@ export default function KioskPage() {
           onContinue={proceedAssign}
           onRetryScan={() => { setVerifyResult(null); setErr(''); setScreen('ID'); }}
           onEscalate={() => escalate(verifyResult?.failureReasons?.includes('NAME_MISMATCH') ? 'ID_MISMATCH' : 'ID_SCAN_FAILED')}
+          onStaffAssist={() => openStaffAssist('SELFIE')}
         />
       ) : null}
       {screen === 'OFFERS' ? (
@@ -538,7 +679,26 @@ export default function KioskPage() {
           <div className="kio-h2">🎧 {t('kiosk.escalatedTitle')}</div>
           <p className="kio-sub">{t('kiosk.escalatedBody')}</p>
           <button type="button" className="kio-btn ghost" onClick={resetAll}>{t('kiosk.startOver')}</button>
+          {/* Employee-facing entry (B3c) — deliberately discreet, not a guest CTA. */}
+          {session ? (
+            <div style={{ marginTop: 22 }}>
+              <button type="button" className="kio-btn back" onClick={() => openStaffAssist('ESCALATED')}>
+                🔧 {t('kiosk.assistEntry')}
+              </button>
+            </div>
+          ) : null}
         </div>
+      ) : null}
+      {screen === 'STAFF_ASSIST' && session ? (
+        <StaffAssistScreen
+          t={t}
+          prefillFields={aamva || undefined}
+          onList={assistList}
+          onUnlock={assistUnlock}
+          onVerify={assistVerify}
+          onCompleted={completeStaffAssist}
+          onExit={exitStaffAssist}
+        />
       ) : null}
       {screen === 'OUT_OF_SERVICE' ? (
         <div className="kio-main center">
@@ -638,7 +798,7 @@ function PairingScreen({ t, busy, setBusy, onPaired, routeFatal }) {
         ))}
         <span />
         <button type="button" className="kio-key" onClick={() => press('0')}>0</button>
-        <button type="button" className="kio-key" onClick={() => press('back')}>⌫</button>
+        <button type="button" className="kio-key" aria-label={t('kiosk.keypadDelete')} onClick={() => press('back')}>⌫</button>
       </div>
       {msg ? <div className="kio-error">{msg}</div> : null}
       <button
@@ -720,7 +880,7 @@ function LookupScreen({ t, busy, err, onSubmit, onBack }) {
                   {alpha ? '123' : 'ABC'}
                 </button>
                 {!alpha ? <button type="button" className="kio-key" onClick={() => press('0')}>0</button> : null}
-                <button type="button" className="kio-key" onClick={() => press('back')}>⌫</button>
+                <button type="button" className="kio-key" aria-label={t('kiosk.keypadDelete')} onClick={() => press('back')}>⌫</button>
               </div>
             </div>
           </div>
@@ -786,49 +946,354 @@ function LookupScreen({ t, busy, err, onSubmit, onBack }) {
   );
 }
 
-function IdScreen({ t, err, verifyResult, onScanned, onPhoto, onEscalate, onBack }) {
-  const failed = verifyResult && !verifyResult.verified;
+/**
+ * B3d ID step (2026-07-05, Hector's iPad verdict): PHOTO-CAPTURE is the
+ * PRIMARY path — front camera (mirrored preview / raw capture), "I'm ready"
+ * → 5s countdown → server-side OCR (POST id-photo-extract) → confirmation
+ * panel (no guest editing: wrong data → retake or staff). The pdf417 barcode
+ * scanner remains the SECONDARY path ("Scan the barcode instead" — it still
+ * works great on Android kiosks), with its upload fallback intact.
+ */
+function IdScreen({ t, busy, err, verifyResult, clearVerify, track, onExtract, onConfirm, onScanned, onScannerPhoto, onEscalate, onStaffAssist, onBack }) {
+  const videoRef = useRef(null);
+  const streamRef = useRef(null);
+  const fileRef = useRef(null);
+  const [mode, setMode] = useState('photo'); // photo (primary) | scanner (secondary)
+  const [phase, setPhase] = useState('camera'); // camera | countdown | extracting | confirm | limit
+  const [count, setCount] = useState(5);
+  const [cameraOn, setCameraOn] = useState(false);
+  const [cameraFailed, setCameraFailed] = useState(false);
+  const [photo, setPhoto] = useState(null);
+  const [fields, setFields] = useState(null);
+  const [warnings, setWarnings] = useState([]);
+  const [localErr, setLocalErr] = useState('');
+
+  const stopCam = useCallback(() => {
+    try { streamRef.current?.getTracks?.().forEach((track_) => track_.stop()); } catch {}
+    streamRef.current = null;
+    if (videoRef.current) {
+      try { videoRef.current.pause(); } catch {}
+      try { videoRef.current.srcObject = null; } catch {}
+    }
+    setCameraOn(false);
+  }, []);
+
+  const requestStream = () => navigator.mediaDevices.getUserMedia({
+    video: { facingMode: 'user', width: { ideal: 1280 }, height: { ideal: 720 } },
+    audio: false,
+  });
+
+  const startCam = useCallback(async () => {
+    setCameraFailed(false);
+    let stream = null;
+    try {
+      stream = await requestStream();
+    } catch {
+      // WebKit single-active-stream rule — give the OS 500ms and retry once.
+      await new Promise((resolve) => setTimeout(resolve, 500));
+      try { stream = await requestStream(); } catch { stream = null; }
+    }
+    if (!stream) { setCameraFailed(true); return; }
+    streamRef.current = stream;
+    setCameraOn(true);
+    setTimeout(() => {
+      if (videoRef.current && streamRef.current) {
+        videoRef.current.srcObject = streamRef.current;
+        videoRef.current.play().catch(() => {});
+      }
+    }, 0);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Camera runs only while aiming / counting down; FULL teardown otherwise
+  // and on unmount (WebKit single-stream rule — the selfie step is next).
+  useEffect(() => {
+    if (mode === 'photo' && (phase === 'camera' || phase === 'countdown')) {
+      if (!streamRef.current) startCam();
+    } else {
+      stopCam();
+    }
+  }, [mode, phase, startCam, stopCam]);
+  useEffect(() => () => stopCam(), [stopCam]);
+
+  // Raw-frame capture (unmirrored — the CSS mirror never reaches the canvas),
+  // downscaled to ≤1600px wide for a fast upload that stays OCR-readable.
+  const captureFrame = () => {
+    const video = videoRef.current;
+    if (!video || !video.videoWidth) return null;
+    const scale = Math.min(1, 1600 / video.videoWidth);
+    const canvas = document.createElement('canvas');
+    canvas.width = Math.round(video.videoWidth * scale);
+    canvas.height = Math.round(video.videoHeight * scale);
+    canvas.getContext('2d').drawImage(video, 0, 0, canvas.width, canvas.height);
+    try { return canvas.toDataURL('image/jpeg', 0.9); } catch { return null; }
+  };
+
+  const runExtract = async (dataUrl) => {
+    setPhoto(dataUrl);
+    setLocalErr('');
+    setPhase('extracting');
+    const out = await onExtract(dataUrl);
+    if (!out || out.code === 'STALE' || out.code === 'FATAL') return;
+    if (out.ok) {
+      setFields(out.fields || {});
+      setWarnings(Array.isArray(out.warnings) ? out.warnings : []);
+      setPhase('confirm');
+      return;
+    }
+    if (out.code === 'EXTRACT_LIMIT') { setPhase('limit'); return; }
+    if (out.code === 'OCR_UNAVAILABLE') {
+      // OCR down (or older backend without the endpoint) → barcode fallback.
+      setLocalErr(t('kiosk.idOcrUnavailable'));
+      setMode('scanner');
+      setPhase('camera');
+      return;
+    }
+    if (out.code === 'INVALID_PHOTO') { setLocalErr(t('kiosk.invalidPhoto')); setPhase('camera'); return; }
+    setLocalErr(out.message || t('kiosk.genericError'));
+    setPhase('camera');
+  };
+
+  // Countdown 5→1 (big kiosk-scale digits) → capture → extract.
+  useEffect(() => {
+    if (phase !== 'countdown') return undefined;
+    if (count <= 0) {
+      const dataUrl = captureFrame();
+      stopCam();
+      if (!dataUrl) { setLocalErr(t('kiosk.idPhotoCameraFailed')); setPhase('camera'); return undefined; }
+      runExtract(dataUrl);
+      return undefined;
+    }
+    const timer = setTimeout(() => setCount((v) => v - 1), 1000);
+    return () => clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [phase, count]);
+
+  const onUploadFile = (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => { stopCam(); runExtract(String(reader.result)); };
+    reader.readAsDataURL(file);
+    e.target.value = '';
+  };
+
+  const retake = () => {
+    track('ID_PHOTO_RETAKE');
+    clearVerify();
+    setFields(null);
+    setWarnings([]);
+    setPhoto(null);
+    setLocalErr('');
+    setCount(5);
+    setPhase('camera');
+  };
+
+  const verifyFailed = verifyResult && !verifyResult.verified;
+  const FIELD_KEYS = ['firstName', 'lastName', 'dateOfBirth', 'licenseNumber', 'licenseState', 'licenseExpiry'];
+  const anyMissing = fields ? FIELD_KEYS.some((key) => !fields[key]) : false;
+  // Name/DOB/expiry are the verify-critical trio — a null here guarantees a
+  // verify failure, so the confirm CTA gets demoted below "Retake photo".
+  const criticalMissing = fields
+    ? (!fields.firstName || !fields.lastName || !fields.dateOfBirth || !fields.licenseExpiry)
+    : false;
+
+  // ── Secondary path: the pdf417 barcode scanner (Android kiosks) ────────────
+  if (mode === 'scanner') {
+    return (
+      <div className="kio-main">
+        <div className="kio-h2">{t('kiosk.idTitle')}</div>
+        <p className="kio-sub">{t('kiosk.idSub')}</p>
+        {localErr ? <div className="kio-note" style={{ marginBottom: 10 }}>{localErr}</div> : null}
+        <div className="kio-panel" style={{ maxWidth: 560, textAlign: 'center' }}>
+          <LicenseScanner
+            onDecode={onScanned}
+            onPhoto={onScannerPhoto}
+            facingMode="user"
+            labels={{
+              slowScanHint: t('kiosk.scanSlowHint'),
+              scanButton: `📷 ${t('kiosk.scanLicenseBtn')}`,
+              stopButton: `■ ${t('kiosk.scanStopBtn')}`,
+              uploadButton: `⬆ ${t('kiosk.scanUploadBtn')}`,
+              holdSteady: t('kiosk.scanHoldSteady'),
+              scannedPrefix: t('kiosk.scanScannedPrefix'),
+              scannedFallback: t('kiosk.scanScannedFallback'),
+              cameraUnavailable: t('kiosk.scanCameraUnavailable'),
+              liveScanUnavailable: t('kiosk.scanLiveUnavailable'),
+              readingBarcode: t('kiosk.scanReading'),
+              photoNoBarcode: t('kiosk.scanPhotoNoBarcode'),
+              photoReadFailed: t('kiosk.scanPhotoReadFailed'),
+              helperNote: t('kiosk.scanHelperNote'),
+            }}
+          />
+        </div>
+        {err ? <div className="kio-error">{err}</div> : null}
+        <div className="kio-row" style={{ marginTop: 16 }}>
+          <button type="button" className="kio-btn ghost sm" onClick={() => { setLocalErr(''); setMode('photo'); setPhase('camera'); }}>
+            📸 {t('kiosk.idPhotoBackToPhoto')}
+          </button>
+          <button type="button" className="kio-btn ghost sm" onClick={onEscalate}>
+            🎧 {t('kiosk.idCantScan')}
+          </button>
+        </div>
+        <div style={{ marginTop: 14 }}>
+          <button type="button" className="kio-btn back" onClick={onBack}>‹ {t('kiosk.back')}</button>
+        </div>
+      </div>
+    );
+  }
+
+  // ── Primary path: photo capture + server-side OCR ──────────────────────────
   return (
     <div className="kio-main">
-      <div className="kio-h2">{t('kiosk.idTitle')}</div>
-      <p className="kio-sub">{t('kiosk.idSub')}</p>
-      <div className="kio-note">🔒 {t('kiosk.idPrivacy')}</div>
-      <div className="kio-panel" style={{ maxWidth: 560, textAlign: 'center' }}>
-        <LicenseScanner
-          onDecode={onScanned}
-          onPhoto={onPhoto}
-          // Mounted kiosk tablet: the guest FACES the screen → FRONT camera
-          // (loaner keeps its 'environment' default). The component mirrors
-          // only the preview; decode + evidence capture use raw frames.
-          facingMode="user"
-          labels={{
-            slowScanHint: t('kiosk.scanSlowHint'),
-            scanButton: `📷 ${t('kiosk.scanLicenseBtn')}`,
-            stopButton: `■ ${t('kiosk.scanStopBtn')}`,
-            uploadButton: `⬆ ${t('kiosk.scanUploadBtn')}`,
-            holdSteady: t('kiosk.scanHoldSteady'),
-            scannedPrefix: t('kiosk.scanScannedPrefix'),
-            scannedFallback: t('kiosk.scanScannedFallback'),
-            cameraUnavailable: t('kiosk.scanCameraUnavailable'),
-            liveScanUnavailable: t('kiosk.scanLiveUnavailable'),
-            readingBarcode: t('kiosk.scanReading'),
-            photoNoBarcode: t('kiosk.scanPhotoNoBarcode'),
-            photoReadFailed: t('kiosk.scanPhotoReadFailed'),
-            helperNote: t('kiosk.scanHelperNote'),
-          }}
-        />
-      </div>
-      {failed ? (
-        <div className="kio-panel" style={{ maxWidth: 560, marginTop: 14 }}>
-          <VerifyChecks t={t} result={verifyResult} />
+      <div className="kio-h2">{t('kiosk.idPhotoTitle')}</div>
+      <p className="kio-sub">{t('kiosk.idPhotoSub')}</p>
+      {(phase === 'camera' || phase === 'confirm') ? <div className="kio-note">🔒 {t('kiosk.idPrivacy')}</div> : null}
+
+      {(phase === 'camera' || phase === 'countdown') ? (
+        <>
+          <div style={{ position: 'relative', width: 'min(560px, 92vw)' }}>
+            <div className="kio-scanbox" style={{ width: '100%', minHeight: 260, padding: 0, overflow: 'hidden' }}>
+              {cameraOn ? (
+                // Mirrored PREVIEW only — captureFrame reads raw frames.
+                // eslint-disable-next-line jsx-a11y/media-has-caption
+                <video ref={videoRef} muted playsInline style={{ width: '100%', transform: 'scaleX(-1)' }} />
+              ) : (
+                <span style={{ fontSize: 44 }}>📷</span>
+              )}
+            </div>
+            {phase === 'countdown' ? (
+              <div style={{
+                position: 'absolute', inset: 0, borderRadius: 20,
+                display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
+                background: 'rgba(33,26,56,.35)',
+              }}>
+                <div style={{ fontSize: 120, fontWeight: 850, color: '#fff', lineHeight: 1, textShadow: '0 4px 18px rgba(0,0,0,.45)' }}>
+                  {count}
+                </div>
+                <div style={{ color: '#fff', fontWeight: 800, fontSize: 18, marginTop: 6 }}>{t('kiosk.idPhotoHoldStill')}</div>
+              </div>
+            ) : null}
+          </div>
+          {phase === 'camera' ? (
+            <div className="kio-row" style={{ marginTop: 16 }}>
+              {cameraOn ? (
+                <button
+                  type="button"
+                  className="kio-btn"
+                  onClick={() => { track('ID_PHOTO_READY'); setLocalErr(''); setCount(5); setPhase('countdown'); }}
+                >
+                  📸 {t('kiosk.idPhotoReady')}
+                </button>
+              ) : (
+                <button type="button" className="kio-btn sm" onClick={startCam}>📷 {t('kiosk.selfieStartCamera')}</button>
+              )}
+              {/* Upload fallback always visible (kiosk resilience rule). */}
+              <button type="button" className="kio-btn ghost sm" onClick={() => fileRef.current?.click()}>
+                ⬆ {t('kiosk.idPhotoUpload')}
+              </button>
+            </div>
+          ) : null}
+          {cameraFailed ? <div className="kio-error">{t('kiosk.idPhotoCameraFailed')}</div> : null}
+        </>
+      ) : null}
+
+      {phase === 'extracting' ? (
+        <div className="kio-panel" style={{ maxWidth: 560, textAlign: 'center' }}>
+          <div className="kio-h2" style={{ fontSize: 22 }}>⏳ {t('kiosk.idPhotoExtracting')}</div>
+          <p className="kio-sub" style={{ margin: '6px auto 0', fontSize: 14 }}>{t('kiosk.idPhotoExtractingSub')}</p>
         </div>
       ) : null}
+
+      {phase === 'confirm' && fields ? (
+        <>
+          <div className="kio-h2" style={{ fontSize: 22, marginTop: 4 }}>{t('kiosk.idPhotoConfirmTitle')}</div>
+          <div className="kio-panel" style={{ maxWidth: 560 }}>
+            <div className="kio-kv"><span className="kio-l">{t('kiosk.idPhotoFieldName')}</span><b>{[fields.firstName, fields.lastName].filter(Boolean).join(' ') || '—'}</b></div>
+            <div className="kio-kv"><span className="kio-l">{t('kiosk.idPhotoFieldDob')}</span><b>{fields.dateOfBirth || '—'}</b></div>
+            <div className="kio-kv"><span className="kio-l">{t('kiosk.idPhotoFieldLicense')}</span><b>{fields.licenseNumber || '—'}</b></div>
+            <div className="kio-kv"><span className="kio-l">{t('kiosk.idPhotoFieldState')}</span><b>{fields.licenseState || '—'}</b></div>
+            <div className="kio-kv"><span className="kio-l">{t('kiosk.idPhotoFieldExpiry')}</span><b>{fields.licenseExpiry || '—'}</b></div>
+          </div>
+          {(anyMissing || warnings.length > 0) ? (
+            <p className="kio-sub" style={{ fontSize: 13.5, marginTop: 10, maxWidth: 560 }}>{t('kiosk.idPhotoMissingHint')}</p>
+          ) : null}
+          {verifyFailed ? (
+            <div className="kio-panel" style={{ maxWidth: 560, marginTop: 10 }}>
+              <VerifyChecks t={t} result={verifyResult} />
+            </div>
+          ) : null}
+          <div className="kio-row" style={{ marginTop: 16 }}>
+            {verifyFailed ? (
+              verifyResult.escalateSuggested ? (
+                <>
+                  <button type="button" className="kio-btn sm" onClick={onEscalate}>🎧 {t('kiosk.connectAgent')}</button>
+                  <button type="button" className="kio-btn ghost sm" disabled={busy} onClick={retake}>{t('kiosk.idPhotoRetake')}</button>
+                  {/* Employee-facing (B3c) — discreet on purpose. */}
+                  {onStaffAssist ? (
+                    <button type="button" className="kio-btn back" onClick={onStaffAssist}>🔧 {t('kiosk.assistEntry')}</button>
+                  ) : null}
+                </>
+              ) : (
+                <>
+                  <button type="button" className="kio-btn sm" disabled={busy} onClick={retake}>{t('kiosk.idPhotoRetake')}</button>
+                  <button type="button" className="kio-btn ghost sm" onClick={onEscalate}>🎧 {t('kiosk.getHelp')}</button>
+                </>
+              )
+            ) : criticalMissing ? (
+              // GD sign-off item: a null name/DOB/expiry means confirming just
+              // burns a verify attempt on a guaranteed failure — RETAKE leads.
+              <>
+                <button type="button" className="kio-btn" disabled={busy} onClick={retake}>{t('kiosk.idPhotoRetake')} ›</button>
+                <button
+                  type="button"
+                  className="kio-btn ghost sm"
+                  disabled={busy}
+                  onClick={() => { track('ID_PHOTO_CONFIRMED'); onConfirm(fields, photo); }}
+                >
+                  {t('kiosk.idPhotoConfirmYes')}
+                </button>
+              </>
+            ) : (
+              <>
+                <button
+                  type="button"
+                  className="kio-btn"
+                  disabled={busy}
+                  onClick={() => { track('ID_PHOTO_CONFIRMED'); onConfirm(fields, photo); }}
+                >
+                  {t('kiosk.idPhotoConfirmYes')} ›
+                </button>
+                <button type="button" className="kio-btn ghost sm" disabled={busy} onClick={retake}>{t('kiosk.idPhotoRetake')}</button>
+              </>
+            )}
+          </div>
+        </>
+      ) : null}
+
+      {phase === 'limit' ? (
+        <div style={{ maxWidth: 560 }}>
+          <div className="kio-h2" style={{ fontSize: 22 }}>{t('kiosk.idPhotoLimitTitle')}</div>
+          <p className="kio-sub">{t('kiosk.idPhotoLimitBody')}</p>
+          <div className="kio-row">
+            <button type="button" className="kio-btn sm" onClick={onEscalate}>🎧 {t('kiosk.connectAgent')}</button>
+          </div>
+        </div>
+      ) : null}
+
+      <input ref={fileRef} type="file" accept="image/*" capture="user" style={{ display: 'none' }} onChange={onUploadFile} />
+      {localErr && phase === 'camera' ? <div className="kio-error">{localErr}</div> : null}
       {err ? <div className="kio-error">{err}</div> : null}
-      <div className="kio-row" style={{ marginTop: 16 }}>
-        <button type="button" className="kio-btn ghost sm" onClick={onEscalate}>
-          🎧 {t('kiosk.idCantScan')}
-        </button>
-      </div>
+
+      {phase === 'camera' ? (
+        <div className="kio-row" style={{ marginTop: 14 }}>
+          {/* Secondary path — pdf417 still shines on Android kiosks. */}
+          <button type="button" className="kio-btn ghost sm" onClick={() => { setLocalErr(''); stopCam(); setMode('scanner'); }}>
+            {t('kiosk.idPhotoScannerLink')}
+          </button>
+          <button type="button" className="kio-btn ghost sm" onClick={onEscalate}>🎧 {t('kiosk.idCantScan')}</button>
+        </div>
+      ) : null}
       <div style={{ marginTop: 14 }}>
         <button type="button" className="kio-btn back" onClick={onBack}>‹ {t('kiosk.back')}</button>
       </div>
@@ -877,7 +1342,7 @@ function VerifyChecks({ t, result }) {
   );
 }
 
-function SelfieScreen({ t, busy, err, selfie, setSelfie, verifyResult, onSubmit, onContinue, onRetryScan, onEscalate }) {
+function SelfieScreen({ t, busy, err, selfie, setSelfie, verifyResult, onSubmit, onContinue, onRetryScan, onEscalate, onStaffAssist }) {
   const videoRef = useRef(null);
   const streamRef = useRef(null);
   const fileRef = useRef(null);
@@ -996,6 +1461,12 @@ function SelfieScreen({ t, busy, err, selfie, setSelfie, verifyResult, onSubmit,
           <button type="button" className="kio-btn sm" onClick={onEscalate}>🎧 {t('kiosk.connectAgent')}</button>
           <button type="button" className="kio-btn ghost sm" onClick={onRetryScan}>{t('kiosk.tryScanAgain')}</button>
         </div>
+        {/* Employee-facing (B3c) — discreet on purpose. */}
+        {onStaffAssist ? (
+          <div style={{ marginTop: 18 }}>
+            <button type="button" className="kio-btn back" onClick={onStaffAssist}>🔧 {t('kiosk.assistEntry')}</button>
+          </div>
+        ) : null}
       </div>
     );
   }

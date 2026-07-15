@@ -319,11 +319,27 @@ export const authService = {
       where: { id: userId, ...(scope?.tenantId ? { tenantId: scope.tenantId } : {}) },
       select: { lockPinHash: true, lockPinUpdatedAt: true }
     });
-    if (!user) throw new Error('User not found');
-    if (!user.lockPinHash) throw new Error('PIN not set');
+    // Machine-readable `code` on each throw (2026-07-06, kiosk B3c review):
+    // the kiosk staff-assist dispatch keys on it instead of regexing the
+    // message. Messages and status semantics are UNCHANGED — the property
+    // is additive.
+    if (!user) {
+      const err = new Error('User not found');
+      err.code = 'USER_NOT_FOUND';
+      throw err;
+    }
+    if (!user.lockPinHash) {
+      const err = new Error('PIN not set');
+      err.code = 'NO_PIN_SET';
+      throw err;
+    }
 
     const ok = await bcrypt.compare(String(pin || ''), user.lockPinHash);
-    if (!ok) throw new Error('Invalid PIN');
+    if (!ok) {
+      const err = new Error('Invalid PIN');
+      err.code = 'INVALID_PIN';
+      throw err;
+    }
     return { ok: true, hasPin: true, lockPinUpdatedAt: user.lockPinUpdatedAt || null };
   },
 
