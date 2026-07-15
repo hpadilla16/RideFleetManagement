@@ -141,6 +141,16 @@ export function isPlannerMovableReservation(reservation) {
   return !['CHECKED_OUT', 'CANCELLED', 'NO_SHOW'].includes(status);
 }
 
+// Mirror of the backend's ASSIGNABLE_STATUSES for POST /api/planner/assign
+// (QA MAJOR 2026-07-14): the snapshot has no status filter, so CHECKED_IN /
+// PENDING_FRANCHISE_IMPORT rows overlap the visible range and would 409 with
+// LOCKED_STATUS if offered as drag/bulk-clear candidates. Keep this in sync
+// with planner.actions.service.js.
+export function isPlannerAssignableReservation(reservation) {
+  const status = String(reservation?.status || '').toUpperCase();
+  return status === 'NEW' || status === 'CONFIRMED';
+}
+
 export function intervalsOverlap(startA, endA, startB, endB) {
   return startA < endB && endA > startB;
 }

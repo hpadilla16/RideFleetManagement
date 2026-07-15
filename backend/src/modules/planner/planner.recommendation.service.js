@@ -11,7 +11,8 @@ import {
   loadPlannerVehicles,
   normalizePlannerDateRange,
   reservationLocationId,
-  reservationVehicleTypeId
+  reservationVehicleTypeId,
+  tenantWhere
 } from './planner.service.js';
 
 function previousAndNextIntervals(intervals = [], start, end) {
@@ -437,6 +438,94 @@ async function buildWashPlan({ start, end, locationId = null, vehicleTypeId = nu
 }
 
 export const plannerRecommendationService = {
+  /**
+   * Per-reservation ranked vehicle suggestions for the board's side panel
+   * (2026-07-14 planner reimagining). Read-only — reuses the auto-accommodate
+   * ranking (vehicleIsCompatible + scoreVehicleFit + explainVehicleRecommendation)
+   * for a single reservation and persists NO PlannerScenario. Capped at 5.
+   */
+  async suggestForReservation(input = {}, scope = {}) {
+    if (!scope?.tenantId) throw new Error('tenantId is required for planner suggestions');
+    const reservationId = input.reservationId ? String(input.reservationId) : null;
+    if (!reservationId) throw new Error('reservationId is required for planner suggestions');
+
+    const target = await prisma.reservation.findFirst({
+      where: {
+        id: reservationId,
+        ...(tenantWhere(scope) || {})
+      },
+      select: {
+        id: true,
+        pickupAt: true,
+        returnAt: true
+      }
+    });
+    if (!target) throw new Error('Reservation not found');
+
+    // Pad the window by the same 2-day horizon scoreVehicleFit assumes for
+    // open gaps, so neighboring occupancy feeds the idle-gap/turnaround parts.
+    const start = new Date(new Date(target.pickupAt).getTime() - 2 * DAY_MS);
+    const end = new Date(new Date(target.returnAt).getTime() + 2 * DAY_MS);
+    const [reservations, vehicles, fullRuleSet] = await Promise.all([
+      loadPlannerReservations({ start, end, scope }),
+      loadPlannerVehicles({ start, end, scope }),
+      plannerRulesService.getRuleSet(scope)
+    ]);
+
+    // Re-find through the scoped loader so program/location visibility rules
+    // apply exactly like the snapshot (a reservation outside the caller's
+    // scope reads as not found).
+    const reservation = reservations.find((row) => row.id === reservationId);
+    if (!reservation) throw new Error('Reservation not found');
+
+    const resLocationId = reservationLocationId(reservation);
+    const resVehicleTypeId = reservationVehicleTypeId(reservation);
+    const locationOverrides = resLocationId ? (fullRuleSet.locationOverrides?.[resLocationId] || {}) : {};
+    const vehicleTypeOverrides = resVehicleTypeId ? (fullRuleSet.vehicleTypeOverrides?.[resVehicleTypeId] || {}) : {};
+    const effectiveRules = { ...fullRuleSet, ...locationOverrides, ...vehicleTypeOverrides };
+
+    const occupancy = buildOccupancyMap({
+      vehicles,
+      reservations,
+      ignoredReservationIds: new Set([reservation.id])
+    });
+    const startMs = new Date(reservation.pickupAt).getTime();
+    const endMs = new Date(reservation.returnAt).getTime();
+
+    const ranked = vehicles
+      .filter((vehicle) => vehicle.id !== reservation.vehicleId)
+      .filter((vehicle) => vehicleIsCompatible(vehicle, reservation, effectiveRules))
+      .map((vehicle) => {
+        const intervals = occupancy.get(vehicle.id) || [];
+        const hasConflict = intervals.some((interval) => intervalsOverlap(interval.start, interval.end, startMs, endMs));
+        if (hasConflict) return null;
+        const scored = scoreVehicleFit({ vehicle, reservation, intervals, rules: effectiveRules });
+        return {
+          vehicle,
+          score: scored.score,
+          scoreParts: scored.parts
+        };
+      })
+      .filter(Boolean)
+      .sort((left, right) => right.score - left.score)
+      .slice(0, 5);
+
+    return {
+      reservationId: reservation.id,
+      suggestions: ranked.map(({ vehicle, score, scoreParts }) => ({
+        vehicleId: vehicle.id,
+        plate: vehicle.plate || '',
+        label: humanVehicleLabel(vehicle),
+        score,
+        reasons: explainVehicleRecommendation({
+          reservation,
+          rules: effectiveRules,
+          scoreParts
+        })
+      }))
+    };
+  },
+
   async simulateAutoAccommodate(input = {}, scope = {}) {
     if (!scope?.tenantId) throw new Error('tenantId is required for planner simulation');
     const { start, end } = normalizePlannerDateRange(input);

@@ -1,17 +1,17 @@
 'use client';
 
 import { useCallback, useState } from 'react';
-import { api } from '../../lib/client';
+import { useTranslation } from 'react-i18next';
+import { API_BASE, api, readStoredToken } from '../../lib/client';
 import {
   createPlannerCopilotConfig,
 } from './planner-utils.mjs';
 import {
   buildAutoAssignCandidates,
   buildClearAssignmentCandidates,
-  buildDropMovePlan,
-  buildPlannerRangePayload,
-  buildVehicleClearUpdates
+  buildPlannerRangePayload
 } from './planner-action-helpers.mjs';
+import { parseAssignConflict } from './planner-board-helpers.mjs';
 
 export function usePlannerActions({
   token,
@@ -22,20 +22,15 @@ export function usePlannerActions({
   rangeEnd,
   filterLocationId,
   filterVehicleTypeId,
-  plannerRules,
-  vehicleTracks,
-  dragItem,
-  dragMeta,
   lockedReservationIds,
-  replaceReservationInState,
+  applyAssignmentLocally,
   reloadPlannerSnapshot,
+  showToast,
   setMsg,
-  setDragItem,
-  setDragMeta,
-  setDraggingId,
   setOverbookedReservationIds,
   setPlannerShortage
 }) {
+  const { t } = useTranslation();
   const [plannerRunning, setPlannerRunning] = useState('');
   const [plannerScenario, setPlannerScenario] = useState(null);
   const [plannerMaintenancePlan, setPlannerMaintenancePlan] = useState(null);
@@ -56,96 +51,150 @@ export function usePlannerActions({
     setPlannerCopilot(null);
   }, []);
 
-  const clearDragState = () => {
-    setDragItem(null);
-    setDragMeta(null);
-    setDraggingId('');
-  };
+  const conflictMessage = useCallback((conflict) => {
+    const byCode = {
+      OCCUPIED: t('planner.conflictOccupied'),
+      TURNAROUND: t('planner.conflictTurnaround'),
+      TYPE_MISMATCH: t('planner.conflictTypeMismatch'),
+      CROSS_LOCATION: t('planner.conflictCrossLocation'),
+      LOCKED_STATUS: t('planner.conflictLockedStatus')
+    };
+    const base = byCode[conflict.code] || t('planner.assignFailed');
+    return conflict.detail ? `${base} — ${conflict.detail}` : base;
+  }, [t]);
 
-  const onDropReservation = async (trackVehicleId, dayIndexRaw, dropMetrics = null) => {
-    if (!dragItem) return;
-    const reservation = dragItem;
-    if (lockedReservationIds.has(reservation.id)) return;
+  // Direct fetch (same auth conventions as api()) because the shared helper
+  // folds 409 bodies into a plain message and would drop {code, detail}.
+  const callAssign = useCallback(async ({ reservationId, vehicleId, force = false }) => {
+    const headers = { 'Content-Type': 'application/json' };
+    const authToken = token || readStoredToken();
+    if (authToken) headers.Authorization = `Bearer ${authToken}`;
+    const res = await fetch(`${API_BASE}${scopedPath('/api/planner/assign')}`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({
+        reservationId,
+        vehicleId: vehicleId || null,
+        ...(force ? { force: true } : {}),
+        ...(isSuper && activeTenantId ? { tenantId: activeTenantId } : {})
+      })
+    });
+    if (res.ok) return res.status === 204 ? null : res.json();
+    let body = null;
+    try { body = await res.json(); } catch {}
+    const error = new Error(body?.error || `/api/planner/assign failed (${res.status})`);
+    error.status = res.status;
+    error.conflictCode = body?.code || null;
+    error.conflictDetail = body?.detail || '';
+    throw error;
+  }, [scopedPath, isSuper, activeTenantId, token]);
 
-    const dayIndex = Number(dayIndexRaw);
-    if (!Number.isFinite(dayIndex) || dayIndex < 0) return;
+  // Assign (or unassign with vehicleId=null) a reservation to a vehicle.
+  // Optimistic: the board updates immediately and reverts on failure.
+  const performAssign = useCallback(async (reservation, targetVehicleId, { force = false, silent = false } = {}) => {
+    if (!reservation?.id) return false;
+    if (lockedReservationIds.has(reservation.id)) {
+      showToast({ text: t('planner.lockedReservation'), kind: 'error' });
+      return false;
+    }
+    const previousVehicleId = reservation.vehicleId || null;
+    const nextVehicleId = targetVehicleId || null;
+    if (previousVehicleId === nextVehicleId && !force) return false;
 
+    applyAssignmentLocally(reservation, nextVehicleId);
     try {
-      const movePlan = buildDropMovePlan({
-        reservation,
-        trackVehicleId,
-        dayIndexRaw,
-        dropMetrics,
-        dragMeta,
-        rangeStart,
-        vehicleTracks
-      });
-      if (!movePlan) return;
-      const ok = window.confirm(
-        `Move reservation ${reservation.reservationNumber}?\n\n` +
-        `Pickup: ${movePlan.newPickup.toLocaleString()}\n` +
-        `Return: ${movePlan.newReturn.toLocaleString()}\n` +
-        `Vehicle: ${movePlan.targetVehicleLabel}`
-      );
-      if (!ok) {
-        setMsg('Move cancelled');
-        clearDragState();
-        return;
+      await callAssign({ reservationId: reservation.id, vehicleId: nextVehicleId, force });
+      if (!silent) {
+        showToast({
+          text: nextVehicleId
+            ? t('planner.assignSuccess', { number: reservation.reservationNumber || '' })
+            : t('planner.unassignSuccess', { number: reservation.reservationNumber || '' }),
+          kind: 'success',
+          ttlMs: 10000,
+          action: {
+            label: t('planner.undo'),
+            // force:true only bypasses the strict type-match rule (occupancy and
+            // locked-status are still enforced server-side), so restoring the
+            // previous placement — which the server had already accepted, possibly
+            // via "Force" — cannot get stuck behind its own type rule.
+            onClick: () => performAssign({ ...reservation, vehicleId: nextVehicleId }, previousVehicleId, { silent: true, force: true })
+          }
+        });
+      } else {
+        showToast({ text: t('planner.undone'), kind: 'success' });
       }
-
-      const updatedReservation = await api(`/api/reservations/${reservation.id}`, {
-        method: 'PATCH',
-        body: JSON.stringify({
-          ...movePlan.patch,
-          ...(isSuper && activeTenantId ? { tenantId: activeTenantId } : {})
-        })
-      }, token);
-      replaceReservationInState(updatedReservation);
-      setMsg(`Reservation ${reservation.reservationNumber} moved`);
-      clearDragState();
+      return true;
     } catch (error) {
-      setMsg(error.message);
-      clearDragState();
+      // Revert the optimistic move.
+      applyAssignmentLocally({ ...reservation, vehicleId: nextVehicleId }, previousVehicleId);
+      const conflict = parseAssignConflict(error);
+      // Rule conflicts (never occupancy) are force-bypassable server-side.
+      if (conflict.status === 409 && (conflict.code === 'TYPE_MISMATCH' || conflict.code === 'CROSS_LOCATION')) {
+        showToast({
+          text: conflictMessage(conflict),
+          kind: 'error',
+          ttlMs: 12000,
+          action: {
+            label: t('planner.force'),
+            onClick: () => performAssign(reservation, nextVehicleId, { force: true })
+          }
+        });
+      } else if (conflict.status === 409 && conflict.code) {
+        showToast({ text: conflictMessage(conflict), kind: 'error', ttlMs: 8000 });
+      } else {
+        showToast({ text: error.message || t('planner.assignFailed'), kind: 'error', ttlMs: 8000 });
+      }
+      return false;
     }
-  };
+  }, [lockedReservationIds, applyAssignmentLocally, callAssign, showToast, conflictMessage, t]);
 
-  const reassignReservations = async (updates, successMessage, overbookedIds = []) => {
-    if (!updates.length) {
-      setOverbookedReservationIds(overbookedIds);
-      setMsg(successMessage);
-      return;
-    }
-    for (const update of updates) {
-      const updatedReservation = await api(`/api/reservations/${update.id}`, {
-        method: 'PATCH',
-        body: JSON.stringify({
-          ...update.patch,
-          ...(isSuper && activeTenantId ? { tenantId: activeTenantId } : {})
-        })
-      }, token);
-      replaceReservationInState(updatedReservation);
-    }
-    setOverbookedReservationIds(overbookedIds);
-    setMsg(successMessage);
-  };
+  const fetchSuggestions = useCallback(async (reservationId) => {
+    const result = await api(scopedPath('/api/planner/suggest'), {
+      method: 'POST',
+      body: JSON.stringify({
+        reservationId,
+        ...(isSuper && activeTenantId ? { tenantId: activeTenantId } : {})
+      })
+    }, token);
+    return Array.isArray(result?.suggestions) ? result.suggestions : [];
+  }, [scopedPath, isSuper, activeTenantId, token]);
 
   const clearVisibleAssignments = async () => {
     const candidates = buildClearAssignmentCandidates(reservations, rangeStart, rangeEnd);
     if (!candidates.length) {
-      setMsg('No movable reservations are currently assigned in this planner range.');
+      setMsg(t('planner.nothingToClear'));
       return;
     }
-    const ok = window.confirm(`Move ${candidates.length} reservation(s) back to Unassigned for this visible planner range?`);
+    const ok = window.confirm(t('planner.confirmClear', { count: candidates.length }));
     if (!ok) return;
     setPlannerRunning('clear');
+    // Candidates already mirror the backend's assignable statuses, but a row
+    // can change state mid-loop (e.g. gets checked out) — skip 409s and keep
+    // going instead of aborting the bulk clear partway (QA MAJOR 2026-07-14).
+    let cleared = 0;
+    let skipped = 0;
+    let lastError = null;
     try {
-      await reassignReservations(
-        buildVehicleClearUpdates(candidates),
-        `${candidates.length} reservation(s) moved back to Unassigned.`,
-        []
-      );
-    } catch (error) {
-      setMsg(error.message || 'Unable to clear assignments');
+      for (const candidate of candidates) {
+        try {
+          await callAssign({ reservationId: candidate.id, vehicleId: null });
+          cleared += 1;
+        } catch (error) {
+          const conflict = parseAssignConflict(error);
+          if (conflict.status === 409) { skipped += 1; continue; }
+          lastError = error;
+          break;
+        }
+      }
+      setOverbookedReservationIds([]);
+      reloadPlannerSnapshot();
+      if (lastError) {
+        setMsg(lastError.message || t('planner.assignFailed'));
+      } else if (skipped > 0) {
+        setMsg(t('planner.clearedPartial', { count: cleared, skipped }));
+      } else {
+        setMsg(t('planner.clearedCount', { count: cleared }));
+      }
     } finally {
       setPlannerRunning('');
     }
@@ -154,7 +203,7 @@ export function usePlannerActions({
   const autoAssignUnassignedReservations = async () => {
     const candidates = buildAutoAssignCandidates(reservations);
     if (!candidates.length) {
-      setMsg('No unassigned movable reservations were found in this planner range.');
+      setMsg(t('planner.noUnassignedInRange'));
       setOverbookedReservationIds([]);
       setPlannerScenario(null);
       return;
@@ -231,7 +280,7 @@ export function usePlannerActions({
     }
   };
 
-  const simulateMaintenancePlan = async () => {
+  const simulateMaintenancePlan = async (maintenanceBufferMinutes = 120) => {
     setPlannerRunning('maintenance');
     try {
       const result = await api(scopedPath('/api/planner/simulate-maintenance'), {
@@ -242,7 +291,7 @@ export function usePlannerActions({
           filterLocationId,
           filterVehicleTypeId,
           tenantId: activeTenantId,
-          extra: { durationMinutes: plannerRules?.maintenanceBufferMinutes || 120 }
+          extra: { durationMinutes: maintenanceBufferMinutes }
         }))
       }, token);
       setPlannerMaintenancePlan(result || null);
@@ -393,7 +442,8 @@ export function usePlannerActions({
     setPlannerCopilotConfig,
     setPlannerCopilotQuestion,
     resetPlannerInsights,
-    onDropReservation,
+    performAssign,
+    fetchSuggestions,
     clearVisibleAssignments,
     autoAssignUnassignedReservations,
     applyPlannerScenario,

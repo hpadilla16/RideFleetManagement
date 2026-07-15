@@ -5,7 +5,6 @@ import { api } from '../../lib/client';
 import { buildPlannerQuery } from './planner-utils.mjs';
 
 const EMPTY_SHORTAGE = { totalCarsNeeded: 0, byDate: [], byVehicleType: [], byLocation: [] };
-const EMPTY_RECOMMENDATION_SUMMARY = { assignmentRecommendations: 0, fleetShortageAlerts: 0 };
 
 export function usePlannerData({
   token,
@@ -21,33 +20,41 @@ export function usePlannerData({
   createPlannerCopilotConfig,
   onMessage
 }) {
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState('');
   const [reservations, setReservations] = useState([]);
   const [vehicles, setVehicles] = useState([]);
+  const [tracks, setTracks] = useState([]);
+  const [counters, setCounters] = useState({});
+  const [unassignedReservations, setUnassignedReservations] = useState([]);
   const [vehicleTypes, setVehicleTypes] = useState([]);
   const [locations, setLocations] = useState([]);
   const [overbookedReservationIds, setOverbookedReservationIds] = useState([]);
   const [plannerRules, setPlannerRules] = useState(null);
   const [plannerShortage, setPlannerShortage] = useState(EMPTY_SHORTAGE);
-  const [plannerRecommendationSummary, setPlannerRecommendationSummary] = useState(EMPTY_RECOMMENDATION_SUMMARY);
 
   useEffect(() => {
     let cancelled = false;
 
     const load = async () => {
       if (isSuper && !activeTenantId) {
+        setLoading(false);
+        setLoadError('');
         setReservations([]);
         setVehicles([]);
+        setTracks([]);
+        setCounters({});
+        setUnassignedReservations([]);
         setVehicleTypes([]);
         setLocations([]);
         setOverbookedReservationIds([]);
         setPlannerRules(null);
         setPlannerShortage(EMPTY_SHORTAGE);
-        setPlannerRecommendationSummary(EMPTY_RECOMMENDATION_SUMMARY);
         setPlannerCopilotConfig(createPlannerCopilotConfig());
-        onMessage?.('Select a tenant to load the planner.');
         return;
       }
 
+      setLoading(true);
       const scopedPath = (path) => {
         if (!isSuper || !activeTenantId) return path;
         const joiner = path.includes('?') ? '&' : '?';
@@ -65,17 +72,26 @@ export function usePlannerData({
       if (cancelled) return;
 
       if (snapshotResult.status === 'fulfilled') {
-        setReservations(snapshotResult.value?.reservations || []);
-        setVehicles(snapshotResult.value?.vehicles || []);
-        setOverbookedReservationIds((snapshotResult.value?.overbookedReservations || []).map((row) => row.id));
-        setPlannerShortage(snapshotResult.value?.shortage || EMPTY_SHORTAGE);
-        setPlannerRecommendationSummary(snapshotResult.value?.recommendationSummary || EMPTY_RECOMMENDATION_SUMMARY);
+        const snapshot = snapshotResult.value || {};
+        setReservations(snapshot.reservations || []);
+        setVehicles(snapshot.vehicles || []);
+        setTracks(Array.isArray(snapshot.tracks) ? snapshot.tracks : []);
+        setCounters(snapshot.counters || {});
+        setUnassignedReservations(Array.isArray(snapshot.unassignedReservations)
+          ? snapshot.unassignedReservations
+          : (snapshot.reservations || []).filter((row) => !row.vehicleId));
+        setOverbookedReservationIds((snapshot.overbookedReservations || []).map((row) => row.id));
+        setPlannerShortage(snapshot.shortage || EMPTY_SHORTAGE);
+        setLoadError('');
       } else {
         setReservations([]);
         setVehicles([]);
+        setTracks([]);
+        setCounters({});
+        setUnassignedReservations([]);
         setOverbookedReservationIds([]);
         setPlannerShortage(EMPTY_SHORTAGE);
-        setPlannerRecommendationSummary(EMPTY_RECOMMENDATION_SUMMARY);
+        setLoadError(snapshotResult.reason?.message || 'Unable to load planner');
       }
 
       if (rulesResult.status === 'fulfilled') setPlannerRules(rulesResult.value || null);
@@ -90,16 +106,14 @@ export function usePlannerData({
       if (locationsResult.status === 'fulfilled') setLocations(locationsResult.value || []);
       else setLocations([]);
 
-      if (snapshotResult.status === 'rejected') {
-        onMessage?.(snapshotResult.reason?.message || 'Unable to load planner');
-      } else if (
+      setLoading(false);
+
+      if (snapshotResult.status === 'fulfilled' && (
         rulesResult.status === 'rejected'
         || copilotConfigResult.status === 'rejected'
         || (canManagePlannerSetup && [vehicleTypesResult, locationsResult].some((row) => row.status === 'rejected'))
-      ) {
+      )) {
         onMessage?.('Planner loaded with limited supporting data');
-      } else {
-        onMessage?.('');
       }
     };
 
@@ -123,10 +137,18 @@ export function usePlannerData({
   ]);
 
   return {
+    loading,
+    loadError,
     reservations,
     setReservations,
     vehicles,
     setVehicles,
+    tracks,
+    setTracks,
+    counters,
+    setCounters,
+    unassignedReservations,
+    setUnassignedReservations,
     vehicleTypes,
     locations,
     overbookedReservationIds,
@@ -134,7 +156,6 @@ export function usePlannerData({
     plannerRules,
     setPlannerRules,
     plannerShortage,
-    setPlannerShortage,
-    plannerRecommendationSummary
+    setPlannerShortage
   };
 }

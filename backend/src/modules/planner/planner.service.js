@@ -585,6 +585,34 @@ export const plannerService = {
         overbooked: overbookedReservationIds.includes(reservation.id)
       }));
 
+    // Header KPIs for the board-first planner (2026-07-14 reimagining):
+    // "today" = the real calendar day, independent of the requested range
+    // start (the legacy pickups/returns counters key off range start and are
+    // kept untouched for the old UI). Movable statuses only — a cancelled
+    // reservation is not an operational pickup.
+    const todayStart = startOfDay(new Date());
+    const todayInRange = todayStart.getTime() >= startOfDay(start).getTime() && todayStart.getTime() < end.getTime();
+    const vehicleTypeNamesById = new Map();
+    vehiclesWithSignals.forEach((vehicle) => {
+      if (vehicle.vehicleType?.id) vehicleTypeNamesById.set(vehicle.vehicleType.id, vehicle.vehicleType.name || vehicle.vehicleType.code || null);
+    });
+    reservations.forEach((reservation) => {
+      if (reservation.vehicleType?.id && !vehicleTypeNamesById.has(reservation.vehicleType.id)) {
+        vehicleTypeNamesById.set(reservation.vehicleType.id, reservation.vehicleType.name || reservation.vehicleType.code || null);
+      }
+    });
+    // Worst shortage entry for today = calculateShortage over the single-day
+    // window (byVehicleType is already the per-type peak for that day).
+    const shortageTodayEntry = todayInRange
+      ? [...calculateShortage({ start: todayStart, end: addDays(todayStart, 1), reservations, vehicles: vehiclesWithSignals }).byVehicleType]
+          .sort((left, right) => right.carsNeeded - left.carsNeeded)[0] || null
+      : null;
+    const shortageToday = shortageTodayEntry ? {
+      count: shortageTodayEntry.carsNeeded,
+      vehicleTypeId: shortageTodayEntry.vehicleTypeId === 'UNSPECIFIED' ? null : shortageTodayEntry.vehicleTypeId,
+      vehicleType: vehicleTypeNamesById.get(shortageTodayEntry.vehicleTypeId) || null
+    } : null;
+
     return {
       range: {
         start: start.toISOString(),
@@ -608,7 +636,15 @@ export const plannerService = {
         lowFuelAttention: vehiclesWithSignals.filter((vehicle) => ['LOW', 'CRITICAL'].includes(String(vehicle.operationalSignals?.telematics?.fuelStatus || '').toUpperCase())).length,
         gpsAttention: vehiclesWithSignals.filter((vehicle) => String(vehicle.operationalSignals?.telematics?.gpsStatus || '').toUpperCase() === 'MISSING').length,
         unassigned: unassignedReservations.length,
-        overbooked: overbookedReservationIds.length
+        overbooked: overbookedReservationIds.length,
+        // Board header KPIs (2026-07-14 reimagining). The 5 keys the new
+        // header consumes — additive, nothing above may be removed while the
+        // old UI is still deployed.
+        unassignedCount: unassignedReservations.length,
+        overbookedCount: overbookedReservationIds.length,
+        pickupsToday: reservations.filter((reservation) => isMovablePlannerStatus(reservation.status) && startOfDay(reservation.pickupAt).getTime() === todayStart.getTime()).length,
+        returnsToday: reservations.filter((reservation) => isMovablePlannerStatus(reservation.status) && startOfDay(reservation.returnAt).getTime() === todayStart.getTime()).length,
+        shortageToday
       },
       reservations: reservations.map((reservation) => reservationItem(reservation)),
       vehicles: vehiclesWithSignals.map((vehicle) => ({

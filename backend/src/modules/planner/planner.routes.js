@@ -154,6 +154,54 @@ plannerRouter.post('/copilot', async (req, res, next) => {
   }
 });
 
+// Single transactional assignment — the board drag-drop handler (2026-07-14
+// reimagining). vehicleId null = unassign. Conflicts come back as 409
+// {error, code: OCCUPIED|LOCKED_STATUS|TYPE_MISMATCH|TURNAROUND|CROSS_LOCATION, detail}.
+plannerRouter.post('/assign', async (req, res, next) => {
+  try {
+    const out = await plannerActionsService.assignVehicle({
+      reservationId: req.body?.reservationId,
+      vehicleId: req.body?.vehicleId ?? null,
+      force: req.body?.force === true,
+      scope: scopeFor(req),
+      actorUserId: req.user?.sub || null
+    });
+    res.json(out);
+  } catch (error) {
+    if (error?.plannerConflictCode) {
+      return res.status(409).json({
+        error: error.message,
+        code: error.plannerConflictCode,
+        detail: error.plannerConflictDetail || error.message
+      });
+    }
+    if (/reservationId is required|tenantId is required/i.test(String(error?.message || ''))) {
+      return res.status(400).json({ error: error.message });
+    }
+    if (/not found/i.test(String(error?.message || ''))) {
+      return res.status(404).json({ error: error.message });
+    }
+    next(error);
+  }
+});
+
+// Per-reservation ranked suggestions for the side panel. Read-only — no
+// PlannerScenario is persisted.
+plannerRouter.post('/suggest', async (req, res, next) => {
+  try {
+    const out = await plannerRecommendationService.suggestForReservation(req.body || {}, scopeFor(req));
+    res.json(out);
+  } catch (error) {
+    if (/reservationId is required|tenantId is required/i.test(String(error?.message || ''))) {
+      return res.status(400).json({ error: error.message });
+    }
+    if (/not found/i.test(String(error?.message || ''))) {
+      return res.status(404).json({ error: error.message });
+    }
+    next(error);
+  }
+});
+
 plannerRouter.post('/apply-plan', async (req, res, next) => {
   try {
     const out = await plannerActionsService.applyScenario({

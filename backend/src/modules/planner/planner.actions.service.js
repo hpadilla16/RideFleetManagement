@@ -1,9 +1,22 @@
 import { prisma } from '../../lib/prisma.js';
 import { activeVehicleBlockOverlapWhere } from '../vehicles/vehicle-blocks.js';
+import { plannerRulesService } from './planner.rules.service.js';
+import { isAssignableReservationStatus } from './planner.service.js';
 
 function tenantWhere(scope = {}) {
   if (scope?.tenantId) return { tenantId: scope.tenantId };
   return scope?.allowCrossTenant ? undefined : { tenantId: '__never__' };
+}
+
+// Conflict errors carry a machine-readable code so the single-assignment
+// endpoint (POST /api/planner/assign, 2026-07-14 board reimagining) can map
+// them to 409 {error, code, detail}. The MESSAGES stay identical to the
+// legacy ones so apply-plan's RECOVERABLE_PATTERNS regexes keep matching.
+function plannerConflict(code, message, detail = null) {
+  const error = new Error(message);
+  error.plannerConflictCode = code;
+  error.plannerConflictDetail = detail || message;
+  return error;
 }
 
 async function ensureReservationForAction(tx, reservationId, scope = {}) {
@@ -18,6 +31,8 @@ async function ensureReservationForAction(tx, reservationId, scope = {}) {
       reservationNumber: true,
       status: true,
       vehicleId: true,
+      vehicleTypeId: true,
+      pickupLocationId: true,
       pickupAt: true,
       returnAt: true
     }
@@ -26,7 +41,7 @@ async function ensureReservationForAction(tx, reservationId, scope = {}) {
   return reservation;
 }
 
-async function ensureVehicleAvailableForReservation(tx, vehicleId, reservation, scope = {}) {
+async function ensureVehicleAvailableForReservation(tx, vehicleId, reservation, scope = {}, { turnaroundMinutes = 0 } = {}) {
   const vehicle = await tx.vehicle.findFirst({
     where: {
       id: vehicleId,
@@ -35,12 +50,14 @@ async function ensureVehicleAvailableForReservation(tx, vehicleId, reservation, 
     select: {
       id: true,
       internalNumber: true,
-      status: true
+      status: true,
+      vehicleTypeId: true,
+      homeLocationId: true
     }
   });
   if (!vehicle) throw new Error('Vehicle not found');
-  if (['IN_MAINTENANCE', 'OUT_OF_SERVICE'].includes(String(vehicle.status || '').toUpperCase())) {
-    throw new Error(`Vehicle ${vehicle.internalNumber || vehicle.id} is not available for assignment`);
+  if (['IN_MAINTENANCE', 'OUT_OF_SERVICE', 'SOLD'].includes(String(vehicle.status || '').toUpperCase())) {
+    throw plannerConflict('LOCKED_STATUS', `Vehicle ${vehicle.internalNumber || vehicle.id} is not available for assignment`);
   }
 
   const conflictingReservation = await tx.reservation.findFirst({
@@ -58,7 +75,7 @@ async function ensureVehicleAvailableForReservation(tx, vehicleId, reservation, 
     }
   });
   if (conflictingReservation) {
-    throw new Error(`Vehicle conflict with reservation ${conflictingReservation.reservationNumber}`);
+    throw plannerConflict('OCCUPIED', `Vehicle conflict with reservation ${conflictingReservation.reservationNumber}`);
   }
 
   const conflictingBlock = await tx.vehicleAvailabilityBlock.findFirst({
@@ -77,7 +94,53 @@ async function ensureVehicleAvailableForReservation(tx, vehicleId, reservation, 
     }
   });
   if (conflictingBlock) {
-    throw new Error(`Vehicle has an active ${String(conflictingBlock.blockType || '').toLowerCase()} during this reservation window`);
+    throw plannerConflict('OCCUPIED', `Vehicle has an active ${String(conflictingBlock.blockType || '').toLowerCase()} during this reservation window`);
+  }
+
+  // Turnaround buffer (PlannerRuleSet.minTurnaroundMinutes): a raw-window
+  // clear vehicle can still be an illegal drop if the neighboring occupancy
+  // does not leave the tenant's configured turnaround gap. Only the /assign
+  // path passes a buffer — apply-plan keeps its historical semantics
+  // (buffer 0, raw overlap only).
+  const bufferMs = Math.max(0, Number(turnaroundMinutes || 0)) * 60 * 1000;
+  if (bufferMs > 0) {
+    const bufferedStart = new Date(new Date(reservation.pickupAt).getTime() - bufferMs);
+    const bufferedEnd = new Date(new Date(reservation.returnAt).getTime() + bufferMs);
+    const turnaroundReservation = await tx.reservation.findFirst({
+      where: {
+        ...(tenantWhere(scope) || {}),
+        vehicleId,
+        id: { not: reservation.id },
+        status: { in: ['NEW', 'CONFIRMED', 'CHECKED_OUT'] },
+        pickupAt: { lt: bufferedEnd },
+        returnAt: { gt: bufferedStart }
+      },
+      select: {
+        id: true,
+        reservationNumber: true
+      }
+    });
+    if (turnaroundReservation) {
+      throw plannerConflict('TURNAROUND', `Vehicle conflict with reservation ${turnaroundReservation.reservationNumber} inside the ${Number(turnaroundMinutes)}-minute turnaround buffer`);
+    }
+
+    const turnaroundBlock = await tx.vehicleAvailabilityBlock.findFirst({
+      where: {
+        ...(tenantWhere(scope) || {}),
+        vehicleId,
+        ...activeVehicleBlockOverlapWhere({
+          start: bufferedStart,
+          end: bufferedEnd
+        })
+      },
+      select: {
+        id: true,
+        blockType: true
+      }
+    });
+    if (turnaroundBlock) {
+      throw plannerConflict('TURNAROUND', `Vehicle has an active ${String(turnaroundBlock.blockType || '').toLowerCase()} inside the ${Number(turnaroundMinutes)}-minute turnaround buffer`);
+    }
   }
 
   return vehicle;
@@ -166,6 +229,105 @@ function normalizeIncomingActions(rawActions = []) {
 }
 
 export const plannerActionsService = {
+  /**
+   * Transactional single assignment for the board's drag-drop (2026-07-14
+   * planner reimagining). Replaces the frontend's direct
+   * PATCH /api/reservations/:id, which bypassed every planner rule.
+   *
+   * vehicleId null = unassign. force:true bypasses the strict type-match
+   * rule ONLY — occupancy/turnaround conflicts are never bypassable.
+   * Conflicts throw with plannerConflictCode
+   * (OCCUPIED | LOCKED_STATUS | TYPE_MISMATCH | TURNAROUND) → route maps to 409.
+   */
+  async assignVehicle({ reservationId, vehicleId = null, force = false, scope = {}, actorUserId = null } = {}) {
+    if (!scope?.tenantId) throw new Error('tenantId is required for planner assign');
+    if (!reservationId) throw new Error('reservationId is required for planner assign');
+    const nextVehicleId = vehicleId ? String(vehicleId) : null;
+
+    const updated = await prisma.$transaction(async (tx) => {
+      const reservation = await ensureReservationForAction(tx, String(reservationId), scope);
+      const status = String(reservation.status || '').toUpperCase();
+      if (!isAssignableReservationStatus(status)) {
+        throw plannerConflict('LOCKED_STATUS', status === 'CHECKED_OUT'
+          ? `Reservation ${reservation.reservationNumber} is locked by check-out and cannot be reassigned`
+          : `Reservation ${reservation.reservationNumber} is ${status} and cannot be assigned from the planner`);
+      }
+
+      if (nextVehicleId && reservation.vehicleId !== nextVehicleId) {
+        const rules = await plannerRulesService.resolveEffectiveRules({
+          scope,
+          locationId: reservation.pickupLocationId || null,
+          vehicleTypeId: reservation.vehicleTypeId || null
+        });
+        const vehicle = await ensureVehicleAvailableForReservation(tx, nextVehicleId, reservation, scope, {
+          turnaroundMinutes: Number(rules.minTurnaroundMinutes || 0)
+        });
+        if (!force && rules.strictVehicleTypeMatch && reservation.vehicleTypeId && vehicle.vehicleTypeId !== reservation.vehicleTypeId) {
+          throw plannerConflict('TYPE_MISMATCH', `Vehicle ${vehicle.internalNumber || vehicle.id} does not match the reserved vehicle type`, 'Pass force:true to override the strict vehicle-type rule for this drop');
+        }
+        // Cross-location parity with the recommendation engine (Innovation
+        // MUST-CHANGE 2026-07-14): the drag preview and vehicleIsCompatible()
+        // both flag this, so the endpoint must enforce it too — otherwise a
+        // drop on a "red" lane silently succeeds. Same force story as
+        // TYPE_MISMATCH (rule overrides only; never occupancy).
+        if (
+          !force &&
+          !rules.allowCrossLocationReassignment &&
+          reservation.pickupLocationId &&
+          vehicle.homeLocationId &&
+          vehicle.homeLocationId !== reservation.pickupLocationId
+        ) {
+          throw plannerConflict('CROSS_LOCATION', `Vehicle ${vehicle.internalNumber || vehicle.id} is homed at a different location than the reservation pickup`, 'Pass force:true to override the cross-location rule for this drop');
+        }
+      }
+
+      const row = await tx.reservation.update({
+        where: { id: reservation.id },
+        data: nextVehicleId
+          ? { vehicle: { connect: { id: nextVehicleId } } }
+          : { vehicle: { disconnect: true } },
+        select: {
+          id: true,
+          tenantId: true,
+          reservationNumber: true,
+          status: true,
+          vehicleId: true
+        }
+      });
+      // Same audit shape apply-plan writes. AuditAction has no PLANNER_ASSIGN
+      // value and migrations are out of scope for this ship, so the action
+      // rides in metadata (action: 'PLANNER_ASSIGN') on an UPDATE row.
+      await tx.auditLog.create({
+        data: {
+          tenantId: row.tenantId || scope.tenantId,
+          reservationId: row.id,
+          action: 'UPDATE',
+          actorUserId: actorUserId || null,
+          fromStatus: reservation.status,
+          toStatus: row.status,
+          reason: 'Planner board assignment',
+          metadata: JSON.stringify({
+            source: 'planner-board',
+            action: 'PLANNER_ASSIGN',
+            previousVehicleId: reservation.vehicleId || null,
+            nextVehicleId,
+            force: !!force
+          })
+        }
+      });
+      return row;
+    });
+
+    return {
+      ok: true,
+      reservation: {
+        id: updated.id,
+        vehicleId: updated.vehicleId || null
+      },
+      conflict: null
+    };
+  },
+
   async applyScenario({ scenarioId, actions = null, scope = {}, actorUserId = null } = {}) {
     if (!scope?.tenantId) throw new Error('tenantId is required for planner apply-plan');
     if (!scenarioId) throw new Error('scenarioId is required');
