@@ -91,11 +91,12 @@ async function kioskFetch(path, { method = 'GET', body, tokenless = false } = {}
   if (!res.ok) {
     // 401 handling is an explicit ALLOWLIST: only the codes below are
     // application-level 401s that surface as normal errors (a wrong staff
-    // PIN in B3c must never wipe the pairing). Everything else — including
-    // the device-auth middleware's code-less 401 AND any future middleware
-    // 401 that grows a code — still unpairs, because only allowlisted codes
-    // pass through. Fail-closed by design.
-    const APP_LEVEL_401 = ['INVALID_PIN'];
+    // PIN in B3c / a wrong name-update verification code in B3e must never
+    // wipe the pairing). Everything else — including the device-auth
+    // middleware's code-less 401 AND any future middleware 401 that grows a
+    // code — still unpairs, because only allowlisted codes pass through.
+    // Fail-closed by design.
+    const APP_LEVEL_401 = ['INVALID_PIN', 'INVALID_CODE'];
     if (res.status === 401 && !tokenless && !APP_LEVEL_401.includes(data?.code)) {
       // Rotated / revoked / never-paired token → wipe and force re-pairing.
       clearDevice();
@@ -221,6 +222,45 @@ export function staffAssistUnlock(sessionId, { userId, pin }) {
 export function staffAssistVerifyId(sessionId, { fields, licenseFrontPhoto, licenseBackPhoto }) {
   return kioskFetch(`/api/kiosk/sessions/${encodeURIComponent(sessionId)}/staff-assist/verify-id`, {
     method: 'POST', body: { fields, licenseFrontPhoto, licenseBackPhoto },
+  });
+}
+
+// ── B3e Name-mismatch: self-service code + staff light bypass ────────────────
+// Layer 1 (token-subset matcher) lives server-side, so these only fire on
+// REAL mismatches. Fields are ALWAYS the session's OCR-confirmed values —
+// never guest free text.
+
+// POST → { ok, sent: {email: "m•••@…", sms: "•••1234"|null}, expiresInMinutes }.
+// Errors: 409 NAME_UPDATE_NOT_ELIGIBLE (name must be the ONLY failed rule),
+// 422 NO_RESERVATION_ATTACHED, 429 NAME_UPDATE_LOCKED (shared device lockout).
+export function nameUpdateSendCode(sessionId) {
+  return kioskFetch(`/api/kiosk/sessions/${encodeURIComponent(sessionId)}/name-update/send-code`, {
+    method: 'POST',
+  });
+}
+
+// GET → { email: "h•••@gmail.com"|null, sms: "•••4821"|null } — MASKS only,
+// gated server-side on the recorded name mismatch. Pre-send preview so the
+// guest can bail out before a code fires ("someone booked for me" case).
+export function nameUpdateDestinations(sessionId) {
+  return kioskFetch(`/api/kiosk/sessions/${encodeURIComponent(sessionId)}/name-update/destinations`);
+}
+
+// POST {code, fields, licensePhoto?} → verify-id-shaped response (+session).
+// Errors: 401 INVALID_CODE (+attemptsRemaining → 429 NAME_UPDATE_LOCKED),
+// 410 CODE_EXPIRED, 409 CODE_NOT_SENT. Age/expiry rules stay hard stops.
+export function nameUpdateConfirm(sessionId, { code, fields, licensePhoto }) {
+  return kioskFetch(`/api/kiosk/sessions/${encodeURIComponent(sessionId)}/name-update/confirm`, {
+    method: 'POST', body: { code, fields, licensePhoto },
+  });
+}
+
+// POST {fields, licensePhoto?} — staff attests the physical license matches
+// the guest (no manual re-entry, no re-photos). Same shape as staff
+// verify-id; 403 ASSIST_GRANT_REQUIRED without a live unlock grant.
+export function staffAssistConfirmName(sessionId, { fields, licensePhoto }) {
+  return kioskFetch(`/api/kiosk/sessions/${encodeURIComponent(sessionId)}/staff-assist/confirm-name`, {
+    method: 'POST', body: { fields, licensePhoto },
   });
 }
 

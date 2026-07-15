@@ -1118,3 +1118,58 @@ test('id-photo-extract M1: per-DEVICE hourly bucket caps across sessions; fresh 
   assert.equal(result.fields.firstName, 'M');
   assert.equal(calls.length, MAX_ID_EXTRACTS_PER_DEVICE_PER_HOUR + 1);
 });
+
+// ---------------------------------------------------------------------------
+// B3e L1: token-subset matcher — canonical suite (Hector's real FL case)
+// ---------------------------------------------------------------------------
+
+test('namesMatch B3e canonical: FL license "PADILLA LUNA HECTOR EDUARDO JR" matches stored "Hector Padilla" under BOTH OCR splits', () => {
+  const stored = { storedFirst: 'Hector', storedLast: 'Padilla' };
+  // split A: OCR read the given names into firstName
+  assert.equal(namesMatch({ scannedFirst: 'HECTOR EDUARDO JR', scannedLast: 'PADILLA LUNA', ...stored }), true);
+  // split B: FL fronts read surname-first — fields swapped by the OCR
+  assert.equal(namesMatch({ scannedFirst: 'PADILLA LUNA', scannedLast: 'HECTOR EDUARDO JR', ...stored }), true);
+  // suffix stripped, accents tolerated
+  assert.equal(namesMatch({ scannedFirst: 'HÉCTOR EDUARDO', scannedLast: 'PADILLA LUNA JR', ...stored }), true);
+});
+
+test('namesMatch B3e negative controls: wrong person never rides the token pool', () => {
+  const license = { scannedFirst: 'HECTOR EDUARDO JR', scannedLast: 'PADILLA LUNA' };
+  // Maria ∉ pool → NO_MATCH even though Padilla matches
+  assert.equal(namesMatch({ ...license, storedFirst: 'Maria', storedLast: 'Padilla' }), false);
+  // completely different person
+  assert.equal(namesMatch({ ...license, storedFirst: 'Juan', storedLast: 'Rivera' }), false);
+  // family false-accept control: two surname hits but wrong given name
+  assert.equal(namesMatch({
+    scannedFirst: 'PEDRO', scannedLast: 'GONZALEZ RIVERA',
+    storedFirst: 'Maria', storedLast: 'Gonzalez Rivera',
+  }), false);
+  // single-token safety rail: a lone repeated token must not match a license
+  // that merely CONTAINS it
+  assert.equal(namesMatch({ ...license, storedFirst: 'Hector', storedLast: 'Hector' }), false);
+});
+
+test('verify-id stamps the server-side nameMismatchAt marker ONLY on a name-only failure', async () => {
+  seedKioskSession();
+  seedWorld();
+  const session = db.sessions[0];
+
+  // name mismatch with rules passing → marker set
+  await kioskCheckoutService.verifyId('ks1', DEVICE, {
+    aamvaFields: { ...GOOD_SCAN, firstName: 'Pedro', lastName: 'Rivera' },
+  });
+  assert.ok(session.nameMismatchAt instanceof Date, 'marker stamped');
+
+  // mixed failure (underage too) does NOT refresh eligibility semantics —
+  // marker only set when NAME_MISMATCH is the lone reason
+  session.nameMismatchAt = null;
+  await kioskCheckoutService.verifyId('ks1', DEVICE, {
+    aamvaFields: { ...GOOD_SCAN, firstName: 'Pedro', lastName: 'Rivera', dateOfBirth: new Date(Date.now() - 18 * 365 * 24 * HOUR).toISOString() },
+  });
+  assert.equal(session.nameMismatchAt, null, 'mixed failures never stamp the marker');
+
+  // a later PASSING verify clears it
+  session.nameMismatchAt = new Date();
+  await kioskCheckoutService.verifyId('ks1', DEVICE, { aamvaFields: GOOD_SCAN });
+  assert.equal(session.nameMismatchAt, null, 'cleared on pass');
+});

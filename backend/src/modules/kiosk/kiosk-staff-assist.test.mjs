@@ -484,3 +484,139 @@ test('staff verify-id happy path: STAFF_OVERRIDE stamp, audit, outcome back to I
   });
   assert.equal(signed.checkoutSession.currentStep, 'CLOSED');
 });
+
+// ---------------------------------------------------------------------------
+// B3e L3: staff name-match bypass (light)
+// ---------------------------------------------------------------------------
+
+const NAME_FIELDS = {
+  firstName: 'Hector Eduardo', lastName: 'Padilla Luna',
+  dateOfBirth: '1990-03-15',
+  licenseNumber: 'P123', licenseState: 'FL',
+  licenseExpiry: new Date(Date.now() + 2 * 365 * 24 * HOUR).toISOString(),
+};
+
+test('confirm-name: requires a live grant (403 without/expired)', async () => {
+  seedDeviceRow();
+  seedStaff();
+  seedWorld();
+  seedSession(); // no grant
+
+  await rejects(
+    kioskStaffAssistService.confirmName('ks1', DEVICE, { fields: NAME_FIELDS }),
+    { status: 403, code: 'ASSIST_GRANT_REQUIRED' },
+  );
+  db.sessions[0].assistUserId = 'u-admin';
+  db.sessions[0].assistGrantedAt = new Date(Date.now() - (ASSIST_GRANT_TTL_MIN + 1) * MIN);
+  await rejects(
+    kioskStaffAssistService.confirmName('ks1', DEVICE, { fields: NAME_FIELDS }),
+    { status: 403, code: 'ASSIST_GRANT_REQUIRED' },
+  );
+});
+
+test('confirm-name: rules stay hard stops — staff vouching never overrides underage', async () => {
+  seedDeviceRow();
+  seedStaff();
+  seedWorld();
+  const session = seedSession({ assistUserId: 'u-admin', assistGrantedAt: new Date() });
+
+  const result = await kioskStaffAssistService.confirmName('ks1', DEVICE, {
+    fields: { ...NAME_FIELDS, dateOfBirth: new Date(Date.now() - 18 * 365 * 24 * HOUR).toISOString() },
+  });
+  assert.equal(result.verified, false);
+  assert.ok(result.failureReasons.includes('UNDERAGE'));
+  assert.equal(session.idVerifiedAt, null);
+  assert.equal(session.outcome, 'ESCALATED', 'stays escalated');
+  assert.ok(session.assistGrantedAt, 'grant not consumed by a failed attempt');
+});
+
+test('confirm-name happy path: STAFF_NAME_OVERRIDE stamp + audit, reservation name NOT changed, grant consumed', async () => {
+  seedDeviceRow();
+  seedStaff();
+  seedWorld();
+  const session = seedSession({ assistUserId: 'u-admin', assistGrantedAt: new Date() });
+  const custBefore = { ...db.customers[0] };
+
+  const result = await kioskStaffAssistService.confirmName('ks1', DEVICE, { fields: NAME_FIELDS });
+
+  assert.equal(result.verified, true);
+  assert.equal(result.session.idVerifyMethod, 'STAFF_NAME_OVERRIDE');
+  assert.equal(result.session.outcome, 'IN_PROGRESS');
+
+  assert.ok(session.idVerifiedAt instanceof Date);
+  assert.equal(session.idVerifyMethod, 'STAFF_NAME_OVERRIDE');
+  assert.equal(session.assistUserId, 'u-admin', 'who approved stays persisted');
+  assert.equal(session.assistGrantedAt, null, 'grant consumed');
+  assert.equal(session.outcome, 'IN_PROGRESS');
+  assert.equal(session.escalatedReason, null);
+
+  // the mismatch is APPROVED, never rewritten — customer identity untouched
+  assert.equal(db.customers[0].firstName, custBefore.firstName);
+  assert.equal(db.customers[0].lastName, custBefore.lastName);
+
+  const audit = db.auditLogs.find((row) => String(row.metadata || '').includes('kiosk_staff_confirm_name'));
+  assert.ok(audit, 'confirm-name audit row written');
+  assert.equal(audit.actorUserId, 'u-admin');
+  assert.equal(JSON.parse(audit.metadata).nameChanged, false);
+  assert.ok(session.eventsJson.some((e) => e.event === 'STAFF_ASSIST_NAME_CONFIRMED'));
+});
+
+test('B3e gate: a live nameMismatchAt stamp opens staff assist WITHOUT escalation (one mismatch failure)', async () => {
+  seedDeviceRow();
+  seedStaff();
+  seedWorld();
+  // NOT escalated, only ONE verify failure — but verifyId stamped the
+  // server-side name-mismatch marker (rules passed, name alone blocked).
+  const session = seedSession({
+    outcome: 'IN_PROGRESS',
+    escalatedReason: null,
+    endedAt: null,
+    nameMismatchAt: new Date(),
+    eventsJson: [{ at: 'x', step: 'ID', event: 'VERIFY_ID_FAILED', data: { reasons: ['NAME_MISMATCH'] } }],
+  });
+
+  // staff list opens
+  const list = await kioskStaffAssistService.listAssistStaff('ks1', DEVICE);
+  assert.equal(list.staff.length, 2);
+
+  // unlock opens (mints the grant)
+  const unlocked = await kioskStaffAssistService.unlock('ks1', DEVICE, { userId: 'u-admin', pin: PIN });
+  assert.equal(unlocked.ok, true);
+  assert.ok(session.assistGrantedAt instanceof Date);
+
+  // confirm-name completes the B3e L3 path end-to-end
+  const result = await kioskStaffAssistService.confirmName('ks1', DEVICE, { fields: NAME_FIELDS });
+  assert.equal(result.verified, true);
+  assert.equal(session.idVerifyMethod, 'STAFF_NAME_OVERRIDE');
+  assert.equal(session.nameMismatchAt, null, 'marker cleared once approved');
+
+  // a PRISTINE session (no escalation, no failures, no marker) stays closed
+  seedSession({ id: 'ksPristine', outcome: 'IN_PROGRESS', escalatedReason: null, endedAt: null, nameMismatchAt: null });
+  await rejects(
+    kioskStaffAssistService.listAssistStaff('ksPristine', DEVICE),
+    { status: 409, code: 'NOT_ASSISTABLE' },
+  );
+});
+
+test('R1: staff verify-id clears the name-mismatch marker + outstanding possession code', async () => {
+  seedDeviceRow();
+  seedStaff();
+  seedWorld({ checkout: { paymentCompletedAt: new Date() } });
+  const session = seedSession({
+    assistUserId: 'u-admin',
+    assistGrantedAt: new Date(),
+    nameMismatchAt: new Date(),
+    nameUpdateCodeHash: 'stale-hash',
+    nameUpdateCodeExpiresAt: new Date(Date.now() + 5 * MIN),
+  });
+
+  const result = await kioskStaffAssistService.staffVerifyId('ks1', DEVICE, {
+    fields: GOOD_FIELDS,
+    licenseFrontPhoto: FRONT,
+    licenseBackPhoto: BACK,
+  });
+  assert.equal(result.verified, true);
+  assert.equal(session.nameMismatchAt, null, 'marker cleared — send-code no longer eligible');
+  assert.equal(session.nameUpdateCodeHash, null, 'outstanding code dies with the verify');
+  assert.equal(session.nameUpdateCodeExpiresAt, null);
+});

@@ -38,6 +38,9 @@ export default function KioskLayout({ children }) {
   const idleTimerRef = useRef(null);
   const idleResetRef = useRef(null);
   const idleOpenRef = useRef(false);
+  // Per-phase idle override (ms). null = IDLE_AFTER_MS. Set by the wizard for
+  // the name-update code wait (email takes 1-3 min) and reset on leave.
+  const idleMsRef = useRef(null);
 
   // Boot: show the cached device immediately, then refresh from
   // GET /api/kiosk/device (picks up rename/walkupEnabled/location without
@@ -66,7 +69,7 @@ export default function KioskLayout({ children }) {
       if (!sessionActiveRef.current) return;
       setCountdown(IDLE_COUNTDOWN_S);
       setIdleOpen(true);
-    }, IDLE_AFTER_MS);
+    }, idleMsRef.current || IDLE_AFTER_MS);
   }, []);
 
   // Activity watch — any touch/click/key rearms the 2-min timer (but never
@@ -105,6 +108,12 @@ export default function KioskLayout({ children }) {
       }
     },
     onIdleReset: (fn) => { idleResetRef.current = fn; },
+    // Re-arm IMMEDIATELY on change: the guest waiting for an email is by
+    // definition idle, so the new window must apply without any activity.
+    setIdleMs: (ms) => {
+      idleMsRef.current = Number(ms) > 0 ? Number(ms) : null;
+      if (sessionActiveRef.current && !idleOpenRef.current) armIdle();
+    },
     helpTick,
     online,
     setOnline,

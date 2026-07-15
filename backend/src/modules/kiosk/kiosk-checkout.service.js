@@ -95,31 +95,65 @@ export function normalizeNamePart(value) {
     .trim();
 }
 
+// Generational suffixes never count as name tokens (FL prints "JR" etc.).
+const NAME_SUFFIX_TOKENS = new Set(['jr', 'sr', 'ii', 'iii', 'iv', 'v']);
+
+function nameTokens(...parts) {
+  return parts
+    .flatMap((part) => normalizeNamePart(part).split(' '))
+    .filter(Boolean)
+    .filter((token) => !NAME_SUFFIX_TOKENS.has(token));
+}
+
+// A stored (reservation) token matches a license-pool token when equal, or
+// when the POOL token (>= 3 chars) is a prefix of the stored token — a
+// truncated/nickname license "WILL" still matches a stored "William", but a
+// stored "Jose" never accepts a license "Josefina" (B3a S2 direction kept).
+function tokenMatches(storedToken, poolToken) {
+  return storedToken === poolToken
+    || (poolToken.length >= 3 && storedToken.startsWith(poolToken));
+}
+
 /**
- * Tolerant person-name match: case/accents-insensitive; middle names and
- * compound last names tolerated (token containment both ways on the LAST
- * name). First name matches on first token, or when the SCANNED first token
- * (>= 3 chars) is a prefix of the stored one — a license "WILL" matches a
- * stored "William", but a stored "Jose" never accepts a scanned "Josefina"
- * (scanned→stored direction ONLY; B3a review S2).
+ * B3e token-subset matcher (Hector's real FL case: license
+ * "PADILLA LUNA HECTOR EDUARDO JR" vs reservation "Hector Padilla").
+ * ALL license tokens (first+last POOLED — FL fronts read surname-first and
+ * OCR splits vary, so field roles are ignored on the license side) are
+ * matched against the reservation's tokens: booking short-form ⊆ license
+ * legal full name, never the reverse with a single token.
+ *
+ * DOCUMENTED DEVIATION from the literal "every stored token must appear":
+ * requiring ALL stored tokens would break the long-standing two-surname
+ * tolerance (stored "González Rivera" vs a license printing only
+ * "GONZALEZ"), while requiring merely "any 2 tokens" would false-accept
+ * family members (stored "Maria González Rivera" vs license
+ * "PEDRO GONZALEZ RIVERA" — 2 surname hits, wrong person). The rule here:
+ *   • the stored FIRST-name token MUST match the pool, AND
+ *   • at least one stored LAST-name token MUST match the pool, AND
+ *   • >= 2 distinct stored tokens matched overall (single-token safety rail:
+ *     a lone stored token only matches a license whose pool is exactly it).
  */
 export function namesMatch({ scannedFirst, scannedLast, storedFirst, storedLast }) {
-  const sf = normalizeNamePart(scannedFirst);
-  const sl = normalizeNamePart(scannedLast);
-  const cf = normalizeNamePart(storedFirst);
-  const cl = normalizeNamePart(storedLast);
-  if (!sf || !sl || !cf || !cl) return false;
+  const pool = nameTokens(scannedFirst, scannedLast);
+  const storedFirstTokens = nameTokens(storedFirst);
+  const storedLastTokens = nameTokens(storedLast);
+  if (!pool.length || !storedFirstTokens.length || !storedLastTokens.length) return false;
 
-  const lastOk = sl === cl
-    || sl.split(' ').includes(cl)
-    || cl.split(' ').includes(sl)
-    || sl.replace(/\s/g, '') === cl.replace(/\s/g, '');
-  if (!lastOk) return false;
+  const inPool = (token) => pool.some((poolToken) => tokenMatches(token, poolToken));
 
-  const sfTok = sf.split(' ')[0];
-  const cfTok = cf.split(' ')[0];
-  return sfTok === cfTok
-    || (sfTok.length >= 3 && cfTok.startsWith(sfTok));
+  // The person's given name must be on the license.
+  if (!inPool(storedFirstTokens[0])) return false;
+  // And at least one of their surnames.
+  if (!storedLastTokens.some(inPool)) return false;
+
+  const distinctMatched = new Set(
+    [...storedFirstTokens, ...storedLastTokens].filter(inPool),
+  );
+  if (distinctMatched.size >= 2) return true;
+  // Single-token safety rail: "Hector" alone must not match any license that
+  // merely CONTAINS "Hector" — only an exact single-token license.
+  const only = [...distinctMatched][0];
+  return pool.length === 1 && pool[0] === only;
 }
 
 export function ageOnDate(dob, onDate) {
@@ -359,7 +393,7 @@ async function verifyId(sessionId, device, { aamvaFields, licensePhoto, selfiePh
     // M2: the SERVER-side stamp /sign gates on (eventsJson is forgeable).
     await prisma.kioskSession.update({
       where: { id: session.id },
-      data: { idVerifiedAt: new Date(), idVerifyMethod: 'SCAN', lastActivityAt: new Date() },
+      data: { idVerifiedAt: new Date(), idVerifyMethod: 'SCAN', nameMismatchAt: null, lastActivityAt: new Date() },
     });
     // Write-through like the counter flows: fill EMPTY customer columns from
     // the scan, never clobber staff-entered data.
@@ -376,6 +410,14 @@ async function verifyId(sessionId, device, { aamvaFields, licensePhoto, selfiePh
     await persistIdPhotos({ session, device, customer: resv.customer, photos });
     await recordSessionTelemetry(session, { step: 'ID', event: 'VERIFY_ID_PASSED', data: null });
   } else {
+    // B3e: server-recorded marker when NAME_MISMATCH is the ONLY blocker
+    // (rules passed) — gates the self-service name-update code send.
+    if (failureReasons.length === 1 && failureReasons[0] === 'NAME_MISMATCH') {
+      await prisma.kioskSession.update({
+        where: { id: session.id },
+        data: { nameMismatchAt: new Date(), lastActivityAt: new Date() },
+      }).catch(() => {});
+    }
     await recordSessionTelemetry(session, { step: 'ID', event: 'VERIFY_ID_FAILED', data: { reasons: failureReasons } });
   }
 

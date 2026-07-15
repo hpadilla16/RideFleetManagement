@@ -63,6 +63,15 @@ function countEvents(session, name) {
 function assertAssistable(session) {
   if (session.outcome === 'ESCALATED') return;
   if (session.outcome === 'IN_PROGRESS' && countEvents(session, 'VERIFY_ID_FAILED') >= VERIFY_FAILS_BEFORE_ESCALATE) return;
+  // B3e: a live server-recorded name-mismatch stamp (written by verifyId
+  // when NAME_MISMATCH was the ONLY failure — a column, not forgeable
+  // telemetry, per the M2 discipline) also opens staff assist: the staff
+  // NAME path enters from ONE mismatch failure without an escalation.
+  // Deliberate scope: this opens the whole staff surface (list + unlock →
+  // grant → confirm-name AND the full manual verify-id) — the full override
+  // stays safe here because it runs the identical rule set and sits behind
+  // the same PIN; splitting the gate would only complicate the UI flow.
+  if (session.outcome === 'IN_PROGRESS' && session.nameMismatchAt) return;
   throw new KioskError('Staff assist is only available for escalated sessions', 409, 'NOT_ASSISTABLE');
 }
 
@@ -293,6 +302,11 @@ async function staffVerifyId(sessionId, device, { fields, licenseFrontPhoto, lic
       idVerifyMethod: 'STAFF_OVERRIDE',
       // grant consumed; assistUserId stays as the audit trail
       assistGrantedAt: null,
+      // R1: a verified session must not stay name-update eligible — clear
+      // the mismatch marker and any outstanding possession code.
+      nameMismatchAt: null,
+      nameUpdateCodeHash: null,
+      nameUpdateCodeExpiresAt: null,
       // an ESCALATED session goes back to work
       outcome: 'IN_PROGRESS',
       escalatedReason: null,
@@ -330,8 +344,121 @@ async function staffVerifyId(sessionId, device, { fields, licenseFrontPhoto, lic
   };
 }
 
+/**
+ * POST /sessions/:id/staff-assist/confirm-name — B3e L3, the LIGHT bypass:
+ * the staff member physically checked the license and vouches ONLY for the
+ * name. Requires a live B3c grant (same unlock, no new auth). Re-runs the
+ * FULL rule set on this session's OCR-confirmed fields and skips ONLY the
+ * name check — age/expiry/DOB stay hard stops. The reservation name is NOT
+ * changed (this approves the mismatch, it doesn't rewrite identity); no
+ * field re-entry, no front/back re-photos — the session's OCR fields (+ the
+ * license photo, persisted here if provided and not already stored) are the
+ * evidence. Stamps idVerifyMethod 'STAFF_NAME_OVERRIDE', audits, un-escalates
+ * and consumes the grant.
+ */
+async function confirmName(sessionId, device, { fields, licensePhoto } = {}) {
+  const session = await getSessionForDevice(sessionId, device);
+  if (!grantIsLive(session)) {
+    throw new KioskError('A staff unlock is required (or the grant expired)', 403, 'ASSIST_GRANT_REQUIRED');
+  }
+  if (!session.reservationId) throw new KioskError('Attach a reservation first', 422, 'NO_RESERVATION_ATTACHED');
+
+  const photoBuffer = validateIdPhotoOrThrow(licensePhoto, 'license'); // optional; 422 on junk
+
+  const resv = await prisma.reservation.findFirst({
+    where: { id: session.reservationId, tenantId: device.tenantId },
+    select: {
+      id: true,
+      pickupAt: true,
+      returnAt: true,
+      pickupLocation: { select: { locationConfig: true } },
+      customer: {
+        select: { id: true, licenseNumber: true, licenseState: true, dateOfBirth: true, idPhotoUrl: true },
+      },
+    },
+  });
+  if (!resv) throw new KioskError('Reservation not found', 404, 'RESERVATION_NOT_FOUND');
+
+  const cleanFields = fields && typeof fields === 'object' ? fields : {};
+  const rules = evaluateIdRules({
+    fields: cleanFields,
+    pickupAt: resv.pickupAt,
+    returnAt: resv.returnAt,
+    locationConfig: parseLocationConfigSafe(resv.pickupLocation?.locationConfig),
+  });
+  if (!(rules.ageOk && rules.licenseNotExpired)) {
+    await recordSessionTelemetry(session, {
+      step: 'ID', event: 'STAFF_ASSIST_NAME_REJECTED', data: { reasons: rules.failureReasons },
+    });
+    return {
+      verified: false,
+      checks: { ageOk: rules.ageOk, licenseNotExpired: rules.licenseNotExpired },
+      failureReasons: rules.failureReasons,
+      minimumAge: rules.minimumAge,
+      maximumAge: rules.maximumAge,
+    };
+  }
+
+  if (photoBuffer) {
+    await persistIdPhotos({
+      session,
+      device,
+      customer: resv.customer,
+      photos: [{ kind: 'license', dataUrl: licensePhoto, buffer: photoBuffer, customerField: 'idPhotoUrl' }],
+    });
+  }
+
+  const now = new Date();
+  const updated = await prisma.kioskSession.update({
+    where: { id: session.id },
+    data: {
+      idVerifiedAt: now,
+      idVerifyMethod: 'STAFF_NAME_OVERRIDE',
+      nameMismatchAt: null,
+      // R1 hygiene: any outstanding possession code dies with the approval.
+      nameUpdateCodeHash: null,
+      nameUpdateCodeExpiresAt: null,
+      assistGrantedAt: null, // grant consumed; assistUserId stays for audit
+      outcome: 'IN_PROGRESS',
+      escalatedReason: null,
+      endedAt: null,
+      lastActivityAt: now,
+    },
+  });
+  await prisma.auditLog.create({
+    data: {
+      tenantId: device.tenantId,
+      reservationId: resv.id,
+      actorUserId: session.assistUserId,
+      action: 'ADMIN_OVERRIDE',
+      reason: 'Kiosk staff assist — name mismatch approved (license physically checked)',
+      metadata: JSON.stringify({
+        kind: 'kiosk_staff_confirm_name',
+        kioskSessionId: session.id,
+        deviceId: device.id,
+        verified: true,
+        nameChanged: false, // approval only — the reservation name stays
+      }),
+    },
+  }).catch(() => {});
+  await recordSessionTelemetry(updated, { step: 'ID', event: 'STAFF_ASSIST_NAME_CONFIRMED', data: null });
+  logger.info('[kiosk-staff-assist] name mismatch approved by staff', {
+    sessionId: session.id, deviceId: device.id, tenantId: device.tenantId, staffUserId: session.assistUserId,
+  });
+
+  return {
+    verified: true,
+    checks: { ageOk: true, licenseNotExpired: true },
+    failureReasons: [],
+    minimumAge: rules.minimumAge,
+    maximumAge: rules.maximumAge,
+    session: { id: updated.id, outcome: updated.outcome, idVerifyMethod: updated.idVerifyMethod },
+  };
+}
+
 export const kioskStaffAssistService = {
   listAssistStaff,
   unlock,
   staffVerifyId,
+  confirmName,
 };

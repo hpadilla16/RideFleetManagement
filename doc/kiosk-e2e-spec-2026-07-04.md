@@ -257,6 +257,27 @@ Admin (auth normal + `requireModuleAccess('kiosk')`):
   capeada por sesión (~5 intentos, costo de API) con fallback a staff-assist. El scan de
   barcode queda como opción secundaria (Android kiosks). La extracción es ADVISORY —
   nunca stampa nada; solo verify-id stampa tras confirmar.
+- **B3e — Name-mismatch: self-service seguro + staff bypass ligero (aprobado por Hector
+  2026-07-15, tras su caso real: licencia FL "PADILLA LUNA HECTOR EDUARDO JR" vs reserva
+  "Hector Padilla")**. TRES capas:
+  (1) **Matcher por token-subset**: los tokens de la reserva contenidos en los tokens de
+  la licencia (orden-agnóstico, sufijos JR/SR/II-IV ignorados, acentos normalizados) =
+  MATCH — el caso de Hector pasa sin fricción. Dirección segura: forma corta del booking
+  ⊆ nombre legal completo de la licencia; NUNCA al revés con un solo token.
+  (2) **Self-service con código**: mismatch real → "¿La reserva está a otro nombre?" →
+  código 6 díg. (hasheado, TTL 10 min, 5 intentos → lockout del device) al email/teléfono
+  DE LA RESERVA (destino enmascarado en pantalla) → código OK = prueba de posesión del
+  booking → el nombre del driver se actualiza AL NOMBRE VERIFICADO DE LA LICENCIA (los
+  fields del OCR confirmados — jamás texto libre del guest) con AuditLog (nombre viejo
+  preservado) → verify-id re-corre y sigue. OJO diseño: cómo actualizar el nombre sin
+  corromper un Customer compartido con otras reservas (analizar convención del counter;
+  guard si el customer tiene historial).
+  (3) **Staff bypass ligero del name-match**: en la pantalla de mismatch, entrada
+  discreta de staff → PIN (reusa el unlock/grant de B3c) → el staff CONFIRMA que verificó
+  la licencia físicamente → verify-id re-corre con skip del name-match bajo el grant
+  (idVerifyMethod 'STAFF_NAME_OVERRIDE', AuditLog) — SIN re-teclear campos ni re-fotos
+  (la licencia ya está OCR-verificada; el staff solo avala el nombre). Edad/expiry siguen
+  hard-stop.
 - **B4 — Walk-up**: availability + walkup-reservation + quote (K9). Tests: no crea
   reserva sin clase disponible; precios = pricing service.
 - **B5 — Pago real (MONEY, gate Hector doble)**: (pre-código) resolver contra docs iPOS

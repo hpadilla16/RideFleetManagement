@@ -1122,6 +1122,10 @@ model Customer {
   lastName                 String
   email                    String?
   phone                    String
+  // VozIA gap #4 (2026-07-15) — digits-only mirror of `phone`, derived on every
+  // write by the customerPhoneNormalize Prisma extension (lib/prisma.js). Lets the
+  // customer search match a spoken "7875551234" against a stored "(787) 555-1234".
+  phoneNormalized          String?
   licenseNumber            String?
   licenseState             String?
   dateOfBirth              DateTime?
@@ -4849,6 +4853,14 @@ model KioskSession {
   // grant window (10 min TTL, consumed on staff verify, cleared on complete).
   assistUserId    String?
   assistGrantedAt DateTime?
+
+  // B3e name-mismatch: server-recorded marker that the LAST verify failed on
+  // NAME_MISMATCH alone (rules passed) — gates the self-service name-update
+  // code send. The 6-digit possession code is hashed at rest, 10-min TTL,
+  // single-use.
+  nameMismatchAt          DateTime?
+  nameUpdateCodeHash      String?
+  nameUpdateCodeExpiresAt DateTime?
 
   // Bumped by the events endpoint — clean staleness signal for the B5
   // orphaned-money / abandoned-session sweep.

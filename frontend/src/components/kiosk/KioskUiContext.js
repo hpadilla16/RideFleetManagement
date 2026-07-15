@@ -30,6 +30,11 @@ export const KioskUiContext = createContext({
   // Footer connectivity dot — the wizard flips this on network failures.
   online: true,
   setOnline: () => {},
+  // Per-phase idle-threshold override in ms (null = default 2 min). Used by
+  // the B3e name-update code screen: email delivery takes 1-3 min and the
+  // default idle wipe would kill the flow mid-wait. Scope overrides narrowly
+  // and always reset to null on leave.
+  setIdleMs: () => {},
 });
 
 export function useKioskUi() {

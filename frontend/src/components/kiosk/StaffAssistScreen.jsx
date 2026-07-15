@@ -44,8 +44,10 @@ function grantTimeLeft(expiresAt) {
   return { ms, label: `${Math.floor(totalSecs / 60)}:${String(totalSecs % 60).padStart(2, '0')}` };
 }
 
-export function StaffAssistScreen({ t, prefillFields, onList, onUnlock, onVerify, onCompleted, onExit }) {
-  const [phase, setPhase] = useState('unlock'); // unlock | locked | form | success
+export function StaffAssistScreen({ t, prefillFields, nameContext, onList, onUnlock, onVerify, onConfirmName, onCompleted, onExit }) {
+  // nameContext (B3e light bypass) skips the K-S2 manual form: the license is
+  // already OCR-verified, staff only attests the NAME matches the guest.
+  const [phase, setPhase] = useState('unlock'); // unlock | locked | form | confirmName | success
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState('');
   const [staff, setStaff] = useState(null); // null = loading
@@ -85,7 +87,7 @@ export function StaffAssistScreen({ t, prefillFields, onList, onUnlock, onVerify
   // Grant chip countdown + client-side expiry hygiene (server enforces the
   // real 10-min TTL; this just keeps the UI honest).
   useEffect(() => {
-    if (phase !== 'form' || !grant) return undefined;
+    if ((phase !== 'form' && phase !== 'confirmName') || !grant) return undefined;
     const timer = setInterval(() => {
       setClock((n) => n + 1);
       if (grantTimeLeft(grant.expiresAt).ms <= 0) {
@@ -107,7 +109,7 @@ export function StaffAssistScreen({ t, prefillFields, onList, onUnlock, onVerify
     if (out.ok) {
       setGrant(out.grant);
       setMsg('');
-      setPhase('form');
+      setPhase(nameContext ? 'confirmName' : 'form');
       return;
     }
     if (out.code === 'FATAL') return;
@@ -155,6 +157,25 @@ export function StaffAssistScreen({ t, prefillFields, onList, onUnlock, onVerify
     });
   };
 
+  // B3e light bypass: no re-typing, no re-photos — the parent sends the
+  // session's already-confirmed OCR fields + photo; staff only attests.
+  const submitConfirmName = async () => {
+    if (busy) return;
+    setBusy(true); setMsg(''); setVerifyFail(null);
+    const out = await onConfirmName();
+    setBusy(false);
+    if (out.code === 'FATAL') return;
+    if (out.code === 'ASSIST_GRANT_REQUIRED') { onExit(t('kiosk.assistGrantExpired')); return; }
+    if (!out.ok) { setMsg(out.message || t('kiosk.genericError')); return; }
+    if (out.verified) { setPhase('success'); return; }
+    // Age/expiry hard stops still apply even with staff attesting.
+    setVerifyFail({
+      failureReasons: out.failureReasons || [],
+      minimumAge: out.minimumAge,
+      maximumAge: out.maximumAge,
+    });
+  };
+
   // ── Render ──────────────────────────────────────────────────────────────────
 
   if (phase === 'locked') {
@@ -175,6 +196,47 @@ export function StaffAssistScreen({ t, prefillFields, onList, onUnlock, onVerify
         <button type="button" className="kio-btn" disabled={busy} onClick={onCompleted}>
           {t('kiosk.assistContinueGuest')} ›
         </button>
+      </div>
+    );
+  }
+
+  if (phase === 'confirmName') {
+    const left = grant ? grantTimeLeft(grant.expiresAt) : { label: '0:00' };
+    return (
+      <div className="kio-main center">
+        <div className="kio-h2" style={{ fontSize: 24 }}>{t('kiosk.assistNameTitle')}</div>
+        <div className="kio-row" style={{ marginBottom: 12 }}>
+          <span className="kio-paystate ok" title={t('kiosk.assistGrantChipTitle')} data-clock={clock}>
+            🔓 {t('kiosk.assistGrantChip', { name: grant?.name || '', time: left.label })}
+          </span>
+        </div>
+        <div className="kio-panel" style={{ maxWidth: 560 }}>
+          <div className="kio-kv"><span className="kio-l">{t('kiosk.assistNameLicense')}</span><b>{nameContext?.licenseName || '—'}</b></div>
+          <div className="kio-kv"><span className="kio-l">{t('kiosk.assistNameReservation')}</span><b>{nameContext?.reservationName || '—'}</b></div>
+        </div>
+        <p className="kio-sub" style={{ fontSize: 13.5, marginTop: 10, maxWidth: 560 }}>{t('kiosk.assistNameHint')}</p>
+        {verifyFail ? (
+          <div className="kio-panel" style={{ maxWidth: 560, marginTop: 8 }}>
+            <div style={{ fontSize: 13.5, color: '#be123c', fontWeight: 700 }}>
+              {(verifyFail.failureReasons || []).map((code) => (
+                <div key={code}>
+                  {t(REASON_KEYS[code] || 'kiosk.reasonGeneric', {
+                    age: code === 'AGE_ABOVE_MAX' ? (verifyFail.maximumAge ?? '') : (verifyFail.minimumAge ?? ''),
+                  })}
+                </div>
+              ))}
+            </div>
+          </div>
+        ) : null}
+        {msg ? <div className="kio-error">{msg}</div> : null}
+        <div className="kio-row" style={{ marginTop: 16 }}>
+          <button type="button" className="kio-btn" disabled={busy || !!verifyFail} onClick={submitConfirmName}>
+            ✓ {t('kiosk.assistNameConfirmBtn')} ›
+          </button>
+          <button type="button" className="kio-btn ghost sm" disabled={busy} onClick={() => onExit()}>
+            {t('kiosk.assistEndBtn')}
+          </button>
+        </div>
       </div>
     );
   }

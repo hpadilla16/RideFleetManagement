@@ -58,6 +58,9 @@ CREATE TABLE IF NOT EXISTS "KioskSession" (
   "idVerifyMethod"    TEXT,
   "assistUserId"      TEXT,
   "assistGrantedAt"   TIMESTAMP(3),
+  "nameMismatchAt"          TIMESTAMP(3),
+  "nameUpdateCodeHash"      TEXT,
+  "nameUpdateCodeExpiresAt" TIMESTAMP(3),
   "lastActivityAt"    TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
   "startedAt"         TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
   "endedAt"           TIMESTAMP(3),
@@ -69,6 +72,9 @@ ALTER TABLE "KioskSession" ADD COLUMN IF NOT EXISTS "idVerifiedAt" TIMESTAMP(3);
 ALTER TABLE "KioskSession" ADD COLUMN IF NOT EXISTS "idVerifyMethod" TEXT;
 ALTER TABLE "KioskSession" ADD COLUMN IF NOT EXISTS "assistUserId" TEXT;
 ALTER TABLE "KioskSession" ADD COLUMN IF NOT EXISTS "assistGrantedAt" TIMESTAMP(3);
+ALTER TABLE "KioskSession" ADD COLUMN IF NOT EXISTS "nameMismatchAt" TIMESTAMP(3);
+ALTER TABLE "KioskSession" ADD COLUMN IF NOT EXISTS "nameUpdateCodeHash" TEXT;
+ALTER TABLE "KioskSession" ADD COLUMN IF NOT EXISTS "nameUpdateCodeExpiresAt" TIMESTAMP(3);
 CREATE INDEX IF NOT EXISTS "KioskSession_tenantId_deviceId_startedAt_idx" ON "KioskSession" ("tenantId","deviceId","startedAt");
 CREATE INDEX IF NOT EXISTS "KioskSession_tenantId_outcome_lastActivityAt_idx" ON "KioskSession" ("tenantId","outcome","lastActivityAt");
 CREATE INDEX IF NOT EXISTS "KioskSession_reservationId_idx" ON "KioskSession" ("reservationId");

@@ -31,11 +31,15 @@ import {
   getOffers,
   idPhotoExtract,
   lookupReservation,
+  nameUpdateConfirm,
+  nameUpdateDestinations,
+  nameUpdateSendCode,
   pairDevice,
   readDeviceToken,
   sandboxPayment,
   sendEvents,
   signAgreement,
+  staffAssistConfirmName,
   staffAssistList,
   staffAssistUnlock,
   staffAssistVerifyId,
@@ -44,6 +48,7 @@ import {
 import { LicenseScanner } from '../../components/loaner/LicenseScanner';
 import { SignaturePad } from '../../components/kiosk/SignaturePad';
 import { StaffAssistScreen } from '../../components/kiosk/StaffAssistScreen';
+import { NameUpdateFlow } from '../../components/kiosk/NameUpdateFlow';
 import { CAMERA_ERR_IN_FLIGHT, acquireCameraStream, cameraGrantedOnce } from '../../lib/kioskCamera';
 import { KIOSK_UNPAIRED_EVENT, useKioskUi } from '../../components/kiosk/KioskUiContext';
 
@@ -94,6 +99,9 @@ export default function KioskPage() {
   // B3c Staff Assist: which screen to return to when the assist flow exits
   // (cancel / grant expiry) — 'ESCALATED' or the escalateSuggested origin.
   const [staffAssistFrom, setStaffAssistFrom] = useState('ESCALATED');
+  // B3e: 'NAME' = light name-only bypass (compact confirm card, no K-S2
+  // manual form); 'FULL' = the escalated-session manual-entry flow.
+  const [staffAssistMode, setStaffAssistMode] = useState('FULL');
 
   const sessionRef = useRef(null);
   useEffect(() => { sessionRef.current = session; }, [session]);
@@ -341,8 +349,9 @@ export default function KioskPage() {
   // The wizard never blocks on assist state: everything lives behind the
   // STAFF_ASSIST screen; exiting always lands back on staffAssistFrom.
 
-  const openStaffAssist = (from) => {
+  const openStaffAssist = (from, mode = 'FULL') => {
     setStaffAssistFrom(from);
+    setStaffAssistMode(mode);
     setErr('');
     if (sessionRef.current?.id) sendEvents(sessionRef.current.id, { step: 'ID', event: 'STAFF_ASSIST_OPENED' });
     setScreen('STAFF_ASSIST');
@@ -393,6 +402,86 @@ export default function KioskPage() {
     } catch (e) {
       if (gen !== genRef.current || routeFatal(e)) return { ok: false, code: 'FATAL' };
       return { ok: false, code: e.code || 'ERROR', message: e.message };
+    }
+  };
+
+  // B3e light bypass: staff attests the PHYSICAL license matches the guest —
+  // fields/photo are the session's already-confirmed OCR values (no manual
+  // re-entry, no re-photos). Server records STAFF_ASSIST_NAME_CONFIRMED.
+  const assistConfirmName = async () => {
+    const gen = genRef.current;
+    try {
+      const out = await staffAssistConfirmName(session.id, {
+        fields: aamva || {},
+        licensePhoto: licensePhoto || undefined,
+      });
+      if (gen !== genRef.current) return { ok: false, code: 'FATAL' };
+      return { ok: true, ...out };
+    } catch (e) {
+      if (gen !== genRef.current || routeFatal(e)) return { ok: false, code: 'FATAL' };
+      return { ok: false, code: e.code || 'ERROR', message: e.message };
+    }
+  };
+
+  // ── B3e self-service name update (real mismatches only — the server's
+  // token-subset matcher already passed the harmless cases) ──────────────────
+
+  // Pre-send masked-destination preview. Best-effort nicety: ANY failure
+  // (incl. an older backend without the endpoint) returns null and the flow
+  // keeps its generic copy — never blocks the send.
+  const nameUpdateDestinationsLoad = async () => {
+    const gen = genRef.current;
+    try {
+      const out = await nameUpdateDestinations(session.id);
+      if (gen !== genRef.current) return null;
+      return out || null;
+    } catch (e) {
+      if (gen === genRef.current) routeFatal(e); // unpaired/offline still route
+      return null;
+    }
+  };
+
+  const nameUpdateSend = async () => {
+    const gen = genRef.current;
+    try {
+      const out = await nameUpdateSendCode(session.id);
+      if (gen !== genRef.current) return { ok: false, code: 'STALE' };
+      // Telemetry (NAME_UPDATE_CODE_SENT) is recorded server-side.
+      return { ok: true, sent: out?.sent || {}, expiresInMinutes: out?.expiresInMinutes };
+    } catch (e) {
+      if (gen !== genRef.current) return { ok: false, code: 'STALE' };
+      if (routeFatal(e)) return { ok: false, code: 'FATAL' };
+      return {
+        ok: false,
+        code: e.code || (e.status === 429 ? 'NAME_UPDATE_LOCKED' : 'ERROR'),
+        // 429 NAME_UPDATE_COOLDOWN (server resend cooldown, distinct from the
+        // hourly LOCKED cap) carries how long to wait.
+        retryInSeconds: e.data?.retryInSeconds,
+        message: e.message,
+      };
+    }
+  };
+
+  const nameUpdateConfirmCode = async (code) => {
+    const gen = genRef.current;
+    try {
+      // Fields are the OCR-confirmed values held in state — never free text.
+      const out = await nameUpdateConfirm(session.id, {
+        code,
+        fields: aamva || {},
+        licensePhoto: licensePhoto || undefined,
+      });
+      if (gen !== genRef.current) return { ok: false, code: 'STALE' };
+      return { ok: true, ...out };
+    } catch (e) {
+      if (gen !== genRef.current) return { ok: false, code: 'STALE' };
+      if (routeFatal(e)) return { ok: false, code: 'FATAL' };
+      return {
+        ok: false,
+        code: e.code || (e.status === 429 ? 'NAME_UPDATE_LOCKED' : 'ERROR'),
+        attemptsRemaining: e.data?.attemptsRemaining,
+        message: e.message,
+      };
     }
   };
 
@@ -605,7 +694,27 @@ export default function KioskPage() {
           onScannerPhoto={(dataUrl) => setLicensePhoto(dataUrl)}
           onEscalate={() => escalate(verifyResult?.failureReasons?.includes('NAME_MISMATCH') ? 'ID_MISMATCH' : 'ID_SCAN_FAILED')}
           onStaffAssist={() => openStaffAssist('ID')}
+          onStaffAssistName={() => openStaffAssist('ID', 'NAME')}
+          onNameUpdate={() => { setErr(''); setScreen('NAME_UPDATE'); }}
           onBack={() => setScreen('SUMMARY')}
+        />
+      ) : null}
+      {screen === 'NAME_UPDATE' && session ? (
+        <NameUpdateFlow
+          t={t}
+          onSendCode={nameUpdateSend}
+          onGetDestinations={nameUpdateDestinationsLoad}
+          onConfirmCode={nameUpdateConfirmCode}
+          onSuccess={() => {
+            // idVerifiedAt is stamped server-side (SCAN_NAME_UPDATED) and the
+            // reservation now carries the license name → selfie as usual.
+            setVerifyResult(null);
+            setSelfie(null);
+            setErr('');
+            setScreen('SELFIE');
+          }}
+          onHelp={() => escalate('ID_MISMATCH')}
+          onExit={(message) => { setErr(message || ''); setScreen('ID'); }}
         />
       ) : null}
       {screen === 'SELFIE' ? (
@@ -694,9 +803,14 @@ export default function KioskPage() {
         <StaffAssistScreen
           t={t}
           prefillFields={aamva || undefined}
+          nameContext={staffAssistMode === 'NAME' ? {
+            licenseName: [aamva?.firstName, aamva?.lastName].filter(Boolean).join(' ') || '—',
+            reservationName: stub?.maskedName || '—',
+          } : null}
           onList={assistList}
           onUnlock={assistUnlock}
           onVerify={assistVerify}
+          onConfirmName={assistConfirmName}
           onCompleted={completeStaffAssist}
           onExit={exitStaffAssist}
         />
@@ -955,7 +1069,7 @@ function LookupScreen({ t, busy, err, onSubmit, onBack }) {
  * scanner remains the SECONDARY path ("Scan the barcode instead" — it still
  * works great on Android kiosks), with its upload fallback intact.
  */
-function IdScreen({ t, busy, err, verifyResult, clearVerify, track, onExtract, onConfirm, onScanned, onScannerPhoto, onEscalate, onStaffAssist, onBack }) {
+function IdScreen({ t, busy, err, verifyResult, clearVerify, track, onExtract, onConfirm, onScanned, onScannerPhoto, onEscalate, onStaffAssist, onStaffAssistName, onNameUpdate, onBack }) {
   const videoRef = useRef(null);
   const streamRef = useRef(null);
   const fileRef = useRef(null);
@@ -1112,6 +1226,10 @@ function IdScreen({ t, busy, err, verifyResult, clearVerify, track, onExtract, o
   };
 
   const verifyFailed = verifyResult && !verifyResult.verified;
+  // B3e: name as the ONLY failed rule → self-service name-update path (the
+  // server's send-code gate enforces the same condition).
+  const failReasons = Array.isArray(verifyResult?.failureReasons) ? verifyResult.failureReasons : [];
+  const nameMismatchOnly = !!verifyFailed && failReasons.length === 1 && failReasons[0] === 'NAME_MISMATCH';
   const FIELD_KEYS = ['firstName', 'lastName', 'dateOfBirth', 'licenseNumber', 'licenseState', 'licenseExpiry'];
   const anyMissing = fields ? FIELD_KEYS.some((key) => !fields[key]) : false;
   // Name/DOB/expiry are the verify-critical trio — a null here guarantees a
@@ -1263,13 +1381,31 @@ function IdScreen({ t, busy, err, verifyResult, clearVerify, track, onExtract, o
           {(anyMissing || warnings.length > 0) ? (
             <p className="kio-sub" style={{ fontSize: 13.5, marginTop: 10, maxWidth: 560 }}>{t('kiosk.idPhotoMissingHint')}</p>
           ) : null}
-          {verifyFailed ? (
+          {verifyFailed && nameMismatchOnly ? (
+            // B3e: REAL name mismatch (layer-1 token matcher already passed
+            // the harmless cases). Friendly explanation + self-service path.
+            <div className="kio-note" style={{ marginTop: 10, maxWidth: 560, fontSize: 14 }}>
+              <b>{t('kiosk.nameMismatchTitle')}</b>
+              <div style={{ marginTop: 4 }}>{t('kiosk.nameMismatchBody')}</div>
+            </div>
+          ) : verifyFailed ? (
             <div className="kio-panel" style={{ maxWidth: 560, marginTop: 10 }}>
               <VerifyChecks t={t} result={verifyResult} />
             </div>
           ) : null}
           <div className="kio-row" style={{ marginTop: 16 }}>
-            {verifyFailed ? (
+            {verifyFailed && nameMismatchOnly ? (
+              <>
+                <button type="button" className="kio-btn" disabled={busy} onClick={onNameUpdate}>
+                  ✉️ {t('kiosk.nameMismatchCta')} ›
+                </button>
+                <button type="button" className="kio-btn ghost sm" disabled={busy} onClick={retake}>{t('kiosk.idPhotoRetake')}</button>
+                {/* Employee-facing light bypass (B3e) — discreet on purpose. */}
+                {onStaffAssistName ? (
+                  <button type="button" className="kio-btn back" onClick={onStaffAssistName}>🔧 {t('kiosk.assistEntry')}</button>
+                ) : null}
+              </>
+            ) : verifyFailed ? (
               verifyResult.escalateSuggested ? (
                 <>
                   <button type="button" className="kio-btn sm" onClick={onEscalate}>🎧 {t('kiosk.connectAgent')}</button>

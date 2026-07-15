@@ -19,6 +19,7 @@ import { kioskSessionService } from './kiosk-session.service.js';
 import { kioskOffersService } from './kiosk-offers.service.js';
 import { kioskCheckoutService } from './kiosk-checkout.service.js';
 import { kioskStaffAssistService } from './kiosk-staff-assist.service.js';
+import { kioskNameUpdateService } from './kiosk-name-update.service.js';
 
 export const kioskRouter = Router();
 
@@ -169,6 +170,34 @@ kioskRouter.post('/sessions/:id/staff-assist/unlock', deviceGuards, ok(
 // rules still enforced server-side; underage stays a hard stop).
 kioskRouter.post('/sessions/:id/staff-assist/verify-id', deviceGuards, ok(
   (req) => kioskStaffAssistService.staffVerifyId(req.params.id, req.kioskDevice, req.body || {}),
+));
+
+// POST /api/kiosk/sessions/:id/staff-assist/confirm-name — B3e L3: staff
+// vouches ONLY for the name (live grant required); rules stay hard stops;
+// the reservation name is NOT changed.
+kioskRouter.post('/sessions/:id/staff-assist/confirm-name', deviceGuards, ok(
+  (req) => kioskStaffAssistService.confirmName(req.params.id, req.kioskDevice, req.body || {}),
+));
+
+// ── B3e L2: self-service verified-name update (possession code) ─────────────
+
+// GET /api/kiosk/sessions/:id/name-update/destinations — READ-ONLY masked
+// preview of where the code would go (shown before the guest burns a send).
+kioskRouter.get('/sessions/:id/name-update/destinations', deviceGuards, ok(
+  (req) => kioskNameUpdateService.destinations(req.params.id, req.kioskDevice),
+));
+
+// POST /api/kiosk/sessions/:id/name-update/send-code — 6-digit code to the
+// RESERVATION's email (+ SMS best-effort); masked destinations only.
+kioskRouter.post('/sessions/:id/name-update/send-code', deviceGuards, ok(
+  (req) => kioskNameUpdateService.sendCode(req.params.id, req.kioskDevice),
+));
+
+// POST /api/kiosk/sessions/:id/name-update/confirm — { code, fields,
+// licensePhoto? } → renames the driver to the LICENSE-VERIFIED name and
+// stamps idVerifiedAt (method SCAN_NAME_UPDATED). Rules stay hard stops.
+kioskRouter.post('/sessions/:id/name-update/confirm', deviceGuards, ok(
+  (req) => kioskNameUpdateService.confirm(req.params.id, req.kioskDevice, req.body || {}),
 ));
 
 // POST /api/kiosk/sessions/:id/escalate — { reason: ESCALATE_REASONS enum }

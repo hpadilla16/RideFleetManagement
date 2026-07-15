@@ -351,8 +351,14 @@ async function attachReservation(sessionId, device, { reservationId } = {}) {
       reservationId: resv.id,
       lastActivityAt: new Date(),
       // M2 (B3a review): the ID-verify stamp belongs to ONE reservation —
-      // binding a different one invalidates any prior verification.
-      ...(session.reservationId !== resv.id ? { idVerifiedAt: null } : {}),
+      // binding a different one invalidates any prior verification, along
+      // with the B3e name-mismatch marker + pending name-update code.
+      ...(session.reservationId !== resv.id ? {
+        idVerifiedAt: null,
+        nameMismatchAt: null,
+        nameUpdateCodeHash: null,
+        nameUpdateCodeExpiresAt: null,
+      } : {}),
     },
   });
   logger.info('[kiosk] reservation attached', {
