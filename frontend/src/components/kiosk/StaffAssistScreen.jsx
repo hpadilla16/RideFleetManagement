@@ -16,6 +16,7 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { CAMERA_ERR_IN_FLIGHT, acquireCameraStream, cameraGrantedOnce } from '../../lib/kioskCamera';
 
 const FIELD_DEFS = [
   { key: 'firstName', labelKey: 'kiosk.assistFirstName' },
@@ -324,8 +325,15 @@ function PhotoBox({ t, label, value, active, onOpen, onCaptured, onCancel }) {
   const videoRef = useRef(null);
   const streamRef = useRef(null);
   const fileRef = useRef(null);
+  const activeRef = useRef(false);
+  const unmountedRef = useRef(false);
   const [cameraOn, setCameraOn] = useState(false);
   const [failed, setFailed] = useState(false);
+  // Raw getUserMedia error name — remote-debug line (iPad re-test).
+  const [camDiag, setCamDiag] = useState('');
+
+  useEffect(() => { activeRef.current = active; }, [active]);
+  useEffect(() => () => { unmountedRef.current = true; }, []);
 
   const stopCam = useCallback(() => {
     try { streamRef.current?.getTracks?.().forEach((track) => track.stop()); } catch {}
@@ -337,33 +345,39 @@ function PhotoBox({ t, label, value, active, onOpen, onCaptured, onCancel }) {
     setCameraOn(false);
   }, []);
 
+  // Shared hardened acquisition (gesture-safe, single in-flight, orphan
+  // cleanup when the box closed / component unmounted mid-prompt).
+  const startCam = useCallback(async () => {
+    setFailed(false);
+    setCamDiag('');
+    const out = await acquireCameraStream({
+      facingMode: 'user',
+      isCancelled: () => unmountedRef.current || !activeRef.current,
+    });
+    if (out.error) {
+      if (out.error.name === CAMERA_ERR_IN_FLIGHT || out.error.name === 'Cancelled') return;
+      setFailed(true);
+      setCamDiag(out.error.name + (out.error.message ? `: ${out.error.message}` : ''));
+      return;
+    }
+    streamRef.current = out.stream;
+    setCameraOn(true);
+    setTimeout(() => {
+      if (videoRef.current && streamRef.current) {
+        videoRef.current.srcObject = streamRef.current;
+        videoRef.current.play().catch(() => {});
+      }
+    }, 0);
+  }, []);
+
+  // Opening the box is itself a tap — the tap handler below calls startCam
+  // directly (gesture context). This effect only handles teardown + the
+  // fast-path re-start once a camera already succeeded this session.
   useEffect(() => {
     if (!active) { stopCam(); return undefined; }
-    let cancelled = false;
-    (async () => {
-      setFailed(false);
-      const request = () => navigator.mediaDevices.getUserMedia({
-        video: { facingMode: 'user', width: { ideal: 1280 }, height: { ideal: 720 } },
-        audio: false,
-      });
-      let stream = null;
-      try { stream = await request(); } catch {
-        await new Promise((resolve) => setTimeout(resolve, 500));
-        try { stream = await request(); } catch { stream = null; }
-      }
-      if (cancelled) { try { stream?.getTracks?.().forEach((track) => track.stop()); } catch {} return; }
-      if (!stream) { setFailed(true); return; }
-      streamRef.current = stream;
-      setCameraOn(true);
-      setTimeout(() => {
-        if (videoRef.current && streamRef.current) {
-          videoRef.current.srcObject = streamRef.current;
-          videoRef.current.play().catch(() => {});
-        }
-      }, 0);
-    })();
-    return () => { cancelled = true; stopCam(); };
-  }, [active, stopCam]);
+    if (!streamRef.current && cameraGrantedOnce()) startCam();
+    return () => stopCam();
+  }, [active, startCam, stopCam]);
 
   const capture = () => {
     const video = videoRef.current;
@@ -393,8 +407,21 @@ function PhotoBox({ t, label, value, active, onOpen, onCaptured, onCancel }) {
       {active ? (
         <div className="kio-scanbox" style={{ width: '100%', minHeight: 150, padding: 0, overflow: 'hidden' }}>
           {cameraOn ? (
+            // min-height + black bg: a stalled stream is a visible black box,
+            // never a 0-height invisible element (iPad debug).
             // eslint-disable-next-line jsx-a11y/media-has-caption
-            <video ref={videoRef} muted playsInline style={{ width: '100%', transform: 'scaleX(-1)' }} />
+            <video
+              ref={videoRef}
+              muted
+              playsInline
+              style={{ width: '100%', minHeight: 140, background: '#000', transform: 'scaleX(-1)' }}
+              onLoadedMetadata={(e) => {
+                if (!e.currentTarget.videoWidth) setCamDiag('loadedmetadata: videoWidth=0');
+              }}
+            />
+          ) : failed ? (
+            // Gesture-driven retry.
+            <button type="button" className="kio-btn back" onClick={startCam}>📷 {t('kiosk.tryAgain')}</button>
           ) : (
             <span style={{ fontSize: 26 }}>📷</span>
           )}
@@ -404,7 +431,14 @@ function PhotoBox({ t, label, value, active, onOpen, onCaptured, onCancel }) {
           type="button"
           className="kio-scanbox"
           style={{ width: '100%', minHeight: 150, cursor: 'pointer', fontFamily: 'inherit', fontSize: 13 }}
-          onClick={onOpen}
+          onClick={() => {
+            // Gesture-initiated start: flip the ref NOW (state lands next
+            // render) so the helper's isCancelled doesn't kill the stream,
+            // then call getUserMedia inside this same tap.
+            activeRef.current = true;
+            onOpen();
+            startCam();
+          }}
         >
           {value ? (
             <img src={value} alt="" style={{ maxWidth: '100%', maxHeight: 110, borderRadius: 10 }} />
@@ -429,7 +463,15 @@ function PhotoBox({ t, label, value, active, onOpen, onCaptured, onCancel }) {
         )}
       </div>
       {failed && active ? (
-        <div className="kio-error" style={{ fontSize: 12.5 }}>{t('kiosk.idPhotoCameraFailed')}</div>
+        <div className="kio-error" style={{ fontSize: 12.5 }}>
+          {t('kiosk.idPhotoCameraFailed')}
+          {camDiag ? (
+            <div style={{ fontSize: 11, color: '#6f668f', fontWeight: 600, marginTop: 3 }}>{camDiag}</div>
+          ) : null}
+        </div>
+      ) : null}
+      {!failed && camDiag && active ? (
+        <div style={{ fontSize: 11, color: '#6f668f', fontWeight: 600, marginTop: 4 }}>{camDiag}</div>
       ) : null}
       {/* Staff photographs a PHYSICAL license card → rear camera hint
           (unlike the guest selfie, which stays capture="user"). */}

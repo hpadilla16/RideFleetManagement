@@ -44,6 +44,7 @@ import {
 import { LicenseScanner } from '../../components/loaner/LicenseScanner';
 import { SignaturePad } from '../../components/kiosk/SignaturePad';
 import { StaffAssistScreen } from '../../components/kiosk/StaffAssistScreen';
+import { CAMERA_ERR_IN_FLIGHT, acquireCameraStream, cameraGrantedOnce } from '../../lib/kioskCamera';
 import { KIOSK_UNPAIRED_EVENT, useKioskUi } from '../../components/kiosk/KioskUiContext';
 
 const DONE_RESET_S = 30;
@@ -967,6 +968,11 @@ function IdScreen({ t, busy, err, verifyResult, clearVerify, track, onExtract, o
   const [fields, setFields] = useState(null);
   const [warnings, setWarnings] = useState([]);
   const [localErr, setLocalErr] = useState('');
+  // Raw getUserMedia error name — shown in small muted text so we can debug
+  // remotely through Hector (NotAllowedError vs NotReadableError vs Abort…).
+  const [camDiag, setCamDiag] = useState('');
+  const unmountedRef = useRef(false);
+  useEffect(() => () => { unmountedRef.current = true; }, []);
 
   const stopCam = useCallback(() => {
     try { streamRef.current?.getTracks?.().forEach((track_) => track_.stop()); } catch {}
@@ -978,23 +984,24 @@ function IdScreen({ t, busy, err, verifyResult, clearVerify, track, onExtract, o
     setCameraOn(false);
   }, []);
 
-  const requestStream = () => navigator.mediaDevices.getUserMedia({
-    video: { facingMode: 'user', width: { ideal: 1280 }, height: { ideal: 720 } },
-    audio: false,
-  });
-
+  // iPad fix: called from TAP handlers — acquireCameraStream reaches
+  // getUserMedia with no awaits in between, keeping the gesture context iOS
+  // wants for the first (permission-prompting) start. In-flight guarding and
+  // orphaned-stream cleanup live in the shared helper.
   const startCam = useCallback(async () => {
     setCameraFailed(false);
-    let stream = null;
-    try {
-      stream = await requestStream();
-    } catch {
-      // WebKit single-active-stream rule — give the OS 500ms and retry once.
-      await new Promise((resolve) => setTimeout(resolve, 500));
-      try { stream = await requestStream(); } catch { stream = null; }
+    setCamDiag('');
+    const out = await acquireCameraStream({
+      facingMode: 'user',
+      isCancelled: () => unmountedRef.current,
+    });
+    if (out.error) {
+      if (out.error.name === CAMERA_ERR_IN_FLIGHT || out.error.name === 'Cancelled') return;
+      setCameraFailed(true);
+      setCamDiag(out.error.name + (out.error.message ? `: ${out.error.message}` : ''));
+      return;
     }
-    if (!stream) { setCameraFailed(true); return; }
-    streamRef.current = stream;
+    streamRef.current = out.stream;
     setCameraOn(true);
     setTimeout(() => {
       if (videoRef.current && streamRef.current) {
@@ -1002,14 +1009,15 @@ function IdScreen({ t, busy, err, verifyResult, clearVerify, track, onExtract, o
         videoRef.current.play().catch(() => {});
       }
     }, 0);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Camera runs only while aiming / counting down; FULL teardown otherwise
-  // and on unmount (WebKit single-stream rule — the selfie step is next).
+  // Camera lifecycle: FULL teardown outside camera/countdown and on unmount
+  // (WebKit single-stream rule — the selfie step is next). Effect-initiated
+  // START is only a fast path once a camera has succeeded this session;
+  // the first-ever start must come from the user's tap (iOS reliability).
   useEffect(() => {
     if (mode === 'photo' && (phase === 'camera' || phase === 'countdown')) {
-      if (!streamRef.current) startCam();
+      if (!streamRef.current && cameraGrantedOnce()) startCam();
     } else {
       stopCam();
     }
@@ -1156,8 +1164,18 @@ function IdScreen({ t, busy, err, verifyResult, clearVerify, track, onExtract, o
             <div className="kio-scanbox" style={{ width: '100%', minHeight: 260, padding: 0, overflow: 'hidden' }}>
               {cameraOn ? (
                 // Mirrored PREVIEW only — captureFrame reads raw frames.
+                // minHeight + black bg: a stalled stream must be a VISIBLE
+                // black box, never a 0-height invisible element (iPad debug).
                 // eslint-disable-next-line jsx-a11y/media-has-caption
-                <video ref={videoRef} muted playsInline style={{ width: '100%', transform: 'scaleX(-1)' }} />
+                <video
+                  ref={videoRef}
+                  muted
+                  playsInline
+                  style={{ width: '100%', minHeight: 240, background: '#000', transform: 'scaleX(-1)' }}
+                  onLoadedMetadata={(e) => {
+                    if (!e.currentTarget.videoWidth) setCamDiag('loadedmetadata: videoWidth=0');
+                  }}
+                />
               ) : (
                 <span style={{ fontSize: 44 }}>📷</span>
               )}
@@ -1186,7 +1204,10 @@ function IdScreen({ t, busy, err, verifyResult, clearVerify, track, onExtract, o
                   📸 {t('kiosk.idPhotoReady')}
                 </button>
               ) : (
-                <button type="button" className="kio-btn sm" onClick={startCam}>📷 {t('kiosk.selfieStartCamera')}</button>
+                // Gesture-initiated start — getUserMedia runs inside this tap.
+                <button type="button" className="kio-btn" onClick={startCam}>
+                  📷 {cameraFailed ? t('kiosk.tryAgain') : t('kiosk.selfieStartCamera')}
+                </button>
               )}
               {/* Upload fallback always visible (kiosk resilience rule). */}
               <button type="button" className="kio-btn ghost sm" onClick={() => fileRef.current?.click()}>
@@ -1194,7 +1215,17 @@ function IdScreen({ t, busy, err, verifyResult, clearVerify, track, onExtract, o
               </button>
             </div>
           ) : null}
-          {cameraFailed ? <div className="kio-error">{t('kiosk.idPhotoCameraFailed')}</div> : null}
+          {cameraFailed ? (
+            <div className="kio-error">
+              {t('kiosk.idPhotoCameraFailed')}
+              {camDiag ? (
+                <div style={{ fontSize: 11.5, color: '#6f668f', fontWeight: 600, marginTop: 4 }}>{camDiag}</div>
+              ) : null}
+            </div>
+          ) : null}
+          {!cameraFailed && camDiag ? (
+            <div style={{ fontSize: 11.5, color: '#6f668f', fontWeight: 600, marginTop: 6 }}>{camDiag}</div>
+          ) : null}
         </>
       ) : null}
 
@@ -1348,6 +1379,10 @@ function SelfieScreen({ t, busy, err, selfie, setSelfie, verifyResult, onSubmit,
   const fileRef = useRef(null);
   const [cameraOn, setCameraOn] = useState(false);
   const [cameraFailed, setCameraFailed] = useState(false);
+  // Raw getUserMedia error name — remote-debug line (iPad re-test).
+  const [camDiag, setCamDiag] = useState('');
+  const unmountedRef = useRef(false);
+  useEffect(() => () => { unmountedRef.current = true; }, []);
 
   const stopCamera = useCallback(() => {
     try { streamRef.current?.getTracks?.().forEach((track) => track.stop()); } catch {}
@@ -1359,26 +1394,22 @@ function SelfieScreen({ t, busy, err, selfie, setSelfie, verifyResult, onSubmit,
     setCameraOn(false);
   }, []);
 
-  const requestStream = () => navigator.mediaDevices.getUserMedia({
-    // 1280×720 front stream — 1080p+ front streams on iPads are slow/flaky.
-    video: { facingMode: 'user', width: { ideal: 1280 }, height: { ideal: 720 } },
-    audio: false,
-  });
-
+  // Shared hardened acquisition: gesture-safe (no awaits before
+  // getUserMedia), single in-flight request, orphan cleanup on unmount.
   const startCamera = useCallback(async () => {
     setCameraFailed(false);
-    let stream = null;
-    try {
-      stream = await requestStream();
-    } catch {
-      // iOS/WebKit single-active-stream rule: if the license scanner's stream
-      // is still winding down, getUserMedia throws NotReadableError. Give the
-      // OS 500ms to release the camera and retry ONCE before giving up.
-      await new Promise((resolve) => setTimeout(resolve, 500));
-      try { stream = await requestStream(); } catch { stream = null; }
+    setCamDiag('');
+    const out = await acquireCameraStream({
+      facingMode: 'user',
+      isCancelled: () => unmountedRef.current,
+    });
+    if (out.error) {
+      if (out.error.name === CAMERA_ERR_IN_FLIGHT || out.error.name === 'Cancelled') return;
+      setCameraFailed(true);
+      setCamDiag(out.error.name + (out.error.message ? `: ${out.error.message}` : ''));
+      return;
     }
-    if (!stream) { setCameraFailed(true); return; }
-    streamRef.current = stream;
+    streamRef.current = out.stream;
     setCameraOn(true);
     // Wait a tick for the <video> to render.
     setTimeout(() => {
@@ -1387,15 +1418,15 @@ function SelfieScreen({ t, busy, err, selfie, setSelfie, verifyResult, onSubmit,
         videoRef.current.play().catch(() => {});
       }
     }, 0);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
-    // ~300ms grace AFTER the ID step unmounts the license scanner: WebKit
-    // allows one live camera stream, and the scanner's tracks need a moment
-    // to fully release before the selfie stream can start.
+    // Auto-start is only a FAST PATH once a camera has succeeded this session
+    // (permission granted → effect-start is fine). First-ever start must be
+    // the user's tap on "Start camera". The ~350ms grace gives the ID step's
+    // tracks time to fully release (WebKit single-stream rule).
     let graceTimer = null;
-    if (!selfie && !verifyResult) {
+    if (!selfie && !verifyResult && cameraGrantedOnce()) {
       graceTimer = setTimeout(() => { startCamera(); }, 350);
     }
     return () => {
@@ -1496,9 +1527,18 @@ function SelfieScreen({ t, busy, err, selfie, setSelfie, verifyResult, onSubmit,
           <img src={selfie} alt="" />
         ) : cameraOn ? (
           // Preview mirrored (front camera, natural aiming) — the captured
-          // canvas frame stays raw/unmirrored.
+          // canvas frame stays raw/unmirrored. Black bg: a stalled stream is
+          // a visible black circle, never an empty frame (iPad debug).
           // eslint-disable-next-line jsx-a11y/media-has-caption
-          <video ref={videoRef} muted playsInline style={{ transform: 'scaleX(-1)' }} />
+          <video
+            ref={videoRef}
+            muted
+            playsInline
+            style={{ transform: 'scaleX(-1)', background: '#000' }}
+            onLoadedMetadata={(e) => {
+              if (!e.currentTarget.videoWidth) setCamDiag('loadedmetadata: videoWidth=0');
+            }}
+          />
         ) : (
           <span style={{ fontSize: 64 }}>🙂</span>
         )}
@@ -1510,7 +1550,10 @@ function SelfieScreen({ t, busy, err, selfie, setSelfie, verifyResult, onSubmit,
             {cameraOn ? (
               <button type="button" className="kio-btn sm" onClick={takePhoto}>📸 {t('kiosk.selfieTake')}</button>
             ) : (
-              <button type="button" className="kio-btn sm" onClick={startCamera}>📷 {t('kiosk.selfieStartCamera')}</button>
+              // Gesture-initiated start — getUserMedia runs inside this tap.
+              <button type="button" className="kio-btn sm" onClick={startCamera}>
+                📷 {cameraFailed ? t('kiosk.tryAgain') : t('kiosk.selfieStartCamera')}
+              </button>
             )}
             {/* Upload fallback ALWAYS visible — on kiosk tablets it's the
                 resilient path, not an error-only afterthought. */}
@@ -1527,7 +1570,17 @@ function SelfieScreen({ t, busy, err, selfie, setSelfie, verifyResult, onSubmit,
           </>
         )}
       </div>
-      {cameraFailed && !selfie ? <div className="kio-error">{t('kiosk.selfieCameraFailed')}</div> : null}
+      {cameraFailed && !selfie ? (
+        <div className="kio-error">
+          {t('kiosk.selfieCameraFailed')}
+          {camDiag ? (
+            <div style={{ fontSize: 11.5, color: '#6f668f', fontWeight: 600, marginTop: 4 }}>{camDiag}</div>
+          ) : null}
+        </div>
+      ) : null}
+      {!cameraFailed && camDiag && !selfie ? (
+        <div style={{ fontSize: 11.5, color: '#6f668f', fontWeight: 600, marginTop: 6 }}>{camDiag}</div>
+      ) : null}
       {err ? <div className="kio-error">{err}</div> : null}
       <div className="kio-note" style={{ marginTop: 18 }}>🔒 {t('kiosk.selfiePrivacy')}</div>
     </div>
