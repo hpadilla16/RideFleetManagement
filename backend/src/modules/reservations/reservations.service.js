@@ -2024,6 +2024,20 @@ export const reservationsService = {
           })
         }
       });
+
+      // Drift fix (2026-06-10): swapVehicle moved the reservation + agreement to
+      // the new vehicle but never synced Vehicle.status — the swapped-out car
+      // stayed ON_RENT and the replacement stayed AVAILABLE until the hourly
+      // sweep repaired both (observed pairs KST792/KQN763 @15:29Z and
+      // KII873/KHV165 @17:29Z right after a 17:23Z swap). Sync inside the same
+      // transaction: primary = the reservation's (new) vehicle -> ON_RENT;
+      // passing the previous vehicleId lets the helper release the swapped-out
+      // car (locked statuses and other open rentals are respected).
+      await syncVehicleStatusForReservation(tx, {
+        vehicleId: current.vehicleId,
+        reservationId: id,
+        toStatus: 'CHECKED_OUT'
+      });
     });
 
     return this.getById(id, scope);
